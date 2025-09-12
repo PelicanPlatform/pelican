@@ -1,0 +1,509 @@
+/***************************************************************
+*
+* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+*
+* Licensed under the Apache License, Version 2.0 (the "License"); you
+* may not use this file except in compliance with the License.  You may
+* obtain a copy of the License at
+*
+*    http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*
+***************************************************************/
+
+package director
+
+import (
+	"context"
+	_ "embed"
+	"math"
+	"math/rand"
+	"net/netip"
+	"net/url"
+	"strings"
+	"testing"
+
+	"github.com/jellydator/ttlcache/v3"
+	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
+
+	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
+)
+
+// Geo Override Yaml mockup
+//
+//go:embed resources/geoip_overrides.yaml
+var yamlMockup string
+
+func TestCheckOverrides(t *testing.T) {
+	server_utils.ResetTestState()
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
+		geoNetOverrides = nil
+	})
+
+	// Set up the override cache for the test
+	old := clientIpGeoOverrideCache
+	t.Cleanup(func() {
+		clientIpGeoOverrideCache.DeleteAll()
+		clientIpGeoOverrideCache.Stop()
+		clientIpGeoOverrideCache = old
+	})
+	clientIpGeoOverrideCache = ttlcache.New(
+		ttlcache.WithCapacity[netip.Addr, server_structs.Coordinate](10),
+	)
+	go clientIpGeoOverrideCache.Start()
+
+	testCases := []struct {
+		name        string
+		inputIP     string
+		expectMatch bool
+		expectCoord server_structs.Coordinate
+	}{
+		{
+			name:        "test-no-ipv4-match",
+			inputIP:     "192.168.0.2",
+			expectMatch: false,
+			expectCoord: server_structs.Coordinate{},
+		},
+		{
+			name:        "test-no-ipv6-match",
+			inputIP:     "ABCD::0123",
+			expectMatch: false,
+			expectCoord: server_structs.Coordinate{},
+		},
+		{
+			name:        "test-ipv4-match",
+			inputIP:     "192.168.0.1",
+			expectMatch: true,
+			expectCoord: server_structs.Coordinate{
+				Lat:    123.4,
+				Long:   987.6,
+				Source: server_structs.CoordinateSourceOverride,
+			},
+		},
+		{
+			name:        "test-ipv4-CIDR-match",
+			inputIP:     "10.0.0.136",
+			expectMatch: true,
+			expectCoord: server_structs.Coordinate{
+				Lat:    43.073904,
+				Long:   -89.384859,
+				Source: server_structs.CoordinateSourceOverride,
+			},
+		},
+		{
+			name:        "test-ipv6-match",
+			inputIP:     "FC00::0001",
+			expectMatch: true,
+			expectCoord: server_structs.Coordinate{
+				Lat:    123.4,
+				Long:   987.6,
+				Source: server_structs.CoordinateSourceOverride,
+			},
+		},
+		{
+			name:        "test-ipv6-CIDR-match",
+			inputIP:     "FD00::FA1B",
+			expectMatch: true,
+			expectCoord: server_structs.Coordinate{
+				Lat:    43.073904,
+				Long:   -89.384859,
+				Source: server_structs.CoordinateSourceOverride,
+			},
+		},
+	}
+
+	viper.SetConfigType("yaml")
+	err := viper.ReadConfig(strings.NewReader(yamlMockup))
+	if err != nil {
+		t.Fatalf("Error reading config: %v", err)
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			addr, err := netip.ParseAddr(tc.inputIP)
+			assert.NoError(t, err, "failed to parse IP address")
+			if tc.expectMatch {
+				// Make sure the IP is not in the cache beforehand
+				cached := clientIpGeoOverrideCache.Get(addr)
+				assert.Nil(t, cached, "IP should not be in cache before test")
+			}
+			coordinate, exists := checkOverrides(addr)
+			assert.Equal(t, tc.expectMatch, exists, "unexpected match result")
+			if tc.expectMatch {
+				tc.expectCoord.Source = server_structs.CoordinateSourceOverride
+				tc.expectCoord.AccuracyRadius = 0
+				assert.EqualValues(t, tc.expectCoord, coordinate, "coordinates do not match expected values")
+				// Make sure the IP is now in the cache
+				cached := clientIpGeoOverrideCache.Get(addr)
+				assert.NotNil(t, cached, "IP should be in cache after test")
+				assert.EqualValues(t, tc.expectCoord, cached.Value(), "cached coordinates do not match expected values")
+			}
+		})
+	}
+}
+
+func TestAngularDistanceOnSphere(t *testing.T) {
+	degToRad := func(d float64) float64 {
+		return d * 3.141592653589793 / 180.0
+	}
+
+	testCases := []struct {
+		name     string
+		coord1   server_structs.Coordinate
+		coord2   server_structs.Coordinate
+		expected float64
+	}{
+		{
+			name:     "null lat/long",
+			coord1:   server_structs.Coordinate{Lat: 0.0, Long: 0.0},
+			coord2:   server_structs.Coordinate{Lat: 0.0, Long: 0.0},
+			expected: 0.0,
+		},
+		{
+			name:     "same point",
+			coord1:   server_structs.Coordinate{Lat: 43.0753, Long: -89.4114},
+			coord2:   server_structs.Coordinate{Lat: 43.0753, Long: -89.4114},
+			expected: 0.0,
+		},
+		{
+			name:     "rotate longitude 90 degrees",
+			coord1:   server_structs.Coordinate{Lat: 0.0, Long: 0.0},
+			coord2:   server_structs.Coordinate{Lat: 0.0, Long: 90.0},
+			expected: degToRad(90.0),
+		},
+		{
+			name:     "rotate longitude -90 degrees",
+			coord1:   server_structs.Coordinate{Lat: 0.0, Long: 0.0},
+			coord2:   server_structs.Coordinate{Lat: 0.0, Long: -90.0},
+			expected: degToRad(90.0),
+		},
+		{
+			name:     "rotate latitude 90 degrees",
+			coord1:   server_structs.Coordinate{Lat: 0.0, Long: 0.0},
+			coord2:   server_structs.Coordinate{Lat: 90.0, Long: 0.0},
+			expected: degToRad(90.0),
+		},
+		{
+			name:     "rotate latitude -90 degrees",
+			coord1:   server_structs.Coordinate{Lat: 0.0, Long: 0.0},
+			coord2:   server_structs.Coordinate{Lat: -90.0, Long: 0.0},
+			expected: degToRad(90.0),
+		},
+		{
+			name:     "rotate latitude and longitude 90 degrees",
+			coord1:   server_structs.Coordinate{Lat: 0.0, Long: 0.0},
+			coord2:   server_structs.Coordinate{Lat: 90.0, Long: 90.0},
+			expected: degToRad(90.0),
+		},
+		{
+			name:     "rotate latitude 90 degrees and longitude -90 degrees",
+			coord1:   server_structs.Coordinate{Lat: 0.0, Long: 0.0},
+			coord2:   server_structs.Coordinate{Lat: 90.0, Long: -90.0},
+			expected: degToRad(90.0),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := angularDistanceOnSphere(tc.coord1.Lat, tc.coord1.Long, tc.coord2.Lat, tc.coord2.Long)
+			assert.InDelta(t, tc.expected, result, 0.0001)
+		})
+	}
+}
+
+func TestAssignRandBoundedCoord(t *testing.T) {
+	// Because of the test's randomness, do it a few times to increase the likelihood of catching errors
+	for range 10 {
+		// Generate a random bounding box between -200, 200
+		lat1 := rand.Float64()*400 - 200
+		long1 := rand.Float64()*400 - 200
+		lat2 := rand.Float64()*400 - 200
+		long2 := rand.Float64()*400 - 200
+
+		// Assign mins and maxes
+		minLat, maxLat := math.Min(lat1, lat2), math.Max(lat1, lat2)
+		minLong, maxLong := math.Min(long1, long2), math.Max(long1, long2)
+
+		// Assign a random coordinate within the bounding box
+		lat, long := assignRandBoundedCoord(minLat, maxLat, minLong, maxLong)
+		assert.True(t, lat >= minLat && lat <= maxLat)
+		assert.True(t, long >= minLong && long <= maxLong)
+	}
+}
+
+func TestGetProjectLabel(t *testing.T) {
+	testCases := []struct {
+		name     string
+		project  string
+		expected string
+	}{
+		{
+			name:     "normal project",
+			project:  "myproject",
+			expected: "myproject",
+		},
+		{
+			name:     "empty project",
+			project:  "",
+			expected: "unknown",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.WithValue(context.Background(), ProjectContextKey{}, tc.project)
+			result := getProjectLabel(ctx)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+// Helpers for TestGet*Coordinate tests
+// Also used in sort_algorithms_test.go to aid in testing
+// sort algorithms
+var (
+	ipInMaxMindSmallRadius = netip.MustParseAddr("192.168.1.1")
+	ipInMaxMindLargeRadius = netip.MustParseAddr("192.168.1.2")
+	ipNotInMaxMind         = netip.MustParseAddr("192.168.1.3")
+	ipFromOverride         = netip.MustParseAddr("192.168.1.4")
+
+	smallRadiusHostname  = "smallradius"
+	largeRadiusHostname  = "largeradius"
+	notInMaxMindHostname = "notinmaxmind"
+	fromOverrideHostname = "fromoverride"
+)
+
+// Override the getIPFromHostname function so we don't need to do actual DNS lookups
+func setupGetIPStub(t *testing.T) {
+	old := getIPFromHostname
+	t.Cleanup(func() { getIPFromHostname = old })
+	getIPFromHostname = func(hostname string) (netip.Addr, error) {
+		switch hostname {
+		case smallRadiusHostname:
+			return ipInMaxMindSmallRadius, nil
+		case largeRadiusHostname:
+			return ipInMaxMindLargeRadius, nil
+		case notInMaxMindHostname:
+			return ipNotInMaxMind, nil
+		case fromOverrideHostname:
+			return ipFromOverride, nil
+		default:
+			t.Errorf("unexpected hostname lookup: %s", hostname)
+			return netip.Addr{}, nil
+		}
+	}
+}
+
+// Override the getMaxMindCoordinate function so we don't need to figure out
+// how to get a maxmind database into the test environment
+func setupGetMaxMindStub(t *testing.T) {
+	old := getMaxMindCoordinate
+	t.Cleanup(func() { getMaxMindCoordinate = old })
+	getMaxMindCoordinate = func(addr netip.Addr) (coord server_structs.Coordinate, err error) {
+		coord.Source = server_structs.CoordinateSourceMaxMind
+		switch addr {
+		case ipInMaxMindSmallRadius:
+			coord.AccuracyRadius = 5.0
+			coord.Lat = 43.07296
+			coord.Long = -89.40831
+			return
+		case ipInMaxMindLargeRadius:
+			err = maxmindError{Kind: MaxMindLargeAccuracyError, Message: "large accuracy radius"}
+			return
+		case ipNotInMaxMind:
+			err = maxmindError{Kind: MaxMindNullLatLonError, Message: "not found in maxmind db"}
+			return
+		default:
+			return coord, nil
+		}
+	}
+}
+
+// Setup the override cache directly instead of configuring/passing a yaml
+// file
+func setupOverrideCache(t *testing.T) {
+	old := clientIpGeoOverrideCache
+	t.Cleanup(func() {
+		clientIpGeoOverrideCache.DeleteAll()
+		clientIpGeoOverrideCache.Stop()
+		clientIpGeoOverrideCache = old
+	})
+	clientIpGeoOverrideCache = ttlcache.New(
+		ttlcache.WithCapacity[netip.Addr, server_structs.Coordinate](10),
+	)
+	go clientIpGeoOverrideCache.Start()
+	clientIpGeoOverrideCache.Set(ipFromOverride, server_structs.Coordinate{
+		Lat:            43.07296, // Discovery Building
+		Long:           -89.40831,
+		AccuracyRadius: 1.0,
+		Source:         server_structs.CoordinateSourceOverride,
+	}, 0)
+}
+
+// Setup the random assignment cache for testing
+func setUpRandAssignmentCache(t *testing.T) {
+	old := clientIpRandAssignmentCache
+	t.Cleanup(func() {
+		clientIpRandAssignmentCache.DeleteAll()
+		clientIpRandAssignmentCache.Stop()
+		clientIpRandAssignmentCache = old
+	})
+	ttlcache.New(ttlcache.WithTTL[netip.Addr, server_structs.Coordinate](0),
+		ttlcache.WithDisableTouchOnHit[netip.Addr, server_structs.Coordinate](),
+		ttlcache.WithCapacity[netip.Addr, server_structs.Coordinate](10),
+	)
+	go clientIpRandAssignmentCache.Start()
+}
+
+func mustUrl(hostname string) url.URL {
+	u, _ := url.Parse("https://" + hostname)
+	return *u
+}
+
+// Note: This does not test the underlying maxmind or override parsing functions,
+// which have been overridden for the purposes of this test. It only tests that
+// GetServerCoordinate gets coordinates from the expected source.
+func TestGetServerCoordinate(t *testing.T) {
+	setupGetIPStub(t)
+	setupGetMaxMindStub(t)
+	setupOverrideCache(t)
+
+	sAdInMaxMindSmallRadius := server_structs.ServerAd{URL: mustUrl(smallRadiusHostname)}
+	sAdInMaxMindSmallRadius.Initialize("inmaxmindsmallradius")
+	sAdInMaxMindLargeRadius := server_structs.ServerAd{URL: mustUrl(largeRadiusHostname)}
+	sAdInMaxMindLargeRadius.Initialize("inmaxmindlargeradius")
+	sAdNotInMaxMind := server_structs.ServerAd{URL: mustUrl(notInMaxMindHostname)}
+	sAdNotInMaxMind.Initialize("notinmaxmind")
+	sAdFromOverride := server_structs.ServerAd{URL: mustUrl(fromOverrideHostname)}
+	sAdFromOverride.Initialize("fromoverride")
+	testCases := []struct {
+		name          string
+		sAd           server_structs.ServerAd
+		expectedCoord server_structs.Coordinate
+		expectError   bool
+	}{
+		{
+			name: "valid maxmind coordinate",
+			sAd:  sAdInMaxMindSmallRadius,
+			expectedCoord: server_structs.Coordinate{
+				Lat:            43.07296,
+				Long:           -89.40831,
+				AccuracyRadius: 5.0,
+				Source:         server_structs.CoordinateSourceMaxMind,
+			},
+			expectError: false,
+		},
+		{
+			name: "valid coordinate from override",
+			sAd:  sAdFromOverride,
+			expectedCoord: server_structs.Coordinate{
+				Lat:            43.07296,
+				Long:           -89.40831,
+				AccuracyRadius: 1.0,
+				Source:         server_structs.CoordinateSourceOverride,
+			},
+			expectError: false,
+		},
+		{
+			name:        "from maxmind large accuracy radius",
+			sAd:         sAdInMaxMindLargeRadius,
+			expectError: true,
+		},
+		{
+			name:        "not in maxmind",
+			sAd:         sAdNotInMaxMind,
+			expectError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			coord, err := getServerCoordinate(tc.sAd)
+			if tc.expectError {
+				assert.Error(t, err)
+				// No point making assertions about the coords here because we've
+				// overridden some internal functions used by getServerCoordinate
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tc.expectedCoord.Lat, coord.Lat)
+				assert.Equal(t, tc.expectedCoord.Long, coord.Long)
+				assert.Equal(t, tc.expectedCoord.AccuracyRadius, coord.AccuracyRadius)
+				assert.Equal(t, tc.expectedCoord.Source, coord.Source)
+			}
+		})
+	}
+}
+
+func TestGetClientCoordinate(t *testing.T) {
+	setupGetIPStub(t)
+	setupGetMaxMindStub(t)
+	setupOverrideCache(t)
+	setUpRandAssignmentCache(t)
+
+	testCases := []struct {
+		name          string
+		addr          netip.Addr
+		expectedCoord server_structs.Coordinate
+	}{
+		{
+			name: "valid maxmind coordinate",
+			addr: ipInMaxMindSmallRadius,
+			expectedCoord: server_structs.Coordinate{
+				Lat:            43.07296,
+				Long:           -89.40831,
+				AccuracyRadius: 5.0,
+				Source:         server_structs.CoordinateSourceMaxMind,
+			},
+		},
+		{
+			name: "valid coordinate from override",
+			addr: ipFromOverride,
+			expectedCoord: server_structs.Coordinate{
+				Lat:            43.07296,
+				Long:           -89.40831,
+				AccuracyRadius: 1.0,
+				Source:         server_structs.CoordinateSourceOverride,
+			},
+		},
+		{
+			name: "from maxmind large accuracy radius, should get random assignment",
+			addr: ipInMaxMindLargeRadius,
+			expectedCoord: server_structs.Coordinate{
+				Source: server_structs.CoordinateSourceRandom,
+			},
+		},
+		{
+			name: "not in maxmind, should get random assignment",
+			addr: ipNotInMaxMind,
+			expectedCoord: server_structs.Coordinate{
+				Source: server_structs.CoordinateSourceRandom,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			coord := getClientCoordinate(ctx, tc.addr)
+			assert.Equal(t, tc.expectedCoord.Source, coord.Source)
+			if tc.expectedCoord.Source != server_structs.CoordinateSourceRandom {
+				// For non-random sources, check full equality
+				assert.Equal(t, tc.expectedCoord.Lat, coord.Lat)
+				assert.Equal(t, tc.expectedCoord.Long, coord.Long)
+				assert.Equal(t, tc.expectedCoord.AccuracyRadius, coord.AccuracyRadius)
+			} else {
+				// For random source, check that lat/long are in valid ranges
+				assert.True(t, coord.Lat >= usLatMin && coord.Lat <= usLatMax)
+				assert.True(t, coord.Long >= usLongMin && coord.Long <= usLongMax)
+			}
+		})
+	}
+}

@@ -21,10 +21,7 @@ package director
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"math"
-	"net"
-	"net/netip"
 	"net/url"
 	"path"
 	"strings"
@@ -221,21 +218,15 @@ func populateEWMAStatusWeight(newSAd, oldSAd *server_structs.ServerAd) {
 //  4. Set up utilities for collecting origin/health server file transfer test status
 //  5. Return the updated ServerAd. The ServerAd passed in will not be modified
 func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAdV2) (updatedAd server_structs.ServerAd) {
-	if err := updateLatLong(&sAd); err != nil {
-		if geoIPError, ok := err.(geoIPError); ok {
-			labels := geoIPError.labels
-			// TODO: Remove this metric (the line directly below)
-			// The renamed metric was added in v7.16
-			metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
-			metrics.PelicanDirectorGeoIPErrorsTotal.With(labels).Inc()
-		}
-		log.Debugln("Failed to lookup GeoIP coordinates for host", sAd.URL.Host)
-	}
-
 	if sAd.URL.String() == "" {
 		log.Errorf("The URL of the serverAd %#v is empty. Cannot set the TTL cache.", sAd)
 		return
 	}
+
+	if err := updateLatLong(&sAd); err != nil {
+		log.Debugf("Failed to lookup GeoIP coordinates for host %s: %v", sAd.URL.Host, err)
+	}
+
 	// Since servers from topology always use http, while servers from Pelican always use https
 	// we want to ignore the scheme difference when checking duplicates (only consider hostname:port)
 	rawURL := sAd.URL.String() // could be http (topology) or https (Pelican or some topology ones)
@@ -428,30 +419,26 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 	return sAd
 }
 
+// Update the lat/long and newer Coordinate field for a given server ad
+// The Coordinate field also provides provenance info about the coordinate
+// (e.g. whether it comes from MaxMind or an override in config). When an
+// error is encountered, the lat/long is left as the default initialized
+// value of (0.0, 0.0) and an error is returned.
+// Metrics for server GeoIP failure are handled in getServerCoordinate().
 func updateLatLong(ad *server_structs.ServerAd) error {
 	if ad == nil {
-		return errors.New("Cannot provide a nil ad to UpdateLatLong")
+		return errors.New("cannot provide a nil ad to UpdateLatLong")
 	}
-	hostname := strings.Split(ad.URL.Host, ":")[0]
-	ip, err := net.LookupIP(hostname)
+
+	coord, err := getServerCoordinate(*ad)
 	if err != nil {
-		return err
+		// The error condition will return a null lat/long (0.0, 0.0)
+		return errors.Wrapf(err, "failed to get coordinate for %s server %s", ad.Type, ad.Name)
 	}
-	if len(ip) == 0 {
-		return fmt.Errorf("unable to find an IP address for hostname %s", hostname)
-	}
-	addr, ok := netip.AddrFromSlice(ip[0])
-	if !ok {
-		return errors.New("Failed to create address object from IP")
-	}
-	// NOTE: If GeoIP resolution of this address fails, lat/long are set to 0.0 (the null lat/long)
-	// This causes the server to be sorted to the end of the list whenever the Director requires distance-aware sorting.
-	lat, long, _, err := getLatLong(addr)
-	if err != nil {
-		return err
-	}
-	ad.Latitude = lat
-	ad.Longitude = long
+	ad.Latitude = coord.Lat
+	ad.Longitude = coord.Long
+	ad.Coordinate = coord
+
 	return nil
 }
 

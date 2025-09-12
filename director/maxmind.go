@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"os"
 	"path"
 	"path/filepath"
@@ -32,21 +33,40 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/oschwald/geoip2-golang"
+	"github.com/oschwald/geoip2-golang/v2"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
+)
+
+type (
+	maxmindError struct {
+		Kind    MaxMindErrorKind
+		Message string
+	}
+
+	MaxMindErrorKind int
 )
 
 const (
 	maxMindURL string = "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-City&license_key=%s&suffix=tar.gz"
+
+	MaxMindDBError MaxMindErrorKind = iota
+	MaxMindQueryError
+	MaxMindNullLatLonError
+	MaxMindLargeAccuracyError
 )
 
 var (
 	maxMindReader atomic.Pointer[geoip2.Reader]
 )
+
+func (e maxmindError) Error() string {
+	return e.Message
+}
 
 func downloadDB(localFile string) error {
 	err := os.MkdirAll(filepath.Dir(localFile), 0755)
@@ -162,4 +182,60 @@ func InitializeGeoIPDB(ctx context.Context) {
 		}
 	}
 	maxMindReader.Store(localReader)
+}
+
+// Given an IP address, query MaxMind for a coordinate.
+//
+// Null coordinates (0,0) and suspiciously large accuracy radii (>=900 km) are
+// treated as errors, and the returned coordinate will have all-zero values.
+// This is declared as a package-level variable so it can be overridden for unit testing
+// where managing a real database is inconvenient.
+var getMaxMindCoordinate = func(addr netip.Addr) (coord server_structs.Coordinate, err error) {
+	coord.Source = server_structs.CoordinateSourceMaxMind
+
+	reader := maxMindReader.Load()
+	if reader == nil {
+		err = maxmindError{Kind: MaxMindDBError, Message: "No MaxMind GeoIP database is available"}
+		return
+	}
+	record, err := reader.City(addr)
+	if err != nil {
+		err = maxmindError{Kind: MaxMindQueryError, Message: fmt.Sprintf("failed to retrieve GeoIP data from the MaxMind database: %v", err)}
+		return
+	} else if record == nil || record.Location.Latitude == nil || record.Location.Longitude == nil {
+		err = maxmindError{Kind: MaxMindQueryError, Message: fmt.Sprintf("no GeoIP data was returned from the MaxMind database for the address %s", addr.String())}
+		return
+	}
+
+	lat := *record.Location.Latitude
+	long := *record.Location.Longitude
+	accuracyRadius := record.Location.AccuracyRadius
+
+	// If the lat/long results are null before we've nulled them because of a large accuracy radius,
+	// something else is probably breaking (why didn't maxmind generate an error on reading the record?)
+	// Sometimes this comes from private IP ranges, so we handle it explicitly.
+	if lat == 0 && long == 0 {
+		err = maxmindError{Kind: MaxMindNullLatLonError, Message: fmt.Sprintf("GeoIP resolution of the address %s resulted in the null lat/long, but no error was provided by MaxMind", addr.String())}
+		// These values in the return struct are already implicitly 0, but it's nice to see them explicitly
+		coord.Lat = 0
+		coord.Long = 0
+		coord.AccuracyRadius = 0
+		return
+	}
+
+	// MaxMind provides an accuracy radius in kilometers. When it actually has no clue how to resolve a valid, public
+	// IP, it sets the radius to 1000. If we get a radius of 900 or more (probably even much less than this...), we
+	// should be very suspicious of the data and treat this as a failure
+	if accuracyRadius >= 900 {
+		err = maxmindError{Kind: MaxMindLargeAccuracyError, Message: fmt.Sprintf("GeoIP resolution of the address %s resulted in a suspiciously large accuracy radius of %d km", addr.String(), accuracyRadius)}
+		coord.Lat = 0
+		coord.Long = 0
+		coord.AccuracyRadius = 0
+		return
+	}
+
+	coord.Lat = lat
+	coord.Long = long
+	coord.AccuracyRadius = accuracyRadius
+	return
 }
