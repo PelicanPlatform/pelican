@@ -98,6 +98,7 @@ type registrationData struct {
 
 	Pubkey           json.RawMessage `json:"pubkey"`
 	Prefix           string          `json:"prefix"`
+	ServerID         string          `json:"server_id"` // For server registrations, the server should provide its own ID; For namespace registrations, this is empty
 	SiteName         string          `json:"site_name"`
 	AccessToken      string          `json:"access_token"`
 	Identity         string          `json:"identity"`
@@ -112,11 +113,19 @@ type badRequestError struct {
 	Message string
 }
 
+type duplicateServerIdError struct {
+	Message string
+}
+
 func (e permissionDeniedError) Error() string {
 	return e.Message
 }
 
 func (e badRequestError) Error() string {
+	return e.Message
+}
+
+func (e *duplicateServerIdError) Error() string {
 	return e.Message
 }
 
@@ -454,8 +463,20 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 	// Overwrite status to Pending to filter malicious request
 	ns.AdminMetadata.Status = server_structs.RegPending
 
+	if server_structs.IsServerPrefix(data.Prefix) {
+		if ns.CustomFields == nil {
+			ns.CustomFields = make(map[string]interface{})
+		}
+		ns.CustomFields["server_id"] = data.ServerID // Pass the server ID to the CustomFields map, to fit in the registration workflow
+	}
+
 	err = AddRegistration(&ns)
 	if err != nil {
+		// Check if it's a server ID conflict error
+		var conflictErr *duplicateServerIdError
+		if errors.As(err, &conflictErr) {
+			return false, nil, &duplicateServerIdError{Message: conflictErr.Message}
+		}
 		return false, nil, errors.Wrapf(err, "Failed to add the prefix %q to the database", ns.Prefix)
 	} else {
 		msg := fmt.Sprintf("Prefix %s successfully registered", ns.Prefix)

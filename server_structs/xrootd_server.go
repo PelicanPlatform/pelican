@@ -92,6 +92,11 @@ func IsOriginNS(ns string) bool {
 		strings.TrimPrefix(ns, OriginPrefix.String()) != ""
 }
 
+// Check if a registration is for a server, i.e. /origins/<hostname> or /caches/<hostname>
+func IsServerPrefix(ns string) bool {
+	return IsCacheNS(ns) || IsOriginNS(ns)
+}
+
 func (ns *NamespaceHolder) SetNamespaceAds(ads []NamespaceAdV2) {
 	ns.namespaceAds = ads
 }
