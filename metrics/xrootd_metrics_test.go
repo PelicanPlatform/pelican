@@ -245,6 +245,63 @@ func TestHandlePacket(t *testing.T) {
 		assert.Error(t, err, "No error reported with an empty detail packet")
 	})
 
+	t.Run("record-correct-thread-creations-from-summary-packet", func(t *testing.T) {
+		type testCase struct {
+			name            string
+			threadCreations int
+			expectedMetric  string
+		}
+
+		cases := []testCase{
+			{
+				name:            "initial-thread-creations",
+				threadCreations: 10,
+				expectedMetric: `
+# HELP xrootd_sched_thread_creations Number of scheduler thread creations
+# TYPE xrootd_sched_thread_creations counter
+xrootd_sched_thread_creations 10
+`,
+			},
+			{
+				name:            "thread-creations-less-than-before",
+				threadCreations: 5,
+				expectedMetric: `
+# HELP xrootd_sched_thread_creations Number of scheduler thread creations
+# TYPE xrootd_sched_thread_creations counter
+xrootd_sched_thread_creations 10
+`,
+			},
+		}
+
+		Threads.Reset()
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				mockShedSummary := SummaryStatistics{
+					Version: "0.0",
+					Program: "xrootd",
+					Stats: []SummaryStat{
+						{
+							Id:              "sched",
+							ThreadCreations: tc.threadCreations,
+						},
+					},
+				}
+
+				mockShedSummaryBytes, err := xml.Marshal(mockShedSummary)
+				require.NoError(t, err, "Error Marshal Summary packet")
+
+				err = handlePacket(mockShedSummaryBytes)
+				require.NoError(t, err, "Error handling the packet")
+
+				expectedReader := strings.NewReader(tc.expectedMetric)
+				if err := testutil.CollectAndCompare(ThreadCreations, expectedReader, "xrootd_sched_thread_creations"); err != nil {
+					require.NoError(t, err, "Collected metric is different from expected")
+				}
+			})
+		}
+	})
+
 	t.Run("record-correct-threads-from-summary-packet", func(t *testing.T) {
 		mockShedSummary := SummaryStatistics{
 			Version: "0.0",
