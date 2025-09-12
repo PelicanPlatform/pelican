@@ -93,7 +93,7 @@ echo "This is some random content in the random file" > /tmp/pelican-test/stat_t
 touch ${PELICAN_CONFIG}
 
 # Prepare token for calling stat
-TOKEN=$(./pelican --config ${PELICAN_CONFIG} origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:$WEBUI_PORT" --scope "web_ui.access" --subject "bar" --lifetime 3600 --private-key /tmp/pelican-test/stat_test/issuer.jwk)
+TOKEN=$(./pelican --config ${PELICAN_CONFIG} origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:$WEBUI_PORT" --scope "web_ui.access" --subject "bar" --lifetime 3600)
 
 # Run federation in the background
 federationServe="./pelican --config ${PELICAN_CONFIG} serve --module director --module registry --module origin --port $WEBUI_PORT"

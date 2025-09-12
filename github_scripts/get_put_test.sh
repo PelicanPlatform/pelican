@@ -72,12 +72,6 @@ if [ ! -f ./pelican ]; then
   exit 1
 fi
 
-# Make a token to be used
-./pelican origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:8444" --scope "storage.read:/ storage.modify:/" --subject "origin"  --claim wlcg.ver=1.0 --lifetime 60 --private-key get_put_tmp/config/issuer.jwk > get_put_tmp/test-token.jwt
-
-echo "Token created"
-cat get_put_tmp/test-token.jwt
-
 # Run federation in the background
 federationServe="./pelican serve --module director --module registry --module origin -d"
 $federationServe &
@@ -121,6 +115,12 @@ do
         exit 1
     fi
 done
+
+# Make a token to be used (now that federation is running)
+./pelican token create pelican://$HOSTNAME:8444/test --read --write --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:8444" --subject "origin"  --profile "wlcg" --lifetime 60 > get_put_tmp/test-token.jwt
+
+echo "Token created"
+cat get_put_tmp/test-token.jwt
 
 # Run pelican object put
 ./pelican object put ./get_put_tmp/input.txt pelican://$HOSTNAME:8444/test/input.txt -d -t get_put_tmp/test-token.jwt -L get_put_tmp/putOutput.txt
