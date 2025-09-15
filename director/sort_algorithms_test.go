@@ -761,7 +761,18 @@ func TestDistanceSortAlg(t *testing.T) {
 					}
 					serverInfo := *tc.sCtx.RedirectInfo.ServersInfo[ad.URL.String()]
 
-					assert.EqualValues(t, expectedRInfo, serverInfo, "redirect info for ad '%s' does not match expected", ad.Name)
+					// Compare coordinates
+					assert.Equal(t, expectedRInfo.Coordinate.Lat, serverInfo.Coordinate.Lat, "lat mismatch for ad '%s'", ad.Name)
+					assert.Equal(t, expectedRInfo.Coordinate.Long, serverInfo.Coordinate.Long, "long mismatch for ad '%s'", ad.Name)
+					assert.Equal(t, expectedRInfo.Coordinate.AccuracyRadius, serverInfo.Coordinate.AccuracyRadius, "accuracy radius mismatch for ad '%s'", ad.Name)
+					assert.Equal(t, expectedRInfo.Coordinate.Source, serverInfo.Coordinate.Source, "coordinate source mismatch for ad '%s'", ad.Name)
+					assert.Equal(t, expectedRInfo.Coordinate.FromTTLCache, serverInfo.Coordinate.FromTTLCache, "fromTTLCache mismatch for ad '%s'", ad.Name)
+
+					// Compare redirect weights (in delta because of floating point math)
+					assert.InDelta(t, expectedRInfo.RedirectWeights.DistanceWeight, serverInfo.RedirectWeights.DistanceWeight, 1e-8, "distance weight mismatch for ad '%s'", ad.Name)
+					assert.InDelta(t, expectedRInfo.RedirectWeights.IOLoadWeight, serverInfo.RedirectWeights.IOLoadWeight, 1e-8, "io load weight mismatch for ad '%s'", ad.Name)
+					assert.InDelta(t, expectedRInfo.RedirectWeights.StatusWeight, serverInfo.RedirectWeights.StatusWeight, 1e-8, "status weight mismatch for ad '%s'", ad.Name)
+					assert.InDelta(t, expectedRInfo.RedirectWeights.AvailabilityWeight, serverInfo.RedirectWeights.AvailabilityWeight, 1e-8, "availability weight mismatch for ad '%s'", ad.Name)
 				}
 			}
 		})
@@ -976,8 +987,18 @@ func TestAdaptiveSortAlg(t *testing.T) {
 						}
 						serverInfo := *tc.sCtx.RedirectInfo.ServersInfo[ad.URL.String()]
 
-						// Use require here because if this fails, sorts may be invalid
-						require.EqualValues(t, expectedRInfo, serverInfo, "redirect info for ad '%s' does not match expected", ad.Name)
+						// Use require here because if RInfo values are incorrect, sorts later in the test will likely be invalid
+						require.Equal(t, expectedRInfo.Coordinate.Lat, serverInfo.Coordinate.Lat, "lat mismatch for ad '%s'", ad.Name)
+						require.Equal(t, expectedRInfo.Coordinate.Long, serverInfo.Coordinate.Long, "long mismatch for ad '%s'", ad.Name)
+						require.Equal(t, expectedRInfo.Coordinate.AccuracyRadius, serverInfo.Coordinate.AccuracyRadius, "accuracy radius mismatch for ad '%s'", ad.Name)
+						require.Equal(t, expectedRInfo.Coordinate.Source, serverInfo.Coordinate.Source, "coordinate source mismatch for ad '%s'", ad.Name)
+						require.Equal(t, expectedRInfo.Coordinate.FromTTLCache, serverInfo.Coordinate.FromTTLCache, "fromTTLCache mismatch for ad '%s'", ad.Name)
+
+						// Compare redirect weights (in delta because of floating point math)
+						require.InDelta(t, expectedRInfo.RedirectWeights.DistanceWeight, serverInfo.RedirectWeights.DistanceWeight, 1e-8, "distance weight mismatch for ad '%s'", ad.Name)
+						require.InDelta(t, expectedRInfo.RedirectWeights.IOLoadWeight, serverInfo.RedirectWeights.IOLoadWeight, 1e-8, "io load weight mismatch for ad '%s'", ad.Name)
+						require.InDelta(t, expectedRInfo.RedirectWeights.StatusWeight, serverInfo.RedirectWeights.StatusWeight, 1e-8, "status weight mismatch for ad '%s'", ad.Name)
+						require.InDelta(t, expectedRInfo.RedirectWeights.AvailabilityWeight, serverInfo.RedirectWeights.AvailabilityWeight, 1e-8, "availability weight mismatch for ad '%s'", ad.Name)
 					}
 				}
 			}
