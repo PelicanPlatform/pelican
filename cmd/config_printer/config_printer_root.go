@@ -111,6 +111,7 @@ pelican config summary`,
 		},
 	}
 
+	// Flags only used in `pelican config` subcommands
 	format            string
 	components        []string
 	includeHidden     bool
