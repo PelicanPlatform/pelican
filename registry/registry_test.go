@@ -460,3 +460,93 @@ func TestCompareJwks(t *testing.T) {
 		assert.True(t, equal, "Expected empty JWKS sets to be equal")
 	})
 }
+
+func TestServerIdGenerationAndStorage(t *testing.T) {
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	// Generate a valid key pair for testing
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	pubkey, err := jwk.FromRaw(privateKey.PublicKey)
+	require.NoError(t, err)
+	require.NoError(t, jwk.AssignKeyID(pubkey))
+
+	keySet := jwk.NewSet()
+	require.NoError(t, keySet.AddKey(pubkey))
+	pubkeyData, err := json.Marshal(keySet)
+	require.NoError(t, err)
+
+	t.Run("origin-prefix-initializes-custom-fields-with-server-id", func(t *testing.T) {
+		serverID := "testid1"
+
+		// Create a registration directly to test the logic
+		ns := server_structs.Registration{
+			Prefix:        "/origins/test-origin.edu",
+			Pubkey:        string(pubkeyData),
+			AdminMetadata: server_structs.AdminMetadata{SiteName: "test-origin", Status: server_structs.RegPending},
+		}
+
+		// Simulate the logic from keySignChallengeCommit
+		if server_structs.IsServerPrefix(ns.Prefix) {
+			if ns.CustomFields == nil {
+				ns.CustomFields = make(map[string]interface{})
+			}
+			ns.CustomFields["server_id"] = serverID
+		}
+
+		// Verify CustomFields is properly initialized and server_id is set
+		assert.NotNil(t, ns.CustomFields)
+		assert.Contains(t, ns.CustomFields, "server_id")
+		assert.Equal(t, serverID, ns.CustomFields["server_id"])
+
+		// Test saving to database
+		err := AddRegistration(&ns)
+		require.NoError(t, err)
+
+		// Retrieve from database
+		saved, err := getRegistrationByPrefix("/origins/test-origin.edu")
+		require.NoError(t, err)
+		// Verify server_id is NOT stored in registrations table
+		if saved.CustomFields != nil {
+			assert.NotContains(t, saved.CustomFields, "server_id", "server_id should not be stored in database CustomFields")
+		}
+		// Verify server_id is stored in servers table
+		server, err := getServerByID(serverID)
+		require.NoError(t, err)
+		assert.Equal(t, serverID, server.ID)
+	})
+
+	t.Run("regular-namespace-does-not-set-server-id", func(t *testing.T) {
+		// Create a registration for regular namespace
+		ns := server_structs.Registration{
+			Prefix:        "/test/regular-namespace",
+			Pubkey:        string(pubkeyData),
+			AdminMetadata: server_structs.AdminMetadata{SiteName: "test-namespace", Status: server_structs.RegPending},
+		}
+
+		// Simulate the logic from keySignChallengeCommit - should NOT set server_id for regular namespaces
+		if server_structs.IsServerPrefix(ns.Prefix) {
+			if ns.CustomFields == nil {
+				ns.CustomFields = make(map[string]interface{})
+			}
+			ns.CustomFields["server_id"] = "should-not-be-set"
+		}
+
+		// For regular namespaces, CustomFields should remain nil or not contain server_id
+		if ns.CustomFields != nil {
+			assert.NotContains(t, ns.CustomFields, "server_id")
+		}
+
+		// Test saving to database
+		err := AddRegistration(&ns)
+		require.NoError(t, err)
+
+		// Retrieve from database and verify server_id is not set
+		saved, err := getRegistrationByPrefix("/test/regular-namespace")
+		require.NoError(t, err)
+		if saved.CustomFields != nil {
+			assert.NotContains(t, saved.CustomFields, "server_id")
+		}
+	})
+}
