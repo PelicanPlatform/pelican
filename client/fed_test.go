@@ -74,6 +74,8 @@ var (
 // Helper function to get a temporary token file
 // NOTE: when used make sure to call os.Remove() on the file
 func getTempToken(t *testing.T) (tempToken *os.File, tkn string) {
+	viper.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
