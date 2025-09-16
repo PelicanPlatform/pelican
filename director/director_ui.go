@@ -50,6 +50,7 @@ type (
 		URL          string                      `json:"url"`    // This is server's XRootD URL for file transfer
 		WebURL       string                      `json:"webUrl"` // This is server's Web interface and API
 		Type         string                      `json:"type"`
+		Coordinate   server_structs.Coordinate   `json:"coordinate"`
 		Latitude     float64                     `json:"latitude"`
 		Longitude    float64                     `json:"longitude"`
 		Caps         server_structs.Capabilities `json:"capabilities"`
@@ -90,6 +91,7 @@ type (
 		URL                    string                      `json:"url"`    // This is server's XRootD URL for file transfer
 		WebURL                 string                      `json:"webUrl"` // This is server's Web interface and API
 		Type                   string                      `json:"type"`
+		Coordinate             server_structs.Coordinate   `json:"coordinate"`
 		Latitude               float64                     `json:"latitude"`
 		Longitude              float64                     `json:"longitude"`
 		Caps                   server_structs.Capabilities `json:"capabilities"`
