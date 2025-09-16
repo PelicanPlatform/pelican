@@ -129,6 +129,7 @@ func (e *duplicateServerIdError) Error() string {
 	return e.Message
 }
 
+// Check whether any key in the input JWK matches any key already registered to an input namespace prefix
 func matchKeys(incomingKey jwk.Key, registeredNamespaces []string) (bool, error) {
 	// If this is the case, we want to make sure that at least one of the superspaces has the
 	// same registration key as the incoming. This guarantees the owner of the superspace is
@@ -146,19 +147,16 @@ func matchKeys(incomingKey jwk.Key, registeredNamespaces []string) (bool, error)
 		for it := (keyset).Keys(context.Background()); it.Next(context.Background()); {
 			pair := it.Pair()
 			registeredKey := pair.Value.(jwk.Key)
-			registeredKeyBuf, err := json.Marshal(registeredKey)
-			if err != nil {
-				return false, errors.Wrapf(err, "failed to marshal a key registered to %s into JSON", ns)
-			}
-			incomingKeyBuf, err := json.Marshal(incomingKey)
-			if err != nil {
-				return false, errors.Wrap(err, "failed to marshal the incoming key into JSON")
-			}
 
-			if string(registeredKeyBuf) == string(incomingKeyBuf) {
+			log.Debugf("Matching key for namespace %s: Registry DB key: %s, Incoming request key: %s", ns, registeredKey.KeyID(), incomingKey.KeyID())
+			// Use jwk.Equal for reliable key comparison
+			if jwk.Equal(registeredKey, incomingKey) {
 				foundMatch = true
 				break
 			}
+		}
+		if foundMatch {
+			break
 		}
 	}
 
