@@ -193,3 +193,25 @@ func GetComponentStatus(comp HealthStatusComponent) (status string, err error) {
 	}
 	return statusInt.Status.String(), nil
 }
+
+// ValidateComponentHealthAge checks the last update of a component and marks it critical
+// if the age exceeds maxAge. If the component has never been set, it will be marked critical.
+func ValidateComponentHealthAge(component HealthStatusComponent, maxAge time.Duration) {
+	if maxAge <= 0 {
+		return
+	}
+	val, ok := healthStatus.Load(component)
+	if !ok {
+		SetComponentHealthStatus(component, StatusCritical, "Component health status missing; marking as stale")
+		return
+	}
+	stat, ok := val.(componentStatusInternal)
+	if !ok {
+		SetComponentHealthStatus(component, StatusCritical, "Component health status invalid; marking as stale")
+		return
+	}
+	age := time.Since(stat.LastUpdate)
+	if age > maxAge {
+		SetComponentHealthStatus(component, StatusCritical, "Component health stale; last update "+age.String()+" ago")
+	}
+}

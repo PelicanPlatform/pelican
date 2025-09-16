@@ -439,9 +439,11 @@ func doSelfMonitorOrigin(ctx context.Context) {
 func PeriodicSelfTest(ctx context.Context, ergp *errgroup.Group, isOrigin bool) {
 	customInterval := param.Cache_SelfTestInterval.GetDuration()
 	doSelfMonitor := doSelfMonitorCache
+	maxAge := param.Cache_SelfTestMaxAge.GetDuration()
 	if isOrigin {
 		doSelfMonitor = doSelfMonitorOrigin
 		customInterval = param.Origin_SelfTestInterval.GetDuration()
+		maxAge = param.Origin_SelfTestMaxAge.GetDuration()
 	}
 
 	ticker := time.NewTicker(customInterval)
@@ -453,8 +455,14 @@ func PeriodicSelfTest(ctx context.Context, ergp *errgroup.Group, isOrigin bool) 
 			select {
 			case <-firstRound:
 				doSelfMonitor(ctx)
+				// This is a failsafe mechanism to the self-test metric (OriginCache_XRootD):
+				// have the server status reported as critical if the check for age is too old.
+				// TODO: if OriginCache_XRootD component hasn't been set for `maxAge` time,
+				// it means no self-test has been run. Maybe we should shutdown the server instead?
+				metrics.ValidateComponentHealthAge(metrics.OriginCache_XRootD, maxAge)
 			case <-ticker.C:
 				doSelfMonitor(ctx)
+				metrics.ValidateComponentHealthAge(metrics.OriginCache_XRootD, maxAge)
 			case <-ctx.Done():
 				return nil
 			}
