@@ -2945,6 +2945,10 @@ Loop:
 		case err = <-done:
 			downloaded = pw.BytesComplete()
 			break Loop
+
+		case <-ctx.Done():
+			err = ctx.Err()
+			break Loop
 		}
 	}
 	if err != nil {
