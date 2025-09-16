@@ -57,6 +57,8 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 func TestMain(m *testing.M) {
@@ -2224,4 +2226,66 @@ func TestPackAutoSegfaultRegression(t *testing.T) {
 		t.Fatal("Expected either downloadObject error or transferResult error, but got neither")
 	}
 
+}
+
+func TestPermissionDeniedError(t *testing.T) {
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer svr.Close()
+
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	tj := &TransferJob{
+		remoteURL: &pelican_url.PelicanURL{
+			Scheme: "pelican://",
+			Host:   svrURL.Host,
+			Path:   svrURL.Path + "/test.txt",
+		},
+		token: NewTokenGenerator(nil, nil, config.TokenSharedRead, false),
+	}
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		job:       tj,
+		remoteURL: svrURL,
+		token:     tj.token,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+	}
+
+	t.Run("expired-token", func(t *testing.T) {
+		tokenConfig := token.NewWLCGToken()
+		tokenConfig.Lifetime = time.Minute
+		tokenConfig.Issuer = svrURL.String()
+		tokenConfig.Subject = "origin"
+		tokenConfig.AddAudienceAny()
+
+		scopes := []token_scopes.TokenScope{}
+		readScope, err := token_scopes.Wlcg_Storage_Read.Path("/")
+		assert.NoError(t, err)
+		scopes = append(scopes, readScope)
+		modScope, err := token_scopes.Wlcg_Storage_Modify.Path("/")
+		assert.NoError(t, err)
+		scopes = append(scopes, modScope)
+		tokenConfig.AddScopes(scopes...)
+
+		tokenConfig.Lifetime = time.Second * 3
+		tkn, err := tokenConfig.CreateToken()
+		assert.NoError(t, err)
+		transfer.job.token.SetToken(tkn)
+
+		time.Sleep(time.Second * 4) // Sleep for longer than the token lifetime
+		res, err := downloadObject(transfer)
+		require.NoError(t, err)
+		require.Error(t, res.Error)
+
+		var pde *PermissionDeniedError
+		require.ErrorAs(t, res.Error, &pde)
+		assert.Equal(t, true, pde.expired)
+		assert.Contains(t, pde.message, "token expired")
+	})
 }
