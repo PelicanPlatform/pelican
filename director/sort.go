@@ -70,7 +70,7 @@ const (
 //   - random: sort serverAds randomly
 //   - adaptive:  sort serverAds based on rules discussed in these places:
 //   - https://github.com/PelicanPlatform/pelican/discussions/1198
-//   - https://docs.google.com/document/d/1w-1oUhFTN6QN_PfQ5qbS7uf8Su3K8q6MZD3TGLKTHB8/edit?tab=t.0
+//   - https://docs.google.com/document/d/e/2PACX-1vQg9biPzp3RbC5qVuJFvgMZHgIM-nw92JzjHkGl-h7djeNNXa68ckv2rAqtXEDYe8QvXL3oX0Fr0-bp/pub
 //
 // Note that if the client IP isn't overridden and MaxMind cannot resolve accurate coordinates for it, the client's
 // coordinate is randomly assigned within the contiguous US and cached for re-use. This means that distance-based sorts

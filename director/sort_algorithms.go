@@ -385,7 +385,7 @@ func (ds *DistanceSort) Sort(sAds []server_structs.ServerAd, sCtx SortContext) (
 // An adaptive sort that combines multiple factors: distance, IO load, status weight, and availability.
 // See:
 //   - https://github.com/PelicanPlatform/pelican/discussions/1198
-//   - https://docs.google.com/document/d/1w-1oUhFTN6QN_PfQ5qbS7uf8Su3K8q6MZD3TGLKTHB8/edit?tab=t.0
+//   - https://docs.google.com/document/d/e/2PACX-1vQg9biPzp3RbC5qVuJFvgMZHgIM-nw92JzjHkGl-h7djeNNXa68ckv2rAqtXEDYe8QvXL3oX0Fr0-bp/pub
 type AdaptiveSort struct{}
 
 func (rs *AdaptiveSort) Type() server_structs.SortType {
