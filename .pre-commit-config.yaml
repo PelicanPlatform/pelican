@@ -19,31 +19,47 @@
 # See https://pre-commit.com for more information
 # See https://pre-commit.com/hooks.html for more hooks
 repos:
--   repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
-    hooks:
-    -   id: trailing-whitespace
-        exclude: github_scripts/pelican_protocol.patch
-    -   id: end-of-file-fixer
-    -   id: check-yaml
-        # Multi-documents are yaml files with multiple --- separating blocks, like
-        # in our docs/parameters.yaml. We need this argument so those parse.
-        args: [--allow-multiple-documents]
-    -   id: check-added-large-files
-        args: ['--maxkb=1024']
--   repo: https://github.com/golangci/golangci-lint
-    rev: v1.64.8
-    hooks:
-    -   id: golangci-lint
--   repo: https://github.com/crate-ci/typos
-    rev: v1.28.2
-    hooks:
-    -   id: typos
-        # Override the default arguments, which include writing back all
-        # suggested changes. We don't want false positives to mangle files.
-        args: [--force-exclude, --sort]
--   repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.10.0.1
-    hooks:
-    -   id: shellcheck
-        args: [--severity=warning]
+  -   repo: https://github.com/pre-commit/pre-commit-hooks
+      rev: v4.5.0
+      hooks:
+        -   id: trailing-whitespace
+            stages: [commit]
+            exclude: github_scripts/pelican_protocol.patch
+        -   id: end-of-file-fixer
+            stages: [commit]
+        -   id: check-yaml
+            stages: [commit]
+            # Multi-documents are yaml files with multiple --- separating blocks, like
+            # in our docs/parameters.yaml. We need this argument so those parse.
+            args: [--allow-multiple-documents]
+        -   id: check-added-large-files
+            stages: [commit]
+            args: ['--maxkb=1024']
+  -   repo: https://github.com/golangci/golangci-lint
+      rev: v1.64.8
+      hooks:
+        -   id: golangci-lint
+            stages: [push]
+  -   repo: https://github.com/crate-ci/typos
+      rev: v1.28.2
+      hooks:
+        -   id: typos
+            stages: [push]
+          # Override the default arguments, which include writing back all
+          # suggested changes. We don't want false positives to mangle files.
+            args: [--force-exclude, --sort]
+  -   repo: https://github.com/shellcheck-py/shellcheck-py
+      rev: v0.10.0.1
+      hooks:
+        -   id: shellcheck
+            stages: [push]
+            args: [--severity=warning]
+  -   repo: local
+      hooks:
+        -   id: npm-format-fix
+            stages: [push]
+            name: Run npm format:fix on web_ui/frontend changes
+            entry: bash -c "cd web_ui/frontend && npm run format:fix"
+            language: system
+            files: web_ui/frontend/.*
+            pass_filenames: false
