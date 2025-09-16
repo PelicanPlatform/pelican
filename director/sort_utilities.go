@@ -132,12 +132,22 @@ func unmarshalOverrides() error {
 	return nil
 }
 
+// Given an IPv4 address mapped into IPv6 space, return the IPv4 address.
+func normalizeAddr(addr netip.Addr) netip.Addr {
+	if addr.Is6() && addr.Is4In6() {
+		return addr.Unmap()
+	}
+	return addr
+}
+
 // Check for any pre-configured IP-to-lat/long overrides. If the passed address
 // matches an override IP (either directly or via CIDR masking), then we use the
 // configured lat/long from the override instead of relying on MaxMind.
 // NOTE: We don't return an error because if checkOverrides encounters an issue,
 // we still have GeoIP to fall back on.
 func checkOverrides(addr netip.Addr) (coord server_structs.Coordinate, exists bool) {
+	addr = normalizeAddr(addr)
+
 	if cached := clientIpGeoOverrideCache.Get(addr); cached != nil {
 		coord = cached.Value()
 		return coord, true
