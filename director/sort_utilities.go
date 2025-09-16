@@ -349,19 +349,17 @@ func getServerCoordinate(sAd server_structs.ServerAd) (coord server_structs.Coor
 	// Now try MaxMind
 	coord, err = getMaxMindCoordinate(addr)
 	if err != nil {
-		if param.Monitoring_EnablePrometheus.GetBool() {
-			network, ok := utils.ApplyIPMask(addr.String())
-			if !ok {
-				log.Warningf("Failed to apply IP mask to address %s", addr.String())
-				network = "unknown"
-			}
-
-			labels := prometheus.Labels{
-				"network":     network,
-				"server_name": sAd.Name,
-			}
-			metrics.PelicanDirectorMaxMindServerErrorsTotal.With(labels).Inc()
+		network, ok := utils.ApplyIPMask(addr.String())
+		if !ok {
+			log.Warningf("Failed to apply IP mask to address %s", addr.String())
+			network = "unknown"
 		}
+
+		labels := prometheus.Labels{
+			"network":     network,
+			"server_name": sAd.Name,
+		}
+		metrics.PelicanDirectorMaxMindServerErrorsTotal.With(labels).Inc()
 	}
 
 	return
@@ -387,19 +385,17 @@ func getClientCoordinate(ctx context.Context, addr netip.Addr) (coord server_str
 	}
 
 	handleClientGeoIPFailure := func(addr netip.Addr) {
-		if param.Monitoring_EnablePrometheus.GetBool() {
-			network, ok := utils.ApplyIPMask(addr.String())
-			if !ok {
-				log.Warningf("Failed to apply IP mask to address %s", addr.String())
-				network = "unknown"
-			}
-			proj := getProjectLabel(ctx)
-			labels := prometheus.Labels{
-				"network": network,
-				"project": proj,
-			}
-			metrics.PelicanDirectorMaxMindClientErrorsTotal.With(labels).Inc()
+		network, ok := utils.ApplyIPMask(addr.String())
+		if !ok {
+			log.Warningf("Failed to apply IP mask to address %s", addr.String())
+			network = "unknown"
 		}
+		proj := getProjectLabel(ctx)
+		labels := prometheus.Labels{
+			"network": network,
+			"project": proj,
+		}
+		metrics.PelicanDirectorMaxMindClientErrorsTotal.With(labels).Inc()
 	}
 
 	// Check the random assignment cache
