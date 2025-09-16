@@ -467,7 +467,10 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	// 2. Supported predicates: if the cache passes the common predicate, we can mark whether we know it supports a feature.
 	// 3. Unknown predicates: if the cache passes the common predicate but we don't know if it supports a feature, we can
 	//    mark it as unknown.
-	commonPredicates := []AdPredicate{cacheNotInErrorState(), cacheNotFromTopoIfPubReads()}
+	commonPredicates := []AdPredicate{cacheNotFromTopoIfPubReads()}
+	if param.Director_FilterCachesInErrorState.GetBool() {
+		commonPredicates = append(commonPredicates, cacheNotInErrorState())
+	}
 	supportedPredicates := []AdPredicate{cacheSupportsFeature(requiredFeatures)}
 	unknownPredicates := []AdPredicate{cacheMightSupportFeature(requiredFeatures)}
 	sortedCaches, unknownCaches := filterCaches(ctx, cacheAds, commonPredicates, supportedPredicates, unknownPredicates)
