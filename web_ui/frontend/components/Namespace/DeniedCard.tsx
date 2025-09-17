@@ -22,7 +22,6 @@ export interface DeniedCardProps {
 }
 
 export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
-  const ref = useRef<HTMLDivElement>(null);
   const [transition, setTransition] = useState<boolean>(false);
   const dispatch = useContext(AlertDispatchContext);
   const alert = useContext(AlertContext);
@@ -118,11 +117,10 @@ export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
             </Box>
           </Box>
         </Box>
-        <Box ref={ref}>
+        <Box>
           <InformationDropdown
             adminMetadata={namespace.admin_metadata}
             transition={transition}
-            parentRef={ref}
           />
         </Box>
       </Box>
