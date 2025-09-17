@@ -40,7 +40,6 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
     : 'medium';
 
   const dispatch = useContext(AlertDispatchContext);
-  const ref = useRef<HTMLDivElement>(undefined);
   const [transition, setTransition] = useState<boolean>(false);
   const { mutate } = useSWRConfig();
 
