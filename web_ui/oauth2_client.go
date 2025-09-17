@@ -52,6 +52,13 @@ const (
 	oauthCallbackPath = "/api/v1.0/auth/oauth/callback"
 )
 
+// Group source types
+const (
+	GroupSourceTypeOIDC     string = "oidc"
+	GroupSourceTypeFile     string = "file"
+	GroupSourceTypeInternal string = "internal"
+)
+
 var (
 	oauthConfig      *oauth2.Config
 	oauthUserInfoUrl = "" // Value will be set at ConfigOAuthClientAPIs
@@ -167,10 +174,6 @@ func handleOAuthLogin(ctx *gin.Context) {
 
 // Given a user name, return the list of groups they belong to
 func generateGroupInfo(user string) (groups []string, err error) {
-	// Currently, only file-based and internal lookup is supported
-	if param.Issuer_GroupSource.GetString() != "file" && param.Issuer_GroupFile.GetString() != "internal" {
-		return
-	}
 	groupFile := param.Issuer_GroupFile.GetString()
 	if groupFile == "" {
 		return
@@ -225,7 +228,9 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 	}
 	user = userIdentifier
 
-	if param.Issuer_GroupSource.GetString() == "oidc" {
+	groupSource := strings.ToLower(param.Issuer_GroupSource.GetString())
+	switch groupSource {
+	case GroupSourceTypeOIDC:
 		groupClaim := param.Issuer_OIDCGroupClaim.GetString()
 		groupList, ok := claimsSource[groupClaim]
 		if ok {
@@ -247,13 +252,13 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 				}
 			}
 		}
-	} else if param.Issuer_GroupSource.GetString() == "file" {
+	case GroupSourceTypeFile:
 		groups, err = generateGroupInfo(user)
 		if err != nil {
 			return "", nil, err
 		}
 		return user, groups, nil
-	} else if param.Issuer_GroupSource.GetString() == "internal" {
+	case GroupSourceTypeInternal:
 		log.Debugf("Getting groups for user %s", user)
 		groupList, err := database.GetMemberGroups(database.ServerDatabase, user)
 		if err != nil {
@@ -264,6 +269,10 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 			groups = append(groups, group.Name)
 		}
 		log.Debugf("Groups for user %s: %v", user, groups)
+		return user, groups, nil
+	default:
+		err = errors.New("invalid group source: " + groupSource)
+		return "", nil, err
 	}
 	return user, groups, nil
 }

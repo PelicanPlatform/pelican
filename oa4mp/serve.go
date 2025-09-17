@@ -39,6 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 type (
@@ -232,8 +233,12 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 
 	oidcAuthnUserClaim := param.Issuer_OIDCAuthenticationUserClaim.GetString()
 	groupSource := param.Issuer_GroupSource.GetString()
+	if groupSource != web_ui.GroupSourceTypeOIDC && groupSource != web_ui.GroupSourceTypeFile && groupSource != web_ui.GroupSourceTypeInternal {
+		err = errors.New("invalid group source: " + groupSource)
+		return
+	}
 	groupFile := param.Issuer_GroupFile.GetString()
-	if groupFile == "" && groupSource == "file" {
+	if groupFile == "" && groupSource == web_ui.GroupSourceTypeFile {
 		err = errors.New("Issuer.GroupFile must be set to use the 'file' group source")
 		return
 	}
