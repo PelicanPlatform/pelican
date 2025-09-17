@@ -39,6 +39,8 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           version: latest
+          args: --config=.golangci.yaml
+
 
       - name: Run pre-commit
         uses: pre-commit/action@v3.0.1
