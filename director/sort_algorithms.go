@@ -24,8 +24,8 @@ import (
 	"math/rand"
 	"slices"
 
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/server_structs"
 )
@@ -450,44 +450,34 @@ func (as *AdaptiveSort) Sort(sAds []server_structs.ServerAd, sCtx SortContext) (
 		}
 	}
 
-	// NOTE: The following three goroutines all write to different fields of the same
-	// serverWeights slice, so there should be no race conditions. If you need to add a
-	// new goroutine that writes to serverWeights, be very careful to ensure it doesn't
-	// write to the same fields as another goroutine.
-	errGrp, _ := errgroup.WithContext(sCtx.Ctx)
-
 	// ioLoad weights
-	errGrp.Go(func() error {
-		return applyWeights("ioLoad", workingSet, serverWeights,
-			func(_ int, ad server_structs.ServerAd) (float64, bool) {
-				return ioLoadWeightFn(ad.IOLoad)
-			},
-			func(sw *server_structs.RedirectWeights, w float64) { sw.IOLoadWeight = w },
-		)
-	})
+	if err := applyWeights("ioLoad", workingSet, serverWeights,
+		func(_ int, ad server_structs.ServerAd) (float64, bool) {
+			return ioLoadWeightFn(ad.IOLoad)
+		},
+		func(sw *server_structs.RedirectWeights, w float64) { sw.IOLoadWeight = w },
+	); err != nil {
+		return nil, errors.Wrap(err, "unable to generate ioLoad weights")
+	}
 
 	// status weights
-	errGrp.Go(func() error {
-		return applyWeights("status", workingSet, serverWeights,
-			func(_ int, ad server_structs.ServerAd) (float64, bool) {
-				return statusWeightFn(ad.StatusWeight)
-			},
-			func(sw *server_structs.RedirectWeights, w float64) { sw.StatusWeight = w },
-		)
-	})
+	if err := applyWeights("status", workingSet, serverWeights,
+		func(_ int, ad server_structs.ServerAd) (float64, bool) {
+			return statusWeightFn(ad.StatusWeight)
+		},
+		func(sw *server_structs.RedirectWeights, w float64) { sw.StatusWeight = w },
+	); err != nil {
+		return nil, errors.Wrap(err, "unable to generate status weights")
+	}
 
 	// availability weights
-	errGrp.Go(func() error {
-		return applyWeights("availability", workingSet, serverWeights,
-			func(_ int, ad server_structs.ServerAd) (float64, bool) {
-				return availabilityWeightFn(ad, sCtx.AvailabilityMap, objAvailabilityFactor)
-			},
-			func(sw *server_structs.RedirectWeights, w float64) { sw.AvailabilityWeight = w },
-		)
-	})
-
-	if err := errGrp.Wait(); err != nil {
-		return nil, err
+	if err := applyWeights("availability", workingSet, serverWeights,
+		func(_ int, ad server_structs.ServerAd) (float64, bool) {
+			return availabilityWeightFn(ad, sCtx.AvailabilityMap, objAvailabilityFactor)
+		},
+		func(sw *server_structs.RedirectWeights, w float64) { sw.AvailabilityWeight = w },
+	); err != nil {
+		return nil, errors.Wrap(err, "unable to generate availability weights")
 	}
 
 	// Final weights from each raw weight
