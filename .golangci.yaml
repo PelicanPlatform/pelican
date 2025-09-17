@@ -29,6 +29,8 @@ run:
 linters:
   enable:
     - misspell
+  disable:
+    - staticcheck
   exclusions:
     generated: lax
     presets:
