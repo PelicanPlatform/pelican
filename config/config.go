@@ -180,7 +180,8 @@ var (
 	warnIssuerKeyOnce  sync.Once
 	warnDeprecatedOnce sync.Once
 
-	RestartFlag = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
+	RestartFlag  = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
+	ShutdownFlag = make(chan any) // A channel flag to shutdown the server instance that launcher listens to (including cache)
 
 	validPrefixes = map[ConfigPrefix]bool{
 		PelicanPrefix: true,
