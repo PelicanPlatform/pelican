@@ -75,18 +75,21 @@ export function Issuer({ metadata }: { metadata: ParameterMetadataRecord }) {
     return merge(structuredClone(serverConfig), structuredClone(patch));
   }, [serverConfig, patch]);
 
-  const submitPatch = useCallback(async (patch: any) => {
-    setStatus({ message: 'Submitting', severity: 'info' });
+  const submitPatch = useCallback(
+    async (patch: any) => {
+      setStatus({ message: 'Submitting', severity: 'info' });
 
-    try {
-      await submitConfigChange(patch);
-      setStatus(undefined);
-    } catch (e) {
-      setStatus({ message: (e as Error).toString(), severity: 'error' });
-      setPatch({});
-      mutate();
-    }
-  }, [mutate, setPatch, setStatus]);
+      try {
+        await submitConfigChange(patch);
+        setStatus(undefined);
+      } catch (e) {
+        setStatus({ message: (e as Error).toString(), severity: 'error' });
+        setPatch({});
+        mutate();
+      }
+    },
+    [mutate, setPatch, setStatus]
+  );
 
   return (
     <Box>
@@ -94,8 +97,9 @@ export function Issuer({ metadata }: { metadata: ParameterMetadataRecord }) {
         <Grid
           size={{
             xs: 12,
-            lg: 8
-          }}>
+            lg: 8,
+          }}
+        >
           <Typography variant={'h4'}>Issuer Configuration</Typography>
           <Box my={2}>
             <Typography variant={'body1'}>

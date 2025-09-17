@@ -1,11 +1,7 @@
 'use client';
 
 import React, { memo, useState, ComponentProps } from 'react';
-import {
-  Box,
-  Button,
-  Typography
-} from '@mui/material';
+import { Box, Button, Typography } from '@mui/material';
 import { QuestionMark } from '@mui/icons-material';
 import { grey } from '@mui/material/colors';
 
@@ -132,7 +128,7 @@ export const ConfigField = ({
 export const ConfigCategoryLabel = ({ name }: { name: string }) => {
   const splitName = name.split('.');
 
-  let variant: ComponentProps<typeof Typography>['variant']
+  let variant: ComponentProps<typeof Typography>['variant'];
   switch (splitName.length) {
     case 1:
       variant = 'h1';

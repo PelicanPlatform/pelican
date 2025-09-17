@@ -21,8 +21,9 @@ export const DirectorDropdown = ({
           <Grid
             size={{
               xs: 12,
-              md: 7
-            }}>
+              md: 7,
+            }}
+          >
             <InformationSpan name={'Type'} value={server.type} />
             <InformationSpan name={'Version'} value={server.version} />
             <InformationSpan
@@ -50,8 +51,9 @@ export const DirectorDropdown = ({
           <Grid
             size={{
               xs: 12,
-              md: 5
-            }}>
+              md: 5,
+            }}
+          >
             <Box
               borderRadius={1}
               height={'100%'}
@@ -93,8 +95,9 @@ export const CapabilitiesRow = ({
             size={{
               md: 12 / 5,
               sm: 12 / 4,
-              xs: 12 / 2
-            }}>
+              xs: 12 / 2,
+            }}
+          >
             <CapabilitiesChip
               name={key}
               value={value}

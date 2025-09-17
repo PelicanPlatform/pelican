@@ -115,8 +115,9 @@ const PutPage = ({ update }: NamespaceFormPage) => {
         <Grid
           size={{
             xs: 12,
-            lg: 8
-          }}>
+            lg: 8,
+          }}
+        >
           {namespace ? (
             <Form
               namespace={namespace}
@@ -136,8 +137,9 @@ const PutPage = ({ update }: NamespaceFormPage) => {
         </Grid>
         <Grid
           size={{
-            lg: 4
-          }}></Grid>
+            lg: 4,
+          }}
+        ></Grid>
       </Grid>
     </AuthenticatedContent>
   );

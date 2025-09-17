@@ -46,16 +46,18 @@ export default function RootLayout({
               <Grid
                 size={{
                   xs: 12,
-                  md: 2
-                }}>
+                  md: 2,
+                }}
+              >
                 <SubNavigation />
               </Grid>
               <Grid
                 size={{
                   xs: 12,
                   md: 8,
-                  lg: 6
-                }}>
+                  lg: 6,
+                }}
+              >
                 <Box width={'100%'}>{children}</Box>
               </Grid>
             </Grid>

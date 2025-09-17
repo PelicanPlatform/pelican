@@ -22,10 +22,13 @@ const LatitudeLongitudePicker = ({
   setLongitude,
   zoom,
 }: LatitudeLongitudePickerProps) => {
-  const updateLatLng = useCallback((lngLat: LngLat) => {
-    setLatitude(parseFloat(lngLat.lat.toFixed(5)));
-    setLongitude(parseFloat(lngLat.lng.toFixed(5)));
-  }, [setLatitude, setLongitude]);
+  const updateLatLng = useCallback(
+    (lngLat: LngLat) => {
+      setLatitude(parseFloat(lngLat.lat.toFixed(5)));
+      setLongitude(parseFloat(lngLat.lng.toFixed(5)));
+    },
+    [setLatitude, setLongitude]
+  );
 
   const tempLongitude = Number.isNaN(longitude) ? 0 : longitude;
   const tempLatitude = Number.isNaN(latitude) ? 0 : latitude;

@@ -22,19 +22,22 @@ export const ServerMap = ({ servers }: ServerMapProps) => {
     ServerGeneral | ServerDetailed | undefined
   >(undefined);
 
-  const _setActiveServer = useCallback((server: ServerGeneral | undefined) => {
-    setActiveServer(server);
-    if (server?.type == 'Origin') {
-      alertOnError(
-        async () => {
-          const response = await getDirectorServer(server.name);
-          setActiveServer(await response.json());
-        },
-        'Failed to fetch server details',
-        dispatch
-      );
-    }
-  }, [dispatch]);
+  const _setActiveServer = useCallback(
+    (server: ServerGeneral | undefined) => {
+      setActiveServer(server);
+      if (server?.type == 'Origin') {
+        alertOnError(
+          async () => {
+            const response = await getDirectorServer(server.name);
+            setActiveServer(await response.json());
+          },
+          'Failed to fetch server details',
+          dispatch
+        );
+      }
+    },
+    [dispatch]
+  );
 
   const serverMarkers = useMemo(() => {
     return servers?.map((server) => {

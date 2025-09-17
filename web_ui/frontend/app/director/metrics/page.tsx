@@ -24,8 +24,9 @@ const Page = () => {
           display={'flex'}
           size={{
             xs: 12,
-            md: 5
-          }}>
+            md: 5,
+          }}
+        >
           <Grid container spacing={1}>
             {[
               <ServerUptime key={'server-count-var-graph'} />,
@@ -42,8 +43,9 @@ const Page = () => {
           display={'flex'}
           size={{
             xs: 12,
-            md: 7
-          }}>
+            md: 7,
+          }}
+        >
           <Grid container spacing={1} flexGrow={1}>
             <Grid display={'flex'} size={12}>
               <Grid container spacing={1}>
@@ -92,8 +94,9 @@ const Page = () => {
                     minHeight={'20rem'}
                     size={{
                       xs: 12,
-                      sm: 6
-                    }}>
+                      sm: 6,
+                    }}
+                  >
                     <Paper sx={{ width: '100%' }}>{component}</Paper>
                   </Grid>
                 ))}
@@ -107,8 +110,9 @@ const Page = () => {
               display={'flex'}
               size={{
                 xs: 12,
-                md: 6
-              }}>
+                md: 6,
+              }}
+            >
               <Paper sx={{ width: '100%', minHeight: '20rem' }}>
                 <TransferBarGraph />
               </Paper>
@@ -117,8 +121,9 @@ const Page = () => {
               display={'flex'}
               size={{
                 xs: 12,
-                md: 6
-              }}>
+                md: 6,
+              }}
+            >
               <Grid container>
                 {[
                   <BigBytesMetric
@@ -139,8 +144,9 @@ const Page = () => {
                     display={'flex'}
                     size={{
                       xs: 12,
-                      md: 6
-                    }}>
+                      md: 6,
+                    }}
+                  >
                     <Paper sx={{ width: '100%' }}>{component}</Paper>
                   </Grid>
                 ))}

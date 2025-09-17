@@ -24,8 +24,9 @@ export const OriginMetricPage = ({
         display={'flex'}
         size={{
           xs: 12,
-          md: 4
-        }}>
+          md: 4,
+        }}
+      >
         <Grid
           container
           spacing={1}
@@ -63,8 +64,9 @@ export const OriginMetricPage = ({
       <Grid
         size={{
           xs: 12,
-          md: 8
-        }}>
+          md: 8,
+        }}
+      >
         <Grid
           container
           spacing={1}
@@ -95,14 +97,16 @@ export const OriginMetricPage = ({
               <Grid
                 size={{
                   xs: 12,
-                  md: 6
-                }}>
+                  md: 6,
+                }}
+              >
                 <Grid container>
                   <Grid
                     size={{
                       xs: 12,
-                      md: 4
-                    }}>
+                      md: 4,
+                    }}
+                  >
                     <BigMetric
                       title={'Pelican Threads'}
                       finalType={'last'}
@@ -113,8 +117,9 @@ export const OriginMetricPage = ({
                   <Grid
                     size={{
                       xs: 12,
-                      md: 4
-                    }}>
+                      md: 4,
+                    }}
+                  >
                     <BigMetric
                       title={'XRootD Running Threads'}
                       finalType={'last'}
@@ -128,8 +133,9 @@ export const OriginMetricPage = ({
                   <Grid
                     size={{
                       xs: 12,
-                      md: 4
-                    }}>
+                      md: 4,
+                    }}
+                  >
                     <BigMetric
                       title={'XRootD Idle Threads'}
                       metric={bm('xrootd_sched_thread_count', {
@@ -145,14 +151,16 @@ export const OriginMetricPage = ({
               <Grid
                 size={{
                   xs: 12,
-                  md: 6
-                }}>
+                  md: 6,
+                }}
+              >
                 <Grid container>
                   <Grid
                     size={{
                       xs: 12,
-                      md: 4
-                    }}>
+                      md: 4,
+                    }}
+                  >
                     <BigBytesMetric
                       metric={bm('xrootd_transfer_bytes', {
                         type: 'read',
@@ -166,8 +174,9 @@ export const OriginMetricPage = ({
                   <Grid
                     size={{
                       xs: 12,
-                      md: 4
-                    }}>
+                      md: 4,
+                    }}
+                  >
                     <BigBytesMetric
                       metric={bm('xrootd_transfer_bytes', {
                         type: 'readv',
@@ -181,8 +190,9 @@ export const OriginMetricPage = ({
                   <Grid
                     size={{
                       xs: 12,
-                      md: 4
-                    }}>
+                      md: 4,
+                    }}
+                  >
                     <BigBytesMetric
                       metric={bm('xrootd_transfer_bytes', {
                         type: 'write',

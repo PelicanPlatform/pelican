@@ -22,8 +22,9 @@ export const NamespaceDropdown = ({
           <Grid
             size={{
               xs: 12,
-              md: 12
-            }}>
+              md: 12,
+            }}
+          >
             <InformationSpan name={'Path'} value={namespace.path} />
             <InformationSpanHeader title={'Token Generation'} />
             {namespace.tokenGeneration?.map((tg) => (

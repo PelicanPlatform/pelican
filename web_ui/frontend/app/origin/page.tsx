@@ -61,8 +61,9 @@ export default function Home() {
           <Grid
             size={{
               xs: 12,
-              lg: 6
-            }}>
+              lg: 6,
+            }}
+          >
             <Typography variant='h4' mb={2}>
               Status
             </Typography>
@@ -71,8 +72,9 @@ export default function Home() {
           <Grid
             size={{
               xs: 12,
-              lg: 6
-            }}>
+              lg: 6,
+            }}
+          >
             <Box
               display={'flex'}
               flexDirection={'row'}
@@ -101,8 +103,9 @@ export default function Home() {
           <Grid
             size={{
               xs: 12,
-              lg: 6
-            }}>
+              lg: 6,
+            }}
+          >
             <FederationOverview />
           </Grid>
         </Grid>

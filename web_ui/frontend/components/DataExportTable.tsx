@@ -172,8 +172,9 @@ export const PosixDataExportCard = ({ entry }: { entry: PosixExportEntry }) => {
         <Grid
           size={{
             xs: 12,
-            md: 9
-          }}>
+            md: 9,
+          }}
+        >
           <ValueLabel
             value={entry.federationPrefix}
             label={'Federation Prefix'}
@@ -187,8 +188,9 @@ export const PosixDataExportCard = ({ entry }: { entry: PosixExportEntry }) => {
         <Grid
           size={{
             xs: 12,
-            md: 3
-          }}>
+            md: 3,
+          }}
+        >
           <CapabilitiesDisplay {...entry} />
         </Grid>
       </Grid>
@@ -204,8 +206,9 @@ export const S3DataExportCard = ({ entry }: { entry: S3ExportEntry }) => {
         <Grid
           size={{
             xs: 12,
-            md: 9
-          }}>
+            md: 9,
+          }}
+        >
           <ValueLabel
             value={entry.federationPrefix}
             label={'Federation Prefix'}
@@ -215,8 +218,9 @@ export const S3DataExportCard = ({ entry }: { entry: S3ExportEntry }) => {
         <Grid
           size={{
             xs: 12,
-            md: 9
-          }}>
+            md: 9,
+          }}
+        >
           <CapabilitiesDisplay {...entry} />
         </Grid>
       </Grid>
@@ -236,8 +240,9 @@ export const GlobusDataExportCard = ({
         <Grid
           size={{
             xs: 12,
-            md: 9
-          }}>
+            md: 9,
+          }}
+        >
           <ValueLabel
             value={entry.federationPrefix}
             label={'Federation Prefix'}

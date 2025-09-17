@@ -35,8 +35,9 @@ export const ServerCapabilitiesTable = ({
             <Grid
               size={{
                 xs: 12,
-                md: 3
-              }}>
+                md: 3,
+              }}
+            >
               <Box display={'flex'} height={'100%'}>
                 <Typography variant={'body2'} my={'auto'}>
                   {server.type}&apos;s Namespace Capabilities
@@ -46,8 +47,9 @@ export const ServerCapabilitiesTable = ({
             <Grid
               size={{
                 xs: 12,
-                md: 9
-              }}>
+                md: 9,
+              }}
+            >
               <CapabilitiesRow capabilities={server.capabilities} />
             </Grid>
           </Grid>
@@ -63,8 +65,9 @@ export const ServerCapabilitiesTable = ({
                   <Grid
                     size={{
                       xs: 12,
-                      md: 3
-                    }}>
+                      md: 3,
+                    }}
+                  >
                     <Box display={'flex'} height={'100%'}>
                       <Typography variant={'body2'} my={'auto'}>
                         {namespace.path}
@@ -74,8 +77,9 @@ export const ServerCapabilitiesTable = ({
                   <Grid
                     size={{
                       xs: 12,
-                      md: 9
-                    }}>
+                      md: 9,
+                    }}
+                  >
                     <CapabilitiesRow
                       capabilities={namespace.capabilities}
                       parentCapabilities={server.capabilities}

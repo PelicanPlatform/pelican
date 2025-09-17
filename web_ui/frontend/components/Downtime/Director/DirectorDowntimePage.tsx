@@ -25,8 +25,9 @@ const ServerDowntimePage = () => {
           <Grid
             size={{
               xs: 12,
-              lg: 12
-            }}>
+              lg: 12,
+            }}
+          >
             <DirectorDowntimePageHeader />
             <Box my={2}>
               <DowntimeCalendar data={data} />

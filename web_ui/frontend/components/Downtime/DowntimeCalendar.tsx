@@ -41,9 +41,10 @@ const DowntimeCalendar = ({ data = [] }: { data?: DowntimeGet[] }) => {
 
           return (
             // Is contained within this date
-            (// Ends on this date
+            // Ends on this date
             (start >= dateStart && start < dateEnd) || // Starts on this date
-            (end > dateStart && end <= dateEnd) || (start < dateStart && end > dateEnd))
+            (end > dateStart && end <= dateEnd) ||
+            (start < dateStart && end > dateEnd)
           );
         });
 

@@ -117,8 +117,9 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
           size={{
             xs: 12,
             md: 8,
-            lg: 6
-          }}>
+            lg: 6,
+          }}
+        >
           <Box>
             {error && (
               <Alert severity={'warning'}>{(error as Error).message}</Alert>
@@ -177,8 +178,9 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
           size={{
             xs: 12,
             md: 4,
-            lg: 3
-          }}>
+            lg: 3,
+          }}
+        >
           <Box pt={2}>
             <TableOfContents metadata={metadata} />
           </Box>

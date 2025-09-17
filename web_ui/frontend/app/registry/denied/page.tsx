@@ -58,16 +58,18 @@ export default function Home() {
           size={{
             xs: 12,
             lg: 6,
-            xl: 5
-          }}>
+            xl: 5,
+          }}
+        >
           <Typography variant={'h4'}>Namespace Registry</Typography>
         </Grid>
         <Grid
           justifyContent={'space-between'}
           size={{
             xs: 12,
-            lg: 8
-          }}>
+            lg: 8,
+          }}
+        >
           <AuthenticatedContent redirect={true}>
             <Typography variant={'h6'} py={2}>
               Denied Namespaces
@@ -86,8 +88,9 @@ export default function Home() {
         <Grid
           size={{
             lg: 6,
-            xl: 8
-          }}></Grid>
+            xl: 8,
+          }}
+        ></Grid>
       </Grid>
     </Box>
   );

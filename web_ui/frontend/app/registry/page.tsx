@@ -105,8 +105,9 @@ export default function Home() {
           justifyContent={'space-between'}
           size={{
             xs: 12,
-            lg: 8
-          }}>
+            lg: 8,
+          }}
+        >
           {pendingData && pendingData.length > 0 && (
             <Grid size={12}>
               <Paper
@@ -243,8 +244,9 @@ export default function Home() {
         <Grid
           size={{
             lg: 6,
-            xl: 8
-          }}></Grid>
+            xl: 8,
+          }}
+        ></Grid>
       </Grid>
     </Box>
   );

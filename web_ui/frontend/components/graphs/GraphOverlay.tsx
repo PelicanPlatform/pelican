@@ -34,22 +34,25 @@ export const GraphOverlay = ({ children }: { children: ReactNode }) => {
     return getFormatString([graphContext.time, graphStart]);
   }, [graphContext.time, graphStart]);
 
-  const handleKeydown = useCallback((e: KeyboardEvent) => {
-    switch (e.key) {
-      case 'ArrowLeft':
-        dispatch({ type: 'decrementTimeByRange' });
-        break;
-      case 'ArrowRight':
-        dispatch({ type: 'incrementTimeByRange' });
-        break;
-      case 'ArrowUp':
-        dispatch({ type: 'incrementRange' });
-        break;
-      case 'ArrowDown':
-        dispatch({ type: 'decrementRange' });
-        break;
-    }
-  }, [dispatch]);
+  const handleKeydown = useCallback(
+    (e: KeyboardEvent) => {
+      switch (e.key) {
+        case 'ArrowLeft':
+          dispatch({ type: 'decrementTimeByRange' });
+          break;
+        case 'ArrowRight':
+          dispatch({ type: 'incrementTimeByRange' });
+          break;
+        case 'ArrowUp':
+          dispatch({ type: 'incrementRange' });
+          break;
+        case 'ArrowDown':
+          dispatch({ type: 'decrementRange' });
+          break;
+      }
+    },
+    [dispatch]
+  );
 
   // Capture arrow keys to adjust timeframe
   useEffect(() => {
@@ -79,8 +82,9 @@ export const GraphOverlay = ({ children }: { children: ReactNode }) => {
           <Grid
             size={{
               xs: 12,
-              md: 'auto'
-            }}>
+              md: 'auto',
+            }}
+          >
             <StringUpdateViewer>
               {graphStart.toFormat(format)} - {graphContext.time.toFormat('f')}
             </StringUpdateViewer>
@@ -89,8 +93,9 @@ export const GraphOverlay = ({ children }: { children: ReactNode }) => {
             display={'flex'}
             size={{
               xs: 12,
-              md: 'auto'
-            }}>
+              md: 'auto',
+            }}
+          >
             <Box display={'flex'} m={'auto'}>
               <TimeRangeSelector />
               <DateTimePickerWithArrows />

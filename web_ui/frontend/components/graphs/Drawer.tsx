@@ -64,8 +64,9 @@ function ReportPeriodInput({
       <Grid
         size={{
           xs: 12,
-          md: 6
-        }}>
+          md: 6,
+        }}
+      >
         <FormControl fullWidth>
           <InputLabel id='select-report-length-label'>Report Length</InputLabel>
           <Select
@@ -88,8 +89,9 @@ function ReportPeriodInput({
       <Grid
         size={{
           xs: 12,
-          md: 6
-        }}>
+          md: 6,
+        }}
+      >
         <LocalizationProvider dateAdapter={AdapterLuxon}>
           <DatePicker
             sx={{ width: '100%' }}
