@@ -136,7 +136,7 @@ export default function CodeInput({
     <Grid container spacing={1}>
       {Array.from(Array(length).keys()).map((index) => {
         return (
-          <Grid item key={index} textAlign={'center'}>
+          <Grid key={index} textAlign={'center'}>
             <TextField
               inputProps={{
                 sx: {

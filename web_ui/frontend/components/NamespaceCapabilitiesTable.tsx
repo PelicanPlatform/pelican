@@ -45,7 +45,7 @@ export const NamespaceCapabilitiesTable = ({
 
   return (
     <Grid container spacing={1}>
-      <Grid item xs={12}>
+      <Grid size={12}>
         <Box
           bgcolor={grey[300]}
           display={'flex'}
@@ -54,14 +54,22 @@ export const NamespaceCapabilitiesTable = ({
           borderRadius={1}
         >
           <Grid container spacing={1}>
-            <Grid item xs={12} md={3}>
+            <Grid
+              size={{
+                xs: 12,
+                md: 3
+              }}>
               <Box display={'flex'} height={'100%'}>
                 <Typography variant={'body2'} my={'auto'}>
                   Namespace Capabilities
                 </Typography>
               </Box>
             </Grid>
-            <Grid item xs={12} md={9}>
+            <Grid
+              size={{
+                xs: 12,
+                md: 9
+              }}>
               <CapabilitiesRow capabilities={namespace.capabilities} />
             </Grid>
           </Grid>
@@ -69,10 +77,14 @@ export const NamespaceCapabilitiesTable = ({
       </Grid>
       {servers &&
         sortedServers?.map((server) => (
-          <Grid key={server.name} item xs={12}>
+          <Grid key={server.name} size={12}>
             <Box display={'flex'} px={1} borderRadius={1}>
               <Grid container spacing={1}>
-                <Grid item xs={12} md={3}>
+                <Grid
+                  size={{
+                    xs: 12,
+                    md: 3
+                  }}>
                   <Box display={'flex'} height={'100%'} overflow={'hidden'}>
                     <Typography variant={'body2'} my={'auto'} display={'flex'}>
                       <NamespaceIcon
@@ -91,7 +103,11 @@ export const NamespaceCapabilitiesTable = ({
                     </Typography>
                   </Box>
                 </Grid>
-                <Grid item xs={12} md={9}>
+                <Grid
+                  size={{
+                    xs: 12,
+                    md: 9
+                  }}>
                   <NamespaceCapabilitiesRow
                     server={server}
                     namespace={namespace}

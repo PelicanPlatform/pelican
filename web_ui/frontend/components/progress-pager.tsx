@@ -46,7 +46,7 @@ export default function ProgressPager({
     <Grid container spacing={1}>
       {Array.from(Array(steps).keys()).map((step) => {
         return (
-          <Grid key={step} item>
+          <Grid key={step}>
             <PagerBox step={step} active={step === activeStep} />
           </Grid>
         );

@@ -20,7 +20,12 @@ export const OriginMetricPage = ({
 }) => {
   return (
     <Grid container spacing={1} direction={'row'}>
-      <Grid item xs={12} md={4} display={'flex'}>
+      <Grid
+        display={'flex'}
+        size={{
+          xs: 12,
+          md: 4
+        }}>
         <Grid
           container
           spacing={1}
@@ -49,43 +54,55 @@ export const OriginMetricPage = ({
             />,
             <StorageGraph key={'storage-graph'} />,
           ].map((component, index) => (
-            <Grid key={index} item xs={12} display={'flex'} height={'21vh'}>
+            <Grid key={index} display={'flex'} height={'21vh'} size={12}>
               <Paper sx={{ width: '100%' }}>{component}</Paper>
             </Grid>
           ))}
         </Grid>
       </Grid>
-      <Grid item xs={12} md={8}>
+      <Grid
+        size={{
+          xs: 12,
+          md: 8
+        }}>
         <Grid
           container
           spacing={1}
           justifyContent={'space-between'}
           flexGrow={1}
         >
-          <Grid item xs={12} display={'flex'} height={'28vh'}>
+          <Grid display={'flex'} height={'28vh'} size={12}>
             <Paper sx={{ flexGrow: 1 }}>
               <TransferRateGraph server_name={server_name} />
             </Paper>
           </Grid>
-          <Grid item xs={12} display={'flex'} height={'28vh'}>
+          <Grid display={'flex'} height={'28vh'} size={12}>
             <Paper sx={{ flexGrow: 1 }}>
               <CPUGraph server_name={server_name} />
             </Paper>
           </Grid>
-          <Grid item xs={12} display={'flex'} height={'28vh'}>
+          <Grid display={'flex'} height={'28vh'} size={12}>
             <Paper sx={{ flexGrow: 1 }}>
               <MemoryGraph server_name={server_name} />
             </Paper>
           </Grid>
         </Grid>
       </Grid>
-      <Grid item xs={12}>
+      <Grid size={12}>
         <Paper>
           <Box p={1} bgcolor={grey[200]} borderRadius={1}>
             <Grid container>
-              <Grid item xs={12} md={6}>
+              <Grid
+                size={{
+                  xs: 12,
+                  md: 6
+                }}>
                 <Grid container>
-                  <Grid item xs={12} md={4}>
+                  <Grid
+                    size={{
+                      xs: 12,
+                      md: 4
+                    }}>
                     <BigMetric
                       title={'Pelican Threads'}
                       finalType={'last'}
@@ -93,7 +110,11 @@ export const OriginMetricPage = ({
                       color={green[300]}
                     />
                   </Grid>
-                  <Grid item xs={12} md={4}>
+                  <Grid
+                    size={{
+                      xs: 12,
+                      md: 4
+                    }}>
                     <BigMetric
                       title={'XRootD Running Threads'}
                       finalType={'last'}
@@ -104,7 +125,11 @@ export const OriginMetricPage = ({
                       color={blue[200]}
                     />
                   </Grid>
-                  <Grid item xs={12} md={4}>
+                  <Grid
+                    size={{
+                      xs: 12,
+                      md: 4
+                    }}>
                     <BigMetric
                       title={'XRootD Idle Threads'}
                       metric={bm('xrootd_sched_thread_count', {
@@ -117,9 +142,17 @@ export const OriginMetricPage = ({
                   </Grid>
                 </Grid>
               </Grid>
-              <Grid item xs={12} md={6}>
+              <Grid
+                size={{
+                  xs: 12,
+                  md: 6
+                }}>
                 <Grid container>
-                  <Grid item xs={12} md={4}>
+                  <Grid
+                    size={{
+                      xs: 12,
+                      md: 4
+                    }}>
                     <BigBytesMetric
                       metric={bm('xrootd_transfer_bytes', {
                         type: 'read',
@@ -130,7 +163,11 @@ export const OriginMetricPage = ({
                       color={green[300]}
                     />
                   </Grid>
-                  <Grid item xs={12} md={4}>
+                  <Grid
+                    size={{
+                      xs: 12,
+                      md: 4
+                    }}>
                     <BigBytesMetric
                       metric={bm('xrootd_transfer_bytes', {
                         type: 'readv',
@@ -141,7 +178,11 @@ export const OriginMetricPage = ({
                       color={green[300]}
                     />
                   </Grid>
-                  <Grid item xs={12} md={4}>
+                  <Grid
+                    size={{
+                      xs: 12,
+                      md: 4
+                    }}>
                     <BigBytesMetric
                       metric={bm('xrootd_transfer_bytes', {
                         type: 'write',
@@ -154,7 +195,7 @@ export const OriginMetricPage = ({
                   </Grid>
                 </Grid>
               </Grid>
-              <Grid item xs={6}>
+              <Grid size={6}>
                 <BigMetric
                   title={'Go Routines'}
                   finalType={'last'}
@@ -162,7 +203,7 @@ export const OriginMetricPage = ({
                   color={green[300]}
                 />
               </Grid>
-              <Grid item xs={6}>
+              <Grid size={6}>
                 <BigMetric
                   title={'XRootD Server Connections'}
                   metric={bm('xrootd_server_connection_count', { server_name })}

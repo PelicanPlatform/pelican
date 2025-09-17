@@ -108,12 +108,17 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
         </Typography>
       </Box>
       <Grid container>
-        <Grid item>
+        <Grid>
           <RestartBox />
         </Grid>
       </Grid>
       <Grid container spacing={2} sx={{ mt: -5 }}>
-        <Grid item xs={12} md={8} lg={6}>
+        <Grid
+          size={{
+            xs: 12,
+            md: 8,
+            lg: 6
+          }}>
           <Box>
             {error && (
               <Alert severity={'warning'}>{(error as Error).message}</Alert>
@@ -167,7 +172,13 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
           />
           {status && <StatusSnackBar key={status.message} {...status} />}
         </Grid>
-        <Grid item xs={12} md={4} lg={3} display={{ xs: 'none', md: 'block' }}>
+        <Grid
+          display={{ xs: 'none', md: 'block' }}
+          size={{
+            xs: 12,
+            md: 4,
+            lg: 3
+          }}>
           <Box pt={2}>
             <TableOfContents metadata={metadata} />
           </Box>

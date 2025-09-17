@@ -58,7 +58,7 @@ const DowntimeCard = ({
       >
         <Box width={'100%'}>
           <Grid container>
-            <Grid item xs={12}>
+            <Grid size={12}>
               <Box display={'flex'} flexDirection={'row'} alignItems={'center'}>
                 <Box pr={1}>
                   <Tooltip title={downtime.severity}>
@@ -92,29 +92,29 @@ const DowntimeCard = ({
                 )}
               </Box>
             </Grid>
-            <Grid item xs={12}>
+            <Grid size={12}>
               <Divider></Divider>
             </Grid>
-            <Grid item xs={12}>
+            <Grid size={12}>
               <Box width={'100%'} borderRadius={2} mt={1}>
                 <Grid container>
-                  <Grid item xs={6}>
+                  <Grid size={6}>
                     <Typography variant={'subtitle2'}>
                       <b>Severity:</b> {downtime.severity}
                     </Typography>
                   </Grid>
-                  <Grid item xs={6}>
+                  <Grid size={6}>
                     <Typography variant={'subtitle2'}>
                       <b>Local Start Time:</b>{' '}
                       {new Date(downtime.startTime).toLocaleString()}
                     </Typography>
                   </Grid>
-                  <Grid item xs={6}>
+                  <Grid size={6}>
                     <Typography variant={'subtitle2'}>
                       <b>Class:</b> {downtime.class}
                     </Typography>
                   </Grid>
-                  <Grid item xs={6}>
+                  <Grid size={6}>
                     <Typography variant={'subtitle2'}>
                       <b>Local End Time:</b>{' '}
                       {downtime.endTime === -1
@@ -125,35 +125,35 @@ const DowntimeCard = ({
                 </Grid>
                 <Collapse in={expanded} timeout={100} sx={{ width: '100%' }}>
                   <Grid container>
-                    <Grid item xs={6}>
+                    <Grid size={6}>
                       <Typography variant={'subtitle2'}>
                         <b>Created By:</b> {downtime.createdBy}
                       </Typography>
                     </Grid>
-                    <Grid item xs={6}>
+                    <Grid size={6}>
                       <Typography variant={'subtitle2'}>
                         <b>Local Creation Time:</b>{' '}
                         {new Date(downtime.createdAt).toLocaleString()}
                       </Typography>
                     </Grid>
-                    <Grid item xs={6}>
+                    <Grid size={6}>
                       <Typography variant={'subtitle2'}>
                         <b>Updated By:</b> {downtime.updatedBy}
                       </Typography>
                     </Grid>
-                    <Grid item xs={6}>
+                    <Grid size={6}>
                       <Typography variant={'subtitle2'}>
                         <b>Local Update Time:</b>{' '}
                         {new Date(downtime.updatedAt).toLocaleString()}
                       </Typography>
                     </Grid>
-                    <Grid item xs={6}>
+                    <Grid size={6}>
                       <Typography variant={'subtitle2'}>
                         <b>ID:</b> {downtime.id}
                       </Typography>
                     </Grid>
                     {federationLevel && (
-                      <Grid item xs={6}>
+                      <Grid size={6}>
                         <Typography variant={'subtitle2'}>
                           <b>Server:</b> {downtime.source}
                         </Typography>

@@ -112,7 +112,11 @@ const PutPage = ({ update }: NamespaceFormPage) => {
   return (
     <AuthenticatedContent redirect={true} boxProps={{ width: '100%' }}>
       <Grid container spacing={2}>
-        <Grid item xs={12} lg={8}>
+        <Grid
+          size={{
+            xs: 12,
+            lg: 8
+          }}>
           {namespace ? (
             <Form
               namespace={namespace}
@@ -130,7 +134,10 @@ const PutPage = ({ update }: NamespaceFormPage) => {
             <Skeleton variant='rectangular' width='100%' height={400} />
           )}
         </Grid>
-        <Grid item lg={4}></Grid>
+        <Grid
+          size={{
+            lg: 4
+          }}></Grid>
       </Grid>
     </AuthenticatedContent>
   );

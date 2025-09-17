@@ -91,7 +91,11 @@ export function Issuer({ metadata }: { metadata: ParameterMetadataRecord }) {
   return (
     <Box>
       <Grid container>
-        <Grid item xs={12} lg={8}>
+        <Grid
+          size={{
+            xs: 12,
+            lg: 8
+          }}>
           <Typography variant={'h4'}>Issuer Configuration</Typography>
           <Box my={2}>
             <Typography variant={'body1'}>

@@ -20,22 +20,32 @@ const Page = () => {
       redirect={true}
     >
       <Grid container spacing={1} direction={'row'}>
-        <Grid item xs={12} md={5} display={'flex'}>
+        <Grid
+          display={'flex'}
+          size={{
+            xs: 12,
+            md: 5
+          }}>
           <Grid container spacing={1}>
             {[
               <ServerUptime key={'server-count-var-graph'} />,
               <StorageTable key={'storage-table'} />,
               <ProjectTable key={'project-table'} />,
             ].map((component, index) => (
-              <Grid key={index} item xs={12} display={'flex'} height={'45vh'}>
+              <Grid key={index} display={'flex'} height={'45vh'} size={12}>
                 <Paper sx={{ width: '100%' }}>{component}</Paper>
               </Grid>
             ))}
           </Grid>
         </Grid>
-        <Grid item xs={12} md={7} display={'flex'}>
+        <Grid
+          display={'flex'}
+          size={{
+            xs: 12,
+            md: 7
+          }}>
           <Grid container spacing={1} flexGrow={1}>
-            <Grid item xs={12} display={'flex'}>
+            <Grid display={'flex'} size={12}>
               <Grid container spacing={1}>
                 {[
                   <MetricBoxPlot
@@ -77,13 +87,13 @@ const Page = () => {
                 ].map((component, index) => (
                   <Grid
                     key={index}
-                    item
-                    xs={12}
-                    sm={6}
                     display={'flex'}
                     maxHeight={'50%'}
                     minHeight={'20rem'}
-                  >
+                    size={{
+                      xs: 12,
+                      sm: 6
+                    }}>
                     <Paper sx={{ width: '100%' }}>{component}</Paper>
                   </Grid>
                 ))}
@@ -91,14 +101,24 @@ const Page = () => {
             </Grid>
           </Grid>
         </Grid>
-        <Grid item xs={12}>
+        <Grid size={12}>
           <Grid container minHeight={'20rem'}>
-            <Grid item xs={12} md={6} display={'flex'}>
+            <Grid
+              display={'flex'}
+              size={{
+                xs: 12,
+                md: 6
+              }}>
               <Paper sx={{ width: '100%', minHeight: '20rem' }}>
                 <TransferBarGraph />
               </Paper>
             </Grid>
-            <Grid item xs={12} md={6} display={'flex'}>
+            <Grid
+              display={'flex'}
+              size={{
+                xs: 12,
+                md: 6
+              }}>
               <Grid container>
                 {[
                   <BigBytesMetric
@@ -114,7 +134,13 @@ const Page = () => {
                     color={green[300]}
                   />,
                 ].map((component, index) => (
-                  <Grid key={index} item xs={12} md={6} display={'flex'}>
+                  <Grid
+                    key={index}
+                    display={'flex'}
+                    size={{
+                      xs: 12,
+                      md: 6
+                    }}>
                     <Paper sx={{ width: '100%' }}>{component}</Paper>
                   </Grid>
                 ))}

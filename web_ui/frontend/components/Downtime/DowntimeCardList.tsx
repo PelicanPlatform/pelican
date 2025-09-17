@@ -80,7 +80,7 @@ function DowntimeCardList({ Card, data }: DowntimeListProps) {
         }}
       >
         <Grid container spacing={1} mb={1}>
-          <Grid item>
+          <Grid>
             <DateTimePicker
               label={'Start Time'}
               value={DateTime.fromMillis(range.startTime)}
@@ -89,7 +89,7 @@ function DowntimeCardList({ Card, data }: DowntimeListProps) {
               }
             />
           </Grid>
-          <Grid item>
+          <Grid>
             <DateTimePicker
               label={'End Time'}
               value={DateTime.fromMillis(range.endTime)}

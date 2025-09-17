@@ -17,7 +17,7 @@ const ServerCard = ({
   return (
     <Box>
       <Grid container spacing={1}>
-        <Grid item xs={12}>
+        <Grid size={12}>
           <InformationSpan name={'Type'} value={server.type} />
           <InformationSpan name={'Status'} value={server.healthStatus} />
           <InformationSpan name={'URL'} value={server.url} />

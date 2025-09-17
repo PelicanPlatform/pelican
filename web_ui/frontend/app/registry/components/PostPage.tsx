@@ -53,7 +53,12 @@ const PostPage = ({ update }: NamespaceFormPage) => {
   return (
     <AuthenticatedContent redirect={true} boxProps={{ width: '100%' }}>
       <Grid container spacing={2}>
-        <Grid item xs={12} lg={7} justifyContent={'space-between'}>
+        <Grid
+          justifyContent={'space-between'}
+          size={{
+            xs: 12,
+            lg: 7
+          }}>
           <Form
             onSubmit={async (namespace) => {
               await alertOnError(
@@ -65,7 +70,10 @@ const PostPage = ({ update }: NamespaceFormPage) => {
             }}
           />
         </Grid>
-        <Grid item lg={2}></Grid>
+        <Grid
+          size={{
+            lg: 2
+          }}></Grid>
       </Grid>
     </AuthenticatedContent>
   );

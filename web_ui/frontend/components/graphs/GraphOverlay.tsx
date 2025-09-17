@@ -76,12 +76,21 @@ export const GraphOverlay = ({ children }: { children: ReactNode }) => {
     <>
       <Box position={'sticky'}>
         <Grid container justifyContent={'space-between'} alignItems={'center'}>
-          <Grid item xs={12} md={'auto'}>
+          <Grid
+            size={{
+              xs: 12,
+              md: 'auto'
+            }}>
             <StringUpdateViewer>
               {graphStart.toFormat(format)} - {graphContext.time.toFormat('f')}
             </StringUpdateViewer>
           </Grid>
-          <Grid item xs={12} md={'auto'} display={'flex'}>
+          <Grid
+            display={'flex'}
+            size={{
+              xs: 12,
+              md: 'auto'
+            }}>
             <Box display={'flex'} m={'auto'}>
               <TimeRangeSelector />
               <DateTimePickerWithArrows />

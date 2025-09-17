@@ -54,10 +54,20 @@ export default function Home() {
   return (
     <Box width={'100%'}>
       <Grid container spacing={2}>
-        <Grid item xs={12} lg={6} xl={5}>
+        <Grid
+          size={{
+            xs: 12,
+            lg: 6,
+            xl: 5
+          }}>
           <Typography variant={'h4'}>Namespace Registry</Typography>
         </Grid>
-        <Grid item xs={12} lg={8} justifyContent={'space-between'}>
+        <Grid
+          justifyContent={'space-between'}
+          size={{
+            xs: 12,
+            lg: 8
+          }}>
           <AuthenticatedContent redirect={true}>
             <Typography variant={'h6'} py={2}>
               Denied Namespaces
@@ -73,7 +83,11 @@ export default function Home() {
             )}
           </AuthenticatedContent>
         </Grid>
-        <Grid item lg={6} xl={8}></Grid>
+        <Grid
+          size={{
+            lg: 6,
+            xl: 8
+          }}></Grid>
       </Grid>
     </Box>
   );
