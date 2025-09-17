@@ -37,7 +37,7 @@ const NamespaceIcon = ({
       default:
         return 24;
     }
-  }, []);
+  }, [size]);
 
   if (serverType == 'namespace') {
     return (

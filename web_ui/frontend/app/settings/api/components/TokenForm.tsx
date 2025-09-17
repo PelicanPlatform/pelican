@@ -57,7 +57,7 @@ const TokenForm = () => {
     setScopes([]);
 
     return token;
-  }, [name, expiration, scopes]);
+  }, [name, expiration, scopes, dispatch]);
 
   return (
     <Box sx={{ mt: 3 }}>

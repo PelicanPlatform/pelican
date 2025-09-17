@@ -88,7 +88,7 @@ export default function Home() {
       timeout && clearTimeout(timeout);
       timer && clearInterval(timer);
     };
-  }, []);
+  }, [nextUrl, router]);
 
   return (
     <AuthenticatedContent

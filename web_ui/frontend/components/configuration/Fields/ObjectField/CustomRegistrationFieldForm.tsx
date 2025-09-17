@@ -66,7 +66,7 @@ const CustomRegistrationFieldForm = ({
     }
 
     onSubmit(objectCopy);
-  }, [customRegistrationField]);
+  }, [customRegistrationField, onSubmit]);
 
   return (
     <>

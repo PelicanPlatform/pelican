@@ -86,7 +86,7 @@ export function Issuer({ metadata }: { metadata: ParameterMetadataRecord }) {
       setPatch({});
       mutate();
     }
-  }, []);
+  }, [mutate, setPatch, setStatus]);
 
   return (
     <Box>

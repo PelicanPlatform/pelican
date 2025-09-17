@@ -1,4 +1,4 @@
-import React, { useContext, useMemo, useState } from 'react';
+import React, { useCallback, useContext, useMemo, useState } from 'react';
 import { Marker } from 'react-map-gl/maplibre';
 import { Storage, TripOrigin } from '@mui/icons-material';
 
@@ -22,9 +22,8 @@ export const ServerMap = ({ servers }: ServerMapProps) => {
     ServerGeneral | ServerDetailed | undefined
   >(undefined);
 
-  const _setActiveServer = (server: ServerGeneral | undefined) => {
+  const _setActiveServer = useCallback((server: ServerGeneral | undefined) => {
     setActiveServer(server);
-
     if (server?.type == 'Origin') {
       alertOnError(
         async () => {
@@ -35,7 +34,7 @@ export const ServerMap = ({ servers }: ServerMapProps) => {
         dispatch
       );
     }
-  };
+  }, [dispatch]);
 
   const serverMarkers = useMemo(() => {
     return servers?.map((server) => {
@@ -49,7 +48,7 @@ export const ServerMap = ({ servers }: ServerMapProps) => {
         />
       );
     });
-  }, [servers]);
+  }, [servers, _setActiveServer]);
 
   return (
     <>

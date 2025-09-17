@@ -36,7 +36,7 @@ const ExportForm = ({ onSubmit, value }: FormProps<Export>) => {
       return;
     }
     onSubmit(storageExport);
-  }, [storageExport]);
+  }, [storageExport, onSubmit]);
 
   return (
     <>

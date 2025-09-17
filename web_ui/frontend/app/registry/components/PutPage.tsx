@@ -107,7 +107,7 @@ const PutPage = ({ update }: NamespaceFormPage) => {
         }
       }
     })();
-  }, []);
+  }, [dispatch]);
 
   return (
     <AuthenticatedContent redirect={true} boxProps={{ width: '100%' }}>

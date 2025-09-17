@@ -62,7 +62,6 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
     return filteredData;
   }, [
     searchedData,
-    search,
     serverError,
     pelicanServer,
     serverDowntime,

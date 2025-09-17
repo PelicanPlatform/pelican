@@ -53,7 +53,7 @@ const LotForm = ({ onSubmit, value }: FormProps<Lot>) => {
       return;
     }
     onSubmit(lot);
-  }, [lot]);
+  }, [lot, onSubmit]);
 
   return (
     <>

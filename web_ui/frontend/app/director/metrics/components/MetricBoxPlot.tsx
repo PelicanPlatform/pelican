@@ -105,7 +105,7 @@ export const BytesMetricBoxPlot = ({
         },
       ],
     };
-  }, [data]);
+  }, [data, compatibleByteData, title]);
 
   return (
     <Chart
@@ -202,7 +202,7 @@ export const MetricBoxPlot = ({
         },
       ],
     };
-  }, [data]);
+  }, [data, title]);
 
   return (
     <Chart

@@ -28,7 +28,7 @@ const StringField = ({
 
   const error = useMemo(
     () => (verify ? verify(bufferValue) : undefined),
-    [bufferValue]
+    [bufferValue, verify]
   );
 
   return (

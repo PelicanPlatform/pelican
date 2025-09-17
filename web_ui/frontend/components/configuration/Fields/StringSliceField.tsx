@@ -59,12 +59,12 @@ const StringSliceField = ({
         onChange(newValue);
       }
     },
-    [onChange, inputValue]
+    [onChange, verify, bufferValue]
   );
 
   const error = useMemo(
     () => (verify ? verify(bufferValue) : undefined),
-    [bufferValue]
+    [bufferValue, verify]
   );
 
   const helperText = useMemo(() => {

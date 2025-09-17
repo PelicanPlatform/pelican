@@ -404,7 +404,7 @@ export const DataExportTable = ({ boxProps }: { boxProps?: BoxProps }) => {
       mutate();
       setPending(false);
     }, 10000);
-  }, []);
+  }, [mutate]);
 
   const dataEnhanced = useMemo(() => {
     // If no from URL return current data

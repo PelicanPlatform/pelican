@@ -36,9 +36,8 @@ const ListCard = ({ value, handleDelete, handleEdit }: ListCardProps) => {
     return data == 'true';
   })();
 
-  const setConfirmDelete = useCallback((value: boolean) => {
-    confirmDelete = value;
-    sessionStorage.setItem('confirmDelete', value.toString());
+  const setConfirmDelete = useCallback((confirm: boolean) => {
+    sessionStorage.setItem('confirmDelete', confirm.toString());
   }, []);
 
   return (
@@ -236,7 +235,7 @@ export function ObjectField<T>({
   >('0px');
 
   // If the value is null lets set it to an empty list to make the objects more uniform
-  const validValue = value || [];
+  const validValue = useMemo(() => value || [], [value]);
 
   const handleChange = useCallback(
     (submittedValue: T) => {
@@ -261,14 +260,14 @@ export function ObjectField<T>({
       newValue = [...newValue, submittedValue];
       onChange(newValue);
     },
-    [validValue, onChange, editValue]
+    [validValue, onChange, editValue, keyGetter]
   );
 
   const sortedValue = useMemo(() => {
     const valueArray = structuredClone(validValue);
     valueArray.sort((a, b) => keyGetter(a).localeCompare(keyGetter(b)));
     return valueArray;
-  }, [validValue]);
+  }, [validValue, keyGetter]);
 
   return (
     <>

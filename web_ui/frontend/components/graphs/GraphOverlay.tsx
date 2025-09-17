@@ -32,7 +32,7 @@ export const GraphOverlay = ({ children }: { children: ReactNode }) => {
 
   const format = useMemo(() => {
     return getFormatString([graphContext.time, graphStart]);
-  }, [graphContext.time, graphContext]);
+  }, [graphContext.time, graphStart]);
 
   const handleKeydown = useCallback((e: KeyboardEvent) => {
     switch (e.key) {
@@ -49,7 +49,7 @@ export const GraphOverlay = ({ children }: { children: ReactNode }) => {
         dispatch({ type: 'decrementRange' });
         break;
     }
-  }, []);
+  }, [dispatch]);
 
   // Capture arrow keys to adjust timeframe
   useEffect(() => {
@@ -59,7 +59,7 @@ export const GraphOverlay = ({ children }: { children: ReactNode }) => {
     return () => {
       document.removeEventListener('keydown', handleKeydown);
     };
-  }, []);
+  }, [dispatch, handleKeydown]);
 
   // Check that time is not a defined url param, update if it isn't
   useEffect(() => {
@@ -70,7 +70,7 @@ export const GraphOverlay = ({ children }: { children: ReactNode }) => {
         dispatch({ type: 'setTime', payload: DateTime.now() });
       }
     }
-  }, []);
+  }, [dispatch]);
 
   return (
     <>
