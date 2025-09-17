@@ -1280,7 +1280,7 @@ func GetLot(lotName string, recursive bool) (*Lot, error) {
 	var lot Lot
 	err := json.Unmarshal(outputBuf, &lot)
 	if err != nil {
-		return nil, errors.Wrap(err, "error unmarshalling lot JSON", err)
+		return nil, errors.Wrap(err, "error unmarshalling lot JSON")
 	}
 	return &lot, nil
 }
