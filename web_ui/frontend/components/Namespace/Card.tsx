@@ -40,7 +40,7 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
     : 'medium';
 
   const dispatch = useContext(AlertDispatchContext);
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLDivElement>(undefined);
   const [transition, setTransition] = useState<boolean>(false);
   const { mutate } = useSWRConfig();
 
@@ -169,11 +169,10 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
             </Box>
           </Box>
         </Box>
-        <Box ref={ref}>
+        <Box>
           <InformationDropdown
             adminMetadata={namespace.admin_metadata}
             transition={transition}
-            parentRef={ref}
           />
         </Box>
       </Paper>
