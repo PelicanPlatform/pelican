@@ -129,6 +129,16 @@ func calculateAllowedScopes(user string, groupsList []string) ([]string, []strin
 						scope = "storage.create"
 					case "modify":
 						scope = "storage.modify"
+					case "collection_read":
+						scope = "collection.read"
+					case "collection_write":
+						scope = "collection.modify"
+					case "collection_create":
+						scope = "collection.create"
+					case "collection_modify":
+						scope = "collection.modify"
+					case "collection_delete":
+						scope = "collection.delete"
 					default:
 						scope = action
 					}
@@ -150,6 +160,16 @@ func calculateAllowedScopes(user string, groupsList []string) ([]string, []strin
 					scope = "storage.create"
 				case "modify":
 					scope = "storage.modify"
+				case "collection_read":
+					scope = "collection.read"
+				case "collection_write":
+					scope = "collection.modify"
+				case "collection_create":
+					scope = "collection.create"
+				case "collection_modify":
+					scope = "collection.modify"
+				case "collection_delete":
+					scope = "collection.delete"
 				default:
 					scope = action
 				}
@@ -213,7 +233,6 @@ func oa4mpProxy(ctx *gin.Context) {
 		allowedScopes, matchedGroups := calculateAllowedScopes(user, groupsList)
 		userInfo["g"] = matchedGroups
 		userInfo["s"] = allowedScopes
-
 		userBytes, err := json.Marshal(userInfo)
 		if err != nil {
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{

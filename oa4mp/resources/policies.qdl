@@ -90,3 +90,4 @@ access_token.'scope' := detokenize(unique(sort(user_scopes. ~ user_scopes_loose.
 remove(access_token.ver);
 access_token.'wlcg.ver' := '1.0';
 access_token.'aud' := 'https://wlcg.cern.ch/jwt/v1/any';
+access_token.'wlcg.groups' := group_list.;

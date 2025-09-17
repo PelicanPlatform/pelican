@@ -41,6 +41,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	pelican_oauth2 "github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -49,6 +50,13 @@ import (
 const (
 	oauthLoginPath    = "/api/v1.0/auth/oauth/login"
 	oauthCallbackPath = "/api/v1.0/auth/oauth/callback"
+)
+
+// Group source types
+const (
+	GroupSourceTypeOIDC     string = "oidc"
+	GroupSourceTypeFile     string = "file"
+	GroupSourceTypeInternal string = "internal"
 )
 
 var (
@@ -166,10 +174,6 @@ func handleOAuthLogin(ctx *gin.Context) {
 
 // Given a user name, return the list of groups they belong to
 func generateGroupInfo(user string) (groups []string, err error) {
-	// Currently, only file-based lookup is supported
-	if param.Issuer_GroupSource.GetString() != "file" {
-		return
-	}
 	groupFile := param.Issuer_GroupFile.GetString()
 	if groupFile == "" {
 		return
@@ -224,7 +228,9 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 	}
 	user = userIdentifier
 
-	if param.Issuer_GroupSource.GetString() == "oidc" {
+	groupSource := strings.ToLower(param.Issuer_GroupSource.GetString())
+	switch groupSource {
+	case GroupSourceTypeOIDC:
 		groupClaim := param.Issuer_OIDCGroupClaim.GetString()
 		groupList, ok := claimsSource[groupClaim]
 		if ok {
@@ -246,10 +252,28 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 				}
 			}
 		}
-	} else {
+	case GroupSourceTypeFile:
 		groups, err = generateGroupInfo(user)
+		if err != nil {
+			return "", nil, err
+		}
+	case GroupSourceTypeInternal:
+		log.Debugf("Getting groups for user %s", user)
+		groupList, err := database.GetMemberGroups(database.ServerDatabase, user)
+		if err != nil {
+			return "", nil, err
+		}
+		groups = make([]string, 0, len(groupList))
+		for _, group := range groupList {
+			groups = append(groups, group.Name)
+		}
+
+	default:
+		err = errors.New("invalid group source: " + groupSource)
+		return "", nil, err
 	}
-	return
+	log.Debugf("Groups for user %s (source=%s): %v", user, groupSource, groups)
+	return user, groups, nil
 }
 
 // Handle the callback request when the user is successfully authenticated.
