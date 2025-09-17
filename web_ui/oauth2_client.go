@@ -257,7 +257,6 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 		if err != nil {
 			return "", nil, err
 		}
-		return user, groups, nil
 	case GroupSourceTypeInternal:
 		log.Debugf("Getting groups for user %s", user)
 		groupList, err := database.GetMemberGroups(database.ServerDatabase, user)
@@ -268,12 +267,12 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 		for _, group := range groupList {
 			groups = append(groups, group.Name)
 		}
-		log.Debugf("Groups for user %s: %v", user, groups)
-		return user, groups, nil
+
 	default:
 		err = errors.New("invalid group source: " + groupSource)
 		return "", nil, err
 	}
+	log.Debugf("Groups for user %s (source=%s): %v", user, groupSource, groups)
 	return user, groups, nil
 }
 
