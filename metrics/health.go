@@ -79,6 +79,7 @@ const (
 	Server_WebUI              HealthStatusComponent = "web-ui"
 	OriginCache_IOConcurrency HealthStatusComponent = "IO-concurrency" // Keep track of whether or active requests are exceeding configured concurrency limits
 	Prometheus                HealthStatusComponent = "prometheus"     // Prometheus server
+	OriginCache_ConfigUpdates HealthStatusComponent = "config-updates" // Track freshness of Authfile and scitokens.cfg
 )
 
 var (
