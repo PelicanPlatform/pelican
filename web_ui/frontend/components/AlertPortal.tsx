@@ -1,4 +1,4 @@
-import { Portal } from '@mui/base';
+import Portal from '@mui/material/Portal';
 import React, { ReactNode } from 'react';
 import {
   Alert,

@@ -17,7 +17,7 @@ import {
   KeyboardArrowUp,
   KeyboardDoubleArrowDown,
 } from '@mui/icons-material';
-import { ClickAwayListener } from '@mui/base';
+import ClickAwayListener from '@mui/material/ClickAwayListener';
 import { isEmpty } from 'lodash';
 
 import ObjectModal from './ObjectModal';
