@@ -10,8 +10,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra/doc"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 )
 
 // copied from generate/next_generator.go
@@ -49,10 +47,17 @@ func generateCLIDocs(outputDir string) error {
 	linkHandler := func(name string) string {
 		// Cobra passes names like "pelican_serve.md"; strip root prefix but keep underscores so we can group by tokens
 		base := strings.TrimSuffix(name, filepath.Ext(name))
+		if base == "pelican" {
+			base = ""
+		} else {
+			base = strings.TrimPrefix(base, "pelican_")
+		}
 		path := strings.ReplaceAll(base, "_", "/")
 		// Must be an absolute path from the site root
-		result := fmt.Sprintf("/%s/%s/", docPathRoot, path)
-		return result
+		if path == "" {
+			return fmt.Sprintf("/%s/", docPathRoot)
+		}
+		return fmt.Sprintf("/%s/%s/", docPathRoot, path)
 	}
 
 	filePrepender := func(filename string) string {
@@ -62,7 +67,7 @@ func generateCLIDocs(outputDir string) error {
 			title = strings.TrimSuffix(base, filepath.Ext(base))
 			title = strings.ReplaceAll(title, "_", " ")
 			title = strings.ReplaceAll(title, "-", " ")
-			title = cases.Title(language.English).String(title)
+			title = strings.ToLower(title)
 		}
 		return fmt.Sprintf("---\ntitle: %s\n---\n\n", title)
 	}
@@ -79,6 +84,10 @@ func generateCLIDocs(outputDir string) error {
 
 	// Group by command tokens: e.g., object/get -> object/get/page.mdx
 	if err := enforceAppRouterLayout(resolvedDir); err != nil {
+		return err
+	}
+
+	if err := generateMetaFiles(resolvedDir); err != nil {
 		return err
 	}
 
@@ -129,8 +138,8 @@ func enforceAppRouterLayout(dir string) error {
 		base := strings.TrimSuffix(name, ".mdx")
 		// Build nested path from underscore-delimited tokens
 		segments := strings.Split(base, "_")
-		if len(segments) == 0 {
-			continue
+		if len(segments) > 0 && segments[0] == "pelican" {
+			segments = segments[1:]
 		}
 		// Create nested directory path
 		targetDir := filepath.Join(append([]string{dir}, segments...)...)
@@ -196,6 +205,55 @@ func fileExists(path string) bool {
 		return false
 	}
 	return !info.IsDir()
+}
+
+func generateMetaFiles(dir string) error {
+	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			return nil
+		}
+
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return err
+		}
+
+		var subdirs []string
+		for _, entry := range entries {
+			if entry.IsDir() {
+				subdirs = append(subdirs, entry.Name())
+			}
+		}
+
+		if len(subdirs) > 0 {
+			metaFilePath := filepath.Join(path, "_meta.js")
+
+			relPath, err := filepath.Rel(dir, path)
+			if err != nil {
+				return err
+			}
+
+			commandPrefix := "pelican"
+			if relPath != "." {
+				commandPrefix += " " + strings.ReplaceAll(relPath, string(filepath.Separator), " ")
+			}
+
+			content := "export default {\n"
+			for _, subdir := range subdirs {
+				title := commandPrefix + " " + subdir
+				content += fmt.Sprintf("    \"%s\": \"%s\",\n", subdir, title)
+			}
+			content += "}\n"
+
+			if err := os.WriteFile(metaFilePath, []byte(content), 0644); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func postProcessMdxFiles(dir string) error {
