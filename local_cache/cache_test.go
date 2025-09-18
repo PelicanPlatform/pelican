@@ -268,10 +268,10 @@ func TestClient(t *testing.T) {
 		_, err := client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
 			filepath.Join(tmpDir, "hello_world.txt"), false, client.WithToken("badtoken"), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
 		assert.Error(t, err)
-		var sce *client.StatusCodeError
-		assert.True(t, errors.As(err, &sce))
-		if sce != nil {
-			assert.Equal(t, int(*sce), http.StatusForbidden)
+		var pde *client.PermissionDeniedError
+		assert.True(t, errors.As(err, &pde))
+		if pde != nil {
+			assert.Contains(t, pde.Error(), "token could not be parsed")
 		}
 	})
 
