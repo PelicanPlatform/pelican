@@ -15,8 +15,8 @@ import { useContext, useMemo } from 'react';
 import { GraphContext } from '@/components/graphs/GraphContext';
 import { DateTime } from 'luxon';
 import { green, red } from '@mui/material/colors';
-import { TimeBar } from '@chtc/web-components';
-import { Point, Range } from '@chtc/web-components/dist/types';
+import TimeBar from '@chtc/web-components/TimeBar';
+import { Point, Range } from '@chtc/web-components/types';
 import useSWR from 'swr';
 import {
   Alert,
