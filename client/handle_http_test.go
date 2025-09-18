@@ -29,6 +29,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"io/fs"
 	"math/big"
@@ -57,8 +58,6 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
-	"github.com/pelicanplatform/pelican/token"
-	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 func TestMain(m *testing.M) {
@@ -2259,25 +2258,10 @@ func TestPermissionDeniedError(t *testing.T) {
 	}
 
 	t.Run("expired-token", func(t *testing.T) {
-		tokenConfig := token.NewWLCGToken()
-		tokenConfig.Lifetime = time.Minute
-		tokenConfig.Issuer = svrURL.String()
-		tokenConfig.Subject = "origin"
-		tokenConfig.AddAudienceAny()
-
-		scopes := []token_scopes.TokenScope{}
-		readScope, err := token_scopes.Wlcg_Storage_Read.Path("/")
-		assert.NoError(t, err)
-		scopes = append(scopes, readScope)
-		modScope, err := token_scopes.Wlcg_Storage_Modify.Path("/")
-		assert.NoError(t, err)
-		scopes = append(scopes, modScope)
-		tokenConfig.AddScopes(scopes...)
-
-		tokenConfig.Lifetime = time.Second * 3
-		tkn, err := tokenConfig.CreateToken()
-		assert.NoError(t, err)
-		transfer.job.token.SetToken(tkn)
+		expiredTime := time.Now().Add(-time.Hour)
+		expiredJWT := fmt.Sprintf(`{"alg":"none","typ":"JWT"}.{"exp":%d,"iat":%d,"sub":"test"}.`,
+			expiredTime.Unix(), expiredTime.Add(-time.Hour).Unix())
+		transfer.job.token.SetToken(expiredJWT)
 
 		time.Sleep(time.Second * 4) // Sleep for longer than the token lifetime
 		res, err := downloadObject(transfer)
