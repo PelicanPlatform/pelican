@@ -2237,13 +2237,14 @@ func TestPermissionDeniedError(t *testing.T) {
 	svrURL, err := url.Parse(svr.URL)
 	require.NoError(t, err)
 
+	remoteURL := &pelican_url.PelicanURL{
+		Scheme: "pelican://",
+		Host:   svrURL.Host,
+		Path:   svrURL.Path + "/test.txt",
+	}
 	tj := &TransferJob{
-		remoteURL: &pelican_url.PelicanURL{
-			Scheme: "pelican://",
-			Host:   svrURL.Host,
-			Path:   svrURL.Path + "/test.txt",
-		},
-		token: NewTokenGenerator(nil, nil, config.TokenSharedRead, false),
+		remoteURL: remoteURL,
+		token:     NewTokenGenerator(remoteURL, nil, config.TokenSharedRead, false),
 	}
 	transfer := &transferFile{
 		ctx:       context.Background(),
