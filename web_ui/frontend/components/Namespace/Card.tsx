@@ -149,18 +149,18 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
                       size={size}
                       color={'error'}
                       onClick={(e) => e.stopPropagation()}
-											onConfirm={async (e) => {
-												e.stopPropagation()
-												await alertOnError(
-													async () => await deleteNamespace(namespace.id),
-													'Could Not Delete Registration',
-													dispatch
-												);
-												await mutate(NAMESPACE_KEY);
-												if (onUpdate) {
-													onUpdate();
-												}
-											}}
+                      onConfirm={async (e) => {
+                        e.stopPropagation();
+                        await alertOnError(
+                          async () => await deleteNamespace(namespace.id),
+                          'Could Not Delete Registration',
+                          dispatch
+                        );
+                        await mutate(NAMESPACE_KEY);
+                        if (onUpdate) {
+                          onUpdate();
+                        }
+                      }}
                     >
                       <Delete fontSize={size} />
                     </ConfirmButton>

@@ -13,7 +13,7 @@ import {
   NAMESPACE_KEY,
 } from '@/helpers/api';
 import { alertOnError } from '@/helpers/util';
-import ConfirmButton from "@chtc/web-components/ConfirmButton";
+import ConfirmButton from '@chtc/web-components/ConfirmButton';
 
 export interface DeniedCardProps {
   namespace: RegistryNamespace;
@@ -80,22 +80,22 @@ export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
               {authenticated?.role == 'admin' && (
                 <>
                   <Tooltip title={'Delete Registration'}>
-										<ConfirmButton
-											sx={{ bgcolor: '#ff00001a', mx: 1 }}
-											color={'error'}
-											onClick={(e) => e.stopPropagation()}
-											onConfirm={async (e) => {
-												e.stopPropagation()
-												await alertOnError(
-													async () => await deleteNamespace(namespace.id),
-													'Could Not Delete Registration',
-													dispatch
-												);
-												await mutate(NAMESPACE_KEY);
-											}}
-										>
-											<Delete />
-										</ConfirmButton>
+                    <ConfirmButton
+                      sx={{ bgcolor: '#ff00001a', mx: 1 }}
+                      color={'error'}
+                      onClick={(e) => e.stopPropagation()}
+                      onConfirm={async (e) => {
+                        e.stopPropagation();
+                        await alertOnError(
+                          async () => await deleteNamespace(namespace.id),
+                          'Could Not Delete Registration',
+                          dispatch
+                        );
+                        await mutate(NAMESPACE_KEY);
+                      }}
+                    >
+                      <Delete />
+                    </ConfirmButton>
                   </Tooltip>
                   <Tooltip title={'Approve Registration'}>
                     <IconButton
