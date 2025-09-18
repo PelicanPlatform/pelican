@@ -1,0 +1,15 @@
+export default {
+    "cache": "pelican cache",
+    "config": "pelican config",
+    "credentials": "pelican credentials",
+    "director": "pelican director",
+    "downtime": "pelican downtime",
+    "generate": "pelican generate",
+    "key": "pelican key",
+    "namespace": "pelican namespace",
+    "object": "pelican object",
+    "origin": "pelican origin",
+    "plugin": "pelican plugin",
+    "registry": "pelican registry",
+    "token": "pelican token",
+}
