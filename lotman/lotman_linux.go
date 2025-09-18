@@ -309,7 +309,7 @@ func GetAuthorizedCallers(lotName string) (*[]string, error) {
 	ret := LotmanGetLotParents(lotName, false, true, &cParents, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
-		return nil, errors.Errorf("Failed to determine %s's parents: %s", lotName, string(errMsg))
+		return nil, errors.Errorf("failed to determine %s's parents: %s", lotName, string(errMsg))
 	}
 
 	parents := cArrToGoArr(&cParents)
@@ -321,7 +321,7 @@ func GetAuthorizedCallers(lotName string) (*[]string, error) {
 		LotmanGetLotOwners(parent, true, &cOwners, &errMsg)
 		if ret != 0 {
 			trimBuf(&errMsg)
-			return nil, errors.Errorf("Failed to determine appropriate owners of %s's parents: %s", lotName, string(errMsg))
+			return nil, errors.Errorf("failed to determine appropriate owners of %s's parents: %s", lotName, string(errMsg))
 		}
 
 		for _, owner := range cArrToGoArr(&cOwners) {
@@ -907,7 +907,7 @@ func ensureLotExistsOrUpdate(lotName string, initializedLots []Lot, federationIs
 				// Get the lot from the lot database to see if it needs updating
 				existingLot, err := GetLot(lotName, false)
 				if err != nil {
-					log.Errorf("unable to get lot %s to check for updates: %v", lotName, err)
+					log.Errorf("Unable to get lot %s to check for updates: %v", lotName, err)
 					return false, fmt.Errorf("unable to get lot %s to check for updates: %v", lotName, err)
 				}
 
@@ -1239,7 +1239,7 @@ func CreateLot(newLot *Lot, caller string) error {
 	// Marshal the JSON into a string for the C function
 	lotJSON, err := json.Marshal(*newLot)
 	if err != nil {
-		return errors.Wrapf(err, "error marshalling lot JSON: %v", err)
+		return errors.Wrap(err, "error marshalling lot JSON")
 	}
 
 	// Set the context to the incoming lot's owner:
@@ -1249,14 +1249,14 @@ func CreateLot(newLot *Lot, caller string) error {
 	ret := LotmanSetContextStr("caller", caller, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
-		return fmt.Errorf(fmt.Sprintf("error creating lot: %s", string(errMsg)))
+		return fmt.Errorf("error creating lot: %s", string(errMsg))
 	}
 
 	// Now finally add the lot
 	ret = LotmanAddLot(string(lotJSON), &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
-		return fmt.Errorf(fmt.Sprintf("error creating lot: %s", string(errMsg)))
+		return fmt.Errorf("error creating lot: %s", string(errMsg))
 	}
 
 	return nil
@@ -1280,7 +1280,7 @@ func GetLot(lotName string, recursive bool) (*Lot, error) {
 	var lot Lot
 	err := json.Unmarshal(outputBuf, &lot)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error unmarshalling lot JSON: %v", err)
+		return nil, errors.Wrap(err, "error unmarshalling lot JSON")
 	}
 	return &lot, nil
 }
@@ -1319,7 +1319,7 @@ func UpdateLot(lotUpdate *LotUpdate, caller string) error {
 	// Marshal the JSON into a string for the C function
 	updateJSON, err := json.Marshal(*lotUpdate)
 	if err != nil {
-		return errors.Wrapf(err, "error marshalling lot JSON: %v", err)
+		return errors.Wrap(err, "error marshalling lot JSON")
 	}
 
 	errMsg := make([]byte, 2048)
@@ -1328,13 +1328,13 @@ func UpdateLot(lotUpdate *LotUpdate, caller string) error {
 	ret := LotmanSetContextStr("caller", caller, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
-		return fmt.Errorf(fmt.Sprintf("error setting caller for lot update: %s", string(errMsg)))
+		return fmt.Errorf("error setting caller for lot update: %s", string(errMsg))
 	}
 
 	ret = LotmanUpdateLot(string(updateJSON), &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
-		return fmt.Errorf(fmt.Sprintf("error updating lot: %s", string(errMsg)))
+		return fmt.Errorf("error updating lot: %s", string(errMsg))
 	}
 
 	return nil
@@ -1361,7 +1361,7 @@ func AddToLot(lotAddition *LotAddition, caller string) error {
 	// Marshal the JSON into a string for the C function
 	additionsJSON, err := json.Marshal(*lotAddition)
 	if err != nil {
-		return errors.Wrapf(err, "error marshalling lot addition JSON: %v", err)
+		return errors.Wrap(err, "error marshalling lot addition JSON")
 	}
 
 	errMsg := make([]byte, 2048)
@@ -1370,13 +1370,13 @@ func AddToLot(lotAddition *LotAddition, caller string) error {
 	ret := LotmanSetContextStr("caller", caller, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
-		return fmt.Errorf(fmt.Sprintf("error setting caller for lot update: %s", string(errMsg)))
+		return fmt.Errorf("error setting caller for lot update: %s", string(errMsg))
 	}
 
 	ret = LotmanAddToLot(string(additionsJSON), &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
-		return fmt.Errorf(fmt.Sprintf("error adding to lot: %s", string(errMsg)))
+		return fmt.Errorf("error adding to lot: %s", string(errMsg))
 	}
 
 	return nil
@@ -1398,7 +1398,7 @@ func RemoveLotParents(parentsRemoval *LotParentRemoval, caller string) error {
 	// Marshal the JSON into a string for the C function
 	parentRemovalJSON, err := json.Marshal(*parentsRemoval)
 	if err != nil {
-		return errors.Wrapf(err, "error marshalling lot parents removal JSON: %v", err)
+		return errors.Wrap(err, "error marshalling lot parents removal JSON")
 	}
 
 	errMsg := make([]byte, 2048)
@@ -1407,13 +1407,13 @@ func RemoveLotParents(parentsRemoval *LotParentRemoval, caller string) error {
 	ret := LotmanSetContextStr("caller", caller, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
-		return fmt.Errorf(fmt.Sprintf("error setting caller for lot parents removal: %s", string(errMsg)))
+		return fmt.Errorf("error setting caller for lot parents removal: %s", string(errMsg))
 	}
 
 	ret = LotmanRemoveLotParents(string(parentRemovalJSON), &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
-		return fmt.Errorf(fmt.Sprintf("error adding removing parents from lot: %s", string(errMsg)))
+		return fmt.Errorf("error adding removing parents from lot: %s", string(errMsg))
 	}
 
 	return nil
@@ -1434,7 +1434,7 @@ func RemoveLotPaths(pathsRemoval *LotPathRemoval, caller string) error {
 	// Marshal the JSON into a string for the C function
 	pathRemovalJSON, err := json.Marshal(*pathsRemoval)
 	if err != nil {
-		return errors.Wrapf(err, "error marshalling lot paths removal JSON: %v", err)
+		return errors.Wrap(err, "error marshalling lot paths removal JSON")
 	}
 
 	errMsg := make([]byte, 2048)
@@ -1443,13 +1443,13 @@ func RemoveLotPaths(pathsRemoval *LotPathRemoval, caller string) error {
 	ret := LotmanSetContextStr("caller", caller, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
-		return fmt.Errorf(fmt.Sprintf("error setting caller for lot paths removal: %s", string(errMsg)))
+		return fmt.Errorf("error setting caller for lot paths removal: %s", string(errMsg))
 	}
 
 	ret = LotmanRemoveLotPaths(string(pathRemovalJSON), &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
-		return fmt.Errorf(fmt.Sprintf("error adding removing paths from lot: %s", string(errMsg)))
+		return fmt.Errorf("error adding removing paths from lot: %s", string(errMsg))
 	}
 
 	return nil
@@ -1465,14 +1465,14 @@ func DeleteLotsRecursive(lotName string, caller string) error {
 	ret := LotmanSetContextStr("caller", caller, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
-		return fmt.Errorf(fmt.Sprintf("Error creating lot: %s", string(errMsg)))
+		return fmt.Errorf("error creating lot: %s", string(errMsg))
 	}
 
 	// We've set the caller, now try to delete the lots
 	ret = LotmanDeleteLotsRecursive(lotName, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
-		return fmt.Errorf(fmt.Sprintf("Error deleting lots: %s", string(errMsg)))
+		return fmt.Errorf("error deleting lots: %s", string(errMsg))
 	}
 
 	return nil
