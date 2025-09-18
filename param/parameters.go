@@ -378,6 +378,7 @@ var (
 	Director_EnableBroker = BoolParam{"Director.EnableBroker"}
 	Director_EnableOIDC = BoolParam{"Director.EnableOIDC"}
 	Director_EnableStat = BoolParam{"Director.EnableStat"}
+	Director_FilterCachesInErrorState = BoolParam{"Director.FilterCachesInErrorState"}
 	DisableHttpProxy = BoolParam{"DisableHttpProxy"}
 	DisableProxyFallback = BoolParam{"DisableProxyFallback"}
 	Issuer_OIDCPreferClaimsFromIDToken = BoolParam{"Issuer.OIDCPreferClaimsFromIDToken"}

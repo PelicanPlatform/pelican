@@ -1820,6 +1820,17 @@ type: string
 default: distance
 components: ["director"]
 ---
+name: Director.FilterCachesInErrorState
+description: |+
+  If true, the Director will filter out any caches that report a health status worse than "warning" when deciding which
+  caches might fulfill a client request. This filter is independent of the cache sorting method, and is applied before sorting.
+
+  This knob is meant mostly to aid in unit testing, where it has been tricky to start all tests with healthy services.
+type: bool
+default: true
+hidden: true
+components: ["director"]
+---
 name: Director.AdaptiveSortEWMATimeConstant
 description: |+
   The time constant used for calculating alpha in the Director's EWMA smoothing of server status weights.

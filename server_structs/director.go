@@ -140,8 +140,9 @@ type (
 		URL                    url.URL           `json:"url"`        // This is server's XRootD URL for file transfer
 		WebURL                 url.URL           `json:"web_url"`    // This is server's Web interface and API
 		Type                   string            `json:"type"`
-		Latitude               float64           `json:"latitude"`
-		Longitude              float64           `json:"longitude"`
+		Latitude               float64           `json:"latitude"`  // Should be replaced by Coordinate
+		Longitude              float64           `json:"longitude"` // Should be replaced by Coordinate
+		Coordinate             Coordinate        `json:"coordinate"`
 		Caps                   Capabilities      `json:"capabilities"`
 		FromTopology           bool              `json:"from_topology"`
 		IOLoad                 float64           `json:"io_load"`
@@ -240,21 +241,31 @@ type (
 		VaultServer   *url.URL
 	}
 
+	CoordinateSource string // For indicating where we got a coordinate from, e.g. maxmind, override, random assignment, etc.
+
+	Coordinate struct {
+		Lat            float64          `mapstructure:"lat"`
+		Long           float64          `mapstructure:"long"`
+		AccuracyRadius uint16           `mapstructure:"accuracyRadius"`
+		Source         CoordinateSource `mapstructure:"source"`
+		FromTTLCache   bool             `mapstructure:"fromTtlCache"` // only used for random assignments when we're grabbing from the cache
+	}
+
 	ClientRedirectInfo struct {
-		Lat           float64 `json:"lat"`
-		Lon           float64 `json:"lon"`
-		GeoIpRadiusKm uint16  `json:"geoIpRadiusKm"` // 0 will indicate no radius (i.e. no resolution)
-		Resolved      bool    `json:"resolved"`      // whether or not the client IP was resolved by MaxMind
-		FromTTLCache  bool    `json:"fromTtlcache"`  // whether we're using a cached value
-		IpAddr        string  `json:"ipAddr"`
+		Coordinate Coordinate
+		IpAddr     string `json:"ipAddr"`
+	}
+
+	RedirectWeights struct {
+		DistanceWeight     float64 `json:"distanceWeight"`
+		IOLoadWeight       float64 `json:"ioLoadWeight"`
+		StatusWeight       float64 `json:"statusWeight"`
+		AvailabilityWeight float64 `json:"availabilityWeight"`
 	}
 
 	ServerRedirectInfo struct {
-		Lat          float64 `json:"lat"`
-		Lon          float64 `json:"lon"`
-		HasObject    string  `json:"hasObject"`
-		LoadWeight   float64 `json:"loadWeight"`
-		StatusWeight float64 `json:"statusWeight"` // The current EWMA-derived weight for this server's status, populated by the Director
+		Coordinate      Coordinate
+		RedirectWeights RedirectWeights
 	}
 
 	RedirectInfo struct {
@@ -284,6 +295,12 @@ var (
 
 	// Counter for the current server ad generation ID
 	generationID atomic.Uint64
+)
+
+const (
+	CoordinateSourceOverride = "override"
+	CoordinateSourceRandom   = "random"
+	CoordinateSourceMaxMind  = "maxmind"
 )
 
 const (
@@ -409,7 +426,7 @@ const (
 )
 
 const (
-	// SortType for sorting the server ads
+	// SortType for server ad sorting algorithms
 	DistanceType        SortType = "distance"
 	DistanceAndLoadType SortType = "distanceAndLoad"
 	RandomType          SortType = "random"
@@ -419,6 +436,10 @@ const (
 	AdAfterTrue    AdAfter = 1 // The ad was generated after the compared one
 	AdAfterUnknown AdAfter = 2 // One of the ads in the comparison is missing necessary attributes to determine when it was generated
 )
+
+func (st SortType) String() string {
+	return string(st)
+}
 
 func IsValidStrategy(strategy string) bool {
 	switch StrategyType(strategy) {

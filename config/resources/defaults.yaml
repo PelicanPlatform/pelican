@@ -36,6 +36,7 @@ Server:
 Director:
   DefaultResponse: cache
   CacheSortMethod: "distance"
+  FilterCachesInErrorState: true
   AdaptiveSortEWMATimeConstant: 5m
   MinStatResponse: 1
   MaxStatResponse: 1

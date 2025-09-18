@@ -96,6 +96,7 @@ type Config struct {
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
 		EnableStat bool `mapstructure:"enablestat" yaml:"EnableStat"`
 		FedTokenLifetime time.Duration `mapstructure:"fedtokenlifetime" yaml:"FedTokenLifetime"`
+		FilterCachesInErrorState bool `mapstructure:"filtercachesinerrorstate" yaml:"FilterCachesInErrorState"`
 		FilteredServers []string `mapstructure:"filteredservers" yaml:"FilteredServers"`
 		GeoIPLocation string `mapstructure:"geoiplocation" yaml:"GeoIPLocation"`
 		MaxMindKeyFile string `mapstructure:"maxmindkeyfile" yaml:"MaxMindKeyFile"`
@@ -463,6 +464,7 @@ type configWithType struct {
 		EnableOIDC struct { Type string; Value bool }
 		EnableStat struct { Type string; Value bool }
 		FedTokenLifetime struct { Type string; Value time.Duration }
+		FilterCachesInErrorState struct { Type string; Value bool }
 		FilteredServers struct { Type string; Value []string }
 		GeoIPLocation struct { Type string; Value string }
 		MaxMindKeyFile struct { Type string; Value string }
