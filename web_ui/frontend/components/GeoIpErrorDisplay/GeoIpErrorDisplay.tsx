@@ -1,3 +1,5 @@
+'use client';
+
 /**
  * Table printing out the errors that occurred during the GeoIP lookup.
  */

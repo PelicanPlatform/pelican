@@ -21,7 +21,7 @@
 import { Box, Grid, Skeleton, Typography } from '@mui/material';
 import { useContext, useMemo } from 'react';
 import useSWR from 'swr';
-import { DirectorCardList, GeoIpErrorTable } from './components';
+import { DirectorCardList } from './components';
 import { getUser } from '@/helpers/login';
 import FederationOverview from '@/components/FederationOverview';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
