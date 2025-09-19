@@ -424,6 +424,7 @@ var (
 	Topology_DisableDowntime = BoolParam{"Topology.DisableDowntime"}
 	Topology_DisableOriginX509 = BoolParam{"Topology.DisableOriginX509"}
 	Topology_DisableOrigins = BoolParam{"Topology.DisableOrigins"}
+	Xrootd_AutoShutdownEnabled = BoolParam{"Xrootd.AutoShutdownEnabled"}
 	Xrootd_EnableLocalMonitoring = BoolParam{"Xrootd.EnableLocalMonitoring"}
 )
 
@@ -431,6 +432,7 @@ var (
 	Cache_DefaultCacheTimeout = DurationParam{"Cache.DefaultCacheTimeout"}
 	Cache_EvictionMonitoringInterval = DurationParam{"Cache.EvictionMonitoringInterval"}
 	Cache_SelfTestInterval = DurationParam{"Cache.SelfTestInterval"}
+	Cache_SelfTestMaxAge = DurationParam{"Cache.SelfTestMaxAge"}
 	Client_SlowTransferRampupTime = DurationParam{"Client.SlowTransferRampupTime"}
 	Client_SlowTransferWindow = DurationParam{"Client.SlowTransferWindow"}
 	Client_StoppedTransferTimeout = DurationParam{"Client.StoppedTransferTimeout"}
@@ -449,6 +451,7 @@ var (
 	Monitoring_TokenExpiresIn = DurationParam{"Monitoring.TokenExpiresIn"}
 	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
 	Origin_SelfTestInterval = DurationParam{"Origin.SelfTestInterval"}
+	Origin_SelfTestMaxAge = DurationParam{"Origin.SelfTestMaxAge"}
 	Registry_InstitutionsUrlReloadMinutes = DurationParam{"Registry.InstitutionsUrlReloadMinutes"}
 	Server_AdLifetime = DurationParam{"Server.AdLifetime"}
 	Server_AdvertisementInterval = DurationParam{"Server.AdvertisementInterval"}
@@ -462,6 +465,7 @@ var (
 	Transport_ResponseHeaderTimeout = DurationParam{"Transport.ResponseHeaderTimeout"}
 	Transport_TLSHandshakeTimeout = DurationParam{"Transport.TLSHandshakeTimeout"}
 	Xrootd_AuthRefreshInterval = DurationParam{"Xrootd.AuthRefreshInterval"}
+	Xrootd_ConfigUpdateFailureTimeout = DurationParam{"Xrootd.ConfigUpdateFailureTimeout"}
 	Xrootd_HttpMaxDelay = DurationParam{"Xrootd.HttpMaxDelay"}
 	Xrootd_MaxStartupWait = DurationParam{"Xrootd.MaxStartupWait"}
 	Xrootd_ShutdownTimeout = DurationParam{"Xrootd.ShutdownTimeout"}

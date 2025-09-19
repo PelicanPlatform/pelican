@@ -216,6 +216,15 @@ type (
 	}
 )
 
+type xrootdMaintenanceState struct {
+	lastAuthfileSuccess  time.Time
+	lastScitokensSuccess time.Time
+	authfileFailures     int
+	scitokensFailures    int
+	// Mutex is not needed because the XRootD maintenance callback is executed in a single goroutine,
+	// so there’s no concurrent access to this state
+}
+
 // CheckOriginXrootdEnv is almost a misnomer -- it does both checking and configuring. In partcicular,
 // it is responsible for setting up the exports and handling all the symlinking we use
 // to export our directories.
@@ -694,6 +703,11 @@ func dropPrivilegeCopy(server server_structs.XRootDServer) error {
 // Launch a separate goroutine that performs the XRootD maintenance tasks.
 // For maintenance that is periodic, `sleepTime` is the maintenance period.
 func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDServer, sleepTime time.Duration) {
+	state := &xrootdMaintenanceState{
+		// This initial set-to-now is a grace baseline to avoid tripping the timeout before the first successful cycle
+		lastAuthfileSuccess:  time.Now(),
+		lastScitokensSuccess: time.Now(),
+	}
 	server_utils.LaunchWatcherMaintenance(
 		ctx,
 		[]string{
@@ -720,22 +734,60 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 				log.Debugln("Successfully updated the Xrootd TLS certificates")
 			}
 			lastErr := err
+
+			// Emit authfile and track success/failure
 			if err := EmitAuthfile(server, false); err != nil {
+				state.authfileFailures += 1
+				elapsed := time.Since(state.lastAuthfileSuccess)
 				if lastErr != nil {
 					log.Errorln("Failure when generating authfile:", err)
 				}
+				log.Debugf("Authfile update has failed %d times in a row; last success was %s ago", state.authfileFailures, elapsed.String())
 				lastErr = err
 			} else {
+				state.lastAuthfileSuccess = time.Now()
+				state.authfileFailures = 0
 				log.Debugln("Successfully updated the Xrootd authfile")
 			}
+
+			// Emit scitokens config and track success/failure
 			if err := EmitScitokensConfig(server); err != nil {
+				state.scitokensFailures += 1
+				elapsed := time.Since(state.lastScitokensSuccess)
 				if lastErr != nil {
 					log.Errorln("Failure when emitting the scitokens.cfg:", err)
 				}
+				log.Debugf("Scitokens config update has failed %d times in a row; last success was %s ago", state.scitokensFailures, elapsed.String())
 				lastErr = err
 			} else {
+				state.lastScitokensSuccess = time.Now()
+				state.scitokensFailures = 0
 				log.Debugln("Successfully updated the Xrootd scitokens configuration")
 			}
+
+			// Health reporting and auto-shutdown check
+			oldest := state.lastAuthfileSuccess
+			if state.lastScitokensSuccess.Before(oldest) {
+				oldest = state.lastScitokensSuccess
+			}
+			authFails := state.authfileFailures
+			sciFails := state.scitokensFailures
+
+			age := time.Since(oldest)
+			timeout := param.Xrootd_ConfigUpdateFailureTimeout.GetDuration()
+
+			if authFails == 0 && sciFails == 0 {
+				metrics.SetComponentHealthStatus(metrics.OriginCache_ConfigUpdates, metrics.StatusOK, "Authfile and scitoken.cfg file updated successfully")
+			} else if age < timeout {
+				metrics.SetComponentHealthStatus(metrics.OriginCache_ConfigUpdates, metrics.StatusWarning, "Authfile and/or scitoken.cfg file update failures observed; within timeout")
+			} else {
+				metrics.SetComponentHealthStatus(metrics.OriginCache_ConfigUpdates, metrics.StatusCritical, "Authfile and/or scitoken.cfg file stale beyond timeout; initiating shutdown if enabled")
+				if param.Xrootd_AutoShutdownEnabled.GetBool() {
+					log.Errorf("XRootD authfile and/or scitoken.cfg file not updated for %s (timeout: %s); initiating auto-shutdown", age.String(), timeout.String())
+					config.ShutdownFlag <- true
+				}
+			}
+
 			return lastErr
 		},
 	)

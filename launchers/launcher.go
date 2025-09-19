@@ -406,6 +406,7 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	egrp.Go(func() error {
 		_ = config.RestartFlag
+		_ = config.ShutdownFlag
 		log.Debug("Will shutdown process on signal")
 		sigs := make(chan os.Signal, 1)
 		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
@@ -430,6 +431,10 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 				handleGracefulShutdown(ctx, modules, servers)
 				shutdownCancel()
 				return ErrRestart
+			case <-config.ShutdownFlag:
+				log.Warningf("Received shutdown request; will shutdown the process")
+				shutdownCancel()
+				return ErrExitOnSignal
 			case <-ctx.Done():
 				return nil
 			}
