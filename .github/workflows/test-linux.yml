@@ -63,6 +63,8 @@ jobs:
           ${{ runner.os }}-go-
     - name: Test
       run: |
+        mkdir -p web_ui/frontend/out
+        touch web_ui/frontend/out/placeholder
         make web-build
         # Disabling until we are able to make it more reliable -- shouldn't punish other folks for challenging tests!
         #go test      -timeout 15m -coverpkg=./director -covermode=count -coverprofile=${{ matrix.coverprofile }} -tags=${{ matrix.tags }} ./director -run TestStatMemory

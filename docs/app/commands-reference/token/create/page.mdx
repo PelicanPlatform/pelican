@@ -1,0 +1,51 @@
+---
+title: pelican token create
+---
+
+## pelican token create
+
+Create a token
+
+```
+pelican token create <pelican-url> [flags]
+```
+
+### Examples
+
+```
+To create a read/write token for /some/namespace/path in OSDF: pelican token create --read --write pelican://osg-htc.org/some/namespace/path
+```
+
+### Options
+
+```
+  -a, --audience string         Specify the token's 'audience/aud' claim. If not provided, the equivalent 'any' audience for the selected profile will be used (e.g. 'https://wlcg.cern.ch/jwt/v1/any' for the 'wlcg' profile).
+  -h, --help                    help for create
+  -i, --issuer string           Set the token's 'issuer/iss' claim. If not provided, the issuer will be discovered via the Director.
+  -l, --lifetime int            Set the token's lifetime in seconds. (default 1200)
+  -m, --modify                  Indicate the requested token should provide the ability to modify/delete the specified resource.
+  -k, --private-key string      Path to the private key used to sign the token. If not provided, Pelican will look for the private key in the default location pointed to by the 'IssuerKeysDirectory' config parameter.
+  -p, --profile string          Create a token with a specific JWT profile. Accepted values are scitokens2 and wlcg. (default "wlcg")
+      --raw-claim stringArray   Set claims to be added to the token. Format: <claim_key>=<claim_value>.
+      --raw-scope stringArray   Set non-typical values for the token's 'scope' claim. Scopes should be space-separated, e.g. 'storage.read:/ storage.create:/'.
+  -r, --read                    Indicate the requested token should provide the ability to read the specified resource.
+      --scope-path string       Specify the path to use when creating the token's scopes. This should generally be the object path without the namespace prefix.
+  -s, --stage                   Indicate the requested token should provide the ability to stage the specified resource.
+      --subject string          Set token's 'subject/sub' claim. If not provided, the current user will be used as the default subject.
+  -w, --write                   Indicate the requested token should provide the ability to create/write the specified resource. Does not grant the ability to overwrite/modify existing resources.
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug logs
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican token](/commands-reference/token/)	 - Interact with tokens used to interact with objects in Pelican
