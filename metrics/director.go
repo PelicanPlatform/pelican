@@ -129,12 +129,12 @@ var (
 	PelicanDirectorMaxMindServerErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_maxmind_server_errors_total",
 		Help: "The total number of errors encountered trying to resolve server coordinates using the GeoIP MaxMind database",
-	}, []string{"network", "server_name"})
+	}, []string{"network", "name"})
 
 	PelicanDirectorMaxMindClientErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_maxmind_client_errors_total",
 		Help: "The total number of errors encountered trying to resolve client coordinates using the GeoIP MaxMind database",
-	}, []string{"network", "project"})
+	}, []string{"network", "name"})
 
 	PelicanDirectorRejectedAdvertisements = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_rejected_advertisements",

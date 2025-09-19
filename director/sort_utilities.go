@@ -366,8 +366,8 @@ func getServerCoordinate(sAd server_structs.ServerAd) (coord server_structs.Coor
 		}
 
 		labels := prometheus.Labels{
-			"network":     network,
-			"server_name": sAd.Name,
+			"network": network,
+			"name":    sAd.Name,
 		}
 		metrics.PelicanDirectorMaxMindServerErrorsTotal.With(labels).Inc()
 	}
@@ -403,7 +403,7 @@ func getClientCoordinate(ctx context.Context, addr netip.Addr) (coord server_str
 		proj := getProjectLabel(ctx)
 		labels := prometheus.Labels{
 			"network": network,
-			"project": proj,
+			"name":    proj,
 		}
 		metrics.PelicanDirectorMaxMindClientErrorsTotal.With(labels).Inc()
 	}
