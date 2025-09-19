@@ -48,7 +48,7 @@ require (
 	go.uber.org/atomic v1.11.0
 	golang.org/x/crypto v0.36.0
 	golang.org/x/net v0.38.0
-	golang.org/x/oauth2 v0.25.0
+	golang.org/x/oauth2 v0.27.0
 	golang.org/x/term v0.30.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/gorm v1.25.7
