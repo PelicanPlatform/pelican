@@ -39,7 +39,7 @@ const GeoIpErrorDisplay = () => {
     getLastOverDay('pelican_director_maxmind_client_errors_total')
   );
 
-  const [activeView, setActiveView] = useState<'server' | 'client'>('server');
+  const [activeView, setActiveView] = useState<MetricVariant>('server');
 
   const {
     data: config,

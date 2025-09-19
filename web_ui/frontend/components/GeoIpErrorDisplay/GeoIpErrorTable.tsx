@@ -12,12 +12,14 @@ import { GeoIPOverride } from '@/components/configuration';
 import { VectorResult } from '@/components';
 
 import StyledTableCell from './StyledTableCell';
+import { MetricVariant } from './types';
 
 interface GeoIpErrorTableProps {
   ipErrors: VectorResult[] | undefined;
   setIp: (ip: string) => void;
   setOpenForm: (open: boolean) => void;
   geoIpOverrides: Record<string, GeoIPOverride>;
+  variant: MetricVariant;
 }
 
 const GeoIpErrorTable = ({
@@ -25,7 +27,12 @@ const GeoIpErrorTable = ({
   setIp,
   setOpenForm,
   geoIpOverrides,
+  variant,
 }: GeoIpErrorTableProps) => {
+  const entityLabel = variant === 'server' ? 'Server' : 'Project';
+  const entityGetter = (v: VectorResult) =>
+    v.metric?.[variant === 'server' ? 'server_name' : 'project'];
+
   return (
     <TableContainer sx={{ maxHeight: 250 }}>
       <Table
@@ -37,7 +44,7 @@ const GeoIpErrorTable = ({
         <TableHead>
           <TableRow>
             <StyledTableCell>Un-located Network</StyledTableCell>
-            <StyledTableCell align='right'>Name</StyledTableCell>
+            <StyledTableCell align='right'>{entityLabel}</StyledTableCell>
             <StyledTableCell align={'right'}># of Errors</StyledTableCell>
             <StyledTableCell align='right'>Locate</StyledTableCell>
           </TableRow>
@@ -50,7 +57,7 @@ const GeoIpErrorTable = ({
                 sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
               >
                 <TableCell>{row.metric?.network}</TableCell>
-                <TableCell align='right'>{row.metric?.name}</TableCell>
+                <TableCell align='right'>{entityGetter(row)}</TableCell>
                 <TableCell align='right'>
                   {parseInt(row.value[1]).toLocaleString()}
                 </TableCell>
