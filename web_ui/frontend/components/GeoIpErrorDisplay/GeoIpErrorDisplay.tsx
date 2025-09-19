@@ -149,7 +149,7 @@ const GeoIpErrorDisplay = () => {
       </Paper>
       <ObjectModal
         name={'Locate Network IP'}
-        handleClose={() => setOpenForm(!open)}
+        handleClose={() => setOpenForm(!openForm)}
         open={openForm}
       >
         <GeoIPOverrideForm
