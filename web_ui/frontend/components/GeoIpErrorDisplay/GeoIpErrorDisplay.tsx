@@ -13,7 +13,7 @@ import {
 } from '@mui/material';
 import useSWR from 'swr';
 
-import { VectorResult } from '@/components';
+import { MetricVariant, VectorResult } from '@/components';
 import {
   GeoIPOverride,
   GeoIPOverrideForm,
@@ -112,6 +112,7 @@ const GeoIpErrorDisplay = () => {
           setIp={setIp}
           setOpenForm={setOpenForm}
           geoIpOverrides={geoIpOverrides}
+          variant={activeView}
         />
         <Box
           display={'flex'}
