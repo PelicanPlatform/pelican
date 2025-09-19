@@ -21,7 +21,7 @@
 import { Box, Grid, Skeleton, Typography } from '@mui/material';
 import { useContext, useMemo } from 'react';
 import useSWR from 'swr';
-import { DirectorCardList, GeoIpErrorTable } from './components';
+import { DirectorCardList } from './components';
 import { getUser } from '@/helpers/login';
 import FederationOverview from '@/components/FederationOverview';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
@@ -31,6 +31,7 @@ import { NamespaceCardList } from './components/NamespaceCardList';
 import { getDirectorNamespaces, getDirectorServers } from '@/helpers/get';
 import { alertOnError } from '@/helpers/util';
 import { AlertDispatchContext } from '@/components/AlertProvider';
+import GeoIpErrorDisplay from '@/components/GeoIpErrorDisplay';
 
 export default function Page() {
   const dispatch = useContext(AlertDispatchContext);
@@ -149,7 +150,7 @@ export default function Page() {
             }}
           >
             <AuthenticatedContent allowedRoles={['admin']}>
-              <GeoIpErrorTable />
+              <GeoIpErrorDisplay />
             </AuthenticatedContent>
           </Grid>
           <Grid
