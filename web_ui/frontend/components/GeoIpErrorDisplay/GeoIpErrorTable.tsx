@@ -20,8 +20,12 @@ interface GeoIpErrorTableProps {
   geoIpOverrides: Record<string, GeoIPOverride>;
 }
 
-const GeoIpErrorTable = ({ipErrors, setIp, setOpenForm, geoIpOverrides}: GeoIpErrorTableProps) => {
-
+const GeoIpErrorTable = ({
+  ipErrors,
+  setIp,
+  setOpenForm,
+  geoIpOverrides,
+}: GeoIpErrorTableProps) => {
   return (
     <TableContainer sx={{ maxHeight: 250 }}>
       <Table
@@ -40,34 +44,30 @@ const GeoIpErrorTable = ({ipErrors, setIp, setOpenForm, geoIpOverrides}: GeoIpEr
         </TableHead>
         <TableBody>
           {ipErrors &&
-            ipErrors
-              .map((row) => (
-                <TableRow
-                  key={row.metric?.network}
-                  sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
-                >
-                  <TableCell>{row.metric?.network}</TableCell>
-                  <TableCell align='right'>{row.metric?.name}</TableCell>
-                  <TableCell align='right'>
-                    {parseInt(row.value[1]).toLocaleString()}
-                  </TableCell>
-                  <TableCell align='right'>
-                    <Button
-                      onClick={() => {
-                        setIp(row.metric?.network);
-                        setOpenForm(true);
-                      }}
-                    >
-                      {Object.keys(geoIpOverrides).includes(
-                        row.metric?.network
-                      )
-                        ? 'Pending'
-                        : 'Locate'}
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))
-          }
+            ipErrors.map((row) => (
+              <TableRow
+                key={row.metric?.network}
+                sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
+              >
+                <TableCell>{row.metric?.network}</TableCell>
+                <TableCell align='right'>{row.metric?.name}</TableCell>
+                <TableCell align='right'>
+                  {parseInt(row.value[1]).toLocaleString()}
+                </TableCell>
+                <TableCell align='right'>
+                  <Button
+                    onClick={() => {
+                      setIp(row.metric?.network);
+                      setOpenForm(true);
+                    }}
+                  >
+                    {Object.keys(geoIpOverrides).includes(row.metric?.network)
+                      ? 'Pending'
+                      : 'Locate'}
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
           {!ipErrors && (
             <TableRow>
               <TableCell colSpan={4} align='center'>
@@ -78,7 +78,7 @@ const GeoIpErrorTable = ({ipErrors, setIp, setOpenForm, geoIpOverrides}: GeoIpEr
         </TableBody>
       </Table>
     </TableContainer>
-  )
-}
+  );
+};
 
 export default GeoIpErrorTable;

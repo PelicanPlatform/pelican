@@ -9,7 +9,7 @@ import {
   Typography,
   CircularProgress,
   Box,
-  ButtonGroup
+  ButtonGroup,
 } from '@mui/material';
 import useSWR from 'swr';
 
@@ -28,13 +28,16 @@ import getOverriddenGeoIps from './getOverriddenGeoIps';
 import getLastOverDay from './getLastOverDay';
 import GeoIpErrorTable from './GeoIpErrorTable';
 
-
 const GeoIpErrorDisplay = () => {
-  const dispatch = useContext(AlertDispatchContext)
+  const dispatch = useContext(AlertDispatchContext);
 
   // Get the IP errors from the last day
-  const { data: serverIpErrors } = useSWR('geoip_server_errors', async () => getLastOverDay('pelican_director_maxmind_server_errors_total'))
-  const { data: clientIpErrors } = useSWR('geoip_client_errors', async () => getLastOverDay('pelican_director_maxmind_client_errors_total'))
+  const { data: serverIpErrors } = useSWR('geoip_server_errors', async () =>
+    getLastOverDay('pelican_director_maxmind_server_errors_total')
+  );
+  const { data: clientIpErrors } = useSWR('geoip_client_errors', async () =>
+    getLastOverDay('pelican_director_maxmind_client_errors_total')
+  );
 
   const [activeView, setActiveView] = useState<'server' | 'client'>('server');
 
@@ -50,19 +53,24 @@ const GeoIpErrorDisplay = () => {
   );
 
   // A function that filters out already patched IPs and sorts the rest by number of errors
-  const transformIpErrors = useCallback((ipErrors: VectorResult[] | undefined) => {
-    const patchedIps = config?.GeoIPOverrides
-      ? Object.values(config.GeoIPOverrides).map((x: GeoIPOverride) => x.ip)
-      : [];
-    return ipErrors
-      ?.filter((x) => !patchedIps.includes(x.metric?.network))
-      ?.sort((a, b) => parseInt(b.value[1]) - parseInt(a.value[1]));
-  }, [config?.GeoIPOverrides]);
+  const transformIpErrors = useCallback(
+    (ipErrors: VectorResult[] | undefined) => {
+      const patchedIps = config?.GeoIPOverrides
+        ? Object.values(config.GeoIPOverrides).map((x: GeoIPOverride) => x.ip)
+        : [];
+      return ipErrors
+        ?.filter((x) => !patchedIps.includes(x.metric?.network))
+        ?.sort((a, b) => parseInt(b.value[1]) - parseInt(a.value[1]));
+    },
+    [config?.GeoIPOverrides]
+  );
 
   // State for the modal form to add new IP overrides
   const [openForm, setOpenForm] = useState(false);
   const [ip, setIp] = useState('');
-  const [geoIpOverrides, setGeoIpOverrides] = useState<Record<string, GeoIPOverride>>({});
+  const [geoIpOverrides, setGeoIpOverrides] = useState<
+    Record<string, GeoIPOverride>
+  >({});
   const onFormSubmit = useCallback((x: GeoIPOverride) => {
     setGeoIpOverrides((p) => {
       return { ...p, [x.ip]: x };
@@ -87,7 +95,9 @@ const GeoIpErrorDisplay = () => {
 
   // Determine the IPs to display
   const ipErrors = useMemo(() => {
-    return transformIpErrors(activeView == 'server' ? serverIpErrors : clientIpErrors)
+    return transformIpErrors(
+      activeView == 'server' ? serverIpErrors : clientIpErrors
+    );
   }, [transformIpErrors, activeView, clientIpErrors, serverIpErrors]);
 
   return (
@@ -97,8 +107,18 @@ const GeoIpErrorDisplay = () => {
         {isValidating && <CircularProgress size={'24px'} sx={{ ml: 1 }} />}
       </Typography>
       <Paper sx={{ overflow: 'hidden' }}>
-        <GeoIpErrorTable ipErrors={ipErrors} setIp={setIp} setOpenForm={setOpenForm} geoIpOverrides={geoIpOverrides}/>
-        <Box display={'flex'} flexDirection={'row'} justifyContent={'space-between'} alignItems={'center'}>
+        <GeoIpErrorTable
+          ipErrors={ipErrors}
+          setIp={setIp}
+          setOpenForm={setOpenForm}
+          geoIpOverrides={geoIpOverrides}
+        />
+        <Box
+          display={'flex'}
+          flexDirection={'row'}
+          justifyContent={'space-between'}
+          alignItems={'center'}
+        >
           <ButtonGroup sx={{ m: 1 }} variant={'outlined'}>
             <Button
               variant={activeView === 'server' ? 'contained' : 'outlined'}
@@ -123,7 +143,6 @@ const GeoIpErrorDisplay = () => {
             </Button>
           )}
         </Box>
-
       </Paper>
       <ObjectModal
         name={'Locate Network IP'}

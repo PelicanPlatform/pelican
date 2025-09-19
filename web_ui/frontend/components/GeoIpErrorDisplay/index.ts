@@ -1,1 +1,1 @@
-export {default} from './GeoIpErrorDisplay'
+export { default } from './GeoIpErrorDisplay';
