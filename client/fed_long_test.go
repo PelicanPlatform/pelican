@@ -966,7 +966,7 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 			_, err := client.DoPut(fed.Ctx, tempDir, uploadUrl, false, client.WithTokenLocation(tempToken.Name()))
 
 			require.Error(t, err, "Expected an error when passing a dir path to object put command without recursive option set")
-			expectedMessage := "the provided path '" + tempPath + "' is a directory, but a file is expected"
+			expectedMessage := "is a directory but recursive is not enabled"
 			require.Contains(t, err.Error(), expectedMessage, "Error message did not match expected text")
 
 			// Check if any file is created at the destination by using get
