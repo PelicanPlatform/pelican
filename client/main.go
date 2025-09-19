@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -508,6 +509,42 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 			err = errors.New(ret)
 		}
 	}()
+
+	info, err := os.Stat(localObject)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, errors.Wrapf(err, "local object %q does not exist", localObject)
+		}
+		return nil, errors.Wrapf(err, "failed to stat local object %q", localObject)
+	}
+
+	if info.IsDir() {
+		if !recursive {
+			return nil, errors.Errorf("local object %q is a directory but recursive is not enabled", localObject)
+		}
+		err = filepath.WalkDir(localObject, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if !d.IsDir() {
+				file, err := os.Open(path)
+				if err != nil {
+					return errors.Wrapf(err, "failed to open local object for reading: %q", path)
+				}
+				file.Close()
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	} else { // It's a file
+		file, err := os.Open(localObject)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to open local object for reading: %q", localObject)
+		}
+		file.Close()
+	}
 
 	// Parse as a Pelican URL, but without any discovery (that happens when the transfer job is created).
 	// We do this to handle URL validation early, and we allow unknown query params to be passed through so that old
