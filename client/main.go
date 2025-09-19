@@ -510,6 +510,31 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 		}
 	}()
 
+	// Parse as a Pelican URL, but without any discovery (that happens when the transfer job is created).
+	// We do this to handle URL validation early, and we allow unknown query params to be passed through so that old
+	// clients may continue to function with newer directors/origins/caches. This will generate a warning about the query
+	// but should still send it along.
+	dOpts := []pelican_url.DiscoveryOption{}
+	rpUrl, err := url.Parse(remoteDestination)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse remote destination while performing PUT")
+	}
+	dOpts = append(dOpts, pelican_url.WithContext(ctx))
+
+	// If the incoming path has no scheme, we need to tell the pelican_url parser to use the configured discovery URL
+	if err = handleSchemelessIfNeeded(ctx, rpUrl, &dOpts); err != nil {
+		return nil, errors.Wrap(err, "failed to handle schemeless URL")
+	}
+
+	pUrl, err := pelican_url.Parse(remoteDestination, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, dOpts)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to parse remote object: %s", remoteDestination)
+	}
+
+	if _, exists := pUrl.Query()[pelican_url.QueryRecursive]; exists {
+		recursive = true
+	}
+
 	info, err := os.Stat(localObject)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -544,27 +569,6 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 			return nil, errors.Wrapf(err, "failed to open local object for reading: %q", localObject)
 		}
 		file.Close()
-	}
-
-	// Parse as a Pelican URL, but without any discovery (that happens when the transfer job is created).
-	// We do this to handle URL validation early, and we allow unknown query params to be passed through so that old
-	// clients may continue to function with newer directors/origins/caches. This will generate a warning about the query
-	// but should still send it along.
-	dOpts := []pelican_url.DiscoveryOption{}
-	rpUrl, err := url.Parse(remoteDestination)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to parse remote destination while performing PUT")
-	}
-	dOpts = append(dOpts, pelican_url.WithContext(ctx))
-
-	// If the incoming path has no scheme, we need to tell the pelican_url parser to use the configured discovery URL
-	if err = handleSchemelessIfNeeded(ctx, rpUrl, &dOpts); err != nil {
-		return nil, errors.Wrap(err, "failed to handle schemeless URL")
-	}
-
-	pUrl, err := pelican_url.Parse(remoteDestination, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, dOpts)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to parse remote object: %s", remoteDestination)
 	}
 
 	te, err := NewTransferEngine(ctx)
@@ -637,6 +641,10 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	pUrl, err := pelican_url.Parse(remoteObject, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, dOpts)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse remote object: %s", remoteObject)
+	}
+
+	if _, exists := pUrl.Query()[pelican_url.QueryRecursive]; exists {
+		recursive = true
 	}
 
 	// get absolute path
