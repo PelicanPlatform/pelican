@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -516,6 +517,46 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 		return nil, errors.Wrapf(err, "failed to parse remote object: %s", remoteDestination)
 	}
 
+	if _, exists := pUrl.Query()[pelican_url.QueryRecursive]; exists {
+		recursive = true
+	}
+
+	info, err := os.Stat(localObject)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, errors.Wrapf(err, "local object %q does not exist", localObject)
+		}
+		return nil, errors.Wrapf(err, "failed to stat local object %q", localObject)
+	}
+
+	if info.IsDir() {
+		if !recursive {
+			return nil, errors.Errorf("local object %q is a directory but recursive is not enabled", localObject)
+		}
+		err = filepath.WalkDir(localObject, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if !d.IsDir() {
+				file, err := os.Open(path)
+				if err != nil {
+					return errors.Wrapf(err, "failed to open local object for reading: %q", path)
+				}
+				file.Close()
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	} else { // It's a file
+		file, err := os.Open(localObject)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to open local object for reading: %q", localObject)
+		}
+		file.Close()
+	}
+
 	te, err := NewTransferEngine(ctx)
 	if err != nil {
 		return nil, err
@@ -586,6 +627,10 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	pUrl, err := pelican_url.Parse(remoteObject, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, dOpts)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse remote object: %s", remoteObject)
+	}
+
+	if _, exists := pUrl.Query()[pelican_url.QueryRecursive]; exists {
+		recursive = true
 	}
 
 	// get absolute path
