@@ -39,7 +39,7 @@ const GeoIPOverrideForm = ({ onSubmit, value }: FormProps<GeoIPOverride>) => {
       return;
     }
     onSubmit(geoIP);
-  }, [geoIP]);
+  }, [geoIP, onSubmit]);
 
   const lat = useMemo(() => {
     return parseFloat(geoIP?.coordinate?.lat);

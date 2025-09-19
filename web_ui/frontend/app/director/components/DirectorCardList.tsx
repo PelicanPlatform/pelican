@@ -62,7 +62,6 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
     return filteredData;
   }, [
     searchedData,
-    search,
     serverError,
     pelicanServer,
     serverDowntime,
@@ -90,7 +89,7 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
     <Box>
       <Box sx={{ pb: 1 }}>
         <Grid container spacing={1} pt={1}>
-          <Grid item>
+          <Grid>
             <TextField
               size={'small'}
               value={search}
@@ -98,7 +97,7 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
               label='Search'
             />
           </Grid>
-          <Grid item>
+          <Grid>
             <FormControl sx={{ width: 200 }} size={'small'}>
               <InputLabel id={'server-version-select-label'}>
                 Server Version
@@ -121,21 +120,21 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
           </Grid>
         </Grid>
         <Grid container spacing={1} pt={1}>
-          <Grid item>
+          <Grid>
             <BooleanToggleButton
               label={'Is Pelican Server'}
               value={pelicanServer}
               onChange={setPelicanServer}
             />
           </Grid>
-          <Grid item>
+          <Grid>
             <BooleanToggleButton
               label={'Has Error'}
               value={serverError}
               onChange={setServerError}
             />
           </Grid>
-          <Grid item>
+          <Grid>
             <BooleanToggleButton
               label={'In Downtime'}
               value={serverDowntime}

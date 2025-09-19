@@ -32,24 +32,27 @@ export const GraphOverlay = ({ children }: { children: ReactNode }) => {
 
   const format = useMemo(() => {
     return getFormatString([graphContext.time, graphStart]);
-  }, [graphContext.time, graphContext]);
+  }, [graphContext.time, graphStart]);
 
-  const handleKeydown = useCallback((e: KeyboardEvent) => {
-    switch (e.key) {
-      case 'ArrowLeft':
-        dispatch({ type: 'decrementTimeByRange' });
-        break;
-      case 'ArrowRight':
-        dispatch({ type: 'incrementTimeByRange' });
-        break;
-      case 'ArrowUp':
-        dispatch({ type: 'incrementRange' });
-        break;
-      case 'ArrowDown':
-        dispatch({ type: 'decrementRange' });
-        break;
-    }
-  }, []);
+  const handleKeydown = useCallback(
+    (e: KeyboardEvent) => {
+      switch (e.key) {
+        case 'ArrowLeft':
+          dispatch({ type: 'decrementTimeByRange' });
+          break;
+        case 'ArrowRight':
+          dispatch({ type: 'incrementTimeByRange' });
+          break;
+        case 'ArrowUp':
+          dispatch({ type: 'incrementRange' });
+          break;
+        case 'ArrowDown':
+          dispatch({ type: 'decrementRange' });
+          break;
+      }
+    },
+    [dispatch]
+  );
 
   // Capture arrow keys to adjust timeframe
   useEffect(() => {
@@ -59,7 +62,7 @@ export const GraphOverlay = ({ children }: { children: ReactNode }) => {
     return () => {
       document.removeEventListener('keydown', handleKeydown);
     };
-  }, []);
+  }, [dispatch, handleKeydown]);
 
   // Check that time is not a defined url param, update if it isn't
   useEffect(() => {
@@ -70,18 +73,29 @@ export const GraphOverlay = ({ children }: { children: ReactNode }) => {
         dispatch({ type: 'setTime', payload: DateTime.now() });
       }
     }
-  }, []);
+  }, [dispatch]);
 
   return (
     <>
       <Box position={'sticky'}>
         <Grid container justifyContent={'space-between'} alignItems={'center'}>
-          <Grid item xs={12} md={'auto'}>
+          <Grid
+            size={{
+              xs: 12,
+              md: 'auto',
+            }}
+          >
             <StringUpdateViewer>
               {graphStart.toFormat(format)} - {graphContext.time.toFormat('f')}
             </StringUpdateViewer>
           </Grid>
-          <Grid item xs={12} md={'auto'} display={'flex'}>
+          <Grid
+            display={'flex'}
+            size={{
+              xs: 12,
+              md: 'auto',
+            }}
+          >
             <Box display={'flex'} m={'auto'}>
               <TimeRangeSelector />
               <DateTimePickerWithArrows />

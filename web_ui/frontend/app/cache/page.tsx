@@ -27,13 +27,23 @@ export default function Home() {
   return (
     <Box width={'100%'}>
       <Grid container spacing={2}>
-        <Grid item xs={12} lg={6}>
+        <Grid
+          size={{
+            xs: 12,
+            lg: 6,
+          }}
+        >
           <Typography variant='h4' mb={2}>
             Status
           </Typography>
           <StatusBox />
         </Grid>
-        <Grid item xs={12} lg={6}>
+        <Grid
+          size={{
+            xs: 12,
+            lg: 6,
+          }}
+        >
           <FederationOverview />
         </Grid>
       </Grid>

@@ -1,11 +1,8 @@
 'use client';
 
-import React, { memo, useState } from 'react';
+import React, { memo, useState, ComponentProps } from 'react';
 import { Box, Button, Typography } from '@mui/material';
 import { QuestionMark } from '@mui/icons-material';
-import { OverridableStringUnion } from '@mui/types';
-import { Variant } from '@mui/material/styles/createTypography';
-import { TypographyPropsVariantOverrides } from '@mui/material/Typography';
 import { grey } from '@mui/material/colors';
 
 import {
@@ -131,10 +128,7 @@ export const ConfigField = ({
 export const ConfigCategoryLabel = ({ name }: { name: string }) => {
   const splitName = name.split('.');
 
-  let variant: OverridableStringUnion<
-    'inherit' | Variant,
-    TypographyPropsVariantOverrides
-  >;
+  let variant: ComponentProps<typeof Typography>['variant'];
   switch (splitName.length) {
     case 1:
       variant = 'h1';

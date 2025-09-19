@@ -27,7 +27,7 @@ const PathForm = ({ onSubmit, value }: FormProps<Path>) => {
       return;
     }
     onSubmit(path);
-  }, [path]);
+  }, [path, onSubmit]);
 
   return (
     <>

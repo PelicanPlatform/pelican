@@ -189,7 +189,7 @@ const BigNumber = ({
               alignItems: 'center',
             }}
           >
-            <Grid item>
+            <Grid>
               <Typography
                 flexGrow={1}
                 variant={'subtitle1'}
@@ -198,7 +198,7 @@ const BigNumber = ({
                 {title}
               </Typography>
             </Grid>
-            <Grid item>
+            <Grid>
               <Typography flexGrow={1} variant={'h4'} fontWeight={'bold'}>
                 {value}
               </Typography>

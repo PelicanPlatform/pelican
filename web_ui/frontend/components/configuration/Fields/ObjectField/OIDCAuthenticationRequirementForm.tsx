@@ -32,7 +32,7 @@ const OIDCAuthenticationRequirementForm = ({
       return;
     }
     onSubmit(authReq);
-  }, [authReq]);
+  }, [authReq, onSubmit]);
 
   return (
     <>

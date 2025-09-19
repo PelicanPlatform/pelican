@@ -71,7 +71,13 @@ export default function Page() {
     <PaddedContent>
       <Box width={'100%'}>
         <Grid container spacing={2}>
-          <Grid item xs={12} lg={8} xl={6}>
+          <Grid
+            size={{
+              xs: 12,
+              lg: 8,
+              xl: 6,
+            }}
+          >
             <Typography variant={'h4'} pb={2}>
               Origins
             </Typography>
@@ -88,7 +94,13 @@ export default function Page() {
               </Box>
             )}
           </Grid>
-          <Grid item xs={12} lg={8} xl={6}>
+          <Grid
+            size={{
+              xs: 12,
+              lg: 8,
+              xl: 6,
+            }}
+          >
             <Typography variant={'h4'} pb={2}>
               Caches
             </Typography>
@@ -105,7 +117,13 @@ export default function Page() {
               </Box>
             )}
           </Grid>
-          <Grid item xs={12} lg={8} xl={6}>
+          <Grid
+            size={{
+              xs: 12,
+              lg: 8,
+              xl: 6,
+            }}
+          >
             <Typography variant={'h4'} pb={2}>
               Namespaces
             </Typography>
@@ -123,12 +141,24 @@ export default function Page() {
               </Box>
             )}
           </Grid>
-          <Grid item xs={12} lg={8} xl={6}>
+          <Grid
+            size={{
+              xs: 12,
+              lg: 8,
+              xl: 6,
+            }}
+          >
             <AuthenticatedContent allowedRoles={['admin']}>
               <GeoIpErrorTable />
             </AuthenticatedContent>
           </Grid>
-          <Grid item xs={12} lg={8} xl={6}>
+          <Grid
+            size={{
+              xs: 12,
+              lg: 8,
+              xl: 6,
+            }}
+          >
             <AuthenticatedContent>
               <FederationOverview />
             </AuthenticatedContent>

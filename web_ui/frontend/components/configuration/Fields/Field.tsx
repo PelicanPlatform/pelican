@@ -39,7 +39,7 @@ const Field = ({
     return <T,>(value: T) => {
       return onChange({ [name]: value });
     };
-  }, [value, name, onChange]);
+  }, [name, onChange]);
 
   // If the value is undefined then return loading field
   if (value === undefined) {

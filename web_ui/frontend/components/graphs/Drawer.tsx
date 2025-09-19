@@ -61,7 +61,12 @@ function ReportPeriodInput({
 }) {
   return (
     <Grid container spacing={2}>
-      <Grid item xs={12} md={6}>
+      <Grid
+        size={{
+          xs: 12,
+          md: 6,
+        }}
+      >
         <FormControl fullWidth>
           <InputLabel id='select-report-length-label'>Report Length</InputLabel>
           <Select
@@ -81,7 +86,12 @@ function ReportPeriodInput({
           </Select>
         </FormControl>
       </Grid>
-      <Grid item xs={12} md={6}>
+      <Grid
+        size={{
+          xs: 12,
+          md: 6,
+        }}
+      >
         <LocalizationProvider dateAdapter={AdapterLuxon}>
           <DatePicker
             sx={{ width: '100%' }}
@@ -106,7 +116,7 @@ function RateInput({
 }) {
   return (
     <Grid container spacing={1}>
-      <Grid item xs={6}>
+      <Grid size={6}>
         <FormControl fullWidth>
           <TextField
             label={'Rate Time Range'}
@@ -119,7 +129,7 @@ function RateInput({
           ></TextField>
         </FormControl>
       </Grid>
-      <Grid item xs={5}>
+      <Grid size={5}>
         <FormControl fullWidth>
           <InputLabel id='select-report-length-label'>Unit</InputLabel>
           <Select
@@ -139,7 +149,7 @@ function RateInput({
           </Select>
         </FormControl>
       </Grid>
-      <Grid item xs={1} m={'auto'}>
+      <Grid m={'auto'} size={1}>
         <IconButton
           href={
             'https://prometheus.io/docs/prometheus/latest/querying/functions/#rate'
@@ -164,7 +174,7 @@ function ResolutionInput({
 }) {
   return (
     <Grid container spacing={1}>
-      <Grid item xs={6}>
+      <Grid size={6}>
         <FormControl fullWidth>
           <TextField
             label={'Resolution'}
@@ -179,7 +189,7 @@ function ResolutionInput({
           ></TextField>
         </FormControl>
       </Grid>
-      <Grid item xs={5}>
+      <Grid size={5}>
         <FormControl fullWidth>
           <InputLabel id='select-report-length-label'>Unit</InputLabel>
           <Select
@@ -202,7 +212,7 @@ function ResolutionInput({
           </Select>
         </FormControl>
       </Grid>
-      <Grid item xs={1} m={'auto'}>
+      <Grid m={'auto'} size={1}>
         <IconButton
           href={
             'https://prometheus.io/docs/prometheus/latest/querying/examples/#subquery'

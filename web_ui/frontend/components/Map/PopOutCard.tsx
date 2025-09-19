@@ -25,7 +25,7 @@ const PopOutCard = ({
         document.removeEventListener('keydown', handler);
       };
     }
-  }, []);
+  }, [active, onClose]);
 
   return (
     <Grow in={active} style={{ transformOrigin: '100% 0 0' }}>

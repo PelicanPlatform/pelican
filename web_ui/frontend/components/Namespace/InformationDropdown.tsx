@@ -9,7 +9,6 @@ import {
 interface InformationDropdownProps {
   adminMetadata: NamespaceAdminMetadata;
   transition: boolean;
-  parentRef?: React.RefObject<HTMLDivElement>;
 }
 
 const InformationDropdown = ({

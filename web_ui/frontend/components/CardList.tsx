@@ -25,15 +25,15 @@ export function CardList<T>({
     if (data?.length && page > Math.ceil(data.length / pageSize)) {
       setPage(Math.max(1, Math.ceil(data.length / pageSize)));
     }
-  }, [data?.length]);
+  }, [data?.length, page, pageSize]);
 
   const count = useMemo(() => {
     return Math.ceil((data?.length || 0) / pageSize);
-  }, [data]);
+  }, [data, pageSize]);
 
   const slicedObjects = useMemo(() => {
     return (data || []).slice((page - 1) * pageSize, page * pageSize);
-  }, [data, page]);
+  }, [data, page, pageSize]);
 
   return (
     <>
