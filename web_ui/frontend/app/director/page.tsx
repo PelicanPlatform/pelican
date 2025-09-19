@@ -31,6 +31,7 @@ import { NamespaceCardList } from './components/NamespaceCardList';
 import { getDirectorNamespaces, getDirectorServers } from '@/helpers/get';
 import { alertOnError } from '@/helpers/util';
 import { AlertDispatchContext } from '@/components/AlertProvider';
+import GeoIpErrorDisplay from '@/components/GeoIpErrorDisplay';
 
 export default function Page() {
   const dispatch = useContext(AlertDispatchContext);
@@ -125,7 +126,7 @@ export default function Page() {
           </Grid>
           <Grid item xs={12} lg={8} xl={6}>
             <AuthenticatedContent allowedRoles={['admin']}>
-              <GeoIpErrorTable />
+              <GeoIpErrorDisplay />
             </AuthenticatedContent>
           </Grid>
           <Grid item xs={12} lg={8} xl={6}>
