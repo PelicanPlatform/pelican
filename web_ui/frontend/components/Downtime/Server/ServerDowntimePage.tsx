@@ -26,7 +26,6 @@ const ServerDowntimePage = () => {
     ServerDowntimeKey,
     getDowntime
   );
-  const sortedDowntimes = sortDowntimes(downtimes || []);
 
   return (
     <>
@@ -42,7 +41,11 @@ const ServerDowntimePage = () => {
             <Box my={2}>
               <DowntimeCalendar data={downtimes} />
             </Box>
-            <DowntimeList data={sortedDowntimes} />
+            <Grid container justifyContent={'center'}>
+              <Grid size={{ xs: 12, lg: 8 }}>
+                <DowntimeList data={downtimes} />
+              </Grid>
+            </Grid>
           </Grid>
         </Grid>
       </Box>
