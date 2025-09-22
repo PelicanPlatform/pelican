@@ -2594,6 +2594,7 @@ description: |+
   - `oidc`: Take group information from the identity token provided by the OIDC identity provider.  Parses
     the value of the claim specified by `Issuer.OIDCGroupClaim` (defaults to "groups") as a list of groups.
     The value may either be a comma-separated string or an array of strings.
+  - `internal`: Take group information from the Pelican server's internal user database.
 type: string
 default: none
 components: ["origin"]

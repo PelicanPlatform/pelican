@@ -268,9 +268,12 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 			groups = append(groups, group.Name)
 		}
 
-	default:
-		log.Debugf("No group source set, using none")
+	case "", "none":
+		log.Debugf("No group source specified; no groups will be used")
 		return
+	default:
+		err = errors.Errorf("invalid group source: %s", groupSource)
+		return "", nil, err
 	}
 	log.Debugf("Groups for user %s (source=%s): %v", user, groupSource, groups)
 	return user, groups, nil
