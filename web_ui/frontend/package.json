@@ -17,7 +17,7 @@
     "test": "jest"
   },
   "dependencies": {
-    "@chtc/web-components": "^1.0.7",
+    "@chtc/web-components": "^1.0.9",
     "@emotion/react": "^11.11.1",
     "@emotion/styled": "^11.11.0",
     "@mui/icons-material": "^7",

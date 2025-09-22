@@ -84,6 +84,7 @@ export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
                       sx={{ bgcolor: '#ff00001a', mx: 1 }}
                       color={'error'}
                       onClick={(e) => e.stopPropagation()}
+                      confirmNode={'Delete'}
                       onConfirm={async (e) => {
                         e.stopPropagation();
                         await alertOnError(

@@ -149,6 +149,7 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
                       size={size}
                       color={'error'}
                       onClick={(e) => e.stopPropagation()}
+                      confirmNode={'Delete'}
                       onConfirm={async (e) => {
                         e.stopPropagation();
                         await alertOnError(
