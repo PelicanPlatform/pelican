@@ -1198,39 +1198,8 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	}
 
 	sn := adV2.Name
-	// Process received server(origin/cache) downtimes and toggle the director's in-memory downtime tracker when necessary
-	if adV2.Downtimes != nil {
-		filteredServersMutex.Lock()
-
-		// Update the cached server downtime list
-		serverDowntimes[sn] = adV2.Downtimes
-
-		now := time.Now().UTC().UnixMilli()
-		active := false // Flag to indicate if this server has active downtime in this server ad
-		for _, dt := range adV2.Downtimes {
-			if dt.StartTime <= now &&
-				(dt.EndTime >= now || dt.EndTime == server_structs.IndefiniteEndTime) {
-				active = true
-				break
-			}
-		}
-
-		// Inspect the existing downtime status for this server
-		existingFilterType, isServerFiltered := filteredServers[sn]
-
-		if active {
-			// Only override if there's no filter
-			if !isServerFiltered {
-				filteredServers[sn] = serverFiltered
-			}
-		} else {
-			// Clear only the downtimes with serverFiltered tag if it’s stale
-			if isServerFiltered && existingFilterType == serverFiltered {
-				delete(filteredServers, sn)
-			}
-		}
-		filteredServersMutex.Unlock()
-	}
+	// Process received server(origin/cache) downtimes and toggle the director's in-memory downtime tracker
+	applyServerDowntimes(sn, adV2.Downtimes)
 
 	// "Status" represents the server's overall health status. It is introduced in Pelican 7.17.0
 	if adV2.Status != "" { // For backward compatibility, we only process this if it is set
