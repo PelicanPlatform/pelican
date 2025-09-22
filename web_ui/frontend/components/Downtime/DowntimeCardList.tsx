@@ -8,7 +8,14 @@ import React, {
   useState,
 } from 'react';
 
-import { Box, Grid, InputLabel, Select, MenuItem, FormControl } from '@mui/material';
+import {
+  Box,
+  Grid,
+  InputLabel,
+  Select,
+  MenuItem,
+  FormControl,
+} from '@mui/material';
 import { DateTimePicker } from '@mui/x-date-pickers';
 import { DateTime } from 'luxon';
 
@@ -21,15 +28,15 @@ import {
 } from '@/components/Downtime/CalendarContext';
 
 const sortTypes = {
-  'startTime': {
-    label: "Start Time",
+  startTime: {
+    label: 'Start Time',
     sortFn: (a: DowntimeGet, b: DowntimeGet) => a.startTime - b.startTime,
   },
-  'updatedAt': {
-    label: "Most Recently Updated",
+  updatedAt: {
+    label: 'Most Recently Updated',
     sortFn: (a: DowntimeGet, b: DowntimeGet) => b.updatedAt - a.updatedAt,
-  }
-}
+  },
+};
 
 interface DowntimeListProps {
   Card: ComponentType<any>;
@@ -37,7 +44,6 @@ interface DowntimeListProps {
 }
 
 function DowntimeCardList({ Card, data }: DowntimeListProps) {
-
   const [recentlyUpdated, setRecentlyUpdated] = useState(false);
   const range = useContext(CalendarDateTimeContext);
   const setRange = useContext(CalendarDateTimeDispatchContext);
@@ -117,11 +123,11 @@ function DowntimeCardList({ Card, data }: DowntimeListProps) {
           </Grid>
           <Grid>
             <FormControl>
-              <InputLabel id="sort-by-label">Sort By</InputLabel>
+              <InputLabel id='sort-by-label'>Sort By</InputLabel>
               <Select
-                labelId="sort-by-label"
+                labelId='sort-by-label'
                 value={sortBy}
-                label="Sort By"
+                label='Sort By'
                 onChange={(e) => setSortBy(e.target.value as keyof sortTypes)}
               >
                 {Object.entries(sortTypes).map(([key, value]) => (

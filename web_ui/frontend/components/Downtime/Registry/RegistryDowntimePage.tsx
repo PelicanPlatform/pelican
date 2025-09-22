@@ -53,11 +53,11 @@ const ServerDowntimePage = () => {
             <Box my={2}>
               <DowntimeCalendar data={downtimes} />
             </Box>
-						<Grid container justifyContent={'center'}>
-							<Grid size={{ xs: 12, lg: 8 }}>
-								<RegistryDowntimeList data={downtimes} />
-							</Grid>
-						</Grid>
+            <Grid container justifyContent={'center'}>
+              <Grid size={{ xs: 12, lg: 8 }}>
+                <RegistryDowntimeList data={downtimes} />
+              </Grid>
+            </Grid>
           </Grid>
         </Grid>
       </Box>
