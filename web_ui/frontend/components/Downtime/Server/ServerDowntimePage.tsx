@@ -15,16 +15,18 @@ import useApiSWR from '@/hooks/useApiSWR';
 import { DowntimeGet } from '@/types';
 import { ServerDowntimeKey } from '@/components/Downtime';
 import { getDowntime } from '@/helpers/api';
+import sortDowntimes from '@/components/Downtime/sortDowntimes';
 
 const ServerDowntimePage = () => {
   const setDowntime = useContext(DowntimeEditDispatchContext);
   const downtime = useContext(DowntimeEditContext);
 
-  const { data } = useApiSWR<DowntimeGet[]>(
+  const { data: downtimes } = useApiSWR<DowntimeGet[]>(
     'Failed to fetch downtimes',
     ServerDowntimeKey,
     getDowntime
   );
+  const sortedDowntimes = sortDowntimes(downtimes || [])
 
   return (
     <>
@@ -38,9 +40,9 @@ const ServerDowntimePage = () => {
           >
             <EditDowntimePageHeader />
             <Box my={2}>
-              <DowntimeCalendar data={data} />
+              <DowntimeCalendar data={downtimes} />
             </Box>
-            <DowntimeList data={data} />
+            <DowntimeList data={sortedDowntimes} />
           </Grid>
         </Grid>
       </Box>

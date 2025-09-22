@@ -44,6 +44,7 @@ import useApiSWR from '@/hooks/useApiSWR';
 import extendNamespace from '@/helpers/Registry/namespaceToServer';
 import { NamespaceIcon } from '@/components';
 import getUtcOffsetString from '@/helpers/getUtcOffsetString';
+import { defaultDowntime } from '@/components/Downtime/constant';
 
 interface DowntimeFormProps {
   downtime: Partial<DowntimeGet>;
@@ -291,26 +292,6 @@ const submitDowntime = async (
       dispatch
     );
   }
-};
-
-const namespacesToRegistryServers = (
-  namespaces: RegistryNamespace[]
-): string[] => {
-  const originsAndCaches = namespaces.filter(
-    (n) => n.prefix.startsWith('/origin') || n.prefix.startsWith('/cache')
-  );
-
-  // Pull the prefixes out of the namespaces
-  return originsAndCaches.map((n) => n.prefix);
-};
-
-const defaultDowntime = {
-  serverName:  '',
-  startTime: DateTime.now().toMillis(),
-  endTime: DateTime.now().plus({days: 1}).toMillis(),
-  description: '',
-  severity: 'Outage (completely inaccessible)' as DowntimeSeverity,
-  class: 'SCHEDULED' as DowntimeClass,
 };
 
 export default ServerUnknownDowntimeForm;
