@@ -148,7 +148,7 @@ type (
 		IOLoad                 float64           `json:"io_load"`
 		StatusWeight           float64           `json:"statusWeight"`           // The current EWMA-derived weight for this server's status, populated by the Director
 		StatusWeightLastUpdate int64             `json:"statusWeightLastUpdate"` // The last time the status weight was updated, in epoch seconds
-		Downtimes              []Downtime        `json:"downtimes,omitempty"`    // Allow null values if no downtime
+		Downtimes              []Downtime        `json:"downtimes"`              // Would be an empty slice if no downtime
 		RequiredFeatures       []string          `json:"requiredFeatures"`       // A list of feature names required by this server
 		Status                 string            `json:"status"`
 	}
@@ -179,8 +179,8 @@ type (
 		Namespaces          []NamespaceAdV2   `json:"namespaces"`
 		Issuer              []TokenIssuer     `json:"token-issuer"`
 		StorageType         OriginStorageType `json:"storageType"`
-		DisableDirectorTest bool              `json:"directorTest"`        // Use negative attribute (disable instead of enable) to be BC with legacy servers where they don't have this field
-		Downtimes           []Downtime        `json:"downtimes,omitempty"` // Allow null values if no downtime
+		DisableDirectorTest bool              `json:"directorTest"` // Use negative attribute (disable instead of enable) to be BC with legacy servers where they don't have this field
+		Downtimes           []Downtime        `json:"downtimes"`    // Would be an empty slice if no downtime
 		RequiredFeatures    []string          `json:"requiredFeatures"`
 		Now                 time.Time         `json:"now"`    // Populated when ad is sent to the director; otherwise, may be zero.  Used to detect time skews between client and server
 		Status              string            `json:"status"` // The status of the server ad. This is a human-readable string that describes the server's status.
