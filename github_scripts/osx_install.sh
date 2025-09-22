@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+# Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you
 # may not use this file except in compliance with the License.  You may
@@ -22,6 +22,19 @@ set -ex
 #
 
 brew install minio ninja coreutils
+
+# Attempted fix to install xrootd-s3-http, which relies on a dependency (nlohmann-json)
+# that requres cmake 3.5...4.0. The version pointed at here is the highest 3.X at the time
+# of writing (2025-09-22).
+# Install CMake 3.31.8 manually, since Homebrew does not provide it.
+CMAKE_VERSION=3.31.8
+CMAKE_TARBALL=cmake-${CMAKE_VERSION}-macos-universal.tar.gz
+CMAKE_URL="https://cmake.org/files/v3.31/${CMAKE_TARBALL}"
+
+curl -LO "$CMAKE_URL"
+tar -xzf "$CMAKE_TARBALL"
+export PATH="$PWD/cmake-${CMAKE_VERSION}-macos-universal/CMake.app/Contents/bin:$PATH"
+echo "CMake version: $(cmake --version)"
 
 # The new macos-latest runner has some issues with /usr/local/<lib/include>. Adjust perms ahead of time
 sudo mkdir -p /usr/local/lib && sudo mkdir -p /usr/local/include
@@ -64,9 +77,8 @@ sudo mkdir -p /etc/xrootd/client.plugins.d/
 sudo cp release_dir/etc/xrootd/client.plugins.d/{curl,pelican}-plugin.conf /etc/xrootd/client.plugins.d/
 popd
 
-git clone --recurse-submodules --branch v0.2.1 https://github.com/PelicanPlatform/xrootd-s3-http.git
+git clone --recurse-submodules --branch v0.5.1 https://github.com/PelicanPlatform/xrootd-s3-http.git
 pushd xrootd-s3-http
-git checkout v0.4.1
 mkdir build
 cd build
 cmake .. -GNinja -DCMAKE_INSTALL_PREFIX="$PWD/release_dir"
