@@ -233,7 +233,7 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 
 	oidcAuthnUserClaim := param.Issuer_OIDCAuthenticationUserClaim.GetString()
 	groupSource := param.Issuer_GroupSource.GetString()
-	if groupSource != web_ui.GroupSourceTypeOIDC && groupSource != web_ui.GroupSourceTypeFile && groupSource != web_ui.GroupSourceTypeInternal {
+	if groupSource != "" && groupSource != "none" && groupSource != web_ui.GroupSourceTypeOIDC && groupSource != web_ui.GroupSourceTypeFile && groupSource != web_ui.GroupSourceTypeInternal {
 		err = errors.New("invalid group source: " + groupSource)
 		return
 	}
