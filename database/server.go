@@ -422,8 +422,12 @@ func UpsertServiceName(serverName string, typ server_structs.ServerType) error {
 
 	// look for existing
 	var entry server_structs.ServiceName
-	err := ServerDatabase.Where("name = ?", serverName).First(&entry).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	// Note: GORM's Find method won't log a "record not found" error, so admin won't be surprised by an errorduring the server startup
+	result := ServerDatabase.Where("name = ?", serverName).Limit(1).Find(&entry)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
 		// no existing row → insert
 		entry = server_structs.ServiceName{
 			ID:        uuid.NewString(),
@@ -433,9 +437,6 @@ func UpsertServiceName(serverName string, typ server_structs.ServerType) error {
 			UpdatedAt: now,
 		}
 		return ServerDatabase.Create(&entry).Error
-	}
-	if err != nil {
-		return err
 	}
 
 	// found → update timestamp
