@@ -84,7 +84,7 @@ const DowntimeCalendar = ({ data = [] }: { data?: DowntimeGet[] }) => {
         const endOfMonth = new Date(
           startOfMonth.getFullYear(),
           startOfMonth.getMonth() + 1,
-          0
+          1
         );
 
         setRange({
