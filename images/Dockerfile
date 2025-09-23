@@ -56,13 +56,8 @@ ARG LOTMAN_VER=0.0.4
 # Note: github_scripts/osx_install.sh also (separately) specifies the version to use
 # Until the two places are programmatically synchronized, please double-check by hand
 # when doing version changes.
-<<<<<<< HEAD
 ARG XRDCL_PELICAN_SRC_BUILD=false
 ARG XRDCL_PELICAN_VER=1.5.6
-=======
-ARG XRDCL_PELICAN_SRC_BUILD=true
-ARG XRDCL_PELICAN_VER=1.4.0
->>>>>>> 55a028cc (Upgrade to xrdcl-pelican v1.4.-)
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
 ARG XRDHTTP_PELICAN_VER=0.0.7
 ARG XROOTD_LOTMAN_SRC_BUILD=false
