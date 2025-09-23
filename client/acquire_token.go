@@ -532,6 +532,14 @@ func tokenIsValid(jwtSerialized string) (valid bool, expiry time.Time) {
 	return
 }
 
+func tokenIsExpired(jwtSerialized string) (expired bool, expiry time.Time, err error) {
+	token, err := jwt.Parse([]byte(jwtSerialized), jwt.WithVerify(false), jwt.WithValidate(false))
+	if err != nil {
+		return
+	}
+	return token.Expiration().Before(time.Now()), token.Expiration(), nil
+}
+
 func registerClient(dirResp server_structs.DirectorResponse) (*config.PrefixEntry, error) {
 	issuers := dirResp.XPelTokGenHdr.Issuers
 	if len(issuers) == 0 {
