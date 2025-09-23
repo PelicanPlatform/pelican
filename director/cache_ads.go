@@ -442,6 +442,49 @@ func updateLatLong(ad *server_structs.ServerAd) error {
 	return nil
 }
 
+// Apply downtimes provided by Origin/Cache servers to the director's in-memory state for the given server.
+// This function treats a nil or empty slice as "no downtimes", clearing any stale
+// serverFiltered entry and removing cached server downtimes.
+func applyServerDowntimes(serverName string, downtimes []server_structs.Downtime) {
+	filteredServersMutex.Lock()
+	defer filteredServersMutex.Unlock()
+
+	if len(downtimes) == 0 {
+		// No downtimes provided: clear cached entry and remove stale serverFiltered
+		delete(serverDowntimes, serverName)
+		if existingFilterType, isServerFiltered := filteredServers[serverName]; isServerFiltered && existingFilterType == serverFiltered {
+			delete(filteredServers, serverName)
+		}
+		return
+	}
+
+	// Update cached downtimes
+	serverDowntimes[serverName] = downtimes
+
+	// Determine whether any provided downtime is currently active
+	now := time.Now().UTC().UnixMilli()
+	active := false
+	for _, dt := range downtimes {
+		if dt.StartTime <= now && (dt.EndTime >= now || dt.EndTime == server_structs.IndefiniteEndTime) {
+			active = true
+			break
+		}
+	}
+
+	existingFilterType, isServerFiltered := filteredServers[serverName]
+	if active {
+		// Only set serverFiltered if no other filter exists
+		if !isServerFiltered {
+			filteredServers[serverName] = serverFiltered
+		}
+	} else {
+		// No active downtime: clear only if it was previously set by the server
+		if isServerFiltered && existingFilterType == serverFiltered {
+			delete(filteredServers, serverName)
+		}
+	}
+}
+
 // Get cached downtimes from registry, topology and servers themselves.
 // Return downtimes for all servers or a specific server if serverName is provided.
 func getCachedDowntimes(serverName string) ([]server_structs.Downtime, error) {

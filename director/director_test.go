@@ -2540,3 +2540,113 @@ func TestExtractProjectFromUserAgent(t *testing.T) {
 		assert.Equal(t, "", result)
 	})
 }
+
+func TestNilOrEmptyServerDowntimes(t *testing.T) {
+	// Reset global state
+	filteredServersMutex.Lock()
+	filteredServers = map[string]filterType{}
+	serverDowntimes = make(map[string][]server_structs.Downtime)
+	filteredServersMutex.Unlock()
+	serverAds.DeleteAll()
+
+	// Setup Gin context and router
+	w := httptest.NewRecorder()
+	c, r := gin.CreateTestContext(w)
+
+	engineCtx := context.Background()
+	r.POST("/", func(gctx *gin.Context) { registerServerAd(engineCtx, gctx, server_structs.OriginType) })
+
+	serverName := "TEST_CACHE_DOWNTIME"
+	now := time.Now().UTC().UnixMilli()
+
+	// 1) Post an ad with an active downtime -> should set serverFiltered
+	adWithActive := map[string]interface{}{
+		"name":     serverName,
+		"data-url": "https://example.org:8443",
+		"web-url":  "https://example.org:8444",
+		"downtimes": []map[string]interface{}{
+			{
+				"id":        "uuid-1",
+				"createdBy": "admin",
+				"updatedBy": "admin",
+				"source":    "cache",
+				"class":     "SCHEDULED",
+				"severity":  "Outage (completely inaccessible)",
+				"startTime": now - 3600_000,
+				"endTime":   now + 3600_000,
+			},
+		},
+	}
+	body, _ := json.Marshal(adWithActive)
+	c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer(body))
+	c.Request.Header.Set("Authorization", "Bearer fake")
+	c.Request.Header.Set("Content-Type", "application/json")
+	// Use a user-agent that passes compat checks
+	c.Request.Header.Set("User-Agent", "pelican-origin/7.18.0")
+	r.ServeHTTP(w, c.Request)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	filteredServersMutex.RLock()
+	ft, exists := filteredServers[serverName]
+	filteredServersMutex.RUnlock()
+	require.True(t, exists, "server should be filtered after active downtime")
+	assert.Equal(t, serverFiltered, ft)
+
+	// 2) Post an ad with omitted downtimes (nil) -> should clear serverFiltered
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	adWithoutDowntimes := map[string]interface{}{
+		"name":     serverName,
+		"data-url": "https://example.org:8443",
+		"web-url":  "https://example.org:8444",
+	}
+	body, _ = json.Marshal(adWithoutDowntimes)
+	c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer(body))
+	c.Request.Header.Set("Authorization", "Bearer fake")
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("User-Agent", "pelican-origin/7.18.0")
+	r.ServeHTTP(w, c.Request)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	filteredServersMutex.RLock()
+	_, exists = filteredServers[serverName]
+	filteredServersMutex.RUnlock()
+	assert.False(t, exists, "serverFiltered should be cleared when downtimes are omitted (nil)")
+
+	// 3) Re-post active to set again, then post empty array [] to clear
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	body, _ = json.Marshal(adWithActive)
+	c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer(body))
+	c.Request.Header.Set("Authorization", "Bearer fake")
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("User-Agent", "pelican-origin/7.18.0")
+	r.ServeHTTP(w, c.Request)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	filteredServersMutex.RLock()
+	_, exists = filteredServers[serverName]
+	filteredServersMutex.RUnlock()
+	require.True(t, exists)
+
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	adWithEmpty := map[string]interface{}{
+		"name":      serverName,
+		"data-url":  "https://example.org:8443",
+		"web-url":   "https://example.org:8444",
+		"downtimes": []interface{}{},
+	}
+	body, _ = json.Marshal(adWithEmpty)
+	c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer(body))
+	c.Request.Header.Set("Authorization", "Bearer fake")
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("User-Agent", "pelican-origin/7.18.0")
+	r.ServeHTTP(w, c.Request)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	filteredServersMutex.RLock()
+	_, exists = filteredServers[serverName]
+	filteredServersMutex.RUnlock()
+	assert.False(t, exists, "serverFiltered should be cleared when downtimes is an empty array []")
+}
