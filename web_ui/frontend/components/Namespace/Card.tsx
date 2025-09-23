@@ -19,6 +19,7 @@ import {
   Person,
 } from '@mui/icons-material';
 import Link from 'next/link';
+import ConfirmButton from '@chtc/web-components/ConfirmButton';
 
 import InformationDropdown from './InformationDropdown';
 import { NamespaceIcon } from '@/components/Namespace/index';
@@ -143,11 +144,13 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
                     </Tooltip>
                   )}
                   <Tooltip title={'Delete Registration'}>
-                    <IconButton
+                    <ConfirmButton
                       sx={{ bgcolor: '#ff00001a', mx: 1 }}
                       size={size}
                       color={'error'}
-                      onClick={async (e) => {
+                      onClick={(e) => e.stopPropagation()}
+                      confirmNode={'Delete'}
+                      onConfirm={async (e) => {
                         e.stopPropagation();
                         await alertOnError(
                           async () => await deleteNamespace(namespace.id),
@@ -161,7 +164,7 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
                       }}
                     >
                       <Delete fontSize={size} />
-                    </IconButton>
+                    </ConfirmButton>
                   </Tooltip>
                 </>
               )}
