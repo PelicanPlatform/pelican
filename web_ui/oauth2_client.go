@@ -228,6 +228,25 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 	}
 	user = userIdentifier
 
+	issuerClaim := param.Issuer_IssuerClaimValue.GetString()
+	if issuerClaim == "" {
+		issuerClaim = "iss"
+	}
+
+	issuerClaimValueIface, ok := claimsSource[issuerClaim]
+	if !ok {
+		log.Errorf("'%s' field of user info response from auth provider is not found", issuerClaim)
+		err = errors.New("identity provider returned an invalid issuer claim value")
+		return
+	}
+
+	issuerClaimValue, ok := issuerClaimValueIface.(string)
+	if !ok {
+		log.Errorf("'%s' field of user info response from auth provider is not a string", issuerClaim)
+		err = errors.New("identity provider returned an invalid issuer claim value")
+		return
+	}
+
 	groupSource := strings.ToLower(param.Issuer_GroupSource.GetString())
 	switch groupSource {
 	case GroupSourceTypeOIDC:
@@ -275,6 +294,13 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 		err = errors.Errorf("invalid group source: %s", groupSource)
 		return "", nil, err
 	}
+
+	// now that we have verified that the user belongs to a group we should create the user if it doesn't exist
+	_, err = database.GetOrCreateUser(database.ServerDatabase, user, issuerClaimValue)
+	if err != nil {
+		return "", nil, err
+	}
+
 	log.Debugf("Groups for user %s (source=%s): %v", user, groupSource, groups)
 	return user, groups, nil
 }

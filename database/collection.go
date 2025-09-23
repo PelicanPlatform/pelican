@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -84,7 +85,8 @@ type CollectionMetadata struct {
 
 type User struct {
 	ID        string    `gorm:"primaryKey" json:"id"`
-	Username  string    `gorm:"not null;unique" json:"username"`
+	Username  string    `gorm:"not null;uniqueIndex:idx_user_issuer" json:"username"`
+	Issuer    string    `gorm:"not null;uniqueIndex:idx_user_issuer" json:"issuer"`
 	CreatedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
 }
 
@@ -612,9 +614,9 @@ func GetUserByUsername(db *gorm.DB, username string) (*User, error) {
 	return user, nil
 }
 
-func GetOrCreateUser(db *gorm.DB, username string) (*User, error) {
+func GetOrCreateUser(db *gorm.DB, username string, issuer string) (*User, error) {
 	user := &User{}
-	err := db.Where("username = ?", username).First(user).Error
+	err := db.Where("username = ? AND issuer = ?", username, issuer).First(user).Error
 	if err == nil {
 		return user, nil
 	}
@@ -630,6 +632,7 @@ func GetOrCreateUser(db *gorm.DB, username string) (*User, error) {
 	newUser := &User{
 		ID:       slug,
 		Username: username,
+		Issuer:   issuer,
 	}
 	if err := db.Create(newUser).Error; err != nil {
 		return nil, err
@@ -688,7 +691,10 @@ func AddGroupMember(db *gorm.DB, groupId, member, addedBy string, groups []strin
 		return ErrForbidden
 	}
 
-	user, err := GetOrCreateUser(db, member)
+	// For now, we assume that when a user is added to a group, they are a local user, so we use the local issuer.
+	// This user can later be enhanced with their OIDC attributes if they log in.
+	issuer := param.Server_ExternalWebUrl.GetString()
+	user, err := GetOrCreateUser(db, member, issuer)
 	if err != nil {
 		return err
 	}

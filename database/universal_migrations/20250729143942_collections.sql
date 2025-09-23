@@ -23,9 +23,12 @@ CREATE TABLE collection_members (
 
 CREATE TABLE users (
     id TEXT PRIMARY KEY,
-    username TEXT NOT NULL UNIQUE,
+    username TEXT NOT NULL,
+    issuer TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE UNIQUE INDEX idx_user_issuer ON users (username, issuer);
 
 CREATE TABLE groups (
     id TEXT PRIMARY KEY,
@@ -71,4 +74,5 @@ DROP TABLE users;
 DROP TABLE collection_members;
 DROP TABLE collections;
 DROP INDEX idx_owner_name;
+DROP INDEX idx_user_issuer;
 -- +goose StatementEnd
