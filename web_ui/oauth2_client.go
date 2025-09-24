@@ -228,6 +228,19 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 	}
 	user = userIdentifier
 
+	subIface, ok := claimsSource["sub"]
+	if !ok {
+		log.Errorln("User info endpoint did not return a value for the sub claim")
+		err = errors.New("identity provider did not return a subject for logged-in user")
+		return
+	}
+	sub, ok := subIface.(string)
+	if !ok {
+		log.Errorln("User info endpoint did not return a string for the sub claim")
+		err = errors.New("identity provider did not return a subject for logged-in user")
+		return
+	}
+
 	issuerClaim := param.Issuer_IssuerClaimValue.GetString()
 	if issuerClaim == "" {
 		issuerClaim = "iss"
@@ -296,7 +309,7 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 	}
 
 	// now that we have verified that the user belongs to a group we should create the user if it doesn't exist
-	_, err = database.GetOrCreateUser(database.ServerDatabase, user, issuerClaimValue)
+	_, err = database.GetOrCreateUser(database.ServerDatabase, user, sub, issuerClaimValue)
 	if err != nil {
 		return "", nil, err
 	}

@@ -848,6 +848,9 @@ func TestGroupManagementAPI(t *testing.T) {
 	require.NoError(t, err, "Failed to migrate DB for groups table")
 	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
 	require.NoError(t, err, "Failed to migrate DB for group members table")
+	err = database.ServerDatabase.AutoMigrate(&database.User{})
+	require.NoError(t, err, "Failed to migrate DB for users table")
+
 	t.Run("test-group-lifecycle", func(t *testing.T) {
 		// 1. Create a group as 'owner-user'
 		groupName := "test-group-lifecycle"
@@ -874,7 +877,7 @@ func TestGroupManagementAPI(t *testing.T) {
 		require.NotEmpty(t, groupID)
 
 		// 2. Add a member to the group as 'owner-user'
-		addMemberReq := map[string]string{"member": "new-member"}
+		addMemberReq := map[string]string{"username": "new-member", "sub": "new-member-sub", "issuer": "https://test-issuer.org"}
 		body, err = json.Marshal(addMemberReq)
 		require.NoError(t, err)
 
@@ -901,7 +904,7 @@ func TestGroupManagementAPI(t *testing.T) {
 		assert.Equal(t, http.StatusForbidden, recorder.Code)
 
 		// 4. Try to remove a member as 'other-user' - should fail
-		req, err = http.NewRequest("DELETE", "/api/v1.0/groups/"+groupID+"/members?member=new-member", nil)
+		req, err = http.NewRequest("DELETE", "/api/v1.0/groups/"+groupID+"/members?sub=new-member-sub&issuer=https://test-issuer.org", nil)
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: otherToken})
 
@@ -910,7 +913,7 @@ func TestGroupManagementAPI(t *testing.T) {
 		assert.Equal(t, http.StatusForbidden, recorder.Code)
 
 		// 5. Remove the member from the group as 'owner-user'
-		req, err = http.NewRequest("DELETE", "/api/v1.0/groups/"+groupID+"/members?member=new-member", nil)
+		req, err = http.NewRequest("DELETE", "/api/v1.0/groups/"+groupID+"/members?sub=new-member-sub&issuer=https://test-issuer.org", nil)
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
 
@@ -946,7 +949,7 @@ func TestGroupManagementAPI(t *testing.T) {
 		require.NotEmpty(t, groupID)
 
 		// Verify the regular user can manage their own group
-		addMemberReq := map[string]string{"member": "new-member"}
+		addMemberReq := map[string]string{"username": "new-member", "sub": "new-member-sub", "issuer": "https://test-issuer.org"}
 		body, err = json.Marshal(addMemberReq)
 		require.NoError(t, err)
 

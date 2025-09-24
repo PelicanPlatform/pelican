@@ -12,7 +12,6 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -86,7 +85,8 @@ type CollectionMetadata struct {
 type User struct {
 	ID        string    `gorm:"primaryKey" json:"id"`
 	Username  string    `gorm:"not null;uniqueIndex:idx_user_issuer" json:"username"`
-	Issuer    string    `gorm:"not null;uniqueIndex:idx_user_issuer" json:"issuer"`
+	Sub       string    `gorm:"not null;uniqueIndex:idx_user_sub_issuer" json:"sub"`
+	Issuer    string    `gorm:"not null;uniqueIndex:idx_user_issuer;uniqueIndex:idx_user_sub_issuer" json:"issuer"`
 	CreatedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
 }
 
@@ -614,10 +614,17 @@ func GetUserByUsername(db *gorm.DB, username string) (*User, error) {
 	return user, nil
 }
 
-func GetOrCreateUser(db *gorm.DB, username string, issuer string) (*User, error) {
+func GetOrCreateUser(db *gorm.DB, username string, sub string, issuer string) (*User, error) {
 	user := &User{}
-	err := db.Where("username = ? AND issuer = ?", username, issuer).First(user).Error
+	err := db.Where("sub = ? AND issuer = ?", sub, issuer).First(user).Error
 	if err == nil {
+		// User found, check if we need to update username and, if so, do it
+		if user.Username != username {
+			user.Username = username
+			if err := db.Save(user).Error; err != nil {
+				return nil, err
+			}
+		}
 		return user, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -632,6 +639,7 @@ func GetOrCreateUser(db *gorm.DB, username string, issuer string) (*User, error)
 	newUser := &User{
 		ID:       slug,
 		Username: username,
+		Sub:      sub,
 		Issuer:   issuer,
 	}
 	if err := db.Create(newUser).Error; err != nil {
@@ -681,7 +689,7 @@ func ListGroups(db *gorm.DB) ([]Group, error) {
 	return groups, nil
 }
 
-func AddGroupMember(db *gorm.DB, groupId, member, addedBy string, groups []string) error {
+func AddGroupMember(db *gorm.DB, groupId, username, sub, issuer, addedBy string, groups []string) error {
 	var group Group
 	if err := db.First(&group, "id = ?", groupId).Error; err != nil {
 		return err
@@ -691,10 +699,7 @@ func AddGroupMember(db *gorm.DB, groupId, member, addedBy string, groups []strin
 		return ErrForbidden
 	}
 
-	// For now, we assume that when a user is added to a group, they are a local user, so we use the local issuer.
-	// This user can later be enhanced with their OIDC attributes if they log in.
-	issuer := param.Server_ExternalWebUrl.GetString()
-	user, err := GetOrCreateUser(db, member, issuer)
+	user, err := GetOrCreateUser(db, username, sub, issuer)
 	if err != nil {
 		return err
 	}
@@ -705,12 +710,16 @@ func AddGroupMember(db *gorm.DB, groupId, member, addedBy string, groups []strin
 		AddedBy: addedBy,
 	}
 	if result := db.Create(groupMember); result.Error != nil {
+		// Check if the error is a unique constraint violation
+		if strings.Contains(result.Error.Error(), "UNIQUE constraint failed") {
+			return errors.New("user is already a member of the group")
+		}
 		return result.Error
 	}
 	return nil
 }
 
-func RemoveGroupMember(db *gorm.DB, groupId, member, removedBy string, groups []string) error {
+func RemoveGroupMember(db *gorm.DB, groupId, sub, issuer, removedBy string, groups []string) error {
 	var group Group
 	if err := db.First(&group, "id = ?", groupId).Error; err != nil {
 		return err
@@ -720,10 +729,10 @@ func RemoveGroupMember(db *gorm.DB, groupId, member, removedBy string, groups []
 		return ErrForbidden
 	}
 
-	user, err := GetUserByUsername(db, member)
-	if err != nil {
+	var user User
+	if err := db.Where("sub = ? AND issuer = ?", sub, issuer).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
+			return nil // User not found, so not a member
 		}
 		return err
 	}
