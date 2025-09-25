@@ -945,6 +945,25 @@ definitions:
         items:
           $ref: "#/definitions/GroupMember"
         description: List of group members
+  User:
+    type: object
+    properties:
+      id:
+        type: string
+        description: Unique identifier for the user
+      username:
+        type: string
+        description: Username of the user
+      sub:
+        type: string
+        description: The 'sub' claim from the user's OIDC token
+      issuer:
+        type: string
+        description: The 'iss' claim from the user's OIDC token
+      created_at:
+        type: string
+        format: date-time
+        description: When the user was created
   GroupMember:
     type: object
     properties:
@@ -952,10 +971,11 @@ definitions:
         type: string
         description: ID of the group
         example: "abc12345"
-      member:
+      user_id:
         type: string
-        description: Member identifier
-        example: "user@example.com"
+        description: ID of the user
+      user:
+        $ref: "#/definitions/User"
       added_by:
         type: string
         description: User who added this member
@@ -1096,12 +1116,22 @@ definitions:
   AddGroupMemberRequest:
     type: object
     required:
-      - member
+      - username
+      - sub
+      - issuer
     properties:
-      member:
+      username:
         type: string
-        description: Member identifier to add
-        example: "user@example.com"
+        description: Username of the member to add
+        example: "new-member"
+      sub:
+        type: string
+        description: The 'sub' claim for the member to add
+        example: "new-member-sub"
+      issuer:
+        type: string
+        description: The 'iss' claim for the member to add
+        example: "https://test-issuer.org"
   ListCollectionResponse:
     type: object
     properties:
@@ -3704,6 +3734,28 @@ paths:
 
   # Group Management APIs
   /groups:
+    get:
+      tags:
+        - groups
+      summary: List all groups
+      description: "`Authentication Required`"
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/Group"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
     post:
       tags:
         - groups
@@ -3738,6 +3790,38 @@ paths:
           schema:
             $ref: "#/definitions/ErrorModelV2"
   /groups/{id}/members:
+    get:
+      tags:
+        - groups
+      summary: List members of a group
+      description: "`Authentication Required`"
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the group
+          required: true
+          type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/GroupMember"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Group not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
     post:
       tags:
         - groups
@@ -3753,15 +3837,19 @@ paths:
           description: ID of the group
           required: true
           type: string
-        - in: body
-          name: member
-          description: The member to add
+        - name: sub
+          in: query
+          description: The 'sub' claim of the member to remove
           required: true
-          schema:
-            $ref: "#/definitions/AddGroupMemberRequest"
+          type: string
+        - name: issuer
+          in: query
+          description: The 'iss' claim of the member to remove
+          required: true
+          type: string
       responses:
         "204":
-          description: Member added successfully
+          description: Member removed successfully
         "400":
           description: Bad request
           schema:
@@ -3775,7 +3863,7 @@ paths:
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "404":
-          description: Group not found
+          description: Group or member not found
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "500":
@@ -3817,6 +3905,29 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
         "404":
           description: Group or member not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /users:
+    get:
+      tags:
+        - groups
+      summary: List all users
+      description: "`Authentication Required`"
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/User"
+        "401":
+          description: Authentication required
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "500":
