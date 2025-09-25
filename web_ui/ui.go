@@ -611,6 +611,7 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.DELETE("/api/v1.0/groups/:id/members", AuthHandler, handleRemoveGroupMember)
 
 	engine.GET("/api/v1.0/users", AuthHandler, handleListUsers)
+	engine.POST("/api/v1.0/users", AuthHandler, handleAddUser)
 
 	return nil
 }

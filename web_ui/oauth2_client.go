@@ -260,6 +260,12 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 		return
 	}
 
+	// now that we have verified that the user belongs to a group we should create the user if it doesn't exist
+	_, err = database.GetOrCreateUser(database.ServerDatabase, user, sub, issuerClaimValue)
+	if err != nil {
+		return "", nil, err
+	}
+
 	groupSource := strings.ToLower(param.Issuer_GroupSource.GetString())
 	switch groupSource {
 	case GroupSourceTypeOIDC:
@@ -305,12 +311,6 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 		return
 	default:
 		err = errors.Errorf("invalid group source: %s", groupSource)
-		return "", nil, err
-	}
-
-	// now that we have verified that the user belongs to a group we should create the user if it doesn't exist
-	_, err = database.GetOrCreateUser(database.ServerDatabase, user, sub, issuerClaimValue)
-	if err != nil {
 		return "", nil, err
 	}
 

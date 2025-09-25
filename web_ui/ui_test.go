@@ -881,6 +881,15 @@ func TestGroupManagementAPI(t *testing.T) {
 		body, err = json.Marshal(addMemberReq)
 		require.NoError(t, err)
 
+		// Pre-create the user before adding them to the group
+		req, err = http.NewRequest("POST", "/api/v1.0/users", bytes.NewReader(body))
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
+		req.Header.Set("Content-Type", "application/json")
+		recorder = httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusCreated, recorder.Code)
+
 		req, err = http.NewRequest("POST", "/api/v1.0/groups/"+groupID+"/members", bytes.NewReader(body))
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
@@ -949,9 +958,18 @@ func TestGroupManagementAPI(t *testing.T) {
 		require.NotEmpty(t, groupID)
 
 		// Verify the regular user can manage their own group
-		addMemberReq := map[string]string{"username": "new-member", "sub": "new-member-sub", "issuer": "https://test-issuer.org"}
+		addMemberReq := map[string]string{"username": "new-member2", "sub": "new-member-sub2", "issuer": "https://test-issuer.org"}
 		body, err = json.Marshal(addMemberReq)
 		require.NoError(t, err)
+
+		// Pre-create the user before adding them to the group
+		req, err = http.NewRequest("POST", "/api/v1.0/users", bytes.NewReader(body))
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: regularUserToken})
+		req.Header.Set("Content-Type", "application/json")
+		recorder = httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusCreated, recorder.Code)
 
 		req, err = http.NewRequest("POST", "/api/v1.0/groups/"+groupID+"/members", bytes.NewReader(body))
 		require.NoError(t, err)

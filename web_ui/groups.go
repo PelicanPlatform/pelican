@@ -187,7 +187,7 @@ func handleAddGroupMember(ctx *gin.Context) {
 		return
 	}
 
-	err = database.AddGroupMember(database.ServerDatabase, ctx.Param("id"), req.Username, req.Sub, req.Issuer, user, groups)
+	err = database.AddGroupMember(database.ServerDatabase, ctx.Param("id"), req.Sub, req.Issuer, user, groups)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -209,6 +209,56 @@ func handleAddGroupMember(ctx *gin.Context) {
 	}
 
 	ctx.Status(http.StatusNoContent)
+}
+
+type AddUserReq struct {
+	Username string `json:"username"`
+	Sub      string `json:"sub"`
+	Issuer   string `json:"issuer"`
+}
+
+func handleAddUser(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie, token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access}, // Or a new scope for user management
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	var req AddUserReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid request body",
+		})
+		return
+	}
+
+	if req.Username == "" || req.Sub == "" || req.Issuer == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Username, sub, and issuer are required",
+		})
+		return
+	}
+
+	_, err = database.CreateUser(database.ServerDatabase, req.Username, req.Sub, req.Issuer)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to create user: %v", err),
+		})
+		return
+	}
+
+	ctx.Status(http.StatusCreated)
 }
 
 func handleRemoveGroupMember(ctx *gin.Context) {

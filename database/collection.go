@@ -648,6 +648,37 @@ func GetOrCreateUser(db *gorm.DB, username string, sub string, issuer string) (*
 	return newUser, nil
 }
 
+func CreateUser(db *gorm.DB, username string, sub string, issuer string) (*User, error) {
+	user := &User{}
+	err := db.Where("sub = ? AND issuer = ?", sub, issuer).First(user).Error
+	if err == nil {
+		return nil, errors.New("user already exists")
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	// User not found, create one
+	slug, err := generateSlug()
+	if err != nil {
+		return nil, err
+	}
+	newUser := &User{
+		ID:       slug,
+		Username: username,
+		Sub:      sub,
+		Issuer:   issuer,
+	}
+	if err := db.Create(newUser).Error; err != nil {
+		// Check if the error is a unique constraint violation on username+issuer
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return nil, errors.New("user with the same username and issuer already exists")
+		}
+		return nil, err
+	}
+	return newUser, nil
+}
+
 func CreateGroup(db *gorm.DB, name, description, createdBy string, groups []string) (*Group, error) {
 	slug, err := generateSlug()
 	if err != nil {
@@ -689,7 +720,7 @@ func ListGroups(db *gorm.DB) ([]Group, error) {
 	return groups, nil
 }
 
-func AddGroupMember(db *gorm.DB, groupId, username, sub, issuer, addedBy string, groups []string) error {
+func AddGroupMember(db *gorm.DB, groupId, sub, issuer, addedBy string, groups []string) error {
 	var group Group
 	if err := db.First(&group, "id = ?", groupId).Error; err != nil {
 		return err
@@ -699,8 +730,12 @@ func AddGroupMember(db *gorm.DB, groupId, username, sub, issuer, addedBy string,
 		return ErrForbidden
 	}
 
-	user, err := GetOrCreateUser(db, username, sub, issuer)
+	user := &User{}
+	err := db.Where("sub = ? AND issuer = ?", sub, issuer).First(user).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.New("user does not exist")
+		}
 		return err
 	}
 
