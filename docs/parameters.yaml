@@ -1265,6 +1265,14 @@ type: filename
 default: $ConfigBase/origin-fed-token
 components: ["origin"]
 ---
+name: Origin.SelfTestMaxAge
+description: |+
+  Defines the maximum allowed time since the last successful self-test. If an Origin fails to complete a new successful test within this period,
+  and Xrootd.AutoShutdownEnabled is true, the Origin will automatically shut down. This acts as a fail-safe mechanism.
+type: duration
+default: 1h
+components: ["origin"]
+---
 ############################
 #   Local cache configs    #
 ############################
@@ -1745,6 +1753,14 @@ description: |+
   Leave unset to disable.
 type: filename
 default: ${Cache.RunLocation}/xrootd.stats
+components: ["cache"]
+---
+name: Cache.SelfTestMaxAge
+description: |+
+  Defines the maximum allowed time since the last successful self-test. If a Cache fails to complete a new successful test within this period,
+  and Xrootd.AutoShutdownEnabled is true, the Cache will automatically shut down. This acts as a fail-safe mechanism.
+type: duration
+default: 1h
 components: ["cache"]
 ---
 ############################
@@ -3018,6 +3034,20 @@ type: int
 default: 20000
 components: ["origin", "cache"]
 hidden: true
+---
+name: Xrootd.ConfigUpdateFailureTimeout
+description: |+
+  If the Authfile and/or scitoken config file fail to update within this duration, and Xrootd.AutoShutdownEnabled is true, the server will be automatically shut down.
+type: duration
+default: 1h
+components: ["origin", "cache"]
+---
+name: Xrootd.AutoShutdownEnabled
+description: |+
+  If enabled, the server will be automatically shut down if the Authfile and/or scitoken config file fail to update within the timeout.
+type: bool
+default: true
+components: ["origin", "cache"]
 ---
 ############################
 # Monitoring-level configs #

@@ -56,6 +56,7 @@ type Config struct {
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
 		SelfTest bool `mapstructure:"selftest" yaml:"SelfTest"`
 		SelfTestInterval time.Duration `mapstructure:"selftestinterval" yaml:"SelfTestInterval"`
+		SelfTestMaxAge time.Duration `mapstructure:"selftestmaxage" yaml:"SelfTestMaxAge"`
 		SentinelLocation string `mapstructure:"sentinellocation" yaml:"SentinelLocation"`
 		StorageLocation string `mapstructure:"storagelocation" yaml:"StorageLocation"`
 		Url string `mapstructure:"url" yaml:"Url"`
@@ -267,6 +268,7 @@ type Config struct {
 		ScitokensUsernameClaim string `mapstructure:"scitokensusernameclaim" yaml:"ScitokensUsernameClaim"`
 		SelfTest bool `mapstructure:"selftest" yaml:"SelfTest"`
 		SelfTestInterval time.Duration `mapstructure:"selftestinterval" yaml:"SelfTestInterval"`
+		SelfTestMaxAge time.Duration `mapstructure:"selftestmaxage" yaml:"SelfTestMaxAge"`
 		StoragePrefix string `mapstructure:"storageprefix" yaml:"StoragePrefix"`
 		StorageType string `mapstructure:"storagetype" yaml:"StorageType"`
 		TokenAudience string `mapstructure:"tokenaudience" yaml:"TokenAudience"`
@@ -367,7 +369,9 @@ type Config struct {
 	Xrootd struct {
 		AuthRefreshInterval time.Duration `mapstructure:"authrefreshinterval" yaml:"AuthRefreshInterval"`
 		Authfile string `mapstructure:"authfile" yaml:"Authfile"`
+		AutoShutdownEnabled bool `mapstructure:"autoshutdownenabled" yaml:"AutoShutdownEnabled"`
 		ConfigFile string `mapstructure:"configfile" yaml:"ConfigFile"`
+		ConfigUpdateFailureTimeout time.Duration `mapstructure:"configupdatefailuretimeout" yaml:"ConfigUpdateFailureTimeout"`
 		DetailedMonitoringHost string `mapstructure:"detailedmonitoringhost" yaml:"DetailedMonitoringHost"`
 		DetailedMonitoringPort int `mapstructure:"detailedmonitoringport" yaml:"DetailedMonitoringPort"`
 		EnableLocalMonitoring bool `mapstructure:"enablelocalmonitoring" yaml:"EnableLocalMonitoring"`
@@ -424,6 +428,7 @@ type configWithType struct {
 		RunLocation struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }
 		SelfTestInterval struct { Type string; Value time.Duration }
+		SelfTestMaxAge struct { Type string; Value time.Duration }
 		SentinelLocation struct { Type string; Value string }
 		StorageLocation struct { Type string; Value string }
 		Url struct { Type string; Value string }
@@ -635,6 +640,7 @@ type configWithType struct {
 		ScitokensUsernameClaim struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }
 		SelfTestInterval struct { Type string; Value time.Duration }
+		SelfTestMaxAge struct { Type string; Value time.Duration }
 		StoragePrefix struct { Type string; Value string }
 		StorageType struct { Type string; Value string }
 		TokenAudience struct { Type string; Value string }
@@ -735,7 +741,9 @@ type configWithType struct {
 	Xrootd struct {
 		AuthRefreshInterval struct { Type string; Value time.Duration }
 		Authfile struct { Type string; Value string }
+		AutoShutdownEnabled struct { Type string; Value bool }
 		ConfigFile struct { Type string; Value string }
+		ConfigUpdateFailureTimeout struct { Type string; Value time.Duration }
 		DetailedMonitoringHost struct { Type string; Value string }
 		DetailedMonitoringPort struct { Type string; Value int }
 		EnableLocalMonitoring struct { Type string; Value bool }
