@@ -1019,7 +1019,11 @@ func warnIssuerKey(v *viper.Viper) {
 			if _, err := os.Stat(legacyKey); err == nil {
 				issuerKeyConfigBy := "default"
 				issuerKeysDirectoryConfigBy := "default"
-				changeExtension := ""
+				oldPath := v.GetString(param.IssuerKey.GetName())
+				issuerKeysDir := v.GetString(param.IssuerKeysDirectory.GetName())
+				ext := filepath.Ext(oldPath)
+				destBase := strings.TrimSuffix(filepath.Base(oldPath), ext) + ".pem"
+				destPath := filepath.Join(issuerKeysDir, destBase)
 
 				configDir := v.GetString("ConfigDir")
 				if filepath.Join(configDir, "issuer.jwk") != v.GetString(param.IssuerKey.GetName()) {
@@ -1028,16 +1032,13 @@ func warnIssuerKey(v *viper.Viper) {
 				if filepath.Join(configDir, "issuer-keys") != v.GetString(param.IssuerKeysDirectory.GetName()) {
 					issuerKeysDirectoryConfigBy = "custom"
 				}
-				if !strings.HasSuffix(v.GetString(param.IssuerKey.GetName()), ".pem") {
-					changeExtension = "renamed to use '.pem' extension and "
-				}
 
 				log.Errorf(
-					"File %q should be %smoved into directory %q. "+
-						"The %q parameter (currently set to %q via %s configuration) is being deprecated in favor of %q (currently set to %q via %s configuration). ",
-					v.GetString(param.IssuerKey.GetName()), changeExtension, v.GetString(param.IssuerKeysDirectory.GetName()),
+					"The %q parameter (currently set to %q via %s configuration) is being deprecated in favor of %q (currently set to %q via %s configuration). "+
+						"You should move %q to %q. ",
 					param.IssuerKey.GetName(), param.IssuerKey.GetString(), issuerKeyConfigBy,
-					param.IssuerKeysDirectory.GetName(), v.GetString(param.IssuerKeysDirectory.GetName()), issuerKeysDirectoryConfigBy,
+					param.IssuerKeysDirectory.GetName(), issuerKeysDir, issuerKeysDirectoryConfigBy,
+					oldPath, destPath,
 				)
 			}
 		}
