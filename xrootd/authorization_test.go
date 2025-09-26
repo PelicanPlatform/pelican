@@ -21,7 +21,6 @@
 package xrootd
 
 import (
-	"bufio"
 	"context"
 	_ "embed"
 	"io/fs"
@@ -35,6 +34,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -74,7 +74,10 @@ var (
 	cacheEmptyOutput string
 
 	//go:embed resources/osdf-authfile
-	authfileOutput string
+	osdfAuthfile string
+
+	//go:embed resources/multi-export-origin.yml
+	multiExportOrigin string
 
 	//go:embed resources/multi-export-multi-issuers.yml
 	multiExportIssuers string
@@ -90,16 +93,6 @@ var (
 	baz
 	abc \`
 
-	sampleMultilineOutputParsed = []string{"foo \tbar", "\tbaz", "\tabc "}
-
-	cacheAuthfileMultilineInput = `
-u * /user/ligo -rl \
-/Gluex rl \
-/NSG/PUBLIC rl \
-/VDC/PUBLIC rl`
-
-	cacheAuthfileOutput = "u * /.well-known lr /user/ligo -rl /Gluex rl /NSG/PUBLIC rl /VDC/PUBLIC rl\n"
-
 	// Configuration snippet from bug report #601
 	scitokensCfgAud = `
 [Global]
@@ -109,36 +102,6 @@ audience = GLOW, HCC, IceCube, NRP, OSG, PATh, UCSD
 issuer = https://ap20.uc.osg-htc.org:1094/ospool/ap20
 base_path = /ospool/ap20
 `
-
-	// Actual authfile entries here are from the bug report #568
-	otherAuthfileEntries = `# DN: /CN=sc-origin.chtc.wisc.edu
-u 5a42185a.0 /chtc/PROTECTED/sc-origin lr
-# DN: /DC=org/DC=incommon/C=US/ST=California/O=University of California, San Diego/CN=osg-stash-sfu-computecanada-ca.nationalresearchplatform.org
-u 4ff08838.0 /chtc/PROTECTED/sc-origin lr
-# DN: /DC=org/DC=incommon/C=US/ST=Georgia/O=Georgia Institute of Technology/OU=Office of Information Technology/CN=osg-gftp2.pace.gatech.edu
-u 3af6a420.0 /chtc/PROTECTED/sc-origin lr
-`
-
-	mergedAuthfileEntries = otherAuthfileEntries + "u * /.well-known lr\n"
-
-	otherMergedAuthfileEntries = otherAuthfileEntries + "u * /.well-known lr /user/ligo -rl /Gluex rl /NSG/PUBLIC rl /VDC/PUBLIC rl\n"
-
-	//Actual cache authfile entriese here for testing
-	cacheAuthfileEntries = `# FQAN: /GLOW
-g /GLOW /chtc/PROTECTED/sc-origin rl /chtc/PROTECTED/sc-origin2000 rl /chtc/itb/helm-origin/PROTECTED rl
-# DN: /DC=org/DC=cilogon/C=US/O=University of Wisconsin-Madison/CN=Matyas Selmeci A148276
-u 5922b3b6.0 /chtc/PROTECTED/sc-origin rl /chtc/PROTECTED/sc-origin2000 rl /chtc/itb/helm-origin/PROTECTED rl
-# FQAN: /hcc
-g /hcc /hcc/focusday rl
-# DN: /DC=ch/DC=cern/OU=Organic Units/OU=Users/CN=bbockelm/CN=659869/CN=Brian Paul Bockelman
-u 6fb7593d.0 /hcc/focusday rl
-# FQAN: /xenon.biggrid.nl/*
-g /xenon.biggrid.nl/* /nrp/protected/xenon-biggrid-nl/ rl
-# DN: /DC=ch/DC=cern/OU=Organic Units/OU=Users/CN=jstephen/CN=781624/CN=Judith Lorraine Stephen
-u eeccb14b.0 /nrp/protected/xenon-biggrid-nl/ rl
-`
-
-	cacheMergedAuthfileEntries = cacheAuthfileEntries + "u * /user/ligo -rl /Gluex rl /NSG/PUBLIC rl /VDC/PUBLIC rl "
 )
 
 func TestOSDFAuthRetrieval(t *testing.T) {
@@ -150,7 +113,7 @@ func TestOSDFAuthRetrieval(t *testing.T) {
 		if r.URL.Path == "/origin/Authfile" && r.URL.RawQuery == "fqdn=sc-origin.chtc.wisc.edu" {
 			w.Header().Set("Content-Type", "text/plain")
 			w.WriteHeader(http.StatusOK)
-			_, err := w.Write([]byte(authfileOutput))
+			_, err := w.Write([]byte(osdfAuthfile))
 			require.NoError(t, err)
 			return
 		}
@@ -183,373 +146,725 @@ func TestOSDFAuthRetrieval(t *testing.T) {
 	server_utils.ResetTestState()
 }
 
-func TestOSDFAuthCreation(t *testing.T) {
-	tests := []struct {
-		desc        string
-		authIn      string
-		authOut     string
-		server      server_structs.XRootDServer
-		hostname    string
-		disableX509 bool
+func TestAuthPathCompToWord(t *testing.T) {
+	testCases := []struct {
+		component authPathComponent
+		word      string
+	}{
+		{authPathComponent{prefix: "/path1", reads: true, listings: true, subtractive: false}, "/path1 lr"},
+		{authPathComponent{prefix: "/path2", reads: true, listings: false, subtractive: false}, "/path2 r"},
+		{authPathComponent{prefix: "/path3", reads: false, listings: true, subtractive: false}, "/path3 l"},
+		{authPathComponent{prefix: "/path4", reads: true, listings: true, subtractive: true}, "/path4 -lr"},
+		{authPathComponent{prefix: "/path5", reads: true, listings: false, subtractive: true}, "/path5 -r"},
+		{authPathComponent{prefix: "/path6", reads: false, listings: true, subtractive: true}, "/path6 -l"},
+	}
+	for _, testInput := range testCases {
+		t.Run(testInput.word, func(t *testing.T) {
+			word := testInput.component.String()
+			require.Equal(t, testInput.word, word, "Mismatch in word for component: %+v", testInput.component)
+		})
+	}
+}
+
+func TestAuthPolicyFromWord(t *testing.T) {
+	testCases := []struct {
+		policyWord  string
+		policy      authPathComponent
+		expectError bool
+	}{
+		{"lr", authPathComponent{subtractive: false, reads: true, listings: true}, false},
+		{"l", authPathComponent{subtractive: false, reads: false, listings: true}, false},
+		{"r", authPathComponent{subtractive: false, reads: true, listings: false}, false},
+		{"-lr", authPathComponent{subtractive: true, reads: true, listings: true}, false},
+		{"-l", authPathComponent{subtractive: true, reads: false, listings: true}, false},
+		{"-r", authPathComponent{subtractive: true, reads: true, listings: false}, false},
+		{"x", authPathComponent{}, true},
+		{"-x", authPathComponent{}, true},
+		{"l-r", authPathComponent{}, true},
+		{"", authPathComponent{}, true},
+	}
+
+	for _, testInput := range testCases {
+		t.Run(testInput.policyWord, func(t *testing.T) {
+			reads, listings, subtractive, err := authPolicyFromWord(testInput.policyWord)
+			if testInput.expectError {
+				require.Error(t, err, "Expected error for policy word: %s", testInput.policyWord)
+				return
+			}
+
+			require.NoError(t, err, "Unexpected error for policy word: %s", testInput.policyWord)
+			require.Equal(t, testInput.policy.reads, reads, "Mismatch in reads for policy word: %s", testInput.policyWord)
+			require.Equal(t, testInput.policy.listings, listings, "Mismatch in listings for policy word: %s", testInput.policyWord)
+			require.Equal(t, testInput.policy.subtractive, subtractive, "Mismatch in subtractive for policy word: %s", testInput.policyWord)
+		})
+	}
+}
+
+func TestAuthPoliciesFromLine(t *testing.T) {
+	testCases := []struct {
+		name            string
+		line            string
+		entries         map[string]*authLine
+		expectedEntries map[string]*authLine
+		expectError     bool
 	}{
 		{
-			desc:        "osdf-origin-auth-no-merge",
-			authIn:      "",
-			authOut:     mergedAuthfileEntries,
-			server:      &origin.OriginServer{},
-			hostname:    "origin-test",
-			disableX509: false,
+			"simple case, first entry",
+			"u * /path1 lr /path2 -r",
+			map[string]*authLine{},
+			map[string]*authLine{
+				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
+					"/path1": {prefix: "/path1", reads: true, listings: true, subtractive: false},
+					"/path2": {prefix: "/path2", reads: true, listings: false, subtractive: true},
+				},
+				},
+			},
+			false,
 		},
 		{
-			desc:        "osdf-origin-auth-merge",
-			authIn:      cacheAuthfileMultilineInput,
-			authOut:     otherMergedAuthfileEntries,
-			server:      &origin.OriginServer{},
-			hostname:    "origin-test",
-			disableX509: false,
+			"simple case, second entry",
+			"u blah /path3 -lr /path4 r",
+			map[string]*authLine{
+				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
+					"/path1": {prefix: "/path1", reads: true, listings: true, subtractive: false},
+					"/path2": {prefix: "/path2", reads: true, listings: false, subtractive: true},
+				},
+				},
+			},
+			map[string]*authLine{
+				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
+					"/path1": {prefix: "/path1", reads: true, listings: true, subtractive: false},
+					"/path2": {prefix: "/path2", reads: true, listings: false, subtractive: true},
+				},
+				},
+				"u blah": {idType: "u", id: "blah", authComponents: map[string]*authPathComponent{
+					"/path3": {prefix: "/path3", reads: true, listings: true, subtractive: true},
+					"/path4": {prefix: "/path4", reads: true, listings: false, subtractive: false},
+				},
+				},
+			},
+			false,
 		},
 		{
-			desc:        "osdf-cache-auth-no-merge",
-			authIn:      "",
-			authOut:     cacheAuthfileEntries,
-			server:      &cache.CacheServer{},
-			hostname:    "cache-test",
-			disableX509: false,
+			"duplicate identifier",
+			"u * /path3 -lr /path4 r",
+			map[string]*authLine{
+				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
+					"/path1": {prefix: "/path1", reads: true, listings: true, subtractive: false},
+					"/path2": {prefix: "/path2", reads: true, listings: false, subtractive: true},
+				},
+				},
+			},
+			map[string]*authLine{},
+			true,
 		},
 		{
-			desc:        "osdf-cache-auth-merge",
-			authIn:      cacheAuthfileMultilineInput,
-			authOut:     cacheMergedAuthfileEntries,
-			server:      &cache.CacheServer{},
-			hostname:    "cache-test",
-			disableX509: false,
+			"duplicate paths",
+			"u * /path1 lr /path1 -r",
+			map[string]*authLine{},
+			map[string]*authLine{},
+			true,
 		},
 		{
-			desc:        "osdf-origin-no-authfile",
-			authIn:      "",
-			authOut:     "u * /.well-known lr\n",
-			server:      &origin.OriginServer{},
-			hostname:    "origin-test-empty",
-			disableX509: false,
+			"malformed missing privileges",
+			"u * /path1 lr /path2 -r /path-missing-privileges",
+			map[string]*authLine{}, // no entries yet
+			map[string]*authLine{},
+			true,
 		},
 		{
-			desc:        "osdf-cache-no-authfile",
-			authIn:      "",
-			authOut:     "",
-			server:      &cache.CacheServer{},
-			hostname:    "cache-test-empty",
-			disableX509: false,
+			"malformed no paths",
+			"u *",
+			map[string]*authLine{}, // no entries yet
+			map[string]*authLine{},
+			true,
 		},
 		{
-			desc:        "osdf-cache-disable-auth",
-			authIn:      cacheAuthfileMultilineInput,
-			authOut:     "u * /user/ligo -rl /Gluex rl /NSG/PUBLIC rl /VDC/PUBLIC rl ",
-			server:      &cache.CacheServer{},
-			hostname:    "cache-test",
-			disableX509: true,
+			"malformed bad privileges",
+			"u * /foo x",
+			map[string]*authLine{}, // no entries yet
+			map[string]*authLine{},
+			true,
 		},
 		{
-			desc:        "osdf-origin-disable-auth",
-			authIn:      "",
-			authOut:     "u * /.well-known lr\n",
-			server:      &origin.OriginServer{},
-			hostname:    "origin-test",
-			disableX509: true,
+			"comments skipped",
+			"# u * /foo x",
+			map[string]*authLine{}, // no entries yet
+			map[string]*authLine{},
+			false,
 		},
 	}
 
+	for _, testInput := range testCases {
+		t.Run(testInput.line, func(t *testing.T) {
+			err := authPoliciesFromLine(testInput.line, testInput.entries)
+			if testInput.expectError {
+				require.Error(t, err, "Expected error for line: %s", testInput.line)
+				return
+			}
+			require.NoError(t, err, "Unexpected error for line: %s", testInput.line)
+			require.True(t, reflect.DeepEqual(testInput.expectedEntries, testInput.entries), "Mismatch in entries for line: %s: %+v", testInput.line, testInput.entries)
+		})
+	}
+}
+
+// Helper function for other tests here who call server_utils.GetOriginExports() internally.
+// This function gets a temp dir for export StoragePrefixes, whose existence is validated
+// by server_utils.GetOriginExports().
+func getTmpFile(t *testing.T) string {
+	tmpFile := t.TempDir() + "/tmpfile"
+
+	// Create the file
+	file, err := os.Create(tmpFile)
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	file.Close()
+
+	// Set file permissions to 777
+	err = os.Chmod(tmpFile, 0777)
+	if err != nil {
+		t.Fatalf("Failed to set file permissions: %v", err)
+	}
+
+	return tmpFile
+}
+
+// Helper function for other tests here who call server_utils.GetOriginExports() internally.
+// This function populates the values so that call doesn't fail.
+func setupExports(t *testing.T, config string) {
+	viper.SetConfigType("yaml")
+	// Use viper to read in the embedded config
+	err := viper.ReadConfig(strings.NewReader(config))
+	require.NoError(t, err, "error reading config")
+	// Some keys need to be overridden because GetOriginExports validates things like filepaths by making
+	// sure the file exists and is readable by the process.
+	// Iterate through Origin.XXX keys and check for "<WILL BE REPLACED IN TEST>" in the value
+	for _, key := range viper.AllKeys() {
+		if strings.Contains(viper.GetString(key), "<WILL BE REPLACED IN TEST>") {
+			tmpFile := getTmpFile(t)
+			viper.Set(key, tmpFile)
+		} else if key == "origin.exports" { // keys will be lowercased
+			// We also need to override paths for any exports that define "SHOULD-OVERRIDE-TEMPFILE"
+			exports := viper.Get(key).([]interface{})
+			for _, export := range exports {
+				exportMap := export.(map[string]interface{})
+				for k, v := range exportMap {
+					if v == "<WILL BE REPLACED IN TEST>" {
+						tmpFile := getTmpFile(t)
+						exportMap[k] = tmpFile
+					}
+				}
+			}
+			// Set the modified exports back to viper after all overrides
+			viper.Set(key, exports)
+		}
+	}
+
+	// Provide an issuer URL so setup doesn't fail
+	viper.Set(param.Server_IssuerUrl.GetName(), "https://foo.bar.com")
+
+	// Now call GetOriginExports and check the struct
+	_, err = server_utils.GetOriginExports()
+	require.NoError(t, err, "error getting origin exports")
+}
+
+func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
+	testCases := []struct {
+		name              string
+		inputAuthLinesMap map[string]*authLine
+		expectedEntries   map[string]*authLine
+	}{
+		// Each of the tests uses the same multi-export Origin config, which has both
+		// public and protected namespaces.
+		{
+			"mulit-export, multi-auth origin with no input authfile",
+			map[string]*authLine{},
+			map[string]*authLine{
+				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
+					"/first/namespace":  {prefix: "/first/namespace", reads: true, listings: true, subtractive: false},
+					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: false, subtractive: true},
+					"/.well-known":      {prefix: "/.well-known", reads: true, listings: true, subtractive: false},
+				},
+				},
+			},
+		},
+		{
+			"mulit-export, multi-auth origin with non-conflicting input authfile",
+			map[string]*authLine{
+				"u another": {idType: "u", id: "another", authComponents: map[string]*authPathComponent{
+					"/first/namespace":  {prefix: "/first/namespace", reads: false, listings: true, subtractive: false},
+					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: true, subtractive: false},
+				},
+				},
+			},
+			map[string]*authLine{
+				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
+					"/first/namespace":  {prefix: "/first/namespace", reads: true, listings: true, subtractive: false},
+					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: false, subtractive: true},
+					"/.well-known":      {prefix: "/.well-known", reads: true, listings: true, subtractive: false},
+				},
+				},
+				"u another": {idType: "u", id: "another", authComponents: map[string]*authPathComponent{
+					"/first/namespace":  {prefix: "/first/namespace", reads: false, listings: true, subtractive: false},
+					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: true, subtractive: false},
+				},
+				},
+			},
+		},
+		{
+			"mulit-export, multi-auth origin with conflicting input authfile",
+			map[string]*authLine{
+				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
+					"/first/namespace": {prefix: "/first/namespace", reads: false, listings: true, subtractive: false},
+					"/third/namespace": {prefix: "/third/namespace", reads: true, listings: true, subtractive: false},
+				},
+				},
+			},
+			map[string]*authLine{
+				// The pre-populated auth map coming from admin input should override the export-derived one
+				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
+					"/first/namespace":  {prefix: "/first/namespace", reads: false, listings: true, subtractive: false},
+					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: false, subtractive: true},
+					"/third/namespace":  {prefix: "/third/namespace", reads: true, listings: true, subtractive: false},
+					"/.well-known":      {prefix: "/.well-known", reads: true, listings: true, subtractive: false},
+				},
+				},
+			},
+		},
+	}
+
+	for _, testInput := range testCases {
+		t.Run(testInput.name, func(t *testing.T) {
+			server_utils.ResetTestState()
+			defer server_utils.ResetTestState()
+
+			setupExports(t, multiExportOrigin)
+
+			err := populateAuthLinesMapForOrigin(testInput.inputAuthLinesMap)
+			// Note we don't test for the err != nil case because that implies GetOriginExports returned
+			// a prefixless-export. This error cannot be triggered by these inputs.
+			require.NoError(t, err, "Unexpected error for test case: %s", testInput.name)
+			// Since the outer map contains an inner map to references, spew lets us see the full structure on error
+			require.True(t, reflect.DeepEqual(testInput.expectedEntries, testInput.inputAuthLinesMap),
+				"Mismatch in entries for test case: %s\nExpected:\n%s\nActual:\n%s",
+				testInput.name,
+				spew.Sdump(testInput.expectedEntries),
+				spew.Sdump(testInput.inputAuthLinesMap),
+			)
+		})
+	}
+}
+
+func TestPopulateAuthLinesMapForCache(t *testing.T) {
+	nsAds := []server_structs.NamespaceAdV2{
+		{
+			Caps: server_structs.Capabilities{PublicReads: true, Listings: true, Reads: true},
+			Path: "/first/namespace",
+		},
+		{
+			Caps: server_structs.Capabilities{PublicReads: false, Listings: false, Reads: true},
+			Path: "/second/namespace",
+		},
+	}
+	server := server_structs.XRootDServer(&cache.CacheServer{})
+	server.SetNamespaceAds(nsAds)
+
+	testCases := []struct {
+		name              string
+		inputAuthLinesMap map[string]*authLine
+		expectedEntries   map[string]*authLine
+	}{
+		{
+			"mulit-export, multi-auth cache with no input authfile",
+			map[string]*authLine{},
+			map[string]*authLine{
+				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
+					"/first/namespace":  {prefix: "/first/namespace", reads: true, listings: true, subtractive: false},
+					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: false, subtractive: true},
+					"/.well-known":      {prefix: "/.well-known", reads: true, listings: true, subtractive: false},
+				},
+				},
+			},
+		},
+		{
+			"mulit-export, multi-auth cache with non-conflicting input authfile",
+			map[string]*authLine{
+				"u another": {idType: "u", id: "another", authComponents: map[string]*authPathComponent{
+					"/first/namespace":  {prefix: "/first/namespace", reads: false, listings: true, subtractive: false},
+					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: true, subtractive: false},
+				},
+				},
+			},
+			map[string]*authLine{
+				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
+					"/first/namespace":  {prefix: "/first/namespace", reads: true, listings: true, subtractive: false},
+					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: false, subtractive: true},
+					"/.well-known":      {prefix: "/.well-known", reads: true, listings: true, subtractive: false},
+				},
+				},
+				"u another": {idType: "u", id: "another", authComponents: map[string]*authPathComponent{
+					"/first/namespace":  {prefix: "/first/namespace", reads: false, listings: true, subtractive: false},
+					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: true, subtractive: false},
+				},
+				},
+			},
+		},
+		{
+			"mulit-export, multi-auth cache with conflicting input authfile",
+			map[string]*authLine{
+				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
+					"/first/namespace": {prefix: "/first/namespace", reads: false, listings: true, subtractive: false},
+					"/third/namespace": {prefix: "/third/namespace", reads: true, listings: true, subtractive: false},
+				},
+				},
+			},
+			map[string]*authLine{
+				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
+					// This one is overridden by discovered namespace ad
+					"/first/namespace":  {prefix: "/first/namespace", reads: true, listings: true, subtractive: false},
+					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: false, subtractive: true},
+					"/third/namespace":  {prefix: "/third/namespace", reads: true, listings: true, subtractive: false},
+					"/.well-known":      {prefix: "/.well-known", reads: true, listings: true, subtractive: false},
+				},
+				},
+			},
+		},
+	}
+
+	for _, testInput := range testCases {
+		t.Run(testInput.name, func(t *testing.T) {
+			server_utils.ResetTestState()
+			defer server_utils.ResetTestState()
+
+			err := populateAuthLinesMapForCache(testInput.inputAuthLinesMap, server)
+			// Similar to the Origin case, we don't test for the err != nil case because that implies
+			// a prefixless-export. This error cannot be triggered by these inputs.
+			require.NoError(t, err, "Unexpected error for test case: %s", testInput.name)
+			// Since the outer map contains an inner map to references, spew lets us see the full structure on error
+			require.True(t, reflect.DeepEqual(testInput.expectedEntries, testInput.inputAuthLinesMap),
+				"Mismatch in entries for test case: %s\nExpected:\n%s\nActual:\n%s",
+				testInput.name,
+				spew.Sdump(testInput.expectedEntries),
+				spew.Sdump(testInput.inputAuthLinesMap),
+			)
+		})
+	}
+}
+
+func TestSerializeAuthline(t *testing.T) {
+	testCases := []struct {
+		name     string
+		authLine authLine
+		outStr   string
+	}{
+		{
+			"single path",
+			authLine{idType: "u", id: "*", authComponents: map[string]*authPathComponent{
+				"/path1": {prefix: "/path1", reads: true, listings: true, subtractive: false},
+			},
+			},
+			"u * /path1 lr",
+		},
+		{
+			"multiple paths with different lengths",
+			authLine{idType: "u", id: "*", authComponents: map[string]*authPathComponent{
+				"/path1":   {prefix: "/path1", reads: true, listings: true, subtractive: false},
+				"/path123": {prefix: "/path123", reads: true, listings: false, subtractive: true},
+			},
+			},
+			"u * /path123 -r /path1 lr",
+		},
+		{
+			"multiple paths with same lengths",
+			// Should preserve ordering if two paths have same length
+			authLine{idType: "u", id: "*", authComponents: map[string]*authPathComponent{
+				"/path432": {prefix: "/path432", reads: true, listings: true, subtractive: false},
+				"/path123": {prefix: "/path123", reads: true, listings: false, subtractive: true},
+			},
+			},
+
+			"u * /path432 lr /path123 -r",
+		},
+	}
+
+	for _, testInput := range testCases {
+		t.Run(testInput.name, func(t *testing.T) {
+			outStr := serializeAuthLine(testInput.authLine)
+			require.Equal(t, testInput.outStr, outStr, "Mismatch in serialized authline for test case: %s", testInput.name)
+		})
+	}
+}
+
+func TestGetSortedSerializedAuthLines(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    map[string]*authLine
+		expected []string
+	}{
+		{
+			name: "Only u * entry",
+			input: map[string]*authLine{
+				"u *": {
+					idType: "u",
+					id:     "*",
+					authComponents: map[string]*authPathComponent{
+						"/foo":    {prefix: "/foo", reads: true, listings: false, subtractive: false},
+						"/foobar": {prefix: "/foobar", reads: true, listings: false, subtractive: true},
+					},
+				},
+			},
+			expected: []string{"u * /foobar -r /foo r"},
+		},
+		{
+			name: "Multiple entries, u * last",
+			input: map[string]*authLine{
+				"u alice": {
+					idType: "u",
+					id:     "alice",
+					authComponents: map[string]*authPathComponent{
+						"/bar": {prefix: "/bar", reads: true, listings: true, subtractive: false},
+					},
+				},
+				"u *": {
+					idType: "u",
+					id:     "*",
+					authComponents: map[string]*authPathComponent{
+						"/foo":    {prefix: "/foo", reads: true, listings: false, subtractive: false},
+						"/foobar": {prefix: "/foobar", reads: true, listings: false, subtractive: true},
+					},
+				},
+			},
+			expected: []string{
+				"u alice /bar lr",
+				"u * /foobar -r /foo r",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			actual := getSortedSerializedAuthLines(tc.input)
+			require.Equal(t, tc.expected, actual)
+		})
+	}
+}
+
+func TestEmitAuthfile(t *testing.T) {
+	testCases := []struct {
+		name                 string
+		serverType           server_structs.ServerType
+		originCfg            string                         // only used if serverType is Origin
+		nsAds                []server_structs.NamespaceAdV2 // only used if serverType is Cache
+		dropPrivileges       bool
+		discoverOSDFAuthfile bool
+		inputAuthfile        string
+		expectedAuthfile     string
+	}{
+		{
+			name:                 "Origin with discoverOSDFAuthfile true and valid input authfile",
+			serverType:           server_structs.OriginType,
+			originCfg:            multiExportOrigin,
+			discoverOSDFAuthfile: true,
+			inputAuthfile:        "u * /valid/path r\n",
+			// The IDType:ID orderings from the OSDF Authfile are first sorted by length and then alphabetically,
+			// meaning the original order from the OSDF Authfile is not preserved. This guarantees the most
+			// specific entries are always matched first.
+			expectedAuthfile: `u 3af6a420.0 /chtc/PROTECTED/sc-origin lr
+u 4ff08838.0 /chtc/PROTECTED/sc-origin lr
+u 5a42185a.0 /chtc/PROTECTED/sc-origin lr
+u * /second/namespace -r /first/namespace lr /.well-known lr /valid/path r
+`,
+		},
+		{
+			name:          "Origin with valid input authfile and without OSDF authfile",
+			serverType:    server_structs.OriginType,
+			originCfg:     multiExportOrigin,
+			inputAuthfile: "u * /valid/path r\nu another /another/path lr",
+			// The IDType:ID orderings from the OSDF Authfile are first sorted by length and then alphabetically,
+			// meaning the original order from the OSDF Authfile is not preserved. This guarantees the most
+			// specific entries are always matched first.
+			expectedAuthfile: `u another /another/path lr
+u * /second/namespace -r /first/namespace lr /.well-known lr /valid/path r
+`,
+		},
+		{
+			name:       "Origin with multiline input authfile and without OSDF authfile",
+			serverType: server_structs.OriginType,
+			originCfg:  multiExportOrigin,
+			inputAuthfile: `u * /valid/path r \
+/second/valid/path lr
+u another /another/path lr`,
+			// The IDType:ID orderings from the OSDF Authfile are first sorted by length and then alphabetically,
+			// meaning the original order from the OSDF Authfile is not preserved. This guarantees the most
+			// specific entries are always matched first.
+			expectedAuthfile: `u another /another/path lr
+u * /second/valid/path lr /second/namespace -r /first/namespace lr /.well-known lr /valid/path r
+`,
+		},
+		{
+			name:       "Origin with without extra authfiles",
+			serverType: server_structs.OriginType,
+			originCfg:  multiExportOrigin,
+			// The IDType:ID orderings from the OSDF Authfile are first sorted by length and then alphabetically,
+			// meaning the original order from the OSDF Authfile is not preserved. This guarantees the most
+			// specific entries are always matched first.
+			expectedAuthfile: "u * /second/namespace -r /first/namespace lr /.well-known lr\n",
+		},
+		{
+			name:       "Origin with without extra authfiles, drop privs",
+			serverType: server_structs.OriginType,
+			originCfg:  multiExportOrigin,
+			// The IDType:ID orderings from the OSDF Authfile are first sorted by length and then alphabetically,
+			// meaning the original order from the OSDF Authfile is not preserved. This guarantees the most
+			// specific entries are always matched first.
+			expectedAuthfile: "u * /second/namespace -r /first/namespace lr /.well-known lr\n",
+		},
+		{
+			name:       "Cache with discoverOSDFAuthfile true and valid input authfile",
+			serverType: server_structs.CacheType,
+			nsAds: []server_structs.NamespaceAdV2{
+				{
+					Caps: server_structs.Capabilities{PublicReads: true, Listings: true, Reads: true},
+					Path: "/first/namespace",
+				},
+				{
+					Caps: server_structs.Capabilities{PublicReads: false, Listings: false, Reads: true},
+					Path: "/second/namespace",
+				},
+			},
+			discoverOSDFAuthfile: true,
+			inputAuthfile:        "u * /valid/path r\n",
+			// The IDType:ID orderings from the OSDF Authfile are first sorted by length and then alphabetically,
+			// meaning the original order from the OSDF Authfile is not preserved. This guarantees the most
+			// specific entries are always matched first.
+			expectedAuthfile: `u 3af6a420.0 /chtc/PROTECTED/sc-origin lr
+u 4ff08838.0 /chtc/PROTECTED/sc-origin lr
+u 5a42185a.0 /chtc/PROTECTED/sc-origin lr
+u * /second/namespace -r /first/namespace lr /.well-known lr /valid/path r
+`,
+		},
+		{
+			name:       "Cache with valid input authfile and without OSDF authfile",
+			serverType: server_structs.CacheType,
+			nsAds: []server_structs.NamespaceAdV2{
+				{
+					Caps: server_structs.Capabilities{PublicReads: true, Listings: true, Reads: true},
+					Path: "/first/namespace",
+				},
+				{
+					Caps: server_structs.Capabilities{PublicReads: false, Listings: false, Reads: true},
+					Path: "/second/namespace",
+				},
+			},
+			inputAuthfile: "u another /another/path lr\nu * /valid/path r\n",
+			// The IDType:ID orderings from the OSDF Authfile are first sorted by length and then alphabetically,
+			// meaning the original order from the OSDF Authfile is not preserved. This guarantees the most
+			// specific entries are always matched first.
+			expectedAuthfile: `u another /another/path lr
+u * /second/namespace -r /first/namespace lr /.well-known lr /valid/path r
+`,
+		},
+		{
+			name:       "Cache with without input authfile or OSDF authfile",
+			serverType: server_structs.CacheType,
+			nsAds: []server_structs.NamespaceAdV2{
+				{
+					Caps: server_structs.Capabilities{PublicReads: true, Listings: true, Reads: true},
+					Path: "/first/namespace",
+				},
+				{
+					Caps: server_structs.Capabilities{PublicReads: false, Listings: false, Reads: true},
+					Path: "/second/namespace",
+				},
+			},
+			// The IDType:ID orderings from the OSDF Authfile are first sorted by length and then alphabetically,
+			// meaning the original order from the OSDF Authfile is not preserved. This guarantees the most
+			// specific entries are always matched first.
+			expectedAuthfile: "u * /second/namespace -r /first/namespace lr /.well-known lr\n",
+		},
+	}
+
+	// Start a test server that will return the OSDF authfile for tests that need it
+	// We don't do any fancy path parsing here -- just give the file for all GET requests
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Method == "GET" && req.URL.Path == "/origin/Authfile" {
-			if req.URL.RawQuery == "fqdn=origin-test" {
-				res := []byte(otherAuthfileEntries)
-				_, err := w.Write(res)
-				if err != nil {
-					w.WriteHeader(http.StatusInternalServerError)
-					return
-				}
-				w.WriteHeader(http.StatusOK)
-			} else {
-				w.WriteHeader(http.StatusNotFound)
+		if req.Method == "GET" {
+			res := []byte(osdfAuthfile)
+			_, err := w.Write(res)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
 			}
-		} else if req.Method == "GET" && req.URL.Path == "/cache/Authfile" {
-			if req.URL.RawQuery == "fqdn=cache-test" {
-				res := []byte(cacheAuthfileEntries)
-				_, err := w.Write(res)
-				if err != nil {
-					w.WriteHeader(http.StatusInternalServerError)
-					return
-				}
-				w.WriteHeader(http.StatusOK)
-			} else {
-				w.WriteHeader(http.StatusNotFound)
-			}
+			w.WriteHeader(http.StatusOK)
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer ts.Close()
 
-	for _, testInput := range tests {
-		t.Run(testInput.desc, func(t *testing.T) {
-			dirName := t.TempDir()
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			dirname := t.TempDir()
 			server_utils.ResetTestState()
 			defer server_utils.ResetTestState()
 
-			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
-			viper.Set("Federation.TopologyUrl", ts.URL)
-			viper.Set("Server.Hostname", testInput.hostname)
-			if testInput.disableX509 {
-				viper.Set("Topology.DisableCacheX509", true)
-				viper.Set("Topology.DisableOriginX509", true)
+			viper.Set(param.Origin_RunLocation.GetName(), filepath.Join(dirname, "origin"))
+			viper.Set(param.Cache_RunLocation.GetName(), filepath.Join(dirname, "cache"))
+			if tc.inputAuthfile != "" {
+				viper.Set(param.Xrootd_Authfile.GetName(), filepath.Join(dirname, "input-authfile"))
 			}
-			var xrootdRun string
-			if strings.Contains(testInput.hostname, "cache") {
-				viper.Set("Cache.RunLocation", dirName)
-				xrootdRun = param.Cache_RunLocation.GetString()
+			viper.Set(param.Federation_TopologyUrl.GetName(), ts.URL)
+
+			viper.Set(param.Server_DropPrivileges.GetName(), tc.dropPrivileges)
+
+			// Toggle whether the OSDF Authfile discovery should be triggered
+			if tc.discoverOSDFAuthfile {
+				oldPrefix, err := config.SetPreferredPrefix(config.OsdfPrefix)
+				require.NoError(t, err, "error setting preferred prefix")
+				t.Cleanup(func() {
+					_, _ = config.SetPreferredPrefix(oldPrefix)
+				})
+
+				viper.Set(param.Topology_DisableCacheX509.GetName(), false)
+				viper.Set(param.Topology_DisableOriginX509.GetName(), false)
 			} else {
-				viper.Set("Origin.RunLocation", dirName)
-				xrootdRun = param.Origin_RunLocation.GetString()
+				viper.Set(param.Topology_DisableCacheX509.GetName(), true)
+				viper.Set(param.Topology_DisableOriginX509.GetName(), true)
 			}
-			viper.Set("Origin.FederationPrefix", "/")
-			viper.Set("Origin.StoragePrefix", "/")
-			oldPrefix, err := config.SetPreferredPrefix(config.OsdfPrefix)
-			assert.NoError(t, err)
-			defer func() {
-				_, err := config.SetPreferredPrefix(oldPrefix)
+
+			// Write the input authfile if provided
+			if tc.inputAuthfile != "" {
+				err := os.WriteFile(viper.GetString(param.Xrootd_Authfile.GetName()), []byte(tc.inputAuthfile), 0600)
 				require.NoError(t, err)
-			}()
-
-			err = os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))
-			require.NoError(t, err, "Failure writing test input authfile")
-
-			err = EmitAuthfile(testInput.server, false)
-			require.NoError(t, err, "Failure generating authfile")
-
-			finalAuthPath := filepath.Join(xrootdRun, "authfile-origin-generated")
-			if testInput.server.GetServerType().IsEnabled(server_structs.CacheType) {
-				finalAuthPath = filepath.Join(xrootdRun, "authfile-cache-generated")
 			}
 
-			genAuth, err := os.ReadFile(finalAuthPath)
-			require.NoError(t, err, "Error reading generated authfile")
-
-			require.Equal(t, testInput.authOut, string(genAuth))
-		})
-	}
-}
-
-func TestAuthfileMultiline(t *testing.T) {
-	sc := bufio.NewScanner(strings.NewReader(sampleMultilineOutput))
-	sc.Split(ScanLinesWithCont)
-	idx := 0
-	for sc.Scan() {
-		require.Less(t, idx, len(sampleMultilineOutputParsed))
-		assert.Equal(t, string(sampleMultilineOutputParsed[idx]), sc.Text())
-		idx += 1
-	}
-	assert.Equal(t, idx, len(sampleMultilineOutputParsed))
-}
-
-func TestEmitAuthfile(t *testing.T) {
-	tests := []struct {
-		desc    string
-		authIn  string
-		authOut string
-	}{
-		{
-			desc:    "merge-multi-lines",
-			authIn:  cacheAuthfileMultilineInput,
-			authOut: cacheAuthfileOutput,
-		},
-		{
-			desc:    "merge-other-entries",
-			authIn:  otherAuthfileEntries,
-			authOut: mergedAuthfileEntries,
-		},
-	}
-	for _, testInput := range tests {
-		t.Run(testInput.desc, func(t *testing.T) {
-			dirName := t.TempDir()
-			server_utils.ResetTestState()
-
-			defer server_utils.ResetTestState()
-
-			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
-			viper.Set("Origin.RunLocation", dirName)
-			viper.Set("Origin.FederationPrefix", "/")
-			viper.Set("Origin.StoragePrefix", "/")
-			server := &origin.OriginServer{}
-
-			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))
-			require.NoError(t, err)
-
-			err = EmitAuthfile(server, false)
-			require.NoError(t, err)
-
-			contents, err := os.ReadFile(filepath.Join(dirName, "authfile-origin-generated"))
-			require.NoError(t, err)
-
-			assert.Equal(t, testInput.authOut, string(contents))
-		})
-	}
-}
-
-func TestEmitAuthfileFirstRun(t *testing.T) {
-	tests := []struct {
-		desc           string
-		authIn         string
-		authOut        string
-		dropPrivileges bool
-		server         server_structs.XRootDServer
-	}{
-		{
-			desc:           "origin-first-run-no-drop-privileges",
-			authIn:         "",
-			authOut:        "u * /.well-known lr\n",
-			dropPrivileges: false,
-			server:         &origin.OriginServer{},
-		},
-		{
-			desc:           "origin-first-run-with-drop-privileges",
-			authIn:         "",
-			authOut:        "u * /.well-known lr\n",
-			dropPrivileges: true,
-			server:         &origin.OriginServer{},
-		},
-		{
-			desc:           "cache-first-run-no-drop-privileges",
-			authIn:         "",
-			authOut:        "",
-			dropPrivileges: false,
-			server:         &cache.CacheServer{},
-		},
-		{
-			desc:           "cache-first-run-with-drop-privileges",
-			authIn:         "",
-			authOut:        "",
-			dropPrivileges: true,
-			server:         &cache.CacheServer{},
-		},
-	}
-
-	for _, testInput := range tests {
-		t.Run(testInput.desc, func(t *testing.T) {
-			dirName := t.TempDir()
-			server_utils.ResetTestState()
-			defer server_utils.ResetTestState()
-
-			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
-
-			// Set the appropriate run location based on server type
-			if testInput.server.GetServerType().IsEnabled(server_structs.CacheType) {
-				viper.Set("Cache.RunLocation", dirName)
-			} else {
-				viper.Set("Origin.RunLocation", dirName)
+			// Set up the servers with their exports/namespace ads
+			var server server_structs.XRootDServer
+			var generatedAuthfileName string
+			var serverDir string
+			if tc.serverType == server_structs.OriginType {
+				server = &origin.OriginServer{}
+				setupExports(t, tc.originCfg)
+				generatedAuthfileName = "authfile-origin-generated"
+				serverDir = viper.GetString(param.Origin_RunLocation.GetName())
+			} else if tc.serverType == server_structs.CacheType {
+				server = &cache.CacheServer{}
+				server.SetNamespaceAds(tc.nsAds)
+				generatedAuthfileName = "authfile-cache-generated"
+				serverDir = viper.GetString(param.Cache_RunLocation.GetName())
 			}
-			viper.Set("Origin.FederationPrefix", "/")
-			viper.Set("Origin.StoragePrefix", "/")
-			viper.Set("Server.DropPrivileges", testInput.dropPrivileges)
+			err := os.MkdirAll(serverDir, 0755)
+			require.NoError(t, err, "error creating server run dir")
+			generatedAuthfilePath := filepath.Join(serverDir, generatedAuthfileName)
 
-			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))
-			require.NoError(t, err)
+			err = EmitAuthfile(server, true)
+			require.NoError(t, err, "Unexpected error for test case: %s", tc.name)
 
-			// Test first run (isFirstRun = true)
-			err = EmitAuthfile(testInput.server, true)
-			require.NoError(t, err)
+			// Read back the emitted authfile and compare with expected
+			emittedAuthfileBytes, err := os.ReadFile(generatedAuthfilePath)
+			require.NoError(t, err, "error reading emitted authfile for test case: %s", tc.name)
 
-			// Verify the authfile was created correctly
-			finalAuthPath := filepath.Join(dirName, "authfile-origin-generated")
-			if testInput.server.GetServerType().IsEnabled(server_structs.CacheType) {
-				finalAuthPath = filepath.Join(dirName, "authfile-cache-generated")
-			}
-
-			contents, err := os.ReadFile(finalAuthPath)
-			require.NoError(t, err)
-
-			assert.Equal(t, testInput.authOut, string(contents))
-
-			// Verify file exists and has correct permissions
-			fileInfo, err := os.Stat(finalAuthPath)
-			require.NoError(t, err)
-			assert.Equal(t, fs.FileMode(0640), fileInfo.Mode().Perm())
-		})
-	}
-}
-
-func TestEmitOriginAuthfileWithCacheAuth(t *testing.T) {
-	dirName := t.TempDir()
-	server_utils.ResetTestState()
-
-	defer server_utils.ResetTestState()
-
-	viper.Set(param.Origin_DisableDirectClients.GetName(), true)
-	viper.Set(param.Xrootd_Authfile.GetName(), filepath.Join(dirName, "authfile"))
-	viper.Set(param.Origin_RunLocation.GetName(), dirName)
-	viper.Set(param.Origin_FederationPrefix.GetName(), "cache-authz-test")
-	viper.Set(param.Origin_StoragePrefix.GetName(), "/")
-	viper.Set(param.Origin_EnablePublicReads.GetName(), true)
-
-	originServer := &origin.OriginServer{}
-
-	err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(""), fs.FileMode(0600))
-	require.NoError(t, err)
-
-	err = EmitAuthfile(originServer, false)
-	require.NoError(t, err)
-
-	contents, err := os.ReadFile(filepath.Join(dirName, "authfile-origin-generated"))
-	require.NoError(t, err)
-
-	assert.Equal(t, "u * /.well-known lr\n", string(contents))
-}
-
-func TestEmitOriginAuthfileWithCapabilities(t *testing.T) {
-	tests := []struct {
-		desc         string
-		name         string
-		authOut      string
-		capabilities []string
-	}{
-		{
-			desc:         "public-reads",
-			name:         "/public",
-			authOut:      "u * /.well-known lr /public lr\n",
-			capabilities: []string{param.Origin_EnablePublicReads.GetName()},
-		},
-		{
-			desc:         "no-public-access",
-			name:         "/private",
-			authOut:      "u * /.well-known lr\n",
-			capabilities: []string{param.Origin_EnableReads.GetName()},
-		},
-	}
-	for _, testInput := range tests {
-		t.Run(testInput.desc, func(t *testing.T) {
-			dirName := t.TempDir()
-			server_utils.ResetTestState()
-
-			defer server_utils.ResetTestState()
-
-			viper.Set(param.Xrootd_Authfile.GetName(), filepath.Join(dirName, "authfile"))
-			viper.Set(param.Origin_RunLocation.GetName(), dirName)
-			viper.Set(param.Origin_FederationPrefix.GetName(), testInput.name)
-			viper.Set(param.Origin_StoragePrefix.GetName(), "/")
-			viper.Set(param.Server_IssuerUrl.GetName(), "https://test-issuer.com")
-			for _, cap := range testInput.capabilities {
-				viper.Set(cap, true)
-			}
-			originServer := &origin.OriginServer{}
-
-			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(""), fs.FileMode(0600))
-			require.NoError(t, err)
-
-			err = EmitAuthfile(originServer, false)
-			require.NoError(t, err)
-
-			contents, err := os.ReadFile(filepath.Join(dirName, "authfile-origin-generated"))
-			require.NoError(t, err)
-
-			assert.Equal(t, testInput.authOut, string(contents))
+			require.Equal(t, tc.expectedAuthfile, string(emittedAuthfileBytes), "Mismatch in emitted authfile for test case: %s", tc.name)
 		})
 	}
 }
@@ -1118,162 +1433,6 @@ func TestGenerateCacheIssuers(t *testing.T) {
 			require.ElementsMatch(t, tc.expectedIssuers, issuers)
 		})
 	}
-}
-
-func TestWriteOriginAuthFiles(t *testing.T) {
-	server_utils.ResetTestState()
-
-	originAuthTester := func(server server_structs.XRootDServer, authStart string, authResult string) func(t *testing.T) {
-		return func(t *testing.T) {
-			defer server_utils.ResetTestState()
-
-			viper.Set("Origin.StorageType", "posix")
-			dirname := t.TempDir()
-			viper.Set("Origin.RunLocation", dirname)
-			viper.Set("Origin.StoragePrefix", "/")
-			viper.SetDefault("Origin.FederationPrefix", "/")
-			viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirname, "scitokens-generated.cfg"))
-			viper.Set("Xrootd.Authfile", filepath.Join(dirname, "authfile"))
-			xAuthFile := filepath.Join(param.Origin_RunLocation.GetString(), "authfile-origin-generated")
-
-			authfileProvided := param.Xrootd_Authfile.GetString()
-
-			err := os.WriteFile(authfileProvided, []byte(authStart), 0600)
-			assert.NoError(t, err)
-
-			err = EmitAuthfile(server, false)
-			assert.NoError(t, err)
-
-			authGen, err := os.ReadFile(xAuthFile)
-			assert.NoError(t, err)
-			assert.Equal(t, authResult, string(authGen))
-		}
-	}
-	nsAds := []server_structs.NamespaceAdV2{}
-
-	originServer := &origin.OriginServer{}
-	originServer.SetNamespaceAds(nsAds)
-
-	t.Run("MultiIssuer", originAuthTester(originServer, "u * t1 lr t2 lr t3 lr", "u * /.well-known lr t1 lr t2 lr t3 lr\n"))
-
-	nsAds = []server_structs.NamespaceAdV2{}
-	originServer.SetNamespaceAds(nsAds)
-
-	t.Run("EmptyAuth", originAuthTester(originServer, "", "u * /.well-known lr\n"))
-
-	viper.Set("Origin.EnablePublicReads", true)
-	viper.Set("Origin.FederationPrefix", "/foo/bar")
-	t.Run("PublicAuth", originAuthTester(originServer, "", "u * /.well-known lr /foo/bar lr\n"))
-}
-
-func TestWriteCacheAuthFiles(t *testing.T) {
-
-	cacheAuthTester := func(server server_structs.XRootDServer, sciTokenResult string, authResult string) func(t *testing.T) {
-		return func(t *testing.T) {
-
-			dirname := t.TempDir()
-			server_utils.ResetTestState()
-			viper.Set("Cache.RunLocation", dirname)
-			if server.GetServerType().IsEnabled(server_structs.OriginType) {
-				viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirname, "scitokens-origin-generated.cfg"))
-				viper.Set("Xrootd.Authfile", filepath.Join(dirname, "authfile-origin-generated"))
-			} else {
-				viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirname, "scitokens-cache-generated.cfg"))
-				viper.Set("Xrootd.Authfile", filepath.Join(dirname, "authfile-cache-generated"))
-			}
-			authFile := param.Xrootd_Authfile.GetString()
-			err := os.WriteFile(authFile, []byte(""), 0600)
-			assert.NoError(t, err)
-
-			err = WriteCacheScitokensConfig(server.GetNamespaceAds(), false)
-			assert.NoError(t, err)
-
-			sciFile := param.Xrootd_ScitokensConfig.GetString()
-			genSciToken, err := os.ReadFile(sciFile)
-			assert.NoError(t, err)
-
-			assert.Equal(t, sciTokenResult, string(genSciToken))
-
-			err = EmitAuthfile(server, false)
-			assert.NoError(t, err)
-
-			authGen, err := os.ReadFile(authFile)
-			assert.NoError(t, err)
-			assert.Equal(t, authResult, string(authGen))
-		}
-	}
-
-	issuer1URL := url.URL{}
-	issuer1URL.Scheme = "https"
-	issuer1URL.Host = "issuer1.com"
-
-	issuer2URL := url.URL{}
-	issuer2URL.Scheme = "https"
-	issuer2URL.Host = "issuer2.com"
-
-	issuer3URL := url.URL{}
-	issuer3URL.Scheme = "https"
-	issuer3URL.Host = "issuer3.com"
-
-	PublicCaps := server_structs.Capabilities{
-		PublicReads: true,
-		Reads:       true,
-		Writes:      true,
-	}
-	PrivateCaps := server_structs.Capabilities{
-		PublicReads: false,
-		Reads:       true,
-		Writes:      true,
-	}
-
-	nsAds := []server_structs.NamespaceAdV2{
-		{
-			Caps: PrivateCaps,
-			Issuer: []server_structs.TokenIssuer{{
-				IssuerUrl:       issuer1URL,
-				BasePaths:       []string{"/p1"},
-				RestrictedPaths: []string{"/p1/nope", "p1/still_nope"}}},
-		},
-		{
-			Caps: PrivateCaps,
-			Issuer: []server_structs.TokenIssuer{{
-				IssuerUrl: issuer2URL,
-				BasePaths: []string{"/p2/path", "/p2/foo", "/p2/baz"},
-			}},
-		},
-		{
-			Path: "/p3",
-			Caps: PublicCaps,
-		},
-		{
-			Caps: PrivateCaps,
-			Issuer: []server_structs.TokenIssuer{{
-				IssuerUrl: issuer1URL,
-				BasePaths: []string{"/p1_again"},
-			}, {
-				IssuerUrl: issuer3URL,
-				BasePaths: []string{"/i3/multi", "/ithree/multi"},
-			}},
-		},
-		{
-			Path: "/p4/depth",
-			Caps: PublicCaps,
-		},
-		{
-			Path: "/p2_noauth",
-			Caps: PublicCaps,
-		},
-	}
-
-	cacheServer := &cache.CacheServer{}
-	cacheServer.SetNamespaceAds(nsAds)
-
-	t.Run("MultiIssuer", cacheAuthTester(cacheServer, cacheSciOutput, "u * /p3 lr /p4/depth lr /p2_noauth lr \n"))
-
-	nsAds = []server_structs.NamespaceAdV2{}
-	cacheServer.SetNamespaceAds(nsAds)
-
-	t.Run("EmptyNS", cacheAuthTester(cacheServer, cacheEmptyOutput, ""))
 }
 
 func TestGenerateFederationIssuer(t *testing.T) {
