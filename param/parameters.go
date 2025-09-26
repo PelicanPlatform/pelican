@@ -1398,6 +1398,7 @@ var (
 	Registry_RequireKeyChaining = BoolParam{"Registry.RequireKeyChaining"}
 	Registry_RequireOriginApproval = BoolParam{"Registry.RequireOriginApproval"}
 	Server_DropPrivileges = BoolParam{"Server.DropPrivileges"}
+	Server_EnablePKCS11 = BoolParam{"Server.EnablePKCS11"}
 	Server_EnablePprof = BoolParam{"Server.EnablePprof"}
 	Server_EnableUI = BoolParam{"Server.EnableUI"}
 	Server_HealthMonitoringPublic = BoolParam{"Server.HealthMonitoringPublic"}
