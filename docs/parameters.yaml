@@ -2893,7 +2893,7 @@ description: |+
   The filepath to an auth file for setting up authorization in XRootD.
 type: string
 default: none
-components: ["origin"]
+components: ["cache", "origin"]
 ---
 name: Xrootd.AuthRefreshInterval
 description: |+
