@@ -2373,7 +2373,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	} else {
 		transferResults.Error = xferErrors
 	}
-	if !success && transfer.packOption == "" {
+	if !success && transfer.packOption == "" && localPath != "/dev/null" {
 		// On Unix-like systems, os.Remove calls unlink, which removes the file from the directory.
 		// If the file is still open, it will be available to the process until the last file
 		// descriptor is closed.  Given fp.Close() is deferred, this should be safe.
