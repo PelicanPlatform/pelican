@@ -2413,6 +2413,14 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	} else {
 		transferResults.Error = xferErrors
 	}
+	if !success && transfer.packOption == "" {
+		// On Unix-like systems, os.Remove calls unlink, which removes the file from the directory.
+		// If the file is still open, it will be available to the process until the last file
+		// descriptor is closed.  Given fp.Close() is deferred, this should be safe.
+		if err := os.Remove(localPath); err != nil && !os.IsNotExist(err) {
+			log.Warningln("Failed to remove partially-downloaded file:", err)
+		}
+	}
 	return
 }
 
@@ -2761,6 +2769,20 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		return
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		log.WithFields(fields).Debugln("Got failure status code:", resp.StatusCode)
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			log.WithFields(fields).Debugln("Failed to read response body for error:", readErr)
+		}
+		bodyStr := string(bodyBytes)
+		log.WithFields(fields).Debugln("Error response body:", bodyStr)
+		sce := StatusCodeError(resp.StatusCode)
+		err = &sce
+		return 0, 0, -1, resp.Header.Get("Server"), &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
+			resp.StatusCode, strings.TrimSpace(bodyStr)), err}
+	}
 
 	serverVersion = resp.Header.Get("Server")
 
