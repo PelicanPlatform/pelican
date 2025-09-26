@@ -309,8 +309,8 @@ base_path = /test2
 default_user = user2
 `
 
-	authfileFooter := "u * /.well-known lr\n"
-	authfileDemo := "u testing /test3 lr\n"
+	authfileFooter := "u * /.well-known lr /test -lr\n"
+	authfileDemo := "u testing /test3 lr /test -lr\n"
 	authfileDemo2 := `u testing /test4 lr`
 
 	err = os.WriteFile(scitokensName, []byte(scitokensCfgDemo), fs.FileMode(0600))
