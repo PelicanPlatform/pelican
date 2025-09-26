@@ -2591,6 +2591,13 @@ root_default: /var/lib/pelican/pelican.sqlite
 default: $ConfigBase/pelican.sqlite
 components: ["cache", "director", "origin", "registry"]
 ---
+name: Server.EnablePKCS11
+description: |+
+  Enable PKCS11 for the server. It allows the server to sign TLS connection without accessing the private key.
+type: bool
+default: true
+components: ["cache", "origin"]
+---
 ################################
 #   Issuer's Configurations    #
 ################################
