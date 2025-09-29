@@ -1102,8 +1102,6 @@ definitions:
         example: "read"
   CreateGroupRequest:
     type: object
-    required:
-      - name
     properties:
       name:
         type: string
@@ -1115,23 +1113,16 @@ definitions:
         example: "Team working on climate research"
   AddGroupMemberRequest:
     type: object
-    required:
-      - username
-      - sub
-      - issuer
     properties:
       username:
         type: string
         description: Username of the member to add
-        example: "new-member"
       sub:
         type: string
-        description: The 'sub' claim for the member to add
-        example: "new-member-sub"
+        description: The 'sub' claim of the member to add
       issuer:
         type: string
-        description: The 'iss' claim for the member to add
-        example: "https://test-issuer.org"
+        description: The 'iss' claim of the member to add
   ListCollectionResponse:
     type: object
     properties:
@@ -3837,19 +3828,15 @@ paths:
           description: ID of the group
           required: true
           type: string
-        - name: sub
-          in: query
-          description: The 'sub' claim of the member to remove
+        - in: body
+          name: member
+          description: The member to add
           required: true
-          type: string
-        - name: issuer
-          in: query
-          description: The 'iss' claim of the member to remove
-          required: true
-          type: string
+          schema:
+            $ref: "#/definitions/AddGroupMemberRequest"
       responses:
         "204":
-          description: Member removed successfully
+          description: Member added successfully
         "400":
           description: Bad request
           schema:
@@ -3863,7 +3850,7 @@ paths:
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "404":
-          description: Group or member not found
+          description: Group not found
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "500":
@@ -3883,9 +3870,14 @@ paths:
           description: ID of the group
           required: true
           type: string
-        - name: member
+        - name: sub
           in: query
-          description: Member identifier to remove
+          description: The 'sub' claim of the member to remove
+          required: true
+          type: string
+        - name: issuer
+          in: query
+          description: The 'iss' claim of the member to remove
           required: true
           type: string
       responses:
