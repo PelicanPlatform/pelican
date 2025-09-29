@@ -21,33 +21,6 @@ CREATE TABLE collection_members (
     PRIMARY KEY (collection_id, object_url)
 );
 
-CREATE TABLE users (
-    id TEXT PRIMARY KEY,
-    username TEXT NOT NULL,
-    sub TEXT NOT NULL,
-    issuer TEXT NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE UNIQUE INDEX idx_user_issuer ON users (username, issuer);
-CREATE UNIQUE INDEX idx_user_sub_issuer ON users (sub, issuer);
-
-CREATE TABLE groups (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
-    description TEXT,
-    created_by TEXT NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE group_members (
-    group_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    added_by TEXT NOT NULL,
-    added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (group_id, user_id)
-);
-
 CREATE TABLE collection_acls (
     collection_id TEXT NOT NULL,
     group_id TEXT NOT NULL,
@@ -70,12 +43,7 @@ CREATE TABLE collection_metadata (
 -- +goose StatementBegin
 DROP TABLE collection_metadata;
 DROP TABLE collection_acls;
-DROP TABLE group_members;
-DROP TABLE groups;
-DROP TABLE users;
 DROP TABLE collection_members;
 DROP TABLE collections;
 DROP INDEX idx_owner_name;
-DROP INDEX idx_user_issuer;
-DROP INDEX idx_user_sub_issuer;
 -- +goose StatementEnd
