@@ -150,7 +150,7 @@ func HandleCreateDowntime(ctx *gin.Context) {
 		return
 	}
 
-	user, _, err := GetUserGroups(ctx)
+	user, _, _, _, err := GetUserGroups(ctx)
 	if user == "" || err != nil {
 		user = ctx.GetString("User")
 		if user == "" {
@@ -256,7 +256,7 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 		return
 	}
 
-	user, _, err := GetUserGroups(ctx)
+	user, _, _, _, err := GetUserGroups(ctx)
 	if user == "" || err != nil {
 		user = ctx.GetString("User")
 		if user == "" {

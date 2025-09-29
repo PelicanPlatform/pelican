@@ -679,7 +679,7 @@ func CreateUser(db *gorm.DB, username string, sub string, issuer string) (*User,
 	return newUser, nil
 }
 
-func CreateGroup(db *gorm.DB, name, description, createdBy string, groups []string) (*Group, error) {
+func CreateGroup(db *gorm.DB, name, description, createdByUserID string, groups []string) (*Group, error) {
 	slug, err := generateSlug()
 	if err != nil {
 		return nil, err
@@ -694,7 +694,7 @@ func CreateGroup(db *gorm.DB, name, description, createdBy string, groups []stri
 		ID:          slug,
 		Name:        name,
 		Description: description,
-		CreatedBy:   createdBy,
+		CreatedBy:   createdByUserID,
 	}
 
 	if result := db.Create(group); result.Error != nil {
@@ -720,18 +720,24 @@ func ListGroups(db *gorm.DB) ([]Group, error) {
 	return groups, nil
 }
 
-func AddGroupMember(db *gorm.DB, groupId, sub, issuer, addedBy string, groups []string) error {
+func AddGroupMember(db *gorm.DB, groupId, sub, issuer, addedBy, addedBySub, addedByIssuer string, groups []string) error {
 	var group Group
 	if err := db.First(&group, "id = ?", groupId).Error; err != nil {
 		return err
 	}
 
-	if group.CreatedBy != addedBy {
+	// Resolve addedBy user identity to User.ID for comparison
+	addedByUser, err := GetOrCreateUser(db, addedBy, addedBySub, addedByIssuer)
+	if err != nil {
+		return ErrForbidden
+	}
+
+	if group.CreatedBy != addedByUser.ID {
 		return ErrForbidden
 	}
 
 	user := &User{}
-	err := db.Where("sub = ? AND issuer = ?", sub, issuer).First(user).Error
+	err = db.Where("sub = ? AND issuer = ?", sub, issuer).First(user).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errors.New("user does not exist")
@@ -754,13 +760,19 @@ func AddGroupMember(db *gorm.DB, groupId, sub, issuer, addedBy string, groups []
 	return nil
 }
 
-func RemoveGroupMember(db *gorm.DB, groupId, sub, issuer, removedBy string, groups []string) error {
+func RemoveGroupMember(db *gorm.DB, groupId, sub, issuer, removedBy, removedBySub, removedByIssuer string, groups []string) error {
 	var group Group
 	if err := db.First(&group, "id = ?", groupId).Error; err != nil {
 		return err
 	}
 
-	if group.CreatedBy != removedBy {
+	// Resolve removedBy user identity to User.ID for comparison
+	removedByUser, err := GetOrCreateUser(db, removedBy, removedBySub, removedByIssuer)
+	if err != nil {
+		return ErrForbidden
+	}
+
+	if group.CreatedBy != removedByUser.ID {
 		return ErrForbidden
 	}
 

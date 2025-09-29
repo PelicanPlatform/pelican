@@ -261,7 +261,7 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 	}
 
 	// now that we have verified that the user belongs to a group we should create the user if it doesn't exist
-	_, err = database.GetOrCreateUser(database.ServerDatabase, username, sub, issuerClaimValue)
+	userRecord, err = database.GetOrCreateUser(database.ServerDatabase, username, sub, issuerClaimValue)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -480,7 +480,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 		return
 	}
 
-	user, groups, err := generateUserGroupInfo(userInfo, idToken)
+	userRecord, groups, err := generateUserGroupInfo(userInfo, idToken)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError,
 			server_structs.SimpleApiResp{
@@ -496,7 +496,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 	}
 
 	// Issue our own JWT for web UI access
-	setLoginCookie(ctx, user.Username, groups)
+	setLoginCookie(ctx, userRecord, groups)
 
 	// Redirect user to where they were or root path
 	ctx.Redirect(http.StatusTemporaryRedirect, redirectLocation)

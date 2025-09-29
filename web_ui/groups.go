@@ -83,7 +83,7 @@ func handleCreateGroup(ctx *gin.Context) {
 		return
 	}
 
-	user, _, err := GetUserGroups(ctx)
+	user, sub, issuer, _, err := GetUserGroups(ctx)
 	if err != nil || user == "" {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -92,7 +92,17 @@ func handleCreateGroup(ctx *gin.Context) {
 		return
 	}
 
-	group, err := database.CreateGroup(database.ServerDatabase, req.Name, req.Description, user, nil)
+	// Resolve unique User.ID
+	userRecord, err := database.GetOrCreateUser(database.ServerDatabase, user, sub, issuer)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to resolve user ID",
+		})
+		return
+	}
+
+	group, err := database.CreateGroup(database.ServerDatabase, req.Name, req.Description, userRecord.ID, nil)
 	if err != nil {
 		if errors.Is(err, database.ErrReservedGroupPrefix) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
@@ -185,7 +195,7 @@ func handleAddGroupMember(ctx *gin.Context) {
 		return
 	}
 
-	user, groups, err := GetUserGroups(ctx)
+	user, userSub, userIssuer, groups, err := GetUserGroups(ctx)
 	if err != nil || user == "" {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -202,7 +212,7 @@ func handleAddGroupMember(ctx *gin.Context) {
 		})
 		return
 	}
-	err = database.AddGroupMember(database.ServerDatabase, id, req.Sub, req.Issuer, user, groups)
+	err = database.AddGroupMember(database.ServerDatabase, id, req.Sub, req.Issuer, user, userSub, userIssuer, groups)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -291,9 +301,9 @@ func handleRemoveGroupMember(ctx *gin.Context) {
 		return
 	}
 
-	sub := ctx.Query("sub")
-	issuer := ctx.Query("issuer")
-	if sub == "" || issuer == "" {
+	memberSub := ctx.Query("sub")
+	memberIssuer := ctx.Query("issuer")
+	if memberSub == "" || memberIssuer == "" {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "sub and issuer query parameters are required",
@@ -301,7 +311,7 @@ func handleRemoveGroupMember(ctx *gin.Context) {
 		return
 	}
 
-	user, groups, err := GetUserGroups(ctx)
+	user, userSub, userIssuer, groups, err := GetUserGroups(ctx)
 	if err != nil || user == "" {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -318,7 +328,7 @@ func handleRemoveGroupMember(ctx *gin.Context) {
 		})
 		return
 	}
-	err = database.RemoveGroupMember(database.ServerDatabase, id, sub, issuer, user, groups)
+	err = database.RemoveGroupMember(database.ServerDatabase, id, memberSub, memberIssuer, user, userSub, userIssuer, groups)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{

@@ -513,11 +513,20 @@ func generateTestAdminUserToken(ctx context.Context) (string, error) {
 	}
 	// Create token for admin user in test
 	tk := token.NewWLCGToken()
-	tk.Issuer = fedInfo.DiscoveryEndpoint
+	issuer := param.Server_ExternalWebUrl.GetString()
+	if issuer == "" {
+		issuer = fedInfo.DiscoveryEndpoint
+	}
+	tk.Issuer = issuer
 	tk.Subject = "admin-user"
 	tk.Lifetime = 5 * time.Minute
-	tk.AddAudiences(fedInfo.DiscoveryEndpoint)
+	tk.AddAudiences(issuer)
 	tk.AddScopes(token_scopes.WebUi_Access)
+	// Add OIDC claims required by GetUserGroups
+	tk.Claims = map[string]string{
+		"oidc_sub": "admin-user",
+		"oidc_iss": issuer,
+	}
 	tok, err := tk.CreateToken()
 	if err != nil {
 		return "", err
@@ -531,11 +540,20 @@ func generateToken(ctx context.Context, scopes []token_scopes.TokenScope, subjec
 		return "", err
 	}
 	tk := token.NewWLCGToken()
-	tk.Issuer = fedInfo.DiscoveryEndpoint
+	issuer := param.Server_ExternalWebUrl.GetString()
+	if issuer == "" {
+		issuer = fedInfo.DiscoveryEndpoint
+	}
+	tk.Issuer = issuer
 	tk.Subject = subject
 	tk.Lifetime = 5 * time.Minute
-	tk.AddAudiences(fedInfo.DiscoveryEndpoint)
+	tk.AddAudiences(issuer)
 	tk.AddScopes(scopes...)
+	// Add OIDC claims required by GetUserGroups
+	tk.Claims = map[string]string{
+		"oidc_sub": subject,
+		"oidc_iss": issuer,
+	}
 	tok, err := tk.CreateToken()
 	if err != nil {
 		return "", err

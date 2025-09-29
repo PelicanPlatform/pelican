@@ -39,6 +39,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
@@ -132,7 +133,7 @@ func configureAuthDB() error {
 
 // Get the "subject" claim from the JWT that "login" cookie stores,
 // where subject is set to be the username. Return empty string if no "login" cookie is present
-func GetUserGroups(ctx *gin.Context) (user string, groups []string, err error) {
+func GetUserGroups(ctx *gin.Context) (user string, sub string, issuer string, groups []string, err error) {
 	token, err := ctx.Cookie("login")
 	if err != nil {
 		if err == http.ErrNoCookie {
@@ -158,6 +159,30 @@ func GetUserGroups(ctx *gin.Context) (user string, groups []string, err error) {
 		return
 	}
 	user = parsed.Subject()
+
+	// Extract new claims
+	subIface, ok := parsed.Get("oidc_sub")
+	if !ok {
+		err = errors.New("Missing oidc_sub claim")
+		return
+	}
+	sub, ok = subIface.(string)
+	if !ok {
+		err = errors.New("Invalid oidc_sub claim")
+		return
+	}
+
+	issuerIface, ok := parsed.Get("oidc_iss")
+	if !ok {
+		err = errors.New("Missing oidc_iss claim")
+		return
+	}
+	issuer, ok = issuerIface.(string)
+	if !ok {
+		err = errors.New("Invalid oidc_iss claim")
+		return
+	}
+
 	groupsIface, ok := parsed.Get("wlcg.groups")
 	if ok {
 		if groupsTmp, ok := groupsIface.([]interface{}); ok {
@@ -173,7 +198,7 @@ func GetUserGroups(ctx *gin.Context) (user string, groups []string, err error) {
 }
 
 // Create a JWT and set the "login" cookie to store that JWT
-func setLoginCookie(ctx *gin.Context, username string, groups []string) {
+func setLoginCookie(ctx *gin.Context, userRecord *database.User, groups []string) {
 
 	// Lifetime of the login token and the cookie that stores it
 	loginLifetime := 16 * time.Hour
@@ -182,9 +207,15 @@ func setLoginCookie(ctx *gin.Context, username string, groups []string) {
 	loginCookieTokenCfg.Lifetime = loginLifetime
 	loginCookieTokenCfg.Issuer = param.Server_ExternalWebUrl.GetString()
 	loginCookieTokenCfg.AddAudiences(param.Server_ExternalWebUrl.GetString())
-	loginCookieTokenCfg.Subject = username
+	loginCookieTokenCfg.Subject = userRecord.Username
 	loginCookieTokenCfg.AddScopes(token_scopes.WebUi_Access, token_scopes.Monitoring_Query, token_scopes.Monitoring_Scrape)
 	loginCookieTokenCfg.AddGroups(groups...)
+
+	// Add claims for unique user resolution
+	loginCookieTokenCfg.Claims = map[string]string{
+		"oidc_sub": userRecord.Sub,
+		"oidc_iss": userRecord.Issuer,
+	}
 
 	// CreateToken also handles validation for us
 	tok, err := loginCookieTokenCfg.CreateToken()
@@ -205,7 +236,7 @@ func setLoginCookie(ctx *gin.Context, username string, groups []string) {
 
 // Check if user is authenticated by checking if the "login" cookie is present and set the user identity to ctx
 func AuthHandler(ctx *gin.Context) {
-	user, groups, err := GetUserGroups(ctx)
+	user, groups, _, _, err := GetUserGroups(ctx)
 	if user == "" {
 		if err != nil {
 			log.Errorln("Invalid user cookie or unable to parse user cookie:", err)
@@ -227,7 +258,7 @@ func AuthHandler(ctx *gin.Context) {
 // The current implementation forces the OAuth2 endpoint; future work may instead use a generic
 // login page.
 func RequireAuthMiddleware(ctx *gin.Context) {
-	user, groups, err := GetUserGroups(ctx)
+	user, groups, _, _, err := GetUserGroups(ctx)
 	if user == "" || err != nil {
 		origPath := ctx.Request.URL.RequestURI()
 		redirUrl := url.URL{
@@ -340,7 +371,10 @@ func loginHandler(ctx *gin.Context) {
 		log.Errorf("Failed to generate group info for user %s: %s", login.User, err)
 		groups = nil
 	}
-	setLoginCookie(ctx, login.User, groups)
+	userRecord := &database.User{
+		Username: login.User,
+	}
+	setLoginCookie(ctx, userRecord, groups)
 	ctx.JSON(http.StatusOK,
 		server_structs.SimpleApiResp{
 			Status: server_structs.RespOK,
@@ -394,7 +428,10 @@ func initLoginHandler(ctx *gin.Context) {
 		log.Errorln("Failed to generate group info for admin:", err)
 		groups = nil
 	}
-	setLoginCookie(ctx, "admin", groups)
+	userRecord := &database.User{
+		Username: "admin",
+	}
+	setLoginCookie(ctx, userRecord, groups)
 }
 
 // Handle reset password
@@ -445,7 +482,7 @@ func logoutHandler(ctx *gin.Context) {
 // Returns the authentication status of the current user, including user id and role
 func whoamiHandler(ctx *gin.Context) {
 	res := WhoAmIRes{}
-	if user, _, err := GetUserGroups(ctx); err != nil || user == "" {
+	if user, _, _, _, err := GetUserGroups(ctx); err != nil || user == "" {
 		res.Authenticated = false
 		ctx.JSON(http.StatusOK, res)
 	} else {
