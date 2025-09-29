@@ -372,7 +372,7 @@ func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
 					"/first/namespace":  {prefix: "/first/namespace", reads: true, listings: true, subtractive: false},
-					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: false, subtractive: true},
+					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: true, subtractive: true},
 					"/.well-known":      {prefix: "/.well-known", reads: true, listings: true, subtractive: false},
 				},
 				},
@@ -383,20 +383,20 @@ func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
 			map[string]*authLine{
 				"u another": {idType: "u", id: "another", authComponents: map[string]*authPathComponent{
 					"/first/namespace":  {prefix: "/first/namespace", reads: false, listings: true, subtractive: false},
-					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: true, subtractive: false},
+					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: false, subtractive: false},
 				},
 				},
 			},
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
 					"/first/namespace":  {prefix: "/first/namespace", reads: true, listings: true, subtractive: false},
-					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: false, subtractive: true},
+					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: true, subtractive: true},
 					"/.well-known":      {prefix: "/.well-known", reads: true, listings: true, subtractive: false},
 				},
 				},
 				"u another": {idType: "u", id: "another", authComponents: map[string]*authPathComponent{
 					"/first/namespace":  {prefix: "/first/namespace", reads: false, listings: true, subtractive: false},
-					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: true, subtractive: false},
+					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: false, subtractive: false},
 				},
 				},
 			},
@@ -414,7 +414,7 @@ func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
 				// The pre-populated auth map coming from admin input should override the export-derived one
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
 					"/first/namespace":  {prefix: "/first/namespace", reads: false, listings: true, subtractive: false},
-					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: false, subtractive: true},
+					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: true, subtractive: true},
 					"/third/namespace":  {prefix: "/third/namespace", reads: true, listings: true, subtractive: false},
 					"/.well-known":      {prefix: "/.well-known", reads: true, listings: true, subtractive: false},
 				},
@@ -470,7 +470,7 @@ func TestPopulateAuthLinesMapForCache(t *testing.T) {
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
 					"/first/namespace":  {prefix: "/first/namespace", reads: true, listings: true, subtractive: false},
-					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: false, subtractive: true},
+					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: true, subtractive: true},
 					"/.well-known":      {prefix: "/.well-known", reads: true, listings: true, subtractive: false},
 				},
 				},
@@ -488,7 +488,7 @@ func TestPopulateAuthLinesMapForCache(t *testing.T) {
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
 					"/first/namespace":  {prefix: "/first/namespace", reads: true, listings: true, subtractive: false},
-					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: false, subtractive: true},
+					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: true, subtractive: true},
 					"/.well-known":      {prefix: "/.well-known", reads: true, listings: true, subtractive: false},
 				},
 				},
@@ -504,7 +504,7 @@ func TestPopulateAuthLinesMapForCache(t *testing.T) {
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
 					"/first/namespace": {prefix: "/first/namespace", reads: false, listings: true, subtractive: false},
-					"/third/namespace": {prefix: "/third/namespace", reads: true, listings: true, subtractive: false},
+					"/third/namespace": {prefix: "/third/namespace", reads: true, listings: false, subtractive: false},
 				},
 				},
 			},
@@ -512,8 +512,8 @@ func TestPopulateAuthLinesMapForCache(t *testing.T) {
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
 					// This one is overridden by discovered namespace ad
 					"/first/namespace":  {prefix: "/first/namespace", reads: true, listings: true, subtractive: false},
-					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: false, subtractive: true},
-					"/third/namespace":  {prefix: "/third/namespace", reads: true, listings: true, subtractive: false},
+					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: true, subtractive: true},
+					"/third/namespace":  {prefix: "/third/namespace", reads: true, listings: false, subtractive: false},
 					"/.well-known":      {prefix: "/.well-known", reads: true, listings: true, subtractive: false},
 				},
 				},
@@ -662,7 +662,7 @@ func TestEmitAuthfile(t *testing.T) {
 			expectedAuthfile: `u 3af6a420.0 /chtc/PROTECTED/sc-origin lr
 u 4ff08838.0 /chtc/PROTECTED/sc-origin lr
 u 5a42185a.0 /chtc/PROTECTED/sc-origin lr
-u * /second/namespace -r /first/namespace lr /.well-known lr /valid/path r
+u * /second/namespace -lr /first/namespace lr /.well-known lr /valid/path r
 `,
 		},
 		{
@@ -674,7 +674,7 @@ u * /second/namespace -r /first/namespace lr /.well-known lr /valid/path r
 			// meaning the original order from the OSDF Authfile is not preserved. This guarantees the most
 			// specific entries are always matched first.
 			expectedAuthfile: `u another /another/path lr
-u * /second/namespace -r /first/namespace lr /.well-known lr /valid/path r
+u * /second/namespace -lr /first/namespace lr /.well-known lr /valid/path r
 `,
 		},
 		{
@@ -688,7 +688,7 @@ u another /another/path lr`,
 			// meaning the original order from the OSDF Authfile is not preserved. This guarantees the most
 			// specific entries are always matched first.
 			expectedAuthfile: `u another /another/path lr
-u * /second/valid/path lr /second/namespace -r /first/namespace lr /.well-known lr /valid/path r
+u * /second/valid/path lr /second/namespace -lr /first/namespace lr /.well-known lr /valid/path r
 `,
 		},
 		{
@@ -698,7 +698,7 @@ u * /second/valid/path lr /second/namespace -r /first/namespace lr /.well-known 
 			// The IDType:ID orderings from the OSDF Authfile are first sorted by length and then alphabetically,
 			// meaning the original order from the OSDF Authfile is not preserved. This guarantees the most
 			// specific entries are always matched first.
-			expectedAuthfile: "u * /second/namespace -r /first/namespace lr /.well-known lr\n",
+			expectedAuthfile: "u * /second/namespace -lr /first/namespace lr /.well-known lr\n",
 		},
 		{
 			name:       "Origin with without extra authfiles, drop privs",
@@ -707,7 +707,7 @@ u * /second/valid/path lr /second/namespace -r /first/namespace lr /.well-known 
 			// The IDType:ID orderings from the OSDF Authfile are first sorted by length and then alphabetically,
 			// meaning the original order from the OSDF Authfile is not preserved. This guarantees the most
 			// specific entries are always matched first.
-			expectedAuthfile: "u * /second/namespace -r /first/namespace lr /.well-known lr\n",
+			expectedAuthfile: "u * /second/namespace -lr /first/namespace lr /.well-known lr\n",
 		},
 		{
 			name:       "Cache with discoverOSDFAuthfile true and valid input authfile",
@@ -730,7 +730,7 @@ u * /second/valid/path lr /second/namespace -r /first/namespace lr /.well-known 
 			expectedAuthfile: `u 3af6a420.0 /chtc/PROTECTED/sc-origin lr
 u 4ff08838.0 /chtc/PROTECTED/sc-origin lr
 u 5a42185a.0 /chtc/PROTECTED/sc-origin lr
-u * /second/namespace -r /first/namespace lr /.well-known lr /valid/path r
+u * /second/namespace -lr /first/namespace lr /.well-known lr /valid/path r
 `,
 		},
 		{
@@ -751,7 +751,7 @@ u * /second/namespace -r /first/namespace lr /.well-known lr /valid/path r
 			// meaning the original order from the OSDF Authfile is not preserved. This guarantees the most
 			// specific entries are always matched first.
 			expectedAuthfile: `u another /another/path lr
-u * /second/namespace -r /first/namespace lr /.well-known lr /valid/path r
+u * /second/namespace -lr /first/namespace lr /.well-known lr /valid/path r
 `,
 		},
 		{
@@ -770,7 +770,7 @@ u * /second/namespace -r /first/namespace lr /.well-known lr /valid/path r
 			// The IDType:ID orderings from the OSDF Authfile are first sorted by length and then alphabetically,
 			// meaning the original order from the OSDF Authfile is not preserved. This guarantees the most
 			// specific entries are always matched first.
-			expectedAuthfile: "u * /second/namespace -r /first/namespace lr /.well-known lr\n",
+			expectedAuthfile: "u * /second/namespace -lr /first/namespace lr /.well-known lr\n",
 		},
 	}
 
