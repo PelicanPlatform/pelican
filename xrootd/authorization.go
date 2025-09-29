@@ -398,9 +398,17 @@ func constructAuthEntry(prefix string, caps server_structs.Capabilities) (authCo
 	if caps.PublicReads || caps.Reads {
 		authComp.reads = true
 	}
-	if caps.Listings {
-		authComp.listings = true
-	}
+
+	// For now, we always set listings to true -- Stats in Pelican require listings,
+	// so even if an Origin admin does not enable them, the authfile still needs to
+	// to encode that listings are allowed. The hope is that we can find a way to
+	// work around this in the future so that we can truly enforce the namespace's
+	// policies.
+	// By putting this "always true" logic explicitly in `constructAuthEntry`, we
+	// make sure this hard-coding only affects service-generated authfile entries
+	// (which are always derived via the capabilities struct that come from Origin
+	// exports), while incoming/merged authfiles can still remove this privilege.
+	authComp.listings = true
 
 	return
 }
