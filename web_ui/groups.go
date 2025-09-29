@@ -127,7 +127,15 @@ func handleListGroupMembers(ctx *gin.Context) {
 		return
 	}
 
-	group, err := database.GetGroupWithMembers(database.ServerDatabase, ctx.Param("id"))
+	id := ctx.Param("id")
+	if id == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "group id is required",
+		})
+		return
+	}
+	group, err := database.GetGroupWithMembers(database.ServerDatabase, id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -187,7 +195,15 @@ func handleAddGroupMember(ctx *gin.Context) {
 		return
 	}
 
-	err = database.AddGroupMember(database.ServerDatabase, ctx.Param("id"), req.Sub, req.Issuer, user, groups)
+	id := ctx.Param("id")
+	if id == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "group id is required",
+		})
+		return
+	}
+	err = database.AddGroupMember(database.ServerDatabase, id, req.Sub, req.Issuer, user, groups)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -295,7 +311,15 @@ func handleRemoveGroupMember(ctx *gin.Context) {
 		return
 	}
 
-	err = database.RemoveGroupMember(database.ServerDatabase, ctx.Param("id"), sub, issuer, user, groups)
+	id := ctx.Param("id")
+	if id == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "group id is required",
+		})
+		return
+	}
+	err = database.RemoveGroupMember(database.ServerDatabase, id, sub, issuer, user, groups)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
