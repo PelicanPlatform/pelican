@@ -20,9 +20,8 @@ type CreateGroupReq struct {
 }
 
 type AddGroupMemberReq struct {
-	Username string `json:"username"`
-	Sub      string `json:"sub"`
-	Issuer   string `json:"issuer"`
+	Sub    string `json:"sub"`
+	Issuer string `json:"issuer"`
 }
 
 func handleListGroups(ctx *gin.Context) {
@@ -178,10 +177,10 @@ func handleAddGroupMember(ctx *gin.Context) {
 		return
 	}
 
-	if req.Username == "" || req.Sub == "" || req.Issuer == "" {
+	if req.Sub == "" || req.Issuer == "" {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Username, sub, and issuer are required",
+			Msg:    "Sub, and issuer are required",
 		})
 		return
 	}

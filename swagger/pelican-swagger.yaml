@@ -1114,9 +1114,6 @@ definitions:
   AddGroupMemberRequest:
     type: object
     properties:
-      username:
-        type: string
-        description: Username of the member to add
       sub:
         type: string
         description: The 'sub' claim of the member to add
