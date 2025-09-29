@@ -67,12 +67,6 @@ var (
 	//go:embed resources/test-scitokens-monitoring.cfg
 	monitoringOutput string
 
-	//go:embed resources/test-scitokens-cache-issuer.cfg
-	cacheSciOutput string
-
-	//go:embed resources/test-scitokens-cache-empty.cfg
-	cacheEmptyOutput string
-
 	//go:embed resources/osdf-authfile
 	osdfAuthfile string
 
@@ -87,11 +81,6 @@ var (
 
 	//go:embed resources/single-export-one-issuer.yml
 	singleExportOneIssuer string
-
-	sampleMultilineOutput = `foo \
-	bar
-	baz
-	abc \`
 
 	// Configuration snippet from bug report #601
 	scitokensCfgAud = `
