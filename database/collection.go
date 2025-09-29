@@ -746,7 +746,7 @@ func AddGroupMember(db *gorm.DB, groupId, sub, issuer, addedBy string, groups []
 	}
 	if result := db.Create(groupMember); result.Error != nil {
 		// Check if the error is a unique constraint violation
-		if strings.Contains(result.Error.Error(), "UNIQUE constraint failed") {
+		if errors.Is(result.Error, gorm.ErrDuplicatedKey) {
 			return errors.New("user is already a member of the group")
 		}
 		return result.Error
