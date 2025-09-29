@@ -713,6 +713,7 @@ func writeAuthfile(server server_structs.XRootDServer, lines []string, isFirstRu
 
 	// If Pelican is run by unprivileged user, use xrdhttp-pelican plugin to ensure xrootd owns the file
 	if !isFirstRun && param.Server_DropPrivileges.GetBool() {
+		// Create a temporary authfile
 		tempAuthFile, err := os.CreateTemp("", "temp-authfile-generated-*")
 		if err != nil {
 			return errors.Wrapf(err, "failed to create a generated temporary authfile")
@@ -725,9 +726,15 @@ func writeAuthfile(server server_structs.XRootDServer, lines []string, isFirstRu
 		if _, err := output.WriteTo(tempAuthFile); err != nil {
 			return errors.Wrapf(err, "failed to write to generated authfile %v", tempAuthFile.Name())
 		}
+		// After writing content to the file, the file pointer remains at the end.
+		// Seek back to the beginning of the file so that the copy operation reads from the start.
 		if _, err := tempAuthFile.Seek(0, io.SeekStart); err != nil {
 			return errors.Wrap(err, "failed to seek to beginning of the file")
 		}
+
+		// Transplant the authfile using the xrdhttp-pelican plugin so xrootd can access it.
+		// Command "6" instructs the plugin to put the auth file into the designated location owned by "xrootd" user,
+		// which is specified in `xrootd/launch.go`.
 		if err = FileCopyToXrootdDir(server.GetServerType().IsEnabled(server_structs.OriginType), 6, tempAuthFile); err != nil {
 			return errors.Wrap(err, "failed to copy the auth file to the xrootd directory")
 		}
