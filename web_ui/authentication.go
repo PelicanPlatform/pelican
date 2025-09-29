@@ -173,7 +173,7 @@ func GetUserGroups(ctx *gin.Context) (user string, groups []string, err error) {
 }
 
 // Create a JWT and set the "login" cookie to store that JWT
-func setLoginCookie(ctx *gin.Context, user string, groups []string) {
+func setLoginCookie(ctx *gin.Context, username string, groups []string) {
 
 	// Lifetime of the login token and the cookie that stores it
 	loginLifetime := 16 * time.Hour
@@ -182,7 +182,7 @@ func setLoginCookie(ctx *gin.Context, user string, groups []string) {
 	loginCookieTokenCfg.Lifetime = loginLifetime
 	loginCookieTokenCfg.Issuer = param.Server_ExternalWebUrl.GetString()
 	loginCookieTokenCfg.AddAudiences(param.Server_ExternalWebUrl.GetString())
-	loginCookieTokenCfg.Subject = user
+	loginCookieTokenCfg.Subject = username
 	loginCookieTokenCfg.AddScopes(token_scopes.WebUi_Access, token_scopes.Monitoring_Query, token_scopes.Monitoring_Scrape)
 	loginCookieTokenCfg.AddGroups(groups...)
 

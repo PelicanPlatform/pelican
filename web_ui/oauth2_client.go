@@ -194,7 +194,7 @@ func generateGroupInfo(user string) (groups []string, err error) {
 
 // Given the maps for the UserInfo and ID token JSON objects, generate
 // user/group information according to the current policy.
-func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]interface{}) (user string, groups []string, err error) {
+func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]interface{}) (userRecord *database.User, groups []string, err error) {
 	claimsSource := maps.Clone(userInfo)
 	if param.Issuer_OIDCPreferClaimsFromIDToken.GetBool() {
 		maps.Copy(claimsSource, idToken)
@@ -226,7 +226,7 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 		err = errors.New("identity provider returned an empty username")
 		return
 	}
-	user = userIdentifier
+	username := userIdentifier
 
 	subIface, ok := claimsSource["sub"]
 	if !ok {
@@ -261,9 +261,9 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 	}
 
 	// now that we have verified that the user belongs to a group we should create the user if it doesn't exist
-	_, err = database.GetOrCreateUser(database.ServerDatabase, user, sub, issuerClaimValue)
+	_, err = database.GetOrCreateUser(database.ServerDatabase, username, sub, issuerClaimValue)
 	if err != nil {
-		return "", nil, err
+		return nil, nil, err
 	}
 
 	groupSource := strings.ToLower(param.Issuer_GroupSource.GetString())
@@ -291,15 +291,15 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 			}
 		}
 	case GroupSourceTypeFile:
-		groups, err = generateGroupInfo(user)
+		groups, err = generateGroupInfo(username)
 		if err != nil {
-			return "", nil, err
+			return nil, nil, err
 		}
 	case GroupSourceTypeInternal:
-		log.Debugf("Getting groups for user %s", user)
-		groupList, err := database.GetMemberGroups(database.ServerDatabase, user)
+		log.Debugf("Getting groups for user %s", username)
+		groupList, err := database.GetMemberGroups(database.ServerDatabase, username)
 		if err != nil {
-			return "", nil, err
+			return nil, nil, err
 		}
 		groups = make([]string, 0, len(groupList))
 		for _, group := range groupList {
@@ -311,11 +311,11 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 		return
 	default:
 		err = errors.Errorf("invalid group source: %s", groupSource)
-		return "", nil, err
+		return nil, nil, err
 	}
 
-	log.Debugf("Groups for user %s (source=%s): %v", user, groupSource, groups)
-	return user, groups, nil
+	log.Debugf("Groups for user %s (source=%s): %v", username, groupSource, groups)
+	return userRecord, groups, nil
 }
 
 // Handle the callback request when the user is successfully authenticated.
@@ -496,7 +496,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 	}
 
 	// Issue our own JWT for web UI access
-	setLoginCookie(ctx, user, groups)
+	setLoginCookie(ctx, user.Username, groups)
 
 	// Redirect user to where they were or root path
 	ctx.Redirect(http.StatusTemporaryRedirect, redirectLocation)
