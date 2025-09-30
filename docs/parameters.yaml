@@ -1013,6 +1013,15 @@ root_default: /run/pelican/xrootd/origin
 default: $XDG_RUNTIME_DIR/pelican/origin
 components: ["origin"]
 ---
+name: Origin.InProgressLocation
+description: |+
+  A directory where objects being uploaded to the origin are temporarily stored until they are committed under the namespace.
+
+  This is only available for origins that have a StorageType of "posix".
+type: filename
+default: $Origin.RunLocation/in-progress
+components: ["origin"]
+---
 name: Origin.NamespacePrefix
 description: |+
   [Deprecated] Origin.NamespacePrefix is being deprecated and will be removed in a future release. It's configuration is being replaced by either

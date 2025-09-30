@@ -95,22 +95,23 @@ enable = true
 
 type (
 	OriginConfig struct {
-		Multiuser         bool
-		DirectorTest      bool
-		EnableCmsd        bool
-		EnableMacaroons   bool
-		EnableVoms        bool
-		EnablePublicReads bool
-		EnableListings    bool
-		SelfTest          bool
-		Concurrency       int
-		Port              int
-		FederationPrefix  string
-		HttpServiceUrl    string
-		HttpAuthTokenFile string
-		XRootServiceUrl   string
-		RunLocation       string
-		StorageType       string
+		Multiuser          bool
+		DirectorTest       bool
+		EnableCmsd         bool
+		EnableMacaroons    bool
+		EnableVoms         bool
+		EnablePublicReads  bool
+		EnableListings     bool
+		SelfTest           bool
+		Concurrency        int
+		Port               int
+		FederationPrefix   string
+		HttpServiceUrl     string
+		HttpAuthTokenFile  string
+		XRootServiceUrl    string
+		RunLocation        string
+		StorageType        string
+		InProgressLocation string
 
 		// S3 specific options that are kept top-level because
 		// they aren't specific to each export
@@ -484,6 +485,63 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 	if err = os.Chown(runtimeDir, uid, -1); err != nil {
 		return errors.Wrapf(err, "Unable to change ownership of runtime directory %v"+
 			" to desired daemon user %v", runtimeDir, username)
+	}
+
+	// Create the in-progress directory with appropriate permissions
+	if param.Origin_StorageType.GetString() == "posix" {
+		inProgressDir := param.Origin_InProgressLocation.GetString()
+
+		// Check if the directory exists
+		if stat, err := os.Stat(inProgressDir); os.IsNotExist(err) {
+			// Directory doesn't exist - create it with mode 1777 (world-writable + sticky bit)
+			log.Infof("Creating in-progress directory %v with mode 1777 (world-writable + sticky bit)", inProgressDir)
+			if err = config.MkdirAll(inProgressDir, 0777|os.ModeSticky, uid, gid); err != nil {
+				return errors.Wrapf(err, "Unable to create in-progress directory %v", inProgressDir)
+			}
+			if err = os.Chown(inProgressDir, uid, -1); err != nil {
+				return errors.Wrapf(err, "Unable to change ownership of in-progress directory %v"+
+					" to desired daemon user %v", inProgressDir, username)
+			}
+		} else if err != nil {
+			// Error checking directory
+			return errors.Wrapf(err, "Unable to stat in-progress directory %v", inProgressDir)
+		} else if !stat.IsDir() {
+			// Path exists but is not a directory
+			return errors.Errorf("In-progress location %v exists but is not a directory", inProgressDir)
+		} else {
+			// Directory exists - check its permissions
+			mode := stat.Mode()
+			perm := mode.Perm()
+
+			// Check if world-writable (others have write permission)
+			isWorldWritable := (perm & 0002) != 0
+
+			if isWorldWritable {
+				// Check sticky bit
+				hasStickyBit := (mode & os.ModeSticky) != 0
+
+				if hasStickyBit {
+					log.Infof("In-progress directory %v exists with mode %04o - using shared sticky-bit model",
+						inProgressDir, perm)
+				} else {
+					log.Warningf("In-progress directory %v has mode %04o (world-writable without sticky bit). "+
+						"This is UNSAFE! Any user can delete others' files. "+
+						"Consider setting permissions to 1777 (chmod 1777 %v)",
+						inProgressDir, perm, inProgressDir)
+				}
+			} else {
+				// Not world-writable - per-user model
+				log.Infof("In-progress directory %v has mode %04o (per-user model). "+
+					"Users must have pre-created subdirectories (%v/$USER) with proper ownership and permissions.",
+					inProgressDir, perm, inProgressDir)
+			}
+
+			// Ensure ownership is correct
+			if err = os.Chown(inProgressDir, uid, -1); err != nil {
+				return errors.Wrapf(err, "Unable to change ownership of in-progress directory %v"+
+					" to desired daemon user %v", inProgressDir, username)
+			}
+		}
 	}
 
 	// The scitokens library will write its JWKS cache into the user's home direct by
