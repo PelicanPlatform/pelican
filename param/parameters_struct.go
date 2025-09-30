@@ -265,6 +265,7 @@ type Config struct {
 		GlobusTransferTokenFile string `mapstructure:"globustransfertokenfile" yaml:"GlobusTransferTokenFile"`
 		HttpAuthTokenFile string `mapstructure:"httpauthtokenfile" yaml:"HttpAuthTokenFile"`
 		HttpServiceUrl string `mapstructure:"httpserviceurl" yaml:"HttpServiceUrl"`
+		InProgressLocation string `mapstructure:"inprogresslocation" yaml:"InProgressLocation"`
 		Mode string `mapstructure:"mode" yaml:"Mode"`
 		Multiuser bool `mapstructure:"multiuser" yaml:"Multiuser"`
 		NamespacePrefix string `mapstructure:"namespaceprefix" yaml:"NamespacePrefix"`
@@ -660,6 +661,7 @@ type configWithType struct {
 		GlobusTransferTokenFile struct { Type string; Value string }
 		HttpAuthTokenFile struct { Type string; Value string }
 		HttpServiceUrl struct { Type string; Value string }
+		InProgressLocation struct { Type string; Value string }
 		Mode struct { Type string; Value string }
 		Multiuser struct { Type string; Value bool }
 		NamespacePrefix struct { Type string; Value string }
