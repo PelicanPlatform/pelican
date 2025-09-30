@@ -95,22 +95,23 @@ enable = true
 
 type (
 	OriginConfig struct {
-		Multiuser         bool
-		DirectorTest      bool
-		EnableCmsd        bool
-		EnableMacaroons   bool
-		EnableVoms        bool
-		EnablePublicReads bool
-		EnableListings    bool
-		SelfTest          bool
-		Concurrency       int
-		CalculatedPort    string
-		FederationPrefix  string
-		HttpServiceUrl    string
-		HttpAuthTokenFile string
-		XRootServiceUrl   string
-		RunLocation       string
-		StorageType       string
+		Multiuser          bool
+		DirectorTest       bool
+		EnableCmsd         bool
+		EnableMacaroons    bool
+		EnableVoms         bool
+		EnablePublicReads  bool
+		EnableListings     bool
+		SelfTest           bool
+		Concurrency        int
+		CalculatedPort     string
+		FederationPrefix   string
+		HttpServiceUrl     string
+		HttpAuthTokenFile  string
+		XRootServiceUrl    string
+		RunLocation        string
+		StorageType        string
+		InProgressLocation string
 
 		// S3 specific options that are kept top-level because
 		// they aren't specific to each export
@@ -459,6 +460,18 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 	if err = os.Chown(runtimeDir, uid, -1); err != nil {
 		return errors.Wrapf(err, "Unable to change ownership of runtime directory %v"+
 			" to desired daemon user %v", runtimeDir, username)
+	}
+
+	// Create the in-progress directory
+	if param.Origin_StorageType.GetString() == "posix" {
+		inProgressDir := param.Origin_InProgressLocation.GetString()
+		if err = config.MkdirAll(inProgressDir, 0755, uid, gid); err != nil {
+			return errors.Wrapf(err, "Unable to create in-progress directory %v", inProgressDir)
+		}
+		if err = os.Chown(inProgressDir, uid, -1); err != nil {
+			return errors.Wrapf(err, "Unable to change ownership of in-progress directory %v"+
+				" to desired daemon user %v", inProgressDir, username)
+		}
 	}
 
 	// The scitokens library will write its JWKS cache into the user's home direct by
