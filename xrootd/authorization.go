@@ -331,7 +331,7 @@ func getOSDFAuthFiles(server server_structs.XRootDServer) ([]byte, error) {
 		u * /foo lr
 	This gives Origin admins the power to get in trouble if they want to by overriding
 	the service-generated policy.
-	- If constructing an authfile for a cachev log a waryning on a conflict, but apply
+	- If constructing an authfile for a cache, log a warning on a conflict but apply
 	the service generated policy. Caches MUST respect the policies discovered via the Federation.
 	This makes it harder for cache admins to accidentally disobey the security policy of discovered
 	Origins.
