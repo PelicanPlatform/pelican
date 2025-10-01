@@ -158,6 +158,71 @@ func TestAuthPathCompToWord(t *testing.T) {
 	}
 }
 
+func TestConstructAuthEntry(t *testing.T) {
+	testCases := []struct {
+		name        string
+		prefix      string
+		caps        server_structs.Capabilities
+		expected    authPathComponent
+		expectError bool
+	}{
+		{
+			"public reads only generates lr", // See comment in constructAuthEntry about why we still need `lr`
+			"/foo",
+			server_structs.Capabilities{PublicReads: true, Listings: false, Reads: false},
+			authPathComponent{prefix: "/foo", reads: true, listings: true, subtractive: false},
+			false,
+		},
+		{
+			"public reads with writes and listings generates lr",
+			"/foo",
+			server_structs.Capabilities{PublicReads: true, Listings: true, Reads: true, Writes: true},
+			authPathComponent{prefix: "/foo", reads: true, listings: true, subtractive: false},
+			false,
+		},
+		{
+			"protected reads, writes and listings generates -lr", // Listings subtracted because they are not public
+			"/foo",
+			server_structs.Capabilities{PublicReads: false, Listings: true, Reads: true, Writes: true},
+			authPathComponent{prefix: "/foo", reads: true, listings: true, subtractive: true},
+			false,
+		},
+		{
+			"protected reads, writes and no listings still generates -lr", // Listings subtracted because they are not public
+			"/foo",
+			server_structs.Capabilities{PublicReads: false, Listings: false, Reads: true, Writes: true},
+			authPathComponent{prefix: "/foo", reads: true, listings: true, subtractive: true},
+			false,
+		},
+		{
+			"protected writes generates -lr",
+			"/foo",
+			server_structs.Capabilities{PublicReads: false, Listings: false, Reads: false, Writes: true},
+			authPathComponent{prefix: "/foo", reads: true, listings: true, subtractive: true},
+			false,
+		},
+		{
+			"no prefix generates error",
+			"",
+			server_structs.Capabilities{PublicReads: true, Listings: false, Reads: false},
+			authPathComponent{},
+			true,
+		},
+	}
+
+	for _, testInput := range testCases {
+		t.Run(testInput.name, func(t *testing.T) {
+			authComp, err := constructAuthEntry(testInput.prefix, testInput.caps)
+			if testInput.expectError {
+				require.Error(t, err, "Expected error for test case: %s", testInput.name)
+				return
+			}
+			require.NoError(t, err, "Unexpected error for test case: %s", testInput.name)
+			require.Equal(t, testInput.expected, authComp, "Mismatch in auth component for test case: %s", testInput.name)
+		})
+	}
+}
+
 func TestAuthPolicyFromWord(t *testing.T) {
 	testCases := []struct {
 		policyWord  string
