@@ -390,25 +390,28 @@ func constructAuthEntry(prefix string, caps server_structs.Capabilities) (authCo
 
 	authComp.prefix = path.Clean(prefix)
 
-	// Determine whether the auth component should add privileges or remove them
-	if !caps.PublicReads {
-		authComp.subtractive = true
-	}
-
-	if caps.PublicReads || caps.Reads {
-		authComp.reads = true
-	}
-
 	// For now, we always set listings to true -- Stats in Pelican require listings,
 	// so even if an Origin admin does not enable them, the authfile still needs to
 	// to encode that listings are allowed. The hope is that we can find a way to
 	// work around this in the future so that we can truly enforce the namespace's
 	// policies.
+	//
+	// We also always set reads to true because every authfile comp will explicitly
+	// grant or deny read privileges. The authComp is not meant to represent the
+	// namespace's policy, but rather the privileges granted or denied via the authfile.
+	//
 	// By putting this "always true" logic explicitly in `constructAuthEntry`, we
 	// make sure this hard-coding only affects service-generated authfile entries
-	// (which are always derived via the capabilities struct that come from Origin
-	// exports), while incoming/merged authfiles can still remove this privilege.
+	// (which are always derived via the capabilities struct that come from namespaces
+	// and capabilities), while incoming/merged authfiles can still remove this privilege.
+	authComp.reads = true
 	authComp.listings = true
+
+	// Every path should be explicit in the authfile so if a path does not allow
+	// public reads, we must  remove lr privileges from it in the authfile
+	if !caps.PublicReads {
+		authComp.subtractive = true
+	}
 
 	return
 }

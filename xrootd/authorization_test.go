@@ -73,6 +73,9 @@ var (
 	//go:embed resources/multi-export-origin.yml
 	multiExportOrigin string
 
+	//go:embed resources/multi-export-origin-write-only.yml
+	multiExportOriginWriteOnly string
+
 	//go:embed resources/multi-export-multi-issuers.yml
 	multiExportIssuers string
 
@@ -363,6 +366,7 @@ func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
 		name              string
 		inputAuthLinesMap map[string]*authLine
 		expectedEntries   map[string]*authLine
+		inputOriginCfg    string
 	}{
 		// Each of the tests uses the same multi-export Origin config, which has both
 		// public and protected namespaces.
@@ -377,6 +381,7 @@ func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
 				},
 				},
 			},
+			multiExportOrigin,
 		},
 		{
 			"mulit-export, multi-auth origin with non-conflicting input authfile",
@@ -400,6 +405,7 @@ func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
 				},
 				},
 			},
+			multiExportOrigin,
 		},
 		{
 			"mulit-export, multi-auth origin with conflicting input authfile",
@@ -420,6 +426,20 @@ func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
 				},
 				},
 			},
+			multiExportOrigin,
+		},
+		{
+			"mulit-export, multi-auth origin with no input authfile where one namespace has no reads",
+			map[string]*authLine{},
+			map[string]*authLine{
+				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
+					"/mynamespace":        {prefix: "/mynamespace", reads: true, listings: true, subtractive: false},
+					"/mynamespace-writes": {prefix: "/mynamespace-writes", reads: true, listings: true, subtractive: true},
+					"/.well-known":        {prefix: "/.well-known", reads: true, listings: true, subtractive: false},
+				},
+				},
+			},
+			multiExportOriginWriteOnly,
 		},
 	}
 
@@ -428,7 +448,7 @@ func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
 			server_utils.ResetTestState()
 			defer server_utils.ResetTestState()
 
-			setupExports(t, multiExportOrigin)
+			setupExports(t, testInput.inputOriginCfg)
 
 			err := populateAuthLinesMapForOrigin(testInput.inputAuthLinesMap)
 			// Note we don't test for the err != nil case because that implies GetOriginExports returned
