@@ -1093,6 +1093,12 @@ func SetServerDefaults(v *viper.Viper) error {
 	// when Pelican is running in its own default Error level. Otherwise we use Pelican's configured log level as a
 	// default for other params.
 	defaultLevel := log.GetLevel().String()
+	// Logrus parses "warn" and converts it to "warning". Pelican uses "warn" in its config and docs,
+	// so we map it back here. This makes sure that something like `param.Logging_Origin_Cms.GetString()`
+	// returns a pelican-compatible log level.
+	if defaultLevel == log.WarnLevel.String() {
+		defaultLevel = "warn"
+	}
 	for _, param := range []param.StringParam{
 		param.Logging_Origin_Cms,
 		param.Logging_Origin_Xrd,

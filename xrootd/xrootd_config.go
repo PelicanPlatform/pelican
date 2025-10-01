@@ -1149,10 +1149,16 @@ func genLoggingConfig(input string, logMap loggingMap) (string, error) {
 		input = param.Logging_Level.GetString()
 	}
 
+	// Note that while Pelican itself doesn't take a "warning" level, when
+	// logrus parses a level of "warn" it converts it to "warning". By
+	// adding "Warning" here, we'll automatically fall down to the "Warn" level
+	// if we happen to grab a log level that passed through logrus without being
+	// mapped back "warn".
 	orderedLevels := []string{
 		"Panic",
 		"Fatal",
 		"Error",
+		"Warning",
 		"Warn",
 		"Info",
 		"Debug",
