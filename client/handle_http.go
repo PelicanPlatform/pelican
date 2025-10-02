@@ -3378,8 +3378,8 @@ Loop:
 		// Fetch the checksums from the server
 		result, err := fetchChecksum(putContext, transfer.requestedChecksums, dest, tokenContents, transfer.job.project)
 		if err != nil {
-			log.Errorln("Error fetching checksum:", err)
 			if transfer.requireChecksum {
+				log.Errorln("Error fetching checksum:", err)
 				transferResult.Error = errors.New("checksum is required but endpoint was not able to provide it")
 				attempt.Error = err
 			} else {
