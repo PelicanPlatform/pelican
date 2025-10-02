@@ -62,8 +62,8 @@ ARG XRDHTTP_PELICAN_SRC_BUILD=false
 ARG XRDHTTP_PELICAN_VER=0.0.7
 ARG XROOTD_LOTMAN_SRC_BUILD=false
 ARG XROOTD_LOTMAN_VER=0.0.5
-ARG XROOTD_S3_HTTP_SRC_BUILD=false
-ARG XROOTD_S3_HTTP_VER=0.5.1
+ARG XROOTD_S3_HTTP_SRC_BUILD=true
+ARG XROOTD_S3_HTTP_VER=0.5.2
 
 # Set scitokens-oauth2-server image as a build stage so that we can copy its
 # OA4MP installation into the images being built here.
