@@ -27,6 +27,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
@@ -71,10 +72,10 @@ func (we weightError) Error(sAds []server_structs.ServerAd) string {
 
 const (
 	// Various constants used in weight calculations
-	distanceHalvingFactor = 200  // Halving distance for the GeoIP weight, in miles
-	objAvailabilityFactor = 2.0  // Multiplier for knowing whether an object is present
-	loadHalvingThreshold  = 10.0 // Threshold where the load halving factor kicks in
-	loadHalvingFactor     = 4.0  // Halving interval for load
+	distanceHalvingFactor = 200   // Halving distance for the GeoIP weight, in miles
+	objAvailabilityFactor = 2.0   // Multiplier for knowing whether an object is present
+	loadHalvingThreshold  = 100.0 // Threshold where the load halving factor kicks in
+	loadHalvingFactor     = 200.0 // Halving interval for load
 )
 
 func (me SwapMaps) Len() int {
@@ -429,7 +430,7 @@ func (as *AdaptiveSort) Sort(sAds []server_structs.ServerAd, sCtx SortContext) (
 		return nil
 	}
 
-	// Sort first by distance -- we'll only keep the top sourceWorkingSetSize ads
+	// Sort first by distance -- we'll only keep the top N ads (configurable)
 	// from this sort to use for the rest of the algorithm
 	dWeights := computeWeights(sAds, func(_ int, ad server_structs.ServerAd) (float64, bool) {
 		return distanceWeightFn(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude)
@@ -437,6 +438,7 @@ func (as *AdaptiveSort) Sort(sAds []server_structs.ServerAd, sCtx SortContext) (
 
 	dWeights.smSortDescending()
 
+	sourceWorkingSetSize := param.Director_AdaptiveSortTruncateConstant.GetInt()
 	// Shrink down to the working set size
 	shrinkTo := min(sourceWorkingSetSize, len(dWeights))
 	dWeights = dWeights[:shrinkTo]

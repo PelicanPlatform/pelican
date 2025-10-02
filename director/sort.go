@@ -59,8 +59,7 @@ type (
 
 // Constants for director sorting algorithms
 const (
-	sourceWorkingSetSize = 15 // Number of servers we consider after first GeoIP sort in adaptive method
-	sourceServerAdsLimit = 6  // Number of servers sent to the client after all sorting operations complete
+	sourceServerAdsLimit = 6 // Number of servers sent to the client after all sorting operations complete
 )
 
 // The all-in-one method to sort serverAds based on the Director.CacheSortMethod configuration parameter

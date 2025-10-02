@@ -1288,6 +1288,15 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.Set(p.GetName(), 5*time.Minute)
 	}
 
+	// By default, set adaptive sort truncate to the same number of servers the Director expects to send.
+	// Cannot be set below 3 because Pelican clients expect to try that many servers.
+	v.SetDefault(param.Director_AdaptiveSortTruncateConstant.GetName(), 6)
+	if adaptiveSortTruncateConst := v.GetInt(param.Director_AdaptiveSortTruncateConstant.GetName()); adaptiveSortTruncateConst < 3 {
+		log.Warningf("Invalid value of '%d' for config param %s; must be greater than or equal to 3. Resetting to default of %d",
+			adaptiveSortTruncateConst, param.Director_AdaptiveSortTruncateConstant.GetName(), 6)
+		v.Set(param.Director_AdaptiveSortTruncateConstant.GetName(), 6)
+	}
+
 	// Setup the audience to use.  We may customize the Origin.URL in the future if it has
 	// a `0` for the port number; to make the audience predictable (it goes into the xrootd
 	// configuration but we don't know the origin's port until after xrootd has started), we

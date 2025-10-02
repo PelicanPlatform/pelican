@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
@@ -531,19 +532,19 @@ func TestIOLoadWeightFn(t *testing.T) {
 		},
 		{
 			name:          "below threshold",
-			load:          9.0,
+			load:          loadHalvingThreshold / 2,
 			weightValid:   true,
 			expectedValue: 1.0,
 		},
 		{
 			name:          "at threshold",
-			load:          10.0,
+			load:          loadHalvingThreshold,
 			weightValid:   true,
 			expectedValue: 1.0,
 		},
 		{
 			name:          "one halving factor above threshold",
-			load:          14.0,
+			load:          loadHalvingThreshold + loadHalvingFactor,
 			weightValid:   true,
 			expectedValue: 0.5,
 		},
@@ -1076,7 +1077,7 @@ func TestAdaptiveSortAlg(t *testing.T) {
 		for range 5000 {
 			sortedAds, err := sortAlg.Sort(snapshotAds, sCtx)
 			assert.NoError(t, err, "unexpected error from AdaptiveSort alg")
-			assert.Equal(t, sourceWorkingSetSize, len(sortedAds), "number of sorted ads does not match expected")
+			assert.Equal(t, param.Director_AdaptiveSortTruncateConstant.GetInt(), len(sortedAds), "number of sorted ads does not match expected")
 			for _, ad := range sortedAds {
 				urlsSet[ad.Name] = struct{}{}
 			}
