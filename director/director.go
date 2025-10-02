@@ -331,7 +331,7 @@ func generateLinkHeader(ctx *gin.Context, sAds []server_structs.ServerAd, nsAd s
 // Generates the CORS headers needed to enable communication with web client
 func corsHeadersMiddleware(ginCtx *gin.Context) {
 	ginCtx.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-	ginCtx.Writer.Header().Set("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
+	ginCtx.Writer.Header().Set("Access-Control-Allow-Methods", "GET, PUT, OPTIONS, PROPFIND")
 	ginCtx.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization") // TODO: , X-Pelican-User, X-Pelican-Timeout, X-Pelican-Token-Generation, X-Pelican-Authorization, X-Pelican-Namespace
 	ginCtx.Writer.Header().Set("Access-Control-Expose-Headers", "Content-Type, Authorization, X-Pelican-User, X-Pelican-Timeout, X-Pelican-Token-Generation, X-Pelican-Authorization, X-Pelican-Namespace")
 }
