@@ -742,7 +742,7 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 				if lastErr != nil {
 					log.Errorln("Failure when generating authfile:", err)
 				}
-				log.Debugf("Authfile update has failed %d times in a row; last success was %s ago", state.authfileFailures, elapsed.String())
+				log.Debugf("Authfile update has failed %d times in a row; last success was %s ago", state.authfileFailures, elapsed.Round(time.Second).String())
 				lastErr = err
 			} else {
 				state.lastAuthfileSuccess = time.Now()
@@ -757,7 +757,7 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 				if lastErr != nil {
 					log.Errorln("Failure when emitting the scitokens.cfg:", err)
 				}
-				log.Debugf("Scitokens config update has failed %d times in a row; last success was %s ago", state.scitokensFailures, elapsed.String())
+				log.Debugf("Scitokens config update has failed %d times in a row; last success was %s ago", state.scitokensFailures, elapsed.Round(time.Second).String())
 				lastErr = err
 			} else {
 				state.lastScitokensSuccess = time.Now()
@@ -783,7 +783,15 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 			} else {
 				metrics.SetComponentHealthStatus(metrics.OriginCache_ConfigUpdates, metrics.StatusCritical, "Authfile and/or scitoken.cfg file stale beyond timeout; initiating shutdown if enabled")
 				if param.Xrootd_AutoShutdownEnabled.GetBool() {
-					log.Errorf("XRootD authfile and/or scitoken.cfg file not updated for %s (timeout: %s); initiating auto-shutdown", age.String(), timeout.String())
+					staleXrootdCfgFiles := "XRootD "
+					if authFails > 0 && sciFails > 0 {
+						staleXrootdCfgFiles += "authfile and scitokens.cfg file"
+					} else if authFails > 0 {
+						staleXrootdCfgFiles += "authfile"
+					} else if sciFails > 0 {
+						staleXrootdCfgFiles += "scitokens.cfg file"
+					}
+					log.Errorf("%s not updated for %s (timeout: %s); initiating auto-shutdown", staleXrootdCfgFiles, age.Round(time.Second).String(), timeout.Round(time.Second).String())
 					config.ShutdownFlag <- true
 				}
 			}

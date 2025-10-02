@@ -3037,14 +3037,14 @@ hidden: true
 ---
 name: Xrootd.ConfigUpdateFailureTimeout
 description: |+
-  If the Authfile and/or scitoken config file fail to update within this duration, and Xrootd.AutoShutdownEnabled is true, the server will be automatically shut down.
+  If the Authfile and/or scitoken config file fails to update within this duration, and Xrootd.AutoShutdownEnabled is true, the server will be automatically shut down.
 type: duration
 default: 1h
 components: ["origin", "cache"]
 ---
 name: Xrootd.AutoShutdownEnabled
 description: |+
-  If enabled, the server will be automatically shut down if the Authfile and/or scitoken config file fail to update within the timeout.
+  If enabled, the server will be automatically shut down if the Authfile and/or scitoken config file fails to update within the timeout.
 type: bool
 default: true
 components: ["origin", "cache"]
