@@ -1850,6 +1850,21 @@ default: 5m
 hidden: true
 components: ["director"]
 ---
+name: Director.AdaptiveSortTruncateConstant
+description: |+
+  The first step in the Director's adaptive sorting algorithm is to sort all servers for the given request
+  by their distance from the client and then truncate to the nearest N server before generating the other
+  adaptive sort weights (load, status, locality).
+
+  This constant sets the value of N. Higher values increase the pool of servers considered for adaptive sorting,
+  while lower values restrict the pool to only the closest servers.
+
+  The constant cannot be set to a value lower than 3, as Pelican clients expect to receive 3 servers at minimum,
+  and the Director will reply with at most 6 servers regardless of this value.
+type: int
+default: 6
+components: ["director"]
+---
 name: Director.OriginResponseHostnames
 description: |+
   A list of virtual hostnames for the director. If a request is sent by the client to one of these hostnames,

@@ -329,6 +329,7 @@ var (
 	Client_MaximumDownloadSpeed = IntParam{"Client.MaximumDownloadSpeed"}
 	Client_MinimumDownloadSpeed = IntParam{"Client.MinimumDownloadSpeed"}
 	Client_WorkerCount = IntParam{"Client.WorkerCount"}
+	Director_AdaptiveSortTruncateConstant = IntParam{"Director.AdaptiveSortTruncateConstant"}
 	Director_CachePresenceCapacity = IntParam{"Director.CachePresenceCapacity"}
 	Director_MaxStatResponse = IntParam{"Director.MaxStatResponse"}
 	Director_MinStatResponse = IntParam{"Director.MinStatResponse"}
