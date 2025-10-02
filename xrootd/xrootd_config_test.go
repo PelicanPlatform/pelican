@@ -655,9 +655,13 @@ func TestAutoShutdownOnStaleAuthfile(t *testing.T) {
 		for {
 			select {
 			case <-config.ShutdownFlag: // receive the shutdown signal from the maintenance loop
-				gotShutdown <- struct{}{} // After receiving, ping test's main goroutine “shutdown happened”
-			case <-time.After(2 * time.Second):
-				// Timeout after 2s so the goroutine doesn’t hang forever if nothing arrives
+				// Use a non-blocking send to drop duplicates and prevents deadlocks where multiple shutdowns emit before the main goroutine receives
+				select {
+				// After receiving, ping test's main goroutine “shutdown happened”
+				case gotShutdown <- struct{}{}:
+				default:
+				}
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -670,8 +674,9 @@ func TestAutoShutdownOnStaleAuthfile(t *testing.T) {
 	case <-gotShutdown:
 		// OK: shutdown was requested due to stale Authfile
 		cancel()
-	case <-time.After(1 * time.Second):
-		// If the test's main goroutine doesn't receive the confirmation signal within 1s, the test will fail
+		require.NoError(t, egrp.Wait())
+	case <-time.After(3 * time.Second):
+		// If the test's main goroutine doesn't receive the confirmation signal within timeout, the test will fail
 		t.Fatal("expected shutdown due to stale Authfile, but none observed within timeout")
 	}
 }
