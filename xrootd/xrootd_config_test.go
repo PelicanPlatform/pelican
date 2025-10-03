@@ -616,67 +616,64 @@ func TestGenLoggingConfig(t *testing.T) {
 }
 
 func TestAutoShutdownOnStaleAuthfile(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
 	dir := t.TempDir()
 
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	t.Cleanup(func() {
-		cancel()
-		assert.NoError(t, egrp.Wait())
-		server_utils.ResetTestState()
-	})
-
-	// Configure small timeout and fast maintenance interval
-	viper.Set(param.Xrootd_ConfigUpdateFailureTimeout.GetName(), 20*time.Millisecond)
-	viper.Set(param.Xrootd_AutoShutdownEnabled.GetName(), true)
 	viper.Set(param.Logging_Level.GetName(), "Debug")
 	viper.Set("ConfigDir", dir)
 	viper.Set(param.Cache_RunLocation.GetName(), dir)
 
-	// Cause Authfile emission to fail by pointing to a non-existent file
-	authfilePath := filepath.Join(dir, "missing-authfile")
-	viper.Set(param.Xrootd_Authfile.GetName(), authfilePath)
+	// Start with a valid authfile and scitokens so the first cycles succeed
+	validAuthfilePath := filepath.Join(dir, "authfile")
+	require.NoError(t, os.WriteFile(validAuthfilePath, []byte("u * /.well-known lr\n"), 0600))
+	viper.Set(param.Xrootd_Authfile.GetName(), validAuthfilePath)
 
-	// Ensure scitokens.cfg path exists so scitokens emission succeeds
 	scitokensPath := filepath.Join(dir, "scitokens.cfg")
 	require.NoError(t, os.WriteFile(scitokensPath, []byte(""), 0600))
 	viper.Set(param.Xrootd_ScitokensConfig.GetName(), scitokensPath)
 
 	// Init cache server
 	require.NoError(t, config.InitServer(ctx, server_structs.CacheType))
+
+	// Set timeout AFTER InitServer as a string to ensure correct parsing
+	viper.Set(param.Xrootd_ConfigUpdateFailureTimeout.GetName(), "50ms")
+	viper.Set(param.Xrootd_AutoShutdownEnabled.GetName(), true)
+
 	cacheServer := &cache.CacheServer{}
 
-	// Creates a buffered channel that can hold one signal without blocking the sender
-	gotShutdown := make(chan struct{}, 1)
-	// config.ShutdownFlag is an unbuffered channel. When the maintenance loop sends on it,
-	// it will block until something is ready to receive. This helper goroutine is started early to
-	// be that receiver immediately, so the sender never blocks.
-	go func() {
-		for {
-			select {
-			case <-config.ShutdownFlag: // receive the shutdown signal from the maintenance loop
-				// Use a non-blocking send to drop duplicates and prevents deadlocks where multiple shutdowns emit before the main goroutine receives
-				select {
-				// After receiving, ping test's main goroutine “shutdown happened”
-				case gotShutdown <- struct{}{}:
-				default:
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	// Replace global ShutdownFlag with a test-local buffered channel to avoid interference
+	origShutdown := config.ShutdownFlag
+	defer func() { config.ShutdownFlag = origShutdown }()
+	testShutdown := make(chan any, 1)
+	config.ShutdownFlag = testShutdown
 
 	// Launch maintenance with a short ticker
 	LaunchXrootdMaintenance(ctx, cacheServer, 10*time.Millisecond)
 
+	// Ensure at least one successful cycle happened (generated file exists)
+	emittedAuthfilePath := filepath.Join(dir, "authfile-cache-generated")
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(emittedAuthfilePath)
+		return err == nil
+	}, 500*time.Millisecond, 20*time.Millisecond, "expected generated authfile to exist after initial maintenance")
+
+	// Now flip to INVALID authfile path to force failures and staleness
+	missingAuthfilePath := filepath.Join(dir, "missing-authfile")
+	viper.Set(param.Xrootd_Authfile.GetName(), missingAuthfilePath)
+
+	// Wait to exceed timeout and then trigger maintenance immediately by touching scitokens
+	time.Sleep(60 * time.Millisecond)
+	require.NoError(t, os.WriteFile(scitokensPath, []byte("# poke\n"), 0600))
+
 	select {
-	case <-gotShutdown:
-		// OK: shutdown was requested due to stale Authfile
+	case <-testShutdown:
+		// stop all background watchers immediately
 		cancel()
 		require.NoError(t, egrp.Wait())
+		return
 	case <-time.After(3 * time.Second):
-		// If the test's main goroutine doesn't receive the confirmation signal within timeout, the test will fail
 		t.Fatal("expected shutdown due to stale Authfile, but none observed within timeout")
 	}
 }
