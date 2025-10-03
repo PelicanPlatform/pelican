@@ -79,6 +79,7 @@ const (
 	Server_WebUI              HealthStatusComponent = "web-ui"
 	OriginCache_IOConcurrency HealthStatusComponent = "IO-concurrency" // Keep track of whether or active requests are exceeding configured concurrency limits
 	Prometheus                HealthStatusComponent = "prometheus"     // Prometheus server
+	OriginCache_ConfigUpdates HealthStatusComponent = "config-updates" // Track freshness of Authfile and scitokens.cfg
 )
 
 var (
@@ -192,4 +193,26 @@ func GetComponentStatus(comp HealthStatusComponent) (status string, err error) {
 		return "", fmt.Errorf("wrong format of component status for component %s", comp.String())
 	}
 	return statusInt.Status.String(), nil
+}
+
+// ValidateComponentHealthAge checks the last update of a component and marks it critical
+// if the age exceeds maxAge. If the component has never been set, it will be marked critical.
+func ValidateComponentHealthAge(component HealthStatusComponent, maxAge time.Duration) {
+	if maxAge <= 0 {
+		return
+	}
+	val, ok := healthStatus.Load(component)
+	if !ok {
+		SetComponentHealthStatus(component, StatusCritical, "Component health status missing; marking as stale")
+		return
+	}
+	stat, ok := val.(componentStatusInternal)
+	if !ok {
+		SetComponentHealthStatus(component, StatusCritical, "Component health status invalid; marking as stale")
+		return
+	}
+	age := time.Since(stat.LastUpdate)
+	if age > maxAge {
+		SetComponentHealthStatus(component, StatusCritical, "Component health stale; last update "+age.String()+" ago")
+	}
 }
