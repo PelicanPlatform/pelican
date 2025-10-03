@@ -47,7 +47,7 @@ function DowntimeCardList({ Card, data }: DowntimeListProps) {
   const [recentlyUpdated, setRecentlyUpdated] = useState(false);
   const range = useContext(CalendarDateTimeContext);
   const setRange = useContext(CalendarDateTimeDispatchContext);
-  const [sortBy, setSortBy] = useState<keyof sortTypes>('updatedAt');
+  const [sortBy, setSortBy] = useState<keyof typeof sortTypes>('updatedAt');
 
   // Filter the data based on the range
   const filteredData = useMemo(() => {
@@ -128,10 +128,10 @@ function DowntimeCardList({ Card, data }: DowntimeListProps) {
                 labelId='sort-by-label'
                 value={sortBy}
                 label='Sort By'
-                onChange={(e) => setSortBy(e.target.value as keyof sortTypes)}
+                onChange={(e) => setSortBy(e.target.value)}
               >
                 {Object.entries(sortTypes).map(([key, value]) => (
-                  <MenuItem key={key} value={key}>
+                  <MenuItem key={key} value={key as (keyof typeof sortTypes)}>
                     {value.label}
                   </MenuItem>
                 ))}
