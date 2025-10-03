@@ -391,6 +391,15 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	// Get our token if needed
 	token := NewTokenGenerator(pUrl, &dirResp, config.TokenSharedRead, true)
 	collectionsOverride := ""
+	recursive := false
+	depth := -1
+
+	// Check for recursive query parameter in the URL
+	if hasRecursive := pUrl.Query().Get(pelican_url.QueryRecursive); hasRecursive != "" {
+		recursive = true
+		log.Debugln("Recursive listing enabled via query parameter")
+	}
+
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
@@ -401,6 +410,11 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 			token.SetToken(option.Value().(string))
 		case identTransferOptionCollectionsUrl{}:
 			collectionsOverride = option.Value().(string)
+		case identTransferOptionRecursive{}:
+			// Option overrides query parameter
+			recursive = option.Value().(bool)
+		case identTransferOptionDepth{}:
+			depth = option.Value().(int)
 		}
 	}
 
@@ -419,7 +433,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 		}
 		dirResp.XPelNsHdr.CollectionsUrl = collectionsOverrideUrl
 	}
-	fileInfos, err = listHttp(pUrl, dirResp, token)
+	fileInfos, err = listHttp(pUrl, dirResp, token, recursive, depth)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to perform list request")
 	}

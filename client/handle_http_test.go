@@ -1768,7 +1768,7 @@ func TestListHttp(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := listHttp(test.pUrl, test.dirResp, nil)
+			_, err := listHttp(test.pUrl, test.dirResp, nil, false, 0)
 			if test.expectedError != "" {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), test.expectedError)
