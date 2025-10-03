@@ -48,4 +48,6 @@ const style = {
   p: 2,
   width: '600px',
   maxWidth: '100%',
+  maxHeight: '100%',
+  overflowY: 'auto',
 };
