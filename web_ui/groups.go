@@ -20,7 +20,35 @@ type CreateGroupReq struct {
 }
 
 type AddGroupMemberReq struct {
-	Member string `json:"member"`
+	Sub    string `json:"sub"`
+	Issuer string `json:"issuer"`
+}
+
+func handleListGroups(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie, token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access},
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	groups, err := database.ListGroups(database.ServerDatabase)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to list groups",
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, groups)
 }
 
 func handleCreateGroup(ctx *gin.Context) {
@@ -55,7 +83,7 @@ func handleCreateGroup(ctx *gin.Context) {
 		return
 	}
 
-	user, _, err := GetUserGroups(ctx)
+	user, sub, issuer, _, err := GetUserGroups(ctx)
 	if err != nil || user == "" {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -64,7 +92,17 @@ func handleCreateGroup(ctx *gin.Context) {
 		return
 	}
 
-	group, err := database.CreateGroup(database.ServerDatabase, req.Name, req.Description, user, nil)
+	// Resolve unique User.ID
+	userRecord, err := database.GetOrCreateUser(database.ServerDatabase, user, sub, issuer)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to resolve user ID",
+		})
+		return
+	}
+
+	group, err := database.CreateGroup(database.ServerDatabase, req.Name, req.Description, userRecord.ID, nil)
 	if err != nil {
 		if errors.Is(err, database.ErrReservedGroupPrefix) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
@@ -81,6 +119,48 @@ func handleCreateGroup(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusCreated, group)
+}
+
+func handleListGroupMembers(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie, token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access},
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	id := ctx.Param("id")
+	if id == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "group id is required",
+		})
+		return
+	}
+	group, err := database.GetGroupWithMembers(database.ServerDatabase, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "group not found",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to get group members: %v", err),
+			})
+		}
+		return
+	}
+
+	ctx.JSON(http.StatusOK, group.Members)
 }
 
 func handleAddGroupMember(ctx *gin.Context) {
@@ -107,15 +187,15 @@ func handleAddGroupMember(ctx *gin.Context) {
 		return
 	}
 
-	if req.Member == "" {
+	if req.Sub == "" || req.Issuer == "" {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Group member is required",
+			Msg:    "Sub, and issuer are required",
 		})
 		return
 	}
 
-	user, groups, err := GetUserGroups(ctx)
+	user, userSub, userIssuer, groups, err := GetUserGroups(ctx)
 	if err != nil || user == "" {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -124,7 +204,15 @@ func handleAddGroupMember(ctx *gin.Context) {
 		return
 	}
 
-	err = database.AddGroupMember(database.ServerDatabase, ctx.Param("id"), req.Member, user, groups)
+	id := ctx.Param("id")
+	if id == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "group id is required",
+		})
+		return
+	}
+	err = database.AddGroupMember(database.ServerDatabase, id, req.Sub, req.Issuer, user, userSub, userIssuer, groups)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -148,6 +236,56 @@ func handleAddGroupMember(ctx *gin.Context) {
 	ctx.Status(http.StatusNoContent)
 }
 
+type AddUserReq struct {
+	Username string `json:"username"`
+	Sub      string `json:"sub"`
+	Issuer   string `json:"issuer"`
+}
+
+func handleAddUser(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie, token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access}, // Or a new scope for user management
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	var req AddUserReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid request body",
+		})
+		return
+	}
+
+	if req.Username == "" || req.Sub == "" || req.Issuer == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Username, sub, and issuer are required",
+		})
+		return
+	}
+
+	_, err = database.CreateUser(database.ServerDatabase, req.Username, req.Sub, req.Issuer)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to create user: %v", err),
+		})
+		return
+	}
+
+	ctx.Status(http.StatusCreated)
+}
+
 func handleRemoveGroupMember(ctx *gin.Context) {
 	authOption := token.AuthOption{
 		Sources: []token.TokenSource{token.Cookie, token.Header},
@@ -163,16 +301,17 @@ func handleRemoveGroupMember(ctx *gin.Context) {
 		return
 	}
 
-	member := ctx.Query("member")
-	if member == "" {
+	memberSub := ctx.Query("sub")
+	memberIssuer := ctx.Query("issuer")
+	if memberSub == "" || memberIssuer == "" {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Group member is required",
+			Msg:    "sub and issuer query parameters are required",
 		})
 		return
 	}
 
-	user, groups, err := GetUserGroups(ctx)
+	user, userSub, userIssuer, groups, err := GetUserGroups(ctx)
 	if err != nil || user == "" {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -181,7 +320,15 @@ func handleRemoveGroupMember(ctx *gin.Context) {
 		return
 	}
 
-	err = database.RemoveGroupMember(database.ServerDatabase, ctx.Param("id"), member, user, groups)
+	id := ctx.Param("id")
+	if id == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "group id is required",
+		})
+		return
+	}
+	err = database.RemoveGroupMember(database.ServerDatabase, id, memberSub, memberIssuer, user, userSub, userIssuer, groups)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -203,4 +350,31 @@ func handleRemoveGroupMember(ctx *gin.Context) {
 	}
 
 	ctx.Status(http.StatusNoContent)
+}
+
+func handleListUsers(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie, token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access},
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	users, err := database.ListUsers(database.ServerDatabase)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to list users",
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, users)
 }
