@@ -11,14 +11,7 @@ CREATE TABLE users (
 CREATE UNIQUE INDEX idx_user_issuer ON users (username, issuer);
 CREATE UNIQUE INDEX idx_user_sub_issuer ON users (sub, issuer);
 
-CREATE TABLE groups (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
-    description TEXT,
-    created_by TEXT NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
+DROP TABLE group_members;
 CREATE TABLE group_members (
     group_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
