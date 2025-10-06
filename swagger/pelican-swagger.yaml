@@ -3825,8 +3825,8 @@ paths:
           description: ID of the group
           required: true
           type: string
-        - in: body
-          name: member
+        - name: member
+          in: body
           description: The member to add
           required: true
           schema:
