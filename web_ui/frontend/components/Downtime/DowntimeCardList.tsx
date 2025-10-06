@@ -131,7 +131,7 @@ function DowntimeCardList({ Card, data }: DowntimeListProps) {
                 onChange={(e) => setSortBy(e.target.value)}
               >
                 {Object.entries(sortTypes).map(([key, value]) => (
-                  <MenuItem key={key} value={key as (keyof typeof sortTypes)}>
+                  <MenuItem key={key} value={key as keyof typeof sortTypes}>
                     {value.label}
                   </MenuItem>
                 ))}
