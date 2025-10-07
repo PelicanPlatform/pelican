@@ -650,7 +650,7 @@ func TestAutoShutdownOnStaleAuthfile(t *testing.T) {
 	config.ShutdownFlag = testShutdown
 
 	// Launch maintenance with a short ticker
-	LaunchXrootdMaintenance(ctx, cacheServer, 10*time.Millisecond)
+	LaunchXrootdMaintenance(ctx, cacheServer, 100*time.Millisecond)
 
 	// Ensure at least one successful cycle happened (generated file exists)
 	emittedAuthfilePath := filepath.Join(dir, "authfile-cache-generated")
@@ -664,7 +664,7 @@ func TestAutoShutdownOnStaleAuthfile(t *testing.T) {
 	viper.Set(param.Xrootd_Authfile.GetName(), missingAuthfilePath)
 
 	// Wait to exceed timeout and then trigger maintenance immediately by touching scitokens
-	time.Sleep(60 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	require.NoError(t, os.WriteFile(scitokensPath, []byte("# poke\n"), 0600))
 
 	select {

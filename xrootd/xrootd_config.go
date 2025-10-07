@@ -795,7 +795,12 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 						staleXrootdCfgFiles += "scitokens.cfg file"
 					}
 					log.Errorf("%s not updated for %s (timeout: %s); initiating auto-shutdown", staleXrootdCfgFiles, age.Round(time.Second).String(), configTimeout.Round(time.Second).String())
-					config.ShutdownFlag <- true
+					// Use non-blocking send to avoid deadlock when multiple rapid maintenance cycles trigger shutdown before the signal is consumed
+					select {
+					case config.ShutdownFlag <- true:
+					default:
+						// Shutdown already initiated, no need to send again
+					}
 				}
 			}
 
