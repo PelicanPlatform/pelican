@@ -704,10 +704,14 @@ func dropPrivilegeCopy(server server_structs.XRootDServer) error {
 // For maintenance that is periodic, `sleepTime` is the maintenance period.
 func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDServer, sleepTime time.Duration) {
 	state := &xrootdMaintenanceState{
-		// This initial set-to-now is a grace baseline to avoid tripping the timeout before the first successful cycle
+		// This initial set-to-now is a grace baseline to avoid tripping the timeout before the first successful cycle
 		lastAuthfileSuccess:  time.Now(),
 		lastScitokensSuccess: time.Now(),
 	}
+	// Capture timeout and auto-shutdown config at launch time to avoid race conditions with Viper resets in tests
+	configTimeout := param.Xrootd_ConfigUpdateFailureTimeout.GetDuration()
+	autoShutdownEnabled := param.Xrootd_AutoShutdownEnabled.GetBool()
+
 	server_utils.LaunchWatcherMaintenance(
 		ctx,
 		[]string{
@@ -774,15 +778,14 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 			sciFails := state.scitokensFailures
 
 			age := time.Since(oldest)
-			timeout := param.Xrootd_ConfigUpdateFailureTimeout.GetDuration()
 
 			if authFails == 0 && sciFails == 0 {
 				metrics.SetComponentHealthStatus(metrics.OriginCache_ConfigUpdates, metrics.StatusOK, "Authfile and scitoken.cfg file updated successfully")
-			} else if age < timeout {
+			} else if age < configTimeout {
 				metrics.SetComponentHealthStatus(metrics.OriginCache_ConfigUpdates, metrics.StatusWarning, "Authfile and/or scitoken.cfg file update failures observed; within timeout")
 			} else {
 				metrics.SetComponentHealthStatus(metrics.OriginCache_ConfigUpdates, metrics.StatusCritical, "Authfile and/or scitoken.cfg file stale beyond timeout; initiating shutdown if enabled")
-				if param.Xrootd_AutoShutdownEnabled.GetBool() {
+				if autoShutdownEnabled {
 					staleXrootdCfgFiles := "XRootD "
 					if authFails > 0 && sciFails > 0 {
 						staleXrootdCfgFiles += "authfile and scitokens.cfg file"
@@ -791,7 +794,7 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 					} else if sciFails > 0 {
 						staleXrootdCfgFiles += "scitokens.cfg file"
 					}
-					log.Errorf("%s not updated for %s (timeout: %s); initiating auto-shutdown", staleXrootdCfgFiles, age.Round(time.Second).String(), timeout.Round(time.Second).String())
+					log.Errorf("%s not updated for %s (timeout: %s); initiating auto-shutdown", staleXrootdCfgFiles, age.Round(time.Second).String(), configTimeout.Round(time.Second).String())
 					config.ShutdownFlag <- true
 				}
 			}
