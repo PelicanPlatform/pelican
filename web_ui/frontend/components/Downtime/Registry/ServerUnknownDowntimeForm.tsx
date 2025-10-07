@@ -14,17 +14,8 @@ import { DateTimePicker } from '@mui/x-date-pickers';
 import { mutate } from 'swr';
 import { DateTime } from 'luxon';
 import { Dispatch, useContext, useEffect, useMemo, useState } from 'react';
-import {
-  DowntimeClass,
-  DowntimeGet,
-  DowntimeRegistryPost,
-  DowntimeSeverity,
-} from '@/types';
-import {
-  DowntimeClasses,
-  DowntimeSeverities,
-  ServerDowntimeKey,
-} from '@/components/Downtime';
+import { DowntimeGet, DowntimeRegistryPost, DowntimeSeverity } from '@/types';
+import { DowntimeSeverities, ServerDowntimeKey } from '@/components/Downtime';
 import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
 import { alertOnError } from '@/helpers/util';
@@ -42,10 +33,10 @@ import { Delete } from '@mui/icons-material';
 import FormHelperText from '@mui/material/FormHelperText';
 import { RegistryNamespace } from '@/index';
 import useApiSWR from '@/hooks/useApiSWR';
-import { getExtendedNamespaces } from '@/helpers/get';
 import extendNamespace from '@/helpers/Registry/namespaceToServer';
 import { NamespaceIcon } from '@/components';
 import getUtcOffsetString from '@/helpers/getUtcOffsetString';
+import { defaultDowntime } from '@/components/Downtime/constant';
 
 interface DowntimeFormProps {
   downtime: Partial<DowntimeGet>;
@@ -59,12 +50,8 @@ const ServerUnknownDowntimeForm = ({
   const dispatch = useContext(AlertDispatchContext);
 
   const [downtime, setDowntime] = useState<DowntimeRegistryPost>({
-    serverName: inputDowntime.serverName ?? '',
-    startTime: inputDowntime.startTime ?? Date.now(),
-    endTime: inputDowntime.endTime ?? Date.now(),
-    description: inputDowntime.description ?? '',
-    severity: inputDowntime.severity ?? defaultDowntime.severity,
-    class: inputDowntime.class ?? defaultDowntime.class,
+    ...defaultDowntime,
+    ...inputDowntime,
   });
 
   const id = 'id' in inputDowntime ? inputDowntime.id : undefined;
@@ -96,6 +83,40 @@ const ServerUnknownDowntimeForm = ({
     }
   }, [servers, setDowntime, downtime]);
 
+  // Keep the downtime class updated based on the 24 hours requirement
+  useEffect(() => {
+    if (
+      DateTime.fromMillis(downtime.startTime) <
+      DateTime.now().plus({ hours: 24 })
+    ) {
+      // If the start time is less than 24 hours from now, we need to set the class to unscheduled
+      if (downtime.class !== 'UNSCHEDULED') {
+        setDowntime({ ...downtime, class: 'UNSCHEDULED' });
+      }
+    } else {
+      // If the start time is more than 24 hours from now, we need to
+      if (downtime.class !== 'SCHEDULED') {
+        setDowntime({ ...downtime, class: 'SCHEDULED' });
+      }
+    }
+  }, [downtime, setDowntime]);
+
+  // If the starttime is updated, before the endtime, adjust the endtime to be 1 day after the starttime
+  useEffect(() => {
+    if (
+      downtime.endTime !== -1 &&
+      DateTime.fromMillis(downtime.endTime) <=
+        DateTime.fromMillis(downtime.startTime)
+    ) {
+      setDowntime({
+        ...downtime,
+        endTime: DateTime.fromMillis(downtime.startTime)
+          .plus({ days: 1 })
+          .toMillis(),
+      });
+    }
+  }, [downtime, setDowntime]);
+
   return (
     <Box>
       <Box mt={2}>
@@ -106,8 +127,7 @@ const ServerUnknownDowntimeForm = ({
             servers?.adjustedPrefix === value?.adjustedPrefix
           }
           value={
-            servers.filter((x) => x.prefix == downtime.serverName)[0] ||
-            servers[0]
+            servers.filter((x) => x.prefix == downtime.serverName)[0] || null
           }
           onChange={(e, v) => {
             if (!v) return;
@@ -117,7 +137,7 @@ const ServerUnknownDowntimeForm = ({
             <TextField {...params} label='Server' variant='outlined' required />
           )}
           renderOption={(params, option) => (
-            <Box component='li' {...params}>
+            <Box component='li' {...params} key={params.key}>
               <Box
                 sx={{
                   display: 'flex',
@@ -172,7 +192,6 @@ const ServerUnknownDowntimeForm = ({
           label='Unknown Endtime'
         />
       </Box>
-
       <Box mt={2}>
         <FormControl fullWidth>
           <InputLabel id='severity'>Severity</InputLabel>
@@ -195,34 +214,6 @@ const ServerUnknownDowntimeForm = ({
             ))}
           </Select>
           <FormHelperText>How much of the resource is affected</FormHelperText>
-        </FormControl>
-      </Box>
-      <Box mt={2}>
-        <FormControl fullWidth>
-          <InputLabel id='class'>Scheduled</InputLabel>
-          <Select
-            variant={'outlined'}
-            labelId={'class'}
-            label={'Scheduled'}
-            value={downtime?.class}
-            onChange={(e) =>
-              setDowntime({
-                ...downtime,
-                class: e.target.value as DowntimeClass,
-              })
-            }
-          >
-            {DowntimeClasses.map((downtimeClass) => (
-              <MenuItem key={downtimeClass} value={downtimeClass}>
-                {downtimeClass}
-              </MenuItem>
-            ))}
-          </Select>
-          <FormHelperText>
-            SCHEDULED - Registered at least 24 hours in advance
-            <br />
-            UNSCHEDULED - Registered less than 24 hours in advance
-          </FormHelperText>
         </FormControl>
       </Box>
       <Box pt={2}>
@@ -304,22 +295,6 @@ const submitDowntime = async (
       dispatch
     );
   }
-};
-
-const namespacesToRegistryServers = (
-  namespaces: RegistryNamespace[]
-): string[] => {
-  const originsAndCaches = namespaces.filter(
-    (n) => n.prefix.startsWith('/origin') || n.prefix.startsWith('/cache')
-  );
-
-  // Pull the prefixes out of the namespaces
-  return originsAndCaches.map((n) => n.prefix);
-};
-
-const defaultDowntime = {
-  severity: 'Outage (completely inaccessible)' as DowntimeSeverity,
-  class: 'SCHEDULED' as DowntimeClass,
 };
 
 export default ServerUnknownDowntimeForm;

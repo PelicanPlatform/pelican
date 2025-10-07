@@ -32,7 +32,11 @@ const ServerDowntimePage = () => {
             <Box my={2}>
               <DowntimeCalendar data={data} />
             </Box>
-            <DirectorDowntimeList data={data} />
+            <Grid container justifyContent={'center'}>
+              <Grid size={{ xs: 12, lg: 8 }}>
+                <DirectorDowntimeList data={data} />
+              </Grid>
+            </Grid>
           </Grid>
         </Grid>
       </Box>
