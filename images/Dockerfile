@@ -500,17 +500,17 @@ ENV JAVA_HOME="/usr/lib/jvm/jre" \
 #################################################################
 FROM pelican-software-base AS director
 ARG TARGETOS TARGETARCH
-COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican_${TARGETOS}_${TARGETARCH}/pelican /usr/local/bin/pelican
+COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
 COPY images/entrypoint.sh /entrypoint.sh
 COPY scripts/geoquery.py /usr/local/sbin/geoquery
 RUN dnf install -y python3-pip \
     && python3 -m pip install geoip2
-ENTRYPOINT ["/entrypoint.sh", "pelican", "director"]
+ENTRYPOINT ["/entrypoint.sh", "pelican-server", "director"]
 CMD ["serve"]
 
 FROM director AS osdf-director
-RUN ln -s pelican /usr/local/bin/osdf
-ENTRYPOINT ["/entrypoint.sh", "osdf", "director"]
+RUN ln -s pelican-server /usr/local/sbin/osdf-server
+ENTRYPOINT ["/entrypoint.sh", "osdf-server", "director"]
 CMD ["serve"]
 
 #################################################################
@@ -518,14 +518,14 @@ CMD ["serve"]
 #################################################################
 FROM pelican-software-base AS registry
 ARG TARGETOS TARGETARCH
-COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican_${TARGETOS}_${TARGETARCH}/pelican /usr/local/bin/pelican
+COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
 COPY images/entrypoint.sh /entrypoint.sh
-ENTRYPOINT ["/entrypoint.sh", "pelican", "registry"]
+ENTRYPOINT ["/entrypoint.sh", "pelican-server", "registry"]
 CMD ["serve"]
 
 FROM registry AS osdf-registry
-RUN ln -s pelican /usr/local/bin/osdf
-ENTRYPOINT ["/entrypoint.sh", "osdf", "registry"]
+RUN ln -s pelican-server /usr/local/sbin/osdf-server
+ENTRYPOINT ["/entrypoint.sh", "osdf-server", "registry"]
 CMD ["serve"]
 
 #################################################################
@@ -533,9 +533,9 @@ CMD ["serve"]
 #################################################################
 FROM origin-base AS origin
 ARG TARGETOS TARGETARCH
-COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican_${TARGETOS}_${TARGETARCH}/pelican /usr/local/bin/pelican
+COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
 COPY images/entrypoint.sh /entrypoint.sh
-ENTRYPOINT ["/entrypoint.sh", "pelican", "origin"]
+ENTRYPOINT ["/entrypoint.sh", "pelican-server", "origin"]
 CMD ["serve"]
 
 FROM origin AS osdf-origin
@@ -547,8 +547,8 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   groupadd -r -g 990 sssd
   useradd -r -g sssd -u 990 -d / -s /usr/sbin/nologin -c "System user for sssd" sssd
 ENDRUN
-RUN ln -s pelican /usr/local/bin/osdf
-ENTRYPOINT ["/entrypoint.sh", "osdf", "origin"]
+RUN ln -s pelican-server /usr/local/sbin/osdf-server
+ENTRYPOINT ["/entrypoint.sh", "osdf-server", "origin"]
 CMD ["serve"]
 
 #################################################################
