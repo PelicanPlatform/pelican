@@ -524,8 +524,7 @@ func generateTestAdminUserToken(ctx context.Context) (string, error) {
 	tk.AddScopes(token_scopes.WebUi_Access)
 	// Add OIDC claims required by GetUserGroups
 	tk.Claims = map[string]string{
-		"oidc_sub": "admin-user",
-		"oidc_iss": issuer,
+		"user_id": "admin-user",
 	}
 	tok, err := tk.CreateToken()
 	if err != nil {
@@ -551,8 +550,7 @@ func generateToken(ctx context.Context, scopes []token_scopes.TokenScope, subjec
 	tk.AddScopes(scopes...)
 	// Add OIDC claims required by GetUserGroups
 	tk.Claims = map[string]string{
-		"oidc_sub": subject,
-		"oidc_iss": issuer,
+		"user_id": subject,
 	}
 	tok, err := tk.CreateToken()
 	if err != nil {
@@ -609,6 +607,21 @@ func TestApiToken(t *testing.T) {
 	require.NoError(t, err, "Error setting up mock origin DB")
 	err = database.ServerDatabase.AutoMigrate(&server_structs.ApiKey{})
 	require.NoError(t, err, "Failed to migrate DB for API key table")
+
+	err = database.ServerDatabase.AutoMigrate(&database.Collection{})
+	require.NoError(t, err, "Failed to migrate DB for collections table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
+	require.NoError(t, err, "Failed to migrate DB for collection members table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
+	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
+	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
+	err = database.ServerDatabase.AutoMigrate(&database.Group{})
+	require.NoError(t, err, "Failed to migrate DB for groups table")
+	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
+	require.NoError(t, err, "Failed to migrate DB for group members table")
+	err = database.ServerDatabase.AutoMigrate(&database.User{})
+	require.NoError(t, err, "Failed to migrate DB for users table")
 
 	testCases := []struct {
 		name string
@@ -895,8 +908,8 @@ func TestGroupManagementAPI(t *testing.T) {
 		require.NotEmpty(t, groupID)
 
 		// 2. Add a member to the group as 'owner-user'
-		addMemberReq := map[string]string{"username": "new-member", "sub": "new-member-sub", "issuer": "https://test-issuer.org"}
-		body, err = json.Marshal(addMemberReq)
+		createUserReq := map[string]string{"username": "new-member", "sub": "new-member-sub", "issuer": "https://test-issuer.org"}
+		body, err = json.Marshal(createUserReq)
 		require.NoError(t, err)
 
 		// Pre-create the user before adding them to the group
@@ -907,6 +920,16 @@ func TestGroupManagementAPI(t *testing.T) {
 		recorder = httptest.NewRecorder()
 		route.ServeHTTP(recorder, req)
 		require.Equal(t, http.StatusCreated, recorder.Code)
+
+		var createUserResp map[string]string
+		err = json.NewDecoder(recorder.Body).Decode(&createUserResp)
+		require.NoError(t, err)
+		userID := createUserResp["id"]
+		require.NotEmpty(t, userID)
+
+		addMemberReq := map[string]string{"userId": userID}
+		body, err = json.Marshal(addMemberReq)
+		require.NoError(t, err)
 
 		req, err = http.NewRequest("POST", "/api/v1.0/groups/"+groupID+"/members", bytes.NewReader(body))
 		require.NoError(t, err)
@@ -921,6 +944,10 @@ func TestGroupManagementAPI(t *testing.T) {
 		otherToken, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "other-user")
 		require.NoError(t, err)
 
+		// Re-marshal the addMemberReq to reuse it
+		body, err = json.Marshal(addMemberReq)
+		require.NoError(t, err)
+
 		req, err = http.NewRequest("POST", "/api/v1.0/groups/"+groupID+"/members", bytes.NewReader(body))
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: otherToken})
@@ -931,7 +958,7 @@ func TestGroupManagementAPI(t *testing.T) {
 		assert.Equal(t, http.StatusForbidden, recorder.Code)
 
 		// 4. Try to remove a member as 'other-user' - should fail
-		req, err = http.NewRequest("DELETE", "/api/v1.0/groups/"+groupID+"/members?sub=new-member-sub&issuer=https://test-issuer.org", nil)
+		req, err = http.NewRequest("DELETE", "/api/v1.0/groups/"+groupID+"/members/"+userID, nil)
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: otherToken})
 
@@ -940,7 +967,7 @@ func TestGroupManagementAPI(t *testing.T) {
 		assert.Equal(t, http.StatusForbidden, recorder.Code)
 
 		// 5. Remove the member from the group as 'owner-user'
-		req, err = http.NewRequest("DELETE", "/api/v1.0/groups/"+groupID+"/members?sub=new-member-sub&issuer=https://test-issuer.org", nil)
+		req, err = http.NewRequest("DELETE", "/api/v1.0/groups/"+groupID+"/members/"+userID, nil)
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
 
@@ -976,8 +1003,8 @@ func TestGroupManagementAPI(t *testing.T) {
 		require.NotEmpty(t, groupID)
 
 		// Verify the regular user can manage their own group
-		addMemberReq := map[string]string{"username": "new-member2", "sub": "new-member-sub2", "issuer": "https://test-issuer.org"}
-		body, err = json.Marshal(addMemberReq)
+		createUserReq := map[string]string{"username": "new-member2", "sub": "new-member-sub2", "issuer": "https://test-issuer.org"}
+		body, err = json.Marshal(createUserReq)
 		require.NoError(t, err)
 
 		// Pre-create the user before adding them to the group
@@ -988,6 +1015,16 @@ func TestGroupManagementAPI(t *testing.T) {
 		recorder = httptest.NewRecorder()
 		route.ServeHTTP(recorder, req)
 		require.Equal(t, http.StatusCreated, recorder.Code)
+
+		var createUserResp map[string]string
+		err = json.NewDecoder(recorder.Body).Decode(&createUserResp)
+		require.NoError(t, err)
+		userID := createUserResp["id"]
+		require.NotEmpty(t, userID)
+
+		addMemberReq := map[string]string{"userId": userID}
+		body, err = json.Marshal(addMemberReq)
+		require.NoError(t, err)
 
 		req, err = http.NewRequest("POST", "/api/v1.0/groups/"+groupID+"/members", bytes.NewReader(body))
 		require.NoError(t, err)

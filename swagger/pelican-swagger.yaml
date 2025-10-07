@@ -3952,6 +3952,13 @@ paths:
       responses:
         "201":
           description: User created successfully
+          schema:
+            type: object
+            properties:
+              id:
+                type: string
+                description: The unique ID of the created user
+                example: "abc12345"
         "400":
           description: Bad request (missing fields or user already exists)
           schema:

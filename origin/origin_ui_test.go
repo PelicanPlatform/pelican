@@ -55,8 +55,7 @@ func generateToken(ctx context.Context, scopes []token_scopes.TokenScope, subjec
 	}
 	// Add OIDC claims required by GetUserGroups
 	tk.Claims = map[string]string{
-		"oidc_sub": subject,
-		"oidc_iss": issuer,
+		"user_id": subject,
 	}
 	tok, err := tk.CreateToken()
 	if err != nil {

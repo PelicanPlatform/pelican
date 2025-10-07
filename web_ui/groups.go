@@ -263,7 +263,7 @@ func handleAddUser(ctx *gin.Context) {
 		return
 	}
 
-	_, err = database.CreateUser(database.ServerDatabase, req.Username, req.Sub, req.Issuer)
+	user, err := database.CreateUser(database.ServerDatabase, req.Username, req.Sub, req.Issuer)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -272,7 +272,7 @@ func handleAddUser(ctx *gin.Context) {
 		return
 	}
 
-	ctx.Status(http.StatusCreated)
+	ctx.JSON(http.StatusCreated, gin.H{"id": user.ID})
 }
 
 func handleRemoveGroupMember(ctx *gin.Context) {

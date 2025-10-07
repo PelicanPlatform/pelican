@@ -55,8 +55,7 @@ func mockAdminToken() (string, error) {
 	tokenCfg.AddAudienceAny()
 	// Add OIDC claims required by GetUserGroups
 	tokenCfg.Claims = map[string]string{
-		"oidc_sub": "admin",
-		"oidc_iss": "https://mock-server.com",
+		"user_id": "admin",
 	}
 	return tokenCfg.CreateToken()
 }
