@@ -20,8 +20,7 @@ type CreateGroupReq struct {
 }
 
 type AddGroupMemberReq struct {
-	Sub    string `json:"sub"`
-	Issuer string `json:"issuer"`
+	UserID string `json:"userId"`
 }
 
 func handleListGroups(ctx *gin.Context) {
@@ -83,8 +82,8 @@ func handleCreateGroup(ctx *gin.Context) {
 		return
 	}
 
-	user, sub, issuer, _, err := GetUserGroups(ctx)
-	if err != nil || user == "" {
+	_, userId, _, err := GetUserGroups(ctx)
+	if err != nil || userId == "" {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Failed to identify group creator",
@@ -92,17 +91,7 @@ func handleCreateGroup(ctx *gin.Context) {
 		return
 	}
 
-	// Resolve unique User.ID
-	userRecord, err := database.GetOrCreateUser(database.ServerDatabase, user, sub, issuer)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to resolve user ID",
-		})
-		return
-	}
-
-	group, err := database.CreateGroup(database.ServerDatabase, req.Name, req.Description, userRecord.ID, nil)
+	group, err := database.CreateGroup(database.ServerDatabase, req.Name, req.Description, userId, nil)
 	if err != nil {
 		if errors.Is(err, database.ErrReservedGroupPrefix) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
@@ -187,16 +176,16 @@ func handleAddGroupMember(ctx *gin.Context) {
 		return
 	}
 
-	if req.Sub == "" || req.Issuer == "" {
+	if req.UserID == "" {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Sub, and issuer are required",
+			Msg:    "user_id is required",
 		})
 		return
 	}
 
-	user, userSub, userIssuer, groups, err := GetUserGroups(ctx)
-	if err != nil || user == "" {
+	_, userId, _, err := GetUserGroups(ctx)
+	if err != nil || userId == "" {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Failed to identify user adding member",
@@ -212,7 +201,7 @@ func handleAddGroupMember(ctx *gin.Context) {
 		})
 		return
 	}
-	err = database.AddGroupMember(database.ServerDatabase, id, req.Sub, req.Issuer, user, userSub, userIssuer, groups)
+	err = database.AddGroupMember(database.ServerDatabase, id, req.UserID, userId)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -301,18 +290,17 @@ func handleRemoveGroupMember(ctx *gin.Context) {
 		return
 	}
 
-	memberSub := ctx.Query("sub")
-	memberIssuer := ctx.Query("issuer")
-	if memberSub == "" || memberIssuer == "" {
+	memberUserId := ctx.Param("userId")
+	if memberUserId == "" {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "sub and issuer query parameters are required",
+			Msg:    "userId path parameter is required",
 		})
 		return
 	}
 
-	user, userSub, userIssuer, groups, err := GetUserGroups(ctx)
-	if err != nil || user == "" {
+	_, userId, _, err := GetUserGroups(ctx)
+	if err != nil || userId == "" {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Failed to identify user removing member",
@@ -328,7 +316,7 @@ func handleRemoveGroupMember(ctx *gin.Context) {
 		})
 		return
 	}
-	err = database.RemoveGroupMember(database.ServerDatabase, id, memberSub, memberIssuer, user, userSub, userIssuer, groups)
+	err = database.RemoveGroupMember(database.ServerDatabase, id, memberUserId, userId)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{

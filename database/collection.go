@@ -103,7 +103,7 @@ type GroupMember struct {
 	GroupID string    `gorm:"primaryKey" json:"group_id"`
 	UserID  string    `gorm:"primaryKey" json:"user_id"`
 	User    User      `gorm:"foreignKey:UserID" json:"user"`
-	AddedBy string    `gorm:"not null" json:"added_by"`
+	AddedBy string    `gorm:"not null;foreignKey:AddedBy" json:"added_by"`
 	AddedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"added_at"`
 }
 
@@ -632,33 +632,10 @@ func GetOrCreateUser(db *gorm.DB, username string, sub string, issuer string) (*
 	}
 
 	// User not found, create one
-	slug, err := generateSlug()
-	if err != nil {
-		return nil, err
-	}
-	newUser := &User{
-		ID:       slug,
-		Username: username,
-		Sub:      sub,
-		Issuer:   issuer,
-	}
-	if err := db.Create(newUser).Error; err != nil {
-		return nil, err
-	}
-	return newUser, nil
+	return CreateUser(db, username, sub, issuer)
 }
 
 func CreateUser(db *gorm.DB, username string, sub string, issuer string) (*User, error) {
-	user := &User{}
-	err := db.Where("sub = ? AND issuer = ?", sub, issuer).First(user).Error
-	if err == nil {
-		return nil, errors.New("user already exists")
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-
-	// User not found, create one
 	slug, err := generateSlug()
 	if err != nil {
 		return nil, err
@@ -670,7 +647,7 @@ func CreateUser(db *gorm.DB, username string, sub string, issuer string) (*User,
 		Issuer:   issuer,
 	}
 	if err := db.Create(newUser).Error; err != nil {
-		// Check if the error is a unique constraint violation on username+issuer
+		// Check if the error is a unique constraint violation
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			return nil, errors.New("user with the same username and issuer already exists")
 		}
@@ -720,25 +697,19 @@ func ListGroups(db *gorm.DB) ([]Group, error) {
 	return groups, nil
 }
 
-func AddGroupMember(db *gorm.DB, groupId, sub, issuer, addedBy, addedBySub, addedByIssuer string, groups []string) error {
+func AddGroupMember(db *gorm.DB, groupId, userId, addedByUserId string) error {
 	var group Group
 	if err := db.First(&group, "id = ?", groupId).Error; err != nil {
 		return err
 	}
 
-	// Resolve addedBy user identity to User.ID for comparison
-	addedByUser, err := GetOrCreateUser(db, addedBy, addedBySub, addedByIssuer)
-	if err != nil {
+	if group.CreatedBy != addedByUserId {
 		return ErrForbidden
 	}
 
-	if group.CreatedBy != addedByUser.ID {
-		return ErrForbidden
-	}
-
-	user := &User{}
-	err = db.Where("sub = ? AND issuer = ?", sub, issuer).First(user).Error
-	if err != nil {
+	// Verify the user exists
+	var user User
+	if err := db.First(&user, "id = ?", userId).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errors.New("user does not exist")
 		}
@@ -747,8 +718,8 @@ func AddGroupMember(db *gorm.DB, groupId, sub, issuer, addedBy, addedBySub, adde
 
 	groupMember := &GroupMember{
 		GroupID: groupId,
-		UserID:  user.ID,
-		AddedBy: addedBy,
+		UserID:  userId,
+		AddedBy: addedByUserId,
 	}
 	if result := db.Create(groupMember); result.Error != nil {
 		// Check if the error is a unique constraint violation
@@ -760,50 +731,28 @@ func AddGroupMember(db *gorm.DB, groupId, sub, issuer, addedBy, addedBySub, adde
 	return nil
 }
 
-func RemoveGroupMember(db *gorm.DB, groupId, sub, issuer, removedBy, removedBySub, removedByIssuer string, groups []string) error {
+func RemoveGroupMember(db *gorm.DB, groupId, userId, removedByUserId string) error {
 	var group Group
 	if err := db.First(&group, "id = ?", groupId).Error; err != nil {
 		return err
 	}
 
-	// Resolve removedBy user identity to User.ID for comparison
-	removedByUser, err := GetOrCreateUser(db, removedBy, removedBySub, removedByIssuer)
-	if err != nil {
+	if group.CreatedBy != removedByUserId {
 		return ErrForbidden
 	}
 
-	if group.CreatedBy != removedByUser.ID {
-		return ErrForbidden
-	}
-
-	var user User
-	if err := db.Where("sub = ? AND issuer = ?", sub, issuer).First(&user).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil // User not found, so not a member
-		}
-		return err
-	}
-
-	if result := db.Where("group_id = ? AND user_id = ?", groupId, user.ID).Delete(&GroupMember{}); result.Error != nil {
+	if result := db.Where("group_id = ? AND user_id = ?", groupId, userId).Delete(&GroupMember{}); result.Error != nil {
 		return result.Error
 	}
 	return nil
 }
 
-func GetMemberGroups(db *gorm.DB, user string) ([]Group, error) {
+func GetMemberGroups(db *gorm.DB, userId string) ([]Group, error) {
 	groups := []Group{}
-
-	userObj, err := GetUserByUsername(db, user)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return groups, nil
-		}
-		return nil, err
-	}
 
 	result := db.Model(&Group{}).
 		Joins("JOIN group_members ON groups.id = group_members.group_id").
-		Where("group_members.user_id = ?", userObj.ID).
+		Where("group_members.user_id = ?", userId).
 		Select("groups.id, groups.name").
 		Find(&groups)
 	if result.Error != nil {

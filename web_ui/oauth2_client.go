@@ -296,8 +296,8 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 			return nil, nil, err
 		}
 	case GroupSourceTypeInternal:
-		log.Debugf("Getting groups for user %s", username)
-		groupList, err := database.GetMemberGroups(database.ServerDatabase, username)
+		log.Debugf("Getting groups for user %s (ID: %s)", username, userRecord.ID)
+		groupList, err := database.GetMemberGroups(database.ServerDatabase, userRecord.ID)
 		if err != nil {
 			return nil, nil, err
 		}

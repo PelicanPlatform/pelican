@@ -131,9 +131,9 @@ func configureAuthDB() error {
 	return nil
 }
 
-// Get the "subject" claim from the JWT that "login" cookie stores,
-// where subject is set to be the username. Return empty string if no "login" cookie is present
-func GetUserGroups(ctx *gin.Context) (user string, sub string, issuer string, groups []string, err error) {
+// Get user information including userId from the login cookie.
+// Returns username, userId, sub, issuer, groups, and error.
+func GetUserGroups(ctx *gin.Context) (user string, userId string, groups []string, err error) {
 	token, err := ctx.Cookie("login")
 	if err != nil {
 		if err == http.ErrNoCookie {
@@ -160,26 +160,15 @@ func GetUserGroups(ctx *gin.Context) (user string, sub string, issuer string, gr
 	}
 	user = parsed.Subject()
 
-	// Extract new claims
-	subIface, ok := parsed.Get("oidc_sub")
+	// Extract userId claim
+	userIdIface, ok := parsed.Get("user_id")
 	if !ok {
-		err = errors.New("Missing oidc_sub claim")
+		err = errors.New("Missing user_id claim")
 		return
 	}
-	sub, ok = subIface.(string)
+	userId, ok = userIdIface.(string)
 	if !ok {
-		err = errors.New("Invalid oidc_sub claim")
-		return
-	}
-
-	issuerIface, ok := parsed.Get("oidc_iss")
-	if !ok {
-		err = errors.New("Missing oidc_iss claim")
-		return
-	}
-	issuer, ok = issuerIface.(string)
-	if !ok {
-		err = errors.New("Invalid oidc_iss claim")
+		err = errors.New("Invalid user_id claim")
 		return
 	}
 
@@ -211,8 +200,9 @@ func setLoginCookie(ctx *gin.Context, userRecord *database.User, groups []string
 	loginCookieTokenCfg.AddScopes(token_scopes.WebUi_Access, token_scopes.Monitoring_Query, token_scopes.Monitoring_Scrape)
 	loginCookieTokenCfg.AddGroups(groups...)
 
-	// Add claims for unique user resolution
+	// Add claims for unique user resolution using userId
 	loginCookieTokenCfg.Claims = map[string]string{
+		"user_id":  userRecord.ID,
 		"oidc_sub": userRecord.Sub,
 		"oidc_iss": userRecord.Issuer,
 	}
@@ -236,7 +226,7 @@ func setLoginCookie(ctx *gin.Context, userRecord *database.User, groups []string
 
 // Check if user is authenticated by checking if the "login" cookie is present and set the user identity to ctx
 func AuthHandler(ctx *gin.Context) {
-	user, groups, _, _, err := GetUserGroups(ctx)
+	user, _, groups, err := GetUserGroups(ctx)
 	if user == "" {
 		if err != nil {
 			log.Errorln("Invalid user cookie or unable to parse user cookie:", err)
@@ -258,7 +248,7 @@ func AuthHandler(ctx *gin.Context) {
 // The current implementation forces the OAuth2 endpoint; future work may instead use a generic
 // login page.
 func RequireAuthMiddleware(ctx *gin.Context) {
-	user, groups, _, _, err := GetUserGroups(ctx)
+	user, _, groups, err := GetUserGroups(ctx)
 	if user == "" || err != nil {
 		origPath := ctx.Request.URL.RequestURI()
 		redirUrl := url.URL{
@@ -371,9 +361,21 @@ func loginHandler(ctx *gin.Context) {
 		log.Errorf("Failed to generate group info for user %s: %s", login.User, err)
 		groups = nil
 	}
-	userRecord := &database.User{
-		Username: login.User,
+
+	// Get or create the user in the database
+	// For password-based login, we use the username as both sub and issuer with server URL
+	externalUrl := param.Server_ExternalWebUrl.GetString()
+	userRecord, err := database.GetOrCreateUser(database.ServerDatabase, login.User, login.User, externalUrl)
+	if err != nil {
+		log.Errorf("Failed to get or create user %s: %s", login.User, err)
+		ctx.JSON(http.StatusInternalServerError,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Failed to create user session",
+			})
+		return
 	}
+
 	setLoginCookie(ctx, userRecord, groups)
 	ctx.JSON(http.StatusOK,
 		server_structs.SimpleApiResp{
@@ -428,9 +430,20 @@ func initLoginHandler(ctx *gin.Context) {
 		log.Errorln("Failed to generate group info for admin:", err)
 		groups = nil
 	}
-	userRecord := &database.User{
-		Username: "admin",
+
+	// Get or create the admin user in the database
+	externalUrl := param.Server_ExternalWebUrl.GetString()
+	userRecord, err := database.GetOrCreateUser(database.ServerDatabase, "admin", "admin", externalUrl)
+	if err != nil {
+		log.Errorf("Failed to get or create admin user: %s", err)
+		ctx.JSON(http.StatusInternalServerError,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Failed to create admin session",
+			})
+		return
 	}
+
 	setLoginCookie(ctx, userRecord, groups)
 }
 
@@ -482,7 +495,7 @@ func logoutHandler(ctx *gin.Context) {
 // Returns the authentication status of the current user, including user id and role
 func whoamiHandler(ctx *gin.Context) {
 	res := WhoAmIRes{}
-	if user, _, _, _, err := GetUserGroups(ctx); err != nil || user == "" {
+	if user, _, _, err := GetUserGroups(ctx); err != nil || user == "" {
 		res.Authenticated = false
 		ctx.JSON(http.StatusOK, res)
 	} else {

@@ -1114,12 +1114,9 @@ definitions:
   AddGroupMemberRequest:
     type: object
     properties:
-      sub:
+      user_id:
         type: string
-        description: The 'sub' claim of the member to add
-      issuer:
-        type: string
-        description: The 'iss' claim of the member to add
+        description: The unique user ID of the member to add
   ListCollectionResponse:
     type: object
     properties:
@@ -3854,6 +3851,7 @@ paths:
           description: Internal server error
           schema:
             $ref: "#/definitions/ErrorModelV2"
+  /groups/{id}/members/{userId}:
     delete:
       tags:
         - groups
@@ -3867,14 +3865,9 @@ paths:
           description: ID of the group
           required: true
           type: string
-        - name: sub
-          in: query
-          description: The 'sub' claim of the member to remove
-          required: true
-          type: string
-        - name: issuer
-          in: query
-          description: The 'iss' claim of the member to remove
+        - name: userId
+          in: path
+          description: The unique user ID of the member to remove
           required: true
           type: string
       responses:
@@ -3915,6 +3908,54 @@ paths:
             type: array
             items:
               $ref: "#/definitions/User"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    post:
+      tags:
+        - groups
+      summary: Create a new user
+      description: "`Authentication Required`"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          description: User object to create
+          required: true
+          schema:
+            type: object
+            required:
+              - username
+              - sub
+              - issuer
+            properties:
+              username:
+                type: string
+                description: Username of the user
+                example: "johndoe"
+              sub:
+                type: string
+                description: The 'sub' claim from the user's OIDC token
+                example: "http://cilogon.org/serverA/users/12345"
+              issuer:
+                type: string
+                description: The 'iss' claim from the user's OIDC token
+                example: "https://cilogon.org"
+      responses:
+        "201":
+          description: User created successfully
+        "400":
+          description: Bad request (missing fields or user already exists)
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
         "401":
           description: Authentication required
           schema:
