@@ -24,8 +24,6 @@ export const getFederationUrls = async () => {
       ? await discoverConfiguration(discoveryUrl)
       : {};
 
-    console.log(discoveredUrls);
-
     // Merge the two sets of URLs, with discovered URLs taking precedence
     return {
       ...federationUrls,
@@ -37,6 +35,10 @@ export const getFederationUrls = async () => {
   }
 };
 
+/**
+ * Pull federation URLs from the configuration and map to friendly names for display
+ * @param config
+ */
 const configurationToFederationUrls = (config: Config) => {
   return UrlData.reduce(
     (acc, { key, text }) => {
@@ -51,7 +53,6 @@ const configurationToFederationUrls = (config: Config) => {
 };
 
 const UrlData = [
-  { key: ['Federation', 'NamespaceUrl'], text: 'Namespace Registry' },
   { key: ['Federation', 'DirectorUrl'], text: 'Director' },
   { key: ['Federation', 'RegistryUrl'], text: 'Registry' },
   { key: ['Federation', 'JwkUrl'], text: 'JWK' },
