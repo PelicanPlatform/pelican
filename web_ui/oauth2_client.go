@@ -349,9 +349,6 @@ func handleOAuthCallback(ctx *gin.Context) {
 
 	var idToken = make(map[string]interface{})
 	if idTokenRaw := token.Extra("id_token"); idTokenRaw != nil {
-		// The token's signature will show as "REDACTED" in the output.
-		log.Debugf("Found an OIDC ID token: %v", idTokenRaw)
-
 		// We were given this ID token by the authentication provider, not
 		// some third party. If we don't trust the provider, we have greater
 		// issues.

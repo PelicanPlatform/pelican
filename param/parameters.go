@@ -311,6 +311,7 @@ var (
 	Issuer_GroupRequirements = StringSliceParam{"Issuer.GroupRequirements"}
 	Issuer_RedirectUris = StringSliceParam{"Issuer.RedirectUris"}
 	Monitoring_AggregatePrefixes = StringSliceParam{"Monitoring.AggregatePrefixes"}
+	OIDC_Scopes = StringSliceParam{"OIDC.Scopes"}
 	Origin_ExportVolumes = StringSliceParam{"Origin.ExportVolumes"}
 	Origin_ScitokensRestrictedPaths = StringSliceParam{"Origin.ScitokensRestrictedPaths"}
 	Registry_AdminUsers = StringSliceParam{"Registry.AdminUsers"}
