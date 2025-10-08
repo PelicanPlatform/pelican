@@ -651,14 +651,16 @@ func TestSerializeAuthline(t *testing.T) {
 		},
 		{
 			"multiple paths with same lengths",
-			// Should preserve ordering if two paths have same length
+			// Until we switch to an ordered map, we'll always sort
+			// lexicographically when lengths are the same -- regular
+			// go maps have no order to preserve.
 			authLine{idType: "u", id: "*", authComponents: map[string]*authPathComponent{
 				"/path432": {prefix: "/path432", reads: true, listings: true, subtractive: false},
 				"/path123": {prefix: "/path123", reads: true, listings: false, subtractive: true},
 			},
 			},
 
-			"u * /path432 lr /path123 -r",
+			"u * /path123 -r /path432 lr",
 		},
 	}
 

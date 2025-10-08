@@ -644,20 +644,21 @@ func populateAuthLinesMapForCache(authLinesMap map[string]*authLine, server serv
 // Given an authLine, serialize it into a string suitable for writing to an authfile.
 // Sort the authComponents by descending prefix length so that XRootD applies the most
 // specific policy first.
+// Prefixes with the same length are sorted lexicographically.
 func serializeAuthLine(al authLine) string {
 	// Collect and sort prefixes by descending length
 	prefixes := make([]string, 0, len(al.authComponents))
 	for prefix := range al.authComponents {
 		prefixes = append(prefixes, prefix)
 	}
-	slices.SortFunc(prefixes, func(a, b string) int {
+	slices.SortStableFunc(prefixes, func(a, b string) int {
 		if len(a) > len(b) {
 			return -1 // a before b
 		}
 		if len(a) < len(b) {
 			return 1 // b before a
 		}
-		return 0 // equal length
+		return strings.Compare(a, b) // equal length
 	})
 
 	// Build the line
