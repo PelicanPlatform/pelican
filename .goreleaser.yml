@@ -83,7 +83,6 @@ builds:
       - lotman
     ldflags:
       - *ldflags-metadata
-      - *ldflags-strip-symbols
 
 # Goreleaser complains if there's a different number of binaries built for different architectures
 # in the same archive. Instead of plopping pelican-server in the same archive as pelican, split the
