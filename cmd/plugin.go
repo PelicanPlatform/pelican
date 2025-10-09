@@ -804,6 +804,12 @@ func createTransferError(err error) (transferError map[string]interface{}) {
 		developerData["ErrorMessage"] = "Origin read error during transfer"
 		developerData["ErrorType"] = "Transfer"
 		transferError["ErrorType"] = "Transfer"
+	} else if errors.Is(err, &client.PermissionDeniedError{}) {
+		developerData["PelicanErrorCode"] = 4000
+		developerData["ErrorType"] = "Authorization"
+		developerData["Retryable"] = false
+		developerData["ErrorMessage"] = "Permission denied"
+		transferError["ErrorType"] = "Authorization"
 	} else {
 		developerData["PelicanErrorCode"] = 0
 		developerData["ErrorType"] = "Unprocessed"

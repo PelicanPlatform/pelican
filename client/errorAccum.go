@@ -29,6 +29,20 @@ import (
 	"github.com/pelicanplatform/pelican/pelican_url"
 )
 
+// PermissionDeniedError is returned when a 403 status code is received.
+// The message is generated based on the token's validity.
+type PermissionDeniedError struct {
+	message string
+	expired bool
+}
+
+func (e *PermissionDeniedError) Error() string {
+	if e.message == "" {
+		return "permission denied"
+	}
+	return e.message
+}
+
 type (
 	TimestampedError struct {
 		err       error
@@ -137,6 +151,12 @@ func (te *TransferErrors) UserError() string {
 func IsRetryable(err error) bool {
 	if errors.Is(err, &SlowTransferError{}) {
 		return true
+	}
+	if errors.Is(err, &PermissionDeniedError{}) {
+		if pde, ok := err.(*PermissionDeniedError); ok {
+			return !pde.expired
+		}
+		return false
 	}
 	if errors.Is(err, pelican_url.MetadataTimeoutErr) {
 		return true

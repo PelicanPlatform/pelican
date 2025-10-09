@@ -2202,6 +2202,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			log.WithFields(fields).Debugln("Failed to download from", transferEndpoint.Url, ":", err)
 			var ope *net.OpError
 			var cse *ConnectionSetupError
+			var pde *PermissionDeniedError
 			proxyStr, _ := os.LookupEnv("http_proxy")
 			if !transferEndpoint.Proxy {
 				proxyStr = ""
@@ -2215,6 +2216,24 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 					proxyStr += "(" + ope.Addr.String() + ")"
 				}
 				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, true, false, err)
+			} else if errors.As(err, &pde) {
+				// If the token is expired we can retry because we will just get a new token
+				// otherwise something is wrong with the token
+				// We use the same token that was used to make the request to check if it is expired
+				expired, expiration, err := tokenIsExpired(tokenContents)
+				if err != nil {
+					pde.message = "Permission denied: token could not be parsed"
+					pde.expired = false
+				} else {
+					if expired {
+						pde.message = "Permission denied: token expired at " + expiration.Format(time.RFC3339)
+						pde.expired = true
+					} else {
+						pde.message = "Permission denied: token appears valid but was rejected by the server"
+						pde.expired = false
+					}
+				}
+				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, pde)
 			} else if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
 				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, &NetworkResetError{})
 			} else if errors.As(err, &cse) {
@@ -2989,6 +3008,10 @@ Loop:
 	// prior attempt.
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		log.WithFields(fields).Debugln("Got failure status code:", resp.StatusCode)
+		if resp.StatusCode == 403 {
+			// We will update the error message in the caller
+			return 0, 0, -1, serverVersion, &PermissionDeniedError{}
+		}
 		if err == nil {
 			sce := StatusCodeError(resp.StatusCode)
 			err = &sce

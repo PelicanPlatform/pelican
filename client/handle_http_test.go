@@ -29,6 +29,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"io/fs"
 	"math/big"
@@ -2224,4 +2225,52 @@ func TestPackAutoSegfaultRegression(t *testing.T) {
 		t.Fatal("Expected either downloadObject error or transferResult error, but got neither")
 	}
 
+}
+
+func TestPermissionDeniedError(t *testing.T) {
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer svr.Close()
+
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	remoteURL := &pelican_url.PelicanURL{
+		Scheme: "pelican://",
+		Host:   svrURL.Host,
+		Path:   svrURL.Path + "/test.txt",
+	}
+	tj := &TransferJob{
+		remoteURL: remoteURL,
+		token:     NewTokenGenerator(remoteURL, nil, config.TokenSharedRead, false),
+	}
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		job:       tj,
+		remoteURL: svrURL,
+		token:     tj.token,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+	}
+
+	t.Run("expired-token", func(t *testing.T) {
+		expiredTime := time.Now().Add(-time.Hour)
+		expiredJWT := fmt.Sprintf(`{"alg":"none","typ":"JWT"}.{"exp":%d,"iat":%d,"sub":"test"}.`,
+			expiredTime.Unix(), expiredTime.Add(-time.Hour).Unix())
+		transfer.job.token.SetToken(expiredJWT)
+
+		time.Sleep(time.Second * 4) // Sleep for longer than the token lifetime
+		res, err := downloadObject(transfer)
+		require.NoError(t, err)
+		require.Error(t, res.Error)
+
+		var pde *PermissionDeniedError
+		require.ErrorAs(t, res.Error, &pde)
+		assert.Equal(t, true, pde.expired)
+		assert.Contains(t, pde.message, "token expired")
+	})
 }
