@@ -2233,7 +2233,9 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 						pde.expired = false
 					}
 				}
-				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, pde)
+				// Re-wrap with PelicanError after modifying the fields
+				wrappedPde := error_codes.NewAuthorizationError(pde)
+				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedPde)
 			} else if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
 				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, &NetworkResetError{})
 			} else if errors.As(err, &cse) {
@@ -3012,7 +3014,7 @@ Loop:
 		log.WithFields(fields).Debugln("Got failure status code:", resp.StatusCode)
 		if resp.StatusCode == 403 {
 			// We will update the error message in the caller
-			return 0, 0, -1, serverVersion, &PermissionDeniedError{}
+			return 0, 0, -1, serverVersion, error_codes.NewAuthorizationError(&PermissionDeniedError{})
 		}
 		if err == nil {
 			sce := StatusCodeError(resp.StatusCode)
@@ -3346,7 +3348,6 @@ Loop:
 				lastKnownWritten = uploaded
 				lastProgress = time.Now()
 			} else if timeSinceLastProgress > stoppedTransferTimeout {
-
 				log.Errorln("No progress made in last", timeSinceLastProgress.Round(time.Millisecond).String(), "in upload")
 				lastError = &StoppedTransferError{
 					BytesTransferred: uploaded,
