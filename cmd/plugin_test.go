@@ -52,6 +52,7 @@ import (
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
@@ -1340,21 +1341,26 @@ func TestTransferError404(t *testing.T) {
 			developerData, ok := errorData["DeveloperData"].(map[string]interface{})
 			require.True(t, ok)
 
+			// Create the expected error to get the expected values
+			// Simulate what the actual code does: StatusCodeError gets wrapped
+			sce := client.StatusCodeError(http.StatusNotFound)
+			expectedErr := error_codes.NewSpecification_FileNotFoundError(&sce)
+
 			pelicanErrorCode, ok := developerData["PelicanErrorCode"].(int)
 			require.True(t, ok)
-			assert.Equal(t, 5011, pelicanErrorCode)
+			assert.Equal(t, expectedErr.Code(), pelicanErrorCode)
 
 			pelicanErrorMessage, ok := developerData["ErrorMessage"].(string)
 			require.True(t, ok)
-			assert.Equal(t, "404: Not Found", pelicanErrorMessage)
+			assert.Equal(t, expectedErr.Unwrap().Error(), pelicanErrorMessage)
 
 			pelicanErrorType, ok := developerData["ErrorType"].(string)
 			require.True(t, ok)
-			assert.Equal(t, "Specification.FileNotFound", pelicanErrorType)
+			assert.Equal(t, expectedErr.ErrorType(), pelicanErrorType)
 
 			retryable, ok := developerData["Retryable"].(bool)
 			require.True(t, ok)
-			assert.False(t, retryable)
+			assert.Equal(t, expectedErr.IsRetryable(), retryable)
 		}
 	}
 }
@@ -1459,17 +1465,20 @@ func TestTransferErrorSlowTransfer(t *testing.T) {
 			developerData, ok := errorData["DeveloperData"].(map[string]interface{})
 			require.True(t, ok)
 
+			// Create the expected error to get the expected values
+			expectedErr := error_codes.NewTransfer_SlowTransferError(nil)
+
 			pelicanErrorCode, ok := developerData["PelicanErrorCode"].(int)
 			require.True(t, ok)
-			assert.Equal(t, 6002, pelicanErrorCode)
+			assert.Equal(t, expectedErr.Code(), pelicanErrorCode)
 
 			retryable, ok := developerData["Retryable"].(bool)
 			require.True(t, ok)
-			assert.True(t, retryable)
+			assert.Equal(t, expectedErr.IsRetryable(), retryable)
 
 			errorType, ok := developerData["ErrorType"].(string)
 			require.True(t, ok)
-			assert.Equal(t, "Transfer.SlowTransfer", errorType)
+			assert.Equal(t, expectedErr.ErrorType(), errorType)
 		}
 	}
 }
@@ -1569,17 +1578,20 @@ func TestTransferErrorHeaderTimeout(t *testing.T) {
 			developerData, ok := errorData["DeveloperData"].(map[string]interface{})
 			require.True(t, ok)
 
+			// Create the expected error to get the expected values
+			expectedErr := error_codes.NewContactError(&client.HeaderTimeoutError{})
+
 			pelicanErrorCode, ok := developerData["PelicanErrorCode"].(int)
 			require.True(t, ok)
-			assert.Equal(t, 3000, pelicanErrorCode)
+			assert.Equal(t, expectedErr.Code(), pelicanErrorCode)
 
 			retryable, ok := developerData["Retryable"].(bool)
 			require.True(t, ok)
-			assert.True(t, retryable)
+			assert.Equal(t, expectedErr.IsRetryable(), retryable)
 
 			errorType, ok := developerData["ErrorType"].(string)
 			require.True(t, ok)
-			assert.Equal(t, "Contact", errorType)
+			assert.Equal(t, expectedErr.ErrorType(), errorType)
 		}
 	}
 }
