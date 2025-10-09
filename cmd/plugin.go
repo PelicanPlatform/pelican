@@ -581,6 +581,18 @@ func failTransfer(remoteUrl string, localFile string, results chan<- *classads.C
 	resultAd.Set("TransferSuccess", false)
 	resultAd.Set("TransferError", err.Error())
 
+	// Populate DeveloperData and TransferErrorData for error classification
+	developerData := make(map[string]interface{})
+	developerData["PelicanClientVersion"] = config.GetVersion()
+	developerData["Attempts"] = 0 // No transfer attempts were made
+
+	var transferErrorData []interface{}
+	transferError := createTransferError(err)
+	transferErrorData = append(transferErrorData, transferError)
+
+	resultAd.Set("DeveloperData", developerData)
+	resultAd.Set("TransferErrorData", transferErrorData)
+
 	results <- resultAd
 }
 
@@ -635,6 +647,19 @@ func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File)
 			} else {
 				resultAd.Set("TransferRetryable", false)
 			}
+
+			// Populate DeveloperData and TransferErrorData for error classification
+			developerData := make(map[string]interface{})
+			developerData["PelicanClientVersion"] = config.GetVersion()
+			developerData["Attempts"] = 0 // No transfer attempts were made
+
+			var transferErrorData []interface{}
+			transferError := createTransferError(err)
+			transferErrorData = append(transferErrorData, transferError)
+
+			resultAd.Set("DeveloperData", developerData)
+			resultAd.Set("TransferErrorData", transferErrorData)
+
 			resultAds = append(resultAds, resultAd)
 		}
 	}
