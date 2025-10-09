@@ -379,7 +379,13 @@ func TestTrailerError(t *testing.T) {
 	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, "", "")
 
 	assert.NotNil(t, err)
-	assert.EqualError(t, err, "download error after server response started: Unable to read test.txt; input/output error")
+	// Check that it's wrapped in a PelicanError
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(err, &pe), "Error should be wrapped in PelicanError")
+	assert.Equal(t, 6000, pe.Code(), "Should be Transfer error code")
+	assert.Equal(t, "Transfer", pe.ErrorType(), "Should be Transfer error type")
+	// Check the underlying error message
+	assert.Contains(t, pe.Unwrap().Error(), "download error after server response started: Unable to read test.txt; input/output error")
 }
 
 func TestUploadZeroLengthFile(t *testing.T) {
