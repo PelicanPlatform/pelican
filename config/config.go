@@ -1032,7 +1032,7 @@ func warnIssuerKey(v *viper.Viper) {
 					changeExtension = "renamed to use '.pem' extension and "
 				}
 
-				log.Errorf(
+				log.Warningf(
 					"File %q should be %smoved into directory %q. "+
 						"The %q parameter (currently set to %q via %s configuration) is being deprecated in favor of %q (currently set to %q via %s configuration). ",
 					v.GetString(param.IssuerKey.GetName()), changeExtension, v.GetString(param.IssuerKeysDirectory.GetName()),
@@ -1321,8 +1321,9 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault("Federation_DirectorUrl", v.GetString(param.Server_ExternalWebUrl.GetName()))
 	}
 
+	// Temporarily disable this warning because Facilitation team and Integration team think this is not user-friendly
 	// Warn the user if they still use IssuerKey
-	warnIssuerKey(v)
+	// warnIssuerKey(v)
 
 	return err
 }
@@ -1947,8 +1948,9 @@ func SetClientDefaults(v *viper.Viper) error {
 		v.Set(param.Client_DirectorRetries.GetName(), 5)
 	}
 
+	// Temporarily disable this warning because Facilitation team and Integration team think this is not user-friendly
 	// Warn the user if they still use IssuerKey
-	warnIssuerKey(v)
+	// warnIssuerKey(v)
 
 	return nil
 }
