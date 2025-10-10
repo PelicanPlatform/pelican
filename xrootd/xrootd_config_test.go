@@ -39,6 +39,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -612,4 +613,104 @@ func TestGenLoggingConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAutoShutdownOnStaleAuthfile(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+	dir := t.TempDir()
+
+	viper.Set(param.Logging_Level.GetName(), "Debug")
+	viper.Set("ConfigDir", dir)
+	viper.Set(param.Cache_RunLocation.GetName(), dir)
+
+	// Start with a valid authfile and scitokens so the first cycles succeed
+	validAuthfilePath := filepath.Join(dir, "authfile")
+	require.NoError(t, os.WriteFile(validAuthfilePath, []byte("u * /.well-known lr\n"), 0600))
+	viper.Set(param.Xrootd_Authfile.GetName(), validAuthfilePath)
+
+	scitokensPath := filepath.Join(dir, "scitokens.cfg")
+	require.NoError(t, os.WriteFile(scitokensPath, []byte(""), 0600))
+	viper.Set(param.Xrootd_ScitokensConfig.GetName(), scitokensPath)
+
+	// Init cache server
+	require.NoError(t, config.InitServer(ctx, server_structs.CacheType))
+
+	// Set timeout AFTER InitServer as a string to ensure correct parsing
+	viper.Set(param.Xrootd_ConfigUpdateFailureTimeout.GetName(), "50ms")
+	viper.Set(param.Xrootd_AutoShutdownEnabled.GetName(), true)
+
+	cacheServer := &cache.CacheServer{}
+
+	// Replace global ShutdownFlag with a test-local buffered channel to avoid interference
+	origShutdown := config.ShutdownFlag
+	defer func() { config.ShutdownFlag = origShutdown }()
+	testShutdown := make(chan any, 1)
+	config.ShutdownFlag = testShutdown
+
+	// Launch maintenance with a short ticker
+	LaunchXrootdMaintenance(ctx, cacheServer, 100*time.Millisecond)
+
+	// Ensure at least one successful cycle happened (generated file exists)
+	emittedAuthfilePath := filepath.Join(dir, "authfile-cache-generated")
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(emittedAuthfilePath)
+		return err == nil
+	}, 500*time.Millisecond, 20*time.Millisecond, "expected generated authfile to exist after initial maintenance")
+
+	// Now flip to INVALID authfile path to force failures and staleness
+	missingAuthfilePath := filepath.Join(dir, "missing-authfile")
+	viper.Set(param.Xrootd_Authfile.GetName(), missingAuthfilePath)
+
+	// Wait to exceed timeout and then trigger maintenance immediately by touching scitokens
+	time.Sleep(100 * time.Millisecond)
+	require.NoError(t, os.WriteFile(scitokensPath, []byte("# poke\n"), 0600))
+
+	select {
+	case <-testShutdown:
+		// stop all background watchers immediately
+		cancel()
+		require.NoError(t, egrp.Wait())
+		return
+	case <-time.After(3 * time.Second):
+		t.Fatal("expected shutdown due to stale Authfile, but none observed within timeout")
+	}
+}
+
+func TestConfigUpdatesHealthOKWhenFresh(t *testing.T) {
+	server_utils.ResetTestState()
+	dir := t.TempDir() // This also automatically registers its own cleanup (RemoveAll), which should be called after cancel/Wait runs
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	t.Cleanup(func() {
+		cancel()
+		assert.NoError(t, egrp.Wait())
+		server_utils.ResetTestState()
+	})
+
+	viper.Set(param.Logging_Level.GetName(), "Debug")
+	viper.Set("ConfigDir", dir)
+	viper.Set(param.Cache_RunLocation.GetName(), dir)
+	viper.Set(param.Xrootd_AutoShutdownEnabled.GetName(), true)
+	viper.Set(param.Xrootd_ConfigUpdateFailureTimeout.GetName(), 1*time.Second)
+
+	// Valid authfile and scitokens inputs so both emissions succeed
+	authfilePath := filepath.Join(dir, "authfile")
+	require.NoError(t, os.WriteFile(authfilePath, []byte("u * /.well-known lr\n"), 0600))
+	viper.Set(param.Xrootd_Authfile.GetName(), authfilePath)
+	scitokensPath := filepath.Join(dir, "scitokens.cfg")
+	require.NoError(t, os.WriteFile(scitokensPath, []byte(""), 0600))
+	viper.Set(param.Xrootd_ScitokensConfig.GetName(), scitokensPath)
+
+	require.NoError(t, config.InitServer(ctx, server_structs.CacheType))
+	cacheServer := &cache.CacheServer{}
+
+	LaunchXrootdMaintenance(ctx, cacheServer, 20*time.Millisecond)
+
+	// Give the maintenance loop a couple of cycles
+	time.Sleep(100 * time.Millisecond)
+
+	status, err := metrics.GetComponentStatus(metrics.OriginCache_ConfigUpdates)
+	require.NoError(t, err)
+	assert.Equal(t, metrics.StatusOK.String(), status)
 }

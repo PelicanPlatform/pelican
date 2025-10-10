@@ -33,6 +33,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/spf13/viper"
@@ -1601,4 +1602,167 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, string(monitoringOutput), string(genCfg))
+}
+
+// TestConfigFilesUpdateDuringRuntime tests that scitokens.cfg and authfile are actually updated
+// when namespace ads change during runtime. It simulates runtime by invoking the same write
+// functions the maintenance loop uses.
+func TestConfigFilesUpdateDuringRuntime(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	dirName := t.TempDir()
+
+	// Set up basic configuration for cache
+	viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
+	viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirName, "scitokens.cfg"))
+	viper.Set("Cache.RunLocation", dirName)
+	viper.Set("Server.DropPrivileges", false) // Not testing drop privileges mode
+
+	// Create minimal input files
+	err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(""), fs.FileMode(0600))
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(dirName, "scitokens.cfg"), []byte(""), fs.FileMode(0600))
+	require.NoError(t, err)
+
+	// Create cache server with initial namespace ads - one public, one private
+	cacheServer := &cache.CacheServer{}
+	initialNamespaceAds := []server_structs.NamespaceAdV2{
+		{
+			Path: "/public/data",
+			Caps: server_structs.Capabilities{
+				PublicReads: true,
+				Reads:       true,
+			},
+		},
+		{
+			Path: "/private/data",
+			Caps: server_structs.Capabilities{
+				PublicReads: false,
+				Reads:       true,
+			},
+			Issuer: []server_structs.TokenIssuer{
+				{
+					IssuerUrl: url.URL{Scheme: "https", Host: "issuer.example.com"},
+					BasePaths: []string{"/private/data"},
+				},
+			},
+		},
+	}
+	cacheServer.SetNamespaceAds(initialNamespaceAds)
+
+	// Generate initial configuration files
+	err = EmitAuthfile(cacheServer, false)
+	require.NoError(t, err)
+	err = EmitScitokensConfig(cacheServer)
+	require.NoError(t, err)
+
+	// Get paths to generated files
+	authfilePath := filepath.Join(dirName, "authfile-cache-generated")
+	scitokensPath := filepath.Join(dirName, "scitokens-cache-generated.cfg")
+
+	// Verify initial files exist
+	require.FileExists(t, authfilePath)
+	require.FileExists(t, scitokensPath)
+
+	// Read initial content and get modification times
+	initialAuthContent, err := os.ReadFile(authfilePath)
+	require.NoError(t, err)
+	initialScitokensContent, err := os.ReadFile(scitokensPath)
+	require.NoError(t, err)
+
+	initialAuthStat, err := os.Stat(authfilePath)
+	require.NoError(t, err)
+	initialSciTokensStat, err := os.Stat(scitokensPath)
+	require.NoError(t, err)
+
+	// Verify initial authfile contains public namespace
+	assert.Contains(t, string(initialAuthContent), "/public/data lr")
+
+	// Verify initial scitokens.cfg contains the private issuer
+	assert.Contains(t, string(initialScitokensContent), "issuer.example.com")
+
+	// Wait a small amount of time to ensure file modification times will differ
+	time.Sleep(10 * time.Millisecond)
+
+	// Simulate namespace ads changing - make the previously public namespace private
+	// and add a new public namespace
+	updatedNamespaceAds := []server_structs.NamespaceAdV2{
+		{
+			Path: "/public/data", // This was public, now becomes private
+			Caps: server_structs.Capabilities{
+				PublicReads: false,
+				Reads:       true,
+			},
+			Issuer: []server_structs.TokenIssuer{
+				{
+					IssuerUrl: url.URL{Scheme: "https", Host: "issuer.example.com"},
+					BasePaths: []string{"/public/data"},
+				},
+			},
+		},
+		{
+			Path: "/private/data", // Unchanged
+			Caps: server_structs.Capabilities{
+				PublicReads: false,
+				Reads:       true,
+			},
+			Issuer: []server_structs.TokenIssuer{
+				{
+					IssuerUrl: url.URL{Scheme: "https", Host: "issuer.example.com"},
+					BasePaths: []string{"/private/data"},
+				},
+			},
+		},
+		{
+			Path: "/new/public", // New public namespace
+			Caps: server_structs.Capabilities{
+				PublicReads: true,
+				Reads:       true,
+			},
+		},
+	}
+	cacheServer.SetNamespaceAds(updatedNamespaceAds)
+
+	// Trigger config file updates (simulating what maintenance loop would do)
+	err = EmitAuthfile(cacheServer, false)
+	require.NoError(t, err)
+	err = EmitScitokensConfig(cacheServer)
+	require.NoError(t, err)
+
+	// Read updated content and get new modification times
+	updatedAuthContent, err := os.ReadFile(authfilePath)
+	require.NoError(t, err)
+	updatedScitokensContent, err := os.ReadFile(scitokensPath)
+	require.NoError(t, err)
+
+	updatedAuthStat, err := os.Stat(authfilePath)
+	require.NoError(t, err)
+	updatedSciTokensStat, err := os.Stat(scitokensPath)
+	require.NoError(t, err)
+
+	// Verify files were actually updated (modification times advanced)
+	assert.True(t, updatedAuthStat.ModTime().After(initialAuthStat.ModTime()),
+		"Authfile modification time should advance after update")
+	assert.True(t, updatedSciTokensStat.ModTime().After(initialSciTokensStat.ModTime()),
+		"Scitokens config modification time should advance after update")
+
+	// Verify content actually changed
+	assert.NotEqual(t, string(initialAuthContent), string(updatedAuthContent),
+		"Authfile content should change when namespace ads change")
+	assert.NotEqual(t, string(initialScitokensContent), string(updatedScitokensContent),
+		"Scitokens config content should change when namespace ads change")
+
+	// Verify specific security-critical changes in authfile:
+	// - Should no longer contain public access to /public/data
+	// - Should contain public access to /new/public
+	assert.NotContains(t, string(updatedAuthContent), "/public/data lr",
+		"Previously public namespace should not have public access in updated authfile")
+	assert.Contains(t, string(updatedAuthContent), "/new/public lr",
+		"New public namespace should have public access in updated authfile")
+
+	// Verify specific changes in scitokens.cfg:
+	// - Should now have /public/data as a base path for the issuer (since it's now private)
+	assert.Contains(t, string(updatedScitokensContent), "/public/data",
+		"Previously public namespace should now appear in scitokens config as private")
 }

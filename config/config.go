@@ -180,7 +180,8 @@ var (
 	warnIssuerKeyOnce  sync.Once
 	warnDeprecatedOnce sync.Once
 
-	RestartFlag = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
+	RestartFlag  = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
+	ShutdownFlag = make(chan any) // A channel flag to shutdown the server instance that launcher listens to (including cache)
 
 	validPrefixes = map[ConfigPrefix]bool{
 		PelicanPrefix: true,
@@ -1082,6 +1083,11 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Origin_SelfTest.GetName(), true)
 	v.SetDefault(param.Origin_SelfTestInterval.GetName(), 15*time.Second)
 	v.SetDefault(param.Cache_SelfTestInterval.GetName(), 15*time.Second)
+	// Defaults for XRootD authfile, scitokens config, and self-test staleness checks
+	v.SetDefault(param.Xrootd_AutoShutdownEnabled.GetName(), true)
+	v.SetDefault(param.Xrootd_ConfigUpdateFailureTimeout.GetName(), 1*time.Hour)
+	v.SetDefault(param.Origin_SelfTestMaxAge.GetName(), 1*time.Hour)
+	v.SetDefault(param.Cache_SelfTestMaxAge.GetName(), 1*time.Hour)
 	v.SetDefault(param.Origin_DirectorTest.GetName(), true)
 	// Set up the default S3 URL style to be path-style here as opposed to in the defaults.yaml because
 	// we want to be able to check if this is user-provided (which we can't do for defaults.yaml)
