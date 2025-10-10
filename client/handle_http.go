@@ -2233,7 +2233,9 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 						pde.expired = false
 					}
 				}
-				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, pde)
+				// Re-wrap with PelicanError after modifying the fields
+				wrappedPde := error_codes.NewAuthorizationError(pde)
+				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedPde)
 			} else if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
 				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, &NetworkResetError{})
 			} else if errors.As(err, &cse) {
@@ -2242,7 +2244,8 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				} else if ue, ok := cse.Unwrap().(*url.Error); ok {
 					httpErr := ue.Unwrap()
 					if httpErr.Error() == "net/http: timeout awaiting response headers" {
-						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, &HeaderTimeoutError{})
+						headerTimeoutErr := error_codes.NewContactError(&HeaderTimeoutError{})
+						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, headerTimeoutErr)
 					} else {
 						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, httpErr)
 					}
@@ -3000,6 +3003,7 @@ Loop:
 				if strings.Contains(statusText, "unexpected EOF") {
 					err = &UnexpectedEOFError{Err: err}
 				}
+				err = error_codes.NewTransferError(err)
 				return
 			}
 		}
@@ -3010,14 +3014,20 @@ Loop:
 		log.WithFields(fields).Debugln("Got failure status code:", resp.StatusCode)
 		if resp.StatusCode == 403 {
 			// We will update the error message in the caller
-			return 0, 0, -1, serverVersion, &PermissionDeniedError{}
+			return 0, 0, -1, serverVersion, error_codes.NewAuthorizationError(&PermissionDeniedError{})
 		}
 		if err == nil {
 			sce := StatusCodeError(resp.StatusCode)
 			err = &sce
 		}
-		return 0, 0, -1, serverVersion, &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
+		httpErr := &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
 			resp.StatusCode), err}
+		// Wrap specific status codes with appropriate PelicanError types
+		if resp.StatusCode == http.StatusNotFound {
+			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
+				resp.StatusCode), error_codes.NewSpecification_FileNotFoundError(err)}
+		}
+		return 0, 0, -1, serverVersion, httpErr
 	}
 
 	// By now, we think the download succeeded. If we know how large the file was supposed to
@@ -3338,7 +3348,6 @@ Loop:
 				lastKnownWritten = uploaded
 				lastProgress = time.Now()
 			} else if timeSinceLastProgress > stoppedTransferTimeout {
-
 				log.Errorln("No progress made in last", timeSinceLastProgress.Round(time.Millisecond).String(), "in upload")
 				lastError = &StoppedTransferError{
 					BytesTransferred: uploaded,
@@ -3371,7 +3380,7 @@ Loop:
 			if errors.As(err, &ue) {
 				err = ue.Unwrap()
 				if err.Error() == "net/http: timeout awaiting response headers" {
-					err = &HeaderTimeoutError{}
+					err = error_codes.NewContactError(&HeaderTimeoutError{})
 				}
 			}
 			if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {

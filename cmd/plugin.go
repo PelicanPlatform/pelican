@@ -43,6 +43,7 @@ import (
 	"github.com/pelicanplatform/pelican/classads"
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 )
@@ -778,43 +779,34 @@ func writeTransferErrorMessage(currentError string, transferUrl string) (errMsg 
 func createTransferError(err error) (transferError map[string]interface{}) {
 	transferError = make(map[string]interface{})
 	developerData := make(map[string]interface{})
-	errMsg := err.Error()
 
-	if errors.Is(err, &client.SlowTransferError{}) {
-		developerData["PelicanErrorCode"] = 6002 // From error_codes.yaml
-		developerData["Retryable"] = true        // SlowTransferError is always retryable
-		developerData["ErrorMessage"] = "Slow transfer"
-		developerData["ErrorType"] = "Transfer.SlowTransfer"
-		transferError["ErrorType"] = "Transfer"
-	} else if strings.Contains(errMsg, "server returned 404 Not Found") {
-		developerData["PelicanErrorCode"] = 5011
-		developerData["Retryable"] = false
-		developerData["ErrorMessage"] = "404: Not Found"
-		developerData["ErrorType"] = "Specification.FileNotFound"
-		transferError["ErrorType"] = "Specification"
-	} else if errors.Is(err, &client.HeaderTimeoutError{}) {
-		developerData["PelicanErrorCode"] = 3000
-		developerData["ErrorType"] = "Contact"
-		developerData["Retryable"] = true
-		developerData["ErrorMessage"] = "Timeout"
-		transferError["ErrorType"] = "Contact"
-	} else if strings.Contains(errMsg, "download error after server response started") {
-		developerData["PelicanErrorCode"] = 6000
-		developerData["Retryable"] = true
-		developerData["ErrorMessage"] = "Origin read error during transfer"
-		developerData["ErrorType"] = "Transfer"
-		transferError["ErrorType"] = "Transfer"
-	} else if errors.Is(err, &client.PermissionDeniedError{}) {
-		developerData["PelicanErrorCode"] = 4000
-		developerData["ErrorType"] = "Authorization"
-		developerData["Retryable"] = false
-		developerData["ErrorMessage"] = "Permission denied"
-		transferError["ErrorType"] = "Authorization"
+	var pe *error_codes.PelicanError
+	if errors.As(err, &pe) {
+		developerData["PelicanErrorCode"] = pe.Code()
+		developerData["Retryable"] = pe.IsRetryable()
+		developerData["ErrorType"] = pe.ErrorType()
+
+		// Use the wrapped error's message if available, otherwise use the PelicanError's full error message
+		if innerErr := pe.Unwrap(); innerErr != nil {
+			developerData["ErrorMessage"] = innerErr.Error()
+		} else {
+			developerData["ErrorMessage"] = pe.Error()
+		}
+
+		// Extract the high-level error category (first part before the dot)
+		errorType := pe.ErrorType()
+		if idx := strings.Index(errorType, "."); idx > 0 {
+			transferError["ErrorType"] = errorType[:idx]
+		} else {
+			transferError["ErrorType"] = errorType
+		}
 	} else {
+		// Fallback for errors that aren't wrapped in PelicanError
 		developerData["PelicanErrorCode"] = 0
 		developerData["ErrorType"] = "Unprocessed"
 		developerData["Retryable"] = false
 		developerData["ErrorMessage"] = "Unprocessed error type"
+		transferError["ErrorType"] = "Unprocessed"
 	}
 	transferError["DeveloperData"] = developerData
 	return transferError
