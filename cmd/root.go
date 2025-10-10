@@ -149,6 +149,7 @@ func init() {
 	rootCmd.AddCommand(config_printer.ConfigCmd)
 	preferredPrefix := config.GetPreferredPrefix()
 	rootCmd.Use = strings.ToLower(preferredPrefix.String())
+	rootCmd.DisableAutoGenTag = true
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/pelican/pelican.yaml)")
 

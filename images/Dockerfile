@@ -142,6 +142,10 @@ RUN --mount=type=cache,id=go-cache,target=/root/.cache/go-build,sharing=shared \
 
   set -eux
 
+  # Create frontend placeholder to satisfy go:embed pattern
+  mkdir -p web_ui/frontend/out
+  touch web_ui/frontend/out/placeholder
+
   if ${IS_NONRELEASE_BUILD}; then
     goreleaser build --clean --single-target --snapshot
   else

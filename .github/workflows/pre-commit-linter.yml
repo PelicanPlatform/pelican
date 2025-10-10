@@ -27,7 +27,8 @@ jobs:
       - name: Generate placeholder files
         id: generate-placeholder
         run: |
-          go generate ./...
+          mkdir -p web_ui/frontend/out
+          touch web_ui/frontend/out/placeholder
 
       - name: Set up Python
         uses: actions/setup-python@v5
