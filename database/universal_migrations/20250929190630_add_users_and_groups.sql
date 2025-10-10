@@ -19,8 +19,7 @@ CREATE TABLE group_members (
     added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (group_id, user_id),
     FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (added_by) REFERENCES users(id) ON DELETE CASCADE
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 -- +goose StatementEnd
 

@@ -103,7 +103,7 @@ type GroupMember struct {
 	GroupID string    `gorm:"primaryKey" json:"group_id"`
 	UserID  string    `gorm:"primaryKey" json:"user_id"`
 	User    User      `gorm:"foreignKey:UserID" json:"user"`
-	AddedBy string    `gorm:"not null;foreignKey:AddedBy" json:"added_by"`
+	AddedBy string    `gorm:"not null" json:"added_by"`
 	AddedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"added_at"`
 }
 
