@@ -53,6 +53,10 @@ func mockAdminToken() (string, error) {
 	tokenCfg.Subject = "admin"
 	tokenCfg.AddScopes(token_scopes.WebUi_Access)
 	tokenCfg.AddAudienceAny()
+	// Add OIDC claims required by GetUserGroups
+	tokenCfg.Claims = map[string]string{
+		"user_id": "admin",
+	}
 	return tokenCfg.CreateToken()
 }
 

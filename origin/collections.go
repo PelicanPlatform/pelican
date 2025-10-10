@@ -96,7 +96,7 @@ func handleListCollections(ctx *gin.Context) {
 		return
 	}
 
-	user, groups, err := web_ui.GetUserGroups(ctx)
+	user, _, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -193,7 +193,7 @@ func handleCreateCollection(ctx *gin.Context) {
 		return
 	}
 
-	user, _, err := web_ui.GetUserGroups(ctx)
+	user, _, _, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -254,7 +254,7 @@ func handleUpdateCollection(ctx *gin.Context) {
 		return
 	}
 
-	user, groups, err := web_ui.GetUserGroups(ctx)
+	user, _, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -601,7 +601,7 @@ func handleGetCollectionMetadata(ctx *gin.Context) {
 		return
 	}
 
-	user, groups, err := web_ui.GetUserGroups(ctx)
+	user, _, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -683,7 +683,7 @@ func handlePutCollectionMetadata(ctx *gin.Context) {
 		value = string(bodyBytes)
 	}
 
-	user, groups, err := web_ui.GetUserGroups(ctx)
+	user, _, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -743,7 +743,7 @@ func handleDeleteCollectionMetadata(ctx *gin.Context) {
 		return
 	}
 
-	user, groups, err := web_ui.GetUserGroups(ctx)
+	user, _, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -794,7 +794,7 @@ func handleGetCollection(ctx *gin.Context) {
 		return
 	}
 
-	user, groups, err := web_ui.GetUserGroups(ctx)
+	user, _, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -863,7 +863,7 @@ func handleDeleteCollection(ctx *gin.Context) {
 		return
 	}
 
-	user, groups, err := web_ui.GetUserGroups(ctx)
+	user, _, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -917,7 +917,7 @@ func handleGetCollectionAcls(ctx *gin.Context) {
 		return
 	}
 
-	user, groups, err := web_ui.GetUserGroups(ctx)
+	user, _, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -993,7 +993,7 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 		return
 	}
 
-	user, groups, err := web_ui.GetUserGroups(ctx)
+	user, _, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -1070,7 +1070,7 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 		return
 	}
 
-	user, groups, err := web_ui.GetUserGroups(ctx)
+	user, _, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,

@@ -194,7 +194,7 @@ func generateGroupInfo(user string) (groups []string, err error) {
 
 // Given the maps for the UserInfo and ID token JSON objects, generate
 // user/group information according to the current policy.
-func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]interface{}) (user string, groups []string, err error) {
+func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]interface{}) (userRecord *database.User, groups []string, err error) {
 	claimsSource := maps.Clone(userInfo)
 	if param.Issuer_OIDCPreferClaimsFromIDToken.GetBool() {
 		maps.Copy(claimsSource, idToken)
@@ -226,7 +226,45 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 		err = errors.New("identity provider returned an empty username")
 		return
 	}
-	user = userIdentifier
+	username := userIdentifier
+
+	subIface, ok := claimsSource["sub"]
+	if !ok {
+		log.Errorln("User info endpoint did not return a value for the sub claim")
+		err = errors.New("identity provider did not return a subject for logged-in user")
+		return
+	}
+	sub, ok := subIface.(string)
+	if !ok {
+		log.Errorln("User info endpoint did not return a string for the sub claim")
+		err = errors.New("identity provider did not return a subject for logged-in user")
+		return
+	}
+
+	issuerClaim := param.Issuer_IssuerClaimValue.GetString()
+	if issuerClaim == "" {
+		issuerClaim = "iss"
+	}
+
+	issuerClaimValueIface, ok := claimsSource[issuerClaim]
+	if !ok {
+		log.Errorf("'%s' field of user info response from auth provider is not found", issuerClaim)
+		err = errors.New("identity provider returned an invalid issuer claim value")
+		return
+	}
+
+	issuerClaimValue, ok := issuerClaimValueIface.(string)
+	if !ok {
+		log.Errorf("'%s' field of user info response from auth provider is not a string", issuerClaim)
+		err = errors.New("identity provider returned an invalid issuer claim value")
+		return
+	}
+
+	// now that we have verified that the user belongs to a group we should create the user if it doesn't exist
+	userRecord, err = database.GetOrCreateUser(database.ServerDatabase, username, sub, issuerClaimValue)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	groupSource := strings.ToLower(param.Issuer_GroupSource.GetString())
 	switch groupSource {
@@ -253,15 +291,15 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 			}
 		}
 	case GroupSourceTypeFile:
-		groups, err = generateGroupInfo(user)
+		groups, err = generateGroupInfo(username)
 		if err != nil {
-			return "", nil, err
+			return nil, nil, err
 		}
 	case GroupSourceTypeInternal:
-		log.Debugf("Getting groups for user %s", user)
-		groupList, err := database.GetMemberGroups(database.ServerDatabase, user)
+		log.Debugf("Getting groups for user %s (ID: %s)", username, userRecord.ID)
+		groupList, err := database.GetMemberGroups(database.ServerDatabase, userRecord.ID)
 		if err != nil {
-			return "", nil, err
+			return nil, nil, err
 		}
 		groups = make([]string, 0, len(groupList))
 		for _, group := range groupList {
@@ -273,10 +311,11 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 		return
 	default:
 		err = errors.Errorf("invalid group source: %s", groupSource)
-		return "", nil, err
+		return nil, nil, err
 	}
-	log.Debugf("Groups for user %s (source=%s): %v", user, groupSource, groups)
-	return user, groups, nil
+
+	log.Debugf("Groups for user %s (source=%s): %v", username, groupSource, groups)
+	return userRecord, groups, nil
 }
 
 // Handle the callback request when the user is successfully authenticated.
@@ -438,7 +477,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 		return
 	}
 
-	user, groups, err := generateUserGroupInfo(userInfo, idToken)
+	userRecord, groups, err := generateUserGroupInfo(userInfo, idToken)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError,
 			server_structs.SimpleApiResp{
@@ -454,7 +493,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 	}
 
 	// Issue our own JWT for web UI access
-	setLoginCookie(ctx, user, groups)
+	setLoginCookie(ctx, userRecord, groups)
 
 	// Redirect user to where they were or root path
 	ctx.Redirect(http.StatusTemporaryRedirect, redirectLocation)
