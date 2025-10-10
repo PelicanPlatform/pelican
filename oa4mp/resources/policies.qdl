@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -16,11 +16,12 @@
  *
  ***************************************************************/
 
-access_token.'sub' := claims.'sub';
-access_token.'iss' := '{{- .OIDCIssuerURL -}}';
+say('Scopes in the initial request: ' + to_string(scopes.));
+
+access_token.sub := claims.sub;
+access_token.iss := '{{- .OIDCIssuerURL -}}';
 
 group_list. := claims.groups;
-remove(claims.groups);
 
 {{ if .GroupRequirements -}}
 if [0 == size(|^group_list. /\ { {{- range $idx, $grp := .GroupRequirements -}}{{- if eq $idx 0 -}}'{{- $grp -}}'{{else}}, '{{- $grp -}}'{{- end -}}{{- end -}} })] then
@@ -31,63 +32,31 @@ if [0 == size(|^group_list. /\ { {{- range $idx, $grp := .GroupRequirements -}}{
 ];
 {{- end }}
 
+/*
+ * Start with the scopes that Pelican provided to us, which are assumed
+ * to be the scopes that the final token must be compatible with.
+ */
 default_scopes := |^claims.scopes;
-{{ range .GroupAuthzTemplates }}
-{{ if eq 0 (len .Groups) -}}
-while [has_value(key, group_list.)]
-{{- else -}}
-while [has_value(key, |^group_list. /\ { {{- range $idx, $grp := .Groups -}}{{- if eq $idx 0 -}}'{{- $grp -}}'{{else}}, '{{- $grp -}}'{{- end -}}{{- end -}} })]
-{{- end }}
-[
-    {{ if eq 0 (len .Users) -}}
-    if [true] then
-    {{- else -}}
-    if [0 != size({claims.'sub'} /\ { {{- range $idx, $user := .Users -}}{{- if eq $idx 0 -}}'{{- $user -}}'{{else}}, '{{- $user -}}'{{- end -}}{{- end -}} })] then
-    {{- end }}
-    [
-        group_scopes := { {{- range $idx, $action := .Actions }}{{- if eq $idx 0 -}}'{{- $action -}}:'{{else}}, '{{- $action -}}:'{{- end -}}{{- end -}} } + '{{- .Prefix -}}';
-        default_scopes := default_scopes \/ |^replace(~group_scopes, '$GROUP', encode(key, 1)); /* 1 = URL-encode (RFC 3986) */
-    ];
-];
-{{- end -}}
-{{ range .UserAuthzTemplates }}
-{{ if eq 0 (len .Users) -}}
-if [true] then
-{{- else -}}
-if [0 != size({claims.'sub'} /\ { {{- range $idx, $user := .Users -}}{{- if eq $idx 0 -}}'{{- $user -}}'{{else}}, '{{- $user -}}'{{- end -}}{{- end -}} })] then
-{{- end }}
-[
-    {{ if eq 0 (len .Groups) -}}
-    if [true] then
-    {{- else -}}
-    if [0 != size(|^group_list. /\ { {{- range $idx, $grp := .Groups -}}{{- if eq $idx 0 -}}'{{- $grp -}}'{{else}}, '{{- $grp -}}'{{- end -}}{{- end -}} })] then
-    {{- end }}
-    [
-        user_scopes := { {{- range $idx, $action := .Actions }}{{- if eq $idx 0 -}}'{{- $action -}}:'{{else}}, '{{- $action -}}:'{{- end -}}{{- end -}} } + '{{- .Prefix -}}';
-        default_scopes := default_scopes \/ |^replace(~user_scopes, '$USER', encode(claims.'sub', 1)); /* 1 = URL-encode (RFC 3986) */
-    ];
-];
-{{- end }}
 
 /*
- * If the requested scope is a tighter requirement than what is permitted,
+ * If a requested scope is a tighter requirement than what is permitted,
  * then grant the tighter requirement.
  */
 user_scopes. := mask(scopes., -1 < starts_with(scopes., ~default_scopes));
 
 /*
- * If the requested scope is a looser requirement than what is permitted,
+ * If a requested scope is a looser requirement than what is permitted,
  * then grant based on the default scopes.
  */
 user_scopes_loose. := mask(~default_scopes, -1 < starts_with(~default_scopes, scopes.));
 
-access_token.'scope' := detokenize(unique(sort(user_scopes. ~ user_scopes_loose.)), ' ', 2);
-
 /*
- * Pelican generates WLCG-style token scopes,
- * so convert the resulting access token to a WLCG token.
+ * Configure the access token.
+ *
+ * Pelican generates WLCG-style token scopes, so modify the token accordingly.
  */
-remove(access_token.ver);
+access_token.'scope' := detokenize(unique(sort(user_scopes. ~ user_scopes_loose.)), ' ', 2);
 access_token.'wlcg.ver' := '1.0';
 access_token.'aud' := 'https://wlcg.cern.ch/jwt/v1/any';
 access_token.'wlcg.groups' := group_list.;
+remove(access_token.ver);
