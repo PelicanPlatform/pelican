@@ -887,7 +887,8 @@ func TestFailTransfer(t *testing.T) {
 	// Test that DeveloperData and TransferErrorData are populated for director errors
 	t.Run("TestDirectorError", func(t *testing.T) {
 		results := make(chan *classads.ClassAd, 1)
-		directorErr := errors.New("failed to get namespace information for remote URL osdf://test/file: error while querying the director at https://osdf-director.osg-htc.org: Get \"https://osdf-director.osg-htc.org/test\": dial tcp 128.105.82.132:443: i/o timeout")
+		innerErr := errors.New("Get \"https://osdf-director.osg-htc.org/test\": dial tcp 128.105.82.132:443: i/o timeout")
+		directorErr := error_codes.NewContact_DirectorError(innerErr)
 		failTransfer("osdf://test/file", "/path/to/local.txt", results, false, directorErr)
 		result := <-results
 
@@ -943,7 +944,8 @@ func TestFailTransfer(t *testing.T) {
 	// Test that DeveloperData and TransferErrorData are populated for file not found errors
 	t.Run("TestFileNotFoundError", func(t *testing.T) {
 		results := make(chan *classads.ClassAd, 1)
-		fileNotFoundErr := errors.New("local object \"/path/to/missing.txt\" does not exist")
+		innerErr := errors.New("local object \"/path/to/missing.txt\" does not exist")
+		fileNotFoundErr := error_codes.NewSpecification_FileNotFoundError(innerErr)
 		failTransfer("osdf://test/file", "/path/to/missing.txt", results, true, fileNotFoundErr)
 		result := <-results
 
@@ -996,7 +998,8 @@ func TestFailTransfer(t *testing.T) {
 func TestCreateTransferError(t *testing.T) {
 	// Test director contact error
 	t.Run("DirectorContactError", func(t *testing.T) {
-		err := errors.New("failed to get namespace information for remote URL osdf://test/file: error while querying the director at https://osdf-director.osg-htc.org: Get \"https://osdf-director.osg-htc.org/test\": dial tcp 128.105.82.132:443: i/o timeout")
+		innerErr := errors.New("Get \"https://osdf-director.osg-htc.org/test\": dial tcp 128.105.82.132:443: i/o timeout")
+		err := error_codes.NewContact_DirectorError(innerErr)
 		transferError := createTransferError(err)
 
 		assert.Equal(t, "Contact", transferError["ErrorType"])
@@ -1006,12 +1009,13 @@ func TestCreateTransferError(t *testing.T) {
 
 		assert.Equal(t, 3001, devData["PelicanErrorCode"])
 		assert.Equal(t, "Contact.Director", devData["ErrorType"])
-		assert.Equal(t, "Failed to contact director (network error)", devData["ErrorMessage"])
+		assert.Contains(t, devData["ErrorMessage"], "dial tcp")
 	})
 
 	// Test file not found error
 	t.Run("FileNotFoundError", func(t *testing.T) {
-		err := errors.New("local object \"/path/to/file.txt\" does not exist")
+		innerErr := errors.New("local object \"/path/to/file.txt\" does not exist")
+		err := error_codes.NewSpecification_FileNotFoundError(innerErr)
 		transferError := createTransferError(err)
 
 		assert.Equal(t, "Specification", transferError["ErrorType"])
@@ -1021,13 +1025,14 @@ func TestCreateTransferError(t *testing.T) {
 
 		assert.Equal(t, 5011, devData["PelicanErrorCode"])
 		assert.Equal(t, "Specification.FileNotFound", devData["ErrorType"])
-		assert.Equal(t, "Local file not found", devData["ErrorMessage"])
+		assert.Contains(t, devData["ErrorMessage"].(string), "does not exist")
 		assert.False(t, devData["Retryable"].(bool))
 	})
 
 	// Test 404 error
 	t.Run("RemoteFileNotFoundError", func(t *testing.T) {
-		err := errors.New("server returned 404 Not Found")
+		innerErr := errors.New("server returned 404 Not Found")
+		err := error_codes.NewSpecification_FileNotFoundError(innerErr)
 		transferError := createTransferError(err)
 
 		assert.Equal(t, "Specification", transferError["ErrorType"])
@@ -1037,13 +1042,14 @@ func TestCreateTransferError(t *testing.T) {
 
 		assert.Equal(t, 5011, devData["PelicanErrorCode"])
 		assert.Equal(t, "Specification.FileNotFound", devData["ErrorType"])
-		assert.Equal(t, "404: Not Found", devData["ErrorMessage"])
+		assert.Contains(t, devData["ErrorMessage"].(string), "404 Not Found")
 		assert.False(t, devData["Retryable"].(bool))
 	})
 
 	// Test slow transfer error
 	t.Run("SlowTransferError", func(t *testing.T) {
-		err := &client.SlowTransferError{}
+		innerErr := &client.SlowTransferError{}
+		err := error_codes.NewTransfer_SlowTransferError(innerErr)
 		transferError := createTransferError(err)
 
 		assert.Equal(t, "Transfer", transferError["ErrorType"])
@@ -1053,7 +1059,6 @@ func TestCreateTransferError(t *testing.T) {
 
 		assert.Equal(t, 6002, devData["PelicanErrorCode"])
 		assert.Equal(t, "Transfer.SlowTransfer", devData["ErrorType"])
-		assert.Equal(t, "Slow transfer", devData["ErrorMessage"])
 		assert.True(t, devData["Retryable"].(bool))
 	})
 

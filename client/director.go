@@ -111,6 +111,8 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 
 		if err != nil {
 			log.Errorln("Failed to get response from the director:", err)
+			// Wrap network errors in Contact.Director error type
+			err = error_codes.NewContact_DirectorError(err)
 			return
 		}
 
@@ -267,11 +269,17 @@ func GetDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, h
 			err = errors.Errorf("the director returned status code 405, indicating it understood the request but could not find an origin that supports PUT/DELETE operations for object: %s.", pUrl.Path)
 			return
 		} else {
-			err = errors.Wrapf(err, "error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint)
-			// Wrap timeout errors specifically; leave other errors unwrapped until we know how to categorize them
-			var netErr net.Error
-			if errors.As(err, &netErr) && netErr.Timeout() {
-				err = error_codes.NewTransfer_DirectorTimeoutError(err)
+			// If not already a PelicanError, wrap it as a Contact.Director error
+			var pe *error_codes.PelicanError
+			if !errors.As(err, &pe) {
+				err = error_codes.NewContact_DirectorError(errors.Wrapf(err, "error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint))
+			} else {
+				err = errors.Wrapf(err, "error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint)
+				// Wrap timeout errors specifically; leave other errors unwrapped until we know how to categorize them
+				var netErr net.Error
+				if errors.As(err, &netErr) && netErr.Timeout() {
+					err = error_codes.NewTransfer_DirectorTimeoutError(err)
+				}
 			}
 			return
 		}

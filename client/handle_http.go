@@ -3235,12 +3235,13 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	if err != nil {
 		log.Errorln("Error checking local file ", transfer.localPath, ":", err)
 		if os.IsNotExist(err) {
-			err = error_codes.NewParameter_FileNotFoundError(err)
+			transferResult.Error = error_codes.NewSpecification_FileNotFoundError(errors.Wrapf(err, "local file %q does not exist", transfer.localPath))
+		} else if os.IsPermission(err) {
+			transferResult.Error = error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied accessing local file %q", transfer.localPath))
 		} else {
-			err = error_codes.NewParameterError(err)
+			transferResult.Error = error_codes.NewSpecificationError(errors.Wrapf(err, "failed to stat local file %q", transfer.localPath))
 		}
-		transferResult.Error = err
-		return transferResult, err
+		return transferResult, transferResult.Error
 	}
 
 	var ioreader io.ReadCloser
@@ -3266,7 +3267,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	} else {
 
 		if fileInfo.IsDir() {
-			err := errors.New("the provided path '" + transfer.localPath + "' is a directory, but a file is expected")
+			err := error_codes.NewParameterError(errors.New("the provided path '" + transfer.localPath + "' is a directory, but a file is expected"))
 			transferResult.Error = err
 			return transferResult, err
 		}
@@ -3275,8 +3276,14 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		file, err := os.Open(transfer.localPath)
 		if err != nil {
 			log.Errorln("Error opening local file:", err)
-			transferResult.Error = err
-			return transferResult, err
+			if os.IsNotExist(err) {
+				transferResult.Error = error_codes.NewSpecification_FileNotFoundError(errors.Wrapf(err, "local file %q does not exist", transfer.localPath))
+			} else if os.IsPermission(err) {
+				transferResult.Error = error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied opening local file %q", transfer.localPath))
+			} else {
+				transferResult.Error = error_codes.NewSpecificationError(errors.Wrapf(err, "failed to open local file %q", transfer.localPath))
+			}
+			return transferResult, transferResult.Error
 		}
 		ioreader = file
 		sizer = &ConstantSizer{size: fileInfo.Size()}
@@ -3793,9 +3800,11 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 		info, err := os.Stat(localPath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return error_codes.NewParameter_FileNotFoundError(errors.Wrap(err, "failed to stat local path"))
+				return error_codes.NewSpecification_FileNotFoundError(errors.Wrapf(err, "local path %q does not exist", localPath))
+			} else if os.IsPermission(err) {
+				return error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied accessing local path %q", localPath))
 			}
-			return error_codes.NewParameterError(errors.Wrap(err, "failed to stat local path"))
+			return error_codes.NewSpecificationError(errors.Wrap(err, "failed to stat local path"))
 		}
 		// If the path leads to a file and not a directory, create a job to upload the file and return
 		if !info.IsDir() {
@@ -3828,7 +3837,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 			return nil
 		}
 		// Otherwise, a different error occurred and we should return it
-		return errors.Wrap(err, "failed to upload local collection")
+		return error_codes.NewSpecificationError(errors.Wrap(err, "failed to upload local collection"))
 	}
 
 	for _, info := range infos {

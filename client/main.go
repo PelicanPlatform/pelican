@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -39,6 +38,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
@@ -538,35 +538,28 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 	info, err := os.Stat(localObject)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, errors.Wrapf(err, "local object %q does not exist", localObject)
+			return nil, error_codes.NewSpecification_FileNotFoundError(errors.Wrapf(err, "local object %q does not exist", localObject))
 		}
-		return nil, errors.Wrapf(err, "failed to stat local object %q", localObject)
+		return nil, error_codes.NewSpecificationError(errors.Wrapf(err, "failed to stat local object %q", localObject))
 	}
 
 	if info.IsDir() {
 		if !recursive {
-			return nil, errors.Errorf("local object %q is a directory but recursive is not enabled", localObject)
+			return nil, error_codes.NewParameterError(errors.Errorf("local object %q is a directory but recursive is not enabled", localObject))
 		}
-		err = filepath.WalkDir(localObject, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if !d.IsDir() {
-				file, err := os.Open(path)
-				if err != nil {
-					return errors.Wrapf(err, "failed to open local object for reading: %q", path)
-				}
-				file.Close()
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, err
-		}
-	} else { // It's a file
+		// Only check that the directory exists and is accessible, don't recurse through all files
+		// The actual file processing will be done during the transfer phase
+	} else {
+		// For non-directory files (including symlinks), try to open them
+		// This matches the logic that will be used during actual transfer
 		file, err := os.Open(localObject)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to open local object for reading: %q", localObject)
+			if os.IsNotExist(err) {
+				return nil, error_codes.NewSpecification_FileNotFoundError(errors.Wrapf(err, "failed to open local object for reading: %q", localObject))
+			} else if os.IsPermission(err) {
+				return nil, error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied when opening local object: %q", localObject))
+			}
+			return nil, error_codes.NewSpecificationError(errors.Wrapf(err, "failed to open local object for reading: %q", localObject))
 		}
 		file.Close()
 	}

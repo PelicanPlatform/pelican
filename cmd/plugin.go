@@ -716,7 +716,7 @@ func writeTransferErrorMessage(currentError string, transferUrl string) (errMsg 
 
 	errMsg += currentError
 	if tUrl, err := url.Parse(transferUrl); transferUrl != "" && err == nil {
-		prefix = tUrl.Scheme + "://" + tUrl.Host
+		prefix := tUrl.Scheme + "://" + tUrl.Host
 		urlRemainder := strings.TrimPrefix(transferUrl, prefix)
 		errMsg = strings.ReplaceAll(errMsg, urlRemainder, "(...Path...)")
 	}
