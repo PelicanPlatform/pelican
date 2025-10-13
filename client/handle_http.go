@@ -3015,14 +3015,15 @@ Loop:
 				log.WithFields(fields).Debugln("Got error from file transfer:", statusText)
 				if strings.Contains(statusText, "sTREAM ioctl timeout") {
 					err = CacheTimedOutReadingFromOrigin
+					err = error_codes.NewTransfer_TimedOutError(err)
 				} else {
 					err = errors.New(statusText)
+					err = errors.Wrap(err, "download error after server response started")
+					if strings.Contains(statusText, "unexpected EOF") {
+						err = &UnexpectedEOFError{Err: err}
+					}
+					err = error_codes.NewTransferError(err)
 				}
-				err = errors.Wrap(err, "download error after server response started")
-				if strings.Contains(statusText, "unexpected EOF") {
-					err = &UnexpectedEOFError{Err: err}
-				}
-				err = error_codes.NewTransferError(err)
 				return
 			}
 		}
@@ -3045,6 +3046,9 @@ Loop:
 		if resp.StatusCode == http.StatusNotFound {
 			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
 				resp.StatusCode), error_codes.NewSpecification_FileNotFoundError(err)}
+		} else if resp.StatusCode == http.StatusGatewayTimeout {
+			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
+				resp.StatusCode), error_codes.NewTransfer_TimedOutError(err)}
 		}
 		return 0, 0, -1, serverVersion, httpErr
 	}

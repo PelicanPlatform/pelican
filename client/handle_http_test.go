@@ -792,6 +792,15 @@ func TestGatewayTimeout(t *testing.T) {
 	assert.NoError(t, err)
 	err = transferResult.Error
 	log.Debugln("Received download error:", err)
+
+	// Check that it's wrapped in a PelicanError with Transfer.TimedOut
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(err, &pe), "Error should be wrapped in PelicanError")
+	assert.Equal(t, 6003, pe.Code(), "Should be Transfer.TimedOut error code")
+	assert.Equal(t, "Transfer.TimedOut", pe.ErrorType(), "Should be Transfer.TimedOut error type")
+	assert.True(t, pe.IsRetryable(), "Timeout should be retryable")
+
+	// Check that the underlying StatusCodeError is still there
 	var sce *StatusCodeError
 	if errors.As(err, &sce) {
 		assert.Equal(t, "cache timed out waiting on origin", sce.Error())
