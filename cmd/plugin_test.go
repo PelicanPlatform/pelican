@@ -826,7 +826,7 @@ func TestFailTransfer(t *testing.T) {
 	// Test when we call failTransfer with a retryable error
 	t.Run("TestWithRetry", func(t *testing.T) {
 		results := make(chan *classads.ClassAd, 1)
-		failTransfer("pelican://some/example.txt", "/path/to/local.txt", results, false, &client.SlowTransferError{})
+		failTransfer("pelican://some/example.txt", "/path/to/local.txt", results, false, error_codes.NewTransfer_SlowTransferError(&client.SlowTransferError{}))
 		result := <-results
 
 		// Check TransferUrl set
@@ -863,7 +863,7 @@ func TestFailTransfer(t *testing.T) {
 		transferError, _ := result.Get("TransferError")
 		transferErrorStr, ok := transferError.(string)
 		require.True(t, ok)
-		assert.Equal(t, "cancelled transfer, too slow; detected speed=0 B/s, total transferred=0 B, total transfer time=0s, cache miss", transferErrorStr)
+		assert.Contains(t, transferErrorStr, "cancelled transfer, too slow; detected speed=0 B/s, total transferred=0 B, total transfer time=0s, cache miss")
 	})
 }
 
