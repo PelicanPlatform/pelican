@@ -3680,7 +3680,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 	if err != nil {
 		// Check if we got a 404:
 		if gowebdav.IsErrNotFound(err) {
-			return errors.New("404: object not found")
+			return error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
 		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
 			info, err := client.Stat(remotePath)
 			if err != nil {
@@ -3898,7 +3898,7 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 	if err != nil {
 		// Check if we got a 404:
 		if gowebdav.IsErrNotFound(err) {
-			return nil, errors.New("404: object not found")
+			return nil, error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
 		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
 			// If we get an error code 500 (internal server error), we should check if the user is trying to ls on a file
 			info, err := client.Stat(remotePath)
@@ -4069,7 +4069,7 @@ func deleteHttp(ctx context.Context, remoteUrl *pelican_url.PelicanURL, recursiv
 	info, err := client.Stat(remotePath)
 	if err != nil {
 		if gowebdav.IsErrNotFound(err) {
-			return errors.Wrapf(ErrObjectNotFound, "cannot remove remote path %s: no such object or collection", remotePath)
+			return error_codes.NewSpecification_FileNotFoundError(errors.Wrapf(ErrObjectNotFound, "cannot remove remote path %s: no such object or collection", remotePath))
 		}
 		return errors.Wrap(err, "failed to check object existence")
 	}
@@ -4173,6 +4173,7 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 					return
 				} else if gowebdav.IsErrNotFound(err) {
 					err = errors.Wrapf(ErrObjectNotFound, "object %s not found at the endpoint %s", dest.String(), endpoint.String())
+					err = error_codes.NewSpecification_FileNotFoundError(err)
 					resultsChan <- statResults{FileInfo{}, err}
 					return
 				}
