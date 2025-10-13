@@ -18,13 +18,17 @@
 
 say('Scopes in the initial request: ' + to_string(scopes.));
 
+/*
+ * Set the essential/required/core claims.
+ */
 access_token.sub := claims.sub;
 access_token.iss := '{{- .OIDCIssuerURL -}}';
 
-group_list. := claims.groups;
-
+/*
+ * Check that the authenticated user is a member of the required groups.
+ */
 {{ if .GroupRequirements -}}
-if [0 == size(|^group_list. /\ { {{- range $idx, $grp := .GroupRequirements -}}{{- if eq $idx 0 -}}'{{- $grp -}}'{{else}}, '{{- $grp -}}'{{- end -}}{{- end -}} })] then
+if [0 == size(|^claims.groups. /\ { {{- range $idx, $grp := .GroupRequirements -}}{{- if eq $idx 0 -}}'{{- $grp -}}'{{else}}, '{{- $grp -}}'{{- end -}}{{- end -}} })] then
 [
     sys_err.ok := false;
     sys_err.message := 'Authenticated user is not in any of the following groups: {{ range $idx, $grp := .GroupRequirements -}}{{- if eq $idx 0 -}}"{{- $grp -}}"{{else}}, "{{- $grp -}}"{{- end -}}{{- end -}}';
@@ -58,5 +62,5 @@ user_scopes_loose. := mask(~default_scopes, -1 < starts_with(~default_scopes, sc
 access_token.'scope' := detokenize(unique(sort(user_scopes. ~ user_scopes_loose.)), ' ', 2);
 access_token.'wlcg.ver' := '1.0';
 access_token.'aud' := 'https://wlcg.cern.ch/jwt/v1/any';
-access_token.'wlcg.groups' := group_list.;
+access_token.'wlcg.groups' := claims.groups.;
 remove(access_token.ver);

@@ -55,6 +55,10 @@ if [0 == size(proxy_claims.)] then
     ];
 ];
 
+/*
+ * Check that the claims in Pelican's Issuer.OIDCAuthenticationRequirements
+ * parameter are present.
+ */
 {{ range $req := .OIDCAuthnReqs }}
 if [!is_defined(proxy_claims.'{{- $req.Claim -}}')] then
 [
@@ -64,6 +68,10 @@ if [!is_defined(proxy_claims.'{{- $req.Claim -}}')] then
 ];
 {{ end }}
 
+/*
+ * Check that the claims in Pelican's Issuer.OIDCAuthenticationRequirements
+ * parameter have the required value.
+ */
 {{ range $req := .OIDCAuthnReqs }}
 if [proxy_claims.'{{- $req.Claim -}}' != '{{- $req.Value -}}'] then
 [
@@ -73,6 +81,9 @@ if [proxy_claims.'{{- $req.Claim -}}' != '{{- $req.Value -}}'] then
 ];
 {{ end }}
 
+/*
+ * Check that the claim Pelican is using as the "username" is present.
+ */
 if [!is_defined(proxy_claims.'{{- .OIDCAuthnUserClaim -}}')] then
 [
     sys_err.ok := false;
@@ -80,5 +91,8 @@ if [!is_defined(proxy_claims.'{{- .OIDCAuthnUserClaim -}}')] then
     return();
 ];
 
+/*
+ * Set the essential/required/core claims.
+ */
 claims.sub := proxy_claims.'{{- .OIDCAuthnUserClaim -}}';
 claims.iss := '{{- .OIDCIssuerURL -}}';
