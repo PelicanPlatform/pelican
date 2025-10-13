@@ -3234,6 +3234,11 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	transferResult.Scheme = transfer.remoteURL.Scheme
 	if err != nil {
 		log.Errorln("Error checking local file ", transfer.localPath, ":", err)
+		if os.IsNotExist(err) {
+			err = error_codes.NewParameter_FileNotFoundError(err)
+		} else {
+			err = error_codes.NewParameterError(err)
+		}
 		transferResult.Error = err
 		return transferResult, err
 	}
@@ -3787,7 +3792,10 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 	if err != nil {
 		info, err := os.Stat(localPath)
 		if err != nil {
-			return errors.Wrap(err, "failed to stat local path")
+			if os.IsNotExist(err) {
+				return error_codes.NewParameter_FileNotFoundError(errors.Wrap(err, "failed to stat local path"))
+			}
+			return error_codes.NewParameterError(errors.Wrap(err, "failed to stat local path"))
 		}
 		// If the path leads to a file and not a directory, create a job to upload the file and return
 		if !info.IsDir() {

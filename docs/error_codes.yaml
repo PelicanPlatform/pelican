@@ -45,6 +45,13 @@ description: >-
   If the client failed to start, or was started with invalid parameters, or otherwise believes what it
   was asked to do is impossible or the request itself is malformed.
 retryable: false
+---
+type: Parameter.FileNotFound
+code: 1011
+clientExitCode: 4
+description: >-
+  If the client was started with a file that does not exist.
+retryable: false
 
 ############################
 #    Resolution Errors     #
