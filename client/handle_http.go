@@ -2901,6 +2901,7 @@ Loop:
 						StoppedTime:      time.Since(noProgressStartTime),
 						CacheHit:         cacheAge > 0,
 					}
+					err = error_codes.NewTransfer_StoppedTransferError(err)
 					log.WithFields(fields).Errorln(err.Error())
 					return
 				}
@@ -3354,6 +3355,7 @@ Loop:
 					StoppedTime:      timeSinceLastProgress,
 					Upload:           true,
 				}
+				lastError = error_codes.NewTransfer_StoppedTransferError(lastError)
 				// No progress has been made in the last 1 second
 				break Loop
 			}
