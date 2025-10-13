@@ -34,10 +34,12 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/client"
 	config "github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
@@ -1102,6 +1104,11 @@ func TestObjectDelete(t *testing.T) {
 		err := client.DoDelete(fed.Ctx, doesNotExistPath, false, client.WithTokenLocation(tempToken.Name()))
 		require.Error(t, err)
 		require.True(t, errors.Is(err, client.ErrObjectNotFound))
+
+		// Verify it's wrapped in a PelicanError with correct code
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(err, &pe), "Error should be wrapped in PelicanError")
+		assert.Equal(t, 5011, pe.Code(), "Should be Specification.FileNotFound error code")
 	})
 
 	// Test deleting an existing object.
