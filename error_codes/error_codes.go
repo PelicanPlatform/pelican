@@ -43,6 +43,17 @@ func NewParameterError(err error) *PelicanError {
 	}
 }
 
+func NewParameter_FileNotFoundError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Parameter.FileNotFound",
+		exitCode:    4,
+		code:        1011,
+		retryable:   false,
+		description: "If the client was started with a file that does not exist.",
+		err:         err,
+	}
+}
+
 func NewResolutionError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Resolution",
