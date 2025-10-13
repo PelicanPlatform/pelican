@@ -20,10 +20,11 @@ package client
 
 import (
 	"errors"
-	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/pelicanplatform/pelican/error_codes"
 )
 
 // Make a mock net timeout error
@@ -53,9 +54,9 @@ func TestErrorAccum(t *testing.T) {
 func TestErrorsRetryableFalse(t *testing.T) {
 	te := NewTransferErrors()
 
-	// Case 2: cache with http
-	te.AddError(&SlowTransferError{})
-	te.AddError(&SlowTransferError{})
+	// Test that wrapped errors work correctly
+	te.AddError(error_codes.NewTransfer_SlowTransferError(&SlowTransferError{}))
+	te.AddError(error_codes.NewTransfer_SlowTransferError(&SlowTransferError{}))
 	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
 	te.resetErrors()
 
@@ -72,22 +73,43 @@ func TestErrorsRetryableFalse(t *testing.T) {
 	assert.False(t, te.AllErrorsRetryable(), "ErrorsRetryable should be false")
 	te.resetErrors()
 
+	// Test PermissionDeniedError with valid token that was rejected (not retryable)
+	pdeValidButRejected := &PermissionDeniedError{expired: false}
+	te.AddError(error_codes.NewAuthorizationError(pdeValidButRejected))
+	assert.False(t, te.AllErrorsRetryable(), "PermissionDeniedError with valid but rejected token should not be retryable")
+	te.resetErrors()
+
 }
 
 // TestErrorsRetryableTrue tests that errors are retryable
 func TestErrorsRetryableTrue(t *testing.T) {
 	te := NewTransferErrors()
 
-	// Try with a retryable error nested error
-	te.AddError(&url.Error{Err: &SlowTransferError{}})
-	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
+	// Test wrapped errors (these are always wrapped in production)
+	te.AddError(error_codes.NewTransfer_SlowTransferError(&SlowTransferError{}))
+	assert.True(t, te.AllErrorsRetryable(), "Wrapped SlowTransferError should be retryable")
 	te.resetErrors()
 
+	te.AddError(error_codes.NewTransfer_HeaderTimeoutError(&HeaderTimeoutError{}))
+	assert.True(t, te.AllErrorsRetryable(), "Wrapped HeaderTimeoutError should be retryable")
+	te.resetErrors()
+
+	te.AddError(error_codes.NewTransfer_StoppedTransferError(&StoppedTransferError{}))
+	assert.True(t, te.AllErrorsRetryable(), "Wrapped StoppedTransferError should be retryable")
+	te.resetErrors()
+
+	te.AddError(error_codes.NewTransferError(&UnexpectedEOFError{}))
+	assert.True(t, te.AllErrorsRetryable(), "Wrapped UnexpectedEOFError should be retryable")
+	te.resetErrors()
+
+	// Test PermissionDeniedError with expired token (retryable - will get new token)
+	pdeExpired := &PermissionDeniedError{expired: true}
+	te.AddError(error_codes.NewAuthorizationError(pdeExpired))
+	assert.True(t, te.AllErrorsRetryable(), "PermissionDeniedError with expired token should be retryable")
+	te.resetErrors()
+
+	// Test unwrapped errors (not yet wrapped in production)
 	te.AddError(&ConnectionSetupError{})
-	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
-	te.resetErrors()
-
-	te.AddError(&StoppedTransferError{})
 	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
 	te.resetErrors()
 
