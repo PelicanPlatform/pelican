@@ -2262,7 +2262,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				} else if ue, ok := cse.Unwrap().(*url.Error); ok {
 					httpErr := ue.Unwrap()
 					if httpErr.Error() == "net/http: timeout awaiting response headers" {
-						headerTimeoutErr := error_codes.NewContactError(&HeaderTimeoutError{})
+						headerTimeoutErr := error_codes.NewTransfer_HeaderTimeoutError(&HeaderTimeoutError{})
 						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, headerTimeoutErr)
 					} else {
 						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, httpErr)
@@ -3398,7 +3398,7 @@ Loop:
 			if errors.As(err, &ue) {
 				err = ue.Unwrap()
 				if err.Error() == "net/http: timeout awaiting response headers" {
-					err = error_codes.NewContactError(&HeaderTimeoutError{})
+					err = error_codes.NewTransfer_HeaderTimeoutError(&HeaderTimeoutError{})
 				}
 			}
 			if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
