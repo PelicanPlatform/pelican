@@ -512,6 +512,16 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				errMsgInternal := result.Error.Error()
 				if errors.As(result.Error, &te) {
 					errMsgInternal = te.UserError()
+				} else {
+					// If we have a PelicanError, prefer the wrapped error message to avoid noisy prefixes
+					var pe *error_codes.PelicanError
+					if errors.As(result.Error, &pe) {
+						if innerErr := pe.Unwrap(); innerErr != nil {
+							errMsgInternal = innerErr.Error()
+						} else {
+							errMsgInternal = pe.Error()
+						}
+					}
 				}
 				errMsg := writeTransferErrorMessage(errMsgInternal, transfer.url.String())
 				resultAd.Set("TransferError", errMsg)
