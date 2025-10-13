@@ -186,6 +186,28 @@ func NewTransfer_SlowTransferError(err error) *PelicanError {
 	}
 }
 
+func NewTransfer_TimedOutError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Transfer.TimedOut",
+		exitCode:    11,
+		code:        6003,
+		retryable:   true,
+		description: "The client started transferring data but the transfer timed out.",
+		err:         err,
+	}
+}
+
+func NewTransfer_HeaderTimeoutError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Transfer.HeaderTimeout",
+		exitCode:    11,
+		code:        6004,
+		retryable:   true,
+		description: "The client attempted to contact the server but timed out waiting for response headers. This indicates the server did not respond before the header timeout threshold.",
+		err:         err,
+	}
+}
+
 // function that maps the error to the exit code
 func (e *PelicanError) ExitCode() int {
 	return e.exitCode

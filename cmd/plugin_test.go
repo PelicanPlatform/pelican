@@ -1574,12 +1574,12 @@ func TestTransferErrorHeaderTimeout(t *testing.T) {
 			errorData := errorDataList[0].(map[string]interface{})
 			errorTypeStr, ok := errorData["ErrorType"].(string)
 			require.True(t, ok)
-			assert.Equal(t, "Contact", errorTypeStr)
+			assert.Equal(t, "Transfer", errorTypeStr)
 			developerData, ok := errorData["DeveloperData"].(map[string]interface{})
 			require.True(t, ok)
 
 			// Create the expected error to get the expected values
-			expectedErr := error_codes.NewContactError(&client.HeaderTimeoutError{})
+			expectedErr := error_codes.NewTransfer_HeaderTimeoutError(&client.HeaderTimeoutError{})
 
 			pelicanErrorCode, ok := developerData["PelicanErrorCode"].(int)
 			require.True(t, ok)
