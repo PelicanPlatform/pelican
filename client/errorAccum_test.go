@@ -54,16 +54,6 @@ func TestErrorAccum(t *testing.T) {
 func TestErrorsRetryableFalse(t *testing.T) {
 	te := NewTransferErrors()
 
-	// Test that wrapped errors work correctly
-	te.AddError(error_codes.NewTransfer_SlowTransferError(&SlowTransferError{}))
-	te.AddError(error_codes.NewTransfer_SlowTransferError(&SlowTransferError{}))
-	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
-	te.resetErrors()
-
-	te.AddError(&ConnectionSetupError{})
-	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
-	te.resetErrors()
-
 	// Now add a non-retryable error
 	te.AddError(errors.New("Non retryable error"))
 	assert.False(t, te.AllErrorsRetryable(), "ErrorsRetryable should be false")
@@ -109,6 +99,10 @@ func TestErrorsRetryableTrue(t *testing.T) {
 	te.resetErrors()
 
 	// Test unwrapped errors (not yet wrapped in production)
+	te.AddError(&ConnectionSetupError{})
+	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
+	te.resetErrors()
+
 	te.AddError(&ConnectionSetupError{})
 	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
 	te.resetErrors()
