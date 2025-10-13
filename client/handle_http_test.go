@@ -313,7 +313,16 @@ func TestStoppedTransfer(t *testing.T) {
 
 	// Make sure the errors are correct
 	assert.NotNil(t, err)
-	assert.IsType(t, &StoppedTransferError{}, err, err.Error())
+	// Check that it's wrapped in a PelicanError and contains StoppedTransferError
+	assert.True(t, errors.Is(err, &StoppedTransferError{}), "Error should contain StoppedTransferError")
+
+	// Check that it's wrapped in a PelicanError with the correct code
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(err, &pe), "Error should be wrapped in PelicanError")
+	assert.Equal(t, 6001, pe.Code(), "Should be Transfer.StoppedTransfer error code")
+	assert.Equal(t, "Transfer.StoppedTransfer", pe.ErrorType(), "Should be Transfer.StoppedTransfer error type")
+	assert.True(t, pe.IsRetryable(), "StoppedTransfer should be retryable")
+
 	assert.True(t, IsRetryable(err))
 }
 
