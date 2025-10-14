@@ -1,0 +1,55 @@
+---
+title: pelican origin token create
+---
+
+## pelican origin token create
+
+Create a Pelican origin token
+
+### Synopsis
+
+Create a JSON web token (JWT) using the origin's signing keys:
+Usage: pelican origin token create [FLAGS] claims
+E.g. pelican origin token create --profile scitokens2 aud=my-audience scope="read:/storage" scope="write:/storage"
+
+Pelican origins use JWTs as bearer tokens for authorizing specific requests,
+such as reading from or writing to the origin's underlying storage, advertising
+to a director, etc. For more information about the makeup of a JWT, see
+https://jwt.io/introduction.
+
+Additional profiles that expand on JWT are supported. They include scitokens2 and
+wlcg. For more information about these profiles, see https://scitokens.org/technical_docs/Claims
+and https://github.com/WLCG-AuthZ-WG/common-jwt-profile/blob/master/profile.md, respectively
+
+```
+pelican origin token create [flags]
+```
+
+### Options
+
+```
+      --audience strings     The token's intended audience.
+      --claim strings        Additional token claims. A claim must be of the form <claim name>=<value>
+  -h, --help                 help for create
+      --issuer string        The URL of the token's issuer. If not provided, the tool will attempt to find one in the configuration file.
+      --lifetime int         The lifetime of the token, in seconds. (default 1200)
+      --private-key string   Filepath designating the location of the private key in PEM format to be used for signing, if different from the origin's default.
+      --scope strings        Scopes for granting fine-grained permissions to the token.
+      --subject string       The token's subject.
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug logs
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --profile string      Passing a profile ensures the token adheres to the profile's requirements. Accepted values are scitokens2 and wlcg (default "wlcg")
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican origin token](/commands-reference/origin/token/)	 - Manage Pelican origin tokens

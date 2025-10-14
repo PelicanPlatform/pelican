@@ -1,0 +1,34 @@
+---
+title: pelican object share
+---
+
+## pelican object share
+
+Generate a string for sharing access to a namespace.
+Note the sharing is based on prefixes; all object names matching the prefix will be accessible
+
+```
+pelican object share {URL} [flags]
+```
+
+### Options
+
+```
+  -h, --help    help for share
+      --write   Allow writes to the target prefix
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug logs
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican object](/commands-reference/object/)	 - Interact with objects in the federation

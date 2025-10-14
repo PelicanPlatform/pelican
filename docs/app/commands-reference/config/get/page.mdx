@@ -1,0 +1,51 @@
+---
+title: pelican config get
+---
+
+## pelican config get
+
+Retrieve config parameters that match any of the given arguments
+
+### Synopsis
+
+The 'get' command retrieves and displays configuration parameters that contain any of the provided argument patterns in their name or value.
+The search space can be narrowed or expanded using available flags. The matching is case-insensitive.
+If no arguments are provided, all configuration parameters are retrieved.
+The command outputs the results in a flattened format from the nested configuration, making it grep-friendly for easier searching.
+
+```
+pelican config get [arguments] [flags]
+```
+
+### Examples
+
+```
+# Retrieve parameters that have either 'log' or 'monitor' in their name or value,
+# and relate to either 'origin' or 'cache', including deprecated parameters in the search space
+pelican config get log monitor -m origin -m cache --include-deprecated
+```
+
+### Options
+
+```
+      --exact-match          Match configuration parameter names exactly instead of using substring matching
+  -h, --help                 help for get
+      --include-deprecated   Include deprecated configuration parameters
+      --include-hidden       Include hidden configuration parameters
+  -m, --module config get    Specify modules to filter the output of config get. The recognized modules are `client`, `registry`, `director`, `origin`, `cache`, and `localcache`. Multiple modules can be specified at the same time, for example: `config get -m cache -m origin`. If multiple modules are provided, parameters related to any of the modules will be retrieved. If no modules are specified, no module-based filter is applied to the search space.
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug logs
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican config](/commands-reference/config/)	 - View and search for configuration parameters
