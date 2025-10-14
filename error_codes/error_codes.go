@@ -120,6 +120,17 @@ func NewContact_RegistryError(err error) *PelicanError {
 	}
 }
 
+func NewContact_ConnectionResetError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Contact.ConnectionReset",
+		exitCode:    6,
+		code:        3005,
+		retryable:   true,
+		description: "The client attempted to contact a server but the connection was reset by the remote peer. This is often a transient network error that can be resolved by retrying.",
+		err:         err,
+	}
+}
+
 func NewAuthorizationError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Authorization",
