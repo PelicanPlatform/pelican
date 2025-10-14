@@ -33,7 +33,7 @@ type (
 		CreatedBy   string    `gorm:"column:created_by;type:text" json:"createdBy"`
 	}
 
-	ServiceName struct {
+	ServerName struct {
 		ID        string         `gorm:"primaryKey;column:id;type:TEXT"`
 		Name      string         `gorm:"column:name;type:TEXT;not null"`
 		Type      string         `gorm:"column:type;type:TEXT;not null"`

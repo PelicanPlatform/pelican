@@ -84,11 +84,12 @@ type (
 	Severity string
 	Downtime struct {
 		UUID        string   `json:"id" gorm:"primaryKey"`
-		ServerName  string   `json:"serverName" gorm:"index"`   // Empty in Origin/Cache; not empty in Registry
-		CreatedBy   string   `json:"createdBy" gorm:"not null"` // Person who created this downtime
-		UpdatedBy   string   `json:"updatedBy" gorm:"not null"` // Person who last updated this downtime
-		Source      string   `json:"source" gorm:"not null"`    // Pelican service that set this downtime
-		Class       Class    `json:"class" gorm:"not null"`     // SCHEDULED or UNSCHEDULED
+		ServerName  string   `json:"serverName" gorm:"index"`            // Empty in Origin/Cache; not empty in Registry
+		ServerID    string   `json:"serverId" gorm:"type:text;not null"` // Server ID may be empty if the downtime is set before v7.21
+		CreatedBy   string   `json:"createdBy" gorm:"not null"`          // Person who created this downtime
+		UpdatedBy   string   `json:"updatedBy" gorm:"not null"`          // Person who last updated this downtime
+		Source      string   `json:"source" gorm:"not null"`             // Pelican service that set this downtime
+		Class       Class    `json:"class" gorm:"not null"`              // SCHEDULED or UNSCHEDULED
 		Description string   `json:"description" gorm:"type:text"`
 		Severity    Severity `json:"severity" gorm:"type:varchar(80);not null"`
 		StartTime   int64    `json:"startTime" gorm:"not null;index"` // Epoch UTC

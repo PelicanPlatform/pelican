@@ -465,11 +465,11 @@ func UpsertServiceName(serverName string, typ server_structs.ServerType) error {
 	now := time.Now()
 
 	// look for existing
-	var entry server_structs.ServiceName
+	var entry server_structs.ServerName
 	err := ServerDatabase.Where("name = ?", serverName).First(&entry).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		// no existing row → insert
-		entry = server_structs.ServiceName{
+		entry = server_structs.ServerName{
 			ID:        uuid.NewString(),
 			Name:      serverName,
 			Type:      strings.ToLower(typ.String()),
@@ -490,7 +490,7 @@ func UpsertServiceName(serverName string, typ server_structs.ServerType) error {
 
 // Retrieve the server name in use - lookup the entry whose UpdatedAt is the most recent
 func GetServiceName() (string, error) {
-	var entry server_structs.ServiceName
+	var entry server_structs.ServerName
 	// There is an index in the database to speed up this query
 	err := ServerDatabase.
 		Where("deleted_at IS NULL").
@@ -504,8 +504,8 @@ func GetServiceName() (string, error) {
 }
 
 // Retrieve all service names from most recent to oldest
-func GetServiceNameHistory() ([]server_structs.ServiceName, error) {
-	var entries []server_structs.ServiceName
+func GetServiceNameHistory() ([]server_structs.ServerName, error) {
+	var entries []server_structs.ServerName
 
 	err := ServerDatabase.
 		Where("deleted_at IS NULL").
@@ -523,7 +523,7 @@ func GetServiceNameHistory() ([]server_structs.ServiceName, error) {
 func SoftDeleteServiceName(id string) error {
 	now := time.Now()
 
-	result := ServerDatabase.Model(&server_structs.ServiceName{}).
+	result := ServerDatabase.Model(&server_structs.ServerName{}).
 		Where("id = ? AND deleted_at IS NULL", id).
 		Update("deleted_at", now)
 

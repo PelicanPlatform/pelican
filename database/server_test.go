@@ -169,12 +169,12 @@ func SetupMockServiceNameDB(t *testing.T) {
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err, "opening in-memory sqlite DB")
 	ServerDatabase = mockDB
-	err = ServerDatabase.AutoMigrate(&server_structs.ServiceName{})
+	err = ServerDatabase.AutoMigrate(&server_structs.ServerName{})
 	require.NoError(t, err, "migrating ServiceName schema")
 }
 
 func TeardownMockServiceNameDB(t *testing.T) {
-	err := ServerDatabase.Migrator().DropTable(&server_structs.ServiceName{})
+	err := ServerDatabase.Migrator().DropTable(&server_structs.ServerName{})
 	require.NoError(t, err, "dropping ServiceName table")
 }
 
@@ -198,7 +198,7 @@ func TestUpsertServiceName(t *testing.T) {
 		err := UpsertServiceName(name1, typ)
 		require.NoError(t, err)
 
-		var got server_structs.ServiceName
+		var got server_structs.ServerName
 		err = ServerDatabase.First(&got, "name = ?", name1).Error
 		require.NoError(t, err)
 
@@ -214,7 +214,7 @@ func TestUpsertServiceName(t *testing.T) {
 		require.NoError(t, err)
 
 		// capture original timestamps & ID
-		var original server_structs.ServiceName
+		var original server_structs.ServerName
 		require.NoError(t,
 			ServerDatabase.First(&original, "name = ?", name1).Error,
 		)
@@ -224,7 +224,7 @@ func TestUpsertServiceName(t *testing.T) {
 		err = UpsertServiceName(name1, origType)
 		require.NoError(t, err)
 
-		var updated server_structs.ServiceName
+		var updated server_structs.ServerName
 		require.NoError(t,
 			ServerDatabase.First(&updated, "name = ?", name1).Error,
 		)
@@ -245,7 +245,7 @@ func TestUpsertServiceName(t *testing.T) {
 
 		var count int64
 		require.NoError(t,
-			ServerDatabase.Model(&server_structs.ServiceName{}).Count(&count).Error,
+			ServerDatabase.Model(&server_structs.ServerName{}).Count(&count).Error,
 		)
 		assert.Equal(t, int64(2), count, "should have two distinct rows")
 	})
@@ -267,14 +267,14 @@ func TestGetServiceName(t *testing.T) {
 
 	t.Run("returns-latest-by-updated_at", func(t *testing.T) {
 		now := time.Now().UTC()
-		old := server_structs.ServiceName{
+		old := server_structs.ServerName{
 			ID:        uuid.NewString(),
 			Name:      "old-server",
 			Type:      "cache",
 			CreatedAt: now.Add(-2 * time.Hour),
 			UpdatedAt: now.Add(-2 * time.Hour),
 		}
-		recent := server_structs.ServiceName{
+		recent := server_structs.ServerName{
 			ID:        uuid.NewString(),
 			Name:      "new-server",
 			Type:      "origin",
