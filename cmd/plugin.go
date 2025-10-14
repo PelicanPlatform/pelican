@@ -780,10 +780,12 @@ func createTransferError(err error) (transferError map[string]interface{}) {
 	transferError = make(map[string]interface{})
 	developerData := make(map[string]interface{})
 
+	isRetryable := client.IsRetryable(err)
+
 	var pe *error_codes.PelicanError
 	if errors.As(err, &pe) {
 		developerData["PelicanErrorCode"] = pe.Code()
-		developerData["Retryable"] = pe.IsRetryable()
+		developerData["Retryable"] = isRetryable
 		developerData["ErrorType"] = pe.ErrorType()
 
 		// Use the wrapped error's message if available, otherwise use the PelicanError's full error message
@@ -804,7 +806,7 @@ func createTransferError(err error) (transferError map[string]interface{}) {
 		// Fallback for errors that aren't wrapped in PelicanError
 		developerData["PelicanErrorCode"] = 0
 		developerData["ErrorType"] = "Unprocessed"
-		developerData["Retryable"] = false
+		developerData["Retryable"] = isRetryable
 		developerData["ErrorMessage"] = "Unprocessed error type"
 		transferError["ErrorType"] = "Unprocessed"
 	}
