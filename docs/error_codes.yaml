@@ -102,6 +102,14 @@ clientExitCode: 6
 description: >-
   The client attempted to contact the registry (usually through the director) but failed to do so.
 retryable: false
+---
+type: Contact.ConnectionReset
+code: 3005
+clientExitCode: 6
+description: >-
+  The client attempted to contact a server but the connection was reset by the remote peer.
+  This is often a transient network error that can be resolved by retrying.
+retryable: true
 
 ############################
 #   Authorization Errors   #
