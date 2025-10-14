@@ -236,6 +236,12 @@ func getServerByID(serverID string) (*server_structs.ServerRegistration, error) 
 		return nil, errors.Wrapf(err, "failed to get services for server ID: %s", serverID)
 	}
 
+	// If server has no services, return a "service not found" error
+	// See the definitions of server and service in the realm of Pelican
+	if len(services) == 0 {
+		return nil, errors.Errorf("no service found for server with ID %s", serverID)
+	}
+
 	result := &server_structs.ServerRegistration{
 		ID:        server.ID,
 		Name:      server.Name,
@@ -247,7 +253,15 @@ func getServerByID(serverID string) (*server_structs.ServerRegistration, error) 
 	}
 
 	for _, service := range services {
-		result.Registration = append(result.Registration, service.Registration)
+		// Exclude services whose preloaded Registration is missing
+		if service.Registration.ID != 0 && service.Registration.Prefix != "" {
+			result.Registration = append(result.Registration, service.Registration)
+		}
+	}
+
+	// Throw an error if no valid registrations for this server
+	if len(result.Registration) == 0 {
+		return nil, errors.Errorf("no service found for server with ID %s. This server is associated with a non-existent registration, which may have been deleted", serverID)
 	}
 
 	return result, nil
@@ -301,6 +315,11 @@ func getServerByName(serverName string) (*server_structs.ServerRegistration, err
 	if err := database.ServerDatabase.Where("server_id = ?", server.ID).Preload("Registration").Find(&services).Error; err != nil {
 		return nil, errors.Wrapf(err, "failed to get services for server name: %s", serverName)
 	}
+	// If server has no services, return a "service not found" error
+	// See the definitions of server and service in the realm of Pelican
+	if len(services) == 0 {
+		return nil, errors.Errorf("no service found for server with ID %s", server.ID)
+	}
 
 	result := &server_structs.ServerRegistration{
 		ID:        server.ID,
@@ -313,7 +332,15 @@ func getServerByName(serverName string) (*server_structs.ServerRegistration, err
 	}
 
 	for _, service := range services {
-		result.Registration = append(result.Registration, service.Registration)
+		// Exclude services whose preloaded Registration is missing
+		if service.Registration.ID != 0 && service.Registration.Prefix != "" {
+			result.Registration = append(result.Registration, service.Registration)
+		}
+	}
+
+	// Throw an error if no valid registrations for this server
+	if len(result.Registration) == 0 {
+		return nil, errors.Errorf("no service found for server with ID %s. This server is associated with a non-existent registration, which may have been deleted", server.ID)
 	}
 
 	return result, nil
@@ -333,6 +360,11 @@ func listServers() ([]server_structs.ServerRegistration, error) {
 			return nil, errors.Wrapf(err, "failed to get services for server ID: %s", server.ID)
 		}
 
+		// If server has no services, skip it. This usually means the foreign key constraint for services table is damaged.
+		if len(services) == 0 {
+			continue
+		}
+
 		serverReg := server_structs.ServerRegistration{
 			ID:        server.ID,
 			Name:      server.Name,
@@ -344,7 +376,15 @@ func listServers() ([]server_structs.ServerRegistration, error) {
 		}
 
 		for _, service := range services {
-			serverReg.Registration = append(serverReg.Registration, service.Registration)
+			// Exclude services whose preloaded Registration is missing
+			if service.Registration.ID != 0 && service.Registration.Prefix != "" {
+				serverReg.Registration = append(serverReg.Registration, service.Registration)
+			}
+		}
+
+		// Skip a stale server entry if it has no valid registrations
+		if len(serverReg.Registration) == 0 {
+			continue
 		}
 
 		results = append(results, serverReg)
