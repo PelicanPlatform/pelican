@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useContext, useEffect, useState } from 'react';
 import { Box, IconButton, Paper, Tooltip, Typography } from '@mui/material';
 import { grey, red } from '@mui/material/colors';

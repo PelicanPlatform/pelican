@@ -7,7 +7,7 @@ interface SettingHeaderProps {
 
 const SettingHeader = ({ title, description }: SettingHeaderProps) => {
   return (
-    <Box mb={1}>
+    <Box mb={3}>
       <Typography variant={'h5'} component={'h2'} id={title}>
         {title}
       </Typography>

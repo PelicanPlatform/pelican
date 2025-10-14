@@ -117,3 +117,44 @@ export interface GetToken extends BaseToken {
   id: string;
   createdBy: string;
 }
+
+/** Groups and Authorization Types */
+
+export interface User {
+  id: string;
+  username: string;
+  sub: string;
+  issuer: string;
+  createdAt: string;
+}
+
+export type UserPost = Omit<User, 'id' | 'createdAt'>;
+
+export type UserPatch = Partial<Omit<User, 'createdAt'>>;
+
+export interface Group {
+  id: string;
+  name: string;
+  description: string;
+  members: User[];
+  createdBy: string;
+  createdAt: string;
+}
+
+export type GroupPost = Omit<
+  Group,
+  'id' | 'members' | 'createdBy' | 'createdAt'
+>;
+
+export interface GroupMember {
+  groupId: string;
+  userId: string;
+  user: User;
+  createdBy: string;
+  createdAt: string;
+}
+
+export type GroupMemberPost = Omit<
+  GroupMember,
+  'user' | 'addedBy' | 'addedAt' | 'groupId'
+>;
