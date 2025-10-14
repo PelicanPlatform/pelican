@@ -618,13 +618,7 @@ func GetOrCreateUser(db *gorm.DB, username string, sub string, issuer string) (*
 	user := &User{}
 	err := db.Where("sub = ? AND issuer = ?", sub, issuer).First(user).Error
 	if err == nil {
-		// User found, check if we need to update username and, if so, do it
-		if user.Username != username {
-			user.Username = username
-			if err := db.Save(user).Error; err != nil {
-				return nil, err
-			}
-		}
+		// User found, return existing user
 		return user, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -649,7 +643,7 @@ func CreateUser(db *gorm.DB, username string, sub string, issuer string) (*User,
 	if err := db.Create(newUser).Error; err != nil {
 		// Check if the error is a unique constraint violation
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-			return nil, errors.New("user with the same username and issuer already exists")
+			return nil, errors.New("user shares either username or (sub and iss) with another")
 		}
 		return nil, err
 	}
