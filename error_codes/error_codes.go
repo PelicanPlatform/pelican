@@ -219,6 +219,17 @@ func NewTransfer_HeaderTimeoutError(err error) *PelicanError {
 	}
 }
 
+func NewTransfer_DirectorTimeoutError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Transfer.DirectorTimeout",
+		exitCode:    11,
+		code:        6005,
+		retryable:   true,
+		description: "The client timed out while querying the director for namespace information. This indicates the director did not respond before the timeout threshold.",
+		err:         err,
+	}
+}
+
 // function that maps the error to the exit code
 func (e *PelicanError) ExitCode() int {
 	return e.exitCode

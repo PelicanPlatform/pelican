@@ -182,3 +182,11 @@ description: >-
   The client attempted to contact the server but timed out waiting for response headers.
   This indicates the server did not respond before the header timeout threshold.
 retryable: true
+---
+type: Transfer.DirectorTimeout
+code: 6005
+clientExitCode: 11
+description: >-
+  The client timed out while querying the director for namespace information.
+  This indicates the director did not respond before the timeout threshold.
+retryable: true
