@@ -925,7 +925,8 @@ func deleteServerHandler(ctx *gin.Context) {
 		log.Errorf("Error deleting the server: %v", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Error deleting the server"})
+			Msg:    "Error deleting the server: " + err.Error()})
+		return
 	}
 	ctx.JSON(http.StatusOK,
 		server_structs.SimpleApiResp{
