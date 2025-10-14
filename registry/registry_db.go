@@ -376,8 +376,8 @@ func listServers() ([]server_structs.ServerRegistration, error) {
 		}
 
 		for _, service := range services {
-			// Exclude services whose preloaded Registration is missing
-			if service.Registration.ID != 0 && service.Registration.Prefix != "" {
+			// Exclude services whose preloaded Registration is missing or not approved
+			if service.Registration.ID != 0 && service.Registration.Prefix != "" && service.Registration.AdminMetadata.Status == server_structs.RegApproved {
 				serverReg.Registration = append(serverReg.Registration, service.Registration)
 			}
 		}
