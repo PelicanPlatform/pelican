@@ -31,7 +31,7 @@ func InitSQLiteDB(dbPath string) (*gorm.DB, error) {
 		dbPath += ".sqlite"
 	}
 
-	dbName := dbPath + "?_busy_timeout=5000&_journal_mode=WAL"
+	dbName := dbPath + "?_busy_timeout=5000&_journal_mode=WAL&_foreign_keys=on"
 
 	globalLogLevel := log.GetLevel()
 	var ormLevel logger.LogLevel
