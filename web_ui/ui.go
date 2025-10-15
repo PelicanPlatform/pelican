@@ -277,7 +277,7 @@ func handleWebUIRedirect(ctx *gin.Context) {
 func handleWebUIAuth(ctx *gin.Context) {
 	requestPath := ctx.Param("requestPath")
 	db := authDB.Load()
-	user, _, err := GetUserGroups(ctx)
+	user, _, _, err := GetUserGroups(ctx)
 
 	// Skip auth check for static files other than html pages
 	if path.Ext(requestPath) != "" && path.Ext(requestPath) != ".html" {
@@ -458,7 +458,7 @@ func createApiToken(ctx *gin.Context) {
 		expirationTime = expirationTime.UTC()
 	}
 	scopes := strings.Join(req.Scopes, ",")
-	user, _, err := GetUserGroups(ctx)
+	user, _, _, err := GetUserGroups(ctx)
 	if err != nil {
 		log.Warn("Failed to get user from context")
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -604,9 +604,14 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 		downtimeAPI.DELETE("/:uuid", AuthHandler, AdminAuthHandler, HandleDeleteDowntime)
 	}
 
+	engine.GET("/api/v1.0/groups", AuthHandler, handleListGroups)
 	engine.POST("/api/v1.0/groups", AuthHandler, handleCreateGroup)
+	engine.GET("/api/v1.0/groups/:id/members", AuthHandler, handleListGroupMembers)
 	engine.POST("/api/v1.0/groups/:id/members", AuthHandler, handleAddGroupMember)
-	engine.DELETE("/api/v1.0/groups/:id/members", AuthHandler, handleRemoveGroupMember)
+	engine.DELETE("/api/v1.0/groups/:id/members/:userId", AuthHandler, handleRemoveGroupMember)
+
+	engine.GET("/api/v1.0/users", AuthHandler, handleListUsers)
+	engine.POST("/api/v1.0/users", AuthHandler, handleAddUser)
 
 	return nil
 }

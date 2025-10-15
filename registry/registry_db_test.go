@@ -69,6 +69,9 @@ func setupMockRegistryDB(t *testing.T) {
 		&server_structs.Service{},
 		&server_structs.Contact{},
 		&server_structs.Endpoint{},
+		&database.User{},
+		&database.Group{},
+		&database.GroupMember{},
 	)
 	require.NoError(t, err, "Failed to migrate DB tables")
 }

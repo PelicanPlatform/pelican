@@ -945,6 +945,25 @@ definitions:
         items:
           $ref: "#/definitions/GroupMember"
         description: List of group members
+  User:
+    type: object
+    properties:
+      id:
+        type: string
+        description: Unique identifier for the user
+      username:
+        type: string
+        description: Username of the user
+      sub:
+        type: string
+        description: The 'sub' claim from the user's OIDC token
+      issuer:
+        type: string
+        description: The 'iss' claim from the user's OIDC token
+      created_at:
+        type: string
+        format: date-time
+        description: When the user was created
   GroupMember:
     type: object
     properties:
@@ -952,10 +971,11 @@ definitions:
         type: string
         description: ID of the group
         example: "abc12345"
-      member:
+      user_id:
         type: string
-        description: Member identifier
-        example: "user@example.com"
+        description: ID of the user
+      user:
+        $ref: "#/definitions/User"
       added_by:
         type: string
         description: User who added this member
@@ -1082,8 +1102,6 @@ definitions:
         example: "read"
   CreateGroupRequest:
     type: object
-    required:
-      - name
     properties:
       name:
         type: string
@@ -1095,13 +1113,10 @@ definitions:
         example: "Team working on climate research"
   AddGroupMemberRequest:
     type: object
-    required:
-      - member
     properties:
-      member:
+      user_id:
         type: string
-        description: Member identifier to add
-        example: "user@example.com"
+        description: The unique user ID of the member to add
   ListCollectionResponse:
     type: object
     properties:
@@ -3704,6 +3719,28 @@ paths:
 
   # Group Management APIs
   /groups:
+    get:
+      tags:
+        - groups
+      summary: List all groups
+      description: "`Authentication Required`"
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/Group"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
     post:
       tags:
         - groups
@@ -3738,6 +3775,38 @@ paths:
           schema:
             $ref: "#/definitions/ErrorModelV2"
   /groups/{id}/members:
+    get:
+      tags:
+        - groups
+      summary: List members of a group
+      description: "`Authentication Required`"
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the group
+          required: true
+          type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/GroupMember"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Group not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
     post:
       tags:
         - groups
@@ -3753,8 +3822,8 @@ paths:
           description: ID of the group
           required: true
           type: string
-        - in: body
-          name: member
+        - name: member
+          in: body
           description: The member to add
           required: true
           schema:
@@ -3782,6 +3851,7 @@ paths:
           description: Internal server error
           schema:
             $ref: "#/definitions/ErrorModelV2"
+  /groups/{id}/members/{userId}:
     delete:
       tags:
         - groups
@@ -3795,9 +3865,9 @@ paths:
           description: ID of the group
           required: true
           type: string
-        - name: member
-          in: query
-          description: Member identifier to remove
+        - name: userId
+          in: path
+          description: The unique user ID of the member to remove
           required: true
           type: string
       responses:
@@ -3817,6 +3887,84 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
         "404":
           description: Group or member not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /users:
+    get:
+      tags:
+        - groups
+      summary: List all users
+      description: "`Authentication Required`"
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/User"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    post:
+      tags:
+        - groups
+      summary: Create a new user
+      description: "`Authentication Required`"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          description: User object to create
+          required: true
+          schema:
+            type: object
+            required:
+              - username
+              - sub
+              - issuer
+            properties:
+              username:
+                type: string
+                description: Username of the user
+                example: "johndoe"
+              sub:
+                type: string
+                description: The 'sub' claim from the user's OIDC token
+                example: "http://cilogon.org/serverA/users/12345"
+              issuer:
+                type: string
+                description: The 'iss' claim from the user's OIDC token
+                example: "https://cilogon.org"
+      responses:
+        "201":
+          description: User created successfully
+          schema:
+            type: object
+            properties:
+              id:
+                type: string
+                description: The unique ID of the created user
+                example: "abc12345"
+        "400":
+          description: Bad request (missing fields or user already exists)
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "500":

@@ -41,13 +41,21 @@ func generateToken(ctx context.Context, scopes []token_scopes.TokenScope, subjec
 		return "", err
 	}
 	tk := token.NewWLCGToken()
-	tk.Issuer = fedInfo.DiscoveryEndpoint
+	issuer := param.Server_ExternalWebUrl.GetString()
+	if issuer == "" {
+		issuer = fedInfo.DiscoveryEndpoint
+	}
+	tk.Issuer = issuer
 	tk.Subject = subject
 	tk.Lifetime = 5 * time.Minute
-	tk.AddAudiences(fedInfo.DiscoveryEndpoint)
+	tk.AddAudiences(issuer)
 	tk.AddScopes(scopes...)
 	if len(groups) > 0 {
 		tk.AddGroups(groups...)
+	}
+	// Add OIDC claims required by GetUserGroups
+	tk.Claims = map[string]string{
+		"user_id": subject,
 	}
 	tok, err := tk.CreateToken()
 	if err != nil {
@@ -157,6 +165,8 @@ func TestCollectionsAPI(t *testing.T) {
 	require.NoError(t, err, "Failed to migrate DB for groups table")
 	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
 	require.NoError(t, err, "Failed to migrate DB for group members table")
+	err = database.ServerDatabase.AutoMigrate(&database.User{})
+	require.NoError(t, err, "Failed to migrate DB for users table")
 
 	t.Run("create-delete-collection", func(t *testing.T) {
 		createReq := CreateCollectionReq{
