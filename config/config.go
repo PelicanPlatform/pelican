@@ -810,12 +810,26 @@ func InitConfigDir(v *viper.Viper) {
 
 // InitConfigInternal sets up the global Viper instance by loading defaults and
 // user-defined config files, validates config params, and initializes logging.
-func InitConfigInternal() {
+func InitConfigInternal(logLevel log.Level) {
 	// Set a prefix so Viper knows how to parse PELICAN_* env vars
 	// This must happen before config dir initialization so that Pelican
 	// can pick up setting the config dir with PELICAN_CONFIGDIR
 	viper.SetEnvPrefix("pelican")
 	viper.AutomaticEnv()
+
+	// Log level defaults are set outside of Set{Server/Client}Defaults because
+	// logging is needed before those functions are called. They're also set directly
+	// in those functions so that the viper objects they generate are consistent.
+	//
+	// Note that we do the WarnLevel -> "warn" mapping because logrus converts the
+	// WarnLevel to "warning" when calling String(), but we want to keep "warn", which
+	// is what Pelican uses. For more information, see:
+	// https://github.com/PelicanPlatform/pelican/pull/2712
+	logString := logLevel.String()
+	if logLevel == log.WarnLevel {
+		logString = "warn"
+	}
+	viper.SetDefault(param.Logging_Level.GetName(), logString)
 
 	// Enable BindStruct to allow unmarshal env into a nested struct
 	viper.SetOptions(viper.ExperimentalBindStruct())
@@ -1028,6 +1042,11 @@ func SetServerDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
 	v.SetConfigType("yaml")
 
+	// Duplicate setting a default logging level so that this function picks picks up
+	// the one case where we need to set client/server defaults differently directly in
+	// InitConfigInternal. We need to do that because internal logging levels are set by
+	// InitServer/InitClient before we call SetClientDefaults/SetServerDefaults.
+	v.SetDefault(param.Logging_Level.GetName(), "info")
 	v.SetDefault(param.Server_WebConfigFile.GetName(), filepath.Join(configDir, "web-config.yaml"))
 	v.SetDefault(param.Server_TLSCertificateChain.GetName(), filepath.Join(configDir, "certificates", "tls.crt"))
 	v.SetDefault(param.Server_TLSKey.GetName(), filepath.Join(configDir, "certificates", "tls.key"))
@@ -1306,7 +1325,7 @@ func SetServerDefaults(v *viper.Viper) error {
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
 func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
-	InitConfigInternal()
+	InitConfigInternal(log.InfoLevel)
 
 	setEnabledServer(currentServers)
 
@@ -1783,6 +1802,11 @@ func ResetClientInitialized() {
 func SetClientDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
 
+	// Duplicate setting a default logging level so that this function picks picks up
+	// the one case where we need to set client/server defaults differently directly in
+	// InitConfigInternal. We need to do that because internal logging levels are set by
+	// InitServer/InitClient before we call SetClientDefaults/SetServerDefaults.
+	v.SetDefault(param.Logging_Level.GetName(), "warning")
 	v.SetDefault(param.IssuerKey.GetName(), filepath.Join(configDir, "issuer.jwk"))
 	v.SetDefault(param.IssuerKeysDirectory.GetName(), filepath.Join(configDir, "issuer-keys"))
 
@@ -1926,7 +1950,7 @@ func SetClientDefaults(v *viper.Viper) error {
 }
 
 func InitClient() error {
-	InitConfigInternal()
+	InitConfigInternal(log.WarnLevel)
 	logging.FlushLogs(true)
 	if err := SetClientDefaults(viper.GetViper()); err != nil {
 		return err
