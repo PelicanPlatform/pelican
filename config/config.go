@@ -354,10 +354,41 @@ func GetAllPrefixes() []ConfigPrefix {
 
 // We can't parse a schemeless hostname when there's a port, so check for a scheme and add one if none exists.
 func wrapWithHttpsIfNeeded(urlStr string) string {
+	// The fact that we don't overwrite http:// with https:// appears to be an artifact from testing.
+	// In a future where we have time to get to the little things, we should address this since an http
+	// central service is a terrible idea, and we shouldn't make it possible just for the sake of testing...
 	if len(urlStr) > 0 && !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
 		urlStr = "https://" + urlStr
+		log.Warningf("The configured URL %s did not have the 'https://' scheme; will assume https", urlStr)
 	}
 	return urlStr
+}
+
+// Validate that the federation Discovery URL does not contain a path and is otherwise a valid URL.
+func validateDiscoveryUrl(discUrlStr string) (*url.URL, error) {
+	errPrfx := fmt.Sprintf("invalid federation discovery url of '%s' (config parameter %s):", discUrlStr, param.Federation_DiscoveryUrl.GetName())
+
+	discUrlStr = wrapWithHttpsIfNeeded(discUrlStr)
+	discUrl, err := url.Parse(discUrlStr)
+	if err != nil {
+		return nil, errors.Wrap(err, errPrfx)
+	}
+
+	// In some strange cases, URL parsing may render a path but no host
+	// (at least, this appears to be an assumption the original author of this logic
+	// made, but at time of functionalizing the knowledge as to how that happens is lost).
+	// Here, we want to ensure that if there is a host, there is no path.
+	if len(discUrl.Path) > 0 && len(discUrl.Host) > 0 {
+		return nil, errors.New(errPrfx + fmt.Sprintf(": Discovery URLs cannot contain a URL path, but yours parses as '%s'", discUrl.Path))
+	}
+
+	// If we end up with a path but no host, we use the path as the host.
+	if len(discUrl.Path) > 0 && len(discUrl.Host) == 0 {
+		discUrl.Host = discUrl.Path
+		discUrl.Path = ""
+	}
+
+	return discUrl, nil
 }
 
 // Global implementation of Discover Federation, outside any caching or
@@ -407,27 +438,22 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 	}
 
 	federationStr = wrapWithHttpsIfNeeded(federationStr)
-	federationUrl, err := url.Parse(federationStr)
+	federationUrl, err := validateDiscoveryUrl(federationStr)
 	if err != nil {
-		err = errors.Wrapf(err, "invalid federation value %s:", federationStr)
 		return
 	}
 
-	if federationUrl.Path != "" && federationUrl.Host != "" {
-		// If the host is nothing, then the url is fine, but if we have a host and a path then there is a problem
-		err = errors.New("Invalid federation discovery url is set. No path allowed for federation discovery url. Provided url: " + federationStr)
-		return
+	if federationUrl.String() == "" && fedInfo.DirectorEndpoint != "" {
+		// If we have no federation but we do have a Director, we may still be able to discover services via
+		// the Director
+		federationUrl, err = validateDiscoveryUrl(wrapWithHttpsIfNeeded(fedInfo.DirectorEndpoint))
 	}
 
-	if len(federationUrl.Path) > 0 && len(federationUrl.Host) == 0 {
-		federationUrl.Host = federationUrl.Path
-		federationUrl.Path = ""
-	}
 	fedInfo.DiscoveryEndpoint = federationUrl.String()
 
 	var metadata pelican_url.FederationDiscovery
 	if federationStr == "" {
-		log.Debugln("Federation URL is unset; skipping discovery")
+		log.Debugln("Federation discovery URL is unset; skipping discovery")
 	} else if federationStr == externalUrlStr {
 		log.Debugln("Current web engine hosts the federation; skipping auto-discovery of services")
 	} else {
