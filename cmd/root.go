@@ -161,15 +161,15 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/pelican/pelican.yaml)")
 
-	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Enable debug logs")
+	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Enable debug log messages")
 
 	rootCmd.PersistentFlags().StringP("federation", "f", "", "Pelican federation to utilize")
-	if err := viper.BindPFlag("Federation.DiscoveryUrl", rootCmd.PersistentFlags().Lookup("federation")); err != nil {
+	if err := viper.BindPFlag(param.Federation_DiscoveryUrl.GetName(), rootCmd.PersistentFlags().Lookup("federation")); err != nil {
 		panic(err)
 	}
 
 	rootCmd.PersistentFlags().StringP("log", "L", "", "Specified log output file")
-	if err := viper.BindPFlag("Logging.LogLocation", rootCmd.PersistentFlags().Lookup("log")); err != nil {
+	if err := viper.BindPFlag(param.Logging_LogLocation.GetName(), rootCmd.PersistentFlags().Lookup("log")); err != nil {
 		panic(err)
 	}
 
