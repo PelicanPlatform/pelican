@@ -53,6 +53,7 @@ func GetDeprecated() map[string][]string {
     return map[string][]string{
         "Cache.DataLocation": {"Cache.StorageLocation"},
         "Cache.LocalRoot": {"Cache.StorageLocation"},
+        "Debug": {"Logging.Level"},
         "Director.EnableStat": {"Director.CheckOriginPresence"},
         "DisableHttpProxy": {"Client.DisableHttpProxy"},
         "DisableProxyFallback": {"Client.DisableProxyFallback"},

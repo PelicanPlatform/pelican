@@ -178,6 +178,7 @@ var (
 	// Some config parsing tools will init both client and server config, but both
 	// warn about several config params. Only warn once per process.
 	warnDeprecatedOnce sync.Once
+	warnDebugOnce      sync.Once
 
 	RestartFlag  = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
 	ShutdownFlag = make(chan any) // A channel flag to shutdown the server instance that launcher listens to (including cache)
@@ -614,6 +615,10 @@ func handleDeprecatedConfig() {
 			if viper.IsSet(deprecated) {
 				if replacement[0] == "none" {
 					log.Warningf("Deprecated configuration key %s is set. This is being removed in future release", deprecated)
+				} else if deprecated == param.Debug.GetName() {
+					// Special case for the Debug key; we handle mapping it to Logging.Level: debug in
+					// `setLoggingInternal()` because that has already been executed by the time we get here.
+					log.Warningf("The configuration key '%s' is being deprecated. While debug logging has been enabled, you should set '%s' to 'debug' to achieve this behavior in the future.", deprecated, param.Logging_Level.GetName())
 				} else {
 					for _, rep := range replacement {
 						if viper.IsSet(rep) {
@@ -763,17 +768,22 @@ func SetBaseDefaultsInConfig(v *viper.Viper) {
 // Helper func that uses configured params to toggle the correct logging level
 // in the log library
 func setLoggingInternal() error {
+	// If the user has not set an explicit log level but they're using the old
+	// `Debug` config param, we set the log level to debug. This override behavior
+	// is legacy until we remove the `Debug` config param in a future release.
 	if param.Debug.GetBool() {
-		SetLogging(log.DebugLevel)
-		log.Warnf("Debug is set as a flag or in config, this will override anything set for '%s' within your configuration", param.Logging_Level.GetName())
-	} else {
-		logLevel := param.Logging_Level.GetString()
-		level, err := log.ParseLevel(logLevel)
-		if err != nil {
-			return errors.Wrapf(err, "failed to parse value of config param %s", param.Logging_Level.GetString())
-		}
-		SetLogging(level)
+		warnDebugOnce.Do(func() {
+			log.Warnf("The config param '%s' is set in your configuration, which will override any values set for '%s' ", param.Debug.GetName(), param.Logging_Level.GetName())
+		})
+		viper.Set(param.Logging_Level.GetName(), "debug")
 	}
+
+	logLevel := param.Logging_Level.GetString()
+	level, err := log.ParseLevel(logLevel)
+	if err != nil {
+		return errors.Wrapf(err, "failed to parse value of config param %s", param.Logging_Level.GetString())
+	}
+	SetLogging(level)
 
 	return nil
 }
@@ -1986,6 +1996,7 @@ func ResetConfig() {
 	globalFedErr = nil
 
 	warnDeprecatedOnce = sync.Once{}
+	warnDebugOnce = sync.Once{}
 
 	setServerOnce = sync.Once{}
 

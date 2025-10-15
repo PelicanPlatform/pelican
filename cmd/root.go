@@ -37,6 +37,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/logging"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 type uint16Value uint16
@@ -51,6 +52,14 @@ var (
 		Long: `The pelican software allows one to build and interact
 with data federations, enabling the sharing of objects and collections
 across multiple dataset providers.`,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			debugFlag, err := cmd.Flags().GetBool("debug")
+			if err == nil && debugFlag {
+				viper.Set(param.Logging_Level.GetName(), "debug")
+			}
+
+			return err
+		},
 	}
 
 	// We want the value of this port flag to correspond to the Port viper key.
@@ -175,10 +184,7 @@ func init() {
 	if err := viper.BindPFlag("config", rootCmd.PersistentFlags().Lookup("config")); err != nil {
 		panic(err)
 	}
-	if err := viper.BindPFlag("Debug", rootCmd.PersistentFlags().Lookup("debug")); err != nil {
-		panic(err)
-	}
-	if err := viper.BindPFlag("Server.WebPort", portFlag); err != nil {
+	if err := viper.BindPFlag(param.Server_WebPort.GetName(), portFlag); err != nil {
 		panic(err)
 	}
 }

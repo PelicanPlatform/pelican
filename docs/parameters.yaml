@@ -49,11 +49,18 @@ components: ["*"]
 ---
 name: Debug
 description: |+
+  [Deprecated] To enable debug logging, set ${Logging.Level} to "debug".
+
   A bool indicating whether Pelican should emit debug messages in its log.
   NOTE: this will override whatever is set within your configuration file under Logging.Level!
 type: bool
 default: false
 components: ["*"]
+deprecated: true
+# while we set `replacedby` here, it does not function in the code the same as other
+# `replacedby` examples because we need to map the Debug bool to the string "debug".
+# This is done with a special handler in `handleDeprecatedConfig()`
+replacedby: "Logging.Level"
 ---
 name: TLSSkipVerify
 description: |+
