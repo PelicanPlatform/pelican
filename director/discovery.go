@@ -52,6 +52,21 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 				Msg:    "Bad server configuration: Federation discovery could not resolve",
 			})
 	}
+
+	discoveryUrlStr := fedInfo.DiscoveryEndpoint
+	discoveryUrl, err := url.Parse(discoveryUrlStr)
+	if err != nil {
+		log.Errorf("Bad server configuration: invalid URL from %s: %v", param.Federation_DiscoveryUrl.GetName(), err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Bad server configuration: discovery URL is not valid",
+		})
+		return
+	}
+	if discoveryUrl.Scheme != "https" {
+		discoveryUrl.Scheme = "https"
+	}
+
 	directorUrlStr := fedInfo.DirectorEndpoint
 	if directorUrlStr == "" {
 		log.Error("Bad server configuration: Federation.DirectorUrl is not set")
@@ -76,6 +91,12 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 	if directorUrl.Port() == "443" {
 		directorUrl.Host = strings.TrimSuffix(directorUrl.Host, ":443")
 	}
+
+	if discoveryUrl.String() == "" && directorUrl.String() != "" {
+		// If DiscoveryUrl is not set, default to DirectorUrl because it hosts all this info
+		discoveryUrl = directorUrl
+	}
+
 	registryUrlStr := fedInfo.RegistryEndpoint
 	if registryUrlStr == "" {
 		log.Error("Bad server configuration: Federation.RegistryUrl is not set")
@@ -114,6 +135,7 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 	}
 
 	rs := pelican_url.FederationDiscovery{
+		DiscoveryEndpoint:          discoveryUrl.String(),
 		DirectorEndpoint:           directorUrl.String(),
 		RegistryEndpoint:           registryUrl.String(),
 		JwksUri:                    jwksUri,
