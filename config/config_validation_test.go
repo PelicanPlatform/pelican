@@ -38,7 +38,7 @@ func TestBadConfigKeys(t *testing.T) {
 	setupFunc := func() *test.Hook {
 		ResetConfig()
 		viper.Set("ConfigDir", t.TempDir())
-		viper.Set(param.Debug.GetName(), true)
+		viper.Set(param.Logging_Level.GetName(), "debug")
 		hook := test.NewLocal(logrus.StandardLogger())
 		return hook
 	}

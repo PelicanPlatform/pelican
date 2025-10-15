@@ -111,7 +111,7 @@ func TestQueryDirector(t *testing.T) {
 	// This test assumes the debugging level is at debug or higher
 	test_utils.InitClient(t, map[string]any{
 		param.Client_DirectorRetries.GetName(): 3,
-		param.Debug.GetName():                  true,
+		param.Logging_Level.GetName():          "debug",
 	})
 
 	type testCase struct {
