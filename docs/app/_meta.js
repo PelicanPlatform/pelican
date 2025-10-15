@@ -1,3 +1,6 @@
+
+const versions = eval(process.env.VERSIONS);
+
 export default {
 	"about-pelican": "About Pelican",
 	"install": "Installing Pelican",
@@ -9,5 +12,16 @@ export default {
 	"monitoring-pelican-services": "Monitoring Pelican Services",
 	"advanced-usage": "Advanced Usage",
 	"faq": "FAQs and Troubleshooting",
-	"api-docs": "API Documentation"
+	"api-docs": "API Documentation",
+	"versions": {
+		"title": "Versions",
+		"type": "menu",
+		"items": versions.reverse().reduce((acc, v) => {
+			acc[`${v}`] = {
+				title: v === 'latest' ? 'Latest' : v,
+				href: v === 'latest' ? '/' : `/${v}/`
+			}
+			return acc
+		}, {})
+	}
 }
