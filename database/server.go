@@ -61,6 +61,15 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 		return errors.Wrapf(err, "failed to run migrations for server type %s", serverType.String())
 	}
 
+	// Data cleanup - remove stale entries in the `servers` and `services` tables
+	// They are caused by the damaged foreign key constraint in `services` table and we didn't update webUI to use server deletion API in time.
+	// See https://opensciencegrid.atlassian.net/browse/OPS-438
+	if serverType == server_structs.RegistryType {
+		if err := cleanupStaleServerEntries(); err != nil {
+			return errors.Wrapf(err, "failed to cleanup stale server entries")
+		}
+	}
+
 	return nil
 }
 
@@ -73,6 +82,41 @@ func runServerTypeMigrations(sqlDB *sql.DB, serverType server_structs.ServerType
 	}
 
 	return nil
+}
+
+func cleanupStaleServerEntries() error {
+	// Identify stale servers via missing/invalid registrations and remove their services and server rows
+	return ServerDatabase.Transaction(func(tx *gorm.DB) error {
+		// Query all stale server IDs
+		var staleServerIDs []string
+		rawQuery := `
+			SELECT DISTINCT servers.id
+			FROM services
+			LEFT JOIN registrations ON services.registration_id = registrations.id
+			LEFT JOIN servers ON servers.id = services.server_id
+			WHERE registrations.pubkey IS NULL`
+
+		if err := tx.Raw(rawQuery).Scan(&staleServerIDs).Error; err != nil {
+			return errors.Wrap(err, "failed to query stale server IDs")
+		}
+
+		if len(staleServerIDs) == 0 {
+			return nil
+		}
+
+		// Delete services first to be robust even if old rows lacked proper FKs
+		if err := tx.Where("server_id IN ?", staleServerIDs).Delete(&server_structs.Service{}).Error; err != nil {
+			return errors.Wrap(err, "failed to delete stale services")
+		}
+
+		// Delete servers
+		if err := tx.Where("id IN ?", staleServerIDs).Delete(&server_structs.Server{}).Error; err != nil {
+			return errors.Wrap(err, "failed to delete stale servers")
+		}
+
+		log.WithField("count", len(staleServerIDs)).Info("Cleaned up stale server entries")
+		return nil
+	})
 }
 
 func CreateCounter(key string, value int) error {
