@@ -12,9 +12,12 @@ import {
   getNamespaces,
 } from '@/helpers/api';
 import { flattenObject } from '@/app/config/util';
-import { DirectorNamespace, ServerGeneral } from '@/types';
+import {
+  DirectorNamespace,
+  WellKnownConfiguration,
+  ServerGeneral,
+} from '@/types';
 import { RegistryNamespace } from '@/index';
-import { getObjectValue } from '@/helpers/util';
 
 /**
  * Director Getters
@@ -81,41 +84,3 @@ export const getExtendedNamespaces = async (): Promise<
 
   return sortedData;
 };
-
-/**
- * Get federation URLs
- */
-export const getFederationUrls = async () => {
-  try {
-    const response = await getConfigResponse();
-    const responseData = (await response.json()) as Config;
-
-    const federationUrls = UrlData.map(({ key, text }) => {
-      let url = getObjectValue<string>(responseData, key);
-      if (url && !url?.startsWith('http://') && !url?.startsWith('https://')) {
-        url = 'https://' + url;
-      }
-
-      return {
-        text,
-        url,
-      };
-    });
-
-    return federationUrls;
-  } catch (e) {
-    console.error(e);
-    return [];
-  }
-};
-const UrlData = [
-  { key: ['Federation', 'NamespaceUrl'], text: 'Namespace Registry' },
-  { key: ['Federation', 'DirectorUrl'], text: 'Director' },
-  { key: ['Federation', 'RegistryUrl'], text: 'Registry' },
-  {
-    key: ['Federation', 'TopologyNamespaceUrl'],
-    text: 'Topology Namespace',
-  },
-  { key: ['Federation', 'DiscoveryUrl'], text: 'Discovery' },
-  { key: ['Federation', 'JwkUrl'], text: 'JWK' },
-];
