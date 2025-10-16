@@ -3235,7 +3235,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	if err != nil {
 		log.Errorln("Error checking local file ", transfer.localPath, ":", err)
 		if os.IsNotExist(err) {
-			transferResult.Error = error_codes.NewSpecification_FileNotFoundError(errors.Wrapf(err, "local file %q does not exist", transfer.localPath))
+			transferResult.Error = error_codes.NewParameter_FileNotFoundError(errors.Wrapf(err, "local file %q does not exist", transfer.localPath))
 		} else if os.IsPermission(err) {
 			transferResult.Error = error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied accessing local file %q", transfer.localPath))
 		} else {
@@ -3277,7 +3277,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		if err != nil {
 			log.Errorln("Error opening local file:", err)
 			if os.IsNotExist(err) {
-				transferResult.Error = error_codes.NewSpecification_FileNotFoundError(errors.Wrapf(err, "local file %q does not exist", transfer.localPath))
+				transferResult.Error = error_codes.NewParameter_FileNotFoundError(errors.Wrapf(err, "local file %q does not exist", transfer.localPath))
 			} else if os.IsPermission(err) {
 				transferResult.Error = error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied opening local file %q", transfer.localPath))
 			} else {
