@@ -27,8 +27,6 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/pelicanplatform/pelican/param"
 )
 
 // Test that Pelican notifies users about unrecognized configuration keys.
@@ -38,7 +36,6 @@ func TestBadConfigKeys(t *testing.T) {
 	setupFunc := func() *test.Hook {
 		ResetConfig()
 		viper.Set("ConfigDir", t.TempDir())
-		viper.Set(param.Logging_Level.GetName(), "debug")
 		hook := test.NewLocal(logrus.StandardLogger())
 		return hook
 	}
@@ -47,8 +44,7 @@ func TestBadConfigKeys(t *testing.T) {
 		viper.Set("Origin.FederationPrefix", "/a/prefix")
 		InitConfigInternal(logrus.DebugLevel)
 
-		require.NotNil(t, hook.LastEntry())
-		assert.NotContains(t, hook.LastEntry().Message, "Unknown configuration keys found")
+		require.Nil(t, hook.LastEntry())
 	})
 
 	t.Run("testRecognizedEnvKey", func(t *testing.T) {
@@ -57,8 +53,7 @@ func TestBadConfigKeys(t *testing.T) {
 		defer os.Unsetenv("PELICAN_ORIGIN_FEDERATIONPREFIX")
 		InitConfigInternal(logrus.DebugLevel)
 
-		require.NotNil(t, hook.LastEntry())
-		assert.NotContains(t, hook.LastEntry().Message, "Unknown configuration keys found")
+		require.Nil(t, hook.LastEntry())
 	})
 
 	t.Run("testBadViperKey", func(t *testing.T) {
