@@ -7,6 +7,18 @@ import React, {
   useMemo,
   useState,
 } from 'react';
+
+import {
+  Box,
+  Grid,
+  InputLabel,
+  Select,
+  MenuItem,
+  FormControl,
+} from '@mui/material';
+import { DateTimePicker } from '@mui/x-date-pickers';
+import { DateTime } from 'luxon';
+
 import { DowntimeCardProps } from './type';
 import { CardList } from '@/components';
 import { DowntimeGet } from '@/types';
@@ -14,9 +26,17 @@ import {
   CalendarDateTimeContext,
   CalendarDateTimeDispatchContext,
 } from '@/components/Downtime/CalendarContext';
-import { Box, Grid } from '@mui/material';
-import { DateTimePicker } from '@mui/x-date-pickers';
-import { DateTime } from 'luxon';
+
+const sortTypes = {
+  startTime: {
+    label: 'Start Time',
+    sortFn: (a: DowntimeGet, b: DowntimeGet) => a.startTime - b.startTime,
+  },
+  updatedAt: {
+    label: 'Most Recently Updated',
+    sortFn: (a: DowntimeGet, b: DowntimeGet) => b.updatedAt - a.updatedAt,
+  },
+};
 
 interface DowntimeListProps {
   Card: ComponentType<any>;
@@ -27,6 +47,7 @@ function DowntimeCardList({ Card, data }: DowntimeListProps) {
   const [recentlyUpdated, setRecentlyUpdated] = useState(false);
   const range = useContext(CalendarDateTimeContext);
   const setRange = useContext(CalendarDateTimeDispatchContext);
+  const [sortBy, setSortBy] = useState<keyof typeof sortTypes>('updatedAt');
 
   // Filter the data based on the range
   const filteredData = useMemo(() => {
@@ -53,13 +74,17 @@ function DowntimeCardList({ Card, data }: DowntimeListProps) {
     });
   }, [data, range]);
 
+  const sortedDowntimes = useMemo(() => {
+    return [...filteredData].sort(sortTypes[sortBy].sortFn);
+  }, [filteredData, sortBy]);
+
   const downtimeCardProps = useMemo(() => {
-    return filteredData?.map((downtime) => {
+    return sortedDowntimes?.map((downtime) => {
       return {
         downtime: downtime,
       };
     });
-  }, [filteredData]);
+  }, [sortedDowntimes]);
 
   useEffect(() => {
     setRecentlyUpdated(true);
@@ -79,8 +104,8 @@ function DowntimeCardList({ Card, data }: DowntimeListProps) {
           },
         }}
       >
-        <Grid container spacing={1} mb={1}>
-          <Grid item>
+        <Grid container spacing={1} mb={1} justifyContent={'space-between'}>
+          <Grid gap={1} display={'flex'}>
             <DateTimePicker
               label={'Start Time'}
               value={DateTime.fromMillis(range.startTime)}
@@ -88,8 +113,6 @@ function DowntimeCardList({ Card, data }: DowntimeListProps) {
                 setRange({ ...range, startTime: v?.toMillis() || 0 })
               }
             />
-          </Grid>
-          <Grid item>
             <DateTimePicker
               label={'End Time'}
               value={DateTime.fromMillis(range.endTime)}
@@ -97,6 +120,23 @@ function DowntimeCardList({ Card, data }: DowntimeListProps) {
                 setRange({ ...range, endTime: v?.toMillis() || 0 })
               }
             />
+          </Grid>
+          <Grid>
+            <FormControl>
+              <InputLabel id='sort-by-label'>Sort By</InputLabel>
+              <Select
+                labelId='sort-by-label'
+                value={sortBy}
+                label='Sort By'
+                onChange={(e) => setSortBy(e.target.value)}
+              >
+                {Object.entries(sortTypes).map(([key, value]) => (
+                  <MenuItem key={key} value={key as keyof typeof sortTypes}>
+                    {value.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
           </Grid>
         </Grid>
       </Box>

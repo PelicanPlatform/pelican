@@ -98,7 +98,7 @@ const AuthenticatedContent = ({
     if (!isValidating && !authenticated && redirect) {
       router.replace('/login/?returnURL=' + pageUrl);
     }
-  }, [data, isValidating, authenticated]);
+  }, [data, isValidating, authenticated, pageUrl, redirect, router]);
 
   // If there was a error then print it to the screen
   if (error) {

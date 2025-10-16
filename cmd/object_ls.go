@@ -29,6 +29,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
@@ -46,6 +47,7 @@ func init() {
 	flagSet := lsCmd.Flags()
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
 	flagSet.BoolP("long", "l", false, "Include extended information")
+	flagSet.BoolP("single-column", "1", false, "Force output to be one entry per line")
 	flagSet.StringP("collections-url", "", "", "URL to use for collection listing, overriding the director's response")
 	flagSet.BoolP("collection-only", "C", false, "List collections only")
 	flagSet.BoolP("object-only", "O", false, "List objects only")
@@ -86,7 +88,13 @@ func listMain(cmd *cobra.Command, args []string) error {
 	collectionOnly, _ := cmd.Flags().GetBool("collection-only")
 	objectOnly, _ := cmd.Flags().GetBool("object-only")
 	asJSON, _ := cmd.Flags().GetBool("json")
+	singleColumn, _ := cmd.Flags().GetBool("single-column")
 	collectionsUrl, _ := cmd.Flags().GetString("collections-url")
+
+	// Same behavior as ls, if output is being piped, use single column format
+	if !term.IsTerminal(int(os.Stdout.Fd())) {
+		singleColumn = true
+	}
 
 	if collectionOnly && objectOnly {
 		// If a user specifies collectionOnly and objectOnly, this means basic functionality (list both objects and directories) so just remove the flags
@@ -155,6 +163,13 @@ func listMain(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Println(string(jsonData))
 	} else {
+		// The -l flag takes precedence over the -1 flag
+		if singleColumn {
+			for _, info := range filteredInfos {
+				fmt.Println(path.Base(info.Name))
+			}
+			return nil
+		}
 		// We print using a tabwriter to enhance readability of the listed files and to make things look nicer
 		totalColumns := 4
 		// column is a counter letting us know what item/column we are on

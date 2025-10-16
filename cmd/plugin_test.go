@@ -52,6 +52,7 @@ import (
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
@@ -66,6 +67,9 @@ import (
 var (
 	//go:embed resources/test-https-origin.yml
 	httpsOriginConfig string
+
+	//go:embed resources/public-test-origin.yml
+	publicTestOrigin string
 )
 
 // TestReadMultiTransfer test if we can read multiple transfers from stdin
@@ -163,7 +167,6 @@ func (f *FedTest) Spinup() {
 
 	viper.Set("ConfigDir", tmpPath)
 
-	config.InitConfig()
 	// Create a file to capture output from commands
 	output, err := os.CreateTemp(f.T.TempDir(), "output")
 	assert.NoError(f.T, err)
@@ -190,7 +193,7 @@ func (f *FedTest) Spinup() {
 	viper.Set("Origin.EnableWrites", true)
 	viper.Set("TLSSkipVerify", true)
 	viper.Set("Server.EnableUI", false)
-	viper.Set("Registry.DbLocation", filepath.Join(f.T.TempDir(), "ns-registry.sqlite"))
+	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(f.T.TempDir(), "ns-registry.sqlite"))
 	viper.Set("Origin.Port", 0)
 	viper.Set("Server.WebPort", 0)
 	viper.Set("Origin.RunLocation", tmpPath)
@@ -501,11 +504,7 @@ func TestPluginMulti(t *testing.T) {
 
 	dirName := t.TempDir()
 
-	viper.Set("Logging.Level", "debug")
-	viper.Set("Origin.StorageType", "posix")
-	viper.Set("Origin.ExportVolumes", "/test")
-	viper.Set("Origin.EnablePublicReads", true)
-	fed := fed_test_utils.NewFedTest(t, "")
+	fed := fed_test_utils.NewFedTest(t, publicTestOrigin)
 	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
 
 	// Drop the testFileContent into the origin directory
@@ -594,15 +593,7 @@ func TestPluginDirectRead(t *testing.T) {
 
 	dirName := t.TempDir()
 
-	viper.Set("Logging.Level", "debug")
-	viper.Set("Origin.StorageType", "posix")
-	viper.Set("Origin.FederationPrefix", "/test")
-	viper.Set("Origin.StoragePrefix", "/<SOMETHING THAT WILL BE OVERRIDDEN>")
-	viper.Set("Origin.EnablePublicReads", true)
-	viper.Set("Origin.EnableDirectReads", true)
-	// We are purposely creating a test with a config of a single-space.
-	// The empty string indicates using the default config, which we don't want.
-	fed := fed_test_utils.NewFedTest(t, " ")
+	fed := fed_test_utils.NewFedTest(t, publicTestOrigin)
 	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
 
 	log.Debugln("Will create origin file at", fed.Exports[0].StoragePrefix)
@@ -883,14 +874,7 @@ func TestPluginRecursiveDownload(t *testing.T) {
 
 	dirName := t.TempDir()
 
-	viper.Set("Origin.StorageType", "posix")
-	viper.Set("Origin.FederationPrefix", "/test")
-	viper.Set("Origin.StoragePrefix", "/<THIS WILL BE OVERRIDDEN>")
-	viper.Set("Origin.EnablePublicReads", true)
-	viper.Set(param.Director_AssumePresenceAtSingleOrigin.GetName(), false)
-	// We are purposely creating a test with a config of a single-space.
-	// The empty string indicates using the default config, which we don't want.
-	fed := fed_test_utils.NewFedTest(t, " ")
+	fed := fed_test_utils.NewFedTest(t, publicTestOrigin)
 	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
 
 	// Drop the testFileContent into the origin directory
@@ -1285,7 +1269,6 @@ func TestTransferError404(t *testing.T) {
 
 	// Isolate the test so it doesn't use system config
 	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
 	err := config.InitClient()
 	require.NoError(t, err)
 
@@ -1358,21 +1341,26 @@ func TestTransferError404(t *testing.T) {
 			developerData, ok := errorData["DeveloperData"].(map[string]interface{})
 			require.True(t, ok)
 
+			// Create the expected error to get the expected values
+			// Simulate what the actual code does: StatusCodeError gets wrapped
+			sce := client.StatusCodeError(http.StatusNotFound)
+			expectedErr := error_codes.NewSpecification_FileNotFoundError(&sce)
+
 			pelicanErrorCode, ok := developerData["PelicanErrorCode"].(int)
 			require.True(t, ok)
-			assert.Equal(t, 5011, pelicanErrorCode)
+			assert.Equal(t, expectedErr.Code(), pelicanErrorCode)
 
 			pelicanErrorMessage, ok := developerData["ErrorMessage"].(string)
 			require.True(t, ok)
-			assert.Equal(t, "404: Not Found", pelicanErrorMessage)
+			assert.Equal(t, expectedErr.Unwrap().Error(), pelicanErrorMessage)
 
 			pelicanErrorType, ok := developerData["ErrorType"].(string)
 			require.True(t, ok)
-			assert.Equal(t, "Specification.FileNotFound", pelicanErrorType)
+			assert.Equal(t, expectedErr.ErrorType(), pelicanErrorType)
 
 			retryable, ok := developerData["Retryable"].(bool)
 			require.True(t, ok)
-			assert.False(t, retryable)
+			assert.Equal(t, expectedErr.IsRetryable(), retryable)
 		}
 	}
 }
@@ -1383,7 +1371,6 @@ func TestTransferErrorSlowTransfer(t *testing.T) {
 
 	// Isolate the test so it doesn't use system config
 	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
 	err := config.InitClient()
 	require.NoError(t, err)
 
@@ -1478,17 +1465,20 @@ func TestTransferErrorSlowTransfer(t *testing.T) {
 			developerData, ok := errorData["DeveloperData"].(map[string]interface{})
 			require.True(t, ok)
 
+			// Create the expected error to get the expected values
+			expectedErr := error_codes.NewTransfer_SlowTransferError(nil)
+
 			pelicanErrorCode, ok := developerData["PelicanErrorCode"].(int)
 			require.True(t, ok)
-			assert.Equal(t, 6002, pelicanErrorCode)
+			assert.Equal(t, expectedErr.Code(), pelicanErrorCode)
 
 			retryable, ok := developerData["Retryable"].(bool)
 			require.True(t, ok)
-			assert.True(t, retryable)
+			assert.Equal(t, expectedErr.IsRetryable(), retryable)
 
 			errorType, ok := developerData["ErrorType"].(string)
 			require.True(t, ok)
-			assert.Equal(t, "Transfer.SlowTransfer", errorType)
+			assert.Equal(t, expectedErr.ErrorType(), errorType)
 		}
 	}
 }
@@ -1499,7 +1489,6 @@ func TestTransferErrorHeaderTimeout(t *testing.T) {
 
 	// Isolate the test so it doesn't use system config
 	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
 	err := config.InitClient()
 	require.NoError(t, err)
 
@@ -1589,17 +1578,20 @@ func TestTransferErrorHeaderTimeout(t *testing.T) {
 			developerData, ok := errorData["DeveloperData"].(map[string]interface{})
 			require.True(t, ok)
 
+			// Create the expected error to get the expected values
+			expectedErr := error_codes.NewContactError(&client.HeaderTimeoutError{})
+
 			pelicanErrorCode, ok := developerData["PelicanErrorCode"].(int)
 			require.True(t, ok)
-			assert.Equal(t, 3000, pelicanErrorCode)
+			assert.Equal(t, expectedErr.Code(), pelicanErrorCode)
 
 			retryable, ok := developerData["Retryable"].(bool)
 			require.True(t, ok)
-			assert.True(t, retryable)
+			assert.Equal(t, expectedErr.IsRetryable(), retryable)
 
 			errorType, ok := developerData["ErrorType"].(string)
 			require.True(t, ok)
-			assert.Equal(t, "Contact", errorType)
+			assert.Equal(t, expectedErr.ErrorType(), errorType)
 		}
 	}
 }

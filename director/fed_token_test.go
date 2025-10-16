@@ -29,6 +29,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
@@ -174,12 +175,6 @@ func parseJWT(tokenString string) (scopes []string, issuer string, err error) {
 }
 
 func TestCreateFedTok(t *testing.T) {
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-
-	kDir := filepath.Join(t.TempDir(), "keys")
-	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
-	viper.Set("ConfigDir", t.TempDir())
 
 	testCases := []struct {
 		name            string
@@ -222,9 +217,16 @@ func TestCreateFedTok(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// config.ResetFederationForTest()
+			server_utils.ResetTestState()
+			defer server_utils.ResetTestState()
+
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
+
+			confDir := t.TempDir()
+			kDir := filepath.Join(confDir, "keys")
+			viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
+			viper.Set("ConfigDir", confDir)
 
 			config.ResetFederationForTest()
 			fed := pelican_url.FederationDiscovery{
@@ -237,7 +239,8 @@ func TestCreateFedTok(t *testing.T) {
 				BrokerEndpoint:    "https://dne-broker.com",
 			}
 			config.SetFederation(fed)
-			config.InitConfig() // Helps us populate the keys directory with a signing key
+			err := config.InitServer(c, server_structs.RegistryType) // Helps us populate the keys directory with a signing key
+			require.NoError(t, err)
 
 			allowedPrefixesForCaches.Store(&tc.allowedPrefixes)
 			rInfo := requestInfo{

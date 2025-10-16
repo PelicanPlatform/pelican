@@ -35,11 +35,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -56,7 +59,6 @@ func TestWaitUntilLogin(t *testing.T) {
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
 	viper.Set("ConfigDir", dirName)
-	config.InitConfig()
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 	go func() {
@@ -105,11 +107,30 @@ func TestCodeBasedLogin(t *testing.T) {
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
 	viper.Set("ConfigDir", dirName)
-	config.InitConfig()
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)
+
+	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	database.ServerDatabase = mockDB
+	require.NoError(t, err, "Error setting up mock origin DB")
+
+	err = database.ServerDatabase.AutoMigrate(&database.Collection{})
+	require.NoError(t, err, "Failed to migrate DB for collections table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
+	require.NoError(t, err, "Failed to migrate DB for collection members table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
+	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
+	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
+	err = database.ServerDatabase.AutoMigrate(&database.Group{})
+	require.NoError(t, err, "Failed to migrate DB for groups table")
+	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
+	require.NoError(t, err, "Failed to migrate DB for group members table")
+	err = database.ServerDatabase.AutoMigrate(&database.User{})
+	require.NoError(t, err, "Failed to migrate DB for users table")
 
 	//Invoke the code login API with the correct code, ensure we get a valid code back
 	t.Run("With valid code", func(t *testing.T) {
@@ -166,6 +187,27 @@ func TestPasswordResetAPI(t *testing.T) {
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
+
+	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	database.ServerDatabase = mockDB
+	require.NoError(t, err, "Error setting up mock origin DB")
+
+	err = database.ServerDatabase.AutoMigrate(&database.Collection{})
+	require.NoError(t, err, "Failed to migrate DB for collections table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
+	require.NoError(t, err, "Failed to migrate DB for collection members table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
+	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
+	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
+	err = database.ServerDatabase.AutoMigrate(&database.Group{})
+	require.NoError(t, err, "Failed to migrate DB for groups table")
+	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
+	require.NoError(t, err, "Failed to migrate DB for group members table")
+	err = database.ServerDatabase.AutoMigrate(&database.User{})
+	require.NoError(t, err, "Failed to migrate DB for users table")
+
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
@@ -304,10 +346,28 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
 	viper.Set("ConfigDir", dirName)
-	config.InitConfig()
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
+	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	database.ServerDatabase = mockDB
+	require.NoError(t, err, "Error setting up mock origin DB")
+
+	err = database.ServerDatabase.AutoMigrate(&database.Collection{})
+	require.NoError(t, err, "Failed to migrate DB for collections table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
+	require.NoError(t, err, "Failed to migrate DB for collection members table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
+	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
+	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
+	err = database.ServerDatabase.AutoMigrate(&database.Group{})
+	require.NoError(t, err, "Failed to migrate DB for groups table")
+	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
+	require.NoError(t, err, "Failed to migrate DB for group members table")
+	err = database.ServerDatabase.AutoMigrate(&database.User{})
+	require.NoError(t, err, "Failed to migrate DB for users table")
 
 	///////////////////////////SETUP///////////////////////////////////
 	//Add an admin user to file to configure
@@ -422,9 +482,28 @@ func TestWhoamiAPI(t *testing.T) {
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
 	viper.Set("ConfigDir", dirName)
-	config.InitConfig()
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 	err := config.InitServer(ctx, server_structs.OriginType)
+	require.NoError(t, err)
+	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	database.ServerDatabase = mockDB
+	require.NoError(t, err, "Error setting up mock origin DB")
+
+	err = database.ServerDatabase.AutoMigrate(&database.Collection{})
+	require.NoError(t, err, "Failed to migrate DB for collections table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
+	require.NoError(t, err, "Failed to migrate DB for collection members table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
+	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
+	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
+	err = database.ServerDatabase.AutoMigrate(&database.Group{})
+	require.NoError(t, err, "Failed to migrate DB for groups table")
+	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
+	require.NoError(t, err, "Failed to migrate DB for group members table")
+	err = database.ServerDatabase.AutoMigrate(&database.User{})
+	require.NoError(t, err, "Failed to migrate DB for users table")
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)
@@ -600,10 +679,28 @@ func TestLogoutAPI(t *testing.T) {
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
 	viper.Set("ConfigDir", dirName)
-	config.InitConfig()
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
+	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	database.ServerDatabase = mockDB
+	require.NoError(t, err, "Error setting up mock origin DB")
+
+	err = database.ServerDatabase.AutoMigrate(&database.Collection{})
+	require.NoError(t, err, "Failed to migrate DB for collections table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
+	require.NoError(t, err, "Failed to migrate DB for collection members table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
+	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
+	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
+	err = database.ServerDatabase.AutoMigrate(&database.Group{})
+	require.NoError(t, err, "Failed to migrate DB for groups table")
+	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
+	require.NoError(t, err, "Failed to migrate DB for group members table")
+	err = database.ServerDatabase.AutoMigrate(&database.User{})
+	require.NoError(t, err, "Failed to migrate DB for users table")
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())

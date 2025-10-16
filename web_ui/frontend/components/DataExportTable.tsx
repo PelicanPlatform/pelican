@@ -169,7 +169,12 @@ export const PosixDataExportCard = ({ entry }: { entry: PosixExportEntry }) => {
     <Paper elevation={1}>
       {entry.status != 'Completed' && <DataExportStatus {...entry} />}
       <Grid container p={1}>
-        <Grid item xs={12} md={9}>
+        <Grid
+          size={{
+            xs: 12,
+            md: 9,
+          }}
+        >
           <ValueLabel
             value={entry.federationPrefix}
             label={'Federation Prefix'}
@@ -180,7 +185,12 @@ export const PosixDataExportCard = ({ entry }: { entry: PosixExportEntry }) => {
             label={'Sentinel Location'}
           />
         </Grid>
-        <Grid item xs={12} md={3}>
+        <Grid
+          size={{
+            xs: 12,
+            md: 3,
+          }}
+        >
           <CapabilitiesDisplay {...entry} />
         </Grid>
       </Grid>
@@ -193,14 +203,24 @@ export const S3DataExportCard = ({ entry }: { entry: S3ExportEntry }) => {
     <Paper elevation={1}>
       {entry.status != 'Completed' && <DataExportStatus {...entry} />}
       <Grid container pt={1}>
-        <Grid item xs={12} md={9}>
+        <Grid
+          size={{
+            xs: 12,
+            md: 9,
+          }}
+        >
           <ValueLabel
             value={entry.federationPrefix}
             label={'Federation Prefix'}
           />
           <ValueLabel value={entry.s3Bucket} label={'S3 Bucket'} />
         </Grid>
-        <Grid item xs={12} md={9}>
+        <Grid
+          size={{
+            xs: 12,
+            md: 9,
+          }}
+        >
           <CapabilitiesDisplay {...entry} />
         </Grid>
       </Grid>
@@ -217,7 +237,12 @@ export const GlobusDataExportCard = ({
     <Paper elevation={1}>
       {entry.status != 'Completed' && <DataExportStatus {...entry} />}
       <Grid container pt={1}>
-        <Grid item xs={12} md={9}>
+        <Grid
+          size={{
+            xs: 12,
+            md: 9,
+          }}
+        >
           <ValueLabel
             value={entry.federationPrefix}
             label={'Federation Prefix'}
@@ -231,7 +256,7 @@ export const GlobusDataExportCard = ({
             label={'Globus Collection ID'}
           />
         </Grid>
-        <Grid item xs={3}>
+        <Grid size={3}>
           <Box
             width={'100%'}
             display={'flex'}
@@ -384,7 +409,7 @@ export const DataExportTable = ({ boxProps }: { boxProps?: BoxProps }) => {
       mutate();
       setPending(false);
     }, 10000);
-  }, []);
+  }, [mutate]);
 
   const dataEnhanced = useMemo(() => {
     // If no from URL return current data

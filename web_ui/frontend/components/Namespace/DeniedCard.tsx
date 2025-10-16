@@ -13,6 +13,7 @@ import {
   NAMESPACE_KEY,
 } from '@/helpers/api';
 import { alertOnError } from '@/helpers/util';
+import ConfirmButton from '@chtc/web-components/ConfirmButton';
 
 export interface DeniedCardProps {
   namespace: RegistryNamespace;
@@ -22,7 +23,6 @@ export interface DeniedCardProps {
 }
 
 export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
-  const ref = useRef<HTMLDivElement>(null);
   const [transition, setTransition] = useState<boolean>(false);
   const dispatch = useContext(AlertDispatchContext);
   const alert = useContext(AlertContext);
@@ -80,21 +80,23 @@ export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
               {authenticated?.role == 'admin' && (
                 <>
                   <Tooltip title={'Delete Registration'}>
-                    <IconButton
+                    <ConfirmButton
                       sx={{ bgcolor: '#ff00001a', mx: 1 }}
                       color={'error'}
-                      onClick={async (e) => {
+                      onClick={(e) => e.stopPropagation()}
+                      confirmNode={'Delete'}
+                      onConfirm={async (e) => {
                         e.stopPropagation();
                         await alertOnError(
-                          () => deleteNamespace(namespace.id),
+                          async () => await deleteNamespace(namespace.id),
                           'Could Not Delete Registration',
                           dispatch
                         );
-                        mutate(NAMESPACE_KEY);
+                        await mutate(NAMESPACE_KEY);
                       }}
                     >
                       <Delete />
-                    </IconButton>
+                    </ConfirmButton>
                   </Tooltip>
                   <Tooltip title={'Approve Registration'}>
                     <IconButton
@@ -118,11 +120,10 @@ export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
             </Box>
           </Box>
         </Box>
-        <Box ref={ref}>
+        <Box>
           <InformationDropdown
             adminMetadata={namespace.admin_metadata}
             transition={transition}
-            parentRef={ref}
           />
         </Box>
       </Box>

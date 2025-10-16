@@ -37,7 +37,6 @@ export const PendingCard = ({
     ? 'small'
     : 'medium';
 
-  const ref = useRef<HTMLDivElement>(null);
   const [transition, setTransition] = useState<boolean>(false);
 
   const dispatch = useContext(AlertDispatchContext);
@@ -157,11 +156,10 @@ export const PendingCard = ({
           </Box>
         </Box>
       </Box>
-      <Box ref={ref}>
+      <Box>
         <InformationDropdown
           adminMetadata={namespace.admin_metadata}
           transition={transition}
-          parentRef={ref}
         />
       </Box>
     </Box>

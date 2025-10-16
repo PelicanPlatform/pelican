@@ -74,9 +74,21 @@ lib = libXrdClPelican.so
 enable = true
 `
 
+	clientHttpPluginDefault = `
+url = http://*;https://*
+lib = libXrdClCurl.so
+enable = true
+`
+
 	clientPluginMac = `
 url = pelican://*
 lib = libXrdClPelican.dylib
+enable = true
+`
+
+	clientHttpPluginMac = `
+url = http://*;https://*
+lib = libXrdClCurl.dylib
 enable = true
 `
 )
@@ -115,25 +127,27 @@ type (
 	}
 
 	CacheConfig struct {
-		UseCmsd             bool
-		EnablePrefetch      bool
-		EnableVoms          bool
-		CalculatedPort      string
-		HighWaterMark       string
-		LowWatermark        string
-		FilesBaseSize       string
-		FilesNominalSize    string
-		FilesMaxSize        string
-		ExportLocation      string
-		RunLocation         string
-		DataLocations       []string
-		MetaLocations       []string
-		NamespaceLocation   string
-		PSSOrigin           string
-		BlocksToPrefetch    int
-		Concurrency         int
-		LotmanCfg           LotmanCfg
-		EnableTLSClientAuth bool
+		UseCmsd                    bool
+		EnablePrefetch             bool
+		EnableVoms                 bool
+		CalculatedPort             string
+		HighWaterMark              string
+		LowWatermark               string
+		FilesBaseSize              string
+		FilesNominalSize           string
+		FilesMaxSize               string
+		ExportLocation             string
+		RunLocation                string
+		DataLocations              []string
+		MetaLocations              []string
+		NamespaceLocation          string
+		PSSOrigin                  string
+		BlocksToPrefetch           int
+		Concurrency                int
+		LotmanCfg                  LotmanCfg
+		EnableTLSClientAuth        bool
+		EvictionMonitoringInterval int
+		EvictionMonitoringMaxDepth int
 	}
 
 	XrootdOptions struct {
@@ -153,6 +167,8 @@ type (
 		ScitokensConfig        string
 		Mount                  string
 		LocalMonitoringPort    int
+		HttpMaxDelay           int
+		MaxThreads             int
 	}
 
 	ServerConfig struct {
@@ -199,6 +215,15 @@ type (
 		Panic string
 	}
 )
+
+type xrootdMaintenanceState struct {
+	lastAuthfileSuccess  time.Time
+	lastScitokensSuccess time.Time
+	authfileFailures     int
+	scitokensFailures    int
+	// Mutex is not needed because the XRootD maintenance callback is executed in a single goroutine,
+	// so there’s no concurrent access to this state
+}
 
 // CheckOriginXrootdEnv is almost a misnomer -- it does both checking and configuring. In partcicular,
 // it is responsible for setting up the exports and handling all the symlinking we use
@@ -273,7 +298,8 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 	}
 	// If the scitokens.cfg does not exist, create one
 	if _, ok := server.(*origin.OriginServer); ok {
-		err = WriteOriginScitokensConfig()
+		// This is the first time we write the scitokens.cfg file, so isFirstRun = true
+		err = WriteOriginScitokensConfig(true)
 		if err != nil {
 			return err
 		}
@@ -393,7 +419,7 @@ func CheckCacheXrootdEnv(server server_structs.XRootDServer, uid int, gid int) e
 	}
 
 	if cacheServer, ok := server.(*cache.CacheServer); ok {
-		err := WriteCacheScitokensConfig(cacheServer.GetNamespaceAds())
+		err := WriteCacheScitokensConfig(cacheServer.GetNamespaceAds(), true)
 		if err != nil {
 			return errors.Wrap(err, "Failed to create scitokens configuration for the cache")
 		}
@@ -459,8 +485,14 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 		}
 		if runtime.GOOS == "darwin" {
 			err = os.WriteFile(filepath.Join(clientPluginsDir, "pelican-plugin.conf"), []byte(clientPluginMac), os.FileMode(0644))
+			if err == nil {
+				err = os.WriteFile(filepath.Join(clientPluginsDir, "http-plugin.conf"), []byte(clientHttpPluginMac), os.FileMode(0644))
+			}
 		} else {
 			err = os.WriteFile(filepath.Join(clientPluginsDir, "pelican-plugin.conf"), []byte(clientPluginDefault), os.FileMode(0644))
+			if err == nil {
+				err = os.WriteFile(filepath.Join(clientPluginsDir, "http-plugin.conf"), []byte(clientHttpPluginDefault), os.FileMode(0644))
+			}
 		}
 		if err != nil {
 			return errors.Wrap(err, "Unable to configure cache client plugin")
@@ -533,7 +565,7 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 	} else if !errors.Is(err, os.ErrExist) {
 		return err
 	}
-	if err := EmitAuthfile(server); err != nil {
+	if err := EmitAuthfile(server, true); err != nil {
 		return err
 	}
 
@@ -671,6 +703,15 @@ func dropPrivilegeCopy(server server_structs.XRootDServer) error {
 // Launch a separate goroutine that performs the XRootD maintenance tasks.
 // For maintenance that is periodic, `sleepTime` is the maintenance period.
 func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDServer, sleepTime time.Duration) {
+	state := &xrootdMaintenanceState{
+		// This initial set-to-now is a grace baseline to avoid tripping the timeout before the first successful cycle
+		lastAuthfileSuccess:  time.Now(),
+		lastScitokensSuccess: time.Now(),
+	}
+	// Capture timeout and auto-shutdown config at launch time to avoid race conditions with Viper resets in tests
+	configTimeout := param.Xrootd_ConfigUpdateFailureTimeout.GetDuration()
+	autoShutdownEnabled := param.Xrootd_AutoShutdownEnabled.GetBool()
+
 	server_utils.LaunchWatcherMaintenance(
 		ctx,
 		[]string{
@@ -684,6 +725,9 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 			var err error
 			if param.Server_DropPrivileges.GetBool() {
 				err = dropPrivilegeCopy(server)
+				if err != nil {
+					log.Errorln("Failure when copying the TLS certificates to the xrootd process:", err)
+				}
 			} else {
 				err = copyXrootdCertificates(server)
 			}
@@ -694,22 +738,72 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 				log.Debugln("Successfully updated the Xrootd TLS certificates")
 			}
 			lastErr := err
-			if err := EmitAuthfile(server); err != nil {
+
+			// Emit authfile and track success/failure
+			if err := EmitAuthfile(server, false); err != nil {
+				state.authfileFailures += 1
+				elapsed := time.Since(state.lastAuthfileSuccess)
 				if lastErr != nil {
 					log.Errorln("Failure when generating authfile:", err)
 				}
+				log.Debugf("Authfile update has failed %d times in a row; last success was %s ago", state.authfileFailures, elapsed.Round(time.Second).String())
 				lastErr = err
 			} else {
+				state.lastAuthfileSuccess = time.Now()
+				state.authfileFailures = 0
 				log.Debugln("Successfully updated the Xrootd authfile")
 			}
+
+			// Emit scitokens config and track success/failure
 			if err := EmitScitokensConfig(server); err != nil {
+				state.scitokensFailures += 1
+				elapsed := time.Since(state.lastScitokensSuccess)
 				if lastErr != nil {
 					log.Errorln("Failure when emitting the scitokens.cfg:", err)
 				}
+				log.Debugf("Scitokens config update has failed %d times in a row; last success was %s ago", state.scitokensFailures, elapsed.Round(time.Second).String())
 				lastErr = err
 			} else {
+				state.lastScitokensSuccess = time.Now()
+				state.scitokensFailures = 0
 				log.Debugln("Successfully updated the Xrootd scitokens configuration")
 			}
+
+			// Health reporting and auto-shutdown check
+			oldest := state.lastAuthfileSuccess
+			if state.lastScitokensSuccess.Before(oldest) {
+				oldest = state.lastScitokensSuccess
+			}
+			authFails := state.authfileFailures
+			sciFails := state.scitokensFailures
+
+			age := time.Since(oldest)
+
+			if authFails == 0 && sciFails == 0 {
+				metrics.SetComponentHealthStatus(metrics.OriginCache_ConfigUpdates, metrics.StatusOK, "Authfile and scitoken.cfg file updated successfully")
+			} else if age < configTimeout {
+				metrics.SetComponentHealthStatus(metrics.OriginCache_ConfigUpdates, metrics.StatusWarning, "Authfile and/or scitoken.cfg file update failures observed; within timeout")
+			} else {
+				metrics.SetComponentHealthStatus(metrics.OriginCache_ConfigUpdates, metrics.StatusCritical, "Authfile and/or scitoken.cfg file stale beyond timeout; initiating shutdown if enabled")
+				if autoShutdownEnabled {
+					staleXrootdCfgFiles := "XRootD "
+					if authFails > 0 && sciFails > 0 {
+						staleXrootdCfgFiles += "authfile and scitokens.cfg file"
+					} else if authFails > 0 {
+						staleXrootdCfgFiles += "authfile"
+					} else if sciFails > 0 {
+						staleXrootdCfgFiles += "scitokens.cfg file"
+					}
+					log.Errorf("%s not updated for %s (timeout: %s); initiating auto-shutdown", staleXrootdCfgFiles, age.Round(time.Second).String(), configTimeout.Round(time.Second).String())
+					// Use non-blocking send to avoid deadlock when multiple rapid maintenance cycles trigger shutdown before the signal is consumed
+					select {
+					case config.ShutdownFlag <- true:
+					default:
+						// Shutdown already initiated, no need to send again
+					}
+				}
+			}
+
 			return lastErr
 		},
 	)
@@ -718,10 +812,10 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 // The default config has `Xrootd.AuthRefreshInterval: 5m`, which we need to convert
 // to an integer representation of seconds for our XRootD configuration. This hook
 // handles that conversion during unmarshalling, as well as some sanitization of user inputs.
-func authRefreshStrToSecondsHookFunc() mapstructure.DecodeHookFuncType {
+func durationStrToSecondsHookFuncGenerator(structName, fieldName, configName string, validation func(duration time.Duration, durStr string) time.Duration) mapstructure.DecodeHookFuncType {
 	return func(f reflect.Type, t reflect.Type, data interface{}) (interface{}, error) {
 		// Filter out underlying data we don't want to risk manipulating
-		if t.Kind() != reflect.Struct || f.Kind() != reflect.Map || t.Name() != "XrootdOptions" {
+		if t.Kind() != reflect.Struct || f.Kind() != reflect.Map || t.Name() != structName {
 			return data, nil
 		}
 
@@ -731,9 +825,20 @@ func authRefreshStrToSecondsHookFunc() mapstructure.DecodeHookFuncType {
 			return nil, errors.New("data is not a map[string]interface{}")
 		}
 
-		durStr, ok := dataMap["authrefreshinterval"].(string)
+		uncastDur, ok := dataMap[fieldName]
 		if !ok {
-			return nil, errors.New("authrefreshinterval is not a string")
+			// If the key is not present, we don't need to do anything.
+			return data, nil
+		}
+
+		var durStr string
+		if _, isInt := uncastDur.(int); isInt {
+			durStr = strconv.Itoa(uncastDur.(int))
+		} else {
+			durStr, ok = uncastDur.(string)
+			if !ok {
+				return nil, errors.Errorf("%s is not a string or int", fieldName)
+			}
 		}
 
 		// Sanitize the input to guarantee we have a unit
@@ -746,29 +851,75 @@ func authRefreshStrToSecondsHookFunc() mapstructure.DecodeHookFuncType {
 			}
 		}
 		if !hasSuffix {
-			log.Warningf("'Xrootd.AuthRefreshInterval' does not have a time unit (s, m, h). Interpreting as seconds")
+			log.Warningf("'%s' does not have a time unit (s, m, h). Interpreting as seconds", configName)
 			durStr = durStr + "s"
 		}
 
 		duration, err := time.ParseDuration(durStr)
 		if err != nil {
-			return nil, errors.Wrapf(err, "Failed to parse 'Xrootd.AuthRefreshInterval' of %s as a duration", durStr)
+			return nil, errors.Wrapf(err, "failed to parse '%s' of %s as a duration", configName, durStr)
 		}
 
-		if duration < 60*time.Second {
-			log.Warningf("'Xrootd.AuthRefreshInterval' of %s appears as less than 60s. Using fallback of 5m", durStr)
-			duration = time.Minute * 5
+		if validation != nil {
+			duration = validation(duration, durStr)
 		}
 
-		dataMap["authrefreshinterval"] = int(duration.Seconds())
+		dataMap[fieldName] = int(duration.Seconds())
 		return data, nil
 	}
+}
+
+func authRefreshIntervalValidation(duration time.Duration, durStr string) time.Duration {
+	if duration < 60*time.Second {
+		log.Warningf("'%s' of %s appears as less than 60s. Using fallback of 5m", param.Xrootd_AuthRefreshInterval.GetName(), durStr)
+		return time.Minute * 5
+	}
+	return duration
+}
+
+func evictionMonitoringIntervalValidation(duration time.Duration, durStr string) time.Duration {
+	if duration < 0*time.Second {
+		log.Warningf("'%s' of %s is a negative value. Using the absolute value.", param.Cache_EvictionMonitoringInterval.GetName(), durStr)
+		duration = -duration
+	} else if duration > 0*time.Second && duration < 5*time.Second {
+		log.Warningf("'%s' of %s appears as less than 5s. This is a very frequent interval and may cause performance issues", param.Cache_EvictionMonitoringInterval.GetName(), durStr)
+	}
+	return duration
+}
+
+func httpMaxDelayValidation(duration time.Duration, durStr string) time.Duration {
+	// Normalize to whole seconds; XRootD expects seconds granularity
+	if duration%time.Second != 0 {
+		duration = duration.Round(time.Second)
+		if duration == 0 && durStr != "0" {
+			// Round could bring small positive values to 0s; avoid that
+			duration = 1 * time.Second
+		}
+	}
+
+	// Disallow non-positive and too-small values; fallback to 9s (our default)
+	if duration <= 0 {
+		log.Warningf("'%s' of %s is not positive. Using fallback of 9s", param.Xrootd_HttpMaxDelay.GetName(), durStr)
+		return 9 * time.Second
+	}
+	if duration < 3*time.Second {
+		log.Warningf("'%s' of %s appears as less than 3s. Using fallback of 9s", param.Xrootd_HttpMaxDelay.GetName(), durStr)
+		return 9 * time.Second
+	}
+
+	// Warn for unusually large values that can cause server-side backlogs
+	if duration > 1*time.Minute {
+		log.Warningf("'%s' of %s is very large and may cause server-side backlogs; consider a small value such as 9s-12s", param.Xrootd_HttpMaxDelay.GetName(), durStr)
+	}
+	return duration
 }
 
 // A wrapper to combine multiple decoder hook functions for XRootD cfg unmarshalling
 func xrootdDecodeHook() mapstructure.DecodeHookFunc {
 	return mapstructure.ComposeDecodeHookFunc(
-		authRefreshStrToSecondsHookFunc(),
+		durationStrToSecondsHookFuncGenerator("XrootdOptions", "authrefreshinterval", param.Xrootd_AuthRefreshInterval.GetName(), authRefreshIntervalValidation),
+		durationStrToSecondsHookFuncGenerator("XrootdOptions", "httpmaxdelay", param.Xrootd_HttpMaxDelay.GetName(), httpMaxDelayValidation),
+		durationStrToSecondsHookFuncGenerator("CacheConfig", "evictionmonitoringinterval", param.Cache_EvictionMonitoringInterval.GetName(), evictionMonitoringIntervalValidation),
 		server_utils.OriginExportsDecoderHook(),
 	)
 }
@@ -1066,10 +1217,16 @@ func genLoggingConfig(input string, logMap loggingMap) (string, error) {
 		input = param.Logging_Level.GetString()
 	}
 
+	// Note that while Pelican itself doesn't take a "warning" level, when
+	// logrus parses a level of "warn" it converts it to "warning". By
+	// adding "Warning" here, we'll automatically fall down to the "Warn" level
+	// if we happen to grab a log level that passed through logrus without being
+	// mapped back "warn".
 	orderedLevels := []string{
 		"Panic",
 		"Fatal",
 		"Error",
+		"Warning",
 		"Warn",
 		"Info",
 		"Debug",

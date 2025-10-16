@@ -146,6 +146,7 @@ func (oP ObjectParam) IsSet() bool {
 }
 
 var (
+	Cache_ClientStatisticsLocation = StringParam{"Cache.ClientStatisticsLocation"}
 	Cache_DataLocation = StringParam{"Cache.DataLocation"}
 	Cache_DbLocation = StringParam{"Cache.DbLocation"}
 	Cache_ExportLocation = StringParam{"Cache.ExportLocation"}
@@ -308,7 +309,9 @@ var (
 	Director_FilteredServers = StringSliceParam{"Director.FilteredServers"}
 	Director_OriginResponseHostnames = StringSliceParam{"Director.OriginResponseHostnames"}
 	Issuer_GroupRequirements = StringSliceParam{"Issuer.GroupRequirements"}
+	Issuer_RedirectUris = StringSliceParam{"Issuer.RedirectUris"}
 	Monitoring_AggregatePrefixes = StringSliceParam{"Monitoring.AggregatePrefixes"}
+	OIDC_Scopes = StringSliceParam{"OIDC.Scopes"}
 	Origin_ExportVolumes = StringSliceParam{"Origin.ExportVolumes"}
 	Origin_ScitokensRestrictedPaths = StringSliceParam{"Origin.ScitokensRestrictedPaths"}
 	Registry_AdminUsers = StringSliceParam{"Registry.AdminUsers"}
@@ -321,11 +324,13 @@ var (
 var (
 	Cache_BlocksToPrefetch = IntParam{"Cache.BlocksToPrefetch"}
 	Cache_Concurrency = IntParam{"Cache.Concurrency"}
+	Cache_EvictionMonitoringMaxDepth = IntParam{"Cache.EvictionMonitoringMaxDepth"}
 	Cache_Port = IntParam{"Cache.Port"}
 	Client_DirectorRetries = IntParam{"Client.DirectorRetries"}
 	Client_MaximumDownloadSpeed = IntParam{"Client.MaximumDownloadSpeed"}
 	Client_MinimumDownloadSpeed = IntParam{"Client.MinimumDownloadSpeed"}
 	Client_WorkerCount = IntParam{"Client.WorkerCount"}
+	Director_AdaptiveSortTruncateConstant = IntParam{"Director.AdaptiveSortTruncateConstant"}
 	Director_CachePresenceCapacity = IntParam{"Director.CachePresenceCapacity"}
 	Director_MaxStatResponse = IntParam{"Director.MaxStatResponse"}
 	Director_MinStatResponse = IntParam{"Director.MinStatResponse"}
@@ -349,12 +354,14 @@ var (
 	Transport_MaxIdleConns = IntParam{"Transport.MaxIdleConns"}
 	Xrootd_DetailedMonitoringPort = IntParam{"Xrootd.DetailedMonitoringPort"}
 	Xrootd_ManagerPort = IntParam{"Xrootd.ManagerPort"}
+	Xrootd_MaxThreads = IntParam{"Xrootd.MaxThreads"}
 	Xrootd_Port = IntParam{"Xrootd.Port"}
 	Xrootd_SummaryMonitoringPort = IntParam{"Xrootd.SummaryMonitoringPort"}
 )
 
 var (
 	Cache_EnableBroker = BoolParam{"Cache.EnableBroker"}
+	Cache_EnableEvictionMonitoring = BoolParam{"Cache.EnableEvictionMonitoring"}
 	Cache_EnableLotman = BoolParam{"Cache.EnableLotman"}
 	Cache_EnableOIDC = BoolParam{"Cache.EnableOIDC"}
 	Cache_EnablePrefetch = BoolParam{"Cache.EnablePrefetch"}
@@ -373,12 +380,14 @@ var (
 	Director_EnableBroker = BoolParam{"Director.EnableBroker"}
 	Director_EnableOIDC = BoolParam{"Director.EnableOIDC"}
 	Director_EnableStat = BoolParam{"Director.EnableStat"}
+	Director_FilterCachesInErrorState = BoolParam{"Director.FilterCachesInErrorState"}
 	DisableHttpProxy = BoolParam{"DisableHttpProxy"}
 	DisableProxyFallback = BoolParam{"DisableProxyFallback"}
 	Issuer_OIDCPreferClaimsFromIDToken = BoolParam{"Issuer.OIDCPreferClaimsFromIDToken"}
 	Issuer_UserStripDomain = BoolParam{"Issuer.UserStripDomain"}
 	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}
 	Lotman_EnableAPI = BoolParam{"Lotman.EnableAPI"}
+	Monitoring_EnablePrometheus = BoolParam{"Monitoring.EnablePrometheus"}
 	Monitoring_MetricAuthorization = BoolParam{"Monitoring.MetricAuthorization"}
 	Monitoring_PromQLAuthorization = BoolParam{"Monitoring.PromQLAuthorization"}
 	Origin_DirectorTest = BoolParam{"Origin.DirectorTest"}
@@ -417,15 +426,19 @@ var (
 	Topology_DisableDowntime = BoolParam{"Topology.DisableDowntime"}
 	Topology_DisableOriginX509 = BoolParam{"Topology.DisableOriginX509"}
 	Topology_DisableOrigins = BoolParam{"Topology.DisableOrigins"}
+	Xrootd_AutoShutdownEnabled = BoolParam{"Xrootd.AutoShutdownEnabled"}
 	Xrootd_EnableLocalMonitoring = BoolParam{"Xrootd.EnableLocalMonitoring"}
 )
 
 var (
 	Cache_DefaultCacheTimeout = DurationParam{"Cache.DefaultCacheTimeout"}
+	Cache_EvictionMonitoringInterval = DurationParam{"Cache.EvictionMonitoringInterval"}
 	Cache_SelfTestInterval = DurationParam{"Cache.SelfTestInterval"}
+	Cache_SelfTestMaxAge = DurationParam{"Cache.SelfTestMaxAge"}
 	Client_SlowTransferRampupTime = DurationParam{"Client.SlowTransferRampupTime"}
 	Client_SlowTransferWindow = DurationParam{"Client.SlowTransferWindow"}
 	Client_StoppedTransferTimeout = DurationParam{"Client.StoppedTransferTimeout"}
+	Director_AdaptiveSortEWMATimeConstant = DurationParam{"Director.AdaptiveSortEWMATimeConstant"}
 	Director_AdvertisementTTL = DurationParam{"Director.AdvertisementTTL"}
 	Director_CachePresenceTTL = DurationParam{"Director.CachePresenceTTL"}
 	Director_FedTokenLifetime = DurationParam{"Director.FedTokenLifetime"}
@@ -440,6 +453,7 @@ var (
 	Monitoring_TokenExpiresIn = DurationParam{"Monitoring.TokenExpiresIn"}
 	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
 	Origin_SelfTestInterval = DurationParam{"Origin.SelfTestInterval"}
+	Origin_SelfTestMaxAge = DurationParam{"Origin.SelfTestMaxAge"}
 	Registry_InstitutionsUrlReloadMinutes = DurationParam{"Registry.InstitutionsUrlReloadMinutes"}
 	Server_AdLifetime = DurationParam{"Server.AdLifetime"}
 	Server_AdvertisementInterval = DurationParam{"Server.AdvertisementInterval"}
@@ -453,6 +467,8 @@ var (
 	Transport_ResponseHeaderTimeout = DurationParam{"Transport.ResponseHeaderTimeout"}
 	Transport_TLSHandshakeTimeout = DurationParam{"Transport.TLSHandshakeTimeout"}
 	Xrootd_AuthRefreshInterval = DurationParam{"Xrootd.AuthRefreshInterval"}
+	Xrootd_ConfigUpdateFailureTimeout = DurationParam{"Xrootd.ConfigUpdateFailureTimeout"}
+	Xrootd_HttpMaxDelay = DurationParam{"Xrootd.HttpMaxDelay"}
 	Xrootd_MaxStartupWait = DurationParam{"Xrootd.MaxStartupWait"}
 	Xrootd_ShutdownTimeout = DurationParam{"Xrootd.ShutdownTimeout"}
 )

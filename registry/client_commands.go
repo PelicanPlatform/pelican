@@ -34,6 +34,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -136,6 +137,16 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 		return errors.Wrap(err, "failed to generate client nonce")
 	}
 
+	var serverID string
+	if server_structs.IsServerPrefix(prefix) {
+		// The server generates its own ID
+		serverID, err = server_structs.GenerateServerID()
+		if err != nil {
+			return errors.Wrap(err, "failed to generate server ID")
+		}
+		log.Debugf("Generated server ID: %s", serverID)
+	}
+
 	data := map[string]interface{}{
 		"client_nonce": clientNonce,
 		"pubkey":       keySet,
@@ -184,6 +195,7 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 		"server_signature":  respData.ServerSignature,
 		"access_token":      accessToken,
 		"identity_required": "false",
+		"server_id":         serverID,
 	}
 
 	// Send the second POST request

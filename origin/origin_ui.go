@@ -165,6 +165,24 @@ func RegisterOriginWebAPI(engine *gin.Engine) error {
 	originWebAPI := engine.Group("/api/v1.0/origin_ui", web_ui.ServerHeaderMiddleware)
 	{
 		originWebAPI.GET("/exports", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleExports)
+
+		// Collections API
+		originWebAPI.GET("/collections", web_ui.AuthHandler, handleListCollections)
+		originWebAPI.POST("/collections", web_ui.AuthHandler, handleCreateCollection)
+		originWebAPI.PATCH("/collections/:id", web_ui.AuthHandler, handleUpdateCollection)
+		originWebAPI.DELETE("/collections/:id", web_ui.AuthHandler, handleDeleteCollection)
+		originWebAPI.GET("/collections/:id", web_ui.AuthHandler, handleGetCollection)
+		// TODO: More collections work in the future, the notion of members is up in the air
+		// originWebAPI.POST("/collections/:id/members", web_ui.AuthHandler, handleAddCollectionMembers)
+		// originWebAPI.DELETE("/collections/:id/members", web_ui.AuthHandler, handleRemoveCollectionMembers)
+		// originWebAPI.DELETE("/collections/:id/members/:encoded_object_url", web_ui.AuthHandler, handleRemoveCollectionMember)
+		// originWebAPI.GET("/collections/:id/members", web_ui.AuthHandler, handleListCollectionMembers)
+		originWebAPI.GET("/collections/:id/metadata", web_ui.AuthHandler, handleGetCollectionMetadata)
+		originWebAPI.PUT("/collections/:id/metadata/:key", web_ui.AuthHandler, handlePutCollectionMetadata)
+		originWebAPI.DELETE("/collections/:id/metadata/:key", web_ui.AuthHandler, handleDeleteCollectionMetadata)
+		originWebAPI.GET("/collections/:id/acl", web_ui.AuthHandler, handleGetCollectionAcls)
+		originWebAPI.POST("/collections/:id/acl", web_ui.AuthHandler, handleGrantCollectionAcl)
+		originWebAPI.DELETE("/collections/:id/acl", web_ui.AuthHandler, handleRevokeCollectionAcl)
 	}
 
 	// Globus backend specific. Config other origin routes above this line

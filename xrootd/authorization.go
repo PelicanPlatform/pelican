@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -30,10 +30,12 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -159,7 +161,11 @@ func deduplicateBasePaths(cfg *ScitokensCfg) {
 
 // Given a reference to a Scitokens configuration, write it out to a known location
 // on disk for the xrootd server
-func writeScitokensConfiguration(modules server_structs.ServerType, cfg *ScitokensCfg) error {
+//
+// isFirstRun is true if this is the first time we write the scitokens.cfg file, false otherwise.
+// If the drop privileges feature is enabled, the first run is by the root user,
+// and the subsequent runs are by the unprivileged pelican user via the xrdhttp-pelican plugin.
+func writeScitokensConfiguration(modules server_structs.ServerType, cfg *ScitokensCfg, isFirstRun bool) error {
 
 	JSONify := func(v any) (string, error) {
 		result, err := json.Marshal(v)
@@ -169,8 +175,9 @@ func writeScitokensConfiguration(modules server_structs.ServerType, cfg *Scitoke
 		Funcs(template.FuncMap{"StringsJoin": strings.Join, "JSONify": JSONify}).
 		Parse(scitokensCfgTemplate))
 
-	// If Pelican is run by unprivileged user, we use xrdhttp-pelican plugin to make sure the final scitokens.cfg file is owned by xrootd
-	if param.Server_DropPrivileges.GetBool() {
+	// After startup (the first run), if Pelican is run by unprivileged user, we use
+	// xrdhttp-pelican plugin to make sure the final scitokens.cfg file is owned by xrootd
+	if !isFirstRun && param.Server_DropPrivileges.GetBool() {
 		// Create a temporary file to assemble the scitokens configuration
 		tempCfgFile, err := os.CreateTemp("", "scitokens-generated-*.cfg.tmp")
 		if err != nil {
@@ -266,7 +273,7 @@ func getOSDFAuthFiles(server server_structs.XRootDServer) ([]byte, error) {
 	}
 	client := http.Client{Transport: config.GetTransport()}
 	url := base.ResolveReference(endpoint)
-	log.Debugln("Querying OSDF url:", url.String())
+	log.Debugf("Querying Topology for OSDF Authfile at '%s'", url.String())
 
 	req, err := http.NewRequest(http.MethodGet, url.String(), nil)
 	if err != nil {
@@ -295,121 +302,435 @@ func getOSDFAuthFiles(server server_structs.XRootDServer) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Parse the input xrootd authfile, add any default configurations, and then save it
-// into the xrootd runtime directory
-func EmitAuthfile(server server_structs.XRootDServer) error {
-	authfile := param.Xrootd_Authfile.GetString()
-	log.Debugln("Location of input authfile:", authfile)
-	contents, err := os.ReadFile(authfile)
-	if err != nil {
-		return errors.Wrapf(err, "failed to read xrootd authfile from %s", authfile)
+/*
+	Rules for parsing/merging authfiles (see https://xrootd.web.cern.ch/doc/dev56/sec_config.htm#_Toc119617465, section 4.1)
+
+	The Authfile is used to control access to public namespaces in XRootD. Incoming requests are
+	a tuple of (authorization, resource, operation), where some authorization (e.g. a SciToken) may
+	or may not permit the operation on the resource.
+
+	Every incoming request first consults the XRootD Scitokens plugin to see if the authorization
+	permits the operation on the resource. If access via SciTokens does not succeed, the authfile
+	is consulted second.
+
+	Rules:
+	- Each authfile entry must be uniquely identifiable by a combination of identity
+	type and identifier. When merging an existing authfile with the service-generated
+	one, take care to properly zip together entries with the same identityType:identity pair.
+	- Within a single authfile entry, path prefixes must be sorted by length from longest
+	to shortest. If XRootD matches an incoming request with an identifier, it will
+	iterate along the prefixes from left to right and apply the policy of the first substring
+	match it finds.
+	- If constructing an authfile for an Origin, merge path entries but use the policy from
+	the existing authfile if there is a conflict, e.g.
+		# user-set authfile
+		u * /foo lr
+		# service-generated authfile
+		u * /foo -a
+		# merged authfile
+		u * /foo lr
+	This gives Origin admins the power to get in trouble if they want to by overriding
+	the service-generated policy.
+	- If constructing an authfile for a cache, log a warning on a conflict but apply
+	the service generated policy. Caches MUST respect the policies discovered via the Federation.
+	This makes it harder for cache admins to accidentally disobey the security policy of discovered
+	Origins.
+	- For any prefix the service may work with, its policy must be explicit in the authfile.
+	That is, if the service must work with a public prefix /foo and a private prefix /bar,
+	the authfile must explicitly provide public access for foo and remove public access for /bar
+*/
+
+// Stores the privileges associated with one path prefix in a given
+// authfile line, e.g. "/foo lr" or "/bar -r"
+type authPathComponent struct {
+	prefix      string
+	subtractive bool // if true, this component removes privileges
+	reads       bool // authfile components only support listings (l) and reads (r)
+	listings    bool
+	// No need for other privileges XRootD supports because Pelican assumes
+	// these are never granted via the authfile (and thus they don't need to
+	// be explicitly taken away for protected cases).
+}
+
+// Converts the authPathComponent back into a string suitable for an authfile
+func (apc authPathComponent) String() string {
+	privileges := ""
+	if apc.subtractive {
+		privileges += "-"
+	}
+	if apc.listings {
+		privileges += "l"
+	}
+	if apc.reads {
+		privileges += "r"
 	}
 
-	output := new(bytes.Buffer)
-	foundPublicLine := false
-	if config.GetPreferredPrefix() == config.OsdfPrefix {
-		if (server.GetServerType().IsEnabled(server_structs.OriginType) && !param.Topology_DisableOriginX509.GetBool()) ||
-			(server.GetServerType().IsEnabled(server_structs.CacheType) && !param.Topology_DisableCacheX509.GetBool()) {
-			log.Debugln("Retrieving OSDF Authfile for server")
-			bytes, err := getOSDFAuthFiles(server)
-			if err != nil {
-				return errors.Wrapf(err, "Failed to fetch osdf authfile from topology")
-			}
+	return fmt.Sprintf("%s %s", apc.prefix, privileges)
+}
 
-			log.Debugln("Parsing OSDF Authfile")
-			if bytes != nil {
-				output.Write(bytes)
+// Stores one logical line of an authfile, e.g. "u * /foo lr /bar -r"
+// When parsing an input authfile, the \ line break is ignored and all
+// parts of the line are stored in the same authLine object.
+type authLine struct {
+	idType         string
+	id             string
+	authComponents map[string]*authPathComponent // key will be the path prefix
+}
+
+// Given a prefix and a set of privileges, construct the appropriate authfile entry.
+// The authfile entry for each path should be explicit about whether an action is allowed, e.g.
+// if a path does not allow public reads, we should construct /path -lr (minus removes a privilege)
+// See section 4.1 of https://xrootd.web.cern.ch/doc/dev56/sec_config.htm#_Toc119617465
+func constructAuthEntry(prefix string, caps server_structs.Capabilities) (authComp authPathComponent, err error) {
+	// Check whether the incoming path and caps warrant an authfile entry
+	if prefix == "" {
+		err = errors.New("cannot construct authfile entry with empty prefix")
+		return
+	}
+
+	authComp.prefix = path.Clean(prefix)
+
+	// For now, we always set listings to true -- Stats in Pelican require listings,
+	// so even if an Origin admin does not enable them, the authfile still needs to
+	// to encode that listings are allowed. The hope is that we can find a way to
+	// work around this in the future so that we can truly enforce the namespace's
+	// policies.
+	//
+	// We also always set reads to true because every authfile comp will explicitly
+	// grant or deny read privileges. The authComp is not meant to represent the
+	// namespace's policy, but rather the privileges granted or denied via the authfile.
+	//
+	// By putting this "always true" logic explicitly in `constructAuthEntry`, we
+	// make sure this hard-coding only affects service-generated authfile entries
+	// (which are always derived via the capabilities struct that come from namespaces
+	// and capabilities), while incoming/merged authfiles can still remove this privilege.
+	authComp.reads = true
+	authComp.listings = true
+
+	// Every path should be explicit in the authfile so if a path does not allow
+	// public reads, we must  remove lr privileges from it in the authfile
+	if !caps.PublicReads {
+		authComp.subtractive = true
+	}
+
+	return
+}
+
+// Given a privilege set from an authfile policy, e.g. "lr" or "-r", parse it into its components.
+// While the list of privileges XRootD supports is longer, Pelican authfiles only care about
+// reads and listings because everything else is handled in the SciTokens plugin.
+func authPolicyFromWord(word string) (reads bool, listings bool, subtractive bool, err error) {
+	if word == "" {
+		return false, false, false, errors.New("internal error: empty authfile policy word")
+	}
+
+	for idx, char := range word {
+		switch char {
+		case 'r':
+			reads = true
+		case 'l':
+			listings = true
+		case '-':
+			if idx != 0 {
+				return false, false, false, errors.Errorf("malformed authfile policy: '-', when included, must be the first character in a set of privileges")
 			}
+			subtractive = true
+		default:
+			return false, false, false, errors.Errorf("unrecognized authfile policy character: %c", char)
 		}
 	}
 
+	return reads, listings, subtractive, nil
+}
+
+// Given an authfile line (where lines can be continued with a \), parse it
+// and add its contents to the authLineMap. The authLineMap is keyed by the combination
+// of ID type and ID, e.g. "u *" or "g somegroup", followed by space-delimited tuples of
+// <path> <privileges>, e.g. "/foo lr /bar -lr"
+func authPoliciesFromLine(line string, authLineMap map[string]*authLine) error {
+	words := strings.Fields(line)
+
+	if len(words) == 0 {
+		return nil
+	}
+
+	// Skip over comments. While we could preserve them, the logic
+	// to keep them next to the relevant authfile entry in the case of
+	// merges is complicated -- they can be referenced via the input authfile.
+	if words[0] == "#" {
+		return nil
+	}
+
+	// Check the line to make sure it looks like every path is matched with a policy,
+	// e.g. "/foo lr /bar -lr" is valid, but "/foo lr /bar" is not.
+	// We check for 4 here because a valid line has an ID type, an ID, and at least
+	// one path/policy pair.
+	if len(words) < 4 || len(words)%2 != 0 {
+		return errors.Errorf(
+			"malformed authfile line in %s: %q\nEach entry must have an ID type, an ID, and then pairs of <path> <policy>, e.g. 'u * /foo lr /bar r'. This line has an unexpected number of fields",
+			param.Xrootd_Authfile.GetString(), line,
+		)
+	}
+
+	key := words[0] + " " + words[1] // e.g. "u *"
+
+	// If this is the first time we've seen this authfile entry, create it
+	if _, exists := authLineMap[key]; exists {
+		// A duplicate entry here means the admin has two entries for the same ID type and ID,
+		// which is bad config. Since we don't know what they really wanted to do, fail.
+		return errors.Errorf("duplicate authfile entry for %s found in %s", key, param.Xrootd_Authfile.GetString())
+	}
+
+	authLineMap[key] = &authLine{
+		idType:         words[0],
+		id:             words[1],
+		authComponents: map[string]*authPathComponent{},
+	}
+
+	authComponents := authLineMap[key].authComponents
+
+	// Start walking through path/policy pairs
+	for i := 2; i < len(words)-1; i += 2 {
+		path := words[i]
+		policy := words[i+1]
+
+		if _, ok := authComponents[path]; ok {
+			return errors.Errorf("duplicate path %s found for authfile entry %s in %s", path, key, param.Xrootd_Authfile.GetString())
+		}
+
+		reads, listings, subtractive, err := authPolicyFromWord(policy)
+		if err != nil {
+			return errors.Wrapf(err, "failed to parse authfile policy %q in line %s from %s", policy, line, param.Xrootd_Authfile.GetString())
+		}
+		authComponents[path] = &authPathComponent{
+			prefix:      path,
+			reads:       reads,
+			listings:    listings,
+			subtractive: subtractive,
+		}
+	}
+
+	return nil
+}
+
+// Parse the contents of an authfile and add all entries to the authLinesMap.
+// These will later be merged with any service-generated entries according to the service's merge policy.
+func populateAuthLinesMapFromFile(contents []byte, authLineMap map[string]*authLine) error {
 	sc := bufio.NewScanner(strings.NewReader(string(contents)))
 	sc.Split(ScanLinesWithCont)
 	log.Debugln("Parsing the input authfile")
+
 	for sc.Scan() {
+		// These lines have already joined any "continue" characters by the scan
+		// split function, so they represent exactly one logical authfile line.
 		lineContents := sc.Text()
-		words := strings.Fields(lineContents)
-		if len(words) >= 2 && words[0] == "u" && words[1] == "*" {
-			// There exists a public access already in the authfile
-			if server.GetServerType().IsEnabled(server_structs.OriginType) {
-				outStr := "u * /.well-known lr "
-
-				// Exports are only public if the origin allows direct clients
-				if !param.Origin_DisableDirectClients.GetBool() {
-					// Set up public reads only for the namespaces that are public
-					originExports, err := server_utils.GetOriginExports()
-					if err != nil {
-						return errors.Wrapf(err, "failed to get origin exports")
-					}
-
-					for _, export := range originExports {
-						if export.Capabilities.PublicReads {
-							outStr += export.FederationPrefix + " lr "
-						}
-					}
-				}
-
-				output.Write([]byte(outStr + strings.Join(words[2:], " ") + "\n"))
-			} else {
-				output.Write([]byte(lineContents + " "))
-			}
-			foundPublicLine = true
-		} else {
-			// Copy over entry verbatim
-			output.Write([]byte(lineContents + "\n"))
+		if err := authPoliciesFromLine(lineContents, authLineMap); err != nil {
+			return errors.Wrap(err, "could not parse authfile line")
 		}
 	}
-	// If Origin has no authfile already exists, add the ./well-known to the authfile
-	if !foundPublicLine && server.GetServerType().IsEnabled(server_structs.OriginType) {
-		outStr := "u * /.well-known lr"
 
-		// Exports are only public if the origin allows direct clients
-		if !param.Origin_DisableDirectClients.GetBool() {
+	return nil
+}
 
-			// Configure the Authfile for each of the public exports we have in the origin
-			originExports, err := server_utils.GetOriginExports()
+// Populate the authLinesMap using any exports defined at the Origin.
+// Public namespaces are added to grant privileges in the Authfile, while
+// private namespaces are added to subtract privileges from public access.
+func populateAuthLinesMapForOrigin(authLinesMap map[string]*authLine) error {
+	// Next, add any public exports the origin has to the authfile map
+	if !param.Origin_DisableDirectClients.GetBool() {
+		log.Debugln("Adding Origin exports to authfile")
+		originExports, err := server_utils.GetOriginExports()
+		if err != nil {
+			return errors.Wrapf(err, "failed to get Origin exports")
+		}
+
+		authl, exists := authLinesMap["u *"]
+		if !exists {
+			authLinesMap["u *"] = &authLine{
+				idType:         "u",
+				id:             "*",
+				authComponents: map[string]*authPathComponent{},
+			}
+
+			// Origin entries are always placed under the "u *" entry so they apply to all users.
+			authl = authLinesMap["u *"]
+		}
+
+		for _, export := range originExports {
+			authComp, err := constructAuthEntry(export.FederationPrefix, export.Capabilities)
 			if err != nil {
-				return errors.Wrapf(err, "failed to get origin exports")
+				return errors.Wrapf(err, "failed to construct authfile entry for Origin export %s", export.FederationPrefix)
 			}
 
-			for _, export := range originExports {
-				if export.Capabilities.PublicReads {
-					outStr += " " + export.FederationPrefix + " lr"
-				}
+			// If the authfile already has an entry for this prefix, we prefer the admin-provided
+			// definition and skip over the service-generated one (but log a warning). Origin admins
+			// are allowed to dig themselves into a hole if they want to.
+			if existingComp, ok := authl.authComponents[authComp.prefix]; ok {
+				log.Warnf("Origin authfile already has an entry for prefix %s; using admin-provided policy %v instead of service-generated policy %v",
+					authComp.prefix, *existingComp, authComp)
+				continue
 			}
+			authl.authComponents[authComp.prefix] = &authComp
 		}
 
-		outStr += "\n"
-		output.Write([]byte(outStr))
-	}
-
-	// For the cache, add the public namespaces
-	if server.GetServerType().IsEnabled(server_structs.CacheType) {
-		// If nothing has been written to the output yet
-		var outStr string
-		if !foundPublicLine {
-			outStr = "u * "
+		// Now add the `.well-known` path
+		wkAuthComp, err := constructAuthEntry("/.well-known", server_structs.Capabilities{PublicReads: true, Reads: true, Listings: true})
+		if err != nil {
+			return errors.Wrapf(err, "failed to construct authfile entry for /.well-known")
 		}
-		for _, ad := range server.GetNamespaceAds() {
-			if ad.Caps.PublicReads && ad.Path != "" {
-				outStr += ad.Path + " lr "
-			}
-		}
-		// A public namespace exists, so a line needs to be printed
-		if len(outStr) > 4 {
-			output.Write([]byte(outStr + "\n"))
+		if existingComp, ok := authl.authComponents[wkAuthComp.prefix]; ok {
+			log.Warnf("Origin authfile already has an entry for prefix %s; using admin-provided policy %v instead of service-generated policy %v",
+				wkAuthComp.prefix, *existingComp, wkAuthComp)
+		} else {
+			authl.authComponents[wkAuthComp.prefix] = &wkAuthComp
 		}
 	}
 
-	// If Pelican is run by unprivileged user, we use xrdhttp-pelican plugin to make sure the final authfile is owned by xrootd
-	if param.Server_DropPrivileges.GetBool() {
+	return nil
+}
+
+// Populate the authLinesMap using any exports defined at the Cache.
+// Public namespaces are added to grant privileges in the Authfile, while
+// private namespaces are added to subtract privileges from public access.
+// Unlike Origins, Caches must respect the policies discovered via the Federation
+// so an admin-provided authfile entry is overridden by the service-generated
+// entry on conflict. This is done to prevent a Cache admin from accidentally
+// violating policies set by the Origin.
+func populateAuthLinesMapForCache(authLinesMap map[string]*authLine, server server_structs.XRootDServer) error {
+	authl, exists := authLinesMap["u *"]
+	if !exists {
+		authLinesMap["u *"] = &authLine{
+			idType:         "u",
+			id:             "*",
+			authComponents: map[string]*authPathComponent{},
+		}
+
+		authl = authLinesMap["u *"]
+	}
+
+	log.Debugln("Adding Cache exports to authfile")
+	for _, ad := range server.GetNamespaceAds() {
+		authComp, err := constructAuthEntry(ad.Path, ad.Caps)
+		if err != nil {
+			return errors.Wrapf(err, "failed to construct authfile entry for Cache export %s", ad.Path)
+		}
+
+		// If the authfile already has an entry for this prefix, we prefer the discovered
+		// definition and skip over the admin-provided one (but log a warning).
+		if existingComp, ok := authl.authComponents[authComp.prefix]; ok {
+			log.Warnf("Cache authfile already has an entry for prefix %s; using federation-discovered policy %v instead of service-generated policy %v",
+				authComp.prefix, *existingComp, authComp)
+		}
+		authl.authComponents[authComp.prefix] = &authComp
+	}
+
+	// Now add the `.well-known` path
+	wkAuthComp, err := constructAuthEntry("/.well-known", server_structs.Capabilities{PublicReads: true, Reads: true, Listings: true})
+	if err != nil {
+		return errors.Wrapf(err, "failed to construct authfile entry for /.well-known")
+	}
+	if existingComp, ok := authl.authComponents[wkAuthComp.prefix]; ok {
+		// Here we still allow the admin to override the .well-known entry, but log a warning
+		// because it's probably not what they want to do.
+		log.Warnf("Cache authfile already has an entry for prefix %s; using admin-provided policy %v instead of service-generated policy %v",
+			wkAuthComp.prefix, *existingComp, wkAuthComp)
+	} else {
+		authl.authComponents[wkAuthComp.prefix] = &wkAuthComp
+	}
+
+	return nil
+}
+
+// Given an authLine, serialize it into a string suitable for writing to an authfile.
+// Sort the authComponents by descending prefix length so that XRootD applies the most
+// specific policy first.
+// Prefixes with the same length are sorted lexicographically.
+func serializeAuthLine(al authLine) string {
+	// Collect and sort prefixes by descending length
+	prefixes := make([]string, 0, len(al.authComponents))
+	for prefix := range al.authComponents {
+		prefixes = append(prefixes, prefix)
+	}
+	slices.SortStableFunc(prefixes, func(a, b string) int {
+		if len(a) > len(b) {
+			return -1 // a before b
+		}
+		if len(a) < len(b) {
+			return 1 // b before a
+		}
+		return strings.Compare(a, b) // equal length
+	})
+
+	// Build the line
+	parts := []string{al.idType, al.id}
+	for _, prefix := range prefixes {
+		parts = append(parts, al.authComponents[prefix].String())
+	}
+	return strings.Join(parts, " ")
+}
+
+// Given an authLinesMap, produce a slice of lines representing the sorted, serialized
+// authfile according to:
+// -- sort IDType:ID lines by ID length (longest first), but always put "u *" last
+// -- within each authLine, sort the authComponents by descending prefix length
+func getSortedSerializedAuthLines(authLinesMap map[string]*authLine) []string {
+	var lines []string
+
+	// Separate "u *" from other keys
+	var otherKeys []string
+	var uStarKey string
+	for key := range authLinesMap {
+		if key == "u *" {
+			uStarKey = key
+		} else {
+			otherKeys = append(otherKeys, key)
+		}
+	}
+
+	// Sort other keys by their authLine's id field (most specific first: longest id first, then lexicographically)
+	slices.SortFunc(otherKeys, func(a, b string) int {
+		idA := authLinesMap[a].id
+		idB := authLinesMap[b].id
+		// Sort by descending length (longest first)
+		if len(idA) > len(idB) {
+			return -1
+		}
+		if len(idA) < len(idB) {
+			return 1
+		}
+		// If lengths are equal, sort lexicographically
+		return strings.Compare(idA, idB)
+	})
+
+	// Add all non-u* lines first
+	for _, key := range otherKeys {
+		lines = append(lines, serializeAuthLine(*authLinesMap[key]))
+	}
+	// Add "u *" last, if present
+	if uStarKey != "" {
+		lines = append(lines, serializeAuthLine(*authLinesMap[uStarKey]))
+	}
+
+	return lines
+}
+
+// Given the set of authfile lines, write them to disk in the appropriate location
+func writeAuthfile(server server_structs.XRootDServer, lines []string, isFirstRun bool) error {
+	// Prepare the output buffer
+	var output bytes.Buffer
+	for _, line := range lines {
+		output.WriteString(line)
+		output.WriteByte('\n')
+	}
+
+	// If Pelican is run by unprivileged user, use xrdhttp-pelican plugin to ensure xrootd owns the file
+	if !isFirstRun && param.Server_DropPrivileges.GetBool() {
 		// Create a temporary authfile
 		tempAuthFile, err := os.CreateTemp("", "temp-authfile-generated-*")
 		if err != nil {
-			return errors.Wrapf(err, "failed to create a generated temporary authfile %s", tempAuthFile.Name())
-		} else {
-			log.Debugln("Created temporary authfile", tempAuthFile.Name())
+			return errors.Wrapf(err, "failed to create a generated temporary authfile")
 		}
+		log.Debugln("Created temporary authfile", tempAuthFile.Name())
 		defer func() {
 			tempAuthFile.Close()
 			os.Remove(tempAuthFile.Name())
@@ -438,7 +759,6 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 	}
 
 	xrootdRun := param.Origin_RunLocation.GetString()
-
 	if server.GetServerType().IsEnabled(server_structs.CacheType) {
 		xrootdRun = param.Cache_RunLocation.GetString()
 	}
@@ -453,14 +773,78 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 	}
 	defer file.Close()
 	if err = os.Chown(finalAuthPath, -1, gid); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of generated auth"+
-			"file %v to desired daemon gid %v", finalAuthPath, gid)
+		return errors.Wrapf(err, "unable to change ownership of generated authfile %v to desired daemon gid %v", finalAuthPath, gid)
 	}
 	if _, err := output.WriteTo(file); err != nil {
 		return errors.Wrapf(err, "failed to write to generated authfile %v", finalAuthPath)
 	}
 
 	return nil
+}
+
+// Parse the input xrootd authfile, add any default configurations, and then save it
+// into the xrootd runtime directory
+//
+// isFirstRun is true if this is the first time we are writing the authfile, false otherwise.
+// If the drop privileges feature is enabled, the first run is by the root user,
+// and the subsequent runs are by the unprivileged pelican user via the xrdhttp-pelican plugin.
+func EmitAuthfile(server server_structs.XRootDServer, isFirstRun bool) error {
+	// Used to hold the representations for every export needed for the authfile
+	authLinesMap := map[string]*authLine{}
+
+	// If we're using OSDF as our topology source, fetch the authfile from there
+	// and parse it into the authLinesMap first.  This way, any user-provided
+	// authfile entries will override the topology-provided ones.
+	if config.GetPreferredPrefix() == config.OsdfPrefix &&
+		((server.GetServerType().IsEnabled(server_structs.OriginType) && !param.Topology_DisableOriginX509.GetBool()) ||
+			(server.GetServerType().IsEnabled(server_structs.CacheType) && !param.Topology_DisableCacheX509.GetBool())) {
+
+		log.Debugln("Retrieving OSDF Authfile for server")
+		contents, err := getOSDFAuthFiles(server)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to fetch osdf authfile from topology")
+		}
+
+		log.Debugln("Parsing OSDF Topology Authfile")
+		if contents != nil {
+			if err := populateAuthLinesMapFromFile(contents, authLinesMap); err != nil {
+				return errors.Wrapf(err, "failed to parse authfile fetched from OSDF Topology")
+			}
+		}
+	}
+
+	// Now parse the user-provided authfile into the map if it exists.
+	userProvidedAuthfile := param.Xrootd_Authfile.GetString()
+	if userProvidedAuthfile != "" {
+		log.Debugf("Parsing authfile from %s", userProvidedAuthfile)
+		contents, err := os.ReadFile(userProvidedAuthfile)
+		if err != nil {
+			return errors.Wrapf(err, "failed to read xrootd authfile from %s", userProvidedAuthfile)
+		}
+		if err := populateAuthLinesMapFromFile(contents, authLinesMap); err != nil {
+			return errors.Wrapf(err, "failed to parse user-provided authfile")
+		}
+	}
+
+	if server.GetServerType().IsEnabled(server_structs.OriginType) {
+		// Add all exports from the Origin to the authfile, subtracting privileges for
+		// protected namespaces while adding privileges for public namespaces
+		if err := populateAuthLinesMapForOrigin(authLinesMap); err != nil {
+			return errors.Wrapf(err, "failed to add origin exports to authfile")
+		}
+	}
+
+	if server.GetServerType().IsEnabled(server_structs.CacheType) {
+		// Do the same for Caches, but apply a different merge policy
+		// on conflicts
+		if err := populateAuthLinesMapForCache(authLinesMap, server); err != nil {
+			return errors.Wrapf(err, "failed to add cache exports to authfile")
+		}
+	}
+
+	sortedAuthfileLines := getSortedSerializedAuthLines(authLinesMap)
+
+	return writeAuthfile(server, sortedAuthfileLines, isFirstRun)
 }
 
 // Given a filename, load and parse the file into a ScitokensCfg object
@@ -637,6 +1021,7 @@ func GenerateOriginIssuers() (issuers []Issuer, err error) {
 			MapSubject:      param.Origin_ScitokensMapSubject.GetBool(),
 			DefaultUser:     param.Origin_ScitokensDefaultUser.GetString(),
 			UsernameClaim:   param.Origin_ScitokensUsernameClaim.GetString(),
+			NameMapfile:     param.Origin_ScitokensNameMapFile.GetString(),
 		})
 	}
 
@@ -693,7 +1078,7 @@ func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 // Writes out the server's scitokens.cfg configuration
 func EmitScitokensConfig(server server_structs.XRootDServer) error {
 	if _, ok := server.(*origin.OriginServer); ok {
-		return WriteOriginScitokensConfig()
+		return WriteOriginScitokensConfig(false)
 	} else if cacheServer, ok := server.(*cache.CacheServer); ok {
 		directorAds := cacheServer.GetNamespaceAds()
 		if param.Cache_SelfTest.GetBool() {
@@ -717,14 +1102,14 @@ func EmitScitokensConfig(server server_structs.XRootDServer) error {
 			}
 			directorAds = append(directorAds, cacheIssuer)
 		}
-		return WriteCacheScitokensConfig(directorAds)
+		return WriteCacheScitokensConfig(directorAds, false)
 	} else {
 		return errors.New("internal error: server object is neither cache nor origin")
 	}
 }
 
 // Writes out the origin's scitokens.cfg configuration
-func WriteOriginScitokensConfig() error {
+func WriteOriginScitokensConfig(isFirstRun bool) error {
 	cfg, err := makeSciTokensCfg()
 	if err != nil {
 		return err
@@ -791,7 +1176,7 @@ func WriteOriginScitokensConfig() error {
 		return errors.Wrap(err, "failed to generate xrootd issuer for federation")
 	}
 
-	return writeScitokensConfiguration(server_structs.OriginType, &cfg)
+	return writeScitokensConfiguration(server_structs.OriginType, &cfg, isFirstRun)
 }
 
 // GenerateCacheIssuers takes a slice of NamespaceAdV2 and generates a list of Issuer objects
@@ -829,7 +1214,7 @@ func GenerateCacheIssuers(nsAds []server_structs.NamespaceAdV2) []Issuer {
 }
 
 // Writes out the cache's scitokens.cfg configuration
-func WriteCacheScitokensConfig(nsAds []server_structs.NamespaceAdV2) error {
+func WriteCacheScitokensConfig(nsAds []server_structs.NamespaceAdV2, isFirstRun bool) error {
 	cfg, err := makeSciTokensCfg()
 	if err != nil {
 		return err
@@ -845,7 +1230,7 @@ func WriteCacheScitokensConfig(nsAds []server_structs.NamespaceAdV2) error {
 		}
 	}
 
-	return writeScitokensConfiguration(server_structs.CacheType, &cfg)
+	return writeScitokensConfiguration(server_structs.CacheType, &cfg, isFirstRun)
 }
 
 func EmitIssuerMetadata(exportPath string, xServeUrl string) error {

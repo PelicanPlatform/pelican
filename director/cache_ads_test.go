@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
@@ -271,4 +272,234 @@ func TestRecordAd(t *testing.T) {
 		_, ok := healthTestUtils[mockUrl.String()]
 		assert.True(t, ok)
 	})
+}
+
+func TestGetRawStatusWeight(t *testing.T) {
+	testCases := []struct {
+		name           string
+		status         metrics.HealthStatusEnum
+		expectedWeight float64
+	}{
+		{
+			name:           "StatusOK",
+			status:         metrics.StatusOK,
+			expectedWeight: 1.0,
+		},
+		{
+			name:           "StatusWarning",
+			status:         metrics.StatusWarning,
+			expectedWeight: 0.5,
+		},
+		{
+			name:           "StatusDegraded",
+			status:         metrics.StatusDegraded,
+			expectedWeight: 0.01,
+		},
+		{
+			// Although StatusShuttingDown completely filters the ad,
+			// (rendering any weight irrelevant), test for completeness
+			name:           "StatusShuttingDown",
+			status:         metrics.StatusShuttingDown,
+			expectedWeight: 0.01,
+		},
+		{
+			name:           "StatusCritical",
+			status:         metrics.StatusCritical,
+			expectedWeight: 0.01,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			weight := getRawStatusWeight(tc.status)
+			assert.Equal(t, tc.expectedWeight, weight, "Expected weight for %s should be %f, got %f", tc.status.String(), tc.expectedWeight, weight)
+		})
+	}
+}
+
+func TestPopulateEWMAStatusWeightSequence(t *testing.T) {
+	// Note: Expected weights calculated using this online calculator:
+	// https://calculatorsforhome.com/ewma-estimator/
+	// For mixed-delta tests, calculations must be done pair-wise because
+	// alphas must be adjusted in between each (which the calculator does not do).
+	testCases := []struct {
+		name            string
+		adSequence      []server_structs.ServerAd // sequence of ads to test
+		deltaTs         []time.Duration           // the time delta between these two ads
+		expectedWeights []float64
+	}{
+		{
+			name: "ok-status-case",
+			adSequence: []server_structs.ServerAd{
+				{StatusWeight: 0.5},
+				{Status: metrics.StatusOK.String()},
+				{Status: metrics.StatusOK.String()},
+			},
+			deltaTs: []time.Duration{
+				time.Minute * 1,
+				time.Minute * 1,
+			},
+			expectedWeights: []float64{
+				0.59063,
+				0.66484,
+			},
+		},
+		{
+			name: "critical-status-case",
+			adSequence: []server_structs.ServerAd{
+				{StatusWeight: 0.5},
+				{Status: metrics.StatusCritical.String()},
+				{Status: metrics.StatusCritical.String()},
+			},
+			deltaTs: []time.Duration{
+				time.Minute * 1,
+				time.Minute * 1,
+			},
+			expectedWeights: []float64{
+				0.41118,
+				0.33846,
+			},
+		},
+		{
+			name: "degraded-status-case",
+			adSequence: []server_structs.ServerAd{
+				{StatusWeight: 0.5},
+				{Status: metrics.StatusDegraded.String()},
+				{Status: metrics.StatusDegraded.String()},
+			},
+			deltaTs: []time.Duration{
+				time.Minute * 1,
+				time.Minute * 1,
+			},
+			expectedWeights: []float64{
+				// Same as critical status because of same xt
+				0.41118,
+				0.33846,
+			},
+		},
+		{
+			name: "unknown-status-case",
+			adSequence: []server_structs.ServerAd{
+				{StatusWeight: 0.5},
+				{Status: metrics.StatusUnknown.String()},
+				{Status: metrics.StatusUnknown.String()},
+			},
+			deltaTs: []time.Duration{
+				time.Minute * 1,
+				time.Minute * 1,
+			},
+			expectedWeights: []float64{
+				// Same as OK status because of same xt
+				0.59063,
+				0.66484,
+			},
+		},
+		{
+			name: "oscillating-status-case",
+			adSequence: []server_structs.ServerAd{
+				{StatusWeight: 0.5},
+				{Status: metrics.StatusOK.String()},
+				{Status: metrics.StatusDegraded.String()},
+				{Status: metrics.StatusOK.String()},
+				{Status: metrics.StatusDegraded.String()},
+			},
+			deltaTs: []time.Duration{
+				time.Minute * 1,
+				time.Minute * 1,
+				time.Minute * 1,
+				time.Minute * 1,
+			},
+			expectedWeights: []float64{
+				0.59063,
+				0.48538,
+				0.57867,
+				0.47559,
+			},
+		},
+		{
+			name: "mixed-deltaTs-case",
+			adSequence: []server_structs.ServerAd{
+				{StatusWeight: 0.5},
+				{Status: metrics.StatusOK.String()},
+				{Status: metrics.StatusOK.String()},
+				{Status: metrics.StatusOK.String()},
+			},
+			deltaTs: []time.Duration{
+				// Required alphas (generated using Wolfram Alpha and equation for
+				// EWMA alpha) if you want to hand-calculate the expected weights:
+				// - 0.181269
+				// - 0.329680
+				// - 0.451188
+				time.Minute * 1,
+				time.Minute * 2,
+				time.Minute * 3,
+			},
+			expectedWeights: []float64{
+				0.59063,
+				0.72559,
+				0.84940,
+			},
+		},
+		{
+			name: "old-ads-no-ewma-fields-case",
+			adSequence: []server_structs.ServerAd{
+				// Old ads will not set the relevant EWMA fields
+				{},
+				{},
+				{},
+			},
+			deltaTs: []time.Duration{
+				time.Minute * 1,
+				time.Minute * 1,
+			},
+			expectedWeights: []float64{
+				// Should default to steady 1s
+				1.0,
+				1.0,
+			},
+		},
+		{
+			// Out of bounds weights should be detected and result
+			// in setting the weight to 1.0
+			name: "oob-starting-ad-case",
+			adSequence: []server_structs.ServerAd{
+				{StatusWeight: -0.5}, // Out of bounds starting weight
+				{Status: metrics.StatusOK.String()},
+			},
+			deltaTs: []time.Duration{
+				time.Minute * 1,
+			},
+			expectedWeights: []float64{
+				1.0,
+			},
+		},
+		{
+			name: "negative-deltaT-case",
+			adSequence: []server_structs.ServerAd{
+				{StatusWeight: 0.5},
+				{Status: metrics.StatusCritical.String()},
+			},
+			deltaTs: []time.Duration{
+				time.Minute * -1,
+			},
+			expectedWeights: []float64{
+				0.5, // the previous weight will be imputed because alpha --> 0
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			for i := 0; i < len(tc.adSequence)-1; i++ {
+				// Overwrite any fields needed to calculate the desired deltaT
+				tc.adSequence[i].StatusWeightLastUpdate = time.Now().Add(-tc.deltaTs[i]).Unix()
+				populateEWMAStatusWeight(&tc.adSequence[i+1], &tc.adSequence[i])
+
+				// Check status weight calculation. Epsilon accounts for time lag, and mult by i+1 accounts
+				// for that lag accumulating over iterations
+				assert.InEpsilon(t, tc.expectedWeights[i], tc.adSequence[i+1].StatusWeight, float64(i+1)*0.0035,
+					"status weight is %d at index %d", tc.adSequence[i+1].StatusWeight, i+1)
+			}
+		})
+	}
 }

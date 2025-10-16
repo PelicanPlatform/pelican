@@ -56,7 +56,7 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		return nil, err
 	}
 
-	if err := database.InitServerDatabase(); err != nil {
+	if err := database.InitServerDatabase(server_structs.CacheType); err != nil {
 		return nil, err
 	}
 
@@ -107,6 +107,12 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 
 	cache.LaunchFedTokManager(ctx, egrp, cacheServer)
 
+	if param.Cache_EnableEvictionMonitoring.GetBool() {
+		metrics.LaunchXrootdCacheEvictionMonitoring(ctx, egrp)
+	}
+
+	metrics.LaunchXrdCurlStatsMonitoring(ctx, egrp)
+
 	concLimit := param.Cache_Concurrency.GetInt()
 	if concLimit > 0 {
 		server_utils.LaunchConcurrencyMonitoring(ctx, egrp, cacheServer.GetServerType())
@@ -134,8 +140,11 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 
 	portStartCallback := func(port int) {
 		viper.Set("Cache.Port", port)
-		if cacheUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {
-			cacheUrl.Host = cacheUrl.Hostname() + ":" + strconv.Itoa(port)
+		if cacheUrl, err := url.Parse(param.Cache_Url.GetString()); err == nil {
+			if cacheUrl.Port() == "" {
+				cacheUrl.Host = cacheUrl.Hostname() + ":" + strconv.Itoa(port)
+			}
+
 			viper.Set("Cache.Url", cacheUrl.String())
 			log.Debugln("Resetting Cache.Url to", cacheUrl.String())
 		}

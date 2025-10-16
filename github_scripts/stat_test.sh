@@ -44,8 +44,7 @@ export PELICAN_SERVER_WEBPORT=$WEBUI_PORT
 export PELICAN_ORIGIN_RUNLOCATION=/tmp/pelican-test/stat_test/xrootdRunLocation
 
 export PELICAN_CONFIGDIR=/tmp/pelican-test/stat_test
-export PELICAN_REGISTRY_DBLOCATION=/tmp/pelican-test/stat_test/test-registry.sql
-export PELICAN_DIRECTOR_DBLOCATION=/tmp/pelican-test/stat_test/test-director.sql
+export PELICAN_SERVER_DBLOCATION=/tmp/pelican-test/stat_test/test-registry.sql
 export PELICAN_CONFIG=${PELICAN_CONFIGDIR}/empty.yaml
 export PELICAN_OIDC_CLIENTID="sometexthere"
 export PELICAN_OIDC_CLIENTSECRETFILE=/tmp/pelican-test/stat_test/oidc-secret
@@ -76,8 +75,7 @@ cleanup() {
     unset PELICAN_FEDERATION_DIRECTORURL
     unset PELICAN_FEDERATION_REGISTRYURL
     unset PELICAN_TLSSKIPVERIFY
-    unset PELICAN_REGISTRY_DBLOCATION
-    unset PELICAN_DIRECTOR_DBLOCATION
+    unset PELICAN_SERVER_DBLOCATION
     unset PELICAN_SERVER_ENABLEUI
     unset PELICAN_OIDC_CLIENTID
     unset PELICAN_OIDC_CLIENTSECRETFILE
@@ -95,7 +93,7 @@ echo "This is some random content in the random file" > /tmp/pelican-test/stat_t
 touch ${PELICAN_CONFIG}
 
 # Prepare token for calling stat
-TOKEN=$(./pelican --config ${PELICAN_CONFIG} origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:$WEBUI_PORT" --scope "web_ui.access" --subject "bar" --lifetime 3600 --private-key /tmp/pelican-test/stat_test/issuer.jwk)
+TOKEN=$(./pelican --config ${PELICAN_CONFIG} origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:$WEBUI_PORT" --scope "web_ui.access" --subject "bar" --lifetime 3600)
 
 # Run federation in the background
 federationServe="./pelican --config ${PELICAN_CONFIG} serve --module director --module registry --module origin --port $WEBUI_PORT"

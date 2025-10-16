@@ -17,6 +17,7 @@ extend-ignore-identifiers-re = [
 NewCFBEncrypter = "NewCFBEncrypter"
 ## HTCondor's daemon names follow the usual "{word} + 'd'" convention.
 StartdAttrs = "StartdAttrs"
+condor_startd = "condor_startd"
 
 [files]
 extend-exclude = [

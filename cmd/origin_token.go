@@ -169,8 +169,14 @@ func cliTokenCreate(cmd *cobra.Command, args []string) error {
 	}
 	tokenConfig.Subject = subject
 
+	// Read the optional private key path override and pass it through so it is preferred over defaults
+	privKeyPath, err := cmd.Flags().GetString("private-key")
+	if err != nil {
+		return errors.Wrap(err, "Failed to get private key path from input")
+	}
+
 	// Finally, create the token
-	token, err := tokenConfig.CreateToken()
+	token, err := tokenConfig.CreateToken(privKeyPath)
 	if err != nil {
 		return errors.Wrap(err, "Failed to create the token")
 	}

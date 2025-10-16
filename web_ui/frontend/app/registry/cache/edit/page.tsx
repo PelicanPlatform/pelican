@@ -35,7 +35,7 @@ export default function Page() {
   return (
     <Box width={'100%'}>
       <Grid container>
-        <Grid item xs={12}>
+        <Grid size={12}>
           <Typography variant={'h4'} pb={3}>
             Namespace Registry
           </Typography>
@@ -43,7 +43,7 @@ export default function Page() {
             Edit Cache
           </Typography>
         </Grid>
-        <Grid item xs={12}>
+        <Grid size={12}>
           <AuthenticatedContent redirect={true}>
             <PutPage update={putCache} />
           </AuthenticatedContent>

@@ -88,7 +88,7 @@ export const BytesTransferred = () => {
 
   useEffect(() => {
     setLoading(false);
-  });
+  }, [setLoading]);
 
   // const chartData = {
   //   labels: data.labels,

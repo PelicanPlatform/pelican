@@ -26,6 +26,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/go-kit/log/term"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
@@ -84,7 +85,6 @@ func FlushLogs(pushToFile bool) {
 	flushOnce.Do(func() {
 		hook := bufferedHook.Load()
 		if hook == nil {
-			fmt.Fprintln(os.Stderr, "FlushLogs called but no bufferedHook exists")
 			return
 		}
 
@@ -123,7 +123,7 @@ func FlushLogs(pushToFile bool) {
 			// Restore colorized output when logging to stderr
 			log.SetFormatter(&log.TextFormatter{
 				FullTimestamp:          true,
-				ForceColors:            true,
+				ForceColors:            term.IsTerminal(log.StandardLogger().Out),
 				DisableColors:          false,
 				DisableLevelTruncation: true,
 			})

@@ -47,6 +47,7 @@ type (
 		daemonName string
 		configPath string
 		fds        [2]int
+		runDir     string
 	}
 
 	UnprivilegedXrootdLauncher struct {
@@ -96,7 +97,7 @@ func (launcher UnprivilegedXrootdLauncher) KillFunc() func(pid int, sig int) err
 	}
 }
 
-func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCache bool) (result UnprivilegedXrootdLauncher, err error) {
+func makeUnprivilegedXrootdLauncher(daemonName string, xrootdRun string, configPath string, isCache bool) (result UnprivilegedXrootdLauncher, err error) {
 	result.DaemonName = daemonName + ".origin"
 	if isCache {
 		result.DaemonName = daemonName + ".cache"
@@ -113,10 +114,8 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCach
 	} else {
 		setOriginFds(result.fds)
 	}
-	xrootdRun := param.Origin_RunLocation.GetString()
-	if isCache {
-		xrootdRun = param.Cache_RunLocation.GetString()
-	}
+
+	result.RunDir = xrootdRun
 	pidFile := filepath.Join(xrootdRun, "xrootd.pid")
 	result.Args = []string{daemonName, "-s", pidFile, "-c", configPath}
 
@@ -133,10 +132,17 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCach
 
 	if isCache {
 		result.Args = append(result.Args, "-n", "cache")
+
+		// Determine the correct CA bundle path based on if drop privilege mode is enabled
+		caBundlePath := filepath.Join(xrootdRun, "ca-bundle.crt")
+		if param.Server_DropPrivileges.GetBool() {
+			caBundlePath = filepath.Join(xrootdRun, "pelican", "ca-bundle.crt")
+		}
+
 		result.ExtraEnv = []string{
 			"XRD_PELICANBROKERSOCKET=" + filepath.Join(xrootdRun, "cache-reversal.sock"),
 			"XRD_PLUGINCONFDIR=" + filepath.Join(xrootdRun, "cache-client.plugins.d"),
-			"X509_CERT_FILE=" + filepath.Join(xrootdRun, "ca-bundle.crt"),
+			"X509_CERT_FILE=" + caBundlePath,
 			"XRD_PELICANCLIENTCERTFILE=" + filepath.Join(xrootdRun, "copied-tls-creds.crt"),
 			"XRD_PELICANCLIENTKEYFILE=" + filepath.Join(xrootdRun, "copied-tls-creds.crt"),
 		}
@@ -145,6 +151,11 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCach
 		}
 		result.ExtraEnv = append(result.ExtraEnv, "XRD_PELICANFEDERATIONMETADATATIMEOUT="+param.Cache_DefaultCacheTimeout.GetDuration().String())
 		result.ExtraEnv = append(result.ExtraEnv, "XRD_PELICANDEFAULTHEADERTIMEOUT="+param.Cache_DefaultCacheTimeout.GetDuration().String())
+
+		// Enable client-side curl statistics if configured
+		if statsPath := param.Cache_ClientStatisticsLocation.GetString(); statsPath != "" {
+			result.ExtraEnv = append(result.ExtraEnv, "XRD_CURLSTATISTICSLOCATION="+statsPath)
+		}
 		// Pass through the advanced Pelican cache control features; meant for unit tests of xrdcl-pelican
 		// Purposely allowing these to override the ones from the Pelican config file
 		for _, envVar := range os.Environ() {
@@ -183,12 +194,17 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCach
 }
 
 func ConfigureLaunchers(privileged bool, configPath string, useCMSD bool, enableCache bool) (launchers []daemon.Launcher, err error) {
+	xrootdRun := param.Origin_RunLocation.GetString()
+	if enableCache {
+		xrootdRun = param.Cache_RunLocation.GetString()
+	}
+
 	if privileged {
 		fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to create socket pair for xrootd")
 		}
-		launchers = append(launchers, PrivilegedXrootdLauncher{"xrootd", configPath, fds})
+		launchers = append(launchers, PrivilegedXrootdLauncher{"xrootd", configPath, fds, xrootdRun})
 		if enableCache {
 			setCacheFds(fds)
 		} else {
@@ -199,17 +215,17 @@ func ConfigureLaunchers(privileged bool, configPath string, useCMSD bool, enable
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to create socket pair for xrootd")
 			}
-			launchers = append(launchers, PrivilegedXrootdLauncher{"cmsd", configPath, cmsdFds})
+			launchers = append(launchers, PrivilegedXrootdLauncher{"cmsd", configPath, cmsdFds, xrootdRun})
 		}
 	} else {
 		var result UnprivilegedXrootdLauncher
-		result, err = makeUnprivilegedXrootdLauncher("xrootd", configPath, enableCache)
+		result, err = makeUnprivilegedXrootdLauncher("xrootd", xrootdRun, configPath, enableCache)
 		if err != nil {
 			return
 		}
 		launchers = append(launchers, result)
 		if useCMSD {
-			result, err = makeUnprivilegedXrootdLauncher("cmsd", configPath, false)
+			result, err = makeUnprivilegedXrootdLauncher("cmsd", xrootdRun, configPath, false)
 			if err != nil {
 				return
 			}

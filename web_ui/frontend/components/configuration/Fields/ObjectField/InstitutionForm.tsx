@@ -27,7 +27,7 @@ const InstitutionForm = ({ onSubmit, value }: FormProps<Institution>) => {
       return;
     }
     onSubmit(institution);
-  }, [institution]);
+  }, [institution, onSubmit]);
 
   return (
     <>

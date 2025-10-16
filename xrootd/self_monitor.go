@@ -80,7 +80,23 @@ func generateTestFile() (string, error) {
 	selfTestPath := filepath.Join(basePath, selfTestDir)
 	_, err := os.Stat(selfTestPath)
 	if err != nil {
-		return "", errors.Wrap(err, "self-test directory does not exist at "+selfTestPath)
+		if errors.Is(err, os.ErrNotExist) {
+			uid, err := config.GetDaemonUID()
+			if err != nil {
+				return "", err
+			}
+
+			gid, err := config.GetDaemonGID()
+			if err != nil {
+				return "", err
+			}
+
+			if err := config.MkdirAll(selfTestPath, 0750, uid, gid); err != nil {
+				return "", errors.Wrap(err, "failed to create self-test directory")
+			}
+		} else {
+			return "", errors.Wrap(err, "failed to stat self-test directory")
+		}
 	}
 	uid, err := config.GetDaemonUID()
 	if err != nil {
@@ -172,6 +188,14 @@ func generateTestFileViaPlugin() (string, error) {
 	user, err := config.GetPelicanUser()
 	if err != nil {
 		return "", errors.Wrap(err, "failed to get user")
+	}
+
+	// Make sure the self-test directory exists.
+	// This is also done in InitSelfTestDir, but we repeat it here to be robust.
+	basePath := param.Cache_NamespaceLocation.GetString()
+	selfTestPath := filepath.Join(basePath, selfTestDir)
+	if err := os.MkdirAll(selfTestPath, 0750); err != nil {
+		return "", errors.Wrap(err, "failed to create self-test directory")
 	}
 
 	// Create a temp directory own by pelican user to bypass privilege restrictions, named "birthplace"
@@ -415,9 +439,11 @@ func doSelfMonitorOrigin(ctx context.Context) {
 func PeriodicSelfTest(ctx context.Context, ergp *errgroup.Group, isOrigin bool) {
 	customInterval := param.Cache_SelfTestInterval.GetDuration()
 	doSelfMonitor := doSelfMonitorCache
+	maxAge := param.Cache_SelfTestMaxAge.GetDuration()
 	if isOrigin {
 		doSelfMonitor = doSelfMonitorOrigin
 		customInterval = param.Origin_SelfTestInterval.GetDuration()
+		maxAge = param.Origin_SelfTestMaxAge.GetDuration()
 	}
 
 	ticker := time.NewTicker(customInterval)
@@ -429,8 +455,14 @@ func PeriodicSelfTest(ctx context.Context, ergp *errgroup.Group, isOrigin bool) 
 			select {
 			case <-firstRound:
 				doSelfMonitor(ctx)
+				// This is a failsafe mechanism to the self-test metric (OriginCache_XRootD):
+				// have the server status reported as critical if the check for age is too old.
+				// TODO: if OriginCache_XRootD component hasn't been set for `maxAge` time,
+				// it means no self-test has been run. Maybe we should shutdown the server instead?
+				metrics.ValidateComponentHealthAge(metrics.OriginCache_XRootD, maxAge)
 			case <-ticker.C:
 				doSelfMonitor(ctx)
+				metrics.ValidateComponentHealthAge(metrics.OriginCache_XRootD, maxAge)
 			case <-ctx.Done():
 				return nil
 			}

@@ -34,6 +34,9 @@ var (
 	// Our global transports that only will get reconfigured if needed
 	transport *http.Transport
 
+	// Transport that avoids any use of a HTTP(S) proxy
+	transportNoProxy *http.Transport
+
 	// Transport that avoids any broker-aware dialer
 	basicTransport *http.Transport
 
@@ -42,6 +45,12 @@ var (
 
 	// The global non-broker-aware HTTP client
 	basicClient *http.Client
+
+	// The global HTTP client with no redirect
+	clientNoRedirect *http.Client
+
+	// The global HTTP client with no use of HTTP(S) proxies
+	clientNoProxy *http.Client
 
 	// Once to ensure we only set up the transport once
 	onceTransport sync.Once
@@ -78,6 +87,34 @@ func GetBasicTransport() *http.Transport {
 		setupTransport()
 	})
 	return basicTransport
+}
+
+// Returns a transport object that does not use any HTTP(S) proxy
+func GetTransportNoProxy() *http.Transport {
+	onceTransport.Do(func() {
+		setupTransport()
+	})
+	return transportNoProxy
+}
+
+// Returns the default client object configured to not follow redirects
+//
+// This allows special handling of redirect headers by the client
+func GetClientNoRedirect() *http.Client {
+	onceTransport.Do(func() {
+		setupTransport()
+	})
+	return clientNoRedirect
+}
+
+// Returns the default client object configured to not use HTTP proxies
+//
+// This allows bypassing of proxies for the GET/PUT in the client methods
+func GetClientNoProxy() *http.Client {
+	onceTransport.Do(func() {
+		setupTransport()
+	})
+	return clientNoProxy
 }
 
 // Returns the basic client object for Pelican
@@ -154,7 +191,18 @@ func setupTransport() {
 	}
 	client = &http.Client{Transport: transport}
 
+	clientNoRedirect = &http.Client{
+		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
 	basicTransport = transport.Clone()
 	basicTransport.DialContext = defaultDialerContext
 	basicClient = &http.Client{Transport: basicTransport}
+
+	transportNoProxy = transport.Clone()
+	transportNoProxy.Proxy = nil
+	clientNoProxy = &http.Client{Transport: transportNoProxy}
 }

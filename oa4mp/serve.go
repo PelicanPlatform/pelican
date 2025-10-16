@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"text/template"
@@ -38,6 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 type (
@@ -68,10 +70,11 @@ type (
 	}
 
 	authzTemplate struct {
-		Actions []string `mapstructure:"actions"`
-		Prefix  string   `mapstructure:"prefix"`
-		Users   []string `mapstructure:"users"`
-		Groups  []string `mapstructure:"groups"`
+		Actions      []string `mapstructure:"actions"`
+		Prefix       string   `mapstructure:"prefix"`
+		Users        []string `mapstructure:"users"`
+		Groups       []string `mapstructure:"groups"`
+		GroupRegexes []string `mapstructure:"group_regexes"`
 	}
 )
 
@@ -88,6 +91,44 @@ var (
 	//go:embed resources/id_token_policies.qdl
 	idTokenPoliciesQdlTmpl string
 )
+
+type compiledAuthz struct {
+	Actions       []string
+	Prefix        string
+	UserSet       map[string]struct{}
+	GroupLiterals map[string]struct{}
+	GroupRegexes  []*regexp.Regexp
+}
+
+var compiledAuthzRules []*compiledAuthz
+
+func compileAuthzRules(raw authzTemplate) (*compiledAuthz, error) {
+	compiled := &compiledAuthz{
+		Actions:       raw.Actions,
+		Prefix:        raw.Prefix,
+		UserSet:       make(map[string]struct{}),
+		GroupLiterals: make(map[string]struct{}),
+		GroupRegexes:  make([]*regexp.Regexp, 0, len(raw.GroupRegexes)),
+	}
+
+	for _, user := range raw.Users {
+		compiled.UserSet[user] = struct{}{}
+	}
+
+	for _, group := range raw.Groups {
+		compiled.GroupLiterals[group] = struct{}{}
+	}
+
+	for _, rgx := range raw.GroupRegexes {
+		rx, err := regexp.Compile(rgx)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to compile group regex: %s", rgx)
+		}
+		compiled.GroupRegexes = append(compiled.GroupRegexes, rx)
+	}
+
+	return compiled, nil
+}
 
 func writeOA4MPFile(fname string, data []byte, perm os.FileMode) error {
 	user, err := config.GetOA4MPUser()
@@ -192,8 +233,12 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 
 	oidcAuthnUserClaim := param.Issuer_OIDCAuthenticationUserClaim.GetString()
 	groupSource := param.Issuer_GroupSource.GetString()
+	if groupSource != "" && groupSource != "none" && groupSource != web_ui.GroupSourceTypeOIDC && groupSource != web_ui.GroupSourceTypeFile && groupSource != web_ui.GroupSourceTypeInternal {
+		err = errors.New("invalid group source: " + groupSource)
+		return
+	}
 	groupFile := param.Issuer_GroupFile.GetString()
-	if groupFile == "" && groupSource == "file" {
+	if groupFile == "" && groupSource == web_ui.GroupSourceTypeFile {
 		err = errors.New("Issuer.GroupFile must be set to use the 'file' group source")
 		return
 	}
@@ -204,6 +249,17 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 		err = errors.Wrap(err, "Failed to parse the Issuer.AuthorizationTemplates config")
 		return
 	}
+
+	compiledAuthzRules = nil
+	for _, authz := range authzTemplates {
+		compiled, cErr := compileAuthzRules(authz)
+		if cErr != nil {
+			err = errors.Wrapf(cErr, "failed to compile authorization template: %v", authz)
+			return
+		}
+		compiledAuthzRules = append(compiledAuthzRules, compiled)
+	}
+
 	groupAuthzTemplates := []authzTemplate{}
 	userAuthzTemplates := []authzTemplate{}
 	for _, authz := range authzTemplates {
@@ -218,6 +274,16 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 				scope_actions = append(scope_actions, "storage.create")
 			case "modify":
 				scope_actions = append(scope_actions, "storage.modify")
+			case "collection_read":
+				scope_actions = append(scope_actions, "collection.read")
+			case "collection_write":
+				scope_actions = append(scope_actions, "collection.modify")
+			case "collection_create":
+				scope_actions = append(scope_actions, "collection.create")
+			case "collection_modify":
+				scope_actions = append(scope_actions, "collection.modify")
+			case "collection_delete":
+				scope_actions = append(scope_actions, "collection.delete")
 			default:
 				scope_actions = append(scope_actions, scope)
 			}

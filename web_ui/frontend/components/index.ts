@@ -6,3 +6,6 @@ export * from './Namespace';
 export * from './CapabilitiesDisplay';
 export * from './graphs';
 export * from './MarkdownRender';
+
+export { default as GeoIpErrorDisplay } from './GeoIpErrorDisplay';
+export * from './GeoIpErrorDisplay';

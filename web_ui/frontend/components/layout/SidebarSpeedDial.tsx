@@ -12,7 +12,7 @@ import {
   Tooltip,
 } from '@mui/material';
 import Link from 'next/link';
-import { ClickAwayListener } from '@mui/base';
+import ClickAwayListener from '@mui/material/ClickAwayListener';
 
 interface SpeedButtonProps {
   boxProps?: BoxProps;

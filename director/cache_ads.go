@@ -21,9 +21,7 @@ package director
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"net"
-	"net/netip"
+	"math"
 	"net/url"
 	"path"
 	"strings"
@@ -32,6 +30,7 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
@@ -105,6 +104,112 @@ func SetBrokerDialer(dialer *broker.BrokerDialer) {
 	brokerDialer = dialer
 }
 
+// Given a server status, return the raw weight that will eventually
+// be smoothed in the EWMA status calculation.
+// Weights should be bounded by (0, 1], where 1 does not adjust the
+// server's ordering and 0 would stick the server at the very end of the list.
+// However, 0 is not included because its multiplication with other load-based
+// weights would destroy information.
+func getRawStatusWeight(status metrics.HealthStatusEnum) float64 {
+	// This weight is used when ordering servers on redirects,
+	// and is only meant to _decrease_ a server's priority, never _increase_ it.
+	// Since these weights are factored into sorting multiplicatively, we assign
+	// "unknown" the multiplicative identity weight.
+	//
+	// There's an additional question about what to do here if the current status
+	// is "unknown" but the previous ad had a known status -- should the status be
+	// imputed, or should we default to 1? For now, it feels safer to make the choice
+	// that doesn't affect sorting, thus "1".
+	xt := 1.0
+	if status <= metrics.StatusDegraded {
+		// Set low weight for degraded or worse.
+		// Note that this also covers StatusShuttingDown, although
+		// that status is completely filtered via a different mechanism.
+		xt = 0.01
+	} else if status == metrics.StatusWarning {
+		// Warnings may be unrelated to IO load, but it's still probably
+		// not great to heavily weight servers reporting warnings.
+		xt = 0.5
+	}
+
+	return xt
+}
+
+// populateEWMAStatusWeight calculates the EWMA status weight for a server advertisement.
+// Each calculation needs several inputs that come from the previous and current server advertisements:
+//   - The previously-derived EWMA status weight (st_1, from oldSAd)
+//   - The current "server status" value (xt, derived from newSAd.Status) -- is bounded by (0, 1] because
+//     0 would completely remove the server from sorting, while 1 has no effect on the server's priority.
+//   - The time since the last status update (deltaT, derived from oldSAd.StatusWeightLastUpdate)
+//
+// For more information about EWMA calculations, see https://en.wikipedia.org/wiki/Exponential_smoothing
+func populateEWMAStatusWeight(newSAd, oldSAd *server_structs.ServerAd) {
+	if newSAd == nil {
+		log.Errorf("internal error; populateEWMAStatusWeight called with nil newSAd")
+		return
+	}
+
+	// Start building pieces from the server ads to apply an EWMA filter
+	// to the server's status weight
+	var statusWeight float64
+	ioStatus := metrics.ParseHealthStatus(newSAd.Status)
+	xt := getRawStatusWeight(ioStatus)
+	t := time.Now()
+
+	// If there is no existing ad, the weight is just the current status
+	if oldSAd == nil {
+		newSAd.StatusWeight = xt
+		newSAd.StatusWeightLastUpdate = t.Unix()
+		return
+	}
+
+	st_1 := oldSAd.StatusWeight
+	// If we received an out-of-bounds previous status weight,
+	// reset it to 1 -- This points to something having gone wrong,
+	// so the safest choice is to avoid affecting the server's sorting.
+	if st_1 <= 0 || st_1 > 1 {
+		st_1 = 1.0
+	}
+	t_1 := oldSAd.StatusWeightLastUpdate
+	deltaT := t.Sub(time.Unix(t_1, 0))
+	if deltaT < 0 {
+		log.Warningf("Negative deltaT detected while calculating EWMA status weight for server %s: %s (previous time: '%d', current time: '%d'). Resetting to 0.",
+			newSAd.Name, deltaT.String(), t_1, t.Unix())
+		deltaT = 0
+	}
+
+	// Using time constant of 5m based on some experimental hand tests -- this feels
+	// reasonably responsive, whereas 10m felt like it overly smoothed things.
+	tao := param.Director_AdaptiveSortEWMATimeConstant.GetDuration()
+	if tao <= 0 {
+		// This should never happen for real servers because config will re-set the value
+		// to the default, but this if statement is in place for unit tests so we can
+		// avoid dividing by zero without adding a bunch of extra config to tests.
+		tao = 5 * time.Minute
+	}
+	alpha := 1 - math.Exp(-float64(deltaT)/float64(tao))
+
+	// Calculate the new status weight using the EWMA formula
+	statusWeight = st_1 + alpha*(xt-st_1)
+	if statusWeight <= 0 || statusWeight > 1 {
+		log.Errorf(
+			"Invalid EWMA status weight for server '%s': computed=%f, previous=%f, raw weight=%f, current status='%s'. "+
+				"Value should be in (0,1]. Resetting to 1.0 (will have no effect on sorting).",
+			newSAd.Name, statusWeight, st_1, xt, newSAd.Status)
+		statusWeight = 1.0
+	}
+	newSAd.StatusWeight = statusWeight
+	newSAd.StatusWeightLastUpdate = t.Unix()
+
+	metrics.PelicanDirectorStatusWeight.With(
+		prometheus.Labels{
+			"server_name": newSAd.Name,
+			"server_url":  newSAd.AuthURL.String(),
+			"server_type": newSAd.Type,
+		},
+	).Set(statusWeight)
+}
+
 // recordAd does following for an incoming ServerAd and []NamespaceAdV2 pair:
 //
 //  1. Update the ServerAd by setting server location and updating server topology attribute
@@ -113,21 +218,15 @@ func SetBrokerDialer(dialer *broker.BrokerDialer) {
 //  4. Set up utilities for collecting origin/health server file transfer test status
 //  5. Return the updated ServerAd. The ServerAd passed in will not be modified
 func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAdV2) (updatedAd server_structs.ServerAd) {
-	if err := updateLatLong(&sAd); err != nil {
-		if geoIPError, ok := err.(geoIPError); ok {
-			labels := geoIPError.labels
-			// TODO: Remove this metric (the line directly below)
-			// The renamed metric was added in v7.16
-			metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
-			metrics.PelicanDirectorGeoIPErrorsTotal.With(labels).Inc()
-		}
-		log.Debugln("Failed to lookup GeoIP coordinates for host", sAd.URL.Host)
-	}
-
 	if sAd.URL.String() == "" {
 		log.Errorf("The URL of the serverAd %#v is empty. Cannot set the TTL cache.", sAd)
 		return
 	}
+
+	if err := updateLatLong(&sAd); err != nil {
+		log.Debugf("Failed to lookup GeoIP coordinates for host %s: %v", sAd.URL.Host, err)
+	}
+
 	// Since servers from topology always use http, while servers from Pelican always use https
 	// we want to ignore the scheme difference when checking duplicates (only consider hostname:port)
 	rawURL := sAd.URL.String() // could be http (topology) or https (Pelican or some topology ones)
@@ -165,6 +264,11 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 		if !sAd.FromTopology && !existing.Value().FromTopology { // Only copy the IO Load value for Pelican server
 			sAd.IOLoad = existing.Value().GetIOLoad() // we copy the value from the existing serverAD to be consistent
 		}
+
+		populateEWMAStatusWeight(&sAd, &(existing.Value().ServerAd))
+	} else {
+		// If there is no existing ad, the status weight will be set to the current raw weight
+		populateEWMAStatusWeight(&sAd, nil)
 	}
 
 	ad := server_structs.Advertisement{ServerAd: sAd, NamespaceAds: *namespaceAds}
@@ -315,31 +419,70 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 	return sAd
 }
 
+// Update the lat/long and newer Coordinate field for a given server ad
+// The Coordinate field also provides provenance info about the coordinate
+// (e.g. whether it comes from MaxMind or an override in config). When an
+// error is encountered, the lat/long is left as the default initialized
+// value of (0.0, 0.0) and an error is returned.
+// Metrics for server GeoIP failure are handled in getServerCoordinate().
 func updateLatLong(ad *server_structs.ServerAd) error {
 	if ad == nil {
-		return errors.New("Cannot provide a nil ad to UpdateLatLong")
+		return errors.New("cannot provide a nil ad to UpdateLatLong")
 	}
-	hostname := strings.Split(ad.URL.Host, ":")[0]
-	ip, err := net.LookupIP(hostname)
+
+	coord, err := getServerCoordinate(*ad)
 	if err != nil {
-		return err
+		// The error condition will return a null lat/long (0.0, 0.0)
+		return errors.Wrapf(err, "failed to get coordinate for %s server %s", ad.Type, ad.Name)
 	}
-	if len(ip) == 0 {
-		return fmt.Errorf("unable to find an IP address for hostname %s", hostname)
-	}
-	addr, ok := netip.AddrFromSlice(ip[0])
-	if !ok {
-		return errors.New("Failed to create address object from IP")
-	}
-	// NOTE: If GeoIP resolution of this address fails, lat/long are set to 0.0 (the null lat/long)
-	// This causes the server to be sorted to the end of the list whenever the Director requires distance-aware sorting.
-	lat, long, _, err := getLatLong(addr)
-	if err != nil {
-		return err
-	}
-	ad.Latitude = lat
-	ad.Longitude = long
+	ad.Latitude = coord.Lat
+	ad.Longitude = coord.Long
+	ad.Coordinate = coord
+
 	return nil
+}
+
+// Apply downtimes provided by Origin/Cache servers to the director's in-memory state for the given server.
+// This function treats a nil or empty slice as "no downtimes", clearing any stale
+// serverFiltered entry and removing cached server downtimes.
+func applyServerDowntimes(serverName string, downtimes []server_structs.Downtime) {
+	filteredServersMutex.Lock()
+	defer filteredServersMutex.Unlock()
+
+	if len(downtimes) == 0 {
+		// No downtimes provided: clear cached entry and remove stale serverFiltered
+		delete(serverDowntimes, serverName)
+		if existingFilterType, isServerFiltered := filteredServers[serverName]; isServerFiltered && existingFilterType == serverFiltered {
+			delete(filteredServers, serverName)
+		}
+		return
+	}
+
+	// Update cached downtimes
+	serverDowntimes[serverName] = downtimes
+
+	// Determine whether any provided downtime is currently active
+	now := time.Now().UTC().UnixMilli()
+	active := false
+	for _, dt := range downtimes {
+		if dt.StartTime <= now && (dt.EndTime >= now || dt.EndTime == server_structs.IndefiniteEndTime) {
+			active = true
+			break
+		}
+	}
+
+	existingFilterType, isServerFiltered := filteredServers[serverName]
+	if active {
+		// Only set serverFiltered if no other filter exists
+		if !isServerFiltered {
+			filteredServers[serverName] = serverFiltered
+		}
+	} else {
+		// No active downtime: clear only if it was previously set by the server
+		if isServerFiltered && existingFilterType == serverFiltered {
+			delete(filteredServers, serverName)
+		}
+	}
 }
 
 // Get cached downtimes from registry, topology and servers themselves.

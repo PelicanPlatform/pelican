@@ -67,7 +67,7 @@ func TestGetSitenameFromReg(t *testing.T) {
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if strings.HasPrefix(req.URL.Path, "/api/v1.0/registry") {
 				prefix := strings.TrimPrefix(req.URL.Path, "/api/v1.0/registry")
-				ns := server_structs.Namespace{Prefix: prefix, ID: 1, AdminMetadata: server_structs.AdminMetadata{SiteName: "bar"}}
+				ns := server_structs.Registration{Prefix: prefix, ID: 1, AdminMetadata: server_structs.AdminMetadata{SiteName: "bar"}}
 				bytes, err := json.Marshal(ns)
 				require.NoError(t, err)
 				_, err = w.Write(bytes)

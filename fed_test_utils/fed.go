@@ -38,6 +38,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+	"gopkg.in/yaml.v3"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
@@ -155,6 +156,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	viper.Set(param.Registry_RequireCacheApproval.GetName(), false)
 	viper.Set(param.Director_CacheSortMethod.GetName(), "distance")
 	viper.Set(param.Director_DbLocation.GetName(), filepath.Join(t.TempDir(), "director.sqlite"))
+	viper.Set(param.Director_FilterCachesInErrorState.GetName(), false)
 	viper.Set(param.Origin_EnableCmsd.GetName(), false)
 	viper.Set(param.Origin_EnableVoms.GetName(), false)
 	viper.Set(param.Origin_Port.GetName(), ports[0])
@@ -163,66 +165,92 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	viper.Set(param.Origin_TokenAudience.GetName(), "")
 	viper.Set(param.Cache_Port.GetName(), ports[1])
 	viper.Set(param.Cache_RunLocation.GetName(), filepath.Join(tmpPath, "cache"))
+	viper.Set(param.Cache_EnableEvictionMonitoring.GetName(), false)
 	viper.Set(param.Cache_StorageLocation.GetName(), filepath.Join(tmpPath, "xcache-data"))
 	viper.Set(param.Cache_DbLocation.GetName(), filepath.Join(t.TempDir(), "cache.sqlite"))
 	viper.Set(param.Server_EnableUI.GetName(), false)
 	viper.Set(param.Server_WebPort.GetName(), ports[2])
+	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(t.TempDir(), "server.sqlite"))
 	// Unix domain sockets have a maximum length of 108 bytes, so we need to make sure our
 	// socket path is short enough to fit within that limit. Mac OS X has long temporary path
 	// names, so we need to make sure our socket path is short enough to fit within that limit.
 	viper.Set(param.LocalCache_RunLocation.GetName(), filepath.Join(tmpPath, "lc"))
-	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(t.TempDir(), "server.sqlite"))
 
 	// Set the Director's start time to 6 minutes ago. This prevents it from sending an HTTP 429 for
 	// unknown prefixes.
 	directorStartTime := time.Now().Add(-6 * time.Minute)
 	director.SetStartupTime(directorStartTime)
 
-	config.InitConfig()
 	err = config.InitServer(ctx, modules)
 	require.NoError(t, err)
 
 	// Read in any config we may have set
-	if originConfig != "" {
-		viper.SetConfigType("yaml")
-		err = viper.MergeConfig(strings.NewReader(originConfig))
-		require.NoError(t, err, "error reading config")
-	}
-	// Now call GetOriginExports and check the struct
-	exports, err := server_utils.GetOriginExports()
-	require.NoError(t, err, "error getting origin exports")
-	ft.Exports = exports
+	var importedConf any
+	viper.SetConfigType("yaml")
+	err = viper.MergeConfig(strings.NewReader(originConfig))
+	require.NoError(t, err, "error reading config")
 
-	// Override the test directory from the config file with our temp directory
-	for i := 0; i < len(ft.Exports); i++ {
-		originDir, err := os.MkdirTemp("", fmt.Sprintf("Export%d", i))
-		assert.NoError(t, err)
-		t.Cleanup(func() {
-			err := os.RemoveAll(originDir)
+	err = yaml.Unmarshal([]byte(originConfig), &importedConf)
+	require.NoError(t, err, "error unmarshalling into interface")
+
+	confMap := importedConf.(map[string]any)
+
+	if originRaw, exists := confMap["Origin"]; exists {
+		originMap := originRaw.(map[string]any)
+
+		overrideTemp := func(storageDir string, exportMap map[string]any) {
+			exportMap["StoragePrefix"] = storageDir
+
+			// Change the permissions of the temporary origin directory
+			permissions = os.FileMode(0755)
+			err = os.Chmod(storageDir, permissions)
 			require.NoError(t, err)
-		})
 
-		// Set the storage prefix to the temporary origin directory
-		ft.Exports[i].StoragePrefix = originDir
-		// Our exports object becomes global -- we must reset in between each fed test
-		t.Cleanup(func() {
-			server_utils.ResetOriginExports()
-		})
+			// Change ownership on the temporary origin directory so files can be uploaded
+			uinfo, err := config.GetDaemonUserInfo()
+			require.NoError(t, err)
+			require.NoError(t, os.Chown(storageDir, uinfo.Uid, uinfo.Gid))
 
-		// Change the permissions of the temporary origin directory
-		permissions = os.FileMode(0755)
-		err = os.Chmod(originDir, permissions)
-		require.NoError(t, err)
+			// Start off with a Hello World file we can use for testing in each of our exports
+			err = os.WriteFile(filepath.Join(storageDir, "hello_world.txt"), []byte("Hello, World!"), os.FileMode(0644))
+			require.NoError(t, err)
+		}
 
-		// Change ownership on the temporary origin directory so files can be uploaded
-		uinfo, err := config.GetDaemonUserInfo()
-		require.NoError(t, err)
-		require.NoError(t, os.Chown(originDir, uinfo.Uid, uinfo.Gid))
+		// Override the test directory from the config file with our temp directory
+		if exportsRaw, exists := originMap["Exports"]; exists {
+			for i, item := range exportsRaw.([]any) {
+				originDir, err := os.MkdirTemp("", fmt.Sprintf("Export%d", i))
+				assert.NoError(t, err)
+				t.Cleanup(func() {
+					err := os.RemoveAll(originDir)
+					require.NoError(t, err)
+				})
 
-		// Start off with a Hello World file we can use for testing in each of our exports
-		err = os.WriteFile(filepath.Join(originDir, "hello_world.txt"), []byte("Hello, World!"), os.FileMode(0644))
-		require.NoError(t, err)
+				exportMap := item.(map[string]any)
+				overrideTemp(originDir, exportMap)
+			}
+		} else {
+			originDir, err := os.MkdirTemp("", fmt.Sprintf("Export%s", "test"))
+			assert.NoError(t, err)
+			t.Cleanup(func() {
+				err := os.RemoveAll(originDir)
+				require.NoError(t, err)
+			})
+
+			overrideTemp(originDir, originMap)
+		}
 	}
+
+	confDir := t.TempDir()
+	outputPath := filepath.Join(confDir, "tempfile_*.yaml")
+
+	outputData, err := yaml.Marshal(&importedConf)
+	require.NoError(t, err, "error marshalling struct into yaml format")
+
+	err = os.WriteFile(outputPath, outputData, 0644)
+	require.NoError(t, err, "error writing out temporary config file for fed test")
+
+	viper.Set("config", outputPath)
 
 	servers, _, err := launchers.LaunchModules(ctx, modules)
 	require.NoError(t, err)
@@ -287,6 +315,9 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	require.NoError(t, err)
 
 	ft.Token = token
+
+	ft.Exports, err = server_utils.GetOriginExports()
+	require.NoError(t, err)
 
 	return
 }

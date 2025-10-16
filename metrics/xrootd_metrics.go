@@ -203,6 +203,27 @@ type (
 		IOTotal    int     `json:"io_total"`
 	}
 
+	OssGStreamEvent struct {
+		Event string `json:"event"`
+	}
+	OssS3CacheGs struct {
+		Event     string  `json:"event"`
+		HitB      int     `json:"hit_b"`      // Bytes that were served to the client directly from the cache (a "cache hit")
+		MissB     int     `json:"miss_b"`     // Bytes that were served to the client that were a cache miss (not immediately available).
+		FullHit   int     `json:"full_hit"`   // Count of read requests from the client that were completely served from the cache.
+		PartHit   int     `json:"part_hit"`   // Count of read requests from the client that were partially served from the cache.
+		Miss      int     `json:"miss"`       // Count of read requests that were entirely a miss.
+		BypassB   int     `json:"bypass_b"`   // Bytes that were read in "bypass mode", skipping the cache. Typically, this is from read requests that are larger than the cache size.
+		Bypass    int     `json:"bypass"`     // Count of read requests that were served by bypassing the cache.
+		FetchB    int     `json:"fetch_b"`    // Bytes fetched from S3 triggered by cache misses. Note the cache may read in more bytes than requested for the miss.
+		Fetch     int     `json:"fetch"`      // Count of GET requests sent to S3.
+		UnusedB   int     `json:"unused_b"`   // Count of bytes that were fetched from S3 but not sent to the client.
+		PrefetchB int     `json:"prefetch_b"` // Bytes prefetched from S3 independent of a client request.
+		Prefetch  int     `json:"prefetch"`   // Count of prefetch requests sent to S3.
+		Errors    int     `json:"errors"`     // Count of errors encountered.
+		BypassS   float64 `json:"bypass_s"`   // Seconds spent in GET requests serving bypass requests.
+		FetchS    float64 `json:"fetch_s"`    // Seconds spent in GET requests serving cache misses.
+	}
 	OSSStatsGs struct {
 		Event           string  `json:"event"`
 		Reads           int     `json:"reads"`
@@ -313,17 +334,23 @@ type (
 	}
 
 	SummaryStat struct {
-		Id         SummaryStatType    `xml:"id,attr"`
-		Total      int                `xml:"tot"`
-		In         int                `xml:"in"`
-		Out        int                `xml:"out"`
-		Threads    int                `xml:"threads"`
-		Idle       int                `xml:"idle"`
-		Paths      SummaryPath        `xml:"paths"` // For Oss Summary Data
-		Store      SummaryCacheStore  `xml:"store"`
-		Memory     SummaryCacheMemory `xml:"mem"`
-		ProcSystem ProcTimes          `xml:"sys"`
-		ProcUser   ProcTimes          `xml:"usr"`
+		Id                 SummaryStatType    `xml:"id,attr"`
+		Total              int                `xml:"tot"`
+		In                 int                `xml:"in"`
+		Out                int                `xml:"out"`
+		Threads            int                `xml:"threads"`
+		Idle               int                `xml:"idle"`
+		Queued             int                `xml:"inq"`
+		Jobs               int                `xml:"jobs"`
+		LongestQueue       int                `xml:"maxinq"`
+		ThreadCreations    int                `xml:"tcr"`
+		ThreadDestructions int                `xml:"tde"`
+		ThreadLimitReached int                `xml:"tlimr"`
+		Paths              SummaryPath        `xml:"paths"` // For Oss Summary Data
+		Store              SummaryCacheStore  `xml:"store"`
+		Memory             SummaryCacheMemory `xml:"mem"`
+		ProcSystem         ProcTimes          `xml:"sys"`
+		ProcUser           ProcTimes          `xml:"usr"`
 	}
 
 	SummaryStatistics struct {
@@ -337,6 +364,35 @@ type (
 		lastUserSeconds float64
 		lastSysSeconds  float64
 		lastUpdateTime  time.Time
+	}
+
+	XrdCurlPrefetchStats struct {
+		Count     float64 `json:"count"`
+		Expired   float64 `json:"expired"`
+		Failed    float64 `json:"failed"`
+		ReadsHit  float64 `json:"reads_hit"`
+		ReadsMiss float64 `json:"reads_miss"`
+		BytesUsed float64 `json:"bytes_used"`
+	}
+
+	XrdCurlFileStats struct {
+		Prefetch XrdCurlPrefetchStats `json:"prefetch"`
+	}
+
+	XrdCurlQueueStats struct {
+		Produced float64 `json:"produced"`
+		Consumed float64 `json:"consumed"`
+		Pending  float64 `json:"pending"`
+		Rejected float64 `json:"rejected"`
+	}
+
+	XrdCurlStats struct {
+		Event   string            `json:"event"`
+		Start   float64           `json:"start"`
+		Now     float64           `json:"now"`
+		File    XrdCurlFileStats  `json:"file"`
+		Workers json.RawMessage   `json:"workers"`
+		Queues  XrdCurlQueueStats `json:"queues"`
 	}
 )
 
@@ -362,6 +418,12 @@ const (
 	OssStat   SummaryStatType = "oss"   // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653741
 	CacheStat SummaryStatType = "cache" // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653733
 	ProcStat  SummaryStatType = "proc"  // https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968507
+)
+
+// These are the names of the events that are sent by XRootD over the g-stream from the OSS layer
+const (
+	OssStatsEvent    = "oss_stats"
+	S3FileStatsEvent = "s3file_stats"
 )
 
 var (
@@ -410,6 +472,36 @@ var (
 		Name: "xrootd_sched_thread_count",
 		Help: "Number of scheduler threads",
 	}, []string{"state"})
+
+	ThreadCreations = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_sched_thread_creations",
+		Help: "Number of scheduler thread creations",
+	})
+
+	ThreadDestructions = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_sched_thread_destructions",
+		Help: "Number of scheduler thread destructions",
+	})
+
+	ThreadLimitReached = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_sched_thread_limit_reached",
+		Help: "Number of times the scheduler thread limit has been reached",
+	})
+
+	Jobs = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "xrootd_sched_jobs",
+		Help: "Number of scheduler jobs requiring a thread",
+	})
+
+	LongestQueue = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "xrootd_sched_queue_longest_length",
+		Help: "Length of the longest run-queue",
+	})
+
+	Queued = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "xrootd_sched_queued",
+		Help: "Number of jobs queued",
+	})
 
 	// TODO: Remove this metric (the line directly below)
 	// The renamed metric was added in v7.16
@@ -758,8 +850,105 @@ var (
 		Help: "CPU utilization of the XRootD server",
 	})
 
-	lastStats    SummaryStat
-	lastOssStats OSSStatsGs
+	S3CacheBytes = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_s3_cache_bytes_total",
+		Help: "Bytes transferred by the S3 cache plugin.",
+	}, []string{"type"})
+
+	S3CacheHits = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_s3_cache_hits_total",
+		Help: "Number of cache hits, partial hits, or misses.",
+	}, []string{"type"})
+
+	S3CacheRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_s3_cache_requests_total",
+		Help: "Number of cache requests.",
+	}, []string{"type"})
+
+	S3CacheErrors = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_s3_cache_errors_total",
+		Help: "Number of errors encountered by the S3 cache plugin.",
+	})
+
+	S3CacheRequestSeconds = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_s3_cache_request_seconds_total",
+		Help: "Total time spent in S3 requests.",
+	}, []string{"type"})
+
+	// Xrdcl Caching/Prefetching client statistics
+	XrdclFilePrefetchCount = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_prefetch_count_total",
+		Help: "Total number of prefetches started.",
+	})
+	XrdclFilePrefetchExpired = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_prefetch_expired_total",
+		Help: "Total number of prefetches that expired.",
+	})
+	XrdclFilePrefetchFailed = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_prefetch_failed_total",
+		Help: "Total number of prefetches that failed.",
+	})
+	XrdclFilePrefetchReadsHit = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_prefetch_reads_hit_total",
+		Help: "Total number of successful reads from prefetch buffer.",
+	})
+	XrdclFilePrefetchReadsMiss = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_prefetch_reads_miss_total",
+		Help: "Total number of reads that missed the prefetch buffer.",
+	})
+	XrdclFilePrefetchBytesUsed = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_prefetch_bytes_used_total",
+		Help: "Total number of bytes served from prefetch.",
+	})
+	XrdclQueueProduced = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_queue_produced_total",
+		Help: "Total number of HTTP requests placed into the queue.",
+	})
+	XrdclQueueConsumed = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_queue_consumed_total",
+		Help: "Total number of HTTP requests read from the queue.",
+	})
+	XrdclQueuePending = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "xrootd_xrdcl_queue_pending",
+		Help: "Number of pending HTTP requests in the queue.",
+	})
+	XrdclQueueRejected = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_queue_rejected_total",
+		Help: "Total number of HTTP requests rejected due to overload.",
+	})
+	XrdclWorkerOldestOp = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "xrootd_xrdcl_worker_oldest_op_timestamp_seconds",
+		Help: "Timestamp of the oldest operation in any of the worker threads.",
+	})
+	XrdclWorkerOldestCycle = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "xrootd_xrdcl_worker_oldest_cycle_timestamp_seconds",
+		Help: "Timestamp of the oldest event loop completion in any of the worker threads.",
+	})
+	XrdclHTTPRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_http_requests_total",
+		Help: "Statistics about HTTP requests.",
+	}, []string{"verb", "status", "type"})
+	XrdclHTTPRequestDuration = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_http_request_duration_seconds_total",
+		Help: "Total duration of HTTP requests.",
+	}, []string{"verb", "status", "type"})
+	XrdclHTTPBytes = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_http_bytes_total",
+		Help: "Bytes transferred for HTTP requests.",
+	}, []string{"verb", "status"})
+	XrdclConncall = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_conncall_total",
+		Help: "Statistics about connection calls.",
+	}, []string{"type"})
+
+	lastStats        SummaryStat
+	lastOssStats     OSSStatsGs
+	lastS3CacheStats OssS3CacheGs
+	lastXrdCurlStats struct {
+		File    XrdCurlFileStats
+		Queues  XrdCurlQueueStats
+		Workers map[string]float64
+	}
 
 	procState = processUtilizationState{}
 
@@ -776,7 +965,7 @@ var (
 	monitorPaths []PathList
 )
 
-var allowedEvents = map[string]bool{"oss_stats": true}
+var allowedEvents = map[string]bool{OssStatsEvent: true, S3FileStatsEvent: true}
 
 // Set up listening and parsing xrootd monitoring UDP packets into prometheus
 //
@@ -1695,6 +1884,22 @@ func HandleSummaryPacket(packet []byte) error {
 			Threads.With(prometheus.Labels{"state": "idle"}).Set(float64(stat.Idle))
 			Threads.With(prometheus.Labels{"state": "running"}).Set(float64(stat.Threads -
 				stat.Idle))
+
+			Queued.Set(float64(stat.Queued))
+			LongestQueue.Set(float64(stat.LongestQueue))
+			Jobs.Set(float64(stat.Jobs))
+			// We have to do this exclusively for thread creations because the metric is not monotonic
+			// See https://github.com/xrootd/xrootd/blob/f1de2038e0c5c10990769f5b7ff82200cc8c3d56/src/Xrd/XrdScheduler.cc#L700
+			incBy := float64(stat.ThreadCreations - lastStats.ThreadCreations)
+			if stat.ThreadCreations < lastStats.ThreadCreations {
+				incBy = 0
+			}
+			ThreadCreations.Add(incBy)
+			ThreadDestructions.Add(float64(stat.ThreadDestructions - lastStats.ThreadDestructions))
+			ThreadLimitReached.Add(float64(stat.ThreadLimitReached - lastStats.ThreadLimitReached))
+			lastStats.ThreadCreations = stat.ThreadCreations
+			lastStats.ThreadDestructions = stat.ThreadDestructions
+			lastStats.ThreadLimitReached = stat.ThreadLimitReached
 		case OssStat: // Oss stat should only appear on origin servers
 			for _, pathStat := range stat.Paths.Stats {
 				noQuoteLp := strings.Replace(pathStat.Lp, "\"", "", 2)
@@ -1740,7 +1945,86 @@ func HandleSummaryPacket(packet []byte) error {
 	return nil
 }
 
-// handleOSSPacket processes the OSS plugin stats
+func updateCounter[T int | uint | float32 | float64](new T, old T, counter prometheus.Counter) T {
+	incBy := float64(new - old)
+	if incBy < 0 {
+		// If the new value is less than the old value, it is likely that the service has been restarted.
+		// In this case, we should report the new value as the increment.
+		incBy = float64(new)
+	}
+	if incBy > 0 {
+		counter.Add(incBy)
+	}
+	return new
+}
+
+// handleS3CacheStats processes the S3 cache stats
+// It expects the blobs to be in JSON format and will update the metrics accordingly
+// It returns an error if the blobs are empty or if there is an error in unmarshalling
+// the JSON data
+// It also handles the case where the total IO or wait time is less than the previous value
+// by resetting the increment to 0.
+// The s3file_stats event schema is as follows:
+//
+//	{
+//	  "event": "s3file_stats",
+//	  "hit_b": uint,
+//	  "miss_b": uint,
+//	  "full_hit": uint,
+//	  "part_hit": uint,
+//	  "miss": uint,
+//	  "bypass_b": uint,
+//	  "bypass": uint,
+//	  "fetch_b": uint,
+//	  "fetch": uint,
+//	  "unused_b": uint,
+//	  "prefetch_b": uint,
+//	  "prefetch": uint,
+//	  "errors": uint,
+//	  "bypass_s": float,
+//	  "fetch_s": float
+//	}
+func handleS3CacheStats(blobs [][]byte) error {
+
+	// we need to process the blobs backwards to ensure that we are processing the last valid event
+	// the most relevant data is the last valid event in the sequence of blobs
+	for i := len(blobs) - 1; i >= 0; i-- {
+		blob := blobs[i]
+		s3fileStats := OssS3CacheGs{}
+		if err := json.Unmarshal(blob, &s3fileStats); err != nil {
+			log.Warningf("Failed to unmarshal S3 file stats json: %s", string(blob))
+			continue
+		}
+		if !allowedEvents[s3fileStats.Event] {
+			log.Warningf("handleS3CacheStats received an S3 file stats packet with an unrecognized event type (%s)", s3fileStats.Event)
+			continue
+		}
+		lastS3CacheStats.HitB = updateCounter(s3fileStats.HitB, lastS3CacheStats.HitB, S3CacheBytes.WithLabelValues("hit"))
+		lastS3CacheStats.MissB = updateCounter(s3fileStats.MissB, lastS3CacheStats.MissB, S3CacheBytes.WithLabelValues("miss"))
+		lastS3CacheStats.BypassB = updateCounter(s3fileStats.BypassB, lastS3CacheStats.BypassB, S3CacheBytes.WithLabelValues("bypass"))
+		lastS3CacheStats.FetchB = updateCounter(s3fileStats.FetchB, lastS3CacheStats.FetchB, S3CacheBytes.WithLabelValues("fetch"))
+		lastS3CacheStats.UnusedB = updateCounter(s3fileStats.UnusedB, lastS3CacheStats.UnusedB, S3CacheBytes.WithLabelValues("unused"))
+		lastS3CacheStats.PrefetchB = updateCounter(s3fileStats.PrefetchB, lastS3CacheStats.PrefetchB, S3CacheBytes.WithLabelValues("prefetch"))
+
+		lastS3CacheStats.FullHit = updateCounter(s3fileStats.FullHit, lastS3CacheStats.FullHit, S3CacheHits.WithLabelValues("full"))
+		lastS3CacheStats.PartHit = updateCounter(s3fileStats.PartHit, lastS3CacheStats.PartHit, S3CacheHits.WithLabelValues("partial"))
+		lastS3CacheStats.Miss = updateCounter(s3fileStats.Miss, lastS3CacheStats.Miss, S3CacheHits.WithLabelValues("miss"))
+
+		lastS3CacheStats.Bypass = updateCounter(s3fileStats.Bypass, lastS3CacheStats.Bypass, S3CacheRequests.WithLabelValues("bypass"))
+		lastS3CacheStats.Fetch = updateCounter(s3fileStats.Fetch, lastS3CacheStats.Fetch, S3CacheRequests.WithLabelValues("fetch"))
+		lastS3CacheStats.Prefetch = updateCounter(s3fileStats.Prefetch, lastS3CacheStats.Prefetch, S3CacheRequests.WithLabelValues("prefetch"))
+
+		lastS3CacheStats.Errors = updateCounter(s3fileStats.Errors, lastS3CacheStats.Errors, S3CacheErrors)
+
+		lastS3CacheStats.BypassS = updateCounter(s3fileStats.BypassS, lastS3CacheStats.BypassS, S3CacheRequestSeconds.WithLabelValues("bypass"))
+		lastS3CacheStats.FetchS = updateCounter(s3fileStats.FetchS, lastS3CacheStats.FetchS, S3CacheRequestSeconds.WithLabelValues("fetch"))
+		// Found and processed the last valid event, so we are done
+		break
+	}
+	return nil
+}
+
+// handleOSSStats processes the OSS plugin stats
 // It expects the blobs to be in JSON format and will update the metrics accordingly
 // It returns an error if the blobs are empty or if there is an error in unmarshalling
 // the JSON data
@@ -1815,18 +2099,7 @@ func HandleSummaryPacket(packet []byte) error {
 // The other fields are used to update the metrics accordingly.
 // The slow_ prefix fields are used to update the slow operation histograms.
 // The other fields are used to update the counters.
-func handleOSSPacket(blobs [][]byte) error {
-	updateCounter := func(new int, old int, counter prometheus.Counter) int {
-		// if the new value is less than the old value, we know that that the counter shouldnt be incremented
-		incBy := math.Max(0, float64(new-old))
-		counter.Add(incBy)
-
-		if new < old {
-			return old
-		}
-		return new
-	}
-
+func handleOSSStats(blobs [][]byte) error {
 	// updateHistogram updates the histogram with the average latency per operation for the given delta.
 	// newTotalTime and oldTotalTime are the cumulative times (in seconds).
 	// newCount and oldCount are the cumulative counts.
@@ -1843,20 +2116,17 @@ func handleOSSPacket(blobs [][]byte) error {
 
 		}
 	}
-	if len(blobs) == 0 {
-		return errors.New("no blobs in the OSS packet")
-	}
-
 	// we need to process the blobs backwards to ensure that we are processing the last valid event
 	// the most relevant data is the last valid event in the sequence of blobs
 	for i := len(blobs) - 1; i >= 0; i-- {
 		blob := blobs[i]
 		ossStats := OSSStatsGs{}
 		if err := json.Unmarshal(blob, &ossStats); err != nil {
-			return errors.Wrap(err, "failed to parse OSS stat json")
+			log.Debugf("Failed to unmarshal S3 file stats json: %s", string(blob))
+			continue
 		}
 		if !allowedEvents[ossStats.Event] {
-			log.Debugf("handleOSSPacket received an OSS packet with an unrecognized event type (%s)", ossStats.Event)
+			log.Warningf("handleOSSStats received an OSS packet with an unrecognized event type (%s)", ossStats.Event)
 			continue
 		}
 		updateHistogram(ossStats.ReadT, lastOssStats.ReadT, ossStats.Reads, lastOssStats.Reads, OssReadTime)
@@ -1938,6 +2208,48 @@ func handleOSSPacket(blobs [][]byte) error {
 		lastOssStats.SlowChmods = updateCounter(ossStats.SlowChmods, lastOssStats.SlowChmods, OssSlowChmodCounter)
 		lastOssStats.SlowOpens = updateCounter(ossStats.SlowOpens, lastOssStats.SlowOpens, OssSlowOpensCounter)
 		lastOssStats.SlowRenames = updateCounter(ossStats.SlowRenames, lastOssStats.SlowRenames, OssSlowRenamesCounter)
+		// Found and processed the last valid event, so we are done
+		break
+	}
+
+	return nil
+}
+
+// handlesOSSPacket handles the OSS g-stream packets
+// It expects the blobs to be in JSON format
+// The blobs can be of different event types and come intermixed
+// When grouping we preserve the order of the blobs in the original packet
+// We will dispatch the blobs to the appropriate handler based on the event type
+func handleOSSPacket(blobs [][]byte) error {
+	if len(blobs) == 0 {
+		return errors.New("no blobs in the OSS g-stream packet")
+	}
+
+	// This map will map the event type to the list of blobs that have that event type
+	groupedEvents := make(map[string][][]byte)
+	for _, blob := range blobs {
+		ossEvent := OssGStreamEvent{}
+		if err := json.Unmarshal(blob, &ossEvent); err != nil {
+			return errors.Wrap(err, "failed to parse OSS event json")
+		}
+		if !allowedEvents[ossEvent.Event] {
+			log.Warningf("handleOSSPacket received an OSS packet with an unrecognized event type (%s)", ossEvent.Event)
+			continue
+		}
+		groupedEvents[ossEvent.Event] = append(groupedEvents[ossEvent.Event], blob)
+	}
+
+	for eventType, eventBlobs := range groupedEvents {
+		switch eventType {
+		case OssStatsEvent:
+			if err := handleOSSStats(eventBlobs); err != nil {
+				return errors.Wrap(err, "failed to handle OSS stats")
+			}
+		case S3FileStatsEvent:
+			if err := handleS3CacheStats(eventBlobs); err != nil {
+				return errors.Wrap(err, "failed to handle S3 file stats")
+			}
+		}
 	}
 
 	return nil
@@ -1982,5 +2294,108 @@ func handleThrottlePacket(blobs [][]byte) error {
 		ServerActiveIO.Set(float64(throttleGS.IOActive))
 		ServerIOWaitTime.Add(waitTimeInc)
 	}
+	return nil
+}
+
+// When XRootD v6 is released, these stats will be available over the g-stream
+// Until then the stats are consumed from Cache.ClientStatisticsLocation
+// This function should be called with the contents of the file / udp packet
+func handleXrdcurlstatsPacket(stats []byte) error {
+	var xrdCurlStats XrdCurlStats
+	if err := json.Unmarshal(stats, &xrdCurlStats); err != nil {
+		return errors.Wrap(err, "failed to unmarshal xrdcurlstats packet")
+	}
+
+	log.Tracef("XrdCurlStats: %v", xrdCurlStats)
+
+	// File prefetch stats
+	lastXrdCurlStats.File.Prefetch.Count = updateCounter(xrdCurlStats.File.Prefetch.Count, lastXrdCurlStats.File.Prefetch.Count, XrdclFilePrefetchCount)
+	lastXrdCurlStats.File.Prefetch.Expired = updateCounter(xrdCurlStats.File.Prefetch.Expired, lastXrdCurlStats.File.Prefetch.Expired, XrdclFilePrefetchExpired)
+	lastXrdCurlStats.File.Prefetch.Failed = updateCounter(xrdCurlStats.File.Prefetch.Failed, lastXrdCurlStats.File.Prefetch.Failed, XrdclFilePrefetchFailed)
+	lastXrdCurlStats.File.Prefetch.ReadsHit = updateCounter(xrdCurlStats.File.Prefetch.ReadsHit, lastXrdCurlStats.File.Prefetch.ReadsHit, XrdclFilePrefetchReadsHit)
+	lastXrdCurlStats.File.Prefetch.ReadsMiss = updateCounter(xrdCurlStats.File.Prefetch.ReadsMiss, lastXrdCurlStats.File.Prefetch.ReadsMiss, XrdclFilePrefetchReadsMiss)
+	lastXrdCurlStats.File.Prefetch.BytesUsed = updateCounter(xrdCurlStats.File.Prefetch.BytesUsed, lastXrdCurlStats.File.Prefetch.BytesUsed, XrdclFilePrefetchBytesUsed)
+
+	// Queue stats
+	lastXrdCurlStats.Queues.Produced = updateCounter(xrdCurlStats.Queues.Produced, lastXrdCurlStats.Queues.Produced, XrdclQueueProduced)
+	lastXrdCurlStats.Queues.Consumed = updateCounter(xrdCurlStats.Queues.Consumed, lastXrdCurlStats.Queues.Consumed, XrdclQueueConsumed)
+	XrdclQueuePending.Set(xrdCurlStats.Queues.Pending)
+	lastXrdCurlStats.Queues.Rejected = updateCounter(xrdCurlStats.Queues.Rejected, lastXrdCurlStats.Queues.Rejected, XrdclQueueRejected)
+
+	// Worker stats
+	var workers map[string]float64
+	if err := json.Unmarshal(xrdCurlStats.Workers, &workers); err != nil {
+		return errors.Wrap(err, "failed to unmarshal xrdcurlstats workers")
+	}
+
+	if lastXrdCurlStats.Workers == nil {
+		lastXrdCurlStats.Workers = make(map[string]float64)
+	}
+
+	for key, value := range workers {
+		if key == "oldest_op" {
+			XrdclWorkerOldestOp.Set(value)
+			continue
+		}
+		if key == "oldest_cycle" {
+			XrdclWorkerOldestCycle.Set(value)
+			continue
+		}
+
+		// Update counters using deltas
+		oldValue := lastXrdCurlStats.Workers[key]
+		incBy := value - oldValue
+		if incBy < 0 {
+			incBy = value
+		}
+		lastXrdCurlStats.Workers[key] = value
+
+		if incBy <= 0 {
+			continue
+		}
+
+		if strings.HasPrefix(key, "http_") {
+			parts := strings.SplitN(key, "_", 4)
+			if len(parts) == 3 { // http_VERB_field
+				verb, field := parts[1], parts[2]
+				switch field {
+				case "started":
+					XrdclHTTPRequests.WithLabelValues(verb, "", "started").Add(incBy)
+				case "error":
+					XrdclHTTPRequests.WithLabelValues(verb, "", "error").Add(incBy)
+				case "timeout":
+					XrdclHTTPRequests.WithLabelValues(verb, "", "timeout").Add(incBy)
+				case "preheaderduration":
+					XrdclHTTPRequestDuration.WithLabelValues(verb, "", "preheader").Add(incBy)
+				}
+			} else if len(parts) == 4 { // http_VERB_STATUS_field
+				verb, status, field := parts[1], parts[2], parts[3]
+				switch field {
+				case "duration":
+					XrdclHTTPRequestDuration.WithLabelValues(verb, status, "duration").Add(incBy)
+				case "pauseduration":
+					XrdclHTTPRequestDuration.WithLabelValues(verb, status, "pause_duration").Add(incBy)
+				case "bytes":
+					XrdclHTTPBytes.WithLabelValues(verb, status).Add(incBy)
+				case "finished":
+					XrdclHTTPRequests.WithLabelValues(verb, status, "finished").Add(incBy)
+				case "servertimeout":
+					XrdclHTTPRequests.WithLabelValues(verb, status, "server_timeout").Add(incBy)
+				case "clienttimeout":
+					XrdclHTTPRequests.WithLabelValues(verb, status, "client_timeout").Add(incBy)
+				}
+			}
+		} else if strings.HasPrefix(key, "conncall_") {
+			parts := strings.Split(key, "_")
+			if len(parts) == 2 {
+				fieldType := parts[1]
+				switch fieldType {
+				case "error", "started", "success", "timeout":
+					XrdclConncall.WithLabelValues(fieldType).Add(incBy)
+				}
+			}
+		}
+	}
+
 	return nil
 }

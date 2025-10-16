@@ -34,7 +34,7 @@ const AuthorizationTemplateForm = ({
       return;
     }
     onSubmit(authorizationTemplate);
-  }, [authorizationTemplate]);
+  }, [authorizationTemplate, onSubmit]);
 
   return (
     <>

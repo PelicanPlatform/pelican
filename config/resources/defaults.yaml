@@ -36,6 +36,8 @@ Server:
 Director:
   DefaultResponse: cache
   CacheSortMethod: "distance"
+  FilterCachesInErrorState: true
+  AdaptiveSortEWMATimeConstant: 5m
   MinStatResponse: 1
   MaxStatResponse: 1
   StatTimeout: 2000ms
@@ -69,6 +71,7 @@ Cache:
   HighWaterMark: 95
   BlocksToPrefetch: 0
   EnableTLSClientAuth: false
+  EnableEvictionMonitoring: true
 Lotman:
   EnabledPolicy: "fairshare"
   DefaultLotExpirationLifetime: "2016h"
@@ -103,6 +106,7 @@ Monitoring:
   PortHigher: 9999
   TokenExpiresIn: 1h
   TokenRefreshInterval: 5m
+  EnablePrometheus: true
   MetricAuthorization: true
   PromQLAuthorization: true
   AggregatePrefixes: ["/*"]
@@ -138,6 +142,7 @@ OIDC:
   DeviceAuthEndpoint: "https://cilogon.org/oauth2/device_authorization"
   TokenEndpoint: "https://cilogon.org/oauth2/token"
   UserInfoEndpoint: "https://cilogon.org/oauth2/userinfo"
+  Scopes: ["openid", "email", "profile"]
 Issuer:
   TomcatLocation: /opt/tomcat
   ScitokensServerLocation: /opt/scitokens-server

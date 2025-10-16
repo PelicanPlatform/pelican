@@ -1,0 +1,11 @@
+# Origin export configuration for testing
+
+Origin:
+  # Things that configure the origin itself
+  StorageType: "posix"
+  EnableDirectReads: true
+  # The actual namespaces we export
+  Exports:
+    - StoragePrefix: /<SHOULD BE OVERRIDDEN>
+      FederationPrefix: /test
+      Capabilities: ["PublicReads", "Writes", "DirectReads", "Listings"]

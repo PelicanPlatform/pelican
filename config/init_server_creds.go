@@ -30,6 +30,8 @@ import (
 	"fmt"
 	"io/fs"
 	"math/big"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -505,7 +507,31 @@ func GenerateCert() error {
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
 	}
-	template.DNSNames = []string{hostname}
+
+	template.DNSNames = []string{}
+	template.IPAddresses = []net.IP{}
+
+	// Some internal tests may not use a hostname, but an IP address like 127.0.0.1 instead
+	// In this case, the IP address will be used as the SAN but it needs to be added as an IP and
+	// not a DNS name.
+	addSAN := func(s string) {
+		if ip := net.ParseIP(s); ip != nil {
+			template.IPAddresses = append(template.IPAddresses, ip)
+		} else {
+			template.DNSNames = append(template.DNSNames, s)
+		}
+	}
+
+	// In the course of unit testing (the primary place these self-signed certs are used),
+	// it may become necessary to mix/match various configurations around the `Server.Hostname`
+	// and `Server.ExternalWebUrl` parameters. Whenever such a test needs to run config.InitServer(),
+	// it's necessary that the value of both `Server.Hostname` and `Server.ExternalWebUrl` are baked
+	// into the cert, and so even if the two don't match we add both to the cert's DNS names.
+	addSAN(hostname)
+	externalWebUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+	if err == nil && externalWebUrl.Hostname() != hostname {
+		addSAN(externalWebUrl.Hostname())
+	}
 
 	// If there's pre-existing CA certificates, self-sign instead of using the generated CA
 	signingCert := caCert
@@ -543,6 +569,36 @@ func GenerateCert() error {
 	}
 
 	return nil
+}
+
+// Check whether a provided hostname matches the DNS names (SANs) or Common Name (CN) in the
+// config-specified TLS certificate file.
+//
+// To avoid difficult-to-interpret errors, we can protect users starting a Pelican server from
+// mismatches between the provided TLS cert and their configured hostname.
+// RFC 6125 section 6.4.4 specifies that we may match against the CN ONLY if there are no DNS names.
+// This logic is implemented by x509.Certificate.VerifyHostname.
+func ValidateHostCertificateHostname(hostname string) error {
+	if param.TLSSkipVerify.GetBool() {
+		log.Warnf("Skipping TLS certificate hostname verification for %s because %s is set to true", hostname, param.TLSSkipVerify.GetName())
+		return nil
+	}
+
+	tlsCert := param.Server_TLSCertificateChain.GetString()
+	if tlsCert == "" {
+		return errors.Errorf("TLS certificate file is not set. See documentation for %s", param.Server_TLSCertificateChain.GetName())
+	}
+
+	// Load the TLS certificate -- the server cert will be the first cert in the chain
+	cert, err := LoadCertificate(tlsCert)
+	if err != nil {
+		return errors.Wrapf(err, "failed to load TLS certificate from %s", tlsCert)
+	}
+	if cert == nil {
+		return errors.Errorf("failed to load TLS certificate from %s: certificate is nil", tlsCert)
+	}
+
+	return cert.VerifyHostname(hostname)
 }
 
 // Helper function to initialize the in-memory map to save all private keys
@@ -623,7 +679,14 @@ func loadPEMFiles(dir string) (jwk.Key, error) {
 			if (path != dir) && dirEnt.IsDir() {
 				return filepath.SkipDir
 			}
-			if dirEnt.Type().IsRegular() && (filepath.Ext(dirEnt.Name()) == ".pem" || filepath.Ext(dirEnt.Name()) == ".jwk") {
+			// Check if this is a regular file or a symlink that points to a regular file
+			// Use os.Stat() to follow symlinks, unlike dirEnt.Type() which doesn't follow symlinks
+			fileInfo, statErr := os.Stat(path)
+			if statErr != nil {
+				log.Warnf("Failed to stat file %s: %v", path, statErr)
+				return nil
+			}
+			if fileInfo.Mode().IsRegular() && (filepath.Ext(dirEnt.Name()) == ".pem" || filepath.Ext(dirEnt.Name()) == ".jwk") {
 				// Parse the private key in this file and add to the in-memory keys map
 				key, err := LoadSinglePEM(path)
 				if err != nil {
@@ -917,7 +980,11 @@ func GenerateSessionSecret() error {
 		}
 	}
 
-	secret, err := GetSecret()
+	currentIssuerKey, err := GetIssuerPrivateJWK()
+	if err != nil {
+		return errors.Wrap(err, "failed to get the current issuer key")
+	}
+	secret, err := GetSecret(currentIssuerKey)
 	if err != nil {
 		return errors.Wrap(err, "failed to get the secret")
 	}

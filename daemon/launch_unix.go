@@ -122,6 +122,7 @@ func (launcher DaemonLauncher) Launch(ctx context.Context) (context.Context, int
 	if err != nil {
 		return ctx, -1, err
 	}
+	cmd.Dir = launcher.RunDir
 
 	if launcher.Uid != -1 && launcher.Gid != -1 {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
@@ -212,7 +213,7 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 	}
 
 	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
 	cases := make([]reflect.SelectCase, len(daemons)+2)
 	for idx, daemon := range daemons {
 		cases[idx].Dir = reflect.SelectRecv
@@ -236,6 +237,10 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 				}
 				if sys_sig == syscall.SIGTERM {
 					log.Warnf("Received SIGTERM, pausing the signal forwarding to daemons for %s", param.Xrootd_ShutdownTimeout.GetDuration().String())
+					time.Sleep(param.Xrootd_ShutdownTimeout.GetDuration())
+				}
+				if sys_sig == syscall.SIGHUP {
+					log.Warnf("Received SIGHUP, reloading the daemons for %s", param.Xrootd_ShutdownTimeout.GetDuration().String())
 					time.Sleep(param.Xrootd_ShutdownTimeout.GetDuration())
 				}
 				log.Warnf("Forwarding signal %v to daemons\n", sys_sig)

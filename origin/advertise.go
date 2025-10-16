@@ -137,6 +137,16 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 			}
 		}
 
+		// Populate the struct for the namespace's "token generation" field
+		// TODO: It's not clear what the intended difference/abstraction between the
+		// "Generation" and the "Issuer" fields is... We should define these eventually
+		var tokGen server_structs.TokenGen
+		if len(issuerUrls) > 0 {
+			tokGen.Strategy = server_structs.OAuthStrategy
+			tokGen.MaxScopeDepth = 3
+			tokGen.CredentialIssuer = issuerUrls[0].IssuerUrl
+		}
+
 		nsAds = append(nsAds, server_structs.NamespaceAdV2{
 			Caps: server_structs.Capabilities{
 				PublicReads: export.Capabilities.PublicReads,
@@ -145,15 +155,9 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 				Listings:    export.Capabilities.Listings,
 				DirectReads: export.Capabilities.DirectReads,
 			},
-			Path: export.FederationPrefix,
-			Generation: []server_structs.TokenGen{{
-				Strategy:      server_structs.StrategyType("OAuth2"),
-				MaxScopeDepth: 3,
-				// TODO: Is this the correct issuer URL to assign here? It's not clear what the
-				// intended difference between the "Generation" and the "Issuer" fields is...
-				CredentialIssuer: *serverIssuerUrl,
-			}},
-			Issuer: issuerUrls,
+			Path:       export.FederationPrefix,
+			Generation: []server_structs.TokenGen{tokGen},
+			Issuer:     issuerUrls,
 		})
 		prefixes = append(prefixes, export.FederationPrefix)
 	}

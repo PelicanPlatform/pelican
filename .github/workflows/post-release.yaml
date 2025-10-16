@@ -5,6 +5,7 @@ name: post-release
 on:
   release:
     types: [published]
+  workflow_call:
 
 jobs:
   toggle-webhook:

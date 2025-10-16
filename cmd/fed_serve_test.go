@@ -80,7 +80,6 @@ func TestFedServePosixOrigin(t *testing.T) {
 
 	// Increase the log level; otherwise, its difficult to debug failures
 	viper.Set("Logging.Level", "Debug")
-	config.InitConfig()
 
 	viper.Set("Origin.StoragePrefix", t.TempDir())
 	viper.Set("Origin.FederationPrefix", "/test")
@@ -94,7 +93,7 @@ func TestFedServePosixOrigin(t *testing.T) {
 	viper.Set("Origin.EnableVoms", false)
 	viper.Set("TLSSkipVerify", true)
 	viper.Set("Server.EnableUI", false)
-	viper.Set("Registry.DbLocation", filepath.Join(t.TempDir(), "ns-registry.sqlite"))
+	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(t.TempDir(), "ns-registry.sqlite"))
 	viper.Set("Registry.RequireOriginApproval", false)
 	viper.Set("Registry.RequireCacheApproval", false)
 	viper.Set("Director.DbLocation", filepath.Join(t.TempDir(), "director.sqlite"))

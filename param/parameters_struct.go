@@ -26,17 +26,21 @@ import (
 type Config struct {
 	Cache struct {
 		BlocksToPrefetch int `mapstructure:"blockstoprefetch" yaml:"BlocksToPrefetch"`
+		ClientStatisticsLocation string `mapstructure:"clientstatisticslocation" yaml:"ClientStatisticsLocation"`
 		Concurrency int `mapstructure:"concurrency" yaml:"Concurrency"`
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
 		DataLocations []string `mapstructure:"datalocations" yaml:"DataLocations"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DefaultCacheTimeout time.Duration `mapstructure:"defaultcachetimeout" yaml:"DefaultCacheTimeout"`
 		EnableBroker bool `mapstructure:"enablebroker" yaml:"EnableBroker"`
+		EnableEvictionMonitoring bool `mapstructure:"enableevictionmonitoring" yaml:"EnableEvictionMonitoring"`
 		EnableLotman bool `mapstructure:"enablelotman" yaml:"EnableLotman"`
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
 		EnablePrefetch bool `mapstructure:"enableprefetch" yaml:"EnablePrefetch"`
 		EnableTLSClientAuth bool `mapstructure:"enabletlsclientauth" yaml:"EnableTLSClientAuth"`
 		EnableVoms bool `mapstructure:"enablevoms" yaml:"EnableVoms"`
+		EvictionMonitoringInterval time.Duration `mapstructure:"evictionmonitoringinterval" yaml:"EvictionMonitoringInterval"`
+		EvictionMonitoringMaxDepth int `mapstructure:"evictionmonitoringmaxdepth" yaml:"EvictionMonitoringMaxDepth"`
 		ExportLocation string `mapstructure:"exportlocation" yaml:"ExportLocation"`
 		FedTokenLocation string `mapstructure:"fedtokenlocation" yaml:"FedTokenLocation"`
 		FilesBaseSize string `mapstructure:"filesbasesize" yaml:"FilesBaseSize"`
@@ -52,6 +56,7 @@ type Config struct {
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
 		SelfTest bool `mapstructure:"selftest" yaml:"SelfTest"`
 		SelfTestInterval time.Duration `mapstructure:"selftestinterval" yaml:"SelfTestInterval"`
+		SelfTestMaxAge time.Duration `mapstructure:"selftestmaxage" yaml:"SelfTestMaxAge"`
 		SentinelLocation string `mapstructure:"sentinellocation" yaml:"SentinelLocation"`
 		StorageLocation string `mapstructure:"storagelocation" yaml:"StorageLocation"`
 		Url string `mapstructure:"url" yaml:"Url"`
@@ -75,6 +80,8 @@ type Config struct {
 	ConfigLocations []string `mapstructure:"configlocations" yaml:"ConfigLocations"`
 	Debug bool `mapstructure:"debug" yaml:"Debug"`
 	Director struct {
+		AdaptiveSortEWMATimeConstant time.Duration `mapstructure:"adaptivesortewmatimeconstant" yaml:"AdaptiveSortEWMATimeConstant"`
+		AdaptiveSortTruncateConstant int `mapstructure:"adaptivesorttruncateconstant" yaml:"AdaptiveSortTruncateConstant"`
 		AdvertiseUrl string `mapstructure:"advertiseurl" yaml:"AdvertiseUrl"`
 		AdvertisementTTL time.Duration `mapstructure:"advertisementttl" yaml:"AdvertisementTTL"`
 		AssumePresenceAtSingleOrigin bool `mapstructure:"assumepresenceatsingleorigin" yaml:"AssumePresenceAtSingleOrigin"`
@@ -91,6 +98,7 @@ type Config struct {
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
 		EnableStat bool `mapstructure:"enablestat" yaml:"EnableStat"`
 		FedTokenLifetime time.Duration `mapstructure:"fedtokenlifetime" yaml:"FedTokenLifetime"`
+		FilterCachesInErrorState bool `mapstructure:"filtercachesinerrorstate" yaml:"FilterCachesInErrorState"`
 		FilteredServers []string `mapstructure:"filteredservers" yaml:"FilteredServers"`
 		GeoIPLocation string `mapstructure:"geoiplocation" yaml:"GeoIPLocation"`
 		MaxMindKeyFile string `mapstructure:"maxmindkeyfile" yaml:"MaxMindKeyFile"`
@@ -130,6 +138,7 @@ type Config struct {
 		OIDCGroupClaim string `mapstructure:"oidcgroupclaim" yaml:"OIDCGroupClaim"`
 		OIDCPreferClaimsFromIDToken bool `mapstructure:"oidcpreferclaimsfromidtoken" yaml:"OIDCPreferClaimsFromIDToken"`
 		QDLLocation string `mapstructure:"qdllocation" yaml:"QDLLocation"`
+		RedirectUris []string `mapstructure:"redirecturis" yaml:"RedirectUris"`
 		ScitokensServerLocation string `mapstructure:"scitokensserverlocation" yaml:"ScitokensServerLocation"`
 		TomcatLocation string `mapstructure:"tomcatlocation" yaml:"TomcatLocation"`
 		UserStripDomain bool `mapstructure:"userstripdomain" yaml:"UserStripDomain"`
@@ -186,6 +195,7 @@ type Config struct {
 		AggregatePrefixes []string `mapstructure:"aggregateprefixes" yaml:"AggregatePrefixes"`
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
 		DataRetention time.Duration `mapstructure:"dataretention" yaml:"DataRetention"`
+		EnablePrometheus bool `mapstructure:"enableprometheus" yaml:"EnablePrometheus"`
 		LabelLimit int `mapstructure:"labellimit" yaml:"LabelLimit"`
 		LabelNameLengthLimit int `mapstructure:"labelnamelengthlimit" yaml:"LabelNameLengthLimit"`
 		LabelValueLengthLimit int `mapstructure:"labelvaluelengthlimit" yaml:"LabelValueLengthLimit"`
@@ -205,6 +215,7 @@ type Config struct {
 		ClientSecretFile string `mapstructure:"clientsecretfile" yaml:"ClientSecretFile"`
 		DeviceAuthEndpoint string `mapstructure:"deviceauthendpoint" yaml:"DeviceAuthEndpoint"`
 		Issuer string `mapstructure:"issuer" yaml:"Issuer"`
+		Scopes []string `mapstructure:"scopes" yaml:"Scopes"`
 		TokenEndpoint string `mapstructure:"tokenendpoint" yaml:"TokenEndpoint"`
 		UserInfoEndpoint string `mapstructure:"userinfoendpoint" yaml:"UserInfoEndpoint"`
 	} `mapstructure:"oidc" yaml:"OIDC"`
@@ -259,6 +270,7 @@ type Config struct {
 		ScitokensUsernameClaim string `mapstructure:"scitokensusernameclaim" yaml:"ScitokensUsernameClaim"`
 		SelfTest bool `mapstructure:"selftest" yaml:"SelfTest"`
 		SelfTestInterval time.Duration `mapstructure:"selftestinterval" yaml:"SelfTestInterval"`
+		SelfTestMaxAge time.Duration `mapstructure:"selftestmaxage" yaml:"SelfTestMaxAge"`
 		StoragePrefix string `mapstructure:"storageprefix" yaml:"StoragePrefix"`
 		StorageType string `mapstructure:"storagetype" yaml:"StorageType"`
 		TokenAudience string `mapstructure:"tokenaudience" yaml:"TokenAudience"`
@@ -359,15 +371,19 @@ type Config struct {
 	Xrootd struct {
 		AuthRefreshInterval time.Duration `mapstructure:"authrefreshinterval" yaml:"AuthRefreshInterval"`
 		Authfile string `mapstructure:"authfile" yaml:"Authfile"`
+		AutoShutdownEnabled bool `mapstructure:"autoshutdownenabled" yaml:"AutoShutdownEnabled"`
 		ConfigFile string `mapstructure:"configfile" yaml:"ConfigFile"`
+		ConfigUpdateFailureTimeout time.Duration `mapstructure:"configupdatefailuretimeout" yaml:"ConfigUpdateFailureTimeout"`
 		DetailedMonitoringHost string `mapstructure:"detailedmonitoringhost" yaml:"DetailedMonitoringHost"`
 		DetailedMonitoringPort int `mapstructure:"detailedmonitoringport" yaml:"DetailedMonitoringPort"`
 		EnableLocalMonitoring bool `mapstructure:"enablelocalmonitoring" yaml:"EnableLocalMonitoring"`
+		HttpMaxDelay time.Duration `mapstructure:"httpmaxdelay" yaml:"HttpMaxDelay"`
 		LocalMonitoringHost string `mapstructure:"localmonitoringhost" yaml:"LocalMonitoringHost"`
 		MacaroonsKeyFile string `mapstructure:"macaroonskeyfile" yaml:"MacaroonsKeyFile"`
 		ManagerHost string `mapstructure:"managerhost" yaml:"ManagerHost"`
 		ManagerPort int `mapstructure:"managerport" yaml:"ManagerPort"`
 		MaxStartupWait time.Duration `mapstructure:"maxstartupwait" yaml:"MaxStartupWait"`
+		MaxThreads int `mapstructure:"maxthreads" yaml:"MaxThreads"`
 		Mount string `mapstructure:"mount" yaml:"Mount"`
 		Port int `mapstructure:"port" yaml:"Port"`
 		RobotsTxtFile string `mapstructure:"robotstxtfile" yaml:"RobotsTxtFile"`
@@ -384,17 +400,21 @@ type Config struct {
 type configWithType struct {
 	Cache struct {
 		BlocksToPrefetch struct { Type string; Value int }
+		ClientStatisticsLocation struct { Type string; Value string }
 		Concurrency struct { Type string; Value int }
 		DataLocation struct { Type string; Value string }
 		DataLocations struct { Type string; Value []string }
 		DbLocation struct { Type string; Value string }
 		DefaultCacheTimeout struct { Type string; Value time.Duration }
 		EnableBroker struct { Type string; Value bool }
+		EnableEvictionMonitoring struct { Type string; Value bool }
 		EnableLotman struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
 		EnablePrefetch struct { Type string; Value bool }
 		EnableTLSClientAuth struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
+		EvictionMonitoringInterval struct { Type string; Value time.Duration }
+		EvictionMonitoringMaxDepth struct { Type string; Value int }
 		ExportLocation struct { Type string; Value string }
 		FedTokenLocation struct { Type string; Value string }
 		FilesBaseSize struct { Type string; Value string }
@@ -410,6 +430,7 @@ type configWithType struct {
 		RunLocation struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }
 		SelfTestInterval struct { Type string; Value time.Duration }
+		SelfTestMaxAge struct { Type string; Value time.Duration }
 		SentinelLocation struct { Type string; Value string }
 		StorageLocation struct { Type string; Value string }
 		Url struct { Type string; Value string }
@@ -433,6 +454,8 @@ type configWithType struct {
 	ConfigLocations struct { Type string; Value []string }
 	Debug struct { Type string; Value bool }
 	Director struct {
+		AdaptiveSortEWMATimeConstant struct { Type string; Value time.Duration }
+		AdaptiveSortTruncateConstant struct { Type string; Value int }
 		AdvertiseUrl struct { Type string; Value string }
 		AdvertisementTTL struct { Type string; Value time.Duration }
 		AssumePresenceAtSingleOrigin struct { Type string; Value bool }
@@ -449,6 +472,7 @@ type configWithType struct {
 		EnableOIDC struct { Type string; Value bool }
 		EnableStat struct { Type string; Value bool }
 		FedTokenLifetime struct { Type string; Value time.Duration }
+		FilterCachesInErrorState struct { Type string; Value bool }
 		FilteredServers struct { Type string; Value []string }
 		GeoIPLocation struct { Type string; Value string }
 		MaxMindKeyFile struct { Type string; Value string }
@@ -488,6 +512,7 @@ type configWithType struct {
 		OIDCGroupClaim struct { Type string; Value string }
 		OIDCPreferClaimsFromIDToken struct { Type string; Value bool }
 		QDLLocation struct { Type string; Value string }
+		RedirectUris struct { Type string; Value []string }
 		ScitokensServerLocation struct { Type string; Value string }
 		TomcatLocation struct { Type string; Value string }
 		UserStripDomain struct { Type string; Value bool }
@@ -544,6 +569,7 @@ type configWithType struct {
 		AggregatePrefixes struct { Type string; Value []string }
 		DataLocation struct { Type string; Value string }
 		DataRetention struct { Type string; Value time.Duration }
+		EnablePrometheus struct { Type string; Value bool }
 		LabelLimit struct { Type string; Value int }
 		LabelNameLengthLimit struct { Type string; Value int }
 		LabelValueLengthLimit struct { Type string; Value int }
@@ -563,6 +589,7 @@ type configWithType struct {
 		ClientSecretFile struct { Type string; Value string }
 		DeviceAuthEndpoint struct { Type string; Value string }
 		Issuer struct { Type string; Value string }
+		Scopes struct { Type string; Value []string }
 		TokenEndpoint struct { Type string; Value string }
 		UserInfoEndpoint struct { Type string; Value string }
 	}
@@ -617,6 +644,7 @@ type configWithType struct {
 		ScitokensUsernameClaim struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }
 		SelfTestInterval struct { Type string; Value time.Duration }
+		SelfTestMaxAge struct { Type string; Value time.Duration }
 		StoragePrefix struct { Type string; Value string }
 		StorageType struct { Type string; Value string }
 		TokenAudience struct { Type string; Value string }
@@ -717,15 +745,19 @@ type configWithType struct {
 	Xrootd struct {
 		AuthRefreshInterval struct { Type string; Value time.Duration }
 		Authfile struct { Type string; Value string }
+		AutoShutdownEnabled struct { Type string; Value bool }
 		ConfigFile struct { Type string; Value string }
+		ConfigUpdateFailureTimeout struct { Type string; Value time.Duration }
 		DetailedMonitoringHost struct { Type string; Value string }
 		DetailedMonitoringPort struct { Type string; Value int }
 		EnableLocalMonitoring struct { Type string; Value bool }
+		HttpMaxDelay struct { Type string; Value time.Duration }
 		LocalMonitoringHost struct { Type string; Value string }
 		MacaroonsKeyFile struct { Type string; Value string }
 		ManagerHost struct { Type string; Value string }
 		ManagerPort struct { Type string; Value int }
 		MaxStartupWait struct { Type string; Value time.Duration }
+		MaxThreads struct { Type string; Value int }
 		Mount struct { Type string; Value string }
 		Port struct { Type string; Value int }
 		RobotsTxtFile struct { Type string; Value string }

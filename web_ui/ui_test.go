@@ -113,7 +113,6 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	viper.Set("ConfigDir", dirname)
-	config.InitConfig()
 	viper.Set("Server.UILoginRateLimit", 100)
 
 	if err := config.InitServer(ctx, server_structs.OriginType); err != nil {
@@ -206,12 +205,12 @@ func TestHandleWebUIAuth(t *testing.T) {
 
 		r = httptest.NewRecorder()
 		// This route **is** in ui.go/adminAccessPages,
-		// but the user is not logged in, so we will hand it over to the frontend for the redirect
+		// so we will check if the user is logged in and if not redirect to login
 		req, err = http.NewRequest("GET", "/view/origin", nil)
 		require.NoError(t, err)
 		route.ServeHTTP(r, req)
 
-		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
+		assert.Equal(t, http.StatusFound, r.Result().StatusCode)
 
 		authDB.Store(nil)
 	})
@@ -259,26 +258,27 @@ func TestHandleWebUIAuth(t *testing.T) {
 		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
 
 		r = httptest.NewRecorder()
-		// This route **is** in ui.go/adminAccessPages, and the user is not logged in, so we return 403
+		// This route **is** in ui.go/adminAccessPages, and the user is not logged in as admin.
+		// Send them to the 403 page to explain why they can't access the page
 		req, err = http.NewRequest("GET", "/view/origin", nil)
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: tok})
 		route.ServeHTTP(r, req)
-		assert.Equal(t, http.StatusForbidden, r.Result().StatusCode)
+		assert.Equal(t, http.StatusFound, r.Result().StatusCode)
 
 		r = httptest.NewRecorder()
 		req, err = http.NewRequest("GET", "/view/cache/", nil)
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: tok})
 		route.ServeHTTP(r, req)
-		assert.Equal(t, http.StatusForbidden, r.Result().StatusCode)
+		assert.Equal(t, http.StatusFound, r.Result().StatusCode)
 
 		r = httptest.NewRecorder()
 		req, err = http.NewRequest("GET", "/view/config/", nil)
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: tok})
 		route.ServeHTTP(r, req)
-		assert.Equal(t, http.StatusForbidden, r.Result().StatusCode)
+		assert.Equal(t, http.StatusFound, r.Result().StatusCode)
 
 		authDB.Store(nil)
 	})
@@ -513,11 +513,45 @@ func generateTestAdminUserToken(ctx context.Context) (string, error) {
 	}
 	// Create token for admin user in test
 	tk := token.NewWLCGToken()
-	tk.Issuer = fedInfo.DiscoveryEndpoint
+	issuer := param.Server_ExternalWebUrl.GetString()
+	if issuer == "" {
+		issuer = fedInfo.DiscoveryEndpoint
+	}
+	tk.Issuer = issuer
 	tk.Subject = "admin-user"
 	tk.Lifetime = 5 * time.Minute
-	tk.AddAudiences(fedInfo.DiscoveryEndpoint)
+	tk.AddAudiences(issuer)
 	tk.AddScopes(token_scopes.WebUi_Access)
+	// Add OIDC claims required by GetUserGroups
+	tk.Claims = map[string]string{
+		"user_id": "admin-user",
+	}
+	tok, err := tk.CreateToken()
+	if err != nil {
+		return "", err
+	}
+	return tok, nil
+}
+
+func generateToken(ctx context.Context, scopes []token_scopes.TokenScope, subject string) (string, error) {
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		return "", err
+	}
+	tk := token.NewWLCGToken()
+	issuer := param.Server_ExternalWebUrl.GetString()
+	if issuer == "" {
+		issuer = fedInfo.DiscoveryEndpoint
+	}
+	tk.Issuer = issuer
+	tk.Subject = subject
+	tk.Lifetime = 5 * time.Minute
+	tk.AddAudiences(issuer)
+	tk.AddScopes(scopes...)
+	// Add OIDC claims required by GetUserGroups
+	tk.Claims = map[string]string{
+		"user_id": subject,
+	}
 	tok, err := tk.CreateToken()
 	if err != nil {
 		return "", err
@@ -561,7 +595,6 @@ func TestApiToken(t *testing.T) {
 	defer server_utils.ResetTestState()
 	viper.Set("ConfigDir", dirName)
 	viper.Set(param.Server_UIAdminUsers.GetName(), "admin-user")
-	config.InitConfig()
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
@@ -574,6 +607,21 @@ func TestApiToken(t *testing.T) {
 	require.NoError(t, err, "Error setting up mock origin DB")
 	err = database.ServerDatabase.AutoMigrate(&server_structs.ApiKey{})
 	require.NoError(t, err, "Failed to migrate DB for API key table")
+
+	err = database.ServerDatabase.AutoMigrate(&database.Collection{})
+	require.NoError(t, err, "Failed to migrate DB for collections table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
+	require.NoError(t, err, "Failed to migrate DB for collection members table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
+	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
+	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
+	err = database.ServerDatabase.AutoMigrate(&database.Group{})
+	require.NoError(t, err, "Failed to migrate DB for groups table")
+	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
+	require.NoError(t, err, "Failed to migrate DB for group members table")
+	err = database.ServerDatabase.AutoMigrate(&database.User{})
+	require.NoError(t, err, "Failed to migrate DB for users table")
 
 	testCases := []struct {
 		name string
@@ -796,4 +844,195 @@ func TestApiToken(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, tc.run)
 	}
+}
+
+func TestGroupManagementAPI(t *testing.T) {
+	route := gin.New()
+	err := configureCommonEndpoints(route)
+	require.NoError(t, err)
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	dirName := t.TempDir()
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+	viper.Set("ConfigDir", dirName)
+	viper.Set(param.Server_UIAdminUsers.GetName(), "admin-user")
+	err = config.InitServer(ctx, server_structs.OriginType)
+	require.NoError(t, err)
+	// set up database
+	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	database.ServerDatabase = mockDB
+	require.NoError(t, err, "Error setting up mock origin DB")
+
+	err = database.ServerDatabase.AutoMigrate(&database.Collection{})
+	require.NoError(t, err, "Failed to migrate DB for collections table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
+	require.NoError(t, err, "Failed to migrate DB for collection members table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
+	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
+	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
+	err = database.ServerDatabase.AutoMigrate(&database.Group{})
+	require.NoError(t, err, "Failed to migrate DB for groups table")
+	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
+	require.NoError(t, err, "Failed to migrate DB for group members table")
+	err = database.ServerDatabase.AutoMigrate(&database.User{})
+	require.NoError(t, err, "Failed to migrate DB for users table")
+
+	t.Run("test-group-lifecycle", func(t *testing.T) {
+		// 1. Create a group as 'owner-user'
+		groupName := "test-group-lifecycle"
+		createGroupReq := map[string]string{"name": groupName, "description": "test group"}
+		body, err := json.Marshal(createGroupReq)
+		require.NoError(t, err)
+
+		req, err := http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
+		require.NoError(t, err)
+
+		ownerToken, err := generateTestAdminUserToken(ctx)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
+		req.Header.Set("Content-Type", "application/json")
+
+		recorder := httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusCreated, recorder.Code)
+
+		var createGroupResp map[string]string
+		err = json.NewDecoder(recorder.Body).Decode(&createGroupResp)
+		require.NoError(t, err)
+		groupID := createGroupResp["id"]
+		require.NotEmpty(t, groupID)
+
+		// 2. Add a member to the group as 'owner-user'
+		createUserReq := map[string]string{"username": "new-member", "sub": "new-member-sub", "issuer": "https://test-issuer.org"}
+		body, err = json.Marshal(createUserReq)
+		require.NoError(t, err)
+
+		// Pre-create the user before adding them to the group
+		req, err = http.NewRequest("POST", "/api/v1.0/users", bytes.NewReader(body))
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
+		req.Header.Set("Content-Type", "application/json")
+		recorder = httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusCreated, recorder.Code)
+
+		var createUserResp map[string]string
+		err = json.NewDecoder(recorder.Body).Decode(&createUserResp)
+		require.NoError(t, err)
+		userID := createUserResp["id"]
+		require.NotEmpty(t, userID)
+
+		addMemberReq := map[string]string{"userId": userID}
+		body, err = json.Marshal(addMemberReq)
+		require.NoError(t, err)
+
+		req, err = http.NewRequest("POST", "/api/v1.0/groups/"+groupID+"/members", bytes.NewReader(body))
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
+		req.Header.Set("Content-Type", "application/json")
+
+		recorder = httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+
+		// 3. Try to add a member as a different user ('other-user') - should fail
+		otherToken, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "other-user")
+		require.NoError(t, err)
+
+		// Re-marshal the addMemberReq to reuse it
+		body, err = json.Marshal(addMemberReq)
+		require.NoError(t, err)
+
+		req, err = http.NewRequest("POST", "/api/v1.0/groups/"+groupID+"/members", bytes.NewReader(body))
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: otherToken})
+		req.Header.Set("Content-Type", "application/json")
+
+		recorder = httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		assert.Equal(t, http.StatusForbidden, recorder.Code)
+
+		// 4. Try to remove a member as 'other-user' - should fail
+		req, err = http.NewRequest("DELETE", "/api/v1.0/groups/"+groupID+"/members/"+userID, nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: otherToken})
+
+		recorder = httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		assert.Equal(t, http.StatusForbidden, recorder.Code)
+
+		// 5. Remove the member from the group as 'owner-user'
+		req, err = http.NewRequest("DELETE", "/api/v1.0/groups/"+groupID+"/members/"+userID, nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
+
+		recorder = httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+	})
+
+	t.Run("test-regular-user-can-create-group", func(t *testing.T) {
+		// Test that a regular (non-admin) user can create a group
+		groupName := "test-regular-user-group"
+		createGroupReq := map[string]string{"name": groupName, "description": "test group by regular user"}
+		body, err := json.Marshal(createGroupReq)
+		require.NoError(t, err)
+
+		req, err := http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
+		require.NoError(t, err)
+
+		// Use a regular user token (not admin)
+		regularUserToken, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "regular-user")
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: regularUserToken})
+		req.Header.Set("Content-Type", "application/json")
+
+		recorder := httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		assert.Equal(t, http.StatusCreated, recorder.Code)
+
+		var createGroupResp map[string]string
+		err = json.NewDecoder(recorder.Body).Decode(&createGroupResp)
+		require.NoError(t, err)
+		groupID := createGroupResp["id"]
+		require.NotEmpty(t, groupID)
+
+		// Verify the regular user can manage their own group
+		createUserReq := map[string]string{"username": "new-member2", "sub": "new-member-sub2", "issuer": "https://test-issuer.org"}
+		body, err = json.Marshal(createUserReq)
+		require.NoError(t, err)
+
+		// Pre-create the user before adding them to the group
+		req, err = http.NewRequest("POST", "/api/v1.0/users", bytes.NewReader(body))
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: regularUserToken})
+		req.Header.Set("Content-Type", "application/json")
+		recorder = httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusCreated, recorder.Code)
+
+		var createUserResp map[string]string
+		err = json.NewDecoder(recorder.Body).Decode(&createUserResp)
+		require.NoError(t, err)
+		userID := createUserResp["id"]
+		require.NotEmpty(t, userID)
+
+		addMemberReq := map[string]string{"userId": userID}
+		body, err = json.Marshal(addMemberReq)
+		require.NoError(t, err)
+
+		req, err = http.NewRequest("POST", "/api/v1.0/groups/"+groupID+"/members", bytes.NewReader(body))
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: regularUserToken})
+		req.Header.Set("Content-Type", "application/json")
+
+		recorder = httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+	})
 }

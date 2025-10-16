@@ -48,6 +48,13 @@ interface ServerBase {
   filteredType: string;
   fromTopology: boolean;
   healthStatus: string;
+  serverStatus:
+    | 'shutting down'
+    | 'critical'
+    | 'degraded'
+    | 'warning'
+    | 'ok'
+    | 'unknown';
   ioLoad: number;
 }
 
@@ -109,4 +116,10 @@ export interface BaseToken {
 export interface GetToken extends BaseToken {
   id: string;
   createdBy: string;
+}
+
+export interface WellKnownConfiguration {
+  director_endpoint: string;
+  namespace_registration_endpoint: string;
+  jwks_uri: string;
 }

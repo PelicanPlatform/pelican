@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, University of Nebraska-Lincoln
+ * Copyright (C) 2025, University of Nebraska-Lincoln
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -26,7 +26,6 @@ import (
 	_ "embed"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -66,14 +65,13 @@ var (
 
 	//go:embed resources/pub-origin-no-directread.yml
 	pubOriginNoDirectRead string
-
-	//go:embed resources/test-https-origin.yml
-	httpsOriginConfig string
 )
 
 // Helper function to get a temporary token file
 // NOTE: when used make sure to call os.Remove() on the file
 func getTempToken(t *testing.T) (tempToken *os.File, tkn string) {
+	viper.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
@@ -152,6 +150,7 @@ func TestGetAndPutAuth(t *testing.T) {
 			transferResultsDownload, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			require.NoError(t, err)
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadURL, false, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -189,6 +188,7 @@ func TestGetAndPutAuth(t *testing.T) {
 			stats, err := os.Stat(filepath.Join(tempDir, fileName))
 			assert.NoError(t, err)
 			assert.NotNil(t, stats)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl.String(), false, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -219,6 +219,7 @@ func TestGetAndPutAuth(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, len(transferResultsDownload), 1)
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadURL, false, client.WithToken(tmpTkn)))
 		}
 	})
 
@@ -241,12 +242,14 @@ func TestGetAndPutAuth(t *testing.T) {
 			// Upload the file with PUT
 			transferResultsUpload, err := client.DoPut(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
 			require.NoError(t, err)
+			require.Equal(t, len(transferResultsUpload), 1)
 			require.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 
 			// Download that same file with GET
 			transferResultsDownload, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadURL, false, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -281,6 +284,7 @@ func TestGetAndPutAuth(t *testing.T) {
 			transferResultsDownload, err := client.DoGet(fed.Ctx, uploadUrl, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, false, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 	t.Cleanup(func() {
@@ -341,6 +345,7 @@ func TestCopyAuth(t *testing.T) {
 			transferResultsDownload, err := client.DoCopy(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			assert.Equal(t, int64(17), transferResultsDownload[0].TransferredBytes)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadURL, false, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -377,6 +382,7 @@ func TestCopyAuth(t *testing.T) {
 			stats, err := os.Stat(filepath.Join(tempDir, fileName))
 			assert.NoError(t, err)
 			assert.NotNil(t, stats)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl.String(), false, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -405,6 +411,7 @@ func TestCopyAuth(t *testing.T) {
 			transferResultsDownload, err := client.DoCopy(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadURL, false, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -439,6 +446,7 @@ func TestCopyAuth(t *testing.T) {
 			transferResultsDownload, err := client.DoCopy(fed.Ctx, uploadUrl, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, false, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 	t.Cleanup(func() {
@@ -858,58 +866,60 @@ func TestObjectList(t *testing.T) {
 	})
 }
 
+// NOTE: This test is commented because we've hit a point where all recent versions of Origin
+//       backends support PROPFIND (S3, HTTP, Globus, Xroot, POSIX), meaning there's nothing we
+//       can mock against to get a 405 response. However, it's likely a new backend in the future
+//       may not yet support PROPFIND, in which case we can turn this back on... if anyone remembers.
 // This tests object ls but for an origin that supports listings but with an object store that does not support PROPFIND.
 // We should get a 405 returned. This is a separate test since we need a completely different origin
-func TestObjectList405Error(t *testing.T) {
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-	test_utils.InitClient(t, nil)
+// func TestObjectList405Error(t *testing.T) {
+// 	server_utils.ResetTestState()
+// 	defer server_utils.ResetTestState()
+// 	test_utils.InitClient(t, nil)
 
-	var storageName string
+// 	var storageName string
 
-	// Set up our http backend so that we can return a 405 on a PROPFIND
-	body := "Hello, World!"
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "HEAD" && r.URL.Path == storageName {
-			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
-			w.WriteHeader(http.StatusOK)
-			return
-		} else if r.Method == "GET" && r.URL.Path == storageName {
-			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
-			w.WriteHeader(http.StatusPartialContent)
-			_, err := w.Write([]byte(body))
-			require.NoError(t, err)
-			return
-		} else if r.Method == "PROPFIND" && r.URL.Path == storageName {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-		}
-	}))
-	defer srv.Close()
-	viper.Set("Origin.HttpServiceUrl", srv.URL)
+// 	// Set up our http backend so that we can return a 405 on a PROPFIND
+// 	body := "Hello, World!"
+// 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// 		if r.Method == "HEAD" && r.URL.Path == storageName {
+// 			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+// 			w.WriteHeader(http.StatusOK)
+// 			return
+// 		} else if r.Method == "GET" && r.URL.Path == storageName {
+// 			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+// 			w.WriteHeader(http.StatusPartialContent)
+// 			_, err := w.Write([]byte(body))
+// 			require.NoError(t, err)
+// 			return
+// 		} else if r.Method == "PROPFIND" && r.URL.Path == storageName {
+// 			w.WriteHeader(http.StatusMethodNotAllowed)
+// 		}
+// 	}))
+// 	defer srv.Close()
+// 	viper.Set("Origin.HttpServiceUrl", srv.URL)
 
-	fed := fed_test_utils.NewFedTest(t, httpsOriginConfig)
-	storageName = fed.Exports[0].StoragePrefix + "/hello_world"
-	discoveryHost := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
+// 	fed := fed_test_utils.NewFedTest(t, httpsOriginConfig)
+// 	storageName = fed.Exports[0].StoragePrefix + "/hello_world"
+// 	discoveryHost := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
 
-	_, err := client.DoList(fed.Ctx, "pelican://"+discoveryHost+"/my-prefix/hello_world")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "405: object listings are not supported by the discovered origin")
-}
+// 	_, err := client.DoList(fed.Ctx, "pelican://"+discoveryHost+"/my-prefix/hello_world")
+// 	require.Error(t, err)
+// 	require.Contains(t, err.Error(), "405: object listings are not supported by the discovered origin")
+// }
 
 // Startup a mini-federation and ensure the "pack=auto" functionality works
 // end-to-end
 func TestClientUnpack(t *testing.T) {
 	server_utils.ResetTestState()
-
-	err := config.InitClient()
-	require.NoError(t, err)
+	test_utils.InitClient(t, nil)
 
 	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
 	export := fed.Exports[0]
 
 	tmpDir := t.TempDir()
 	fooLocation := filepath.Join(tmpDir, "foo.txt")
-	err = os.WriteFile(fooLocation, []byte("hello world"), os.FileMode(0600))
+	err := os.WriteFile(fooLocation, []byte("hello world"), os.FileMode(0600))
 	require.NoError(t, err)
 	fi, err := os.Stat(fooLocation)
 	require.NoError(t, err)

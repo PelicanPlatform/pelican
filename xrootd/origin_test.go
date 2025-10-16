@@ -75,7 +75,6 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 
 	// Increase the log level; otherwise, its difficult to debug failures
 	viper.Set("Logging.Level", "Debug")
-	config.InitConfig()
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
@@ -218,7 +217,6 @@ func TestMultiExportOrigin(t *testing.T) {
 
 	// Initialize the origin before getting origin exports
 	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 

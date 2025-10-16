@@ -113,6 +113,7 @@ func (plauncher PrivilegedXrootdLauncher) Launch(ctx context.Context) (context.C
 				attrs.Files[3] = uintptr(plauncher.fds[1])
 			}
 		}
+		attrs.Dir = plauncher.runDir
 		return nil
 	})
 	iab := cap.NewIAB()

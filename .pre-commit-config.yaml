@@ -1,6 +1,6 @@
 # ***************************************************************
 #
-#  Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+#  Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
 #
 #  Licensed under the Apache License, Version 2.0 (the "License"); you
 #  may not use this file except in compliance with the License.  You may
@@ -20,7 +20,7 @@
 # See https://pre-commit.com/hooks.html for more hooks
 repos:
 -   repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: v6.0.0
     hooks:
     -   id: trailing-whitespace
         exclude: github_scripts/pelican_protocol.patch
@@ -32,7 +32,7 @@ repos:
     -   id: check-added-large-files
         args: ['--maxkb=1024']
 -   repo: https://github.com/golangci/golangci-lint
-    rev: v1.64.8
+    rev: v2.4.0
     hooks:
     -   id: golangci-lint
 -   repo: https://github.com/crate-ci/typos
@@ -43,7 +43,7 @@ repos:
         # suggested changes. We don't want false positives to mangle files.
         args: [--force-exclude, --sort]
 -   repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.10.0.1
+    rev: v0.11.0.1
     hooks:
     -   id: shellcheck
         args: [--severity=warning]

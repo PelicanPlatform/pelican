@@ -52,6 +52,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // GetTopologyJSON returns the namespaces and caches from OSDF topology
@@ -106,93 +107,117 @@ func GetTopologyJSON(ctx context.Context) (*server_structs.TopologyNamespacesJSO
 
 // Wait until given `reqUrl` returns the expected status.
 // Logging messages emitted will refer to `server` (e.g., origin, cache, director)
-// Pass true to statusMismatch to allow a mismatch of expected status code and what's returned not fail immediately
+// The `statusMismatch` param tells the probe not to fail immediately when a bad code is returned, useful
+// when the probed endpoint may be able to respond before it's fully initialized.
 func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expectedStatus int, statusMismatch bool) error {
 	expiry := time.Now().Add(param.Server_StartupTimeout.GetDuration())
 	ctx, cancel := context.WithDeadline(ctx, expiry)
 	defer cancel()
+
+	// We'll fire the test request every 50ms until it succeeds or generates an error
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
-	success := false
-	logged := false
-	var statusError error
-	statusErrLogged := false
 
-	for !(success || time.Now().After(expiry)) {
-		select {
-		case <-ticker.C:
-			req, err := http.NewRequestWithContext(ctx, method, reqUrl, nil)
-			if err != nil {
-				return err
-			}
-			httpClient := http.Client{
-				Transport: config.GetTransport(),
-				Timeout:   1 * time.Second,
-				CheckRedirect: func(req *http.Request, via []*http.Request) error {
-					return http.ErrUseLastResponse
-				},
-			}
-			resp, err := httpClient.Do(req)
-			if err != nil {
-				if !logged {
-					log.Infof("Failed to send request to %s at %s; likely server is not up (will retry in 50ms): %v", server, reqUrl, err)
-					logged = true
-				}
-			} else {
-				if resp.StatusCode == expectedStatus {
-					log.Debugf("%s server appears to be functioning at %s", server, reqUrl)
-					return nil
-				}
-				bytes, err := io.ReadAll(resp.Body)
-				if err != nil {
-					statusError = errors.Errorf("Received bad status code in reply to server ping at %s: %d. Expected %d. Can't read response body with error %v.", reqUrl, resp.StatusCode, expectedStatus, err)
-					if statusMismatch {
-						if !statusErrLogged {
-							log.Info(statusError, "Will retry until timeout")
-							statusErrLogged = true
-						}
-					} else {
-						// We didn't get the expected status
-						return statusError
-					}
-				} else {
-					if len(bytes) != 0 {
-						statusError = errors.Errorf("Received bad status code in reply to server ping at %s: %d. Expected %d. Response body: %s", reqUrl, resp.StatusCode, expectedStatus, string(bytes))
-						if statusMismatch {
-							if !statusErrLogged {
-								log.Info(statusError, "Will retry until timeout")
-								statusErrLogged = true
-							}
-						} else {
-							// We didn't get the expected status
-							return statusError
-						}
-					} else {
-						statusError = errors.Errorf("Received bad status code in reply to server ping at %s: %d. Expected %d. Response body is empty.", reqUrl, resp.StatusCode, expectedStatus)
-						if statusMismatch {
-							if !statusErrLogged {
-								log.Info(statusError, "Will retry until timeout")
-								statusErrLogged = true
-							}
-						} else {
-							return statusError
-						}
-					}
-				}
+	var (
+		lastConnErr   error // keep track of the last encountered reason the client can't connect to the server
+		lastStatusErr error // keep track error info related to status code mismatches
+		loggedConn    bool  // only log errors the first time the ticker fires, not every 50ms
+		loggedStatus  bool
+	)
 
-			}
-		case <-ctx.Done():
-			if statusError != nil {
-				return errors.Wrapf(statusError, "url %s didn't respond with the expected status code %d within %s", reqUrl, expectedStatus, param.Server_StartupTimeout.GetDuration().String())
-			}
-			return ctx.Err()
+	// Helper function to handle request logic.
+	// Has three return cases:
+	// - Tern_True: the probe was successful and the calling function can safely return nil
+	// - Tern_Unknown: the probe failed, but there is not yet an error to report because we'll keep trying
+	// - Tern_False: the probe failed and we've decided not to continue trying. This indicates a startup failure
+	// An error should only be returned alongside Tern_False.
+	doRequest := func() (utils.Ternary, error) {
+		req, err := http.NewRequestWithContext(ctx, method, reqUrl, nil)
+		if err != nil {
+			return utils.Tern_False, err
 		}
+		client := http.Client{
+			Transport: config.GetTransport(),
+			Timeout:   1 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			// Only record lastConnErr if it's not a context error or we haven't yet recorded any errors.
+			// Otherwise we risk overwriting something useful like "no route to host" with a generic "context canceled".
+			if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) || lastConnErr == nil {
+				lastConnErr = err
+			}
+			if !loggedConn {
+				log.Infof("Failed to send request to %s at %s; likely server is not up (will retry in 50ms): %v", server, reqUrl, err)
+				loggedConn = true
+			}
+			return utils.Tern_Unknown, nil
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == expectedStatus {
+			log.Debugf("%s server appears to be functioning at %s", server, reqUrl)
+			return utils.Tern_True, nil
+		}
+
+		body, readErr := io.ReadAll(resp.Body)
+		var statusErr error
+		if readErr != nil {
+			statusErr = errors.Errorf("received bad status code from %s: %d (expected %d), and failed to read body: %v", reqUrl, resp.StatusCode, expectedStatus, readErr)
+		} else if len(body) > 0 {
+			statusErr = errors.Errorf("received bad status code from %s: %d (expected %d), body: %s", reqUrl, resp.StatusCode, expectedStatus, string(body))
+		} else {
+			statusErr = errors.Errorf("received bad status code from %s: %d (expected %d), empty body", reqUrl, resp.StatusCode, expectedStatus)
+		}
+		lastStatusErr = statusErr
+
+		if statusMismatch {
+			if !loggedStatus {
+				log.Info(statusErr, "Will retry until timeout")
+				loggedStatus = true
+			}
+			return utils.Tern_Unknown, nil
+		}
+		return utils.Tern_False, statusErr // fail immediately if status code mismatch is not permitted
 	}
 
-	if statusError != nil {
-		return errors.Wrapf(statusError, "url %s didn't respond with the expected status code %d within 10s", reqUrl, expectedStatus)
-	} else {
-		return errors.Errorf("The %s server at %s either did not startup or did not respond quickly enough after %s of waiting", server, reqUrl, param.Server_StartupTimeout.GetDuration().String())
+	// Main work loop to fire the test against the url
+	for {
+		select {
+		case <-ticker.C:
+			result, err := doRequest()
+			switch result {
+			case utils.Tern_True:
+				return nil
+			case utils.Tern_Unknown:
+				// continue retrying until success or timeout
+				continue
+			case utils.Tern_False:
+				if err != nil {
+					return err // unrecoverable error, or we got a bad status code and statusMismatch is false
+				} else {
+					// We shouldn't get here because `doRequest` isn't setup to return a false with no
+					// error, but just in case...
+					return errors.New("unexpected result while testing server startup -- no error was provided, but the result was not a success")
+				}
+			}
+		case <-ctx.Done():
+			// Outside of context errors, there are two main classifications of errors we might see:
+			// - We tried to connect but never succeeded (e.g. no route to host, TLS handshake failure, etc.)
+			// - We connected but didn't get the expected response (e.g. wanted 200, got 403)
+			msg := fmt.Sprintf("url %s didn't respond with the expected status code %d within the timeout of %s (%s)",
+				reqUrl, expectedStatus, param.Server_StartupTimeout.GetDuration().String(), param.Server_StartupTimeout.GetName())
+			if lastStatusErr != nil {
+				return errors.Wrap(lastStatusErr, msg)
+			}
+			if lastConnErr != nil {
+				return errors.Wrap(lastConnErr, msg)
+			}
+			return errors.Wrap(ctx.Err(), msg) // context was canceled or deadline exceeded
+		}
 	}
 }
 
@@ -534,6 +559,10 @@ func SetFedTok(ctx context.Context, server server_structs.XRootDServer, tok stri
 // that gets reported to the Director, which can help inform the Director whether it needs to
 // cool down redirects to the server.
 func LaunchConcurrencyMonitoring(ctx context.Context, egrp *errgroup.Group, sType server_structs.ServerType) {
+	if !param.Monitoring_EnablePrometheus.GetBool() {
+		log.Infoln("Prometheus is not enabled, skipping IO concurrency monitoring")
+		return
+	}
 
 	doLoadMonitoring := func(ctx context.Context) error {
 		var concLimit int

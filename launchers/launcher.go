@@ -52,6 +52,10 @@ import (
 var (
 	ErrExitOnSignal error = errors.New("Exit program on signal")
 	ErrRestart      error = errors.New("Restart program")
+
+	// oncePrometheus is used to ensure that the embedded prometheus instance is only configured once,
+	// even when LaunchModules is called multiple times in test scenarios.
+	oncePrometheus sync.Once
 )
 
 func LaunchModules(ctx context.Context, modules server_structs.ServerType) (servers []server_structs.XRootDServer, shutdownCancel context.CancelFunc, err error) {
@@ -89,6 +93,10 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	// Register OIDC endpoint
 	if param.Server_EnableUI.GetBool() {
+		// Warn if Prometheus is disabled, but Web UI is enabled. Metrics via Web UI will not be available.
+		if !param.Monitoring_EnablePrometheus.GetBool() {
+			log.Warn("Prometheus is disabled, but Web UI is enabled. Metrics via Web UI will not be available.")
+		}
 		if modules.IsEnabled(server_structs.RegistryType) ||
 			(modules.IsEnabled(server_structs.OriginType) && param.Origin_EnableOIDC.GetBool()) ||
 			(modules.IsEnabled(server_structs.CacheType) && param.Cache_EnableOIDC.GetBool()) ||
@@ -189,7 +197,8 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	healthCheckUrl := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
 	if err = server_utils.WaitUntilWorking(ctx, "GET", healthCheckUrl, "Web UI", http.StatusOK, true); err != nil {
-		log.Errorln("Web engine check failed: ", err)
+		log.Errorf("The server was unable to unable to ping its health test endpoint at the configured %s during startup: %v",
+			param.Server_ExternalWebUrl.GetName(), err)
 		return
 	}
 
@@ -370,40 +379,65 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	}
 
-	if param.Server_EnableUI.GetBool() {
-		metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusWarning, "Prometheus not started")
-		if err = web_ui.ConfigureEmbeddedPrometheus(ctx, engine); err != nil {
-			err = errors.Wrap(err, "Failed to configure embedded prometheus instance")
-			metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusCritical, err.Error())
+	var prometheusInitErr error
+	if param.Monitoring_EnablePrometheus.GetBool() {
+		// Due to federation tests / fed-in-a-box, we need to configure the embedded prometheus instance only once
+		// and not for each server. This is why we use a sync.Once here.
+		oncePrometheus.Do(func() {
+			metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusWarning, "Prometheus not started")
+			prometheusInitErr = web_ui.ConfigureEmbeddedPrometheus(ctx, engine)
+			if prometheusInitErr != nil {
+				prometheusInitErr = errors.Wrap(prometheusInitErr, "failed to configure embedded Prometheus instance")
+				metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusCritical, prometheusInitErr.Error())
+				return
+			}
+			metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusOK, "Prometheus started")
+		})
+		if prometheusInitErr != nil {
+			err = prometheusInitErr
 			return
 		}
-		metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusOK, "Prometheus started")
+	}
 
+	if param.Server_EnableUI.GetBool() {
 		log.Info("Starting web login...")
 		egrp.Go(func() error { return web_ui.InitServerWebLogin(ctx) })
 	}
 
 	egrp.Go(func() error {
 		_ = config.RestartFlag
+		_ = config.ShutdownFlag
 		log.Debug("Will shutdown process on signal")
 		sigs := make(chan os.Signal, 1)
-		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-		select {
-		case sig := <-sigs:
-			log.Warningf("Received signal %v; will shutdown process", sig)
-			// Graceful shutdown if received SIGTERM
-			if sig == syscall.SIGTERM {
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
+		for {
+			select {
+			case sig := <-sigs:
+				if sig == syscall.SIGHUP {
+					log.Warning("Received SIGHUP; will restart process")
+					handleGracefulShutdown(ctx, modules, servers)
+					shutdownCancel()
+					return ErrRestart
+				}
+				log.Warningf("Received signal %v; will shutdown process", sig)
+				// Graceful shutdown if received SIGTERM
+				if sig == syscall.SIGTERM {
+					handleGracefulShutdown(ctx, modules, servers)
+				}
+				shutdownCancel()
+				return ErrExitOnSignal
+			case <-config.RestartFlag:
+				log.Warningf("Received restart request; will restart the process")
 				handleGracefulShutdown(ctx, modules, servers)
+				shutdownCancel()
+				return ErrRestart
+			case <-config.ShutdownFlag:
+				log.Warningf("Received shutdown request; will shutdown the process")
+				shutdownCancel()
+				return ErrExitOnSignal
+			case <-ctx.Done():
+				return nil
 			}
-			shutdownCancel()
-			return ErrExitOnSignal
-		case <-config.RestartFlag:
-			log.Warningf("Received restart request; will restart the process")
-			handleGracefulShutdown(ctx, modules, servers)
-			shutdownCancel()
-			return ErrRestart
-		case <-ctx.Done():
-			return nil
 		}
 	})
 

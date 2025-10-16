@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -16,63 +16,83 @@
  *
  ***************************************************************/
 
-/* Unpack the user information from pelican.
-
-   This is a workaround for the fact that the HTTP header claim source
-   doesn't function with the device code flow.
+/*
+ * Unpack the user information from Pelican.
+ *
+ * This is a workaround for the fact that the HTTP header claim source
+ * doesn't function with the device code flow.
  */
-if [exec_phase == 'post_token'] [
-     userInfo. := from_json(decode(claims.sub));
-     claims.sub := userInfo.u;
-     claims.groups := userInfo.g;
-     say('Got user name from pelican: ' + claims.sub);
+if [exec_phase == 'pre_auth']
+[
+    userInfo. := from_json(decode(claims.sub));
+    claims.sub := userInfo.u;
+    claims.groups := sort(userInfo.g);  /* ensure some semblance of order */
+    claims.scopes := sort(userInfo.s);
+    say('Pelican provided the user name: ' + claims.sub);
+    say('Pelican provided the list of groups: ' + to_string(claims.groups));
+    say('Pelican provided the list of scopes: ' + to_string(claims.scopes));
 ];
 
 if [0 == size(proxy_claims.)] then
 [
-     /* Fallback: OA4MP 5.4.1 doesn't set proxy_claims at all.
-        Copy from the claims token as a workaround
-      */
-{{ range $req := .OIDCAuthnReqs }}
-     if [is_defined(claims.'{{- $req.Claim -}}')] then
-     [
-         proxy_claims.'{{- $req.Claim -}}' := claims.'{{- $req.Claim -}}';
-     ];
-{{ end -}}
-     if [is_defined(claims.'{{- .OIDCAuthnUserClaim }}')] then
-     [
-         proxy_claims.'{{- .OIDCAuthnUserClaim }}' := claims.'{{- .OIDCAuthnUserClaim }}';
-     ];
-     if [0 == size(proxy_claims.)] then
-     [
-         return();
-     ];
+    /*
+     * Fallback: OA4MP 5.4.1 doesn't set proxy_claims at all.
+     * Copy from the claims token as a workaround.
+     */
+{{- range $req := .OIDCAuthnReqs }}
+    if [is_defined(claims.'{{- $req.Claim -}}')] then
+    [
+        proxy_claims.'{{- $req.Claim -}}' := claims.'{{- $req.Claim -}}';
+    ];
+{{- end }}
+    if [is_defined(claims.'{{- .OIDCAuthnUserClaim -}}')] then
+    [
+        proxy_claims.'{{- .OIDCAuthnUserClaim -}}' := claims.'{{- .OIDCAuthnUserClaim -}}';
+    ];
+    if [0 == size(proxy_claims.)] then
+    [
+        return();
+    ];
 ];
 
-say(proxy_claims.);
-
-{{ range $req := .OIDCAuthnReqs -}}
+/*
+ * Check that the claims in Pelican's Issuer.OIDCAuthenticationRequirements
+ * parameter are present.
+ */
+{{ range $req := .OIDCAuthnReqs }}
 if [!is_defined(proxy_claims.'{{- $req.Claim -}}')] then
 [
-     sys_err.ok := false;
-     sys_err.message := 'Authentication is missing claim {{- $req.Claim -}}.';
-     return();
+    sys_err.ok := false;
+    sys_err.message := 'Authentication is missing claim "{{- $req.Claim -}}".';
+    return();
 ];
+{{ end }}
 
-if [proxy_claims.'{{- $req.Claim -}}'  != '{{- $req.Value -}}'] then
+/*
+ * Check that the claims in Pelican's Issuer.OIDCAuthenticationRequirements
+ * parameter have the required value.
+ */
+{{ range $req := .OIDCAuthnReqs }}
+if [proxy_claims.'{{- $req.Claim -}}' != '{{- $req.Value -}}'] then
 [
-     sys_err.ok := false;
-     sys_err.message := 'Claim "{{- $req.Claim -}}" must be set to "{{- $req.Value -}}" for authentication';
-     return();
+    sys_err.ok := false;
+    sys_err.message := 'Claim "{{- $req.Claim -}}" must be set to "{{- $req.Value -}}" for authentication.';
+    return();
 ];
-{{ end -}}
+{{ end }}
 
+/*
+ * Check that the claim Pelican is using as the "username" is present.
+ */
 if [!is_defined(proxy_claims.'{{- .OIDCAuthnUserClaim -}}')] then
 [
-     sys_err.ok := false;
-     sys_err.message := 'Authentication is missing claim "{{- .OIDCAuthnUserClaim -}}".';
-     return();
+    sys_err.ok := false;
+    sys_err.message := 'Authentication is missing claim "{{- .OIDCAuthnUserClaim -}}".';
+    return();
 ];
-claims.'sub' := proxy_claims.'{{- .OIDCAuthnUserClaim -}}';
 
+/*
+ * Set the essential/required/core claims.
+ */
+claims.sub := proxy_claims.'{{- .OIDCAuthnUserClaim -}}';
 claims.iss := '{{- .OIDCIssuerURL -}}';

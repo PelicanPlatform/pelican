@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -131,22 +132,25 @@ type (
 	// and the functions responsible for generating these structs on-demand.
 	ServerAd struct {
 		ServerBaseAd
-		RegistryPrefix      string            `json:"registryPrefix"` // The server's prefix recorded in the registry
-		StorageType         OriginStorageType `json:"storageType"`    // Always POSIX for caches
-		DisableDirectorTest bool              `json:"directorTest"`
-		AuthURL             url.URL           `json:"auth_url"`
-		BrokerURL           url.URL           `json:"broker_url"` // The URL of the broker service to use for this host.
-		URL                 url.URL           `json:"url"`        // This is server's XRootD URL for file transfer
-		WebURL              url.URL           `json:"web_url"`    // This is server's Web interface and API
-		Type                string            `json:"type"`
-		Latitude            float64           `json:"latitude"`
-		Longitude           float64           `json:"longitude"`
-		Caps                Capabilities      `json:"capabilities"`
-		FromTopology        bool              `json:"from_topology"`
-		IOLoad              float64           `json:"io_load"`
-		Downtimes           []Downtime        `json:"downtimes,omitempty"` // Allow null values if no downtime
-		RequiredFeatures    []string          `json:"requiredFeatures"`    // A list of feature names required by this server
-		Status              string            `json:"status"`
+		RegistryPrefix         string            `json:"registryPrefix"` // The server's prefix recorded in the registry
+		StorageType            OriginStorageType `json:"storageType"`    // Always POSIX for caches
+		DisableDirectorTest    bool              `json:"directorTest"`
+		AuthURL                url.URL           `json:"auth_url"`
+		BrokerURL              url.URL           `json:"broker_url"` // The URL of the broker service to use for this host.
+		URL                    url.URL           `json:"url"`        // This is server's XRootD URL for file transfer
+		WebURL                 url.URL           `json:"web_url"`    // This is server's Web interface and API
+		Type                   string            `json:"type"`
+		Latitude               float64           `json:"latitude"`  // Should be replaced by Coordinate
+		Longitude              float64           `json:"longitude"` // Should be replaced by Coordinate
+		Coordinate             Coordinate        `json:"coordinate"`
+		Caps                   Capabilities      `json:"capabilities"`
+		FromTopology           bool              `json:"from_topology"`
+		IOLoad                 float64           `json:"io_load"`
+		StatusWeight           float64           `json:"statusWeight"`           // The current EWMA-derived weight for this server's status, populated by the Director
+		StatusWeightLastUpdate int64             `json:"statusWeightLastUpdate"` // The last time the status weight was updated, in epoch seconds
+		Downtimes              []Downtime        `json:"downtimes"`              // Would be an empty slice if no downtime
+		RequiredFeatures       []string          `json:"requiredFeatures"`       // A list of feature names required by this server
+		Status                 string            `json:"status"`
 	}
 
 	// The struct holding a server's advertisement (including ServerAd and NamespaceAd)
@@ -175,8 +179,8 @@ type (
 		Namespaces          []NamespaceAdV2   `json:"namespaces"`
 		Issuer              []TokenIssuer     `json:"token-issuer"`
 		StorageType         OriginStorageType `json:"storageType"`
-		DisableDirectorTest bool              `json:"directorTest"`        // Use negative attribute (disable instead of enable) to be BC with legacy servers where they don't have this field
-		Downtimes           []Downtime        `json:"downtimes,omitempty"` // Allow null values if no downtime
+		DisableDirectorTest bool              `json:"directorTest"` // Use negative attribute (disable instead of enable) to be BC with legacy servers where they don't have this field
+		Downtimes           []Downtime        `json:"downtimes"`    // Would be an empty slice if no downtime
 		RequiredFeatures    []string          `json:"requiredFeatures"`
 		Now                 time.Time         `json:"now"`    // Populated when ad is sent to the director; otherwise, may be zero.  Used to detect time skews between client and server
 		Status              string            `json:"status"` // The status of the server ad. This is a human-readable string that describes the server's status.
@@ -201,16 +205,17 @@ type (
 	}
 
 	OpenIdDiscoveryResponse struct {
-		Issuer               string   `json:"issuer"`
-		JwksUri              string   `json:"jwks_uri"`
-		TokenEndpoint        string   `json:"token_endpoint,omitempty"`
-		UserInfoEndpoint     string   `json:"userinfo_endpoint,omitempty"`
-		RevocationEndpoint   string   `json:"revocation_endpoint,omitempty"`
-		GrantTypesSupported  []string `json:"grant_types_supported,omitempty"`
-		ScopesSupported      []string `json:"scopes_supported,omitempty"`
-		TokenAuthMethods     []string `json:"token_endpoint_auth_methods_supported,omitempty"`
-		RegistrationEndpoint string   `json:"registration_endpoint,omitempty"`
-		DeviceEndpoint       string   `json:"device_authorization_endpoint,omitempty"`
+		Issuer                string   `json:"issuer"`
+		JwksUri               string   `json:"jwks_uri"`
+		TokenEndpoint         string   `json:"token_endpoint,omitempty"`
+		UserInfoEndpoint      string   `json:"userinfo_endpoint,omitempty"`
+		RevocationEndpoint    string   `json:"revocation_endpoint,omitempty"`
+		GrantTypesSupported   []string `json:"grant_types_supported,omitempty"`
+		ScopesSupported       []string `json:"scopes_supported,omitempty"`
+		TokenAuthMethods      []string `json:"token_endpoint_auth_methods_supported,omitempty"`
+		RegistrationEndpoint  string   `json:"registration_endpoint,omitempty"`
+		DeviceEndpoint        string   `json:"device_authorization_endpoint,omitempty"`
+		AuthorizationEndpoint string   `json:"authorization_endpoint,omitempty"`
 	}
 
 	XPelHeader interface {
@@ -236,20 +241,31 @@ type (
 		VaultServer   *url.URL
 	}
 
+	CoordinateSource string // For indicating where we got a coordinate from, e.g. maxmind, override, random assignment, etc.
+
+	Coordinate struct {
+		Lat            float64          `mapstructure:"lat"`
+		Long           float64          `mapstructure:"long"`
+		AccuracyRadius uint16           `mapstructure:"accuracyRadius"`
+		Source         CoordinateSource `mapstructure:"source"`
+		FromTTLCache   bool             `mapstructure:"fromTtlCache"` // only used for random assignments when we're grabbing from the cache
+	}
+
 	ClientRedirectInfo struct {
-		Lat           float64 `json:"lat"`
-		Lon           float64 `json:"lon"`
-		GeoIpRadiusKm uint16  `json:"geoIpRadiusKm"` // 0 will indicate no radius (i.e. no resolution)
-		Resolved      bool    `json:"resolved"`      // whether or not the client IP was resolved by MaxMind
-		FromTTLCache  bool    `json:"fromTtlcache"`  // whether we're using a cached value
-		IpAddr        string  `json:"ipAddr"`
+		Coordinate Coordinate
+		IpAddr     string `json:"ipAddr"`
+	}
+
+	RedirectWeights struct {
+		DistanceWeight     float64 `json:"distanceWeight"`
+		IOLoadWeight       float64 `json:"ioLoadWeight"`
+		StatusWeight       float64 `json:"statusWeight"`
+		AvailabilityWeight float64 `json:"availabilityWeight"`
 	}
 
 	ServerRedirectInfo struct {
-		Lat        float64 `json:"lat"`
-		Lon        float64 `json:"lon"`
-		HasObject  string  `json:"hasObject"`
-		LoadWeight float64 `json:"loadWeight"`
+		Coordinate      Coordinate
+		RedirectWeights RedirectWeights
 	}
 
 	RedirectInfo struct {
@@ -279,6 +295,12 @@ var (
 
 	// Counter for the current server ad generation ID
 	generationID atomic.Uint64
+)
+
+const (
+	CoordinateSourceOverride = "override"
+	CoordinateSourceRandom   = "random"
+	CoordinateSourceMaxMind  = "maxmind"
 )
 
 const (
@@ -404,7 +426,7 @@ const (
 )
 
 const (
-	// SortType for sorting the server ads
+	// SortType for server ad sorting algorithms
 	DistanceType        SortType = "distance"
 	DistanceAndLoadType SortType = "distanceAndLoad"
 	RandomType          SortType = "random"
@@ -414,6 +436,10 @@ const (
 	AdAfterTrue    AdAfter = 1 // The ad was generated after the compared one
 	AdAfterUnknown AdAfter = 2 // One of the ads in the comparison is missing necessary attributes to determine when it was generated
 )
+
+func (st SortType) String() string {
+	return string(st)
+}
 
 func IsValidStrategy(strategy string) bool {
 	switch StrategyType(strategy) {
@@ -468,6 +494,14 @@ func (ad ServerBaseAd) GetExpiration() time.Time {
 
 // Returns true if `ad` was generated after `other`,
 func (ad *ServerBaseAd) After(other ServerBaseAdInterface) AdAfter {
+	// An interface value is nil only if both the type and value are nil.
+	// A typed-nil value (e.g. (*DirectorAd)(nil)) is not nil, and it will
+	// cause a panic if we try to access its methods.
+	// So we use reflection to check if the underlying value is nil.
+	if other == nil || (reflect.ValueOf(other).Kind() == reflect.Ptr && reflect.ValueOf(other).IsNil()) {
+		return AdAfterUnknown
+	}
+
 	// Handle the error condition -- the ad names must match.
 	if ad.Name != other.GetName() {
 		return AdAfterUnknown

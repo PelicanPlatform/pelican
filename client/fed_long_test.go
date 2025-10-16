@@ -23,7 +23,6 @@ package client_test
 import (
 	_ "embed"
 	"fmt"
-	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -32,6 +31,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
@@ -150,6 +150,33 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			}
 			require.NoError(t, err)
 			verifySuccessfulTransfer(t, transferDetailsDownload)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
+		}
+	})
+
+	t.Run("testRecursiveDownloadToDevNull", func(t *testing.T) {
+		oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		require.NoError(t, err)
+		defer func() {
+			_, err := config.SetPreferredPrefix(oldPref)
+			require.NoError(t, err)
+		}()
+
+		for _, export := range fed.Exports {
+			tempPath := tempDir
+			dirName := filepath.Base(tempPath)
+			uploadUrl := fmt.Sprintf("pelican://%s%s/%s/%s", discoveryUrl.Host,
+				export.FederationPrefix, "osdf_osdf", dirName)
+
+			// Upload the file with PUT
+			transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadUrl, true, client.WithTokenLocation(tempToken.Name()))
+			require.NoError(t, err)
+			verifySuccessfulTransfer(t, transferDetailsUpload)
+
+			transferDetailsDownload, err := client.DoGet(fed.Ctx, uploadUrl, os.DevNull, true, client.WithTokenLocation(tempToken.Name()))
+			require.NoError(t, err)
+			verifySuccessfulTransfer(t, transferDetailsDownload)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -188,6 +215,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			}
 			require.NoError(t, err)
 			verifySuccessfulTransfer(t, transferDetailsDownload)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -219,6 +247,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			}
 			require.NoError(t, err)
 			verifySuccessfulTransfer(t, transferDetailsDownload)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -349,6 +378,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 			}
 			require.NoError(t, err)
 			verifySuccessfulTransfer(t, transferDetailsDownload)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -377,6 +407,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 			}
 			require.NoError(t, err)
 			verifySuccessfulTransfer(t, transferDetailsDownload)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -405,6 +436,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 			}
 			require.NoError(t, err)
 			verifySuccessfulTransfer(t, transferDetailsDownload)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -433,6 +465,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 			}
 			require.NoError(t, err)
 			verifySuccessfulTransfer(t, transferDetailsDownload)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 }
@@ -442,21 +475,22 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 func TestFailureOnOriginDisablingListings(t *testing.T) {
 	server_utils.ResetTestState()
 
-	viper.Set("Logging.Level", "debug")
-	viper.Set("Origin.StorageType", "posix")
-	viper.Set("Origin.ExportVolumes", "/test")
-	viper.Set("Origin.EnablePublicReads", true)
-	viper.Set("Origin.EnableListings", false)
-	fed := fed_test_utils.NewFedTest(t, "")
+	fed := fed_test_utils.NewFedTest(t, pubExportNoDirectRead)
 
-	destDir := filepath.Join(fed.Exports[0].StoragePrefix, "test")
-	require.NoError(t, os.MkdirAll(destDir, os.FileMode(0755)))
-	log.Debugln("Will create origin file at", destDir)
-	err := os.WriteFile(filepath.Join(destDir, "test.txt"), []byte("test file content"), fs.FileMode(0644))
-	require.NoError(t, err)
-	downloadURL := fmt.Sprintf("pelican://%s:%s%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
-		fed.Exports[0].FederationPrefix, "test")
+	testFileContent := "test file content"
+	// Drop the testFileContent into the origin directory
+	tempFile, err := os.Create(filepath.Join(fed.Exports[0].StoragePrefix, "test.txt"))
+	require.NoError(t, err, "Error creating temp file")
+	defer os.Remove(tempFile.Name())
+	_, err = tempFile.WriteString(testFileContent)
+	require.NoError(t, err, "Error writing to temp file")
+	tempFile.Close()
 
+	// Set path for object to upload/download
+	downloadURL := fmt.Sprintf("pelican://%s:%s%s/", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+		fed.Exports[0].FederationPrefix)
+
+	// Download the directory with get, should fail due to no collections URL
 	_, err = client.DoGet(fed.Ctx, downloadURL, t.TempDir(), true)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no collections URL found in director response")
@@ -538,6 +572,7 @@ func TestSyncUpload(t *testing.T) {
 		transferDetailsDownload, err := client.DoGet(fed.Ctx, uploadUrl, t.TempDir(), true, client.WithTokenLocation(tempToken.Name()))
 		require.NoError(t, err)
 		verifySuccessfulTransfer(t, transferDetailsDownload)
+		require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 	})
 
 	t.Run("testSyncUploadNone", func(t *testing.T) {
@@ -556,6 +591,7 @@ func TestSyncUpload(t *testing.T) {
 
 		// Should have already been uploaded once
 		require.Len(t, transferDetailsUpload, 0)
+		require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 	})
 
 	t.Run("testSyncUploadPartial", func(t *testing.T) {
@@ -589,6 +625,7 @@ func TestSyncUpload(t *testing.T) {
 		contentBytes, err := os.ReadFile(filepath.Join(downloadDir, filepath.Base(innerTempDir), filepath.Base(innerTempFile.Name())))
 		require.NoError(t, err)
 		require.Equal(t, innerTestFileContent, string(contentBytes))
+		require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 	})
 
 	t.Run("testSyncUploadFile", func(t *testing.T) {
@@ -650,7 +687,9 @@ func TestSyncUpload(t *testing.T) {
 
 		// Attempt to sync an upload of a single file to a collection, should fail
 		_, err = client.DoPut(fed.Ctx, smallTestFile.Name(), uploadUrl, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
-		require.ErrorContains(t, err, "request failed (HTTP status 409)")
+		// The correct error code is a 409 but the way XRootD currently tears down connections, the server response can be
+		// lost and the client will see a broken connection error.  See the knowledge in https://github.com/PelicanPlatform/pelican/issues/2515
+		require.True(t, strings.Contains(err.Error(), "request failed (HTTP status 409)") || strings.Contains(err.Error(), "the existing TCP connection was broken"), "Expected a 409 error when trying to sync upload a file to a collection, got: %v", err)
 	})
 }
 
@@ -860,6 +899,7 @@ func TestSyncDownload(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, newTestFileContent, string(contentBytes))
 	})
+	require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 }
 
 // This test verifies the behavior when a directory path is passed to the object put command without the recursive option.
@@ -1061,7 +1101,7 @@ func TestObjectDelete(t *testing.T) {
 		doesNotExistPath := fmt.Sprintf("pelican://%s%s/doesNotExist", discoveryUrl.Host, "/with-write")
 		err := client.DoDelete(fed.Ctx, doesNotExistPath, false, client.WithTokenLocation(tempToken.Name()))
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "404")
+		require.True(t, errors.Is(err, client.ErrObjectNotFound))
 	})
 
 	// Test deleting an existing object.

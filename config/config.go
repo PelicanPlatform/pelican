@@ -29,12 +29,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/go-kit/log/term"
 	"github.com/go-playground/locales/en"
 	ut "github.com/go-playground/universal-translator"
 	"github.com/go-playground/validator/v10"
@@ -108,12 +110,33 @@ const (
 )
 
 const (
-	TokenWrite TokenOperation = iota
+	TokenWrite TokenOperation = 1 << iota
 	TokenRead
 	TokenSharedWrite
 	TokenSharedRead
 	TokenDelete
+	TokenList
 )
+
+// Set sets a new operation to the Operation instance
+func (o *TokenOperation) Set(newOp TokenOperation) {
+	*o |= newOp
+}
+
+// IsEnabled checks if a testOp is in the Operation instance
+func (o TokenOperation) IsEnabled(testOp TokenOperation) bool {
+	return o&testOp == testOp
+}
+
+// Clear all values in an operation
+func (o *TokenOperation) Clear() {
+	*o = TokenOperation(0)
+}
+
+// Create a new, empty operation
+func NewOperation() TokenOperation {
+	return TokenOperation(0)
+}
 
 var (
 	// Some of the unit tests probe behavior specific to OSDF vs Pelican.  Hence,
@@ -152,7 +175,13 @@ var (
 	enabledServers server_structs.ServerType
 	setServerOnce  sync.Once
 
-	RestartFlag = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
+	// Some config parsing tools will init both client and server config, but both
+	// warn about several config params. Only warn once per process.
+	warnIssuerKeyOnce  sync.Once
+	warnDeprecatedOnce sync.Once
+
+	RestartFlag  = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
+	ShutdownFlag = make(chan any) // A channel flag to shutdown the server instance that launcher listens to (including cache)
 
 	validPrefixes = map[ConfigPrefix]bool{
 		PelicanPrefix: true,
@@ -502,8 +531,12 @@ func CleanupTempResources() (err error) {
 func getConfigBase() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		// We currently don't handle this case in Windows (and it may not even occur)
-		// This will be revisited in the future
+		os := runtime.GOOS
+		if os == "windows" {
+			windowsPath := filepath.Join("C:", "ProgramData", "pelican")
+			log.Warningln("No home directory found for user -- will check for configuration yaml in ", windowsPath)
+			return windowsPath
+		}
 		log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
 		return filepath.Join("/etc", "pelican")
 	}
@@ -576,24 +609,26 @@ func GetEnTranslator() ut.Translator {
 // along with printing out a warning to let them know they should update. Whether or not keys are mapped is
 // configured in docs/parameters.yaml using the `deprecated: true` and replacedby: `<list of new keys>` fields.
 func handleDeprecatedConfig() {
-	deprecatedMap := param.GetDeprecated()
-	for deprecated, replacement := range deprecatedMap {
-		if viper.IsSet(deprecated) {
-			if replacement[0] == "none" {
-				log.Warningf("Deprecated configuration key %s is set. This is being removed in future release", deprecated)
-			} else {
-				for _, rep := range replacement {
-					if viper.IsSet(rep) {
-						log.Warningf("The configuration key '%s' is deprecated. The value from its replacement '%s' will be used instead, and the value of the deprecated configuration key '%s' will be ignored.", deprecated, rep, deprecated)
-					} else {
-						log.Warningf("The configuration key '%s' is deprecated. Please use '%s' instead. Will use the value of deprecated config key '%s' for the new config key '%s'.", deprecated, rep, deprecated, rep)
-						value := viper.Get(deprecated)
-						viper.Set(rep, value)
+	warnDeprecatedOnce.Do(func() {
+		deprecatedMap := param.GetDeprecated()
+		for deprecated, replacement := range deprecatedMap {
+			if viper.IsSet(deprecated) {
+				if replacement[0] == "none" {
+					log.Warningf("Deprecated configuration key %s is set. This is being removed in future release", deprecated)
+				} else {
+					for _, rep := range replacement {
+						if viper.IsSet(rep) {
+							log.Warningf("The configuration key '%s' is deprecated. The value from its replacement '%s' will be used instead, and the value of the deprecated configuration key '%s' will be ignored.", deprecated, rep, deprecated)
+						} else {
+							log.Warningf("The configuration key '%s' is deprecated. Please use '%s' instead. Will use the value of deprecated config key '%s' for the new config key '%s'.", deprecated, rep, deprecated, rep)
+							value := viper.Get(deprecated)
+							viper.Set(rep, value)
+						}
 					}
 				}
 			}
 		}
-	}
+	})
 }
 
 func setupTranslation() error {
@@ -671,6 +706,10 @@ func handleContinuedCfg() error {
 // Read config file from web UI changes, and call viper.Set() to explicitly override the value
 // so that env wouldn't take precedence
 func setWebConfigOverride(v *viper.Viper, configPath string) error {
+	if configPath == "" {
+		return nil
+	}
+
 	webConfigFile, err := os.OpenFile(configPath, os.O_RDONLY|os.O_CREATE, 0644)
 	if err != nil {
 		return err
@@ -746,7 +785,12 @@ func InitConfigDir(v *viper.Viper) {
 	configDir := v.GetString("ConfigDir")
 	if configDir == "" {
 		if IsRootExecution() {
-			configDir = "/etc/pelican" // We currently don't handle this case in windows, will be revisited in the future
+			os := runtime.GOOS
+			if os == "windows" {
+				configDir = filepath.Join("C:", "ProgramData", "pelican")
+			} else {
+				configDir = filepath.Join("/etc", "pelican")
+			}
 		} else {
 			configDir = getConfigBase()
 		}
@@ -755,9 +799,9 @@ func InitConfigDir(v *viper.Viper) {
 	v.SetConfigName("pelican")
 }
 
-// InitConfig sets up the global Viper instance by loading defaults and
+// InitConfigInternal sets up the global Viper instance by loading defaults and
 // user-defined config files, validates config params, and initializes logging.
-func InitConfig() {
+func InitConfigInternal() {
 	// Set a prefix so Viper knows how to parse PELICAN_* env vars
 	// This must happen before config dir initialization so that Pelican
 	// can pick up setting the config dir with PELICAN_CONFIGDIR
@@ -842,7 +886,7 @@ func printConfigHelper(bytes []byte) {
 		log.SetFormatter(originalFormatter)
 	}()
 
-	isStdout := param.Logging_LogLocation.GetString() == ""
+	isStdout := param.Logging_LogLocation.GetString() == "" && term.IsTerminal(log.StandardLogger().Out)
 
 	log.SetFormatter(&log.TextFormatter{
 		DisableQuote:           true,
@@ -969,35 +1013,45 @@ func PrintClientConfig() error {
 // This function serves as a transitional step to help users migrate from IssuerKey to
 // IssuerKeysDirectory. It should be removed if the transition is done.
 func warnIssuerKey(v *viper.Viper) {
-	legacyKey := v.GetString(param.IssuerKey.GetName())
-	if legacyKey != "" {
-		if _, err := os.Stat(legacyKey); err == nil {
-			issuerKeyConfigBy := "default"
-			issuerKeysDirectoryConfigBy := "default"
-			changeExtension := ""
+	warnIssuerKeyOnce.Do(func() {
+		legacyKey := v.GetString(param.IssuerKey.GetName())
+		if legacyKey != "" {
 
-			configDir := v.GetString("ConfigDir")
-			if filepath.Join(configDir, "issuer.jwk") != param.IssuerKey.GetString() {
-				issuerKeyConfigBy = "custom"
-			}
-			if filepath.Join(configDir, "issuer-keys") != param.IssuerKeysDirectory.GetString() {
-				issuerKeysDirectoryConfigBy = "custom"
-			}
-			if !strings.HasSuffix(param.IssuerKey.GetString(), ".pem") {
-				changeExtension = "renamed to use '.pem' extension and "
-			}
+			if _, err := os.Stat(legacyKey); err == nil {
+				issuerKeyConfigBy := "default"
+				issuerKeysDirectoryConfigBy := "default"
+				changeExtension := ""
 
-			log.Errorf(
-				"File %q should be %smoved into directory %q. "+
-					"The %q parameter (currently set to %q via %s configuration) is being deprecated in favor of %q (currently set to %q via %s configuration). ",
-				param.IssuerKey.GetString(), changeExtension, param.IssuerKeysDirectory.GetString(),
-				param.IssuerKey.GetName(), param.IssuerKey.GetString(), issuerKeyConfigBy,
-				param.IssuerKeysDirectory.GetName(), param.IssuerKeysDirectory.GetString(), issuerKeysDirectoryConfigBy,
-			)
+				configDir := v.GetString("ConfigDir")
+				if filepath.Join(configDir, "issuer.jwk") != v.GetString(param.IssuerKey.GetName()) {
+					issuerKeyConfigBy = "custom"
+				}
+				if filepath.Join(configDir, "issuer-keys") != v.GetString(param.IssuerKeysDirectory.GetName()) {
+					issuerKeysDirectoryConfigBy = "custom"
+				}
+				if !strings.HasSuffix(v.GetString(param.IssuerKey.GetName()), ".pem") {
+					changeExtension = "renamed to use '.pem' extension and "
+				}
+
+				log.Errorf(
+					"File %q should be %smoved into directory %q. "+
+						"The %q parameter (currently set to %q via %s configuration) is being deprecated in favor of %q (currently set to %q via %s configuration). ",
+					v.GetString(param.IssuerKey.GetName()), changeExtension, v.GetString(param.IssuerKeysDirectory.GetName()),
+					param.IssuerKey.GetName(), param.IssuerKey.GetString(), issuerKeyConfigBy,
+					param.IssuerKeysDirectory.GetName(), v.GetString(param.IssuerKeysDirectory.GetName()), issuerKeysDirectoryConfigBy,
+				)
+			}
 		}
-	}
+	})
 }
 
+// Set all defaults relevant to servers (defaults can be set only for active servers)
+// but only for the passed viper instance.
+// We operate on the passed viper instance instead of the global because it lets us
+// construct two config instances for comparing defaults and overrides in the config
+// tool. As such, you SHOULD NOT do a `viper.Set()` or a `param.<some param>.Get*()`
+// here as part of the logic for setting defaults on the passed `v` because you'll be
+// operating on two different config structs!
 func SetServerDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
 	v.SetConfigType("yaml")
@@ -1012,6 +1066,11 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Xrootd_Authfile.GetName(), filepath.Join(configDir, "xrootd", "authfile"))
 	v.SetDefault(param.Xrootd_MacaroonsKeyFile.GetName(), filepath.Join(configDir, "macaroons-secret"))
 	v.SetDefault(param.Xrootd_ShutdownTimeout.GetName(), 1*time.Minute)
+	v.SetDefault(param.Xrootd_HttpMaxDelay.GetName(), "9s")
+	v.SetDefault(param.Xrootd_MaxThreads.GetName(), 20000)
+	v.SetDefault(param.Cache_EvictionMonitoringInterval.GetName(), "60s")
+	v.SetDefault(param.Cache_EvictionMonitoringMaxDepth.GetName(), 1)
+	v.SetDefault(param.Cache_ClientStatisticsLocation.GetName(), filepath.Join(param.Cache_RunLocation.GetString(), "xrootd.stats"))
 	v.SetDefault(param.IssuerKey.GetName(), filepath.Join(configDir, "issuer.jwk"))
 	v.SetDefault(param.IssuerKeysDirectory.GetName(), filepath.Join(configDir, "issuer-keys"))
 	v.SetDefault(param.Server_UIPasswordFile.GetName(), filepath.Join(configDir, "server-web-passwd"))
@@ -1024,6 +1083,11 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Origin_SelfTest.GetName(), true)
 	v.SetDefault(param.Origin_SelfTestInterval.GetName(), 15*time.Second)
 	v.SetDefault(param.Cache_SelfTestInterval.GetName(), 15*time.Second)
+	// Defaults for XRootD authfile, scitokens config, and self-test staleness checks
+	v.SetDefault(param.Xrootd_AutoShutdownEnabled.GetName(), true)
+	v.SetDefault(param.Xrootd_ConfigUpdateFailureTimeout.GetName(), 1*time.Hour)
+	v.SetDefault(param.Origin_SelfTestMaxAge.GetName(), 1*time.Hour)
+	v.SetDefault(param.Cache_SelfTestMaxAge.GetName(), 1*time.Hour)
 	v.SetDefault(param.Origin_DirectorTest.GetName(), true)
 	// Set up the default S3 URL style to be path-style here as opposed to in the defaults.yaml because
 	// we want to be able to check if this is user-provided (which we can't do for defaults.yaml)
@@ -1035,6 +1099,12 @@ func SetServerDefaults(v *viper.Viper) error {
 	// when Pelican is running in its own default Error level. Otherwise we use Pelican's configured log level as a
 	// default for other params.
 	defaultLevel := log.GetLevel().String()
+	// Logrus parses "warn" and converts it to "warning". Pelican uses "warn" in its config and docs,
+	// so we map it back here. This makes sure that something like `param.Logging_Origin_Cms.GetString()`
+	// returns a pelican-compatible log level.
+	if defaultLevel == log.WarnLevel.String() {
+		defaultLevel = "warn"
+	}
 	for _, param := range []param.StringParam{
 		param.Logging_Origin_Cms,
 		param.Logging_Origin_Xrd,
@@ -1217,6 +1287,22 @@ func SetServerDefaults(v *viper.Viper) error {
 			cacheConcurrency, param.Cache_Concurrency.GetName())
 	}
 
+	if directorStatusWeightTimeConstant := v.GetDuration(param.Director_AdaptiveSortEWMATimeConstant.GetName()); directorStatusWeightTimeConstant <= 0 {
+		duration := v.GetDuration(param.Director_AdaptiveSortEWMATimeConstant.GetName())
+		p := param.Director_AdaptiveSortEWMATimeConstant
+		log.Warningf("Invalid value of '%s' for config param %s; must be greater than 0. Resetting to default", duration.String(), p.GetName())
+		v.Set(p.GetName(), 5*time.Minute)
+	}
+
+	// By default, set adaptive sort truncate to the same number of servers the Director expects to send.
+	// Cannot be set below 3 because Pelican clients expect to try that many servers.
+	v.SetDefault(param.Director_AdaptiveSortTruncateConstant.GetName(), 6)
+	if adaptiveSortTruncateConst := v.GetInt(param.Director_AdaptiveSortTruncateConstant.GetName()); adaptiveSortTruncateConst < 3 {
+		log.Warningf("Invalid value of '%d' for config param %s; must be greater than or equal to 3. Resetting to default of %d",
+			adaptiveSortTruncateConst, param.Director_AdaptiveSortTruncateConstant.GetName(), 6)
+		v.Set(param.Director_AdaptiveSortTruncateConstant.GetName(), 6)
+	}
+
 	// Setup the audience to use.  We may customize the Origin.URL in the future if it has
 	// a `0` for the port number; to make the audience predictable (it goes into the xrootd
 	// configuration but we don't know the origin's port until after xrootd has started), we
@@ -1251,6 +1337,8 @@ func SetServerDefaults(v *viper.Viper) error {
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
 func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
+	InitConfigInternal()
+
 	setEnabledServer(currentServers)
 
 	// Output warnings before the defaults are set. The SetServerDefaults function sets the default values
@@ -1627,6 +1715,62 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		return err
 	}
 
+	// The certificate was either generated or has been provided by now. Verify that any configured
+	// hostnames are valid w.r.t the given certificate.
+	//
+	// We'll always check both Server.Hostname, Server.ExternalWebUrl because we don't enforce that
+	// these point to the same hostname (maybe we should?), and we'll conditionally check
+	// Origin.Url/Cache.Url, depending on whether the origin/cache servers are enabled.
+	// See https://github.com/PelicanPlatform/pelican/issues/1802 for a description of why we check
+	// these particular hostnames.
+	if param.Server_Hostname.IsSet() {
+		serverHostname := param.Server_Hostname.GetString()
+		if err := ValidateHostCertificateHostname(serverHostname); err != nil {
+			return errors.Wrapf(err, "unable to validate server hostname '%s' configured via %s against the TLS certificate"+
+				" configured via %s",
+				serverHostname, param.Server_Hostname.GetName(), param.Server_TLSCertificateChain.GetName())
+		}
+	}
+
+	// Helper func to deal with params that may include ports, which must be parsed so
+	// we can grab only the hostname
+	validateUrlHostname := func(urlParam param.StringParam) error {
+		urlStr := urlParam.GetString()
+		parsed, err := url.Parse(urlStr)
+		if err != nil {
+			return errors.Wrapf(err, "unable to parse %s as a URL", urlParam.GetName())
+		} else if parsed == nil {
+			return errors.New(fmt.Sprintf("the url configured via %s was parsed as nil; is it set?", urlParam.GetName()))
+		}
+
+		if err := ValidateHostCertificateHostname(parsed.Hostname()); err != nil {
+			return errors.Wrapf(err, "unable to validate hostname '%s' configured via %s against the TLS certificate"+
+				" configured via %s",
+				parsed.Hostname(), urlParam.GetName(), param.Server_TLSCertificateChain.GetName())
+		}
+		return nil
+	}
+
+	if param.Server_ExternalWebUrl.IsSet() {
+		if err = validateUrlHostname(param.Server_ExternalWebUrl); err != nil {
+			return err
+		}
+	}
+
+	// While I (Justin) cannot currently fathom a situation where the hostname of the Cache.Url
+	// or Origin.Url would not match either the Server.Hostname or the Server.ExternalWebUrl,
+	// we still validate them just in case.
+	if currentServers.IsEnabled(server_structs.CacheType) && param.Cache_Url.IsSet() {
+		if err = validateUrlHostname(param.Cache_Url); err != nil {
+			return err
+		}
+	}
+	if currentServers.IsEnabled(server_structs.OriginType) && param.Origin_Url.IsSet() {
+		if err = validateUrlHostname(param.Origin_Url); err != nil {
+			return err
+		}
+	}
+
 	// Generate the session secret and save it as the default value
 	if err := GenerateSessionSecret(); err != nil {
 		return err
@@ -1661,6 +1805,12 @@ func ResetClientInitialized() {
 	clientInitialized = false
 }
 
+// Set all defaults relevant to the client but only for the passed viper instance.
+// We operate on the passed viper instance instead of the global because it lets us
+// construct two config instances for comparing defaults and overrides in the config
+// tool. As such, you SHOULD NOT do a `viper.Set()` or a `param.<some param>.Get*()`
+// here as part of the logic for setting defaults on the passed `v` because you'll be
+// operating on two different config structs!
 func SetClientDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
 
@@ -1676,11 +1826,12 @@ func SetClientDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Server_TLSCACertificateFile.GetName(), filepath.Join(configDir, "certificates", "tlsca.pem"))
 
 	// Default is set outside of defaults.yaml to allow SetDefault call below to override
-	viper.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), 102400)
-	if param.MinimumDownloadSpeed.IsSet() {
-		viper.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), param.MinimumDownloadSpeed.GetInt())
+	v.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), 102400)
+	if v.IsSet(param.MinimumDownloadSpeed.GetName()) {
+		v.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), v.GetInt(param.MinimumDownloadSpeed.GetName()))
 	}
 
+	// This is the only block where we can assume the passed and global viper instances are the same.
 	if v == viper.GetViper() {
 		viper.AutomaticEnv()
 		upperPrefix := GetPreferredPrefix()
@@ -1792,11 +1943,12 @@ func SetClientDefaults(v *viper.Viper) error {
 	// Some client actions may take different defaults depending on whether we detect the plugin
 	v.SetDefault(param.Client_IsPlugin.GetName(), false)
 	v.SetDefault(param.Client_DirectorRetries.GetName(), 5)
-	if param.Client_IsPlugin.GetBool() {
+	if v.GetBool(param.Client_IsPlugin.GetName()) {
 		// If we _are_ the plugin, be more aggressive about retries
-		v.Set(param.Client_DirectorRetries.GetName(), 2*param.Client_DirectorRetries.GetInt())
+		v.Set(param.Client_DirectorRetries.GetName(), 2*v.GetInt(param.Client_DirectorRetries.GetName()))
 	}
-	if param.Client_DirectorRetries.GetInt() < 1 {
+
+	if v.GetInt(param.Client_DirectorRetries.GetName()) < 1 {
 		log.Warningf("Client.DirectorRetries was set to %d, but it must be at least 1. Falling back to default of 5.", param.Client_DirectorRetries.GetInt())
 		v.Set(param.Client_DirectorRetries.GetName(), 5)
 	}
@@ -1808,6 +1960,7 @@ func SetClientDefaults(v *viper.Viper) error {
 }
 
 func InitClient() error {
+	InitConfigInternal()
 	logging.FlushLogs(true)
 	if err := SetClientDefaults(viper.GetViper()); err != nil {
 		return err
@@ -1829,6 +1982,7 @@ func InitClient() error {
 	var printClientConfigErr error
 	printClientConfigOnce.Do(func() {
 		if log.GetLevel() == log.DebugLevel {
+			PrintPelicanVersion(os.Stdout)
 			printClientConfigErr = PrintClientConfig()
 		}
 	})
@@ -1874,6 +2028,11 @@ func ResetConfig() {
 	fedDiscoveryOnce = &sync.Once{}
 	globalFedInfo = pelican_url.FederationDiscovery{}
 	globalFedErr = nil
+
+	warnIssuerKeyOnce = sync.Once{}
+	warnDeprecatedOnce = sync.Once{}
+
+	setServerOnce = sync.Once{}
 
 	ResetIssuerPrivateKeys()
 

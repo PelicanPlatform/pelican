@@ -18,14 +18,26 @@ export const DirectorDropdown = ({
     <>
       <Dropdown transition={transition} flexDirection={'column'}>
         <Grid container spacing={1}>
-          <Grid item xs={12} md={7}>
+          <Grid
+            size={{
+              xs: 12,
+              md: 7,
+            }}
+          >
             <InformationSpan name={'Type'} value={server.type} />
             <InformationSpan name={'Version'} value={server.version} />
             <InformationSpan
               name={'In Downtime'}
               value={server.filtered ? 'True' : 'False'}
             />
-            <InformationSpan name={'Status'} value={server.healthStatus} />
+            <InformationSpan
+              name={'Server Status'}
+              value={server.serverStatus}
+            />
+            <InformationSpan
+              name={'XRootD Health Test'}
+              value={server.healthStatus}
+            />
             <InformationSpan name={'URL'} value={server.url} />
             <InformationSpan
               name={'Longitude'}
@@ -36,7 +48,12 @@ export const DirectorDropdown = ({
               value={server.latitude.toString()}
             />
           </Grid>
-          <Grid item xs={12} md={5}>
+          <Grid
+            size={{
+              xs: 12,
+              md: 5,
+            }}
+          >
             <Box
               borderRadius={1}
               height={'100%'}
@@ -73,7 +90,14 @@ export const CapabilitiesRow = ({
       {Object.entries(capabilities).map(([key, value]) => {
         const castKey = key as keyof Capabilities;
         return (
-          <Grid item md={12 / 5} sm={12 / 4} xs={12 / 2} key={key}>
+          <Grid
+            key={key}
+            size={{
+              md: 12 / 5,
+              sm: 12 / 4,
+              xs: 12 / 2,
+            }}
+          >
             <CapabilitiesChip
               name={key}
               value={value}

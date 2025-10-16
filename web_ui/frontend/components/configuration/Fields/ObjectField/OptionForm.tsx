@@ -25,7 +25,7 @@ const OptionForm = ({ onSubmit, value }: FormProps<Option>) => {
     }
 
     onSubmit(option);
-  }, [option]);
+  }, [option, onSubmit]);
 
   return (
     <>

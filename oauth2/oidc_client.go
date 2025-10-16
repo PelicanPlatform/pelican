@@ -129,9 +129,9 @@ func ServerOIDCClient() (result Config, provider config.OIDCProvider, err error)
 	}
 	result.Endpoint.UserInfoURL = userInfoEndpointURL.String()
 
-	// Set the scope
-	result.Scopes = []string{"openid", "profile", "email"}
-	// Add extra scope only for CILogon user info endpoint
+	// Set the scopes.
+	result.Scopes = param.OIDC_Scopes.GetStringSlice()
+	// For backwards compatibility, implicitly add CILogon-specific scopes.
 	if provider == config.CILogon {
 		result.Scopes = append(result.Scopes, "org.cilogon.userinfo")
 	}

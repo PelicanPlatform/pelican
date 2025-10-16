@@ -21,7 +21,6 @@ package director
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"net/http"
@@ -204,10 +203,11 @@ func getLinkDepth(filepath, prefix string) (int, error) {
 	// To make the final calculation easier, we also remove the head slash from the file path.
 	// e.g. filepath = /foo/bar/barz.txt   prefix = /foo
 	// we want commonPath = bar/barz.txt
-	if !strings.HasSuffix(prefix, "/") && prefix != "/" {
-		prefix += "/"
-	}
 	commonPath := strings.TrimPrefix(filepath, prefix)
+	commonPath = strings.TrimPrefix(commonPath, "/")
+	if len(commonPath) == 0 {
+		return 0, nil
+	}
 	pathDepth := len(strings.Split(commonPath, "/"))
 	return pathDepth, nil
 }
@@ -326,6 +326,14 @@ func generateLinkHeader(ctx *gin.Context, sAds []server_structs.ServerAd, nsAd s
 		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; pri=%d; depth=%d`, redirectURL.String(), idx+1, depth)
 	}
 	ctx.Writer.Header()["Link"] = []string{linkHeader}
+}
+
+// Generates the CORS headers needed to enable communication with web client
+func corsHeadersMiddleware(ginCtx *gin.Context) {
+	ginCtx.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+	ginCtx.Writer.Header().Set("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
+	ginCtx.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization") // TODO: , X-Pelican-User, X-Pelican-Timeout, X-Pelican-Token-Generation, X-Pelican-Authorization, X-Pelican-Namespace
+	ginCtx.Writer.Header().Set("Access-Control-Expose-Headers", "Content-Type, Authorization, X-Pelican-User, X-Pelican-Timeout, X-Pelican-Token-Generation, X-Pelican-Authorization, X-Pelican-Namespace")
 }
 
 // Generates the X-Pelican-Authorization header (when applicable) for responses that have
@@ -598,7 +606,6 @@ func generateRedirectResponse(ctx *gin.Context, chosenAds []server_structs.Serve
 		return
 	}
 
-	// Generate headers
 	generateLinkHeader(ctx, chosenAds, nsAd)
 	generateXAuthHeader(ctx, nsAd)
 	generateXTokenGenHeader(ctx, nsAd)
@@ -611,17 +618,16 @@ func generateRedirectResponse(ctx *gin.Context, chosenAds []server_structs.Serve
 
 	// Use debugging redirect info if available and it was asked for
 	if redirectInfo, exists := ctx.Get("redirectInfo"); exists && ctx.GetHeader("X-Pelican-Debug") == "true" {
-		redirectInfoJSON, err := json.Marshal(redirectInfo)
-		if err == nil {
-			// If using ctx.JSON, we need to set the Location header manually.
-			ctx.Writer.Header().Set("Location", getFinalRedirectURL(redirectURL, reqParams))
-			ctx.JSON(http.StatusTemporaryRedirect, redirectInfoJSON)
-			return
-		} else {
-			// Don't treat this is a redirect failure, just log it for director admins to see
-			// and continue with the redirect.
-			log.Errorf("Failed to marshal redirect info to JSON: %v", err)
-		}
+		ctx.Writer.Header().Set("Location", getFinalRedirectURL(redirectURL, reqParams))
+		ctx.Header("Content-Type", "application/json")
+		ctx.JSON(http.StatusTemporaryRedirect, redirectInfo)
+		return
+	}
+
+	// Check if the request has asked to not be redirected and return directly if so
+	if (reqParams.Has("redirect") && reqParams.Get("redirect") == "false") || ctx.Request.Method == http.MethodOptions {
+		ctx.Status(http.StatusOK)
+		return
 	}
 
 	// Note we only append the `authz` query parameter in the case of the redirect response and not the
@@ -862,6 +868,14 @@ func checkHostnameRedirects(c *gin.Context, incomingHost string) {
 func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		web_ui.ServerHeaderMiddleware(c)
+		corsHeadersMiddleware(c)
+
+		// If this is a OPTIONS request, we should just return OK
+		if c.Request.Method == http.MethodOptions {
+			c.Status(http.StatusOK)
+			c.Abort()
+			return
+		}
 
 		// If this is a request for getting public key, don't modify the path
 		// If this is a request to the Prometheus API, don't modify the path
@@ -1184,39 +1198,8 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	}
 
 	sn := adV2.Name
-	// Process received server(origin/cache) downtimes and toggle the director's in-memory downtime tracker when necessary
-	if adV2.Downtimes != nil {
-		filteredServersMutex.Lock()
-
-		// Update the cached server downtime list
-		serverDowntimes[sn] = adV2.Downtimes
-
-		now := time.Now().UTC().UnixMilli()
-		active := false // Flag to indicate if this server has active downtime in this server ad
-		for _, dt := range adV2.Downtimes {
-			if dt.StartTime <= now &&
-				(dt.EndTime >= now || dt.EndTime == server_structs.IndefiniteEndTime) {
-				active = true
-				break
-			}
-		}
-
-		// Inspect the existing downtime status for this server
-		existingFilterType, isServerFiltered := filteredServers[sn]
-
-		if active {
-			// Only override if there's no filter
-			if !isServerFiltered {
-				filteredServers[sn] = serverFiltered
-			}
-		} else {
-			// Clear only the downtimes with serverFiltered tag if it’s stale
-			if isServerFiltered && existingFilterType == serverFiltered {
-				delete(filteredServers, sn)
-			}
-		}
-		filteredServersMutex.Unlock()
-	}
+	// Process received server(origin/cache) downtimes and toggle the director's in-memory downtime tracker
+	applyServerDowntimes(sn, adV2.Downtimes)
 
 	// "Status" represents the server's overall health status. It is introduced in Pelican 7.17.0
 	if adV2.Status != "" { // For backward compatibility, we only process this if it is set
@@ -1247,7 +1230,7 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	}
 
 	// Forward to other directors, if applicable
-	forwardServiceAd(engineCtx, &adV2, sType)
+	forwardServiceAd(engineCtx, &adV2, sType, "")
 
 	// Correct any clock skews detected in the client
 	now := time.Now()
@@ -1646,14 +1629,21 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 
 	directorAPIV1 := router.Group("/api/v1.0/director", web_ui.ServerHeaderMiddleware)
 	{
+		// Answer CORS preflight requests, trivial response inlined
+		directorAPIV1.OPTIONS("/*any", corsHeadersMiddleware, func(ctx *gin.Context) {
+			ctx.String(http.StatusOK, "")
+		})
+
 		// Establish the routes used for cache/origin redirection
-		directorAPIV1.GET("/object/*any", redirectToCache)
-		directorAPIV1.HEAD("/object/*any", redirectToCache)
-		directorAPIV1.GET("/origin/*any", redirectToOrigin)
-		directorAPIV1.HEAD("/origin/*any", redirectToOrigin)
-		directorAPIV1.PUT("/origin/*any", redirectToOrigin)
-		directorAPIV1.DELETE("/origin/*any", redirectToOrigin)
-		directorAPIV1.Handle("PROPFIND", "/origin/*any", redirectToOrigin)
+		directorAPIV1.GET("/object/*any", corsHeadersMiddleware, redirectToCache)
+		directorAPIV1.HEAD("/object/*any", corsHeadersMiddleware, redirectToCache)
+		directorAPIV1.GET("/origin/*any", corsHeadersMiddleware, redirectToOrigin)
+		directorAPIV1.HEAD("/origin/*any", corsHeadersMiddleware, redirectToOrigin)
+		directorAPIV1.PUT("/origin/*any", corsHeadersMiddleware, redirectToOrigin)
+		directorAPIV1.DELETE("/origin/*any", corsHeadersMiddleware, redirectToOrigin)
+		directorAPIV1.Handle("PROPFIND", "/origin/*any", corsHeadersMiddleware, redirectToOrigin)
+
+		// Other API endpoints
 		directorAPIV1.GET("/directors", listDirectors)
 		directorAPIV1.POST("/registerDirector", serverAdMetricMiddleware, func(gctx *gin.Context) { registerDirectorAd(ctx, egrp, gctx) })
 		directorAPIV1.POST("/registerOrigin", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServerAd(ctx, gctx, server_structs.OriginType) })

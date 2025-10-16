@@ -43,6 +43,7 @@ import (
 	"github.com/pelicanplatform/pelican/classads"
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 )
@@ -114,7 +115,6 @@ func stashPluginMain(args []string) {
 	}()
 
 	var isConfigErr = false
-	config.InitConfig()
 	configErr := config.InitClient()
 	if configErr != nil {
 		log.Errorf("Problem initializing the Pelican client config: %v", configErr)
@@ -421,6 +421,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 	}()
 	defer close(results)
 
+	resultsChan := tc.Results()
 	jobMap := make(map[string]PluginTransfer)
 	var recursive bool
 	var tj *client.TransferJob
@@ -467,7 +468,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				failTransfer(transfer.url.String(), transfer.localFile, results, upload, err)
 				return err
 			}
-		case result, ok := <-tc.Results():
+		case result, ok := <-resultsChan:
 			if !ok {
 				log.Debugln("Client has no more results")
 				// Check to be sure we did not have a lookup error
@@ -778,31 +779,34 @@ func writeTransferErrorMessage(currentError string, transferUrl string) (errMsg 
 func createTransferError(err error) (transferError map[string]interface{}) {
 	transferError = make(map[string]interface{})
 	developerData := make(map[string]interface{})
-	errMsg := err.Error()
 
-	if errors.Is(err, &client.SlowTransferError{}) {
-		developerData["PelicanErrorCode"] = 6002 // From error_codes.yaml
-		developerData["Retryable"] = true        // SlowTransferError is always retryable
-		developerData["ErrorMessage"] = "Slow transfer"
-		developerData["ErrorType"] = "Transfer.SlowTransfer"
-		transferError["ErrorType"] = "Transfer"
-	} else if strings.Contains(errMsg, "server returned 404 Not Found") {
-		developerData["PelicanErrorCode"] = 5011
-		developerData["Retryable"] = false
-		developerData["ErrorMessage"] = "404: Not Found"
-		developerData["ErrorType"] = "Specification.FileNotFound"
-		transferError["ErrorType"] = "Specification"
-	} else if errors.Is(err, &client.HeaderTimeoutError{}) {
-		developerData["PelicanErrorCode"] = 3000
-		developerData["ErrorType"] = "Contact"
-		developerData["Retryable"] = true
-		developerData["ErrorMessage"] = "Timeout"
-		transferError["ErrorType"] = "Contact"
+	var pe *error_codes.PelicanError
+	if errors.As(err, &pe) {
+		developerData["PelicanErrorCode"] = pe.Code()
+		developerData["Retryable"] = pe.IsRetryable()
+		developerData["ErrorType"] = pe.ErrorType()
+
+		// Use the wrapped error's message if available, otherwise use the PelicanError's full error message
+		if innerErr := pe.Unwrap(); innerErr != nil {
+			developerData["ErrorMessage"] = innerErr.Error()
+		} else {
+			developerData["ErrorMessage"] = pe.Error()
+		}
+
+		// Extract the high-level error category (first part before the dot)
+		errorType := pe.ErrorType()
+		if idx := strings.Index(errorType, "."); idx > 0 {
+			transferError["ErrorType"] = errorType[:idx]
+		} else {
+			transferError["ErrorType"] = errorType
+		}
 	} else {
+		// Fallback for errors that aren't wrapped in PelicanError
 		developerData["PelicanErrorCode"] = 0
 		developerData["ErrorType"] = "Unprocessed"
 		developerData["Retryable"] = false
-		developerData["ErrorMessage"] = "Unprocessed (for now) error type"
+		developerData["ErrorMessage"] = "Unprocessed error type"
+		transferError["ErrorType"] = "Unprocessed"
 	}
 	transferError["DeveloperData"] = developerData
 	return transferError

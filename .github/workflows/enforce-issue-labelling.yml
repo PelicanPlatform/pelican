@@ -6,27 +6,37 @@ on:
 
 jobs:
   validate-issue:
+    # 1. Don’t even start the job when the stale-bot did the closing **or**
+    #    when the issue already bears the `stale` label.
+    if: |
+      github.actor != 'github-actions[bot]' &&
+      !contains(join(github.event.issue.labels.*.name, ','), 'stale')
+
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
-      - name: Validate issue has labels
+      - name: Validate that the closed issue still has at least one label
         id: check_labels
         run: |
-          ISSUE_LABELS=$(jq -r '.issue.labels | length' $GITHUB_EVENT_PATH)
-          if [ "$ISSUE_LABELS" -eq "0" ]; then
-            echo "No labels found on the issue."
-            # Re-open the issue
-            ISSUE_NUMBER=$(jq -r '.issue.number' $GITHUB_EVENT_PATH)
-            REPO_OWNER=$(jq -r '.repository.owner.login' $GITHUB_EVENT_PATH)
-            REPO_NAME=$(jq -r '.repository.name' $GITHUB_EVENT_PATH)
-            curl -L \
-              -X PATCH \
-              -H "Accept: application/vnd.github.v3+json" \
+          # 2. Extra safety-net: bail out quietly if the stale label is present
+          if jq -e '.issue.labels[] | select(.name=="stale")' "$GITHUB_EVENT_PATH" > /dev/null; then
+            echo "Closed by stale-bot – skipping label check."
+            exit 0
+          fi
+
+          LABEL_COUNT=$(jq -r '.issue.labels | length' "$GITHUB_EVENT_PATH")
+          if [ "$LABEL_COUNT" -eq 0 ]; then
+            echo "No labels found – reopening."
+            ISSUE_NUMBER=$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")
+            OWNER=$(jq -r '.repository.owner.login' "$GITHUB_EVENT_PATH")
+            REPO=$(jq -r '.repository.name' "$GITHUB_EVENT_PATH")
+
+            curl -sSL -X PATCH \
               -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/issues/$ISSUE_NUMBER \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$OWNER/$REPO/issues/$ISSUE_NUMBER" \
               -d '{"state":"open"}'
             exit 1
           fi

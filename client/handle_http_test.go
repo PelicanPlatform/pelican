@@ -23,8 +23,16 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/hex"
+	"fmt"
+	"io"
 	"io/fs"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -41,6 +49,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
@@ -139,8 +148,12 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 }
 
 func TestSlowTransfers(t *testing.T) {
+	defer goleak.VerifyNone(t,
+		// Ignore the progress bars
+		goleak.IgnoreTopFunction("github.com/vbauerster/mpb/v8.(*Progress).serve"),
+		goleak.IgnoreTopFunction("github.com/vbauerster/mpb/v8.heapManager.run"),
+	)
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
-
 	// Adjust down some timeouts to speed up the test
 	test_utils.InitClient(t, map[string]any{
 		"Client.SlowTransferWindow":     "2s",
@@ -208,7 +221,7 @@ func TestSlowTransfers(t *testing.T) {
 	}
 
 	// Close the channel to allow the download to complete
-	channel <- true
+	close(channel)
 
 	// Make sure the errors are correct
 	assert.NotNil(t, err)
@@ -295,7 +308,7 @@ func TestStoppedTransfer(t *testing.T) {
 	}
 
 	// Close the channel to allow the download to complete
-	channel <- true
+	close(channel)
 
 	// Make sure the errors are correct
 	assert.NotNil(t, err)
@@ -366,7 +379,13 @@ func TestTrailerError(t *testing.T) {
 	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, "", "")
 
 	assert.NotNil(t, err)
-	assert.EqualError(t, err, "download error after server response started: Unable to read test.txt; input/output error")
+	// Check that it's wrapped in a PelicanError
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(err, &pe), "Error should be wrapped in PelicanError")
+	assert.Equal(t, 6000, pe.Code(), "Should be Transfer error code")
+	assert.Equal(t, "Transfer", pe.ErrorType(), "Should be Transfer error type")
+	// Check the underlying error message
+	assert.Contains(t, pe.Unwrap().Error(), "download error after server response started: Unable to read test.txt; input/output error")
 }
 
 func TestUploadZeroLengthFile(t *testing.T) {
@@ -469,7 +488,7 @@ func TestSortAttempts(t *testing.T) {
 
 	defer cancel()
 
-	token := newTokenGenerator(nil, nil, config.TokenSharedRead, false)
+	token := NewTokenGenerator(nil, nil, config.TokenSharedRead, false)
 	token.SetToken("aaa")
 	size, results := sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt2, attempt3}, token)
 	assert.Equal(t, int64(42), size)
@@ -743,8 +762,14 @@ func TestGatewayTimeout(t *testing.T) {
 	require.NoError(t, err)
 
 	transfer := &transferFile{
-		ctx:       context.Background(),
-		job:       &TransferJob{},
+		ctx: context.Background(),
+		job: &TransferJob{
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   svrURL.Host,
+				Path:   svrURL.Path + "/test.txt",
+			},
+		},
 		localPath: "/dev/null",
 		remoteURL: svrURL,
 		attempts: []transferAttemptDetails{
@@ -790,8 +815,14 @@ func TestChecksum(t *testing.T) {
 	require.NoError(t, err)
 
 	transfer := &transferFile{
-		ctx:       context.Background(),
-		job:       &TransferJob{},
+		ctx: context.Background(),
+		job: &TransferJob{
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   svrURL.Host,
+				Path:   svrURL.Path + "/test.txt",
+			},
+		},
 		localPath: "/dev/null",
 		remoteURL: svrURL,
 		attempts: []transferAttemptDetails{
@@ -816,7 +847,7 @@ func TestChecksum(t *testing.T) {
 }
 
 // Test behavior when checksum is incorrect
-func TestChecksumIncorrect(t *testing.T) {
+func TestChecksumIncorrectWhenRequired(t *testing.T) {
 	test_utils.InitClient(t, map[string]any{
 		param.Logging_Level.GetName(): "debug",
 	})
@@ -840,8 +871,14 @@ func TestChecksumIncorrect(t *testing.T) {
 	require.NoError(t, err)
 
 	transfer := &transferFile{
-		ctx:       context.Background(),
-		job:       &TransferJob{},
+		ctx: context.Background(),
+		job: &TransferJob{
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   svrURL.Host,
+				Path:   svrURL.Path + "/test.txt",
+			},
+		},
 		localPath: "/dev/null",
 		remoteURL: svrURL,
 		attempts: []transferAttemptDetails{
@@ -849,6 +886,7 @@ func TestChecksumIncorrect(t *testing.T) {
 				Url: svrURL,
 			},
 		},
+		requireChecksum: true,
 	}
 	transferResult, err := downloadObject(transfer)
 	assert.NoError(t, err)
@@ -856,6 +894,65 @@ func TestChecksumIncorrect(t *testing.T) {
 	incorrectChecksumError := &ChecksumMismatchError{}
 	assert.True(t, errors.As(transferResult.Error, &incorrectChecksumError), "Expected a checksum mismatch error")
 	assert.Equal(t, "checksum mismatch for crc32c; client computed 977b8112, server reported 977b8111", incorrectChecksumError.Error())
+
+	// Checksum validation
+	assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
+	info := transferResult.ServerChecksums[0]
+	assert.Equal(t, "977b8111", hex.EncodeToString(info.Value))
+	assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+
+	assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+	info = transferResult.ClientChecksums[0]
+	assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
+	assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+}
+
+func TestChecksumIncorrectWhenNotRequired(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		param.Logging_Level.GetName(): "debug",
+	})
+
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			w.Header().Set("Content-Length", "17")
+			w.Header().Set("Digest", "crc32c=977b8111") // Incorrect checksum; should be 977b8112
+			w.WriteHeader(http.StatusOK)
+		} else if r.Method == "GET" {
+			w.Header().Set("Content-Length", "17")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte("test file content"))
+			assert.NoError(t, err)
+		} else {
+			t.Fatal("Unexpected method:", r.Method)
+		}
+	}))
+	defer svr.Close()
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		ctx: context.Background(),
+		job: &TransferJob{
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   svrURL.Host,
+				Path:   svrURL.Path + "/test.txt",
+			},
+		},
+		localPath: "/dev/null",
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+		requireChecksum: false,
+	}
+	transferResult, err := downloadObject(transfer)
+	assert.NoError(t, err)
+	// We should expect an error because even when the checksum is not required, we still want to verify that the checksum is correct.
+	// We wouldn't want the object downloaded to different than the original.
+	assert.Error(t, transferResult.Error, "Should error when requireChecksum is false")
 
 	// Checksum validation
 	assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
@@ -893,8 +990,14 @@ func TestChecksumMissing(t *testing.T) {
 	require.NoError(t, err)
 
 	transfer := &transferFile{
-		ctx:       context.Background(),
-		job:       &TransferJob{},
+		ctx: context.Background(),
+		job: &TransferJob{
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   svrURL.Host,
+				Path:   svrURL.Path + "/test.txt",
+			},
+		},
 		localPath: "/dev/null",
 		remoteURL: svrURL,
 		attempts: []transferAttemptDetails{
@@ -908,6 +1011,374 @@ func TestChecksumMissing(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Error(t, transferResult.Error)
 	assert.True(t, errors.Is(transferResult.Error, ErrServerChecksumMissing), "Expected checksum missing error")
+}
+
+func TestChecksumPut(t *testing.T) {
+	t.Run("test-good-checksum", func(t *testing.T) {
+		test_utils.InitClient(t, map[string]any{
+			param.Logging_Level.GetName(): "debug",
+			param.TLSSkipVerify.GetName(): true,
+		})
+
+		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PUT" {
+				body, err := io.ReadAll(r.Body)
+				require.NoError(t, err)
+				assert.Equal(t, "test file content", string(body))
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			if r.Method == "HEAD" {
+				w.Header().Set("Content-Length", "17")
+				w.Header().Set("Digest", "crc32c=977b8112")
+				w.WriteHeader(http.StatusOK)
+			}
+
+			if r.Method == "PROPFIND" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+		}))
+		defer svr.Close()
+		svrURL, err := url.Parse(svr.URL)
+		require.NoError(t, err)
+
+		tempDir := t.TempDir()
+		tempFile := filepath.Join(tempDir, "testfile.txt")
+		err = os.WriteFile(tempFile, []byte("test file content"), 0644)
+		require.NoError(t, err)
+
+		transfer := &transferFile{
+			ctx: context.Background(),
+			job: &TransferJob{
+				requireChecksum:    true,
+				requestedChecksums: []ChecksumType{AlgCRC32C},
+				dirResp: server_structs.DirectorResponse{
+					ObjectServers: []*url.URL{svrURL},
+				},
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/testfile.txt",
+				},
+			},
+			localPath: tempFile,
+			remoteURL: svrURL,
+			attempts: []transferAttemptDetails{
+				{
+					Url: svrURL,
+				},
+			},
+		}
+		transferResult, err := uploadObject(transfer)
+		assert.NoError(t, err)
+		assert.NoError(t, transferResult.Error)
+
+		assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
+		info := transferResult.ServerChecksums[0]
+		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
+		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+
+		assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+		info = transferResult.ClientChecksums[0]
+		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
+		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+	})
+
+	t.Run("test-bad-checksum", func(t *testing.T) {
+		test_utils.InitClient(t, map[string]any{
+			param.Logging_Level.GetName(): "debug",
+			param.TLSSkipVerify.GetName(): true,
+		})
+
+		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PUT" {
+				body, err := io.ReadAll(r.Body)
+				require.NoError(t, err)
+				assert.Equal(t, "test file content", string(body))
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			if r.Method == "HEAD" {
+				w.Header().Set("Content-Length", "17")
+				w.Header().Set("Digest", "crc32c=977b8111") // Incorrect checksum; should be 977b8112
+				w.WriteHeader(http.StatusOK)
+			}
+			if r.Method == "PROPFIND" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+		}))
+		defer svr.Close()
+		svrURL, err := url.Parse(svr.URL)
+		require.NoError(t, err)
+
+		tempDir := t.TempDir()
+		tempFile := filepath.Join(tempDir, "testfile.txt")
+		err = os.WriteFile(tempFile, []byte("test file content"), 0644)
+		require.NoError(t, err)
+
+		transfer := &transferFile{
+			ctx: context.Background(),
+			job: &TransferJob{
+				requireChecksum:    true,
+				requestedChecksums: []ChecksumType{AlgCRC32C},
+				dirResp: server_structs.DirectorResponse{
+					ObjectServers: []*url.URL{svrURL},
+				},
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/testfile.txt",
+				},
+			},
+			localPath: tempFile,
+			remoteURL: svrURL,
+			attempts: []transferAttemptDetails{
+				{
+					Url: svrURL,
+				},
+			},
+			requireChecksum: true,
+		}
+		transferResult, err := uploadObject(transfer)
+		assert.NoError(t, err)
+		require.Error(t, transferResult.Error)
+		var checksumError *ChecksumMismatchError
+		require.ErrorAs(t, transferResult.Error, &checksumError)
+
+		assert.Equal(t, "checksum mismatch for crc32c; client computed 977b8112, server reported 977b8111", checksumError.Error())
+
+		assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
+		info := transferResult.ServerChecksums[0]
+		assert.Equal(t, "977b8111", hex.EncodeToString(info.Value))
+		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+
+		assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+		info = transferResult.ClientChecksums[0]
+		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
+		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+	})
+
+	t.Run("test-algorithm-mismatch", func(t *testing.T) {
+		test_utils.InitClient(t, map[string]any{
+			param.Logging_Level.GetName(): "debug",
+			param.TLSSkipVerify.GetName(): true,
+		})
+
+		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PUT" {
+				body, err := io.ReadAll(r.Body)
+				require.NoError(t, err)
+				assert.Equal(t, "test file content", string(body))
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			if r.Method == "HEAD" {
+				w.Header().Set("Content-Length", "17")
+				// Server returns MD5 checksum but client requested CRC32C
+				w.Header().Set("Digest", "md5=5eb63bbbe01eeed093cb22bb8f5acdc3")
+				w.WriteHeader(http.StatusOK)
+			}
+			if r.Method == "PROPFIND" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+		}))
+		defer svr.Close()
+		svrURL, err := url.Parse(svr.URL)
+		require.NoError(t, err)
+
+		tempDir := t.TempDir()
+		tempFile := filepath.Join(tempDir, "testfile.txt")
+		err = os.WriteFile(tempFile, []byte("test file content"), 0644)
+		require.NoError(t, err)
+
+		transfer := &transferFile{
+			ctx: context.Background(),
+			job: &TransferJob{
+				requireChecksum:    true,
+				requestedChecksums: []ChecksumType{AlgCRC32C},
+				dirResp: server_structs.DirectorResponse{
+					ObjectServers: []*url.URL{svrURL},
+				},
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/testfile.txt",
+				},
+			},
+			localPath: tempFile,
+			remoteURL: svrURL,
+			attempts: []transferAttemptDetails{
+				{
+					Url: svrURL,
+				},
+			},
+			requireChecksum: true,
+		}
+		transferResult, err := uploadObject(transfer)
+		assert.NoError(t, err)
+		require.Error(t, transferResult.Error)
+		assert.True(t, errors.Is(transferResult.Error, ErrServerChecksumMissing), "Expected checksum missing error when algorithms don't match")
+
+		// Server provided MD5 checksum but client requested CRC32C
+		assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
+		info := transferResult.ServerChecksums[0]
+		assert.Equal(t, "5eb63bbbe01eeed093cb22bb8f5acdc3", checksumValueToHttpDigest(info.Algorithm, info.Value))
+		assert.Equal(t, ChecksumType(AlgMD5), info.Algorithm)
+
+		// Client computed CRC32C checksum
+		assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+		info = transferResult.ClientChecksums[0]
+		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
+		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+	})
+
+	t.Run("test-no-error-when-requireChecksum-false", func(t *testing.T) {
+		test_utils.InitClient(t, map[string]any{
+			param.Logging_Level.GetName(): "debug",
+			param.TLSSkipVerify.GetName(): true,
+		})
+
+		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PUT" {
+				body, err := io.ReadAll(r.Body)
+				require.NoError(t, err)
+				assert.Equal(t, "test file content", string(body))
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			if r.Method == "HEAD" {
+				w.Header().Set("Content-Length", "17")
+				// Server returns different algorithm than requested
+				w.Header().Set("Digest", "md5=5eb63bbbe01eeed093cb22bb8f5acdc3")
+				w.WriteHeader(http.StatusOK)
+			}
+			if r.Method == "PROPFIND" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+		}))
+		defer svr.Close()
+		svrURL, err := url.Parse(svr.URL)
+		require.NoError(t, err)
+
+		tempDir := t.TempDir()
+		tempFile := filepath.Join(tempDir, "testfile.txt")
+		err = os.WriteFile(tempFile, []byte("test file content"), 0644)
+		require.NoError(t, err)
+
+		transfer := &transferFile{
+			ctx: context.Background(),
+			job: &TransferJob{
+				requireChecksum:    false, // Don't require checksum
+				requestedChecksums: []ChecksumType{AlgCRC32C},
+				dirResp: server_structs.DirectorResponse{
+					ObjectServers: []*url.URL{svrURL},
+				},
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/testfile.txt",
+				},
+			},
+			localPath: tempFile,
+			remoteURL: svrURL,
+			attempts: []transferAttemptDetails{
+				{
+					Url: svrURL,
+				},
+			},
+			requireChecksum: false,
+		}
+		transferResult, err := uploadObject(transfer)
+		assert.NoError(t, err)
+		assert.NoError(t, transferResult.Error, "Should not error when requireChecksum is false")
+
+		// Server provided MD5 checksum
+		assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
+		info := transferResult.ServerChecksums[0]
+		assert.Equal(t, "5eb63bbbe01eeed093cb22bb8f5acdc3", checksumValueToHttpDigest(info.Algorithm, info.Value))
+		assert.Equal(t, ChecksumType(AlgMD5), info.Algorithm)
+
+		// Client computed CRC32C checksum
+		assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+		info = transferResult.ClientChecksums[0]
+		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
+		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+	})
+
+	t.Run("test-missing-checksum-when-required", func(t *testing.T) {
+		test_utils.InitClient(t, map[string]any{
+			param.Logging_Level.GetName(): "debug",
+			param.TLSSkipVerify.GetName(): true,
+		})
+
+		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PUT" {
+				body, err := io.ReadAll(r.Body)
+				require.NoError(t, err)
+				assert.Equal(t, "test file content", string(body))
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			if r.Method == "HEAD" {
+				w.Header().Set("Content-Length", "17")
+				// No Digest header - server doesn't provide checksum
+				w.WriteHeader(http.StatusOK)
+			}
+			if r.Method == "PROPFIND" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+		}))
+		defer svr.Close()
+		svrURL, err := url.Parse(svr.URL)
+		require.NoError(t, err)
+
+		tempDir := t.TempDir()
+		tempFile := filepath.Join(tempDir, "testfile.txt")
+		err = os.WriteFile(tempFile, []byte("test file content"), 0644)
+		require.NoError(t, err)
+
+		transfer := &transferFile{
+			ctx: context.Background(),
+			job: &TransferJob{
+				requireChecksum:    true,
+				requestedChecksums: []ChecksumType{AlgCRC32C},
+				dirResp: server_structs.DirectorResponse{
+					ObjectServers: []*url.URL{svrURL},
+				},
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/testfile.txt",
+				},
+			},
+			localPath: tempFile,
+			remoteURL: svrURL,
+			attempts: []transferAttemptDetails{
+				{
+					Url: svrURL,
+				},
+			},
+			requireChecksum: true,
+		}
+		transferResult, err := uploadObject(transfer)
+		assert.NoError(t, err)
+		require.Error(t, transferResult.Error)
+		assert.True(t, errors.Is(transferResult.Error, ErrServerChecksumMissing), "Expected checksum missing error when server provides no checksum")
+
+		// No server checksums provided
+		assert.Equal(t, 0, len(transferResult.ServerChecksums), "Checksum count is %d but should be 0", len(transferResult.ServerChecksums))
+
+		// Client still computed CRC32C checksum
+		assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+		info := transferResult.ClientChecksums[0]
+		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
+		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+	})
 }
 
 // Test behavior when resuming a transfer after an EOF
@@ -957,8 +1428,14 @@ func TestResume(t *testing.T) {
 	require.NoError(t, err)
 
 	transfer := &transferFile{
-		ctx:       context.Background(),
-		job:       &TransferJob{},
+		ctx: context.Background(),
+		job: &TransferJob{
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   svr1URL.Host,
+				Path:   svr1URL.Path + "/test.txt",
+			},
+		},
 		localPath: "/dev/null",
 		remoteURL: svr1URL,
 		attempts: []transferAttemptDetails{
@@ -1013,8 +1490,14 @@ func TestFailedConnectionSetupError(t *testing.T) {
 	require.NoError(t, err)
 
 	transfer := &transferFile{
-		ctx:       context.Background(),
-		job:       &TransferJob{},
+		ctx: context.Background(),
+		job: &TransferJob{
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   svrURL.Host,
+				Path:   svrURL.Path + "/test.txt",
+			},
+		},
 		localPath: "/dev/null",
 		remoteURL: svrURL,
 		attempts: []transferAttemptDetails{
@@ -1049,11 +1532,17 @@ func TestHeadRequestWithDownloadToken(t *testing.T) {
 	svrURL, err := url.Parse(svr.URL)
 	require.NoError(t, err)
 
-	token := newTokenGenerator(nil, nil, config.TokenSharedRead, false)
+	token := NewTokenGenerator(nil, nil, config.TokenSharedRead, false)
 	token.SetToken("test-token")
 	transfer := &transferFile{
-		ctx:       context.Background(),
-		job:       &TransferJob{},
+		ctx: context.Background(),
+		job: &TransferJob{
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   svrURL.Host,
+				Path:   svrURL.Path + "/test.txt",
+			},
+		},
 		localPath: "/dev/null",
 		remoteURL: svrURL,
 		attempts: []transferAttemptDetails{
@@ -1085,6 +1574,10 @@ func TestFailedUploadError(t *testing.T) {
 
 	shutdownChan := make(chan bool)
 	svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PROPFIND" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		<-shutdownChan
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -1095,8 +1588,21 @@ func TestFailedUploadError(t *testing.T) {
 	require.NoError(t, err)
 
 	transfer := &transferFile{
-		ctx:       context.Background(),
-		job:       &TransferJob{},
+		ctx: context.Background(),
+		job: &TransferJob{
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   svrURL.Host,
+				Path:   svrURL.Path + "/test.txt",
+			},
+			dirResp: server_structs.DirectorResponse{
+				XPelNsHdr: server_structs.XPelNs{
+					Namespace:      "/test",
+					RequireToken:   false,
+					CollectionsUrl: svrURL,
+				},
+			},
+		},
 		localPath: testfileLocation,
 		remoteURL: svrURL,
 		attempts: []transferAttemptDetails{
@@ -1141,6 +1647,10 @@ func TestFailedLargeUploadError(t *testing.T) {
 
 	shutdownChan := make(chan bool)
 	svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PROPFIND" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		<-shutdownChan
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -1151,8 +1661,21 @@ func TestFailedLargeUploadError(t *testing.T) {
 	require.NoError(t, err)
 
 	transfer := &transferFile{
-		ctx:       context.Background(),
-		job:       &TransferJob{},
+		ctx: context.Background(),
+		job: &TransferJob{
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   svrURL.Host,
+				Path:   svrURL.Path + "/test.txt",
+			},
+			dirResp: server_structs.DirectorResponse{
+				XPelNsHdr: server_structs.XPelNs{
+					Namespace:      "/test",
+					RequireToken:   false,
+					CollectionsUrl: svrURL,
+				},
+			},
+		},
 		localPath: testfileLocation,
 		remoteURL: svrURL,
 		attempts: []transferAttemptDetails{
@@ -1254,4 +1777,506 @@ func TestListHttp(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestInvalidByteInChunkLength(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	// Create a test server that sends an invalid chunk length
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("server does not support hijacking")
+		}
+		conn, bufrw, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("hijack failed: %v", err)
+		}
+		defer conn.Close()
+
+		// Write a properly formatted HTTP response with an invalid chunk length
+		if _, err := bufrw.WriteString("HTTP/1.1 200 OK\r\n"); err != nil {
+			t.Fatalf("failed to write status line: %v", err)
+		}
+		if _, err := bufrw.WriteString("Content-Type: text/plain\r\n"); err != nil {
+			t.Fatalf("failed to write content-type: %v", err)
+		}
+		if _, err := bufrw.WriteString("Transfer-Encoding: chunked\r\n"); err != nil {
+			t.Fatalf("failed to write transfer-encoding: %v", err)
+		}
+		if _, err := bufrw.WriteString("Connection: close\r\n"); err != nil {
+			t.Fatalf("failed to write connection: %v", err)
+		}
+		if _, err := bufrw.WriteString("\r\n"); err != nil {
+			t.Fatalf("failed to write header separator: %v", err)
+		}
+		if _, err := bufrw.WriteString("1g\r\n"); err != nil { // Invalid chunk length
+			t.Fatalf("failed to write chunk length: %v", err)
+		}
+		if _, err := bufrw.WriteString("data\r\n"); err != nil {
+			t.Fatalf("failed to write chunk data: %v", err)
+		}
+		if _, err := bufrw.WriteString("0\r\n\r\n"); err != nil {
+			t.Fatalf("failed to write chunk terminator: %v", err)
+		}
+		if err := bufrw.Flush(); err != nil {
+			t.Fatalf("failed to flush buffer: %v", err)
+		}
+	}))
+
+	defer svr.CloseClientConnections()
+	defer svr.Close()
+
+	transfers := generateTransferDetails(svr.URL, transferDetailsOptions{false, ""})
+	require.Equal(t, 1, len(transfers))
+
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	require.NoError(t, err)
+	defer writer.Close()
+
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, "", "")
+	require.Error(t, err)
+	t.Logf("error: %v", err)
+	assert.True(t, IsRetryable(err), "Invalid chunk length error should be retryable")
+}
+
+func TestUnexpectedEOFInTransferStatus(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	// Create a test server that sends an EOF error in the X-Transfer-Status trailer
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Trailer", "X-Transfer-Status")
+
+		// Write the body
+		_, err := w.Write([]byte("hello"))
+		require.NoError(t, err)
+
+		// Set the trailer
+		w.Header().Set("X-Transfer-Status", "500: unexpected EOF")
+	}))
+	defer svr.Close()
+
+	transfers := generateTransferDetails(svr.URL, transferDetailsOptions{false, ""})
+	require.Equal(t, 1, len(transfers))
+
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	require.NoError(t, err)
+	defer writer.Close()
+
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, "", "")
+	require.Error(t, err)
+	t.Logf("error: %v", err)
+	assert.True(t, IsRetryable(err), "Unexpected EOF error should be retryable")
+}
+
+func TestTLSCertificateError(t *testing.T) {
+	// Generate a self-signed certificate
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			Organization: []string{"Test Org"},
+			CommonName:   "localhost",
+		},
+		DNSNames:  []string{"localhost"},
+		NotBefore: time.Now(),
+		NotAfter:  time.Now().Add(time.Hour),
+		KeyUsage:  x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{
+			x509.ExtKeyUsageServerAuth,
+		},
+		BasicConstraintsValid: true,
+	}
+
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	require.NoError(t, err)
+
+	svr := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PUT" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}))
+	svr.TLS = &tls.Config{
+		Certificates: []tls.Certificate{{
+			Certificate: [][]byte{derBytes},
+			PrivateKey:  priv,
+		}},
+	}
+	svr.StartTLS()
+	defer svr.Close()
+
+	// Use the server's URL but with localhost
+	serverURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+	serverURL.Host = "localhost:" + strings.Split(serverURL.Host, ":")[1]
+
+	// Create a test file to upload
+	testData := []byte("test data")
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	err = os.WriteFile(fname, testData, 0o644)
+	require.NoError(t, err)
+
+	// Create the PUT request
+	file, err := os.Open(fname)
+	require.NoError(t, err)
+	defer file.Close()
+
+	request, err := http.NewRequest("PUT", serverURL.String(), file)
+	require.NoError(t, err)
+
+	// Set up channels for response and error handling
+	errorChan := make(chan error, 1)
+	responseChan := make(chan *http.Response, 1)
+
+	// Run the PUT request
+	go runPut(request, responseChan, errorChan, false)
+
+	// Wait for either an error or response
+	select {
+	case err := <-errorChan:
+		require.Error(t, err)
+		t.Logf("error: %v", err)
+		assert.Contains(t, err.Error(), "certificate signed by unknown authority")
+		assert.True(t, IsRetryable(err), "TLS certificate error should be retryable")
+	case response := <-responseChan:
+		t.Fatalf("Expected error but got response: %v", response)
+	case <-time.After(time.Second * 2):
+		t.Fatal("Timeout while waiting for response")
+	}
+}
+
+func TestPutOverwrite(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		"TLSSkipVerify": true,
+	})
+
+	t.Run("ObjectExists", func(t *testing.T) {
+		// Create a server that responds to WebDAV PROPFIND requests indicating the object exists
+		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PROPFIND" {
+				// Simulate existing object - return WebDAV response
+				w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+				w.WriteHeader(http.StatusMultiStatus)
+				response := `<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/hello.txt</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:resourcetype/>
+        <D:getcontentlength>1024</D:getcontentlength>
+        <D:getlastmodified>Wed, 01 Jan 2024 00:00:00 GMT</D:getlastmodified>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>`
+				_, err := w.Write([]byte(response))
+				require.NoError(t, err)
+				return
+			}
+			if r.Method == "PUT" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}))
+		defer svr.Close()
+
+		svrURL, err := url.Parse(svr.URL)
+		require.NoError(t, err)
+
+		// Create a token generator with a test token
+		token := NewTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token.SetToken("test-token")
+
+		transfer := &transferFile{
+			ctx: context.Background(),
+			job: &TransferJob{
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/hello.txt",
+				},
+				dirResp: server_structs.DirectorResponse{
+					XPelNsHdr: server_structs.XPelNs{
+						Namespace:      "/test",
+						RequireToken:   true,
+						CollectionsUrl: svrURL,
+					},
+				},
+				token: token,
+			},
+			remoteURL: svrURL,
+			token:     token,
+		}
+
+		result, err := uploadObject(transfer)
+		require.Error(t, err)
+		require.Equal(t, "remote object already exists, upload aborted", result.Error.Error())
+	})
+
+	t.Run("ObjectDoesNotExist", func(t *testing.T) {
+		// Create a server that responds to WebDAV PROPFIND requests with 404 (object doesn't exist)
+		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PROPFIND" {
+				// Simulate non-existing object - return 404
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			if r.Method == "PUT" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}))
+		defer svr.Close()
+
+		svrURL, err := url.Parse(svr.URL)
+		require.NoError(t, err)
+
+		// Create a token generator with a test token
+		token := NewTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token.SetToken("test-token")
+
+		// Create a test file to upload
+		testData := []byte("test content")
+		fname := filepath.Join(t.TempDir(), "test.txt")
+		err = os.WriteFile(fname, testData, 0o644)
+		require.NoError(t, err)
+
+		transfer := &transferFile{
+			ctx: context.Background(),
+			job: &TransferJob{
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/test.txt",
+				},
+				dirResp: server_structs.DirectorResponse{
+					XPelNsHdr: server_structs.XPelNs{
+						Namespace:      "/test",
+						RequireToken:   true,
+						CollectionsUrl: svrURL,
+					},
+				},
+				token: token,
+			},
+			remoteURL: svrURL,
+			localPath: fname,
+			token:     token,
+			attempts: []transferAttemptDetails{
+				{
+					Url: svrURL,
+				},
+			},
+		}
+
+		result, err := uploadObject(transfer)
+		require.NoError(t, err)
+		require.NoError(t, result.Error) // Should succeed when object doesn't exist
+	})
+
+	t.Run("StatError", func(t *testing.T) {
+		// Create a server that returns an error on WebDAV PROPFIND requests
+		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PROPFIND" {
+				// Simulate server error
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			if r.Method == "PUT" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}))
+		defer svr.Close()
+
+		svrURL, err := url.Parse(svr.URL)
+		require.NoError(t, err)
+
+		// Create a token generator with a test token
+		token := NewTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token.SetToken("test-token")
+
+		// Create a test file to upload
+		testData := []byte("test content")
+		fname := filepath.Join(t.TempDir(), "test.txt")
+		err = os.WriteFile(fname, testData, 0o644)
+		require.NoError(t, err)
+
+		transfer := &transferFile{
+			ctx: context.Background(),
+			job: &TransferJob{
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/hello.txt",
+				},
+				dirResp: server_structs.DirectorResponse{
+					XPelNsHdr: server_structs.XPelNs{
+						Namespace:      "/test",
+						RequireToken:   true,
+						CollectionsUrl: svrURL,
+					},
+				},
+				token: token,
+			},
+			remoteURL: svrURL,
+			localPath: fname,
+			token:     token,
+			attempts: []transferAttemptDetails{
+				{
+					Url: svrURL,
+				},
+			},
+		}
+
+		// Capture log warnings
+		var logBuf bytes.Buffer
+		origOut := log.StandardLogger().Out
+		log.SetOutput(&logBuf)
+		origLevel := log.GetLevel()
+		log.SetLevel(log.WarnLevel)
+		defer func() {
+			log.SetOutput(origOut)
+			log.SetLevel(origLevel)
+		}()
+
+		result, err := uploadObject(transfer)
+		require.NoError(t, err) // We should not get an error from the uploadObject call
+		require.NoError(t, result.Error)
+
+		// Ensure the expected warning was logged
+		assert.Contains(t, logBuf.String(), "Failed to check if object exists at the origin, proceeding with upload")
+	})
+}
+
+func TestPackAutoSegfaultRegression(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		param.Logging_Level.GetName(): "debug",
+	})
+
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			w.Header().Set("Content-Length", "100")
+			w.WriteHeader(http.StatusOK)
+		} else if r.Method == "GET" {
+			w.Header().Set("Content-Length", "100")
+			w.WriteHeader(http.StatusOK)
+			// Send some compressed-like data to trigger pack handling
+			_, err := w.Write([]byte("compressed data content"))
+			assert.NoError(t, err)
+			w.(http.Flusher).Flush()
+		} else {
+			t.Fatal("Unexpected method:", r.Method)
+		}
+	}))
+	defer svr.Close()
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	destDir := filepath.Join(t.TempDir(), "nonexistent", "subdir")
+	destFile := filepath.Join(destDir, "downloaded.txt")
+
+	transfer := &transferFile{
+		ctx: context.Background(),
+		job: &TransferJob{
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   svrURL.Host,
+				Path:   svrURL.Path + "/test.txt",
+			},
+		},
+		localPath:  destFile,
+		remoteURL:  svrURL,
+		xferType:   transferTypeDownload,
+		packOption: "auto",
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+	}
+
+	transferResult, err := downloadObject(transfer)
+
+	// We expect either an error from downloadObject OR an error in the transfer result
+	// since pack=auto requires a directory destination
+	if err != nil {
+		t.Logf("downloadObject returned error: %v", err)
+	} else if transferResult.Error != nil {
+		errorMsg := transferResult.Error.Error()
+		if strings.Contains(errorMsg, "destination path is not a directory") {
+			// This is the pack-related error we're looking for
+			t.Logf("Got expected pack-related error: %v", errorMsg)
+		} else if strings.Contains(errorMsg, "unexpected EOF") {
+			// This is a transfer error, but the important thing is we didn't segfault
+			// The pack logic should have run and handled the destination path issue
+			t.Logf("Got transfer error (expected in test environment): %v", errorMsg)
+			t.Logf("Test passed: no segfault occurred, pack logic handled the case properly")
+		} else {
+			t.Fatalf("Got other error: %v", errorMsg)
+		}
+	} else {
+		// This shouldn't happen - we should get some kind of error
+		t.Fatal("Expected either downloadObject error or transferResult error, but got neither")
+	}
+
+}
+
+func TestPermissionDeniedError(t *testing.T) {
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer svr.Close()
+
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	remoteURL := &pelican_url.PelicanURL{
+		Scheme: "pelican://",
+		Host:   svrURL.Host,
+		Path:   svrURL.Path + "/test.txt",
+	}
+	tj := &TransferJob{
+		remoteURL: remoteURL,
+		token:     NewTokenGenerator(remoteURL, nil, config.TokenSharedRead, false),
+	}
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		job:       tj,
+		remoteURL: svrURL,
+		token:     tj.token,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+	}
+
+	t.Run("expired-token", func(t *testing.T) {
+		expiredTime := time.Now().Add(-time.Hour)
+		expiredJWT := fmt.Sprintf(`{"alg":"none","typ":"JWT"}.{"exp":%d,"iat":%d,"sub":"test"}.`,
+			expiredTime.Unix(), expiredTime.Add(-time.Hour).Unix())
+		transfer.job.token.SetToken(expiredJWT)
+
+		time.Sleep(time.Second * 4) // Sleep for longer than the token lifetime
+		res, err := downloadObject(transfer)
+		require.NoError(t, err)
+		require.Error(t, res.Error)
+
+		var pde *PermissionDeniedError
+		require.ErrorAs(t, res.Error, &pde)
+		assert.Equal(t, true, pde.expired)
+		assert.Contains(t, pde.message, "token expired")
+	})
 }

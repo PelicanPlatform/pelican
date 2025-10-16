@@ -15,7 +15,7 @@ import semver from 'semver';
 import { DirectorCard, DirectorCardProps } from './';
 import { BooleanToggleButton, CardList } from '@/components';
 import useFuse from '@/helpers/useFuse';
-import { ServerGeneral } from '@/types';
+import serverHasError from '@/helpers/serverHasError';
 
 interface DirectorCardListProps {
   data: Partial<DirectorCardProps>[];
@@ -62,7 +62,6 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
     return filteredData;
   }, [
     searchedData,
-    search,
     serverError,
     pelicanServer,
     serverDowntime,
@@ -70,21 +69,27 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
   ]);
 
   const allServerVersions = useMemo(() => {
-    const versions = new Set<string>();
+    const semverVersions = new Set<string>();
+    const nonSemverVersions = new Set<string>();
     data.forEach((d) => {
-      if (d.server?.version) {
-        versions.add(d.server.version);
+      if (d.server?.version && semver.valid(d.server.version) !== null) {
+        semverVersions.add(d.server.version);
+      } else if (d.server?.version && semver.valid(d.server.version) === null) {
+        nonSemverVersions.add(d.server.version);
       }
     });
 
-    return semver.sort([...versions]).reverse();
+    return [
+      ...semver.sort([...semverVersions]).reverse(),
+      ...[...nonSemverVersions].sort().reverse(),
+    ];
   }, [data]);
 
   return (
     <Box>
       <Box sx={{ pb: 1 }}>
         <Grid container spacing={1} pt={1}>
-          <Grid item>
+          <Grid>
             <TextField
               size={'small'}
               value={search}
@@ -92,13 +97,14 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
               label='Search'
             />
           </Grid>
-          <Grid item>
+          <Grid>
             <FormControl sx={{ width: 200 }} size={'small'}>
               <InputLabel id={'server-version-select-label'}>
                 Server Version
               </InputLabel>
               <Select
                 multiple
+                id={'server-version-select'}
                 value={serverVersions}
                 onChange={(e) => setServerVersions(e.target.value as string[])}
                 labelId={'server-version-select-label'}
@@ -114,21 +120,21 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
           </Grid>
         </Grid>
         <Grid container spacing={1} pt={1}>
-          <Grid item>
+          <Grid>
             <BooleanToggleButton
               label={'Is Pelican Server'}
               value={pelicanServer}
               onChange={setPelicanServer}
             />
           </Grid>
-          <Grid item>
+          <Grid>
             <BooleanToggleButton
               label={'Has Error'}
               value={serverError}
               onChange={setServerError}
             />
           </Grid>
-          <Grid item>
+          <Grid>
             <BooleanToggleButton
               label={'In Downtime'}
               value={serverDowntime}
@@ -146,9 +152,5 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
     </Box>
   );
 }
-
-const serverHasError = (server?: ServerGeneral) => {
-  return server?.healthStatus === 'Error';
-};
 
 export default DirectorCardList;

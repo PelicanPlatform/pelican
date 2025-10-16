@@ -48,6 +48,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/oauth2"
@@ -97,6 +98,7 @@ type registrationData struct {
 
 	Pubkey           json.RawMessage `json:"pubkey"`
 	Prefix           string          `json:"prefix"`
+	ServerID         string          `json:"server_id"` // For server registrations, the server should provide its own ID; For namespace registrations, this is empty
 	SiteName         string          `json:"site_name"`
 	AccessToken      string          `json:"access_token"`
 	Identity         string          `json:"identity"`
@@ -111,6 +113,10 @@ type badRequestError struct {
 	Message string
 }
 
+type duplicateServerIdError struct {
+	Message string
+}
+
 func (e permissionDeniedError) Error() string {
 	return e.Message
 }
@@ -119,13 +125,18 @@ func (e badRequestError) Error() string {
 	return e.Message
 }
 
+func (e *duplicateServerIdError) Error() string {
+	return e.Message
+}
+
+// Check whether any key in the input JWK matches any key already registered to an input namespace prefix
 func matchKeys(incomingKey jwk.Key, registeredNamespaces []string) (bool, error) {
 	// If this is the case, we want to make sure that at least one of the superspaces has the
 	// same registration key as the incoming. This guarantees the owner of the superspace is
 	// permitting the action (assuming their keys haven't been stolen!)
 	foundMatch := false
 	for _, ns := range registeredNamespaces {
-		keyset, _, err := getNamespaceJwksByPrefix(ns)
+		keyset, _, err := getRegistrationJwksByPrefix(ns)
 		if err != nil {
 			return false, errors.Wrapf(err, "Cannot get keyset for %s from the database", ns)
 		}
@@ -136,19 +147,16 @@ func matchKeys(incomingKey jwk.Key, registeredNamespaces []string) (bool, error)
 		for it := (keyset).Keys(context.Background()); it.Next(context.Background()); {
 			pair := it.Pair()
 			registeredKey := pair.Value.(jwk.Key)
-			registeredKeyBuf, err := json.Marshal(registeredKey)
-			if err != nil {
-				return false, errors.Wrapf(err, "failed to marshal a key registered to %s into JSON", ns)
-			}
-			incomingKeyBuf, err := json.Marshal(incomingKey)
-			if err != nil {
-				return false, errors.Wrap(err, "failed to marshal the incoming key into JSON")
-			}
 
-			if string(registeredKeyBuf) == string(incomingKeyBuf) {
+			log.Debugf("Matching key for namespace %s: Registry DB key: %s, Incoming request key: %s", ns, registeredKey.KeyID(), incomingKey.KeyID())
+			// Use jwk.Equal for reliable key comparison
+			if jwk.Equal(registeredKey, incomingKey) {
 				foundMatch = true
 				break
 			}
+		}
+		if foundMatch {
+			break
 		}
 	}
 
@@ -205,6 +213,52 @@ func signPayload(payload []byte, privateKey *ecdsa.PrivateKey) ([]byte, error) {
 func verifySignature(payload []byte, signature []byte, publicKey *ecdsa.PublicKey) bool {
 	hash := sha256.Sum256(payload)
 	return ecdsa.VerifyASN1(publicKey, hash[:], signature)
+}
+
+// When a request wants to register a new service (Origin/Cache) on an existing server,
+// we need to verify they are allowed to do so by checking if the signature they present can be verified by the existing server's keyset
+func verifyServerOwnership(existingServer *server_structs.ServerRegistration, data *registrationData) (bool, error) {
+	if existingServer == nil || len(existingServer.Registration) == 0 {
+		return false, errors.New("no existing registrations to verify against")
+	}
+
+	// Parse existing server's public key
+	// When one server has multiple services, they all share the same public key(s), so we just need to check the first registration
+	existingKeySet, err := jwk.ParseString(existingServer.Registration[0].Pubkey)
+	if err != nil {
+		return false, err
+	}
+
+	// If the signature in the request could be verified by any of the keys in the existing server's keyset,
+	// then we consider whoever send this request is the owner of the existing server
+	clientPayload := []byte(data.ClientNonce + data.ServerNonce)
+	clientSignature, err := hex.DecodeString(data.ClientSignature)
+	if err != nil {
+		return false, err
+	}
+
+	// Iterate through all keys in the server's keyset recorded in Registry to find one that can verify the client signature
+	for i := 0; i < existingKeySet.Len(); i++ {
+		key, exists := existingKeySet.Key(i)
+		if !exists {
+			continue
+		}
+		var rawkey interface{}
+		if err := key.Raw(&rawkey); err != nil {
+			return false, err
+		}
+		ecdsaKey, ok := rawkey.(*ecdsa.PublicKey)
+		if !ok {
+			continue
+		}
+
+		verified := verifySignature(clientPayload, clientSignature, ecdsaKey)
+
+		if verified {
+			return true, nil // Stop iteration
+		}
+	}
+	return false, nil
 }
 
 // Generate server nonce for key-sign challenge
@@ -295,7 +349,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 	log.Debug("Registering namespace ", data.Prefix)
 
 	// Check if prefix exists before doing anything else
-	exists, err := namespaceExistsByPrefix(data.Prefix)
+	exists, err := registrationExistsByPrefix(data.Prefix)
 	if err != nil {
 		log.Errorf("Failed to check if namespace already exists: %v", err)
 		return false, nil, errors.Wrap(err, "Server encountered an error checking if namespace already exists")
@@ -308,6 +362,28 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		return false, returnMsg, nil
 	}
 
+	// For a server registration attempt, check if the site name is duplicated
+	isOrigin := strings.HasPrefix(data.Prefix, server_structs.OriginPrefix.String())
+	isCache := strings.HasPrefix(data.Prefix, server_structs.CachePrefix.String())
+	if isOrigin || isCache {
+		existingServer, err := getServerByName(strings.TrimSpace(data.SiteName))
+		if err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return false, nil, errors.Wrapf(err, "failed to check for existing server %q", data.SiteName)
+			}
+			// Record not found, continue with registration
+		} else if existingServer != nil && existingServer.ID != "" {
+			// Server exists, verify ownership
+			verified, err := verifyServerOwnership(existingServer, data)
+			if err != nil {
+				return false, nil, errors.Wrapf(err, "Failed to verify server ownership for %s", data.SiteName)
+			}
+			if !verified {
+				return false, nil, permissionDeniedError{Message: fmt.Sprintf("unable to verify you own the registered server %q", data.SiteName)}
+			}
+		}
+	}
+
 	inTopo, topoNss, valErr, sysErr := validateKeyChaining(data.Prefix, key)
 	if valErr != nil {
 		log.Errorln(err)
@@ -318,7 +394,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		return false, nil, sysErr
 	}
 
-	var ns server_structs.Namespace
+	var ns server_structs.Registration
 	ns.Prefix = data.Prefix
 
 	pubkeyData, err := json.Marshal(data.Pubkey)
@@ -385,8 +461,20 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 	// Overwrite status to Pending to filter malicious request
 	ns.AdminMetadata.Status = server_structs.RegPending
 
-	err = AddNamespace(&ns)
+	if server_structs.IsServerPrefix(data.Prefix) {
+		if ns.CustomFields == nil {
+			ns.CustomFields = make(map[string]interface{})
+		}
+		ns.CustomFields["server_id"] = data.ServerID // Pass the server ID to the CustomFields map, to fit in the registration workflow
+	}
+
+	err = AddRegistration(&ns)
 	if err != nil {
+		// Check if it's a server ID conflict error
+		var conflictErr *duplicateServerIdError
+		if errors.As(err, &conflictErr) {
+			return false, nil, &duplicateServerIdError{Message: conflictErr.Message}
+		}
 		return false, nil, errors.Wrapf(err, "Failed to add the prefix %q to the database", ns.Prefix)
 	} else {
 		msg := fmt.Sprintf("Prefix %s successfully registered", ns.Prefix)
@@ -700,7 +788,7 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 	}
 
 	// Check if prefix exists before trying to delete it
-	exists, err := namespaceExistsByPrefix(prefix)
+	exists, err := registrationExistsByPrefix(prefix)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -724,7 +812,7 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 	delTokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
 	// Have the token, now we need to load the JWKS for the prefix
-	originJwks, _, err := getNamespaceJwksByPrefix(prefix)
+	originJwks, _, err := getRegistrationJwksByPrefix(prefix)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -754,7 +842,7 @@ func deleteNamespaceHandler(ctx *gin.Context) {
 	}
 
 	// If we get to this point in the code, we've passed all the security checks and we're ready to delete
-	err = deleteNamespaceByPrefix(prefix)
+	err = deleteRegistrationByPrefix(prefix)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -788,7 +876,7 @@ func cliListNamespaces(c *gin.Context) {
 */
 
 func getAllNamespacesHandler(ctx *gin.Context) {
-	nss, err := getAllNamespaces()
+	nss, err := getAllRegistrations()
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -815,7 +903,7 @@ func wildcardHandler(ctx *gin.Context) {
 	// while HTTP path is always slash (/)
 	if strings.HasSuffix(path, "/.well-known/issuer.jwks") {
 		prefix := strings.TrimSuffix(path, "/.well-known/issuer.jwks")
-		found, err := namespaceExistsByPrefix(prefix)
+		found, err := registrationExistsByPrefix(prefix)
 		if err != nil {
 			log.Error("Error checking if prefix ", prefix, " exists: ", err)
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -830,7 +918,7 @@ func wildcardHandler(ctx *gin.Context) {
 			return
 		}
 
-		jwks, adminMetadata, err := getNamespaceJwksByPrefix(prefix)
+		jwks, adminMetadata, err := getRegistrationJwksByPrefix(prefix)
 		if err != nil {
 			log.Errorf("Failed to load jwks for prefix %s: %v", prefix, err)
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -869,7 +957,7 @@ func wildcardHandler(ctx *gin.Context) {
 	} else if strings.HasSuffix(path, "/.well-known/openid-configuration") {
 		// Check that the namespace exists before constructing config JSON
 		prefix := strings.TrimSuffix(path, "/.well-known/openid-configuration")
-		exists, err := namespaceExistsByPrefix(prefix)
+		exists, err := registrationExistsByPrefix(prefix)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
@@ -916,7 +1004,7 @@ func wildcardHandler(ctx *gin.Context) {
 func getNamespaceHandler(ctx *gin.Context) {
 	param := ctx.Param("wildcard")
 	prefix := path.Clean(param)
-	exists, err := namespaceExistsByPrefix(prefix)
+	exists, err := registrationExistsByPrefix(prefix)
 	if err != nil {
 		log.Error("Error checking if prefix ", prefix, " exists: ", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -930,7 +1018,7 @@ func getNamespaceHandler(ctx *gin.Context) {
 			Msg:    fmt.Sprintf("namespace prefix '%s', was not found", prefix)})
 		return
 	}
-	ns, err := getNamespaceByPrefix(prefix)
+	ns, err := getRegistrationByPrefix(prefix)
 	if err != nil {
 		log.Errorf("Failed to load namespace for prefix %s: %v", prefix, err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -985,7 +1073,7 @@ func checkNamespaceExistsHandler(ctx *gin.Context) {
 		return
 	}
 
-	found, err := namespaceExistsByPrefix(req.Prefix)
+	found, err := registrationExistsByPrefix(req.Prefix)
 	if err != nil {
 		log.Debugln("Failed to check if namespace exists by prefix", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -1001,9 +1089,9 @@ func checkNamespaceExistsHandler(ctx *gin.Context) {
 		return
 	}
 	// Just to check if the key matches. We don't care about approval status
-	jwksDb, _, err := getNamespaceJwksByPrefix(req.Prefix)
+	jwksDb, _, err := getRegistrationJwksByPrefix(req.Prefix)
 	if err != nil {
-		log.Errorf("Error in getNamespaceJwksByPrefix with prefix %s. %v", req.Prefix, err)
+		log.Errorf("Error in getRegistrationJwksByPrefix with prefix %s. %v", req.Prefix, err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    err.Error()})
@@ -1042,9 +1130,9 @@ func checkApprovalHandler(ctx *gin.Context) {
 			Msg:    "prefix is required"})
 		return
 	}
-	exists, err := namespaceExistsByPrefix(req.Prefix)
+	exists, err := registrationExistsByPrefix(req.Prefix)
 	if err != nil {
-		log.Errorf("Error in namespaceExistsByPrefix with prefix %s. %v", req.Prefix, err)
+		log.Errorf("Error in registrationExistsByPrefix with prefix %s. %v", req.Prefix, err)
 		ctx.JSON(http.StatusInternalServerError,
 			server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
@@ -1063,9 +1151,9 @@ func checkApprovalHandler(ctx *gin.Context) {
 		return
 	}
 
-	ns, err := getNamespaceByPrefix(req.Prefix)
+	ns, err := getRegistrationByPrefix(req.Prefix)
 	if err != nil || ns == nil {
-		log.Errorf("Error in getNamespaceByPrefix with prefix %s. %v", req.Prefix, err)
+		log.Errorf("Error in getRegistrationByPrefix with prefix %s. %v", req.Prefix, err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("Error getting namespace %s: %s", req.Prefix, err.Error())})
@@ -1114,7 +1202,7 @@ func checkStatusHandler(ctx *gin.Context) {
 	}
 	for _, prefix := range nssReq.Prefixes {
 		complete := server_structs.NamespaceCompletenessResult{}
-		exists, err := namespaceExistsByPrefix(prefix)
+		exists, err := registrationExistsByPrefix(prefix)
 		if err != nil {
 			complete.Msg = fmt.Sprintf("Failed to check if %s exists: %v", prefix, err)
 			results[prefix] = complete
@@ -1125,7 +1213,7 @@ func checkStatusHandler(ctx *gin.Context) {
 			results[prefix] = complete
 			continue
 		}
-		ns, err := getNamespaceByPrefix(prefix)
+		ns, err := getRegistrationByPrefix(prefix)
 		if err != nil {
 			complete.Msg = fmt.Sprintf("Failed to retrieve namespace %s: %v", prefix, err)
 			results[prefix] = complete

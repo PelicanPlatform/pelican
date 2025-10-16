@@ -651,6 +651,10 @@ description: |+
   - IssuerUrls: A list of URLs that token requests to the federation prefix can use as issuers. These issuer URLs are used
       to craft the Origin's Scitokens configuration file. If unset, the Origin will fall back to its own external web URL and
       assume its server keys are also used for minting data access tokens.
+
+      When clients need to bootstrap access tokens using OAuth2 flows, they'll use the first URL in this list for bootstrapping.
+      If no URLs are provided but a defined namespace capability for the export requires tokens (`Reads`, `Writes`), the derived
+      value from `${Server.IssuerUrl}` will be used.
   - Capabilities: A list of the capabilities the origin is willing to support for the given export. Capabilities include:
       ["Reads", "PublicReads", "Writes", "Listings", "DirectReads"]
       where each of these has the same effect as the corresponding "Origin.Enable*" configuration, except scoped to the
@@ -884,9 +888,17 @@ components: ["origin"]
 ---
 name: Origin.Concurrency
 description: |+
-  This value represents the maximum number of connections to an Origin for XRootD throttling.
-  When this value is set, it enables the XRootD throttling plugin and will set the maximum
-  number of connections to this value.
+  This value represents the maximum number of permitted IO operations in-progress per second.
+  When this value is set, it enables the [XRootD throttling plugin's](https://github.com/xrootd/xrootd/tree/master/src/XrdThrottle)
+  'concurrency' throttle directive.
+
+  For example, if there are two simultaneous read requests and each takes 1 second to complete,
+  the concurrency is 2. Setting a concurrency limit of 1 would cause one of the requests to be
+  delayed until the other completes.
+
+  For POSIX Origins, this value should be approximately:
+  - (HDDs) ~2x the number of underlying disks
+  - (NVMe/SSDs) ~10x the number of cores available to the Origin
 type: int
 default: none
 components: ["origin"]
@@ -1253,6 +1265,14 @@ type: filename
 default: $ConfigBase/origin-fed-token
 components: ["origin"]
 ---
+name: Origin.SelfTestMaxAge
+description: |+
+  Defines the maximum allowed time since the last successful self-test. If an Origin fails to complete a new successful test within this period,
+  and Xrootd.AutoShutdownEnabled is true, the Origin will automatically shut down. This acts as a fail-safe mechanism.
+type: duration
+default: 1h
+components: ["origin"]
+---
 ############################
 #   Local cache configs    #
 ############################
@@ -1587,9 +1607,17 @@ components: ["cache"]
 ---
 name: Cache.Concurrency
 description: |+
-  This value represents the maximum number of connections to a cache for XRootD throttling.
-  When this value is set, it enables the XRootD throttling plugin and will set the maximum
-  number of connections to this value.
+  This value represents the maximum number of permitted IO operations in-progress per second.
+  When this value is set, it enables the [XRootD throttling plugin's](https://github.com/xrootd/xrootd/tree/master/src/XrdThrottle)
+  'concurrency' throttle directive.
+
+  For example, if there are two simultaneous read requests and each takes 1 second to complete,
+  the concurrency is 2. Setting a concurrency limit of 1 would cause one of the requests to be
+  delayed until the other completes.
+
+  For Caches, this value should be approximately:
+  - (HDDs) ~2x the number of underlying disks
+  - (NVMe/SSDs) ~10x the number of cores available to the Cache
 type: int
 default: none
 components: ["cache"]
@@ -1682,6 +1710,59 @@ type: filename
 default: $ConfigBase/cache-fed-token
 components: ["cache"]
 ---
+name: Cache.EnableEvictionMonitoring
+description: |+
+  Enable cache eviction monitoring.
+  The cache eviction monitoring data includes information like the total space available, the space used, and the space used by each namespace.
+type: bool
+default: true
+components: ["cache"]
+---
+name: Cache.EvictionMonitoringInterval
+description: |+
+  The interval at which the eviction monitoring will be reported.
+  Valid values are 60, 300, 600, 900, 1800, 3600.
+type: duration
+default: 60s
+components: ["cache"]
+---
+name: Cache.EvictionMonitoringMaxDepth
+description: |+
+  The maximum depth of the eviction monitoring within the namespace hierarchy.
+  Depth is measured by the number of /-delimited levels in a namespace path.
+  For example, a depth of 0 refers to the root of the namespace ('/'), while a depth of 1 refers to top-level namespaces like '/foo' and '/bar'.
+  When eviction monitoring data is generated, it will aggregate usage statistics up to the specified depth. For example, if a cache serves the namespaces `/projectA/dataset1` and `/projectA/dataset2`,
+  and `EvictionMonitoringMaxDepth` is set to 1, the usage for both namespaces will be aggregated and reported under `/projectA`. If the depth is set to 2, usage for `/projectA/dataset1` and `/projectA/dataset2` will be reported separately.
+  A depth of 0 will report only the total usage for the entire cache, aggregated at the root level.
+type: int
+default: 1
+components: ["cache"]
+---
+name: Cache.ClientStatisticsLocation
+description: |+
+  If set, Pelican will pass this path to the XRootD cache process via the `XRD_CURLSTATISTICSLOCATION` environment variable to enable client-side curl statistics in `xrdcl-pelican` (v1.5.0+).
+
+  Example:
+
+  ```yaml
+  Cache:
+    ClientStatisticsLocation: "${Cache.RunLocation}/xrootd.stats"
+  ```
+
+  The XRootD process will periodically write JSON-formatted statistics to the specified file, which can be read by external monitoring (e.g., `jq`).
+  Leave unset to disable.
+type: filename
+default: ${Cache.RunLocation}/xrootd.stats
+components: ["cache"]
+---
+name: Cache.SelfTestMaxAge
+description: |+
+  Defines the maximum allowed time since the last successful self-test. If a Cache fails to complete a new successful test within this period,
+  and Xrootd.AutoShutdownEnabled is true, the Cache will automatically shut down. This acts as a fail-safe mechanism.
+type: duration
+default: 1h
+components: ["cache"]
+---
 ############################
 #  Director-level configs  #
 ############################
@@ -1746,11 +1827,58 @@ description: |+
     and returns the same ordering as "distance".
   - "random": Sorts caches randomly.
   - "adaptive": Sorts caches according to stochastically-generated weights that consider a combination of factors,
-      including a cache's distance from the client, its IO load, and whether the cache already has the requested object.
-      See details at https://github.com/PelicanPlatform/pelican/discussions/1198.  Note that if `Director.CheckCachePresence`
-      is set to false, then the adaptive algorithm cannot use the cache locality information.
+      including a cache's distance from the client, its IO load, server status and whether the cache already has the requested
+      object.
+
+  See details at https://github.com/PelicanPlatform/pelican/discussions/1198.  Note that if `Director.CheckCachePresence`
+  is set to false, then the adaptive algorithm cannot use the cache locality information.
 type: string
 default: distance
+components: ["director"]
+---
+name: Director.FilterCachesInErrorState
+description: |+
+  If true, the Director will filter out any caches that report a health status worse than "warning" when deciding which
+  caches might fulfill a client request. This filter is independent of the cache sorting method, and is applied before sorting.
+
+  This knob is meant mostly to aid in unit testing, where it has been tricky to start all tests with healthy services.
+type: bool
+default: true
+hidden: true
+components: ["director"]
+---
+name: Director.AdaptiveSortEWMATimeConstant
+description: |+
+  The time constant used for calculating alpha in the Director's EWMA smoothing of server status weights.
+  This number can be thought of as a "lookback" window used by the Director when deciding how heavily
+  to consider past observations related to the server's status.
+
+  Large values decrease the impact of recent observations, leading to a smoother and more stable time-series
+  for status weights, while small values increase impact and result in more responsive behavior to recent changes.
+
+  When this value is set too high, the Director may not respond quickly enough to changes in server status, leading
+  to suboptimal cache selection. When set too low, the Director may not give overloaded caches sufficient time to
+  drain their queues before re-prioritizing them.
+
+  For more information, see https://en.wikipedia.org/wiki/Exponential_smoothing
+type: duration
+default: 5m
+hidden: true
+components: ["director"]
+---
+name: Director.AdaptiveSortTruncateConstant
+description: |+
+  The first step in the Director's adaptive sorting algorithm is to sort all servers for the given request
+  by their distance from the client and then truncate to the nearest N server before generating the other
+  adaptive sort weights (load, status, locality).
+
+  This constant sets the value of N. Higher values increase the pool of servers considered for adaptive sorting,
+  while lower values restrict the pool to only the closest servers.
+
+  The constant cannot be set to a value lower than 3, as Pelican clients expect to receive 3 servers at minimum,
+  and the Director will reply with at most 6 servers regardless of this value.
+type: int
+default: 6
 components: ["director"]
 ---
 name: Director.OriginResponseHostnames
@@ -2497,6 +2625,7 @@ description: |+
   - `oidc`: Take group information from the identity token provided by the OIDC identity provider.  Parses
     the value of the claim specified by `Issuer.OIDCGroupClaim` (defaults to "groups") as a list of groups.
     The value may either be a comma-separated string or an array of strings.
+  - `internal`: Take group information from the Pelican server's internal user database.
 type: string
 default: none
 components: ["origin"]
@@ -2556,6 +2685,10 @@ description: |+
     `$GROUP`, then authorizations will be generated only for the groups
     listed here.
 
+  - `group_regexes` (optional): A list of regular expressions. If non-empty, at least one authenticated group must match one of the regular expressions
+    in order for this template to generate any authorizations. If `prefix` contains the substring `$GROUP`, then authorizations will be generated only
+    for the matching groups.  An authenticated group will match if it is listed in either the `groups` or the `group_regexes` list.
+
   For example, if the request is authenticated as username `bbockelm` and
   groups `dept_a` and `dept_b`, then the list of templates
 
@@ -2568,6 +2701,9 @@ description: |+
   - actions: ["read", "create"]
     prefix: /projects/$GROUP
     groups: ["dept_a", "dept_c"]
+  - actions: ["read"]
+    prefix: /data/$GROUP
+    group_regexes: ["^dept_"]
   ```
 
   will result in the following authorizations:
@@ -2576,7 +2712,20 @@ description: |+
   - modify /home/bbockelm
   - read /projects/dept_a
   - create /projects_dept_a
+  - read /data/dept_a
+  - read /data/dept_b
 type: object
+default: []
+components: ["origin"]
+---
+name: Issuer.RedirectUris
+description: |+
+  The list of redirect URIs for Issuer Clients to use in the Authorization Code Flow. Used to enable the use of a
+  Pelican Web Client at the redirect target. The URIs must use the `https` scheme.
+
+  More information on using the [Pelican Web Client](https://github.com/PelicanPlatform/web-client).
+type: stringSlice
+root_default: []
 default: []
 components: ["origin"]
 ---
@@ -2674,6 +2823,13 @@ type: url
 default: https://cilogon.org
 components: ["registry", "origin", "cache", "director"]
 ---
+name: OIDC.Scopes
+description: |+
+  A list of scopes to request from the authentication provider.
+type: stringSlice
+default: ["openid", "email", "profile"]
+components: ["registry", "origin", "cache", "director"]
+---
 name: OIDC.ClientRedirectHostname
 description: |+
   The hostname for the OIDC client redirect URL that the OIDC provider will redirect to after the user is authenticated.
@@ -2699,7 +2855,7 @@ type: int
 default: 8443
 deprecated: true
 replacedby: ["Origin.Port", "Cache.Port"]
-components: ["origin", "cache"]
+components: ["cache", "origin"]
 ---
 name: Xrootd.RunLocation
 description: |+
@@ -2717,7 +2873,7 @@ root_default: /run/pelican/xrootd
 default: $XDG_RUNTIME_DIR/pelican
 deprecated: true
 replacedby: ["Cache.RunLocation", "Origin.RunLocation"]
-components: ["origin", "cache"]
+components: ["cache", "origin"]
 ---
 name: Xrootd.ConfigFile
 description: |+
@@ -2731,7 +2887,7 @@ description: |+
   for details
 type: filename
 default: none
-components: ["origin", "cache"]
+components: ["cache", "origin"]
 ---
 name: Xrootd.RobotsTxtFile
 description: |+
@@ -2754,7 +2910,7 @@ description: |+
 type: filename
 root_default: /etc/pelican/xrootd/scitokens.cfg
 default: $ConfigBase/xrootd/scitokens.cfg
-components: ["origin", "cache"]
+components: ["cache", "origin"]
 ---
 name: Xrootd.Mount
 description: |+
@@ -2775,7 +2931,7 @@ description: |+
   The filepath to an auth file for setting up authorization in XRootD.
 type: string
 default: none
-components: ["origin"]
+components: ["cache", "origin"]
 ---
 name: Xrootd.AuthRefreshInterval
 description: |+
@@ -2784,49 +2940,49 @@ description: |+
   polled for changes.
 type: duration
 default: 5m
-components: ["origin", "cache"]
+components: ["cache", "origin"]
 ---
 name: Xrootd.ManagerHost
 description: |+
   A URL pointing toward the XRootD instance's Manager Host.
 type: url
 default: none
-components: ["origin", "cache"]
+components: ["cache", "origin"]
 ---
 name: Xrootd.ManagerPort
 description: |+
   The port at which the XRootD instance's Manager Host is available.
 type: int
 default: 1213
-components: ["origin", "cache"]
+components: ["cache", "origin"]
 ---
 name: Xrootd.SummaryMonitoringHost
 description: |+
   A URL pointing toward the XRootD instance's Summary Monitoring Host.
 type: url
 default: none
-components: ["origin", "cache"]
+components: ["cache", "origin"]
 ---
 name: Xrootd.SummaryMonitoringPort
 description: |+
   The port at which the XRootD instance's Summary Monitoring Host is available.
 type: int
 default: 9931
-components: ["origin", "cache"]
+components: ["cache", "origin"]
 ---
 name: Xrootd.DetailedMonitoringHost
 description: |+
   A URL pointing toward the XRootD instance's Detailed Monitoring Host.
 type: url
 default: none
-components: ["origin", "cache"]
+components: ["cache", "origin"]
 ---
 name: Xrootd.DetailedMonitoringPort
 description: |+
   The port at which the XRootD instance's Detailed Monitoring Host is available.
 type: int
 default: 9930
-components: ["origin", "cache"]
+components: ["cache", "origin"]
 ---
 name: Xrootd.EnableLocalMonitoring
 description: |+
@@ -2838,14 +2994,14 @@ description: |+
 type: bool
 default: true
 hidden: true
-components: ["origin", "cache"]
+components: ["cache", "origin"]
 ---
 name: Xrootd.LocalMonitoringHost
 description: |+
   A URL pointing toward the XRootD instance's Local Monitoring Host.
 type: url
 default: none
-components: ["origin", "cache"]
+components: ["cache", "origin"]
 ---
 name: Xrootd.Sitename
 description: |+
@@ -2857,7 +3013,7 @@ description: |+
   For both cahces/origins the sitename will be displayed as the service's name in the federation's Director.
 type: string
 default: none
-components: ["origin", "cache"]
+components: ["cache", "origin"]
 ---
 name: Xrootd.MaxStartupWait
 description: |+
@@ -2866,7 +3022,7 @@ description: |+
 type: duration
 default: 10s
 hidden: true
-components: ["origin", "cache"]
+components: ["cache", "origin"]
 ---
 name: Xrootd.ShutdownTimeout
 description: |+
@@ -2875,11 +3031,56 @@ description: |+
   while in-flight transfers are allowed to proceed until timeout.
 type: duration
 default: 1m
+components: ["cache", "origin"]
+---
+name: Xrootd.HttpMaxDelay
+description: |+
+  Configures the maximum amount of time the XRootD HTTP layer will continue internal retries
+  when a file open fails. XRootD retries every 3s until this limit is reached; once exceeded,
+  the request fails (typically with HTTP 500 / Internal Error).
+
+  The historical behavior is to retry for up to an hour, which can create server-side backlogs
+  when clients have much shorter timeouts. Set this to a small duration to avoid queue buildup.
+  With a 10s client timeout, common choices are:
+    - 9s: client likely still receives an HTTP 500 response before its own timeout.
+    - 12s: client times out first; the server stops retrying shortly after, reducing load.
+type: duration
+default: 9s
+hidden: true
+components: ["cache", "origin"]
+---
+name: Xrootd.MaxThreads
+description: |+
+  The maximum number of threads that XRootD will use. See the XRootD [documentation](https://xrootd.web.cern.ch/doc/dev6/xrd_config.htm#_sched) for more information.
+type: int
+default: 20000
+components: ["cache", "origin"]
+hidden: true
+---
+name: Xrootd.ConfigUpdateFailureTimeout
+description: |+
+  If the Authfile and/or scitoken config file fails to update within this duration, and Xrootd.AutoShutdownEnabled is true, the server will be automatically shut down.
+type: duration
+default: 1h
+components: ["origin", "cache"]
+---
+name: Xrootd.AutoShutdownEnabled
+description: |+
+  If enabled, the server will be automatically shut down if the Authfile and/or scitoken config file fails to update within the timeout.
+type: bool
+default: true
 components: ["origin", "cache"]
 ---
 ############################
 # Monitoring-level configs #
 ############################
+name: Monitoring.EnablePrometheus
+description: |+
+  Enable the internal Prometheus server. This server is bound to the ${Server.WebPort}.
+type: bool
+default: true
+components: ["origin", "cache", "director", "registry"]
+---
 name: Monitoring.DataLocation
 description: |+
   A filepath where Prometheus should host its monitoring data.

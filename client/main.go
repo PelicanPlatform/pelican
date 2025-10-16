@@ -114,7 +114,7 @@ func ParseRemoteAsPUrl(ctx context.Context, rp string) (*pelican_url.PelicanURL,
 	}
 
 	// Set up options that get passed from Parse --> PopulateFedInfo and may be used when querying the Director
-	client := &http.Client{Transport: config.GetTransport()}
+	client := config.GetClient()
 	pOptions := []pelican_url.ParseOption{pelican_url.ShouldDiscover(true), pelican_url.ValidateQueryParams(true)}
 	dOptions := []pelican_url.DiscoveryOption{pelican_url.UseCached(true), pelican_url.WithContext(ctx), pelican_url.WithClient(client), pelican_url.WithUserAgent(getUserAgent(""))}
 
@@ -170,7 +170,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 
 	var requestedChecksums []ChecksumType
 
-	token := newTokenGenerator(pUrl, &dirResp, config.TokenSharedRead, true)
+	token := NewTokenGenerator(pUrl, &dirResp, config.TokenSharedRead, true)
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
@@ -186,7 +186,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 
 	var tokenContents string
 	if dirResp.XPelNsHdr.RequireToken {
-		tokenContents, err = token.get()
+		tokenContents, err = token.Get()
 		if err != nil || tokenContents == "" {
 			return nil, errors.Wrap(err, "failed to get token for transfer")
 		}
@@ -389,7 +389,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	}
 
 	// Get our token if needed
-	token := newTokenGenerator(pUrl, &dirResp, config.TokenSharedRead, true)
+	token := NewTokenGenerator(pUrl, &dirResp, config.TokenSharedRead, true)
 	collectionsOverride := ""
 	for _, option := range options {
 		switch option.Ident() {
@@ -405,7 +405,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	}
 
 	if dirResp.XPelNsHdr.RequireToken {
-		tokenContents, err := token.get()
+		tokenContents, err := token.Get()
 		if err != nil || tokenContents == "" {
 			return nil, errors.Wrap(err, "failed to get token for transfer")
 		}
@@ -452,7 +452,12 @@ func DoDelete(ctx context.Context, remoteDestination string, recursive bool, opt
 		return err
 	}
 
-	token := newTokenGenerator(pUrl, &dirResp, config.TokenDelete, true)
+	operation := config.TokenDelete
+	if recursive {
+		operation.Set(config.TokenList)
+	}
+
+	token := NewTokenGenerator(pUrl, &dirResp, operation, true)
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
@@ -464,7 +469,7 @@ func DoDelete(ctx context.Context, remoteDestination string, recursive bool, opt
 		}
 	}
 
-	tokenContents, err := token.get()
+	tokenContents, err := token.Get()
 	if err != nil || tokenContents == "" {
 		return errors.Wrap(err, "failed to retrieve token for delete operation")
 	}
@@ -499,6 +504,7 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse remote destination while performing PUT")
 	}
+	dOpts = append(dOpts, pelican_url.WithContext(ctx))
 
 	// If the incoming path has no scheme, we need to tell the pelican_url parser to use the configured discovery URL
 	if err = handleSchemelessIfNeeded(ctx, rpUrl, &dOpts); err != nil {
@@ -524,7 +530,7 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 	if err != nil {
 		return
 	}
-	tj, err := client.NewTransferJob(context.Background(), pUrl.GetRawUrl(), localObject, true, recursive)
+	tj, err := client.NewTransferJob(context.Background(), pUrl.GetRawUrl(), localObject, true, recursive, options...)
 	if err != nil {
 		return
 	}
@@ -570,6 +576,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse remote source while performing GET")
 	}
+	dOpts = append(dOpts, pelican_url.WithContext(ctx))
 
 	// If the incoming path has no scheme, we need to tell the pelican_url parser to use the configured discovery URL
 	if err = handleSchemelessIfNeeded(ctx, rpUrl, &dOpts); err != nil {

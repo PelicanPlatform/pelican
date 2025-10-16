@@ -43,10 +43,21 @@ export default function RootLayout({
         >
           <PaddedContent>
             <Grid container spacing={2}>
-              <Grid item xs={12} md={2}>
+              <Grid
+                size={{
+                  xs: 12,
+                  md: 2,
+                }}
+              >
                 <SubNavigation />
               </Grid>
-              <Grid item xs={12} md={8} lg={6}>
+              <Grid
+                size={{
+                  xs: 12,
+                  md: 8,
+                  lg: 6,
+                }}
+              >
                 <Box width={'100%'}>{children}</Box>
               </Grid>
             </Grid>

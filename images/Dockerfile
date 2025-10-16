@@ -35,7 +35,7 @@ ARG OSG_SERIES=24
 ARG OSG_REPO=release
 
 # For compiling Pelican.
-ARG GO_VER=1.23.8
+ARG GO_VER=1.24.7
 ARG NODEJS_VER=20
 
 # For controlling how XRootD plugins are installed:
@@ -53,18 +53,21 @@ ARG NODEJS_VER=20
 #
 ARG LOTMAN_SRC_BUILD=false
 ARG LOTMAN_VER=0.0.4
+# Note: github_scripts/osx_install.sh also (separately) specifies the version to use
+# Until the two places are programmatically synchronized, please double-check by hand
+# when doing version changes.
 ARG XRDCL_PELICAN_SRC_BUILD=false
-ARG XRDCL_PELICAN_VER=1.2.3
+ARG XRDCL_PELICAN_VER=1.5.6
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
-ARG XRDHTTP_PELICAN_VER=0.0.6
+ARG XRDHTTP_PELICAN_VER=0.0.7
 ARG XROOTD_LOTMAN_SRC_BUILD=false
-ARG XROOTD_LOTMAN_VER=0.0.3
+ARG XROOTD_LOTMAN_VER=0.0.5
 ARG XROOTD_S3_HTTP_SRC_BUILD=true
-ARG XROOTD_S3_HTTP_VER=0.4.1
+ARG XROOTD_S3_HTTP_VER=0.5.2
 
 # Set scitokens-oauth2-server image as a build stage so that we can copy its
 # OA4MP installation into the images being built here.
-FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
+FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20250625-2352 AS scitokens-oauth2-server
 
 #################################################################
 # Pelican Build Base
@@ -192,7 +195,12 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   printf '%s\n' "metadata_expire=1800" >> /etc/dnf/dnf.conf
 
   dnf install -y tini 'dnf-command(versionlock)'
+
+  mkdir -p /etc/pelican/config.d
+  mkdir -p /usr/share/pelican/config.d
 ENDRUN
+
+COPY images/pelican.yaml /etc/pelican/pelican.yaml
 
 #################################################################
 # XRootD Software Init
@@ -215,8 +223,8 @@ RUN groupadd -g 10940 xrootd \
 # Pelican's patches are ingested into the OSG repositories.
 # NOTE: If you update this version, you must also update the version in
 # github_scripts/osx_install.sh
-ARG XROOTD_VER="5.8.3"
-ARG XROOTD_RELEASE="1.2.osg${OSG_SERIES}.${BASE_OS}"
+ARG XROOTD_VER="5.8.4"
+ARG XROOTD_RELEASE="1.4.osg${OSG_SERIES}.${BASE_OS}"
 ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VER}/${XROOTD_RELEASE}"
 
 # The packages from Koji need to be installed in a single dnf command in
@@ -454,6 +462,14 @@ RUN useradd -r -s /sbin/nologin tomcat && \
 # communicate with it over a socket.
 COPY --chown=root:tomcat oa4mp/resources/server.xml /opt/tomcat/conf/server.xml
 
+# Replace other bits and bobs to take into account the fact that Pelican
+# authenticates the user and proxies requests.
+COPY --chown=tomcat:tomcat oa4mp/resources/client-template.xml /opt/scitokens-server/etc/templates/client-template.xml
+COPY --chown=tomcat:tomcat oa4mp/resources/device-consent.jsp /opt/tomcat/webapps/scitokens-server/device-consent.jsp
+COPY --chown=tomcat:tomcat oa4mp/resources/authorize-remote-user.jsp /opt/tomcat/webapps/scitokens-server/authorize-remote-user.jsp
+COPY --chown=tomcat:tomcat oa4mp/resources/device-fail.jsp /opt/tomcat/webapps/scitokens-server/device-fail.jsp
+COPY --chown=tomcat:tomcat oa4mp/resources/device-ok.jsp /opt/tomcat/webapps/scitokens-server/device-ok.jsp
+
 # This script is a documented part of OA4MP's bootstrap process, but we
 # otherwise do not need it.
 COPY --from=scitokens-oauth2-server /usr/local/bin/generate_jwk.sh /usr/local/bin/generate_jwk.sh
@@ -484,17 +500,17 @@ ENV JAVA_HOME="/usr/lib/jvm/jre" \
 #################################################################
 FROM pelican-software-base AS director
 ARG TARGETOS TARGETARCH
-COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican_${TARGETOS}_${TARGETARCH}/pelican /usr/local/bin/pelican
+COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
 COPY images/entrypoint.sh /entrypoint.sh
 COPY scripts/geoquery.py /usr/local/sbin/geoquery
 RUN dnf install -y python3-pip \
     && python3 -m pip install geoip2
-ENTRYPOINT ["/entrypoint.sh", "pelican", "director"]
+ENTRYPOINT ["/entrypoint.sh", "pelican-server", "director"]
 CMD ["serve"]
 
 FROM director AS osdf-director
-RUN ln -s pelican /usr/local/bin/osdf
-ENTRYPOINT ["/entrypoint.sh", "osdf", "director"]
+RUN ln -s pelican-server /usr/local/sbin/osdf-server
+ENTRYPOINT ["/entrypoint.sh", "osdf-server", "director"]
 CMD ["serve"]
 
 #################################################################
@@ -502,14 +518,14 @@ CMD ["serve"]
 #################################################################
 FROM pelican-software-base AS registry
 ARG TARGETOS TARGETARCH
-COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican_${TARGETOS}_${TARGETARCH}/pelican /usr/local/bin/pelican
+COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
 COPY images/entrypoint.sh /entrypoint.sh
-ENTRYPOINT ["/entrypoint.sh", "pelican", "registry"]
+ENTRYPOINT ["/entrypoint.sh", "pelican-server", "registry"]
 CMD ["serve"]
 
 FROM registry AS osdf-registry
-RUN ln -s pelican /usr/local/bin/osdf
-ENTRYPOINT ["/entrypoint.sh", "osdf", "registry"]
+RUN ln -s pelican-server /usr/local/sbin/osdf-server
+ENTRYPOINT ["/entrypoint.sh", "osdf-server", "registry"]
 CMD ["serve"]
 
 #################################################################
@@ -517,9 +533,9 @@ CMD ["serve"]
 #################################################################
 FROM origin-base AS origin
 ARG TARGETOS TARGETARCH
-COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican_${TARGETOS}_${TARGETARCH}/pelican /usr/local/bin/pelican
+COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
 COPY images/entrypoint.sh /entrypoint.sh
-ENTRYPOINT ["/entrypoint.sh", "pelican", "origin"]
+ENTRYPOINT ["/entrypoint.sh", "pelican-server", "origin"]
 CMD ["serve"]
 
 FROM origin AS osdf-origin
@@ -531,8 +547,8 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   groupadd -r -g 990 sssd
   useradd -r -g sssd -u 990 -d / -s /usr/sbin/nologin -c "System user for sssd" sssd
 ENDRUN
-RUN ln -s pelican /usr/local/bin/osdf
-ENTRYPOINT ["/entrypoint.sh", "osdf", "origin"]
+RUN ln -s pelican-server /usr/local/sbin/osdf-server
+ENTRYPOINT ["/entrypoint.sh", "osdf-server", "origin"]
 CMD ["serve"]
 
 #################################################################

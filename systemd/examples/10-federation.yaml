@@ -5,9 +5,10 @@
 # Required configuration to integrate with your federation
 #####################################################
 
-Federation:
-  ## The main URL for your federation. You must specify this.
-  DiscoveryUrl:
+# Federation:
+#   ## The main URL for your federation. You must specify this unless
+#   ## you are using one of the `osdf-*` service RPMs.
+#   DiscoveryUrl:
 
 ## If the external DNS name of your host is different from the output
 ## of `hostname -f`, set Hostname to the external DNS name

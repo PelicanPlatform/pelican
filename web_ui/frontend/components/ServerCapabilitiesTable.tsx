@@ -23,7 +23,7 @@ export const ServerCapabilitiesTable = ({
 }: ServerCapabilitiesTableProps) => {
   return (
     <Grid container spacing={1}>
-      <Grid item xs={12}>
+      <Grid size={12}>
         <Box
           bgcolor={grey[300]}
           display={'flex'}
@@ -32,14 +32,24 @@ export const ServerCapabilitiesTable = ({
           borderRadius={1}
         >
           <Grid container spacing={1}>
-            <Grid item xs={12} md={3}>
+            <Grid
+              size={{
+                xs: 12,
+                md: 3,
+              }}
+            >
               <Box display={'flex'} height={'100%'}>
                 <Typography variant={'body2'} my={'auto'}>
                   {server.type}&apos;s Namespace Capabilities
                 </Typography>
               </Box>
             </Grid>
-            <Grid item xs={12} md={9}>
+            <Grid
+              size={{
+                xs: 12,
+                md: 9,
+              }}
+            >
               <CapabilitiesRow capabilities={server.capabilities} />
             </Grid>
           </Grid>
@@ -49,17 +59,27 @@ export const ServerCapabilitiesTable = ({
         server?.namespaces
           ?.sort((a, b) => a.path.localeCompare(b.path))
           ?.map((namespace) => (
-            <Grid key={namespace.path} item xs={12}>
+            <Grid key={namespace.path} size={12}>
               <Box display={'flex'} px={1} borderRadius={1}>
                 <Grid container spacing={1}>
-                  <Grid item xs={12} md={3}>
+                  <Grid
+                    size={{
+                      xs: 12,
+                      md: 3,
+                    }}
+                  >
                     <Box display={'flex'} height={'100%'}>
                       <Typography variant={'body2'} my={'auto'}>
                         {namespace.path}
                       </Typography>
                     </Box>
                   </Grid>
-                  <Grid item xs={12} md={9}>
+                  <Grid
+                    size={{
+                      xs: 12,
+                      md: 9,
+                    }}
+                  >
                     <CapabilitiesRow
                       capabilities={namespace.capabilities}
                       parentCapabilities={server.capabilities}

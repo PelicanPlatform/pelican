@@ -1,0 +1,14 @@
+# For testing a specific edge case where a public namespace is a prefix
+# of a write-only namespace.
+
+Origin:
+  StorageType: "posix"
+
+  # The actual namespaces we export
+  Exports:
+    - StoragePrefix: /<WILL BE REPLACED IN TEST>
+      FederationPrefix: /mynamespace
+      Capabilities: ["PublicReads", "Writes", "Listings", "DirectReads"]
+    - StoragePrefix: /<WILL BE REPLACED IN TEST>
+      FederationPrefix: /mynamespace-writes
+      Capabilities: [ "Writes"]

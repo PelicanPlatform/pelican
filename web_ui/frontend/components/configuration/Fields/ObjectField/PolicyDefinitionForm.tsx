@@ -39,7 +39,7 @@ const PolicyDefinitionForm = ({
       return;
     }
     onSubmit(policyDefinition);
-  }, [policyDefinition]);
+  }, [policyDefinition, onSubmit]);
 
   return (
     <>

@@ -84,7 +84,7 @@ type (
 	}
 )
 
-func newTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.DirectorResponse, operation config.TokenOperation, enableAcquire bool) *tokenGenerator {
+func NewTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.DirectorResponse, operation config.TokenOperation, enableAcquire bool) *tokenGenerator {
 	return &tokenGenerator{
 		DirResp:       dirResp,
 		Destination:   dest,
@@ -373,12 +373,17 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 // Return the token contents associated with the generator
 //
 // Thread-safe
-func (tg *tokenGenerator) get() (token string, err error) {
+func (tg *tokenGenerator) Get() (token string, err error) {
 	// First, see if the existing token is valid
 	info := tg.Token.Load()
 	if info != nil && time.Until(info.Expiry) > 0 && info.Contents != "" {
-		token = info.Contents
-		return
+		// if AcquireToken is enabled and the token is unacceptable, clear the cache and force a new token to be generated
+		if tg.EnableAcquire && tg.DirResp != nil && !tokenIsAcceptable(info.Contents, tg.Destination.Path, *tg.DirResp, config.TokenGenerationOpts{Operation: tg.Operation}) {
+			tg.Token.Store(nil) // clear the cache and force a new token to be generated
+			log.Debugln("Token is not acceptable; clearing cache")
+		} else {
+			return info.Contents, nil
+		}
 	}
 
 	// If not, always invoke the synchronized "Do".  It will
@@ -412,7 +417,11 @@ func tokenIsAcceptable(jwtSerialized string, objectName string, dirResp server_s
 		isWLCG = true
 	}
 	if ver, ok := tok.Get("ver"); ok {
-		if s, ok2 := ver.(string); ok2 && strings.HasPrefix(s, "scitokens:") {
+		// Based on the scitoken official docs(https://scitokens.org/technical_docs/Verification),
+		// the correct behavior for the `ver` claim is `scitoken:2.0` (singular). However, to maintain
+		// backward compatibility and typo tolerance, Pelican should keep accepting `scitokens:2.0` too.
+		// This implementation is inspired by the scitoken check in scitokens-cpp library.
+		if s, ok2 := ver.(string); ok2 && (strings.HasPrefix(s, "scitoken:2.0") || strings.HasPrefix(s, "scitokens:2.0")) {
 			isSci = true
 		}
 	}
@@ -468,11 +477,15 @@ func tokenIsAcceptable(jwtSerialized string, objectName string, dirResp server_s
 		acceptableScope := false
 		for _, scope := range strings.Split(scopes, " ") {
 			scope_info := strings.Split(scope, ":")
-			scopeOK := false
-			if (opts.Operation == config.TokenWrite || opts.Operation == config.TokenSharedWrite) && (scope_info[0] == "storage.modify" || scope_info[0] == "storage.create") {
-				scopeOK = true
-			} else if scope_info[0] == "storage.read" {
-				scopeOK = true
+			var scopeOK bool
+			if opts.Operation.IsEnabled(config.TokenWrite) || opts.Operation.IsEnabled(config.TokenSharedWrite) {
+				scopeOK = (scope_info[0] == "storage.modify" || scope_info[0] == "storage.create")
+			} else if opts.Operation.IsEnabled(config.TokenDelete) {
+				scopeOK = (scope_info[0] == "storage.modify")
+			} else if opts.Operation.IsEnabled(config.TokenRead) || opts.Operation.IsEnabled(config.TokenSharedRead) {
+				scopeOK = (scope_info[0] == "storage.read")
+			} else {
+				scopeOK = false
 			}
 			if !scopeOK {
 				continue
@@ -483,7 +496,7 @@ func tokenIsAcceptable(jwtSerialized string, objectName string, dirResp server_s
 				break
 			}
 			// Shared URLs must have exact matches; otherwise, prefix matching is acceptable.
-			if ((opts.Operation == config.TokenSharedWrite || opts.Operation == config.TokenSharedRead) && (targetResource == scope_info[1])) ||
+			if ((opts.Operation.IsEnabled(config.TokenSharedWrite) || opts.Operation.IsEnabled(config.TokenSharedRead)) && (targetResource == scope_info[1])) ||
 				strings.HasPrefix(targetResource, scope_info[1]) {
 				acceptableScope = true
 				break
@@ -509,9 +522,22 @@ func tokenIsValid(jwtSerialized string) (valid bool, expiry time.Time) {
 		return
 	}
 
+	if err := jwt.Validate(token); err != nil {
+		log.Warningln("Token is invalid:", err)
+		return false, token.Expiration()
+	}
+
 	valid = true
 	expiry = token.Expiration()
 	return
+}
+
+func tokenIsExpired(jwtSerialized string) (expired bool, expiry time.Time, err error) {
+	token, err := jwt.Parse([]byte(jwtSerialized), jwt.WithVerify(false), jwt.WithValidate(false))
+	if err != nil {
+		return
+	}
+	return token.Expiration().Before(time.Now()), token.Expiration(), nil
 }
 
 func registerClient(dirResp server_structs.DirectorResponse) (*config.PrefixEntry, error) {
@@ -529,7 +555,6 @@ func registerClient(dirResp server_structs.DirectorResponse) (*config.PrefixEntr
 	}
 
 	drcp := oauth2.DCRPConfig{ClientRegistrationEndpointURL: issuer.RegistrationURL, Transport: config.GetTransport(), Metadata: oauth2.Metadata{
-		RedirectURIs:            []string{"https://localhost/osdf-client"},
 		TokenEndpointAuthMethod: "client_secret_basic",
 		GrantTypes:              []string{"refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
 		ResponseTypes:           []string{"code"},
@@ -633,36 +658,30 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		}
 	}
 
-	// For now, a fairly useless token-selection algorithm - take the first in the list.
-	// In the future, we should:
-	// - Check scopes
-	var acceptableToken *config.TokenEntry = nil
-	acceptableUnexpiredToken := ""
-	for idx, token := range prefixEntry.Tokens {
-		if !tokenIsAcceptable(token.AccessToken, destination.Path, dirResp, opts) {
-			continue
+	// First search for an acceptable and unexpired token.
+	for _, token := range prefixEntry.Tokens {
+		if tokenIsAcceptable(token.AccessToken, destination.Path, dirResp, opts) {
+			if valid, _ := tokenIsValid(token.AccessToken); valid {
+				log.Debugln("Returning an unexpired token from cache")
+				return token.AccessToken, nil
+			}
 		}
-		if acceptableToken == nil {
-			acceptableToken = &prefixEntry.Tokens[idx]
-		} else if acceptableUnexpiredToken != "" {
-			// Both tokens are non-empty; let's use them
+	}
+
+	// If no acceptable and unexpired token is found, search for an acceptable token to refresh.
+	var tokenToRefresh *config.TokenEntry = nil
+	for idx, token := range prefixEntry.Tokens {
+		if tokenIsAcceptable(token.AccessToken, destination.Path, dirResp, opts) {
+			tokenToRefresh = &prefixEntry.Tokens[idx]
 			break
 		}
-		if valid, _ := tokenIsValid(token.AccessToken); valid {
-			acceptableUnexpiredToken = token.AccessToken
-		}
-	}
-	if len(acceptableUnexpiredToken) > 0 {
-		log.Debugln("Returning an unexpired token from cache")
-		return acceptableUnexpiredToken, nil
 	}
 
-	if acceptableToken != nil && len(acceptableToken.RefreshToken) > 0 {
-
+	if tokenToRefresh != nil {
 		// We have a reasonable token; let's try refreshing it.
 		upstreamToken := oauth2_upstream.Token{
-			AccessToken:  acceptableToken.AccessToken,
-			RefreshToken: acceptableToken.RefreshToken,
+			AccessToken:  tokenToRefresh.AccessToken,
+			RefreshToken: tokenToRefresh.RefreshToken,
 			Expiry:       time.Unix(0, 0),
 		}
 		issuerInfo, err := config.GetIssuerMetadata(issuer)
@@ -681,10 +700,10 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 			if err != nil {
 				log.Warningln("Failed to renew an expired token:", err)
 			} else {
-				acceptableToken.AccessToken = newToken.AccessToken
-				acceptableToken.Expiration = newToken.Expiry.Unix()
+				tokenToRefresh.AccessToken = newToken.AccessToken
+				tokenToRefresh.Expiration = newToken.Expiry.Unix()
 				if len(newToken.RefreshToken) != 0 {
-					acceptableToken.RefreshToken = newToken.RefreshToken
+					tokenToRefresh.RefreshToken = newToken.RefreshToken
 				}
 				if err = config.SaveConfigContents(&osdfConfig); err != nil {
 					log.Warningln("Failed to save new token to configuration file:", err)
@@ -820,16 +839,32 @@ func generateToken(destination *url.URL, dirResp server_structs.DirectorResponse
 	tc.Issuer = issuer
 	tc.Lifetime = time.Hour
 	tc.Subject = "client_token"
-	ts := token_scopes.Wlcg_Storage_Read
-	if opts.Operation == config.TokenSharedWrite {
-		ts = token_scopes.Wlcg_Storage_Modify
-	}
-	if after, found := strings.CutPrefix(path.Clean(destination.Path), path.Clean(dirResp.XPelNsHdr.Namespace)); found {
-		tc.AddResourceScopes(token_scopes.NewResourceScope(ts, after))
-	} else {
+	scopes := []token_scopes.ResourceScope{}
+	base := path.Clean(dirResp.XPelNsHdr.Namespace)
+	dest := path.Clean(destination.Path)
+
+	after, found := strings.CutPrefix(dest, base)
+	if !found {
 		err = errors.New("Destination resource not inside director-provided namespace")
 		return
 	}
+
+	ops := []struct {
+		enabled bool
+		scope   token_scopes.TokenScope
+	}{
+		{opts.Operation.IsEnabled(config.TokenRead) || opts.Operation.IsEnabled(config.TokenSharedRead), token_scopes.Wlcg_Storage_Read},
+		{opts.Operation.IsEnabled(config.TokenWrite) || opts.Operation.IsEnabled(config.TokenSharedWrite), token_scopes.Wlcg_Storage_Create},
+		{opts.Operation.IsEnabled(config.TokenDelete), token_scopes.Wlcg_Storage_Modify},
+		{opts.Operation.IsEnabled(config.TokenList), token_scopes.Wlcg_Storage_Read},
+	}
+
+	for _, op := range ops {
+		if op.enabled {
+			scopes = append(scopes, token_scopes.NewResourceScope(op.scope, after))
+		}
+	}
+	tc.AddResourceScopes(scopes...)
 
 	err = key.Set("kid", keyId)
 	if err != nil {

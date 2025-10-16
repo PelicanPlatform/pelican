@@ -41,6 +41,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	pelican_oauth2 "github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -49,6 +50,13 @@ import (
 const (
 	oauthLoginPath    = "/api/v1.0/auth/oauth/login"
 	oauthCallbackPath = "/api/v1.0/auth/oauth/callback"
+)
+
+// Group source types
+const (
+	GroupSourceTypeOIDC     string = "oidc"
+	GroupSourceTypeFile     string = "file"
+	GroupSourceTypeInternal string = "internal"
 )
 
 var (
@@ -166,10 +174,6 @@ func handleOAuthLogin(ctx *gin.Context) {
 
 // Given a user name, return the list of groups they belong to
 func generateGroupInfo(user string) (groups []string, err error) {
-	// Currently, only file-based lookup is supported
-	if param.Issuer_GroupSource.GetString() != "file" {
-		return
-	}
 	groupFile := param.Issuer_GroupFile.GetString()
 	if groupFile == "" {
 		return
@@ -190,7 +194,7 @@ func generateGroupInfo(user string) (groups []string, err error) {
 
 // Given the maps for the UserInfo and ID token JSON objects, generate
 // user/group information according to the current policy.
-func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]interface{}) (user string, groups []string, err error) {
+func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]interface{}) (userRecord *database.User, groups []string, err error) {
 	claimsSource := maps.Clone(userInfo)
 	if param.Issuer_OIDCPreferClaimsFromIDToken.GetBool() {
 		maps.Copy(claimsSource, idToken)
@@ -222,9 +226,49 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 		err = errors.New("identity provider returned an empty username")
 		return
 	}
-	user = userIdentifier
+	username := userIdentifier
 
-	if param.Issuer_GroupSource.GetString() == "oidc" {
+	subIface, ok := claimsSource["sub"]
+	if !ok {
+		log.Errorln("User info endpoint did not return a value for the sub claim")
+		err = errors.New("identity provider did not return a subject for logged-in user")
+		return
+	}
+	sub, ok := subIface.(string)
+	if !ok {
+		log.Errorln("User info endpoint did not return a string for the sub claim")
+		err = errors.New("identity provider did not return a subject for logged-in user")
+		return
+	}
+
+	issuerClaim := param.Issuer_IssuerClaimValue.GetString()
+	if issuerClaim == "" {
+		issuerClaim = "iss"
+	}
+
+	issuerClaimValueIface, ok := claimsSource[issuerClaim]
+	if !ok {
+		log.Errorf("'%s' field of user info response from auth provider is not found", issuerClaim)
+		err = errors.New("identity provider returned an invalid issuer claim value")
+		return
+	}
+
+	issuerClaimValue, ok := issuerClaimValueIface.(string)
+	if !ok {
+		log.Errorf("'%s' field of user info response from auth provider is not a string", issuerClaim)
+		err = errors.New("identity provider returned an invalid issuer claim value")
+		return
+	}
+
+	// now that we have verified that the user belongs to a group we should create the user if it doesn't exist
+	userRecord, err = database.GetOrCreateUser(database.ServerDatabase, username, sub, issuerClaimValue)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	groupSource := strings.ToLower(param.Issuer_GroupSource.GetString())
+	switch groupSource {
+	case GroupSourceTypeOIDC:
 		groupClaim := param.Issuer_OIDCGroupClaim.GetString()
 		groupList, ok := claimsSource[groupClaim]
 		if ok {
@@ -246,10 +290,32 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 				}
 			}
 		}
-	} else {
-		groups, err = generateGroupInfo(user)
+	case GroupSourceTypeFile:
+		groups, err = generateGroupInfo(username)
+		if err != nil {
+			return nil, nil, err
+		}
+	case GroupSourceTypeInternal:
+		log.Debugf("Getting groups for user %s (ID: %s)", username, userRecord.ID)
+		groupList, err := database.GetMemberGroups(database.ServerDatabase, userRecord.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		groups = make([]string, 0, len(groupList))
+		for _, group := range groupList {
+			groups = append(groups, group.Name)
+		}
+
+	case "", "none":
+		log.Debugf("No group source specified; no groups will be used")
+		return
+	default:
+		err = errors.Errorf("invalid group source: %s", groupSource)
+		return nil, nil, err
 	}
-	return
+
+	log.Debugf("Groups for user %s (source=%s): %v", username, groupSource, groups)
+	return userRecord, groups, nil
 }
 
 // Handle the callback request when the user is successfully authenticated.
@@ -322,9 +388,6 @@ func handleOAuthCallback(ctx *gin.Context) {
 
 	var idToken = make(map[string]interface{})
 	if idTokenRaw := token.Extra("id_token"); idTokenRaw != nil {
-		// The token's signature will show as "REDACTED" in the output.
-		log.Debugf("Found an OIDC ID token: %v", idTokenRaw)
-
 		// We were given this ID token by the authentication provider, not
 		// some third party. If we don't trust the provider, we have greater
 		// issues.
@@ -414,7 +477,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 		return
 	}
 
-	user, groups, err := generateUserGroupInfo(userInfo, idToken)
+	userRecord, groups, err := generateUserGroupInfo(userInfo, idToken)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError,
 			server_structs.SimpleApiResp{
@@ -430,7 +493,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 	}
 
 	// Issue our own JWT for web UI access
-	setLoginCookie(ctx, user, groups)
+	setLoginCookie(ctx, userRecord, groups)
 
 	// Redirect user to where they were or root path
 	ctx.Redirect(http.StatusTemporaryRedirect, redirectLocation)
