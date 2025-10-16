@@ -53,31 +53,31 @@ type Collection struct {
 	Owner       string               `gorm:"not null;uniqueIndex:idx_owner_name" json:"owner"`
 	Namespace   string               `gorm:"not null" json:"namespace"`
 	Visibility  Visibility           `gorm:"not null;default:private" json:"visibility"`
-	CreatedAt   time.Time            `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
-	UpdatedAt   time.Time            `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updated_at"`
+	CreatedAt   time.Time            `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	UpdatedAt   time.Time            `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updatedAt"`
 	Members     []CollectionMember   `gorm:"foreignKey:CollectionID" json:"members"`
 	ACLs        []CollectionACL      `gorm:"foreignKey:CollectionID" json:"acls"`
 	Metadata    []CollectionMetadata `gorm:"foreignKey:CollectionID" json:"metadata"`
 }
 
 type CollectionMember struct {
-	CollectionID string    `gorm:"primaryKey" json:"collection_id"`
-	ObjectURL    string    `gorm:"primaryKey" json:"object_url"` // full pelican:// URL
-	AddedBy      string    `gorm:"not null" json:"added_by"`
-	AddedAt      time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"added_at"`
+	CollectionID string    `gorm:"primaryKey" json:"collectionId"`
+	ObjectURL    string    `gorm:"primaryKey" json:"objectUrl"` // full pelican:// URL
+	AddedBy      string    `gorm:"not null" json:"createdBy"`
+	AddedAt      time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
 }
 
 type CollectionACL struct {
-	CollectionID string     `gorm:"primaryKey" json:"collection_id"`
-	GroupID      string     `gorm:"primaryKey" json:"group_id"`
+	CollectionID string     `gorm:"primaryKey" json:"collectionId"`
+	GroupID      string     `gorm:"primaryKey" json:"groupId"`
 	Role         AclRole    `gorm:"primaryKey;not null" json:"role"`
-	GrantedBy    string     `gorm:"not null" json:"granted_by"`
-	GrantedAt    time.Time  `gorm:"not null;default:CURRENT_TIMESTAMP" json:"granted_at"`
-	ExpiresAt    *time.Time `json:"expires_at"`
+	GrantedBy    string     `gorm:"not null" json:"createdBy"`
+	GrantedAt    time.Time  `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	ExpiresAt    *time.Time `json:"expiresAt"`
 }
 
 type CollectionMetadata struct {
-	CollectionID string `gorm:"primaryKey" json:"collection_id"`
+	CollectionID string `gorm:"primaryKey" json:"collectionId"`
 	Key          string `gorm:"primaryKey;not null" json:"key"`
 	Value        string `gorm:"not null" json:"value"`
 }
@@ -87,24 +87,24 @@ type User struct {
 	Username  string    `gorm:"not null;uniqueIndex:idx_user_issuer" json:"username"`
 	Sub       string    `gorm:"not null;uniqueIndex:idx_user_sub_issuer" json:"sub"`
 	Issuer    string    `gorm:"not null;uniqueIndex:idx_user_issuer;uniqueIndex:idx_user_sub_issuer" json:"issuer"`
-	CreatedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
+	CreatedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
 }
 
 type Group struct {
 	ID          string        `gorm:"primaryKey" json:"id"`
 	Name        string        `gorm:"not null;unique" json:"name"`
 	Description string        `json:"description"`
-	CreatedBy   string        `gorm:"not null" json:"created_by"`
-	CreatedAt   time.Time     `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
+	CreatedBy   string        `gorm:"not null" json:"createdBy"`
+	CreatedAt   time.Time     `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
 	Members     []GroupMember `gorm:"foreignKey:GroupID" json:"members"`
 }
 
 type GroupMember struct {
-	GroupID string    `gorm:"primaryKey" json:"group_id"`
-	UserID  string    `gorm:"primaryKey" json:"user_id"`
+	GroupID string    `gorm:"primaryKey" json:"groupId"`
+	UserID  string    `gorm:"primaryKey" json:"userId"`
 	User    User      `gorm:"foreignKey:UserID" json:"user"`
-	AddedBy string    `gorm:"not null" json:"added_by"`
-	AddedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"added_at"`
+	AddedBy string    `gorm:"not null" json:"createdBy"`
+	AddedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
 }
 
 func generateSlug() (string, error) {
