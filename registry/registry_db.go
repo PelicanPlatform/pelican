@@ -808,10 +808,48 @@ func setRegistrationPubKey(prefix string, pubkeyDbString string) error {
 }
 
 // Note: If this is a server registration, the foreign key constraint applied on the DB will
-// remove the corresponding entry in the “services” table, while the entry in “servers” table
-// remains - that server might have other services, and we still want to keep other server info
+// remove the corresponding entry in the “services” table.
+// Additionally, if this server only has this single service registration (i.e., the server is only an
+// origin or only a cache, not both), then delete the corresponding entry in the “servers” table.
 func deleteRegistrationByID(id int) error {
-	return database.ServerDatabase.Delete(&server_structs.Registration{}, id).Error
+	// Get server info before deletion so we know whether this was the only registration
+	serverReg, err := getServerByRegistrationID(id)
+	if err != nil {
+		return err
+	}
+
+	// Default: do not delete server
+	deleteServer := false
+	serverID := ""
+	if serverReg != nil && serverReg.ID != "" {
+		serverID = serverReg.ID
+		// If the server has exactly one service registration, then deleting it should also delete the server entry.
+		if len(serverReg.Registration) == 1 {
+			deleteServer = true
+		}
+	}
+
+	// Wrap in a transaction to keep operations consistent
+	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
+		// Delete the registration (this cascades to the related service entry)
+		if err := tx.Delete(&server_structs.Registration{}, id).Error; err != nil {
+			return err
+		}
+
+		// If flagged to delete the server, double-check that there are no remaining services
+		if deleteServer && serverID != "" {
+			var svcCount int64
+			if err := tx.Model(&server_structs.Service{}).Where("server_id = ?", serverID).Count(&svcCount).Error; err != nil {
+				return err
+			}
+			if svcCount == 0 {
+				if err := tx.Where("id = ?", serverID).Delete(&server_structs.Server{}).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }
 
 func deleteRegistrationByPrefix(prefix string) error {
