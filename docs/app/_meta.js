@@ -1,4 +1,10 @@
 
+if(!process.env.VERSIONS && process.env.NODE_ENV !== 'development') {
+	throw new Exception("Missing required env variable VERSIONS");
+} else {
+	process.env.VERSIONS = process.env.VERSIONS || "['latest']"
+}
+
 const versions = eval(process.env.VERSIONS);
 
 export default {
