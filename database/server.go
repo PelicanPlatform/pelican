@@ -107,9 +107,9 @@ func cleanupStaleServerEntries() error {
 		var staleServerIDs []string
 		rawQuery := `
 			SELECT DISTINCT servers.id
-			FROM services
+			FROM servers
+			LEFT JOIN services ON servers.id = services.server_id
 			LEFT JOIN registrations ON services.registration_id = registrations.id
-			LEFT JOIN servers ON servers.id = services.server_id
 			WHERE registrations.pubkey IS NULL`
 
 		if err := tx.Raw(rawQuery).Scan(&staleServerIDs).Error; err != nil {
