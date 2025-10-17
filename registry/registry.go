@@ -373,10 +373,14 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 			}
 			// Record not found, continue with registration
 		} else if existingServer != nil && existingServer.ID != "" {
-			// Server exists, verify ownership
+			// Server exists, check approval status
+			if existingServer.Registration[0].AdminMetadata.Status != server_structs.RegApproved {
+				return false, nil, permissionDeniedError{Message: fmt.Sprintf("the server %q is not approved. Please contact the Registry admin", data.SiteName)}
+			}
+			// Verify the request sender has the ownership of the server name it claims
 			verified, err := verifyServerOwnership(existingServer, data)
 			if err != nil {
-				return false, nil, errors.Wrapf(err, "Failed to verify server ownership for %s", data.SiteName)
+				return false, nil, errors.Wrapf(err, "failed to verify server ownership for %s", data.SiteName)
 			}
 			if !verified {
 				return false, nil, permissionDeniedError{Message: fmt.Sprintf("unable to verify you own the registered server %q", data.SiteName)}
