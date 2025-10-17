@@ -340,6 +340,8 @@ type (
 	identTransferOptionCollectionsUrl  struct{}
 	identTransferOptionChecksums       struct{}
 	identTransferOptionRequireChecksum struct{}
+	identTransferOptionRecursive       struct{}
+	identTransferOptionDepth           struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -906,6 +908,22 @@ func WithAcquireToken(enable bool) TransferOption {
 // object already exists.
 func WithSynchronize(level SyncLevel) TransferOption {
 	return option.New(identTransferOptionSynchronize{}, level)
+}
+
+// Create an option to enable recursive listing
+//
+// When enabled, the list operation will recursively traverse all subdirectories
+func WithRecursive(recursive bool) TransferOption {
+	return option.New(identTransferOptionRecursive{}, recursive)
+}
+
+// Create an option to specify the maximum depth for recursive listing
+//
+// The depth parameter controls how deep the recursive listing will go.
+// A depth of 0 means only the specified directory, 1 means one level deep, etc.
+// A depth of -1 means unlimited depth.
+func WithDepth(depth int) TransferOption {
+	return option.New(identTransferOptionDepth{}, depth)
 }
 
 // Create a new client to work with an engine
@@ -3844,7 +3862,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 }
 
 // This function performs the ls command by walking through the specified collections and printing the contents of the files
-func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator) (fileInfos []FileInfo, err error) {
+func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, recursive bool, depth int) (fileInfos []FileInfo, err error) {
 	// Get our collection listing host
 	if dirResp.XPelNsHdr.CollectionsUrl == nil {
 		return nil, errors.Errorf("Collections URL not found in director response. Are you sure there's an origin for prefix %s that supports listings?", dirResp.XPelNsHdr.Namespace)
@@ -3864,6 +3882,12 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 	client := createWebDavClient(collectionsUrl, token, project)
 	remotePath := remoteUrl.Path
 
+	// If recursive listing is requested, use the helper function
+	if recursive {
+		return listHttpRecursive(client, remotePath, depth)
+	}
+
+	// Non-recursive listing (original behavior)
 	infos, err := client.ReadDir(remotePath)
 	if err != nil {
 		// Check if we got a 404:
@@ -3906,6 +3930,73 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 		}
 		fileInfos = append(fileInfos, file)
 	}
+	return fileInfos, nil
+}
+
+// listHttpRecursive recursively lists all objects in a collection with optional depth limiting
+func listHttpRecursive(client *gowebdav.Client, remotePath string, maxDepth int) (fileInfos []FileInfo, err error) {
+	return listHttpRecursiveHelper(client, remotePath, 0, maxDepth)
+}
+
+// listHttpRecursiveHelper is the recursive helper function that tracks the current depth
+func listHttpRecursiveHelper(client *gowebdav.Client, remotePath string, currentDepth int, maxDepth int) (fileInfos []FileInfo, err error) {
+	// Check if we've reached the maximum depth (if maxDepth is >= 0)
+	if maxDepth >= 0 && currentDepth > maxDepth {
+		return fileInfos, nil
+	}
+
+	infos, err := client.ReadDir(remotePath)
+	if err != nil {
+		// Check if we got a 404:
+		if gowebdav.IsErrNotFound(err) {
+			return nil, errors.New("404: object not found")
+		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
+			// If we get an error code 500 (internal server error), we should check if the user is trying to ls on a file
+			info, err := client.Stat(remotePath)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to stat remote path")
+			}
+			// If the path leads to a file and not a collection, just add the filename
+			if !info.IsDir() {
+				file := FileInfo{
+					Name:         remotePath,
+					Size:         info.Size(),
+					ModTime:      info.ModTime(),
+					IsCollection: false,
+				}
+				fileInfos = append(fileInfos, file)
+				return fileInfos, nil
+			}
+		} else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
+			return nil, errors.Errorf("405: object listings are not supported by the discovered origin")
+		}
+		// Otherwise, a different error occurred and we should return it
+		return nil, errors.Wrap(err, "failed to read remote collection")
+	}
+
+	for _, info := range infos {
+		jPath, _ := url.JoinPath(remotePath, info.Name())
+		// Create a FileInfo for the file and append it to the slice
+		file := FileInfo{
+			Name:         jPath,
+			Size:         info.Size(),
+			ModTime:      info.ModTime(),
+			IsCollection: info.IsDir(),
+		}
+		fileInfos = append(fileInfos, file)
+
+		// If this is a collection and we haven't reached max depth, recurse into it
+		// We check currentDepth + 1 < maxDepth because currentDepth represents how deep we are,
+		// and we want to recurse only if going one level deeper wouldn't exceed maxDepth
+		if info.IsDir() && (maxDepth < 0 || currentDepth+1 < maxDepth) {
+			subFileInfos, err := listHttpRecursiveHelper(client, jPath, currentDepth+1, maxDepth)
+			if err != nil {
+				return nil, err
+			}
+			fileInfos = append(fileInfos, subFileInfos...)
+		}
+	}
+
 	return fileInfos, nil
 }
 
