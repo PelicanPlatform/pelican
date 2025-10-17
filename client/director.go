@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -268,7 +269,8 @@ func GetDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, h
 		} else {
 			err = errors.Wrapf(err, "error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint)
 			// Wrap timeout errors specifically; leave other errors unwrapped until we know how to categorize them
-			if strings.Contains(err.Error(), "timeout") {
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
 				err = error_codes.NewTransfer_DirectorTimeoutError(err)
 			}
 			return

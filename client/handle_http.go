@@ -3017,12 +3017,12 @@ Loop:
 					err = CacheTimedOutReadingFromOrigin
 					err = error_codes.NewTransfer_TimedOutError(err)
 				} else {
-					err = errors.New(statusText)
-					err = errors.Wrap(err, "download error after server response started")
+					baseErr := errors.New(statusText)
 					if strings.Contains(statusText, "unexpected EOF") {
-						err = &UnexpectedEOFError{Err: err}
+						baseErr = &UnexpectedEOFError{Err: baseErr}
 					}
-					err = error_codes.NewTransferError(err)
+					err = error_codes.NewTransferError(fmt.Errorf("download error after server response started: %w", baseErr))
+					return
 				}
 				return
 			}
