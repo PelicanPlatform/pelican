@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/pelican_url"
 )
 
@@ -149,15 +150,23 @@ func (te *TransferErrors) UserError() string {
 
 // IsRetryable will return true if the error is retryable
 func IsRetryable(err error) bool {
-	if errors.Is(err, &SlowTransferError{}) {
-		return true
+	// Special case: PermissionDeniedError has dynamic retryability based on token expiration
+	// Check this before the general PelicanError check since it's always wrapped but needs special handling
+	// If the token is expired, we can retry because we'll get a new token
+	var pde *PermissionDeniedError
+	if errors.As(err, &pde) {
+		return pde.expired
 	}
-	if errors.Is(err, &PermissionDeniedError{}) {
-		if pde, ok := err.(*PermissionDeniedError); ok {
-			return !pde.expired
-		}
-		return false
+
+	// Check if it's a wrapped PelicanError - use its metadata
+	var pe *error_codes.PelicanError
+	if errors.As(err, &pe) {
+		return pe.IsRetryable()
 	}
+
+	// Fall back to legacy checks for unwrapped errors
+	// Note: SlowTransferError, HeaderTimeoutError, UnexpectedEOFError, and StoppedTransferError
+	// are always wrapped in PelicanError, so they're handled above
 	if errors.Is(err, pelican_url.MetadataTimeoutErr) {
 		return true
 	}
@@ -167,25 +176,16 @@ func IsRetryable(err error) bool {
 	if errors.Is(err, &NetworkResetError{}) {
 		return true
 	}
-	if errors.Is(err, &StoppedTransferError{}) {
-		return true
-	}
 	if errors.Is(err, &allocateMemoryError{}) {
 		return true
 	}
 	if errors.Is(err, &InvalidByteInChunkLengthError{}) {
 		return true
 	}
-	if errors.Is(err, &UnexpectedEOFError{}) {
-		return true
-	}
 	if errors.Is(err, &dirListingNotSupportedError{}) {
 		// false because we cannot automatically retry, the user must change the url to use a different origin/namespace
 		// that enables dirlistings or the admin must enable dirlistings on the origin/namespace
 		return false
-	}
-	if errors.Is(err, &HeaderTimeoutError{}) {
-		return true
 	}
 	var cse *ConnectionSetupError
 	if errors.As(err, &cse) {

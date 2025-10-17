@@ -313,7 +313,16 @@ func TestStoppedTransfer(t *testing.T) {
 
 	// Make sure the errors are correct
 	assert.NotNil(t, err)
-	assert.IsType(t, &StoppedTransferError{}, err, err.Error())
+	// Check that it's wrapped in a PelicanError and contains StoppedTransferError
+	assert.True(t, errors.Is(err, &StoppedTransferError{}), "Error should contain StoppedTransferError")
+
+	// Check that it's wrapped in a PelicanError with the correct code
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(err, &pe), "Error should be wrapped in PelicanError")
+	assert.Equal(t, 6001, pe.Code(), "Should be Transfer.StoppedTransfer error code")
+	assert.Equal(t, "Transfer.StoppedTransfer", pe.ErrorType(), "Should be Transfer.StoppedTransfer error type")
+	assert.True(t, pe.IsRetryable(), "StoppedTransfer should be retryable")
+
 	assert.True(t, IsRetryable(err))
 }
 
@@ -445,6 +454,63 @@ func TestFailedUpload(t *testing.T) {
 	case <-time.After(time.Second * 2):
 		assert.Fail(t, "Timeout while waiting for response")
 	}
+}
+
+func TestUploadLocalFileNotFound(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{})
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Return 404 for PROPFIND (stat) requests so upload doesn't think file exists
+		if r.Method == "PROPFIND" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	tsURL, err := url.Parse(ts.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		localPath: "/nonexistent/path/to/file.txt",
+		remoteURL: tsURL,
+		xferType:  transferTypeUpload,
+		job: &TransferJob{
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   tsURL.Host,
+				Path:   "/test/file.txt",
+			},
+			dirResp: server_structs.DirectorResponse{
+				XPelNsHdr: server_structs.XPelNs{
+					CollectionsUrl: tsURL, // Point to our mock server
+				},
+			},
+		},
+		callback: nil,
+		attempts: []transferAttemptDetails{
+			{
+				Url:   tsURL,
+				Proxy: false,
+			},
+		},
+	}
+
+	transferResult, err := uploadObject(transfer)
+	require.Error(t, err)                  // uploadObject returns error when local stat fails
+	require.Error(t, transferResult.Error) // And the result also contains the error
+
+	// Verify it's wrapped in Parameter.FileNotFound PelicanError
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(err, &pe), "Error should be wrapped in PelicanError")
+	assert.Equal(t, 1011, pe.Code(), "Should be Parameter.FileNotFound error code")
+	assert.Equal(t, "Parameter.FileNotFound", pe.ErrorType(), "Should be Parameter.FileNotFound error type")
+	assert.False(t, pe.IsRetryable(), "Local file not found should not be retryable")
+
+	// Verify the error message
+	assert.Contains(t, err.Error(), "stat /nonexistent/path/to/file.txt: no such file or directory")
 }
 
 func TestSortAttempts(t *testing.T) {
@@ -783,6 +849,15 @@ func TestGatewayTimeout(t *testing.T) {
 	assert.NoError(t, err)
 	err = transferResult.Error
 	log.Debugln("Received download error:", err)
+
+	// Check that it's wrapped in a PelicanError with Transfer.TimedOut
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(err, &pe), "Error should be wrapped in PelicanError")
+	assert.Equal(t, 6003, pe.Code(), "Should be Transfer.TimedOut error code")
+	assert.Equal(t, "Transfer.TimedOut", pe.ErrorType(), "Should be Transfer.TimedOut error type")
+	assert.True(t, pe.IsRetryable(), "Timeout should be retryable")
+
+	// Check that the underlying StatusCodeError is still there
 	var sce *StatusCodeError
 	if errors.As(err, &sce) {
 		assert.Equal(t, "cache timed out waiting on origin", sce.Error())
