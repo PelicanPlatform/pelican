@@ -105,6 +105,23 @@ func stashPluginMain(args []string) {
 			resultAd.Set("TransferSuccess", false)
 			errMsg := writeTransferErrorMessage(ret+";"+strings.ReplaceAll(string(debug.Stack()), "\n", ";"), "")
 			resultAd.Set("TransferError", errMsg)
+			resultAd.Set("TransferRetryable", false) // Panics are not retryable
+
+			// Add DeveloperData and TransferErrorData for panic errors
+			panicErr := errors.New(ret)
+			developerData := make(map[string]interface{})
+			developerData["PelicanClientVersion"] = config.GetVersion()
+			developerData["Attempts"] = 1 // We attempted the transfer but failed early
+			developerData["TransferError1"] = panicErr.Error()
+			developerData["IsRetryable1"] = false // Panics are not retryable
+			resultAd.Set("DeveloperData", developerData)
+
+			// Create TransferErrorData with PelicanError information
+			var transferErrorData []interface{}
+			transferError := createTransferError(panicErr)
+			transferErrorData = append(transferErrorData, transferError)
+			resultAd.Set("TransferErrorData", transferErrorData)
+
 			resultAds = append(resultAds, resultAd)
 
 			// Attempt to write our file and bail
@@ -189,11 +206,22 @@ func stashPluginMain(args []string) {
 		resultAd.Set("TransferSuccess", false)
 		errMsg := writeTransferErrorMessage(configErr.Error(), "")
 		resultAd.Set("TransferError", errMsg)
-		if client.ShouldRetry(configErr) {
-			resultAd.Set("TransferRetryable", true)
-		} else {
-			resultAd.Set("TransferRetryable", false)
-		}
+		resultAd.Set("TransferRetryable", client.ShouldRetry(configErr))
+
+		// Add DeveloperData and TransferErrorData for config errors
+		developerData := make(map[string]interface{})
+		developerData["PelicanClientVersion"] = config.GetVersion()
+		developerData["Attempts"] = 1 // We attempted the transfer but failed early
+		developerData["TransferError1"] = configErr.Error()
+		developerData["IsRetryable1"] = client.ShouldRetry(configErr)
+		resultAd.Set("DeveloperData", developerData)
+
+		// TransferErrorData contains the error details via createTransferError
+		var transferErrorData []interface{}
+		transferError := createTransferError(configErr)
+		transferErrorData = append(transferErrorData, transferError)
+		resultAd.Set("TransferErrorData", transferErrorData)
+
 		resultAds = append(resultAds, resultAd)
 
 		// Attempt to write our file and bail
@@ -573,13 +601,24 @@ func failTransfer(remoteUrl string, localFile string, results chan<- *classads.C
 		resultAd.Set("TransferType", "download")
 		resultAd.Set("TransferFileName", path.Base(remoteUrl))
 	}
-	if client.IsRetryable(err) {
-		resultAd.Set("TransferRetryable", true)
-	} else {
-		resultAd.Set("TransferRetryable", false)
-	}
+	resultAd.Set("TransferRetryable", client.IsRetryable(err))
 	resultAd.Set("TransferSuccess", false)
 	resultAd.Set("TransferError", err.Error())
+
+	// Add DeveloperData and TransferErrorData for early failures (e.g., director lookup failures)
+	// This ensures errors can be properly classified even when they occur before transfer attempts
+	developerData := make(map[string]interface{})
+	developerData["PelicanClientVersion"] = config.GetVersion()
+	developerData["Attempts"] = 1 // We attempted the transfer but failed early
+	developerData["TransferError1"] = err.Error()
+	developerData["IsRetryable1"] = client.IsRetryable(err)
+	resultAd.Set("DeveloperData", developerData)
+
+	// Create TransferErrorData with PelicanError information
+	var transferErrorData []interface{}
+	transferError := createTransferError(err)
+	transferErrorData = append(transferErrorData, transferError)
+	resultAd.Set("TransferErrorData", transferErrorData)
 
 	results <- resultAd
 }
@@ -630,11 +669,22 @@ func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File)
 			resultAd := classads.NewClassAd()
 			resultAd.Set("TransferSuccess", false)
 			resultAd.Set("TransferError", err.Error())
-			if client.ShouldRetry(err) {
-				resultAd.Set("TransferRetryable", true)
-			} else {
-				resultAd.Set("TransferRetryable", false)
-			}
+			resultAd.Set("TransferRetryable", client.ShouldRetry(err))
+
+			// Add DeveloperData and TransferErrorData for workflow errors
+			developerData := make(map[string]interface{})
+			developerData["PelicanClientVersion"] = config.GetVersion()
+			developerData["Attempts"] = 1 // We attempted the transfer but failed early
+			developerData["TransferError1"] = err.Error()
+			developerData["IsRetryable1"] = client.ShouldRetry(err)
+			resultAd.Set("DeveloperData", developerData)
+
+			// TransferErrorData contains the error details via createTransferError
+			var transferErrorData []interface{}
+			transferError := createTransferError(err)
+			transferErrorData = append(transferErrorData, transferError)
+			resultAd.Set("TransferErrorData", transferErrorData)
+
 			resultAds = append(resultAds, resultAd)
 		}
 	}
