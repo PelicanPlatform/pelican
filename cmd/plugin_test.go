@@ -778,6 +778,24 @@ func TestFailTransfer(t *testing.T) {
 		transferErrorStr, ok := transferError.(string)
 		require.True(t, ok)
 		assert.Equal(t, "test error", transferErrorStr)
+
+		// Check DeveloperData is now populated
+		devData, err := result.Get("DeveloperData")
+		require.NoError(t, err)
+		require.NotNil(t, devData)
+		devDataMap, ok := devData.(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, 1, devDataMap["Attempts"])
+		assert.Equal(t, "test error", devDataMap["TransferError1"])
+		assert.Equal(t, false, devDataMap["IsRetryable1"])
+		assert.NotEmpty(t, devDataMap["PelicanClientVersion"])
+
+		// Check TransferErrorData is now populated (bug fix)
+		errData, err := result.Get("TransferErrorData")
+		require.NoError(t, err)
+		require.NotNil(t, errData)
+		errorDataList := errData.([]interface{})
+		require.Equal(t, 1, len(errorDataList))
 	})
 
 	// Test when we call failTransfer with a download
@@ -1481,6 +1499,64 @@ func TestTransferErrorSlowTransfer(t *testing.T) {
 			assert.Equal(t, expectedErr.ErrorType(), errorType)
 		}
 	}
+}
+
+func TestTransferErrorDirectorTimeout(t *testing.T) {
+	testErr := errors.New("dial tcp 128.105.82.132:443: i/o timeout")
+	testErr = errors.Wrap(testErr, "error while querying the director at https://osdf-director.osg-htc.org")
+	testErr = error_codes.NewTransfer_DirectorTimeoutError(testErr)
+
+	results := make(chan *classads.ClassAd, 1)
+	failTransfer("osdf://osg-htc.org/chtc/PUBLIC/test.txt", "/tmp/test.txt", results, false, testErr)
+	resultAd := <-results
+
+	// Basic fields should be set
+	transferSuccess, _ := resultAd.Get("TransferSuccess")
+	assert.False(t, transferSuccess.(bool))
+
+	transferRetryable, _ := resultAd.Get("TransferRetryable")
+	assert.True(t, transferRetryable.(bool), "Director timeout should be retryable")
+
+	// Verify DeveloperData is populated
+	devData, err := resultAd.Get("DeveloperData")
+	require.NoError(t, err, "DeveloperData should be present for director failures")
+	require.NotNil(t, devData)
+	devDataMap, ok := devData.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, 1, devDataMap["Attempts"])
+	assert.NotEmpty(t, devDataMap["TransferError1"])
+	assert.NotNil(t, devDataMap["IsRetryable1"])
+	assert.Equal(t, true, devDataMap["IsRetryable1"], "Director timeout should be retryable")
+	assert.NotEmpty(t, devDataMap["PelicanClientVersion"])
+
+	// Verify TransferErrorData is populated
+	errData, err := resultAd.Get("TransferErrorData")
+	require.NoError(t, err, "TransferErrorData should be present for director failures")
+	require.NotNil(t, errData)
+	errorDataList := errData.([]interface{})
+	require.Equal(t, 1, len(errorDataList), "Should have one error in TransferErrorData")
+
+	errorData := errorDataList[0].(map[string]interface{})
+	errorTypeStr, ok := errorData["ErrorType"].(string)
+	require.True(t, ok)
+	assert.Equal(t, "Transfer", errorTypeStr, "Should be Transfer error type")
+
+	developerData, ok := errorData["DeveloperData"].(map[string]interface{})
+	require.True(t, ok)
+
+	// Verify it's wrapped with Transfer.DirectorTimeout PelicanError
+	expectedErr := error_codes.NewTransfer_DirectorTimeoutError(errors.New("timeout"))
+	pelicanErrorCode, ok := developerData["PelicanErrorCode"].(int)
+	require.True(t, ok)
+	assert.Equal(t, expectedErr.Code(), pelicanErrorCode, "Should have Transfer.DirectorTimeout code 6005")
+
+	pelicanErrorType, ok := developerData["ErrorType"].(string)
+	require.True(t, ok)
+	assert.Equal(t, expectedErr.ErrorType(), pelicanErrorType, "Should be Transfer.DirectorTimeout")
+
+	retryable, ok := developerData["Retryable"].(bool)
+	require.True(t, ok)
+	assert.True(t, retryable, "Director timeout should be retryable")
 }
 
 func TestTransferErrorHeaderTimeout(t *testing.T) {
