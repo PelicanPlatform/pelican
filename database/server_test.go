@@ -1,6 +1,9 @@
 package database
 
 import (
+	"database/sql"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +16,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database/utils"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
@@ -284,4 +288,75 @@ func TestGetServiceName(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "new-server", got)
 	})
+}
+
+// insertOrphans attempts to insert rows violating FK constraints.
+func insertOrphans(t *testing.T, sqldb *sql.DB) (insertErr error) {
+	t.Helper()
+
+	// Insert an orphan services row referencing non-existent registration and server
+	_, err := sqldb.Exec("INSERT INTO services(server_id, registration_id) VALUES(?, ?)", "non-existent-server", 999999)
+	return err
+}
+
+// countFKViolations returns count of rows from PRAGMA foreign_key_check;
+func countFKViolations(t *testing.T, sqldb *sql.DB) int {
+	t.Helper()
+	rows, err := sqldb.Query("PRAGMA foreign_key_check;")
+	require.NoError(t, err)
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		count++
+	}
+	require.NoError(t, rows.Err())
+	return count
+}
+
+// createDBViaInitSQLiteDB initializes the server DB using Pelican's
+// InitSQLiteDB and returns the underlying *sql.DB and a cleanup func.
+func createDBViaInitSQLiteDB(t *testing.T, dbPath string) (*sql.DB, func()) {
+	t.Helper()
+
+	// Open via InitSQLiteDB (which includes DSN flags) and run registry migrations
+	gdb, err := utils.InitSQLiteDB(dbPath)
+	require.NoError(t, err)
+	ServerDatabase = gdb
+
+	sqldb, err := gdb.DB()
+	require.NoError(t, err)
+
+	require.NoError(t, runServerTypeMigrations(sqldb, server_structs.RegistryType))
+
+	cleanup := func() {
+		_ = ShutdownDB()
+		_ = os.Remove(dbPath)
+	}
+
+	return sqldb, cleanup
+}
+
+// TestForeignKeysEnabledViaDSN verifies that enabling FKs via DSN in InitSQLiteDB func enforces constraints
+func TestForeignKeysEnabledViaDSN(t *testing.T) {
+	config.ResetConfig()
+	defer config.ResetConfig()
+
+	dbPath := filepath.Join(t.TempDir(), "fk_with_dsn.sqlite")
+
+	// Initialize via InitSQLiteDB func which enables FKs in DSN
+	sqldb, cleanup := createDBViaInitSQLiteDB(t, dbPath)
+	defer cleanup()
+
+	// Confirm foreign_keys is ON for this connection
+	var fkOn int
+	require.NoError(t, sqldb.QueryRow("PRAGMA foreign_keys;").Scan(&fkOn))
+	require.Equal(t, 1, fkOn) // fkOn should be 1 as long as foreign key constraints are enforced
+
+	// Insert should fail due to FK enforcement
+	err := insertOrphans(t, sqldb)
+	require.Error(t, err)
+
+	// foreign_key_check should report no violations because failing insert did not land
+	v := countFKViolations(t, sqldb)
+	require.Equal(t, 0, v)
 }
