@@ -178,6 +178,7 @@ var (
 	// Some config parsing tools will init both client and server config, but both
 	// warn about several config params. Only warn once per process.
 	warnDeprecatedOnce sync.Once
+	warnDebugOnce      sync.Once
 
 	RestartFlag  = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
 	ShutdownFlag = make(chan any) // A channel flag to shutdown the server instance that launcher listens to (including cache)
@@ -614,6 +615,10 @@ func handleDeprecatedConfig() {
 			if viper.IsSet(deprecated) {
 				if replacement[0] == "none" {
 					log.Warningf("Deprecated configuration key %s is set. This is being removed in future release", deprecated)
+				} else if deprecated == param.Debug.GetName() {
+					// Special case for the Debug key; we handle mapping it to Logging.Level: debug in
+					// `setLoggingInternal()` because that has already been executed by the time we get here.
+					log.Warningf("The configuration key '%s' is being deprecated. While debug logging has been enabled, you should set '%s' to 'debug' to achieve this behavior in the future.", deprecated, param.Logging_Level.GetName())
 				} else {
 					for _, rep := range replacement {
 						if viper.IsSet(rep) {
@@ -763,17 +768,22 @@ func SetBaseDefaultsInConfig(v *viper.Viper) {
 // Helper func that uses configured params to toggle the correct logging level
 // in the log library
 func setLoggingInternal() error {
+	// If the user has not set an explicit log level but they're using the old
+	// `Debug` config param, we set the log level to debug. This override behavior
+	// is legacy until we remove the `Debug` config param in a future release.
 	if param.Debug.GetBool() {
-		SetLogging(log.DebugLevel)
-		log.Warnf("Debug is set as a flag or in config, this will override anything set for '%s' within your configuration", param.Logging_Level.GetName())
-	} else {
-		logLevel := param.Logging_Level.GetString()
-		level, err := log.ParseLevel(logLevel)
-		if err != nil {
-			return errors.Wrapf(err, "failed to parse value of config param %s", param.Logging_Level.GetString())
-		}
-		SetLogging(level)
+		warnDebugOnce.Do(func() {
+			log.Warnf("The config param '%s' is set in your configuration, which will override any values set for '%s' ", param.Debug.GetName(), param.Logging_Level.GetName())
+		})
+		viper.Set(param.Logging_Level.GetName(), "debug")
 	}
+
+	logLevel := param.Logging_Level.GetString()
+	level, err := log.ParseLevel(logLevel)
+	if err != nil {
+		return errors.Wrapf(err, "failed to parse value of config param %s", param.Logging_Level.GetString())
+	}
+	SetLogging(level)
 
 	return nil
 }
@@ -800,12 +810,26 @@ func InitConfigDir(v *viper.Viper) {
 
 // InitConfigInternal sets up the global Viper instance by loading defaults and
 // user-defined config files, validates config params, and initializes logging.
-func InitConfigInternal() {
+func InitConfigInternal(logLevel log.Level) {
 	// Set a prefix so Viper knows how to parse PELICAN_* env vars
 	// This must happen before config dir initialization so that Pelican
 	// can pick up setting the config dir with PELICAN_CONFIGDIR
 	viper.SetEnvPrefix("pelican")
 	viper.AutomaticEnv()
+
+	// Log level defaults are set outside of Set{Server/Client}Defaults because
+	// logging is needed before those functions are called. They're also set directly
+	// in those functions so that the viper objects they generate are consistent.
+	//
+	// Note that we do the WarnLevel -> "warn" mapping because logrus converts the
+	// WarnLevel to "warning" when calling String(), but we want to keep "warn", which
+	// is what Pelican uses. For more information, see:
+	// https://github.com/PelicanPlatform/pelican/pull/2712
+	logString := logLevel.String()
+	if logLevel == log.WarnLevel {
+		logString = "warn"
+	}
+	viper.SetDefault(param.Logging_Level.GetName(), logString)
 
 	// Enable BindStruct to allow unmarshal env into a nested struct
 	viper.SetOptions(viper.ExperimentalBindStruct())
@@ -1018,6 +1042,11 @@ func SetServerDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
 	v.SetConfigType("yaml")
 
+	// Duplicate setting a default logging level so that this function picks picks up
+	// the one case where we need to set client/server defaults differently directly in
+	// InitConfigInternal. We need to do that because internal logging levels are set by
+	// InitServer/InitClient before we call SetClientDefaults/SetServerDefaults.
+	v.SetDefault(param.Logging_Level.GetName(), "info")
 	v.SetDefault(param.Server_WebConfigFile.GetName(), filepath.Join(configDir, "web-config.yaml"))
 	v.SetDefault(param.Server_TLSCertificateChain.GetName(), filepath.Join(configDir, "certificates", "tls.crt"))
 	v.SetDefault(param.Server_TLSKey.GetName(), filepath.Join(configDir, "certificates", "tls.key"))
@@ -1296,7 +1325,7 @@ func SetServerDefaults(v *viper.Viper) error {
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
 func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
-	InitConfigInternal()
+	InitConfigInternal(log.InfoLevel)
 
 	setEnabledServer(currentServers)
 
@@ -1773,6 +1802,11 @@ func ResetClientInitialized() {
 func SetClientDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
 
+	// Duplicate setting a default logging level so that this function picks picks up
+	// the one case where we need to set client/server defaults differently directly in
+	// InitConfigInternal. We need to do that because internal logging levels are set by
+	// InitServer/InitClient before we call SetClientDefaults/SetServerDefaults.
+	v.SetDefault(param.Logging_Level.GetName(), "warning")
 	v.SetDefault(param.IssuerKey.GetName(), filepath.Join(configDir, "issuer.jwk"))
 	v.SetDefault(param.IssuerKeysDirectory.GetName(), filepath.Join(configDir, "issuer-keys"))
 
@@ -1916,7 +1950,7 @@ func SetClientDefaults(v *viper.Viper) error {
 }
 
 func InitClient() error {
-	InitConfigInternal()
+	InitConfigInternal(log.WarnLevel)
 	logging.FlushLogs(true)
 	if err := SetClientDefaults(viper.GetViper()); err != nil {
 		return err
@@ -1986,6 +2020,7 @@ func ResetConfig() {
 	globalFedErr = nil
 
 	warnDeprecatedOnce = sync.Once{}
+	warnDebugOnce = sync.Once{}
 
 	setServerOnce = sync.Once{}
 
