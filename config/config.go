@@ -177,7 +177,6 @@ var (
 
 	// Some config parsing tools will init both client and server config, but both
 	// warn about several config params. Only warn once per process.
-	warnIssuerKeyOnce  sync.Once
 	warnDeprecatedOnce sync.Once
 
 	RestartFlag  = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
@@ -1008,43 +1007,6 @@ func PrintClientConfig() error {
 	return nil
 }
 
-// Helper function to emit a warning telling the user to switch to IssuerKeysDirectory,
-// if the IssuerKey config param still points to a file on disk.
-// This function serves as a transitional step to help users migrate from IssuerKey to
-// IssuerKeysDirectory. It should be removed if the transition is done.
-func warnIssuerKey(v *viper.Viper) {
-	warnIssuerKeyOnce.Do(func() {
-		legacyKey := v.GetString(param.IssuerKey.GetName())
-		if legacyKey != "" {
-
-			if _, err := os.Stat(legacyKey); err == nil {
-				issuerKeyConfigBy := "default"
-				issuerKeysDirectoryConfigBy := "default"
-				changeExtension := ""
-
-				configDir := v.GetString("ConfigDir")
-				if filepath.Join(configDir, "issuer.jwk") != v.GetString(param.IssuerKey.GetName()) {
-					issuerKeyConfigBy = "custom"
-				}
-				if filepath.Join(configDir, "issuer-keys") != v.GetString(param.IssuerKeysDirectory.GetName()) {
-					issuerKeysDirectoryConfigBy = "custom"
-				}
-				if !strings.HasSuffix(v.GetString(param.IssuerKey.GetName()), ".pem") {
-					changeExtension = "renamed to use '.pem' extension and "
-				}
-
-				log.Errorf(
-					"File %q should be %smoved into directory %q. "+
-						"The %q parameter (currently set to %q via %s configuration) is being deprecated in favor of %q (currently set to %q via %s configuration). ",
-					v.GetString(param.IssuerKey.GetName()), changeExtension, v.GetString(param.IssuerKeysDirectory.GetName()),
-					param.IssuerKey.GetName(), param.IssuerKey.GetString(), issuerKeyConfigBy,
-					param.IssuerKeysDirectory.GetName(), v.GetString(param.IssuerKeysDirectory.GetName()), issuerKeysDirectoryConfigBy,
-				)
-			}
-		}
-	})
-}
-
 // Set all defaults relevant to servers (defaults can be set only for active servers)
 // but only for the passed viper instance.
 // We operate on the passed viper instance instead of the global because it lets us
@@ -1326,9 +1288,6 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault("Federation.BrokerURL", v.GetString(param.Server_ExternalWebUrl.GetName()))
 		v.SetDefault("Federation_DirectorUrl", v.GetString(param.Server_ExternalWebUrl.GetName()))
 	}
-
-	// Warn the user if they still use IssuerKey
-	warnIssuerKey(v)
 
 	return err
 }
@@ -1953,9 +1912,6 @@ func SetClientDefaults(v *viper.Viper) error {
 		v.Set(param.Client_DirectorRetries.GetName(), 5)
 	}
 
-	// Warn the user if they still use IssuerKey
-	warnIssuerKey(v)
-
 	return nil
 }
 
@@ -2029,7 +1985,6 @@ func ResetConfig() {
 	globalFedInfo = pelican_url.FederationDiscovery{}
 	globalFedErr = nil
 
-	warnIssuerKeyOnce = sync.Once{}
 	warnDeprecatedOnce = sync.Once{}
 
 	setServerOnce = sync.Once{}
