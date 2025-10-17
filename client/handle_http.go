@@ -3963,7 +3963,7 @@ func listHttpRecursiveHelper(client *gowebdav.Client, remotePath string, current
 	if err != nil {
 		// Check if we got a 404:
 		if gowebdav.IsErrNotFound(err) {
-			return nil, errors.New("404: object not found")
+			return nil, error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
 		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
 			// If we get an error code 500 (internal server error), we should check if the user is trying to ls on a file
 			info, err := client.Stat(remotePath)
