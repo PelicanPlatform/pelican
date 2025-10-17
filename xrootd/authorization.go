@@ -1034,11 +1034,11 @@ func GenerateDirectorMonitoringIssuer() (issuer Issuer, err error) {
 	if err != nil {
 		return
 	}
-	if val := fedInfo.DirectorEndpoint; val == "" {
+	if val := fedInfo.DiscoveryEndpoint; val == "" {
 		return
 	}
-	issuer.Name = "Director-based Monitoring"
-	issuer.Issuer = fedInfo.DirectorEndpoint
+	issuer.Name = "Federation-based Monitoring"
+	issuer.Issuer = fedInfo.DiscoveryEndpoint
 	issuer.BasePaths = []string{"/pelican/monitoring"}
 	issuer.DefaultUser = "xrootd"
 
