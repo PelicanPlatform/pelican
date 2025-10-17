@@ -2262,7 +2262,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				} else if ue, ok := cse.Unwrap().(*url.Error); ok {
 					httpErr := ue.Unwrap()
 					if httpErr.Error() == "net/http: timeout awaiting response headers" {
-						headerTimeoutErr := error_codes.NewContactError(&HeaderTimeoutError{})
+						headerTimeoutErr := error_codes.NewTransfer_HeaderTimeoutError(&HeaderTimeoutError{})
 						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, headerTimeoutErr)
 					} else {
 						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, httpErr)
@@ -2919,6 +2919,7 @@ Loop:
 						StoppedTime:      time.Since(noProgressStartTime),
 						CacheHit:         cacheAge > 0,
 					}
+					err = error_codes.NewTransfer_StoppedTransferError(err)
 					log.WithFields(fields).Errorln(err.Error())
 					return
 				}
@@ -3014,14 +3015,15 @@ Loop:
 				log.WithFields(fields).Debugln("Got error from file transfer:", statusText)
 				if strings.Contains(statusText, "sTREAM ioctl timeout") {
 					err = CacheTimedOutReadingFromOrigin
+					err = error_codes.NewTransfer_TimedOutError(err)
 				} else {
 					err = errors.New(statusText)
+					err = errors.Wrap(err, "download error after server response started")
+					if strings.Contains(statusText, "unexpected EOF") {
+						err = &UnexpectedEOFError{Err: err}
+					}
+					err = error_codes.NewTransferError(err)
 				}
-				err = errors.Wrap(err, "download error after server response started")
-				if strings.Contains(statusText, "unexpected EOF") {
-					err = &UnexpectedEOFError{Err: err}
-				}
-				err = error_codes.NewTransferError(err)
 				return
 			}
 		}
@@ -3044,6 +3046,9 @@ Loop:
 		if resp.StatusCode == http.StatusNotFound {
 			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
 				resp.StatusCode), error_codes.NewSpecification_FileNotFoundError(err)}
+		} else if resp.StatusCode == http.StatusGatewayTimeout {
+			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
+				resp.StatusCode), error_codes.NewTransfer_TimedOutError(err)}
 		}
 		return 0, 0, -1, serverVersion, httpErr
 	}
@@ -3229,8 +3234,14 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	transferResult.Scheme = transfer.remoteURL.Scheme
 	if err != nil {
 		log.Errorln("Error checking local file ", transfer.localPath, ":", err)
-		transferResult.Error = err
-		return transferResult, err
+		if os.IsNotExist(err) {
+			transferResult.Error = error_codes.NewParameter_FileNotFoundError(errors.Wrapf(err, "local file %q does not exist", transfer.localPath))
+		} else if os.IsPermission(err) {
+			transferResult.Error = error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied accessing local file %q", transfer.localPath))
+		} else {
+			transferResult.Error = error_codes.NewSpecificationError(errors.Wrapf(err, "failed to stat local file %q", transfer.localPath))
+		}
+		return transferResult, transferResult.Error
 	}
 
 	var ioreader io.ReadCloser
@@ -3256,7 +3267,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	} else {
 
 		if fileInfo.IsDir() {
-			err := errors.New("the provided path '" + transfer.localPath + "' is a directory, but a file is expected")
+			err := error_codes.NewParameterError(errors.New("the provided path '" + transfer.localPath + "' is a directory, but a file is expected"))
 			transferResult.Error = err
 			return transferResult, err
 		}
@@ -3265,8 +3276,14 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		file, err := os.Open(transfer.localPath)
 		if err != nil {
 			log.Errorln("Error opening local file:", err)
-			transferResult.Error = err
-			return transferResult, err
+			if os.IsNotExist(err) {
+				transferResult.Error = error_codes.NewParameter_FileNotFoundError(errors.Wrapf(err, "local file %q does not exist", transfer.localPath))
+			} else if os.IsPermission(err) {
+				transferResult.Error = error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied opening local file %q", transfer.localPath))
+			} else {
+				transferResult.Error = error_codes.NewSpecificationError(errors.Wrapf(err, "failed to open local file %q", transfer.localPath))
+			}
+			return transferResult, transferResult.Error
 		}
 		ioreader = file
 		sizer = &ConstantSizer{size: fileInfo.Size()}
@@ -3372,6 +3389,7 @@ Loop:
 					StoppedTime:      timeSinceLastProgress,
 					Upload:           true,
 				}
+				lastError = error_codes.NewTransfer_StoppedTransferError(lastError)
 				// No progress has been made in the last 1 second
 				break Loop
 			}
@@ -3398,7 +3416,7 @@ Loop:
 			if errors.As(err, &ue) {
 				err = ue.Unwrap()
 				if err.Error() == "net/http: timeout awaiting response headers" {
-					err = error_codes.NewContactError(&HeaderTimeoutError{})
+					err = error_codes.NewTransfer_HeaderTimeoutError(&HeaderTimeoutError{})
 				}
 			}
 			if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
@@ -3674,7 +3692,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 	if err != nil {
 		// Check if we got a 404:
 		if gowebdav.IsErrNotFound(err) {
-			return errors.New("404: object not found")
+			return error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
 		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
 			info, err := client.Stat(remotePath)
 			if err != nil {
@@ -3781,7 +3799,12 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 	if err != nil {
 		info, err := os.Stat(localPath)
 		if err != nil {
-			return errors.Wrap(err, "failed to stat local path")
+			if os.IsNotExist(err) {
+				return error_codes.NewSpecification_FileNotFoundError(errors.Wrapf(err, "local path %q does not exist", localPath))
+			} else if os.IsPermission(err) {
+				return error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied accessing local path %q", localPath))
+			}
+			return error_codes.NewSpecificationError(errors.Wrap(err, "failed to stat local path"))
 		}
 		// If the path leads to a file and not a directory, create a job to upload the file and return
 		if !info.IsDir() {
@@ -3814,7 +3837,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 			return nil
 		}
 		// Otherwise, a different error occurred and we should return it
-		return errors.Wrap(err, "failed to upload local collection")
+		return error_codes.NewSpecificationError(errors.Wrap(err, "failed to upload local collection"))
 	}
 
 	for _, info := range infos {
@@ -3892,7 +3915,7 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 	if err != nil {
 		// Check if we got a 404:
 		if gowebdav.IsErrNotFound(err) {
-			return nil, errors.New("404: object not found")
+			return nil, error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
 		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
 			// If we get an error code 500 (internal server error), we should check if the user is trying to ls on a file
 			info, err := client.Stat(remotePath)
@@ -4063,7 +4086,7 @@ func deleteHttp(ctx context.Context, remoteUrl *pelican_url.PelicanURL, recursiv
 	info, err := client.Stat(remotePath)
 	if err != nil {
 		if gowebdav.IsErrNotFound(err) {
-			return errors.Wrapf(ErrObjectNotFound, "cannot remove remote path %s: no such object or collection", remotePath)
+			return error_codes.NewSpecification_FileNotFoundError(errors.Wrapf(ErrObjectNotFound, "cannot remove remote path %s: no such object or collection", remotePath))
 		}
 		return errors.Wrap(err, "failed to check object existence")
 	}
@@ -4167,6 +4190,7 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 					return
 				} else if gowebdav.IsErrNotFound(err) {
 					err = errors.Wrapf(ErrObjectNotFound, "object %s not found at the endpoint %s", dest.String(), endpoint.String())
+					err = error_codes.NewSpecification_FileNotFoundError(err)
 					resultsChan <- statResults{FileInfo{}, err}
 					return
 				}

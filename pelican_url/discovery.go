@@ -34,6 +34,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
+
+	"github.com/pelicanplatform/pelican/error_codes"
 )
 
 type (
@@ -278,6 +280,9 @@ func startMetadataQuery(ctx context.Context, httpClient *http.Client, ua string,
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
 			err = MetadataTimeoutErr.Wrap(err)
+		} else if strings.Contains(err.Error(), "connection reset by peer") {
+			err = NewMetadataError(err, "Error occurred when querying for metadata")
+			err = error_codes.NewContact_ConnectionResetError(err)
 		} else {
 			err = NewMetadataError(err, "Error occurred when querying for metadata")
 		}

@@ -545,6 +545,16 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				errMsgInternal := result.Error.Error()
 				if errors.As(result.Error, &te) {
 					errMsgInternal = te.UserError()
+				} else {
+					// If we have a PelicanError, prefer the wrapped error message to avoid noisy prefixes
+					var pe *error_codes.PelicanError
+					if errors.As(result.Error, &pe) {
+						if innerErr := pe.Unwrap(); innerErr != nil {
+							errMsgInternal = innerErr.Error()
+						} else {
+							errMsgInternal = pe.Error()
+						}
+					}
 				}
 				errMsg := writeTransferErrorMessage(errMsgInternal, transfer.url.String())
 				resultAd.Set("TransferError", errMsg)
@@ -580,6 +590,18 @@ func failTransfer(remoteUrl string, localFile string, results chan<- *classads.C
 	}
 	resultAd.Set("TransferSuccess", false)
 	resultAd.Set("TransferError", err.Error())
+
+	// Populate DeveloperData and TransferErrorData for error classification
+	developerData := make(map[string]interface{})
+	developerData["PelicanClientVersion"] = config.GetVersion()
+	developerData["Attempts"] = 0 // No transfer attempts were made
+
+	var transferErrorData []interface{}
+	transferError := createTransferError(err)
+	transferErrorData = append(transferErrorData, transferError)
+
+	resultAd.Set("DeveloperData", developerData)
+	resultAd.Set("TransferErrorData", transferErrorData)
 
 	results <- resultAd
 }
@@ -635,6 +657,19 @@ func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File)
 			} else {
 				resultAd.Set("TransferRetryable", false)
 			}
+
+			// Populate DeveloperData and TransferErrorData for error classification
+			developerData := make(map[string]interface{})
+			developerData["PelicanClientVersion"] = config.GetVersion()
+			developerData["Attempts"] = 0 // No transfer attempts were made
+
+			var transferErrorData []interface{}
+			transferError := createTransferError(err)
+			transferErrorData = append(transferErrorData, transferError)
+
+			resultAd.Set("DeveloperData", developerData)
+			resultAd.Set("TransferErrorData", transferErrorData)
+
 			resultAds = append(resultAds, resultAd)
 		}
 	}
@@ -752,7 +787,7 @@ func writeTransferErrorMessage(currentError string, transferUrl string) (errMsg 
 
 	errMsg += currentError
 	if tUrl, err := url.Parse(transferUrl); transferUrl != "" && err == nil {
-		prefix = tUrl.Scheme + "://" + tUrl.Host
+		prefix := tUrl.Scheme + "://" + tUrl.Host
 		urlRemainder := strings.TrimPrefix(transferUrl, prefix)
 		errMsg = strings.ReplaceAll(errMsg, urlRemainder, "(...Path...)")
 	}
@@ -780,10 +815,12 @@ func createTransferError(err error) (transferError map[string]interface{}) {
 	transferError = make(map[string]interface{})
 	developerData := make(map[string]interface{})
 
+	isRetryable := client.IsRetryable(err)
+
 	var pe *error_codes.PelicanError
 	if errors.As(err, &pe) {
 		developerData["PelicanErrorCode"] = pe.Code()
-		developerData["Retryable"] = pe.IsRetryable()
+		developerData["Retryable"] = isRetryable
 		developerData["ErrorType"] = pe.ErrorType()
 
 		// Use the wrapped error's message if available, otherwise use the PelicanError's full error message
@@ -804,7 +841,7 @@ func createTransferError(err error) (transferError map[string]interface{}) {
 		// Fallback for errors that aren't wrapped in PelicanError
 		developerData["PelicanErrorCode"] = 0
 		developerData["ErrorType"] = "Unprocessed"
-		developerData["Retryable"] = false
+		developerData["Retryable"] = isRetryable
 		developerData["ErrorMessage"] = "Unprocessed error type"
 		transferError["ErrorType"] = "Unprocessed"
 	}

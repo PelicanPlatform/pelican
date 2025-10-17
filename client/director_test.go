@@ -21,6 +21,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,7 +32,9 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -317,4 +320,37 @@ func TestGetDirectorInfoForPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDirectorTimeout(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	test_utils.InitClient(t, map[string]any{
+		param.Client_DirectorRetries.GetName(): 1, // Only try once to avoid long waits
+		param.Debug.GetName():                  true,
+	})
+
+	// Use a non-routable IP address that will cause a dial timeout
+	// 192.0.2.1 is from TEST-NET-1 (RFC 5737), guaranteed to not be routable
+	// This simulates the real "dial tcp ... i/o timeout" error
+	pUrl := &pelican_url.PelicanURL{
+		Path: "/test/object.txt",
+		FedInfo: pelican_url.FederationDiscovery{
+			DirectorEndpoint: "http://192.0.2.1:8080",
+		},
+	}
+
+	_, err := GetDirectorInfoForPath(context.Background(), pUrl, http.MethodGet, "")
+	require.Error(t, err)
+
+	// Verify it's wrapped in Transfer.DirectorTimeout PelicanError
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(err, &pe), "Error should be wrapped in PelicanError")
+	assert.Equal(t, 6005, pe.Code(), "Should be Transfer.DirectorTimeout error code")
+	assert.Equal(t, "Transfer.DirectorTimeout", pe.ErrorType(), "Should be Transfer.DirectorTimeout error type")
+	assert.True(t, pe.IsRetryable(), "Director timeout should be retryable")
+
+	// Verify the error message contains "i/o timeout"
+	assert.Contains(t, err.Error(), "i/o timeout")
 }
