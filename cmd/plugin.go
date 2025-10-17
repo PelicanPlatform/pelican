@@ -531,6 +531,13 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 					transferErrorData = append(transferErrorData, transferError)
 				}
 			}
+			// If there were no attempts but there is an error, add it to TransferErrorData
+			// This handles very early failures (e.g., local file not found before upload starts)
+			if len(result.Attempts) == 0 && result.Error != nil {
+				transferError := createTransferError(result.Error)
+				transferErrorData = append(transferErrorData, transferError)
+			}
+
 			if len(result.ClientChecksums) > 0 {
 				checksumInfo := make(map[string]interface{})
 				for _, checksum := range result.ClientChecksums {
