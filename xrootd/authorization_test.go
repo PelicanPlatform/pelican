@@ -44,6 +44,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -1590,8 +1591,16 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	viper.Set(param.Server_Hostname.GetName(), "origin.example.com")
 	viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
 
+	test_utils.MockFederationRoot(t, nil, nil)
+
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
+
+	// Since this test asserts the static config from resources/test-scitokens-monitoring.cfg
+	// matches the generated/written config, we need to force WriteOriginScitokensConfig to find a
+	// static federation issuer URL as well. The mocked fed root has already assisted with discovery,
+	// so we can now overwrite the discovered fed info with something static.
+	config.SetFederation(pelican_url.FederationDiscovery{DiscoveryEndpoint: "https://federation.example.com/discovery"})
 
 	scitokensCfg := param.Xrootd_ScitokensConfig.GetString()
 	err = config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, -1)
