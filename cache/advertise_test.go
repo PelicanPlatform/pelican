@@ -130,6 +130,9 @@ func TestFilterNsAdsForCache(t *testing.T) {
 	for _, testInput := range tests {
 		t.Run(testInput.desc, func(t *testing.T) {
 			test_utils.InitClient(t, nil)
+			// We don't bother passing info to the federation mock server
+			// because we only need it to be queryable (not to be correct)
+			test_utils.MockFederationRoot(t, nil, nil)
 			viper.Set("Federation.DirectorURL", ts.URL)
 			if testInput.permittedNS != nil {
 				viper.Set("Cache.PermittedNamespaces", testInput.permittedNS)

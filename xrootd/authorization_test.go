@@ -1065,6 +1065,8 @@ func TestMergeConfig(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
+	test_utils.MockFederationRoot(t, nil, nil)
+
 	viper.Set(param.Origin_RunLocation.GetName(), dirname)
 	viper.Set(param.Origin_Port.GetName(), 8443)
 	viper.Set(param.Origin_StoragePrefix.GetName(), "/")
@@ -1281,6 +1283,8 @@ func TestGenerateOriginIssuer(t *testing.T) {
 			ctx, _, _ := test_utils.TestContext(context.Background(), t)
 			viper.Set("ConfigDir", t.TempDir())
 			viper.Set(param.Logging_Level.GetName(), "debug")
+
+			test_utils.MockFederationRoot(t, nil, nil)
 
 			// Load in test config
 			viper.SetConfigType("yaml")

@@ -285,6 +285,7 @@ func MockFederationRoot(t *testing.T, fInfo *pelican_url.FederationDiscovery, kS
 			w.WriteHeader(http.StatusOK)
 
 			discoveryMetadata := pelican_url.FederationDiscovery{
+				DiscoveryEndpoint:          getInternalFInfo().DiscoveryEndpoint,
 				DirectorEndpoint:           getInternalFInfo().DirectorEndpoint,
 				RegistryEndpoint:           getInternalFInfo().RegistryEndpoint,
 				BrokerEndpoint:             getInternalFInfo().BrokerEndpoint,
@@ -314,6 +315,7 @@ func MockFederationRoot(t *testing.T, fInfo *pelican_url.FederationDiscovery, kS
 	getInternalFInfo = func() pelican_url.FederationDiscovery {
 		// Pre-populate some fed metadata values
 		internalFInfo := pelican_url.FederationDiscovery{
+			DiscoveryEndpoint: serverUrl,
 			DirectorEndpoint: "https://fake-director.com",
 			RegistryEndpoint: "https://fake-registry.com",
 			BrokerEndpoint:   "https://fake-broker.com",
@@ -347,6 +349,8 @@ func MockFederationRoot(t *testing.T, fInfo *pelican_url.FederationDiscovery, kS
 	// Finally, set this as the federation discovery URL so tests
 	// can "discover" the info
 	viper.Set(param.Federation_DiscoveryUrl.GetName(), serverUrl)
+	// Set to skip TLS verification for the test server
+	viper.Set(param.TLSSkipVerify.GetName(), true)
 }
 
 // Create a mock issuer that responds to request for /.well-known/openid-configuration
