@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -359,7 +358,7 @@ func wrapWithHttpsIfNeeded(urlStr string) string {
 	// central service is a terrible idea, and we shouldn't make it possible just for the sake of testing...
 	if len(urlStr) > 0 && !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
 		urlStr = "https://" + urlStr
-		log.Warningf("The configured URL %s did not have the 'https://' scheme; will assume https", urlStr)
+		log.Debugf("The configured URL %s did not have an understood scheme ('https://' or 'http://'); will assume https", urlStr)
 	}
 	return urlStr
 }
@@ -410,6 +409,9 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 		if fedInfo.BrokerEndpoint == "" && enabledServers.IsEnabled(server_structs.BrokerType) {
 			fedInfo.BrokerEndpoint = externalUrlStr
 		}
+		if fedInfo.DirectorAdvertiseEndpoints == nil && enabledServers.IsEnabled(server_structs.DirectorType) {
+			fedInfo.DirectorAdvertiseEndpoints = []string{externalUrlStr}
+		}
 
 		// Some services in the Director, like federation tokens, may require a defined federation root (discovery URL)
 		// so for these to have a chance at working in places where a Director truly is acting as the fed root (e.g.
@@ -419,21 +421,33 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 		}
 
 		// Make sure any values in global federation metadata are url-parseable
+		fedInfo.DiscoveryEndpoint = wrapWithHttpsIfNeeded(fedInfo.DiscoveryEndpoint)
 		fedInfo.DirectorEndpoint = wrapWithHttpsIfNeeded(fedInfo.DirectorEndpoint)
 		fedInfo.RegistryEndpoint = wrapWithHttpsIfNeeded(fedInfo.RegistryEndpoint)
 		fedInfo.JwksUri = wrapWithHttpsIfNeeded(fedInfo.JwksUri)
 		fedInfo.BrokerEndpoint = wrapWithHttpsIfNeeded(fedInfo.BrokerEndpoint)
+		for i, advUrl := range fedInfo.DirectorAdvertiseEndpoints {
+			fedInfo.DirectorAdvertiseEndpoints[i] = wrapWithHttpsIfNeeded(advUrl)
+		}
 	}()
 
+	// Set each of the fed values to anything we got from config.
 	log.Debugln("Configured federation URL:", federationStr)
+	fedInfo.DiscoveryEndpoint = federationStr
 	fedInfo.DirectorEndpoint = viper.GetString("Federation.DirectorUrl")
 	fedInfo.RegistryEndpoint = viper.GetString("Federation.RegistryUrl")
 	fedInfo.JwksUri = viper.GetString("Federation.JwkUrl")
 	fedInfo.BrokerEndpoint = viper.GetString("Federation.BrokerUrl")
-	if fedInfo.DirectorEndpoint != "" && fedInfo.RegistryEndpoint != "" && fedInfo.JwksUri != "" && fedInfo.BrokerEndpoint != "" {
-		if federationStr != "" {
-			fedInfo.DiscoveryEndpoint = federationStr
-		}
+
+	// The only time we'll ever skip discovery is if we already have all the values.
+	// Note that the discovery endpoint itself is required because it acts as the
+	// federation's issuer.
+	//
+	// It's unclear whether director advertise endpoints should also be included here --
+	// outside of federations with HA Directors, even the discovered slice will be empty
+	// and it doesn't seem like we should enforce its presence.
+	if fedInfo.DiscoveryEndpoint != "" && fedInfo.DirectorEndpoint != "" &&
+		fedInfo.RegistryEndpoint != "" && fedInfo.JwksUri != "" && fedInfo.BrokerEndpoint != "" {
 		return
 	}
 
@@ -443,36 +457,55 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 		return
 	}
 
+	// If we have no locally-configured discovery URL but we do have a Director, we may still be able to discover
+	// services via the Director's hosting of the metadata. In this case, even though we discover services via the Director,
+	// we populate our fed info object's discovery URL with what's discovered, NOT the Director itself. The reason we
+	// do this is that the returned fed object's discovery URL acts as the federation's issuer, so it MUST match what the
+	// Director sees -- the Director may sign tokens with what it sees as the discovery URL.
+	//
+	// The awkwardness in this stems from failing to separate out the concepts of federation issuer from discovery URL, but
+	// these metadata objects are too established to change easily.
 	if federationUrl.String() == "" && fedInfo.DirectorEndpoint != "" {
-		// If we have no federation but we do have a Director, we may still be able to discover services via
-		// the Director
+		log.Debugf("No federation discovery URL was configured; will attempt to fall back to discovering services via the configured Director URL of %s", fedInfo.DirectorEndpoint)
 		federationUrl, err = validateDiscoveryUrl(wrapWithHttpsIfNeeded(fedInfo.DirectorEndpoint))
+		if err != nil {
+			// An error here means there is no valid discovery URL and we couldn't parse the Director URL;
+			// we're out of options for discovery
+			err = errors.Wrap(err, "could not determine federation discovery URL and was unable to fallback to metadata discovery via the configured Director URL")
+			return
+		}
+		federationStr = federationUrl.String()
+
+		// Unset the discovery endpoint -- in this case we'll try to learn the federation's
+		// real discovery URL from the Director
+		fedInfo.DiscoveryEndpoint = ""
 	}
 
-	fedInfo.DiscoveryEndpoint = federationUrl.String()
-
 	var metadata pelican_url.FederationDiscovery
-	if federationStr == "" {
-		log.Debugln("Federation discovery URL is unset; skipping discovery")
-	} else if federationStr == externalUrlStr {
+	if federationStr == externalUrlStr {
 		log.Debugln("Current web engine hosts the federation; skipping auto-discovery of services")
 	} else {
-		tr := GetTransport()
-		httpClient := &http.Client{
-			Transport: tr,
-			Timeout:   time.Second * 5,
+		log.Debugln("Attempting to discover federation services via URL:", federationStr)
+		httpClient := GetClient()
+		if client == nil {
+			err = errors.New("no HTTP client available to perform federation discovery")
+			return
 		}
 
 		// We can't really know the service here, so set to generic Pelican
 		ua := "pelican/" + GetVersion()
 		metadata, err = pelican_url.DiscoverFederation(ctx, httpClient, ua, federationUrl)
 		if err != nil {
-			err = errors.Wrapf(err, "invalid federation value (%s)", federationStr)
+			err = errors.Wrapf(err, "could not discover federation services from '%s'", federationUrl.String())
 			return
 		}
 	}
 
 	// Set our globals
+	if fedInfo.DiscoveryEndpoint == "" {
+		log.Debugln("Setting global discovery url to", metadata.DiscoveryEndpoint)
+		fedInfo.DiscoveryEndpoint = metadata.DiscoveryEndpoint
+	}
 	if fedInfo.DirectorEndpoint == "" {
 		log.Debugln("Setting global director url to", metadata.DirectorEndpoint)
 		fedInfo.DirectorEndpoint = metadata.DirectorEndpoint
@@ -488,6 +521,9 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 	if fedInfo.BrokerEndpoint == "" && metadata.BrokerEndpoint != "" {
 		log.Debugln("Setting global broker url to", metadata.BrokerEndpoint)
 		fedInfo.BrokerEndpoint = metadata.BrokerEndpoint
+	}
+	if fedInfo.DirectorAdvertiseEndpoints == nil && metadata.DirectorAdvertiseEndpoints != nil {
+		fedInfo.DirectorAdvertiseEndpoints = metadata.DirectorAdvertiseEndpoints
 	}
 
 	return
@@ -517,11 +553,14 @@ func GetFederation(ctx context.Context) (pelican_url.FederationDiscovery, error)
 
 // Set the current global federation metadata
 func SetFederation(fd pelican_url.FederationDiscovery) {
-	viper.Set("Federation.DiscoveryUrl", fd.DiscoveryEndpoint)
+	viper.Set(param.Federation_DiscoveryUrl.GetName(), fd.DiscoveryEndpoint)
 	viper.Set("Federation.DirectorUrl", fd.DirectorEndpoint)
 	viper.Set("Federation.RegistryUrl", fd.RegistryEndpoint)
 	viper.Set("Federation.BrokerUrl", fd.BrokerEndpoint)
 	viper.Set("Federation.JwkUrl", fd.JwksUri)
+	viper.Set("Federation.DirectorAdvertiseEndpoints", fd.DirectorAdvertiseEndpoints)
+
+	globalFedInfo = fd
 }
 
 // TODO: It's not clear that this function works correctly.  We should
