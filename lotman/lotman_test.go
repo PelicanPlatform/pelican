@@ -2,7 +2,7 @@
 
 /***************************************************************
 *
-* Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -44,6 +44,7 @@ import (
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 //go:embed resources/lots-config.yaml
@@ -1042,6 +1043,11 @@ func TestConfigLotsFromFedPrefixes(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
+	test_utils.MockFederationRoot(t, nil, nil)
+	fedInfo, err := config.GetFederation(context.Background())
+	require.NoError(t, err)
+	discUrl := fedInfo.DiscoveryEndpoint
+
 	issuer1Str := "https://issuer1.com"
 	issuer1, _ := url.Parse(issuer1Str)
 	issuer2Str := "https://issuer2.com"
@@ -1070,7 +1076,7 @@ func TestConfigLotsFromFedPrefixes(t *testing.T) {
 					},
 				},
 			},
-			federationIssuer: "https://dne-discovery.com",
+			federationIssuer: discUrl,
 			directorUrl:      "https://dne-director.com",
 			expectedLotMap: map[string]Lot{
 				"/namespace1": {
@@ -1114,7 +1120,7 @@ func TestConfigLotsFromFedPrefixes(t *testing.T) {
 					},
 				},
 			},
-			federationIssuer: "https://dne-discovery.com",
+			federationIssuer: discUrl,
 			directorUrl:      "https://dne-director.com",
 			expectedLotMap: map[string]Lot{
 				"/namespace2": {
@@ -1132,18 +1138,20 @@ func TestConfigLotsFromFedPrefixes(t *testing.T) {
 			expectedError: "",
 		},
 		{
-			name: "Fallback to Director URL as issuer",
+			name: "Fallback to Director URL for discovery of fed issuer",
 			nsAds: []server_structs.NamespaceAdV2{
 				{
 					Path: "/namespace1",
 				},
 			},
 			federationIssuer: "",
-			directorUrl:      "https://dne-director.com",
+			// Discovery will happen via the Director, but we'll still discover
+			// the federation root there.
+			directorUrl:      discUrl,
 			expectedLotMap: map[string]Lot{
 				"/namespace1": {
 					LotName: "/namespace1",
-					Owner:   "https://dne-director.com",
+					Owner:   discUrl,
 					Parents: []string{"root"},
 					Paths: []LotPath{
 						{
@@ -1165,7 +1173,7 @@ func TestConfigLotsFromFedPrefixes(t *testing.T) {
 			federationIssuer: "",
 			directorUrl:      "",
 			expectedLotMap:   map[string]Lot{},
-			expectedError:    "The detected federation issuer, which is needed by Lotman to determine lot/namespace ownership, is empty",
+			expectedError:    "unable to determine the federation's discovery endpoint/issuer for lot ownership",
 		},
 	}
 
