@@ -316,10 +316,10 @@ func MockFederationRoot(t *testing.T, fInfo *pelican_url.FederationDiscovery, kS
 		// Pre-populate some fed metadata values
 		internalFInfo := pelican_url.FederationDiscovery{
 			DiscoveryEndpoint: serverUrl,
-			DirectorEndpoint: "https://fake-director.com",
-			RegistryEndpoint: "https://fake-registry.com",
-			BrokerEndpoint:   "https://fake-broker.com",
-			JwksUri:          fmt.Sprintf("%s/.well-known/issuer.jwks", serverUrl),
+			DirectorEndpoint:  "https://fake-director.com",
+			RegistryEndpoint:  "https://fake-registry.com",
+			BrokerEndpoint:    "https://fake-broker.com",
+			JwksUri:           fmt.Sprintf("%s/.well-known/issuer.jwks", serverUrl),
 		}
 
 		// Override as needed based on the passed in fInfo
