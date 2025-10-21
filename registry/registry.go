@@ -373,20 +373,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 			}
 			// Record not found, continue with registration
 		} else if existingServer != nil && existingServer.ID != "" {
-			// Server exists, check approval status
-			// If the server has multiple service registrations, check if any of them is approved. If not, return an error.
-			if (existingServer.IsOrigin && param.Registry_RequireOriginApproval.GetBool()) || (existingServer.IsCache && param.Registry_RequireCacheApproval.GetBool()) {
-				approved := false
-				for _, reg := range existingServer.Registration {
-					if reg.AdminMetadata.Status == server_structs.RegApproved {
-						approved = true
-						break
-					}
-				}
-				if !approved {
-					return false, nil, permissionDeniedError{Message: fmt.Sprintf("the server %q is not approved. Please contact the Registry admin", data.SiteName)}
-				}
-			}
+			// Server exists, verify ownership
 			// Verify the request sender has the ownership of the server name it claims
 			verified, err := verifyServerOwnership(existingServer, data)
 			if err != nil {
