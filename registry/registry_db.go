@@ -772,22 +772,32 @@ func setRegistrationPubKey(prefix string, pubkeyDbString string) error {
 // Additionally, if this server only has this single service registration (i.e., the server is only an
 // origin or only a cache, not both), then delete the corresponding entry in the “servers” table.
 func deleteRegistrationByID(id int) error {
-	// Get server info before deletion so we know whether this was the only registration
-	serverReg, err := getServerByRegistrationID(id)
-	if err != nil {
-		return err
-	}
-
-	// Wrap in a transaction to keep operations consistent
+	// Wrap in a transaction to perform an atomic operation
 	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
-		// Delete the registration (this cascades to the related service entry)
+		// Determine the server ID associated with this registration via the services table
+		// (Server ID is not empty if this is a server registration)
+		var svc server_structs.Service
+		if err := tx.Where("registration_id = ?", id).First(&svc).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			// No service mapping found; proceed to delete registration only
+		}
+
+		// Delete the registration (this cascadingly deletes the related service entry)
 		if err := tx.Delete(&server_structs.Registration{}, id).Error; err != nil {
 			return err
 		}
 
-		// If the server has exactly one service registration, then deleting it should also delete the server entry.
-		if len(serverReg.Registration) == 1 {
-			if err := tx.Where("id = ?", serverReg.ID).Delete(&server_structs.Server{}).Error; err != nil {
+		// Conditionally delete the server atomically only if no services remain
+		if svc.ServerID != "" {
+			// The nested NOT EXISTS subquery ensures we only delete the server if
+			// there are no remaining rows in `services` referencing this server. Within
+			// the same transaction, this makes the check-and-delete atomic: if a new
+			// service is inserted concurrently, the subquery returns a row and the
+			// DELETE is skipped.
+			subq := tx.Model(&server_structs.Service{}).Select("1").Where("server_id = ?", svc.ServerID).Limit(1)
+			if err := tx.Where("id = ? AND NOT EXISTS (?)", svc.ServerID, subq).Delete(&server_structs.Server{}).Error; err != nil {
 				return err
 			}
 		}
