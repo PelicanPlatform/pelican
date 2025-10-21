@@ -594,20 +594,7 @@ func TestApiToken(t *testing.T) {
 	err = database.ServerDatabase.AutoMigrate(&server_structs.ApiKey{})
 	require.NoError(t, err, "Failed to migrate DB for API key table")
 
-	err = database.ServerDatabase.AutoMigrate(&database.Collection{})
-	require.NoError(t, err, "Failed to migrate DB for collections table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
-	require.NoError(t, err, "Failed to migrate DB for collection members table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
-	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
-	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
-	err = database.ServerDatabase.AutoMigrate(&database.Group{})
-	require.NoError(t, err, "Failed to migrate DB for groups table")
-	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
-	require.NoError(t, err, "Failed to migrate DB for group members table")
-	err = database.ServerDatabase.AutoMigrate(&database.User{})
-	require.NoError(t, err, "Failed to migrate DB for users table")
+	migrateTestDB(t)
 
 	testCases := []struct {
 		name string
@@ -855,20 +842,7 @@ func TestGroupManagementAPI(t *testing.T) {
 	database.ServerDatabase = mockDB
 	require.NoError(t, err, "Error setting up mock origin DB")
 
-	err = database.ServerDatabase.AutoMigrate(&database.Collection{})
-	require.NoError(t, err, "Failed to migrate DB for collections table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
-	require.NoError(t, err, "Failed to migrate DB for collection members table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
-	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
-	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
-	err = database.ServerDatabase.AutoMigrate(&database.Group{})
-	require.NoError(t, err, "Failed to migrate DB for groups table")
-	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
-	require.NoError(t, err, "Failed to migrate DB for group members table")
-	err = database.ServerDatabase.AutoMigrate(&database.User{})
-	require.NoError(t, err, "Failed to migrate DB for users table")
+	migrateTestDB(t)
 
 	t.Run("test-group-lifecycle", func(t *testing.T) {
 		// 1. Create a group as 'owner-user'

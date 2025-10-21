@@ -50,6 +50,23 @@ import (
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
+func migrateTestDB(t *testing.T) {
+	err := database.ServerDatabase.AutoMigrate(&database.Collection{})
+	require.NoError(t, err, "Failed to migrate DB for collections table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
+	require.NoError(t, err, "Failed to migrate DB for collection members table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
+	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
+	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
+	err = database.ServerDatabase.AutoMigrate(&database.Group{})
+	require.NoError(t, err, "Failed to migrate DB for groups table")
+	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
+	require.NoError(t, err, "Failed to migrate DB for group members table")
+	err = database.ServerDatabase.AutoMigrate(&database.User{})
+	require.NoError(t, err, "Failed to migrate DB for users table")
+}
+
 func TestWaitUntilLogin(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
@@ -110,20 +127,7 @@ func TestCodeBasedLogin(t *testing.T) {
 	database.ServerDatabase = mockDB
 	require.NoError(t, err, "Error setting up mock origin DB")
 
-	err = database.ServerDatabase.AutoMigrate(&database.Collection{})
-	require.NoError(t, err, "Failed to migrate DB for collections table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
-	require.NoError(t, err, "Failed to migrate DB for collection members table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
-	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
-	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
-	err = database.ServerDatabase.AutoMigrate(&database.Group{})
-	require.NoError(t, err, "Failed to migrate DB for groups table")
-	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
-	require.NoError(t, err, "Failed to migrate DB for group members table")
-	err = database.ServerDatabase.AutoMigrate(&database.User{})
-	require.NoError(t, err, "Failed to migrate DB for users table")
+	migrateTestDB(t)
 
 	//Invoke the code login API with the correct code, ensure we get a valid code back
 	t.Run("With valid code", func(t *testing.T) {
@@ -176,20 +180,7 @@ func TestPasswordResetAPI(t *testing.T) {
 	database.ServerDatabase = mockDB
 	require.NoError(t, err, "Error setting up mock origin DB")
 
-	err = database.ServerDatabase.AutoMigrate(&database.Collection{})
-	require.NoError(t, err, "Failed to migrate DB for collections table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
-	require.NoError(t, err, "Failed to migrate DB for collection members table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
-	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
-	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
-	err = database.ServerDatabase.AutoMigrate(&database.Group{})
-	require.NoError(t, err, "Failed to migrate DB for groups table")
-	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
-	require.NoError(t, err, "Failed to migrate DB for group members table")
-	err = database.ServerDatabase.AutoMigrate(&database.User{})
-	require.NoError(t, err, "Failed to migrate DB for users table")
+	migrateTestDB(t)
 
 	//////////////////////////////SETUP////////////////////////////////
 	//Add an admin user to file to configure
@@ -326,20 +317,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 	database.ServerDatabase = mockDB
 	require.NoError(t, err, "Error setting up mock origin DB")
 
-	err = database.ServerDatabase.AutoMigrate(&database.Collection{})
-	require.NoError(t, err, "Failed to migrate DB for collections table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
-	require.NoError(t, err, "Failed to migrate DB for collection members table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
-	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
-	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
-	err = database.ServerDatabase.AutoMigrate(&database.Group{})
-	require.NoError(t, err, "Failed to migrate DB for groups table")
-	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
-	require.NoError(t, err, "Failed to migrate DB for group members table")
-	err = database.ServerDatabase.AutoMigrate(&database.User{})
-	require.NoError(t, err, "Failed to migrate DB for users table")
+	migrateTestDB(t)
 
 	///////////////////////////SETUP///////////////////////////////////
 	//Add an admin user to file to configure
@@ -455,20 +433,7 @@ func TestWhoamiAPI(t *testing.T) {
 	database.ServerDatabase = mockDB
 	require.NoError(t, err, "Error setting up mock origin DB")
 
-	err = database.ServerDatabase.AutoMigrate(&database.Collection{})
-	require.NoError(t, err, "Failed to migrate DB for collections table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
-	require.NoError(t, err, "Failed to migrate DB for collection members table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
-	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
-	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
-	err = database.ServerDatabase.AutoMigrate(&database.Group{})
-	require.NoError(t, err, "Failed to migrate DB for groups table")
-	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
-	require.NoError(t, err, "Failed to migrate DB for group members table")
-	err = database.ServerDatabase.AutoMigrate(&database.User{})
-	require.NoError(t, err, "Failed to migrate DB for users table")
+	migrateTestDB(t)
 
 	///////////////////////////SETUP///////////////////////////////////
 	//Add an admin user to file to configure
@@ -641,20 +606,7 @@ func TestLogoutAPI(t *testing.T) {
 	database.ServerDatabase = mockDB
 	require.NoError(t, err, "Error setting up mock origin DB")
 
-	err = database.ServerDatabase.AutoMigrate(&database.Collection{})
-	require.NoError(t, err, "Failed to migrate DB for collections table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
-	require.NoError(t, err, "Failed to migrate DB for collection members table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
-	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
-	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
-	err = database.ServerDatabase.AutoMigrate(&database.Group{})
-	require.NoError(t, err, "Failed to migrate DB for groups table")
-	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
-	require.NoError(t, err, "Failed to migrate DB for group members table")
-	err = database.ServerDatabase.AutoMigrate(&database.User{})
-	require.NoError(t, err, "Failed to migrate DB for users table")
+	migrateTestDB(t)
 
 	///////////////////////////SETUP///////////////////////////////////
 	//Add an admin user to file to configure
