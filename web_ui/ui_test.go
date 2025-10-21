@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -74,34 +74,41 @@ func cleanupAuthDB() {
 	authDB.Store(nil)
 }
 
-func TestMain(m *testing.M) {
+func setupWebUIEnv(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, cancel := context.WithCancel(context.Background())
 	egrp, ctx := errgroup.WithContext(ctx)
 	defer func() {
 		if err := egrp.Wait(); err != nil {
-			fmt.Println("Failure when shutting down service:", err)
-			os.Exit(1)
+			t.Fatal("Failure when shutting down service:", err)
 		}
 	}()
 	defer cancel()
 
+	testCfgDir := t.TempDir()
+	server_utils.ResetTestState()
+	viper.Set("ConfigDir", testCfgDir)
+
 	//set a temporary password file:
 	tempFile, err := os.CreateTemp("", "web-ui-passwd")
 	if err != nil {
-		fmt.Println("Failed to setup web-ui-passwd file")
-		os.Exit(1)
+		t.Fatal("Failed to setup web-ui-passwd file:", err)
 	}
+	t.Cleanup(func() {
+		os.Remove(tempFile.Name())
+	})
 	tempPasswdFile = tempFile
 	//Override viper default for testing
-	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
+	viper.Set(param.Server_UIPasswordFile.GetName(), tempPasswdFile.Name())
 
 	//Make a testing issuer.jwk file to get a cookie
 	tempJWKDir, err := os.MkdirTemp("", "tempDir")
 	if err != nil {
-		fmt.Println("Error making temp jwk dir")
-		os.Exit(1)
+		t.Fatal("Error making temp jwk dir:", err)
 	}
+	t.Cleanup(func() {
+		os.RemoveAll(tempJWKDir)
+	})
 
 	//Override viper default for testing
 	viper.Set(param.IssuerKeysDirectory.GetName(), filepath.Join(tempJWKDir, "issuer-keys"))
@@ -109,38 +116,28 @@ func TestMain(m *testing.M) {
 	// Ensure we load up the default configs.
 	dirname, err := os.MkdirTemp("", "tmpDir")
 	if err != nil {
-		fmt.Println("Error making temp config dir")
-		os.Exit(1)
+		t.Fatal("Error making temp config dir:", err)
 	}
 	viper.Set("ConfigDir", dirname)
-	viper.Set("Server.UILoginRateLimit", 100)
+	viper.Set(param.Server_UILoginRateLimit.GetName(), 100)
 
+	test_utils.MockFederationRoot(t, nil, nil)
 	if err := config.InitServer(ctx, server_structs.OriginType); err != nil {
-		fmt.Println("Failed to configure the test module")
-		os.Exit(1)
+		t.Fatal("Failed to initialize server config:", err)
 	}
 
 	//Get keys
 	_, err = config.GetIssuerPublicJWKS()
 	if err != nil {
-		fmt.Println("Error issuing jwks")
-		os.Exit(1)
+		t.Fatal("Error issuing jwks:", err)
 	}
 	router = gin.Default()
 
 	//Configure Web API
 	err = ConfigureServerWebAPI(ctx, router, egrp)
 	if err != nil {
-		fmt.Println("Error configuring web UI")
-		os.Exit(1)
+		t.Fatal("Error configuring web UI:", err)
 	}
-	//Run the tests
-	exitCode := m.Run()
-
-	//Clean up created files by removing them and exit
-	os.Remove(tempPasswdFile.Name())
-	os.RemoveAll(tempJWKDir)
-	os.Exit(exitCode)
 }
 
 func TestHandleWebUIAuth(t *testing.T) {
@@ -411,7 +408,7 @@ func TestMapPrometheusPath(t *testing.T) {
 func TestServerHostRestart(t *testing.T) {
 	route := gin.New()
 	route.POST("/api/v1.0/restart", AuthHandler, AdminAuthHandler, hotRestartServer)
-	viper.Set("IssuerKey", filepath.Join(t.TempDir(), "issuer.jwk"))
+	viper.Set(param.IssuerKey.GetName(), filepath.Join(t.TempDir(), "issuer.jwk"))
 
 	t.Run("unauthorized-no-token", func(t *testing.T) {
 		r := httptest.NewRecorder()
@@ -454,7 +451,7 @@ func TestServerHostRestart(t *testing.T) {
 		require.NoError(t, err)
 
 		r := httptest.NewRecorder()
-		viper.Set("Server.UIAdminUsers", []string{"admin1", "admin2"})
+		viper.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2"})
 		c := gin.CreateTestContextOnly(r, route)
 		c.Set("User", "admin1")
 		req := httptest.NewRequest(http.MethodPost, "/api/v1.0/restart", nil)
@@ -506,21 +503,15 @@ func TestServerHostRestart(t *testing.T) {
 
 // Create an authentication token for testing purpose. This token can pass AuthHandler and AdminAuthHandler,
 // allowing tests to proceed without authentication constraints
-func generateTestAdminUserToken(ctx context.Context) (string, error) {
-	fedInfo, err := config.GetFederation(ctx)
-	if err != nil {
-		return "", err
-	}
+func generateTestAdminUserToken(t *testing.T) string {
 	// Create token for admin user in test
 	tk := token.NewWLCGToken()
 	issuer := param.Server_ExternalWebUrl.GetString()
-	if issuer == "" {
-		issuer = fedInfo.DiscoveryEndpoint
-	}
+	require.NotEmpty(t, issuer, "Server ExternalWebUrl must be set for tests")
 	tk.Issuer = issuer
 	tk.Subject = "admin-user"
 	tk.Lifetime = 5 * time.Minute
-	tk.AddAudiences(issuer)
+	tk.AddAudiences(param.Server_ExternalWebUrl.GetString())
 	tk.AddScopes(token_scopes.WebUi_Access)
 	// Add OIDC claims required by GetUserGroups
 	tk.Claims = map[string]string{
@@ -528,25 +519,19 @@ func generateTestAdminUserToken(ctx context.Context) (string, error) {
 	}
 	tok, err := tk.CreateToken()
 	if err != nil {
-		return "", err
+		t.Fatal("Failed to create test admin user token:", err)
 	}
-	return tok, nil
+	return tok
 }
 
-func generateToken(ctx context.Context, scopes []token_scopes.TokenScope, subject string) (string, error) {
-	fedInfo, err := config.GetFederation(ctx)
-	if err != nil {
-		return "", err
-	}
+func generateToken(t *testing.T, scopes []token_scopes.TokenScope, subject string) string {
 	tk := token.NewWLCGToken()
 	issuer := param.Server_ExternalWebUrl.GetString()
-	if issuer == "" {
-		issuer = fedInfo.DiscoveryEndpoint
-	}
+	require.NotEmpty(t, issuer, "Server ExternalWebUrl must be set for tests")
 	tk.Issuer = issuer
 	tk.Subject = subject
 	tk.Lifetime = 5 * time.Minute
-	tk.AddAudiences(issuer)
+	tk.AddAudiences(param.Server_ExternalWebUrl.GetString())
 	tk.AddScopes(scopes...)
 	// Add OIDC claims required by GetUserGroups
 	tk.Claims = map[string]string{
@@ -554,12 +539,15 @@ func generateToken(ctx context.Context, scopes []token_scopes.TokenScope, subjec
 	}
 	tok, err := tk.CreateToken()
 	if err != nil {
-		return "", err
+		t.Fatal("Failed to create test token:", err)
 	}
-	return tok, nil
+	return tok
 }
 
 func TestApiToken(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
 	route := gin.New()
 	err := configureCommonEndpoints(route)
 	require.NoError(t, err)
@@ -580,7 +568,7 @@ func TestApiToken(t *testing.T) {
 		} else if !ok {
 			ctx.JSON(status, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    err.Error(),
+				Msg:    "Unable to verify token with the current authorization options",
 			})
 			return
 		}
@@ -591,16 +579,14 @@ func TestApiToken(t *testing.T) {
 	defer cancel()
 
 	dirName := t.TempDir()
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
 	viper.Set("ConfigDir", dirName)
 	viper.Set(param.Server_UIAdminUsers.GetName(), "admin-user")
+	test_utils.MockFederationRoot(t, nil, nil)
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
-	//Create a token to pass auth middlewares
-	cookieValue, err := generateTestAdminUserToken(ctx)
-	require.NoError(t, err)
+	// Create a token to pass auth middlewares
+	cookieValue := generateTestAdminUserToken(t)
 
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	database.ServerDatabase = mockDB
@@ -646,7 +632,7 @@ func TestApiToken(t *testing.T) {
 
 				recorder := httptest.NewRecorder()
 				route.ServeHTTP(recorder, req)
-				assert.Equal(t, http.StatusOK, recorder.Code)
+				require.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 
 				// Parse the response to retrieve the token
 				var createTokenResp map[string]string
@@ -664,7 +650,7 @@ func TestApiToken(t *testing.T) {
 
 				recorder = httptest.NewRecorder()
 				route.ServeHTTP(recorder, req)
-				assert.Equal(t, http.StatusOK, recorder.Code)
+				assert.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on DELETE, body: %s", recorder.Code, recorder.Body.String()))
 			},
 		},
 		{
@@ -674,7 +660,7 @@ func TestApiToken(t *testing.T) {
 				assert.NoError(t, err)
 				recorder := httptest.NewRecorder()
 				route.ServeHTTP(recorder, req)
-				assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+				assert.Equal(t, http.StatusUnauthorized, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 			},
 		},
 		{
@@ -684,7 +670,7 @@ func TestApiToken(t *testing.T) {
 				assert.NoError(t, err)
 				recorder := httptest.NewRecorder()
 				route.ServeHTTP(recorder, req)
-				assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+				assert.Equal(t, http.StatusUnauthorized, recorder.Code, fmt.Sprintf("unexpected status %d on DELETE, body: %s", recorder.Code, recorder.Body.String()))
 			},
 		},
 		{
@@ -694,7 +680,7 @@ func TestApiToken(t *testing.T) {
 				assert.NoError(t, err)
 				recorder := httptest.NewRecorder()
 				route.ServeHTTP(recorder, req)
-				assert.Equal(t, http.StatusForbidden, recorder.Code)
+				assert.Equal(t, http.StatusForbidden, recorder.Code, fmt.Sprintf("unexpected status %d on GET, body: %s", recorder.Code, recorder.Body.String()))
 			},
 		},
 		{
@@ -716,7 +702,7 @@ func TestApiToken(t *testing.T) {
 
 				recorder := httptest.NewRecorder()
 				route.ServeHTTP(recorder, req)
-				assert.Equal(t, http.StatusOK, recorder.Code)
+				require.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 
 				var createTokenResp map[string]string
 				err = json.NewDecoder(recorder.Body).Decode(&createTokenResp)
@@ -730,7 +716,7 @@ func TestApiToken(t *testing.T) {
 				req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
 				recorder = httptest.NewRecorder()
 				route.ServeHTTP(recorder, req)
-				assert.Equal(t, http.StatusOK, recorder.Code)
+				assert.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on GET, body: %s", recorder.Code, recorder.Body.String()))
 			},
 		},
 		{
@@ -752,7 +738,7 @@ func TestApiToken(t *testing.T) {
 
 				recorder := httptest.NewRecorder()
 				route.ServeHTTP(recorder, req)
-				assert.Equal(t, http.StatusOK, recorder.Code)
+				assert.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 
 				var createTokenResp map[string]string
 				err = json.NewDecoder(recorder.Body).Decode(&createTokenResp)
@@ -770,7 +756,7 @@ func TestApiToken(t *testing.T) {
 				req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", incorrectToken))
 				recorder = httptest.NewRecorder()
 				route.ServeHTTP(recorder, req)
-				assert.Equal(t, http.StatusForbidden, recorder.Code)
+				assert.Equal(t, http.StatusForbidden, recorder.Code, fmt.Sprintf("unexpected status %d on GET, body: %s", recorder.Code, recorder.Body.String()))
 				assert.Contains(t, recorder.Body.String(), "Invalid API token")
 			},
 		},
@@ -793,7 +779,7 @@ func TestApiToken(t *testing.T) {
 
 				recorder := httptest.NewRecorder()
 				route.ServeHTTP(recorder, req)
-				assert.Equal(t, http.StatusOK, recorder.Code)
+				assert.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 
 				var createTokenResp map[string]string
 				err = json.NewDecoder(recorder.Body).Decode(&createTokenResp)
@@ -809,7 +795,7 @@ func TestApiToken(t *testing.T) {
 
 				recorder = httptest.NewRecorder()
 				route.ServeHTTP(recorder, req)
-				assert.Equal(t, http.StatusOK, recorder.Code)
+				assert.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on GET, body: %s", recorder.Code, recorder.Body.String()))
 
 				var listTokensResp []server_structs.ApiKeyResponse
 				err = json.NewDecoder(recorder.Body).Decode(&listTokensResp)
@@ -835,7 +821,7 @@ func TestApiToken(t *testing.T) {
 
 				recorder := httptest.NewRecorder()
 				route.ServeHTTP(recorder, req)
-				assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+				assert.Equal(t, http.StatusUnauthorized, recorder.Code, fmt.Sprintf("unexpected status %d on GET, body: %s", recorder.Code, recorder.Body.String()))
 			},
 		},
 	}
@@ -859,6 +845,8 @@ func TestGroupManagementAPI(t *testing.T) {
 	defer server_utils.ResetTestState()
 	viper.Set("ConfigDir", dirName)
 	viper.Set(param.Server_UIAdminUsers.GetName(), "admin-user")
+
+	test_utils.MockFederationRoot(t, nil, nil)
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 	// set up database
@@ -892,14 +880,13 @@ func TestGroupManagementAPI(t *testing.T) {
 		req, err := http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
 		require.NoError(t, err)
 
-		ownerToken, err := generateTestAdminUserToken(ctx)
-		require.NoError(t, err)
+		ownerToken := generateTestAdminUserToken(t)
 		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
 		req.Header.Set("Content-Type", "application/json")
 
 		recorder := httptest.NewRecorder()
 		route.ServeHTTP(recorder, req)
-		require.Equal(t, http.StatusCreated, recorder.Code)
+		require.Equal(t, http.StatusCreated, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 
 		var createGroupResp map[string]string
 		err = json.NewDecoder(recorder.Body).Decode(&createGroupResp)
@@ -938,11 +925,10 @@ func TestGroupManagementAPI(t *testing.T) {
 
 		recorder = httptest.NewRecorder()
 		route.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		assert.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 
 		// 3. Try to add a member as a different user ('other-user') - should fail
-		otherToken, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "other-user")
-		require.NoError(t, err)
+		otherToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "other-user")
 
 		// Re-marshal the addMemberReq to reuse it
 		body, err = json.Marshal(addMemberReq)
@@ -955,7 +941,7 @@ func TestGroupManagementAPI(t *testing.T) {
 
 		recorder = httptest.NewRecorder()
 		route.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusForbidden, recorder.Code)
+		assert.Equal(t, http.StatusForbidden, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 
 		// 4. Try to remove a member as 'other-user' - should fail
 		req, err = http.NewRequest("DELETE", "/api/v1.0/groups/"+groupID+"/members/"+userID, nil)
@@ -964,7 +950,7 @@ func TestGroupManagementAPI(t *testing.T) {
 
 		recorder = httptest.NewRecorder()
 		route.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusForbidden, recorder.Code)
+		assert.Equal(t, http.StatusForbidden, recorder.Code, fmt.Sprintf("unexpected status %d on DELETE, body: %s", recorder.Code, recorder.Body.String()))
 
 		// 5. Remove the member from the group as 'owner-user'
 		req, err = http.NewRequest("DELETE", "/api/v1.0/groups/"+groupID+"/members/"+userID, nil)
@@ -973,7 +959,7 @@ func TestGroupManagementAPI(t *testing.T) {
 
 		recorder = httptest.NewRecorder()
 		route.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		assert.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on DELETE, body: %s", recorder.Code, recorder.Body.String()))
 	})
 
 	t.Run("test-regular-user-can-create-group", func(t *testing.T) {
@@ -987,14 +973,13 @@ func TestGroupManagementAPI(t *testing.T) {
 		require.NoError(t, err)
 
 		// Use a regular user token (not admin)
-		regularUserToken, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "regular-user")
-		require.NoError(t, err)
+		regularUserToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "regular-user")
 		req.AddCookie(&http.Cookie{Name: "login", Value: regularUserToken})
 		req.Header.Set("Content-Type", "application/json")
 
 		recorder := httptest.NewRecorder()
 		route.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusCreated, recorder.Code)
+		assert.Equal(t, http.StatusCreated, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 
 		var createGroupResp map[string]string
 		err = json.NewDecoder(recorder.Body).Decode(&createGroupResp)
@@ -1033,6 +1018,6 @@ func TestGroupManagementAPI(t *testing.T) {
 
 		recorder = httptest.NewRecorder()
 		route.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		assert.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 	})
 }

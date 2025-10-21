@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -35,20 +36,14 @@ var (
 	router         *gin.Engine
 )
 
-func generateToken(ctx context.Context, scopes []token_scopes.TokenScope, subject string, groups ...string) (string, error) {
-	fedInfo, err := config.GetFederation(ctx)
-	if err != nil {
-		return "", err
-	}
+func generateToken(t *testing.T, scopes []token_scopes.TokenScope, subject string, groups ...string) string {
 	tk := token.NewWLCGToken()
 	issuer := param.Server_ExternalWebUrl.GetString()
-	if issuer == "" {
-		issuer = fedInfo.DiscoveryEndpoint
-	}
+	require.NotEmpty(t, issuer, "Server External Web URL must be set for tests")
 	tk.Issuer = issuer
 	tk.Subject = subject
 	tk.Lifetime = 5 * time.Minute
-	tk.AddAudiences(issuer)
+	tk.AddAudiences(param.Server_ExternalWebUrl.GetString())
 	tk.AddScopes(scopes...)
 	if len(groups) > 0 {
 		tk.AddGroups(groups...)
@@ -58,10 +53,9 @@ func generateToken(ctx context.Context, scopes []token_scopes.TokenScope, subjec
 		"user_id": subject,
 	}
 	tok, err := tk.CreateToken()
-	if err != nil {
-		return "", err
-	}
-	return tok, nil
+	require.NoError(t, err, "Failed to create token")
+
+	return tok
 }
 
 func TestCollectionsAPI(t *testing.T) {
@@ -69,51 +63,42 @@ func TestCollectionsAPI(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() {
 		if err := egrp.Wait(); err != nil {
-			t.Logf("Failure when shutting down service: %s", err)
-			os.Exit(1)
+			t.Fatal("Error waiting for errgroup: ", err)
 		}
 	}()
 	defer cancel()
 
-	//set a temporary password file:
+	testCfgDir, err := os.MkdirTemp("", "tmpDir")
+	require.NoError(t, err, "Failed to create temp config dir")
+	viper.Set("ConfigDir", testCfgDir)
+
+	// set a temporary password file:
 	tempFile, err := os.CreateTemp("", "web-ui-passwd")
-	if err != nil {
-		t.Log("Failed to setup web-ui-passwd file")
-		os.Exit(1)
-	}
+	require.NoError(t, err, "Failed to create temp web-ui-passwd file")
 	tempPasswdFile = tempFile
 
-	//Override viper default for testing
-	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
+	// Override viper default for testing
+	viper.Set(param.Server_UIPasswordFile.GetName(), tempPasswdFile.Name())
 
-	//Make a testing issuer.jwk file to get a cookie
+	// Make a testing issuer.jwk file to get a cookie
 	tempJWKDir, err := os.MkdirTemp("", "tempDir")
-	if err != nil {
-		t.Log("Error making temp jwk dir")
-		os.Exit(1)
-	}
-	//Override viper default for testing
+	require.NoError(t, err, "Failed to create temp jwk dir")
+
+	// Override viper default for testing
 	viper.Set(param.IssuerKeysDirectory.GetName(), filepath.Join(tempJWKDir, "issuer-keys"))
 
-	// Ensure we load up the default configs.
-	dirname, err := os.MkdirTemp("", "tmpDir")
-	if err != nil {
-		t.Log("Error making temp config dir")
-		os.Exit(1)
-	}
-	viper.Set("ConfigDir", dirname)
-	viper.Set("Server.UILoginRateLimit", 100)
+	viper.Set(param.Server_UILoginRateLimit.GetName(), 100)
 
 	// Set up origin exports
 	exportDir, err := os.MkdirTemp("", "test-export")
 	require.NoError(t, err)
-	//The defer call to remove the directory and its contents is commented out because it was causing a race condition with the file watcher.
-	//defer os.RemoveAll(exportDir)
+	// The defer call to remove the directory and its contents is commented out because it was causing a race condition with the file watcher.
+	// defer os.RemoveAll(exportDir)
 	err = os.WriteFile(filepath.Join(exportDir, "test-origin"), []byte("test"), 0644)
 	require.NoError(t, err)
 
-	viper.Set("Origin.StorageType", "posix")
-	viper.Set("Origin.Exports", []map[string]interface{}{
+	viper.Set(param.Origin_StorageType.GetName(), "posix")
+	viper.Set(param.Origin_Exports.GetName(), []map[string]interface{}{
 		{
 			"StoragePrefix":    exportDir,
 			"FederationPrefix": "/test1",
@@ -125,25 +110,16 @@ func TestCollectionsAPI(t *testing.T) {
 		},
 	})
 
-	if err := config.InitServer(ctx, server_structs.OriginType); err != nil {
-		t.Log("Failed to configure the test module")
-		os.Exit(1)
-	}
+	test_utils.MockFederationRoot(t, nil, nil)
+	err = config.InitServer(ctx, server_structs.OriginType)
+	require.NoError(t, err, "failed to init server config")
 
-	//Get keys
-	_, err = config.GetIssuerPublicJWKS()
-	if err != nil {
-		t.Log("Error issuing jwks")
-		os.Exit(1)
-	}
 	router = gin.Default()
 
-	//Configure Web API
+	// Configure Web API
 	err = web_ui.ConfigureServerWebAPI(ctx, router, egrp)
-	if err != nil {
-		t.Log("Error configuring web UI")
-		os.Exit(1)
-	}
+	require.NoError(t, err, "Failed to configure server web API")
+
 	err = RegisterOriginWebAPI(router)
 	require.NoError(t, err)
 
@@ -181,14 +157,13 @@ func TestCollectionsAPI(t *testing.T) {
 		req, err := http.NewRequest("POST", "/api/v1.0/origin_ui/collections", bytes.NewReader(body))
 		require.NoError(t, err)
 
-		token, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Create, token_scopes.Collection_Delete}, "test-user")
-		require.NoError(t, err)
+		token := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Create, token_scopes.Collection_Delete}, "test-user")
 
 		req.AddCookie(&http.Cookie{Name: "login", Value: token})
 		req.Header.Set("Content-Type", "application/json")
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusCreated, recorder.Code)
+		assert.Equal(t, http.StatusCreated, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 
 		var createCollectionResp map[string]string
 		err = json.NewDecoder(recorder.Body).Decode(&createCollectionResp)
@@ -202,7 +177,7 @@ func TestCollectionsAPI(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: "login", Value: token})
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		assert.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on DELETE, body: %s", recorder.Code, recorder.Body.String()))
 	})
 
 	t.Run("create-collection-with-invalid-visibility", func(t *testing.T) {
@@ -218,14 +193,13 @@ func TestCollectionsAPI(t *testing.T) {
 		req, err := http.NewRequest("POST", "/api/v1.0/origin_ui/collections", bytes.NewReader(body))
 		require.NoError(t, err)
 
-		token, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Create}, "test-user")
-		require.NoError(t, err)
+		token := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Create}, "test-user")
 
 		req.AddCookie(&http.Cookie{Name: "login", Value: token})
 		req.Header.Set("Content-Type", "application/json")
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 	})
 
 	t.Run("create-collection-with-unconfigured-namespace", func(t *testing.T) {
@@ -239,13 +213,12 @@ func TestCollectionsAPI(t *testing.T) {
 		require.NoError(t, err)
 		req, err := http.NewRequest("POST", "/api/v1.0/origin_ui/collections", bytes.NewReader(body))
 		require.NoError(t, err)
-		token, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Create}, "test-user")
-		require.NoError(t, err)
+		token := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Create}, "test-user")
 		req.AddCookie(&http.Cookie{Name: "login", Value: token})
 		req.Header.Set("Content-Type", "application/json")
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 	})
 
 	t.Run("create-collection-without-permission", func(t *testing.T) {
@@ -259,13 +232,12 @@ func TestCollectionsAPI(t *testing.T) {
 		require.NoError(t, err)
 		req, err := http.NewRequest("POST", "/api/v1.0/origin_ui/collections", bytes.NewReader(body))
 		require.NoError(t, err)
-		token, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.Monitoring_Query}, "test-user")
-		require.NoError(t, err)
+		token := generateToken(t, []token_scopes.TokenScope{token_scopes.Monitoring_Query}, "test-user")
 		req.AddCookie(&http.Cookie{Name: "login", Value: token})
 		req.Header.Set("Content-Type", "application/json")
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusForbidden, recorder.Code)
+		assert.Equal(t, http.StatusForbidden, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 	})
 
 	t.Run("test-collection-lifecycle", func(t *testing.T) {
@@ -281,7 +253,7 @@ func TestCollectionsAPI(t *testing.T) {
 		req, err := http.NewRequest("POST", "/api/v1.0/origin_ui/collections", bytes.NewReader(body))
 		require.NoError(t, err)
 
-		token, err := generateToken(ctx, []token_scopes.TokenScope{
+		token := generateToken(t, []token_scopes.TokenScope{
 			token_scopes.WebUi_Access,
 			token_scopes.Collection_Create,
 			token_scopes.Collection_Read,
@@ -289,12 +261,11 @@ func TestCollectionsAPI(t *testing.T) {
 			token_scopes.Collection_Delete},
 			"test-user",
 		)
-		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: token})
 		req.Header.Set("Content-Type", "application/json")
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		require.Equal(t, http.StatusCreated, recorder.Code)
+		require.Equal(t, http.StatusCreated, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 		var createResp map[string]string
 		err = json.NewDecoder(recorder.Body).Decode(&createResp)
 		require.NoError(t, err)
@@ -307,7 +278,7 @@ func TestCollectionsAPI(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: "login", Value: token})
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusOK, recorder.Code)
+		assert.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on GET, body: %s", recorder.Code, recorder.Body.String()))
 
 		var listResp []ListCollectionRes
 		err = json.NewDecoder(recorder.Body).Decode(&listResp)
@@ -328,7 +299,7 @@ func TestCollectionsAPI(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: "login", Value: token})
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusOK, recorder.Code)
+		assert.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on GET, body: %s", recorder.Code, recorder.Body.String()))
 		var getResp GetCollectionRes
 		err = json.NewDecoder(recorder.Body).Decode(&getResp)
 		require.NoError(t, err)
@@ -348,7 +319,7 @@ func TestCollectionsAPI(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		assert.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on PATCH, body: %s", recorder.Code, recorder.Body.String()))
 
 		// Verify the update
 		req, err = http.NewRequest("GET", "/api/v1.0/origin_ui/collections/"+collectionID, nil)
@@ -356,7 +327,7 @@ func TestCollectionsAPI(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: "login", Value: token})
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusOK, recorder.Code)
+		assert.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on GET, body: %s", recorder.Code, recorder.Body.String()))
 		var updatedResp GetCollectionRes
 		err = json.NewDecoder(recorder.Body).Decode(&updatedResp)
 		require.NoError(t, err)
@@ -368,7 +339,7 @@ func TestCollectionsAPI(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: "login", Value: token})
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		assert.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on DELETE, body: %s", recorder.Code, recorder.Body.String()))
 
 		// 6. Verify the collection is gone
 		req, err = http.NewRequest("GET", "/api/v1.0/origin_ui/collections/"+collectionID, nil)
@@ -376,7 +347,7 @@ func TestCollectionsAPI(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: "login", Value: token})
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusNotFound, recorder.Code)
+		assert.Equal(t, http.StatusNotFound, recorder.Code, fmt.Sprintf("unexpected status %d on GET, body: %s", recorder.Code, recorder.Body.String()))
 	})
 
 	t.Run("test-collection-acls", func(t *testing.T) {
@@ -388,13 +359,12 @@ func TestCollectionsAPI(t *testing.T) {
 		req, err := http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
 		require.NoError(t, err)
 
-		regularUserToken, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "regular-user")
-		require.NoError(t, err)
+		regularUserToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "regular-user")
 		req.AddCookie(&http.Cookie{Name: "login", Value: regularUserToken})
 		req.Header.Set("Content-Type", "application/json")
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		require.Equal(t, http.StatusCreated, recorder.Code)
+		require.Equal(t, http.StatusCreated, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 		var createGroupResp map[string]string
 		err = json.NewDecoder(recorder.Body).Decode(&createGroupResp)
 		require.NoError(t, err)
@@ -411,13 +381,12 @@ func TestCollectionsAPI(t *testing.T) {
 		require.NoError(t, err)
 		req, err = http.NewRequest("POST", "/api/v1.0/origin_ui/collections", bytes.NewReader(body))
 		require.NoError(t, err)
-		createToken, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Create, token_scopes.Collection_Delete}, "test-user-owner", groupName)
-		require.NoError(t, err)
+		createToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Create, token_scopes.Collection_Delete}, "test-user-owner", groupName)
 		req.AddCookie(&http.Cookie{Name: "login", Value: createToken})
 		req.Header.Set("Content-Type", "application/json")
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		require.Equal(t, http.StatusCreated, recorder.Code)
+		require.Equal(t, http.StatusCreated, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 		var createColResp map[string]string
 		err = json.NewDecoder(recorder.Body).Decode(&createColResp)
 		require.NoError(t, err)
@@ -434,27 +403,25 @@ func TestCollectionsAPI(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		require.Equal(t, http.StatusNoContent, recorder.Code)
+		require.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 
 		// 4. A user not in the group cannot read the collection
-		rogueToken, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Read}, "rogue-user", "some-other-group")
-		require.NoError(t, err)
+		rogueToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Read}, "rogue-user", "some-other-group")
 		req, err = http.NewRequest("GET", "/api/v1.0/origin_ui/collections/"+collectionID, nil)
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: rogueToken})
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusNotFound, recorder.Code)
+		assert.Equal(t, http.StatusNotFound, recorder.Code, fmt.Sprintf("unexpected status %d on GET, body: %s", recorder.Code, recorder.Body.String()))
 
 		// 5. A user in the group can read the collection
-		groupToken, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Read}, "group-user", groupName)
-		require.NoError(t, err)
+		groupToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Read}, "group-user", groupName)
 		req, err = http.NewRequest("GET", "/api/v1.0/origin_ui/collections/"+collectionID, nil)
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: groupToken})
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusOK, recorder.Code)
+		assert.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on GET, body: %s", recorder.Code, recorder.Body.String()))
 
 		// 6. Grant the group write access to the collection
 		grantAclReq = map[string]string{"group_id": groupID, "role": "write"}
@@ -466,7 +433,7 @@ func TestCollectionsAPI(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		require.Equal(t, http.StatusNoContent, recorder.Code)
+		require.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 
 		// 7. A user not in the group cannot update the collection
 		updatedDesc := "rogue update"
@@ -479,7 +446,7 @@ func TestCollectionsAPI(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusNotFound, recorder.Code)
+		assert.Equal(t, http.StatusNotFound, recorder.Code, fmt.Sprintf("unexpected status %d on PATCH, body: %s", recorder.Code, recorder.Body.String()))
 
 		// 8. A user in the group (with the modify role) can update the collection
 		updatedDesc = "group update"
@@ -488,13 +455,12 @@ func TestCollectionsAPI(t *testing.T) {
 		require.NoError(t, err)
 		req, err = http.NewRequest("PATCH", "/api/v1.0/origin_ui/collections/"+collectionID, bytes.NewReader(body))
 		require.NoError(t, err)
-		groupWriteToken, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Modify}, "group-user-write", groupName)
-		require.NoError(t, err)
+		groupWriteToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Modify}, "group-user-write", groupName)
 		req.AddCookie(&http.Cookie{Name: "login", Value: groupWriteToken})
 		req.Header.Set("Content-Type", "application/json")
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		assert.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on PATCH, body: %s", recorder.Code, recorder.Body.String()))
 
 		// 9. Grant owner access to the group
 		grantAclReq = map[string]string{"group_id": groupID, "role": "owner"}
@@ -506,7 +472,7 @@ func TestCollectionsAPI(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		require.Equal(t, http.StatusNoContent, recorder.Code)
+		require.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 
 		// 10. A user not in the group cannot delete the collection
 		req, err = http.NewRequest("DELETE", "/api/v1.0/origin_ui/collections/"+collectionID, nil)
@@ -514,16 +480,15 @@ func TestCollectionsAPI(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: "login", Value: rogueToken})
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusNotFound, recorder.Code)
+		assert.Equal(t, http.StatusNotFound, recorder.Code, fmt.Sprintf("unexpected status %d on DELETE, body: %s", recorder.Code, recorder.Body.String()))
 
 		// 11. A user in the group can delete the collection
-		groupOwnerToken, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Delete}, "group-user-owner", groupName)
-		require.NoError(t, err)
+		groupOwnerToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Delete}, "group-user-owner", groupName)
 		req, err = http.NewRequest("DELETE", "/api/v1.0/origin_ui/collections/"+collectionID, nil)
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: groupOwnerToken})
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		assert.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on DELETE, body: %s", recorder.Code, recorder.Body.String()))
 	})
 }
