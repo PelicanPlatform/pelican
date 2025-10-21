@@ -3239,7 +3239,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		} else if os.IsPermission(err) {
 			transferResult.Error = error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied accessing local file %q", transfer.localPath))
 		} else {
-			transferResult.Error = error_codes.NewSpecificationError(errors.Wrapf(err, "failed to stat local file %q", transfer.localPath))
+			transferResult.Error = error_codes.NewParameterError(errors.Wrapf(err, "failed to stat local file %q", transfer.localPath))
 		}
 		return transferResult, transferResult.Error
 	}
@@ -3281,7 +3281,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 			} else if os.IsPermission(err) {
 				transferResult.Error = error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied opening local file %q", transfer.localPath))
 			} else {
-				transferResult.Error = error_codes.NewSpecificationError(errors.Wrapf(err, "failed to open local file %q", transfer.localPath))
+				transferResult.Error = error_codes.NewParameterError(errors.Wrapf(err, "failed to open local file %q", transfer.localPath))
 			}
 			return transferResult, transferResult.Error
 		}
@@ -3800,11 +3800,11 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 		info, err := os.Stat(localPath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return error_codes.NewSpecification_FileNotFoundError(errors.Wrapf(err, "local path %q does not exist", localPath))
+				return error_codes.NewParameter_FileNotFoundError(errors.Wrapf(err, "local path %q does not exist", localPath))
 			} else if os.IsPermission(err) {
 				return error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied accessing local path %q", localPath))
 			}
-			return error_codes.NewSpecificationError(errors.Wrap(err, "failed to stat local path"))
+			return error_codes.NewParameterError(errors.Wrap(err, "failed to stat local path"))
 		}
 		// If the path leads to a file and not a directory, create a job to upload the file and return
 		if !info.IsDir() {
@@ -3837,7 +3837,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 			return nil
 		}
 		// Otherwise, a different error occurred and we should return it
-		return error_codes.NewSpecificationError(errors.Wrap(err, "failed to upload local collection"))
+		return error_codes.NewParameterError(errors.Wrap(err, "failed to upload local collection"))
 	}
 
 	for _, info := range infos {

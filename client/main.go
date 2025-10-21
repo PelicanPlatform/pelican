@@ -538,9 +538,9 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 	info, err := os.Stat(localObject)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, error_codes.NewSpecification_FileNotFoundError(errors.Wrapf(err, "local object %q does not exist", localObject))
+			return nil, error_codes.NewParameter_FileNotFoundError(errors.Wrapf(err, "local object %q does not exist", localObject))
 		}
-		return nil, error_codes.NewSpecificationError(errors.Wrapf(err, "failed to stat local object %q", localObject))
+		return nil, error_codes.NewParameterError(errors.Wrapf(err, "failed to stat local object %q", localObject))
 	}
 
 	if info.IsDir() {
@@ -554,12 +554,10 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 		// This matches the logic that will be used during actual transfer
 		file, err := os.Open(localObject)
 		if err != nil {
-			if os.IsNotExist(err) {
-				return nil, error_codes.NewSpecification_FileNotFoundError(errors.Wrapf(err, "failed to open local object for reading: %q", localObject))
-			} else if os.IsPermission(err) {
+			if os.IsPermission(err) {
 				return nil, error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied when opening local object: %q", localObject))
 			}
-			return nil, error_codes.NewSpecificationError(errors.Wrapf(err, "failed to open local object for reading: %q", localObject))
+			return nil, error_codes.NewParameterError(errors.Wrapf(err, "failed to open local object for reading: %q", localObject))
 		}
 		file.Close()
 	}

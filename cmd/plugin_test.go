@@ -919,7 +919,10 @@ func TestFailTransfer(t *testing.T) {
 		errDataMap, ok := errDataSlice[0].(map[string]interface{})
 		require.True(t, ok)
 
-		// Check ErrorType
+		// Create the expected error to get the expected values
+		expectedErr := error_codes.NewTransfer_DirectorTimeoutError(innerErr)
+
+		// Check top-level ErrorType (should be base type like "Transfer")
 		errorType, ok := errDataMap["ErrorType"]
 		require.True(t, ok)
 		assert.Equal(t, "Transfer", errorType)
@@ -930,20 +933,20 @@ func TestFailTransfer(t *testing.T) {
 		errDevDataMap, ok := errDevData.(map[string]interface{})
 		require.True(t, ok)
 
-		// Check PelicanErrorCode is 6005 (Transfer.DirectorTimeout)
+		// Check PelicanErrorCode
 		errorCode, ok := errDevDataMap["PelicanErrorCode"]
 		require.True(t, ok)
-		assert.Equal(t, 6005, errorCode)
+		assert.Equal(t, expectedErr.Code(), errorCode)
 
-		// Check ErrorType is Transfer.DirectorTimeout
+		// Check ErrorType
 		errType, ok := errDevDataMap["ErrorType"]
 		require.True(t, ok)
-		assert.Equal(t, "Transfer.DirectorTimeout", errType)
+		assert.Equal(t, expectedErr.ErrorType(), errType)
 
-		// Check Retryable is true
+		// Check Retryable
 		retryable, ok := errDevDataMap["Retryable"]
 		require.True(t, ok)
-		assert.True(t, retryable.(bool))
+		assert.Equal(t, expectedErr.IsRetryable(), retryable.(bool))
 	})
 
 	// Test that DeveloperData and TransferErrorData are populated for file not found errors
@@ -971,7 +974,10 @@ func TestFailTransfer(t *testing.T) {
 		errDataMap, ok := errDataSlice[0].(map[string]interface{})
 		require.True(t, ok)
 
-		// Check ErrorType
+		// Create the expected error to get the expected values
+		expectedErr := error_codes.NewSpecification_FileNotFoundError(innerErr)
+
+		// Check top-level ErrorType (should be base type like "Specification")
 		errorType, ok := errDataMap["ErrorType"]
 		require.True(t, ok)
 		assert.Equal(t, "Specification", errorType)
@@ -982,20 +988,20 @@ func TestFailTransfer(t *testing.T) {
 		errDevDataMap, ok := errDevData.(map[string]interface{})
 		require.True(t, ok)
 
-		// Check PelicanErrorCode is 5011 (Specification.FileNotFound)
+		// Check PelicanErrorCode
 		errorCode, ok := errDevDataMap["PelicanErrorCode"]
 		require.True(t, ok)
-		assert.Equal(t, 5011, errorCode)
+		assert.Equal(t, expectedErr.Code(), errorCode)
 
-		// Check ErrorType is Specification.FileNotFound
+		// Check ErrorType
 		errType, ok := errDevDataMap["ErrorType"]
 		require.True(t, ok)
-		assert.Equal(t, "Specification.FileNotFound", errType)
+		assert.Equal(t, expectedErr.ErrorType(), errType)
 
-		// Check Retryable is false
+		// Check Retryable
 		retryable, ok := errDevDataMap["Retryable"]
 		require.True(t, ok)
-		assert.False(t, retryable.(bool))
+		assert.Equal(t, expectedErr.IsRetryable(), retryable.(bool))
 	})
 }
 
@@ -1012,10 +1018,10 @@ func TestCreateTransferError(t *testing.T) {
 		devData, ok := transferError["DeveloperData"].(map[string]interface{})
 		require.True(t, ok)
 
-		assert.Equal(t, 6005, devData["PelicanErrorCode"])
-		assert.Equal(t, "Transfer.DirectorTimeout", devData["ErrorType"])
+		assert.Equal(t, err.Code(), devData["PelicanErrorCode"])
+		assert.Equal(t, err.ErrorType(), devData["ErrorType"])
 		assert.Contains(t, devData["ErrorMessage"], "dial tcp")
-		assert.True(t, devData["Retryable"].(bool))
+		assert.Equal(t, err.IsRetryable(), devData["Retryable"].(bool))
 	})
 
 	// Test file not found error
@@ -1029,10 +1035,10 @@ func TestCreateTransferError(t *testing.T) {
 		devData, ok := transferError["DeveloperData"].(map[string]interface{})
 		require.True(t, ok)
 
-		assert.Equal(t, 5011, devData["PelicanErrorCode"])
-		assert.Equal(t, "Specification.FileNotFound", devData["ErrorType"])
+		assert.Equal(t, err.Code(), devData["PelicanErrorCode"])
+		assert.Equal(t, err.ErrorType(), devData["ErrorType"])
 		assert.Contains(t, devData["ErrorMessage"].(string), "does not exist")
-		assert.False(t, devData["Retryable"].(bool))
+		assert.Equal(t, err.IsRetryable(), devData["Retryable"].(bool))
 	})
 
 	// Test 404 error
@@ -1046,10 +1052,10 @@ func TestCreateTransferError(t *testing.T) {
 		devData, ok := transferError["DeveloperData"].(map[string]interface{})
 		require.True(t, ok)
 
-		assert.Equal(t, 5011, devData["PelicanErrorCode"])
-		assert.Equal(t, "Specification.FileNotFound", devData["ErrorType"])
+		assert.Equal(t, err.Code(), devData["PelicanErrorCode"])
+		assert.Equal(t, err.ErrorType(), devData["ErrorType"])
 		assert.Contains(t, devData["ErrorMessage"].(string), "404 Not Found")
-		assert.False(t, devData["Retryable"].(bool))
+		assert.Equal(t, err.IsRetryable(), devData["Retryable"].(bool))
 	})
 
 	// Test slow transfer error
@@ -1063,9 +1069,9 @@ func TestCreateTransferError(t *testing.T) {
 		devData, ok := transferError["DeveloperData"].(map[string]interface{})
 		require.True(t, ok)
 
-		assert.Equal(t, 6002, devData["PelicanErrorCode"])
-		assert.Equal(t, "Transfer.SlowTransfer", devData["ErrorType"])
-		assert.True(t, devData["Retryable"].(bool))
+		assert.Equal(t, err.Code(), devData["PelicanErrorCode"])
+		assert.Equal(t, err.ErrorType(), devData["ErrorType"])
+		assert.Equal(t, err.IsRetryable(), devData["Retryable"].(bool))
 	})
 
 	// Test unprocessed error
@@ -1683,6 +1689,9 @@ func TestTransferErrorSlowTransfer(t *testing.T) {
 			// Create the expected error to get the expected values
 			expectedErr := error_codes.NewTransfer_SlowTransferError(nil)
 
+			// Check top-level ErrorType (should be base type like "Transfer")
+			assert.Equal(t, "Transfer", errorTypeStr)
+
 			pelicanErrorCode, ok := developerData["PelicanErrorCode"].(int)
 			require.True(t, ok)
 			assert.Equal(t, expectedErr.Code(), pelicanErrorCode)
@@ -1853,6 +1862,9 @@ func TestTransferErrorHeaderTimeout(t *testing.T) {
 
 			// Create the expected error to get the expected values
 			expectedErr := error_codes.NewTransfer_HeaderTimeoutError(&client.HeaderTimeoutError{})
+
+			// Check top-level ErrorType (should be base type like "Transfer")
+			assert.Equal(t, "Transfer", errorTypeStr)
 
 			pelicanErrorCode, ok := developerData["PelicanErrorCode"].(int)
 			require.True(t, ok)
