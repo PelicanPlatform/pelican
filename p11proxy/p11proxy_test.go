@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 func TestStartDisabledGraceful(t *testing.T) {
@@ -15,7 +17,7 @@ func TestStartDisabledGraceful(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	p, err := Start(ctx, Options{})
+	p, err := Start(ctx, Options{}, server_structs.CacheType)
 	if err != nil {
 		t.Fatalf("Start returned error: %v", err)
 	}
