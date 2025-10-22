@@ -36,6 +36,7 @@ ARG OSG_REPO=release
 
 # For compiling Pelican.
 ARG GO_VER=1.24.7
+ARG GORELEASER_CURRENT_TAG
 ARG NODEJS_VER=20
 
 # For controlling how XRootD plugins are installed:
@@ -51,6 +52,7 @@ ARG NODEJS_VER=20
 #     claims to be will *always* come from the .spec file. The upstream Git
 #     repository must have a correct .spec file, or confusion will ensue.
 #
+
 ARG LOTMAN_SRC_BUILD=false
 ARG LOTMAN_VER=0.0.4
 # Note: github_scripts/osx_install.sh also (separately) specifies the version to use
@@ -127,6 +129,8 @@ ARG TARGETPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
 
+ARG GORELEASER_CURRENT_TAG
+ENV GORELEASER_CURRENT_TAG=${GORELEASER_CURRENT_TAG}
 ARG IS_NONRELEASE_BUILD=true
 ENV GOOS=${TARGETOS}
 ENV GOARCH=${TARGETARCH}
