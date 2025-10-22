@@ -18,6 +18,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 // Info contains the outputs needed by a developer to wire OpenSSL to the helper.
@@ -67,11 +68,19 @@ func (p *Proxy) Stop() error {
 		_ = p.ln.Close()
 	}
 	if p.sock != "" {
-		_ = os.Remove(p.sock)
+		if err := os.Remove(p.sock); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			log.Debugf("p11proxy: failed to remove socket %s: %v", p.sock, err)
+		}
 	}
 	if p.tmpDir != "" {
-		if err := os.RemoveAll(p.tmpDir); err != nil && firstErr == nil {
-			firstErr = err
+		if err := os.RemoveAll(p.tmpDir); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			log.Debugf("p11proxy: failed to remove temp dir %s: %v", p.tmpDir, err)
 		}
 	}
 	return firstErr
@@ -80,7 +89,7 @@ func (p *Proxy) Stop() error {
 // Start initializes the PKCS#11 helper. It will never return a fatal error that should
 // abort server startup: on missing dependencies or unsupported environment, it logs a
 // warning and returns a disabled Info.
-func Start(ctx context.Context, opts Options) (*Proxy, error) {
+func Start(ctx context.Context, opts Options, modules server_structs.ServerType) (*Proxy, error) {
 	// If globally disabled via config, short-circuit.
 	if !param.Server_EnablePKCS11.GetBool() {
 		return &Proxy{info: Info{Enabled: false}}, nil
@@ -144,19 +153,35 @@ func Start(ctx context.Context, opts Options) (*Proxy, error) {
 		return &Proxy{info: Info{Enabled: false}}, nil
 	}
 
-	// Create Unix socket path under runtime dir.
+	xrootdRun := param.Origin_RunLocation.GetString()
+	if modules.IsEnabled(server_structs.CacheType) {
+		xrootdRun = param.Cache_RunLocation.GetString()
+	}
+	// Create a unique runtime directory for the Unix socket under xrootdRun or /tmp.
+	// Avoid predictable paths to mitigate precreation/symlink attacks.
+	var runtimeBase string
+	if xrootdRun != "" {
+		runtimeBase = xrootdRun
+	} else {
+		runtimeBase = "/tmp"
+	}
 	sockDir := opts.SocketDir
 	if sockDir == "" {
-		if base := os.Getenv("XDG_RUNTIME_DIR"); base != "" {
-			sockDir = filepath.Join(base, "p11-kit")
-		} else {
-			sockDir = "/tmp/p11-kit"
+		// Create a private temp dir under the runtime base
+		d, derr := os.MkdirTemp(runtimeBase, "p11-kit-")
+		if derr != nil {
+			log.Warnf("PKCS#11 helper disabled: cannot create runtime dir under %s: %v", runtimeBase, derr)
+			_ = proxy.Stop()
+			return &Proxy{info: Info{Enabled: false}}, nil
 		}
-	}
-	if err := os.MkdirAll(sockDir, 0700); err != nil {
-		log.Warnf("PKCS#11 helper disabled: cannot create socket dir %s: %v", sockDir, err)
-		_ = proxy.Stop()
-		return &Proxy{info: Info{Enabled: false}}, nil
+		sockDir = d
+	} else {
+		// If caller provided a directory, ensure it exists with safe perms
+		if err := os.MkdirAll(sockDir, 0640); err != nil {
+			log.Warnf("PKCS#11 helper disabled: cannot create socket dir %s: %v", sockDir, err)
+			_ = proxy.Stop()
+			return &Proxy{info: Info{Enabled: false}}, nil
+		}
 	}
 	sockPath := filepath.Join(sockDir, fmt.Sprintf("pkcs11-%d.sock", os.Getpid()))
 	proxy.sock = sockPath
@@ -327,7 +352,9 @@ func startServer(ctx context.Context, signer crypto.Signer, cert *x509.Certifica
 			}
 			go func(c net.Conn) {
 				defer c.Close()
-				_ = h.Handle(c)
+				if err := h.Handle(c); err != nil {
+					log.Debugf("p11proxy: handler error: %v", err)
+				}
 			}(conn)
 		}
 	}()
