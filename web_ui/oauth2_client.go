@@ -375,6 +375,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 
 	// We need this token only to get the user's info.
 	// We will later issue our own token for user access.
+	log.Debugf("used oauth code here: %v", req.Code)
 	token, err := oauthConfig.Exchange(c, req.Code)
 	if err != nil {
 		log.Errorf("Error in exchanging code for token:  %v", err)

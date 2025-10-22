@@ -344,9 +344,10 @@ func handleGlobusCallback(ctx *gin.Context) {
 		return
 	}
 
+	log.Debugf("used oauth code for Globus here: %v", req.Code)
 	token, err := client.Exchange(c, req.Code)
 	if err != nil {
-		log.Errorf("Error in exchanging code for token:  %v", err)
+		log.Errorf("Error in exchanging code for token: %v", err)
 		ctx.JSON(http.StatusInternalServerError,
 			server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
@@ -457,11 +458,12 @@ func handleGlobusCallback(ctx *gin.Context) {
 		globusExportsMutex.Lock()
 		defer globusExportsMutex.Unlock()
 
-		if err := persistToken(cid, collectionToken, TokenTypeCollection); err != nil {
+		var collectionTokenFile string
+		if collectionTokenFile, err = persistToken(cid, collectionToken, TokenTypeCollection); err != nil {
 			return err
 		}
-
-		if err := persistToken(cid, transferToken, TokenTypeTransfer); err != nil {
+		var transferTokenFile string
+		if transferTokenFile, err = persistToken(cid, transferToken, TokenTypeTransfer); err != nil {
 			return err
 		}
 
@@ -472,6 +474,8 @@ func handleGlobusCallback(ctx *gin.Context) {
 			globusExports[cid].TransferToken = transferToken
 			globusExports[cid].Status = GlobusActivated
 			globusExports[cid].Description = ""
+			globusExports[cid].TokenFile = collectionTokenFile
+			globusExports[cid].TransferTokenFile = transferTokenFile
 			if globusExports[cid].DisplayName == "" || globusExports[cid].DisplayName == cid {
 				globusExports[cid].DisplayName = transferJSON.DisplayName
 			}
@@ -581,20 +585,20 @@ func handleGlobusAuth(ctx *gin.Context) {
 }
 
 // Persist a Globus access token on the disk
-func persistToken(collectionID string, token *oauth2.Token, tokenType TokenType) error {
+func persistToken(collectionID string, token *oauth2.Token, tokenType TokenType) (string, error) {
 	uid, err := config.GetDaemonUID()
 	if err != nil {
-		return errors.Wrap(err, fmt.Sprintf("failed to persist Globus %s access token on disk: failed to get uid", tokenType))
+		return "", errors.Wrap(err, fmt.Sprintf("failed to persist Globus %s access token on disk: failed to get uid", tokenType))
 	}
 
 	gid, err := config.GetDaemonGID()
 	if err != nil {
-		return errors.Wrap(err, fmt.Sprintf("failed to persist Globus %s access token on disk: failed to get gid", tokenType))
+		return "", errors.Wrap(err, fmt.Sprintf("failed to persist Globus %s access token on disk: failed to get gid", tokenType))
 	}
 	globusFdr := param.Origin_GlobusConfigLocation.GetString()
 	tokBase := filepath.Join(globusFdr, "tokens")
 	if filepath.Clean(tokBase) == "" {
-		return fmt.Errorf("failed to update Globus %s token: Origin.GlobusTokenLocation is not a valid path: %s", tokenType, tokBase)
+		return "", fmt.Errorf("failed to update Globus %s token: Origin.GlobusTokenLocation is not a valid path: %s", tokenType, tokBase)
 	}
 
 	var filename string
@@ -602,35 +606,35 @@ func persistToken(collectionID string, token *oauth2.Token, tokenType TokenType)
 	case TokenTypeCollection:
 		filename = collectionID + GlobusTokenFileExt
 	case TokenTypeTransfer:
-		filename = collectionID + ".transfer" + GlobusTokenFileExt
+		filename = collectionID + GlobusTransferTokenFileExt
 	default:
-		return fmt.Errorf("unknown token type: %s", tokenType)
+		return "", fmt.Errorf("unknown token type: %s", tokenType)
 	}
 
 	tokFileName := filepath.Join(tokBase, filename)
 	tmpTokFile, err := os.CreateTemp(tokBase, filename)
 	if err != nil {
-		return errors.Wrap(err, fmt.Sprintf("failed to update Globus %s token: unable to create a temporary Globus %s token file", tokenType, tokenType))
+		return "", errors.Wrap(err, fmt.Sprintf("failed to update Globus %s token: unable to create a temporary Globus %s token file", tokenType, tokenType))
 	}
 	// We need to change the directory and file permission to XRootD user/group so that it can access the token
 	if err = tmpTokFile.Chown(uid, gid); err != nil {
-		return errors.Wrapf(err, "unable to change the ownership of Globus %s token file at %s to xrootd daemon", tokenType, tmpTokFile.Name())
+		return "", errors.Wrapf(err, "unable to change the ownership of Globus %s token file at %s to xrootd daemon", tokenType, tmpTokFile.Name())
 	}
 	defer tmpTokFile.Close()
 
 	_, err = tmpTokFile.Write([]byte(token.AccessToken + "\n"))
 	if err != nil {
-		return errors.Wrap(err, fmt.Sprintf("failed to update Globus %s token: unable to write token to the tmp file", tokenType))
+		return "", errors.Wrap(err, fmt.Sprintf("failed to update Globus %s token: unable to write token to the tmp file", tokenType))
 	}
 
 	if err = tmpTokFile.Sync(); err != nil {
-		return errors.Wrap(err, fmt.Sprintf("failed to update Globus %s token: unable to flush tmp file to disk", tokenType))
+		return "", errors.Wrap(err, fmt.Sprintf("failed to update Globus %s token: unable to flush tmp file to disk", tokenType))
 	}
 
 	if err := os.Rename(tmpTokFile.Name(), tokFileName); err != nil {
-		return errors.Wrap(err, fmt.Sprintf("failed to update Globus %s token: unable to rename tmp file to the token file", tokenType))
+		return "", errors.Wrap(err, fmt.Sprintf("failed to update Globus %s token: unable to rename tmp file to the token file", tokenType))
 	}
-	return nil
+	return tokFileName, nil
 }
 
 // Refresh a Globus OAuth2 token
@@ -655,7 +659,8 @@ func refreshGlobusToken(cid string, token *oauth2.Token, tokenType TokenType) (*
 		return nil, fmt.Errorf("failed to update Globus %s token for collection %s", tokenType, cid)
 	}
 	// Update access token location with the new token
-	if err := persistToken(cid, newTok, tokenType); err != nil {
+	_, err = persistToken(cid, newTok, tokenType)
+	if err != nil {
 		return nil, err
 	}
 

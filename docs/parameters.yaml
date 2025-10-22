@@ -1256,6 +1256,15 @@ root_default: /run/pelican/xrootd/origin/globus
 default: $XDG_RUNTIME_DIR/pelican/xrootd/origin/globus
 components: ["origin"]
 ---
+name: Origin.GlobusTransferTokenFile
+description: |+
+  The filepath to the Globus transfer token file. This corresponds to the `globus.transfer_token_file` 
+  configuration in XRootD's Globus plugin. If not set, it will be automatically derived from 
+  the Globus token directory.
+type: filename
+default: none
+components: ["origin"]
+---
 name: Origin.FedTokenLocation
 description: |+
   A path to the file containing a token issued by the federation's issuer. This token may be consumed by other federation services

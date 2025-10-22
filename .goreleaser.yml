@@ -26,7 +26,7 @@ before:
   hooks:
     - go mod tidy
     - go generate ./...
-    # - make web-build
+    - make web-build
 builds:
   - &build-pelican
     id: pelican

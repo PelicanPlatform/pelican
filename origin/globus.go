@@ -44,13 +44,15 @@ type globusExportStatus string
 
 // For internal globusExports map
 type globusExport struct {
-	DisplayName      string             `json:"displayName"`
-	FederationPrefix string             `json:"federationPrefix"`
-	Status           globusExportStatus `json:"status"`
-	Description      string             `json:"description,omitempty"` // status description
-	HttpsServer      string             `json:"httpsServer"`           // server url to access files in the collection
-	Token            *oauth2.Token      `json:"-"`
-	TransferToken    *oauth2.Token      `json:"-"`
+	DisplayName       string             `json:"displayName"`
+	FederationPrefix  string             `json:"federationPrefix"`
+	Status            globusExportStatus `json:"status"`
+	Description       string             `json:"description,omitempty"` // status description
+	HttpsServer       string             `json:"httpsServer"`           // server url to access files in the collection
+	Token             *oauth2.Token      `json:"-"`
+	TransferToken     *oauth2.Token      `json:"-"`
+	TokenFile         string             `json:"-"`
+	TransferTokenFile string             `json:"-"`
 }
 
 // For UI
@@ -64,7 +66,8 @@ const (
 	GlobusActivated = "Activated"
 )
 
-const GlobusTokenFileExt = ".tok" // File extension for caching Globus access token
+const GlobusTokenFileExt = ".tok"                  // File extension for caching Globus access token
+const GlobusTransferTokenFileExt = ".transfer.tok" // File extension for caching Globus transfer token
 
 var (
 	// An in-memory map-struct to keep Globus collections information with key being the collection UUID.
@@ -174,11 +177,13 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 		}
 
 		// Save the new access tokens
-		if err := persistToken(col.UUID, collectionToken, TokenTypeCollection); err != nil {
+		var tokenFileName string
+		var transferTokenFileName string
+		if tokenFileName, err = persistToken(col.UUID, collectionToken, TokenTypeCollection); err != nil {
 			return err
 		}
 
-		if err := persistToken(col.UUID, transferToken, TokenTypeTransfer); err != nil {
+		if transferTokenFileName, err = persistToken(col.UUID, transferToken, TokenTypeTransfer); err != nil {
 			return err
 		}
 
@@ -194,6 +199,8 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 		globusEsp.TransferToken = transferToken
 		globusEsp.HttpsServer = col.ServerURL
 		globusEsp.Description = "Activated with cached credentials"
+		globusEsp.TokenFile = tokenFileName
+		globusEsp.TransferTokenFile = transferTokenFileName
 		globusExports[esp.GlobusCollectionID] = &globusEsp
 	}
 	return nil
