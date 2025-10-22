@@ -37,7 +37,6 @@ import (
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/origin"
-	"github.com/pelicanplatform/pelican/p11proxy"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -49,26 +48,6 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusWarning, "XRootD is initializing")
 	metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusWarning, "CMSD is initializting")
 
-	// Start PKCS#11 helper early, but do not fail startup if unavailable
-	if param.Server_EnablePKCS11.GetBool() {
-		pctx, _ := context.WithCancel(ctx)
-		proxy, err := p11proxy.Start(pctx, p11proxy.Options{})
-		if err != nil {
-			log.Warnf("PKCS#11 helper failed to initialize: %v", err)
-		} else if proxy != nil && proxy.Info().Enabled {
-			info := proxy.Info()
-			log.Infof("PKCS#11 helper enabled. To use with OpenSSL in another shell:")
-			log.Infof("  export P11_KIT_SERVER_ADDRESS=%s", info.ServerAddress)
-			log.Infof("  export OPENSSL_CONF=%s", info.OpenSSLConfPath)
-			log.Infof("  openssl s_server -accept 8500 -cert %s -key \"%s\" -engine pkcs11 -keyform engine -quiet", info.CertPath, info.PKCS11URL)
-			log.Infof("And in another shell:")
-			log.Infof("  openssl s_client -connect 127.0.0.1:8500 -servername localhost -CAfile %s", param.Server_TLSCACertificateFile.GetString())
-			egrp.Go(func() error { <-ctx.Done(); return proxy.Stop() })
-		} else {
-			log.Warnf("PKCS#11 helper auto-disabled. Install openssl, p11-kit, p11-kit-modules, libengine-pkcs11-openssl to enable; or set %s=false to suppress this message.", param.Server_EnablePKCS11.GetName())
-		}
-	}
-
 	err := xrootd.SetUpMonitoring(ctx, egrp)
 	if err != nil {
 		return nil, err
@@ -79,6 +58,9 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	if err != nil {
 		return nil, err
 	}
+
+	// Initialize PKCS#11 helper after the defaults are set up
+	initPKCS11(ctx, egrp, modules)
 
 	if err := origin.InitializeDB(); err != nil {
 		return nil, errors.Wrap(err, "failed to initialize origin sqlite database")

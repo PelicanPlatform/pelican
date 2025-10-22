@@ -1203,8 +1203,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Server_UIActivationCodeFile.GetName(), filepath.Join(configDir, "server-web-activation-code"))
 	v.SetDefault(param.OIDC_ClientIDFile.GetName(), filepath.Join(configDir, "oidc-client-id"))
 	v.SetDefault(param.OIDC_ClientSecretFile.GetName(), filepath.Join(configDir, "oidc-client-secret"))
-	// Enable PKCS#11 helper by default, but it auto-disables if deps are missing.
-	v.SetDefault(param.Server_EnablePKCS11.GetName(), true)
+	v.SetDefault(param.Server_EnablePKCS11.GetName(), false)
 	v.SetDefault(param.Cache_ExportLocation.GetName(), "/")
 	v.SetDefault(param.Registry_RequireKeyChaining.GetName(), true)
 	v.SetDefault(param.Origin_StorageType.GetName(), "posix")

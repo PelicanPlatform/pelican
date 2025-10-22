@@ -2595,8 +2595,9 @@ name: Server.EnablePKCS11
 description: |+
   Enable PKCS11 for the server. It allows the server to sign TLS connection without accessing the private key.
 type: bool
-default: true
+default: false
 components: ["cache", "origin"]
+hidden: true
 ---
 ################################
 #   Issuer's Configurations    #
