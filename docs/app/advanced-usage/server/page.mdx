@@ -8,7 +8,7 @@ This page covers various topics in managing these credentials.
 
 ## Pre-generate Credentials
 
-### Namespace Private Key
+### Namespace Private Key (Issuer Key)
 
 > **Note**: The namespace private key is a **powerful secret** and should never be shared with others.  With the private key, one can create user credentials that can **arbitrarily read or write into your namespace**.
 
@@ -16,13 +16,13 @@ Pelican services rely on a private/public key pair for creating (signing) and ve
 
 When a Pelican origin or other service is started, the server automatically generates a new private key if one is not present.  However, if someone is running the origin on your behalf, you will need to generate the keypair on your own and send the public portion to the origin operator. If you're doing the deployment, it can also be convenient to generate the key-pair in advance and mount the private key file to the Pelican server via configuration variable, especially in a container environment.
 
-The Pelican binary ships with a `pelican key create` for generating a private/public key pairs (this replaces the `pelican generate keygen` command):
+To generate a private/public key pair, run the following command:
 
 ```bash copy
 pelican key create
 ```
 
-Pelican will generate both the private key and the public key under the current working directory:
+Resulting in public and private keys generated under the current working directory:
 
 ```console
 Successfully generated keys at:
@@ -30,14 +30,18 @@ Private key: /path/to/private-key.pem
 Public Key: /path/to/issuer-pub.jwks
 ```
 
-You can change the location of the generated keys by passing in  arguments `private-key` and/or `public-key`:
+You can change the location of the generated keys by passing in arguments `private-key` and/or `public-key`:
 
 
 ```bash copy
 pelican key create --private-key /tmp/foo --public-key /tmp/bar
 ```
 
-You can also use this command to derive the public key of an existing private key.
+You can also use this command to derive the public key of an existing private key:
+
+```bash copy
+pelican key create --private-key /path/to/existing/private/key
+```
 
 To configure a Pelican server to use the newly-generated *private key*, move it into the directory specified by the `IssuerKeysDirectory` parameter in the configuration `yaml` file:
 
@@ -107,11 +111,11 @@ Server:
   UIPasswordFile: /path/to/generated-htpasswd-file
 ```
 
-## Key Auto-Generation, Multiple Keys and Key Replacement
+## Key Auto-Generation, Multiple Keys, and Key Replacement
 
 ### Key Auto-Generation
 
-Starting with Pelican v7.13.0, if no pre-generated private key is found at either `IssuerKey` or within `IssuerKeysDirectory`, Pelican server will automatically generated a new private key file in PEM format inside `IssuerKeysDirectory`.
+Starting with Pelican v7.13.0, if no pre-generated private key is found at either `IssuerKey` or within `IssuerKeysDirectory`, Pelican will automatically generate a new private key file in PEM format inside `IssuerKeysDirectory`.
 
 ```
 IssuerKeysDirectory/
@@ -123,9 +127,9 @@ IssuerKeysDirectory/
 
 ### Multiple Keys
 
-Pelican supports multiple keys since v7.13.0. Server administrator can place additional `.pem` file into `IssuerKeysDirectory`, and any valid private key in this directory or at `IssuerKey` can be used to verify token or payload signature.
+Since v7.13.0, Pelican has supported multiple issuer keys. Server administrator can place additional `.pem` file into `IssuerKeysDirectory`, and any valid private key in this directory or at `IssuerKey` can be used to verify token or payload signatures.
 
-When selecting a key for signing, Pelican automatically chooses the private key with the lexicographical smallest filename.
+When selecting a key for signing, Pelican automatically chooses the private key with the lexicographically smallest filename.
 
 ```
 ConfigBase
@@ -140,12 +144,12 @@ Pelican scans the above directory every 60 seconds to detect newly added or remo
 
 ### Key Replacement
 
-With support for Multiple Keys, Pelican allows administrator to replace private keys anytime. Follow these steps to replace an existing key:
+With support for Multiple Keys, Pelican allows the administrator to replace private keys at anytime. Follow these steps to replace an existing key:
 
-1. Generate a new pair of private and public key by the `pelican key create` command.
-2. Make sure your Pelican server is running. Copy the new private key file to [IssuerKeysDirectory](#multiple-keys).
-3. Visit the Registry and download the latest registered public key set for your server under "Origins" section. Ensure the new public key is included. If it isn't, wait for 60 seconds and retry.
+1. Generate a new private/public keypair by using the `pelican key create` command, see details [here](#namespace-private-key).
+2. Ensure that the Pelican server is running. Copy the new private key file to [IssuerKeysDirectory](#multiple-keys).
+3. Visit your federation's Registry in your browser (you can find it in your Pelican server's web interface) and download the latest registered public key set for your server under "Origins" section. Ensure the new public key is included. If it isn't, wait for 60 seconds and retry.
 4. Remove the old private key from [IssuerKeysDirectory](#multiple-keys)
 5. Wait for 60s, then go back to the Registry, download the latest registered public key set again. Verify the old public key has been removed.
 
-> If you are using HTCondor Credmon, the waiting time will be 15m OR generated token lifetime configured in the credmon.
+> If you are using a [Credmon](https://htcondor.readthedocs.io/en/main/admin-manual/file-and-cred-transfer.html#enabling-the-fetching-and-use-of-credentials) in HTCondor, increase the wait time in the above steps to the credmon's configured token lifetime (15 minutes by default).
