@@ -367,7 +367,6 @@ func handleGlobusCallback(ctx *gin.Context) {
 			})
 		return
 	}
-	log.Debugf("Globus token response - transfer token: %+v", transferToken)
 
 	// For accessing files in the collection
 	collectionToken, err := getGlobusResourceToken(token, cid)
@@ -523,6 +522,7 @@ func handleGlobusCallback(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, globusAuthCallbackRes{NextUrl: nextUrl})
 
 	// Restart the server
+	log.Debugf("Sending the signal to restart the server")
 	config.RestartFlag <- true
 }
 
