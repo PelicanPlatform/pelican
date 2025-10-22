@@ -193,8 +193,10 @@ description: |+
   A string defining the log level of the client. Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
 
   Log levels are inherited by all components unless explicitly overridden. Levels are case-insensitive.
+
+  The default logging level for clients is "warn", whereas the default for servers is "info".
 type: string
-default: error
+default: info
 components: ["*"]
 ---
 name: Logging.LogLocation

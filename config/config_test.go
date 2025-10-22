@@ -433,7 +433,7 @@ func TestDeprecationHandling(t *testing.T) {
 
 	logContent := logBuffer.String()
 
-	expectedMessage := "The configuration key 'Server.TLSCertificate' is deprecated. Please use 'Server.TLSCertificateChain' instead."
+	expectedMessage := "The configuration key \\\"Server.TLSCertificate\\\" is deprecated. Please use \\\"Server.TLSCertificateChain\\\" instead."
 
 	require.Contains(t, logContent, expectedMessage, "Expected message not found in the logs")
 

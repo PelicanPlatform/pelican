@@ -168,9 +168,6 @@ func TestConfigSummary(t *testing.T) {
 		t.Fatalf("Error: %v", err)
 	}
 
-	// Set a value same as default value
-	viper.Set("Debug", false)
-
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
