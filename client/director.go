@@ -112,7 +112,8 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		if err != nil {
 			log.Errorln("Failed to get response from the director:", err)
 			// Check if this is a timeout error and use the appropriate retryable error type
-			if strings.Contains(err.Error(), "timeout") {
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
 				err = error_codes.NewTransfer_DirectorTimeoutError(err)
 			} else {
 				// Wrap other network errors in Contact.Director error type
@@ -278,19 +279,15 @@ func GetDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, h
 			var pe *error_codes.PelicanError
 			if !errors.As(err, &pe) {
 				// Check if this is a timeout error and use the appropriate retryable error type
-				if strings.Contains(err.Error(), "timeout") {
-					err = error_codes.NewTransfer_DirectorTimeoutError(errors.Wrapf(err, "error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint))
+				var netErr net.Error
+				if errors.As(err, &netErr) && netErr.Timeout() {
+					err = errors.Wrapf(error_codes.NewTransfer_DirectorTimeoutError(err), "error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint)
 				} else {
-					err = error_codes.NewContact_DirectorError(errors.Wrapf(err, "error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint))
+					err = errors.Wrapf(error_codes.NewContact_DirectorError(err), "error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint)
 				}
 			} else {
 				// If it's already a PelicanError, wrap the context around it
 				err = errors.Wrapf(err, "error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint)
-				// Wrap timeout errors specifically; leave other errors unwrapped until we know how to categorize them
-				var netErr net.Error
-				if errors.As(err, &netErr) && netErr.Timeout() {
-					err = error_codes.NewTransfer_DirectorTimeoutError(err)
-				}
 			}
 			return
 		}
