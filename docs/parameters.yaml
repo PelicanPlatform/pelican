@@ -2386,7 +2386,9 @@ components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.IssuerJwks
 description: |+
-  A filepath indicating where the server's public JSON web keyset can be found.
+  A filepath to a JWKS-formatted file containing pre-generated public keys. These keys will be
+  appended to the public keys dynamically generated from the private keys in [Server.IssuerKeysDirectory](https://docs.pelicanplatform.org/parameters#IssuerKeysDirectory)
+  and [Server.IssuerKey](https://docs.pelicanplatform.org/parameters#IssuerKey) (deprecated), to form the final exported public keys JWKS.
 type: filename
 default: none
 components: ["cache", "director", "origin", "registry"]
