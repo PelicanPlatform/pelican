@@ -2778,10 +2778,24 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		}
 		bodyStr := string(bodyBytes)
 		log.WithFields(fields).Debugln("Error response body:", bodyStr)
+		serverVersion = resp.Header.Get("Server")
+		if resp.StatusCode == http.StatusForbidden {
+			// We will update the error message in the caller
+			return 0, 0, -1, serverVersion, error_codes.NewAuthorizationError(&PermissionDeniedError{})
+		}
 		sce := StatusCodeError(resp.StatusCode)
 		err = &sce
-		return 0, 0, -1, resp.Header.Get("Server"), &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
+		httpErr := &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
 			resp.StatusCode, strings.TrimSpace(bodyStr)), err}
+		// Wrap specific status codes with appropriate PelicanError types
+		if resp.StatusCode == http.StatusNotFound {
+			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
+				resp.StatusCode, strings.TrimSpace(bodyStr)), error_codes.NewSpecification_FileNotFoundError(err)}
+		} else if resp.StatusCode == http.StatusGatewayTimeout {
+			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
+				resp.StatusCode, strings.TrimSpace(bodyStr)), error_codes.NewTransfer_TimedOutError(err)}
+		}
+		return 0, 0, -1, serverVersion, httpErr
 	}
 
 	serverVersion = resp.Header.Get("Server")
