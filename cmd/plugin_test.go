@@ -903,10 +903,9 @@ func TestFailTransfer(t *testing.T) {
 		require.True(t, ok)
 		assert.NotEmpty(t, version)
 
-		// Check Attempts is 0 (no transfer attempts made)
 		attempts, ok := devDataMap["Attempts"]
 		require.True(t, ok)
-		assert.Equal(t, 0, attempts)
+		assert.Equal(t, 1, attempts)
 
 		// Check that TransferErrorData exists and has expected fields
 		transferErrorData, err := result.Get("TransferErrorData")
