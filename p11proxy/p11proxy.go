@@ -157,8 +157,8 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 	if modules.IsEnabled(server_structs.CacheType) {
 		xrootdRun = param.Cache_RunLocation.GetString()
 	}
-	// Create a unique runtime directory for the Unix socket under xrootdRun or /tmp.
-	// Avoid predictable paths to mitigate precreation/symlink attacks.
+
+	// Create a path for the Unix socket
 	var runtimeBase string
 	if xrootdRun != "" {
 		runtimeBase = xrootdRun
@@ -167,23 +167,9 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 	}
 	sockDir := opts.SocketDir
 	if sockDir == "" {
-		// Create a private temp dir under the runtime base
-		d, derr := os.MkdirTemp(runtimeBase, "p11-kit-")
-		if derr != nil {
-			log.Warnf("PKCS#11 helper disabled: cannot create runtime dir under %s: %v", runtimeBase, derr)
-			_ = proxy.Stop()
-			return &Proxy{info: Info{Enabled: false}}, nil
-		}
-		sockDir = d
-	} else {
-		// If caller provided a directory, ensure it exists with safe perms
-		if err := os.MkdirAll(sockDir, 0640); err != nil {
-			log.Warnf("PKCS#11 helper disabled: cannot create socket dir %s: %v", sockDir, err)
-			_ = proxy.Stop()
-			return &Proxy{info: Info{Enabled: false}}, nil
-		}
+		sockDir = runtimeBase
 	}
-	sockPath := filepath.Join(sockDir, fmt.Sprintf("pkcs11-%d.sock", os.Getpid()))
+	sockPath := filepath.Join(sockDir, "pkcs11.sock")
 	proxy.sock = sockPath
 
 	// Generate OpenSSL engine config.
@@ -302,11 +288,14 @@ func startServer(ctx context.Context, signer crypto.Signer, cert *x509.Certifica
 	// Build objects
 	privObj, err := p11kit.NewPrivateKeyObject(signer)
 	if err != nil {
-		return false, nil, errors.Wrap(err, "creating private key object")
+		return false, nil, errors.Wrap(err, "error in creating private key object")
 	}
 	privObj.SetLabel(objectLabel)
 	if cert != nil {
-		privObj.SetCertificate(cert)
+		err = privObj.SetCertificate(cert)
+		if err != nil {
+			return false, nil, errors.Wrap(err, "error in setting certificate")
+		}
 	}
 
 	objs := []p11kit.Object{privObj}
@@ -340,6 +329,20 @@ func startServer(ctx context.Context, signer crypto.Signer, cert *x509.Certifica
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
 		return false, nil, errors.Wrapf(err, "cannot bind unix socket at %s", sockPath)
+	}
+
+	// Ensure socket has appropriate perms and group
+	gid, err := config.GetDaemonGID()
+	if err != nil {
+		return false, nil, errors.Wrap(err, "error in getting XRootD User's GID")
+	}
+
+	if err := os.Chmod(sockPath, 0660); err != nil {
+		log.Debugf("p11proxy: failed to chmod socket %s to 0660: %v", sockPath, err)
+	}
+
+	if err := os.Chown(sockPath, -1, gid); err != nil {
+		log.Debugf("p11proxy: failed to chown socket %s to gid %d: %v", sockPath, gid, err)
 	}
 
 	// Serve loop
