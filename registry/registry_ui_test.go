@@ -70,13 +70,14 @@ func TestListNamespaces(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
-	viper.Set("Server.WebPort", 0)
-	viper.Set("Server.ExternalWebUrl", "https://mock-server.com")
+	viper.Set(param.Server_WebPort.GetName(), 0)
+	viper.Set(param.Server_ExternalWebUrl.GetName(), "https://mock-server.com")
 
 	dirName := t.TempDir()
 	viper.Set("ConfigDir", dirName)
 	viper.Set(param.Logging_Level.GetName(), "debug")
-	viper.Set("Origin.Port", 0)
+	viper.Set(param.Origin_Port.GetName(), 0)
+	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)

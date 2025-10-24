@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -67,16 +67,18 @@ func TestPrometheusUnprotected(t *testing.T) {
 	//Setup a private key
 	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
 	viper.Set("ConfigDir", t.TempDir())
+
+	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
 	c, r := gin.CreateTestContext(w)
 
-	viper.Set("Monitoring.PromQLAuthorization", false)
+	viper.Set(param.Monitoring_PromQLAuthorization.GetName(), false)
 
 	// Set ExternalWebUrl so that IssuerCheck can pass
-	viper.Set("Server.ExternalWebUrl", "https://test-origin.org:8444")
+	viper.Set(param.Server_ExternalWebUrl.GetName(), "https://test-origin.org:8444")
 
 	c.Request = &http.Request{
 		URL: &url.URL{},
@@ -112,16 +114,18 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	// Setup a private key directory
 	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
 	viper.Set("ConfigDir", t.TempDir())
+
+	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
 	c, r := gin.CreateTestContext(w)
 
-	viper.Set("Monitoring.PromQLAuthorization", true)
+	viper.Set(param.Monitoring_PromQLAuthorization.GetName(), true)
 
 	// Set ExternalWebUrl so that IssuerCheck can pass
-	viper.Set("Server.ExternalWebUrl", "https://test-origin.org:8444")
+	viper.Set(param.Server_ExternalWebUrl.GetName(), "https://test-origin.org:8444")
 
 	c.Request = &http.Request{
 		URL: &url.URL{},
@@ -161,8 +165,8 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	defer cancel()
 
 	server_utils.ResetTestState()
-	viper.Set("Server.ExternalWebUrl", "https://test-origin.org:8444")
-	viper.Set("Monitoring.PromQLAuthorization", true)
+	viper.Set(param.Server_ExternalWebUrl.GetName(), "https://test-origin.org:8444")
+	viper.Set(param.Monitoring_PromQLAuthorization.GetName(), true)
 
 	av1 := route.New().WithPrefix("/api/v1.0/prometheus")
 
@@ -171,7 +175,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	keysDir := filepath.Join(tDir, "testKeys")
 
 	//Setup a private key and a token
-	viper.Set("IssuerKeysDirectory", keysDir)
+	viper.Set(param.IssuerKeysDirectory.GetName(), keysDir)
 
 	// Setting the ConfigDir to t.TempDir() causes issues with this test on Windows because
 	// the process tries to clean up the directory before the test is done with it.
@@ -181,6 +185,8 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 		os.RemoveAll(configDir)
 	})
 	viper.Set("ConfigDir", configDir)
+
+	test_utils.MockFederationRoot(t, nil, nil)
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 

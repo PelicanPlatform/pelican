@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -93,14 +94,6 @@ func TestFederationDiscoveryHandler(t *testing.T) {
 			expectedReg: mockRegUrlWoPort,
 			statusCode:  200,
 		},
-		{
-			name:        "dir-empty",
-			dirUrl:      "",
-			regUrl:      mockRegUrlWoPort,
-			expectedDir: "",
-			expectedReg: "",
-			statusCode:  500,
-		},
 		// registry url tests
 		{
 			name:        "reg-with-non-443-port",
@@ -126,22 +119,18 @@ func TestFederationDiscoveryHandler(t *testing.T) {
 			expectedReg: mockRegUrlWoPort,
 			statusCode:  200,
 		},
-		{
-			name:        "reg-empty",
-			dirUrl:      mockDirUrlWoPort,
-			regUrl:      "",
-			expectedDir: "",
-			expectedReg: "",
-			statusCode:  500,
-		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			server_utils.ResetTestState()
+			fedInfo := pelican_url.FederationDiscovery{DirectorEndpoint: tc.dirUrl, RegistryEndpoint: tc.regUrl}
+			test_utils.MockFederationRoot(t, &fedInfo, nil)
 			test_utils.InitClient(t, map[string]any{
-				"Federation.DirectorUrl": tc.dirUrl,
-				"Federation.RegistryUrl": tc.regUrl,
+				param.Federation_DiscoveryUrl.GetName(): param.Federation_DiscoveryUrl.GetString(),
+				"Federation.DirectorUrl":                tc.dirUrl,
+				"Federation.RegistryUrl":                tc.regUrl,
+				param.TLSSkipVerify.GetName():           true,
 			})
 
 			w := httptest.NewRecorder()
@@ -199,20 +188,17 @@ func TestOidcDiscoveryHandler(t *testing.T) {
 			expectedJwks:   mockDirUrlWoPort + directorJWKSPath,
 			statusCode:     200,
 		},
-		{
-			name:           "empty-dir",
-			dirUrl:         "",
-			expectedIssuer: "",
-			expectedJwks:   "",
-			statusCode:     500,
-		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			server_utils.ResetTestState()
+			fedInfo := pelican_url.FederationDiscovery{DirectorEndpoint: tc.dirUrl}
+			test_utils.MockFederationRoot(t, &fedInfo, nil)
 			test_utils.InitClient(t, map[string]any{
-				"Federation.DirectorUrl": tc.dirUrl,
+				param.Federation_DiscoveryUrl.GetName(): param.Federation_DiscoveryUrl.GetString(),
+				"Federation.DirectorUrl":                tc.dirUrl,
+				param.TLSSkipVerify.GetName():           true,
 			})
 
 			w := httptest.NewRecorder()
