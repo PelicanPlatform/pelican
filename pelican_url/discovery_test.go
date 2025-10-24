@@ -33,6 +33,8 @@ import (
 	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/error_codes"
 )
 
 // Spin up a discovery server for testing purposes
@@ -318,5 +320,30 @@ func TestStartMetadataQuery(t *testing.T) {
 		_, err = startMetadataQuery(ctx, client, "test-ua", discUrl)
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, NewMetadataError(err, "Error occurred when querying for metadata")))
+	})
+
+	t.Run("ConnectionResetError", func(t *testing.T) {
+		// Create a custom RoundTripper that simulates a connection reset error
+		client := &http.Client{
+			Transport: &http.Transport{
+				Dial: func(network, addr string) (net.Conn, error) {
+					return nil, errors.New("read tcp 10.244.239.169:48896->104.21.71.171:443: read: connection reset by peer")
+				},
+			},
+		}
+
+		discUrl, err := url.Parse("https://example.com")
+		require.NoError(t, err)
+
+		ctx := context.Background()
+		_, err = startMetadataQuery(ctx, client, "test-ua", discUrl)
+		assert.Error(t, err)
+
+		// Verify it's wrapped with Contact.ConnectionReset PelicanError
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(err, &pe), "Error should be wrapped in PelicanError")
+		assert.Equal(t, 3005, pe.Code(), "Should be Contact.ConnectionReset error code")
+		assert.Equal(t, "Contact.ConnectionReset", pe.ErrorType(), "Should be Contact.ConnectionReset error type")
+		assert.True(t, pe.IsRetryable(), "Connection reset should be retryable")
 	})
 }

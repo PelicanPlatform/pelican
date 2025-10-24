@@ -52,7 +52,7 @@ func setupMockConfig(t *testing.T) error {
 	// Set default config
 	viper.Set("ConfigDir", t.TempDir())
 
-	config.InitConfigInternal()
+	config.InitConfigInternal(log.InfoLevel)
 	if err := config.SetServerDefaults(viper.GetViper()); err != nil {
 		return err
 	}
@@ -167,9 +167,6 @@ func TestConfigSummary(t *testing.T) {
 	if err := setupMockConfig(t); err != nil {
 		t.Fatalf("Error: %v", err)
 	}
-
-	// Set a value same as default value
-	viper.Set("Debug", false)
 
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()

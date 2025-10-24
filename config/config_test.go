@@ -21,6 +21,7 @@ package config
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -39,6 +40,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/logging"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
@@ -56,6 +58,59 @@ func testConfigContext(t *testing.T) (ctx context.Context) {
 	}
 	t.Cleanup(cancel)
 	return
+}
+
+// Set up a mock discovery endpoint that uses its own URL as the discovery URL.
+// Note that this is a scaled back version of test_utils.MockFederationRoot to avoid import cycles.
+func mockFederationRoot(t *testing.T) string {
+	responseHandler := func(w http.ResponseWriter, r *http.Request) {
+		// We only understand GET requests
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			_, err := w.Write([]byte("I only understand GET requests, but you sent me " + r.Method))
+			require.NoError(t, err)
+			return
+		}
+
+		path := r.URL.Path
+		switch path {
+		// Provide base fed root metadata
+		case "/.well-known/pelican-configuration":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+
+			discoveryMetadata := pelican_url.FederationDiscovery{
+				DiscoveryEndpoint: "https://fake-discovery.com",
+				DirectorEndpoint:  "https://fake-director.com",
+				RegistryEndpoint:  "https://fake-registry.com",
+				BrokerEndpoint:    "https://fake-broker.com",
+				JwksUri:           "https://fake-discovery/.well-known/issuer.jwks",
+				DirectorAdvertiseEndpoints: []string{
+					"https://fake-director-1.com",
+					"https://fake-director-2.com",
+				},
+			}
+
+			discoveryJSONBytes, err := json.Marshal(discoveryMetadata)
+			require.NoError(t, err, "Failed to marshal discovery metadata")
+			_, err = w.Write(discoveryJSONBytes)
+			require.NoError(t, err)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, err := w.Write([]byte("I don't understand this path: " + path))
+			require.NoError(t, err)
+		}
+	}
+
+	server := httptest.NewTLSServer(http.HandlerFunc(responseHandler))
+
+	// Cleanup, cleanup, everybody do your share!
+	t.Cleanup(server.Close)
+
+	viper.Set(param.TLSSkipVerify.GetName(), true)
+	viper.Set(param.Federation_DiscoveryUrl.GetName(), server.URL)
+
+	return server.URL
 }
 
 func TestMain(m *testing.M) {
@@ -153,7 +208,7 @@ func TestInitConfig(t *testing.T) {
 		t.Fatalf("Failed to make temp file: %v", err)
 	}
 
-	InitConfigInternal() // Should set up pelican.yaml, osdf.yaml and defaults.yaml
+	InitConfigInternal(logrus.DebugLevel) // Should set up pelican.yaml, osdf.yaml and defaults.yaml
 
 	// Check if server address is correct by defaults.yaml
 	assert.Equal(t, "0.0.0.0", param.Server_WebHost.GetString())
@@ -166,7 +221,7 @@ func TestInitConfig(t *testing.T) {
 	}
 	ResetConfig()
 	viper.Set("config", tempCfgFile.Name()) // Set the temp file as the new 'pelican.yaml'
-	InitConfigInternal()
+	InitConfigInternal(logrus.DebugLevel)
 
 	// Check if server address overrides the default
 	assert.Equal(t, "1.1.1.1", param.Server_WebHost.GetString())
@@ -179,7 +234,7 @@ func TestInitConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to make temp file: %v", err)
 	}
-	InitConfigInternal()
+	InitConfigInternal(logrus.DebugLevel)
 	assert.Equal(t, "", param.Federation_DiscoveryUrl.GetString())
 }
 
@@ -433,7 +488,7 @@ func TestDeprecationHandling(t *testing.T) {
 
 	logContent := logBuffer.String()
 
-	expectedMessage := "The configuration key 'Server.TLSCertificate' is deprecated. Please use 'Server.TLSCertificateChain' instead."
+	expectedMessage := "The configuration key \\\"Server.TLSCertificate\\\" is deprecated. Please use \\\"Server.TLSCertificateChain\\\" instead."
 
 	require.Contains(t, logContent, expectedMessage, "Expected message not found in the logs")
 
@@ -573,20 +628,21 @@ func TestInitServerUrl(t *testing.T) {
 	})
 	initConfig := func() {
 		ResetConfig()
+		mockFederationRoot(t)
 		tempDir := t.TempDir()
 		viper.Set("ConfigDir", tempDir)
 	}
 
 	initDirectoryConfig := func() {
 		initConfig()
-		viper.Set("Director.MinStatResponse", 1)
-		viper.Set("Director.MaxStatResponse", 4)
+		viper.Set(param.Director_MinStatResponse.GetName(), 1)
+		viper.Set(param.Director_MaxStatResponse.GetName(), 4)
 	}
 
 	t.Run("web-url-defaults-to-hostname-port", func(t *testing.T) {
 		initDirectoryConfig()
-		viper.Set("Server.Hostname", mockHostname)
-		viper.Set("Server.WebPort", mockNon443Port)
+		viper.Set(param.Server_Hostname.GetName(), mockHostname)
+		viper.Set(param.Server_WebPort.GetName(), mockNon443Port)
 		err := InitServer(context.Background(), 0)
 		require.NoError(t, err)
 		assert.Equal(t, mockWebUrlWNon443Port, param.Server_ExternalWebUrl.GetString())
@@ -594,8 +650,8 @@ func TestInitServerUrl(t *testing.T) {
 
 	t.Run("default-web-url-removes-443-port", func(t *testing.T) {
 		initDirectoryConfig()
-		viper.Set("Server.Hostname", mockHostname)
-		viper.Set("Server.WebPort", mock443Port)
+		viper.Set(param.Server_Hostname.GetName(), mockHostname)
+		viper.Set(param.Server_WebPort.GetName(), mock443Port)
 		err := InitServer(context.Background(), 0)
 		require.NoError(t, err)
 		assert.Equal(t, mockWebUrlWoPort, param.Server_ExternalWebUrl.GetString())
@@ -604,7 +660,7 @@ func TestInitServerUrl(t *testing.T) {
 	t.Run("remove-443-port-for-set-web-url", func(t *testing.T) {
 		// We respect the URL value set directly by others. Won't remove 443 port
 		initDirectoryConfig()
-		viper.Set("Server.ExternalWebUrl", mockWebUrlW443Port)
+		viper.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlW443Port)
 		err := InitServer(context.Background(), 0)
 		require.NoError(t, err)
 		assert.Equal(t, mockWebUrlWoPort, param.Server_ExternalWebUrl.GetString())
@@ -615,8 +671,8 @@ func TestInitServerUrl(t *testing.T) {
 		initDirectoryConfig()
 		// If Server_ExternalWebUrl is not set, Federation_DirectorUrl defaults to https://<hostname>:<non-443-port>
 		// In this case, the port is 443, so Federation_DirectorUrl = https://example.com
-		viper.Set("Server.Hostname", mockHostname)
-		viper.Set("Server.WebPort", mock443Port)
+		viper.Set(param.Server_Hostname.GetName(), mockHostname)
+		viper.Set(param.Server_WebPort.GetName(), mock443Port)
 		err := InitServer(ctx, server_structs.DirectorType)
 		require.NoError(t, err)
 		fedInfo, err := GetFederation(ctx)
@@ -626,7 +682,7 @@ func TestInitServerUrl(t *testing.T) {
 		// If Server_ExternalWebUrl is explicitly set, Federation_DirectorUrl defaults to whatever it is
 		// But 443 port is stripped if provided
 		initDirectoryConfig()
-		viper.Set("Server.ExternalWebUrl", mockWebUrlW443Port)
+		viper.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlW443Port)
 		err = InitServer(ctx, server_structs.DirectorType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
@@ -634,7 +690,7 @@ func TestInitServerUrl(t *testing.T) {
 		assert.Equal(t, mockWebUrlWoPort, fedInfo.DirectorEndpoint)
 
 		initDirectoryConfig()
-		viper.Set("Server.ExternalWebUrl", mockWebUrlWoPort)
+		viper.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlWoPort)
 		viper.Set("Federation.DirectorUrl", "https://example-director.com")
 		err = InitServer(ctx, server_structs.DirectorType)
 		require.NoError(t, err)
@@ -648,8 +704,8 @@ func TestInitServerUrl(t *testing.T) {
 		initConfig()
 		// If Server_ExternalWebUrl is not set, Federation_RegistryUrl defaults to https://<hostname>:<non-443-port>
 		// In this case, the port is 443, so Federation_RegistryUrl = https://example.com
-		viper.Set("Server.Hostname", mockHostname)
-		viper.Set("Server.WebPort", mock443Port)
+		viper.Set(param.Server_Hostname.GetName(), mockHostname)
+		viper.Set(param.Server_WebPort.GetName(), mock443Port)
 		err := InitServer(ctx, server_structs.RegistryType)
 		require.NoError(t, err)
 		fedInfo, err := GetFederation(ctx)
@@ -659,7 +715,7 @@ func TestInitServerUrl(t *testing.T) {
 		// If Server_ExternalWebUrl is explicitly set, Federation_RegistryUrl defaults to whatever it is
 		// But 443 port is stripped if provided
 		initConfig()
-		viper.Set("Server.ExternalWebUrl", mockWebUrlW443Port)
+		viper.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlW443Port)
 		err = InitServer(ctx, server_structs.RegistryType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
@@ -667,7 +723,7 @@ func TestInitServerUrl(t *testing.T) {
 		assert.Equal(t, mockWebUrlWoPort, fedInfo.RegistryEndpoint)
 
 		initConfig()
-		viper.Set("Server.ExternalWebUrl", mockWebUrlWoPort)
+		viper.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlWoPort)
 		viper.Set("Federation.RegistryUrl", "https://example-registry.com")
 		err = InitServer(ctx, server_structs.RegistryType)
 		require.NoError(t, err)
@@ -681,8 +737,8 @@ func TestInitServerUrl(t *testing.T) {
 		initConfig()
 		// If Server_ExternalWebUrl is not set, Federation_BrokerUrl defaults to https://<hostname>:<non-443-port>
 		// In this case, the port is 443, so Federation_BrokerUrl = https://example.com
-		viper.Set("Server.Hostname", mockHostname)
-		viper.Set("Server.WebPort", mock443Port)
+		viper.Set(param.Server_Hostname.GetName(), mockHostname)
+		viper.Set(param.Server_WebPort.GetName(), mock443Port)
 		err := InitServer(ctx, server_structs.BrokerType)
 		require.NoError(t, err)
 		fedInfo, err := GetFederation(ctx)
@@ -692,7 +748,7 @@ func TestInitServerUrl(t *testing.T) {
 		// If Server_ExternalWebUrl is explicitly set, Federation_BrokerUrl defaults to whatever it is
 		// But 443 port is stripped if provided
 		initConfig()
-		viper.Set("Server.ExternalWebUrl", mockWebUrlW443Port)
+		viper.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlW443Port)
 		err = InitServer(ctx, server_structs.BrokerType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
@@ -700,7 +756,7 @@ func TestInitServerUrl(t *testing.T) {
 		assert.Equal(t, mockWebUrlWoPort, fedInfo.BrokerEndpoint)
 
 		initConfig()
-		viper.Set("Server.ExternalWebUrl", mockWebUrlWoPort)
+		viper.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlWoPort)
 		viper.Set("Federation.BrokerUrl", "https://example-registry.com")
 		err = InitServer(ctx, server_structs.BrokerType)
 		require.NoError(t, err)
@@ -721,6 +777,8 @@ func TestWebConfigSetsLogFile(t *testing.T) {
 	viper.Set(param.Server_WebConfigFile.GetName(), webConfigFile)
 	logFile := filepath.Join(configDir, "test-log.txt")
 
+	mockFederationRoot(t)
+
 	yamlContent := fmt.Sprintf(`
 Logging:
   LogLocation: %s
@@ -739,4 +797,136 @@ Logging:
 	// Stat the file -- that it was created is sufficient evidence of success
 	_, err = os.Stat(logFile)
 	require.NoError(t, err)
+}
+
+func TestDiscoverFederationImpl(t *testing.T) {
+	testCases := []struct {
+		name                  string
+		inputFed              pelican_url.FederationDiscovery
+		mockMetadataIsFedRoot bool
+		extWebUrl             string
+		expectedFed           pelican_url.FederationDiscovery
+		expectError           bool
+	}{
+		{
+			name:                  "all values come from defined discovery URL",
+			inputFed:              pelican_url.FederationDiscovery{},
+			mockMetadataIsFedRoot: true,
+			expectedFed: pelican_url.FederationDiscovery{
+				DirectorEndpoint: "https://fake-director.com",
+				RegistryEndpoint: "https://fake-registry.com",
+				BrokerEndpoint:   "https://fake-broker.com",
+				JwksUri:          "https://fake-discovery/.well-known/issuer.jwks",
+				DirectorAdvertiseEndpoints: []string{
+					"https://fake-director-1.com",
+					"https://fake-director-2.com",
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:                  "Setting Director URL with no Discovery URL falls back to Director Discovery",
+			inputFed:              pelican_url.FederationDiscovery{},
+			mockMetadataIsFedRoot: false,
+			// Need to set external web URL so the tested function doesn't think it hosts
+			// its own discovery info
+			extWebUrl: "https://my-external-web.com",
+			expectedFed: pelican_url.FederationDiscovery{
+				// We set the Discovery endpoint to what we expect to learn from
+				// the federation root, but we don't set the Director URL because
+				// that will get set to the mocked metadata discovery server
+				DiscoveryEndpoint: "https://fake-discovery.com",
+				RegistryEndpoint:  "https://fake-registry.com",
+				BrokerEndpoint:    "https://fake-broker.com",
+				JwksUri:           "https://fake-discovery/.well-known/issuer.jwks",
+				DirectorAdvertiseEndpoints: []string{
+					"https://fake-director-1.com",
+					"https://fake-director-2.com",
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "If a subset of values are set, we discover others but only override unset values",
+			inputFed: pelican_url.FederationDiscovery{
+				DirectorEndpoint: "https://locally-configured-director.com",
+			},
+			mockMetadataIsFedRoot: true,
+			expectedFed: pelican_url.FederationDiscovery{
+				DirectorEndpoint: "https://locally-configured-director.com",
+				RegistryEndpoint: "https://fake-registry.com",
+				BrokerEndpoint:   "https://fake-broker.com",
+				JwksUri:          "https://fake-discovery/.well-known/issuer.jwks",
+				DirectorAdvertiseEndpoints: []string{
+					"https://fake-director-1.com",
+					"https://fake-director-2.com",
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "Unparsable discovery URL returns error",
+			// Trigger discovery from the input discovery URL
+			mockMetadataIsFedRoot: false,
+			inputFed: pelican_url.FederationDiscovery{
+				DiscoveryEndpoint: "https://[::1", // Invalid URL
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ResetConfig()
+			t.Cleanup(func() {
+				ResetConfig()
+			})
+
+			// Set up the mock federation discovery endpoint
+			// Since the test case instantiation can't know this URL ahead of time
+			// we set the expected value of the fed info whenever no expected discovery
+			// endpoint is provided but the test indicates it should use the mock fed root
+			// for discovery metadata.
+			serverUrl := mockFederationRoot(t)
+			if tc.mockMetadataIsFedRoot {
+				viper.Set(param.Federation_DiscoveryUrl.GetName(), serverUrl)
+				tc.expectedFed.DiscoveryEndpoint = serverUrl
+			} else {
+				viper.Set(param.Federation_DiscoveryUrl.GetName(), "")
+				viper.Set("Federation.DirectorUrl", serverUrl)
+				tc.expectedFed.DirectorEndpoint = serverUrl
+			}
+
+			// Set up local configuration (simulates stuff the server would get from config files)
+			// Note that federation params other than discovery URL cannot be set with param because
+			// they're hidden to force access through `config.GetFederation()`
+			if tc.inputFed.DiscoveryEndpoint != "" {
+				viper.Set(param.Federation_DiscoveryUrl.GetName(), tc.inputFed.DiscoveryEndpoint)
+			}
+			if tc.inputFed.RegistryEndpoint != "" {
+				viper.Set("Federation.RegistryUrl", tc.inputFed.RegistryEndpoint)
+			}
+			if tc.inputFed.DirectorEndpoint != "" {
+				viper.Set("Federation.DirectorUrl", tc.inputFed.DirectorEndpoint)
+			}
+			if tc.inputFed.BrokerEndpoint != "" {
+				viper.Set("Federation.BrokerUrl", tc.inputFed.BrokerEndpoint)
+			}
+			if tc.inputFed.JwksUri != "" {
+				viper.Set("Federation.JwksUrl", tc.inputFed.JwksUri)
+			}
+
+			viper.Set(param.Server_ExternalWebUrl.GetName(), tc.extWebUrl)
+
+			// Run discovery
+			ctx := testConfigContext(t)
+			result, err := discoverFederationImpl(ctx)
+			if tc.expectError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.expectedFed, result)
+			}
+		})
+	}
 }

@@ -36,6 +36,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -55,8 +56,6 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 
 	//Setup a private key and a token
 	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
-
-	viper.Set("Federation.DirectorURL", "https://director-url.org")
 
 	// Mock registry server
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -79,8 +78,11 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	}))
 	defer ts.Close()
 
+	// Spin up mock federation discovery endpoint with embedded mock registry URL.
+	fedInfo := pelican_url.FederationDiscovery{RegistryEndpoint: ts.URL}
+	test_utils.MockFederationRoot(t, &fedInfo, nil)
+
 	// Mock cached jwks
-	viper.Set("Federation.RegistryUrl", ts.URL)
 	viper.Set("ConfigDir", t.TempDir())
 	err := config.InitServer(ctx, server_structs.DirectorType)
 	require.NoError(t, err)

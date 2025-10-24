@@ -44,9 +44,10 @@ func TestResetPassword(t *testing.T) {
 
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
+	test_utils.MockFederationRoot(t, nil, nil)
 	viper.Set("ConfigDir", dirName)
-	viper.Set("Server.WebPort", 8444)
-	viper.Set("Origin.Port", 8443)
+	viper.Set(param.Server_WebPort.GetName(), 8444)
+	viper.Set(param.Origin_Port.GetName(), 8443)
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 

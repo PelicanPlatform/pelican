@@ -50,6 +50,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"golang.org/x/net/webdav"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
@@ -312,7 +313,16 @@ func TestStoppedTransfer(t *testing.T) {
 
 	// Make sure the errors are correct
 	assert.NotNil(t, err)
-	assert.IsType(t, &StoppedTransferError{}, err, err.Error())
+	// Check that it's wrapped in a PelicanError and contains StoppedTransferError
+	assert.True(t, errors.Is(err, &StoppedTransferError{}), "Error should contain StoppedTransferError")
+
+	// Check that it's wrapped in a PelicanError with the correct code
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(err, &pe), "Error should be wrapped in PelicanError")
+	assert.Equal(t, 6001, pe.Code(), "Should be Transfer.StoppedTransfer error code")
+	assert.Equal(t, "Transfer.StoppedTransfer", pe.ErrorType(), "Should be Transfer.StoppedTransfer error type")
+	assert.True(t, pe.IsRetryable(), "StoppedTransfer should be retryable")
+
 	assert.True(t, IsRetryable(err))
 }
 
@@ -444,6 +454,63 @@ func TestFailedUpload(t *testing.T) {
 	case <-time.After(time.Second * 2):
 		assert.Fail(t, "Timeout while waiting for response")
 	}
+}
+
+func TestUploadLocalFileNotFound(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{})
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Return 404 for PROPFIND (stat) requests so upload doesn't think file exists
+		if r.Method == "PROPFIND" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	tsURL, err := url.Parse(ts.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		localPath: "/nonexistent/path/to/file.txt",
+		remoteURL: tsURL,
+		xferType:  transferTypeUpload,
+		job: &TransferJob{
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   tsURL.Host,
+				Path:   "/test/file.txt",
+			},
+			dirResp: server_structs.DirectorResponse{
+				XPelNsHdr: server_structs.XPelNs{
+					CollectionsUrl: tsURL, // Point to our mock server
+				},
+			},
+		},
+		callback: nil,
+		attempts: []transferAttemptDetails{
+			{
+				Url:   tsURL,
+				Proxy: false,
+			},
+		},
+	}
+
+	transferResult, err := uploadObject(transfer)
+	require.Error(t, err)                  // uploadObject returns error when local stat fails
+	require.Error(t, transferResult.Error) // And the result also contains the error
+
+	// Verify it's wrapped in Parameter.FileNotFound PelicanError
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(err, &pe), "Error should be wrapped in PelicanError")
+	assert.Equal(t, 1011, pe.Code(), "Should be Parameter.FileNotFound error code")
+	assert.Equal(t, "Parameter.FileNotFound", pe.ErrorType(), "Should be Parameter.FileNotFound error type")
+	assert.False(t, pe.IsRetryable(), "Local file not found should not be retryable")
+
+	// Verify the error message
+	assert.Contains(t, err.Error(), "stat /nonexistent/path/to/file.txt: no such file or directory")
 }
 
 func TestSortAttempts(t *testing.T) {
@@ -782,6 +849,15 @@ func TestGatewayTimeout(t *testing.T) {
 	assert.NoError(t, err)
 	err = transferResult.Error
 	log.Debugln("Received download error:", err)
+
+	// Check that it's wrapped in a PelicanError with Transfer.TimedOut
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(err, &pe), "Error should be wrapped in PelicanError")
+	assert.Equal(t, 6003, pe.Code(), "Should be Transfer.TimedOut error code")
+	assert.Equal(t, "Transfer.TimedOut", pe.ErrorType(), "Should be Transfer.TimedOut error type")
+	assert.True(t, pe.IsRetryable(), "Timeout should be retryable")
+
+	// Check that the underlying StatusCodeError is still there
 	var sce *StatusCodeError
 	if errors.As(err, &sce) {
 		assert.Equal(t, "cache timed out waiting on origin", sce.Error())
@@ -1768,7 +1844,7 @@ func TestListHttp(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := listHttp(test.pUrl, test.dirResp, nil)
+			_, err := listHttp(test.pUrl, test.dirResp, nil, false, 0)
 			if test.expectedError != "" {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), test.expectedError)
@@ -2278,5 +2354,91 @@ func TestPermissionDeniedError(t *testing.T) {
 		require.ErrorAs(t, res.Error, &pde)
 		assert.Equal(t, true, pde.expired)
 		assert.Contains(t, pde.message, "token expired")
+	})
+}
+
+// Test recursive listings and depth handling using a minimal WebDAV-like server
+func TestListHttpRecursiveAndDepth(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		param.Logging_Level.GetName(): "debug",
+	})
+
+	// Real WebDAV server using in-memory FS
+	memFS := webdav.NewMemFS()
+	ctx := context.Background()
+	require.NoError(t, memFS.Mkdir(ctx, "/root", 0o755))
+	// file1 at /root/file1.txt
+	f1, err := memFS.OpenFile(ctx, "/root/file1.txt", os.O_CREATE|os.O_RDWR, 0o644)
+	require.NoError(t, err)
+	_, err = f1.Write([]byte("hello world!")) // 12 bytes
+	require.NoError(t, err)
+	require.NoError(t, f1.Close())
+	// dirA with file2
+	require.NoError(t, memFS.Mkdir(ctx, "/root/dirA", 0o755))
+	f2, err := memFS.OpenFile(ctx, "/root/dirA/file2.txt", os.O_CREATE|os.O_RDWR, 0o644)
+	require.NoError(t, err)
+	_, err = f2.Write([]byte("content")) // 7 bytes
+	require.NoError(t, err)
+	require.NoError(t, f2.Close())
+
+	wh := &webdav.Handler{FileSystem: memFS, LockSystem: webdav.NewMemLS()}
+	svr := httptest.NewServer(wh)
+	defer svr.Close()
+
+	collURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	// Build inputs for listHttp
+	pUrl := &pelican_url.PelicanURL{Scheme: "pelican", Host: collURL.Host, Path: "/root"}
+	dirResp := server_structs.DirectorResponse{
+		XPelNsHdr: server_structs.XPelNs{
+			Namespace:      "/root",
+			RequireToken:   false,
+			CollectionsUrl: collURL,
+		},
+	}
+
+	// Helper to convert slice to a set for stable assertions
+	toSet := func(in []FileInfo) map[string]FileInfo {
+		m := make(map[string]FileInfo)
+		for _, fi := range in {
+			m[fi.Name] = fi
+		}
+		return m
+	}
+
+	t.Run("recursive-unlimited-depth", func(t *testing.T) {
+		files, err := listHttp(pUrl, dirResp, nil, true, -1)
+		require.NoError(t, err)
+		s := toSet(files)
+		// Expect both immediate children and nested file
+		require.Contains(t, s, "/root/dirA")
+		assert.True(t, s["/root/dirA"].IsCollection)
+		require.Contains(t, s, "/root/file1.txt")
+		assert.False(t, s["/root/file1.txt"].IsCollection)
+		require.Contains(t, s, "/root/dirA/file2.txt")
+		assert.False(t, s["/root/dirA/file2.txt"].IsCollection)
+	})
+
+	t.Run("depth-0-no-recursion", func(t *testing.T) {
+		files, err := listHttp(pUrl, dirResp, nil, true, 0)
+		require.NoError(t, err)
+		s := toSet(files)
+		// Only immediate children
+		require.Contains(t, s, "/root/dirA")
+		require.Contains(t, s, "/root/file1.txt")
+		assert.NotContains(t, s, "/root/dirA/file2.txt")
+	})
+
+	t.Run("depth-1-current-behavior-matches-depth-0", func(t *testing.T) {
+		// Note: current implementation recurses only when currentDepth+1 < maxDepth,
+		// so depth=1 behaves like depth=0. This test documents existing behavior.
+		files, err := listHttp(pUrl, dirResp, nil, true, 1)
+		require.NoError(t, err)
+		s := toSet(files)
+		// Only immediate children, no nested files
+		require.Contains(t, s, "/root/dirA")
+		require.Contains(t, s, "/root/file1.txt")
+		assert.NotContains(t, s, "/root/dirA/file2.txt")
 	})
 }

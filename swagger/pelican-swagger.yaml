@@ -1213,6 +1213,35 @@ definitions:
         type: string
         description: The metadata value
         example: "Climate Research"
+  ServerRegistration:
+    type: object
+    description: A server registration entry in the registry
+    properties:
+      id:
+        type: string
+        description: Unique identifier for the server
+        example: "01936b49-ea7f-7d6b-ab90-a56a5ec95e21"
+      name:
+        type: string
+        description: Name of the server
+        example: "TEST_ORIGIN"
+      is_origin:
+        type: boolean
+        description: Whether this server is an origin server
+        example: true
+      is_cache:
+        type: boolean
+        description: Whether this server is a cache server
+        example: false
+      note:
+        type: string
+        description: Additional notes about the server
+        example: "Production origin server"
+      registration:
+        type: array
+        description: List of registrations associated with this server
+        items:
+          $ref: "#/definitions/Namespace"
 
 tags:
   - name: auth
@@ -2331,6 +2360,110 @@ paths:
               minItems: 0
         "500":
           description: Error retrieving namespaces from the topology
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+  /registry_ui/servers:
+    get:
+      tags:
+        - "registry_ui"
+      summary: Returns a list of all registered servers in the registry
+      description: Public API to get all registered servers (origins and caches) in the registry
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/ServerRegistration"
+            description: An array of server registrations
+        "500":
+          description: Internal server error
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+  /registry_ui/servers/{id}:
+    get:
+      tags:
+        - "registry_ui"
+      summary: Return a specific server by ID
+      description: Get detailed information about a specific registered server by its ID
+      operationId: getServerById
+      parameters:
+        - name: id
+          in: path
+          description: ID of the server to fetch
+          required: true
+          type: string
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+            $ref: "#/definitions/ServerRegistration"
+        "400":
+          description: Invalid server ID
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Server not found
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+    delete:
+      tags:
+        - "registry_ui"
+      summary: Delete a server registration by ID
+      description: "`Authentication Required` `Admin privilege Required`
+
+        Delete a specific server registration from the registry. Only admin users have privilege to this action."
+      operationId: deleteServerById
+      parameters:
+        - name: id
+          in: path
+          description: ID of the server to delete
+          required: true
+          type: string
+        - in: header
+          name: X-CSRF-Token
+          description: The CSRF token for protecting against Cross-Site Request Forgery (CSRF) attacks. Obtained by requesting `/api/v1.0/auth/whoami` and reading response header `X-CSRF-Token`
+          type: string
+          required: true
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+            $ref: "#/definitions/SuccessModelV2"
+        "400":
+          description: Invalid server ID
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"

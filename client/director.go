@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -34,6 +35,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -266,6 +268,11 @@ func GetDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, h
 			return
 		} else {
 			err = errors.Wrapf(err, "error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint)
+			// Wrap timeout errors specifically; leave other errors unwrapped until we know how to categorize them
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				err = error_codes.NewTransfer_DirectorTimeoutError(err)
+			}
 			return
 		}
 	}

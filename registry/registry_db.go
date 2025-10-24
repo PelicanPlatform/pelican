@@ -220,7 +220,45 @@ func getRegistrationStatusById(id int) (server_structs.RegistrationStatus, error
 	return result.AdminMetadata.Status, nil
 }
 
+// Helper to construct a ServerRegistration from a server and its services,
+// filtering out services whose preloaded Registration is missing. Returns an
+// error if, after filtering, there are no valid registrations remaining.
+func buildServerRegistration(server server_structs.Server, services []server_structs.Service) (*server_structs.ServerRegistration, error) {
+	// If server has no services, return a "service not found" error
+	// See the definitions of server and service in the realm of Pelican
+	if len(services) == 0 {
+		return nil, errors.Errorf("no service found")
+	}
+
+	result := &server_structs.ServerRegistration{
+		ID:        server.ID,
+		Name:      server.Name,
+		IsOrigin:  server.IsOrigin,
+		IsCache:   server.IsCache,
+		Note:      server.Note,
+		CreatedAt: server.CreatedAt,
+		UpdatedAt: server.UpdatedAt,
+	}
+
+	for _, service := range services {
+		// Exclude services whose preloaded Registration is missing
+		if service.Registration.ID != 0 && service.Registration.Prefix != "" {
+			result.Registration = append(result.Registration, service.Registration)
+		}
+	}
+
+	// Throw an error if no valid registrations for this server
+	if len(result.Registration) == 0 {
+		return nil, errors.Errorf("no service found for server with ID %s. This server is associated with a non-existent registration, which may have been deleted", server.ID)
+	}
+
+	return result, nil
+}
+
 // Retrieve the details of a server by server ID
+// 1. Get the server from servers table
+// 2. Iterate through the services table (preload registrations table), find every service registration associated with this server
+// 3. [Safety net for foreign key constraint violation] Filter out services with missing registrations, and server with no services
 func getServerByID(serverID string) (*server_structs.ServerRegistration, error) {
 	var server server_structs.Server
 	if err := database.ServerDatabase.Where("id = ?", serverID).First(&server).Error; err != nil {
@@ -236,21 +274,7 @@ func getServerByID(serverID string) (*server_structs.ServerRegistration, error) 
 		return nil, errors.Wrapf(err, "failed to get services for server ID: %s", serverID)
 	}
 
-	result := &server_structs.ServerRegistration{
-		ID:        server.ID,
-		Name:      server.Name,
-		IsOrigin:  server.IsOrigin,
-		IsCache:   server.IsCache,
-		Note:      server.Note,
-		CreatedAt: server.CreatedAt,
-		UpdatedAt: server.UpdatedAt,
-	}
-
-	for _, service := range services {
-		result.Registration = append(result.Registration, service.Registration)
-	}
-
-	return result, nil
+	return buildServerRegistration(server, services)
 }
 
 // Retrieve the details of a server by its registration's ID
@@ -301,22 +325,7 @@ func getServerByName(serverName string) (*server_structs.ServerRegistration, err
 	if err := database.ServerDatabase.Where("server_id = ?", server.ID).Preload("Registration").Find(&services).Error; err != nil {
 		return nil, errors.Wrapf(err, "failed to get services for server name: %s", serverName)
 	}
-
-	result := &server_structs.ServerRegistration{
-		ID:        server.ID,
-		Name:      server.Name,
-		IsOrigin:  server.IsOrigin,
-		IsCache:   server.IsCache,
-		Note:      server.Note,
-		CreatedAt: server.CreatedAt,
-		UpdatedAt: server.UpdatedAt,
-	}
-
-	for _, service := range services {
-		result.Registration = append(result.Registration, service.Registration)
-	}
-
-	return result, nil
+	return buildServerRegistration(server, services)
 }
 
 // Get the complete info of all servers
@@ -333,21 +342,12 @@ func listServers() ([]server_structs.ServerRegistration, error) {
 			return nil, errors.Wrapf(err, "failed to get services for server ID: %s", server.ID)
 		}
 
-		serverReg := server_structs.ServerRegistration{
-			ID:        server.ID,
-			Name:      server.Name,
-			IsOrigin:  server.IsOrigin,
-			IsCache:   server.IsCache,
-			Note:      server.Note,
-			CreatedAt: server.CreatedAt,
-			UpdatedAt: server.UpdatedAt,
+		serverReg, err := buildServerRegistration(server, services)
+		if err != nil || serverReg == nil {
+			// Skip servers with no valid service registrations
+			continue
 		}
-
-		for _, service := range services {
-			serverReg.Registration = append(serverReg.Registration, service.Registration)
-		}
-
-		results = append(results, serverReg)
+		results = append(results, *serverReg)
 	}
 
 	return results, nil
@@ -768,10 +768,42 @@ func setRegistrationPubKey(prefix string, pubkeyDbString string) error {
 }
 
 // Note: If this is a server registration, the foreign key constraint applied on the DB will
-// remove the corresponding entry in the “services” table, while the entry in “servers” table
-// remains - that server might have other services, and we still want to keep other server info
+// remove the corresponding entry in the “services” table.
+// Additionally, if this server only has this single service registration (i.e., the server is only an
+// origin or only a cache, not both), then delete the corresponding entry in the “servers” table.
 func deleteRegistrationByID(id int) error {
-	return database.ServerDatabase.Delete(&server_structs.Registration{}, id).Error
+	// Wrap in a transaction to perform an atomic operation
+	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
+		// Determine the server ID associated with this registration via the services table
+		// (Server ID is not empty if this is a server registration)
+		var svc server_structs.Service
+		if err := tx.Where("registration_id = ?", id).First(&svc).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			// No service mapping found; proceed to delete registration only
+		}
+
+		// Delete the registration (this cascadingly deletes the related service entry)
+		if err := tx.Delete(&server_structs.Registration{}, id).Error; err != nil {
+			return err
+		}
+
+		// Conditionally delete the server atomically only if no services remain
+		if svc.ServerID != "" {
+			// The nested NOT EXISTS subquery ensures we only delete the server if
+			// there are no remaining rows in `services` referencing this server. Within
+			// the same transaction, this makes the check-and-delete atomic: if a new
+			// service is inserted concurrently, the subquery returns a row and the
+			// DELETE is skipped.
+			subq := tx.Model(&server_structs.Service{}).Select("1").Where("server_id = ?", svc.ServerID).Limit(1)
+			if err := tx.Where("id = ? AND NOT EXISTS (?)", svc.ServerID, subq).Delete(&server_structs.Server{}).Error; err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
 }
 
 func deleteRegistrationByPrefix(prefix string) error {

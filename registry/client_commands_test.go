@@ -38,6 +38,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -45,12 +46,20 @@ import (
 
 func registryMockup(ctx context.Context, t *testing.T, testName string) *httptest.Server {
 	tDir := t.TempDir()
-	issuerTempDir := filepath.Join(tDir, testName)
 
+	// Set up a server to use for testing
+	gin.SetMode(gin.TestMode)
+	engine := gin.Default()
+	svr := httptest.NewServer(engine)
+
+	fedInfo := pelican_url.FederationDiscovery{RegistryEndpoint: svr.URL}
+	test_utils.MockFederationRoot(t, &fedInfo, nil)
+
+	issuerTempDir := filepath.Join(tDir, testName)
 	ikeyDir := filepath.Join(issuerTempDir, "issuer-keys")
-	viper.Set("IssuerKeysDirectory", ikeyDir)
+	viper.Set(param.IssuerKeysDirectory.GetName(), ikeyDir)
 	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(issuerTempDir, "test.sql"))
-	viper.Set("Server.WebPort", 8444)
+	viper.Set(param.Server_WebPort.GetName(), 8444)
 	viper.Set("ConfigDir", tDir)
 
 	err := config.InitServer(ctx, server_structs.RegistryType)
@@ -58,15 +67,9 @@ func registryMockup(ctx context.Context, t *testing.T, testName string) *httptes
 
 	setupMockRegistryDB(t)
 
-	gin.SetMode(gin.TestMode)
-	engine := gin.Default()
-
-	//Configure registry
+	// Configure registry
 	RegisterRegistryAPI(engine.Group("/"))
 
-	//Set up a server to use for testing
-	svr := httptest.NewServer(engine)
-	viper.Set("Federation.RegistryUrl", svr.URL)
 	return svr
 }
 

@@ -105,6 +105,12 @@ func stashPluginMain(args []string) {
 			resultAd.Set("TransferSuccess", false)
 			errMsg := writeTransferErrorMessage(ret+";"+strings.ReplaceAll(string(debug.Stack()), "\n", ";"), "")
 			resultAd.Set("TransferError", errMsg)
+			resultAd.Set("TransferRetryable", false) // Panics are not retryable
+
+			// Add DeveloperData and TransferErrorData for panic errors
+			panicErr := errors.New(ret)
+			addDataToClassAd(resultAd, nil, panicErr, 1, nil, nil)
+
 			resultAds = append(resultAds, resultAd)
 
 			// Attempt to write our file and bail
@@ -189,11 +195,8 @@ func stashPluginMain(args []string) {
 		resultAd.Set("TransferSuccess", false)
 		errMsg := writeTransferErrorMessage(configErr.Error(), "")
 		resultAd.Set("TransferError", errMsg)
-		if client.ShouldRetry(configErr) {
-			resultAd.Set("TransferRetryable", true)
-		} else {
-			resultAd.Set("TransferRetryable", false)
-		}
+		resultAd.Set("TransferRetryable", client.ShouldRetry(configErr))
+		addDataToClassAd(resultAd, nil, configErr, 1, nil, nil)
 		resultAds = append(resultAds, resultAd)
 
 		// Attempt to write our file and bail
@@ -481,45 +484,9 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			}
 			log.Debugln("Got result from transfer client")
 			resultAd := classads.NewClassAd()
-			// Set our DeveloperData:
-			developerData := make(map[string]interface{})
-			var transferErrorData []interface{}
-			developerData["PelicanClientVersion"] = config.GetVersion()
-			developerData["Attempts"] = len(result.Attempts)
-			for _, attempt := range result.Attempts {
-				developerData[fmt.Sprintf("TransferFileBytes%d", attempt.Number)] = attempt.TransferFileBytes
-				developerData[fmt.Sprintf("TimeToFirstByte%d", attempt.Number)] = attempt.TimeToFirstByte.Round(time.Millisecond).Seconds()
-				developerData[fmt.Sprintf("Endpoint%d", attempt.Number)] = attempt.Endpoint
-				developerData[fmt.Sprintf("TransferEndTime%d", attempt.Number)] = attempt.TransferEndTime.Unix()
-				developerData[fmt.Sprintf("ServerVersion%d", attempt.Number)] = attempt.ServerVersion
-				developerData[fmt.Sprintf("TransferTime%d", attempt.Number)] = attempt.TransferTime.Round(time.Millisecond).Seconds()
-				if attempt.CacheAge >= 0 {
-					developerData[fmt.Sprintf("DataAge%d", attempt.Number)] = attempt.CacheAge.Round(time.Millisecond).Seconds()
-				}
-				if attempt.Error != nil {
-					developerData[fmt.Sprintf("TransferError%d", attempt.Number)] = attempt.Error.Error()
-					developerData[fmt.Sprintf("IsRetryable%d", attempt.Number)] = client.IsRetryable(attempt.Error)
-					transferError := createTransferError(attempt.Error)
-					transferErrorData = append(transferErrorData, transferError)
-				}
-			}
-			if len(result.ClientChecksums) > 0 {
-				checksumInfo := make(map[string]interface{})
-				for _, checksum := range result.ClientChecksums {
-					checksumInfo[client.HttpDigestFromChecksum(checksum.Algorithm)] = hex.EncodeToString(checksum.Value)
-				}
-				developerData["ClientChecksums"] = checksumInfo
-			}
-			if len(result.ServerChecksums) > 0 {
-				checksumInfo := make(map[string]interface{})
-				for _, checksum := range result.ServerChecksums {
-					checksumInfo[client.HttpDigestFromChecksum(checksum.Algorithm)] = hex.EncodeToString(checksum.Value)
-				}
-				developerData["ServerChecksums"] = checksumInfo
-			}
 
-			resultAd.Set("DeveloperData", developerData)
-			resultAd.Set("TransferErrorData", transferErrorData)
+			// Add comprehensive transfer data to ClassAd
+			addDataToClassAd(resultAd, &result, result.Error, len(result.Attempts), result.ClientChecksums, result.ServerChecksums)
 
 			resultAd.Set("TransferStartTime", result.TransferStartTime.Unix())
 			resultAd.Set("TransferEndTime", time.Now().Unix())
@@ -573,13 +540,13 @@ func failTransfer(remoteUrl string, localFile string, results chan<- *classads.C
 		resultAd.Set("TransferType", "download")
 		resultAd.Set("TransferFileName", path.Base(remoteUrl))
 	}
-	if client.IsRetryable(err) {
-		resultAd.Set("TransferRetryable", true)
-	} else {
-		resultAd.Set("TransferRetryable", false)
-	}
+	resultAd.Set("TransferRetryable", client.IsRetryable(err))
 	resultAd.Set("TransferSuccess", false)
 	resultAd.Set("TransferError", err.Error())
+
+	// Add DeveloperData and TransferErrorData for early failures (e.g., director lookup failures)
+	// This ensures errors can be properly classified even when they occur before transfer attempts
+	addDataToClassAd(resultAd, nil, err, 1, nil, nil)
 
 	results <- resultAd
 }
@@ -630,11 +597,8 @@ func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File)
 			resultAd := classads.NewClassAd()
 			resultAd.Set("TransferSuccess", false)
 			resultAd.Set("TransferError", err.Error())
-			if client.ShouldRetry(err) {
-				resultAd.Set("TransferRetryable", true)
-			} else {
-				resultAd.Set("TransferRetryable", false)
-			}
+			resultAd.Set("TransferRetryable", client.ShouldRetry(err))
+			addDataToClassAd(resultAd, nil, err, 1, nil, nil)
 			resultAds = append(resultAds, resultAd)
 		}
 	}
@@ -780,10 +744,12 @@ func createTransferError(err error) (transferError map[string]interface{}) {
 	transferError = make(map[string]interface{})
 	developerData := make(map[string]interface{})
 
+	isRetryable := client.IsRetryable(err)
+
 	var pe *error_codes.PelicanError
 	if errors.As(err, &pe) {
 		developerData["PelicanErrorCode"] = pe.Code()
-		developerData["Retryable"] = pe.IsRetryable()
+		developerData["Retryable"] = isRetryable
 		developerData["ErrorType"] = pe.ErrorType()
 
 		// Use the wrapped error's message if available, otherwise use the PelicanError's full error message
@@ -804,12 +770,71 @@ func createTransferError(err error) (transferError map[string]interface{}) {
 		// Fallback for errors that aren't wrapped in PelicanError
 		developerData["PelicanErrorCode"] = 0
 		developerData["ErrorType"] = "Unprocessed"
-		developerData["Retryable"] = false
+		developerData["Retryable"] = isRetryable
 		developerData["ErrorMessage"] = "Unprocessed error type"
 		transferError["ErrorType"] = "Unprocessed"
 	}
 	transferError["DeveloperData"] = developerData
 	return transferError
+}
+
+// addDataToClassAd is a helper function that adds DeveloperData and TransferErrorData to a ClassAd
+func addDataToClassAd(resultAd *classads.ClassAd, result *client.TransferResults, err error, attempts int, clientChecksums, serverChecksums []client.ChecksumInfo) {
+	developerData := make(map[string]interface{})
+	var transferErrorData []interface{}
+
+	developerData["PelicanClientVersion"] = config.GetVersion()
+	developerData["Attempts"] = attempts
+
+	// Handle per-attempt data if we have transfer results
+	if result != nil {
+		for _, attempt := range result.Attempts {
+			developerData[fmt.Sprintf("TransferFileBytes%d", attempt.Number)] = attempt.TransferFileBytes
+			developerData[fmt.Sprintf("TimeToFirstByte%d", attempt.Number)] = attempt.TimeToFirstByte.Round(time.Millisecond).Seconds()
+			developerData[fmt.Sprintf("Endpoint%d", attempt.Number)] = attempt.Endpoint
+			developerData[fmt.Sprintf("TransferEndTime%d", attempt.Number)] = attempt.TransferEndTime.Unix()
+			developerData[fmt.Sprintf("ServerVersion%d", attempt.Number)] = attempt.ServerVersion
+			developerData[fmt.Sprintf("TransferTime%d", attempt.Number)] = attempt.TransferTime.Round(time.Millisecond).Seconds()
+			if attempt.CacheAge >= 0 {
+				developerData[fmt.Sprintf("DataAge%d", attempt.Number)] = attempt.CacheAge.Round(time.Millisecond).Seconds()
+			}
+			if attempt.Error != nil {
+				developerData[fmt.Sprintf("TransferError%d", attempt.Number)] = attempt.Error.Error()
+				developerData[fmt.Sprintf("IsRetryable%d", attempt.Number)] = client.IsRetryable(attempt.Error)
+				transferError := createTransferError(attempt.Error)
+				transferErrorData = append(transferErrorData, transferError)
+			}
+		}
+	}
+
+	// Handle early failures (simple error case or transfer results with no attempts)
+	if err != nil && ((attempts == 1 && result == nil) || (result != nil && len(result.Attempts) == 0)) {
+		developerData["TransferError1"] = err.Error()
+		developerData["IsRetryable1"] = client.IsRetryable(err)
+		transferError := createTransferError(err)
+		transferErrorData = append(transferErrorData, transferError)
+	}
+
+	// Add checksum information if provided
+	if len(clientChecksums) > 0 {
+		checksumInfo := make(map[string]interface{})
+		for _, checksum := range clientChecksums {
+			checksumInfo[client.HttpDigestFromChecksum(checksum.Algorithm)] = hex.EncodeToString(checksum.Value)
+		}
+		developerData["ClientChecksums"] = checksumInfo
+	}
+	if len(serverChecksums) > 0 {
+		checksumInfo := make(map[string]interface{})
+		for _, checksum := range serverChecksums {
+			checksumInfo[client.HttpDigestFromChecksum(checksum.Algorithm)] = hex.EncodeToString(checksum.Value)
+		}
+		developerData["ServerChecksums"] = checksumInfo
+	}
+
+	resultAd.Set("DeveloperData", developerData)
+	if len(transferErrorData) > 0 {
+		resultAd.Set("TransferErrorData", transferErrorData)
+	}
 }
 
 // This function parses the machine ad present with a condor job to get the site name and the physical hostname if run
