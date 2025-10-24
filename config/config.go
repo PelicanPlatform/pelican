@@ -177,6 +177,7 @@ var (
 	// Some config parsing tools will init both client and server config, but both
 	// warn about several config params. Only warn once per process.
 	warnDeprecatedOnce sync.Once
+	warnDebugOnce      sync.Once
 
 	RestartFlag  = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
 	ShutdownFlag = make(chan any) // A channel flag to shutdown the server instance that launcher listens to (including cache)
@@ -625,27 +626,27 @@ func GetServerIssuerURL() (issuerUrl string, err error) {
 	// Prefer the concretely configured param
 	if issuerUrl = param.Server_IssuerUrl.GetString(); issuerUrl != "" {
 		if _, err := url.Parse(issuerUrl); err != nil {
-			return "", errors.Wrapf(err, "failed to parse '%s' as issuer URL from config param '%s'",
+			return "", errors.Wrapf(err, "failed to parse %q as issuer URL from config param %q",
 				param.Server_IssuerUrl.GetString(), param.Server_IssuerUrl.GetName())
 		}
-		log.Debugf("Populating server's issuer URL as '%s' from config param '%s'", issuerUrl, param.Server_IssuerUrl.GetName())
+		log.Debugf("Populating server's issuer URL as %q from config param %q", issuerUrl, param.Server_IssuerUrl.GetName())
 		return issuerUrl, nil
 	}
 
 	// Next, try to piece it together based on concretely configured hostname:port
 	if param.Server_IssuerHostname.GetString() != "" {
 		if param.Server_IssuerPort.GetInt() == 0 {
-			return "", errors.Errorf("if '%s' is configured, you must also configure a valid port via '%s'",
+			return "", errors.Errorf("if %q is configured, you must also configure a valid port via %q",
 				param.Server_IssuerHostname.GetName(), param.Server_IssuerPort.GetName())
 		}
 
 		// We assume any issuer is running https
 		issuerUrl := fmt.Sprintf("https://%s:%d", param.Server_IssuerHostname.GetString(), param.Server_IssuerPort.GetInt())
 		if _, err := url.Parse(issuerUrl); err != nil {
-			return "", errors.Wrapf(err, "failed to parse '%s' as issuer URL from config params '%s' and '%s'",
+			return "", errors.Wrapf(err, "failed to parse %q as issuer URL from config params %q and %q",
 				issuerUrl, param.Server_IssuerHostname.GetName(), param.Server_IssuerPort.GetName())
 		}
-		log.Debugf("Populating server's issuer URL as '%s' from configured values of '%s' and '%s'",
+		log.Debugf("Populating server's issuer URL as %q from configured values of %q and %q",
 			issuerUrl, param.Server_IssuerHostname.GetName(), param.Server_IssuerPort.GetName())
 		return issuerUrl, nil
 	}
@@ -653,10 +654,10 @@ func GetServerIssuerURL() (issuerUrl string, err error) {
 	// Finally, fall back to the external web URL
 	issuerUrl = param.Server_ExternalWebUrl.GetString()
 	if _, err := url.Parse(issuerUrl); err != nil {
-		return "", errors.Wrapf(err, "failed to parse '%s' as the issuer URL generated from config param '%s'",
+		return "", errors.Wrapf(err, "failed to parse %q as the issuer URL generated from config param %q",
 			issuerUrl, param.Server_ExternalWebUrl.GetName())
 	}
-	log.Debugf("Populating server's issuer URL as '%s' from configured value of '%s'", issuerUrl, param.Server_ExternalWebUrl.GetName())
+	log.Debugf("Populating server's issuer URL as %q from configured value of %q", issuerUrl, param.Server_ExternalWebUrl.GetName())
 	return issuerUrl, nil
 }
 
@@ -679,12 +680,16 @@ func handleDeprecatedConfig() {
 			if viper.IsSet(deprecated) {
 				if replacement[0] == "none" {
 					log.Warningf("Deprecated configuration key %s is set. This is being removed in future release", deprecated)
+				} else if deprecated == param.Debug.GetName() {
+					// Special case for the Debug key; we handle mapping it to Logging.Level: debug in
+					// `setLoggingInternal()` because that has already been executed by the time we get here.
+					log.Warningf("The configuration key %q is being deprecated. While your setting for debug logging has been applied, you should set %q to 'debug' to achieve this behavior in the future.", param.Debug.GetName(), param.Logging_Level.GetName())
 				} else {
 					for _, rep := range replacement {
 						if viper.IsSet(rep) {
-							log.Warningf("The configuration key '%s' is deprecated. The value from its replacement '%s' will be used instead, and the value of the deprecated configuration key '%s' will be ignored.", deprecated, rep, deprecated)
+							log.Warningf("The configuration key %q is deprecated. The value from its replacement %q will be used instead, and the value of the deprecated configuration key %q will be ignored.", deprecated, rep, deprecated)
 						} else {
-							log.Warningf("The configuration key '%s' is deprecated. Please use '%s' instead. Will use the value of deprecated config key '%s' for the new config key '%s'.", deprecated, rep, deprecated, rep)
+							log.Warningf("The configuration key %q is deprecated. Please use %q instead. Will use the value of deprecated config key %q for the new config key %q.", deprecated, rep, deprecated, rep)
 							value := viper.Get(deprecated)
 							viper.Set(rep, value)
 						}
@@ -828,17 +833,22 @@ func SetBaseDefaultsInConfig(v *viper.Viper) {
 // Helper func that uses configured params to toggle the correct logging level
 // in the log library
 func setLoggingInternal() error {
+	// If the user has not set an explicit log level but they're using the old
+	// `Debug` config param, we set the log level to debug. This override behavior
+	// is legacy until we remove the `Debug` config param in a future release.
 	if param.Debug.GetBool() {
-		SetLogging(log.DebugLevel)
-		log.Warnf("Debug is set as a flag or in config, this will override anything set for '%s' within your configuration", param.Logging_Level.GetName())
-	} else {
-		logLevel := param.Logging_Level.GetString()
-		level, err := log.ParseLevel(logLevel)
-		if err != nil {
-			return errors.Wrapf(err, "failed to parse value of config param %s", param.Logging_Level.GetString())
-		}
-		SetLogging(level)
+		warnDebugOnce.Do(func() {
+			log.Warnf("The config param %q is set in your configuration, which will override any values set for %q ", param.Debug.GetName(), param.Logging_Level.GetName())
+		})
+		viper.Set(param.Logging_Level.GetName(), "debug")
 	}
+
+	logLevel := param.Logging_Level.GetString()
+	level, err := log.ParseLevel(logLevel)
+	if err != nil {
+		return errors.Wrapf(err, "failed to parse value of config param %s", param.Logging_Level.GetString())
+	}
+	SetLogging(level)
 
 	return nil
 }
@@ -865,12 +875,26 @@ func InitConfigDir(v *viper.Viper) {
 
 // InitConfigInternal sets up the global Viper instance by loading defaults and
 // user-defined config files, validates config params, and initializes logging.
-func InitConfigInternal() {
+func InitConfigInternal(logLevel log.Level) {
 	// Set a prefix so Viper knows how to parse PELICAN_* env vars
 	// This must happen before config dir initialization so that Pelican
 	// can pick up setting the config dir with PELICAN_CONFIGDIR
 	viper.SetEnvPrefix("pelican")
 	viper.AutomaticEnv()
+
+	// Log level defaults are set outside of Set{Server/Client}Defaults because
+	// logging is needed before those functions are called. They're also set directly
+	// in those functions so that the viper objects they generate are consistent.
+	//
+	// Note that we do the WarnLevel -> "warn" mapping because logrus converts the
+	// WarnLevel to "warning" when calling String(), but we want to keep "warn", which
+	// is what Pelican uses. For more information, see:
+	// https://github.com/PelicanPlatform/pelican/pull/2712
+	logString := logLevel.String()
+	if logLevel == log.WarnLevel {
+		logString = "warn"
+	}
+	viper.SetDefault(param.Logging_Level.GetName(), logString)
 
 	// Enable BindStruct to allow unmarshal env into a nested struct
 	viper.SetOptions(viper.ExperimentalBindStruct())
@@ -1083,6 +1107,11 @@ func SetServerDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
 	v.SetConfigType("yaml")
 
+	// Duplicate setting a default logging level so that this function picks picks up
+	// the one case where we need to set client/server defaults differently directly in
+	// InitConfigInternal. We need to do that because internal logging levels are set by
+	// InitServer/InitClient before we call SetClientDefaults/SetServerDefaults.
+	v.SetDefault(param.Logging_Level.GetName(), "info")
 	v.SetDefault(param.Server_WebConfigFile.GetName(), filepath.Join(configDir, "web-config.yaml"))
 	v.SetDefault(param.Server_TLSCertificateChain.GetName(), filepath.Join(configDir, "certificates", "tls.crt"))
 	v.SetDefault(param.Server_TLSKey.GetName(), filepath.Join(configDir, "certificates", "tls.key"))
@@ -1317,7 +1346,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	if directorStatusWeightTimeConstant := v.GetDuration(param.Director_AdaptiveSortEWMATimeConstant.GetName()); directorStatusWeightTimeConstant <= 0 {
 		duration := v.GetDuration(param.Director_AdaptiveSortEWMATimeConstant.GetName())
 		p := param.Director_AdaptiveSortEWMATimeConstant
-		log.Warningf("Invalid value of '%s' for config param %s; must be greater than 0. Resetting to default", duration.String(), p.GetName())
+		log.Warningf("Invalid value of %q for config param %s; must be greater than 0. Resetting to default", duration.String(), p.GetName())
 		v.Set(p.GetName(), 5*time.Minute)
 	}
 
@@ -1361,7 +1390,7 @@ func SetServerDefaults(v *viper.Viper) error {
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
 func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
-	InitConfigInternal()
+	InitConfigInternal(log.InfoLevel)
 
 	setEnabledServer(currentServers)
 
@@ -1632,7 +1661,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		}
 
 		if adTTL := param.Director_AdvertisementTTL.GetDuration(); adTTL <= 0 {
-			log.Warningf("Invalid value of '%s' for config param %s; must be greater than 0, falling back to default of 15 minutes",
+			log.Warningf("Invalid value of %q for config param %s; must be greater than 0, falling back to default of 15 minutes",
 				adTTL, param.Director_AdvertisementTTL.GetName())
 			viper.Set(param.Director_AdvertisementTTL.GetName(), "15m")
 		}
@@ -1653,7 +1682,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		case server_structs.SortType(""):
 			viper.Set(param.Director_CacheSortMethod.GetName(), server_structs.DistanceType)
 		default:
-			return errors.New(fmt.Sprintf("invalid Director.CacheSortMethod. Must be one of '%s', '%s', '%s', or '%s', but you configured '%s'.",
+			return errors.New(fmt.Sprintf("invalid Director.CacheSortMethod. Must be one of %q, %q, %q, or %q, but you configured %q.",
 				server_structs.DistanceType, server_structs.DistanceAndLoadType, server_structs.RandomType, server_structs.AdaptiveType, s))
 		}
 	} else {
@@ -1750,7 +1779,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	if param.Server_Hostname.IsSet() {
 		serverHostname := param.Server_Hostname.GetString()
 		if err := ValidateHostCertificateHostname(serverHostname); err != nil {
-			return errors.Wrapf(err, "unable to validate server hostname '%s' configured via %s against the TLS certificate"+
+			return errors.Wrapf(err, "unable to validate server hostname %q configured via %s against the TLS certificate"+
 				" configured via %s",
 				serverHostname, param.Server_Hostname.GetName(), param.Server_TLSCertificateChain.GetName())
 		}
@@ -1768,7 +1797,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		}
 
 		if err := ValidateHostCertificateHostname(parsed.Hostname()); err != nil {
-			return errors.Wrapf(err, "unable to validate hostname '%s' configured via %s against the TLS certificate"+
+			return errors.Wrapf(err, "unable to validate hostname %q configured via %s against the TLS certificate"+
 				" configured via %s",
 				parsed.Hostname(), urlParam.GetName(), param.Server_TLSCertificateChain.GetName())
 		}
@@ -1838,6 +1867,11 @@ func ResetClientInitialized() {
 func SetClientDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
 
+	// Duplicate setting a default logging level so that this function picks picks up
+	// the one case where we need to set client/server defaults differently directly in
+	// InitConfigInternal. We need to do that because internal logging levels are set by
+	// InitServer/InitClient before we call SetClientDefaults/SetServerDefaults.
+	v.SetDefault(param.Logging_Level.GetName(), "warn")
 	v.SetDefault(param.IssuerKey.GetName(), filepath.Join(configDir, "issuer.jwk"))
 	v.SetDefault(param.IssuerKeysDirectory.GetName(), filepath.Join(configDir, "issuer-keys"))
 
@@ -1981,7 +2015,7 @@ func SetClientDefaults(v *viper.Viper) error {
 }
 
 func InitClient() error {
-	InitConfigInternal()
+	InitConfigInternal(log.WarnLevel)
 	logging.FlushLogs(true)
 	if err := SetClientDefaults(viper.GetViper()); err != nil {
 		return err
@@ -2051,6 +2085,7 @@ func ResetConfig() {
 	globalFedErr = nil
 
 	warnDeprecatedOnce = sync.Once{}
+	warnDebugOnce = sync.Once{}
 
 	setServerOnce = sync.Once{}
 

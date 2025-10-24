@@ -49,11 +49,18 @@ components: ["*"]
 ---
 name: Debug
 description: |+
+  [Deprecated] To enable debug logging, set ${Logging.Level} to "debug".
+
   A bool indicating whether Pelican should emit debug messages in its log.
   NOTE: this will override whatever is set within your configuration file under Logging.Level!
 type: bool
 default: false
 components: ["*"]
+deprecated: true
+# while we set `replacedby` here, it does not function in the code the same as other
+# `replacedby` examples because we need to map the Debug bool to the string "debug".
+# This is done with a special handler in `handleDeprecatedConfig()`
+replacedby: "Logging.Level"
 ---
 name: TLSSkipVerify
 description: |+
@@ -186,8 +193,12 @@ description: |+
   A string defining the log level of the client. Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
 
   Log levels are inherited by all components unless explicitly overridden. Levels are case-insensitive.
+
+  The default logging level for clients is "warn", whereas the default for servers is "info".
 type: string
-default: error
+default: none
+client_default: warn
+server_default: info
 components: ["*"]
 ---
 name: Logging.LogLocation

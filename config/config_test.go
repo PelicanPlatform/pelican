@@ -208,7 +208,7 @@ func TestInitConfig(t *testing.T) {
 		t.Fatalf("Failed to make temp file: %v", err)
 	}
 
-	InitConfigInternal() // Should set up pelican.yaml, osdf.yaml and defaults.yaml
+	InitConfigInternal(logrus.DebugLevel) // Should set up pelican.yaml, osdf.yaml and defaults.yaml
 
 	// Check if server address is correct by defaults.yaml
 	assert.Equal(t, "0.0.0.0", param.Server_WebHost.GetString())
@@ -221,7 +221,7 @@ func TestInitConfig(t *testing.T) {
 	}
 	ResetConfig()
 	viper.Set("config", tempCfgFile.Name()) // Set the temp file as the new 'pelican.yaml'
-	InitConfigInternal()
+	InitConfigInternal(logrus.DebugLevel)
 
 	// Check if server address overrides the default
 	assert.Equal(t, "1.1.1.1", param.Server_WebHost.GetString())
@@ -234,7 +234,7 @@ func TestInitConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to make temp file: %v", err)
 	}
-	InitConfigInternal()
+	InitConfigInternal(logrus.DebugLevel)
 	assert.Equal(t, "", param.Federation_DiscoveryUrl.GetString())
 }
 
@@ -488,7 +488,7 @@ func TestDeprecationHandling(t *testing.T) {
 
 	logContent := logBuffer.String()
 
-	expectedMessage := "The configuration key 'Server.TLSCertificate' is deprecated. Please use 'Server.TLSCertificateChain' instead."
+	expectedMessage := "The configuration key \\\"Server.TLSCertificate\\\" is deprecated. Please use \\\"Server.TLSCertificateChain\\\" instead."
 
 	require.Contains(t, logContent, expectedMessage, "Expected message not found in the logs")
 
