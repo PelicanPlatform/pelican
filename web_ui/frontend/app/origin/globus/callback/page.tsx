@@ -36,26 +36,28 @@ export default function Home() {
 
   const router = useRouter();
 
-  const postCallback = async (search: string): Promise<callbackResponse> => {
-    const url = new URL(
-      '/api/v1.0/origin_ui/globus/auth/callback' + search,
-      window.location.origin
-    );
-
-    const response = await fetch(url, {
-      credentials: 'include',
-    });
-
-    if (response.ok) {
-      const resData = await response.json();
-      return resData;
-    } else {
-      const errMsg = await getErrorMessage(response);
-      return Promise.reject(errMsg);
-    }
-  };
-
   useEffect(() => {
+    const postCallback = async (
+      search: string
+    ): Promise<callbackResponse> => {
+      const url = new URL(
+        '/api/v1.0/origin_ui/globus/auth/callback' + search,
+        window.location.origin
+      );
+
+      const response = await fetch(url, {
+        credentials: 'include',
+      });
+
+      if (response.ok) {
+        const resData = await response.json();
+        return resData;
+      } else {
+        const errMsg = await getErrorMessage(response);
+        return Promise.reject(errMsg);
+      }
+    };
+
     const cbQuery = window.location.search;
     const cbQueryParsed = new URLSearchParams(cbQuery);
     if (!cbQueryParsed.get('code') || !cbQueryParsed.get('state')) {
@@ -69,9 +71,10 @@ export default function Home() {
 
     postCallback(cbQuery)
       .then((res) => {
+        const redirectTarget = res.nextUrl || '/origin/globus';
         setNextUrl(res.nextUrl);
         timeout = setTimeout(() => {
-          router.replace(nextUrl || '/origin/globus');
+          router.replace(redirectTarget);
         }, 5000);
 
         timer = setInterval(() => {
@@ -88,7 +91,7 @@ export default function Home() {
       timeout && clearTimeout(timeout);
       timer && clearInterval(timer);
     };
-  }, [nextUrl, router]);
+  }, [router]);
 
   return (
     <AuthenticatedContent

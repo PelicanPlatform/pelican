@@ -37,18 +37,22 @@ import (
 )
 
 const (
-	mockRefreshTok1 = "randomtokenstirng123"
-	mockRefreshTok2 = "randomtokenstirng456"
-	mockRefreshTok3 = "randomtokenstirng789"
-	mockRefreshTok4 = "randomtokenstirng101112"
+	mockRefreshTok1  = "randomtokenstirng123"
+	mockRefreshTok2  = "randomtokenstirng456"
+	mockRefreshTok3  = "randomtokenstirng789"
+	mockRefreshTok4  = "randomtokenstirng101112"
+	mockTransferTok1 = "transfertokenstring123"
+	mockTransferTok2 = "transfertokenstring456"
+	mockTransferTok3 = "transfertokenstring789"
+	mockTransferTok4 = "transfertokenstring101112"
 )
 
 var (
 	mockGC []GlobusCollection = []GlobusCollection{
-		{UUID: uuid.NewString(), Name: "mock1", ServerURL: "https://mock1.org", RefreshToken: mockRefreshTok1},
-		{UUID: uuid.NewString(), Name: "mock2", ServerURL: "https://mock2.org", RefreshToken: mockRefreshTok2},
-		{UUID: uuid.NewString(), Name: "mock3", ServerURL: "https://mock3.org", RefreshToken: mockRefreshTok3},
-		{UUID: uuid.NewString(), Name: "mock4", ServerURL: "https://mock4.org", RefreshToken: mockRefreshTok4},
+		{UUID: uuid.NewString(), Name: "mock1", ServerURL: "https://mock1.org", RefreshToken: mockRefreshTok1, TransferRefreshToken: mockTransferTok1},
+		{UUID: uuid.NewString(), Name: "mock2", ServerURL: "https://mock2.org", RefreshToken: mockRefreshTok2, TransferRefreshToken: mockTransferTok2},
+		{UUID: uuid.NewString(), Name: "mock3", ServerURL: "https://mock3.org", RefreshToken: mockRefreshTok3, TransferRefreshToken: mockTransferTok3},
+		{UUID: uuid.NewString(), Name: "mock4", ServerURL: "https://mock4.org", RefreshToken: mockRefreshTok4, TransferRefreshToken: mockTransferTok4},
 	}
 )
 
@@ -70,6 +74,10 @@ func setupMockOriginDB(t *testing.T) {
 		encrypted, err := config.EncryptString(mockGC[idx].RefreshToken)
 		require.NoError(t, err)
 		mockGC[idx].RefreshToken = encrypted
+
+		encryptedTransfer, err := config.EncryptString(mockGC[idx].TransferRefreshToken)
+		require.NoError(t, err)
+		mockGC[idx].TransferRefreshToken = encryptedTransfer
 	}
 }
 
@@ -83,6 +91,10 @@ func teardownMockOriginDB(t *testing.T) {
 	mockGC[1].RefreshToken = mockRefreshTok2
 	mockGC[2].RefreshToken = mockRefreshTok3
 	mockGC[3].RefreshToken = mockRefreshTok4
+	mockGC[0].TransferRefreshToken = mockTransferTok1
+	mockGC[1].TransferRefreshToken = mockTransferTok2
+	mockGC[2].TransferRefreshToken = mockTransferTok3
+	mockGC[3].TransferRefreshToken = mockTransferTok4
 
 	err := ShutdownOriginDB()
 	require.NoError(t, err, "Error tearing down mock namespace DB")
@@ -93,6 +105,7 @@ func insertMockDBData(gc []GlobusCollection) error {
 }
 
 func compareCollection(a, b GlobusCollection) bool {
+	// Only compare non-token fields since tokens are encrypted in DB and decrypted when retrieved
 	return a.UUID == b.UUID && a.Name == b.Name && a.ServerURL == b.ServerURL
 }
 
@@ -147,6 +160,7 @@ func TestGetCollectionByUUID(t *testing.T) {
 		assert.True(t, compareCollection(mockGC[0], *get), fmt.Sprintf("Expected: %#v\nGot: %#v", mockGC[0], *get))
 		// Refresh token is encrypted in the mock data, but the get result is decrypted
 		assert.Equal(t, mockRefreshTok1, get.RefreshToken)
+		assert.Equal(t, mockTransferTok1, get.TransferRefreshToken)
 	})
 
 	t.Run("collection-DNE", func(t *testing.T) {
@@ -174,10 +188,11 @@ func TestCreateCollection(t *testing.T) {
 
 	t.Run("create-collection-returns-no-err", func(t *testing.T) {
 		mockGCCreate := GlobusCollection{
-			UUID:         uuid.NewString(),
-			Name:         "mock1",
-			ServerURL:    "https://mock1.org",
-			RefreshToken: mockRefreshTok1,
+			UUID:                 uuid.NewString(),
+			Name:                 "mock1",
+			ServerURL:            "https://mock1.org",
+			RefreshToken:         mockRefreshTok1,
+			TransferRefreshToken: mockTransferTok1,
 		}
 		err := createCollection(&mockGCCreate)
 		require.NoError(t, err)
@@ -185,6 +200,7 @@ func TestCreateCollection(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, compareCollection(mockGCCreate, *get))
 		assert.Equal(t, mockRefreshTok1, get.RefreshToken)
+		assert.Equal(t, mockTransferTok1, get.TransferRefreshToken)
 	})
 
 	t.Run("create-collection-wo-token-returns-no-err", func(t *testing.T) {
@@ -201,6 +217,7 @@ func TestCreateCollection(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, compareCollection(mockGCCreate, *get))
 		assert.Empty(t, get.RefreshToken)
+		assert.Empty(t, get.TransferRefreshToken)
 	})
 }
 
@@ -213,10 +230,11 @@ func TestUpdateCollection(t *testing.T) {
 	})
 
 	mockGCCreate := GlobusCollection{
-		UUID:         uuid.NewString(),
-		Name:         "mock1",
-		ServerURL:    "https://mock1.org",
-		RefreshToken: mockRefreshTok1,
+		UUID:                 uuid.NewString(),
+		Name:                 "mock1",
+		ServerURL:            "https://mock1.org",
+		RefreshToken:         mockRefreshTok1,
+		TransferRefreshToken: mockTransferTok1,
 	}
 	err := createCollection(&mockGCCreate)
 	require.NoError(t, err)
@@ -232,6 +250,7 @@ func TestUpdateCollection(t *testing.T) {
 	mockGCCreate.ServerURL = "https://new.org"
 	assert.True(t, compareCollection(mockGCCreate, *get))
 	assert.Equal(t, mockRefreshTok1, get.RefreshToken)
+	assert.Equal(t, mockTransferTok1, get.TransferRefreshToken)
 }
 
 func TestDeleteCollectionByUUID(t *testing.T) {
@@ -243,10 +262,11 @@ func TestDeleteCollectionByUUID(t *testing.T) {
 	})
 
 	mockGCCreate := GlobusCollection{
-		UUID:         uuid.NewString(),
-		Name:         "mock1",
-		ServerURL:    "https://mock1.org",
-		RefreshToken: mockRefreshTok1,
+		UUID:                 uuid.NewString(),
+		Name:                 "mock1",
+		ServerURL:            "https://mock1.org",
+		RefreshToken:         mockRefreshTok1,
+		TransferRefreshToken: mockTransferTok1,
 	}
 	err := createCollection(&mockGCCreate)
 	require.NoError(t, err)
@@ -260,4 +280,81 @@ func TestDeleteCollectionByUUID(t *testing.T) {
 	ok, err = collectionExistsByUUID(mockGCCreate.UUID)
 	require.NoError(t, err)
 	assert.False(t, ok)
+}
+
+func TestUpdateTransferRefreshToken(t *testing.T) {
+	server_utils.ResetTestState()
+	setupMockOriginDB(t)
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
+		teardownMockOriginDB(t)
+	})
+
+	mockGCCreate := GlobusCollection{
+		UUID:                 uuid.NewString(),
+		Name:                 "mock1",
+		ServerURL:            "https://mock1.org",
+		RefreshToken:         mockRefreshTok1,
+		TransferRefreshToken: mockTransferTok1,
+	}
+	err := createCollection(&mockGCCreate)
+	require.NoError(t, err)
+
+	// Update only the transfer refresh token
+	newTransferToken := "newtransfertoken123"
+	err = updateCollection(mockGCCreate.UUID, &GlobusCollection{TransferRefreshToken: newTransferToken})
+	require.NoError(t, err)
+
+	get, err := getCollectionByUUID(mockGCCreate.UUID)
+	require.NoError(t, err)
+	// Original refresh token should remain unchanged
+	assert.Equal(t, mockRefreshTok1, get.RefreshToken)
+	// Transfer refresh token should be updated
+	assert.Equal(t, newTransferToken, get.TransferRefreshToken)
+}
+
+func TestCreateCollectionWithOnlyTransferToken(t *testing.T) {
+	server_utils.ResetTestState()
+	setupMockOriginDB(t)
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
+		teardownMockOriginDB(t)
+	})
+
+	mockGCCreate := GlobusCollection{
+		UUID:                 uuid.NewString(),
+		Name:                 "mock1",
+		ServerURL:            "https://mock1.org",
+		TransferRefreshToken: mockTransferTok1,
+		// No RefreshToken set
+	}
+	err := createCollection(&mockGCCreate)
+	require.NoError(t, err)
+	get, err := getCollectionByUUID(mockGCCreate.UUID)
+	require.NoError(t, err)
+	assert.Empty(t, get.RefreshToken)
+	assert.Equal(t, mockTransferTok1, get.TransferRefreshToken)
+}
+
+func TestCreateCollectionWithOnlyRefreshToken(t *testing.T) {
+	server_utils.ResetTestState()
+	setupMockOriginDB(t)
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
+		teardownMockOriginDB(t)
+	})
+
+	mockGCCreate := GlobusCollection{
+		UUID:         uuid.NewString(),
+		Name:         "mock1",
+		ServerURL:    "https://mock1.org",
+		RefreshToken: mockRefreshTok1,
+		// No TransferRefreshToken set
+	}
+	err := createCollection(&mockGCCreate)
+	require.NoError(t, err)
+	get, err := getCollectionByUUID(mockGCCreate.UUID)
+	require.NoError(t, err)
+	assert.Equal(t, mockRefreshTok1, get.RefreshToken)
+	assert.Empty(t, get.TransferRefreshToken)
 }

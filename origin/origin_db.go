@@ -31,10 +31,11 @@ import (
 )
 
 type GlobusCollection struct {
-	UUID         string `gorm:"primaryKey"`
-	Name         string `gorm:"not null;default:''"`
-	ServerURL    string `gorm:"not null;default:''"`
-	RefreshToken string `gorm:"not null;default:''"`
+	UUID                 string `gorm:"primaryKey"`
+	Name                 string `gorm:"not null;default:''"`
+	ServerURL            string `gorm:"not null;default:''"`
+	RefreshToken         string `gorm:"not null;default:''"`
+	TransferRefreshToken string `gorm:"not null;default:''"`
 	// We don't use gorm default gorm.Model to use UUID as the pk
 	// and don't allow soft delete
 	CreatedAt time.Time
@@ -120,6 +121,23 @@ func getCollectionByUUID(uuid string) (*GlobusCollection, error) {
 			}
 		}
 	}
+	if collection.TransferRefreshToken != "" {
+		var keyID string
+		collection.TransferRefreshToken, keyID, err = config.DecryptString(collection.TransferRefreshToken)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to decrypt the transfer refresh token")
+		}
+		currentIssuerKey, err := config.GetIssuerPrivateJWK()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get current issuer key")
+		}
+		if keyID != currentIssuerKey.KeyID() {
+			newEncrypted, err := config.EncryptString(collection.RefreshToken)
+			if err == nil {
+				db.Model(&GlobusCollection{}).Where("uuid = ?", uuid).Update("transfer_refresh_token", newEncrypted)
+			}
+		}
+	}
 	return &collection, nil
 }
 
@@ -129,6 +147,12 @@ func createCollection(collection *GlobusCollection) error {
 		collection.RefreshToken, err = config.EncryptString(collection.RefreshToken)
 		if err != nil {
 			return errors.Wrap(err, "failed to encrypt the refresh token")
+		}
+	}
+	if collection.TransferRefreshToken != "" {
+		collection.TransferRefreshToken, err = config.EncryptString(collection.TransferRefreshToken)
+		if err != nil {
+			return errors.Wrap(err, "failed to encrypt the transfer refresh token")
 		}
 	}
 	if err = db.Create(collection).Error; err != nil {
@@ -143,6 +167,12 @@ func updateCollection(uuid string, updatedCollection *GlobusCollection) error {
 		updatedCollection.RefreshToken, err = config.EncryptString(updatedCollection.RefreshToken)
 		if err != nil {
 			return errors.Wrap(err, "failed to encrypt the refresh token")
+		}
+	}
+	if updatedCollection.TransferRefreshToken != "" {
+		updatedCollection.TransferRefreshToken, err = config.EncryptString(updatedCollection.TransferRefreshToken)
+		if err != nil {
+			return errors.Wrap(err, "failed to encrypt the transfer refresh token")
 		}
 	}
 	if err = db.Model(&GlobusCollection{}).Where("uuid = ?", uuid).Updates(updatedCollection).Error; err != nil {
