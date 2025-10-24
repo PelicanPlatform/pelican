@@ -22,12 +22,19 @@ package config
 
 import (
 	"github.com/jsipprell/keyctl"
+	log "github.com/sirupsen/logrus"
 )
+
+// In the event that the session keyring is unavailable, we will fallback
+// to saving the password to in-process memory.
+var saved_password bool = false
+var saved_password_val []byte = make([]byte, 0)
 
 func TryGetPassword() ([]byte, error) {
 	keyring, err := keyctl.SessionKeyring()
 	if err != nil {
-		return make([]byte, 0), err
+		log.Debugln("Failed to get session keyring")
+		return tryGetPasswordFromMemory()
 	}
 	key, err := keyring.Search("osdf-oauth2-password")
 	if err != nil {
@@ -46,7 +53,8 @@ func TryGetPassword() ([]byte, error) {
 func SavePassword(password []byte) error {
 	keyring, err := keyctl.SessionKeyring()
 	if err != nil {
-		return err
+		log.Debugln("Failed to get session keyring")
+		return savePasswordToMemory(password)
 	}
 	key, err := keyring.Add("osdf-oauth2-password", password)
 	if err != nil {
@@ -59,5 +67,18 @@ func SavePassword(password []byte) error {
 	if err != nil {
 		return err
 	}
+	return nil
+}
+
+func tryGetPasswordFromMemory() ([]byte, error) {
+	if saved_password {
+		return saved_password_val, nil
+	}
+	return make([]byte, 0), nil
+}
+
+func savePasswordToMemory(new_pass []byte) error {
+	saved_password_val = new_pass
+	saved_password = true
 	return nil
 }
