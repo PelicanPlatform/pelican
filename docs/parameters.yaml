@@ -196,7 +196,8 @@ description: |+
 
   The default logging level for clients is "warn", whereas the default for servers is "info".
 type: string
-default: info
+client_default: warn
+server_default: info
 components: ["*"]
 ---
 name: Logging.LogLocation
