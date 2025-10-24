@@ -2413,6 +2413,14 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	} else {
 		transferResults.Error = xferErrors
 	}
+	if !success && transfer.packOption == "" && localPath != "/dev/null" {
+		// On Unix-like systems, os.Remove calls unlink, which removes the file from the directory.
+		// If the file is still open, it will be available to the process until the last file
+		// descriptor is closed.  Given fp.Close() is deferred, this should be safe.
+		if err := os.Remove(localPath); err != nil && !os.IsNotExist(err) {
+			log.Warningln("Failed to remove partially-downloaded file:", err)
+		}
+	}
 	return
 }
 
@@ -2761,6 +2769,34 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		return
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		log.WithFields(fields).Debugln("Got failure status code:", resp.StatusCode)
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			log.WithFields(fields).Debugln("Failed to read response body for error:", readErr)
+		}
+		bodyStr := string(bodyBytes)
+		log.WithFields(fields).Debugln("Error response body:", bodyStr)
+		serverVersion = resp.Header.Get("Server")
+		if resp.StatusCode == http.StatusForbidden {
+			// We will update the error message in the caller
+			return 0, 0, -1, serverVersion, error_codes.NewAuthorizationError(&PermissionDeniedError{})
+		}
+		sce := StatusCodeError(resp.StatusCode)
+		err = &sce
+		httpErr := &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
+			resp.StatusCode, strings.TrimSpace(bodyStr)), err}
+		// Wrap specific status codes with appropriate PelicanError types
+		if resp.StatusCode == http.StatusNotFound {
+			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
+				resp.StatusCode, strings.TrimSpace(bodyStr)), error_codes.NewSpecification_FileNotFoundError(err)}
+		} else if resp.StatusCode == http.StatusGatewayTimeout {
+			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
+				resp.StatusCode, strings.TrimSpace(bodyStr)), error_codes.NewTransfer_TimedOutError(err)}
+		}
+		return 0, 0, -1, serverVersion, httpErr
+	}
 
 	serverVersion = resp.Header.Get("Server")
 
