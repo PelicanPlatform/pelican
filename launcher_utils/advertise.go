@@ -117,7 +117,7 @@ func Advertise(ctx context.Context, servers []server_structs.XRootDServer) error
 }
 
 func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) error {
-	name, err := server_utils.GetServiceName(ctx, server.GetServerType())
+	name, _, err := server_utils.GetServerMetadata(ctx, server.GetServerType())
 	if err != nil {
 		return errors.Wrap(err, "failed to determine service name for advertising to director")
 	}

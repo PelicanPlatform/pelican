@@ -175,7 +175,7 @@ func HandleCreateDowntime(ctx *gin.Context) {
 	serverType := server_structs.NewServerType()
 	serverType.SetString(downtimeInput.Source)
 	if serverType == server_structs.OriginType || serverType == server_structs.CacheType {
-		downtimeInput.ServerName, err = server_utils.GetServiceName(ctx, serverType)
+		downtimeInput.ServerName, _, err = server_utils.GetServerMetadata(ctx, serverType)
 		if err != nil {
 			// Not a fatal error, serverName is set to sitename by the fallback
 			log.Debugf("During server name setting process: %v", err)
