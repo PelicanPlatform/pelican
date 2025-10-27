@@ -37,7 +37,8 @@ type (
 		CreatedBy   string                  `json:"createdBy"`  // Person who created this downtime
 		UpdatedBy   string                  `json:"updatedBy"`  // Person who last updated this downtime
 		ServerName  string                  `json:"serverName"` // Empty for Origin/Cache input; Not empty for Registry input
-		Source      string                  `json:"source"`     // Automatically set by the server; should only be set by input during testing
+		ServerID    string                  `json:"serverId"`
+		Source      string                  `json:"source"` // Automatically set by the server; should only be set by input during testing
 		Class       server_structs.Class    `json:"class"`
 		Description string                  `json:"description"`
 		Severity    server_structs.Severity `json:"severity"`
@@ -171,11 +172,11 @@ func HandleCreateDowntime(ctx *gin.Context) {
 		}
 	}
 
-	// If the downtime is created by the Origin or Cache, serverName will be set automatically
+	// If the downtime is created by the Origin or Cache, serverName and serverID will be set automatically
 	serverType := server_structs.NewServerType()
 	serverType.SetString(downtimeInput.Source)
 	if serverType == server_structs.OriginType || serverType == server_structs.CacheType {
-		downtimeInput.ServerName, _, err = server_utils.GetServerMetadata(ctx, serverType)
+		downtimeInput.ServerName, downtimeInput.ServerID, err = server_utils.GetServerMetadata(ctx, serverType)
 		if err != nil {
 			// Not a fatal error, serverName is set to sitename by the fallback
 			log.Debugf("During server name setting process: %v", err)
@@ -186,6 +187,7 @@ func HandleCreateDowntime(ctx *gin.Context) {
 		UUID:        id.String(),
 		CreatedBy:   user,
 		UpdatedBy:   user,
+		ServerID:    downtimeInput.ServerID,
 		ServerName:  downtimeInput.ServerName,
 		Source:      downtimeInput.Source,
 		Class:       downtimeInput.Class,
