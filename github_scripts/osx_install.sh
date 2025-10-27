@@ -104,6 +104,7 @@ sudo ln -s "$PWD/release_dir/lib/libXrdPelicanHttpCore.0.dylib" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdPelicanHttpCore.dylib" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdHTTPServer-5.so" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdS3-5.so" "$xrootd_libdir"
+<<<<<<< HEAD
 sudo ln -s "$PWD/release_dir/lib/libXrdOssHttp-5.so" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdOssGlobus-5.so" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdOssS3-5.so" "$xrootd_libdir"

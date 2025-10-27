@@ -234,7 +234,7 @@ type xrootdMaintenanceState struct {
 // CheckOriginXrootdEnv is almost a misnomer -- it does both checking and configuring. In partcicular,
 // it is responsible for setting up the exports and handling all the symlinking we use
 // to export our directories.
-func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer, uid int, gid int, groupname string) error {
+func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer, uid int, gid int, username, groupname string) error {
 	// First we check if our config yaml contains the Exports block. If it does, we use that instead of the older legacy
 	// options for all this configuration
 	originExports, err := server_utils.GetOriginExports()
@@ -265,6 +265,68 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 		// Set the mount to our export path now that everything is symlinked
 		if err := param.Set("Xrootd.Mount", exportPath); err != nil {
 			return err
+		}
+
+		// Create the user specified in-progress directory with appropriate permissions
+		inProgressDir := param.Origin_InProgressLocation.GetString()
+
+		// Check if the directory exists
+		if stat, err := os.Stat(inProgressDir); os.IsNotExist(err) {
+			// Directory doesn't exist - create it with mode 1777 (world-writable + sticky bit)
+			log.Infof("Creating in-progress directory %v with mode 1777 (world-writable + sticky bit)", inProgressDir)
+			if err = config.MkdirAll(inProgressDir, 0777|os.ModeSticky, uid, gid); err != nil {
+				return errors.Wrapf(err, "Unable to create in-progress directory %v", inProgressDir)
+			}
+			if err = os.Chown(inProgressDir, uid, -1); err != nil {
+				return errors.Wrapf(err, "Unable to change ownership of in-progress directory %v"+
+					" to desired daemon user %v", inProgressDir, username)
+			}
+		} else if err != nil {
+			// Error checking directory
+			return errors.Wrapf(err, "Unable to stat in-progress directory %v", inProgressDir)
+		} else if !stat.IsDir() {
+			// Path exists but is not a directory
+			return errors.Errorf("In-progress location %v exists but is not a directory", inProgressDir)
+		} else {
+			// Directory exists - check its permissions
+			mode := stat.Mode()
+			perm := mode.Perm()
+
+			// Check if world-writable (others have write permission)
+			isWorldWritable := (perm & 0002) != 0
+
+			if isWorldWritable {
+				// Check sticky bit
+				hasStickyBit := (mode & os.ModeSticky) != 0
+
+				if hasStickyBit {
+					log.Infof("In-progress directory %v exists with mode %04o - using shared sticky-bit model",
+						inProgressDir, perm)
+				} else {
+					log.Warningf("In-progress directory %v has mode %04o (world-writable without sticky bit). "+
+						"This is UNSAFE! Any user can delete others' files. "+
+						"Consider setting permissions to 1777 (chmod 1777 %v)",
+						inProgressDir, perm, inProgressDir)
+				}
+			} else {
+				// Not world-writable - per-user model
+				log.Infof("In-progress directory %v has mode %04o (per-user model). "+
+					"Users must have pre-created subdirectories (%v/$USER) with proper ownership and permissions.",
+					inProgressDir, perm, inProgressDir)
+			}
+
+			// Ensure ownership is correct
+			if err = os.Chown(inProgressDir, uid, -1); err != nil {
+				return errors.Wrapf(err, "Unable to change ownership of in-progress directory %v"+
+					" to desired daemon user %v", inProgressDir, username)
+			}
+		}
+		// At this point, the in-progress directory is created and owned by the user specified in the config
+		// We need to symlink the user-specified in-progress directory to the actual in-progress directory
+
+		err = os.Symlink(inProgressDir, filepath.Join(exportPath, "in-progress"))
+		if err != nil {
+			return errors.Wrapf(err, "Failed to create in-progress symlink from %v to %v", inProgressDir, filepath.Join(exportPath, "in-progress"))
 		}
 	}
 
@@ -487,63 +549,6 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 			" to desired daemon user %v", runtimeDir, username)
 	}
 
-	// Create the in-progress directory with appropriate permissions
-	if param.Origin_StorageType.GetString() == "posix" {
-		inProgressDir := param.Origin_InProgressLocation.GetString()
-
-		// Check if the directory exists
-		if stat, err := os.Stat(inProgressDir); os.IsNotExist(err) {
-			// Directory doesn't exist - create it with mode 1777 (world-writable + sticky bit)
-			log.Infof("Creating in-progress directory %v with mode 1777 (world-writable + sticky bit)", inProgressDir)
-			if err = config.MkdirAll(inProgressDir, 0777|os.ModeSticky, uid, gid); err != nil {
-				return errors.Wrapf(err, "Unable to create in-progress directory %v", inProgressDir)
-			}
-			if err = os.Chown(inProgressDir, uid, -1); err != nil {
-				return errors.Wrapf(err, "Unable to change ownership of in-progress directory %v"+
-					" to desired daemon user %v", inProgressDir, username)
-			}
-		} else if err != nil {
-			// Error checking directory
-			return errors.Wrapf(err, "Unable to stat in-progress directory %v", inProgressDir)
-		} else if !stat.IsDir() {
-			// Path exists but is not a directory
-			return errors.Errorf("In-progress location %v exists but is not a directory", inProgressDir)
-		} else {
-			// Directory exists - check its permissions
-			mode := stat.Mode()
-			perm := mode.Perm()
-
-			// Check if world-writable (others have write permission)
-			isWorldWritable := (perm & 0002) != 0
-
-			if isWorldWritable {
-				// Check sticky bit
-				hasStickyBit := (mode & os.ModeSticky) != 0
-
-				if hasStickyBit {
-					log.Infof("In-progress directory %v exists with mode %04o - using shared sticky-bit model",
-						inProgressDir, perm)
-				} else {
-					log.Warningf("In-progress directory %v has mode %04o (world-writable without sticky bit). "+
-						"This is UNSAFE! Any user can delete others' files. "+
-						"Consider setting permissions to 1777 (chmod 1777 %v)",
-						inProgressDir, perm, inProgressDir)
-				}
-			} else {
-				// Not world-writable - per-user model
-				log.Infof("In-progress directory %v has mode %04o (per-user model). "+
-					"Users must have pre-created subdirectories (%v/$USER) with proper ownership and permissions.",
-					inProgressDir, perm, inProgressDir)
-			}
-
-			// Ensure ownership is correct
-			if err = os.Chown(inProgressDir, uid, -1); err != nil {
-				return errors.Wrapf(err, "Unable to change ownership of in-progress directory %v"+
-					" to desired daemon user %v", inProgressDir, username)
-			}
-		}
-	}
-
 	// The scitokens library will write its JWKS cache into the user's home direct by
 	// default.  By setting $XDG_CACHE_HOME, we move the JWKS cache into our runtime dir.
 	// This makes the Pelican instance more self-contained inside the runtime dir -- and two
@@ -594,7 +599,7 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 	}
 
 	if server.GetServerType().IsEnabled(server_structs.OriginType) {
-		err = CheckOriginXrootdEnv(exportPath, server, uid, gid, groupname)
+		err = CheckOriginXrootdEnv(exportPath, server, uid, gid, username, groupname)
 	} else {
 		err = CheckCacheXrootdEnv(server, uid, gid)
 	}
