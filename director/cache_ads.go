@@ -573,24 +573,57 @@ func updateDowntimeFromRegistry(ctx context.Context) error {
 	filteredServersMutex.Lock()
 	defer filteredServersMutex.Unlock()
 
-	// In the Registry, downtime.serverName is prefix, not server name (because Registry doesn't know the server name)
-	// So we need to find its corresponding server name in the serverAds and use it to overwrite downtime.serverName
-
 	ads := serverAds.Items() // pull the ads slice once
-	// Build a prefix→name map
+	// Build a prefix→name map to convert legacy downtime entries' server name (prefix)
+	// to actual server name (meanwhile checking if the server is currently running);
+	// and a set of running server names to check if a server is currently running
 	prefixToName := make(map[string]string, len(ads))
+	runningServerNames := make(map[string]struct{}, len(ads))
+	serverIDToName := make(map[string]string, len(ads))
 	for _, ad := range ads {
 		prefixToName[ad.Value().RegistryPrefix] = ad.Value().Name
-	}
-	var runningServersDowntimes []server_structs.Downtime
-	for i := 0; i < len(latestFedDowntimes); i++ {
-		name, found := prefixToName[latestFedDowntimes[i].ServerName]
-		if !found {
-			log.Infof("Unable to find server name for prefix %s in the Director. The server with the given prefix is not running now.", latestFedDowntimes[i].ServerName)
-			continue
+		runningServerNames[ad.Value().Name] = struct{}{}
+		if ad.Value().ServerID != "" {
+			serverIDToName[ad.Value().ServerID] = ad.Value().Name
 		}
-		latestFedDowntimes[i].ServerName = name
-		runningServersDowntimes = append(runningServersDowntimes, latestFedDowntimes[i])
+	}
+
+	// Separate downtimes into two categories:
+	// 1. Downtimes for currently running servers (need to apply filtering)
+	// 2. All downtimes (for display in Director's downtime page)
+	var runningServersDowntimes []server_structs.Downtime
+	var allDowntimes []server_structs.Downtime
+
+	for i := 0; i < len(latestFedDowntimes); i++ {
+		downtime := latestFedDowntimes[i]
+		// If this entry doesn't have a server ID, it means it's an old downtime entry (recorded before v7.22),
+		// where the server name is the prefix. This block is for backward compatibility.
+		// In the Registry, downtime.serverName is prefix, not server name (because Registry doesn't know the server name)
+		// So we need to find its corresponding server name in the serverAds and use it to overwrite downtime.serverName
+		if downtime.ServerID == "" {
+			name, found := prefixToName[downtime.ServerName]
+			if !found {
+				// Server is not currently running, but we still want to display the downtime
+				log.Tracef("Server with prefix %s is not currently running in the Director, but keeping downtime for display.", downtime.ServerName)
+				allDowntimes = append(allDowntimes, downtime)
+				continue
+			}
+			// Convert the server name from prefix to actual server name
+			downtime.ServerName = name
+			// End of backward compatibility block
+		} else {
+			name, found := serverIDToName[downtime.ServerID]
+			if !found {
+				// Server is not currently running, but we still want to display the downtime
+				log.Tracef("Server with ID %s is not currently running in the Director, but keeping downtime for display.", downtime.ServerID)
+				allDowntimes = append(allDowntimes, downtime)
+				continue
+			}
+			downtime.ServerName = name
+		}
+		// Server is currently running
+		runningServersDowntimes = append(runningServersDowntimes, downtime)
+		allDowntimes = append(allDowntimes, downtime)
 	}
 
 	// Remove existing filteredSevers that are fetched from the Registry first
@@ -604,17 +637,22 @@ func updateDowntimeFromRegistry(ctx context.Context) error {
 	newFederationDowntimes := make(map[string][]server_structs.Downtime)
 	currentTime := time.Now().UTC().UnixMilli()
 
-	for _, downtime := range runningServersDowntimes {
-		// Save all active and future downtimes to the new map
+	// First, save ALL downtimes (including non-running servers) for display in Director's downtime page
+	for _, downtime := range allDowntimes {
 		newFederationDowntimes[downtime.ServerName] = append(newFederationDowntimes[downtime.ServerName], downtime)
+	}
 
+	// Then, apply filtering only to currently running servers
+	for _, downtime := range runningServersDowntimes {
 		// Check existing downtime filter
 		originalFilterType, hasOriginalFilter := filteredServers[downtime.ServerName]
-		// If this server is already put in downtime, we don't need to do anything to the filteredServers map
+
+		// If this server is already put in downtime (and not tempAllowed), we don't need to do anything
 		if hasOriginalFilter && originalFilterType != tempAllowed {
 			continue
 		}
-		// Otherwise, if it is an active downtime, we need to put it into the filteredServers map
+
+		// If it is an active downtime, add it to the filteredServers map
 		if currentTime >= downtime.StartTime && (currentTime <= downtime.EndTime || downtime.EndTime == -1) {
 			filteredServers[downtime.ServerName] = tempFiltered
 		}
