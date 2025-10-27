@@ -41,11 +41,11 @@ var (
 	baseAdErr  error
 )
 
-// Get the site name from the registry given a namespace prefix.
+// Get the server's metadata from the registry given a namespace prefix.
 //
 // Here, the "prefix" is typically /origins/<hostname> or similar,
 // not the namespace prefix for an object.
-func getSitenameFromReg(ctx context.Context, prefix string) (sitename string, err error) {
+func getServerMetadataFromReg(ctx context.Context, prefix string) (server server_structs.ServerRegistration, err error) {
 	fed, err := config.GetFederation(ctx)
 	if err != nil {
 		return
@@ -54,7 +54,7 @@ func getSitenameFromReg(ctx context.Context, prefix string) (sitename string, er
 		err = fmt.Errorf("unable to fetch site name from the registry. Federation.RegistryUrl or Federation.DiscoveryUrl is unset")
 		return
 	}
-	requestUrl, err := url.JoinPath(fed.RegistryEndpoint, "api/v1.0/registry", prefix)
+	requestUrl, err := url.JoinPath(fed.RegistryEndpoint, "api/v1.0/registry/server", prefix)
 	if err != nil {
 		return
 	}
@@ -63,16 +63,14 @@ func getSitenameFromReg(ctx context.Context, prefix string) (sitename string, er
 	if err != nil {
 		return
 	}
-	ns := server_structs.Registration{}
-	err = json.Unmarshal(res, &ns)
+	err = json.Unmarshal(res, &server)
 	if err != nil {
 		return
 	}
-	sitename = ns.AdminMetadata.SiteName
 	return
 }
 
-// Centralized code for determining the "name" of the service.
+// Centralized code for determining the "name" and "id" of the service.
 //
 // The server's name should be unique and machine-friendly: typically, it's
 // the hostname/FQDN of the host.  It will be registered at the registry to
@@ -85,9 +83,11 @@ func getSitenameFromReg(ctx context.Context, prefix string) (sitename string, er
 // In the current implementation, if the origin component is enabled, we
 // always look up the registered "site name" for the hostname in the registry
 // under /origins; otherwise, we look it up under /caches.
-func GetServiceName(ctx context.Context, server server_structs.ServerType) (name string, err error) {
+func GetServerMetadata(ctx context.Context, server server_structs.ServerType) (name string, id string, err error) {
 
 	var nameFromReg string
+	var idFromReg string
+	var serverReg server_structs.ServerRegistration
 	// Fetch site name from the registry, if not, fall back to Xrootd.Sitename.
 	if server.IsEnabled(server_structs.DirectorType) {
 		exturlStr := param.Server_ExternalWebUrl.GetString()
@@ -106,15 +106,21 @@ func GetServiceName(ctx context.Context, server server_structs.ServerType) (name
 		extUrl, _ := url.Parse(extUrlStr)
 		// Only use hostname:port
 		originPrefix := server_structs.GetOriginNs(extUrl.Host)
-		nameFromReg, err = getSitenameFromReg(ctx, originPrefix)
+		serverReg, err = getServerMetadataFromReg(ctx, originPrefix)
 		if err != nil {
-			log.Errorf("Failed to get sitename from the registry for the origin. Will fallback to using %s: %v", param.Xrootd_Sitename.GetName(), err)
+			log.Errorf("Failed to get metadata from the registry for the origin. Will fallback to using %s: %v", param.Xrootd_Sitename.GetName(), err)
+		} else {
+			nameFromReg = serverReg.Name
+			idFromReg = serverReg.ID
 		}
 	} else if server.IsEnabled(server_structs.CacheType) {
 		cachePrefix := server_structs.GetCacheNs(param.Xrootd_Sitename.GetString())
-		nameFromReg, err = getSitenameFromReg(ctx, cachePrefix)
+		serverReg, err = getServerMetadataFromReg(ctx, cachePrefix)
 		if err != nil {
-			log.Errorf("Failed to get sitename from the registry for the cache. Will fallback to use %s: %v", param.Xrootd_Sitename.GetName(), err)
+			log.Errorf("Failed to get metadata from the registry for the cache. Will fallback to use %s: %v", param.Xrootd_Sitename.GetName(), err)
+		} else {
+			nameFromReg = serverReg.Name
+			idFromReg = serverReg.ID
 		}
 	}
 
@@ -124,6 +130,7 @@ func GetServiceName(ctx context.Context, server server_structs.ServerType) (name
 	} else {
 		// Use the registered sitename as service name if it is not empty
 		name = nameFromReg
+		id = idFromReg
 		// Warn the user if the sitename from the registry does not match the local configuration
 		if nameFromReg != param.Xrootd_Sitename.GetString() && param.Xrootd_Sitename.GetString() != "" {
 			log.Warningf("Sitename mismatch detected:\n"+
@@ -150,7 +157,7 @@ func IsDirectorAdFromSelf(ctx context.Context, ad server_structs.ServerBaseAdInt
 
 	baseAdOnce.Do(func() {
 		var name string
-		name, baseAdErr = GetServiceName(ctx, server_structs.DirectorType)
+		name, _, baseAdErr = GetServerMetadata(ctx, server_structs.DirectorType)
 		if baseAdErr != nil {
 			return
 		}
