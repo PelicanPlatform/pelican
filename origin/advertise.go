@@ -78,7 +78,7 @@ func (server *OriginServer) GetRequiredFeatures() []features.Feature {
 	return requiredFeatures
 }
 
-func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
+func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
 	isGlobusBackend := param.Origin_StorageType.GetString() == string(server_structs.OriginStorageGlobus)
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	serverIssuerUrlStr, err := config.GetServerIssuerURL()
@@ -186,6 +186,7 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 	status := metrics.GetHealthStatus().OverallStatus
 
 	ad := server_structs.OriginAdvertiseV2{
+		ServerID:       id,
 		RegistryPrefix: registryPrefix,
 		DataURL:        originUrlStr,
 		WebURL:         originWebUrl,

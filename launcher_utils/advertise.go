@@ -137,7 +137,7 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 		serverUrl = param.Cache_Url.GetString()
 	}
 
-	ad, err := server.CreateAdvertisement(name, serverUrl, webUrl)
+	ad, err := server.CreateAdvertisement(name, id, serverUrl, webUrl)
 	if err != nil {
 		return err
 	}
