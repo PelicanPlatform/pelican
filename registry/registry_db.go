@@ -328,6 +328,22 @@ func getServerByName(serverName string) (*server_structs.ServerRegistration, err
 	return buildServerRegistration(server, services)
 }
 
+// Retrieve the details of a server by a registration prefix
+func getServerByPrefix(prefix string) (*server_structs.ServerRegistration, error) {
+	if prefix == "" {
+		return nil, errors.New("invalid prefix. Prefix must not be empty")
+	}
+
+	// Find the registration by prefix
+	registration, err := getRegistrationByPrefix(prefix)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get registration by prefix: %s", prefix)
+	}
+
+	// Reuse existing helper to assemble the server payload
+	return getServerByRegistrationID(registration.ID)
+}
+
 // Get the complete info of all servers
 func listServers() ([]server_structs.ServerRegistration, error) {
 	var servers []server_structs.Server
