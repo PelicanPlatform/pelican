@@ -133,6 +133,7 @@ type (
 	// and the functions responsible for generating these structs on-demand.
 	ServerAd struct {
 		ServerBaseAd
+		ServerID               string            `json:"serverId"`       // The server's ID
 		RegistryPrefix         string            `json:"registryPrefix"` // The server's prefix recorded in the registry
 		StorageType            OriginStorageType `json:"storageType"`    // Always POSIX for caches
 		DisableDirectorTest    bool              `json:"directorTest"`
@@ -167,6 +168,7 @@ type (
 	// OriginAdvertiseV2 is the struct used to advertise BOTH Origin and Cache server to the director
 	OriginAdvertiseV2 struct {
 		ServerBaseAd
+		ServerID string `json:"serverId"`
 		// The namespace prefix to register/look up the server in the registry.
 		// The value is /caches/{Xrootd.Sitename} for cache servers and /origins/{Xrootd.Sitename} for the origin servers
 		RegistryPrefix string `json:"registry-prefix"`
