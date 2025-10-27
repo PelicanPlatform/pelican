@@ -883,6 +883,208 @@ func TestFailTransfer(t *testing.T) {
 		require.True(t, ok)
 		assert.Contains(t, transferErrorStr, "cancelled transfer, too slow; detected speed=0 B/s, total transferred=0 B, total transfer time=0s, cache miss")
 	})
+
+	// Test that DeveloperData and TransferErrorData are populated for director timeout errors
+	t.Run("TestDirectorTimeoutError", func(t *testing.T) {
+		results := make(chan *classads.ClassAd, 1)
+		innerErr := errors.New("Get \"https://osdf-director.osg-htc.org/test\": dial tcp 128.105.82.132:443: i/o timeout")
+		directorErr := error_codes.NewTransfer_DirectorTimeoutError(innerErr)
+		failTransfer("osdf://test/file", "/path/to/local.txt", results, false, directorErr)
+		result := <-results
+
+		// Check that DeveloperData exists and has expected fields
+		developerData, err := result.Get("DeveloperData")
+		require.NoError(t, err)
+		devDataMap, ok := developerData.(map[string]interface{})
+		require.True(t, ok)
+
+		// Check PelicanClientVersion
+		version, ok := devDataMap["PelicanClientVersion"]
+		require.True(t, ok)
+		assert.NotEmpty(t, version)
+
+		attempts, ok := devDataMap["Attempts"]
+		require.True(t, ok)
+		assert.Equal(t, 1, attempts)
+
+		// Check that TransferErrorData exists and has expected fields
+		transferErrorData, err := result.Get("TransferErrorData")
+		require.NoError(t, err)
+		errDataSlice, ok := transferErrorData.([]interface{})
+		require.True(t, ok)
+		require.Len(t, errDataSlice, 1)
+
+		// Check the error classification
+		errDataMap, ok := errDataSlice[0].(map[string]interface{})
+		require.True(t, ok)
+
+		// Create the expected error to get the expected values
+		expectedErr := error_codes.NewTransfer_DirectorTimeoutError(innerErr)
+
+		// Check top-level ErrorType (should be base type like "Transfer")
+		errorType, ok := errDataMap["ErrorType"]
+		require.True(t, ok)
+		assert.Equal(t, "Transfer", errorType)
+
+		// Check DeveloperData within TransferErrorData
+		errDevData, ok := errDataMap["DeveloperData"]
+		require.True(t, ok)
+		errDevDataMap, ok := errDevData.(map[string]interface{})
+		require.True(t, ok)
+
+		// Check PelicanErrorCode
+		errorCode, ok := errDevDataMap["PelicanErrorCode"]
+		require.True(t, ok)
+		assert.Equal(t, expectedErr.Code(), errorCode)
+
+		// Check ErrorType
+		errType, ok := errDevDataMap["ErrorType"]
+		require.True(t, ok)
+		assert.Equal(t, expectedErr.ErrorType(), errType)
+
+		// Check Retryable
+		retryable, ok := errDevDataMap["Retryable"]
+		require.True(t, ok)
+		assert.Equal(t, expectedErr.IsRetryable(), retryable.(bool))
+	})
+
+	// Test that DeveloperData and TransferErrorData are populated for file not found errors
+	t.Run("TestFileNotFoundError", func(t *testing.T) {
+		results := make(chan *classads.ClassAd, 1)
+		innerErr := errors.New("local object \"/path/to/missing.txt\" does not exist")
+		fileNotFoundErr := error_codes.NewSpecification_FileNotFoundError(innerErr)
+		failTransfer("osdf://test/file", "/path/to/missing.txt", results, true, fileNotFoundErr)
+		result := <-results
+
+		// Check that DeveloperData exists
+		developerData, err := result.Get("DeveloperData")
+		require.NoError(t, err)
+		_, ok := developerData.(map[string]interface{})
+		require.True(t, ok)
+
+		// Check that TransferErrorData exists and has expected fields
+		transferErrorData, err := result.Get("TransferErrorData")
+		require.NoError(t, err)
+		errDataSlice, ok := transferErrorData.([]interface{})
+		require.True(t, ok)
+		require.Len(t, errDataSlice, 1)
+
+		// Check the error classification
+		errDataMap, ok := errDataSlice[0].(map[string]interface{})
+		require.True(t, ok)
+
+		// Create the expected error to get the expected values
+		expectedErr := error_codes.NewSpecification_FileNotFoundError(innerErr)
+
+		// Check top-level ErrorType (should be base type like "Specification")
+		errorType, ok := errDataMap["ErrorType"]
+		require.True(t, ok)
+		assert.Equal(t, "Specification", errorType)
+
+		// Check DeveloperData within TransferErrorData
+		errDevData, ok := errDataMap["DeveloperData"]
+		require.True(t, ok)
+		errDevDataMap, ok := errDevData.(map[string]interface{})
+		require.True(t, ok)
+
+		// Check PelicanErrorCode
+		errorCode, ok := errDevDataMap["PelicanErrorCode"]
+		require.True(t, ok)
+		assert.Equal(t, expectedErr.Code(), errorCode)
+
+		// Check ErrorType
+		errType, ok := errDevDataMap["ErrorType"]
+		require.True(t, ok)
+		assert.Equal(t, expectedErr.ErrorType(), errType)
+
+		// Check Retryable
+		retryable, ok := errDevDataMap["Retryable"]
+		require.True(t, ok)
+		assert.Equal(t, expectedErr.IsRetryable(), retryable.(bool))
+	})
+}
+
+// Test the createTransferError function for proper error classification
+func TestCreateTransferError(t *testing.T) {
+	// Test director timeout error
+	t.Run("DirectorTimeoutError", func(t *testing.T) {
+		innerErr := errors.New("Get \"https://osdf-director.osg-htc.org/test\": dial tcp 128.105.82.132:443: i/o timeout")
+		err := error_codes.NewTransfer_DirectorTimeoutError(innerErr)
+		transferError := createTransferError(err)
+
+		assert.Equal(t, "Transfer", transferError["ErrorType"])
+
+		devData, ok := transferError["DeveloperData"].(map[string]interface{})
+		require.True(t, ok)
+
+		assert.Equal(t, err.Code(), devData["PelicanErrorCode"])
+		assert.Equal(t, err.ErrorType(), devData["ErrorType"])
+		assert.Contains(t, devData["ErrorMessage"], "dial tcp")
+		assert.Equal(t, err.IsRetryable(), devData["Retryable"].(bool))
+	})
+
+	// Test file not found error
+	t.Run("FileNotFoundError", func(t *testing.T) {
+		innerErr := errors.New("local object \"/path/to/file.txt\" does not exist")
+		err := error_codes.NewSpecification_FileNotFoundError(innerErr)
+		transferError := createTransferError(err)
+
+		assert.Equal(t, "Specification", transferError["ErrorType"])
+
+		devData, ok := transferError["DeveloperData"].(map[string]interface{})
+		require.True(t, ok)
+
+		assert.Equal(t, err.Code(), devData["PelicanErrorCode"])
+		assert.Equal(t, err.ErrorType(), devData["ErrorType"])
+		assert.Contains(t, devData["ErrorMessage"].(string), "does not exist")
+		assert.Equal(t, err.IsRetryable(), devData["Retryable"].(bool))
+	})
+
+	// Test 404 error
+	t.Run("RemoteFileNotFoundError", func(t *testing.T) {
+		innerErr := errors.New("server returned 404 Not Found")
+		err := error_codes.NewSpecification_FileNotFoundError(innerErr)
+		transferError := createTransferError(err)
+
+		assert.Equal(t, "Specification", transferError["ErrorType"])
+
+		devData, ok := transferError["DeveloperData"].(map[string]interface{})
+		require.True(t, ok)
+
+		assert.Equal(t, err.Code(), devData["PelicanErrorCode"])
+		assert.Equal(t, err.ErrorType(), devData["ErrorType"])
+		assert.Contains(t, devData["ErrorMessage"].(string), "404 Not Found")
+		assert.Equal(t, err.IsRetryable(), devData["Retryable"].(bool))
+	})
+
+	// Test slow transfer error
+	t.Run("SlowTransferError", func(t *testing.T) {
+		innerErr := &client.SlowTransferError{}
+		err := error_codes.NewTransfer_SlowTransferError(innerErr)
+		transferError := createTransferError(err)
+
+		assert.Equal(t, "Transfer", transferError["ErrorType"])
+
+		devData, ok := transferError["DeveloperData"].(map[string]interface{})
+		require.True(t, ok)
+
+		assert.Equal(t, err.Code(), devData["PelicanErrorCode"])
+		assert.Equal(t, err.ErrorType(), devData["ErrorType"])
+		assert.Equal(t, err.IsRetryable(), devData["Retryable"].(bool))
+	})
+
+	// Test unprocessed error
+	t.Run("UnprocessedError", func(t *testing.T) {
+		err := errors.New("some random error message")
+		transferError := createTransferError(err)
+
+		devData, ok := transferError["DeveloperData"].(map[string]interface{})
+		require.True(t, ok)
+
+		assert.Equal(t, 0, devData["PelicanErrorCode"])
+		assert.Equal(t, "Unprocessed", devData["ErrorType"])
+		assert.Equal(t, "Unprocessed error type", devData["ErrorMessage"])
+	})
 }
 
 // Test recursive downloads from the plugin
@@ -1486,6 +1688,9 @@ func TestTransferErrorSlowTransfer(t *testing.T) {
 			// Create the expected error to get the expected values
 			expectedErr := error_codes.NewTransfer_SlowTransferError(nil)
 
+			// Check top-level ErrorType (should be base type like "Transfer")
+			assert.Equal(t, "Transfer", errorTypeStr)
+
 			pelicanErrorCode, ok := developerData["PelicanErrorCode"].(int)
 			require.True(t, ok)
 			assert.Equal(t, expectedErr.Code(), pelicanErrorCode)
@@ -1656,6 +1861,9 @@ func TestTransferErrorHeaderTimeout(t *testing.T) {
 
 			// Create the expected error to get the expected values
 			expectedErr := error_codes.NewTransfer_HeaderTimeoutError(&client.HeaderTimeoutError{})
+
+			// Check top-level ErrorType (should be base type like "Transfer")
+			assert.Equal(t, "Transfer", errorTypeStr)
 
 			pelicanErrorCode, ok := developerData["PelicanErrorCode"].(int)
 			require.True(t, ok)
