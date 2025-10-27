@@ -178,7 +178,7 @@ func TeardownMockServiceNameDB(t *testing.T) {
 	require.NoError(t, err, "dropping ServiceName table")
 }
 
-func TestUpsertServiceName(t *testing.T) {
+func TestUpsertServerName(t *testing.T) {
 	config.ResetConfig()
 	SetupMockServiceNameDB(t)
 	t.Cleanup(func() {
@@ -187,6 +187,7 @@ func TestUpsertServiceName(t *testing.T) {
 	})
 
 	const name1 = "server-one"
+	const id1 = "test123"
 	origType := server_structs.NewServerType()
 	origType.SetString("origin")
 	cacheType := server_structs.NewServerType()
@@ -195,14 +196,15 @@ func TestUpsertServiceName(t *testing.T) {
 	t.Run("insert-when-empty", func(t *testing.T) {
 		typ := server_structs.NewServerType()
 		typ.SetString("origin")
-		err := UpsertServiceName(name1, typ)
+		err := UpsertServerName(name1, id1, typ)
 		require.NoError(t, err)
 
 		var got server_structs.ServerName
-		err = ServerDatabase.First(&got, "name = ?", name1).Error
+		err = ServerDatabase.First(&got, "id = ?", id1).Error
 		require.NoError(t, err)
 
 		assert.Equal(t, name1, got.Name)
+		assert.Equal(t, id1, got.ID)
 		assert.Equal(t, strings.ToLower(typ.String()), got.Type)
 		assert.WithinDuration(t, time.Now().UTC(), got.CreatedAt, time.Second)
 		assert.WithinDuration(t, time.Now().UTC(), got.UpdatedAt, time.Second)
@@ -210,23 +212,23 @@ func TestUpsertServiceName(t *testing.T) {
 
 	t.Run("update-existing-record", func(t *testing.T) {
 		// seed initial
-		err := UpsertServiceName(name1, origType)
+		err := UpsertServerName(name1, id1, origType)
 		require.NoError(t, err)
 
 		// capture original timestamps & ID
 		var original server_structs.ServerName
 		require.NoError(t,
-			ServerDatabase.First(&original, "name = ?", name1).Error,
+			ServerDatabase.First(&original, "id = ?", id1).Error,
 		)
 
-		// Upsert with same name
+		// Upsert with same ID
 		time.Sleep(10 * time.Millisecond) // ensure UpdatedAt is different
-		err = UpsertServiceName(name1, origType)
+		err = UpsertServerName(name1, id1, origType)
 		require.NoError(t, err)
 
 		var updated server_structs.ServerName
 		require.NoError(t,
-			ServerDatabase.First(&updated, "name = ?", name1).Error,
+			ServerDatabase.First(&updated, "id = ?", id1).Error,
 		)
 
 		assert.Equal(t, original.ID, updated.ID, "ID should be unchanged")
@@ -237,10 +239,9 @@ func TestUpsertServiceName(t *testing.T) {
 		assert.Equal(t, strings.ToLower(origType.String()), updated.Type, "Type should not be updated")
 	})
 
-	t.Run("insert-second-record-when-name-differs", func(t *testing.T) {
-		err := UpsertServiceName(name1, origType)
-		require.NoError(t, err)
-		err = UpsertServiceName("server-two", cacheType)
+	t.Run("insert-second-record-when-id-differs", func(t *testing.T) {
+		id2 := "test223"
+		err := UpsertServerName("server-two", id2, cacheType)
 		require.NoError(t, err)
 
 		var count int64
@@ -251,7 +252,7 @@ func TestUpsertServiceName(t *testing.T) {
 	})
 }
 
-func TestGetServiceName(t *testing.T) {
+func TestGetServerName(t *testing.T) {
 	config.ResetConfig()
 	SetupMockServiceNameDB(t)
 	t.Cleanup(func() {
@@ -260,7 +261,7 @@ func TestGetServiceName(t *testing.T) {
 	})
 
 	t.Run("empty-table", func(t *testing.T) {
-		_, err := GetServiceName()
+		_, err := GetServerName()
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, gorm.ErrRecordNotFound))
 	})
@@ -284,7 +285,7 @@ func TestGetServiceName(t *testing.T) {
 		require.NoError(t, ServerDatabase.Create(&old).Error)
 		require.NoError(t, ServerDatabase.Create(&recent).Error)
 
-		got, err := GetServiceName()
+		got, err := GetServerName()
 		require.NoError(t, err)
 		assert.Equal(t, "new-server", got)
 	})
