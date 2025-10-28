@@ -114,7 +114,7 @@ The `pelican token create` command uses a set capability flags to apply various 
 These flags are:
 - `-r, --read`: adds the ability to _read_ the specified resource. All tokens needed for a `pelican object get` should apply this flag.
 - `-w, --write`: adds the ability to _write_ or _create_ the specified resource. Note that this **does not** grant permission to _overwrite_ or _delete_ the resource. All tokens needed for a `pelican object put` should apply this flag.
-- `-m, --modify`: adds the ability to _modify_ or _delete_ the specified resource, but will also grant the ability to _write_ or _create_. All tokens needed for a `pelican object rm` should apply this flag.
+- `-m, --modify`: adds the ability to _modify_ or _delete_ the specified resource, but will also grant the ability to _write_ or _create_. All tokens needed for a `pelican object delete` should apply this flag.
 
 <Callout type="example">
 To create a token that lets Client users **read/get** or **write/put** anything under the `/foobar` namespace in the `osg-htc.org` federation (OSDF), run
