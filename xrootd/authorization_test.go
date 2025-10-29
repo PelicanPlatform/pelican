@@ -145,12 +145,17 @@ func TestAuthPathCompToWord(t *testing.T) {
 		component authPathComponent
 		word      string
 	}{
-		{authPathComponent{prefix: "/path1", reads: true, listings: true, subtractive: false}, "/path1 lr"},
-		{authPathComponent{prefix: "/path2", reads: true, listings: false, subtractive: false}, "/path2 r"},
-		{authPathComponent{prefix: "/path3", reads: false, listings: true, subtractive: false}, "/path3 l"},
-		{authPathComponent{prefix: "/path4", reads: true, listings: true, subtractive: true}, "/path4 -lr"},
-		{authPathComponent{prefix: "/path5", reads: true, listings: false, subtractive: true}, "/path5 -r"},
-		{authPathComponent{prefix: "/path6", reads: false, listings: true, subtractive: true}, "/path6 -l"},
+		// Verbose testing around `lr` combinations because these are used by Pelican
+		{authPathComponent{prefix: "/path1", privs: authPrivileges{reads: true, listings: true, subtractive: false}}, "/path1 lr"},
+		{authPathComponent{prefix: "/path2", privs: authPrivileges{reads: true, listings: false, subtractive: false}}, "/path2 r"},
+		{authPathComponent{prefix: "/path3", privs: authPrivileges{reads: false, listings: true, subtractive: false}}, "/path3 l"},
+		{authPathComponent{prefix: "/path4", privs: authPrivileges{reads: true, listings: true, subtractive: true}}, "/path4 -lr"},
+		{authPathComponent{prefix: "/path5", privs: authPrivileges{reads: true, listings: false, subtractive: true}}, "/path5 -r"},
+		{authPathComponent{prefix: "/path6", privs: authPrivileges{reads: false, listings: true, subtractive: true}}, "/path6 -l"},
+
+		// Other combinations may come from admin-defined authfiles
+		{authPathComponent{prefix: "/path7", privs: authPrivileges{all: true, subtractive: true}}, "/path7 -a"},
+		{authPathComponent{prefix: "/path8", privs: authPrivileges{delete: true, insert: true, rename: true, write: true}}, "/path8 dinw"},
 	}
 	for _, testInput := range testCases {
 		t.Run(testInput.word, func(t *testing.T) {
@@ -168,39 +173,42 @@ func TestConstructAuthEntry(t *testing.T) {
 		expected    authPathComponent
 		expectError bool
 	}{
+		// constructAuthEntry only cares about `lr` authfile privs because it takes as input a Capabilities struct,
+		// meaning it is inherently tied to internal generation of authfile entries from exports and NOT user-supplied
+		// authfiles.
 		{
 			"public reads only generates lr", // See comment in constructAuthEntry about why we still need `lr`
 			"/foo",
 			server_structs.Capabilities{PublicReads: true, Listings: false, Reads: false},
-			authPathComponent{prefix: "/foo", reads: true, listings: true, subtractive: false},
+			authPathComponent{prefix: "/foo", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
 			false,
 		},
 		{
 			"public reads with writes and listings generates lr",
 			"/foo",
 			server_structs.Capabilities{PublicReads: true, Listings: true, Reads: true, Writes: true},
-			authPathComponent{prefix: "/foo", reads: true, listings: true, subtractive: false},
+			authPathComponent{prefix: "/foo", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
 			false,
 		},
 		{
 			"protected reads, writes and listings generates -lr", // Listings subtracted because they are not public
 			"/foo",
 			server_structs.Capabilities{PublicReads: false, Listings: true, Reads: true, Writes: true},
-			authPathComponent{prefix: "/foo", reads: true, listings: true, subtractive: true},
+			authPathComponent{prefix: "/foo", privs: authPrivileges{reads: true, listings: true, subtractive: true}},
 			false,
 		},
 		{
 			"protected reads, writes and no listings still generates -lr", // Listings subtracted because they are not public
 			"/foo",
 			server_structs.Capabilities{PublicReads: false, Listings: false, Reads: true, Writes: true},
-			authPathComponent{prefix: "/foo", reads: true, listings: true, subtractive: true},
+			authPathComponent{prefix: "/foo", privs: authPrivileges{reads: true, listings: true, subtractive: true}},
 			false,
 		},
 		{
 			"protected writes generates -lr",
 			"/foo",
 			server_structs.Capabilities{PublicReads: false, Listings: false, Reads: false, Writes: true},
-			authPathComponent{prefix: "/foo", reads: true, listings: true, subtractive: true},
+			authPathComponent{prefix: "/foo", privs: authPrivileges{reads: true, listings: true, subtractive: true}},
 			false,
 		},
 		{
@@ -225,36 +233,37 @@ func TestConstructAuthEntry(t *testing.T) {
 	}
 }
 
-func TestAuthPolicyFromWord(t *testing.T) {
+func TestAuthPrivilegesFromWord(t *testing.T) {
 	testCases := []struct {
-		policyWord  string
-		policy      authPathComponent
+		privsWord   string
+		privs       authPrivileges
 		expectError bool
 	}{
-		{"lr", authPathComponent{subtractive: false, reads: true, listings: true}, false},
-		{"l", authPathComponent{subtractive: false, reads: false, listings: true}, false},
-		{"r", authPathComponent{subtractive: false, reads: true, listings: false}, false},
-		{"-lr", authPathComponent{subtractive: true, reads: true, listings: true}, false},
-		{"-l", authPathComponent{subtractive: true, reads: false, listings: true}, false},
-		{"-r", authPathComponent{subtractive: true, reads: true, listings: false}, false},
-		{"x", authPathComponent{}, true},
-		{"-x", authPathComponent{}, true},
-		{"l-r", authPathComponent{}, true},
-		{"", authPathComponent{}, true},
+		{"lr", authPrivileges{subtractive: false, reads: true, listings: true}, false},
+		{"l", authPrivileges{subtractive: false, reads: false, listings: true}, false},
+		{"r", authPrivileges{subtractive: false, reads: true, listings: false}, false},
+		{"-lr", authPrivileges{subtractive: true, reads: true, listings: true}, false},
+		{"-l", authPrivileges{subtractive: true, reads: false, listings: true}, false},
+		{"-r", authPrivileges{subtractive: true, reads: true, listings: false}, false},
+		{"a", authPrivileges{subtractive: false, all: true}, false},
+		{"-a", authPrivileges{subtractive: true, all: true}, false},
+		{"dinw", authPrivileges{subtractive: false, delete: true, insert: true, rename: true, write: true}, false},
+		{"x", authPrivileges{}, true},
+		{"-x", authPrivileges{}, true},
+		{"l-r", authPrivileges{}, true},
+		{"", authPrivileges{}, true},
 	}
 
 	for _, testInput := range testCases {
-		t.Run(testInput.policyWord, func(t *testing.T) {
-			reads, listings, subtractive, err := authPolicyFromWord(testInput.policyWord)
+		t.Run(testInput.privsWord, func(t *testing.T) {
+			privs, err := authPrivilegesFromWord(testInput.privsWord)
 			if testInput.expectError {
-				require.Error(t, err, "Expected error for policy word: %s", testInput.policyWord)
+				require.Error(t, err, "Expected error for privs word: %s", testInput.privsWord)
 				return
 			}
 
-			require.NoError(t, err, "Unexpected error for policy word: %s", testInput.policyWord)
-			require.Equal(t, testInput.policy.reads, reads, "Mismatch in reads for policy word: %s", testInput.policyWord)
-			require.Equal(t, testInput.policy.listings, listings, "Mismatch in listings for policy word: %s", testInput.policyWord)
-			require.Equal(t, testInput.policy.subtractive, subtractive, "Mismatch in subtractive for policy word: %s", testInput.policyWord)
+			require.NoError(t, err, "Unexpected error for privs word: %s", testInput.privsWord)
+			require.Equal(t, testInput.privs, privs, "Mismatch in privs for privs word: %s", testInput.privsWord)
 		})
 	}
 }
@@ -273,8 +282,8 @@ func TestAuthPoliciesFromLine(t *testing.T) {
 			map[string]*authLine{},
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
-					"/path1": {prefix: "/path1", reads: true, listings: true, subtractive: false},
-					"/path2": {prefix: "/path2", reads: true, listings: false, subtractive: true},
+					"/path1": {prefix: "/path1", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
+					"/path2": {prefix: "/path2", privs: authPrivileges{reads: true, listings: false, subtractive: true}},
 				},
 				},
 			},
@@ -285,20 +294,20 @@ func TestAuthPoliciesFromLine(t *testing.T) {
 			"u blah /path3 -lr /path4 r",
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
-					"/path1": {prefix: "/path1", reads: true, listings: true, subtractive: false},
-					"/path2": {prefix: "/path2", reads: true, listings: false, subtractive: true},
+					"/path1": {prefix: "/path1", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
+					"/path2": {prefix: "/path2", privs: authPrivileges{reads: true, listings: false, subtractive: true}},
 				},
 				},
 			},
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
-					"/path1": {prefix: "/path1", reads: true, listings: true, subtractive: false},
-					"/path2": {prefix: "/path2", reads: true, listings: false, subtractive: true},
+					"/path1": {prefix: "/path1", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
+					"/path2": {prefix: "/path2", privs: authPrivileges{reads: true, listings: false, subtractive: true}},
 				},
 				},
 				"u blah": {idType: "u", id: "blah", authComponents: map[string]*authPathComponent{
-					"/path3": {prefix: "/path3", reads: true, listings: true, subtractive: true},
-					"/path4": {prefix: "/path4", reads: true, listings: false, subtractive: false},
+					"/path3": {prefix: "/path3", privs: authPrivileges{reads: true, listings: true, subtractive: true}},
+					"/path4": {prefix: "/path4", privs: authPrivileges{reads: true, listings: false, subtractive: false}},
 				},
 				},
 			},
@@ -309,8 +318,8 @@ func TestAuthPoliciesFromLine(t *testing.T) {
 			"u * /path3 -lr /path4 r",
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
-					"/path1": {prefix: "/path1", reads: true, listings: true, subtractive: false},
-					"/path2": {prefix: "/path2", reads: true, listings: false, subtractive: true},
+					"/path1": {prefix: "/path1", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
+					"/path2": {prefix: "/path2", privs: authPrivileges{reads: true, listings: false, subtractive: true}},
 				},
 				},
 			},
@@ -442,9 +451,9 @@ func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
 			map[string]*authLine{},
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
-					"/first/namespace":  {prefix: "/first/namespace", reads: true, listings: true, subtractive: false},
-					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: true, subtractive: true},
-					"/.well-known":      {prefix: "/.well-known", reads: true, listings: true, subtractive: false},
+					"/first/namespace":  {prefix: "/first/namespace", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
+					"/second/namespace": {prefix: "/second/namespace", privs: authPrivileges{reads: true, listings: true, subtractive: true}},
+					"/.well-known":      {prefix: "/.well-known", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
 				},
 				},
 			},
@@ -454,21 +463,25 @@ func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
 			"mulit-export, multi-auth origin with non-conflicting input authfile",
 			map[string]*authLine{
 				"u another": {idType: "u", id: "another", authComponents: map[string]*authPathComponent{
-					"/first/namespace":  {prefix: "/first/namespace", reads: false, listings: true, subtractive: false},
-					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: false, subtractive: false},
+					"/first/namespace":  {prefix: "/first/namespace", privs: authPrivileges{reads: false, listings: true, subtractive: false}},
+					"/second/namespace": {prefix: "/second/namespace", privs: authPrivileges{reads: true, listings: false, subtractive: false}},
+					"/third/namespace":  {prefix: "/third/namespace", privs: authPrivileges{all: true}},
+					"/fourth/namespace": {prefix: "/fourth/namespace", privs: authPrivileges{delete: true, insert: true, rename: true, write: true}},
 				},
 				},
 			},
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
-					"/first/namespace":  {prefix: "/first/namespace", reads: true, listings: true, subtractive: false},
-					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: true, subtractive: true},
-					"/.well-known":      {prefix: "/.well-known", reads: true, listings: true, subtractive: false},
+					"/first/namespace":  {prefix: "/first/namespace", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
+					"/second/namespace": {prefix: "/second/namespace", privs: authPrivileges{reads: true, listings: true, subtractive: true}},
+					"/.well-known":      {prefix: "/.well-known", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
 				},
 				},
 				"u another": {idType: "u", id: "another", authComponents: map[string]*authPathComponent{
-					"/first/namespace":  {prefix: "/first/namespace", reads: false, listings: true, subtractive: false},
-					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: false, subtractive: false},
+					"/first/namespace":  {prefix: "/first/namespace", privs: authPrivileges{reads: false, listings: true, subtractive: false}},
+					"/second/namespace": {prefix: "/second/namespace", privs: authPrivileges{reads: true, listings: false, subtractive: false}},
+					"/third/namespace":  {prefix: "/third/namespace", privs: authPrivileges{all: true}},
+					"/fourth/namespace": {prefix: "/fourth/namespace", privs: authPrivileges{delete: true, insert: true, rename: true, write: true}},
 				},
 				},
 			},
@@ -478,18 +491,18 @@ func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
 			"mulit-export, multi-auth origin with conflicting input authfile",
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
-					"/first/namespace": {prefix: "/first/namespace", reads: false, listings: true, subtractive: false},
-					"/third/namespace": {prefix: "/third/namespace", reads: true, listings: true, subtractive: false},
+					"/first/namespace": {prefix: "/first/namespace", privs: authPrivileges{reads: false, listings: true, subtractive: false}},
+					"/third/namespace": {prefix: "/third/namespace", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
 				},
 				},
 			},
 			map[string]*authLine{
 				// The pre-populated auth map coming from admin input should override the export-derived one
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
-					"/first/namespace":  {prefix: "/first/namespace", reads: false, listings: true, subtractive: false},
-					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: true, subtractive: true},
-					"/third/namespace":  {prefix: "/third/namespace", reads: true, listings: true, subtractive: false},
-					"/.well-known":      {prefix: "/.well-known", reads: true, listings: true, subtractive: false},
+					"/first/namespace":  {prefix: "/first/namespace", privs: authPrivileges{reads: false, listings: true, subtractive: false}},
+					"/second/namespace": {prefix: "/second/namespace", privs: authPrivileges{reads: true, listings: true, subtractive: true}},
+					"/third/namespace":  {prefix: "/third/namespace", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
+					"/.well-known":      {prefix: "/.well-known", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
 				},
 				},
 			},
@@ -500,9 +513,9 @@ func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
 			map[string]*authLine{},
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
-					"/mynamespace":        {prefix: "/mynamespace", reads: true, listings: true, subtractive: false},
-					"/mynamespace-writes": {prefix: "/mynamespace-writes", reads: true, listings: true, subtractive: true},
-					"/.well-known":        {prefix: "/.well-known", reads: true, listings: true, subtractive: false},
+					"/mynamespace":        {prefix: "/mynamespace", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
+					"/mynamespace-writes": {prefix: "/mynamespace-writes", privs: authPrivileges{reads: true, listings: true, subtractive: true}},
+					"/.well-known":        {prefix: "/.well-known", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
 				},
 				},
 			},
@@ -556,9 +569,9 @@ func TestPopulateAuthLinesMapForCache(t *testing.T) {
 			map[string]*authLine{},
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
-					"/first/namespace":  {prefix: "/first/namespace", reads: true, listings: true, subtractive: false},
-					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: true, subtractive: true},
-					"/.well-known":      {prefix: "/.well-known", reads: true, listings: true, subtractive: false},
+					"/first/namespace":  {prefix: "/first/namespace", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
+					"/second/namespace": {prefix: "/second/namespace", privs: authPrivileges{reads: true, listings: true, subtractive: true}},
+					"/.well-known":      {prefix: "/.well-known", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
 				},
 				},
 			},
@@ -567,21 +580,25 @@ func TestPopulateAuthLinesMapForCache(t *testing.T) {
 			"mulit-export, multi-auth cache with non-conflicting input authfile",
 			map[string]*authLine{
 				"u another": {idType: "u", id: "another", authComponents: map[string]*authPathComponent{
-					"/first/namespace":  {prefix: "/first/namespace", reads: false, listings: true, subtractive: false},
-					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: true, subtractive: false},
+					"/first/namespace":  {prefix: "/first/namespace", privs: authPrivileges{reads: false, listings: true, subtractive: false}},
+					"/second/namespace": {prefix: "/second/namespace", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
+					"/third/namespace":  {prefix: "/third/namespace", privs: authPrivileges{all: true}},
+					"/fourth/namespace": {prefix: "/fourth/namespace", privs: authPrivileges{delete: true, insert: true, rename: true, write: true}},
 				},
 				},
 			},
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
-					"/first/namespace":  {prefix: "/first/namespace", reads: true, listings: true, subtractive: false},
-					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: true, subtractive: true},
-					"/.well-known":      {prefix: "/.well-known", reads: true, listings: true, subtractive: false},
+					"/first/namespace":  {prefix: "/first/namespace", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
+					"/second/namespace": {prefix: "/second/namespace", privs: authPrivileges{reads: true, listings: true, subtractive: true}},
+					"/.well-known":      {prefix: "/.well-known", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
 				},
 				},
 				"u another": {idType: "u", id: "another", authComponents: map[string]*authPathComponent{
-					"/first/namespace":  {prefix: "/first/namespace", reads: false, listings: true, subtractive: false},
-					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: true, subtractive: false},
+					"/first/namespace":  {prefix: "/first/namespace", privs: authPrivileges{reads: false, listings: true, subtractive: false}},
+					"/second/namespace": {prefix: "/second/namespace", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
+					"/third/namespace":  {prefix: "/third/namespace", privs: authPrivileges{all: true}},
+					"/fourth/namespace": {prefix: "/fourth/namespace", privs: authPrivileges{delete: true, insert: true, rename: true, write: true}},
 				},
 				},
 			},
@@ -590,18 +607,18 @@ func TestPopulateAuthLinesMapForCache(t *testing.T) {
 			"mulit-export, multi-auth cache with conflicting input authfile",
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
-					"/first/namespace": {prefix: "/first/namespace", reads: false, listings: true, subtractive: false},
-					"/third/namespace": {prefix: "/third/namespace", reads: true, listings: false, subtractive: false},
+					"/first/namespace": {prefix: "/first/namespace", privs: authPrivileges{reads: false, listings: true, subtractive: false}},
+					"/third/namespace": {prefix: "/third/namespace", privs: authPrivileges{reads: true, listings: false, subtractive: false}},
 				},
 				},
 			},
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
 					// This one is overridden by discovered namespace ad
-					"/first/namespace":  {prefix: "/first/namespace", reads: true, listings: true, subtractive: false},
-					"/second/namespace": {prefix: "/second/namespace", reads: true, listings: true, subtractive: true},
-					"/third/namespace":  {prefix: "/third/namespace", reads: true, listings: false, subtractive: false},
-					"/.well-known":      {prefix: "/.well-known", reads: true, listings: true, subtractive: false},
+					"/first/namespace":  {prefix: "/first/namespace", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
+					"/second/namespace": {prefix: "/second/namespace", privs: authPrivileges{reads: true, listings: true, subtractive: true}},
+					"/third/namespace":  {prefix: "/third/namespace", privs: authPrivileges{reads: true, listings: false, subtractive: false}},
+					"/.well-known":      {prefix: "/.well-known", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
 				},
 				},
 			},
@@ -637,7 +654,7 @@ func TestSerializeAuthline(t *testing.T) {
 		{
 			"single path",
 			authLine{idType: "u", id: "*", authComponents: map[string]*authPathComponent{
-				"/path1": {prefix: "/path1", reads: true, listings: true, subtractive: false},
+				"/path1": {prefix: "/path1", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
 			},
 			},
 			"u * /path1 lr",
@@ -645,8 +662,8 @@ func TestSerializeAuthline(t *testing.T) {
 		{
 			"multiple paths with different lengths",
 			authLine{idType: "u", id: "*", authComponents: map[string]*authPathComponent{
-				"/path1":   {prefix: "/path1", reads: true, listings: true, subtractive: false},
-				"/path123": {prefix: "/path123", reads: true, listings: false, subtractive: true},
+				"/path1":   {prefix: "/path1", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
+				"/path123": {prefix: "/path123", privs: authPrivileges{reads: true, listings: false, subtractive: true}},
 			},
 			},
 			"u * /path123 -r /path1 lr",
@@ -657,8 +674,8 @@ func TestSerializeAuthline(t *testing.T) {
 			// lexicographically when lengths are the same -- regular
 			// go maps have no order to preserve.
 			authLine{idType: "u", id: "*", authComponents: map[string]*authPathComponent{
-				"/path432": {prefix: "/path432", reads: true, listings: true, subtractive: false},
-				"/path123": {prefix: "/path123", reads: true, listings: false, subtractive: true},
+				"/path432": {prefix: "/path432", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
+				"/path123": {prefix: "/path123", privs: authPrivileges{reads: true, listings: false, subtractive: true}},
 			},
 			},
 
@@ -687,8 +704,8 @@ func TestGetSortedSerializedAuthLines(t *testing.T) {
 					idType: "u",
 					id:     "*",
 					authComponents: map[string]*authPathComponent{
-						"/foo":    {prefix: "/foo", reads: true, listings: false, subtractive: false},
-						"/foobar": {prefix: "/foobar", reads: true, listings: false, subtractive: true},
+						"/foo":    {prefix: "/foo", privs: authPrivileges{reads: true, listings: false, subtractive: false}},
+						"/foobar": {prefix: "/foobar", privs: authPrivileges{reads: true, listings: false, subtractive: true}},
 					},
 				},
 			},
@@ -701,15 +718,15 @@ func TestGetSortedSerializedAuthLines(t *testing.T) {
 					idType: "u",
 					id:     "alice",
 					authComponents: map[string]*authPathComponent{
-						"/bar": {prefix: "/bar", reads: true, listings: true, subtractive: false},
+						"/bar": {prefix: "/bar", privs: authPrivileges{reads: true, listings: true, subtractive: false}},
 					},
 				},
 				"u *": {
 					idType: "u",
 					id:     "*",
 					authComponents: map[string]*authPathComponent{
-						"/foo":    {prefix: "/foo", reads: true, listings: false, subtractive: false},
-						"/foobar": {prefix: "/foobar", reads: true, listings: false, subtractive: true},
+						"/foo":    {prefix: "/foo", privs: authPrivileges{reads: true, listings: false, subtractive: false}},
+						"/foobar": {prefix: "/foobar", privs: authPrivileges{reads: true, listings: false, subtractive: true}},
 					},
 				},
 			},
