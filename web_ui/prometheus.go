@@ -470,6 +470,12 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 	}
 	cfg.tsdb.RetentionDuration = retention
 
+	maxBytes, err := units.ParseBase2Bytes(param.Monitoring_DataRetentionSize.GetString())
+	if err != nil {
+		return fmt.Errorf("failed to parse max bytes for retention size: %v", err)
+	}
+	cfg.tsdb.MaxBytes = maxBytes
+
 	// Max block size settings.
 	if cfg.tsdb.MaxBlockDuration == 0 {
 		maxBlockDuration, err := model.ParseDuration("31d")

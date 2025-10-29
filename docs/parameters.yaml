@@ -3168,6 +3168,17 @@ type: duration
 default: 360h
 components: ["origin", "cache", "director", "registry"]
 ---
+name: Monitoring.DataRetentionSize
+description: |+
+  The maximum number of bytes of storage blocks to retain. The oldest data will be removed first. This is used to limit the amount of data that can be stored in the database.
+  This parameter is equivalent to the Prometheus `storage.tsdb.retention.size` flag. For more information, see [Prometheus Storage Documentation](https://prometheus.io/docs/prometheus/latest/storage/).
+
+  Units supported: B, KB, MB, GB, TB, PB, EB
+  Ex: "512MB"
+type: string
+default: "0B"
+components: ["origin", "cache", "director", "registry"]
+---
 name: Monitoring.LabelLimit
 description: |+
   The maximum number of labels that can be attached to a single metric. 0 means no limit.
