@@ -81,6 +81,13 @@ type Config struct {
 		StoppedTransferTimeout time.Duration `mapstructure:"stoppedtransfertimeout" yaml:"StoppedTransferTimeout"`
 		WorkerCount int `mapstructure:"workercount" yaml:"WorkerCount"`
 	} `mapstructure:"client" yaml:"Client"`
+	ClientAPI struct {
+		DatabasePath string `mapstructure:"databasepath" yaml:"DatabasePath"`
+		EnableAutoRecovery bool `mapstructure:"enableautorecovery" yaml:"EnableAutoRecovery"`
+		HistoryRetentionDays int `mapstructure:"historyretentiondays" yaml:"HistoryRetentionDays"`
+		MaxConnections int `mapstructure:"maxconnections" yaml:"MaxConnections"`
+		Socket string `mapstructure:"socket" yaml:"Socket"`
+	} `mapstructure:"clientapi" yaml:"ClientAPI"`
 	ConfigDir string `mapstructure:"configdir" yaml:"ConfigDir"`
 	ConfigLocations []string `mapstructure:"configlocations" yaml:"ConfigLocations"`
 	Debug bool `mapstructure:"debug" yaml:"Debug"`
@@ -481,6 +488,13 @@ type configWithType struct {
 		SlowTransferWindow struct { Type string; Value time.Duration }
 		StoppedTransferTimeout struct { Type string; Value time.Duration }
 		WorkerCount struct { Type string; Value int }
+	}
+	ClientAPI struct {
+		DatabasePath struct { Type string; Value string }
+		EnableAutoRecovery struct { Type string; Value bool }
+		HistoryRetentionDays struct { Type string; Value int }
+		MaxConnections struct { Type string; Value int }
+		Socket struct { Type string; Value string }
 	}
 	ConfigDir struct { Type string; Value string }
 	ConfigLocations struct { Type string; Value []string }

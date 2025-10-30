@@ -20,6 +20,7 @@ package client_api
 
 import (
 	"context"
+	"reflect"
 	"sync"
 	"time"
 
@@ -67,6 +68,7 @@ type TransferJob struct {
 type TransferManager struct {
 	jobs      map[string]*TransferJob
 	transfers map[string]*Transfer
+	store     StoreInterface
 	mu        sync.RWMutex
 	maxJobs   int
 	semaphore chan struct{}
@@ -76,16 +78,128 @@ type TransferManager struct {
 }
 
 // NewTransferManager creates a new transfer manager
-func NewTransferManager(ctx context.Context, maxConcurrentJobs int) *TransferManager {
+func NewTransferManager(ctx context.Context, maxConcurrentJobs int, store StoreInterface) *TransferManager {
 	managerCtx, cancel := context.WithCancel(ctx)
 
-	return &TransferManager{
+	tm := &TransferManager{
 		jobs:      make(map[string]*TransferJob),
 		transfers: make(map[string]*Transfer),
+		store:     store,
 		maxJobs:   maxConcurrentJobs,
 		semaphore: make(chan struct{}, maxConcurrentJobs),
 		ctx:       managerCtx,
 		cancel:    cancel,
+	}
+
+	// Attempt to recover incomplete jobs from database
+	if store != nil {
+		go tm.recoverJobs()
+		go tm.startBackgroundTasks()
+	}
+
+	return tm
+}
+
+// recoverJobs attempts to recover incomplete jobs from the database
+func (tm *TransferManager) recoverJobs() {
+	log.Info("Starting job recovery from database...")
+
+	// The most reliable way is to use GetRecoverableJobs which returns interface{}
+	// containing []*store.StoredJob, but since we can't import store from here,
+	// we use ListJobs and extract IDs using reflection
+	var recoveredCount int
+	for _, status := range []string{StatusPending, StatusRunning} {
+		statusJobsData, statusTotal, err := tm.store.ListJobs(status, 1000, 0)
+		if err != nil {
+			log.Warnf("Failed to get %s jobs: %v", status, err)
+			continue
+		}
+
+		if statusTotal == 0 {
+			continue
+		}
+
+		log.Infof("Found %d incomplete jobs with status %s", statusTotal, status)
+
+		// statusJobsData is []*store.StoredJob as interface{}
+		// We can use reflection to extract job IDs
+		v := reflect.ValueOf(statusJobsData)
+		if v.Kind() == reflect.Slice {
+			for i := 0; i < v.Len(); i++ {
+				jobVal := v.Index(i)
+				if jobVal.Kind() == reflect.Ptr {
+					jobVal = jobVal.Elem()
+				}
+				if jobVal.Kind() == reflect.Struct {
+					idField := jobVal.FieldByName("ID")
+					if idField.IsValid() && idField.Kind() == reflect.String {
+						jobID := idField.String()
+						tm.recoverSingleJob(jobID)
+						recoveredCount++
+					}
+				}
+			}
+		}
+	}
+
+	if recoveredCount == 0 {
+		log.Info("No jobs to recover")
+	} else {
+		log.Infof("Job recovery complete: marked %d jobs as failed", recoveredCount)
+	}
+}
+
+// recoverSingleJob marks a single job as failed and archives it
+func (tm *TransferManager) recoverSingleJob(jobID string) {
+	log.Infof("Marking incomplete job %s as failed", jobID)
+
+	now := time.Now()
+	if err := tm.store.UpdateJobStatus(jobID, StatusFailed); err != nil {
+		log.Warnf("Failed to update recovered job %s status: %v", jobID, err)
+		return
+	}
+	if err := tm.store.UpdateJobTimes(jobID, nil, &now); err != nil {
+		log.Warnf("Failed to update recovered job %s completion time: %v", jobID, err)
+	}
+	if err := tm.store.UpdateJobError(jobID, "Job interrupted by server restart"); err != nil {
+		log.Warnf("Failed to update recovered job %s error: %v", jobID, err)
+	}
+
+	// Update all transfers for this job to failed status
+	transfersData, err := tm.store.GetTransfersByJob(jobID)
+	if err != nil {
+		log.Warnf("Failed to get transfers for recovered job %s: %v", jobID, err)
+	} else {
+		// Use reflection to extract transfers from interface{}
+		transfersVal := reflect.ValueOf(transfersData)
+		if transfersVal.Kind() == reflect.Slice {
+			for i := 0; i < transfersVal.Len(); i++ {
+				transfer := transfersVal.Index(i)
+				if transfer.Kind() == reflect.Ptr {
+					transfer = transfer.Elem()
+				}
+
+				// Extract transfer ID
+				transferIDField := transfer.FieldByName("ID")
+				if !transferIDField.IsValid() || transferIDField.Kind() != reflect.String {
+					continue
+				}
+				transferID := transferIDField.String()
+
+				// Update transfer status and completion time
+				if err := tm.store.UpdateTransferStatus(transferID, StatusFailed); err != nil {
+					log.Warnf("Failed to update recovered transfer %s status: %v", transferID, err)
+				}
+				if err := tm.store.UpdateTransferTimes(transferID, nil, &now); err != nil {
+					log.Warnf("Failed to update recovered transfer %s completion time: %v", transferID, err)
+				}
+			}
+		}
+	}
+
+	// Archive the failed job
+	if err := tm.store.ArchiveJob(jobID); err != nil {
+		log.Warnf("Failed to archive recovered job %s: %v", jobID, err)
 	}
 }
 
@@ -127,9 +241,34 @@ func (tm *TransferManager) CreateJob(requests []TransferRequest, options []clien
 
 		job.Transfers = append(job.Transfers, transfer)
 		tm.transfers[transferID] = transfer
+
+		// Persist transfer to database if store is available
+		if tm.store != nil {
+			storedTransfer := map[string]interface{}{
+				"ID":          transferID,
+				"JobID":       jobID,
+				"Operation":   req.Operation,
+				"Source":      req.Source,
+				"Destination": req.Destination,
+				"Recursive":   req.Recursive,
+				"Status":      StatusPending,
+				"CreatedAt":   transfer.CreatedAt.Unix(),
+			}
+			if err := tm.store.CreateTransfer(storedTransfer); err != nil {
+				log.Warnf("Failed to persist transfer %s to database: %v", transferID, err)
+			}
+		}
 	}
 
 	tm.jobs[jobID] = job
+
+	// Persist job to database if store is available
+	if tm.store != nil {
+		optionsJSON := "{}"
+		if err := tm.store.CreateJob(jobID, StatusPending, job.CreatedAt, optionsJSON); err != nil {
+			log.Warnf("Failed to persist job %s to database: %v", jobID, err)
+		}
+	}
 
 	// Start the job asynchronously
 	tm.wg.Add(1)
@@ -157,6 +296,16 @@ func (tm *TransferManager) executeJob(job *TransferJob) {
 	job.Status = StatusRunning
 	job.StartedAt = &now
 	tm.mu.Unlock()
+
+	// Persist status update to database
+	if tm.store != nil {
+		if err := tm.store.UpdateJobStatus(job.ID, StatusRunning); err != nil {
+			log.Warnf("Failed to update job %s status in database: %v", job.ID, err)
+		}
+		if err := tm.store.UpdateJobTimes(job.ID, &now, nil); err != nil {
+			log.Warnf("Failed to update job %s start time in database: %v", job.ID, err)
+		}
+	}
 
 	log.Infof("Starting job %s with %d transfers", job.ID, len(job.Transfers))
 
@@ -192,6 +341,21 @@ func (tm *TransferManager) executeJob(job *TransferJob) {
 	}
 	tm.mu.Unlock()
 
+	// Persist final status to database
+	if tm.store != nil {
+		if err := tm.store.UpdateJobStatus(job.ID, job.Status); err != nil {
+			log.Warnf("Failed to update job %s final status in database: %v", job.ID, err)
+		}
+		if err := tm.store.UpdateJobTimes(job.ID, nil, &completedAt); err != nil {
+			log.Warnf("Failed to update job %s completion time in database: %v", job.ID, err)
+		}
+		if job.Error != nil {
+			if err := tm.store.UpdateJobError(job.ID, job.Error.Error()); err != nil {
+				log.Warnf("Failed to update job %s error in database: %v", job.ID, err)
+			}
+		}
+	}
+
 	log.Infof("Job %s completed with status %s", job.ID, job.Status)
 }
 
@@ -202,6 +366,16 @@ func (tm *TransferManager) executeTransfer(transfer *Transfer, options []client.
 	transfer.Status = StatusRunning
 	transfer.StartedAt = &now
 	tm.mu.Unlock()
+
+	// Persist transfer status update to database
+	if tm.store != nil {
+		if err := tm.store.UpdateTransferStatus(transfer.ID, StatusRunning); err != nil {
+			log.Warnf("Failed to update transfer %s status in database: %v", transfer.ID, err)
+		}
+		if err := tm.store.UpdateTransferTimes(transfer.ID, &now, nil); err != nil {
+			log.Warnf("Failed to update transfer %s start time in database: %v", transfer.ID, err)
+		}
+	}
 
 	log.Debugf("Executing transfer %s: %s %s -> %s", transfer.ID, transfer.Operation, transfer.Source, transfer.Destination)
 
@@ -229,6 +403,20 @@ func (tm *TransferManager) executeTransfer(transfer *Transfer, options []client.
 	if err != nil {
 		transfer.Status = StatusFailed
 		transfer.Error = err
+
+		// Persist failure to database
+		if tm.store != nil {
+			if storeErr := tm.store.UpdateTransferStatus(transfer.ID, StatusFailed); storeErr != nil {
+				log.Warnf("Failed to update transfer %s status in database: %v", transfer.ID, storeErr)
+			}
+			if storeErr := tm.store.UpdateTransferTimes(transfer.ID, nil, &completedAt); storeErr != nil {
+				log.Warnf("Failed to update transfer %s completion time in database: %v", transfer.ID, storeErr)
+			}
+			if storeErr := tm.store.UpdateTransferError(transfer.ID, err.Error()); storeErr != nil {
+				log.Warnf("Failed to update transfer %s error in database: %v", transfer.ID, storeErr)
+			}
+		}
+
 		log.Errorf("Transfer %s failed: %v", transfer.ID, err)
 		return err
 	}
@@ -242,6 +430,19 @@ func (tm *TransferManager) executeTransfer(transfer *Transfer, options []client.
 	transfer.BytesTransferred = totalBytes
 	transfer.TotalBytes = totalBytes
 	transfer.Status = StatusCompleted
+
+	// Persist success to database
+	if tm.store != nil {
+		if err := tm.store.UpdateTransferProgress(transfer.ID, totalBytes, totalBytes); err != nil {
+			log.Warnf("Failed to update transfer %s progress in database: %v", transfer.ID, err)
+		}
+		if err := tm.store.UpdateTransferStatus(transfer.ID, StatusCompleted); err != nil {
+			log.Warnf("Failed to update transfer %s status in database: %v", transfer.ID, err)
+		}
+		if err := tm.store.UpdateTransferTimes(transfer.ID, nil, &completedAt); err != nil {
+			log.Warnf("Failed to update transfer %s completion time in database: %v", transfer.ID, err)
+		}
+	}
 
 	log.Debugf("Transfer %s completed successfully: %d bytes", transfer.ID, totalBytes)
 	return nil
@@ -345,6 +546,16 @@ func (tm *TransferManager) CancelJob(jobID string) (int, int, error) {
 					now := time.Now()
 					transfer.CompletedAt = &now
 				}
+
+				// Persist cancellation to database
+				if tm.store != nil {
+					if err := tm.store.UpdateTransferStatus(transfer.ID, StatusCancelled); err != nil {
+						log.Warnf("Failed to update cancelled transfer %s in database: %v", transfer.ID, err)
+					}
+					if err := tm.store.UpdateTransferTimes(transfer.ID, nil, transfer.CompletedAt); err != nil {
+						log.Warnf("Failed to update cancelled transfer %s time in database: %v", transfer.ID, err)
+					}
+				}
 			}
 		}
 	}
@@ -353,6 +564,16 @@ func (tm *TransferManager) CancelJob(jobID string) (int, int, error) {
 	if job.CompletedAt == nil {
 		now := time.Now()
 		job.CompletedAt = &now
+	}
+
+	// Persist job cancellation to database
+	if tm.store != nil {
+		if err := tm.store.UpdateJobStatus(job.ID, StatusCancelled); err != nil {
+			log.Warnf("Failed to update cancelled job %s in database: %v", job.ID, err)
+		}
+		if err := tm.store.UpdateJobTimes(job.ID, nil, job.CompletedAt); err != nil {
+			log.Warnf("Failed to update cancelled job %s time in database: %v", job.ID, err)
+		}
 	}
 
 	return cancelled, completed, nil
@@ -470,6 +691,130 @@ func (tm *TransferManager) GetJobProgress(job *TransferJob) *JobProgress {
 		TransfersCompleted: completed,
 		TransfersTotal:     total,
 		TransfersFailed:    failed,
+	}
+}
+
+// startBackgroundTasks starts periodic background maintenance tasks
+func (tm *TransferManager) startBackgroundTasks() {
+	if tm.store == nil {
+		log.Debug("Store not configured, background tasks disabled")
+		return
+	}
+
+	log.Info("Starting background maintenance tasks")
+
+	// Archive completed jobs periodically (every hour)
+	tm.wg.Add(1)
+	go func() {
+		defer tm.wg.Done()
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-tm.ctx.Done():
+				log.Debug("Stopping job archival task")
+				return
+			case <-ticker.C:
+				tm.archiveCompletedJobs()
+			}
+		}
+	}()
+
+	// Prune old history periodically (daily)
+	tm.wg.Add(1)
+	go func() {
+		defer tm.wg.Done()
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+
+		// Run once on startup after a short delay (use shorter delay for tests)
+		startupDelay := 5 * time.Minute
+		if tm.maxJobs < 10 {
+			// Likely a test environment with low maxJobs, use shorter delay
+			startupDelay = 1 * time.Second
+		}
+
+		// Use a timer instead of sleep to respect context cancellation
+		timer := time.NewTimer(startupDelay)
+		select {
+		case <-tm.ctx.Done():
+			timer.Stop()
+			log.Debug("Stopping history pruning task (before initial run)")
+			return
+		case <-timer.C:
+			tm.pruneOldHistory()
+		}
+
+		for {
+			select {
+			case <-tm.ctx.Done():
+				log.Debug("Stopping history pruning task")
+				return
+			case <-ticker.C:
+				tm.pruneOldHistory()
+			}
+		}
+	}()
+}
+
+// archiveCompletedJobs archives all completed/failed/cancelled jobs to history
+func (tm *TransferManager) archiveCompletedJobs() {
+	log.Debug("Running job archival task")
+
+	tm.mu.RLock()
+	var jobsToArchive []string
+	for jobID, job := range tm.jobs {
+		if job.Status == StatusCompleted || job.Status == StatusFailed || job.Status == StatusCancelled {
+			// Only archive if completed more than 5 minutes ago
+			if job.CompletedAt != nil && time.Since(*job.CompletedAt) > 5*time.Minute {
+				jobsToArchive = append(jobsToArchive, jobID)
+			}
+		}
+	}
+	tm.mu.RUnlock()
+
+	archived := 0
+	for _, jobID := range jobsToArchive {
+		if err := tm.store.ArchiveJob(jobID); err != nil {
+			log.Warnf("Failed to archive job %s: %v", jobID, err)
+			continue
+		}
+
+		// Remove from in-memory maps
+		tm.mu.Lock()
+		if job, exists := tm.jobs[jobID]; exists {
+			for _, transfer := range job.Transfers {
+				delete(tm.transfers, transfer.ID)
+			}
+			delete(tm.jobs, jobID)
+		}
+		tm.mu.Unlock()
+
+		archived++
+	}
+
+	if archived > 0 {
+		log.Infof("Archived %d completed jobs to history", archived)
+	}
+}
+
+// pruneOldHistory removes historical jobs older than the retention period
+func (tm *TransferManager) pruneOldHistory() {
+	log.Debug("Running history pruning task")
+
+	// Default retention: 30 days
+	retentionDays := 30
+	cutoffTime := time.Now().Add(-time.Duration(retentionDays) * 24 * time.Hour)
+
+	pruned, err := tm.store.PruneHistory(cutoffTime)
+	if err != nil {
+		log.Errorf("Failed to prune history: %v", err)
+		return
+	}
+
+	if pruned > 0 {
+		log.Infof("Pruned %d old jobs from history (older than %d days)", pruned, retentionDays)
 	}
 }
 

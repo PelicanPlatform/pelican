@@ -23,6 +23,7 @@ package client_api_test
 import (
 	"bytes"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,6 +32,7 @@ import (
 	"testing"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -49,7 +51,7 @@ func buildPelicanBinary(t *testing.T) string {
 	tmpDir := t.TempDir()
 	binaryPath := filepath.Join(tmpDir, "pelican")
 
-	cmd := exec.Command("go", "build", "-o", binaryPath, "../../cmd")
+	cmd := exec.Command("go", "build", "-o", binaryPath, "../cmd")
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, "Failed to build pelican binary: %s", output)
 
@@ -125,12 +127,13 @@ func TestCLIAsyncGet(t *testing.T) {
 	require.NoError(t, err)
 
 	federationPrefix := fed.Exports[0].FederationPrefix
-	discoveryUrl := param.Federation_DiscoveryUrl.GetString()
-	uploadURL := fmt.Sprintf("pelican://%s%s/async-get-test.txt", discoveryUrl, federationPrefix)
+	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+	require.NoError(t, err)
+	uploadURL := fmt.Sprintf("pelican://%s%s/async-get-test.txt", discoveryUrl.Host, federationPrefix)
 
-	// Upload synchronously first
-	uploadCmd := exec.Command(pelicanBin, "object", "put", uploadFile, uploadURL, "--token", tokenFile)
-	uploadCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENT_API_SOCKET=%s", socketPath))
+	// Upload with async + wait to ensure file is present before testing downloads
+	uploadCmd := exec.Command(pelicanBin, "object", "put", "--async", "--wait", uploadFile, uploadURL, "--token", tokenFile)
+	uploadCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
 	output, err := uploadCmd.CombinedOutput()
 	require.NoError(t, err, "Failed to upload file: %s", output)
 
@@ -139,7 +142,7 @@ func TestCLIAsyncGet(t *testing.T) {
 		downloadFile := filepath.Join(tempDir, "downloaded-async.txt")
 
 		cmd := exec.Command(pelicanBin, "object", "get", "--async", uploadURL, downloadFile, "--token", tokenFile)
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENT_API_SOCKET=%s", socketPath))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Failed to run async get: %s", output)
@@ -171,7 +174,7 @@ func TestCLIAsyncGet(t *testing.T) {
 		downloadFile := filepath.Join(tempDir, "downloaded-wait.txt")
 
 		cmd := exec.Command(pelicanBin, "object", "get", "--async", "--wait", uploadURL, downloadFile, "--token", tokenFile)
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENT_API_SOCKET=%s", socketPath))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Failed to run async get with wait: %s", output)
@@ -257,13 +260,14 @@ func TestCLIAsyncPut(t *testing.T) {
 	require.NoError(t, err)
 
 	federationPrefix := fed.Exports[0].FederationPrefix
-	discoveryUrl := param.Federation_DiscoveryUrl.GetString()
-	uploadURL := fmt.Sprintf("pelican://%s%s/async-put-test.txt", discoveryUrl, federationPrefix)
+	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+	require.NoError(t, err)
+	uploadURL := fmt.Sprintf("pelican://%s%s/async-put-test.txt", discoveryUrl.Host, federationPrefix)
 
 	// Test async put without --wait
 	t.Run("AsyncPutWithoutWait", func(t *testing.T) {
 		cmd := exec.Command(pelicanBin, "object", "put", "--async", uploadFile, uploadURL, "--token", tokenFile)
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENT_API_SOCKET=%s", socketPath))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Failed to run async put: %s", output)
@@ -278,10 +282,10 @@ func TestCLIAsyncPut(t *testing.T) {
 
 	// Test async put with --wait
 	t.Run("AsyncPutWithWait", func(t *testing.T) {
-		uploadURL2 := fmt.Sprintf("pelican://%s%s/async-put-wait-test.txt", discoveryUrl, federationPrefix)
+		uploadURL2 := fmt.Sprintf("pelican://%s%s/async-put-wait-test.txt", discoveryUrl.Host, federationPrefix)
 
 		cmd := exec.Command(pelicanBin, "object", "put", "--async", "--wait", uploadFile, uploadURL2, "--token", tokenFile)
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENT_API_SOCKET=%s", socketPath))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Failed to run async put with wait: %s", output)
@@ -348,6 +352,7 @@ func TestCLIJobCommands(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
+		log.Debug("Shutting down client API server at end of TestCLIJobCommands")
 		err := server.Shutdown()
 		assert.NoError(t, err)
 	})
@@ -362,12 +367,14 @@ func TestCLIJobCommands(t *testing.T) {
 	require.NoError(t, err)
 
 	federationPrefix := fed.Exports[0].FederationPrefix
-	discoveryUrl := param.Federation_DiscoveryUrl.GetString()
-	uploadURL := fmt.Sprintf("pelican://%s%s/job-cmd-test.txt", discoveryUrl, federationPrefix)
+	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+	assert.NoError(t, err)
+	uploadURL := fmt.Sprintf("pelican://%s%s/job-cmd-test.txt", discoveryUrl.Host, federationPrefix)
 
 	// Create an async job
+	t.Logf("Creating async job uploading to %s", uploadURL)
 	cmd := exec.Command(pelicanBin, "object", "put", "--async", uploadFile, uploadURL, "--token", tokenFile)
-	cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENT_API_SOCKET=%s", socketPath))
+	cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
 
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, "Failed to create job: %s", output)
@@ -377,14 +384,16 @@ func TestCLIJobCommands(t *testing.T) {
 	matches := re.FindStringSubmatch(string(output))
 	require.Len(t, matches, 2, "Could not extract job ID from output")
 	jobID := matches[1]
-	t.Logf("Created job ID: %s", jobID)
+	log.Debugln("Created job ID:", jobID)
 
 	// Test job status command
 	t.Run("JobStatus", func(t *testing.T) {
-		cmd := exec.Command(pelicanBin, "job", "status", jobID)
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENT_API_SOCKET=%s", socketPath))
+		log.Debugln("Running job status for job ID:", jobID)
+		cmd := exec.Command(pelicanBin, "job", "status", jobID, "--debug")
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
 
 		output, err := cmd.CombinedOutput()
+		log.Debug("Job status output:", string(output))
 		require.NoError(t, err, "Failed to get job status: %s", output)
 
 		outputStr := string(output)
@@ -399,7 +408,7 @@ func TestCLIJobCommands(t *testing.T) {
 	// Test job list command
 	t.Run("JobList", func(t *testing.T) {
 		cmd := exec.Command(pelicanBin, "job", "list")
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENT_API_SOCKET=%s", socketPath))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Failed to list jobs: %s", output)
@@ -417,7 +426,7 @@ func TestCLIJobCommands(t *testing.T) {
 		time.Sleep(2 * time.Second)
 
 		cmd := exec.Command(pelicanBin, "job", "list", "--status", "completed")
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENT_API_SOCKET=%s", socketPath))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Failed to list completed jobs: %s", output)
@@ -437,11 +446,11 @@ func TestCLIJobCommands(t *testing.T) {
 		err := os.WriteFile(largeFile, largeContent, 0644)
 		require.NoError(t, err)
 
-		cancelURL := fmt.Sprintf("pelican://%s%s/cancel-test.txt", discoveryUrl, federationPrefix)
+		cancelURL := fmt.Sprintf("pelican://%s%s/cancel-test.txt", discoveryUrl.Host, federationPrefix)
 
 		// Create async job
 		createCmd := exec.Command(pelicanBin, "object", "put", "--async", largeFile, cancelURL, "--token", tokenFile)
-		createCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENT_API_SOCKET=%s", socketPath))
+		createCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
 
 		output, err := createCmd.CombinedOutput()
 		require.NoError(t, err, "Failed to create job for cancellation: %s", output)
@@ -456,15 +465,22 @@ func TestCLIJobCommands(t *testing.T) {
 
 		// Cancel the job
 		cancelCmd := exec.Command(pelicanBin, "job", "cancel", cancelJobID)
-		cancelCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENT_API_SOCKET=%s", socketPath))
+		cancelCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
 
 		output, err = cancelCmd.CombinedOutput()
-		require.NoError(t, err, "Failed to cancel job: %s", output)
-
 		outputStr := string(output)
 		t.Logf("Cancel output: %s", outputStr)
 
-		assert.Contains(t, outputStr, "cancelled")
+		// Accept either successful cancellation or already completed
+		// (race condition where job finishes before we can cancel)
+		if err != nil {
+			// If there's an error, it should be because job already completed
+			assert.Contains(t, outputStr, "already completed",
+				"Expected either successful cancellation or 'already completed' error")
+		} else {
+			// If successful, should contain "cancelled"
+			assert.Contains(t, outputStr, "cancelled")
+		}
 	})
 }
 
@@ -483,7 +499,7 @@ func TestCLIAsyncServerNotRunning(t *testing.T) {
 	socketPath := filepath.Join(tempDir, "nonexistent.sock")
 
 	cmd := exec.Command(pelicanBin, "object", "put", "--async", testFile, "pelican://example.com/test", "--token", "fake-token")
-	cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENT_API_SOCKET=%s", socketPath))
+	cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
 
 	output, err := cmd.CombinedOutput()
 	require.Error(t, err, "Should fail when server is not running")
