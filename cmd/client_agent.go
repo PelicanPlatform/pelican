@@ -28,25 +28,25 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
-	"github.com/pelicanplatform/pelican/client_api"
-	"github.com/pelicanplatform/pelican/client_api/store"
+	"github.com/pelicanplatform/pelican/client_agent"
+	"github.com/pelicanplatform/pelican/client_agent/store"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 )
 
 var (
-	clientAPISocketPath string
-	clientAPIPidFile    string
-	clientAPIMaxJobs    int
-	clientAPIDbPath     string
+	clientAgentSocketPath string
+	clientAgentPidFile    string
+	clientAgentMaxJobs    int
+	clientAgentDbPath     string
 )
 
 // initializeStore creates a new database store instance
-func initializeStore(dbPath string) (client_api.StoreInterface, error) {
+func initializeStore(dbPath string) (client_agent.StoreInterface, error) {
 	return store.NewStore(dbPath)
 }
 
-var clientAPICmd = &cobra.Command{
+var clientAgentCmd = &cobra.Command{
 	Use:   "client-api",
 	Short: "Manage the Pelican client API server",
 	Long: `The client-api server provides a RESTful API for interacting with
@@ -55,7 +55,7 @@ external applications to use Pelican transfer capabilities without directly
 invoking the CLI.`,
 }
 
-var clientAPIServeCmd = &cobra.Command{
+var clientAgentServeCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the client API server",
 	Long: `Start the client API server as a daemon process. The server will listen
@@ -67,12 +67,12 @@ on a Unix domain socket and handle job-based transfer requests.`,
 		}
 
 		// Use parameter socket path if set, otherwise use flag value
-		if socketParam := param.ClientAPI_Socket.GetString(); socketParam != "" {
-			clientAPISocketPath = socketParam
+		if socketParam := param.ClientAgent_Socket.GetString(); socketParam != "" {
+			clientAgentSocketPath = socketParam
 		}
 
 		// Check if already running
-		running, err := client_api.CheckServerRunning(clientAPISocketPath)
+		running, err := client_agent.CheckServerRunning(clientAgentSocketPath)
 		if err != nil {
 			return errors.Wrap(err, "Failed to check server status")
 		}
@@ -81,22 +81,22 @@ on a Unix domain socket and handle job-based transfer requests.`,
 		}
 
 		// Create server config
-		serverConfig := client_api.ServerConfig{
-			SocketPath:        clientAPISocketPath,
-			PidFile:           clientAPIPidFile,
-			MaxConcurrentJobs: clientAPIMaxJobs,
-			DatabasePath:      clientAPIDbPath,
+		serverConfig := client_agent.ServerConfig{
+			SocketPath:        clientAgentSocketPath,
+			PidFile:           clientAgentPidFile,
+			MaxConcurrentJobs: clientAgentMaxJobs,
+			DatabasePath:      clientAgentDbPath,
 		}
 
 		// Create server
-		server, err := client_api.NewServer(serverConfig)
+		server, err := client_agent.NewServer(serverConfig)
 		if err != nil {
 			return errors.Wrap(err, "Failed to create server")
 		}
 
 		// Initialize database store if database path is configured
-		if clientAPIDbPath != "" {
-			store, err := initializeStore(clientAPIDbPath)
+		if clientAgentDbPath != "" {
+			store, err := initializeStore(clientAgentDbPath)
 			if err != nil {
 				log.Warnf("Failed to initialize database store: %v. Server will run without persistence.", err)
 			} else {
@@ -131,7 +131,7 @@ on a Unix domain socket and handle job-based transfer requests.`,
 	},
 }
 
-var clientAPIStopCmd = &cobra.Command{
+var clientAgentStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the client API server",
 	Long:  `Stop a running client API server daemon.`,
@@ -142,12 +142,12 @@ var clientAPIStopCmd = &cobra.Command{
 		}
 
 		// Use parameter socket path if set, otherwise use flag value
-		if socketParam := param.ClientAPI_Socket.GetString(); socketParam != "" {
-			clientAPISocketPath = socketParam
+		if socketParam := param.ClientAgent_Socket.GetString(); socketParam != "" {
+			clientAgentSocketPath = socketParam
 		}
 
 		// Check if server is running
-		running, err := client_api.CheckServerRunning(clientAPISocketPath)
+		running, err := client_agent.CheckServerRunning(clientAgentSocketPath)
 		if err != nil {
 			return errors.Wrap(err, "Failed to check server status")
 		}
@@ -157,7 +157,7 @@ var clientAPIStopCmd = &cobra.Command{
 		}
 
 		// Read PID from file
-		pid, err := client_api.ReadPidFile(clientAPIPidFile)
+		pid, err := client_agent.ReadPidFile(clientAgentPidFile)
 		if err != nil {
 			return errors.Wrap(err, "Failed to read PID file")
 		}
@@ -178,7 +178,7 @@ var clientAPIStopCmd = &cobra.Command{
 	},
 }
 
-var clientAPIStatusCmd = &cobra.Command{
+var clientAgentStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Check the status of the client API server",
 	Long:  `Check if the client API server is running.`,
@@ -189,24 +189,24 @@ var clientAPIStatusCmd = &cobra.Command{
 		}
 
 		// Use parameter socket path if set, otherwise use flag value
-		if socketParam := param.ClientAPI_Socket.GetString(); socketParam != "" {
-			clientAPISocketPath = socketParam
+		if socketParam := param.ClientAgent_Socket.GetString(); socketParam != "" {
+			clientAgentSocketPath = socketParam
 		}
 
-		running, err := client_api.CheckServerRunning(clientAPISocketPath)
+		running, err := client_agent.CheckServerRunning(clientAgentSocketPath)
 		if err != nil {
 			return errors.Wrap(err, "Failed to check server status")
 		}
 
 		if running {
 			// Try to read PID
-			pid, err := client_api.ReadPidFile(clientAPIPidFile)
+			pid, err := client_agent.ReadPidFile(clientAgentPidFile)
 			if err == nil {
 				fmt.Printf("Client API server is running (PID: %d)\n", pid)
-				fmt.Printf("Socket: %s\n", clientAPISocketPath)
+				fmt.Printf("Socket: %s\n", clientAgentSocketPath)
 			} else {
 				fmt.Println("Client API server is running")
-				fmt.Printf("Socket: %s\n", clientAPISocketPath)
+				fmt.Printf("Socket: %s\n", clientAgentSocketPath)
 			}
 		} else {
 			fmt.Println("Client API server is not running")
@@ -218,22 +218,22 @@ var clientAPIStatusCmd = &cobra.Command{
 
 func init() {
 	// Add subcommands
-	clientAPICmd.AddCommand(clientAPIServeCmd)
-	clientAPICmd.AddCommand(clientAPIStopCmd)
-	clientAPICmd.AddCommand(clientAPIStatusCmd)
+	clientAgentCmd.AddCommand(clientAgentServeCmd)
+	clientAgentCmd.AddCommand(clientAgentStopCmd)
+	clientAgentCmd.AddCommand(clientAgentStatusCmd)
 
 	// Persistent flags (available to all subcommands)
-	clientAPICmd.PersistentFlags().StringVar(&clientAPISocketPath, "socket", client_api.DefaultSocketPath,
+	clientAgentCmd.PersistentFlags().StringVar(&clientAgentSocketPath, "socket", client_agent.DefaultSocketPath,
 		"Path to the Unix domain socket")
-	clientAPICmd.PersistentFlags().StringVar(&clientAPIPidFile, "pid-file", client_api.DefaultPidFile,
+	clientAgentCmd.PersistentFlags().StringVar(&clientAgentPidFile, "pid-file", client_agent.DefaultPidFile,
 		"Path to the PID file")
 
 	// Serve-specific flags
-	clientAPIServeCmd.Flags().IntVar(&clientAPIMaxJobs, "max-jobs", client_api.DefaultMaxConcurrentJobs,
+	clientAgentServeCmd.Flags().IntVar(&clientAgentMaxJobs, "max-jobs", client_agent.DefaultMaxConcurrentJobs,
 		"Maximum number of concurrent transfer jobs")
-	clientAPIServeCmd.Flags().StringVar(&clientAPIDbPath, "database", "",
+	clientAgentServeCmd.Flags().StringVar(&clientAgentDbPath, "database", "",
 		"Path to the SQLite database file for persistence (default: ~/.pelican/client-api.db)")
 
 	// Add to root command
-	rootCmd.AddCommand(clientAPICmd)
+	rootCmd.AddCommand(clientAgentCmd)
 }
