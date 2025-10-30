@@ -443,12 +443,22 @@ func (tm *TransferManager) GetJobProgress(job *TransferJob) *JobProgress {
 		percentage = float64(completed) / float64(total) * 100
 	}
 
-	// Calculate transfer rate (simplified - would need time tracking for accurate rate)
+	// Calculate transfer rate in Megabits per second (Mbps)
+	// Conversion: bytes/sec → MB/sec → Mbps
+	// 1 MB = 1024 * 1024 bytes, 1 byte = 8 bits
+	const (
+		bytesPerKB  = 1024.0
+		bytesPerMB  = bytesPerKB * 1024.0
+		bitsPerByte = 8.0
+	)
+
 	rate := 0.0
 	if job.StartedAt != nil {
 		elapsed := time.Since(*job.StartedAt).Seconds()
 		if elapsed > 0 {
-			rate = float64(bytesTransferred) / elapsed / 1024 / 1024 * 8 // Mbps
+			bytesPerSecond := float64(bytesTransferred) / elapsed
+			megabytesPerSecond := bytesPerSecond / bytesPerMB
+			rate = megabytesPerSecond * bitsPerByte // Convert MB/s to Mbps
 		}
 	}
 
