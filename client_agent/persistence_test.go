@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package client_api
+package client_agent
 
 import (
 	"context"
@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/client_api/store"
+	"github.com/pelicanplatform/pelican/client_agent/store"
 )
 
 // setupTestStore creates a temporary database for testing
