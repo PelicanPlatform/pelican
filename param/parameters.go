@@ -164,8 +164,8 @@ var (
 	Cache_StorageLocation = StringParam{"Cache.StorageLocation"}
 	Cache_Url = StringParam{"Cache.Url"}
 	Cache_XRootDPrefix = StringParam{"Cache.XRootDPrefix"}
-	ClientAPI_DatabasePath = StringParam{"ClientAPI.DatabasePath"}
-	ClientAPI_Socket = StringParam{"ClientAPI.Socket"}
+	ClientAgent_DatabasePath = StringParam{"ClientAgent.DatabasePath"}
+	ClientAgent_Socket = StringParam{"ClientAgent.Socket"}
 	Director_AdvertiseUrl = StringParam{"Director.AdvertiseUrl"}
 	Director_CacheSortMethod = StringParam{"Director.CacheSortMethod"}
 	Director_DbLocation = StringParam{"Director.DbLocation"}
@@ -329,8 +329,8 @@ var (
 	Cache_Concurrency = IntParam{"Cache.Concurrency"}
 	Cache_EvictionMonitoringMaxDepth = IntParam{"Cache.EvictionMonitoringMaxDepth"}
 	Cache_Port = IntParam{"Cache.Port"}
-	ClientAPI_HistoryRetentionDays = IntParam{"ClientAPI.HistoryRetentionDays"}
-	ClientAPI_MaxConnections = IntParam{"ClientAPI.MaxConnections"}
+	ClientAgent_HistoryRetentionDays = IntParam{"ClientAgent.HistoryRetentionDays"}
+	ClientAgent_MaxConnections = IntParam{"ClientAgent.MaxConnections"}
 	Client_DirectorRetries = IntParam{"Client.DirectorRetries"}
 	Client_MaximumDownloadSpeed = IntParam{"Client.MaximumDownloadSpeed"}
 	Client_MinimumDownloadSpeed = IntParam{"Client.MinimumDownloadSpeed"}
@@ -373,7 +373,7 @@ var (
 	Cache_EnableTLSClientAuth = BoolParam{"Cache.EnableTLSClientAuth"}
 	Cache_EnableVoms = BoolParam{"Cache.EnableVoms"}
 	Cache_SelfTest = BoolParam{"Cache.SelfTest"}
-	ClientAPI_EnableAutoRecovery = BoolParam{"ClientAPI.EnableAutoRecovery"}
+	ClientAgent_EnableAutoRecovery = BoolParam{"ClientAgent.EnableAutoRecovery"}
 	Client_AssumeDirectorServerHeader = BoolParam{"Client.AssumeDirectorServerHeader"}
 	Client_DisableHttpProxy = BoolParam{"Client.DisableHttpProxy"}
 	Client_DisableProxyFallback = BoolParam{"Client.DisableProxyFallback"}

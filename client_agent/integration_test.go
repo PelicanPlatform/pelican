@@ -18,7 +18,7 @@
  *
  ***************************************************************/
 
-package client_api_test
+package client_agent_test
 
 import (
 	"bytes"
@@ -39,7 +39,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/client_api"
+	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
@@ -145,13 +145,13 @@ func TestClientAPIIntegration(t *testing.T) {
 	socketPath := filepath.Join(tempDir, "client-api.sock")
 	pidFile := filepath.Join(tempDir, "client-api.pid")
 
-	serverConfig := client_api.ServerConfig{
+	serverConfig := client_agent.ServerConfig{
 		SocketPath:        socketPath,
 		PidFile:           pidFile,
 		MaxConcurrentJobs: 5,
 	}
 
-	server, err := client_api.NewServer(serverConfig)
+	server, err := client_agent.NewServer(serverConfig)
 	require.NoError(t, err)
 
 	// Start the server
@@ -178,7 +178,7 @@ func TestClientAPIIntegration(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-		var health client_api.HealthResponse
+		var health client_agent.HealthResponse
 		err = json.NewDecoder(resp.Body).Decode(&health)
 		require.NoError(t, err)
 
@@ -199,8 +199,8 @@ func TestClientAPIIntegration(t *testing.T) {
 
 	// Test 2: Create a job to upload the file
 	t.Run("CreateUploadJob", func(t *testing.T) {
-		jobReq := client_api.JobRequest{
-			Transfers: []client_api.TransferRequest{
+		jobReq := client_agent.JobRequest{
+			Transfers: []client_agent.TransferRequest{
 				{
 					Operation:   "put",
 					Source:      originalFile,
@@ -208,7 +208,7 @@ func TestClientAPIIntegration(t *testing.T) {
 					Recursive:   false,
 				},
 			},
-			Options: client_api.TransferOptions{
+			Options: client_agent.TransferOptions{
 				Token: tokenFile,
 			},
 		}
@@ -222,7 +222,7 @@ func TestClientAPIIntegration(t *testing.T) {
 
 		assert.Equal(t, http.StatusCreated, resp.StatusCode)
 
-		var jobResp client_api.JobResponse
+		var jobResp client_agent.JobResponse
 		err = json.NewDecoder(resp.Body).Decode(&jobResp)
 		require.NoError(t, err)
 
@@ -251,7 +251,7 @@ func TestClientAPIIntegration(t *testing.T) {
 				resp, err := httpClient.Get(fmt.Sprintf("%s/jobs/%s", baseURL, jobID))
 				require.NoError(t, err)
 
-				var status client_api.JobStatus
+				var status client_agent.JobStatus
 				err = json.NewDecoder(resp.Body).Decode(&status)
 				resp.Body.Close()
 				require.NoError(t, err)
@@ -271,9 +271,9 @@ func TestClientAPIIntegration(t *testing.T) {
 
 	// Test 4: Stat the uploaded file
 	t.Run("StatUploadedFile", func(t *testing.T) {
-		statReq := client_api.StatRequest{
+		statReq := client_agent.StatRequest{
 			URL: uploadURL,
-			Options: client_api.TransferOptions{
+			Options: client_agent.TransferOptions{
 				Token: tokenFile,
 			},
 		}
@@ -287,7 +287,7 @@ func TestClientAPIIntegration(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-		var statResp client_api.StatResponse
+		var statResp client_agent.StatResponse
 		err = json.NewDecoder(resp.Body).Decode(&statResp)
 		require.NoError(t, err)
 
@@ -301,8 +301,8 @@ func TestClientAPIIntegration(t *testing.T) {
 
 	// Test 5: Create a job to download the file
 	t.Run("CreateDownloadJob", func(t *testing.T) {
-		jobReq := client_api.JobRequest{
-			Transfers: []client_api.TransferRequest{
+		jobReq := client_agent.JobRequest{
+			Transfers: []client_agent.TransferRequest{
 				{
 					Operation:   "get",
 					Source:      uploadURL,
@@ -310,7 +310,7 @@ func TestClientAPIIntegration(t *testing.T) {
 					Recursive:   false,
 				},
 			},
-			Options: client_api.TransferOptions{
+			Options: client_agent.TransferOptions{
 				Token: tokenFile,
 			},
 		}
@@ -324,7 +324,7 @@ func TestClientAPIIntegration(t *testing.T) {
 
 		assert.Equal(t, http.StatusCreated, resp.StatusCode)
 
-		var jobResp client_api.JobResponse
+		var jobResp client_agent.JobResponse
 		err = json.NewDecoder(resp.Body).Decode(&jobResp)
 		require.NoError(t, err)
 
@@ -348,7 +348,7 @@ func TestClientAPIIntegration(t *testing.T) {
 				resp, err := httpClient.Get(fmt.Sprintf("%s/jobs/%s", baseURL, jobID))
 				require.NoError(t, err)
 
-				var status client_api.JobStatus
+				var status client_agent.JobStatus
 				err = json.NewDecoder(resp.Body).Decode(&status)
 				resp.Body.Close()
 				require.NoError(t, err)
@@ -396,7 +396,7 @@ func TestClientAPIIntegration(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-		var listResp client_api.JobListResponse
+		var listResp client_agent.JobListResponse
 		err = json.NewDecoder(resp.Body).Decode(&listResp)
 		require.NoError(t, err)
 
@@ -409,8 +409,8 @@ func TestClientAPIIntegration(t *testing.T) {
 	// Test 9: Test job cancellation
 	t.Run("CancelJob", func(t *testing.T) {
 		// Create a job to cancel
-		jobReq := client_api.JobRequest{
-			Transfers: []client_api.TransferRequest{
+		jobReq := client_agent.JobRequest{
+			Transfers: []client_agent.TransferRequest{
 				{
 					Operation:   "get",
 					Source:      uploadURL,
@@ -418,7 +418,7 @@ func TestClientAPIIntegration(t *testing.T) {
 					Recursive:   false,
 				},
 			},
-			Options: client_api.TransferOptions{
+			Options: client_agent.TransferOptions{
 				Token: tokenFile,
 			},
 		}
@@ -429,7 +429,7 @@ func TestClientAPIIntegration(t *testing.T) {
 		resp, err := httpClient.Post(baseURL+"/jobs", "application/json", bytes.NewBuffer(body))
 		require.NoError(t, err)
 
-		var jobResp client_api.JobResponse
+		var jobResp client_agent.JobResponse
 		err = json.NewDecoder(resp.Body).Decode(&jobResp)
 		resp.Body.Close()
 		require.NoError(t, err)
@@ -448,7 +448,7 @@ func TestClientAPIIntegration(t *testing.T) {
 		assert.Contains(t, []int{http.StatusOK, http.StatusConflict}, resp.StatusCode)
 
 		if resp.StatusCode == http.StatusOK {
-			var cancelResp client_api.CancelResponse
+			var cancelResp client_agent.CancelResponse
 			err = json.NewDecoder(resp.Body).Decode(&cancelResp)
 			require.NoError(t, err)
 
@@ -475,13 +475,13 @@ func TestClientAPIShutdown(t *testing.T) {
 	socketPath := filepath.Join(tempDir, "api.sock")
 	pidFile := filepath.Join(tempDir, "api.pid")
 
-	serverConfig := client_api.ServerConfig{
+	serverConfig := client_agent.ServerConfig{
 		SocketPath:        socketPath,
 		PidFile:           pidFile,
 		MaxConcurrentJobs: 5,
 	}
 
-	server, err := client_api.NewServer(serverConfig)
+	server, err := client_agent.NewServer(serverConfig)
 	require.NoError(t, err)
 
 	// Start the server
@@ -499,7 +499,7 @@ func TestClientAPIShutdown(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-		var health client_api.HealthResponse
+		var health client_agent.HealthResponse
 		err = json.NewDecoder(resp.Body).Decode(&health)
 		require.NoError(t, err)
 

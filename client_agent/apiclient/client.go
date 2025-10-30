@@ -30,7 +30,7 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/pelicanplatform/pelican/client_api"
+	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/param"
 )
 
@@ -45,11 +45,11 @@ type APIClient struct {
 func NewAPIClient(socketPath string) (*APIClient, error) {
 	if socketPath == "" {
 		// Check if parameter is set via environment or config
-		if paramSocket := param.ClientAPI_Socket.GetString(); paramSocket != "" {
+		if paramSocket := param.ClientAgent_Socket.GetString(); paramSocket != "" {
 			socketPath = paramSocket
 		} else {
 			// Use default socket path
-			expandedPath, err := expandPath(client_api.DefaultSocketPath)
+			expandedPath, err := expandPath(client_agent.DefaultSocketPath)
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to expand default socket path")
 			}
@@ -103,8 +103,8 @@ func (c *APIClient) IsServerRunning(ctx context.Context) bool {
 }
 
 // CreateJob creates a new transfer job and returns the job ID
-func (c *APIClient) CreateJob(ctx context.Context, transfers []client_api.TransferRequest, options client_api.TransferOptions) (string, error) {
-	jobReq := client_api.JobRequest{
+func (c *APIClient) CreateJob(ctx context.Context, transfers []client_agent.TransferRequest, options client_agent.TransferOptions) (string, error) {
+	jobReq := client_agent.JobRequest{
 		Transfers: transfers,
 		Options:   options,
 	}
@@ -131,7 +131,7 @@ func (c *APIClient) CreateJob(ctx context.Context, transfers []client_api.Transf
 		return "", errors.Errorf("server returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var jobResp client_api.JobResponse
+	var jobResp client_agent.JobResponse
 	if err := json.NewDecoder(resp.Body).Decode(&jobResp); err != nil {
 		return "", errors.Wrap(err, "failed to decode response")
 	}
@@ -140,7 +140,7 @@ func (c *APIClient) CreateJob(ctx context.Context, transfers []client_api.Transf
 }
 
 // GetJobStatus retrieves the current status of a job
-func (c *APIClient) GetJobStatus(ctx context.Context, jobID string) (*client_api.JobStatus, error) {
+func (c *APIClient) GetJobStatus(ctx context.Context, jobID string) (*client_agent.JobStatus, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/jobs/"+jobID, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create request")
@@ -157,7 +157,7 @@ func (c *APIClient) GetJobStatus(ctx context.Context, jobID string) (*client_api
 		return nil, errors.Errorf("server returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var jobStatus client_api.JobStatus
+	var jobStatus client_agent.JobStatus
 	if err := json.NewDecoder(resp.Body).Decode(&jobStatus); err != nil {
 		return nil, errors.Wrap(err, "failed to decode response")
 	}
@@ -184,11 +184,11 @@ func (c *APIClient) WaitForJob(ctx context.Context, jobID string, timeout time.D
 			}
 
 			switch status.Status {
-			case client_api.StatusCompleted:
+			case client_agent.StatusCompleted:
 				return nil
-			case client_api.StatusFailed:
+			case client_agent.StatusFailed:
 				return errors.Errorf("job failed: %s", status.Error)
-			case client_api.StatusCancelled:
+			case client_agent.StatusCancelled:
 				return errors.New("job was cancelled")
 			}
 		}
@@ -217,7 +217,7 @@ func (c *APIClient) CancelJob(ctx context.Context, jobID string) error {
 }
 
 // ListJobs lists all jobs with optional filtering
-func (c *APIClient) ListJobs(ctx context.Context, status string, limit, offset int) (*client_api.JobListResponse, error) {
+func (c *APIClient) ListJobs(ctx context.Context, status string, limit, offset int) (*client_agent.JobListResponse, error) {
 	url := fmt.Sprintf("%s/jobs?limit=%d&offset=%d", c.baseURL, limit, offset)
 	if status != "" {
 		url += "&status=" + status
@@ -239,7 +239,7 @@ func (c *APIClient) ListJobs(ctx context.Context, status string, limit, offset i
 		return nil, errors.Errorf("server returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var listResp client_api.JobListResponse
+	var listResp client_agent.JobListResponse
 	if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil {
 		return nil, errors.Wrap(err, "failed to decode response")
 	}
@@ -248,8 +248,8 @@ func (c *APIClient) ListJobs(ctx context.Context, status string, limit, offset i
 }
 
 // Stat retrieves metadata about a remote object
-func (c *APIClient) Stat(ctx context.Context, url string, options client_api.TransferOptions) (*client_api.StatResponse, error) {
-	statReq := client_api.StatRequest{
+func (c *APIClient) Stat(ctx context.Context, url string, options client_agent.TransferOptions) (*client_agent.StatResponse, error) {
+	statReq := client_agent.StatRequest{
 		URL:     url,
 		Options: options,
 	}
@@ -276,7 +276,7 @@ func (c *APIClient) Stat(ctx context.Context, url string, options client_api.Tra
 		return nil, errors.Errorf("server returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	var statResp client_api.StatResponse
+	var statResp client_agent.StatResponse
 	if err := json.NewDecoder(resp.Body).Decode(&statResp); err != nil {
 		return nil, errors.Wrap(err, "failed to decode response")
 	}
@@ -285,8 +285,8 @@ func (c *APIClient) Stat(ctx context.Context, url string, options client_api.Tra
 }
 
 // List retrieves directory listing
-func (c *APIClient) List(ctx context.Context, url string, options client_api.TransferOptions) (*client_api.ListResponse, error) {
-	listReq := client_api.ListRequest{
+func (c *APIClient) List(ctx context.Context, url string, options client_agent.TransferOptions) (*client_agent.ListResponse, error) {
+	listReq := client_agent.ListRequest{
 		URL:     url,
 		Options: options,
 	}
@@ -313,7 +313,7 @@ func (c *APIClient) List(ctx context.Context, url string, options client_api.Tra
 		return nil, errors.Errorf("server returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	var listResp client_api.ListResponse
+	var listResp client_agent.ListResponse
 	if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil {
 		return nil, errors.Wrap(err, "failed to decode response")
 	}
@@ -322,8 +322,8 @@ func (c *APIClient) List(ctx context.Context, url string, options client_api.Tra
 }
 
 // Delete deletes a remote object
-func (c *APIClient) Delete(ctx context.Context, url string, recursive bool, options client_api.TransferOptions) error {
-	deleteReq := client_api.DeleteRequest{
+func (c *APIClient) Delete(ctx context.Context, url string, recursive bool, options client_agent.TransferOptions) error {
+	deleteReq := client_agent.DeleteRequest{
 		URL:       url,
 		Recursive: recursive,
 		Options:   options,
@@ -357,5 +357,5 @@ func (c *APIClient) Delete(ctx context.Context, url string, recursive bool, opti
 // expandPath expands ~ to home directory (duplicated from server.go for package independence)
 func expandPath(path string) (string, error) {
 	// Implementation is same as in server.go but kept separate for independence
-	return client_api.ExpandPath(path)
+	return client_agent.ExpandPath(path)
 }
