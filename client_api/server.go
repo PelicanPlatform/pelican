@@ -65,12 +65,12 @@ type ServerConfig struct {
 // NewServer creates a new client API server
 func NewServer(config ServerConfig) (*Server, error) {
 	// Expand home directory in paths
-	socketPath, err := expandPath(config.SocketPath)
+	socketPath, err := ExpandPath(config.SocketPath)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to expand socket path")
 	}
 
-	pidFile, err := expandPath(config.PidFile)
+	pidFile, err := ExpandPath(config.PidFile)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to expand pid file path")
 	}
@@ -291,8 +291,8 @@ func removeSocket(path string) error {
 	return nil
 }
 
-// expandPath expands ~ to home directory
-func expandPath(path string) (string, error) {
+// ExpandPath expands ~ to home directory
+func ExpandPath(path string) (string, error) {
 	if len(path) == 0 {
 		return path, nil
 	}
@@ -315,7 +315,7 @@ func expandPath(path string) (string, error) {
 
 // CheckServerRunning checks if a server is already running at the socket path
 func CheckServerRunning(socketPath string) (bool, error) {
-	expandedPath, err := expandPath(socketPath)
+	expandedPath, err := ExpandPath(socketPath)
 	if err != nil {
 		return false, err
 	}
@@ -338,7 +338,7 @@ func CheckServerRunning(socketPath string) (bool, error) {
 
 // ReadPidFile reads the PID from the PID file
 func ReadPidFile(pidFile string) (int, error) {
-	expandedPath, err := expandPath(pidFile)
+	expandedPath, err := ExpandPath(pidFile)
 	if err != nil {
 		return 0, err
 	}
