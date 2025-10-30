@@ -23,6 +23,7 @@ package apiclient_test
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -161,9 +162,10 @@ func TestAPIClientCreateJob(t *testing.T) {
 	federationPrefix := fed.Exports[0].FederationPrefix
 
 	// Construct pelican URL
-	discoveryUrl := param.Federation_DiscoveryUrl.GetString()
+	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+	require.NoError(t, err)
 	fileName := "test-upload.txt"
-	uploadURL := fmt.Sprintf("pelican://%s%s/%s", discoveryUrl, federationPrefix, fileName)
+	uploadURL := fmt.Sprintf("pelican://%s%s/%s", discoveryUrl.Host, federationPrefix, fileName)
 
 	t.Run("CreatePutJob", func(t *testing.T) {
 		transfers := []client_agent.TransferRequest{
@@ -199,12 +201,12 @@ func TestAPIClientCreateJob(t *testing.T) {
 			{
 				Operation:   "put",
 				Source:      file1,
-				Destination: fmt.Sprintf("pelican://%s%s/multi1.txt", discoveryUrl, federationPrefix),
+				Destination: fmt.Sprintf("pelican://%s%s/multi1.txt", discoveryUrl.Host, federationPrefix),
 			},
 			{
 				Operation:   "put",
 				Source:      file2,
-				Destination: fmt.Sprintf("pelican://%s%s/multi2.txt", discoveryUrl, federationPrefix),
+				Destination: fmt.Sprintf("pelican://%s%s/multi2.txt", discoveryUrl.Host, federationPrefix),
 			},
 		}
 
@@ -234,8 +236,9 @@ func TestAPIClientJobStatus(t *testing.T) {
 	require.NoError(t, err)
 
 	federationPrefix := fed.Exports[0].FederationPrefix
-	discoveryUrl := param.Federation_DiscoveryUrl.GetString()
-	uploadURL := fmt.Sprintf("pelican://%s%s/status-test.txt", discoveryUrl, federationPrefix)
+	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+	require.NoError(t, err)
+	uploadURL := fmt.Sprintf("pelican://%s%s/status-test.txt", discoveryUrl.Host, federationPrefix)
 
 	transfers := []client_agent.TransferRequest{
 		{
@@ -286,8 +289,9 @@ func TestAPIClientWaitForJob(t *testing.T) {
 	require.NoError(t, err)
 
 	federationPrefix := fed.Exports[0].FederationPrefix
-	discoveryUrl := param.Federation_DiscoveryUrl.GetString()
-	uploadURL := fmt.Sprintf("pelican://%s%s/wait-test.txt", discoveryUrl, federationPrefix)
+	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+	require.NoError(t, err)
+	uploadURL := fmt.Sprintf("pelican://%s%s/wait-test.txt", discoveryUrl.Host, federationPrefix)
 
 	transfers := []client_agent.TransferRequest{
 		{
@@ -340,14 +344,15 @@ func TestAPIClientListJobs(t *testing.T) {
 
 	// Create several jobs
 	federationPrefix := fed.Exports[0].FederationPrefix
-	discoveryUrl := param.Federation_DiscoveryUrl.GetString()
+	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+	require.NoError(t, err)
 
 	for i := 0; i < 3; i++ {
 		testFile := filepath.Join(tempDir, fmt.Sprintf("list-test-%d.txt", i))
 		err := os.WriteFile(testFile, []byte(fmt.Sprintf("Content %d\n", i)), 0644)
 		require.NoError(t, err)
 
-		uploadURL := fmt.Sprintf("pelican://%s%s/list-test-%d.txt", discoveryUrl, federationPrefix, i)
+		uploadURL := fmt.Sprintf("pelican://%s%s/list-test-%d.txt", discoveryUrl.Host, federationPrefix, i)
 
 		transfers := []client_agent.TransferRequest{
 			{
@@ -419,8 +424,9 @@ func TestAPIClientCancelJob(t *testing.T) {
 	require.NoError(t, err)
 
 	federationPrefix := fed.Exports[0].FederationPrefix
-	discoveryUrl := param.Federation_DiscoveryUrl.GetString()
-	uploadURL := fmt.Sprintf("pelican://%s%s/cancel-test.txt", discoveryUrl, federationPrefix)
+	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+	require.NoError(t, err)
+	uploadURL := fmt.Sprintf("pelican://%s%s/cancel-test.txt", discoveryUrl.Host, federationPrefix)
 
 	transfers := []client_agent.TransferRequest{
 		{
@@ -473,8 +479,9 @@ func TestAPIClientEndToEnd(t *testing.T) {
 	require.NoError(t, err)
 
 	federationPrefix := fed.Exports[0].FederationPrefix
-	discoveryUrl := param.Federation_DiscoveryUrl.GetString()
-	uploadURL := fmt.Sprintf("pelican://%s%s/e2e-test.txt", discoveryUrl, federationPrefix)
+	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+	require.NoError(t, err)
+	uploadURL := fmt.Sprintf("pelican://%s%s/e2e-test.txt", discoveryUrl.Host, federationPrefix)
 	downloadFile := filepath.Join(tempDir, "e2e-downloaded.txt")
 
 	// Step 1: Upload file
