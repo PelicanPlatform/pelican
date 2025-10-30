@@ -1,4 +1,4 @@
-# Design Document: Pelican Client API Server
+# Design Document: Pelican Client Agent Server
 
 **Author:** Design Proposal
 **Date:** October 29, 2025
@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-This document proposes the design and implementation of a RESTful server that exposes Pelican's client API functionality over a Unix domain socket. The server will enable programmatic access to Pelican's data transfer capabilities, supporting operations like get, put, copy, delete, stat, and list through a well-defined REST API.
+This document proposes the design and implementation of a RESTful server that exposes Pelican's client agent functionality over a Unix domain socket. The server will enable programmatic access to Pelican's data transfer capabilities, supporting operations like get, put, copy, delete, stat, and list through a well-defined REST API.
 
 The implementation will proceed in three phases:
 1. **Phase 1:** Basic stateless server with OpenAPI schema
@@ -19,7 +19,7 @@ Currently, Pelican's client functionality is accessible only through:
 - Command-line interface (`pelican object get/put/copy/delete/stat/ls`)
 - Direct Go API calls (`client.DoGet()`, `client.DoPut()`, etc.)
 
-This design adds a third access method: a RESTful API server that can be accessed over a Unix domain socket, enabling:
+This design adds a third access method: a RESTful agent server that can be accessed over a Unix domain socket, enabling:
 - Language-agnostic client implementations
 - Long-running daemon for managing transfers
 - Web-based or programmatic monitoring of transfers
@@ -34,7 +34,7 @@ This design adds a third access method: a RESTful API server that can be accesse
 └─────────────────────┬───────────────────────────────────────┘
                       │ HTTP over Unix Socket
 ┌─────────────────────▼───────────────────────────────────────┐
-│              Pelican Client API Server                       │
+│              Pelican Client Agent Server                       │
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │  REST API Layer (Gin/Echo Framework)                   │ │
 │  │  - /api/v1/transfers (POST, GET, DELETE)               │ │
@@ -64,7 +64,7 @@ This design adds a third access method: a RESTful API server that can be accesse
 ## Phase 1: Basic Stateless Server
 
 ### Goals
-- Launch a RESTful API server listening on Unix domain socket
+- Launch a RESTful agent server listening on Unix domain socket
 - Expose core client operations through REST endpoints
 - Generate OpenAPI 3.0 specification
 - Implement comprehensive unit tests
@@ -80,7 +80,7 @@ Windows:     \\.\pipe\pelican-client-api (Named Pipe)
 #### Configuration Parameters
 ```yaml
 # parameters.yaml
-ClientAPI:
+ClientAgent:
   SocketPath: ""  # Override default socket location
   MaxConnections: 100  # Maximum concurrent connections
   RequestTimeout: 300s  # Default request timeout
@@ -462,10 +462,10 @@ func (s *APIServer) CreateJob(c *gin.Context) {
 
 ### Implementation Structure
 
-#### New Package: `client_api`
+#### New Package: `client_agent`
 
 ```
-client_api/
+client_agent/
 ├── server.go           # Main server setup and lifecycle
 ├── handlers.go         # HTTP request handlers
 ├── models.go           # Request/response models
@@ -651,7 +651,7 @@ Create a Windows service using `golang.org/x/sys/windows/svc`
 
 #### Unit Tests
 ```
-client_api/
+client_agent/
 ├── server_test.go          # Server lifecycle tests
 ├── handlers_test.go        # HTTP handler tests
 ├── transfer_manager_test.go # Transfer job management tests
@@ -741,16 +741,16 @@ func TestCancelJob(t *testing.T) {
 
 ### Configuration Integration
 
-Add to `cmd/client_api.go`:
+Add to `cmd/client_agent.go`:
 ```go
 var clientAPICmd = &cobra.Command{
     Use:   "client-api",
-    Short: "Manage the Pelican client API server",
+    Short: "Manage the Pelican client agent server",
 }
 
 var clientAPIServeCmd = &cobra.Command{
     Use:   "serve",
-    Short: "Start the client API server",
+    Short: "Start the client agent server",
     Run:   clientAPIServeMain,
 }
 
@@ -819,22 +819,22 @@ Add global flag to all `pelican object` commands:
 pelican object get [flags] source dest
 
 New Flags:
-  --use-api-server         Force use of API server
+  --use-api-server         Force use of agent server
   --no-api-server          Force direct execution (skip server)
-  --api-socket string      Override API server socket path
+  --api-socket string      Override agent server socket path
 
 Default Behavior:
-  1. Check if API server is running (connect to socket)
-  2. If running, use API server
+  1. Check if agent server is running (connect to socket)
+  2. If running, use agent server
   3. If not running, execute directly (current behavior)
 ```
 
 ### Implementation
 
-#### New Package: `client_api/client`
+#### New Package: `client_agent/client`
 
 ```go
-// client_api/client/client.go
+// client_agent/client/client.go
 type APIClient struct {
     socketPath string
     httpClient *http.Client
@@ -873,15 +873,15 @@ func getMain(cmd *cobra.Command, args []string) {
     useServer := shouldUseAPIServer(cmd)
 
     if useServer {
-        apiClient, err := client_api_client.NewAPIClient("")
+        apiClient, err := client_agent_client.NewAPIClient("")
         if err != nil {
-            log.Warningln("Failed to connect to API server, falling back to direct execution:", err)
+            log.Warningln("Failed to connect to agent server, falling back to direct execution:", err)
             executeGetDirect(ctx, cmd, args)
             return
         }
 
         if !apiClient.IsServerRunning() {
-            log.Debugln("API server not running, using direct execution")
+            log.Debugln("agent server not running, using direct execution")
             executeGetDirect(ctx, cmd, args)
             return
         }
@@ -904,7 +904,7 @@ func shouldUseAPIServer(cmd *cobra.Command) bool {
     }
 
     // Check config
-    return param.ClientAPI_AutoConnect.GetBool()
+    return param.ClientAgent_AutoConnect.GetBool()
 }
 ```
 
@@ -912,7 +912,7 @@ func shouldUseAPIServer(cmd *cobra.Command) bool {
 
 Add parameters:
 ```yaml
-ClientAPI:
+ClientAgent:
   AutoConnect: false  # Phase 2: default false; Phase 3: default true
   FallbackToDirect: true  # If server fails, execute directly
   StartServerIfMissing: false  # Auto-start server if not running
@@ -920,7 +920,7 @@ ClientAPI:
 
 ### Progress Reporting
 
-When using API server:
+When using agent server:
 - Poll transfer status at regular intervals
 - Display progress bar (reuse existing progress bar infrastructure)
 - Stream logs if available
@@ -987,7 +987,7 @@ func executeGetViaAPI(ctx context.Context, apiClient *APIClient, cmd *cobra.Comm
 
 #### Integration Tests with Federation
 
-Create test file: `client_api/fed_integration_test.go`
+Create test file: `client_agent/fed_integration_test.go`
 
 ```go
 func TestGetViaAPIServer(t *testing.T) {
@@ -996,8 +996,8 @@ func TestGetViaAPIServer(t *testing.T) {
     server_utils.ResetOriginExports()
     fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
 
-    // Start API server
-    apiServer, err := client_api.NewAPIServer("")
+    // Start agent server
+    apiServer, err := client_agent.NewAPIServer("")
     require.NoError(t, err)
 
     go apiServer.Start()
@@ -1018,7 +1018,7 @@ func TestGetViaAPIServer(t *testing.T) {
     require.NoError(t, err)
 
     // Download via API client
-    apiClient := client_api_client.NewAPIClient(apiServer.SocketPath())
+    apiClient := client_agent_client.NewAPIClient(apiServer.SocketPath())
 
     downloadPath := filepath.Join(t.TempDir(), "downloaded.txt")
     jobID, err := apiClient.CreateJob(context.Background(), []TransferRequest{
@@ -1168,7 +1168,7 @@ CREATE INDEX idx_transfer_history_completed_at ON transfer_history(completed_at 
 Use [goose](https://github.com/pressly/goose) for database migrations (already a dependency in Pelican).
 
 ```
-client_api/migrations/
+client_agent/migrations/
 ├── 00001_create_jobs_table.sql
 ├── 00002_create_transfers_table.sql
 ├── 00003_create_job_history_table.sql
@@ -1177,7 +1177,7 @@ client_api/migrations/
 
 ### State Management
 
-#### New Package: `client_api/store`
+#### New Package: `client_agent/store`
 
 ```go
 // store/store.go
@@ -1394,7 +1394,7 @@ Response 200:
 
 Add parameters:
 ```yaml
-ClientAPI:
+ClientAgent:
   Database:
     Path: ""  # Override default location ($HOME/.pelican/client-api.db)
     MaxConnections: 10
@@ -1569,7 +1569,7 @@ Expose Prometheus metrics at `/metrics`:
 
 ### Logging
 - Structured JSON logging
-- Separate log file for API server
+- Separate log file for agent server
 - Rotation and retention policies
 - Debug mode for troubleshooting
 
@@ -1940,7 +1940,7 @@ for job in history["jobs"]:
 ```yaml
 openapi: 3.0.0
 info:
-  title: Pelican Client API
+  title: Pelican Client Agent
   description: RESTful API for Pelican data transfer operations
   version: 1.0.0
   contact:

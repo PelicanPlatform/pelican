@@ -32,8 +32,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/client_api"
-	"github.com/pelicanplatform/pelican/client_api/apiclient"
+	"github.com/pelicanplatform/pelican/client_agent"
+	"github.com/pelicanplatform/pelican/client_agent/apiclient"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
@@ -95,13 +95,13 @@ func setupTestEnvironment(t *testing.T) (apiClient *apiclient.APIClient, fed *fe
 	socketPath := filepath.Join(tempDir, "client-api.sock")
 	pidFile := filepath.Join(tempDir, "client-api.pid")
 
-	serverConfig := client_api.ServerConfig{
+	serverConfig := client_agent.ServerConfig{
 		SocketPath:        socketPath,
 		PidFile:           pidFile,
 		MaxConcurrentJobs: 5,
 	}
 
-	server, err := client_api.NewServer(serverConfig)
+	server, err := client_agent.NewServer(serverConfig)
 	require.NoError(t, err)
 
 	// Start the server
@@ -166,7 +166,7 @@ func TestAPIClientCreateJob(t *testing.T) {
 	uploadURL := fmt.Sprintf("pelican://%s%s/%s", discoveryUrl, federationPrefix, fileName)
 
 	t.Run("CreatePutJob", func(t *testing.T) {
-		transfers := []client_api.TransferRequest{
+		transfers := []client_agent.TransferRequest{
 			{
 				Operation:   "put",
 				Source:      testFile,
@@ -175,7 +175,7 @@ func TestAPIClientCreateJob(t *testing.T) {
 			},
 		}
 
-		options := client_api.TransferOptions{
+		options := client_agent.TransferOptions{
 			Token: tokenFile,
 		}
 
@@ -195,7 +195,7 @@ func TestAPIClientCreateJob(t *testing.T) {
 		err = os.WriteFile(file2, []byte("File 2\n"), 0644)
 		require.NoError(t, err)
 
-		transfers := []client_api.TransferRequest{
+		transfers := []client_agent.TransferRequest{
 			{
 				Operation:   "put",
 				Source:      file1,
@@ -208,7 +208,7 @@ func TestAPIClientCreateJob(t *testing.T) {
 			},
 		}
 
-		options := client_api.TransferOptions{
+		options := client_agent.TransferOptions{
 			Token: tokenFile,
 		}
 
@@ -237,7 +237,7 @@ func TestAPIClientJobStatus(t *testing.T) {
 	discoveryUrl := param.Federation_DiscoveryUrl.GetString()
 	uploadURL := fmt.Sprintf("pelican://%s%s/status-test.txt", discoveryUrl, federationPrefix)
 
-	transfers := []client_api.TransferRequest{
+	transfers := []client_agent.TransferRequest{
 		{
 			Operation:   "put",
 			Source:      testFile,
@@ -245,7 +245,7 @@ func TestAPIClientJobStatus(t *testing.T) {
 		},
 	}
 
-	options := client_api.TransferOptions{
+	options := client_agent.TransferOptions{
 		Token: tokenFile,
 	}
 
@@ -289,7 +289,7 @@ func TestAPIClientWaitForJob(t *testing.T) {
 	discoveryUrl := param.Federation_DiscoveryUrl.GetString()
 	uploadURL := fmt.Sprintf("pelican://%s%s/wait-test.txt", discoveryUrl, federationPrefix)
 
-	transfers := []client_api.TransferRequest{
+	transfers := []client_agent.TransferRequest{
 		{
 			Operation:   "put",
 			Source:      testFile,
@@ -297,7 +297,7 @@ func TestAPIClientWaitForJob(t *testing.T) {
 		},
 	}
 
-	options := client_api.TransferOptions{
+	options := client_agent.TransferOptions{
 		Token: tokenFile,
 	}
 
@@ -312,7 +312,7 @@ func TestAPIClientWaitForJob(t *testing.T) {
 		// Verify final status
 		status, err := apiClient.GetJobStatus(ctx, jobID)
 		require.NoError(t, err)
-		assert.Equal(t, client_api.StatusCompleted, status.Status)
+		assert.Equal(t, client_agent.StatusCompleted, status.Status)
 
 		t.Logf("Job completed successfully")
 	})
@@ -349,7 +349,7 @@ func TestAPIClientListJobs(t *testing.T) {
 
 		uploadURL := fmt.Sprintf("pelican://%s%s/list-test-%d.txt", discoveryUrl, federationPrefix, i)
 
-		transfers := []client_api.TransferRequest{
+		transfers := []client_agent.TransferRequest{
 			{
 				Operation:   "put",
 				Source:      testFile,
@@ -357,7 +357,7 @@ func TestAPIClientListJobs(t *testing.T) {
 			},
 		}
 
-		options := client_api.TransferOptions{
+		options := client_agent.TransferOptions{
 			Token: tokenFile,
 		}
 
@@ -422,7 +422,7 @@ func TestAPIClientCancelJob(t *testing.T) {
 	discoveryUrl := param.Federation_DiscoveryUrl.GetString()
 	uploadURL := fmt.Sprintf("pelican://%s%s/cancel-test.txt", discoveryUrl, federationPrefix)
 
-	transfers := []client_api.TransferRequest{
+	transfers := []client_agent.TransferRequest{
 		{
 			Operation:   "put",
 			Source:      testFile,
@@ -430,7 +430,7 @@ func TestAPIClientCancelJob(t *testing.T) {
 		},
 	}
 
-	options := client_api.TransferOptions{
+	options := client_agent.TransferOptions{
 		Token: tokenFile,
 	}
 
@@ -449,7 +449,7 @@ func TestAPIClientCancelJob(t *testing.T) {
 		require.NoError(t, err)
 
 		// Status should eventually be cancelled
-		assert.Contains(t, []string{client_api.StatusCancelled, client_api.StatusRunning, client_api.StatusCompleted}, status.Status)
+		assert.Contains(t, []string{client_agent.StatusCancelled, client_agent.StatusRunning, client_agent.StatusCompleted}, status.Status)
 		t.Logf("Job status after cancel: %s", status.Status)
 	})
 
@@ -479,7 +479,7 @@ func TestAPIClientEndToEnd(t *testing.T) {
 
 	// Step 1: Upload file
 	t.Log("Step 1: Uploading file...")
-	uploadTransfers := []client_api.TransferRequest{
+	uploadTransfers := []client_agent.TransferRequest{
 		{
 			Operation:   "put",
 			Source:      originalFile,
@@ -487,7 +487,7 @@ func TestAPIClientEndToEnd(t *testing.T) {
 		},
 	}
 
-	options := client_api.TransferOptions{
+	options := client_agent.TransferOptions{
 		Token: tokenFile,
 	}
 
@@ -499,7 +499,7 @@ func TestAPIClientEndToEnd(t *testing.T) {
 
 	uploadStatus, err := apiClient.GetJobStatus(ctx, uploadJobID)
 	require.NoError(t, err)
-	assert.Equal(t, client_api.StatusCompleted, uploadStatus.Status)
+	assert.Equal(t, client_agent.StatusCompleted, uploadStatus.Status)
 	t.Log("Upload completed successfully")
 
 	// Step 2: Stat the file
@@ -511,7 +511,7 @@ func TestAPIClientEndToEnd(t *testing.T) {
 
 	// Step 3: Download file
 	t.Log("Step 3: Downloading file...")
-	downloadTransfers := []client_api.TransferRequest{
+	downloadTransfers := []client_agent.TransferRequest{
 		{
 			Operation:   "get",
 			Source:      uploadURL,
@@ -527,7 +527,7 @@ func TestAPIClientEndToEnd(t *testing.T) {
 
 	downloadStatus, err := apiClient.GetJobStatus(ctx, downloadJobID)
 	require.NoError(t, err)
-	assert.Equal(t, client_api.StatusCompleted, downloadStatus.Status)
+	assert.Equal(t, client_agent.StatusCompleted, downloadStatus.Status)
 	t.Log("Download completed successfully")
 
 	// Step 4: Verify downloaded content

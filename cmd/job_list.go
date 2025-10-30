@@ -25,7 +25,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
-	"github.com/pelicanplatform/pelican/client_api/apiclient"
+	"github.com/pelicanplatform/pelican/client_agent/apiclient"
 	"github.com/pelicanplatform/pelican/config"
 )
 

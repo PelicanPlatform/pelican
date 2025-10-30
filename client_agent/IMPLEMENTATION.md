@@ -1,8 +1,8 @@
-# Phase 1 Implementation Summary - Pelican Client API Server
+# Phase 1 Implementation Summary - Pelican Client Agent Server
 
 ## Overview
 
-Successfully implemented **Phase 1** of the Pelican Client API Server as specified in the design document. The implementation provides a fully functional RESTful API server that exposes Pelican client functionality over a Unix domain socket.
+Successfully implemented **Phase 1** of the Pelican Client Agent Server as specified in the design document. The implementation provides a fully functional RESTful agent server that exposes Pelican client functionality over a Unix domain socket.
 
 ## Implementation Date
 
@@ -10,7 +10,7 @@ January 15, 2025
 
 ## Files Created
 
-### Core Package (`client_api/`)
+### Core Package (`client_agent/`)
 
 1. **models.go** (235 lines)
    - Complete data model types for entire API
@@ -63,7 +63,7 @@ January 15, 2025
 
 ### CLI Integration (`cmd/`)
 
-7. **cmd/client_api.go** (195 lines)
+7. **cmd/client_agent.go** (195 lines)
    - Cobra command integration
    - `pelican client-api serve` - start server
    - `pelican client-api stop` - stop server
@@ -266,24 +266,24 @@ pelican client-api status [--socket PATH]
 
 Recommended test files to create:
 
-1. `client_api/models_test.go`
+1. `client_agent/models_test.go`
    - JSON marshaling/unmarshaling
    - Validation logic
 
-2. `client_api/transfer_manager_test.go`
+2. `client_agent/transfer_manager_test.go`
    - Job creation
    - Transfer execution
    - Cancellation
    - Progress tracking
    - Concurrent job limits
 
-3. `client_api/handlers_test.go`
+3. `client_agent/handlers_test.go`
    - HTTP endpoint testing
    - Request validation
    - Response formatting
    - Error handling
 
-4. `client_api/server_test.go`
+4. `client_agent/server_test.go`
    - Server lifecycle
    - Socket creation
    - Shutdown handling
@@ -438,7 +438,7 @@ Breakdown:
 - server.go:            320 lines
 - handlers.go:          325 lines
 - middleware.go:        92 lines
-- cmd/client_api.go:    195 lines
+- cmd/client_agent.go:    195 lines
 - README.md:            500+ lines
 ```
 
