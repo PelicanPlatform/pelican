@@ -20,14 +20,18 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
+	"time"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/client"
+	"github.com/pelicanplatform/pelican/client_api"
+	"github.com/pelicanplatform/pelican/client_api/apiclient"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/param"
@@ -58,6 +62,8 @@ the client should fallback to discovered caches if all preferred caches fail.`)
 	flagSet.String("transfer-stats", "", "A path to a file to write transfer statistics to")
 	flagSet.String("pack", "", "Package transfer using remote packing functionality (same as '?pack=' query). Options: auto, tar, tar.gz, tar.xz, zip. Default: auto when flag is provided without an explicit value")
 	flagSet.Bool("direct", false, "Download directly from an origin, bypassing any caches (same as '?directread' query)")
+	flagSet.Bool("async", false, "Run the transfer asynchronously through the client API server and return a job ID")
+	flagSet.Bool("wait", false, "When used with --async, wait for the job to complete before returning")
 	objectCmd.AddCommand(getCmd)
 }
 
@@ -74,6 +80,106 @@ func getMain(cmd *cobra.Command, args []string) {
 		} else {
 			os.Exit(1)
 		}
+	}
+
+	// Check for async mode
+	isAsync, _ := cmd.Flags().GetBool("async")
+	if isAsync {
+		// Validate arguments
+		if len(args) < 2 {
+			log.Errorln("No Source or Destination\nTry 'pelican object get --help' for more information.")
+			os.Exit(1)
+		}
+		source := args[:len(args)-1]
+		dest := args[len(args)-1]
+
+		// Create API client (empty string uses default socket path)
+		apiClient, err := apiclient.NewAPIClient("")
+		if err != nil {
+			log.Errorln("Failed to create API client:", err)
+			log.Errorln("Ensure the client API server is running with 'pelican serve --client-api'")
+			os.Exit(1)
+		}
+
+		// Check if server is running
+		if !apiClient.IsServerRunning(ctx) {
+			log.Errorln("Client API server is not running")
+			log.Errorln("Start it with 'pelican serve --client-api'")
+			os.Exit(1)
+		}
+
+		// Get flags for transfer options
+		isRecursive, _ := cmd.Flags().GetBool("recursive")
+		tokenLocation, _ := cmd.Flags().GetString("token")
+		packOption, _ := cmd.Flags().GetString("pack")
+
+		// Get preferred caches
+		caches, err := getPreferredCaches()
+		if err != nil {
+			log.Errorln("Failed to get preferred caches:", err)
+			os.Exit(1)
+		}
+
+		// Convert caches to strings
+		cacheStrings := make([]string, len(caches))
+		for i, cache := range caches {
+			cacheStrings[i] = cache.String()
+		}
+
+		// Build transfer options
+		options := client_api.TransferOptions{
+			Token:      tokenLocation,
+			Caches:     cacheStrings,
+			PackOption: packOption,
+		}
+
+		// Create transfers for each source
+		transfers := make([]client_api.TransferRequest, len(source))
+		for i, src := range source {
+			transfers[i] = client_api.TransferRequest{
+				Operation:   "get",
+				Source:      src,
+				Destination: dest,
+				Recursive:   isRecursive,
+			}
+		}
+
+		// Create job
+		jobID, err := apiClient.CreateJob(ctx, transfers, options)
+		if err != nil {
+			log.Errorln("Failed to create job:", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Job created: %s\n", jobID)
+
+		// Check if we should wait for completion
+		shouldWait, _ := cmd.Flags().GetBool("wait")
+		if shouldWait {
+			fmt.Println("Waiting for job to complete...")
+
+			// Wait with a reasonable timeout (e.g., 1 hour)
+			err := apiClient.WaitForJob(ctx, jobID, 1*time.Hour)
+			if err != nil {
+				log.Errorln("Error waiting for job:", err)
+				os.Exit(1)
+			}
+
+			// Get final status
+			finalStatus, err := apiClient.GetJobStatus(ctx, jobID)
+			if err != nil {
+				log.Errorln("Error getting final job status:", err)
+				os.Exit(1)
+			}
+
+			fmt.Printf("Job completed successfully\n")
+			if finalStatus.Progress != nil {
+				fmt.Printf("Transferred: %d bytes\n", finalStatus.Progress.BytesTransferred)
+			}
+		} else {
+			fmt.Printf("Check status with: pelican job status %s\n", jobID)
+		}
+		return
 	}
 
 	tokenLocation, _ := cmd.Flags().GetString("token")

@@ -566,6 +566,286 @@ Check socket path matches:
 
 The socket has restrictive permissions (0600). Ensure you're the same user who started the server.
 
+## CLI Integration (Phase 2)
+
+Starting with Phase 2, Pelican's CLI commands can execute transfers asynchronously through the Client API Server. This enables fire-and-forget transfers and better management of long-running operations.
+
+### Async Transfer Flags
+
+All object transfer commands (`get`, `put`, `copy`) support async execution:
+
+#### --async Flag
+
+Submit the transfer as an asynchronous job and return immediately with a job ID:
+
+```bash
+# Async download - returns immediately
+pelican object get --async osdf:///path/to/file /local/destination
+
+# Output:
+# Job created: 550e8400-e29b-41d4-a716-446655440000
+# Check status with: pelican job status 550e8400-e29b-41d4-a716-446655440000
+```
+
+#### --async --wait Flags
+
+Submit as async job but wait for completion before returning:
+
+```bash
+# Async download with wait - blocks until complete
+pelican object get --async --wait osdf:///path/to/file /local/destination
+
+# Output:
+# Job created: 550e8400-e29b-41d4-a716-446655440000
+# Waiting for job to complete...
+# Job completed successfully
+# Transferred: 1048576 bytes
+```
+
+#### Without --async
+
+Executes directly using the existing client library (default behavior):
+
+```bash
+# Traditional direct execution
+pelican object get osdf:///path/to/file /local/destination
+```
+
+### Job Management Commands
+
+The `pelican job` subcommand provides tools to manage asynchronous jobs:
+
+#### Check Job Status
+
+Get detailed status of a job including progress and transfer details:
+
+```bash
+# One-time status check
+pelican job status <job-id>
+
+# Output:
+# Job ID: 550e8400-e29b-41d4-a716-446655440000
+# Status: running
+# Created: 2025-10-29 10:30:00
+# Started: 2025-10-29 10:30:01
+# Progress: 45.2% (4.7 MB / 10.4 MB)
+# Transfer Rate: 8.5 Mbps
+# Transfers: 1/2 completed, 0 failed
+```
+
+Watch job status with live updates (refreshes every 2 seconds):
+
+```bash
+# Watch mode - updates automatically
+pelican job status --watch <job-id>
+```
+
+#### List Jobs
+
+View all jobs with optional filtering:
+
+```bash
+# List all jobs (default: last 10)
+pelican job list
+
+# Output (table format):
+# JOB ID                                STATUS     PROGRESS  CREATED
+# 550e8400-e29b-41d4-a716-446655440000  completed  100.0%    2025-10-29 10:30:00
+# 661f9511-f3ac-52e5-b827-557766551111  running    45.2%     2025-10-29 10:35:00
+
+# Filter by status
+pelican job list --status running
+pelican job list --status completed
+pelican job list --status failed
+
+# Pagination
+pelican job list --limit 20 --offset 10
+```
+
+#### Cancel Job
+
+Stop a running job and cancel incomplete transfers:
+
+```bash
+# Cancel a job
+pelican job cancel <job-id>
+
+# Output:
+# Job 550e8400-e29b-41d4-a716-446655440000 cancelled successfully
+```
+
+### Usage Examples
+
+#### Fire-and-Forget Upload
+
+Start a large upload and continue working:
+
+```bash
+# Start upload in background
+pelican object put --async /local/large-dataset.tar.gz osdf:///project/data/
+
+# Save the job ID from output
+export JOB_ID="550e8400-e29b-41d4-a716-446655440000"
+
+# Continue working...
+# Check progress later
+pelican job status $JOB_ID
+```
+
+#### Batch Transfers
+
+Submit multiple transfers without waiting:
+
+```bash
+#!/bin/bash
+# Upload multiple files asynchronously
+
+for file in dataset/*.txt; do
+    pelican object put --async "$file" "osdf:///project/data/$(basename $file)"
+done
+
+# Check status of all jobs
+pelican job list
+```
+
+#### Monitored Transfer
+
+Track a long-running transfer:
+
+```bash
+# Start transfer with live monitoring
+pelican object get --async osdf:///large/dataset.tar.gz /local/destination
+# (save job ID)
+
+# Watch progress in real-time
+pelican job status --watch <job-id>
+
+# Or check periodically
+watch -n 5 pelican job status <job-id>
+```
+
+#### Conditional Workflow
+
+Wait for transfer completion before proceeding:
+
+```bash
+#!/bin/bash
+# Download and process data
+
+pelican object get --async --wait osdf:///data/input.csv /tmp/input.csv
+
+# Only proceeds after download completes
+python process_data.py /tmp/input.csv
+```
+
+### Programmatic Access (API Client)
+
+For Go applications, use the `apiclient` package to interact with the Client API Server:
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "time"
+
+    "github.com/pelicanplatform/pelican/client_api"
+    "github.com/pelicanplatform/pelican/client_api/apiclient"
+)
+
+func main() {
+    ctx := context.Background()
+
+    // Create API client (uses default socket path)
+    client, err := apiclient.NewAPIClient("")
+    if err != nil {
+        panic(err)
+    }
+
+    // Check if server is running
+    if !client.IsServerRunning(ctx) {
+        fmt.Println("Server is not running. Start with: pelican client-api serve")
+        return
+    }
+
+    // Create a transfer job
+    transfers := []client_api.TransferRequest{
+        {
+            Operation:   "get",
+            Source:      "osdf:///osgconnect/public/example.txt",
+            Destination: "/tmp/example.txt",
+            Recursive:   false,
+        },
+    }
+
+    options := client_api.TransferOptions{
+        Token: "/path/to/token",
+    }
+
+    jobID, err := client.CreateJob(ctx, transfers, options)
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Printf("Created job: %s\n", jobID)
+
+    // Wait for completion (with timeout)
+    err = client.WaitForJob(ctx, jobID, 5*time.Minute)
+    if err != nil {
+        panic(err)
+    }
+
+    // Get final status
+    status, err := client.GetJobStatus(ctx, jobID)
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Printf("Job completed: %d bytes transferred\n",
+        status.Progress.BytesTransferred)
+}
+```
+
+### API Client Methods
+
+The `apiclient.APIClient` provides the following methods:
+
+- `NewAPIClient(socketPath string) (*APIClient, error)` - Create new client
+- `IsServerRunning(ctx context.Context) bool` - Check if server is accessible
+- `CreateJob(ctx, transfers, options) (string, error)` - Create new job
+- `GetJobStatus(ctx, jobID) (*JobStatus, error)` - Get job status
+- `WaitForJob(ctx, jobID, timeout) error` - Wait for job completion
+- `ListJobs(ctx, status, limit, offset) (*JobListResponse, error)` - List jobs
+- `CancelJob(ctx, jobID) error` - Cancel job
+- `Stat(ctx, url, options) (*StatResponse, error)` - Stat remote object
+- `List(ctx, url, options) (*ListResponse, error)` - List directory contents
+- `Delete(ctx, url, recursive, options) error` - Delete remote object
+
+### Prerequisites for Async Mode
+
+1. **Server Running**: Client API server must be running:
+   ```bash
+   pelican client-api serve
+   ```
+
+2. **Socket Path**: CLI automatically uses default socket. Override with:
+   ```bash
+   export PELICAN_CLIENT_API_SOCKET=/custom/path/socket
+   ```
+
+3. **Authentication**: Same token requirements as direct execution
+
+### Error Handling
+
+If the server is not running, async commands will fail with a clear error:
+
+```bash
+$ pelican object get --async osdf:///file /dest
+Error: Client API server is not running
+Start it with 'pelican serve --client-api'
+```
+
 ## Development
 
 ### Running Tests
