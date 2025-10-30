@@ -1286,40 +1286,25 @@ func SetServerDefaults(v *viper.Viper) error {
 	// We default to the value of Server.Hostname, which defaults to os.Hostname but can be overwritten
 	v.SetDefault(param.Xrootd_Sitename.GetName(), hostname)
 
-	cachePort := v.GetInt("Cache.Port")
-	originPort := v.GetInt("Origin.Port")
-	xrootdPort := v.GetInt("Xrootd.Port")
-	xrootdPortIsSet := v.IsSet("Xrootd.Port")
-	if !v.IsSet("Cache.Port") {
-		if xrootdPortIsSet {
-			cachePort = xrootdPort
-		}
+	v.SetDefault(param.Origin_Port.GetName(), 8443)
+	v.SetDefault(param.Cache_Port.GetName(), 8442)
+
+	xrootdPort := v.GetInt(param.Xrootd_Port.GetName())
+	if !v.IsSet(param.Origin_Port.GetName()) && xrootdPort != 0 {
+		v.SetDefault(param.Origin_Port.GetName(), xrootdPort)
+	}
+	if !v.IsSet(param.Cache_Port.GetName()) && xrootdPort != 0 {
+		v.SetDefault(param.Cache_Port.GetName(), xrootdPort)
 	}
 
-	if !v.IsSet(param.Origin_Port.GetName()) && xrootdPortIsSet {
-		originPort = xrootdPort
-	}
-
-	v.SetDefault("Origin.CalculatedPort", strconv.Itoa(originPort))
-	if originPort == 0 {
-		v.SetDefault("Origin.CalculatedPort", "any")
-	}
-	v.SetDefault("Cache.CalculatedPort", strconv.Itoa(cachePort))
-	if cachePort == 0 {
-		v.SetDefault("Cache.CalculatedPort", "any")
-	}
-
-	v.SetDefault(param.Origin_Port.GetName(), originPort)
-	v.SetDefault(param.Cache_Port.GetName(), cachePort)
-
-	if originPort != 443 {
-		v.SetDefault(param.Origin_Url.GetName(), fmt.Sprintf("https://%v:%v", v.GetString(param.Server_Hostname.GetName()), originPort))
+	if param.Origin_Port.GetInt() != 443 {
+		v.SetDefault(param.Origin_Url.GetName(), fmt.Sprintf("https://%v:%v", v.GetString(param.Server_Hostname.GetName()), param.Origin_Port.GetInt()))
 	} else {
 		v.SetDefault(param.Origin_Url.GetName(), fmt.Sprintf("https://%v", v.GetString(param.Server_Hostname.GetName())))
 	}
 
-	if cachePort != 443 {
-		v.SetDefault(param.Cache_Url.GetName(), fmt.Sprintf("https://%v:%v", v.GetString(param.Server_Hostname.GetName()), cachePort))
+	if param.Cache_Port.GetInt() != 443 {
+		v.SetDefault(param.Cache_Url.GetName(), fmt.Sprintf("https://%v:%v", v.GetString(param.Server_Hostname.GetName()), param.Cache_Port.GetInt()))
 	} else {
 		v.SetDefault(param.Cache_Url.GetName(), fmt.Sprintf("https://%v", v.GetString(param.Server_Hostname.GetName())))
 	}
