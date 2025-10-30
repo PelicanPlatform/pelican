@@ -38,7 +38,7 @@ func TestCreateJob(t *testing.T) {
 
 	// Create transfer manager
 	ctx := context.Background()
-	tm := NewTransferManager(ctx, 5)
+	tm := NewTransferManager(ctx, 5, nil)
 	defer func() {
 		_ = tm.Shutdown()
 	}()
@@ -89,7 +89,7 @@ func TestGetJobStatus(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	ctx := context.Background()
-	tm := NewTransferManager(ctx, 5)
+	tm := NewTransferManager(ctx, 5, nil)
 	defer func() {
 		_ = tm.Shutdown()
 	}()
@@ -133,7 +133,7 @@ func TestCancelJob(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	ctx := context.Background()
-	tm := NewTransferManager(ctx, 5)
+	tm := NewTransferManager(ctx, 5, nil)
 	defer func() {
 		_ = tm.Shutdown()
 	}()
@@ -178,7 +178,7 @@ func TestListJobs(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	ctx := context.Background()
-	tm := NewTransferManager(ctx, 5)
+	tm := NewTransferManager(ctx, 5, nil)
 	defer func() {
 		_ = tm.Shutdown()
 	}()
@@ -246,7 +246,7 @@ func TestInvalidJobRequest(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	ctx := context.Background()
-	tm := NewTransferManager(ctx, 5)
+	tm := NewTransferManager(ctx, 5, nil)
 	defer func() {
 		_ = tm.Shutdown()
 	}()
@@ -283,7 +283,7 @@ func TestGetJobNotFound(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	ctx := context.Background()
-	tm := NewTransferManager(ctx, 5)
+	tm := NewTransferManager(ctx, 5, nil)
 	defer func() {
 		_ = tm.Shutdown()
 	}()
@@ -311,7 +311,7 @@ func TestGetJobNotFound(t *testing.T) {
 func TestTransferManagerConcurrency(t *testing.T) {
 	ctx := context.Background()
 	maxJobs := 2
-	tm := NewTransferManager(ctx, maxJobs)
+	tm := NewTransferManager(ctx, maxJobs, nil)
 	defer func() {
 		_ = tm.Shutdown()
 	}()
@@ -352,7 +352,7 @@ func TestShutdownHandler(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tm := NewTransferManager(ctx, 5)
+	tm := NewTransferManager(ctx, 5, nil)
 	defer func() {
 		_ = tm.Shutdown()
 	}()

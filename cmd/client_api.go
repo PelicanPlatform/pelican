@@ -29,14 +29,22 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/client_api"
+	"github.com/pelicanplatform/pelican/client_api/store"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 var (
 	clientAPISocketPath string
 	clientAPIPidFile    string
 	clientAPIMaxJobs    int
+	clientAPIDbPath     string
 )
+
+// initializeStore creates a new database store instance
+func initializeStore(dbPath string) (client_api.StoreInterface, error) {
+	return store.NewStore(dbPath)
+}
 
 var clientAPICmd = &cobra.Command{
 	Use:   "client-api",
@@ -58,6 +66,11 @@ on a Unix domain socket and handle job-based transfer requests.`,
 			return errors.Wrap(err, "Failed to initialize Pelican client")
 		}
 
+		// Use parameter socket path if set, otherwise use flag value
+		if socketParam := param.ClientAPI_Socket.GetString(); socketParam != "" {
+			clientAPISocketPath = socketParam
+		}
+
 		// Check if already running
 		running, err := client_api.CheckServerRunning(clientAPISocketPath)
 		if err != nil {
@@ -72,12 +85,24 @@ on a Unix domain socket and handle job-based transfer requests.`,
 			SocketPath:        clientAPISocketPath,
 			PidFile:           clientAPIPidFile,
 			MaxConcurrentJobs: clientAPIMaxJobs,
+			DatabasePath:      clientAPIDbPath,
 		}
 
 		// Create server
 		server, err := client_api.NewServer(serverConfig)
 		if err != nil {
 			return errors.Wrap(err, "Failed to create server")
+		}
+
+		// Initialize database store if database path is configured
+		if clientAPIDbPath != "" {
+			store, err := initializeStore(clientAPIDbPath)
+			if err != nil {
+				log.Warnf("Failed to initialize database store: %v. Server will run without persistence.", err)
+			} else {
+				server.SetStore(store)
+				defer store.Close()
+			}
 		}
 
 		// Start server
@@ -111,6 +136,16 @@ var clientAPIStopCmd = &cobra.Command{
 	Short: "Stop the client API server",
 	Long:  `Stop a running client API server daemon.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Initialize config to read parameters
+		if err := config.InitClient(); err != nil {
+			return errors.Wrap(err, "Failed to initialize Pelican client")
+		}
+
+		// Use parameter socket path if set, otherwise use flag value
+		if socketParam := param.ClientAPI_Socket.GetString(); socketParam != "" {
+			clientAPISocketPath = socketParam
+		}
+
 		// Check if server is running
 		running, err := client_api.CheckServerRunning(clientAPISocketPath)
 		if err != nil {
@@ -148,6 +183,16 @@ var clientAPIStatusCmd = &cobra.Command{
 	Short: "Check the status of the client API server",
 	Long:  `Check if the client API server is running.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Initialize config to read parameters
+		if err := config.InitClient(); err != nil {
+			return errors.Wrap(err, "Failed to initialize Pelican client")
+		}
+
+		// Use parameter socket path if set, otherwise use flag value
+		if socketParam := param.ClientAPI_Socket.GetString(); socketParam != "" {
+			clientAPISocketPath = socketParam
+		}
+
 		running, err := client_api.CheckServerRunning(clientAPISocketPath)
 		if err != nil {
 			return errors.Wrap(err, "Failed to check server status")
@@ -186,6 +231,8 @@ func init() {
 	// Serve-specific flags
 	clientAPIServeCmd.Flags().IntVar(&clientAPIMaxJobs, "max-jobs", client_api.DefaultMaxConcurrentJobs,
 		"Maximum number of concurrent transfer jobs")
+	clientAPIServeCmd.Flags().StringVar(&clientAPIDbPath, "database", "",
+		"Path to the SQLite database file for persistence (default: ~/.pelican/client-api.db)")
 
 	// Add to root command
 	rootCmd.AddCommand(clientAPICmd)
