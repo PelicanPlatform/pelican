@@ -1254,6 +1254,15 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Origin_Multiuser.GetName(), false)
 	}
 
+	v.SetDefault(param.Director_CheckOriginPresence.GetName(), true)
+	v.SetDefault(param.Director_CheckCachePresence.GetName(), true)
+
+	v.SetDefault(param.Origin_EnablePublicReads.GetName(), false)
+	v.SetDefault(param.Origin_EnableReads.GetName(), true)
+	v.SetDefault(param.Origin_EnableWrites.GetName(), true)
+	v.SetDefault(param.Origin_EnableListings.GetName(), true)
+	v.SetDefault(param.Origin_EnableDirectReads.GetName(), true)
+
 	v.SetDefault(param.Cache_ClientStatisticsLocation.GetName(), filepath.Join(param.Cache_RunLocation.GetString(), "xrootd.stats"))
 
 	fcRunLocation := v.GetString(param.LocalCache_RunLocation.GetName())
