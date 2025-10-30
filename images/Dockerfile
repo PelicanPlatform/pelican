@@ -39,6 +39,12 @@ ARG GO_VER=1.24.7
 ARG GORELEASER_CURRENT_TAG
 ARG NODEJS_VER=20
 
+# For controlling the UID/GID of users in the container images.
+ARG PELICAN_UID=10941
+ARG PELICAN_GID=10941
+ARG XROOTD_UID=10940
+ARG XROOTD_GID=10940
+
 # For controlling how XRootD plugins are installed:
 #
 #   - Set '*_BUILD' to 'true' to build RPMs from source.
@@ -179,6 +185,8 @@ ENDRUN
 FROM hub.opensciencegrid.org/osg-htc/software-base:${OSG_SERIES}-${BASE_OS}-${OSG_REPO} AS pelican-software-base
 ARG TARGETPLATFORM
 ARG PELICAN_USER=pelican
+ARG PELICAN_UID
+ARG PELICAN_GID
 
 WORKDIR /pelican
 
@@ -186,8 +194,8 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   set -eux
 
   # Create pelican user and group
-  groupadd -g 10941 ${PELICAN_USER}
-  useradd -u 10941 -g 10941 -d / -s /sbin/nologin ${PELICAN_USER}
+  groupadd -g ${PELICAN_GID} ${PELICAN_USER}
+  useradd -u ${PELICAN_UID} -g ${PELICAN_GID} -d / -s /sbin/nologin ${PELICAN_USER}
 
   # Throughout this build, we will have Docker's build process cache dnf's
   # cache directory, so that we can not include it in any final images and
@@ -217,11 +225,13 @@ ARG TARGETPLATFORM
 ARG TARGETARCH
 ARG BASE_OS
 ARG OSG_SERIES
+ARG XROOTD_UID
+ARG XROOTD_GID
 
 # xrootd's UID and GID here are effectively set in stone because of the
 # existing data out in the wild that is owned by these IDs.
-RUN groupadd -g 10940 xrootd \
-    && useradd -u 10940 -g 10940 -d / -s /sbin/nologin xrootd
+RUN groupadd -g ${XROOTD_GID} xrootd \
+    && useradd -u ${XROOTD_UID} -g ${XROOTD_GID} -d / -s /sbin/nologin xrootd
 
 # We need to pin the install for many of the RPMs to "Koji" until all of
 # Pelican's patches are ingested into the OSG repositories.
