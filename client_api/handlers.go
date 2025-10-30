@@ -20,6 +20,7 @@ package client_api
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/client"
+	"github.com/pelicanplatform/pelican/version"
 )
 
 var serverStartTime = time.Now()
@@ -315,7 +317,7 @@ func (s *Server) HealthHandler(c *gin.Context) {
 
 	c.JSON(http.StatusOK, HealthResponse{
 		Status:        "ok",
-		Version:       "1.0.0", // TODO: Get from version package
+		Version:       version.GetVersion(),
 		UptimeSeconds: int64(uptime),
 	})
 }
@@ -349,8 +351,23 @@ func buildTransferOptions(opts TransferOptions) []client.TransferOption {
 		options = append(options, client.WithTokenLocation(opts.Token))
 	}
 
-	// TODO: Add cache support - need to parse cache URLs
-	// TODO: Add more options as needed (workers, chunk size, etc.)
+	// Add cache URLs if provided
+	if len(opts.Caches) > 0 {
+		cacheURLs := make([]*url.URL, 0, len(opts.Caches))
+		for _, cacheStr := range opts.Caches {
+			if cacheURL, err := url.Parse(cacheStr); err == nil {
+				cacheURLs = append(cacheURLs, cacheURL)
+			} else {
+				log.Warnf("Failed to parse cache URL %s: %v", cacheStr, err)
+			}
+		}
+		if len(cacheURLs) > 0 {
+			options = append(options, client.WithCaches(cacheURLs...))
+		}
+	}
+
+	// Note: Additional options like workers, chunk size, etc. can be added
+	// as they become available in the client.TransferOption API
 
 	return options
 }
