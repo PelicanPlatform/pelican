@@ -73,13 +73,8 @@ const (
 	globusCallbackPath = "/view/origin/globus/callback"
 )
 
-// TokenType represents the type of Globus token
-type TokenType string
-
-const (
-	TokenTypeCollection TokenType = "collection"
-	TokenTypeTransfer   TokenType = "transfer"
-)
+const globusTokenFileExt = ".tok"                  // File extension for caching Globus access token
+const globusTransferTokenFileExt = ".transfer.tok" // File extension for caching Globus transfer token
 
 // Setup the OAuth2 config for Globus backend
 func setupGlobusOAuthCfg() {
@@ -344,7 +339,6 @@ func handleGlobusCallback(ctx *gin.Context) {
 		return
 	}
 
-	log.Debugf("used oauth code for Globus here: %v", req.Code)
 	token, err := client.Exchange(c, req.Code)
 	if err != nil {
 		log.Errorf("Error in exchanging code for token: %v", err)
@@ -575,7 +569,6 @@ func handleGlobusAuth(ctx *gin.Context) {
 		fmt.Sprintf("https://auth.globus.org/scopes/%s/https", cid),
 		fmt.Sprintf("https://auth.globus.org/scopes/%s/data_access", cid),
 	)
-	log.Debugf("reqScopes: %v", reqScopes)
 	redirectUrl := client.AuthCodeURL(
 		csrfState,
 		oauth2.AccessTypeOffline,
@@ -585,7 +578,7 @@ func handleGlobusAuth(ctx *gin.Context) {
 }
 
 // Persist a Globus access token on the disk
-func persistToken(collectionID string, token *oauth2.Token, tokenType TokenType) (string, error) {
+func persistToken(collectionID string, token *oauth2.Token, tokenType GlobusTokenType) (string, error) {
 	uid, err := config.GetDaemonUID()
 	if err != nil {
 		return "", errors.Wrap(err, fmt.Sprintf("failed to persist Globus %s access token on disk: failed to get uid", tokenType))
@@ -604,9 +597,9 @@ func persistToken(collectionID string, token *oauth2.Token, tokenType TokenType)
 	var filename string
 	switch tokenType {
 	case TokenTypeCollection:
-		filename = collectionID + GlobusTokenFileExt
+		filename = collectionID + globusTokenFileExt
 	case TokenTypeTransfer:
-		filename = collectionID + GlobusTransferTokenFileExt
+		filename = collectionID + globusTransferTokenFileExt
 	default:
 		return "", fmt.Errorf("unknown token type: %s", tokenType)
 	}
@@ -641,7 +634,7 @@ func persistToken(collectionID string, token *oauth2.Token, tokenType TokenType)
 //
 // Returns nil if the token is still valid (expire time > 10 min) or the refreshed token.
 // Returns error if any
-func refreshGlobusToken(cid string, token *oauth2.Token, tokenType TokenType) (*oauth2.Token, error) {
+func refreshGlobusToken(cid string, token *oauth2.Token, tokenType GlobusTokenType) (*oauth2.Token, error) {
 	if token == nil {
 		return nil, fmt.Errorf("failed to update Globus %s token for collection %s: token is nil", tokenType, cid)
 	}

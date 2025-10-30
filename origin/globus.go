@@ -61,13 +61,18 @@ type globusExportUI struct {
 	UUID string `json:"uuid"`
 }
 
+// GlobusTokenType represents the type of Globus token
+type GlobusTokenType string
+
+const (
+	TokenTypeCollection GlobusTokenType = "collection"
+	TokenTypeTransfer   GlobusTokenType = "transfer"
+)
+
 const (
 	GlobusInactive  = "Inactive"
 	GlobusActivated = "Activated"
 )
-
-const GlobusTokenFileExt = ".tok"                  // File extension for caching Globus access token
-const GlobusTransferTokenFileExt = ".transfer.tok" // File extension for caching Globus transfer token
 
 var (
 	// An in-memory map-struct to keep Globus collections information with key being the collection UUID.
@@ -76,7 +81,7 @@ var (
 )
 
 // loadTokenFromDB loads and refreshes a token from the database for a specific token type
-func loadTokenFromDB(cid string, refreshToken string, tokenType TokenType, globusAuthCfg *oauth2.Config) (*oauth2.Token, error) {
+func loadTokenFromDB(cid string, refreshToken string, tokenType GlobusTokenType, globusAuthCfg *oauth2.Config) (*oauth2.Token, error) {
 	refToken := &oauth2.Token{
 		RefreshToken: refreshToken,
 	}
@@ -221,7 +226,7 @@ func isExportActivated(fedPrefix string) (ok bool) {
 }
 
 // refreshTokenWithRetry handles token refresh with retry logic for a specific token type
-func refreshTokenWithRetry(cid string, token *oauth2.Token, tokenType TokenType, exp *globusExport) (*oauth2.Token, error) {
+func refreshTokenWithRetry(cid string, token *oauth2.Token, tokenType GlobusTokenType, exp *globusExport) (*oauth2.Token, error) {
 	newTok, err := refreshGlobusToken(cid, token, tokenType)
 	if err != nil {
 		log.Errorf("Failed to refresh Globus %s token for collection %s with name %s. Will retry once: %v", tokenType, cid, exp.DisplayName, err)
