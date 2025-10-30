@@ -25,6 +25,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/client_api/apiclient"
+	"github.com/pelicanplatform/pelican/config"
 )
 
 var (
@@ -45,6 +46,11 @@ func init() {
 func jobCancelMain(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	jobID := args[0]
+
+	// Initialize config to read parameters
+	if err := config.InitClient(); err != nil {
+		return errors.Wrap(err, "failed to initialize config")
+	}
 
 	// Create API client
 	apiClient, err := apiclient.NewAPIClient("")

@@ -136,14 +136,14 @@ func copyMain(cmd *cobra.Command, args []string) {
 		apiClient, err := apiclient.NewAPIClient("")
 		if err != nil {
 			log.Errorln("Failed to create API client:", err)
-			log.Errorln("Ensure the client API server is running with 'pelican serve --client-api'")
+			log.Errorln("Ensure the client API server is running with 'pelican client-api serve'")
 			os.Exit(1)
 		}
 
 		// Check if server is running
 		if !apiClient.IsServerRunning(ctx) {
 			log.Errorln("Client API server is not running")
-			log.Errorln("Start it with 'pelican serve --client-api'")
+			log.Errorln("Start it with 'pelican client-api serve'")
 			os.Exit(1)
 		}
 

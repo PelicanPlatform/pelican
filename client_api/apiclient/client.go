@@ -31,6 +31,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/pelicanplatform/pelican/client_api"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // APIClient provides a client interface to the Pelican Client API Server
@@ -43,13 +44,20 @@ type APIClient struct {
 // NewAPIClient creates a new API client connected to the Unix socket
 func NewAPIClient(socketPath string) (*APIClient, error) {
 	if socketPath == "" {
-		// Use default socket path
-		expandedPath, err := expandPath(client_api.DefaultSocketPath)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to expand default socket path")
+		// Check if parameter is set via environment or config
+		if paramSocket := param.ClientAPI_Socket.GetString(); paramSocket != "" {
+			socketPath = paramSocket
+		} else {
+			// Use default socket path
+			expandedPath, err := expandPath(client_api.DefaultSocketPath)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to expand default socket path")
+			}
+			socketPath = expandedPath
 		}
-		socketPath = expandedPath
-	} else {
+	}
+
+	if socketPath != "" {
 		expandedPath, err := expandPath(socketPath)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to expand socket path")
