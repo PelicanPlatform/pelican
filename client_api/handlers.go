@@ -322,6 +322,155 @@ func (s *Server) HealthHandler(c *gin.Context) {
 	})
 }
 
+// GetJobHistoryHandler handles GET /api/v1/xfer/history
+// Query params: status, from, to, limit, offset
+func (s *Server) GetJobHistoryHandler(c *gin.Context) {
+	// Check if store is configured
+	if s.transferManager.store == nil {
+		c.JSON(http.StatusServiceUnavailable, ErrorResponse{
+			Code:  "HISTORY_UNAVAILABLE",
+			Error: "Job history is not available (database not configured)",
+		})
+		return
+	}
+
+	// Parse query parameters
+	status := c.Query("status")
+	fromStr := c.Query("from")
+	toStr := c.Query("to")
+	limitStr := c.DefaultQuery("limit", "100")
+	offsetStr := c.DefaultQuery("offset", "0")
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit < 1 || limit > 1000 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Code:  ErrCodeInvalidRequest,
+			Error: "Invalid limit parameter (must be 1-1000)",
+		})
+		return
+	}
+
+	offset, err := strconv.Atoi(offsetStr)
+	if err != nil || offset < 0 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Code:  ErrCodeInvalidRequest,
+			Error: "Invalid offset parameter (must be >= 0)",
+		})
+		return
+	}
+
+	// Parse time filters
+	var fromTime, toTime time.Time
+	if fromStr != "" {
+		t, err := time.Parse(time.RFC3339, fromStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{
+				Code:  ErrCodeInvalidRequest,
+				Error: "Invalid from parameter (must be RFC3339 format)",
+			})
+			return
+		}
+		fromTime = t
+	}
+	if toStr != "" {
+		t, err := time.Parse(time.RFC3339, toStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{
+				Code:  ErrCodeInvalidRequest,
+				Error: "Invalid to parameter (must be RFC3339 format)",
+			})
+			return
+		}
+		toTime = t
+	}
+
+	// Get history from store
+	historyData, total, err := s.transferManager.store.GetJobHistory(status, fromTime, toTime, limit, offset)
+	if err != nil {
+		log.Errorf("Failed to get job history: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Code:  ErrCodeInternal,
+			Error: "Failed to retrieve job history",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"jobs":   historyData,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
+	})
+}
+
+// DeleteJobHistoryHandler handles DELETE /api/v1/xfer/history
+// Can delete specific job or prune old history with olderThan param
+func (s *Server) DeleteJobHistoryHandler(c *gin.Context) {
+	// Check if store is configured
+	if s.transferManager.store == nil {
+		c.JSON(http.StatusServiceUnavailable, ErrorResponse{
+			Code:  "HISTORY_UNAVAILABLE",
+			Error: "Job history is not available (database not configured)",
+		})
+		return
+	}
+
+	// Check for job ID in path
+	jobID := c.Param("job_id")
+	olderThanStr := c.Query("older_than")
+
+	if jobID != "" {
+		// Delete specific job history
+		if err := s.transferManager.store.DeleteJobHistory(jobID); err != nil {
+			log.Errorf("Failed to delete job history %s: %v", jobID, err)
+			c.JSON(http.StatusInternalServerError, ErrorResponse{
+				Code:  ErrCodeInternal,
+				Error: "Failed to delete job history",
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Job history deleted",
+			"job_id":  jobID,
+		})
+		return
+	}
+
+	if olderThanStr != "" {
+		// Prune old history
+		olderThan, err := time.Parse(time.RFC3339, olderThanStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{
+				Code:  ErrCodeInvalidRequest,
+				Error: "Invalid older_than parameter (must be RFC3339 format)",
+			})
+			return
+		}
+
+		pruned, err := s.transferManager.store.PruneHistory(olderThan)
+		if err != nil {
+			log.Errorf("Failed to prune history: %v", err)
+			c.JSON(http.StatusInternalServerError, ErrorResponse{
+				Code:  ErrCodeInternal,
+				Error: "Failed to prune job history",
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Old job history pruned",
+			"pruned":  pruned,
+		})
+		return
+	}
+
+	c.JSON(http.StatusBadRequest, ErrorResponse{
+		Code:  ErrCodeInvalidRequest,
+		Error: "Must provide either job_id or older_than parameter",
+	})
+}
+
 // ShutdownHandler handles POST /shutdown
 // Initiates a graceful shutdown of the server
 func (s *Server) ShutdownHandler(c *gin.Context) {
