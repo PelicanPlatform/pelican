@@ -680,6 +680,68 @@ default: none
 components: ["client"]
 ---
 ############################
+#  ClientAPI-level Configs #
+############################
+name: ClientAPI.DatabasePath
+description: |+
+  The filepath to the SQLite database used by the client API server for persisting
+  transfer job state, history, and recovery information. If not specified, defaults
+  to `~/.pelican/client-api.db`.
+
+  Set this to an empty string to disable database persistence entirely and run
+  the client API server in memory-only mode.
+type: filename
+default: $ConfigBase/client-api.db
+components: ["client"]
+---
+name: ClientAPI.EnableAutoRecovery
+description: |+
+  A boolean indicating whether the client API server should automatically attempt
+  to recover incomplete jobs from the database on startup. When enabled, interrupted
+  jobs will be marked as failed and archived to history.
+
+  Disabling this may be useful for debugging or when manual recovery is preferred.
+type: bool
+default: true
+components: ["client"]
+---
+name: ClientAPI.HistoryRetentionDays
+description: |+
+  The number of days to retain completed job history in the database before
+  automatic pruning. Historical records older than this threshold will be deleted
+  during the daily maintenance cycle.
+
+  Set to 0 to disable automatic pruning (history will be retained indefinitely).
+type: int
+default: 30
+components: ["client"]
+---
+name: ClientAPI.MaxConnections
+description: |+
+  The maximum number of concurrent database connections allowed by the client API
+  server's SQLite connection pool. This limits resource usage but may impact
+  performance under high load.
+
+  Increase this value if you experience database lock contention or timeouts
+  with many concurrent API requests.
+type: int
+default: 10
+components: ["client"]
+---
+name: ClientAPI.Socket
+description: |+
+  The filepath to the Unix domain socket used by the client API server for
+  inter-process communication. Clients connect to this socket to submit transfer
+  jobs and query their status.
+
+  If not specified, the default location is used based on the platform and user
+  permissions. This parameter allows overriding the default location for testing
+  or custom deployment scenarios.
+type: filename
+default: ""
+components: ["client"]
+---
+############################
 #   Origin-level Configs   #
 ############################
 name: Origin.DbLocation

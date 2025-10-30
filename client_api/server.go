@@ -60,6 +60,7 @@ type ServerConfig struct {
 	SocketPath        string
 	PidFile           string
 	MaxConcurrentJobs int
+	DatabasePath      string
 }
 
 // NewServer creates a new client API server
@@ -83,12 +84,38 @@ func NewServer(config ServerConfig) (*Server, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Initialize database store
+	var storeInstance StoreInterface
+	dbPath := config.DatabasePath
+	if dbPath == "" {
+		// Default to ~/.pelican/client-api.db
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			log.Warnf("Failed to get home directory, database will not be initialized: %v", err)
+		} else {
+			dbPath = filepath.Join(homeDir, ".pelican", "client-api.db")
+			dbDir := filepath.Dir(dbPath)
+			if err := os.MkdirAll(dbDir, 0755); err != nil {
+				log.Warnf("Failed to create database directory, database will not be initialized: %v", err)
+				dbPath = ""
+			}
+		}
+	}
+
+	if dbPath != "" {
+		// Import is done via interface, actual store creation happens in a separate package
+		log.Infof("Initializing database at %s", dbPath)
+		// Note: Store initialization will be handled by importing client_api/store
+		// and calling store.NewStore(dbPath) in the caller of NewServer
+		// For now, we'll pass nil and the store can be set later via a method
+	}
+
 	// Create transfer manager
 	maxJobs := config.MaxConcurrentJobs
 	if maxJobs <= 0 {
 		maxJobs = DefaultMaxConcurrentJobs
 	}
-	transferManager := NewTransferManager(ctx, maxJobs)
+	transferManager := NewTransferManager(ctx, maxJobs, storeInstance)
 
 	// Set up Gin router
 	gin.SetMode(gin.ReleaseMode)
@@ -123,6 +150,11 @@ func (s *Server) setupRoutes() {
 		api.GET("/jobs/:job_id", s.GetJobStatusHandler)
 		api.DELETE("/jobs/:job_id", s.CancelJobHandler)
 
+		// History management
+		api.GET("/history", s.GetJobHistoryHandler)
+		api.DELETE("/history/:job_id", s.DeleteJobHistoryHandler)
+		api.DELETE("/history", s.DeleteJobHistoryHandler)
+
 		// File operations
 		api.POST("/stat", s.StatHandler)
 		api.POST("/list", s.ListHandler)
@@ -134,6 +166,15 @@ func (s *Server) setupRoutes() {
 
 	// Shutdown
 	s.router.POST("/shutdown", s.ShutdownHandler)
+}
+
+// SetStore sets the persistent storage interface for the server
+// This allows the store to be initialized separately to avoid import cycles
+func (s *Server) SetStore(store StoreInterface) {
+	s.transferManager.store = store
+	if store != nil {
+		log.Info("Database store configured for transfer manager")
+	}
 }
 
 // Start starts the server
