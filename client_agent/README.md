@@ -1,6 +1,6 @@
-# Pelican Client API Server
+# Pelican Client Agent Server
 
-The Pelican Client API Server provides a RESTful API for interacting with Pelican client functionality over a Unix domain socket. This enables external applications to use Pelican transfer capabilities programmatically without directly invoking the CLI.
+The Pelican Client Agent Server provides a RESTful API for interacting with Pelican client functionality over a Unix domain socket. This enables external applications to use Pelican transfer capabilities programmatically without directly invoking the CLI.
 
 ## Features
 
@@ -568,7 +568,7 @@ The socket has restrictive permissions (0600). Ensure you're the same user who s
 
 ## CLI Integration (Phase 2)
 
-Starting with Phase 2, Pelican's CLI commands can execute transfers asynchronously through the Client API Server. This enables fire-and-forget transfers and better management of long-running operations.
+Starting with Phase 2, Pelican's CLI commands can execute transfers asynchronously through the Client Agent Server. This enables fire-and-forget transfers and better management of long-running operations.
 
 ### Async Transfer Flags
 
@@ -740,7 +740,7 @@ python process_data.py /tmp/input.csv
 
 ### Programmatic Access (API Client)
 
-For Go applications, use the `apiclient` package to interact with the Client API Server:
+For Go applications, use the `apiclient` package to interact with the Client Agent Server:
 
 ```go
 package main
@@ -750,8 +750,8 @@ import (
     "fmt"
     "time"
 
-    "github.com/pelicanplatform/pelican/client_api"
-    "github.com/pelicanplatform/pelican/client_api/apiclient"
+    "github.com/pelicanplatform/pelican/client_agent"
+    "github.com/pelicanplatform/pelican/client_agent/apiclient"
 )
 
 func main() {
@@ -770,7 +770,7 @@ func main() {
     }
 
     // Create a transfer job
-    transfers := []client_api.TransferRequest{
+    transfers := []client_agent.TransferRequest{
         {
             Operation:   "get",
             Source:      "osdf:///osgconnect/public/example.txt",
@@ -779,7 +779,7 @@ func main() {
         },
     }
 
-    options := client_api.TransferOptions{
+    options := client_agent.TransferOptions{
         Token: "/path/to/token",
     }
 
@@ -824,14 +824,14 @@ The `apiclient.APIClient` provides the following methods:
 
 ### Prerequisites for Async Mode
 
-1. **Server Running**: Client API server must be running:
+1. **Server Running**: Client Agent server must be running:
    ```bash
    pelican client-api serve
    ```
 
 2. **Socket Path**: CLI automatically uses default socket. Override with:
    ```bash
-   export PELICAN_CLIENT_API_SOCKET=/custom/path/socket
+   export PELICAN_CLIENTAGENT_SOCKET=/custom/path/socket
    ```
 
 3. **Authentication**: Same token requirements as direct execution
@@ -842,7 +842,7 @@ If the server is not running, async commands will fail with a clear error:
 
 ```bash
 $ pelican object get --async osdf:///file /dest
-Error: Client API server is not running
+Error: Client Agent server is not running
 Start it with 'pelican serve --client-api'
 ```
 
@@ -851,14 +851,14 @@ Start it with 'pelican serve --client-api'
 ### Running Tests
 
 ```bash
-cd client_api
+cd client_agent
 go test -v
 ```
 
 ### Building
 
 ```bash
-# Build Pelican with client API support
+# Build Pelican with client agent support
 make build
 ```
 

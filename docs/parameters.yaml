@@ -680,9 +680,9 @@ default: none
 components: ["client"]
 ---
 ############################
-#  ClientAPI-level Configs #
+#  ClientAgent-level Configs #
 ############################
-name: ClientAPI.DatabasePath
+name: ClientAgent.DatabasePath
 description: |+
   The filepath to the SQLite database used by the client API server for persisting
   transfer job state, history, and recovery information. If not specified, defaults
@@ -694,7 +694,7 @@ type: filename
 default: $ConfigBase/client-api.db
 components: ["client"]
 ---
-name: ClientAPI.EnableAutoRecovery
+name: ClientAgent.EnableAutoRecovery
 description: |+
   A boolean indicating whether the client API server should automatically attempt
   to recover incomplete jobs from the database on startup. When enabled, interrupted
@@ -705,7 +705,7 @@ type: bool
 default: true
 components: ["client"]
 ---
-name: ClientAPI.HistoryRetentionDays
+name: ClientAgent.HistoryRetentionDays
 description: |+
   The number of days to retain completed job history in the database before
   automatic pruning. Historical records older than this threshold will be deleted
@@ -716,7 +716,7 @@ type: int
 default: 30
 components: ["client"]
 ---
-name: ClientAPI.MaxConnections
+name: ClientAgent.MaxConnections
 description: |+
   The maximum number of concurrent database connections allowed by the client API
   server's SQLite connection pool. This limits resource usage but may impact
@@ -728,7 +728,7 @@ type: int
 default: 10
 components: ["client"]
 ---
-name: ClientAPI.Socket
+name: ClientAgent.Socket
 description: |+
   The filepath to the Unix domain socket used by the client API server for
   inter-process communication. Clients connect to this socket to submit transfer

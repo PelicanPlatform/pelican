@@ -26,8 +26,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
-	"github.com/pelicanplatform/pelican/client_api"
-	"github.com/pelicanplatform/pelican/client_api/apiclient"
+	"github.com/pelicanplatform/pelican/client_agent"
+	"github.com/pelicanplatform/pelican/client_agent/apiclient"
 	"github.com/pelicanplatform/pelican/config"
 )
 
@@ -109,7 +109,7 @@ func watchJobStatus(ctx context.Context, apiClient *apiclient.APIClient, jobID s
 	}
 }
 
-func printJobStatus(status *client_api.JobStatus) {
+func printJobStatus(status *client_agent.JobStatus) {
 	fmt.Printf("Job ID: %s\n", status.JobID)
 	fmt.Printf("Status: %s\n", status.Status)
 	fmt.Printf("Created: %s\n", status.CreatedAt.Format(time.RFC3339))

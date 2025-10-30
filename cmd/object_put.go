@@ -37,8 +37,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/client"
-	"github.com/pelicanplatform/pelican/client_api"
-	"github.com/pelicanplatform/pelican/client_api/apiclient"
+	"github.com/pelicanplatform/pelican/client_agent"
+	"github.com/pelicanplatform/pelican/client_agent/apiclient"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 )
@@ -179,15 +179,15 @@ func putMain(cmd *cobra.Command, args []string) {
 		packOption, _ := cmd.Flags().GetString("pack")
 
 		// Build transfer options
-		options := client_api.TransferOptions{
+		options := client_agent.TransferOptions{
 			Token:      tokenLocation,
 			PackOption: packOption,
 		}
 
 		// Create transfers for each source
-		transfers := make([]client_api.TransferRequest, len(source))
+		transfers := make([]client_agent.TransferRequest, len(source))
 		for i, src := range source {
-			transfers[i] = client_api.TransferRequest{
+			transfers[i] = client_agent.TransferRequest{
 				Operation:   "put",
 				Source:      src,
 				Destination: dest,

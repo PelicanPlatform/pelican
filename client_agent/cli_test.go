@@ -18,7 +18,7 @@
  *
  ***************************************************************/
 
-package client_api_test
+package client_agent_test
 
 import (
 	"bytes"
@@ -37,7 +37,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/client_api"
+	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
@@ -100,13 +100,13 @@ func TestCLIAsyncGet(t *testing.T) {
 	socketPath := filepath.Join(tempDir, "client-api.sock")
 	pidFile := filepath.Join(tempDir, "client-api.pid")
 
-	serverConfig := client_api.ServerConfig{
+	serverConfig := client_agent.ServerConfig{
 		SocketPath:        socketPath,
 		PidFile:           pidFile,
 		MaxConcurrentJobs: 5,
 	}
 
-	server, err := client_api.NewServer(serverConfig)
+	server, err := client_agent.NewServer(serverConfig)
 	require.NoError(t, err)
 
 	err = server.Start()
@@ -133,7 +133,7 @@ func TestCLIAsyncGet(t *testing.T) {
 
 	// Upload with async + wait to ensure file is present before testing downloads
 	uploadCmd := exec.Command(pelicanBin, "object", "put", "--async", "--wait", uploadFile, uploadURL, "--token", tokenFile)
-	uploadCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
+	uploadCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
 	output, err := uploadCmd.CombinedOutput()
 	require.NoError(t, err, "Failed to upload file: %s", output)
 
@@ -142,7 +142,7 @@ func TestCLIAsyncGet(t *testing.T) {
 		downloadFile := filepath.Join(tempDir, "downloaded-async.txt")
 
 		cmd := exec.Command(pelicanBin, "object", "get", "--async", uploadURL, downloadFile, "--token", tokenFile)
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Failed to run async get: %s", output)
@@ -174,7 +174,7 @@ func TestCLIAsyncGet(t *testing.T) {
 		downloadFile := filepath.Join(tempDir, "downloaded-wait.txt")
 
 		cmd := exec.Command(pelicanBin, "object", "get", "--async", "--wait", uploadURL, downloadFile, "--token", tokenFile)
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Failed to run async get with wait: %s", output)
@@ -233,13 +233,13 @@ func TestCLIAsyncPut(t *testing.T) {
 	socketPath := filepath.Join(tempDir, "client-api.sock")
 	pidFile := filepath.Join(tempDir, "client-api.pid")
 
-	serverConfig := client_api.ServerConfig{
+	serverConfig := client_agent.ServerConfig{
 		SocketPath:        socketPath,
 		PidFile:           pidFile,
 		MaxConcurrentJobs: 5,
 	}
 
-	server, err := client_api.NewServer(serverConfig)
+	server, err := client_agent.NewServer(serverConfig)
 	require.NoError(t, err)
 
 	err = server.Start()
@@ -267,7 +267,7 @@ func TestCLIAsyncPut(t *testing.T) {
 	// Test async put without --wait
 	t.Run("AsyncPutWithoutWait", func(t *testing.T) {
 		cmd := exec.Command(pelicanBin, "object", "put", "--async", uploadFile, uploadURL, "--token", tokenFile)
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Failed to run async put: %s", output)
@@ -285,7 +285,7 @@ func TestCLIAsyncPut(t *testing.T) {
 		uploadURL2 := fmt.Sprintf("pelican://%s%s/async-put-wait-test.txt", discoveryUrl.Host, federationPrefix)
 
 		cmd := exec.Command(pelicanBin, "object", "put", "--async", "--wait", uploadFile, uploadURL2, "--token", tokenFile)
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Failed to run async put with wait: %s", output)
@@ -339,13 +339,13 @@ func TestCLIJobCommands(t *testing.T) {
 	socketPath := filepath.Join(tempDir, "client-api.sock")
 	pidFile := filepath.Join(tempDir, "client-api.pid")
 
-	serverConfig := client_api.ServerConfig{
+	serverConfig := client_agent.ServerConfig{
 		SocketPath:        socketPath,
 		PidFile:           pidFile,
 		MaxConcurrentJobs: 5,
 	}
 
-	server, err := client_api.NewServer(serverConfig)
+	server, err := client_agent.NewServer(serverConfig)
 	require.NoError(t, err)
 
 	err = server.Start()
@@ -374,7 +374,7 @@ func TestCLIJobCommands(t *testing.T) {
 	// Create an async job
 	t.Logf("Creating async job uploading to %s", uploadURL)
 	cmd := exec.Command(pelicanBin, "object", "put", "--async", uploadFile, uploadURL, "--token", tokenFile)
-	cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
+	cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
 
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, "Failed to create job: %s", output)
@@ -390,7 +390,7 @@ func TestCLIJobCommands(t *testing.T) {
 	t.Run("JobStatus", func(t *testing.T) {
 		log.Debugln("Running job status for job ID:", jobID)
 		cmd := exec.Command(pelicanBin, "job", "status", jobID, "--debug")
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
 
 		output, err := cmd.CombinedOutput()
 		log.Debug("Job status output:", string(output))
@@ -408,7 +408,7 @@ func TestCLIJobCommands(t *testing.T) {
 	// Test job list command
 	t.Run("JobList", func(t *testing.T) {
 		cmd := exec.Command(pelicanBin, "job", "list")
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Failed to list jobs: %s", output)
@@ -426,7 +426,7 @@ func TestCLIJobCommands(t *testing.T) {
 		time.Sleep(2 * time.Second)
 
 		cmd := exec.Command(pelicanBin, "job", "list", "--status", "completed")
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Failed to list completed jobs: %s", output)
@@ -450,7 +450,7 @@ func TestCLIJobCommands(t *testing.T) {
 
 		// Create async job
 		createCmd := exec.Command(pelicanBin, "object", "put", "--async", largeFile, cancelURL, "--token", tokenFile)
-		createCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
+		createCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
 
 		output, err := createCmd.CombinedOutput()
 		require.NoError(t, err, "Failed to create job for cancellation: %s", output)
@@ -465,7 +465,7 @@ func TestCLIJobCommands(t *testing.T) {
 
 		// Cancel the job
 		cancelCmd := exec.Command(pelicanBin, "job", "cancel", cancelJobID)
-		cancelCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
+		cancelCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
 
 		output, err = cancelCmd.CombinedOutput()
 		outputStr := string(output)
@@ -499,7 +499,7 @@ func TestCLIAsyncServerNotRunning(t *testing.T) {
 	socketPath := filepath.Join(tempDir, "nonexistent.sock")
 
 	cmd := exec.Command(pelicanBin, "object", "put", "--async", testFile, "pelican://example.com/test", "--token", "fake-token")
-	cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAPI_SOCKET=%s", socketPath))
+	cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
 
 	output, err := cmd.CombinedOutput()
 	require.Error(t, err, "Should fail when server is not running")

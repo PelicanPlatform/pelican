@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package client_api
+package client_agent
 
 import "time"
 
