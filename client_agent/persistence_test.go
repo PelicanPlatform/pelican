@@ -161,13 +161,24 @@ func TestJobRecovery(t *testing.T) {
 		_ = tm.Shutdown()
 	}()
 
-	// Wait for recovery to complete
-	time.Sleep(500 * time.Millisecond)
+	// Poll for recovery to complete (up to 2 seconds)
+	var historyData interface{}
+	var total int
+	recoveryComplete := false
 
-	// The job should no longer be in the active jobs table (it was archived)
-	// Instead, verify it's in the history
-	historyData, total, err := testStore.GetJobHistory("", time.Time{}, time.Time{}, 10, 0)
-	require.NoError(t, err, "Failed to get job history")
+	for i := 0; i < 20; i++ {
+		historyData, total, err = testStore.GetJobHistory("", time.Time{}, time.Time{}, 10, 0)
+		require.NoError(t, err, "Failed to get job history")
+
+		if total == 1 {
+			recoveryComplete = true
+			break
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	require.True(t, recoveryComplete, "Recovery did not complete within 2 seconds")
 	require.Equal(t, 1, total, "Expected 1 job in history")
 
 	historyJobs, ok := historyData.([]*store.HistoricalJob)
