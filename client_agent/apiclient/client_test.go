@@ -122,8 +122,8 @@ func setupTestEnvironment(t *testing.T) (apiClient *apiclient.APIClient, fed *fe
 	return apiClient, fed, tempDir, tokenFile, cleanup
 }
 
-// TestAPIClientServerConnection tests basic connectivity to the API server
-func TestAPIClientServerConnection(t *testing.T) {
+// TestAgentConn tests basic connectivity to the API server
+func TestAgentConn(t *testing.T) {
 	apiClient, _, _, _, cleanup := setupTestEnvironment(t)
 	defer cleanup()
 
@@ -136,7 +136,7 @@ func TestAPIClientServerConnection(t *testing.T) {
 
 	t.Run("ServerNotRunning", func(t *testing.T) {
 		// Create client with non-existent socket
-		badClient, err := apiclient.NewAPIClient(filepath.Join(t.TempDir(), "nonexistent.sock"))
+		badClient, err := apiclient.NewAPIClient(filepath.Join(t.TempDir(), "non.sock"))
 		require.NoError(t, err)
 
 		running := badClient.IsServerRunning(ctx)
@@ -416,7 +416,7 @@ func TestAPIClientCancelJob(t *testing.T) {
 
 	// Create a large file to ensure transfer takes some time
 	testFile := filepath.Join(tempDir, "cancel-test.txt")
-	largeContent := make([]byte, 10*1024*1024) // 10MB
+	largeContent := make([]byte, 100*1024*1024) // 100MB
 	for i := range largeContent {
 		largeContent[i] = byte(i % 256)
 	}
