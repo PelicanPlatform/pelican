@@ -37,9 +37,7 @@ export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    const postCallback = async (
-      search: string
-    ): Promise<callbackResponse> => {
+    const postCallback = async (search: string): Promise<callbackResponse> => {
       const url = new URL(
         '/api/v1.0/origin_ui/globus/auth/callback' + search,
         window.location.origin
