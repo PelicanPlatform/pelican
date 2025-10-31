@@ -40,6 +40,7 @@ type (
 	// A response struct for a server Ad that provides a minimal view into the servers data
 	listServerResponse struct {
 		Name                string                           `json:"name"`
+		ServerID            string                           `json:"serverId"`
 		StorageType         server_structs.OriginStorageType `json:"storageType"`
 		DisableDirectorTest bool                             `json:"disableDirectorTest"`
 		// AuthURL is Deprecated. For Pelican severs, URL is used as the base URL for object access.
@@ -80,6 +81,7 @@ type (
 	// and the server_structs.ServerAd.
 	serverResponse struct {
 		Name                string                           `json:"name"`
+		ServerID            string                           `json:"serverId"`
 		RegistryPrefix      string                           `json:"registryPrefix"`
 		StorageType         server_structs.OriginStorageType `json:"storageType"`
 		DisableDirectorTest bool                             `json:"disableDirectorTest"`
@@ -253,6 +255,7 @@ func advertisementToServerResponse(ad *server_structs.Advertisement) serverRespo
 	filtered, ft := checkFilter(ad.Name)
 	res := serverResponse{
 		Name:                ad.Name,
+		ServerID:            ad.ServerID,
 		RegistryPrefix:      ad.RegistryPrefix,
 		StorageType:         ad.StorageType,
 		DisableDirectorTest: ad.DisableDirectorTest,
@@ -284,6 +287,7 @@ func advertisementToServerResponse(ad *server_structs.Advertisement) serverRespo
 func serverResponseToListServerResponse(res serverResponse) listServerResponse {
 	listRes := listServerResponse{
 		Name:                res.Name,
+		ServerID:            res.ServerID,
 		RegistryPrefix:      res.RegistryPrefix,
 		StorageType:         res.StorageType,
 		DisableDirectorTest: res.DisableDirectorTest,
