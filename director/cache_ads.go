@@ -442,15 +442,25 @@ func updateLatLong(ad *server_structs.ServerAd) error {
 	return nil
 }
 
-// Apply downtimes provided by Origin/Cache servers to the director's in-memory state for the given server.
+// Apply downtimes provided by Origin/Cache servers (<= v7.21) to the director's in-memory state for the given server.
 // This function treats a nil or empty slice as "no downtimes", clearing any stale
 // serverFiltered entry and removing cached server downtimes.
 func applyServerDowntimes(serverName string, downtimes []server_structs.Downtime) {
+	// If the server is >= v7.22, it sets the serverID in the downtime entry.
+	// Its downtimes are already handled by the Registry polling (updateDowntimeFromRegistry),
+	// so we don't need to do anything here
+	for _, dt := range downtimes {
+		if dt.ServerID != "" {
+			log.Debugf("The downtimes set by the admin of Server %q have been propagated to the Director through polling the Registry; skipping processing the downtimes in the server ads", serverName)
+			return
+		}
+	}
+
 	filteredServersMutex.Lock()
 	defer filteredServersMutex.Unlock()
 
 	if len(downtimes) == 0 {
-		// No downtimes provided: clear cached entry and remove stale serverFiltered
+		// No downtimes provided (nil or empty slice): clear cached entry and remove stale serverFiltered
 		delete(serverDowntimes, serverName)
 		if existingFilterType, isServerFiltered := filteredServers[serverName]; isServerFiltered && existingFilterType == serverFiltered {
 			delete(filteredServers, serverName)
@@ -545,11 +555,8 @@ func updateDowntimeFromRegistry(ctx context.Context) error {
 	}
 
 	// Construct the registry downtime list URL to get active and future downtimes
+	// Fetch all sources (registry, origin, cache) so Director can persist server-originated downtimes
 	registryEndpointURL.Path = path.Join(registryEndpointURL.Path, "api", "v1.0", "downtime")
-	// Set the query parameter "source" to the Registry.
-	q := registryEndpointURL.Query()
-	q.Set("source", strings.ToLower(server_structs.RegistryType.String()))
-	registryEndpointURL.RawQuery = q.Encode()
 
 	registryDowntimeListURL := registryEndpointURL.String()
 
