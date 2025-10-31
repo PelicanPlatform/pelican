@@ -21,6 +21,7 @@ package web_ui
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -309,6 +310,40 @@ func AdminAuthHandler(ctx *gin.Context) {
 				Msg:    msg,
 			})
 	}
+}
+
+// DowntimeAuthHandler allows EITHER:
+// 1. Admin cookie authentication (req from this server itself), OR
+// 2. Server bearer token authentication (req from another server, i.e. origin/cache)
+func DowntimeAuthHandler(ctx *gin.Context) {
+	// First, try cookie-based admin auth (this block consolidates AuthHandler and AdminAuthHandler)
+	user, _, groups, err := GetUserGroups(ctx)
+	if user != "" && err == nil {
+		// User has valid cookie, check if admin
+		isAdmin, _ := CheckAdmin(user)
+		if isAdmin {
+			ctx.Set("User", user)
+			ctx.Set("Groups", groups)
+			ctx.Set("AuthMethod", "admin-cookie")
+			ctx.Next()
+			return
+		}
+	}
+
+	// If not admin cookie, try bearer token from header
+	status, ok, err := token.Verify(ctx, token.AuthOption{
+		Sources: []token.TokenSource{token.Header},
+		Issuers: []token.TokenIssuer{token.RegisteredServer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.Pelican_Downtime},
+	})
+	if !ok || err != nil {
+		ctx.AbortWithStatusJSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprint("Failed to verify the token: ", err),
+		})
+		return
+	}
+
 }
 
 // Handle regular username/password based login
