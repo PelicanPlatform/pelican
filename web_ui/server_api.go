@@ -18,18 +18,27 @@
 package web_ui
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/url"
+	"path"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -130,6 +139,31 @@ func validateDowntimeInput(downtimeInput DowntimeInput) error {
 	return nil
 }
 
+// validateServerType checks if any currently enabled server matches the allowed server types slice.
+func validateServerType(allowedServerTypes []server_structs.ServerType) bool {
+	if len(allowedServerTypes) == 0 {
+		return false
+	}
+
+	enabledServers := config.GetEnabledServerString(true)
+	if len(enabledServers) == 0 {
+		return false
+	}
+
+	allowed := make(map[string]struct{}, len(allowedServerTypes))
+	for _, serverType := range allowedServerTypes {
+		allowed[strings.ToLower(serverType.String())] = struct{}{}
+	}
+
+	for _, enabled := range enabledServers {
+		if _, ok := allowed[enabled]; ok {
+			return true
+		}
+	}
+
+	return false
+}
+
 func HandleCreateDowntime(ctx *gin.Context) {
 	var downtimeInput DowntimeInput
 	if err := ctx.ShouldBindJSON(&downtimeInput); err != nil {
@@ -144,6 +178,10 @@ func HandleCreateDowntime(ctx *gin.Context) {
 			Msg:    "Failed to create new UUID for new entry in downtimes table",
 		})
 		return
+	}
+	idStr := id.String()
+	if ctx.Param("uuid") != "" {
+		idStr = ctx.Param("uuid")
 	}
 
 	if err = validateDowntimeInput(downtimeInput); err != nil {
@@ -172,19 +210,24 @@ func HandleCreateDowntime(ctx *gin.Context) {
 		}
 	}
 
-	// If the downtime is created by the Origin or Cache, serverName and serverID will be set automatically
+	// If the downtime is created by the Origin or Cache, and the current server is not a Registry, serverName and serverID will be set automatically
 	serverType := server_structs.NewServerType()
 	serverType.SetString(downtimeInput.Source)
-	if serverType == server_structs.OriginType || serverType == server_structs.CacheType {
-		downtimeInput.ServerName, downtimeInput.ServerID, err = server_utils.GetServerMetadata(ctx, serverType)
+	if (serverType == server_structs.OriginType || serverType == server_structs.CacheType) && !validateServerType([]server_structs.ServerType{server_structs.RegistryType}) {
+		svrName, svrID, err := server_utils.GetServerMetadata(ctx, serverType)
 		if err != nil {
-			// Not a fatal error, serverName is set to sitename by the fallback
-			log.Debugf("During server name setting process: %v", err)
+			log.Debugf("Unable to get server metadata for %s: %v", serverType.String(), err)
+		}
+		if downtimeInput.ServerName == "" {
+			downtimeInput.ServerName = svrName
+		}
+		if downtimeInput.ServerID == "" {
+			downtimeInput.ServerID = svrID
 		}
 	}
 
 	downtime := server_structs.Downtime{
-		UUID:        id.String(),
+		UUID:        idStr,
 		CreatedBy:   user,
 		UpdatedBy:   user,
 		ServerID:    downtimeInput.ServerID,
@@ -197,9 +240,19 @@ func HandleCreateDowntime(ctx *gin.Context) {
 		EndTime:     downtimeInput.EndTime,
 	}
 
-	if err := database.CreateDowntime(&downtime); err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to create downtime: " + err.Error()})
+	// Mirror to Registry when running as Origin/Cache so downtime persists centrally (Director polls Registry for all sources)
+	if err := mirrorDowntimeToRegistry(ctx, downtime, http.MethodPost, idStr); err != nil {
+		ctx.JSON(http.StatusBadGateway, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to mirror downtime to registry: " + err.Error()})
 		return
+	}
+
+	if err := database.CreateDowntime(&downtime); err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			log.Debugf("Downtime already exists: %v; skipping creation", downtime)
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to create downtime: " + err.Error()})
+			return
+		}
 	}
 	ctx.JSON(http.StatusOK, downtime)
 }
@@ -258,6 +311,17 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 		return
 	}
 
+	// Downtimes created by a server admin are read-only for federation admins
+	dtSourceServer := server_structs.NewServerType()
+	dtSourceServer.SetString(existingDowntime.Source)
+	if validateServerType([]server_structs.ServerType{server_structs.RegistryType}) && dtSourceServer != server_structs.RegistryType {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Downtimes created by a server admin are read-only for federation admins",
+		})
+		return
+	}
+
 	user, _, _, err := GetUserGroups(ctx)
 	if user == "" || err != nil {
 		user = ctx.GetString("User")
@@ -266,39 +330,123 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 		}
 	}
 	downtimeInput.UpdatedBy = user
+
+	updatedDowntime := *existingDowntime
 	// Only update fields provided in the request (different from default values)
 	if downtimeInput.CreatedBy != "" {
-		existingDowntime.CreatedBy = downtimeInput.CreatedBy
+		updatedDowntime.CreatedBy = downtimeInput.CreatedBy
 	}
 	if downtimeInput.Class != "" {
-		existingDowntime.Class = downtimeInput.Class
+		updatedDowntime.Class = downtimeInput.Class
 	}
 	if downtimeInput.Description != "" {
-		existingDowntime.Description = downtimeInput.Description
+		updatedDowntime.Description = downtimeInput.Description
 	}
 	if downtimeInput.Severity != "" {
-		existingDowntime.Severity = downtimeInput.Severity
+		updatedDowntime.Severity = downtimeInput.Severity
 	}
 	if downtimeInput.StartTime != 0 {
-		existingDowntime.StartTime = downtimeInput.StartTime
+		updatedDowntime.StartTime = downtimeInput.StartTime
 	}
 	if downtimeInput.EndTime != 0 {
-		existingDowntime.EndTime = downtimeInput.EndTime
+		updatedDowntime.EndTime = downtimeInput.EndTime
 	}
-	// To avoid confusion, we don't allow to change the server name in an update
+	updatedDowntime.UpdatedBy = downtimeInput.UpdatedBy
+	// To avoid confusion, we don't allow to change the server name and id in an update
 
-	if err := database.UpdateDowntime(uuid, existingDowntime); err != nil {
+	if err := mirrorDowntimeToRegistry(ctx, updatedDowntime, http.MethodPut, uuid); err != nil {
+		ctx.JSON(http.StatusBadGateway, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to mirror this update of downtime to registry: " + err.Error()})
+		return
+	}
+
+	if err := database.UpdateDowntime(uuid, &updatedDowntime); err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to update downtime: " + err.Error()})
 		return
 	}
-	ctx.JSON(http.StatusOK, existingDowntime)
+	ctx.JSON(http.StatusOK, updatedDowntime)
 }
 
 func HandleDeleteDowntime(ctx *gin.Context) {
 	uuid := ctx.Param("uuid")
+	existingDowntime, err := database.GetDowntimeByUUID(uuid)
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Downtime record not found"})
+		return
+	}
+
+	if err := mirrorDowntimeToRegistry(ctx, *existingDowntime, http.MethodDelete, uuid); err != nil {
+		ctx.JSON(http.StatusBadGateway, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to mirror downtime to registry: " + err.Error()})
+		return
+	}
+
 	if err := database.DeleteDowntime(uuid); err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to delete downtime: " + err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "Downtime deleted successfully"})
+}
+
+// mirrorDowntimeToRegistry forwards a downtime CRUD to the Registry, if the
+// current server has an Origin or Cache service. It uses the server's issuer key to mint a short-lived
+// service token and sets Authorization: Bearer <token>.
+func mirrorDowntimeToRegistry(ctx *gin.Context, dt server_structs.Downtime, method string, id string) error {
+	if id == "" {
+		return errors.New("downtime ID is required")
+	}
+
+	// Only mirror downtime to Registry when this server is an Origin or Cache
+	if !validateServerType([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType}) {
+		return nil
+	}
+
+	fed, err := config.GetFederation(ctx)
+	if err != nil || fed.RegistryEndpoint == "" {
+		return errors.Wrap(err, "failed to load federation configuration")
+	}
+
+	regURL, err := url.Parse(fed.RegistryEndpoint)
+	if err != nil {
+		return errors.Wrap(err, "failed to parse registry endpoint")
+	}
+
+	// In "federation in a box" scenario, all services run in the same process with the same URL.
+	// Skip mirroring if the Registry endpoint is the same as the current server to avoid recursion.
+	currentServerURL := param.Server_ExternalWebUrl.GetString()
+	if currentServerURL != "" {
+		currentURL, err := url.Parse(currentServerURL)
+		if err == nil && currentURL.Host == regURL.Host {
+			log.Debugf("Skipping mirror to registry because Registry endpoint (%s) is the same as current server (%s)", regURL.Host, currentURL.Host)
+			return nil
+		}
+	}
+
+	regURL.Path = path.Join(regURL.Path, "api", "v1.0", "downtime", id)
+
+	tokCfg := token.NewWLCGToken()
+	tokCfg.Lifetime = 2 * time.Minute
+	tokCfg.Subject = dt.ServerID
+	tokCfg.AddAudienceAny()
+	tokCfg.AddScopes(token_scopes.Pelican_Downtime)
+	tok, err := tokCfg.CreateToken()
+	if err != nil {
+		return errors.Wrap(err, "failed to mint downtime token")
+	}
+
+	headers := map[string]string{"Authorization": "Bearer " + tok}
+	var data map[string]interface{}
+	if method == http.MethodPost || method == http.MethodPut {
+		payload, err := json.Marshal(dt)
+		if err != nil {
+			return errors.Wrap(err, "failed to marshal downtime payload")
+		}
+		if err := json.Unmarshal(payload, &data); err != nil {
+			return errors.Wrap(err, "failed to unmarshal downtime payload")
+		}
+	}
+	tr := config.GetTransport()
+	if _, err := utils.MakeRequest(ctx, tr, regURL.String(), method, data, headers); err != nil {
+		return errors.Wrapf(err, "failed to mirror downtime to registry at %s", regURL.String())
+	}
+
+	return nil
 }

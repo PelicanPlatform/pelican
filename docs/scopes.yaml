@@ -54,6 +54,12 @@ description: >-
 issuedBy: ["director"]
 acceptedBy: ["director"]
 ---
+name: pelican.downtime
+description: >-
+  Permits origin and cache to propagate their downtimes to the registry
+issuedBy: ["origin", "cache"]
+acceptedBy: ["registry"]
+---
 ############################
 #      Web UI Scopes       #
 ############################
