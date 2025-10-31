@@ -22,13 +22,11 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"strings"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/features"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
@@ -161,12 +159,6 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 		prefixes = append(prefixes, export.FederationPrefix)
 	}
 
-	// Fetch origin's active and future downtimes
-	downtimes, err := database.GetIncompleteDowntimes(strings.ToLower(server_structs.OriginType.String()))
-	if err != nil {
-		return nil, err
-	}
-
 	// Determine whether this origin requires any special features that may place
 	// limitations on the other servers (e.g. caches) it can work with.
 	requiredFeatures := server.GetRequiredFeatures()
@@ -210,7 +202,6 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 		}},
 		StorageType:         ost,
 		DisableDirectorTest: !param.Origin_DirectorTest.GetBool(),
-		Downtimes:           downtimes,
 		RequiredFeatures:    featureNames,
 		Status:              status,
 	}

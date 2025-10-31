@@ -31,7 +31,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -54,12 +53,6 @@ var MinFedTokenTickerRate = 1 * time.Minute
 func (server *CacheServer) CreateAdvertisement(name, id, originUrl, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
 	registryPrefix := server_structs.GetCacheNs(param.Xrootd_Sitename.GetString())
 
-	// Fetch cache's active and future downtimes
-	downtimes, err := database.GetIncompleteDowntimes(strings.ToLower(server_structs.CacheType.String()))
-	if err != nil {
-		return nil, err
-	}
-
 	// Get the overall health status as reported by the cache.
 	status := metrics.GetHealthStatus().OverallStatus
 
@@ -69,7 +62,6 @@ func (server *CacheServer) CreateAdvertisement(name, id, originUrl, originWebUrl
 		DataURL:        originUrl,
 		WebURL:         originWebUrl,
 		Namespaces:     server.GetNamespaceAds(),
-		Downtimes:      downtimes,
 		Status:         status,
 	}
 	ad.Initialize(name)
