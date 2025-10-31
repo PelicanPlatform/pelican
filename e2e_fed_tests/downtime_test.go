@@ -53,6 +53,7 @@ type serverAdUnmarshalCustom struct {
 	serverAdUnmarshal
 	WebURL    string                    `json:"webUrl"`
 	Name      string                    `json:"name"`
+	ServerID  string                    `json:"serverId"`
 	Downtimes []server_structs.Downtime `json:"downtimes"`
 }
 
@@ -105,11 +106,13 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	require.NoError(t, err, "Failed to unmarshal server ads")
 	var cacheWebUrlStr string
 	var cacheServerName string
+	var cacheServerID string
 	found := false
 	for _, serverAd := range serverAds {
 		if serverAd.Type == server_structs.CacheType.String() {
 			cacheWebUrlStr = serverAd.WebURL
 			cacheServerName = serverAd.Name
+			cacheServerID = serverAd.ServerID
 			found = true
 			break
 		}
@@ -120,6 +123,8 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 
 	// Assemble a downtime creation request to the cache server
 	incompleteDowntime := web_ui.DowntimeInput{
+		ServerName:  cacheServerName,
+		ServerID:    cacheServerID,
 		Source:      strings.ToLower(server_structs.CacheType.String()),
 		Class:       "SCHEDULED",
 		Description: "",
@@ -141,6 +146,7 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	tk.Lifetime = 5 * time.Minute
 	tk.AddAudiences(fedInfo.DiscoveryEndpoint)
 	tk.AddScopes(token_scopes.WebUi_Access)
+	tk.Claims = map[string]string{"user_id": "test-user-id"} // Required by GetUserGroups
 	tok, err := tk.CreateToken()
 	require.NoError(t, err)
 	downtimeCreationReq, _ := http.NewRequest("POST", cacheWebUrl.String(), bytes.NewBuffer(body))
@@ -162,7 +168,7 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	registryUrl.Path = downtimeCreationPath
 
 	downtimeByFedAdmin := web_ui.DowntimeInput{
-		ServerName:  server_structs.GetCacheNs(cacheServerName), // In Registry downtime table, the server name uses server's registered prefix
+		ServerName:  cacheServerName,
 		Source:      strings.ToLower(server_structs.RegistryType.String()),
 		Class:       "SCHEDULED",
 		Description: "This is a test downtime set by federation admin",
