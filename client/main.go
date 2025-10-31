@@ -38,6 +38,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
@@ -530,6 +531,37 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 		return nil, errors.Wrapf(err, "failed to parse remote object: %s", remoteDestination)
 	}
 
+	if _, exists := pUrl.Query()[pelican_url.QueryRecursive]; exists {
+		recursive = true
+	}
+
+	info, err := os.Stat(localObject)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, error_codes.NewParameter_FileNotFoundError(errors.Wrapf(err, "local object %q does not exist", localObject))
+		}
+		return nil, error_codes.NewParameterError(errors.Wrapf(err, "failed to stat local object %q", localObject))
+	}
+
+	if info.IsDir() {
+		if !recursive {
+			return nil, error_codes.NewParameterError(errors.Errorf("local object %q is a directory but recursive is not enabled", localObject))
+		}
+		// Only check that the directory exists and is accessible, don't recurse through all files
+		// The actual file processing will be done during the transfer phase
+	} else {
+		// For non-directory files (including symlinks), try to open them
+		// This matches the logic that will be used during actual transfer
+		file, err := os.Open(localObject)
+		if err != nil {
+			if os.IsPermission(err) {
+				return nil, error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied when opening local object: %q", localObject))
+			}
+			return nil, error_codes.NewParameterError(errors.Wrapf(err, "failed to open local object for reading: %q", localObject))
+		}
+		file.Close()
+	}
+
 	te, err := NewTransferEngine(ctx)
 	if err != nil {
 		return nil, err
@@ -600,6 +632,10 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	pUrl, err := pelican_url.Parse(remoteObject, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, dOpts)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse remote object: %s", remoteObject)
+	}
+
+	if _, exists := pUrl.Query()[pelican_url.QueryRecursive]; exists {
+		recursive = true
 	}
 
 	// get absolute path

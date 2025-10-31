@@ -2413,6 +2413,14 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	} else {
 		transferResults.Error = xferErrors
 	}
+	if !success && transfer.packOption == "" && localPath != "/dev/null" {
+		// On Unix-like systems, os.Remove calls unlink, which removes the file from the directory.
+		// If the file is still open, it will be available to the process until the last file
+		// descriptor is closed.  Given fp.Close() is deferred, this should be safe.
+		if err := os.Remove(localPath); err != nil && !os.IsNotExist(err) {
+			log.Warningln("Failed to remove partially-downloaded file:", err)
+		}
+	}
 	return
 }
 
@@ -2761,6 +2769,34 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		return
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		log.WithFields(fields).Debugln("Got failure status code:", resp.StatusCode)
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			log.WithFields(fields).Debugln("Failed to read response body for error:", readErr)
+		}
+		bodyStr := string(bodyBytes)
+		log.WithFields(fields).Debugln("Error response body:", bodyStr)
+		serverVersion = resp.Header.Get("Server")
+		if resp.StatusCode == http.StatusForbidden {
+			// We will update the error message in the caller
+			return 0, 0, -1, serverVersion, error_codes.NewAuthorizationError(&PermissionDeniedError{})
+		}
+		sce := StatusCodeError(resp.StatusCode)
+		err = &sce
+		httpErr := &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
+			resp.StatusCode, strings.TrimSpace(bodyStr)), err}
+		// Wrap specific status codes with appropriate PelicanError types
+		if resp.StatusCode == http.StatusNotFound {
+			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
+				resp.StatusCode, strings.TrimSpace(bodyStr)), error_codes.NewSpecification_FileNotFoundError(err)}
+		} else if resp.StatusCode == http.StatusGatewayTimeout {
+			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
+				resp.StatusCode, strings.TrimSpace(bodyStr)), error_codes.NewTransfer_TimedOutError(err)}
+		}
+		return 0, 0, -1, serverVersion, httpErr
+	}
 
 	serverVersion = resp.Header.Get("Server")
 
@@ -3235,12 +3271,13 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	if err != nil {
 		log.Errorln("Error checking local file ", transfer.localPath, ":", err)
 		if os.IsNotExist(err) {
-			err = error_codes.NewParameter_FileNotFoundError(err)
+			transferResult.Error = error_codes.NewParameter_FileNotFoundError(errors.Wrapf(err, "local file %q does not exist", transfer.localPath))
+		} else if os.IsPermission(err) {
+			transferResult.Error = error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied accessing local file %q", transfer.localPath))
 		} else {
-			err = error_codes.NewParameterError(err)
+			transferResult.Error = error_codes.NewParameterError(errors.Wrapf(err, "failed to stat local file %q", transfer.localPath))
 		}
-		transferResult.Error = err
-		return transferResult, err
+		return transferResult, transferResult.Error
 	}
 
 	var ioreader io.ReadCloser
@@ -3266,7 +3303,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	} else {
 
 		if fileInfo.IsDir() {
-			err := errors.New("the provided path '" + transfer.localPath + "' is a directory, but a file is expected")
+			err := error_codes.NewParameterError(errors.New("the provided path '" + transfer.localPath + "' is a directory, but a file is expected"))
 			transferResult.Error = err
 			return transferResult, err
 		}
@@ -3275,8 +3312,14 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		file, err := os.Open(transfer.localPath)
 		if err != nil {
 			log.Errorln("Error opening local file:", err)
-			transferResult.Error = err
-			return transferResult, err
+			if os.IsNotExist(err) {
+				transferResult.Error = error_codes.NewParameter_FileNotFoundError(errors.Wrapf(err, "local file %q does not exist", transfer.localPath))
+			} else if os.IsPermission(err) {
+				transferResult.Error = error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied opening local file %q", transfer.localPath))
+			} else {
+				transferResult.Error = error_codes.NewParameterError(errors.Wrapf(err, "failed to open local file %q", transfer.localPath))
+			}
+			return transferResult, transferResult.Error
 		}
 		ioreader = file
 		sizer = &ConstantSizer{size: fileInfo.Size()}
@@ -3797,7 +3840,9 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 		info, err := os.Stat(localPath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return error_codes.NewParameter_FileNotFoundError(errors.Wrap(err, "failed to stat local path"))
+				return error_codes.NewParameter_FileNotFoundError(errors.Wrapf(err, "local path %q does not exist", localPath))
+			} else if os.IsPermission(err) {
+				return error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied accessing local path %q", localPath))
 			}
 			return error_codes.NewParameterError(errors.Wrap(err, "failed to stat local path"))
 		}
@@ -3832,7 +3877,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 			return nil
 		}
 		// Otherwise, a different error occurred and we should return it
-		return errors.Wrap(err, "failed to upload local collection")
+		return error_codes.NewParameterError(errors.Wrap(err, "failed to upload local collection"))
 	}
 
 	for _, info := range infos {
