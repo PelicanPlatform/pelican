@@ -2076,6 +2076,8 @@ func ClearServerAds() {
 
 // This function resets most states for test cases, including 1. viper settings, 2. preferred prefix, 3. transport object, 4. Federation metadata back to their default
 func ResetConfig() {
+	// Close any open log files and reset logger output
+	logging.CloseLogger()
 	viper.Reset()
 
 	// Clear cached preferred prefix

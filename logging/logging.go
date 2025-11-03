@@ -157,6 +157,9 @@ func FlushLogs(pushToFile bool) {
 func CloseLogger() {
 	if logFHandle != nil {
 		_ = logFHandle.Close()
+		logFHandle = nil
+		// Reset log output to stderr to prevent writing to closed file
+		log.SetOutput(os.Stderr)
 	}
 }
 
