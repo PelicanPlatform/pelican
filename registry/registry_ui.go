@@ -32,11 +32,13 @@ import (
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/web_ui"
@@ -83,6 +85,17 @@ const (
 func init() {
 	registrationFields = make([]registrationField, 0)
 	registrationFields = append(registrationFields, populateRegistrationFields("", server_structs.Registration{})...)
+
+	token.RegisterServerJWKSResolver(func(ctx *gin.Context, serverID string) (jwk.Set, error) {
+		server, err := getServerByID(serverID)
+		if err != nil {
+			return nil, err
+		}
+		if len(server.Registration) == 0 {
+			return nil, errors.New("server registration not found")
+		}
+		return jwk.Parse([]byte(server.Registration[0].Pubkey))
+	})
 }
 
 // Populate registrationFields array to provide available namespace registration fields
