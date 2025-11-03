@@ -29,7 +29,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
@@ -247,10 +246,45 @@ func HandleCreateDowntime(ctx *gin.Context) {
 	}
 
 	if err := database.CreateDowntime(&downtime); err != nil {
-		if errors.Is(err, gorm.ErrDuplicatedKey) {
-			log.Debugf("Downtime already exists: %v; skipping creation", downtime)
+		// [For federation-in-a-box only] If the downtime already exists, update the metadata
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			log.Debugf("Downtime already exists: %v; syncing metadata", downtime)
+			existing, getErr := database.GetDowntimeByUUID(idStr)
+			if getErr != nil {
+				ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "Failed to load existing downtime: " + getErr.Error(),
+				})
+				return
+			}
+
+			existing.CreatedBy = downtime.CreatedBy
+			existing.UpdatedBy = downtime.UpdatedBy
+			if downtime.ServerName != "" {
+				existing.ServerName = downtime.ServerName
+			}
+			if downtime.ServerID != "" {
+				existing.ServerID = downtime.ServerID
+			}
+			existing.Description = downtime.Description
+			existing.Class = downtime.Class
+			existing.Severity = downtime.Severity
+			existing.StartTime = downtime.StartTime
+			existing.EndTime = downtime.EndTime
+
+			if updateErr := database.UpdateDowntime(idStr, existing); updateErr != nil {
+				ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "Failed to update existing downtime: " + updateErr.Error(),
+				})
+				return
+			}
+			downtime = *existing
 		} else {
-			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to create downtime: " + err.Error()})
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Failed to create downtime: " + err.Error(),
+			})
 			return
 		}
 	}
