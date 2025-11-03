@@ -41,6 +41,7 @@ import (
 	"testing"
 	"time"
 
+	classad "github.com/PelicanPlatform/classad/classad"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -48,7 +49,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/pelicanplatform/pelican/classads"
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
@@ -425,9 +425,9 @@ func TestInfileUploadWithDirAndFiles(t *testing.T) {
 	serverWebPort := param.Server_WebPort.GetInt()
 
 	infileContent := fmt.Sprintf(
-		"[ Url = %s; LocalFileName = %s ]\n"+
-			"[ Url = %s; LocalFileName = %s ]\n"+
-			"[ Url = %s; LocalFileName = %s ]\n",
+		"[ Url = \"%s\"; LocalFileName = \"%s\" ]\n"+
+			"[ Url = \"%s\"; LocalFileName = \"%s\" ]\n"+
+			"[ Url = \"%s\"; LocalFileName = \"%s\" ]\n",
 		fmt.Sprintf(urlTemplate, serverHostname, serverWebPort, "tempObject1"), tempObject1.Name(),
 		fmt.Sprintf(urlTemplate, serverHostname, serverWebPort, "TempUploadDir"), tempUploadDir,
 		fmt.Sprintf(urlTemplate, serverHostname, serverWebPort, "tempObject2"), tempObject2.Name(),
@@ -533,7 +533,7 @@ func TestPluginMulti(t *testing.T) {
 	workChan <- PluginTransfer{url: &downloadUrl2, localFile: localPath2}
 	close(workChan)
 
-	results := make(chan *classads.ClassAd, 5)
+	results := make(chan *classad.ClassAd, 5)
 	fed.Egrp.Go(func() error {
 		return runPluginWorker(fed.Ctx, false, workChan, results)
 	})
@@ -549,36 +549,26 @@ func TestPluginMulti(t *testing.T) {
 				break
 			}
 			// Process results as soon as we get them
-			transferSuccess, err := resultAd.Get("TransferSuccess")
-			assert.NoError(t, err)
-			boolVal, ok := transferSuccess.(bool)
+			transferSuccess, ok := classad.GetAs[bool](resultAd, "TransferSuccess")
 			require.True(t, ok)
-			assert.True(t, boolVal)
+			assert.True(t, transferSuccess)
 
 			log.Debugln("Got result ad:", resultAd)
 			// Verify the checksums
-			fileName, err := resultAd.Get("TransferFileName")
-			require.NoError(t, err)
-			fileNameString, ok := fileName.(string)
+			fileNameString, ok := classad.GetAs[string](resultAd, "TransferFileName")
 			require.True(t, ok)
 
-			devData, err := resultAd.Get("DeveloperData")
-			require.NoError(t, err)
-			devDataMap, ok := devData.(map[string]interface{})
+			devData, ok := classad.GetAs[*classad.ClassAd](resultAd, "DeveloperData")
 			require.True(t, ok)
-			checksum, ok := devDataMap["ClientChecksums"]
+			checksum, ok := classad.GetAs[*classad.ClassAd](devData, "ClientChecksums")
 			require.True(t, ok)
-			checksumMap, ok := checksum.(map[string]interface{})
-			require.True(t, ok, "Expected transfer checksum to be a map type; was %T", checksum)
-			checksumValue, ok := checksumMap["crc32c"]
-			require.True(t, ok)
-			checksumString, ok := checksumValue.(string)
+			checksumValue, ok := classad.GetAs[string](checksum, "crc32c")
 			require.True(t, ok)
 
 			if fileNameString == filepath.Base(localPath1) {
-				assert.Equal(t, "977b8112", checksumString)
+				assert.Equal(t, "977b8112", checksumValue)
 			} else if fileNameString == filepath.Base(localPath2) {
-				assert.Equal(t, "b99ecaad", checksumString)
+				assert.Equal(t, "b99ecaad", checksumValue)
 			} else {
 				t.Fatalf("Unexpected file name: %s", fileNameString)
 			}
@@ -611,12 +601,11 @@ func TestPluginDirectRead(t *testing.T) {
 	workChan <- PluginTransfer{url: &downloadUrl, localFile: localPath}
 	close(workChan)
 
-	results := make(chan *classads.ClassAd, 5)
+	results := make(chan *classad.ClassAd, 5)
 	fed.Egrp.Go(func() error {
 		return runPluginWorker(fed.Ctx, false, workChan, results)
 	})
 
-	var developerData map[string]interface{}
 	done := false
 	for !done {
 		select {
@@ -628,24 +617,19 @@ func TestPluginDirectRead(t *testing.T) {
 				break
 			}
 			// Process results as soon as we get them
-			transferSuccess, err := resultAd.Get("TransferSuccess")
-			assert.NoError(t, err)
-			boolVal, ok := transferSuccess.(bool)
+			transferSuccess, ok := classad.GetAs[bool](resultAd, "TransferSuccess")
 			require.True(t, ok)
-			assert.True(t, boolVal)
+			assert.True(t, transferSuccess)
 
 			// Assert that our endpoint is always the origin and not the cache
-			data, err := resultAd.Get("DeveloperData")
-			assert.NoError(t, err)
-			developerData, ok = data.(map[string]interface{})
+			developerData, ok := classad.GetAs[*classad.ClassAd](resultAd, "DeveloperData")
 			require.True(t, ok)
-
-			attempts, ok := developerData["Attempts"].(int)
+			attempts, ok := classad.GetAs[int](developerData, "Attempts")
 			require.True(t, ok)
 
 			for i := 0; i < attempts; i++ {
 				key := fmt.Sprintf("Endpoint%d", i)
-				endpoint, ok := developerData[key].(string)
+				endpoint, ok := classad.GetAs[string](developerData, key)
 				require.True(t, ok)
 				assert.Equal(t, param.Origin_Url.GetString(), "https://"+endpoint)
 			}
@@ -695,7 +679,7 @@ func TestPluginCorrectStartAndEndTime(t *testing.T) {
 	workChan <- PluginTransfer{url: &downloadUrl, localFile: tmpPath}
 	close(workChan)
 
-	results := make(chan *classads.ClassAd, 5)
+	results := make(chan *classad.ClassAd, 5)
 	fed.Egrp.Go(func() error {
 		return runPluginWorker(fed.Ctx, false, workChan, results)
 	})
@@ -711,26 +695,19 @@ func TestPluginCorrectStartAndEndTime(t *testing.T) {
 				break
 			}
 			// Process results as soon as we get them
-			transferSuccess, err := resultAd.Get("TransferSuccess")
-			assert.NoError(t, err)
-			boolVal, ok := transferSuccess.(bool)
+			transferSuccess, ok := classad.GetAs[bool](resultAd, "TransferSuccess")
 			require.True(t, ok)
-			assert.True(t, boolVal)
+			assert.True(t, transferSuccess)
 
 			// Assert that our start time is different from end time (and less than the end time)
-			startTime, err := resultAd.Get("TransferStartTime")
-			assert.NoError(t, err)
-			startTimeVal, ok := startTime.(int64)
+			startTime, ok := classad.GetAs[int64](resultAd, "TransferStartTime")
 			require.True(t, ok)
-			assert.True(t, startTimeVal > 0)
+			assert.True(t, startTime > 0)
 
-			endTime, err := resultAd.Get("TransferEndTime")
-			assert.NoError(t, err)
-			endTimeVal, ok := endTime.(int64)
+			endTime, ok := classad.GetAs[int64](resultAd, "TransferEndTime")
 			require.True(t, ok)
-			assert.True(t, endTimeVal > 0)
-
-			require.True(t, startTimeVal < endTimeVal)
+			assert.True(t, endTime > 0)
+			require.True(t, startTime < endTime)
 		}
 	}
 }
@@ -739,268 +716,216 @@ func TestPluginCorrectStartAndEndTime(t *testing.T) {
 func TestFailTransfer(t *testing.T) {
 	// Test when we call failTransfer with an upload
 	t.Run("TestWithUpload", func(t *testing.T) {
-		results := make(chan *classads.ClassAd, 1)
+		results := make(chan *classad.ClassAd, 1)
 		failTransfer("pelican://some/example.txt", "/path/to/local.txt", results, true, errors.New("test error"))
 		result := <-results
 
 		// Check TransferUrl set
-		transferUrl, _ := result.Get("TransferUrl")
-		transferUrlStr, ok := transferUrl.(string)
+		transferUrl, ok := classad.GetAs[string](result, "TransferUrl")
 		require.True(t, ok)
-		assert.Equal(t, "pelican://some/example.txt", transferUrlStr)
+		assert.Equal(t, "pelican://some/example.txt", transferUrl)
 
 		// Check TransferType set
-		transferType, _ := result.Get("TransferType")
-		transferTypeStr, ok := transferType.(string)
+		transferType, ok := classad.GetAs[string](result, "TransferType")
 		require.True(t, ok)
-		assert.Equal(t, "upload", transferTypeStr)
+		assert.Equal(t, "upload", transferType)
 
 		// Check TransferFileName set
-		transferFileName, _ := result.Get("TransferFileName")
-		transferFileNameStr, ok := transferFileName.(string)
+		transferFileName, ok := classad.GetAs[string](result, "TransferFileName")
 		require.True(t, ok)
-		assert.Equal(t, "local.txt", transferFileNameStr)
+		assert.Equal(t, "local.txt", transferFileName)
 
 		// Check TransferRetryable set
-		transferRetryable, _ := result.Get("TransferRetryable")
-		transferRetryableBool, ok := transferRetryable.(bool)
+		transferRetryable, ok := classad.GetAs[bool](result, "TransferRetryable")
 		require.True(t, ok)
-		assert.False(t, transferRetryableBool)
+		assert.False(t, transferRetryable)
 
 		// Check TransferSuccess set
-		transferSuccess, _ := result.Get("TransferSuccess")
-		transferSuccessBool, ok := transferSuccess.(bool)
+		transferSuccess, ok := classad.GetAs[bool](result, "TransferSuccess")
 		require.True(t, ok)
-		assert.False(t, transferSuccessBool)
+		assert.False(t, transferSuccess)
 
 		// Check TransferError set
-		transferError, _ := result.Get("TransferError")
-		transferErrorStr, ok := transferError.(string)
+		transferError, ok := classad.GetAs[string](result, "TransferError")
 		require.True(t, ok)
-		assert.Equal(t, "test error", transferErrorStr)
+		assert.Equal(t, "test error", transferError)
 
 		// Check DeveloperData is now populated
-		devData, err := result.Get("DeveloperData")
-		require.NoError(t, err)
-		require.NotNil(t, devData)
-		devDataMap, ok := devData.(map[string]interface{})
+		devData, ok := classad.GetAs[*classad.ClassAd](result, "DeveloperData")
 		require.True(t, ok)
-		assert.Equal(t, 1, devDataMap["Attempts"])
-		assert.Equal(t, "test error", devDataMap["TransferError1"])
-		assert.Equal(t, false, devDataMap["IsRetryable1"])
-		assert.NotEmpty(t, devDataMap["PelicanClientVersion"])
+		attempts, ok := classad.GetAs[int](devData, "Attempts")
+		require.True(t, ok)
+		assert.Equal(t, 1, attempts)
+		transferError1, ok := classad.GetAs[string](devData, "TransferError1")
+		require.True(t, ok)
+		assert.Equal(t, "test error", transferError1)
+		isRetryable1, ok := classad.GetAs[bool](devData, "IsRetryable1")
+		require.True(t, ok)
+		assert.False(t, isRetryable1)
+		pelicanClientVersion, ok := classad.GetAs[string](devData, "PelicanClientVersion")
+		require.True(t, ok)
+		assert.NotEmpty(t, pelicanClientVersion)
 
 		// Check TransferErrorData is now populated (bug fix)
-		errData, err := result.Get("TransferErrorData")
-		require.NoError(t, err)
-		require.NotNil(t, errData)
-		errorDataList := errData.([]interface{})
+		errorDataList, ok := classad.GetAs[[]*classad.ClassAd](result, "TransferErrorData")
+		require.True(t, ok)
 		require.Equal(t, 1, len(errorDataList))
 	})
 
 	// Test when we call failTransfer with a download
 	t.Run("TestWithDownload", func(t *testing.T) {
-		results := make(chan *classads.ClassAd, 1)
+		results := make(chan *classad.ClassAd, 1)
 		failTransfer("pelican://some/example.txt", "/path/to/local.txt", results, false, errors.New("test error"))
 		result := <-results
 
 		// Check TransferUrl set
-		transferUrl, _ := result.Get("TransferUrl")
-		transferUrlStr, ok := transferUrl.(string)
+		transferUrl, ok := classad.GetAs[string](result, "TransferUrl")
 		require.True(t, ok)
-		assert.Equal(t, "pelican://some/example.txt", transferUrlStr)
+		assert.Equal(t, "pelican://some/example.txt", transferUrl)
 
 		// Check TransferType set
-		transferType, _ := result.Get("TransferType")
-		transferTypeStr, ok := transferType.(string)
+		transferType, ok := classad.GetAs[string](result, "TransferType")
 		require.True(t, ok)
-		assert.Equal(t, "download", transferTypeStr)
+		assert.Equal(t, "download", transferType)
 
 		// Check TransferFileName set
-		transferFileName, _ := result.Get("TransferFileName")
-		transferFileNameStr, ok := transferFileName.(string)
+		transferFileName, ok := classad.GetAs[string](result, "TransferFileName")
 		require.True(t, ok)
-		assert.Equal(t, "example.txt", transferFileNameStr)
+		assert.Equal(t, "example.txt", transferFileName)
 
 		// Check TransferRetryable set
-		transferRetryable, _ := result.Get("TransferRetryable")
-		transferRetryableBool, ok := transferRetryable.(bool)
+		transferRetryable, ok := classad.GetAs[bool](result, "TransferRetryable")
 		require.True(t, ok)
-		assert.False(t, transferRetryableBool)
+		assert.False(t, transferRetryable)
 
 		// Check TransferSuccess set
-		transferSuccess, _ := result.Get("TransferSuccess")
-		transferSuccessBool, ok := transferSuccess.(bool)
+		transferSuccess, ok := classad.GetAs[bool](result, "TransferSuccess")
 		require.True(t, ok)
-		assert.False(t, transferSuccessBool)
+		assert.False(t, transferSuccess)
 
 		// Check TransferError set
-		transferError, _ := result.Get("TransferError")
-		transferErrorStr, ok := transferError.(string)
+		transferError, ok := classad.GetAs[string](result, "TransferError")
 		require.True(t, ok)
-		assert.Equal(t, "test error", transferErrorStr)
+		assert.Equal(t, "test error", transferError)
 	})
 
 	// Test when we call failTransfer with a retryable error
 	t.Run("TestWithRetry", func(t *testing.T) {
-		results := make(chan *classads.ClassAd, 1)
+		results := make(chan *classad.ClassAd, 1)
 		failTransfer("pelican://some/example.txt", "/path/to/local.txt", results, false, error_codes.NewTransfer_SlowTransferError(&client.SlowTransferError{}))
 		result := <-results
 
 		// Check TransferUrl set
-		transferUrl, _ := result.Get("TransferUrl")
-		transferUrlStr, ok := transferUrl.(string)
+		transferUrl, ok := classad.GetAs[string](result, "TransferUrl")
 		require.True(t, ok)
-		assert.Equal(t, "pelican://some/example.txt", transferUrlStr)
+		assert.Equal(t, "pelican://some/example.txt", transferUrl)
 
 		// Check TransferType set
-		transferType, _ := result.Get("TransferType")
-		transferTypeStr, ok := transferType.(string)
+		transferType, ok := classad.GetAs[string](result, "TransferType")
 		require.True(t, ok)
-		assert.Equal(t, "download", transferTypeStr)
+		assert.Equal(t, "download", transferType)
 
 		// Check TransferFileName set
-		transferFileName, _ := result.Get("TransferFileName")
-		transferFileNameStr, ok := transferFileName.(string)
+		transferFileName, ok := classad.GetAs[string](result, "TransferFileName")
 		require.True(t, ok)
-		assert.Equal(t, "example.txt", transferFileNameStr)
+		assert.Equal(t, "example.txt", transferFileName)
 
 		// Check TransferRetryable set
-		transferRetryable, _ := result.Get("TransferRetryable")
-		transferRetryableBool, ok := transferRetryable.(bool)
+		transferRetryable, ok := classad.GetAs[bool](result, "TransferRetryable")
 		require.True(t, ok)
-		assert.True(t, transferRetryableBool)
+		assert.True(t, transferRetryable)
 
 		// Check TransferSuccess set
-		transferSuccess, _ := result.Get("TransferSuccess")
-		transferSuccessBool, ok := transferSuccess.(bool)
+		transferSuccess, ok := classad.GetAs[bool](result, "TransferSuccess")
 		require.True(t, ok)
-		assert.False(t, transferSuccessBool)
+		assert.False(t, transferSuccess)
 
 		// Check TransferError set
-		transferError, _ := result.Get("TransferError")
-		transferErrorStr, ok := transferError.(string)
+		transferError, ok := classad.GetAs[string](result, "TransferError")
 		require.True(t, ok)
-		assert.Contains(t, transferErrorStr, "cancelled transfer, too slow; detected speed=0 B/s, total transferred=0 B, total transfer time=0s, cache miss")
+		assert.Contains(t, transferError, "cancelled transfer, too slow; detected speed=0 B/s, total transferred=0 B, total transfer time=0s, cache miss")
 	})
 
 	// Test that DeveloperData and TransferErrorData are populated for director timeout errors
 	t.Run("TestDirectorTimeoutError", func(t *testing.T) {
-		results := make(chan *classads.ClassAd, 1)
+		results := make(chan *classad.ClassAd, 1)
 		innerErr := errors.New("Get \"https://osdf-director.osg-htc.org/test\": dial tcp 128.105.82.132:443: i/o timeout")
 		directorErr := error_codes.NewTransfer_DirectorTimeoutError(innerErr)
 		failTransfer("osdf://test/file", "/path/to/local.txt", results, false, directorErr)
 		result := <-results
 
 		// Check that DeveloperData exists and has expected fields
-		developerData, err := result.Get("DeveloperData")
-		require.NoError(t, err)
-		devDataMap, ok := developerData.(map[string]interface{})
+		developerData, ok := classad.GetAs[*classad.ClassAd](result, "DeveloperData")
 		require.True(t, ok)
-
-		// Check PelicanClientVersion
-		version, ok := devDataMap["PelicanClientVersion"]
+		version, ok := classad.GetAs[string](developerData, "PelicanClientVersion")
 		require.True(t, ok)
 		assert.NotEmpty(t, version)
-
-		attempts, ok := devDataMap["Attempts"]
+		attempts, ok := classad.GetAs[int](developerData, "Attempts")
 		require.True(t, ok)
 		assert.Equal(t, 1, attempts)
-
 		// Check that TransferErrorData exists and has expected fields
-		transferErrorData, err := result.Get("TransferErrorData")
-		require.NoError(t, err)
-		errDataSlice, ok := transferErrorData.([]interface{})
+		transferErrorDataList, ok := classad.GetAs[[]*classad.ClassAd](result, "TransferErrorData")
 		require.True(t, ok)
-		require.Len(t, errDataSlice, 1)
-
-		// Check the error classification
-		errDataMap, ok := errDataSlice[0].(map[string]interface{})
-		require.True(t, ok)
-
-		// Create the expected error to get the expected values
-		expectedErr := error_codes.NewTransfer_DirectorTimeoutError(innerErr)
-
-		// Check top-level ErrorType (should be base type like "Transfer")
-		errorType, ok := errDataMap["ErrorType"]
+		require.Len(t, transferErrorDataList, 1)
+		errorType, ok := classad.GetAs[string](transferErrorDataList[0], "ErrorType")
 		require.True(t, ok)
 		assert.Equal(t, "Transfer", errorType)
-
-		// Check DeveloperData within TransferErrorData
-		errDevData, ok := errDataMap["DeveloperData"]
+		// PelicanErrorCode and Retryable are stored inside the nested DeveloperData
+		teDevData, ok := classad.GetAs[*classad.ClassAd](transferErrorDataList[0], "DeveloperData")
 		require.True(t, ok)
-		errDevDataMap, ok := errDevData.(map[string]interface{})
+		errorCode, ok := classad.GetAs[int64](teDevData, "PelicanErrorCode")
 		require.True(t, ok)
-
-		// Check PelicanErrorCode
-		errorCode, ok := errDevDataMap["PelicanErrorCode"]
+		assert.Equal(t, int64(directorErr.Code()), errorCode)
+		errType, ok := classad.GetAs[string](transferErrorDataList[0], "ErrorType")
 		require.True(t, ok)
-		assert.Equal(t, expectedErr.Code(), errorCode)
-
-		// Check ErrorType
-		errType, ok := errDevDataMap["ErrorType"]
-		require.True(t, ok)
-		assert.Equal(t, expectedErr.ErrorType(), errType)
+		assert.Equal(t, "Transfer", errType)
 
 		// Check Retryable
-		retryable, ok := errDevDataMap["Retryable"]
+		retryable, ok := classad.GetAs[bool](teDevData, "Retryable")
 		require.True(t, ok)
-		assert.Equal(t, expectedErr.IsRetryable(), retryable.(bool))
+		assert.Equal(t, directorErr.IsRetryable(), retryable)
 	})
 
 	// Test that DeveloperData and TransferErrorData are populated for file not found errors
 	t.Run("TestFileNotFoundError", func(t *testing.T) {
-		results := make(chan *classads.ClassAd, 1)
+		results := make(chan *classad.ClassAd, 1)
 		innerErr := errors.New("local object \"/path/to/missing.txt\" does not exist")
 		fileNotFoundErr := error_codes.NewSpecification_FileNotFoundError(innerErr)
 		failTransfer("osdf://test/file", "/path/to/missing.txt", results, true, fileNotFoundErr)
 		result := <-results
 
 		// Check that DeveloperData exists
-		developerData, err := result.Get("DeveloperData")
-		require.NoError(t, err)
-		_, ok := developerData.(map[string]interface{})
+		developerData, ok := classad.GetAs[*classad.ClassAd](result, "DeveloperData")
 		require.True(t, ok)
+		version, ok := classad.GetAs[string](developerData, "PelicanClientVersion")
+		require.True(t, ok)
+		assert.NotEmpty(t, version)
+		attempts, ok := classad.GetAs[int](developerData, "Attempts")
+		require.True(t, ok)
+		assert.Equal(t, 1, attempts)
 
 		// Check that TransferErrorData exists and has expected fields
-		transferErrorData, err := result.Get("TransferErrorData")
-		require.NoError(t, err)
-		errDataSlice, ok := transferErrorData.([]interface{})
+		transferErrorDataList, ok := classad.GetAs[[]*classad.ClassAd](result, "TransferErrorData")
 		require.True(t, ok)
-		require.Len(t, errDataSlice, 1)
-
-		// Check the error classification
-		errDataMap, ok := errDataSlice[0].(map[string]interface{})
-		require.True(t, ok)
-
-		// Create the expected error to get the expected values
-		expectedErr := error_codes.NewSpecification_FileNotFoundError(innerErr)
-
-		// Check top-level ErrorType (should be base type like "Specification")
-		errorType, ok := errDataMap["ErrorType"]
+		require.Equal(t, 1, len(transferErrorDataList))
+		errorType, ok := classad.GetAs[string](transferErrorDataList[0], "ErrorType")
 		require.True(t, ok)
 		assert.Equal(t, "Specification", errorType)
-
-		// Check DeveloperData within TransferErrorData
-		errDevData, ok := errDataMap["DeveloperData"]
+		teDevData, ok := classad.GetAs[*classad.ClassAd](transferErrorDataList[0], "DeveloperData")
 		require.True(t, ok)
-		errDevDataMap, ok := errDevData.(map[string]interface{})
+		errorCode, ok := classad.GetAs[int64](teDevData, "PelicanErrorCode")
 		require.True(t, ok)
-
-		// Check PelicanErrorCode
-		errorCode, ok := errDevDataMap["PelicanErrorCode"]
-		require.True(t, ok)
-		assert.Equal(t, expectedErr.Code(), errorCode)
+		assert.Equal(t, int64(fileNotFoundErr.Code()), errorCode)
 
 		// Check ErrorType
-		errType, ok := errDevDataMap["ErrorType"]
+		errType, ok := classad.GetAs[string](transferErrorDataList[0], "ErrorType")
 		require.True(t, ok)
-		assert.Equal(t, expectedErr.ErrorType(), errType)
+		assert.Equal(t, "Specification", errType)
 
 		// Check Retryable
-		retryable, ok := errDevDataMap["Retryable"]
+		retryable, ok := classad.GetAs[bool](teDevData, "Retryable")
 		require.True(t, ok)
-		assert.Equal(t, expectedErr.IsRetryable(), retryable.(bool))
+		assert.Equal(t, fileNotFoundErr.IsRetryable(), retryable)
 	})
 }
 
@@ -1012,15 +937,26 @@ func TestCreateTransferError(t *testing.T) {
 		err := error_codes.NewTransfer_DirectorTimeoutError(innerErr)
 		transferError := createTransferError(err)
 
-		assert.Equal(t, "Transfer", transferError["ErrorType"])
+		errorType, ok := classad.GetAs[string](transferError, "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, "Transfer", errorType)
 
-		devData, ok := transferError["DeveloperData"].(map[string]interface{})
+		developerData, ok := classad.GetAs[*classad.ClassAd](transferError, "DeveloperData")
+		require.True(t, ok)
+		pelicanErrorCode, ok := classad.GetAs[int64](developerData, "PelicanErrorCode")
 		require.True(t, ok)
 
-		assert.Equal(t, err.Code(), devData["PelicanErrorCode"])
-		assert.Equal(t, err.ErrorType(), devData["ErrorType"])
-		assert.Contains(t, devData["ErrorMessage"], "dial tcp")
-		assert.Equal(t, err.IsRetryable(), devData["Retryable"].(bool))
+		assert.Equal(t, int64(err.Code()), pelicanErrorCode)
+		// Full error type is stored inside DeveloperData
+		devErrType, ok := classad.GetAs[string](developerData, "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, err.ErrorType(), devErrType)
+		errMsg, ok := classad.GetAs[string](developerData, "ErrorMessage")
+		require.True(t, ok)
+		assert.Contains(t, errMsg, "dial tcp")
+		retryable, ok := classad.GetAs[bool](developerData, "Retryable")
+		require.True(t, ok)
+		assert.True(t, retryable)
 	})
 
 	// Test file not found error
@@ -1029,15 +965,24 @@ func TestCreateTransferError(t *testing.T) {
 		err := error_codes.NewSpecification_FileNotFoundError(innerErr)
 		transferError := createTransferError(err)
 
-		assert.Equal(t, "Specification", transferError["ErrorType"])
-
-		devData, ok := transferError["DeveloperData"].(map[string]interface{})
+		errorType, ok := classad.GetAs[string](transferError, "ErrorType")
 		require.True(t, ok)
+		assert.Equal(t, "Specification", errorType)
 
-		assert.Equal(t, err.Code(), devData["PelicanErrorCode"])
-		assert.Equal(t, err.ErrorType(), devData["ErrorType"])
-		assert.Contains(t, devData["ErrorMessage"].(string), "does not exist")
-		assert.Equal(t, err.IsRetryable(), devData["Retryable"].(bool))
+		developerData, ok := classad.GetAs[*classad.ClassAd](transferError, "DeveloperData")
+		require.True(t, ok)
+		pelicanErrorCode, ok := classad.GetAs[int64](developerData, "PelicanErrorCode")
+		require.True(t, ok)
+		assert.Equal(t, int64(err.Code()), pelicanErrorCode)
+		devErrType, ok := classad.GetAs[string](developerData, "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, err.ErrorType(), devErrType)
+		errMsg, ok := classad.GetAs[string](developerData, "ErrorMessage")
+		require.True(t, ok)
+		assert.Contains(t, errMsg, "does not exist")
+		retryable, ok := classad.GetAs[bool](developerData, "Retryable")
+		require.True(t, ok)
+		assert.Equal(t, err.IsRetryable(), retryable)
 	})
 
 	// Test 404 error
@@ -1046,15 +991,28 @@ func TestCreateTransferError(t *testing.T) {
 		err := error_codes.NewSpecification_FileNotFoundError(innerErr)
 		transferError := createTransferError(err)
 
-		assert.Equal(t, "Specification", transferError["ErrorType"])
+		errorType, ok := classad.GetAs[string](transferError, "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, "Specification", errorType)
 
-		devData, ok := transferError["DeveloperData"].(map[string]interface{})
+		developerData, ok := classad.GetAs[*classad.ClassAd](transferError, "DeveloperData")
 		require.True(t, ok)
 
-		assert.Equal(t, err.Code(), devData["PelicanErrorCode"])
-		assert.Equal(t, err.ErrorType(), devData["ErrorType"])
-		assert.Contains(t, devData["ErrorMessage"].(string), "404 Not Found")
-		assert.Equal(t, err.IsRetryable(), devData["Retryable"].(bool))
+		pelicanErrorCode, ok := classad.GetAs[int64](developerData, "PelicanErrorCode")
+		require.True(t, ok)
+		assert.Equal(t, int64(err.Code()), pelicanErrorCode)
+
+		devErrType, ok := classad.GetAs[string](developerData, "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, err.ErrorType(), devErrType)
+
+		errMsg, ok := classad.GetAs[string](developerData, "ErrorMessage")
+		require.True(t, ok)
+		assert.Contains(t, errMsg, "404 Not Found")
+
+		retryable, ok := classad.GetAs[bool](developerData, "Retryable")
+		require.True(t, ok)
+		assert.Equal(t, err.IsRetryable(), retryable)
 	})
 
 	// Test slow transfer error
@@ -1063,14 +1021,22 @@ func TestCreateTransferError(t *testing.T) {
 		err := error_codes.NewTransfer_SlowTransferError(innerErr)
 		transferError := createTransferError(err)
 
-		assert.Equal(t, "Transfer", transferError["ErrorType"])
+		errorType, ok := classad.GetAs[string](transferError, "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, "Transfer", errorType)
 
-		devData, ok := transferError["DeveloperData"].(map[string]interface{})
+		developerData, ok := classad.GetAs[*classad.ClassAd](transferError, "DeveloperData")
+		require.True(t, ok)
+		pelicanErrorCode, ok := classad.GetAs[int64](developerData, "PelicanErrorCode")
 		require.True(t, ok)
 
-		assert.Equal(t, err.Code(), devData["PelicanErrorCode"])
-		assert.Equal(t, err.ErrorType(), devData["ErrorType"])
-		assert.Equal(t, err.IsRetryable(), devData["Retryable"].(bool))
+		assert.Equal(t, int64(err.Code()), pelicanErrorCode)
+		devErrType, ok := classad.GetAs[string](developerData, "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, err.ErrorType(), devErrType)
+		retryable, ok := classad.GetAs[bool](developerData, "Retryable")
+		require.True(t, ok)
+		assert.True(t, retryable)
 	})
 
 	// Test unprocessed error
@@ -1078,12 +1044,24 @@ func TestCreateTransferError(t *testing.T) {
 		err := errors.New("some random error message")
 		transferError := createTransferError(err)
 
-		devData, ok := transferError["DeveloperData"].(map[string]interface{})
+		developerData, ok := classad.GetAs[*classad.ClassAd](transferError, "DeveloperData")
+		require.True(t, ok)
+		pelicanErrorCode, ok := classad.GetAs[int64](developerData, "PelicanErrorCode")
 		require.True(t, ok)
 
-		assert.Equal(t, 0, devData["PelicanErrorCode"])
-		assert.Equal(t, "Unprocessed", devData["ErrorType"])
-		assert.Equal(t, "Unprocessed error type", devData["ErrorMessage"])
+		assert.Equal(t, int64(0), pelicanErrorCode)
+		errorType, ok := classad.GetAs[string](transferError, "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, "Unprocessed", errorType)
+		errorMessage, ok := classad.GetAs[string](developerData, "ErrorMessage")
+		require.True(t, ok)
+		assert.Equal(t, "Unprocessed error type", errorMessage)
+		retryable, ok := classad.GetAs[bool](developerData, "Retryable")
+		require.True(t, ok)
+		assert.Equal(t, client.IsRetryable(err), retryable)
+		pelicanErrorType, ok := classad.GetAs[string](transferError, "ErrorType")
+		require.True(t, ok)
+		assert.Equal(t, "Unprocessed", pelicanErrorType)
 	})
 }
 
@@ -1120,12 +1098,12 @@ func TestPluginRecursiveDownload(t *testing.T) {
 		//workChan <- PluginTransfer{url: &downloadUrl2, localFile: localPath2}
 		close(workChan)
 
-		results := make(chan *classads.ClassAd, 5)
+		results := make(chan *classad.ClassAd, 5)
 		fed.Egrp.Go(func() error {
 			return runPluginWorker(fed.Ctx, false, workChan, results)
 		})
 
-		resultAds := []*classads.ClassAd{}
+		resultAds := []*classad.ClassAd{}
 		done := false
 		for !done {
 			select {
@@ -1137,11 +1115,9 @@ func TestPluginRecursiveDownload(t *testing.T) {
 					break
 				}
 				// Process results as soon as we get them
-				transferSuccess, err := resultAd.Get("TransferSuccess")
-				assert.NoError(t, err)
-				boolVal, ok := transferSuccess.(bool)
+				transferSuccess, ok := classad.GetAs[bool](resultAd, "TransferSuccess")
 				require.True(t, ok)
-				assert.True(t, boolVal)
+				assert.True(t, transferSuccess)
 				resultAds = append(resultAds, resultAd)
 			}
 		}
@@ -1162,7 +1138,7 @@ func TestPluginRecursiveDownload(t *testing.T) {
 		workChan <- PluginTransfer{url: &downloadUrl1, localFile: localPath1}
 		close(workChan)
 
-		results := make(chan *classads.ClassAd, 5)
+		results := make(chan *classad.ClassAd, 5)
 		err = runPluginWorker(fed.Ctx, false, workChan, results)
 		assert.Error(t, err)
 	})
@@ -1178,14 +1154,19 @@ func TestWriteOutfile(t *testing.T) {
 		defer os.Remove(tempFile.Name())
 
 		// Set up test result ads
-		var resultAds []*classads.ClassAd
+		var resultAds []*classad.ClassAd
 		for i := 0; i < 4; i++ {
-			resultAd := classads.NewClassAd()
-			resultAd.Set("TransferSuccess", true)
-			resultAd.Set("TransferLocalMachineName", "abcdefghijk")
-			resultAd.Set("TransferFileBytes", 12)
-			resultAd.Set("TransferTotalBytes", 27538253)
-			resultAd.Set("TransferUrl", "foo.txt")
+			resultAd := classad.New()
+			err := resultAd.Set("TransferSuccess", true)
+			assert.NoError(t, err)
+			err = resultAd.Set("TransferLocalMachineName", "abcdefghijk")
+			assert.NoError(t, err)
+			err = resultAd.Set("TransferFileBytes", 12)
+			assert.NoError(t, err)
+			err = resultAd.Set("TransferTotalBytes", 27538253)
+			assert.NoError(t, err)
+			err = resultAd.Set("TransferUrl", "foo.txt")
+			assert.NoError(t, err)
 			resultAds = append(resultAds, resultAd)
 		}
 		success, retryable, err := writeOutfile(nil, resultAds, tempFile)
@@ -1211,13 +1192,17 @@ func TestWriteOutfile(t *testing.T) {
 		defer os.Remove(tempFile.Name())
 
 		// Set up test result ads
-		var resultAds []*classads.ClassAd
+		var resultAds []*classad.ClassAd
 		for i := 0; i < 4; i++ {
-			resultAd := classads.NewClassAd()
-			resultAd.Set("TransferSuccess", true)
-			resultAd.Set("TransferLocalMachineName", "abcdefghijk")
-			resultAd.Set("TransferFileBytes", 12)
-			resultAd.Set("TransferTotalBytes", 27538253)
+			resultAd := classad.New()
+			err := resultAd.Set("TransferSuccess", true)
+			assert.NoError(t, err)
+			err = resultAd.Set("TransferLocalMachineName", "abcdefghijk")
+			assert.NoError(t, err)
+			err = resultAd.Set("TransferFileBytes", 12)
+			assert.NoError(t, err)
+			err = resultAd.Set("TransferTotalBytes", 27538253)
+			assert.NoError(t, err)
 			resultAds = append(resultAds, resultAd)
 		}
 		success, retryable, err := writeOutfile(nil, resultAds, tempFile)
@@ -1227,13 +1212,20 @@ func TestWriteOutfile(t *testing.T) {
 		tempFileContent, err := os.ReadFile(tempFile.Name())
 		assert.NoError(t, err)
 
-		// assert the output file contains some of our result ads
-		assert.Contains(t, string(tempFileContent), "TransferFileBytes = 12;")
-		assert.Contains(t, string(tempFileContent), "TransferTotalBytes = 27538253;")
-		assert.Contains(t, string(tempFileContent), "TransferSuccess = true;")
-		// Ensure we get empty strings for these classads
-		assert.Contains(t, string(tempFileContent), "TransferUrl = \"\";")
-		assert.Contains(t, string(tempFileContent), "TransferFileName = \"\";")
+		reader := classad.NewReader(bytes.NewReader(tempFileContent))
+		reader.Next()
+
+		readAd := reader.ClassAd()
+
+		transferBytes, ok := classad.GetAs[int64](readAd, "TransferFileBytes")
+		require.True(t, ok)
+		assert.Equal(t, int64(12), transferBytes)
+		transferTotalBytes, ok := classad.GetAs[int64](readAd, "TransferTotalBytes")
+		require.True(t, ok)
+		assert.Equal(t, int64(27538253), transferTotalBytes)
+		transferSuccess, ok := classad.GetAs[bool](readAd, "TransferSuccess")
+		require.True(t, ok)
+		assert.True(t, transferSuccess)
 	})
 
 	t.Run("TestOutfileFailureNoRetry", func(t *testing.T) {
@@ -1245,15 +1237,21 @@ func TestWriteOutfile(t *testing.T) {
 		defer os.Remove(tempFile.Name())
 
 		// Set up test result ads
-		var resultAds []*classads.ClassAd
+		var resultAds []*classad.ClassAd
 		for i := 0; i < 4; i++ {
-			resultAd := classads.NewClassAd()
-			resultAd.Set("TransferSuccess", false)
-			resultAd.Set("TransferRetryable", false)
-			resultAd.Set("TransferLocalMachineName", "abcdefghijk")
-			resultAd.Set("TransferFileBytes", 12)
-			resultAd.Set("TransferTotalBytes", 27538253)
-			resultAd.Set("TransferUrl", "foo.txt")
+			resultAd := classad.New()
+			err := resultAd.Set("TransferSuccess", false)
+			assert.NoError(t, err)
+			err = resultAd.Set("TransferRetryable", false)
+			assert.NoError(t, err)
+			err = resultAd.Set("TransferLocalMachineName", "abcdefghijk")
+			assert.NoError(t, err)
+			err = resultAd.Set("TransferFileBytes", 12)
+			assert.NoError(t, err)
+			err = resultAd.Set("TransferTotalBytes", 27538253)
+			assert.NoError(t, err)
+			err = resultAd.Set("TransferUrl", "foo.txt")
+			assert.NoError(t, err)
 			resultAds = append(resultAds, resultAd)
 		}
 		success, retryable, err := writeOutfile(nil, resultAds, tempFile)
@@ -1263,11 +1261,22 @@ func TestWriteOutfile(t *testing.T) {
 		tempFileContent, err := os.ReadFile(tempFile.Name())
 		assert.NoError(t, err)
 
-		// assert the output file contains some of our result ads
-		assert.Contains(t, string(tempFileContent), "TransferFileBytes = 12;")
-		assert.Contains(t, string(tempFileContent), "TransferSuccess = false;")
-		assert.Contains(t, string(tempFileContent), "TransferRetryable = false;")
-		assert.Contains(t, string(tempFileContent), "TransferUrl = \"foo.txt\";")
+		reader := classad.NewReader(bytes.NewReader(tempFileContent))
+		reader.Next()
+		readAd := reader.ClassAd()
+
+		transferBytes, ok := classad.GetAs[int64](readAd, "TransferFileBytes")
+		require.True(t, ok)
+		assert.Equal(t, int64(12), transferBytes)
+		transferSuccess, ok := classad.GetAs[bool](readAd, "TransferSuccess")
+		require.True(t, ok)
+		assert.False(t, transferSuccess)
+		transferRetryable, ok := classad.GetAs[bool](readAd, "TransferRetryable")
+		require.True(t, ok)
+		assert.False(t, transferRetryable)
+		transferUrl, ok := classad.GetAs[string](readAd, "TransferUrl")
+		require.True(t, ok)
+		assert.Equal(t, "foo.txt", transferUrl)
 	})
 
 	t.Run("TestOutfileFailureWithRetry", func(t *testing.T) {
@@ -1279,15 +1288,21 @@ func TestWriteOutfile(t *testing.T) {
 		defer os.Remove(tempFile.Name())
 
 		// Set up test result ads
-		var resultAds []*classads.ClassAd
+		var resultAds []*classad.ClassAd
 		for i := 0; i < 4; i++ {
-			resultAd := classads.NewClassAd()
-			resultAd.Set("TransferSuccess", false)
-			resultAd.Set("TransferRetryable", true)
-			resultAd.Set("TransferLocalMachineName", "abcdefghijk")
-			resultAd.Set("TransferFileBytes", 12)
-			resultAd.Set("TransferTotalBytes", 27538253)
-			resultAd.Set("TransferUrl", "foo.txt")
+			resultAd := classad.New()
+			err := resultAd.Set("TransferSuccess", false)
+			assert.NoError(t, err)
+			err = resultAd.Set("TransferRetryable", true)
+			assert.NoError(t, err)
+			err = resultAd.Set("TransferLocalMachineName", "abcdefghijk")
+			assert.NoError(t, err)
+			err = resultAd.Set("TransferFileBytes", 12)
+			assert.NoError(t, err)
+			err = resultAd.Set("TransferTotalBytes", 27538253)
+			assert.NoError(t, err)
+			err = resultAd.Set("TransferUrl", "foo.txt")
+			assert.NoError(t, err)
 			resultAds = append(resultAds, resultAd)
 		}
 		success, retryable, err := writeOutfile(nil, resultAds, tempFile)
@@ -1297,11 +1312,19 @@ func TestWriteOutfile(t *testing.T) {
 		tempFileContent, err := os.ReadFile(tempFile.Name())
 		assert.NoError(t, err)
 
-		// assert the output file contains some of our result ads
-		assert.Contains(t, string(tempFileContent), "TransferFileBytes = 12;")
-		assert.Contains(t, string(tempFileContent), "TransferSuccess = false;")
-		assert.Contains(t, string(tempFileContent), "TransferRetryable = true;")
-		assert.Contains(t, string(tempFileContent), "TransferUrl = \"foo.txt\";")
+		reader := classad.NewReader(bytes.NewReader(tempFileContent))
+		reader.Next()
+		readAd := reader.ClassAd()
+
+		transferBytes, ok := classad.GetAs[int64](readAd, "TransferFileBytes")
+		require.True(t, ok)
+		assert.Equal(t, int64(12), transferBytes)
+		transferSuccess, ok := classad.GetAs[bool](readAd, "TransferSuccess")
+		require.True(t, ok)
+		assert.False(t, transferSuccess)
+		transferRetryable, ok := classad.GetAs[bool](readAd, "TransferRetryable")
+		require.True(t, ok)
+		assert.True(t, transferRetryable)
 	})
 
 	// Test the check in writeOutfile if we have an error sent to the function and have an error in our resultAds
@@ -1315,11 +1338,13 @@ func TestWriteOutfile(t *testing.T) {
 		defer os.Remove(tempFile.Name())
 
 		// Set up test result ads
-		var resultAds []*classads.ClassAd
+		var resultAds []*classad.ClassAd
 		for i := 0; i < 4; i++ {
-			resultAd := classads.NewClassAd()
-			resultAd.Set("TransferSuccess", false)
-			resultAd.Set("TransferError", "This is some error here")
+			resultAd := classad.New()
+			err := resultAd.Set("TransferSuccess", false)
+			assert.NoError(t, err)
+			err = resultAd.Set("TransferError", "This is some error here")
+			assert.NoError(t, err)
 			resultAds = append(resultAds, resultAd)
 		}
 		writeErr := errors.New("This is the error that is passed to writeOutfile")
@@ -1329,9 +1354,17 @@ func TestWriteOutfile(t *testing.T) {
 		tempFileContent, err := os.ReadFile(tempFile.Name())
 		assert.NoError(t, err)
 
+		reader := classad.NewReader(bytes.NewReader(tempFileContent))
+		reader.Next()
+		readAd := reader.ClassAd()
+
 		// assert the output file contains some of our result ads
-		assert.Contains(t, string(tempFileContent), "TransferSuccess = false;")
-		assert.Contains(t, string(tempFileContent), "TransferError = \"This is some error here\";")
+		transferSuccess, ok := classad.GetAs[bool](readAd, "TransferSuccess")
+		require.True(t, ok)
+		assert.False(t, transferSuccess)
+		transferError, ok := classad.GetAs[string](readAd, "TransferError")
+		require.True(t, ok)
+		assert.Equal(t, "This is some error here", transferError)
 	})
 
 	// In this case, we have an error sent to writeOutFile but no errors in the resultAds, we want to ensure
@@ -1345,10 +1378,11 @@ func TestWriteOutfile(t *testing.T) {
 		defer os.Remove(tempFile.Name())
 
 		// Set up test result ads
-		var resultAds []*classads.ClassAd
+		var resultAds []*classad.ClassAd
 		for i := 0; i < 4; i++ {
-			resultAd := classads.NewClassAd()
-			resultAd.Set("TransferSuccess", true)
+			resultAd := classad.New()
+			err := resultAd.Set("TransferSuccess", true)
+			assert.NoError(t, err)
 			resultAds = append(resultAds, resultAd)
 		}
 		writeErr := errors.New("This is the error that is passed to writeOutfile")
@@ -1527,7 +1561,7 @@ func TestTransferError404(t *testing.T) {
 	workChan := make(chan PluginTransfer, 1)
 	workChan <- PluginTransfer{url: objectUrl, localFile: "/tmp/targetfile"}
 	close(workChan)
-	results := make(chan *classads.ClassAd, 2)
+	results := make(chan *classad.ClassAd, 2)
 	egrp.Go(func() error {
 		return runPluginWorker(ctx, false, workChan, results)
 	})
@@ -1542,23 +1576,20 @@ func TestTransferError404(t *testing.T) {
 				done = true
 				break
 			}
-			transferSuccess, err := resultAd.Get("TransferSuccess")
-			assert.NoError(t, err)
-			boolVal, ok := transferSuccess.(bool)
+			transferSuccess, ok := classad.GetAs[bool](resultAd, "TransferSuccess")
 			require.True(t, ok)
-			assert.False(t, boolVal)
+			assert.False(t, transferSuccess)
 
 			log.Debugln("Got result ad:", resultAd)
 
-			errData, err := resultAd.Get("TransferErrorData")
-			require.NoError(t, err)
-			errorDataList := errData.([]interface{})
-			require.Equal(t, 1, len(errorDataList))
-			errorData := errorDataList[0].(map[string]interface{})
-			errorTypeStr, ok := errorData["ErrorType"].(string)
+			errDataList, ok := classad.GetAs[[]*classad.ClassAd](resultAd, "TransferErrorData")
 			require.True(t, ok)
-			assert.Equal(t, "Specification", errorTypeStr)
-			developerData, ok := errorData["DeveloperData"].(map[string]interface{})
+			require.Equal(t, 1, len(errDataList))
+			errData := errDataList[0]
+			errorType, ok := classad.GetAs[string](errData, "ErrorType")
+			require.True(t, ok)
+			assert.Equal(t, "Specification", errorType)
+			developerData, ok := classad.GetAs[*classad.ClassAd](errData, "DeveloperData")
 			require.True(t, ok)
 
 			// Create the expected error to get the expected values
@@ -1566,19 +1597,19 @@ func TestTransferError404(t *testing.T) {
 			sce := client.StatusCodeError(http.StatusNotFound)
 			expectedErr := error_codes.NewSpecification_FileNotFoundError(&sce)
 
-			pelicanErrorCode, ok := developerData["PelicanErrorCode"].(int)
+			pelicanErrorCode, ok := classad.GetAs[int64](developerData, "PelicanErrorCode")
 			require.True(t, ok)
-			assert.Equal(t, expectedErr.Code(), pelicanErrorCode)
+			assert.Equal(t, int64(expectedErr.Code()), pelicanErrorCode)
 
-			pelicanErrorMessage, ok := developerData["ErrorMessage"].(string)
+			pelicanErrorMessage, ok := classad.GetAs[string](developerData, "ErrorMessage")
 			require.True(t, ok)
 			assert.Equal(t, expectedErr.Unwrap().Error(), pelicanErrorMessage)
 
-			pelicanErrorType, ok := developerData["ErrorType"].(string)
+			pelicanErrorType, ok := classad.GetAs[string](developerData, "ErrorType")
 			require.True(t, ok)
 			assert.Equal(t, expectedErr.ErrorType(), pelicanErrorType)
 
-			retryable, ok := developerData["Retryable"].(bool)
+			retryable, ok := classad.GetAs[bool](developerData, "Retryable")
 			require.True(t, ok)
 			assert.Equal(t, expectedErr.IsRetryable(), retryable)
 		}
@@ -1653,7 +1684,7 @@ func TestTransferErrorSlowTransfer(t *testing.T) {
 	workChan := make(chan PluginTransfer, 1)
 	workChan <- PluginTransfer{url: objectUrl, localFile: "/tmp/targetfile"}
 	close(workChan)
-	results := make(chan *classads.ClassAd, 2)
+	results := make(chan *classad.ClassAd, 2)
 	egrp.Go(func() error {
 		return runPluginWorker(ctx, false, workChan, results)
 	})
@@ -1668,40 +1699,37 @@ func TestTransferErrorSlowTransfer(t *testing.T) {
 				done = true
 				break
 			}
-			transferSuccess, err := resultAd.Get("TransferSuccess")
-			assert.NoError(t, err)
-			boolVal, ok := transferSuccess.(bool)
+			transferSuccess, ok := classad.GetAs[bool](resultAd, "TransferSuccess")
 			require.True(t, ok)
-			assert.False(t, boolVal)
+			assert.False(t, transferSuccess)
 
-			errData, err := resultAd.Get("TransferErrorData")
-			require.NoError(t, err)
-			errorDataList := errData.([]interface{})
-			require.Equal(t, 1, len(errorDataList))
-			errorData := errorDataList[0].(map[string]interface{})
-			errorTypeStr, ok := errorData["ErrorType"].(string)
+			errDataList, ok := classad.GetAs[[]*classad.ClassAd](resultAd, "TransferErrorData")
 			require.True(t, ok)
-			assert.Equal(t, "Transfer", errorTypeStr)
-			developerData, ok := errorData["DeveloperData"].(map[string]interface{})
+			require.Equal(t, 1, len(errDataList))
+			errData := errDataList[0]
+			errorType, ok := classad.GetAs[string](errData, "ErrorType")
 			require.True(t, ok)
+			assert.Equal(t, "Transfer", errorType)
 
 			// Create the expected error to get the expected values
 			expectedErr := error_codes.NewTransfer_SlowTransferError(nil)
 
 			// Check top-level ErrorType (should be base type like "Transfer")
-			assert.Equal(t, "Transfer", errorTypeStr)
+			assert.Equal(t, "Transfer", errorType)
 
-			pelicanErrorCode, ok := developerData["PelicanErrorCode"].(int)
+			developerData, ok := classad.GetAs[*classad.ClassAd](errData, "DeveloperData")
 			require.True(t, ok)
-			assert.Equal(t, expectedErr.Code(), pelicanErrorCode)
+			pelicanErrorCode, ok := classad.GetAs[int64](developerData, "PelicanErrorCode")
+			require.True(t, ok)
+			assert.Equal(t, int64(expectedErr.Code()), pelicanErrorCode)
 
-			retryable, ok := developerData["Retryable"].(bool)
+			retryable, ok := classad.GetAs[bool](developerData, "Retryable")
 			require.True(t, ok)
 			assert.Equal(t, expectedErr.IsRetryable(), retryable)
 
-			errorType, ok := developerData["ErrorType"].(string)
+			pelicanErrorType, ok := classad.GetAs[string](developerData, "ErrorType")
 			require.True(t, ok)
-			assert.Equal(t, expectedErr.ErrorType(), errorType)
+			assert.Equal(t, expectedErr.ErrorType(), pelicanErrorType)
 		}
 	}
 }
@@ -1711,55 +1739,56 @@ func TestTransferErrorDirectorTimeout(t *testing.T) {
 	testErr = errors.Wrap(testErr, "error while querying the director at https://osdf-director.osg-htc.org")
 	testErr = error_codes.NewTransfer_DirectorTimeoutError(testErr)
 
-	results := make(chan *classads.ClassAd, 1)
+	results := make(chan *classad.ClassAd, 1)
 	failTransfer("osdf://osg-htc.org/chtc/PUBLIC/test.txt", "/tmp/test.txt", results, false, testErr)
 	resultAd := <-results
 
 	// Basic fields should be set
-	transferSuccess, _ := resultAd.Get("TransferSuccess")
-	assert.False(t, transferSuccess.(bool))
+	transferSuccess, ok := classad.GetAs[bool](resultAd, "TransferSuccess")
+	require.True(t, ok)
+	assert.False(t, transferSuccess)
 
-	transferRetryable, _ := resultAd.Get("TransferRetryable")
-	assert.True(t, transferRetryable.(bool), "Director timeout should be retryable")
+	transferRetryable, ok := classad.GetAs[bool](resultAd, "TransferRetryable")
+	require.True(t, ok)
+	assert.True(t, transferRetryable, "Director timeout should be retryable")
 
 	// Verify DeveloperData is populated
-	devData, err := resultAd.Get("DeveloperData")
-	require.NoError(t, err, "DeveloperData should be present for director failures")
-	require.NotNil(t, devData)
-	devDataMap, ok := devData.(map[string]interface{})
+	devData, ok := classad.GetAs[*classad.ClassAd](resultAd, "DeveloperData")
 	require.True(t, ok)
-	assert.Equal(t, 1, devDataMap["Attempts"])
-	assert.NotEmpty(t, devDataMap["TransferError1"])
-	assert.NotNil(t, devDataMap["IsRetryable1"])
-	assert.Equal(t, true, devDataMap["IsRetryable1"], "Director timeout should be retryable")
-	assert.NotEmpty(t, devDataMap["PelicanClientVersion"])
+	attempts, ok := classad.GetAs[int](devData, "Attempts")
+	require.True(t, ok)
+	assert.Equal(t, 1, attempts)
+	transferError1, ok := classad.GetAs[string](devData, "TransferError1")
+	require.True(t, ok)
+	assert.NotEmpty(t, transferError1)
+	isRetryable1, ok := classad.GetAs[bool](devData, "IsRetryable1")
+	require.True(t, ok)
+	assert.Equal(t, true, isRetryable1, "Director timeout should be retryable")
+	pelicanClientVersion, ok := classad.GetAs[string](devData, "PelicanClientVersion")
+	require.True(t, ok)
+	assert.NotEmpty(t, pelicanClientVersion)
 
 	// Verify TransferErrorData is populated
-	errData, err := resultAd.Get("TransferErrorData")
-	require.NoError(t, err, "TransferErrorData should be present for director failures")
-	require.NotNil(t, errData)
-	errorDataList := errData.([]interface{})
-	require.Equal(t, 1, len(errorDataList), "Should have one error in TransferErrorData")
-
-	errorData := errorDataList[0].(map[string]interface{})
-	errorTypeStr, ok := errorData["ErrorType"].(string)
+	errDataList, ok := classad.GetAs[[]*classad.ClassAd](resultAd, "TransferErrorData")
 	require.True(t, ok)
-	assert.Equal(t, "Transfer", errorTypeStr, "Should be Transfer error type")
-
-	developerData, ok := errorData["DeveloperData"].(map[string]interface{})
+	require.Equal(t, 1, len(errDataList))
+	errData := errDataList[0]
+	errorType, ok := classad.GetAs[string](errData, "ErrorType")
 	require.True(t, ok)
-
+	assert.Equal(t, "Transfer", errorType)
+	developerData, ok := classad.GetAs[*classad.ClassAd](errData, "DeveloperData")
+	require.True(t, ok)
 	// Verify it's wrapped with Transfer.DirectorTimeout PelicanError
 	expectedErr := error_codes.NewTransfer_DirectorTimeoutError(errors.New("timeout"))
-	pelicanErrorCode, ok := developerData["PelicanErrorCode"].(int)
+	pelicanErrorCode, ok := classad.GetAs[int64](developerData, "PelicanErrorCode")
 	require.True(t, ok)
-	assert.Equal(t, expectedErr.Code(), pelicanErrorCode, "Should have Transfer.DirectorTimeout code 6005")
+	assert.Equal(t, int64(expectedErr.Code()), pelicanErrorCode, "Should have Transfer.DirectorTimeout code 6005")
 
-	pelicanErrorType, ok := developerData["ErrorType"].(string)
+	pelicanErrorType, ok := classad.GetAs[string](developerData, "ErrorType")
 	require.True(t, ok)
 	assert.Equal(t, expectedErr.ErrorType(), pelicanErrorType, "Should be Transfer.DirectorTimeout")
 
-	retryable, ok := developerData["Retryable"].(bool)
+	retryable, ok := classad.GetAs[bool](developerData, "Retryable")
 	require.True(t, ok)
 	assert.True(t, retryable, "Director timeout should be retryable")
 }
@@ -1827,7 +1856,7 @@ func TestTransferErrorHeaderTimeout(t *testing.T) {
 	workChan := make(chan PluginTransfer, 1)
 	workChan <- PluginTransfer{url: objectUrl, localFile: "/tmp/targetfile"}
 	close(workChan)
-	results := make(chan *classads.ClassAd, 2)
+	results := make(chan *classad.ClassAd, 2)
 	egrp.Go(func() error {
 		return runPluginWorker(ctx, false, workChan, results)
 	})
@@ -1842,40 +1871,37 @@ func TestTransferErrorHeaderTimeout(t *testing.T) {
 				done = true
 				break
 			}
-			transferSuccess, err := resultAd.Get("TransferSuccess")
-			assert.NoError(t, err)
-			boolVal, ok := transferSuccess.(bool)
+			transferSuccess, ok := classad.GetAs[bool](resultAd, "TransferSuccess")
 			require.True(t, ok)
-			assert.False(t, boolVal)
+			assert.False(t, transferSuccess)
 
-			errData, err := resultAd.Get("TransferErrorData")
-			require.NoError(t, err)
-			errorDataList := errData.([]interface{})
-			require.Equal(t, 1, len(errorDataList))
-			errorData := errorDataList[0].(map[string]interface{})
-			errorTypeStr, ok := errorData["ErrorType"].(string)
+			errDataList, ok := classad.GetAs[[]*classad.ClassAd](resultAd, "TransferErrorData")
 			require.True(t, ok)
-			assert.Equal(t, "Transfer", errorTypeStr)
-			developerData, ok := errorData["DeveloperData"].(map[string]interface{})
+			require.Equal(t, 1, len(errDataList))
+			errData := errDataList[0]
+			errorType, ok := classad.GetAs[string](errData, "ErrorType")
 			require.True(t, ok)
+			assert.Equal(t, "Transfer", errorType)
 
 			// Create the expected error to get the expected values
 			expectedErr := error_codes.NewTransfer_HeaderTimeoutError(&client.HeaderTimeoutError{})
 
 			// Check top-level ErrorType (should be base type like "Transfer")
-			assert.Equal(t, "Transfer", errorTypeStr)
+			assert.Equal(t, "Transfer", errorType)
 
-			pelicanErrorCode, ok := developerData["PelicanErrorCode"].(int)
+			developerData, ok := classad.GetAs[*classad.ClassAd](errData, "DeveloperData")
 			require.True(t, ok)
-			assert.Equal(t, expectedErr.Code(), pelicanErrorCode)
+			pelicanErrorCode, ok := classad.GetAs[int64](developerData, "PelicanErrorCode")
+			require.True(t, ok)
+			assert.Equal(t, int64(expectedErr.Code()), pelicanErrorCode)
 
-			retryable, ok := developerData["Retryable"].(bool)
-			require.True(t, ok)
+			retryable, ok := classad.GetAs[bool](developerData, "Retryable")
+			assert.True(t, ok)
 			assert.Equal(t, expectedErr.IsRetryable(), retryable)
 
-			errorType, ok := developerData["ErrorType"].(string)
+			pelicanErrorType, ok := classad.GetAs[string](developerData, "ErrorType")
 			require.True(t, ok)
-			assert.Equal(t, expectedErr.ErrorType(), errorType)
+			assert.Equal(t, expectedErr.ErrorType(), pelicanErrorType)
 		}
 	}
 }

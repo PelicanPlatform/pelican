@@ -34,13 +34,13 @@ import (
 	"syscall"
 	"time"
 
+	classad "github.com/PelicanPlatform/classad/classad"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/pelicanplatform/pelican/classads"
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
@@ -98,14 +98,23 @@ func stashPluginMain(args []string) {
 			log.Warningln("Panic caused by the following", string(debug.Stack()))
 			ret := fmt.Sprintf("Unrecoverable error (panic) captured in stashPluginMain(): %v", r)
 
-			resultAd := classads.NewClassAd()
-			var resultAds []*classads.ClassAd
+			resultAd := classad.New()
+			var resultAds []*classad.ClassAd
 
 			// Set as failure and add errors
-			resultAd.Set("TransferSuccess", false)
+			err := resultAd.Set("TransferSuccess", false)
+			if err != nil {
+				log.Errorf("Failed to set TransferSuccess: %s", err)
+			}
 			errMsg := writeTransferErrorMessage(ret+";"+strings.ReplaceAll(string(debug.Stack()), "\n", ";"), "")
-			resultAd.Set("TransferError", errMsg)
-			resultAd.Set("TransferRetryable", false) // Panics are not retryable
+			err = resultAd.Set("TransferError", errMsg)
+			if err != nil {
+				log.Errorf("Failed to set TransferError: %s", err)
+			}
+			err = resultAd.Set("TransferRetryable", false) // Panics are not retryable
+			if err != nil {
+				log.Errorf("Failed to set TransferRetryable: %s", err)
+			}
 
 			// Add DeveloperData and TransferErrorData for panic errors
 			panicErr := errors.New(ret)
@@ -188,14 +197,23 @@ func stashPluginMain(args []string) {
 	// Want to bail here for config fail to see if we want to write an outfile
 	if isConfigErr {
 		// Write our important classAds
-		resultAd := classads.NewClassAd()
-		var resultAds []*classads.ClassAd
+		resultAd := classad.New()
+		var resultAds []*classad.ClassAd
 
 		// Set as failure and add errors
-		resultAd.Set("TransferSuccess", false)
+		err := resultAd.Set("TransferSuccess", false)
+		if err != nil {
+			log.Errorf("Failed to set TransferSuccess: %s", err)
+		}
 		errMsg := writeTransferErrorMessage(configErr.Error(), "")
-		resultAd.Set("TransferError", errMsg)
-		resultAd.Set("TransferRetryable", client.ShouldRetry(configErr))
+		err = resultAd.Set("TransferError", errMsg)
+		if err != nil {
+			log.Errorf("Failed to set TransferError: %s", err)
+		}
+		err = resultAd.Set("TransferRetryable", client.ShouldRetry(configErr))
+		if err != nil {
+			log.Errorf("Failed to set TransferRetryable: %s", err)
+		}
 		addDataToClassAd(resultAd, nil, configErr, 1, nil, nil)
 		resultAds = append(resultAds, resultAd)
 
@@ -298,14 +316,14 @@ func stashPluginMain(args []string) {
 	}()
 	defer cancel()
 
-	results := make(chan *classads.ClassAd, 5)
+	results := make(chan *classad.ClassAd, 5)
 
 	egrp.Go(func() error {
 		return runPluginWorker(ctx, upload, workChan, results)
 	})
 
 	success := true
-	var resultAds []*classads.ClassAd
+	var resultAds []*classad.ClassAd
 	done := false
 	for !done {
 		select {
@@ -317,15 +335,18 @@ func stashPluginMain(args []string) {
 				break
 			}
 			// Process results as soon as we get them
-			transferSuccess, err := resultAd.Get("TransferSuccess")
-			if err != nil {
-				log.Errorln("Failed to get TransferSuccess:", err)
-				resultAd.Set("TransferSuccess", false)
+			transferSuccess, ok := classad.GetAs[bool](resultAd, "TransferSuccess")
+			if !ok {
+				log.Errorln("Failed to get TransferSuccess: TransferSuccess is not a boolean")
+				err := resultAd.Set("TransferSuccess", false)
+				if err != nil {
+					log.Errorf("Failed to set TransferSuccess: %s", err)
+				}
 				success = false
 				transferSuccess = false
 			}
 			// If we are not uploading and we fail, we want to abort
-			if !upload && !transferSuccess.(bool) {
+			if !upload && !transferSuccess {
 				success = false
 				// Add the final (failed) result to the resultAds
 				resultAds = append(resultAds, resultAd)
@@ -363,7 +384,7 @@ func stashPluginMain(args []string) {
 // This function is used if we get some error requiring us to bail
 // We attempt to write and output file and call an exit(1)
 // In the future if we get more unique exit codes, we can change the passed in exit code
-func writeClassadOutputAndBail(exitCode int, resultAds []*classads.ClassAd) {
+func writeClassadOutputAndBail(exitCode int, resultAds []*classad.ClassAd) {
 	// Attempt to write out outfile:
 	outputFile := os.Stdout
 	if useOutFile {
@@ -394,7 +415,7 @@ func writeClassadOutputAndBail(exitCode int, resultAds []*classads.ClassAd) {
 // runPluginWorker performs the appropriate download or upload functions for the plugin as well as
 // writes the resultAds for each transfer
 // Returns: resultAds and if an error given is retryable
-func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTransfer, results chan<- *classads.ClassAd) (err error) {
+func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTransfer, results chan<- *classad.ClassAd) (err error) {
 	te, err := client.NewTransferEngine(ctx)
 	if err != nil {
 		return
@@ -483,31 +504,70 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				return
 			}
 			log.Debugln("Got result from transfer client")
-			resultAd := classads.NewClassAd()
+			resultAd := classad.New()
 
 			// Add comprehensive transfer data to ClassAd
 			addDataToClassAd(resultAd, &result, result.Error, len(result.Attempts), result.ClientChecksums, result.ServerChecksums)
 
-			resultAd.Set("TransferStartTime", result.TransferStartTime.Unix())
-			resultAd.Set("TransferEndTime", time.Now().Unix())
+			err := resultAd.Set("TransferStartTime", result.TransferStartTime.Unix())
+			if err != nil {
+				log.Errorf("Failed to set TransferStartTime: %s", err)
+			}
+			err = resultAd.Set("TransferEndTime", time.Now().Unix())
+			if err != nil {
+				log.Errorf("Failed to set TransferEndTime: %s", err)
+			}
 			hostname, _ := os.Hostname()
-			resultAd.Set("TransferLocalMachineName", hostname)
-			resultAd.Set("TransferProtocol", result.Scheme)
+			err = resultAd.Set("TransferLocalMachineName", hostname)
+			if err != nil {
+				log.Errorf("Failed to set TransferLocalMachineName: %s", err)
+			}
+			err = resultAd.Set("TransferProtocol", result.Scheme)
+			if err != nil {
+				log.Errorf("Failed to set TransferProtocol: %s", err)
+			}
 			transfer := jobMap[result.ID()]
-			resultAd.Set("TransferUrl", transfer.url.String())
+			err = resultAd.Set("TransferUrl", transfer.url.String())
+			if err != nil {
+				log.Errorf("Failed to set TransferUrl: %s", err)
+			}
 			if upload {
-				resultAd.Set("TransferType", "upload")
-				resultAd.Set("TransferFileName", path.Base(transfer.localFile))
+				err = resultAd.Set("TransferType", "upload")
+				if err != nil {
+					log.Errorf("Failed to set TransferType: %s", err)
+				}
+				err = resultAd.Set("TransferFileName", path.Base(transfer.localFile))
+				if err != nil {
+					log.Errorf("Failed to set TransferFileName: %s", err)
+				}
 			} else {
-				resultAd.Set("TransferType", "download")
-				resultAd.Set("TransferFileName", path.Base(transfer.url.String()))
+				err = resultAd.Set("TransferType", "download")
+				if err != nil {
+					log.Errorf("Failed to set TransferType: %s", err)
+				}
+				err = resultAd.Set("TransferFileName", path.Base(transfer.url.String()))
+				if err != nil {
+					log.Errorf("Failed to set TransferFileName: %s", err)
+				}
 			}
 			if result.Error == nil {
-				resultAd.Set("TransferSuccess", true)
-				resultAd.Set("TransferFileBytes", result.Attempts[len(result.Attempts)-1].TransferFileBytes)
-				resultAd.Set("TransferTotalBytes", result.Attempts[len(result.Attempts)-1].TransferFileBytes)
+				err = resultAd.Set("TransferSuccess", true)
+				if err != nil {
+					log.Errorf("Failed to set TransferSuccess: %s", err)
+				}
+				err = resultAd.Set("TransferFileBytes", result.Attempts[len(result.Attempts)-1].TransferFileBytes)
+				if err != nil {
+					log.Errorf("Failed to set TransferFileBytes: %s", err)
+				}
+				err = resultAd.Set("TransferTotalBytes", result.Attempts[len(result.Attempts)-1].TransferFileBytes)
+				if err != nil {
+					log.Errorf("Failed to set TransferTotalBytes: %s", err)
+				}
 			} else {
-				resultAd.Set("TransferSuccess", false)
+				err = resultAd.Set("TransferSuccess", false)
+				if err != nil {
+					log.Errorf("Failed to set TransferSuccess: %s", err)
+				}
 				var te *client.TransferErrors
 				errMsgInternal := result.Error.Error()
 				if errors.As(result.Error, &te) {
@@ -524,13 +584,28 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 					}
 				}
 				errMsg := writeTransferErrorMessage(errMsgInternal, transfer.url.String())
-				resultAd.Set("TransferError", errMsg)
-				resultAd.Set("TransferFileBytes", 0)
-				resultAd.Set("TransferTotalBytes", 0)
+				err = resultAd.Set("TransferError", errMsg)
+				if err != nil {
+					log.Errorf("Failed to set TransferError: %s", err)
+				}
+				err = resultAd.Set("TransferFileBytes", 0)
+				if err != nil {
+					log.Errorf("Failed to set TransferFileBytes: %s", err)
+				}
+				err = resultAd.Set("TransferTotalBytes", 0)
+				if err != nil {
+					log.Errorf("Failed to set TransferTotalBytes: %s", err)
+				}
 				if client.ShouldRetry(result.Error) {
-					resultAd.Set("TransferRetryable", true)
+					err = resultAd.Set("TransferRetryable", true)
+					if err != nil {
+						log.Errorf("Failed to set TransferRetryable: %s", err)
+					}
 				} else {
-					resultAd.Set("TransferRetryable", false)
+					err = resultAd.Set("TransferRetryable", false)
+					if err != nil {
+						log.Errorf("Failed to set TransferRetryable: %s", err)
+					}
 				}
 			}
 			results <- resultAd
@@ -540,19 +615,43 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 
 // This function is to be called to populate the result ads for a failed transfer
 // This ensures that the needed classads are populated and sent to the results channel
-func failTransfer(remoteUrl string, localFile string, results chan<- *classads.ClassAd, upload bool, err error) {
-	resultAd := classads.NewClassAd()
-	resultAd.Set("TransferUrl", remoteUrl)
-	if upload {
-		resultAd.Set("TransferType", "upload")
-		resultAd.Set("TransferFileName", path.Base(localFile))
-	} else {
-		resultAd.Set("TransferType", "download")
-		resultAd.Set("TransferFileName", path.Base(remoteUrl))
+func failTransfer(remoteUrl string, localFile string, results chan<- *classad.ClassAd, upload bool, err error) {
+	resultAd := classad.New()
+	adErr := resultAd.Set("TransferUrl", remoteUrl)
+	if adErr != nil {
+		log.Errorf("Failed to set TransferUrl: %s", adErr)
 	}
-	resultAd.Set("TransferRetryable", client.IsRetryable(err))
-	resultAd.Set("TransferSuccess", false)
-	resultAd.Set("TransferError", err.Error())
+	if upload {
+		adErr = resultAd.Set("TransferType", "upload")
+		if adErr != nil {
+			log.Errorf("Failed to set TransferType: %s", adErr)
+		}
+		adErr = resultAd.Set("TransferFileName", path.Base(localFile))
+		if adErr != nil {
+			log.Errorf("Failed to set TransferFileName: %s", adErr)
+		}
+	} else {
+		adErr = resultAd.Set("TransferType", "download")
+		if adErr != nil {
+			log.Errorf("Failed to set TransferType: %s", adErr)
+		}
+		adErr = resultAd.Set("TransferFileName", path.Base(remoteUrl))
+		if adErr != nil {
+			log.Errorf("Failed to set TransferFileName: %s", adErr)
+		}
+	}
+	adErr = resultAd.Set("TransferRetryable", client.IsRetryable(err))
+	if adErr != nil {
+		log.Errorf("Failed to set TransferRetryable: %s", adErr)
+	}
+	adErr = resultAd.Set("TransferSuccess", false)
+	if adErr != nil {
+		log.Errorf("Failed to set TransferSuccess: %s", adErr)
+	}
+	adErr = resultAd.Set("TransferError", err.Error())
+	if adErr != nil {
+		log.Errorf("Failed to set TransferError: %s", adErr)
+	}
 
 	// Add DeveloperData and TransferErrorData for early failures (e.g., director lookup failures)
 	// This ensures errors can be properly classified even when they occur before transfer attempts
@@ -592,22 +691,28 @@ func parseDestination(transfer PluginTransfer) (parsedDest string) {
 // true: all result ads indicate transfer success
 // false: at least one result ad has failed
 // As well as a boolean letting us know if errors are retryable
-func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File) (success bool, retryable bool, writeErr error) {
+func writeOutfile(err error, resultAds []*classad.ClassAd, outputFile *os.File) (success bool, retryable bool, writeErr error) {
 
 	if err != nil {
 		alreadyFailed := false
 		for _, ad := range resultAds {
-			succeeded, getErr := ad.Get("TransferSuccess")
-			if getErr != nil || !(succeeded.(bool)) {
+			succeeded, ok := classad.GetAs[bool](ad, "TransferSuccess")
+			if !ok || !succeeded {
 				alreadyFailed = true
 				break
 			}
 		}
 		if !alreadyFailed {
-			resultAd := classads.NewClassAd()
-			resultAd.Set("TransferSuccess", false)
-			resultAd.Set("TransferError", err.Error())
-			resultAd.Set("TransferRetryable", client.ShouldRetry(err))
+			resultAd := classad.New()
+			if adErr := resultAd.Set("TransferSuccess", false); adErr != nil {
+				log.Errorf("Failed to set TransferSuccess: %s", adErr)
+			}
+			if adErr := resultAd.Set("TransferError", err.Error()); adErr != nil {
+				log.Errorf("Failed to set TransferError: %s", adErr)
+			}
+			if adErr := resultAd.Set("TransferRetryable", client.ShouldRetry(err)); adErr != nil {
+				log.Errorf("Failed to set TransferRetryable: %s", adErr)
+			}
 			addDataToClassAd(resultAd, nil, err, 1, nil, nil)
 			resultAds = append(resultAds, resultAd)
 		}
@@ -618,33 +723,35 @@ func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File)
 		// Condor expects the plugin to always return a TransferUrl and TransferFileName. Therefore,
 		// we should populate them even if they are empty. If empty, the url/filename is most likely
 		// included in the error stack already or it is not relevant to the error
-		if url, _ := resultAd.Get("TransferUrl"); url == nil {
+		if url, ok := classad.GetAs[string](resultAd, "TransferUrl"); !ok || url == "" {
 			log.Debugln("No URL found in result ad")
-			resultAd.Set("TransferUrl", "")
+			adErr := resultAd.Set("TransferUrl", "")
+			if adErr != nil {
+				log.Errorf("Failed to set TransferUrl: %s", adErr)
+			}
 		}
-		if fileName, _ := resultAd.Get("TransferFileName"); fileName == nil {
+		if fileName, ok := classad.GetAs[string](resultAd, "TransferFileName"); !ok || fileName == "" {
 			log.Debugln("No TransferFileName found in result ad")
-			resultAd.Set("TransferFileName", "")
+			adErr := resultAd.Set("TransferFileName", "")
+			if adErr != nil {
+				log.Errorf("Failed to set TransferFileName: %s", adErr)
+			}
 		}
 
-		_, err = outputFile.WriteString(resultAd.String() + "\n")
-		if err != nil {
-			return false, false, errors.Wrap(err, "failed to write to outfile")
+		_, adErr := outputFile.WriteString(resultAd.String() + "\n")
+		if adErr != nil {
+			return false, false, errors.Wrap(adErr, "failed to write to outfile")
 		}
-		transferSuccess, err := resultAd.Get("TransferSuccess")
-		if err != nil {
-			log.Errorln("Failed to get TransferSuccess:", err)
+		transferSuccess, ok := classad.GetAs[bool](resultAd, "TransferSuccess")
+		if !ok || !transferSuccess {
 			success = false
-		}
-		success = success && transferSuccess.(bool)
-		// If we do not get a success, check if it is retryable
-		if !success {
-			retryableTransfer, err := resultAd.Get("TransferRetryable")
-			if err != nil {
-				log.Errorln("Failed to see if ad is retryable", err)
-			}
-			if retryableTransfer != nil {
-				retryable = retryableTransfer.(bool)
+			// If we do not get a success, check if it is retryable
+			retryableTransfer, ok := classad.GetAs[bool](resultAd, "TransferRetryable")
+			if !ok {
+				log.Errorln("Failed to get TransferRetryable: TransferRetryable is not a boolean")
+				retryable = false
+			} else {
+				retryable = retryableTransfer
 			}
 		}
 	}
@@ -672,45 +779,29 @@ func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File)
 // readMultiTransfers reads the transfers from a Reader, such as stdin
 func readMultiTransfers(stdin bufio.Reader) (transfers []PluginTransfer, err error) {
 	// Check stdin for a list of transfers
-	ads, err := classads.ReadClassAd(&stdin)
-	if err != nil {
-		return nil, err
-	}
-	if ads == nil {
-		return nil, errors.New("No transfers found")
-	}
-	for _, ad := range ads {
-		adUrlStr, err := ad.Get("Url")
-		if err != nil {
+	adsIter := classad.All(&stdin)
+	for ad := range adsIter {
+		adUrlStr, ok := ad.EvaluateAttrString("Url")
+		if !ok || adUrlStr == "" {
 			// If we don't find a URL, we are assuming it is a classad used for other purposes
 			// so keep searching for URL
 			log.Debugln("Url attribute not set for transfer, skipping...")
 			continue
 		}
 
-		if adUrlStr == nil {
-			log.Debugln("Url attribute not set for transfer, skipping...")
-			continue
-		}
-
-		adUrl, err := url.Parse(adUrlStr.(string))
+		adUrl, err := url.Parse(adUrlStr)
 		if err != nil {
 			return nil, err
 		}
 
-		destination, err := ad.Get("LocalFileName")
-		if err != nil {
+		destination, ok := ad.EvaluateAttrString("LocalFileName")
+		if !ok || destination == "" {
 			// If we don't find a local filename, we are assuming it is a classad used for other purposes
 			// so keep searching for local filename
 			log.Debugln("LocalFileName attribute not set for transfer, skipping...")
 			continue
 		}
-
-		if destination == nil {
-			log.Debugln("LocalFileName attribute not set for transfer, skipping...")
-			continue
-		}
-		transfers = append(transfers, PluginTransfer{url: adUrl, localFile: destination.(string)})
+		transfers = append(transfers, PluginTransfer{url: adUrl, localFile: destination})
 	}
 	if len(transfers) == 0 {
 		return nil, errors.New("No transfers found in infile")
@@ -750,67 +841,143 @@ func writeTransferErrorMessage(currentError string, transferUrl string) (errMsg 
 }
 
 // createTransferError creates a transfer error map with developer data
-func createTransferError(err error) (transferError map[string]interface{}) {
-	transferError = make(map[string]interface{})
-	developerData := make(map[string]interface{})
+func createTransferError(err error) (transferError *classad.ClassAd) {
+	transferError = classad.New()
+	developerData := classad.New()
 
 	isRetryable := client.IsRetryable(err)
 
 	var pe *error_codes.PelicanError
 	if errors.As(err, &pe) {
-		developerData["PelicanErrorCode"] = pe.Code()
-		developerData["Retryable"] = isRetryable
-		developerData["ErrorType"] = pe.ErrorType()
+		err := developerData.Set("PelicanErrorCode", int64(pe.Code()))
+		if err != nil {
+			log.Errorf("Failed to set PelicanErrorCode: %s", err)
+		}
+		err = developerData.Set("Retryable", isRetryable)
+		if err != nil {
+			log.Errorf("Failed to set Retryable: %s", err)
+		}
+		err = developerData.Set("ErrorType", pe.ErrorType())
+		if err != nil {
+			log.Errorf("Failed to set ErrorType: %s", err)
+		}
 
 		// Use the wrapped error's message if available, otherwise use the PelicanError's full error message
 		if innerErr := pe.Unwrap(); innerErr != nil {
-			developerData["ErrorMessage"] = innerErr.Error()
+			err = developerData.Set("ErrorMessage", innerErr.Error())
+			if err != nil {
+				log.Errorf("Failed to set ErrorMessage: %s", err)
+			}
 		} else {
-			developerData["ErrorMessage"] = pe.Error()
+			err = developerData.Set("ErrorMessage", pe.Error())
+			if err != nil {
+				log.Errorf("Failed to set ErrorMessage: %s", err)
+			}
 		}
 
 		// Extract the high-level error category (first part before the dot)
 		errorType := pe.ErrorType()
 		if idx := strings.Index(errorType, "."); idx > 0 {
-			transferError["ErrorType"] = errorType[:idx]
+			err := transferError.Set("ErrorType", errorType[:idx])
+			if err != nil {
+				log.Errorf("Failed to set ErrorType: %s", err)
+			}
 		} else {
-			transferError["ErrorType"] = errorType
+			err := transferError.Set("ErrorType", errorType)
+			if err != nil {
+				log.Errorf("Failed to set ErrorType: %s", err)
+			}
 		}
 	} else {
 		// Fallback for errors that aren't wrapped in PelicanError
-		developerData["PelicanErrorCode"] = 0
-		developerData["ErrorType"] = "Unprocessed"
-		developerData["Retryable"] = isRetryable
-		developerData["ErrorMessage"] = "Unprocessed error type"
-		transferError["ErrorType"] = "Unprocessed"
+		err = developerData.Set("PelicanErrorCode", 0)
+		if err != nil {
+			log.Errorf("Failed to set PelicanErrorCode: %s", err)
+		}
+		if err != nil {
+			log.Errorf("Failed to set PelicanErrorCode: %s", err)
+		}
+		err = developerData.Set("ErrorType", "Unprocessed")
+		if err != nil {
+			log.Errorf("Failed to set ErrorType: %s", err)
+		}
+		err = developerData.Set("Retryable", isRetryable)
+		if err != nil {
+			log.Errorf("Failed to set Retryable: %s", err)
+		}
+		err = developerData.Set("ErrorMessage", "Unprocessed error type")
+		if err != nil {
+			log.Errorf("Failed to set ErrorMessage: %s", err)
+		}
+		err = transferError.Set("ErrorType", "Unprocessed")
+		if err != nil {
+			log.Errorf("Failed to set ErrorType: %s", err)
+		}
 	}
-	transferError["DeveloperData"] = developerData
+	err = transferError.Set("DeveloperData", developerData)
+	if err != nil {
+		log.Errorf("Failed to set DeveloperData: %s", err)
+	}
 	return transferError
 }
 
 // addDataToClassAd is a helper function that adds DeveloperData and TransferErrorData to a ClassAd
-func addDataToClassAd(resultAd *classads.ClassAd, result *client.TransferResults, err error, attempts int, clientChecksums, serverChecksums []client.ChecksumInfo) {
-	developerData := make(map[string]interface{})
-	var transferErrorData []interface{}
+func addDataToClassAd(resultAd *classad.ClassAd, result *client.TransferResults, err error, attempts int, clientChecksums, serverChecksums []client.ChecksumInfo) {
+	developerData := classad.New()
+	var transferErrorData []*classad.ClassAd
 
-	developerData["PelicanClientVersion"] = config.GetVersion()
-	developerData["Attempts"] = attempts
+	// Add duplicate fields into DeveloperData for backward compatibility
+	adErr := developerData.Set("PelicanClientVersion", config.GetVersion())
+	if adErr != nil {
+		log.Errorf("Failed to set PelicanClientVersion: %s", adErr)
+	}
+	adErr = developerData.Set("Attempts", attempts)
+	if adErr != nil {
+		log.Errorf("Failed to set Attempts: %s", adErr)
+	}
 
 	// Handle per-attempt data if we have transfer results
 	if result != nil {
 		for _, attempt := range result.Attempts {
-			developerData[fmt.Sprintf("TransferFileBytes%d", attempt.Number)] = attempt.TransferFileBytes
-			developerData[fmt.Sprintf("TimeToFirstByte%d", attempt.Number)] = attempt.TimeToFirstByte.Round(time.Millisecond).Seconds()
-			developerData[fmt.Sprintf("Endpoint%d", attempt.Number)] = attempt.Endpoint
-			developerData[fmt.Sprintf("TransferEndTime%d", attempt.Number)] = attempt.TransferEndTime.Unix()
-			developerData[fmt.Sprintf("ServerVersion%d", attempt.Number)] = attempt.ServerVersion
-			developerData[fmt.Sprintf("TransferTime%d", attempt.Number)] = attempt.TransferTime.Round(time.Millisecond).Seconds()
+			adErr := developerData.Set(fmt.Sprintf("TransferFileBytes%d", attempt.Number), int64(attempt.TransferFileBytes))
+			if adErr != nil {
+				log.Errorf("Failed to set TransferFileBytes%d: %s", attempt.Number, adErr)
+			}
+			adErr = developerData.Set(fmt.Sprintf("TimeToFirstByte%d", attempt.Number), attempt.TimeToFirstByte.Round(time.Millisecond).Seconds())
+			if adErr != nil {
+				log.Errorf("Failed to set TimeToFirstByte%d: %s", attempt.Number, adErr)
+			}
+			adErr = developerData.Set(fmt.Sprintf("Endpoint%d", attempt.Number), attempt.Endpoint)
+			if adErr != nil {
+				log.Errorf("Failed to set Endpoint%d: %s", attempt.Number, adErr)
+			}
+			adErr = developerData.Set(fmt.Sprintf("TransferEndTime%d", attempt.Number), attempt.TransferEndTime.Unix())
+			if adErr != nil {
+				log.Errorf("Failed to set TransferEndTime%d: %s", attempt.Number, adErr)
+			}
+			adErr = developerData.Set(fmt.Sprintf("ServerVersion%d", attempt.Number), attempt.ServerVersion)
+			if adErr != nil {
+				log.Errorf("Failed to set ServerVersion%d: %s", attempt.Number, adErr)
+			}
+			adErr = developerData.Set(fmt.Sprintf("TransferTime%d", attempt.Number), attempt.TransferTime.Round(time.Millisecond).Seconds())
+			if adErr != nil {
+				log.Errorf("Failed to set TransferTime%d: %s", attempt.Number, adErr)
+			}
 			if attempt.CacheAge >= 0 {
-				developerData[fmt.Sprintf("DataAge%d", attempt.Number)] = attempt.CacheAge.Round(time.Millisecond).Seconds()
+				adErr = developerData.Set(fmt.Sprintf("DataAge%d", attempt.Number), attempt.CacheAge.Round(time.Millisecond).Seconds())
+				if adErr != nil {
+					log.Errorf("Failed to set DataAge%d: %s", attempt.Number, adErr)
+				}
 			}
 			if attempt.Error != nil {
-				developerData[fmt.Sprintf("TransferError%d", attempt.Number)] = attempt.Error.Error()
-				developerData[fmt.Sprintf("IsRetryable%d", attempt.Number)] = client.IsRetryable(attempt.Error)
+				adErr := developerData.Set(fmt.Sprintf("TransferError%d", attempt.Number), attempt.Error.Error())
+				if adErr != nil {
+					log.Errorf("Failed to set TransferError%d: %s", attempt.Number, adErr)
+				}
+				adErr = developerData.Set(fmt.Sprintf("IsRetryable%d", attempt.Number), client.IsRetryable(attempt.Error))
+				if adErr != nil {
+					log.Errorf("Failed to set IsRetryable%d: %s", attempt.Number, adErr)
+				}
 				transferError := createTransferError(attempt.Error)
 				transferErrorData = append(transferErrorData, transferError)
 			}
@@ -819,31 +986,55 @@ func addDataToClassAd(resultAd *classads.ClassAd, result *client.TransferResults
 
 	// Handle early failures (simple error case or transfer results with no attempts)
 	if err != nil && ((attempts == 1 && result == nil) || (result != nil && len(result.Attempts) == 0)) {
-		developerData["TransferError1"] = err.Error()
-		developerData["IsRetryable1"] = client.IsRetryable(err)
+		adErr = developerData.Set("TransferError1", err.Error())
+		if adErr != nil {
+			log.Errorf("Failed to set TransferError1: %s", adErr)
+		}
+		adErr = developerData.Set("IsRetryable1", client.IsRetryable(err))
+		if adErr != nil {
+			log.Errorf("Failed to set IsRetryable1: %s", adErr)
+		}
 		transferError := createTransferError(err)
 		transferErrorData = append(transferErrorData, transferError)
 	}
 
 	// Add checksum information if provided
 	if len(clientChecksums) > 0 {
-		checksumInfo := make(map[string]interface{})
+		clientChecksumsData := classad.New()
 		for _, checksum := range clientChecksums {
-			checksumInfo[client.HttpDigestFromChecksum(checksum.Algorithm)] = hex.EncodeToString(checksum.Value)
+			adErr = clientChecksumsData.Set(client.HttpDigestFromChecksum(checksum.Algorithm), hex.EncodeToString(checksum.Value))
+			if adErr != nil {
+				log.Errorf("Failed to set ClientChecksums: %s", adErr)
+			}
 		}
-		developerData["ClientChecksums"] = checksumInfo
+		adErr = developerData.Set("ClientChecksums", clientChecksumsData)
+		if adErr != nil {
+			log.Errorf("Failed to set ClientChecksums: %s", adErr)
+		}
 	}
 	if len(serverChecksums) > 0 {
-		checksumInfo := make(map[string]interface{})
+		serverChecksumsData := classad.New()
 		for _, checksum := range serverChecksums {
-			checksumInfo[client.HttpDigestFromChecksum(checksum.Algorithm)] = hex.EncodeToString(checksum.Value)
+			adErr = serverChecksumsData.Set(client.HttpDigestFromChecksum(checksum.Algorithm), hex.EncodeToString(checksum.Value))
+			if adErr != nil {
+				log.Errorf("Failed to set ServerChecksums: %s", adErr)
+			}
 		}
-		developerData["ServerChecksums"] = checksumInfo
+		adErr = developerData.Set("ServerChecksums", serverChecksumsData)
+		if adErr != nil {
+			log.Errorf("Failed to set ServerChecksums: %s", adErr)
+		}
 	}
 
-	resultAd.Set("DeveloperData", developerData)
+	adErr = resultAd.Set("DeveloperData", developerData)
+	if adErr != nil {
+		log.Errorf("Failed to set DeveloperData: %s", adErr)
+	}
 	if len(transferErrorData) > 0 {
-		resultAd.Set("TransferErrorData", transferErrorData)
+		adErr = resultAd.Set("TransferErrorData", transferErrorData)
+		if adErr != nil {
+			log.Errorf("Failed to set TransferErrorData: %s", adErr)
+		}
 	}
 }
 
