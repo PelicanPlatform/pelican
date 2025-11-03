@@ -239,7 +239,6 @@ type Config struct {
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
 		EnablePublicReads bool `mapstructure:"enablepublicreads" yaml:"EnablePublicReads"`
 		EnableReads bool `mapstructure:"enablereads" yaml:"EnableReads"`
-		EnableUI bool `mapstructure:"enableui" yaml:"EnableUI"`
 		EnableVoms bool `mapstructure:"enablevoms" yaml:"EnableVoms"`
 		EnableWrite bool `mapstructure:"enablewrite" yaml:"EnableWrite"`
 		EnableWrites bool `mapstructure:"enablewrites" yaml:"EnableWrites"`
@@ -617,7 +616,6 @@ type configWithType struct {
 		EnableOIDC struct { Type string; Value bool }
 		EnablePublicReads struct { Type string; Value bool }
 		EnableReads struct { Type string; Value bool }
-		EnableUI struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		EnableWrite struct { Type string; Value bool }
 		EnableWrites struct { Type string; Value bool }
