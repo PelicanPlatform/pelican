@@ -28,6 +28,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -59,6 +60,8 @@ type (
 		checkRegisteredServer(ctx *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error
 	}
 	AuthCheckImpl struct{}
+
+	RegisteredServerJWKSResolver func(ctx *gin.Context, serverID string) (jwk.Set, error)
 )
 
 const (
@@ -82,10 +85,33 @@ var (
 	)
 	// API token format: <5-char ID>.<64-char secret>, total length = 70, alphanumeric
 	ApiTokenRegex = regexp.MustCompile(`^[a-zA-Z0-9]{5}\.[a-zA-Z0-9]{64}$`)
+
+	registeredServerJWKSResolver atomic.Pointer[RegisteredServerJWKSResolver]
 )
 
 func init() {
 	authChecker = &AuthCheckImpl{}
+}
+
+// RegisterServerJWKSResolver allows other packages (e.g. the Registry) to provide a
+// direct lookup mechanism for registered server keys, avoiding HTTP round-trips and
+// import cycles.
+func RegisterServerJWKSResolver(resolver RegisteredServerJWKSResolver) {
+	if resolver == nil {
+		registeredServerJWKSResolver.Store(nil)
+		return
+	}
+	registeredServerJWKSResolver.Store(&resolver)
+}
+
+func resolveRegisteredServerJWKS(ctx *gin.Context, serverID string) (jwk.Set, bool, error) {
+	resolverPtr := registeredServerJWKSResolver.Load()
+	if resolverPtr == nil {
+		return nil, false, nil
+	}
+	resolver := *resolverPtr
+	jwks, err := resolver(ctx, serverID)
+	return jwks, true, err
 }
 
 // Checks that the given token was signed by the federation jwk and also checks that the token has the expected scope
@@ -204,10 +230,16 @@ func (a AuthCheckImpl) checkRegisteredServer(ctx *gin.Context, strToken string, 
 		return errors.New("Token missing subject claim")
 	}
 
-	// Look up the server's public key and metadata based on the subject
-	jwks, err := GetJWKSFromServerID(ctx, subject)
+	// Look up the server's public key and metadata based on the the server id in the token subject
+	jwks, resolved, err := resolveRegisteredServerJWKS(ctx, subject)
 	if err != nil {
-		return errors.Wrap(err, "Failed to lookup registered server")
+		return errors.Wrap(err, "Failed to resolve registered server JWKS")
+	}
+	if !resolved {
+		jwks, err = fetchRegisteredServerJWKS(ctx, subject)
+		if err != nil {
+			return errors.Wrap(err, "Failed to lookup registered server")
+		}
 	}
 
 	// Now verify the token with the server's public key
@@ -459,49 +491,63 @@ func GetJWKSFromIssUrl(issuer string) (*jwk.Set, error) {
 	return &kSet, nil
 }
 
-func GetJWKSFromServerID(ctx *gin.Context, serverID string) (jwk.Set, error) {
+// fetchRegisteredServerJWKS retrieves the JWKS for a registered server by contacting the registry.
+func fetchRegisteredServerJWKS(ctx *gin.Context, serverID string) (jwk.Set, error) {
 	fedInfo, err := config.GetFederation(ctx)
 	if err != nil {
-		return nil, errors.Wrap(err, "Failed to get federation")
-	}
-	registryUrlStr := fedInfo.RegistryEndpoint
-	if registryUrlStr == "" {
-		return nil, errors.New("Registry URL not discovered")
-	}
-	registryUrl, err := url.Parse(registryUrlStr)
-	if err != nil {
-		return nil, errors.Wrap(err, "Failed to parse registry URL")
+		return nil, errors.Wrap(err, "failed to get federation information")
 	}
 
-	registeredServerPubKeyUrl, err := url.JoinPath(registryUrl.Path, "api", "v1.0", "registry_ui", "servers", serverID, "pubkey")
-	if err != nil {
-		return nil, errors.Wrap(err, "Failed to construct registered server public key URL")
+	registryEndpoint := strings.TrimSpace(fedInfo.RegistryEndpoint)
+	if registryEndpoint == "" {
+		registryEndpoint = strings.TrimSpace(param.Server_ExternalWebUrl.GetString())
+	}
+	if registryEndpoint == "" && ctx != nil {
+		scheme := ctx.Request.URL.Scheme
+		if scheme == "" {
+			if ctx.Request.TLS != nil {
+				scheme = "https"
+			} else {
+				scheme = "http"
+			}
+		}
+		registryEndpoint = fmt.Sprintf("%s://%s", scheme, ctx.Request.Host)
+	}
+	if registryEndpoint == "" {
+		return nil, errors.New("registry endpoint unknown; set Federation.RegistryEndpoint or Server.ExternalWebUrl")
 	}
 
-	// Query the JWKS URL for the public keys
+	registryURL, err := url.Parse(registryEndpoint)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse registry endpoint")
+	}
+
+	registeredServerPubKeyURL, err := url.JoinPath(registryURL.String(), "api", "v1.0", "registry_ui", "servers", serverID, "pubkey")
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to construct registered server public key URL")
+	}
+
 	httpClient := &http.Client{Transport: config.GetTransport()}
-	req, err := http.NewRequest("GET", registeredServerPubKeyUrl, nil)
+	req, err := http.NewRequest("GET", registeredServerPubKeyURL, nil)
 	if err != nil {
-		return nil, errors.Wrap(err, "Error creating request to issuer's JWKS URL")
+		return nil, errors.Wrap(err, "error creating request to registered server JWKS URL")
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, errors.Wrapf(err, "Error querying issuer's key endpoint (%s)", registeredServerPubKeyUrl)
+		return nil, errors.Wrapf(err, "error querying registered server key endpoint (%s)", registeredServerPubKeyURL)
 	}
 	defer resp.Body.Close()
-	// Check the response code, make sure it's not in the error ranges (400-500)
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
-		return nil, errors.Errorf("The issuer's JWKS endpoint returned an unexpected status: %s", resp.Status)
+		return nil, errors.Errorf("the registered server JWKS endpoint returned an unexpected status: %s", resp.Status)
 	}
 
-	// Read the response body and parse the JWKs from it
 	jwksStr, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, errors.Wrapf(err, "Error reading response body from %s", registeredServerPubKeyUrl)
+		return nil, errors.Wrapf(err, "error reading response body from %s", registeredServerPubKeyURL)
 	}
 	kSet, err := jwk.ParseString(string(jwksStr))
 	if err != nil {
-		return nil, errors.Wrapf(err, "Error parsing JWKs from %s", registeredServerPubKeyUrl)
+		return nil, errors.Wrapf(err, "error parsing JWKs from %s", registeredServerPubKeyURL)
 	}
 
 	return kSet, nil
