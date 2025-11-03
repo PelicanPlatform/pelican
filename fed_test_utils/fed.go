@@ -171,6 +171,13 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	viper.Set(param.Server_EnableUI.GetName(), false)
 	viper.Set(param.Server_WebPort.GetName(), ports[2])
 	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(t.TempDir(), "server.sqlite"))
+	// Set up OIDC client configuration for registry OAuth functionality
+	oidcClientIDFile := filepath.Join(tmpPath, "oidc-client-id")
+	oidcClientSecretFile := filepath.Join(tmpPath, "oidc-client-secret")
+	require.NoError(t, os.WriteFile(oidcClientIDFile, []byte("test-client-id"), 0644))
+	require.NoError(t, os.WriteFile(oidcClientSecretFile, []byte("test-client-secret"), 0644))
+	viper.Set(param.OIDC_ClientIDFile.GetName(), oidcClientIDFile)
+	viper.Set(param.OIDC_ClientSecretFile.GetName(), oidcClientSecretFile)
 	// Unix domain sockets have a maximum length of 108 bytes, so we need to make sure our
 	// socket path is short enough to fit within that limit. Mac OS X has long temporary path
 	// names, so we need to make sure our socket path is short enough to fit within that limit.
