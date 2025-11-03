@@ -954,13 +954,6 @@ type: duration
 default: 15s
 components: ["origin"]
 ---
-name: Origin.EnableUI
-description: |+
-  Indicate whether the origin should enable its web UI.
-type: bool
-default: true
-components: ["origin"]
----
 name: Origin.EnableOIDC
 description: |+
   Indicate whether the origin should allow users to login to the admin website via OAuth2/OIDC with third-party
