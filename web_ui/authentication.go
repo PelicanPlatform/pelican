@@ -132,9 +132,71 @@ func configureAuthDB() error {
 	return nil
 }
 
-// Get user information including userId from the login cookie.
+// Get user information including userId from the login cookie or Bearer token.
 // Returns username, userId, sub, issuer, groups, and error.
 func GetUserGroups(ctx *gin.Context) (user string, userId string, groups []string, err error) {
+	// First check if user info was already set in context (e.g., from Bearer token verification)
+	if userIface, exists := ctx.Get("User"); exists {
+		if userStr, ok := userIface.(string); ok && userStr != "" {
+			user = userStr
+			// Extract groups from context if available
+			if groupsIface, exists := ctx.Get("Groups"); exists {
+				if groupsSlice, ok := groupsIface.([]string); ok {
+					groups = groupsSlice
+				}
+			}
+			// userId may not be available from Bearer tokens, but that's okay
+			return
+		}
+	}
+
+	// Check for Bearer token in Authorization header
+	headerToken := ctx.Request.Header["Authorization"]
+	if len(headerToken) > 0 {
+		tokenStr, found := strings.CutPrefix(headerToken[0], "Bearer ")
+		if found && tokenStr != "" {
+			// Try to parse the Bearer token and extract user info
+			parsed, parseErr := jwt.Parse([]byte(tokenStr), jwt.WithVerify(false))
+			if parseErr == nil {
+				// Verify issuer matches local issuer
+				serverURL := param.Server_ExternalWebUrl.GetString()
+				if parsed.Issuer() == serverURL {
+					// Verify signature
+					jwks, jwksErr := config.GetIssuerPublicJWKS()
+					if jwksErr == nil {
+						verified, verifyErr := jwt.Parse([]byte(tokenStr), jwt.WithKeySet(jwks))
+						if verifyErr == nil {
+							if validateErr := jwt.Validate(verified); validateErr == nil {
+								// Extract user from subject
+								user = verified.Subject()
+								// Extract groups
+								groupsIface, ok := verified.Get("wlcg.groups")
+								if ok {
+									if groupsTmp, ok := groupsIface.([]interface{}); ok {
+										groups = make([]string, 0, len(groupsTmp))
+										for _, groupObj := range groupsTmp {
+											if groupStr, ok := groupObj.(string); ok {
+												groups = append(groups, groupStr)
+											}
+										}
+									}
+								}
+								// Set in context for later use
+								if user != "" {
+									ctx.Set("User", user)
+									if len(groups) > 0 {
+										ctx.Set("Groups", groups)
+									}
+									return
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	token, err := ctx.Cookie("login")
 	if err != nil {
 		if err == http.ErrNoCookie {

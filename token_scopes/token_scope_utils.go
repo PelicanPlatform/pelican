@@ -143,6 +143,31 @@ func ScopeContains(tokenScopes []string, expectedScopes []TokenScope, all bool) 
 	}
 }
 
+// CheckCollectionScope verifies if a token scope string matches a collection scope.
+// It handles both exact matches ("collection.read") and scopes with collection IDs
+// ("collection.read:test_collection") for collection scopes only.
+func CheckCollectionScope(tokenScopeStr string, expectedScope TokenScope) bool {
+	expectedScopeStr := expectedScope.String()
+	tokenScopeLower := strings.ToLower(tokenScopeStr)
+	expectedScopeLower := strings.ToLower(expectedScopeStr)
+
+	// Exact match (case-insensitive)
+	if tokenScopeLower == expectedScopeLower {
+		return true
+	}
+
+	// For collection scopes, check if token scope starts with expected scope + ":"
+	// This handles cases like "collection.read:test_collection" matching "collection.read"
+	if strings.HasPrefix(tokenScopeLower, expectedScopeLower+":") {
+		// Verify it's actually a collection scope (starts with "collection.")
+		if strings.HasPrefix(expectedScopeLower, "collection.") {
+			return true
+		}
+	}
+
+	return false
+}
+
 // Creates a validator that checks if a token's scope matches the expectedScopes.
 // If all=false, it checks if the tokenScopes have any one scope in expectedScopes;
 // If all=true, it checks if tokenScopes is the same set as expectedScopes
