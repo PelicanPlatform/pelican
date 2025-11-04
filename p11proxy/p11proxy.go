@@ -4,13 +4,16 @@ import (
 	"context"
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/google/go-p11-kit/p11kit"
 	"github.com/pkg/errors"
@@ -56,6 +59,29 @@ type Proxy struct {
 	ln     net.Listener
 }
 
+var (
+	infoMu      sync.RWMutex
+	currentInfo Info
+)
+
+func setCurrentInfo(info Info) {
+	infoMu.Lock()
+	defer infoMu.Unlock()
+	currentInfo = info
+}
+
+// SetCurrentInfoForTest allows unit tests to override the globally cached PKCS#11 helper info.
+func SetCurrentInfoForTest(info Info) {
+	setCurrentInfo(info)
+}
+
+// CurrentInfo returns the latest PKCS#11 helper information recorded during Start().
+func CurrentInfo() Info {
+	infoMu.RLock()
+	defer infoMu.RUnlock()
+	return currentInfo
+}
+
 func (p *Proxy) Info() Info { return p.info }
 
 // Stop removes the Unix socket (if present) and temp files.
@@ -83,6 +109,11 @@ func (p *Proxy) Stop() error {
 			log.Debugf("p11proxy: failed to remove temp dir %s: %v", p.tmpDir, err)
 		}
 	}
+	infoMu.Lock()
+	if currentInfo == p.info {
+		currentInfo = Info{}
+	}
+	infoMu.Unlock()
 	return firstErr
 }
 
@@ -92,18 +123,24 @@ func (p *Proxy) Stop() error {
 func Start(ctx context.Context, opts Options, modules server_structs.ServerType) (*Proxy, error) {
 	// If globally disabled via config, short-circuit.
 	if !param.Server_EnablePKCS11.GetBool() {
-		return &Proxy{info: Info{Enabled: false}}, nil
+		disabled := Info{Enabled: false}
+		setCurrentInfo(disabled)
+		return &Proxy{info: disabled}, nil
 	}
 
 	// Load server private key and cert chain paths.
 	keyPath := param.Server_TLSKey.GetString()
 	if keyPath == "" {
-		return &Proxy{info: Info{Enabled: false}}, nil
+		disabled := Info{Enabled: false}
+		setCurrentInfo(disabled)
+		return &Proxy{info: disabled}, nil
 	}
 	pk, err := config.LoadPrivateKey(keyPath, true)
 	if err != nil {
 		log.Warnf("PKCS#11 helper disabled: failed to parse TLS key at %s: %v", keyPath, err)
-		return &Proxy{info: Info{Enabled: false}}, nil
+		disabled := Info{Enabled: false}
+		setCurrentInfo(disabled)
+		return &Proxy{info: disabled}, nil
 	}
 	var signer crypto.Signer
 	switch k := pk.(type) {
@@ -113,20 +150,26 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 		signer = k
 	default:
 		log.Warnf("PKCS#11 helper disabled: unsupported private key type %T", pk)
-		return &Proxy{info: Info{Enabled: false}}, nil
+		disabled := Info{Enabled: false}
+		setCurrentInfo(disabled)
+		return &Proxy{info: disabled}, nil
 	}
 
 	certChainPath := param.Server_TLSCertificateChain.GetString()
 	if certChainPath == "" {
 		log.Warn("PKCS#11 helper disabled: missing Server.TLSCertificateChain")
-		return &Proxy{info: Info{Enabled: false}}, nil
+		disabled := Info{Enabled: false}
+		setCurrentInfo(disabled)
+		return &Proxy{info: disabled}, nil
 	}
 
 	// Prepare temp workspace.
 	tmpDir, err := os.MkdirTemp("", "pelican-p11proxy-*")
 	if err != nil {
 		log.Warnf("PKCS#11 helper disabled: cannot create temp dir: %v", err)
-		return &Proxy{info: Info{Enabled: false}}, nil
+		disabled := Info{Enabled: false}
+		setCurrentInfo(disabled)
+		return &Proxy{info: disabled}, nil
 	}
 
 	proxy := &Proxy{tmpDir: tmpDir}
@@ -150,7 +193,9 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 	if len(missing) > 0 {
 		log.Warnf("PKCS#11 helper disabled: missing %s. Install packages: openssl, p11-kit, p11-kit-modules, libengine-pkcs11-openssl (distro-specific)", strings.Join(missing, ", "))
 		_ = proxy.Stop()
-		return &Proxy{info: Info{Enabled: false}}, nil
+		disabled := Info{Enabled: false}
+		setCurrentInfo(disabled)
+		return &Proxy{info: disabled}, nil
 	}
 
 	xrootdRun := param.Origin_RunLocation.GetString()
@@ -169,7 +214,21 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 	if sockDir == "" {
 		sockDir = runtimeBase
 	}
-	sockPath := filepath.Join(sockDir, "pkcs11.sock")
+	if err := os.MkdirAll(sockDir, 0755); err != nil {
+		log.Warnf("PKCS#11 helper disabled: cannot ensure socket directory: %v", err)
+		_ = proxy.Stop()
+		disabled := Info{Enabled: false}
+		setCurrentInfo(disabled)
+		return &Proxy{info: disabled}, nil
+	}
+	sockPath, err := uniqueSocketPath(sockDir)
+	if err != nil {
+		log.Warnf("PKCS#11 helper disabled: cannot derive socket path: %v", err)
+		_ = proxy.Stop()
+		disabled := Info{Enabled: false}
+		setCurrentInfo(disabled)
+		return &Proxy{info: disabled}, nil
+	}
 	proxy.sock = sockPath
 
 	// Generate OpenSSL engine config.
@@ -177,7 +236,9 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 	if err := writeOpenSSLConf(opensslConf, enginePath, modulePath); err != nil {
 		log.Warnf("PKCS#11 helper disabled: cannot write OpenSSL config: %v", err)
 		_ = proxy.Stop()
-		return &Proxy{info: Info{Enabled: false}}, nil
+		disabled := Info{Enabled: false}
+		setCurrentInfo(disabled)
+		return &Proxy{info: disabled}, nil
 	}
 
 	// Build PKCS#11 URL.
@@ -196,7 +257,9 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 	if err != nil {
 		log.Warnf("PKCS#11 helper disabled: cannot parse certificate chain: %v", err)
 		_ = proxy.Stop()
-		return &Proxy{info: Info{Enabled: false}}, nil
+		disabled := Info{Enabled: false}
+		setCurrentInfo(disabled)
+		return &Proxy{info: disabled}, nil
 	}
 
 	// Start p11-kit RPC server with the signer and cert.
@@ -206,7 +269,9 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 	}
 	if !enabled {
 		_ = proxy.Stop()
-		return &Proxy{info: Info{Enabled: false}}, nil
+		disabled := Info{Enabled: false}
+		setCurrentInfo(disabled)
+		return &Proxy{info: disabled}, nil
 	}
 	proxy.ln = ln
 
@@ -217,6 +282,7 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 		OpenSSLConfPath: opensslConf,
 		CertPath:        certChainPath,
 	}
+	setCurrentInfo(proxy.info)
 
 	// Ensure we remove the socket file on context cancellation.
 	go func(sock string) {
@@ -225,6 +291,15 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 	}(sockPath)
 
 	return proxy, nil
+}
+
+func uniqueSocketPath(sockDir string) (string, error) {
+	randBytes := make([]byte, 6)
+	if _, err := rand.Read(randBytes); err != nil {
+		return "", err
+	}
+	name := fmt.Sprintf("pelican-p11-%d-%s.sock", os.Getpid(), hex.EncodeToString(randBytes))
+	return filepath.Join(sockDir, name), nil
 }
 
 func writeOpenSSLConf(path, enginePath, modulePath string) error {
@@ -326,6 +401,9 @@ func startServer(ctx context.Context, signer crypto.Signer, cert *x509.Certifica
 		Slots:          []p11kit.Slot{slot},
 	}
 
+	if err := os.Remove(sockPath); err != nil && !os.IsNotExist(err) {
+		return false, nil, errors.Wrapf(err, "cannot remove stale socket at %s", sockPath)
+	}
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
 		return false, nil, errors.Wrapf(err, "cannot bind unix socket at %s", sockPath)
