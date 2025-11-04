@@ -9,9 +9,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 
 	"github.com/pelicanplatform/pelican/database"
@@ -20,6 +23,139 @@ import (
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
+
+// verifyTokenWithCollectionScope verifies a token with standard verification first,
+// and falls back to manual collection scope verification if standard verification fails.
+// This handles cases where OA4MP adds collection IDs to scopes (e.g., "collection.read:test_collection").
+func verifyTokenWithCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenScope) (status int, ok bool, err error) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie, token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access, expectedScope},
+	}
+
+	// Try standard verification first
+	status, ok, err = token.Verify(ctx, authOption)
+	if ok {
+		return status, ok, nil
+	}
+
+	// If standard verification failed, try manual verification for collection scopes with IDs
+	log.Debugf("verifyTokenWithCollectionScope: Standard verification failed, trying fallback collection scope verification. Error: %v", err)
+	if verifyCollectionScope(ctx, expectedScope) {
+		log.Debugf("verifyTokenWithCollectionScope: Fallback collection scope verification succeeded")
+		return http.StatusOK, true, nil
+	}
+
+	log.Debugf("verifyTokenWithCollectionScope: Both standard and fallback verification failed")
+	return status, false, err
+}
+
+// verifyCollectionScope manually verifies a token has a collection scope, handling scopes with collection IDs.
+// This is used as a fallback when standard token.Verify fails due to OA4MP adding collection IDs to scopes.
+func verifyCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenScope) bool {
+	// Extract token from Authorization header
+	headerToken := ctx.Request.Header["Authorization"]
+	if len(headerToken) == 0 {
+		log.Debugf("verifyCollectionScope: No Authorization header found")
+		return false
+	}
+
+	tokenStr, found := strings.CutPrefix(headerToken[0], "Bearer ")
+	if !found {
+		log.Debugf("verifyCollectionScope: No Bearer token found in Authorization header")
+		return false
+	}
+
+	// Parse token (without verification first to check issuer)
+	tok, err := jwt.Parse([]byte(tokenStr), jwt.WithVerify(false))
+	if err != nil {
+		log.Debugf("verifyCollectionScope: Failed to parse token (no verify): %v", err)
+		return false
+	}
+
+	// Verify issuer matches local issuer
+	serverURL := param.Server_ExternalWebUrl.GetString()
+	tokenIssuer := tok.Issuer()
+	log.Debugf("verifyCollectionScope: Comparing issuer - server: %s, token: %s", serverURL, tokenIssuer)
+	if serverURL != tokenIssuer {
+		log.Debugf("verifyCollectionScope: Issuer mismatch - expected %s, got %s", serverURL, tokenIssuer)
+		return false
+	}
+
+	// Verify signature
+	jwks, err := config.GetIssuerPublicJWKS()
+	if err != nil {
+		log.Debugf("verifyCollectionScope: Failed to get issuer public JWKS: %v", err)
+		return false
+	}
+
+	parsed, err := jwt.Parse([]byte(tokenStr), jwt.WithKeySet(jwks))
+	if err != nil {
+		log.Debugf("verifyCollectionScope: Failed to parse token with signature verification: %v", err)
+		return false
+	}
+
+	// Basic validation
+	if err := jwt.Validate(parsed); err != nil {
+		log.Debugf("verifyCollectionScope: Token validation failed: %v", err)
+		return false
+	}
+
+	// Check scope claim
+	scopeAny, ok := parsed.Get("scope")
+	if !ok {
+		log.Debugf("verifyCollectionScope: No scope claim found in token")
+		return false
+	}
+
+	scopeStr, ok := scopeAny.(string)
+	if !ok {
+		log.Debugf("verifyCollectionScope: Scope claim is not a string")
+		return false
+	}
+
+	log.Debugf("verifyCollectionScope: Token scope string: %s, expected scope: %s", scopeStr, expectedScope.String())
+
+	// Check each scope in the token
+	scopes := strings.Split(scopeStr, " ")
+	for _, scope := range scopes {
+		if scope == "" {
+			continue
+		}
+		log.Debugf("verifyCollectionScope: Checking scope '%s' against expected '%s'", scope, expectedScope.String())
+		// Use CheckCollectionScope helper which handles collection IDs
+		if token_scopes.CheckCollectionScope(scope, expectedScope) {
+			log.Debugf("verifyCollectionScope: Scope match found! scope='%s', expected='%s'", scope, expectedScope.String())
+			// Extract user identity from the token (subject claim)
+			user := parsed.Subject()
+			if user != "" {
+				ctx.Set("User", user)
+				log.Debugf("verifyCollectionScope: Set User context to: %s", user)
+			}
+
+			// Extract groups if present
+			groupsIface, ok := parsed.Get("wlcg.groups")
+			if ok {
+				if groupsTmp, ok := groupsIface.([]interface{}); ok {
+					groups := make([]string, 0, len(groupsTmp))
+					for _, groupObj := range groupsTmp {
+						if groupStr, ok := groupObj.(string); ok {
+							groups = append(groups, groupStr)
+						}
+					}
+					ctx.Set("Groups", groups)
+					log.Debugf("verifyCollectionScope: Set Groups context to: %v", groups)
+				}
+			}
+
+			return true
+		}
+	}
+
+	log.Debugf("verifyCollectionScope: No matching scope found. Token scopes: %v, expected: %s", scopes, expectedScope.String())
+	return false
+}
 
 type CreateCollectionReq struct {
 	Name        string            `json:"name"`
@@ -82,12 +218,7 @@ type GetCollectionRes struct {
 }
 
 func handleListCollections(ctx *gin.Context) {
-	authOption := token.AuthOption{
-		Sources: []token.TokenSource{token.Cookie, token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
-		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Read},
-	}
-	status, ok, err := token.Verify(ctx, authOption)
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Read)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -136,12 +267,7 @@ func handleListCollections(ctx *gin.Context) {
 }
 
 func handleCreateCollection(ctx *gin.Context) {
-	authOption := token.AuthOption{
-		Sources: []token.TokenSource{token.Cookie, token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
-		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Create},
-	}
-	status, ok, err := token.Verify(ctx, authOption)
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Create)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -230,12 +356,7 @@ func handleCreateCollection(ctx *gin.Context) {
 }
 
 func handleUpdateCollection(ctx *gin.Context) {
-	authOption := token.AuthOption{
-		Sources: []token.TokenSource{token.Cookie, token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
-		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Modify},
-	}
-	status, ok, err := token.Verify(ctx, authOption)
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Modify)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -587,12 +708,7 @@ func handleListCollectionMembers(ctx *gin.Context) {
 */
 
 func handleGetCollectionMetadata(ctx *gin.Context) {
-	authOption := token.AuthOption{
-		Sources: []token.TokenSource{token.Cookie, token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
-		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Read},
-	}
-	status, ok, err := token.Verify(ctx, authOption)
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Read)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -636,12 +752,7 @@ func handleGetCollectionMetadata(ctx *gin.Context) {
 }
 
 func handlePutCollectionMetadata(ctx *gin.Context) {
-	authOption := token.AuthOption{
-		Sources: []token.TokenSource{token.Cookie, token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
-		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Modify},
-	}
-	status, ok, err := token.Verify(ctx, authOption)
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Modify)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -720,12 +831,7 @@ func handlePutCollectionMetadata(ctx *gin.Context) {
 }
 
 func handleDeleteCollectionMetadata(ctx *gin.Context) {
-	authOption := token.AuthOption{
-		Sources: []token.TokenSource{token.Cookie, token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
-		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Modify},
-	}
-	status, ok, err := token.Verify(ctx, authOption)
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Modify)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -780,12 +886,7 @@ func handleDeleteCollectionMetadata(ctx *gin.Context) {
 }
 
 func handleGetCollection(ctx *gin.Context) {
-	authOption := token.AuthOption{
-		Sources: []token.TokenSource{token.Cookie, token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
-		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Read},
-	}
-	status, ok, err := token.Verify(ctx, authOption)
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Read)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -849,12 +950,7 @@ func handleGetCollection(ctx *gin.Context) {
 }
 
 func handleDeleteCollection(ctx *gin.Context) {
-	authOption := token.AuthOption{
-		Sources: []token.TokenSource{token.Cookie, token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
-		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Delete},
-	}
-	status, ok, err := token.Verify(ctx, authOption)
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Delete)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -903,12 +999,7 @@ func handleDeleteCollection(ctx *gin.Context) {
 }
 
 func handleGetCollectionAcls(ctx *gin.Context) {
-	authOption := token.AuthOption{
-		Sources: []token.TokenSource{token.Cookie, token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
-		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Read},
-	}
-	status, ok, err := token.Verify(ctx, authOption)
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Read)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -952,12 +1043,7 @@ func handleGetCollectionAcls(ctx *gin.Context) {
 }
 
 func handleGrantCollectionAcl(ctx *gin.Context) {
-	authOption := token.AuthOption{
-		Sources: []token.TokenSource{token.Cookie, token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
-		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Modify},
-	}
-	status, ok, err := token.Verify(ctx, authOption)
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Modify)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -1030,12 +1116,7 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 }
 
 func handleRevokeCollectionAcl(ctx *gin.Context) {
-	authOption := token.AuthOption{
-		Sources: []token.TokenSource{token.Cookie, token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
-		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Modify},
-	}
-	status, ok, err := token.Verify(ctx, authOption)
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Modify)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,

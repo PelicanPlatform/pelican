@@ -23,21 +23,27 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
@@ -65,13 +71,116 @@ func getTransport() *http.Transport {
 	return transport
 }
 
-func calculateAllowedScopes(user string, groupsList []string) ([]string, []string) {
-	if len(compiledAuthzRules) == 0 {
-		return []string{}, []string{}
+// hasCollectionAccess checks if a user/groups have access to a collection with the specified scope
+func hasCollectionAccess(user string, groupsList []string, collectionID string, scope token_scopes.TokenScope) bool {
+	// Get the database instance
+	db := database.ServerDatabase
+	if db == nil {
+		log.Warningf("Database not initialized, cannot check collection access for %s", collectionID)
+		return false
 	}
 
+	// Load collection with ACLs
+	var collection database.Collection
+	if err := db.Preload("ACLs").Where("id = ?", collectionID).First(&collection).Error; err != nil {
+		log.Debugf("Collection %s not found: %v", collectionID, err)
+		return false
+	}
+
+	// Check if collection is public (read access only)
+	if collection.Visibility == database.VisibilityPublic {
+		// Public collections allow read access to everyone
+		if scope == token_scopes.Collection_Read {
+			return true
+		}
+		// For other scopes on public collections, still need ACL check
+	}
+
+	// Get required roles for this scope
+	requiredRoles, ok := database.ScopeToRole[scope]
+	if !ok {
+		log.Debugf("Invalid scope for collection access check: %s", scope.String())
+		return false
+	}
+
+	// Ensure user group is in the list
+	userGroup := "user-" + user
+	if !slices.Contains(groupsList, userGroup) {
+		groupsList = append(groupsList, userGroup)
+	}
+
+	// Check if user is the owner (owners have all permissions)
+	if collection.Owner == user {
+		return true
+	}
+
+	// Check ACLs
+	for _, acl := range collection.ACLs {
+		// Check if user's group matches and has required role
+		if slices.Contains(groupsList, acl.GroupID) && slices.Contains(requiredRoles, acl.Role) {
+			// Check if ACL has expired
+			if acl.ExpiresAt != nil && acl.ExpiresAt.Before(time.Now()) {
+				continue
+			}
+			return true
+		}
+	}
+
+	// No matching ACL found
+	return false
+}
+
+func calculateAllowedScopes(user string, groupsList []string, requestedScopes []string) ([]string, []string) {
 	scopeSet := make(map[string]struct{})
 	groupSet := make(map[string]struct{})
+
+	// Process collection scopes from requestedScopes first
+	// These need to be checked against database ACLs
+	for _, reqScope := range requestedScopes {
+		// Check if this is a collection scope (format: collection.<action>:<collection_id>)
+		if strings.HasPrefix(reqScope, "collection.") {
+			parts := strings.SplitN(reqScope, ":", 2)
+			if len(parts) == 2 {
+				scopePart := parts[0]
+				collectionID := parts[1]
+
+				// Map scope string to token scope
+				var tokenScope token_scopes.TokenScope
+				switch scopePart {
+				case "collection.read":
+					tokenScope = token_scopes.Collection_Read
+				case "collection.modify":
+					tokenScope = token_scopes.Collection_Modify
+				case "collection.create":
+					tokenScope = token_scopes.Collection_Create
+				case "collection.delete":
+					tokenScope = token_scopes.Collection_Delete
+				default:
+					continue // Skip unknown collection scopes
+				}
+
+				// Check if user has access to this collection
+				if hasCollectionAccess(user, groupsList, collectionID, tokenScope) {
+					scopeSet[reqScope] = struct{}{}
+				}
+			}
+		}
+	}
+
+	// Process config-based authorization rules for non-collection scopes
+	if len(compiledAuthzRules) == 0 {
+		// If no rules and no collection scopes, return empty
+		if len(scopeSet) == 0 {
+			return []string{}, []string{}
+		}
+		// Otherwise, return only the collection scopes we found
+		allowedScopes := make([]string, 0, len(scopeSet))
+		for scope := range scopeSet {
+			allowedScopes = append(allowedScopes, scope)
+		}
+		return allowedScopes, []string{}
+	}
+
 	userEscaped := url.PathEscape(user)
 	for _, rule := range compiledAuthzRules {
 		// First, check if the user is allowed by this rule
@@ -223,6 +332,38 @@ func oa4mpProxy(ctx *gin.Context) {
 		if groupsList == nil {
 			groupsList = make([]string, 0)
 		}
+
+		// Extract requested scopes from the request
+		// For device flow, this is the initial POST request (not the consent response)
+		// The consent response has action=ok in the body, so we skip scope extraction for that
+		var requestedScopes []string
+		if ctx.Request.Method == http.MethodPost {
+			// Check if this is a consent response (has action parameter)
+			bodyBytes, err := io.ReadAll(ctx.Request.Body)
+			if err == nil {
+				// Parse form data to check if this is consent response
+				// We need to restore the body first for ParseForm to work
+				ctx.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+				if err := ctx.Request.ParseForm(); err == nil {
+					// If this is NOT a consent response (no action parameter), extract scopes
+					if ctx.Request.PostForm.Get("action") == "" {
+						scopeParam := ctx.Request.PostForm.Get("scope")
+						if scopeParam != "" {
+							requestedScopes = strings.Fields(scopeParam)
+						}
+					}
+				}
+				// Restore the body again after ParseForm (which consumes it) for forwarding
+				ctx.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+			}
+		} else {
+			// For GET requests, check query parameters
+			scopeParam := ctx.Request.URL.Query().Get("scope")
+			if scopeParam != "" {
+				requestedScopes = strings.Fields(scopeParam)
+			}
+		}
+
 		// WORKAROUND: OA4MP 5.4.x does not provide a mechanism to pass data through headers (the
 		// existing mechanism only works with the authorization code grant, not the device authorization
 		// grant).  Therefore, all the data we want passed we stuff into the username (which *is* copied
@@ -230,7 +371,8 @@ func oa4mpProxy(ctx *gin.Context) {
 		// side will appropriately unwrap this information.
 		userInfo := make(map[string]interface{})
 		userInfo["u"] = user
-		allowedScopes, matchedGroups := calculateAllowedScopes(user, groupsList)
+		log.Debugf("Requested scopes: %v", requestedScopes)
+		allowedScopes, matchedGroups := calculateAllowedScopes(user, groupsList, requestedScopes)
 		userInfo["g"] = matchedGroups
 		userInfo["s"] = allowedScopes
 		userBytes, err := json.Marshal(userInfo)
@@ -261,13 +403,23 @@ func oa4mpProxy(ctx *gin.Context) {
 		log.Debugln("Will proxy request to URL", ctx.Request.URL.String())
 	}
 	transport = getTransport()
+	socketName := filepath.Join(param.Issuer_ScitokensServerLocation.GetString(), "var", "http.sock")
 	resp, err := transport.RoundTrip(ctx.Request)
 	if err != nil {
 		log.Infoln("Failed to talk to OA4MP service:", err)
-		ctx.JSON(http.StatusServiceUnavailable, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Unable to contact token issuer",
-		})
+		// Check if socket exists to provide better error message
+		if _, socketErr := os.Stat(socketName); socketErr != nil && os.IsNotExist(socketErr) {
+			log.Errorf("OA4MP Unix socket does not exist at %s. The OA4MP service may not be running or may still be starting up.", socketName)
+			ctx.JSON(http.StatusServiceUnavailable, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Token issuer service is not available. The OA4MP service may still be starting up. Socket path: %s", socketName),
+			})
+		} else {
+			ctx.JSON(http.StatusServiceUnavailable, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Unable to contact token issuer: %v", err),
+			})
+		}
 		return
 	}
 	defer resp.Body.Close()
