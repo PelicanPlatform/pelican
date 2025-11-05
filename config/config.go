@@ -35,6 +35,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alecthomas/units"
 	"github.com/go-kit/log/term"
 	"github.com/go-playground/locales/en"
 	ut "github.com/go-playground/universal-translator"
@@ -1359,6 +1360,17 @@ func SetServerDefaults(v *viper.Viper) error {
 			adaptiveSortTruncateConst, param.Director_AdaptiveSortTruncateConstant.GetName(), 6)
 		v.Set(param.Director_AdaptiveSortTruncateConstant.GetName(), 6)
 	}
+
+	maxBytes, err := units.ParseBase2Bytes(param.Monitoring_DataRetentionSize.GetString())
+	if err != nil {
+		return errors.Wrapf(err, "failed to parse Monitoring.DataRetentionSize as a byte value: %v", err)
+	}
+	if maxBytes < 0 {
+		log.Warningf("Invalid value of '%s' for config param %s; must be greater than or equal to 0B. Resetting to default of 0B",
+			param.Monitoring_DataRetentionSize.GetString(), param.Monitoring_DataRetentionSize.GetName())
+		maxBytes = 0
+	}
+	v.Set(param.Monitoring_DataRetentionSize.GetName(), maxBytes)
 
 	// Setup the audience to use.  We may customize the Origin.URL in the future if it has
 	// a `0` for the port number; to make the audience predictable (it goes into the xrootd

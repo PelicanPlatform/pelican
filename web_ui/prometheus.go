@@ -472,7 +472,7 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 
 	maxBytes, err := units.ParseBase2Bytes(param.Monitoring_DataRetentionSize.GetString())
 	if err != nil {
-		return fmt.Errorf("failed to parse max bytes for retention size: %v", err)
+		return fmt.Errorf("failed to parse Monitoring.DataRetentionSize as a byte value: %v", err)
 	}
 	cfg.tsdb.MaxBytes = maxBytes
 
