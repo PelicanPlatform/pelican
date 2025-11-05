@@ -471,8 +471,10 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 	cfg.tsdb.RetentionDuration = retention
 
 	maxBytes, err := units.ParseBase2Bytes(param.Monitoring_DataRetentionSize.GetString())
-	if err != nil {
-		return fmt.Errorf("failed to parse Monitoring.DataRetentionSize as a byte value: %v", err)
+	if err != nil || maxBytes < 0 {
+		logrus.Warningf("Invalid value of '%s' for config param %s; must be a valid byte value and greater than or equal to 0B. Resetting to default of 0B",
+			param.Monitoring_DataRetentionSize.GetString(), param.Monitoring_DataRetentionSize.GetName())
+		maxBytes = 0
 	}
 	cfg.tsdb.MaxBytes = maxBytes
 
