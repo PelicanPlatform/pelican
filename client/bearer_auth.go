@@ -19,7 +19,6 @@
 package client
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 
@@ -58,11 +57,19 @@ func (b *bearerAuthenticator) Authorize(c *http.Client, rq *http.Request, path s
 
 // Verify verifies the authentication
 func (b *bearerAuthenticator) Verify(c *http.Client, rs *http.Response, path string) (redo bool, err error) {
-	if rs.StatusCode == 401 {
-		err := fmt.Errorf("Authorize: %s, %v", path, rs.StatusCode)
-		return true, err
+	if b.token == nil {
+		return false, nil
 	}
-	return
+
+	switch rs.StatusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return b.token.recordAuthFailure(rs.StatusCode)
+	default:
+		if rs.StatusCode < 400 {
+			b.token.recordAuthSuccess()
+		}
+		return false, nil
+	}
 }
 
 // Close cleans up all resources

@@ -30,6 +30,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -64,15 +65,17 @@ type (
 	// Thread-safe and will auto-renew the token throughout the lifetime
 	// of the process.
 	tokenGenerator struct {
-		DirResp       *server_structs.DirectorResponse
-		Destination   *pelican_url.PelicanURL
-		TokenLocation string
-		TokenName     string
-		Operation     config.TokenOperation
-		EnableAcquire bool
-		Token         atomic.Pointer[tokenInfo]
-		Iterator      *tokenContentIterator
-		Sync          *singleflight.Group
+		DirResp                 *server_structs.DirectorResponse
+		Destination             *pelican_url.PelicanURL
+		TokenLocation           string
+		TokenName               string
+		Operation               config.TokenOperation
+		EnableAcquire           bool
+		Token                   atomic.Pointer[tokenInfo]
+		Iterator                *tokenContentIterator
+		Sync                    *singleflight.Group
+		authFailureMu           sync.Mutex
+		consecutiveAuthFailures int
 	}
 
 	// An object that iterates through the various possible tokens
@@ -132,6 +135,29 @@ func (tg *tokenGenerator) Copy() *tokenGenerator {
 		EnableAcquire: tg.EnableAcquire,
 		Sync:          new(singleflight.Group),
 	}
+}
+
+func (tg *tokenGenerator) recordAuthFailure(statusCode int) (bool, error) {
+	tg.authFailureMu.Lock()
+	defer tg.authFailureMu.Unlock()
+
+	// Ensure any subsequent request fetches a fresh credential.
+	tg.Token.Store(nil)
+	tg.consecutiveAuthFailures++
+
+	// Retry up to 3 times before giving up
+	maxRetries := 3
+	if tg.consecutiveAuthFailures <= maxRetries {
+		return true, errors.Errorf("authorization failed with status %d; retrying with a fresh credential", statusCode)
+	}
+
+	return false, errors.Errorf("authentication failed for %d consecutive times (last status %d)", tg.consecutiveAuthFailures, statusCode)
+}
+
+func (tg *tokenGenerator) recordAuthSuccess() {
+	tg.authFailureMu.Lock()
+	tg.consecutiveAuthFailures = 0
+	tg.authFailureMu.Unlock()
 }
 
 func (tci *tokenContentIterator) discoverHTCondorTokenLocations(tokenName string) (tokenLocations []string) {
