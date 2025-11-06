@@ -769,6 +769,14 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		return "", err
 	}
 
+	if token == nil {
+		return "", fmt.Errorf("issuer %s returned an empty token response", issuer)
+	}
+
+	if !tokenIsAcceptable(token.AccessToken, destination.Path, dirResp, opts) {
+		return "", fmt.Errorf("acquired token missing required scope for %s", destination.Path)
+	}
+
 	Tokens := &prefixEntry.Tokens
 	*Tokens = append(*Tokens, *token)
 
