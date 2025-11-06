@@ -23,12 +23,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -38,6 +36,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
@@ -130,68 +129,30 @@ func hasCollectionAccess(user string, groupsList []string, collectionID string, 
 	return false
 }
 
-func calculateAllowedScopes(user string, groupsList []string, requestedScopes []string) ([]string, []string) {
+func calculateAllowedScopes(user string, groupsList []string) ([]string, []string) {
+	if len(compiledAuthzRules) == 0 {
+		log.Debugf("calculateAllowedScopes: compiledAuthzRules is empty")
+		return []string{}, []string{}
+	}
+
+	log.Debugf("calculateAllowedScopes: user=%s, groupsList=%v, numRules=%d", user, groupsList, len(compiledAuthzRules))
 	scopeSet := make(map[string]struct{})
 	groupSet := make(map[string]struct{})
-
-	// Process collection scopes from requestedScopes first
-	// These need to be checked against database ACLs
-	for _, reqScope := range requestedScopes {
-		// Check if this is a collection scope (format: collection.<action>:<collection_id>)
-		if strings.HasPrefix(reqScope, "collection.") {
-			parts := strings.SplitN(reqScope, ":", 2)
-			if len(parts) == 2 {
-				scopePart := parts[0]
-				collectionID := parts[1]
-
-				// Map scope string to token scope
-				var tokenScope token_scopes.TokenScope
-				switch scopePart {
-				case "collection.read":
-					tokenScope = token_scopes.Collection_Read
-				case "collection.modify":
-					tokenScope = token_scopes.Collection_Modify
-				case "collection.create":
-					tokenScope = token_scopes.Collection_Create
-				case "collection.delete":
-					tokenScope = token_scopes.Collection_Delete
-				default:
-					continue // Skip unknown collection scopes
-				}
-
-				// Check if user has access to this collection
-				if hasCollectionAccess(user, groupsList, collectionID, tokenScope) {
-					scopeSet[reqScope] = struct{}{}
-				}
-			}
-		}
-	}
-
-	// Process config-based authorization rules for non-collection scopes
-	if len(compiledAuthzRules) == 0 {
-		// If no rules and no collection scopes, return empty
-		if len(scopeSet) == 0 {
-			return []string{}, []string{}
-		}
-		// Otherwise, return only the collection scopes we found
-		allowedScopes := make([]string, 0, len(scopeSet))
-		for scope := range scopeSet {
-			allowedScopes = append(allowedScopes, scope)
-		}
-		return allowedScopes, []string{}
-	}
-
 	userEscaped := url.PathEscape(user)
-	for _, rule := range compiledAuthzRules {
+	for idx, rule := range compiledAuthzRules {
+		log.Debugf("calculateAllowedScopes: Processing rule %d: prefix=%s, actions=%v, groupLiterals=%v, groupRegexes=%d, userSet=%v",
+			idx, rule.Prefix, rule.Actions, rule.GroupLiterals, len(rule.GroupRegexes), rule.UserSet)
 		// First, check if the user is allowed by this rule
 		if len(rule.UserSet) > 0 {
 			if _, ok := rule.UserSet[user]; !ok {
+				log.Debugf("calculateAllowedScopes: Rule %d skipped - user not in UserSet", idx)
 				continue
 			}
 		}
 
 		// Next, check if the rule has group requirements.
 		hasGroupRequirements := len(rule.GroupLiterals) > 0 || len(rule.GroupRegexes) > 0
+		log.Debugf("calculateAllowedScopes: Rule %d hasGroupRequirements=%v", idx, hasGroupRequirements)
 		currentMatchingGroups := make([]string, 0)
 		if hasGroupRequirements {
 			for _, group := range groupsList {
@@ -207,9 +168,11 @@ func calculateAllowedScopes(user string, groupsList []string, requestedScopes []
 				}
 				if literalMatch || regexMatch {
 					currentMatchingGroups = append(currentMatchingGroups, group)
+					log.Debugf("calculateAllowedScopes: Rule %d matched group: %s", idx, group)
 				}
 			}
 			if len(currentMatchingGroups) == 0 {
+				log.Debugf("calculateAllowedScopes: Rule %d skipped - no matching groups found", idx)
 				continue
 			}
 		}
@@ -299,7 +262,60 @@ func calculateAllowedScopes(user string, groupsList []string, requestedScopes []
 		matchedGroups = append(matchedGroups, group)
 	}
 
+	log.Debugf("calculateAllowedScopes: Final - allowedScopes=%v, matchedGroups=%v, groupSet=%v", allowedScopes, matchedGroups, groupSet)
 	return allowedScopes, matchedGroups
+}
+
+func getUserCollectionScopes(db *gorm.DB, user string, groupsList []string) ([]string, error) {
+	scopes := make([]string, 0)
+
+	userGroup := "user-" + user
+	if !slices.Contains(groupsList, userGroup) {
+		groupsList = append(groupsList, userGroup)
+	}
+
+	var acls []database.CollectionACL
+	if result := db.
+		Joins("JOIN collections ON collections.id = collection_acls.collection_id").
+		Where("collection_acls.group_id IN ?", groupsList).
+		Find(&acls); result.Error != nil {
+		return nil, result.Error
+	}
+
+	collectionPerms := make(map[string]database.AclRole)
+	for _, acl := range acls {
+		if acl.ExpiresAt != nil && acl.ExpiresAt.Before(time.Now()) {
+			continue
+		}
+
+		existingRole, ok := collectionPerms[acl.CollectionID]
+		if !ok {
+			collectionPerms[acl.CollectionID] = acl.Role
+		} else {
+			// Owner > Write > Read
+			if acl.Role == database.AclRoleOwner {
+				collectionPerms[acl.CollectionID] = database.AclRoleOwner
+			} else if acl.Role == database.AclRoleWrite && (existingRole != database.AclRoleOwner && existingRole != database.AclRoleWrite) {
+				collectionPerms[acl.CollectionID] = database.AclRoleWrite
+			}
+		}
+	}
+
+	for collectionID, role := range collectionPerms {
+		switch role {
+		case database.AclRoleOwner:
+			scopes = append(scopes, token_scopes.Collection_Read.String()+":"+collectionID)
+			scopes = append(scopes, token_scopes.Collection_Modify.String()+":"+collectionID)
+			scopes = append(scopes, token_scopes.Collection_Delete.String()+":"+collectionID)
+		case database.AclRoleWrite:
+			scopes = append(scopes, token_scopes.Collection_Read.String()+":"+collectionID)
+			scopes = append(scopes, token_scopes.Collection_Modify.String()+":"+collectionID)
+		case database.AclRoleRead:
+			scopes = append(scopes, token_scopes.Collection_Read.String()+":"+collectionID)
+		}
+	}
+
+	return scopes, nil
 }
 
 // Proxy a HTTP request from the Pelican server to the OA4MP server
@@ -332,38 +348,6 @@ func oa4mpProxy(ctx *gin.Context) {
 		if groupsList == nil {
 			groupsList = make([]string, 0)
 		}
-
-		// Extract requested scopes from the request
-		// For device flow, this is the initial POST request (not the consent response)
-		// The consent response has action=ok in the body, so we skip scope extraction for that
-		var requestedScopes []string
-		if ctx.Request.Method == http.MethodPost {
-			// Check if this is a consent response (has action parameter)
-			bodyBytes, err := io.ReadAll(ctx.Request.Body)
-			if err == nil {
-				// Parse form data to check if this is consent response
-				// We need to restore the body first for ParseForm to work
-				ctx.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-				if err := ctx.Request.ParseForm(); err == nil {
-					// If this is NOT a consent response (no action parameter), extract scopes
-					if ctx.Request.PostForm.Get("action") == "" {
-						scopeParam := ctx.Request.PostForm.Get("scope")
-						if scopeParam != "" {
-							requestedScopes = strings.Fields(scopeParam)
-						}
-					}
-				}
-				// Restore the body again after ParseForm (which consumes it) for forwarding
-				ctx.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-			}
-		} else {
-			// For GET requests, check query parameters
-			scopeParam := ctx.Request.URL.Query().Get("scope")
-			if scopeParam != "" {
-				requestedScopes = strings.Fields(scopeParam)
-			}
-		}
-
 		// WORKAROUND: OA4MP 5.4.x does not provide a mechanism to pass data through headers (the
 		// existing mechanism only works with the authorization code grant, not the device authorization
 		// grant).  Therefore, all the data we want passed we stuff into the username (which *is* copied
@@ -371,10 +355,20 @@ func oa4mpProxy(ctx *gin.Context) {
 		// side will appropriately unwrap this information.
 		userInfo := make(map[string]interface{})
 		userInfo["u"] = user
-		log.Debugf("Requested scopes: %v", requestedScopes)
-		allowedScopes, matchedGroups := calculateAllowedScopes(user, groupsList, requestedScopes)
+		allowedScopes, matchedGroups := calculateAllowedScopes(user, groupsList)
+		userCollectionScopes, err := getUserCollectionScopes(database.ServerDatabase, user, groupsList)
+		if err != nil {
+			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Unable to get user collection scopes",
+			})
+			return
+		}
+
+		allowedScopes = append(allowedScopes, userCollectionScopes...)
 		userInfo["g"] = matchedGroups
 		userInfo["s"] = allowedScopes
+		log.Debugf("Before proxying to OA4MP: allowedScopes=%v, userCollectionScopes=%v for user=%s and groups=%v", allowedScopes, userCollectionScopes, user, groupsList)
 		userBytes, err := json.Marshal(userInfo)
 		if err != nil {
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -403,23 +397,13 @@ func oa4mpProxy(ctx *gin.Context) {
 		log.Debugln("Will proxy request to URL", ctx.Request.URL.String())
 	}
 	transport = getTransport()
-	socketName := filepath.Join(param.Issuer_ScitokensServerLocation.GetString(), "var", "http.sock")
 	resp, err := transport.RoundTrip(ctx.Request)
 	if err != nil {
 		log.Infoln("Failed to talk to OA4MP service:", err)
-		// Check if socket exists to provide better error message
-		if _, socketErr := os.Stat(socketName); socketErr != nil && os.IsNotExist(socketErr) {
-			log.Errorf("OA4MP Unix socket does not exist at %s. The OA4MP service may not be running or may still be starting up.", socketName)
-			ctx.JSON(http.StatusServiceUnavailable, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Token issuer service is not available. The OA4MP service may still be starting up. Socket path: %s", socketName),
-			})
-		} else {
-			ctx.JSON(http.StatusServiceUnavailable, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Unable to contact token issuer: %v", err),
-			})
-		}
+		ctx.JSON(http.StatusServiceUnavailable, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Unable to contact token issuer",
+		})
 		return
 	}
 	defer resp.Body.Close()

@@ -27,7 +27,8 @@ import (
 // verifyTokenWithCollectionScope verifies a token with standard verification first,
 // and falls back to manual collection scope verification if standard verification fails.
 // This handles cases where OA4MP adds collection IDs to scopes (e.g., "collection.read:test_collection").
-func verifyTokenWithCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenScope) (status int, ok bool, err error) {
+// For read operations on public collections, it also provides a fallback that doesn't require explicit scopes.
+func verifyTokenWithCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenScope, collectionID string) (status int, ok bool, err error) {
 	authOption := token.AuthOption{
 		Sources: []token.TokenSource{token.Cookie, token.Header},
 		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
@@ -42,7 +43,7 @@ func verifyTokenWithCollectionScope(ctx *gin.Context, expectedScope token_scopes
 
 	// If standard verification failed, try manual verification for collection scopes with IDs
 	log.Debugf("verifyTokenWithCollectionScope: Standard verification failed, trying fallback collection scope verification. Error: %v", err)
-	if verifyCollectionScope(ctx, expectedScope) {
+	if verifyCollectionScope(ctx, expectedScope, collectionID) {
 		log.Debugf("verifyTokenWithCollectionScope: Fallback collection scope verification succeeded")
 		return http.StatusOK, true, nil
 	}
@@ -53,7 +54,8 @@ func verifyTokenWithCollectionScope(ctx *gin.Context, expectedScope token_scopes
 
 // verifyCollectionScope manually verifies a token has a collection scope, handling scopes with collection IDs.
 // This is used as a fallback when standard token.Verify fails due to OA4MP adding collection IDs to scopes.
-func verifyCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenScope) bool {
+// For read operations, it also checks if the collection is public as a final fallback.
+func verifyCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenScope, collectionID string) bool {
 	// Extract token from Authorization header
 	headerToken := ctx.Request.Header["Authorization"]
 	if len(headerToken) == 0 {
@@ -106,6 +108,10 @@ func verifyCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenSco
 	scopeAny, ok := parsed.Get("scope")
 	if !ok {
 		log.Debugf("verifyCollectionScope: No scope claim found in token")
+		// For read operations on public collections, check if collection is public as final fallback
+		if expectedScope == token_scopes.Collection_Read && collectionID != "" {
+			return checkPublicCollectionAccess(ctx, collectionID, parsed)
+		}
 		return false
 	}
 
@@ -154,7 +160,58 @@ func verifyCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenSco
 	}
 
 	log.Debugf("verifyCollectionScope: No matching scope found. Token scopes: %v, expected: %s", scopes, expectedScope.String())
+
+	// Final fallback: For read operations, check if collection is public
+	if expectedScope == token_scopes.Collection_Read && collectionID != "" {
+		return checkPublicCollectionAccess(ctx, collectionID, parsed)
+	}
+
 	return false
+}
+
+// checkPublicCollectionAccess checks if a collection is public and allows read access.
+// This is used as a fallback when token doesn't have explicit collection scopes.
+// It also sets user context from the token for logging purposes.
+func checkPublicCollectionAccess(ctx *gin.Context, collectionID string, parsed jwt.Token) bool {
+	log.Debugf("checkPublicCollectionAccess: Checking if collection %s is public", collectionID)
+
+	// Check if collection exists and is public
+	var collection database.Collection
+	if err := database.ServerDatabase.Where("id = ?", collectionID).First(&collection).Error; err != nil {
+		log.Debugf("checkPublicCollectionAccess: Collection %s not found: %v", collectionID, err)
+		return false
+	}
+
+	if collection.Visibility != database.VisibilityPublic {
+		log.Debugf("checkPublicCollectionAccess: Collection %s is not public (visibility: %s)", collectionID, collection.Visibility)
+		return false
+	}
+
+	log.Infof("checkPublicCollectionAccess: Allowing read access to public collection %s", collectionID)
+
+	// Extract and set user context from token for audit logging
+	user := parsed.Subject()
+	if user != "" {
+		ctx.Set("User", user)
+		log.Debugf("checkPublicCollectionAccess: Set User context to: %s", user)
+	}
+
+	// Extract and set groups if present
+	groupsIface, ok := parsed.Get("wlcg.groups")
+	if ok {
+		if groupsTmp, ok := groupsIface.([]interface{}); ok {
+			groups := make([]string, 0, len(groupsTmp))
+			for _, groupObj := range groupsTmp {
+				if groupStr, ok := groupObj.(string); ok {
+					groups = append(groups, groupStr)
+				}
+			}
+			ctx.Set("Groups", groups)
+			log.Debugf("checkPublicCollectionAccess: Set Groups context to: %v", groups)
+		}
+	}
+
+	return true
 }
 
 type CreateCollectionReq struct {
@@ -218,7 +275,8 @@ type GetCollectionRes struct {
 }
 
 func handleListCollections(ctx *gin.Context) {
-	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Read)
+	// List collections doesn't target a specific collection, so pass empty string
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Read, "")
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -267,7 +325,8 @@ func handleListCollections(ctx *gin.Context) {
 }
 
 func handleCreateCollection(ctx *gin.Context) {
-	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Create)
+	// Collection create doesn't have a specific collection ID yet, so pass empty string
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Create, "")
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -356,7 +415,8 @@ func handleCreateCollection(ctx *gin.Context) {
 }
 
 func handleUpdateCollection(ctx *gin.Context) {
-	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Modify)
+	collectionID := ctx.Param("id")
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Modify, collectionID)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -708,7 +768,8 @@ func handleListCollectionMembers(ctx *gin.Context) {
 */
 
 func handleGetCollectionMetadata(ctx *gin.Context) {
-	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Read)
+	collectionID := ctx.Param("id")
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Read, collectionID)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -752,7 +813,8 @@ func handleGetCollectionMetadata(ctx *gin.Context) {
 }
 
 func handlePutCollectionMetadata(ctx *gin.Context) {
-	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Modify)
+	collectionID := ctx.Param("id")
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Modify, collectionID)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -831,7 +893,8 @@ func handlePutCollectionMetadata(ctx *gin.Context) {
 }
 
 func handleDeleteCollectionMetadata(ctx *gin.Context) {
-	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Modify)
+	collectionID := ctx.Param("id")
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Modify, collectionID)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -886,7 +949,8 @@ func handleDeleteCollectionMetadata(ctx *gin.Context) {
 }
 
 func handleGetCollection(ctx *gin.Context) {
-	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Read)
+	collectionID := ctx.Param("id")
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Read, collectionID)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -950,7 +1014,8 @@ func handleGetCollection(ctx *gin.Context) {
 }
 
 func handleDeleteCollection(ctx *gin.Context) {
-	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Delete)
+	collectionID := ctx.Param("id")
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Delete, collectionID)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -999,7 +1064,8 @@ func handleDeleteCollection(ctx *gin.Context) {
 }
 
 func handleGetCollectionAcls(ctx *gin.Context) {
-	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Read)
+	collectionID := ctx.Param("id")
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Read, collectionID)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -1043,7 +1109,8 @@ func handleGetCollectionAcls(ctx *gin.Context) {
 }
 
 func handleGrantCollectionAcl(ctx *gin.Context) {
-	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Modify)
+	collectionID := ctx.Param("id")
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Modify, collectionID)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -1116,7 +1183,8 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 }
 
 func handleRevokeCollectionAcl(ctx *gin.Context) {
-	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Modify)
+	collectionID := ctx.Param("id")
+	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Modify, collectionID)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,

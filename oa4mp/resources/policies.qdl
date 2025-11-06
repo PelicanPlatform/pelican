@@ -41,18 +41,21 @@ if [0 == size(|^claims.groups. /\ { {{- range $idx, $grp := .GroupRequirements -
  * to be the scopes that the final token must be compatible with.
  */
 default_scopes := |^claims.scopes;
+say('policies.qdl: default_scopes:' + to_string(default_scopes));
 
 /*
  * If a requested scope is a tighter requirement than what is permitted,
  * then grant the tighter requirement.
  */
 user_scopes. := mask(scopes., -1 < starts_with(scopes., ~default_scopes));
+say('policies.qdl: user_scopes:' + to_string(user_scopes.));
 
 /*
  * If a requested scope is a looser requirement than what is permitted,
  * then grant based on the default scopes.
  */
 user_scopes_loose. := mask(~default_scopes, -1 < starts_with(~default_scopes, scopes.));
+say('policies.qdl: user_scopes_loose:' + to_string(user_scopes_loose.));
 
 /*
  * Configure the access token.
@@ -60,6 +63,7 @@ user_scopes_loose. := mask(~default_scopes, -1 < starts_with(~default_scopes, sc
  * Pelican generates WLCG-style token scopes, so modify the token accordingly.
  */
 access_token.'scope' := detokenize(unique(sort(user_scopes. ~ user_scopes_loose.)), ' ', 2);
+say('policies.qdl: access_token_scopes' + to_string(access_token.'scope'));
 access_token.'wlcg.ver' := '1.0';
 access_token.'aud' := 'https://wlcg.cern.ch/jwt/v1/any';
 access_token.'wlcg.groups' := claims.groups.;
