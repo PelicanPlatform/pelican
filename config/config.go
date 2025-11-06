@@ -1360,6 +1360,8 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.Set(param.Director_AdaptiveSortTruncateConstant.GetName(), 6)
 	}
 
+	v.SetDefault(param.Monitoring_DataRetentionSize.GetName(), "0B")
+
 	// Setup the audience to use.  We may customize the Origin.URL in the future if it has
 	// a `0` for the port number; to make the audience predictable (it goes into the xrootd
 	// configuration but we don't know the origin's port until after xrootd has started), we
