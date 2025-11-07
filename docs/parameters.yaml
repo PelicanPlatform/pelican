@@ -3103,7 +3103,7 @@ description: |+
   Enable the internal Prometheus server. This server is bound to the ${Server.WebPort}.
 type: bool
 default: true
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.DataLocation
 description: |+
@@ -3111,7 +3111,7 @@ description: |+
 type: string
 root_default: /var/lib/pelican/monitoring/data
 default: $ConfigBase/monitoring/data
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.PortLower
 description: |+
@@ -3145,7 +3145,7 @@ description: |+
   director's origin scraper, and server's self-scraper.
 type: duration
 default: 1h
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.TokenRefreshInterval
 description: |+
@@ -3156,35 +3156,46 @@ description: |+
   This value must be less than Monitoring.TokenExpiresIn.
 type: duration
 default: 5m
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.MetricAuthorization
 description: |+
   If authorization (Bearer token) is required for accessing /metrics endpoint.
 type: bool
 default: true
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.PromQLAuthorization
 description: |+
   If authorization (Bearer token or cookie) is required for accessing /prometheus/query endpoint.
 type: bool
 default: true
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.DataRetention
 description: |+
   The duration of which Prometheus should retain the monitoring data.
 type: duration
 default: 360h
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
+---
+name: Monitoring.DataRetentionSize
+description: |+
+  The maximum number of bytes of storage blocks to retain. The oldest data will be removed first. This is used to limit the amount of data that can be stored in the database.
+  This parameter is equivalent to the Prometheus `storage.tsdb.retention.size` flag. For more information, see [Prometheus Storage Documentation](https://prometheus.io/docs/prometheus/latest/storage/).
+
+  Units supported: B, KB, MB, GB, TB, PB, EB
+  Ex: "512MB"
+type: string
+default: "0B"
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.LabelLimit
 description: |+
   The maximum number of labels that can be attached to a single metric. 0 means no limit.
 type: int
 default: 64
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.LabelNameLengthLimit
 description: |+
@@ -3201,14 +3212,14 @@ description: |+
   Be wary of modify this value. Similar considerations should be made for modifying Monitoring.LabelValueLengthLimit, Monitoring.LabelLimit, and Monitoring.SampleLimit.
 type: int
 default: 128
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.LabelValueLengthLimit
 description: |+
   The maximum length of a label value. 0 means no limit. The default value is 2048 bytes, which allows for up to 512 characters.
 type: int
 default: 2048
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.SampleLimit
 description: |+
@@ -3217,7 +3228,7 @@ description: |+
   the entire scrape will be treated as failed. 0 means no limit.
 type: int
 default: 200
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 ############################
 #   Shoveler-level configs   #
