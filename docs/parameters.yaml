@@ -1270,7 +1270,7 @@ components: ["origin"]
 name: Origin.GlobusTransferTokenFile
 description: |+
   When set, all requests from the Globus backend to the Globus Transfer API will include the contents
-  of the file as a bearer token in theAuthorization header.
+  of the file as a bearer token in the authorization header.
 
   Any value set here will be overridden with the filepath to the file ending in `.transfer.tok` found
   in the $(Origin.GlobusConfigLocation)/tokens directory
