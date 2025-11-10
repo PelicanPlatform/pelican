@@ -30,14 +30,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
@@ -54,21 +53,6 @@ var (
 	// It's possible to overwhelm the XRootD listen socket with requests.  This rate
 	// limiter will allow no more than 32 requests / second and 8 new ones in a burst
 	xrdConnLimit *rate.Limiter = rate.NewLimiter(32, 8)
-
-	PelicanBrokerConnections = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "pelican_broker_connections_total",
-		Help: "The number of connections made to the service via a connection broker.",
-	}, []string{"server_type"})
-
-	PelicanBrokerApiRequests = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "pelican_broker_api_requests_total",
-		Help: "The number of API requests made to the service via a connection broker.",
-	}, []string{"server_type"})
-
-	PelicanBrokerObjectRequests = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "pelican_broker_object_requests_total",
-		Help: "The number of object requests made to the service via a connection broker.",
-	})
 )
 
 // Return a custom HTTP transport object; starts with the default transport for
@@ -108,7 +92,7 @@ func proxyOrigin(resp http.ResponseWriter, req *http.Request, engine *gin.Engine
 		engine.ServeHTTP(resp, req)
 		return
 	}
-	PelicanBrokerObjectRequests.Inc()
+	metrics.PelicanBrokerObjectRequests.Inc()
 	url := req.URL
 	url.Scheme = "https"
 	url.Host = param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Origin_Port.GetInt())
