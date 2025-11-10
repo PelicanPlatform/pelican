@@ -13,7 +13,7 @@ import useFuse from '@/helpers/useFuse';
 
 const Page = () => {
   const { data } = useApiSWR<Group[]>(
-    'Could no fetch users',
+    'Could not fetch groups',
     '/api/v1.0/groups',
     async () => {
       return await fetch('/api/v1.0/groups', { method: 'GET' });

@@ -53,7 +53,7 @@ const MemberCard = ({ member }: MemberCardProps) => {
               e.stopPropagation();
               await alertOnError(
                 async () => await removeMember(member.groupId, member.user.id),
-                'Could Not Delete Registration',
+                'Could Not Remove Group Member',
                 dispatch
               );
               await mutate(`/api/v1.0/groups/${member.groupId}/members`);
