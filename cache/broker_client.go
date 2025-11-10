@@ -40,6 +40,7 @@ import (
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
@@ -268,6 +269,7 @@ func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group, engine *gin
 				srv := http.Server{
 					Handler: http.HandlerFunc(engine.ServeHTTP),
 				}
+				metrics.PelicanBrokerConnections.WithLabelValues("cache").Inc()
 				go func(fields log.Fields) {
 					// A one-shot listener should do a single "accept" then shutdown.
 					log.WithFields(fields).Debug("Cache starting to serve broker reverse connection")
