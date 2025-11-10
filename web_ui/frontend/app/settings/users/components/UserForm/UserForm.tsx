@@ -56,6 +56,7 @@ const UserForm: React.FC<UserFormProps> = ({
           onChange={(e) => setUsername(e.target.value)}
           disabled={isSubmitting}
           size={'small'}
+          helperText={'String identifier for the user, no restrictions'}
           required
           fullWidth
         />
@@ -66,6 +67,7 @@ const UserForm: React.FC<UserFormProps> = ({
           onChange={(e) => setSub(e.target.value)}
           disabled={isSubmitting}
           size={'small'}
+          helperText={'Subject Identifier, provided to pelican via the configured OIDC Provider.'}
           required
           fullWidth
         />
@@ -76,6 +78,7 @@ const UserForm: React.FC<UserFormProps> = ({
           onChange={(e) => setIssuer(e.target.value)}
           disabled={isSubmitting}
           size={'small'}
+          helperText={'Issuer Identifier, provided to pelican via the configured OIDC Provider.'}
           required
           fullWidth
         />
