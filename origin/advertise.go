@@ -19,7 +19,6 @@
 package origin
 
 import (
-	"context"
 	"fmt"
 	"net/url"
 	"strings"
@@ -222,28 +221,13 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		} else {
 			return nil, errors.New("failed to create advertisement: no valid export")
 		}
-	} else if len(prefixes) == 1 {
-		if param.Origin_EnableBroker.GetBool() {
-			var brokerUrl *url.URL
-			fedInfo, err := config.GetFederation(context.Background())
-			if err != nil {
-				return nil, err
-			}
-			brokerUrl, err = url.Parse(fedInfo.BrokerEndpoint)
-			if err != nil {
-				err = errors.Wrap(err, "Invalid Broker URL")
-				return nil, err
-			}
-			brokerUrl.Path = "/api/v1.0/broker/reverse"
-			values := brokerUrl.Query()
-			values.Set("origin", param.Server_Hostname.GetString())
-			values.Set("prefix", prefixes[0])
-			brokerUrl.RawQuery = values.Encode()
-			ad.BrokerURL = brokerUrl.String()
-		}
-	} else {
-		log.Warningf("Multiple prefixes are not yet supported with the broker. Skipping broker configuration")
 	}
+
+	// Set broker URL if enabled
+	if err = server_utils.SetBrokerURL(&ad, server_structs.OriginType, prefixes); err != nil {
+		return nil, errors.Wrap(err, "failed to set broker URL")
+	}
+
 	return &ad, nil
 }
 
