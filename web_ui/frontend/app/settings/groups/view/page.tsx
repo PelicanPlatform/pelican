@@ -81,7 +81,7 @@ const getGroup = async (id: string): Promise<Response> => {
 
 const information = (g: Group) => [
   { name: 'Created By', value: g.createdBy },
-  { name: 'Created At', value: g.createdAt },
+  { name: 'Created At', value: new Date(g.createdAt).toLocaleString() },
 ];
 
 export default Page;

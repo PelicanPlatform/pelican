@@ -41,7 +41,7 @@ const MemberCard = ({ member }: MemberCardProps) => {
       >
         <CardTitle
           title={member?.user?.username}
-          description={member.createdAt}
+          description={new Date(member.createdAt).toLocaleString()}
         />
         <Box>
           <ConfirmButton

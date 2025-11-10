@@ -27,7 +27,7 @@ const UserCard = ({ user }: UserCardProps) => {
       >
         <ListCard onClick={() => setOpen(!open)}>
           <Box>{user.username}</Box>
-          <Box>{user.createdAt}</Box>
+          <Box>{new Date(user.createdAt).toLocaleString()}</Box>
         </ListCard>
         <InformationDropdown user={user} transition={open} />
       </Badge>
