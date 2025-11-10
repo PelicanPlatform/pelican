@@ -34,7 +34,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	pelican_oauth2 "github.com/pelicanplatform/pelican/oauth2"
+	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -55,65 +57,6 @@ type directorServerResponse struct {
 	Type           string `json:"type"`
 	AuthURL        string `json:"authUrl"`
 	RegistryPrefix string `json:"registryPrefix"`
-}
-
-// Collection API request/response structures matching origin/collections.go
-type createCollectionReq struct {
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	Visibility  string            `json:"visibility"`
-	Metadata    map[string]string `json:"metadata"`
-	Namespace   string            `json:"namespace"`
-}
-
-type updateCollectionReq struct {
-	Name        *string `json:"name,omitempty"`
-	Description *string `json:"description,omitempty"`
-	Visibility  *string `json:"visibility,omitempty"`
-}
-
-type listCollectionRes struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	OwnerID     string `json:"owner_id"`
-	Description string `json:"description"`
-	Visibility  string `json:"visibility"`
-	Namespace   string `json:"namespace"`
-}
-
-type getCollectionRes struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	OwnerID     string            `json:"owner_id"`
-	Description string            `json:"description"`
-	Visibility  string            `json:"visibility"`
-	Namespace   string            `json:"namespace"`
-	Members     []string          `json:"members"`
-	ACLs        []collectionACL   `json:"acls"`
-	Metadata    map[string]string `json:"metadata"`
-	CreatedAt   time.Time         `json:"created_at"`
-	UpdatedAt   time.Time         `json:"updated_at"`
-}
-
-type collectionACL struct {
-	GroupID   string     `json:"group_id"`
-	Role      string     `json:"role"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-}
-
-type grantACLReq struct {
-	GroupID   string     `json:"group_id"`
-	Role      string     `json:"role"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-}
-
-type revokeACLReq struct {
-	GroupID string `json:"group_id"`
-	Role    string `json:"role"`
-}
-
-type metadataValue struct {
-	Value string `json:"value"`
 }
 
 // getDirectorOriginWebUrl queries the Director API to find an origin server's web URL
@@ -417,7 +360,7 @@ func formatOutput(data interface{}) error {
 
 	// Human-readable format
 	switch v := data.(type) {
-	case []listCollectionRes:
+	case []origin.ListCollectionRes:
 		if len(v) == 0 {
 			fmt.Println("No collections found")
 			return nil
@@ -434,7 +377,7 @@ func formatOutput(data interface{}) error {
 			fmt.Printf("Owner ID:    %s\n", coll.OwnerID)
 			fmt.Println()
 		}
-	case getCollectionRes:
+	case origin.GetCollectionRes:
 		fmt.Printf("ID:          %s\n", v.ID)
 		fmt.Printf("Name:        %s\n", v.Name)
 		fmt.Printf("Namespace:   %s\n", v.Namespace)
@@ -478,7 +421,7 @@ func formatOutput(data interface{}) error {
 		for key, value := range v {
 			fmt.Printf("%s: %s\n", key, value)
 		}
-	case []collectionACL:
+	case []database.CollectionACL:
 		if len(v) == 0 {
 			fmt.Println("No ACLs")
 			return nil
@@ -517,7 +460,7 @@ var originCollectionsListCmd = &cobra.Command{
 			return err
 		}
 
-		var collections []listCollectionRes
+		var collections []origin.ListCollectionRes
 		if err := json.Unmarshal(respBody, &collections); err != nil {
 			return errors.Wrap(err, "failed to parse response")
 		}
@@ -548,7 +491,7 @@ var originCollectionsCreateCmd = &cobra.Command{
 			return errors.New("--namespace is required")
 		}
 
-		req := createCollectionReq{
+		req := origin.CreateCollectionReq{
 			Name:        name,
 			Namespace:   namespace,
 			Description: description,
@@ -573,7 +516,7 @@ var originCollectionsCreateCmd = &cobra.Command{
 			return err
 		}
 
-		var collection getCollectionRes
+		var collection origin.GetCollectionRes
 		if err := json.Unmarshal(respBody, &collection); err != nil {
 			return errors.Wrap(err, "failed to parse response")
 		}
@@ -601,7 +544,7 @@ var originCollectionsGetCmd = &cobra.Command{
 			return err
 		}
 
-		var collection getCollectionRes
+		var collection origin.GetCollectionRes
 		if err := json.Unmarshal(respBody, &collection); err != nil {
 			return errors.Wrap(err, "failed to parse response")
 		}
@@ -623,7 +566,7 @@ var originCollectionsUpdateCmd = &cobra.Command{
 		id := args[0]
 		endpoint := fmt.Sprintf("/collections/%s", id)
 
-		req := updateCollectionReq{}
+		req := origin.UpdateCollectionReq{}
 		flagsSet := false
 
 		if cmd.Flags().Changed("name") {
@@ -656,7 +599,7 @@ var originCollectionsUpdateCmd = &cobra.Command{
 			return nil
 		}
 
-		var collection getCollectionRes
+		var collection origin.GetCollectionRes
 		if err := json.Unmarshal(respBody, &collection); err == nil {
 			return formatOutput(collection)
 		}
@@ -735,7 +678,7 @@ var originCollectionsMetadataSetCmd = &cobra.Command{
 		value := args[2]
 		endpoint := fmt.Sprintf("/collections/%s/metadata/%s", id, url.PathEscape(key))
 
-		req := metadataValue{Value: value}
+		req := origin.MetadataValue{Value: value}
 
 		_, err := makeCollectionAPIRequest(ctx, http.MethodPut, endpoint, req, token_scopes.Collection_Modify, id)
 		if err != nil {
@@ -794,7 +737,7 @@ var originCollectionsACLListCmd = &cobra.Command{
 			return err
 		}
 
-		var acls []collectionACL
+		var acls []database.CollectionACL
 		if err := json.Unmarshal(respBody, &acls); err != nil {
 			return errors.Wrap(err, "failed to parse response")
 		}
@@ -827,7 +770,7 @@ var originCollectionsACLGrantCmd = &cobra.Command{
 			return errors.New("--role is required")
 		}
 
-		req := grantACLReq{
+		req := origin.GrantAclReq{
 			GroupID: groupID,
 			Role:    role,
 		}
@@ -873,7 +816,7 @@ var originCollectionsACLRevokeCmd = &cobra.Command{
 			return errors.New("--role is required")
 		}
 
-		req := revokeACLReq{
+		req := origin.RevokeAclReq{
 			GroupID: groupID,
 			Role:    role,
 		}
