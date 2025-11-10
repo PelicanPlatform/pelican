@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -20,18 +20,24 @@
 
 package config
 
-var saved_password bool = false
-var saved_password_val []byte = make([]byte, 0)
+var savedPassword bool = false
+var savedPasswordVal []byte = make([]byte, 0)
 
+// Returns the password stored in the session keyring, or an empty byte
+// array if it cannot be found. The keyring is provided by in-process memory
+// because we assume that the kernel key retention service is unavailable.
 func TryGetPassword() ([]byte, error) {
-	if saved_password {
-		return saved_password_val, nil
+	if savedPassword {
+		return savedPasswordVal, nil
 	}
 	return make([]byte, 0), nil
 }
 
-func SavePassword(new_pass []byte) error {
-	saved_password_val = new_pass
-	saved_password = true
+// Saves a password to the session keyring. The keyring is provided by
+// in-process memory because we assume that the kernel key retention service
+// is unavailable.
+func SavePassword(password []byte) error {
+	savedPasswordVal = password
+	savedPassword = true
 	return nil
 }

@@ -158,3 +158,10 @@ export type GroupMemberPost = Omit<
   GroupMember,
   'user' | 'addedBy' | 'addedAt' | 'groupId'
 >;
+
+export interface WellKnownConfiguration {
+  director_endpoint: string;
+  namespace_registration_endpoint: string;
+  jwks_uri: string;
+}
+

@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -72,14 +72,16 @@ func TestDowntime(t *testing.T) {
 	database.SetupMockDowntimeDB(t)
 	defer database.TeardownMockDowntimeDB(t)
 
-	viper.Set("Server.WebPort", 0)
-	viper.Set("Server.ExternalWebUrl", "https://mock-server.com")
+	viper.Set(param.Server_WebPort.GetName(), 0)
+	viper.Set(param.Server_ExternalWebUrl.GetName(), "https://mock-server.com")
 	viper.Set(param.Xrootd_Sitename.GetName(), "mock-sitename")
 
 	dirName := t.TempDir()
 	viper.Set("ConfigDir", dirName)
 	viper.Set(param.Logging_Level.GetName(), "debug")
-	viper.Set("Origin.Port", 0)
+	viper.Set(param.Origin_Port.GetName(), 0)
+
+	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 

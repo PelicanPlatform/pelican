@@ -1,9 +1,15 @@
+import React from "react";
+
 import { Footer, Layout, Navbar } from 'nextra-theme-docs'
-import { Banner, Head } from 'nextra/components'
+import { Head } from 'nextra/components'
 import { getPageMap } from 'nextra/page-map'
+
+import { AppRouterCacheProvider } from '@mui/material-nextjs/v15-appRouter';
+
+import ThemeProvider from '@/components/ThemeProvider'
+
 // Required for theme styles, previously was imported under the hood
 import 'nextra-theme-docs/style.css'
-import React from "react";
 
 export const metadata = {
 	title: "Pelican Documentation",
@@ -34,50 +40,48 @@ const footer = (
 		</Footer>
 )
 
+
+
 export default async function RootLayout({ children }) {
-
-
-  return (
-			<html
-					// Not required, but good for SEO
-					lang="en"
-					// Required to be set
-					dir="ltr"
-					// Suggested by `next-themes` package https://github.com/pacocoursey/next-themes#with-app
-					suppressHydrationWarning
-			>
+	return (
+		<html
+			// Not required, but good for SEO
+			lang="en"
+			// Required to be set
+			dir="ltr"
+			// Suggested by `next-themes` package https://github.com/pacocoursey/next-themes#with-app
+			suppressHydrationWarning
+		>
 			<Head
-					backgroundColor={{
-						dark: 'rgb(15, 23, 42)',
-						light: 'rgb(255,255,255)'
-					}}
-					color={{
-						hue: { dark: 200, light: 200 },
-						saturation: { dark: 100, light: 100 }
-					}}
+				backgroundColor={{
+					dark: 'rgb(15, 23, 42)',
+					light: 'rgb(255,255,255)'
+				}}
+				color={{
+					hue: { dark: 200, light: 200 },
+					saturation: { dark: 100, light: 100 }
+				}}
 			>
 				<link rel="stylesheet" type="text/css" href="/style.css"/>
-
-
 			</Head>
-			<body>
-			<Layout
-					navbar={navbar}
-					pageMap={await getPageMap()}
-					docsRepositoryBase="https://github.com/PelicanPlatform/pelican/tree/main/docs"
-					editLink="Edit this page on GitHub"
-					sidebar={{ defaultMenuCollapseLevel: 1 }}
-					footer={footer}
-					darkMode={false}
-					nextThemes={{
-						forcedTheme: "light",
-					}}
-					// ...Your additional theme config options
-			>
-				{}
-				{children}
-			</Layout>
-			</body>
-			</html>
+			<AppRouterCacheProvider>
+				<body>
+					<Layout
+						navbar={navbar}
+						pageMap={await getPageMap()}
+						docsRepositoryBase="https://github.com/PelicanPlatform/pelican/tree/main/docs"
+						editLink="Edit this page on GitHub"
+						sidebar={{ defaultMenuCollapseLevel: 1 }}
+						footer={footer}
+						// ...Your additional theme config options
+					>
+						{}
+						<ThemeProvider>
+							{children}
+						</ThemeProvider>
+					</Layout>
+				</body>
+			</AppRouterCacheProvider>
+		</html>
 	)
 }

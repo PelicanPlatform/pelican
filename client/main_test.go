@@ -25,8 +25,6 @@ import (
 	"crypto/rand"
 	"fmt"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -37,11 +35,13 @@ import (
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/mock"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -382,27 +382,6 @@ func FuzzGetTokenName(f *testing.F) {
 	})
 }
 
-// Spin up a discovery server for testing purposes
-func getTestDiscoveryServer(t *testing.T) *httptest.Server {
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/.well-known/pelican-configuration" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_, err := w.Write([]byte(`{
-				"director_endpoint": "https://director.com",
-				"namespace_registration_endpoint": "https://registration.com",
-				"broker_endpoint": "https://broker.com",
-				"jwks_uri": "https://tokens.com"
-			}`))
-			assert.NoError(t, err)
-		} else {
-			http.NotFound(w, r)
-		}
-	}
-	server := httptest.NewTLSServer(http.HandlerFunc(handler))
-	return server
-}
-
 func assertPelicanURLEqual(t *testing.T, expected, actual *pelican_url.PelicanURL) {
 	assert.Equal(t, expected.Scheme, actual.Scheme, "Scheme mismatch")
 	assert.Equal(t, expected.Host, actual.Host, "Discovery Host mismatch")
@@ -411,10 +390,30 @@ func assertPelicanURLEqual(t *testing.T, expected, actual *pelican_url.PelicanUR
 }
 
 func TestParseRemoteAsPUrl(t *testing.T) {
-	discServer := getTestDiscoveryServer(t)
-	defer discServer.Close()
-	discUrl, err := url.Parse(discServer.URL)
+	// A federation discovery object that'll act as the metadata
+	// these tests find through discovery.
+	//
+	// Note that while some of the tests fall back to discovery via
+	// the Director endpoint, those tests use the test server below
+	// for the Director only discover "director.com", which should
+	// never be queried.
+	//
+	// The discovery endpoint is set after the federation mock server is created.
+	fedInfo := pelican_url.FederationDiscovery{
+		DirectorEndpoint: "https://director.com",
+		RegistryEndpoint: "https://registration.com",
+		BrokerEndpoint:   "https://broker.com",
+		JwksUri:          "https://tokens.com",
+	}
+	test_utils.MockFederationRoot(t, &fedInfo, nil)
+	discUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
 	require.NoError(t, err)
+
+	fedInfo.DiscoveryEndpoint = discUrl.String()
+
+	// Unset the global discovery endpoint set by MockFederationRoot so that these
+	// tests can set it as needed
+	viper.Set(param.Federation_DiscoveryUrl.GetName(), "")
 
 	oldHost, err := pelican_url.SetOsdfDiscoveryHost(discUrl.Host)
 	t.Cleanup(func() {
@@ -425,7 +424,7 @@ func TestParseRemoteAsPUrl(t *testing.T) {
 	tests := []struct {
 		name      string
 		rp        string
-		discEP    string // for setting global federation metadata
+		discEP    string // for setting global federation metadata. Otherwise values are set via the constructed Pelican URL.
 		dirEP     string // for setting global federation metadata
 		expected  *pelican_url.PelicanURL
 		expectErr bool
@@ -435,7 +434,7 @@ func TestParseRemoteAsPUrl(t *testing.T) {
 			rp:        fmt.Sprintf("pelican://%s/foo/bar", discUrl.Host),
 			discEP:    "",
 			dirEP:     "",
-			expected:  &pelican_url.PelicanURL{Scheme: "pelican", Host: discUrl.Host, Path: "/foo/bar", FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.com", RegistryEndpoint: "https://registration.com", BrokerEndpoint: "https://broker.com", JwksUri: "https://tokens.com"}},
+			expected:  &pelican_url.PelicanURL{Scheme: "pelican", Host: discUrl.Host, Path: "/foo/bar", FedInfo: fedInfo},
 			expectErr: false,
 		},
 		{
@@ -443,7 +442,7 @@ func TestParseRemoteAsPUrl(t *testing.T) {
 			rp:        "osdf:///foo/bar",
 			discEP:    "",
 			dirEP:     "",
-			expected:  &pelican_url.PelicanURL{Scheme: "osdf", Host: "", Path: "/foo/bar", FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.com", RegistryEndpoint: "https://registration.com", BrokerEndpoint: "https://broker.com", JwksUri: "https://tokens.com"}},
+			expected:  &pelican_url.PelicanURL{Scheme: "osdf", Host: "", Path: "/foo/bar", FedInfo: fedInfo},
 			expectErr: false,
 		},
 		{
@@ -451,23 +450,22 @@ func TestParseRemoteAsPUrl(t *testing.T) {
 			rp:        "stash:///foo/bar",
 			discEP:    "",
 			dirEP:     "",
-			expected:  &pelican_url.PelicanURL{Scheme: "stash", Host: "", Path: "/foo/bar", FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.com", RegistryEndpoint: "https://registration.com", BrokerEndpoint: "https://broker.com", JwksUri: "https://tokens.com"}},
+			expected:  &pelican_url.PelicanURL{Scheme: "stash", Host: "", Path: "/foo/bar", FedInfo: fedInfo},
 			expectErr: false,
 		},
 		{
-			name:      "test valid path with configured global discovery url",
-			rp:        "/foo/bar",
-			discEP:    discUrl.Host,
-			dirEP:     "",
-			expected:  &pelican_url.PelicanURL{Scheme: "pelican", Host: discUrl.Host, Path: "/foo/bar", FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.com", RegistryEndpoint: "https://registration.com", BrokerEndpoint: "https://broker.com", JwksUri: "https://tokens.com"}},
-			expectErr: false,
+			name:     "test valid path with configured global discovery url",
+			rp:       "/foo/bar",
+			discEP:   discUrl.Host,
+			dirEP:    "",
+			expected: &pelican_url.PelicanURL{Scheme: "pelican", Host: discUrl.Host, Path: "/foo/bar", FedInfo: fedInfo},
 		},
 		{
 			name:      "test valid path that falls back to configured director for discovery",
 			rp:        "/foo/bar",
 			discEP:    "",
 			dirEP:     discUrl.Host,
-			expected:  &pelican_url.PelicanURL{Scheme: "pelican", Host: discUrl.Host, Path: "/foo/bar", FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.com", RegistryEndpoint: "https://registration.com", BrokerEndpoint: "https://broker.com", JwksUri: "https://tokens.com"}},
+			expected:  &pelican_url.PelicanURL{Scheme: "pelican", Host: discUrl.Host, Path: "/foo/bar", FedInfo: fedInfo},
 			expectErr: false,
 		},
 		{
@@ -486,7 +484,7 @@ func TestParseRemoteAsPUrl(t *testing.T) {
 			// fall back to configured discovery/director URLs if it can't find them in the URL
 			configOpts := map[string]any{"TLSSkipVerify": true}
 			if test.discEP != "" {
-				configOpts["Federation.DiscoveryUrl"] = test.discEP
+				configOpts[param.Federation_DiscoveryUrl.GetName()] = test.discEP
 			}
 			if test.dirEP != "" {
 				configOpts["Federation.DirectorUrl"] = test.dirEP
@@ -500,7 +498,7 @@ func TestParseRemoteAsPUrl(t *testing.T) {
 				return
 			}
 
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assertPelicanURLEqual(t, test.expected, pUrl)
 		})
 	}

@@ -52,12 +52,14 @@ func setupXrootd(t *testing.T, ctx context.Context, server server_structs.Server
 	server_utils.ResetTestState()
 
 	viper.Set("ConfigDir", tmpDir)
-	viper.Set("Xrootd.RunLocation", tmpDir)
-	viper.Set("Cache.RunLocation", tmpDir)
-	viper.Set("Origin.RunLocation", tmpDir)
-	viper.Set("Origin.StoragePrefix", "/")
-	viper.Set("Origin.FederationPrefix", "/")
-	viper.Set("Server.IssuerUrl", "https://my-xrootd.com:8444")
+	viper.Set(param.Xrootd_RunLocation.GetName(), tmpDir)
+	viper.Set(param.Cache_RunLocation.GetName(), tmpDir)
+	viper.Set(param.Origin_RunLocation.GetName(), tmpDir)
+	viper.Set(param.Origin_StoragePrefix.GetName(), "/")
+	viper.Set(param.Origin_FederationPrefix.GetName(), "/")
+	viper.Set(param.Server_IssuerUrl.GetName(), "https://my-xrootd.com:8444")
+
+	test_utils.MockFederationRoot(t, nil, nil)
 
 	err := config.InitServer(ctx, server)
 	require.NoError(t, err)
@@ -182,8 +184,9 @@ func TestXrootDCacheConfig(t *testing.T) {
 	})
 	server_utils.ResetTestState()
 
-	viper.Set("Cache.RunLocation", dirname)
+	viper.Set(param.Cache_RunLocation.GetName(), dirname)
 	viper.Set("ConfigDir", dirname)
+	test_utils.MockFederationRoot(t, nil, nil)
 
 	err = config.InitServer(ctx, server_structs.CacheType)
 	require.NoError(t, err)
@@ -284,15 +287,17 @@ func TestUpdateAuth(t *testing.T) {
 
 	defer server_utils.ResetTestState()
 
-	viper.Set("Logging.Level", "Debug")
-	viper.Set("Origin.RunLocation", runDirname)
+	viper.Set(param.Logging_Level.GetName(), "Debug")
+	viper.Set(param.Origin_RunLocation.GetName(), runDirname)
 	viper.Set("ConfigDir", configDirname)
 	authfileName := filepath.Join(configDirname, "authfile")
-	viper.Set("Xrootd.Authfile", authfileName)
+	viper.Set(param.Xrootd_Authfile.GetName(), authfileName)
 	scitokensName := filepath.Join(configDirname, "scitokens.cfg")
-	viper.Set("Xrootd.ScitokensConfig", scitokensName)
-	viper.Set("Origin.FederationPrefix", "/test")
-	viper.Set("Origin.StoragePrefix", "/")
+	viper.Set(param.Xrootd_ScitokensConfig.GetName(), scitokensName)
+	viper.Set(param.Origin_FederationPrefix.GetName(), "/test")
+	viper.Set(param.Origin_StoragePrefix.GetName(), "/")
+
+	test_utils.MockFederationRoot(t, nil, nil)
 
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
@@ -377,9 +382,11 @@ func TestCopyCertificates(t *testing.T) {
 	runDirname := t.TempDir()
 	configDirname := t.TempDir()
 	server_utils.ResetTestState()
-	viper.Set("Logging.Level", "Debug")
-	viper.Set("Origin.RunLocation", runDirname)
+	viper.Set(param.Logging_Level.GetName(), "Debug")
+	viper.Set(param.Origin_RunLocation.GetName(), runDirname)
 	viper.Set("ConfigDir", configDirname)
+
+	test_utils.MockFederationRoot(t, nil, nil)
 
 	// First, invoke CopyXrootdCertificates directly, ensure it works.
 	err := copyXrootdCertificates(&origin.OriginServer{})
@@ -634,6 +641,8 @@ func TestAutoShutdownOnStaleAuthfile(t *testing.T) {
 	require.NoError(t, os.WriteFile(scitokensPath, []byte(""), 0600))
 	viper.Set(param.Xrootd_ScitokensConfig.GetName(), scitokensPath)
 
+	test_utils.MockFederationRoot(t, nil, nil)
+
 	// Init cache server
 	require.NoError(t, config.InitServer(ctx, server_structs.CacheType))
 
@@ -702,6 +711,7 @@ func TestConfigUpdatesHealthOKWhenFresh(t *testing.T) {
 	require.NoError(t, os.WriteFile(scitokensPath, []byte(""), 0600))
 	viper.Set(param.Xrootd_ScitokensConfig.GetName(), scitokensPath)
 
+	test_utils.MockFederationRoot(t, nil, nil)
 	require.NoError(t, config.InitServer(ctx, server_structs.CacheType))
 	cacheServer := &cache.CacheServer{}
 

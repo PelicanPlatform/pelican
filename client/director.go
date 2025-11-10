@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -34,6 +35,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -109,6 +111,14 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 
 		if err != nil {
 			log.Errorln("Failed to get response from the director:", err)
+			// Check if this is a timeout error and use the appropriate retryable error type
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				err = error_codes.NewTransfer_DirectorTimeoutError(err)
+			} else {
+				// Wrap other network errors in Contact.Director error type
+				err = error_codes.NewContact_DirectorError(err)
+			}
 			return
 		}
 
@@ -265,7 +275,20 @@ func GetDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, h
 			err = errors.Errorf("the director returned status code 405, indicating it understood the request but could not find an origin that supports PUT/DELETE operations for object: %s.", pUrl.Path)
 			return
 		} else {
-			err = errors.Wrapf(err, "error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint)
+			// If not already a PelicanError, wrap it appropriately
+			var pe *error_codes.PelicanError
+			if !errors.As(err, &pe) {
+				// Check if this is a timeout error and use the appropriate retryable error type
+				var netErr net.Error
+				if errors.As(err, &netErr) && netErr.Timeout() {
+					err = errors.Wrapf(error_codes.NewTransfer_DirectorTimeoutError(err), "error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint)
+				} else {
+					err = errors.Wrapf(error_codes.NewContact_DirectorError(err), "error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint)
+				}
+			} else {
+				// If it's already a PelicanError, wrap the context around it
+				err = errors.Wrapf(err, "error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint)
+			}
 			return
 		}
 	}

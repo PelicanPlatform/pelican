@@ -53,6 +53,7 @@ func GetDeprecated() map[string][]string {
     return map[string][]string{
         "Cache.DataLocation": {"Cache.StorageLocation"},
         "Cache.LocalRoot": {"Cache.StorageLocation"},
+        "Debug": {"Logging.Level"},
         "Director.EnableStat": {"Director.CheckOriginPresence"},
         "DisableHttpProxy": {"Client.DisableHttpProxy"},
         "DisableProxyFallback": {"Client.DisableProxyFallback"},
@@ -212,6 +213,7 @@ var (
 	Lotman_LibLocation = StringParam{"Lotman.LibLocation"}
 	Lotman_LotHome = StringParam{"Lotman.LotHome"}
 	Monitoring_DataLocation = StringParam{"Monitoring.DataLocation"}
+	Monitoring_DataRetentionSize = StringParam{"Monitoring.DataRetentionSize"}
 	OIDC_AuthorizationEndpoint = StringParam{"OIDC.AuthorizationEndpoint"}
 	OIDC_ClientID = StringParam{"OIDC.ClientID"}
 	OIDC_ClientIDFile = StringParam{"OIDC.ClientIDFile"}

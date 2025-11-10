@@ -78,11 +78,13 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 	dirpath := t.TempDir()
 
 	server_utils.ResetTestState()
-	viper.Set("Logging.Level", "Debug")
+	viper.Set(param.Logging_Level.GetName(), "Debug")
 	viper.Set("ConfigDir", filepath.Join(dirpath, "config"))
-	viper.Set("Server.WebPort", "0")
+	viper.Set(param.Server_WebPort.GetName(), "0")
 	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(dirpath, "ns-registry.sqlite"))
-	viper.Set("Origin.FederationPrefix", "/foo")
+	viper.Set(param.Origin_FederationPrefix.GetName(), "/foo")
+
+	test_utils.MockFederationRoot(t, nil, nil)
 
 	err := config.InitServer(ctx, server_structs.BrokerType)
 	require.NoError(t, err)

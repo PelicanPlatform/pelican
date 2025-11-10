@@ -70,13 +70,14 @@ func TestListNamespaces(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
-	viper.Set("Server.WebPort", 0)
-	viper.Set("Server.ExternalWebUrl", "https://mock-server.com")
+	viper.Set(param.Server_WebPort.GetName(), 0)
+	viper.Set(param.Server_ExternalWebUrl.GetName(), "https://mock-server.com")
 
 	dirName := t.TempDir()
 	viper.Set("ConfigDir", dirName)
 	viper.Set(param.Logging_Level.GetName(), "debug")
-	viper.Set("Origin.Port", 0)
+	viper.Set(param.Origin_Port.GetName(), 0)
+	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
@@ -1499,4 +1500,116 @@ func TestListInstitutions(t *testing.T) {
 func TestPopulateRegistrationFields(t *testing.T) {
 	result := populateRegistrationFields("", server_structs.Registration{})
 	assert.NotEqual(t, 0, len(result))
+}
+
+func TestDeleteNamespaceDeletesServerWhenSingleService(t *testing.T) {
+	// Initialize the mock database
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	// Create a single origin registration which will create a server with one service
+	jwks, err := test_utils.GenerateJWKS()
+	require.NoError(t, err)
+	ns := server_structs.Registration{
+		Prefix: "/origins/single-service.edu",
+		Pubkey: jwks,
+		AdminMetadata: server_structs.AdminMetadata{
+			SiteName:    "single-service.edu",
+			Institution: "Test University",
+			Status:      server_structs.RegApproved,
+		},
+	}
+	err = AddRegistration(&ns)
+	require.NoError(t, err)
+
+	// Resolve server ID from the registration
+	serverReg, err := getServerByRegistrationID(ns.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, serverReg.ID)
+
+	// Set up router for delete and get server endpoints
+	router := gin.Default()
+	router.DELETE("/namespaces/:id", deleteNamespace)
+	router.GET("/servers/:id", getServerHandler)
+
+	// Delete the namespace
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("DELETE", "/namespaces/"+strconv.Itoa(ns.ID), nil)
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Verify the server is deleted (should return 404)
+	wGet := httptest.NewRecorder()
+	reqGet, _ := http.NewRequest("GET", "/servers/"+serverReg.ID, nil)
+	router.ServeHTTP(wGet, reqGet)
+	assert.Equal(t, http.StatusNotFound, wGet.Code)
+}
+
+func TestDeleteNamespaceKeepsServerWhenMultipleServices(t *testing.T) {
+	// Initialize the mock database
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	// Use the same JWKS so the second registration can attach to the existing server
+	jwks, err := test_utils.GenerateJWKS()
+	require.NoError(t, err)
+
+	// Create origin registration
+	nsOrigin := server_structs.Registration{
+		Prefix: "/origins/both-roles.edu",
+		Pubkey: jwks,
+		AdminMetadata: server_structs.AdminMetadata{
+			SiteName:    "both-roles.edu",
+			Institution: "Test University",
+			Status:      server_structs.RegApproved,
+		},
+	}
+	err = AddRegistration(&nsOrigin)
+	require.NoError(t, err)
+
+	// Create cache registration for the same server (same SiteName, same JWKS)
+	nsCache := server_structs.Registration{
+		Prefix: "/caches/both-roles.edu",
+		Pubkey: jwks,
+		AdminMetadata: server_structs.AdminMetadata{
+			SiteName:    "both-roles.edu",
+			Institution: "Test University",
+			Status:      server_structs.RegApproved,
+		},
+	}
+	err = AddRegistration(&nsCache)
+	require.NoError(t, err)
+
+	// Resolve server ID from one of the registrations
+	serverReg, err := getServerByRegistrationID(nsOrigin.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, serverReg.ID)
+	require.Len(t, serverReg.Registration, 2, "expected two services (origin and cache)")
+
+	// Set up router for delete and get server endpoints
+	router := gin.Default()
+	router.DELETE("/namespaces/:id", deleteNamespace)
+	router.GET("/servers/:id", getServerHandler)
+
+	// Delete one namespace (cache)
+	wDel := httptest.NewRecorder()
+	reqDel, _ := http.NewRequest("DELETE", "/namespaces/"+strconv.Itoa(nsCache.ID), nil)
+	router.ServeHTTP(wDel, reqDel)
+	require.Equal(t, http.StatusOK, wDel.Code)
+
+	// Verify the server still exists and has exactly one registration left
+	wGet := httptest.NewRecorder()
+	reqGet, _ := http.NewRequest("GET", "/servers/"+serverReg.ID, nil)
+	router.ServeHTTP(wGet, reqGet)
+	require.Equal(t, http.StatusOK, wGet.Code)
+
+	var returned server_structs.ServerRegistration
+	err = json.Unmarshal(wGet.Body.Bytes(), &returned)
+	require.NoError(t, err)
+	assert.Equal(t, serverReg.ID, returned.ID)
+	require.Len(t, returned.Registration, 1, "expected one remaining registration after deletion")
+
+	// Ensure the remaining registration is the origin one
+	remainingPrefix := returned.Registration[0].Prefix
+	assert.Equal(t, "/origins/both-roles.edu", remainingPrefix)
 }

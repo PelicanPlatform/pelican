@@ -43,6 +43,17 @@ func NewParameterError(err error) *PelicanError {
 	}
 }
 
+func NewParameter_FileNotFoundError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Parameter.FileNotFound",
+		exitCode:    4,
+		code:        1011,
+		retryable:   false,
+		description: "If the client was started with a file that does not exist.",
+		err:         err,
+	}
+}
+
 func NewResolutionError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Resolution",
@@ -105,6 +116,17 @@ func NewContact_RegistryError(err error) *PelicanError {
 		code:        3004,
 		retryable:   false,
 		description: "The client attempted to contact the registry (usually through the director) but failed to do so.",
+		err:         err,
+	}
+}
+
+func NewContact_ConnectionResetError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Contact.ConnectionReset",
+		exitCode:    6,
+		code:        3005,
+		retryable:   true,
+		description: "The client attempted to contact a server but the connection was reset by the remote peer. This is often a transient network error that can be resolved by retrying.",
 		err:         err,
 	}
 }
@@ -182,6 +204,39 @@ func NewTransfer_SlowTransferError(err error) *PelicanError {
 		code:        6002,
 		retryable:   true,
 		description: "The client started transferring data but the transfer was slower than the minimum configured timeout rate.",
+		err:         err,
+	}
+}
+
+func NewTransfer_TimedOutError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Transfer.TimedOut",
+		exitCode:    11,
+		code:        6003,
+		retryable:   true,
+		description: "The client started transferring data but the transfer timed out.",
+		err:         err,
+	}
+}
+
+func NewTransfer_HeaderTimeoutError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Transfer.HeaderTimeout",
+		exitCode:    11,
+		code:        6004,
+		retryable:   true,
+		description: "The client attempted to contact the server but timed out waiting for response headers. This indicates the server did not respond before the header timeout threshold.",
+		err:         err,
+	}
+}
+
+func NewTransfer_DirectorTimeoutError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Transfer.DirectorTimeout",
+		exitCode:    11,
+		code:        6005,
+		retryable:   true,
+		description: "The client timed out while querying the director for namespace information. This indicates the director did not respond before the timeout threshold.",
 		err:         err,
 	}
 }

@@ -52,6 +52,8 @@ func init() {
 	flagSet.BoolP("collection-only", "C", false, "List collections only")
 	flagSet.BoolP("object-only", "O", false, "List objects only")
 	flagSet.BoolP("json", "j", false, "Print results in JSON format")
+	flagSet.BoolP("recursive", "r", false, "Recursively list all objects in subdirectories")
+	flagSet.Int("depth", -1, "Maximum depth to recurse (e.g., --depth 2 similar to find . -maxdepth 2). Use -1 for unlimited depth.")
 
 	objectCmd.AddCommand(lsCmd)
 }
@@ -90,6 +92,8 @@ func listMain(cmd *cobra.Command, args []string) error {
 	asJSON, _ := cmd.Flags().GetBool("json")
 	singleColumn, _ := cmd.Flags().GetBool("single-column")
 	collectionsUrl, _ := cmd.Flags().GetString("collections-url")
+	recursive, _ := cmd.Flags().GetBool("recursive")
+	depth, _ := cmd.Flags().GetInt("depth")
 
 	// Same behavior as ls, if output is being piped, use single column format
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
@@ -101,7 +105,24 @@ func listMain(cmd *cobra.Command, args []string) error {
 		return errors.New("cannot specify both collectionOnly (-C) and object only (-O) flags, as they are mutually exclusive")
 	}
 
-	fileInfos, err := client.DoList(ctx, object, client.WithTokenLocation(tokenLocation), client.WithCollectionsUrl(collectionsUrl))
+	// Build options list for DoList
+	options := []client.TransferOption{
+		client.WithTokenLocation(tokenLocation),
+		client.WithCollectionsUrl(collectionsUrl),
+	}
+
+	if recursive {
+		options = append(options, client.WithRecursive(true))
+		if depth >= 0 {
+			options = append(options, client.WithDepth(depth))
+		}
+	} else if depth >= 0 {
+		// If depth is specified without recursive, treat it as recursive with depth limit
+		options = append(options, client.WithRecursive(true))
+		options = append(options, client.WithDepth(depth))
+	}
+
+	fileInfos, err := client.DoList(ctx, object, options...)
 
 	// Exit with failure
 	if err != nil {

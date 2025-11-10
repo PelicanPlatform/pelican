@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -22,7 +22,6 @@ package web_ui
 
 import (
 	"context"
-	"crypto/elliptic"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -51,6 +50,23 @@ import (
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
+func migrateTestDB(t *testing.T) {
+	err := database.ServerDatabase.AutoMigrate(&database.Collection{})
+	require.NoError(t, err, "Failed to migrate DB for collections table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
+	require.NoError(t, err, "Failed to migrate DB for collection members table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
+	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
+	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
+	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
+	err = database.ServerDatabase.AutoMigrate(&database.Group{})
+	require.NoError(t, err, "Failed to migrate DB for groups table")
+	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
+	require.NoError(t, err, "Failed to migrate DB for group members table")
+	err = database.ServerDatabase.AutoMigrate(&database.User{})
+	require.NoError(t, err, "Failed to migrate DB for users table")
+}
+
 func TestWaitUntilLogin(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
@@ -59,6 +75,8 @@ func TestWaitUntilLogin(t *testing.T) {
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
 	viper.Set("ConfigDir", dirName)
+
+	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 	go func() {
@@ -100,37 +118,16 @@ func TestWaitUntilLogin(t *testing.T) {
 }
 
 func TestCodeBasedLogin(t *testing.T) {
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
-
-	dirName := t.TempDir()
 	server_utils.ResetTestState()
-	viper.Set("ConfigDir", dirName)
-	err := config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
-	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
-	require.NoError(t, err)
+
+	setupWebUIEnv(t)
 
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	database.ServerDatabase = mockDB
 	require.NoError(t, err, "Error setting up mock origin DB")
 
-	err = database.ServerDatabase.AutoMigrate(&database.Collection{})
-	require.NoError(t, err, "Failed to migrate DB for collections table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
-	require.NoError(t, err, "Failed to migrate DB for collection members table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
-	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
-	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
-	err = database.ServerDatabase.AutoMigrate(&database.Group{})
-	require.NoError(t, err, "Failed to migrate DB for groups table")
-	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
-	require.NoError(t, err, "Failed to migrate DB for group members table")
-	err = database.ServerDatabase.AutoMigrate(&database.User{})
-	require.NoError(t, err, "Failed to migrate DB for users table")
+	migrateTestDB(t)
 
 	//Invoke the code login API with the correct code, ensure we get a valid code back
 	t.Run("With valid code", func(t *testing.T) {
@@ -145,7 +142,7 @@ func TestCodeBasedLogin(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 
 		//Check the HTTP response code
-		assert.Equal(t, 200, recorder.Code)
+		assert.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 		//Check that we get a cookie back
 		cookies := recorder.Result().Cookies()
 		foundCookie := false
@@ -169,48 +166,21 @@ func TestCodeBasedLogin(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 
 		//Check the HTTP response code
-		assert.Equal(t, 401, recorder.Code)
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 		assert.JSONEq(t, `{"msg":"Invalid login code", "status":"error"}`, recorder.Body.String())
 	})
 }
 
 func TestPasswordResetAPI(t *testing.T) {
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
-
-	dirName := t.TempDir()
 	server_utils.ResetTestState()
-	viper.Set("ConfigDir", dirName)
-	viper.Set(param.Logging_Level.GetName(), "debug")
-	viper.Set("Origin.Port", 8443)
-	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
-	err := config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+	setupWebUIEnv(t)
 
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	database.ServerDatabase = mockDB
 	require.NoError(t, err, "Error setting up mock origin DB")
 
-	err = database.ServerDatabase.AutoMigrate(&database.Collection{})
-	require.NoError(t, err, "Failed to migrate DB for collections table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
-	require.NoError(t, err, "Failed to migrate DB for collection members table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
-	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
-	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
-	err = database.ServerDatabase.AutoMigrate(&database.Group{})
-	require.NoError(t, err, "Failed to migrate DB for groups table")
-	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
-	require.NoError(t, err, "Failed to migrate DB for group members table")
-	err = database.ServerDatabase.AutoMigrate(&database.User{})
-	require.NoError(t, err, "Failed to migrate DB for users table")
-
-	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
-	require.NoError(t, err)
-	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
+	migrateTestDB(t)
 
 	//////////////////////////////SETUP////////////////////////////////
 	//Add an admin user to file to configure
@@ -239,7 +209,7 @@ func TestPasswordResetAPI(t *testing.T) {
 	router.ServeHTTP(recorder, req)
 
 	//Check ok http response
-	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 	//Check that success message returned
 	require.JSONEq(t, `{"msg":"success", "status":"success"}`, recorder.Body.String())
 	//Get the cookie to pass to password reset
@@ -339,35 +309,15 @@ func TestPasswordResetAPI(t *testing.T) {
 }
 
 func TestPasswordBasedLoginAPI(t *testing.T) {
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
-
-	dirName := t.TempDir()
 	server_utils.ResetTestState()
-	viper.Set("ConfigDir", dirName)
-	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
-	err := config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+	setupWebUIEnv(t)
+
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	database.ServerDatabase = mockDB
 	require.NoError(t, err, "Error setting up mock origin DB")
 
-	err = database.ServerDatabase.AutoMigrate(&database.Collection{})
-	require.NoError(t, err, "Failed to migrate DB for collections table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
-	require.NoError(t, err, "Failed to migrate DB for collection members table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
-	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
-	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
-	err = database.ServerDatabase.AutoMigrate(&database.Group{})
-	require.NoError(t, err, "Failed to migrate DB for groups table")
-	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
-	require.NoError(t, err, "Failed to migrate DB for group members table")
-	err = database.ServerDatabase.AutoMigrate(&database.User{})
-	require.NoError(t, err, "Failed to migrate DB for users table")
+	migrateTestDB(t)
 
 	///////////////////////////SETUP///////////////////////////////////
 	//Add an admin user to file to configure
@@ -399,7 +349,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
 		//Check ok http response
-		assert.Equal(t, http.StatusOK, recorder.Code)
+		assert.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 		//Check that success message returned
 		assert.JSONEq(t, `{"msg":"success", "status":"success"}`, recorder.Body.String())
 		//Check for a cookie being returned
@@ -424,7 +374,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
 		//Check http response code 400
-		assert.Equal(t, 400, recorder.Code)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 		assert.JSONEq(t, `{"msg":"Password is required", "status":"error"}`, recorder.Body.String())
 	})
 
@@ -439,7 +389,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
 		//Check http response code 401
-		assert.Equal(t, 401, recorder.Code)
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 		assert.JSONEq(t, `{"msg":"Password and user didn't match", "status":"error"}`, recorder.Body.String())
 	})
 
@@ -454,7 +404,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
 		//Check http response code 401
-		assert.Equal(t, 401, recorder.Code)
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 		assert.JSONEq(t, `{"msg":"Password and user didn't match", "status":"error"}`, recorder.Body.String())
 	})
 
@@ -469,45 +419,21 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
 		//Check http response code 400
-		assert.Equal(t, 400, recorder.Code)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 		assert.JSONEq(t, `{"msg":"User is required", "status":"error"}`, recorder.Body.String())
 	})
 }
 
 func TestWhoamiAPI(t *testing.T) {
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
-
-	dirName := t.TempDir()
 	server_utils.ResetTestState()
-	viper.Set("ConfigDir", dirName)
-	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
-	err := config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+	setupWebUIEnv(t)
+
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	database.ServerDatabase = mockDB
 	require.NoError(t, err, "Error setting up mock origin DB")
 
-	err = database.ServerDatabase.AutoMigrate(&database.Collection{})
-	require.NoError(t, err, "Failed to migrate DB for collections table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
-	require.NoError(t, err, "Failed to migrate DB for collection members table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
-	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
-	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
-	err = database.ServerDatabase.AutoMigrate(&database.Group{})
-	require.NoError(t, err, "Failed to migrate DB for groups table")
-	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
-	require.NoError(t, err, "Failed to migrate DB for group members table")
-	err = database.ServerDatabase.AutoMigrate(&database.User{})
-	require.NoError(t, err, "Failed to migrate DB for users table")
-	require.NoError(t, err)
-	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
-	require.NoError(t, err)
-	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
+	migrateTestDB(t)
 
 	///////////////////////////SETUP///////////////////////////////////
 	//Add an admin user to file to configure
@@ -535,7 +461,7 @@ func TestWhoamiAPI(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, req)
 	//Check ok http response
-	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 	//Check that success message returned
 	assert.JSONEq(t, `{"msg":"success", "status":"success"}`, recorder.Body.String())
 	//Get the cookie to test 'whoami'
@@ -562,7 +488,7 @@ func TestWhoamiAPI(t *testing.T) {
 		require.NoError(t, err)
 
 		//Check for http response code 200
-		assert.Equal(t, 200, recorder.Code)
+		assert.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on GET, body: %s", recorder.Code, recorder.Body.String()))
 		assert.JSONEq(t, string(resStr), recorder.Body.String())
 		assert.NotZero(t, recorder.Header().Get("X-CSRF-Token"))
 	})
@@ -579,7 +505,7 @@ func TestWhoamiAPI(t *testing.T) {
 		require.NoError(t, err)
 
 		//Check for http response code 200
-		assert.Equal(t, 200, recorder.Code)
+		assert.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on GET, body: %s", recorder.Code, recorder.Body.String()))
 		assert.JSONEq(t, string(resStr), recorder.Body.String())
 	})
 }
@@ -595,7 +521,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "user-not-logged-in",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set("Server.UIAdminUsers", []string{"admin1", "admin2"})
+				viper.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2"})
 				ctx.Set("User", "")
 			},
 			expectedCode:  http.StatusUnauthorized,
@@ -604,7 +530,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "general-admin-access",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set("Server.UIAdminUsers", []string{})
+				viper.Set(param.Server_UIAdminUsers.GetName(), []string{})
 				ctx.Set("User", "admin")
 			},
 			expectedCode: http.StatusOK,
@@ -612,7 +538,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "specific-admin-user-access",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set("Server.UIAdminUsers", []string{"admin1", "admin2"})
+				viper.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2"})
 				ctx.Set("User", "admin1")
 			},
 			expectedCode: http.StatusOK,
@@ -620,7 +546,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "non-admin-user-access",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set("Server.UIAdminUsers", []string{"admin1", "admin2"})
+				viper.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2"})
 				ctx.Set("User", "user")
 			},
 			expectedCode:  http.StatusForbidden,
@@ -629,7 +555,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "admin-list-empty",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set("Server.UIAdminUsers", []string{})
+				viper.Set(param.Server_UIAdminUsers.GetName(), []string{})
 				ctx.Set("User", "user")
 			},
 			expectedCode:  http.StatusForbidden,
@@ -638,7 +564,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "admin-list-multiple-users",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set("Server.UIAdminUsers", []string{"admin1", "admin2", "admin3"})
+				viper.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2", "admin3"})
 				ctx.Set("User", "admin2")
 			},
 			expectedCode: http.StatusOK,
@@ -672,38 +598,15 @@ func TestAdminAuthHandler(t *testing.T) {
 }
 
 func TestLogoutAPI(t *testing.T) {
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
-
-	dirName := t.TempDir()
 	server_utils.ResetTestState()
-	viper.Set("ConfigDir", dirName)
-	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
-	err := config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+	setupWebUIEnv(t)
+
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	database.ServerDatabase = mockDB
 	require.NoError(t, err, "Error setting up mock origin DB")
 
-	err = database.ServerDatabase.AutoMigrate(&database.Collection{})
-	require.NoError(t, err, "Failed to migrate DB for collections table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
-	require.NoError(t, err, "Failed to migrate DB for collection members table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
-	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
-	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
-	err = database.ServerDatabase.AutoMigrate(&database.Group{})
-	require.NoError(t, err, "Failed to migrate DB for groups table")
-	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
-	require.NoError(t, err, "Failed to migrate DB for group members table")
-	err = database.ServerDatabase.AutoMigrate(&database.User{})
-	require.NoError(t, err, "Failed to migrate DB for users table")
-	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
-	require.NoError(t, err)
-	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
+	migrateTestDB(t)
 
 	///////////////////////////SETUP///////////////////////////////////
 	//Add an admin user to file to configure
@@ -731,7 +634,7 @@ func TestLogoutAPI(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, req)
 	//Check ok http response
-	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 	//Check that success message returned
 	assert.JSONEq(t, `{"msg":"success", "status":"success"}`, recorder.Body.String())
 	//Get the cookie to test 'logout'
@@ -754,7 +657,7 @@ func TestLogoutAPI(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 
 		//Check for http response code 200
-		assert.Equal(t, 200, recorder.Code)
+		assert.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 		assert.Equal(t, 1, len(recorder.Result().Cookies()))
 		assert.Equal(t, "login", recorder.Result().Cookies()[0].Name)
 		assert.Greater(t, time.Now(), recorder.Result().Cookies()[0].Expires)
@@ -767,8 +670,8 @@ func TestLogoutAPI(t *testing.T) {
 		recorder = httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
 
-		//Check for http response code 200
-		assert.Equal(t, 401, recorder.Code)
+		//Check for http response code 401
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 	})
 }
 
@@ -801,7 +704,7 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 
 	t.Run("origin-included-if-flag-is-on", func(t *testing.T) {
 		server_utils.ResetTestState()
-		viper.Set("Origin.EnableOIDC", true)
+		viper.Set(param.Origin_EnableOIDC.GetName(), true)
 		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "origin"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
 		assert.NoError(t, err)
@@ -823,7 +726,7 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 
 	t.Run("cache-included-if-flag-is-on", func(t *testing.T) {
 		server_utils.ResetTestState()
-		viper.Set("Cache.EnableOIDC", true)
+		viper.Set(param.Cache_EnableOIDC.GetName(), true)
 		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "cache"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
 		assert.NoError(t, err)
@@ -845,7 +748,7 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 
 	t.Run("director-included-if-flag-is-on", func(t *testing.T) {
 		server_utils.ResetTestState()
-		viper.Set("Director.EnableOIDC", true)
+		viper.Set(param.Director_EnableOIDC.GetName(), true)
 		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "director"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
 		assert.NoError(t, err)
@@ -867,9 +770,9 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 
 	t.Run("origin-cache-both-included-if-flags-are-on", func(t *testing.T) {
 		server_utils.ResetTestState()
-		viper.Set("Origin.EnableOIDC", true)
-		viper.Set("Cache.EnableOIDC", true)
-		viper.Set("Director.EnableOIDC", true)
+		viper.Set(param.Origin_EnableOIDC.GetName(), true)
+		viper.Set(param.Cache_EnableOIDC.GetName(), true)
+		viper.Set(param.Director_EnableOIDC.GetName(), true)
 		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "origin", "cache", "director"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
 		assert.NoError(t, err)

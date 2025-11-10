@@ -217,6 +217,8 @@ func TestPurgeFirst(t *testing.T) {
 	configDir := t.TempDir()
 	viper.Set("ConfigDir", configDir)
 
+	test_utils.MockFederationRoot(t, nil, nil)
+
 	dataDir := t.TempDir()
 	viper.Set(param.Logging_Level.GetName(), "debug")
 	viper.Set(param.LocalCache_DataLocation.GetName(), dataDir)

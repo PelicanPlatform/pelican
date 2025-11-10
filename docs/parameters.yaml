@@ -49,11 +49,18 @@ components: ["*"]
 ---
 name: Debug
 description: |+
+  [Deprecated] To enable debug logging, set ${Logging.Level} to "debug".
+
   A bool indicating whether Pelican should emit debug messages in its log.
   NOTE: this will override whatever is set within your configuration file under Logging.Level!
 type: bool
 default: false
 components: ["*"]
+deprecated: true
+# while we set `replacedby` here, it does not function in the code the same as other
+# `replacedby` examples because we need to map the Debug bool to the string "debug".
+# This is done with a special handler in `handleDeprecatedConfig()`
+replacedby: "Logging.Level"
 ---
 name: TLSSkipVerify
 description: |+
@@ -186,8 +193,12 @@ description: |+
   A string defining the log level of the client. Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
 
   Log levels are inherited by all components unless explicitly overridden. Levels are case-insensitive.
+
+  The default logging level for clients is "warn", whereas the default for servers is "info".
 type: string
-default: error
+default: none
+client_default: warn
+server_default: info
 components: ["*"]
 ---
 name: Logging.LogLocation
@@ -2386,7 +2397,9 @@ components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.IssuerJwks
 description: |+
-  A filepath indicating where the server's public JSON web keyset can be found.
+  A filepath to a JWKS-formatted file containing pre-generated public keys. These keys will be
+  appended to the public keys dynamically generated from the private keys in [Server.IssuerKeysDirectory](https://docs.pelicanplatform.org/parameters#IssuerKeysDirectory)
+  and [Server.IssuerKey](https://docs.pelicanplatform.org/parameters#IssuerKey) (deprecated), to form the final exported public keys JWKS.
 type: filename
 default: none
 components: ["cache", "director", "origin", "registry"]
@@ -3079,7 +3092,7 @@ description: |+
   Enable the internal Prometheus server. This server is bound to the ${Server.WebPort}.
 type: bool
 default: true
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.DataLocation
 description: |+
@@ -3087,7 +3100,7 @@ description: |+
 type: string
 root_default: /var/lib/pelican/monitoring/data
 default: $ConfigBase/monitoring/data
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.PortLower
 description: |+
@@ -3121,7 +3134,7 @@ description: |+
   director's origin scraper, and server's self-scraper.
 type: duration
 default: 1h
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.TokenRefreshInterval
 description: |+
@@ -3132,35 +3145,46 @@ description: |+
   This value must be less than Monitoring.TokenExpiresIn.
 type: duration
 default: 5m
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.MetricAuthorization
 description: |+
   If authorization (Bearer token) is required for accessing /metrics endpoint.
 type: bool
 default: true
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.PromQLAuthorization
 description: |+
   If authorization (Bearer token or cookie) is required for accessing /prometheus/query endpoint.
 type: bool
 default: true
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.DataRetention
 description: |+
   The duration of which Prometheus should retain the monitoring data.
 type: duration
 default: 360h
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
+---
+name: Monitoring.DataRetentionSize
+description: |+
+  The maximum number of bytes of storage blocks to retain. The oldest data will be removed first. This is used to limit the amount of data that can be stored in the database.
+  This parameter is equivalent to the Prometheus `storage.tsdb.retention.size` flag. For more information, see [Prometheus Storage Documentation](https://prometheus.io/docs/prometheus/latest/storage/).
+
+  Units supported: B, KB, MB, GB, TB, PB, EB
+  Ex: "512MB"
+type: string
+default: "0B"
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.LabelLimit
 description: |+
   The maximum number of labels that can be attached to a single metric. 0 means no limit.
 type: int
 default: 64
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.LabelNameLengthLimit
 description: |+
@@ -3177,14 +3201,14 @@ description: |+
   Be wary of modify this value. Similar considerations should be made for modifying Monitoring.LabelValueLengthLimit, Monitoring.LabelLimit, and Monitoring.SampleLimit.
 type: int
 default: 128
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.LabelValueLengthLimit
 description: |+
   The maximum length of a label value. 0 means no limit. The default value is 2048 bytes, which allows for up to 512 characters.
 type: int
 default: 2048
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 name: Monitoring.SampleLimit
 description: |+
@@ -3193,7 +3217,7 @@ description: |+
   the entire scrape will be treated as failed. 0 means no limit.
 type: int
 default: 200
-components: ["origin", "cache", "director", "registry"]
+components: ["origin", "cache", "director", "registry", "broker", "localcache"]
 ---
 ############################
 #   Shoveler-level configs   #

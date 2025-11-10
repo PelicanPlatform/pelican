@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -177,8 +176,8 @@ var (
 
 	// Some config parsing tools will init both client and server config, but both
 	// warn about several config params. Only warn once per process.
-	warnIssuerKeyOnce  sync.Once
 	warnDeprecatedOnce sync.Once
+	warnDebugOnce      sync.Once
 
 	RestartFlag  = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
 	ShutdownFlag = make(chan any) // A channel flag to shutdown the server instance that launcher listens to (including cache)
@@ -355,10 +354,41 @@ func GetAllPrefixes() []ConfigPrefix {
 
 // We can't parse a schemeless hostname when there's a port, so check for a scheme and add one if none exists.
 func wrapWithHttpsIfNeeded(urlStr string) string {
+	// The fact that we don't overwrite http:// with https:// appears to be an artifact from testing.
+	// In a future where we have time to get to the little things, we should address this since an http
+	// central service is a terrible idea, and we shouldn't make it possible just for the sake of testing...
 	if len(urlStr) > 0 && !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
 		urlStr = "https://" + urlStr
+		log.Debugf("The configured URL %s did not have an understood scheme ('https://' or 'http://'); will assume https", urlStr)
 	}
 	return urlStr
+}
+
+// Validate that the federation Discovery URL does not contain a path and is otherwise a valid URL.
+func validateDiscoveryUrl(discUrlStr string) (*url.URL, error) {
+	errPrfx := fmt.Sprintf("invalid federation discovery url of '%s' (config parameter %s):", discUrlStr, param.Federation_DiscoveryUrl.GetName())
+
+	discUrlStr = wrapWithHttpsIfNeeded(discUrlStr)
+	discUrl, err := url.Parse(discUrlStr)
+	if err != nil {
+		return nil, errors.Wrap(err, errPrfx)
+	}
+
+	// In some strange cases, URL parsing may render a path but no host
+	// (at least, this appears to be an assumption the original author of this logic
+	// made, but at time of functionalizing the knowledge as to how that happens is lost).
+	// Here, we want to ensure that if there is a host, there is no path.
+	if len(discUrl.Path) > 0 && len(discUrl.Host) > 0 {
+		return nil, errors.New(errPrfx + fmt.Sprintf(": Discovery URLs cannot contain a URL path, but yours parses as '%s'", discUrl.Path))
+	}
+
+	// If we end up with a path but no host, we use the path as the host.
+	if len(discUrl.Path) > 0 && len(discUrl.Host) == 0 {
+		discUrl.Host = discUrl.Path
+		discUrl.Path = ""
+	}
+
+	return discUrl, nil
 }
 
 // Global implementation of Discover Federation, outside any caching or
@@ -380,6 +410,9 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 		if fedInfo.BrokerEndpoint == "" && enabledServers.IsEnabled(server_structs.BrokerType) {
 			fedInfo.BrokerEndpoint = externalUrlStr
 		}
+		if fedInfo.DirectorAdvertiseEndpoints == nil && enabledServers.IsEnabled(server_structs.DirectorType) {
+			fedInfo.DirectorAdvertiseEndpoints = []string{externalUrlStr}
+		}
 
 		// Some services in the Director, like federation tokens, may require a defined federation root (discovery URL)
 		// so for these to have a chance at working in places where a Director truly is acting as the fed root (e.g.
@@ -389,65 +422,91 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 		}
 
 		// Make sure any values in global federation metadata are url-parseable
+		fedInfo.DiscoveryEndpoint = wrapWithHttpsIfNeeded(fedInfo.DiscoveryEndpoint)
 		fedInfo.DirectorEndpoint = wrapWithHttpsIfNeeded(fedInfo.DirectorEndpoint)
 		fedInfo.RegistryEndpoint = wrapWithHttpsIfNeeded(fedInfo.RegistryEndpoint)
 		fedInfo.JwksUri = wrapWithHttpsIfNeeded(fedInfo.JwksUri)
 		fedInfo.BrokerEndpoint = wrapWithHttpsIfNeeded(fedInfo.BrokerEndpoint)
+		for i, advUrl := range fedInfo.DirectorAdvertiseEndpoints {
+			fedInfo.DirectorAdvertiseEndpoints[i] = wrapWithHttpsIfNeeded(advUrl)
+		}
 	}()
 
+	// Set each of the fed values to anything we got from config.
 	log.Debugln("Configured federation URL:", federationStr)
+	fedInfo.DiscoveryEndpoint = federationStr
 	fedInfo.DirectorEndpoint = viper.GetString("Federation.DirectorUrl")
 	fedInfo.RegistryEndpoint = viper.GetString("Federation.RegistryUrl")
 	fedInfo.JwksUri = viper.GetString("Federation.JwkUrl")
 	fedInfo.BrokerEndpoint = viper.GetString("Federation.BrokerUrl")
-	if fedInfo.DirectorEndpoint != "" && fedInfo.RegistryEndpoint != "" && fedInfo.JwksUri != "" && fedInfo.BrokerEndpoint != "" {
-		if federationStr != "" {
-			fedInfo.DiscoveryEndpoint = federationStr
-		}
+
+	// The only time we'll ever skip discovery is if we already have all the values.
+	// Note that the discovery endpoint itself is required because it acts as the
+	// federation's issuer.
+	//
+	// It's unclear whether director advertise endpoints should also be included here --
+	// outside of federations with HA Directors, even the discovered slice will be empty
+	// and it doesn't seem like we should enforce its presence.
+	if fedInfo.DiscoveryEndpoint != "" && fedInfo.DirectorEndpoint != "" &&
+		fedInfo.RegistryEndpoint != "" && fedInfo.JwksUri != "" && fedInfo.BrokerEndpoint != "" {
 		return
 	}
 
 	federationStr = wrapWithHttpsIfNeeded(federationStr)
-	federationUrl, err := url.Parse(federationStr)
+	federationUrl, err := validateDiscoveryUrl(federationStr)
 	if err != nil {
-		err = errors.Wrapf(err, "invalid federation value %s:", federationStr)
 		return
 	}
 
-	if federationUrl.Path != "" && federationUrl.Host != "" {
-		// If the host is nothing, then the url is fine, but if we have a host and a path then there is a problem
-		err = errors.New("Invalid federation discovery url is set. No path allowed for federation discovery url. Provided url: " + federationStr)
-		return
-	}
+	// If we have no locally-configured discovery URL but we do have a Director, we may still be able to discover
+	// services via the Director's hosting of the metadata. In this case, even though we discover services via the Director,
+	// we populate our fed info object's discovery URL with what's discovered, NOT the Director itself. The reason we
+	// do this is that the returned fed object's discovery URL acts as the federation's issuer, so it MUST match what the
+	// Director sees -- the Director may sign tokens with what it sees as the discovery URL.
+	//
+	// The awkwardness in this stems from failing to separate out the concepts of federation issuer from discovery URL, but
+	// these metadata objects are too established to change easily.
+	if federationUrl.String() == "" && fedInfo.DirectorEndpoint != "" {
+		log.Debugf("No federation discovery URL was configured; will attempt to fall back to discovering services via the configured Director URL of %s", fedInfo.DirectorEndpoint)
+		federationUrl, err = validateDiscoveryUrl(wrapWithHttpsIfNeeded(fedInfo.DirectorEndpoint))
+		if err != nil {
+			// An error here means there is no valid discovery URL and we couldn't parse the Director URL;
+			// we're out of options for discovery
+			err = errors.Wrap(err, "could not determine federation discovery URL and was unable to fallback to metadata discovery via the configured Director URL")
+			return
+		}
+		federationStr = federationUrl.String()
 
-	if len(federationUrl.Path) > 0 && len(federationUrl.Host) == 0 {
-		federationUrl.Host = federationUrl.Path
-		federationUrl.Path = ""
+		// Unset the discovery endpoint -- in this case we'll try to learn the federation's
+		// real discovery URL from the Director
+		fedInfo.DiscoveryEndpoint = ""
 	}
-	fedInfo.DiscoveryEndpoint = federationUrl.String()
 
 	var metadata pelican_url.FederationDiscovery
-	if federationStr == "" {
-		log.Debugln("Federation URL is unset; skipping discovery")
-	} else if federationStr == externalUrlStr {
+	if federationStr == externalUrlStr {
 		log.Debugln("Current web engine hosts the federation; skipping auto-discovery of services")
 	} else {
-		tr := GetTransport()
-		httpClient := &http.Client{
-			Transport: tr,
-			Timeout:   time.Second * 5,
+		log.Debugln("Attempting to discover federation services via URL:", federationStr)
+		httpClient := GetClient()
+		if client == nil {
+			err = errors.New("no HTTP client available to perform federation discovery")
+			return
 		}
 
 		// We can't really know the service here, so set to generic Pelican
 		ua := "pelican/" + GetVersion()
 		metadata, err = pelican_url.DiscoverFederation(ctx, httpClient, ua, federationUrl)
 		if err != nil {
-			err = errors.Wrapf(err, "invalid federation value (%s)", federationStr)
+			err = errors.Wrapf(err, "could not discover federation services from '%s'", federationUrl.String())
 			return
 		}
 	}
 
 	// Set our globals
+	if fedInfo.DiscoveryEndpoint == "" {
+		log.Debugln("Setting global discovery url to", metadata.DiscoveryEndpoint)
+		fedInfo.DiscoveryEndpoint = metadata.DiscoveryEndpoint
+	}
 	if fedInfo.DirectorEndpoint == "" {
 		log.Debugln("Setting global director url to", metadata.DirectorEndpoint)
 		fedInfo.DirectorEndpoint = metadata.DirectorEndpoint
@@ -463,6 +522,9 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 	if fedInfo.BrokerEndpoint == "" && metadata.BrokerEndpoint != "" {
 		log.Debugln("Setting global broker url to", metadata.BrokerEndpoint)
 		fedInfo.BrokerEndpoint = metadata.BrokerEndpoint
+	}
+	if fedInfo.DirectorAdvertiseEndpoints == nil && metadata.DirectorAdvertiseEndpoints != nil {
+		fedInfo.DirectorAdvertiseEndpoints = metadata.DirectorAdvertiseEndpoints
 	}
 
 	return
@@ -492,11 +554,14 @@ func GetFederation(ctx context.Context) (pelican_url.FederationDiscovery, error)
 
 // Set the current global federation metadata
 func SetFederation(fd pelican_url.FederationDiscovery) {
-	viper.Set("Federation.DiscoveryUrl", fd.DiscoveryEndpoint)
+	viper.Set(param.Federation_DiscoveryUrl.GetName(), fd.DiscoveryEndpoint)
 	viper.Set("Federation.DirectorUrl", fd.DirectorEndpoint)
 	viper.Set("Federation.RegistryUrl", fd.RegistryEndpoint)
 	viper.Set("Federation.BrokerUrl", fd.BrokerEndpoint)
 	viper.Set("Federation.JwkUrl", fd.JwksUri)
+	viper.Set("Federation.DirectorAdvertiseEndpoints", fd.DirectorAdvertiseEndpoints)
+
+	globalFedInfo = fd
 }
 
 // TODO: It's not clear that this function works correctly.  We should
@@ -561,27 +626,27 @@ func GetServerIssuerURL() (issuerUrl string, err error) {
 	// Prefer the concretely configured param
 	if issuerUrl = param.Server_IssuerUrl.GetString(); issuerUrl != "" {
 		if _, err := url.Parse(issuerUrl); err != nil {
-			return "", errors.Wrapf(err, "failed to parse '%s' as issuer URL from config param '%s'",
+			return "", errors.Wrapf(err, "failed to parse %q as issuer URL from config param %q",
 				param.Server_IssuerUrl.GetString(), param.Server_IssuerUrl.GetName())
 		}
-		log.Debugf("Populating server's issuer URL as '%s' from config param '%s'", issuerUrl, param.Server_IssuerUrl.GetName())
+		log.Debugf("Populating server's issuer URL as %q from config param %q", issuerUrl, param.Server_IssuerUrl.GetName())
 		return issuerUrl, nil
 	}
 
 	// Next, try to piece it together based on concretely configured hostname:port
 	if param.Server_IssuerHostname.GetString() != "" {
 		if param.Server_IssuerPort.GetInt() == 0 {
-			return "", errors.Errorf("if '%s' is configured, you must also configure a valid port via '%s'",
+			return "", errors.Errorf("if %q is configured, you must also configure a valid port via %q",
 				param.Server_IssuerHostname.GetName(), param.Server_IssuerPort.GetName())
 		}
 
 		// We assume any issuer is running https
 		issuerUrl := fmt.Sprintf("https://%s:%d", param.Server_IssuerHostname.GetString(), param.Server_IssuerPort.GetInt())
 		if _, err := url.Parse(issuerUrl); err != nil {
-			return "", errors.Wrapf(err, "failed to parse '%s' as issuer URL from config params '%s' and '%s'",
+			return "", errors.Wrapf(err, "failed to parse %q as issuer URL from config params %q and %q",
 				issuerUrl, param.Server_IssuerHostname.GetName(), param.Server_IssuerPort.GetName())
 		}
-		log.Debugf("Populating server's issuer URL as '%s' from configured values of '%s' and '%s'",
+		log.Debugf("Populating server's issuer URL as %q from configured values of %q and %q",
 			issuerUrl, param.Server_IssuerHostname.GetName(), param.Server_IssuerPort.GetName())
 		return issuerUrl, nil
 	}
@@ -589,10 +654,10 @@ func GetServerIssuerURL() (issuerUrl string, err error) {
 	// Finally, fall back to the external web URL
 	issuerUrl = param.Server_ExternalWebUrl.GetString()
 	if _, err := url.Parse(issuerUrl); err != nil {
-		return "", errors.Wrapf(err, "failed to parse '%s' as the issuer URL generated from config param '%s'",
+		return "", errors.Wrapf(err, "failed to parse %q as the issuer URL generated from config param %q",
 			issuerUrl, param.Server_ExternalWebUrl.GetName())
 	}
-	log.Debugf("Populating server's issuer URL as '%s' from configured value of '%s'", issuerUrl, param.Server_ExternalWebUrl.GetName())
+	log.Debugf("Populating server's issuer URL as %q from configured value of %q", issuerUrl, param.Server_ExternalWebUrl.GetName())
 	return issuerUrl, nil
 }
 
@@ -615,12 +680,16 @@ func handleDeprecatedConfig() {
 			if viper.IsSet(deprecated) {
 				if replacement[0] == "none" {
 					log.Warningf("Deprecated configuration key %s is set. This is being removed in future release", deprecated)
+				} else if deprecated == param.Debug.GetName() {
+					// Special case for the Debug key; we handle mapping it to Logging.Level: debug in
+					// `setLoggingInternal()` because that has already been executed by the time we get here.
+					log.Warningf("The configuration key %q is being deprecated. While your setting for debug logging has been applied, you should set %q to 'debug' to achieve this behavior in the future.", param.Debug.GetName(), param.Logging_Level.GetName())
 				} else {
 					for _, rep := range replacement {
 						if viper.IsSet(rep) {
-							log.Warningf("The configuration key '%s' is deprecated. The value from its replacement '%s' will be used instead, and the value of the deprecated configuration key '%s' will be ignored.", deprecated, rep, deprecated)
+							log.Warningf("The configuration key %q is deprecated. The value from its replacement %q will be used instead, and the value of the deprecated configuration key %q will be ignored.", deprecated, rep, deprecated)
 						} else {
-							log.Warningf("The configuration key '%s' is deprecated. Please use '%s' instead. Will use the value of deprecated config key '%s' for the new config key '%s'.", deprecated, rep, deprecated, rep)
+							log.Warningf("The configuration key %q is deprecated. Please use %q instead. Will use the value of deprecated config key %q for the new config key %q.", deprecated, rep, deprecated, rep)
 							value := viper.Get(deprecated)
 							viper.Set(rep, value)
 						}
@@ -764,17 +833,22 @@ func SetBaseDefaultsInConfig(v *viper.Viper) {
 // Helper func that uses configured params to toggle the correct logging level
 // in the log library
 func setLoggingInternal() error {
+	// If the user has not set an explicit log level but they're using the old
+	// `Debug` config param, we set the log level to debug. This override behavior
+	// is legacy until we remove the `Debug` config param in a future release.
 	if param.Debug.GetBool() {
-		SetLogging(log.DebugLevel)
-		log.Warnf("Debug is set as a flag or in config, this will override anything set for '%s' within your configuration", param.Logging_Level.GetName())
-	} else {
-		logLevel := param.Logging_Level.GetString()
-		level, err := log.ParseLevel(logLevel)
-		if err != nil {
-			return errors.Wrapf(err, "failed to parse value of config param %s", param.Logging_Level.GetString())
-		}
-		SetLogging(level)
+		warnDebugOnce.Do(func() {
+			log.Warnf("The config param %q is set in your configuration, which will override any values set for %q ", param.Debug.GetName(), param.Logging_Level.GetName())
+		})
+		viper.Set(param.Logging_Level.GetName(), "debug")
 	}
+
+	logLevel := param.Logging_Level.GetString()
+	level, err := log.ParseLevel(logLevel)
+	if err != nil {
+		return errors.Wrapf(err, "failed to parse value of config param %s", param.Logging_Level.GetString())
+	}
+	SetLogging(level)
 
 	return nil
 }
@@ -801,12 +875,26 @@ func InitConfigDir(v *viper.Viper) {
 
 // InitConfigInternal sets up the global Viper instance by loading defaults and
 // user-defined config files, validates config params, and initializes logging.
-func InitConfigInternal() {
+func InitConfigInternal(logLevel log.Level) {
 	// Set a prefix so Viper knows how to parse PELICAN_* env vars
 	// This must happen before config dir initialization so that Pelican
 	// can pick up setting the config dir with PELICAN_CONFIGDIR
 	viper.SetEnvPrefix("pelican")
 	viper.AutomaticEnv()
+
+	// Log level defaults are set outside of Set{Server/Client}Defaults because
+	// logging is needed before those functions are called. They're also set directly
+	// in those functions so that the viper objects they generate are consistent.
+	//
+	// Note that we do the WarnLevel -> "warn" mapping because logrus converts the
+	// WarnLevel to "warning" when calling String(), but we want to keep "warn", which
+	// is what Pelican uses. For more information, see:
+	// https://github.com/PelicanPlatform/pelican/pull/2712
+	logString := logLevel.String()
+	if logLevel == log.WarnLevel {
+		logString = "warn"
+	}
+	viper.SetDefault(param.Logging_Level.GetName(), logString)
 
 	// Enable BindStruct to allow unmarshal env into a nested struct
 	viper.SetOptions(viper.ExperimentalBindStruct())
@@ -1008,43 +1096,6 @@ func PrintClientConfig() error {
 	return nil
 }
 
-// Helper function to emit a warning telling the user to switch to IssuerKeysDirectory,
-// if the IssuerKey config param still points to a file on disk.
-// This function serves as a transitional step to help users migrate from IssuerKey to
-// IssuerKeysDirectory. It should be removed if the transition is done.
-func warnIssuerKey(v *viper.Viper) {
-	warnIssuerKeyOnce.Do(func() {
-		legacyKey := v.GetString(param.IssuerKey.GetName())
-		if legacyKey != "" {
-
-			if _, err := os.Stat(legacyKey); err == nil {
-				issuerKeyConfigBy := "default"
-				issuerKeysDirectoryConfigBy := "default"
-				changeExtension := ""
-
-				configDir := v.GetString("ConfigDir")
-				if filepath.Join(configDir, "issuer.jwk") != v.GetString(param.IssuerKey.GetName()) {
-					issuerKeyConfigBy = "custom"
-				}
-				if filepath.Join(configDir, "issuer-keys") != v.GetString(param.IssuerKeysDirectory.GetName()) {
-					issuerKeysDirectoryConfigBy = "custom"
-				}
-				if !strings.HasSuffix(v.GetString(param.IssuerKey.GetName()), ".pem") {
-					changeExtension = "renamed to use '.pem' extension and "
-				}
-
-				log.Errorf(
-					"File %q should be %smoved into directory %q. "+
-						"The %q parameter (currently set to %q via %s configuration) is being deprecated in favor of %q (currently set to %q via %s configuration). ",
-					v.GetString(param.IssuerKey.GetName()), changeExtension, v.GetString(param.IssuerKeysDirectory.GetName()),
-					param.IssuerKey.GetName(), param.IssuerKey.GetString(), issuerKeyConfigBy,
-					param.IssuerKeysDirectory.GetName(), v.GetString(param.IssuerKeysDirectory.GetName()), issuerKeysDirectoryConfigBy,
-				)
-			}
-		}
-	})
-}
-
 // Set all defaults relevant to servers (defaults can be set only for active servers)
 // but only for the passed viper instance.
 // We operate on the passed viper instance instead of the global because it lets us
@@ -1056,6 +1107,11 @@ func SetServerDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
 	v.SetConfigType("yaml")
 
+	// Duplicate setting a default logging level so that this function picks picks up
+	// the one case where we need to set client/server defaults differently directly in
+	// InitConfigInternal. We need to do that because internal logging levels are set by
+	// InitServer/InitClient before we call SetClientDefaults/SetServerDefaults.
+	v.SetDefault(param.Logging_Level.GetName(), "info")
 	v.SetDefault(param.Server_WebConfigFile.GetName(), filepath.Join(configDir, "web-config.yaml"))
 	v.SetDefault(param.Server_TLSCertificateChain.GetName(), filepath.Join(configDir, "certificates", "tls.crt"))
 	v.SetDefault(param.Server_TLSKey.GetName(), filepath.Join(configDir, "certificates", "tls.key"))
@@ -1070,7 +1126,6 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Xrootd_MaxThreads.GetName(), 20000)
 	v.SetDefault(param.Cache_EvictionMonitoringInterval.GetName(), "60s")
 	v.SetDefault(param.Cache_EvictionMonitoringMaxDepth.GetName(), 1)
-	v.SetDefault(param.Cache_ClientStatisticsLocation.GetName(), filepath.Join(param.Cache_RunLocation.GetString(), "xrootd.stats"))
 	v.SetDefault(param.IssuerKey.GetName(), filepath.Join(configDir, "issuer.jwk"))
 	v.SetDefault(param.IssuerKeysDirectory.GetName(), filepath.Join(configDir, "issuer-keys"))
 	v.SetDefault(param.Server_UIPasswordFile.GetName(), filepath.Join(configDir, "server-web-passwd"))
@@ -1199,6 +1254,8 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Origin_Multiuser.GetName(), false)
 	}
 
+	v.SetDefault(param.Cache_ClientStatisticsLocation.GetName(), filepath.Join(param.Cache_RunLocation.GetString(), "xrootd.stats"))
+
 	fcRunLocation := v.GetString(param.LocalCache_RunLocation.GetName())
 	v.SetDefault(param.LocalCache_Socket.GetName(), filepath.Join(fcRunLocation, "cache.sock"))
 	v.SetDefault(param.LocalCache_DataLocation.GetName(), filepath.Join(fcRunLocation, "cache"))
@@ -1290,7 +1347,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	if directorStatusWeightTimeConstant := v.GetDuration(param.Director_AdaptiveSortEWMATimeConstant.GetName()); directorStatusWeightTimeConstant <= 0 {
 		duration := v.GetDuration(param.Director_AdaptiveSortEWMATimeConstant.GetName())
 		p := param.Director_AdaptiveSortEWMATimeConstant
-		log.Warningf("Invalid value of '%s' for config param %s; must be greater than 0. Resetting to default", duration.String(), p.GetName())
+		log.Warningf("Invalid value of %q for config param %s; must be greater than 0. Resetting to default", duration.String(), p.GetName())
 		v.Set(p.GetName(), 5*time.Minute)
 	}
 
@@ -1302,6 +1359,8 @@ func SetServerDefaults(v *viper.Viper) error {
 			adaptiveSortTruncateConst, param.Director_AdaptiveSortTruncateConstant.GetName(), 6)
 		v.Set(param.Director_AdaptiveSortTruncateConstant.GetName(), 6)
 	}
+
+	v.SetDefault(param.Monitoring_DataRetentionSize.GetName(), "0B")
 
 	// Setup the audience to use.  We may customize the Origin.URL in the future if it has
 	// a `0` for the port number; to make the audience predictable (it goes into the xrootd
@@ -1327,9 +1386,6 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault("Federation_DirectorUrl", v.GetString(param.Server_ExternalWebUrl.GetName()))
 	}
 
-	// Warn the user if they still use IssuerKey
-	warnIssuerKey(v)
-
 	return err
 }
 
@@ -1337,7 +1393,7 @@ func SetServerDefaults(v *viper.Viper) error {
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
 func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
-	InitConfigInternal()
+	InitConfigInternal(log.InfoLevel)
 
 	setEnabledServer(currentServers)
 
@@ -1608,7 +1664,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		}
 
 		if adTTL := param.Director_AdvertisementTTL.GetDuration(); adTTL <= 0 {
-			log.Warningf("Invalid value of '%s' for config param %s; must be greater than 0, falling back to default of 15 minutes",
+			log.Warningf("Invalid value of %q for config param %s; must be greater than 0, falling back to default of 15 minutes",
 				adTTL, param.Director_AdvertisementTTL.GetName())
 			viper.Set(param.Director_AdvertisementTTL.GetName(), "15m")
 		}
@@ -1629,7 +1685,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		case server_structs.SortType(""):
 			viper.Set(param.Director_CacheSortMethod.GetName(), server_structs.DistanceType)
 		default:
-			return errors.New(fmt.Sprintf("invalid Director.CacheSortMethod. Must be one of '%s', '%s', '%s', or '%s', but you configured '%s'.",
+			return errors.New(fmt.Sprintf("invalid Director.CacheSortMethod. Must be one of %q, %q, %q, or %q, but you configured %q.",
 				server_structs.DistanceType, server_structs.DistanceAndLoadType, server_structs.RandomType, server_structs.AdaptiveType, s))
 		}
 	} else {
@@ -1726,7 +1782,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	if param.Server_Hostname.IsSet() {
 		serverHostname := param.Server_Hostname.GetString()
 		if err := ValidateHostCertificateHostname(serverHostname); err != nil {
-			return errors.Wrapf(err, "unable to validate server hostname '%s' configured via %s against the TLS certificate"+
+			return errors.Wrapf(err, "unable to validate server hostname %q configured via %s against the TLS certificate"+
 				" configured via %s",
 				serverHostname, param.Server_Hostname.GetName(), param.Server_TLSCertificateChain.GetName())
 		}
@@ -1744,7 +1800,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		}
 
 		if err := ValidateHostCertificateHostname(parsed.Hostname()); err != nil {
-			return errors.Wrapf(err, "unable to validate hostname '%s' configured via %s against the TLS certificate"+
+			return errors.Wrapf(err, "unable to validate hostname %q configured via %s against the TLS certificate"+
 				" configured via %s",
 				parsed.Hostname(), urlParam.GetName(), param.Server_TLSCertificateChain.GetName())
 		}
@@ -1814,6 +1870,11 @@ func ResetClientInitialized() {
 func SetClientDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
 
+	// Duplicate setting a default logging level so that this function picks picks up
+	// the one case where we need to set client/server defaults differently directly in
+	// InitConfigInternal. We need to do that because internal logging levels are set by
+	// InitServer/InitClient before we call SetClientDefaults/SetServerDefaults.
+	v.SetDefault(param.Logging_Level.GetName(), "warn")
 	v.SetDefault(param.IssuerKey.GetName(), filepath.Join(configDir, "issuer.jwk"))
 	v.SetDefault(param.IssuerKeysDirectory.GetName(), filepath.Join(configDir, "issuer-keys"))
 
@@ -1953,14 +2014,11 @@ func SetClientDefaults(v *viper.Viper) error {
 		v.Set(param.Client_DirectorRetries.GetName(), 5)
 	}
 
-	// Warn the user if they still use IssuerKey
-	warnIssuerKey(v)
-
 	return nil
 }
 
 func InitClient() error {
-	InitConfigInternal()
+	InitConfigInternal(log.WarnLevel)
 	logging.FlushLogs(true)
 	if err := SetClientDefaults(viper.GetViper()); err != nil {
 		return err
@@ -2029,8 +2087,8 @@ func ResetConfig() {
 	globalFedInfo = pelican_url.FederationDiscovery{}
 	globalFedErr = nil
 
-	warnIssuerKeyOnce = sync.Once{}
 	warnDeprecatedOnce = sync.Once{}
+	warnDebugOnce = sync.Once{}
 
 	setServerOnce = sync.Once{}
 

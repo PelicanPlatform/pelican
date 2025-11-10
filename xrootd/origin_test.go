@@ -68,13 +68,15 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	require.NoError(t, err)
 
 	viper.Set("ConfigDir", tmpPath)
-	viper.Set("Origin.RunLocation", filepath.Join(tmpPath, "xorigin"))
+	viper.Set(param.Origin_RunLocation.GetName(), filepath.Join(tmpPath, "xorigin"))
 	t.Cleanup(func() {
 		os.RemoveAll(tmpPath)
 	})
 
+	test_utils.MockFederationRoot(t, nil, nil)
+
 	// Increase the log level; otherwise, its difficult to debug failures
-	viper.Set("Logging.Level", "Debug")
+	viper.Set(param.Logging_Level.GetName(), "Debug")
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
@@ -119,7 +121,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	require.NoError(t, err)
 
 	portStartCallback := func(port int) {
-		viper.Set("Origin.Port", port)
+		viper.Set(param.Origin_Port.GetName(), port)
 		if originUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {
 			originUrl.Host = originUrl.Hostname() + ":" + strconv.Itoa(port)
 			viper.Set("Origin.Url", originUrl.String())
@@ -215,6 +217,8 @@ func TestMultiExportOrigin(t *testing.T) {
 	viper.Set(param.TLSSkipVerify.GetName(), true)
 	viper.Set(param.Logging_Origin_Scitokens.GetName(), "debug")
 
+	test_utils.MockFederationRoot(t, nil, nil)
+
 	// Initialize the origin before getting origin exports
 	viper.Set("ConfigDir", t.TempDir())
 	err = config.InitServer(ctx, server_structs.OriginType)
@@ -249,26 +253,26 @@ func TestMultiExportOrigin(t *testing.T) {
 func mockupS3Origin(ctx context.Context, egrp *errgroup.Group, t *testing.T, federationPrefix, bucketName, urlStyle string) context.CancelFunc {
 	regionName := "us-east-1"
 	serviceUrl := "https://s3.amazonaws.com"
-	viper.Set("Origin.FederationPrefix", federationPrefix)
-	viper.Set("Origin.S3Bucket", bucketName)
-	viper.Set("Origin.S3Region", regionName)
-	viper.Set("Origin.S3ServiceUrl", serviceUrl)
-	viper.Set("Origin.S3UrlStyle", urlStyle)
-	viper.Set("Origin.StorageType", "s3")
-	viper.Set("Origin.EnablePublicReads", true)
+	viper.Set(param.Origin_FederationPrefix.GetName(), federationPrefix)
+	viper.Set(param.Origin_S3Bucket.GetName(), bucketName)
+	viper.Set(param.Origin_S3Region.GetName(), regionName)
+	viper.Set(param.Origin_S3ServiceUrl.GetName(), serviceUrl)
+	viper.Set(param.Origin_S3UrlStyle.GetName(), urlStyle)
+	viper.Set(param.Origin_StorageType.GetName(), "s3")
+	viper.Set(param.Origin_EnablePublicReads.GetName(), true)
 
 	ports, err := test_utils.GetUniqueAvailablePorts(2)
 	require.NoError(t, err)
 	require.Len(t, ports, 2)
 
 	// Disable functionality we're not using (and is difficult to make work on Mac)
-	viper.Set("Origin.EnableCmsd", false)
-	viper.Set("Origin.EnableMacaroons", false)
-	viper.Set("Origin.EnableVoms", false)
-	viper.Set("Origin.SelfTest", false)
-	viper.Set("Origin.Port", ports[0])
-	viper.Set("Server.WebPort", ports[1])
-	viper.Set("TLSSkipVerify", true)
+	viper.Set(param.Origin_EnableCmsd.GetName(), false)
+	viper.Set(param.Origin_EnableMacaroons.GetName(), false)
+	viper.Set(param.Origin_EnableVoms.GetName(), false)
+	viper.Set(param.Origin_SelfTest.GetName(), false)
+	viper.Set(param.Origin_Port.GetName(), ports[0])
+	viper.Set(param.Server_WebPort.GetName(), ports[1])
+	viper.Set(param.TLSSkipVerify.GetName(), true)
 
 	return originMockup(ctx, egrp, t)
 }
@@ -341,8 +345,8 @@ func TestS3OriginWithSentinel(t *testing.T) {
 	defer mockupCancel()
 
 	mockExportValidStn := server_utils.OriginExport{
-		StoragePrefix:    viper.GetString("Origin.StoragePrefix"),
-		FederationPrefix: viper.GetString("Origin.FederationPrefix"),
+		StoragePrefix:    viper.GetString(param.Origin_StoragePrefix.GetName()),
+		FederationPrefix: viper.GetString(param.Origin_FederationPrefix.GetName()),
 		Capabilities:     server_structs.Capabilities{Reads: true},
 		SentinelLocation: "MD5SUMS",
 	}
@@ -356,15 +360,15 @@ func TestS3OriginWithSentinel(t *testing.T) {
 
 	// mock export with no sentinel
 	mockExportNoStn := server_utils.OriginExport{
-		StoragePrefix:    viper.GetString("Origin.StoragePrefix"),
-		FederationPrefix: viper.GetString("Origin.FederationPrefix"),
+		StoragePrefix:    viper.GetString(param.Origin_StoragePrefix.GetName()),
+		FederationPrefix: viper.GetString(param.Origin_FederationPrefix.GetName()),
 		Capabilities:     server_structs.Capabilities{Reads: true},
 	}
 
 	// mock export with an invalid sentinel
 	mockExportInvalidStn := server_utils.OriginExport{
-		StoragePrefix:    viper.GetString("Origin.StoragePrefix"),
-		FederationPrefix: viper.GetString("Origin.FederationPrefix"),
+		StoragePrefix:    viper.GetString(param.Origin_StoragePrefix.GetName()),
+		FederationPrefix: viper.GetString(param.Origin_FederationPrefix.GetName()),
 		Capabilities:     server_structs.Capabilities{Reads: true},
 		SentinelLocation: "MD5SUMS_dne",
 	}
@@ -407,17 +411,17 @@ func TestPosixOriginWithSentinel(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, ports, 2)
 
-	viper.Set("Origin.StoragePrefix", tmpPath)
-	viper.Set("Origin.FederationPrefix", "/test")
-	viper.Set("Origin.StorageType", "posix")
+	viper.Set(param.Origin_StoragePrefix.GetName(), tmpPath)
+	viper.Set(param.Origin_FederationPrefix.GetName(), "/test")
+	viper.Set(param.Origin_StorageType.GetName(), "posix")
 	// Disable functionality we're not using (and is difficult to make work on Mac)
-	viper.Set("Origin.EnableCmsd", false)
-	viper.Set("Origin.EnableMacaroons", false)
-	viper.Set("Origin.EnableVoms", false)
-	viper.Set("Origin.Port", ports[0])
-	viper.Set("Server.WebPort", ports[1])
-	viper.Set("TLSSkipVerify", true)
-	viper.Set("Logging.Origin.Scitokens", "trace")
+	viper.Set(param.Origin_EnableCmsd.GetName(), false)
+	viper.Set(param.Origin_EnableMacaroons.GetName(), false)
+	viper.Set(param.Origin_EnableVoms.GetName(), false)
+	viper.Set(param.Origin_Port.GetName(), ports[0])
+	viper.Set(param.Server_WebPort.GetName(), ports[1])
+	viper.Set(param.TLSSkipVerify.GetName(), true)
+	viper.Set(param.Logging_Origin_Scitokens.GetName(), "trace")
 
 	mockupCancel := originMockup(ctx, egrp, t)
 	defer mockupCancel()

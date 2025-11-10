@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -50,10 +50,12 @@ import (
 func setupPingEngine(t *testing.T, ctx context.Context, egrp *errgroup.Group) (chan bool, context.CancelFunc, string) {
 	dirname := t.TempDir()
 	server_utils.ResetTestState()
-	viper.Set("Logging.Level", "Debug")
+	viper.Set(param.Logging_Level.GetName(), "Debug")
 	viper.Set("ConfigDir", dirname)
-	viper.Set("Server.WebPort", 8444)
-	viper.Set("Origin.Port", 8443)
+	viper.Set(param.Server_WebPort.GetName(), 8444)
+	viper.Set(param.Origin_Port.GetName(), 8443)
+
+	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(ctx)

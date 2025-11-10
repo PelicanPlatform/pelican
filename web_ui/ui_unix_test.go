@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -32,18 +32,22 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tg123/go-htpasswd"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 func TestDoReload(t *testing.T) {
 	server_utils.ResetTestState()
+
+	setupWebUIEnv(t)
+
 	savedAuthDB := authDB.Load()
 	authDB.Store(nil)
 	defer authDB.Store(savedAuthDB)
 
 	tempDir := t.TempDir()
 	passwordFile := path.Join(tempDir, "/authdb")
-	viper.Set("Server.UIPasswordFile", passwordFile)
+	viper.Set(param.Server_UIPasswordFile.GetName(), passwordFile)
 	hook := test.NewGlobal()
 
 	// Without a authdb set up, it should return nil with log message

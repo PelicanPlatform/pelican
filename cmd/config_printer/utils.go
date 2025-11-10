@@ -42,7 +42,7 @@ func initClientAndServerConfig(v *viper.Viper) *param.Config {
 	currentLevel := log.GetLevel()
 	log.SetLevel(log.ErrorLevel) // Suppress debug, warnings and info messages
 
-	config.InitConfigInternal()
+	config.InitConfigInternal(log.InfoLevel)
 
 	// Restore original log level
 	log.SetLevel(currentLevel)

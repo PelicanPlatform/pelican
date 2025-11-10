@@ -66,6 +66,7 @@ func TestRegistration(t *testing.T) {
 	keysDir := filepath.Join(tempConfigDir, "issuer-keys")
 	viper.Set(param.IssuerKeysDirectory.GetName(), keysDir)
 
+	test_utils.MockFederationRoot(t, nil, nil)
 	viper.Set(param.Registry_DbLocation.GetName(), "")
 	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(tempConfigDir, "test.sql"))
 	err = config.InitServer(ctx, server_structs.OriginType)
@@ -97,7 +98,7 @@ func TestRegistration(t *testing.T) {
 	defer svr.Close()
 
 	viper.Set("Federation.RegistryUrl", svr.URL)
-	viper.Set("Origin.FederationPrefix", "/test123")
+	viper.Set(param.Origin_FederationPrefix.GetName(), "/test123")
 
 	// Re-run the InitServer to reflect the new RegistryUrl set above
 	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
@@ -186,6 +187,13 @@ func TestMultiKeysRegistration(t *testing.T) {
 
 	server_utils.ResetTestState()
 	viper.Set("ConfigDir", tempConfigDir)
+
+	// MockFederationRoot must be called before setting IssuerKeysDirectory because that
+	// function overrides the IssuerKeysDirectory value if not already set. Since we don't
+	// rely on the federation keys in this test, it's easier to work around the issue than
+	// generate distinct keys for it.
+	test_utils.MockFederationRoot(t, nil, nil)
+
 	keysDir := filepath.Join(tempConfigDir, "issuer-keys")
 	viper.Set(param.IssuerKeysDirectory.GetName(), keysDir)
 
@@ -248,7 +256,7 @@ func TestMultiKeysRegistration(t *testing.T) {
 	defer svr.Close()
 
 	viper.Set("Federation.RegistryUrl", svr.URL)
-	viper.Set("Origin.FederationPrefix", "/test123")
+	viper.Set(param.Origin_FederationPrefix.GetName(), "/test123")
 
 	// Remove the original key, forcing us to register with the new one
 	require.NoError(t, os.Remove(filepath.Join(keysDir, dirEntries[0].Name())))

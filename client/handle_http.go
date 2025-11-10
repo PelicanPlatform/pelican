@@ -340,6 +340,8 @@ type (
 	identTransferOptionCollectionsUrl  struct{}
 	identTransferOptionChecksums       struct{}
 	identTransferOptionRequireChecksum struct{}
+	identTransferOptionRecursive       struct{}
+	identTransferOptionDepth           struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -906,6 +908,22 @@ func WithAcquireToken(enable bool) TransferOption {
 // object already exists.
 func WithSynchronize(level SyncLevel) TransferOption {
 	return option.New(identTransferOptionSynchronize{}, level)
+}
+
+// Create an option to enable recursive listing
+//
+// When enabled, the list operation will recursively traverse all subdirectories
+func WithRecursive(recursive bool) TransferOption {
+	return option.New(identTransferOptionRecursive{}, recursive)
+}
+
+// Create an option to specify the maximum depth for recursive listing
+//
+// The depth parameter controls how deep the recursive listing will go.
+// A depth of 0 means only the specified directory, 1 means one level deep, etc.
+// A depth of -1 means unlimited depth.
+func WithDepth(depth int) TransferOption {
+	return option.New(identTransferOptionDepth{}, depth)
 }
 
 // Create a new client to work with an engine
@@ -2244,7 +2262,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				} else if ue, ok := cse.Unwrap().(*url.Error); ok {
 					httpErr := ue.Unwrap()
 					if httpErr.Error() == "net/http: timeout awaiting response headers" {
-						headerTimeoutErr := error_codes.NewContactError(&HeaderTimeoutError{})
+						headerTimeoutErr := error_codes.NewTransfer_HeaderTimeoutError(&HeaderTimeoutError{})
 						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, headerTimeoutErr)
 					} else {
 						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, httpErr)
@@ -2394,6 +2412,14 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		}
 	} else {
 		transferResults.Error = xferErrors
+	}
+	if !success && transfer.packOption == "" && localPath != "/dev/null" {
+		// On Unix-like systems, os.Remove calls unlink, which removes the file from the directory.
+		// If the file is still open, it will be available to the process until the last file
+		// descriptor is closed.  Given fp.Close() is deferred, this should be safe.
+		if err := os.Remove(localPath); err != nil && !os.IsNotExist(err) {
+			log.Warningln("Failed to remove partially-downloaded file:", err)
+		}
 	}
 	return
 }
@@ -2744,6 +2770,34 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		log.WithFields(fields).Debugln("Got failure status code:", resp.StatusCode)
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			log.WithFields(fields).Debugln("Failed to read response body for error:", readErr)
+		}
+		bodyStr := string(bodyBytes)
+		log.WithFields(fields).Debugln("Error response body:", bodyStr)
+		serverVersion = resp.Header.Get("Server")
+		if resp.StatusCode == http.StatusForbidden {
+			// We will update the error message in the caller
+			return 0, 0, -1, serverVersion, error_codes.NewAuthorizationError(&PermissionDeniedError{})
+		}
+		sce := StatusCodeError(resp.StatusCode)
+		err = &sce
+		httpErr := &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
+			resp.StatusCode, strings.TrimSpace(bodyStr)), err}
+		// Wrap specific status codes with appropriate PelicanError types
+		if resp.StatusCode == http.StatusNotFound {
+			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
+				resp.StatusCode, strings.TrimSpace(bodyStr)), error_codes.NewSpecification_FileNotFoundError(err)}
+		} else if resp.StatusCode == http.StatusGatewayTimeout {
+			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
+				resp.StatusCode, strings.TrimSpace(bodyStr)), error_codes.NewTransfer_TimedOutError(err)}
+		}
+		return 0, 0, -1, serverVersion, httpErr
+	}
+
 	serverVersion = resp.Header.Get("Server")
 
 	if ageStr := resp.Header.Get("Age"); ageStr != "" {
@@ -2901,6 +2955,7 @@ Loop:
 						StoppedTime:      time.Since(noProgressStartTime),
 						CacheHit:         cacheAge > 0,
 					}
+					err = error_codes.NewTransfer_StoppedTransferError(err)
 					log.WithFields(fields).Errorln(err.Error())
 					return
 				}
@@ -2996,14 +3051,15 @@ Loop:
 				log.WithFields(fields).Debugln("Got error from file transfer:", statusText)
 				if strings.Contains(statusText, "sTREAM ioctl timeout") {
 					err = CacheTimedOutReadingFromOrigin
+					err = error_codes.NewTransfer_TimedOutError(err)
 				} else {
-					err = errors.New(statusText)
+					baseErr := errors.New(statusText)
+					if strings.Contains(statusText, "unexpected EOF") {
+						baseErr = &UnexpectedEOFError{Err: baseErr}
+					}
+					err = error_codes.NewTransferError(fmt.Errorf("download error after server response started: %w", baseErr))
+					return
 				}
-				err = errors.Wrap(err, "download error after server response started")
-				if strings.Contains(statusText, "unexpected EOF") {
-					err = &UnexpectedEOFError{Err: err}
-				}
-				err = error_codes.NewTransferError(err)
 				return
 			}
 		}
@@ -3026,6 +3082,9 @@ Loop:
 		if resp.StatusCode == http.StatusNotFound {
 			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
 				resp.StatusCode), error_codes.NewSpecification_FileNotFoundError(err)}
+		} else if resp.StatusCode == http.StatusGatewayTimeout {
+			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
+				resp.StatusCode), error_codes.NewTransfer_TimedOutError(err)}
 		}
 		return 0, 0, -1, serverVersion, httpErr
 	}
@@ -3211,8 +3270,14 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	transferResult.Scheme = transfer.remoteURL.Scheme
 	if err != nil {
 		log.Errorln("Error checking local file ", transfer.localPath, ":", err)
-		transferResult.Error = err
-		return transferResult, err
+		if os.IsNotExist(err) {
+			transferResult.Error = error_codes.NewParameter_FileNotFoundError(errors.Wrapf(err, "local file %q does not exist", transfer.localPath))
+		} else if os.IsPermission(err) {
+			transferResult.Error = error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied accessing local file %q", transfer.localPath))
+		} else {
+			transferResult.Error = error_codes.NewParameterError(errors.Wrapf(err, "failed to stat local file %q", transfer.localPath))
+		}
+		return transferResult, transferResult.Error
 	}
 
 	var ioreader io.ReadCloser
@@ -3238,7 +3303,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	} else {
 
 		if fileInfo.IsDir() {
-			err := errors.New("the provided path '" + transfer.localPath + "' is a directory, but a file is expected")
+			err := error_codes.NewParameterError(errors.New("the provided path '" + transfer.localPath + "' is a directory, but a file is expected"))
 			transferResult.Error = err
 			return transferResult, err
 		}
@@ -3247,8 +3312,14 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		file, err := os.Open(transfer.localPath)
 		if err != nil {
 			log.Errorln("Error opening local file:", err)
-			transferResult.Error = err
-			return transferResult, err
+			if os.IsNotExist(err) {
+				transferResult.Error = error_codes.NewParameter_FileNotFoundError(errors.Wrapf(err, "local file %q does not exist", transfer.localPath))
+			} else if os.IsPermission(err) {
+				transferResult.Error = error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied opening local file %q", transfer.localPath))
+			} else {
+				transferResult.Error = error_codes.NewParameterError(errors.Wrapf(err, "failed to open local file %q", transfer.localPath))
+			}
+			return transferResult, transferResult.Error
 		}
 		ioreader = file
 		sizer = &ConstantSizer{size: fileInfo.Size()}
@@ -3354,6 +3425,7 @@ Loop:
 					StoppedTime:      timeSinceLastProgress,
 					Upload:           true,
 				}
+				lastError = error_codes.NewTransfer_StoppedTransferError(lastError)
 				// No progress has been made in the last 1 second
 				break Loop
 			}
@@ -3380,7 +3452,7 @@ Loop:
 			if errors.As(err, &ue) {
 				err = ue.Unwrap()
 				if err.Error() == "net/http: timeout awaiting response headers" {
-					err = error_codes.NewContactError(&HeaderTimeoutError{})
+					err = error_codes.NewTransfer_HeaderTimeoutError(&HeaderTimeoutError{})
 				}
 			}
 			if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
@@ -3656,7 +3728,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 	if err != nil {
 		// Check if we got a 404:
 		if gowebdav.IsErrNotFound(err) {
-			return errors.New("404: object not found")
+			return error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
 		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
 			info, err := client.Stat(remotePath)
 			if err != nil {
@@ -3763,7 +3835,12 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 	if err != nil {
 		info, err := os.Stat(localPath)
 		if err != nil {
-			return errors.Wrap(err, "failed to stat local path")
+			if os.IsNotExist(err) {
+				return error_codes.NewParameter_FileNotFoundError(errors.Wrapf(err, "local path %q does not exist", localPath))
+			} else if os.IsPermission(err) {
+				return error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied accessing local path %q", localPath))
+			}
+			return error_codes.NewParameterError(errors.Wrap(err, "failed to stat local path"))
 		}
 		// If the path leads to a file and not a directory, create a job to upload the file and return
 		if !info.IsDir() {
@@ -3796,7 +3873,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 			return nil
 		}
 		// Otherwise, a different error occurred and we should return it
-		return errors.Wrap(err, "failed to upload local collection")
+		return error_codes.NewParameterError(errors.Wrap(err, "failed to upload local collection"))
 	}
 
 	for _, info := range infos {
@@ -3844,7 +3921,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 }
 
 // This function performs the ls command by walking through the specified collections and printing the contents of the files
-func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator) (fileInfos []FileInfo, err error) {
+func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, recursive bool, depth int) (fileInfos []FileInfo, err error) {
 	// Get our collection listing host
 	if dirResp.XPelNsHdr.CollectionsUrl == nil {
 		return nil, errors.Errorf("Collections URL not found in director response. Are you sure there's an origin for prefix %s that supports listings?", dirResp.XPelNsHdr.Namespace)
@@ -3864,11 +3941,17 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 	client := createWebDavClient(collectionsUrl, token, project)
 	remotePath := remoteUrl.Path
 
+	// If recursive listing is requested, use the helper function
+	if recursive {
+		return listHttpRecursive(client, remotePath, depth)
+	}
+
+	// Non-recursive listing (original behavior)
 	infos, err := client.ReadDir(remotePath)
 	if err != nil {
 		// Check if we got a 404:
 		if gowebdav.IsErrNotFound(err) {
-			return nil, errors.New("404: object not found")
+			return nil, error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
 		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
 			// If we get an error code 500 (internal server error), we should check if the user is trying to ls on a file
 			info, err := client.Stat(remotePath)
@@ -3906,6 +3989,73 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 		}
 		fileInfos = append(fileInfos, file)
 	}
+	return fileInfos, nil
+}
+
+// listHttpRecursive recursively lists all objects in a collection with optional depth limiting
+func listHttpRecursive(client *gowebdav.Client, remotePath string, maxDepth int) (fileInfos []FileInfo, err error) {
+	return listHttpRecursiveHelper(client, remotePath, 0, maxDepth)
+}
+
+// listHttpRecursiveHelper is the recursive helper function that tracks the current depth
+func listHttpRecursiveHelper(client *gowebdav.Client, remotePath string, currentDepth int, maxDepth int) (fileInfos []FileInfo, err error) {
+	// Check if we've reached the maximum depth (if maxDepth is >= 0)
+	if maxDepth >= 0 && currentDepth > maxDepth {
+		return fileInfos, nil
+	}
+
+	infos, err := client.ReadDir(remotePath)
+	if err != nil {
+		// Check if we got a 404:
+		if gowebdav.IsErrNotFound(err) {
+			return nil, error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
+		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
+			// If we get an error code 500 (internal server error), we should check if the user is trying to ls on a file
+			info, err := client.Stat(remotePath)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to stat remote path")
+			}
+			// If the path leads to a file and not a collection, just add the filename
+			if !info.IsDir() {
+				file := FileInfo{
+					Name:         remotePath,
+					Size:         info.Size(),
+					ModTime:      info.ModTime(),
+					IsCollection: false,
+				}
+				fileInfos = append(fileInfos, file)
+				return fileInfos, nil
+			}
+		} else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
+			return nil, errors.Errorf("405: object listings are not supported by the discovered origin")
+		}
+		// Otherwise, a different error occurred and we should return it
+		return nil, errors.Wrap(err, "failed to read remote collection")
+	}
+
+	for _, info := range infos {
+		jPath, _ := url.JoinPath(remotePath, info.Name())
+		// Create a FileInfo for the file and append it to the slice
+		file := FileInfo{
+			Name:         jPath,
+			Size:         info.Size(),
+			ModTime:      info.ModTime(),
+			IsCollection: info.IsDir(),
+		}
+		fileInfos = append(fileInfos, file)
+
+		// If this is a collection and we haven't reached max depth, recurse into it
+		// We check currentDepth + 1 < maxDepth because currentDepth represents how deep we are,
+		// and we want to recurse only if going one level deeper wouldn't exceed maxDepth
+		if info.IsDir() && (maxDepth < 0 || currentDepth+1 < maxDepth) {
+			subFileInfos, err := listHttpRecursiveHelper(client, jPath, currentDepth+1, maxDepth)
+			if err != nil {
+				return nil, err
+			}
+			fileInfos = append(fileInfos, subFileInfos...)
+		}
+	}
+
 	return fileInfos, nil
 }
 
@@ -3972,7 +4122,7 @@ func deleteHttp(ctx context.Context, remoteUrl *pelican_url.PelicanURL, recursiv
 	info, err := client.Stat(remotePath)
 	if err != nil {
 		if gowebdav.IsErrNotFound(err) {
-			return errors.Wrapf(ErrObjectNotFound, "cannot remove remote path %s: no such object or collection", remotePath)
+			return error_codes.NewSpecification_FileNotFoundError(errors.Wrapf(ErrObjectNotFound, "cannot remove remote path %s: no such object or collection", remotePath))
 		}
 		return errors.Wrap(err, "failed to check object existence")
 	}
@@ -4076,6 +4226,7 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 					return
 				} else if gowebdav.IsErrNotFound(err) {
 					err = errors.Wrapf(ErrObjectNotFound, "object %s not found at the endpoint %s", dest.String(), endpoint.String())
+					err = error_codes.NewSpecification_FileNotFoundError(err)
 					resultsChan <- statResults{FileInfo{}, err}
 					return
 				}

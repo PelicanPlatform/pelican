@@ -349,7 +349,7 @@ func getFederationIssuer() (string, error) {
 	}
 	federationIssuer := fedInfo.DiscoveryEndpoint
 	if federationIssuer == "" {
-		federationIssuer = fedInfo.DirectorEndpoint
+		return "", errors.New("unable to determine the federation's discovery endpoint/issuer for lot ownership")
 	}
 
 	return federationIssuer, nil
