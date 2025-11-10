@@ -141,10 +141,7 @@ export interface Group {
   createdAt: string;
 }
 
-export type GroupPost = Omit<
-  Group,
-  'members' | 'createdBy' | 'createdAt'
->;
+export type GroupPost = Omit<Group, 'members' | 'createdBy' | 'createdAt'>;
 
 export interface GroupMember {
   groupId: string;
