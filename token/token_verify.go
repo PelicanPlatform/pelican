@@ -173,7 +173,15 @@ func (a AuthCheckImpl) checkFederationIssuer(c *gin.Context, strToken string, ex
 		return errors.Wrap(err, fmt.Sprintf("Failed to verify the scope of the token. Require %v", expectedScopes))
 	}
 
-	c.Set("User", "Federation")
+	c.Set("User", parsed.Subject())
+
+	// Also extract and set userId if present in the token
+	if userIdIface, ok := parsed.Get("user_id"); ok {
+		if userId, ok := userIdIface.(string); ok && userId != "" {
+			c.Set("UserId", userId)
+		}
+	}
+
 	return nil
 }
 
@@ -211,7 +219,15 @@ func (a AuthCheckImpl) checkLocalIssuer(c *gin.Context, strToken string, expecte
 		return errors.Wrap(err, fmt.Sprintf("Failed to verify the scope of the token. Require %v", expectedScopes))
 	}
 
-	c.Set("User", "Origin")
+	c.Set("User", parsed.Subject())
+
+	// Also extract and set userId if present in the token
+	if userIdIface, ok := parsed.Get("user_id"); ok {
+		if userId, ok := userIdIface.(string); ok && userId != "" {
+			c.Set("UserId", userId)
+		}
+	}
+
 	return nil
 }
 

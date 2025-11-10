@@ -139,13 +139,18 @@ func GetUserGroups(ctx *gin.Context) (user string, userId string, groups []strin
 	if userIface, exists := ctx.Get("User"); exists {
 		if userStr, ok := userIface.(string); ok && userStr != "" {
 			user = userStr
+			// Extract userId from context if available
+			if userIdIface, exists := ctx.Get("UserId"); exists {
+				if userIdStr, ok := userIdIface.(string); ok {
+					userId = userIdStr
+				}
+			}
 			// Extract groups from context if available
 			if groupsIface, exists := ctx.Get("Groups"); exists {
 				if groupsSlice, ok := groupsIface.([]string); ok {
 					groups = groupsSlice
 				}
 			}
-			// userId may not be available from Bearer tokens, but that's okay
 			return
 		}
 	}
