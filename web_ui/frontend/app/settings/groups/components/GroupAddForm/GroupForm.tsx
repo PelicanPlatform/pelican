@@ -2,14 +2,7 @@
 
 import React, { useState } from 'react';
 import { TextField, Button, Box, Stack } from '@mui/material';
-import { Group } from '@/types';
-
-// No GroupPost type, so define inline
-export type GroupPost = {
-  id?: string;
-  name: string;
-  description: string;
-};
+import { Group, GroupPost } from '@/types';
 
 type CreateGroupFormProps = {
   group?: undefined;
