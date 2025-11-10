@@ -143,7 +143,7 @@ export interface Group {
 
 export type GroupPost = Omit<
   Group,
-  'id' | 'members' | 'createdBy' | 'createdAt'
+  'members' | 'createdBy' | 'createdAt'
 >;
 
 export interface GroupMember {
@@ -164,4 +164,3 @@ export interface WellKnownConfiguration {
   namespace_registration_endpoint: string;
   jwks_uri: string;
 }
-

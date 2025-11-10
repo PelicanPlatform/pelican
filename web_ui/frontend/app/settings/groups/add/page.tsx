@@ -26,7 +26,7 @@ const Page = () => {
       </Breadcrumbs>
       <SettingHeader title={'Add Group'} />
       <GroupForm
-        onSubmit={async (user: GroupPost) => {
+        onSubmit={async (user) => {
           setIsSubmitting(true);
           const response = await alertOnError(
             async () => addGroup(user),
@@ -44,7 +44,7 @@ const Page = () => {
   );
 };
 
-const addGroup = (group: GroupPost) => {
+const addGroup = (group: Omit<GroupPost, 'id'>) => {
   return fetchApi(async () =>
     fetch('/api/v1.0/groups', {
       method: 'POST',
