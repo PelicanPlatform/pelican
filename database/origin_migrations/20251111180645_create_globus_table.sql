@@ -13,5 +13,5 @@ CREATE TABLE globus_collections (
 
 -- +goose Down
 -- +goose StatementBegin
-SELECT 'down SQL query';
+DROP TABLE IF EXISTS globus_collections
 -- +goose StatementEnd
