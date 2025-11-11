@@ -32,6 +32,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
@@ -59,9 +60,11 @@ var (
 // Setup helper functions
 func setupMockOriginDB(t *testing.T) {
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	db = mockDB
 	require.NoError(t, err, "Error setting up mock origin DB")
-	err = db.AutoMigrate(&GlobusCollection{})
+
+	database.ServerDatabase = mockDB
+
+	err = database.ServerDatabase.AutoMigrate(&GlobusCollection{})
 	require.NoError(t, err, "Failed to migrate DB for Globus table")
 
 	// Setup encryption
@@ -82,7 +85,7 @@ func setupMockOriginDB(t *testing.T) {
 }
 
 func resetGlobusTable(t *testing.T) {
-	err := db.Where("1 = 1").Delete(&GlobusCollection{}).Error
+	err := database.ServerDatabase.Where("1 = 1").Delete(&GlobusCollection{}).Error
 	require.NoError(t, err, "Error resetting Globus table")
 }
 
@@ -96,12 +99,14 @@ func teardownMockOriginDB(t *testing.T) {
 	mockGC[2].TransferRefreshToken = mockTransferTok3
 	mockGC[3].TransferRefreshToken = mockTransferTok4
 
-	err := ShutdownOriginDB()
+	err := database.ShutdownDB()
 	require.NoError(t, err, "Error tearing down mock namespace DB")
+
+	database.ServerDatabase = nil
 }
 
 func insertMockDBData(gc []GlobusCollection) error {
-	return db.Create(&gc).Error
+	return database.ServerDatabase.Create(&gc).Error
 }
 
 func compareCollection(a, b GlobusCollection) bool {

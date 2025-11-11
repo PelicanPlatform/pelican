@@ -5,6 +5,7 @@ CREATE TABLE globus_collections (
     name TEXT NOT NULL DEFAULT '',
     server_url TEXT NOT NULL DEFAULT '',
     refresh_token TEXT NOT NULL DEFAULT '',
+    transfer_refresh_token TEXT NOT NULL DEFAULT '',
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
 );
@@ -12,4 +13,5 @@ CREATE TABLE globus_collections (
 
 -- +goose Down
 -- +goose StatementBegin
+SELECT 'down SQL query';
 -- +goose StatementEnd

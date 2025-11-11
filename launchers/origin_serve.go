@@ -60,10 +60,6 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		return nil, err
 	}
 
-	if err := origin.InitializeDB(); err != nil {
-		return nil, errors.Wrap(err, "failed to initialize origin sqlite database")
-	}
-
 	if err := database.InitServerDatabase(server_structs.OriginType); err != nil {
 		return nil, errors.Wrap(err, "failed to initialize server sqlite database")
 	}
@@ -180,7 +176,7 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group) error {
 
 	egrp.Go(func() error {
 		<-ctx.Done()
-		return origin.ShutdownOriginDB()
+		return database.ShutdownDB()
 	})
 
 	return nil

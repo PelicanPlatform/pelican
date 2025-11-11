@@ -19,15 +19,13 @@
 package origin
 
 import (
-	"embed"
 	"time"
 
 	"github.com/pkg/errors"
 	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/database"
 )
 
 type GlobusCollection struct {
@@ -42,50 +40,21 @@ type GlobusCollection struct {
 	UpdatedAt time.Time
 }
 
-/*
-Declare the DB handle as an unexported global so that all
-functions in the package can access it without having to
-pass it around. This simplifies the HTTP handlers, and
-the handle is already thread-safe! The approach being used
-is based off of 1.b from
-https://www.alexedwards.net/blog/organising-database-access
-*/
-var db *gorm.DB
-
-//go:embed migrations/*.sql
-var embedMigrations embed.FS
-
-func InitializeDB() error {
-	dbPath := param.Origin_DbLocation.GetString()
-
-	tdb, err := server_utils.InitSQLiteDB(dbPath)
-	if err != nil {
-		return err
+func getDatabaseHandle() (*gorm.DB, error) {
+	if database.ServerDatabase == nil {
+		return nil, errors.New("server database is not initialized")
 	}
-
-	db = tdb
-
-	sqldb, err := db.DB()
-
-	if err != nil {
-		return errors.Wrapf(err, "Failed to get sql.DB from gorm DB: %s", dbPath)
-	}
-
-	// Run database migrations
-	if err := server_utils.MigrateDB(sqldb, embedMigrations); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func ShutdownOriginDB() error {
-	return server_utils.ShutdownDB(db)
+	return database.ServerDatabase, nil
 }
 
 func collectionExistsByUUID(uuid string) (bool, error) {
+	db, err := getDatabaseHandle()
+	if err != nil {
+		return false, err
+	}
+
 	var count int64
-	err := db.Model(&GlobusCollection{}).Where("uuid = ?", uuid).Count(&count).Error
+	err = db.Model(&GlobusCollection{}).Where("uuid = ?", uuid).Count(&count).Error
 	if err != nil {
 		return false, err
 	}
@@ -93,8 +62,13 @@ func collectionExistsByUUID(uuid string) (bool, error) {
 }
 
 func getCollectionByUUID(uuid string) (*GlobusCollection, error) {
+	db, err := getDatabaseHandle()
+	if err != nil {
+		return nil, err
+	}
+
 	var collection GlobusCollection
-	err := db.First(&collection, "uuid = ?", uuid).Error
+	err = db.First(&collection, "uuid = ?", uuid).Error
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +106,7 @@ func getCollectionByUUID(uuid string) (*GlobusCollection, error) {
 			return nil, errors.Wrap(err, "failed to get current issuer key")
 		}
 		if keyID != currentIssuerKey.KeyID() {
-			newEncrypted, err := config.EncryptString(collection.RefreshToken)
+			newEncrypted, err := config.EncryptString(collection.TransferRefreshToken)
 			if err == nil {
 				db.Model(&GlobusCollection{}).Where("uuid = ?", uuid).Update("transfer_refresh_token", newEncrypted)
 			}
@@ -142,7 +116,11 @@ func getCollectionByUUID(uuid string) (*GlobusCollection, error) {
 }
 
 func createCollection(collection *GlobusCollection) error {
-	var err error
+	db, err := getDatabaseHandle()
+	if err != nil {
+		return err
+	}
+
 	if collection.RefreshToken != "" {
 		collection.RefreshToken, err = config.EncryptString(collection.RefreshToken)
 		if err != nil {
@@ -162,7 +140,11 @@ func createCollection(collection *GlobusCollection) error {
 }
 
 func updateCollection(uuid string, updatedCollection *GlobusCollection) error {
-	var err error
+	db, err := getDatabaseHandle()
+	if err != nil {
+		return err
+	}
+
 	if updatedCollection.RefreshToken != "" {
 		updatedCollection.RefreshToken, err = config.EncryptString(updatedCollection.RefreshToken)
 		if err != nil {
@@ -184,5 +166,10 @@ func updateCollection(uuid string, updatedCollection *GlobusCollection) error {
 
 // Hard-delete the collection from the DB
 func deleteCollectionByUUID(uuid string) error {
+	db, err := getDatabaseHandle()
+	if err != nil {
+		return err
+	}
+
 	return db.Delete(&GlobusCollection{}, "uuid = ?", uuid).Error
 }
