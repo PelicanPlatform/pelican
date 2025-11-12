@@ -120,6 +120,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
+      - name: Free disk space
+        shell: bash
+        run: |
+          # Use `df` to quickly check how much space is available.
+
+          echo "::group::Before"
+          df -h
+          echo "::endgroup::"
+
+          sudo rm -rf /usr/local/lib/android
+
+          echo "::group::After"
+          df -h
+          echo "::endgroup::"
+
       - name: Checkout code
         uses: actions/checkout@v4
 
