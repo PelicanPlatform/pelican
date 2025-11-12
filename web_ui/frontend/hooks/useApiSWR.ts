@@ -1,3 +1,5 @@
+'use client';
+
 import useSWR, { SWRConfiguration } from 'swr';
 import { useCallback, useContext } from 'react';
 

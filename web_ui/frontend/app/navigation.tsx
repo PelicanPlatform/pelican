@@ -16,6 +16,8 @@ import {
   Settings,
   Storage,
   TripOrigin,
+  Groups,
+  Person,
 } from '@mui/icons-material';
 import { NavigationConfiguration } from '@/components/layout/Navigation';
 
@@ -30,6 +32,16 @@ const NavigationConfig: NavigationConfiguration = {
       title: 'API',
       href: '/settings/api/',
       icon: <Api />,
+    },
+    {
+      title: 'Groups',
+      href: '/settings/groups/',
+      icon: <Groups />,
+    },
+    {
+      title: 'Users',
+      href: '/settings/users/',
+      icon: <Person />,
     },
   ],
   registry: [
