@@ -213,15 +213,15 @@ func HandleCreateDowntime(ctx *gin.Context) {
 	serverType := server_structs.NewServerType()
 	serverType.SetString(downtimeInput.Source)
 	if (serverType == server_structs.OriginType || serverType == server_structs.CacheType) && !validateServerType([]server_structs.ServerType{server_structs.RegistryType}) {
-		svrName, svrID, err := server_utils.GetServerMetadata(ctx, serverType)
+		metadata, err := server_utils.GetServerMetadata(ctx, serverType)
 		if err != nil {
 			log.Debugf("Unable to get server metadata for %s: %v", serverType.String(), err)
 		}
 		if downtimeInput.ServerName == "" {
-			downtimeInput.ServerName = svrName
+			downtimeInput.ServerName = metadata.Name
 		}
 		if downtimeInput.ServerID == "" {
-			downtimeInput.ServerID = svrID
+			downtimeInput.ServerID = metadata.ID
 		}
 	}
 

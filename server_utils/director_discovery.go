@@ -95,11 +95,11 @@ func doDiscovery(ctx context.Context, isDirector bool) (endpoints []server_struc
 			// Bootstrap my own ad, even if nothing else is discovered.
 			if servers := directorEndpoints.Load(); servers == nil {
 				servers := make([]server_structs.DirectorAd, 1)
-				if name, _, err := GetServerMetadata(ctx, server_structs.DirectorType); err == nil {
+				if metadata, err := GetServerMetadata(ctx, server_structs.DirectorType); err == nil {
 					servers[0] = server_structs.DirectorAd{
 						AdvertiseUrl: adUrl,
 					}
-					servers[0].Initialize(name)
+					servers[0].Initialize(metadata.Name)
 					directorEndpoints.CompareAndSwap(nil, &servers)
 				}
 			}

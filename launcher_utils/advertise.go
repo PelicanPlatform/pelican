@@ -117,14 +117,14 @@ func Advertise(ctx context.Context, servers []server_structs.XRootDServer) error
 }
 
 func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) error {
-	name, id, err := server_utils.GetServerMetadata(ctx, server.GetServerType())
+	metadata, err := server_utils.GetServerMetadata(ctx, server.GetServerType())
 	if err != nil {
 		return errors.Wrap(err, "failed to determine service name for advertising to director")
 	}
 
 	// Keep the service name in local database up to date
-	if err = database.UpsertServerName(name, id, server.GetServerType()); err != nil {
-		return errors.Wrapf(err, "failed to upsert service name %s in local database", name)
+	if err = database.UpsertServerName(metadata.Name, metadata.ID, server.GetServerType()); err != nil {
+		return errors.Wrapf(err, "failed to upsert service name %s in local database", metadata.Name)
 	}
 
 	if err = server.GetNamespaceAdsFromDirector(); err != nil {
@@ -137,7 +137,7 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 		serverUrl = param.Cache_Url.GetString()
 	}
 
-	ad, err := server.CreateAdvertisement(name, id, serverUrl, webUrl)
+	ad, err := server.CreateAdvertisement(metadata.Name, metadata.ID, serverUrl, webUrl)
 	if err != nil {
 		return err
 	}

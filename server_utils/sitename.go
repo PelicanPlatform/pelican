@@ -70,34 +70,36 @@ func getServerMetadataFromReg(ctx context.Context, prefix string) (server server
 	return
 }
 
-// Centralized code for determining the "name" and "id" of the service.
+// Centralized code for determining the metadata of the server.
 //
-// The server's name should be unique and machine-friendly: typically, it's
-// the hostname/FQDN of the host.  It will be registered at the registry to
-// ensure uniqueness within the federation.
+// This function is called by a server to look up its own metadata from the
+// registry using local configuration parameters. It cannot query metadata
+// for other servers.
+//
+// The server's name should be unique and human-friendly: for example,
+// "UW_OSDF_CACHE".  It will be registered at the registry to ensure
+// uniqueness within the federation.
 //
 // There are improvements to do here: once registered, the server should
 // serialize the name.  It should also be for the service itself, not
 // specific to the "origin" or "cache" component.
 //
 // In the current implementation, if the origin component is enabled, we
-// always look up the registered "site name" for the hostname in the registry
+// always look up the registered "server name" for the hostname in the registry
 // under /origins; otherwise, we look it up under /caches.
-func GetServerMetadata(ctx context.Context, server server_structs.ServerType) (name string, id string, err error) {
+func GetServerMetadata(ctx context.Context, server server_structs.ServerType) (metadata server_structs.ServerRegistration, err error) {
 
-	var nameFromReg string
-	var idFromReg string
-	var serverReg server_structs.ServerRegistration
-	// Fetch site name from the registry, if not, fall back to Xrootd.Sitename.
+	// Fetch server metadata from the registry, if not, fall back server name to Xrootd.Sitename.
 	if server.IsEnabled(server_structs.DirectorType) {
 		exturlStr := param.Server_ExternalWebUrl.GetString()
 		var extUrl *url.URL
 		extUrl, err = url.Parse(exturlStr)
 		if err != nil {
-			err = errors.Wrap(err, "unable to determine service name")
+			err = errors.Wrap(err, "unable to determine server name")
 			return
 		}
-		nameFromReg = extUrl.Host
+		// For DirectorType servers, only the Name field is set in the returned struct
+		metadata.Name = extUrl.Host
 	} else if server.IsEnabled(server_structs.OriginType) {
 		// Note we use Server_ExternalWebUrl as the origin prefix
 		// But caches still use Xrootd_Sitename, which will be changed to Server_ExternalWebUrl in
@@ -106,42 +108,33 @@ func GetServerMetadata(ctx context.Context, server server_structs.ServerType) (n
 		extUrl, _ := url.Parse(extUrlStr)
 		// Only use hostname:port
 		originPrefix := server_structs.GetOriginNs(extUrl.Host)
-		serverReg, err = getServerMetadataFromReg(ctx, originPrefix)
+		metadata, err = getServerMetadataFromReg(ctx, originPrefix)
 		if err != nil {
 			log.Errorf("Failed to get metadata from the registry for the origin. Will fallback to using %s: %v", param.Xrootd_Sitename.GetName(), err)
-		} else {
-			nameFromReg = serverReg.Name
-			idFromReg = serverReg.ID
 		}
 	} else if server.IsEnabled(server_structs.CacheType) {
 		cachePrefix := server_structs.GetCacheNs(param.Xrootd_Sitename.GetString())
-		serverReg, err = getServerMetadataFromReg(ctx, cachePrefix)
+		metadata, err = getServerMetadataFromReg(ctx, cachePrefix)
 		if err != nil {
 			log.Errorf("Failed to get metadata from the registry for the cache. Will fallback to use %s: %v", param.Xrootd_Sitename.GetName(), err)
-		} else {
-			nameFromReg = serverReg.Name
-			idFromReg = serverReg.ID
 		}
 	}
 
-	if nameFromReg == "" {
-		log.Infof("Sitename from the registry is empty, fall back to %s: %s", param.Xrootd_Sitename.GetName(), param.Xrootd_Sitename.GetString())
-		name = param.Xrootd_Sitename.GetString()
+	if metadata.Name == "" {
+		log.Infof("Server name from the registry is empty, fall back to %s: %s", param.Xrootd_Sitename.GetName(), param.Xrootd_Sitename.GetString())
+		metadata.Name = param.Xrootd_Sitename.GetString()
 	} else {
-		// Use the registered sitename as service name if it is not empty
-		name = nameFromReg
-		id = idFromReg
-		// Warn the user if the sitename from the registry does not match the local configuration
-		if nameFromReg != param.Xrootd_Sitename.GetString() && param.Xrootd_Sitename.GetString() != "" {
-			log.Warningf("Sitename mismatch detected:\n"+
-				"  Registered sitename: %q\n"+
+		// Warn the user if the server name from the registry does not match the local configuration
+		if metadata.Name != param.Xrootd_Sitename.GetString() && param.Xrootd_Sitename.GetString() != "" {
+			log.Warningf("Server name mismatch detected:\n"+
+				"  Registered server name: %q\n"+
 				"  Local sitename:      %q\n"+
-				"Pelican will use the registered sitename as your service name.\n"+
-				"Contact the federation administrator to update the sitename in the Registry or update your local config to maintain consistency.",
-				nameFromReg, param.Xrootd_Sitename.GetString())
+				"Pelican will use the registered server name as your server name.\n"+
+				"Contact the federation administrator to update the registered server name or update your local config to maintain consistency.",
+				metadata.Name, param.Xrootd_Sitename.GetString())
 		}
 	}
-	if name == "" {
+	if metadata.Name == "" {
 		err = errors.Errorf("%s name isn't set. Please set the name via %s", server.String(), param.Xrootd_Sitename.GetName())
 	}
 	return
@@ -156,12 +149,12 @@ func IsDirectorAdFromSelf(ctx context.Context, ad server_structs.ServerBaseAdInt
 	}
 
 	baseAdOnce.Do(func() {
-		var name string
-		name, _, baseAdErr = GetServerMetadata(ctx, server_structs.DirectorType)
+		var metadata server_structs.ServerRegistration
+		metadata, baseAdErr = GetServerMetadata(ctx, server_structs.DirectorType)
 		if baseAdErr != nil {
 			return
 		}
-		baseAd.Initialize(name)
+		baseAd.Initialize(metadata.Name)
 	})
 	if baseAdErr != nil {
 		return false, baseAdErr
