@@ -5,7 +5,11 @@ interface SettingHeaderProps extends BoxProps {
   description?: string;
 }
 
-const SettingHeader = ({ title, description, ...props }: SettingHeaderProps) => {
+const SettingHeader = ({
+  title,
+  description,
+  ...props
+}: SettingHeaderProps) => {
   return (
     <Box mb={3} {...props}>
       <Typography variant={'h5'} component={'h2'} id={title}>

@@ -50,7 +50,9 @@ const PageContent = () => {
         <Box>
           {information(group).map((info) => (
             <Box key={info.name} mb={1}>
-              <Typography variant={'subtitle2'}>{info.name}: {info.value}</Typography>
+              <Typography variant={'subtitle2'}>
+                {info.name}: {info.value}
+              </Typography>
             </Box>
           ))}
         </Box>
