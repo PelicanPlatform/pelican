@@ -137,7 +137,13 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 		serverUrl = param.Cache_Url.GetString()
 	}
 
-	ad, err := server.CreateAdvertisement(metadata.Name, metadata.ID, serverUrl, webUrl)
+	// Fetch server's active and future downtimes
+	downtimes, err := database.GetIncompleteDowntimes(strings.ToLower(server.GetServerType().String()))
+	if err != nil {
+		return err
+	}
+
+	ad, err := server.CreateAdvertisement(metadata.Name, metadata.ID, serverUrl, webUrl, downtimes)
 	if err != nil {
 		return err
 	}
