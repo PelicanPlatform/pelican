@@ -1300,7 +1300,7 @@ func getServerByPrefixHandler(ctx *gin.Context) {
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Failed to get server by prefix",
+			Msg:    fmt.Sprintf("Failed to get server by prefix: %s", err.Error()),
 		})
 		return
 	}
