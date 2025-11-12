@@ -461,7 +461,9 @@ func (dir *directorInfo) sendAd(ctx context.Context, directorUrlStr string, ad *
 // this module for faster lookups
 func getMyName(ctx context.Context) (string, error) {
 	directorNameOnce.Do(func() {
-		directorName, _, directorNameError = server_utils.GetServerMetadata(ctx, server_structs.DirectorType)
+		var metadata server_structs.ServerRegistration
+		metadata, directorNameError = server_utils.GetServerMetadata(ctx, server_structs.DirectorType)
+		directorName = metadata.Name
 	})
 	if directorNameError != nil {
 		return "", directorNameError
