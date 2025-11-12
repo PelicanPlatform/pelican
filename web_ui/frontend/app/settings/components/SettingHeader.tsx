@@ -1,13 +1,13 @@
-import { Box, Typography } from '@mui/material';
+import { Box, BoxProps, Typography } from '@mui/material';
 
-interface SettingHeaderProps {
+interface SettingHeaderProps extends BoxProps {
   title: string;
   description?: string;
 }
 
-const SettingHeader = ({ title, description }: SettingHeaderProps) => {
+const SettingHeader = ({ title, description, ...props }: SettingHeaderProps) => {
   return (
-    <Box mb={3}>
+    <Box mb={3} {...props}>
       <Typography variant={'h5'} component={'h2'} id={title}>
         {title}
       </Typography>

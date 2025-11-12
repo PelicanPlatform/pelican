@@ -47,18 +47,20 @@ const PageContent = () => {
         description={group?.description}
       />
       {group ? (
-        <MemberList groupId={group?.id} />
-      ) : (
-        <Skeleton variant='rectangular' width={'100%'} height={'500px'} />
-      )}
-      {group ? (
-        <Box mt={2}>
+        <Box>
           {information(group).map((info) => (
-            <InformationSpan key={info.name} {...info} />
+            <Box key={info.name} mb={1}>
+              <Typography variant={'subtitle2'}>{info.name}: {info.value}</Typography>
+            </Box>
           ))}
         </Box>
       ) : (
         <Skeleton variant='rectangular' width={'100%'} height={'60px'} />
+      )}
+      {group ? (
+        <MemberList groupId={group?.id} />
+      ) : (
+        <Skeleton variant='rectangular' width={'100%'} height={'500px'} />
       )}
     </Box>
   );
