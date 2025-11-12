@@ -42,6 +42,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/error_codes"
 	oauth2 "github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -773,8 +774,12 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		return "", fmt.Errorf("issuer %s returned an empty token response", issuer)
 	}
 
+	// At this point, we have a freshly acquired credential. tokenIsAcceptable can still fail only if:
+	//  - the token lacks the storage scope required for the requested operation; or
+	//  - the token is not valid for the director-provided namespace/base-path.
+	// Issuer mismatches are handled earlier by oauth2.AcquireToken and will not reach this check.
 	if !tokenIsAcceptable(token.AccessToken, destination.Path, dirResp, opts) {
-		return "", fmt.Errorf("acquired token missing required scope for %s", destination.Path)
+		return "", error_codes.NewAuthorizationError(fmt.Errorf("acquired token not valid for %s (missing scope or namespace/base-path mismatch)", destination.Path))
 	}
 
 	Tokens := &prefixEntry.Tokens
