@@ -221,7 +221,7 @@ func (a AuthCheckImpl) checkRegisteredServer(ctx *gin.Context, strToken string, 
 	// First parse token without verification to extract claims
 	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 	if err != nil {
-		return errors.Wrap(err, "Invalid JWT")
+		return errors.Wrap(err, "invalid JWT")
 	}
 
 	// Extract server identifier from token subject
@@ -233,31 +233,31 @@ func (a AuthCheckImpl) checkRegisteredServer(ctx *gin.Context, strToken string, 
 	// Look up the server's public key and metadata based on the the server id in the token subject
 	jwks, resolved, err := resolveRegisteredServerJWKS(ctx, subject)
 	if err != nil {
-		return errors.Wrap(err, "Failed to resolve registered server JWKS")
+		return errors.Wrap(err, "failed to resolve registered server JWKS")
 	}
 	if !resolved {
 		jwks, err = fetchRegisteredServerJWKS(ctx, subject)
 		if err != nil {
-			return errors.Wrap(err, "Failed to lookup registered server")
+			return errors.Wrap(err, "failed to lookup registered server")
 		}
 	}
 
 	// Now verify the token with the server's public key
 	parsed, err := jwt.Parse([]byte(strToken), jwt.WithKeySet(jwks))
 	if err != nil {
-		return errors.Wrap(err, "Failed to verify JWT with server's registered public key")
+		return errors.Wrap(err, "failed to verify JWT with server's registered key set")
 	}
 
 	// Validate expiration and other standard claims
 	if err := jwt.Validate(parsed); err != nil {
-		return errors.Wrap(err, "Token validation failed")
+		return errors.Wrap(err, "token validation failed")
 	}
 
 	// Validate scopes if needed
 	if len(expectedScopes) > 0 {
 		scopeValidator := token_scopes.CreateScopeValidator(expectedScopes, allScopes)
 		if err := jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
-			return errors.Wrap(err, fmt.Sprintf("Failed to verify the scope of the token. Require %v", expectedScopes))
+			return errors.Wrap(err, fmt.Sprintf("failed to verify the scope of the token. Require %v", expectedScopes))
 		}
 	}
 
@@ -463,7 +463,7 @@ func GetJWKSFromIssUrl(issuer string) (*jwk.Set, error) {
 	}
 
 	// Query the JWKS URL for the public keys
-	httpClient := &http.Client{Transport: config.GetTransport()}
+	httpClient := config.GetClient()
 	req, err := http.NewRequest("GET", pubkeyUrlStr, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "Error creating request to issuer's JWKS URL")
@@ -527,7 +527,7 @@ func fetchRegisteredServerJWKS(ctx *gin.Context, serverID string) (jwk.Set, erro
 		return nil, errors.Wrap(err, "failed to construct registered server public key URL")
 	}
 
-	httpClient := &http.Client{Transport: config.GetTransport()}
+	httpClient := config.GetClient()
 	req, err := http.NewRequest("GET", registeredServerPubKeyURL, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "error creating request to registered server JWKS URL")
