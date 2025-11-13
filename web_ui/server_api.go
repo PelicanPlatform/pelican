@@ -25,6 +25,8 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
@@ -240,8 +242,12 @@ func HandleCreateDowntime(ctx *gin.Context) {
 	}
 
 	// Mirror to Registry when running as Origin/Cache so downtime persists centrally (Director polls Registry for all sources)
+	// This prevents the Registry database from getting out of sync with the Origin/Cache local downtime state.
 	if err := mirrorDowntimeToRegistry(ctx, downtime, http.MethodPost, idStr); err != nil {
-		ctx.JSON(http.StatusBadGateway, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to mirror downtime to registry: " + err.Error()})
+		ctx.JSON(http.StatusBadGateway, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to create downtime with UUID " + idStr + " at the Registry: " + err.Error(),
+		})
 		return
 	}
 
@@ -253,7 +259,7 @@ func HandleCreateDowntime(ctx *gin.Context) {
 			if getErr != nil {
 				ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
-					Msg:    "Failed to load existing downtime: " + getErr.Error(),
+					Msg:    "Failed to load existing downtime with UUID " + idStr + " during create: " + getErr.Error(),
 				})
 				return
 			}
@@ -275,7 +281,7 @@ func HandleCreateDowntime(ctx *gin.Context) {
 			if updateErr := database.UpdateDowntime(idStr, existing); updateErr != nil {
 				ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
-					Msg:    "Failed to update existing downtime: " + updateErr.Error(),
+					Msg:    "Failed to update existing downtime with UUID " + idStr + " during create: " + updateErr.Error(),
 				})
 				return
 			}
@@ -283,7 +289,7 @@ func HandleCreateDowntime(ctx *gin.Context) {
 		} else {
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    "Failed to create downtime: " + err.Error(),
+				Msg:    "Failed to create downtime with UUID " + idStr + ": " + err.Error(),
 			})
 			return
 		}
@@ -316,7 +322,10 @@ func HandleGetDowntimeByUUID(ctx *gin.Context) {
 	uuid := ctx.Param("uuid")
 	downtime, err := database.GetDowntimeByUUID(uuid)
 	if err != nil {
-		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to get downtime by UUID: " + err.Error()})
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to get downtime by UUID " + uuid + ": " + err.Error(),
+		})
 		return
 	}
 	ctx.JSON(http.StatusOK, downtime)
@@ -388,13 +397,21 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 	updatedDowntime.UpdatedBy = downtimeInput.UpdatedBy
 	// To avoid confusion, we don't allow to change the server name and id in an update
 
+	// Mirror updates to the Registry to keep the central downtime records consistent with local changes.
+	// This prevents the Registry database from getting out of sync with the Origin/Cache local downtime state.
 	if err := mirrorDowntimeToRegistry(ctx, updatedDowntime, http.MethodPut, uuid); err != nil {
-		ctx.JSON(http.StatusBadGateway, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to mirror this update of downtime to registry: " + err.Error()})
+		ctx.JSON(http.StatusBadGateway, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to update downtime with UUID " + uuid + " at the Registry: " + err.Error(),
+		})
 		return
 	}
 
 	if err := database.UpdateDowntime(uuid, &updatedDowntime); err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to update downtime: " + err.Error()})
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to update downtime with UUID " + uuid + ": " + err.Error(),
+		})
 		return
 	}
 	ctx.JSON(http.StatusOK, updatedDowntime)
@@ -404,17 +421,35 @@ func HandleDeleteDowntime(ctx *gin.Context) {
 	uuid := ctx.Param("uuid")
 	existingDowntime, err := database.GetDowntimeByUUID(uuid)
 	if err != nil {
-		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Downtime record not found"})
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Downtime record not found for delete: UUID " + uuid,
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Failed to query downtime for delete by UUID " + uuid + ": " + err.Error(),
+			})
+		}
 		return
 	}
 
+	// Mirror deletion to the Registry so the central DB removes the downtime as well.
+	// This prevents the Registry database from getting out of sync with the Origin/Cache local downtime state.
 	if err := mirrorDowntimeToRegistry(ctx, *existingDowntime, http.MethodDelete, uuid); err != nil {
-		ctx.JSON(http.StatusBadGateway, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to mirror downtime to registry: " + err.Error()})
+		ctx.JSON(http.StatusBadGateway, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to delete downtime with UUID " + uuid + " at the Registry: " + err.Error(),
+		})
 		return
 	}
 
 	if err := database.DeleteDowntime(uuid); err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to delete downtime: " + err.Error()})
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to delete downtime with UUID " + uuid + ": " + err.Error(),
+		})
 		return
 	}
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "Downtime deleted successfully"})
