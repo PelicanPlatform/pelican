@@ -52,8 +52,10 @@ type ObjectParam struct {
 func GetDeprecated() map[string][]string {
     return map[string][]string{
         "Cache.DataLocation": {"Cache.StorageLocation"},
+        "Cache.DbLocation": {"Server.DbLocation"},
         "Cache.LocalRoot": {"Cache.StorageLocation"},
         "Debug": {"Logging.Level"},
+        "Director.DbLocation": {"Server.DbLocation"},
         "Director.EnableStat": {"Director.CheckOriginPresence"},
         "DisableHttpProxy": {"Client.DisableHttpProxy"},
         "DisableProxyFallback": {"Client.DisableProxyFallback"},
@@ -68,6 +70,7 @@ func GetDeprecated() map[string][]string {
         "Origin.NamespacePrefix": {"Origin.FederationPrefix"},
         "Origin.S3ServiceName": {"none"},
         "Registry.AdminUsers": {"Server.UIAdminUsers"},
+        "Registry.DbLocation": {"Server.DbLocation"},
         "Server.TLSCertificate": {"Server.TLSCertificateChain"},
         "Xrootd.Port": {"Origin.Port", "Cache.Port"},
         "Xrootd.RunLocation": {"Cache.RunLocation", "Origin.RunLocation"},
@@ -367,6 +370,7 @@ var (
 	Cache_EnableLotman = BoolParam{"Cache.EnableLotman"}
 	Cache_EnableOIDC = BoolParam{"Cache.EnableOIDC"}
 	Cache_EnablePrefetch = BoolParam{"Cache.EnablePrefetch"}
+	Cache_EnableSiteLocalMode = BoolParam{"Cache.EnableSiteLocalMode"}
 	Cache_EnableTLSClientAuth = BoolParam{"Cache.EnableTLSClientAuth"}
 	Cache_EnableVoms = BoolParam{"Cache.EnableVoms"}
 	Cache_SelfTest = BoolParam{"Cache.SelfTest"}
