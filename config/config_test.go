@@ -37,6 +37,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 
 	"github.com/pelicanplatform/pelican/logging"
 	"github.com/pelicanplatform/pelican/param"
@@ -140,6 +141,74 @@ func TestMain(m *testing.M) {
 	defer server.Close()
 	exitCode := m.Run()
 	os.Exit(exitCode)
+}
+
+// Test that no deprecated config keys are present in defaultsYaml or osdfDefaultsYaml
+func TestNoReplacementKeysInDefaults(t *testing.T) {
+	type testCase struct {
+		yamlStr     string
+		fName       string
+		shouldError bool
+	}
+	testCases := []testCase{
+		{yamlStr: defaultsYaml, fName: "defaults.yaml", shouldError: false},
+		{yamlStr: osdfDefaultsYaml, fName: "osdfDefaults.yaml", shouldError: false},
+		// Example: Client.DisableHttpProxy is a replacement for DisableHttpProxy
+		{yamlStr: `
+Client:
+  DisableHttpProxy: true
+`, fName: "inline test case with replacement key Client.DisableHttpProxy", shouldError: true},
+	}
+
+	deprecatedMap := param.GetDeprecated()
+	for _, tc := range testCases {
+		var m map[string]any
+		err := yaml.Unmarshal([]byte(tc.yamlStr), &m)
+		require.NoError(t, err, "Failed to parse %s", tc.fName)
+
+		// Map replacement key -> deprecated key(s)
+		found := make(map[string]string)
+		for deprecated, replacements := range deprecatedMap {
+			for _, rep := range replacements {
+				if rep == "none" {
+					continue
+				}
+				// Check for top-level and nested keys (e.g., Logging.Level)
+				parts := strings.Split(rep, ".")
+				node := m
+				foundKey := true
+				for _, part := range parts {
+					val, ok := node[part]
+					if !ok {
+						foundKey = false
+						break
+					}
+					// If not at the last part, descend if possible
+					if mp, ok := val.(map[string]any); ok {
+						node = mp
+					} else if part != parts[len(parts)-1] {
+						foundKey = false
+						break
+					}
+				}
+				if foundKey {
+					found[rep] = deprecated
+				}
+			}
+		}
+
+		if tc.shouldError {
+			assert.NotEmpty(t, found, "Expected replacement key(s) in %s, but none found", tc.fName)
+		} else {
+			if len(found) > 0 {
+				var details []string
+				for rep, dep := range found {
+					details = append(details, fmt.Sprintf("%q (replacement for deprecated key %q)", rep, dep))
+				}
+				t.Errorf("Replacement config key(s) found in %s: %v. Please remove them from the defaults yaml and set them in a SetDefaults() function in the config package.", tc.fName, details)
+			}
+		}
+	}
 }
 
 func TestResponseHeaderTimeout(t *testing.T) {

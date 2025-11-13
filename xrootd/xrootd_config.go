@@ -104,7 +104,7 @@ type (
 		EnableListings    bool
 		SelfTest          bool
 		Concurrency       int
-		CalculatedPort    string
+		Port              int
 		FederationPrefix  string
 		HttpServiceUrl    string
 		HttpAuthTokenFile string
@@ -130,7 +130,7 @@ type (
 		UseCmsd                    bool
 		EnablePrefetch             bool
 		EnableVoms                 bool
-		CalculatedPort             string
+		Port                       int
 		HighWaterMark              string
 		LowWatermark               string
 		FilesBaseSize              string
