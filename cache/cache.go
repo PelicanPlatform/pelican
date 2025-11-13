@@ -22,8 +22,10 @@ import (
 	"context"
 
 	"github.com/gin-gonic/gin"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
@@ -32,6 +34,11 @@ var (
 )
 
 func RegisterCacheAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.Group) {
+	if param.Cache_EnableSiteLocalMode.GetBool() {
+		log.Debug("Skipping Cache API registration because site-local mode is enabled and the server does not expect Director tests")
+		return
+	}
+
 	// start the timer for the director test report timeout
 	server_utils.LaunchPeriodicDirectorTimeout(ctx, egrp, notificationChan)
 
