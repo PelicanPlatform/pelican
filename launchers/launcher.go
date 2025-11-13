@@ -335,7 +335,7 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	}
 
 	// Launch the broker listener.  Needs the federation information to determine the broker endpoint.
-	if fedInfo.BrokerEndpoint != "" && !(modules.IsEnabled(server_structs.OriginType) && param.Origin_EnableBroker.GetBool()) && modules.IsEnabled(server_structs.CacheType) && param.Cache_EnableBroker.GetBool() {
+	if fedInfo.BrokerEndpoint != "" && !(modules.IsEnabled(server_structs.OriginType) && param.Origin_EnableBroker.GetBool()) && modules.IsEnabled(server_structs.CacheType) && param.Cache_EnableBroker.GetBool() && !param.Cache_EnableSiteLocalMode.GetBool() {
 		// Note we unconditionally launch the broker listener for the cache if there
 		// is one available.  This is to reduce the need for the cache to have a second
 		// incoming TCP connection to function.
