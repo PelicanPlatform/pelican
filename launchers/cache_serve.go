@@ -168,6 +168,11 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 
 // Finish configuration of the cache server.
 func CacheServeFinish(ctx context.Context, egrp *errgroup.Group, cacheServer server_structs.XRootDServer) error {
+	if param.Cache_EnableSiteLocalMode.GetBool() {
+		log.Debugf("Skipping Cache registration because site-local mode is enabled (see %s)", param.Cache_EnableSiteLocalMode.GetName())
+		return nil
+	}
+
 	log.Debug("Register Cache")
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the cache server")
 	if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, server_structs.GetCacheNs(param.Xrootd_Sitename.GetString())); err != nil {
