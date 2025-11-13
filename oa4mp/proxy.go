@@ -28,16 +28,21 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
@@ -65,24 +70,89 @@ func getTransport() *http.Transport {
 	return transport
 }
 
+// hasCollectionAccess checks if a user/groups have access to a collection with the specified scope
+func hasCollectionAccess(user string, groupsList []string, collectionID string, scope token_scopes.TokenScope) bool {
+	// Get the database instance
+	db := database.ServerDatabase
+	if db == nil {
+		log.Warningf("Database not initialized, cannot check collection access for %s", collectionID)
+		return false
+	}
+
+	// Load collection with ACLs
+	var collection database.Collection
+	if err := db.Preload("ACLs").Where("id = ?", collectionID).First(&collection).Error; err != nil {
+		log.Debugf("Collection %s not found: %v", collectionID, err)
+		return false
+	}
+
+	// Check if collection is public (read access only)
+	if collection.Visibility == database.VisibilityPublic {
+		// Public collections allow read access to everyone
+		if scope == token_scopes.Collection_Read {
+			return true
+		}
+		// For other scopes on public collections, still need ACL check
+	}
+
+	// Get required roles for this scope
+	requiredRoles, ok := database.ScopeToRole[scope]
+	if !ok {
+		log.Debugf("Invalid scope for collection access check: %s", scope.String())
+		return false
+	}
+
+	// Ensure user group is in the list
+	userGroup := "user-" + user
+	if !slices.Contains(groupsList, userGroup) {
+		groupsList = append(groupsList, userGroup)
+	}
+
+	// Check if user is the owner (owners have all permissions)
+	if collection.Owner == user {
+		return true
+	}
+
+	// Check ACLs
+	for _, acl := range collection.ACLs {
+		// Check if user's group matches and has required role
+		if slices.Contains(groupsList, acl.GroupID) && slices.Contains(requiredRoles, acl.Role) {
+			// Check if ACL has expired
+			if acl.ExpiresAt != nil && acl.ExpiresAt.Before(time.Now()) {
+				continue
+			}
+			return true
+		}
+	}
+
+	// No matching ACL found
+	return false
+}
+
 func calculateAllowedScopes(user string, groupsList []string) ([]string, []string) {
 	if len(compiledAuthzRules) == 0 {
+		log.Debugf("calculateAllowedScopes: compiledAuthzRules is empty")
 		return []string{}, []string{}
 	}
 
+	log.Debugf("calculateAllowedScopes: user=%s, groupsList=%v, numRules=%d", user, groupsList, len(compiledAuthzRules))
 	scopeSet := make(map[string]struct{})
 	groupSet := make(map[string]struct{})
 	userEscaped := url.PathEscape(user)
-	for _, rule := range compiledAuthzRules {
+	for idx, rule := range compiledAuthzRules {
+		log.Debugf("calculateAllowedScopes: Processing rule %d: prefix=%s, actions=%v, groupLiterals=%v, groupRegexes=%d, userSet=%v",
+			idx, rule.Prefix, rule.Actions, rule.GroupLiterals, len(rule.GroupRegexes), rule.UserSet)
 		// First, check if the user is allowed by this rule
 		if len(rule.UserSet) > 0 {
 			if _, ok := rule.UserSet[user]; !ok {
+				log.Debugf("calculateAllowedScopes: Rule %d skipped - user not in UserSet", idx)
 				continue
 			}
 		}
 
 		// Next, check if the rule has group requirements.
 		hasGroupRequirements := len(rule.GroupLiterals) > 0 || len(rule.GroupRegexes) > 0
+		log.Debugf("calculateAllowedScopes: Rule %d hasGroupRequirements=%v", idx, hasGroupRequirements)
 		currentMatchingGroups := make([]string, 0)
 		if hasGroupRequirements {
 			for _, group := range groupsList {
@@ -98,9 +168,11 @@ func calculateAllowedScopes(user string, groupsList []string) ([]string, []strin
 				}
 				if literalMatch || regexMatch {
 					currentMatchingGroups = append(currentMatchingGroups, group)
+					log.Debugf("calculateAllowedScopes: Rule %d matched group: %s", idx, group)
 				}
 			}
 			if len(currentMatchingGroups) == 0 {
+				log.Debugf("calculateAllowedScopes: Rule %d skipped - no matching groups found", idx)
 				continue
 			}
 		}
@@ -190,7 +262,60 @@ func calculateAllowedScopes(user string, groupsList []string) ([]string, []strin
 		matchedGroups = append(matchedGroups, group)
 	}
 
+	log.Debugf("calculateAllowedScopes: Final - allowedScopes=%v, matchedGroups=%v, groupSet=%v", allowedScopes, matchedGroups, groupSet)
 	return allowedScopes, matchedGroups
+}
+
+func getUserCollectionScopes(db *gorm.DB, user string, groupsList []string) ([]string, error) {
+	scopes := make([]string, 0)
+
+	userGroup := "user-" + user
+	if !slices.Contains(groupsList, userGroup) {
+		groupsList = append(groupsList, userGroup)
+	}
+
+	var acls []database.CollectionACL
+	if result := db.
+		Joins("JOIN collections ON collections.id = collection_acls.collection_id").
+		Where("collection_acls.group_id IN ?", groupsList).
+		Find(&acls); result.Error != nil {
+		return nil, result.Error
+	}
+
+	collectionPerms := make(map[string]database.AclRole)
+	for _, acl := range acls {
+		if acl.ExpiresAt != nil && acl.ExpiresAt.Before(time.Now()) {
+			continue
+		}
+
+		existingRole, ok := collectionPerms[acl.CollectionID]
+		if !ok {
+			collectionPerms[acl.CollectionID] = acl.Role
+		} else {
+			// Owner > Write > Read
+			if acl.Role == database.AclRoleOwner {
+				collectionPerms[acl.CollectionID] = database.AclRoleOwner
+			} else if acl.Role == database.AclRoleWrite && (existingRole != database.AclRoleOwner && existingRole != database.AclRoleWrite) {
+				collectionPerms[acl.CollectionID] = database.AclRoleWrite
+			}
+		}
+	}
+
+	for collectionID, role := range collectionPerms {
+		switch role {
+		case database.AclRoleOwner:
+			scopes = append(scopes, token_scopes.Collection_Read.String()+":"+collectionID)
+			scopes = append(scopes, token_scopes.Collection_Modify.String()+":"+collectionID)
+			scopes = append(scopes, token_scopes.Collection_Delete.String()+":"+collectionID)
+		case database.AclRoleWrite:
+			scopes = append(scopes, token_scopes.Collection_Read.String()+":"+collectionID)
+			scopes = append(scopes, token_scopes.Collection_Modify.String()+":"+collectionID)
+		case database.AclRoleRead:
+			scopes = append(scopes, token_scopes.Collection_Read.String()+":"+collectionID)
+		}
+	}
+
+	return scopes, nil
 }
 
 // Proxy a HTTP request from the Pelican server to the OA4MP server
@@ -231,8 +356,19 @@ func oa4mpProxy(ctx *gin.Context) {
 		userInfo := make(map[string]interface{})
 		userInfo["u"] = user
 		allowedScopes, matchedGroups := calculateAllowedScopes(user, groupsList)
+		userCollectionScopes, err := getUserCollectionScopes(database.ServerDatabase, user, groupsList)
+		if err != nil {
+			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Unable to get user collection scopes",
+			})
+			return
+		}
+
+		allowedScopes = append(allowedScopes, userCollectionScopes...)
 		userInfo["g"] = matchedGroups
 		userInfo["s"] = allowedScopes
+		log.Debugf("Before proxying to OA4MP: allowedScopes=%v, userCollectionScopes=%v for user=%s and groups=%v", allowedScopes, userCollectionScopes, user, groupsList)
 		userBytes, err := json.Marshal(userInfo)
 		if err != nil {
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
