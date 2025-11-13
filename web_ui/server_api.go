@@ -460,7 +460,17 @@ func mirrorDowntimeToRegistry(ctx *gin.Context, dt server_structs.Downtime, meth
 	tokCfg.Lifetime = 2 * time.Minute
 	tokCfg.Subject = dt.ServerID
 	tokCfg.AddAudienceAny()
-	tokCfg.AddScopes(token_scopes.Pelican_Downtime)
+	switch method {
+	case http.MethodPost:
+		tokCfg.AddScopes(token_scopes.Pelican_DowntimeCreate)
+	case http.MethodPut:
+		tokCfg.AddScopes(token_scopes.Pelican_DowntimeModify)
+	case http.MethodDelete:
+		tokCfg.AddScopes(token_scopes.Pelican_DowntimeDelete)
+	default:
+		// For safety, do not mint a token with an unexpected scope for unknown methods
+		return errors.Errorf("unsupported downtime mirror method: %s", method)
+	}
 	tok, err := tokCfg.CreateToken()
 	if err != nil {
 		return errors.Wrap(err, "failed to mint downtime token")

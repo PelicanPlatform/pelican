@@ -54,9 +54,21 @@ description: >-
 issuedBy: ["director"]
 acceptedBy: ["director"]
 ---
-name: pelican.downtime
+name: pelican.downtime_create
 description: >-
-  Permits origin and cache to propagate their downtimes to the registry
+  Permits origin and cache to create downtimes at the registry
+issuedBy: ["origin", "cache"]
+acceptedBy: ["registry"]
+---
+name: pelican.downtime_modify
+description: >-
+  Permits origin and cache to modify existing downtimes at the registry
+issuedBy: ["origin", "cache"]
+acceptedBy: ["registry"]
+---
+name: pelican.downtime_delete
+description: >-
+  Permits origin and cache to delete downtimes at the registry
 issuedBy: ["origin", "cache"]
 acceptedBy: ["registry"]
 ---

@@ -331,10 +331,22 @@ func DowntimeAuthHandler(ctx *gin.Context) {
 	}
 
 	// If not admin cookie, try bearer token from header
+	var requiredScope token_scopes.TokenScope
+	switch ctx.Request.Method {
+	case http.MethodPost:
+		requiredScope = token_scopes.Pelican_DowntimeCreate
+	case http.MethodPut:
+		requiredScope = token_scopes.Pelican_DowntimeModify
+	case http.MethodDelete:
+		requiredScope = token_scopes.Pelican_DowntimeDelete
+	default:
+		// Fallback: require create/modify/delete not for GETs (which don't hit this handler).
+		requiredScope = token_scopes.Pelican_DowntimeModify
+	}
 	status, ok, err := token.Verify(ctx, token.AuthOption{
 		Sources: []token.TokenSource{token.Header},
 		Issuers: []token.TokenIssuer{token.RegisteredServer},
-		Scopes:  []token_scopes.TokenScope{token_scopes.Pelican_Downtime},
+		Scopes:  []token_scopes.TokenScope{requiredScope},
 	})
 	if !ok || err != nil {
 		ctx.AbortWithStatusJSON(status, server_structs.SimpleApiResp{
