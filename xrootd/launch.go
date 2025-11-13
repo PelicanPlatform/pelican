@@ -156,6 +156,13 @@ func makeUnprivilegedXrootdLauncher(daemonName string, xrootdRun string, configP
 		if statsPath := param.Cache_ClientStatisticsLocation.GetString(); statsPath != "" {
 			result.ExtraEnv = append(result.ExtraEnv, "XRD_CURLSTATISTICSLOCATION="+statsPath)
 		}
+
+		// If the cache is running in "site-local" mode, configure xrdcl-pelican to
+		// query the Director for other Caches, not Origins.
+		if param.Cache_EnableSiteLocalMode.GetBool() {
+			result.ExtraEnv = append(result.ExtraEnv, "XRD_PELICANDIRECTORYQUERYMODE=cache")
+		}
+
 		// Pass through the advanced Pelican cache control features; meant for unit tests of xrdcl-pelican
 		// Purposely allowing these to override the ones from the Pelican config file
 		for _, envVar := range os.Environ() {
