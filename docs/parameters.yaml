@@ -1702,6 +1702,8 @@ type: filename
 root_default: /var/lib/pelican/cache.sqlite
 default: $ConfigBase/cache.sqlite
 components: ["cache"]
+deprecated: true
+replacedby: ["Server.DbLocation"]
 ---
 name: Cache.EnableTLSClientAuth
 description: |+
@@ -1817,6 +1819,8 @@ type: filename
 root_default: /var/lib/pelican/director.sqlite
 default: $ConfigBase/director.sqlite
 components: ["director"]
+deprecated: true
+replacedby: ["Server.DbLocation"]
 ---
 name: Director.DefaultResponse
 description: |+
@@ -2136,6 +2140,8 @@ type: filename
 root_default: /var/lib/pelican/registry.sqlite
 default: $ConfigBase/ns-registry.sqlite
 components: ["registry"]
+deprecated: true
+replacedby: ["Server.DbLocation"]
 ---
 name: Registry.RequireKeyChaining
 description: |+
