@@ -957,8 +957,8 @@ func getServerPublicKeyHandler(ctx *gin.Context) {
 		return
 	}
 
-	pubkey := strings.TrimSpace(server.Registration[0].Pubkey)
-	if pubkey == "" {
+	jwksString := strings.TrimSpace(server.Registration[0].Pubkey)
+	if jwksString == "" {
 		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Server public key not available"})
@@ -966,7 +966,7 @@ func getServerPublicKeyHandler(ctx *gin.Context) {
 	}
 
 	var raw json.RawMessage
-	if err := json.Unmarshal([]byte(pubkey), &raw); err != nil {
+	if err := json.Unmarshal([]byte(jwksString), &raw); err != nil {
 		log.Errorf("Invalid JWKS stored for server %s: %v", serverID, err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
