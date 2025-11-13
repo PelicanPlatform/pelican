@@ -145,7 +145,11 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	}()
 	config.UpdateConfigFromListener(ln)
 
+	// The servers slice holds all running XRootD servers, whereas the
+	// serversRequireAdvertisement slice only holds those that need to
+	// be advertised to the director.
 	servers = make([]server_structs.XRootDServer, 0)
+	serversRequireAdvertisement := make([]server_structs.XRootDServer, 0)
 
 	if modules.IsEnabled(server_structs.OriginType) {
 
@@ -155,6 +159,7 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 			return
 		}
 		servers = append(servers, server)
+		serversRequireAdvertisement = append(serversRequireAdvertisement, server)
 
 		var originExports []server_utils.OriginExport
 		originExports, err = server_utils.GetOriginExports()
@@ -326,6 +331,9 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		}
 
 		servers = append(servers, cacheServer)
+		if !param.Cache_EnableSiteLocalMode.GetBool() {
+			serversRequireAdvertisement = append(serversRequireAdvertisement, cacheServer)
+		}
 	}
 
 	if modules.IsEnabled(server_structs.CacheType) {
@@ -361,9 +369,9 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		}
 	}
 
-	if modules.IsEnabled(server_structs.OriginType) || modules.IsEnabled(server_structs.CacheType) {
+	if modules.IsEnabled(server_structs.OriginType) || modules.IsEnabled(server_structs.CacheType) && len(serversRequireAdvertisement) > 0 {
 		log.Debug("Launching periodic advertise of origin/cache server to the director")
-		if err = launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
+		if err = launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, serversRequireAdvertisement); err != nil {
 			return
 		}
 	}
