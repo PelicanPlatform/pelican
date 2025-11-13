@@ -197,8 +197,8 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	healthCheckUrl := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
 	if err = server_utils.WaitUntilWorking(ctx, "GET", healthCheckUrl, "Web UI", http.StatusOK, true); err != nil {
-		log.Errorf("The server was unable to unable to ping its health test endpoint at the configured %s during startup: %v",
-			param.Server_ExternalWebUrl.GetName(), err)
+		log.Errorf("The server was unable to ping its health test endpoint at its external web URL %q (param %s) during startup: %v",
+			param.Server_ExternalWebUrl.GetName(), param.Server_ExternalWebUrl.GetName(), err)
 		return
 	}
 
@@ -242,9 +242,10 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	}
 
 	// Origin needs to advertise once before the cache starts
-	if modules.IsEnabled(server_structs.CacheType) && modules.IsEnabled(server_structs.OriginType) {
-		log.Debug("Advertise Origin and Cache to the Director")
-		if err = launcher_utils.Advertise(ctx, servers); err != nil {
+	if modules.IsEnabled(server_structs.CacheType) && modules.IsEnabled(server_structs.OriginType) && !param.Cache_EnableSiteLocalMode.GetBool() {
+		// At this point, the `servers` slice has _only_ the Origin server in it
+		log.Debug("Detected both Origin and Cache modules; performing initial advertisement of Origin to Director before starting Cache")
+		if err = launcher_utils.Advertise(ctx, serversRequireAdvertisement); err != nil {
 			err = errors.Wrap(err, "failed to do initial advertisement to the director")
 			return
 		}

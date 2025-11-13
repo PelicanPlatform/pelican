@@ -146,14 +146,14 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 	}
 
 	portStartCallback := func(port int) {
-		viper.Set("Cache.Port", port)
+		viper.Set(param.Cache_Port.GetName(), port)
 		if cacheUrl, err := url.Parse(param.Cache_Url.GetString()); err == nil {
 			if cacheUrl.Port() == "" {
 				cacheUrl.Host = cacheUrl.Hostname() + ":" + strconv.Itoa(port)
 			}
 
-			viper.Set("Cache.Url", cacheUrl.String())
-			log.Debugln("Resetting Cache.Url to", cacheUrl.String())
+			viper.Set(param.Cache_Url.GetName(), cacheUrl.String())
+			log.Debugf("Resetting %s to %s", param.Cache_Url.GetName(), cacheUrl.String())
 		}
 		log.Infoln("Cache startup complete on port", port)
 	}
