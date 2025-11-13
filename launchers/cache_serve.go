@@ -103,9 +103,12 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 
 	xrootd.LaunchXrootdMaintenance(ctx, cacheServer, 2*time.Minute)
 
-	cache.LaunchDirectorTestFileCleanup(ctx)
-
-	cache.LaunchFedTokManager(ctx, egrp, cacheServer)
+	// Site-local caches aren't part of the federation, so they don't expect
+	// Director tests or federation tokens.
+	if !param.Cache_EnableSiteLocalMode.GetBool() {
+		cache.LaunchDirectorTestFileCleanup(ctx)
+		cache.LaunchFedTokManager(ctx, egrp, cacheServer)
+	}
 
 	if param.Cache_EnableEvictionMonitoring.GetBool() {
 		metrics.LaunchXrootdCacheEvictionMonitoring(ctx, egrp)
