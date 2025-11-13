@@ -299,6 +299,7 @@ type Config struct {
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DirectorUrls []string `mapstructure:"directorurls" yaml:"DirectorUrls"`
 		DropPrivileges bool `mapstructure:"dropprivileges" yaml:"DropPrivileges"`
+		EnablePKCS11 bool `mapstructure:"enablepkcs11" yaml:"EnablePKCS11"`
 		EnablePprof bool `mapstructure:"enablepprof" yaml:"EnablePprof"`
 		EnableUI bool `mapstructure:"enableui" yaml:"EnableUI"`
 		ExternalWebUrl string `mapstructure:"externalweburl" yaml:"ExternalWebUrl"`
@@ -674,6 +675,7 @@ type configWithType struct {
 		DbLocation struct { Type string; Value string }
 		DirectorUrls struct { Type string; Value []string }
 		DropPrivileges struct { Type string; Value bool }
+		EnablePKCS11 struct { Type string; Value bool }
 		EnablePprof struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
 		ExternalWebUrl struct { Type string; Value string }
