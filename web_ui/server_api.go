@@ -358,11 +358,16 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 	dtSourceServer := server_structs.NewServerType()
 	dtSourceServer.SetString(existingDowntime.Source)
 	if validateServerType([]server_structs.ServerType{server_structs.RegistryType}) && dtSourceServer != server_structs.RegistryType {
-		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Downtimes created by a server admin are read-only for federation admins",
-		})
-		return
+		// Allow updates from Origin/Cache on their own server
+		if ctx.GetString("AuthMethod") == "registered-server-token" && ctx.GetString("TokenSubject") == existingDowntime.ServerID {
+			// permitted
+		} else {
+			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Downtimes created by a server admin are read-only for federation admins",
+			})
+			return
+		}
 	}
 
 	user, _, _, err := GetUserGroups(ctx)
