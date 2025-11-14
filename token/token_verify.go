@@ -224,11 +224,13 @@ func (a AuthCheckImpl) checkRegisteredServer(ctx *gin.Context, strToken string, 
 		return errors.Wrap(err, "invalid JWT")
 	}
 
-	// Extract server identifier from token subject
+	// Extract server id from token subject (e.g. "g2dsvf3")
 	subject := token.Subject()
 	if subject == "" {
 		return errors.New("Token missing subject claim")
 	}
+	// Expose subject for downstream handlers (e.g., ownership checks)
+	ctx.Set("TokenSubject", subject)
 
 	// Look up the server's public key and metadata based on the the server id in the token subject
 	jwks, resolved, err := resolveRegisteredServerJWKS(ctx, subject)
