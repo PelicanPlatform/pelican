@@ -140,31 +140,6 @@ func validateDowntimeInput(downtimeInput DowntimeInput) error {
 	return nil
 }
 
-// validateServerType checks if any currently enabled server matches the allowed server types slice.
-func validateServerType(allowedServerTypes []server_structs.ServerType) bool {
-	if len(allowedServerTypes) == 0 {
-		return false
-	}
-
-	enabledServers := config.GetEnabledServerString(true)
-	if len(enabledServers) == 0 {
-		return false
-	}
-
-	allowed := make(map[string]struct{}, len(allowedServerTypes))
-	for _, serverType := range allowedServerTypes {
-		allowed[strings.ToLower(serverType.String())] = struct{}{}
-	}
-
-	for _, enabled := range enabledServers {
-		if _, ok := allowed[enabled]; ok {
-			return true
-		}
-	}
-
-	return false
-}
-
 func HandleCreateDowntime(ctx *gin.Context) {
 	var downtimeInput DowntimeInput
 	if err := ctx.ShouldBindJSON(&downtimeInput); err != nil {
@@ -214,7 +189,7 @@ func HandleCreateDowntime(ctx *gin.Context) {
 	// If the downtime is created by the Origin or Cache, and the current server is not a Registry, serverName and serverID will be set automatically
 	serverType := server_structs.NewServerType()
 	serverType.SetString(downtimeInput.Source)
-	if (serverType == server_structs.OriginType || serverType == server_structs.CacheType) && !validateServerType([]server_structs.ServerType{server_structs.RegistryType}) {
+	if (serverType == server_structs.OriginType || serverType == server_structs.CacheType) && !config.ValidateServerType([]server_structs.ServerType{server_structs.RegistryType}) {
 		metadata, err := server_utils.GetServerMetadata(ctx, serverType)
 		if err != nil {
 			log.Debugf("Unable to get server metadata for %s: %v", serverType.String(), err)
@@ -357,7 +332,7 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 	// Downtimes created by a server admin are read-only for federation admins
 	dtSourceServer := server_structs.NewServerType()
 	dtSourceServer.SetString(existingDowntime.Source)
-	if validateServerType([]server_structs.ServerType{server_structs.RegistryType}) && dtSourceServer != server_structs.RegistryType {
+	if config.ValidateServerType([]server_structs.ServerType{server_structs.RegistryType}) && dtSourceServer != server_structs.RegistryType {
 		// Allow updates from Origin/Cache on their own server
 		if ctx.GetString("AuthMethod") == "registered-server-token" && ctx.GetString("TokenSubject") == existingDowntime.ServerID {
 			// permitted
@@ -469,7 +444,7 @@ func mirrorDowntimeToRegistry(ctx *gin.Context, dt server_structs.Downtime, meth
 	}
 
 	// Only mirror downtime to Registry when this server is an Origin or Cache
-	if !validateServerType([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType}) {
+	if !config.ValidateServerType([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType}) {
 		return nil
 	}
 
