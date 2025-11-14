@@ -97,6 +97,14 @@ func getToolsList() []Tool {
 
 // handleDownload implements the pelican_download tool
 func (s *Server) handleDownload(args map[string]interface{}) CallToolResult {
+	// Ensure Pelican client is initialized
+	if err := s.ensureInitialized(); err != nil {
+		return CallToolResult{
+			Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("Error: Failed to initialize Pelican client: %v", err)}},
+			IsError: true,
+		}
+	}
+
 	source, ok := args["source"].(string)
 	if !ok {
 		return CallToolResult{
@@ -160,6 +168,14 @@ func (s *Server) handleDownload(args map[string]interface{}) CallToolResult {
 
 // handleStat implements the pelican_stat tool
 func (s *Server) handleStat(args map[string]interface{}) CallToolResult {
+	// Ensure Pelican client is initialized
+	if err := s.ensureInitialized(); err != nil {
+		return CallToolResult{
+			Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("Error: Failed to initialize Pelican client: %v", err)}},
+			IsError: true,
+		}
+	}
+
 	url, ok := args["url"].(string)
 	if !ok {
 		return CallToolResult{
@@ -205,6 +221,14 @@ func (s *Server) handleStat(args map[string]interface{}) CallToolResult {
 
 // handleList implements the pelican_list tool
 func (s *Server) handleList(args map[string]interface{}) CallToolResult {
+	// Ensure Pelican client is initialized
+	if err := s.ensureInitialized(); err != nil {
+		return CallToolResult{
+			Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("Error: Failed to initialize Pelican client: %v", err)}},
+			IsError: true,
+		}
+	}
+
 	url, ok := args["url"].(string)
 	if !ok {
 		return CallToolResult{
