@@ -79,6 +79,11 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		return
 	}
 
+	// After config is loaded, check if director should enable broker
+	if modules.IsEnabled(server_structs.DirectorType) && param.Director_EnableBroker.GetBool() {
+		modules.Set(server_structs.BrokerType)
+	}
+
 	// Print Pelican config at server start if it's in debug or info level
 	if log.GetLevel() >= log.InfoLevel {
 		if err = config.PrintConfig(); err != nil {
@@ -115,6 +120,7 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	}
 
 	if modules.IsEnabled(server_structs.BrokerType) {
+		log.Debug("Enabling broker endpoints")
 		rootGroup := engine.Group("/", web_ui.ServerHeaderMiddleware)
 		broker.RegisterBroker(ctx, rootGroup)
 		broker.LaunchNamespaceKeyMaintenance(ctx, egrp)
