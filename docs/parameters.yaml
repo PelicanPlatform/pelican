@@ -914,6 +914,21 @@ type: int
 default: none
 components: ["origin"]
 ---
+name: Origin.ConcurrencyDegradedThreshold
+description: |+
+  The percentage of permissible concurrency that indicates when the Origin should enter the "degraded" state.
+
+  For example, if `${Origin.Concurrency}` is set to 100 and `${Origin.ConcurrencyDegradedThreshold}` is set to 80,
+  then the Origin will enter the degraded state when active IO exceeds 80.
+
+  The Director will continue to deprioritize the Origin while in the degraded state until the active IO drops below
+  the threshold.
+
+  This setting only has effect when `${Origin.Concurrency}` is set.
+type: int
+default: 90
+components: ["origin"]
+---
 name: Origin.DirectorTest
 description: |+
   A bool indicating whether the director should send file transfer tests to the origin.
@@ -1631,6 +1646,21 @@ description: |+
   - (NVMe/SSDs) ~10x the number of cores available to the Cache
 type: int
 default: none
+components: ["cache"]
+---
+name: Cache.ConcurrencyDegradedThreshold
+description: |+
+  The percentage of permissible concurrency that indicates when the Cache should enter the "degraded" state.
+
+  For example, if `${Cache.Concurrency}` is set to 100 and `${Cache.ConcurrencyDegradedThreshold}` is set to 80,
+  then the Cache will enter the degraded state when active IO exceeds 80.
+
+  The Director will continue to deprioritize the Cache while in the degraded state until the active IO drops below
+  the threshold.
+
+  This setting only has effect when `${Cache.Concurrency}` is set.
+type: int
+default: 90
 components: ["cache"]
 ---
 name: Cache.EnableLotman
