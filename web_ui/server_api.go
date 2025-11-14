@@ -494,7 +494,9 @@ func mirrorDowntimeToRegistry(ctx *gin.Context, dt server_structs.Downtime, meth
 	tokCfg := token.NewWLCGToken()
 	tokCfg.Lifetime = 2 * time.Minute
 	tokCfg.Subject = dt.ServerID
-	tokCfg.AddAudienceAny()
+	// Set audience to the Registry's host:port so the token is explicitly targeted.
+	// Example: "registry.example.org:8446"
+	tokCfg.AddAudiences(regURL.Host)
 	switch method {
 	case http.MethodPost:
 		tokCfg.AddScopes(token_scopes.Pelican_DowntimeCreate)
