@@ -24,6 +24,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -32,6 +33,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -47,7 +49,6 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 type (
@@ -162,6 +163,43 @@ func doRetrieveRequest(t *testing.T, ctx context.Context, dur time.Duration) (*h
 	return client.Do(req)
 }
 
+// setupTestEngine creates a gin engine for testing, similar to web_ui.GetEngine()
+func setupTestEngine() *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+	return engine
+}
+
+// runTestEngine starts an HTTP server with the given gin engine for testing
+func runTestEngine(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
+	addr := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	config.UpdateConfigFromListener(ln)
+
+	server := &http.Server{
+		Addr:    addr,
+		Handler: engine,
+	}
+
+	egrp.Go(func() error {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return server.Shutdown(shutdownCtx)
+	})
+
+	egrp.Go(func() error {
+		defer ln.Close()
+		return server.Serve(ln)
+	})
+
+	return nil
+}
+
 // End-to-end test of the broker doing a TCP reversal
 func TestBroker(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
@@ -171,14 +209,13 @@ func TestBroker(t *testing.T) {
 	Setup(t, ctx, egrp)
 
 	// Setup the broker APIs
-	engine, err := web_ui.GetEngine()
-	require.NoError(t, err)
+	engine := setupTestEngine()
 	rootGroup := engine.Group("/")
 	RegisterBroker(ctx, rootGroup)
 	RegisterBrokerCallback(ctx, rootGroup)
 	registry.RegisterRegistryAPI(rootGroup)
 	// Register routes for APIs to registry Web UI
-	err = registry.RegisterRegistryWebAPI(rootGroup)
+	err := registry.RegisterRegistryWebAPI(rootGroup)
 	require.NoError(t, err)
 
 	egrp.Go(func() error {
@@ -187,7 +224,7 @@ func TestBroker(t *testing.T) {
 	})
 
 	// Run the web engine, wait for it to be online.
-	err = web_ui.RunEngineRoutine(ctx, engine, egrp, false)
+	err = runTestEngine(ctx, engine, egrp)
 	require.NoError(t, err)
 	err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/", "Web UI", http.StatusNotFound, false)
 	require.NoError(t, err)
@@ -292,8 +329,7 @@ func TestRetrieveTimeout(t *testing.T) {
 	Setup(t, ctx, egrp)
 
 	// Setup the broker APIs
-	engine, err := web_ui.GetEngine()
-	require.NoError(t, err)
+	engine := setupTestEngine()
 	rootGroup := engine.Group("/")
 	RegisterBroker(ctx, rootGroup)
 	registry.RegisterRegistryAPI(rootGroup)
@@ -304,7 +340,7 @@ func TestRetrieveTimeout(t *testing.T) {
 	})
 
 	// Run the web engine, wait for it to be online.
-	err = web_ui.RunEngineRoutine(ctx, engine, egrp, false)
+	err := runTestEngine(ctx, engine, egrp)
 	require.NoError(t, err)
 	err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/", "Web UI", http.StatusNotFound, false)
 	require.NoError(t, err)

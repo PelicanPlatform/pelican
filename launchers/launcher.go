@@ -355,9 +355,10 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	// If we are a director, we will potentially contact other
 	// services with the broker, so we need to set up the broker dialer
+	var brokerDialer *broker.BrokerDialer
 	if modules.IsEnabled(server_structs.DirectorType) {
 		fmt.Println("Setting up broker dialer for director")
-		brokerDialer := broker.NewBrokerDialer(ctx, egrp)
+		brokerDialer = broker.NewBrokerDialer(ctx, egrp)
 		config.SetTransportDialer(brokerDialer.DialContext)
 		director.SetBrokerDialer(brokerDialer)
 	}
@@ -394,7 +395,11 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		// and not for each server. This is why we use a sync.Once here.
 		oncePrometheus.Do(func() {
 			metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusWarning, "Prometheus not started")
-			prometheusInitErr = web_ui.ConfigureEmbeddedPrometheus(ctx, engine)
+			var dialContextFunc func(context.Context, string, string) (net.Conn, error)
+			if brokerDialer != nil {
+				dialContextFunc = brokerDialer.DialContext
+			}
+			prometheusInitErr = web_ui.ConfigureEmbeddedPrometheus(ctx, engine, dialContextFunc)
 			if prometheusInitErr != nil {
 				prometheusInitErr = errors.Wrap(prometheusInitErr, "failed to configure embedded Prometheus instance")
 				metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusCritical, prometheusInitErr.Error())

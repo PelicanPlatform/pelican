@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -345,7 +346,7 @@ func (a LogrusAdapter) Log(keyvals ...interface{}) error {
 	return nil
 }
 
-func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error {
+func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine, dialContextFunc func(context.Context, string, string) (net.Conn, error)) error {
 	// This is fine if each process has only one server enabled
 	// Since the "federation-in-the-box" feature won't include any web components
 	// we can assume that this is the only server to enable
@@ -381,6 +382,12 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 	cfg.queryConcurrency = 20
 	cfg.queryMaxSamples = 50000000
 	cfg.scrape.DiscoveryReloadInterval = model.Duration(5 * time.Second)
+
+	if isDirector && dialContextFunc != nil {
+		cfg.scrape.HTTPClientOptions = append(cfg.scrape.HTTPClientOptions, common_config.WithDialContextFunc(
+			dialContextFunc,
+		))
+	}
 
 	RemoteReadSampleLimit := int(5e7)
 	RemoteReadConcurrencyLimit := 10
