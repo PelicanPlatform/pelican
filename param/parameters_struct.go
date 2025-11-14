@@ -28,6 +28,7 @@ type Config struct {
 		BlocksToPrefetch int `mapstructure:"blockstoprefetch" yaml:"BlocksToPrefetch"`
 		ClientStatisticsLocation string `mapstructure:"clientstatisticslocation" yaml:"ClientStatisticsLocation"`
 		Concurrency int `mapstructure:"concurrency" yaml:"Concurrency"`
+		ConcurrencyDegradedThreshold int `mapstructure:"concurrencydegradedthreshold" yaml:"ConcurrencyDegradedThreshold"`
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
 		DataLocations []string `mapstructure:"datalocations" yaml:"DataLocations"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
@@ -221,6 +222,7 @@ type Config struct {
 	} `mapstructure:"oidc" yaml:"OIDC"`
 	Origin struct {
 		Concurrency int `mapstructure:"concurrency" yaml:"Concurrency"`
+		ConcurrencyDegradedThreshold int `mapstructure:"concurrencydegradedthreshold" yaml:"ConcurrencyDegradedThreshold"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DirectorTest bool `mapstructure:"directortest" yaml:"DirectorTest"`
 		DisableDirectClients bool `mapstructure:"disabledirectclients" yaml:"DisableDirectClients"`
@@ -402,6 +404,7 @@ type configWithType struct {
 		BlocksToPrefetch struct { Type string; Value int }
 		ClientStatisticsLocation struct { Type string; Value string }
 		Concurrency struct { Type string; Value int }
+		ConcurrencyDegradedThreshold struct { Type string; Value int }
 		DataLocation struct { Type string; Value string }
 		DataLocations struct { Type string; Value []string }
 		DbLocation struct { Type string; Value string }
@@ -595,6 +598,7 @@ type configWithType struct {
 	}
 	Origin struct {
 		Concurrency struct { Type string; Value int }
+		ConcurrencyDegradedThreshold struct { Type string; Value int }
 		DbLocation struct { Type string; Value string }
 		DirectorTest struct { Type string; Value bool }
 		DisableDirectClients struct { Type string; Value bool }
