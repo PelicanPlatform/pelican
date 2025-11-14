@@ -26,6 +26,10 @@ chmod 777 get_put_tmp/config
 mkdir -p get_put_tmp/origin
 chmod 777 get_put_tmp/origin
 
+# Create OIDC client configuration files for registry OAuth functionality
+echo "test-client-id" > get_put_tmp/config/oidc-client-id
+echo "test-client-secret" > get_put_tmp/config/oidc-client-secret
+
 # Setup env variables needed
 export PELICAN_FEDERATION_DIRECTORURL="https://$HOSTNAME:8444"
 export PELICAN_FEDERATION_REGISTRYURL="https://$HOSTNAME:8444"
@@ -35,7 +39,8 @@ export PELICAN_SERVER_ENABLEUI=false
 export PELICAN_ORIGIN_RUNLOCATION=$PWD/xrootdRunLocation
 export PELICAN_CONFIGDIR=$PWD/get_put_tmp/config
 export PELICAN_SERVER_DBLOCATION=$PWD/get_put_tmp/config/test-registry.sql
-export PELICAN_OIDC_CLIENTID="sometexthere"
+export PELICAN_OIDC_CLIENTIDFILE="$PWD/get_put_tmp/config/oidc-client-id"
+export PELICAN_OIDC_CLIENTSECRETFILE="$PWD/get_put_tmp/config/oidc-client-secret"
 export PELICAN_ORIGIN_FEDERATIONPREFIX="/test"
 export PELICAN_ORIGIN_STORAGEPREFIX="$PWD/get_put_tmp/origin"
 
@@ -60,7 +65,8 @@ cleanup() {
     unset PELICAN_ORIGIN_FEDERATIONPREFIX
     unset PELICAN_ORIGIN_STORAGEPREFIX
     unset PELICAN_SERVER_ENABLEUI
-    unset PELICAN_OIDC_CLIENTID
+    unset PELICAN_OIDC_CLIENTIDFILE
+    unset PELICAN_OIDC_CLIENTSECRETFILE
     unset PELICAN_ORIGIN_ENABLEDIRECTREADS
 }
 

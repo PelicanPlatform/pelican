@@ -97,13 +97,14 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		if !param.Monitoring_EnablePrometheus.GetBool() {
 			log.Warn("Prometheus is disabled, but Web UI is enabled. Metrics via Web UI will not be available.")
 		}
-		if modules.IsEnabled(server_structs.RegistryType) ||
-			(modules.IsEnabled(server_structs.OriginType) && param.Origin_EnableOIDC.GetBool()) ||
-			(modules.IsEnabled(server_structs.CacheType) && param.Cache_EnableOIDC.GetBool()) ||
-			(modules.IsEnabled(server_structs.DirectorType) && param.Director_EnableOIDC.GetBool()) {
-			if err = web_ui.ConfigOAuthClientAPIs(engine); err != nil {
-				return
-			}
+	}
+
+	if modules.IsEnabled(server_structs.RegistryType) ||
+		(modules.IsEnabled(server_structs.OriginType) && param.Origin_EnableOIDC.GetBool()) ||
+		(modules.IsEnabled(server_structs.CacheType) && param.Cache_EnableOIDC.GetBool()) ||
+		(modules.IsEnabled(server_structs.DirectorType) && param.Director_EnableOIDC.GetBool()) {
+		if err = web_ui.ConfigOAuthClientAPIs(engine); err != nil {
+			return
 		}
 	}
 

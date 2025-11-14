@@ -99,6 +99,13 @@ func TestFedServePosixOrigin(t *testing.T) {
 	viper.Set("Director.DbLocation", filepath.Join(t.TempDir(), "director.sqlite"))
 	viper.Set(param.Origin_DbLocation.GetName(), filepath.Join(t.TempDir(), "origin.sqlite"))
 	viper.Set(param.Cache_DbLocation.GetName(), filepath.Join(t.TempDir(), "cache.sqlite"))
+	// Set up OIDC client configuration for registry OAuth functionality
+	oidcClientIDFile := filepath.Join(tmpPath, "oidc-client-id")
+	oidcClientSecretFile := filepath.Join(tmpPath, "oidc-client-secret")
+	require.NoError(t, os.WriteFile(oidcClientIDFile, []byte("test-client-id"), 0644))
+	require.NoError(t, os.WriteFile(oidcClientSecretFile, []byte("test-client-secret"), 0644))
+	viper.Set(param.OIDC_ClientIDFile.GetName(), oidcClientIDFile)
+	viper.Set(param.OIDC_ClientSecretFile.GetName(), oidcClientSecretFile)
 
 	defer cancel()
 
