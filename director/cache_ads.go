@@ -442,15 +442,25 @@ func updateLatLong(ad *server_structs.ServerAd) error {
 	return nil
 }
 
-// Apply downtimes provided by Origin/Cache servers to the director's in-memory state for the given server.
+// Apply downtimes provided by Origin/Cache servers (<= v7.21) to the director's in-memory state for the given server.
 // This function treats a nil or empty slice as "no downtimes", clearing any stale
 // serverFiltered entry and removing cached server downtimes.
 func applyServerDowntimes(serverName string, downtimes []server_structs.Downtime) {
+	// If the server is >= v7.22, it sets the serverID in the downtime entry.
+	// Its downtimes are already handled by the Registry polling (updateDowntimeFromRegistry),
+	// so we don't need to do anything here
+	for _, dt := range downtimes {
+		if dt.ServerID != "" {
+			log.Debugf("The downtimes set by the admin of Server %q have been propagated to the Director through polling the Registry; skipping processing the downtimes in the server ads", serverName)
+			return
+		}
+	}
+
 	filteredServersMutex.Lock()
 	defer filteredServersMutex.Unlock()
 
 	if len(downtimes) == 0 {
-		// No downtimes provided: clear cached entry and remove stale serverFiltered
+		// No downtimes provided (nil or empty slice): clear cached entry and remove stale serverFiltered
 		delete(serverDowntimes, serverName)
 		if existingFilterType, isServerFiltered := filteredServers[serverName]; isServerFiltered && existingFilterType == serverFiltered {
 			delete(filteredServers, serverName)
@@ -530,70 +540,107 @@ func getCachedDowntimes(serverName string) ([]server_structs.Downtime, error) {
 	return result, nil
 }
 
-// Get the downtimes set by federation admin in the Registry
-func updateDowntimeFromRegistry(ctx context.Context) error {
+// getRegistryDowntimes fetches all downtime information from the Registry.
+// It returns both active and future downtimes from all sources (registry, origin, cache).
+func getRegistryDowntimes(ctx context.Context) ([]server_structs.Downtime, error) {
 	fedInfo, err := config.GetFederation(ctx)
 	if err != nil || fedInfo.RegistryEndpoint == "" {
 		log.Error("Failed to get federation info: ", err)
-		return errors.Wrap(err, "failed to get federation info")
+		return nil, errors.Wrap(err, "failed to get federation info")
 	}
 
 	registryEndpointURL, err := url.Parse(fedInfo.RegistryEndpoint)
 	if err != nil {
 		log.Error("Failed to parse registry endpoint URL: ", err)
-		return errors.Wrap(err, "failed to parse registry endpoint URL")
+		return nil, errors.Wrap(err, "failed to parse registry endpoint URL")
 	}
 
 	// Construct the registry downtime list URL to get active and future downtimes
+	// Fetch all sources (registry, origin, cache) so Director can persist server-originated downtimes
 	registryEndpointURL.Path = path.Join(registryEndpointURL.Path, "api", "v1.0", "downtime")
-	// Set the query parameter "source" to the Registry.
-	q := registryEndpointURL.Query()
-	q.Set("source", strings.ToLower(server_structs.RegistryType.String()))
-	registryEndpointURL.RawQuery = q.Encode()
 
 	registryDowntimeListURL := registryEndpointURL.String()
 
 	tr := config.GetTransport()
 	respData, err := utils.MakeRequest(ctx, tr, registryDowntimeListURL, "GET", nil, nil)
 	if err != nil {
-		log.Error("Failed to get live servers from the director: ", err)
-		return errors.Wrap(err, "failed to get live servers from the director")
+		log.Error("Failed to get downtimes from the registry: ", err)
+		return nil, errors.Wrap(err, "failed to get downtimes from the registry")
 	}
-	var latestFedDowntimes []server_structs.Downtime
-	err = json.Unmarshal(respData, &latestFedDowntimes)
+
+	var downtimes []server_structs.Downtime
+	err = json.Unmarshal(respData, &downtimes)
 	if err != nil {
-		log.Errorf("Failed to marshal response in to JSON: %v", err)
-		return errors.Wrap(err, "failed to marshal response in to JSON")
+		log.Errorf("Failed to unmarshal response into JSON: %v", err)
+		return nil, errors.Wrap(err, "failed to unmarshal response into JSON")
 	}
 
-	// If `latestFedDowntimes` is empty, it means there's no downtime set by federation admin,
-	// or the downtime is expired (deleted). In either case, we still need to proceed to use
-	// it to update `filteredServers` and `federationDowntimes`, clearing out stale info.
+	return downtimes, nil
+}
 
-	filteredServersMutex.Lock()
-	defer filteredServersMutex.Unlock()
-
-	// In the Registry, downtime.serverName is prefix, not server name (because Registry doesn't know the server name)
-	// So we need to find its corresponding server name in the serverAds and use it to overwrite downtime.serverName
-
-	ads := serverAds.Items() // pull the ads slice once
-	// Build a prefix→name map
+// categorizeServerDowntimes categorizes downtimes based on whether they're for a running or offline server.
+// The Director still cares about offline servers because it needs to display their downtime info too.
+//
+// It returns two slices:
+//  1. runningServerDowntimes: downtimes for currently running servers (need to apply filtering)
+//  2. allDowntimes: all downtimes including non-running servers (for display in Director's downtime page)
+func categorizeServerDowntimes(registryDowntimes []server_structs.Downtime, ads map[string]*ttlcache.Item[string, *server_structs.Advertisement]) (runningServerDowntimes, allDowntimes []server_structs.Downtime, err error) {
+	// Build a prefix→name map to convert legacy downtime entries' server name (prefix)
+	// to actual server name (meanwhile checking if the server is currently running).
+	// Similarly, build a serverID→name map to convert serverID to server name.
 	prefixToName := make(map[string]string, len(ads))
+	serverIDToName := make(map[string]string, len(ads))
 	for _, ad := range ads {
 		prefixToName[ad.Value().RegistryPrefix] = ad.Value().Name
-	}
-	var runningServersDowntimes []server_structs.Downtime
-	for i := 0; i < len(latestFedDowntimes); i++ {
-		name, found := prefixToName[latestFedDowntimes[i].ServerName]
-		if !found {
-			log.Infof("Unable to find server name for prefix %s in the Director. The server with the given prefix is not running now.", latestFedDowntimes[i].ServerName)
-			continue
+		if ad.Value().ServerID != "" {
+			serverIDToName[ad.Value().ServerID] = ad.Value().Name
 		}
-		latestFedDowntimes[i].ServerName = name
-		runningServersDowntimes = append(runningServersDowntimes, latestFedDowntimes[i])
 	}
 
-	// Remove existing filteredSevers that are fetched from the Registry first
+	runningServerDowntimes = make([]server_structs.Downtime, 0)
+	allDowntimes = make([]server_structs.Downtime, 0)
+
+	for i := 0; i < len(registryDowntimes); i++ {
+		downtime := registryDowntimes[i]
+		// If this entry doesn't have a server ID, it means it's an old downtime entry (recorded before v7.22),
+		// where the server name is the prefix. This block is for backward compatibility.
+		// In the Registry, downtime.serverName is prefix, not server name (because Registry doesn't know the server name)
+		// So we need to find its corresponding server name in the serverAds and use it to overwrite downtime.serverName
+		if downtime.ServerID == "" {
+			name, found := prefixToName[downtime.ServerName]
+			if !found {
+				// Server is not currently running, but we still want to display the downtime
+				log.Tracef("Server with prefix %s is not currently running in the Director, but keeping downtime for display.", downtime.ServerName)
+				allDowntimes = append(allDowntimes, downtime)
+				continue
+			}
+			// Convert the server name from prefix to actual server name
+			downtime.ServerName = name
+			// End of backward compatibility block
+		} else {
+			name, found := serverIDToName[downtime.ServerID]
+			if !found {
+				// Server is not currently running, but we still want to display the downtime
+				log.Tracef("Server with ID %s is not currently running in the Director, but keeping downtime for display.", downtime.ServerID)
+				allDowntimes = append(allDowntimes, downtime)
+				continue
+			}
+			downtime.ServerName = name
+		}
+		// Server is currently running
+		runningServerDowntimes = append(runningServerDowntimes, downtime)
+		allDowntimes = append(allDowntimes, downtime)
+	}
+
+	return runningServerDowntimes, allDowntimes, nil
+}
+
+// applyDowntimeFilters creates new filters as needed and applies them to the filteredServers map.
+// It also updates the federationDowntimes map with all downtimes for display purposes.
+//
+// This function expects to be called with filteredServersMutex already locked.
+func applyDowntimeFilters(runningServerDowntimes, allDowntimes []server_structs.Downtime) error {
+	// Remove existing filteredServers that are fetched from the Registry first
 	for key, val := range filteredServers {
 		if val == tempFiltered {
 			delete(filteredServers, key)
@@ -604,17 +651,22 @@ func updateDowntimeFromRegistry(ctx context.Context) error {
 	newFederationDowntimes := make(map[string][]server_structs.Downtime)
 	currentTime := time.Now().UTC().UnixMilli()
 
-	for _, downtime := range runningServersDowntimes {
-		// Save all active and future downtimes to the new map
+	// First, save ALL downtimes (including non-running servers) for display in Director's downtime page
+	for _, downtime := range allDowntimes {
 		newFederationDowntimes[downtime.ServerName] = append(newFederationDowntimes[downtime.ServerName], downtime)
+	}
 
+	// Then, apply filtering only to currently running servers
+	for _, downtime := range runningServerDowntimes {
 		// Check existing downtime filter
 		originalFilterType, hasOriginalFilter := filteredServers[downtime.ServerName]
-		// If this server is already put in downtime, we don't need to do anything to the filteredServers map
+
+		// If this server is already put in downtime (and not tempAllowed), we don't need to do anything
 		if hasOriginalFilter && originalFilterType != tempAllowed {
 			continue
 		}
-		// Otherwise, if it is an active downtime, we need to put it into the filteredServers map
+
+		// If it is an active downtime, add it to the filteredServers map
 		if currentTime >= downtime.StartTime && (currentTime <= downtime.EndTime || downtime.EndTime == -1) {
 			filteredServers[downtime.ServerName] = tempFiltered
 		}
@@ -622,6 +674,41 @@ func updateDowntimeFromRegistry(ctx context.Context) error {
 
 	// Overwrite the in-memory federationDowntimes map with the new data.
 	federationDowntimes = newFederationDowntimes
+	return nil
+}
+
+// updateDowntimeFromRegistry fetches downtime information from the Registry and applies it
+// to the Director's in-memory state. This includes both federation-set downtimes and
+// server-originated downtimes that have been persisted to the Registry.
+func updateDowntimeFromRegistry(ctx context.Context) error {
+	// Get all downtime information from the registry
+	registryDowntimes, err := getRegistryDowntimes(ctx)
+	if err != nil {
+		return err
+	}
+
+	// If `registryDowntimes` is empty, it means there's no downtime set by federation/origin/cache admin,
+	// or the downtime is expired (deleted). In either case, we still need to proceed to use
+	// it to update `filteredServers` and `federationDowntimes`, clearing out stale info.
+
+	filteredServersMutex.Lock()
+	defer filteredServersMutex.Unlock()
+
+	ads := serverAds.Items() // pull the cached server ads slice once
+
+	// Categorize server downtimes based on whether they're for a running server or not
+	// (not in the cached server ads = not running). The Director still cares about servers
+	// that aren't running because it needs to display downtime info for those servers.
+	runningServerDowntimes, allDowntimes, err := categorizeServerDowntimes(registryDowntimes, ads)
+	if err != nil {
+		return err
+	}
+
+	// Create new filters as needed and apply them
+	if err := applyDowntimeFilters(runningServerDowntimes, allDowntimes); err != nil {
+		return err
+	}
+
 	return nil
 }
 

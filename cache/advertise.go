@@ -31,7 +31,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -51,25 +50,20 @@ type (
 // Can use this mechanism to override the minimum for the sake of tests
 var MinFedTokenTickerRate = 1 * time.Minute
 
-func (server *CacheServer) CreateAdvertisement(name, originUrl, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
+func (server *CacheServer) CreateAdvertisement(name, id, originUrl, originWebUrl string, downtimes []server_structs.Downtime) (*server_structs.OriginAdvertiseV2, error) {
 	registryPrefix := server_structs.GetCacheNs(param.Xrootd_Sitename.GetString())
-
-	// Fetch cache's active and future downtimes
-	downtimes, err := database.GetIncompleteDowntimes(strings.ToLower(server_structs.CacheType.String()))
-	if err != nil {
-		return nil, err
-	}
 
 	// Get the overall health status as reported by the cache.
 	status := metrics.GetHealthStatus().OverallStatus
 
 	ad := server_structs.OriginAdvertiseV2{
+		ServerID:       id,
 		RegistryPrefix: registryPrefix,
 		DataURL:        originUrl,
 		WebURL:         originWebUrl,
 		Namespaces:     server.GetNamespaceAds(),
-		Downtimes:      downtimes,
 		Status:         status,
+		Downtimes:      downtimes,
 	}
 	ad.Initialize(name)
 
