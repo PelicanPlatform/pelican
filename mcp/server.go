@@ -91,16 +91,35 @@ func (s *Server) Run() error {
 
 // handleRequest processes a JSON-RPC request
 func (s *Server) handleRequest(req *JSONRPCRequest) error {
+	// Check if this is a notification (no ID) - these should not get responses
+	isNotification := req.ID == nil
+
 	switch req.Method {
 	case "initialize":
 		return s.handleInitialize(req)
+	case "initialized":
+		// This is a notification sent after initialize - no response needed
+		log.Debug("Received initialized notification")
+		return nil
 	case "tools/list":
 		return s.handleListTools(req)
 	case "tools/call":
 		return s.handleCallTool(req)
 	case "ping":
+		if isNotification {
+			return nil
+		}
 		return s.sendResponse(req.ID, map[string]interface{}{})
+	case "notifications/cancelled":
+		// Handle cancellation notification
+		log.Debug("Received cancellation notification")
+		return nil
 	default:
+		// Don't respond to unknown notifications
+		if isNotification {
+			log.Debugf("Ignoring unknown notification: %s", req.Method)
+			return nil
+		}
 		return s.sendError(req.ID, -32601, "Method not found", nil)
 	}
 }
