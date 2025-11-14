@@ -253,8 +253,35 @@ func (a AuthCheckImpl) checkRegisteredServer(ctx *gin.Context, strToken string, 
 		return errors.Wrap(err, "token validation failed")
 	}
 
-	// Validate scopes if needed
+	// Validate audience. The audience should be Registry's host:port.
+	url, parseErr := url.Parse(param.Server_ExternalWebUrl.GetString())
+	if parseErr != nil {
+		return errors.Wrapf(parseErr, "failed to parse server's external web URL %s", param.Server_ExternalWebUrl.GetString())
+	}
+	isAudienceValid := false
+	log.Tracef("Token audience: %v; Registry's 'host:port': %s", parsed.Audience(), url.Host)
+	for _, audience := range parsed.Audience() {
+		if audience == url.Host {
+			isAudienceValid = true
+			break
+		}
+	}
+	if !isAudienceValid {
+		return errors.New(fmt.Sprintf("failed to verify the audience of the token. Require %s", url.Host))
+	}
+
 	if len(expectedScopes) > 0 {
+		// Log the token scope for debugging
+		if scopeAny, present := parsed.Get("scope"); present {
+			if scopeStr, ok := scopeAny.(string); ok {
+				log.Tracef("Token scope: %s; expected scopes: %v", scopeStr, expectedScopes)
+			} else {
+				log.Tracef("Token scope is non-string (type %T); expected scopes: %v", scopeAny, expectedScopes)
+			}
+		} else {
+			log.Tracef("Token has no 'scope' claim; expected scopes: %v", expectedScopes)
+		}
+		// Validate scopes
 		scopeValidator := token_scopes.CreateScopeValidator(expectedScopes, allScopes)
 		if err := jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
 			return errors.Wrap(err, fmt.Sprintf("failed to verify the scope of the token. Require %v", expectedScopes))
