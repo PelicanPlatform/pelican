@@ -32,9 +32,10 @@ import (
 
 // Server implements the MCP server
 type Server struct {
-	reader *bufio.Reader
-	writer io.Writer
-	ctx    context.Context
+	reader      *bufio.Reader
+	writer      io.Writer
+	ctx         context.Context
+	initialized bool
 }
 
 // NewServer creates a new MCP server
@@ -46,13 +47,21 @@ func NewServer(ctx context.Context, reader io.Reader, writer io.Writer) *Server 
 	}
 }
 
+// ensureInitialized initializes the Pelican client if not already done
+func (s *Server) ensureInitialized() error {
+	if !s.initialized {
+		if err := config.InitClient(); err != nil {
+			log.Errorf("Failed to initialize Pelican client: %v", err)
+			return fmt.Errorf("failed to initialize Pelican client: %w", err)
+		}
+		s.initialized = true
+		log.Info("Pelican client initialized")
+	}
+	return nil
+}
+
 // Run starts the MCP server and handles requests
 func (s *Server) Run() error {
-	// Initialize the Pelican client
-	if err := config.InitClient(); err != nil {
-		return fmt.Errorf("failed to initialize Pelican client: %w", err)
-	}
-
 	log.Info("Pelican MCP server started")
 
 	for {
