@@ -924,60 +924,6 @@ func getServerHandler(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, server)
 }
 
-func getServerPublicKeyHandler(ctx *gin.Context) {
-	serverID := ctx.Param("id")
-	if serverID == "" {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Invalid server ID. ID cannot be empty"})
-		return
-	}
-
-	server, err := getServerByID(serverID)
-	if err != nil {
-		log.Error(err)
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get server"})
-		return
-	}
-
-	// Check if server was found (empty ID indicates not found)
-	if server.ID == "" {
-		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Server not found"})
-		return
-	}
-
-	if len(server.Registration) == 0 {
-		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Server registration not found"})
-		return
-	}
-
-	jwksString := strings.TrimSpace(server.Registration[0].Pubkey)
-	if jwksString == "" {
-		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Server public key not available"})
-		return
-	}
-
-	var raw json.RawMessage
-	if err := json.Unmarshal([]byte(jwksString), &raw); err != nil {
-		log.Errorf("Invalid JWKS stored for server %s: %v", serverID, err)
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Stored server public key is invalid",
-		})
-		return
-	}
-
-	ctx.Data(http.StatusOK, "application/json", raw)
-}
-
 func deleteServerHandler(ctx *gin.Context) {
 	serverID := ctx.Param("id")
 	if serverID == "" {
@@ -1089,7 +1035,6 @@ func RegisterRegistryWebAPI(router *gin.RouterGroup) error {
 	{
 		registryWebAPI.GET("/servers", listServersHandler)
 		registryWebAPI.GET("/servers/:id", getServerHandler)
-		registryWebAPI.GET("/servers/:id/pubkey", getServerPublicKeyHandler)
 		registryWebAPI.DELETE("/servers/:id", web_ui.AuthHandler, web_ui.AdminAuthHandler, deleteServerHandler)
 		// If you want to CREATE/PUT a server, just use the namespaces endpoint
 	}
