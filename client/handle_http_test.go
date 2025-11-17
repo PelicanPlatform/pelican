@@ -362,6 +362,33 @@ func TestConnectionError(t *testing.T) {
 	assert.Equal(t, expectedErr.IsRetryable(), pe.IsRetryable(), "Connection setup failures should be retryable")
 }
 
+func TestAllocateMemoryError(t *testing.T) {
+	// Create an allocateMemoryError directly (simulating ENOMEM from client.Do)
+	// In production, this is created at handle_http.go:2775 when client.Do returns ENOMEM
+	originalErr := errors.New("cannot allocate memory")
+	allocErr := &allocateMemoryError{Err: originalErr}
+
+	// Verify it's an allocateMemoryError
+	var allocErrCheck *allocateMemoryError
+	require.True(t, errors.As(allocErr, &allocErrCheck), "Error should be an allocateMemoryError")
+
+	// Simulate the wrapping that happens in the download loop (handle_http.go:2261-2264)
+	wrappedErr := error_codes.NewTransferError(allocErr)
+
+	// Verify the wrapped error has the correct properties
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(wrappedErr, &pe), "Wrapped error should be a PelicanError")
+
+	// Use the generated error code instead of hardcoding to make the test robust to code changes
+	expectedErr := error_codes.NewTransferError(errors.New("test"))
+	assert.Equal(t, expectedErr.Code(), pe.Code(), "Should map to Transfer error code")
+	assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType(), "Should map to Transfer error type")
+	assert.Equal(t, expectedErr.IsRetryable(), pe.IsRetryable(), "AllocateMemoryError should be retryable (wrapped as TransferError)")
+
+	// Verify the original error is preserved
+	assert.Equal(t, originalErr.Error(), allocErrCheck.Unwrap().Error(), "Original error should be preserved")
+}
+
 func TestTrailerError(t *testing.T) {
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
