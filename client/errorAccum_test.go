@@ -99,13 +99,13 @@ func TestErrorsRetryableTrue(t *testing.T) {
 	assert.True(t, te.AllErrorsRetryable(), "PermissionDeniedError with expired token should be retryable")
 	te.resetErrors()
 
-	// Test unwrapped errors (not yet wrapped in production)
-	te.AddError(&ConnectionSetupError{})
-	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
+	// Test wrapped ConnectionSetupError (all ConnectionSetupErrors are wrapped in production)
+	te.AddError(error_codes.NewContact_ConnectionSetupError(&ConnectionSetupError{}))
+	assert.True(t, te.AllErrorsRetryable(), "Wrapped ConnectionSetupError should be retryable")
 	te.resetErrors()
 
-	te.AddError(&ConnectionSetupError{})
-	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
+	te.AddError(error_codes.NewContact_ConnectionSetupError(&ConnectionSetupError{}))
+	assert.True(t, te.AllErrorsRetryable(), "Wrapped ConnectionSetupError should be retryable")
 	te.resetErrors()
 
 	te.AddError(&allocateMemoryError{})
