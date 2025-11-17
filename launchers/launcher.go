@@ -91,9 +91,8 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		return
 	}
 
-	// Register OIDC endpoint
+	// Warn if Prometheus is disabled, but Web UI is enabled. Metrics via Web UI will not be available.
 	if param.Server_EnableUI.GetBool() {
-		// Warn if Prometheus is disabled, but Web UI is enabled. Metrics via Web UI will not be available.
 		if !param.Monitoring_EnablePrometheus.GetBool() {
 			log.Warn("Prometheus is disabled, but Web UI is enabled. Metrics via Web UI will not be available.")
 		}

@@ -2377,7 +2377,7 @@ components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.EnableUI
 description: |+
-  Indicate whether a server should enable its web UI.
+  Indicate whether a server should enable its web UI. This only controls the serving of web UI resources and pages. Backend functionality such as OIDC authentication, OAuth endpoints, and API routes will remain enabled regardless of this setting.
 type: bool
 default: true
 components: ["origin", "registry", "director", "cache"]
