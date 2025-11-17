@@ -2255,7 +2255,11 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				if ope.Addr != nil {
 					proxyStr += "(" + ope.Addr.String() + ")"
 				}
-				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, true, false, err)
+				// Wrap proxy connection error as Contact.ConnectionSetupError
+				// Proxy connection failure is a connection setup failure
+				proxyErr := &ConnectionSetupError{URL: transferEndpoint.Url.String(), Err: err}
+				wrappedErr := error_codes.NewContact_ConnectionSetupError(proxyErr)
+				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, true, false, wrappedErr)
 			} else if errors.As(err, &pde) {
 				// If the token is expired we can retry because we will just get a new token
 				// otherwise something is wrong with the token
@@ -3509,13 +3513,26 @@ Loop:
 
 		case err := <-errorChan:
 			log.Errorln("Unexpected error when performing upload:", err)
+			var ope *net.OpError
 			var ue *url.Error
 			var cse *ConnectionSetupError
+			// Check for proxy connection errors first (may be wrapped in url.Error)
 			if errors.As(err, &ue) {
-				err = ue.Unwrap()
-				if err.Error() == "net/http: timeout awaiting response headers" {
+				innerErr := ue.Unwrap()
+				if ope, ok := innerErr.(*net.OpError); ok && ope.Op == "proxyconnect" {
+					// Wrap proxy connection error as Contact.ConnectionSetupError (code 3006, retryable)
+					proxyErr := &ConnectionSetupError{URL: request.URL.String(), Err: err}
+					err = error_codes.NewContact_ConnectionSetupError(proxyErr)
+				} else if innerErr.Error() == "net/http: timeout awaiting response headers" {
 					err = error_codes.NewTransfer_HeaderTimeoutError(&HeaderTimeoutError{})
+				} else {
+					// Restore original url.Error for further processing
+					err = ue
 				}
+			} else if errors.As(err, &ope) && ope.Op == "proxyconnect" {
+				// Direct proxy connection error (not wrapped in url.Error)
+				proxyErr := &ConnectionSetupError{URL: request.URL.String(), Err: err}
+				err = error_codes.NewContact_ConnectionSetupError(proxyErr)
 			} else if errors.As(err, &cse) {
 				// Check if ConnectionSetupError contains a url.Error
 				if ue, ok := cse.Unwrap().(*url.Error); ok {
