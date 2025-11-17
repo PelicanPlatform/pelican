@@ -2416,7 +2416,8 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 							},
 							ServerValue: checksumInfo.Value,
 						}
-						transferResults.Error = mismatchErr
+						// Wrap ChecksumMismatchError as Transfer.ChecksumMismatch (post-transfer validation failure)
+						transferResults.Error = error_codes.NewTransfer_ChecksumMismatchError(mismatchErr)
 						log.WithFields(fields).Errorln(transferResults.Error)
 						break
 					} else {
@@ -3590,13 +3591,15 @@ Loop:
 				if checksumInfo.Algorithm == checksum {
 					found = true
 					if !bytes.Equal(checksumInfo.Value, computedValue) {
-						transferResult.Error = &ChecksumMismatchError{
+						mismatchErr := &ChecksumMismatchError{
 							Info: ChecksumInfo{
 								Algorithm: checksum,
 								Value:     computedValue,
 							},
 							ServerValue: checksumInfo.Value,
 						}
+						// Wrap ChecksumMismatchError as Transfer.ChecksumMismatch (post-transfer validation failure)
+						transferResult.Error = error_codes.NewTransfer_ChecksumMismatchError(mismatchErr)
 						log.WithFields(fields).Errorln(transferResult.Error)
 						break
 					} else {
