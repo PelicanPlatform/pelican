@@ -200,21 +200,7 @@ func IsRetryable(err error) bool {
 			return false
 		}
 	}
-	// Check for StatusCodeError directly (can be extracted from ConnectionSetupError)
-	// This preserves the old retryability logic for ConnectionSetupError containing StatusCodeError
-	var sce *StatusCodeError
-	if errors.As(err, &sce) {
-		switch int(*sce) {
-		case http.StatusInternalServerError:
-		case http.StatusBadGateway:
-		case http.StatusServiceUnavailable:
-		case http.StatusGatewayTimeout:
-			return true
-		default:
-			return false
-		}
-	}
-
+	// Note: StatusCodeError should always be wrapped as PelicanError, so it's handled above
 	// If we have a timeout error, we are retryable
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
