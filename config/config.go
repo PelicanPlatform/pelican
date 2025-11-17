@@ -1340,11 +1340,8 @@ func SetServerDefaults(v *viper.Viper) error {
 			originConcurrency, param.Origin_Concurrency.GetName())
 	}
 	v.SetDefault(param.Origin_ConcurrencyDegradedThreshold.GetName(), 90)
-	if originConcThreshold := v.GetInt(param.Origin_ConcurrencyDegradedThreshold.GetName()); originConcThreshold < 0 {
-		return errors.Errorf("invalid value of '%d' for config param %s; must be greater than or equal to 0, where 0 disables the feature",
-			originConcThreshold, param.Origin_ConcurrencyDegradedThreshold.GetName())
-	} else if originConcThreshold > 100 {
-		return errors.Errorf("invalid value of '%d' for config param %s; must be less than or equal to 100",
+	if originConcThreshold := v.GetInt(param.Origin_ConcurrencyDegradedThreshold.GetName()); originConcThreshold < 0 || originConcThreshold > 100 {
+		return errors.Errorf("invalid value of '%d' for config param %s; must be between 0 and 100",
 			originConcThreshold, param.Origin_ConcurrencyDegradedThreshold.GetName())
 	}
 
@@ -1353,11 +1350,8 @@ func SetServerDefaults(v *viper.Viper) error {
 			cacheConcurrency, param.Cache_Concurrency.GetName())
 	}
 	v.SetDefault(param.Cache_ConcurrencyDegradedThreshold.GetName(), 90)
-	if cacheConcThreshold := v.GetInt(param.Cache_ConcurrencyDegradedThreshold.GetName()); cacheConcThreshold < 0 {
-		return errors.Errorf("invalid value of '%d' for config param %s; must be greater than or equal to 0, where 0 disables the feature",
-			cacheConcThreshold, param.Cache_ConcurrencyDegradedThreshold.GetName())
-	} else if cacheConcThreshold > 100 {
-		return errors.Errorf("invalid value of '%d' for config param %s; must be less than or equal to 100",
+	if cacheConcThreshold := v.GetInt(param.Cache_ConcurrencyDegradedThreshold.GetName()); cacheConcThreshold < 0 || cacheConcThreshold > 100 {
+		return errors.Errorf("invalid value of '%d' for config param %s; must be between 0 and 100",
 			cacheConcThreshold, param.Cache_ConcurrencyDegradedThreshold.GetName())
 	}
 

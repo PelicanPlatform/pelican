@@ -575,7 +575,7 @@ func LaunchConcurrencyMonitoring(ctx context.Context, egrp *errgroup.Group, sTyp
 			concParam = param.Origin_Concurrency
 			concThresholdParam = param.Origin_ConcurrencyDegradedThreshold
 		default:
-			return errors.New("concurrency monitoring can only be launched for origin or cache servers")
+			return errors.New("concurrency monitoring can only be launched for Origin or Cache servers")
 		}
 
 		// Although these values should be validated at startup, double check here in case
@@ -583,10 +583,10 @@ func LaunchConcurrencyMonitoring(ctx context.Context, egrp *errgroup.Group, sTyp
 		concLimit := concParam.GetInt()
 		concThreshold := concThresholdParam.GetInt()
 		if concLimit <= 0 {
-			return errors.Errorf("invalid config value: %s is %d. Must be greater than 0.", concParam.GetName(), concLimit)
+			return errors.Errorf("invalid config value: %s is %d. Must be greater than 0", concParam.GetName(), concLimit)
 		}
-		if concThreshold <= 0 || concThreshold >= 100 {
-			return errors.Errorf("invalid config value: %s is %d. Must be between 1 and 99.", concThresholdParam.GetName(), concThreshold)
+		if concThreshold < 0 || concThreshold > 100 {
+			return errors.Errorf("invalid config value: %s is %d. Must be between 0 and 100", concThresholdParam.GetName(), concThreshold)
 		}
 
 		// TODO: Do we need to make this configurable?
