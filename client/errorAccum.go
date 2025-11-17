@@ -184,9 +184,7 @@ func IsRetryable(err error) bool {
 	if errors.Is(err, &NetworkResetError{}) {
 		return true
 	}
-	if errors.Is(err, &allocateMemoryError{}) {
-		return true
-	}
+	// Note: allocateMemoryError should always be wrapped as PelicanError (TransferError), so it's handled above
 	if errors.Is(err, &InvalidByteInChunkLengthError{}) {
 		return true
 	}
