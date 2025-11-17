@@ -200,7 +200,7 @@ func NewTransferError(err error) *PelicanError {
 func NewTransfer_StoppedTransferError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Transfer.StoppedTransfer",
-		exitCode:    11,
+		exitCode:    9,
 		code:        6001,
 		retryable:   true,
 		description: "The client started transferring file(s) but it got cancelled by Pelican as stopped transferring data.",
@@ -211,7 +211,7 @@ func NewTransfer_StoppedTransferError(err error) *PelicanError {
 func NewTransfer_SlowTransferError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Transfer.SlowTransfer",
-		exitCode:    11,
+		exitCode:    9,
 		code:        6002,
 		retryable:   true,
 		description: "The client started transferring data but the transfer was slower than the minimum configured timeout rate.",
@@ -222,7 +222,7 @@ func NewTransfer_SlowTransferError(err error) *PelicanError {
 func NewTransfer_TimedOutError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Transfer.TimedOut",
-		exitCode:    11,
+		exitCode:    9,
 		code:        6003,
 		retryable:   true,
 		description: "The client started transferring data but the transfer timed out.",
@@ -233,7 +233,7 @@ func NewTransfer_TimedOutError(err error) *PelicanError {
 func NewTransfer_HeaderTimeoutError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Transfer.HeaderTimeout",
-		exitCode:    11,
+		exitCode:    9,
 		code:        6004,
 		retryable:   true,
 		description: "The client attempted to contact the server but timed out waiting for response headers. This indicates the server did not respond before the header timeout threshold.",
@@ -244,10 +244,21 @@ func NewTransfer_HeaderTimeoutError(err error) *PelicanError {
 func NewTransfer_DirectorTimeoutError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Transfer.DirectorTimeout",
-		exitCode:    11,
+		exitCode:    9,
 		code:        6005,
 		retryable:   true,
 		description: "The client timed out while querying the director for namespace information. This indicates the director did not respond before the timeout threshold.",
+		err:         err,
+	}
+}
+
+func NewTransfer_ChecksumMismatchError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Transfer.ChecksumMismatch",
+		exitCode:    9,
+		code:        6006,
+		retryable:   true,
+		description: "The client successfully transferred the file but the checksum computed by the client did not match the checksum reported by the server. This indicates data corruption during transfer or a mismatch between client and server checksum calculations.",
 		err:         err,
 	}
 }
