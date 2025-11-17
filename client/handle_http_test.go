@@ -987,6 +987,312 @@ func TestGatewayTimeout(t *testing.T) {
 	}
 }
 
+// TestStatusCodeErrorWrapping tests that different HTTP status codes are wrapped correctly
+func TestStatusCodeErrorWrapping(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		"Logging.Level": "debug",
+	})
+
+	testCases := []struct {
+		name          string
+		statusCode    int
+		expectedCode  int
+		expectedType  string
+		expectedRetry bool
+		expectedErrFn func(error) *error_codes.PelicanError
+	}{
+		{
+			name:          "401 Unauthorized",
+			statusCode:    http.StatusUnauthorized,
+			expectedCode:  4000,
+			expectedType:  "Authorization",
+			expectedRetry: false,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewAuthorizationError(errors.New("test"))
+			},
+		},
+		{
+			name:          "403 Forbidden",
+			statusCode:    http.StatusForbidden,
+			expectedCode:  4000,
+			expectedType:  "Authorization",
+			expectedRetry: false,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewAuthorizationError(errors.New("test"))
+			},
+		},
+		{
+			name:          "404 Not Found",
+			statusCode:    http.StatusNotFound,
+			expectedCode:  5011,
+			expectedType:  "Specification.FileNotFound",
+			expectedRetry: false,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewSpecification_FileNotFoundError(errors.New("test"))
+			},
+		},
+		{
+			name:          "400 Bad Request",
+			statusCode:    http.StatusBadRequest,
+			expectedCode:  5000,
+			expectedType:  "Specification",
+			expectedRetry: false,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewSpecificationError(errors.New("test"))
+			},
+		},
+		{
+			name:          "500 Internal Server Error",
+			statusCode:    http.StatusInternalServerError,
+			expectedCode:  6000,
+			expectedType:  "Transfer",
+			expectedRetry: true,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewTransferError(errors.New("test"))
+			},
+		},
+		{
+			name:          "502 Bad Gateway",
+			statusCode:    http.StatusBadGateway,
+			expectedCode:  6000,
+			expectedType:  "Transfer",
+			expectedRetry: true,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewTransferError(errors.New("test"))
+			},
+		},
+		{
+			name:          "503 Service Unavailable",
+			statusCode:    http.StatusServiceUnavailable,
+			expectedCode:  6000,
+			expectedType:  "Transfer",
+			expectedRetry: true,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewTransferError(errors.New("test"))
+			},
+		},
+		{
+			name:          "504 Gateway Timeout",
+			statusCode:    http.StatusGatewayTimeout,
+			expectedCode:  6003,
+			expectedType:  "Transfer.TimedOut",
+			expectedRetry: true,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewTransfer_TimedOutError(errors.New("test"))
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.statusCode)
+			}))
+			defer svr.Close()
+			svrURL, err := url.Parse(svr.URL)
+			require.NoError(t, err)
+
+			transfer := &transferFile{
+				ctx: context.Background(),
+				job: &TransferJob{
+					remoteURL: &pelican_url.PelicanURL{
+						Scheme: "pelican://",
+						Host:   svrURL.Host,
+						Path:   svrURL.Path + "/test.txt",
+					},
+				},
+				localPath: "/dev/null",
+				remoteURL: svrURL,
+				attempts: []transferAttemptDetails{
+					{
+						Url: svrURL,
+					},
+				},
+			}
+			transferResult, err := downloadObject(transfer)
+			assert.NoError(t, err)
+			err = transferResult.Error
+			require.Error(t, err, "Should have an error for status code %d", tc.statusCode)
+
+			// Check that it's wrapped in a PelicanError with the expected type
+			var pe *error_codes.PelicanError
+			require.True(t, errors.As(err, &pe), "Error should be wrapped in PelicanError for status %d", tc.statusCode)
+
+			// Use the expected error function to get the expected values
+			expectedErr := tc.expectedErrFn(errors.New("test"))
+			assert.Equal(t, expectedErr.Code(), pe.Code(), "Status %d should map to error code %d", tc.statusCode, tc.expectedCode)
+			assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType(), "Status %d should map to error type %s", tc.statusCode, tc.expectedType)
+			assert.Equal(t, expectedErr.IsRetryable(), pe.IsRetryable(), "Status %d retryability should be %v", tc.statusCode, tc.expectedRetry)
+		})
+	}
+}
+
+// TestStatusCodeErrorWrappingUpload tests that different HTTP status codes are wrapped correctly during uploads
+func TestStatusCodeErrorWrappingUpload(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		"Logging.Level": "debug",
+		"TLSSkipVerify": true,
+	})
+
+	testCases := []struct {
+		name          string
+		statusCode    int
+		expectedCode  int
+		expectedType  string
+		expectedRetry bool
+		expectedErrFn func(error) *error_codes.PelicanError
+	}{
+		{
+			name:          "401 Unauthorized",
+			statusCode:    http.StatusUnauthorized,
+			expectedCode:  4000,
+			expectedType:  "Authorization",
+			expectedRetry: false,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewAuthorizationError(errors.New("test"))
+			},
+		},
+		{
+			name:          "403 Forbidden",
+			statusCode:    http.StatusForbidden,
+			expectedCode:  4000,
+			expectedType:  "Authorization",
+			expectedRetry: false,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewAuthorizationError(errors.New("test"))
+			},
+		},
+		{
+			name:          "400 Bad Request",
+			statusCode:    http.StatusBadRequest,
+			expectedCode:  5000,
+			expectedType:  "Specification",
+			expectedRetry: false,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewSpecificationError(errors.New("test"))
+			},
+		},
+		{
+			name:          "500 Internal Server Error",
+			statusCode:    http.StatusInternalServerError,
+			expectedCode:  6000,
+			expectedType:  "Transfer",
+			expectedRetry: true,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewTransferError(errors.New("test"))
+			},
+		},
+		{
+			name:          "502 Bad Gateway",
+			statusCode:    http.StatusBadGateway,
+			expectedCode:  6000,
+			expectedType:  "Transfer",
+			expectedRetry: true,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewTransferError(errors.New("test"))
+			},
+		},
+		{
+			name:          "503 Service Unavailable",
+			statusCode:    http.StatusServiceUnavailable,
+			expectedCode:  6000,
+			expectedType:  "Transfer",
+			expectedRetry: true,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewTransferError(errors.New("test"))
+			},
+		},
+		{
+			name:          "504 Gateway Timeout",
+			statusCode:    http.StatusGatewayTimeout,
+			expectedCode:  6003,
+			expectedType:  "Transfer.TimedOut",
+			expectedRetry: true,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewTransfer_TimedOutError(errors.New("test"))
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			configDir := t.TempDir()
+			testfileLocation := filepath.Join(configDir, "testfile.txt")
+			err := os.WriteFile(testfileLocation, []byte("test content"), fs.FileMode(0600))
+			require.NoError(t, err)
+
+			svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Return 404 for PROPFIND (stat) requests so upload doesn't think file exists
+				if r.Method == "PROPFIND" {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				// For PUT requests, return the test status code
+				if r.Method == "PUT" {
+					w.WriteHeader(tc.statusCode)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer svr.Close()
+			svrURL, err := url.Parse(svr.URL)
+			require.NoError(t, err)
+
+			transfer := &transferFile{
+				ctx: context.Background(),
+				job: &TransferJob{
+					remoteURL: &pelican_url.PelicanURL{
+						Scheme: "pelican://",
+						Host:   svrURL.Host,
+						Path:   svrURL.Path + "/test.txt",
+					},
+					dirResp: server_structs.DirectorResponse{
+						XPelNsHdr: server_structs.XPelNs{
+							Namespace:      "/test",
+							RequireToken:   false,
+							CollectionsUrl: svrURL,
+						},
+					},
+				},
+				localPath: testfileLocation,
+				remoteURL: svrURL,
+				attempts: []transferAttemptDetails{
+					{
+						Url: svrURL,
+					},
+				},
+			}
+			transferResult, err := uploadObject(transfer)
+			assert.NoError(t, err)
+			err = transferResult.Error
+			require.Error(t, err, "Should have an error for status code %d", tc.statusCode)
+
+			// Check that it's wrapped in a PelicanError with the expected type
+			// The error might be in TransferErrors, so we need to check both
+			var te *TransferErrors
+			if errors.As(err, &te) {
+				// Extract the first error from TransferErrors
+				if te.errors != nil && len(te.errors) > 0 {
+					if tsErr, ok := te.errors[0].(*TimestampedError); ok && tsErr != nil {
+						err = tsErr.err
+					} else {
+						err = te.errors[0]
+					}
+				}
+			}
+
+			var pe *error_codes.PelicanError
+			require.True(t, errors.As(err, &pe), "Error should be wrapped in PelicanError for status %d, got: %T %v", tc.statusCode, err, err)
+
+			// Use the expected error function to get the expected values
+			expectedErr := tc.expectedErrFn(errors.New("test"))
+			assert.Equal(t, expectedErr.Code(), pe.Code(), "Status %d should map to error code %d", tc.statusCode, tc.expectedCode)
+			assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType(), "Status %d should map to error type %s", tc.statusCode, tc.expectedType)
+			assert.Equal(t, expectedErr.IsRetryable(), pe.IsRetryable(), "Status %d retryability should be %v", tc.statusCode, tc.expectedRetry)
+		})
+	}
+}
+
 // Test checksum calculation and validation
 func TestChecksum(t *testing.T) {
 	test_utils.InitClient(t, map[string]any{
