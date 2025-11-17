@@ -110,6 +110,13 @@ description: >-
   The client attempted to contact a server but the connection was reset by the remote peer.
   This is often a transient network error that can be resolved by retrying.
 retryable: true
+---
+type: Contact.ConnectionSetup
+code: 3006
+clientExitCode: 6
+description: >-
+  The client attempted to establish a connection to the server but failed before the request could be completed.
+retryable: true
 
 ############################
 #   Authorization Errors   #
