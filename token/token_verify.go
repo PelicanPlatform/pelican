@@ -253,9 +253,17 @@ func (a AuthCheckImpl) checkRegisteredServer(ctx *gin.Context, strToken string, 
 	}
 
 	// Validate audience. The audience should be Registry's host:port.
-	url, parseErr := url.Parse(param.Server_ExternalWebUrl.GetString())
+	federationInfo, err := config.GetFederation(context.Background())
+	if err != nil {
+		return errors.Wrap(err, "failed to get federation information")
+	}
+	registryURL := federationInfo.RegistryEndpoint
+	if registryURL == "" {
+		return errors.New("registry URL is not set")
+	}
+	url, parseErr := url.Parse(registryURL)
 	if parseErr != nil {
-		return errors.Wrapf(parseErr, "failed to parse server's external web URL %s", param.Server_ExternalWebUrl.GetString())
+		return errors.Wrapf(parseErr, "failed to parse registry URL %s", registryURL)
 	}
 	isAudienceValid := false
 	log.Tracef("Token audience: %v; Registry's 'host:port': %s", parsed.Audience(), url.Host)
