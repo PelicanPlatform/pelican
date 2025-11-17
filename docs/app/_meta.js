@@ -17,7 +17,7 @@ export default {
 	"operating-a-federation": "Operating a Federation",
 	"monitoring-pelican-services": "Monitoring Pelican Services",
 	"advanced-usage": "Advanced Usage",
-	"faq": "FAQs and Troubleshooting",
+	"getting-help": "Getting Help",
 	"api-docs": "API Documentation",
 	"versions": {
 		"title": "Versions",
