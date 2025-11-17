@@ -94,3 +94,5 @@ jobs:
       run: ./github_scripts/stat_test.sh
     - name: Run end-to-end test for --version flag
       run: ./github_scripts/version_test.sh
+    - name: Run end-to-end test for site-local cache standup
+      run: ./github_scripts/site_local_cache_test.sh

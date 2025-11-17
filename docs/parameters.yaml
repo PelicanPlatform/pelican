@@ -1702,6 +1702,8 @@ type: filename
 root_default: /var/lib/pelican/cache.sqlite
 default: $ConfigBase/cache.sqlite
 components: ["cache"]
+deprecated: true
+replacedby: ["Server.DbLocation"]
 ---
 name: Cache.EnableTLSClientAuth
 description: |+
@@ -1774,6 +1776,26 @@ type: duration
 default: 1h
 components: ["cache"]
 ---
+name: Cache.EnableSiteLocalMode
+description: |+
+  When true, the Cache will run without fully joining its configured federation. This means it will not register at its Registry and it
+  will not advertise to its Director.
+
+  This mode is intended for those who want the Cache to be used only by clients at their local site, without being part of a larger Pelican
+  federation.
+
+  Because this Cache will not be discoverable via the Director, Clients will need to be run with the ${Client.PreferredCaches} configuration
+  set to the URL:port of this Cache's XRootD component in order to use it. If you need help finding this URL, see the Cache's ${Cache.Url}
+  configuration.
+
+  Note: When running in site-local mode, the operators of your federation will remain unaware of your Cache's existence, and thus will not be
+  able to automatically detect its health or version. Furthermore, any statistics or usage data that would normally be collected by the Director
+  will not include this Cache. Administrators of site-local Caches should watch closely for releases with cache-related security patches to ensure
+  their systems remain secure.
+type: bool
+default: false
+components: ["cache"]
+---
 ############################
 #  Director-level configs  #
 ############################
@@ -1797,6 +1819,8 @@ type: filename
 root_default: /var/lib/pelican/director.sqlite
 default: $ConfigBase/director.sqlite
 components: ["director"]
+deprecated: true
+replacedby: ["Server.DbLocation"]
 ---
 name: Director.DefaultResponse
 description: |+
@@ -2116,6 +2140,8 @@ type: filename
 root_default: /var/lib/pelican/registry.sqlite
 default: $ConfigBase/ns-registry.sqlite
 components: ["registry"]
+deprecated: true
+replacedby: ["Server.DbLocation"]
 ---
 name: Registry.RequireKeyChaining
 description: |+
