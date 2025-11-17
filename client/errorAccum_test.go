@@ -108,8 +108,9 @@ func TestErrorsRetryableTrue(t *testing.T) {
 	assert.True(t, te.AllErrorsRetryable(), "Wrapped ConnectionSetupError should be retryable")
 	te.resetErrors()
 
-	te.AddError(&allocateMemoryError{})
-	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
+	// Test wrapped allocateMemoryError (all allocateMemoryErrors are wrapped in production)
+	te.AddError(error_codes.NewTransferError(&allocateMemoryError{}))
+	assert.True(t, te.AllErrorsRetryable(), "Wrapped allocateMemoryError should be retryable")
 	te.resetErrors()
 
 	te.AddError(&timeoutError{msg: "test timeout error"})
