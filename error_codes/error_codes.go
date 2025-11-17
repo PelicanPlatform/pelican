@@ -131,6 +131,17 @@ func NewContact_ConnectionResetError(err error) *PelicanError {
 	}
 }
 
+func NewContact_ConnectionSetupError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Contact.ConnectionSetup",
+		exitCode:    6,
+		code:        3006,
+		retryable:   true,
+		description: "The client attempted to establish a connection to the server but failed before the request could be completed.",
+		err:         err,
+	}
+}
+
 func NewAuthorizationError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Authorization",
