@@ -722,6 +722,29 @@ func (e *StatusCodeError) Is(target error) bool {
 	return int(*sce) == int(*e)
 }
 
+// wrapStatusCodeError wraps a StatusCodeError with the appropriate PelicanError based on the status code
+func wrapStatusCodeError(sce *StatusCodeError) error {
+	code := int(*sce)
+	switch {
+	case code == http.StatusNotFound:
+		return error_codes.NewSpecification_FileNotFoundError(sce)
+	case code == http.StatusGatewayTimeout:
+		return error_codes.NewTransfer_TimedOutError(sce)
+	case code == http.StatusUnauthorized || code == http.StatusForbidden:
+		// 401/403 are authorization errors
+		return error_codes.NewAuthorizationError(sce)
+	case code >= 500 && code < 600:
+		// 5xx are server errors - use Transfer error (retryable)
+		return error_codes.NewTransferError(sce)
+	case code >= 400 && code < 500:
+		// Other 4xx are client/specification errors
+		return error_codes.NewSpecificationError(sce)
+	default:
+		// For other status codes, wrap as Transfer error
+		return error_codes.NewTransferError(sce)
+	}
+}
+
 func (tae *TransferAttemptError) Error() (errMsg string) {
 	errMsg = "failed download from "
 	if tae.isUpload {
@@ -2264,33 +2287,49 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 					// Wrap allocateMemoryError as TransferError (system resource issue during transfer)
 					wrappedErr := error_codes.NewTransferError(allocErr)
 					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
-				} else if errors.As(err, &cse) {
-					if sce, ok := cse.Unwrap().(*StatusCodeError); ok {
-						// Wrap specific status codes with appropriate PelicanError types for consistency
-						var wrappedErr error = sce
-						if int(*sce) == http.StatusNotFound {
-							wrappedErr = error_codes.NewSpecification_FileNotFoundError(sce)
-						} else if int(*sce) == http.StatusGatewayTimeout {
-							wrappedErr = error_codes.NewTransfer_TimedOutError(sce)
-						}
-						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
-					} else if ue, ok := cse.Unwrap().(*url.Error); ok {
-						httpErr := ue.Unwrap()
-						if httpErr.Error() == "net/http: timeout awaiting response headers" {
-							headerTimeoutErr := error_codes.NewTransfer_HeaderTimeoutError(&HeaderTimeoutError{})
-							attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, headerTimeoutErr)
+				} else {
+					// Check for HttpErrResp (returned from downloadHTTP)
+					// HttpErrResp should already contain a wrapped PelicanError, but we extract it
+					// to ensure it's properly wrapped
+					var httpErr *HttpErrResp
+					if errors.As(err, &httpErr) {
+						innerErr := httpErr.Unwrap()
+						// Check if inner error is already a PelicanError (wrapped in downloadHTTP)
+						var pe *error_codes.PelicanError
+						if errors.As(innerErr, &pe) {
+							// Already wrapped, use it directly
+							attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, innerErr)
+						} else if sce, ok := innerErr.(*StatusCodeError); ok {
+							// Unwrapped StatusCodeError (shouldn't happen if downloadHTTP wraps correctly, but handle for safety)
+							wrappedErr := wrapStatusCodeError(sce)
+							attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
 						} else {
-							// Wrap ConnectionSetupError even if it contains a url.Error (it's still a connection setup error)
+							// HttpErrResp with non-StatusCodeError inner error - pass through
+							attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
+						}
+					} else if errors.As(err, &cse) {
+						if sce, ok := cse.Unwrap().(*StatusCodeError); ok {
+							// Wrap StatusCodeError extracted from ConnectionSetupError
+							wrappedErr := wrapStatusCodeError(sce)
+							attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
+						} else if ue, ok := cse.Unwrap().(*url.Error); ok {
+							httpErr := ue.Unwrap()
+							if httpErr.Error() == "net/http: timeout awaiting response headers" {
+								headerTimeoutErr := error_codes.NewTransfer_HeaderTimeoutError(&HeaderTimeoutError{})
+								attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, headerTimeoutErr)
+							} else {
+								// Wrap ConnectionSetupError even if it contains a url.Error (it's still a connection setup error)
+								wrappedErr := error_codes.NewContact_ConnectionSetupError(cse)
+								attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
+							}
+						} else {
+							// Wrap ConnectionSetupError that doesn't contain StatusCodeError or url.Error
 							wrappedErr := error_codes.NewContact_ConnectionSetupError(cse)
 							attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
 						}
 					} else {
-						// Wrap ConnectionSetupError that doesn't contain StatusCodeError or url.Error
-						wrappedErr := error_codes.NewContact_ConnectionSetupError(cse)
-						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
+						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
 					}
-				} else {
-					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
 				}
 			}
 			xferErrors.AddPastError(attempt.Error, endTime)
@@ -2804,17 +2843,10 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 			return 0, 0, -1, serverVersion, error_codes.NewAuthorizationError(&PermissionDeniedError{})
 		}
 		sce := StatusCodeError(resp.StatusCode)
-		err = &sce
+		// Wrap StatusCodeError with appropriate PelicanError based on status code
+		wrappedErr := wrapStatusCodeError(&sce)
 		httpErr := &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
-			resp.StatusCode, strings.TrimSpace(bodyStr)), err}
-		// Wrap specific status codes with appropriate PelicanError types
-		if resp.StatusCode == http.StatusNotFound {
-			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
-				resp.StatusCode, strings.TrimSpace(bodyStr)), error_codes.NewSpecification_FileNotFoundError(err)}
-		} else if resp.StatusCode == http.StatusGatewayTimeout {
-			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
-				resp.StatusCode, strings.TrimSpace(bodyStr)), error_codes.NewTransfer_TimedOutError(err)}
-		}
+			resp.StatusCode, strings.TrimSpace(bodyStr)), wrappedErr}
 		return 0, 0, -1, serverVersion, httpErr
 	}
 
@@ -3092,20 +3124,17 @@ Loop:
 			// We will update the error message in the caller
 			return 0, 0, -1, serverVersion, error_codes.NewAuthorizationError(&PermissionDeniedError{})
 		}
+		var wrappedErr error
 		if err == nil {
 			sce := StatusCodeError(resp.StatusCode)
-			err = &sce
+			// Wrap StatusCodeError with appropriate PelicanError based on status code
+			wrappedErr = wrapStatusCodeError(&sce)
+		} else {
+			// If err is already set, use it as-is (might be from trailer status)
+			wrappedErr = err
 		}
 		httpErr := &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
-			resp.StatusCode), err}
-		// Wrap specific status codes with appropriate PelicanError types
-		if resp.StatusCode == http.StatusNotFound {
-			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
-				resp.StatusCode), error_codes.NewSpecification_FileNotFoundError(err)}
-		} else if resp.StatusCode == http.StatusGatewayTimeout {
-			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
-				resp.StatusCode), error_codes.NewTransfer_TimedOutError(err)}
-		}
+			resp.StatusCode), wrappedErr}
 		return 0, 0, -1, serverVersion, httpErr
 	}
 
@@ -3460,8 +3489,10 @@ Loop:
 			if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
 				log.Errorln("Got failure status code:", response.StatusCode)
 				sce := StatusCodeError(response.StatusCode)
+				// Wrap StatusCodeError with appropriate PelicanError based on status code
+				wrappedErr := wrapStatusCodeError(&sce)
 				lastError = &HttpErrResp{response.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
-					response.StatusCode), &sce}
+					response.StatusCode), wrappedErr}
 				break Loop
 			}
 			break Loop
