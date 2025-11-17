@@ -180,9 +180,7 @@ func IsRetryable(err error) bool {
 	}
 	// Note: NetworkResetError should always be wrapped as PelicanError (Contact.ConnectionReset), so it's handled above
 	// Note: allocateMemoryError should always be wrapped as PelicanError (TransferError), so it's handled above
-	if errors.Is(err, &InvalidByteInChunkLengthError{}) {
-		return true
-	}
+	// Note: InvalidByteInChunkLengthError should always be wrapped as PelicanError (TransferError), so it's handled above
 	if errors.Is(err, &dirListingNotSupportedError{}) {
 		// false because we cannot automatically retry, the user must change the url to use a different origin/namespace
 		// that enables dirlistings or the admin must enable dirlistings on the origin/namespace
