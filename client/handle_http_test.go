@@ -1293,6 +1293,67 @@ func TestStatusCodeErrorWrappingUpload(t *testing.T) {
 	}
 }
 
+func TestInvalidByteInChunkLengthError(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	// Set up an HTTP server that sends malformed chunk encoding
+	// This simulates the "invalid byte in chunk length" error
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Hijack the connection so we can send malformed chunk encoding
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "webserver doesn't support hijacking", http.StatusInternalServerError)
+			return
+		}
+		conn, bufrw, err := hj.Hijack()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer conn.Close()
+
+		// Send HTTP response headers with chunked transfer encoding
+		_, _ = bufrw.WriteString("HTTP/1.1 200 OK\r\n")
+		_, _ = bufrw.WriteString("Transfer-Encoding: chunked\r\n")
+		_, _ = bufrw.WriteString("\r\n")
+		_ = bufrw.Flush()
+
+		// Send malformed chunk length (invalid byte 'X' in chunk length)
+		// This should trigger "invalid byte in chunk length" error in Go's HTTP client
+		_, _ = conn.Write([]byte("X\r\n")) // Invalid chunk length
+		_ = bufrw.Flush()
+	}))
+	defer svr.Close()
+
+	serverAddr := strings.TrimPrefix(svr.URL, "http://")
+
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	assert.NoError(t, err)
+	defer writer.Close()
+
+	// Call downloadHTTP which should trigger InvalidByteInChunkLengthError
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil,
+		transferAttemptDetails{Url: &url.URL{Scheme: "http", Host: serverAddr}, Proxy: false},
+		fname, writer, 0, -1, "", "",
+	)
+
+	require.Error(t, err, "Should have an error from invalid chunk length")
+
+	// Verify that the error is an InvalidByteInChunkLengthError (unwrapped, since it's created in downloadHTTP)
+	var invalidChunkErr *InvalidByteInChunkLengthError
+	require.True(t, errors.As(err, &invalidChunkErr), "Error should be an InvalidByteInChunkLengthError, got: %T, error: %v", err, err)
+
+	// Verify that when wrapped, it has the correct properties (simulating download loop behavior)
+	wrappedErr := error_codes.NewTransferError(invalidChunkErr)
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(wrappedErr, &pe), "Wrapped error should be a PelicanError")
+	expectedErr := error_codes.NewTransferError(errors.New("test"))
+	assert.Equal(t, expectedErr.Code(), pe.Code(), "Should map to TransferError error code")
+	assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType(), "Should map to TransferError error type")
+	assert.Equal(t, expectedErr.IsRetryable(), pe.IsRetryable(), "InvalidByteInChunkLengthError should be retryable (wrapped as TransferError)")
+}
+
 // Test checksum calculation and validation
 func TestChecksum(t *testing.T) {
 	test_utils.InitClient(t, map[string]any{
@@ -2341,7 +2402,14 @@ func TestInvalidByteInChunkLength(t *testing.T) {
 	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, "", "")
 	require.Error(t, err)
 	t.Logf("error: %v", err)
-	assert.True(t, IsRetryable(err), "Invalid chunk length error should be retryable")
+
+	// Verify that the error is an InvalidByteInChunkLengthError (unwrapped, since it's created in downloadHTTP)
+	var invalidChunkErr *InvalidByteInChunkLengthError
+	require.True(t, errors.As(err, &invalidChunkErr), "Error should be an InvalidByteInChunkLengthError")
+
+	// Wrap the error as it would be in the download loop, then check retryability
+	wrappedErr := error_codes.NewTransferError(invalidChunkErr)
+	assert.True(t, IsRetryable(wrappedErr), "Invalid chunk length error should be retryable (wrapped as TransferError)")
 }
 
 func TestUnexpectedEOFInTransferStatus(t *testing.T) {
