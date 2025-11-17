@@ -472,6 +472,81 @@ func TestNetworkResetError(t *testing.T) {
 		"Error should be ECONNRESET or EPIPE (possibly wrapped), got: %T, error: %v", err, err)
 }
 
+func TestProxyConnectionError(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	// Create a custom transport that simulates a proxy connection failure
+	// In production, this happens when http.Client.Do() tries to connect to a proxy
+	// and the connection fails (e.g., proxy is unreachable)
+	proxyAddr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:3128")
+	require.NoError(t, err)
+
+	proxyConnectionErr := &net.OpError{
+		Op:   "proxyconnect",
+		Net:  "tcp",
+		Addr: proxyAddr,
+		Err:  errors.New("connection refused"),
+	}
+
+	// Create a custom transport that returns the proxy connection error
+	customTransport := &http.Transport{
+		Proxy: func(*http.Request) (*url.URL, error) {
+			// Return a proxy URL to force proxy usage
+			return url.Parse("http://127.0.0.1:3128")
+		},
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			// When the client tries to dial the proxy, return the proxy connection error
+			if addr == "127.0.0.1:3128" {
+				return nil, proxyConnectionErr
+			}
+			// For other addresses, use default dialer
+			var d net.Dialer
+			return d.DialContext(ctx, network, addr)
+		},
+	}
+
+	// Create an HTTP client with the custom transport
+	client := &http.Client{
+		Transport: customTransport,
+		Timeout:   time.Second,
+	}
+
+	// Create a request that will trigger the proxy connection
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://example.com/test", nil)
+	require.NoError(t, err)
+
+	// Call client.Do which should return the proxy connection error
+	_, err = client.Do(req)
+	require.Error(t, err, "Should have an error from proxy connection failure")
+
+	// Verify that the error is a *net.OpError with Op == "proxyconnect"
+	// The error might be wrapped in url.Error
+	var ope *net.OpError
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		innerErr := ue.Unwrap()
+		if innerOpe, ok := innerErr.(*net.OpError); ok {
+			ope = innerOpe
+		}
+	}
+
+	if ope == nil {
+		require.True(t, errors.As(err, &ope), "Error should be a *net.OpError, got: %T, error: %v", err, err)
+	}
+	assert.Equal(t, "proxyconnect", ope.Op, "Error should be a proxyconnect operation")
+
+	// Verify that when wrapped (as it would be in the download loop), it has the correct properties
+	proxyErr := &ConnectionSetupError{URL: "http://example.com/test", Err: err}
+	wrappedErr := error_codes.NewContact_ConnectionSetupError(proxyErr)
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(wrappedErr, &pe), "Wrapped error should be a PelicanError")
+	// Use the generated error code instead of hardcoding to make the test robust to code changes
+	expectedErr := error_codes.NewContact_ConnectionSetupError(errors.New("test"))
+	assert.Equal(t, expectedErr.Code(), pe.Code(), "Should map to Contact.ConnectionSetup error code")
+	assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType(), "Should map to Contact.ConnectionSetup error type")
+	assert.Equal(t, expectedErr.IsRetryable(), pe.IsRetryable(), "Proxy connection failures should be retryable")
+}
+
 func TestTrailerError(t *testing.T) {
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
