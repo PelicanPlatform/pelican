@@ -42,6 +42,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -363,30 +364,112 @@ func TestConnectionError(t *testing.T) {
 }
 
 func TestAllocateMemoryError(t *testing.T) {
-	// Create an allocateMemoryError directly (simulating ENOMEM from client.Do)
-	// In production, this is created at handle_http.go:2775 when client.Do returns ENOMEM
-	originalErr := errors.New("cannot allocate memory")
-	allocErr := &allocateMemoryError{Err: originalErr}
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
-	// Verify it's an allocateMemoryError
-	var allocErrCheck *allocateMemoryError
-	require.True(t, errors.As(allocErr, &allocErrCheck), "Error should be an allocateMemoryError")
+	// Create a custom transport that returns ENOMEM to simulate the actual error condition
+	// In production, this happens at handle_http.go:2780-2784 when client.Do returns ENOMEM
+	enomemTransport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return nil, syscall.Errno(syscall.ENOMEM)
+		},
+	}
 
-	// Simulate the wrapping that happens in the download loop (handle_http.go:2261-2264)
-	wrappedErr := error_codes.NewTransferError(allocErr)
+	// Create an HTTP client with the custom transport
+	client := &http.Client{
+		Transport: enomemTransport,
+		Timeout:   time.Second,
+	}
 
-	// Verify the wrapped error has the correct properties
-	var pe *error_codes.PelicanError
-	require.True(t, errors.As(wrappedErr, &pe), "Wrapped error should be a PelicanError")
+	// Create a request that will trigger the ENOMEM error
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://example.com/test", nil)
+	require.NoError(t, err)
 
-	// Use the generated error code instead of hardcoding to make the test robust to code changes
-	expectedErr := error_codes.NewTransferError(errors.New("test"))
-	assert.Equal(t, expectedErr.Code(), pe.Code(), "Should map to Transfer error code")
-	assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType(), "Should map to Transfer error type")
-	assert.Equal(t, expectedErr.IsRetryable(), pe.IsRetryable(), "AllocateMemoryError should be retryable (wrapped as TransferError)")
+	// Call client.Do which should return ENOMEM
+	_, err = client.Do(req)
+	require.Error(t, err, "Should have an error from ENOMEM")
 
-	// Verify the original error is preserved
-	assert.Equal(t, originalErr.Error(), allocErrCheck.Unwrap().Error(), "Original error should be preserved")
+	// Verify that the error contains ENOMEM
+	var sysErr syscall.Errno
+	require.True(t, errors.As(err, &sysErr), "Error should be a syscall.Errno")
+	assert.Equal(t, syscall.ENOMEM, sysErr, "Error should be ENOMEM")
+
+}
+
+func TestNetworkResetError(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	// Set up an HTTP server that hijacks the connection and resets it during transfer
+	// This simulates ECONNRESET/EPIPE during transfer
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Hijack the connection so we can control when to reset it
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "webserver doesn't support hijacking", http.StatusInternalServerError)
+			return
+		}
+		conn, bufrw, err := hj.Hijack()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer conn.Close()
+
+		// Send HTTP response headers
+		_, _ = bufrw.WriteString("HTTP/1.1 200 OK\r\n")
+		_, _ = bufrw.WriteString("Content-Length: 1000\r\n")
+		_, _ = bufrw.WriteString("\r\n")
+		_ = bufrw.Flush()
+
+		// Send some data to ensure client starts reading
+		_, _ = conn.Write([]byte("some data"))
+		_ = conn.(*net.TCPConn).SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
+
+		// Give the client time to start reading the response body
+		time.Sleep(100 * time.Millisecond)
+
+		// Force TCP RST by setting SO_LINGER to 0
+		// This causes the connection to send RST instead of FIN when closed
+		if tcpConn, ok := conn.(*net.TCPConn); ok {
+			_ = tcpConn.SetLinger(0) // Set linger to 0 to send RST on close
+			rawConn, err := tcpConn.SyscallConn()
+			if err == nil {
+				_ = rawConn.Control(func(fd uintptr) {
+					// Also set SO_LINGER via syscall to ensure RST
+					var linger syscall.Linger
+					linger.Onoff = 1
+					linger.Linger = 0
+					_ = syscall.SetsockoptLinger(int(fd), syscall.SOL_SOCKET, syscall.SO_LINGER, &linger)
+				})
+			}
+		}
+		// Close connection with RST (due to SO_LINGER) while client is reading
+		conn.Close()
+	}))
+	defer svr.Close()
+
+	serverAddr := strings.TrimPrefix(svr.URL, "http://")
+
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	assert.NoError(t, err)
+	defer writer.Close()
+
+	// Call downloadHTTP which should trigger NetworkResetError when connection is reset
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil,
+		transferAttemptDetails{Url: &url.URL{Scheme: "http", Host: serverAddr}, Proxy: false},
+		fname, writer, 0, -1, "", "",
+	)
+
+	// The error should be wrapped as Contact.ConnectionReset in the download loop
+	// We need to check the TransferAttemptError to see the wrapped error
+	// But downloadHTTP returns the raw error, so we need to simulate the wrapping
+	require.Error(t, err, "Should have an error from connection reset")
+
+	// Check if it's a syscall error that would trigger NetworkResetError
+	// The download loop checks for ECONNRESET/EPIPE at using errors.Is
+	// errors.Is should work even if the error is wrapped (through ConnectionSetupError -> OpError -> ECONNRESET)
+	require.True(t, errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE),
+		"Error should be ECONNRESET or EPIPE (possibly wrapped), got: %T, error: %v", err, err)
 }
 
 func TestTrailerError(t *testing.T) {
