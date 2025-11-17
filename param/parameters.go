@@ -329,6 +329,7 @@ var (
 var (
 	Cache_BlocksToPrefetch = IntParam{"Cache.BlocksToPrefetch"}
 	Cache_Concurrency = IntParam{"Cache.Concurrency"}
+	Cache_ConcurrencyDegradedThreshold = IntParam{"Cache.ConcurrencyDegradedThreshold"}
 	Cache_EvictionMonitoringMaxDepth = IntParam{"Cache.EvictionMonitoringMaxDepth"}
 	Cache_Port = IntParam{"Cache.Port"}
 	Client_DirectorRetries = IntParam{"Client.DirectorRetries"}
@@ -350,6 +351,7 @@ var (
 	Monitoring_PortLower = IntParam{"Monitoring.PortLower"}
 	Monitoring_SampleLimit = IntParam{"Monitoring.SampleLimit"}
 	Origin_Concurrency = IntParam{"Origin.Concurrency"}
+	Origin_ConcurrencyDegradedThreshold = IntParam{"Origin.ConcurrencyDegradedThreshold"}
 	Origin_Port = IntParam{"Origin.Port"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
 	Server_UILoginRateLimit = IntParam{"Server.UILoginRateLimit"}
