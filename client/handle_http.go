@@ -2242,7 +2242,6 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		if err != nil {
 			log.WithFields(fields).Debugln("Failed to download from", transferEndpoint.Url, ":", err)
 			var ope *net.OpError
-			var cse *ConnectionSetupError
 			var pde *PermissionDeniedError
 			proxyStr, _ := os.LookupEnv("http_proxy")
 			if !transferEndpoint.Proxy {
@@ -2288,47 +2287,57 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 					wrappedErr := error_codes.NewTransferError(allocErr)
 					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
 				} else {
-					// Check for HttpErrResp (returned from downloadHTTP)
-					// HttpErrResp should already contain a wrapped PelicanError, but we extract it
-					// to ensure it's properly wrapped
-					var httpErr *HttpErrResp
-					if errors.As(err, &httpErr) {
-						innerErr := httpErr.Unwrap()
-						// Check if inner error is already a PelicanError (wrapped in downloadHTTP)
-						var pe *error_codes.PelicanError
-						if errors.As(innerErr, &pe) {
-							// Already wrapped, use it directly
-							attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, innerErr)
-						} else if sce, ok := innerErr.(*StatusCodeError); ok {
-							// Unwrapped StatusCodeError (shouldn't happen if downloadHTTP wraps correctly, but handle for safety)
-							wrappedErr := wrapStatusCodeError(sce)
-							attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
-						} else {
-							// HttpErrResp with non-StatusCodeError inner error - pass through
-							attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
-						}
-					} else if errors.As(err, &cse) {
-						if sce, ok := cse.Unwrap().(*StatusCodeError); ok {
-							// Wrap StatusCodeError extracted from ConnectionSetupError
-							wrappedErr := wrapStatusCodeError(sce)
-							attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
-						} else if ue, ok := cse.Unwrap().(*url.Error); ok {
-							httpErr := ue.Unwrap()
-							if httpErr.Error() == "net/http: timeout awaiting response headers" {
-								headerTimeoutErr := error_codes.NewTransfer_HeaderTimeoutError(&HeaderTimeoutError{})
-								attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, headerTimeoutErr)
-							} else {
-								// Wrap ConnectionSetupError even if it contains a url.Error (it's still a connection setup error)
-								wrappedErr := error_codes.NewContact_ConnectionSetupError(cse)
+					var invalidChunkErr *InvalidByteInChunkLengthError
+					if errors.As(err, &invalidChunkErr) {
+						// Wrap InvalidByteInChunkLengthError as TransferError (transfer protocol error)
+						wrappedErr := error_codes.NewTransferError(invalidChunkErr)
+						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
+					} else {
+						// Check for HttpErrResp (returned from downloadHTTP)
+						// HttpErrResp should already contain a wrapped PelicanError, but we extract it
+						// to ensure it's properly wrapped
+						var httpErr *HttpErrResp
+						if errors.As(err, &httpErr) {
+							innerErr := httpErr.Unwrap()
+							// Check if inner error is already a PelicanError (wrapped in downloadHTTP)
+							var pe *error_codes.PelicanError
+							if errors.As(innerErr, &pe) {
+								// Already wrapped, use it directly
+								attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, innerErr)
+							} else if sce, ok := innerErr.(*StatusCodeError); ok {
+								// Unwrapped StatusCodeError (shouldn't happen if downloadHTTP wraps correctly, but handle for safety)
+								wrappedErr := wrapStatusCodeError(sce)
 								attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
+							} else {
+								// HttpErrResp with non-StatusCodeError inner error - pass through
+								attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
 							}
 						} else {
-							// Wrap ConnectionSetupError that doesn't contain StatusCodeError or url.Error
-							wrappedErr := error_codes.NewContact_ConnectionSetupError(cse)
-							attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
+							var cse *ConnectionSetupError
+							if errors.As(err, &cse) {
+								if sce, ok := cse.Unwrap().(*StatusCodeError); ok {
+									// Wrap StatusCodeError extracted from ConnectionSetupError
+									wrappedErr := wrapStatusCodeError(sce)
+									attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
+								} else if ue, ok := cse.Unwrap().(*url.Error); ok {
+									httpErr := ue.Unwrap()
+									if httpErr.Error() == "net/http: timeout awaiting response headers" {
+										headerTimeoutErr := error_codes.NewTransfer_HeaderTimeoutError(&HeaderTimeoutError{})
+										attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, headerTimeoutErr)
+									} else {
+										// Wrap ConnectionSetupError even if it contains a url.Error (it's still a connection setup error)
+										wrappedErr := error_codes.NewContact_ConnectionSetupError(cse)
+										attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
+									}
+								} else {
+									// Wrap ConnectionSetupError that doesn't contain StatusCodeError or url.Error
+									wrappedErr := error_codes.NewContact_ConnectionSetupError(cse)
+									attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
+								}
+							} else {
+								attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
+							}
 						}
-					} else {
-						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
 					}
 				}
 			}
