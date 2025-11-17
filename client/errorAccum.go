@@ -178,12 +178,7 @@ func IsRetryable(err error) bool {
 	if errors.Is(err, pelican_url.MetadataTimeoutErr) {
 		return true
 	}
-	// There's little a user can do about a TCP connection reset besides retry; if it
-	// was due to the server crashing, then on a subsequent retry they should get a different
-	// error message (connection refused).
-	if errors.Is(err, &NetworkResetError{}) {
-		return true
-	}
+	// Note: NetworkResetError should always be wrapped as PelicanError (Contact.ConnectionReset), so it's handled above
 	// Note: allocateMemoryError should always be wrapped as PelicanError (TransferError), so it's handled above
 	if errors.Is(err, &InvalidByteInChunkLengthError{}) {
 		return true
