@@ -174,6 +174,7 @@ func IsRetryable(err error) bool {
 	// Fall back to legacy checks for unwrapped errors
 	// Note: SlowTransferError, HeaderTimeoutError, UnexpectedEOFError, and StoppedTransferError
 	// are always wrapped in PelicanError, so they're handled above
+	// Note: ConnectionSetupError should always be wrapped as PelicanError or converted to NetworkResetError
 	if errors.Is(err, pelican_url.MetadataTimeoutErr) {
 		return true
 	}
@@ -194,24 +195,23 @@ func IsRetryable(err error) bool {
 		// that enables dirlistings or the admin must enable dirlistings on the origin/namespace
 		return false
 	}
-	var cse *ConnectionSetupError
-	if errors.As(err, &cse) {
-		if sce, ok := cse.Unwrap().(*StatusCodeError); ok {
-			switch int(*sce) {
-			case http.StatusInternalServerError:
-			case http.StatusBadGateway:
-			case http.StatusServiceUnavailable:
-			case http.StatusGatewayTimeout:
-				return true
-			default:
-				return false
-			}
-		}
-		return true
-	}
 	var hep *HttpErrResp
 	if errors.As(err, &hep) {
 		switch int(hep.Code) {
+		case http.StatusInternalServerError:
+		case http.StatusBadGateway:
+		case http.StatusServiceUnavailable:
+		case http.StatusGatewayTimeout:
+			return true
+		default:
+			return false
+		}
+	}
+	// Check for StatusCodeError directly (can be extracted from ConnectionSetupError)
+	// This preserves the old retryability logic for ConnectionSetupError containing StatusCodeError
+	var sce *StatusCodeError
+	if errors.As(err, &sce) {
+		switch int(*sce) {
 		case http.StatusInternalServerError:
 		case http.StatusBadGateway:
 		case http.StatusServiceUnavailable:
