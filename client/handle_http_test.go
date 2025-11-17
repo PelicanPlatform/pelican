@@ -1455,8 +1455,18 @@ func TestChecksumIncorrectWhenRequired(t *testing.T) {
 	transferResult, err := downloadObject(transfer)
 	assert.NoError(t, err)
 	assert.Error(t, transferResult.Error)
-	incorrectChecksumError := &ChecksumMismatchError{}
-	assert.True(t, errors.As(transferResult.Error, &incorrectChecksumError), "Expected a checksum mismatch error")
+
+	// Verify that the error is wrapped as a PelicanError
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(transferResult.Error, &pe), "Error should be wrapped as PelicanError")
+	expectedErr := error_codes.NewTransfer_ChecksumMismatchError(errors.New("test"))
+	assert.Equal(t, expectedErr.Code(), pe.Code(), "Should map to Transfer.ChecksumMismatch error code")
+	assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType(), "Should map to Transfer.ChecksumMismatch error type")
+	assert.Equal(t, expectedErr.IsRetryable(), pe.IsRetryable(), "ChecksumMismatchError should be retryable (wrapped as Transfer.ChecksumMismatch)")
+
+	// Extract the inner ChecksumMismatchError to verify the error message
+	var incorrectChecksumError *ChecksumMismatchError
+	require.True(t, errors.As(transferResult.Error, &incorrectChecksumError), "Error should contain ChecksumMismatchError")
 	assert.Equal(t, "checksum mismatch for crc32c; client computed 977b8112, server reported 977b8111", incorrectChecksumError.Error())
 
 	// Checksum validation
@@ -1708,9 +1718,18 @@ func TestChecksumPut(t *testing.T) {
 		transferResult, err := uploadObject(transfer)
 		assert.NoError(t, err)
 		require.Error(t, transferResult.Error)
+
+		// Verify that the error is wrapped as a PelicanError
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(transferResult.Error, &pe), "Error should be wrapped as PelicanError")
+		expectedErr := error_codes.NewTransfer_ChecksumMismatchError(errors.New("test"))
+		assert.Equal(t, expectedErr.Code(), pe.Code(), "Should map to Transfer.ChecksumMismatch error code")
+		assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType(), "Should map to Transfer.ChecksumMismatch error type")
+		assert.Equal(t, expectedErr.IsRetryable(), pe.IsRetryable(), "ChecksumMismatchError should be retryable (wrapped as Transfer.ChecksumMismatch)")
+
+		// Extract the inner ChecksumMismatchError to verify the error message
 		var checksumError *ChecksumMismatchError
 		require.ErrorAs(t, transferResult.Error, &checksumError)
-
 		assert.Equal(t, "checksum mismatch for crc32c; client computed 977b8112, server reported 977b8111", checksumError.Error())
 
 		assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
