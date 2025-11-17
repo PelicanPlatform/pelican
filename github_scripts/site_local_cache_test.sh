@@ -235,9 +235,6 @@ echo "Site-local cache is running!"
 echo "Test 1: Checking Registry to ensure site-local cache did not register..."
 REGISTRY_SERVERS_URL="https://$HOSTNAME:8444/api/v1.0/registry_ui/servers"
 
-# # Make a token for authentication
-# ./pelican token create pelican://$HOSTNAME:8444/test --read --write --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:8444" --subject "origin"  --profile "wlcg" --lifetime 600 > site_local_test/test-token.jwt
-
 # echo "Token created for testing"
 
 REGISTRY_RESPONSE=$(curl -k -s -X GET "$REGISTRY_SERVERS_URL")
