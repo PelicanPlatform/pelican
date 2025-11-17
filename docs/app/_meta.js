@@ -25,7 +25,7 @@ export default {
 		"items": versions.reverse().reduce((acc, v) => {
 			acc[`${v}`] = {
 				title: v === 'latest' ? 'Latest' : v,
-				href: v === 'latest' ? '/' : `/${v}/`
+				href: v === 'latest' ? '/' : `https://docs.pelicanplatform.org/${v}/`
 			}
 			return acc
 		}, {})
