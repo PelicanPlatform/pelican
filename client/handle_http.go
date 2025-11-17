@@ -2255,7 +2255,9 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				wrappedPde := error_codes.NewAuthorizationError(pde)
 				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedPde)
 			} else if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
-				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, &NetworkResetError{})
+				// Wrap NetworkResetError as Contact.ConnectionReset (code 3005, retryable)
+				wrappedErr := error_codes.NewContact_ConnectionResetError(&NetworkResetError{})
+				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
 			} else {
 				var allocErr *allocateMemoryError
 				if errors.As(err, &allocErr) {
@@ -3051,7 +3053,7 @@ Loop:
 		if errors.Is(err, syscall.ECONNREFUSED) ||
 			errors.Is(err, syscall.ECONNRESET) ||
 			errors.Is(err, syscall.ECONNABORTED) {
-			err = &ConnectionSetupError{URL: req.URL.String()}
+			err = &ConnectionSetupError{URL: req.URL.String(), Err: err}
 			return
 		}
 		// Add a check for InvalidByteInChunkLengthError
@@ -3489,7 +3491,8 @@ Loop:
 				}
 			}
 			if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
-				err = &NetworkResetError{}
+				// Wrap NetworkResetError as Contact.ConnectionReset (code 3005, retryable)
+				err = error_codes.NewContact_ConnectionResetError(&NetworkResetError{})
 			}
 			lastError = err
 			break Loop
