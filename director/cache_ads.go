@@ -291,9 +291,9 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 	if sAd.BrokerURL.Host != "" && brokerDialer != nil {
 		sType := server_structs.NewServerType()
 		sType.SetString(sAd.Type)
-		brokerDialer.UseBroker(sType, sAd.WebURL.Host, sAd.BrokerURL.String())
+		brokerDialer.UseBroker(sType, sAd.WebURL.Host, sAd.BrokerURL.String(), sAd.RegistryPrefix)
 		if sAd.Type == server_structs.OriginType.String() {
-			brokerDialer.UseBroker(sType, sAd.URL.Host, sAd.BrokerURL.String())
+			brokerDialer.UseBroker(sType, sAd.URL.Host, sAd.BrokerURL.String(), sAd.RegistryPrefix)
 		}
 	}
 
