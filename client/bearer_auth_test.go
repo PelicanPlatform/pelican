@@ -56,29 +56,34 @@ func TestBearerAuthenticator_Authorize(t *testing.T) {
 	assert.Equal(t, http.StatusOK, response.StatusCode)
 }
 
+// Test the retry logic for bearer authentication
 func TestBearerAuthenticator_Verify(t *testing.T) {
 	token := NewTokenGenerator(nil, nil, config.TokenSharedRead, false)
 	token.SetToken("some_token_1234_abc")
 	authenticator := &bearerAuthenticator{token: token}
-	client := &http.Client{}
 
-	// Create a dummy HTTP response with a 401 status
-	response := &http.Response{
-		StatusCode: http.StatusUnauthorized,
+	// First three 401/403 responses assert `redo=true` with the "retrying with a fresh credential" message
+	for i := 0; i < 3; i++ {
+		redo, err := authenticator.Verify(nil, &http.Response{StatusCode: http.StatusUnauthorized}, "/test/path")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "retrying with a fresh credential")
+		assert.True(t, redo, "unauthorized attempt %d should trigger a retry", i+1)
 	}
 
-	// Verify the authentication
-	redo, err := authenticator.Verify(client, response, "/test/path")
+	// The fourth 401/403 response asserts `redo=false` with the "authentication failed" message
+	redo, err := authenticator.Verify(nil, &http.Response{StatusCode: http.StatusUnauthorized}, "/test/path")
 	assert.Error(t, err)
-	assert.True(t, redo, "Expected Verify to return true for 401 Unauthorized")
+	assert.False(t, redo, "fourth unauthorized response should stop retrying")
+	assert.Contains(t, err.Error(), "authentication failed")
 
-	// Create a dummy HTTP response with a 200 OK status
-	responseOK := &http.Response{
-		StatusCode: http.StatusOK,
-	}
-
-	// Verify the authentication
-	redo, err = authenticator.Verify(client, responseOK, "/test/path")
+	// Successful response should reset the failure counter.
+	redo, err = authenticator.Verify(nil, &http.Response{StatusCode: http.StatusOK}, "/test/path")
 	assert.NoError(t, err)
-	assert.False(t, redo, "Expected Verify to return false for 200 OK")
+	assert.False(t, redo, "successful responses should not trigger retry")
+
+	// After a success, the next unauthorized response should allow one more retry.
+	redo, err = authenticator.Verify(nil, &http.Response{StatusCode: http.StatusForbidden}, "/test/path")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "retrying with a fresh credential")
+	assert.True(t, redo, "failure counter should reset after a success")
 }
