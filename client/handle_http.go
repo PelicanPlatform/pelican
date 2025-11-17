@@ -2258,17 +2258,28 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, &NetworkResetError{})
 			} else if errors.As(err, &cse) {
 				if sce, ok := cse.Unwrap().(*StatusCodeError); ok {
-					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, sce)
+					// Wrap specific status codes with appropriate PelicanError types for consistency
+					var wrappedErr error = sce
+					if int(*sce) == http.StatusNotFound {
+						wrappedErr = error_codes.NewSpecification_FileNotFoundError(sce)
+					} else if int(*sce) == http.StatusGatewayTimeout {
+						wrappedErr = error_codes.NewTransfer_TimedOutError(sce)
+					}
+					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
 				} else if ue, ok := cse.Unwrap().(*url.Error); ok {
 					httpErr := ue.Unwrap()
 					if httpErr.Error() == "net/http: timeout awaiting response headers" {
 						headerTimeoutErr := error_codes.NewTransfer_HeaderTimeoutError(&HeaderTimeoutError{})
 						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, headerTimeoutErr)
 					} else {
-						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, httpErr)
+						// Wrap ConnectionSetupError even if it contains a url.Error (it's still a connection setup error)
+						wrappedErr := error_codes.NewContact_ConnectionSetupError(cse)
+						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
 					}
 				} else {
-					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
+					// Wrap ConnectionSetupError that doesn't contain StatusCodeError or url.Error
+					wrappedErr := error_codes.NewContact_ConnectionSetupError(cse)
+					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
 				}
 			} else {
 				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
@@ -3449,10 +3460,25 @@ Loop:
 		case err := <-errorChan:
 			log.Errorln("Unexpected error when performing upload:", err)
 			var ue *url.Error
+			var cse *ConnectionSetupError
 			if errors.As(err, &ue) {
 				err = ue.Unwrap()
 				if err.Error() == "net/http: timeout awaiting response headers" {
 					err = error_codes.NewTransfer_HeaderTimeoutError(&HeaderTimeoutError{})
+				}
+			} else if errors.As(err, &cse) {
+				// Check if ConnectionSetupError contains a url.Error
+				if ue, ok := cse.Unwrap().(*url.Error); ok {
+					httpErr := ue.Unwrap()
+					if httpErr.Error() == "net/http: timeout awaiting response headers" {
+						err = error_codes.NewTransfer_HeaderTimeoutError(&HeaderTimeoutError{})
+					} else {
+						// Wrap ConnectionSetupError even if it contains a url.Error (it's still a connection setup error)
+						err = error_codes.NewContact_ConnectionSetupError(cse)
+					}
+				} else {
+					// Wrap ConnectionSetupError that doesn't contain url.Error
+					err = error_codes.NewContact_ConnectionSetupError(cse)
 				}
 			}
 			if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
