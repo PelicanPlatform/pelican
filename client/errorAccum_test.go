@@ -19,6 +19,7 @@
 package client
 
 import (
+	"crypto/tls"
 	"errors"
 	"testing"
 
@@ -113,6 +114,18 @@ func TestErrorsRetryableTrue(t *testing.T) {
 
 	te.AddError(&timeoutError{msg: "test timeout error"})
 	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
+	te.resetErrors()
+
+	// Test tls.AlertError - direct (not wrapped)
+	alertErr := tls.AlertError(42) // 42 = bad_certificate alert
+	te.AddError(alertErr)
+	assert.True(t, te.AllErrorsRetryable(), "tls.AlertError should be retryable")
+	te.resetErrors()
+
+	// Test tls.AlertError wrapped in ConnectionSetupError (production scenario)
+	cse := &ConnectionSetupError{Err: alertErr}
+	te.AddError(cse)
+	assert.True(t, te.AllErrorsRetryable(), "ConnectionSetupError containing tls.AlertError should be retryable")
 	te.resetErrors()
 
 }
