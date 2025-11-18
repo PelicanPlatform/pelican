@@ -29,6 +29,11 @@ If your goal is to integrate Pelican with Python, you're looking for our [Pelica
 This client lets you interact with Pelican objects at any level of your code, including by plugging Pelican directly into popular Python libraries like [xarray](https://github.com/PelicanPlatform/pelicanfs/tree/main/examples/xarray)
 and [PyTorch data loaders](https://github.com/PelicanPlatform/pelicanfs/tree/main/examples/pytorch).
 
+### Pelican's Model Context Protocol (MCP) Server
+If you work with AI assistants like Claude Code or VS Code Copilot, the Pelican MCP server allows you to download data from Pelican federations
+using natural language. Simply ask your AI assistant to "download pelican://..." and it will handle the transfer for you. The MCP server also
+provides tools to list directories and inspect object metadata, making it easy to explore and work with federated data directly from your AI-powered
+development environment. For details, see [Using Pelican with AI Assistants](./getting-data-with-pelican/mcp.mdx).
 
 ### Pelican's HTCondor Plugin
 Pelican maintains a plugin that acts as the preferred transfer tool for [HTCondor](https://htcondor.org/), a software suite used in many distributed/clustered
