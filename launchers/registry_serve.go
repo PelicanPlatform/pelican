@@ -29,7 +29,6 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/metrics"
-	"github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -63,13 +62,6 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 
 		// Checks topology for updates every 10 minutes
 		go registry.PeriodicTopologyReload(ctx)
-	}
-
-	// Validate OIDC configuration is present. Registry requires OIDC for authentication,
-	// regardless of Server.EnableUI setting.
-	_, _, err = oauth2.ServerOIDCClient()
-	if err != nil {
-		return errors.Wrap(err, "Registry requires OIDC configuration to be set. Please configure OIDC.ClientID, OIDC.ClientSecret, OIDC.AuthorizationEndpoint, OIDC.DeviceAuthEndpoint, OIDC.TokenEndpoint, and OIDC.UserInfoEndpoint")
 	}
 
 	rootRouterGroup := engine.Group("/", web_ui.ServerHeaderMiddleware)
