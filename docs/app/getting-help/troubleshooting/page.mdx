@@ -1,3 +1,5 @@
+import { Callout } from 'nextra/components'
+
 # Troubleshooting
 
 This guide details the common errors that occur when working with Pelican, and how to troubleshoot them.
@@ -5,3 +7,57 @@ This guide details the common errors that occur when working with Pelican, and h
 ## Pelican CLI
 
 This section discusses common errors when working with the [Pelican CLI](/getting-data-with-pelican/client) client. 
+
+The most common problems users encounter with the Pelican CLI are 
+
+* [LIST TBD]
+
+### Reset local client
+
+If the you've followed the other troubleshooting instructions but you continue to experience the issue,
+or if you are experiencing an issue not listed here,
+there may be a problem with the local configuration for your client.
+You can reset the local configuration as described below.
+
+<Callout type="error">
+Resetting your local configuration will remove any stored credentials or custom configuration.
+</Callout>
+
+To reset your local configuration on **Linux**/**MacOS**:
+
+1. Move to the containing directory.
+
+    ```bash copy
+    cd ~/.config
+    ```
+
+    You should see a `pelican` directory when you run `ls`.
+
+2. Remove the `pelican` directory.
+
+    ```bash copy
+    rm -r ./pelican
+    ```
+
+    <Callout type="warning">
+    Make sure you avoid any typos! This command will **recursively delete** whatever you provide to it. 
+    </Callout>
+
+To reset your local configuration on **Windows**:
+
+1. Move to the containing directory.
+
+    ```powershell copy
+    cd ~\.config
+    ```
+
+    You should see a `pelican` directory when you run `dir`.
+
+2. Remove the `pelican` directory.
+
+    ```powershell copy
+    rm .\pelican
+    ```
+
+    If prompted to remove a file, double-check the path before confirming with `Y`.
+
