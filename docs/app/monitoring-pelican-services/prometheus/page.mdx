@@ -2,7 +2,7 @@ import ExportedImage from "next-image-export-optimizer";
 
 # Query Pelican Server Metrics via Prometheus
 
-> For Pelican `>= 7.4.2`. Older version of Pelican may not include all of the metrics listed.
+> For Pelican `>= 7.16.0`. Older version of Pelican may not include all of the metrics listed.
 
 Pelican servers have [Prometheus](https://prometheus.io/) embedded by default and provide a handful of Prometheus metrics to monitor server status. You can access the metrics endpoint at `https://<pelican-server-host>:<server-web-port>/metrics` to see all the available metrics and their current values. By default, `/metrics` is a protected endpoint and you are required to login and get authenticated to view the page. You can change `Monitoring.MetricAuthorization` to `false` in config to turn off the authentication.
 
@@ -54,32 +54,77 @@ This yields the duration in seconds.
   | `registry`   | Namespace registration at the Registry | Origin and cache servers     |
   | `director`   | Object transfer tests from the Director | Origin and cache servers     |
   | `topology`    | Data fetch from the OSDF topology server                 | All servers (OSDF mode only)                  |
+  | `IO-concurrency` | IO concurrency limit | Origin and cache servers |
+  | `prometheus`   | Prometheus server | All servers |
+  | `config-updates` | Authfile and scitokens.cfg updates | Origin and cache servers |
 
 ### `pelican_component_health_status_last_update`
 
   The timestamp of last update of health status of Pelican server components. The value is UNIX time in seconds. It shares the same label as `pelican_component_health_status`
 
+### `pelican_server_xrootd_last_crash`
+
+The timestamp of the last crash of the XRootD server.
+
+## Registry
+
+### `pelican_registry_federation_namespaces`
+
+The number of federation namespace associated with a public key, excluding server namespaces, in the registry.
+
+#### Label: `status`
+
+| Label Values | Description     |
+|--------------|-----------------|
+| `ok`     |  The number of namespaces that are have a valid registration.  |
+| `error`      |  The number of namespaces that have an error in their registration.   |
+
+### `pelican_osdf_institution_count`
+
+Total number of contributing institutions. This is only available when running in OSDF mode.
 
 ## Storage Servers (Origin and Cache)
 
-### `xrootd_monitoring_packets_received`
+### `xrootd_monitoring_packets_received_total`
 
-  The total number of [XRootD monitoring](https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm) UDP packets received.
-
+The total number of [XRootD monitoring](https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm) UDP packets received.
 
 ### `xrootd_sched_thread_count`
 
   The number of XRootD scheduler threads. Ref: https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm#_Toc138968509
 
-  #### Label: `status`
+  #### Label: `state`
 
   | Label Value       | Description                               |
   |-----------|-------------------------------------------|
   | `idle`    | Scheduler threads waiting for work        |
   | `running` | Scheduler threads running                 |
 
+### `xrootd_sched_thread_creations`
 
-### `xrootd_server_bytes`
+Number of scheduler thread creations.
+
+### `xrootd_sched_thread_destructions`
+
+Number of scheduler thread destructions.
+
+### `xrootd_sched_thread_limit_reached`
+
+Number of times the scheduler thread limit has been reached.
+
+### `xrootd_sched_jobs`
+
+Number of scheduler jobs requiring a thread.
+
+### `xrootd_sched_queue_longest_length`
+
+Length of the longest run-queue.
+
+### `xrootd_sched_queued`
+
+Number of jobs queued.
+
+### `xrootd_server_bytes_total`
 
   The total number of bytes XRootD sent/received. Ref: https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm#_Toc138968503 (See `link.in` and `link.out`)
 
@@ -90,9 +135,9 @@ This yields the duration in seconds.
   | `tx`         | Bytes sent      |
   | `rx`         | Bytes received  |
 
-### `xrootd_server_connection_count`
+### `xrootd_server_connections_total`
 
-  The total number of server connections to XRootD.
+The total number of server connections to XRootD.
 
 ### `xrootd_storage_volume_bytes`
 
@@ -152,13 +197,161 @@ This yields the duration in seconds.
   | `readv`      | Bytes read from file using readv()       |
   | `write`      | Bytes written to file                    |
 
-### `xrootd_transfer_operations_count`
+### `xrootd_transfer_operations_total`
 
   The number of transfer operations performed for individual object. The labels for this metric is the same as the ones in `xrootd_transfer_bytes`
 
-### `xrootd_transfer_readv_segments_count`
+### `xrootd_transfer_readv_segments_total`
 
   The number of segments in readv operations for individual object. The labels for this metric is the same as the ones in `xrootd_transfer_bytes` except that `type` label isn't available in this metric.
+
+### `xrootd_cache_access_bytes`
+
+Number of bytes the data requested is in the cache or not.
+
+#### Label: `path`
+
+The path to the object (filename).
+
+#### Label: `type`
+
+| Label Values | Description |
+| --- | --- |
+| `hit` | Bytes served from cache. |
+| `miss` | Bytes missed in cache. |
+| `bypass` | Bytes that bypassed the cache. |
+
+### `xrootd_server_io_total`
+
+Total storage operations in origin/cache server.
+
+### `xrootd_server_io_active`
+
+Number of ongoing storage operations in origin/cache server.
+
+### `xrootd_server_io_wait_seconds_total`
+
+The aggregate time spent in storage operations in origin/cache server.
+
+### OSS Layer Metrics
+
+The following metrics are available from the XRootD OSS layer.
+
+| Metric Name | Description |
+| --- | --- |
+| `xrootd_oss_reads_total` | The total number of read operations on the OSS. |
+| `xrootd_oss_writes_total` | The total number of write operations on the OSS. |
+| `xrootd_oss_stats_total` | The total number of stat operations on the OSS. |
+| `xrootd_oss_pgreads_total`| The total number of page read operations on the OSS. |
+| `xrootd_oss_pgwrites_total`| The total number of page write operations on the OSS. |
+| `xrootd_oss_readv_total` | The total number of readv operations on the OSS. |
+| `xrootd_oss_readv_segments_total` | The total number of segments in readv operations on the OSS. |
+| `xrootd_oss_dirlists_total` | The total number of directory list operations on the OSS. |
+| `xrootd_oss_dirlist_entries_total` | The total number of directory list entries on the OSS. |
+| `xrootd_oss_truncates_total` | The total number of truncate operations on the OSS. |
+| `xrootd_oss_unlinks_total` | The total number of unlink operations on the OSS. |
+| `xrootd_oss_chmods_total` | The total number of chmod operations on the OSS. |
+| `xrootd_oss_opens_total` | The total number of open operations on the OSS. |
+| `xrootd_oss_renames_total` | The total number of rename operations on the OSS. |
+| `xrootd_oss_slow_reads_total` | The total number of slow read operations on the OSS. |
+| `xrootd_oss_slow_writes_total`| The total number of slow write operations on the OSS. |
+| `xrootd_oss_slow_stats_total`| The total number of slow stat operations on the OSS. |
+| `xrootd_oss_slow_pgreads_total`| The total number of slow page read operations on the OSS. |
+| `xrootd_oss_slow_pgwrites_total`| The total number of slow page write operations on the OSS. |
+| `xrootd_oss_slow_readv_total`| The total number of slow readv operations on the OSS. |
+| `xrootd_oss_slow_readv_segments_total`| The total number of segments in slow readv operations on the OSS. |
+| `xrootd_oss_slow_dirlists_total`| The total number of slow directory list operations on the OSS. |
+| `xrootd_oss_slow_dirlist_entries_total`| The total number of slow directory list entries on the OSS. |
+| `xrootd_oss_slow_truncates_total`| The total number of slow truncate operations on the OSS. |
+| `xrootd_oss_slow_unlinks_total`| The total number of slow unlink operations on the OSS. |
+| `xrootd_oss_slow_chmods_total`| The total number of slow chmod operations on the OSS. |
+| `xrootd_oss_slow_opens_total`| The total number of slow open operations on the OSS. |
+| `xrootd_oss_slow_renames_total`| The total number of slow rename operations on the OSS. |
+| `xrootd_oss_open_time_seconds`| The time taken for open operations on the OSS. |
+| `xrootd_oss_read_time_seconds`| The time taken for read operations on the OSS. |
+| `xrootd_oss_readv_time_seconds`| The time taken for readv operations on the OSS. |
+| `xrootd_oss_pgread_time_seconds`| The time taken for page read operations on the OSS. |
+| `xrootd_oss_write_time_seconds`| The time taken for write operations on the OSS. |
+| `xrootd_oss_pgwrite_time_seconds`| The time taken for page write operations on the OSS. |
+| `xrootd_oss_dirlist_time_seconds`| The time taken for directory list operations on the OSS. |
+| `xrootd_oss_stat_time_seconds`| The time taken for stat operations on the OSS. |
+| `xrootd_oss_truncate_time_seconds`| The time taken for truncate operations on the OSS. |
+| `xrootd_oss_unlink_time_seconds`| The time taken for unlink operations on the OSS. |
+| `xrootd_oss_rename_time_seconds`| The time taken for rename operations on the OSS. |
+| `xrootd_oss_chmod_time_seconds`| The time taken for chmod operations on the OSS. |
+| `xrootd_oss_slow_open_time_seconds`| The time taken for slow open operations on the OSS. |
+| `xrootd_oss_slow_read_time_seconds`| The time taken for slow read operations on the OSS. |
+| `xrootd_oss_slow_readv_time_seconds`| The time taken for slow readv operations on the OSS. |
+| `xrootd_oss_slow_pgread_time_seconds`| The time taken for slow page read operations on the OSS. |
+| `xrootd_oss_slow_write_time_seconds`| The time taken for slow write operations on the OSS. |
+| `xrootd_oss_slow_pgwrite_time_seconds`| The time taken for slow page write operations on the OSS. |
+| `xrootd_oss_slow_dirlist_time_seconds`| The time taken for slow directory list operations on the OSS. |
+| `xrootd_oss_slow_stat_time_seconds`| The time taken for slow stat operations on the OSS. |
+| `xrootd_oss_slow_truncate_time_seconds`| The time taken for slow truncate operations on the OSS. |
+| `xrootd_oss_slow_unlink_time_seconds`| The time taken for slow unlink operations on the OSS. |
+| `xrootd_oss_slow_rename_time_seconds`| The time taken for slow rename operations on the OSS. |
+| `xrootd_oss_slow_chmod_time_seconds`| The time taken for slow chmod operations on the OSS. |
+
+### S3 Cache Plugin Metrics
+
+The following metrics are available from the XRootD S3 cache plugin.
+
+| Metric Name | Description | Labels |
+| --- | --- | --- |
+| `xrootd_s3_cache_bytes_total` | Bytes transferred by the S3 cache plugin. | `type`: `hit`, `miss`, `bypass`, `fetch`, `unused`, `prefetch` |
+| `xrootd_s3_cache_hits_total` | Number of cache hits, partial hits, or misses. | `type`: `full`, `partial`, `miss` |
+| `xrootd_s3_cache_requests_total` | Number of cache requests. | `type`: `bypass`, `fetch`, `prefetch` |
+| `xrootd_s3_cache_errors_total` | Number of errors encountered by the S3 cache plugin. | |
+| `xrootd_s3_cache_request_seconds_total` | Total time spent in S3 requests. | `type`: `bypass`, `fetch` |
+
+### XrdCl Client Metrics
+
+The following metrics are available from the XrdCl client.
+
+| Metric Name | Description | Labels |
+| --- | --- | --- |
+| `xrootd_xrdcl_prefetch_count_total` | Total number of prefetches started. | |
+| `xrootd_xrdcl_prefetch_expired_total` | Total number of prefetches that expired. | |
+| `xrootd_xrdcl_prefetch_failed_total` | Total number of prefetches that failed. | |
+| `xrootd_xrdcl_prefetch_reads_hit_total` | Total number of successful reads from prefetch buffer. | |
+| `xrootd_xrdcl_prefetch_reads_miss_total` | Total number of reads that missed the prefetch buffer. | |
+| `xrootd_xrdcl_prefetch_bytes_used_total` | Total number of bytes served from prefetch. | |
+| `xrootd_xrdcl_queue_produced_total` | Total number of HTTP requests placed into the queue. | |
+| `xrootd_xrdcl_queue_consumed_total` | Total number of HTTP requests read from the queue. | |
+| `xrootd_xrdcl_queue_pending` | Number of pending HTTP requests in the queue. | |
+| `xrootd_xrdcl_queue_rejected_total` | Total number of HTTP requests rejected due to overload. | |
+| `xrootd_xrdcl_worker_oldest_op_timestamp_seconds` | Timestamp of the oldest operation in any of the worker threads. | |
+| `xrootd_xrdcl_worker_oldest_cycle_timestamp_seconds` | Timestamp of the oldest event loop completion in any of the worker threads. | |
+| `xrootd_xrdcl_http_requests_total` | Statistics about HTTP requests. | `verb`, `status`, `type` |
+| `xrootd_xrdcl_http_request_duration_seconds_total` | Total duration of HTTP requests. | `verb`, `status`, `type` |
+| `xrootd_xrdcl_http_bytes_total` | Bytes transferred for HTTP requests. | `verb`, `status` |
+| `xrootd_xrdcl_conncall_total` | Statistics about connection calls. | `type` |
+
+### Cache Eviction Metrics
+
+The following metrics are available from the XRootD cache eviction process.
+
+| Metric Name | Description | Labels |
+| --- | --- | --- |
+| `xrootd_cache_eviction_last_update_time_seconds` | The last time xrootd cache eviction metrics were updated. | |
+| `xrootd_cache_eviction_disk_usage_bytes` | The disk usage of the xrootd cache. | |
+| `xrootd_cache_eviction_snapshot_stats_reset_time_seconds`| The time when the snapshot statistics were last reset. | |
+| `xrootd_cache_eviction_disk_total_bytes` | The total disk space available for the cache. | |
+| `xrootd_cache_eviction_file_usage_bytes` | The file usage of the xrootd cache. | |
+| `xrootd_cache_eviction_meta_total_bytes` | The total metadata storage available for the cache. | |
+| `xrootd_cache_eviction_meta_used_bytes` | The used metadata storage for the cache. | |
+| `xrootd_cache_eviction_dir_num_ios` | Number of I/Os per directory. | `dir_name` |
+| `xrootd_cache_eviction_dir_duration` | Duration of I/Os per directory. | `dir_name` |
+| `xrootd_cache_eviction_dir_bytes` | Bytes transferred per directory. | `dir_name`, `type`: `hit`, `missed`, `bypassed`, `written` |
+| `xrootd_cache_eviction_dir_st_block_bytes` | Bytes from storage blocks per directory. | `dir_name`, `type`: `added`, `removed` |
+| `xrootd_cache_eviction_dir_n_cksum_errors` | Number of checksum errors per directory. | `dir_name` |
+| `xrootd_cache_eviction_dir_files_count` | File operations per directory (opened, closed, created, removed). | `dir_name`, `type`: `opened`, `closed`, `created`, `removed` |
+| `xrootd_cache_eviction_dir_directories_count` | Directory operations (created, removed) per directory. | `dir_name`, `type`: `created`, `removed` |
+| `xrootd_cache_eviction_dir_last_access_time_seconds` | Last access time per directory. | `dir_name`, `type`: `open`, `close` |
+| `xrootd_cache_eviction_dir_st_blocks_usage_count` | Storage blocks usage per directory. | `dir_name` |
+| `xrootd_cache_eviction_dir_n_files_open_count` | Number of open files per directory. | `dir_name` |
+| `xrootd_cache_eviction_dir_n_files_count` | Number of files per directory. | `dir_name` |
+| `xrootd_cache_eviction_dir_n_directories_count` | Number of directories per directory. | `dir_name` |
 
 
 ## Director
@@ -259,15 +452,18 @@ With the `up` metric, it is possible to count number of active origin and cache 
 
   The `stat` query result.
 
-| Label Values | Description                                                          |
-|--------------|----------------------------------------------------------------------|
-| `Succeeded`  | The object requested is on the server            |
-| `NotFound`   | The requested object could not be found on the server                  |
-| `Timeout`    | The query exceeded the allotted time and was not completed.     |
-| `Cancelled`  | The query is cancelled as maximum number of responses has been reached          |
-| `Forbidden`  | The object request was denied due to lack of permissions or missing token |
-| `UnknownErr` | An unexpected error occurred. Typically when the server refused to connect  |
+  | Label Values | Description                                                          |
+  |--------------|----------------------------------------------------------------------|
+  | `Succeeded`  | The object requested is on the server            |
+  | `NotFound`   | The requested object could not be found on the server                  |
+  | `Timeout`    | The query exceeded the allotted time and was not completed.     |
+  | `Cancelled`  | The query is cancelled as maximum number of responses has been reached          |
+  | `Forbidden`  | The object request was denied due to lack of permissions or missing token |
+  | `UnknownErr` | An unexpected error occurred. Typically when the server refused to connect  |
 
+  #### Label: `cached_result`
+
+  Whether the result was cached.
 
 ### `pelican_director_stat_active`
 
@@ -333,21 +529,136 @@ With the `up` metric, it is possible to count number of active origin and cache 
   | `Success`    | The reporting to the origin of test run status succeeded           |
   | `Failed`     | The reporting to the origin of test run status failed              |
 
+### `pelican_director_map_items_total`
 
-### `pelican_director_geoip_errors`
+The total number of map items in the director, by the name of the map.
 
-  The total number of errors encountered trying to resolve coordinates using the GeoIP MaxMind database
+#### Label: `name`
 
-  #### Label: `network`
-  A \24 bit mask of the network address that was being resolved
+The name of the map. One of `healthTestUtils`, `filteredServers`, `serverStatUtils`, `serverStatEntries`.
 
-  #### Label: `source`
+### `pelican_director_ttl_cache`
 
-  | Label Values | Description     |
-  |--------------|-----------------|
-  | `server`    |  Indicates a server-side issue, such as the unavailability of the GeoIP database or an error while retrieving the city record.  |
-  | `client`    |  Indicates a client-side issue, such as the IP address being from a private range or the GeoIP database providing unreliable data  |
+The statistics of various TTL caches.
 
-  #### Label: `proj`
+#### Label: `name`
 
-  The project of the client that was being resolved. This comes from the `User-Agent` header of the client's request.
+The name of the cache. One of `serverAds`, `jwks`.
+
+#### Label: `type`
+
+The type of the statistic. One of `evictions`, `insertions`, `hits`, `misses`, `total`.
+
+### `pelican_director_server_count`
+
+The number of servers currently recognized by the Director, delineated by pelican/non-pelican and origin/cache.
+
+#### Label: `server_name`
+
+The name of the server.
+
+#### Label: `server_type`
+
+| Label Values | Description     |
+|--------------|-----------------|
+| `Origin`     | Origin server   |
+| `Cache`      | Cache server    |
+
+#### Label: `from_topology`
+
+Whether the server was discovered from the topology.
+
+### `pelican_director_client_requests_total`
+
+The total number of requests from clients.
+
+#### Label: `version`
+
+The client version.
+
+#### Label: `service`
+
+The service that received the request.
+
+### `pelican_director_redirects_total`
+
+The total number of redirects the director issued.
+
+#### Label: `destination`
+
+The destination of the redirect.
+
+#### Label: `status_code`
+
+The status code of the redirect.
+
+#### Label: `version`
+
+The client version.
+
+#### Label: `network`
+
+The network of the client.
+
+### `pelican_director_maxmind_server_errors_total`
+
+The total number of errors encountered trying to resolve server coordinates using the GeoIP MaxMind database.
+
+#### Label: `network`
+
+The network address that was being resolved.
+
+#### Label: `server_name`
+
+The name of the server that was being resolved.
+
+### `pelican_director_maxmind_client_errors_total`
+
+The total number of errors encountered trying to resolve client coordinates using the GeoIP MaxMind database.
+
+#### Label: `network`
+
+The network address that was being resolved.
+
+#### Label: `project`
+
+The project of the client that was being resolved.
+
+### `pelican_director_rejected_advertisements`
+
+The total number of advertisements rejected by the director.
+
+#### Label: `hostname`
+
+The hostname of the server that sent the advertisement.
+
+### `pelican_director_server_statusweight`
+
+The EWMA-smoothed status weight generated by the Director for each server.
+
+#### Label: `server_name`
+
+The name of the server.
+
+#### Label: `server_url`
+
+The URL of the server.
+
+#### Label: `server_type`
+
+| Label Values | Description     |
+|--------------|-----------------|
+| `Origin`     | Origin server   |
+| `Cache`      | Cache server    |
+
+### Deprecated Metrics
+
+The following metrics are deprecated and will be removed in a future release.
+
+- `pelican_director_geoip_errors`: [Deprecated -- split into separate client/server metrics (pelican_director_maxmind_{server,client}_errors_total)] The total number of errors encountered trying to resolve coordinates using the GeoIP MaxMind database.
+- `xrootd_monitoring_packets_received`: Renamed to `xrootd_monitoring_packets_received_total`.
+- `xrootd_transfer_readv_segments_count`: Renamed to `xrootd_transfer_readv_segments_total`.
+- `xrootd_transfer_operations_count`: Renamed to `xrootd_transfer_operations_total`.
+- `xrootd_server_connection_count`: Renamed to `xrootd_server_connections_total`.
+- `xrootd_server_bytes`: Renamed to `xrootd_server_bytes_total`.
+- `xrootd_server_io_wait_time`: Renamed to `xrootd_server_io_wait_seconds_total`.
