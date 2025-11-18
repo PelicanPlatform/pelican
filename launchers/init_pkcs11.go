@@ -46,6 +46,8 @@ func initPKCS11(ctx context.Context, egrp *errgroup.Group, modules server_struct
 		log.Infof("  openssl s_client -connect 127.0.0.1:8500 -servername localhost -CAfile %s", param.Server_TLSCACertificateFile.GetString())
 		egrp.Go(func() error { <-ctx.Done(); return proxy.Stop() })
 	} else {
-		log.Warnf("PKCS#11 helper auto-disabled. Install openssl, p11-kit, p11-kit-modules, libengine-pkcs11-openssl to enable; or set %s=false to suppress this message.", param.Server_EnablePKCS11.GetName())
+		if param.Server_EnablePKCS11.GetBool() {
+			log.Warnf("PKCS#11 helper auto-disabled. Install openssl, p11-kit, p11-kit-modules, libengine-pkcs11-openssl to enable; or set %s=false to suppress this message.", param.Server_EnablePKCS11.GetName())
+		}
 	}
 }
