@@ -60,8 +60,12 @@ func TestErrorsRetryableFalse(t *testing.T) {
 	assert.False(t, te.AllErrorsRetryable(), "ErrorsRetryable should be false")
 	te.resetErrors()
 
-	te.AddError(&dirListingNotSupportedError{})
-	assert.False(t, te.AllErrorsRetryable(), "ErrorsRetryable should be false")
+	// Test wrapped dirListingNotSupportedError (all dirListingNotSupportedErrors are wrapped in production)
+	listingErr := &dirListingNotSupportedError{
+		Err: errors.New("405: object listings are not supported by the discovered origin"),
+	}
+	te.AddError(error_codes.NewSpecificationError(listingErr))
+	assert.False(t, te.AllErrorsRetryable(), "Wrapped dirListingNotSupportedError should not be retryable")
 	te.resetErrors()
 
 	// Test PermissionDeniedError with valid token that was rejected (not retryable)
