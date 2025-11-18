@@ -41,6 +41,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/origin"
+	"github.com/pelicanplatform/pelican/p11proxy"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -398,7 +399,7 @@ func TestCopyCertificates(t *testing.T) {
 	require.NoError(t, err)
 	err = copyXrootdCertificates(&origin.OriginServer{})
 	require.NoError(t, err)
-	destKeyPairName := filepath.Join(param.Origin_RunLocation.GetString(), "copied-tls-creds.crt")
+	destKeyPairName := runtimeTLSCertPath(false)
 	assert.FileExists(t, destKeyPairName)
 
 	keyPairContents, err := os.ReadFile(destKeyPairName)
@@ -463,6 +464,39 @@ func TestCopyCertificates(t *testing.T) {
 	require.NoError(t, err)
 	log.Debug("Will wait to see if the new certs are copied")
 	assert.True(t, waitForCopy())
+}
+
+func TestCopyCertificatesWithPKCS11(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
+	runDir := t.TempDir()
+	configDir := t.TempDir()
+	viper.Set("Origin.RunLocation", runDir)
+	viper.Set("ConfigDir", configDir)
+
+	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
+
+	p11proxy.SetCurrentInfoForTest(p11proxy.Info{Enabled: true, PKCS11URL: "pkcs11:test"})
+	t.Cleanup(func() {
+		p11proxy.SetCurrentInfoForTest(p11proxy.Info{})
+		viper.Set(param.Server_EnablePKCS11.GetName(), false)
+	})
+	viper.Set(param.Server_EnablePKCS11.GetName(), true)
+
+	require.NoError(t, copyXrootdCertificates(&origin.OriginServer{}))
+
+	destPath := runtimeTLSCertPath(false)
+	got, err := os.ReadFile(destPath)
+	require.NoError(t, err)
+
+	origCert, err := os.ReadFile(param.Server_TLSCertificateChain.GetString())
+	require.NoError(t, err)
+
+	assert.Equal(t, origCert, got)
 }
 
 func TestAuthIntervalUnmarshal(t *testing.T) {

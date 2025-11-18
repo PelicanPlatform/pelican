@@ -33,6 +33,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
+	"github.com/pelicanplatform/pelican/p11proxy"
 	"github.com/pelicanplatform/pelican/param"
 )
 
@@ -98,6 +99,15 @@ func (plauncher PrivilegedXrootdLauncher) Launch(ctx context.Context) (context.C
 	// Set the directory where the SciTokens library should cache public keys.
 	if xdgCacheHome, ok := os.LookupEnv("XDG_CACHE_HOME"); ok {
 		env = append(env, "XDG_CACHE_HOME="+xdgCacheHome)
+	}
+	pkcs11Info := p11proxy.CurrentInfo()
+	if param.Server_EnablePKCS11.GetBool() && pkcs11Info.Enabled {
+		if pkcs11Info.ServerAddress != "" {
+			env = append(env, "P11_KIT_SERVER_ADDRESS="+pkcs11Info.ServerAddress)
+		}
+		if pkcs11Info.OpenSSLConfPath != "" {
+			env = append(env, "OPENSSL_CONF="+pkcs11Info.OpenSSLConfPath)
+		}
 	}
 
 	launcher := cap.NewLauncher(executable, []string{plauncher.Name(), "-f", "-s", pidFile, "-c", plauncher.configPath, "-n", "origin"}, env)
