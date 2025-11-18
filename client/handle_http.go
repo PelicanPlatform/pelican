@@ -4068,7 +4068,10 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 			}
 		} else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
 			// We replace the error from gowebdav with our own because gowebdav returns: "ReadDir /prefix/different-path/: 405" which is not very user friendly
-			return nil, errors.Errorf("405: object listings are not supported by the discovered origin")
+			listingErr := &dirListingNotSupportedError{
+				Err: errors.New("405: object listings are not supported by the discovered origin"),
+			}
+			return nil, error_codes.NewSpecificationError(listingErr)
 		}
 		// Otherwise, a different error occurred and we should return it
 		return nil, errors.Wrap(err, "failed to read remote collection")
@@ -4123,7 +4126,10 @@ func listHttpRecursiveHelper(client *gowebdav.Client, remotePath string, current
 				return fileInfos, nil
 			}
 		} else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
-			return nil, errors.Errorf("405: object listings are not supported by the discovered origin")
+			listingErr := &dirListingNotSupportedError{
+				Err: errors.New("405: object listings are not supported by the discovered origin"),
+			}
+			return nil, error_codes.NewSpecificationError(listingErr)
 		}
 		// Otherwise, a different error occurred and we should return it
 		return nil, errors.Wrap(err, "failed to read remote collection")
