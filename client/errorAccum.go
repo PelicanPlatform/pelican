@@ -182,11 +182,7 @@ func IsRetryable(err error) bool {
 	// Note: allocateMemoryError should always be wrapped as PelicanError (TransferError), so it's handled above
 	// Note: InvalidByteInChunkLengthError should always be wrapped as PelicanError (TransferError), so it's handled above
 	// Note: ChecksumMismatchError should always be wrapped as PelicanError (Transfer.ChecksumMismatch), so it's handled above
-	if errors.Is(err, &dirListingNotSupportedError{}) {
-		// false because we cannot automatically retry, the user must change the url to use a different origin/namespace
-		// that enables dirlistings or the admin must enable dirlistings on the origin/namespace
-		return false
-	}
+	// Note: dirListingNotSupportedError should always be wrapped as PelicanError (SpecificationError), so it's handled above
 	var hep *HttpErrResp
 	if errors.As(err, &hep) {
 		switch int(hep.Code) {
