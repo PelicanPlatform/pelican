@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -77,7 +77,9 @@ func (s *Server) Run() error {
 		var req JSONRPCRequest
 		if err := json.Unmarshal(line, &req); err != nil {
 			log.Errorf("Error parsing JSON-RPC request: %v", err)
-			s.sendError(nil, -32700, "Parse error", nil)
+			if sendErr := s.sendError(nil, -32700, "Parse error", nil); sendErr != nil {
+				log.Errorf("Failed to send error response: %v", sendErr)
+			}
 			continue
 		}
 
@@ -132,7 +134,7 @@ func (s *Server) handleInitialize(req *JSONRPCRequest) error {
 	}
 
 	result := InitializeResult{
-		ProtocolVersion: "2024-11-05",
+		ProtocolVersion: "2025-11-17",
 		Capabilities: map[string]interface{}{
 			"tools": map[string]interface{}{},
 		},
