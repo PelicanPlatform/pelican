@@ -160,6 +160,431 @@ Notice that there is a port number, `8444`, following the hostname in the URLs a
 
 > For more information about how Docker networking works, refer to [Docker Networking Documentation](https://docs.docker.com/network/).
 
+## Persisting Data Across Container Restarts
+
+When running Pelican servers in containers, certain files and directories need to persist across container restarts to maintain server identity, configurations, and data. Without proper volume mounts, restarting a container will cause data loss, including cryptographic keys, databases, and configuration files.
+
+This section describes which data should be persisted for each Pelican server type and how to configure volume mounts appropriately.
+
+### Understanding Default Paths
+
+Pelican uses different default paths depending on whether the server runs as root (which is the case in containers):
+- **Root user** (containers): Configuration and data are stored in `/etc/pelican` and `/var/lib/pelican`
+- **Non-root user**: Configuration and data are stored in `~/.config/pelican`
+
+All examples below assume the server runs as root inside a container.
+
+### Data That Should Persist for All Server Types
+
+The following data should be persisted for all Pelican server types (origin, cache, director, registry):
+
+#### Issuer Keys Directory
+
+**Purpose**: Contains PEM-encoded ECDSA private keys used to sign credentials issued by the server. These keys establish the server's cryptographic identity within the federation.
+
+**Default Path**: `/etc/pelican/issuer-keys`
+
+**Volume Mount**:
+```bash
+-v /host/pelican/issuer-keys:/etc/pelican/issuer-keys
+```
+
+**Configuration**: To customize the path, set `IssuerKeysDirectory`:
+```yaml
+IssuerKeysDirectory: /custom/path/to/issuer-keys
+```
+
+**Why it must persist**: If these keys are lost, the server will generate new ones, causing authentication failures with other federation services that trust the old keys. For origins, this is the source of the "namespace is registered with a different key" error.
+
+#### Server Database
+
+**Purpose**: Stores server state, configuration, and operational data.
+
+**Default Path**: `/var/lib/pelican/pelican.sqlite`
+
+**Volume Mount**:
+```bash
+-v /host/pelican/db:/var/lib/pelican
+```
+
+**Configuration**: To customize the path, set `Server.DbLocation`:
+```yaml
+Server:
+  DbLocation: /custom/path/to/pelican.sqlite
+```
+
+#### Web UI Password File
+
+**Purpose**: Stores the hashed password for accessing the server's web UI.
+
+**Default Path**: `/etc/pelican/server-web-passwd`
+
+**Volume Mount**:
+```bash
+-v /host/pelican/config:/etc/pelican
+```
+
+**Configuration**: To customize the path, set `Server.UIPasswordFile`:
+```yaml
+Server:
+  UIPasswordFile: /custom/path/to/server-web-passwd
+```
+
+#### TLS Certificates and Keys
+
+**Purpose**: TLS certificate chain and private key for HTTPS communication.
+
+**Default Paths**:
+- Certificate chain: `/etc/pelican/certificates/tls.crt`
+- Private key: `/etc/pelican/certificates/tls.key`
+- CA certificate: `/etc/pelican/certificates/tlsca.pem`
+
+**Volume Mount**:
+```bash
+-v /host/pelican/certificates:/etc/pelican/certificates
+```
+
+**Configuration**: To customize paths:
+```yaml
+Server:
+  TLSCertificateChain: /custom/path/to/tls.crt
+  TLSKey: /custom/path/to/tls.key
+  TLSCACertificateFile: /custom/path/to/tlsca.pem
+```
+
+#### Session Secret File
+
+**Purpose**: Secret used for encrypting/decrypting session data for the web UI and CSRF protection.
+
+**Default Path**: `/etc/pelican/session-secret`
+
+**Volume Mount**: Included in the `/etc/pelican` mount above.
+
+**Configuration**: To customize the path, set `Server.SessionSecretFile`:
+```yaml
+Server:
+  SessionSecretFile: /custom/path/to/session-secret
+```
+
+#### Log Files (Optional)
+
+**Purpose**: Server log files for troubleshooting and monitoring.
+
+**Default Path**: Logs are written to stderr/stdout by default, but can be redirected to a file.
+
+**Volume Mount**:
+```bash
+-v /host/pelican/logs:/var/log/pelican
+```
+
+**Configuration**: To enable file logging, set `Logging.LogLocation`:
+```yaml
+Logging:
+  LogLocation: /var/log/pelican/pelican.log
+```
+
+#### Monitoring Data (Optional)
+
+**Purpose**: Prometheus monitoring data and metrics.
+
+**Default Path**: `/var/lib/pelican/monitoring/data`
+
+**Volume Mount**:
+```bash
+-v /host/pelican/monitoring:/var/lib/pelican/monitoring
+```
+
+**Configuration**: To customize the path, set `Monitoring.DataLocation`:
+```yaml
+Monitoring:
+  DataLocation: /custom/path/to/monitoring/data
+```
+
+#### OIDC Client Credentials (If Using OIDC)
+
+**Purpose**: OIDC client ID and secret for OAuth2/OIDC authentication.
+
+**Default Paths**:
+- Client ID: `/etc/pelican/oidc-client-id`
+- Client secret: `/etc/pelican/oidc-client-secret`
+
+**Volume Mount**: Included in the `/etc/pelican` mount above.
+
+**Configuration**: To customize paths:
+```yaml
+OIDC:
+  ClientIDFile: /custom/path/to/oidc-client-id
+  ClientSecretFile: /custom/path/to/oidc-client-secret
+```
+
+### Origin-Specific Persistent Data
+
+In addition to the common data above, origins need to persist:
+
+#### Origin Database
+
+**Purpose**: Origin-specific operational data and state.
+
+**Default Path**: `/var/lib/pelican/origin.sqlite`
+
+**Volume Mount**: Included in the `/var/lib/pelican` mount above.
+
+**Configuration**: To customize the path, set `Origin.DbLocation`:
+```yaml
+Origin:
+  DbLocation: /custom/path/to/origin.sqlite
+```
+
+#### Federation Token
+
+**Purpose**: Token used for federation authentication.
+
+**Default Path**: `/etc/pelican/origin-fed-token`
+
+**Volume Mount**: Included in the `/etc/pelican` mount above.
+
+**Configuration**: To customize the path, set `Origin.FedTokenLocation`:
+```yaml
+Origin:
+  FedTokenLocation: /custom/path/to/origin-fed-token
+```
+
+#### Origin Data Directory
+
+**Purpose**: The actual data being served by the origin (if using POSIX storage).
+
+**Default Path**: Configured via `Origin.StoragePrefix` or `Origin.Exports`
+
+**Volume Mount Example**:
+```bash
+-v /host/data:/data:ro
+```
+
+**Configuration**:
+```yaml
+Origin:
+  StoragePrefix: /data
+```
+
+Or for multiple exports:
+```yaml
+Origin:
+  Exports:
+    - StoragePrefix: /data
+      FederationPrefix: /my-namespace
+```
+
+**Note**: This directory contains your actual data files. Mount it as read-only (`:ro`) if the origin should not modify the data.
+
+#### Example: Running an Origin with Persistent Data
+
+```bash
+docker run -d \
+  --name pelican-origin \
+  -p 8444:8444 \
+  -p 8443:8443 \
+  -v /host/pelican/config:/etc/pelican \
+  -v /host/pelican/lib:/var/lib/pelican \
+  -v /host/pelican/certificates:/etc/pelican/certificates \
+  -v /host/data:/data:ro \
+  hub.opensciencegrid.org/pelican_platform/origin:latest \
+  serve -v /data:/my-namespace -f <federation>
+```
+
+### Cache-Specific Persistent Data
+
+In addition to the common data above, caches need to persist:
+
+#### Cache Database
+
+**Purpose**: Cache-specific operational data and state.
+
+**Default Path**: `/var/lib/pelican/cache.sqlite`
+
+**Volume Mount**: Included in the `/var/lib/pelican` mount above.
+
+**Configuration**: To customize the path, set `Cache.DbLocation`:
+```yaml
+Cache:
+  DbLocation: /custom/path/to/cache.sqlite
+```
+
+#### Cache Storage Location
+
+**Purpose**: Directory where cached objects are stored.
+
+**Default Path**: `/run/pelican/xrootd/cache` (but this should be changed for persistence)
+
+**Volume Mount**:
+```bash
+-v /host/cache/storage:/var/cache/pelican
+```
+
+**Configuration**: Set `Cache.StorageLocation` to persist cached data:
+```yaml
+Cache:
+  StorageLocation: /var/cache/pelican
+```
+
+**Why it must persist**: Without persistence, the cache loses all cached objects on restart, defeating its purpose. The cache will need to re-download all data, increasing load on origins and slowing down data access.
+
+#### Federation Token
+
+**Purpose**: Token used for federation authentication.
+
+**Default Path**: `/etc/pelican/cache-fed-token`
+
+**Volume Mount**: Included in the `/etc/pelican` mount above.
+
+**Configuration**: To customize the path, set `Cache.FedTokenLocation`:
+```yaml
+Cache:
+  FedTokenLocation: /custom/path/to/cache-fed-token
+```
+
+#### Example: Running a Cache with Persistent Data
+
+```bash
+docker run -d \
+  --name pelican-cache \
+  -p 8444:8444 \
+  -p 8442:8442 \
+  -v /host/pelican/config:/etc/pelican \
+  -v /host/pelican/lib:/var/lib/pelican \
+  -v /host/pelican/certificates:/etc/pelican/certificates \
+  -v /host/cache/storage:/var/cache/pelican \
+  hub.opensciencegrid.org/pelican_platform/cache:latest \
+  serve -f <federation>
+```
+
+### Director-Specific Persistent Data
+
+In addition to the common data above, directors need to persist:
+
+#### Director Database
+
+**Purpose**: Director-specific state including topology and routing information.
+
+**Default Path**: `/var/lib/pelican/director.sqlite`
+
+**Volume Mount**: Included in the `/var/lib/pelican` mount above.
+
+**Configuration**: To customize the path, set `Director.DbLocation`:
+```yaml
+Director:
+  DbLocation: /custom/path/to/director.sqlite
+```
+
+#### GeoIP Database (Optional)
+
+**Purpose**: MaxMind GeoIP database for geographic routing optimization.
+
+**Default Path**: `/var/cache/pelican/maxmind/GeoLite2-City.mmdb`
+
+**Volume Mount**:
+```bash
+-v /host/pelican/maxmind:/var/cache/pelican/maxmind
+```
+
+**Configuration**: To customize the path, set `Director.GeoIPLocation`:
+```yaml
+Director:
+  GeoIPLocation: /custom/path/to/GeoLite2-City.mmdb
+```
+
+**Note**: If you have a MaxMind API key, you can also persist it:
+```yaml
+Director:
+  MaxMindKeyFile: /etc/pelican/maxmind-key
+```
+
+#### Example: Running a Director with Persistent Data
+
+```bash
+docker run -d \
+  --name pelican-director \
+  -p 8444:8444 \
+  -v /host/pelican/config:/etc/pelican \
+  -v /host/pelican/lib:/var/lib/pelican \
+  -v /host/pelican/certificates:/etc/pelican/certificates \
+  -v /host/pelican/maxmind:/var/cache/pelican/maxmind \
+  hub.opensciencegrid.org/pelican_platform/director:latest \
+  serve -f <federation>
+```
+
+### Registry-Specific Persistent Data
+
+In addition to the common data above, registries need to persist:
+
+#### Registry Database
+
+**Purpose**: Contains all namespace registrations, including associated public keys and metadata. This is the most critical data for a registry.
+
+**Default Path**: `/var/lib/pelican/registry.sqlite` (deprecated parameter), now uses `Server.DbLocation`
+
+**Volume Mount**: Included in the `/var/lib/pelican` mount above.
+
+**Configuration**: Uses `Server.DbLocation` by default. The deprecated `Registry.DbLocation` parameter should not be used.
+
+**Why it must persist**: The registry database contains the authoritative record of all namespace registrations. Loss of this database means loss of all registration data and will require namespace owners to re-register.
+
+#### Example: Running a Registry with Persistent Data
+
+```bash
+docker run -d \
+  --name pelican-registry \
+  -p 8444:8444 \
+  -v /host/pelican/config:/etc/pelican \
+  -v /host/pelican/lib:/var/lib/pelican \
+  -v /host/pelican/certificates:/etc/pelican/certificates \
+  hub.opensciencegrid.org/pelican_platform/registry:latest \
+  serve -f <federation>
+```
+
+### Using Docker Compose for Persistent Data
+
+For production deployments, Docker Compose provides a cleaner way to manage volumes. Here's an example for an origin:
+
+```yaml
+version: '3.8'
+
+services:
+  pelican-origin:
+    image: hub.opensciencegrid.org/pelican_platform/origin:latest
+    container_name: pelican-origin
+    ports:
+      - "8444:8444"
+      - "8443:8443"
+    volumes:
+      - pelican-config:/etc/pelican
+      - pelican-lib:/var/lib/pelican
+      - pelican-certs:/etc/pelican/certificates
+      - /path/to/data:/data:ro
+    command: serve -v /data:/my-namespace -f https://osg-htc.org
+    restart: unless-stopped
+
+volumes:
+  pelican-config:
+  pelican-lib:
+  pelican-certs:
+```
+
+### Best Practices
+
+1. **Always persist `/etc/pelican` and `/var/lib/pelican`**: These directories contain most of the critical persistent data.
+
+2. **Use named volumes or bind mounts consistently**: Avoid mixing approaches to prevent confusion.
+
+3. **Back up databases regularly**: The SQLite databases in `/var/lib/pelican` should be backed up regularly.
+
+4. **Protect private keys**: The issuer keys and TLS private keys in `/etc/pelican` are sensitive and should be protected with appropriate file system permissions on the host.
+
+5. **Monitor disk usage**: Cache storage and monitoring data can grow over time. Monitor disk usage and configure appropriate limits.
+
+6. **Test container restarts**: After setting up persistent volumes, test that the container can be stopped and restarted without losing data or generating new keys.
+
+7. **Document your volume mounts**: Keep a record of which host directories are mounted to which container paths for each server.
+
 ## Troubleshooting
 
 ### Error running Pelican Docker image on macOS with a M-series chip
