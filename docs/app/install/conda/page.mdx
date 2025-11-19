@@ -1,4 +1,4 @@
-# Install Pelican via Conda-Forge
+# Install Pelican via Conda-forge
 
 This document explains how to install Pelican using conda-forge, a community-led conda channel that provides the `pelicanplatform` package.
 
@@ -14,6 +14,7 @@ You'll need either [conda](https://docs.conda.io/en/latest/), [mamba](https://ma
 
     ```bash
     conda config --add channels conda-forge
+    conda config --remove channels defaults
     conda config --set channel_priority strict
     ```
 
@@ -31,6 +32,7 @@ You'll need either [conda](https://docs.conda.io/en/latest/), [mamba](https://ma
 
     ```bash
     conda config --add channels conda-forge
+    conda config --remove channels defaults
     conda config --set channel_priority strict
     ```
 
@@ -83,7 +85,10 @@ Or with mamba:
 ```bash
 mamba search pelicanplatform --channel conda-forge
 ```
+Or with Pixi:
 
+```bash
+pixi search pelicanplatform
 ## Additional Information
 
 For more details about the conda-forge package, including build status and maintainer information, visit the [pelicanplatform-feedstock repository](https://github.com/conda-forge/pelicanplatform-feedstock).

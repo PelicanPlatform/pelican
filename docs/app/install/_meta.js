@@ -5,6 +5,6 @@ export default {
   "linux-binary": "Linux Standalone Binary",
   "macos": "macOS",
   "windows": "Windows",
-  "conda": "Conda-Forge",
+  "conda": "Conda-forge",
   "docker": "Pelican Docker Image"
 }
