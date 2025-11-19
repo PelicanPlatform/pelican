@@ -4,7 +4,7 @@ This document explains how to install Pelican using conda-forge, a community-led
 
 ## Prerequisites
 
-You'll need either [conda](https://docs.conda.io/en/latest/), [mamba](https://mamba.readthedocs.io/), or [pixi](https://pixi.sh/) installed on your system. These package managers work across Linux, macOS, and Windows.
+You'll need either [conda](https://docs.conda.io/en/latest/) or [mamba](https://mamba.readthedocs.io/) installed on your system. These package managers work across Linux, macOS, and Windows.
 
 > **Note**: The package on conda-forge is named `pelicanplatform` (not `pelican`, which is a different package).
 
@@ -38,22 +38,6 @@ You'll need either [conda](https://docs.conda.io/en/latest/), [mamba](https://ma
 
     ```bash
     mamba install pelicanplatform
-    ```
-
-## Install Pelican using Pixi
-
-[Pixi](https://pixi.sh/) is a modern, fast package management tool that provides fully reproducible multi-platform environments:
-
-1. Add `pelicanplatform` to your project:
-
-    ```bash
-    pixi add pelicanplatform
-    ```
-
-2. Then run Pelican commands in the project environment:
-
-    ```bash
-    pixi exec pelican --version
     ```
 
 ## Available Platforms
