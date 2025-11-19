@@ -1,0 +1,90 @@
+# Install Pelican via Conda-Forge
+
+This document explains how to install Pelican using conda-forge, a community-led conda channel that provides the `pelicanplatform` package.
+
+## Prerequisites
+
+You'll need either [conda](https://docs.conda.io/en/latest/), [mamba](https://mamba.readthedocs.io/), or [pixi](https://pixi.sh/) installed on your system. These package managers work across Linux, macOS, and Windows.
+
+> **Note**: The package on conda-forge is named `pelicanplatform` (not `pelican`, which is a different package).
+
+## Install Pelican using Conda
+
+1. First, add the `conda-forge` channel and set channel priority:
+
+    ```bash
+    conda config --add channels conda-forge
+    conda config --set channel_priority strict
+    ```
+
+2. Install `pelicanplatform`:
+
+    ```bash
+    conda install pelicanplatform
+    ```
+
+## Install Pelican using Mamba
+
+[Mamba](https://mamba.readthedocs.io/) is a faster alternative to conda:
+
+1. Add the `conda-forge` channel and set channel priority:
+
+    ```bash
+    conda config --add channels conda-forge
+    conda config --set channel_priority strict
+    ```
+
+2. Install `pelicanplatform`:
+
+    ```bash
+    mamba install pelicanplatform
+    ```
+
+## Install Pelican using Pixi
+
+[Pixi](https://pixi.sh/) is a modern, fast package management tool that provides fully reproducible multi-platform environments:
+
+1. Add `pelicanplatform` to your project:
+
+    ```bash
+    pixi add pelicanplatform
+    ```
+
+2. Or run Pelican directly without installation:
+
+    ```bash
+    pixi exec pelicanplatform pelican --version
+    ```
+
+## Available Platforms
+
+The `pelicanplatform` package is available on conda-forge for the following platforms:
+
+* Linux (x86_64, aarch64, ppc64le)
+* macOS (x86_64, arm64)
+* Windows (x86_64)
+
+## Version Management
+
+To search for available versions:
+
+```bash
+conda search pelicanplatform --channel conda-forge
+```
+
+Or with mamba:
+
+```bash
+mamba search pelicanplatform --channel conda-forge
+```
+
+## Additional Information
+
+For more details about the conda-forge package, including build status and maintainer information, visit the [pelicanplatform-feedstock repository](https://github.com/conda-forge/pelicanplatform-feedstock).
+
+## Next steps
+
+* [Verify Pelican is installed](../install.mdx#verify-pelican-is-installed)
+* [Read our quick start guide on accessing data using Pelican client](../getting-started/accessing-data.mdx)
+* [Federate your data via Pelican Origin server](../federating-your-data.mdx)
+* [Operate a Pelican data federation](../operating-a-federation.mdx)
