@@ -43,16 +43,14 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 		return errors.Wrap(err, "unable to initialize the server database")
 	}
 
-	if param.Server_EnableUI.GetBool() {
-		registry.InitOptionsCache(ctx, egrp)
+	registry.InitOptionsCache(ctx, egrp)
 
-		if err = registry.InitCustomRegistrationFields(); err != nil {
-			return err
-		}
+	if err = registry.InitCustomRegistrationFields(); err != nil {
+		return err
+	}
 
-		if err := registry.InitInstConfig(ctx, egrp); err != nil {
-			return err
-		}
+	if err := registry.InitInstConfig(ctx, egrp); err != nil {
+		return err
 	}
 
 	if config.GetPreferredPrefix() == config.OsdfPrefix && !param.Topology_DisableOrigins.GetBool() {

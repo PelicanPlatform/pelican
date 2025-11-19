@@ -954,13 +954,6 @@ type: duration
 default: 15s
 components: ["origin"]
 ---
-name: Origin.EnableUI
-description: |+
-  Indicate whether the origin should enable its web UI.
-type: bool
-default: true
-components: ["origin"]
----
 name: Origin.EnableOIDC
 description: |+
   Indicate whether the origin should allow users to login to the admin website via OAuth2/OIDC with third-party
@@ -2384,7 +2377,7 @@ components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.EnableUI
 description: |+
-  Indicate whether a server should enable its web UI.
+  Indicate whether a server should enable its web UI. This only controls the serving of web UI resources and pages. Backend functionality such as OIDC authentication, OAuth endpoints, and API routes will remain enabled regardless of this setting.
 type: bool
 default: true
 components: ["origin", "registry", "director", "cache"]
