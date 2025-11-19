@@ -166,6 +166,20 @@ When running Pelican servers in containers, certain files and directories need t
 
 This section describes which data should be persisted for each Pelican server type and how to configure volume mounts appropriately.
 
+### Quick Reference: Essential Volume Mounts
+
+The table below shows the minimum recommended volume mounts for each server type:
+
+| Server Type | Essential Volume Mounts |
+|-------------|------------------------|
+| **All** | `-v /host/pelican/config:/etc/pelican` <br/> `-v /host/pelican/lib:/var/lib/pelican` <br/> `-v /host/pelican/certificates:/etc/pelican/certificates` |
+| **Origin** | Above + <br/> `-v /host/data:/data:ro` (your data directory) |
+| **Cache** | Above + <br/> `-v /host/cache/storage:/var/cache/pelican` (cache storage) |
+| **Director** | Above + <br/> `-v /host/pelican/maxmind:/var/cache/pelican/maxmind` (optional, for GeoIP) |
+| **Registry** | Above (no additional mounts required) |
+
+> **Important**: The `/etc/pelican` directory contains cryptographic keys that establish your server's identity in the federation. Loss of these keys will cause the "namespace is registered with a different key" error for origins.
+
 ### Understanding Default Paths
 
 Pelican uses different default paths depending on whether the server runs as root (which is the case in containers):
