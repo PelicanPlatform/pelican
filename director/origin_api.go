@@ -47,7 +47,7 @@ var (
 	// namespaceKeys caches jwks from various origins.
 	// The cache key is jwks endpoint (e.g. https://example.com/path/to/issuer.jwks).
 	// TTL cache is thread-safe
-	namespaceKeys = ttlcache.New(ttlcache.WithTTL[string, jwk.Set](15 * time.Minute))
+	namespaceKeys = ttlcache.New(ttlcache.WithTTL[string, jwk.Set](15*time.Minute), ttlcache.WithDisableTouchOnHit[string, jwk.Set]())
 
 	adminApprovalErr error
 )
