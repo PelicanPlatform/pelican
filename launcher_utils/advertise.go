@@ -122,8 +122,8 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 		return errors.Wrap(err, "failed to determine service name for advertising to director")
 	}
 
-	// Keep the service name in local database up to date
-	if err = database.UpsertServerLocalMetadata(metadata.Name, metadata.ID, server.GetServerType()); err != nil {
+	// Keep the server metadata in local database up to date
+	if err = database.UpsertServerLocalMetadata(metadata); err != nil {
 		return errors.Wrapf(err, "failed to upsert service name %s in local database", metadata.Name)
 	}
 
