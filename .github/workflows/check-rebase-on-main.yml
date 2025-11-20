@@ -1,0 +1,38 @@
+name: Check Rebase on Main
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches-ignore:
+      - main
+
+jobs:
+  check-rebase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history to check ancestry
+
+      - name: Check if branch is rebased on main
+        run: |
+          # Fetch the latest main branch
+          git fetch origin main:main
+
+          # Check if main is an ancestor of the current branch
+          # This will exit with code 0 if main is an ancestor (branch is rebased)
+          # and exit with code 1 if main is not an ancestor (branch needs rebase)
+          if ! git merge-base --is-ancestor origin/main HEAD; then
+            echo "Error: This branch is not rebased on main."
+            echo "Please rebase your branch on main before merging."
+            echo ""
+            echo "To rebase, run:"
+            echo "  git fetch origin main"
+            echo "  git rebase origin/main"
+            exit 1
+          fi
+
+          echo "Branch is rebased on main"
