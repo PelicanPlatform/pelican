@@ -1368,6 +1368,88 @@ func TestStatusCodeErrorWrappingUpload(t *testing.T) {
 	}
 }
 
+// TestHttpErrRespWithNonStatusCodeError tests that HttpErrResp with non-StatusCodeError inner error
+// is wrapped correctly based on HTTP status code using wrapErrorByStatusCode
+func TestHttpErrRespWithNonStatusCodeError(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		"Logging.Level": "debug",
+	})
+
+	testCases := []struct {
+		name          string
+		statusCode    int
+		expectedCode  int
+		expectedType  string
+		expectedRetry bool
+		innerError    error
+	}{
+		{
+			name:          "404 with generic error",
+			statusCode:    http.StatusNotFound,
+			expectedCode:  5011,
+			expectedType:  "Specification.FileNotFound",
+			expectedRetry: false,
+			innerError:    errors.New("some other error"),
+		},
+		{
+			name:          "500 with generic error",
+			statusCode:    http.StatusInternalServerError,
+			expectedCode:  6000,
+			expectedType:  "Transfer",
+			expectedRetry: true,
+			innerError:    errors.New("server error"),
+		},
+		{
+			name:          "400 with generic error",
+			statusCode:    http.StatusBadRequest,
+			expectedCode:  5000,
+			expectedType:  "Specification",
+			expectedRetry: false,
+			innerError:    errors.New("bad request"),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Test wrapErrorByStatusCode directly (used by HttpErrResp handler)
+			wrappedErr := wrapErrorByStatusCode(tc.statusCode, tc.innerError)
+			require.Error(t, wrappedErr)
+
+			var pe *error_codes.PelicanError
+			require.True(t, errors.As(wrappedErr, &pe), "Error should be wrapped in PelicanError")
+			assert.Equal(t, tc.expectedCode, pe.Code(), "Status %d should map to error code %d", tc.statusCode, tc.expectedCode)
+			assert.Equal(t, tc.expectedType, pe.ErrorType(), "Status %d should map to error type %s", tc.statusCode, tc.expectedType)
+			assert.Equal(t, tc.expectedRetry, pe.IsRetryable(), "Status %d retryability should be %v", tc.statusCode, tc.expectedRetry)
+
+			// Verify the inner error is preserved
+			assert.True(t, errors.Is(wrappedErr, tc.innerError), "Original error should be preserved in error chain")
+		})
+	}
+}
+
+// TestCatchAllErrorWrapping tests that unknown error types are wrapped as generic TransferError
+func TestCatchAllErrorWrapping(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		"Logging.Level": "debug",
+	})
+
+	// Create a generic error that doesn't match any specific error type checks
+	genericErr := errors.New("some unknown error type")
+
+	// Test that wrapErrorByStatusCode wraps it correctly for a 500 status
+	wrappedErr := wrapErrorByStatusCode(http.StatusInternalServerError, genericErr)
+	require.Error(t, wrappedErr)
+
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(wrappedErr, &pe), "Error should be wrapped in PelicanError")
+	assert.Equal(t, 6000, pe.Code(), "Should be Transfer error code")
+	assert.Equal(t, "Transfer", pe.ErrorType(), "Should be Transfer error type")
+	assert.True(t, pe.IsRetryable(), "Should be retryable")
+
+	// Verify the original error is preserved
+	assert.True(t, errors.Is(wrappedErr, genericErr), "Original error should be preserved in error chain")
+}
+
 func TestInvalidByteInChunkLengthError(t *testing.T) {
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
@@ -2124,7 +2206,8 @@ func TestResume(t *testing.T) {
 	assert.Equal(t, 2, len(transferResult.Attempts), "Expected 2 attempts, got %d", len(transferResult.Attempts))
 	tae := &TransferAttemptError{}
 	require.True(t, errors.As(transferResult.Attempts[0].Error, &tae), "Got error of type %T; expected transfer attempt error", transferResult.Attempts[0].Error)
-	assert.Equal(t, "unexpected EOF", tae.Unwrap().Error())
+	// The error should be wrapped as a PelicanError, but the original io.ErrUnexpectedEOF should be preserved
+	assert.True(t, errors.Is(tae.Unwrap(), io.ErrUnexpectedEOF), "Expected original error to be preserved in error chain")
 	assert.Equal(t, int64(9), transferResult.Attempts[0].TransferFileBytes)
 	assert.NoError(t, transferResult.Attempts[1].Error)
 	assert.Equal(t, int64(8), transferResult.Attempts[1].TransferFileBytes)
