@@ -52,8 +52,10 @@ type ObjectParam struct {
 func GetDeprecated() map[string][]string {
     return map[string][]string{
         "Cache.DataLocation": {"Cache.StorageLocation"},
+        "Cache.DbLocation": {"Server.DbLocation"},
         "Cache.LocalRoot": {"Cache.StorageLocation"},
         "Debug": {"Logging.Level"},
+        "Director.DbLocation": {"Server.DbLocation"},
         "Director.EnableStat": {"Director.CheckOriginPresence"},
         "DisableHttpProxy": {"Client.DisableHttpProxy"},
         "DisableProxyFallback": {"Client.DisableProxyFallback"},
@@ -68,6 +70,7 @@ func GetDeprecated() map[string][]string {
         "Origin.NamespacePrefix": {"Origin.FederationPrefix"},
         "Origin.S3ServiceName": {"none"},
         "Registry.AdminUsers": {"Server.UIAdminUsers"},
+        "Registry.DbLocation": {"Server.DbLocation"},
         "Server.TLSCertificate": {"Server.TLSCertificateChain"},
         "Xrootd.Port": {"Origin.Port", "Cache.Port"},
         "Xrootd.RunLocation": {"Cache.RunLocation", "Origin.RunLocation"},
@@ -213,6 +216,7 @@ var (
 	Lotman_LibLocation = StringParam{"Lotman.LibLocation"}
 	Lotman_LotHome = StringParam{"Lotman.LotHome"}
 	Monitoring_DataLocation = StringParam{"Monitoring.DataLocation"}
+	Monitoring_DataRetentionSize = StringParam{"Monitoring.DataRetentionSize"}
 	OIDC_AuthorizationEndpoint = StringParam{"OIDC.AuthorizationEndpoint"}
 	OIDC_ClientID = StringParam{"OIDC.ClientID"}
 	OIDC_ClientIDFile = StringParam{"OIDC.ClientIDFile"}
@@ -325,6 +329,7 @@ var (
 var (
 	Cache_BlocksToPrefetch = IntParam{"Cache.BlocksToPrefetch"}
 	Cache_Concurrency = IntParam{"Cache.Concurrency"}
+	Cache_ConcurrencyDegradedThreshold = IntParam{"Cache.ConcurrencyDegradedThreshold"}
 	Cache_EvictionMonitoringMaxDepth = IntParam{"Cache.EvictionMonitoringMaxDepth"}
 	Cache_Port = IntParam{"Cache.Port"}
 	Client_DirectorRetries = IntParam{"Client.DirectorRetries"}
@@ -346,6 +351,7 @@ var (
 	Monitoring_PortLower = IntParam{"Monitoring.PortLower"}
 	Monitoring_SampleLimit = IntParam{"Monitoring.SampleLimit"}
 	Origin_Concurrency = IntParam{"Origin.Concurrency"}
+	Origin_ConcurrencyDegradedThreshold = IntParam{"Origin.ConcurrencyDegradedThreshold"}
 	Origin_Port = IntParam{"Origin.Port"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
 	Server_UILoginRateLimit = IntParam{"Server.UILoginRateLimit"}
@@ -366,6 +372,7 @@ var (
 	Cache_EnableLotman = BoolParam{"Cache.EnableLotman"}
 	Cache_EnableOIDC = BoolParam{"Cache.EnableOIDC"}
 	Cache_EnablePrefetch = BoolParam{"Cache.EnablePrefetch"}
+	Cache_EnableSiteLocalMode = BoolParam{"Cache.EnableSiteLocalMode"}
 	Cache_EnableTLSClientAuth = BoolParam{"Cache.EnableTLSClientAuth"}
 	Cache_EnableVoms = BoolParam{"Cache.EnableVoms"}
 	Cache_SelfTest = BoolParam{"Cache.SelfTest"}
@@ -404,7 +411,6 @@ var (
 	Origin_EnableOIDC = BoolParam{"Origin.EnableOIDC"}
 	Origin_EnablePublicReads = BoolParam{"Origin.EnablePublicReads"}
 	Origin_EnableReads = BoolParam{"Origin.EnableReads"}
-	Origin_EnableUI = BoolParam{"Origin.EnableUI"}
 	Origin_EnableVoms = BoolParam{"Origin.EnableVoms"}
 	Origin_EnableWrite = BoolParam{"Origin.EnableWrite"}
 	Origin_EnableWrites = BoolParam{"Origin.EnableWrites"}

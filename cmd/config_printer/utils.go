@@ -91,6 +91,9 @@ func printConfig(configData interface{}, format string) {
 	default:
 		log.Errorf("Unsupported format: %s. Use 'yaml' or 'json'.", format)
 	}
+
+	// Add an eye break before any other logs are printed.
+	fmt.Println()
 }
 
 // formatValue formats values appropriately for printing.

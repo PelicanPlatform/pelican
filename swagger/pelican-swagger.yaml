@@ -121,7 +121,7 @@ definitions:
   AdminMetadata:
     type: object
     properties:
-      user_id:
+      userId:
         type: string
         description: '"sub" claim of user JWT who requested registration'
       description:
@@ -151,7 +151,7 @@ definitions:
         type: string
         format: date-time
         description: "Timestamp of when the registration was created"
-      updated_at:
+      updatedAt:
         type: string
         format: date-time
         description: "Timestamp of the last update"
@@ -823,12 +823,12 @@ definitions:
           - private
           - public
         example: "private"
-      created_at:
+      createdAt:
         type: string
         format: date-time
         description: When the collection was created
         example: "2024-01-15T10:30:00Z"
-      updated_at:
+      updatedAt:
         type: string
         format: date-time
         description: When the collection was last updated
@@ -851,7 +851,7 @@ definitions:
   CollectionMember:
     type: object
     properties:
-      collection_id:
+      collectionId:
         type: string
         description: ID of the collection
         example: "481c756c"
@@ -859,11 +859,11 @@ definitions:
         type: string
         description: Full pelican:// URL of the object
         example: "pelican://origin.example.com/research/data/file1.txt"
-      added_by:
+      createdBy:
         type: string
         description: User who added this member
         example: "user@example.com"
-      added_at:
+      createdAt:
         type: string
         format: date-time
         description: When the member was added
@@ -871,11 +871,11 @@ definitions:
   CollectionACL:
     type: object
     properties:
-      collection_id:
+      collectionId:
         type: string
         description: ID of the collection
         example: "481c756c"
-      group_id:
+      groupId:
         type: string
         description: ID or name of the group
         example: "research-team"
@@ -887,16 +887,16 @@ definitions:
           - write
           - owner
         example: "read"
-      granted_by:
+      createdBy:
         type: string
-        description: User who granted this ACL
+        description: User who created this ACL
         example: "admin@example.com"
       granted_at:
         type: string
         format: date-time
         description: When the ACL was granted
         example: "2024-01-15T10:30:00Z"
-      expires_at:
+      expiresAt:
         type: string
         format: date-time
         description: When the ACL expires (optional)
@@ -904,7 +904,7 @@ definitions:
   CollectionMetadata:
     type: object
     properties:
-      collection_id:
+      collectionId:
         type: string
         description: ID of the collection
         example: "481c756c"
@@ -935,7 +935,7 @@ definitions:
         type: string
         description: User who created the group
         example: "admin@example.com"
-      created_at:
+      createdAt:
         type: string
         format: date-time
         description: When the group was created
@@ -960,27 +960,27 @@ definitions:
       issuer:
         type: string
         description: The 'iss' claim from the user's OIDC token
-      created_at:
+      createdAt:
         type: string
         format: date-time
         description: When the user was created
   GroupMember:
     type: object
     properties:
-      group_id:
+      groupId:
         type: string
         description: ID of the group
         example: "abc12345"
-      user_id:
+      userId:
         type: string
         description: ID of the user
       user:
         $ref: "#/definitions/User"
-      added_by:
+      createdBy:
         type: string
         description: User who added this member
         example: "admin@example.com"
-      added_at:
+      createdAt:
         type: string
         format: date-time
         description: When the member was added
@@ -1062,10 +1062,10 @@ definitions:
   GrantACLRequest:
     type: object
     required:
-      - group_id
+      - groupId
       - role
     properties:
-      group_id:
+      groupId:
         type: string
         description: ID or name of the group to grant access to
         example: "research-team"
@@ -1077,7 +1077,7 @@ definitions:
           - write
           - owner
         example: "read"
-      expires_at:
+      expiresAt:
         type: string
         format: date-time
         description: When the ACL expires (optional)
@@ -1085,10 +1085,10 @@ definitions:
   RevokeACLRequest:
     type: object
     required:
-      - group_id
+      - groupId
       - role
     properties:
-      group_id:
+      groupId:
         type: string
         description: ID or name of the group to revoke access from
         example: "research-team"
@@ -1114,7 +1114,7 @@ definitions:
   AddGroupMemberRequest:
     type: object
     properties:
-      user_id:
+      userId:
         type: string
         description: The unique user ID of the member to add
   ListCollectionResponse:
@@ -1196,12 +1196,12 @@ definitions:
         example:
           project: "Climate Research"
           department: "Environmental Science"
-      created_at:
+      createdAt:
         type: string
         format: date-time
         description: When the collection was created
         example: "2024-01-15T10:30:00Z"
-      updated_at:
+      updatedAt:
         type: string
         format: date-time
         description: When the collection was last updated

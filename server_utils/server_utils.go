@@ -565,18 +565,28 @@ func LaunchConcurrencyMonitoring(ctx context.Context, egrp *errgroup.Group, sTyp
 	}
 
 	doLoadMonitoring := func(ctx context.Context) error {
-		var concLimit int
-		var paramName string
-		if sType == server_structs.CacheType {
-			concLimit = param.Cache_Concurrency.GetInt()
-			paramName = param.Cache_Concurrency.GetName()
-		} else if sType == server_structs.OriginType {
-			concLimit = param.Origin_Concurrency.GetInt()
-			paramName = param.Origin_Concurrency.GetName()
+		var concParam param.IntParam
+		var concThresholdParam param.IntParam
+		switch sType {
+		case server_structs.CacheType:
+			concParam = param.Cache_Concurrency
+			concThresholdParam = param.Cache_ConcurrencyDegradedThreshold
+		case server_structs.OriginType:
+			concParam = param.Origin_Concurrency
+			concThresholdParam = param.Origin_ConcurrencyDegradedThreshold
+		default:
+			return errors.New("concurrency monitoring can only be launched for Origin or Cache servers")
 		}
 
+		// Although these values should be validated at startup, double check here in case
+		// this is being invoked by a test that doesn't properly init config.
+		concLimit := concParam.GetInt()
+		concThreshold := concThresholdParam.GetInt()
 		if concLimit <= 0 {
-			return errors.Errorf("invalid config value: %s is %d. Must be greater than 0.", paramName, concLimit)
+			return errors.Errorf("invalid config value: %s is %d. Must be greater than 0", concParam.GetName(), concLimit)
+		}
+		if concThreshold < 0 || concThreshold > 100 {
+			return errors.Errorf("invalid config value: %s is %d. Must be between 0 and 100", concThresholdParam.GetName(), concThreshold)
 		}
 
 		// TODO: Do we need to make this configurable?
@@ -610,12 +620,33 @@ func LaunchConcurrencyMonitoring(ctx context.Context, egrp *errgroup.Group, sTyp
 						}
 
 						log.Tracef("Average 1m IO concurrency value from Prometheus is %.2f", avgConc)
-						if avgConc >= float64(concLimit) {
-							log.Debugf("Putting IO Concurrency health status into degraded state; the average 1m concurrency value of %f is higher than the configured limit %d", avgConc, concLimit)
-							metrics.SetComponentHealthStatus(metrics.OriginCache_IOConcurrency, metrics.StatusDegraded, "The server is currently experiencing more than its configured IO concurrency limit, performance may degraded")
+						degradedThreshold := float64(concLimit) * (float64(concThreshold) / 100.0)
+						if avgConc >= degradedThreshold {
+							log.Debugf(
+								"Entering degraded state: average 1m concurrency %.2f exceeds %.0f%% of configured limit (%d). Threshold: %.2f",
+								avgConc, float64(concThreshold), concLimit, degradedThreshold,
+							)
+							metrics.SetComponentHealthStatus(
+								metrics.OriginCache_IOConcurrency,
+								metrics.StatusDegraded,
+								fmt.Sprintf(
+									"Concurrency %.2f exceeds degraded threshold (%.0f%% of limit %d = %.2f)",
+									avgConc, float64(concThreshold), concLimit, degradedThreshold,
+								),
+							)
 						} else {
-							log.Debugln("Putting IO Concurrency health status into OK state")
-							metrics.SetComponentHealthStatus(metrics.OriginCache_IOConcurrency, metrics.StatusOK, "The server is within its configured IO concurrency limits")
+							log.Debugf(
+								"Concurrency OK: average 1m concurrency %.2f is below degraded threshold (%.0f%% of limit %d = %.2f)",
+								avgConc, float64(concThreshold), concLimit, degradedThreshold,
+							)
+							metrics.SetComponentHealthStatus(
+								metrics.OriginCache_IOConcurrency,
+								metrics.StatusOK,
+								fmt.Sprintf(
+									"Concurrency %.2f is within threshold (%.0f%% of limit %d = %.2f)",
+									avgConc, float64(concThreshold), concLimit, degradedThreshold,
+								),
+							)
 						}
 					}
 				}

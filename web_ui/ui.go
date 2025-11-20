@@ -767,10 +767,12 @@ func ConfigureServerWebAPI(ctx context.Context, engine *gin.Engine, egrp *errgro
 	if err := configureMetrics(engine); err != nil {
 		return err
 	}
+
+	if err := configureAuthEndpoints(ctx, engine, egrp); err != nil {
+		return err
+	}
+
 	if param.Server_EnableUI.GetBool() {
-		if err := configureAuthEndpoints(ctx, engine, egrp); err != nil {
-			return err
-		}
 		configureWebResource(engine)
 	}
 

@@ -85,7 +85,6 @@ Origin:
   Multiuser: false
   EnableMacaroons: false
   EnableVoms: true
-  EnableUI: true
   SelfTestInterval: 15s
 Registry:
   InstitutionsUrlReloadMinutes: 15m

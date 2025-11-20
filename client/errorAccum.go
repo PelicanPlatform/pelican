@@ -19,6 +19,7 @@
 package client
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -156,6 +157,12 @@ func IsRetryable(err error) bool {
 	var pde *PermissionDeniedError
 	if errors.As(err, &pde) {
 		return pde.expired
+	}
+
+	// Check if it contains a TLS AlertError, which should always be retryable
+	var alertErr tls.AlertError
+	if errors.As(err, &alertErr) {
+		return true
 	}
 
 	// Check if it's a wrapped PelicanError - use its metadata

@@ -28,6 +28,7 @@ type Config struct {
 		BlocksToPrefetch int `mapstructure:"blockstoprefetch" yaml:"BlocksToPrefetch"`
 		ClientStatisticsLocation string `mapstructure:"clientstatisticslocation" yaml:"ClientStatisticsLocation"`
 		Concurrency int `mapstructure:"concurrency" yaml:"Concurrency"`
+		ConcurrencyDegradedThreshold int `mapstructure:"concurrencydegradedthreshold" yaml:"ConcurrencyDegradedThreshold"`
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
 		DataLocations []string `mapstructure:"datalocations" yaml:"DataLocations"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
@@ -37,6 +38,7 @@ type Config struct {
 		EnableLotman bool `mapstructure:"enablelotman" yaml:"EnableLotman"`
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
 		EnablePrefetch bool `mapstructure:"enableprefetch" yaml:"EnablePrefetch"`
+		EnableSiteLocalMode bool `mapstructure:"enablesitelocalmode" yaml:"EnableSiteLocalMode"`
 		EnableTLSClientAuth bool `mapstructure:"enabletlsclientauth" yaml:"EnableTLSClientAuth"`
 		EnableVoms bool `mapstructure:"enablevoms" yaml:"EnableVoms"`
 		EvictionMonitoringInterval time.Duration `mapstructure:"evictionmonitoringinterval" yaml:"EvictionMonitoringInterval"`
@@ -195,6 +197,7 @@ type Config struct {
 		AggregatePrefixes []string `mapstructure:"aggregateprefixes" yaml:"AggregatePrefixes"`
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
 		DataRetention time.Duration `mapstructure:"dataretention" yaml:"DataRetention"`
+		DataRetentionSize string `mapstructure:"dataretentionsize" yaml:"DataRetentionSize"`
 		EnablePrometheus bool `mapstructure:"enableprometheus" yaml:"EnablePrometheus"`
 		LabelLimit int `mapstructure:"labellimit" yaml:"LabelLimit"`
 		LabelNameLengthLimit int `mapstructure:"labelnamelengthlimit" yaml:"LabelNameLengthLimit"`
@@ -221,6 +224,7 @@ type Config struct {
 	} `mapstructure:"oidc" yaml:"OIDC"`
 	Origin struct {
 		Concurrency int `mapstructure:"concurrency" yaml:"Concurrency"`
+		ConcurrencyDegradedThreshold int `mapstructure:"concurrencydegradedthreshold" yaml:"ConcurrencyDegradedThreshold"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DirectorTest bool `mapstructure:"directortest" yaml:"DirectorTest"`
 		DisableDirectClients bool `mapstructure:"disabledirectclients" yaml:"DisableDirectClients"`
@@ -235,7 +239,6 @@ type Config struct {
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
 		EnablePublicReads bool `mapstructure:"enablepublicreads" yaml:"EnablePublicReads"`
 		EnableReads bool `mapstructure:"enablereads" yaml:"EnableReads"`
-		EnableUI bool `mapstructure:"enableui" yaml:"EnableUI"`
 		EnableVoms bool `mapstructure:"enablevoms" yaml:"EnableVoms"`
 		EnableWrite bool `mapstructure:"enablewrite" yaml:"EnableWrite"`
 		EnableWrites bool `mapstructure:"enablewrites" yaml:"EnableWrites"`
@@ -402,6 +405,7 @@ type configWithType struct {
 		BlocksToPrefetch struct { Type string; Value int }
 		ClientStatisticsLocation struct { Type string; Value string }
 		Concurrency struct { Type string; Value int }
+		ConcurrencyDegradedThreshold struct { Type string; Value int }
 		DataLocation struct { Type string; Value string }
 		DataLocations struct { Type string; Value []string }
 		DbLocation struct { Type string; Value string }
@@ -411,6 +415,7 @@ type configWithType struct {
 		EnableLotman struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
 		EnablePrefetch struct { Type string; Value bool }
+		EnableSiteLocalMode struct { Type string; Value bool }
 		EnableTLSClientAuth struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		EvictionMonitoringInterval struct { Type string; Value time.Duration }
@@ -569,6 +574,7 @@ type configWithType struct {
 		AggregatePrefixes struct { Type string; Value []string }
 		DataLocation struct { Type string; Value string }
 		DataRetention struct { Type string; Value time.Duration }
+		DataRetentionSize struct { Type string; Value string }
 		EnablePrometheus struct { Type string; Value bool }
 		LabelLimit struct { Type string; Value int }
 		LabelNameLengthLimit struct { Type string; Value int }
@@ -595,6 +601,7 @@ type configWithType struct {
 	}
 	Origin struct {
 		Concurrency struct { Type string; Value int }
+		ConcurrencyDegradedThreshold struct { Type string; Value int }
 		DbLocation struct { Type string; Value string }
 		DirectorTest struct { Type string; Value bool }
 		DisableDirectClients struct { Type string; Value bool }
@@ -609,7 +616,6 @@ type configWithType struct {
 		EnableOIDC struct { Type string; Value bool }
 		EnablePublicReads struct { Type string; Value bool }
 		EnableReads struct { Type string; Value bool }
-		EnableUI struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		EnableWrite struct { Type string; Value bool }
 		EnableWrites struct { Type string; Value bool }

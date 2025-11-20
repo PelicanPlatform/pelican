@@ -1333,9 +1333,20 @@ func SetServerDefaults(v *viper.Viper) error {
 		return errors.Errorf("invalid value of '%d' for config param %s; must be greater than or equal to 0, where 0 disables the feature",
 			originConcurrency, param.Origin_Concurrency.GetName())
 	}
+	v.SetDefault(param.Origin_ConcurrencyDegradedThreshold.GetName(), 90)
+	if originConcThreshold := v.GetInt(param.Origin_ConcurrencyDegradedThreshold.GetName()); originConcThreshold < 0 || originConcThreshold > 100 {
+		return errors.Errorf("invalid value of '%d' for config param %s; must be between 0 and 100",
+			originConcThreshold, param.Origin_ConcurrencyDegradedThreshold.GetName())
+	}
+
 	if cacheConcurrency := v.GetInt(param.Cache_Concurrency.GetName()); cacheConcurrency < 0 {
 		return errors.Errorf("invalid value of '%d' for config param %s; must be greater than or equal to 0, where 0 disables the feature",
 			cacheConcurrency, param.Cache_Concurrency.GetName())
+	}
+	v.SetDefault(param.Cache_ConcurrencyDegradedThreshold.GetName(), 90)
+	if cacheConcThreshold := v.GetInt(param.Cache_ConcurrencyDegradedThreshold.GetName()); cacheConcThreshold < 0 || cacheConcThreshold > 100 {
+		return errors.Errorf("invalid value of '%d' for config param %s; must be between 0 and 100",
+			cacheConcThreshold, param.Cache_ConcurrencyDegradedThreshold.GetName())
 	}
 
 	if directorStatusWeightTimeConstant := v.GetDuration(param.Director_AdaptiveSortEWMATimeConstant.GetName()); directorStatusWeightTimeConstant <= 0 {
@@ -1353,6 +1364,8 @@ func SetServerDefaults(v *viper.Viper) error {
 			adaptiveSortTruncateConst, param.Director_AdaptiveSortTruncateConstant.GetName(), 6)
 		v.Set(param.Director_AdaptiveSortTruncateConstant.GetName(), 6)
 	}
+
+	v.SetDefault(param.Monitoring_DataRetentionSize.GetName(), "0B")
 
 	// Setup the audience to use.  We may customize the Origin.URL in the future if it has
 	// a `0` for the port number; to make the audience predictable (it goes into the xrootd
@@ -2057,6 +2070,8 @@ func ClearServerAds() {
 
 // This function resets most states for test cases, including 1. viper settings, 2. preferred prefix, 3. transport object, 4. Federation metadata back to their default
 func ResetConfig() {
+	// Close any open log files and reset logger output
+	logging.CloseLogger()
 	viper.Reset()
 
 	// Clear cached preferred prefix
