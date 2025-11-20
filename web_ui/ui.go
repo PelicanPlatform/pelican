@@ -586,6 +586,9 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.PATCH("/api/v1.0/config", AuthHandler, AdminAuthHandler, updateConfigValues)
 	engine.POST("/api/v1.0/restart", AuthHandler, AdminAuthHandler, hotRestartServer)
 	engine.GET("/api/v1.0/servers", getEnabledServers)
+	if config.ValidateServerType([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType}) {
+		engine.GET("/api/v1.0/server", AuthHandler, AdminAuthHandler, HandleGetServerLocalMetadataHistory)
+	}
 	// Health check endpoint for web engine
 	engine.GET("/api/v1.0/health", func(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Web Engine Running. Time: %s", time.Now().String())})
