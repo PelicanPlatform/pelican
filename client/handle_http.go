@@ -723,26 +723,30 @@ func (e *StatusCodeError) Is(target error) bool {
 }
 
 // wrapStatusCodeError wraps a StatusCodeError with the appropriate PelicanError based on the status code
-func wrapStatusCodeError(sce *StatusCodeError) error {
-	code := int(*sce)
+// wrapErrorByStatusCode wraps an error based on HTTP status code using the same mapping as wrapStatusCodeError
+func wrapErrorByStatusCode(code int, err error) error {
 	switch {
 	case code == http.StatusNotFound:
-		return error_codes.NewSpecification_FileNotFoundError(sce)
+		return error_codes.NewSpecification_FileNotFoundError(err)
 	case code == http.StatusGatewayTimeout:
-		return error_codes.NewTransfer_TimedOutError(sce)
+		return error_codes.NewTransfer_TimedOutError(err)
 	case code == http.StatusUnauthorized || code == http.StatusForbidden:
 		// 401/403 are authorization errors
-		return error_codes.NewAuthorizationError(sce)
+		return error_codes.NewAuthorizationError(err)
 	case code >= 500 && code < 600:
 		// 5xx are server errors - use Transfer error (retryable)
-		return error_codes.NewTransferError(sce)
+		return error_codes.NewTransferError(err)
 	case code >= 400 && code < 500:
 		// Other 4xx are client/specification errors
-		return error_codes.NewSpecificationError(sce)
+		return error_codes.NewSpecificationError(err)
 	default:
 		// For other status codes, wrap as Transfer error
-		return error_codes.NewTransferError(sce)
+		return error_codes.NewTransferError(err)
 	}
+}
+
+func wrapStatusCodeError(sce *StatusCodeError) error {
+	return wrapErrorByStatusCode(int(*sce), sce)
 }
 
 func (tae *TransferAttemptError) Error() (errMsg string) {
@@ -2313,8 +2317,10 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 								wrappedErr := wrapStatusCodeError(sce)
 								attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
 							} else {
-								// HttpErrResp with non-StatusCodeError inner error - pass through
-								attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
+								// HttpErrResp with non-StatusCodeError inner error - wrap based on HTTP status code
+								// Use the same mapping logic as wrapStatusCodeError but wrap the actual inner error
+								wrappedErr := wrapErrorByStatusCode(httpErr.Code, innerErr)
+								attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
 							}
 						} else {
 							var cse *ConnectionSetupError
@@ -2339,7 +2345,17 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 									attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
 								}
 							} else {
-								attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
+								// Catch-all for errors that don't match specific checks
+								// Check if error is already a PelicanError
+								var pe *error_codes.PelicanError
+								if errors.As(err, &pe) {
+									// Already wrapped, use it directly
+									attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
+								} else {
+									// Unknown error type - wrap as generic TransferError
+									wrappedErr := error_codes.NewTransferError(err)
+									attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
+								}
 							}
 						}
 					}
