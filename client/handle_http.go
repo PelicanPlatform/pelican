@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, University of Nebraska-Lincoln
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -470,15 +470,6 @@ func checksumValueToHttpDigest(checksumType ChecksumType, checksumValue []byte) 
 	return "(unknown checksum type)"
 }
 
-func (e *ChecksumMismatchError) Error() string {
-	return fmt.Sprintf(
-		"checksum mismatch for %s; client computed %s, server reported %s",
-		HttpDigestFromChecksum(e.Info.Algorithm),
-		checksumValueToHttpDigest(e.Info.Algorithm, e.Info.Value),
-		checksumValueToHttpDigest(e.Info.Algorithm, e.ServerValue),
-	)
-}
-
 // Reset the memory-cached copy of the HTCondor job ad
 //
 // The client will search through the process's environment to find
@@ -544,130 +535,6 @@ func mergeCancel(ctx1, ctx2 context.Context) (context.Context, context.CancelFun
 	}
 }
 
-func (e *HeaderTimeoutError) Error() string {
-	return "timeout waiting for HTTP response (TCP connection successful)"
-}
-
-func (e *HeaderTimeoutError) Is(target error) bool {
-	_, ok := target.(*HeaderTimeoutError)
-	return ok
-}
-
-func (e *NetworkResetError) Error() string {
-	return "the existing TCP connection was broken (potentially caused by server restart or NAT/firewall issue)"
-
-}
-
-func (e *StoppedTransferError) Error() (errMsg string) {
-	if e.StoppedTime > 0 {
-		errMsg = "no progress for more than " + e.StoppedTime.Truncate(time.Millisecond).String()
-	} else {
-		errMsg = "no progress"
-	}
-	errMsg += " after " + ByteCountSI(e.BytesTransferred) + " transferred"
-	if !e.Upload {
-		if e.CacheHit {
-			errMsg += " (cache hit)"
-		} else {
-			errMsg += " (cache miss)"
-		}
-	}
-	return
-}
-
-func (e *StoppedTransferError) Is(target error) bool {
-	_, ok := target.(*StoppedTransferError)
-	return ok
-}
-
-func (e *allocateMemoryError) Error() string {
-	return e.Err.Error()
-}
-
-func (e *allocateMemoryError) Unwrap() error {
-	return e.Err
-}
-
-func (e *allocateMemoryError) Is(target error) bool {
-	_, ok := target.(*allocateMemoryError)
-	return ok
-}
-
-func (e *dirListingNotSupportedError) Error() string {
-	return e.Err.Error()
-}
-
-func (e *dirListingNotSupportedError) Unwrap() error {
-	return e.Err
-}
-
-func (e *dirListingNotSupportedError) Is(target error) bool {
-	_, ok := target.(*dirListingNotSupportedError)
-	return ok
-}
-
-func (e *InvalidByteInChunkLengthError) Error() string {
-	return e.Err.Error()
-}
-
-func (e *InvalidByteInChunkLengthError) Unwrap() error {
-	return e.Err
-}
-
-func (e *InvalidByteInChunkLengthError) Is(target error) bool {
-	_, ok := target.(*InvalidByteInChunkLengthError)
-	return ok
-}
-
-func (e *UnexpectedEOFError) Error() string {
-	return e.Err.Error()
-}
-
-func (e *UnexpectedEOFError) Unwrap() error {
-	return e.Err
-}
-
-func (e *UnexpectedEOFError) Is(target error) bool {
-	_, ok := target.(*UnexpectedEOFError)
-	return ok
-}
-
-type HttpErrResp struct {
-	Code int
-	Str  string
-	Err  error
-}
-
-func (e *HttpErrResp) Error() string {
-	if e.Err != nil {
-		return e.Str + ": " + e.Err.Error()
-	}
-	return e.Str
-}
-
-func (e *HttpErrResp) Unwrap() error {
-	return e.Err
-}
-
-func (e *SlowTransferError) Error() (errMsg string) {
-	errMsg = "cancelled transfer, too slow; detected speed=" +
-		ByteCountSI(e.BytesPerSecond) +
-		"/s, total transferred=" +
-		ByteCountSI(e.BytesTransferred) +
-		", total transfer time=" +
-		e.Duration.Round(time.Millisecond).String()
-	if e.CacheAge == 0 {
-		errMsg += ", cache miss"
-	} else if e.CacheAge > 0 {
-		errMsg += ", cache hit"
-	}
-	return
-}
-
-func (e *SlowTransferError) Is(target error) bool {
-	_, ok := target.(*SlowTransferError)
-	return ok
-}
 
 // Determines whether or not we can interact with the site HTTP proxy
 func isProxyEnabled() bool {
@@ -685,106 +552,6 @@ func CanDisableProxy() bool {
 	return !param.Client_DisableProxyFallback.GetBool()
 }
 
-func (e *ConnectionSetupError) Error() string {
-	if e.Err != nil {
-		if len(e.URL) > 0 {
-			return "failed connection setup to " + e.URL + ": " + e.Err.Error()
-		} else {
-			return "failed connection setup: " + e.Err.Error()
-		}
-	} else {
-		return "Connection to remote server failed"
-	}
-
-}
-
-func (e *ConnectionSetupError) Unwrap() error {
-	return e.Err
-}
-
-func (e *ConnectionSetupError) Is(target error) bool {
-	_, ok := target.(*ConnectionSetupError)
-	return ok
-}
-
-func (e *StatusCodeError) Error() string {
-	if int(*e) == http.StatusGatewayTimeout {
-		return "cache timed out waiting on origin"
-	}
-	return fmt.Sprintf("server returned %d %s", int(*e), http.StatusText(int(*e)))
-}
-
-func (e *StatusCodeError) Is(target error) bool {
-	sce, ok := target.(*StatusCodeError)
-	if !ok {
-		return false
-	}
-	return int(*sce) == int(*e)
-}
-
-// wrapStatusCodeError wraps a StatusCodeError with the appropriate PelicanError based on the status code
-// wrapErrorByStatusCode wraps an error based on HTTP status code using the same mapping as wrapStatusCodeError
-func wrapErrorByStatusCode(code int, err error) error {
-	switch {
-	case code == http.StatusNotFound:
-		return error_codes.NewSpecification_FileNotFoundError(err)
-	case code == http.StatusGatewayTimeout:
-		return error_codes.NewTransfer_TimedOutError(err)
-	case code == http.StatusUnauthorized || code == http.StatusForbidden:
-		// 401/403 are authorization errors
-		return error_codes.NewAuthorizationError(err)
-	case code >= 500 && code < 600:
-		// 5xx are server errors - use Transfer error (retryable)
-		return error_codes.NewTransferError(err)
-	case code >= 400 && code < 500:
-		// Other 4xx are client/specification errors
-		return error_codes.NewSpecificationError(err)
-	default:
-		// For other status codes, wrap as Transfer error
-		return error_codes.NewTransferError(err)
-	}
-}
-
-func wrapStatusCodeError(sce *StatusCodeError) error {
-	return wrapErrorByStatusCode(int(*sce), sce)
-}
-
-func (tae *TransferAttemptError) Error() (errMsg string) {
-	errMsg = "failed download from "
-	if tae.isUpload {
-		errMsg = "failed upload to "
-	}
-	if tae.serviceHost == "" {
-		errMsg += "unknown host"
-	} else {
-		errMsg += tae.serviceHost
-	}
-	if tae.isProxyErr {
-		if tae.proxyHost == "" {
-			errMsg += " due to unknown proxy"
-		} else {
-			errMsg += " due to proxy " + tae.proxyHost
-		}
-	} else if tae.proxyHost != "" {
-		errMsg += "+proxy=" + tae.proxyHost
-	}
-	if tae.err != nil {
-		errMsg += ": " + tae.err.Error()
-	}
-	return
-}
-
-func (tae *TransferAttemptError) Unwrap() error {
-	return tae.err
-}
-
-func (tae *TransferAttemptError) Is(target error) bool {
-	other, ok := target.(*TransferAttemptError)
-	if !ok {
-		return false
-	}
-	return tae.isUpload == other.isUpload && tae.serviceHost == other.serviceHost && tae.isProxyErr == other.isProxyErr && tae.proxyHost == other.proxyHost
-}
 
 func compatToDuration(dur time.Duration, paramName string) (result time.Duration) {
 	// Backward compat: some parameters were previously integers, in seconds.
@@ -800,16 +567,6 @@ func compatToDuration(dur time.Duration, paramName string) (result time.Duration
 	return
 }
 
-func newTransferAttemptError(service string, proxy string, isProxyErr bool, isUpload bool, err error) (tae *TransferAttemptError) {
-	tae = &TransferAttemptError{
-		serviceHost: service,
-		proxyHost:   proxy,
-		isProxyErr:  isProxyErr,
-		isUpload:    isUpload,
-		err:         err,
-	}
-	return
-}
 
 // Create a new transfer results object
 func newTransferResults(job *TransferJob) TransferResults {
@@ -2245,8 +2002,6 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 
 		if err != nil {
 			log.WithFields(fields).Debugln("Failed to download from", transferEndpoint.Url, ":", err)
-			var ope *net.OpError
-			var pde *PermissionDeniedError
 			proxyStr, _ := os.LookupEnv("http_proxy")
 			if !transferEndpoint.Proxy {
 				proxyStr = ""
@@ -2255,112 +2010,11 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			if transferEndpointUrl.Scheme == "unix" {
 				serviceStr = "local-cache"
 			}
-			if errors.As(err, &ope) && ope.Op == "proxyconnect" {
-				if ope.Addr != nil {
-					proxyStr += "(" + ope.Addr.String() + ")"
-				}
-				// Wrap proxy connection error as Contact.ConnectionSetupError
-				// Proxy connection failure is a connection setup failure
-				proxyErr := &ConnectionSetupError{URL: transferEndpoint.Url.String(), Err: err}
-				wrappedErr := error_codes.NewContact_ConnectionSetupError(proxyErr)
-				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, true, false, wrappedErr)
-			} else if errors.As(err, &pde) {
-				// If the token is expired we can retry because we will just get a new token
-				// otherwise something is wrong with the token
-				// We use the same token that was used to make the request to check if it is expired
-				expired, expiration, err := tokenIsExpired(tokenContents)
-				if err != nil {
-					pde.message = "Permission denied: token could not be parsed"
-					pde.expired = false
-				} else {
-					if expired {
-						pde.message = "Permission denied: token expired at " + expiration.Format(time.RFC3339)
-						pde.expired = true
-					} else {
-						pde.message = "Permission denied: token appears valid but was rejected by the server"
-						pde.expired = false
-					}
-				}
-				// Re-wrap with PelicanError after modifying the fields
-				wrappedPde := error_codes.NewAuthorizationError(pde)
-				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedPde)
-			} else if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
-				// Wrap NetworkResetError as Contact.ConnectionReset (code 3005, retryable)
-				wrappedErr := error_codes.NewContact_ConnectionResetError(&NetworkResetError{})
-				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
-			} else {
-				var allocErr *allocateMemoryError
-				if errors.As(err, &allocErr) {
-					// Wrap allocateMemoryError as TransferError (system resource issue during transfer)
-					wrappedErr := error_codes.NewTransferError(allocErr)
-					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
-				} else {
-					var invalidChunkErr *InvalidByteInChunkLengthError
-					if errors.As(err, &invalidChunkErr) {
-						// Wrap InvalidByteInChunkLengthError as TransferError (transfer protocol error)
-						wrappedErr := error_codes.NewTransferError(invalidChunkErr)
-						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
-					} else {
-						// Check for HttpErrResp (returned from downloadHTTP)
-						// HttpErrResp should already contain a wrapped PelicanError, but we extract it
-						// to ensure it's properly wrapped
-						var httpErr *HttpErrResp
-						if errors.As(err, &httpErr) {
-							innerErr := httpErr.Unwrap()
-							// Check if inner error is already a PelicanError (wrapped in downloadHTTP)
-							var pe *error_codes.PelicanError
-							if errors.As(innerErr, &pe) {
-								// Already wrapped, use it directly
-								attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, innerErr)
-							} else if sce, ok := innerErr.(*StatusCodeError); ok {
-								// Unwrapped StatusCodeError (shouldn't happen if downloadHTTP wraps correctly, but handle for safety)
-								wrappedErr := wrapStatusCodeError(sce)
-								attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
-							} else {
-								// HttpErrResp with non-StatusCodeError inner error - wrap based on HTTP status code
-								// Use the same mapping logic as wrapStatusCodeError but wrap the actual inner error
-								wrappedErr := wrapErrorByStatusCode(httpErr.Code, innerErr)
-								attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
-							}
-						} else {
-							var cse *ConnectionSetupError
-							if errors.As(err, &cse) {
-								if sce, ok := cse.Unwrap().(*StatusCodeError); ok {
-									// Wrap StatusCodeError extracted from ConnectionSetupError
-									wrappedErr := wrapStatusCodeError(sce)
-									attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
-								} else if ue, ok := cse.Unwrap().(*url.Error); ok {
-									httpErr := ue.Unwrap()
-									if httpErr.Error() == "net/http: timeout awaiting response headers" {
-										headerTimeoutErr := error_codes.NewTransfer_HeaderTimeoutError(&HeaderTimeoutError{})
-										attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, headerTimeoutErr)
-									} else {
-										// Wrap ConnectionSetupError even if it contains a url.Error (it's still a connection setup error)
-										wrappedErr := error_codes.NewContact_ConnectionSetupError(cse)
-										attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
-									}
-								} else {
-									// Wrap ConnectionSetupError that doesn't contain StatusCodeError or url.Error
-									wrappedErr := error_codes.NewContact_ConnectionSetupError(cse)
-									attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
-								}
-							} else {
-								// Catch-all for errors that don't match specific checks
-								// Check if error is already a PelicanError
-								var pe *error_codes.PelicanError
-								if errors.As(err, &pe) {
-									// Already wrapped, use it directly
-									attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
-								} else {
-									// Unknown error type - wrap as generic TransferError
-									wrappedErr := error_codes.NewTransferError(err)
-									attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedErr)
-								}
-							}
-						}
-					}
-				}
+			wrappedErr, isProxyErr, modifiedProxyStr := wrapDownloadError(err, transferEndpoint.Url.String(), tokenContents)
+			if isProxyErr {
+				proxyStr += modifiedProxyStr
 			}
+			attempt.Error = newTransferAttemptError(serviceStr, proxyStr, isProxyErr, false, wrappedErr)
 			xferErrors.AddPastError(attempt.Error, endTime)
 		}
 		transferResults.Attempts = append(transferResults.Attempts, attempt)
@@ -2851,6 +2505,12 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		if errors.As(err, &cam) && cam == syscall.ENOMEM {
 			// ENOMEM is error from os for unable to allocate memory
 			err = &allocateMemoryError{Err: err}
+		} else if isTLSCertificateValidationError(err) {
+			// TLS certificate validation error - wrap as SpecificationError (configuration issue, not retryable)
+			err = error_codes.NewSpecificationError(err)
+		} else if isContextDeadlineError(err) || isDNSError(err) || (isTLSError(err) && !isTLSCertificateValidationError(err)) || isDialError(err) {
+			// Connection setup errors (timeout, DNS, TLS handshake, dial) - wrap as ConnectionSetupError (retryable)
+			err = &ConnectionSetupError{Err: err}
 		} else {
 			err = &ConnectionSetupError{Err: err}
 		}
@@ -3550,8 +3210,12 @@ Loop:
 				proxyErr := &ConnectionSetupError{URL: request.URL.String(), Err: err}
 				err = error_codes.NewContact_ConnectionSetupError(proxyErr)
 			} else if errors.As(err, &cse) {
-				// Check if ConnectionSetupError contains a url.Error
-				if ue, ok := cse.Unwrap().(*url.Error); ok {
+				// ConnectionSetupError already created in runPut - only check for special cases
+				innerErr := cse.Unwrap()
+				if isTLSCertificateValidationError(innerErr) {
+					// TLS certificate validation error - wrap as SpecificationError (configuration issue, not retryable)
+					err = error_codes.NewSpecificationError(err)
+				} else if ue, ok := innerErr.(*url.Error); ok {
 					httpErr := ue.Unwrap()
 					if httpErr.Error() == "net/http: timeout awaiting response headers" {
 						err = error_codes.NewTransfer_HeaderTimeoutError(&HeaderTimeoutError{})
@@ -3560,9 +3224,13 @@ Loop:
 						err = error_codes.NewContact_ConnectionSetupError(cse)
 					}
 				} else {
-					// Wrap ConnectionSetupError that doesn't contain url.Error
+					// All other ConnectionSetupError cases - wrap as ConnectionSetupError (already identified as connection setup error)
 					err = error_codes.NewContact_ConnectionSetupError(cse)
 				}
+			} else if isContextDeadlineError(err) || isDNSError(err) || (isTLSError(err) && !isTLSCertificateValidationError(err)) || isDialError(err) {
+				// Connection setup errors (timeout, DNS, TLS handshake, dial) - wrap as ConnectionSetupError (retryable)
+				cse := &ConnectionSetupError{URL: request.URL.String(), Err: err}
+				err = error_codes.NewContact_ConnectionSetupError(cse)
 			}
 			if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
 				// Wrap NetworkResetError as Contact.ConnectionReset (code 3005, retryable)
@@ -3712,8 +3380,11 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
 			log.Errorln("Error with PUT:", err)
-			// Wrap TLS errors in a ConnectionSetupError
-			if strings.Contains(err.Error(), "certificate") || strings.Contains(err.Error(), "tls") {
+			// Wrap connection setup errors (timeout, DNS, TLS handshake, dial) in ConnectionSetupError
+			// Note: TLS certificate validation errors are handled separately (not retryable)
+			if isTLSCertificateValidationError(err) {
+				// TLS certificate validation error - leave unwrapped, will be wrapped as SpecificationError in upload error handler
+			} else if isContextDeadlineError(err) || isDNSError(err) || (isTLSError(err) && !isTLSCertificateValidationError(err)) || isDialError(err) {
 				err = &ConnectionSetupError{URL: request.URL.String(), Err: err}
 			}
 		}
