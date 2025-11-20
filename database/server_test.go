@@ -187,15 +187,17 @@ func TestUpsertServerLocalMetadata(t *testing.T) {
 
 	const name1 = "server-one"
 	const id1 = "test123"
-	origType := server_structs.NewServerType()
-	origType.SetString("origin")
-	cacheType := server_structs.NewServerType()
-	cacheType.SetString("cache")
+	buildMetadata := func(name, id string, isOrigin, isCache bool) server_structs.ServerRegistration {
+		return server_structs.ServerRegistration{
+			ID:       id,
+			Name:     name,
+			IsOrigin: isOrigin,
+			IsCache:  isCache,
+		}
+	}
 
 	t.Run("insert-when-empty", func(t *testing.T) {
-		typ := server_structs.NewServerType()
-		typ.SetString("origin")
-		err := UpsertServerLocalMetadata(name1, id1, typ)
+		err := UpsertServerLocalMetadata(buildMetadata(name1, id1, true, false))
 		require.NoError(t, err)
 
 		var got server_structs.ServerLocalMetadata
@@ -212,7 +214,7 @@ func TestUpsertServerLocalMetadata(t *testing.T) {
 
 	t.Run("update-existing-record", func(t *testing.T) {
 		// seed initial
-		err := UpsertServerLocalMetadata(name1, id1, origType)
+		err := UpsertServerLocalMetadata(buildMetadata(name1, id1, true, false))
 		require.NoError(t, err)
 
 		// capture original timestamps & ID
@@ -223,7 +225,7 @@ func TestUpsertServerLocalMetadata(t *testing.T) {
 
 		// Upsert with same ID
 		time.Sleep(10 * time.Millisecond) // ensure UpdatedAt is different
-		err = UpsertServerLocalMetadata(name1, id1, origType)
+		err = UpsertServerLocalMetadata(buildMetadata(name1, id1, true, false))
 		require.NoError(t, err)
 
 		var updated server_structs.ServerLocalMetadata
@@ -242,7 +244,7 @@ func TestUpsertServerLocalMetadata(t *testing.T) {
 
 	t.Run("insert-second-record-when-id-differs", func(t *testing.T) {
 		id2 := "test223"
-		err := UpsertServerLocalMetadata("server-two", id2, cacheType)
+		err := UpsertServerLocalMetadata(buildMetadata("server-two", id2, false, true))
 		require.NoError(t, err)
 
 		var count int64
