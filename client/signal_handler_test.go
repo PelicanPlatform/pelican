@@ -57,23 +57,23 @@ func TestSignalHandlerIntegration(t *testing.T) {
 	// This is the parent test that spawns the subprocess
 	cmd := exec.Command(os.Args[0], "-test.run=TestSignalHandlerIntegration")
 	cmd.Env = append(os.Environ(), "TEST_SIGNAL_HANDLER=1")
-	
+
 	// Start the subprocess
 	err := cmd.Start()
 	require.NoError(t, err, "subprocess should start successfully")
-	
+
 	// Give the subprocess time to set up signal handler
 	time.Sleep(100 * time.Millisecond)
-	
+
 	// Send SIGTERM to the subprocess
 	err = cmd.Process.Signal(syscall.SIGTERM)
 	require.NoError(t, err, "should be able to send SIGTERM")
-	
+
 	// Wait for the subprocess to exit
 	err = cmd.Wait()
 	// The process should exit with a non-zero status after receiving SIGTERM
 	assert.Error(t, err, "subprocess should exit with error after SIGTERM")
-	
+
 	t.Log("Successfully verified signal handler responds to SIGTERM")
 }
 
@@ -81,15 +81,15 @@ func TestSignalHandlerIntegration(t *testing.T) {
 func TestSignalHandlerSIGTERM(t *testing.T) {
 	// Set up a signal handler
 	SetupSignalHandlers()
-	
+
 	// Give the goroutine time to set up
 	time.Sleep(10 * time.Millisecond)
-	
+
 	// Note: We can't easily test the actual signal handling in a unit test
 	// without spawning a subprocess, as sending a signal to ourselves
 	// would terminate the test process. The integration test above handles
 	// that scenario.
-	
+
 	// This test just verifies the setup doesn't panic
 	assert.True(t, true, "Signal handler setup completed without panic")
 }
