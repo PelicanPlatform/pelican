@@ -33,10 +33,12 @@ type (
 		CreatedBy   string    `gorm:"column:created_by;type:text" json:"createdBy"`
 	}
 
-	ServerName struct {
+	// ServerLocalMetadata is the local record of Origin/Cache server's metadata it fetched from the Registry,
+	ServerLocalMetadata struct {
 		ID        string         `gorm:"primaryKey;column:id;type:TEXT"`
 		Name      string         `gorm:"column:name;type:TEXT;not null"`
-		Type      string         `gorm:"column:type;type:TEXT;not null"`
+		IsOrigin  bool           `gorm:"column:is_origin;type:BOOLEAN;not null;default:false"`
+		IsCache   bool           `gorm:"column:is_cache;type:BOOLEAN;not null;default:false"`
 		CreatedAt time.Time      `gorm:"column:created_at;autoCreateTime"`
 		UpdatedAt time.Time      `gorm:"column:updated_at;autoUpdateTime"`
 		DeletedAt gorm.DeletedAt `gorm:"column:deleted_at;index"`

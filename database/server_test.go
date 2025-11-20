@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -169,16 +168,16 @@ func SetupMockServiceNameDB(t *testing.T) {
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err, "opening in-memory sqlite DB")
 	ServerDatabase = mockDB
-	err = ServerDatabase.AutoMigrate(&server_structs.ServerName{})
+	err = ServerDatabase.AutoMigrate(&server_structs.ServerLocalMetadata{})
 	require.NoError(t, err, "migrating ServiceName schema")
 }
 
 func TeardownMockServiceNameDB(t *testing.T) {
-	err := ServerDatabase.Migrator().DropTable(&server_structs.ServerName{})
+	err := ServerDatabase.Migrator().DropTable(&server_structs.ServerLocalMetadata{})
 	require.NoError(t, err, "dropping ServiceName table")
 }
 
-func TestUpsertServerName(t *testing.T) {
+func TestUpsertServerLocalMetadata(t *testing.T) {
 	config.ResetConfig()
 	SetupMockServiceNameDB(t)
 	t.Cleanup(func() {
@@ -196,37 +195,38 @@ func TestUpsertServerName(t *testing.T) {
 	t.Run("insert-when-empty", func(t *testing.T) {
 		typ := server_structs.NewServerType()
 		typ.SetString("origin")
-		err := UpsertServerName(name1, id1, typ)
+		err := UpsertServerLocalMetadata(name1, id1, typ)
 		require.NoError(t, err)
 
-		var got server_structs.ServerName
+		var got server_structs.ServerLocalMetadata
 		err = ServerDatabase.First(&got, "id = ?", id1).Error
 		require.NoError(t, err)
 
 		assert.Equal(t, name1, got.Name)
 		assert.Equal(t, id1, got.ID)
-		assert.Equal(t, strings.ToLower(typ.String()), got.Type)
+		assert.True(t, got.IsOrigin)
+		assert.False(t, got.IsCache)
 		assert.WithinDuration(t, time.Now().UTC(), got.CreatedAt, time.Second)
 		assert.WithinDuration(t, time.Now().UTC(), got.UpdatedAt, time.Second)
 	})
 
 	t.Run("update-existing-record", func(t *testing.T) {
 		// seed initial
-		err := UpsertServerName(name1, id1, origType)
+		err := UpsertServerLocalMetadata(name1, id1, origType)
 		require.NoError(t, err)
 
 		// capture original timestamps & ID
-		var original server_structs.ServerName
+		var original server_structs.ServerLocalMetadata
 		require.NoError(t,
 			ServerDatabase.First(&original, "id = ?", id1).Error,
 		)
 
 		// Upsert with same ID
 		time.Sleep(10 * time.Millisecond) // ensure UpdatedAt is different
-		err = UpsertServerName(name1, id1, origType)
+		err = UpsertServerLocalMetadata(name1, id1, origType)
 		require.NoError(t, err)
 
-		var updated server_structs.ServerName
+		var updated server_structs.ServerLocalMetadata
 		require.NoError(t,
 			ServerDatabase.First(&updated, "id = ?", id1).Error,
 		)
@@ -236,17 +236,18 @@ func TestUpsertServerName(t *testing.T) {
 			"CreatedAt should be unchanged")
 		assert.True(t, updated.UpdatedAt.After(original.UpdatedAt),
 			"UpdatedAt should be newer")
-		assert.Equal(t, strings.ToLower(origType.String()), updated.Type, "Type should not be updated")
+		assert.True(t, updated.IsOrigin, "IsOrigin should not be updated")
+		assert.False(t, updated.IsCache, "IsCache should not be updated")
 	})
 
 	t.Run("insert-second-record-when-id-differs", func(t *testing.T) {
 		id2 := "test223"
-		err := UpsertServerName("server-two", id2, cacheType)
+		err := UpsertServerLocalMetadata("server-two", id2, cacheType)
 		require.NoError(t, err)
 
 		var count int64
 		require.NoError(t,
-			ServerDatabase.Model(&server_structs.ServerName{}).Count(&count).Error,
+			ServerDatabase.Model(&server_structs.ServerLocalMetadata{}).Count(&count).Error,
 		)
 		assert.Equal(t, int64(2), count, "should have two distinct rows")
 	})
@@ -261,33 +262,35 @@ func TestGetServerName(t *testing.T) {
 	})
 
 	t.Run("empty-table", func(t *testing.T) {
-		_, err := GetServerName()
+		_, err := GetServerLocalMetadata()
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, gorm.ErrRecordNotFound))
 	})
 
 	t.Run("returns-latest-by-updated_at", func(t *testing.T) {
 		now := time.Now().UTC()
-		old := server_structs.ServerName{
+		old := server_structs.ServerLocalMetadata{
 			ID:        uuid.NewString(),
 			Name:      "old-server",
-			Type:      "cache",
+			IsOrigin:  false,
+			IsCache:   true,
 			CreatedAt: now.Add(-2 * time.Hour),
 			UpdatedAt: now.Add(-2 * time.Hour),
 		}
-		recent := server_structs.ServerName{
+		recent := server_structs.ServerLocalMetadata{
 			ID:        uuid.NewString(),
 			Name:      "new-server",
-			Type:      "origin",
+			IsOrigin:  true,
+			IsCache:   false,
 			CreatedAt: now.Add(-1 * time.Hour),
 			UpdatedAt: now.Add(-1 * time.Hour),
 		}
 		require.NoError(t, ServerDatabase.Create(&old).Error)
 		require.NoError(t, ServerDatabase.Create(&recent).Error)
 
-		got, err := GetServerName()
+		got, err := GetServerLocalMetadata()
 		require.NoError(t, err)
-		assert.Equal(t, "new-server", got)
+		assert.Equal(t, "new-server", got.Name)
 	})
 }
 
