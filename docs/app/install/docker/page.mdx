@@ -190,6 +190,15 @@ Pelican uses different default paths depending on whether the server runs as roo
 
 All examples below assume the server runs as root inside a container.
 
+### Mounting Directories vs Individual Files
+
+The volume mount examples in this document show mounting entire directories (e.g., `-v /host/pelican/config:/etc/pelican`).
+This is the recommended approach for Docker deployments as it's simpler and ensures all related files are persisted together.
+
+However, in some deployment scenarios (such as Kubernetes with sealed secrets), you may need to mount individual files instead of entire directories.
+In such cases, consult the configuration parameter documentation linked for each file to determine or customize the file's path.
+Each file's default location is also specified in the sections below.
+
 ### Data That Should Persist for All Server Types
 
 The following data should be persisted for all Pelican server types (Origin, Cache, Director, Registry):
@@ -204,16 +213,9 @@ These keys establish the server's cryptographic identity within the federation.
 **Best Practice**: Pre-generate these keys outside the container and mount them into the container's issuer keys directory.
 This prevents accidental re-generation of keys in the event of a typo in volume mounts, as the keys remain persisted on the host.
 
-**Volume Mount Options**:
-
-For mounting the entire directory:
+**Volume Mount**:
 ```bash
 -v /host/pelican/issuer-keys:/etc/pelican/issuer-keys
-```
-
-For mounting individual key files (useful in Kubernetes with sealed secrets):
-```bash
--v /host/pelican/issuer.jwk:/etc/pelican/issuer-keys/issuer.jwk
 ```
 
 **Configuration**: To customize the path, see the [`IssuerKeysDirectory`](../parameters.mdx#IssuerKeysDirectory) parameter.
@@ -229,16 +231,9 @@ This cannot be fixed without help from the federation administrators.
 
 **Default Path**: `/var/lib/pelican/pelican.sqlite`
 
-**Volume Mount Options**:
-
-For mounting the entire directory:
+**Volume Mount**:
 ```bash
 -v /host/pelican/lib:/var/lib/pelican
-```
-
-For mounting individual database files (useful in Kubernetes):
-```bash
--v /host/pelican/pelican.sqlite:/var/lib/pelican/pelican.sqlite
 ```
 
 **Configuration**: To customize the path, see the [`Server.DbLocation`](../parameters.mdx#Server-DbLocation) parameter.
@@ -249,16 +244,9 @@ For mounting individual database files (useful in Kubernetes):
 
 **Default Path**: `/etc/pelican/server-web-passwd`
 
-**Volume Mount Options**:
-
-For mounting the entire directory:
+**Volume Mount**:
 ```bash
 -v /host/pelican/config:/etc/pelican
-```
-
-For mounting individual password files (useful in Kubernetes):
-```bash
--v /host/pelican/server-web-passwd:/etc/pelican/server-web-passwd
 ```
 
 **Configuration**: To customize the path, see the [`Server.UIPasswordFile`](../parameters.mdx#Server-UIPasswordFile) parameter.
@@ -272,18 +260,9 @@ For mounting individual password files (useful in Kubernetes):
 - Private key: `/etc/pelican/certificates/tls.key`
 - CA certificate: `/etc/pelican/certificates/tlsca.pem`
 
-**Volume Mount Options**:
-
-For mounting the entire certificates directory:
+**Volume Mount**:
 ```bash
 -v /host/pelican/certificates:/etc/pelican/certificates
-```
-
-For mounting individual certificate files (useful in Kubernetes with sealed secrets):
-```bash
--v /host/tls.crt:/etc/pelican/certificates/tls.crt
--v /host/tls.key:/etc/pelican/certificates/tls.key
--v /host/tlsca.pem:/etc/pelican/certificates/tlsca.pem
 ```
 
 **Configuration**: To customize paths, see [`Server.TLSCertificateChain`](../parameters.mdx#Server-TLSCertificateChain), [`Server.TLSKey`](../parameters.mdx#Server-TLSKey), and [`Server.TLSCACertificateFile`](../parameters.mdx#Server-TLSCACertificateFile) parameters.
@@ -294,10 +273,7 @@ For mounting individual certificate files (useful in Kubernetes with sealed secr
 
 **Default Path**: `/etc/pelican/session-secret`
 
-**Volume Mount**: Included in the `/etc/pelican` mount above, or mount individually:
-```bash
--v /host/session-secret:/etc/pelican/session-secret
-```
+**Volume Mount**: Included in the `/etc/pelican` mount above.
 
 **Configuration**: To customize the path, see the [`Server.SessionSecretFile`](../parameters.mdx#Server-SessionSecretFile) parameter.
 
@@ -335,17 +311,9 @@ For mounting individual certificate files (useful in Kubernetes with sealed secr
 - Client ID: `/etc/pelican/oidc-client-id`
 - Client secret: `/etc/pelican/oidc-client-secret`
 
-**Volume Mount Options**:
-
-For mounting the entire directory (includes these files):
+**Volume Mount**:
 ```bash
 -v /host/pelican/config:/etc/pelican
-```
-
-For mounting individual credential files (useful in Kubernetes with sealed secrets):
-```bash
--v /host/oidc-client-id:/etc/pelican/oidc-client-id
--v /host/oidc-client-secret:/etc/pelican/oidc-client-secret
 ```
 
 **Configuration**: To customize paths, see [`OIDC.ClientIDFile`](../parameters.mdx#OIDC-ClientIDFile) and [`OIDC.ClientSecretFile`](../parameters.mdx#OIDC-ClientSecretFile) parameters.
@@ -360,10 +328,7 @@ In addition to the common data above, Origins need to persist:
 
 **Default Path**: `/var/lib/pelican/origin.sqlite`
 
-**Volume Mount**: Included in the `/var/lib/pelican` mount above, or mount individually:
-```bash
--v /host/pelican/origin.sqlite:/var/lib/pelican/origin.sqlite
-```
+**Volume Mount**: Included in the `/var/lib/pelican` mount above.
 
 **Configuration**: To customize the path, see the [`Origin.DbLocation`](../parameters.mdx#Origin-DbLocation) parameter.
 
@@ -414,10 +379,7 @@ In addition to the common data above, Caches need to persist:
 
 **Default Path**: `/var/lib/pelican/cache.sqlite`
 
-**Volume Mount**: Included in the `/var/lib/pelican` mount above, or mount individually:
-```bash
--v /host/pelican/cache.sqlite:/var/lib/pelican/cache.sqlite
-```
+**Volume Mount**: Included in the `/var/lib/pelican` mount above.
 
 **Configuration**: To customize the path, see the [`Cache.DbLocation`](../parameters.mdx#Cache-DbLocation) parameter.
 
@@ -473,10 +435,7 @@ In addition to the common data above, Directors need to persist:
 
 **Default Path**: `/var/lib/pelican/director.sqlite`
 
-**Volume Mount**: Included in the `/var/lib/pelican` mount above, or mount individually:
-```bash
--v /host/pelican/director.sqlite:/var/lib/pelican/director.sqlite
-```
+**Volume Mount**: Included in the `/var/lib/pelican` mount above.
 
 **Configuration**: To customize the path, see the [`Director.DbLocation`](../parameters.mdx#Director-DbLocation) parameter.
 
@@ -520,10 +479,7 @@ This is the most critical data for a Registry.
 
 **Default Path**: `/var/lib/pelican/pelican.sqlite` (uses `Server.DbLocation`)
 
-**Volume Mount**: Included in the `/var/lib/pelican` mount above, or mount individually:
-```bash
--v /host/pelican/pelican.sqlite:/var/lib/pelican/pelican.sqlite
-```
+**Volume Mount**: Included in the `/var/lib/pelican` mount above.
 
 **Configuration**: Uses [`Server.DbLocation`](../parameters.mdx#Server-DbLocation) by default.
 
