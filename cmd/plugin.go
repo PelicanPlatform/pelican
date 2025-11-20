@@ -91,6 +91,9 @@ func init() {
 func stashPluginMain(args []string) {
 	viper.Set(param.Client_IsPlugin.GetName(), true)
 
+	// Set up signal handlers to flush logs on SIGTERM
+	client.SetupSignalHandlers()
+
 	// Handler function to recover from panics
 	defer func() {
 		if r := recover(); r != nil {

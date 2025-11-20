@@ -60,6 +60,10 @@ func init() {
 
 func listMain(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
+
+	// Set up signal handlers to flush logs on SIGTERM
+	client.SetupSignalHandlers()
+
 	err := config.InitClient()
 	if err != nil {
 		log.Errorln(err)
