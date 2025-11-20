@@ -435,6 +435,29 @@ func HandleDeleteDowntime(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "Downtime deleted successfully"})
 }
 
+// HandleGetServerLocalMetadataHistory returns the locally cached server metadata history for Origins/Caches.
+func HandleGetServerLocalMetadataHistory(ctx *gin.Context) {
+	// Ensure we only serve this endpoint for Origin/Cache instances.
+	if !config.ValidateServerType([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType}) {
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server metadata history is not available on this server type",
+		})
+		return
+	}
+
+	entries, err := database.GetServerLocalMetadataHistory()
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to fetch server metadata history: " + err.Error(),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, entries)
+}
+
 // mirrorDowntimeToRegistry forwards a downtime CRUD to the Registry, if the
 // current server has an Origin or Cache service. It uses the server's issuer key to mint a short-lived
 // service token and sets Authorization: Bearer <token>.
