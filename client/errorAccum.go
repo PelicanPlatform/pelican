@@ -172,17 +172,10 @@ func IsRetryable(err error) bool {
 	}
 
 	// Fall back to legacy checks for unwrapped errors
-	// Note: SlowTransferError, HeaderTimeoutError, UnexpectedEOFError, and StoppedTransferError
-	// are always wrapped in PelicanError, so they're handled above
-	// Note: ConnectionSetupError should always be wrapped as PelicanError or converted to NetworkResetError
 	if errors.Is(err, pelican_url.MetadataTimeoutErr) {
 		return true
 	}
-	// Note: NetworkResetError should always be wrapped as PelicanError (Contact.ConnectionReset), so it's handled above
-	// Note: allocateMemoryError should always be wrapped as PelicanError (TransferError), so it's handled above
-	// Note: InvalidByteInChunkLengthError should always be wrapped as PelicanError (TransferError), so it's handled above
-	// Note: ChecksumMismatchError should always be wrapped as PelicanError (Transfer.ChecksumMismatch), so it's handled above
-	// Note: dirListingNotSupportedError should always be wrapped as PelicanError (SpecificationError), so it's handled above
+
 	var hep *HttpErrResp
 	if errors.As(err, &hep) {
 		switch int(hep.Code) {
@@ -195,8 +188,7 @@ func IsRetryable(err error) bool {
 			return false
 		}
 	}
-	// Note: StatusCodeError should always be wrapped as PelicanError, so it's handled above
-	// If we have a timeout error, we are retryable
+
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
 		return true
