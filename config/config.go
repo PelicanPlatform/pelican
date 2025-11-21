@@ -1926,7 +1926,6 @@ func SetClientDefaults(v *viper.Viper) error {
 	if v == viper.GetViper() {
 		viper.AutomaticEnv()
 		upperPrefix := GetPreferredPrefix()
-		viper.SetEnvPrefix(string(upperPrefix))
 
 		viper.SetConfigName("config")
 		viper.SetConfigType("yaml")
