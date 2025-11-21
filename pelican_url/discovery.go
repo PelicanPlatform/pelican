@@ -338,7 +338,19 @@ func DiscoverFederation(ctx context.Context, httpClient *http.Client, ua string,
 			truncatedMessage = string(body[:1000])
 			truncatedMessage += " [... remainder truncated ...]"
 		}
-		return FederationDiscovery{}, errors.Errorf("Federation metadata discovery failed with HTTP status %d.  Error message: %s", result.StatusCode, truncatedMessage)
+		baseErr := errors.Errorf("Federation metadata discovery failed with HTTP status %d.  Error message: %s", result.StatusCode, truncatedMessage)
+
+		// Wrap based on status code: 5xx are retryable (server errors), 4xx are not retryable (likely typo in URL)
+		if result.StatusCode >= 500 && result.StatusCode < 600 {
+			// 5xx server errors - retryable (transient server issue)
+			return FederationDiscovery{}, error_codes.NewTransferError(baseErr)
+		} else if result.StatusCode >= 400 && result.StatusCode < 500 {
+			// 4xx client errors - not retryable (likely typo in discovery URL)
+			return FederationDiscovery{}, error_codes.NewSpecificationError(baseErr)
+		} else {
+			// Other status codes - wrap as TransferError (retryable by default)
+			return FederationDiscovery{}, error_codes.NewTransferError(baseErr)
+		}
 	}
 
 	metadata = FederationDiscovery{}
