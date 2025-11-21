@@ -535,7 +535,6 @@ func mergeCancel(ctx1, ctx2 context.Context) (context.Context, context.CancelFun
 	}
 }
 
-
 // Determines whether or not we can interact with the site HTTP proxy
 func isProxyEnabled() bool {
 	if _, isSet := os.LookupEnv("http_proxy"); !isSet {
@@ -552,7 +551,6 @@ func CanDisableProxy() bool {
 	return !param.Client_DisableProxyFallback.GetBool()
 }
 
-
 func compatToDuration(dur time.Duration, paramName string) (result time.Duration) {
 	// Backward compat: some parameters were previously integers, in seconds.
 	// If you give viper an integer without a suffix then it interprets it as a
@@ -566,7 +564,6 @@ func compatToDuration(dur time.Duration, paramName string) (result time.Duration
 	}
 	return
 }
-
 
 // Create a new transfer results object
 func newTransferResults(job *TransferJob) TransferResults {
