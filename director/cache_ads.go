@@ -61,11 +61,11 @@ var (
 	// The map should be idenpendent of serverAds as we want to persist this change in-memory, regardless of the presence of the serverAd
 	filteredServers = map[string]filterType{}
 
-	// A map of active and future downtimes set by server (Origin/Cache) admin, with the key being the ServerAd.Name
+	// A map of active and future downtimes set by server (Origin/Cache) advertisements, with the key being the ServerAd.Name
 	serverDowntimes = make(map[string][]server_structs.Downtime)
 	// A map of active and future downtimes set by topology, with the key being the ServerAd.Name
 	topologyDowntimes = make(map[string][]server_structs.Downtime)
-	// A map of active and future downtimes set by the federation admin, with the key being the ServerAd.Name
+	// A map of active and future downtimes set by the federation admin, server admin (via mirrorDowntimeToRegistry), with the key being the ServerAd.Name
 	federationDowntimes = make(map[string][]server_structs.Downtime)
 
 	// Use a single mutex to protect four global maps
@@ -442,29 +442,63 @@ func updateLatLong(ad *server_structs.ServerAd) error {
 	return nil
 }
 
-// Apply downtimes provided by Origin/Cache servers (<= v7.21) to the director's in-memory state for the given server.
-// This function treats a nil or empty slice as "no downtimes", clearing any stale
-// serverFiltered entry and removing cached server downtimes.
+// Apply downtimes provided by Origin/Cache server advertisements to
+// the director's in-memory state for the given server.
+//
+// This function is for the following cases:
+// 1. Origin/Cache server running Pelican version <= v7.21
+// 2. Origin/Cache server in v7.22 or later, but it contains downtimes created before v7.22 by the server admin
+// 3. Origin/Cache server in v7.22 or later, creates downtimes without mirroring to the Registry (extremely rare)
 func applyServerDowntimes(serverName string, downtimes []server_structs.Downtime) {
-	// If the server is >= v7.22, it sets the serverID in the downtime entry.
-	// Its downtimes are already handled by the Registry polling (updateDowntimeFromRegistry),
-	// so we don't need to do anything here
-	for _, dt := range downtimes {
-		if dt.ServerID != "" {
-			log.Debugf("The downtimes set by the admin of Server %q have been propagated to the Director through polling the Registry; skipping processing the downtimes in the server ads", serverName)
-			return
-		}
-	}
-
 	filteredServersMutex.Lock()
 	defer filteredServersMutex.Unlock()
 
-	if len(downtimes) == 0 {
-		// No downtimes provided (nil or empty slice): clear cached entry and remove stale serverFiltered
+	// Helper function to clear any stale serverFiltered entry and removing cached server downtimes
+	clearDowntimeSetByServerAd := func() {
 		delete(serverDowntimes, serverName)
 		if existingFilterType, isServerFiltered := filteredServers[serverName]; isServerFiltered && existingFilterType == serverFiltered {
 			delete(filteredServers, serverName)
 		}
+	}
+
+	// No downtimes provided (nil or empty slice): clear cached entry and remove stale serverFiltered
+	if len(downtimes) == 0 {
+		clearDowntimeSetByServerAd()
+		return
+	}
+
+	// Filter out Origin/Cache-set downtimes already tracked via federationDowntimes so we don't duplicate entries.
+	if len(downtimes) > 0 && len(federationDowntimes) > 0 {
+		// Build a set of downtime UUIDs that are already tracked via federationDowntimes for this server, named "done"
+		done := make(map[string]struct{})
+		fedList := federationDowntimes[serverName]
+		for _, fedDT := range fedList {
+			if fedDT.UUID == "" {
+				continue
+			}
+			done[fedDT.UUID] = struct{}{}
+		}
+
+		if len(done) > 0 {
+			// leftDowntimes represents the server-set downtimes that are not tracked via federationDowntimes
+			// i.e. the downtimes that are set by the server admin before 7.22
+			leftDowntimes := make([]server_structs.Downtime, 0, len(downtimes))
+			for _, dt := range downtimes {
+				if dt.UUID == "" {
+					log.Errorf("A server admin-set downtime %#v has no UUID", dt)
+				}
+				if _, exists := done[dt.UUID]; exists {
+					continue
+				}
+				leftDowntimes = append(leftDowntimes, dt)
+			}
+			downtimes = leftDowntimes
+		}
+	}
+
+	// Exit early when no downtimes left, meaning all downtimes in this server ad are already tracked via federationDowntimes
+	if len(downtimes) == 0 {
+		clearDowntimeSetByServerAd()
 		return
 	}
 
