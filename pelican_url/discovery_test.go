@@ -233,6 +233,74 @@ func TestDiscoverFederation(t *testing.T) {
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, context.Canceled))
 	})
+
+	t.Run("Test5xxStatusCodesRetryable", func(t *testing.T) {
+		// Test that 5xx status codes are wrapped as retryable TransferError
+		testCases := []int{500, 502, 503, 504}
+		for _, statusCode := range testCases {
+			t.Run(http.StatusText(statusCode), func(t *testing.T) {
+				server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(statusCode)
+					_, _ = w.Write([]byte("Server error"))
+				}))
+				defer server.Close()
+				discUrl, err := url.Parse(server.URL)
+				require.NoError(t, err)
+
+				tr := &http.Transport{
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				}
+				client := &http.Client{Transport: tr}
+
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+
+				_, err = DiscoverFederation(ctx, client, "test-ua", discUrl)
+				require.Error(t, err)
+
+				// Verify it's wrapped with TransferError (retryable)
+				var pe *error_codes.PelicanError
+				require.True(t, errors.As(err, &pe), "Error should be wrapped in PelicanError")
+				assert.Equal(t, "Transfer", pe.ErrorType(), "5xx errors should be TransferError")
+				assert.True(t, pe.IsRetryable(), "5xx errors should be retryable")
+				assert.Contains(t, err.Error(), "Federation metadata discovery failed with HTTP status")
+			})
+		}
+	})
+
+	t.Run("Test4xxStatusCodesNotRetryable", func(t *testing.T) {
+		// Test that 4xx status codes are wrapped as non-retryable SpecificationError
+		testCases := []int{400, 401, 403, 404, 405}
+		for _, statusCode := range testCases {
+			t.Run(http.StatusText(statusCode), func(t *testing.T) {
+				server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(statusCode)
+					_, _ = w.Write([]byte("Client error"))
+				}))
+				defer server.Close()
+				discUrl, err := url.Parse(server.URL)
+				require.NoError(t, err)
+
+				tr := &http.Transport{
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				}
+				client := &http.Client{Transport: tr}
+
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+
+				_, err = DiscoverFederation(ctx, client, "test-ua", discUrl)
+				require.Error(t, err)
+
+				// Verify it's wrapped with SpecificationError (non-retryable)
+				var pe *error_codes.PelicanError
+				require.True(t, errors.As(err, &pe), "Error should be wrapped in PelicanError")
+				assert.Equal(t, "Specification", pe.ErrorType(), "4xx errors should be SpecificationError")
+				assert.False(t, pe.IsRetryable(), "4xx errors should not be retryable (likely typo in URL)")
+				assert.Contains(t, err.Error(), "Federation metadata discovery failed with HTTP status")
+			})
+		}
+	})
 }
 
 // Custom round tripper to simulate a network error in startMetadataQuery test
