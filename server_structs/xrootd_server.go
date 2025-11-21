@@ -27,7 +27,7 @@ type (
 		GetServerType() ServerType
 		SetNamespaceAds([]NamespaceAdV2)
 		GetNamespaceAds() []NamespaceAdV2
-		CreateAdvertisement(name string, serverUrl string, serverWebUrl string) (*OriginAdvertiseV2, error)
+		CreateAdvertisement(name string, id string, serverUrl string, serverWebUrl string, downtimes []Downtime) (*OriginAdvertiseV2, error)
 		GetNamespaceAdsFromDirector() error
 		GetAdTokCfg(string) (AdTokCfg, error) // Given a director URL, configuration a token for advertising
 		GetFedTokLocation() string

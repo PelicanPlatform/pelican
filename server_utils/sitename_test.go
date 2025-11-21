@@ -34,7 +34,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
-func TestGetSitenameFromReg(t *testing.T) {
+func TestGetServerMetadataFromReg(t *testing.T) {
 	t.Cleanup(func() {
 		ResetTestState()
 	})
@@ -42,10 +42,10 @@ func TestGetSitenameFromReg(t *testing.T) {
 	t.Run("no-registry-url", func(t *testing.T) {
 		config.ResetFederationForTest()
 		config.SetFederation(pelican_url.FederationDiscovery{})
-		sitename, err := getSitenameFromReg(context.Background(), "/foo")
+		server, err := getServerMetadataFromReg(context.Background(), "/foo")
 		require.Error(t, err)
 		assert.Equal(t, "unable to fetch site name from the registry. Federation.RegistryUrl or Federation.DiscoveryUrl is unset", err.Error())
-		assert.Empty(t, sitename)
+		assert.Empty(t, server.Name)
 	})
 
 	t.Run("registry-returns-404", func(t *testing.T) {
@@ -56,18 +56,17 @@ func TestGetSitenameFromReg(t *testing.T) {
 		defer ts.Close()
 		config.ResetFederationForTest()
 		config.SetFederation(pelican_url.FederationDiscovery{RegistryEndpoint: ts.URL})
-		sitename, err := getSitenameFromReg(context.Background(), "/foo")
+		server, err := getServerMetadataFromReg(context.Background(), "/foo")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "replied with status code 404")
-		assert.Empty(t, sitename)
+		assert.Empty(t, server.Name)
 	})
 
 	t.Run("registry-returns-correct-object", func(t *testing.T) {
 		ResetTestState()
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if strings.HasPrefix(req.URL.Path, "/api/v1.0/registry") {
-				prefix := strings.TrimPrefix(req.URL.Path, "/api/v1.0/registry")
-				ns := server_structs.Registration{Prefix: prefix, ID: 1, AdminMetadata: server_structs.AdminMetadata{SiteName: "bar"}}
+				ns := server_structs.ServerRegistration{Name: "bar", ID: "testsvrid"}
 				bytes, err := json.Marshal(ns)
 				require.NoError(t, err)
 				_, err = w.Write(bytes)
@@ -79,8 +78,8 @@ func TestGetSitenameFromReg(t *testing.T) {
 		defer ts.Close()
 		config.ResetFederationForTest()
 		config.SetFederation(pelican_url.FederationDiscovery{RegistryEndpoint: ts.URL})
-		sitename, err := getSitenameFromReg(context.Background(), "/foo")
+		server, err := getServerMetadataFromReg(context.Background(), "/foo")
 		require.NoError(t, err)
-		assert.Equal(t, "bar", sitename)
+		assert.Equal(t, "bar", server.Name)
 	})
 }

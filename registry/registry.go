@@ -995,6 +995,12 @@ func wildcardHandler(ctx *gin.Context) {
 	} else if strings.HasSuffix(path, "/caches/allowedPrefixes") {
 		getAllowedPrefixesForCachesHandler(ctx)
 		return
+	} else if strings.HasPrefix(path, "/server/") {
+		// Extract the prefix after "/server"
+		prefix := strings.TrimPrefix(path, "/server")
+		ctx.Set("prefix", prefix)
+		getServerByPrefixHandler(ctx)
+		return
 	} else {
 		// Default to get the namespace by its prefix
 		getNamespaceHandler(ctx)
@@ -1268,6 +1274,47 @@ func getAllowedPrefixesForCachesHandler(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, allowedPrefixesForCachesData)
+}
+
+// getServerByPrefixHandler returns server details for a given namespace prefix
+func getServerByPrefixHandler(ctx *gin.Context) {
+	// Get prefix from context (set by wildcardHandler)
+	prefixVal, exists := ctx.Get("prefix")
+	if !exists {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid prefix. Prefix cannot be empty",
+		})
+		return
+	}
+	prefix, ok := prefixVal.(string)
+	if !ok || prefix == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid prefix. Prefix cannot be empty",
+		})
+		return
+	}
+
+	server, err := getServerByPrefix(prefix)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to get server by prefix: %s", err.Error()),
+		})
+		return
+	}
+
+	// Check if server was found (empty ID indicates not found)
+	if server.ID == "" {
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server not found for the given prefix",
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, server)
 }
 
 func RegisterRegistryAPI(router *gin.RouterGroup) {
