@@ -669,20 +669,23 @@ func categorizeServerDowntimes(registryDowntimes []server_structs.Downtime, ads 
 	return runningServerDowntimes, allDowntimes, nil
 }
 
-// applyDowntimeFilters creates new filters as needed and applies them to the filteredServers map.
-// It also updates the federationDowntimes map with all downtimes for display purposes.
-//
-// This function expects to be called with filteredServersMutex already locked.
-func applyDowntimeFilters(runningServerDowntimes, allDowntimes []server_structs.Downtime) error {
-	// Remove existing filteredServers that are fetched from the Registry first
-	for key, val := range filteredServers {
+// applyDowntimeFilters builds new filter and federation downtime maps based on the current registry data.
+// Callers remain responsible for handling synchronization (lock) and updating the shared state.
+func applyDowntimeFilters(
+	runningServerDowntimes, allDowntimes []server_structs.Downtime,
+	currentFilters map[string]filterType,
+	currentFederationDowntimes map[string][]server_structs.Downtime,
+) (map[string]filterType, map[string][]server_structs.Downtime) {
+	newFilters := make(map[string]filterType, len(currentFilters))
+	for key, val := range currentFilters {
 		if val == tempFiltered {
-			delete(filteredServers, key)
+			continue
 		}
+		newFilters[key] = val
 	}
 
 	// Build a new map to replace the in-memory federationDowntimes map
-	newFederationDowntimes := make(map[string][]server_structs.Downtime)
+	newFederationDowntimes := make(map[string][]server_structs.Downtime, len(currentFederationDowntimes))
 	currentTime := time.Now().UTC().UnixMilli()
 
 	// First, save ALL downtimes (including non-running servers) for display in Director's downtime page
@@ -693,7 +696,7 @@ func applyDowntimeFilters(runningServerDowntimes, allDowntimes []server_structs.
 	// Then, apply filtering only to currently running servers
 	for _, downtime := range runningServerDowntimes {
 		// Check existing downtime filter
-		originalFilterType, hasOriginalFilter := filteredServers[downtime.ServerName]
+		originalFilterType, hasOriginalFilter := newFilters[downtime.ServerName]
 
 		// If this server is already put in downtime (and not tempAllowed), we don't need to do anything
 		if hasOriginalFilter && originalFilterType != tempAllowed {
@@ -702,13 +705,11 @@ func applyDowntimeFilters(runningServerDowntimes, allDowntimes []server_structs.
 
 		// If it is an active downtime, add it to the filteredServers map
 		if currentTime >= downtime.StartTime && (currentTime <= downtime.EndTime || downtime.EndTime == -1) {
-			filteredServers[downtime.ServerName] = tempFiltered
+			newFilters[downtime.ServerName] = tempFiltered
 		}
 	}
 
-	// Overwrite the in-memory federationDowntimes map with the new data.
-	federationDowntimes = newFederationDowntimes
-	return nil
+	return newFilters, newFederationDowntimes
 }
 
 // updateDowntimeFromRegistry fetches downtime information from the Registry and applies it
@@ -739,9 +740,14 @@ func updateDowntimeFromRegistry(ctx context.Context) error {
 	}
 
 	// Create new filters as needed and apply them
-	if err := applyDowntimeFilters(runningServerDowntimes, allDowntimes); err != nil {
-		return err
-	}
+	newFilters, newFederation := applyDowntimeFilters(
+		runningServerDowntimes,
+		allDowntimes,
+		filteredServers,
+		federationDowntimes,
+	)
+	filteredServers = newFilters
+	federationDowntimes = newFederation
 
 	return nil
 }
