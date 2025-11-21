@@ -20,9 +20,6 @@ package director
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -32,7 +29,6 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -203,35 +199,17 @@ func TestNamespaceKeysCacheTTLExpiration(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
-	// Use a shorter TTL for testing (2 seconds instead of 15 minutes)
-	originalTTL := param.Director_AdvertisementTTL.GetDuration()
-	defer viper.Set(param.Director_AdvertisementTTL.GetName(), originalTTL)
-	viper.Set(param.Director_AdvertisementTTL.GetName(), 2*time.Second)
-
-	// Create test keys
-	oldKeyRaw, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	// Create test keys using config.GeneratePEM helper
+	keyDir := t.TempDir()
+	oldKey, err := config.GeneratePEM(keyDir)
 	require.NoError(t, err, "Failed to generate old private key")
-	oldKey, err := jwk.FromRaw(oldKeyRaw)
-	require.NoError(t, err, "Failed to convert old key to JWK")
-	err = jwk.AssignKeyID(oldKey)
-	require.NoError(t, err)
-	err = oldKey.Set(jwk.AlgorithmKey, jwa.ES256)
-	require.NoError(t, err)
-
 	oldPublicKey, err := oldKey.PublicKey()
 	require.NoError(t, err, "Failed to create old public key")
 
-	newKeyRaw, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	newKey, err := config.GeneratePEM(keyDir)
 	require.NoError(t, err, "Failed to generate new private key")
-	newKey, err := jwk.FromRaw(newKeyRaw)
-	require.NoError(t, err, "Failed to convert new key to JWK")
-	err = jwk.AssignKeyID(newKey)
-	require.NoError(t, err)
-	err = newKey.Set(jwk.AlgorithmKey, jwa.ES256)
-	require.NoError(t, err)
-
 	newPublicKey, err := newKey.PublicKey()
 	require.NoError(t, err, "Failed to create new public key")
 
@@ -271,7 +249,7 @@ func TestNamespaceKeysCacheTTLExpiration(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write(jwksByte)
 		} else {
-			w.WriteHeader(http.StatusNotFound)
+			t.Fatalf("Unmocked endpoint hit: %s %s", req.Method, req.URL.Path)
 		}
 	}))
 	defer ts.Close()
@@ -286,6 +264,15 @@ func TestNamespaceKeysCacheTTLExpiration(t *testing.T) {
 	kDir := filepath.Join(tDir, "t-issuer-keys")
 	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
 	viper.Set("ConfigDir", tDir)
+
+	// Use a shorter TTL for testing (2 seconds instead of 15 minutes)
+	// This affects both the server ad cache and the namespaceKeys cache expiration
+	originalTTL := param.Director_AdvertisementTTL.GetDuration()
+	viper.Set(param.Director_AdvertisementTTL.GetName(), 2*time.Second)
+	t.Cleanup(func() {
+		viper.Set(param.Director_AdvertisementTTL.GetName(), originalTTL)
+	})
+
 	err = config.InitServer(ctx, server_structs.DirectorType)
 	require.NoError(t, err)
 
@@ -298,19 +285,25 @@ func TestNamespaceKeysCacheTTLExpiration(t *testing.T) {
 	keyLoc, err := server_utils.GetJWKSURLFromIssuerURL(issuerUrl)
 	require.NoError(t, err)
 
+	// Get the director URL from federation info for token audience
+	fedInfo, err = config.GetFederation(ctx)
+	require.NoError(t, err)
+	directorURL := fedInfo.DirectorEndpoint
+	require.NotEmpty(t, directorURL, "Director endpoint should be set from mock federation root")
+
 	// Create a token signed with the old key
 	advTokenCfg := token.NewWLCGToken()
 	advTokenCfg.Lifetime = time.Minute
 	advTokenCfg.Issuer = issuerUrl
 	advTokenCfg.Subject = "test-cache"
-	advTokenCfg.AddAudiences("https://director.example.com")
+	advTokenCfg.AddAudiences(directorURL)
 	advTokenCfg.AddScopes(token_scopes.Pelican_Advertise)
 
 	// Sign token with old key
 	tok, err := advTokenCfg.CreateTokenWithKey(oldKey)
 	require.NoError(t, err, "Failed to create token with old key")
 
-	// First verification - should fetch keys from registry (jwksCallCount = 1)
+	// First verification - this act caches the key and should fetch keys from registry (jwksCallCount = 1)
 	ok, err := verifyAdvertiseToken(ctx, tok, "/test-namespace")
 	require.NoError(t, err)
 	assert.True(t, ok, "Token verification should succeed with old key")
@@ -322,16 +315,16 @@ func TestNamespaceKeysCacheTTLExpiration(t *testing.T) {
 	assert.False(t, item.IsExpired(), "Cached key should not be expired yet")
 
 	// Access the cache multiple times - WithDisableTouchOnHit should prevent TTL refresh
+	var expiration time.Time
 	for i := 0; i < 5; i++ {
 		time.Sleep(100 * time.Millisecond)
 		item = namespaceKeys.Get(keyLoc)
 		require.NotNil(t, item, "Key should still be cached")
-		// The expiration time should not change (TTL should not be refreshed)
-		originalExpiry := item.ExpiresAt()
-		time.Sleep(50 * time.Millisecond)
-		item = namespaceKeys.Get(keyLoc)
-		assert.Equal(t, originalExpiry, item.ExpiresAt(), "TTL should not be refreshed on cache access (WithDisableTouchOnHit)")
+		if i == 0 {
+			expiration = item.ExpiresAt()
+		}
 	}
+	assert.Equal(t, expiration, namespaceKeys.Get(keyLoc).ExpiresAt(), "TTL should not be refreshed on cache access (WithDisableTouchOnHit)")
 
 	// Verify JWKS was not fetched again (still count = 1)
 	assert.Equal(t, 1, jwksCallCount, "JWKS should not be fetched again while cached")
@@ -353,6 +346,8 @@ func TestNamespaceKeysCacheTTLExpiration(t *testing.T) {
 	assert.Equal(t, 1, jwksCallCount, "JWKS should not be fetched while cache is still valid")
 
 	// Wait for TTL to expire (2 seconds + small buffer)
+	// The namespaceKeys cache expiration is set using Director.AdvertisementTTL,
+	// which we configured to 2 seconds above
 	time.Sleep(2500 * time.Millisecond)
 
 	// Verify the cache entry has expired
