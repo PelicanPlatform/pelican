@@ -185,7 +185,7 @@ The table below shows the minimum recommended volume mounts for each server type
 ### Understanding Default Paths
 
 Pelican uses different default paths depending on whether the server runs as root (which is the case in containers):
-- **Root user** (containers): Configuration and data are stored in `/etc/pelican` and `/var/lib/pelican`
+- **Root user** (including root-ly containers such as in Docker, and in unprivileged containers where pelican still appears to run as PID 0): Configuration and data are stored in `/etc/pelican` and `/var/lib/pelican`
 - **Non-root user**: Configuration and data are stored in `~/.config/pelican`
 
 All examples below assume the server runs as root inside a container.
@@ -221,9 +221,9 @@ This prevents accidental re-generation of keys in the event of a typo in volume 
 **Configuration**: To customize the path, see the [`IssuerKeysDirectory`](../parameters.mdx#IssuerKeysDirectory) parameter.
 
 **Why it must persist**: If these keys are lost, the server will generate new ones, causing authentication failures with other federation services that trust the old keys.
-For Origins, this is the source of the "namespace is registered with a different key" error.
+For Origins and Caches, this is the source of the "namespace is registered with a different key" error.
 When this error is encountered, you must contact your federation's administrators to have them delete the old registration.
-This cannot be fixed without help from the federation administrators.
+For security, this cannot be fixed without help from the federation administrators.
 
 #### Server Database
 
@@ -371,7 +371,7 @@ Note: All Origin configuration, including exports and federation URL, should be 
 
 ### Cache-Specific Persistent Data
 
-In addition to the common data above, Caches need to persist:
+In addition to the common data, Caches need to persist:
 
 #### Cache Database
 
@@ -405,8 +405,7 @@ Cache:
   StorageLocation: /var/cache/pelican
 ```
 
-**Why it must persist**: Without persistence, the Cache loses all cached objects on restart, defeating its purpose.
-The Cache will need to re-download all data, increasing load on Origins and slowing down data access.
+**Why it must persist**: Without persistence, the Cache loses all cached objects on restart, increasing load on Origins and slowing down data access due cache misses.
 
 #### Example: Running a Cache with Persistent Data
 
@@ -427,7 +426,7 @@ Note: All Cache configuration, including federation URL, should be provided via 
 
 ### Director-Specific Persistent Data
 
-In addition to the common data above, Directors need to persist:
+In addition to the common data, Directors need to persist:
 
 #### Director Database
 
@@ -470,7 +469,7 @@ Note: All Director configuration, including federation URL, should be provided v
 
 ### Registry-Specific Persistent Data
 
-In addition to the common data above, Registries need to persist:
+In addition to the common data, Registries need to persist:
 
 #### Registry Database
 
