@@ -1,3 +1,5 @@
+import { Callout } from 'nextra/components'
+
 # Run Pelican Server with Docker Image
 
 This document explains how to run a Pelican server using Pelican docker image. If you want to use Pelican client functionalities, such as to download or upload an object, refer to the [install page](../install.mdx) to download and install a Pelican binary instead.
@@ -11,7 +13,9 @@ Pelican builds separate images for each Pelican server components, e.g. origin, 
 * Pelican director server: `hub.opensciencegrid.org/pelican_platform/director:latest`
 * Pelican registry server: `hub.opensciencegrid.org/pelican_platform/registry:latest`
 
-> **Note**: The `latest` tag will pull the Pelican server image with the latest released version. You may pull an image with explicit Pelican version by passing the version as the tag (e.g. `v7.6.4`) instead. For a list of available tags, refer to [Pelican Harbor repository](https://hub.opensciencegrid.org/harbor/projects/883/repositories/origin/artifacts-tab?publicAndNotLogged=yes).
+<Callout type="info">
+The `latest` tag will pull the Pelican server image with the latest released version. You may pull an image with explicit Pelican version by passing the version as the tag (e.g. `v7.6.4`) instead. For a list of available tags, refer to [Pelican Harbor repository](https://hub.opensciencegrid.org/harbor/projects/883/repositories/origin/artifacts-tab?publicAndNotLogged=yes).
+</Callout>
 
 ## Run Pelican server via Docker CLI
 
@@ -53,7 +57,9 @@ Where most of the command overlaps with the one to run the Pelican origin server
 
 ### Run Pelican director server
 
-> **Note**: To successfully run a Pelican director server, additional configuration is required. Follow [Serve a Pelican Director](../serving_a_federation.mdx#serve-a-director) for instructions. For how to pass configurations to Docker container, refer to [the next section](#configure-pelican-server-in-a-container).
+<Callout type="warning">
+To successfully run a Pelican director server, additional configuration is required. Follow [Serve a Pelican Director](../serving_a_federation.mdx#serve-a-director) for instructions. For how to pass configurations to Docker container, refer to [the next section](#configure-pelican-server-in-a-container).
+</Callout>
 
 To run the latest pelican director server, run the following command:
 
@@ -63,7 +69,9 @@ docker run -it -p 8444:8444 --name=pelican-director hub.opensciencegrid.org/peli
 
 ### Run Pelican registry server
 
-> **Note**: To successfully run a Pelican registry server, additional configuration is required. Follow [Serve a Pelican Registry](../serving_a_federation.mdx#serve-a-registry) for instructions. For how to pass configurations to Docker container, refer to [the next section](#configure-pelican-server-in-a-container).
+<Callout type="warning">
+To successfully run a Pelican registry server, additional configuration is required. Follow [Serve a Pelican Registry](../serving_a_federation.mdx#serve-a-registry) for instructions. For how to pass configurations to Docker container, refer to [the next section](#configure-pelican-server-in-a-container).
+</Callout>
 
 To run the latest pelican registry server, run the following command:
 
@@ -107,7 +115,9 @@ docker run -it -e PELICAN_LOGGING_LEVEL=debug -p 8444:8444 -p 8443:8443 -v /path
 
 There are other ways to pass environment variables to a Docker container, see details in [Docker documentation](https://docs.docker.com/reference/cli/docker/container/run/#env).
 
-> Some of Pelican configuration parameters with the `object` type can not be passed as environment variables, such as [GeoIPOverrides](../parameters.mdx#GeoIPOverrides) and [Origin.Exports](../parameters.mdx##Origin-Exports). For these parameters, use a configuration file instead.
+<Callout type="info">
+Some of Pelican configuration parameters with the `object` type can not be passed as environment variables, such as [GeoIPOverrides](../parameters.mdx#GeoIPOverrides) and [Origin.Exports](../parameters.mdx##Origin-Exports). For these parameters, use a configuration file instead.
+</Callout>
 
 ### Configure via the configuration file
 
@@ -158,7 +168,9 @@ Therefore, to keep things consistent, Pelican internally should use the same hum
 
 Notice that there is a port number, `8444`, following the hostname in the URLs above. This is the default port for Pelican web server. When publishing ports from the container, you may choose a different port on the host machine to publish to. Two conventional options are `443` or `8080`, which are default ports for a web service. If you publish `8444` port from the container to `443`, or `8080` on the host machine, i.e. `docker run -p 8444:443`, you may remove the port number from `Server.ExternalWebURL`, i.e. `https://example-origin.org`. For other ports, you need to leave the port number in the URL.
 
-> For more information about how Docker networking works, refer to [Docker Networking Documentation](https://docs.docker.com/network/).
+<Callout type="info">
+For more information about how Docker networking works, refer to [Docker Networking Documentation](https://docs.docker.com/network/).
+</Callout>
 
 ## Persisting Data Across Container Restarts
 
@@ -180,9 +192,11 @@ For additional information about using config params to set the location of spec
 | **Director** | 'All' + <br/> `-v /host/pelican/maxmind:/var/cache/pelican/maxmind` (optional, for GeoIP) |
 | **Registry** | 'All' (no additional mounts required) |
 
-> **Important**: The `/etc/pelican` directory contains cryptographic keys that establish your server's identity in the federation.
-> Loss of these keys will cause the "namespace is registered with a different key" error for Caches/Origins, and loss of the Director's issuer key will cause federation-wide issues with Cache/Origin Director tests.
-> See ["Issuer Keys Directory"](./docker#issuer-keys-directory) for more information.
+<Callout type="warning">
+The `/etc/pelican` directory contains cryptographic keys that establish your server's identity in the federation.
+Loss of these keys will cause the "namespace is registered with a different key" error for Caches/Origins, and loss of the Director's issuer key will cause federation-wide issues with Cache/Origin Director tests.
+See ["Issuer Keys Directory"](./docker#issuer-keys-directory) for more information.
+</Callout>
 
 ### Understanding Default Paths
 
@@ -398,7 +412,9 @@ docker run -d \
   serve
 ```
 
-Note: All Origin configuration, including exports and federation URL, should be provided via `/etc/pelican/pelican.yaml` which is mounted into the container.
+<Callout type="info">
+All Origin configuration, including exports and federation URL, should be provided via `/etc/pelican/pelican.yaml` which is mounted into the container.
+</Callout>
 
 ### Cache-Specific Persistent Data
 
@@ -425,7 +441,6 @@ If this configuration is not changed, cached data will fill up `/run`, potential
 ```bash
 -v /host/cache/storage:/var/cache/pelican
 ```
-
 
 **Why it must persist**: Without persistence, the Cache loses all cached objects on restart, increasing load on Origins and slowing down data access due cache misses.
 
@@ -463,7 +478,6 @@ In addition to the common data, Directors need to persist:
 -v /host/pelican/maxmind:/var/cache/pelican/maxmind
 ```
 
-
 #### Example: Running a Director with Persistent Data
 
 ```bash
@@ -497,7 +511,9 @@ docker run -d \
   serve
 ```
 
-Note: All Registry configuration, including federation URL, should be provided via `/etc/pelican/pelican.yaml` which is mounted into the container.
+<Callout type="info">
+All Registry configuration, including federation URL, should be provided via `/etc/pelican/pelican.yaml` which is mounted into the container.
+</Callout>
 
 ### Using Docker Compose for Persistent Data
 
