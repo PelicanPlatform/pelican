@@ -53,8 +53,6 @@ docker run -it -p 8444:8444 -p 8442:8442 --name=pelican-cache hub.opensciencegri
 Where most of the command overlaps with the one to run the Pelican origin server, with the following differences:
 * `-p 8444:8444 -p 8442:8442` publishes port `8444` and `8442` from the container to the same port on the host machine. Note that the admin website of the Pelican server runs on port `8444` by default, and the objects transfer endpoint of the Pelican cache server runs on port `8442` by default.
 
-> **Note**: The Pelican Docker image currently does not support binding a directory on your host machine as the directory for a Pelican cache to store cached objects, e.g. using `-v /host/machine:/run/pelican/cache/location`. This feature is a work in progress and will be available in a future Pelican version.
-
 ### Run Pelican director server
 
 <Callout type="warning">
@@ -104,8 +102,6 @@ There are two ways to configure a Pelican server running in a container. One is 
 ### Configure via environment variables
 
 Most Pelican configuration parameters described in [parameters page](../parameters.mdx) can be passed to a Pelican server as environment variables. For a configuration parameter, the corresponding environment variable is `PELICAN_<PARAMETER_NAME>`, where `PELICAN` is the prefix, and `<PARAMETER_NAME>` is the name of the parameter, with dots `.` replaced by underscores `_`. For example, a Pelican configuration named `Logging.Level` has a corresponding environment variable named `PELICAN_LOGGING_LEVEL`.
-
-> For admins that use Pelican images built for OSDF (with `osdf` prefix to the image tag, such as `osdf-origin`). The environment variables are prefixed by `OSDF` instead of `PELICAN`. The example above should then be `OSDF_LOGGING_LEVEL`.
 
 To pass environment variables to the Docker container, append `-e` flag to your `docker run` command. For example, if you want to pass  `PELICAN_LOGGING_LEVEL` to the container, run:
 
@@ -561,22 +557,3 @@ Note: Configuration including exports and federation URL should be provided in a
 6. **Test container restarts**: After setting up persistent volumes, test that the container can be stopped and restarted without losing data or generating new keys.
 
 7. **Document your volume mounts**: Keep a record of which host directories are mounted to which container paths for each server.
-
-## Troubleshooting
-
-### Error running Pelican Docker image on macOS with a M-series chip
-
-When running Pelican Docker image on macOS with a M-series chip, you may get the following error message:
-
-```console
-docker: no matching manifest for linux/arm64/v8 in the manifest list entries.
-See 'docker run --help'
-```
-
-This is because Pelican Docker images are built for `X86_64` architecture only, and your machine is in `ARM64`. To fix the issue, run the image with `--platform linux/amd64` instead:
-
-```bash
-docker run --platform linux/amd64 -it -p 8444:8444 --name=pelican-director hub.opensciencegrid.org/pelican_platform/director:latest serve -f <federation>
-```
-
-> **Note**: Although you may run Pelican server containers on ARM64 machines, it is not recommended for production use due to performance limitations.
