@@ -1242,6 +1242,36 @@ definitions:
         description: List of registrations associated with this server
         items:
           $ref: "#/definitions/Namespace"
+  ServerLocalMetadata:
+    type: object
+    description: Local cache of server metadata stored on Origins and Caches.
+    properties:
+      id:
+        type: string
+        description: Registry-assigned server ID
+        example: "18f1jk5"
+      name:
+        type: string
+        description: Human-readable server name reported to the registry
+        example: "UW_OSDF_CACHE"
+      isOrigin:
+        type: boolean
+        description: Whether the server offers Origin capabilities
+        example: true
+      isCache:
+        type: boolean
+        description: Whether the server offers Cache capabilities
+        example: false
+      createdAt:
+        type: string
+        format: date-time
+        description: Timestamp when this metadata record was created locally
+        example: "2025-02-10T18:22:00Z"
+      updatedAt:
+        type: string
+        format: date-time
+        description: Timestamp when this metadata record was last refreshed locally
+        example: "2025-02-15T18:22:00Z"
 
 tags:
   - name: auth
@@ -1536,6 +1566,41 @@ paths:
                 type: string
                 example: "7.8.0"
                 description: The current version of the server
+  /server/localMetadata/history:
+    get:
+      tags:
+        - common
+      summary: Retrieve local server metadata history
+      description: |
+        `Authentication Required` `Admin privilege Required`
+
+        Available only on Origin and Cache servers.
+        Returns the list of server metadata entries cached locally after syncing with the Registry.
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/ServerLocalMetadata"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Admin privilege required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Endpoint unavailable on this server type
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
   /metrics/health:
     get:
       tags:
