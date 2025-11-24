@@ -2692,13 +2692,12 @@ func TestTLSCertificateError(t *testing.T) {
 		require.Error(t, err)
 		t.Logf("error: %v", err)
 		assert.Contains(t, err.Error(), "certificate signed by unknown authority")
-		// runPut returns unwrapped ConnectionSetupError; wrapping happens in upload error handler
-		// Verify it's a ConnectionSetupError and that when wrapped, it's retryable
-		var cse *ConnectionSetupError
-		require.True(t, errors.As(err, &cse), "Error should be a ConnectionSetupError")
-		// Simulate upload error handler wrapping
-		wrappedErr := error_codes.NewContact_ConnectionSetupError(cse)
-		assert.True(t, IsRetryable(wrappedErr), "Wrapped TLS certificate error should be retryable")
+		// runPut returns the underlying TLS validation error; wrapping happens in the upload error handler.
+		require.True(t, isTLSCertificateValidationError(err), "Error should be TLS certificate validation error")
+		// Simulate upload error handler wrapping (TLS certificate validation errors are specification errors,
+		// not retryable)
+		wrappedErr := error_codes.NewSpecificationError(err)
+		assert.False(t, IsRetryable(wrappedErr), "Wrapped TLS certificate validation error should not be retryable")
 	case response := <-responseChan:
 		t.Fatalf("Expected error but got response: %v", response)
 	case <-time.After(time.Second * 2):
