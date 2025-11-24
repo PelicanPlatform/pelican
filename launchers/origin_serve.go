@@ -60,6 +60,9 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		return nil, err
 	}
 
+	// Initialize PKCS#11 helper after the defaults are set up
+	initPKCS11(ctx, egrp, modules)
+
 	if err := origin.InitializeDB(); err != nil {
 		return nil, errors.Wrap(err, "failed to initialize origin sqlite database")
 	}
