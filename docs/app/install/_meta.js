@@ -6,5 +6,5 @@ export default {
   "macos": "macOS",
   "windows": "Windows",
   "conda": "Conda-forge",
-  "docker": "Pelican Docker Image"
+  "docker": "Docker Images"
 }
