@@ -5,5 +5,5 @@ export default {
   "linux-binary": "Linux Standalone Binary",
   "macos": "macOS",
   "windows": "Windows",
-  "docker": "Pelican Docker Image"
+  "docker": "Docker Images"
 }
