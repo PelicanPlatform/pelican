@@ -234,7 +234,7 @@ This prevents accidental re-generation of keys in the event of a typo in volume 
 
 For mounting individual key files:
 ```bash
--v /host/pelican/issuer.jwk:/etc/pelican/issuer-keys/issuer.jwk
+-v /host/pelican/issuer.pem:/etc/pelican/issuer-keys/issuer.pem
 ```
 
 **Why it must persist**: If these keys are lost, the server will generate new ones, causing authentication failures with other federation services that trust the old keys.
@@ -492,7 +492,7 @@ Note: All Director configuration, including federation URL, should be provided v
 
 ### Registry-Specific Persistent Data
 
-Registries do not require persisting data outside the directories/files discussed in the ["Data That Should Persist for All Server Types"](./docker#data-that-should-persist-for-all-server-types) section.
+Registries only require persisting the directories/files discussed in the ["Data That Should Persist for All Server Types"](./docker#data-that-should-persist-for-all-server-types) section.
 
 #### Example: Running a Registry with Persistent Data
 
