@@ -122,8 +122,14 @@ func getRegistryIssuerInfo(ctx context.Context, prefix string) (iss string, keys
 	jwksUrl := iss + "/.well-known/issuer.jwks"
 
 	item := namespaceKeys.Get(prefix)
-	if item.Value() != nil {
-		keyset, err = item.Value().Get(ctx, jwksUrl)
+	if item.Value() == nil {
+		err = errors.Errorf("failed to load issuer information for namespace %s: namespace may not be registered in the registry or registry endpoint is unreachable", prefix)
+		return
+	}
+	keyset, err = item.Value().Get(ctx, jwksUrl)
+	if err != nil {
+		err = errors.Wrapf(err, "failed to retrieve keyset from JWKS URL %s for namespace %s", jwksUrl, prefix)
+		return
 	}
 	return
 }

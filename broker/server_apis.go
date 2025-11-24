@@ -148,22 +148,6 @@ func reverseRequest(ctx context.Context, ginCtx *gin.Context) {
 		return
 	}
 
-	hostname, err := getCacheHostnameFromToken([]byte(token))
-	if err != nil {
-		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, newBrokerRespFail("Failed to determine issuer: "+err.Error()))
-		return
-	}
-
-	ok, err := verifyToken(ctx, token, server_structs.GetCacheNs(hostname), param.Server_ExternalWebUrl.GetString(), token_scopes.Broker_Reverse)
-	if err != nil {
-		log.Errorln("Failed to verify token for cache reversal request:", err)
-		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, newBrokerRespFail("Failed to verify provided token"))
-		return
-	}
-	if !ok {
-		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, newBrokerRespFail("Authorization denied"))
-	}
-
 	reversalReq := reversalRequest{}
 	if err := ginCtx.Bind(&reversalReq); err != nil {
 		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, newBrokerRespFail("Failed to parse the cache's reversal request"))
@@ -176,6 +160,43 @@ func reverseRequest(ctx context.Context, ginCtx *gin.Context) {
 	if reversalReq.Prefix == "" {
 		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, newBrokerRespFail("Missing 'prefix' parameter in request"))
 		return
+	}
+
+	audience := param.Server_ExternalWebUrl.GetString()
+	prefix := reversalReq.Prefix
+
+	// If the requester provides an origin namespace, verify the token directly
+	// against that namespace. This allows directors (or other services) to
+	// retrieve broker connections on behalf of that origin without being
+	// registered as caches.
+	if strings.HasPrefix(prefix, server_structs.OriginPrefix.String()) {
+		ok, err := verifyToken(ctx, token, prefix, audience, token_scopes.Broker_Reverse)
+		if err != nil {
+			log.Errorln("Failed to verify token for reverse request:", err)
+			ginCtx.AbortWithStatusJSON(http.StatusBadRequest, newBrokerRespFail("Failed to verify provided token"))
+			return
+		}
+		if !ok {
+			ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, newBrokerRespFail("Authorization denied"))
+			return
+		}
+	} else {
+		hostname, err := getCacheHostnameFromToken([]byte(token))
+		if err != nil {
+			ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, newBrokerRespFail("Failed to determine issuer: "+err.Error()))
+			return
+		}
+
+		ok, err := verifyToken(ctx, token, server_structs.GetCacheNs(hostname), audience, token_scopes.Broker_Reverse)
+		if err != nil {
+			log.Errorln("Failed to verify token for cache reversal request:", err)
+			ginCtx.AbortWithStatusJSON(http.StatusBadRequest, newBrokerRespFail("Failed to verify provided token"))
+			return
+		}
+		if !ok {
+			ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, newBrokerRespFail("Authorization denied"))
+			return
+		}
 	}
 
 	if err = handleRequest(ctx, reversalReq.OriginName, reversalReq, timeoutVal); errors.Is(err, errRequestTimeout) {
