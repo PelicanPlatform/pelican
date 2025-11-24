@@ -20,6 +20,7 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -102,6 +103,13 @@ func isTLSError(err error) bool {
 // (as opposed to a network issue during TLS handshake). Certificate validation errors
 // are not retryable (configuration issue), while handshake network errors might be.
 func isTLSCertificateValidationError(err error) bool {
+	// tls.AlertError represents TLS handshake errors (like bad_certificate alert),
+	// which are retryable handshake failures, not certificate validation errors.
+	// Explicitly exclude them from being classified as certificate validation errors.
+	var alertErr tls.AlertError
+	if errors.As(err, &alertErr) {
+		return false
+	}
 	errStr := err.Error()
 	// Certificate validation errors typically mention:
 	// - "certificate" + ("expired", "not valid", "invalid", "hostname", "name", "verify")
