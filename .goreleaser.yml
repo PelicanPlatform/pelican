@@ -285,7 +285,7 @@ nfpms:
       # brianaydemir 2025-05-15: Because some software, e.g., HTCSS, has
       # a version constraint on `pelican`, we need to include some version
       # here. However, I have found no way to refer to {{ .Version }}.
-      - pelican = 7.21.2-rc.0
+      - pelican = 7.21.2-rc.1
   # end package pelican-debug
 
   - id: pelican-osdf-compat
