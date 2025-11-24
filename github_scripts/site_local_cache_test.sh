@@ -36,6 +36,8 @@ set -e
 mkdir -p site_local_test/fed_config
 chmod 777 site_local_test/fed_config
 
+echo "fake oidc client secret" > site_local_test/fed_config/oidc-client-secret
+
 mkdir -p site_local_test/fed_origin
 chmod 777 site_local_test/fed_origin
 

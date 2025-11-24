@@ -5,5 +5,6 @@ export default {
   "linux-binary": "Linux Standalone Binary",
   "macos": "macOS",
   "windows": "Windows",
+  "conda": "Conda-forge",
   "docker": "Docker Images"
 }
