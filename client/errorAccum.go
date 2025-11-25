@@ -172,43 +172,10 @@ func IsRetryable(err error) bool {
 	}
 
 	// Fall back to legacy checks for unwrapped errors
-	// Note: SlowTransferError, HeaderTimeoutError, UnexpectedEOFError, and StoppedTransferError
-	// are always wrapped in PelicanError, so they're handled above
 	if errors.Is(err, pelican_url.MetadataTimeoutErr) {
 		return true
 	}
-	// There's little a user can do about a TCP connection reset besides retry; if it
-	// was due to the server crashing, then on a subsequent retry they should get a different
-	// error message (connection refused).
-	if errors.Is(err, &NetworkResetError{}) {
-		return true
-	}
-	if errors.Is(err, &allocateMemoryError{}) {
-		return true
-	}
-	if errors.Is(err, &InvalidByteInChunkLengthError{}) {
-		return true
-	}
-	if errors.Is(err, &dirListingNotSupportedError{}) {
-		// false because we cannot automatically retry, the user must change the url to use a different origin/namespace
-		// that enables dirlistings or the admin must enable dirlistings on the origin/namespace
-		return false
-	}
-	var cse *ConnectionSetupError
-	if errors.As(err, &cse) {
-		if sce, ok := cse.Unwrap().(*StatusCodeError); ok {
-			switch int(*sce) {
-			case http.StatusInternalServerError:
-			case http.StatusBadGateway:
-			case http.StatusServiceUnavailable:
-			case http.StatusGatewayTimeout:
-				return true
-			default:
-				return false
-			}
-		}
-		return true
-	}
+
 	var hep *HttpErrResp
 	if errors.As(err, &hep) {
 		switch int(hep.Code) {
@@ -222,7 +189,6 @@ func IsRetryable(err error) bool {
 		}
 	}
 
-	// If we have a timeout error, we are retryable
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
 		return true

@@ -60,8 +60,12 @@ func TestErrorsRetryableFalse(t *testing.T) {
 	assert.False(t, te.AllErrorsRetryable(), "ErrorsRetryable should be false")
 	te.resetErrors()
 
-	te.AddError(&dirListingNotSupportedError{})
-	assert.False(t, te.AllErrorsRetryable(), "ErrorsRetryable should be false")
+	// Test wrapped dirListingNotSupportedError (all dirListingNotSupportedErrors are wrapped in production)
+	listingErr := &dirListingNotSupportedError{
+		Err: errors.New("405: object listings are not supported by the discovered origin"),
+	}
+	te.AddError(error_codes.NewSpecificationError(listingErr))
+	assert.False(t, te.AllErrorsRetryable(), "Wrapped dirListingNotSupportedError should not be retryable")
 	te.resetErrors()
 
 	// Test PermissionDeniedError with valid token that was rejected (not retryable)
@@ -99,17 +103,23 @@ func TestErrorsRetryableTrue(t *testing.T) {
 	assert.True(t, te.AllErrorsRetryable(), "PermissionDeniedError with expired token should be retryable")
 	te.resetErrors()
 
-	// Test unwrapped errors (not yet wrapped in production)
-	te.AddError(&ConnectionSetupError{})
-	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
+	// Test wrapped ConnectionSetupError (all ConnectionSetupErrors are wrapped in production)
+	te.AddError(error_codes.NewContact_ConnectionSetupError(&ConnectionSetupError{}))
+	assert.True(t, te.AllErrorsRetryable(), "Wrapped ConnectionSetupError should be retryable")
 	te.resetErrors()
 
-	te.AddError(&ConnectionSetupError{})
-	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
+	te.AddError(error_codes.NewContact_ConnectionSetupError(&ConnectionSetupError{}))
+	assert.True(t, te.AllErrorsRetryable(), "Wrapped ConnectionSetupError should be retryable")
 	te.resetErrors()
 
-	te.AddError(&allocateMemoryError{})
-	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
+	// Test wrapped allocateMemoryError (all allocateMemoryErrors are wrapped in production)
+	te.AddError(error_codes.NewTransferError(&allocateMemoryError{}))
+	assert.True(t, te.AllErrorsRetryable(), "Wrapped allocateMemoryError should be retryable")
+	te.resetErrors()
+
+	// Test wrapped NetworkResetError (all NetworkResetErrors are wrapped in production)
+	te.AddError(error_codes.NewContact_ConnectionResetError(&NetworkResetError{}))
+	assert.True(t, te.AllErrorsRetryable(), "Wrapped NetworkResetError should be retryable")
 	te.resetErrors()
 
 	te.AddError(&timeoutError{msg: "test timeout error"})
