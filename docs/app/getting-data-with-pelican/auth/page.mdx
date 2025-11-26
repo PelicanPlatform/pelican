@@ -1,4 +1,3 @@
-
 import { Callout } from '@/components/Callout'
 import { Terminal } from '@/components/Terminal'
 
@@ -18,7 +17,7 @@ It will gloss over most technical terms, preferring instead to provide only what
 For a more technical walkthrough of Pelican's authorization framework including how "authorization" differs from "authentication", see "[Advanced Usage/Pelican's Authorization System](../../advanced-usage/auth)".
 
 ## Background
-The data protection framework most people are familiar with is "username & password", but this setup rarely scales well in federated services whose components cross administrative boundaries, which is how the OSDF functions.
+Most people are familiar with using "username & password" authentication to protect data, but this setup rarely scales well in federated services whose components cross administrative boundaries, which is how the OSDF functions.
 Instead, Pelican uses [authorization tokens](../../advanced-usage/auth#tokens) to decide whether to grant or deny object access.
 
 The simplest description of authorization tokens is that they function much like concert tickets:
