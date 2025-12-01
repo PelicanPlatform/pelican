@@ -28,6 +28,11 @@ import (
 // and falls back to manual collection scope verification if standard verification fails.
 // This handles cases where OA4MP adds collection IDs to scopes (e.g., "collection.read:test_collection").
 // For read operations on public collections, it also provides a fallback that doesn't require explicit scopes.
+//
+// Note: This accepts tokens with EITHER web_ui.access OR the specific collection scope.
+// This design allows both:
+//   - Web UI users (who have web_ui.access from login cookies) to access collections
+//   - CLI/API clients (who have collection-specific scopes from OAuth2 device flow) to access collections
 func verifyTokenWithCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenScope, collectionID string) (status int, ok bool, err error) {
 	authOption := token.AuthOption{
 		Sources: []token.TokenSource{token.Cookie, token.Header},
@@ -416,6 +421,14 @@ func handleCreateCollection(ctx *gin.Context) {
 
 func handleUpdateCollection(ctx *gin.Context) {
 	collectionID := ctx.Param("id")
+	if collectionID == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Collection ID is required",
+		})
+		return
+	}
+
 	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Modify, collectionID)
 	if !ok {
 		ctx.JSON(status, server_structs.SimpleApiResp{
