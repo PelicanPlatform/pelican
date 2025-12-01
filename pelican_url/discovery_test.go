@@ -236,7 +236,7 @@ func TestDiscoverFederation(t *testing.T) {
 
 	t.Run("Test5xxStatusCodesRetryable", func(t *testing.T) {
 		// Test that 5xx status codes are wrapped as retryable TransferError
-		testCases := []int{500, 502, 503, 504}
+		testCases := []int{http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout}
 		for _, statusCode := range testCases {
 			t.Run(http.StatusText(statusCode), func(t *testing.T) {
 				server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -270,7 +270,7 @@ func TestDiscoverFederation(t *testing.T) {
 
 	t.Run("Test4xxStatusCodesNotRetryable", func(t *testing.T) {
 		// Test that 4xx status codes are wrapped as non-retryable SpecificationError
-		testCases := []int{400, 401, 403, 404, 405}
+		testCases := []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusMethodNotAllowed}
 		for _, statusCode := range testCases {
 			t.Run(http.StatusText(statusCode), func(t *testing.T) {
 				server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
