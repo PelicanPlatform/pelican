@@ -533,21 +533,20 @@ func TestApplyDowntimeFilters(t *testing.T) {
 		EndTime:    now + 1_000,
 	}
 
-	running := []server_structs.Downtime{
-		activeDowntime,
-		tempAllowedDowntime,
-		futureDowntime,
-		indefDowntime,
-		permFilteredDowntime,
-	}
-
 	offlineOnly := server_structs.Downtime{
 		ServerName: "offline-only",
 		StartTime:  now - 10_000,
 		EndTime:    now - 5_000,
 	}
-	allDowntimes := append([]server_structs.Downtime{}, running...)
-	allDowntimes = append(allDowntimes, offlineOnly)
+
+	allDowntimes := []server_structs.Downtime{
+		activeDowntime,
+		tempAllowedDowntime,
+		futureDowntime,
+		indefDowntime,
+		permFilteredDowntime,
+		offlineOnly,
+	}
 
 	currentFilters := map[string]filterType{
 		"perm-filtered":       permFiltered,
@@ -560,7 +559,7 @@ func TestApplyDowntimeFilters(t *testing.T) {
 		},
 	}
 
-	newFilters, newFederation := applyDowntimeFilters(running, allDowntimes, currentFilters, currentFederation)
+	newFilters, newFederation := applyDowntimeFilters(allDowntimes, currentFilters, currentFederation)
 
 	require.NotNil(t, newFilters)
 	require.NotNil(t, newFederation)
