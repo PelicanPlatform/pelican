@@ -398,7 +398,11 @@ The `/.well-known` path for the Origin's public keys is also exposed via XRootD.
 
 <Callout type="warning">
 It is **very important** to get the ordering of each authfile line and each privilege in a line correct.
-XRootD's authorization library uses basic string matching to determine access privileges, so `/my-prefix-auth` would match the access policy of `/my-prefix` if `/my-prefix` were listed first first.
+XRootD's authorization library parses top to bottom, left to right and uses basic string matching to determine access privileges.
+The following authline is incorrect because `/my-prefix-auth` will match the policy for `/my-prefix` before the `/my-prefix-auth` policy is checked, accidentally granting privileges:
+```text
+u * /my-prefix lr /my-prefix-auth -lr
+```
 </Callout>
 
 For more information about XRootD Authfiles, see https://xrootd.web.cern.ch/doc/dev56/sec_config.htm#_Toc119617472
