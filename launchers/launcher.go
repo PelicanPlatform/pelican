@@ -126,17 +126,10 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		broker.LaunchNamespaceKeyMaintenance(ctx, egrp)
 	}
 
-	// Directors that enable broker support but don't run the cache module still need
-	// to expose the broker callback endpoint so origins can complete reverse connections.
-	if modules.IsEnabled(server_structs.DirectorType) &&
-		param.Director_EnableBroker.GetBool() &&
-		!modules.IsEnabled(server_structs.CacheType) {
-		log.Debug("Director broker support enabled without cache; registering broker callback endpoint")
-		rootGroup := engine.Group("/", web_ui.ServerHeaderMiddleware)
-		broker.RegisterBrokerCallback(ctx, rootGroup)
-		if !modules.IsEnabled(server_structs.BrokerType) {
-			broker.LaunchNamespaceKeyMaintenance(ctx, egrp)
-		}
+	// Directors with broker support need to initialize the broker client to handle reverse connections.
+	// This initializes the broker callback endpoint needed to reverse connections from origins/caches behind firewalls.
+	if modules.IsEnabled(server_structs.DirectorType) && param.Director_EnableBroker.GetBool() {
+		broker.InitializeBrokerClient(ctx, egrp, engine)
 	}
 
 	if modules.IsEnabled(server_structs.DirectorType) {

@@ -96,10 +96,8 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 
 	// Don't perform Broker operations for site-local caches.
 	if !param.Cache_EnableSiteLocalMode.GetBool() {
-		broker.RegisterBrokerCallback(ctx, engine.Group("/", web_ui.ServerHeaderMiddleware))
-		broker.LaunchNamespaceKeyMaintenance(ctx, egrp)
+		broker.InitializeBrokerClient(ctx, egrp, engine)
 	}
-
 	configPath, err := xrootd.ConfigXrootd(ctx, false)
 	if err != nil {
 		return nil, err
