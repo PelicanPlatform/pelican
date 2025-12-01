@@ -132,6 +132,64 @@ func configureAuthDB() error {
 	return nil
 }
 
+// extractUserFromBearerToken parses and verifies a Bearer token, extracting user info.
+// Uses early-exit pattern for cleaner flow control.
+func extractUserFromBearerToken(ctx *gin.Context, tokenStr string) (user string, userId string, groups []string, err error) {
+	// Parse token without verification first to check issuer
+	parsed, err := jwt.Parse([]byte(tokenStr), jwt.WithVerify(false))
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	// Verify issuer matches local issuer
+	serverURL := param.Server_ExternalWebUrl.GetString()
+	if parsed.Issuer() != serverURL {
+		return "", "", nil, errors.New("token issuer does not match server URL")
+	}
+
+	// Verify signature
+	jwks, err := config.GetIssuerPublicJWKS()
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	verified, err := jwt.Parse([]byte(tokenStr), jwt.WithKeySet(jwks))
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	if err = jwt.Validate(verified); err != nil {
+		return "", "", nil, err
+	}
+
+	// Extract user from subject
+	user = verified.Subject()
+	if user == "" {
+		return "", "", nil, errors.New("token has empty subject")
+	}
+
+	// Extract groups
+	groupsIface, ok := verified.Get("wlcg.groups")
+	if ok {
+		if groupsTmp, ok := groupsIface.([]interface{}); ok {
+			groups = make([]string, 0, len(groupsTmp))
+			for _, groupObj := range groupsTmp {
+				if groupStr, ok := groupObj.(string); ok {
+					groups = append(groups, groupStr)
+				}
+			}
+		}
+	}
+
+	// Set in context for later use
+	ctx.Set("User", user)
+	if len(groups) > 0 {
+		ctx.Set("Groups", groups)
+	}
+
+	return user, userId, groups, nil
+}
+
 // Get user information including userId from the login cookie or Bearer token.
 // Returns username, userId, sub, issuer, groups, and error.
 func GetUserGroups(ctx *gin.Context) (user string, userId string, groups []string, err error) {
@@ -160,49 +218,16 @@ func GetUserGroups(ctx *gin.Context) (user string, userId string, groups []strin
 	if len(headerToken) > 0 {
 		tokenStr, found := strings.CutPrefix(headerToken[0], "Bearer ")
 		if found && tokenStr != "" {
-			// Try to parse the Bearer token and extract user info
-			parsed, parseErr := jwt.Parse([]byte(tokenStr), jwt.WithVerify(false))
-			if parseErr == nil {
-				// Verify issuer matches local issuer
-				serverURL := param.Server_ExternalWebUrl.GetString()
-				if parsed.Issuer() == serverURL {
-					// Verify signature
-					jwks, jwksErr := config.GetIssuerPublicJWKS()
-					if jwksErr == nil {
-						verified, verifyErr := jwt.Parse([]byte(tokenStr), jwt.WithKeySet(jwks))
-						if verifyErr == nil {
-							if validateErr := jwt.Validate(verified); validateErr == nil {
-								// Extract user from subject
-								user = verified.Subject()
-								// Extract groups
-								groupsIface, ok := verified.Get("wlcg.groups")
-								if ok {
-									if groupsTmp, ok := groupsIface.([]interface{}); ok {
-										groups = make([]string, 0, len(groupsTmp))
-										for _, groupObj := range groupsTmp {
-											if groupStr, ok := groupObj.(string); ok {
-												groups = append(groups, groupStr)
-											}
-										}
-									}
-								}
-								// Set in context for later use
-								if user != "" {
-									ctx.Set("User", user)
-									if len(groups) > 0 {
-										ctx.Set("Groups", groups)
-									}
-									return
-								}
-							}
-						}
-					}
-				}
+			user, userId, groups, err = extractUserFromBearerToken(ctx, tokenStr)
+			if err == nil && user != "" {
+				return
 			}
+			// Bearer token failed, fall through to cookie check
 		}
 	}
 
-	token, err := ctx.Cookie("login")
+	var token string
+	token, err = ctx.Cookie("login")
 	if err != nil {
 		if err == http.ErrNoCookie {
 			err = nil
