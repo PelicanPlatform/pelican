@@ -70,65 +70,6 @@ func getTransport() *http.Transport {
 	return transport
 }
 
-// hasCollectionAccess checks if a user/groups have access to a collection with the specified scope
-func hasCollectionAccess(user string, groupsList []string, collectionID string, scope token_scopes.TokenScope) bool {
-	// Get the database instance
-	db := database.ServerDatabase
-	if db == nil {
-		log.Warningf("Database not initialized, cannot check collection access for %s", collectionID)
-		return false
-	}
-
-	// Load collection with ACLs
-	var collection database.Collection
-	if err := db.Preload("ACLs").Where("id = ?", collectionID).First(&collection).Error; err != nil {
-		log.Debugf("Collection %s not found: %v", collectionID, err)
-		return false
-	}
-
-	// Check if collection is public (read access only)
-	if collection.Visibility == database.VisibilityPublic {
-		// Public collections allow read access to everyone
-		if scope == token_scopes.Collection_Read {
-			return true
-		}
-		// For other scopes on public collections, still need ACL check
-	}
-
-	// Get required roles for this scope
-	requiredRoles, ok := database.ScopeToRole[scope]
-	if !ok {
-		log.Debugf("Invalid scope for collection access check: %s", scope.String())
-		return false
-	}
-
-	// Ensure user group is in the list
-	userGroup := "user-" + user
-	if !slices.Contains(groupsList, userGroup) {
-		groupsList = append(groupsList, userGroup)
-	}
-
-	// Check if user is the owner (owners have all permissions)
-	if collection.Owner == user {
-		return true
-	}
-
-	// Check ACLs
-	for _, acl := range collection.ACLs {
-		// Check if user's group matches and has required role
-		if slices.Contains(groupsList, acl.GroupID) && slices.Contains(requiredRoles, acl.Role) {
-			// Check if ACL has expired
-			if acl.ExpiresAt != nil && acl.ExpiresAt.Before(time.Now()) {
-				continue
-			}
-			return true
-		}
-	}
-
-	// No matching ACL found
-	return false
-}
-
 func calculateAllowedScopes(user string, groupsList []string) ([]string, []string) {
 	if len(compiledAuthzRules) == 0 {
 		log.Debugf("calculateAllowedScopes: compiledAuthzRules is empty")
