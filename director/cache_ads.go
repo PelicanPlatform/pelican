@@ -21,6 +21,7 @@ package director
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/url"
 	"path"
@@ -538,14 +539,29 @@ func getCachedDowntimes(serverName string) ([]server_structs.Downtime, error) {
 	// helper to collect one server's downtimes
 	collect := func(name string) []server_structs.Downtime {
 		out := make([]server_structs.Downtime, 0)
+
+		// Use a set and a helper function to deduplicate downtimes by their snapshot string
+		seen := make(map[string]struct{})
+		appendUnique := func(list []server_structs.Downtime) {
+			for _, dt := range list {
+				key := downtimeSnap(dt)
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				out = append(out, dt)
+			}
+		}
+
+		// Collect downtimes from all sources
 		if list, ok := serverDowntimes[name]; ok {
-			out = append(out, list...)
+			appendUnique(list)
 		}
 		if list, ok := topologyDowntimes[name]; ok {
-			out = append(out, list...)
+			appendUnique(list)
 		}
 		if list, ok := federationDowntimes[name]; ok {
-			out = append(out, list...)
+			appendUnique(list)
 		}
 		return out
 	}
@@ -572,6 +588,13 @@ func getCachedDowntimes(serverName string) ([]server_structs.Downtime, error) {
 	}
 
 	return result, nil
+}
+
+func downtimeSnap(dt server_structs.Downtime) string {
+	if dt.UUID != "" {
+		return dt.UUID
+	}
+	return fmt.Sprintf("%s|%s|%d|%d|%d", dt.ServerName, dt.Source, dt.StartTime, dt.EndTime, dt.CreatedAt)
 }
 
 // getRegistryDowntimes fetches all downtime information from the Registry.

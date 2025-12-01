@@ -591,3 +591,40 @@ func TestApplyDowntimeFilters(t *testing.T) {
 	assert.Len(t, newFederation["offline-only"], 1)
 	assert.NotContains(t, newFederation, "legacy")
 }
+
+func TestGetCachedDowntimesDedup(t *testing.T) {
+	serverName := "TEST_CACHE"
+	now := time.Now().UnixMilli()
+	dup := server_structs.Downtime{
+		UUID:        "dup-id",
+		ServerName:  serverName,
+		ServerID:    "server-id",
+		Source:      "cache",
+		StartTime:   now - 1_000,
+		EndTime:     now + 1_000,
+		Description: "cache downtime",
+	}
+	registry := server_structs.Downtime{
+		UUID:        "registry-id",
+		ServerName:  serverName,
+		Source:      "registry",
+		StartTime:   now + 10_000,
+		EndTime:     server_structs.IndefiniteEndTime,
+		Description: "registry downtime",
+	}
+
+	filteredServersMutex.Lock()
+	serverDowntimes = map[string][]server_structs.Downtime{
+		serverName: {dup},
+	}
+	federationDowntimes = map[string][]server_structs.Downtime{
+		serverName: {dup, registry},
+	}
+	filteredServersMutex.Unlock()
+
+	downtimes, err := getCachedDowntimes(serverName)
+	require.NoError(t, err)
+	require.Len(t, downtimes, 2)
+
+	assert.ElementsMatch(t, []string{"dup-id", "registry-id"}, []string{downtimes[0].UUID, downtimes[1].UUID})
+}
