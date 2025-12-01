@@ -999,3 +999,127 @@ func TestDiscoverFederationImpl(t *testing.T) {
 		})
 	}
 }
+
+// TestPreferredCachesEnvVar tests that PELICAN_CLIENT_PREFERREDCACHES environment variable
+// works correctly in both regular client mode (PELICAN prefix) and plugin mode (OSDF prefix).
+// This test addresses issue #2819 where PELICAN_CLIENT_PREFERREDCACHES was ignored in plugin mode.
+func TestPreferredCachesEnvVar(t *testing.T) {
+	t.Run("pelican-prefix-with-pelican-env-var", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(func() {
+			ResetConfig()
+			os.Unsetenv("PELICAN_CLIENT_PREFERREDCACHES")
+		})
+
+		// Set preferred prefix to PELICAN (regular client mode)
+		oldPrefix, err := SetPreferredPrefix(PelicanPrefix)
+		require.NoError(t, err)
+		defer func() {
+			_, _ = SetPreferredPrefix(oldPrefix)
+		}()
+
+		// Set the environment variable
+		testCache := "https://cache.example.com:8443"
+		t.Setenv("PELICAN_CLIENT_PREFERREDCACHES", testCache)
+
+		// Initialize config and client defaults
+		InitConfigInternal(logrus.WarnLevel)
+		err = SetClientDefaults(viper.GetViper())
+		require.NoError(t, err)
+
+		// Verify the preferred cache was set correctly
+		preferredCaches := param.Client_PreferredCaches.GetStringSlice()
+		require.Len(t, preferredCaches, 1)
+		assert.Equal(t, testCache, preferredCaches[0])
+	})
+
+	t.Run("osdf-prefix-with-pelican-env-var", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(func() {
+			ResetConfig()
+			os.Unsetenv("PELICAN_CLIENT_PREFERREDCACHES")
+			os.Unsetenv("OSDF_CLIENT_PREFERREDCACHES")
+		})
+
+		// Set preferred prefix to OSDF (plugin mode)
+		oldPrefix, err := SetPreferredPrefix(OsdfPrefix)
+		require.NoError(t, err)
+		defer func() {
+			_, _ = SetPreferredPrefix(oldPrefix)
+		}()
+
+		// Set the PELICAN environment variable (this is the fix - it should work even in plugin mode)
+		testCache := "https://cache.example.com:8443"
+		t.Setenv("PELICAN_CLIENT_PREFERREDCACHES", testCache)
+
+		// Initialize config and client defaults
+		InitConfigInternal(logrus.WarnLevel)
+		err = SetClientDefaults(viper.GetViper())
+		require.NoError(t, err)
+
+		// Verify the preferred cache was set correctly from PELICAN env var
+		preferredCaches := param.Client_PreferredCaches.GetStringSlice()
+		require.Len(t, preferredCaches, 1)
+		assert.Equal(t, testCache, preferredCaches[0])
+	})
+
+	t.Run("osdf-prefix-with-osdf-env-var-backward-compat", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(func() {
+			ResetConfig()
+			os.Unsetenv("OSDF_CLIENT_PREFERREDCACHES")
+		})
+
+		// Set preferred prefix to OSDF (plugin mode)
+		oldPrefix, err := SetPreferredPrefix(OsdfPrefix)
+		require.NoError(t, err)
+		defer func() {
+			_, _ = SetPreferredPrefix(oldPrefix)
+		}()
+
+		// Set the OSDF environment variable (backward compatibility)
+		testCache := "https://cache.example.com:8443"
+		t.Setenv("OSDF_CLIENT_PREFERREDCACHES", testCache)
+
+		// Initialize config and client defaults
+		InitConfigInternal(logrus.WarnLevel)
+		err = SetClientDefaults(viper.GetViper())
+		require.NoError(t, err)
+
+		// Verify the preferred cache was set correctly from OSDF env var
+		// This should work via bindNonPelicanEnv()
+		preferredCaches := param.Client_PreferredCaches.GetStringSlice()
+		require.Len(t, preferredCaches, 1)
+		assert.Equal(t, testCache, preferredCaches[0])
+	})
+
+	t.Run("pelican-prefix-with-multiple-caches", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(func() {
+			ResetConfig()
+			os.Unsetenv("PELICAN_CLIENT_PREFERREDCACHES")
+		})
+
+		// Set preferred prefix to PELICAN
+		oldPrefix, err := SetPreferredPrefix(PelicanPrefix)
+		require.NoError(t, err)
+		defer func() {
+			_, _ = SetPreferredPrefix(oldPrefix)
+		}()
+
+		// Set multiple caches (space-separated as per docs)
+		testCaches := "https://cache1.example.com:8443 https://cache2.example.com:8443"
+		t.Setenv("PELICAN_CLIENT_PREFERREDCACHES", testCaches)
+
+		// Initialize config and client defaults
+		InitConfigInternal(logrus.WarnLevel)
+		err = SetClientDefaults(viper.GetViper())
+		require.NoError(t, err)
+
+		// Verify the preferred caches were set correctly
+		preferredCaches := param.Client_PreferredCaches.GetStringSlice()
+		require.Len(t, preferredCaches, 2)
+		assert.Equal(t, "https://cache1.example.com:8443", preferredCaches[0])
+		assert.Equal(t, "https://cache2.example.com:8443", preferredCaches[1])
+	})
+}
