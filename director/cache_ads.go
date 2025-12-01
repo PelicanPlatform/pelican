@@ -497,9 +497,14 @@ func applyServerDowntimes(serverName string, downtimes []server_structs.Downtime
 		}
 	}
 
-	// Exit early when no downtimes left, meaning all downtimes in this server ad are already tracked via federationDowntimes
+	// When all downtimes are already tracked via federationDowntimes, we still need to ensure
+	// that any active downtime is immediately applied to filteredServers. This handles the case
+	// where a server wakes up mid-downtime: the registry poll may not have run yet, so we must
+	// apply the filter right away based on what's already in federationDowntimes.
 	if len(downtimes) == 0 {
 		clearDowntimeSetByServerAd()
+		// Check federationDowntimes for any active downtime and apply filter immediately
+		applyActiveDowntimeFilter(serverName)
 		return
 	}
 
@@ -526,6 +531,29 @@ func applyServerDowntimes(serverName string, downtimes []server_structs.Downtime
 		// No active downtime: clear only if it was previously set by the server
 		if isServerFiltered && existingFilterType == serverFiltered {
 			delete(filteredServers, serverName)
+		}
+	}
+}
+
+// applyActiveDowntimeFilter checks federationDowntimes for any active downtime for the given server
+// and applies the tempFiltered filter immediately if found. This ensures that when a server wakes up
+// mid-downtime, it is blocked right away without waiting for the next registry poll.
+//
+// This function expects to be called with filteredServersMutex already locked.
+func applyActiveDowntimeFilter(serverName string) {
+	fedList, ok := federationDowntimes[serverName]
+	if !ok || len(fedList) == 0 {
+		return
+	}
+
+	now := time.Now().UTC().UnixMilli()
+	for _, dt := range fedList {
+		if dt.StartTime <= now && (dt.EndTime >= now || dt.EndTime == server_structs.IndefiniteEndTime) {
+			// Found an active downtime; apply filter if not already filtered
+			if _, alreadyFiltered := filteredServers[serverName]; !alreadyFiltered {
+				filteredServers[serverName] = tempFiltered
+			}
+			return
 		}
 	}
 }
