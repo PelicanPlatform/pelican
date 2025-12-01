@@ -258,7 +258,7 @@ func NewTransfer_ChecksumMismatchError(err error) *PelicanError {
 		exitCode:    9,
 		code:        6006,
 		retryable:   true,
-		description: "The client successfully transferred the file but the checksum computed by the client did not match the checksum reported by the server. This indicates data corruption during transfer or a mismatch between client and server checksum calculations.",
+		description: "The client successfully transferred the file but the checksum computed by the client did not match the checksum reported by the server.",
 		err:         err,
 	}
 }
