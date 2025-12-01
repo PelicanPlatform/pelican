@@ -16,6 +16,26 @@ Pelican included metrics from built-in [gin](https://gin-gonic.com/) web server,
 
 Pelican also has a set of built-in metrics to monitor Pelican server's status, listed below.
 
+### Counter Metrics
+
+Many metrics in this documentation are **counters** (typically identified by names ending in `_total` or `_count`). Counter metrics are monotonically increasing values that accumulate over time. Important notes about counters:
+
+- **Counters reset on restart**: When a Pelican server restarts, all counter values reset to 0. The counter then begins accumulating from 0 again.
+- **Time ranges are required**: To get meaningful data from counters, you must use PromQL functions that calculate changes over time, such as:
+  - `rate()` - calculates the per-second average rate of increase
+  - `irate()` - calculates the per-second instant rate of increase
+  - `increase()` - calculates the increase over a time range
+- **Example usage**: Instead of querying `xrootd_server_bytes_total` directly, use `rate(xrootd_server_bytes_total[5m])` to get bytes per second, or `increase(xrootd_server_bytes_total[1h])` to get total bytes transferred in the last hour.
+
+### Gauge Metrics
+
+Many metrics in this documentation are **gauges**. Gauge metrics represent a single numerical value that can go up or down over time. Important notes about gauges:
+
+- **Gauges represent current state**: Unlike counters, gauges show the current value of something at a point in time (e.g., number of active connections, current CPU usage, available disk space).
+- **Gauges can be queried directly**: You can query gauge metrics directly without time-range functions like `rate()` or `increase()`. The value represents the current state.
+- **Gauges persist across restarts**: When a server restarts, gauge values reset to their initial state (often 0), but they don't accumulate like counters. The gauge will reflect the new current state after restart.
+- **Example usage**: Query `xrootd_server_io_active` directly to see the current number of active IO operations, or use `avg_over_time(xrootd_server_io_active[5m])` to see the average over the last 5 minutes.
+
 ## All Servers
 
 All of the Pelican servers have the following metrics:
@@ -36,6 +56,8 @@ This yields the duration in seconds.
 
   The health status of Pelican server components. The metric value can be converted into following status:
 
+  > **Note**: This is a gauge metric representing the current health status. Query directly to see the current state of each component.
+
   ```
   1: Critical
   2: Warning
@@ -54,23 +76,29 @@ This yields the duration in seconds.
   | `registry`   | Namespace registration at the Registry | Origin and cache servers     |
   | `director`   | Object transfer tests from the Director | Origin and cache servers     |
   | `topology`    | Data fetch from the OSDF topology server                 | All servers (OSDF mode only)                  |
-  | `IO-concurrency` | IO concurrency limit | Origin and cache servers |
-  | `prometheus`   | Prometheus server | All servers |
-  | `config-updates` | Authfile and scitokens.cfg updates | Origin and cache servers |
+  | `IO-concurrency` | Health status indicating whether the average concurrent IO operations exceed the configured concurrency limit, used by the Director to determine if redirects should be reduced | Origin and cache servers |
+  | `prometheus`   | Health status of the embedded Prometheus server. Critical indicates Prometheus failed to start or the server is not ready to receive web requests (metrics unavailable). OK indicates Prometheus started successfully and is ready | All servers |
+  | `config-updates` | Health status of XRootD configuration file updates (authfile and scitokens.cfg). Critical indicates files are stale beyond the configured timeout and may trigger auto-shutdown if enabled. Warning indicates update failures observed but within timeout. OK indicates both files updated successfully | Origin and cache servers |
 
 ### `pelican_component_health_status_last_update`
 
   The timestamp of last update of health status of Pelican server components. The value is UNIX time in seconds. It shares the same label as `pelican_component_health_status`
 
+  > **Note**: This is a gauge metric representing the last update timestamp. Query directly to see when each component's health status was last updated.
+
 ### `pelican_server_xrootd_last_crash`
 
-The timestamp of the last crash of the XRootD server.
+The timestamp (seconds) of the last crash of the XRootD server.
+
+> **Note**: This is a gauge metric representing the timestamp of the last crash. Query directly to see when XRootD last crashed. A value of 0 indicates no crashes have occurred since the server started.
 
 ## Registry
 
 ### `pelican_registry_federation_namespaces`
 
-The number of federation namespace associated with a public key, excluding server namespaces, in the registry.
+The number of namespace registrations in the registry.
+
+> **Note**: This is a gauge metric representing the current number of namespace registrations. Query directly to see the current count.
 
 #### Label: `status`
 
@@ -83,15 +111,21 @@ The number of federation namespace associated with a public key, excluding serve
 
 Total number of contributing institutions. This is only available when running in OSDF mode.
 
+> **Note**: This is a gauge metric representing the current number of institutions. Query directly to see the current count.
+
 ## Storage Servers (Origin and Cache)
 
 ### `xrootd_monitoring_packets_received_total`
 
-The total number of [XRootD monitoring](https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm) UDP packets received.
+The total number of [XRootD monitoring](https://xrootd.web.cern.ch/doc/dev6/xrd_monitoring.htm) UDP packets received.
+
+> **Note**: This is a counter metric. Use `rate(xrootd_monitoring_packets_received_total[5m])` to get packets per second, or `increase(xrootd_monitoring_packets_received_total[1h])` to get total packets in the last hour.
 
 ### `xrootd_sched_thread_count`
 
-  The number of XRootD scheduler threads. Ref: https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm#_Toc138968509
+  The number of XRootD scheduler threads. Ref: https://xrootd.web.cern.ch/doc/dev6/xrd_monitoring.htm#_Toc204013493
+
+  > **Note**: This is a gauge metric representing the current number of threads. Query directly or use `avg_over_time(xrootd_sched_thread_count[5m])` to see the average over a time range.
 
   #### Label: `state`
 
@@ -104,29 +138,43 @@ The total number of [XRootD monitoring](https://xrootd.slac.stanford.edu/doc/dev
 
 Number of scheduler thread creations.
 
+> **Note**: This is a counter metric. Use `rate(xrootd_sched_thread_creations[5m])` to get thread creations per second, or `increase(xrootd_sched_thread_creations[1h])` to get total thread creations in the last hour.
+
 ### `xrootd_sched_thread_destructions`
 
 Number of scheduler thread destructions.
+
+> **Note**: This is a counter metric. Use `rate(xrootd_sched_thread_destructions[5m])` to get thread destructions per second, or `increase(xrootd_sched_thread_destructions[1h])` to get total thread destructions in the last hour.
 
 ### `xrootd_sched_thread_limit_reached`
 
 Number of times the scheduler thread limit has been reached.
 
+> **Note**: This is a counter metric. Use `rate(xrootd_sched_thread_limit_reached[5m])` to get limit hits per second, or `increase(xrootd_sched_thread_limit_reached[1h])` to get total limit hits in the last hour.
+
 ### `xrootd_sched_jobs`
 
 Number of scheduler jobs requiring a thread.
+
+> **Note**: This is a gauge metric representing the current number of jobs. Query directly or use `avg_over_time(xrootd_sched_jobs[5m])` to see the average over a time range.
 
 ### `xrootd_sched_queue_longest_length`
 
 Length of the longest run-queue.
 
+> **Note**: This is a gauge metric representing the current longest queue length. Query directly or use `avg_over_time(xrootd_sched_queue_longest_length[5m])` to see the average over a time range.
+
 ### `xrootd_sched_queued`
 
 Number of jobs queued.
 
+> **Note**: This is a gauge metric representing the current number of queued jobs. Query directly or use `avg_over_time(xrootd_sched_queued[5m])` to see the average over a time range.
+
 ### `xrootd_server_bytes_total`
 
-  The total number of bytes XRootD sent/received. Ref: https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm#_Toc138968503 (See `link.in` and `link.out`)
+  The total number of bytes XRootD sent/received. Ref: https://xrootd.web.cern.ch/doc/dev6/xrd_monitoring.htm#_Toc204013487 (See `link.in` and `link.out`)
+
+  > **Note**: This is a counter metric. Use `rate(xrootd_server_bytes_total[5m])` to get bytes per second, or `increase(xrootd_server_bytes_total[1h])` to get total bytes in the last hour.
 
   #### Label: `direction`
 
@@ -139,9 +187,13 @@ Number of jobs queued.
 
 The total number of server connections to XRootD.
 
+> **Note**: This is a counter metric. Use `rate(xrootd_server_connections_total[5m])` to get connections per second, or `increase(xrootd_server_connections_total[1h])` to get total connections in the last hour.
+
 ### `xrootd_storage_volume_bytes`
 
   The storage volume usage on the storage server.
+
+  > **Note**: This is a gauge metric representing the current storage volume. Query directly or use `avg_over_time(xrootd_storage_volume_bytes[5m])` to see the average over a time range.
 
   #### Label: `type`
 
@@ -163,7 +215,9 @@ The total number of server connections to XRootD.
 
 ### `xrootd_transfer_bytes`
 
-  The bytes of transfers for individual object. Ref: https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm#_Toc138968522 (See XrdXrootdMonStatXFR)
+  The bytes of transfers for individual object. Ref: https://xrootd.web.cern.ch/doc/dev6/xrd_monitoring.htm#_Toc204013508 (See XrdXrootdMonStatXFR)
+
+  > **Note**: This is a counter metric. Use `rate(xrootd_transfer_bytes[5m])` to get bytes per second, or `increase(xrootd_transfer_bytes[1h])` to get total bytes in the last hour.
 
   #### Label: `path`
 
@@ -201,13 +255,19 @@ The total number of server connections to XRootD.
 
   The number of transfer operations performed for individual object. The labels for this metric is the same as the ones in `xrootd_transfer_bytes`
 
+  > **Note**: This is a counter metric. Use `rate(xrootd_transfer_operations_total[5m])` to get operations per second, or `increase(xrootd_transfer_operations_total[1h])` to get total operations in the last hour.
+
 ### `xrootd_transfer_readv_segments_total`
 
   The number of segments in readv operations for individual object. The labels for this metric is the same as the ones in `xrootd_transfer_bytes` except that `type` label isn't available in this metric.
 
+  > **Note**: This is a counter metric. Use `rate(xrootd_transfer_readv_segments_total[5m])` to get segments per second, or `increase(xrootd_transfer_readv_segments_total[1h])` to get total segments in the last hour.
+
 ### `xrootd_cache_access_bytes`
 
 Number of bytes the data requested is in the cache or not.
+
+> **Note**: This is a gauge metric representing the current cache access state. Query directly or use `avg_over_time(xrootd_cache_access_bytes[5m])` to see the average over a time range.
 
 #### Label: `path`
 
@@ -225,17 +285,31 @@ The path to the object (filename).
 
 Total storage operations in origin/cache server.
 
+> **Note**: This is a counter metric. Use `rate(xrootd_server_io_total[5m])` to get operations per second, or `increase(xrootd_server_io_total[1h])` to get total operations in the last hour.
+
 ### `xrootd_server_io_active`
 
 Number of ongoing storage operations in origin/cache server.
+
+> **Note**: This is a gauge metric representing the current number of active IO operations. Query directly or use `avg_over_time(xrootd_server_io_active[5m])` to see the average over a time range.
 
 ### `xrootd_server_io_wait_seconds_total`
 
 The aggregate time spent in storage operations in origin/cache server.
 
+> **Note**: This is a counter metric. Use `rate(xrootd_server_io_wait_seconds_total[5m])` to get average wait time per second, or `increase(xrootd_server_io_wait_seconds_total[1h])` to get total wait time in the last hour.
+
+### `xrootd_cpu_utilization`
+
+CPU utilization of the XRootD server, represented as the average number of CPU cores utilized (e.g., 1.0 = one full core, 2.5 = two and a half cores).
+
+> **Note**: This is a gauge metric representing the current CPU utilization. Query directly to see the current utilization, or use `avg_over_time(xrootd_cpu_utilization[5m])` to see the average over a time range.
+
 ### OSS Layer Metrics
 
 The following metrics are available from the XRootD OSS layer.
+
+> **Note**: All metrics ending in `_total` are counter metrics. Use `rate()` or `increase()` with a time range to query them. All metrics ending in `_time_seconds` are histogram metrics that track operation duration distributions.
 
 | Metric Name | Description |
 | --- | --- |
@@ -296,6 +370,8 @@ The following metrics are available from the XRootD OSS layer.
 
 The following metrics are available from the XRootD S3 cache plugin.
 
+> **Note**: All metrics ending in `_total` are counter metrics. Use `rate()` or `increase()` with a time range to query them.
+
 | Metric Name | Description | Labels |
 | --- | --- | --- |
 | `xrootd_s3_cache_bytes_total` | Bytes transferred by the S3 cache plugin. | `type`: `hit`, `miss`, `bypass`, `fetch`, `unused`, `prefetch` |
@@ -307,6 +383,8 @@ The following metrics are available from the XRootD S3 cache plugin.
 ### XrdCl Client Metrics
 
 The following metrics are available from the XrdCl client.
+
+> **Note**: All metrics ending in `_total` are counter metrics. Use `rate()` or `increase()` with a time range to query them. Metrics ending in `_timestamp_seconds` are gauge metrics representing timestamps and can be queried directly. `xrootd_xrdcl_queue_pending` is a gauge metric representing the current queue size.
 
 | Metric Name | Description | Labels |
 | --- | --- | --- |
@@ -330,6 +408,8 @@ The following metrics are available from the XrdCl client.
 ### Cache Eviction Metrics
 
 The following metrics are available from the XRootD cache eviction process.
+
+> **Note**: All cache eviction metrics are gauge metrics representing current state. Query them directly or use `avg_over_time()` to see averages over a time range.
 
 | Metric Name | Description | Labels |
 | --- | --- | --- |
@@ -400,6 +480,8 @@ With the `up` metric, it is possible to count number of active origin and cache 
 
   The accumulated number of origin/cache advertisements to the director. This metric shows if an origin/cache server successfully joins the federation or not. For origin servers, it also shows if each federation namespace prefix it exports passed director verification.
 
+  > **Note**: This is a counter metric. Use `rate(pelican_director_advertisements_received_total[5m])` to get advertisements per second, or `increase(pelican_director_advertisements_received_total[1h])` to get total advertisements in the last hour.
+
   #### Label: `server_name`
 
   The name of the storage server. By default it's the hostname.
@@ -432,6 +514,8 @@ With the `up` metric, it is possible to count number of active origin and cache 
 ### `pelican_director_stat_total`
 
   The accumulated number of `stat` query the director made to origin/cache servers to check for object availability. Only available when `Director.EnableStat` is set to true. This metric is a good indicator of object availability and origin/cache service quality.
+
+  > **Note**: This is a gauge metric representing the current accumulated count. Query directly to see the current total. Note that this metric accumulates but is a gauge (not a counter), so it may reset on restart.
 
   #### Label: `server_name`
 
@@ -469,6 +553,8 @@ With the `up` metric, it is possible to count number of active origin and cache 
 
  The ongoing `stat` queries at the server. Note that Prometheus samples the metric value per 15s, and each `stat` request only takes ~10-100ms to finish. The value of this metric can't capture per-second transient requests.
 
+ > **Note**: This is a gauge metric representing the current number of active stat queries. Query directly to see the current count.
+
   #### Label: `server_name`
 
   The name of the storage server. By default it's the hostname.
@@ -487,6 +573,8 @@ With the `up` metric, it is possible to count number of active origin and cache 
 ### `pelican_director_total_ftx_test_suite`
 
   The number of file transfer test suite the director issued. In Pelican, director creates a test file and sent to origin servers to as a health test. It issues such test suite when it receives the registration from the origin server. In a test suite, a timer was set to run a cycle of uploading, getting, and deleting the test file every 15 seconds. Such cycle is called a "test run". In theory, director should issue only one test for each origin servers; however, since the registration information was stored in a TTL cache in director, and it expires after certain period of time, and the test suite issued will be cancelled. A new test suite is issued with the new registration. Thus, director _can_ issue multiple test suites to an origin server.
+
+  > **Note**: This is a counter metric. Use `rate(pelican_director_total_ftx_test_suite[5m])` to get test suites per second, or `increase(pelican_director_total_ftx_test_suite[1h])` to get total test suites in the last hour.
 
   #### Label: `server_name`
 
@@ -509,9 +597,13 @@ With the `up` metric, it is possible to count number of active origin and cache 
 
   This metric shares the same label as `pelican_director_total_ftx_test_suite`
 
+  > **Note**: This is a gauge metric representing the current number of active test suites. Query directly to see the current count.
+
 ### `pelican_director_total_ftx_test_runs`
 
   The number of file transfer test runs the director issued. A "test run" is a set of upload/get/delete of test files to a origin. It executes in a cycle of 15s (by default).
+
+  > **Note**: This is a counter metric. Use `rate(pelican_director_total_ftx_test_runs[5m])` to get test runs per second, or `increase(pelican_director_total_ftx_test_runs[1h])` to get total test runs in the last hour.
 
   This metric shares the same label as `pelican_director_total_ftx_test_suite`, with two additions:
 
@@ -533,6 +625,8 @@ With the `up` metric, it is possible to count number of active origin and cache 
 
 The total number of map items in the director, by the name of the map.
 
+> **Note**: This is a gauge metric representing the current number of map items. Query directly to see the current count.
+
 #### Label: `name`
 
 The name of the map. One of `healthTestUtils`, `filteredServers`, `serverStatUtils`, `serverStatEntries`.
@@ -540,6 +634,8 @@ The name of the map. One of `healthTestUtils`, `filteredServers`, `serverStatUti
 ### `pelican_director_ttl_cache`
 
 The statistics of various TTL caches.
+
+> **Note**: This is a gauge metric representing the current TTL cache statistics. Query directly to see the current values.
 
 #### Label: `name`
 
@@ -552,6 +648,8 @@ The type of the statistic. One of `evictions`, `insertions`, `hits`, `misses`, `
 ### `pelican_director_server_count`
 
 The number of servers currently recognized by the Director, delineated by pelican/non-pelican and origin/cache.
+
+> **Note**: This is a gauge metric representing the current number of servers. Query directly to see the current count.
 
 #### Label: `server_name`
 
@@ -572,6 +670,8 @@ Whether the server was discovered from the topology.
 
 The total number of requests from clients.
 
+> **Note**: This is a counter metric. Use `rate(pelican_director_client_requests_total[5m])` to get requests per second, or `increase(pelican_director_client_requests_total[1h])` to get total requests in the last hour.
+
 #### Label: `version`
 
 The client version.
@@ -583,6 +683,8 @@ The service that received the request.
 ### `pelican_director_redirects_total`
 
 The total number of redirects the director issued.
+
+> **Note**: This is a counter metric. Use `rate(pelican_director_redirects_total[5m])` to get redirects per second, or `increase(pelican_director_redirects_total[1h])` to get total redirects in the last hour.
 
 #### Label: `destination`
 
@@ -604,6 +706,8 @@ The network of the client.
 
 The total number of errors encountered trying to resolve server coordinates using the GeoIP MaxMind database.
 
+> **Note**: This is a counter metric. Use `rate(pelican_director_maxmind_server_errors_total[5m])` to get errors per second, or `increase(pelican_director_maxmind_server_errors_total[1h])` to get total errors in the last hour.
+
 #### Label: `network`
 
 The network address that was being resolved.
@@ -615,6 +719,8 @@ The name of the server that was being resolved.
 ### `pelican_director_maxmind_client_errors_total`
 
 The total number of errors encountered trying to resolve client coordinates using the GeoIP MaxMind database.
+
+> **Note**: This is a counter metric. Use `rate(pelican_director_maxmind_client_errors_total[5m])` to get errors per second, or `increase(pelican_director_maxmind_client_errors_total[1h])` to get total errors in the last hour.
 
 #### Label: `network`
 
@@ -628,6 +734,8 @@ The project of the client that was being resolved.
 
 The total number of advertisements rejected by the director.
 
+> **Note**: This is a counter metric. Use `rate(pelican_director_rejected_advertisements[5m])` to get rejections per second, or `increase(pelican_director_rejected_advertisements[1h])` to get total rejections in the last hour.
+
 #### Label: `hostname`
 
 The hostname of the server that sent the advertisement.
@@ -635,6 +743,8 @@ The hostname of the server that sent the advertisement.
 ### `pelican_director_server_statusweight`
 
 The EWMA-smoothed status weight generated by the Director for each server.
+
+> **Note**: This is a gauge metric representing the current status weight. Query directly to see the current weight value.
 
 #### Label: `server_name`
 
