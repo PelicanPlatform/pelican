@@ -2508,9 +2508,10 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		} else if isContextDeadlineError(err) || isDNSError(err) || (isTLSError(err) && !isTLSCertificateValidationError(err)) || isDialError(err) {
 			// Connection setup errors (timeout, DNS, TLS handshake, dial) - wrap as ConnectionSetupError (retryable)
 			err = &ConnectionSetupError{Err: err}
-		} else {
-			err = &ConnectionSetupError{Err: err}
 		}
+		// Note: Any other errors from client.Do that don't match the above conditions will remain unwrapped for now.
+		// In practice, client.Do primarily returns connection-related errors, so most should be caught above.
+		// TODO: Wrap any other errors from client.Do with appropriate PelicanError types.
 		log.WithFields(fields).Errorln("Failed to download:", err)
 		return
 	}
