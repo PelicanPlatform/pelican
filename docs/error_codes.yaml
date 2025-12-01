@@ -211,6 +211,5 @@ code: 6006
 clientExitCode: 9
 description: >-
   The client successfully transferred the file but the checksum computed by the client
-  did not match the checksum reported by the server. This indicates data corruption
-  during transfer or a mismatch between client and server checksum calculations.
+  did not match the checksum reported by the server.
 retryable: true
