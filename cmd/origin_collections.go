@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -42,12 +42,11 @@ import (
 )
 
 var (
-	originCollectionsCmd = &cobra.Command{
-		Use:   "collections",
+	originCollectionCmd = &cobra.Command{
+		Use:   "collection",
 		Short: "Manage collections on a Pelican origin",
 		Long:  "Manage collections on a Pelican origin server using OAuth2 authentication",
 	}
-	collectionsOutputJSON bool
 )
 
 // Director server response structures
@@ -105,7 +104,10 @@ func getDirectorOriginWebUrl(ctx context.Context) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return "", errors.Errorf("Director API returned status %d (failed to read body: %v)", resp.StatusCode, readErr)
+		}
 		return "", errors.Errorf("Director API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -124,7 +126,8 @@ func getDirectorOriginWebUrl(ctx context.Context) (string, error) {
 	}
 
 	// Use the first origin server found
-	// TODO: Could add a flag to specify which origin to use if multiple exist
+	// TODO: In a federation with multiple origins, this may not target the desired origin.
+	// Consider adding a --origin-url flag to explicitly specify the target origin server.
 	origin := servers[0]
 	if origin.WebURL == "" {
 		return "", errors.Errorf("origin server '%s' does not have a webUrl", origin.Name)
@@ -349,7 +352,7 @@ func makeCollectionAPIRequest(ctx context.Context, method, endpoint string, body
 
 // formatOutput formats output as JSON or human-readable based on global flag
 func formatOutput(data interface{}) error {
-	if collectionsOutputJSON {
+	if outputJSON {
 		jsonBytes, err := json.MarshalIndent(data, "", "  ")
 		if err != nil {
 			return errors.Wrap(err, "failed to marshal JSON")
@@ -832,8 +835,7 @@ var originCollectionsACLRevokeCmd = &cobra.Command{
 }
 
 func init() {
-	// Global JSON output flag
-	originCollectionsCmd.PersistentFlags().BoolVar(&collectionsOutputJSON, "json", false, "Output in JSON format")
+	// Use global --json flag from root.go for JSON output
 
 	// Create command flags
 	originCollectionsCreateCmd.Flags().String("name", "", "Collection name (required)")
@@ -854,13 +856,13 @@ func init() {
 	originCollectionsACLRevokeCmd.Flags().String("role", "", "Role for the ACL (required)")
 
 	// Register commands
-	originCollectionsCmd.AddCommand(originCollectionsListCmd)
-	originCollectionsCmd.AddCommand(originCollectionsCreateCmd)
-	originCollectionsCmd.AddCommand(originCollectionsGetCmd)
-	originCollectionsCmd.AddCommand(originCollectionsUpdateCmd)
-	originCollectionsCmd.AddCommand(originCollectionsDeleteCmd)
-	originCollectionsCmd.AddCommand(originCollectionsMetadataCmd)
-	originCollectionsCmd.AddCommand(originCollectionsACLCmd)
+	originCollectionCmd.AddCommand(originCollectionsListCmd)
+	originCollectionCmd.AddCommand(originCollectionsCreateCmd)
+	originCollectionCmd.AddCommand(originCollectionsGetCmd)
+	originCollectionCmd.AddCommand(originCollectionsUpdateCmd)
+	originCollectionCmd.AddCommand(originCollectionsDeleteCmd)
+	originCollectionCmd.AddCommand(originCollectionsMetadataCmd)
+	originCollectionCmd.AddCommand(originCollectionsACLCmd)
 
 	originCollectionsMetadataCmd.AddCommand(originCollectionsMetadataGetCmd)
 	originCollectionsMetadataCmd.AddCommand(originCollectionsMetadataSetCmd)

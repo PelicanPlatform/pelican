@@ -228,5 +228,5 @@ instead.
 	originUiResetCmd.Flags().String("user", "admin", "The user whose password should be reset.")
 	originUiResetCmd.Flags().Bool("stdin", false, "Read the password in from stdin.")
 
-	originCmd.AddCommand(originCollectionsCmd)
+	originCmd.AddCommand(originCollectionCmd)
 }
