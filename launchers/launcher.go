@@ -79,6 +79,11 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		return
 	}
 
+	// After config is loaded, check if director should enable broker
+	if modules.IsEnabled(server_structs.DirectorType) && param.Director_EnableBroker.GetBool() {
+		modules.Set(server_structs.BrokerType)
+	}
+
 	// Print Pelican config at server start if it's in debug or info level
 	if log.GetLevel() >= log.InfoLevel {
 		if err = config.PrintConfig(); err != nil {
@@ -115,9 +120,16 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	}
 
 	if modules.IsEnabled(server_structs.BrokerType) {
+		log.Debug("Enabling broker endpoints")
 		rootGroup := engine.Group("/", web_ui.ServerHeaderMiddleware)
 		broker.RegisterBroker(ctx, rootGroup)
 		broker.LaunchNamespaceKeyMaintenance(ctx, egrp)
+	}
+
+	// Directors with broker support need to initialize the broker client to handle reverse connections.
+	// This initializes the broker callback endpoint needed to reverse connections from origins/caches behind firewalls.
+	if modules.IsEnabled(server_structs.DirectorType) && param.Director_EnableBroker.GetBool() {
+		broker.InitializeBrokerClient(ctx, egrp, engine)
 	}
 
 	if modules.IsEnabled(server_structs.DirectorType) {
@@ -355,9 +367,10 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	// If we are a director, we will potentially contact other
 	// services with the broker, so we need to set up the broker dialer
+	var brokerDialer *broker.BrokerDialer
 	if modules.IsEnabled(server_structs.DirectorType) {
 		fmt.Println("Setting up broker dialer for director")
-		brokerDialer := broker.NewBrokerDialer(ctx, egrp)
+		brokerDialer = broker.NewBrokerDialer(ctx, egrp)
 		config.SetTransportDialer(brokerDialer.DialContext)
 		director.SetBrokerDialer(brokerDialer)
 	}
@@ -394,7 +407,11 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		// and not for each server. This is why we use a sync.Once here.
 		oncePrometheus.Do(func() {
 			metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusWarning, "Prometheus not started")
-			prometheusInitErr = web_ui.ConfigureEmbeddedPrometheus(ctx, engine)
+			var dialContextFunc func(context.Context, string, string) (net.Conn, error)
+			if brokerDialer != nil {
+				dialContextFunc = brokerDialer.DialContext
+			}
+			prometheusInitErr = web_ui.ConfigureEmbeddedPrometheus(ctx, engine, dialContextFunc)
 			if prometheusInitErr != nil {
 				prometheusInitErr = errors.Wrap(prometheusInitErr, "failed to configure embedded Prometheus instance")
 				metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusCritical, prometheusInitErr.Error())

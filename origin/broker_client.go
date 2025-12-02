@@ -91,6 +91,14 @@ func getTransport() *http.Transport {
 }
 
 func proxyOrigin(resp http.ResponseWriter, req *http.Request, engine *gin.Engine) {
+	// Handle /metrics endpoint - route to gin engine for Prometheus metrics
+	if req.URL.Path == "/metrics" {
+		PelicanBrokerApiRequests.WithLabelValues("origin").Inc()
+		engine.ServeHTTP(resp, req)
+		return
+	}
+
+	// Handle /api endpoints - route to gin engine
 	if strings.HasPrefix(req.URL.Path, "/api") {
 		PelicanBrokerApiRequests.WithLabelValues("origin").Inc()
 		engine.ServeHTTP(resp, req)
