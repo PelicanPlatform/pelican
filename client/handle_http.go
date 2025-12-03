@@ -1931,7 +1931,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			if os.IsNotExist(err) {
 				// If we're unpacking, the destination must be a directory. Create it directly.
 				if transfer.packOption != "" {
-					if err = os.MkdirAll(localPath, 0700); err != nil {
+					if err = os.MkdirAll(localPath, 0777); err != nil {
 						return
 					}
 					if info, err = os.Stat(localPath); err != nil {
@@ -1943,7 +1943,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 						directory = localPath
 						localPath = path.Join(directory, path.Base(transfer.remoteURL.Path))
 					}
-					if err = os.MkdirAll(directory, 0700); err != nil {
+					if err = os.MkdirAll(directory, 0777); err != nil {
 						return
 					}
 				}
