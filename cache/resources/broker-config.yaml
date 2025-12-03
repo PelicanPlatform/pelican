@@ -1,0 +1,24 @@
+# Cache configuration to test broker functionality
+# Note: Only enable broker for cache, not origin, because in the launcher only
+# one broker listener launches per server instance (see launchers/launcher.go:238 and 338)
+
+Director:
+  EnableBroker: true
+  # Disable director tests to avoid failures when origin can't be accessed via broker
+  OriginCacheHealthTestInterval: 1s
+
+Cache:
+  EnableBroker: true
+  PermittedNamespaces:
+    - /test
+
+Origin:
+  StorageType: "posix"
+  EnableBroker: false
+  EnableDirectReads: true
+  # Disable director test for origin since we're not using origin broker
+  DirectorTest: false
+  Exports:
+    - StoragePrefix: /<SHOULD BE OVERRIDDEN>
+      FederationPrefix: /test
+      Capabilities: ["PublicReads", "Writes", "DirectReads", "Listings"]

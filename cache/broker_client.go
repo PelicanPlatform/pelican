@@ -39,6 +39,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
@@ -252,6 +253,7 @@ func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group, engine *gin
 				srv := http.Server{
 					Handler: http.HandlerFunc(engine.ServeHTTP),
 				}
+				metrics.PelicanBrokerConnections.WithLabelValues("cache").Inc()
 				go func() {
 					// A one-shot listener should do a single "accept" then shutdown.
 					err = srv.Serve(listener)

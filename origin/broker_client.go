@@ -30,14 +30,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
@@ -54,21 +53,6 @@ var (
 	// It's possible to overwhelm the XRootD listen socket with requests.  This rate
 	// limiter will allow no more than 32 requests / second and 8 new ones in a burst
 	xrdConnLimit *rate.Limiter = rate.NewLimiter(32, 8)
-
-	PelicanBrokerConnections = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "pelican_broker_connections_total",
-		Help: "The number of connections made to the service via a connection broker.",
-	}, []string{"server_type"})
-
-	PelicanBrokerApiRequests = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "pelican_broker_api_requests_total",
-		Help: "The number of API requests made to the service via a connection broker.",
-	}, []string{"server_type"})
-
-	PelicanBrokerObjectRequests = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "pelican_broker_object_requests_total",
-		Help: "The number of object requests made to the service via a connection broker.",
-	})
 )
 
 // Return a custom HTTP transport object; starts with the default transport for
@@ -100,11 +84,11 @@ func proxyOrigin(resp http.ResponseWriter, req *http.Request, engine *gin.Engine
 
 	// Handle /api endpoints - route to gin engine
 	if strings.HasPrefix(req.URL.Path, "/api") {
-		PelicanBrokerApiRequests.WithLabelValues("origin").Inc()
+		metrics.PelicanBrokerApiRequests.WithLabelValues("origin").Inc()
 		engine.ServeHTTP(resp, req)
 		return
 	}
-	PelicanBrokerObjectRequests.Inc()
+	metrics.PelicanBrokerObjectRequests.Inc()
 	url := req.URL
 	url.Scheme = "https"
 	url.Host = param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Origin_Port.GetInt())
@@ -172,7 +156,7 @@ func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group, engine *gin
 				srv := http.Server{
 					Handler: http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) { proxyOrigin(resp, req, engine) }),
 				}
-				PelicanBrokerConnections.WithLabelValues("origin").Inc()
+				metrics.PelicanBrokerConnections.WithLabelValues("origin").Inc()
 				go func() {
 					// A one-shot listener should do a single "accept" then shutdown.
 					err = srv.Serve(listener)

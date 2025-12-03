@@ -364,6 +364,53 @@ func FilterTopLevelPrefixes(nsAds []server_structs.NamespaceAdV2) []server_struc
 	return uniquePrefixes
 }
 
+// SetBrokerURL sets the broker URL in the advertisement for servers that have broker support enabled.
+// Returns the broker URL string if successful, or an empty string if not applicable.
+func SetBrokerURL(ad *server_structs.OriginAdvertiseV2, serverType server_structs.ServerType, prefixes []string) error {
+	// Only set broker URL if there's exactly one prefix (this rule is inherited from the initial Broker implementation)
+	if len(prefixes) != 1 {
+		if len(prefixes) > 1 {
+			log.Warningf("Multiple prefixes are not yet supported with the broker. Skipping broker configuration")
+		}
+		return nil
+	}
+
+	// Check if broker is enabled for this server type
+	var brokerEnabled bool
+	switch serverType {
+	case server_structs.OriginType:
+		brokerEnabled = param.Origin_EnableBroker.GetBool()
+	case server_structs.CacheType:
+		brokerEnabled = param.Cache_EnableBroker.GetBool()
+	default:
+		return nil
+	}
+
+	if !brokerEnabled {
+		return nil
+	}
+
+	// Get federation info for broker endpoint
+	fedInfo, err := config.GetFederation(context.Background())
+	if err != nil {
+		return err
+	}
+
+	brokerUrl, err := url.Parse(fedInfo.BrokerEndpoint)
+	if err != nil {
+		return errors.Wrap(err, "Invalid Broker URL")
+	}
+
+	brokerUrl.Path = "/api/v1.0/broker/reverse"
+	values := brokerUrl.Query()
+	values.Set("origin", param.Server_Hostname.GetString())
+	values.Set("prefix", prefixes[0])
+	brokerUrl.RawQuery = values.Encode()
+	ad.BrokerURL = brokerUrl.String()
+
+	return nil
+}
+
 // Get an advertisement token for the given server. Advertisement tokens are signed by the server
 // and passed to the Director, which can then use them to check the server's identity. Tokens are
 // valid when the Director can query the public key for the given server from the Registry.
