@@ -275,7 +275,7 @@ func TestBroker(t *testing.T) {
 	externalWebUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	require.NoError(t, err)
 
-	err = LaunchRequestMonitor(ctxQuick, egrp, server_structs.CacheType, externalWebUrl.Hostname(), listenerChan)
+	err = LaunchRequestMonitor(ctxQuick, egrp, server_structs.CacheType, externalWebUrl.Hostname(), "", listenerChan)
 	require.NoError(t, err)
 
 	// Initiate the callback using the cache-based routines.

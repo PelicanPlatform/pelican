@@ -141,13 +141,19 @@ func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group, engine *gin
 		return
 	}
 
+	// The origin is registered under its external web URL, so we use that
+	// as the prefix for token authentication regardless of which address
+	// we're polling for. This ensures the broker can verify our tokens
+	// against the registered namespace.
+	registeredPrefix := server_structs.GetOriginNs(externalWebUrl.Host)
+
 	// Startup 5 continuous polling routines
 	for cnt := 0; cnt < 5; cnt += 1 {
-		err = broker.LaunchRequestMonitor(ctx, egrp, server_structs.OriginType, externalWebUrl.Host, listenerChan)
+		err = broker.LaunchRequestMonitor(ctx, egrp, server_structs.OriginType, externalWebUrl.Host, registeredPrefix, listenerChan)
 		if err != nil {
 			return
 		}
-		err = broker.LaunchRequestMonitor(ctx, egrp, server_structs.OriginType, originUrl.Host, listenerChan)
+		err = broker.LaunchRequestMonitor(ctx, egrp, server_structs.OriginType, originUrl.Host, registeredPrefix, listenerChan)
 		if err != nil {
 			return
 		}
