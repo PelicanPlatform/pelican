@@ -18,7 +18,11 @@
 
 package client
 
-import "fmt"
+import (
+	"fmt"
+	"math/rand"
+	"path/filepath"
+)
 
 // Convert b bytes to a human-friendly string with SI units
 //
@@ -35,4 +39,23 @@ func ByteCountSI(b int64) string {
 	}
 	return fmt.Sprintf("%.1f %cB",
 		float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+// generateTempPath creates a temporary filename for a transfer
+// Uses rsync-style naming: .basename.XXXXXX where X is a random alphanumeric character
+func generateTempPath(finalPath string) string {
+	dir := filepath.Dir(finalPath)
+	base := filepath.Base(finalPath)
+	suffix := generateRandomSuffix(6)
+	return filepath.Join(dir, fmt.Sprintf(".%s.%s", base, suffix))
+}
+
+// generateRandomSuffix creates a random alphanumeric string of the specified length
+func generateRandomSuffix(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = charset[rand.Intn(len(charset))]
+	}
+	return string(b)
 }
