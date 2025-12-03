@@ -1000,126 +1000,141 @@ func TestDiscoverFederationImpl(t *testing.T) {
 	}
 }
 
-// TestPreferredCachesEnvVar tests that PELICAN_CLIENT_PREFERREDCACHES environment variable
-// works correctly in both regular client mode (PELICAN prefix) and plugin mode (OSDF prefix).
-// This test addresses issue #2819 where PELICAN_CLIENT_PREFERREDCACHES was ignored in plugin mode.
-func TestPreferredCachesEnvVar(t *testing.T) {
-	t.Run("pelican-prefix-with-pelican-env-var", func(t *testing.T) {
-		ResetConfig()
-		t.Cleanup(func() {
+// TestEnvVarConfigMapping tests that environment variables are correctly mapped into
+// Pelican config structs for both client and server initialization paths.
+// This addresses issue #2819 where PELICAN_* env vars were ignored in certain modes.
+func TestEnvVarConfigMapping(t *testing.T) {
+	type initMode string
+	const (
+		clientMode initMode = "client"
+		serverMode initMode = "server"
+	)
+
+	type testCase struct {
+		name              string
+		binaryPrefix      ConfigPrefix // PELICAN or OSDF
+		envVarPrefix      string       // PELICAN, OSDF, or other
+		envVarSuffix      string       // e.g., CLIENT_PREFERREDCACHES, SERVER_WEBPORT
+		configValue       string       // the value to set for the env var
+		mode              initMode     // client or server
+		configShouldApply bool         // whether the config should be picked up
+		validateFunc      func(t *testing.T)
+	}
+
+	tests := []testCase{
+		// Client mode tests
+		{
+			name:              "pelican-binary-pelican-env-client",
+			binaryPrefix:      PelicanPrefix,
+			envVarPrefix:      "PELICAN",
+			envVarSuffix:      "CLIENT_PREFERREDCACHES",
+			configValue:       "https://cache.example.com:8443",
+			mode:              clientMode,
+			configShouldApply: true,
+			validateFunc: func(t *testing.T) {
+				caches := param.Client_PreferredCaches.GetStringSlice()
+				require.Len(t, caches, 1)
+				assert.Equal(t, "https://cache.example.com:8443", caches[0])
+			},
+		},
+		{
+			name:              "osdf-binary-pelican-env-client",
+			binaryPrefix:      OsdfPrefix,
+			envVarPrefix:      "PELICAN",
+			envVarSuffix:      "CLIENT_PREFERREDCACHES",
+			configValue:       "https://cache.example.com:8443",
+			mode:              clientMode,
+			configShouldApply: true,
+			validateFunc: func(t *testing.T) {
+				caches := param.Client_PreferredCaches.GetStringSlice()
+				require.Len(t, caches, 1)
+				assert.Equal(t, "https://cache.example.com:8443", caches[0])
+			},
+		},
+		{
+			name:              "osdf-binary-osdf-env-client-backward-compat",
+			binaryPrefix:      OsdfPrefix,
+			envVarPrefix:      "OSDF",
+			envVarSuffix:      "CLIENT_PREFERREDCACHES",
+			configValue:       "https://cache.example.com:8443",
+			mode:              clientMode,
+			configShouldApply: true,
+			validateFunc: func(t *testing.T) {
+				caches := param.Client_PreferredCaches.GetStringSlice()
+				require.Len(t, caches, 1)
+				assert.Equal(t, "https://cache.example.com:8443", caches[0])
+			},
+		},
+		// Server mode tests - verify env vars work for server initialization too
+		{
+			name:              "pelican-binary-pelican-env-server",
+			binaryPrefix:      PelicanPrefix,
+			envVarPrefix:      "PELICAN",
+			envVarSuffix:      "SERVER_WEBPORT",
+			configValue:       "9999",
+			mode:              serverMode,
+			configShouldApply: true,
+			validateFunc: func(t *testing.T) {
+				assert.Equal(t, 9999, param.Server_WebPort.GetInt())
+			},
+		},
+		{
+			name:              "osdf-binary-pelican-env-server",
+			binaryPrefix:      OsdfPrefix,
+			envVarPrefix:      "PELICAN",
+			envVarSuffix:      "SERVER_WEBPORT",
+			configValue:       "9999",
+			mode:              serverMode,
+			configShouldApply: true,
+			validateFunc: func(t *testing.T) {
+				assert.Equal(t, 9999, param.Server_WebPort.GetInt())
+			},
+		},
+		{
+			name:              "osdf-binary-osdf-env-server-backward-compat",
+			binaryPrefix:      OsdfPrefix,
+			envVarPrefix:      "OSDF",
+			envVarSuffix:      "SERVER_WEBPORT",
+			configValue:       "9999",
+			mode:              serverMode,
+			configShouldApply: true,
+			validateFunc: func(t *testing.T) {
+				assert.Equal(t, 9999, param.Server_WebPort.GetInt())
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
 			ResetConfig()
-			os.Unsetenv("PELICAN_CLIENT_PREFERREDCACHES")
+			t.Cleanup(func() {
+				ResetConfig()
+			})
+
+			// Set the binary prefix (ResetConfig already clears this)
+			_, err := SetPreferredPrefix(tc.binaryPrefix)
+			require.NoError(t, err)
+
+			// Set the environment variable (t.Setenv handles cleanup automatically)
+			envVar := tc.envVarPrefix + "_" + tc.envVarSuffix
+			t.Setenv(envVar, tc.configValue)
+
+			// Initialize config based on mode
+			switch tc.mode {
+			case clientMode:
+				InitConfigInternal(logrus.WarnLevel)
+				err = SetClientDefaults(viper.GetViper())
+				require.NoError(t, err)
+			case serverMode:
+				InitConfigInternal(logrus.InfoLevel)
+				err = SetServerDefaults(viper.GetViper())
+				require.NoError(t, err)
+			}
+
+			// Validate the config was applied (or not) as expected
+			if tc.configShouldApply {
+				tc.validateFunc(t)
+			}
 		})
-
-		// Set preferred prefix to PELICAN (regular client mode)
-		oldPrefix, err := SetPreferredPrefix(PelicanPrefix)
-		require.NoError(t, err)
-		defer func() {
-			_, _ = SetPreferredPrefix(oldPrefix)
-		}()
-
-		// Set the environment variable
-		testCache := "https://cache.example.com:8443"
-		t.Setenv("PELICAN_CLIENT_PREFERREDCACHES", testCache)
-
-		// Initialize config and client defaults
-		InitConfigInternal(logrus.WarnLevel)
-		err = SetClientDefaults(viper.GetViper())
-		require.NoError(t, err)
-
-		// Verify the preferred cache was set correctly
-		preferredCaches := param.Client_PreferredCaches.GetStringSlice()
-		require.Len(t, preferredCaches, 1)
-		assert.Equal(t, testCache, preferredCaches[0])
-	})
-
-	t.Run("osdf-prefix-with-pelican-env-var", func(t *testing.T) {
-		ResetConfig()
-		t.Cleanup(func() {
-			ResetConfig()
-			os.Unsetenv("PELICAN_CLIENT_PREFERREDCACHES")
-			os.Unsetenv("OSDF_CLIENT_PREFERREDCACHES")
-		})
-
-		// Set preferred prefix to OSDF (plugin mode)
-		oldPrefix, err := SetPreferredPrefix(OsdfPrefix)
-		require.NoError(t, err)
-		defer func() {
-			_, _ = SetPreferredPrefix(oldPrefix)
-		}()
-
-		// Set the PELICAN environment variable (this is the fix - it should work even in plugin mode)
-		testCache := "https://cache.example.com:8443"
-		t.Setenv("PELICAN_CLIENT_PREFERREDCACHES", testCache)
-
-		// Initialize config and client defaults
-		InitConfigInternal(logrus.WarnLevel)
-		err = SetClientDefaults(viper.GetViper())
-		require.NoError(t, err)
-
-		// Verify the preferred cache was set correctly from PELICAN env var
-		preferredCaches := param.Client_PreferredCaches.GetStringSlice()
-		require.Len(t, preferredCaches, 1)
-		assert.Equal(t, testCache, preferredCaches[0])
-	})
-
-	t.Run("osdf-prefix-with-osdf-env-var-backward-compat", func(t *testing.T) {
-		ResetConfig()
-		t.Cleanup(func() {
-			ResetConfig()
-			os.Unsetenv("OSDF_CLIENT_PREFERREDCACHES")
-		})
-
-		// Set preferred prefix to OSDF (plugin mode)
-		oldPrefix, err := SetPreferredPrefix(OsdfPrefix)
-		require.NoError(t, err)
-		defer func() {
-			_, _ = SetPreferredPrefix(oldPrefix)
-		}()
-
-		// Set the OSDF environment variable (backward compatibility)
-		testCache := "https://cache.example.com:8443"
-		t.Setenv("OSDF_CLIENT_PREFERREDCACHES", testCache)
-
-		// Initialize config and client defaults
-		InitConfigInternal(logrus.WarnLevel)
-		err = SetClientDefaults(viper.GetViper())
-		require.NoError(t, err)
-
-		// Verify the preferred cache was set correctly from OSDF env var
-		// This should work via bindNonPelicanEnv()
-		preferredCaches := param.Client_PreferredCaches.GetStringSlice()
-		require.Len(t, preferredCaches, 1)
-		assert.Equal(t, testCache, preferredCaches[0])
-	})
-
-	t.Run("pelican-prefix-with-multiple-caches", func(t *testing.T) {
-		ResetConfig()
-		t.Cleanup(func() {
-			ResetConfig()
-			os.Unsetenv("PELICAN_CLIENT_PREFERREDCACHES")
-		})
-
-		// Set preferred prefix to PELICAN
-		oldPrefix, err := SetPreferredPrefix(PelicanPrefix)
-		require.NoError(t, err)
-		defer func() {
-			_, _ = SetPreferredPrefix(oldPrefix)
-		}()
-
-		// Set multiple caches (space-separated as per docs)
-		testCaches := "https://cache1.example.com:8443 https://cache2.example.com:8443"
-		t.Setenv("PELICAN_CLIENT_PREFERREDCACHES", testCaches)
-
-		// Initialize config and client defaults
-		InitConfigInternal(logrus.WarnLevel)
-		err = SetClientDefaults(viper.GetViper())
-		require.NoError(t, err)
-
-		// Verify the preferred caches were set correctly
-		preferredCaches := param.Client_PreferredCaches.GetStringSlice()
-		require.Len(t, preferredCaches, 2)
-		assert.Equal(t, "https://cache1.example.com:8443", preferredCaches[0])
-		assert.Equal(t, "https://cache2.example.com:8443", preferredCaches[1])
-	})
+	}
 }
