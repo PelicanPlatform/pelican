@@ -1289,6 +1289,7 @@ func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, adV2 *se
 	}
 
 	sAd := server_structs.ServerAd{
+		ServerID:            adV2.ServerID,
 		RegistryPrefix:      adV2.RegistryPrefix,
 		StorageType:         st,
 		DisableDirectorTest: adV2.DisableDirectorTest,

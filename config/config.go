@@ -304,6 +304,31 @@ func GetEnabledServerString(lowerCase bool) []string {
 	}
 }
 
+// ValidateServerType checks if any currently enabled server matches the allowed server types slice.
+func ValidateServerType(allowedServerTypes []server_structs.ServerType) bool {
+	if len(allowedServerTypes) == 0 {
+		return false
+	}
+
+	enabledServers := GetEnabledServerString(true)
+	if len(enabledServers) == 0 {
+		return false
+	}
+
+	allowed := make(map[string]struct{}, len(allowedServerTypes))
+	for _, serverType := range allowedServerTypes {
+		allowed[strings.ToLower(serverType.String())] = struct{}{}
+	}
+
+	for _, enabled := range enabledServers {
+		if _, ok := allowed[enabled]; ok {
+			return true
+		}
+	}
+
+	return false
+}
+
 // Based on the name of the current binary, determine the preferred "style"
 // of behavior.  For example, a binary with the "osdf_" prefix should utilize
 // the known URLs for OSDF.  For "pelican"-style commands, the user will

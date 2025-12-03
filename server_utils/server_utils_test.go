@@ -213,7 +213,7 @@ type mockServer struct {
 func (m *mockServer) GetServerType() server_structs.ServerType           { return m.serverType }
 func (m *mockServer) SetNamespaceAds(ads []server_structs.NamespaceAdV2) { m.namespaceAds = ads }
 func (m *mockServer) GetNamespaceAds() []server_structs.NamespaceAdV2    { return m.namespaceAds }
-func (m *mockServer) CreateAdvertisement(name, serverUrl, serverWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
+func (m *mockServer) CreateAdvertisement(name, id, serverUrl, serverWebUrl string, downtimes []server_structs.Downtime) (*server_structs.OriginAdvertiseV2, error) {
 	return nil, nil
 }
 func (m *mockServer) GetNamespaceAdsFromDirector() error { return nil }

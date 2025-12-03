@@ -457,11 +457,13 @@ func (dir *directorInfo) sendAd(ctx context.Context, directorUrlStr string, ad *
 
 // Return the name used by the service
 //
-// Utilizes server_utils.GetServiceName but caches the result in
+// Utilizes server_utils.GetServerMetadata but caches the result in
 // this module for faster lookups
 func getMyName(ctx context.Context) (string, error) {
 	directorNameOnce.Do(func() {
-		directorName, directorNameError = server_utils.GetServiceName(ctx, server_structs.DirectorType)
+		var metadata server_structs.ServerRegistration
+		metadata, directorNameError = server_utils.GetServerMetadata(ctx, server_structs.DirectorType)
+		directorName = metadata.Name
 	})
 	if directorNameError != nil {
 		return "", directorNameError

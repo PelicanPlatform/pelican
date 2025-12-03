@@ -21,6 +21,7 @@ package web_ui
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -309,6 +310,52 @@ func AdminAuthHandler(ctx *gin.Context) {
 				Msg:    msg,
 			})
 	}
+}
+
+// DowntimeAuthHandler allows EITHER:
+// 1. Admin cookie authentication (req from this server itself), OR
+// 2. Server bearer token authentication (req from another server, i.e. origin/cache)
+func DowntimeAuthHandler(ctx *gin.Context) {
+	// First, try cookie-based admin auth (this block consolidates AuthHandler and AdminAuthHandler)
+	user, _, groups, err := GetUserGroups(ctx)
+	if user != "" && err == nil {
+		// User has valid cookie, check if admin
+		isAdmin, _ := CheckAdmin(user)
+		if isAdmin {
+			ctx.Set("User", user)
+			ctx.Set("Groups", groups)
+			ctx.Set("AuthMethod", "admin-cookie")
+			ctx.Next()
+			return
+		}
+	}
+
+	// If not admin cookie, try bearer token from header
+	var requiredScope token_scopes.TokenScope
+	switch ctx.Request.Method {
+	case http.MethodPost:
+		requiredScope = token_scopes.Pelican_DowntimeCreate
+	case http.MethodPut:
+		requiredScope = token_scopes.Pelican_DowntimeModify
+	case http.MethodDelete:
+		requiredScope = token_scopes.Pelican_DowntimeDelete
+	default:
+		// Fallback: require create/modify/delete not for GETs (which don't hit this handler).
+		requiredScope = token_scopes.Pelican_DowntimeModify
+	}
+	status, ok, err := token.Verify(ctx, token.AuthOption{
+		Sources: []token.TokenSource{token.Header},
+		Issuers: []token.TokenIssuer{token.RegisteredServer},
+		Scopes:  []token_scopes.TokenScope{requiredScope},
+	})
+	if !ok || err != nil {
+		ctx.AbortWithStatusJSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprint("Failed to verify the token: ", err),
+		})
+		return
+	}
+
 }
 
 // Handle regular username/password based login

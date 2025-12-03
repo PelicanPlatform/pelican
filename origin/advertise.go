@@ -22,13 +22,11 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"strings"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/features"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
@@ -78,7 +76,7 @@ func (server *OriginServer) GetRequiredFeatures() []features.Feature {
 	return requiredFeatures
 }
 
-func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
+func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWebUrl string, downtimes []server_structs.Downtime) (*server_structs.OriginAdvertiseV2, error) {
 	isGlobusBackend := param.Origin_StorageType.GetString() == string(server_structs.OriginStorageGlobus)
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	serverIssuerUrlStr, err := config.GetServerIssuerURL()
@@ -161,12 +159,6 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		prefixes = append(prefixes, export.FederationPrefix)
 	}
 
-	// Fetch origin's active and future downtimes
-	downtimes, err := database.GetIncompleteDowntimes(strings.ToLower(server_structs.OriginType.String()))
-	if err != nil {
-		return nil, err
-	}
-
 	// Determine whether this origin requires any special features that may place
 	// limitations on the other servers (e.g. caches) it can work with.
 	requiredFeatures := server.GetRequiredFeatures()
@@ -186,6 +178,7 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 	status := metrics.GetHealthStatus().OverallStatus
 
 	ad := server_structs.OriginAdvertiseV2{
+		ServerID:       id,
 		RegistryPrefix: registryPrefix,
 		DataURL:        originUrlStr,
 		WebURL:         originWebUrl,
@@ -209,9 +202,9 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		}},
 		StorageType:         ost,
 		DisableDirectorTest: !param.Origin_DirectorTest.GetBool(),
-		Downtimes:           downtimes,
 		RequiredFeatures:    featureNames,
 		Status:              status,
+		Downtimes:           downtimes,
 	}
 	ad.Initialize(name)
 

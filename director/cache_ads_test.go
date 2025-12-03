@@ -503,3 +503,127 @@ func TestPopulateEWMAStatusWeightSequence(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyDowntimeFilters(t *testing.T) {
+	now := time.Now().UTC().UnixMilli()
+
+	activeDowntime := server_structs.Downtime{
+		ServerName: "active-new",
+		StartTime:  now - 1_000,
+		EndTime:    now + 1_000,
+	}
+	tempAllowedDowntime := server_structs.Downtime{
+		ServerName: "temp-allowed",
+		StartTime:  now - 500,
+		EndTime:    now + 500,
+	}
+	futureDowntime := server_structs.Downtime{
+		ServerName: "future-only",
+		StartTime:  now + 5_000,
+		EndTime:    now + 6_000,
+	}
+	indefDowntime := server_structs.Downtime{
+		ServerName: "indef",
+		StartTime:  now - 2_000,
+		EndTime:    server_structs.IndefiniteEndTime,
+	}
+	permFilteredDowntime := server_structs.Downtime{
+		ServerName: "perm-filtered",
+		StartTime:  now - 1_000,
+		EndTime:    now + 1_000,
+	}
+
+	offlineOnly := server_structs.Downtime{
+		ServerName: "offline-only",
+		StartTime:  now - 10_000,
+		EndTime:    now - 5_000,
+	}
+
+	allDowntimes := []server_structs.Downtime{
+		activeDowntime,
+		tempAllowedDowntime,
+		futureDowntime,
+		indefDowntime,
+		permFilteredDowntime,
+		offlineOnly,
+	}
+
+	currentFilters := map[string]filterType{
+		"perm-filtered":       permFiltered,
+		"temp-filter-cleanup": tempFiltered,
+		"temp-allowed":        tempAllowed,
+	}
+	currentFederation := map[string][]server_structs.Downtime{
+		"legacy": {
+			{ServerName: "legacy"},
+		},
+	}
+
+	newFilters, newFederation := applyDowntimeFilters(allDowntimes, currentFilters, currentFederation)
+
+	require.NotNil(t, newFilters)
+	require.NotNil(t, newFederation)
+
+	// Ensure the original maps are untouched.
+	assert.Contains(t, currentFilters, "temp-filter-cleanup")
+	assert.Contains(t, currentFederation, "legacy")
+
+	// tempFiltered entries should be removed from the new state.
+	_, exists := newFilters["temp-filter-cleanup"]
+	assert.False(t, exists)
+
+	// Existing filters that are not tempAllowed should stay as-is.
+	assert.Equal(t, permFiltered, newFilters["perm-filtered"])
+	// tempAllowed filters should be overwritten if there is an active downtime.
+	assert.Equal(t, tempFiltered, newFilters["temp-allowed"])
+
+	// Active downtimes should mark the server as tempFiltered.
+	assert.Equal(t, tempFiltered, newFilters["active-new"])
+	assert.Equal(t, tempFiltered, newFilters["indef"])
+
+	// Future downtimes should not mark servers as filtered yet.
+	_, exists = newFilters["future-only"]
+	assert.False(t, exists)
+
+	// Federation downtimes include every server from the provided list, including offline ones.
+	assert.Len(t, newFederation["active-new"], 1)
+	assert.Len(t, newFederation["offline-only"], 1)
+	assert.NotContains(t, newFederation, "legacy")
+}
+
+func TestGetCachedDowntimesDedup(t *testing.T) {
+	serverName := "TEST_CACHE"
+	now := time.Now().UnixMilli()
+	dup := server_structs.Downtime{
+		UUID:        "dup-id",
+		ServerName:  serverName,
+		ServerID:    "server-id",
+		Source:      "cache",
+		StartTime:   now - 1_000,
+		EndTime:     now + 1_000,
+		Description: "cache downtime",
+	}
+	registry := server_structs.Downtime{
+		UUID:        "registry-id",
+		ServerName:  serverName,
+		Source:      "registry",
+		StartTime:   now + 10_000,
+		EndTime:     server_structs.IndefiniteEndTime,
+		Description: "registry downtime",
+	}
+
+	filteredServersMutex.Lock()
+	serverDowntimes = map[string][]server_structs.Downtime{
+		serverName: {dup},
+	}
+	federationDowntimes = map[string][]server_structs.Downtime{
+		serverName: {dup, registry},
+	}
+	filteredServersMutex.Unlock()
+
+	downtimes, err := getCachedDowntimes(serverName)
+	require.NoError(t, err)
+	require.Len(t, downtimes, 2)
+
+	assert.ElementsMatch(t, []string{"dup-id", "registry-id"}, []string{downtimes[0].UUID, downtimes[1].UUID})
+}
