@@ -226,8 +226,10 @@ func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group, engine *gin
 	}
 
 	// Startup 5 continuous polling routines
+	// For caches, the registered prefix matches the constructed one (hostname only),
+	// so we pass an empty string to use the default behavior.
 	for cnt := 0; cnt < 5; cnt += 1 {
-		err = broker.LaunchRequestMonitor(ctx, egrp, server_structs.CacheType, externalWebUrl.Hostname(), listenerChan)
+		err = broker.LaunchRequestMonitor(ctx, egrp, server_structs.CacheType, externalWebUrl.Hostname(), "", listenerChan)
 		if err != nil {
 			return
 		}
