@@ -47,6 +47,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -3570,4 +3571,110 @@ func TestIsIdleConnectionError(t *testing.T) {
 	t.Run("handles_nil_error", func(t *testing.T) {
 		assert.False(t, isIdleConnectionError(nil), "Should handle nil error")
 	})
+}
+
+// TestDirectoryPermissionsRespectUmask tests that directories created during
+// downloads respect different umask values
+func TestDirectoryPermissionsRespectUmask(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{})
+
+	// Save original umask
+	oldUmask := syscall.Umask(0)
+	defer syscall.Umask(oldUmask)
+
+	testCases := []struct {
+		name         string
+		umask        int
+		expectedPerm os.FileMode
+	}{
+		{
+			name:         "umask_0022_standard",
+			umask:        0022,
+			expectedPerm: 0755, // drwxr-xr-x - most common default
+		},
+		{
+			name:         "umask_0002_group_writable",
+			umask:        0002,
+			expectedPerm: 0775, // drwxrwxr-x
+		},
+		{
+			name:         "umask_0077_restrictive",
+			umask:        0077,
+			expectedPerm: 0700, // drwx------
+		},
+		{
+			name:         "umask_0027_group_readable",
+			umask:        0027,
+			expectedPerm: 0750, // drwxr-x---
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
+			defer cancel()
+
+			// Set the test umask
+			syscall.Umask(tc.umask)
+
+			// Create a mock HTTP server that serves a file
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Length", "13")
+				w.WriteHeader(http.StatusOK)
+				_, _ = io.WriteString(w, "test content\n")
+			}))
+			defer server.Close()
+
+			serverURL, err := url.Parse(server.URL)
+			require.NoError(t, err)
+
+			tempDir := t.TempDir()
+			destPath := filepath.Join(tempDir, "testdir", "subdir", "file.txt")
+
+			pUrl, err := pelican_url.Parse("pelican://test/file.txt", nil, nil)
+			require.NoError(t, err)
+
+			// Create a minimal transfer job and transfer file
+			job := &TransferJob{
+				ctx:       ctx,
+				uuid:      uuid.New(),
+				remoteURL: pUrl,
+			}
+
+			transfer := &transferFile{
+				ctx:       ctx,
+				job:       job,
+				xferType:  transferTypeDownload,
+				localPath: destPath,
+				remoteURL: serverURL,
+				attempts:  []transferAttemptDetails{{Url: serverURL, Proxy: false}},
+			}
+
+			// Call downloadObject which will create the directories
+			_, err = downloadObject(transfer)
+			require.NoError(t, err)
+
+			// Check the top-level directory permissions
+			dirPath := filepath.Join(tempDir, "testdir")
+			info, err := os.Stat(dirPath)
+			require.NoError(t, err)
+
+			actualPerm := info.Mode().Perm()
+
+			// Assert that the directory permission match the expected permissions based on the umask
+			assert.Equal(t, tc.expectedPerm, actualPerm,
+				fmt.Sprintf("With umask %#o, directory should have permissions %#o but has %#o",
+					tc.umask, tc.expectedPerm, actualPerm))
+
+			// Also check the subdirectory has the same permissions
+			subdirPath := filepath.Join(tempDir, "testdir", "subdir")
+			subinfo, err := os.Stat(subdirPath)
+			require.NoError(t, err)
+
+			actualSubPerm := subinfo.Mode().Perm()
+			assert.Equal(t, tc.expectedPerm, actualSubPerm,
+				fmt.Sprintf("Subdirectory with umask %#o should have %#o but has %#o",
+					tc.umask, tc.expectedPerm, actualSubPerm))
+		})
+	}
 }
