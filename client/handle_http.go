@@ -276,6 +276,7 @@ type (
 		project            string
 		writer             io.WriteCloser // Optional writer for downloads - if set, write to this instead of localPath
 		reader             io.ReadCloser  // Optional reader for uploads - if set, read from this instead of localPath
+		inPlace            bool           // If true, write directly to final destination; if false, use temporary file
 	}
 
 	// A TransferJob associated with a client's request
@@ -352,6 +353,7 @@ type (
 	identTransferOptionDepth           struct{}
 	identTransferOptionWriter          struct{}
 	identTransferOptionReader          struct{}
+	identTransferOptionInPlace         struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -731,6 +733,15 @@ func WithRecursive(recursive bool) TransferOption {
 // A depth of -1 means unlimited depth.
 func WithDepth(depth int) TransferOption {
 	return option.New(identTransferOptionDepth{}, depth)
+}
+
+// Create an option to specify whether to write files in-place or use temporary files
+//
+// When inPlace is false (default), files are written to temporary names and atomically
+// renamed on success (similar to rsync's default behavior). When true, files are written
+// directly to their final destination (similar to rsync's --inplace option).
+func WithInPlace(inPlace bool) TransferOption {
+	return option.New(identTransferOptionInPlace{}, inPlace)
 }
 
 // Create a new client to work with an engine
@@ -1124,6 +1135,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		uuid:           id,
 		project:        project,
 		token:          NewTokenGenerator(&copyUrl, nil, operation, !tc.skipAcquire),
+		inPlace:        false, // Default to using temporary files (rsync-style)
 	}
 	if upload {
 		tj.xferType = transferTypeUpload
@@ -1159,6 +1171,8 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			tj.writer = option.Value().(io.WriteCloser)
 		case identTransferOptionReader{}:
 			tj.reader = option.Value().(io.ReadCloser)
+		case identTransferOptionInPlace{}:
+			tj.inPlace = option.Value().(bool)
 		}
 	}
 
