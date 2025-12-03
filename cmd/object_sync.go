@@ -49,6 +49,7 @@ func init() {
 	flagSet.StringP("cache", "c", "", `A comma-separated list of preferred caches to try for the transfer, where a "+" in the list indicates
 the client should fallback to discovered caches if all preferred caches fail.`)
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
+	flagSet.Bool("inplace", false, "Write files directly to destination (default: use temporary files)")
 	objectCmd.AddCommand(syncCmd)
 }
 
@@ -100,6 +101,7 @@ func syncMain(cmd *cobra.Command, args []string) {
 	}
 
 	tokenLocation, _ := cmd.Flags().GetString("token")
+	inPlace, _ := cmd.Flags().GetBool("inplace")
 
 	pb := newProgressBar()
 	defer pb.shutdown()
@@ -171,7 +173,8 @@ func syncMain(cmd *cobra.Command, args []string) {
 		for _, src := range sources {
 			if _, err = client.DoGet(ctx, src, dest, true,
 				client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation),
-				client.WithCaches(caches...), client.WithSynchronize(client.SyncSize)); err != nil {
+				client.WithCaches(caches...), client.WithSynchronize(client.SyncSize),
+				client.WithInPlace(inPlace)); err != nil {
 				lastSrc = src
 				break
 			}
