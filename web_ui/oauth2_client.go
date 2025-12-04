@@ -388,6 +388,8 @@ func handleOAuthCallback(ctx *gin.Context) {
 
 	var idToken = make(map[string]interface{})
 	if idTokenRaw := token.Extra("id_token"); idTokenRaw != nil {
+		log.Debugln("ID token from auth provider:", idTokenRaw)
+
 		// We were given this ID token by the authentication provider, not
 		// some third party. If we don't trust the provider, we have greater
 		// issues.
