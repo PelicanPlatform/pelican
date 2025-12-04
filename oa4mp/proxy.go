@@ -28,16 +28,21 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
@@ -65,24 +70,50 @@ func getTransport() *http.Transport {
 	return transport
 }
 
+// mergeGroups merges two slices of groups, removing duplicates.
+func mergeGroups(groups1, groups2 []string) []string {
+	seen := make(map[string]struct{})
+	result := make([]string, 0, len(groups1)+len(groups2))
+
+	for _, g := range groups1 {
+		if _, ok := seen[g]; !ok {
+			seen[g] = struct{}{}
+			result = append(result, g)
+		}
+	}
+	for _, g := range groups2 {
+		if _, ok := seen[g]; !ok {
+			seen[g] = struct{}{}
+			result = append(result, g)
+		}
+	}
+	return result
+}
+
 func calculateAllowedScopes(user string, groupsList []string) ([]string, []string) {
 	if len(compiledAuthzRules) == 0 {
+		log.Debugf("calculateAllowedScopes: compiledAuthzRules is empty")
 		return []string{}, []string{}
 	}
 
+	log.Debugf("calculateAllowedScopes: user=%s, groupsList=%v, numRules=%d", user, groupsList, len(compiledAuthzRules))
 	scopeSet := make(map[string]struct{})
 	groupSet := make(map[string]struct{})
 	userEscaped := url.PathEscape(user)
-	for _, rule := range compiledAuthzRules {
+	for idx, rule := range compiledAuthzRules {
+		log.Debugf("calculateAllowedScopes: Processing rule %d: prefix=%s, actions=%v, groupLiterals=%v, groupRegexes=%d, userSet=%v",
+			idx, rule.Prefix, rule.Actions, rule.GroupLiterals, len(rule.GroupRegexes), rule.UserSet)
 		// First, check if the user is allowed by this rule
 		if len(rule.UserSet) > 0 {
 			if _, ok := rule.UserSet[user]; !ok {
+				log.Debugf("calculateAllowedScopes: Rule %d skipped - user not in UserSet", idx)
 				continue
 			}
 		}
 
 		// Next, check if the rule has group requirements.
 		hasGroupRequirements := len(rule.GroupLiterals) > 0 || len(rule.GroupRegexes) > 0
+		log.Debugf("calculateAllowedScopes: Rule %d hasGroupRequirements=%v", idx, hasGroupRequirements)
 		currentMatchingGroups := make([]string, 0)
 		if hasGroupRequirements {
 			for _, group := range groupsList {
@@ -98,9 +129,11 @@ func calculateAllowedScopes(user string, groupsList []string) ([]string, []strin
 				}
 				if literalMatch || regexMatch {
 					currentMatchingGroups = append(currentMatchingGroups, group)
+					log.Debugf("calculateAllowedScopes: Rule %d matched group: %s", idx, group)
 				}
 			}
 			if len(currentMatchingGroups) == 0 {
+				log.Debugf("calculateAllowedScopes: Rule %d skipped - no matching groups found", idx)
 				continue
 			}
 		}
@@ -190,7 +223,81 @@ func calculateAllowedScopes(user string, groupsList []string) ([]string, []strin
 		matchedGroups = append(matchedGroups, group)
 	}
 
+	log.Debugf("calculateAllowedScopes: Final - allowedScopes=%v, matchedGroups=%v, groupSet=%v", allowedScopes, matchedGroups, groupSet)
 	return allowedScopes, matchedGroups
+}
+
+// getUserCollectionScopes returns collection scopes and matched groups for a user.
+// The matched groups are groups that have ACLs on collections, which should be
+// included in the token's wlcg.groups claim for collection ACL checking.
+func getUserCollectionScopes(db *gorm.DB, user string, groupsList []string) (scopes []string, matchedGroups []string, err error) {
+	scopes = make([]string, 0)
+	matchedGroupSet := make(map[string]struct{})
+
+	// Any authenticated user can create new collections - they become the owner.
+	// This is a capability scope, not tied to an existing resource.
+	scopes = append(scopes, token_scopes.Collection_Create.String()+":/")
+
+	// Any authenticated user can list/read collections - the actual access control
+	// is handled at the database level based on ACLs and visibility.
+	scopes = append(scopes, token_scopes.Collection_Read.String()+":/")
+
+	userGroup := "user-" + user
+	if !slices.Contains(groupsList, userGroup) {
+		groupsList = append(groupsList, userGroup)
+	}
+
+	var acls []database.CollectionACL
+	if result := db.
+		Joins("JOIN collections ON collections.id = collection_acls.collection_id").
+		Where("collection_acls.group_id IN ?", groupsList).
+		Find(&acls); result.Error != nil {
+		return nil, nil, result.Error
+	}
+
+	collectionPerms := make(map[string]database.AclRole)
+	for _, acl := range acls {
+		if acl.ExpiresAt != nil && acl.ExpiresAt.Before(time.Now()) {
+			continue
+		}
+
+		// Track which groups have ACLs (for wlcg.groups claim)
+		matchedGroupSet[acl.GroupID] = struct{}{}
+
+		existingRole, ok := collectionPerms[acl.CollectionID]
+		if !ok {
+			collectionPerms[acl.CollectionID] = acl.Role
+		} else {
+			// Owner > Write > Read
+			if acl.Role == database.AclRoleOwner {
+				collectionPerms[acl.CollectionID] = database.AclRoleOwner
+			} else if acl.Role == database.AclRoleWrite && (existingRole != database.AclRoleOwner && existingRole != database.AclRoleWrite) {
+				collectionPerms[acl.CollectionID] = database.AclRoleWrite
+			}
+		}
+	}
+
+	for collectionID, role := range collectionPerms {
+		switch role {
+		case database.AclRoleOwner:
+			scopes = append(scopes, token_scopes.Collection_Read.String()+":"+collectionID)
+			scopes = append(scopes, token_scopes.Collection_Modify.String()+":"+collectionID)
+			scopes = append(scopes, token_scopes.Collection_Delete.String()+":"+collectionID)
+		case database.AclRoleWrite:
+			scopes = append(scopes, token_scopes.Collection_Read.String()+":"+collectionID)
+			scopes = append(scopes, token_scopes.Collection_Modify.String()+":"+collectionID)
+		case database.AclRoleRead:
+			scopes = append(scopes, token_scopes.Collection_Read.String()+":"+collectionID)
+		}
+	}
+
+	// Convert matched group set to slice
+	matchedGroups = make([]string, 0, len(matchedGroupSet))
+	for group := range matchedGroupSet {
+		matchedGroups = append(matchedGroups, group)
+	}
+
+	return scopes, matchedGroups, nil
 }
 
 // Proxy a HTTP request from the Pelican server to the OA4MP server
@@ -203,7 +310,7 @@ func oa4mpProxy(ctx *gin.Context) {
 	var userEncoded string
 	var user string
 	var groupsList []string
-	var matchedGroups []string
+	var allMatchedGroups []string
 	if ctx.Request.URL.Path == "/api/v1.0/issuer/device" || ctx.Request.URL.Path == "/api/v1.0/issuer/authorize" {
 		web_ui.RequireAuthMiddleware(ctx)
 		if ctx.IsAborted() {
@@ -230,9 +337,25 @@ func oa4mpProxy(ctx *gin.Context) {
 		// side will appropriately unwrap this information.
 		userInfo := make(map[string]interface{})
 		userInfo["u"] = user
-		allowedScopes, matchedGroups := calculateAllowedScopes(user, groupsList)
-		userInfo["g"] = matchedGroups
+		allowedScopes, authzMatchedGroups := calculateAllowedScopes(user, groupsList)
+		userCollectionScopes, collectionMatchedGroups, err := getUserCollectionScopes(database.ServerDatabase, user, groupsList)
+		if err != nil {
+			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Unable to get user collection scopes",
+			})
+			return
+		}
+
+		allowedScopes = append(allowedScopes, userCollectionScopes...)
+
+		// Merge groups from authorization templates and collection ACLs.
+		// Authorization templates may match different groups than collection ACLs,
+		// so we need both sets in wlcg.groups for proper access control.
+		allMatchedGroups = mergeGroups(authzMatchedGroups, collectionMatchedGroups)
+		userInfo["g"] = allMatchedGroups
 		userInfo["s"] = allowedScopes
+		log.Debugf("Before proxying to OA4MP: allowedScopes=%v, userCollectionScopes=%v, authzMatchedGroups=%v, collectionMatchedGroups=%v for user=%s", allowedScopes, userCollectionScopes, authzMatchedGroups, collectionMatchedGroups, user)
 		userBytes, err := json.Marshal(userInfo)
 		if err != nil {
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -256,7 +379,7 @@ func oa4mpProxy(ctx *gin.Context) {
 	}
 
 	if user != "" {
-		log.Debugf("Will proxy request to URL %s with user '%s' and groups '%s'", ctx.Request.URL.String(), user, strings.Join(matchedGroups, ","))
+		log.Debugf("Will proxy request to URL %s with user '%s' and groups '%s'", ctx.Request.URL.String(), user, strings.Join(allMatchedGroups, ","))
 	} else {
 		log.Debugln("Will proxy request to URL", ctx.Request.URL.String())
 	}
