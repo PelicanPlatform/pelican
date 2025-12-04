@@ -296,6 +296,7 @@ func handleListCollections(ctx *gin.Context) {
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
 		})
+		return
 	}
 	if user == "" {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
