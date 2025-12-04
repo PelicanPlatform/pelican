@@ -25,6 +25,9 @@ var embedUniversalMigrations embed.FS
 //go:embed registry_migrations/*.sql
 var embedRegistryMigrations embed.FS
 
+//go:embed origin_migrations/*.sql
+var embedOriginMigrations embed.FS
+
 type Counter struct {
 	Key   string `gorm:"primaryKey"`
 	Value int    `gorm:"not null;default:0"`
@@ -92,6 +95,8 @@ func runServerTypeMigrations(sqlDB *sql.DB, serverType server_structs.ServerType
 	switch serverType {
 	case server_structs.RegistryType:
 		return utils.MigrateServerSpecificDB(sqlDB, embedRegistryMigrations, "registry_migrations", "registry")
+	case server_structs.OriginType:
+		return utils.MigrateServerSpecificDB(sqlDB, embedOriginMigrations, "origin_migrations", "origin")
 	default:
 		log.Debugf("No specific migrations for server type: %s", serverType.String())
 	}
