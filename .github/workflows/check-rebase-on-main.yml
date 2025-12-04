@@ -28,10 +28,6 @@ jobs:
           if ! git merge-base --is-ancestor origin/main HEAD; then
             echo "Error: This branch is not rebased on main."
             echo "Please rebase your branch on main before merging."
-            echo ""
-            echo "To rebase, run:"
-            echo "  git fetch origin main"
-            echo "  git rebase origin/main"
             exit 1
           fi
 
