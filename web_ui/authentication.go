@@ -202,7 +202,7 @@ func setLoginCookie(ctx *gin.Context, userRecord *database.User, groups []string
 
 	// For backwards compatibility (see #398), add additional scopes
 	// for expert admins who extract the login cookie from their browser
-	// and use it query monitoring endpoints directly.
+	// and use it to query monitoring endpoints directly.
 	if isAdmin, _ := CheckAdmin(loginCookieTokenCfg.Subject); isAdmin {
 		loginCookieTokenCfg.AddScopes(token_scopes.Monitoring_Query, token_scopes.Monitoring_Scrape)
 	}
