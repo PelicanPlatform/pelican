@@ -243,7 +243,6 @@ func doTokenRoundTrip(ctx context.Context, req *http.Request) (*oauth2_upstream.
 		return nil, fmt.Errorf("oauth2: cannot fetch token: %v", err)
 	}
 	log.Debugf("Token round trip response code: %v", r.StatusCode)
-	log.Debugf("Token round trip body: %s", body)
 	if code := r.StatusCode; code < 200 || code > 299 {
 		return nil, &oauth2_upstream.RetrieveError{
 			Response: r,
@@ -283,6 +282,13 @@ func doTokenRoundTrip(ctx context.Context, req *http.Request) (*oauth2_upstream.
 	}
 	if token.AccessToken == "" {
 		return nil, errors.New("oauth2: server response missing access_token")
+	} else {
+		log.Debugln("Access token from server response:", token.AccessToken)
+		if token.RefreshToken != "" {
+			log.Debugln("Server response included a refresh token")
+		} else {
+			log.Debugln("Server response did not include a refresh token")
+		}
 	}
 	return token, nil
 }
