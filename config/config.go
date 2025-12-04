@@ -2026,7 +2026,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	// of http handlers by calling config.GetCSRFHandler()
 	setupCSRFHandler()
 
-	// Sets up the server log filter mechanism
+	// Set up the log filter mechanisms, e.g., for sensitive secrets
 	initFilterLogging()
 
 	// Register callback for runtime log level changes
@@ -2135,8 +2135,11 @@ func InitClient() error {
 		return err
 	}
 
-	// Sets (or resets) the deferred federation lookup
+	// Set (or reset) the deferred federation lookup
 	fedDiscoveryOnce = &sync.Once{}
+
+	// Set up the log filter mechanisms, e.g., for sensitive secrets
+	initFilterLogging()
 
 	clientInitialized = true
 
