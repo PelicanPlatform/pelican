@@ -73,6 +73,9 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		return nil, err
 	}
 
+	// Initialize PKCS#11 helper after the defaults are set up
+	initPKCS11(ctx, egrp, modules)
+
 	// Register Lotman
 	if param.Cache_EnableLotman.GetBool() {
 		// Register the web endpoints
