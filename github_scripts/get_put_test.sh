@@ -122,6 +122,9 @@ do
     fi
 done
 
+# Print out the config.
+./pelican config dump
+
 # Make a token to be used (now that federation is running)
 ./pelican token create pelican://$HOSTNAME:8444/test --read --write --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:8444" --subject "origin"  --profile "wlcg" --lifetime 60 > get_put_tmp/test-token.jwt
 
