@@ -35,7 +35,7 @@ import useApiSWR from '@/hooks/useApiSWR';
 import { NamespaceIcon } from '@/components';
 import getUtcOffsetString from '@/helpers/getUtcOffsetString';
 import { defaultDowntime } from '@/components/Downtime/constant';
-import { ServerRegistration } from '@/app/registry/type'
+import { ServerRegistration } from '@/app/registry/type';
 import extendPrefix from '@/helpers/extendPrefix';
 
 interface DowntimeFormProps {
@@ -61,18 +61,21 @@ const ServerUnknownDowntimeForm = ({
   const { data: _servers } = useApiSWR<ServerRegistration[]>(
     'Could not fetch Origins and Caches to populate downtime form',
     'getNamespaces-TODO-update-this-key-to-share-cache',
-    async () => fetch("/api/v1.0/registry_ui/servers")
+    async () => fetch('/api/v1.0/registry_ui/servers')
   );
 
   const servers = useMemo(() => {
-    return (_servers || [])
-      .sort((a, b) => a.name.localeCompare(b.name))
+    return (_servers || []).sort((a, b) => a.name.localeCompare(b.name));
   }, [_servers]);
 
   // Set a default prefix on registry
   useEffect(() => {
     if (servers.length > 0 && downtime.serverId === '') {
-      setDowntime({ ...downtime, serverId: servers[0].id, serverName: servers[0].name } );
+      setDowntime({
+        ...downtime,
+        serverId: servers[0].id,
+        serverName: servers[0].name,
+      });
     }
   }, [servers, setDowntime, downtime]);
 
@@ -119,9 +122,7 @@ const ServerUnknownDowntimeForm = ({
           isOptionEqualToValue={(servers, value) =>
             servers?.name === value?.name
           }
-          value={
-            servers.filter((x) => x.id == downtime.serverId)[0] || null
-          }
+          value={servers.filter((x) => x.id == downtime.serverId)[0] || null}
           onChange={(e, v) => {
             if (!v) return;
             setDowntime({ ...downtime, serverId: v.id, serverName: v.name });
@@ -138,12 +139,13 @@ const ServerUnknownDowntimeForm = ({
                   width: '100%',
                 }}
               >
+                <Box display={'flex'}>{option.name}</Box>
                 <Box display={'flex'}>
-                  {option.name}
-                </Box>
-                <Box display={'flex'}>
-                  {option.registration.map(r => (
-                    <NamespaceIcon key={extendPrefix(r.prefix).type} serverType={extendPrefix(r.prefix).type} />
+                  {option.registration.map((r) => (
+                    <NamespaceIcon
+                      key={extendPrefix(r.prefix).type}
+                      serverType={extendPrefix(r.prefix).type}
+                    />
                   ))}
                 </Box>
               </Box>
