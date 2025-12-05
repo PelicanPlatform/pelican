@@ -89,11 +89,13 @@ export interface DowntimePost extends DowntimeBase {}
 
 export interface DowntimeRegistryPost extends DowntimeBase {
   serverName: string;
+  serverId: string;
 }
 
 export interface DowntimeGet extends DowntimeBase {
   id: string;
   serverName: string;
+  serverId: string;
   source: string;
   createdBy: string;
   createdAt: number;

@@ -331,12 +331,12 @@ export const deleteDowntime = async (id: string) => {
 };
 
 export const putDowntime = async (
-  id: string,
-  downtime: DowntimePost | DowntimeRegistryPost
+  downtimeId: string,
+  downtime: DowntimeRegistryPost | DowntimePost
 ) => {
   return await fetchApi(
     async () =>
-      await secureFetch(`/api/v1.0/downtime/${id}`, {
+      await secureFetch(`/api/v1.0/downtime/${downtimeId}`, {
         method: 'PUT',
         body: JSON.stringify(downtime),
         headers: {
