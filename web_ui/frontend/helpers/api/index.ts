@@ -332,7 +332,7 @@ export const deleteDowntime = async (id: string) => {
 
 export const putDowntime = async (
   downtimeId: string,
-  downtime: DowntimeRegistryPost
+  downtime: DowntimeRegistryPost | DowntimePost
 ) => {
   return await fetchApi(
     async () =>
