@@ -31,12 +31,12 @@ import {
 } from '@/components/AlertProvider';
 import { Delete } from '@mui/icons-material';
 import FormHelperText from '@mui/material/FormHelperText';
-import { RegistryNamespace } from '@/index';
 import useApiSWR from '@/hooks/useApiSWR';
-import extendNamespace from '@/helpers/Registry/namespaceToServer';
 import { NamespaceIcon } from '@/components';
 import getUtcOffsetString from '@/helpers/getUtcOffsetString';
 import { defaultDowntime } from '@/components/Downtime/constant';
+import { ServerRegistration } from '@/app/registry/type'
+import extendPrefix from '@/helpers/extendPrefix';
 
 interface DowntimeFormProps {
   downtime: Partial<DowntimeGet>;
@@ -58,28 +58,21 @@ const ServerUnknownDowntimeForm = ({
   const endless = useMemo(() => downtime.endTime === -1, [downtime.endTime]);
 
   // Get the cache and origin prefixes to key the downtimes for the director
-  const { data: namespaces } = useApiSWR<RegistryNamespace[]>(
+  const { data: _servers } = useApiSWR<ServerRegistration[]>(
     'Could not fetch Origins and Caches to populate downtime form',
     'getNamespaces-TODO-update-this-key-to-share-cache',
-    getNamespaces
+    async () => fetch("/api/v1.0/registry_ui/servers")
   );
+
   const servers = useMemo(() => {
-    return (namespaces || [])
-      .map(extendNamespace)
-      .filter(
-        (x) =>
-          (x.type === 'origin' || x.type === 'cache') &&
-          x.admin_metadata.status === 'Approved'
-      )
-      .sort((a, b) =>
-        (a?.adjustedPrefix || '') > (b?.adjustedPrefix || '') ? 1 : -1
-      );
-  }, [namespaces]);
+    return (_servers || [])
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [_servers]);
 
   // Set a default prefix on registry
   useEffect(() => {
-    if (servers.length > 0 && downtime.serverName === '') {
-      setDowntime({ ...downtime, serverName: servers[0].prefix });
+    if (servers.length > 0 && downtime.serverId === '') {
+      setDowntime({ ...downtime, serverId: servers[0].id, serverName: servers[0].name } );
     }
   }, [servers, setDowntime, downtime]);
 
@@ -122,16 +115,16 @@ const ServerUnknownDowntimeForm = ({
       <Box mt={2}>
         <Autocomplete
           options={servers}
-          getOptionLabel={(servers) => servers?.adjustedPrefix || 'Error'}
+          getOptionLabel={(servers) => servers?.name || 'Error'}
           isOptionEqualToValue={(servers, value) =>
-            servers?.adjustedPrefix === value?.adjustedPrefix
+            servers?.name === value?.name
           }
           value={
-            servers.filter((x) => x.prefix == downtime.serverName)[0] || null
+            servers.filter((x) => x.id == downtime.serverId)[0] || null
           }
           onChange={(e, v) => {
             if (!v) return;
-            setDowntime({ ...downtime, serverName: v.prefix });
+            setDowntime({ ...downtime, serverId: v.id, serverName: v.name });
           }}
           renderInput={(params) => (
             <TextField {...params} label='Server' variant='outlined' required />
@@ -146,10 +139,12 @@ const ServerUnknownDowntimeForm = ({
                 }}
               >
                 <Box display={'flex'}>
-                  {option.adjustedPrefix || option.prefix}
+                  {option.name}
                 </Box>
                 <Box display={'flex'}>
-                  <NamespaceIcon serverType={option.type} />
+                  {option.registration.map(r => (
+                    <NamespaceIcon key={extendPrefix(r.prefix).type} serverType={extendPrefix(r.prefix).type} />
+                  ))}
                 </Box>
               </Box>
             </Box>
