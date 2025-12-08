@@ -423,7 +423,7 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
     if ${!SRC_BUILD}; then
       dnf install -y /xrootd-build/RPMS/*/${REPO}-*.rpm
     else
-      dnf install -y --enablerepo=epel-testing --enablerepo=osg-development --enablerepo=osg-testing --enablerepo=osg-upcoming-testing ${REPO}-${!VER}
+      dnf install -y --enablerepo=epel-testing --enablerepo=osg-testing --enablerepo=osg-upcoming-testing ${REPO}-${!VER}
     fi
   }
 
