@@ -1932,6 +1932,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	// By time this block has finished, we have a writer interface representing the transfer
 	// destination (could be io.Discard!) that we'll join with the hashesWriter.
 	var fileWriter io.Writer
+	var writeDestination string // Path to write to (may be temporary file or final destination)
 	var fileCloser io.Closer
 
 	// Check if we have a custom writer provided (e.g., for io.FS implementation)
@@ -1955,7 +1956,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 					directory := path.Dir(localPath)
 					if localPath != "" && os.IsPathSeparator(localPath[len(localPath)-1]) {
 						directory = localPath
-						localPath = path.Join(directory, path.Base(transfer.remoteURL.Path))
+						localPath = path.Join(directory, path.Base(transfer.job.remoteURL.Path))
 					}
 					if err = os.MkdirAll(directory, 0777); err != nil {
 						return
@@ -1979,14 +1980,34 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				return
 			}
 			fileWriter = newAutoUnpacker(localPath, behavior)
+			// Pack operations unpack in-place to the destination directory
+			writeDestination = localPath
 		} else {
 			if info != nil && info.IsDir() {
-				localPath = path.Join(localPath, path.Base(transfer.remoteURL.Path))
+				localPath = path.Join(localPath, path.Base(transfer.job.remoteURL.Path))
+			}
+			// Determine write destination - use temporary file unless inPlace is true
+			// Special case: os.DevNull should always use inPlace mode (no temp files)
+			writeDestination = localPath
+			if !transfer.job.inPlace && localPath != os.DevNull {
+				// Use rsync-style temporary naming: .filename.XXXXXX (random suffix)
+				writeDestination = generateTempPath(localPath)
+			}
+			// Ensure temporary file is cleaned up if we exit early (errors, panics, etc.)
+			if !transfer.job.inPlace && writeDestination != localPath {
+				defer func() {
+					// Only clean up if the temporary file still exists and wasn't renamed
+					if _, statErr := os.Stat(writeDestination); statErr == nil {
+						if removeErr := os.Remove(writeDestination); removeErr != nil {
+							log.Warningln("Failed to remove temporary file:", removeErr)
+						}
+					}
+				}()
 			}
 			// If the destination is something strange, like a block device, then the OpenFile below
 			// will create the appropriate error message
 			var fp *os.File
-			if fp, err = os.OpenFile(localPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644); err == nil {
+			if fp, err = os.OpenFile(writeDestination, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644); err == nil {
 				fileWriter = fp
 				defer fp.Close()
 			} else {
@@ -1994,7 +2015,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			}
 		}
 	} else {
-		localPath = "/dev/null"
+		localPath = os.DevNull
 		fileWriter = io.Discard
 	}
 
@@ -2047,7 +2068,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			tokenContents, _ = transfer.token.Get()
 		}
 		attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, err := downloadHTTP(
-			ctx, transfer.engine, transfer.callback, transferEndpoint, localPath, fileWriter, downloaded, size, tokenContents, transfer.project,
+			ctx, transfer.engine, transfer.callback, transferEndpoint, writeDestination, fileWriter, downloaded, size, tokenContents, transfer.project,
 		)
 		endTime := time.Now()
 		if cacheAge >= 0 {
@@ -2216,14 +2237,17 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	} else {
 		transferResults.Error = xferErrors
 	}
-	if !success && transfer.packOption == "" && localPath != "/dev/null" {
-		// On Unix-like systems, os.Remove calls unlink, which removes the file from the directory.
-		// If the file is still open, it will be available to the process until the last file
-		// descriptor is closed.  Given fp.Close() is deferred, this should be safe.
-		if err := os.Remove(localPath); err != nil && !os.IsNotExist(err) {
-			log.Warningln("Failed to remove partially-downloaded file:", err)
+
+	// Atomically rename temporary file to final destination on successful download
+	if success && !transfer.job.inPlace && writeDestination != "" && writeDestination != localPath && transfer.packOption == "" {
+		if renameErr := os.Rename(writeDestination, localPath); renameErr != nil {
+			transferResults.Error = errors.Wrap(renameErr, "failed to rename temporary file to final destination")
+			log.Warningln("Failed to rename temporary file:", renameErr)
+			// Since rename failed, the deferred cleanup will remove the temp file
+			return
 		}
 	}
+
 	return
 }
 
@@ -2386,8 +2410,8 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 // Verify that a file on disk matches the expected size. We ignore directories
 // and generic stat failures unless the file doesn't exist.
 func verifyFileSize(dest string, expectedSize int64, fields log.Fields) error {
-	if dest == "/dev/null" {
-		log.WithFields(fields).Debugf("Skipping size check because destination /dev/null")
+	if dest == os.DevNull {
+		log.WithFields(fields).Debugf("Skipping size check because destination is (%s)", os.DevNull)
 		return nil
 	}
 
