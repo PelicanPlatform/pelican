@@ -1056,7 +1056,8 @@ func TestGatewayTimeout(t *testing.T) {
 	require.NoError(t, err)
 
 	transfer := &transferFile{
-		ctx: context.Background(),
+		xferType: transferTypeDownload,
+		ctx:      context.Background(),
 		job: &TransferJob{
 			remoteURL: &pelican_url.PelicanURL{
 				Scheme: "pelican://",
@@ -1064,7 +1065,7 @@ func TestGatewayTimeout(t *testing.T) {
 				Path:   svrURL.Path + "/test.txt",
 			},
 		},
-		localPath: "/dev/null",
+		localPath: os.DevNull,
 		remoteURL: svrURL,
 		attempts: []transferAttemptDetails{
 			{
@@ -1573,7 +1574,8 @@ func TestChecksum(t *testing.T) {
 	require.NoError(t, err)
 
 	transfer := &transferFile{
-		ctx: context.Background(),
+		xferType: transferTypeDownload,
+		ctx:      context.Background(),
 		job: &TransferJob{
 			remoteURL: &pelican_url.PelicanURL{
 				Scheme: "pelican://",
@@ -1581,7 +1583,7 @@ func TestChecksum(t *testing.T) {
 				Path:   svrURL.Path + "/test.txt",
 			},
 		},
-		localPath: "/dev/null",
+		localPath: os.DevNull,
 		remoteURL: svrURL,
 		attempts: []transferAttemptDetails{
 			{
@@ -1630,7 +1632,8 @@ func TestChecksumIncorrectWhenRequired(t *testing.T) {
 	require.NoError(t, err)
 
 	transfer := &transferFile{
-		ctx: context.Background(),
+		xferType: transferTypeDownload,
+		ctx:      context.Background(),
 		job: &TransferJob{
 			remoteURL: &pelican_url.PelicanURL{
 				Scheme: "pelican://",
@@ -1638,7 +1641,7 @@ func TestChecksumIncorrectWhenRequired(t *testing.T) {
 				Path:   svrURL.Path + "/test.txt",
 			},
 		},
-		localPath: "/dev/null",
+		localPath: os.DevNull,
 		remoteURL: svrURL,
 		attempts: []transferAttemptDetails{
 			{
@@ -1701,7 +1704,8 @@ func TestChecksumIncorrectWhenNotRequired(t *testing.T) {
 	require.NoError(t, err)
 
 	transfer := &transferFile{
-		ctx: context.Background(),
+		xferType: transferTypeDownload,
+		ctx:      context.Background(),
 		job: &TransferJob{
 			remoteURL: &pelican_url.PelicanURL{
 				Scheme: "pelican://",
@@ -1709,7 +1713,7 @@ func TestChecksumIncorrectWhenNotRequired(t *testing.T) {
 				Path:   svrURL.Path + "/test.txt",
 			},
 		},
-		localPath: "/dev/null",
+		localPath: os.DevNull,
 		remoteURL: svrURL,
 		attempts: []transferAttemptDetails{
 			{
@@ -1761,7 +1765,8 @@ func TestChecksumMissing(t *testing.T) {
 	require.NoError(t, err)
 
 	transfer := &transferFile{
-		ctx: context.Background(),
+		xferType: transferTypeDownload,
+		ctx:      context.Background(),
 		job: &TransferJob{
 			remoteURL: &pelican_url.PelicanURL{
 				Scheme: "pelican://",
@@ -1769,7 +1774,7 @@ func TestChecksumMissing(t *testing.T) {
 				Path:   svrURL.Path + "/test.txt",
 			},
 		},
-		localPath: "/dev/null",
+		localPath: os.DevNull,
 		remoteURL: svrURL,
 		attempts: []transferAttemptDetails{
 			{
@@ -2210,7 +2215,8 @@ func TestResume(t *testing.T) {
 	require.NoError(t, err)
 
 	transfer := &transferFile{
-		ctx: context.Background(),
+		xferType: transferTypeDownload,
+		ctx:      context.Background(),
 		job: &TransferJob{
 			remoteURL: &pelican_url.PelicanURL{
 				Scheme: "pelican://",
@@ -2218,7 +2224,7 @@ func TestResume(t *testing.T) {
 				Path:   svr1URL.Path + "/test.txt",
 			},
 		},
-		localPath: "/dev/null",
+		localPath: os.DevNull,
 		remoteURL: svr1URL,
 		attempts: []transferAttemptDetails{
 			{
@@ -2274,7 +2280,8 @@ func TestFailedConnectionSetupError(t *testing.T) {
 	require.NoError(t, err)
 
 	transfer := &transferFile{
-		ctx: context.Background(),
+		xferType: transferTypeDownload,
+		ctx:      context.Background(),
 		job: &TransferJob{
 			remoteURL: &pelican_url.PelicanURL{
 				Scheme: "pelican://",
@@ -2282,7 +2289,7 @@ func TestFailedConnectionSetupError(t *testing.T) {
 				Path:   svrURL.Path + "/test.txt",
 			},
 		},
-		localPath: "/dev/null",
+		localPath: os.DevNull,
 		remoteURL: svrURL,
 		attempts: []transferAttemptDetails{
 			{
@@ -2320,7 +2327,8 @@ func TestHeadRequestWithDownloadToken(t *testing.T) {
 	token := NewTokenGenerator(nil, nil, config.TokenSharedRead, false)
 	token.SetToken("test-token")
 	transfer := &transferFile{
-		ctx: context.Background(),
+		xferType: transferTypeDownload,
+		ctx:      context.Background(),
 		job: &TransferJob{
 			remoteURL: &pelican_url.PelicanURL{
 				Scheme: "pelican://",
@@ -2328,7 +2336,7 @@ func TestHeadRequestWithDownloadToken(t *testing.T) {
 				Path:   svrURL.Path + "/test.txt",
 			},
 		},
-		localPath: "/dev/null",
+		localPath: os.DevNull,
 		remoteURL: svrURL,
 		attempts: []transferAttemptDetails{
 			{
