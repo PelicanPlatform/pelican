@@ -262,6 +262,8 @@ type (
 		lookupErr          error
 		activeXfer         atomic.Int64
 		totalXfer          int
+		skipped403         sync.Mutex // Protects skipped403Objs slice
+		skipped403Objs     []string   // List of object paths skipped due to 403 during sync
 		localPath          string
 		xferType           transferType
 		requestedChecksums []ChecksumType
@@ -1452,6 +1454,7 @@ func (tc *TransferClient) Shutdown() (results []TransferResults, err error) {
 	tc.Close()
 	results = make([]TransferResults, 0)
 	resultsChan := tc.Results()
+	jobsSkipped := make(map[uuid.UUID]bool) // Track which jobs we've already reported skips for
 	for {
 		select {
 		case <-tc.ctx.Done():
@@ -1459,6 +1462,27 @@ func (tc *TransferClient) Shutdown() (results []TransferResults, err error) {
 			return
 		case result, ok := <-resultsChan:
 			if !ok {
+				// Print summary of skipped files for each job before returning
+				for _, r := range results {
+					if r.job != nil && !jobsSkipped[r.job.uuid] {
+						r.job.skipped403.Lock()
+						skipCount := len(r.job.skipped403Objs)
+						skippedObjs := make([]string, len(r.job.skipped403Objs))
+						copy(skippedObjs, r.job.skipped403Objs)
+						r.job.skipped403.Unlock()
+
+						if skipCount > 0 {
+							jobsSkipped[r.job.uuid] = true
+							if skipCount <= 2 {
+								log.Warnf("Skipped upload of %d object(s) because of permission denied errors (object most likely already exists at the origin): %v",
+									skipCount, skippedObjs)
+							} else {
+								log.Warnf("Skipped upload of %d objects because of permission denied errors (objects most likely already exist at the origin)",
+									skipCount)
+							}
+						}
+					}
+				}
 				return
 			}
 			results = append(results, result)
@@ -3284,6 +3308,10 @@ Loop:
 			if response.StatusCode == http.StatusForbidden && transfer.job.syncLevel != SyncNone {
 				// When syncing, a 403 on PUT typically means the file already exists
 				// and the origin doesn't allow overwrites. This is expected behavior.
+				// Track this for summary reporting
+				transfer.job.skipped403.Lock()
+				transfer.job.skipped403Objs = append(transfer.job.skipped403Objs, transfer.remoteURL.Path)
+				transfer.job.skipped403.Unlock()
 
 				log.Debugln("Skipping upload of", transfer.remoteURL.Path, "(403 Forbidden, object likely already exists)")
 				// Don't set lastError - treat this as successful skip
