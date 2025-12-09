@@ -3279,6 +3279,17 @@ Loop:
 			log.Debugln("File closed")
 		case response := <-responseChan:
 			attempt.ServerVersion = response.Header.Get("Server")
+
+			// Handle 403 specially when sync is enabled
+			if response.StatusCode == http.StatusForbidden && transfer.job.syncLevel != SyncNone {
+				// When syncing, a 403 on PUT typically means the file already exists
+				// and the origin doesn't allow overwrites. This is expected behavior.
+
+				log.Debugln("Skipping upload of", transfer.remoteURL.Path, "(403 Forbidden, object likely already exists)")
+				// Don't set lastError - treat this as successful skip
+				break Loop
+			}
+
 			// Note: Accept both 200 and 201 as success codes; the latter is the correct one, but
 			// older versions of XRootD incorrectly use 200.
 			if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
