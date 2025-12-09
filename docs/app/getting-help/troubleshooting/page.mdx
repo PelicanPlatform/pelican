@@ -4,6 +4,32 @@ import { Callout } from 'nextra/components'
 
 This guide details the common errors that occur when working with Pelican, and how to troubleshoot them.
 
+These sections are intended for **end users** who are using Pelican to transfer data:
+
+* [General client issues](#general-client-issues): problems that apply to any implementation of a Pelican client.
+* [Pelican CLI](#pelican-cli): problems using the [Pelican CLI](/getting-data-with-pelican/client) client, specifically.
+* [Pelican HTCondor Plugin](#pelican-htcondor-plugin): problems using [Pelican's HTCondor file transfer plugin](/getting-data-with-pelican#pelicans-htcondor-plugin), specifically.
+
+These sections are intended for **system administrators** deploying Pelican services:
+
+* [Federating data](#federating-data): problems integrating a data store with an existing Pelican Federation
+* [Operating a Federation](#operating-a-federation): problems operating Pelican services used to run a Pelican Federation
+
+## General client issues
+
+Regardless of how a Pelican client is implemented, it will be interacting with the Pelican Federation using a common set of operations, including:
+
+* Connecting to Federation services
+* Getting information about a namespace
+* Transferring data 
+
+among other things. (For more information, see [About Pelican](/about-pelican) and [Getting Data with Pelican](/getting-data-with-pelican).)
+Furthermore, these operations are conducted over the internet and so common networking problems can impact these operations.
+
+### Error messages
+
+TBD
+
 ## Pelican CLI
 
 This section discusses common errors when working with the [Pelican CLI](/getting-data-with-pelican/client) client. 
@@ -60,4 +86,16 @@ To reset your local configuration on **Windows**:
     ```
 
     If prompted to remove a file, double-check the path before confirming with `Y`.
+
+## Pelican HTCondor Plugin
+
+TBD
+
+## Federating data
+
+TBD
+
+## Operating a Federation
+
+TBD
 
