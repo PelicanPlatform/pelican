@@ -55,6 +55,7 @@ the client should fallback to discovered caches if all preferred caches fail.`)
 	flagSet.String("caches", "", "A JSON file containing the list of caches")
 	flagSet.String("transfer-stats", "", "A path to a file to write transfer statistics to")
 	flagSet.String("pack", "", "Package transfer using remote packing functionality (same as '?pack=' query). Options: auto, tar, tar.gz, tar.xz, zip. Default: auto when flag is provided without an explicit value")
+	flagSet.Bool("direct", false, "Download directly from an origin, bypassing any caches (same as '?directread' query)")
 	objectCmd.AddCommand(getCmd)
 }
 
@@ -106,6 +107,19 @@ func getMain(cmd *cobra.Command, args []string) {
 			newSrc, err := addPackQuery(src, packOption)
 			if err != nil {
 				log.Errorln("Failed to process --pack option:", err)
+				os.Exit(1)
+			}
+			source[i] = newSrc
+		}
+	}
+
+	// Handle --direct flag by appending the directread query parameter to each source URL
+	directRead, _ := cmd.Flags().GetBool("direct")
+	if directRead {
+		for i, src := range source {
+			newSrc, err := addDirectReadQuery(src)
+			if err != nil {
+				log.Errorln("Failed to process --direct option:", err)
 				os.Exit(1)
 			}
 			source[i] = newSrc
@@ -194,6 +208,18 @@ func addPackQuery(rawURL string, packOption string) (string, error) {
 	}
 	q := u.Query()
 	q.Set("pack", packOption)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
+// addDirectReadQuery appends the "directread" query parameter on the provided URL string.
+func addDirectReadQuery(rawURL string) (string, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	q := u.Query()
+	q.Set("directread", "")
 	u.RawQuery = q.Encode()
 	return u.String(), nil
 }
