@@ -137,10 +137,13 @@ func reportStatusToServer(ctx context.Context, serverWebUrl string, status strin
 // it's talking to the director. The test fetches the current server ad
 // from the TTL cache on each cycle and stops when the ad is no longer present.
 func LaunchPeriodicDirectorTest(ctx context.Context, serverUrlStr string) {
+	// Option to disable touch on hit when fetching from cache to avoid extending TTL
+	disableTouchOpt := ttlcache.WithDisableTouchOnHit[string, *server_structs.Advertisement]()
+
 	// Fetch the initial server ad to set up metrics
-	initialAdItem := serverAds.Get(serverUrlStr, ttlcache.WithDisableTouchOnHit[string, *server_structs.Advertisement]())
+	initialAdItem := serverAds.Get(serverUrlStr, disableTouchOpt)
 	if initialAdItem == nil {
-		log.Errorf("Failed to start director test suite: server ad not found in cache for URL %s", serverUrlStr)
+		log.Errorf("Failed to start director test suite: server ad not found in cache for URL %s. Test will not be started.", serverUrlStr)
 		return
 	}
 	initialAd := initialAdItem.Value()
@@ -185,7 +188,7 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverUrlStr string) {
 			return
 		case <-ticker.C:
 			// Fetch the current server ad from the TTL cache
-			adItem := serverAds.Get(serverUrlStr, ttlcache.WithDisableTouchOnHit[string, *server_structs.Advertisement]())
+			adItem := serverAds.Get(serverUrlStr, disableTouchOpt)
 			if adItem == nil {
 				log.Infof("Server ad no longer in cache for URL %s. Stopping director tests.", serverUrlStr)
 				return
