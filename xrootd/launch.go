@@ -207,9 +207,15 @@ func makeUnprivilegedXrootdLauncher(daemonName string, xrootdRun string, configP
 	if pkcs11Active {
 		if pkcs11Info.ServerAddress != "" {
 			result.ExtraEnv = append(result.ExtraEnv, "P11_KIT_SERVER_ADDRESS="+pkcs11Info.ServerAddress)
+			log.Tracef("makeUnprivilegedXrootdLauncher: Adding P11_KIT_SERVER_ADDRESS=%s to ExtraEnv", pkcs11Info.ServerAddress)
+		}
+		if pkcs11Info.ModulePath != "" {
+			result.ExtraEnv = append(result.ExtraEnv, "PKCS11_MODULE_PATH="+pkcs11Info.ModulePath)
+			log.Tracef("makeUnprivilegedXrootdLauncher: Adding PKCS11_MODULE_PATH=%s to ExtraEnv", pkcs11Info.ModulePath)
 		}
 		if pkcs11Info.OpenSSLConfPath != "" {
 			result.ExtraEnv = append(result.ExtraEnv, "OPENSSL_CONF="+pkcs11Info.OpenSSLConfPath)
+			log.Tracef("makeUnprivilegedXrootdLauncher: Adding OPENSSL_CONF=%s to ExtraEnv", pkcs11Info.OpenSSLConfPath)
 		}
 	}
 	return

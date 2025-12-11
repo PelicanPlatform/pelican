@@ -92,9 +92,10 @@ func (plauncher PrivilegedXrootdLauncher) Launch(ctx context.Context) (context.C
 		return ctx, -1, err
 	}
 
-	var env []string = nil
+	// Start with the parent process's environment to inherit system variables
+	env := os.Environ()
 	if plauncher.fds[1] != -1 {
-		env = []string{"XRDHTTP_PELICAN_INFO_FD=3"}
+		env = append(env, "XRDHTTP_PELICAN_INFO_FD=3")
 	}
 	// Set the directory where the SciTokens library should cache public keys.
 	if xdgCacheHome, ok := os.LookupEnv("XDG_CACHE_HOME"); ok {
@@ -104,12 +105,21 @@ func (plauncher PrivilegedXrootdLauncher) Launch(ctx context.Context) (context.C
 	if param.Server_EnablePKCS11.GetBool() && pkcs11Info.Enabled {
 		if pkcs11Info.ServerAddress != "" {
 			env = append(env, "P11_KIT_SERVER_ADDRESS="+pkcs11Info.ServerAddress)
+			log.Tracef("launch_linux: Setting P11_KIT_SERVER_ADDRESS=%s", pkcs11Info.ServerAddress)
 		}
 		if pkcs11Info.OpenSSLConfPath != "" {
 			env = append(env, "OPENSSL_CONF="+pkcs11Info.OpenSSLConfPath)
+			log.Tracef("launch_linux: Setting OPENSSL_CONF=%s", pkcs11Info.OpenSSLConfPath)
+			// Log the OpenSSL config file contents for debugging
+			if confData, err := os.ReadFile(pkcs11Info.OpenSSLConfPath); err == nil {
+				log.Tracef("launch_linux: OpenSSL config contents:\n%s", string(confData))
+			} else {
+				log.Warnf("launch_linux: Could not read OpenSSL config at %s: %v", pkcs11Info.OpenSSLConfPath, err)
+			}
 		}
 	}
 
+	log.Tracef("launch_linux: Launching %s with args %v", executable, []string{plauncher.Name(), "-f", "-s", pidFile, "-c", plauncher.configPath, "-n", "origin"})
 	launcher := cap.NewLauncher(executable, []string{plauncher.Name(), "-f", "-s", pidFile, "-c", plauncher.configPath, "-n", "origin"}, env)
 	launcher.Callback(func(attrs *syscall.ProcAttr, _ interface{}) error {
 		attrs.Files[1] = writeStdout.Fd()
