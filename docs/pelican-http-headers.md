@@ -249,7 +249,7 @@ X-Pelican-Namespace: namespace=/foo/bar, require-token=true, collections-url=htt
 
 **Format:** Single URL string
 
-**Description:** This header contains the broker service URL associated with the origin. The broker is used for certain operations like cache management and coordination.
+**Description:** This header contains the broker service URL associated with the origin. The broker is used for connection reversing, allowing origins (or the admin interface of a cache, in the future) to be behind firewalls.
 
 **Example:**
 ```
