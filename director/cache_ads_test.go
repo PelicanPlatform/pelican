@@ -25,12 +25,12 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
@@ -262,7 +262,7 @@ func TestRecordAd(t *testing.T) {
 			serverAds.DeleteAll()
 		}()
 
-		viper.Set("GeoIPOverrides", []map[string]interface{}{{"IP": "192.168.100.100", "Coordinate": map[string]float64{"lat": 43.567, "long": -65.322}}})
+		require.NoError(t, param.Set("GeoIPOverrides", []map[string]interface{}{{"IP": "192.168.100.100", "Coordinate": map[string]float64{"lat": 43.567, "long": -65.322}}}))
 		mockUrl := url.URL{Scheme: "https", Host: "192.168.100.100"}
 		serverAd := server_structs.ServerAd{URL: mockUrl, WebURL: mockUrl, FromTopology: false}
 		serverAd.Initialize("TEST_ORIGIN")

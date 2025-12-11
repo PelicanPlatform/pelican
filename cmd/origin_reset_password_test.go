@@ -25,7 +25,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tg123/go-htpasswd"
@@ -45,9 +44,9 @@ func TestResetPassword(t *testing.T) {
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
 	test_utils.MockFederationRoot(t, nil, nil)
-	viper.Set("ConfigDir", dirName)
-	viper.Set(param.Server_WebPort.GetName(), 8444)
-	viper.Set(param.Origin_Port.GetName(), 8443)
+	require.NoError(t, param.Set("ConfigDir", dirName))
+	require.NoError(t, param.Set(param.Server_WebPort.GetName(), 8444))
+	require.NoError(t, param.Set(param.Origin_Port.GetName(), 8443))
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 

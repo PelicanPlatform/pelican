@@ -30,7 +30,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/broker"
@@ -144,13 +143,17 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 	}
 
 	portStartCallback := func(port int) {
-		viper.Set(param.Cache_Port.GetName(), port)
+		if err := param.Set(param.Cache_Port.GetName(), port); err != nil {
+			log.WithError(err).Warnf("Failed to set %s to %d", param.Cache_Port.GetName(), port)
+		}
 		if cacheUrl, err := url.Parse(param.Cache_Url.GetString()); err == nil {
 			if cacheUrl.Port() == "" {
 				cacheUrl.Host = cacheUrl.Hostname() + ":" + strconv.Itoa(port)
 			}
 
-			viper.Set(param.Cache_Url.GetName(), cacheUrl.String())
+			if err := param.Set(param.Cache_Url.GetName(), cacheUrl.String()); err != nil {
+				log.WithError(err).Warnf("Failed to set %s to %s", param.Cache_Url.GetName(), cacheUrl.String())
+			}
 			log.Debugf("Resetting %s to %s", param.Cache_Url.GetName(), cacheUrl.String())
 		}
 		log.Infoln("Cache startup complete on port", port)

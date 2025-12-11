@@ -24,9 +24,10 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // Test that Pelican notifies users about unrecognized configuration keys.
@@ -35,13 +36,13 @@ func TestBadConfigKeys(t *testing.T) {
 
 	setupFunc := func() *test.Hook {
 		ResetConfig()
-		viper.Set("ConfigDir", t.TempDir())
+		require.NoError(t, param.Set("ConfigDir", t.TempDir()))
 		hook := test.NewLocal(logrus.StandardLogger())
 		return hook
 	}
 	t.Run("testRecognizedViperKey", func(t *testing.T) {
 		hook := setupFunc()
-		viper.Set("Origin.FederationPrefix", "/a/prefix")
+		require.NoError(t, param.Set("Origin.FederationPrefix", "/a/prefix"))
 		InitConfigInternal(logrus.DebugLevel)
 
 		require.Nil(t, hook.LastEntry())
@@ -58,7 +59,7 @@ func TestBadConfigKeys(t *testing.T) {
 
 	t.Run("testBadViperKey", func(t *testing.T) {
 		hook := setupFunc()
-		viper.Set("Origin.Bad.Key", "/a/prefix")
+		require.NoError(t, param.Set("Origin.Bad.Key", "/a/prefix"))
 		InitConfigInternal(logrus.DebugLevel)
 
 		require.NotNil(t, hook.LastEntry())

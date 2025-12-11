@@ -123,7 +123,7 @@ func setup(t *testing.T, config string, shouldError bool) []OriginExport {
 	for _, key := range viper.AllKeys() {
 		if strings.Contains(viper.GetString(key), "SHOULD-OVERRIDE-TEMPFILE") {
 			tmpFile := getTmpFile(t)
-			viper.Set(key, tmpFile)
+			require.NoError(t, param.Set(key, tmpFile))
 		} else if key == "origin.exports" { // keys will be lowercased
 			// We also need to override paths for any exports that define "SHOULD-OVERRIDE-TEMPFILE"
 			exports := viper.Get(key).([]interface{})
@@ -137,12 +137,12 @@ func setup(t *testing.T, config string, shouldError bool) []OriginExport {
 				}
 			}
 			// Set the modified exports back to viper after all overrides
-			viper.Set(key, exports)
+			require.NoError(t, param.Set(key, exports))
 		}
 	}
 
 	// Provide an issuer URL that exports will use as a fallback
-	viper.Set(param.Server_IssuerUrl.GetName(), defaultIssuerUrl)
+	require.NoError(t, param.Set(param.Server_IssuerUrl.GetName(), defaultIssuerUrl))
 
 	// Now call GetOriginExports and check the struct
 	exports, err := GetOriginExports()
@@ -320,21 +320,21 @@ func TestGetExports(t *testing.T) {
 	t.Run("testInvalidExport", func(t *testing.T) {
 		defer ResetTestState()
 
-		viper.Set("Origin.StorageType", "posix")
-		viper.Set("Origin.ExportVolumes", "")
+		require.NoError(t, param.Set("Origin.StorageType", "posix"))
+		require.NoError(t, param.Set("Origin.ExportVolumes", ""))
 		_, err := GetOriginExports()
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
 
 		ResetTestState()
-		viper.Set("Origin.StorageType", "posix")
-		viper.Set("Origin.ExportVolumes", "foo")
+		require.NoError(t, param.Set("Origin.StorageType", "posix"))
+		require.NoError(t, param.Set("Origin.ExportVolumes", "foo"))
 		_, err = GetOriginExports()
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
 
 		ResetTestState()
-		viper.Set("Origin.StorageType", "blah")
+		require.NoError(t, param.Set("Origin.StorageType", "blah"))
 		_, err = GetOriginExports()
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, server_structs.ErrUnknownOriginStorageType)
@@ -662,7 +662,7 @@ func TestGetExports(t *testing.T) {
 
 	t.Run("disabledDirectClientsPreventsDirectReads", func(t *testing.T) {
 		defer ResetTestState()
-		viper.Set(param.Origin_DisableDirectClients.GetName(), true)
+		require.NoError(t, param.Set(param.Origin_DisableDirectClients.GetName(), true))
 		// This export has DirectReads set to true, so expect failure
 		_ = setup(t, singleExportBlockConfig, true)
 	})

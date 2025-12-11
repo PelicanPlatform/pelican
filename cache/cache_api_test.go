@@ -23,7 +23,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -40,7 +39,7 @@ func TestCheckCacheSentinelLocation(t *testing.T) {
 
 	t.Run("sentinel-contains-dir", func(t *testing.T) {
 		server_utils.ResetTestState()
-		viper.Set(param.Cache_SentinelLocation.GetName(), "/test.txt")
+		require.NoError(t, param.Set(param.Cache_SentinelLocation.GetName(), "/test.txt"))
 		err := CheckCacheSentinelLocation()
 		require.Error(t, err)
 		assert.Equal(t, "invalid Cache.SentinelLocation path. File must not contain a directory. Got /test.txt", err.Error())
@@ -49,8 +48,8 @@ func TestCheckCacheSentinelLocation(t *testing.T) {
 	t.Run("sentinel-dne", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		server_utils.ResetTestState()
-		viper.Set(param.Cache_SentinelLocation.GetName(), "test.txt")
-		viper.Set(param.Cache_NamespaceLocation.GetName(), tmpDir)
+		require.NoError(t, param.Set(param.Cache_SentinelLocation.GetName(), "test.txt"))
+		require.NoError(t, param.Set(param.Cache_NamespaceLocation.GetName(), tmpDir))
 		err := CheckCacheSentinelLocation()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to open Cache.SentinelLocation")
@@ -60,8 +59,8 @@ func TestCheckCacheSentinelLocation(t *testing.T) {
 		tmpDir := t.TempDir()
 		server_utils.ResetTestState()
 
-		viper.Set(param.Cache_SentinelLocation.GetName(), "test.txt")
-		viper.Set(param.Cache_NamespaceLocation.GetName(), tmpDir)
+		require.NoError(t, param.Set(param.Cache_SentinelLocation.GetName(), "test.txt"))
+		require.NoError(t, param.Set(param.Cache_NamespaceLocation.GetName(), tmpDir))
 
 		file, err := os.Create(filepath.Join(tmpDir, "test.txt"))
 		require.NoError(t, err)

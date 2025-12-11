@@ -27,7 +27,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -225,8 +224,8 @@ func TestCreateFedTok(t *testing.T) {
 
 			confDir := t.TempDir()
 			kDir := filepath.Join(confDir, "keys")
-			viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
-			viper.Set("ConfigDir", confDir)
+			require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), kDir))
+			require.NoError(t, param.Set("ConfigDir", confDir))
 
 			config.ResetFederationForTest()
 			fed := pelican_url.FederationDiscovery{

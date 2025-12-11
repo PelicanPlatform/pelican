@@ -38,7 +38,6 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/client"
@@ -89,7 +88,9 @@ func init() {
 }
 
 func stashPluginMain(args []string) {
-	viper.Set(param.Client_IsPlugin.GetName(), true)
+	if err := param.Set(param.Client_IsPlugin.GetName(), true); err != nil {
+		log.Warningln("Failed to set plugin mode:", err)
+	}
 
 	// Handler function to recover from panics
 	defer func() {

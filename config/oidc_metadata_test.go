@@ -21,7 +21,6 @@ package config
 import (
 	"testing"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -42,19 +41,19 @@ func TestGetOIDCProvider(t *testing.T) {
 
 	t.Run("auth-endpoint-gives-correct-result", func(t *testing.T) {
 		ResetConfig()
-		viper.Set(param.OIDC_AuthorizationEndpoint.GetName(), "https://example.com/authorization")
+		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint.GetName(), "https://example.com/authorization"))
 		get, err := GetOIDCProdiver()
 		require.NoError(t, err)
 		assert.Equal(t, UnknownProvider, get)
 
 		// CILogon
-		viper.Set(param.OIDC_AuthorizationEndpoint.GetName(), "https://cilogon.org/api/v1.0/authorization")
+		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint.GetName(), "https://cilogon.org/api/v1.0/authorization"))
 		get, err = GetOIDCProdiver()
 		require.NoError(t, err)
 		assert.Equal(t, CILogon, get)
 
 		// Globus
-		viper.Set(param.OIDC_AuthorizationEndpoint.GetName(), "https://auth.globus.org/api/v1.0/authorization")
+		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint.GetName(), "https://auth.globus.org/api/v1.0/authorization"))
 		get, err = GetOIDCProdiver()
 		require.NoError(t, err)
 		assert.Equal(t, Globus, get)
@@ -62,25 +61,25 @@ func TestGetOIDCProvider(t *testing.T) {
 
 	t.Run("issuer-endpoint-gives-correct-result", func(t *testing.T) {
 		ResetConfig()
-		viper.Set(param.OIDC_Issuer.GetName(), "https://example.com")
+		require.NoError(t, param.Set(param.OIDC_Issuer.GetName(), "https://example.com"))
 		get, err := GetOIDCProdiver()
 		require.NoError(t, err)
 		assert.Equal(t, UnknownProvider, get)
 
 		// CILogon
-		viper.Set(param.OIDC_AuthorizationEndpoint.GetName(), "https://cilogon.org")
+		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint.GetName(), "https://cilogon.org"))
 		get, err = GetOIDCProdiver()
 		require.NoError(t, err)
 		assert.Equal(t, CILogon, get)
 
 		// CILogon no protocol
-		viper.Set(param.OIDC_AuthorizationEndpoint.GetName(), "cilogon.org")
+		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint.GetName(), "cilogon.org"))
 		get, err = GetOIDCProdiver()
 		require.NoError(t, err)
 		assert.Equal(t, CILogon, get)
 
 		// Globus no protocol
-		viper.Set(param.OIDC_AuthorizationEndpoint.GetName(), "auth.globus.org")
+		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint.GetName(), "auth.globus.org"))
 		get, err = GetOIDCProdiver()
 		require.NoError(t, err)
 		assert.Equal(t, Globus, get)

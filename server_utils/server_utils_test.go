@@ -32,7 +32,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -50,7 +49,7 @@ func TestWaitUntilWorking(t *testing.T) {
 		ResetTestState()
 	})
 
-	viper.Set(param.Server_StartupTimeout.GetName(), "10s")
+	require.NoError(t, param.Set(param.Server_StartupTimeout.GetName(), "10s"))
 	t.Run("success-with-HTTP-200", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK) // 200
@@ -151,7 +150,7 @@ func TestWaitUntilWorking(t *testing.T) {
 	})
 
 	t.Run("server-short-timeout", func(t *testing.T) {
-		viper.Set(param.Server_StartupTimeout.GetName(), "1s")
+		require.NoError(t, param.Set(param.Server_StartupTimeout.GetName(), "1s"))
 		earlyCancelCtx, earlyCancel := context.WithCancel(ctx)
 		go func() {
 			<-time.After(1500 * time.Millisecond)

@@ -195,7 +195,9 @@ func LaunchShoveler(ctx context.Context, egrp *errgroup.Group) (int, error) {
 
 	shovelerLogger.Infoln("Starting xrootd-monitoring-shoveler...")
 
-	viper.Set("queue_directory", param.Shoveler_QueueDirectory.GetString())
+	if err := param.Set("queue_directory", param.Shoveler_QueueDirectory.GetString()); err != nil {
+		return -1, err
+	}
 
 	// Start the message queue
 	cq := shoveler.NewConfirmationQueue()

@@ -33,7 +33,6 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -85,7 +84,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	tempToken.Close()
 
 	// Disable progress bars to not reuse the same mpb instance
-	viper.Set("Logging.DisableProgressBars", true)
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 	// Make our test directories and files
 	tempDir, err := os.MkdirTemp("", "UploadDir")
@@ -318,7 +317,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 	tempToken.Close()
 
 	// Disable progress bars to not reuse the same mpb instance
-	viper.Set("Logging.DisableProgressBars", true)
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 	// Make our test directories and files
 	tempDir, err := os.MkdirTemp("", "UploadDir")
@@ -527,7 +526,7 @@ func TestSyncUpload(t *testing.T) {
 	tempToken.Close()
 
 	// Disable progress bars to not reuse the same mpb instance
-	viper.Set("Logging.DisableProgressBars", true)
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 	// Make our test directories and files
 	tempDir := t.TempDir()
@@ -724,7 +723,7 @@ func TestSyncDownload(t *testing.T) {
 	tempToken.Close()
 
 	// Disable progress bars to not reuse the same mpb instance
-	viper.Set("Logging.DisableProgressBars", true)
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 	// Make our test directories and files
 	tempDir := t.TempDir()
@@ -938,7 +937,7 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 	tempToken.Close()
 
 	// Disable progress bars to not reuse the same mpb instance
-	viper.Set("Logging.DisableProgressBars", true)
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 	tempDir, err := os.MkdirTemp("", "UploadDir")
 	require.NoError(t, err)
@@ -1022,7 +1021,7 @@ func TestObjectDelete(t *testing.T) {
 	require.NoError(t, err)
 	tempToken.Close()
 
-	viper.Set("Logging.DisableProgressBars", true)
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 	storagePrefix := fed.Exports[0].StoragePrefix
 

@@ -41,10 +41,14 @@ func TestForwardService(t *testing.T) {
 	directorName = ""
 	directorNameError = nil
 
-	viper.Set(param.Director_AdvertiseUrl.GetName(), "http://director-ad-url")
-	defer viper.Set(param.Director_AdvertiseUrl.GetName(), "")
-	viper.Set(param.Server_ExternalWebUrl.GetName(), "http://external-url")
-	defer viper.Set(param.Server_ExternalWebUrl.GetName(), "")
+	require.NoError(t, param.Set(param.Director_AdvertiseUrl.GetName(), "http://director-ad-url"))
+	t.Cleanup(func() {
+		require.NoError(t, param.Set(param.Director_AdvertiseUrl.GetName(), ""))
+	})
+	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://external-url"))
+	t.Cleanup(func() {
+		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), ""))
+	})
 
 	ctx := context.Background()
 	ad := &server_structs.OriginAdvertiseV2{
@@ -89,8 +93,10 @@ func TestForwardService(t *testing.T) {
 // We have two directors, each with different advertise urls
 // We have a service ad that should be only forwarded to the director that is not itself
 func TestForwardServiceAd(t *testing.T) {
-	viper.Set(param.Server_ExternalWebUrl.GetName(), "http://director1.com")
-	defer viper.Set(param.Server_ExternalWebUrl.GetName(), "")
+	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://director1.com"))
+	t.Cleanup(func() {
+		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), ""))
+	})
 
 	// Reset the cache
 	directorAds.DeleteAll()
