@@ -26,17 +26,29 @@ Regardless of how a Pelican client is implemented, it will be interacting with t
 among other things. (For more information, see [About Pelican](/about-pelican) and [Getting Data with Pelican](/getting-data-with-pelican).)
 Furthermore, these operations are conducted over the internet and so common networking problems can impact these operations.
 
-### Error messages
+### Understanding Pelican client error messages
 
-TBD
+The Pelican client you are using will return an error if something goes wrong. 
+Ideally, you can use this error to understand the problem and what needs to be done.
+
+[Emma TODO: How to parse a pelican error message]
+
+### Authentication issues
+
+For protected reads and rights, Pelican can integrate with authentication services such as CILogon. 
+When you try to run a protected operation, you'll be prompted by Pelican to authenticate, usually by going to a web address in your browser and signing in with the necessary identity.
+
+Often times, the browser will store a cookie regarding your login to remember you next time. 
+In some cases, this cookie may become invalid and cause issues with the authentication flow for using Pelican.
+
+We recommend that you clear the cookies in your browser when troubleshooting issues with authenticated actions. 
+To do so, follow these instructions:
+
+[Patrick TODO]
 
 ## Pelican CLI
 
 This section discusses common errors when working with the [Pelican CLI](/getting-data-with-pelican/client) client. 
-
-The most common problems users encounter with the Pelican CLI are 
-
-* [LIST TBD]
 
 ### Reset local client
 
@@ -93,9 +105,24 @@ TBD
 
 ## Federating data
 
-TBD
+When setting up an Origin to make your data available via a Pelican Federation, it's good practice to test access using the same mechanism that your target audience will use.
+To make it easier to identify failure points, we recommend this ordering:
+
+1. Test that `pelican object ls` works
+2. Test that `pelican object get --direct` works
+3. Test that `pelican object get` works
+
+In principle, once you've successfully completed a transfer this way, everything should be good to go.
+
+Keep in mind that general networking issues can complicate the testing process, so it's also a good idea to test the transfer multiple times before jumping into troubleshooting your configuration.
+
+### Unable to transfer data via a cache
+
+A common issue is that you **are** able to download an object **directly** from the origin (using the `pelican object get --direct` command) but **are not** able to download the object **via a cache** (using the `pelican object get` command).
+
+To troubleshoot this issue, [Justin TODO]
 
 ## Operating a Federation
 
-TBD
+If you are deploying your own Pelican Federation, we recommend that you contact the Pelican team for assistance in getting started and troubleshooting issues: [pelicanplatform.org/contact](https://pelicanplatform.org/contact).
 

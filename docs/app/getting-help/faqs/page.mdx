@@ -156,16 +156,6 @@ More information about `pelican` and `osdf` URLs can be found in our [client usa
   <a id="triple-slash-fn3">**3**</a>: URLs can also contain things like ports, query parameters and "fragments," and while Pelican makes use of these, they aren't as crucial to understanding
   the question at hand.
 
-### Can I run a Pelican Origin from my laptop?
-
-You can, but it is not recommended.
-
-While it is technically possible to run a Pelican Origin for data on your laptop, there are several reasons why you should not.
-
-* Whenever your laptop is closed, runs out of battery, or simply isn’t connected to the internet, the Origin would no longer be available to any researcher who wishes to access that data.
-* You would need to restart the Origin each time your laptop shut down.
-* There is the potential for high network usage on your laptop if a large amount of the data is requested at once.
-
 ### Why isn't Pelican using the closest cache(s) when I download objects?
 Whenever a Pelican client tries to download an object, one of its first steps is to talk to the appropriate federation's Director, where the Directors job is to
 match the client's request to some service(s) that can best fulfill the request. This usually means giving the client an ordered list of caches that the Director
@@ -290,3 +280,20 @@ Once again, the `link` header will include an ordered list of Origins that your 
 < link: <https://chtc-osdf-origin.chtc.wisc.edu:8443/some/object>; rel="duplicate"; pri=1; depth=1
 ```
 This list is usually much shorter and likely contains a single Origin.
+
+## Federating Data
+
+### Can I run a Pelican Origin from my laptop?
+
+You can, but it is not recommended.
+
+While it is technically possible to run a Pelican Origin for data on your laptop, there are several reasons why you should not.
+
+* Whenever your laptop is closed, runs out of battery, or simply isn’t connected to the internet, the Origin would no longer be available to any researcher who wishes to access that data.
+* You would need to restart the Origin each time your laptop shut down.
+* There is the potential for high network usage on your laptop if a large amount of the data is requested at once.
+
+### How do I get the public JWKS key from the private JWK key that I have?
+
+[Howard TODO]
+
