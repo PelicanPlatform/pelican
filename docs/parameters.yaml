@@ -2583,7 +2583,7 @@ type: stringSlice
 default: []
 components: ["cache", "director", "origin", "registry"]
 ---
-name: Server.UIAdminGroups
+name: Server.AdminGroups
 description: |+
   A string slice of group names that grant admin permission for the server admin website.
   Users who belong to any of these groups will be granted admin privileges, regardless of their username.

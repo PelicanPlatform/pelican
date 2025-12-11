@@ -303,6 +303,7 @@ type Config struct {
 	RuntimeDir string `mapstructure:"runtimedir" yaml:"RuntimeDir"`
 	Server struct {
 		AdLifetime time.Duration `mapstructure:"adlifetime" yaml:"AdLifetime"`
+		AdminGroups []string `mapstructure:"admingroups" yaml:"AdminGroups"`
 		AdvertisementInterval time.Duration `mapstructure:"advertisementinterval" yaml:"AdvertisementInterval"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DirectorUrls []string `mapstructure:"directorurls" yaml:"DirectorUrls"`
@@ -328,7 +329,6 @@ type Config struct {
 		TLSCertificateChain string `mapstructure:"tlscertificatechain" yaml:"TLSCertificateChain"`
 		TLSKey string `mapstructure:"tlskey" yaml:"TLSKey"`
 		UIActivationCodeFile string `mapstructure:"uiactivationcodefile" yaml:"UIActivationCodeFile"`
-		UIAdminGroups []string `mapstructure:"uiadmingroups" yaml:"UIAdminGroups"`
 		UIAdminUsers []string `mapstructure:"uiadminusers" yaml:"UIAdminUsers"`
 		UILoginRateLimit int `mapstructure:"uiloginratelimit" yaml:"UILoginRateLimit"`
 		UIPasswordFile string `mapstructure:"uipasswordfile" yaml:"UIPasswordFile"`
@@ -689,6 +689,7 @@ type configWithType struct {
 	RuntimeDir struct { Type string; Value string }
 	Server struct {
 		AdLifetime struct { Type string; Value time.Duration }
+		AdminGroups struct { Type string; Value []string }
 		AdvertisementInterval struct { Type string; Value time.Duration }
 		DbLocation struct { Type string; Value string }
 		DirectorUrls struct { Type string; Value []string }
@@ -714,7 +715,6 @@ type configWithType struct {
 		TLSCertificateChain struct { Type string; Value string }
 		TLSKey struct { Type string; Value string }
 		UIActivationCodeFile struct { Type string; Value string }
-		UIAdminGroups struct { Type string; Value []string }
 		UIAdminUsers struct { Type string; Value []string }
 		UILoginRateLimit struct { Type string; Value int }
 		UIPasswordFile struct { Type string; Value string }
