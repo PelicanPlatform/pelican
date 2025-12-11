@@ -661,7 +661,7 @@ func TestCheckAdmin(t *testing.T) {
 			// Setup admin groups config
 			// Only set if explicitly provided (nil means not set, empty slice means set but empty)
 			if tc.adminGroups != nil {
-				viper.Set(param.Server_UIAdminGroups.GetName(), tc.adminGroups)
+				viper.Set(param.Server_AdminGroups.GetName(), tc.adminGroups)
 			}
 
 			// Call CheckAdmin
@@ -745,7 +745,7 @@ func TestAdminAuthHandler(t *testing.T) {
 			name: "admin-group-access",
 			setupUserFunc: func(ctx *gin.Context) {
 				viper.Set(param.Server_UIAdminUsers.GetName(), []string{})
-				viper.Set(param.Server_UIAdminGroups.GetName(), []string{"pelican-admins"})
+				viper.Set(param.Server_AdminGroups.GetName(), []string{"pelican-admins"})
 				ctx.Set("User", "user1")
 				ctx.Set("Groups", []string{"pelican-admins"})
 			},
@@ -755,7 +755,7 @@ func TestAdminAuthHandler(t *testing.T) {
 			name: "non-admin-group-access",
 			setupUserFunc: func(ctx *gin.Context) {
 				viper.Set(param.Server_UIAdminUsers.GetName(), []string{})
-				viper.Set(param.Server_UIAdminGroups.GetName(), []string{"pelican-admins"})
+				viper.Set(param.Server_AdminGroups.GetName(), []string{"pelican-admins"})
 				ctx.Set("User", "user1")
 				ctx.Set("Groups", []string{"pelican-users"})
 			},
