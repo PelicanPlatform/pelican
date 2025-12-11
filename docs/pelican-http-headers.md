@@ -305,6 +305,8 @@ X-Transfer-Status: 500: Unable to read test.txt; input/output error
 X-Transfer-Status: 500: unexpected EOF
 ```
 
+**Note:** The format includes a colon and space after the status code, followed by the status text (e.g., "200: OK" or "500: error message").
+
 **Notes:**
 - Sent as an HTTP trailer (after the response body)
 - Only sent if client sets `X-Transfer-Status: true` and `TE: trailers` headers
@@ -368,13 +370,14 @@ In addition to custom headers, Pelican also uses standard HTTP headers:
 The following Pelican headers are exposed for CORS (Cross-Origin Resource Sharing) requests:
 
 **Access-Control-Expose-Headers:**
-- `X-Pelican-User`
 - `X-Pelican-Timeout`
 - `X-Pelican-Token-Generation`
 - `X-Pelican-Authorization`
 - `X-Pelican-Namespace`
 
-**Note:** There is a TODO in the codebase to potentially add more headers to `Access-Control-Allow-Headers`:
+**Note:** The `X-Pelican-User` header appears in the CORS configuration in the source code but is actually an internal header used only between Pelican Server and OA4MP Server, not for web clients.
+
+**Additional Note:** There is a TODO in the codebase to potentially add more headers to `Access-Control-Allow-Headers`:
 - Currently allowed: `Content-Type`, `Authorization`, `Depth`
 - Potential additions: `X-Pelican-User`, `X-Pelican-Timeout`, `X-Pelican-Token-Generation`, `X-Pelican-Authorization`, `X-Pelican-Namespace`
 
