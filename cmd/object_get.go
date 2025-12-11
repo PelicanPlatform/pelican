@@ -51,6 +51,7 @@ the client should fallback to discovered caches if all preferred caches fail.`)
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
 	flagSet.BoolP("recursive", "r", false, "Recursively download a collection.  Forces methods to only be http to get the freshest collection contents")
 	flagSet.Bool("inplace", false, "Write files directly to destination (default: use temporary files)")
+	flagSet.Bool("dry-run", false, "Show what would be downloaded without actually downloading")
 	flagSet.StringP("cache-list-name", "n", "xroot", "(Deprecated) Cache list to use, currently either xroot or xroots; may be ignored")
 	flagSet.Lookup("cache-list-name").Hidden = true
 	flagSet.String("caches", "", "A JSON file containing the list of caches")
@@ -167,7 +168,15 @@ func getMain(cmd *cobra.Command, args []string) {
 
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		transferResults, err := client.DoGet(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation), client.WithCaches(caches...), client.WithInPlace(inPlace))
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		options := []client.TransferOption{
+			client.WithCallback(pb.callback),
+			client.WithTokenLocation(tokenLocation),
+			client.WithCaches(caches...),
+			client.WithInPlace(inPlace),
+			client.WithDryRun(dryRun),
+		}
+		transferResults, err := client.DoGet(ctx, src, dest, isRecursive, options...)
 		if err != nil {
 			attemptErr = err
 			lastSrc = src

@@ -270,6 +270,7 @@ type (
 		requireChecksum    bool
 		recursive          bool
 		skipAcquire        bool
+		dryRun             bool       // Enable dry-run mode to display what would be transferred without actually doing it
 		syncLevel          SyncLevel  // Policy for handling synchronization when the destination exists
 		prefObjServers     []*url.URL // holds any client-requested caches/origins
 		dirResp            server_structs.DirectorResponse
@@ -333,6 +334,7 @@ type (
 		syncLevel      SyncLevel // Policy for the client to synchronize data
 		tokenLocation  string    // Location of a token file to use for transfers
 		token          string    // Token that should be used for transfers
+		dryRun         bool      // Enable dry-run mode to display what would be transferred without actually doing it
 		work           chan *TransferJob
 		closed         bool
 		prefObjServers []*url.URL // holds any client-requested caches/origins
@@ -356,6 +358,7 @@ type (
 	identTransferOptionWriter          struct{}
 	identTransferOptionReader          struct{}
 	identTransferOptionInPlace         struct{}
+	identTransferOptionDryRun          struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -750,6 +753,15 @@ func WithInPlace(inPlace bool) TransferOption {
 	return option.New(identTransferOptionInPlace{}, inPlace)
 }
 
+// Create an option to enable dry-run mode
+//
+// When enabled, the transfer will display what would be copied without actually
+// modifying the destination. Useful for verifying paths and sources before
+// performing actual transfers.
+func WithDryRun(enable bool) TransferOption {
+	return option.New(identTransferOptionDryRun{}, enable)
+}
+
 // Create a new client to work with an engine
 func (te *TransferEngine) NewClient(options ...TransferOption) (client *TransferClient, err error) {
 	log.Debugln("Making new clients")
@@ -780,6 +792,8 @@ func (te *TransferEngine) NewClient(options ...TransferOption) (client *Transfer
 			client.token = option.Value().(string)
 		case identTransferOptionSynchronize{}:
 			client.syncLevel = option.Value().(SyncLevel)
+		case identTransferOptionDryRun{}:
+			client.dryRun = option.Value().(bool)
 		}
 	}
 	func() {
@@ -1136,6 +1150,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		remoteURL:      &copyUrl,
 		callback:       tc.callback,
 		skipAcquire:    tc.skipAcquire,
+		dryRun:         tc.dryRun,
 		syncLevel:      tc.syncLevel,
 		xferType:       transferTypeDownload,
 		uuid:           id,
@@ -1179,6 +1194,8 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			tj.reader = option.Value().(io.ReadCloser)
 		case identTransferOptionInPlace{}:
 			tj.inPlace = option.Value().(bool)
+		case identTransferOptionDryRun{}:
+			tj.dryRun = option.Value().(bool)
 		}
 	}
 
@@ -1941,6 +1958,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	log.Debugln("Downloading object from", transfer.remoteURL, "to", transfer.localPath)
 	var downloaded int64
 	localPath := transfer.localPath
+	transferResults.job = transfer.job
 
 	// Create a checksum hash instance for each requested checksum; these will all be
 	// joined together into a single writer interface with the output file
@@ -1977,6 +1995,18 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		fileCloser = transfer.writer
 		localPath = "" // Don't use localPath when using custom writer
 	} else if transfer.xferType == transferTypeDownload {
+		// In dry-run mode, skip actual file operations and just report what would happen
+		if transfer.job != nil && transfer.job.dryRun {
+			// Determine the final local path
+			finalLocalPath := localPath
+			if len(localPath) > 0 && os.IsPathSeparator(localPath[len(localPath)-1]) {
+				finalLocalPath = path.Join(localPath, path.Base(transfer.remoteURL.Path))
+			}
+			// Print to stdout with structured format for easy parsing
+			fmt.Printf("DOWNLOAD: %s -> %s\n", transfer.remoteURL.Path, finalLocalPath)
+			return transferResults, nil
+		}
+
 		var info os.FileInfo
 		if info, err = os.Stat(localPath); err != nil {
 			if os.IsNotExist(err) {
@@ -3088,6 +3118,14 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	log.Debugln("Uploading file to destination", transfer.remoteURL)
 	xferErrors := NewTransferErrors()
 	transferResult.job = transfer.job
+
+	// In dry-run mode, log what would be uploaded and return success
+	if transfer.job != nil && transfer.job.dryRun {
+		// Print to stdout with structured format for easy parsing
+		fmt.Printf("UPLOAD: %s -> %s\n", transfer.localPath, transfer.remoteURL.Path)
+		// Return success for dry-run without performing any file operations
+		return transferResult, nil
+	}
 
 	// Check if the remote object already exists using statHttp
 	// If the job is recursive, we skip this check as the check is already performed in walkDirUpload
