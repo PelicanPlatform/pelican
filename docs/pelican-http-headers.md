@@ -367,15 +367,16 @@ In addition to custom headers, Pelican also uses standard HTTP headers:
 
 ## CORS Configuration
 
-The following Pelican headers are exposed for CORS (Cross-Origin Resource Sharing) requests:
+The following Pelican headers are configured for CORS (Cross-Origin Resource Sharing) requests:
 
 **Access-Control-Expose-Headers:**
+- `X-Pelican-User` (exposed but currently only used internally)
 - `X-Pelican-Timeout`
 - `X-Pelican-Token-Generation`
 - `X-Pelican-Authorization`
 - `X-Pelican-Namespace`
 
-**Note:** The `X-Pelican-User` header appears in the CORS configuration in the source code but is actually an internal header used only between Pelican Server and OA4MP Server, not for web clients.
+**Note:** While `X-Pelican-User` is included in the CORS exposed headers configuration, it is currently only used internally between the Pelican Server and OA4MP Server and is not set by the director in client responses. The CORS configuration may be prepared for future use or is overly permissive.
 
 **Additional Note:** There is a TODO in the codebase to potentially add more headers to `Access-Control-Allow-Headers`:
 - Currently allowed: `Content-Type`, `Authorization`, `Depth`
