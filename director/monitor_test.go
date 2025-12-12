@@ -228,7 +228,7 @@ func TestLaunchPeriodicDirectorTest(t *testing.T) {
 				// Check if test stopped due to cache expiration
 				select {
 				case <-testStopped:
-					assert.True(t, true, "Test stopped as expected when cache expired")
+					// Test stopped as expected when cache expired
 				case <-time.After(time.Millisecond * 200):
 					t.Errorf("Test case %s: expected test to stop when cache expired but it didn't", tc.name)
 				}
@@ -388,7 +388,7 @@ func TestDirectorTestCacheEviction(t *testing.T) {
 	// Verify test finished (because cache entry was evicted)
 	select {
 	case <-testFinished:
-		assert.True(t, true, "Test should finish when server is evicted from cache")
+		// Test finished as expected when server was evicted from cache
 	case <-time.After(time.Millisecond * 300):
 		t.Error("Test should have stopped when server was evicted from cache")
 	}
