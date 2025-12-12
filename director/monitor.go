@@ -201,18 +201,18 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverUrlStr string) {
 				log.Warningf("Failed to get cached downtimes for server %s: %v. Skipping director test cycle.", serverAd.Name, err)
 				continue
 			}
-			
+
 			// Check if any downtime is currently active
 			currentTime := time.Now().UTC().UnixMilli()
 			hasActiveDowntime := false
 			for _, downtime := range downtimes {
-				if currentTime >= downtime.StartTime && (currentTime <= downtime.EndTime || downtime.EndTime == server_structs.IndefiniteEndTime) {
+				if downtime.StartTime <= currentTime && (downtime.EndTime >= currentTime || downtime.EndTime == server_structs.IndefiniteEndTime) {
 					hasActiveDowntime = true
 					log.Debugf("Skipping director test cycle for %s server %s: server is in active downtime", serverAd.Type, serverAd.Name)
 					break
 				}
 			}
-			
+
 			if hasActiveDowntime {
 				continue
 			}
