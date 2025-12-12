@@ -93,7 +93,7 @@ func NewTransferManager(ctx context.Context, maxConcurrentJobs int, store StoreI
 
 	// Attempt to recover incomplete jobs from database
 	if store != nil {
-		go tm.recoverJobs()
+		tm.recoverJobs()
 		go tm.startBackgroundTasks()
 	}
 
@@ -134,6 +134,17 @@ func (tm *TransferManager) recoverJobs() {
 					idField := jobVal.FieldByName("ID")
 					if idField.IsValid() && idField.Kind() == reflect.String {
 						jobID := idField.String()
+
+						// Skip jobs that are already in memory (actively managed)
+						tm.mu.RLock()
+						_, exists := tm.jobs[jobID]
+						tm.mu.RUnlock()
+
+						if exists {
+							log.Debugf("Skipping recovery for job %s (already in memory)", jobID)
+							continue
+						}
+
 						tm.recoverSingleJob(jobID)
 						recoveredCount++
 					}
@@ -145,62 +156,155 @@ func (tm *TransferManager) recoverJobs() {
 	if recoveredCount == 0 {
 		log.Info("No jobs to recover")
 	} else {
-		log.Infof("Job recovery complete: marked %d jobs as failed", recoveredCount)
+		log.Infof("Job recovery complete: restarted %d incomplete jobs", recoveredCount)
 	}
 }
 
-// recoverSingleJob marks a single job as failed and archives it
+// recoverSingleJob restarts a single interrupted job
 func (tm *TransferManager) recoverSingleJob(jobID string) {
-	log.Infof("Marking incomplete job %s as failed", jobID)
+	log.Infof("Recovering and restarting incomplete job %s", jobID)
 
-	now := time.Now()
-	if err := tm.store.UpdateJobStatus(jobID, StatusFailed); err != nil {
-		log.Warnf("Failed to update recovered job %s status: %v", jobID, err)
+	// Get the job from the database
+	jobData, err := tm.store.GetJob(jobID)
+	if err != nil {
+		log.Warnf("Failed to get job %s for recovery: %v", jobID, err)
 		return
 	}
-	if err := tm.store.UpdateJobTimes(jobID, nil, &now); err != nil {
-		log.Warnf("Failed to update recovered job %s completion time: %v", jobID, err)
+
+	// Use reflection to extract job details including retry count
+	jobVal := reflect.ValueOf(jobData)
+	if jobVal.Kind() == reflect.Ptr {
+		jobVal = jobVal.Elem()
 	}
-	if err := tm.store.UpdateJobError(jobID, "Job interrupted by server restart"); err != nil {
-		log.Warnf("Failed to update recovered job %s error: %v", jobID, err)
+	if jobVal.Kind() != reflect.Struct {
+		log.Warnf("Invalid job data type for recovery: %s", jobID)
+		return
 	}
 
-	// Update all transfers for this job to failed status
+	// Extract retry count from the job
+	retryCountField := jobVal.FieldByName("RetryCount")
+	var currentRetryCount int
+	if retryCountField.IsValid() && retryCountField.Kind() == reflect.Int {
+		currentRetryCount = int(retryCountField.Int())
+	}
+
+	// Get transfers for this job
 	transfersData, err := tm.store.GetTransfersByJob(jobID)
 	if err != nil {
 		log.Warnf("Failed to get transfers for recovered job %s: %v", jobID, err)
-	} else {
-		// Use reflection to extract transfers from interface{}
-		transfersVal := reflect.ValueOf(transfersData)
-		if transfersVal.Kind() == reflect.Slice {
-			for i := 0; i < transfersVal.Len(); i++ {
-				transfer := transfersVal.Index(i)
-				if transfer.Kind() == reflect.Ptr {
-					transfer = transfer.Elem()
-				}
+		return
+	}
 
-				// Extract transfer ID
-				transferIDField := transfer.FieldByName("ID")
-				if !transferIDField.IsValid() || transferIDField.Kind() != reflect.String {
-					continue
-				}
-				transferID := transferIDField.String()
-
-				// Update transfer status and completion time
-				if err := tm.store.UpdateTransferStatus(transferID, StatusFailed); err != nil {
-					log.Warnf("Failed to update recovered transfer %s status: %v", transferID, err)
-				}
-				if err := tm.store.UpdateTransferTimes(transferID, nil, &now); err != nil {
-					log.Warnf("Failed to update recovered transfer %s completion time: %v", transferID, err)
-				}
+	// Convert transfers to TransferRequest format
+	var requests []TransferRequest
+	transfersVal := reflect.ValueOf(transfersData)
+	if transfersVal.Kind() == reflect.Slice {
+		for i := 0; i < transfersVal.Len(); i++ {
+			transfer := transfersVal.Index(i)
+			if transfer.Kind() == reflect.Ptr {
+				transfer = transfer.Elem()
 			}
+
+			// Extract transfer fields
+			operationField := transfer.FieldByName("Operation")
+			sourceField := transfer.FieldByName("Source")
+			destinationField := transfer.FieldByName("Destination")
+			recursiveField := transfer.FieldByName("Recursive")
+
+			if !operationField.IsValid() || !sourceField.IsValid() || !destinationField.IsValid() || !recursiveField.IsValid() {
+				log.Warnf("Failed to extract transfer fields for recovery")
+				continue
+			}
+
+			request := TransferRequest{
+				Operation:   operationField.String(),
+				Source:      sourceField.String(),
+				Destination: destinationField.String(),
+				Recursive:   recursiveField.Bool(),
+			}
+			requests = append(requests, request)
 		}
 	}
 
-	// Archive the failed job
-	if err := tm.store.ArchiveJob(jobID); err != nil {
-		log.Warnf("Failed to archive recovered job %s: %v", jobID, err)
+	if len(requests) == 0 {
+		log.Warnf("No valid transfers found for recovered job %s", jobID)
+		return
 	}
+
+	// Delete the old job and transfers from the database
+	// First delete from jobs table (cascades to transfers)
+	if err := tm.store.DeleteJob(jobID); err != nil {
+		log.Warnf("Failed to delete old job %s during recovery: %v", jobID, err)
+		// Continue anyway - CreateJob will create new entries
+	}
+
+	// Recreate the job with the SAME ID but incremented retry count
+	// This preserves the job ID known to the user
+	tm.mu.Lock()
+	newRetryCount := currentRetryCount + 1
+	jobCtx, jobCancel := context.WithCancel(tm.ctx)
+
+	job := &TransferJob{
+		ID:         jobID, // PRESERVE the original job ID
+		Status:     StatusPending,
+		CreatedAt:  time.Now(),
+		Transfers:  make([]*Transfer, 0, len(requests)),
+		Options:    nil, // Options are not persisted, so we can't recover them
+		CancelFunc: jobCancel,
+		ctx:        jobCtx,
+	}
+
+	// Create transfers for the job
+	for _, req := range requests {
+		transferID := uuid.New().String()
+		transferCtx, transferCancel := context.WithCancel(jobCtx)
+
+		transfer := &Transfer{
+			ID:          transferID,
+			JobID:       jobID, // Use the original job ID
+			Operation:   req.Operation,
+			Source:      req.Source,
+			Destination: req.Destination,
+			Recursive:   req.Recursive,
+			Status:      StatusPending,
+			CreatedAt:   time.Now(),
+			CancelFunc:  transferCancel,
+			ctx:         transferCtx,
+		}
+
+		job.Transfers = append(job.Transfers, transfer)
+		tm.transfers[transferID] = transfer
+
+		// Persist transfer to database
+		storedTransfer := map[string]interface{}{
+			"ID":          transferID,
+			"JobID":       jobID, // Use the original job ID
+			"Operation":   req.Operation,
+			"Source":      req.Source,
+			"Destination": req.Destination,
+			"Recursive":   req.Recursive,
+			"Status":      StatusPending,
+			"CreatedAt":   transfer.CreatedAt.Unix(),
+		}
+		if err := tm.store.CreateTransfer(storedTransfer); err != nil {
+			log.Warnf("Failed to persist recovered transfer %s to database: %v", transferID, err)
+		}
+	}
+
+	tm.jobs[jobID] = job // Use the original job ID
+	tm.mu.Unlock()
+
+	// Persist job to database with incremented retry count
+	optionsJSON := "{}"
+	if err := tm.store.CreateJob(jobID, StatusPending, job.CreatedAt, optionsJSON, newRetryCount); err != nil {
+		log.Warnf("Failed to persist recovered job %s to database: %v", jobID, err)
+	}
+
+	log.Infof("Job %s recovered and restarted with %d transfers (retry attempt %d)", jobID, len(requests), newRetryCount)
+
+	// Start the job asynchronously
+	tm.wg.Add(1)
+	go tm.executeJob(job)
 }
 
 // CreateJob creates a new transfer job
@@ -262,10 +366,10 @@ func (tm *TransferManager) CreateJob(requests []TransferRequest, options []clien
 
 	tm.jobs[jobID] = job
 
-	// Persist job to database if store is available
+	// Persist job to database if store is available (initial creation with retry_count=0)
 	if tm.store != nil {
 		optionsJSON := "{}"
-		if err := tm.store.CreateJob(jobID, StatusPending, job.CreatedAt, optionsJSON); err != nil {
+		if err := tm.store.CreateJob(jobID, StatusPending, job.CreatedAt, optionsJSON, 0); err != nil {
 			log.Warnf("Failed to persist job %s to database: %v", jobID, err)
 		}
 	}
