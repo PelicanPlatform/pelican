@@ -478,6 +478,8 @@ func TestCopyCertificatesWithPKCS11(t *testing.T) {
 	viper.Set("Origin.RunLocation", runDir)
 	viper.Set("ConfigDir", configDir)
 
+	test_utils.MockFederationRoot(t, nil, nil)
+
 	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
 
 	p11proxy.SetCurrentInfoForTest(p11proxy.Info{Enabled: true, PKCS11URL: "pkcs11:test"})
