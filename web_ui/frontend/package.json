@@ -45,7 +45,7 @@
     "react-markdown": "^9.0.1",
     "semver": "^7.7.2",
     "sharp": "^0.34.1",
-    "swagger-ui-react": "5.29.0",
+    "swagger-ui-react": "^5.31.0",
     "swr": "^2.2.5",
     "yaml": "^2.3.4"
   },
