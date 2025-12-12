@@ -184,29 +184,51 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverUrlStr string) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Debug(fmt.Sprintf("End director test suite for %s server %s at %s", serverType, serverName, serverUrlStr))
+			log.Debug(fmt.Sprintf("Stopped the Director test suite for %s server %s at %s", serverType, serverName, serverUrlStr))
 			return
 		case <-ticker.C:
 			// Fetch the current server ad from the TTL cache
 			adItem := serverAds.Get(serverUrlStr, disableTouchOpt)
 			if adItem == nil {
-				log.Infof("Server ad no longer in cache for URL %s. Stopping director tests.", serverUrlStr)
+				log.Infof("The Director doesn't have any advertisements for server with URL %s. Stopping director tests.", serverUrlStr)
 				return
 			}
 			serverAd := adItem.Value().ServerAd
 
+			// Check if the server is in an active downtime
+			downtimes, err := getCachedDowntimes(serverAd.Name)
+			if err != nil {
+				log.Warningf("Failed to get cached downtimes for server %s: %v. Skipping director test cycle.", serverAd.Name, err)
+				continue
+			}
+			
+			// Check if any downtime is currently active
+			currentTime := time.Now().Unix()
+			hasActiveDowntime := false
+			for _, downtime := range downtimes {
+				if currentTime >= downtime.StartTime && (currentTime <= downtime.EndTime || downtime.EndTime == -1) {
+					hasActiveDowntime = true
+					log.Debugf("Skipping director test cycle for %s server %s: server is in active downtime", serverAd.Type, serverAd.Name)
+					break
+				}
+			}
+			
+			if hasActiveDowntime {
+				continue
+			}
+
 			log.Debug(fmt.Sprintf("Starting a director test cycle for %s server %s at %s", serverAd.Type, serverAd.Name, serverAd.URL.String()))
 			ok := true
-			var err error
+			var testErr error
 			if serverAd.Type == server_structs.OriginType.String() {
 				fileTests := server_utils.TestFileTransferImpl{}
-				ok, err = fileTests.RunTests(ctx, serverAd.URL.String(), serverAd.URL.String(), "", server_utils.DirectorTest)
+				ok, testErr = fileTests.RunTests(ctx, serverAd.URL.String(), serverAd.URL.String(), "", server_utils.DirectorTest)
 			} else if serverAd.Type == server_structs.CacheType.String() {
-				err = runCacheTest(ctx, serverAd.URL)
+				testErr = runCacheTest(ctx, serverAd.URL)
 			}
 
 			// Successfully run a test, no error
-			if ok && err == nil {
+			if ok && testErr == nil {
 				log.Debugf("Director file transfer test cycle succeeded at %s for %s server with URL at %s", time.Now().Format(time.RFC3339), serverAd.Type, serverAd.URL.String())
 				func() {
 					healthTestUtilsMutex.Lock()
@@ -286,7 +308,7 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverUrlStr string) {
 				}
 				// The file tests failed. Report failure back to origin/cache
 			} else {
-				log.Warningln("Director file transfer test cycle failed for ", serverAd.Type, " server: ", serverAd.URL.String(), " ", err)
+				log.Warningln("Director file transfer test cycle failed for ", serverAd.Type, " server: ", serverAd.URL.String(), " ", testErr)
 				func() {
 					healthTestUtilsMutex.Lock()
 					defer healthTestUtilsMutex.Unlock()
@@ -300,7 +322,7 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverUrlStr string) {
 				if err := reportStatusToServer(
 					ctx,
 					serverAd.WebURL.String(),
-					"error", "Director file transfer test cycle failed for origin: "+serverAd.URL.String()+" "+err.Error(),
+					"error", "Director file transfer test cycle failed for origin: "+serverAd.URL.String()+" "+testErr.Error(),
 					serverAd.Type,
 					false,
 				); err != nil {
