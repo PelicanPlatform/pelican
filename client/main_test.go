@@ -530,7 +530,7 @@ func TestTokenIsAcceptableForSciTokens(t *testing.T) {
 	tc.Lifetime = time.Hour
 	tc.Issuer = "https://issuer.example"
 	tc.AddAudienceAny()
-	tc.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/bar"))
+	tc.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Scitokens_Read, "/bar"))
 
 	// Generate an ECDSA P‑256 key so that ES256 signing works
 	privEC, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -565,7 +565,7 @@ func TestTokenIsAcceptableForSciTokens(t *testing.T) {
 	tc.Lifetime = time.Hour
 	tc.Issuer = "https://issuer.example"
 	tc.AddAudienceAny()
-	tc.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Modify, "/bar"))
+	tc.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Scitokens_Write, "/bar"))
 	sciTokBytes, err = tc.CreateTokenWithKey(jwkKey)
 	require.NoError(t, err)
 	sciTok = string(sciTokBytes)
