@@ -2,6 +2,14 @@
 
 This document provides guidance for AI coding agents (including GitHub Copilot) when working with the Pelican codebase.
 
+## Problem-Solving Approach
+
+When presented with an issue or bug, always ask: "Is this an isolated bug, or does it represent a _class_ of bugs that can be fixed?"
+
+For example, if an issue reports "there's a typo in the config name we pass as a string to a function," the immediate fix is correcting the typo. However, the better observation is: "this function takes config params as strings rather than as typed params, which introduces the ability to make typos. I can solve this and all future typo bugs by changing the signature to make typos impossible."
+
+Always seek to prevent entire classes of problems by asking: "How can I prevent other bugs like this in the future?"
+
 ## Project Overview
 
 Pelican is a data federation platform that allows users to serve and access datasets through a distributed network of origins and caches. The project includes both server components (Registry, Director, Origin, Cache) and client tools for data transfer.
@@ -43,7 +51,7 @@ Pelican is a data federation platform that allows users to serve and access data
 - `daemon/` - Daemon utilities
 - `database/` - Database models and migrations
 - `director/` - Director service for federation coordination
-- `docs/` - Documentation and parameter definitions
+- `docs/` - Documentation and parameter definitions (use one sentence per line for markdown files)
 - `origin/` - Origin server implementation
 - `registry/` - Registry service for namespace management
 - `server_utils/` - Shared utilities for server components
@@ -58,6 +66,11 @@ Pelican is a data federation platform that allows users to serve and access data
 **Full build with GoReleaser:**
 ```bash
 goreleaser build --clean --snapshot
+```
+
+**Faster build for testing (single architecture):**
+```bash
+goreleaser build --clean --snapshot --single-target
 ```
 
 **Development build (faster):**
@@ -78,6 +91,11 @@ make web-build
 go test ./...
 ```
 
+**Test individual modules:**
+```bash
+cd director && go test
+```
+
 **Frontend tests:**
 ```bash
 cd web_ui/frontend
@@ -89,6 +107,11 @@ npm test
 **Go linting:**
 ```bash
 golangci-lint run
+```
+
+**Go formatting:**
+```bash
+gofmt -w .
 ```
 
 **Frontend linting:**
@@ -133,9 +156,25 @@ npm run format:fix    # Fix formatting
 
 3. **Error Handling**: Always check and handle errors appropriately
 
-4. **Testing**: Place test files alongside source files with `_test.go` suffix
+4. **Testing**: Place test files alongside source files with `_test.go` suffix. Tests should be isolated (use temp directories and config reset functions) and not depend on state from other tests.
 
-5. **Imports**: Use `goimports` for automatic import organization
+5. **Imports**: Organize imports in three groups separated by blank lines:
+   ```go
+   import (
+       // Standard library imports (alphabetized)
+       "encoding/json"
+       "net/http"
+       "time"
+
+       // External dependencies (alphabetized)
+       "github.com/google/uuid"
+       "github.com/pkg/errors"
+
+       // Pelican internal packages (alphabetized)
+       "github.com/pelicanplatform/pelican/param"
+       "github.com/pelicanplatform/pelican/utils"
+   )
+   ```
 
 ### TypeScript/React Code
 
@@ -170,14 +209,15 @@ Key steps:
 
 - Address a single concern with minimal changes
 - Add tests for new functionality or bug fixes
-- Update documentation in `docs/` folder if needed
+- Update documentation in `docs/` folder if needed (use one sentence per line for markdown)
 - Follow the ["fork-and-pull" Git workflow](https://github.com/susam/gitpr)
 - At least one core contributor must review and approve changes
 - Run linters and tests before submitting
+- Rebase against main and wait for passing tests before merge (tests run in dev container built from main branch)
 
 ### Configuration
 
-- Server configuration: YAML files (typically `pelican.yaml`)
+- Server configuration: Prefer YAML files (typically `pelican.yaml`) over command-line arguments (except when testing command-line arguments)
 - Client configuration: Can use federation discovery URLs or explicit configuration
 - Parameters documented in `docs/parameters.yaml`
 
@@ -186,7 +226,7 @@ Key steps:
 ### Object Transfer
 
 - Client commands: `pelican object get`, `pelican object put`, `pelican object copy`
-- Support for multiple protocols (HTTP, XRootD)
+- All transfers use HTTP (pelican:// and osdf:// URLs specify federation discovery, not transfer protocol)
 - Checksum verification (MD5, SHA1, CRC32)
 - Resume capabilities for interrupted transfers
 
@@ -197,11 +237,12 @@ Key steps:
 - **Origins**: Serve data from storage backends
 - **Caches**: Provide distributed caching layer
 
-### Authentication
+### Authorization
 
-- Token-based authentication with support for various issuers
-- OAuth integration via CILogon
-- Support for WLCG tokens
+- Token-based authorization (not authentication) with support for various issuers
+- OAuth integration via CILogon for web authentication
+- Support for WLCG tokens (https://github.com/WLCG-AuthZ-WG/common-jwt-profile/blob/master/profile.md)
+- Support for SciTokens (https://scitokens.org/technical_docs/Claims)
 
 ### Monitoring
 
@@ -238,7 +279,7 @@ API endpoints are documented using OpenAPI V2.0. The specification is generated 
 ## Common Gotchas
 
 1. **XRootD Integration**: Origins and Caches require XRootD to be properly configured
-2. **MaxMind License**: Director requires a MaxMind license key for GeoIP lookups
+2. **MaxMind License**: Director benefits from a MaxMind license key for GeoIP lookups (functions without it, but cannot use GeoIP services)
 3. **OAuth Setup**: Registry requires CILogon OAuth credentials for web authentication
 4. **Port Conflicts**: Default ports may conflict with local services
 5. **TLS Certificates**: Development often uses `TLSSkipVerify: true` but production requires proper certificates
