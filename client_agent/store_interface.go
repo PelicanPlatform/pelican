@@ -24,7 +24,7 @@ import "time"
 // This interface is implemented by client_api/store.Store to avoid import cycles
 type StoreInterface interface {
 	// Job operations
-	CreateJob(jobID, status string, createdAt time.Time, optionsJSON string) error
+	CreateJob(jobID, status string, createdAt time.Time, optionsJSON string, retryCount int) error
 	UpdateJobStatus(jobID, status string) error
 	UpdateJobTimes(jobID string, startedAt, completedAt *time.Time) error
 	UpdateJobError(jobID, errorMsg string) error

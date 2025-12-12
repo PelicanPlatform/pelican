@@ -31,6 +31,7 @@ type StoredJob struct {
 	CompletedAt  *time.Time
 	Options      map[string]interface{} // JSON-decoded options
 	ErrorMessage string
+	RetryCount   int // Number of times this job has been retried
 }
 
 // StoredTransfer represents a transfer stored in the database
@@ -63,4 +64,5 @@ type HistoricalJob struct {
 	TransfersTotal     int
 	BytesTransferred   int64
 	TotalBytes         int64
+	RetryCount         int // Number of times this job was retried before completion
 }
