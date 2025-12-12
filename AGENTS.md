@@ -1,6 +1,6 @@
-# Copilot Instructions for Pelican
+# Pelican - AI Agent Instructions
 
-This document provides guidance for GitHub Copilot when working with the Pelican codebase.
+This document provides guidance for AI coding agents (including GitHub Copilot) when working with the Pelican codebase.
 
 ## Project Overview
 
@@ -157,7 +157,7 @@ npm run format:fix    # Fix formatting
 
 ### Environment Setup
 
-Pelican uses Docker containers and VSCode Dev Containers for development. See [CONTRIBUTE.md](../CONTRIBUTE.md) for detailed setup instructions.
+Pelican uses Docker containers and VSCode Dev Containers for development. See [CONTRIBUTE.md](CONTRIBUTE.md) for detailed setup instructions.
 
 Key steps:
 1. Fork and clone the repository
@@ -267,5 +267,5 @@ make validate-parameters
 - Main Repository: https://github.com/PelicanPlatform/pelican
 - Documentation: https://docs.pelicanplatform.org/
 - Website: https://pelicanplatform.org/
-- Contributing Guide: [CONTRIBUTE.md](../CONTRIBUTE.md)
-- Security Policy: [SECURITY.md](../SECURITY.md)
+- Contributing Guide: [CONTRIBUTE.md](CONTRIBUTE.md)
+- Security Policy: [SECURITY.md](SECURITY.md)
