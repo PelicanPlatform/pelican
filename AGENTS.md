@@ -108,11 +108,11 @@ npm run format:fix    # Fix formatting
 
 ### Go Code
 
-1. **License Headers**: All Go files must include the Apache 2.0 license header at the top:
+1. **License Headers**: All Go files must include the Apache 2.0 license header at the top (use current year):
    ```go
    /***************************************************************
     *
-    * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+    * Copyright (C) {YEAR}, Pelican Project, Morgridge Institute for Research
     *
     * Licensed under the Apache License, Version 2.0 (the "License"); you
     * may not use this file except in compliance with the License.  You may
