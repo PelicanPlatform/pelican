@@ -64,7 +64,7 @@ goreleaser build --clean --snapshot
 ```bash
 make pelican-dev-build
 ```
-_Note: Requires a `.goreleaser.dev.yml` configuration file_
+_Note: Requires creating a `.goreleaser.dev.yml` configuration file. See README.md for an example configuration._
 
 **Build web UI:**
 ```bash
@@ -163,7 +163,7 @@ Key steps:
 1. Fork and clone the repository
 2. Install Docker and VSCode
 3. Pull the development container: `hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb`
-4. Configure VSCode Dev Container using `.devcontainer/devcontainer.json`
+4. Create `.devcontainer/devcontainer.json` using the template from `dev/devcontainer.json`
 5. Build Pelican from source inside the container
 
 ### Pull Request Guidelines
