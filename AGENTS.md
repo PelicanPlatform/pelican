@@ -182,7 +182,7 @@ npm run format:fix    # Fix formatting
 
 2. **Type Safety**: Prefer explicit types over `any`
 
-3. **File Organization**: 
+3. **File Organization**:
    - Components in `web_ui/frontend/components/`
    - Pages/routes in `web_ui/frontend/app/`
    - Utilities in `web_ui/frontend/helpers/`
