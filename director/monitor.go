@@ -203,10 +203,10 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverUrlStr string) {
 			}
 			
 			// Check if any downtime is currently active
-			currentTime := time.Now().Unix()
+			currentTime := time.Now().UTC().UnixMilli()
 			hasActiveDowntime := false
 			for _, downtime := range downtimes {
-				if currentTime >= downtime.StartTime && (currentTime <= downtime.EndTime || downtime.EndTime == -1) {
+				if currentTime >= downtime.StartTime && (currentTime <= downtime.EndTime || downtime.EndTime == server_structs.IndefiniteEndTime) {
 					hasActiveDowntime = true
 					log.Debugf("Skipping director test cycle for %s server %s: server is in active downtime", serverAd.Type, serverAd.Name)
 					break
