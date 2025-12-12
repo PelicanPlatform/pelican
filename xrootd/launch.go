@@ -38,6 +38,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
+	"github.com/pelicanplatform/pelican/p11proxy"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
@@ -130,21 +131,27 @@ func makeUnprivilegedXrootdLauncher(daemonName string, xrootdRun string, configP
 		}
 	}
 
+	pkcs11Info := p11proxy.CurrentInfo()
+	pkcs11Active := param.Server_EnablePKCS11.GetBool() && pkcs11Info.Enabled
+	certPath := runtimeTLSCertPath(isCache)
+	caBundlePath := filepath.Join(xrootdRun, "ca-bundle.crt")
+	if param.Server_DropPrivileges.GetBool() {
+		caBundlePath = filepath.Join(xrootdRun, "pelican", "ca-bundle.crt")
+	}
+
 	if isCache {
 		result.Args = append(result.Args, "-n", "cache")
-
-		// Determine the correct CA bundle path based on if drop privilege mode is enabled
-		caBundlePath := filepath.Join(xrootdRun, "ca-bundle.crt")
-		if param.Server_DropPrivileges.GetBool() {
-			caBundlePath = filepath.Join(xrootdRun, "pelican", "ca-bundle.crt")
-		}
 
 		result.ExtraEnv = []string{
 			"XRD_PELICANBROKERSOCKET=" + filepath.Join(xrootdRun, "cache-reversal.sock"),
 			"XRD_PLUGINCONFDIR=" + filepath.Join(xrootdRun, "cache-client.plugins.d"),
 			"X509_CERT_FILE=" + caBundlePath,
-			"XRD_PELICANCLIENTCERTFILE=" + filepath.Join(xrootdRun, "copied-tls-creds.crt"),
-			"XRD_PELICANCLIENTKEYFILE=" + filepath.Join(xrootdRun, "copied-tls-creds.crt"),
+			"XRD_PELICANCLIENTCERTFILE=" + certPath,
+		}
+		if pkcs11Active {
+			result.ExtraEnv = append(result.ExtraEnv, "XRD_PELICANCLIENTKEYFILE=")
+		} else {
+			result.ExtraEnv = append(result.ExtraEnv, "XRD_PELICANCLIENTKEYFILE="+certPath)
 		}
 		if confDir := os.Getenv("XRD_PLUGINCONFDIR"); confDir != "" {
 			result.ExtraEnv = append(result.ExtraEnv, "XRD_PLUGINCONFDIR="+confDir)
@@ -174,8 +181,8 @@ func makeUnprivilegedXrootdLauncher(daemonName string, xrootdRun string, configP
 		result.Args = append(result.Args, "-n", "origin")
 	}
 	if param.Server_DropPrivileges.GetBool() {
-		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_CA_FILE="+filepath.Join(xrootdRun, "ca-bundle.crt"))
-		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_CERT_FILE="+filepath.Join(xrootdRun, "copied-tls-creds.crt"))
+		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_CA_FILE="+caBundlePath)
+		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_CERT_FILE="+certPath)
 		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_INFO_FD="+strconv.Itoa(result.fds[1]))
 
 		basePath := filepath.Join(param.Cache_NamespaceLocation.GetString(), server_utils.MonitoringBaseNs, "selfTest")
@@ -196,6 +203,20 @@ func makeUnprivilegedXrootdLauncher(daemonName string, xrootdRun string, configP
 		configPath := filepath.Join(xrootdRun, scitokensCfgFileName)
 		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_AUTHFILE_GENERATED="+authPath)
 		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_SCITOKENS_GENERATED="+configPath)
+	}
+	if pkcs11Active {
+		if pkcs11Info.ServerAddress != "" {
+			result.ExtraEnv = append(result.ExtraEnv, "P11_KIT_SERVER_ADDRESS="+pkcs11Info.ServerAddress)
+			log.Tracef("makeUnprivilegedXrootdLauncher: Adding P11_KIT_SERVER_ADDRESS=%s to ExtraEnv", pkcs11Info.ServerAddress)
+		}
+		if pkcs11Info.ModulePath != "" {
+			result.ExtraEnv = append(result.ExtraEnv, "PKCS11_MODULE_PATH="+pkcs11Info.ModulePath)
+			log.Tracef("makeUnprivilegedXrootdLauncher: Adding PKCS11_MODULE_PATH=%s to ExtraEnv", pkcs11Info.ModulePath)
+		}
+		if pkcs11Info.OpenSSLConfPath != "" {
+			result.ExtraEnv = append(result.ExtraEnv, "OPENSSL_CONF="+pkcs11Info.OpenSSLConfPath)
+			log.Tracef("makeUnprivilegedXrootdLauncher: Adding OPENSSL_CONF=%s to ExtraEnv", pkcs11Info.OpenSSLConfPath)
+		}
 	}
 	return
 }
