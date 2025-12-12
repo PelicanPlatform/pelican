@@ -121,14 +121,14 @@ func TestDatabasePersistence(t *testing.T) {
 	assert.Equal(t, "get", transfers[0].Operation)
 }
 
-// TestJobRecovery verifies that incomplete jobs are recovered on startup
+// TestJobRecovery verifies that incomplete jobs are recovered and retried on startup
 func TestJobRecovery(t *testing.T) {
 	testStore, dbPath := setupTestStore(t)
 
 	// Create a job directly in the database (simulating an interrupted job)
 	jobID := "test-job-recovery-123"
 	now := time.Now()
-	err := testStore.CreateJob(jobID, StatusRunning, now, "{}")
+	err := testStore.CreateJob(jobID, StatusRunning, now, "{}", 0)
 	require.NoError(t, err, "Failed to create job in database")
 
 	// Create a transfer for the job
@@ -162,15 +162,24 @@ func TestJobRecovery(t *testing.T) {
 	}()
 
 	// Poll for recovery to complete (up to 2 seconds)
-	var historyData interface{}
+	// The old job should be deleted and a new job created
+	var jobsData interface{}
 	var total int
 	recoveryComplete := false
 
 	for i := 0; i < 20; i++ {
-		historyData, total, err = testStore.GetJobHistory("", time.Time{}, time.Time{}, 10, 0)
-		require.NoError(t, err, "Failed to get job history")
+		// Check if the old job has been deleted
+		_, err := testStore.GetJob(jobID)
+		oldJobDeleted := (err != nil && err.Error() == "job "+jobID+" not found")
 
-		if total == 1 {
+		// Check if any new jobs exist (the recovered job)
+		jobsData, total, err = testStore.ListJobs("", 10, 0)
+		require.NoError(t, err, "Failed to list jobs")
+
+		// Recovery is complete when:
+		// 1. Old job is deleted
+		// 2. New job(s) exist (could be pending, running, or completed/failed)
+		if oldJobDeleted && total > 0 {
 			recoveryComplete = true
 			break
 		}
@@ -179,16 +188,27 @@ func TestJobRecovery(t *testing.T) {
 	}
 
 	require.True(t, recoveryComplete, "Recovery did not complete within 2 seconds")
-	require.Equal(t, 1, total, "Expected 1 job in history")
+	require.Greater(t, total, 0, "Expected at least 1 job after recovery")
 
-	historyJobs, ok := historyData.([]*store.HistoricalJob)
-	require.True(t, ok, "Failed to cast history data")
-	require.Len(t, historyJobs, 1, "Expected 1 job in history array")
+	// Verify the old job was replaced with a new job
+	jobs, ok := jobsData.([]*store.StoredJob)
+	require.True(t, ok, "Failed to cast jobs data")
+	require.Greater(t, len(jobs), 0, "Expected at least 1 job in jobs array")
 
-	// Verify the job was marked as failed and archived
-	assert.Equal(t, jobID, historyJobs[0].ID)
-	assert.Equal(t, StatusFailed, historyJobs[0].Status)
-	assert.Contains(t, historyJobs[0].ErrorMessage, "interrupted by server restart")
+	// The recovered job should have a different ID
+	newJob := jobs[0]
+	assert.NotEqual(t, jobID, newJob.ID, "Recovered job should have a new ID")
+	assert.Contains(t, []string{StatusPending, StatusRunning, StatusFailed}, newJob.Status)
+
+	// Verify the transfer was recreated
+	newTransfersData, err := testStore.GetTransfersByJob(newJob.ID)
+	if err == nil && newTransfersData != nil {
+		newTransfers, ok := newTransfersData.([]*store.StoredTransfer)
+		require.True(t, ok, "Failed to cast transfers")
+		require.Len(t, newTransfers, 1, "Expected 1 transfer for recovered job")
+		assert.Equal(t, "get", newTransfers[0].Operation)
+		assert.Equal(t, "pelican://example.com/test.txt", newTransfers[0].Source)
+	}
 }
 
 // TestJobArchival verifies that completed jobs are archived to history
@@ -330,6 +350,21 @@ func TestFullLifecycleWithRestart(t *testing.T) {
 	err := testStore.CreateJob(jobID, StatusPending, now, "{}")
 	require.NoError(t, err)
 
+	// Create a transfer for the job (required for recovery)
+	transferID := "lifecycle-transfer-123"
+	storedTransfer := &store.StoredTransfer{
+		ID:          transferID,
+		JobID:       jobID,
+		Operation:   "get",
+		Source:      "pelican://example.com/lifecycle.txt",
+		Destination: "/tmp/lifecycle.txt",
+		Recursive:   false,
+		Status:      StatusPending,
+		CreatedAt:   now.Unix(),
+	}
+	err = testStore.CreateTransfer(storedTransfer)
+	require.NoError(t, err)
+
 	// Update to running status
 	err = testStore.UpdateJobStatus(jobID, StatusRunning)
 	require.NoError(t, err)
@@ -358,21 +393,34 @@ func TestFullLifecycleWithRestart(t *testing.T) {
 	// Wait for recovery
 	time.Sleep(500 * time.Millisecond)
 
-	// Verify job was recovered and marked as failed
+	// Verify the old job was deleted (it should be replaced with a new job)
 	_, err = testStore.GetJob(jobID)
-	assert.Error(t, err, "Job should be removed from active table after recovery")
+	assert.Error(t, err, "Old job should be removed from active table after recovery")
 
-	// Verify job is in history
-	historyData, total, err := testStore.GetJobHistory("", time.Time{}, time.Time{}, 10, 0)
+	// The recovered job should have been retried and may have completed or failed
+	// Check for active jobs (new job created during recovery)
+	jobsData, total, err := testStore.ListJobs("", 10, 0)
 	require.NoError(t, err)
-	assert.Equal(t, 1, total)
 
-	historyJobs, ok := historyData.([]*store.HistoricalJob)
-	require.True(t, ok)
-	assert.Len(t, historyJobs, 1)
-	assert.Equal(t, jobID, historyJobs[0].ID)
-	assert.Equal(t, StatusFailed, historyJobs[0].Status)
-	assert.Contains(t, historyJobs[0].ErrorMessage, "interrupted by server restart")
+	// If no active jobs, check history (job may have completed/failed quickly)
+	if total == 0 {
+		historyData, histTotal, histErr := testStore.GetJobHistory("", time.Time{}, time.Time{}, 10, 0)
+		require.NoError(t, histErr)
+		assert.Greater(t, histTotal, 0, "Expected at least 1 job in history after recovery")
+
+		historyJobs, ok := historyData.([]*store.HistoricalJob)
+		require.True(t, ok)
+		assert.Greater(t, len(historyJobs), 0)
+		// The recovered job will have a different ID than the original
+		assert.NotEqual(t, jobID, historyJobs[0].ID, "Recovered job should have a new ID")
+	} else {
+		// Job is still active (pending or running)
+		jobs, ok := jobsData.([]*store.StoredJob)
+		require.True(t, ok)
+		assert.Greater(t, len(jobs), 0)
+		// The recovered job will have a different ID than the original
+		assert.NotEqual(t, jobID, jobs[0].ID, "Recovered job should have a new ID")
+	}
 }
 
 // TestInMemoryMode verifies that TransferManager works without a store

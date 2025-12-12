@@ -93,14 +93,14 @@ func (s *Store) Close() error {
 }
 
 // CreateJob inserts a new job into the database
-func (s *Store) CreateJob(jobID, status string, createdAt time.Time, optionsJSON string) error {
-	query := `INSERT INTO jobs (id, status, created_at, options) VALUES (?, ?, ?, ?)`
-	_, err := s.db.Exec(query, jobID, status, createdAt.Unix(), optionsJSON)
+func (s *Store) CreateJob(jobID, status string, createdAt time.Time, optionsJSON string, retryCount int) error {
+	query := `INSERT INTO jobs (id, status, created_at, options, retry_count) VALUES (?, ?, ?, ?, ?)`
+	_, err := s.db.Exec(query, jobID, status, createdAt.Unix(), optionsJSON, retryCount)
 	if err != nil {
 		return errors.Wrap(err, "failed to insert job")
 	}
 
-	log.Debugf("Created job %s in database", jobID)
+	log.Debugf("Created job %s in database (retry_count=%d)", jobID, retryCount)
 	return nil
 }
 
@@ -152,7 +152,7 @@ func (s *Store) UpdateJobError(jobID, errorMsg string) error {
 
 // GetJob retrieves a job by ID
 func (s *Store) GetJob(jobID string) (interface{}, error) {
-	query := `SELECT id, status, created_at, started_at, completed_at, options, error_message
+	query := `SELECT id, status, created_at, started_at, completed_at, options, error_message, retry_count
 	          FROM jobs WHERE id = ?`
 
 	var job StoredJob
@@ -161,7 +161,7 @@ func (s *Store) GetJob(jobID string) (interface{}, error) {
 
 	err := s.db.QueryRow(query, jobID).Scan(
 		&job.ID, &job.Status, &job.CreatedAt,
-		&startedAt, &completedAt, &options, &errorMsg,
+		&startedAt, &completedAt, &options, &errorMsg, &job.RetryCount,
 	)
 
 	if err == sql.ErrNoRows {
@@ -198,7 +198,7 @@ func (s *Store) GetJob(jobID string) (interface{}, error) {
 // ListJobs retrieves jobs with optional filtering
 func (s *Store) ListJobs(status string, limit, offset int) (interface{}, int, error) {
 	// Build query with filters
-	query := `SELECT id, status, created_at, started_at, completed_at, options, error_message FROM jobs`
+	query := `SELECT id, status, created_at, started_at, completed_at, options, error_message, retry_count FROM jobs`
 	countQuery := `SELECT COUNT(*) FROM jobs`
 	args := []interface{}{}
 
@@ -233,7 +233,7 @@ func (s *Store) ListJobs(status string, limit, offset int) (interface{}, int, er
 
 		err := rows.Scan(
 			&job.ID, &job.Status, &job.CreatedAt,
-			&startedAt, &completedAt, &options, &errorMsg,
+			&startedAt, &completedAt, &options, &errorMsg, &job.RetryCount,
 		)
 		if err != nil {
 			return nil, 0, errors.Wrap(err, "failed to scan job row")
@@ -472,7 +472,7 @@ func (s *Store) GetTransfersByJob(jobID string) (interface{}, error) {
 
 // GetRecoverableJobs returns jobs that need recovery (pending or running status)
 func (s *Store) GetRecoverableJobs() (interface{}, error) {
-	query := `SELECT id, status, created_at, started_at, completed_at, options, error_message
+	query := `SELECT id, status, created_at, started_at, completed_at, options, error_message, retry_count
 	          FROM jobs WHERE status IN ('pending', 'running') ORDER BY created_at ASC`
 
 	rows, err := s.db.Query(query)
@@ -489,7 +489,7 @@ func (s *Store) GetRecoverableJobs() (interface{}, error) {
 
 		err := rows.Scan(
 			&job.ID, &job.Status, &job.CreatedAt,
-			&startedAt, &completedAt, &options, &errorMsg,
+			&startedAt, &completedAt, &options, &errorMsg, &job.RetryCount,
 		)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to scan job row")
@@ -572,8 +572,8 @@ func (s *Store) ArchiveJob(jobID string) error {
 	historyQuery := `INSERT INTO job_history
 	                 (id, status, created_at, started_at, completed_at, options, error_message,
 	                  transfers_completed, transfers_failed, transfers_total,
-	                  bytes_transferred, total_bytes)
-	                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	                  bytes_transferred, total_bytes, retry_count)
+	                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	var startedAt, completedAt sql.NullInt64
 	if job.StartedAt != nil {
@@ -594,7 +594,7 @@ func (s *Store) ArchiveJob(jobID string) error {
 		job.ID, job.Status, job.CreatedAt, startedAt, completedAt,
 		string(optionsJSON), job.ErrorMessage,
 		transfersCompleted, transfersFailed, transfersTotal,
-		bytesTransferred, totalBytes,
+		bytesTransferred, totalBytes, job.RetryCount,
 	)
 	if err != nil {
 		return errors.Wrap(err, "failed to insert job into history")
@@ -646,7 +646,7 @@ func (s *Store) ArchiveJob(jobID string) error {
 func (s *Store) GetJobHistory(status string, from, to time.Time, limit, offset int) (interface{}, int, error) {
 	// Build query with filters
 	query := `SELECT id, status, created_at, started_at, completed_at, error_message,
-	          transfers_completed, transfers_failed, transfers_total, bytes_transferred, total_bytes
+	          transfers_completed, transfers_failed, transfers_total, bytes_transferred, total_bytes, retry_count
 	          FROM job_history WHERE 1=1`
 	countQuery := `SELECT COUNT(*) FROM job_history WHERE 1=1`
 	args := []interface{}{}
@@ -696,7 +696,7 @@ func (s *Store) GetJobHistory(status string, from, to time.Time, limit, offset i
 			&job.ID, &job.Status, &job.CreatedAt,
 			&startedAt, &completedAt, &errorMsg,
 			&job.TransfersCompleted, &job.TransfersFailed, &job.TransfersTotal,
-			&job.BytesTransferred, &job.TotalBytes,
+			&job.BytesTransferred, &job.TotalBytes, &job.RetryCount,
 		)
 		if err != nil {
 			return nil, 0, errors.Wrap(err, "failed to scan historical job row")
