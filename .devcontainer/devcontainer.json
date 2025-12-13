@@ -1,0 +1,34 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/cpp
+{
+	"name": "Pelican",
+	"image": "hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb",
+	"forwardPorts": [
+		8444,
+		8443,
+		8080
+	],
+	"customizations": {
+		"vscode": {
+			"settings": {
+				"go.gopath": "/root/go",
+				"go.goroot": "/usr/local/go",
+				"go.useLanguageServer": true
+			},
+			"extensions": [
+				"golang.go",
+				"ms-vscode.makefile-tools"
+			]
+		}
+	},
+	"postCreateCommand": "go install github.com/go-delve/delve/cmd/dlv@latest",
+	"remoteEnv": {
+		"PATH": "/usr/local/go/bin:/root/go/bin:${containerEnv:PATH}"
+	},
+	"remoteUser": "root",
+	"features": {
+		"ghcr.io/devcontainers/features/git:1": {
+			"version": "latest"
+		}
+	}
+}
