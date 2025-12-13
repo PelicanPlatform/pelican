@@ -244,16 +244,16 @@ However, if you are developing Pelican _Server_ components (Registry, Director, 
 
     * Navigate to your repository root directory and run the following commands:
       ```bash
-      # Make sure you're in the repository root directory before running these commands
+      # Verify you're in the repository root (should show pelican.yaml)
+      $ ls pelican.yaml
+      pelican.yaml
       
       # Remove default config and create symlink
       $ rm -f /etc/pelican/pelican.yaml
       $ ln -s "$PWD/pelican.yaml" /etc/pelican/pelican.yaml
       ```
       
-      Note: The symlink uses `$PWD` (current directory), so ensure you're in the repository root before running the command.
-      
-    * Verify that the file is linked:
+    * Verify that the symlink was created correctly:
       ```bash
       $ cat /etc/pelican/pelican.yaml
       TLSSkipVerify: true
@@ -281,10 +281,14 @@ At this point, your repository should have the following files in the root direc
 
 ### Run Pelican Client
 
-To run Pelican client, navigate to the folder where the built binary is located (adjust the architecture path as needed):
+To run Pelican client, navigate to the folder where the built binary is located:
 
 ```bash
-# Use the architecture-specific directory (e.g., pelican_linux_arm64 or pelican_linux_amd64)
+# List available build outputs to find your architecture
+$ ls dist/
+# pelican_linux_amd64  pelican_linux_arm64  ...
+
+# Navigate to the appropriate directory for your architecture
 $ cd dist/pelican_linux_*/
 ```
 

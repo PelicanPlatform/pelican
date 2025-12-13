@@ -1,5 +1,5 @@
-// For format details, see https://aka.ms/devcontainer.json. For config options, see the
-// README at: https://github.com/devcontainers/templates/tree/main/src/cpp
+// For format details, see https://aka.ms/devcontainer.json
+// For config options, see https://containers.dev/implementors/json_reference/
 {
 	"name": "Pelican",
 	"image": "hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb",
