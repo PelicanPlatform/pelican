@@ -262,6 +262,7 @@ type (
 		requireChecksum    bool
 		recursive          bool
 		skipAcquire        bool
+		dryRun             bool       // Enable dry-run mode to display what would be transferred without actually doing it
 		syncLevel          SyncLevel  // Policy for handling synchronization when the destination exists
 		prefObjServers     []*url.URL // holds any client-requested caches/origins
 		dirResp            server_structs.DirectorResponse
@@ -322,6 +323,7 @@ type (
 		syncLevel      SyncLevel // Policy for the client to synchronize data
 		tokenLocation  string    // Location of a token file to use for transfers
 		token          string    // Token that should be used for transfers
+		dryRun         bool      // Enable dry-run mode to display what would be transferred without actually doing it
 		work           chan *TransferJob
 		closed         bool
 		prefObjServers []*url.URL // holds any client-requested caches/origins
@@ -342,6 +344,7 @@ type (
 	identTransferOptionRequireChecksum struct{}
 	identTransferOptionRecursive       struct{}
 	identTransferOptionDepth           struct{}
+	identTransferOptionDryRun          struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -707,6 +710,15 @@ func WithDepth(depth int) TransferOption {
 	return option.New(identTransferOptionDepth{}, depth)
 }
 
+// Create an option to enable dry-run mode
+//
+// When enabled, the transfer will display what would be copied without actually
+// modifying the destination. Useful for verifying paths and sources before
+// performing actual transfers.
+func WithDryRun(enable bool) TransferOption {
+	return option.New(identTransferOptionDryRun{}, enable)
+}
+
 // Create a new client to work with an engine
 func (te *TransferEngine) NewClient(options ...TransferOption) (client *TransferClient, err error) {
 	log.Debugln("Making new clients")
@@ -737,6 +749,8 @@ func (te *TransferEngine) NewClient(options ...TransferOption) (client *Transfer
 			client.token = option.Value().(string)
 		case identTransferOptionSynchronize{}:
 			client.syncLevel = option.Value().(SyncLevel)
+		case identTransferOptionDryRun{}:
+			client.dryRun = option.Value().(bool)
 		}
 	}
 	func() {
@@ -1093,6 +1107,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		remoteURL:      &copyUrl,
 		callback:       tc.callback,
 		skipAcquire:    tc.skipAcquire,
+		dryRun:         tc.dryRun,
 		syncLevel:      tc.syncLevel,
 		xferType:       transferTypeDownload,
 		uuid:           id,
@@ -1129,6 +1144,8 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			tj.requestedChecksums = option.Value().([]ChecksumType)
 		case identTransferOptionRequireChecksum{}:
 			tj.requireChecksum = option.Value().(bool)
+		case identTransferOptionDryRun{}:
+			tj.dryRun = option.Value().(bool)
 		}
 	}
 
@@ -1860,6 +1877,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	log.Debugln("Downloading object from", transfer.remoteURL, "to", transfer.localPath)
 	var downloaded int64
 	localPath := transfer.localPath
+	transferResults.job = transfer.job
 
 	// Create a checksum hash instance for each requested checksum; these will all be
 	// joined together into a single writer interface with the output file
@@ -1888,56 +1906,68 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	var fileWriter io.Writer
 	if transfer.xferType == transferTypeDownload {
 		var info os.FileInfo
-		if info, err = os.Stat(localPath); err != nil {
-			if os.IsNotExist(err) {
-				// If we're unpacking, the destination must be a directory. Create it directly.
-				if transfer.packOption != "" {
-					if err = os.MkdirAll(localPath, 0700); err != nil {
-						return
-					}
-					if info, err = os.Stat(localPath); err != nil {
-						return
+		// In dry-run mode, skip actual file operations and just report what would happen
+		if transfer.job != nil && transfer.job.dryRun {
+			// Determine the final local path
+			finalLocalPath := localPath
+			if len(localPath) > 0 && os.IsPathSeparator(localPath[len(localPath)-1]) {
+				finalLocalPath = path.Join(localPath, path.Base(transfer.remoteURL.Path))
+			}
+			// Print to stdout with structured format for easy parsing
+			fmt.Printf("DOWNLOAD: %s -> %s\n", transfer.remoteURL.Path, finalLocalPath)
+			return transferResults, nil
+		} else {
+			if info, err = os.Stat(localPath); err != nil {
+				if os.IsNotExist(err) {
+					// If we're unpacking, the destination must be a directory. Create it directly.
+					if transfer.packOption != "" {
+						if err = os.MkdirAll(localPath, 0700); err != nil {
+							return
+						}
+						if info, err = os.Stat(localPath); err != nil {
+							return
+						}
+					} else {
+						directory := path.Dir(localPath)
+						if len(localPath) > 0 && os.IsPathSeparator(localPath[len(localPath)-1]) {
+							directory = localPath
+							localPath = path.Join(directory, path.Base(transfer.remoteURL.Path))
+						}
+						if err = os.MkdirAll(directory, 0700); err != nil {
+							return
+						}
 					}
 				} else {
-					directory := path.Dir(localPath)
-					if localPath != "" && os.IsPathSeparator(localPath[len(localPath)-1]) {
-						directory = localPath
-						localPath = path.Join(directory, path.Base(transfer.remoteURL.Path))
-					}
-					if err = os.MkdirAll(directory, 0700); err != nil {
-						return
-					}
+					return
 				}
+			}
+			if transfer.packOption != "" {
+				var behavior packerBehavior
+				if behavior, err = GetBehavior(transfer.packOption); err != nil {
+					return
+				}
+				if info == nil || !info.IsDir() {
+					err = errors.New("destination path is not a directory; must be a directory for unpacking")
+					return
+				}
+				if localPath, err = filepath.Abs(localPath); err != nil {
+					err = errors.Wrap(err, "failed to get absolute path for destination directory")
+					return
+				}
+				fileWriter = newAutoUnpacker(localPath, behavior)
 			} else {
-				return
-			}
-		}
-		if transfer.packOption != "" {
-			var behavior packerBehavior
-			if behavior, err = GetBehavior(transfer.packOption); err != nil {
-				return
-			}
-			if info == nil || !info.IsDir() {
-				err = errors.New("destination path is not a directory; must be a directory for unpacking")
-				return
-			}
-			if localPath, err = filepath.Abs(localPath); err != nil {
-				err = errors.Wrap(err, "failed to get absolute path for destination directory")
-				return
-			}
-			fileWriter = newAutoUnpacker(localPath, behavior)
-		} else {
-			if info != nil && info.IsDir() {
-				localPath = path.Join(localPath, path.Base(transfer.remoteURL.Path))
-			}
-			// If the destination is something strange, like a block device, then the OpenFile below
-			// will create the appropriate error message
-			var fp *os.File
-			if fp, err = os.OpenFile(localPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644); err == nil {
-				fileWriter = fp
-				defer fp.Close()
-			} else {
-				return
+				if info != nil && info.IsDir() {
+					localPath = path.Join(localPath, path.Base(transfer.remoteURL.Path))
+				}
+				// If the destination is something strange, like a block device, then the OpenFile below
+				// will create the appropriate error message
+				var fp *os.File
+				if fp, err = os.OpenFile(localPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644); err == nil {
+					fileWriter = fp
+					defer fp.Close()
+				} else {
+					return
+				}
 			}
 		}
 	} else {
@@ -2952,6 +2982,14 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	log.Debugln("Uploading file to destination", transfer.remoteURL)
 	xferErrors := NewTransferErrors()
 	transferResult.job = transfer.job
+
+	// In dry-run mode, log what would be uploaded and return success
+	if transfer.job != nil && transfer.job.dryRun {
+		// Print to stdout with structured format for easy parsing
+		fmt.Printf("UPLOAD: %s -> %s\n", transfer.localPath, transfer.remoteURL.Path)
+		// Return success for dry-run without performing any file operations
+		return transferResult, nil
+	}
 
 	// Check if the remote object already exists using statHttp
 	// If the job is recursive, we skip this check as the check is already performed in walkDirUpload
