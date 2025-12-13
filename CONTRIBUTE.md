@@ -215,10 +215,12 @@ The build takes around 1-3 minutes to finish. It usually takes longer if this is
   • thanks for using goreleaser!
 ```
 
-The built artifacts including the binary are located under `dist`, the binary file for your OS should be located at `dist/pelican_linux_arm64/` if you are running an ARM machine.
+The built artifacts are located in the `dist` directory.
+The binary location depends on your system architecture (e.g., `dist/pelican_linux_arm64/pelican` for ARM64, `dist/pelican_linux_amd64/pelican` for AMD64).
 
 ```bash
-$ cd dist/pelican_linux_arm64
+# Navigate to the appropriate directory based on your architecture
+$ cd dist/pelican_linux_*/
 $ ls
 pelican
 ```
@@ -242,16 +244,14 @@ However, if you are developing Pelican _Server_ components (Registry, Director, 
 
     * Navigate to your repository root directory and run the following commands:
       ```bash
-      # Navigate to repository root (example paths, adjust as needed)
-      # For Codespaces: cd /workspaces/pelican
-      # For local Dev Container: it depends on where you cloned the repo
+      # Make sure you're in the repository root directory before running these commands
       
       # Remove default config and create symlink
       $ rm -f /etc/pelican/pelican.yaml
       $ ln -s "$PWD/pelican.yaml" /etc/pelican/pelican.yaml
       ```
       
-      Note: Make sure you're in the repository root before running `ln -s`, as the symlink uses the current directory (`$PWD`).
+      Note: The symlink uses `$PWD` (current directory), so ensure you're in the repository root before running the command.
       
     * Verify that the file is linked:
       ```bash
@@ -281,10 +281,11 @@ At this point, your repository should have the following files in the root direc
 
 ### Run Pelican Client
 
-To run Pelican client, go to the folder where the built binary is located:
+To run Pelican client, navigate to the folder where the built binary is located (adjust the architecture path as needed):
 
 ```bash
-$ cd dist/pelican_linux_arm64
+# Use the architecture-specific directory (e.g., pelican_linux_arm64 or pelican_linux_amd64)
+$ cd dist/pelican_linux_*/
 ```
 
 and run Pelican client to fetch an object:
