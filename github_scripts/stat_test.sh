@@ -96,7 +96,7 @@ touch ${PELICAN_CONFIG}
 TOKEN=$(./pelican --config ${PELICAN_CONFIG} origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:$WEBUI_PORT" --scope "web_ui.access" --subject "bar" --lifetime 3600)
 
 # Run federation in the background
-federationServe="./pelican --config ${PELICAN_CONFIG} serve --module director --module registry --module origin --port $WEBUI_PORT"
+federationServe="./pelican --config ${PELICAN_CONFIG} serve --module director --module registry --module origin --port $WEBUI_PORT || :"
 $federationServe &
 pid_federationServe=$!
 
