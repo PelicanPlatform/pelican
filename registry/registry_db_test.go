@@ -32,7 +32,6 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -878,9 +877,9 @@ func TestRegistryTopology(t *testing.T) {
 	defer svr.Close()
 
 	registryDB := t.TempDir()
-	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(registryDB, "test.sqlite"))
-	viper.Set("Federation.TopologyNamespaceURL", svr.URL)
-	viper.Set("ConfigDir", t.TempDir())
+	require.NoError(t, param.Set(param.Server_DbLocation.GetName(), filepath.Join(registryDB, "test.sqlite")))
+	require.NoError(t, param.Set("Federation.TopologyNamespaceURL", svr.URL))
+	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
 
 	err := database.InitServerDatabase(server_structs.RegistryType)
 	require.NoError(t, err)
@@ -938,7 +937,7 @@ func TestRegistryTopology(t *testing.T) {
 
 	topoNamespaces = []string{"/topo/foo", "/topo/baz"}
 	svr = topologyMockup(t, topoNamespaces)
-	viper.Set("Federation.TopologyNamespaceURL", svr.URL)
+	require.NoError(t, param.Set("Federation.TopologyNamespaceURL", svr.URL))
 	defer svr.Close()
 
 	// Re-populate topo

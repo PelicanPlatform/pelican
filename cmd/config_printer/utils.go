@@ -38,14 +38,15 @@ import (
 // It takes a Viper instance, populates the client and server parameters, unmarshals it into
 // a config struct, and returns it.
 func initClientAndServerConfig(v *viper.Viper) *param.Config {
-	// To provide a cleaner output, we temporarily suppress excessive logging in `InitConfigInternal`
-	currentLevel := log.GetLevel()
-	log.SetLevel(log.ErrorLevel) // Suppress debug, warnings and info messages
-
-	config.InitConfigInternal(log.InfoLevel)
-
-	// Restore original log level
-	log.SetLevel(currentLevel)
+	// To provide a cleaner output, we temporarily suppress excessive logging in `InitConfigInternal`.
+	// Note: InitConfigInternal operates on the *global* viper instance. Only invoke it when
+	// we are also operating on the global viper instance.
+	if v == viper.GetViper() {
+		currentLevel := log.GetLevel()
+		log.SetLevel(log.ErrorLevel) // Suppress debug, warnings and info messages
+		config.InitConfigInternal(log.InfoLevel)
+		log.SetLevel(currentLevel)
+	}
 
 	if err := config.SetClientDefaults(v); err != nil {
 		log.Errorf("Error setting client defaults: %v", err)
@@ -62,7 +63,7 @@ func initClientAndServerConfig(v *viper.Viper) *param.Config {
 		config.SetFederation(globalFedInfo)
 	}
 
-	expandedConfig, err := param.UnmarshalConfig(v)
+	expandedConfig, err := param.DecodeConfig(v)
 	if err != nil {
 		log.Errorf("Error unmarshalling config: %v", err)
 	}

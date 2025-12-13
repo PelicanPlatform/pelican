@@ -21,8 +21,8 @@ package origin
 import (
 	"testing"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -52,7 +52,7 @@ func TestGetRequiredFeatures(t *testing.T) {
 			defer server_utils.ResetTestState()
 
 			for k, v := range tc.vConfig {
-				viper.Set(k, v)
+				require.NoError(t, param.Set(k, v))
 			}
 
 			oServer := &OriginServer{}

@@ -28,7 +28,6 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -66,7 +65,7 @@ func TestHttpOriginConfig(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
-	viper.Set("Origin.HttpServiceUrl", srv.URL)
+	require.NoError(t, param.Set("Origin.HttpServiceUrl", srv.URL))
 
 	fed := fed_test_utils.NewFedTest(t, httpsOriginConfig)
 	storageName = fed.Exports[0].StoragePrefix + "/hello_world"

@@ -30,7 +30,6 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -56,7 +55,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	kDir := filepath.Join(tDir, "t-issuer-keys")
 
 	//Setup a private key and a token
-	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
+	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), kDir))
 
 	// Mock registry server
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -84,7 +83,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	test_utils.MockFederationRoot(t, &fedInfo, nil)
 
 	// Mock cached jwks
-	viper.Set("ConfigDir", t.TempDir())
+	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
 	err := config.InitServer(ctx, server_structs.DirectorType)
 	require.NoError(t, err)
 
@@ -262,15 +261,15 @@ func TestNamespaceKeysCacheTTLExpiration(t *testing.T) {
 	// Initialize director
 	tDir := t.TempDir()
 	kDir := filepath.Join(tDir, "t-issuer-keys")
-	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
-	viper.Set("ConfigDir", tDir)
+	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), kDir))
+	require.NoError(t, param.Set("ConfigDir", tDir))
 
 	// Use a shorter TTL for testing (2 seconds instead of 15 minutes)
 	// This affects both the server ad cache and the namespaceKeys cache expiration
 	originalTTL := param.Director_AdvertisementTTL.GetDuration()
-	viper.Set(param.Director_AdvertisementTTL.GetName(), 2*time.Second)
+	require.NoError(t, param.Set(param.Director_AdvertisementTTL.GetName(), 2*time.Second))
 	t.Cleanup(func() {
-		viper.Set(param.Director_AdvertisementTTL.GetName(), originalTTL)
+		require.NoError(t, param.Set(param.Director_AdvertisementTTL.GetName(), originalTTL))
 	})
 
 	err = config.InitServer(ctx, server_structs.DirectorType)

@@ -78,7 +78,314 @@ func GetDeprecated() map[string][]string {
 }
 
 func (sP StringParam) GetString() string {
-	return viper.GetString(sP.name)
+	config := getOrCreateConfig()
+	switch sP.name {
+		case "Cache.ClientStatisticsLocation":
+			return config.Cache.ClientStatisticsLocation
+		case "Cache.DataLocation":
+			return config.Cache.DataLocation
+		case "Cache.DbLocation":
+			return config.Cache.DbLocation
+		case "Cache.ExportLocation":
+			return config.Cache.ExportLocation
+		case "Cache.FedTokenLocation":
+			return config.Cache.FedTokenLocation
+		case "Cache.FilesBaseSize":
+			return config.Cache.FilesBaseSize
+		case "Cache.FilesMaxSize":
+			return config.Cache.FilesMaxSize
+		case "Cache.FilesNominalSize":
+			return config.Cache.FilesNominalSize
+		case "Cache.HighWaterMark":
+			return config.Cache.HighWaterMark
+		case "Cache.LocalRoot":
+			return config.Cache.LocalRoot
+		case "Cache.LowWatermark":
+			return config.Cache.LowWatermark
+		case "Cache.NamespaceLocation":
+			return config.Cache.NamespaceLocation
+		case "Cache.RunLocation":
+			return config.Cache.RunLocation
+		case "Cache.SentinelLocation":
+			return config.Cache.SentinelLocation
+		case "Cache.StorageLocation":
+			return config.Cache.StorageLocation
+		case "Cache.Url":
+			return config.Cache.Url
+		case "Cache.XRootDPrefix":
+			return config.Cache.XRootDPrefix
+		case "Director.AdvertiseUrl":
+			return config.Director.AdvertiseUrl
+		case "Director.CacheSortMethod":
+			return config.Director.CacheSortMethod
+		case "Director.DbLocation":
+			return config.Director.DbLocation
+		case "Director.DefaultResponse":
+			return config.Director.DefaultResponse
+		case "Director.GeoIPLocation":
+			return config.Director.GeoIPLocation
+		case "Director.MaxMindKeyFile":
+			return config.Director.MaxMindKeyFile
+		case "Director.SupportContactEmail":
+			return config.Director.SupportContactEmail
+		case "Director.SupportContactUrl":
+			return config.Director.SupportContactUrl
+		case "Federation.DiscoveryUrl":
+			return config.Federation.DiscoveryUrl
+		case "Federation.TopologyDowntimeUrl":
+			return config.Federation.TopologyDowntimeUrl
+		case "Federation.TopologyNamespaceUrl":
+			return config.Federation.TopologyNamespaceUrl
+		case "Federation.TopologyUrl":
+			return config.Federation.TopologyUrl
+		case "IssuerKey":
+			return config.IssuerKey
+		case "IssuerKeysDirectory":
+			return config.IssuerKeysDirectory
+		case "Issuer.AuthenticationSource":
+			return config.Issuer.AuthenticationSource
+		case "Issuer.GroupFile":
+			return config.Issuer.GroupFile
+		case "Issuer.GroupSource":
+			return config.Issuer.GroupSource
+		case "Issuer.IssuerClaimValue":
+			return config.Issuer.IssuerClaimValue
+		case "Issuer.OIDCAuthenticationUserClaim":
+			return config.Issuer.OIDCAuthenticationUserClaim
+		case "Issuer.OIDCGroupClaim":
+			return config.Issuer.OIDCGroupClaim
+		case "Issuer.QDLLocation":
+			return config.Issuer.QDLLocation
+		case "Issuer.ScitokensServerLocation":
+			return config.Issuer.ScitokensServerLocation
+		case "Issuer.TomcatLocation":
+			return config.Issuer.TomcatLocation
+		case "LocalCache.DataLocation":
+			return config.LocalCache.DataLocation
+		case "LocalCache.RunLocation":
+			return config.LocalCache.RunLocation
+		case "LocalCache.Size":
+			return config.LocalCache.Size
+		case "LocalCache.Socket":
+			return config.LocalCache.Socket
+		case "Logging.Cache.Http":
+			return config.Logging.Cache.Http
+		case "Logging.Cache.Ofs":
+			return config.Logging.Cache.Ofs
+		case "Logging.Cache.Pfc":
+			return config.Logging.Cache.Pfc
+		case "Logging.Cache.Pss":
+			return config.Logging.Cache.Pss
+		case "Logging.Cache.PssSetOpt":
+			return config.Logging.Cache.PssSetOpt
+		case "Logging.Cache.Scitokens":
+			return config.Logging.Cache.Scitokens
+		case "Logging.Cache.Xrd":
+			return config.Logging.Cache.Xrd
+		case "Logging.Cache.Xrootd":
+			return config.Logging.Cache.Xrootd
+		case "Logging.Level":
+			return config.Logging.Level
+		case "Logging.LogLocation":
+			return config.Logging.LogLocation
+		case "Logging.Origin.Cms":
+			return config.Logging.Origin.Cms
+		case "Logging.Origin.Http":
+			return config.Logging.Origin.Http
+		case "Logging.Origin.Ofs":
+			return config.Logging.Origin.Ofs
+		case "Logging.Origin.Oss":
+			return config.Logging.Origin.Oss
+		case "Logging.Origin.Scitokens":
+			return config.Logging.Origin.Scitokens
+		case "Logging.Origin.Xrd":
+			return config.Logging.Origin.Xrd
+		case "Logging.Origin.Xrootd":
+			return config.Logging.Origin.Xrootd
+		case "Lotman.DbLocation":
+			return config.Lotman.DbLocation
+		case "Lotman.EnabledPolicy":
+			return config.Lotman.EnabledPolicy
+		case "Lotman.LibLocation":
+			return config.Lotman.LibLocation
+		case "Lotman.LotHome":
+			return config.Lotman.LotHome
+		case "Monitoring.DataLocation":
+			return config.Monitoring.DataLocation
+		case "Monitoring.DataRetentionSize":
+			return config.Monitoring.DataRetentionSize
+		case "OIDC.AuthorizationEndpoint":
+			return config.OIDC.AuthorizationEndpoint
+		case "OIDC.ClientID":
+			return config.OIDC.ClientID
+		case "OIDC.ClientIDFile":
+			return config.OIDC.ClientIDFile
+		case "OIDC.ClientRedirectHostname":
+			return config.OIDC.ClientRedirectHostname
+		case "OIDC.ClientSecretFile":
+			return config.OIDC.ClientSecretFile
+		case "OIDC.DeviceAuthEndpoint":
+			return config.OIDC.DeviceAuthEndpoint
+		case "OIDC.Issuer":
+			return config.OIDC.Issuer
+		case "OIDC.TokenEndpoint":
+			return config.OIDC.TokenEndpoint
+		case "OIDC.UserInfoEndpoint":
+			return config.OIDC.UserInfoEndpoint
+		case "Origin.DbLocation":
+			return config.Origin.DbLocation
+		case "Origin.ExportVolume":
+			return config.Origin.ExportVolume
+		case "Origin.FedTokenLocation":
+			return config.Origin.FedTokenLocation
+		case "Origin.FederationPrefix":
+			return config.Origin.FederationPrefix
+		case "Origin.GlobusClientIDFile":
+			return config.Origin.GlobusClientIDFile
+		case "Origin.GlobusClientSecretFile":
+			return config.Origin.GlobusClientSecretFile
+		case "Origin.GlobusCollectionID":
+			return config.Origin.GlobusCollectionID
+		case "Origin.GlobusCollectionName":
+			return config.Origin.GlobusCollectionName
+		case "Origin.GlobusConfigLocation":
+			return config.Origin.GlobusConfigLocation
+		case "Origin.HttpAuthTokenFile":
+			return config.Origin.HttpAuthTokenFile
+		case "Origin.HttpServiceUrl":
+			return config.Origin.HttpServiceUrl
+		case "Origin.Mode":
+			return config.Origin.Mode
+		case "Origin.NamespacePrefix":
+			return config.Origin.NamespacePrefix
+		case "Origin.RunLocation":
+			return config.Origin.RunLocation
+		case "Origin.S3AccessKeyfile":
+			return config.Origin.S3AccessKeyfile
+		case "Origin.S3Bucket":
+			return config.Origin.S3Bucket
+		case "Origin.S3Region":
+			return config.Origin.S3Region
+		case "Origin.S3SecretKeyfile":
+			return config.Origin.S3SecretKeyfile
+		case "Origin.S3ServiceName":
+			return config.Origin.S3ServiceName
+		case "Origin.S3ServiceUrl":
+			return config.Origin.S3ServiceUrl
+		case "Origin.S3UrlStyle":
+			return config.Origin.S3UrlStyle
+		case "Origin.ScitokensDefaultUser":
+			return config.Origin.ScitokensDefaultUser
+		case "Origin.ScitokensNameMapFile":
+			return config.Origin.ScitokensNameMapFile
+		case "Origin.ScitokensUsernameClaim":
+			return config.Origin.ScitokensUsernameClaim
+		case "Origin.StoragePrefix":
+			return config.Origin.StoragePrefix
+		case "Origin.StorageType":
+			return config.Origin.StorageType
+		case "Origin.TokenAudience":
+			return config.Origin.TokenAudience
+		case "Origin.Url":
+			return config.Origin.Url
+		case "Origin.XRootDPrefix":
+			return config.Origin.XRootDPrefix
+		case "Origin.XRootServiceUrl":
+			return config.Origin.XRootServiceUrl
+		case "Plugin.Token":
+			return config.Plugin.Token
+		case "Registry.DbLocation":
+			return config.Registry.DbLocation
+		case "Registry.InstitutionsUrl":
+			return config.Registry.InstitutionsUrl
+		case "Server.DbLocation":
+			return config.Server.DbLocation
+		case "Server.ExternalWebUrl":
+			return config.Server.ExternalWebUrl
+		case "Server.Hostname":
+			return config.Server.Hostname
+		case "Server.IssuerHostname":
+			return config.Server.IssuerHostname
+		case "Server.IssuerJwks":
+			return config.Server.IssuerJwks
+		case "Server.IssuerUrl":
+			return config.Server.IssuerUrl
+		case "Server.SessionSecretFile":
+			return config.Server.SessionSecretFile
+		case "Server.TLSCACertificateDirectory":
+			return config.Server.TLSCACertificateDirectory
+		case "Server.TLSCACertificateFile":
+			return config.Server.TLSCACertificateFile
+		case "Server.TLSCAKey":
+			return config.Server.TLSCAKey
+		case "Server.TLSCertificate":
+			return config.Server.TLSCertificate
+		case "Server.TLSCertificateChain":
+			return config.Server.TLSCertificateChain
+		case "Server.TLSKey":
+			return config.Server.TLSKey
+		case "Server.UIActivationCodeFile":
+			return config.Server.UIActivationCodeFile
+		case "Server.UIPasswordFile":
+			return config.Server.UIPasswordFile
+		case "Server.UnprivilegedUser":
+			return config.Server.UnprivilegedUser
+		case "Server.WebConfigFile":
+			return config.Server.WebConfigFile
+		case "Server.WebHost":
+			return config.Server.WebHost
+		case "Shoveler.AMQPExchange":
+			return config.Shoveler.AMQPExchange
+		case "Shoveler.AMQPTokenLocation":
+			return config.Shoveler.AMQPTokenLocation
+		case "Shoveler.MessageQueueProtocol":
+			return config.Shoveler.MessageQueueProtocol
+		case "Shoveler.QueueDirectory":
+			return config.Shoveler.QueueDirectory
+		case "Shoveler.StompCert":
+			return config.Shoveler.StompCert
+		case "Shoveler.StompCertKey":
+			return config.Shoveler.StompCertKey
+		case "Shoveler.StompPassword":
+			return config.Shoveler.StompPassword
+		case "Shoveler.StompUsername":
+			return config.Shoveler.StompUsername
+		case "Shoveler.Topic":
+			return config.Shoveler.Topic
+		case "Shoveler.URL":
+			return config.Shoveler.URL
+		case "StagePlugin.MountPrefix":
+			return config.StagePlugin.MountPrefix
+		case "StagePlugin.OriginPrefix":
+			return config.StagePlugin.OriginPrefix
+		case "StagePlugin.ShadowOriginPrefix":
+			return config.StagePlugin.ShadowOriginPrefix
+		case "Xrootd.Authfile":
+			return config.Xrootd.Authfile
+		case "Xrootd.ConfigFile":
+			return config.Xrootd.ConfigFile
+		case "Xrootd.DetailedMonitoringHost":
+			return config.Xrootd.DetailedMonitoringHost
+		case "Xrootd.LocalMonitoringHost":
+			return config.Xrootd.LocalMonitoringHost
+		case "Xrootd.MacaroonsKeyFile":
+			return config.Xrootd.MacaroonsKeyFile
+		case "Xrootd.ManagerHost":
+			return config.Xrootd.ManagerHost
+		case "Xrootd.Mount":
+			return config.Xrootd.Mount
+		case "Xrootd.RobotsTxtFile":
+			return config.Xrootd.RobotsTxtFile
+		case "Xrootd.RunLocation":
+			return config.Xrootd.RunLocation
+		case "Xrootd.ScitokensConfig":
+			return config.Xrootd.ScitokensConfig
+		case "Xrootd.Sitename":
+			return config.Xrootd.Sitename
+		case "Xrootd.SummaryMonitoringHost":
+			return config.Xrootd.SummaryMonitoringHost
+	}
+	return ""
 }
 
 func (sP StringParam) GetName() string {
@@ -90,7 +397,48 @@ func (sP StringParam) IsSet() bool {
 }
 
 func (slP StringSliceParam) GetStringSlice() []string {
-	return viper.GetStringSlice(slP.name)
+	config := getOrCreateConfig()
+	switch slP.name {
+		case "Cache.DataLocations":
+			return config.Cache.DataLocations
+		case "Cache.MetaLocations":
+			return config.Cache.MetaLocations
+		case "Cache.PermittedNamespaces":
+			return config.Cache.PermittedNamespaces
+		case "Client.PreferredCaches":
+			return config.Client.PreferredCaches
+		case "ConfigLocations":
+			return config.ConfigLocations
+		case "Director.CacheResponseHostnames":
+			return config.Director.CacheResponseHostnames
+		case "Director.FilteredServers":
+			return config.Director.FilteredServers
+		case "Director.OriginResponseHostnames":
+			return config.Director.OriginResponseHostnames
+		case "Issuer.GroupRequirements":
+			return config.Issuer.GroupRequirements
+		case "Issuer.RedirectUris":
+			return config.Issuer.RedirectUris
+		case "Monitoring.AggregatePrefixes":
+			return config.Monitoring.AggregatePrefixes
+		case "OIDC.Scopes":
+			return config.OIDC.Scopes
+		case "Origin.ExportVolumes":
+			return config.Origin.ExportVolumes
+		case "Origin.ScitokensRestrictedPaths":
+			return config.Origin.ScitokensRestrictedPaths
+		case "Registry.AdminUsers":
+			return config.Registry.AdminUsers
+		case "Server.DirectorUrls":
+			return config.Server.DirectorUrls
+		case "Server.Modules":
+			return config.Server.Modules
+		case "Server.UIAdminUsers":
+			return config.Server.UIAdminUsers
+		case "Shoveler.OutputDestinations":
+			return config.Shoveler.OutputDestinations
+	}
+	return nil
 }
 
 func (slP StringSliceParam) GetName() string {
@@ -102,7 +450,84 @@ func (slP StringSliceParam) IsSet() bool {
 }
 
 func (iP IntParam) GetInt() int {
-	return viper.GetInt(iP.name)
+	config := getOrCreateConfig()
+	switch iP.name {
+		case "Cache.BlocksToPrefetch":
+			return config.Cache.BlocksToPrefetch
+		case "Cache.Concurrency":
+			return config.Cache.Concurrency
+		case "Cache.ConcurrencyDegradedThreshold":
+			return config.Cache.ConcurrencyDegradedThreshold
+		case "Cache.EvictionMonitoringMaxDepth":
+			return config.Cache.EvictionMonitoringMaxDepth
+		case "Cache.Port":
+			return config.Cache.Port
+		case "Client.DirectorRetries":
+			return config.Client.DirectorRetries
+		case "Client.MaximumDownloadSpeed":
+			return config.Client.MaximumDownloadSpeed
+		case "Client.MinimumDownloadSpeed":
+			return config.Client.MinimumDownloadSpeed
+		case "Client.WorkerCount":
+			return config.Client.WorkerCount
+		case "Director.AdaptiveSortTruncateConstant":
+			return config.Director.AdaptiveSortTruncateConstant
+		case "Director.CachePresenceCapacity":
+			return config.Director.CachePresenceCapacity
+		case "Director.MaxStatResponse":
+			return config.Director.MaxStatResponse
+		case "Director.MinStatResponse":
+			return config.Director.MinStatResponse
+		case "Director.StatConcurrencyLimit":
+			return config.Director.StatConcurrencyLimit
+		case "LocalCache.HighWaterMarkPercentage":
+			return config.LocalCache.HighWaterMarkPercentage
+		case "LocalCache.LowWaterMarkPercentage":
+			return config.LocalCache.LowWaterMarkPercentage
+		case "MinimumDownloadSpeed":
+			return config.MinimumDownloadSpeed
+		case "Monitoring.LabelLimit":
+			return config.Monitoring.LabelLimit
+		case "Monitoring.LabelNameLengthLimit":
+			return config.Monitoring.LabelNameLengthLimit
+		case "Monitoring.LabelValueLengthLimit":
+			return config.Monitoring.LabelValueLengthLimit
+		case "Monitoring.PortHigher":
+			return config.Monitoring.PortHigher
+		case "Monitoring.PortLower":
+			return config.Monitoring.PortLower
+		case "Monitoring.SampleLimit":
+			return config.Monitoring.SampleLimit
+		case "Origin.Concurrency":
+			return config.Origin.Concurrency
+		case "Origin.ConcurrencyDegradedThreshold":
+			return config.Origin.ConcurrencyDegradedThreshold
+		case "Origin.Port":
+			return config.Origin.Port
+		case "Server.IssuerPort":
+			return config.Server.IssuerPort
+		case "Server.UILoginRateLimit":
+			return config.Server.UILoginRateLimit
+		case "Server.WebPort":
+			return config.Server.WebPort
+		case "Shoveler.PortHigher":
+			return config.Shoveler.PortHigher
+		case "Shoveler.PortLower":
+			return config.Shoveler.PortLower
+		case "Transport.MaxIdleConns":
+			return config.Transport.MaxIdleConns
+		case "Xrootd.DetailedMonitoringPort":
+			return config.Xrootd.DetailedMonitoringPort
+		case "Xrootd.ManagerPort":
+			return config.Xrootd.ManagerPort
+		case "Xrootd.MaxThreads":
+			return config.Xrootd.MaxThreads
+		case "Xrootd.Port":
+			return config.Xrootd.Port
+		case "Xrootd.SummaryMonitoringPort":
+			return config.Xrootd.SummaryMonitoringPort
+	}
+	return 0
 }
 
 func (iP IntParam) GetName() string {
@@ -114,7 +539,146 @@ func (iP IntParam) IsSet() bool {
 }
 
 func (bP BoolParam) GetBool() bool {
-	return viper.GetBool(bP.name)
+	config := getOrCreateConfig()
+	switch bP.name {
+		case "Cache.EnableBroker":
+			return config.Cache.EnableBroker
+		case "Cache.EnableEvictionMonitoring":
+			return config.Cache.EnableEvictionMonitoring
+		case "Cache.EnableLotman":
+			return config.Cache.EnableLotman
+		case "Cache.EnableOIDC":
+			return config.Cache.EnableOIDC
+		case "Cache.EnablePrefetch":
+			return config.Cache.EnablePrefetch
+		case "Cache.EnableSiteLocalMode":
+			return config.Cache.EnableSiteLocalMode
+		case "Cache.EnableTLSClientAuth":
+			return config.Cache.EnableTLSClientAuth
+		case "Cache.EnableVoms":
+			return config.Cache.EnableVoms
+		case "Cache.SelfTest":
+			return config.Cache.SelfTest
+		case "Client.AssumeDirectorServerHeader":
+			return config.Client.AssumeDirectorServerHeader
+		case "Client.DisableHttpProxy":
+			return config.Client.DisableHttpProxy
+		case "Client.DisableProxyFallback":
+			return config.Client.DisableProxyFallback
+		case "Client.IsPlugin":
+			return config.Client.IsPlugin
+		case "Debug":
+			return config.Debug
+		case "Director.AssumePresenceAtSingleOrigin":
+			return config.Director.AssumePresenceAtSingleOrigin
+		case "Director.CachesPullFromCaches":
+			return config.Director.CachesPullFromCaches
+		case "Director.CheckCachePresence":
+			return config.Director.CheckCachePresence
+		case "Director.CheckOriginPresence":
+			return config.Director.CheckOriginPresence
+		case "Director.EnableBroker":
+			return config.Director.EnableBroker
+		case "Director.EnableOIDC":
+			return config.Director.EnableOIDC
+		case "Director.EnableStat":
+			return config.Director.EnableStat
+		case "Director.FilterCachesInErrorState":
+			return config.Director.FilterCachesInErrorState
+		case "DisableHttpProxy":
+			return config.DisableHttpProxy
+		case "DisableProxyFallback":
+			return config.DisableProxyFallback
+		case "Issuer.OIDCPreferClaimsFromIDToken":
+			return config.Issuer.OIDCPreferClaimsFromIDToken
+		case "Issuer.UserStripDomain":
+			return config.Issuer.UserStripDomain
+		case "Logging.DisableProgressBars":
+			return config.Logging.DisableProgressBars
+		case "Lotman.EnableAPI":
+			return config.Lotman.EnableAPI
+		case "Monitoring.EnablePrometheus":
+			return config.Monitoring.EnablePrometheus
+		case "Monitoring.MetricAuthorization":
+			return config.Monitoring.MetricAuthorization
+		case "Monitoring.PromQLAuthorization":
+			return config.Monitoring.PromQLAuthorization
+		case "Origin.DirectorTest":
+			return config.Origin.DirectorTest
+		case "Origin.DisableDirectClients":
+			return config.Origin.DisableDirectClients
+		case "Origin.EnableBroker":
+			return config.Origin.EnableBroker
+		case "Origin.EnableCmsd":
+			return config.Origin.EnableCmsd
+		case "Origin.EnableDirListing":
+			return config.Origin.EnableDirListing
+		case "Origin.EnableDirectReads":
+			return config.Origin.EnableDirectReads
+		case "Origin.EnableFallbackRead":
+			return config.Origin.EnableFallbackRead
+		case "Origin.EnableIssuer":
+			return config.Origin.EnableIssuer
+		case "Origin.EnableListings":
+			return config.Origin.EnableListings
+		case "Origin.EnableMacaroons":
+			return config.Origin.EnableMacaroons
+		case "Origin.EnableOIDC":
+			return config.Origin.EnableOIDC
+		case "Origin.EnablePublicReads":
+			return config.Origin.EnablePublicReads
+		case "Origin.EnableReads":
+			return config.Origin.EnableReads
+		case "Origin.EnableVoms":
+			return config.Origin.EnableVoms
+		case "Origin.EnableWrite":
+			return config.Origin.EnableWrite
+		case "Origin.EnableWrites":
+			return config.Origin.EnableWrites
+		case "Origin.Multiuser":
+			return config.Origin.Multiuser
+		case "Origin.ScitokensMapSubject":
+			return config.Origin.ScitokensMapSubject
+		case "Origin.SelfTest":
+			return config.Origin.SelfTest
+		case "Registry.RequireCacheApproval":
+			return config.Registry.RequireCacheApproval
+		case "Registry.RequireKeyChaining":
+			return config.Registry.RequireKeyChaining
+		case "Registry.RequireOriginApproval":
+			return config.Registry.RequireOriginApproval
+		case "Server.DropPrivileges":
+			return config.Server.DropPrivileges
+		case "Server.EnablePprof":
+			return config.Server.EnablePprof
+		case "Server.EnableUI":
+			return config.Server.EnableUI
+		case "Server.HealthMonitoringPublic":
+			return config.Server.HealthMonitoringPublic
+		case "Shoveler.Enable":
+			return config.Shoveler.Enable
+		case "Shoveler.VerifyHeader":
+			return config.Shoveler.VerifyHeader
+		case "StagePlugin.Hook":
+			return config.StagePlugin.Hook
+		case "TLSSkipVerify":
+			return config.TLSSkipVerify
+		case "Topology.DisableCacheX509":
+			return config.Topology.DisableCacheX509
+		case "Topology.DisableCaches":
+			return config.Topology.DisableCaches
+		case "Topology.DisableDowntime":
+			return config.Topology.DisableDowntime
+		case "Topology.DisableOriginX509":
+			return config.Topology.DisableOriginX509
+		case "Topology.DisableOrigins":
+			return config.Topology.DisableOrigins
+		case "Xrootd.AutoShutdownEnabled":
+			return config.Xrootd.AutoShutdownEnabled
+		case "Xrootd.EnableLocalMonitoring":
+			return config.Xrootd.EnableLocalMonitoring
+	}
+	return false
 }
 
 func (bP BoolParam) GetName() string {
@@ -126,7 +690,90 @@ func (bP BoolParam) IsSet() bool {
 }
 
 func (dP DurationParam) GetDuration() time.Duration {
-	return viper.GetDuration(dP.name)
+	config := getOrCreateConfig()
+	switch dP.name {
+		case "Cache.DefaultCacheTimeout":
+			return config.Cache.DefaultCacheTimeout
+		case "Cache.EvictionMonitoringInterval":
+			return config.Cache.EvictionMonitoringInterval
+		case "Cache.SelfTestInterval":
+			return config.Cache.SelfTestInterval
+		case "Cache.SelfTestMaxAge":
+			return config.Cache.SelfTestMaxAge
+		case "Client.SlowTransferRampupTime":
+			return config.Client.SlowTransferRampupTime
+		case "Client.SlowTransferWindow":
+			return config.Client.SlowTransferWindow
+		case "Client.StoppedTransferTimeout":
+			return config.Client.StoppedTransferTimeout
+		case "Director.AdaptiveSortEWMATimeConstant":
+			return config.Director.AdaptiveSortEWMATimeConstant
+		case "Director.AdvertisementTTL":
+			return config.Director.AdvertisementTTL
+		case "Director.CachePresenceTTL":
+			return config.Director.CachePresenceTTL
+		case "Director.FedTokenLifetime":
+			return config.Director.FedTokenLifetime
+		case "Director.OriginCacheHealthTestInterval":
+			return config.Director.OriginCacheHealthTestInterval
+		case "Director.RegistryQueryInterval":
+			return config.Director.RegistryQueryInterval
+		case "Director.StatTimeout":
+			return config.Director.StatTimeout
+		case "Federation.TopologyReloadInterval":
+			return config.Federation.TopologyReloadInterval
+		case "Logging.Client.ProgressInterval":
+			return config.Logging.Client.ProgressInterval
+		case "Lotman.DefaultLotDeletionLifetime":
+			return config.Lotman.DefaultLotDeletionLifetime
+		case "Lotman.DefaultLotExpirationLifetime":
+			return config.Lotman.DefaultLotExpirationLifetime
+		case "Monitoring.DataRetention":
+			return config.Monitoring.DataRetention
+		case "Monitoring.TokenExpiresIn":
+			return config.Monitoring.TokenExpiresIn
+		case "Monitoring.TokenRefreshInterval":
+			return config.Monitoring.TokenRefreshInterval
+		case "Origin.SelfTestInterval":
+			return config.Origin.SelfTestInterval
+		case "Origin.SelfTestMaxAge":
+			return config.Origin.SelfTestMaxAge
+		case "Registry.InstitutionsUrlReloadMinutes":
+			return config.Registry.InstitutionsUrlReloadMinutes
+		case "Server.AdLifetime":
+			return config.Server.AdLifetime
+		case "Server.AdvertisementInterval":
+			return config.Server.AdvertisementInterval
+		case "Server.RegistrationRetryInterval":
+			return config.Server.RegistrationRetryInterval
+		case "Server.StartupTimeout":
+			return config.Server.StartupTimeout
+		case "Transport.BrokerEndpointCacheTTL":
+			return config.Transport.BrokerEndpointCacheTTL
+		case "Transport.DialerKeepAlive":
+			return config.Transport.DialerKeepAlive
+		case "Transport.DialerTimeout":
+			return config.Transport.DialerTimeout
+		case "Transport.ExpectContinueTimeout":
+			return config.Transport.ExpectContinueTimeout
+		case "Transport.IdleConnTimeout":
+			return config.Transport.IdleConnTimeout
+		case "Transport.ResponseHeaderTimeout":
+			return config.Transport.ResponseHeaderTimeout
+		case "Transport.TLSHandshakeTimeout":
+			return config.Transport.TLSHandshakeTimeout
+		case "Xrootd.AuthRefreshInterval":
+			return config.Xrootd.AuthRefreshInterval
+		case "Xrootd.ConfigUpdateFailureTimeout":
+			return config.Xrootd.ConfigUpdateFailureTimeout
+		case "Xrootd.HttpMaxDelay":
+			return config.Xrootd.HttpMaxDelay
+		case "Xrootd.MaxStartupWait":
+			return config.Xrootd.MaxStartupWait
+		case "Xrootd.ShutdownTimeout":
+			return config.Xrootd.ShutdownTimeout
+	}
+	return 0
 }
 
 func (dP DurationParam) GetName() string {
@@ -147,6 +794,336 @@ func (oP ObjectParam) GetName() string {
 
 func (oP ObjectParam) IsSet() bool {
 	return viper.IsSet(oP.name)
+}
+
+// allParameterNames is the list of all config keys generated from
+// docs/parameters.yaml. It is primarily used to bind environment variables so
+// that env-only overrides are included in viper.AllSettings().
+var allParameterNames = []string{
+	"Cache.BlocksToPrefetch",
+	"Cache.ClientStatisticsLocation",
+	"Cache.Concurrency",
+	"Cache.ConcurrencyDegradedThreshold",
+	"Cache.DataLocation",
+	"Cache.DataLocations",
+	"Cache.DbLocation",
+	"Cache.DefaultCacheTimeout",
+	"Cache.EnableBroker",
+	"Cache.EnableEvictionMonitoring",
+	"Cache.EnableLotman",
+	"Cache.EnableOIDC",
+	"Cache.EnablePrefetch",
+	"Cache.EnableSiteLocalMode",
+	"Cache.EnableTLSClientAuth",
+	"Cache.EnableVoms",
+	"Cache.EvictionMonitoringInterval",
+	"Cache.EvictionMonitoringMaxDepth",
+	"Cache.ExportLocation",
+	"Cache.FedTokenLocation",
+	"Cache.FilesBaseSize",
+	"Cache.FilesMaxSize",
+	"Cache.FilesNominalSize",
+	"Cache.HighWaterMark",
+	"Cache.LocalRoot",
+	"Cache.LowWatermark",
+	"Cache.MetaLocations",
+	"Cache.NamespaceLocation",
+	"Cache.PermittedNamespaces",
+	"Cache.Port",
+	"Cache.RunLocation",
+	"Cache.SelfTest",
+	"Cache.SelfTestInterval",
+	"Cache.SelfTestMaxAge",
+	"Cache.SentinelLocation",
+	"Cache.StorageLocation",
+	"Cache.Url",
+	"Cache.XRootDPrefix",
+	"Client.AssumeDirectorServerHeader",
+	"Client.DirectorRetries",
+	"Client.DisableHttpProxy",
+	"Client.DisableProxyFallback",
+	"Client.IsPlugin",
+	"Client.MaximumDownloadSpeed",
+	"Client.MinimumDownloadSpeed",
+	"Client.PreferredCaches",
+	"Client.SlowTransferRampupTime",
+	"Client.SlowTransferWindow",
+	"Client.StoppedTransferTimeout",
+	"Client.WorkerCount",
+	"ConfigLocations",
+	"Debug",
+	"Director.AdaptiveSortEWMATimeConstant",
+	"Director.AdaptiveSortTruncateConstant",
+	"Director.AdvertiseUrl",
+	"Director.AdvertisementTTL",
+	"Director.AssumePresenceAtSingleOrigin",
+	"Director.CachePresenceCapacity",
+	"Director.CachePresenceTTL",
+	"Director.CacheResponseHostnames",
+	"Director.CacheSortMethod",
+	"Director.CachesPullFromCaches",
+	"Director.CheckCachePresence",
+	"Director.CheckOriginPresence",
+	"Director.DbLocation",
+	"Director.DefaultResponse",
+	"Director.EnableBroker",
+	"Director.EnableOIDC",
+	"Director.EnableStat",
+	"Director.FedTokenLifetime",
+	"Director.FilterCachesInErrorState",
+	"Director.FilteredServers",
+	"Director.GeoIPLocation",
+	"Director.MaxMindKeyFile",
+	"Director.MaxStatResponse",
+	"Director.MinStatResponse",
+	"Director.OriginCacheHealthTestInterval",
+	"Director.OriginResponseHostnames",
+	"Director.RegistryQueryInterval",
+	"Director.StatConcurrencyLimit",
+	"Director.StatTimeout",
+	"Director.SupportContactEmail",
+	"Director.SupportContactUrl",
+	"DisableHttpProxy",
+	"DisableProxyFallback",
+	"Federation.DiscoveryUrl",
+	"Federation.TopologyDowntimeUrl",
+	"Federation.TopologyNamespaceUrl",
+	"Federation.TopologyReloadInterval",
+	"Federation.TopologyUrl",
+	"GeoIPOverrides",
+	"Issuer.AuthenticationSource",
+	"Issuer.AuthorizationTemplates",
+	"Issuer.GroupFile",
+	"Issuer.GroupRequirements",
+	"Issuer.GroupSource",
+	"Issuer.IssuerClaimValue",
+	"Issuer.OIDCAuthenticationRequirements",
+	"Issuer.OIDCAuthenticationUserClaim",
+	"Issuer.OIDCGroupClaim",
+	"Issuer.OIDCPreferClaimsFromIDToken",
+	"Issuer.QDLLocation",
+	"Issuer.RedirectUris",
+	"Issuer.ScitokensServerLocation",
+	"Issuer.TomcatLocation",
+	"Issuer.UserStripDomain",
+	"IssuerKey",
+	"IssuerKeysDirectory",
+	"LocalCache.DataLocation",
+	"LocalCache.HighWaterMarkPercentage",
+	"LocalCache.LowWaterMarkPercentage",
+	"LocalCache.RunLocation",
+	"LocalCache.Size",
+	"LocalCache.Socket",
+	"Logging.Cache.Http",
+	"Logging.Cache.Ofs",
+	"Logging.Cache.Pfc",
+	"Logging.Cache.Pss",
+	"Logging.Cache.PssSetOpt",
+	"Logging.Cache.Scitokens",
+	"Logging.Cache.Xrd",
+	"Logging.Cache.Xrootd",
+	"Logging.Client.ProgressInterval",
+	"Logging.DisableProgressBars",
+	"Logging.Level",
+	"Logging.LogLocation",
+	"Logging.Origin.Cms",
+	"Logging.Origin.Http",
+	"Logging.Origin.Ofs",
+	"Logging.Origin.Oss",
+	"Logging.Origin.Scitokens",
+	"Logging.Origin.Xrd",
+	"Logging.Origin.Xrootd",
+	"Lotman.DbLocation",
+	"Lotman.DefaultLotDeletionLifetime",
+	"Lotman.DefaultLotExpirationLifetime",
+	"Lotman.EnableAPI",
+	"Lotman.EnabledPolicy",
+	"Lotman.LibLocation",
+	"Lotman.LotHome",
+	"Lotman.PolicyDefinitions",
+	"MinimumDownloadSpeed",
+	"Monitoring.AggregatePrefixes",
+	"Monitoring.DataLocation",
+	"Monitoring.DataRetention",
+	"Monitoring.DataRetentionSize",
+	"Monitoring.EnablePrometheus",
+	"Monitoring.LabelLimit",
+	"Monitoring.LabelNameLengthLimit",
+	"Monitoring.LabelValueLengthLimit",
+	"Monitoring.MetricAuthorization",
+	"Monitoring.PortHigher",
+	"Monitoring.PortLower",
+	"Monitoring.PromQLAuthorization",
+	"Monitoring.SampleLimit",
+	"Monitoring.TokenExpiresIn",
+	"Monitoring.TokenRefreshInterval",
+	"OIDC.AuthorizationEndpoint",
+	"OIDC.ClientID",
+	"OIDC.ClientIDFile",
+	"OIDC.ClientRedirectHostname",
+	"OIDC.ClientSecretFile",
+	"OIDC.DeviceAuthEndpoint",
+	"OIDC.Issuer",
+	"OIDC.Scopes",
+	"OIDC.TokenEndpoint",
+	"OIDC.UserInfoEndpoint",
+	"Origin.Concurrency",
+	"Origin.ConcurrencyDegradedThreshold",
+	"Origin.DbLocation",
+	"Origin.DirectorTest",
+	"Origin.DisableDirectClients",
+	"Origin.EnableBroker",
+	"Origin.EnableCmsd",
+	"Origin.EnableDirListing",
+	"Origin.EnableDirectReads",
+	"Origin.EnableFallbackRead",
+	"Origin.EnableIssuer",
+	"Origin.EnableListings",
+	"Origin.EnableMacaroons",
+	"Origin.EnableOIDC",
+	"Origin.EnablePublicReads",
+	"Origin.EnableReads",
+	"Origin.EnableVoms",
+	"Origin.EnableWrite",
+	"Origin.EnableWrites",
+	"Origin.ExportVolume",
+	"Origin.ExportVolumes",
+	"Origin.Exports",
+	"Origin.FedTokenLocation",
+	"Origin.FederationPrefix",
+	"Origin.GlobusClientIDFile",
+	"Origin.GlobusClientSecretFile",
+	"Origin.GlobusCollectionID",
+	"Origin.GlobusCollectionName",
+	"Origin.GlobusConfigLocation",
+	"Origin.HttpAuthTokenFile",
+	"Origin.HttpServiceUrl",
+	"Origin.Mode",
+	"Origin.Multiuser",
+	"Origin.NamespacePrefix",
+	"Origin.Port",
+	"Origin.RunLocation",
+	"Origin.S3AccessKeyfile",
+	"Origin.S3Bucket",
+	"Origin.S3Region",
+	"Origin.S3SecretKeyfile",
+	"Origin.S3ServiceName",
+	"Origin.S3ServiceUrl",
+	"Origin.S3UrlStyle",
+	"Origin.ScitokensDefaultUser",
+	"Origin.ScitokensMapSubject",
+	"Origin.ScitokensNameMapFile",
+	"Origin.ScitokensRestrictedPaths",
+	"Origin.ScitokensUsernameClaim",
+	"Origin.SelfTest",
+	"Origin.SelfTestInterval",
+	"Origin.SelfTestMaxAge",
+	"Origin.StoragePrefix",
+	"Origin.StorageType",
+	"Origin.TokenAudience",
+	"Origin.Url",
+	"Origin.XRootDPrefix",
+	"Origin.XRootServiceUrl",
+	"Plugin.Token",
+	"Registry.AdminUsers",
+	"Registry.CustomRegistrationFields",
+	"Registry.DbLocation",
+	"Registry.Institutions",
+	"Registry.InstitutionsUrl",
+	"Registry.InstitutionsUrlReloadMinutes",
+	"Registry.RequireCacheApproval",
+	"Registry.RequireKeyChaining",
+	"Registry.RequireOriginApproval",
+	"Server.AdLifetime",
+	"Server.AdvertisementInterval",
+	"Server.DbLocation",
+	"Server.DirectorUrls",
+	"Server.DropPrivileges",
+	"Server.EnablePprof",
+	"Server.EnableUI",
+	"Server.ExternalWebUrl",
+	"Server.HealthMonitoringPublic",
+	"Server.Hostname",
+	"Server.IssuerHostname",
+	"Server.IssuerJwks",
+	"Server.IssuerPort",
+	"Server.IssuerUrl",
+	"Server.Modules",
+	"Server.RegistrationRetryInterval",
+	"Server.SessionSecretFile",
+	"Server.StartupTimeout",
+	"Server.TLSCACertificateDirectory",
+	"Server.TLSCACertificateFile",
+	"Server.TLSCAKey",
+	"Server.TLSCertificate",
+	"Server.TLSCertificateChain",
+	"Server.TLSKey",
+	"Server.UIActivationCodeFile",
+	"Server.UIAdminUsers",
+	"Server.UILoginRateLimit",
+	"Server.UIPasswordFile",
+	"Server.UnprivilegedUser",
+	"Server.WebConfigFile",
+	"Server.WebHost",
+	"Server.WebPort",
+	"Shoveler.AMQPExchange",
+	"Shoveler.AMQPTokenLocation",
+	"Shoveler.Enable",
+	"Shoveler.IPMapping",
+	"Shoveler.MessageQueueProtocol",
+	"Shoveler.OutputDestinations",
+	"Shoveler.PortHigher",
+	"Shoveler.PortLower",
+	"Shoveler.QueueDirectory",
+	"Shoveler.StompCert",
+	"Shoveler.StompCertKey",
+	"Shoveler.StompPassword",
+	"Shoveler.StompUsername",
+	"Shoveler.Topic",
+	"Shoveler.URL",
+	"Shoveler.VerifyHeader",
+	"StagePlugin.Hook",
+	"StagePlugin.MountPrefix",
+	"StagePlugin.OriginPrefix",
+	"StagePlugin.ShadowOriginPrefix",
+	"TLSSkipVerify",
+	"Topology.DisableCacheX509",
+	"Topology.DisableCaches",
+	"Topology.DisableDowntime",
+	"Topology.DisableOriginX509",
+	"Topology.DisableOrigins",
+	"Transport.BrokerEndpointCacheTTL",
+	"Transport.DialerKeepAlive",
+	"Transport.DialerTimeout",
+	"Transport.ExpectContinueTimeout",
+	"Transport.IdleConnTimeout",
+	"Transport.MaxIdleConns",
+	"Transport.ResponseHeaderTimeout",
+	"Transport.TLSHandshakeTimeout",
+	"Xrootd.AuthRefreshInterval",
+	"Xrootd.Authfile",
+	"Xrootd.AutoShutdownEnabled",
+	"Xrootd.ConfigFile",
+	"Xrootd.ConfigUpdateFailureTimeout",
+	"Xrootd.DetailedMonitoringHost",
+	"Xrootd.DetailedMonitoringPort",
+	"Xrootd.EnableLocalMonitoring",
+	"Xrootd.HttpMaxDelay",
+	"Xrootd.LocalMonitoringHost",
+	"Xrootd.MacaroonsKeyFile",
+	"Xrootd.ManagerHost",
+	"Xrootd.ManagerPort",
+	"Xrootd.MaxStartupWait",
+	"Xrootd.MaxThreads",
+	"Xrootd.Mount",
+	"Xrootd.Port",
+	"Xrootd.RobotsTxtFile",
+	"Xrootd.RunLocation",
+	"Xrootd.ScitokensConfig",
+	"Xrootd.ShutdownTimeout",
+	"Xrootd.Sitename",
+	"Xrootd.SummaryMonitoringHost",
+	"Xrootd.SummaryMonitoringPort",
 }
 
 var (

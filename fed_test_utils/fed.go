@@ -116,29 +116,29 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	err = os.Chmod(tmpPath, permissions)
 	require.NoError(t, err)
 
-	viper.Set("ConfigDir", tmpPath)
+	require.NoError(t, param.Set("ConfigDir", tmpPath))
 	// Configure all relevant logging levels. We don't let the XRootD
 	// log levels inherit from the global log level, because the many
 	// fed tests we run back-to-back would otherwise generate a lot of
 	// log output.
-	viper.Set(param.Logging_Level.GetName(), "debug")
-	viper.Set(param.Logging_Origin_Cms.GetName(), "error")
-	viper.Set(param.Logging_Origin_Xrd.GetName(), "error")
-	viper.Set(param.Logging_Origin_Ofs.GetName(), "error")
-	viper.Set(param.Logging_Origin_Oss.GetName(), "error")
-	viper.Set(param.Logging_Origin_Http.GetName(), "error")
-	viper.Set(param.Logging_Origin_Scitokens.GetName(), "fatal")
-	viper.Set(param.Logging_Origin_Xrootd.GetName(), "info")
-	viper.Set(param.Logging_Cache_Ofs.GetName(), "error")
-	viper.Set(param.Logging_Cache_Pss.GetName(), "error")
-	viper.Set(param.Logging_Cache_PssSetOpt.GetName(), "error")
-	viper.Set(param.Logging_Cache_Http.GetName(), "error")
-	viper.Set(param.Logging_Cache_Xrd.GetName(), "error")
-	viper.Set(param.Logging_Cache_Xrootd.GetName(), "error")
-	viper.Set(param.Logging_Cache_Scitokens.GetName(), "fatal")
-	viper.Set(param.Logging_Cache_Pfc.GetName(), "info")
+	require.NoError(t, param.Set(param.Logging_Level.GetName(), "debug"))
+	require.NoError(t, param.Set(param.Logging_Origin_Cms.GetName(), "error"))
+	require.NoError(t, param.Set(param.Logging_Origin_Xrd.GetName(), "error"))
+	require.NoError(t, param.Set(param.Logging_Origin_Ofs.GetName(), "error"))
+	require.NoError(t, param.Set(param.Logging_Origin_Oss.GetName(), "error"))
+	require.NoError(t, param.Set(param.Logging_Origin_Http.GetName(), "error"))
+	require.NoError(t, param.Set(param.Logging_Origin_Scitokens.GetName(), "fatal"))
+	require.NoError(t, param.Set(param.Logging_Origin_Xrootd.GetName(), "info"))
+	require.NoError(t, param.Set(param.Logging_Cache_Ofs.GetName(), "error"))
+	require.NoError(t, param.Set(param.Logging_Cache_Pss.GetName(), "error"))
+	require.NoError(t, param.Set(param.Logging_Cache_PssSetOpt.GetName(), "error"))
+	require.NoError(t, param.Set(param.Logging_Cache_Http.GetName(), "error"))
+	require.NoError(t, param.Set(param.Logging_Cache_Xrd.GetName(), "error"))
+	require.NoError(t, param.Set(param.Logging_Cache_Xrootd.GetName(), "error"))
+	require.NoError(t, param.Set(param.Logging_Cache_Scitokens.GetName(), "fatal"))
+	require.NoError(t, param.Set(param.Logging_Cache_Pfc.GetName(), "info"))
 
-	viper.Set(param.TLSSkipVerify.GetName(), true)
+	require.NoError(t, param.Set(param.TLSSkipVerify.GetName(), true))
 
 	// Instead of using "0" as a port directly in the config, which lets XRootD find its own port,
 	// we need to know the port in advance for configuring the issuer URLs for each export. To do that
@@ -151,37 +151,37 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	require.Len(t, ports, 3)
 
 	// Disable functionality we're not using (and is difficult to make work on Mac)
-	viper.Set(param.Registry_DbLocation.GetName(), filepath.Join(t.TempDir(), "ns-registry.sqlite"))
-	viper.Set(param.Registry_RequireOriginApproval.GetName(), false)
-	viper.Set(param.Registry_RequireCacheApproval.GetName(), false)
-	viper.Set(param.Director_CacheSortMethod.GetName(), "distance")
-	viper.Set(param.Director_DbLocation.GetName(), filepath.Join(t.TempDir(), "director.sqlite"))
-	viper.Set(param.Director_FilterCachesInErrorState.GetName(), false)
-	viper.Set(param.Origin_EnableCmsd.GetName(), false)
-	viper.Set(param.Origin_EnableVoms.GetName(), false)
-	viper.Set(param.Origin_Port.GetName(), ports[0])
-	viper.Set(param.Origin_RunLocation.GetName(), filepath.Join(tmpPath, "origin"))
-	viper.Set(param.Origin_DbLocation.GetName(), filepath.Join(t.TempDir(), "origin.sqlite"))
-	viper.Set(param.Origin_TokenAudience.GetName(), "")
-	viper.Set(param.Cache_Port.GetName(), ports[1])
-	viper.Set(param.Cache_RunLocation.GetName(), filepath.Join(tmpPath, "cache"))
-	viper.Set(param.Cache_EnableEvictionMonitoring.GetName(), false)
-	viper.Set(param.Cache_StorageLocation.GetName(), filepath.Join(tmpPath, "xcache-data"))
-	viper.Set(param.Cache_DbLocation.GetName(), filepath.Join(t.TempDir(), "cache.sqlite"))
-	viper.Set(param.Server_EnableUI.GetName(), false)
-	viper.Set(param.Server_WebPort.GetName(), ports[2])
-	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(t.TempDir(), "server.sqlite"))
+	require.NoError(t, param.Set(param.Registry_DbLocation.GetName(), filepath.Join(t.TempDir(), "ns-registry.sqlite")))
+	require.NoError(t, param.Set(param.Registry_RequireOriginApproval.GetName(), false))
+	require.NoError(t, param.Set(param.Registry_RequireCacheApproval.GetName(), false))
+	require.NoError(t, param.Set(param.Director_CacheSortMethod.GetName(), "distance"))
+	require.NoError(t, param.Set(param.Director_DbLocation.GetName(), filepath.Join(t.TempDir(), "director.sqlite")))
+	require.NoError(t, param.Set(param.Director_FilterCachesInErrorState.GetName(), false))
+	require.NoError(t, param.Set(param.Origin_EnableCmsd.GetName(), false))
+	require.NoError(t, param.Set(param.Origin_EnableVoms.GetName(), false))
+	require.NoError(t, param.Set(param.Origin_Port.GetName(), ports[0]))
+	require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), filepath.Join(tmpPath, "origin")))
+	require.NoError(t, param.Set(param.Origin_DbLocation.GetName(), filepath.Join(t.TempDir(), "origin.sqlite")))
+	require.NoError(t, param.Set(param.Origin_TokenAudience.GetName(), ""))
+	require.NoError(t, param.Set(param.Cache_Port.GetName(), ports[1]))
+	require.NoError(t, param.Set(param.Cache_RunLocation.GetName(), filepath.Join(tmpPath, "cache")))
+	require.NoError(t, param.Set(param.Cache_EnableEvictionMonitoring.GetName(), false))
+	require.NoError(t, param.Set(param.Cache_StorageLocation.GetName(), filepath.Join(tmpPath, "xcache-data")))
+	require.NoError(t, param.Set(param.Cache_DbLocation.GetName(), filepath.Join(t.TempDir(), "cache.sqlite")))
+	require.NoError(t, param.Set(param.Server_EnableUI.GetName(), false))
+	require.NoError(t, param.Set(param.Server_WebPort.GetName(), ports[2]))
+	require.NoError(t, param.Set(param.Server_DbLocation.GetName(), filepath.Join(t.TempDir(), "server.sqlite")))
 	// Set up OIDC client configuration for registry OAuth functionality
 	oidcClientIDFile := filepath.Join(tmpPath, "oidc-client-id")
 	oidcClientSecretFile := filepath.Join(tmpPath, "oidc-client-secret")
 	require.NoError(t, os.WriteFile(oidcClientIDFile, []byte("test-client-id"), 0644))
 	require.NoError(t, os.WriteFile(oidcClientSecretFile, []byte("test-client-secret"), 0644))
-	viper.Set(param.OIDC_ClientIDFile.GetName(), oidcClientIDFile)
-	viper.Set(param.OIDC_ClientSecretFile.GetName(), oidcClientSecretFile)
+	require.NoError(t, param.Set(param.OIDC_ClientIDFile.GetName(), oidcClientIDFile))
+	require.NoError(t, param.Set(param.OIDC_ClientSecretFile.GetName(), oidcClientSecretFile))
 	// Unix domain sockets have a maximum length of 108 bytes, so we need to make sure our
 	// socket path is short enough to fit within that limit. Mac OS X has long temporary path
 	// names, so we need to make sure our socket path is short enough to fit within that limit.
-	viper.Set(param.LocalCache_RunLocation.GetName(), filepath.Join(tmpPath, "lc"))
+	require.NoError(t, param.Set(param.LocalCache_RunLocation.GetName(), filepath.Join(tmpPath, "lc")))
 
 	// Set the Director's start time to 6 minutes ago. This prevents it from sending an HTTP 429 for
 	// unknown prefixes.
@@ -257,7 +257,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	err = os.WriteFile(outputPath, outputData, 0644)
 	require.NoError(t, err, "error writing out temporary config file for fed test")
 
-	viper.Set("config", outputPath)
+	require.NoError(t, param.Set("config", outputPath))
 
 	servers, _, err := launchers.LaunchModules(ctx, modules)
 	require.NoError(t, err)
@@ -286,7 +286,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	}
 	discoveryServer := httptest.NewTLSServer(http.HandlerFunc(handler))
 	t.Cleanup(discoveryServer.Close)
-	viper.Set(param.Federation_DiscoveryUrl.GetName(), discoveryServer.URL)
+	require.NoError(t, param.Set(param.Federation_DiscoveryUrl.GetName(), discoveryServer.URL))
 
 	desiredURL := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
 	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200, false)

@@ -54,10 +54,17 @@ with data federations, enabling the sharing of objects and collections
 across multiple dataset providers.`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			debugFlag, err := cmd.Flags().GetBool("debug")
-			if err == nil && debugFlag {
-				viper.Set(param.Logging_Level.GetName(), "debug")
+			if err != nil {
+				return err
 			}
-
+			if debugFlag {
+				if err := param.Set(param.Logging_Level.GetName(), "debug"); err != nil {
+					return err
+				}
+			}
+			// Cobra flag parsing happens before PersistentPreRunE.
+			// Refresh the cached config so generated param accessors see any flag values.
+			_, err = param.Refresh()
 			return err
 		},
 	}

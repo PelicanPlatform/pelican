@@ -31,10 +31,10 @@ import (
 
 	"github.com/sirupsen/logrus"
 	logrustest "github.com/sirupsen/logrus/hooks/test"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
@@ -211,7 +211,7 @@ func TestAdvertiseOSDF(t *testing.T) {
 
 		topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
 		defer topoServer.Close()
-		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+		require.NoError(t, param.Set("Federation.TopologyNamespaceUrl", topoServer.URL))
 
 		err := AdvertiseOSDF(context.Background())
 		require.NoError(t, err)
@@ -280,7 +280,7 @@ func TestAdvertiseOSDF(t *testing.T) {
 
 		topoServer := httptest.NewServer(http.HandlerFunc(multiExportsTopoJSONHandler))
 		defer topoServer.Close()
-		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+		require.NoError(t, param.Set("Federation.TopologyNamespaceUrl", topoServer.URL))
 
 		err := AdvertiseOSDF(context.Background())
 		require.NoError(t, err)
@@ -308,7 +308,7 @@ func TestAdvertiseOSDF(t *testing.T) {
 
 		topoServer := httptest.NewServer(http.HandlerFunc(multiExportsTopoJSONHandler))
 		defer topoServer.Close()
-		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+		require.NoError(t, param.Set("Federation.TopologyNamespaceUrl", topoServer.URL))
 
 		err := AdvertiseOSDF(context.Background())
 		require.NoError(t, err)
@@ -330,10 +330,10 @@ func TestAdvertiseOSDF(t *testing.T) {
 			serverAds.DeleteAll()
 		}()
 
-		viper.Set("Topology.DisableCaches", true)
+		require.NoError(t, param.Set("Topology.DisableCaches", true))
 		topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
 		defer topoServer.Close()
-		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+		require.NoError(t, param.Set("Federation.TopologyNamespaceUrl", topoServer.URL))
 
 		err := AdvertiseOSDF(context.Background())
 		require.NoError(t, err)
@@ -356,10 +356,10 @@ func TestAdvertiseOSDF(t *testing.T) {
 			serverAds.DeleteAll()
 		}()
 
-		viper.Set("Topology.DisableOrigins", true)
+		require.NoError(t, param.Set("Topology.DisableOrigins", true))
 		topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
 		defer topoServer.Close()
-		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+		require.NoError(t, param.Set("Federation.TopologyNamespaceUrl", topoServer.URL))
 
 		err := AdvertiseOSDF(context.Background())
 		require.NoError(t, err)
@@ -445,7 +445,7 @@ func TestUpdateDowntimeFromTopology(t *testing.T) {
 	t.Cleanup(func() {
 		server.Close()
 	})
-	viper.Set("Federation.TopologyDowntimeUrl", server.URL)
+	require.NoError(t, param.Set("Federation.TopologyDowntimeUrl", server.URL))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(func() {
@@ -472,7 +472,7 @@ func TestDisableTopologyDowntime(t *testing.T) {
 	t.Run("disable-topology-downtime", func(t *testing.T) {
 		server_utils.ResetTestState()
 		serverAds.DeleteAll()
-		viper.Set("Topology.DisableDowntime", true)
+		require.NoError(t, param.Set("Topology.DisableDowntime", true))
 		defer func() {
 			server_utils.ResetTestState()
 			serverAds.DeleteAll()
@@ -484,13 +484,13 @@ func TestDisableTopologyDowntime(t *testing.T) {
 		assert.Len(t, filteredServers, 0)
 		topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
 		defer topoServer.Close()
-		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+		require.NoError(t, param.Set("Federation.TopologyNamespaceUrl", topoServer.URL))
 
 		downtimeServer := httptest.NewServer(http.HandlerFunc(mockTopoDowntimeXMLHandler))
 		t.Cleanup(func() {
 			downtimeServer.Close()
 		})
-		viper.Set("Federation.TopologyDowntimeUrl", downtimeServer.URL)
+		require.NoError(t, param.Set("Federation.TopologyDowntimeUrl", downtimeServer.URL))
 
 		err := AdvertiseOSDF(context.Background())
 		require.NoError(t, err)
@@ -501,7 +501,7 @@ func TestDisableTopologyDowntime(t *testing.T) {
 	t.Run("enable-topology-downtime", func(t *testing.T) {
 		server_utils.ResetTestState()
 		serverAds.DeleteAll()
-		viper.Set("Topology.DisableDowntime", false)
+		require.NoError(t, param.Set("Topology.DisableDowntime", false))
 		defer func() {
 			server_utils.ResetTestState()
 			serverAds.DeleteAll()
@@ -513,13 +513,13 @@ func TestDisableTopologyDowntime(t *testing.T) {
 		assert.Len(t, filteredServers, 0)
 		topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
 		defer topoServer.Close()
-		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+		require.NoError(t, param.Set("Federation.TopologyNamespaceUrl", topoServer.URL))
 
 		downtimeServer := httptest.NewServer(http.HandlerFunc(mockTopoDowntimeXMLHandler))
 		t.Cleanup(func() {
 			downtimeServer.Close()
 		})
-		viper.Set("Federation.TopologyDowntimeUrl", downtimeServer.URL)
+		require.NoError(t, param.Set("Federation.TopologyDowntimeUrl", downtimeServer.URL))
 
 		err := AdvertiseOSDF(context.Background())
 		require.NoError(t, err)

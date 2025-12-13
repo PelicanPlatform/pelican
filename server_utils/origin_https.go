@@ -25,7 +25,6 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -58,7 +57,9 @@ func (o *HTTPSOrigin) validateExtra(e *OriginExport, numExports int) (err error)
 	// trailing / isn't handled by the origin, so fix that here
 	if strings.HasSuffix(httpServiceUrl, "/") {
 		log.Warningln("Removing trailing '/' from http service URL")
-		viper.Set(param.Origin_HttpServiceUrl.GetName(), strings.TrimSuffix(httpServiceUrl, "/"))
+		if err := param.Set(param.Origin_HttpServiceUrl.GetName(), strings.TrimSuffix(httpServiceUrl, "/")); err != nil {
+			return err
+		}
 	}
 
 	if strings.HasSuffix(e.StoragePrefix, "/") {

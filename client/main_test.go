@@ -35,7 +35,6 @@ import (
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -413,7 +412,7 @@ func TestParseRemoteAsPUrl(t *testing.T) {
 
 	// Unset the global discovery endpoint set by MockFederationRoot so that these
 	// tests can set it as needed
-	viper.Set(param.Federation_DiscoveryUrl.GetName(), "")
+	require.NoError(t, param.Set(param.Federation_DiscoveryUrl.GetName(), ""))
 
 	oldHost, err := pelican_url.SetOsdfDiscoveryHost(discUrl.Host)
 	t.Cleanup(func() {

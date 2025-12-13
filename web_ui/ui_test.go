@@ -37,7 +37,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tg123/go-htpasswd"
@@ -87,7 +86,7 @@ func setupWebUIEnv(t *testing.T) {
 
 	testCfgDir := t.TempDir()
 	server_utils.ResetTestState()
-	viper.Set("ConfigDir", testCfgDir)
+	require.NoError(t, param.Set("ConfigDir", testCfgDir))
 
 	//set a temporary password file:
 	tempFile, err := os.CreateTemp("", "web-ui-passwd")
@@ -99,7 +98,7 @@ func setupWebUIEnv(t *testing.T) {
 	})
 	tempPasswdFile = tempFile
 	//Override viper default for testing
-	viper.Set(param.Server_UIPasswordFile.GetName(), tempPasswdFile.Name())
+	require.NoError(t, param.Set(param.Server_UIPasswordFile.GetName(), tempPasswdFile.Name()))
 
 	//Make a testing issuer.jwk file to get a cookie
 	tempJWKDir, err := os.MkdirTemp("", "tempDir")
@@ -111,15 +110,15 @@ func setupWebUIEnv(t *testing.T) {
 	})
 
 	//Override viper default for testing
-	viper.Set(param.IssuerKeysDirectory.GetName(), filepath.Join(tempJWKDir, "issuer-keys"))
+	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), filepath.Join(tempJWKDir, "issuer-keys")))
 
 	// Ensure we load up the default configs.
 	dirname, err := os.MkdirTemp("", "tmpDir")
 	if err != nil {
 		t.Fatal("Error making temp config dir:", err)
 	}
-	viper.Set("ConfigDir", dirname)
-	viper.Set(param.Server_UILoginRateLimit.GetName(), 100)
+	require.NoError(t, param.Set("ConfigDir", dirname))
+	require.NoError(t, param.Set(param.Server_UILoginRateLimit.GetName(), 100))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	if err := config.InitServer(ctx, server_structs.OriginType); err != nil {
@@ -223,8 +222,8 @@ func TestHandleWebUIAuth(t *testing.T) {
 
 		tmpDir := t.TempDir()
 		issuerDirectory := filepath.Join(tmpDir, "issuer-keys")
-		viper.Set(param.IssuerKeysDirectory.GetName(), issuerDirectory)
-		viper.Set(param.Server_ExternalWebUrl.GetName(), "https://example.com")
+		require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), issuerDirectory))
+		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "https://example.com"))
 
 		_, err := config.GetIssuerPrivateJWK()
 		require.NoError(t, err)
@@ -408,7 +407,7 @@ func TestMapPrometheusPath(t *testing.T) {
 func TestServerHostRestart(t *testing.T) {
 	route := gin.New()
 	route.POST("/api/v1.0/restart", AuthHandler, AdminAuthHandler, hotRestartServer)
-	viper.Set(param.IssuerKey.GetName(), filepath.Join(t.TempDir(), "issuer.jwk"))
+	require.NoError(t, param.Set(param.IssuerKey.GetName(), filepath.Join(t.TempDir(), "issuer.jwk")))
 
 	t.Run("unauthorized-no-token", func(t *testing.T) {
 		r := httptest.NewRecorder()
@@ -451,7 +450,7 @@ func TestServerHostRestart(t *testing.T) {
 		require.NoError(t, err)
 
 		r := httptest.NewRecorder()
-		viper.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2"})
+		require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2"}))
 		c := gin.CreateTestContextOnly(r, route)
 		c.Set("User", "admin1")
 		req := httptest.NewRequest(http.MethodPost, "/api/v1.0/restart", nil)
@@ -579,8 +578,8 @@ func TestApiToken(t *testing.T) {
 	defer cancel()
 
 	dirName := t.TempDir()
-	viper.Set("ConfigDir", dirName)
-	viper.Set(param.Server_UIAdminUsers.GetName(), "admin-user")
+	require.NoError(t, param.Set("ConfigDir", dirName))
+	require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), "admin-user"))
 	test_utils.MockFederationRoot(t, nil, nil)
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
@@ -830,8 +829,8 @@ func TestGroupManagementAPI(t *testing.T) {
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
-	viper.Set("ConfigDir", dirName)
-	viper.Set(param.Server_UIAdminUsers.GetName(), "admin-user")
+	require.NoError(t, param.Set("ConfigDir", dirName))
+	require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), "admin-user"))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err = config.InitServer(ctx, server_structs.OriginType)

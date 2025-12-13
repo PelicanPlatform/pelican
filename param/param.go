@@ -20,38 +20,155 @@ package param
 
 import (
 	"reflect"
+	"strings"
 	"sync"
+	"sync/atomic"
+
+	"github.com/mitchellh/mapstructure"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 )
 
 var (
-	viperConfig *Config
-	configMutex sync.RWMutex
+	viperConfig atomic.Pointer[Config]
+	configMutex sync.Mutex
 )
 
-// Unmarshal Viper config into a struct viperConfig and returns it
-func UnmarshalConfig(v *viper.Viper) (*Config, error) {
-	configMutex.Lock()
-	defer configMutex.Unlock()
-	viperConfig = new(Config)
-	err := v.Unmarshal(viperConfig)
+// Refresh reloads the atomic cached configuration from viper's *global* instance.
+//
+// The param accessors read from an atomic cached `Config` struct for performance.
+// Any code that mutates configuration via global viper APIs (SetDefault, Set,
+// MergeConfig, MergeInConfig, ReadConfig, etc.) should call Refresh afterwards to
+// keep param getters consistent with viper.
+//
+// Note: the cached config is global process state; Refresh intentionally does not
+// accept a viper instance to avoid implying that refreshing from a non-global viper
+// is safe.
+func Refresh() (*Config, error) {
+	return UnmarshalConfig()
+}
+
+// BindAllParameters binds all known configuration keys to environment variables.
+//
+// Viper's AutomaticEnv() allows env vars to override Get* calls. However,
+// Viper's AllSettings() (which we use to build a snapshot Config) does not
+// necessarily include env-only values unless the key is explicitly bound.
+//
+// By binding all known keys, we ensure env overrides are reflected in the
+// snapshot and therefore in generated `param.*` getters.
+func BindAllParameters(v *viper.Viper) {
+	if v == nil {
+		return
+	}
+
+	for _, key := range allParameterNames {
+		_ = v.BindEnv(key)
+	}
+}
+
+// DecodeConfig decodes the provided viper instance into a new Config struct.
+//
+// Unlike UnmarshalConfig/Refresh, this does NOT update the global atomic cache.
+// It is intended for tooling paths that construct a temporary viper instance for
+// comparison/printing.
+func DecodeConfig(v *viper.Viper) (*Config, error) {
+	if v == nil {
+		return nil, errors.New("nil viper instance")
+	}
+	BindAllParameters(v)
+	newConfig := new(Config)
+	settings := v.AllSettings()
+	mergeKnownKeyOverrides(settings, v)
+	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		TagName:          "mapstructure",
+		WeaklyTypedInput: true,
+		DecodeHook: mapstructure.ComposeDecodeHookFunc(
+			mapstructure.StringToTimeDurationHookFunc(),
+			mapstructure.StringToSliceHookFunc(","),
+		),
+		MatchName: func(mapKey, fieldName string) bool {
+			return strings.EqualFold(mapKey, fieldName)
+		},
+		Result: newConfig,
+	})
 	if err != nil {
 		return nil, err
 	}
+	if err := decoder.Decode(settings); err != nil {
+		return nil, err
+	}
+	return newConfig, nil
+}
 
-	return viperConfig, nil
+func mergeKnownKeyOverrides(settings map[string]any, v *viper.Viper) {
+	if v == nil || settings == nil {
+		return
+	}
+
+	for _, key := range allParameterNames {
+		// Viper's AllSettings() may omit values coming exclusively from bindings
+		// (for example, keys bound to Cobra/pflag flags). To keep the decoded
+		// snapshot consistent with viper.Get(), explicitly overlay all known keys.
+		val := v.Get(key)
+		if val == nil {
+			continue
+		}
+		setLowercasePath(settings, strings.Split(key, "."), val)
+	}
+}
+
+func setLowercasePath(root map[string]any, path []string, val any) {
+	if len(path) == 0 {
+		return
+	}
+
+	m := root
+	for i := range len(path) - 1 {
+		k := strings.ToLower(path[i])
+		nextAny, ok := m[k]
+		if ok {
+			if nextMap, ok := nextAny.(map[string]any); ok {
+				m = nextMap
+				continue
+			}
+		}
+		next := make(map[string]any)
+		m[k] = next
+		m = next
+	}
+
+	leaf := strings.ToLower(path[len(path)-1])
+	m[leaf] = val
+}
+
+// UnmarshalConfig refreshes the global atomic cached configuration from viper's
+// *global* instance.
+func UnmarshalConfig() (*Config, error) {
+	return decodeAndStoreConfig(viper.GetViper())
+}
+
+func decodeAndStoreConfig(v *viper.Viper) (*Config, error) {
+	configMutex.Lock()
+	defer configMutex.Unlock()
+	if v == nil {
+		return nil, errors.New("nil viper instance")
+	}
+	newConfig, err := DecodeConfig(v)
+	if err != nil {
+		return nil, err
+	}
+	viperConfig.Store(newConfig)
+	return newConfig, nil
 }
 
 // Return the unmarshaled viper config struct as a pointer
 func GetUnmarshaledConfig() (*Config, error) {
-	configMutex.RLock()
-	defer configMutex.RUnlock()
-	if viperConfig == nil {
+	config := viperConfig.Load()
+	if config == nil {
 		return nil, errors.New("Config hasn't been unmarshaled yet.")
 	}
-	return viperConfig, nil
+	return config, nil
 }
 
 // Helper function to set a parameter field entry in configWithType
@@ -120,4 +237,110 @@ func ConvertToConfigWithType(rawConfig *Config) *configWithType {
 	destVal := reflect.ValueOf(&typedConfig).Elem()
 	convertStruct(srcVal, destVal)
 	return &typedConfig
+}
+
+// getOrCreateConfig returns the current config or creates one from viper if it doesn't exist.
+// This helper is used by the generated accessor functions to ensure we always have a config.
+func getOrCreateConfig() *Config {
+	config := viperConfig.Load()
+	if config != nil {
+		return config
+	}
+
+	// Config doesn't exist yet, create one from viper
+	configMutex.Lock()
+	defer configMutex.Unlock()
+
+	// Double-check after acquiring lock
+	config = viperConfig.Load()
+	if config != nil {
+		return config
+	}
+
+	// Create new config from viper.
+	//
+	// Important: `viper.Unmarshal` does not reliably include values set only via
+	// `SetDefault` in all cases; however `AllSettings()` does include merged
+	// defaults/config/env. Decode from that to avoid returning an empty config.
+	newConfig := new(Config)
+	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		TagName:          "mapstructure",
+		WeaklyTypedInput: true,
+		DecodeHook: mapstructure.ComposeDecodeHookFunc(
+			mapstructure.StringToTimeDurationHookFunc(),
+			mapstructure.StringToSliceHookFunc(","),
+		),
+		MatchName: func(mapKey, fieldName string) bool {
+			return strings.EqualFold(mapKey, fieldName)
+		},
+		Result: newConfig,
+	})
+	if err != nil {
+		return new(Config)
+	}
+	if err := decoder.Decode(viper.GetViper().AllSettings()); err != nil {
+		return new(Config)
+	}
+
+	viperConfig.Store(newConfig)
+	return newConfig
+}
+
+// Set sets a parameter value in both viper and the config struct.
+// This function is thread-safe and will update the atomic config pointer.
+func Set(key string, value interface{}) error {
+	return MultiSet(map[string]interface{}{key: value})
+}
+
+// MultiSet sets multiple parameter values in both viper and the config struct.
+// This function is thread-safe and will update the atomic config pointer.
+// It is more efficient than calling Set multiple times as it only updates
+// the config object once.
+func MultiSet(keyValues map[string]interface{}) error {
+	configMutex.Lock()
+	defer configMutex.Unlock()
+
+	// Set all values in viper
+	for key, value := range keyValues {
+		viper.Set(key, value)
+	}
+
+	// Create new config from updated viper
+	newConfig := new(Config)
+	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		TagName:          "mapstructure",
+		WeaklyTypedInput: true,
+		DecodeHook: mapstructure.ComposeDecodeHookFunc(
+			mapstructure.StringToTimeDurationHookFunc(),
+			mapstructure.StringToSliceHookFunc(","),
+		),
+		MatchName: func(mapKey, fieldName string) bool {
+			return strings.EqualFold(mapKey, fieldName)
+		},
+		Result: newConfig,
+	})
+	if err != nil {
+		return err
+	}
+	if err := decoder.Decode(viper.GetViper().AllSettings()); err != nil {
+		return err
+	}
+
+	// Update atomic pointer
+	viperConfig.Store(newConfig)
+	return nil
+}
+
+// Reset resets the viper configuration and creates a new config struct.
+// This function is thread-safe and will update the atomic config pointer.
+func Reset() error {
+	configMutex.Lock()
+	defer configMutex.Unlock()
+
+	// Reset viper
+	viper.Reset()
+
+	// Clear the config
+	viperConfig.Store(nil)
+	return nil
 }

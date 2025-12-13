@@ -24,7 +24,7 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
-	"github.com/spf13/viper"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -126,13 +126,19 @@ func (o *S3Origin) mapSingleExtra() {
 
 	e := o.Exports[0]
 	if e.S3Bucket != "" {
-		viper.Set(param.Origin_S3Bucket.GetName(), e.S3Bucket)
+		if err := param.Set(param.Origin_S3Bucket.GetName(), e.S3Bucket); err != nil {
+			log.Warningf("Failed to set %s: %v", param.Origin_S3Bucket.GetName(), err)
+		}
 	}
 	if e.S3AccessKeyfile != "" {
-		viper.Set(param.Origin_S3AccessKeyfile.GetName(), e.S3AccessKeyfile)
+		if err := param.Set(param.Origin_S3AccessKeyfile.GetName(), e.S3AccessKeyfile); err != nil {
+			log.Warningf("Failed to set %s: %v", param.Origin_S3AccessKeyfile.GetName(), err)
+		}
 	}
 	if e.S3SecretKeyfile != "" {
-		viper.Set(param.Origin_S3SecretKeyfile.GetName(), e.S3SecretKeyfile)
+		if err := param.Set(param.Origin_S3SecretKeyfile.GetName(), e.S3SecretKeyfile); err != nil {
+			log.Warningf("Failed to set %s: %v", param.Origin_S3SecretKeyfile.GetName(), err)
+		}
 	}
 }
 

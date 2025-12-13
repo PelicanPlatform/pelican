@@ -24,7 +24,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -40,7 +39,7 @@ func TestGetSecret(t *testing.T) {
 	t.Run("generate-32B-hash", func(t *testing.T) {
 		tmp := t.TempDir()
 		keyDir := filepath.Join(tmp, "issuer-keys")
-		viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
+		require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), keyDir))
 
 		currentIssuerKey, err := GetIssuerPrivateJWK()
 		require.NoError(t, err)
@@ -60,7 +59,7 @@ func TestEncryptString(t *testing.T) {
 	t.Run("encrypt-without-err", func(t *testing.T) {
 		tmp := t.TempDir()
 		keyDir := filepath.Join(tmp, "issuer-keys")
-		viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
+		require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), keyDir))
 
 		encrypted, err := EncryptString("Some secret to encrypt")
 		require.NoError(t, err)
@@ -80,7 +79,7 @@ func TestDecryptString(t *testing.T) {
 
 	tmp := t.TempDir()
 	keyDir := filepath.Join(tmp, "issuer-keys")
-	viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
+	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), keyDir))
 
 	t.Cleanup(func() {
 		ResetConfig()

@@ -303,10 +303,17 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 					crashTimestampUnix := crashTimestamp.Unix()
 					log.Debug("Recording xrootd crash at time: ", crashTimestamp.Format(time.RFC3339))
 
-					dbErr := database.CreateOrUpdateCounter(serviceKey, int(crashTimestampUnix))
-					if dbErr != nil {
-						log.Debug("Error recording xrootd crash: ", dbErr)
-						return errors.Wrap(err, "Unable to record xrootd crash")
+					// In some unit-test contexts, the server DB is not initialized; don't crash the
+					// whole process while attempting to record crash telemetry.
+					if database.ServerDatabase == nil {
+						log.Debug("Skipping xrootd crash recording: ServerDatabase is nil")
+					} else {
+						dbErr := database.CreateOrUpdateCounter(serviceKey, int(crashTimestampUnix))
+						if dbErr != nil {
+							// Best-effort only: do not mask the real daemon failure due to an
+							// auxiliary telemetry write failure.
+							log.Debug("Error recording xrootd crash: ", dbErr)
+						}
 					}
 					metrics.PelicanServerXRootDLastCrash.With(prometheus.Labels{"server_type": serviceKey}).Set(float64(crashTimestampUnix))
 					log.Errorln(err)

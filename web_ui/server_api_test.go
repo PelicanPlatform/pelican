@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -74,14 +73,14 @@ func TestDowntime(t *testing.T) {
 	database.SetupMockDowntimeDB(t)
 	defer database.TeardownMockDowntimeDB(t)
 
-	viper.Set(param.Server_WebPort.GetName(), 0)
-	viper.Set(param.Server_ExternalWebUrl.GetName(), "https://mock-server.com")
-	viper.Set(param.Xrootd_Sitename.GetName(), "mock-sitename")
+	require.NoError(t, param.Set(param.Server_WebPort.GetName(), 0))
+	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "https://mock-server.com"))
+	require.NoError(t, param.Set(param.Xrootd_Sitename.GetName(), "mock-sitename"))
 
 	dirName := t.TempDir()
-	viper.Set("ConfigDir", dirName)
-	viper.Set(param.Logging_Level.GetName(), "debug")
-	viper.Set(param.Origin_Port.GetName(), 0)
+	require.NoError(t, param.Set("ConfigDir", dirName))
+	require.NoError(t, param.Set(param.Logging_Level.GetName(), "debug"))
+	require.NoError(t, param.Set(param.Origin_Port.GetName(), 0))
 
 	// This mock registry handles the downtime mirror operations for the test
 	mockRegistry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

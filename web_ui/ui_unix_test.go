@@ -27,7 +27,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tg123/go-htpasswd"
@@ -47,7 +46,7 @@ func TestDoReload(t *testing.T) {
 
 	tempDir := t.TempDir()
 	passwordFile := path.Join(tempDir, "/authdb")
-	viper.Set(param.Server_UIPasswordFile.GetName(), passwordFile)
+	require.NoError(t, param.Set(param.Server_UIPasswordFile.GetName(), passwordFile))
 	hook := test.NewGlobal()
 
 	// Without a authdb set up, it should return nil with log message

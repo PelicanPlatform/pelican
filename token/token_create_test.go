@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -207,11 +206,11 @@ func TestCreateToken(t *testing.T) {
 
 	// Some viper pre-requisites
 	config.ResetConfig()
-	viper.Set("IssuerUrl", "https://my-issuer.com")
+	require.NoError(t, param.Set("IssuerUrl", "https://my-issuer.com"))
 	tDir := t.TempDir()
 	kDir := filepath.Join(tDir, "testKeyDir")
-	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
-	viper.Set("ConfigDir", t.TempDir())
+	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), kDir))
+	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
 	err := config.InitServer(ctx, server_structs.DirectorType)
 	require.NoError(t, err)
 
@@ -251,7 +250,7 @@ func TestCreateToken(t *testing.T) {
 	assert.Equal(t, "bar", val)
 
 	// Test providing issuer via claim
-	viper.Set("IssuerUrl", "")
+	require.NoError(t, param.Set("IssuerUrl", ""))
 	tokenConfig = TokenConfig{tokenProfile: WlcgProfile{}, audience: []string{"foo"}, Subject: "bar", Issuer: "https://localhost:9999", Lifetime: time.Minute * 10}
 	_, err = tokenConfig.CreateToken()
 	assert.NoError(t, err)
