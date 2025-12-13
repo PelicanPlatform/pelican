@@ -240,11 +240,19 @@ However, if you are developing Pelican _Server_ components (Registry, Director, 
     The default location for Pelican config file is at `/etc/pelican/pelican.yaml` for root user.
     For non-root user, it's at `~/.config/pelican/pelican.yaml`
 
-    * Run the following commands from your repository root:
+    * Navigate to your repository root directory and run the following commands:
       ```bash
-      $ rm -f /etc/pelican/pelican.yaml # Removes the default configuration file
-      $ ln -s $(pwd)/pelican.yaml /etc/pelican/pelican.yaml # Soft link to your config file
+      # Navigate to repository root (example paths, adjust as needed)
+      # For Codespaces: cd /workspaces/pelican
+      # For local Dev Container: it depends on where you cloned the repo
+      
+      # Remove default config and create symlink
+      $ rm -f /etc/pelican/pelican.yaml
+      $ ln -s "$PWD/pelican.yaml" /etc/pelican/pelican.yaml
       ```
+      
+      Note: Make sure you're in the repository root before running `ln -s`, as the symlink uses the current directory (`$PWD`).
+      
     * Verify that the file is linked:
       ```bash
       $ cat /etc/pelican/pelican.yaml
