@@ -3,11 +3,26 @@
 {
 	"name": "Pelican",
 	"image": "hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb",
+	"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
 	"forwardPorts": [
 		8444,
 		8443,
 		8080
 	],
+	"portsAttributes": {
+		"8444": {
+			"label": "Pelican Server",
+			"onAutoForward": "notify"
+		},
+		"8443": {
+			"label": "Pelican Web UI",
+			"onAutoForward": "notify"
+		},
+		"8080": {
+			"label": "Additional Service",
+			"onAutoForward": "silent"
+		}
+	},
 	"customizations": {
 		"vscode": {
 			"settings": {
@@ -17,7 +32,8 @@
 			},
 			"extensions": [
 				"golang.go",
-				"ms-vscode.makefile-tools"
+				"ms-vscode.makefile-tools",
+				"redhat.vscode-yaml"
 			]
 		}
 	},
