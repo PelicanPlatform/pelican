@@ -315,11 +315,70 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 			}
 		}
 		// At this point, the in-progress directory is created and owned by the user specified in the config
-		// We need to symlink the user-specified in-progress directory to the actual in-progress directory
+		// We need to symlink from the export path (where POSC will look) to the user-specified in-progress directory
+		inProgressSymlinkPath := filepath.Join(exportPath, "in-progress")
 
-		err = os.Symlink(inProgressDir, filepath.Join(exportPath, "in-progress"))
-		if err != nil {
-			return errors.Wrapf(err, "Failed to create in-progress symlink from %v to %v", inProgressDir, filepath.Join(exportPath, "in-progress"))
+		// Check if symlink already exists and remove it if it points to the wrong location
+		if linkInfo, err := os.Lstat(inProgressSymlinkPath); err == nil {
+			if linkInfo.Mode()&os.ModeSymlink != 0 {
+				// It's a symlink - check if it points to the correct location
+				existingTarget, err := os.Readlink(inProgressSymlinkPath)
+				if err != nil {
+					return errors.Wrapf(err, "Failed to read existing in-progress symlink at %v", inProgressSymlinkPath)
+				}
+				// Resolve the symlink target to an absolute path
+				// If the target is relative, resolve it relative to the symlink's directory
+				var absExistingTarget string
+				if filepath.IsAbs(existingTarget) {
+					absExistingTarget = existingTarget
+				} else {
+					absExistingTarget = filepath.Join(filepath.Dir(inProgressSymlinkPath), existingTarget)
+					absExistingTarget = filepath.Clean(absExistingTarget)
+				}
+				// Resolve to absolute path (handles any remaining ".." components)
+				absExistingTarget, err = filepath.Abs(absExistingTarget)
+				if err != nil {
+					return errors.Wrapf(err, "Failed to resolve absolute path of existing symlink target %v", existingTarget)
+				}
+				absInProgressDir, err := filepath.Abs(inProgressDir)
+				if err != nil {
+					return errors.Wrapf(err, "Failed to resolve absolute path of in-progress directory %v", inProgressDir)
+				}
+				if absExistingTarget != absInProgressDir {
+					log.Infof("Removing existing in-progress symlink at %v (points to %v, should point to %v)",
+						inProgressSymlinkPath, existingTarget, inProgressDir)
+					if err = os.Remove(inProgressSymlinkPath); err != nil {
+						return errors.Wrapf(err, "Failed to remove existing in-progress symlink at %v", inProgressSymlinkPath)
+					}
+				} else {
+					// Symlink already points to the correct location, no need to recreate it
+					log.Debugf("In-progress symlink at %v already points to the correct location %v", inProgressSymlinkPath, inProgressDir)
+					// Continue with the rest of the function - don't return early
+				}
+			} else {
+				// Path exists but is not a symlink - this is an error
+				return errors.Errorf("In-progress path %v exists but is not a symlink", inProgressSymlinkPath)
+			}
+		} else if !os.IsNotExist(err) {
+			return errors.Wrapf(err, "Failed to stat in-progress symlink at %v", inProgressSymlinkPath)
+		}
+
+		// Create symlink: the symlink at exportPath/in-progress points to inProgressDir
+		// This allows POSC (configured with posc.prefix /in-progress) to find the actual directory
+		// POSC will resolve /in-progress relative to oss.localroot (which is exportPath)
+		// Only create the symlink if it doesn't already exist or was removed above
+		if _, err := os.Lstat(inProgressSymlinkPath); os.IsNotExist(err) {
+			// Ensure we use an absolute path for the symlink target to avoid issues
+			// if the working directory changes
+			absInProgressDir, err := filepath.Abs(inProgressDir)
+			if err != nil {
+				return errors.Wrapf(err, "Failed to resolve absolute path of in-progress directory %v", inProgressDir)
+			}
+			err = os.Symlink(absInProgressDir, inProgressSymlinkPath)
+			if err != nil {
+				return errors.Wrapf(err, "Failed to create in-progress symlink from %v to %v", absInProgressDir, inProgressSymlinkPath)
+			}
+			log.Debugf("Created in-progress symlink at %v pointing to %v", inProgressSymlinkPath, absInProgressDir)
 		}
 	}
 
