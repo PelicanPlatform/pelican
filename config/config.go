@@ -30,7 +30,6 @@ import (
 	"reflect"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -945,6 +944,25 @@ func InitConfigInternal(logLevel log.Level) {
 			cobra.CheckErr(err)
 		}
 	}
+
+	// Handle config file specified via <PREFIX>_CONFIG_FILE environment variable
+	// This supports PELICAN_CONFIG_FILE, OSDF_CONFIG_FILE, STASH_CONFIG_FILE
+	upperPrefix := GetPreferredPrefix()
+	if envConfigFile := os.Getenv(upperPrefix.String() + "_CONFIG_FILE"); envConfigFile != "" {
+		fp, err := os.Open(envConfigFile)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				cobra.CheckErr(errors.Wrapf(err, "failed to open config file specified via %s_CONFIG_FILE", upperPrefix.String()))
+			}
+			// If file doesn't exist, continue without it
+		} else {
+			defer fp.Close()
+			if err := viper.MergeConfig(fp); err != nil {
+				cobra.CheckErr(errors.Wrapf(err, "failed to read config file specified via %s_CONFIG_FILE", upperPrefix.String()))
+			}
+		}
+	}
+
 	// Handle any extra yaml configurations specified in the ConfigLocations key
 	err := handleContinuedCfg()
 	if err != nil {
@@ -1922,115 +1940,6 @@ func SetClientDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), v.GetInt(param.MinimumDownloadSpeed.GetName()))
 	}
 
-	// This is the only block where we can assume the passed and global viper instances are the same.
-	if v == viper.GetViper() {
-		viper.AutomaticEnv()
-		upperPrefix := GetPreferredPrefix()
-		viper.SetEnvPrefix(string(upperPrefix))
-
-		viper.SetConfigName("config")
-		viper.SetConfigType("yaml")
-		err := viper.ReadInConfig()
-		if err != nil {
-			if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-				return err
-			}
-			// Do not fail if the config file is missing
-		}
-		env_config_file := os.Getenv(upperPrefix.String() + "_CONFIG_FILE")
-		if len(env_config_file) != 0 {
-			fp, err := os.Open(env_config_file)
-			if err != nil && !os.IsNotExist(err) {
-				return err
-			}
-			err = viper.ReadConfig(fp)
-			if err != nil {
-				return err
-			}
-		}
-		// Handle all the grandfathered configuration parameters
-		prefixes := GetAllPrefixes()
-		prefixes_with_osg := append(prefixes, "OSG")
-		for _, prefix := range prefixes_with_osg {
-			if _, isSet := os.LookupEnv(prefix.String() + "_DISABLE_HTTP_PROXY"); isSet {
-				viper.Set(param.Client_DisableHttpProxy.GetName(), true)
-				break
-			}
-		}
-		for _, prefix := range prefixes_with_osg {
-			if _, isSet := os.LookupEnv(prefix.String() + "_DISABLE_PROXY_FALLBACK"); isSet {
-				viper.Set(param.Client_DisableProxyFallback.GetName(), true)
-				break
-			}
-		}
-		for _, prefix := range prefixes {
-			if val, isSet := os.LookupEnv(prefix.String() + "_DIRECTOR_URL"); isSet {
-				viper.Set("Federation.DirectorURL", val)
-				break
-			}
-		}
-		for _, prefix := range prefixes {
-			if val, isSet := os.LookupEnv(prefix.String() + "_NAMESPACE_URL"); isSet {
-				viper.Set("Federation.RegistryUrl", val)
-				break
-			}
-		}
-		for _, prefix := range prefixes {
-			if val, isSet := os.LookupEnv(prefix.String() + "_TOPOLOGY_NAMESPACE_URL"); isSet {
-				viper.Set("Federation.TopologyNamespaceURL", val)
-				break
-			}
-		}
-		// Check the environment variable STASHCP_MINIMUM_DOWNLOAD_SPEED (and all the prefix variants)
-		var prefixes_with_cp []ConfigPrefix
-		for _, prefix := range prefixes {
-			prefixes_with_cp = append(prefixes_with_cp, prefix+"CP")
-		}
-		for _, prefix := range append(prefixes, prefixes_with_cp...) {
-			downloadLimitStr := os.Getenv(prefix.String() + "_MINIMUM_DOWNLOAD_SPEED")
-			if len(downloadLimitStr) == 0 {
-				continue
-			}
-			downloadLimit, err := strconv.ParseInt(downloadLimitStr, 10, 64)
-			if err != nil {
-				log.Errorf("Environment variable %s_MINIMUM_DOWNLOAD_SPEED=%s is not parsable as integer: %s",
-					prefixes, downloadLimitStr, err.Error())
-				continue
-			}
-			if downloadLimit < 0 {
-				log.Errorf("Environment variable %s_MINIMUM_DOWNLOAD_SPEED=%s is negative value; ignoring and will use"+
-					"built-in default of %s", prefixes, downloadLimitStr, viper.Get(param.Client_MinimumDownloadSpeed.GetName()))
-				continue
-			}
-
-			// Backward compatibility environment variables do not overwrite the new-style ones
-			viper.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), downloadLimit)
-
-			break
-		}
-		// Handle more legacy config options
-		if param.DisableProxyFallback.IsSet() {
-			viper.SetDefault(param.Client_DisableProxyFallback.GetName(), param.DisableProxyFallback.GetBool())
-		}
-		if param.DisableHttpProxy.IsSet() {
-			viper.SetDefault(param.Client_DisableHttpProxy.GetName(), param.DisableHttpProxy.GetBool())
-		}
-
-		// Handle legacy config for (PELICAN_)NEAREST_CACHE
-		if configuredCaches, isSet := os.LookupEnv("NEAREST_CACHE"); isSet {
-			log.Warningf("You are using a legacy/deprecated parameter 'NEAREST_CACHE' to indicate preferred caches. Please use %s instead", param.Client_PreferredCaches.GetName())
-			viper.Set(param.Client_PreferredCaches.GetName(), strings.Split(configuredCaches, ","))
-		} else {
-			for _, prefix := range prefixes {
-				if val, isSet := os.LookupEnv(prefix.String() + "_NEAREST_CACHE"); isSet {
-					log.Warningf("You are using a legacy/deprecated parameter '%s_NEAREST_CACHE' to indicate preferred caches. Please use %s instead", prefix.String(), param.Client_PreferredCaches.GetName())
-					viper.Set(param.Client_PreferredCaches.GetName(), strings.Split(val, ","))
-					break
-				}
-			}
-		}
-	}
-
 	// Some client actions may take different defaults depending on whether we detect the plugin
 	v.SetDefault(param.Client_IsPlugin.GetName(), false)
 	v.SetDefault(param.Client_DirectorRetries.GetName(), 5)
@@ -2050,6 +1959,11 @@ func SetClientDefaults(v *viper.Viper) error {
 func InitClient() error {
 	InitConfigInternal(log.WarnLevel)
 	logging.FlushLogs(true)
+
+	// Bind legacy client environment variables (e.g., STASHCP_*, OSG_*, NEAREST_CACHE)
+	// This must happen after InitConfigInternal but before SetClientDefaults
+	bindLegacyClientEnv()
+
 	if err := SetClientDefaults(viper.GetViper()); err != nil {
 		return err
 	}
