@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
 *
 * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
@@ -19,11 +21,14 @@
 package server_utils
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/pkg/errors"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
@@ -110,6 +115,109 @@ func (o *PosixOrigin) validateExtra(e *OriginExport, _ int) error {
 	}
 	if err := o.validateTempUploadLocation(e); err != nil {
 		return err
+	}
+	if err := ValidatePosixPermissions(e.StoragePrefix, e.Capabilities, e.FederationPrefix); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// ValidatePosixPermissions checks if the daemon user has the required filesystem permissions
+// on the given path to support the specified capabilities.
+func ValidatePosixPermissions(storagePath string, caps server_structs.Capabilities, federationPrefix string) error {
+	// Get XRootD daemon user info
+	uid, err := config.GetDaemonUID()
+	if err != nil {
+		return errors.Wrap(err, "failed to get XRootD daemon UID for permission validation")
+	}
+	gid, err := config.GetDaemonGID()
+	if err != nil {
+		return errors.Wrap(err, "failed to get XRootD daemon GID for permission validation")
+	}
+	username, err := config.GetDaemonUser()
+	if err != nil {
+		username = "username-unknown"
+	}
+
+	// Check if the storage prefix exists
+	info, err := os.Stat(storagePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return errors.Wrapf(ErrInvalidOriginConfig,
+				"storage prefix %q for export %q does not exist",
+				storagePath, federationPrefix)
+		}
+		return errors.Wrapf(err, "failed to stat storage prefix %q for export %q",
+			storagePath, federationPrefix)
+	}
+
+	// The storage prefix should be a directory
+	if !info.IsDir() {
+		return errors.Wrapf(ErrInvalidOriginConfig,
+			"storage prefix %q for export %q is not a directory",
+			storagePath, federationPrefix)
+	}
+
+	// Get the directory's owner and group
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return errors.Errorf("failed to get system stat info for %q", storagePath)
+	}
+	dirUID := int(stat.Uid)
+	dirGID := int(stat.Gid)
+	mode := info.Mode()
+
+	// Determine which permission bits apply to XRootD daemon user
+	var canRead, canWrite, canExecute bool
+	if uid == dirUID {
+		// User is owner - check owner bits
+		canRead = mode&0400 != 0
+		canWrite = mode&0200 != 0
+		canExecute = mode&0100 != 0
+	} else if gid == dirGID {
+		// User is in group - check group bits
+		canRead = mode&0040 != 0
+		canWrite = mode&0020 != 0
+		canExecute = mode&0010 != 0
+	} else {
+		// User is neither owner nor in group - check others bits
+		canRead = mode&0004 != 0
+		canWrite = mode&0002 != 0
+		canExecute = mode&0001 != 0
+	}
+
+	// Helper to format permission error message
+	formatPermError := func(capability, requiredPerms string) error {
+		return errors.Wrapf(ErrInvalidOriginConfig,
+			"storage prefix %q for export %q requires %q permissions for the %q user (uid=%d, gid=%d) "+
+				"to support the %q capability, but the current permissions are %q (owner uid=%d, gid=%d). "+
+				"Please adjust the ownership or permissions of the directory",
+			storagePath, federationPrefix, requiredPerms, username, uid, gid,
+			capability, mode.Perm().String(), dirUID, dirGID)
+	}
+
+	// Check permissions based on capabilities
+
+	// Check reads (PublicReads or Reads) - needs read and execute
+	if caps.Reads || caps.PublicReads {
+		if !canRead || !canExecute {
+			return formatPermError("Reads/PublicReads", "read and execute (r-x)")
+		}
+	}
+
+	// Check writes - needs write and execute
+	if caps.Writes {
+		if !canWrite || !canExecute {
+			return formatPermError("Writes", "write and execute (-wx)")
+		}
+	}
+
+	// Check listings - needs read and execute
+	if caps.Listings {
+		if !canRead || !canExecute {
+			return formatPermError("Listings", "read and execute (r-x)")
+		}
 	}
 
 	return nil
