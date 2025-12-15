@@ -24,11 +24,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jellydator/ttlcache/v3"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
@@ -36,15 +34,36 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
+const (
+	// Test timing constants for better readability and maintainability
+	testHealthCheckInterval = 100 * time.Millisecond
+	testShortTTL            = 200 * time.Millisecond
+	testStartupWait         = 50 * time.Millisecond
+	testTickerWait          = 150 * time.Millisecond
+	testTimeoutBuffer       = 200 * time.Millisecond
+)
+
+// setupTestDowntimes is a helper to configure downtime maps for testing
+func setupTestDowntimes(serverName string, downtimes []server_structs.Downtime) {
+	filteredServersMutex.Lock()
+	defer filteredServersMutex.Unlock()
+	serverDowntimes = make(map[string][]server_structs.Downtime)
+	topologyDowntimes = make(map[string][]server_structs.Downtime)
+	federationDowntimes = make(map[string][]server_structs.Downtime)
+	if downtimes != nil {
+		serverDowntimes[serverName] = downtimes
+	}
+}
+
 // TestLaunchPeriodicDirectorTest verifies that LaunchPeriodicDirectorTest:
 // 1. Only runs against servers that are in the TTL cache and not expired
 // 2. Does not run against servers in scheduled downtime
 func TestLaunchPeriodicDirectorTest(t *testing.T) {
 	config.ResetConfig()
-	defer config.ResetConfig()
+	t.Cleanup(config.ResetConfig)
 
 	// Set test interval to be very short for faster testing
-	viper.Set(param.Director_OriginCacheHealthTestInterval.GetName(), "100ms")
+	viper.Set(param.Director_OriginCacheHealthTestInterval.GetName(), testHealthCheckInterval.String())
 
 	mockServerAd := server_structs.ServerAd{
 		AuthURL: url.URL{},
@@ -67,6 +86,7 @@ func TestLaunchPeriodicDirectorTest(t *testing.T) {
 		Path: "/test/path",
 	}
 
+	// Test cases covering different cache and downtime scenarios
 	testCases := []struct {
 		name              string
 		serverInCache     bool
@@ -95,10 +115,10 @@ func TestLaunchPeriodicDirectorTest(t *testing.T) {
 			description:       "Test should start and run if server is in cache with no downtime",
 		},
 		{
-			name:          "server-expires-from-cache",
-			serverInCache: true,
-			cacheTTL:      time.Millisecond * 200, // Very short TTL so it expires during test
-			downtimes:     nil,
+			name:              "server-expires-from-cache",
+			serverInCache:     true,
+			cacheTTL:          testShortTTL, // Very short TTL so it expires during test
+			downtimes:         nil,
 			expectTestToStart: true,
 			expectTestToStop:  true,
 			description:       "Test should stop when server expires from TTL cache",
@@ -169,14 +189,7 @@ func TestLaunchPeriodicDirectorTest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Clean up test environment
 			serverAds.DeleteAll()
-			filteredServersMutex.Lock()
-			serverDowntimes = make(map[string][]server_structs.Downtime)
-			topologyDowntimes = make(map[string][]server_structs.Downtime)
-			federationDowntimes = make(map[string][]server_structs.Downtime)
-			if tc.downtimes != nil {
-				serverDowntimes[mockServerAd.Name] = tc.downtimes
-			}
-			filteredServersMutex.Unlock()
+			setupTestDowntimes(mockServerAd.Name, tc.downtimes)
 
 			// Set up server in cache if test requires it
 			if tc.serverInCache {
@@ -191,54 +204,51 @@ func TestLaunchPeriodicDirectorTest(t *testing.T) {
 			defer cancel()
 
 			// Launch the test in a goroutine
-			testStarted := make(chan bool, 1)
 			testStopped := make(chan bool, 1)
 
 			go func() {
-				// Check if test starts by seeing if it gets past the initial check
-				if serverAds.Has(mockServerAd.URL.String()) {
-					testStarted <- true
-				} else {
-					testStarted <- false
-				}
-
 				// Run the actual test (will be interrupted by context cancellation)
 				LaunchPeriodicDirectorTest(ctx, mockServerAd.URL.String())
 				testStopped <- true
 			}()
 
-			// Wait a bit to see if test started
-			time.Sleep(time.Millisecond * 50)
+			// Wait a bit to see if test started or immediately returned
+			time.Sleep(testStartupWait)
 
+			// Check if the test started or immediately returned
 			select {
-			case started := <-testStarted:
+			case <-testStopped:
+				// Test returned immediately (e.g., server not in cache)
 				if tc.expectTestToStart {
-					assert.True(t, started, tc.description)
-				} else {
-					assert.False(t, started, tc.description)
+					t.Errorf("Test case %s: expected test to start but it returned immediately. Description: %s", tc.name, tc.description)
 				}
-			case <-time.After(time.Millisecond * 100):
-				if tc.expectTestToStart {
-					t.Errorf("Test case %s: expected test to start but timed out", tc.name)
+			default:
+				// Test is still running
+				if !tc.expectTestToStart {
+					t.Errorf("Test case %s: expected test not to start but it's still running. Description: %s", tc.name, tc.description)
 				}
 			}
 
-			// For cache expiration test, wait for the ad to expire
+			// For cache expiration test, manually remove the entry to simulate expiration
 			if tc.expectTestToStop {
-				// Wait for TTL to expire plus a bit more
-				time.Sleep(tc.cacheTTL + time.Millisecond*150)
+				// Wait for TTL to expire
+				time.Sleep(tc.cacheTTL)
+
+				// Manually delete the entry to simulate cache expiration
+				serverAds.Delete(mockServerAd.URL.String())
+
+				// Wait for one more ticker cycle plus buffer to ensure LaunchPeriodicDirectorTest exits
+				time.Sleep(testTickerWait)
 
 				// Check if test stopped due to cache expiration
 				select {
 				case <-testStopped:
 					// Test stopped as expected when cache expired
-				case <-time.After(time.Millisecond * 200):
-					t.Errorf("Test case %s: expected test to stop when cache expired but it didn't", tc.name)
+				case <-time.After(testTimeoutBuffer):
+					t.Errorf("Test case %s: expected test to stop when cache expired but it didn't. Description: %s", tc.name, tc.description)
+					cancel() // Force cancel to avoid hanging
 				}
 			}
-
-			// Wait for context cancellation to clean up
-			<-ctx.Done()
 		})
 	}
 }
@@ -248,10 +258,10 @@ func TestDirectorTestDowntimeLogic(t *testing.T) {
 	now := time.Now().UTC().UnixMilli()
 
 	testCases := []struct {
-		name              string
-		downtime          server_structs.Downtime
-		expectSkip        bool
-		description       string
+		name        string
+		downtime    server_structs.Downtime
+		expectSkip  bool
+		description string
 	}{
 		{
 			name: "active-downtime",
@@ -327,7 +337,7 @@ func TestDirectorTestDowntimeLogic(t *testing.T) {
 // TestDirectorTestCacheEviction verifies that tests stop when server ads are evicted
 func TestDirectorTestCacheEviction(t *testing.T) {
 	config.ResetConfig()
-	defer config.ResetConfig()
+	t.Cleanup(config.ResetConfig)
 	viper.Set(param.Director_OriginCacheHealthTestInterval.GetName(), "50ms")
 
 	mockServerAd := server_structs.ServerAd{
@@ -351,11 +361,11 @@ func TestDirectorTestCacheEviction(t *testing.T) {
 	shutdownCtx, shutdownCancel, egrp := test_utils.TestContext(context.Background(), t)
 	cacheCtx := context.WithValue(shutdownCtx, config.EgrpKey, egrp)
 	LaunchTTLCache(cacheCtx, egrp)
-	defer func() {
+	t.Cleanup(func() {
 		shutdownCancel()
 		err := egrp.Wait()
 		assert.NoError(t, err)
-	}()
+	})
 
 	// Clean up
 	serverAds.DeleteAll()
@@ -378,17 +388,21 @@ func TestDirectorTestCacheEviction(t *testing.T) {
 		testFinished <- true
 	}()
 
-	// Wait for cache to expire
-	time.Sleep(time.Millisecond * 200)
+	// Wait for cache to expire (150ms TTL + buffer)
+	time.Sleep(testShortTTL)
 
 	// Verify server is no longer in cache
 	assert.False(t, serverAds.Has(mockServerAd.URL.String()), "Server should have been evicted from cache")
+
+	// Wait for the next ticker cycle (50ms interval + buffer) to ensure LaunchPeriodicDirectorTest checks cache and exits
+	time.Sleep(100 * time.Millisecond)
 
 	// Verify test finished (because cache entry was evicted)
 	select {
 	case <-testFinished:
 		// Test finished as expected when server was evicted from cache
-	case <-time.After(time.Millisecond * 300):
+	case <-time.After(testTimeoutBuffer):
 		t.Error("Test should have stopped when server was evicted from cache")
+		testCancel() // Force cancel to avoid hanging
 	}
 }
