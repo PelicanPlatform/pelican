@@ -93,7 +93,7 @@ func bindLegacyClientEnv() {
 	// Handle TOPOLOGY_NAMESPACE_URL
 	for _, prefix := range prefixes {
 		if val, isSet := os.LookupEnv(prefix.String() + "_TOPOLOGY_NAMESPACE_URL"); isSet {
-			viper.Set("Federation.TopologyNamespaceURL", val)
+			viper.Set(param.Federation_TopologyNamespaceUrl.GetName(), val)
 			break
 		}
 	}
@@ -124,14 +124,6 @@ func bindLegacyClientEnv() {
 		viper.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), downloadLimit)
 
 		break
-	}
-
-	// Handle legacy config options from config file
-	if param.DisableProxyFallback.IsSet() {
-		viper.SetDefault(param.Client_DisableProxyFallback.GetName(), param.DisableProxyFallback.GetBool())
-	}
-	if param.DisableHttpProxy.IsSet() {
-		viper.SetDefault(param.Client_DisableHttpProxy.GetName(), param.DisableHttpProxy.GetBool())
 	}
 
 	// Handle legacy config for (PELICAN_)NEAREST_CACHE
