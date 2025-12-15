@@ -133,6 +133,13 @@ func reportStatusToServer(ctx context.Context, serverWebUrl string, status strin
 	return nil
 }
 
+// isDowntimeActive checks if a downtime is currently active based on the current time.
+// A downtime is considered active if the current time is between StartTime and EndTime (inclusive),
+// or if EndTime is IndefiniteEndTime and current time is after StartTime.
+func isDowntimeActive(downtime server_structs.Downtime, currentTime int64) bool {
+	return downtime.StartTime <= currentTime && (downtime.EndTime >= currentTime || downtime.EndTime == server_structs.IndefiniteEndTime)
+}
+
 // Run a periodic test file transfer against an origin to ensure
 // it's talking to the director. The test fetches the current server ad
 // from the TTL cache on each cycle and stops when the ad is no longer present.
@@ -204,7 +211,7 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverUrlStr string) {
 				currentTime := time.Now().UTC().UnixMilli()
 				hasActiveDowntime := false
 				for _, downtime := range downtimes {
-					if downtime.StartTime <= currentTime && (downtime.EndTime >= currentTime || downtime.EndTime == server_structs.IndefiniteEndTime) {
+					if isDowntimeActive(downtime, currentTime) {
 						hasActiveDowntime = true
 						log.Debugf("Skipping director test cycle for %s server %s: server is in active downtime", serverAd.Type, serverAd.Name)
 						break

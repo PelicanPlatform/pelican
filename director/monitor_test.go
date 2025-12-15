@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -30,18 +30,21 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // TestLaunchPeriodicDirectorTest verifies that LaunchPeriodicDirectorTest:
 // 1. Only runs against servers that are in the TTL cache and not expired
 // 2. Does not run against servers in scheduled downtime
 func TestLaunchPeriodicDirectorTest(t *testing.T) {
-	viper.Reset()
-	defer viper.Reset()
+	config.ResetConfig()
+	defer config.ResetConfig()
 
 	// Set test interval to be very short for faster testing
-	viper.Set("Director.OriginCacheHealthTestInterval", "100ms")
+	viper.Set(param.Director_OriginCacheHealthTestInterval.GetName(), "100ms")
 
 	mockServerAd := server_structs.ServerAd{
 		AuthURL: url.URL{},
@@ -184,7 +187,7 @@ func TestLaunchPeriodicDirectorTest(t *testing.T) {
 			}
 
 			// Create context that will be canceled after test
-			ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*500)
+			ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
 			defer cancel()
 
 			// Launch the test in a goroutine
@@ -309,12 +312,8 @@ func TestDirectorTestDowntimeLogic(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			currentTime := now
-			hasActiveDowntime := false
-
-			// This is the exact logic from LaunchPeriodicDirectorTest
-			if tc.downtime.StartTime <= currentTime && (tc.downtime.EndTime >= currentTime || tc.downtime.EndTime == server_structs.IndefiniteEndTime) {
-				hasActiveDowntime = true
-			}
+			// Use the helper function from monitor.go
+			hasActiveDowntime := isDowntimeActive(tc.downtime, currentTime)
 
 			if tc.expectSkip {
 				assert.True(t, hasActiveDowntime, tc.description)
@@ -327,9 +326,9 @@ func TestDirectorTestDowntimeLogic(t *testing.T) {
 
 // TestDirectorTestCacheEviction verifies that tests stop when server ads are evicted
 func TestDirectorTestCacheEviction(t *testing.T) {
-	viper.Reset()
-	defer viper.Reset()
-	viper.Set("Director.OriginCacheHealthTestInterval", "50ms")
+	config.ResetConfig()
+	defer config.ResetConfig()
+	viper.Set(param.Director_OriginCacheHealthTestInterval.GetName(), "50ms")
 
 	mockServerAd := server_structs.ServerAd{
 		URL: url.URL{
@@ -349,8 +348,8 @@ func TestDirectorTestCacheEviction(t *testing.T) {
 	}
 
 	// Start cache eviction handler
-	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
-	egrp, cacheCtx := errgroup.WithContext(shutdownCtx)
+	shutdownCtx, shutdownCancel, egrp := test_utils.TestContext(context.Background(), t)
+	cacheCtx := context.WithValue(shutdownCtx, config.EgrpKey, egrp)
 	LaunchTTLCache(cacheCtx, egrp)
 	defer func() {
 		shutdownCancel()
@@ -370,7 +369,7 @@ func TestDirectorTestCacheEviction(t *testing.T) {
 	require.True(t, serverAds.Has(mockServerAd.URL.String()), "Server should be in cache")
 
 	// Launch test
-	testCtx, testCancel := context.WithTimeout(context.Background(), time.Second)
+	testCtx, testCancel, _ := test_utils.TestContext(context.Background(), t)
 	defer testCancel()
 
 	testFinished := make(chan bool, 1)
