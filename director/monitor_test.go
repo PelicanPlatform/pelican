@@ -47,16 +47,16 @@ const (
 func setupTestDowntimes(serverName string, downtimes []server_structs.Downtime) {
 	filteredServersMutex.Lock()
 	defer filteredServersMutex.Unlock()
-	
+
 	// Clear all downtime maps
 	serverDowntimes = make(map[string][]server_structs.Downtime)
 	topologyDowntimes = make(map[string][]server_structs.Downtime)
 	federationDowntimes = make(map[string][]server_structs.Downtime)
 	filteredServers = make(map[string]filterType)
-	
+
 	if downtimes != nil {
 		serverDowntimes[serverName] = downtimes
-		
+
 		// Check if any downtime is currently active and update filteredServers accordingly
 		currentTime := time.Now().UTC().UnixMilli()
 		for _, downtime := range downtimes {
