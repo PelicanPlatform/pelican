@@ -88,6 +88,10 @@ func TestObjectGetDirectFlag(t *testing.T) {
 		err := getCmd.Execute()
 		require.NoError(t, err)
 
+		// Reset command for next test
+		getCmd.SetArgs(nil)
+		getCmd.SetContext(nil)
+
 		// Verify the file was downloaded
 		downloadedContent, err := os.ReadFile(localPath)
 		require.NoError(t, err)
@@ -132,6 +136,10 @@ func TestObjectGetDirectFlag(t *testing.T) {
 		// Execute the command
 		err := getCmd.Execute()
 		require.NoError(t, err)
+
+		// Reset command for next test
+		getCmd.SetArgs(nil)
+		getCmd.SetContext(nil)
 
 		// Verify the file was downloaded
 		downloadedContent, err := os.ReadFile(localPath)
