@@ -192,7 +192,7 @@ func putMain(cmd *cobra.Command, args []string) {
 			os.Exit(1)
 		}
 		var err error
-		dest, err = addPackQuery(dest, packOption)
+		dest, err = addQueryParam(dest, "pack", packOption)
 		if err != nil {
 			log.Errorln("Failed to process --pack option:", err)
 			os.Exit(1)

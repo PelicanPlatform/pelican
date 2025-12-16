@@ -127,7 +127,7 @@ func getMain(cmd *cobra.Command, args []string) {
 				log.Errorln("Cannot use --direct flag with URLs that have '?prefercached' query parameter")
 				os.Exit(1)
 			}
-			
+
 			newSrc, err := addQueryParam(src, "directread", "")
 			if err != nil {
 				log.Errorln("Failed to process --direct option:", err)
