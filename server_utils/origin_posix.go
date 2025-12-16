@@ -116,16 +116,16 @@ func (o *PosixOrigin) validateExtra(e *OriginExport, _ int) error {
 	if err := o.validateTempUploadLocation(e); err != nil {
 		return err
 	}
-	if err := ValidatePosixPermissions(e.StoragePrefix, e.Capabilities, e.FederationPrefix); err != nil {
+	if err := validatePosixPermissions(e.StoragePrefix, e.Capabilities, e.FederationPrefix); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-// ValidatePosixPermissions checks if the daemon user has the required filesystem permissions
+// validatePosixPermissions checks if the daemon user has the required filesystem permissions
 // on the given path to support the specified capabilities.
-func ValidatePosixPermissions(storagePath string, caps server_structs.Capabilities, federationPrefix string) error {
+func validatePosixPermissions(storagePath string, caps server_structs.Capabilities, federationPrefix string) error {
 	// Get XRootD daemon user info
 	uid, err := config.GetDaemonUID()
 	if err != nil {
