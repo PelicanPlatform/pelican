@@ -21,6 +21,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -72,25 +73,26 @@ func TestObjectGetDirectFlag(t *testing.T) {
 	// Create a temporary directory for downloads
 	downloadDir := t.TempDir()
 
+	t.Cleanup(func() {
+		rootCmd.SetArgs(nil)
+		rootCmd.SetContext(context.TODO())
+	})
+
 	t.Run("WithDirectFlag", func(t *testing.T) {
 		// Test with --direct flag - should read from origin
 		downloadUrl := fmt.Sprintf("pelican://%s%s/%s", host, fed.Exports[0].FederationPrefix, testFileName)
 		localPath := filepath.Join(downloadDir, "with-direct-flag.txt")
 		transferStatsPath := filepath.Join(downloadDir, "transfer-stats-direct.json")
 
-		// Use the actual getCmd and set context
-		getCmd.SetContext(fed.Ctx)
+		// Use rootCmd with full command path to properly invoke the subcommand
+		rootCmd.SetContext(fed.Ctx)
 
 		// Set arguments to simulate: pelican object get --direct --transfer-stats <path> <url> <dest>
-		getCmd.SetArgs([]string{"--direct", "--transfer-stats", transferStatsPath, downloadUrl, localPath})
+		rootCmd.SetArgs([]string{"object", "get", "--direct", "--transfer-stats", transferStatsPath, downloadUrl, localPath})
 
 		// Execute the command
-		err := getCmd.Execute()
+		err := rootCmd.Execute()
 		require.NoError(t, err)
-
-		// Reset command for next test
-		getCmd.SetArgs(nil)
-		getCmd.SetContext(nil)
 
 		// Verify the file was downloaded
 		downloadedContent, err := os.ReadFile(localPath)
@@ -127,19 +129,15 @@ func TestObjectGetDirectFlag(t *testing.T) {
 		localPath := filepath.Join(downloadDir, "without-direct-flag.txt")
 		transferStatsPath := filepath.Join(downloadDir, "transfer-stats-normal.json")
 
-		// Use the actual getCmd and set context
-		getCmd.SetContext(fed.Ctx)
+		// Use rootCmd with full command path to properly invoke the subcommand
+		rootCmd.SetContext(fed.Ctx)
 
 		// Set arguments WITHOUT --direct flag
-		getCmd.SetArgs([]string{"--transfer-stats", transferStatsPath, downloadUrl, localPath})
+		rootCmd.SetArgs([]string{"object", "get", "--transfer-stats", transferStatsPath, downloadUrl, localPath})
 
 		// Execute the command
-		err := getCmd.Execute()
+		err := rootCmd.Execute()
 		require.NoError(t, err)
-
-		// Reset command for next test
-		getCmd.SetArgs(nil)
-		getCmd.SetContext(nil)
 
 		// Verify the file was downloaded
 		downloadedContent, err := os.ReadFile(localPath)
