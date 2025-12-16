@@ -381,3 +381,31 @@ GlobalJobId = "12345"
 		assert.Empty(t, param.Client_PreferredCaches.GetStringSlice())
 	})
 }
+
+func TestBindLegacyServerEnv(t *testing.T) {
+	ResetConfig()
+	t.Cleanup(func() {
+		ResetConfig()
+	})
+
+	t.Setenv("PELICAN_MAXMINDKEY", "/path/to/keyfile")
+
+	// Two things to test here:
+	// 1. That the legacy env var PELICAN_MAXMINDKEY correctly binds to Director.MaxMindKeyFile
+	// 2. Director.MaxMindKeyFile takes precedence over the legacy env var when both are set
+
+	// Test 1
+	t.Run("binds-legacy-env-var", func(t *testing.T) {
+		assert.Empty(t, viper.GetString(param.Director_MaxMindKeyFile.GetName()))
+		bindLegacyServerEnv()
+		assert.Equal(t, "/path/to/keyfile", viper.GetString(param.Director_MaxMindKeyFile.GetName()))
+	})
+
+	// Test 2
+	t.Run("does-not-overwrite-existing-config", func(t *testing.T) {
+		viper.Set(param.Director_MaxMindKeyFile.GetName(), "/existing/config/keyfile")
+		bindLegacyServerEnv()
+		assert.Equal(t, "/path/to/keyfile", os.Getenv("PELICAN_MAXMINDKEY")) // env var is still set
+		assert.Equal(t, "/existing/config/keyfile", viper.GetString(param.Director_MaxMindKeyFile.GetName()))
+	})
+}
