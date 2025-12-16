@@ -52,15 +52,13 @@ import (
 
 func setupXrootd(t *testing.T, ctx context.Context, server server_structs.ServerType, egrp *errgroup.Group) {
 	tmpDir := t.TempDir()
-	storageDir := filepath.Join(tmpDir, "storage")
-	require.NoError(t, os.MkdirAll(storageDir, 0755))
 	server_utils.ResetTestState()
 
 	require.NoError(t, param.ConfigDir.Set(tmpDir))
 	require.NoError(t, param.Xrootd_RunLocation.Set(tmpDir))
 	require.NoError(t, param.Cache_RunLocation.Set(tmpDir))
 	require.NoError(t, param.Origin_RunLocation.Set(tmpDir))
-	require.NoError(t, param.Origin_StoragePrefix.Set(storageDir))
+	require.NoError(t, param.Origin_StoragePrefix.Set(test_utils.GetTmpStoragePrefixDir(t)))
 	require.NoError(t, param.Origin_FederationPrefix.Set("/"))
 	require.NoError(t, param.Server_IssuerUrl.Set("https://my-xrootd.com:8444"))
 
