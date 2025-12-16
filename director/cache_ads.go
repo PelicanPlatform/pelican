@@ -535,6 +535,16 @@ func applyServerDowntimes(serverName string, downtimes []server_structs.Downtime
 	}
 }
 
+// isServerInDowntime checks if a server is in the filteredServers map with an active filter.
+// A server is considered in downtime if it exists in filteredServers with any filter type except tempAllowed.
+func isServerInDowntime(serverName string) bool {
+	filteredServersMutex.RLock()
+	defer filteredServersMutex.RUnlock()
+
+	existingFilterType, isServerFiltered := filteredServers[serverName]
+	return isServerFiltered && existingFilterType != tempAllowed
+}
+
 // applyActiveDowntimeFilter checks federationDowntimes for any active downtime for the given server
 // and applies the tempFiltered filter immediately if found. This ensures that when a server wakes up
 // mid-downtime, it is blocked right away without waiting for the next registry poll.

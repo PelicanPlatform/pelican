@@ -202,25 +202,10 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverUrlStr string) {
 			}
 			serverAd := adItem.Value().ServerAd
 
-			// Check if the server is in an active downtime
-			downtimes, err := getCachedDowntimes(serverAd.Name)
-			if err != nil {
-				log.Warningf("Failed to get cached downtimes for server %s: %v. Proceeding with director test.", serverAd.Name, err)
-			} else {
-				// Check if any downtime is currently active
-				currentTime := time.Now().UTC().UnixMilli()
-				hasActiveDowntime := false
-				for _, downtime := range downtimes {
-					if isDowntimeActive(downtime, currentTime) {
-						hasActiveDowntime = true
-						log.Debugf("Skipping director test cycle for %s server %s: server is in active downtime", serverAd.Type, serverAd.Name)
-						break
-					}
-				}
-
-				if hasActiveDowntime {
-					continue
-				}
+			// Check if the server is in downtime by checking the filteredServers map
+			if isServerInDowntime(serverAd.Name) {
+				log.Debugf("Skipping director test cycle for %s server %s: server is in downtime", serverAd.Type, serverAd.Name)
+				continue
 			}
 
 			log.Debug(fmt.Sprintf("Starting a director test cycle for %s server %s at %s", serverAd.Type, serverAd.Name, serverAd.URL.String()))

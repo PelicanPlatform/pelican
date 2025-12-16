@@ -43,15 +43,28 @@ const (
 	testTimeoutBuffer       = 200 * time.Millisecond
 )
 
-// setupTestDowntimes is a helper to configure downtime maps for testing
+// setupTestDowntimes is a helper to configure downtime maps and filteredServers for testing
 func setupTestDowntimes(serverName string, downtimes []server_structs.Downtime) {
 	filteredServersMutex.Lock()
 	defer filteredServersMutex.Unlock()
+	
+	// Clear all downtime maps
 	serverDowntimes = make(map[string][]server_structs.Downtime)
 	topologyDowntimes = make(map[string][]server_structs.Downtime)
 	federationDowntimes = make(map[string][]server_structs.Downtime)
+	filteredServers = make(map[string]filterType)
+	
 	if downtimes != nil {
 		serverDowntimes[serverName] = downtimes
+		
+		// Check if any downtime is currently active and update filteredServers accordingly
+		currentTime := time.Now().UTC().UnixMilli()
+		for _, downtime := range downtimes {
+			if isDowntimeActive(downtime, currentTime) {
+				filteredServers[serverName] = tempFiltered
+				break
+			}
+		}
 	}
 }
 
