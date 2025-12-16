@@ -88,6 +88,7 @@ echo "Will install into: $xrootd_libdir"
 sudo mkdir -p "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdHTTPServer-5.so" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdS3-5.so" "$xrootd_libdir"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssPosc-5.so" "$xrootd_libdir"
 popd
 
 popd

@@ -95,22 +95,23 @@ enable = true
 
 type (
 	OriginConfig struct {
-		Multiuser         bool
-		DirectorTest      bool
-		EnableCmsd        bool
-		EnableMacaroons   bool
-		EnableVoms        bool
-		EnablePublicReads bool
-		EnableListings    bool
-		SelfTest          bool
-		Concurrency       int
-		Port              int
-		FederationPrefix  string
-		HttpServiceUrl    string
-		HttpAuthTokenFile string
-		XRootServiceUrl   string
-		RunLocation       string
-		StorageType       string
+		Multiuser          bool
+		DirectorTest       bool
+		EnableCmsd         bool
+		EnableMacaroons    bool
+		EnableVoms         bool
+		EnablePublicReads  bool
+		EnableListings     bool
+		SelfTest           bool
+		Concurrency        int
+		Port               int
+		FederationPrefix   string
+		HttpServiceUrl     string
+		HttpAuthTokenFile  string
+		XRootServiceUrl    string
+		RunLocation        string
+		StorageType        string
+		InProgressLocation string
 
 		// S3 specific options that are kept top-level because
 		// they aren't specific to each export
@@ -228,7 +229,7 @@ type xrootdMaintenanceState struct {
 // CheckOriginXrootdEnv is almost a misnomer -- it does both checking and configuring. In partcicular,
 // it is responsible for setting up the exports and handling all the symlinking we use
 // to export our directories.
-func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer, uid int, gid int, groupname string) error {
+func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer, uid int, gid int, username, groupname string) error {
 	// First we check if our config yaml contains the Exports block. If it does, we use that instead of the older legacy
 	// options for all this configuration
 	originExports, err := server_utils.GetOriginExports()
@@ -258,6 +259,127 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 		}
 		// Set the mount to our export path now that everything is symlinked
 		viper.Set("Xrootd.Mount", exportPath)
+
+		// Create the user specified in-progress directory with appropriate permissions
+		inProgressDir := param.Origin_InProgressLocation.GetString()
+
+		// Check if the directory exists
+		if stat, err := os.Stat(inProgressDir); os.IsNotExist(err) {
+			// Directory doesn't exist - create it with mode 1777 (world-writable + sticky bit)
+			log.Infof("Creating in-progress directory %v with mode 1777 (world-writable + sticky bit)", inProgressDir)
+			if err = config.MkdirAll(inProgressDir, 0777|os.ModeSticky, uid, gid); err != nil {
+				return errors.Wrapf(err, "Unable to create in-progress directory %v", inProgressDir)
+			}
+			if err = os.Chown(inProgressDir, uid, -1); err != nil {
+				return errors.Wrapf(err, "Unable to change ownership of in-progress directory %v"+
+					" to desired daemon user %v", inProgressDir, username)
+			}
+		} else if err != nil {
+			// Error checking directory
+			return errors.Wrapf(err, "Unable to stat in-progress directory %v", inProgressDir)
+		} else if !stat.IsDir() {
+			// Path exists but is not a directory
+			return errors.Errorf("In-progress location %v exists but is not a directory", inProgressDir)
+		} else {
+			// Directory exists - check its permissions
+			mode := stat.Mode()
+			perm := mode.Perm()
+
+			// Check if world-writable (others have write permission)
+			isWorldWritable := (perm & 0002) != 0
+
+			if isWorldWritable {
+				// Check sticky bit
+				hasStickyBit := (mode & os.ModeSticky) != 0
+
+				if hasStickyBit {
+					log.Infof("In-progress directory %v exists with mode %04o - using shared sticky-bit model",
+						inProgressDir, perm)
+				} else {
+					log.Warningf("In-progress directory %v has mode %04o (world-writable without sticky bit). "+
+						"This is UNSAFE! Any user can delete others' files. "+
+						"Consider setting permissions to 1777 (chmod 1777 %v)",
+						inProgressDir, perm, inProgressDir)
+				}
+			} else {
+				// Not world-writable - per-user model
+				log.Infof("In-progress directory %v has mode %04o (per-user model). "+
+					"Users must have pre-created subdirectories (%v/$USER) with proper ownership and permissions.",
+					inProgressDir, perm, inProgressDir)
+			}
+
+			// Ensure ownership is correct
+			if err = os.Chown(inProgressDir, uid, -1); err != nil {
+				return errors.Wrapf(err, "Unable to change ownership of in-progress directory %v"+
+					" to desired daemon user %v", inProgressDir, username)
+			}
+		}
+		// At this point, the in-progress directory is created and owned by the user specified in the config
+		// We need to symlink from the export path (where POSC will look) to the user-specified in-progress directory
+		inProgressSymlinkPath := filepath.Join(exportPath, "in-progress")
+
+		// Check if symlink already exists and remove it if it points to the wrong location
+		if linkInfo, err := os.Lstat(inProgressSymlinkPath); err == nil {
+			if linkInfo.Mode()&os.ModeSymlink != 0 {
+				// It's a symlink - check if it points to the correct location
+				existingTarget, err := os.Readlink(inProgressSymlinkPath)
+				if err != nil {
+					return errors.Wrapf(err, "Failed to read existing in-progress symlink at %v", inProgressSymlinkPath)
+				}
+				// Resolve the symlink target to an absolute path
+				// If the target is relative, resolve it relative to the symlink's directory
+				var absExistingTarget string
+				if filepath.IsAbs(existingTarget) {
+					absExistingTarget = existingTarget
+				} else {
+					absExistingTarget = filepath.Join(filepath.Dir(inProgressSymlinkPath), existingTarget)
+					absExistingTarget = filepath.Clean(absExistingTarget)
+				}
+				// Resolve to absolute path (handles any remaining ".." components)
+				absExistingTarget, err = filepath.Abs(absExistingTarget)
+				if err != nil {
+					return errors.Wrapf(err, "Failed to resolve absolute path of existing symlink target %v", existingTarget)
+				}
+				absInProgressDir, err := filepath.Abs(inProgressDir)
+				if err != nil {
+					return errors.Wrapf(err, "Failed to resolve absolute path of in-progress directory %v", inProgressDir)
+				}
+				if absExistingTarget != absInProgressDir {
+					log.Infof("Removing existing in-progress symlink at %v (points to %v, should point to %v)",
+						inProgressSymlinkPath, existingTarget, inProgressDir)
+					if err = os.Remove(inProgressSymlinkPath); err != nil {
+						return errors.Wrapf(err, "Failed to remove existing in-progress symlink at %v", inProgressSymlinkPath)
+					}
+				} else {
+					// Symlink already points to the correct location, no need to recreate it
+					log.Debugf("In-progress symlink at %v already points to the correct location %v", inProgressSymlinkPath, inProgressDir)
+					// Continue with the rest of the function - don't return early
+				}
+			} else {
+				// Path exists but is not a symlink - this is an error
+				return errors.Errorf("In-progress path %v exists but is not a symlink", inProgressSymlinkPath)
+			}
+		} else if !os.IsNotExist(err) {
+			return errors.Wrapf(err, "Failed to stat in-progress symlink at %v", inProgressSymlinkPath)
+		}
+
+		// Create symlink: the symlink at exportPath/in-progress points to inProgressDir
+		// This allows POSC (configured with posc.prefix /in-progress) to find the actual directory
+		// POSC will resolve /in-progress relative to oss.localroot (which is exportPath)
+		// Only create the symlink if it doesn't already exist or was removed above
+		if _, err := os.Lstat(inProgressSymlinkPath); os.IsNotExist(err) {
+			// Ensure we use an absolute path for the symlink target to avoid issues
+			// if the working directory changes
+			absInProgressDir, err := filepath.Abs(inProgressDir)
+			if err != nil {
+				return errors.Wrapf(err, "Failed to resolve absolute path of in-progress directory %v", inProgressDir)
+			}
+			err = os.Symlink(absInProgressDir, inProgressSymlinkPath)
+			if err != nil {
+				return errors.Wrapf(err, "Failed to create in-progress symlink from %v to %v", absInProgressDir, inProgressSymlinkPath)
+			}
+			log.Debugf("Created in-progress symlink at %v pointing to %v", inProgressSymlinkPath, absInProgressDir)
+		}
 	}
 
 	if param.Origin_SelfTest.GetBool() {
@@ -511,7 +633,7 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 	}
 
 	if server.GetServerType().IsEnabled(server_structs.OriginType) {
-		err = CheckOriginXrootdEnv(exportPath, server, uid, gid, groupname)
+		err = CheckOriginXrootdEnv(exportPath, server, uid, gid, username, groupname)
 	} else {
 		err = CheckCacheXrootdEnv(server, uid, gid)
 	}
