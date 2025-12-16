@@ -220,41 +220,42 @@ Be careful using tokens that let you modify object contents after the object has
 
 While discussing what tokens are and how they work, it's been unavoidable to briefly discuss the concept of *issuers*, but up until now we haven't rigorously explained what issuers are and why it's difficult to precisely describe them.
 
-At its simplest, an **Issuer** is the authority that creates, signs, and manages tokens.
+At its simplest, an **Issuer** is the authority that creates/mints, signs, and provides means to validate tokens.
 It possesses a cryptographic private key that *only* it has, which lets other services verify that tokens are coming from the right source.
 In our concert ticket analogy, the Issuer is a combination of the **ticket booth** and the **clipboard**; it is the only entity trusted to print valid tickets, and it provides a means for others to double check a ticket's validity.
 
 Part of what makes discussing the term "Issuer" difficult is that it is heavily overloaded.
 In fact, an Issuer may refer to two related-yet-distinct things, as evidenced by the fact that our analogy needed both a ticket booth and a clipboard to describe it:
-1. A service that *creates* tokens when provided with identifiers from a trusted identity provider (ticket booth)
+1. A service that *creates/mints* tokens when provided with identifiers from a trusted identity provider (ticket booth)
 2. A service that others can use to look up the public keys linked to the token creator's private keys (clipboard)
 
-These two functions can live in the same place, but it's often beneficial to split them up
+These two functions can live in the same place, but it's often beneficial to split them up.
 
-To distinguish between these two concepts, we'll refer to 1 as the "Get Issuer" (you "get" tokens from it) and 2 as the "Verify Issuer" (you use it to "verify" that a token is legitimate)
+To distinguish between these two concepts, we'll refer to 1 as the "Mint Issuer" (it mints the tokens you need) and 2 as the "Verify Issuer" (you use it to "verify" that a token is legitimate).
 
-### The "Get" Role (Issuance)
-The "Get Issuer" is used by clients to fetch any tokens that are needed to perform an action on a resource (e.g. get/put /foo/bar)
+### The "Mint" Role (Issuance)
+The "Mint Issuer" is used by clients to fetch any tokens that are needed to perform an action on a resource (e.g. get/put /foo/bar).
 
 This is the private, secure side of the issuer.
 Before a user can get a token, they must prove who they are to an identity provider.
-Once that provider validates the user's identity, it passes *identifiers* to the "Get Issuer" like which groups the user belongs to.
-Finally, the "Get Issuer", which is configured to know which tokens can be created for which groups, provides a cryptographically-signed token for the request.
+Once that provider validates the user's identity, it passes *identifiers* to the "Mint Issuer" like which groups the user belongs to.
+Finally, the "Mint Issuer", which is configured to know which tokens can be created for which groups, provides a cryptographically-signed token for the request.
 
 <Callout type="warning">
 This is an important distinction: Issuers are *not* the same as Identity Providers.
 Rather, Identity Providers authenticate a user and then pass the user's identifiers along to the issuer.
 The issuer is configured to know which tokens it can create based on those identifiers.
+The actual token that is _does_ create is the intersection of what the issuer is willing to create and what the user is asking for.
 </Callout>
 
-In Pelican, the "Get Issuer" is often a service called [OA4MP (OAuth for Many People)](https://oa4mp.org/) built into the Origin.
+In Pelican, the "Mint Issuer" is often a service called [OA4MP (OAuth for Many People)](https://oa4mp.org/) built into the Origin.
 Other services can be configured to issue tokens as well, like HTCondor's [CredMon](https://github.com/htcondor/scitokens-credmon).
 
-However the "Get Issuer" is set up, the Origin must be configured to trust it by providing the source of truth for the public keys that can be used to verify tokens it creates, which leads us to...
+However the "Mint Issuer" is set up, the Origin must be configured to trust it by providing the source of truth for the public keys that can be used to verify tokens it creates, which leads us to...
 
 ### The "Verify" Role (Discovery)
 The "Verify Issuer" is used by Origins and Caches or any service that needs to check the validity tokens.
-It is the public-facing side of an Issuer and must make any public keys associated with the "Get Issuer's" private keys publicly accessible.
+It is the public-facing side of an Issuer and must make any public keys associated with the "Mint Issuer's" private keys publicly accessible.
 
 #### OIDC Key Discovery for "Verify Issuers"
 
@@ -263,7 +264,7 @@ Because the entire issuer scheme follows the [OpenID Connect (OIDC)](https://ope
 1. Given the "Verify Issuer's" URL, append the path `/.well-known/openid-configuration` and download the JSON hosted here.
 For example, if the URL is `https://osg-htc.org`, you'd fetch `https://osg-htc.org/.well-known/openid-configuration` and parse it as JSON.
 2. This JSON will provide a key named `"jwks_uri"` whose value is another URL. The public keys live as a JSON Web Keyset (JWKS) behind this URL.
-3. By fetching and keys pointed to by the `"jwks_uri"`, you can check whether any given token was in fact signed by the corresponding "Get Issuer".
+3. By fetching and keys pointed to by the `"jwks_uri"`, you can check whether any given token was in fact signed by the corresponding "Mint Issuer".
 
 Crucially, the "Verify" side does not know or care *who* the user is or who is asking for the keys.
 It simply publishes the mathematical keys required to check the signature of the token ("hologram" on the ticket).
@@ -281,11 +282,11 @@ Because this process involves stringing together multiple services, it's worth t
 	If the Identity Provider cannot be trusted to say "This is Bob", nobody can safely grant "Bob" access.
 
 2. **The "Issuer" Trusts the Identity Provider:**
-	When users authenticate with the Identity Provider, the "Get Issuer" trusts the identifiers it is handed.
+	When users authenticate with the Identity Provider, the "Mint Issuer" trusts the identifiers it is handed.
 	This trust is typically established when the Issuer is registered as a client with the Identity Provider.
 	The Issuer trusts that the Identity Provider has rigorously verified the user's credentials (password, MFA) before asserting their identity and attributes.
 
-3. **Origins Trust their Issuers (both "Get" and "Verify") and Federation Central Services (Director/Registry):**
+3. **Origins Trust their Issuers (both "Mint" and "Verify") and Federation Central Services (Director/Registry):**
 	The Origin is explicitly configured with which Issuers it trusts for which namespaces.
 	This is done by providing the "Verify Issuer" URL that hosts a set of public keys in the Origin's exports.
 	The Origin trusts that if a token bears the signature of a trusted Issuer, the permissions inside that token are valid.
