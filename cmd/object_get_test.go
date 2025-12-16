@@ -73,45 +73,20 @@ func TestObjectGetDirectFlag(t *testing.T) {
 	// Create a temporary directory for downloads
 	downloadDir := t.TempDir()
 
-	// Helper function to create a test command instance
-	createTestGetCmd := func() *cobra.Command {
-		cmd := &cobra.Command{
-			Use:   "get {source ...} {destination}",
-			Short: "Get a file from a Pelican federation",
-			Run:   getMain,
-			PreRun: func(cmd *cobra.Command, args []string) {
-				commaFlagsListToViperSlice(cmd, map[string]string{"cache": param.Client_PreferredCaches.GetName()})
-			},
-		}
-
-		// Add the same flags as the real getCmd
-		flagSet := cmd.Flags()
-		flagSet.StringP("cache", "c", "", "")
-		flagSet.StringP("token", "t", "", "")
-		flagSet.BoolP("recursive", "r", false, "")
-		flagSet.String("caches", "", "")
-		flagSet.String("transfer-stats", "", "")
-		flagSet.String("pack", "", "")
-		flagSet.Bool("direct", false, "")
-
-		cmd.SetContext(fed.Ctx)
-		return cmd
-	}
-
 	t.Run("WithDirectFlag", func(t *testing.T) {
 		// Test with --direct flag - should read from origin
 		downloadUrl := fmt.Sprintf("pelican://%s%s/%s", host, fed.Exports[0].FederationPrefix, testFileName)
 		localPath := filepath.Join(downloadDir, "with-direct-flag.txt")
 		transferStatsPath := filepath.Join(downloadDir, "transfer-stats-direct.json")
 
-		// Create a fresh command instance
-		cmd := createTestGetCmd()
+		// Use the actual getCmd and set context
+		getCmd.SetContext(fed.Ctx)
 
 		// Set arguments to simulate: pelican object get --direct --transfer-stats <path> <url> <dest>
-		cmd.SetArgs([]string{"--direct", "--transfer-stats", transferStatsPath, downloadUrl, localPath})
+		getCmd.SetArgs([]string{"--direct", "--transfer-stats", transferStatsPath, downloadUrl, localPath})
 
 		// Execute the command
-		err := cmd.Execute()
+		err := getCmd.Execute()
 		require.NoError(t, err)
 
 		// Verify the file was downloaded
@@ -149,14 +124,14 @@ func TestObjectGetDirectFlag(t *testing.T) {
 		localPath := filepath.Join(downloadDir, "without-direct-flag.txt")
 		transferStatsPath := filepath.Join(downloadDir, "transfer-stats-normal.json")
 
-		// Create a fresh command instance
-		cmd := createTestGetCmd()
+		// Use the actual getCmd and set context
+		getCmd.SetContext(fed.Ctx)
 
 		// Set arguments WITHOUT --direct flag
-		cmd.SetArgs([]string{"--transfer-stats", transferStatsPath, downloadUrl, localPath})
+		getCmd.SetArgs([]string{"--transfer-stats", transferStatsPath, downloadUrl, localPath})
 
 		// Execute the command
-		err := cmd.Execute()
+		err := getCmd.Execute()
 		require.NoError(t, err)
 
 		// Verify the file was downloaded
@@ -179,39 +154,49 @@ func TestObjectGetDirectFlag(t *testing.T) {
 	})
 }
 
-// TestAddDirectReadQuery tests the URL transformation function
-func TestAddDirectReadQuery(t *testing.T) {
+// TestAddQueryParam tests the URL transformation function
+func TestAddQueryParam(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       string
+		key         string
+		value       string
 		expected    string
 		expectError bool
 	}{
 		{
-			name:     "Simple URL without query",
+			name:     "Add directread to simple URL",
 			input:    "osdf:///pelicanplatform/test/hello-world.txt",
+			key:      "directread",
+			value:    "",
 			expected: "osdf:///pelicanplatform/test/hello-world.txt?directread=",
 		},
 		{
-			name:     "URL with existing query parameter",
+			name:     "Add directread to URL with existing query",
 			input:    "pelican://example.com/path?pack=auto",
+			key:      "directread",
+			value:    "",
 			expected: "pelican://example.com/path?directread=&pack=auto",
 		},
 		{
-			name:     "HTTPS URL",
+			name:     "Add pack to simple URL",
 			input:    "https://example.com/path/to/file",
-			expected: "https://example.com/path/to/file?directread=",
+			key:      "pack",
+			value:    "auto",
+			expected: "https://example.com/path/to/file?pack=auto",
 		},
 		{
 			name:        "Invalid URL",
 			input:       "://invalid",
+			key:         "directread",
+			value:       "",
 			expectError: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := addDirectReadQuery(tt.input)
+			result, err := addQueryParam(tt.input, tt.key, tt.value)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -227,10 +212,10 @@ func TestAddDirectReadQuery(t *testing.T) {
 			expectedURL, err := url.Parse(tt.expected)
 			require.NoError(t, err)
 
-			// Verify directread parameter exists and is empty
-			_, exists := resultURL.Query()["directread"]
-			assert.True(t, exists, "directread parameter should exist in result URL")
-			assert.Equal(t, "", resultURL.Query().Get("directread"), "directread parameter should be empty")
+			// Verify the specified parameter exists
+			_, exists := resultURL.Query()[tt.key]
+			assert.True(t, exists, fmt.Sprintf("%s parameter should exist in result URL", tt.key))
+			assert.Equal(t, tt.value, resultURL.Query().Get(tt.key), fmt.Sprintf("%s parameter should have expected value", tt.key))
 
 			// Verify all query parameters match
 			assert.Equal(t, expectedURL.Query(), resultURL.Query(), "Query parameters should match")
