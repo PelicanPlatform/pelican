@@ -158,6 +158,11 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 }
 
 func RegisterDirectorOIDCAPI(router *gin.RouterGroup) {
-	router.GET(federationDiscoveryPath, federationDiscoveryHandler)
 	server_utils.RegisterOIDCAPI(router, true)
+}
+
+func RegisterFedMetadata(router *gin.RouterGroup) {
+	if param.Director_EnableFederationMetadataHosting.GetBool() == true {
+		router.GET(federationDiscoveryPath, federationDiscoveryHandler)
+	}
 }

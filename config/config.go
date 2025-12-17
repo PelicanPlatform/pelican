@@ -1425,6 +1425,7 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Origin_Multiuser.GetName(), false)
 	}
 
+	v.SetDefault(param.Director_EnableFederationMetadataHosting.GetName(), true)
 	v.SetDefault(param.Director_CheckOriginPresence.GetName(), true)
 	v.SetDefault(param.Director_CheckCachePresence.GetName(), true)
 

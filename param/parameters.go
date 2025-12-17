@@ -1753,6 +1753,7 @@ var (
 	Director_CheckCachePresence = BoolParam{"Director.CheckCachePresence"}
 	Director_CheckOriginPresence = BoolParam{"Director.CheckOriginPresence"}
 	Director_EnableBroker = BoolParam{"Director.EnableBroker"}
+	Director_EnableFederationMetadataHosting = BoolParam{"Director.EnableFederationMetadataHosting"}
 	Director_EnableOIDC = BoolParam{"Director.EnableOIDC"}
 	Director_EnableStat = BoolParam{"Director.EnableStat"}
 	Director_FilterCachesInErrorState = BoolParam{"Director.FilterCachesInErrorState"}
