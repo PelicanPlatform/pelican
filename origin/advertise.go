@@ -212,31 +212,31 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 		if isGlobusBackend {
 			activateUrl := param.Server_ExternalWebUrl.GetString() + "/view/origin/globus"
 			return nil, fmt.Errorf("failed to create advertisement: no activated Globus collection. Go to %s to activate your collection.", activateUrl)
-		} else {
-			return nil, errors.New("failed to create advertisement: no valid export")
 		}
-	} else if len(prefixes) == 1 {
-		if param.Origin_EnableBroker.GetBool() {
-			var brokerUrl *url.URL
-			fedInfo, err := config.GetFederation(context.Background())
-			if err != nil {
-				return nil, err
-			}
-			brokerUrl, err = url.Parse(fedInfo.BrokerEndpoint)
-			if err != nil {
-				err = errors.Wrap(err, "Invalid Broker URL")
-				return nil, err
-			}
-			brokerUrl.Path = "/api/v1.0/broker/reverse"
-			values := brokerUrl.Query()
-			values.Set("origin", param.Server_Hostname.GetString())
-			values.Set("prefix", prefixes[0])
-			brokerUrl.RawQuery = values.Encode()
-			ad.BrokerURL = brokerUrl.String()
-		}
-	} else {
-		log.Warningf("Multiple prefixes are not yet supported with the broker. Skipping broker configuration")
+
+		return nil, errors.New("failed to create advertisement: no valid export")
 	}
+
+	if param.Origin_EnableBroker.GetBool() && len(prefixes) == 1 {
+		var brokerUrl *url.URL
+		fedInfo, err := config.GetFederation(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		brokerUrl, err = url.Parse(fedInfo.BrokerEndpoint)
+		if err != nil {
+			return nil, errors.Wrap(err, "federation metadata discovery provided an invalid broker endpoint")
+		}
+		brokerUrl.Path = "/api/v1.0/broker/reverse"
+		values := brokerUrl.Query()
+		values.Set("origin", param.Server_Hostname.GetString())
+		values.Set("prefix", prefixes[0])
+		brokerUrl.RawQuery = values.Encode()
+		ad.BrokerURL = brokerUrl.String()
+	} else if param.Origin_EnableBroker.GetBool() && len(prefixes) > 1 {
+		log.Warningf("Multiple federation prefixes are not yet supported with the broker. Skipping broker configuration")
+	}
+
 	return &ad, nil
 }
 
