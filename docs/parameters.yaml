@@ -2592,7 +2592,7 @@ description: |+
   Groups are typically provided by OAuth/OIDC providers in the "wlcg.groups" claim of the authentication token.
 
   Note: This works in conjunction with Server.UIAdminUsers. A user can be granted admin access either by being
-  listed in Server.UIAdminUsers or by belonging to a group listed in Server.UIAdminGroups.
+  listed in Server.UIAdminUsers or by belonging to a group listed in Server.AdminGroups.
 type: stringSlice
 default: []
 components: ["cache", "director", "origin", "registry"]
