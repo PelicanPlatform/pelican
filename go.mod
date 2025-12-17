@@ -9,7 +9,7 @@ toolchain go1.24.7
 
 require (
 	github.com/JGLTechnologies/gin-rate-limit v1.5.4
-	github.com/PelicanPlatform/classad v0.0.3
+	github.com/PelicanPlatform/classad v0.0.5
 	github.com/alecthomas/units v0.0.0-20211218093645-b94a6e3cc137
 	github.com/charmbracelet/glamour v0.8.0
 	github.com/cyphar/filepath-securejoin v0.4.1
