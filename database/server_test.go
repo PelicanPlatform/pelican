@@ -206,8 +206,7 @@ func TestUpsertServerLocalMetadata(t *testing.T) {
 
 		assert.Equal(t, name1, got.Name)
 		assert.Equal(t, id1, got.ID)
-		assert.True(t, got.IsOrigin)
-		assert.False(t, got.IsCache)
+		assert.Equal(t, "origin", got.Type)
 		assert.WithinDuration(t, time.Now().UTC(), got.CreatedAt, time.Second)
 		assert.WithinDuration(t, time.Now().UTC(), got.UpdatedAt, time.Second)
 	})
@@ -238,8 +237,7 @@ func TestUpsertServerLocalMetadata(t *testing.T) {
 			"CreatedAt should be unchanged")
 		assert.True(t, updated.UpdatedAt.After(original.UpdatedAt),
 			"UpdatedAt should be newer")
-		assert.True(t, updated.IsOrigin, "IsOrigin should not be updated")
-		assert.False(t, updated.IsCache, "IsCache should not be updated")
+		assert.Equal(t, "origin", updated.Type, "Type should remain origin")
 	})
 
 	t.Run("insert-second-record-when-id-differs", func(t *testing.T) {
@@ -274,16 +272,14 @@ func TestGetServerName(t *testing.T) {
 		old := server_structs.ServerLocalMetadata{
 			ID:        uuid.NewString(),
 			Name:      "old-server",
-			IsOrigin:  false,
-			IsCache:   true,
+			Type:      "cache",
 			CreatedAt: now.Add(-2 * time.Hour),
 			UpdatedAt: now.Add(-2 * time.Hour),
 		}
 		recent := server_structs.ServerLocalMetadata{
 			ID:        uuid.NewString(),
 			Name:      "new-server",
-			IsOrigin:  true,
-			IsCache:   false,
+			Type:      "origin",
 			CreatedAt: now.Add(-1 * time.Hour),
 			UpdatedAt: now.Add(-1 * time.Hour),
 		}
