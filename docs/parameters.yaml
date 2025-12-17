@@ -543,6 +543,20 @@ default: false
 hidden: true
 components: ["client"]
 ---
+name: Client.EnableOverwrites
+description: |+
+  A bool indicating whether the client should skip overwrite protection checks when uploading objects.
+  When enabled, uploads will overwrite existing objects without checking if they already exist.
+
+  WARNING: This is an extremely sharp edge. Careless use of overwrites could cause havoc for regular users.
+  This parameter is hidden and should only be enabled by knowledgeable administrators or power users who
+  understand the potential issues. This is primarily intended for specialized use cases with zero reuse
+  and exclusive direct read mode.
+type: bool
+default: false
+hidden: true
+components: ["client"]
+---
 name: Client.DirectorRetries
 description: |+
   A positive integer indicating the number of retries a client should attempt when contacting a non-responsive Director. Each retry will

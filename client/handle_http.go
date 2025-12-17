@@ -2956,7 +2956,8 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	// Check if the remote object already exists using statHttp
 	// If the job is recursive, we skip this check as the check is already performed in walkDirUpload
 	// If the job is not recursive, we check if the object exists at the origin
-	if transfer.remoteURL != nil && transfer.job != nil && transfer.job.syncLevel != SyncNone && !transfer.job.recursive {
+	// Skip this check if Client.EnableOverwrites is enabled
+	if transfer.remoteURL != nil && transfer.job != nil && transfer.job.syncLevel != SyncNone && !transfer.job.recursive && !param.Client_EnableOverwrites.GetBool() {
 		remoteUrl, dirResp, token := transfer.job.remoteURL, transfer.job.dirResp, transfer.job.token
 		_, statErr := statHttp(remoteUrl, dirResp, token)
 		if statErr == nil {
@@ -3461,6 +3462,10 @@ func skipDownload(syncLevel SyncLevel, remoteInfo fs.FileInfo, localPath string)
 // Depending on the synchronization policy, decide if the upload should be skipped
 func skipUpload(job *TransferJob, localPath string, remoteUrl *pelican_url.PelicanURL) bool {
 	if job.syncLevel == SyncNone {
+		return false
+	}
+	// Skip the synchronization check if overwrites are enabled
+	if param.Client_EnableOverwrites.GetBool() {
 		return false
 	}
 

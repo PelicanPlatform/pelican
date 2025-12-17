@@ -565,6 +565,8 @@ func (bP BoolParam) GetBool() bool {
 			return config.Client.DisableHttpProxy
 		case "Client.DisableProxyFallback":
 			return config.Client.DisableProxyFallback
+		case "Client.EnableOverwrites":
+			return config.Client.EnableOverwrites
 		case "Client.IsPlugin":
 			return config.Client.IsPlugin
 		case "Debug":
@@ -844,6 +846,7 @@ var allParameterNames = []string{
 	"Client.DirectorRetries",
 	"Client.DisableHttpProxy",
 	"Client.DisableProxyFallback",
+	"Client.EnableOverwrites",
 	"Client.IsPlugin",
 	"Client.MaximumDownloadSpeed",
 	"Client.MinimumDownloadSpeed",
@@ -1359,6 +1362,7 @@ var (
 	Client_AssumeDirectorServerHeader = BoolParam{"Client.AssumeDirectorServerHeader"}
 	Client_DisableHttpProxy = BoolParam{"Client.DisableHttpProxy"}
 	Client_DisableProxyFallback = BoolParam{"Client.DisableProxyFallback"}
+	Client_EnableOverwrites = BoolParam{"Client.EnableOverwrites"}
 	Client_IsPlugin = BoolParam{"Client.IsPlugin"}
 	Debug = BoolParam{"Debug"}
 	Director_AssumePresenceAtSingleOrigin = BoolParam{"Director.AssumePresenceAtSingleOrigin"}

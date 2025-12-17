@@ -69,6 +69,7 @@ type Config struct {
 		DirectorRetries int `mapstructure:"directorretries" yaml:"DirectorRetries"`
 		DisableHttpProxy bool `mapstructure:"disablehttpproxy" yaml:"DisableHttpProxy"`
 		DisableProxyFallback bool `mapstructure:"disableproxyfallback" yaml:"DisableProxyFallback"`
+		EnableOverwrites bool `mapstructure:"enableoverwrites" yaml:"EnableOverwrites"`
 		IsPlugin bool `mapstructure:"isplugin" yaml:"IsPlugin"`
 		MaximumDownloadSpeed int `mapstructure:"maximumdownloadspeed" yaml:"MaximumDownloadSpeed"`
 		MinimumDownloadSpeed int `mapstructure:"minimumdownloadspeed" yaml:"MinimumDownloadSpeed"`
@@ -447,6 +448,7 @@ type configWithType struct {
 		DirectorRetries struct { Type string; Value int }
 		DisableHttpProxy struct { Type string; Value bool }
 		DisableProxyFallback struct { Type string; Value bool }
+		EnableOverwrites struct { Type string; Value bool }
 		IsPlugin struct { Type string; Value bool }
 		MaximumDownloadSpeed struct { Type string; Value int }
 		MinimumDownloadSpeed struct { Type string; Value int }
