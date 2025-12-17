@@ -2589,7 +2589,11 @@ description: |+
   Users who belong to any of these groups will be granted admin privileges, regardless of their username.
 
   This is useful when you want to grant admin access based on group membership rather than individual user identifiers.
-  Groups are typically provided by OAuth/OIDC providers in the "wlcg.groups" claim of the authentication token.
+
+  Group information is obtained from the issuer configuration (`Issuer.GroupSource`). Depending on the group source:
+  - If `Issuer.GroupSource` is `file`: Groups are read from the file specified by `Issuer.GroupFile`.
+  - If `Issuer.GroupSource` is `oidc`: Groups are extracted from the OIDC provider token using the claim specified by `Issuer.OIDCGroupClaim` (defaults to "groups").
+  - If `Issuer.GroupSource` is `internal`: Groups are read from the Pelican server's internal SQLite database.
 
   Note: This works in conjunction with Server.UIAdminUsers. A user can be granted admin access either by being
   listed in Server.UIAdminUsers or by belonging to a group listed in Server.AdminGroups.
