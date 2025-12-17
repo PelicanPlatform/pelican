@@ -671,11 +671,7 @@ func TestCheckAdmin(t *testing.T) {
 			// Call CheckAdmin
 			var isAdmin bool
 			var msg string
-			if tc.groups != nil {
-				isAdmin, msg = CheckAdmin(tc.user, tc.groups)
-			} else {
-				isAdmin, msg = CheckAdmin(tc.user)
-			}
+			isAdmin, msg = CheckAdmin(tc.user, tc.groups)
 
 			// Verify results
 			assert.Equal(t, tc.expectedAdmin, isAdmin, "Admin status mismatch for user %s", tc.user)

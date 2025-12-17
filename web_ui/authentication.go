@@ -370,20 +370,16 @@ func RequireAuthMiddleware(ctx *gin.Context) {
 // Note that by default it only checks if user == "admin". If you have a custom list of admin identifiers
 // to check, you should set Server.UIAdminUsers. If you want to grant admin privileges based on group
 // membership, you should set Server.AdminGroups.
-//
-// groups is an optional parameter. If provided, the function will also check if the user belongs to
-// any of the configured admin groups.
-func CheckAdmin(user string, groups ...[]string) (isAdmin bool, message string) {
+func CheckAdmin(user string, groups []string) (isAdmin bool, message string) {
 	if user == "admin" {
 		return true, ""
 	}
 
 	// Check admin groups if groups are provided
-	if len(groups) > 0 && groups[0] != nil {
+	if len(groups) > 0 {
 		adminGroups := param.Server_AdminGroups.GetStringSlice()
 		if param.Server_AdminGroups.IsSet() && len(adminGroups) > 0 {
-			userGroups := groups[0]
-			for _, userGroup := range userGroups {
+			for _, userGroup := range groups {
 				for _, adminGroup := range adminGroups {
 					if userGroup == adminGroup {
 						return true, ""
