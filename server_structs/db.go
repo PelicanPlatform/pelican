@@ -34,13 +34,18 @@ type (
 	}
 
 	// ServerLocalMetadata is the local record of Origin/Cache server's metadata it fetched from the Registry,
+	// Maps to the `service_names` table in the database.
 	ServerLocalMetadata struct {
 		ID        string         `gorm:"primaryKey;column:id;type:TEXT" json:"id"`
 		Name      string         `gorm:"column:name;type:TEXT;not null" json:"name"`
-		IsOrigin  bool           `gorm:"column:is_origin;type:BOOLEAN;not null;default:false" json:"isOrigin"`
-		IsCache   bool           `gorm:"column:is_cache;type:BOOLEAN;not null;default:false" json:"isCache"`
+		Type      string         `gorm:"column:type;type:TEXT;not null" json:"type"` // "origin" or "cache"
 		CreatedAt time.Time      `gorm:"column:created_at;autoCreateTime" json:"createdAt"`
 		UpdatedAt time.Time      `gorm:"column:updated_at;autoUpdateTime" json:"updatedAt"`
 		DeletedAt gorm.DeletedAt `gorm:"column:deleted_at;index" json:"-"`
 	}
 )
+
+// TableName overrides the default table name to use the existing `service_names` table
+func (ServerLocalMetadata) TableName() string {
+	return "service_names"
+}
