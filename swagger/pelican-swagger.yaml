@@ -1254,14 +1254,10 @@ definitions:
         type: string
         description: Human-readable server name reported to the registry
         example: "UW_OSDF_CACHE"
-      isOrigin:
-        type: boolean
-        description: Whether the server offers Origin capabilities
-        example: true
-      isCache:
-        type: boolean
-        description: Whether the server offers Cache capabilities
-        example: false
+      type:
+        type: string
+        description: Server type (origin, cache)
+        example: "origin"
       createdAt:
         type: string
         format: date-time
