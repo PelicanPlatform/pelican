@@ -56,6 +56,7 @@ var (
 		Args:  cobra.ExactArgs(1),
 		Example: "To create a read/write token for /some/namespace/path in OSDF: " +
 			"pelican token create --read --write pelican://osg-htc.org/some/namespace/path",
+		SilenceUsage: true,
 	}
 
 	tokenFetchCmd = &cobra.Command{

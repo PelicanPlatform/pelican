@@ -1,0 +1,409 @@
+import { Callout } from '@/components/Callout'
+import ExportedImage from "next-image-export-optimizer";
+
+# Pelican's Authorization System
+At its core, the goal of Pelican's authorization system is simple: give the right people access to the right data, and protect the data from everyone else.
+Whether data is private, public, or shared with a specific collaboration, Pelican ensures that only authorized users can access it.
+To achieve this in a distributed environment without sacrificing performance, Pelican relies on a modern, token-based architecture that separates the responsibility of *verifying identity* from the responsibility of *granting access*.
+
+## Authentication vs Authorization (AuthZ vs AuthN)
+
+While often used interchangeably in casual conversation, **Authentication** and **Authorization** (often abbreviated **AuthN** and **AuthZ**) are distinct concepts in computer security.
+
+- **Authentication (AuthN)** is the process of verifying *who you are*.
+It's used to confirm your identity and typically involves providing some kind of secret or unique thing that *only* you possess.
+Common authentication methods include passwords, certificates, or federated identity providers like [CILogon](https://www.cilogon.org/home).
+<Callout type="example">
+- Showing your passport to airport security proves you are the person named on your ticket -- only you possess the face shown in the passport.
+- *In Computing:* Logging in with a username and password, or using multi-factor authentication -- only you possess the password and phone number associated with the account.
+</Callout>
+
+- **Authorization (Authz)** answers the question *what you are allowed to do*.
+It determines your permissions and is typically managed through policies, roles, or access tokens.
+<Callout type="example">
+- Your boarding pass allows you to board a specific flight and sit in a specific seat, but it doesn't let you sit in someone else's seat, fly the plane or enter the cockpit.
+- *In Computing:* Having read-only access to a file, or administrative privileges on a server.
+</Callout>
+
+Part of what makes these concepts confusing is that in order to determine *what* you're allowed to do, we usually first have to determine *who* you are; before granting authorization, you have to be authenticated.
+
+This is true, but Pelican draws a clear line between the two by leaving it up to external **identity providers** to handle the "who" (Authentication), while Pelican focuses exclusively on the "what" (Authorization).
+Pelican does not manage usernames, passwords, or user accounts.
+Instead, it relies on the **[OpenID Connect (OIDC)](https://openid.net/developers/how-connect-works/)** standard to integrate with trusted third-party identity providers like CILogon, university logins, or Google.
+
+### The Challenge of Federated Identity
+
+In a distributed environment like the OSDF, **Federated Authentication** is notoriously difficult.
+It requires that every service in the federation trusts and understands the identity providers of every user.
+If a user from University A wants to access data at Laboratory B, Laboratory B must be able to verify University A's credentials directly.
+Scaling this "mesh of trust" across hundreds of institutions is complex and fragile.
+
+Pelican addresses this by relying on **Federated Authorization**.
+Instead of passing user identities around, we pass **tokens with capabilities**.
+When a user authenticates with their home institution, that institution's identity provider gives information about *who* the user is to a token issuer.
+The token [issuer](#issuers) then decides *what* the user is allowed to do and creates a token explaining those permissions.
+Importantly, this token doesn't say "This is User X"; it says "The bearer of this token is allowed to read /data/project-y".
+
+The services in the federation (Origins and Caches) do not need to know *who* the user is; they only need to trust the *Issuer* that signed the token and verify that the token grants the necessary permissions.
+This decouples the identity verification from resource access, allowing Pelican to protect data without ever needing to store or manage sensitive user credentials.
+
+## Tokens
+
+In the context of Pelican and modern web security, an **Authorization Token** is a portable, digital credential that grants access to specific resources.
+While tokens *can* be used for authentication, Pelican uses them exclusively for authorization to specify what the token holder is allowed to do.
+
+Sometimes these tokens are also referred to as *Bearer Tokens* because we don't make any assertions about *who* is presenting the tokens, only about *what* the token says the bearer/presenter is allowed to do.
+This is a sure sign that we're working with an authorization framework, *not* an authentication framework.
+
+Since there is a distinction between authentication tokens and authorization tokens, whenever these docs refer simply to "tokens", we're talking about "authorization" tokens.
+
+A good analogy to understand how tokens work is to think of them like concert tickets:
+
+<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", alignItems: "start", border: "1px solid #e5e7eb", borderRadius: "0.5rem", padding: "1rem" }}>
+### Concert Tickets
+### Tokens
+<div>
+**1.** You go to the ticket booth and prove you're the one who paid
+</div>
+<div>
+**1.** You go to an identity provider and log into your account to prove who you are
+</div>
+
+<div>
+**2.** The receptionist at the ticket booth double checks which seat you paid for and then *prints/issues* you a ticket that says "whoever holds this ticket can enter the venue today between 7-8pm and is allowed to sit in seat D12".
+The ticket has a special hologram on it that *only* this printer can create
+</div>
+<div>
+**2.** The identity provider hands various *identifiers* to a token issuer service that uses those identifiers to decide what you're allowed to do.
+It then creates a token that says "whoever presents this token is allowed to read and write anywhere under the `/foo` namespace for the next 20 minutes".
+The token is cryptographically signed with a private key that *only* this issuer has
+</div>
+
+<div>
+**3.** At 7pm, you present the ticket to a security guard who compares its hologram against an example on his clipboard.
+The guard confirms the hologram is authentic because he **trusts** that whoever handed him the clipboard works for the same company.
+</div>
+<div>
+**3.** Within the 20m timeframe, you present the token to an Origin along with a request to download an object called `/foo/picture.jpg`.
+The Origin's XRootD process fetches the issuer's public key (from online or a local cache) and verifies the token's signature is authentic because it **trusts** that the issuer is allowed to speak on behalf of the requested resources
+</div>
+
+<div>
+**4.** You enter the venue and are escorted by an usher to your seat
+</div>
+<div>
+**4.** Finally, XRootD let's you proceed with the download
+</div>
+
+</div>
+
+<div style={{ display: "flex", justifyContent: "center", marginTop: "2rem" }}>
+    <ExportedImage width={750} height={575000} src={"/pelican/advanced-concepts/tickets-tokens.png"} alt={"Tokens as tickets analogy"} />
+</div>
+
+Importantly, if you tried to use a ticket for a different band or you scribbled all over the token (tampered with it), you'd be denied entry by the security guard.
+These same principles apply to tokens, which is why they work well for guarding protected resources.
+While tokens cannot be revoked the way certificates can be, their short lifetimes minimize the potential for leaking data by building in an automatic expiration.
+
+Ultimately, the security guarantees of tokens come from *public/private key cryptography*, which lets the token issuer *sign* tokens using a secret while the public key is openly available for anyone to *verify* the signature on the token.
+In practice, the service that *signs* the token and the service that hosts the public keys for *verification* are often split.
+For more information about this, see the section on ["Issuers"](#issuers).
+
+### JSON Web Tokens (JWTs)
+
+So far we've discussed what role tokens play and how they work at a high level, but we haven't yet discussed what a real token looks like.
+
+Pelican uses a specific type of token called a **JSON Web Token (JWT)**.
+A JWT is an open standard (RFC 7519) that defines a compact and self-contained way for securely transmitting information between parties as a JSON object.
+
+JWTs consist of three parts:
+
+1.  **Header:** Describes *how* the token was signed (e.g., "We used the RS256 algorithm").
+2.  **Payload:** Contains the "Claims" — the actual data/permissions. This includes:
+    *   `iss`   (Issuer): Who created this token?
+	*   `aud`   (Audience): Who do we expect this token to be presented to?
+	*   `exp`   (Expiration): When does this token expire?
+	*   `iat`   (Issued At): When was this token created?
+	*   `nbf`   (Not Before): When does the lifetime of this token start?
+    *   `scope` (Scope): Which actions can be performed on which resources, i.e. what is this token allowed to do?
+	*   `jti`   (JWT Identifier): A unique identifier that is specific to this token.
+	*   Other fields can be defined according to specific token *profiles* (see ["Token Profiles"](#token-profiles) for more information)
+3.  **Signature:** The cryptographic proof that ensures the token was created by the right issuer and hasn't been altered. Signatures do not decode to JSON
+
+<Callout type="example">
+Below are JSON objects that represent an example JWT header and payload:
+```
+{
+  "alg": "RS256",
+  "kid": "key-rs256",
+  "typ": "JWT"
+}
+{
+  "aud": "https://demo.scitokens.org",
+  "iss": "https://demo.scitokens.org",
+  "exp": 1764179999,
+  "iat": 1764179399,
+  "nbf": 1764179399,
+  "jti": "f84a5cb6-8e1b-46b4-a205-0c44503a3d27",
+  "scope": "read:/foo",
+  "ver": "scitoken:2.0"
+}
+```
+</Callout>
+
+In order to pass these tokens around, each part of the token is base64-encoded and strung together using periods (`.`), i.e. `Header.Payload.Signature`.
+
+<Callout type="example">
+The previous token JSON (along with a made up signature) would be encoded as:
+```
+eyJhbGciOiJSUzI1NiIsImtpZCI6ImtleS1yczI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJodHRwczovL2RlbW8uc2NpdG9rZW5zLm9yZyIsImlzcyI6Imh0dHBzOi8vZGVtby5zY2l0b2tlbnMub3JnIiwiZXhwIjoxNzY0MTgwNjI2LCJpYXQiOjE3NjQxODAwMjYsIm5iZiI6MTc2NDE4MDAyNiwianRpIjoiZjg0YTVjYjYtOGUxYi00NmI0LWEyMDUtMGM0NDUwM2EzZDI3Iiwic2NvcGUiOiJyZWFkOi9mb28iLCJ2ZXIiOiJzY2l0b2tlbjoyLjAifQ.RmtEjRW63s2v2HuhulWhB0FHltza9eyUVDKhYs-jGHQYsEL65gIMMHb6IbB1BL9YBzdMCJd4J8n8sPt8rN5YJxC8SJ1nQHjzJOBDXZhhQ52W5Rj5KQQINwISuU6QA39RMZ3hOWexijW9OEcmvCZLpDPqRCyc7xAcW3DgCzWqiopgS3ff-Cj9AR8RFa90V5VEfXYwvyVsmE4sUy3FqrDpyG4OuNkVIpuuF7l7XlqnSC4b2QFFmlbkxw6B4q3s2_mHPIcCMIhwo8mCNuXVaeSCIh6EtJ7eALQpbagWvdqFhL6dGRNFsHPDgfas98nkRfRv4gVP5_Qj7qVcUSp_1std5Q
+```
+</Callout>
+
+<Callout type="default">
+You can safely share the first two sections (everything **up to but not after** the second period) of your tokens because they don't contain secrets.
+However, you should be ***extremely careful*** about sharing token signatures and you should treat this like sharing a password.
+</Callout>
+
+<Callout type="warning">
+**Encoded vs. Encrypted**
+It is crucial to understand that the **Header** and **Payload** of a JWT are merely **Base64Url encoded**, not encrypted.
+This means **anyone who intercepts the token can read the information inside it** (like the namespace paths you are accessing).
+
+However, they cannot *change* that information. Changing the payload would invalidate the **Signature**, causing the token to be rejected by Pelican.
+</Callout>
+
+#### JWT Tools
+
+If you're working with JWTs, it's useful to know about a few tools that help you decode them for interpreting what they say.
+
+Both the [SciTokens demo site](https://demo.scitokens.org/) and [jwt.io](https://jwt.io) are great web-based portals for converting tokens to/from their encoded and decoded forms.
+In particular, jwt.io is nice because you can hover your mouse over the token's timestamps to see them in human-readable form.
+Both websites operate purely in your browser, so any tokens you input won't be sent anywhere -- this lets you use the sites without worrying about anyone stealing your secrets!
+
+In general, most of the JWTs you'll need to create to work with Pelican can be created using [Pelican's command line token tools](../../getting-data-with-pelican/auth).
+
+However, other command line libraries like the ones provided at https://demo.scitokens.org/ and the [htgettoken](https://github.com/fermitools/htgettoken?tab=readme-ov-file) tool can be used to create/decode generic JWTs.
+
+### Token Profiles
+
+JWT is a generic framework for packing information into a string that's easy to pass between web services.
+While some of the core JSON keys like `iss`, `exp`, etc. are present in every JWT, some people have extended the keys/semantics of JWTs to communicate specific information relevant in their ecosystems.
+
+Specifications that describe the extra contents of a JWT are called *profiles*, and they typically describe which "scopes" are recognized and which other fields are mandatory.
+
+The two profiles used in the Pelican ecosystem are the **WLCG Profile** and the **SciTokens** profile.
+
+#### **WLCG Profile**
+The Worldwide Large Hadron Collider (WLCG) auth group maintains the WLCG token profile.
+Some of the WLCG scopes/capabilities Pelican uses include:
+	- `storage.read:/path/to/resource`: grants the ability to *read* the specified resource
+	- `storage.create:/path/to/resource`: grants the ability to *create* but **not** modify the specified resource
+	- `storage.modify:/path/to/resource`: a superset of `storage.create`, grants the ability to *modify and delete* the specified resource
+
+See [WLCG's Token Profile documentation](https://github.com/WLCG-AuthZ-WG/common-jwt-profile/blob/master/profile.md) for more information about other WLCG token requirements and available capabilities/scopes.
+
+#### **SciTokens Profile**
+
+The SciTokens Profile is another option Pelican understands how to work with, although Pelican prefers the WLCG profile.
+Some of the SciTokens scopes/capabilities Pelican uses include:
+	- `read:/path/to/resource`: grants the ability to *read* the specified resource
+	- `write:/path/to/resource`: grants the ability to create/modify the specified resource
+
+See the [SciTokens site](https://scitokens.org/) for generic documentation and the [SciTokens Claims specification](https://scitokens.org/technical_docs/Claims) for more information about other SciTokens requirements and available capabilities/scopes.
+
+<Callout type="warning">
+Be careful using tokens that let you modify object contents after the object has been written -- Pelican objects should be treated as immutable, so these tokens can get you in trouble!
+</Callout>
+
+## Issuers
+
+While discussing what tokens are and how they work, it's been unavoidable to briefly discuss the concept of *issuers*, but up until now we haven't rigorously explained what issuers are and why it's difficult to precisely describe them.
+
+At its simplest, an **Issuer** is the authority that creates/mints, signs, and provides means to validate tokens.
+It possesses a cryptographic private key that *only* it has, which lets other services verify that tokens are coming from the right source.
+In our concert ticket analogy, the Issuer is a combination of the **ticket booth** and the **clipboard**; it is the only entity trusted to print valid tickets, and it provides a means for others to double check a ticket's validity.
+
+Part of what makes discussing the term "Issuer" difficult is that it is heavily overloaded.
+In fact, an Issuer may refer to two related-yet-distinct things, as evidenced by the fact that our analogy needed both a ticket booth and a clipboard to describe it:
+1. A service that *creates/mints* tokens when provided with identifiers from a trusted identity provider (ticket booth)
+2. A service that others can use to look up the public keys linked to the token creator's private keys (clipboard)
+
+These two functions can live in the same place, but it's often beneficial to split them up.
+
+To distinguish between these two concepts, we'll refer to 1 as the "Mint Issuer" (it mints the tokens you need) and 2 as the "Verify Issuer" (you use it to "verify" that a token is legitimate).
+
+### The "Mint" Role (Issuance)
+The "Mint Issuer" is used by clients to fetch any tokens that are needed to perform an action on a resource (e.g. get/put /foo/bar).
+
+This is the private, secure side of the issuer.
+Before a user can get a token, they must prove who they are to an identity provider.
+Once that provider validates the user's identity, it passes *identifiers* to the "Mint Issuer" like which groups the user belongs to.
+Finally, the "Mint Issuer", which is configured to know which tokens can be created for which groups, provides a cryptographically-signed token for the request.
+
+<Callout type="warning">
+This is an important distinction: Issuers are *not* the same as Identity Providers.
+Rather, Identity Providers authenticate a user and then pass the user's identifiers along to the issuer.
+The issuer is configured to know which tokens it can create based on those identifiers.
+The actual token that is _does_ create is the intersection of what the issuer is willing to create and what the user is asking for.
+</Callout>
+
+In Pelican, the "Mint Issuer" is often a service called [OA4MP (OAuth for Many People)](https://oa4mp.org/) built into the Origin.
+Other services can be configured to issue tokens as well, like HTCondor's [CredMon](https://github.com/htcondor/scitokens-credmon).
+
+However the "Mint Issuer" is set up, the Origin must be configured to trust it by providing the source of truth for the public keys that can be used to verify tokens it creates, which leads us to...
+
+### The "Verify" Role (Discovery)
+The "Verify Issuer" is used by Origins and Caches or any service that needs to check the validity tokens.
+It is the public-facing side of an Issuer and must make any public keys associated with the "Mint Issuer's" private keys publicly accessible.
+
+#### OIDC Key Discovery for "Verify Issuers"
+
+The only thing you need to interact with a "Verify Issuer" is its URL and knowledge of its key discovery protocol.
+Because the entire issuer scheme follows the [OpenID Connect (OIDC)](https://openid.net/developers/how-connect-works/) specification, the "Verify Issuer's" public keys can be fetched according to:
+1. Given the "Verify Issuer's" URL, append the path `/.well-known/openid-configuration` and download the JSON hosted here.
+For example, if the URL is `https://osg-htc.org`, you'd fetch `https://osg-htc.org/.well-known/openid-configuration` and parse it as JSON.
+2. This JSON will provide a key named `"jwks_uri"` whose value is another URL. The public keys live as a JSON Web Keyset (JWKS) behind this URL.
+3. By fetching and keys pointed to by the `"jwks_uri"`, you can check whether any given token was in fact signed by the corresponding "Mint Issuer".
+
+Crucially, the "Verify" side does not know or care *who* the user is or who is asking for the keys.
+It simply publishes the mathematical keys required to check the signature of the token ("hologram" on the ticket).
+
+### Trust Relationships
+
+At the end of the day, the user provides a token to an Origin or Cache along with a request to perform an action on a resource (`read /foo`).
+But it's the Origin/Cache that has to decide whether it will fulfill the request and let the user do what it wants.
+
+Because this process involves stringing together multiple services, it's worth taking a moment to analyze how trust is bootstrapped between each of them.
+
+1. **The Storage Provider Trusts the Origin and the Identity Provider:**
+	The entire chain of trust starts with the owner of some underlying storage trusting the Origin to enforce whatever access policies it provides.
+	Crucially, because the Storage Provider defines the policies that map a user's identity to their permissions (e.g. "Bob can read /foo"), they must fundamentally trust the Identity Provider to accurately verify that identity.
+	If the Identity Provider cannot be trusted to say "This is Bob", nobody can safely grant "Bob" access.
+
+2. **The "Issuer" Trusts the Identity Provider:**
+	When users authenticate with the Identity Provider, the "Mint Issuer" trusts the identifiers it is handed.
+	This trust is typically established when the Issuer is registered as a client with the Identity Provider.
+	The Issuer trusts that the Identity Provider has rigorously verified the user's credentials (password, MFA) before asserting their identity and attributes.
+
+3. **Origins Trust their Issuers (both "Mint" and "Verify") and Federation Central Services (Director/Registry):**
+	The Origin is explicitly configured with which Issuers it trusts for which namespaces.
+	This is done by providing the "Verify Issuer" URL that hosts a set of public keys in the Origin's exports.
+	The Origin trusts that if a token bears the signature of a trusted Issuer, the permissions inside that token are valid.
+	Furthermore, Origins send information about their namespaces Issuers to the Federation's Director, which the Origin also trusts.
+
+4. **The Director/Registry Can Verify Origins/Caches:**
+	When Origins and Caches join a federation, they register their identities with the Registry and provide a public key corresponding to a private key they possess.
+	Origins/Caches advertise who they are and what they do to the Director service, which uses the Registry to verify their identities.
+	The Director can hand out the information in these advertisements, and anyone who's part of the federation trusts the information because they trust the Director.
+	Because Origins trust Central Services and Central Services trust Caches, Origins transitively trust that Caches will respect their access policies.
+
+5. **Caches Trust the Director/Registry:**
+	Because Caches can grant access to copies of namespaced data, they must know which Issuers are trusted for which namespaces.
+	Each Origin/namespace and their Issuers are advertised to the Director by the Origin.
+	Because both the Cache and the Origin trust the Director, the Cache trusts each namespace Issuer it learns about via the Director.
+
+By chaining these trust relationships together transitively, we create a system where a Cache can serve an object to a user without ever knowing who the user is or directly contacting the user's home institution.
+
+<div style={{ display: "flex", justifyContent: "center", marginTop: "2rem" }}>
+    <ExportedImage width={750} height={575000} src={"/pelican/advanced-concepts/trust-diagram.png"} alt={"Bootstrapping Trust between Pelican Services"} />
+</div>
+
+## Anatomy of an Origin's/Cache's Authorization Configuration
+
+XRootD is the service at Origins and Caches that serves requests for data.
+It's also the service that receives tokens and decides whether the token is sufficient to permit the request.
+
+XRootD does this using two frameworks, the ["Authorization Database File"](https://xrootd.web.cern.ch/doc/dev56/sec_config.htm#_Toc119617472) (often abbreviated as "authfile") and the [XRootD-Scitokens plugin](https://github.com/xrootd/xrootd/tree/master/src/XrdSciTokens).
+<Callout type="info">
+Note that SciTokens plugin works with multiple token formats (WLCG, SciTokens).
+</Callout>
+
+When Origins/Caches start up, they parse the policies provided in their configuration (Origins) or discovered via the Director (Caches) to generate configuration files for both of these frameworks.
+Because Caches usually serve multiple federation namespaces, a Cache's authfile/SciTokens configuration is a union over the policies of the federation's namespaces as presented by Origins.
+
+Additionally, these generated configuration files may be merged with admin-supplied files by specifying the [`Xrootd.Authfile`](../parameters#Xrootd-Authfile) and [`Xrootd.ScitokensConfig`](../parameters#Xrootd-ScitokensConfig) config parameters.
+
+<Callout type="warning">
+Any extra information provided in custom authfile or SciTokens configuration ***does not*** propagate through the rest of the federation.
+Moreover, improper configuration can result in ***unintentional data exposure***.
+Use these at your own risk!
+
+If you're setting up an Origin to serve protected data and you can use tokens to download directly via the Origin but not via Caches, double check that you're not relying on admin-supplied authfile/SciTokens configuration!
+</Callout>
+
+Whenever an Origin/Cache receives a request, it first consults the SciTokens configuration and then falls back to the authfile if access cannot be granted via the SciTokens plugin.
+
+### SciTokens Configuration File
+
+The SciTokens config file's basic contents include a list of Issuer URLs along with which namespaces (base paths) those Issuers should be used for.
+
+<Callout type="example">
+Below is a sample of a generated Origin SciTokens configuration:
+```ini
+#
+# Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you
+# may not use this file except in compliance with the License.  You may
+# obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+#
+# This is a generated configuration file -- DO NOT HAND EDIT.
+# It will be overwritten on the next startup of pelican.
+#
+
+[Global]
+audience_json = ["https://my-origin.com:8443"]
+
+[Issuer Origin https://my-origin:8440 and Built-in Monitoring]
+issuer = https://my-origin:8440
+base_path = /my-namespace, /pelican/monitoring
+
+[Issuer Federation-based Monitoring]
+issuer = https://osg-htc.org
+base_path = /pelican/monitoring
+default_user = xrootd
+
+# End of config
+```
+</Callout>
+
+For more information about XRootD's SciTokens plugin configuration, see https://github.com/xrootd/xrootd/tree/master/src/XrdSciTokens.
+
+### Authfile Configuration
+
+Each line in an authfile at Origins/Caches maps some kind of identifier to a list of path:privilege pairs.
+While admin-supplied authfiles can be quite complicated, a Pelican-generated authfile that hasn't been merged with anything will only use the `l` (list) and `r` (read) privileges for a given path.
+A `-` is used before each set of privileges to subtract those privileges, while the absence of a `-` means the privileges are granted.
+Pelican-generated authfiles are never used to grant write privileges -- this is always done via the SciTokens configuration.
+
+<Callout type="example">
+Below is a sample of a generated Origin authfile configuration:
+```text
+u * /my-prefix-auth -lr /.well-known lr /my-prefix lr
+```
+
+This authfile allows *any* user to list/read the contents of the `/my-prefix` namespace with `/my-prefix lr`, but prevents *all* users from listing/reading the contents of `/my-prefix-auth` with `/my-prefix/auth -lr`.
+The `/.well-known` path for the Origin's public keys is also exposed via XRootD.
+</Callout>
+
+<Callout type="warning">
+It is **very important** to get the ordering of each authfile line and each privilege in a line correct.
+XRootD's authorization library parses top to bottom, left to right and uses basic string matching to determine access privileges.
+The following authline is incorrect because `/my-prefix-auth` will match the policy for `/my-prefix` before the `/my-prefix-auth` policy is checked, accidentally granting privileges:
+```text
+u * /my-prefix lr /my-prefix-auth -lr
+```
+</Callout>
+
+For more information about XRootD Authfiles, see https://xrootd.web.cern.ch/doc/dev56/sec_config.htm#_Toc119617472
