@@ -160,103 +160,70 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 	// race condition where the origin/cache 30s timeout fires before the first ticker-driven test.
 	runDirectorTestCycle := func() {
 		log.Debug(fmt.Sprintf("Starting a director test cycle for %s server %s at %s", serverAd.Type, serverName, serverUrl))
-		ok := true
-		var err error
+		testSucceeded := true
+		var testErr error
 		if serverAd.Type == server_structs.OriginType.String() {
 			fileTests := server_utils.TestFileTransferImpl{}
-			ok, err = fileTests.RunTests(ctx, serverUrl, serverUrl, "", server_utils.DirectorTest)
+			testSucceeded, testErr = fileTests.RunTests(ctx, serverUrl, serverUrl, "", server_utils.DirectorTest)
 		} else if serverAd.Type == server_structs.CacheType.String() {
-			err = runCacheTest(ctx, serverAd.URL)
+			testErr = runCacheTest(ctx, serverAd.URL)
 		}
 
-		// Successfully run a test, no error
-		if ok && err == nil {
+		// Compose the result of this Director-test to report to the server
+		var reportStatus, reportMessage string // status (result of the Director-test) and message to report back to the server
+		var healthStatus HealthTestStatus
+		if testSucceeded && testErr == nil {
+			reportStatus = "ok"
+			reportMessage = "Director test cycle succeeded at " + time.Now().Format(time.RFC3339)
+			healthStatus = HealthStatusOK
 			log.Debugf("Director file transfer test cycle succeeded at %s for %s server with URL at %s", time.Now().Format(time.RFC3339), serverAd.Type, serverUrl)
-			func() {
-				healthTestUtilsMutex.Lock()
-				defer healthTestUtilsMutex.Unlock()
-				if existingUtil, ok := healthTestUtils[serverAd.URL.String()]; ok {
-					existingUtil.Status = HealthStatusOK
-				} else {
-					log.Debugln("HealthTestUtil missing for ", serverAd.Type, " server: ", serverUrl, " Failed to update internal status")
-				}
-			}()
-
-			// Report the result of this Director-test back to origin/server
-			if err := reportStatusToServer(
-				ctx,
-				serverWebUrl,
-				"ok", "Director test cycle succeeded at "+time.Now().Format(time.RFC3339),
-				serverAd.Type,
-				false,
-			); err != nil {
-				// Record the error right away
-				log.Warningf("Failed to report director test result to %s server at %s: %v", serverAd.Type, serverAd.WebURL.String(), err)
-				metrics.PelicanDirectorFileTransferTestsRuns.With(
-					prometheus.Labels{
-						"server_name":    serverName,
-						"server_web_url": serverWebUrl,
-						"server_type":    string(serverAd.Type),
-						"status":         string(metrics.MetricSucceeded),
-						"report_status":  string(metrics.MetricFailed),
-					},
-				).Inc()
-			} else {
-				// No error when reporting the result, we are good
-				metrics.PelicanDirectorFileTransferTestsRuns.With(
-					prometheus.Labels{
-						"server_name":    serverName,
-						"server_web_url": serverWebUrl,
-						"server_type":    string(serverAd.Type),
-						"status":         string(metrics.MetricSucceeded),
-						"report_status":  string(metrics.MetricSucceeded),
-					},
-				).Inc()
-			}
 		} else {
-			// The Director-test failed. Report failure back to origin/cache
-			log.Warningln("Director file transfer test cycle failed for ", serverAd.Type, " server: ", serverUrl, " ", err)
-			func() {
-				healthTestUtilsMutex.Lock()
-				defer healthTestUtilsMutex.Unlock()
-				if existingUtil, ok := healthTestUtils[serverAd.URL.String()]; ok {
-					existingUtil.Status = HealthStatusError
-				} else {
-					log.Debugln("HealthTestUtil missing for", serverAd.Type, " server: ", serverUrl, " Failed to update internal status")
-				}
-			}()
-
-			if err := reportStatusToServer(
-				ctx,
-				serverWebUrl,
-				"error", "Director file transfer test cycle failed for origin: "+serverUrl+" "+err.Error(),
-				serverAd.Type,
-				false,
-			); err != nil {
-				// Record the error right away
-				log.Warningf("Failed to report director test result to %s server at %s: %v", serverAd.Type, serverAd.WebURL.String(), err)
-				metrics.PelicanDirectorFileTransferTestsRuns.With(
-					prometheus.Labels{
-						"server_name":    serverName,
-						"server_web_url": serverWebUrl,
-						"server_type":    string(serverAd.Type),
-						"status":         string(metrics.MetricFailed),
-						"report_status":  string(metrics.MetricFailed),
-					},
-				).Inc()
-			} else {
-				// No error when reporting the result, we are good
-				metrics.PelicanDirectorFileTransferTestsRuns.With(
-					prometheus.Labels{
-						"server_name":    serverName,
-						"server_web_url": serverWebUrl,
-						"server_type":    string(serverAd.Type),
-						"status":         string(metrics.MetricFailed),
-						"report_status":  string(metrics.MetricSucceeded),
-					},
-				).Inc()
+			reportStatus = "error"
+			reportMessage = "Director file transfer test cycle failed for server: " + serverUrl
+			if testErr != nil {
+				reportMessage += " " + testErr.Error()
 			}
+			healthStatus = HealthStatusError
+			log.Warningln("Director file transfer test cycle failed for ", serverAd.Type, " server: ", serverUrl, " ", testErr)
 		}
+
+		// Update healthTestUtils once per cycle
+		func() {
+			healthTestUtilsMutex.Lock()
+			defer healthTestUtilsMutex.Unlock()
+			if existingUtil, ok := healthTestUtils[serverAd.URL.String()]; ok {
+				existingUtil.Status = healthStatus
+			} else {
+				log.Debugln("HealthTestUtil missing for ", serverAd.Type, " server: ", serverUrl, " Failed to update internal status")
+			}
+		}()
+
+		// Determine the metric status label based on test result
+		testStatusMetric := metrics.MetricSucceeded
+		if !testSucceeded || testErr != nil {
+			testStatusMetric = metrics.MetricFailed
+		}
+
+		// Report the result of this Director-test back to origin/server (single call)
+		reportErr := reportStatusToServer(ctx, serverWebUrl, reportStatus, reportMessage, serverAd.Type, false)
+
+		// Determine report status metric and log if reporting failed
+		reportStatusMetric := metrics.MetricSucceeded
+		if reportErr != nil {
+			reportStatusMetric = metrics.MetricFailed
+			log.Warningf("Failed to report director test result to %s server at %s: %v", serverAd.Type, serverAd.WebURL.String(), reportErr)
+		}
+
+		// Record metrics once per cycle
+		metrics.PelicanDirectorFileTransferTestsRuns.With(
+			prometheus.Labels{
+				"server_name":    serverName,
+				"server_web_url": serverWebUrl,
+				"server_type":    string(serverAd.Type),
+				"status":         string(testStatusMetric),
+				"report_status":  string(reportStatusMetric),
+			},
+		).Inc()
 	}
 
 	// Run the first test immediately to avoid race with origin/cache 30s timeout.
