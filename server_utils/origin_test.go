@@ -112,11 +112,30 @@ func getTmpFile(t *testing.T) string {
 	return tmpFile
 }
 
+// getTmpDir returns a temp directory with 0777 permissions for test use.
+// The 0777 permissions ensure the xrootd daemon user can access the directory
+func getTmpDir(t *testing.T) string {
+	tmpDir := t.TempDir()
+
+	// Set directory permissions to 777 so the xrootd daemon user can access it
+	err := os.Chmod(tmpDir, 0777)
+	if err != nil {
+		t.Fatalf("Failed to set directory permissions: %v", err)
+	}
+
+	return tmpDir
+}
+
 func setup(t *testing.T, config string, shouldError bool) []OriginExport {
 	viper.SetConfigType("yaml")
 	// Use viper to read in the embedded config
 	err := viper.ReadConfig(strings.NewReader(config))
 	require.NoError(t, err, "error reading config")
+
+	// Check if this is a POSIX origin (default is posix if not specified)
+	storageType := viper.GetString("origin.storagetype")
+	isPosix := storageType == "" || storageType == "posix"
+
 	// Some keys need to be overridden because GetOriginExports validates things like filepaths by making
 	// sure the file exists and is readable by the process.
 	// Iterate through Origin.XXX keys and check for "SHOULD-OVERRIDE" in the value
@@ -124,8 +143,30 @@ func setup(t *testing.T, config string, shouldError bool) []OriginExport {
 		if strings.Contains(viper.GetString(key), "SHOULD-OVERRIDE-TEMPFILE") {
 			tmpFile := getTmpFile(t)
 			viper.Set(key, tmpFile)
+		} else if key == "origin.storageprefix" && isPosix {
+			// For POSIX origins, replace the storage prefix with a temp directory
+			// so the permission validation can succeed
+			tmpDir := getTmpDir(t)
+			viper.Set(key, tmpDir)
+		} else if key == "origin.exportvolumes" && isPosix {
+			// For POSIX origins, replace export volumes paths with temp directories
+			volumes := viper.GetStringSlice(key)
+			newVolumes := make([]string, len(volumes))
+			for i, vol := range volumes {
+				// Parse the volume format "storagePrefix:federationPrefix"
+				parts := strings.SplitN(vol, ":", 2)
+				if len(parts) == 2 {
+					tmpDir := getTmpDir(t)
+					newVolumes[i] = tmpDir + ":" + parts[1]
+				} else {
+					tmpDir := getTmpDir(t)
+					newVolumes[i] = tmpDir
+				}
+			}
+			viper.Set(key, newVolumes)
 		} else if key == "origin.exports" { // keys will be lowercased
 			// We also need to override paths for any exports that define "SHOULD-OVERRIDE-TEMPFILE"
+			// and for POSIX origins, replace storage prefixes with temp directories
 			exports := viper.Get(key).([]interface{})
 			for _, export := range exports {
 				exportMap := export.(map[string]interface{})
@@ -133,6 +174,10 @@ func setup(t *testing.T, config string, shouldError bool) []OriginExport {
 					if v == "SHOULD-OVERRIDE-TEMPFILE" {
 						tmpFile := getTmpFile(t)
 						exportMap[k] = tmpFile
+					} else if k == "storageprefix" && isPosix {
+						// For POSIX origins, replace storage prefixes with temp directories
+						// that have proper permissions for the daemon user
+						exportMap[k] = getTmpDir(t)
 					}
 				}
 			}
@@ -167,7 +212,8 @@ func TestGetExports(t *testing.T) {
 		exports := setup(t, envVarMimicConfig, false)
 
 		assert.Len(t, exports, 1, "expected 1 export")
-		assert.Equal(t, "/foo", exports[0].StoragePrefix, "expected /foo")
+		// Storage prefix is replaced with temp dir for permission validation tests
+		assert.True(t, strings.HasPrefix(exports[0].StoragePrefix, "/tmp/"), "expected storage prefix to be temp dir")
 
 		assert.False(t, exports[0].Capabilities.Writes, "expected no writes")
 		assert.True(t, exports[0].Capabilities.PublicReads, "expected public reads")
@@ -179,35 +225,27 @@ func TestGetExports(t *testing.T) {
 		defer ResetTestState()
 		exports := setup(t, multiExportValidConfig, false)
 
-		expectedExport1 := OriginExport{
-			StoragePrefix:    "/test1",
-			FederationPrefix: "/first/namespace",
-			Capabilities: server_structs.Capabilities{
-				Writes:      true,
-				PublicReads: true,
-				Listings:    true,
-				Reads:       true,
-				DirectReads: true,
-			},
-			IssuerUrls: []string{defaultIssuerUrl},
-		}
-
-		expectedExport2 := OriginExport{
-			StoragePrefix:    "/test2",
-			FederationPrefix: "/second/namespace",
-			Capabilities: server_structs.Capabilities{
-				Writes:      true,
-				PublicReads: false,
-				Listings:    false,
-				Reads:       false,
-				DirectReads: false,
-			},
-			IssuerUrls: []string{defaultIssuerUrl},
-		}
-
 		assert.Len(t, exports, 2, "expected 2 exports")
-		assert.Equal(t, expectedExport1, exports[0])
-		assert.Equal(t, expectedExport2, exports[1])
+
+		// Check first export (storage prefix is temp dir)
+		assert.True(t, strings.HasPrefix(exports[0].StoragePrefix, "/tmp/"), "expected storage prefix to be temp dir")
+		assert.Equal(t, "/first/namespace", exports[0].FederationPrefix)
+		assert.Equal(t, []string{defaultIssuerUrl}, exports[0].IssuerUrls)
+		assert.True(t, exports[0].Capabilities.Writes)
+		assert.True(t, exports[0].Capabilities.PublicReads)
+		assert.True(t, exports[0].Capabilities.Listings)
+		assert.True(t, exports[0].Capabilities.Reads)
+		assert.True(t, exports[0].Capabilities.DirectReads)
+
+		// Check second export (storage prefix is temp dir)
+		assert.True(t, strings.HasPrefix(exports[1].StoragePrefix, "/tmp/"), "expected storage prefix to be temp dir")
+		assert.Equal(t, "/second/namespace", exports[1].FederationPrefix)
+		assert.Equal(t, []string{defaultIssuerUrl}, exports[1].IssuerUrls)
+		assert.True(t, exports[1].Capabilities.Writes)
+		assert.False(t, exports[1].Capabilities.PublicReads)
+		assert.False(t, exports[1].Capabilities.Listings)
+		assert.False(t, exports[1].Capabilities.Reads)
+		assert.False(t, exports[1].Capabilities.DirectReads)
 	})
 
 	t.Run("testTrailingSlashRemovalPosix", func(t *testing.T) {
@@ -224,35 +262,27 @@ func TestGetExports(t *testing.T) {
 		defer ResetTestState()
 		exports := setup(t, exportVolumesValidConfig, false)
 
-		expectedExport1 := OriginExport{
-			StoragePrefix:    "/test1",
-			FederationPrefix: "/first/namespace",
-			Capabilities: server_structs.Capabilities{
-				Writes:      false,
-				PublicReads: false,
-				Listings:    true,
-				Reads:       true,
-				DirectReads: true,
-			},
-			IssuerUrls: []string{defaultIssuerUrl},
-		}
-
-		expectedExport2 := OriginExport{
-			StoragePrefix:    "/test2",
-			FederationPrefix: "/second/namespace",
-			Capabilities: server_structs.Capabilities{
-				Writes:      false,
-				PublicReads: false,
-				Listings:    true,
-				Reads:       true,
-				DirectReads: true,
-			},
-			IssuerUrls: []string{defaultIssuerUrl},
-		}
-
 		assert.Len(t, exports, 2, "expected 2 exports")
-		assert.Equal(t, expectedExport1, exports[0])
-		assert.Equal(t, expectedExport2, exports[1])
+
+		// Check first export (storage prefix is temp dir)
+		assert.True(t, strings.HasPrefix(exports[0].StoragePrefix, "/tmp/"), "expected storage prefix to be temp dir")
+		assert.Equal(t, "/first/namespace", exports[0].FederationPrefix)
+		assert.Equal(t, []string{defaultIssuerUrl}, exports[0].IssuerUrls)
+		assert.False(t, exports[0].Capabilities.Writes)
+		assert.False(t, exports[0].Capabilities.PublicReads)
+		assert.True(t, exports[0].Capabilities.Listings)
+		assert.True(t, exports[0].Capabilities.Reads)
+		assert.True(t, exports[0].Capabilities.DirectReads)
+
+		// Check second export (storage prefix is temp dir)
+		assert.True(t, strings.HasPrefix(exports[1].StoragePrefix, "/tmp/"), "expected storage prefix to be temp dir")
+		assert.Equal(t, "/second/namespace", exports[1].FederationPrefix)
+		assert.Equal(t, []string{defaultIssuerUrl}, exports[1].IssuerUrls)
+		assert.False(t, exports[1].Capabilities.Writes)
+		assert.False(t, exports[1].Capabilities.PublicReads)
+		assert.True(t, exports[1].Capabilities.Listings)
+		assert.True(t, exports[1].Capabilities.Reads)
+		assert.True(t, exports[1].Capabilities.DirectReads)
 	})
 
 	// When we have a single export volume, we also set a few viper variables that can be
@@ -261,24 +291,21 @@ func TestGetExports(t *testing.T) {
 		defer ResetTestState()
 		exports := setup(t, exportSingleVolumeConfig, false)
 
-		expectedExport := OriginExport{
-			StoragePrefix:    "/test1",
-			FederationPrefix: "/first/namespace",
-			Capabilities: server_structs.Capabilities{
-				Writes:      true,
-				PublicReads: true,
-				Listings:    false,
-				Reads:       true,
-				DirectReads: false,
-			},
-			IssuerUrls: []string{defaultIssuerUrl},
-		}
-
 		assert.Len(t, exports, 1, "expected 1 export")
-		assert.Equal(t, expectedExport, exports[0])
+
+		// Check export (storage prefix is temp dir)
+		assert.True(t, strings.HasPrefix(exports[0].StoragePrefix, "/tmp/"), "expected storage prefix to be temp dir")
+		assert.Equal(t, "/first/namespace", exports[0].FederationPrefix)
+		assert.Equal(t, []string{defaultIssuerUrl}, exports[0].IssuerUrls)
+		assert.True(t, exports[0].Capabilities.Writes)
+		assert.True(t, exports[0].Capabilities.PublicReads)
+		assert.False(t, exports[0].Capabilities.Listings)
+		assert.True(t, exports[0].Capabilities.Reads)
+		assert.False(t, exports[0].Capabilities.DirectReads)
 
 		// Now check that we properly set the other viper vars we should have
-		assert.Equal(t, "/test1", viper.GetString("Origin.StoragePrefix"))
+		// Note: StoragePrefix is a temp dir now
+		assert.True(t, strings.HasPrefix(viper.GetString("Origin.StoragePrefix"), "/tmp/"), "expected viper storage prefix to be temp dir")
 		assert.Equal(t, "/first/namespace", viper.GetString("Origin.FederationPrefix"))
 		assert.True(t, viper.GetBool("Origin.EnableReads"))
 		assert.True(t, viper.GetBool("Origin.EnableWrites"))
@@ -291,24 +318,22 @@ func TestGetExports(t *testing.T) {
 		defer ResetTestState()
 		exports := setup(t, singleExportBlockConfig, false)
 
-		expectedExport := OriginExport{
-			StoragePrefix:    "/test1",
-			FederationPrefix: "/first/namespace",
-			Capabilities: server_structs.Capabilities{
-				Writes:      false,
-				PublicReads: true,
-				Listings:    false,
-				Reads:       true,
-				DirectReads: true,
-			},
-			// No issuer is populated because there are no namespaces requiring it
-		}
-
 		assert.Len(t, exports, 1, "expected 1 export")
-		assert.Equal(t, expectedExport, exports[0])
+
+		// Check export (storage prefix is temp dir)
+		assert.True(t, strings.HasPrefix(exports[0].StoragePrefix, "/tmp/"), "expected storage prefix to be temp dir")
+		assert.Equal(t, "/first/namespace", exports[0].FederationPrefix)
+		// No issuer is populated because there are no namespaces requiring it
+		assert.Nil(t, exports[0].IssuerUrls)
+		assert.False(t, exports[0].Capabilities.Writes)
+		assert.True(t, exports[0].Capabilities.PublicReads)
+		assert.False(t, exports[0].Capabilities.Listings)
+		assert.True(t, exports[0].Capabilities.Reads)
+		assert.True(t, exports[0].Capabilities.DirectReads)
 
 		// Now check that we properly set the other viper vars we should have
-		assert.Equal(t, "/test1", viper.GetString("Origin.StoragePrefix"))
+		// Note: StoragePrefix is a temp dir now
+		assert.True(t, strings.HasPrefix(viper.GetString("Origin.StoragePrefix"), "/tmp/"))
 		assert.Equal(t, "/first/namespace", viper.GetString("Origin.FederationPrefix"))
 		assert.True(t, viper.GetBool("Origin.EnableReads"))
 		assert.False(t, viper.GetBool("Origin.EnableWrites"))
@@ -724,4 +749,183 @@ func TestFederationPrefixValidation(t *testing.T) {
 	runFedPrefixTest(t, "/caches/foo/bar", false) // Test prefix for caches
 	runFedPrefixTest(t, "/caches/example.org", false)
 	runFedPrefixTest(t, "/valid/prefix", true) // Test valid prefix
+}
+
+// TestValidatePosixPermissions tests the filesystem permission validation for POSIX origins.
+// These tests ensure that the origin correctly validates whether the XRootD daemon user has the
+// necessary permissions to perform operations specified by the export's capabilities.
+func TestValidatePosixPermissions(t *testing.T) {
+	// Test with non-existent path
+	t.Run("NonExistentPath", func(t *testing.T) {
+		caps := server_structs.Capabilities{Reads: true}
+		err := ValidatePosixPermissions("/nonexistent/path/that/does/not/exist", caps, "/test")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
+		assert.Contains(t, err.Error(), "does not exist")
+	})
+
+	// Test with a file instead of directory
+	t.Run("FileInsteadOfDirectory", func(t *testing.T) {
+		tmpFile := t.TempDir() + "/testfile"
+		file, err := os.Create(tmpFile)
+		require.NoError(t, err)
+		file.Close()
+
+		caps := server_structs.Capabilities{Reads: true}
+		err = ValidatePosixPermissions(tmpFile, caps, "/test")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
+		assert.Contains(t, err.Error(), "is not a directory")
+	})
+
+	// Test with full permissions (rwx) - all capabilities should pass
+	// Note: We use 0777 because tests run as root but the daemon user (xrootd) is different,
+	// so we need "others" permissions to be rwx for the xrootd user to have access.
+	t.Run("FullPermissions", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		err := os.Chmod(tmpDir, 0777) // rwx for everyone including "others" (daemon user)
+		require.NoError(t, err)
+
+		// Test reads capability
+		caps := server_structs.Capabilities{Reads: true}
+		err = ValidatePosixPermissions(tmpDir, caps, "/test")
+		assert.NoError(t, err)
+
+		// Test public reads capability
+		caps = server_structs.Capabilities{PublicReads: true}
+		err = ValidatePosixPermissions(tmpDir, caps, "/test")
+		assert.NoError(t, err)
+
+		// Test writes capability
+		caps = server_structs.Capabilities{Writes: true}
+		err = ValidatePosixPermissions(tmpDir, caps, "/test")
+		assert.NoError(t, err)
+
+		// Test listings capability
+		caps = server_structs.Capabilities{Listings: true}
+		err = ValidatePosixPermissions(tmpDir, caps, "/test")
+		assert.NoError(t, err)
+
+		// Test all capabilities together
+		caps = server_structs.Capabilities{
+			Reads:       true,
+			PublicReads: true,
+			Writes:      true,
+			Listings:    true,
+		}
+		err = ValidatePosixPermissions(tmpDir, caps, "/test")
+		assert.NoError(t, err)
+	})
+
+	// Test with no capabilities - should always pass (nothing to validate)
+	t.Run("NoCapabilities", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		// Even with restrictive permissions, no capabilities means no validation needed
+		err := os.Chmod(tmpDir, 0000)
+		require.NoError(t, err)
+		defer os.Chmod(tmpDir, 0755) // Restore for cleanup
+
+		caps := server_structs.Capabilities{}
+		err = ValidatePosixPermissions(tmpDir, caps, "/test")
+		assert.NoError(t, err)
+	})
+
+	// Test with read-only permissions (r-x) - writes should fail
+	t.Run("ReadOnlyPermissions", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		err := os.Chmod(tmpDir, 0555) // r-x r-x r-x
+		require.NoError(t, err)
+		defer os.Chmod(tmpDir, 0755) // Restore for cleanup
+
+		// Reads should pass
+		caps := server_structs.Capabilities{Reads: true}
+		err = ValidatePosixPermissions(tmpDir, caps, "/test")
+		assert.NoError(t, err)
+
+		// Listings should pass
+		caps = server_structs.Capabilities{Listings: true}
+		err = ValidatePosixPermissions(tmpDir, caps, "/test")
+		assert.NoError(t, err)
+
+		// Writes should fail
+		caps = server_structs.Capabilities{Writes: true}
+		err = ValidatePosixPermissions(tmpDir, caps, "/test")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
+		assert.Contains(t, err.Error(), "Writes")
+		assert.Contains(t, err.Error(), "write and execute")
+	})
+
+	// Test with write-only permissions (-wx) - reads and listings should fail
+	t.Run("WriteOnlyPermissions", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		err := os.Chmod(tmpDir, 0333) // -wx -wx -wx
+		require.NoError(t, err)
+		defer os.Chmod(tmpDir, 0755) // Restore for cleanup
+
+		// Writes should pass
+		caps := server_structs.Capabilities{Writes: true}
+		err = ValidatePosixPermissions(tmpDir, caps, "/test")
+		assert.NoError(t, err)
+
+		// Reads should fail
+		caps = server_structs.Capabilities{Reads: true}
+		err = ValidatePosixPermissions(tmpDir, caps, "/test")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
+		assert.Contains(t, err.Error(), "Reads")
+
+		// Listings should fail
+		caps = server_structs.Capabilities{Listings: true}
+		err = ValidatePosixPermissions(tmpDir, caps, "/test")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
+		assert.Contains(t, err.Error(), "Listings")
+	})
+
+	// Test with no execute permission - all capabilities requiring traversal should fail
+	t.Run("NoExecutePermission", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		err := os.Chmod(tmpDir, 0666) // rw- rw- rw-
+		require.NoError(t, err)
+		defer os.Chmod(tmpDir, 0755) // Restore for cleanup
+
+		// Reads should fail (needs execute for directory traversal)
+		caps := server_structs.Capabilities{Reads: true}
+		err = ValidatePosixPermissions(tmpDir, caps, "/test")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
+
+		// Writes should fail (needs execute for directory traversal)
+		caps = server_structs.Capabilities{Writes: true}
+		err = ValidatePosixPermissions(tmpDir, caps, "/test")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
+
+		// Listings should fail (needs execute for directory traversal)
+		caps = server_structs.Capabilities{Listings: true}
+		err = ValidatePosixPermissions(tmpDir, caps, "/test")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
+	})
+
+	// Test error message contains useful information
+	t.Run("ErrorMessageContent", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		err := os.Chmod(tmpDir, 0000) // --- --- ---
+		require.NoError(t, err)
+		defer os.Chmod(tmpDir, 0755) // Restore for cleanup
+
+		caps := server_structs.Capabilities{Reads: true}
+		err = ValidatePosixPermissions(tmpDir, caps, "/my/federation/prefix")
+		require.Error(t, err)
+
+		errStr := err.Error()
+		// Check that the error message contains useful debugging information
+		assert.Contains(t, errStr, tmpDir, "error should contain the storage path")
+		assert.Contains(t, errStr, "/my/federation/prefix", "error should contain the federation prefix")
+		assert.Contains(t, errStr, "uid=", "error should contain UID info")
+		assert.Contains(t, errStr, "gid=", "error should contain GID info")
+		assert.Contains(t, errStr, "permissions", "error should mention permissions")
+	})
 }

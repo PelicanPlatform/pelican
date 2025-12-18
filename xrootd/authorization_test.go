@@ -377,25 +377,18 @@ func TestAuthPoliciesFromLine(t *testing.T) {
 }
 
 // Helper function for other tests here who call server_utils.GetOriginExports() internally.
-// This function gets a temp dir for export StoragePrefixes, whose existence is validated
-// by server_utils.GetOriginExports().
-func getTmpFile(t *testing.T) string {
-	tmpFile := t.TempDir() + "/tmpfile"
+// This function gets a temp dir for export StoragePrefixes, whose existence and permissions
+// are validated by server_utils.GetOriginExports().
+func getTmpDir(t *testing.T) string {
+	tmpDir := t.TempDir()
 
-	// Create the file
-	file, err := os.Create(tmpFile)
+	// Set directory permissions to 777 so the daemon XRootD daemon user can access it
+	err := os.Chmod(tmpDir, 0777)
 	if err != nil {
-		t.Fatalf("Failed to create temp file: %v", err)
-	}
-	file.Close()
-
-	// Set file permissions to 777
-	err = os.Chmod(tmpFile, 0777)
-	if err != nil {
-		t.Fatalf("Failed to set file permissions: %v", err)
+		t.Fatalf("Failed to set directory permissions: %v", err)
 	}
 
-	return tmpFile
+	return tmpDir
 }
 
 // Helper function for other tests here who call server_utils.GetOriginExports() internally.
@@ -406,21 +399,23 @@ func setupExports(t *testing.T, config string) {
 	err := viper.ReadConfig(strings.NewReader(config))
 	require.NoError(t, err, "error reading config")
 	// Some keys need to be overridden because GetOriginExports validates things like filepaths by making
-	// sure the file exists and is readable by the process.
+	// sure the file exists and is readable by the process. For POSIX origins, we also need directories
+	// with proper permissions for the XRootD daemon user.
 	// Iterate through Origin.XXX keys and check for "<WILL BE REPLACED IN TEST>" in the value
 	for _, key := range viper.AllKeys() {
 		if strings.Contains(viper.GetString(key), "<WILL BE REPLACED IN TEST>") {
-			tmpFile := getTmpFile(t)
-			viper.Set(key, tmpFile)
+			tmpDir := getTmpDir(t)
+			viper.Set(key, tmpDir)
 		} else if key == "origin.exports" { // keys will be lowercased
-			// We also need to override paths for any exports that define "SHOULD-OVERRIDE-TEMPFILE"
+			// We also need to override paths for any exports that define "<WILL BE REPLACED IN TEST>"
 			exports := viper.Get(key).([]interface{})
 			for _, export := range exports {
 				exportMap := export.(map[string]interface{})
 				for k, v := range exportMap {
-					if v == "<WILL BE REPLACED IN TEST>" {
-						tmpFile := getTmpFile(t)
-						exportMap[k] = tmpFile
+					// Use strings.Contains because the value might have a leading "/" like "/<WILL BE REPLACED IN TEST>"
+					if vStr, ok := v.(string); ok && strings.Contains(vStr, "<WILL BE REPLACED IN TEST>") {
+						tmpDir := getTmpDir(t)
+						exportMap[k] = tmpDir
 					}
 				}
 			}
@@ -1087,7 +1082,7 @@ func TestMergeConfig(t *testing.T) {
 
 	viper.Set(param.Origin_RunLocation.GetName(), dirname)
 	viper.Set(param.Origin_Port.GetName(), 8443)
-	viper.Set(param.Origin_StoragePrefix.GetName(), "/")
+	viper.Set(param.Origin_StoragePrefix.GetName(), getTmpDir(t))
 	viper.Set(param.Origin_FederationPrefix.GetName(), "/")
 	viper.Set("ConfigDir", dirname)
 	// We don't inherit any defaults at this level of code -- in order to recognize
@@ -1308,6 +1303,21 @@ func TestGenerateOriginIssuer(t *testing.T) {
 			viper.SetConfigType("yaml")
 			err := viper.MergeConfig(strings.NewReader(tc.yamlConfig))
 			require.NoError(t, err, "error reading config")
+
+			// Replace storage prefixes with temp directories that have proper permissions
+			if exports, ok := viper.Get("origin.exports").([]interface{}); ok {
+				for _, export := range exports {
+					exportMap := export.(map[string]interface{})
+					for k, v := range exportMap {
+						if vStr, ok := v.(string); ok && strings.Contains(vStr, "<WILL BE REPLACED IN TEST>") {
+							tmpDir := getTmpDir(t)
+							exportMap[k] = tmpDir
+						}
+					}
+				}
+				viper.Set("origin.exports", exports)
+			}
+
 			err = config.InitServer(ctx, server_structs.OriginType)
 			require.NoError(t, err)
 
@@ -1570,7 +1580,7 @@ func TestGenerateFederationIssuer(t *testing.T) {
 			viper.Set(param.Origin_EnablePublicReads.GetName(), tc.PublicReads)
 			viper.Set(param.Origin_EnableListings.GetName(), false)
 			viper.Set(param.Origin_EnableWrites.GetName(), false)
-			viper.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter")
+			viper.Set(param.Origin_StoragePrefix.GetName(), getTmpDir(t))
 			viper.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar")
 			viper.Set(param.TLSSkipVerify.GetName(), true)
 
@@ -1604,7 +1614,9 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	viper.Set(param.Origin_RunLocation.GetName(), tmpDir)
 	viper.Set(param.Origin_SelfTest.GetName(), true)
 	viper.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar")
-	viper.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter")
+	// Create storage dir with permissions for XRootD daemon user
+	storageDir := getTmpDir(t)
+	viper.Set(param.Origin_StoragePrefix.GetName(), storageDir)
 	viper.Set(param.Server_Hostname.GetName(), "origin.example.com")
 	viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
 

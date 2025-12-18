@@ -55,8 +55,8 @@ func setupXrootd(t *testing.T, ctx context.Context, server server_structs.Server
 	viper.Set(param.Xrootd_RunLocation.GetName(), tmpDir)
 	viper.Set(param.Cache_RunLocation.GetName(), tmpDir)
 	viper.Set(param.Origin_RunLocation.GetName(), tmpDir)
-	viper.Set(param.Origin_StoragePrefix.GetName(), "/")
-	viper.Set(param.Origin_FederationPrefix.GetName(), "/")
+	viper.Set(param.Origin_StoragePrefix.GetName(), getTmpDir(t))
+	viper.Set(param.Origin_FederationPrefix.GetName(), "/test")
 	viper.Set(param.Server_IssuerUrl.GetName(), "https://my-xrootd.com:8444")
 
 	test_utils.MockFederationRoot(t, nil, nil)
@@ -295,7 +295,7 @@ func TestUpdateAuth(t *testing.T) {
 	scitokensName := filepath.Join(configDirname, "scitokens.cfg")
 	viper.Set(param.Xrootd_ScitokensConfig.GetName(), scitokensName)
 	viper.Set(param.Origin_FederationPrefix.GetName(), "/test")
-	viper.Set(param.Origin_StoragePrefix.GetName(), "/")
+	viper.Set(param.Origin_StoragePrefix.GetName(), getTmpDir(t))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
