@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+	"errors"
 	"os"
 	"time"
 
@@ -27,7 +28,9 @@ func LaunchXrdCurlStatsMonitoring(ctx context.Context, egrp *errgroup.Group) {
 			case <-ticker.C:
 				stats, err := os.ReadFile(param.Cache_ClientStatisticsLocation.GetString())
 				if err != nil {
-					log.Errorf("XrdCurlStats monitoring: failed to read stats file: %v", err)
+					if !errors.Is(err, os.ErrNotExist) {
+						log.Errorf("XrdCurlStats monitoring: failed to read stats file: %v", err)
+					}
 					continue
 				}
 				err = handleXrdcurlstatsPacket(stats)

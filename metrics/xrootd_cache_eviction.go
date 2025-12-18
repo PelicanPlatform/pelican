@@ -21,6 +21,7 @@ package metrics
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path"
 	"path/filepath"
@@ -344,7 +345,9 @@ func LaunchXrootdCacheEvictionMonitoring(ctx context.Context, egrp *errgroup.Gro
 				log.Trace("Xrootd cache eviction monitoring (attempting to ingest eviction data)")
 				stats, err := os.ReadFile(statsFile)
 				if err != nil {
-					log.Errorf("Xrootd cache eviction monitoring: failed to read stats file: %v", err)
+					if !errors.Is(err, os.ErrNotExist) {
+						log.Errorf("Xrootd cache eviction monitoring: failed to read stats file: %v", err)
+					}
 					continue
 				}
 				var dirStatistics DirStatistics
