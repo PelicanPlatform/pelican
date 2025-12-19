@@ -18,6 +18,8 @@ NewCFBEncrypter = "NewCFBEncrypter"
 ## HTCondor's daemon names follow the usual "{word} + 'd'" convention.
 StartdAttrs = "StartdAttrs"
 condor_startd = "condor_startd"
+STARTD = "STARTD"
+Startd = "Startd"
 
 [files]
 extend-exclude = [
