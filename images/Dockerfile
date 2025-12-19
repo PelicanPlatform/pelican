@@ -687,10 +687,22 @@ ENDRUN
 # Enable the CodeReady Linux Builder repository.
 RUN /usr/bin/crb enable
 
+# Add HTCondor repository for development and testing
+RUN <<ENDRUN
+  set -eux
+  cd /etc/yum.repos.d
+  wget -q https://htcss-downloads.chtc.wisc.edu/repo/25.x/htcondor-release-current.el9.noarch.rpm || true
+  if [ -f htcondor-release-current.el9.noarch.rpm ]; then
+    dnf install -y htcondor-release-current.el9.noarch.rpm
+    rm -f htcondor-release-current.el9.noarch.rpm
+  fi
+ENDRUN
+
 # Install a kitchen sink's worth of development tools and libraries.
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
   dnf install -y --enablerepo=osg-contrib \
         cmake3 \
+        condor \
         delve \
         docker \
         gdb \
