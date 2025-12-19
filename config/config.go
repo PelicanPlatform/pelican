@@ -890,6 +890,9 @@ func setLoggingInternal() error {
 	}
 	SetLogging(level)
 
+	// Initialize the log level manager with our custom functions after setting up logging
+	logging.InitLogLevelManager(nil, nil, SetLogging, GetEffectiveLogLevel)
+
 	return nil
 }
 

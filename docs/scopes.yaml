@@ -82,6 +82,15 @@ issuedBy: ["*"]
 acceptedBy: ["*"]
 ---
 ############################
+# Logging Management Scopes#
+############################
+name: pelican.logging_modify
+description: >-
+  Permits modification of server log levels at runtime
+issuedBy: ["*"]
+acceptedBy: ["*"]
+---
+############################
 #     Registry Scopes      #
 ############################
 name: registry.edit_registration

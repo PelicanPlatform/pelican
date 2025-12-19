@@ -598,6 +598,14 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.GET("/api/v1.0/tokens", AuthHandler, AdminAuthHandler, listApiTokens)
 	engine.GET("/api/v1.0/version", getVersionHandler)
 
+	// Logging level management API
+	loggingAPI := engine.Group("/api/v1.0/logging")
+	{
+		loggingAPI.POST("/level", AuthHandler, AdminAuthHandler, HandleSetLogLevel)
+		loggingAPI.GET("/level", AuthHandler, AdminAuthHandler, HandleGetLogLevel)
+		loggingAPI.DELETE("/level/:changeId", AuthHandler, AdminAuthHandler, HandleDeleteLogLevel)
+	}
+
 	downtimeAPI := engine.Group("/api/v1.0/downtime")
 	{
 		downtimeAPI.POST("", DowntimeAuthHandler, HandleCreateDowntime)

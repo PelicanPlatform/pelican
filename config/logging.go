@@ -108,6 +108,10 @@ func (fh *RegexpFilterHook) Fire(entry *log.Entry) (err error) {
 
 // Process a single log entry, updating it as necessary
 func (rt *regexpTransformHook) Fire(entry *log.Entry) (err error) {
+	// Skip if writer is io.Discard (test mode)
+	if rt.hook != nil && rt.hook.Writer == io.Discard {
+		return nil
+	}
 	for _, replace := range rt.replacements {
 		if replace.regex != nil {
 			entry.Message = replace.regex.ReplaceAllString(entry.Message, replace.template)
@@ -148,6 +152,15 @@ func initFilterLogging() {
 		// stress test; as this is called for each unit test run, this reduces the chance
 		// prior unit tests affect this one.
 		globalTransform.replacements[0].regex = regexp.MustCompile(bearerTokenRegexStr)
+	}
+}
+
+// ResetGlobalLoggingHooks resets the global logging hooks and flags for testing.
+// This should be called by test_utils.SetupTestLogging to ensure clean test state.
+func ResetGlobalLoggingHooks() {
+	addedGlobalFilters = false
+	if globalTransform != nil && globalTransform.hook != nil {
+		globalTransform.hook.Writer = io.Discard
 	}
 }
 
@@ -208,6 +221,31 @@ func SetLogging(logLevel log.Level) {
 	} else {
 		log.SetLevel(logLevel)
 	}
+}
+
+// GetEffectiveLogLevel returns the effective log level based on the transform hook
+func GetEffectiveLogLevel() log.Level {
+	if addedGlobalFilters && globalTransform != nil {
+		// Find the highest level in the hook
+		for _, lvl := range log.AllLevels {
+			found := false
+			for _, hookLvl := range globalTransform.hook.LogLevels {
+				if hookLvl == lvl {
+					found = true
+					break
+				}
+			}
+			if !found && lvl > log.PanicLevel {
+				// Return the level just below the first one not in the hook
+				for i := len(log.AllLevels) - 1; i >= 0; i-- {
+					if log.AllLevels[i] < lvl {
+						return log.AllLevels[i]
+					}
+				}
+			}
+		}
+	}
+	return log.GetLevel()
 }
 
 // Disable the logging censor functionality

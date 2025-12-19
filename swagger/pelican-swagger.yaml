@@ -4165,3 +4165,156 @@ paths:
           description: Internal server error
           schema:
             $ref: "#/definitions/ErrorModelV2"
+  /logging/level:
+    post:
+      tags:
+        - common
+      summary: Temporarily change server log level
+      description: "`Admin privilege Required`. Temporarily changes the server's log level for a specified duration. The log level will automatically revert after the duration expires."
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          description: Log level change request
+          required: true
+          schema:
+            type: object
+            required:
+              - level
+              - duration
+            properties:
+              level:
+                type: string
+                description: The log level to set
+                enum: [trace, debug, info, warn, warning, error, fatal, panic]
+                example: "debug"
+              duration:
+                type: integer
+                description: Duration in seconds for the temporary change (max 86400)
+                minimum: 1
+                maximum: 86400
+                example: 300
+              moduleName:
+                type: string
+                description: Optional module name for module-specific log level (reserved for future use)
+                example: ""
+      responses:
+        "200":
+          description: Log level changed successfully
+          schema:
+            type: object
+            properties:
+              changeId:
+                type: string
+                description: Unique identifier for this log level change
+                example: "550e8400-e29b-41d4-a716-446655440000"
+              level:
+                type: string
+                description: The log level that was set
+                example: "debug"
+              endTime:
+                type: string
+                format: date-time
+                description: When the log level will revert
+                example: "2025-12-19T19:15:00Z"
+              remainingSeconds:
+                type: integer
+                description: Seconds until the log level reverts
+                example: 300
+        "400":
+          description: Bad request (invalid level or duration)
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Admin privilege required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    get:
+      tags:
+        - common
+      summary: Get current log level status
+      description: "`Admin privilege Required`. Retrieves the current log level and any active temporary changes."
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: Current log level status
+          schema:
+            type: object
+            properties:
+              currentLevel:
+                type: string
+                description: The currently active log level
+                example: "debug"
+              baseLevel:
+                type: string
+                description: The base log level from configuration
+                example: "info"
+              activeChanges:
+                type: array
+                description: List of active temporary log level changes
+                items:
+                  type: object
+                  properties:
+                    changeId:
+                      type: string
+                      example: "550e8400-e29b-41d4-a716-446655440000"
+                    level:
+                      type: string
+                      example: "debug"
+                    moduleName:
+                      type: string
+                      example: ""
+                    endTime:
+                      type: string
+                      format: date-time
+                      example: "2025-12-19T19:15:00Z"
+                    remainingSeconds:
+                      type: integer
+                      example: 245
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Admin privilege required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /logging/level/{changeId}:
+    delete:
+      tags:
+        - common
+      summary: Remove a temporary log level change
+      description: "`Admin privilege Required`. Removes a temporary log level change before it expires naturally."
+      produces:
+        - application/json
+      parameters:
+        - in: path
+          name: changeId
+          description: The unique identifier of the log level change to remove
+          required: true
+          type: string
+      responses:
+        "200":
+          description: Log level change removed successfully
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Admin privilege required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Change ID not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"

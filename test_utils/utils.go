@@ -48,6 +48,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/logging"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 )
@@ -513,6 +514,9 @@ func SetupTestLogging(t *testing.T) func() {
 	}
 	globalLogMu.Unlock()
 
+	// Reset global logging hooks that may have been added by config initialization
+	config.ResetGlobalLoggingHooks()
+
 	// Disable standard output and use only the test hook
 	logrus.SetOutput(io.Discard)
 	logrus.StandardLogger().Hooks = make(logrus.LevelHooks)
@@ -531,6 +535,9 @@ func SetupTestLogging(t *testing.T) func() {
 
 	// Return cleanup function
 	return func() {
+		logging.ResetGlobalManager()
+		// Reset global logging hooks so they don't output during subsequent config initialization
+		config.ResetGlobalLoggingHooks()
 		logrus.SetOutput(originalOut)
 		logrus.StandardLogger().Hooks = originalHooks
 		logrus.SetFormatter(originalFormatter)
