@@ -579,6 +579,8 @@ func (bP BoolParam) GetBool() bool {
 			return config.Director.CheckOriginPresence
 		case "Director.EnableBroker":
 			return config.Director.EnableBroker
+		case "Director.EnableFederationMetadataHosting":
+			return config.Director.EnableFederationMetadataHosting
 		case "Director.EnableOIDC":
 			return config.Director.EnableOIDC
 		case "Director.EnableStat":
@@ -867,6 +869,7 @@ var allParameterNames = []string{
 	"Director.DbLocation",
 	"Director.DefaultResponse",
 	"Director.EnableBroker",
+	"Director.EnableFederationMetadataHosting",
 	"Director.EnableOIDC",
 	"Director.EnableStat",
 	"Director.FedTokenLifetime",
