@@ -345,6 +345,7 @@ func LaunchXrootdCacheEvictionMonitoring(ctx context.Context, egrp *errgroup.Gro
 				log.Trace("Xrootd cache eviction monitoring (attempting to ingest eviction data)")
 				stats, err := os.ReadFile(statsFile)
 				if err != nil {
+					log.Tracef("Xrootd cache eviction monitoring: failed to read stats file: %v", err)
 					if !errors.Is(err, os.ErrNotExist) {
 						log.Errorf("Xrootd cache eviction monitoring: failed to read stats file: %v", err)
 					}
