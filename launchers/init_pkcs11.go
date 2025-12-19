@@ -46,7 +46,7 @@ func initPKCS11(ctx context.Context, modules server_structs.ServerType) {
 		// Proxy handles its own cleanup when ctx is cancelled (see p11proxy.Start())
 	} else {
 		if param.Server_EnablePKCS11.GetBool() {
-			log.Warnf("PKCS#11 helper auto-disabled. Install openssl, p11-kit, p11-kit-modules, libengine-pkcs11-openssl to enable; or set %s=false to suppress this message.", param.Server_EnablePKCS11.GetName())
+			log.Warnf("PKCS#11 helper auto-disabled. Install openssl-pkcs11, p11-kit-server to enable; or set %s=false to suppress this message.", param.Server_EnablePKCS11.GetName())
 		}
 	}
 }

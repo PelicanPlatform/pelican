@@ -207,13 +207,13 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 	}
 	missing := make([]string, 0, 2)
 	if enginePath == "" {
-		missing = append(missing, "pkcs11 engine (libengine-pkcs11-openssl)")
+		missing = append(missing, "openssl-pkcs11")
 	}
 	if modulePath == "" {
-		missing = append(missing, "p11-kit client (p11-kit-client.so)")
+		missing = append(missing, "p11-kit-server")
 	}
 	if len(missing) > 0 {
-		log.Warnf("PKCS#11 helper disabled: missing %s. Install packages: openssl, p11-kit-modules, libengine-pkcs11-openssl (distro-specific)", strings.Join(missing, ", "))
+		log.Errorf("PKCS#11 helper disabled: missing %s. Please install these packages to use PKCS#11 mode.", strings.Join(missing, ", "))
 		_ = proxy.Stop()
 		disabled := Info{Enabled: false}
 		setCurrentInfo(disabled)
@@ -480,13 +480,12 @@ func startServer(ctx context.Context, signer crypto.Signer, cert *x509.Certifica
 				log.Tracef("p11proxy: accept error (listener likely closed): %v", err)
 				return
 			}
-			log.Tracef("p11proxy: accepted connection from remote=%v local=%v", conn.RemoteAddr(), conn.LocalAddr())
+			log.Debugf("p11proxy: accepted connection from remote to local=%s", conn.LocalAddr().String())
 			go func(c net.Conn) {
 				defer func() {
-					log.Tracef("p11proxy: closing connection from %v", c.RemoteAddr())
+					log.Tracef("p11proxy: closing connection")
 					c.Close()
 				}()
-				log.Infof("p11proxy: calling handler for connection from %v", c.RemoteAddr())
 				if err := h.Handle(c); err != nil {
 					// EOF errors during shutdown are expected, log at trace level
 					errMsg := err.Error()
@@ -497,7 +496,7 @@ func startServer(ctx context.Context, signer crypto.Signer, cert *x509.Certifica
 						log.Warnf("p11proxy: handler error: %v", err)
 					}
 				} else {
-					log.Tracef("p11proxy: handler completed successfully for %v", c.RemoteAddr())
+					log.Debugf("p11proxy: handler completed successfully")
 				}
 			}(conn)
 		}
