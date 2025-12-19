@@ -172,6 +172,10 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		return nil, err
 	}
 	cacheServer.SetPids(pids)
+	
+	// Register callback for xrootd logging configuration changes
+	// This must be done after LaunchDaemons so the daemons are registered
+	xrootd.RegisterXrootdLoggingCallback()
 
 	if param.Cache_EnableEvictionMonitoring.GetBool() {
 		metrics.LaunchXrootdCacheEvictionMonitoring(ctx, egrp)

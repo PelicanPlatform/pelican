@@ -309,6 +309,9 @@ func LaunchDaemons(ctx context.Context, launchers []daemon.Launcher, egrp *errgr
 		return
 	}
 
+	// Register xrootd daemons for potential restart on logging changes
+	RegisterXrootdDaemons(launchers, pids)
+
 	ticker := time.NewTicker(param.Xrootd_MaxStartupWait.GetDuration())
 	defer ticker.Stop()
 	select {

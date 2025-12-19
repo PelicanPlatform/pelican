@@ -156,6 +156,10 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		return nil, err
 	}
 	originServer.SetPids(pids)
+	
+	// Register callback for xrootd logging configuration changes
+	// This must be done after LaunchDaemons so the daemons are registered
+	xrootd.RegisterXrootdLoggingCallback()
 
 	// LaunchOriginDaemons may edit the viper config; these launched goroutines are purposely
 	// delayed until after the viper config is done.

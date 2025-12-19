@@ -33,7 +33,17 @@ import (
 var (
 	viperConfig atomic.Pointer[Config]
 	configMutex sync.Mutex
+	callbacks   map[string]ConfigCallback
+	callbackMux sync.RWMutex
 )
+
+// ConfigCallback is a function that is called when configuration changes.
+// It receives the old and new configuration.
+type ConfigCallback func(oldConfig, newConfig *Config)
+
+func init() {
+	callbacks = make(map[string]ConfigCallback)
+}
 
 // Refresh reloads the atomic cached configuration from viper's *global* instance.
 //
@@ -158,7 +168,12 @@ func decodeAndStoreConfig(v *viper.Viper) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	oldConfig := viperConfig.Load()
 	viperConfig.Store(newConfig)
+	
+	// Invoke callbacks with old and new config
+	invokeCallbacks(oldConfig, newConfig)
+	
 	return newConfig, nil
 }
 
@@ -326,8 +341,10 @@ func MultiSet(keyValues map[string]interface{}) error {
 		return err
 	}
 
-	// Update atomic pointer
+	// Update atomic pointer and invoke callbacks
+	oldConfig := viperConfig.Load()
 	viperConfig.Store(newConfig)
+	invokeCallbacks(oldConfig, newConfig)
 	return nil
 }
 
@@ -343,4 +360,36 @@ func Reset() error {
 	// Clear the config
 	viperConfig.Store(nil)
 	return nil
+}
+
+// RegisterCallback registers a callback function that will be called when
+// configuration is updated. The callback receives the old and new configuration.
+// This is useful for modules that need to react to configuration changes at runtime.
+// The key parameter is used to identify the callback and prevent duplicate registrations.
+// If a callback with the same key is already registered, it will be replaced.
+func RegisterCallback(key string, cb ConfigCallback) {
+	callbackMux.Lock()
+	defer callbackMux.Unlock()
+	callbacks[key] = cb
+}
+
+// ClearCallbacks clears all registered callbacks.
+// This is primarily intended for testing.
+func ClearCallbacks() {
+	callbackMux.Lock()
+	defer callbackMux.Unlock()
+	callbacks = make(map[string]ConfigCallback)
+}
+
+// invokeCallbacks calls all registered callbacks with the old and new configuration.
+// This should be called while holding configMutex.
+func invokeCallbacks(oldConfig, newConfig *Config) {
+	callbackMux.RLock()
+	defer callbackMux.RUnlock()
+	
+	for _, cb := range callbacks {
+		// Call each callback in a goroutine to avoid blocking config updates
+		// if a callback takes time to execute
+		go cb(oldConfig, newConfig)
+	}
 }

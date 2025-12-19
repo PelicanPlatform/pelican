@@ -263,3 +263,75 @@ func TestGetRuntimeConfigurable(t *testing.T) {
 	assert.True(t, exists, "TLSSkipVerify should exist in the map")
 	assert.False(t, tlsSkipVerify, "TLSSkipVerify should be false in the map")
 }
+
+func TestCallbackRegistration(t *testing.T) {
+	// Reset before test
+	Reset()
+	defer Reset()
+
+	// Track callback invocations
+	callbackInvoked := make(chan bool, 1)
+
+	// Register a callback
+	RegisterCallback("test1", func(oldConfig, newConfig *Config) {
+		// For this test, we'll just signal that the callback was invoked
+		callbackInvoked <- true
+	})
+
+	// Set a value to trigger callback
+	err := Set("TestKey", "TestValue")
+	require.NoError(t, err)
+
+	// Wait for callback to be invoked (with timeout)
+	select {
+	case <-callbackInvoked:
+	// Success
+	case <-time.After(1 * time.Second):
+		t.Fatal("Callback was not invoked")
+	}
+}
+
+func TestCallbackWithConfigChanges(t *testing.T) {
+	// Reset before test
+	Reset()
+	defer Reset()
+
+	// Track callback invocations with actual config values
+	callbackInvoked := make(chan bool, 1)
+	var receivedOldConfig, receivedNewConfig *Config
+
+	// Register a callback that captures the configs
+	RegisterCallback("test2", func(oldConfig, newConfig *Config) {
+		receivedOldConfig = oldConfig
+		receivedNewConfig = newConfig
+		callbackInvoked <- true
+	})
+
+	// Set initial value
+	err := Set("Logging.Level", "info")
+	require.NoError(t, err)
+
+	// Wait for first callback
+	select {
+	case <-callbackInvoked:
+	// First callback received
+	case <-time.After(1 * time.Second):
+		t.Fatal("First callback was not invoked")
+	}
+
+	// Change the value
+	err = Set("Logging.Level", "debug")
+	require.NoError(t, err)
+
+	// Wait for second callback
+	select {
+	case <-callbackInvoked:
+		// Second callback received - verify old and new configs differ
+		assert.NotNil(t, receivedOldConfig)
+		assert.NotNil(t, receivedNewConfig)
+		// The configs should be different instances
+		assert.NotEqual(t, receivedOldConfig, receivedNewConfig)
+	case <-time.After(1 * time.Second):
+		t.Fatal("Second callback was not invoked")
+	}
+}

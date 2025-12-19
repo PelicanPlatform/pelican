@@ -30,6 +30,16 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
+// assertNoUnknownKeyLogs validates that no log entry mentions unknown configuration keys.
+// The logging callback can emit other messages (for example, when parsing log levels),
+// so the checks target only the unknown-key warnings.
+func assertNoUnknownKeyLogs(t *testing.T, entries []*logrus.Entry) {
+	t.Helper()
+	for _, entry := range entries {
+		assert.NotContains(t, entry.Message, "Unknown configuration keys found")
+	}
+}
+
 // Test that Pelican notifies users about unrecognized configuration keys.
 func TestBadConfigKeys(t *testing.T) {
 	t.Cleanup(func() { ResetConfig() })
@@ -45,7 +55,7 @@ func TestBadConfigKeys(t *testing.T) {
 		require.NoError(t, param.Set("Origin.FederationPrefix", "/a/prefix"))
 		InitConfigInternal(logrus.DebugLevel)
 
-		require.Nil(t, hook.LastEntry())
+		assertNoUnknownKeyLogs(t, hook.AllEntries())
 	})
 
 	t.Run("testRecognizedEnvKey", func(t *testing.T) {
@@ -54,7 +64,7 @@ func TestBadConfigKeys(t *testing.T) {
 		defer os.Unsetenv("PELICAN_ORIGIN_FEDERATIONPREFIX")
 		InitConfigInternal(logrus.DebugLevel)
 
-		require.Nil(t, hook.LastEntry())
+		assertNoUnknownKeyLogs(t, hook.AllEntries())
 	})
 
 	t.Run("testBadViperKey", func(t *testing.T) {
