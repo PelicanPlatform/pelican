@@ -2971,9 +2971,13 @@ description: |+
 
   If the OIDC auto-discovery failed, Pelican will fall back to use individual endpoints set in the configuration. For
   any unset endpoints, Pelican will use default values, which are from CILogon.
+  
+  **Note**: If you explicitly set the OIDC endpoints (AuthorizationEndpoint, TokenEndpoint, etc.), those values will
+  take precedence over auto-discovery. This is useful for OAuth2 providers like GitHub that don't support OIDC discovery.
 
   For CILogon, it's https://cilogon.org
   For Globus, it's https://auth.globus.org
+  For GitHub OAuth2, set this to https://github.com and explicitly configure the individual endpoints
 type: url
 default: https://cilogon.org
 components: ["registry", "origin", "cache", "director"]
