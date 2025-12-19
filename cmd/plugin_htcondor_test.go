@@ -98,13 +98,13 @@ Origin:
 	// Build the pelican binary to use as the plugin
 	t.Log("Building pelican binary for plugin...")
 	pelicanBinary := filepath.Join(tempDir, "pelican")
-	buildCmd := exec.Command("go", "build", "-o", pelicanBinary, ".")
-	buildCmd.Dir = filepath.Join(filepath.Dir(tempDir), "..", "pelican")
-	// Try to find the repo root
+	
+	// Find the repository root
 	repoRoot, err := findRepoRoot()
-	if err == nil {
-		buildCmd.Dir = repoRoot
-	}
+	require.NoError(t, err, "Failed to find git repository root")
+	
+	buildCmd := exec.Command("go", "build", "-o", pelicanBinary, ".")
+	buildCmd.Dir = repoRoot
 	output, err := buildCmd.CombinedOutput()
 	if err != nil {
 		t.Logf("Build output: %s", string(output))
@@ -145,19 +145,19 @@ Origin:
 
 	// Create an executable script for the job
 	scriptPath := filepath.Join(jobDir, "test-script.sh")
-	scriptContent := `#!/bin/bash
+	scriptContent := fmt.Sprintf(`#!/bin/bash
 echo "Job is running"
 echo "Current directory: $(pwd)"
 echo "Files in current directory:"
 ls -la
 echo "Content of input file:"
-cat test-input.txt || echo "Failed to read input file"
+cat %s || echo "Failed to read input file"
 echo "Creating output file..."
 echo "Output from HTCondor job" > test-output.txt
 echo "Listing directory again:"
 ls -la
 echo "Job completed"
-`
+`, testFilename)
 	require.NoError(t, os.WriteFile(scriptPath, []byte(scriptContent), 0755))
 
 	// Create HTCondor submit file
@@ -327,6 +327,10 @@ exec %s plugin transfer "$@"
 }
 
 // findFreePort finds an available port by asking the OS to allocate one
+// Note: There is a small race condition where another process could claim
+// the port between when we close the listener and when it's used. However,
+// this is acceptable for tests as the probability is low and tests will
+// fail cleanly if it happens.
 func findFreePort() int {
 	// Let the OS allocate a free port
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
