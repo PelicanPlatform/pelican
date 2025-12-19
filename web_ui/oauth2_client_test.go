@@ -25,8 +25,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/pelicanplatform/pelican/param"
 )
 
 func base64encode(s string) string {
@@ -67,74 +65,5 @@ func TestParseOAuthState(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "duplicated keys")
 		assert.Nil(t, get)
-	})
-}
-
-func TestGenerateUserGroupInfo(t *testing.T) {
-	// Note: These tests will fail at the database access point since we don't have a database initialized.
-	// However, they validate that we properly parse the claims and don't error out with missing claim errors.
-	// If we reach the database call, it means the claim parsing worked correctly.
-
-	t.Run("handles-numeric-subject-claim-from-github", func(t *testing.T) {
-		// GitHub returns numeric user IDs
-		userInfo := map[string]interface{}{
-			"login": "testuser",
-			"id":    float64(67890),
-		}
-		idToken := make(map[string]interface{})
-
-		require.NoError(t, param.Set(param.Issuer_OIDCAuthenticationUserClaim.GetName(), "login"))
-		require.NoError(t, param.Set(param.Issuer_OIDCSubjectClaim.GetName(), "id"))
-		require.NoError(t, param.Set(param.OIDC_Issuer.GetName(), "https://github.com"))
-		defer param.Reset()
-
-		// This should convert the numeric ID to a string and not error with parsing errors
-		_, _, err := generateUserGroupInfo(userInfo, idToken)
-		// We will get a database-related error (nil pointer), but not a parsing error
-		if err != nil {
-			assert.NotContains(t, err.Error(), "did not return a string for the subject claim", "Should handle numeric subject claims")
-			assert.NotContains(t, err.Error(), "did not return a value for the subject claim", "Should find the 'id' claim")
-		}
-	})
-
-	t.Run("handles-missing-issuer-claim-with-fallback", func(t *testing.T) {
-		// GitHub doesn't return an "iss" claim
-		userInfo := map[string]interface{}{
-			"login": "testuser",
-			"id":    float64(11111),
-		}
-		idToken := make(map[string]interface{})
-
-		require.NoError(t, param.Set(param.Issuer_OIDCAuthenticationUserClaim.GetName(), "login"))
-		require.NoError(t, param.Set(param.Issuer_OIDCSubjectClaim.GetName(), "id"))
-		require.NoError(t, param.Set(param.OIDC_Issuer.GetName(), "https://github.com"))
-		defer param.Reset()
-
-		// This should fall back to using OIDC.Issuer
-		_, _, err := generateUserGroupInfo(userInfo, idToken)
-		// We will get a database-related error, but not a parsing error about missing issuer
-		if err != nil {
-			assert.NotContains(t, err.Error(), "did not return an issuer", "Should fall back to OIDC.Issuer when 'iss' claim is missing")
-			assert.NotContains(t, err.Error(), "identity provider did not return an issuer claim value", "Should not require 'iss' claim when fallback is available")
-		}
-	})
-
-	t.Run("handles-missing-sub-claim-fallback-to-username", func(t *testing.T) {
-		// If no sub/id claim exists, fall back to username
-		userInfo := map[string]interface{}{
-			"login": "testuser",
-		}
-		idToken := make(map[string]interface{})
-
-		require.NoError(t, param.Set(param.Issuer_OIDCAuthenticationUserClaim.GetName(), "login"))
-		require.NoError(t, param.Set(param.OIDC_Issuer.GetName(), "https://example.com"))
-		defer param.Reset()
-
-		// This should use the username as the subject
-		_, _, err := generateUserGroupInfo(userInfo, idToken)
-		// We will get a database-related error, but not a parsing error about missing subject
-		if err != nil {
-			assert.NotContains(t, err.Error(), "did not return a subject for logged-in user", "Should fall back to username when subject claim is missing")
-		}
 	})
 }

@@ -1,0 +1,50 @@
+# Example configuration for using GitHub OAuth2 with Pelican
+#
+# GitHub uses OAuth2 (not OIDC), so you need to explicitly configure
+# the endpoints and claim names. This example shows how to set up
+# Pelican to authenticate users via GitHub.
+#
+# Prerequisites:
+# 1. Create a GitHub OAuth App at https://github.com/settings/developers
+# 2. Set the callback URL to: https://your-server.example.com/api/v1.0/auth/oauth/callback
+# 3. Note your Client ID and Client Secret
+
+OIDC:
+  # Set the issuer to GitHub (used as fallback for issuer claim)
+  Issuer: https://github.com
+  
+  # Explicitly configure OAuth2 endpoints (GitHub doesn't support OIDC discovery)
+  AuthorizationEndpoint: https://github.com/login/oauth/authorize
+  TokenEndpoint: https://github.com/login/oauth/access_token
+  UserInfoEndpoint: https://api.github.com/user
+  # Note: DeviceAuthEndpoint is required for registry but GitHub doesn't support it
+  # If you're not running a registry, you can omit this
+  DeviceAuthEndpoint: https://github.com/login/device/code
+  
+  # Your GitHub OAuth App credentials
+  ClientID: your-github-client-id
+  ClientSecretFile: /path/to/client-secret-file
+  
+  # GitHub-specific scopes (adjust as needed)
+  Scopes:
+    - user
+    - read:org
+
+Issuer:
+  # Configure which claims to use from GitHub's user info response
+  # GitHub returns "login" for username instead of the OIDC standard "sub"
+  OIDCAuthenticationUserClaim: login
+  
+  # GitHub returns "id" (numeric) instead of the OIDC standard "sub"
+  OIDCSubjectClaim: id
+  
+  # GitHub doesn't return an "iss" claim, so this setting tells Pelican
+  # to fall back to OIDC.Issuer (configured above)
+  OIDCIssuerClaim: iss
+  
+  # Optional: GitHub doesn't provide group information via OAuth2
+  # You can use file-based or internal group management instead
+  GroupSource: internal  # or "file" or "none"
+
+Server:
+  ExternalWebUrl: https://your-server.example.com
