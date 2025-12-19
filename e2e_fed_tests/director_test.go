@@ -349,7 +349,7 @@ func TestDirectorMetadataHosting(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			viper.Set(param.Director_EnableFederationMetadataHosting.GetName(), tt.enableHosting)
+			require.NoError(t, param.Set(param.Director_EnableFederationMetadataHosting.GetName(), tt.enableHosting))
 			_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
 
 			ctx := context.Background()
