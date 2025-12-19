@@ -649,6 +649,8 @@ func (bP BoolParam) GetBool() bool {
 			return config.Registry.RequireOriginApproval
 		case "Server.DropPrivileges":
 			return config.Server.DropPrivileges
+		case "Server.EnablePKCS11":
+			return config.Server.EnablePKCS11
 		case "Server.EnablePprof":
 			return config.Server.EnablePprof
 		case "Server.EnableUI":
@@ -1039,6 +1041,7 @@ var allParameterNames = []string{
 	"Server.DbLocation",
 	"Server.DirectorUrls",
 	"Server.DropPrivileges",
+	"Server.EnablePKCS11",
 	"Server.EnablePprof",
 	"Server.EnableUI",
 	"Server.ExternalWebUrl",
