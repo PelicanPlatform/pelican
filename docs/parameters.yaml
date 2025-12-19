@@ -68,6 +68,7 @@ description: |+
 type: bool
 default: false
 components: ["cache", "director", "origin", "registry"]
+runtime_configurable: false
 ---
 name: IssuerKey
 description: |+
@@ -200,6 +201,7 @@ default: none
 client_default: warn
 server_default: info
 components: ["*"]
+runtime_configurable: true
 ---
 name: Logging.LogLocation
 description: |+
