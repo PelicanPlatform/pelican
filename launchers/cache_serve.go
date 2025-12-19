@@ -111,12 +111,6 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		cache.LaunchFedTokManager(ctx, egrp, cacheServer)
 	}
 
-	if param.Cache_EnableEvictionMonitoring.GetBool() {
-		metrics.LaunchXrootdCacheEvictionMonitoring(ctx, egrp)
-	}
-
-	metrics.LaunchXrdCurlStatsMonitoring(ctx, egrp)
-
 	concLimit := param.Cache_Concurrency.GetInt()
 	if concLimit > 0 {
 		server_utils.LaunchConcurrencyMonitoring(ctx, egrp, cacheServer.GetServerType())
@@ -164,6 +158,13 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		return nil, err
 	}
 	cacheServer.SetPids(pids)
+
+	if param.Cache_EnableEvictionMonitoring.GetBool() {
+		metrics.LaunchXrootdCacheEvictionMonitoring(ctx, egrp)
+	}
+
+	metrics.LaunchXrdCurlStatsMonitoring(ctx, egrp)
+
 	return cacheServer, nil
 }
 
