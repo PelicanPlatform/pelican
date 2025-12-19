@@ -257,7 +257,9 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 			}
 		}
 		// Set the mount to our export path now that everything is symlinked
-		viper.Set("Xrootd.Mount", exportPath)
+		if err := param.Set("Xrootd.Mount", exportPath); err != nil {
+			return err
+		}
 	}
 
 	if param.Origin_SelfTest.GetBool() {
@@ -394,7 +396,9 @@ func CheckCacheXrootdEnv(server server_structs.XRootDServer, uid int, gid int) e
 			discoveryUrl.Scheme = "pelican"
 			discoveryUrl.Path = ""
 			discoveryUrl.RawQuery = ""
-			viper.Set("Cache.PSSOrigin", discoveryUrl.String())
+			if err := param.Set("Cache.PSSOrigin", discoveryUrl.String()); err != nil {
+				return err
+			}
 		} else {
 			return errors.Wrapf(err, "Failed to parse discovery URL %s", discoveryUrlStr)
 		}
@@ -408,7 +412,9 @@ func CheckCacheXrootdEnv(server server_structs.XRootDServer, uid int, gid int) e
 				return errors.New("The Federation.DirectorUrl's path is non-empty, ensure the Federation.DirectorUrl has the format <host>:<port>")
 			}
 			directorUrl.Scheme = "pelican"
-			viper.Set("Cache.PSSOrigin", directorUrl.String())
+			if err := param.Set("Cache.PSSOrigin", directorUrl.String()); err != nil {
+				return err
+			}
 		} else {
 			return errors.Wrapf(err, "Failed to parse director URL %s", directorUrlStr)
 		}
@@ -545,7 +551,9 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 			if _, err := file.WriteString(robotsTxt); err != nil {
 				return errors.Wrap(err, "Failed to write out a default robots.txt file")
 			}
-			viper.Set("Xrootd.RobotsTxtFile", newPath)
+			if err := param.Set("Xrootd.RobotsTxtFile", newPath); err != nil {
+				return err
+			}
 		} else {
 			return err
 		}
@@ -1181,7 +1189,9 @@ func SetUpMonitoring(ctx context.Context, egrp *errgroup.Group) error {
 		}
 	}
 
-	viper.Set("Xrootd.LocalMonitoringPort", monitorPort)
+	if err := param.Set("Xrootd.LocalMonitoringPort", monitorPort); err != nil {
+		return err
+	}
 
 	return nil
 }

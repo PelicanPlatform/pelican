@@ -32,11 +32,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -156,8 +156,8 @@ func TestHandleWildcard(t *testing.T) {
 	for _, tc := range mockApprovalTcs {
 		t.Run(tc.Name, func(t *testing.T) {
 			server_utils.ResetTestState()
-			viper.Set("Registry.RequireCacheApproval", tc.CacheApprovedOnly)
-			viper.Set("Registry.RequireOriginApproval", tc.OriginApprovedOnly)
+			require.NoError(t, param.Set("Registry.RequireCacheApproval", tc.CacheApprovedOnly))
+			require.NoError(t, param.Set("Registry.RequireOriginApproval", tc.OriginApprovedOnly))
 
 			mockPrefix := "/testnamespace/foo"
 			if tc.IsCache {

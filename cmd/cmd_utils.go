@@ -24,7 +24,6 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/param"
 )
@@ -38,7 +37,9 @@ func commaFlagsListToViperSlice(cmd *cobra.Command, flags map[string]string) {
 			for _, value := range strings.Split(flagValue, ",") {
 				trimmedValues = append(trimmedValues, strings.TrimSpace(value))
 			}
-			viper.Set(viperName, trimmedValues)
+			if err := param.Set(viperName, trimmedValues); err != nil {
+				cobra.CheckErr(err)
+			}
 		}
 	}
 }

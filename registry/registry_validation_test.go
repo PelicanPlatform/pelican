@@ -22,10 +22,10 @@ import (
 	"testing"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -246,7 +246,7 @@ func TestValidateKeyChaining(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("off-param-no-check", func(t *testing.T) {
-		viper.Set("Registry.RequireKeyChaining", false)
+		require.NoError(t, param.Set("Registry.RequireKeyChaining", false))
 		superspaces, subspaces, _, _, err := namespaceSupSubChecks("/foo/barz")
 		assert.NoError(t, err)
 		assert.Len(t, superspaces, 1)
@@ -258,7 +258,7 @@ func TestValidateKeyChaining(t *testing.T) {
 	})
 
 	t.Run("on-param-does-check", func(t *testing.T) {
-		viper.Set("Registry.RequireKeyChaining", true)
+		require.NoError(t, param.Set("Registry.RequireKeyChaining", true))
 		_, _, validErr, serverErr := validateKeyChaining("/foo/barz", jwkFoo)
 		// Same public key as /foo shouldn't give error
 		assert.NoError(t, serverErr)
@@ -272,7 +272,7 @@ func TestValidateKeyChaining(t *testing.T) {
 	})
 
 	t.Run("on-param-ignore-cache", func(t *testing.T) {
-		viper.Set("Registry.RequireKeyChaining", true)
+		require.NoError(t, param.Set("Registry.RequireKeyChaining", true))
 		superspaces, subspaces, _, _, err := namespaceSupSubChecks("/cache/newCache")
 		assert.NoError(t, err)
 		assert.Empty(t, superspaces)

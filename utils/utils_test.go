@@ -22,9 +22,10 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 func TestSliceToSet(t *testing.T) {
@@ -52,8 +53,8 @@ func TestSliceToSet(t *testing.T) {
 
 func TestValidateWatermark(t *testing.T) {
 	// Can't use config.ResetConfig() due to circ dependency
-	viper.Reset()
-	defer viper.Reset()
+	require.NoError(t, param.Reset())
+	defer func() { require.NoError(t, param.Reset()) }()
 
 	t.Parallel()
 	testCases := []struct {
@@ -172,7 +173,7 @@ func TestValidateWatermark(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			viper.Set(tc.name, tc.wm)
+			require.NoError(t, param.Set(tc.name, tc.wm))
 			val, isAbs, err := ValidateWatermark(tc.name, tc.requireSuffix)
 			if tc.expectErr {
 				assert.Equal(t, 0.0, val)

@@ -30,7 +30,6 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -70,10 +69,10 @@ func TestDirectorShutdown(t *testing.T) {
 		}
 	}))
 	dirAd.AdvertiseUrl = ts.URL
-	viper.Set(param.Server_DirectorUrls.GetName(), ts.URL)
+	require.NoError(t, param.Set(param.Server_DirectorUrls.GetName(), ts.URL))
 	defer ts.Close()
 
-	viper.Set(param.Server_AdLifetime.GetName(), "100ms")
+	require.NoError(t, param.Set(param.Server_AdLifetime.GetName(), "100ms"))
 	fed_test_utils.NewFedTest(t, "")
 	time.Sleep(time.Duration(110 * time.Millisecond))
 	ads := server_utils.GetDirectorAds()
@@ -113,10 +112,10 @@ func TestExpirationDirector(t *testing.T) {
 		}
 	}))
 	dirAd.AdvertiseUrl = ts.URL
-	viper.Set(param.Server_DirectorUrls.GetName(), ts.URL)
+	require.NoError(t, param.Set(param.Server_DirectorUrls.GetName(), ts.URL))
 	defer ts.Close()
 
-	viper.Set(param.Server_AdLifetime.GetName(), "100ms")
+	require.NoError(t, param.Set(param.Server_AdLifetime.GetName(), "100ms"))
 	fed_test_utils.NewFedTest(t, "")
 	time.Sleep(time.Duration(500 * time.Millisecond))
 	assert.Less(t, 10, int(listDirectorCount.Load()))
@@ -154,7 +153,7 @@ func TestForwardDirector(t *testing.T) {
 		}
 	}))
 	dirAd.AdvertiseUrl = ts.URL
-	viper.Set(param.Server_DirectorUrls.GetName(), ts.URL)
+	require.NoError(t, param.Set(param.Server_DirectorUrls.GetName(), ts.URL))
 	defer ts.Close()
 
 	fed_test_utils.NewFedTest(t, "")

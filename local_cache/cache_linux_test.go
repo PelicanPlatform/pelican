@@ -32,7 +32,6 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -55,7 +54,7 @@ func TestPurge(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	server_utils.ResetTestState()
-	viper.Set("LocalCache.Size", "5MB")
+	require.NoError(t, param.Set("LocalCache.Size", "5MB"))
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
@@ -118,9 +117,9 @@ func TestForcePurge(t *testing.T) {
 
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
-	viper.Set("LocalCache.Size", "5MB")
+	require.NoError(t, param.Set("LocalCache.Size", "5MB"))
 	// Decrease the low water mark so invoking purge will result in 3 files in the cache.
-	viper.Set("LocalCache.LowWaterMarkPercentage", "80")
+	require.NoError(t, param.Set("LocalCache.LowWaterMarkPercentage", "80"))
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
@@ -215,18 +214,18 @@ func TestPurgeFirst(t *testing.T) {
 	server_utils.ResetTestState()
 
 	configDir := t.TempDir()
-	viper.Set("ConfigDir", configDir)
+	require.NoError(t, param.Set("ConfigDir", configDir))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
 	dataDir := t.TempDir()
-	viper.Set(param.Logging_Level.GetName(), "debug")
-	viper.Set(param.LocalCache_DataLocation.GetName(), dataDir)
-	viper.Set(param.LocalCache_Size.GetName(), "10MB")
-	viper.Set(param.LocalCache_LowWaterMarkPercentage.GetName(), "50")
-	viper.Set(param.Server_StartupTimeout.GetName(), "10s")
-	viper.Set(param.Server_AdvertisementInterval.GetName(), "10m")
-	viper.Set(param.Server_AdLifetime.GetName(), "10m")
+	require.NoError(t, param.Set(param.Logging_Level.GetName(), "debug"))
+	require.NoError(t, param.Set(param.LocalCache_DataLocation.GetName(), dataDir))
+	require.NoError(t, param.Set(param.LocalCache_Size.GetName(), "10MB"))
+	require.NoError(t, param.Set(param.LocalCache_LowWaterMarkPercentage.GetName(), "50"))
+	require.NoError(t, param.Set(param.Server_StartupTimeout.GetName(), "10s"))
+	require.NoError(t, param.Set(param.Server_AdvertisementInterval.GetName(), "10m"))
+	require.NoError(t, param.Set(param.Server_AdLifetime.GetName(), "10m"))
 
 	// Create test files and sentinel files
 	testFiles := []struct {

@@ -30,7 +30,6 @@ import (
 	"testing"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -226,7 +225,7 @@ func TestQueryDirector(t *testing.T) {
 func TestGetDirectorInfoForPath(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
-	viper.Set(param.Client_DirectorRetries.GetName(), 3)
+	require.NoError(t, param.Set(param.Client_DirectorRetries.GetName(), 3))
 
 	// Craft the Director's response
 	directorHeaders := make(map[string]string)

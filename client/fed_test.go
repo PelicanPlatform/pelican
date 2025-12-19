@@ -35,7 +35,6 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -70,7 +69,7 @@ var (
 // Helper function to get a temporary token file
 // NOTE: when used make sure to call os.Remove() on the file
 func getTempToken(t *testing.T) (tempToken *os.File, tkn string) {
-	viper.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir()))
 
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
@@ -124,7 +123,7 @@ func TestGetAndPutAuth(t *testing.T) {
 	defer os.Remove(tempToken.Name())
 
 	// Disable progress bars to not reuse the same mpb instance
-	viper.Set("Logging.DisableProgressBars", true)
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 	// This tests object get/put with a pelican:// url
 	t.Run("testPelicanObjectPutAndGetWithPelicanUrl", func(t *testing.T) {
@@ -318,7 +317,7 @@ func TestCopyAuth(t *testing.T) {
 	defer tempToken.Close()
 	defer os.Remove(tempToken.Name())
 	// Disable progress bars to not reuse the same mpb instance
-	viper.Set("Logging.DisableProgressBars", true)
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 	// This tests object get/put with a pelican:// url
 	t.Run("testPelicanObjectCopyWithPelicanUrl", func(t *testing.T) {
@@ -475,7 +474,7 @@ func TestGetPublicRead(t *testing.T) {
 			assert.NoError(t, err, "Error writing to temp file")
 			tempFile.Close()
 
-			viper.Set("Logging.DisableProgressBars", true)
+			require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 			// Set path for object to upload/download
 			tempPath := tempFile.Name()
@@ -520,7 +519,7 @@ func TestObjectStat(t *testing.T) {
 	defer os.Remove(tempToken.Name())
 
 	// Disable progress bars to not reuse the same mpb instance
-	viper.Set("Logging.DisableProgressBars", true)
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 	// Make directories for test within origin exports
 	destDir1 := filepath.Join(fed.Exports[0].StoragePrefix, "test")
@@ -604,7 +603,7 @@ func TestObjectStat(t *testing.T) {
 		assert.NoError(t, err, "Error writing to temp file")
 		tempFile.Close()
 
-		viper.Set("Logging.DisableProgressBars", true)
+		require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
@@ -624,7 +623,7 @@ func TestDirectReads(t *testing.T) {
 	t.Run("testDirectReadsSuccess", func(t *testing.T) {
 		server_utils.ResetTestState()
 
-		viper.Set("Origin.EnableDirectReads", true)
+		require.NoError(t, param.Set("Origin.EnableDirectReads", true))
 		fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
 		discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
 		require.NoError(t, err)
@@ -638,7 +637,7 @@ func TestDirectReads(t *testing.T) {
 		assert.NoError(t, err, "Error writing to temp file")
 		tempFile.Close()
 
-		viper.Set("Logging.DisableProgressBars", true)
+		require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
@@ -679,7 +678,7 @@ func TestDirectReads(t *testing.T) {
 		assert.NoError(t, err, "Error writing to temp file")
 		tempFile.Close()
 
-		viper.Set("Logging.DisableProgressBars", true)
+		require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
@@ -710,7 +709,7 @@ func TestDirectReads(t *testing.T) {
 		assert.NoError(t, err, "Error writing to temp file")
 		tempFile.Close()
 
-		viper.Set("Logging.DisableProgressBars", true)
+		require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
@@ -795,7 +794,7 @@ func TestObjectList(t *testing.T) {
 	defer os.Remove(tempToken.Name())
 
 	// Disable progress bars to not reuse the same mpb instance
-	viper.Set("Logging.DisableProgressBars", true)
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 	// Make directories for test within origin exports
 	destDir1 := filepath.Join(fed.Exports[0].StoragePrefix, "test")
@@ -897,7 +896,7 @@ func TestObjectList(t *testing.T) {
 // 		}
 // 	}))
 // 	defer srv.Close()
-// 	viper.Set("Origin.HttpServiceUrl", srv.URL)
+// 	param.Set("Origin.HttpServiceUrl", srv.URL)
 
 // 	fed := fed_test_utils.NewFedTest(t, httpsOriginConfig)
 // 	storageName = fed.Exports[0].StoragePrefix + "/hello_world"
@@ -983,7 +982,7 @@ func TestTokenGenerate(t *testing.T) {
 	tempFile.Close()
 
 	// Disable progress bars to not reuse the same mpb instance
-	viper.Set("Logging.DisableProgressBars", true)
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 	// Set path for object to upload/download
 	for _, export := range fed.Exports {
@@ -1028,7 +1027,7 @@ func TestPrestage(t *testing.T) {
 	defer tempToken.Close()
 	defer os.Remove(tempToken.Name())
 	// Disable progress bars to not reuse the same mpb instance
-	viper.Set("Logging.DisableProgressBars", true)
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 	oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
 	assert.NoError(t, err)

@@ -32,7 +32,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/common/route"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -65,8 +64,8 @@ func TestPrometheusUnprotected(t *testing.T) {
 	tDir := t.TempDir()
 	kDir := filepath.Join(tDir, "testKeyDir")
 	//Setup a private key
-	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
-	viper.Set("ConfigDir", t.TempDir())
+	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), kDir))
+	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
@@ -75,10 +74,10 @@ func TestPrometheusUnprotected(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, r := gin.CreateTestContext(w)
 
-	viper.Set(param.Monitoring_PromQLAuthorization.GetName(), false)
+	require.NoError(t, param.Set(param.Monitoring_PromQLAuthorization.GetName(), false))
 
 	// Set ExternalWebUrl so that IssuerCheck can pass
-	viper.Set(param.Server_ExternalWebUrl.GetName(), "https://test-origin.org:8444")
+	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "https://test-origin.org:8444"))
 
 	c.Request = &http.Request{
 		URL: &url.URL{},
@@ -112,8 +111,8 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	tDir := t.TempDir()
 	kDir := filepath.Join(tDir, "testKeyDir")
 	// Setup a private key directory
-	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
-	viper.Set("ConfigDir", t.TempDir())
+	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), kDir))
+	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
@@ -122,10 +121,10 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, r := gin.CreateTestContext(w)
 
-	viper.Set(param.Monitoring_PromQLAuthorization.GetName(), true)
+	require.NoError(t, param.Set(param.Monitoring_PromQLAuthorization.GetName(), true))
 
 	// Set ExternalWebUrl so that IssuerCheck can pass
-	viper.Set(param.Server_ExternalWebUrl.GetName(), "https://test-origin.org:8444")
+	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "https://test-origin.org:8444"))
 
 	c.Request = &http.Request{
 		URL: &url.URL{},
@@ -165,8 +164,8 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	defer cancel()
 
 	server_utils.ResetTestState()
-	viper.Set(param.Server_ExternalWebUrl.GetName(), "https://test-origin.org:8444")
-	viper.Set(param.Monitoring_PromQLAuthorization.GetName(), true)
+	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "https://test-origin.org:8444"))
+	require.NoError(t, param.Set(param.Monitoring_PromQLAuthorization.GetName(), true))
 
 	av1 := route.New().WithPrefix("/api/v1.0/prometheus")
 
@@ -175,7 +174,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	keysDir := filepath.Join(tDir, "testKeys")
 
 	//Setup a private key and a token
-	viper.Set(param.IssuerKeysDirectory.GetName(), keysDir)
+	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), keysDir))
 
 	// Setting the ConfigDir to t.TempDir() causes issues with this test on Windows because
 	// the process tries to clean up the directory before the test is done with it.
@@ -184,7 +183,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	t.Cleanup(func() {
 		os.RemoveAll(configDir)
 	})
-	viper.Set("ConfigDir", configDir)
+	require.NoError(t, param.Set("ConfigDir", configDir))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err = config.InitServer(ctx, server_structs.OriginType)
@@ -241,7 +240,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 		// Create a new private key by re-initializing config to point at a new temp dir
 		k2dir := filepath.Join(tDir, "whatever", "testDir2")
-		viper.Set("IssuerKeysDirectory", k2dir)
+		require.NoError(t, param.Set("IssuerKeysDirectory", k2dir))
 		err = config.InitServer(ctx, server_structs.OriginType)
 		require.NoError(t, err)
 
@@ -249,7 +248,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 		// Re-init the config again, this time pointing at the original key
 		config.ResetIssuerPrivateKeys()
-		viper.Set("IssuerKeysDirectory", keysDir)
+		require.NoError(t, param.Set("IssuerKeysDirectory", keysDir))
 		err = config.InitServer(ctx, server_structs.OriginType)
 		require.NoError(t, err)
 

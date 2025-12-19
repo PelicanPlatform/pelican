@@ -44,6 +44,7 @@ type GoField struct {
 type TemplateData struct {
 	GeneratedConfig         string
 	GeneratedConfigWithType string
+	AllParamNames           []string
 }
 
 var requiredKeys = [3]string{"description", "default", "type"}
@@ -84,6 +85,7 @@ func GenParamEnum() {
 	boolParamMap := make(map[string]string)
 	durationParamMap := make(map[string]string)
 	objectParamMap := make(map[string]string)
+	allParamNames := make([]string, 0, 512)
 
 	// Skip the first parameter (ConfigBase is special)
 	// Save the first parameter separately in order to do "<pname> Param = iota" for the enums
@@ -176,7 +178,10 @@ func GenParamEnum() {
 				"change the type in parameters.yaml to be an already-handled type", pType)
 			panic(errMsg)
 		}
+		allParamNames = append(allParamNames, rawName)
 	}
+
+	sort.Strings(allParamNames)
 
 	// Create the file to be generated
 	f, err := os.Create("../param/parameters.go")
@@ -194,7 +199,8 @@ func GenParamEnum() {
 		DurationMap    map[string]string
 		ObjectMap      map[string]string
 		DeprecatedMap  map[string][]string
-	}{StringMap: stringParamMap, StringSliceMap: stringSliceParamMap, IntMap: intParamMap, BoolMap: boolParamMap, DurationMap: durationParamMap, ObjectMap: objectParamMap, DeprecatedMap: deprecatedMap})
+		AllParamNames  []string
+	}{StringMap: stringParamMap, StringSliceMap: stringSliceParamMap, IntMap: intParamMap, BoolMap: boolParamMap, DurationMap: durationParamMap, ObjectMap: objectParamMap, DeprecatedMap: deprecatedMap, AllParamNames: allParamNames})
 
 	if err != nil {
 		panic(err)
@@ -399,6 +405,9 @@ func GenParamStruct() {
 	}
 	defer f.Close()
 
+	// AllParameterNames is the list of all config keys generated from
+	// docs/parameters.yaml. It is primarily used to bind environment variables
+	// so that env-only overrides are included in viper.AllSettings().
 	err = structTemplate.Execute(f, data)
 
 	if err != nil {
@@ -468,7 +477,14 @@ func GetDeprecated() map[string][]string {
 }
 
 func (sP StringParam) GetString() string {
-	return viper.GetString(sP.name)
+	config := getOrCreateConfig()
+	switch sP.name {
+		{{- range $key, $value := .StringMap}}
+		case {{printf "%q" $value}}:
+			return config.{{$value}}
+		{{- end}}
+	}
+	return ""
 }
 
 func (sP StringParam) GetName() string {
@@ -480,7 +496,14 @@ func (sP StringParam) IsSet() bool {
 }
 
 func (slP StringSliceParam) GetStringSlice() []string {
-	return viper.GetStringSlice(slP.name)
+	config := getOrCreateConfig()
+	switch slP.name {
+		{{- range $key, $value := .StringSliceMap}}
+		case {{printf "%q" $value}}:
+			return config.{{$value}}
+		{{- end}}
+	}
+	return nil
 }
 
 func (slP StringSliceParam) GetName() string {
@@ -492,7 +515,14 @@ func (slP StringSliceParam) IsSet() bool {
 }
 
 func (iP IntParam) GetInt() int {
-	return viper.GetInt(iP.name)
+	config := getOrCreateConfig()
+	switch iP.name {
+		{{- range $key, $value := .IntMap}}
+		case {{printf "%q" $value}}:
+			return config.{{$value}}
+		{{- end}}
+	}
+	return 0
 }
 
 func (iP IntParam) GetName() string {
@@ -504,7 +534,14 @@ func (iP IntParam) IsSet() bool {
 }
 
 func (bP BoolParam) GetBool() bool {
-	return viper.GetBool(bP.name)
+	config := getOrCreateConfig()
+	switch bP.name {
+		{{- range $key, $value := .BoolMap}}
+		case {{printf "%q" $value}}:
+			return config.{{$value}}
+		{{- end}}
+	}
+	return false
 }
 
 func (bP BoolParam) GetName() string {
@@ -516,7 +553,14 @@ func (bP BoolParam) IsSet() bool {
 }
 
 func (dP DurationParam) GetDuration() time.Duration {
-	return viper.GetDuration(dP.name)
+	config := getOrCreateConfig()
+	switch dP.name {
+		{{- range $key, $value := .DurationMap}}
+		case {{printf "%q" $value}}:
+			return config.{{$value}}
+		{{- end}}
+	}
+	return 0
 }
 
 func (dP DurationParam) GetName() string {
@@ -537,6 +581,15 @@ func (oP ObjectParam) GetName() string {
 
 func (oP ObjectParam) IsSet() bool {
 	return viper.IsSet(oP.name)
+}
+
+// allParameterNames is the list of all config keys generated from
+// docs/parameters.yaml. It is primarily used to bind environment variables so
+// that env-only overrides are included in viper.AllSettings().
+var allParameterNames = []string{
+	{{- range $i, $name := .AllParamNames}}
+	{{printf "%q" $name}},
+	{{- end}}
 }
 
 var ({{range $key, $value := .StringMap}}
