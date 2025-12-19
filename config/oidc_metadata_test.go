@@ -90,7 +90,9 @@ func TestGetOIDCProvider(t *testing.T) {
 func TestGetMetadataRespectsExplicitEndpoints(t *testing.T) {
 	t.Cleanup(func() {
 		ResetConfig()
-		// Reset the sync.Once
+		// Note: Resetting sync.Once in tests is generally not recommended due to potential race conditions.
+		// However, in this case, we run tests sequentially and need to re-trigger metadata discovery.
+		// In production code, sync.Once ensures getMetadata() is only called once per process lifetime.
 		onceMetadata = sync.Once{}
 		metadataError = nil
 		oidcMetadata = nil
@@ -98,7 +100,7 @@ func TestGetMetadataRespectsExplicitEndpoints(t *testing.T) {
 
 	t.Run("explicit-endpoints-not-overridden-by-issuer", func(t *testing.T) {
 		ResetConfig()
-		// Reset the sync.Once so we can test getMetadata again
+		// Reset the sync.Once so we can test getMetadata again in this isolated test
 		onceMetadata = sync.Once{}
 		metadataError = nil
 		oidcMetadata = nil
