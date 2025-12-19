@@ -25,26 +25,25 @@ import (
 	_ "embed"
 
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/p11proxy"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
-func initPKCS11(ctx context.Context, egrp *errgroup.Group, modules server_structs.ServerType) {
+func initPKCS11(ctx context.Context, modules server_structs.ServerType) {
 	proxy, err := p11proxy.Start(ctx, p11proxy.Options{}, modules)
 	if err != nil {
 		log.Warnf("PKCS#11 helper failed to initialize: %v", err)
 	} else if proxy != nil && proxy.Info().Enabled {
 		info := proxy.Info()
-		log.Infof("PKCS#11 helper enabled. For manual test, use OpenSSL in another shell:")
-		log.Infof("  export P11_KIT_SERVER_ADDRESS=%s", info.ServerAddress)
-		log.Infof("  export OPENSSL_CONF=%s", info.OpenSSLConfPath)
-		log.Infof("  openssl s_server -accept 8500 -cert %s -key \"%s\" -engine pkcs11 -keyform engine -quiet", info.CertPath, info.PKCS11URL)
-		log.Infof("And in another shell:")
-		log.Infof("  openssl s_client -connect 127.0.0.1:8500 -servername localhost -CAfile %s", param.Server_TLSCACertificateFile.GetString())
-		egrp.Go(func() error { <-ctx.Done(); return proxy.Stop() })
+		log.Debugf("PKCS#11 helper enabled. For manual test, use OpenSSL in another shell:")
+		log.Debugf("  export P11_KIT_SERVER_ADDRESS=%s", info.ServerAddress)
+		log.Debugf("  export OPENSSL_CONF=%s", info.OpenSSLConfPath)
+		log.Debugf("  openssl s_server -accept 8500 -cert %s -key \"%s\" -engine pkcs11 -keyform engine -quiet", info.CertPath, info.PKCS11URL)
+		log.Debugf("And in another shell:")
+		log.Debugf("  openssl s_client -connect 127.0.0.1:8500 -servername localhost -CAfile %s", param.Server_TLSCACertificateFile.GetString())
+		// Proxy handles its own cleanup when ctx is cancelled (see p11proxy.Start())
 	} else {
 		if param.Server_EnablePKCS11.GetBool() {
 			log.Warnf("PKCS#11 helper auto-disabled. Install openssl, p11-kit, p11-kit-modules, libengine-pkcs11-openssl to enable; or set %s=false to suppress this message.", param.Server_EnablePKCS11.GetName())

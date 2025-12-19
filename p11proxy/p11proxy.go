@@ -54,10 +54,12 @@ type Options struct {
 // Proxy represents a running p11proxy helper instance.
 // Use Stop() to cleanup resources.
 type Proxy struct {
-	info   Info
-	tmpDir string
-	sock   string
-	ln     net.Listener
+	info    Info
+	tmpDir  string
+	sock    string
+	ln      net.Listener
+	stopped bool
+	mu      sync.Mutex
 }
 
 var (
@@ -96,10 +98,20 @@ func captureFirstError(dst *error, err error) {
 }
 
 // Stop removes the Unix socket (if present) and temp files.
+// It is safe to call multiple times.
 func (p *Proxy) Stop() error {
 	if p == nil {
 		return nil
 	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Already stopped, return immediately
+	if p.stopped {
+		return nil
+	}
+	p.stopped = true
+
 	var firstErr error
 	// Close the listener
 	if p.ln != nil {
@@ -107,7 +119,7 @@ func (p *Proxy) Stop() error {
 	}
 	// Remove the socket file
 	if p.sock != "" {
-		if err := os.Remove(p.sock); err != nil {
+		if err := os.Remove(p.sock); err != nil && !os.IsNotExist(err) {
 			captureFirstError(&firstErr, err)
 			log.Warnf("p11proxy: failed to remove socket %s: %v", p.sock, err)
 		}
@@ -476,7 +488,14 @@ func startServer(ctx context.Context, signer crypto.Signer, cert *x509.Certifica
 				}()
 				log.Infof("p11proxy: calling handler for connection from %v", c.RemoteAddr())
 				if err := h.Handle(c); err != nil {
-					log.Warnf("p11proxy: handler error from %v: %v", c.RemoteAddr(), err)
+					// EOF errors during shutdown are expected, log at trace level
+					errMsg := err.Error()
+					// p11-kit library wraps the EOF error differently, preventing errors.Is() from detecting it
+					if strings.Contains(errMsg, "EOF") {
+						log.Tracef("p11proxy: connection closed: %v", err)
+					} else {
+						log.Warnf("p11proxy: handler error: %v", err)
+					}
 				} else {
 					log.Tracef("p11proxy: handler completed successfully for %v", c.RemoteAddr())
 				}
