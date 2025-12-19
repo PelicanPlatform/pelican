@@ -21,8 +21,6 @@
 package fed_tests
 
 import (
-	"fmt"
-
 	"context"
 	"crypto/tls"
 	_ "embed"
@@ -357,8 +355,6 @@ func TestDirectorMetadataHosting(t *testing.T) {
 
 			fedInfo, err := config.GetFederation(ctx)
 			require.NoError(t, err)
-
-			fmt.Printf("\n\n\nFED INFO: %+v\n\n\n", fedInfo)
 
 			client := newInsecureClient()
 
