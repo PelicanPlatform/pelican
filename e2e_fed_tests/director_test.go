@@ -343,7 +343,7 @@ func TestDirectorMetadataHosting(t *testing.T) {
 		{
 			name:           "director-does-not-host-metadata",
 			enableHosting:  false,
-			expectedStatus: http.StatusNotFound,
+			expectedStatus: http.StatusGone,
 		},
 	}
 
