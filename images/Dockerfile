@@ -691,10 +691,11 @@ RUN /usr/bin/crb enable
 RUN <<ENDRUN
   set -eux
   cd /etc/yum.repos.d
-  wget -q https://htcss-downloads.chtc.wisc.edu/repo/25.x/htcondor-release-current.el9.noarch.rpm || true
-  if [ -f htcondor-release-current.el9.noarch.rpm ]; then
+  if wget -q https://htcss-downloads.chtc.wisc.edu/repo/25.x/htcondor-release-current.el9.noarch.rpm; then
     dnf install -y htcondor-release-current.el9.noarch.rpm
     rm -f htcondor-release-current.el9.noarch.rpm
+  else
+    echo "Warning: Failed to download HTCondor repository RPM, HTCondor will not be available"
   fi
 ENDRUN
 

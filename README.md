@@ -121,3 +121,28 @@ builds:
 ```
 make pelican-dev-build
 ```
+
+## Running Integration Tests
+
+Pelican includes integration tests that verify the plugin works correctly with HTCondor.
+These tests require HTCondor to be installed and available in your PATH.
+
+### Running HTCondor Integration Tests
+
+To run the HTCondor integration tests:
+
+```bash
+go test -tags=integration ./cmd -run TestHTCondorPlugin
+```
+
+The test will:
+1. Start a mini HTCondor instance with the Pelican plugin configured
+2. Start a data federation (director, registry, origin)
+3. Submit a job that transfers files using the Pelican plugin
+4. Verify the job completes successfully
+
+**Prerequisites:**
+- HTCondor must be installed with `condor_master` available in PATH
+- The test will be skipped automatically if HTCondor is not found
+
+**Note:** The integration tests use random ports and shared port support to allow multiple tests to run in parallel.

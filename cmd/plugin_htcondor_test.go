@@ -23,12 +23,10 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
-	"net/url"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -36,7 +34,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -329,11 +326,16 @@ exec %s plugin transfer "$@"
 	return nil
 }
 
-// findFreePort finds an available port
+// findFreePort finds an available port by asking the OS to allocate one
 func findFreePort() int {
-	// Simple approach: use a random high port
-	// In a real scenario, we'd check if it's actually free
-	return 19000 + (os.Getpid() % 10000)
+	// Let the OS allocate a free port
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		// Fallback to a high random port if we can't bind
+		return 19000 + (os.Getpid() % 10000)
+	}
+	defer listener.Close()
+	return listener.Addr().(*net.TCPAddr).Port
 }
 
 // startCondorMaster starts the condor_master daemon
