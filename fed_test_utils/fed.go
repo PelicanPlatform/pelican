@@ -287,7 +287,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	}
 	discoveryServer = httptest.NewTLSServer(http.HandlerFunc(handler))
 	t.Cleanup(discoveryServer.Close)
-	
+
 	// Set the discovery URL in both viper and the global fed info object
 	require.NoError(t, param.Set(param.Federation_DiscoveryUrl.GetName(), discoveryServer.URL))
 	fedInfo, err := config.GetFederation(ctx)
