@@ -249,7 +249,14 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 			sub = subStr
 		} else if subNum, ok := subIface.(float64); ok {
 			// Some providers (like GitHub) return a numeric ID
-			sub = fmt.Sprintf("%.0f", subNum)
+			// Convert to int64 first to avoid floating-point precision issues
+			if subNum >= 0 && subNum <= float64(^uint64(0)>>1) && subNum == float64(int64(subNum)) {
+				sub = fmt.Sprintf("%d", int64(subNum))
+			} else {
+				log.Errorf("User info endpoint returned an out-of-range numeric value for the subject claim '%s': %v", subClaim, subNum)
+				err = errors.New("identity provider returned an invalid numeric subject for logged-in user")
+				return
+			}
 		} else {
 			log.Errorf("User info endpoint returned a non-string/non-numeric value for the subject claim '%s'", subClaim)
 			err = errors.New("identity provider did not return a valid subject for logged-in user")
@@ -280,7 +287,12 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 			authEndpoint := param.OIDC_AuthorizationEndpoint.GetString()
 			parsedURL, parseErr := url.Parse(authEndpoint)
 			if parseErr == nil {
-				issuerClaimValue = parsedURL.Scheme + "://" + parsedURL.Host
+				// Construct the issuer URL from scheme and host
+				issuerURL := &url.URL{
+					Scheme: parsedURL.Scheme,
+					Host:   parsedURL.Host,
+				}
+				issuerClaimValue = issuerURL.String()
 				log.Debugf("Using authorization endpoint host as issuer: %s", issuerClaimValue)
 			} else {
 				log.Errorf("Failed to parse authorization endpoint to determine issuer")
