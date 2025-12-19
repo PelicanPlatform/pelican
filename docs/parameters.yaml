@@ -2738,6 +2738,28 @@ type: string
 default: sub
 components: ["origin"]
 ---
+name: Issuer.OIDCSubjectClaim
+description: |+
+  The claim to be used as the unique subject identifier for the user.
+  For OIDC providers, this is typically "sub".
+  For OAuth2 providers like GitHub, this might be "id".
+  
+  If the claim is not found in the user info response, the system will fall back to using the username.
+  If the claim value is numeric, it will be converted to a string.
+type: string
+default: sub
+components: ["origin", "registry", "cache", "director"]
+---
+name: Issuer.OIDCIssuerClaim
+description: |+
+  The claim to be used to identify the authentication provider (issuer).
+  For OIDC providers, this is typically "iss".
+  For OAuth2 providers that don't provide an issuer claim, the system will fall back to using
+  the value of OIDC.Issuer or the hostname from OIDC.AuthorizationEndpoint.
+type: string
+default: iss
+components: ["origin", "registry", "cache", "director"]
+---
 name: Issuer.UserStripDomain
 description: |+
   Some OIDC issuers generate a username of the form user@domain (such as `john.doe@gmail.com`); when
