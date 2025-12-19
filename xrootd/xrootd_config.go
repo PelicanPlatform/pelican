@@ -50,6 +50,7 @@ import (
 	"github.com/pelicanplatform/pelican/lotman"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/origin"
+	"github.com/pelicanplatform/pelican/p11proxy"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -580,7 +581,19 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 	return nil
 }
 
-func writeX509Credentials(fp *os.File) error {
+// Returns the path to the runtime TLS certificate file for the given server type
+func runtimeTLSCertPath(isCache bool) string {
+	base := param.Origin_RunLocation.GetString()
+	if isCache {
+		base = param.Cache_RunLocation.GetString()
+	}
+	if param.Server_DropPrivileges.GetBool() {
+		base = filepath.Join(base, "pelican")
+	}
+	return filepath.Join(base, "copied-tls-creds.crt")
+}
+
+func writeX509Credentials(fp *os.File, includeKey bool) error {
 	srcFile, err := os.Open(param.Server_TLSCertificateChain.GetString())
 	if err != nil {
 		return errors.Wrap(err, "Failure when opening source certificate for xrootd")
@@ -589,6 +602,10 @@ func writeX509Credentials(fp *os.File) error {
 
 	if _, err = io.Copy(fp, srcFile); err != nil {
 		return errors.Wrapf(err, "Failure when copying source certificate for xrootd")
+	}
+
+	if !includeKey {
+		return nil
 	}
 
 	if _, err = fp.Write([]byte{'\n', '\n'}); err != nil {
@@ -640,7 +657,9 @@ func copyXrootdCertificates(server server_structs.XRootDServer) error {
 		return errors.Wrap(err, "Failure when chown'ing certificate key pair file for xrootd")
 	}
 
-	if err = writeX509Credentials(destFile); err != nil {
+	pkcs11Info := p11proxy.CurrentInfo()
+	pkcs11Active := param.Server_EnablePKCS11.GetBool() && pkcs11Info.Enabled
+	if err = writeX509Credentials(destFile, !pkcs11Active); err != nil {
 		return err
 	}
 
@@ -668,11 +687,7 @@ func dropPrivilegeCopy(server server_structs.XRootDServer) error {
 		return builtin_errors.Join(err, errBadKeyPair)
 	}
 
-	destination := filepath.Join(param.Origin_RunLocation.GetString(), "pelican")
-	if server.GetServerType().IsEnabled(server_structs.CacheType) {
-		destination = filepath.Join(param.Cache_RunLocation.GetString(), "pelican")
-	}
-	destination = filepath.Join(destination, "copied-tls-creds.crt")
+	destination := runtimeTLSCertPath(server.GetServerType().IsEnabled(server_structs.CacheType))
 
 	// If the file already exists, delete it so that OpenFile will create a new one.
 	// Because the destination file is read-only (0400), user cannot update it (os.O_TRUNC will hit an permission denied error).
@@ -687,7 +702,9 @@ func dropPrivilegeCopy(server server_structs.XRootDServer) error {
 	}
 	defer destFile.Close()
 
-	if err = writeX509Credentials(destFile); err != nil {
+	pkcs11Info := p11proxy.CurrentInfo()
+	pkcs11Active := param.Server_EnablePKCS11.GetBool() && pkcs11Info.Enabled
+	if err = writeX509Credentials(destFile, !pkcs11Active); err != nil {
 		return err
 	}
 
@@ -1079,6 +1096,20 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 	log.Debugf("A total of %d CA certificates were written", caCount)
 	if caCount > 0 {
 		xrdConfig.Server.TLSCACertificateFile = runtimeCAs
+	}
+
+	runtimeCertPath := runtimeTLSCertPath(!isOrigin)
+	xrdConfig.Server.TLSCertificateChain = runtimeCertPath
+
+	pkcs11Info := p11proxy.CurrentInfo()
+	pkcs11Active := param.Server_EnablePKCS11.GetBool() && pkcs11Info.Enabled
+	if pkcs11Active {
+		xrdConfig.Server.TLSKey = pkcs11Info.PKCS11URL
+	} else {
+		if param.Server_EnablePKCS11.GetBool() && !pkcs11Info.Enabled {
+			log.Warn("Server.EnablePKCS11 is true but the PKCS#11 helper is not active; falling back to the local TLS key file for XRootD")
+		}
+		xrdConfig.Server.TLSKey = runtimeCertPath
 	}
 
 	if isOrigin {

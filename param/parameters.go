@@ -649,6 +649,8 @@ func (bP BoolParam) GetBool() bool {
 			return config.Registry.RequireOriginApproval
 		case "Server.DropPrivileges":
 			return config.Server.DropPrivileges
+		case "Server.EnablePKCS11":
+			return config.Server.EnablePKCS11
 		case "Server.EnablePprof":
 			return config.Server.EnablePprof
 		case "Server.EnableUI":
@@ -1039,6 +1041,7 @@ var allParameterNames = []string{
 	"Server.DbLocation",
 	"Server.DirectorUrls",
 	"Server.DropPrivileges",
+	"Server.EnablePKCS11",
 	"Server.EnablePprof",
 	"Server.EnableUI",
 	"Server.ExternalWebUrl",
@@ -1398,6 +1401,7 @@ var (
 	Registry_RequireKeyChaining = BoolParam{"Registry.RequireKeyChaining"}
 	Registry_RequireOriginApproval = BoolParam{"Registry.RequireOriginApproval"}
 	Server_DropPrivileges = BoolParam{"Server.DropPrivileges"}
+	Server_EnablePKCS11 = BoolParam{"Server.EnablePKCS11"}
 	Server_EnablePprof = BoolParam{"Server.EnablePprof"}
 	Server_EnableUI = BoolParam{"Server.EnableUI"}
 	Server_HealthMonitoringPublic = BoolParam{"Server.HealthMonitoringPublic"}
