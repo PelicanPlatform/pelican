@@ -3494,3 +3494,25 @@ func TestWrapDownloadError(t *testing.T) {
 		assert.True(t, errors.Is(wrappedErr, unknownErr), "Should preserve original error")
 	})
 }
+
+func TestIsIdleConnectionError(t *testing.T) {
+	t.Run("detects_idle_connection_error", func(t *testing.T) {
+		err := errors.New("http: server closed idle connection")
+		assert.True(t, isIdleConnectionError(err), "Should detect idle connection error")
+	})
+
+	t.Run("detects_wrapped_idle_connection_error", func(t *testing.T) {
+		innerErr := errors.New("http: server closed idle connection")
+		wrappedErr := errors.Wrap(innerErr, "additional context")
+		assert.True(t, isIdleConnectionError(wrappedErr), "Should detect wrapped idle connection error")
+	})
+
+	t.Run("does_not_detect_other_errors", func(t *testing.T) {
+		err := errors.New("some other error")
+		assert.False(t, isIdleConnectionError(err), "Should not detect non-idle connection errors")
+	})
+
+	t.Run("handles_nil_error", func(t *testing.T) {
+		assert.False(t, isIdleConnectionError(nil), "Should handle nil error")
+	})
+}
