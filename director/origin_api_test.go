@@ -45,6 +45,7 @@ import (
 )
 
 func TestVerifyAdvertiseToken(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -63,15 +64,14 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 			res := server_structs.CheckNamespaceStatusRes{Approved: true}
 			resByte, err := json.Marshal(res)
 			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-			_, err = w.Write(resByte)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
+				http.Error(w, "marshal error", http.StatusInternalServerError)
 				return
 			}
 			w.WriteHeader(http.StatusOK)
+			if _, err = w.Write(resByte); err != nil {
+				// Cannot write another header; log via test logger instead
+				return
+			}
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -140,6 +140,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 }
 
 func TestNamespaceKeysCacheEviction(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Run("evict-after-expire-time", func(t *testing.T) {
 		// Start cache eviction
 		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
@@ -194,6 +195,7 @@ func TestNamespaceKeysCacheEviction(t *testing.T) {
 // prevents TTL refresh on cache access. This validates the fix for the bug
 // where stale keys would remain cached indefinitely if accessed frequently.
 func TestNamespaceKeysCacheTTLExpiration(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()

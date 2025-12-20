@@ -67,6 +67,7 @@ func migrateTestDB(t *testing.T) {
 }
 
 func TestWaitUntilLogin(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -117,6 +118,7 @@ func TestWaitUntilLogin(t *testing.T) {
 }
 
 func TestCodeBasedLogin(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
 	setupWebUIEnv(t)
@@ -171,6 +173,7 @@ func TestCodeBasedLogin(t *testing.T) {
 }
 
 func TestPasswordResetAPI(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	setupWebUIEnv(t)
 
@@ -308,6 +311,7 @@ func TestPasswordResetAPI(t *testing.T) {
 }
 
 func TestPasswordBasedLoginAPI(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	setupWebUIEnv(t)
 
@@ -424,6 +428,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 }
 
 func TestWhoamiAPI(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	setupWebUIEnv(t)
 
@@ -510,6 +515,7 @@ func TestWhoamiAPI(t *testing.T) {
 }
 
 func TestAdminAuthHandler(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Define test cases
 	testCases := []struct {
 		name          string
@@ -597,6 +603,7 @@ func TestAdminAuthHandler(t *testing.T) {
 }
 
 func TestLogoutAPI(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	setupWebUIEnv(t)
 
@@ -675,6 +682,7 @@ func TestLogoutAPI(t *testing.T) {
 }
 
 func TestListOIDCEnabledServersHandler(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	router := gin.New()
 	router.GET("/oauth", listOIDCEnabledServersHandler)
 	t.Cleanup(func() {

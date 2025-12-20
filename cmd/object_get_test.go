@@ -32,6 +32,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -45,6 +46,7 @@ import (
 // instead of going through a cache. This test requires xrootd to be installed and actually
 // invokes the command-line flag parsing code.
 func TestObjectGetDirectFlag(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Skip if xrootd is not available
 	if _, err := exec.LookPath("xrootd"); err != nil {
 		t.Skip("Skipping test because xrootd is not installed")
@@ -160,6 +162,7 @@ func TestObjectGetDirectFlag(t *testing.T) {
 
 // TestAddQueryParam tests the URL transformation function
 func TestAddQueryParam(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	tests := []struct {
 		name        string
 		input       string

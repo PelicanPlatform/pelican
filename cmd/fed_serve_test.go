@@ -43,8 +43,7 @@ import (
 )
 
 func TestFedServePosixOrigin(t *testing.T) {
-	cleanup := test_utils.SetupTestLogging(t)
-	defer cleanup()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()

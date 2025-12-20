@@ -35,6 +35,7 @@ import (
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 var (
@@ -43,6 +44,7 @@ var (
 )
 
 func TestHttpOriginConfig(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	// temp place holder so we can start the test server before this value has been parsed

@@ -39,6 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -69,6 +70,8 @@ func initMockStatUtils() {
 }
 
 func TestQueryServersForObject(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	server_utils.ResetTestState()
 	require.NoError(t, param.Set("Director.MinStatResponse", 1))
 	require.NoError(t, param.Set("Director.MaxStatResponse", 1))
@@ -825,6 +828,8 @@ func TestQueryServersForObject(t *testing.T) {
 }
 
 func TestCache(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	require.NoError(t, param.Reset())
 	require.NoError(t, param.Set("Logging.Level", "Debug"))
 	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
@@ -924,6 +929,8 @@ func TestCache(t *testing.T) {
 }
 
 func TestSendHeadReq(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	server_utils.ResetTestState()
 
 	// Start a local HTTP server

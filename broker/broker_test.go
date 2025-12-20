@@ -221,6 +221,7 @@ func doRetrieveRequest(t *testing.T, ctx context.Context, dur time.Duration) (*h
 
 // End-to-end test of the broker doing a TCP reversal
 func TestBroker(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -360,6 +361,7 @@ func TestBroker(t *testing.T) {
 
 // Ensure the retrieve handler times out
 func TestRetrieveTimeout(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()

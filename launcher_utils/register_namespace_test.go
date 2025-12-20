@@ -46,6 +46,7 @@ import (
 )
 
 func TestRegistration(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Cleanup(func() {
 		server_utils.ResetTestState()
 	})
@@ -170,6 +171,7 @@ func TestRegistration(t *testing.T) {
 }
 
 func TestMultiKeysRegistration(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Cleanup(func() {
 		server_utils.ResetTestState()
 	})

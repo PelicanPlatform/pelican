@@ -59,6 +59,7 @@ type serverAdUnmarshal struct {
 // process at the cache behaves, as its responsible for requesting files from its
 // own XRootD component
 func TestDirectorCacheHealthTest(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Spin up a federation
 	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
 
@@ -164,6 +165,7 @@ func updateAllowedPrefixesForCache(t *testing.T, dbPath string, cacheHost string
 // using a valid advertise token. For now this only tests Caches because
 // we aren't actively using fed tokens in the Origin yet.
 func TestDirectorFedTokenCacheAPI(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 

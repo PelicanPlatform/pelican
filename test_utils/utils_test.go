@@ -28,6 +28,7 @@ import (
 
 // TestGenerateJWK tests the GenerateJWK function.
 func TestGenerateJWK(t *testing.T) {
+	t.Cleanup(SetupTestLogging(t))
 	jwkKey, jwks, jwksString, err := GenerateJWK()
 	require.NoErrorf(t, err, "Failed to generate JWK and JWKS: %v", err)
 	assert.NotNil(t, jwkKey)
@@ -37,6 +38,7 @@ func TestGenerateJWK(t *testing.T) {
 
 // TestSetupTestLogging verifies that the test logging hook is properly configured
 func TestSetupTestLogging(t *testing.T) {
+	t.Cleanup(SetupTestLogging(t))
 	cleanup := SetupTestLogging(t)
 	defer cleanup()
 

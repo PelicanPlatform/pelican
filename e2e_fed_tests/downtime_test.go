@@ -58,6 +58,7 @@ type serverAdUnmarshalCustom struct {
 
 // Verify that the director correctly handles a downtime declared by a cache server
 func TestServerDowntimeDirectorForwarding(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {

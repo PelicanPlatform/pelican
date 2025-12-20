@@ -37,6 +37,7 @@ import (
 )
 
 func TestResetPassword(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()

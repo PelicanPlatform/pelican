@@ -58,6 +58,7 @@ func generateToken(t *testing.T, scopes []token_scopes.TokenScope, subject strin
 }
 
 func TestCollectionsAPI(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	gin.SetMode(gin.TestMode)
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() {

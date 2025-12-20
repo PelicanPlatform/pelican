@@ -149,6 +149,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 }
 
 func TestOrigin(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -192,6 +193,7 @@ func TestOrigin(t *testing.T) {
 }
 
 func TestMultiExportOrigin(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -318,6 +320,7 @@ func runS3Test(t *testing.T, bucketName, urlStyle, objectName string) {
 }
 
 func TestS3OriginConfig(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Run("S3OriginPathBucket", func(t *testing.T) {
 		runS3Test(t, "noaa-wod-pds", "path", "MD5SUMS")
 	})
@@ -332,6 +335,7 @@ func TestS3OriginConfig(t *testing.T) {
 }
 
 func TestS3OriginWithSentinel(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -392,6 +396,7 @@ func TestS3OriginWithSentinel(t *testing.T) {
 }
 
 func TestPosixOriginWithSentinel(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()

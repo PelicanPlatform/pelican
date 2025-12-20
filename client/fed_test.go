@@ -102,8 +102,7 @@ func getTempToken(t *testing.T) (tempToken *os.File, tkn string) {
 
 // A test that spins up a federation, and tests object get and put
 func TestGetAndPutAuth(t *testing.T) {
-	cleanup := test_utils.SetupTestLogging(t)
-	defer cleanup()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	server_utils.ResetTestState()
 
@@ -297,8 +296,7 @@ func TestGetAndPutAuth(t *testing.T) {
 
 // A test that spins up a federation, and tests object get and put
 func TestCopyAuth(t *testing.T) {
-	cleanup := test_utils.SetupTestLogging(t)
-	defer cleanup()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	server_utils.ResetTestState()
 
@@ -465,8 +463,7 @@ func TestCopyAuth(t *testing.T) {
 
 // A test that spins up the federation, where the origin is in EnablePublicReads mode. Then GET a file from the origin without a token
 func TestGetPublicRead(t *testing.T) {
-	cleanup := test_utils.SetupTestLogging(t)
-	defer cleanup()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	server_utils.ResetTestState()
 
@@ -505,8 +502,7 @@ func TestGetPublicRead(t *testing.T) {
 
 // A test that spins up a federation, and tests object stat
 func TestObjectStat(t *testing.T) {
-	cleanup := test_utils.SetupTestLogging(t)
-	defer cleanup()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	server_utils.ResetTestState()
 
@@ -631,8 +627,7 @@ func TestObjectStat(t *testing.T) {
 
 // Test the functionality of the direct reads feature (?directread)
 func TestDirectReads(t *testing.T) {
-	cleanup := test_utils.SetupTestLogging(t)
-	defer cleanup()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	defer server_utils.ResetTestState()
 	t.Run("testDirectReadsSuccess", func(t *testing.T) {
@@ -740,6 +735,7 @@ func TestDirectReads(t *testing.T) {
 
 // Test the functionality of NewTransferJob, checking we return at the correct locations for certain errors
 func TestNewTransferJob(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -788,6 +784,7 @@ func TestNewTransferJob(t *testing.T) {
 
 // A test that spins up a federation, and tests object list
 func TestObjectList(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
 	defer server_utils.ResetTestState()
@@ -925,6 +922,7 @@ func TestObjectList(t *testing.T) {
 // Startup a mini-federation and ensure the "pack=auto" functionality works
 // end-to-end
 func TestClientUnpack(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	test_utils.InitClient(t, nil)
 
@@ -982,6 +980,7 @@ func TestClientUnpack(t *testing.T) {
 
 // A test that generates a token locally from the private key
 func TestTokenGenerate(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
 	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
@@ -1019,6 +1018,7 @@ func TestTokenGenerate(t *testing.T) {
 }
 
 func TestPrestage(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)

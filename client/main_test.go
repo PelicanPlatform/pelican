@@ -52,6 +52,7 @@ import (
 // TestGetIps calls main.get_ips with a hostname, checking
 // for a valid return value.
 func TestGetIps(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Parallel()
 
 	ips := getIPs("wlcg-wpad.fnal.gov")
@@ -72,6 +73,7 @@ func TestGetIps(t *testing.T) {
 }
 
 func TestGenerateSortedObjectServers(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	dirResp := server_structs.DirectorResponse{
 		ObjectServers: []*url.URL{
 			{Scheme: "https", Host: "server1.com", Path: "/foo"},
@@ -143,6 +145,7 @@ func TestGenerateSortedObjectServers(t *testing.T) {
 
 // TestGetToken tests getToken
 func TestGetToken(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Need a namespace for token acquisition
 	defer os.Unsetenv("PELICAN_FEDERATION_TOPOLOGYNAMESPACEURL")
 	os.Setenv("PELICAN_FEDERATION_TOPOLOGYNAMESPACEURL", "https://topology.opensciencegrid.org/osdf/namespaces")
@@ -336,6 +339,7 @@ func TestGetToken(t *testing.T) {
 
 // TestGetTokenName tests getTokenName
 func TestGetTokenName(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	cases := []struct {
 		url    string
 		name   string
@@ -389,6 +393,7 @@ func assertPelicanURLEqual(t *testing.T, expected, actual *pelican_url.PelicanUR
 }
 
 func TestParseRemoteAsPUrl(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// A federation discovery object that'll act as the metadata
 	// these tests find through discovery.
 	//
@@ -505,6 +510,7 @@ func TestParseRemoteAsPUrl(t *testing.T) {
 
 // Verify if a scitoken‐profile JWT is acceptable for a given namespace
 func TestTokenIsAcceptableForSciTokens(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	issuerURL, err := url.Parse("https://issuer.example")
 	require.NoError(t, err)
 

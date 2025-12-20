@@ -51,6 +51,8 @@ const (
 )
 
 func TestFederationDiscoveryHandler(t *testing.T) {
+	setGinTestMode()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	router := gin.Default()
 	router.GET("/test", federationDiscoveryHandler)
 
@@ -150,6 +152,8 @@ func TestFederationDiscoveryHandler(t *testing.T) {
 }
 
 func TestOidcDiscoveryHandler(t *testing.T) {
+	setGinTestMode()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	router := gin.Default()
 	server_utils.RegisterOIDCAPI(router.Group("/test"), true)
 

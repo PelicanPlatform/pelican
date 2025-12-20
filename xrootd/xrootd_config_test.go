@@ -68,6 +68,7 @@ func setupXrootd(t *testing.T, ctx context.Context, server server_structs.Server
 }
 
 func TestXrootDOriginConfig(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
@@ -174,6 +175,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 }
 
 func TestXrootDCacheConfig(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -278,6 +280,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 }
 
 func TestUpdateAuth(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -376,6 +379,7 @@ default_user = user2
 }
 
 func TestCopyCertificates(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -467,6 +471,7 @@ func TestCopyCertificates(t *testing.T) {
 }
 
 func TestCopyCertificatesWithPKCS11(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -502,6 +507,7 @@ func TestCopyCertificatesWithPKCS11(t *testing.T) {
 }
 
 func TestAuthIntervalUnmarshal(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	defer server_utils.ResetTestState()
 	t.Run("test-minutes-to-seconds", func(t *testing.T) {
 		server_utils.ResetTestState()
@@ -561,6 +567,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 }
 
 func TestGenLoggingConfig(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -659,6 +666,7 @@ func TestGenLoggingConfig(t *testing.T) {
 }
 
 func TestAutoShutdownOnStaleAuthfile(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
@@ -724,6 +732,7 @@ func TestAutoShutdownOnStaleAuthfile(t *testing.T) {
 }
 
 func TestConfigUpdatesHealthOKWhenFresh(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	dir := t.TempDir() // This also automatically registers its own cleanup (RemoveAll), which should be called after cancel/Wait runs
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)

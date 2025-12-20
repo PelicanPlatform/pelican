@@ -94,6 +94,7 @@ func getSortedKids(ctx context.Context, jsonStr string) ([]string, error) {
 }
 
 func TestServeNamespaceRegistry(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
 		if r := recover(); r != nil {
@@ -176,6 +177,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 }
 
 func TestNamespaceRegisteredPubKeyUpdate(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
 		if r := recover(); r != nil {
@@ -254,6 +256,7 @@ func TestNamespaceRegisteredPubKeyUpdate(t *testing.T) {
 }
 
 func TestMultiPubKeysRegisteredOnNamespace(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	server_utils.ResetTestState()
 	t.Cleanup(func() {
@@ -363,6 +366,7 @@ func TestMultiPubKeysRegisteredOnNamespace(t *testing.T) {
 }
 
 func TestRegistryKeyChainingOSDF(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
@@ -466,6 +470,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 }
 
 func TestRegistryKeyChaining(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)

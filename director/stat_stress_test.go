@@ -44,6 +44,7 @@ import (
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 var (
@@ -111,6 +112,10 @@ func countInterestingStacks() int {
 // The goal is to generate significant load on the "statUtils" cache within the director
 // and related code to see if we can generate memory leaks / hoarding.
 func TestStatMemory(t *testing.T) {
+	if os.Getenv("PELICAN_RUN_STAT_STRESS") != "1" {
+		t.Skip("set PELICAN_RUN_STAT_STRESS=1 to enable this stress test")
+	}
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
 	// To allow for developer control over testing, we add two environment variables

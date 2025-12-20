@@ -86,6 +86,7 @@ func createTestNamespaces(t *testing.T) []server_structs.Registration {
 }
 
 func TestServerNamespaceOperations(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
@@ -152,6 +153,7 @@ func TestServerNamespaceOperations(t *testing.T) {
 }
 
 func TestAddNamespaceCreatesServers(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
@@ -288,6 +290,7 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 }
 
 func TestUpdateNamespaceWithServerTables(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
@@ -337,6 +340,7 @@ func TestUpdateNamespaceWithServerTables(t *testing.T) {
 }
 
 func TestServerTableConstraints(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
@@ -409,6 +413,7 @@ func TestServerTableConstraints(t *testing.T) {
 }
 
 func TestServerTableCascadeDelete(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
@@ -469,6 +474,7 @@ func TestServerTableCascadeDelete(t *testing.T) {
 }
 
 func TestServerWithMultipleServices(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 

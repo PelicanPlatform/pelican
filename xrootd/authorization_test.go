@@ -99,6 +99,7 @@ base_path = /ospool/ap20
 )
 
 func TestOSDFAuthRetrieval(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -141,6 +142,7 @@ func TestOSDFAuthRetrieval(t *testing.T) {
 }
 
 func TestAuthPathCompToWord(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		component authPathComponent
 		word      string
@@ -166,6 +168,7 @@ func TestAuthPathCompToWord(t *testing.T) {
 }
 
 func TestConstructAuthEntry(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name        string
 		prefix      string
@@ -234,6 +237,7 @@ func TestConstructAuthEntry(t *testing.T) {
 }
 
 func TestAuthPrivilegesFromWord(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		privsWord   string
 		privs       authPrivileges
@@ -269,6 +273,7 @@ func TestAuthPrivilegesFromWord(t *testing.T) {
 }
 
 func TestAuthPoliciesFromLine(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name            string
 		line            string
@@ -438,6 +443,7 @@ func setupExports(t *testing.T, config string) {
 }
 
 func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name              string
 		inputAuthLinesMap map[string]*authLine
@@ -546,6 +552,7 @@ func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
 }
 
 func TestPopulateAuthLinesMapForCache(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	nsAds := []server_structs.NamespaceAdV2{
 		{
 			Caps: server_structs.Capabilities{PublicReads: true, Listings: true, Reads: true},
@@ -646,6 +653,7 @@ func TestPopulateAuthLinesMapForCache(t *testing.T) {
 }
 
 func TestSerializeAuthline(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name     string
 		authLine authLine
@@ -692,6 +700,7 @@ func TestSerializeAuthline(t *testing.T) {
 }
 
 func TestGetSortedSerializedAuthLines(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	tests := []struct {
 		name     string
 		input    map[string]*authLine
@@ -746,6 +755,7 @@ func TestGetSortedSerializedAuthLines(t *testing.T) {
 }
 
 func TestEmitAuthfile(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name                 string
 		serverType           server_structs.ServerType
@@ -965,6 +975,7 @@ u * /second/namespace -lr /first/namespace lr /.well-known lr /valid/path r
 }
 
 func TestEmitCfg(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	dirname := t.TempDir()
 	server_utils.ResetTestState()
 
@@ -995,6 +1006,7 @@ func TestEmitCfg(t *testing.T) {
 }
 
 func TestDeduplicateBasePaths(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	tests := []struct {
 		name        string
 		initialCfg  ScitokensCfg
@@ -1044,6 +1056,7 @@ func TestDeduplicateBasePaths(t *testing.T) {
 }
 
 func TestLoadScitokensConfig(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	dirname := t.TempDir()
 	server_utils.ResetTestState()
 
@@ -1079,6 +1092,7 @@ func TestLoadScitokensConfig(t *testing.T) {
 
 // Test that merging the configuration works without throwing any errors
 func TestMergeConfig(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	dirname := t.TempDir()
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
@@ -1125,6 +1139,7 @@ func TestMergeConfig(t *testing.T) {
 }
 
 func TestGenerateMonitoringIssuer(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -1180,6 +1195,7 @@ func TestGenerateMonitoringIssuer(t *testing.T) {
 }
 
 func TestGenerateOriginIssuer(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -1335,6 +1351,7 @@ func TestGenerateOriginIssuer(t *testing.T) {
 // various combinations of public/private capabilities, multiple issuers,
 // and overlapping base paths.
 func TestGenerateCacheIssuers(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -1535,6 +1552,7 @@ func TestGenerateCacheIssuers(t *testing.T) {
 }
 
 func TestGenerateFederationIssuer(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name           string
 		PublicReads    bool
@@ -1594,6 +1612,7 @@ func TestGenerateFederationIssuer(t *testing.T) {
 }
 
 func TestWriteOriginScitokensConfig(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
@@ -1638,6 +1657,7 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 // when namespace ads change during runtime. It simulates runtime by invoking the same write
 // functions the maintenance loop uses.
 func TestConfigFilesUpdateDuringRuntime(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 

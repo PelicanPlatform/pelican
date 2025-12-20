@@ -65,6 +65,7 @@ func NamespaceAdContainsPath(ns []server_structs.NamespaceAdV2, path string) boo
 }
 
 func TestGetLinkDepth(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	tests := []struct {
 		name     string
 		filepath string
@@ -146,8 +147,8 @@ func TestGetLinkDepth(t *testing.T) {
 // corresponding token and invokes the registration endpoint, it then does
 // so again with an invalid token and confirms that the correct error is returned
 func TestDirectorRegistration(t *testing.T) {
-	cleanup := test_utils.SetupTestLogging(t)
-	defer cleanup()
+	setGinTestMode()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
@@ -171,15 +172,11 @@ func TestDirectorRegistration(t *testing.T) {
 			res := server_structs.CheckNamespaceStatusRes{Approved: true}
 			resByte, err := json.Marshal(res)
 			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-			_, err = w.Write(resByte)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
+				http.Error(w, "marshal error", http.StatusInternalServerError)
 				return
 			}
 			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(resByte)
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -1312,6 +1309,7 @@ func TestDirectorRegistration(t *testing.T) {
 }
 
 func TestUpdateDowntimeFromRegistry(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
@@ -1382,6 +1380,7 @@ func TestUpdateDowntimeFromRegistry(t *testing.T) {
 }
 
 func TestGetAuthzEscaped(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Test passing a token via header with no bearer prefix
 	req, err := http.NewRequest(http.MethodPost, "http://fake-server.com", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
@@ -1417,6 +1416,7 @@ func TestGetAuthzEscaped(t *testing.T) {
 }
 
 func TestGetRequestParameters(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Test passing a token & timeout via header
 	req, err := http.NewRequest(http.MethodPost, "http://fake-server.com", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
@@ -1481,6 +1481,7 @@ func TestGetRequestParameters(t *testing.T) {
 }
 
 func TestCheckRedirectQuery(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Run("valid-directread-only", func(t *testing.T) {
 		mockQueryStr := "directread"
 		mockQuery, err := url.ParseQuery(mockQueryStr)
@@ -1525,6 +1526,8 @@ func TestCheckRedirectQuery(t *testing.T) {
 }
 
 func TestDiscoverOriginCache(t *testing.T) {
+	setGinTestMode()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -1826,6 +1829,8 @@ func TestDiscoverOriginCache(t *testing.T) {
 }
 
 func TestRedirectCheckHostnames(t *testing.T) {
+	setGinTestMode()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -1887,6 +1892,7 @@ func TestRedirectCheckHostnames(t *testing.T) {
 
 	for _, tc := range hostnamesTestCases {
 		t.Run(tc.desc, func(t *testing.T) {
+			t.Cleanup(test_utils.SetupTestLogging(t))
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			req := httptest.NewRequest("GET", tc.requestPath, nil)
 			c.Request = req
@@ -1895,10 +1901,11 @@ func TestRedirectCheckHostnames(t *testing.T) {
 			assert.Equal(t, tc.expectedPath, c.Request.URL.Path)
 		})
 	}
-	server_utils.ResetTestState()
 }
 
 func TestRedirectMiddleware(t *testing.T) {
+	setGinTestMode()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -1928,6 +1935,8 @@ func TestRedirectMiddleware(t *testing.T) {
 	// Helper function to run the middleware and assert the URL path
 	testRequest := func(tc testCase) {
 		t.Run(tc.description, func(t *testing.T) {
+			t.Cleanup(test_utils.SetupTestLogging(t))
+
 			req := httptest.NewRequest(tc.method, tc.path, nil)
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Request = req
@@ -1982,6 +1991,8 @@ func TestRedirectMiddleware(t *testing.T) {
 
 }
 func TestRedirects(t *testing.T) {
+	setGinTestMode()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
@@ -2134,6 +2145,8 @@ func TestRedirects(t *testing.T) {
 }
 
 func TestHeaderGenFuncs(t *testing.T) {
+	setGinTestMode()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	issUrl := url.URL{
 		Scheme: "https",
 		Host:   "my-issuer.com",
@@ -2266,6 +2279,8 @@ func TestHeaderGenFuncs(t *testing.T) {
 }
 
 func TestGetHealthTestFile(t *testing.T) {
+	setGinTestMode()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	gEngine := gin.Default()
 	router := gEngine.Group("/")
 	ctx := context.Background()
@@ -2405,6 +2420,7 @@ func TestGetHealthTestFile(t *testing.T) {
 }
 
 func TestGetRedirectUrl(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	adFromTopo := server_structs.ServerAd{
 		URL: url.URL{
 			Host: "fake-topology-ad.org:8443",
@@ -2462,6 +2478,7 @@ func TestGetRedirectUrl(t *testing.T) {
 }
 
 func TestGetFinalRedirectURL(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Run("url-without-params", func(t *testing.T) {
 		base := url.URL{Scheme: "https", Host: "example.org:8444"}
 		query := url.Values{"key1": []string{"val1"}}
@@ -2501,6 +2518,7 @@ func TestGetFinalRedirectURL(t *testing.T) {
 }
 
 func TestExtractProjectFromUserAgent(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Run("Single User-Agent with project prefix", func(t *testing.T) {
 		userAgents := []string{"pelican-client/1.0.0 project/test"}
 		result := utils.ExtractProjectFromUserAgent(userAgents)
@@ -2544,6 +2562,8 @@ func TestExtractProjectFromUserAgent(t *testing.T) {
 }
 
 func TestNilOrEmptyServerDowntimes(t *testing.T) {
+	setGinTestMode()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Reset global state
 	filteredServersMutex.Lock()
 	filteredServers = map[string]filterType{}

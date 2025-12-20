@@ -58,6 +58,7 @@ func createUnsignedJWT(t *testing.T, payload map[string]any) string {
 }
 
 func TestSharingUrl(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Construct a local server that we can poke with QueryDirector. Start with a placeholder handler
 	// so that we can update the server.URL with the actual server address in the handler we overwrite later.
 	log.SetLevel(log.DebugLevel)

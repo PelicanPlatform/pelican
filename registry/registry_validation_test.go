@@ -32,6 +32,7 @@ import (
 )
 
 func TestValidateCustomFields(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	setMockConfig := func(config []registrationField) {
 		registrationFields = config
@@ -201,6 +202,7 @@ func TestValidateCustomFields(t *testing.T) {
 }
 
 func TestValidateKeyChaining(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	setupMockRegistryDB(t)
 	defer func() {
@@ -306,6 +308,7 @@ func TestValidateKeyChaining(t *testing.T) {
 }
 
 func TestValidatePrefix(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Run("root-origin-prefix-returns-err", func(t *testing.T) {
 		_, err := validatePrefix("/origins/")
 		require.Error(t, err)

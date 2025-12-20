@@ -45,6 +45,7 @@ import (
 )
 
 func TestPrometheusUnprotected(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -99,6 +100,7 @@ func TestPrometheusUnprotected(t *testing.T) {
 // Test the Prometheus query engine endpoint auth check with an server issuer token
 // set in cookie
 func TestPrometheusProtectionCookieAuth(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -159,6 +161,7 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 // to access the prometheus metrics. It then attempts to access the metrics with a token with an invalid scope.
 // It attempts to do so again with a token signed by a bad key. Both these are expected to fail.
 func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()

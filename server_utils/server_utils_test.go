@@ -41,8 +41,13 @@ import (
 )
 
 func TestWaitUntilWorking(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	hook := test.NewGlobal()
+	origLevel := logrus.GetLevel()
 	logrus.SetLevel(logrus.DebugLevel) // Ensure all log levels are captured
+	t.Cleanup(func() {
+		logrus.SetLevel(origLevel)
+	})
 	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
 		cancel()
@@ -172,6 +177,7 @@ func TestWaitUntilWorking(t *testing.T) {
 }
 
 func TestFilterTopLevelPrefixes(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	namespaceAds := []server_structs.NamespaceAdV2{
 		{Path: "/foo"},
 		{Path: "/foo/bar"},
@@ -226,6 +232,7 @@ func (m *mockServer) GetPids() []int            { return m.pids }
 func (m *mockServer) SetPids(pids []int)        { m.pids = pids }
 
 func TestSetFedTok(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name      string
 		server    *mockServer

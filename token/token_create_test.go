@@ -40,6 +40,7 @@ import (
 )
 
 func TestVerifyCreateSciTokens2(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Start by feeding it a valid claims map
 	tokenConfig := TokenConfig{tokenProfile: Scitokens2Profile{}, audience: []string{"foo"}, version: "scitokens:2.0", scope: "read:/storage"}
 	err := tokenConfig.verifyCreateSciTokens2()
@@ -68,6 +69,7 @@ func TestVerifyCreateSciTokens2(t *testing.T) {
 }
 
 func TestVerifyCreateWLCG(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Start by feeding it a valid claims map
 	tokenConfig := TokenConfig{tokenProfile: WlcgProfile{}, audience: []string{"director"}, version: "1.0", Subject: "foo"}
 	err := tokenConfig.verifyCreateWLCG()
@@ -97,6 +99,7 @@ func TestVerifyCreateWLCG(t *testing.T) {
 
 // TestAddScopes tests the AddScopes method of TokenConfig
 func TestAddScopes(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	tests := []struct {
 		name             string
 		initialScope     string
@@ -146,6 +149,7 @@ func TestAddScopes(t *testing.T) {
 
 // TestAddRawScope tests the AddRawScope method of TokenConfig
 func TestAddRawScope(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	tests := []struct {
 		name          string
 		initialScope  string
@@ -200,6 +204,7 @@ func TestAddRawScope(t *testing.T) {
 }
 
 func TestCreateToken(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -261,6 +266,7 @@ func TestCreateToken(t *testing.T) {
 }
 
 func TestLookupIssuerJwksUrl(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	var resp *string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/issuer/.well-known/openid-configuration" {
@@ -329,6 +335,7 @@ func TestLookupIssuerJwksUrl(t *testing.T) {
 	}
 }
 func TestGetWLCGAudience(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	tests := []struct {
 		name        string
 		urlStr      string

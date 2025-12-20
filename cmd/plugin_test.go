@@ -73,6 +73,7 @@ var (
 
 // TestReadMultiTransfer test if we can read multiple transfers from stdin
 func TestReadMultiTransfer(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Parallel()
 
 	// Test with multiple transfers
@@ -256,6 +257,7 @@ func (f *FedTest) Teardown() {
 
 // Test the main function for the pelican plugin
 func TestStashPluginMain(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
 	oldPrefix, err := config.SetPreferredPrefix(config.StashPrefix)
@@ -338,6 +340,8 @@ func TestStashPluginMain(t *testing.T) {
 // - The directory itself is not uploaded, and no empty file with the directory name is created at the destination.
 // - An appropriate message indicating the directory upload failure is returned in the corresponding resultad.
 func TestInfileUploadWithDirAndFiles(t *testing.T) {
+
+	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	server_utils.ResetTestState()
 	t.Cleanup(func() {
@@ -506,6 +510,7 @@ func TestInfileUploadWithDirAndFiles(t *testing.T) {
 
 // Test multiple downloads from the plugin
 func TestPluginMulti(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
 	dirName := t.TempDir()
@@ -584,6 +589,7 @@ func TestPluginMulti(t *testing.T) {
 
 // Test multiple downloads from the plugin
 func TestPluginDirectRead(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -646,6 +652,7 @@ func TestPluginDirectRead(t *testing.T) {
 // We ran into a bug where the start time for the transfer was not recorded correctly and was almost always the same as the end time
 // (since they were set at similar sections of code). This test ensures that they are different and that the start time is before the end time.
 func TestPluginCorrectStartAndEndTime(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetOriginExports()
 	defer server_utils.ResetTestState()
 	var storageName string
@@ -720,6 +727,7 @@ func TestPluginCorrectStartAndEndTime(t *testing.T) {
 
 // Test the functionality of the failTransfer function, ensuring the proper classads are being set and returned
 func TestFailTransfer(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Test when we call failTransfer with an upload
 	t.Run("TestWithUpload", func(t *testing.T) {
 		results := make(chan *classad.ClassAd, 1)
@@ -937,6 +945,7 @@ func TestFailTransfer(t *testing.T) {
 
 // Test the createTransferError function for proper error classification
 func TestCreateTransferError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Test director timeout error
 	t.Run("DirectorTimeoutError", func(t *testing.T) {
 		innerErr := errors.New("Get \"https://osdf-director.osg-htc.org/test\": dial tcp 128.105.82.132:443: i/o timeout")
@@ -1073,6 +1082,7 @@ func TestCreateTransferError(t *testing.T) {
 
 // Test recursive downloads from the plugin
 func TestPluginRecursiveDownload(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -1151,6 +1161,7 @@ func TestPluginRecursiveDownload(t *testing.T) {
 }
 
 func TestWriteOutfile(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Run("TestOutfileSuccess", func(t *testing.T) {
 		// Drop the testFileContent into the origin directory
 		tempFile, err := os.Create(filepath.Join(t.TempDir(), "test.txt"))
@@ -1408,6 +1419,7 @@ func TestWriteOutfile(t *testing.T) {
 // This test checks if the destination (local file) is parsed correctly
 // and we get the direct path to the file or source added to the destination for directories
 func TestParseDestination(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Create a temporary directory for testing
 	tempDir, err := os.MkdirTemp("", "test")
 	if err != nil {
@@ -1463,6 +1475,7 @@ func TestParseDestination(t *testing.T) {
 }
 
 func TestWriteTransferErrorMessage(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -1524,6 +1537,7 @@ func TestWriteTransferErrorMessage(t *testing.T) {
 }
 
 func TestTransferError404(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -1623,6 +1637,7 @@ func TestTransferError404(t *testing.T) {
 }
 
 func TestTransferErrorSlowTransfer(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -1741,6 +1756,7 @@ func TestTransferErrorSlowTransfer(t *testing.T) {
 }
 
 func TestTransferErrorDirectorTimeout(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testErr := errors.New("dial tcp 128.105.82.132:443: i/o timeout")
 	testErr = errors.Wrap(testErr, "error while querying the director at https://osdf-director.osg-htc.org")
 	testErr = error_codes.NewTransfer_DirectorTimeoutError(testErr)
@@ -1800,6 +1816,7 @@ func TestTransferErrorDirectorTimeout(t *testing.T) {
 }
 
 func TestTransferErrorHeaderTimeout(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 

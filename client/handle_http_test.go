@@ -64,15 +64,21 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	cleanup := test_utils.SetupGlobalTestLogging()
+
 	server_utils.ResetTestState()
 	if err := config.InitClient(); err != nil {
+		cleanup()
 		os.Exit(1)
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	cleanup()
+	os.Exit(code)
 }
 
 // TestNewTransferDetails checks the creation of transfer details
 func TestNewTransferDetails(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	os.Setenv("http_proxy", "http://proxy.edu:3128")
 	t.Cleanup(func() {
 		require.NoError(t, os.Unsetenv("http_proxy"))
@@ -124,6 +130,7 @@ func TestNewTransferDetails(t *testing.T) {
 }
 
 func TestNewTransferDetailsEnv(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	os.Setenv("http_proxy", "http://proxy.edu:3128")
 	t.Cleanup(func() {
 		require.NoError(t, os.Unsetenv("http_proxy"))
@@ -151,8 +158,7 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 }
 
 func TestSlowTransfers(t *testing.T) {
-	cleanup := test_utils.SetupTestLogging(t)
-	defer cleanup()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	defer goleak.VerifyNone(t,
 		// Ignore the progress bars
@@ -245,8 +251,7 @@ func TestSlowTransfers(t *testing.T) {
 
 // Test stopped transfer
 func TestStoppedTransfer(t *testing.T) {
-	cleanup := test_utils.SetupTestLogging(t)
-	defer cleanup()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	os.Setenv("http_proxy", "http://proxy.edu:3128")
 	t.Cleanup(func() {
@@ -336,8 +341,7 @@ func TestStoppedTransfer(t *testing.T) {
 
 // Test connection error
 func TestConnectionError(t *testing.T) {
-	cleanup := test_utils.SetupTestLogging(t)
-	defer cleanup()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
@@ -374,6 +378,7 @@ func TestConnectionError(t *testing.T) {
 }
 
 func TestAllocateMemoryError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// Create a custom transport that returns ENOMEM to simulate the actual error condition
@@ -406,6 +411,7 @@ func TestAllocateMemoryError(t *testing.T) {
 }
 
 func TestNetworkResetError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// Set up an HTTP server that hijacks the connection and resets it during transfer
@@ -483,6 +489,7 @@ func TestNetworkResetError(t *testing.T) {
 }
 
 func TestProxyConnectionError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// Create a custom transport that simulates a proxy connection failure
@@ -558,6 +565,7 @@ func TestProxyConnectionError(t *testing.T) {
 }
 
 func TestTrailerError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// Set up an HTTP server that returns an error trailer
@@ -605,6 +613,7 @@ func TestTrailerError(t *testing.T) {
 }
 
 func TestUploadZeroLengthFile(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
 		//t.Logf("%s", dump)
@@ -633,6 +642,7 @@ func TestUploadZeroLengthFile(t *testing.T) {
 }
 
 func TestFailedUpload(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
 		//t.Logf("%s", dump)
@@ -663,6 +673,7 @@ func TestFailedUpload(t *testing.T) {
 }
 
 func TestUploadLocalFileNotFound(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{})
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -720,6 +731,7 @@ func TestUploadLocalFileNotFound(t *testing.T) {
 }
 
 func TestSortAttempts(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
 
 	neverRespond := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -787,6 +799,7 @@ func TestSortAttempts(t *testing.T) {
 }
 
 func TestTimeoutHeaderSetForDownload(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		"Transport.ResponseHeaderTimeout": 10 * time.Second,
 	})
@@ -823,6 +836,7 @@ func TestTimeoutHeaderSetForDownload(t *testing.T) {
 }
 
 func TestJobIdHeaderSetForDownload(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{})
 
 	// Create a test .job.ad file
@@ -880,6 +894,7 @@ type (
 
 // Test to ensure the user-agent header is being updating in the request made within DownloadHTTP()
 func TestProjInUserAgent(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	server_test := server_test{}
@@ -914,6 +929,7 @@ func TestProjInUserAgent(t *testing.T) {
 // The test should prove that the function getObjectServersToTry returns the correct number of servers,
 // and that any duplicates are removed
 func TestGetObjectServersToTry(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	sortedServers := []string{
 		"http://cache-1.com", // set an HTTP scheme to check that it's switched to https
 		"https://cache-2.com",
@@ -977,6 +993,7 @@ func TestGetObjectServersToTry(t *testing.T) {
 
 // Test that the project name is correctly extracted from the job ad file
 func TestSearchJobAd(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Create a temporary file
 	tempFile, err := os.CreateTemp("", "test")
 	assert.NoError(t, err)
@@ -1023,6 +1040,7 @@ func TestSearchJobAd(t *testing.T) {
 
 // Test error messages when a 504 Gateway Timeout occurs
 func TestGatewayTimeout(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		"Logging.Level": "debug",
 	})
@@ -1074,6 +1092,7 @@ func TestGatewayTimeout(t *testing.T) {
 
 // TestStatusCodeErrorWrapping tests that different HTTP status codes are wrapped correctly
 func TestStatusCodeErrorWrapping(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		"Logging.Level": "debug",
 	})
@@ -1214,6 +1233,7 @@ func TestStatusCodeErrorWrapping(t *testing.T) {
 
 // TestStatusCodeErrorWrappingUpload tests that different HTTP status codes are wrapped correctly during uploads
 func TestStatusCodeErrorWrappingUpload(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		"Logging.Level": "debug",
 		"TLSSkipVerify": true,
@@ -1381,6 +1401,7 @@ func TestStatusCodeErrorWrappingUpload(t *testing.T) {
 // TestHttpErrRespWithNonStatusCodeError tests that HttpErrResp with non-StatusCodeError inner error
 // is wrapped correctly based on HTTP status code using wrapErrorByStatusCode
 func TestHttpErrRespWithNonStatusCodeError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		"Logging.Level": "debug",
 	})
@@ -1439,6 +1460,7 @@ func TestHttpErrRespWithNonStatusCodeError(t *testing.T) {
 
 // TestCatchAllErrorWrapping tests that unknown error types are wrapped as generic TransferError
 func TestCatchAllErrorWrapping(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		"Logging.Level": "debug",
 	})
@@ -1461,6 +1483,7 @@ func TestCatchAllErrorWrapping(t *testing.T) {
 }
 
 func TestInvalidByteInChunkLengthError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// Set up an HTTP server that sends malformed chunk encoding
@@ -1523,6 +1546,7 @@ func TestInvalidByteInChunkLengthError(t *testing.T) {
 
 // Test checksum calculation and validation
 func TestChecksum(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		param.Logging_Level.GetName(): "debug",
 	})
@@ -1579,6 +1603,7 @@ func TestChecksum(t *testing.T) {
 
 // Test behavior when checksum is incorrect
 func TestChecksumIncorrectWhenRequired(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		param.Logging_Level.GetName(): "debug",
 	})
@@ -1649,6 +1674,7 @@ func TestChecksumIncorrectWhenRequired(t *testing.T) {
 }
 
 func TestChecksumIncorrectWhenNotRequired(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		param.Logging_Level.GetName(): "debug",
 	})
@@ -1709,6 +1735,7 @@ func TestChecksumIncorrectWhenNotRequired(t *testing.T) {
 
 // Test behavior when checksum is missing
 func TestChecksumMissing(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		param.Logging_Level.GetName(): "debug",
 	})
@@ -1755,6 +1782,7 @@ func TestChecksumMissing(t *testing.T) {
 }
 
 func TestChecksumPut(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Run("test-good-checksum", func(t *testing.T) {
 		test_utils.InitClient(t, map[string]any{
 			param.Logging_Level.GetName(): "debug",
@@ -2137,6 +2165,7 @@ func TestChecksumPut(t *testing.T) {
 // error), and another that returns the rest of the file. The test checks that the transfer resumes
 // after the first attempt and that the checksums are calculated and validated properly.
 func TestResume(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		"Logging.Level": "debug",
 	})
@@ -2226,6 +2255,7 @@ func TestResume(t *testing.T) {
 
 // Test failed connection setup error message for downloads
 func TestFailedConnectionSetupError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		"Transport.ResponseHeaderTimeout": "500ms",
 		"Logging.Level":                   "debug",
@@ -2273,6 +2303,7 @@ func TestFailedConnectionSetupError(t *testing.T) {
 
 // Test that head requests with downloads contain the download token if it exists
 func TestHeadRequestWithDownloadToken(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "HEAD" {
 			assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
@@ -2311,6 +2342,7 @@ func TestHeadRequestWithDownloadToken(t *testing.T) {
 // Creates a server that does nothing but stall; examines the
 // corresponding error message out to the user.
 func TestFailedUploadError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	configDir := t.TempDir()
 	test_utils.InitClient(t, map[string]any{
@@ -2384,6 +2416,7 @@ func TestFailedUploadError(t *testing.T) {
 // Creates a server that does nothing but stall; examines the
 // corresponding error message out to the user.
 func TestFailedLargeUploadError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		"Transport.ResponseHeaderTimeout": "500ms",
 		"TLSSkipVerify":                   true,
@@ -2453,6 +2486,7 @@ func TestFailedLargeUploadError(t *testing.T) {
 }
 
 func TestNewTransferEngine(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	// Test we fail if we do not call initclient() before
@@ -2474,6 +2508,7 @@ func TestNewTransferEngine(t *testing.T) {
 }
 
 func TestListHttp(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	type test struct {
 		name          string
 		pUrl          *pelican_url.PelicanURL
@@ -2531,6 +2566,7 @@ func TestListHttp(t *testing.T) {
 }
 
 func TestInvalidByteInChunkLength(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// Create a test server that sends an invalid chunk length
@@ -2600,6 +2636,7 @@ func TestInvalidByteInChunkLength(t *testing.T) {
 }
 
 func TestUnexpectedEOFInTransferStatus(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// Create a test server that sends an EOF error in the X-Transfer-Status trailer
@@ -2631,6 +2668,7 @@ func TestUnexpectedEOFInTransferStatus(t *testing.T) {
 }
 
 func TestTLSCertificateError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Generate a self-signed certificate
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
@@ -2716,6 +2754,7 @@ func TestTLSCertificateError(t *testing.T) {
 }
 
 func TestPutOverwrite(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		"TLSSkipVerify": true,
 	})
@@ -3015,6 +3054,7 @@ func TestPutOverwrite(t *testing.T) {
 }
 
 func TestPackAutoSegfaultRegression(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		param.Logging_Level.GetName(): "debug",
 	})
@@ -3088,6 +3128,7 @@ func TestPackAutoSegfaultRegression(t *testing.T) {
 }
 
 func TestPermissionDeniedError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
@@ -3137,6 +3178,7 @@ func TestPermissionDeniedError(t *testing.T) {
 
 // Test recursive listings and depth handling using a minimal WebDAV-like server
 func TestListHttpRecursiveAndDepth(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		param.Logging_Level.GetName(): "debug",
 	})
@@ -3225,6 +3267,7 @@ func TestListHttpRecursiveAndDepth(t *testing.T) {
 // all error types that can be returned from downloadHTTP. This test verifies that the
 // refactored function behaves exactly like the original inline error handling code.
 func TestWrapDownloadError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		"Logging.Level": "debug",
 	})
@@ -3505,6 +3548,7 @@ func TestWrapDownloadError(t *testing.T) {
 }
 
 func TestIsIdleConnectionError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Run("detects_idle_connection_error", func(t *testing.T) {
 		err := errors.New("http: server closed idle connection")
 		assert.True(t, isIdleConnectionError(err), "Should detect idle connection error")

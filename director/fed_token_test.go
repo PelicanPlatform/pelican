@@ -23,10 +23,12 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -35,9 +37,23 @@ import (
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
+var setGinTestModeOnce sync.Once
+
+func setGinTestMode() {
+	setGinTestModeOnce.Do(func() {
+		gin.SetMode(gin.TestMode)
+		// Route gin logs through logrus so they appear under the test log hook.
+		gin.DefaultWriter = log.StandardLogger().WriterLevel(log.InfoLevel)
+		gin.DefaultErrorWriter = log.StandardLogger().WriterLevel(log.WarnLevel)
+	})
+}
+
 func TestValidateRequest(t *testing.T) {
+	setGinTestMode()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name           string
 		host           []string // Using slices here so we can trigger errors on purpose
@@ -174,6 +190,8 @@ func parseJWT(tokenString string) (scopes []string, issuer string, err error) {
 }
 
 func TestCreateFedTok(t *testing.T) {
+	setGinTestMode()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	testCases := []struct {
 		name            string

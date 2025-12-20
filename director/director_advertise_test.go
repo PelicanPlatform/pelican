@@ -37,10 +37,12 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // Test for a director disappearing
 func TestDirectorShutdown(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -82,6 +84,7 @@ func TestDirectorShutdown(t *testing.T) {
 // Significantly decrease the ad lifetime; ensure forwarding from director and
 // multiple servers works.
 func TestExpirationDirector(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -126,6 +129,7 @@ func TestExpirationDirector(t *testing.T) {
 }
 
 func TestForwardDirector(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 

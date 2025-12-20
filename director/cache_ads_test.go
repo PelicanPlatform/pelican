@@ -33,9 +33,12 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func TestLaunchTTLCache(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	mockPelicanOriginServerAd := server_structs.ServerAd{
 		AuthURL: url.URL{},
 		URL: url.URL{
@@ -124,6 +127,8 @@ func TestLaunchTTLCache(t *testing.T) {
 }
 
 func TestServerAdsCacheEviction(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	mockServerAd := server_structs.ServerAd{Type: server_structs.OriginType.String(), URL: url.URL{Host: "mock.server.org"}}
 	mockServerAd.Initialize("foo")
 
@@ -178,6 +183,8 @@ func TestServerAdsCacheEviction(t *testing.T) {
 }
 
 func TestRecordAd(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	serverAds.DeleteAll()
 	t.Cleanup(func() {
 		serverAds.DeleteAll()
@@ -275,6 +282,8 @@ func TestRecordAd(t *testing.T) {
 }
 
 func TestGetRawStatusWeight(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	testCases := []struct {
 		name           string
 		status         metrics.HealthStatusEnum
@@ -318,6 +327,8 @@ func TestGetRawStatusWeight(t *testing.T) {
 }
 
 func TestPopulateEWMAStatusWeightSequence(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	// Note: Expected weights calculated using this online calculator:
 	// https://calculatorsforhome.com/ewma-estimator/
 	// For mixed-delta tests, calculations must be done pair-wise because
@@ -505,6 +516,8 @@ func TestPopulateEWMAStatusWeightSequence(t *testing.T) {
 }
 
 func TestApplyDowntimeFilters(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	now := time.Now().UTC().UnixMilli()
 
 	activeDowntime := server_structs.Downtime{
@@ -592,6 +605,8 @@ func TestApplyDowntimeFilters(t *testing.T) {
 }
 
 func TestGetCachedDowntimesDedup(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	serverName := "TEST_CACHE"
 	now := time.Now().UnixMilli()
 	dup := server_structs.Downtime{

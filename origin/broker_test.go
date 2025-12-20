@@ -33,6 +33,7 @@ import (
 	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 var (
@@ -43,6 +44,7 @@ var (
 // A test that spins up a federation and verifies we can
 // perform API calls to the origin via the broker.
 func TestBrokerApi(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
 	fed := fed_test_utils.NewFedTest(t, brokerConfig)
