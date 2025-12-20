@@ -83,8 +83,7 @@ jobs:
         echo "::group::Building web UI"
         make web-build
         echo "::endgroup::"
-        #gotestsum --format testname -- -timeout 15m -coverpkg=./director -covermode=count -coverprofile=coverage.out ./director -run TestStatMemory
-        gotestsum --format testname -- -p=4 -timeout 15m -coverpkg=./... -covermode=count -coverprofile=coverage.out ./... -skip TestStatMemory
+        gotestsum --format pkgname-and-test-fails --hide-summary=output -- -p=4 -timeout 15m -coverpkg=./... -covermode=count -coverprofile=coverage.out ./...
     - name: Install gotestsum (Windows)
       if: runner.os == 'Windows'
       env:
@@ -109,7 +108,7 @@ jobs:
         echo "::group::Building web UI"
         make web-build
         echo "::endgroup::"
-        gotestsum --format testname -- -p=4 -timeout 15m -coverpkg=./... -covermode=count -coverprofile=coverage.out ./...
+        gotestsum --format pkgname-and-test-fails --hide-summary=output -- -p=4 -timeout 15m -coverpkg=./... -covermode=count -coverprofile=coverage.out ./...
     - name: Run GoReleaser for macOS
       uses: goreleaser/goreleaser-action@v6
       if: runner.os == 'macOS'
