@@ -32,7 +32,6 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -54,8 +53,8 @@ func TestObjectGetDirectFlag(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	viper.Set(param.Origin_EnableDirectReads.GetName(), true)
-	viper.Set(param.Logging_DisableProgressBars.GetName(), true)
+	require.NoError(t, param.Set(param.Origin_EnableDirectReads.GetName(), true))
+	require.NoError(t, param.Set(param.Logging_DisableProgressBars.GetName(), true))
 
 	// Create a test federation with cache and origin
 	fed := fed_test_utils.NewFedTest(t, "")
