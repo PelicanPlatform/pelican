@@ -37,6 +37,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
@@ -408,4 +409,53 @@ func MockIssuer(t *testing.T, kSet *jwk.Set) string {
 	t.Cleanup(server.Close)
 
 	return serverUrl
+}
+
+// TestLogHook is a logrus hook that redirects log output to the test's log buffer.
+// This ensures that log messages are only displayed when a test fails, keeping
+// the test output clean for passing tests.
+type TestLogHook struct {
+	t *testing.T
+}
+
+// NewTestLogHook creates a new TestLogHook that writes to testing.T's log buffer
+func NewTestLogHook(t *testing.T) *TestLogHook {
+	return &TestLogHook{t: t}
+}
+
+// Fire is called on every log entry
+func (hook *TestLogHook) Fire(entry *logrus.Entry) error {
+	// Format the entry and write it to the test's log buffer
+	// The test's log buffer only displays output if the test fails
+	if msg, err := entry.String(); err == nil {
+		hook.t.Log(msg)
+	}
+	return nil
+}
+
+// Levels defines which log levels this hook applies to
+func (hook *TestLogHook) Levels() []logrus.Level {
+	return logrus.AllLevels
+}
+
+// SetupTestLogging configures logrus to write to the test's log buffer.
+// This should be called at the beginning of tests to ensure clean output.
+// Returns a cleanup function that should be called with defer.
+func SetupTestLogging(t *testing.T) func() {
+	// Save the original logger configuration
+	originalOut := logrus.StandardLogger().Out
+	originalHooks := logrus.StandardLogger().Hooks
+	originalFormatter := logrus.StandardLogger().Formatter
+
+	// Disable standard output and use only the test hook
+	logrus.SetOutput(io.Discard)
+	logrus.StandardLogger().Hooks = make(logrus.LevelHooks)
+	logrus.AddHook(NewTestLogHook(t))
+
+	// Return cleanup function
+	return func() {
+		logrus.SetOutput(originalOut)
+		logrus.StandardLogger().Hooks = originalHooks
+		logrus.SetFormatter(originalFormatter)
+	}
 }

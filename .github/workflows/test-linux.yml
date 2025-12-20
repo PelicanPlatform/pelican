@@ -61,12 +61,15 @@ jobs:
         key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
         restore-keys: |
           ${{ runner.os }}-go-
+    - name: Install gotestsum
+      run: |
+        go install gotest.tools/gotestsum@latest
     - name: Test
       run: |
         make web-build
         # Disabling until we are able to make it more reliable -- shouldn't punish other folks for challenging tests!
-        #go test      -timeout 15m -coverpkg=./director -covermode=count -coverprofile=${{ matrix.coverprofile }} -tags=${{ matrix.tags }} ./director -run TestStatMemory
-        go test -p=4 -timeout 15m -coverpkg=./...      -covermode=count -coverprofile=${{ matrix.coverprofile }} -tags=${{ matrix.tags }} ./... -skip TestStatMemory
+        #gotestsum --format testname -- -timeout 15m -coverpkg=./director -covermode=count -coverprofile=${{ matrix.coverprofile }} -tags=${{ matrix.tags }} ./director -run TestStatMemory
+        gotestsum --format testname -- -p=4 -timeout 15m -coverpkg=./...      -covermode=count -coverprofile=${{ matrix.coverprofile }} -tags=${{ matrix.tags }} ./... -skip TestStatMemory
     - name: Get total code coverage
       if: github.event_name == 'pull_request'
       id: cc

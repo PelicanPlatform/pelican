@@ -21,6 +21,7 @@ package test_utils
 import (
 	"testing"
 
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,4 +33,17 @@ func TestGenerateJWK(t *testing.T) {
 	assert.NotNil(t, jwkKey)
 	assert.NotNil(t, jwks)
 	assert.NotEmpty(t, jwksString)
+}
+
+// TestSetupTestLogging verifies that the test logging hook is properly configured
+func TestSetupTestLogging(t *testing.T) {
+	cleanup := SetupTestLogging(t)
+	defer cleanup()
+
+	// Log a message - it should be captured by the test hook
+	logrus.Info("This message should only appear if the test fails")
+	logrus.Warn("This warning should only appear if the test fails")
+
+	// Verify that the hook was installed
+	assert.Equal(t, 1, len(logrus.StandardLogger().Hooks[logrus.InfoLevel]), "Expected one hook to be installed")
 }

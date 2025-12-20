@@ -69,12 +69,25 @@ jobs:
     - name: Install macOS Dependencies
       run: ./github_scripts/osx_install.sh
       if: runner.os == 'macOS'
+    - name: Install gotestsum (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        go install gotest.tools/gotestsum@latest
     - name: Test macOS
       if: runner.os == 'macOS'
       run: |
         make web-build
-        #go test -timeout 15m -coverpkg=./director -covermode=count -coverprofile=coverage.out ./director -run TestStatMemory
-        go test -p=4 -timeout 15m -coverpkg=./... -covermode=count -coverprofile=coverage.out ./... -skip TestStatMemory
+        #gotestsum --format testname -- -timeout 15m -coverpkg=./director -covermode=count -coverprofile=coverage.out ./director -run TestStatMemory
+        gotestsum --format testname -- -p=4 -timeout 15m -coverpkg=./... -covermode=count -coverprofile=coverage.out ./... -skip TestStatMemory
+    - name: Install gotestsum (Windows)
+      if: runner.os == 'Windows'
+      env:
+        # Fix slow Go compile and cache restore: https://github.com/actions/setup-go/pull/515
+        GOCACHE: D:\gocache
+        GOMODCACHE: D:\gomodcache
+        GOTMPDIR: D:\gotmp
+      run: |
+        go install gotest.tools/gotestsum@latest
     - name: Test Windows
       if: runner.os == 'Windows'
       env:
@@ -84,7 +97,7 @@ jobs:
         GOTMPDIR: D:\gotmp
       run: |
         make web-build
-        go test -p=4 -timeout 15m -coverpkg=./... -covermode=count -coverprofile=coverage.out ./...
+        gotestsum --format testname -- -p=4 -timeout 15m -coverpkg=./... -covermode=count -coverprofile=coverage.out ./...
     - name: Run GoReleaser for macOS
       uses: goreleaser/goreleaser-action@v6
       if: runner.os == 'macOS'
