@@ -31,11 +31,21 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
+// getServerRuntimeDir returns the runtime directory for server-wide runtime files using
+// the configuration populated during server initialization.
+func getServerRuntimeDir() (string, error) {
+	runtimeDir := viper.GetString(param.RuntimeDir.GetName())
+	if runtimeDir == "" {
+		return "", errors.New("runtime directory is not configured")
+	}
+	return runtimeDir, nil
+}
+
 // WriteAddressFile writes a file containing the actual addresses selected by Pelican
 // after startup. This allows scripts to source the file to get the server's addresses
 // instead of probing for ports (which can lead to race conditions).
 //
-// The file is written to ${ConfigDir}/pelican.addresses and contains KEY=VALUE pairs,
+// The file is written to the runtime directory and contains KEY=VALUE pairs,
 // one per line, with the following keys:
 //   - SERVER_EXTERNAL_WEB_URL: The main web UI/API endpoint
 //   - ORIGIN_URL: The origin's XRootD endpoint (if origin is enabled)
@@ -43,17 +53,17 @@ import (
 //
 // The file is written atomically using a temporary file and rename.
 func WriteAddressFile(modules server_structs.ServerType) error {
-	configDir := viper.GetString("ConfigDir")
-	if configDir == "" {
-		return errors.New("ConfigDir is not set; cannot write address file")
+	runtimeDir, err := getServerRuntimeDir()
+	if err != nil {
+		return errors.Wrap(err, "failed to determine runtime directory")
 	}
 
-	// Ensure the config directory exists
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return errors.Wrap(err, "failed to create config directory")
+	// Ensure the runtime directory exists
+	if err := os.MkdirAll(runtimeDir, 0755); err != nil {
+		return errors.Wrap(err, "failed to create runtime directory")
 	}
 
-	addressFilePath := filepath.Join(configDir, "pelican.addresses")
+	addressFilePath := filepath.Join(runtimeDir, "pelican.addresses")
 	tempFilePath := addressFilePath + ".tmp"
 
 	// Build the content

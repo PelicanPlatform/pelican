@@ -296,6 +296,7 @@ type Config struct {
 		RequireKeyChaining bool `mapstructure:"requirekeychaining" yaml:"RequireKeyChaining"`
 		RequireOriginApproval bool `mapstructure:"requireoriginapproval" yaml:"RequireOriginApproval"`
 	} `mapstructure:"registry" yaml:"Registry"`
+	RuntimeDir string `mapstructure:"runtimedir" yaml:"RuntimeDir"`
 	Server struct {
 		AdLifetime time.Duration `mapstructure:"adlifetime" yaml:"AdLifetime"`
 		AdvertisementInterval time.Duration `mapstructure:"advertisementinterval" yaml:"AdvertisementInterval"`
@@ -675,6 +676,7 @@ type configWithType struct {
 		RequireKeyChaining struct { Type string; Value bool }
 		RequireOriginApproval struct { Type string; Value bool }
 	}
+	RuntimeDir struct { Type string; Value string }
 	Server struct {
 		AdLifetime struct { Type string; Value time.Duration }
 		AdvertisementInterval struct { Type string; Value time.Duration }

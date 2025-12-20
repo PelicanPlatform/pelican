@@ -89,7 +89,12 @@ pid_federationServe=$!
 trap 'cleanup $pid_federationServe' EXIT
 
 # Wait for the address file to be created
-ADDRESS_FILE="${PELICAN_CONFIGDIR}/pelican.addresses"
+# Address file is in runtime directory: $XDG_RUNTIME_DIR/pelican if set, otherwise falls back to ConfigDir
+if [ -n "$XDG_RUNTIME_DIR" ]; then
+    ADDRESS_FILE="$XDG_RUNTIME_DIR/pelican/pelican.addresses"
+else
+    ADDRESS_FILE="${PELICAN_CONFIGDIR}/pelican.addresses"
+fi
 echo "Waiting for address file: $ADDRESS_FILE"
 TOTAL_WAIT=0
 while [ ! -f "$ADDRESS_FILE" ]; do

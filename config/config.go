@@ -1167,6 +1167,43 @@ func PrintClientConfig() error {
 	return nil
 }
 
+// ensureRuntimeDir populates the runtime directory configuration and indicates whether
+// the directory should be cleaned up on shutdown. If the runtime directory is already
+// set in the provided viper instance, the existing configuration is returned.
+const runtimeDirCleanupKey = "runtimeDirCleanupInternal"
+
+func ensureRuntimeDir(v *viper.Viper) (string, bool, error) {
+	if runtimeDir := v.GetString(param.RuntimeDir.GetName()); runtimeDir != "" {
+		return runtimeDir, v.GetBool(runtimeDirCleanupKey), nil
+	}
+
+	if IsRootExecution() {
+		runtimeDir := filepath.Join("/run", "pelican")
+		v.SetDefault(param.RuntimeDir.GetName(), runtimeDir)
+		v.Set(param.RuntimeDir.GetName(), runtimeDir)
+		v.Set(runtimeDirCleanupKey, false)
+		return runtimeDir, false, nil
+	}
+
+	if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
+		runtimeDir := filepath.Join(userRuntimeDir, "pelican")
+		v.SetDefault(param.RuntimeDir.GetName(), runtimeDir)
+		v.Set(param.RuntimeDir.GetName(), runtimeDir)
+		v.Set(runtimeDirCleanupKey, false)
+		return runtimeDir, false, nil
+	}
+
+	runtimeDir, err := os.MkdirTemp("", "pelican-xrootd-*")
+	if err != nil {
+		return "", false, errors.Wrap(err, "Failed to create temporary runtime directory for Pelican")
+	}
+	// Temporary runtime directories are cleaned up on shutdown.
+	v.SetDefault(param.RuntimeDir.GetName(), runtimeDir)
+	v.Set(param.RuntimeDir.GetName(), runtimeDir)
+	v.Set(runtimeDirCleanupKey, true)
+	return runtimeDir, true, nil
+}
+
 // Set all defaults relevant to servers (defaults can be set only for active servers)
 // but only for the passed viper instance.
 // We operate on the passed viper instance instead of the global because it lets us
@@ -1213,6 +1250,11 @@ func SetServerDefaults(v *viper.Viper) error {
 	// Defaults for XRootD authfile, scitokens config, and self-test staleness checks
 	v.SetDefault(param.Xrootd_AutoShutdownEnabled.GetName(), true)
 	v.SetDefault(param.Xrootd_ConfigUpdateFailureTimeout.GetName(), 1*time.Hour)
+
+	runtimeDir, _, err := ensureRuntimeDir(v)
+	if err != nil {
+		return err
+	}
 	v.SetDefault(param.Origin_SelfTestMaxAge.GetName(), 1*time.Hour)
 	v.SetDefault(param.Cache_SelfTestMaxAge.GetName(), 1*time.Hour)
 	v.SetDefault(param.Origin_DirectorTest.GetName(), true)
@@ -1266,15 +1308,15 @@ func SetServerDefaults(v *viper.Viper) error {
 	}
 
 	if IsRootExecution() {
-		v.SetDefault(param.Origin_RunLocation.GetName(), filepath.Join("/run", "pelican", "xrootd", "origin"))
-		v.SetDefault(param.Cache_RunLocation.GetName(), filepath.Join("/run", "pelican", "xrootd", "cache"))
+		v.SetDefault(param.Origin_RunLocation.GetName(), filepath.Join(runtimeDir, "xrootd", "origin"))
+		v.SetDefault(param.Cache_RunLocation.GetName(), filepath.Join(runtimeDir, "xrootd", "cache"))
 
-		v.SetDefault(param.Cache_StorageLocation.GetName(), filepath.Join("/run", "pelican", "cache"))
+		v.SetDefault(param.Cache_StorageLocation.GetName(), filepath.Join(runtimeDir, "cache"))
 		v.SetDefault(param.Cache_NamespaceLocation.GetName(), filepath.Join(param.Cache_StorageLocation.GetString(), "namespace"))
 		v.SetDefault(param.Cache_DataLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "data")})
 		v.SetDefault(param.Cache_MetaLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "meta")})
 
-		v.SetDefault(param.LocalCache_RunLocation.GetName(), filepath.Join("/run", "pelican", "localcache"))
+		v.SetDefault(param.LocalCache_RunLocation.GetName(), filepath.Join(runtimeDir, "localcache"))
 		v.SetDefault(param.Origin_Multiuser.GetName(), true)
 		v.SetDefault(param.Origin_DbLocation.GetName(), "/var/lib/pelican/origin.sqlite")
 		v.SetDefault(param.Director_GeoIPLocation.GetName(), "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
@@ -1287,7 +1329,7 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Monitoring_DataLocation.GetName(), "/var/lib/pelican/monitoring/data")
 		v.SetDefault(param.Shoveler_QueueDirectory.GetName(), "/var/spool/pelican/shoveler/queue")
 		v.SetDefault(param.Shoveler_AMQPTokenLocation.GetName(), "/etc/pelican/shoveler-token")
-		v.SetDefault(param.Origin_GlobusConfigLocation.GetName(), filepath.Join("/run", "pelican", "xrootd", "origin", "globus"))
+		v.SetDefault(param.Origin_GlobusConfigLocation.GetName(), filepath.Join(runtimeDir, "xrootd", "origin", "globus"))
 	} else {
 		v.SetDefault(param.Origin_DbLocation.GetName(), filepath.Join(configDir, "origin.sqlite"))
 		v.SetDefault(param.Director_GeoIPLocation.GetName(), filepath.Join(configDir, "maxmind", "GeoLite2-City.mmdb"))
@@ -1300,17 +1342,6 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Monitoring_DataLocation.GetName(), filepath.Join(configDir, "monitoring/data"))
 		v.SetDefault(param.Shoveler_QueueDirectory.GetName(), filepath.Join(configDir, "shoveler/queue"))
 		v.SetDefault(param.Shoveler_AMQPTokenLocation.GetName(), filepath.Join(configDir, "shoveler-token"))
-
-		var runtimeDir string
-		if v == viper.GetViper() && os.Getenv("XDG_RUNTIME_DIR") != "" {
-			runtimeDir = filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "pelican")
-		} else {
-			var err error
-			runtimeDir, err = os.MkdirTemp("", "pelican-xrootd-*")
-			if err != nil {
-				return errors.Wrap(err, "Failed to create temporary runtime directory for Pelican")
-			}
-		}
 
 		v.SetDefault(param.Cache_RunLocation.GetName(), filepath.Join(runtimeDir, "cache"))
 		v.SetDefault(param.Origin_RunLocation.GetName(), filepath.Join(runtimeDir, "origin"))
@@ -1342,7 +1373,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.LocalCache_DataLocation.GetName(), filepath.Join(fcRunLocation, "cache"))
 
 	// Any platform-specific paths should go here
-	err := InitServerOSDefaults(v)
+	err = InitServerOSDefaults(v)
 	if err != nil {
 		return errors.Wrapf(err, "Failure when setting up OS-specific configuration")
 	}
@@ -1520,19 +1551,16 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	// be done in sequence because the web UI may change the log location.
 	logging.FlushLogs(true)
 
+	runtimeDir, cleanupRuntimeDir, err := ensureRuntimeDir(viper.GetViper())
+	if err != nil {
+		return err
+	}
+
 	if !IsRootExecution() {
-		var runtimeDir string
-		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
-			runtimeDir = filepath.Join(userRuntimeDir, "pelican")
-			if err := os.MkdirAll(runtimeDir, 0750); err != nil {
-				return err
-			}
-		} else {
-			var err error
-			runtimeDir, err = os.MkdirTemp("", "pelican-xrootd-*")
-			if err != nil {
-				return err
-			}
+		if err := os.MkdirAll(runtimeDir, 0750); err != nil {
+			return err
+		}
+		if cleanupRuntimeDir {
 			cleanupDirOnShutdown(ctx, runtimeDir)
 		}
 		if !param.Cache_RunLocation.IsSet() && !param.Origin_RunLocation.IsSet() && param.Xrootd_RunLocation.IsSet() {

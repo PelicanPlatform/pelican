@@ -33,14 +33,18 @@ import (
 )
 
 func TestWriteAddressFile(t *testing.T) {
+	t.Cleanup(func() { ResetConfig() })
+
 	// Create a temporary directory for testing
 	tmpDir := t.TempDir()
-
-	// Reset viper config
-	viper.Reset()
+	setRuntimeDir := func(t *testing.T) {
+		t.Helper()
+		viper.Set(param.RuntimeDir.GetName(), tmpDir)
+	}
 
 	// Set up ConfigDir
-	viper.Set("ConfigDir", tmpDir)
+	require.NoError(t, param.Set("ConfigDir", tmpDir))
+	setRuntimeDir(t)
 
 	t.Run("WriteAddressFileWithAllModules", func(t *testing.T) {
 		// Set up test parameters
@@ -71,9 +75,8 @@ func TestWriteAddressFile(t *testing.T) {
 	})
 
 	t.Run("WriteAddressFileOriginOnly", func(t *testing.T) {
-		// Reset and set up new test parameters
-		viper.Reset()
-		viper.Set("ConfigDir", tmpDir)
+		require.NoError(t, param.Set("ConfigDir", tmpDir))
+		setRuntimeDir(t)
 		require.NoError(t, param.Set("Server.ExternalWebUrl", "https://origin.example.com:9443"))
 		require.NoError(t, param.Set("Origin.Url", "https://origin.example.com:9444"))
 
@@ -100,6 +103,7 @@ func TestWriteAddressFile(t *testing.T) {
 		// Reset and set up new test parameters
 		viper.Reset()
 		viper.Set("ConfigDir", tmpDir)
+		setRuntimeDir(t)
 		require.NoError(t, param.Set("Server.ExternalWebUrl", "https://director.example.com:8443"))
 
 		// Create modules with only director enabled
@@ -127,16 +131,17 @@ func TestWriteAddressFile(t *testing.T) {
 
 		modules := server_structs.DirectorType
 
-		// This should return an error
+		// This should return an error since the runtime directory is not configured
 		err := WriteAddressFile(modules)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "ConfigDir is not set")
+		assert.Contains(t, err.Error(), "runtime directory is not configured")
 	})
 
 	t.Run("AtomicWrite", func(t *testing.T) {
 		// Reset and set up
 		viper.Reset()
 		viper.Set("ConfigDir", tmpDir)
+		setRuntimeDir(t)
 		require.NoError(t, param.Set("Server.ExternalWebUrl", "https://atomic.example.com:8443"))
 
 		modules := server_structs.DirectorType
@@ -160,6 +165,7 @@ func TestWriteAddressFile(t *testing.T) {
 		// Reset and set up
 		viper.Reset()
 		viper.Set("ConfigDir", tmpDir)
+		setRuntimeDir(t)
 		require.NoError(t, param.Set("Server.ExternalWebUrl", "https://parseable.example.com:8443"))
 		require.NoError(t, param.Set("Origin.Url", "https://parseable.example.com:8444"))
 

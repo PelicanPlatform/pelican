@@ -47,6 +47,13 @@ type: stringSlice
 default: []
 components: ["*"]
 ---
+name: RuntimeDir
+description: |+
+  Directory where Pelican writes runtime artifacts such as address files; if unset it defaults to /run/pelican for root, $XDG_RUNTIME_DIR/pelican when XDG_RUNTIME_DIR is set, or a temporary directory that Pelican cleans up on shutdown.
+type: filename
+default: ""
+components: ["cache", "director", "origin", "registry"]
+---
 name: Debug
 description: |+
   [Deprecated] To enable debug logging, set ${Logging.Level} to "debug".
