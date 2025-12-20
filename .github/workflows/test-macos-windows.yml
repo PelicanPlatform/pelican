@@ -79,11 +79,24 @@ jobs:
         echo "$HOME/go/bin" >> $GITHUB_PATH
     - name: Test macOS
       if: runner.os == 'macOS'
+      env:
+        JUNIT_FILE: junit-macOS.xml
       run: |
         echo "::group::Building web UI"
         make web-build
         echo "::endgroup::"
-        gotestsum --format pkgname-and-test-fails --hide-summary=output -- -p=4 -timeout 15m -coverpkg=./... -covermode=count -coverprofile=coverage.out ./...
+        gotestsum --format pkgname-and-test-fails --hide-summary=output --junitfile "$JUNIT_FILE" -- -p=4 -timeout 15m -coverpkg=./... -covermode=count -coverprofile=coverage.out ./...
+    - name: Upload junit report (macOS)
+      if: always() && runner.os == 'macOS'
+      uses: actions/upload-artifact@v4
+      with:
+        name: junit-macOS
+        path: junit-macOS.xml
+    - name: Publish JUnit summary (macOS)
+      if: always() && runner.os == 'macOS'
+      uses: test-summary/action@v2
+      with:
+        paths: junit-macOS.xml
     - name: Install gotestsum (Windows)
       if: runner.os == 'Windows'
       env:
@@ -104,11 +117,23 @@ jobs:
         GOCACHE: D:\gocache
         GOMODCACHE: D:\gomodcache
         GOTMPDIR: D:\gotmp
+        JUNIT_FILE: junit-Windows.xml
       run: |
         echo "::group::Building web UI"
         make web-build
         echo "::endgroup::"
-        gotestsum --format pkgname-and-test-fails --hide-summary=output -- -p=4 -timeout 15m -coverpkg=./... -covermode=count -coverprofile=coverage.out ./...
+        gotestsum --format pkgname-and-test-fails --hide-summary=output --junitfile "$env:JUNIT_FILE" -- -p=4 -timeout 15m -coverpkg=./... -covermode=count -coverprofile=coverage.out ./...
+    - name: Upload junit report (Windows)
+      if: always() && runner.os == 'Windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: junit-Windows
+        path: junit-Windows.xml
+    - name: Publish JUnit summary (Windows)
+      if: always() && runner.os == 'Windows'
+      uses: test-summary/action@v2
+      with:
+        paths: junit-Windows.xml
     - name: Run GoReleaser for macOS
       uses: goreleaser/goreleaser-action@v6
       if: runner.os == 'macOS'

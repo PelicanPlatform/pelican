@@ -69,11 +69,24 @@ jobs:
         # Ensure ~/go/bin is in PATH for subsequent steps
         echo "$HOME/go/bin" >> $GITHUB_PATH
     - name: Test
+      env:
+        JUNIT_FILE: junit-${{ matrix.binary_name }}.xml
       run: |
         echo "::group::Building web UI"
         make web-build
         echo "::endgroup::"
-        gotestsum --format pkgname-and-test-fails --hide-summary=output -- -p=4 -timeout 15m -coverpkg=./...      -covermode=count -coverprofile=${{ matrix.coverprofile }} -tags=${{ matrix.tags }} ./...
+        gotestsum --format pkgname-and-test-fails --hide-summary=output --junitfile "$JUNIT_FILE" -- -p=4 -timeout 15m -coverpkg=./...      -covermode=count -coverprofile=${{ matrix.coverprofile }} -tags=${{ matrix.tags }} ./...
+    - name: Upload junit report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: junit-${{ matrix.binary_name }}-linux
+        path: junit-${{ matrix.binary_name }}.xml
+    - name: Publish JUnit summary
+      if: always()
+      uses: test-summary/action@v2
+      with:
+        paths: junit-${{ matrix.binary_name }}.xml
     - name: Get total code coverage
       if: github.event_name == 'pull_request'
       id: cc
