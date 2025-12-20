@@ -467,6 +467,12 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		}
 	})
 
+	// Write the address file now that all services are running and health checks have passed
+	if err = config.WriteAddressFile(modules); err != nil {
+		log.WithError(err).Warning("Failed to write address file")
+		// Don't fail startup if we can't write the address file
+	}
+
 	return
 }
 

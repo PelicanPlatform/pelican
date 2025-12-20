@@ -24,23 +24,11 @@ mkdir -p /tmp/pelican-test/stat_test
 mkdir -p /tmp/pelican-test/stat_test/origin
 chmod 777 /tmp/pelican-test/stat_test/origin
 
-# Helper func that finds an available port for the servers
-find_available_port() {
-    # Use Python to bind to port 0 and find an available port
-    python3 -c "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.bind(('', 0)); print(s.getsockname()[1]); s.close()"
-}
-
-# Get two random available ports
-WEBUI_PORT=$(find_available_port)
-ORIGIN_PORT=$(find_available_port)
-
-# Setup env variables needed
-export PELICAN_FEDERATION_DIRECTORURL="https://$HOSTNAME:$WEBUI_PORT"
-export PELICAN_FEDERATION_REGISTRYURL="https://$HOSTNAME:$WEBUI_PORT"
-export PELICAN_ORIGIN_PORT=$ORIGIN_PORT
+# Setup env variables needed - use port 0 to let Pelican choose random ports
+export PELICAN_ORIGIN_PORT=0
 export PELICAN_TLSSKIPVERIFY=true
 export PELICAN_SERVER_ENABLEUI=false
-export PELICAN_SERVER_WEBPORT=$WEBUI_PORT
+export PELICAN_SERVER_WEBPORT=0
 export PELICAN_ORIGIN_RUNLOCATION=/tmp/pelican-test/stat_test/xrootdRunLocation
 
 export PELICAN_CONFIGDIR=/tmp/pelican-test/stat_test
@@ -92,19 +80,44 @@ cleanup() {
 echo "This is some random content in the random file" > /tmp/pelican-test/stat_test/origin/input.txt
 touch ${PELICAN_CONFIG}
 
-# Prepare token for calling stat
-TOKEN=$(./pelican --config ${PELICAN_CONFIG} origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:$WEBUI_PORT" --scope "web_ui.access" --subject "bar" --lifetime 3600)
-
-# Run federation in the background
-federationServe="./pelican --config ${PELICAN_CONFIG} serve --module director --module registry --module origin --port $WEBUI_PORT || :"
+# Run federation in the background with port 0 (random port)
+federationServe="./pelican --config ${PELICAN_CONFIG} serve --module director --module registry --module origin --port 0 || :"
 $federationServe &
 pid_federationServe=$!
 
 # Setup trap with the PID as an argument to the cleanup function
 trap 'cleanup $pid_federationServe' EXIT
 
+# Wait for the address file to be created
+ADDRESS_FILE="${PELICAN_CONFIGDIR}/pelican.addresses"
+echo "Waiting for address file: $ADDRESS_FILE"
+TOTAL_WAIT=0
+while [ ! -f "$ADDRESS_FILE" ]; do
+    sleep 0.5
+    TOTAL_WAIT=$((TOTAL_WAIT + 1))
+    if [ "$TOTAL_WAIT" -gt 40 ]; then
+        echo "Address file not created after 20 seconds, exiting..."
+        echo "TEST FAILED"
+        exit 1
+    fi
+done
+
+echo "Address file found, sourcing it..."
+# Source the address file to get the actual server addresses
+source "$ADDRESS_FILE"
+
+echo "SERVER_EXTERNAL_WEB_URL=$SERVER_EXTERNAL_WEB_URL"
+echo "ORIGIN_URL=$ORIGIN_URL"
+
+# Set environment variables for federation discovery based on actual addresses
+export PELICAN_FEDERATION_DIRECTORURL="$SERVER_EXTERNAL_WEB_URL"
+export PELICAN_FEDERATION_REGISTRYURL="$SERVER_EXTERNAL_WEB_URL"
+
+# Prepare token for calling stat
+TOKEN=$(./pelican --config ${PELICAN_CONFIG} origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "$SERVER_EXTERNAL_WEB_URL" --scope "web_ui.access" --subject "bar" --lifetime 3600)
+
 # Give the federation time to spin up:
-API_URL="https://$HOSTNAME:$WEBUI_PORT/api/v1.0/health"
+API_URL="$SERVER_EXTERNAL_WEB_URL/api/v1.0/health"
 DESIRED_RESPONSE="200"
 
 # Function to check if the response indicates all servers are running
@@ -139,7 +152,7 @@ do
     fi
 done
 
-STAT_URL="https://$HOSTNAME:$WEBUI_PORT/api/v1.0/director_ui/servers/origins/stat/test/input.txt"
+STAT_URL="$SERVER_EXTERNAL_WEB_URL/api/v1.0/director_ui/servers/origins/stat/test/input.txt"
 
 # Function to query the stat endpoint with retry logic for 429 responses
 query_stat_endpoint() {
