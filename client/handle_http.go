@@ -81,6 +81,10 @@ var (
 
 	// ErrObjectNotFound is returned when the requested remote object does not exist.
 	ErrObjectNotFound = errors.New("remote object not found")
+
+	// maxWebDavRetries is the maximum number of attempts (including the initial attempt)
+	// for WebDAV operations that encounter idle connection errors.
+	maxWebDavRetries = 2
 )
 
 type (
@@ -3510,13 +3514,23 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 	if err := job.job.ctx.Err(); err != nil {
 		return err
 	}
-	infos, err := client.ReadDir(remotePath)
+	var infos []fs.FileInfo
+	err := retryWebDavOperation("ReadDir", func() error {
+		var err error
+		infos, err = client.ReadDir(remotePath)
+		return err
+	})
 	if err != nil {
 		// Check if we got a 404:
 		if gowebdav.IsErrNotFound(err) {
 			return error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
 		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
-			info, err := client.Stat(remotePath)
+			var info fs.FileInfo
+			err := retryWebDavOperation("Stat", func() error {
+				var err error
+				info, err = client.Stat(remotePath)
+				return err
+			})
 			if err != nil {
 				return errors.Wrap(err, "failed to stat remote path")
 			}
@@ -3733,14 +3747,24 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 	}
 
 	// Non-recursive listing (original behavior)
-	infos, err := client.ReadDir(remotePath)
+	var infos []fs.FileInfo
+	err = retryWebDavOperation("ReadDir", func() error {
+		var err error
+		infos, err = client.ReadDir(remotePath)
+		return err
+	})
 	if err != nil {
 		// Check if we got a 404:
 		if gowebdav.IsErrNotFound(err) {
 			return nil, error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
 		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
 			// If we get an error code 500 (internal server error), we should check if the user is trying to ls on a file
-			info, err := client.Stat(remotePath)
+			var info fs.FileInfo
+			err := retryWebDavOperation("Stat", func() error {
+				var err error
+				info, err = client.Stat(remotePath)
+				return err
+			})
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to stat remote path")
 			}
@@ -3793,14 +3817,24 @@ func listHttpRecursiveHelper(client *gowebdav.Client, remotePath string, current
 		return fileInfos, nil
 	}
 
-	infos, err := client.ReadDir(remotePath)
+	var infos []fs.FileInfo
+	err = retryWebDavOperation("ReadDir", func() error {
+		var err error
+		infos, err = client.ReadDir(remotePath)
+		return err
+	})
 	if err != nil {
 		// Check if we got a 404:
 		if gowebdav.IsErrNotFound(err) {
 			return nil, error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
 		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
 			// If we get an error code 500 (internal server error), we should check if the user is trying to ls on a file
-			info, err := client.Stat(remotePath)
+			var info fs.FileInfo
+			err := retryWebDavOperation("Stat", func() error {
+				var err error
+				info, err = client.Stat(remotePath)
+				return err
+			})
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to stat remote path")
 			}
@@ -3849,6 +3883,26 @@ func listHttpRecursiveHelper(client *gowebdav.Client, remotePath string, current
 	}
 
 	return fileInfos, nil
+}
+
+// retryWebDavOperation executes a WebDAV operation with retry logic for idle connection errors.
+// The operation is retried up to maxWebDavRetries times if an idle connection error is encountered.
+func retryWebDavOperation(operationName string, operation func() error) error {
+	var err error
+	for attempt := 0; attempt < maxWebDavRetries; attempt++ {
+		err = operation()
+		if err == nil {
+			return nil
+		}
+		// Retry if it's an idle connection error and we have attempts remaining
+		if isIdleConnectionError(err) && attempt < maxWebDavRetries-1 {
+			log.Debugf("Retrying %s after idle connection error: %v", operationName, err)
+			continue
+		}
+		// For all other errors or final attempt, return the error
+		break
+	}
+	return err
 }
 
 // deleteHttp takes the collection URL from the director response to perform the delete operation.
@@ -3911,19 +3965,33 @@ func deleteHttp(ctx context.Context, remoteUrl *pelican_url.PelicanURL, recursiv
 	client := createWebDavClient(collectionsUrl, token, project)
 	remotePath := remoteUrl.Path
 
-	info, err := client.Stat(remotePath)
-	if err != nil {
-		if gowebdav.IsErrNotFound(err) {
-			return error_codes.NewSpecification_FileNotFoundError(errors.Wrapf(ErrObjectNotFound, "cannot remove remote path %s: no such object or collection", remotePath))
+	// Use retry logic for Stat() to handle idle connection errors
+	var info fs.FileInfo
+	err = retryWebDavOperation("Stat", func() error {
+		var err error
+		info, err = client.Stat(remotePath)
+		if err != nil {
+			if gowebdav.IsErrNotFound(err) {
+				return error_codes.NewSpecification_FileNotFoundError(errors.Wrapf(ErrObjectNotFound, "cannot remove remote path %s: no such object or collection", remotePath))
+			}
+			return err
 		}
+		return nil
+	})
+	if err != nil {
 		return errors.Wrap(err, "failed to check object existence")
 	}
 
 	if info.IsDir() {
-		children, err := client.ReadDir(remotePath)
+		var children []fs.FileInfo
+		// Use retry logic for ReadDir() to handle idle connection errors
+		err = retryWebDavOperation("ReadDir", func() error {
+			var err error
+			children, err = client.ReadDir(remotePath)
+			return err
+		})
 		if err != nil {
 			return errors.Wrapf(err, "failed to read contents of collection %s", remotePath)
-
 		}
 		if !recursive && len(children) > 0 {
 			return errors.Errorf("%s is a non-empty collection, use recursive flag or recursive query in the url to delete it", remotePath)
@@ -3993,6 +4061,7 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 		go func(endpoint *url.URL) {
 			canDisableProxy := CanDisableProxy()
 			disableProxy := !isProxyEnabled()
+			idleConnRetries := 0
 
 			var info FileInfo
 			for {
@@ -4030,6 +4099,12 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 						disableProxy = true
 						continue
 					}
+				}
+				// If we have an idle connection error, retry once
+				if isIdleConnectionError(err) && idleConnRetries < maxWebDavRetries-1 {
+					log.Debugln("Retrying Stat after idle connection error:", err)
+					idleConnRetries++
+					continue
 				}
 				log.Errorln("Failed to get HTTP response:", err)
 				resultsChan <- statResults{FileInfo{}, err}
