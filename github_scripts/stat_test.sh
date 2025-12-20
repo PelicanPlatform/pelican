@@ -141,14 +141,48 @@ done
 
 STAT_URL="https://$HOSTNAME:$WEBUI_PORT/api/v1.0/director_ui/servers/origins/stat/test/input.txt"
 
-RESPONSE=$(curl -k -H "Cookie: login=$TOKEN" -H "Content-Type: application/json" "$STAT_URL")
+# Function to query the stat endpoint with retry logic for 429 responses
+query_stat_endpoint() {
+    local max_retries=10
+    local retry_count=0
 
-if echo "$RESPONSE" | grep -q "\"status\":\"success\""; then
-    echo "Desired response received: $RESPONSE"
-    echo "Test Succeeded"
+    while [ $retry_count -lt $max_retries ]; do
+        # Make the curl request and capture both the response body and HTTP status code
+        HTTP_RESPONSE=$(curl -k -w "\n%{http_code}" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" "$STAT_URL" 2>/dev/null)
+
+        # Extract the status code (last line) and response body (everything else)
+        HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -n1)
+        RESPONSE=$(echo "$HTTP_RESPONSE" | sed '$d')
+
+        # Check if we got a 429 status code
+        if [ "$HTTP_CODE" = "429" ]; then
+            echo "Received 429 status code (director recently restarted), retrying in 1 second... (attempt $((retry_count + 1))/$max_retries)"
+            retry_count=$((retry_count + 1))
+            sleep 1
+            continue
+        fi
+
+        # For any other status code, check if we got a successful response
+        if echo "$RESPONSE" | grep -q "\"status\":\"success\""; then
+            echo "Desired response received: $RESPONSE"
+            echo "Test Succeeded"
+            return 0
+        else
+            echo "Stat response returns error: $RESPONSE (HTTP status: $HTTP_CODE)"
+            echo "Test Failed"
+            return 1
+        fi
+    done
+
+    # If we exhausted all retries
+    echo "Exceeded maximum retries ($max_retries) for stat endpoint query"
+    echo "Test Failed"
+    return 1
+}
+
+# Query the stat endpoint with retry logic
+if query_stat_endpoint; then
     exit 0
 else
-    echo "Stat response returns error: $RESPONSE"
-    echo "Test Failed"
     exit 1
 fi
