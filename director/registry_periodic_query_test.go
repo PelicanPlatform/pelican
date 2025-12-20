@@ -36,6 +36,7 @@ import (
 )
 
 func TestLaunchRegistryPeriodicQuery(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	config.ResetConfig()
 	defer config.ResetConfig()
 

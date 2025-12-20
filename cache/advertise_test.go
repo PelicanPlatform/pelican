@@ -33,6 +33,7 @@ import (
 )
 
 func TestFilterNsAdsForCache(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	tests := []struct {
 		desc          string
 		permittedNS   []string

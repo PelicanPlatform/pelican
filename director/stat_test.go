@@ -35,10 +35,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -69,6 +69,8 @@ func initMockStatUtils() {
 }
 
 func TestQueryServersForObject(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	server_utils.ResetTestState()
 	require.NoError(t, param.Set("Director.MinStatResponse", 1))
 	require.NoError(t, param.Set("Director.MaxStatResponse", 1))
@@ -825,6 +827,8 @@ func TestQueryServersForObject(t *testing.T) {
 }
 
 func TestCache(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	require.NoError(t, param.Reset())
 	require.NoError(t, param.Set("Logging.Level", "Debug"))
 	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
@@ -870,7 +874,7 @@ func TestCache(t *testing.T) {
 	)
 	initMockStatUtils()
 	t.Cleanup(cleanupMock)
-	require.NoError(t, config.InitServer(context.Background(), server_structs.DirectorType))
+	require.NoError(t, initServerForTest(t, context.Background(), server_structs.DirectorType))
 
 	t.Run("repeated-cache-access-found", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -924,6 +928,8 @@ func TestCache(t *testing.T) {
 }
 
 func TestSendHeadReq(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	server_utils.ResetTestState()
 
 	// Start a local HTTP server
@@ -965,7 +971,7 @@ func TestSendHeadReq(t *testing.T) {
 
 	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
 
-	err = config.InitServer(context.Background(), server_structs.DirectorType)
+	err = initServerForTest(t, context.Background(), server_structs.DirectorType)
 	require.NoError(t, err)
 
 	t.Run("correct-input-gives-no-error", func(t *testing.T) {

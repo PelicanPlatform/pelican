@@ -32,6 +32,7 @@ import (
 )
 
 func TestGetCacheHostnameFromToken(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	test_utils.InitClient(t, nil)
 

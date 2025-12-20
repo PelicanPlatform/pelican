@@ -148,6 +148,7 @@ func generateTestCert(runDir string) (certPath, keyPath string, err error) {
 }
 
 func TestDropPrivilegeSignaling(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {

@@ -369,7 +369,7 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	// services with the broker, so we need to set up the broker dialer
 	var brokerDialer *broker.BrokerDialer
 	if modules.IsEnabled(server_structs.DirectorType) {
-		fmt.Println("Setting up broker dialer for director")
+		log.Debug("Setting up broker dialer for director")
 		brokerDialer = broker.NewBrokerDialer(ctx, egrp)
 		config.SetTransportDialer(brokerDialer.DialContext)
 		director.SetBrokerDialer(brokerDialer)

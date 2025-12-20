@@ -33,9 +33,12 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func TestLaunchTTLCache(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	mockPelicanOriginServerAd := server_structs.ServerAd{
 		AuthURL: url.URL{},
 		URL: url.URL{
@@ -80,14 +83,14 @@ func TestLaunchTTLCache(t *testing.T) {
 
 		func() {
 			serverAds.DeleteAll()
+			resetHealthTests()
+
 			serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
 				ServerAd:     mockPelicanOriginServerAd,
 				NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
 			}, ttlcache.DefaultTTL)
 			healthTestUtilsMutex.Lock()
 			defer healthTestUtilsMutex.Unlock()
-			// Clear the map for the new test
-			healthTestUtils = make(map[string]*healthTestUtil)
 			healthTestUtils[mockPelicanOriginServerAd.URL.String()] = &healthTestUtil{
 				Cancel:        cancelFunc,
 				ErrGrp:        errgrp,
@@ -124,6 +127,8 @@ func TestLaunchTTLCache(t *testing.T) {
 }
 
 func TestServerAdsCacheEviction(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	mockServerAd := server_structs.ServerAd{Type: server_structs.OriginType.String(), URL: url.URL{Host: "mock.server.org"}}
 	mockServerAd.Initialize("foo")
 
@@ -178,9 +183,21 @@ func TestServerAdsCacheEviction(t *testing.T) {
 }
 
 func TestRecordAd(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	t.Cleanup(func() {
+		// Drain any background goroutines spawned by health/stat utilities to avoid leaks across tests.
+		shutdownHealthTests()
+		shutdownStatUtils()
+	})
+
+	resetHealthTests()
+	shutdownStatUtils()
+
 	serverAds.DeleteAll()
+	go serverAds.Start()
 	t.Cleanup(func() {
 		serverAds.DeleteAll()
+		serverAds.Stop()
 	})
 
 	topologyServerUrl := url.URL{Scheme: "http", Host: "origin.chtc.wisc.edu"} // Topology server URL is always in http
@@ -202,18 +219,21 @@ func TestRecordAd(t *testing.T) {
 	}
 
 	t.Run("topology-server-added-if-no-duplicate", func(t *testing.T) {
+		defer serverAds.DeleteAll()
 		recordAd(context.Background(), mockTopology.ServerAd, &mockTopology.NamespaceAds)
 		assert.Len(t, serverAds.Items(), 1)
 		assert.True(t, serverAds.Has(topologyServerUrl.String()))
 	})
 
 	t.Run("pelican-server-added-if-no-duplicate", func(t *testing.T) {
+		defer serverAds.DeleteAll()
 		recordAd(context.Background(), mockPelican.ServerAd, &mockPelican.NamespaceAds)
 		assert.Len(t, serverAds.Items(), 1)
 		assert.True(t, serverAds.Has(pelicanServerUrl.String()))
 	})
 
 	t.Run("pelican-server-overwrites-topology", func(t *testing.T) {
+		defer serverAds.DeleteAll()
 		recordAd(context.Background(), mockTopology.ServerAd, &mockTopology.NamespaceAds)
 		recordAd(context.Background(), mockPelican.ServerAd, &mockPelican.NamespaceAds)
 
@@ -225,6 +245,7 @@ func TestRecordAd(t *testing.T) {
 	})
 
 	t.Run("topology-server-is-ignored-with-dup-pelican-server", func(t *testing.T) {
+		defer serverAds.DeleteAll()
 		recordAd(context.Background(), mockPelican.ServerAd, &mockPelican.NamespaceAds)
 		recordAd(context.Background(), mockTopology.ServerAd, &mockTopology.NamespaceAds)
 
@@ -238,27 +259,16 @@ func TestRecordAd(t *testing.T) {
 	t.Run("recorded-sad-should-match-health-test-utils-one", func(t *testing.T) {
 		t.Cleanup(func() {
 			server_utils.ResetTestState()
-			healthTestUtilsMutex.Lock()
-			statUtilsMutex.Lock()
-			defer statUtilsMutex.Unlock()
-			defer healthTestUtilsMutex.Unlock()
-			healthTestUtils = make(map[string]*healthTestUtil)
-			statUtils = make(map[string]*serverStatUtil)
-
+			resetHealthTests()
+			shutdownStatUtils()
 			serverAds.DeleteAll()
 			geoNetOverrides = nil
 		})
 		server_utils.ResetTestState()
 		func() {
 			geoNetOverrides = nil
-
-			healthTestUtilsMutex.Lock()
-			statUtilsMutex.Lock()
-			defer statUtilsMutex.Unlock()
-			defer healthTestUtilsMutex.Unlock()
-			healthTestUtils = make(map[string]*healthTestUtil)
-			statUtils = make(map[string]*serverStatUtil)
-
+			resetHealthTests()
+			shutdownStatUtils()
 			serverAds.DeleteAll()
 		}()
 
@@ -275,6 +285,8 @@ func TestRecordAd(t *testing.T) {
 }
 
 func TestGetRawStatusWeight(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	testCases := []struct {
 		name           string
 		status         metrics.HealthStatusEnum
@@ -318,6 +330,8 @@ func TestGetRawStatusWeight(t *testing.T) {
 }
 
 func TestPopulateEWMAStatusWeightSequence(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	// Note: Expected weights calculated using this online calculator:
 	// https://calculatorsforhome.com/ewma-estimator/
 	// For mixed-delta tests, calculations must be done pair-wise because
@@ -505,6 +519,8 @@ func TestPopulateEWMAStatusWeightSequence(t *testing.T) {
 }
 
 func TestApplyDowntimeFilters(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	now := time.Now().UTC().UnixMilli()
 
 	activeDowntime := server_structs.Downtime{
@@ -592,6 +608,8 @@ func TestApplyDowntimeFilters(t *testing.T) {
 }
 
 func TestGetCachedDowntimesDedup(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	serverName := "TEST_CACHE"
 	now := time.Now().UnixMilli()
 	dup := server_structs.Downtime{

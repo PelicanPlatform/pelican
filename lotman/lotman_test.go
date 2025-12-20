@@ -139,6 +139,7 @@ func getMockDiscoveryHost() *httptest.Server {
 
 // Test the library initializer. NOTE: this also tests CreateLot, which is a part of initialization.
 func TestLotmanInit(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
 	t.Run("TestBadInit", func(t *testing.T) {
@@ -198,6 +199,7 @@ func TestLotmanInit(t *testing.T) {
 }
 
 func TestLotmanInitFromConfig(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
 	param.Set("Federation.DiscoveryUrl", server.URL)
@@ -280,6 +282,7 @@ func TestLotmanInitFromConfig(t *testing.T) {
 }
 
 func TestGetLotmanLib(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	libLoc := getLotmanLib()
 	require.Equal(t, "/usr/lib64/libLotMan.so", libLoc)
 
@@ -295,6 +298,7 @@ func TestGetLotmanLib(t *testing.T) {
 }
 
 func TestGetAuthzCallers(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
 	param.Set("Federation.DiscoveryUrl", server.URL)
@@ -316,6 +320,7 @@ func TestGetAuthzCallers(t *testing.T) {
 }
 
 func TestGetLot(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
 	param.Set("Federation.DiscoveryUrl", server.URL)
@@ -341,6 +346,7 @@ func TestGetLot(t *testing.T) {
 }
 
 func TestUpdateLot(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
 	param.Set("Federation.DiscoveryUrl", server.URL)
@@ -381,6 +387,7 @@ func TestUpdateLot(t *testing.T) {
 }
 
 func TestAddToLot(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
 	param.Set("Federation.DiscoveryUrl", server.URL)
@@ -389,12 +396,12 @@ func TestAddToLot(t *testing.T) {
 	require.True(t, success)
 
 	newLotPath := LotPath{
-		Path: "/a/new/path",
+		Path:      "/a/new/path",
 		Recursive: true,
 	}
 	addition := LotAddition{
 		LotName: "test-1",
-		Paths: []LotPath{newLotPath},
+		Paths:   []LotPath{newLotPath},
 		Parents: []string{"default"},
 	}
 
@@ -414,6 +421,7 @@ func TestAddToLot(t *testing.T) {
 }
 
 func TestRemoveLotParents(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
 	param.Set("Federation.DiscoveryUrl", server.URL)
@@ -452,6 +460,7 @@ func TestRemoveLotParents(t *testing.T) {
 }
 
 func TestRemoveLotPaths(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
 	param.Set("Federation.DiscoveryUrl", server.URL)
@@ -474,6 +483,7 @@ func TestRemoveLotPaths(t *testing.T) {
 }
 
 func TestDeleteLotsRec(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
 	param.Set("Federation.DiscoveryUrl", server.URL)
@@ -497,6 +507,7 @@ func TestDeleteLotsRec(t *testing.T) {
 
 // In any case where two MPA values are both set, the value in MPA1 should win.
 func TestMergeMPAs(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	dedicatedGB1 := 10.0
 	maxNumObjects1 := Int64FromFloat{Value: 50}
 	creationTime1 := Int64FromFloat{Value: 200}
@@ -535,6 +546,7 @@ func TestMergeMPAs(t *testing.T) {
 }
 
 func TestLotMerging(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Owner should be set to lot1 owner
 	owner1 := "owner1"
 	owner2 := "owner2"
@@ -621,6 +633,7 @@ func TestLotMerging(t *testing.T) {
 
 // Read the mockup yaml and make sure we grab the list of policy definitions as expected
 func TestGetPolicyMap(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -668,6 +681,7 @@ func TestGetPolicyMap(t *testing.T) {
 }
 
 func TestByteConversions(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	bytes := uint64(120530000000) // 120.53 GB
 
 	// forward pass
@@ -682,6 +696,7 @@ func TestByteConversions(t *testing.T) {
 // Valid lot configuration not only requires that all fields are present, but also that the sum of all lots' dedicatedGB values
 // does not exceed the high watermark.
 func TestLotValidation(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	type testCase struct {
 		name            string
 		lots            []Lot
@@ -829,6 +844,7 @@ func TestLotValidation(t *testing.T) {
 
 // Make sure we handle various suffixes and non-suffixed percentages correctly
 func TestConvertWatermarkToBytes(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	type testCase struct {
 		Name          string
 		Watermark     string
@@ -901,6 +917,7 @@ func TestConvertWatermarkToBytes(t *testing.T) {
 // I don't test for errors here because the internal functions capable of generating
 // errors are tested elsewhere (e.g. convertWatermarkToBytes)
 func TestDivideRemainingSpace(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	dedGB := float64(10.0)
@@ -960,6 +977,7 @@ func TestDivideRemainingSpace(t *testing.T) {
 // Pretty straightforward -- tests should make sure we can grab viper config and use it when
 // setting lot timestamps if they're not pre-configured.
 func TestConfigLotTimestamps(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	now := time.Now().UnixMilli()
@@ -1040,6 +1058,7 @@ func TestConfigLotTimestamps(t *testing.T) {
 }
 
 func TestConfigLotsFromFedPrefixes(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -1147,7 +1166,7 @@ func TestConfigLotsFromFedPrefixes(t *testing.T) {
 			federationIssuer: "",
 			// Discovery will happen via the Director, but we'll still discover
 			// the federation root there.
-			directorUrl:      discUrl,
+			directorUrl: discUrl,
 			expectedLotMap: map[string]Lot{
 				"/namespace1": {
 					LotName: "/namespace1",

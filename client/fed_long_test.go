@@ -43,6 +43,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -53,6 +54,7 @@ var (
 )
 
 func TestRecursiveUploadsAndDownloads(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Create instance of test federation
 	server_utils.ResetTestState()
 
@@ -277,6 +279,7 @@ func verifySuccessfulTransfer(t *testing.T, transferResults []client.TransferRes
 
 // Test that recursive uploads and downloads work with the ?recursive query
 func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Create instance of test federation
 	server_utils.ResetTestState()
 
@@ -474,6 +477,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 // This tests that is origins disable listings, we should fail the download
 // Note: origins disabling listings override the existence of dirlisthost, causing a failure
 func TestFailureOnOriginDisablingListings(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
 	fed := fed_test_utils.NewFedTest(t, pubExportNoDirectRead)
@@ -498,6 +502,7 @@ func TestFailureOnOriginDisablingListings(t *testing.T) {
 }
 
 func TestSyncUpload(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Create instance of test federation
 	server_utils.ResetTestState()
 
@@ -695,6 +700,7 @@ func TestSyncUpload(t *testing.T) {
 }
 
 func TestSyncDownload(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Create instance of test federation
 	server_utils.ResetTestState()
 
@@ -906,6 +912,7 @@ func TestSyncDownload(t *testing.T) {
 // This test verifies the behavior when a directory path is passed to the object put command without the recursive option.
 // In this scenario, an appropriate error message should be logged, and no directory or file should be created at the destination.
 func TestObjectPutNonRecursiveDirPath(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Create instance of test federation
 	server_utils.ResetTestState()
 
@@ -994,6 +1001,7 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 // - Failing to delete a non-empty directory when the recursive flag is not set.
 // - Ensuring the proper error messages are displayed for various failure cases.
 func TestObjectDelete(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	fed := fed_test_utils.NewFedTest(t, originConfigWithAndWithoutWrite)
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())

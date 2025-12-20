@@ -61,6 +61,7 @@ func setupRouter() *gin.Engine {
 }
 
 func TestDowntime(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	config.ResetConfig()
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {

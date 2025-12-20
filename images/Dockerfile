@@ -665,6 +665,14 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   dnf install -y goreleaser
 ENDRUN
 
+# Install gotestsum for better test output formatting
+RUN --mount=type=cache,id=go-mod-cache-${TARGETPLATFORM},target=/root/go,sharing=locked <<ENDRUN
+  set -eux
+  go install gotest.tools/gotestsum@latest
+  # Move gotestsum to a system location that is world readable
+  mv /root/go/bin/gotestsum /usr/local/bin/gotestsum
+ENDRUN
+
 # Install Node.js using the same commands as the pelican-build-init stage.
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux

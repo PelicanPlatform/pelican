@@ -51,6 +51,7 @@ import (
 // Create five 1MB files.  Trigger a purge, ensuring that the cleanup is
 // done according to LRU
 func TestPurge(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	tmpDir := t.TempDir()
 
 	server_utils.ResetTestState()
@@ -113,6 +114,7 @@ func TestPurge(t *testing.T) {
 // Create four 1MB files (above low-water mark).  Force a purge, ensuring that the cleanup is
 // done according to LRU
 func TestForcePurge(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	tmpDir := t.TempDir()
 
 	server_utils.ResetTestState()
@@ -211,6 +213,7 @@ func TestForcePurge(t *testing.T) {
 // The purge is triggered with the low water mark set at 5MB, and the test asserts that three files are purged:
 // file-1 and file-5 (PURGEFIRST), and file-2 (the oldest among the remaining non-PURGEFIRST files).
 func TestPurgeFirst(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
 	configDir := t.TempDir()

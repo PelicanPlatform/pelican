@@ -206,6 +206,7 @@ var (
 )
 
 func TestGetNamespaceById(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
@@ -248,6 +249,7 @@ func TestGetNamespaceById(t *testing.T) {
 }
 
 func TestGetNamespaceStatusById(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
@@ -287,6 +289,7 @@ func TestGetNamespaceStatusById(t *testing.T) {
 }
 
 func TestAddNamespace(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
@@ -356,6 +359,7 @@ func TestAddNamespace(t *testing.T) {
 }
 
 func TestUpdateNamespace(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
@@ -400,6 +404,7 @@ func TestUpdateNamespace(t *testing.T) {
 }
 
 func TestUpdateNamespaceStatusById(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 	t.Run("return-error-if-id-dne", func(t *testing.T) {
@@ -468,6 +473,7 @@ func TestUpdateNamespaceStatusById(t *testing.T) {
 }
 
 func TestGetNamespacesByFilter(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -775,6 +781,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 // getAllowedPrefixesForCaches correctly constructs the mapping
 // from cache hostnames to allowed prefixes.
 func TestGetAllowedPrefixesForCaches(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
@@ -813,6 +820,7 @@ func TestGetAllowedPrefixesForCaches(t *testing.T) {
 }
 
 func TestGetNamespaceJwksByPrefix(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
@@ -870,6 +878,7 @@ func topologyMockup(t *testing.T, namespaces []string) *httptest.Server {
 }
 
 func TestRegistryTopology(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
 	topoNamespaces := []string{"/topo/foo", "/topo/bar"}
@@ -964,6 +973,7 @@ func TestRegistryTopology(t *testing.T) {
 }
 
 func TestGetTopoPrefixString(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Run("empty-arr", func(t *testing.T) {
 		re := GetTopoPrefixString([]Topology{})
 		assert.Empty(t, re)

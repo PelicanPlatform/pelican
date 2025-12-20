@@ -44,6 +44,7 @@ import (
 )
 
 func TestHandleWildcard(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Set up the router
 	r := gin.New()
 	group := r.Group("/registry")
@@ -196,6 +197,7 @@ func TestHandleWildcard(t *testing.T) {
 }
 
 func TestCheckNamespaceCompleteHandler(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	router := gin.New()
 	router.POST("/namespaces/check/status", checkStatusHandler)
@@ -408,6 +410,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 }
 
 func TestCompareJwks(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	priv1, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	assert.NoError(t, err)
 	priv2, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -462,6 +465,7 @@ func TestCompareJwks(t *testing.T) {
 }
 
 func TestServerIdGenerationAndStorage(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 

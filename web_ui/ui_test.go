@@ -140,6 +140,7 @@ func setupWebUIEnv(t *testing.T) {
 }
 
 func TestHandleWebUIAuth(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	route := gin.New()
 	route.GET("/view/*requestPath", handleWebUIAuth, func(ctx *gin.Context) { ctx.Status(200) })
 
@@ -339,6 +340,7 @@ func TestHandleWebUIAuth(t *testing.T) {
 }
 
 func TestMapPrometheusPath(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Run("aggregate-frontend-path", func(t *testing.T) {
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
 		req := httptest.NewRequest("GET", "/view/_next/static/123.js", nil)
@@ -405,6 +407,7 @@ func TestMapPrometheusPath(t *testing.T) {
 }
 
 func TestServerHostRestart(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	route := gin.New()
 	route.POST("/api/v1.0/restart", AuthHandler, AdminAuthHandler, hotRestartServer)
 	require.NoError(t, param.Set(param.IssuerKey.GetName(), filepath.Join(t.TempDir(), "issuer.jwk")))
@@ -544,6 +547,7 @@ func generateToken(t *testing.T, scopes []token_scopes.TokenScope, subject strin
 }
 
 func TestApiToken(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -819,6 +823,7 @@ func TestApiToken(t *testing.T) {
 }
 
 func TestGroupManagementAPI(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	route := gin.New()
 	err := configureCommonEndpoints(route)
 	require.NoError(t, err)

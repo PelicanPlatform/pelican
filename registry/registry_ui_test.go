@@ -60,6 +60,7 @@ func mockAdminToken() (string, error) {
 }
 
 func TestListNamespaces(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
@@ -316,6 +317,7 @@ func TestListNamespaces(t *testing.T) {
 }
 
 func TestListNamespacesForUser(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
@@ -409,6 +411,7 @@ func TestListNamespacesForUser(t *testing.T) {
 }
 
 func TestGetNamespace(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -534,6 +537,7 @@ func TestGetNamespace(t *testing.T) {
 }
 
 func TestGetNamespaceJWKS(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -625,6 +629,7 @@ func TestGetNamespaceJWKS(t *testing.T) {
 }
 
 func TestUpdateNamespaceStatus(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -726,6 +731,7 @@ func TestUpdateNamespaceStatus(t *testing.T) {
 }
 
 func TestCreateNamespace(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
 	t.Cleanup(func() {
@@ -1145,6 +1151,7 @@ func TestCreateNamespace(t *testing.T) {
 }
 
 func TestUpdateNamespaceHandler(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	t.Cleanup(func() {
 		server_utils.ResetTestState()
@@ -1400,6 +1407,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 }
 
 func TestListInstitutions(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	router := gin.Default()
 	router.GET("/institutions", listInstitutions)
@@ -1497,11 +1505,13 @@ func TestListInstitutions(t *testing.T) {
 }
 
 func TestPopulateRegistrationFields(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	result := populateRegistrationFields("", server_structs.Registration{})
 	assert.NotEqual(t, 0, len(result))
 }
 
 func TestDeleteNamespaceDeletesServerWhenSingleService(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Initialize the mock database
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
@@ -1545,6 +1555,7 @@ func TestDeleteNamespaceDeletesServerWhenSingleService(t *testing.T) {
 }
 
 func TestDeleteNamespaceKeepsServerWhenMultipleServices(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Initialize the mock database
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)

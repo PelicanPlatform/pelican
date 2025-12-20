@@ -37,6 +37,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 var (
@@ -47,6 +48,8 @@ var (
 )
 
 func TestConsolidateDupServerAd(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	t.Run("union-capabilities", func(t *testing.T) {
 		existingAd := server_structs.ServerAd{Caps: server_structs.Capabilities{Writes: false}}
 		newAd := server_structs.ServerAd{Caps: server_structs.Capabilities{Writes: true}}
@@ -100,6 +103,7 @@ func TestConsolidateDupServerAd(t *testing.T) {
 }
 
 func TestParseServerAdFromTopology(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	server := server_structs.TopoServer{
 		Endpoint:     "http://my-endpoint.com",
@@ -201,6 +205,8 @@ func multiExportsTopoJSONHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func TestAdvertiseOSDF(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	t.Run("mock-topology-parse-correctly", func(t *testing.T) {
 		server_utils.ResetTestState()
 		serverAds.DeleteAll()
@@ -423,6 +429,8 @@ func mockTopoDowntimeXMLHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func TestUpdateDowntimeFromTopology(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	server_utils.ResetTestState()
 	serverAds.DeleteAll()
 	defer func() {
@@ -469,6 +477,8 @@ func TestUpdateDowntimeFromTopology(t *testing.T) {
 }
 
 func TestDisableTopologyDowntime(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	t.Run("disable-topology-downtime", func(t *testing.T) {
 		server_utils.ResetTestState()
 		serverAds.DeleteAll()

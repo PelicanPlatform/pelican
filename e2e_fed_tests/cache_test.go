@@ -43,6 +43,7 @@ import (
 // Test that token maintenance for the cache works as expected -- we never
 // want to let the on-disk token expire.
 func TestCacheFedTokMaint(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -88,6 +89,7 @@ func TestCacheFedTokMaint(t *testing.T) {
 
 // Validate CacheServe behavior: if Cache.Url has an existing port, it is preserved
 func TestCacheServe_PreservesExistingPort(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -107,6 +109,7 @@ func TestCacheServe_PreservesExistingPort(t *testing.T) {
 
 // Validate CacheServe behavior: if Cache.Url lacks a port, one is added
 func TestCacheServe_AddsPortWhenMissing(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 

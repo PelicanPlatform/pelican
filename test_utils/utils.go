@@ -19,6 +19,7 @@
 package test_utils
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -32,11 +33,17 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
@@ -408,4 +415,153 @@ func MockIssuer(t *testing.T, kSet *jwk.Set) string {
 	t.Cleanup(server.Close)
 
 	return serverUrl
+}
+
+// TestLogHook forwards log entries to the test log buffer so they appear under the
+// test's output (visible with -v or on failure) and never hit stdout/stderr directly.
+type TestLogHook struct {
+	t *testing.T
+}
+
+var (
+	globalLogBuffer   bytes.Buffer
+	globalLogMu       sync.Mutex
+	globalHookEnabled atomic.Bool
+)
+
+// globalBufferHook captures log entries into a shared buffer before tests are running
+// so they can be replayed under the first test's logger instead of hitting stdout/stderr.
+type globalBufferHook struct {
+	buf *bytes.Buffer
+	mu  *sync.Mutex
+}
+
+func (h *globalBufferHook) Levels() []logrus.Level { return logrus.AllLevels }
+
+func (h *globalBufferHook) Fire(entry *logrus.Entry) error {
+	if !globalHookEnabled.Load() {
+		return nil
+	}
+	if msg, err := entry.String(); err == nil {
+		h.mu.Lock()
+		h.buf.WriteString(msg)
+		h.mu.Unlock()
+	}
+	return nil
+}
+
+// NewTestLogHook creates a new TestLogHook that writes to testing.T's log buffer
+func NewTestLogHook(t *testing.T) *TestLogHook {
+	return &TestLogHook{t: t}
+}
+
+// Fire is called on every log entry
+func (hook *TestLogHook) Fire(entry *logrus.Entry) error {
+	hook.t.Helper()
+	hook.t.Log(formatEntry(entry))
+	return nil
+}
+
+// Levels defines which log levels this hook applies to
+func (hook *TestLogHook) Levels() []logrus.Level {
+	return logrus.AllLevels
+}
+
+// SetupGlobalTestLogging silences logrus output for an entire package's tests (for use in TestMain).
+// It preserves existing logger settings and restores them when the returned cleanup is called.
+func SetupGlobalTestLogging() func() {
+	originalOut := logrus.StandardLogger().Out
+	originalHooks := logrus.StandardLogger().Hooks
+	originalFormatter := logrus.StandardLogger().Formatter
+	originalReportCaller := logrus.StandardLogger().ReportCaller
+	globalHookEnabled.Store(true)
+
+	globalLogMu.Lock()
+	globalLogBuffer.Reset()
+	globalLogMu.Unlock()
+
+	logrus.SetOutput(&globalLogBuffer)
+	logrus.StandardLogger().Hooks = make(logrus.LevelHooks)
+	logrus.SetReportCaller(true)
+	logrus.AddHook(&globalBufferHook{buf: &globalLogBuffer, mu: &globalLogMu})
+
+	return func() {
+		logrus.SetOutput(originalOut)
+		logrus.StandardLogger().Hooks = originalHooks
+		logrus.SetFormatter(originalFormatter)
+		logrus.SetReportCaller(originalReportCaller)
+	}
+}
+
+// SetupTestLogging configures logrus to write to the test's log buffer.
+// This should be called at the beginning of tests to ensure clean output.
+// Returns a cleanup function that should be called with defer.
+func SetupTestLogging(t *testing.T) func() {
+	previousGlobalHookState := globalHookEnabled.Swap(false)
+	// Save the original logger configuration
+	originalOut := logrus.StandardLogger().Out
+	originalHooks := logrus.StandardLogger().Hooks
+	originalFormatter := logrus.StandardLogger().Formatter
+	originalReportCaller := logrus.StandardLogger().ReportCaller
+
+	// Flush any buffered global logs into the test hook (only emitted on failure)
+	var bufferedLogs string
+	globalLogMu.Lock()
+	if globalLogBuffer.Len() > 0 {
+		bufferedLogs = globalLogBuffer.String()
+		globalLogBuffer.Reset()
+	}
+	globalLogMu.Unlock()
+
+	// Disable standard output and use only the test hook
+	logrus.SetOutput(io.Discard)
+	logrus.StandardLogger().Hooks = make(logrus.LevelHooks)
+	logrus.SetReportCaller(true)
+	hook := NewTestLogHook(t)
+	logrus.AddHook(hook)
+
+	if strings.TrimSpace(bufferedLogs) != "" {
+		hook.t.Helper()
+		for _, line := range strings.Split(strings.TrimSuffix(bufferedLogs, "\n"), "\n") {
+			if trimmed := strings.TrimSpace(line); trimmed != "" {
+				hook.t.Log(trimmed)
+			}
+		}
+	}
+
+	// Return cleanup function
+	return func() {
+		logrus.SetOutput(originalOut)
+		logrus.StandardLogger().Hooks = originalHooks
+		logrus.SetFormatter(originalFormatter)
+		logrus.SetReportCaller(originalReportCaller)
+		globalHookEnabled.Store(previousGlobalHookState)
+	}
+}
+
+// formatEntry turns a logrus entry into a concise string that includes caller information.
+// This avoids the testing.T log location (which would otherwise point to the hook) and instead
+// surfaces the originating call site to make test output readable.
+func formatEntry(entry *logrus.Entry) string {
+	loc := ""
+	if entry.HasCaller() && entry.Caller != nil {
+		loc = fmt.Sprintf("%s:%d: ", filepath.Base(entry.Caller.File), entry.Caller.Line)
+	}
+
+	var keys []string
+	for k := range entry.Data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	msg := entry.Message
+	if len(keys) > 0 {
+		var fields []string
+		for _, k := range keys {
+			fields = append(fields, fmt.Sprintf("%s=%v", k, entry.Data[k]))
+		}
+		msg = fmt.Sprintf("%s [%s]", msg, strings.Join(fields, " "))
+	}
+
+	return fmt.Sprintf("%s %s%s %s", entry.Time.Format(time.RFC3339Nano), loc, entry.Level, msg)
 }

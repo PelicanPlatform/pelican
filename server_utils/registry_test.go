@@ -31,6 +31,7 @@ import (
 )
 
 func TestGetNSIssuerURL(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ResetTestState()
 	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
 	require.NoError(t, config.InitClient())
@@ -43,6 +44,7 @@ func TestGetNSIssuerURL(t *testing.T) {
 }
 
 func TestGetJWKSURLFromIssuerURL(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ResetTestState()
 	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
 	require.NoError(t, config.InitClient())

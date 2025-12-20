@@ -112,6 +112,7 @@ func setupPingEngine(t *testing.T, ctx context.Context, egrp *errgroup.Group) (c
 // Test the engine startup, serving a single request using
 // TLS validation, then a clean shutdown.
 func TestRunEngine(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -132,6 +133,7 @@ func TestRunEngine(t *testing.T) {
 // Ensure that if the TLS certificate is updated on disk then new
 // connections will use the new version.
 func TestUpdateCert(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()

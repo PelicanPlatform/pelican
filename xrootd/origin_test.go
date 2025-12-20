@@ -54,6 +54,38 @@ var (
 	multiExportOriginConfig string
 )
 
+func ensureXrdS3PluginAvailable(t *testing.T) {
+	searchPaths := []string{
+		"/usr/lib",
+		"/usr/lib64",
+		"/usr/local/lib",
+		"/opt/homebrew/lib",
+	}
+
+	appendEnvPaths := func(env string) {
+		for _, path := range strings.Split(os.Getenv(env), ":") {
+			if path != "" {
+				searchPaths = append(searchPaths, path)
+			}
+		}
+	}
+
+	appendEnvPaths("XRD_PLUGINPATH")
+	appendEnvPaths("LD_LIBRARY_PATH")
+	appendEnvPaths("DYLD_LIBRARY_PATH")
+
+	pluginNames := []string{"libXrdS3.so", "libXrdS3-5.so", "libXrdS3.dylib", "libXrdS3-5.dylib"}
+	for _, dir := range searchPaths {
+		for _, name := range pluginNames {
+			if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+				return
+			}
+		}
+	}
+
+	t.Skip("Skipping: XRootD S3 plugin not found on this system")
+}
+
 func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) context.CancelFunc {
 	originServer := &origin.OriginServer{}
 
@@ -149,6 +181,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 }
 
 func TestOrigin(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -192,6 +225,7 @@ func TestOrigin(t *testing.T) {
 }
 
 func TestMultiExportOrigin(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -278,6 +312,8 @@ func mockupS3Origin(ctx context.Context, egrp *errgroup.Group, t *testing.T, fed
 }
 
 func runS3Test(t *testing.T, bucketName, urlStyle, objectName string) {
+	ensureXrdS3PluginAvailable(t)
+
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -318,6 +354,7 @@ func runS3Test(t *testing.T, bucketName, urlStyle, objectName string) {
 }
 
 func TestS3OriginConfig(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Run("S3OriginPathBucket", func(t *testing.T) {
 		runS3Test(t, "noaa-wod-pds", "path", "MD5SUMS")
 	})
@@ -332,6 +369,8 @@ func TestS3OriginConfig(t *testing.T) {
 }
 
 func TestS3OriginWithSentinel(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	ensureXrdS3PluginAvailable(t)
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -392,6 +431,7 @@ func TestS3OriginWithSentinel(t *testing.T) {
 }
 
 func TestPosixOriginWithSentinel(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
