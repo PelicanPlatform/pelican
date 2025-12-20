@@ -1377,7 +1377,7 @@ func TestStatusCodeErrorWrappingUpload(t *testing.T) {
 			var te *TransferErrors
 			if errors.As(err, &te) {
 				// Extract the first error from TransferErrors
-				if te.errors != nil && len(te.errors) > 0 {
+				if len(te.errors) > 0 {
 					if tsErr, ok := te.errors[0].(*TimestampedError); ok && tsErr != nil {
 						err = tsErr.err
 					} else {

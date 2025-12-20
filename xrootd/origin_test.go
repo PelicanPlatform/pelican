@@ -74,7 +74,7 @@ func ensureXrdS3PluginAvailable(t *testing.T) {
 	appendEnvPaths("LD_LIBRARY_PATH")
 	appendEnvPaths("DYLD_LIBRARY_PATH")
 
-	pluginNames := []string{"libXrdS3.so", "libXrdS3-5.so", "libXrdS3.dylib", "libXrdS3-5.dylib"}
+	pluginNames := []string{"libXrdS3.so", "libXrdS3-5.so", "libXrdS3-6.so", "libXrdS3.dylib", "libXrdS3-5.dylib", "libXrdS3-6.dylib"}
 	for _, dir := range searchPaths {
 		for _, name := range pluginNames {
 			if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
