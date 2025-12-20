@@ -627,7 +627,7 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, sType serve
 			sleepDuration := time.Second + time.Duration(mrand.Intn(500))*time.Microsecond
 			select {
 			case <-ctx.Done():
-				return
+				return nil
 			default:
 				// Send a request to the broker for a connection reversal
 				reqReader.Reset(req)

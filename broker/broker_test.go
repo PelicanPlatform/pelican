@@ -271,6 +271,7 @@ func TestBroker(t *testing.T) {
 	require.NoError(t, param.Set("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString()))
 	listenerChan := make(chan any)
 	ctxQuick, deadlineCancel := context.WithTimeout(ctx, 5*time.Second) // Have shorter timeout for this handshake
+	defer deadlineCancel()
 
 	externalWebUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	require.NoError(t, err)
