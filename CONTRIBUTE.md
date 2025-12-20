@@ -247,12 +247,12 @@ However, if you are developing Pelican _Server_ components (Registry, Director, 
       # Verify you're in the repository root (should show pelican.yaml)
       $ ls pelican.yaml
       pelican.yaml
-      
+
       # Remove default config and create symlink
       $ rm -f /etc/pelican/pelican.yaml
       $ ln -s "$PWD/pelican.yaml" /etc/pelican/pelican.yaml
       ```
-      
+
     * Verify that the symlink was created correctly:
       ```bash
       $ cat /etc/pelican/pelican.yaml
