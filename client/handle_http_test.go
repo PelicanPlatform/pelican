@@ -29,6 +29,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"io/fs"
@@ -2910,6 +2911,97 @@ func TestPutOverwrite(t *testing.T) {
 
 		// Ensure the expected warning was logged
 		assert.Contains(t, logBuf.String(), "Failed to check if object exists at the origin, proceeding with upload")
+	})
+
+	t.Run("OverwriteEnabled", func(t *testing.T) {
+		// Create a server that responds to WebDAV PROPFIND requests indicating the object exists
+		// But the upload should still proceed because overwrites are enabled
+		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PROPFIND" {
+				// Simulate existing object - return WebDAV response
+				w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+				w.WriteHeader(http.StatusMultiStatus)
+				response := `<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/test.txt</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:resourcetype/>
+        <D:getcontentlength>1024</D:getcontentlength>
+        <D:getlastmodified>Wed, 01 Jan 2024 00:00:00 GMT</D:getlastmodified>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>`
+				_, err := w.Write([]byte(response))
+				require.NoError(t, err)
+				return
+			}
+			if r.Method == "PUT" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}))
+		defer svr.Close()
+
+		// Trust the test server certificate instead of skipping verification
+		certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: svr.Certificate().Raw})
+		certFile := filepath.Join(t.TempDir(), "ca.pem")
+		require.NoError(t, os.WriteFile(certFile, certPEM, 0o644))
+
+		// Test that overwrite protection is skipped when Client.EnableOverwrites is enabled
+		test_utils.InitClient(t, map[string]any{
+			param.Server_TLSCACertificateFile.GetName(): certFile,
+			param.Client_EnableOverwrites.GetName():     true,
+		})
+
+		svrURL, err := url.Parse(svr.URL)
+		require.NoError(t, err)
+
+		// Create a token generator with a test token
+		token := NewTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token.SetToken("test-token")
+
+		// Create a test file to upload
+		testData := []byte("test content for overwrite")
+		fname := filepath.Join(t.TempDir(), "test.txt")
+		err = os.WriteFile(fname, testData, 0o644)
+		require.NoError(t, err)
+
+		transfer := &transferFile{
+			ctx: context.Background(),
+			job: &TransferJob{
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/test.txt",
+				},
+				dirResp: server_structs.DirectorResponse{
+					XPelNsHdr: server_structs.XPelNs{
+						Namespace:      "/test",
+						RequireToken:   true,
+						CollectionsUrl: svrURL,
+					},
+				},
+				token: token,
+			},
+			remoteURL: svrURL,
+			localPath: fname,
+			token:     token,
+			attempts: []transferAttemptDetails{
+				{
+					Url: svrURL,
+				},
+			},
+		}
+
+		// The upload should succeed despite the object existing because overwrites are enabled
+		result, err := uploadObject(transfer)
+		require.NoError(t, err)
+		require.NoError(t, result.Error) // Should succeed with overwrites enabled
 	})
 }
 
