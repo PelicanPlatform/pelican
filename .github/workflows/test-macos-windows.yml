@@ -80,7 +80,9 @@ jobs:
     - name: Test macOS
       if: runner.os == 'macOS'
       run: |
+        echo "::group::Building web UI"
         make web-build
+        echo "::endgroup::"
         #gotestsum --format testname -- -timeout 15m -coverpkg=./director -covermode=count -coverprofile=coverage.out ./director -run TestStatMemory
         gotestsum --format testname -- -p=4 -timeout 15m -coverpkg=./... -covermode=count -coverprofile=coverage.out ./... -skip TestStatMemory
     - name: Install gotestsum (Windows)
@@ -104,7 +106,9 @@ jobs:
         GOMODCACHE: D:\gomodcache
         GOTMPDIR: D:\gotmp
       run: |
+        echo "::group::Building web UI"
         make web-build
+        echo "::endgroup::"
         gotestsum --format testname -- -p=4 -timeout 15m -coverpkg=./... -covermode=count -coverprofile=coverage.out ./...
     - name: Run GoReleaser for macOS
       uses: goreleaser/goreleaser-action@v6
