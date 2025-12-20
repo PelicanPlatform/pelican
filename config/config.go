@@ -2023,6 +2023,10 @@ func InitClient() error {
 	// This must happen after InitConfigInternal but before SetClientDefaults
 	bindLegacyClientEnv()
 
+	// Bind configuration from HTCondor job ClassAd (e.g., PelicanCfg_* attributes)
+	// This should happen after legacy env binding but before SetClientDefaults
+	bindClassAdConfig()
+
 	if err := SetClientDefaults(viper.GetViper()); err != nil {
 		return err
 	}
