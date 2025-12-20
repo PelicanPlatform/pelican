@@ -35,7 +35,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -875,7 +874,7 @@ func TestCache(t *testing.T) {
 	)
 	initMockStatUtils()
 	t.Cleanup(cleanupMock)
-	require.NoError(t, config.InitServer(context.Background(), server_structs.DirectorType))
+	require.NoError(t, initServerForTest(t, context.Background(), server_structs.DirectorType))
 
 	t.Run("repeated-cache-access-found", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -972,7 +971,7 @@ func TestSendHeadReq(t *testing.T) {
 
 	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
 
-	err = config.InitServer(context.Background(), server_structs.DirectorType)
+	err = initServerForTest(t, context.Background(), server_structs.DirectorType)
 	require.NoError(t, err)
 
 	t.Run("correct-input-gives-no-error", func(t *testing.T) {

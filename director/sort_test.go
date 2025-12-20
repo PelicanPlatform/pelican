@@ -51,6 +51,23 @@ func hasServerAdWithName(ads []copyAd, name string) bool {
 func TestGetAdsForPath(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 
+	// Ensure we start from a clean slate and detect leaks spawned during this test.
+	resetHealthTests()
+	shutdownStatUtils()
+
+	t.Cleanup(func() {
+		shutdownHealthTests()
+		shutdownStatUtils()
+		serverAds.DeleteAll()
+	})
+
+	serverAds.DeleteAll()
+	go serverAds.Start()
+	t.Cleanup(func() {
+		serverAds.DeleteAll()
+		serverAds.Stop()
+	})
+
 	/*
 		FLOW:
 			- Set up a few dummy namespaces, origin, and cache ads

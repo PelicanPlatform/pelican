@@ -1600,7 +1600,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 
 	// Isolate the test so it doesn't use system config
 	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
-	err = config.InitServer(ctx, server_structs.DirectorType)
+	err = initServerForTest(t, ctx, server_structs.DirectorType)
 	require.NoError(t, err)
 
 	fedInfo, err := config.GetFederation(ctx)
@@ -1831,9 +1831,13 @@ func TestDiscoverOriginCache(t *testing.T) {
 func TestRedirectCheckHostnames(t *testing.T) {
 	setGinTestMode()
 	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
+	go serverAds.Start()
+	defer serverAds.Stop()
 
 	// Use ads generated via mock topology for generating list of caches
 	topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
@@ -1994,6 +1998,18 @@ func TestRedirects(t *testing.T) {
 	setGinTestMode()
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
+	t.Cleanup(func() {
+		shutdownHealthTests()
+		shutdownStatUtils()
+		serverAds.DeleteAll()
+	})
+
+	serverAds.DeleteAll()
+	go serverAds.Start()
+	t.Cleanup(func() {
+		serverAds.DeleteAll()
+		serverAds.Stop()
+	})
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
 		server_utils.ResetTestState()

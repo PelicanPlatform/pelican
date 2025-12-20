@@ -32,9 +32,10 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/test_utils"
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
