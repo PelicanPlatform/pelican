@@ -95,17 +95,39 @@ In general, we follow the ["fork-and-pull" Git workflow](https://github.com/susa
 
 ## Development Environment Setup
 
-We use Docker containers and VSCode Dev Container to setup our dev environment. We provide a pre-build Docker image for developers, which includes all the development dependencies. We also adapt additional container recipes for website development.
+We use Docker containers and VSCode Dev Container to setup our dev environment.
+We provide a pre-build Docker image for developers, which includes all the development dependencies.
+The repository includes a devcontainer configuration that works with both GitHub Codespaces and local VS Code Dev Containers.
 
-### Before Start
+### Option 1: GitHub Codespaces (Quickest)
 
-[Fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo#forking-a-repository) Pelican repository and [Clone](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo#cloning-your-forked-repository) your fork to your machine. The link is pointing to GitHub instructions where they use a demo repository. You need to replace it by https://github.com/PelicanPlatform/pelican
+For quick fixes or contributions, you can use GitHub Codespaces to develop in the browser:
 
-### Install and Start Docker
+1. Navigate to the [Pelican repository](https://github.com/PelicanPlatform/pelican) (or your fork) on GitHub
+2. Click the "Code" button and select "Codespaces"
+3. Click "Create codespace on main" (or your branch)
+4. Wait for the container to build and start - you'll have a fully-configured development environment in your browser!
 
-Follow the [instruction](https://docs.docker.com/get-docker/) from Docker to download and install Docker. You need Docker for running the development container.
+The devcontainer will automatically install all necessary dependencies and tools.
 
-After installation, for macOS and Windows user, start your Docker Desktop app and wait for a couple of minutes for Docker to start. If the whale icon is animated, it is probably still in the process of starting. You can click on the icon to see the status.
+### Option 2: Local Development with VS Code Dev Containers
+
+For a local development environment:
+
+#### Before Start
+
+[Fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo#forking-a-repository) Pelican repository and [Clone](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo#cloning-your-forked-repository) your fork to your machine.
+The link is pointing to GitHub instructions where they use a demo repository.
+You need to replace it by https://github.com/PelicanPlatform/pelican
+
+#### Install and Start Docker
+
+Follow the [instruction](https://docs.docker.com/get-docker/) from Docker to download and install Docker.
+You need Docker for running the development container.
+
+After installation, for macOS and Windows user, start your Docker Desktop app and wait for a couple of minutes for Docker to start.
+If the whale icon is animated, it is probably still in the process of starting.
+You can click on the icon to see the status.
 
 ![docker-image](./docs/images/docker-startup.png)
 
@@ -117,105 +139,57 @@ $ docker --version
 Docker version 25.0.2, build 29cf629
 ```
 
-### Install VScode
+#### Install VScode
 
-Follow the [instruction](https://code.visualstudio.com/download) to download and install VSCode. This is the IDE we use to develop Pelican.
+Follow the [instruction](https://code.visualstudio.com/download) to download and install VSCode.
+This is the IDE we use to develop Pelican.
 
-Additionally, VSCode has a nice feature called Dev Container to streamline development inside a Docker container. We will go through how to set that up later.
+Additionally, VSCode has a nice feature called Dev Container to streamline development inside a Docker container.
 
-### Pull Development Container
+#### Setup Dev Container
 
-We host our dev container at `hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb`. Pull the container with the following command:
+The repository now includes a `.devcontainer` configuration, so you don't need to create it manually!
 
-```bash
-$ docker pull hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
-
-latest-itb: Pulling from pelican_platform/pelican-dev
-Digest: sha256:9c49600a6edef303a9850584a548955f747b83661a7f536486523e3ade424997
-Status: Downloaded newer image for hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
-hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
-```
-
-### Setup Development Folder Structure
-
-To make it easier configuring your local Pelican instance, we will store all the configuration files in a central spot. This includes the configuration for the Dev Container as well. To do so, you will need to create the following folder structure:
-
-* Create a "development" folder as the root folder for the project
-
-  ```bash
-  $ mkdir pelican-dev
-  ```
-
-* Move your Pelican clone to the `pelican-dev` folder
-
-  ```bash
-  $ mv pelican pelican-dev
-  ```
-
-* Go inside the `pelican-dev` folder, which should look like this:
-
-  ```bash
-  $ cd pelican-dev
-  $ ls
-  pelican
-  ```
-
-### Setup Dev Container
-
-* Open `pelican-dev` folder in VSCode
-* Install the [Dev Container plugin](vscode:extension/ms-vscode-remote.remote-containers)
+* Open your Pelican clone in VSCode
+* Install the [Dev Container extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
 
   ![dev-container-screenshot](./docs/images/dev-container.png)
 
-* Check installation
-  With the Dev Containers extension installed, you will see a new Status bar item at the far left.
+* Check installation: With the Dev Containers extension installed, you will see a new Status bar item at the far left.
 
   ![dev-container-icon](./docs/images/dev-container-bl-icon.png)
 
-* Create a new folder named `.devcontainer` and create a new file named `devcontainer.json` in the folder. This is where the configuration of Dev Container lives. Below is what your folder will look like after creating the files:
+* Reopen in Container: Click the Dev Container icon on the bottom left corner to open the menu.
+  Click "Reopen in Container" to reopen your VSCode workspace in the dev container.
 
-  ![dev-container-folder](./docs/images/dev-container-folder.png)
+  ![dev-container-reopen](./docs/images/dev-container-reopen.png)
 
+  VS Code will automatically detect the `.devcontainer/devcontainer.json` configuration and use it.
 
-* Copy and paste the provided configuration at [here](./dev/devcontainer.json) to `devcontainer.json`:
-
-  ![dev-container-copy-config](./docs/images/dev-container-copy-config.png)
-
-* Save the file and reopen your workspace in the dev container
-
-  * `cmd + s` (macOS) or `ctrl + s` (Windows) to save the file
-  * Click the Dev Container icon on the bottom left corner to open the menu. Click "Reopen in Container" to reopen your VSCode workspace in the dev container.
-
-    ![dev-container-reopen](./docs/images/dev-container-reopen.png)
-
-* Wait for Dev Container to start
-
-  There will be a loading snackbar at the bottom-right corner while the Dev Container is starting. After a few seconds VSCode will be refreshed.
+* Wait for Dev Container to start: There will be a loading notification at the bottom-right corner while the Dev Container is starting.
+  The first time may take several minutes as it pulls the development container image (`hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb`).
 
   ![dev-container-loading](./docs/images/dev-container-loading.png)
 
-* Check you are connected to the Dev Container
-
-  Once you are connected to the Dev Container, the bottom left status will show your connection status:
+* Check you are connected to the Dev Container: Once connected, the bottom left status will show your connection status:
 
   ![dev-container-status](./docs/images/dev-container-status.png)
 
 ### Build Pelican from Source
 
-We use [GoReleaser](https://goreleaser.com/) to manage compiling and distributing Pelican binaries. The Pelican development container comes with GoReleaser installed. To build Pelican, start a new terminal in your VSCode workspace:
+We use [GoReleaser](https://goreleaser.com/) to manage compiling and distributing Pelican binaries.
+The Pelican development container comes with GoReleaser installed.
+To build Pelican, start a new terminal in your VSCode workspace:
 
 ![vscode-start-terminal](./docs/images/vscode-start-terminal.png)
 
-> **Note**: the VSCode terminal you opened is connected to the *development container*, not your host machine. We will work inside the container for the rest of the instructions. Also note that the Dev Container plugin **mounts** your `pelican-dev` folder on your machine to the container, and any changes to your local `pelican-dev` folder is synced to the container.
+> **Note**: the VSCode terminal you opened is connected to the *development container*, not your host machine.
+> We will work inside the container for the rest of the instructions.
+> The Dev Container automatically mounts your repository to the container and syncs any changes.
+> In Codespaces, the repository is mounted at `/workspaces/pelican`.
+> In local Dev Containers, the path depends on where you cloned the repository.
 
-First, in the terminal, navigate to the `pelican` folder:
-
-
-```bash
-$ cd pelican
-```
-
-Run the following command:
+Navigate to the repository root in the terminal (if not already there) and run the following command:
 
 ```bash
 $ goreleaser build --single-target --clean --snapshot
@@ -241,10 +215,12 @@ The build takes around 1-3 minutes to finish. It usually takes longer if this is
   • thanks for using goreleaser!
 ```
 
-The built artifacts including the binary are located under `pelican/dist`, the binary file for your OS should be located at `pelican/dist/pelican_linux_arm64/` if you are running an ARM machine.
+The built artifacts are located in the `dist` directory.
+The binary location depends on your system architecture (e.g., `dist/pelican_linux_arm64/pelican` for ARM64, `dist/pelican_linux_amd64/pelican` for AMD64).
 
 ```bash
-$ cd /workspaces/pelican-dev/pelican/dist/pelican_linux_arm64
+# Navigate to the appropriate directory based on your architecture
+$ cd dist/pelican_linux_*/
 $ ls
 pelican
 ```
@@ -253,32 +229,41 @@ Now you are able to run the built Pelican binary.
 
 ### Configure Pelican
 
-If you are developing Pelican _Client_, you may skip the following content and dive right into it. However, if you are developing Pelican _Server_ components (Registry, Director, Origin, and Cache) or you want to set up your local federation. Follow the instruction below to configure Pelican.
+If you are developing Pelican _Client_, you may skip the following content and dive right into it.
+However, if you are developing Pelican _Server_ components (Registry, Director, Origin, and Cache) or you want to set up your local federation, follow the instruction below to configure Pelican.
 
-* Setup a config file on your host machine
-    * Create a new file in your VSCode workspace called `pelican.yaml`
+* Setup a config file
+    * Create a new file in your repository root called `pelican.yaml`
     * Copy and paste the following content to the file:
       ```yaml
       TLSSkipVerify: true
       ```
 * Link the config file to the Pelican config location
-    The default location for Pelican config file is at `/etc/pelican/pelican.yaml` for root user. For non-root user, it's at `~/.config/pelican/pelican.yaml`
+    The default location for Pelican config file is at `/etc/pelican/pelican.yaml` for root user.
+    For non-root user, it's at `~/.config/pelican/pelican.yaml`
 
-    * Go to `pelican-dev` folder in the container
-    * Run the following command:
+    * Navigate to your repository root directory and run the following commands:
       ```bash
-      $ rm -f /etc/pelican/pelican.yaml # Removes the default configuration file
-      $ ln -s /workspaces/pelican-dev/pelican.yaml /etc/pelican/pelican.yaml # Soft link to your config file the Pelican config location
+      # Verify you're in the repository root (should show pelican.yaml)
+      $ ls pelican.yaml
+      pelican.yaml
+
+      # Remove default config and create symlink
+      $ rm -f /etc/pelican/pelican.yaml
+      $ ln -s "$PWD/pelican.yaml" /etc/pelican/pelican.yaml
       ```
-    * Verify that the file is linked:
+
+    * Verify that the symlink was created correctly:
       ```bash
       $ cat /etc/pelican/pelican.yaml
       TLSSkipVerify: true
       ```
 
-* Create an empty file named `oidc-client-id` under `pelican-dev` folder and link to `/etc/pelican/oidc-client-id`. This file is required to run Pelican Registry and any other Pelican services if you want to enable server website login through OAuth.
+* Create an empty file named `oidc-client-id` in your repository root and link to `/etc/pelican/oidc-client-id`.
+  This file is required to run Pelican Registry and any other Pelican services if you want to enable server website login through OAuth.
 
-* Create an empty file named `oidc-client-secret` and link it to `/etc/pelican/oidc-client-secret`. This is the OAuth client secret required for OAuth login.
+* Create an empty file named `oidc-client-secret` and link it to `/etc/pelican/oidc-client-secret`.
+  This is the OAuth client secret required for OAuth login.
 
 Don't worry about the content of the files for now. We will set them up later.
 
@@ -286,23 +271,25 @@ Don't worry about the content of the files for now. We will set them up later.
 
 * Use the [template configuration file](./dev/dev_pelican.yaml) to start off. Copy and paste the content to your `pelican.yaml` file.
 
-At this point, your VSCode workspace should have the following files and directories:
+At this point, your repository should have the following files in the root directory:
 
-![vscode-ws-after-config](./docs/images/vscode-ws-after-config.png)
-
-Where:
-* `.devcontainer` is the Dev Container configuration files
-* `oidc-client-id` is the empty file for OAuth client ID
-* `oidc-client-secret` is the empty file for OAuth client secret
-* `pelican` is the Pelican source code repository
-* `pelican.yaml` is your Pelican configuration file
+* `.devcontainer/` - The Dev Container configuration files (automatically included in the repository)
+* `oidc-client-id` - The empty file for OAuth client ID (created by you)
+* `oidc-client-secret` - The empty file for OAuth client secret (created by you)
+* `pelican.yaml` - Your Pelican configuration file (created by you)
+* (Plus all the existing repository files and directories)
 
 ### Run Pelican Client
 
-To run Pelican client, go to the folder where the built binary is located:
+To run Pelican client, navigate to the folder where the built binary is located:
 
 ```bash
-$ cd /workspaces/pelican-dev/pelican/dist/pelican_linux_arm64
+# List available build outputs to find your architecture
+$ ls dist/
+# pelican_linux_amd64  pelican_linux_arm64  ...
+
+# Navigate to the appropriate directory for your architecture
+$ cd dist/pelican_linux_*/
 ```
 
 and run Pelican client to fetch an object:
