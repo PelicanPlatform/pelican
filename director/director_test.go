@@ -146,6 +146,9 @@ func TestGetLinkDepth(t *testing.T) {
 // corresponding token and invokes the registration endpoint, it then does
 // so again with an invalid token and confirms that the correct error is returned
 func TestDirectorRegistration(t *testing.T) {
+	cleanup := test_utils.SetupTestLogging(t)
+	defer cleanup()
+
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()

@@ -151,6 +151,9 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 }
 
 func TestSlowTransfers(t *testing.T) {
+	cleanup := test_utils.SetupTestLogging(t)
+	defer cleanup()
+
 	defer goleak.VerifyNone(t,
 		// Ignore the progress bars
 		goleak.IgnoreTopFunction("github.com/vbauerster/mpb/v8.(*Progress).serve"),
@@ -242,6 +245,9 @@ func TestSlowTransfers(t *testing.T) {
 
 // Test stopped transfer
 func TestStoppedTransfer(t *testing.T) {
+	cleanup := test_utils.SetupTestLogging(t)
+	defer cleanup()
+
 	os.Setenv("http_proxy", "http://proxy.edu:3128")
 	t.Cleanup(func() {
 		require.NoError(t, os.Unsetenv("http_proxy"))
@@ -330,6 +336,9 @@ func TestStoppedTransfer(t *testing.T) {
 
 // Test connection error
 func TestConnectionError(t *testing.T) {
+	cleanup := test_utils.SetupTestLogging(t)
+	defer cleanup()
+
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	l, err := net.Listen("tcp", "127.0.0.1:0")

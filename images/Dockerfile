@@ -669,6 +669,8 @@ ENDRUN
 RUN --mount=type=cache,id=go-mod-cache-${TARGETPLATFORM},target=/root/go,sharing=locked <<ENDRUN
   set -eux
   go install gotest.tools/gotestsum@latest
+  # Move gotestsum to a system location that is world readable
+  mv /root/go/bin/gotestsum /usr/local/bin/gotestsum
 ENDRUN
 
 # Install Node.js using the same commands as the pelican-build-init stage.
@@ -717,7 +719,6 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
 
 # Suppress Git's "dubious ownership" warning.
 ENV GOFLAGS="-buildvcs=false"
-ENV PATH="/root/go/bin:${PATH}"
 
 RUN python3 -m pip --no-cache-dir install pre-commit
 COPY images/dev-config.yaml /etc/pelican/pelican.yaml
