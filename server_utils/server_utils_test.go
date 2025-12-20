@@ -115,10 +115,12 @@ func TestWaitUntilWorking(t *testing.T) {
 	})
 
 	t.Run("server-does-not-exist", func(t *testing.T) {
-		// cancel wait until working after 200ms so that we don't wait for 10s before it returns
+		// cancel wait until working after 1000ms so that we don't wait for 10s before it returns
+		// Note: this was bumped up due to sporadic test failures on CI with 200ms; 1s should
+		// be sufficient for a DNS resolution failure to return.
 		earlyCancelCtx, earlyCancel := context.WithCancel(ctx)
 		go func() {
-			<-time.After(200 * time.Millisecond)
+			<-time.After(1000 * time.Millisecond)
 			earlyCancel()
 		}()
 		err := WaitUntilWorking(earlyCancelCtx, "GET", "https://noserverexists.com", "testServer", http.StatusOK, false)
