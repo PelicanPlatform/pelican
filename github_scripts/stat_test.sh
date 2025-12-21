@@ -19,45 +19,44 @@
 
 set -e
 
-mkdir -p /tmp/pelican-test/stat_test
+TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/pelican-stat-test.XXXXXX")"
 
-mkdir -p /tmp/pelican-test/stat_test/origin
-chmod 777 /tmp/pelican-test/stat_test/origin
+mkdir -p "${TEST_ROOT}/origin"
+chmod 777 "${TEST_ROOT}/origin"
 
 # Setup env variables needed - use port 0 to let Pelican choose random ports
 export PELICAN_ORIGIN_PORT=0
 export PELICAN_TLSSKIPVERIFY=true
 export PELICAN_SERVER_ENABLEUI=false
 export PELICAN_SERVER_WEBPORT=0
-export PELICAN_ORIGIN_RUNLOCATION=/tmp/pelican-test/stat_test/xrootdRunLocation
+export PELICAN_ORIGIN_RUNLOCATION="${TEST_ROOT}/xrootdRunLocation"
 
-export PELICAN_CONFIGDIR=/tmp/pelican-test/stat_test
-export PELICAN_SERVER_DBLOCATION=/tmp/pelican-test/stat_test/test-registry.sql
-export PELICAN_CONFIG=${PELICAN_CONFIGDIR}/empty.yaml
+export PELICAN_CONFIGDIR="${TEST_ROOT}"
+export PELICAN_SERVER_DBLOCATION="${TEST_ROOT}/test-registry.sql"
+export PELICAN_CONFIG="${PELICAN_CONFIGDIR}/empty.yaml"
 export PELICAN_OIDC_CLIENTID="sometexthere"
-export PELICAN_OIDC_CLIENTSECRETFILE=/tmp/pelican-test/stat_test/oidc-secret
-echo "Placeholder OIDC secret" > /tmp/pelican-test/stat_test/oidc-secret
+export PELICAN_OIDC_CLIENTSECRETFILE="${TEST_ROOT}/oidc-secret"
+echo "Placeholder OIDC secret" > "${TEST_ROOT}/oidc-secret"
 
 export PELICAN_ORIGIN_ENABLEDIRECTREADS=true
 export PELICAN_ORIGIN_FEDERATIONPREFIX="/test"
-export PELICAN_ORIGIN_STORAGEPREFIX="/tmp/pelican-test/stat_test/origin"
+export PELICAN_ORIGIN_STORAGEPREFIX="${TEST_ROOT}/origin"
 export PELICAN_ORIGIN_ENABLEPUBLICREADS=true
 export PELICAN_DIRECTOR_STATTIMEOUT=1s
 export PELICAN_LOGGING_LEVEL=debug
 
 # Function to cleanup after test ends
 cleanup() {
-    local pid=$1  # Get the PID from the function argument
     echo "Cleaning up..."
-    if [ ! -z "$pid" ]; then
-        echo "Sending SIGINT to PID $pid"
-        kill -SIGINT "$pid"
+    if [ -n "${pid_federationServe:-}" ]; then
+        echo "Sending SIGINT to PID ${pid_federationServe}"
+        kill -SIGINT "${pid_federationServe}"
     else
         echo "No PID provided for cleanup."
     fi
 
     # Clean up temporary files
-    rm -rf /tmp/pelican-test/stat_test
+    rm -rf "${TEST_ROOT:-}"
 
     unset PELICAN_CONFIGDIR
     unset PELICAN_FEDERATION_DIRECTORURL
@@ -77,16 +76,17 @@ cleanup() {
     unset PELICAN_ORIGIN_PORT
 }
 
-echo "This is some random content in the random file" > /tmp/pelican-test/stat_test/origin/input.txt
-touch ${PELICAN_CONFIG}
+echo "This is some random content in the random file" > "${TEST_ROOT}/origin/input.txt"
+touch "${PELICAN_CONFIG}"
 
 # Run federation in the background with port 0 (random port)
 federationServe="./pelican --config ${PELICAN_CONFIG} serve --module director --module registry --module origin --port 0 || :"
+
 $federationServe &
 pid_federationServe=$!
 
 # Setup trap with the PID as an argument to the cleanup function
-trap 'cleanup $pid_federationServe' EXIT
+trap cleanup EXIT
 
 # Wait for the address file to be created
 # Address file is in runtime directory: $XDG_RUNTIME_DIR/pelican if set, otherwise falls back to ConfigDir
@@ -109,6 +109,7 @@ done
 
 echo "Address file found, sourcing it..."
 # Source the address file to get the actual server addresses
+# shellcheck source=/dev/null
 source "$ADDRESS_FILE"
 
 echo "SERVER_EXTERNAL_WEB_URL=$SERVER_EXTERNAL_WEB_URL"
@@ -119,7 +120,7 @@ export PELICAN_FEDERATION_DIRECTORURL="$SERVER_EXTERNAL_WEB_URL"
 export PELICAN_FEDERATION_REGISTRYURL="$SERVER_EXTERNAL_WEB_URL"
 
 # Prepare token for calling stat
-TOKEN=$(./pelican --config ${PELICAN_CONFIG} origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "$SERVER_EXTERNAL_WEB_URL" --scope "web_ui.access" --subject "bar" --lifetime 3600)
+TOKEN=$(./pelican --config "${PELICAN_CONFIG}" origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "$SERVER_EXTERNAL_WEB_URL" --scope "web_ui.access" --subject "bar" --lifetime 3600)
 
 # Give the federation time to spin up:
 API_URL="$SERVER_EXTERNAL_WEB_URL/api/v1.0/health"
@@ -144,7 +145,7 @@ check_response() {
 # We don't want to do this loop for too long, indicates there is an error
 TOTAL_SLEEP_TIME=0
 
-while check_response; [ $? -ne 0 ]
+until check_response
 do
     sleep .5
     TOTAL_SLEEP_TIME=$((TOTAL_SLEEP_TIME + 1))
@@ -200,7 +201,11 @@ query_stat_endpoint() {
 
 # Query the stat endpoint with retry logic
 if query_stat_endpoint; then
+    trap - EXIT
+    cleanup
     exit 0
 else
+    trap - EXIT
+    cleanup
     exit 1
 fi
