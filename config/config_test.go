@@ -45,8 +45,6 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
-var server *httptest.Server
-
 // Generate a context associated with the test
 //
 // Note: Does not utilize test_utils.TestContext to avoid an import cycle
@@ -114,50 +112,32 @@ func mockFederationRoot(t *testing.T) string {
 	return server.URL
 }
 
-func TestMain(m *testing.M) {
-	// Create a test server
-	server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// simuilate long server response
+func configureTransportTestDefaults(t *testing.T) {
+	t.Helper()
+	require.NoError(t, param.Set("Transport.MaxIdleConns", 30))
+	require.NoError(t, param.Set("Transport.IdleConnTimeout", time.Second*90))
+	require.NoError(t, param.Set("Transport.TLSHandshakeTimeout", time.Second*15))
+	require.NoError(t, param.Set("Transport.ExpectContinueTimeout", time.Second*1))
+	require.NoError(t, param.Set("Transport.ResponseHeaderTimeout", time.Second*10))
+	require.NoError(t, param.Set("Transport.Dialer.Timeout", time.Second*1))
+	require.NoError(t, param.Set("Transport.Dialer.KeepAlive", time.Second*30))
+	require.NoError(t, param.Set("TLSSkipVerify", true))
+	require.NoError(t, param.Set(param.Logging_Level.GetName(), "debug"))
+}
+
+func newTimeoutTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	configureTransportTestDefaults(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Simulate long server response so ResponseHeaderTimeout fires
 		time.Sleep(5 * time.Second)
 		w.WriteHeader(http.StatusOK)
-		code, err := w.Write([]byte("Success"))
-		if err != nil {
-			fmt.Printf("Error writing out response: %d, %v", code, err)
-			os.Exit(1)
+		if _, err := w.Write([]byte("Success")); err != nil {
+			t.Fatalf("Error writing out response: %v", err)
 		}
 	}))
-	// Init server to get configs initiallized
-	if err := param.Set("Transport.MaxIdleConns", 30); err != nil {
-		panic(err)
-	}
-	if err := param.Set("Transport.IdleConnTimeout", time.Second*90); err != nil {
-		panic(err)
-	}
-	if err := param.Set("Transport.TLSHandshakeTimeout", time.Second*15); err != nil {
-		panic(err)
-	}
-	if err := param.Set("Transport.ExpectContinueTimeout", time.Second*1); err != nil {
-		panic(err)
-	}
-	if err := param.Set("Transport.ResponseHeaderTimeout", time.Second*10); err != nil {
-		panic(err)
-	}
-	if err := param.Set("Transport.Dialer.Timeout", time.Second*1); err != nil {
-		panic(err)
-	}
-	if err := param.Set("Transport.Dialer.KeepAlive", time.Second*30); err != nil {
-		panic(err)
-	}
-	if err := param.Set("TLSSkipVerify", true); err != nil {
-		panic(err)
-	}
-	if err := param.Set(param.Logging_Level.GetName(), "debug"); err != nil {
-		panic(err)
-	}
-	server.StartTLS()
-	defer server.Close()
-	exitCode := m.Run()
-	os.Exit(exitCode)
+	t.Cleanup(srv.Close)
+	return srv
 }
 
 // Test that no deprecated config keys are present in defaultsYaml or osdfDefaultsYaml
@@ -229,13 +209,15 @@ Client:
 }
 
 func TestResponseHeaderTimeout(t *testing.T) {
+	srv := newTimeoutTestServer(t)
+
 	// Change the viper value of the timeout
 	require.NoError(t, param.Set("Transport.ResponseHeaderTimeout", time.Millisecond*25))
 	setupTransport()
 	transport := GetTransport()
 	client := &http.Client{Transport: transport}
 	// make a request
-	req, err := http.NewRequest("GET", server.URL, nil)
+	req, err := http.NewRequest("GET", srv.URL, nil)
 	if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}
@@ -253,6 +235,8 @@ func TestResponseHeaderTimeout(t *testing.T) {
 }
 
 func TestDialerTimeout(t *testing.T) {
+	configureTransportTestDefaults(t)
+
 	// Change the viper value of the timeout
 	require.NoError(t, param.Set("Transport.Dialer.Timeout", time.Millisecond*25))
 	setupTransport()
