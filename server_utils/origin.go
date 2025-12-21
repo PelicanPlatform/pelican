@@ -401,7 +401,7 @@ func (b *BaseOrigin) handleExportsCfg(o Origin) error {
 
 	log.Infoln("Configuring multi-exports from Origin.Exports block in config file")
 	var tmpExports []OriginExport
-	if err := viper.UnmarshalKey(param.Origin_Exports.GetName(), &tmpExports, viper.DecodeHook(OriginExportsDecoderHook())); err != nil {
+	if err := param.Origin_Exports.UnmarshalWithHook(&tmpExports, OriginExportsDecoderHook()); err != nil {
 		return errors.Wrap(err, "unable to parse the Origin.Exports configuration")
 	}
 	if len(tmpExports) == 0 {
@@ -564,8 +564,6 @@ func GetOriginExports() ([]OriginExport, error) {
 		return originExports, nil
 	}
 
-	// This default also set in config.go, but duplicating it here makes testing a bit easier.
-	viper.SetDefault("Origin.StorageType", "posix")
 	storageType, err := server_structs.ParseOriginStorageType(param.Origin_StorageType.GetString())
 	if err != nil {
 		return originExports, err

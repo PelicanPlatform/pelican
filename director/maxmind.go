@@ -36,7 +36,6 @@ import (
 	"github.com/oschwald/geoip2-golang/v2"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -76,7 +75,7 @@ func downloadDB(localFile string) error {
 
 	var licenseKey string
 	keyFile := param.Director_MaxMindKeyFile.GetString()
-	keyFromEnv := viper.GetString("MAXMINDKEY")
+	keyFromEnv := os.Getenv("PELICAN_MAXMINDKEY")
 	if keyFile != "" {
 		contents, err := os.ReadFile(keyFile)
 		if err != nil {

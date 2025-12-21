@@ -68,10 +68,14 @@ func CheckDefaults(server server_structs.XRootDServer) error {
 
 	if managerHost := param.Xrootd_ManagerHost.GetString(); managerHost == "" {
 		log.Debug("No manager host specified for the cmsd process in origin; assuming no xrootd protocol support")
-		viper.SetDefault("Origin.EnableCmsd", false)
+		if err := param.Set("Origin.EnableCmsd", false); err != nil {
+			log.Warningf("Failed to set Origin.EnableCmsd: %v", err)
+		}
 		metrics.DeleteComponentHealthStatus("cmsd")
 	} else {
-		viper.SetDefault("Origin.EnableCmsd", true)
+		if err := param.Set("Origin.EnableCmsd", true); err != nil {
+			log.Warningf("Failed to set Origin.EnableCmsd: %v", err)
+		}
 	}
 
 	// TODO: Could upgrade this to a check for a cert in the file...
