@@ -37,28 +37,48 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
+type restartInfo struct {
+	launchers  []daemon.Launcher
+	egrp       *errgroup.Group
+	callback   func(int)
+	isCache    bool
+	useCMSD    bool
+	privileged bool
+}
+
 var (
 	// restartMutex ensures only one restart operation happens at a time
 	restartMutex sync.Mutex
 
-	// Store launcher information for restart
-	currentLaunchers []daemon.Launcher
-	currentEgrp      *errgroup.Group
-	currentCallback  func(int)
-	isCache          bool
-	useCMSD          bool
-	privileged       bool
+	// Store launcher information for restart; one entry per server role (origin/cache)
+	restartInfos []restartInfo
 )
 
 // StoreRestartInfo stores the information needed for restarting XRootD
 // This should be called during initial launch
 func StoreRestartInfo(launchers []daemon.Launcher, egrp *errgroup.Group, callback func(int), cache bool, cmsd bool, priv bool) {
-	currentLaunchers = launchers
-	currentEgrp = egrp
-	currentCallback = callback
-	isCache = cache
-	useCMSD = cmsd
-	privileged = priv
+	info := restartInfo{
+		launchers:  launchers,
+		egrp:       egrp,
+		callback:   callback,
+		isCache:    cache,
+		useCMSD:    cmsd,
+		privileged: priv,
+	}
+
+	// Replace any existing entry for the same server role; otherwise append.
+	replaced := false
+	for idx := range restartInfos {
+		if restartInfos[idx].isCache == cache {
+			restartInfos[idx] = info
+			replaced = true
+			break
+		}
+	}
+
+	if !replaced {
+		restartInfos = append(restartInfos, info)
+	}
 }
 
 // RestartXrootd gracefully restarts the XRootD server processes
@@ -75,13 +95,23 @@ func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error
 
 	daemon.SetExpectedRestart(true)
 	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusShuttingDown, "XRootD restart in progress")
-	if useCMSD {
+	hasCMSD := false
+	for _, info := range restartInfos {
+		if info.useCMSD {
+			hasCMSD = true
+			break
+		}
+	}
+	if hasCMSD {
 		metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusShuttingDown, "CMSD restart in progress")
 	}
 
-	if len(currentLaunchers) == 0 {
-		log.Warn("Restart called without stored launchers; proceeding with reconfiguration")
+	if len(restartInfos) == 0 {
+		return nil, errors.New("restart requested before storing launcher information")
 	}
+
+	storedInfos := make([]restartInfo, len(restartInfos))
+	copy(storedInfos, restartInfos)
 
 	// Step 1: Gracefully shutdown existing XRootD processes
 	log.Debug("Sending SIGTERM to existing XRootD processes")
@@ -108,7 +138,7 @@ func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error
 		if allDead {
 			break
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	// Force kill any remaining processes
@@ -126,37 +156,45 @@ func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error
 
 	// Step 2: Reconfigure XRootD runtime directory
 	log.Debug("Reconfiguring XRootD runtime directory")
-	configPath, err := ConfigXrootd(ctx, !isCache)
-	if err != nil {
-		return nil, errors.Wrap(err, "Failed to reconfigure XRootD")
-	}
-
 	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical, "XRootD stopped during restart")
-	if useCMSD {
-		metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusCritical, "CMSD stopped during restart")
+
+	newPids = make([]int, 0, len(oldPids))
+	updatedInfos := make([]restartInfo, 0, len(storedInfos))
+
+	for _, info := range storedInfos {
+		configPath, cfgErr := ConfigXrootd(ctx, !info.isCache)
+		if cfgErr != nil {
+			return nil, errors.Wrap(cfgErr, "Failed to reconfigure XRootD")
+		}
+
+		if info.useCMSD {
+			metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusCritical, "CMSD stopped during restart")
+		}
+
+		log.Debug("Configuring new XRootD launchers")
+		newLaunchers, cfgLaunchErr := ConfigureLaunchers(info.privileged, configPath, info.useCMSD, info.isCache)
+		if cfgLaunchErr != nil {
+			return nil, errors.Wrap(cfgLaunchErr, "Failed to configure XRootD launchers")
+		}
+
+		log.Info("Launching new XRootD daemons")
+		pids, launchErr := LaunchDaemons(ctx, newLaunchers, info.egrp, info.callback)
+		if launchErr != nil {
+			return nil, errors.Wrap(launchErr, "Failed to launch XRootD daemons")
+		}
+
+		info.launchers = newLaunchers
+		updatedInfos = append(updatedInfos, info)
+		newPids = append(newPids, pids...)
+
+		if info.useCMSD {
+			metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusOK, "CMSD restart complete")
+		}
 	}
 
-	// Step 3: Configure new launchers with updated configuration
-	log.Debug("Configuring new XRootD launchers")
-	newLaunchers, err := ConfigureLaunchers(privileged, configPath, useCMSD, isCache)
-	if err != nil {
-		return nil, errors.Wrap(err, "Failed to configure XRootD launchers")
-	}
-
-	// Update the stored launchers for future restarts
-	currentLaunchers = newLaunchers
-
-	// Step 4: Launch new XRootD daemons
-	log.Info("Launching new XRootD daemons")
-	newPids, err = LaunchDaemons(ctx, newLaunchers, currentEgrp, currentCallback)
-	if err != nil {
-		return nil, errors.Wrap(err, "Failed to launch XRootD daemons")
-	}
+	restartInfos = updatedInfos
 
 	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusOK, "XRootD restart complete")
-	if useCMSD {
-		metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusOK, "CMSD restart complete")
-	}
 
 	log.Infof("XRootD restart complete with new PIDs: %v", newPids)
 	return newPids, nil

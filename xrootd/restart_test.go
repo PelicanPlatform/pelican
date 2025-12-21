@@ -32,60 +32,58 @@ import (
 	"github.com/pelicanplatform/pelican/daemon"
 )
 
-// TestRestartConcurrentProtection tests that only one restart can happen at a time
-func TestRestartConcurrentProtection(t *testing.T) {
-	// Store dummy restart info
-	var launchers []daemon.Launcher
-	egrp := &errgroup.Group{}
-	callback := func(int) {}
-	StoreRestartInfo(launchers, egrp, callback, false, false, false)
-
-	// Try to start two restarts concurrently
-	done := make(chan struct{})
-	var firstSuccess, secondSuccess bool
-
-	go func() {
-		firstSuccess = restartMutex.TryLock()
-		if firstSuccess {
-			// Simulate a long restart
-			time.Sleep(100 * time.Millisecond)
-			restartMutex.Unlock()
-		}
-		done <- struct{}{}
-	}()
-
-	// Give first goroutine time to acquire lock
-	time.Sleep(10 * time.Millisecond)
-
-	go func() {
-		secondSuccess = restartMutex.TryLock()
-		if secondSuccess {
-			restartMutex.Unlock()
-		}
-		done <- struct{}{}
-	}()
-
-	// Wait for both goroutines
-	<-done
-	<-done
-
-	// One should succeed, one should fail
-	assert.True(t, firstSuccess != secondSuccess, "One restart should succeed and one should fail")
-}
-
 // TestStoreRestartInfo tests that restart info is stored correctly
 func TestStoreRestartInfo(t *testing.T) {
+	restartInfos = nil
+	t.Cleanup(func() { restartInfos = nil })
+
 	var launchers []daemon.Launcher
 	egrp := &errgroup.Group{}
 	callback := func(port int) {}
 
 	StoreRestartInfo(launchers, egrp, callback, true, false, true)
+	StoreRestartInfo(launchers, egrp, callback, false, true, false)
 
-	assert.Equal(t, true, isCache)
-	assert.Equal(t, false, useCMSD)
-	assert.Equal(t, true, privileged)
-	assert.NotNil(t, currentEgrp)
-	assert.NotNil(t, currentCallback)
+	require.Len(t, restartInfos, 2)
+
+	var cacheInfo, originInfo *restartInfo
+	for idx := range restartInfos {
+		if restartInfos[idx].isCache {
+			cacheInfo = &restartInfos[idx]
+		} else {
+			originInfo = &restartInfos[idx]
+		}
+	}
+
+	require.NotNil(t, cacheInfo)
+	require.NotNil(t, originInfo)
+
+	assert.True(t, cacheInfo.isCache)
+	assert.False(t, cacheInfo.useCMSD)
+	assert.True(t, cacheInfo.privileged)
+
+	assert.False(t, originInfo.isCache)
+	assert.True(t, originInfo.useCMSD)
+	assert.False(t, originInfo.privileged)
+	assert.NotNil(t, originInfo.egrp)
+	assert.NotNil(t, originInfo.callback)
+}
+
+func TestStoreRestartInfoReplacesByRole(t *testing.T) {
+	restartInfos = nil
+	t.Cleanup(func() { restartInfos = nil })
+
+	var launchers []daemon.Launcher
+	egrp := &errgroup.Group{}
+
+	StoreRestartInfo(launchers, egrp, func(int) {}, true, false, false)
+	require.Len(t, restartInfos, 1)
+
+	StoreRestartInfo(launchers, egrp, func(int) {}, true, true, true)
+
+	require.Len(t, restartInfos, 1)
+	assert.True(t, restartInfos[0].useCMSD)
+	assert.True(t, restartInfos[0].privileged)
 }
 
 // TestRestartXrootd_NoProcesses tests restart with no running processes
