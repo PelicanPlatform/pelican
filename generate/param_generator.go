@@ -49,6 +49,7 @@ type TemplateData struct {
 
 var requiredKeys = [3]string{"description", "default", "type"}
 var deprecatedMap = make(map[string][]string)
+var runtimeConfigurableMap = make(map[string]bool)
 
 func GenParamEnum() {
 	/*
@@ -153,7 +154,15 @@ func GenParamEnum() {
 			deprecatedMap[entry["name"].(string)] = replacedBySlice
 		}
 
+		// Handle runtime_configurable field
 		rawName := entry["name"].(string)
+		if runtimeConfigurable, ok := entry["runtime_configurable"].(bool); ok {
+			runtimeConfigurableMap[rawName] = runtimeConfigurable
+		} else {
+			// Default to false if not specified
+			runtimeConfigurableMap[rawName] = false
+		}
+
 		name := strings.ReplaceAll(rawName, ".", "_")
 		pType := entry["type"].(string)
 		switch pType {
@@ -192,15 +201,16 @@ func GenParamEnum() {
 
 	// Generate the code based on the template
 	err = packageTemplate.Execute(f, struct {
-		StringMap      map[string]string
-		StringSliceMap map[string]string
-		IntMap         map[string]string
-		BoolMap        map[string]string
-		DurationMap    map[string]string
-		ObjectMap      map[string]string
-		DeprecatedMap  map[string][]string
-		AllParamNames  []string
-	}{StringMap: stringParamMap, StringSliceMap: stringSliceParamMap, IntMap: intParamMap, BoolMap: boolParamMap, DurationMap: durationParamMap, ObjectMap: objectParamMap, DeprecatedMap: deprecatedMap, AllParamNames: allParamNames})
+		StringMap              map[string]string
+		StringSliceMap         map[string]string
+		IntMap                 map[string]string
+		BoolMap                map[string]string
+		DurationMap            map[string]string
+		ObjectMap              map[string]string
+		DeprecatedMap          map[string][]string
+		RuntimeConfigurableMap map[string]bool
+		AllParamNames          []string
+	}{StringMap: stringParamMap, StringSliceMap: stringSliceParamMap, IntMap: intParamMap, BoolMap: boolParamMap, DurationMap: durationParamMap, ObjectMap: objectParamMap, DeprecatedMap: deprecatedMap, RuntimeConfigurableMap: runtimeConfigurableMap, AllParamNames: allParamNames})
 
 	if err != nil {
 		panic(err)
@@ -476,6 +486,27 @@ func GetDeprecated() map[string][]string {
     }
 }
 
+// runtimeConfigurableMap is a map of parameter names to their runtime configurability status.
+// It is generated from docs/parameters.yaml and indicates whether a parameter can be reloaded
+// at runtime without requiring a server restart.
+var runtimeConfigurableMap = map[string]bool{
+	{{- range $key, $value := .RuntimeConfigurableMap}}
+	"{{$key}}": {{$value}},
+	{{- end}}
+}
+
+func GetRuntimeConfigurable() map[string]bool {
+	return runtimeConfigurableMap
+}
+
+// IsRuntimeConfigurable returns whether the given parameter name can be reloaded at runtime
+func IsRuntimeConfigurable(paramName string) bool {
+	if val, ok := runtimeConfigurableMap[paramName]; ok {
+		return val
+	}
+	return false
+}
+
 func (sP StringParam) GetString() string {
 	config := getOrCreateConfig()
 	switch sP.name {
@@ -493,6 +524,10 @@ func (sP StringParam) GetName() string {
 
 func (sP StringParam) IsSet() bool {
 	return viper.IsSet(sP.name)
+}
+
+func (sP StringParam) IsRuntimeConfigurable() bool {
+	return IsRuntimeConfigurable(sP.name)
 }
 
 func (slP StringSliceParam) GetStringSlice() []string {
@@ -514,6 +549,10 @@ func (slP StringSliceParam) IsSet() bool {
 	return viper.IsSet(slP.name)
 }
 
+func (slP StringSliceParam) IsRuntimeConfigurable() bool {
+	return IsRuntimeConfigurable(slP.name)
+}
+
 func (iP IntParam) GetInt() int {
 	config := getOrCreateConfig()
 	switch iP.name {
@@ -531,6 +570,10 @@ func (iP IntParam) GetName() string {
 
 func (iP IntParam) IsSet() bool {
 	return viper.IsSet(iP.name)
+}
+
+func (iP IntParam) IsRuntimeConfigurable() bool {
+	return IsRuntimeConfigurable(iP.name)
 }
 
 func (bP BoolParam) GetBool() bool {
@@ -552,6 +595,10 @@ func (bP BoolParam) IsSet() bool {
 	return viper.IsSet(bP.name)
 }
 
+func (bP BoolParam) IsRuntimeConfigurable() bool {
+	return IsRuntimeConfigurable(bP.name)
+}
+
 func (dP DurationParam) GetDuration() time.Duration {
 	config := getOrCreateConfig()
 	switch dP.name {
@@ -571,6 +618,10 @@ func (dP DurationParam) IsSet() bool {
 	return viper.IsSet(dP.name)
 }
 
+func (dP DurationParam) IsRuntimeConfigurable() bool {
+	return IsRuntimeConfigurable(dP.name)
+}
+
 func (oP ObjectParam) Unmarshal(rawVal any) error {
 	return viper.UnmarshalKey(oP.name, rawVal)
 }
@@ -581,6 +632,10 @@ func (oP ObjectParam) GetName() string {
 
 func (oP ObjectParam) IsSet() bool {
 	return viper.IsSet(oP.name)
+}
+
+func (oP ObjectParam) IsRuntimeConfigurable() bool {
+	return IsRuntimeConfigurable(oP.name)
 }
 
 // allParameterNames is the list of all config keys generated from

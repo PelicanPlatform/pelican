@@ -77,6 +77,350 @@ func GetDeprecated() map[string][]string {
     }
 }
 
+// runtimeConfigurableMap is a map of parameter names to their runtime configurability status.
+// It is generated from docs/parameters.yaml and indicates whether a parameter can be reloaded
+// at runtime without requiring a server restart.
+var runtimeConfigurableMap = map[string]bool{
+	"Cache.BlocksToPrefetch": false,
+	"Cache.ClientStatisticsLocation": false,
+	"Cache.Concurrency": false,
+	"Cache.ConcurrencyDegradedThreshold": false,
+	"Cache.DataLocation": false,
+	"Cache.DataLocations": false,
+	"Cache.DbLocation": false,
+	"Cache.DefaultCacheTimeout": false,
+	"Cache.EnableBroker": false,
+	"Cache.EnableEvictionMonitoring": false,
+	"Cache.EnableLotman": false,
+	"Cache.EnableOIDC": false,
+	"Cache.EnablePrefetch": false,
+	"Cache.EnableSiteLocalMode": false,
+	"Cache.EnableTLSClientAuth": false,
+	"Cache.EnableVoms": false,
+	"Cache.EvictionMonitoringInterval": false,
+	"Cache.EvictionMonitoringMaxDepth": false,
+	"Cache.ExportLocation": false,
+	"Cache.FedTokenLocation": false,
+	"Cache.FilesBaseSize": false,
+	"Cache.FilesMaxSize": false,
+	"Cache.FilesNominalSize": false,
+	"Cache.HighWaterMark": false,
+	"Cache.LocalRoot": false,
+	"Cache.LowWatermark": false,
+	"Cache.MetaLocations": false,
+	"Cache.NamespaceLocation": false,
+	"Cache.PermittedNamespaces": false,
+	"Cache.Port": false,
+	"Cache.RunLocation": false,
+	"Cache.SelfTest": false,
+	"Cache.SelfTestInterval": false,
+	"Cache.SelfTestMaxAge": false,
+	"Cache.SentinelLocation": false,
+	"Cache.StorageLocation": false,
+	"Cache.Url": false,
+	"Cache.XRootDPrefix": false,
+	"Client.AssumeDirectorServerHeader": false,
+	"Client.DirectorRetries": false,
+	"Client.DisableHttpProxy": false,
+	"Client.DisableProxyFallback": false,
+	"Client.EnableOverwrites": false,
+	"Client.IsPlugin": false,
+	"Client.MaximumDownloadSpeed": false,
+	"Client.MinimumDownloadSpeed": false,
+	"Client.PreferredCaches": false,
+	"Client.SlowTransferRampupTime": false,
+	"Client.SlowTransferWindow": false,
+	"Client.StoppedTransferTimeout": false,
+	"Client.WorkerCount": false,
+	"ConfigLocations": false,
+	"Debug": false,
+	"Director.AdaptiveSortEWMATimeConstant": false,
+	"Director.AdaptiveSortTruncateConstant": false,
+	"Director.AdvertiseUrl": false,
+	"Director.AdvertisementTTL": false,
+	"Director.AssumePresenceAtSingleOrigin": false,
+	"Director.CachePresenceCapacity": false,
+	"Director.CachePresenceTTL": false,
+	"Director.CacheResponseHostnames": false,
+	"Director.CacheSortMethod": false,
+	"Director.CachesPullFromCaches": false,
+	"Director.CheckCachePresence": false,
+	"Director.CheckOriginPresence": false,
+	"Director.DbLocation": false,
+	"Director.DefaultResponse": false,
+	"Director.EnableBroker": false,
+	"Director.EnableOIDC": false,
+	"Director.EnableStat": false,
+	"Director.FedTokenLifetime": false,
+	"Director.FilterCachesInErrorState": false,
+	"Director.FilteredServers": false,
+	"Director.GeoIPLocation": false,
+	"Director.MaxMindKeyFile": false,
+	"Director.MaxStatResponse": false,
+	"Director.MinStatResponse": false,
+	"Director.OriginCacheHealthTestInterval": false,
+	"Director.OriginResponseHostnames": false,
+	"Director.RegistryQueryInterval": false,
+	"Director.StatConcurrencyLimit": false,
+	"Director.StatTimeout": false,
+	"Director.SupportContactEmail": false,
+	"Director.SupportContactUrl": false,
+	"DisableHttpProxy": false,
+	"DisableProxyFallback": false,
+	"Federation.DiscoveryUrl": false,
+	"Federation.TopologyDowntimeUrl": false,
+	"Federation.TopologyNamespaceUrl": false,
+	"Federation.TopologyReloadInterval": false,
+	"Federation.TopologyUrl": false,
+	"GeoIPOverrides": false,
+	"Issuer.AuthenticationSource": false,
+	"Issuer.AuthorizationTemplates": false,
+	"Issuer.GroupFile": false,
+	"Issuer.GroupRequirements": false,
+	"Issuer.GroupSource": false,
+	"Issuer.IssuerClaimValue": false,
+	"Issuer.OIDCAuthenticationRequirements": false,
+	"Issuer.OIDCAuthenticationUserClaim": false,
+	"Issuer.OIDCGroupClaim": false,
+	"Issuer.OIDCPreferClaimsFromIDToken": false,
+	"Issuer.QDLLocation": false,
+	"Issuer.RedirectUris": false,
+	"Issuer.ScitokensServerLocation": false,
+	"Issuer.TomcatLocation": false,
+	"Issuer.UserStripDomain": false,
+	"IssuerKey": false,
+	"IssuerKeysDirectory": false,
+	"LocalCache.DataLocation": false,
+	"LocalCache.HighWaterMarkPercentage": false,
+	"LocalCache.LowWaterMarkPercentage": false,
+	"LocalCache.RunLocation": false,
+	"LocalCache.Size": false,
+	"LocalCache.Socket": false,
+	"Logging.Cache.Http": false,
+	"Logging.Cache.Ofs": false,
+	"Logging.Cache.Pfc": false,
+	"Logging.Cache.Pss": false,
+	"Logging.Cache.PssSetOpt": false,
+	"Logging.Cache.Scitokens": false,
+	"Logging.Cache.Xrd": false,
+	"Logging.Cache.Xrootd": false,
+	"Logging.Client.ProgressInterval": false,
+	"Logging.DisableProgressBars": false,
+	"Logging.Level": true,
+	"Logging.LogLocation": false,
+	"Logging.Origin.Cms": false,
+	"Logging.Origin.Http": false,
+	"Logging.Origin.Ofs": false,
+	"Logging.Origin.Oss": false,
+	"Logging.Origin.Scitokens": false,
+	"Logging.Origin.Xrd": false,
+	"Logging.Origin.Xrootd": false,
+	"Lotman.DbLocation": false,
+	"Lotman.DefaultLotDeletionLifetime": false,
+	"Lotman.DefaultLotExpirationLifetime": false,
+	"Lotman.EnableAPI": false,
+	"Lotman.EnabledPolicy": false,
+	"Lotman.LibLocation": false,
+	"Lotman.LotHome": false,
+	"Lotman.PolicyDefinitions": false,
+	"MinimumDownloadSpeed": false,
+	"Monitoring.AggregatePrefixes": false,
+	"Monitoring.DataLocation": false,
+	"Monitoring.DataRetention": false,
+	"Monitoring.DataRetentionSize": false,
+	"Monitoring.EnablePrometheus": false,
+	"Monitoring.LabelLimit": false,
+	"Monitoring.LabelNameLengthLimit": false,
+	"Monitoring.LabelValueLengthLimit": false,
+	"Monitoring.MetricAuthorization": false,
+	"Monitoring.PortHigher": false,
+	"Monitoring.PortLower": false,
+	"Monitoring.PromQLAuthorization": false,
+	"Monitoring.SampleLimit": false,
+	"Monitoring.TokenExpiresIn": false,
+	"Monitoring.TokenRefreshInterval": false,
+	"OIDC.AuthorizationEndpoint": false,
+	"OIDC.ClientID": false,
+	"OIDC.ClientIDFile": false,
+	"OIDC.ClientRedirectHostname": false,
+	"OIDC.ClientSecretFile": false,
+	"OIDC.DeviceAuthEndpoint": false,
+	"OIDC.Issuer": false,
+	"OIDC.Scopes": false,
+	"OIDC.TokenEndpoint": false,
+	"OIDC.UserInfoEndpoint": false,
+	"Origin.Concurrency": false,
+	"Origin.ConcurrencyDegradedThreshold": false,
+	"Origin.DbLocation": false,
+	"Origin.DirectorTest": false,
+	"Origin.DisableDirectClients": false,
+	"Origin.EnableBroker": false,
+	"Origin.EnableCmsd": false,
+	"Origin.EnableDirListing": false,
+	"Origin.EnableDirectReads": false,
+	"Origin.EnableFallbackRead": false,
+	"Origin.EnableIssuer": false,
+	"Origin.EnableListings": false,
+	"Origin.EnableMacaroons": false,
+	"Origin.EnableOIDC": false,
+	"Origin.EnablePublicReads": false,
+	"Origin.EnableReads": false,
+	"Origin.EnableVoms": false,
+	"Origin.EnableWrite": false,
+	"Origin.EnableWrites": false,
+	"Origin.ExportVolume": false,
+	"Origin.ExportVolumes": false,
+	"Origin.Exports": false,
+	"Origin.FedTokenLocation": false,
+	"Origin.FederationPrefix": false,
+	"Origin.GlobusClientIDFile": false,
+	"Origin.GlobusClientSecretFile": false,
+	"Origin.GlobusCollectionID": false,
+	"Origin.GlobusCollectionName": false,
+	"Origin.GlobusConfigLocation": false,
+	"Origin.HttpAuthTokenFile": false,
+	"Origin.HttpServiceUrl": false,
+	"Origin.Mode": false,
+	"Origin.Multiuser": false,
+	"Origin.NamespacePrefix": false,
+	"Origin.Port": false,
+	"Origin.RunLocation": false,
+	"Origin.S3AccessKeyfile": false,
+	"Origin.S3Bucket": false,
+	"Origin.S3Region": false,
+	"Origin.S3SecretKeyfile": false,
+	"Origin.S3ServiceName": false,
+	"Origin.S3ServiceUrl": false,
+	"Origin.S3UrlStyle": false,
+	"Origin.ScitokensDefaultUser": false,
+	"Origin.ScitokensMapSubject": false,
+	"Origin.ScitokensNameMapFile": false,
+	"Origin.ScitokensRestrictedPaths": false,
+	"Origin.ScitokensUsernameClaim": false,
+	"Origin.SelfTest": false,
+	"Origin.SelfTestInterval": false,
+	"Origin.SelfTestMaxAge": false,
+	"Origin.StoragePrefix": false,
+	"Origin.StorageType": false,
+	"Origin.TokenAudience": false,
+	"Origin.Url": false,
+	"Origin.XRootDPrefix": false,
+	"Origin.XRootServiceUrl": false,
+	"Plugin.Token": false,
+	"Registry.AdminUsers": false,
+	"Registry.CustomRegistrationFields": false,
+	"Registry.DbLocation": false,
+	"Registry.Institutions": false,
+	"Registry.InstitutionsUrl": false,
+	"Registry.InstitutionsUrlReloadMinutes": false,
+	"Registry.RequireCacheApproval": false,
+	"Registry.RequireKeyChaining": false,
+	"Registry.RequireOriginApproval": false,
+	"Server.AdLifetime": false,
+	"Server.AdvertisementInterval": false,
+	"Server.DbLocation": false,
+	"Server.DirectorUrls": false,
+	"Server.DropPrivileges": false,
+	"Server.EnablePKCS11": false,
+	"Server.EnablePprof": false,
+	"Server.EnableUI": false,
+	"Server.ExternalWebUrl": false,
+	"Server.HealthMonitoringPublic": false,
+	"Server.Hostname": false,
+	"Server.IssuerHostname": false,
+	"Server.IssuerJwks": false,
+	"Server.IssuerPort": false,
+	"Server.IssuerUrl": false,
+	"Server.Modules": false,
+	"Server.RegistrationRetryInterval": false,
+	"Server.SessionSecretFile": false,
+	"Server.StartupTimeout": false,
+	"Server.TLSCACertificateDirectory": false,
+	"Server.TLSCACertificateFile": false,
+	"Server.TLSCAKey": false,
+	"Server.TLSCertificate": false,
+	"Server.TLSCertificateChain": false,
+	"Server.TLSKey": false,
+	"Server.UIActivationCodeFile": false,
+	"Server.UIAdminUsers": false,
+	"Server.UILoginRateLimit": false,
+	"Server.UIPasswordFile": false,
+	"Server.UnprivilegedUser": false,
+	"Server.WebConfigFile": false,
+	"Server.WebHost": false,
+	"Server.WebPort": false,
+	"Shoveler.AMQPExchange": false,
+	"Shoveler.AMQPTokenLocation": false,
+	"Shoveler.Enable": false,
+	"Shoveler.IPMapping": false,
+	"Shoveler.MessageQueueProtocol": false,
+	"Shoveler.OutputDestinations": false,
+	"Shoveler.PortHigher": false,
+	"Shoveler.PortLower": false,
+	"Shoveler.QueueDirectory": false,
+	"Shoveler.StompCert": false,
+	"Shoveler.StompCertKey": false,
+	"Shoveler.StompPassword": false,
+	"Shoveler.StompUsername": false,
+	"Shoveler.Topic": false,
+	"Shoveler.URL": false,
+	"Shoveler.VerifyHeader": false,
+	"StagePlugin.Hook": false,
+	"StagePlugin.MountPrefix": false,
+	"StagePlugin.OriginPrefix": false,
+	"StagePlugin.ShadowOriginPrefix": false,
+	"TLSSkipVerify": false,
+	"Topology.DisableCacheX509": false,
+	"Topology.DisableCaches": false,
+	"Topology.DisableDowntime": false,
+	"Topology.DisableOriginX509": false,
+	"Topology.DisableOrigins": false,
+	"Transport.BrokerEndpointCacheTTL": false,
+	"Transport.DialerKeepAlive": false,
+	"Transport.DialerTimeout": false,
+	"Transport.ExpectContinueTimeout": false,
+	"Transport.IdleConnTimeout": false,
+	"Transport.MaxIdleConns": false,
+	"Transport.ResponseHeaderTimeout": false,
+	"Transport.TLSHandshakeTimeout": false,
+	"Xrootd.AuthRefreshInterval": false,
+	"Xrootd.Authfile": false,
+	"Xrootd.AutoShutdownEnabled": false,
+	"Xrootd.ConfigFile": false,
+	"Xrootd.ConfigUpdateFailureTimeout": false,
+	"Xrootd.DetailedMonitoringHost": false,
+	"Xrootd.DetailedMonitoringPort": false,
+	"Xrootd.EnableLocalMonitoring": false,
+	"Xrootd.HttpMaxDelay": false,
+	"Xrootd.LocalMonitoringHost": false,
+	"Xrootd.MacaroonsKeyFile": false,
+	"Xrootd.ManagerHost": false,
+	"Xrootd.ManagerPort": false,
+	"Xrootd.MaxStartupWait": false,
+	"Xrootd.MaxThreads": false,
+	"Xrootd.Mount": false,
+	"Xrootd.Port": false,
+	"Xrootd.RobotsTxtFile": false,
+	"Xrootd.RunLocation": false,
+	"Xrootd.ScitokensConfig": false,
+	"Xrootd.ShutdownTimeout": false,
+	"Xrootd.Sitename": false,
+	"Xrootd.SummaryMonitoringHost": false,
+	"Xrootd.SummaryMonitoringPort": false,
+}
+
+func GetRuntimeConfigurable() map[string]bool {
+	return runtimeConfigurableMap
+}
+
+// IsRuntimeConfigurable returns whether the given parameter name can be reloaded at runtime
+func IsRuntimeConfigurable(paramName string) bool {
+	if val, ok := runtimeConfigurableMap[paramName]; ok {
+		return val
+	}
+	return false
+}
+
 func (sP StringParam) GetString() string {
 	config := getOrCreateConfig()
 	switch sP.name {
@@ -396,6 +740,10 @@ func (sP StringParam) IsSet() bool {
 	return viper.IsSet(sP.name)
 }
 
+func (sP StringParam) IsRuntimeConfigurable() bool {
+	return IsRuntimeConfigurable(sP.name)
+}
+
 func (slP StringSliceParam) GetStringSlice() []string {
 	config := getOrCreateConfig()
 	switch slP.name {
@@ -447,6 +795,10 @@ func (slP StringSliceParam) GetName() string {
 
 func (slP StringSliceParam) IsSet() bool {
 	return viper.IsSet(slP.name)
+}
+
+func (slP StringSliceParam) IsRuntimeConfigurable() bool {
+	return IsRuntimeConfigurable(slP.name)
 }
 
 func (iP IntParam) GetInt() int {
@@ -536,6 +888,10 @@ func (iP IntParam) GetName() string {
 
 func (iP IntParam) IsSet() bool {
 	return viper.IsSet(iP.name)
+}
+
+func (iP IntParam) IsRuntimeConfigurable() bool {
+	return IsRuntimeConfigurable(iP.name)
 }
 
 func (bP BoolParam) GetBool() bool {
@@ -693,6 +1049,10 @@ func (bP BoolParam) IsSet() bool {
 	return viper.IsSet(bP.name)
 }
 
+func (bP BoolParam) IsRuntimeConfigurable() bool {
+	return IsRuntimeConfigurable(bP.name)
+}
+
 func (dP DurationParam) GetDuration() time.Duration {
 	config := getOrCreateConfig()
 	switch dP.name {
@@ -788,6 +1148,10 @@ func (dP DurationParam) IsSet() bool {
 	return viper.IsSet(dP.name)
 }
 
+func (dP DurationParam) IsRuntimeConfigurable() bool {
+	return IsRuntimeConfigurable(dP.name)
+}
+
 func (oP ObjectParam) Unmarshal(rawVal any) error {
 	return viper.UnmarshalKey(oP.name, rawVal)
 }
@@ -798,6 +1162,10 @@ func (oP ObjectParam) GetName() string {
 
 func (oP ObjectParam) IsSet() bool {
 	return viper.IsSet(oP.name)
+}
+
+func (oP ObjectParam) IsRuntimeConfigurable() bool {
+	return IsRuntimeConfigurable(oP.name)
 }
 
 // allParameterNames is the list of all config keys generated from

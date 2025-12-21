@@ -227,3 +227,39 @@ func TestAccessorFunctionsWithNoConfig(t *testing.T) {
 	require.NotNil(t, config)
 	assert.Equal(t, 7000, config.Cache.Port)
 }
+
+func TestIsRuntimeConfigurable(t *testing.T) {
+	// Test the package-level function with a parameter that has runtime_configurable: true
+	assert.True(t, IsRuntimeConfigurable("Logging.Level"), "Logging.Level should be runtime configurable")
+
+	// Test with a parameter that has runtime_configurable: false
+	assert.False(t, IsRuntimeConfigurable("TLSSkipVerify"), "TLSSkipVerify should not be runtime configurable")
+
+	// Test with a parameter that doesn't specify runtime_configurable (should default to false)
+	assert.False(t, IsRuntimeConfigurable("Cache.Port"), "Cache.Port should default to not runtime configurable")
+
+	// Test with a non-existent parameter
+	assert.False(t, IsRuntimeConfigurable("NonExistent.Parameter"), "Non-existent parameter should return false")
+}
+
+func TestParamIsRuntimeConfigurable(t *testing.T) {
+	// Test the method on different param types
+	assert.True(t, Logging_Level.IsRuntimeConfigurable(), "Logging.Level should be runtime configurable")
+	assert.False(t, TLSSkipVerify.IsRuntimeConfigurable(), "TLSSkipVerify should not be runtime configurable")
+	assert.False(t, Cache_Port.IsRuntimeConfigurable(), "Cache.Port should not be runtime configurable")
+}
+
+func TestGetRuntimeConfigurable(t *testing.T) {
+	// Test that GetRuntimeConfigurable returns a valid map
+	runtimeConfigMap := GetRuntimeConfigurable()
+	require.NotNil(t, runtimeConfigMap, "GetRuntimeConfigurable should return a non-nil map")
+
+	// Verify specific entries
+	loggingLevel, exists := runtimeConfigMap["Logging.Level"]
+	assert.True(t, exists, "Logging.Level should exist in the map")
+	assert.True(t, loggingLevel, "Logging.Level should be true in the map")
+
+	tlsSkipVerify, exists := runtimeConfigMap["TLSSkipVerify"]
+	assert.True(t, exists, "TLSSkipVerify should exist in the map")
+	assert.False(t, tlsSkipVerify, "TLSSkipVerify should be false in the map")
+}
