@@ -359,6 +359,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 
 	// Test we work with just the query
 	t.Run("testRecursiveGetAndPutWithQuery", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		require.NoError(t, err)
 
@@ -388,6 +389,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 
 	// Test we work with a value assigned to it (we print deprecation warning)
 	t.Run("testRecursiveGetAndPutWithQueryWithValueTrue", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		require.NoError(t, err)
 
@@ -417,6 +419,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 
 	// Test we work with a value assigned to it but says recursive=false (we print deprecation warning and ignore arguments in query so we still work)
 	t.Run("testRecursiveGetAndPutWithQueryWithValueFalse", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		require.NoError(t, err)
 
@@ -446,6 +449,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 
 	// Test we work with both recursive and directread query params
 	t.Run("testRecursiveGetAndPutWithQueryAndDirectread", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		require.NoError(t, err)
 
@@ -564,6 +568,7 @@ func TestSyncUpload(t *testing.T) {
 	innerTempFile.Close()
 
 	t.Run("testSyncUploadFull", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		// Set path for object to upload/download
 		tempPath := tempDir
 		dirName := filepath.Base(tempPath)
@@ -582,6 +587,7 @@ func TestSyncUpload(t *testing.T) {
 	})
 
 	t.Run("testSyncUploadNone", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		// Set path for object to upload/download
 		dirName := filepath.Base(tempDir)
 		uploadUrl := fmt.Sprintf("pelican://%s/first/namespace/sync_upload_none/%s", discoveryUrl.Host, dirName)
@@ -601,6 +607,7 @@ func TestSyncUpload(t *testing.T) {
 	})
 
 	t.Run("testSyncUploadPartial", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		// Set path for object to upload/download
 		dirName := filepath.Base(tempDir)
 		uploadUrl := fmt.Sprintf("pelican://%s/first/namespace/sync_upload_partial/%s", discoveryUrl.Host, dirName)
@@ -635,6 +642,7 @@ func TestSyncUpload(t *testing.T) {
 	})
 
 	t.Run("testSyncUploadFile", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		// Create a new test file to upload
 		newDir := t.TempDir()
 		newTestFile, err := os.CreateTemp(newDir, "newTest")
@@ -772,6 +780,7 @@ func TestSyncDownload(t *testing.T) {
 	verifySuccessfulTransfer(t, transferDetailsUpload)
 
 	t.Run("testSyncDownloadFull", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		// Download the files we just uploaded
 		transferDetailsDownload, err := client.DoGet(fed.Ctx, uploadUrl, t.TempDir(), true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
 		require.NoError(t, err)
@@ -779,6 +788,7 @@ func TestSyncDownload(t *testing.T) {
 	})
 
 	t.Run("testSyncDownloadNone", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		// Set path for object to upload/download
 		dirName := t.TempDir()
 
@@ -794,6 +804,7 @@ func TestSyncDownload(t *testing.T) {
 	})
 
 	t.Run("testSyncDownloadObject", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		// Set path for object to upload/download
 		dirName := t.TempDir()
 		filename1 := filepath.Base(tempFile1.Name())
@@ -840,6 +851,7 @@ func TestSyncDownload(t *testing.T) {
 	})
 
 	t.Run("testSyncDownloadPartial", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		// Set path for object to upload/download
 		downloadDir := t.TempDir()
 		dirName := filepath.Base(tempDir)
@@ -954,6 +966,7 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("testObjectPutNonRecursiveDirPath", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 
 		oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		require.NoError(t, err)
@@ -1107,6 +1120,7 @@ func TestObjectDelete(t *testing.T) {
 	// Test deleting a non-existent object.
 	// The operation should fail with a 404 error indicating that the object does not exist.
 	t.Run("testDeleteNonExistentObject", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		doesNotExistPath := fmt.Sprintf("pelican://%s%s/doesNotExist", discoveryUrl.Host, "/with-write")
 		err := client.DoDelete(fed.Ctx, doesNotExistPath, false, client.WithTokenLocation(tempToken.Name()))
 		require.Error(t, err)
@@ -1121,6 +1135,7 @@ func TestObjectDelete(t *testing.T) {
 	// Test deleting an existing object.
 	// The operation should succeed, and the object should no longer be accessible.
 	t.Run("testDeleteObject", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		objectToDeletePelicanUrl := fmt.Sprintf("pelican://%s/with-write/%s", discoveryUrl.Host, filepath.Base(objectToBeDeleted))
 		err = client.DoDelete(fed.Ctx, objectToDeletePelicanUrl, false, client.WithTokenLocation(tempToken.Name()))
 		require.NoError(t, err)
@@ -1134,6 +1149,7 @@ func TestObjectDelete(t *testing.T) {
 	// Test deleting an empty collection.
 	// The operation should succeed, and the collection should no longer be accessible.
 	t.Run("testDeleteEmptyCollection", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		emptyCollectionPelicanUrl := fmt.Sprintf("pelican://%s/with-write/%s", discoveryUrl.Host, filepath.Base(emptyCollectionToBeDeleted))
 		err := client.DoDelete(fed.Ctx, emptyCollectionPelicanUrl, false, client.WithTokenLocation(tempToken.Name()))
 		require.NoError(t, err)
@@ -1146,6 +1162,7 @@ func TestObjectDelete(t *testing.T) {
 	// Test deleting a non-empty collection without the recursive flag.
 	// The operation should fail with an error indicating that the collection cannot be deleted because it is not empty, and the collection should still exist.
 	t.Run("testDeleteNonEmptyCollectionWithoutRecursive", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		collectionToDeletePelicanUrl := fmt.Sprintf("pelican://%s/with-write/%s", discoveryUrl.Host, filepath.Base(complexCollection))
 		err := client.DoDelete(fed.Ctx, collectionToDeletePelicanUrl, false, client.WithTokenLocation(tempToken.Name()))
 		require.Error(t, err)
@@ -1159,6 +1176,7 @@ func TestObjectDelete(t *testing.T) {
 	// Test deleting a non-empty collection with the recursive flag.
 	// The operation should succeed, and the collection and its contents should no longer be accessible.
 	t.Run("testDeleteNonEmptyCollectionWithRecursive", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		collectionToDeletePelicanUrl := fmt.Sprintf("pelican://%s/with-write/%s", discoveryUrl.Host, filepath.Base(complexCollection))
 		err = client.DoDelete(fed.Ctx, collectionToDeletePelicanUrl, true, client.WithTokenLocation(tempToken.Name()))
 		require.NoError(t, err)
@@ -1171,6 +1189,7 @@ func TestObjectDelete(t *testing.T) {
 	// Test attempting to delete an object in a prefix without writes capability.
 	// The operation should fail with a 403 permission error.
 	t.Run("testDeleteForNonWritableNamespace", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		collectionToDeletePelicanUrl := fmt.Sprintf("pelican://%s/without-write/%s", discoveryUrl.Host, filepath.Base(objectNonWritableNs))
 		err := client.DoDelete(fed.Ctx, collectionToDeletePelicanUrl, false, client.WithTokenLocation(tempToken.Name()))
 

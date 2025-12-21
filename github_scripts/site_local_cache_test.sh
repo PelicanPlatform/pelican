@@ -31,41 +31,45 @@
 set -e
 
 # Create temporary directories for the test
-# Note: Use /tmp for cache storage as it typically supports extended attributes (xattr)
-# which are required by XRootD's proxy file cache
-mkdir -p site_local_test/fed_config
-chmod 777 site_local_test/fed_config
+SITE_TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/pelican_site_local_test.XXXXXX")
+chmod 755 "$SITE_TEST_ROOT"
+FED_CONFIG_DIR="$SITE_TEST_ROOT/fed_config"
+FED_RUNTIME_DIR="$SITE_TEST_ROOT/runtime_fed"
+FED_ORIGIN_DIR="$SITE_TEST_ROOT/fed_origin"
+SITE_LOCAL_CONFIG_DIR="$SITE_TEST_ROOT/site_local_config"
+SITE_LOCAL_RUNTIME_DIR="$SITE_TEST_ROOT/runtime_site_local"
+SITE_LOCAL_CACHE_RUN="$SITE_TEST_ROOT/site_local_cache_run"
+SITE_LOCAL_DOWNLOAD="$SITE_TEST_ROOT/downloaded_file.txt"
+SITE_LOCAL_DOWNLOAD_LOG="$SITE_TEST_ROOT/download_log.txt"
 
-echo "fake oidc client secret" > site_local_test/fed_config/oidc-client-secret
+mkdir -p "$FED_CONFIG_DIR" "$FED_RUNTIME_DIR" "$FED_ORIGIN_DIR" "$SITE_LOCAL_CONFIG_DIR" "$SITE_LOCAL_RUNTIME_DIR" "$SITE_LOCAL_CACHE_RUN"
+chmod 755 "$FED_CONFIG_DIR" "$FED_RUNTIME_DIR" "$FED_ORIGIN_DIR" "$SITE_LOCAL_CONFIG_DIR" "$SITE_LOCAL_RUNTIME_DIR" "$SITE_LOCAL_CACHE_RUN"
+chown xrootd: "$FED_ORIGIN_DIR"
 
-mkdir -p site_local_test/fed_origin
-chmod 777 site_local_test/fed_origin
+echo "fake oidc client secret" > "$FED_CONFIG_DIR/oidc-client-secret"
 
-mkdir -p /tmp/pelican_test_fed_cache_storage
-chmod 777 /tmp/pelican_test_fed_cache_storage
-
-mkdir -p site_local_test/site_local_config
-chmod 777 site_local_test/site_local_config
-
-mkdir -p /tmp/pelican_test_site_local_storage
-chmod 777 /tmp/pelican_test_site_local_storage
+FED_CACHE_STORAGE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/pelican_test_fed_cache_storage.XXXXXX")
+SITE_LOCAL_CACHE_STORAGE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/pelican_test_site_local_storage.XXXXXX")
+chmod 777 "$FED_CACHE_STORAGE_DIR" "$SITE_LOCAL_CACHE_STORAGE_DIR"
 
 # Setup env variables for the federation
-export PELICAN_FEDERATION_DIRECTORURL="https://$HOSTNAME:8444"
-export PELICAN_FEDERATION_REGISTRYURL="https://$HOSTNAME:8444"
 export PELICAN_REGISTRY_REQUIRECACHEAPPROVAL=false
 export PELICAN_REGISTRY_REQUIREORIGINAPPROVAL=false
 export PELICAN_TLSSKIPVERIFY=true
 export PELICAN_ORIGIN_ENABLEDIRECTREADS=true
 export PELICAN_ORIGIN_ENABLEPUBLICREADS=true
 export PELICAN_SERVER_ENABLEUI=false
-export PELICAN_ORIGIN_RUNLOCATION=$PWD/site_local_test/xrootdRunLocation
-export PELICAN_CONFIGDIR=$PWD/site_local_test/fed_config
-export PELICAN_SERVER_DBLOCATION=$PWD/site_local_test/fed_config/test-registry.sql
+export PELICAN_ORIGIN_RUNLOCATION="$SITE_TEST_ROOT/xrootdRunLocation"
+export PELICAN_RUNTIMEDIR="$FED_RUNTIME_DIR"
+export PELICAN_SERVER_WEBPORT=0
+export PELICAN_ORIGIN_PORT=0
+export PELICAN_CACHE_PORT=0
+export PELICAN_CONFIGDIR="$FED_CONFIG_DIR"
+export PELICAN_SERVER_DBLOCATION="$FED_CONFIG_DIR/test-registry.sql"
 export PELICAN_OIDC_CLIENTID="sometexthere"
 export PELICAN_ORIGIN_FEDERATIONPREFIX="/test"
-export PELICAN_ORIGIN_STORAGEPREFIX="$PWD/site_local_test/fed_origin"
-export PELICAN_CACHE_STORAGELOCATION="/tmp/pelican_test_fed_cache_storage"
+export PELICAN_ORIGIN_STORAGEPREFIX="$FED_ORIGIN_DIR"
+export PELICAN_CACHE_STORAGELOCATION="$FED_CACHE_STORAGE_DIR"
 
 # Function to cleanup after test ends
 cleanup() {
@@ -76,7 +80,7 @@ cleanup() {
     echo "Cleaning up test environment..."
     echo "=========================================="
 
-    if [ ! -z "$fed_pid" ]; then
+    if [ -n "$fed_pid" ]; then
         echo "Stopping federation (PID $fed_pid)..."
         kill -SIGINT "$fed_pid" 2>/dev/null || true
         # Wait a moment for graceful shutdown
@@ -85,7 +89,7 @@ cleanup() {
         kill -9 "$fed_pid" 2>/dev/null || true
     fi
 
-    if [ ! -z "$site_local_pid" ]; then
+    if [ -n "$site_local_pid" ]; then
         echo "Stopping site-local cache (PID $site_local_pid)..."
         kill -SIGINT "$site_local_pid" 2>/dev/null || true
         # Wait a moment for graceful shutdown
@@ -95,10 +99,16 @@ cleanup() {
     fi
 
     echo "Removing temporary directories..."
-    rm -rf site_local_test
-    rm -rf xrootdRunLocation
-    rm -rf /tmp/pelican_test_fed_cache_storage
-    rm -rf /tmp/pelican_test_site_local_storage
+    if [ -n "${SITE_TEST_ROOT:-}" ]; then
+        rm -rf "$SITE_TEST_ROOT"
+    fi
+    rm -rf "xrootdRunLocation"
+    if [ -n "${FED_CACHE_STORAGE_DIR:-}" ]; then
+        rm -rf "$FED_CACHE_STORAGE_DIR"
+    fi
+    if [ -n "${SITE_LOCAL_CACHE_STORAGE_DIR:-}" ]; then
+        rm -rf "$SITE_LOCAL_CACHE_STORAGE_DIR"
+    fi
 
     echo "Unsetting environment variables..."
     unset PELICAN_FEDERATION_DIRECTORURL
@@ -116,6 +126,19 @@ cleanup() {
     unset PELICAN_CONFIGDIR
     unset PELICAN_SERVER_DBLOCATION
     unset PELICAN_CACHE_STORAGELOCATION
+    unset PELICAN_RUNTIMEDIR
+    unset PELICAN_SERVER_WEBPORT
+    unset PELICAN_ORIGIN_PORT
+    unset PELICAN_CACHE_PORT
+    unset SITE_TEST_ROOT
+    unset FED_CONFIG_DIR
+    unset FED_RUNTIME_DIR
+    unset FED_ORIGIN_DIR
+    unset SITE_LOCAL_CONFIG_DIR
+    unset SITE_LOCAL_RUNTIME_DIR
+    unset SITE_LOCAL_CACHE_RUN
+    unset SITE_LOCAL_DOWNLOAD
+    unset SITE_LOCAL_DOWNLOAD_LOG
 
     echo "Cleanup complete!"
     echo ""
@@ -127,47 +150,82 @@ if [ ! -f ./pelican ]; then
   exit 1
 fi
 
+pid_siteLocalCache=""
+
 # Create a test file to download
-echo "This is test content for site-local cache testing" > ./site_local_test/fed_origin/test_file.txt
+echo "This is test content for site-local cache testing" > "$FED_ORIGIN_DIR/test_file.txt"
 
 # Run federation in the background (director + registry + origin + cache)
 echo "Starting federation with director, registry, origin, and cache..."
-federationServe="./pelican serve --module director --module registry --module origin --module cache -d"
-$federationServe &
+./pelican serve --module director --module registry --module origin --module cache -d &
 pid_federationServe=$!
 
 # Setup trap with the PID as an argument to the cleanup function
-trap 'cleanup $pid_federationServe $pid_siteLocalCache' EXIT
+trap_cleanup() {
+    cleanup "$pid_federationServe" "$pid_siteLocalCache"
+}
+trap trap_cleanup EXIT
 
-# Give the federation time to spin up
-API_URL="https://$HOSTNAME:8444/api/v1.0/health"
-DESIRED_RESPONSE="HTTP/2 200"
+# Wait for the federation address file so we can discover the actual ports
+FED_ADDRESS_FILE="${PELICAN_RUNTIMEDIR%/}/pelican.addresses"
+TOTAL_WAIT=0
+echo "Waiting for federation address file: $FED_ADDRESS_FILE"
+while [ ! -f "$FED_ADDRESS_FILE" ]; do
+    if ! kill -0 "${pid_federationServe:-0}" 2>/dev/null; then
+        echo "Federation process exited before address file was created"
+        echo "TEST FAILED"
+        unset pid_federationServe
+        exit 1
+    fi
+    sleep 0.5
+    TOTAL_WAIT=$((TOTAL_WAIT + 1))
+    if [ "$TOTAL_WAIT" -gt 40 ]; then
+        echo "Address file not created after 20 seconds, exiting..."
+        echo "TEST FAILED: Federation did not start in time"
+        exit 1
+    fi
+done
 
-# Function to check if the response indicates all servers are running
+# shellcheck source=/dev/null
+source "$FED_ADDRESS_FILE"
+
+if [ -z "${SERVER_EXTERNAL_WEB_URL:-}" ]; then
+    echo "Address file missing SERVER_EXTERNAL_WEB_URL"
+    exit 1
+fi
+
+FED_SERVER_EXTERNAL_WEB_URL="$SERVER_EXTERNAL_WEB_URL"
+FED_DISCOVERY_HOSTPORT="${FED_SERVER_EXTERNAL_WEB_URL#https://}"
+FED_DISCOVERY_HOSTPORT="${FED_DISCOVERY_HOSTPORT#http://}"
+
+export PELICAN_FEDERATION_DIRECTORURL="$FED_SERVER_EXTERNAL_WEB_URL"
+export PELICAN_FEDERATION_REGISTRYURL="$FED_SERVER_EXTERNAL_WEB_URL"
+
+# Give the federation time to spin up using the discovered address
+API_URL="$FED_SERVER_EXTERNAL_WEB_URL/api/v1.0/health"
+DESIRED_RESPONSE="200"
+
 check_response() {
-    RESPONSE=$(curl -k -s -I -X GET "$API_URL" \
+    local response
+    response=$(curl -m 10 -k -s -o /dev/null -w "%{http_code}" -X GET "$API_URL" \
                  -H "Content-Type: application/json")
 
-    # Check if the response matches the desired output
-    if echo "$RESPONSE" | grep -q "$DESIRED_RESPONSE"; then
-        echo "Desired response received: $RESPONSE"
+    if [ "$response" = "$DESIRED_RESPONSE" ]; then
+        echo "Desired response received: $response"
         return 0
-    else
-        echo "Waiting for desired response..."
-        return 1
     fi
+
+    echo "Waiting for desired response..."
+    return 1
 }
 
-# We don't want to do this loop for too long, indicates there is an error
 TOTAL_SLEEP_TIME=0
 
-# Loop until director, origin, registry, and cache are running
-while check_response; [ $? -ne 0 ]
+until check_response
 do
     sleep .5
     TOTAL_SLEEP_TIME=$((TOTAL_SLEEP_TIME + 1))
 
-    # Break loop if we sleep for more than 20 seconds
     if [ "$TOTAL_SLEEP_TIME" -gt 40 ]; then
         echo "Total sleep time exceeded, exiting..."
         echo "TEST FAILED: Federation did not start in time"
@@ -180,48 +238,91 @@ echo "Federation is running!"
 # Now start the site-local cache with its own config and storage
 echo "Starting site-local cache..."
 
-# We need to use different ports and paths for the site-local cache
-SITE_LOCAL_PORT=8445
-SITE_LOCAL_CACHE_PORT=8446
+SITE_LOCAL_CONFIG_PATH="$SITE_LOCAL_CONFIG_DIR/pelican.yaml"
+SITE_LOCAL_WEBPORT=0
+SITE_LOCAL_CACHE_PORT=0
 
 # Create a minimal config file for the site-local cache
-cat > site_local_test/site_local_config/pelican.yaml <<EOF
-ConfigDir: $PWD/site_local_test/site_local_config
+cat > "$SITE_LOCAL_CONFIG_PATH" <<EOF
+RuntimeDir: $SITE_LOCAL_RUNTIME_DIR
+ConfigDir: $SITE_LOCAL_CONFIG_DIR
 Server:
-  WebPort: $SITE_LOCAL_PORT
-  DbLocation: $PWD/site_local_test/site_local_config/site-local-cache.sql
+  WebPort: $SITE_LOCAL_WEBPORT
+  DbLocation: $SITE_LOCAL_CONFIG_DIR/site-local-cache.sql
   TLSSkipVerify: true
   EnableUI: false
 Cache:
   Port: $SITE_LOCAL_CACHE_PORT
-  RunLocation: $PWD/site_local_test/site_local_cache_run
-  StorageLocation: /tmp/pelican_test_site_local_storage
+  RunLocation: $SITE_LOCAL_CACHE_RUN
+  StorageLocation: $SITE_LOCAL_CACHE_STORAGE_DIR
   EnableSiteLocalMode: true
 Federation:
-  DirectorUrl: https://$HOSTNAME:8444
-  RegistryUrl: https://$HOSTNAME:8444
+  DirectorUrl: $FED_SERVER_EXTERNAL_WEB_URL
+  RegistryUrl: $FED_SERVER_EXTERNAL_WEB_URL
 OIDC:
   ClientID: "sitelocalclient"
 EOF
 
 # Start the site-local cache
-./pelican cache serve --config site_local_test/site_local_config/pelican.yaml -d &
+PELICAN_RUNTIMEDIR="$SITE_LOCAL_RUNTIME_DIR" ./pelican cache serve --config "$SITE_LOCAL_CONFIG_PATH" -d &
 pid_siteLocalCache=$!
 
 # Update trap to include site-local cache PID
-trap 'cleanup $pid_federationServe $pid_siteLocalCache' EXIT
+trap_cleanup() {
+    cleanup "$pid_federationServe" "$pid_siteLocalCache"
+}
+trap trap_cleanup EXIT
 
-# Give the site-local cache time to start
-SITE_LOCAL_HEALTH_URL="https://$HOSTNAME:$SITE_LOCAL_PORT/api/v1.0/health"
+# Wait for the site-local address file to be written
+SITE_LOCAL_ADDRESS_FILE="${SITE_LOCAL_RUNTIME_DIR%/}/pelican.addresses"
+TOTAL_WAIT=0
+echo "Waiting for site-local address file: $SITE_LOCAL_ADDRESS_FILE"
+while [ ! -f "$SITE_LOCAL_ADDRESS_FILE" ]; do
+    if ! kill -0 "${pid_siteLocalCache:-0}" 2>/dev/null; then
+        echo "Site-local cache exited before address file was created"
+        echo "TEST FAILED"
+        unset pid_siteLocalCache
+        exit 1
+    fi
+    sleep 0.5
+    TOTAL_WAIT=$((TOTAL_WAIT + 1))
+    if [ "$TOTAL_WAIT" -gt 40 ]; then
+        echo "Site-local address file not created after 20 seconds, exiting..."
+        echo "TEST FAILED: Site-local cache did not start in time"
+        exit 1
+    fi
+done
+
+SITE_LOCAL_SERVER_EXTERNAL_WEB_URL=""
+SITE_LOCAL_CACHE_URL=""
+while IFS='=' read -r key val; do
+    case "$key" in
+        SERVER_EXTERNAL_WEB_URL) SITE_LOCAL_SERVER_EXTERNAL_WEB_URL="$val" ;;
+        CACHE_URL) SITE_LOCAL_CACHE_URL="$val" ;;
+    esac
+done < "$SITE_LOCAL_ADDRESS_FILE"
+
+if [ -z "$SITE_LOCAL_SERVER_EXTERNAL_WEB_URL" ]; then
+    echo "Site-local address file missing SERVER_EXTERNAL_WEB_URL"
+    exit 1
+fi
+if [ -z "$SITE_LOCAL_CACHE_URL" ]; then
+    echo "Site-local address file missing CACHE_URL"
+    exit 1
+fi
+
+SITE_LOCAL_HEALTH_URL="$SITE_LOCAL_SERVER_EXTERNAL_WEB_URL/api/v1.0/health"
 TOTAL_SLEEP_TIME=0
 
 echo "Waiting for site-local cache to start..."
-while ! curl -k -s -I -X GET "$SITE_LOCAL_HEALTH_URL" | grep -q "$DESIRED_RESPONSE"
-do
+while true; do
+    RESPONSE=$(curl -m 10 -k -s -o /dev/null -w "%{http_code}" -X GET "$SITE_LOCAL_HEALTH_URL" -H "Content-Type: application/json")
+    if [ "$RESPONSE" = "$DESIRED_RESPONSE" ]; then
+        echo "Site-local cache is running!"
+        break
+    fi
     sleep .5
     TOTAL_SLEEP_TIME=$((TOTAL_SLEEP_TIME + 1))
-
-    # Break loop if we sleep for more than 20 seconds
     if [ "$TOTAL_SLEEP_TIME" -gt 40 ]; then
         echo "Total sleep time exceeded, exiting..."
         echo "TEST FAILED: Site-local cache did not start in time"
@@ -229,13 +330,11 @@ do
     fi
 done
 
-echo "Site-local cache is running!"
-
 # Now run the tests
 
 # Test 1: Verify site-local cache did not register at the Registry
 echo "Test 1: Checking Registry to ensure site-local cache did not register..."
-REGISTRY_SERVERS_URL="https://$HOSTNAME:8444/api/v1.0/registry_ui/servers"
+REGISTRY_SERVERS_URL="$FED_SERVER_EXTERNAL_WEB_URL/api/v1.0/registry_ui/servers"
 
 # echo "Token created for testing"
 
@@ -266,12 +365,12 @@ echo "Test 2: Checking Director to ensure site-local cache did not advertise..."
 sleep 8
 
 # First, let's check all servers to see what's there
-DIRECTOR_ALL_SERVERS_URL="https://$HOSTNAME:8444/api/v1.0/director_ui/servers"
+DIRECTOR_ALL_SERVERS_URL="$FED_SERVER_EXTERNAL_WEB_URL/api/v1.0/director_ui/servers"
 DIRECTOR_ALL_RESPONSE=$(curl -k -s -X GET "$DIRECTOR_ALL_SERVERS_URL")
 echo "All director servers: $DIRECTOR_ALL_RESPONSE"
 
 # Now check just the caches
-DIRECTOR_SERVERS_URL="https://$HOSTNAME:8444/api/v1.0/director_ui/servers?server_type=Cache"
+DIRECTOR_SERVERS_URL="$FED_SERVER_EXTERNAL_WEB_URL/api/v1.0/director_ui/servers?server_type=Cache"
 DIRECTOR_RESPONSE=$(curl -k -s -X GET "$DIRECTOR_SERVERS_URL")
 echo "Director cache servers: $DIRECTOR_RESPONSE"
 
@@ -301,28 +400,29 @@ echo "Test 3: Downloading object directly from site-local cache..."
 
 # The object path in the federation
 OBJECT_PATH="/test/test_file.txt"
+OBJECT_URL="pelican://${FED_DISCOVERY_HOSTPORT}${OBJECT_PATH}"
 
 # Download via the site-local cache by specifying it as a preferred cache
 # Note: We use the --cache flag to force the client to use the site-local cache
-./pelican object get "pelican://$HOSTNAME:8444$OBJECT_PATH" site_local_test/downloaded_file.txt \
-    -d -L site_local_test/download_log.txt \
-    --cache "https://$HOSTNAME:$SITE_LOCAL_CACHE_PORT"
+./pelican object get "$OBJECT_URL" "$SITE_LOCAL_DOWNLOAD" \
+    -d -L "$SITE_LOCAL_DOWNLOAD_LOG" \
+    --cache "$SITE_LOCAL_CACHE_URL"
 
 # Verify the download was successful
-if grep -q "HTTP Transfer was successful" site_local_test/download_log.txt; then
+if grep -q "HTTP Transfer was successful" "$SITE_LOCAL_DOWNLOAD_LOG"; then
     echo "Download successful!"
 else
     echo "TEST FAILED: Download did not complete successfully"
-    cat site_local_test/download_log.txt
+    cat "$SITE_LOCAL_DOWNLOAD_LOG"
     exit 1
 fi
 
 # Verify the content matches
-if grep -q "This is test content for site-local cache testing" site_local_test/downloaded_file.txt; then
+if grep -q "This is test content for site-local cache testing" "$SITE_LOCAL_DOWNLOAD"; then
     echo "Content matches the uploaded file!"
 else
     echo "TEST FAILED: Downloaded content does not match original"
-    cat site_local_test/downloaded_file.txt
+    cat "$SITE_LOCAL_DOWNLOAD"
     exit 1
 fi
 
@@ -332,9 +432,9 @@ echo "Test 3 PASSED: Object successfully downloaded via site-local cache"
 echo "Test 4: Verifying object is cached in both caches..."
 
 # Check site-local cache storage
-if [ -d "/tmp/pelican_test_site_local_storage" ]; then
+if [ -d "$SITE_LOCAL_CACHE_STORAGE_DIR" ]; then
     # Look for cached files (they may be in subdirectories with hashed names)
-    SITE_LOCAL_CACHED_FILES=$(find /tmp/pelican_test_site_local_storage -type f | wc -l)
+    SITE_LOCAL_CACHED_FILES=$(find "$SITE_LOCAL_CACHE_STORAGE_DIR" -type f | wc -l)
     echo "Site-local cache has $SITE_LOCAL_CACHED_FILES cached files"
 
     if [ "$SITE_LOCAL_CACHED_FILES" -gt 0 ]; then
@@ -347,8 +447,8 @@ else
 fi
 
 # Check federation cache storage
-if [ -d "/tmp/pelican_test_fed_cache_storage" ]; then
-    FED_CACHED_FILES=$(find /tmp/pelican_test_fed_cache_storage -type f | wc -l)
+if [ -d "$FED_CACHE_STORAGE_DIR" ]; then
+    FED_CACHED_FILES=$(find "$FED_CACHE_STORAGE_DIR" -type f | wc -l)
     echo "Federation cache has $FED_CACHED_FILES cached files"
 
     if [ "$FED_CACHED_FILES" -gt 0 ]; then
@@ -369,8 +469,7 @@ echo "============================================"
 echo ""
 
 echo "Shutting down test servers..."
-# The EXIT trap will call cleanup() which will terminate both processes
-# Give a moment for the message to be visible
-sleep 1
-
+# Disable the EXIT trap now that tests finished and run cleanup explicitly
+trap - EXIT
+cleanup "$pid_federationServe" "$pid_siteLocalCache"
 exit 0

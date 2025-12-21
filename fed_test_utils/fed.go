@@ -140,16 +140,6 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 
 	require.NoError(t, param.Set(param.TLSSkipVerify.GetName(), true))
 
-	// Instead of using "0" as a port directly in the config, which lets XRootD find its own port,
-	// we need to know the port in advance for configuring the issuer URLs for each export. To do that
-	// without hardcoding the ports (which we can't guarantee are available in the test env), we'll
-	// get a few unique, available ports and use them for the origin, cache, and web UIs. This introduces
-	// a race condition, however, because it's possible the ports are consumed between getting them from this
-	// function and binding the servers to them
-	ports, err := test_utils.GetUniqueAvailablePorts(3)
-	require.NoError(t, err)
-	require.Len(t, ports, 3)
-
 	// Disable functionality we're not using (and is difficult to make work on Mac)
 	require.NoError(t, param.Set(param.Registry_DbLocation.GetName(), filepath.Join(t.TempDir(), "ns-registry.sqlite")))
 	require.NoError(t, param.Set(param.Registry_RequireOriginApproval.GetName(), false))
@@ -159,17 +149,17 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	require.NoError(t, param.Set(param.Director_FilterCachesInErrorState.GetName(), false))
 	require.NoError(t, param.Set(param.Origin_EnableCmsd.GetName(), false))
 	require.NoError(t, param.Set(param.Origin_EnableVoms.GetName(), false))
-	require.NoError(t, param.Set(param.Origin_Port.GetName(), ports[0]))
+	require.NoError(t, param.Set(param.Origin_Port.GetName(), 0))
 	require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), filepath.Join(tmpPath, "origin")))
 	require.NoError(t, param.Set(param.Origin_DbLocation.GetName(), filepath.Join(t.TempDir(), "origin.sqlite")))
 	require.NoError(t, param.Set(param.Origin_TokenAudience.GetName(), ""))
-	require.NoError(t, param.Set(param.Cache_Port.GetName(), ports[1]))
+	require.NoError(t, param.Set(param.Cache_Port.GetName(), 0))
 	require.NoError(t, param.Set(param.Cache_RunLocation.GetName(), filepath.Join(tmpPath, "cache")))
 	require.NoError(t, param.Set(param.Cache_EnableEvictionMonitoring.GetName(), false))
 	require.NoError(t, param.Set(param.Cache_StorageLocation.GetName(), filepath.Join(tmpPath, "xcache-data")))
 	require.NoError(t, param.Set(param.Cache_DbLocation.GetName(), filepath.Join(t.TempDir(), "cache.sqlite")))
 	require.NoError(t, param.Set(param.Server_EnableUI.GetName(), false))
-	require.NoError(t, param.Set(param.Server_WebPort.GetName(), ports[2]))
+	require.NoError(t, param.Set(param.Server_WebPort.GetName(), 0))
 	require.NoError(t, param.Set(param.Server_DbLocation.GetName(), filepath.Join(t.TempDir(), "server.sqlite")))
 	// Set up OIDC client configuration for registry OAuth functionality
 	oidcClientIDFile := filepath.Join(tmpPath, "oidc-client-id")

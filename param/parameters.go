@@ -316,6 +316,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Registry.RequireCacheApproval": false,
 	"Registry.RequireKeyChaining": false,
 	"Registry.RequireOriginApproval": false,
+	"RuntimeDir": false,
 	"Server.AdLifetime": false,
 	"Server.AdvertisementInterval": false,
 	"Server.DbLocation": false,
@@ -642,6 +643,8 @@ func (sP StringParam) GetString() string {
 			return config.Registry.DbLocation
 		case "Registry.InstitutionsUrl":
 			return config.Registry.InstitutionsUrl
+		case "RuntimeDir":
+			return config.RuntimeDir
 		case "Server.DbLocation":
 			return config.Server.DbLocation
 		case "Server.ExternalWebUrl":
@@ -1407,6 +1410,7 @@ var allParameterNames = []string{
 	"Registry.RequireCacheApproval",
 	"Registry.RequireKeyChaining",
 	"Registry.RequireOriginApproval",
+	"RuntimeDir",
 	"Server.AdLifetime",
 	"Server.AdvertisementInterval",
 	"Server.DbLocation",
@@ -1610,6 +1614,7 @@ var (
 	Plugin_Token = StringParam{"Plugin.Token"}
 	Registry_DbLocation = StringParam{"Registry.DbLocation"}
 	Registry_InstitutionsUrl = StringParam{"Registry.InstitutionsUrl"}
+	RuntimeDir = StringParam{"RuntimeDir"}
 	Server_DbLocation = StringParam{"Server.DbLocation"}
 	Server_ExternalWebUrl = StringParam{"Server.ExternalWebUrl"}
 	Server_Hostname = StringParam{"Server.Hostname"}
