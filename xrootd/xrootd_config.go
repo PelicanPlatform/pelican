@@ -421,7 +421,7 @@ func CheckCacheXrootdEnv(server server_structs.XRootDServer, uid int, gid int) e
 		}
 	}
 
-	if param.Cache_PSSOrigin.GetString() == "" {
+	if viper.GetString("Cache.PSSOrigin") == "" {
 		return errors.New("One of Federation.DiscoveryUrl or Federation.DirectorUrl must be set to configure a cache")
 	}
 

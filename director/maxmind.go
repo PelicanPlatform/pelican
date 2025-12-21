@@ -75,17 +75,17 @@ func downloadDB(localFile string) error {
 
 	var licenseKey string
 	keyFile := param.Director_MaxMindKeyFile.GetString()
-	keyFromEnv := os.Getenv("PELICAN_MAXMINDKEY")
+	keyFromParam := param.Director_MaxMindKey.GetString()
 	if keyFile != "" {
 		contents, err := os.ReadFile(keyFile)
 		if err != nil {
 			return err
 		}
 		licenseKey = strings.TrimSpace(string(contents))
-	} else if keyFromEnv != "" {
-		licenseKey = keyFromEnv
+	} else if keyFromParam != "" {
+		licenseKey = keyFromParam
 	} else {
-		return errors.New("A MaxMind key file must be specified in the config (Director.MaxMindKeyFile), in the environment (PELICAN_DIRECTOR_MAXMINDKEYFILE), or the key must be provided via the environment variable PELICAN_MAXMINDKEY)")
+		return errors.New("A MaxMind key file must be specified in the config (Director.MaxMindKeyFile), in the environment (PELICAN_DIRECTOR_MAXMINDKEYFILE), or the key must be provided via the environment variable PELICAN_DIRECTOR_MAXMINDKEY)")
 	}
 
 	url := fmt.Sprintf(maxMindURL, licenseKey)
