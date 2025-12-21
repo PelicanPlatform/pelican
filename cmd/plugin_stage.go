@@ -231,7 +231,7 @@ func processTransferInput(reader io.Reader, mountPrefixStr string, originPrefixP
 		return nil, nil, fmt.Errorf("Failed to parse ClassAd from stdin: %v", err), 1
 	}
 	inputList := classad.EvaluateAttr("TransferInput")
-	if err != nil || inputList.IsUndefined() {
+	if inputList.IsUndefined() {
 		// No TransferInput, no need to transform therefore we exit(0)
 		return nil, nil, fmt.Errorf("No transfer input found in classad, no need to transform."), 0
 	}

@@ -553,7 +553,7 @@ func TestPluginMulti(t *testing.T) {
 	for !done {
 		select {
 		case <-fed.Ctx.Done():
-			break
+			done = true
 		case resultAd, ok := <-results:
 			if !ok {
 				done = true
@@ -622,7 +622,7 @@ func TestPluginDirectRead(t *testing.T) {
 	for !done {
 		select {
 		case <-fed.Ctx.Done():
-			break
+			done = true
 		case resultAd, ok := <-results:
 			if !ok {
 				done = true
@@ -701,7 +701,7 @@ func TestPluginCorrectStartAndEndTime(t *testing.T) {
 	for !done {
 		select {
 		case <-fed.Ctx.Done():
-			break
+			done = true
 		case resultAd, ok := <-results:
 			if !ok {
 				done = true
@@ -1124,7 +1124,7 @@ func TestPluginRecursiveDownload(t *testing.T) {
 		for !done {
 			select {
 			case <-fed.Ctx.Done():
-				break
+				done = true
 			case resultAd, ok := <-results:
 				if !ok {
 					done = true

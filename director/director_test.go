@@ -66,6 +66,7 @@ func NamespaceAdContainsPath(ns []server_structs.NamespaceAdV2, path string) boo
 
 func TestGetLinkDepth(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	tests := []struct {
 		name     string
 		filepath string
@@ -76,28 +77,34 @@ func TestGetLinkDepth(t *testing.T) {
 		{
 			name: "empty-file-prefix",
 			err:  errors.New("either filepath or prefix is an empty path"),
-		}, {
+		},
+		{
 			name: "empty-file",
 			err:  errors.New("either filepath or prefix is an empty path"),
-		}, {
+		},
+		{
 			name: "empty-prefix",
 			err:  errors.New("either filepath or prefix is an empty path"),
-		}, {
+		},
+		{
 			name:     "no-match",
 			filepath: "/foo/bar/barz.txt",
 			prefix:   "/bar",
 			err:      errors.New("filepath does not contain the prefix"),
-		}, {
+		},
+		{
 			name:     "depth-1-case",
 			filepath: "/foo/bar/barz.txt",
 			prefix:   "/foo/bar",
 			depth:    1,
-		}, {
+		},
+		{
 			name:     "depth-1-w-trailing-slash",
 			filepath: "/foo/bar/barz.txt",
 			prefix:   "/foo/bar/",
 			depth:    1,
-		}, {
+		},
+		{
 			name:     "depth-2-case",
 			filepath: "/foo/bar/barz.txt",
 			prefix:   "/foo",
@@ -187,6 +194,8 @@ func TestDirectorRegistration(t *testing.T) {
 	require.NoError(t, param.Set("Director.CacheSortMethod", "distance"))
 	require.NoError(t, param.Set("Director.StatTimeout", 300*time.Millisecond))
 	require.NoError(t, param.Set("Director.StatConcurrencyLimit", 1))
+	// Force federation discovery to run with the new config to avoid race condition
+	_, _ = config.GetFederation(ctx)
 
 	setupContext := func() (*gin.Context, *gin.Engine, *httptest.ResponseRecorder) {
 		// Setup httptest recorder and context for the the unit test
@@ -306,8 +315,8 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
 		get := serverAds.Get("https://or-url.org")
-		getAd := get.Value()
 		require.NotNil(t, get, "Coudln't find server in the director cache.")
+		getAd := get.Value()
 		assert.Equal(t, getAd.Name, ad.Name)
 		require.Len(t, getAd.NamespaceAds, 1)
 		assert.Equal(t, getAd.NamespaceAds[0].Path, "/foo/bar")
@@ -346,8 +355,8 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
 		get := serverAds.Get("https://or-url.org")
-		getAd := get.Value()
 		require.NotNil(t, get, "Coudln't find server in the director cache.")
+		getAd := get.Value()
 		assert.Equal(t, getAd.Name, ad.Name)
 		require.Len(t, getAd.NamespaceAds, 1)
 		assert.Equal(t, getAd.NamespaceAds[0].Path, "/foo/bar")
@@ -990,8 +999,8 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
 		get := serverAds.Get("https://or-url.org")
-		getAd := get.Value()
 		require.NotNil(t, get, "Coudln't find server in the director cache.")
+		getAd := get.Value()
 		assert.Equal(t, ad.Version, getAd.Version)
 		teardown()
 
@@ -1026,8 +1035,8 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
 		get := serverAds.Get("https://or-url.org")
-		getAd := get.Value()
 		require.NotNil(t, get, "Coudln't find server in the director cache.")
+		getAd := get.Value()
 		assert.Equal(t, "7.0.0", getAd.Version)
 		teardown()
 	})
@@ -1065,8 +1074,8 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
 		get := serverAds.Get("https://or-url.org")
-		getAd := get.Value()
 		require.NotNil(t, get, "Coudln't find server in the director cache.")
+		getAd := get.Value()
 		assert.Equal(t, "unknown", getAd.Version)
 		teardown()
 	})
@@ -1100,8 +1109,8 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
 		get := serverAds.Get("https://or-url.org")
-		getAd := get.Value()
 		require.NotNil(t, get, "Coudln't find server in the director cache.")
+		getAd := get.Value()
 		assert.Equal(t, "7.0.0", getAd.Version)
 		teardown()
 
@@ -1141,8 +1150,8 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
 		get := serverAds.Get("https://or-url.org")
-		getAd := get.Value()
 		require.NotNil(t, get, "Coudln't find server in the director cache.")
+		getAd := get.Value()
 		assert.Equal(t, "7.0.0", getAd.Version)
 		teardown()
 	})
@@ -1596,7 +1605,9 @@ func TestDiscoverOriginCache(t *testing.T) {
 
 	// Set up the mock federation, which must exist for the auth handler to fetch federation keys
 	test_utils.MockFederationRoot(t, nil, &pKeySet)
-	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
 
 	// Isolate the test so it doesn't use system config
 	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
@@ -2010,7 +2021,10 @@ func TestRedirects(t *testing.T) {
 		serverAds.DeleteAll()
 		serverAds.Stop()
 	})
-	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
 	t.Cleanup(func() {
 		server_utils.ResetTestState()
 	})
@@ -2300,7 +2314,8 @@ func TestGetHealthTestFile(t *testing.T) {
 	gEngine := gin.Default()
 	router := gEngine.Group("/")
 	ctx := context.Background()
-	ctx, cancel, _ := test_utils.TestContext(ctx, t)
+	ctx, cancel, egrp := test_utils.TestContext(ctx, t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 	RegisterDirectorAPI(ctx, router)
 
@@ -2437,6 +2452,7 @@ func TestGetHealthTestFile(t *testing.T) {
 
 func TestGetRedirectUrl(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	adFromTopo := server_structs.ServerAd{
 		URL: url.URL{
 			Host: "fake-topology-ad.org:8443",
