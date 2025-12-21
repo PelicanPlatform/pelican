@@ -77,6 +77,10 @@ func TestHTCondorPlugin(t *testing.T) {
 	}
 	require.NoError(t, os.WriteFile(signingKeyPath, key, 0600))
 
+	// Set XRD_PLUGINCONFDIR so XRootD can load the pelican protocol handler
+	// This allows the cache to handle pelican:// URLs
+	t.Setenv("XRD_PLUGINCONFDIR", "/Users/bbockelm/projects/xrdcl-curl/build/release_dir/etc/xrootd/client.plugins.d/")
+
 	// Start a Pelican data federation
 	t.Log("Starting Pelican data federation...")
 	fed := fed_test_utils.NewFedTest(t, `
