@@ -266,8 +266,10 @@ func TestGetRuntimeConfigurable(t *testing.T) {
 
 func TestCallbackRegistration(t *testing.T) {
 	// Reset before test
-	Reset()
-	defer Reset()
+	require.NoError(t, Reset())
+	defer func() {
+		require.NoError(t, Reset())
+	}()
 
 	// Track callback invocations
 	callbackInvoked := make(chan bool, 1)
@@ -293,8 +295,10 @@ func TestCallbackRegistration(t *testing.T) {
 
 func TestCallbackWithConfigChanges(t *testing.T) {
 	// Reset before test
-	Reset()
-	defer Reset()
+	require.NoError(t, Reset())
+	defer func() {
+		require.NoError(t, Reset())
+	}()
 
 	// Track callback invocations with actual config values
 	callbackInvoked := make(chan bool, 1)

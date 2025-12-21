@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
@@ -19,13 +21,10 @@
 package xrootd
 
 import (
-	"bytes"
 	"context"
 	"testing"
 	"time"
 
-	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -33,147 +32,75 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
-// Mock launcher for testing
-type mockLauncher struct {
-	name    string
-	killSig int
-	killErr error
-}
+type mockLauncher struct{}
 
-func (m *mockLauncher) Name() string {
-	return m.name
-}
-
-func (m *mockLauncher) Launch(ctx context.Context) (context.Context, int, error) {
-	return ctx, 0, nil
-}
-
+func (m *mockLauncher) Name() string                                             { return "mock" }
+func (m *mockLauncher) Launch(ctx context.Context) (context.Context, int, error) { return ctx, 0, nil }
 func (m *mockLauncher) KillFunc() func(pid int, sig int) error {
-	return func(pid int, sig int) error {
-		m.killSig = sig
-		return m.killErr
+	return func(pid int, sig int) error { return nil }
+}
+
+func TestXrootdLoggingCallbackRestartsAndUpdatesPids(t *testing.T) {
+	param.ClearCallbacks()
+	ClearXrootdDaemons()
+	restartInfos = []restartInfo{
+		{launchers: []daemon.Launcher{&mockLauncher{}}, isCache: true, pids: []int{10}},
+		{launchers: []daemon.Launcher{&mockLauncher{}}, isCache: false, pids: []int{20}},
 	}
-}
+	t.Cleanup(func() { restartInfos = nil })
 
-func TestXrootdLoggingCallback(t *testing.T) {
-	// Reset and clear state for clean test
-	viper.Reset()
-	defer viper.Reset()
-	ClearXrootdDaemons()
-	param.ClearCallbacks()
-	time.Sleep(100 * time.Millisecond) // Wait for any pending callbacks from other tests
+	restartCalled := make(chan []int, 1)
+	restartXrootdFn = func(ctx context.Context, oldPids []int) ([]int, error) {
+		if oldPids == nil {
+			oldPids = collectTrackedPIDs(restartInfos)
+		}
+		restartCalled <- append([]int(nil), oldPids...)
+		return []int{111, 222}, nil
+	}
+	t.Cleanup(func() { restartXrootdFn = RestartXrootd })
 
-	// Set initial xrootd logging config
 	require.NoError(t, param.Set("Logging.Origin.Cms", "info"))
-	require.NoError(t, param.Set("Logging.Cache.Http", "warn"))
-
-	// Create mock launchers
-	mockOrigin := &mockLauncher{name: "xrootd.origin"}
-	mockCache := &mockLauncher{name: "xrootd.cache"}
-
-	launchers := []daemon.Launcher{mockOrigin, mockCache}
-	pids := []int{1234, 5678}
-
-	// Register the daemons
-	RegisterXrootdDaemons(launchers, pids)
-
-	// Register the logging callback
-	RegisterXrootdLoggingCallback()
-
-	// Capture log output to verify warning message
-	var logBuffer bytes.Buffer
-	origOutput := log.StandardLogger().Out
-	log.SetOutput(&logBuffer)
-	defer log.SetOutput(origOutput)
-
-	// Change xrootd logging config
-	require.NoError(t, param.Set("Logging.Origin.Cms", "debug"))
-
-	// Give callback time to execute
-	time.Sleep(300 * time.Millisecond)
-
-	// Verify warning message was logged
-	logOutput := logBuffer.String()
-	assert.Contains(t, logOutput, "XRootD logging configuration changed", "Should log warning about config change")
-	assert.Contains(t, logOutput, "Server restart required", "Should indicate restart is required")
-
-	// Verify no signals were sent (since we're not actually restarting)
-	assert.Equal(t, 0, mockOrigin.killSig, "No signal should be sent to origin")
-	assert.Equal(t, 0, mockCache.killSig, "No signal should be sent to cache")
-}
-
-func TestXrootdLoggingCallbackNoChange(t *testing.T) {
-	// Reset and clear state for clean test
-	viper.Reset()
-	defer viper.Reset()
-	ClearXrootdDaemons()
-	param.ClearCallbacks()
-	time.Sleep(100 * time.Millisecond) // Wait for any pending callbacks from other tests
-
-	// Set initial non-xrootd logging config BEFORE registering callback
-	require.NoError(t, param.Set("Logging.Level", "info"))
-
-	// Create mock launcher
-	mockOrigin := &mockLauncher{name: "xrootd.origin"}
-
-	launchers := []daemon.Launcher{mockOrigin}
-	pids := []int{1234}
-
-	// Register the daemons
-	RegisterXrootdDaemons(launchers, pids)
-
-	// Register the logging callback
-	RegisterXrootdLoggingCallback()
-
-	// NOW change the non-xrootd logging parameter (after callback registration)
-	require.NoError(t, param.Set("Logging.Level", "debug"))
-
-	// Give callback time to execute
-	time.Sleep(300 * time.Millisecond)
-
-	// Verify no signal was sent
-	assert.Equal(t, 0, mockOrigin.killSig, "No signal should be sent for non-xrootd logging changes")
-}
-
-func TestXrootdLoggingCallbackCacheParams(t *testing.T) {
-	// Reset and clear state for clean test
-	viper.Reset()
-	defer viper.Reset()
-	ClearXrootdDaemons()
-	param.ClearCallbacks()
-	time.Sleep(100 * time.Millisecond) // Wait for any pending callbacks from other tests
-
-	// Set initial cache logging config
 	require.NoError(t, param.Set("Logging.Cache.Pfc", "info"))
 
-	// Create mock launcher
-	mockCache := &mockLauncher{name: "xrootd.cache"}
-
-	launchers := []daemon.Launcher{mockCache}
-	pids := []int{5678}
-
-	// Register the daemons
-	RegisterXrootdDaemons(launchers, pids)
-
-	// Register the logging callback
 	RegisterXrootdLoggingCallback()
 
-	// Capture log output to verify warning message
-	var logBuffer bytes.Buffer
-	origOutput := log.StandardLogger().Out
-	log.SetOutput(&logBuffer)
-	defer log.SetOutput(origOutput)
-
-	// Change cache xrootd logging config
 	require.NoError(t, param.Set("Logging.Cache.Pfc", "debug"))
 
-	// Give callback time to execute
-	time.Sleep(300 * time.Millisecond)
+	var seenOld []int
+	require.Eventually(t, func() bool {
+		select {
+		case seenOld = <-restartCalled:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 25*time.Millisecond)
 
-	// Verify warning message was logged
-	logOutput := logBuffer.String()
-	assert.Contains(t, logOutput, "XRootD logging configuration changed", "Should log warning about config change")
-	
-	// Verify no signals were sent
-	assert.Equal(t, 0, mockCache.killSig, "No signal should be sent to cache")
+	assert.ElementsMatch(t, []int{10, 20}, seenOld)
+}
+
+func TestXrootdLoggingCallbackIgnoresNonXrootdLogging(t *testing.T) {
+	param.ClearCallbacks()
+	ClearXrootdDaemons()
+	restartInfos = []restartInfo{{launchers: []daemon.Launcher{&mockLauncher{}}, isCache: false, pids: []int{30}}}
+	t.Cleanup(func() { restartInfos = nil })
+
+	restartCalled := make(chan struct{}, 1)
+	restartXrootdFn = func(ctx context.Context, oldPids []int) ([]int, error) {
+		restartCalled <- struct{}{}
+		return []int{333}, nil
+	}
+	t.Cleanup(func() { restartXrootdFn = RestartXrootd })
+
+	require.NoError(t, param.Set("Logging.Level", "info"))
+	RegisterXrootdLoggingCallback()
+
+	require.NoError(t, param.Set("Logging.Level", "debug"))
+
+	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-restartCalled:
+		t.Fatalf("unexpected restart for non-xrootd logging change")
+	default:
+	}
 }

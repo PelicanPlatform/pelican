@@ -244,6 +244,7 @@ description: |+
 type: string
 default: error
 components: ["origin"]
+runtime_configurable: true
 ---
 name: Logging.Origin.Scitokens
 description: |+
@@ -255,6 +256,7 @@ description: |+
 type: string
 default: fatal
 components: ["origin"]
+runtime_configurable: true
 ---
 name: Logging.Origin.Xrd
 description: |+
@@ -266,6 +268,7 @@ description: |+
 type: string
 default: error
 components: ["origin"]
+runtime_configurable: true
 ---
 name: Logging.Origin.Xrootd
 description: |+
@@ -279,6 +282,7 @@ description: |+
 type: string
 default: info
 components: ["origin"]
+runtime_configurable: true
 ---
 name: Logging.Origin.Http
 description: |+
@@ -291,6 +295,7 @@ description: |+
 type: string
 default: error
 components: ["origin"]
+runtime_configurable: true
 ---
 name: Logging.Origin.Ofs
 description: |+
@@ -302,6 +307,7 @@ description: |+
 type: string
 default: error
 components: ["origin"]
+runtime_configurable: true
 ---
 name: Logging.Origin.Oss
 description: |+
@@ -313,6 +319,7 @@ description: |+
 type: string
 default: error
 components: ["origin"]
+runtime_configurable: true
 ---
 name: Logging.Cache.Http
 description: |+
@@ -324,6 +331,7 @@ description: |+
 type: string
 default: error
 components: ["cache"]
+runtime_configurable: true
 ---
 name: Logging.Cache.Ofs
 description: |+
@@ -336,6 +344,7 @@ description: |+
 type: string
 default: error
 components: ["cache"]
+runtime_configurable: true
 ---
 name: Logging.Cache.Pfc
 description: |+
@@ -348,6 +357,7 @@ description: |+
 type: string
 default: info
 components: ["cache"]
+runtime_configurable: true
 ---
 name: Logging.Cache.Pss
 description: |+
@@ -360,6 +370,7 @@ description: |+
 type: string
 default: error
 components: ["cache"]
+runtime_configurable: true
 ---
 name: Logging.Cache.PssSetOpt
 description: |+
@@ -371,6 +382,7 @@ description: |+
 type: string
 default: error
 components: ["cache"]
+runtime_configurable: true
 ---
 name: Logging.Cache.Scitokens
 description: |+
@@ -382,6 +394,7 @@ description: |+
 type: string
 default: fatal
 components: ["cache"]
+runtime_configurable: true
 ---
 name: Logging.Cache.Xrd
 description: |+
@@ -393,6 +406,7 @@ description: |+
 type: string
 default: error
 components: ["cache"]
+runtime_configurable: true
 ---
 name: Logging.Cache.Xrootd
 description: |+
@@ -405,6 +419,7 @@ description: |+
 type: string
 default: error
 components: ["cache"]
+runtime_configurable: true
 ---
 ############################
 # Federation-Level Configs #
@@ -1548,6 +1563,16 @@ description: |+
   The cache's configured URL, as reported to XRootD. This is the file transfer endpoint for the cache.
 type: url
 default: https://${Server.Hostname}:${Cache.Port}
+components: ["cache"]
+---
+name: Cache.PSSOrigin
+description: |+
+  The URL provided to the xrootd daemon to fetch information from the data federation
+
+  Normally derived automatically from federation discovery and not intended for manual configuration.
+type: url
+default: none
+hidden: true
 components: ["cache"]
 ---
 name: Cache.Port
@@ -3094,6 +3119,17 @@ description: |+
   A URL pointing toward the XRootD instance's Local Monitoring Host.
 type: url
 default: none
+components: ["cache", "origin"]
+---
+name: Xrootd.LocalMonitoringPort
+description: |+
+  XRootD sends the pelican process monitoring information over UDP.  The port is typically
+  determined automatically based on free ports; free port search starts at 9930 by default.
+
+  Since it is automatically set, this is rarely configured by administrators.
+type: int
+default: none
+hidden: true
 components: ["cache", "origin"]
 ---
 name: Xrootd.Sitename

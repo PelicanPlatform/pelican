@@ -170,10 +170,10 @@ func decodeAndStoreConfig(v *viper.Viper) (*Config, error) {
 	}
 	oldConfig := viperConfig.Load()
 	viperConfig.Store(newConfig)
-	
+
 	// Invoke callbacks with old and new config
 	invokeCallbacks(oldConfig, newConfig)
-	
+
 	return newConfig, nil
 }
 
@@ -386,7 +386,7 @@ func ClearCallbacks() {
 func invokeCallbacks(oldConfig, newConfig *Config) {
 	callbackMux.RLock()
 	defer callbackMux.RUnlock()
-	
+
 	for _, cb := range callbacks {
 		// Call each callback in a goroutine to avoid blocking config updates
 		// if a callback takes time to execute

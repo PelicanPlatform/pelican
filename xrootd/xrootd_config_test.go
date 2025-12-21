@@ -28,6 +28,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +37,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
@@ -48,7 +50,7 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
-func setupXrootd(t *testing.T, ctx context.Context, server server_structs.ServerType) {
+func setupXrootd(t *testing.T, ctx context.Context, server server_structs.ServerType, egrp *errgroup.Group) {
 	tmpDir := t.TempDir()
 	server_utils.ResetTestState()
 
@@ -65,13 +67,21 @@ func setupXrootd(t *testing.T, ctx context.Context, server server_structs.Server
 	err := config.InitServer(ctx, server)
 	require.NoError(t, err)
 
+	if param.Xrootd_LocalMonitoringPort.GetInt() <= 0 {
+		require.NoError(t, SetUpMonitoring(ctx, egrp))
+	}
+
 }
 
 func TestXrootDOriginConfig(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
-	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	t.Cleanup(func() {
+		cancel()
+		require.NoError(t, egrp.Wait())
+	})
 
 	tests := []struct {
 		name            string
@@ -93,7 +103,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			defer server_utils.ResetTestState()
-			setupXrootd(t, ctx, server_structs.OriginType)
+			setupXrootd(t, ctx, server_structs.OriginType, egrp)
 
 			if tt.configKey != "" {
 				require.NoError(t, param.Set(tt.configKey, tt.configValue))
@@ -124,7 +134,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 	// Additional configuration tests
 	t.Run("TestOsdfWithXRDHOSTAndPort", func(t *testing.T) {
 		defer os.Unsetenv("XRDHOST")
-		setupXrootd(t, ctx, server_structs.OriginType)
+		setupXrootd(t, ctx, server_structs.OriginType, egrp)
 
 		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		require.NoError(t, err, "Failed to set preferred prefix to OSDF")
@@ -140,7 +150,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 
 	t.Run("TestOsdfWithXRDHOSTAndNoPort", func(t *testing.T) {
 		defer os.Unsetenv("XRDHOST")
-		setupXrootd(t, ctx, server_structs.OriginType)
+		setupXrootd(t, ctx, server_structs.OriginType, egrp)
 
 		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		require.NoError(t, err, "Failed to set preferred prefix to OSDF")
@@ -158,7 +168,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 		// We don't expect XRDHOST to be set for Pelican proper. However, if it is set,
 		// we must unset it on test failure.
 		defer os.Unsetenv("XRDHOST")
-		setupXrootd(t, ctx, server_structs.OriginType)
+		setupXrootd(t, ctx, server_structs.OriginType, egrp)
 
 		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		require.NoError(t, err, "Failed to set preferred prefix to Pelican")
@@ -177,8 +187,10 @@ func TestXrootDOriginConfig(t *testing.T) {
 func TestXrootDCacheConfig(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
+	t.Cleanup(func() {
+		cancel()
+		require.NoError(t, egrp.Wait())
+	})
 
 	dirname, err := os.MkdirTemp("", "tmpDir")
 	require.NoError(t, err)
@@ -193,6 +205,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 	err = config.InitServer(ctx, server_structs.CacheType)
 	require.NoError(t, err)
+	require.NoError(t, SetUpMonitoring(ctx, egrp))
 
 	configPath, err := ConfigXrootd(ctx, false)
 	require.NoError(t, err)
@@ -225,7 +238,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			defer server_utils.ResetTestState()
-			setupXrootd(t, ctx, server_structs.CacheType)
+			setupXrootd(t, ctx, server_structs.CacheType, egrp)
 
 			if tt.configKey != "" {
 				require.NoError(t, param.Set(tt.configKey, tt.configValue))
@@ -279,11 +292,76 @@ func TestXrootDCacheConfig(t *testing.T) {
 	})
 }
 
+func TestDurationStrToSecondsHookFuncGenerator(t *testing.T) {
+	hook := durationStrToSecondsHookFuncGenerator("XrootdOptions", "authrefreshinterval", param.Xrootd_AuthRefreshInterval.GetName(), nil)
+
+	t.Run("stringWithUnit", func(t *testing.T) {
+		data := map[string]any{"authrefreshinterval": "90s"}
+		res, err := hook(reflect.TypeOf(data), reflect.TypeOf(XrootdOptions{}), data)
+		require.NoError(t, err)
+		assert.Equal(t, 90, res.(map[string]any)["authrefreshinterval"])
+	})
+
+	t.Run("stringWithoutUnitGetsSeconds", func(t *testing.T) {
+		data := map[string]any{"authrefreshinterval": "42"}
+		res, err := hook(reflect.TypeOf(data), reflect.TypeOf(XrootdOptions{}), data)
+		require.NoError(t, err)
+		assert.Equal(t, 42, res.(map[string]any)["authrefreshinterval"])
+	})
+
+	t.Run("intValue", func(t *testing.T) {
+		data := map[string]any{"authrefreshinterval": 15}
+		res, err := hook(reflect.TypeOf(data), reflect.TypeOf(XrootdOptions{}), data)
+		require.NoError(t, err)
+		assert.Equal(t, 15, res.(map[string]any)["authrefreshinterval"])
+	})
+
+	t.Run("floatValueRoundsDownSeconds", func(t *testing.T) {
+		data := map[string]any{"authrefreshinterval": float32(2.5)}
+		res, err := hook(reflect.TypeOf(data), reflect.TypeOf(XrootdOptions{}), data)
+		require.NoError(t, err)
+		assert.Equal(t, 2, res.(map[string]any)["authrefreshinterval"])
+	})
+
+	t.Run("missingKeyReturnsUnchanged", func(t *testing.T) {
+		data := map[string]any{"other": "1m"}
+		res, err := hook(reflect.TypeOf(data), reflect.TypeOf(XrootdOptions{}), data)
+		require.NoError(t, err)
+		assert.Equal(t, data, res)
+	})
+
+	t.Run("nonTargetStructSkipsHook", func(t *testing.T) {
+		data := map[string]any{"authrefreshinterval": "30s"}
+		res, err := hook(reflect.TypeOf(data), reflect.TypeOf(CacheConfig{}), data)
+		require.NoError(t, err)
+		assert.Equal(t, data, res)
+	})
+
+	t.Run("badMapTypeErrors", func(t *testing.T) {
+		data := map[string]string{"authrefreshinterval": "30s"}
+		_, err := hook(reflect.TypeOf(data), reflect.TypeOf(XrootdOptions{}), data)
+		require.Error(t, err)
+	})
+
+	t.Run("validationApplied", func(t *testing.T) {
+		validation := func(d time.Duration, _ string) time.Duration {
+			return d + time.Second
+		}
+		validationHook := durationStrToSecondsHookFuncGenerator("XrootdOptions", "authrefreshinterval", param.Xrootd_AuthRefreshInterval.GetName(), validation)
+		data := map[string]any{"authrefreshinterval": "10s"}
+		res, err := validationHook(reflect.TypeOf(data), reflect.TypeOf(XrootdOptions{}), data)
+		require.NoError(t, err)
+		assert.Equal(t, 11, res.(map[string]any)["authrefreshinterval"])
+	})
+}
+
 func TestUpdateAuth(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
+	t.Cleanup(func() {
+		cancel()
+		require.NoError(t, egrp.Wait())
+	})
 
 	runDirname := t.TempDir()
 	configDirname := t.TempDir()
@@ -381,8 +459,10 @@ default_user = user2
 func TestCopyCertificates(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
+	t.Cleanup(func() {
+		cancel()
+		require.NoError(t, egrp.Wait())
+	})
 
 	runDirname := t.TempDir()
 	configDirname := t.TempDir()
@@ -473,8 +553,10 @@ func TestCopyCertificates(t *testing.T) {
 func TestCopyCertificatesWithPKCS11(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
+	t.Cleanup(func() {
+		cancel()
+		require.NoError(t, egrp.Wait())
+	})
 
 	server_utils.ResetTestState()
 	t.Cleanup(server_utils.ResetTestState)
@@ -668,6 +750,10 @@ func TestGenLoggingConfig(t *testing.T) {
 func TestAutoShutdownOnStaleAuthfile(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	t.Cleanup(func() {
+		cancel()
+		require.NoError(t, egrp.Wait())
+	})
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	dir := t.TempDir()
@@ -722,9 +808,7 @@ func TestAutoShutdownOnStaleAuthfile(t *testing.T) {
 
 	select {
 	case <-testShutdown:
-		// stop all background watchers immediately
 		cancel()
-		require.NoError(t, egrp.Wait())
 		return
 	case <-time.After(3 * time.Second):
 		t.Fatal("expected shutdown due to stale Authfile, but none observed within timeout")

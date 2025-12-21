@@ -148,17 +148,17 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		log.Infoln("Origin startup complete on port", port)
 	}
 
-	// Store restart information before launching
-	xrootd.StoreRestartInfo(launchers, egrp, portStartCallback, false, useCMSD, privileged)
-
 	pids, err := xrootd.LaunchDaemons(ctx, launchers, egrp, portStartCallback)
 	if err != nil {
 		return nil, err
 	}
 	originServer.SetPids(pids)
-	
+
+	// Store restart information after PIDs are known
+	xrootd.StoreRestartInfo(launchers, pids, egrp, portStartCallback, false, useCMSD, privileged)
+
 	// Register callback for xrootd logging configuration changes
-	// This must be done after LaunchDaemons so the daemons are registered
+	// This must be done after LaunchDaemons so the server has PIDs
 	xrootd.RegisterXrootdLoggingCallback()
 
 	// LaunchOriginDaemons may edit the viper config; these launched goroutines are purposely

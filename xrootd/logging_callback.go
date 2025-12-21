@@ -19,108 +19,81 @@
 package xrootd
 
 import (
-	"sync"
+	"context"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/param"
 )
 
 var (
-	// Track running xrootd daemons for potential restart
-	xrootdDaemons   []xrootdDaemonInfo
-	xrootdDaemonsMu sync.RWMutex
+	// restartXrootdFn allows tests to stub restart behavior.
+	restartXrootdFn = RestartXrootd
+
+	xrootdCallbackRegd bool
 )
 
-type xrootdDaemonInfo struct {
-	launcher daemon.Launcher
-	pid      int
+// RegisterXrootdLoggingCallback installs the callback (once) to trigger a restart
+// when any XRootD logging parameter changes.
+func RegisterXrootdLoggingCallback() {
+	if xrootdCallbackRegd {
+		return
+	}
+	param.RegisterCallback("xrootd-logging", handleXrootdLoggingChange)
+	xrootdCallbackRegd = true
 }
 
-// RegisterXrootdDaemons registers the xrootd daemon launchers and PIDs
-// so they can be restarted if xrootd logging configuration changes.
-func RegisterXrootdDaemons(launchers []daemon.Launcher, pids []int) {
-	xrootdDaemonsMu.Lock()
-	defer xrootdDaemonsMu.Unlock()
+func handleXrootdLoggingChange(oldConfig, newConfig *param.Config) {
+	if oldConfig == nil || newConfig == nil {
+		return
+	}
 
-	xrootdDaemons = make([]xrootdDaemonInfo, len(launchers))
-	for i, launcher := range launchers {
-		xrootdDaemons[i] = xrootdDaemonInfo{
-			launcher: launcher,
-			pid:      pids[i],
-		}
+	restartOrigin, restartCache := detectLoggingChange(oldConfig, newConfig)
+	if !restartOrigin && !restartCache {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), param.Xrootd_ShutdownTimeout.GetDuration()+time.Minute)
+	defer cancel()
+
+	_, err := restartXrootdFn(ctx, nil)
+	if err != nil {
+		log.WithError(err).Error("Failed to restart XRootD after logging configuration change")
+		return
 	}
 }
 
-// RegisterXrootdLoggingCallback registers a callback to restart xrootd
-// when xrootd-specific logging parameters change.
-//
-// NOTE: This is currently a placeholder. XRootD does not support configuration
-// reload via SIGHUP. To properly implement this feature, we would need to:
-// 1. Send SIGTERM to tear down the current XRootD processes
-// 2. Wait for them to exit cleanly
-// 3. Regenerate the XRootD configuration files with new logging settings
-// 4. Relaunch the XRootD daemons with the new configuration
-//
-// This is a substantial undertaking that requires careful coordination with
-// the daemon lifecycle management and server state. For now, XRootD logging
-// configuration changes require a full server restart.
-func RegisterXrootdLoggingCallback() {
-	param.RegisterCallback("xrootd-logging", func(oldConfig, newConfig *param.Config) {
-		if oldConfig == nil || newConfig == nil {
-			return
-		}
+func detectLoggingChange(oldConfig, newConfig *param.Config) (originChanged, cacheChanged bool) {
+	// Origin logging parameters
+	if oldConfig.Logging.Origin.Cms != newConfig.Logging.Origin.Cms ||
+		oldConfig.Logging.Origin.Http != newConfig.Logging.Origin.Http ||
+		oldConfig.Logging.Origin.Ofs != newConfig.Logging.Origin.Ofs ||
+		oldConfig.Logging.Origin.Oss != newConfig.Logging.Origin.Oss ||
+		oldConfig.Logging.Origin.Scitokens != newConfig.Logging.Origin.Scitokens ||
+		oldConfig.Logging.Origin.Xrd != newConfig.Logging.Origin.Xrd ||
+		oldConfig.Logging.Origin.Xrootd != newConfig.Logging.Origin.Xrootd {
+		originChanged = true
+	}
 
-		// Check if any xrootd logging parameters changed
-		needsRestart := false
+	// Cache logging parameters
+	if oldConfig.Logging.Cache.Http != newConfig.Logging.Cache.Http ||
+		oldConfig.Logging.Cache.Ofs != newConfig.Logging.Cache.Ofs ||
+		oldConfig.Logging.Cache.Pfc != newConfig.Logging.Cache.Pfc ||
+		oldConfig.Logging.Cache.Pss != newConfig.Logging.Cache.Pss ||
+		oldConfig.Logging.Cache.PssSetOpt != newConfig.Logging.Cache.PssSetOpt ||
+		oldConfig.Logging.Cache.Scitokens != newConfig.Logging.Cache.Scitokens ||
+		oldConfig.Logging.Cache.Xrd != newConfig.Logging.Cache.Xrd ||
+		oldConfig.Logging.Cache.Xrootd != newConfig.Logging.Cache.Xrootd {
+		cacheChanged = true
+	}
 
-		// Origin logging parameters
-		if oldConfig.Logging.Origin.Cms != newConfig.Logging.Origin.Cms ||
-			oldConfig.Logging.Origin.Http != newConfig.Logging.Origin.Http ||
-			oldConfig.Logging.Origin.Ofs != newConfig.Logging.Origin.Ofs ||
-			oldConfig.Logging.Origin.Oss != newConfig.Logging.Origin.Oss ||
-			oldConfig.Logging.Origin.Scitokens != newConfig.Logging.Origin.Scitokens ||
-			oldConfig.Logging.Origin.Xrd != newConfig.Logging.Origin.Xrd ||
-			oldConfig.Logging.Origin.Xrootd != newConfig.Logging.Origin.Xrootd {
-			needsRestart = true
-		}
-
-		// Cache logging parameters
-		if oldConfig.Logging.Cache.Http != newConfig.Logging.Cache.Http ||
-			oldConfig.Logging.Cache.Ofs != newConfig.Logging.Cache.Ofs ||
-			oldConfig.Logging.Cache.Pfc != newConfig.Logging.Cache.Pfc ||
-			oldConfig.Logging.Cache.Pss != newConfig.Logging.Cache.Pss ||
-			oldConfig.Logging.Cache.PssSetOpt != newConfig.Logging.Cache.PssSetOpt ||
-			oldConfig.Logging.Cache.Scitokens != newConfig.Logging.Cache.Scitokens ||
-			oldConfig.Logging.Cache.Xrd != newConfig.Logging.Cache.Xrd ||
-			oldConfig.Logging.Cache.Xrootd != newConfig.Logging.Cache.Xrootd {
-			needsRestart = true
-		}
-
-		if needsRestart {
-			log.Warn("XRootD logging configuration changed. Server restart required for changes to take effect.")
-			// TODO: Implement proper XRootD restart mechanism
-			// restartXrootdDaemons()
-		}
-	})
+	return
 }
 
-// TODO: Implement restartXrootdDaemons to properly tear down and relaunch XRootD
-// restartXrootdDaemons would need to:
-// 1. Send SIGTERM to all XRootD processes
-// 2. Wait for graceful shutdown (with timeout)
-// 3. Regenerate configuration files with new logging settings (call ConfigXrootd)
-// 4. Relaunch daemons with new configuration
-// 5. Update registered daemon info with new PIDs
-//
-// This requires significant refactoring to make the configuration and launch
-// process repeatable and coordinated with the server lifecycle.
-
-// ClearXrootdDaemons clears the registered xrootd daemons.
+// ClearXrootdDaemons clears registered servers and resets the logging callback.
 // This is primarily intended for testing.
 func ClearXrootdDaemons() {
-	xrootdDaemonsMu.Lock()
-	defer xrootdDaemonsMu.Unlock()
-	xrootdDaemons = nil
+	xrootdCallbackRegd = false
+	restartXrootdFn = RestartXrootd
 }

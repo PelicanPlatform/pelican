@@ -44,19 +44,23 @@ type restartInfo struct {
 	isCache    bool
 	useCMSD    bool
 	privileged bool
+	pids       []int
 }
 
 var (
 	// restartMutex ensures only one restart operation happens at a time
 	restartMutex sync.Mutex
 
+	// restartInfosMu guards access to restartInfos so callers can update PID snapshots.
+	restartInfosMu sync.RWMutex
+
 	// Store launcher information for restart; one entry per server role (origin/cache)
 	restartInfos []restartInfo
 )
 
 // StoreRestartInfo stores the information needed for restarting XRootD
-// This should be called during initial launch
-func StoreRestartInfo(launchers []daemon.Launcher, egrp *errgroup.Group, callback func(int), cache bool, cmsd bool, priv bool) {
+// This should be called during initial launch after PIDs are known.
+func StoreRestartInfo(launchers []daemon.Launcher, pids []int, egrp *errgroup.Group, callback func(int), cache bool, cmsd bool, priv bool) {
 	info := restartInfo{
 		launchers:  launchers,
 		egrp:       egrp,
@@ -64,9 +68,11 @@ func StoreRestartInfo(launchers []daemon.Launcher, egrp *errgroup.Group, callbac
 		isCache:    cache,
 		useCMSD:    cmsd,
 		privileged: priv,
+		pids:       append([]int(nil), pids...),
 	}
 
 	// Replace any existing entry for the same server role; otherwise append.
+	restartInfosMu.Lock()
 	replaced := false
 	for idx := range restartInfos {
 		if restartInfos[idx].isCache == cache {
@@ -79,6 +85,7 @@ func StoreRestartInfo(launchers []daemon.Launcher, egrp *errgroup.Group, callbac
 	if !replaced {
 		restartInfos = append(restartInfos, info)
 	}
+	restartInfosMu.Unlock()
 }
 
 // RestartXrootd gracefully restarts the XRootD server processes
@@ -106,12 +113,22 @@ func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error
 		metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusShuttingDown, "CMSD restart in progress")
 	}
 
+	restartInfosMu.RLock()
 	if len(restartInfos) == 0 {
+		restartInfosMu.RUnlock()
 		return nil, errors.New("restart requested before storing launcher information")
 	}
 
 	storedInfos := make([]restartInfo, len(restartInfos))
 	copy(storedInfos, restartInfos)
+	restartInfosMu.RUnlock()
+
+	if len(oldPids) == 0 {
+		oldPids = collectTrackedPIDs(storedInfos)
+	}
+	if len(oldPids) == 0 {
+		return nil, errors.New("restart requested but no tracked PIDs are available")
+	}
 
 	// Step 1: Gracefully shutdown existing XRootD processes
 	log.Debug("Sending SIGTERM to existing XRootD processes")
@@ -184,6 +201,7 @@ func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error
 		}
 
 		info.launchers = newLaunchers
+		info.pids = append([]int(nil), pids...)
 		updatedInfos = append(updatedInfos, info)
 		newPids = append(newPids, pids...)
 
@@ -192,7 +210,9 @@ func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error
 		}
 	}
 
+	restartInfosMu.Lock()
 	restartInfos = updatedInfos
+	restartInfosMu.Unlock()
 
 	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusOK, "XRootD restart complete")
 
@@ -210,4 +230,12 @@ func RestartServer(ctx context.Context, server server_structs.XRootDServer) erro
 	}
 	server.SetPids(newPids)
 	return nil
+}
+
+func collectTrackedPIDs(infos []restartInfo) []int {
+	var pids []int
+	for _, info := range infos {
+		pids = append(pids, info.pids...)
+	}
+	return pids
 }
