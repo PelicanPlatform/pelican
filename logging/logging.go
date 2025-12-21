@@ -49,7 +49,20 @@ var (
 // Reset function intended for unit tests to be able to
 // reset log flush state.
 func ResetLogFlush() {
+	if logFHandle != nil {
+		_ = logFHandle.Close()
+		logFHandle = nil
+	}
+	bufferedHook.Store(nil)
 	flushOnce = sync.Once{}
+	removeBufferedHook()
+	log.SetOutput(os.Stderr)
+	log.SetFormatter(&log.TextFormatter{
+		FullTimestamp:          true,
+		ForceColors:            term.IsTerminal(log.StandardLogger().Out),
+		DisableColors:          false,
+		DisableLevelTruncation: true,
+	})
 }
 
 func NewBufferedLogHook() *BufferedLogHook {
@@ -75,9 +88,19 @@ func (hook *BufferedLogHook) Levels() []log.Level {
 	return log.AllLevels
 }
 
-// removeBufferedHook removes the buffered hook (used after flushing)
+// removeBufferedHook removes the buffered hook while preserving other hooks (e.g., test hooks).
 func removeBufferedHook() {
-	log.StandardLogger().ReplaceHooks(make(log.LevelHooks))
+	cur := log.StandardLogger().Hooks
+	filtered := make(log.LevelHooks)
+	for lvl, hooks := range cur {
+		for _, h := range hooks {
+			if _, ok := h.(*BufferedLogHook); ok {
+				continue
+			}
+			filtered[lvl] = append(filtered[lvl], h)
+		}
+	}
+	log.StandardLogger().ReplaceHooks(filtered)
 }
 
 // FlushLogs flushes buffered logs and switches to direct logging

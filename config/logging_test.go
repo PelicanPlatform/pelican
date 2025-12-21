@@ -26,7 +26,6 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/writer"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -48,9 +47,11 @@ func TestLoggingFilter(t *testing.T) {
 }
 
 func TestLoggingCallback(t *testing.T) {
-	// Reset viper for clean test
-	viper.Reset()
-	defer viper.Reset()
+	// Reset for clean test
+	require.NoError(t, param.Reset())
+	t.Cleanup(func() {
+		require.NoError(t, param.Reset())
+	})
 
 	// Create a buffer to capture log output
 	var logBuffer bytes.Buffer

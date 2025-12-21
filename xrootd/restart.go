@@ -58,6 +58,14 @@ var (
 	restartInfos []restartInfo
 )
 
+// ResetRestartState clears restart tracking and callbacks for tests.
+func ResetRestartState() {
+	restartMutex = sync.Mutex{}
+	restartInfosMu = sync.RWMutex{}
+	restartInfos = nil
+	ClearXrootdDaemons()
+}
+
 // StoreRestartInfo stores the information needed for restarting XRootD
 // This should be called during initial launch after PIDs are known.
 func StoreRestartInfo(launchers []daemon.Launcher, pids []int, egrp *errgroup.Group, callback func(int), cache bool, cmsd bool, priv bool) {

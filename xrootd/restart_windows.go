@@ -45,3 +45,8 @@ func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error
 func RestartServer(ctx context.Context, server server_structs.XRootDServer) error {
 	return errors.New("XRootD restart is not supported on Windows")
 }
+
+// ResetRestartState clears restart tracking and callbacks for tests.
+func ResetRestartState() {
+	ClearXrootdDaemons()
+}
