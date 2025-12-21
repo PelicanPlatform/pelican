@@ -20,47 +20,56 @@
 
 set -e
 
-mkdir -p get_put_tmp/config
-chmod 777 get_put_tmp/config
+GET_PUT_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/pelican_get_put.XXXXXX")
+chmod 755 "$GET_PUT_ROOT"
+GET_PUT_CONFIG="$GET_PUT_ROOT/config"
+GET_PUT_RUNTIME="$GET_PUT_ROOT/runtime"
+GET_PUT_ORIGIN="$GET_PUT_ROOT/origin"
+GET_PUT_INPUT="$GET_PUT_ROOT/input.txt"
+GET_PUT_OUTPUT="$GET_PUT_ROOT/output.txt"
+GET_PUT_PUT_LOG="$GET_PUT_ROOT/putOutput.txt"
+GET_PUT_GET_LOG="$GET_PUT_ROOT/getOutput.txt"
+GET_PUT_TOKEN="$GET_PUT_ROOT/test-token.jwt"
 
-mkdir -p get_put_tmp/origin
-chmod 777 get_put_tmp/origin
+mkdir -p "$GET_PUT_CONFIG" "$GET_PUT_RUNTIME" "$GET_PUT_ORIGIN"
+chmod 755 "$GET_PUT_CONFIG" "$GET_PUT_RUNTIME" "$GET_PUT_ORIGIN"
+chown xrootd: "$GET_PUT_ORIGIN"
 
 # Create OIDC client configuration files for registry OAuth functionality
-echo "test-client-id" > get_put_tmp/config/oidc-client-id
-echo "test-client-secret" > get_put_tmp/config/oidc-client-secret
+echo "test-client-id" > "$GET_PUT_CONFIG/oidc-client-id"
+echo "test-client-secret" > "$GET_PUT_CONFIG/oidc-client-secret"
 
 # Setup env variables needed
-export PELICAN_FEDERATION_DIRECTORURL="https://$HOSTNAME:8444"
-export PELICAN_FEDERATION_REGISTRYURL="https://$HOSTNAME:8444"
 export PELICAN_TLSSKIPVERIFY=true
 export PELICAN_ORIGIN_ENABLEDIRECTREADS=true
 export PELICAN_SERVER_ENABLEUI=false
-export PELICAN_ORIGIN_RUNLOCATION=$PWD/xrootdRunLocation
-export PELICAN_CONFIGDIR=$PWD/get_put_tmp/config
-export PELICAN_SERVER_DBLOCATION=$PWD/get_put_tmp/config/test-registry.sql
-export PELICAN_OIDC_CLIENTIDFILE="$PWD/get_put_tmp/config/oidc-client-id"
-export PELICAN_OIDC_CLIENTSECRETFILE="$PWD/get_put_tmp/config/oidc-client-secret"
+export PELICAN_ORIGIN_RUNLOCATION="$GET_PUT_ROOT/xrootdRunLocation"
+export PELICAN_RUNTIMEDIR="$GET_PUT_RUNTIME"
+export PELICAN_SERVER_WEBPORT=0
+export PELICAN_ORIGIN_PORT=0
+export PELICAN_CONFIGDIR="$GET_PUT_CONFIG"
+export PELICAN_SERVER_DBLOCATION="$GET_PUT_CONFIG/test-registry.sql"
+export PELICAN_OIDC_CLIENTIDFILE="$GET_PUT_CONFIG/oidc-client-id"
+export PELICAN_OIDC_CLIENTSECRETFILE="$GET_PUT_CONFIG/oidc-client-secret"
 export PELICAN_ORIGIN_FEDERATIONPREFIX="/test"
-export PELICAN_ORIGIN_STORAGEPREFIX="$PWD/get_put_tmp/origin"
+export PELICAN_ORIGIN_STORAGEPREFIX="$GET_PUT_ORIGIN"
 
 # Function to cleanup after test ends
 cleanup() {
     local pid=$1  # Get the PID from the function argument
     echo "Cleaning up..."
-    if [ ! -z "$pid" ]; then
-    echo "Sending SIGINT to PID $pid"
-    kill -SIGINT "$pid"
+    if [ -n "$pid" ]; then
+        echo "Sending SIGINT to PID $pid"
+        kill -SIGINT "$pid" 2>/dev/null || true
     else
     echo "No PID provided for cleanup."
     fi
 
     # Clean up temporary files
-    rm -rf get_put_tmp
-    rm -rf xrootdRunLocation
+    if [ -n "${GET_PUT_ROOT:-}" ]; then
+        rm -rf "$GET_PUT_ROOT"
+    fi
 
-    unset PELICAN_FEDERATION_DIRECTORURL
-    unset PELICAN_FEDERATION_REGISTRYURL
     unset PELICAN_TLSSKIPVERIFY
     unset PELICAN_ORIGIN_FEDERATIONPREFIX
     unset PELICAN_ORIGIN_STORAGEPREFIX
@@ -68,10 +77,22 @@ cleanup() {
     unset PELICAN_OIDC_CLIENTIDFILE
     unset PELICAN_OIDC_CLIENTSECRETFILE
     unset PELICAN_ORIGIN_ENABLEDIRECTREADS
+    unset PELICAN_RUNTIMEDIR
+    unset PELICAN_SERVER_WEBPORT
+    unset PELICAN_ORIGIN_PORT
+    unset GET_PUT_ROOT
+    unset GET_PUT_CONFIG
+    unset GET_PUT_RUNTIME
+    unset GET_PUT_ORIGIN
+    unset GET_PUT_INPUT
+    unset GET_PUT_OUTPUT
+    unset GET_PUT_PUT_LOG
+    unset GET_PUT_GET_LOG
+    unset GET_PUT_TOKEN
 }
 
 # Make a file to use for testing
-echo "This is some random content in the random file" > ./get_put_tmp/input.txt
+echo "This is some random content in the random file" > "$GET_PUT_INPUT"
 
 if [ ! -f ./pelican ]; then
   echo "Pelican executable does not exist in PWD. Exiting.."
@@ -79,37 +100,69 @@ if [ ! -f ./pelican ]; then
 fi
 
 # Run federation in the background
-federationServe="./pelican serve --module director --module registry --module origin -d"
-$federationServe &
+./pelican serve --module director --module registry --module origin -d &
 pid_federationServe=$!
 
 # Setup trap with the PID as an argument to the cleanup function
-trap 'cleanup $pid_federationServe' EXIT
+trap_cleanup() {
+    cleanup "$pid_federationServe"
+}
+trap trap_cleanup EXIT
 
-# Give the federation time to spin up:
-API_URL="https://$HOSTNAME:8444/api/v1.0/health"
-DESIRED_RESPONSE="HTTP/2 200"
+# Wait for the address file to be created so we can discover the actual ports
+ADDRESS_FILE="${PELICAN_RUNTIMEDIR%/}/pelican.addresses"
+TOTAL_WAIT=0
+echo "Waiting for address file: $ADDRESS_FILE"
+while [ ! -f "$ADDRESS_FILE" ]; do
+    if ! kill -0 "${pid_federationServe:-0}" 2>/dev/null; then
+        echo "Pelican process exited before address file was created"
+        echo "TEST FAILED"
+        unset pid_federationServe
+        exit 1
+    fi
+    sleep 0.5
+    TOTAL_WAIT=$((TOTAL_WAIT + 1))
+    if [ "$TOTAL_WAIT" -gt 40 ]; then
+        echo "Address file not created after 20 seconds, exiting..."
+        echo "TEST FAILED"
+        exit 1
+    fi
+done
+
+# shellcheck source=/dev/null
+source "$ADDRESS_FILE"
+if [ -z "${SERVER_EXTERNAL_WEB_URL:-}" ]; then
+    echo "Address file missing SERVER_EXTERNAL_WEB_URL"
+    exit 1
+fi
+
+DISCOVERY_HOSTPORT="${SERVER_EXTERNAL_WEB_URL#https://}"
+DISCOVERY_HOSTPORT="${DISCOVERY_HOSTPORT#http://}"
+
+# Give the federation time to spin up using the discovered address
+API_URL="$SERVER_EXTERNAL_WEB_URL/api/v1.0/health"
+DESIRED_RESPONSE="200"
 
 # Function to check if the response indicates all servers are running
 check_response() {
-    RESPONSE=$(curl -k -s -I -X GET "$API_URL" \
-                 -H "Content-Type: application/json") \
+    local response
+    response=$(curl -m 10 -k -s -o /dev/null -w "%{http_code}" -X GET "$API_URL" \
+                 -H "Content-Type: application/json")
 
-    # Check if the response matches the desired output
-    if echo "$RESPONSE" | grep -q "$DESIRED_RESPONSE"; then
-        echo "Desired response received: $RESPONSE"
+    if [ "$response" = "$DESIRED_RESPONSE" ]; then
+        echo "Desired response received: $response"
         return 0
-    else
-        echo "Waiting for desired response..."
-        return 1
     fi
+
+    echo "Waiting for desired response..."
+    return 1
 }
 
 # We don't want to do this loop for too long, indicates there is an error
 TOTAL_SLEEP_TIME=0
 
 # Loop until director, origin, and registry are running
-while check_response; [ $? -ne 0 ]
+until check_response
 do
     sleep .5
     TOTAL_SLEEP_TIME=$((TOTAL_SLEEP_TIME + 1))
@@ -123,43 +176,43 @@ do
 done
 
 # Make a token to be used (now that federation is running)
-./pelican token create pelican://$HOSTNAME:8444/test --read --write --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:8444" --subject "origin"  --profile "wlcg" --lifetime 60 > get_put_tmp/test-token.jwt
+./pelican token create "pelican://$DISCOVERY_HOSTPORT/test" --read --write --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "$SERVER_EXTERNAL_WEB_URL" --subject "origin"  --profile "wlcg" --lifetime 60 > "$GET_PUT_TOKEN"
 
 echo "Token created"
-cat get_put_tmp/test-token.jwt
+cat "$GET_PUT_TOKEN"
 
 # Run pelican object put
-./pelican object put ./get_put_tmp/input.txt pelican://$HOSTNAME:8444/test/input.txt -d -t get_put_tmp/test-token.jwt -L get_put_tmp/putOutput.txt
+./pelican object put "$GET_PUT_INPUT" "pelican://$DISCOVERY_HOSTPORT/test/input.txt" -d -t "$GET_PUT_TOKEN" -L "$GET_PUT_PUT_LOG"
 
 # Check output of command.  Note we can accept either
 # 200 (old, incorrect response from XRootD but we accept it) or 201 (Created; correct)
-if grep -q "Dumping response: HTTP/1.1 20" get_put_tmp/putOutput.txt; then
+if grep -q "Dumping response: HTTP/1.1 20" "$GET_PUT_PUT_LOG"; then
     echo "Uploaded bytes successfully!"
 else
     echo "Did not upload correctly"
-    cat get_put_tmp/putOutput.txt
+    cat "$GET_PUT_PUT_LOG"
     exit 1
 fi
 
-./pelican object get pelican://$HOSTNAME:8444/test/input.txt get_put_tmp/output.txt -d -t get_put_tmp/test-token.jwt -L get_put_tmp/getOutput.txt
+./pelican object get "pelican://$DISCOVERY_HOSTPORT/test/input.txt" "$GET_PUT_OUTPUT" -d -t "$GET_PUT_TOKEN" -L "$GET_PUT_GET_LOG"
 
 # Check output of command
-if grep -q "HTTP Transfer was successful" get_put_tmp/getOutput.txt; then
+if grep -q "HTTP Transfer was successful" "$GET_PUT_GET_LOG"; then
     echo "Downloaded bytes successfully!"
 else
     echo "Did not download correctly"
-    cat get_put_tmp/getOutput.txt
+    cat "$GET_PUT_GET_LOG"
     exit 1
 fi
 
-if grep -q "This is some random content in the random file" get_put_tmp/output.txt; then
+if grep -q "This is some random content in the random file" "$GET_PUT_OUTPUT"; then
     echo "Content matches the uploaded file!"
 else
     echo "Did not download correctly, content in downloaded file is different from the uploaded file"
     echo "Contents of the downloaded file:"
-    cat get_put_tmp/output.txt
+    cat "$GET_PUT_OUTPUT"
     echo "Contents of uploaded file:"
-    cat get_put_tmp/input.txt
+    cat "$GET_PUT_INPUT"
     exit 1
 fi
 

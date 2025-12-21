@@ -1,6 +1,6 @@
 #!/bin/bash -xe
 
-# Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+# Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you
 # may not use this file except in compliance with the License.  You may
@@ -22,9 +22,10 @@ set -e
 # Note we don't use $TMPDIR here to avoid issues with long temp paths;
 # XRootD uses Unix domain sockets which have a max path length of 108 characters.
 TEST_ROOT="$(mktemp -d "/tmp/pelican-stat-test.XXXXXX")"
+chmod 755 "${TEST_ROOT}"
 
 mkdir -p "${TEST_ROOT}/origin"
-chmod 777 "${TEST_ROOT}/origin"
+chown xrootd: "${TEST_ROOT}/origin"
 
 # Setup env variables needed - use port 0 to let Pelican choose random ports
 export PELICAN_ORIGIN_PORT=0
@@ -48,6 +49,15 @@ export PELICAN_ORIGIN_STORAGEPREFIX="${TEST_ROOT}/origin"
 export PELICAN_ORIGIN_ENABLEPUBLICREADS=true
 export PELICAN_DIRECTOR_STATTIMEOUT=1s
 export PELICAN_LOGGING_LEVEL=debug
+
+# Report the xrootd found on PATH (do not alter PATH or fallback).
+if command -v xrootd >/dev/null 2>&1; then
+    XROOTD_BIN="$(command -v xrootd)"
+    echo "Using xrootd at $XROOTD_BIN"
+else
+    echo "ERROR: xrootd not found on PATH"
+    exit 1
+fi
 
 # Function to cleanup after test ends
 cleanup() {
