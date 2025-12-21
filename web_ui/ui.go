@@ -919,10 +919,11 @@ func runEngineWithListener(ctx context.Context, ln net.Listener, engine *gin.Eng
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		err = server.Shutdown(ctx)
-		if err != nil {
+		if err != nil && !errors.Is(err, context.DeadlineExceeded) {
 			log.Errorln("Failed to shutdown server:", err)
+			return err
 		}
-		return err
+		return nil
 	})
 
 	if err := server.ServeTLS(ln, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {

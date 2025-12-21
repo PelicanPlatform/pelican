@@ -108,7 +108,10 @@ func runTestEngine(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		return server.Shutdown(shutdownCtx)
+		if err := server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		return nil
 	})
 
 	egrp.Go(func() error {
