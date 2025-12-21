@@ -60,6 +60,11 @@ func UpdateConfigFromListener(ln net.Listener) {
 						log.WithError(err).Warn("Failed to update Federation.RegistryUrl from listener")
 					}
 				}
+				if brokerUrlStr := viper.GetString("Federation.BrokerUrl"); brokerUrlStr == serverUrlStr {
+					if err := param.Set("Federation.BrokerUrl", newUrlStr); err != nil {
+						log.WithError(err).Warn("Failed to update Federation.BrokerUrl from listener")
+					}
+				}
 				fedDiscoveryOnce = &sync.Once{}
 				log.Debugln("Random web port used; updated external web URL to", param.Server_ExternalWebUrl.GetString())
 			} else {

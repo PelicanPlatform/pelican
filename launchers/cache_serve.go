@@ -23,6 +23,7 @@ package launchers
 import (
 	"context"
 	_ "embed"
+	"net"
 	"net/url"
 	"strconv"
 	"time"
@@ -144,14 +145,19 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 			log.WithError(err).Warnf("Failed to set %s to %d", param.Cache_Port.GetName(), port)
 		}
 		if cacheUrl, err := url.Parse(param.Cache_Url.GetString()); err == nil {
-			if cacheUrl.Port() == "" {
-				cacheUrl.Host = cacheUrl.Hostname() + ":" + strconv.Itoa(port)
+			host := cacheUrl.Hostname()
+			if host == "" {
+				host = param.Server_Hostname.GetString()
 			}
-
-			if err := param.Set(param.Cache_Url.GetName(), cacheUrl.String()); err != nil {
-				log.WithError(err).Warnf("Failed to set %s to %s", param.Cache_Url.GetName(), cacheUrl.String())
+			currentPort := cacheUrl.Port()
+			if currentPort == "" || currentPort == "0" {
+				cacheUrl.Host = net.JoinHostPort(host, strconv.Itoa(port))
+				if err := param.Set(param.Cache_Url.GetName(), cacheUrl.String()); err != nil {
+					log.WithError(err).Warnf("Failed to set %s to %s", param.Cache_Url.GetName(), cacheUrl.String())
+				} else {
+					log.Debugf("Resetting %s to %s", param.Cache_Url.GetName(), cacheUrl.String())
+				}
 			}
-			log.Debugf("Resetting %s to %s", param.Cache_Url.GetName(), cacheUrl.String())
 		}
 		log.Infoln("Cache startup complete on port", port)
 	}
