@@ -19,7 +19,9 @@
 
 set -e
 
-TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/pelican-stat-test.XXXXXX")"
+# Note we don't use $TMPDIR here to avoid issues with long temp paths;
+# XRootD uses Unix domain sockets which have a max path length of 108 characters.
+TEST_ROOT="$(mktemp -d "/tmp/pelican-stat-test.XXXXXX")"
 
 mkdir -p "${TEST_ROOT}/origin"
 chmod 777 "${TEST_ROOT}/origin"
@@ -30,8 +32,10 @@ export PELICAN_TLSSKIPVERIFY=true
 export PELICAN_SERVER_ENABLEUI=false
 export PELICAN_SERVER_WEBPORT=0
 export PELICAN_ORIGIN_RUNLOCATION="${TEST_ROOT}/xrootdRunLocation"
+export PELICAN_ORIGIN_ENABLEVOMS=false
 
 export PELICAN_CONFIGDIR="${TEST_ROOT}"
+export PELICAN_RUNTIMEDIR="${TEST_ROOT}"
 export PELICAN_SERVER_DBLOCATION="${TEST_ROOT}/test-registry.sql"
 export PELICAN_CONFIG="${PELICAN_CONFIGDIR}/empty.yaml"
 export PELICAN_OIDC_CLIENTID="sometexthere"
@@ -59,6 +63,7 @@ cleanup() {
     rm -rf "${TEST_ROOT:-}"
 
     unset PELICAN_CONFIGDIR
+    unset PELICAN_RUNTIMEDIR
     unset PELICAN_FEDERATION_DIRECTORURL
     unset PELICAN_FEDERATION_REGISTRYURL
     unset PELICAN_TLSSKIPVERIFY
@@ -91,13 +96,21 @@ trap cleanup EXIT
 # Wait for the address file to be created
 # Address file is in runtime directory: $XDG_RUNTIME_DIR/pelican if set, otherwise falls back to ConfigDir
 if [ -n "$XDG_RUNTIME_DIR" ]; then
-    ADDRESS_FILE="$XDG_RUNTIME_DIR/pelican/pelican.addresses"
+    RUNTIME_BASE="${XDG_RUNTIME_DIR%/}"
+    ADDRESS_FILE="${RUNTIME_BASE}/pelican/pelican.addresses"
 else
-    ADDRESS_FILE="${PELICAN_CONFIGDIR}/pelican.addresses"
+    CONFIG_BASE="${PELICAN_CONFIGDIR%/}"
+    ADDRESS_FILE="${CONFIG_BASE}/pelican.addresses"
 fi
 echo "Waiting for address file: $ADDRESS_FILE"
 TOTAL_WAIT=0
 while [ ! -f "$ADDRESS_FILE" ]; do
+    if ! kill -0 "${pid_federationServe:-0}" 2>/dev/null; then
+        echo "Pelican process exited before address file was created"
+        echo "TEST FAILED"
+        unset pid_federationServe
+        exit 1
+    fi
     sleep 0.5
     TOTAL_WAIT=$((TOTAL_WAIT + 1))
     if [ "$TOTAL_WAIT" -gt 40 ]; then
