@@ -1970,6 +1970,9 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	// Sets up the server log filter mechanism
 	initFilterLogging()
 
+	// Register callback for runtime log level changes
+	RegisterLoggingCallback()
+
 	// Ensure server defaults are applied before any federation discovery; several
 	// tests rely on URL defaults being derived from Server.ExternalWebUrl.
 	if err := SetServerDefaults(viper.GetViper()); err != nil {

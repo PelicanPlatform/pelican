@@ -109,6 +109,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.LowWatermark": false,
 	"Cache.MetaLocations": false,
 	"Cache.NamespaceLocation": false,
+	"Cache.PSSOrigin": false,
 	"Cache.PermittedNamespaces": false,
 	"Cache.Port": false,
 	"Cache.RunLocation": false,
@@ -196,25 +197,25 @@ var runtimeConfigurableMap = map[string]bool{
 	"LocalCache.RunLocation": false,
 	"LocalCache.Size": false,
 	"LocalCache.Socket": false,
-	"Logging.Cache.Http": false,
-	"Logging.Cache.Ofs": false,
-	"Logging.Cache.Pfc": false,
-	"Logging.Cache.Pss": false,
-	"Logging.Cache.PssSetOpt": false,
-	"Logging.Cache.Scitokens": false,
-	"Logging.Cache.Xrd": false,
-	"Logging.Cache.Xrootd": false,
+	"Logging.Cache.Http": true,
+	"Logging.Cache.Ofs": true,
+	"Logging.Cache.Pfc": true,
+	"Logging.Cache.Pss": true,
+	"Logging.Cache.PssSetOpt": true,
+	"Logging.Cache.Scitokens": true,
+	"Logging.Cache.Xrd": true,
+	"Logging.Cache.Xrootd": true,
 	"Logging.Client.ProgressInterval": false,
 	"Logging.DisableProgressBars": false,
 	"Logging.Level": true,
 	"Logging.LogLocation": false,
-	"Logging.Origin.Cms": false,
-	"Logging.Origin.Http": false,
-	"Logging.Origin.Ofs": false,
-	"Logging.Origin.Oss": false,
-	"Logging.Origin.Scitokens": false,
-	"Logging.Origin.Xrd": false,
-	"Logging.Origin.Xrootd": false,
+	"Logging.Origin.Cms": true,
+	"Logging.Origin.Http": true,
+	"Logging.Origin.Ofs": true,
+	"Logging.Origin.Oss": true,
+	"Logging.Origin.Scitokens": true,
+	"Logging.Origin.Xrd": true,
+	"Logging.Origin.Xrootd": true,
 	"Lotman.DbLocation": false,
 	"Lotman.DefaultLotDeletionLifetime": false,
 	"Lotman.DefaultLotExpirationLifetime": false,
@@ -394,6 +395,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Xrootd.EnableLocalMonitoring": false,
 	"Xrootd.HttpMaxDelay": false,
 	"Xrootd.LocalMonitoringHost": false,
+	"Xrootd.LocalMonitoringPort": false,
 	"Xrootd.MacaroonsKeyFile": false,
 	"Xrootd.ManagerHost": false,
 	"Xrootd.ManagerPort": false,
@@ -449,6 +451,8 @@ func (sP StringParam) GetString() string {
 			return config.Cache.LowWatermark
 		case "Cache.NamespaceLocation":
 			return config.Cache.NamespaceLocation
+		case "Cache.PSSOrigin":
+			return config.Cache.PSSOrigin
 		case "Cache.RunLocation":
 			return config.Cache.RunLocation
 		case "Cache.SentinelLocation":
@@ -873,6 +877,8 @@ func (iP IntParam) GetInt() int {
 			return config.Transport.MaxIdleConns
 		case "Xrootd.DetailedMonitoringPort":
 			return config.Xrootd.DetailedMonitoringPort
+		case "Xrootd.LocalMonitoringPort":
+			return config.Xrootd.LocalMonitoringPort
 		case "Xrootd.ManagerPort":
 			return config.Xrootd.ManagerPort
 		case "Xrootd.MaxThreads":
@@ -1203,6 +1209,7 @@ var allParameterNames = []string{
 	"Cache.LowWatermark",
 	"Cache.MetaLocations",
 	"Cache.NamespaceLocation",
+	"Cache.PSSOrigin",
 	"Cache.PermittedNamespaces",
 	"Cache.Port",
 	"Cache.RunLocation",
@@ -1488,6 +1495,7 @@ var allParameterNames = []string{
 	"Xrootd.EnableLocalMonitoring",
 	"Xrootd.HttpMaxDelay",
 	"Xrootd.LocalMonitoringHost",
+	"Xrootd.LocalMonitoringPort",
 	"Xrootd.MacaroonsKeyFile",
 	"Xrootd.ManagerHost",
 	"Xrootd.ManagerPort",
@@ -1517,6 +1525,7 @@ var (
 	Cache_LocalRoot = StringParam{"Cache.LocalRoot"}
 	Cache_LowWatermark = StringParam{"Cache.LowWatermark"}
 	Cache_NamespaceLocation = StringParam{"Cache.NamespaceLocation"}
+	Cache_PSSOrigin = StringParam{"Cache.PSSOrigin"}
 	Cache_RunLocation = StringParam{"Cache.RunLocation"}
 	Cache_SentinelLocation = StringParam{"Cache.SentinelLocation"}
 	Cache_StorageLocation = StringParam{"Cache.StorageLocation"}
@@ -1716,6 +1725,7 @@ var (
 	Shoveler_PortLower = IntParam{"Shoveler.PortLower"}
 	Transport_MaxIdleConns = IntParam{"Transport.MaxIdleConns"}
 	Xrootd_DetailedMonitoringPort = IntParam{"Xrootd.DetailedMonitoringPort"}
+	Xrootd_LocalMonitoringPort = IntParam{"Xrootd.LocalMonitoringPort"}
 	Xrootd_ManagerPort = IntParam{"Xrootd.ManagerPort"}
 	Xrootd_MaxThreads = IntParam{"Xrootd.MaxThreads"}
 	Xrootd_Port = IntParam{"Xrootd.Port"}

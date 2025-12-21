@@ -1590,7 +1590,7 @@ func TestTransferError404(t *testing.T) {
 	for !done {
 		select {
 		case <-ctx.Done():
-			break
+			done = true
 		case resultAd, ok := <-results:
 			if !ok {
 				done = true
@@ -1714,7 +1714,7 @@ func TestTransferErrorSlowTransfer(t *testing.T) {
 	for !done {
 		select {
 		case <-ctx.Done():
-			break
+			done = true
 		case resultAd, ok := <-results:
 			if !ok {
 				done = true
@@ -1888,7 +1888,7 @@ func TestTransferErrorHeaderTimeout(t *testing.T) {
 	for !done {
 		select {
 		case <-ctx.Done():
-			break
+			done = true
 		case resultAd, ok := <-results:
 			if !ok {
 				done = true

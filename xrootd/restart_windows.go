@@ -30,7 +30,7 @@ import (
 
 // StoreRestartInfo stores the information needed for restarting XRootD
 // Windows stub - restart not implemented on Windows
-func StoreRestartInfo(launchers []daemon.Launcher, egrp *errgroup.Group, callback func(int), cache bool, cmsd bool, priv bool) {
+func StoreRestartInfo(launchers []daemon.Launcher, pids []int, egrp *errgroup.Group, callback func(int), cache bool, cmsd bool, priv bool) {
 	// No-op on Windows
 }
 
@@ -44,4 +44,9 @@ func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error
 // Windows stub - restart not implemented on Windows
 func RestartServer(ctx context.Context, server server_structs.XRootDServer) error {
 	return errors.New("XRootD restart is not supported on Windows")
+}
+
+// ResetRestartState clears restart tracking and callbacks for tests.
+func ResetRestartState() {
+	ClearXrootdDaemons()
 }

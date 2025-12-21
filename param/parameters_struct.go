@@ -53,6 +53,7 @@ type Config struct {
 		LowWatermark string `mapstructure:"lowwatermark" yaml:"LowWatermark"`
 		MetaLocations []string `mapstructure:"metalocations" yaml:"MetaLocations"`
 		NamespaceLocation string `mapstructure:"namespacelocation" yaml:"NamespaceLocation"`
+		PSSOrigin string `mapstructure:"pssorigin" yaml:"PSSOrigin"`
 		PermittedNamespaces []string `mapstructure:"permittednamespaces" yaml:"PermittedNamespaces"`
 		Port int `mapstructure:"port" yaml:"Port"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
@@ -385,6 +386,7 @@ type Config struct {
 		EnableLocalMonitoring bool `mapstructure:"enablelocalmonitoring" yaml:"EnableLocalMonitoring"`
 		HttpMaxDelay time.Duration `mapstructure:"httpmaxdelay" yaml:"HttpMaxDelay"`
 		LocalMonitoringHost string `mapstructure:"localmonitoringhost" yaml:"LocalMonitoringHost"`
+		LocalMonitoringPort int `mapstructure:"localmonitoringport" yaml:"LocalMonitoringPort"`
 		MacaroonsKeyFile string `mapstructure:"macaroonskeyfile" yaml:"MacaroonsKeyFile"`
 		ManagerHost string `mapstructure:"managerhost" yaml:"ManagerHost"`
 		ManagerPort int `mapstructure:"managerport" yaml:"ManagerPort"`
@@ -433,6 +435,7 @@ type configWithType struct {
 		LowWatermark struct { Type string; Value string }
 		MetaLocations struct { Type string; Value []string }
 		NamespaceLocation struct { Type string; Value string }
+		PSSOrigin struct { Type string; Value string }
 		PermittedNamespaces struct { Type string; Value []string }
 		Port struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
@@ -765,6 +768,7 @@ type configWithType struct {
 		EnableLocalMonitoring struct { Type string; Value bool }
 		HttpMaxDelay struct { Type string; Value time.Duration }
 		LocalMonitoringHost struct { Type string; Value string }
+		LocalMonitoringPort struct { Type string; Value int }
 		MacaroonsKeyFile struct { Type string; Value string }
 		ManagerHost struct { Type string; Value string }
 		ManagerPort struct { Type string; Value int }

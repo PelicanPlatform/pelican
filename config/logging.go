@@ -27,6 +27,8 @@ import (
 	"github.com/go-kit/log/term"
 	log "github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/writer"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 type (
@@ -214,4 +216,26 @@ func SetLogging(logLevel log.Level) {
 // otherwise, it should not be used
 func DisableLoggingCensor() {
 	globalTransform.replacements[0].regex = nil
+}
+
+// RegisterLoggingCallback registers a callback with the param module
+// to update logging configuration when Logging.Level changes.
+func RegisterLoggingCallback() {
+	param.RegisterCallback("logging", func(oldConfig, newConfig *param.Config) {
+		if oldConfig == nil || newConfig == nil {
+			return
+		}
+
+		oldLevel, oldErr := log.ParseLevel(oldConfig.Logging.Level)
+		newLevel, newErr := log.ParseLevel(newConfig.Logging.Level)
+		if newErr != nil {
+			log.Errorf("Failed to parse new log level %q: %v", newConfig.Logging.Level, newErr)
+			return
+		}
+		// Apply changes whenever the parsed level differs (case-insensitive) or old level failed to parse.
+		if oldErr != nil || oldLevel != newLevel {
+			log.Infof("Updating log level from %s to %s", oldConfig.Logging.Level, newConfig.Logging.Level)
+			SetLogging(newLevel)
+		}
+	})
 }
