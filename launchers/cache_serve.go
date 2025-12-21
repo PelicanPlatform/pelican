@@ -135,7 +135,9 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 	}
 
 	log.Info("Launching cache")
-	launchers, err := xrootd.ConfigureLaunchers(false, configPath, false, true)
+	useCMSD := false
+	privileged := false
+	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, useCMSD, true)
 	if err != nil {
 		return nil, err
 	}
@@ -161,6 +163,9 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		}
 		log.Infoln("Cache startup complete on port", port)
 	}
+
+	// Store restart information before launching
+	xrootd.StoreRestartInfo(launchers, egrp, portStartCallback, true, useCMSD, privileged)
 
 	pids, err := xrootd.LaunchDaemons(ctx, launchers, egrp, portStartCallback)
 	if err != nil {

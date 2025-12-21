@@ -271,12 +271,17 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 					log.Infof("Daemon %q with pid %d was killed", daemons[chosen].name, daemons[chosen].pid)
 				}
 				if waitResult := context.Cause(daemons[chosen].ctx); waitResult != nil {
+					metricName := strings.SplitN(launchers[chosen].Name(), ".", 2)[0]
+					if IsExpectedRestart() {
+						metrics.SetComponentHealthStatus(metrics.HealthStatusComponent(metricName), metrics.StatusShuttingDown, "XRootD restart in progress")
+						log.Infof("Daemon %q exited during expected restart: %v", daemons[chosen].name, waitResult)
+						return nil
+					}
 					if !daemons[chosen].expiry.IsZero() {
 						return nil
 					} else if errors.Is(waitResult, context.Canceled) {
 						return nil
 					}
-					metricName := strings.SplitN(launchers[chosen].Name(), ".", 2)[0]
 					metrics.SetComponentHealthStatus(metrics.HealthStatusComponent(metricName), metrics.StatusCritical,
 						launchers[chosen].Name()+" process failed unexpectedly")
 					err = errors.Wrapf(waitResult, "%s process failed unexpectedly", launchers[chosen].Name())
