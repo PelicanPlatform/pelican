@@ -120,7 +120,8 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	}
 
 	privileged := param.Origin_Multiuser.GetBool()
-	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, param.Origin_EnableCmsd.GetBool(), false)
+	useCMSD := param.Origin_EnableCmsd.GetBool()
+	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, useCMSD, false)
 	if err != nil {
 		return nil, err
 	}
@@ -146,6 +147,9 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		}
 		log.Infoln("Origin startup complete on port", port)
 	}
+
+	// Store restart information before launching
+	xrootd.StoreRestartInfo(launchers, egrp, portStartCallback, false, useCMSD, privileged)
 
 	pids, err := xrootd.LaunchDaemons(ctx, launchers, egrp, portStartCallback)
 	if err != nil {
