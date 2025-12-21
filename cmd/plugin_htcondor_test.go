@@ -23,7 +23,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -82,8 +82,10 @@ func TestHTCondorPlugin(t *testing.T) {
 	fed := fed_test_utils.NewFedTest(t, `
 Origin:
   StorageType: posix
-  EnablePublicReads: true
-  EnableWrites: true
+  Exports:
+    - FederationPrefix: /test
+      StoragePrefix: /<OVERRIDDEN>
+      Capabilities: ["PublicReads", "Writes", "Listings"]
 `)
 
 	// Wait for federation to be ready
@@ -98,12 +100,12 @@ Origin:
 	// Build the pelican binary to use as the plugin
 	t.Log("Building pelican binary for plugin...")
 	pelicanBinary := filepath.Join(tempDir, "pelican")
-	
+
 	// Find the repository root
 	repoRoot, err := findRepoRoot()
 	require.NoError(t, err, "Failed to find git repository root")
-	
-	buildCmd := exec.Command("go", "build", "-o", pelicanBinary, ".")
+
+	buildCmd := exec.Command("go", "build", "-o", pelicanBinary, "./cmd")
 	buildCmd.Dir = repoRoot
 	output, err := buildCmd.CombinedOutput()
 	if err != nil {
@@ -178,6 +180,9 @@ transfer_output_remaps = "test-output.txt=%s"
 should_transfer_files = YES
 when_to_transfer_output = ON_EXIT
 
+# Configure Pelican plugin via job ad attribute to skip TLS verification
++PelicanCfg_TLSSkipVerify = true
+
 queue
 `, scriptPath, jobDir, jobDir, jobDir, federationURL, testFilename, outputFile)
 
@@ -243,13 +248,68 @@ func findRepoRoot() (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
+// findHTCondorSbin finds the sbin directory for HTCondor binaries
+func findHTCondorSbin() (string, error) {
+	condorMaster, err := exec.LookPath("condor_master")
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(condorMaster), nil
+}
+
+// findHTCondorBin finds the bin directory for HTCondor binaries
+func findHTCondorBin() (string, error) {
+	condorQ, err := exec.LookPath("condor_q")
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(condorQ), nil
+}
+
+// findHTCondorLibexec finds the libexec directory for HTCondor
+func findHTCondorLibexec() (string, error) {
+	// Try to find condor_shared_port in PATH first
+	sharedPort, err := exec.LookPath("condor_shared_port")
+	if err == nil {
+		return filepath.Dir(sharedPort), nil
+	}
+
+	// Derive from condor_master location
+	condorMaster, err := exec.LookPath("condor_master")
+	if err != nil {
+		return "", errors.New("could not find condor_master to derive libexec")
+	}
+	sbinDir := filepath.Dir(condorMaster)
+	libexecDir := filepath.Join(filepath.Dir(sbinDir), "libexec")
+
+	// Verify it exists
+	if _, err := os.Stat(filepath.Join(libexecDir, "condor_shared_port")); err != nil {
+		return "", errors.Wrapf(err, "libexec directory %s does not contain condor_shared_port", libexecDir)
+	}
+
+	return libexecDir, nil
+}
+
 // writeMiniCondorConfig writes a minimal HTCondor configuration for testing
 func writeMiniCondorConfig(configFile, tempDir, socketDir, passwordsDir, pelicanBinary string) error {
-	// Use dynamic ports to allow parallel test execution
-	collectorPort := findFreePort()
-	sharedPort := findFreePort()
+	// Find HTCondor binaries in PATH
+	sbinDir, err := findHTCondorSbin()
+	if err != nil {
+		return errors.Wrap(err, "failed to find HTCondor sbin directory")
+	}
+	binDir, err := findHTCondorBin()
+	if err != nil {
+		return errors.Wrap(err, "failed to find HTCondor bin directory")
+	}
+
+	// Find LIBEXEC directory (contains condor_shared_port)
+	libexecDir, err := findHTCondorLibexec()
+	if err != nil {
+		return errors.Wrap(err, "failed to find HTCondor libexec directory")
+	}
 
 	config := fmt.Sprintf(`# Mini HTCondor configuration for Pelican plugin testing
+CONDOR_HOST = 127.0.0.1
 LOCAL_DIR = %s
 LOG = $(LOCAL_DIR)/log
 SPOOL = $(LOCAL_DIR)/spool
@@ -257,17 +317,28 @@ EXECUTE = $(LOCAL_DIR)/execute
 LOCK = $(LOCAL_DIR)/lock
 RUN = $(LOCAL_DIR)/run
 
+# HTCondor binary locations
+SBIN = %s
+BIN = %s
+LIBEXEC = %s
+
+# Socket directory for shared port
+DAEMON_SOCKET_DIR = %s
+
 # Use secure socket directory
 SEC_PASSWORD_DIRECTORY = %s
 SEC_TOKEN_DIRECTORY = $(LOCAL_DIR)/tokens.d
 
-# Network configuration - use dynamic ports
-COLLECTOR_HOST = $(CONDOR_HOST):$(COLLECTOR_PORT)
-COLLECTOR_PORT = %d
-SHARED_PORT = %d
+# Network configuration - use port 0 to let condor choose free ports
+COLLECTOR_HOST = 127.0.0.1:0
+BIND_ALL_INTERFACES = False
+NETWORK_INTERFACE = 127.0.0.1
 USE_SHARED_PORT = True
-SHARED_PORT_PORT = $(SHARED_PORT)
-DAEMON_LIST = MASTER, COLLECTOR, NEGOTIATOR, SCHEDD, SHARED_PORT
+DAEMON_LIST = MASTER, COLLECTOR, NEGOTIATOR, SCHEDD, STARTD, SHARED_PORT
+
+# Address files for dynamic port allocation
+COLLECTOR_ADDRESS_FILE = $(LOG)/.collector_address
+SCHEDD_ADDRESS_FILE = $(LOG)/.schedd_address
 
 # Allow local access
 ALLOW_WRITE = *
@@ -283,14 +354,15 @@ SEC_PASSWORD_FILE = $(SEC_PASSWORD_DIRECTORY)/POOL
 # File transfer plugin configuration
 FILETRANSFER_PLUGINS = $(LIBEXEC)/pelican_plugin
 
-# Create wrapper script for pelican plugin
-LIBEXEC = %s/libexec
-
 # Schedd configuration
 SCHEDD_INTERVAL = 5
 NEGOTIATOR_INTERVAL = 10
 
-# Startd configuration (for local universe)
+# Minimal machine resources for testing
+NUM_CPUS = 1
+MEMORY = 1024
+
+# Startd configuration
 START = True
 SUSPEND = False
 CONTINUE = True
@@ -301,45 +373,22 @@ WANT_VACATE = False
 
 # Enable file transfer
 ENABLE_FILE_TRANSFER = TRUE
-`, tempDir, passwordsDir, collectorPort, sharedPort, tempDir)
+`, tempDir, sbinDir, binDir, libexecDir, socketDir, passwordsDir)
 
 	if err := os.WriteFile(configFile, []byte(config), 0644); err != nil {
 		return err
 	}
 
-	// Create libexec directory and wrapper script
-	libexecDir := filepath.Join(tempDir, "libexec")
-	if err := os.MkdirAll(libexecDir, 0755); err != nil {
-		return err
-	}
-
-	// Create wrapper script that calls pelican plugin transfer
-	wrapperScript := filepath.Join(libexecDir, "pelican_plugin")
-	wrapperContent := fmt.Sprintf(`#!/bin/bash
-exec %s plugin transfer "$@"
-`, pelicanBinary)
-
-	if err := os.WriteFile(wrapperScript, []byte(wrapperContent), 0755); err != nil {
+	// Create symlink for pelican_plugin in HTCondor's LIBEXEC directory
+	// The pelican binary detects its name and behaves as a plugin when named pelican_plugin
+	pluginLink := filepath.Join(libexecDir, "pelican_plugin")
+	// Remove if it exists (from previous test run)
+	os.Remove(pluginLink)
+	if err := os.Symlink(pelicanBinary, pluginLink); err != nil {
 		return err
 	}
 
 	return nil
-}
-
-// findFreePort finds an available port by asking the OS to allocate one
-// Note: There is a small race condition where another process could claim
-// the port between when we close the listener and when it's used. However,
-// this is acceptable for tests as the probability is low and tests will
-// fail cleanly if it happens.
-func findFreePort() int {
-	// Let the OS allocate a free port
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		// Fallback to a high random port if we can't bind
-		return 19000 + (os.Getpid() % 10000)
-	}
-	defer listener.Close()
-	return listener.Addr().(*net.TCPAddr).Port
 }
 
 // startCondorMaster starts the condor_master daemon
@@ -385,16 +434,47 @@ func stopCondorMaster(cmd *exec.Cmd, t *testing.T) {
 // waitForCondor waits for HTCondor to be ready
 func waitForCondor(tempDir string, timeout time.Duration, t *testing.T) error {
 	deadline := time.Now().Add(timeout)
+	configFile := filepath.Join(tempDir, "condor_config")
+
 	for time.Now().Before(deadline) {
 		// Try condor_q to check if schedd is responsive
 		cmd := exec.Command("condor_q")
-		cmd.Env = append(os.Environ(), "CONDOR_CONFIG="+filepath.Join(tempDir, "condor_config"))
-		if err := cmd.Run(); err == nil {
+		cmd.Env = append(os.Environ(), "CONDOR_CONFIG="+configFile)
+		output, err := cmd.CombinedOutput()
+		if err == nil {
 			return nil
 		}
-		time.Sleep(1 * time.Second)
+		t.Logf("Waiting for HTCondor... (error: %v, output: %s)", err, string(output))
+
+		// Check master log for errors
+		masterLog := filepath.Join(tempDir, "log", "MasterLog")
+		if logData, err := os.ReadFile(masterLog); err == nil {
+			t.Logf("MasterLog tail: %s", string(logData[max(0, len(logData)-500):]))
+		}
+
+		time.Sleep(2 * time.Second)
 	}
+
+	// Dump logs on timeout
+	logDir := filepath.Join(tempDir, "log")
+	files, _ := os.ReadDir(logDir)
+	for _, file := range files {
+		if !file.IsDir() {
+			logPath := filepath.Join(logDir, file.Name())
+			if data, err := os.ReadFile(logPath); err == nil {
+				t.Logf("Content of %s:\n%s", file.Name(), string(data))
+			}
+		}
+	}
+
 	return fmt.Errorf("HTCondor did not become ready within %v", timeout)
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // extractClusterID extracts the cluster ID from condor_submit output
