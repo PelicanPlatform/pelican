@@ -72,6 +72,8 @@ func TestFedServePosixOrigin(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, param.Set("ConfigDir", tmpPath))
+	// Set RuntimeDir to avoid race conditions with parallel tests using shared /run/pelican
+	require.NoError(t, param.Set(param.RuntimeDir.GetName(), tmpPath))
 	require.NoError(t, param.Set("Origin.RunLocation", filepath.Join(tmpPath, "xrd")))
 	t.Cleanup(func() {
 		if err := os.RemoveAll(tmpPath); err != nil {

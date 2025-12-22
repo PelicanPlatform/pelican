@@ -117,6 +117,8 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	require.NoError(t, err)
 
 	require.NoError(t, param.Set("ConfigDir", tmpPath))
+	// Set RuntimeDir to a per-test location to avoid race conditions in parallel tests
+	require.NoError(t, param.Set(param.RuntimeDir.GetName(), tmpPath))
 	// Configure all relevant logging levels. We don't let the XRootD
 	// log levels inherit from the global log level, because the many
 	// fed tests we run back-to-back would otherwise generate a lot of

@@ -166,6 +166,8 @@ func (f *FedTest) Spinup() {
 	require.NoError(f.T, err)
 
 	require.NoError(f.T, param.Set("ConfigDir", tmpPath))
+	// Set RuntimeDir to avoid race conditions with parallel tests using shared /run/pelican
+	require.NoError(f.T, param.Set(param.RuntimeDir.GetName(), tmpPath))
 
 	// Create a file to capture output from commands
 	output, err := os.CreateTemp(f.T.TempDir(), "output")
