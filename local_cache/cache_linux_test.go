@@ -218,6 +218,8 @@ func TestPurgeFirst(t *testing.T) {
 
 	configDir := t.TempDir()
 	require.NoError(t, param.Set("ConfigDir", configDir))
+	// Set RuntimeDir to avoid race conditions with parallel tests using shared /run/pelican
+	require.NoError(t, param.Set(param.RuntimeDir.GetName(), configDir))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 

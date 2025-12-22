@@ -388,6 +388,25 @@ func wrapWithHttpsIfNeeded(urlStr string) string {
 	return urlStr
 }
 
+// Strip port 443 from a URL string if present
+func stripPort443(urlStr string) string {
+	if urlStr == "" {
+		return urlStr
+	}
+
+	parsedUrl, err := url.Parse(urlStr)
+	if err != nil {
+		return urlStr // Return original if we can't parse it
+	}
+
+	if parsedUrl.Port() == "443" {
+		parsedUrl.Host = parsedUrl.Hostname()
+		return parsedUrl.String()
+	}
+
+	return urlStr
+}
+
 // Validate that the federation Discovery URL does not contain a path and is otherwise a valid URL.
 func validateDiscoveryUrl(discUrlStr string) (*url.URL, error) {
 	errPrfx := fmt.Sprintf("invalid federation discovery url of '%s' (config parameter %s):", discUrlStr, param.Federation_DiscoveryUrl.GetName())
@@ -446,13 +465,13 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 		}
 
 		// Make sure any values in global federation metadata are url-parseable
-		fedInfo.DiscoveryEndpoint = wrapWithHttpsIfNeeded(fedInfo.DiscoveryEndpoint)
-		fedInfo.DirectorEndpoint = wrapWithHttpsIfNeeded(fedInfo.DirectorEndpoint)
-		fedInfo.RegistryEndpoint = wrapWithHttpsIfNeeded(fedInfo.RegistryEndpoint)
-		fedInfo.JwksUri = wrapWithHttpsIfNeeded(fedInfo.JwksUri)
-		fedInfo.BrokerEndpoint = wrapWithHttpsIfNeeded(fedInfo.BrokerEndpoint)
+		fedInfo.DiscoveryEndpoint = stripPort443(wrapWithHttpsIfNeeded(fedInfo.DiscoveryEndpoint))
+		fedInfo.DirectorEndpoint = stripPort443(wrapWithHttpsIfNeeded(fedInfo.DirectorEndpoint))
+		fedInfo.RegistryEndpoint = stripPort443(wrapWithHttpsIfNeeded(fedInfo.RegistryEndpoint))
+		fedInfo.JwksUri = stripPort443(wrapWithHttpsIfNeeded(fedInfo.JwksUri))
+		fedInfo.BrokerEndpoint = stripPort443(wrapWithHttpsIfNeeded(fedInfo.BrokerEndpoint))
 		for i, advUrl := range fedInfo.DirectorAdvertiseEndpoints {
-			fedInfo.DirectorAdvertiseEndpoints[i] = wrapWithHttpsIfNeeded(advUrl)
+			fedInfo.DirectorAdvertiseEndpoints[i] = stripPort443(wrapWithHttpsIfNeeded(advUrl))
 		}
 	}()
 
@@ -509,6 +528,8 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 	var metadata pelican_url.FederationDiscovery
 	if federationStr == externalUrlStr {
 		log.Debugln("Current web engine hosts the federation; skipping auto-discovery of services")
+	} else if federationStr == "" {
+		log.Debugln("No federation discovery URL configured; skipping auto-discovery of services")
 	} else {
 		log.Debugln("Attempting to discover federation services via URL:", federationStr)
 		httpClient := GetClient()
@@ -890,6 +911,9 @@ func setLoggingInternal() error {
 	}
 	SetLogging(level)
 
+	// Initialize the log level manager with our custom functions after setting up logging
+	logging.InitLogLevelManager(nil, nil, SetLogging, GetEffectiveLogLevel)
+
 	return nil
 }
 
@@ -1204,6 +1228,50 @@ func ensureRuntimeDir(v *viper.Viper) (string, bool, error) {
 	return runtimeDir, true, nil
 }
 
+// ComputeExternalWebUrl computes the Server.ExternalWebUrl if not explicitly set.
+// This is extracted from SetServerDefaults so it can be called independently
+// by client commands that need to determine the server's web URL.
+// It sets the default based on Server.Hostname and Server.WebPort if not already configured.
+func ComputeExternalWebUrl(v *viper.Viper) error {
+	// Only compute if not already set
+	if !v.IsSet(param.Server_ExternalWebUrl.GetName()) {
+		// Get or set default hostname
+		hostname := v.GetString(param.Server_Hostname.GetName())
+		if hostname == "" {
+			osHostname, err := os.Hostname()
+			if err != nil {
+				return errors.Wrap(err, "failed to determine hostname")
+			}
+			hostname = osHostname
+		}
+
+		// Get web port
+		webPort := v.GetInt(param.Server_WebPort.GetName())
+		if webPort == 0 {
+			webPort = 8444 // Default web port
+		}
+
+		// Compute External Web URL
+		if webPort != 443 {
+			v.SetDefault(param.Server_ExternalWebUrl.GetName(), fmt.Sprintf("https://%s:%d", hostname, webPort))
+		} else {
+			v.SetDefault(param.Server_ExternalWebUrl.GetName(), fmt.Sprintf("https://%s", hostname))
+		}
+	}
+
+	// Strip port 443 if present (even if URL was explicitly set)
+	externalAddressStr := v.GetString(param.Server_ExternalWebUrl.GetName())
+	parsedExtAdd, err := url.Parse(externalAddressStr)
+	if err != nil {
+		return errors.Wrap(err, fmt.Sprint("invalid Server.ExternalWebUrl: ", externalAddressStr))
+	} else if parsedExtAdd.Port() == "443" {
+		parsedExtAdd.Host = parsedExtAdd.Hostname()
+		v.Set(param.Server_ExternalWebUrl.GetName(), parsedExtAdd.String())
+	}
+
+	return nil
+}
+
 // Set all defaults relevant to servers (defaults can be set only for active servers)
 // but only for the passed viper instance.
 // We operate on the passed viper instance instead of the global because it lets us
@@ -1417,19 +1485,9 @@ func SetServerDefaults(v *viper.Viper) error {
 		return errors.Errorf("the Server.WebPort setting of %d is invalid; TCP ports must be greater than 0", webPort)
 	}
 
-	if webPort != 443 {
-		v.SetDefault(param.Server_ExternalWebUrl.GetName(), fmt.Sprintf("https://%s:%d", hostname, webPort))
-	} else {
-		v.SetDefault(param.Server_ExternalWebUrl.GetName(), fmt.Sprintf("https://%s", hostname))
-	}
-
-	externalAddressStr := v.GetString(param.Server_ExternalWebUrl.GetName())
-	parsedExtAdd, err := url.Parse(externalAddressStr)
-	if err != nil {
-		return errors.Wrap(err, fmt.Sprint("invalid Server.ExternalWebUrl: ", externalAddressStr))
-	} else if parsedExtAdd.Port() == "443" {
-		parsedExtAdd.Host = parsedExtAdd.Hostname()
-		v.Set(param.Server_ExternalWebUrl.GetName(), parsedExtAdd.String())
+	// Compute Server.ExternalWebUrl
+	if err := ComputeExternalWebUrl(v); err != nil {
+		return err
 	}
 
 	if originConcurrency := v.GetInt(param.Origin_Concurrency.GetName()); originConcurrency < 0 {
@@ -2060,6 +2118,12 @@ func InitClient() error {
 
 	if err := SetClientDefaults(viper.GetViper()); err != nil {
 		return err
+	}
+
+	// Compute Server.ExternalWebUrl so client commands can access it if needed
+	// (e.g., for server management commands like set-logging-level)
+	if err := ComputeExternalWebUrl(viper.GetViper()); err != nil {
+		log.Debugln("Failed to compute Server.ExternalWebUrl:", err)
 	}
 
 	setupTransport()

@@ -325,6 +325,7 @@ func ResetTestState() {
 	}
 	ResetOriginExports()
 	logging.ResetLogFlush()
+	logging.ResetGlobalManager()
 	baseAdOnce = sync.Once{}
 	baseAd = server_structs.ServerBaseAd{}
 	baseAdErr = nil

@@ -247,3 +247,11 @@ func collectTrackedPIDs(infos []restartInfo) []int {
 	}
 	return pids
 }
+
+// GetTrackedPIDs returns a snapshot of currently tracked XRootD PIDs
+// This is useful for tests that need to verify XRootD restarts
+func GetTrackedPIDs() []int {
+	restartInfosMu.RLock()
+	defer restartInfosMu.RUnlock()
+	return collectTrackedPIDs(restartInfos)
+}

@@ -23,6 +23,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -53,9 +54,14 @@ func ResetLogFlush() {
 		_ = logFHandle.Close()
 		logFHandle = nil
 	}
+	testMode := isTestProcess()
 	bufferedHook.Store(nil)
 	flushOnce = sync.Once{}
 	removeBufferedHook()
+	if testMode {
+		log.SetOutput(io.Discard)
+		return
+	}
 	log.SetOutput(os.Stderr)
 	log.SetFormatter(&log.TextFormatter{
 		FullTimestamp:          true,
@@ -141,20 +147,22 @@ func FlushLogs(pushToFile bool) {
 				DisableLevelTruncation: true,
 			})
 		} else {
-			log.SetOutput(os.Stderr)
-
-			// Restore colorized output when logging to stderr
-			log.SetFormatter(&log.TextFormatter{
-				FullTimestamp:          true,
-				ForceColors:            term.IsTerminal(log.StandardLogger().Out),
-				DisableColors:          false,
-				DisableLevelTruncation: true,
-			})
+			// In tests, avoid re-enabling stderr output to prevent duplicate log lines (test hook already captures logs)
+			if isTestProcess() {
+				log.SetOutput(io.Discard)
+			} else {
+				log.SetOutput(os.Stderr)
+				log.SetFormatter(&log.TextFormatter{
+					FullTimestamp:          true,
+					ForceColors:            term.IsTerminal(log.StandardLogger().Out),
+					DisableColors:          false,
+					DisableLevelTruncation: true,
+				})
+			}
 		}
 
 		// Flush buffered logs
 		if len(hook.entries) > 0 {
-
 			for _, entry := range hook.entries {
 				formatted, err := entry.String()
 				if err == nil {
@@ -181,9 +189,18 @@ func CloseLogger() {
 	if logFHandle != nil {
 		_ = logFHandle.Close()
 		logFHandle = nil
-		// Reset log output to stderr to prevent writing to closed file
-		log.SetOutput(os.Stderr)
+		// Reset log output to prevent writing to closed file
+		if isTestProcess() {
+			log.SetOutput(io.Discard)
+		} else {
+			log.SetOutput(os.Stderr)
+		}
 	}
+}
+
+// isTestProcess detects whether the current binary is a `go test` binary.
+func isTestProcess() bool {
+	return strings.HasSuffix(filepath.Base(os.Args[0]), ".test")
 }
 
 func SetupLogBuffering() {
@@ -198,5 +215,4 @@ func SetupLogBuffering() {
 	if bufferedHook.CompareAndSwap(nil, hook) {
 		log.AddHook(hook)
 	}
-
 }

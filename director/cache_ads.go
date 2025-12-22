@@ -105,6 +105,15 @@ func SetBrokerDialer(dialer *broker.BrokerDialer) {
 	brokerDialer = dialer
 }
 
+// HasBrokerForAddr returns true if the director's broker dialer knows about the given address.
+// Returns false if the broker dialer is not set up.
+func HasBrokerForAddr(addr string) bool {
+	if brokerDialer == nil {
+		return false
+	}
+	return brokerDialer.HasBrokerEndpoint(addr)
+}
+
 // Given a server status, return the raw weight that will eventually
 // be smoothed in the EWMA status calculation.
 // Weights should be bounded by (0, 1], where 1 does not adjust the

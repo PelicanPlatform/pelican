@@ -36,6 +36,7 @@ const (
 	Pelican_DowntimeModify TokenScope = "pelican.downtime_modify"
 	Pelican_DowntimeDelete TokenScope = "pelican.downtime_delete"
 	WebUi_Access TokenScope = "web_ui.access"
+	Pelican_LoggingModify TokenScope = "pelican.logging_modify"
 	Registry_EditRegistration TokenScope = "registry.edit_registration"
 	Monitoring_Scrape TokenScope = "monitoring.scrape"
 	Monitoring_Query TokenScope = "monitoring.query"

@@ -23,12 +23,15 @@ package origin_test
 import (
 	_ "embed"
 	"net/http"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
@@ -57,6 +60,12 @@ func TestBrokerApi(t *testing.T) {
 	desiredURL := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
 	err = server_utils.WaitUntilWorking(fed.Ctx, "GET", desiredURL, "director", 200, false)
 	require.NoError(t, err)
+
+	// Wait for the director to register the origin's broker endpoint
+	originAddr := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Origin_Port.GetInt())
+	require.Eventually(t, func() bool {
+		return director.HasBrokerForAddr(originAddr)
+	}, 5*time.Second, 50*time.Millisecond, "Director did not register origin broker endpoint")
 
 	httpc := http.Client{
 		Transport: config.GetTransport().Clone(),
