@@ -96,9 +96,10 @@ func (hook *BufferedLogHook) Levels() []log.Level {
 
 // removeBufferedHook removes the buffered hook while preserving other hooks (e.g., test hooks).
 func removeBufferedHook() {
-	cur := log.StandardLogger().Hooks
+	// Use ReplaceHooks to safely get and replace hooks with internal locking
+	oldHooks := log.StandardLogger().ReplaceHooks(log.LevelHooks{})
 	filtered := make(log.LevelHooks)
-	for lvl, hooks := range cur {
+	for lvl, hooks := range oldHooks {
 		for _, h := range hooks {
 			if _, ok := h.(*BufferedLogHook); ok {
 				continue
