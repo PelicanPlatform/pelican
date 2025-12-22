@@ -123,10 +123,84 @@ func GetLogLevelManager() *LogLevelManager {
 }
 
 // isValidLoggingParameter checks if a parameter name is valid for log level changes
+// isValidLoggingParameter checks if a parameter name exists in the param.Config structure
+// using reflection to validate the actual field path
 func isValidLoggingParameter(paramName string) bool {
-	return paramName == "Logging.Level" ||
-		strings.HasPrefix(paramName, "Logging.Cache.") ||
-		strings.HasPrefix(paramName, "Logging.Origin.")
+	// Split the parameter name into parts (e.g., "Logging.Origin.Xrootd" -> ["Logging", "Origin", "Xrootd"])
+	parts := strings.Split(paramName, ".")
+
+	// Must start with "Logging" and have at least 2 parts
+	if len(parts) < 2 || parts[0] != "Logging" {
+		return false
+	}
+
+	// Second level must be one of the valid categories
+	validSecondLevels := map[string]bool{
+		"Level":  true,
+		"Cache":  true,
+		"Origin": true,
+	}
+	if !validSecondLevels[parts[1]] {
+		return false
+	}
+
+	// Use reflection to check if the path exists in param.Config
+	configType := reflect.TypeOf(param.Config{})
+
+	// Start with the Config struct
+	currentType := configType
+	for i, part := range parts {
+		// Find the field with this name (case-insensitive struct tag matching)
+		field, found := findFieldByName(currentType, part)
+		if !found {
+			return false
+		}
+
+		// If this is not the last part, make sure it's a struct so we can continue
+		if i < len(parts)-1 {
+			fieldType := field.Type
+			if fieldType.Kind() != reflect.Struct {
+				return false
+			}
+			currentType = fieldType
+		} else {
+			// Last part should be a string field (the actual log level parameter)
+			return field.Type.Kind() == reflect.String
+		}
+	}
+
+	return true
+}
+
+// findFieldByName searches for a struct field by name, matching against both
+// the field name and yaml/mapstructure tags (case-insensitive)
+func findFieldByName(structType reflect.Type, name string) (reflect.StructField, bool) {
+	nameLower := strings.ToLower(name)
+
+	for i := 0; i < structType.NumField(); i++ {
+		field := structType.Field(i)
+
+		// Check field name (case-insensitive)
+		if strings.ToLower(field.Name) == nameLower {
+			return field, true
+		}
+
+		// Check yaml tag
+		if yamlTag := field.Tag.Get("yaml"); yamlTag != "" {
+			if strings.ToLower(yamlTag) == nameLower {
+				return field, true
+			}
+		}
+
+		// Check mapstructure tag
+		if mapTag := field.Tag.Get("mapstructure"); mapTag != "" {
+			if strings.ToLower(mapTag) == nameLower {
+				return field, true
+			}
+		}
+	}
+
+	return reflect.StructField{}, false
 }
 
 // HasParameter returns true if the parameter is valid for log level changes

@@ -80,6 +80,9 @@ var (
 			},
 		},
 	}
+
+	// Track whether we've already configured the formatter to avoid resetting it
+	formatterConfigured bool
 )
 
 func (fh *RegexpFilterHook) Levels() []log.Level {
@@ -188,14 +191,18 @@ func RemoveFilter(name string) {
 }
 
 func SetLogging(logLevel log.Level) {
-	textFormatter := log.TextFormatter{}
-	textFormatter.DisableLevelTruncation = true
-	textFormatter.FullTimestamp = true
-	// Since we redirect log.Out to io.Discard, logrus will treat the output as non-terminal
-	// and won't format logs with color. Here we bypass logrus check by forcing the color
-	// and provide our check. Note that when calling SetLogging, io.Out hasn't been changed yet.
-	textFormatter.ForceColors = term.IsTerminal(log.StandardLogger().Out)
-	log.SetFormatter(&textFormatter)
+	// Only configure the formatter once to preserve formatting across log level changes
+	if !formatterConfigured {
+		textFormatter := log.TextFormatter{}
+		textFormatter.DisableLevelTruncation = true
+		textFormatter.FullTimestamp = true
+		// Since we redirect log.Out to io.Discard, logrus will treat the output as non-terminal
+		// and won't format logs with color. Here we bypass logrus check by forcing the color
+		// and provide our check. Note that when calling SetLogging, io.Out hasn't been changed yet.
+		textFormatter.ForceColors = term.IsTerminal(log.StandardLogger().Out)
+		log.SetFormatter(&textFormatter)
+		formatterConfigured = true
+	}
 
 	// Note: don't call log.SetLevel directly here as we filter at the transform
 	// hook, not at the logrus level.

@@ -26,7 +26,6 @@ import (
 	"net/http"
 	"net/url"
 	"path"
-	"strconv"
 	"strings"
 	"time"
 
@@ -42,17 +41,18 @@ var (
 	loggingParameterName string
 
 	serverSetLoggingLevelCmd = &cobra.Command{
-		Use:   "set-logging-level <level> <duration-seconds>",
+		Use:   "set-logging-level <level> <duration>",
 		Short: "Temporarily change the server's log level",
 		Long: `Temporarily change the server's log level for a specified duration.
 The log level will automatically revert to the configured level after the duration expires.
 
 Valid log levels: debug, info, warn, error, fatal, panic
+Duration should be specified as a Go duration string (e.g., 5m, 1h30m, 300s)
 
 Examples:
-  pelican server set-logging-level debug 300 -s https://my-origin.com:8447
-	pelican server set-logging-level info 1800 -s https://my-cache.com:8447 -t /path/to/token
-	pelican server set-logging-level debug 120 -s https://my-origin.com:8447 --param Logging.Origin.Xrootd`,
+  pelican server set-logging-level debug 5m -s https://my-origin.com:8447
+	pelican server set-logging-level info 30m -s https://my-cache.com:8447 -t /path/to/token
+	pelican server set-logging-level debug 2m -s https://my-origin.com:8447 --param Logging.Origin.Xrootd`,
 		Args: cobra.ExactArgs(2),
 		RunE: setLogLevel,
 	}
@@ -71,6 +71,8 @@ func setLogLevel(cmd *cobra.Command, args []string) error {
 		ctx = context.Background()
 	}
 
+	// Initialize config to load configuration file
+	// InitClient will compute Server.ExternalWebUrl from Server.Hostname and Server.WebPort
 	if err := config.InitClient(); err != nil {
 		log.Errorln("Failed to initialize client:", err)
 	}
@@ -78,11 +80,15 @@ func setLogLevel(cmd *cobra.Command, args []string) error {
 	level := args[0]
 	durationStr := args[1]
 
-	// Parse duration
-	duration, err := strconv.Atoi(durationStr)
-	if err != nil || duration <= 0 {
-		return errors.New("Duration must be a positive integer (seconds)")
+	// Parse duration as Go duration string (e.g., "5m", "1h30m", "300s")
+	duration, err := time.ParseDuration(durationStr)
+	if err != nil {
+		return errors.Wrap(err, "Duration must be a valid Go duration string (e.g., 5m, 1h30m, 300s)")
 	}
+	if duration <= 0 {
+		return errors.New("Duration must be positive")
+	}
+	durationSeconds := int(duration.Seconds())
 
 	parameterName := strings.TrimSpace(loggingParameterName)
 	if parameterName == "" {
@@ -92,6 +98,7 @@ func setLogLevel(cmd *cobra.Command, args []string) error {
 	// Construct API URL - use config if server URL not provided
 	srvURL := serverURLStr
 	if srvURL == "" {
+		// Try to get Server.ExternalWebUrl from config (computed or explicit)
 		srvURL = param.Server_ExternalWebUrl.GetString()
 		if srvURL == "" {
 			return errors.New("Server URL must be provided via --server flag or Server.ExternalWebUrl config")
@@ -106,7 +113,7 @@ func setLogLevel(cmd *cobra.Command, args []string) error {
 	// Build request payload
 	payload := map[string]interface{}{
 		"level":         level,
-		"duration":      duration,
+		"duration":      durationSeconds,
 		"parameterName": parameterName,
 	}
 

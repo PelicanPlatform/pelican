@@ -32,9 +32,11 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func TestGetServerMetadataFromReg(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Cleanup(func() {
 		ResetTestState()
 	})

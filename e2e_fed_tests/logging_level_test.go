@@ -24,7 +24,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"testing"
 	"time"
 
@@ -64,8 +63,8 @@ func TestCLILoggingLevelChanges(t *testing.T) {
 	err = viper.WriteConfigAs(configFile.Name())
 	require.NoError(t, err, "Failed to write config file for subprocess")
 
-	runSetLevel := func(paramName string, level string, duration int) {
-		args := []string{cliPath, "server", "set-logging-level", level, strconv.Itoa(duration)}
+	runSetLevel := func(paramName string, level string, duration string) {
+		args := []string{cliPath, "server", "set-logging-level", level, duration}
 		if paramName != "" {
 			args = append(args, "--param", paramName)
 		}
@@ -78,10 +77,31 @@ func TestCLILoggingLevelChanges(t *testing.T) {
 		require.NoError(t, err, "CLI command failed: %s", string(output))
 	}
 
+	runSetLevelExpectFail := func(paramName string, level string, duration string) string {
+		args := []string{cliPath, "server", "set-logging-level", level, duration}
+		if paramName != "" {
+			args = append(args, "--param", paramName)
+		}
+		cmd := exec.CommandContext(ft.Ctx, args[0], args[1:]...)
+		// Pass config file so CLI can access issuer keys for token generation
+		cmd.Env = append(os.Environ(),
+			"PELICAN_CONFIG="+configFile.Name(),
+		)
+		output, err := cmd.CombinedOutput()
+		require.Error(t, err, "CLI command should have failed")
+		return string(output)
+	}
+
 	// Get initial PIDs for xrootd processes (should be origin and cache)
 	initialPids := xrootd.GetTrackedPIDs()
 	require.NotEmpty(t, initialPids, "Expected xrootd PIDs to be tracked")
 	t.Logf("Initial xrootd PIDs: %v", initialPids)
+
+	// Test 0: Verify invalid parameter names are rejected
+	t.Log("Test 0: Verify invalid parameter names are rejected")
+	output := runSetLevelExpectFail("Logging.Origin.foo", "debug", "10s")
+	require.Contains(t, output, "Unsupported parameter", "Expected error message about unsupported parameter")
+	t.Logf("✓ Invalid parameter correctly rejected: %s", output)
 
 	// Capture the INITIAL log level BEFORE making any changes
 	// Query via param, not log.GetLevel() which is unreliable
@@ -91,8 +111,8 @@ func TestCLILoggingLevelChanges(t *testing.T) {
 	// Test 1: Change to info level (should suppress debug logs), then verify it restores
 	t.Log("Test 1: Change to info level, verify debug logs suppressed, then verify restoration")
 
-	// Set to info level for 3 seconds
-	runSetLevel("Logging.Level", "info", 2)
+	// Set to info level for 2 seconds
+	runSetLevel("Logging.Level", "info", "2s")
 
 	// Wait for the change to take effect
 	require.Eventually(t, func() bool {
@@ -121,7 +141,7 @@ func TestCLILoggingLevelChanges(t *testing.T) {
 	originBase := param.Logging_Origin_Xrootd.GetString()
 	t.Logf("Origin base XRootD logging level: %s", originBase)
 
-	runSetLevel("Logging.Origin.Xrootd", "trace", 4)
+	runSetLevel("Logging.Origin.Xrootd", "trace", "4s")
 
 	require.Eventually(t, func() bool {
 		level := param.Logging_Origin_Xrootd.GetString()
