@@ -26,6 +26,7 @@ import (
 	"net"
 
 	"github.com/jellydator/ttlcache/v3"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/param"
@@ -95,9 +96,11 @@ func (d *BrokerDialer) HasBrokerEndpoint(addr string) bool {
 func (d *BrokerDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	info := d.brokerEndpoints.Get(addr)
 	if info == nil {
+		log.Debugf("BrokerDialer: No broker endpoint found for %s, using default dialer", addr)
 		// If the endpoint is not found in the cache, use the default dialer.
 		return d.dialerContext(ctx, network, addr)
 	}
 
+	log.Debugf("BrokerDialer: Using broker to connect to %s via %s", addr, info.Value().BrokerUrl)
 	return ConnectToService(ctx, info.Value().BrokerUrl, info.Value().Prefix, addr)
 }
