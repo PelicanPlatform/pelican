@@ -21,7 +21,6 @@
 package fed_tests
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,6 +29,7 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -37,8 +37,6 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
-	"github.com/pelicanplatform/pelican/token"
-	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/xrootd"
 )
 
@@ -47,43 +45,35 @@ func TestCLILoggingLevelChanges(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	// Set up admin user for authentication
-	require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), "admin-user"))
-
 	ft := fed_test_utils.NewFedTest(t, bothPubNamespaces)
 
 	cliPath := buildPelicanCLI(t)
 	srvURL := param.Server_ExternalWebUrl.GetString()
 
-	// Create admin token for API authentication
-	ctx := ft.Ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	fedInfo, err := config.GetFederation(ctx)
-	require.NoError(t, err, "Failed to get federation info")
+	// Write current config to a temporary file so the subprocess can access issuer keys
+	configFile, err := os.CreateTemp(t.TempDir(), "pelican-config-*.yaml")
+	require.NoError(t, err)
+	defer configFile.Close()
 
-	tk := token.NewWLCGToken()
-	tk.Issuer = fedInfo.DiscoveryEndpoint
-	tk.Subject = "admin-user"
-	tk.Lifetime = 30 * time.Minute
-	tk.AddAudiences(fedInfo.DiscoveryEndpoint)
-	tk.AddScopes(token_scopes.WebUi_Access)
-	adminToken, err := tk.CreateToken()
-	require.NoError(t, err, "Failed to create admin token")
+	// Ensure critical paths are set so they get written to the config file
+	// The subprocess needs these to generate admin tokens
+	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), param.IssuerKeysDirectory.GetString()))
+	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), srvURL))
+	require.NoError(t, param.Set(param.Federation_DiscoveryUrl.GetName(), param.Federation_DiscoveryUrl.GetString()))
 
-	// Write token to a temporary file
-	tokenFile := filepath.Join(t.TempDir(), "admin-token")
-	err = os.WriteFile(tokenFile, []byte(adminToken), 0600)
-	require.NoError(t, err, "Failed to write token file")
+	err = viper.WriteConfigAs(configFile.Name())
+	require.NoError(t, err, "Failed to write config file for subprocess")
 
 	runSetLevel := func(paramName string, level string, duration int) {
-		args := []string{cliPath, "server", "set-logging-level", level, strconv.Itoa(duration), "-s", srvURL, "-t", tokenFile}
+		args := []string{cliPath, "server", "set-logging-level", level, strconv.Itoa(duration)}
 		if paramName != "" {
 			args = append(args, "--param", paramName)
 		}
 		cmd := exec.CommandContext(ft.Ctx, args[0], args[1:]...)
-		cmd.Env = append(os.Environ(), "PELICAN_TLSSKIPVERIFY=true")
+		// Pass config file so CLI can access issuer keys for token generation
+		cmd.Env = append(os.Environ(),
+			"PELICAN_CONFIG="+configFile.Name(),
+		)
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "CLI command failed: %s", string(output))
 	}
