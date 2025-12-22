@@ -86,6 +86,11 @@ func (d *BrokerDialer) UseBroker(serverType server_structs.ServerType, name, bro
 	}, ttlcache.DefaultTTL)
 }
 
+// HasBrokerEndpoint returns true if the dialer knows about a broker endpoint for the given address.
+func (d *BrokerDialer) HasBrokerEndpoint(addr string) bool {
+	return d.brokerEndpoints.Get(addr) != nil
+}
+
 // DialContext dials a connection to the given network and address using the broker.
 func (d *BrokerDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	info := d.brokerEndpoints.Get(addr)
