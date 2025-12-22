@@ -56,26 +56,15 @@ func TestHTCondorPlugin(t *testing.T) {
 	// Create temporary directory for mini HTCondor
 	tempDir, err := os.MkdirTemp("", "htcondor-pelican-test-*")
 	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+	t.Cleanup(func() { os.RemoveAll(tempDir) })
 
 	// Create secure socket directory in /tmp to avoid path length issues
 	socketDir, err := os.MkdirTemp("/tmp", "htc_sock_*")
 	require.NoError(t, err)
-	defer os.RemoveAll(socketDir)
+	t.Cleanup(func() { os.RemoveAll(socketDir) })
 
 	t.Logf("Using temporary directory: %s", tempDir)
 	t.Logf("Using socket directory: %s", socketDir)
-
-	// Generate signing key for HTCondor authentication
-	passwordsDir := filepath.Join(tempDir, "passwords.d")
-	require.NoError(t, os.MkdirAll(passwordsDir, 0700))
-	signingKeyPath := filepath.Join(passwordsDir, "POOL")
-	// Generate a simple signing key for testing
-	key := make([]byte, 32)
-	for i := range key {
-		key[i] = byte(i)
-	}
-	require.NoError(t, os.WriteFile(signingKeyPath, key, 0600))
 
 	// Set XRD_PLUGINCONFDIR so XRootD can load the pelican protocol handler
 	// This allows the cache to handle pelican:// URLs
@@ -109,7 +98,7 @@ Origin:
 	repoRoot, err := findRepoRoot()
 	require.NoError(t, err, "Failed to find git repository root")
 
-	buildCmd := exec.Command("go", "build", "-o", pelicanBinary, "./cmd")
+	buildCmd := exec.Command("go", "build", "-buildvcs=false", "-o", pelicanBinary, "./cmd")
 	buildCmd.Dir = repoRoot
 	output, err := buildCmd.CombinedOutput()
 	if err != nil {
@@ -120,7 +109,7 @@ Origin:
 
 	// Create HTCondor configuration
 	configFile := filepath.Join(tempDir, "condor_config")
-	require.NoError(t, writeMiniCondorConfig(configFile, tempDir, socketDir, passwordsDir, pelicanBinary))
+	require.NoError(t, writeMiniCondorConfig(configFile, tempDir, socketDir, pelicanBinary))
 
 	// Set CONDOR_CONFIG environment variable
 	t.Setenv("CONDOR_CONFIG", configFile)
@@ -295,7 +284,7 @@ func findHTCondorLibexec() (string, error) {
 }
 
 // writeMiniCondorConfig writes a minimal HTCondor configuration for testing
-func writeMiniCondorConfig(configFile, tempDir, socketDir, passwordsDir, pelicanBinary string) error {
+func writeMiniCondorConfig(configFile, tempDir, socketDir, pelicanBinary string) error {
 	// Find HTCondor binaries in PATH
 	sbinDir, err := findHTCondorSbin()
 	if err != nil {
@@ -329,18 +318,13 @@ LIBEXEC = %s
 # Socket directory for shared port
 DAEMON_SOCKET_DIR = %s
 
-# Use secure socket directory
-SEC_PASSWORD_DIRECTORY = %s
-SEC_TOKEN_DIRECTORY = $(LOCAL_DIR)/tokens.d
-
 # Network configuration - use port 0 to let condor choose free ports
 COLLECTOR_HOST = 127.0.0.1:0
 BIND_ALL_INTERFACES = False
 NETWORK_INTERFACE = 127.0.0.1
-USE_SHARED_PORT = True
-DAEMON_LIST = MASTER, COLLECTOR, NEGOTIATOR, SCHEDD, STARTD, SHARED_PORT
+DAEMON_LIST = MASTER, COLLECTOR, NEGOTIATOR, SCHEDD, STARTD
 
-# Address files for dynamic port allocation
+# Address files for dynamic port allocation (the address file is dropped by the daemon when it is ready)
 COLLECTOR_ADDRESS_FILE = $(LOG)/.collector_address
 SCHEDD_ADDRESS_FILE = $(LOG)/.schedd_address
 
@@ -353,14 +337,13 @@ ALLOW_ADMINISTRATOR = *
 # Security settings for testing
 SEC_DEFAULT_AUTHENTICATION = OPTIONAL
 SEC_DEFAULT_AUTHENTICATION_METHODS = FS, PASSWORD
-SEC_PASSWORD_FILE = $(SEC_PASSWORD_DIRECTORY)/POOL
 
 # File transfer plugin configuration
 FILETRANSFER_PLUGINS = $(LIBEXEC)/pelican_plugin
 
 # Schedd configuration
 SCHEDD_INTERVAL = 5
-NEGOTIATOR_INTERVAL = 10
+NEGOTIATOR_INTERVAL = 5
 
 # Minimal machine resources for testing
 NUM_CPUS = 1
@@ -377,7 +360,7 @@ WANT_VACATE = False
 
 # Enable file transfer
 ENABLE_FILE_TRANSFER = TRUE
-`, tempDir, sbinDir, binDir, libexecDir, socketDir, passwordsDir)
+`, tempDir, sbinDir, binDir, libexecDir, socketDir)
 
 	if err := os.WriteFile(configFile, []byte(config), 0644); err != nil {
 		return err
@@ -418,10 +401,9 @@ func startCondorMaster(ctx context.Context, configFile, logDir string) (*exec.Cm
 // stopCondorMaster stops the condor_master daemon
 func stopCondorMaster(cmd *exec.Cmd, t *testing.T) {
 	if cmd != nil && cmd.Process != nil {
-		// Try graceful shutdown first
-		offCmd := exec.Command("condor_off", "-daemon", "master")
-		if err := offCmd.Run(); err != nil {
-			t.Logf("Warning: condor_off failed: %v", err)
+		// Send SIGTERM to condor_master for graceful shutdown
+		if err := cmd.Process.Signal(os.Interrupt); err != nil {
+			t.Logf("Warning: failed to send signal to condor_master: %v", err)
 		}
 
 		// Wait a bit for graceful shutdown
@@ -456,7 +438,7 @@ func waitForCondor(tempDir string, timeout time.Duration, t *testing.T) error {
 			t.Logf("MasterLog tail: %s", string(logData[max(0, len(logData)-500):]))
 		}
 
-		time.Sleep(2 * time.Second)
+		time.Sleep(700 * time.Millisecond)
 	}
 
 	// Dump logs on timeout
