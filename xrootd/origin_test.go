@@ -139,6 +139,8 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 		}
 	}()
 	config.UpdateConfigFromListener(ln)
+	// Clear cached issuer URL so it gets recalculated with the actual port
+	require.NoError(t, param.Set(param.Server_IssuerUrl.GetName(), ""))
 
 	err = CheckXrootdEnv(originServer)
 	require.NoError(t, err)
@@ -190,11 +192,6 @@ func TestOrigin(t *testing.T) {
 
 	defer server_utils.ResetTestState()
 
-	// Get available, unique ports
-	ports, err := test_utils.GetUniqueAvailablePorts(2)
-	require.NoError(t, err)
-	require.Len(t, ports, 2)
-
 	require.NoError(t, param.Set(param.Origin_StoragePrefix.GetName(), t.TempDir()))
 	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/test"))
 	require.NoError(t, param.Set(param.Origin_StorageType.GetName(), "posix"))
@@ -202,8 +199,8 @@ func TestOrigin(t *testing.T) {
 	require.NoError(t, param.Set(param.Origin_EnableCmsd.GetName(), false))
 	require.NoError(t, param.Set(param.Origin_EnableMacaroons.GetName(), false))
 	require.NoError(t, param.Set(param.Origin_EnableVoms.GetName(), false))
-	require.NoError(t, param.Set(param.Origin_Port.GetName(), ports[0]))
-	require.NoError(t, param.Set(param.Server_WebPort.GetName(), ports[1]))
+	require.NoError(t, param.Set(param.Origin_Port.GetName(), 0))
+	require.NoError(t, param.Set(param.Server_WebPort.GetName(), 0))
 	require.NoError(t, param.Set(param.TLSSkipVerify.GetName(), true))
 	require.NoError(t, param.Set(param.Logging_Origin_Scitokens.GetName(), "debug"))
 
@@ -211,7 +208,7 @@ func TestOrigin(t *testing.T) {
 	defer mockupCancel()
 
 	// In this case a 403 means its running
-	err = server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString(), "xrootd", 403, false)
+	err := server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString(), "xrootd", 403, false)
 	if err != nil {
 		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
 	}
@@ -238,16 +235,11 @@ func TestMultiExportOrigin(t *testing.T) {
 	err := viper.ReadConfig(strings.NewReader(multiExportOriginConfig))
 	require.NoError(t, err, "error reading config")
 
-	// Get available, unique ports and pre-allocate for xrootd startup.
-	ports, err := test_utils.GetUniqueAvailablePorts(2)
-	require.NoError(t, err)
-	require.Len(t, ports, 2)
-
 	// Disable functionality we're not using for the tests
 	require.NoError(t, param.Set(param.Origin_EnableCmsd.GetName(), false))
 	require.NoError(t, param.Set(param.Origin_EnableVoms.GetName(), false))
-	require.NoError(t, param.Set(param.Origin_Port.GetName(), ports[0]))
-	require.NoError(t, param.Set(param.Server_WebPort.GetName(), ports[1]))
+	require.NoError(t, param.Set(param.Origin_Port.GetName(), 0))
+	require.NoError(t, param.Set(param.Server_WebPort.GetName(), 0))
 	require.NoError(t, param.Set(param.TLSSkipVerify.GetName(), true))
 	require.NoError(t, param.Set(param.Logging_Origin_Scitokens.GetName(), "debug"))
 
@@ -263,8 +255,6 @@ func TestMultiExportOrigin(t *testing.T) {
 	require.Len(t, exports, 2)
 
 	// Override the object store prefix to a temp directory
-	issuerUrl, err := config.GetServerIssuerURL()
-	require.NoError(t, err)
 	for i := range exports {
 		exports[i].StoragePrefix = t.TempDir()
 	}
@@ -278,6 +268,8 @@ func TestMultiExportOrigin(t *testing.T) {
 		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
 	}
 	fileTests := server_utils.TestFileTransferImpl{}
+	issuerUrl, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
 
 	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), param.Origin_TokenAudience.GetString(), issuerUrl, server_utils.ServerSelfTest)
 	require.NoError(t, err)
@@ -295,17 +287,13 @@ func mockupS3Origin(ctx context.Context, egrp *errgroup.Group, t *testing.T, fed
 	require.NoError(t, param.Set(param.Origin_StorageType.GetName(), "s3"))
 	require.NoError(t, param.Set(param.Origin_EnablePublicReads.GetName(), true))
 
-	ports, err := test_utils.GetUniqueAvailablePorts(2)
-	require.NoError(t, err)
-	require.Len(t, ports, 2)
-
 	// Disable functionality we're not using (and is difficult to make work on Mac)
 	require.NoError(t, param.Set(param.Origin_EnableCmsd.GetName(), false))
 	require.NoError(t, param.Set(param.Origin_EnableMacaroons.GetName(), false))
 	require.NoError(t, param.Set(param.Origin_EnableVoms.GetName(), false))
 	require.NoError(t, param.Set(param.Origin_SelfTest.GetName(), false))
-	require.NoError(t, param.Set(param.Origin_Port.GetName(), ports[0]))
-	require.NoError(t, param.Set(param.Server_WebPort.GetName(), ports[1]))
+	require.NoError(t, param.Set(param.Origin_Port.GetName(), 0))
+	require.NoError(t, param.Set(param.Server_WebPort.GetName(), 0))
 	require.NoError(t, param.Set(param.TLSSkipVerify.GetName(), true))
 
 	return originMockup(ctx, egrp, t)
@@ -447,10 +435,6 @@ func TestPosixOriginWithSentinel(t *testing.T) {
 	err = os.Chmod(tmpPath, 0755)
 	require.NoError(t, err)
 
-	ports, err := test_utils.GetUniqueAvailablePorts(2)
-	require.NoError(t, err)
-	require.Len(t, ports, 2)
-
 	require.NoError(t, param.Set(param.Origin_StoragePrefix.GetName(), tmpPath))
 	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/test"))
 	require.NoError(t, param.Set(param.Origin_StorageType.GetName(), "posix"))
@@ -458,8 +442,8 @@ func TestPosixOriginWithSentinel(t *testing.T) {
 	require.NoError(t, param.Set(param.Origin_EnableCmsd.GetName(), false))
 	require.NoError(t, param.Set(param.Origin_EnableMacaroons.GetName(), false))
 	require.NoError(t, param.Set(param.Origin_EnableVoms.GetName(), false))
-	require.NoError(t, param.Set(param.Origin_Port.GetName(), ports[0]))
-	require.NoError(t, param.Set(param.Server_WebPort.GetName(), ports[1]))
+	require.NoError(t, param.Set(param.Origin_Port.GetName(), 0))
+	require.NoError(t, param.Set(param.Server_WebPort.GetName(), 0))
 	require.NoError(t, param.Set(param.TLSSkipVerify.GetName(), true))
 	require.NoError(t, param.Set(param.Logging_Origin_Scitokens.GetName(), "trace"))
 
