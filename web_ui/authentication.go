@@ -296,7 +296,7 @@ func setLoginCookie(ctx *gin.Context, userRecord *database.User, groups []string
 	// For backwards compatibility (see #398), add additional scopes
 	// for expert admins who extract the login cookie from their browser
 	// and use it to query monitoring endpoints directly.
-	if isAdmin, _ := CheckAdmin(loginCookieTokenCfg.Subject); isAdmin {
+	if isAdmin, _ := CheckAdmin(loginCookieTokenCfg.Subject, groups); isAdmin {
 		loginCookieTokenCfg.AddScopes(token_scopes.Monitoring_Query, token_scopes.Monitoring_Scrape)
 	}
 
@@ -368,20 +368,42 @@ func RequireAuthMiddleware(ctx *gin.Context) {
 // indicating the error message.
 //
 // Note that by default it only checks if user == "admin". If you have a custom list of admin identifiers
-// to check, you should set Server.UIAdminUsers. See parameters.yaml for details.
-func CheckAdmin(user string) (isAdmin bool, message string) {
+// to check, you should set Server.UIAdminUsers. If you want to grant admin privileges based on group
+// membership, you should set Server.AdminGroups.
+func CheckAdmin(user string, groups []string) (isAdmin bool, message string) {
 	if user == "admin" {
 		return true, ""
 	}
-	adminList := param.Server_UIAdminUsers.GetStringSlice()
-	if !param.Server_UIAdminUsers.IsSet() {
-		return false, "Server.UIAdminUsers is not set, and user is not root user. Admin check returns false"
-	}
-	for _, admin := range adminList {
-		if user == admin {
-			return true, ""
+
+	// Check admin groups if groups are provided
+	if len(groups) > 0 {
+		adminGroups := param.Server_AdminGroups.GetStringSlice()
+		if param.Server_AdminGroups.IsSet() && len(adminGroups) > 0 {
+			for _, userGroup := range groups {
+				for _, adminGroup := range adminGroups {
+					if userGroup == adminGroup {
+						return true, ""
+					}
+				}
+			}
 		}
 	}
+
+	// Check admin users
+	adminList := param.Server_UIAdminUsers.GetStringSlice()
+	if param.Server_UIAdminUsers.IsSet() {
+		for _, admin := range adminList {
+			if user == admin {
+				return true, ""
+			}
+		}
+	}
+
+	// If neither admin groups nor admin users are configured, and user is not "admin", deny access
+	if !param.Server_AdminGroups.IsSet() && !param.Server_UIAdminUsers.IsSet() {
+		return false, "Server.UIAdminUsers and Server.UIAdminGroups are not set, and user is not root user. Admin check returns false"
+	}
+
 	return false, "You don't have permission to perform this action"
 }
 
@@ -398,7 +420,14 @@ func AdminAuthHandler(ctx *gin.Context) {
 			})
 		return
 	}
-	isAdmin, msg := CheckAdmin(user)
+	// Get groups from context if available
+	var groups []string
+	if groupsIface, exists := ctx.Get("Groups"); exists {
+		if groupsSlice, ok := groupsIface.([]string); ok {
+			groups = groupsSlice
+		}
+	}
+	isAdmin, msg := CheckAdmin(user, groups)
 	if isAdmin {
 		ctx.Next()
 		return
@@ -419,7 +448,7 @@ func DowntimeAuthHandler(ctx *gin.Context) {
 	user, _, groups, err := GetUserGroups(ctx)
 	if user != "" && err == nil {
 		// User has valid cookie, check if admin
-		isAdmin, _ := CheckAdmin(user)
+		isAdmin, _ := CheckAdmin(user, groups)
 		if isAdmin {
 			ctx.Set("User", user)
 			ctx.Set("Groups", groups)
@@ -641,7 +670,7 @@ func logoutHandler(ctx *gin.Context) {
 // Returns the authentication status of the current user, including user id and role
 func whoamiHandler(ctx *gin.Context) {
 	res := WhoAmIRes{}
-	if user, _, _, err := GetUserGroups(ctx); err != nil || user == "" {
+	if user, _, groups, err := GetUserGroups(ctx); err != nil || user == "" {
 		res.Authenticated = false
 		ctx.JSON(http.StatusOK, res)
 	} else {
@@ -650,7 +679,7 @@ func whoamiHandler(ctx *gin.Context) {
 
 		// Set header to carry CSRF token
 		ctx.Header("X-CSRF-Token", csrf.Token(ctx.Request))
-		isAdmin, _ := CheckAdmin(user)
+		isAdmin, _ := CheckAdmin(user, groups)
 		if isAdmin {
 			res.Role = AdminRole
 		} else {

@@ -342,9 +342,16 @@ func getNamespaceRegFields(ctx *gin.Context) {
 // POST /namespaces
 // PUT /namespaces/:id
 func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
-	user := ctx.GetString("User")
 	accessToken := ctx.Query("access_token")
-	isAdmin, _ := web_ui.CheckAdmin(user)
+	user, _, groups, err := web_ui.GetUserGroups(ctx)
+	if err != nil {
+		log.Error("Failed to get user groups: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to get user groups"})
+		return
+	}
+	isAdmin, _ := web_ui.CheckAdmin(user, groups)
 
 	id := 0 // namespace ID when doing update, will be populated later
 	if user == "" {
@@ -654,7 +661,14 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 //
 // GET /namesapces/:id
 func getNamespace(ctx *gin.Context) {
-	user := ctx.GetString("User")
+	user, _, groups, err := web_ui.GetUserGroups(ctx)
+	if err != nil {
+		log.Error("Failed to get user groups: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to get user groups"})
+		return
+	}
 	idStr := ctx.Param("id")
 	accessToken := ctx.Query("access_token")
 	id, err := strconv.Atoi(idStr)
@@ -681,7 +695,7 @@ func getNamespace(ctx *gin.Context) {
 		return
 	}
 
-	isAdmin, _ := web_ui.CheckAdmin(user)
+	isAdmin, _ := web_ui.CheckAdmin(user, groups)
 	belongsTo := false
 
 	if !isAdmin { // Not admin, need to check if the namespace belongs to the user
