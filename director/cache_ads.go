@@ -301,8 +301,10 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 	if sAd.BrokerURL.Host != "" && brokerDialer != nil {
 		sType := server_structs.NewServerType()
 		sType.SetString(sAd.Type)
+		log.Debugf("Director registering broker endpoint for %s WebURL=%s BrokerURL=%s", sAd.Type, sAd.WebURL.Host, sAd.BrokerURL.String())
 		brokerDialer.UseBroker(sType, sAd.WebURL.Host, sAd.BrokerURL.String(), sAd.RegistryPrefix)
 		if sAd.Type == server_structs.OriginType.String() {
+			log.Debugf("Director registering broker endpoint for Origin DataURL=%s", sAd.URL.Host)
 			brokerDialer.UseBroker(sType, sAd.URL.Host, sAd.BrokerURL.String(), sAd.RegistryPrefix)
 		}
 	}

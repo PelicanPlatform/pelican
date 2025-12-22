@@ -23,7 +23,7 @@ package origin_test
 import (
 	_ "embed"
 	"net/http"
-	"strconv"
+	"net/url"
 	"testing"
 	"time"
 
@@ -62,10 +62,12 @@ func TestBrokerApi(t *testing.T) {
 	require.NoError(t, err)
 
 	// Wait for the director to register the origin's broker endpoint
-	originAddr := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Origin_Port.GetInt())
+	// We need to extract the host:port from the external web URL since that's what the HTTP client will dial
+	externalWebUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+	require.NoError(t, err)
 	require.Eventually(t, func() bool {
-		return director.HasBrokerForAddr(originAddr)
-	}, 5*time.Second, 50*time.Millisecond, "Director did not register origin broker endpoint")
+		return director.HasBrokerForAddr(externalWebUrl.Host)
+	}, 5*time.Second, 50*time.Millisecond, "Director did not register origin broker endpoint for "+externalWebUrl.Host)
 
 	httpc := http.Client{
 		Transport: config.GetTransport().Clone(),
