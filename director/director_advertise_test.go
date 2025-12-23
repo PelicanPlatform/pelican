@@ -30,7 +30,6 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -38,10 +37,12 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // Test for a director disappearing
 func TestDirectorShutdown(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -70,10 +71,10 @@ func TestDirectorShutdown(t *testing.T) {
 		}
 	}))
 	dirAd.AdvertiseUrl = ts.URL
-	viper.Set(param.Server_DirectorUrls.GetName(), ts.URL)
+	require.NoError(t, param.Set(param.Server_DirectorUrls.GetName(), ts.URL))
 	defer ts.Close()
 
-	viper.Set(param.Server_AdLifetime.GetName(), "100ms")
+	require.NoError(t, param.Set(param.Server_AdLifetime.GetName(), "100ms"))
 	fed_test_utils.NewFedTest(t, "")
 	time.Sleep(time.Duration(110 * time.Millisecond))
 	ads := server_utils.GetDirectorAds()
@@ -83,6 +84,7 @@ func TestDirectorShutdown(t *testing.T) {
 // Significantly decrease the ad lifetime; ensure forwarding from director and
 // multiple servers works.
 func TestExpirationDirector(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -113,10 +115,10 @@ func TestExpirationDirector(t *testing.T) {
 		}
 	}))
 	dirAd.AdvertiseUrl = ts.URL
-	viper.Set(param.Server_DirectorUrls.GetName(), ts.URL)
+	require.NoError(t, param.Set(param.Server_DirectorUrls.GetName(), ts.URL))
 	defer ts.Close()
 
-	viper.Set(param.Server_AdLifetime.GetName(), "100ms")
+	require.NoError(t, param.Set(param.Server_AdLifetime.GetName(), "100ms"))
 	fed_test_utils.NewFedTest(t, "")
 	time.Sleep(time.Duration(500 * time.Millisecond))
 	assert.Less(t, 10, int(listDirectorCount.Load()))
@@ -127,6 +129,7 @@ func TestExpirationDirector(t *testing.T) {
 }
 
 func TestForwardDirector(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -154,7 +157,7 @@ func TestForwardDirector(t *testing.T) {
 		}
 	}))
 	dirAd.AdvertiseUrl = ts.URL
-	viper.Set(param.Server_DirectorUrls.GetName(), ts.URL)
+	require.NoError(t, param.Set(param.Server_DirectorUrls.GetName(), ts.URL))
 	defer ts.Close()
 
 	fed_test_utils.NewFedTest(t, "")

@@ -34,7 +34,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -50,10 +49,10 @@ import (
 func setupPingEngine(t *testing.T, ctx context.Context, egrp *errgroup.Group) (chan bool, context.CancelFunc, string) {
 	dirname := t.TempDir()
 	server_utils.ResetTestState()
-	viper.Set(param.Logging_Level.GetName(), "Debug")
-	viper.Set("ConfigDir", dirname)
-	viper.Set(param.Server_WebPort.GetName(), 8444)
-	viper.Set(param.Origin_Port.GetName(), 8443)
+	require.NoError(t, param.Set(param.Logging_Level.GetName(), "Debug"))
+	require.NoError(t, param.Set("ConfigDir", dirname))
+	require.NoError(t, param.Set(param.Server_WebPort.GetName(), 8444))
+	require.NoError(t, param.Set(param.Origin_Port.GetName(), 8443))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
@@ -113,6 +112,7 @@ func setupPingEngine(t *testing.T, ctx context.Context, egrp *errgroup.Group) (c
 // Test the engine startup, serving a single request using
 // TLS validation, then a clean shutdown.
 func TestRunEngine(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -133,6 +133,7 @@ func TestRunEngine(t *testing.T) {
 // Ensure that if the TLS certificate is updated on disk then new
 // connections will use the new version.
 func TestUpdateCert(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()

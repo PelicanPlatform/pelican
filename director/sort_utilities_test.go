@@ -34,6 +34,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // Geo Override Yaml mockup
@@ -42,6 +43,7 @@ import (
 var yamlMockup string
 
 func TestCheckOverrides(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	t.Cleanup(func() {
 		server_utils.ResetTestState()

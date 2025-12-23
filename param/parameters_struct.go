@@ -53,6 +53,7 @@ type Config struct {
 		LowWatermark string `mapstructure:"lowwatermark" yaml:"LowWatermark"`
 		MetaLocations []string `mapstructure:"metalocations" yaml:"MetaLocations"`
 		NamespaceLocation string `mapstructure:"namespacelocation" yaml:"NamespaceLocation"`
+		PSSOrigin string `mapstructure:"pssorigin" yaml:"PSSOrigin"`
 		PermittedNamespaces []string `mapstructure:"permittednamespaces" yaml:"PermittedNamespaces"`
 		Port int `mapstructure:"port" yaml:"Port"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
@@ -69,6 +70,7 @@ type Config struct {
 		DirectorRetries int `mapstructure:"directorretries" yaml:"DirectorRetries"`
 		DisableHttpProxy bool `mapstructure:"disablehttpproxy" yaml:"DisableHttpProxy"`
 		DisableProxyFallback bool `mapstructure:"disableproxyfallback" yaml:"DisableProxyFallback"`
+		EnableOverwrites bool `mapstructure:"enableoverwrites" yaml:"EnableOverwrites"`
 		IsPlugin bool `mapstructure:"isplugin" yaml:"IsPlugin"`
 		MaximumDownloadSpeed int `mapstructure:"maximumdownloadspeed" yaml:"MaximumDownloadSpeed"`
 		MinimumDownloadSpeed int `mapstructure:"minimumdownloadspeed" yaml:"MinimumDownloadSpeed"`
@@ -295,12 +297,14 @@ type Config struct {
 		RequireKeyChaining bool `mapstructure:"requirekeychaining" yaml:"RequireKeyChaining"`
 		RequireOriginApproval bool `mapstructure:"requireoriginapproval" yaml:"RequireOriginApproval"`
 	} `mapstructure:"registry" yaml:"Registry"`
+	RuntimeDir string `mapstructure:"runtimedir" yaml:"RuntimeDir"`
 	Server struct {
 		AdLifetime time.Duration `mapstructure:"adlifetime" yaml:"AdLifetime"`
 		AdvertisementInterval time.Duration `mapstructure:"advertisementinterval" yaml:"AdvertisementInterval"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DirectorUrls []string `mapstructure:"directorurls" yaml:"DirectorUrls"`
 		DropPrivileges bool `mapstructure:"dropprivileges" yaml:"DropPrivileges"`
+		EnablePKCS11 bool `mapstructure:"enablepkcs11" yaml:"EnablePKCS11"`
 		EnablePprof bool `mapstructure:"enablepprof" yaml:"EnablePprof"`
 		EnableUI bool `mapstructure:"enableui" yaml:"EnableUI"`
 		ExternalWebUrl string `mapstructure:"externalweburl" yaml:"ExternalWebUrl"`
@@ -382,6 +386,7 @@ type Config struct {
 		EnableLocalMonitoring bool `mapstructure:"enablelocalmonitoring" yaml:"EnableLocalMonitoring"`
 		HttpMaxDelay time.Duration `mapstructure:"httpmaxdelay" yaml:"HttpMaxDelay"`
 		LocalMonitoringHost string `mapstructure:"localmonitoringhost" yaml:"LocalMonitoringHost"`
+		LocalMonitoringPort int `mapstructure:"localmonitoringport" yaml:"LocalMonitoringPort"`
 		MacaroonsKeyFile string `mapstructure:"macaroonskeyfile" yaml:"MacaroonsKeyFile"`
 		ManagerHost string `mapstructure:"managerhost" yaml:"ManagerHost"`
 		ManagerPort int `mapstructure:"managerport" yaml:"ManagerPort"`
@@ -430,6 +435,7 @@ type configWithType struct {
 		LowWatermark struct { Type string; Value string }
 		MetaLocations struct { Type string; Value []string }
 		NamespaceLocation struct { Type string; Value string }
+		PSSOrigin struct { Type string; Value string }
 		PermittedNamespaces struct { Type string; Value []string }
 		Port struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
@@ -446,6 +452,7 @@ type configWithType struct {
 		DirectorRetries struct { Type string; Value int }
 		DisableHttpProxy struct { Type string; Value bool }
 		DisableProxyFallback struct { Type string; Value bool }
+		EnableOverwrites struct { Type string; Value bool }
 		IsPlugin struct { Type string; Value bool }
 		MaximumDownloadSpeed struct { Type string; Value int }
 		MinimumDownloadSpeed struct { Type string; Value int }
@@ -672,12 +679,14 @@ type configWithType struct {
 		RequireKeyChaining struct { Type string; Value bool }
 		RequireOriginApproval struct { Type string; Value bool }
 	}
+	RuntimeDir struct { Type string; Value string }
 	Server struct {
 		AdLifetime struct { Type string; Value time.Duration }
 		AdvertisementInterval struct { Type string; Value time.Duration }
 		DbLocation struct { Type string; Value string }
 		DirectorUrls struct { Type string; Value []string }
 		DropPrivileges struct { Type string; Value bool }
+		EnablePKCS11 struct { Type string; Value bool }
 		EnablePprof struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
 		ExternalWebUrl struct { Type string; Value string }
@@ -759,6 +768,7 @@ type configWithType struct {
 		EnableLocalMonitoring struct { Type string; Value bool }
 		HttpMaxDelay struct { Type string; Value time.Duration }
 		LocalMonitoringHost struct { Type string; Value string }
+		LocalMonitoringPort struct { Type string; Value int }
 		MacaroonsKeyFile struct { Type string; Value string }
 		ManagerHost struct { Type string; Value string }
 		ManagerPort struct { Type string; Value int }

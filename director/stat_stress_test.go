@@ -35,7 +35,6 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -45,6 +44,7 @@ import (
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 var (
@@ -112,6 +112,10 @@ func countInterestingStacks() int {
 // The goal is to generate significant load on the "statUtils" cache within the director
 // and related code to see if we can generate memory leaks / hoarding.
 func TestStatMemory(t *testing.T) {
+	if os.Getenv("PELICAN_RUN_STAT_STRESS") != "1" {
+		t.Skip("set PELICAN_RUN_STAT_STRESS=1 to enable this stress test")
+	}
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
 	// To allow for developer control over testing, we add two environment variables
@@ -130,17 +134,17 @@ func TestStatMemory(t *testing.T) {
 	}
 	snapshotHeap := os.Getenv("PELICAN_STRESS_SNAPSHOT_HEAP") == "1"
 
-	viper.Set(param.Xrootd_EnableLocalMonitoring.GetName(), false)
+	require.NoError(t, param.Set(param.Xrootd_EnableLocalMonitoring.GetName(), false))
 	// Under testing on a laptop, we saw up to 1 second long delays happen deep in the
 	// go HTTP server framework (GC?  Lock contention?  Unclear...).  By bumping the ad
 	// lifetime to 2 seconds, we get repeated ad updates through the lifetime of the
 	// test - useful for checking propagation of changes - but don't get the spurious
 	// failures if there's a short blip in availability.
-	viper.Set(param.Server_AdLifetime.GetName(), "2000ms")
-	viper.Set(param.Cache_SelfTest.GetName(), false)
-	viper.Set(param.Origin_DirectorTest.GetName(), false)
-	viper.Set(param.Origin_SelfTest.GetName(), false)
-	viper.Set(param.Director_CachePresenceCapacity.GetName(), 500)
+	require.NoError(t, param.Set(param.Server_AdLifetime.GetName(), "2000ms"))
+	require.NoError(t, param.Set(param.Cache_SelfTest.GetName(), false))
+	require.NoError(t, param.Set(param.Origin_DirectorTest.GetName(), false))
+	require.NoError(t, param.Set(param.Origin_SelfTest.GetName(), false))
+	require.NoError(t, param.Set(param.Director_CachePresenceCapacity.GetName(), 500))
 	fed := fed_test_utils.NewFedTest(t, directorPublicCfg)
 	config.DisableLoggingCensor()
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())

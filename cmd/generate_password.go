@@ -29,7 +29,6 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"github.com/tg123/go-htpasswd"
 	"golang.org/x/term"
 
@@ -116,7 +115,9 @@ func passwordMain(cmd *cobra.Command, args []string) error {
 		return errors.Wrapf(err, "failed to create directory for the password file at %s", filepath.Dir(outPasswordPath))
 	}
 
-	viper.Set(param.Server_UIPasswordFile.GetName(), outPasswordPath)
+	if err := param.Set(param.Server_UIPasswordFile.GetName(), outPasswordPath); err != nil {
+		return err
+	}
 	file, err := os.OpenFile(outPasswordPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return err

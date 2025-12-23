@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 
+	classad "github.com/PelicanPlatform/classad/classad"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 
@@ -137,6 +138,131 @@ func bindLegacyClientEnv() {
 				viper.Set(param.Client_PreferredCaches.GetName(), strings.Split(val, ","))
 				break
 			}
+		}
+	}
+}
+
+// bindClassAdConfig reads configuration from the HTCondor job ClassAd file.
+// It looks for attributes prefixed with "PelicanCfg_" and converts them to Pelican configuration.
+// For example, "PelicanCfg_Client_PreferredCaches" becomes "Client.PreferredCaches".
+// This function should be called from InitClient after InitConfigInternal.
+func bindClassAdConfig() {
+	// Look for the condor job ad file
+	condorJobAd, isPresent := os.LookupEnv("_CONDOR_JOB_AD")
+	if !isPresent {
+		// No job ad file specified, nothing to do
+		return
+	}
+
+	// Open the job ad file
+	file, err := os.Open(condorJobAd)
+	if err != nil {
+		log.Debugf("Unable to open job ad file %s: %v", condorJobAd, err)
+		return
+	}
+	defer file.Close()
+
+	// Parse the ClassAd using old-style reader (newline-delimited format)
+	reader := classad.NewOldReader(file)
+	if !reader.Next() {
+		if err := reader.Err(); err != nil {
+			log.Debugf("Unable to parse job ad file %s: %v", condorJobAd, err)
+		}
+		return
+	}
+
+	ad := reader.ClassAd()
+	if ad == nil {
+		log.Debugf("No ClassAd found in job ad file %s", condorJobAd)
+		return
+	}
+
+	// Iterate through all attributes in the ClassAd looking for PelicanCfg_ prefix
+	for _, attrName := range ad.GetAttributes() {
+		// Skip attributes that don't have the PelicanCfg_ prefix
+		if !strings.HasPrefix(attrName, "PelicanCfg_") {
+			continue
+		}
+
+		// Convert PelicanCfg_Client_PreferredCaches -> Client.PreferredCaches
+		viperKey := strings.Replace(strings.TrimPrefix(attrName, "PelicanCfg_"), "_", ".", -1)
+
+		// Evaluate the attribute to get its value
+		attrValue := ad.EvaluateAttr(attrName)
+		if attrValue.IsUndefined() {
+			log.Debugf("ClassAd attribute %s is undefined, skipping", attrName)
+			continue
+		}
+
+		// Set the value in viper based on the type
+		if attrValue.IsString() {
+			if strVal, err := attrValue.StringValue(); err == nil {
+				viper.Set(viperKey, strVal)
+				log.Debugf("Set %s = %s from job ClassAd attribute %s", viperKey, strVal, attrName)
+			} else {
+				log.Debugf("Failed to get string value for ClassAd attribute %s: %v", attrName, err)
+			}
+		} else if attrValue.IsInteger() {
+			if intVal, err := attrValue.IntValue(); err == nil {
+				viper.Set(viperKey, intVal)
+				log.Debugf("Set %s = %d from job ClassAd attribute %s", viperKey, intVal, attrName)
+			} else {
+				log.Debugf("Failed to get integer value for ClassAd attribute %s: %v", attrName, err)
+			}
+		} else if attrValue.IsBool() {
+			if boolVal, err := attrValue.BoolValue(); err == nil {
+				viper.Set(viperKey, boolVal)
+				log.Debugf("Set %s = %t from job ClassAd attribute %s", viperKey, boolVal, attrName)
+			} else {
+				log.Debugf("Failed to get boolean value for ClassAd attribute %s: %v", attrName, err)
+			}
+		} else if attrValue.IsReal() {
+			// For real numbers, get the actual float64 value
+			if realVal, err := attrValue.RealValue(); err == nil {
+				viper.Set(viperKey, realVal)
+				log.Debugf("Set %s = %f from job ClassAd attribute %s", viperKey, realVal, attrName)
+			} else {
+				log.Debugf("Failed to get real value for ClassAd attribute %s: %v", attrName, err)
+			}
+		} else if attrValue.IsList() {
+			// For lists, use ListValue() to get the list items
+			items, err := attrValue.ListValue()
+			if err != nil {
+				log.Debugf("Failed to get list value for ClassAd attribute %s: %v", attrName, err)
+				continue
+			}
+
+			// Convert list items to string slice
+			out := make([]string, len(items))
+			for i, v := range items {
+				if !v.IsString() {
+					log.Debugf("ClassAd attribute %s list element %d is %v, want string; skipping attribute", attrName, i, v.Type())
+					continue
+				}
+				out[i], _ = v.StringValue()
+			}
+
+			viper.Set(viperKey, out)
+			log.Debugf("Set %s = %v from job ClassAd attribute %s", viperKey, out, attrName)
+		} else if attrValue.IsClassAd() {
+			// For nested ClassAds, use the classad Unmarshal helper directly
+			nestedAd, err := attrValue.ClassAdValue()
+			if err != nil {
+				log.Debugf("Failed to get ClassAd value for attribute %s: %v", attrName, err)
+				continue
+			}
+
+			var result map[string]interface{}
+			if err := classad.Unmarshal(nestedAd.String(), &result); err != nil {
+				log.Debugf("Failed to unmarshal ClassAd for attribute %s: %v", attrName, err)
+				continue
+			}
+
+			viper.Set(viperKey, result)
+			log.Debugf("Set %s = %v from job ClassAd attribute %s", viperKey, result, attrName)
+		} else {
+			// For other types, log a warning
+			log.Debugf("Unsupported ClassAd type for attribute %s (type %v), skipping", attrName, attrValue.Type())
 		}
 	}
 }

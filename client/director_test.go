@@ -30,7 +30,6 @@ import (
 	"testing"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -44,6 +43,7 @@ import (
 )
 
 func TestParseServersFromDirectorResponse(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Construct the Director's Response, comprising headers and a body
 	directorHeaders := make(map[string][]string)
 	directorHeaders["Link"] = []string{"<my-cache.edu:8443>; rel=\"duplicate\"; pri=1, <another-cache.edu:8443>; rel=\"duplicate\"; pri=2"}
@@ -62,6 +62,7 @@ func TestParseServersFromDirectorResponse(t *testing.T) {
 }
 
 func TestParseDirectorInfo(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Craft the Director's response
 	directorHeaders := make(map[string][]string)
 	directorHeaders["Link"] = []string{"<my-cache.edu:8443>; rel=\"duplicate\"; pri=1, <another-cache.edu:8443>; rel=\"duplicate\"; pri=2"}
@@ -106,6 +107,7 @@ func TestParseDirectorInfo(t *testing.T) {
 // Tests for client logic when the Director is being queried. In particular,
 // we check that various types of retries are triggered.
 func TestQueryDirector(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	// This test assumes the debugging level is at debug or higher
@@ -224,9 +226,10 @@ func TestQueryDirector(t *testing.T) {
 }
 
 func TestGetDirectorInfoForPath(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
-	viper.Set(param.Client_DirectorRetries.GetName(), 3)
+	require.NoError(t, param.Set(param.Client_DirectorRetries.GetName(), 3))
 
 	// Craft the Director's response
 	directorHeaders := make(map[string]string)
@@ -323,6 +326,7 @@ func TestGetDirectorInfoForPath(t *testing.T) {
 }
 
 func TestDirectorTimeout(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 

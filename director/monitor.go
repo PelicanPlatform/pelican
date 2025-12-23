@@ -267,10 +267,7 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverUrlStr string) {
 	// Without this, time.NewTicker waits for the first interval before firing,
 	// which could cause the origin/cache to report a missed test if registration
 	// takes more than 15 seconds after the server started.
-	if !runDirectorTestCycle() {
-		// If the first test fails (server not in cache), stop immediately
-		return
-	}
+	runDirectorTestCycle()
 
 	for {
 		select {
@@ -284,14 +281,7 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverUrlStr string) {
 
 			return
 		case <-ticker.C:
-			if !runDirectorTestCycle() {
-				// If server is no longer in cache, stop the test suite
-				metrics.PelicanDirectorActiveFileTransferTestSuite.With(
-					prometheus.Labels{
-						"server_name": serverName, "server_web_url": serverWebUrl, "server_type": string(serverAd.Type),
-					}).Dec()
-				return
-			}
+			runDirectorTestCycle()
 		}
 	}
 }

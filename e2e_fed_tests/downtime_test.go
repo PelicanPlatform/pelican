@@ -34,7 +34,6 @@ import (
 	"time"
 
 	_ "github.com/glebarez/sqlite"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -59,6 +58,7 @@ type serverAdUnmarshalCustom struct {
 
 // Verify that the director correctly handles a downtime declared by a cache server
 func TestServerDowntimeDirectorForwarding(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
@@ -68,10 +68,10 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	})
 
 	// Spin up a federation and get the Director's URL
-	viper.Set(param.Server_UIAdminUsers.GetName(), "admin-user")
-	viper.Set(param.Director_RegistryQueryInterval.GetName(), 1*time.Second)
+	require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), "admin-user"))
+	require.NoError(t, param.Set(param.Director_RegistryQueryInterval.GetName(), 1*time.Second))
 	customAdvertisementInterval := 100 * time.Millisecond
-	viper.Set(param.Server_AdvertisementInterval.GetName(), customAdvertisementInterval) // was 1 minute by default
+	require.NoError(t, param.Set(param.Server_AdvertisementInterval.GetName(), customAdvertisementInterval)) // was 1 minute by default
 	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
 	fedInfo, err := config.GetFederation(ctx)
 	require.NoError(t, err, "Failed to get federation service info")

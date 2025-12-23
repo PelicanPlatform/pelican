@@ -76,10 +76,18 @@ func getMetadata() {
 
 	// We don't check if the endpoint(s) are set. Just overwrite to ensure
 	// our default values are not being used if the issuer is not CILogon
-	viper.Set("OIDC.DeviceAuthEndpoint", metadata.DeviceAuthURL)
-	viper.Set("OIDC.TokenEndpoint", metadata.TokenURL)
-	viper.Set("OIDC.UserInfoEndpoint", metadata.UserInfoURL)
-	viper.Set("OIDC.AuthorizationEndpoint", metadata.AuthURL)
+	if err := param.Set("OIDC.DeviceAuthEndpoint", metadata.DeviceAuthURL); err != nil {
+		log.WithError(err).Warn("Failed to set OIDC.DeviceAuthEndpoint from issuer metadata")
+	}
+	if err := param.Set("OIDC.TokenEndpoint", metadata.TokenURL); err != nil {
+		log.WithError(err).Warn("Failed to set OIDC.TokenEndpoint from issuer metadata")
+	}
+	if err := param.Set("OIDC.UserInfoEndpoint", metadata.UserInfoURL); err != nil {
+		log.WithError(err).Warn("Failed to set OIDC.UserInfoEndpoint from issuer metadata")
+	}
+	if err := param.Set("OIDC.AuthorizationEndpoint", metadata.AuthURL); err != nil {
+		log.WithError(err).Warn("Failed to set OIDC.AuthorizationEndpoint from issuer metadata")
+	}
 }
 
 func getMetadataValue(stringParam param.StringParam) (result string, err error) {

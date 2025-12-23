@@ -32,7 +32,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -42,15 +41,20 @@ import (
 )
 
 func TestWaitUntilWorking(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	hook := test.NewGlobal()
+	origLevel := logrus.GetLevel()
 	logrus.SetLevel(logrus.DebugLevel) // Ensure all log levels are captured
+	t.Cleanup(func() {
+		logrus.SetLevel(origLevel)
+	})
 	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
 		cancel()
 		ResetTestState()
 	})
 
-	viper.Set(param.Server_StartupTimeout.GetName(), "10s")
+	require.NoError(t, param.Set(param.Server_StartupTimeout.GetName(), "10s"))
 	t.Run("success-with-HTTP-200", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK) // 200
@@ -116,10 +120,12 @@ func TestWaitUntilWorking(t *testing.T) {
 	})
 
 	t.Run("server-does-not-exist", func(t *testing.T) {
-		// cancel wait until working after 200ms so that we don't wait for 10s before it returns
+		// cancel wait until working after 1000ms so that we don't wait for 10s before it returns
+		// Note: this was bumped up due to sporadic test failures on CI with 200ms; 1s should
+		// be sufficient for a DNS resolution failure to return.
 		earlyCancelCtx, earlyCancel := context.WithCancel(ctx)
 		go func() {
-			<-time.After(200 * time.Millisecond)
+			<-time.After(1000 * time.Millisecond)
 			earlyCancel()
 		}()
 		err := WaitUntilWorking(earlyCancelCtx, "GET", "https://noserverexists.com", "testServer", http.StatusOK, false)
@@ -151,7 +157,7 @@ func TestWaitUntilWorking(t *testing.T) {
 	})
 
 	t.Run("server-short-timeout", func(t *testing.T) {
-		viper.Set(param.Server_StartupTimeout.GetName(), "1s")
+		require.NoError(t, param.Set(param.Server_StartupTimeout.GetName(), "1s"))
 		earlyCancelCtx, earlyCancel := context.WithCancel(ctx)
 		go func() {
 			<-time.After(1500 * time.Millisecond)
@@ -171,6 +177,7 @@ func TestWaitUntilWorking(t *testing.T) {
 }
 
 func TestFilterTopLevelPrefixes(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	namespaceAds := []server_structs.NamespaceAdV2{
 		{Path: "/foo"},
 		{Path: "/foo/bar"},
@@ -225,6 +232,7 @@ func (m *mockServer) GetPids() []int            { return m.pids }
 func (m *mockServer) SetPids(pids []int)        { m.pids = pids }
 
 func TestSetFedTok(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name      string
 		server    *mockServer

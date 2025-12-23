@@ -31,9 +31,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func TestListServers(t *testing.T) {
+	setGinTestMode()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	mockOriginServerAd := server_structs.ServerAd{
 		URL:       url.URL{Host: "origin.com", Scheme: "https"},
 		Type:      server_structs.OriginType.String(),
@@ -190,6 +193,8 @@ func TestListServers(t *testing.T) {
 }
 
 func TestGetServer(t *testing.T) {
+	setGinTestMode()
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	mockOriginServerAd := server_structs.ServerAd{
 		URL:       url.URL{Host: "origin.com", Scheme: "https"},
 		Type:      server_structs.OriginType.String(),
@@ -341,6 +346,9 @@ func TestGetServer(t *testing.T) {
 }
 
 func TestGetNamespaces(t *testing.T) {
+	setGinTestMode()
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	mockOriginServerAd := server_structs.ServerAd{
 		URL:       url.URL{Host: "origin.com", Scheme: "https"},
 		Type:      server_structs.OriginType.String(),

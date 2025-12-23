@@ -68,8 +68,8 @@ ARG XRDCL_PELICAN_SRC_BUILD=false
 ARG XRDCL_PELICAN_VER=1.5.6
 ARG XROOTD_LOTMAN_SRC_BUILD=false
 ARG XROOTD_LOTMAN_VER=0.0.5
-ARG XROOTD_S3_HTTP_SRC_BUILD=true
-ARG XROOTD_S3_HTTP_VER=0.5.2
+ARG XROOTD_S3_HTTP_SRC_BUILD=false
+ARG XROOTD_S3_HTTP_VER=0.5.3
 # Installed from Koji if not building it from source
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
 ARG XRDHTTP_PELICAN_VER=0.0.8
@@ -665,6 +665,14 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   dnf install -y goreleaser
 ENDRUN
 
+# Install gotestsum for better test output formatting
+RUN --mount=type=cache,id=go-mod-cache-${TARGETPLATFORM},target=/root/go,sharing=locked <<ENDRUN
+  set -eux
+  go install gotest.tools/gotestsum@latest
+  # Move gotestsum to a system location that is world readable
+  mv /root/go/bin/gotestsum /usr/local/bin/gotestsum
+ENDRUN
+
 # Install Node.js using the same commands as the pelican-build-init stage.
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
@@ -679,10 +687,23 @@ ENDRUN
 # Enable the CodeReady Linux Builder repository.
 RUN /usr/bin/crb enable
 
+# Add HTCondor repository for development and testing
+RUN <<ENDRUN
+  set -eux
+  cd /etc/yum.repos.d
+  if wget -q https://htcss-downloads.chtc.wisc.edu/repo/25.x/htcondor-release-current.el9.noarch.rpm; then
+    dnf install -y htcondor-release-current.el9.noarch.rpm
+    rm -f htcondor-release-current.el9.noarch.rpm
+  else
+    echo "Warning: Failed to download HTCondor repository RPM, HTCondor will not be available"
+  fi
+ENDRUN
+
 # Install a kitchen sink's worth of development tools and libraries.
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
   dnf install -y --enablerepo=osg-contrib \
         cmake3 \
+        condor \
         delve \
         docker \
         gdb \

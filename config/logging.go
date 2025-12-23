@@ -27,6 +27,8 @@ import (
 	"github.com/go-kit/log/term"
 	log "github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/writer"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 type (
@@ -78,6 +80,9 @@ var (
 			},
 		},
 	}
+
+	// Track whether we've already configured the formatter to avoid resetting it
+	formatterConfigured bool
 )
 
 func (fh *RegexpFilterHook) Levels() []log.Level {
@@ -106,6 +111,10 @@ func (fh *RegexpFilterHook) Fire(entry *log.Entry) (err error) {
 
 // Process a single log entry, updating it as necessary
 func (rt *regexpTransformHook) Fire(entry *log.Entry) (err error) {
+	// Skip if writer is io.Discard (test mode)
+	if rt.hook != nil && rt.hook.Writer == io.Discard {
+		return nil
+	}
 	for _, replace := range rt.replacements {
 		if replace.regex != nil {
 			entry.Message = replace.regex.ReplaceAllString(entry.Message, replace.template)
@@ -149,6 +158,15 @@ func initFilterLogging() {
 	}
 }
 
+// ResetGlobalLoggingHooks resets the global logging hooks and flags for testing.
+// This should be called by test_utils.SetupTestLogging to ensure clean test state.
+func ResetGlobalLoggingHooks() {
+	addedGlobalFilters = false
+	if globalTransform != nil && globalTransform.hook != nil {
+		globalTransform.hook.Writer = io.Discard
+	}
+}
+
 func AddFilter(newFilter *RegexpFilter) {
 	filters := globalFilters.filters.Load()
 	var newFilters []*RegexpFilter
@@ -173,14 +191,18 @@ func RemoveFilter(name string) {
 }
 
 func SetLogging(logLevel log.Level) {
-	textFormatter := log.TextFormatter{}
-	textFormatter.DisableLevelTruncation = true
-	textFormatter.FullTimestamp = true
-	// Since we redirect log.Out to io.Discard, logrus will treat the output as non-terminal
-	// and won't format logs with color. Here we bypass logrus check by forcing the color
-	// and provide our check. Note that when calling SetLogging, io.Out hasn't been changed yet.
-	textFormatter.ForceColors = term.IsTerminal(log.StandardLogger().Out)
-	log.SetFormatter(&textFormatter)
+	// Only configure the formatter once to preserve formatting across log level changes
+	if !formatterConfigured {
+		textFormatter := log.TextFormatter{}
+		textFormatter.DisableLevelTruncation = true
+		textFormatter.FullTimestamp = true
+		// Since we redirect log.Out to io.Discard, logrus will treat the output as non-terminal
+		// and won't format logs with color. Here we bypass logrus check by forcing the color
+		// and provide our check. Note that when calling SetLogging, io.Out hasn't been changed yet.
+		textFormatter.ForceColors = term.IsTerminal(log.StandardLogger().Out)
+		log.SetFormatter(&textFormatter)
+		formatterConfigured = true
+	}
 
 	// Note: don't call log.SetLevel directly here as we filter at the transform
 	// hook, not at the logrus level.
@@ -208,10 +230,57 @@ func SetLogging(logLevel log.Level) {
 	}
 }
 
+// GetEffectiveLogLevel returns the effective log level based on the transform hook
+func GetEffectiveLogLevel() log.Level {
+	if addedGlobalFilters && globalTransform != nil {
+		// Find the highest level in the hook
+		for _, lvl := range log.AllLevels {
+			found := false
+			for _, hookLvl := range globalTransform.hook.LogLevels {
+				if hookLvl == lvl {
+					found = true
+					break
+				}
+			}
+			if !found && lvl > log.PanicLevel {
+				// Return the level just below the first one not in the hook
+				for i := len(log.AllLevels) - 1; i >= 0; i-- {
+					if log.AllLevels[i] < lvl {
+						return log.AllLevels[i]
+					}
+				}
+			}
+		}
+	}
+	return log.GetLevel()
+}
+
 // Disable the logging censor functionality
 //
 // Provided so we can disable the censoring in unit tests;
 // otherwise, it should not be used
 func DisableLoggingCensor() {
 	globalTransform.replacements[0].regex = nil
+}
+
+// RegisterLoggingCallback registers a callback with the param module
+// to update logging configuration when Logging.Level changes.
+func RegisterLoggingCallback() {
+	param.RegisterCallback("logging", func(oldConfig, newConfig *param.Config) {
+		if oldConfig == nil || newConfig == nil {
+			return
+		}
+
+		oldLevel, oldErr := log.ParseLevel(oldConfig.Logging.Level)
+		newLevel, newErr := log.ParseLevel(newConfig.Logging.Level)
+		if newErr != nil {
+			log.Errorf("Failed to parse new log level %q: %v", newConfig.Logging.Level, newErr)
+			return
+		}
+		// Apply changes whenever the parsed level differs (case-insensitive) or old level failed to parse.
+		if oldErr != nil || oldLevel != newLevel {
+			log.Infof("Updating log level from %s to %s", oldConfig.Logging.Level, newConfig.Logging.Level)
+			SetLogging(newLevel)
+		}
+	})
 }

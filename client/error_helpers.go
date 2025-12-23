@@ -146,6 +146,20 @@ func isContextDeadlineError(err error) bool {
 	return errors.Is(err, context.DeadlineExceeded)
 }
 
+// isIdleConnectionError checks if an error is caused by the server closing an idle connection
+// This is a normal occurrence when attempting to reuse a connection that the server has closed.
+// Note: We use string matching because the Go standard library does not export a specific error type
+// for this condition. While this error message is consistently produced by the Go HTTP client,
+// it's an implementation detail rather than a documented stable API contract.
+func isIdleConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Check if the error message contains "server closed idle connection"
+	// This is a specific error message from the Go HTTP client
+	return strings.Contains(err.Error(), "server closed idle connection")
+}
+
 // ConnectionSetupError methods
 
 func (e *ConnectionSetupError) Error() string {

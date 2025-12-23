@@ -43,11 +43,12 @@ import (
 // Test that token maintenance for the cache works as expected -- we never
 // want to let the on-disk token expire.
 func TestCacheFedTokMaint(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
 	// Spin up the full fed so that our cache server can get the token from the director
-	viper.Set(param.Director_FedTokenLifetime.GetName(), "12s")
+	require.NoError(t, param.Set(param.Director_FedTokenLifetime.GetName(), "12s"))
 	oldMinTokRate := cache.MinFedTokenTickerRate
 	defer func() {
 		cache.MinFedTokenTickerRate = oldMinTokRate
@@ -63,7 +64,7 @@ func TestCacheFedTokMaint(t *testing.T) {
 	cacheServer := cache.CacheServer{}
 
 	// Give this "cache" instance a unique location so it doesn't compete with the fed test cache token
-	viper.Set(param.Cache_FedTokenLocation.GetName(), filepath.Join(t.TempDir(), t.Name()+"_fedtok"))
+	require.NoError(t, param.Set(param.Cache_FedTokenLocation.GetName(), filepath.Join(t.TempDir(), t.Name()+"_fedtok")))
 	cache.LaunchFedTokManager(ctx, egrp, &cacheServer)
 	tokFile := cacheServer.GetFedTokLocation()
 
@@ -88,11 +89,12 @@ func TestCacheFedTokMaint(t *testing.T) {
 
 // Validate CacheServe behavior: if Cache.Url has an existing port, it is preserved
 func TestCacheServe_PreservesExistingPort(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
 	// Set Cache.Url to include an existing port
-	viper.Set(param.Cache_Url.GetName(), "https://example.com:8442")
+	require.NoError(t, param.Set(param.Cache_Url.GetName(), "https://example.com:8442"))
 
 	// Launch the federation (starts CacheServe among others)
 	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
@@ -107,11 +109,12 @@ func TestCacheServe_PreservesExistingPort(t *testing.T) {
 
 // Validate CacheServe behavior: if Cache.Url lacks a port, one is added
 func TestCacheServe_AddsPortWhenMissing(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
 	// Ensure Cache.Url has no explicit port
-	viper.Set(param.Cache_Url.GetName(), "https://example.com")
+	require.NoError(t, param.Set(param.Cache_Url.GetName(), "https://example.com"))
 
 	// Launch the federation (starts CacheServe among others)
 	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)

@@ -97,7 +97,7 @@ func getConfigValues(ctx *gin.Context) {
 		})
 		return
 	}
-	rawConfig, err := param.UnmarshalConfig(viper.GetViper())
+	rawConfig, err := param.UnmarshalConfig()
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -598,6 +598,14 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.GET("/api/v1.0/tokens", AuthHandler, AdminAuthHandler, listApiTokens)
 	engine.GET("/api/v1.0/version", getVersionHandler)
 
+	// Logging level management API
+	loggingAPI := engine.Group("/api/v1.0/logging")
+	{
+		loggingAPI.POST("/level", AuthHandler, AdminAuthHandler, HandleSetLogLevel)
+		loggingAPI.GET("/level", AuthHandler, AdminAuthHandler, HandleGetLogLevel)
+		loggingAPI.DELETE("/level/:changeId", AuthHandler, AdminAuthHandler, HandleDeleteLogLevel)
+	}
+
 	downtimeAPI := engine.Group("/api/v1.0/downtime")
 	{
 		downtimeAPI.POST("", DowntimeAuthHandler, HandleCreateDowntime)
@@ -919,10 +927,11 @@ func runEngineWithListener(ctx context.Context, ln net.Listener, engine *gin.Eng
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		err = server.Shutdown(ctx)
-		if err != nil {
+		if err != nil && !errors.Is(err, context.DeadlineExceeded) {
 			log.Errorln("Failed to shutdown server:", err)
+			return err
 		}
-		return err
+		return nil
 	})
 
 	if err := server.ServeTLS(ln, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {

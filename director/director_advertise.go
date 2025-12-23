@@ -120,12 +120,13 @@ func listDirectors(ctx *gin.Context) {
 		if directorAds.Len() == 0 {
 			ads = server_utils.GetDirectorAds()
 		} else {
-			directorAds.Range(func(item *ttlcache.Item[string, *directorInfo]) bool {
+			// Use Items() instead of Range() to avoid race conditions with the cache's internal eviction goroutine
+			items := directorAds.Items()
+			for _, item := range items {
 				if item.Value() != nil && item.Value().ad != nil {
 					ads = append(ads, *item.Value().ad)
 				}
-				return true
-			})
+			}
 		}
 	}()
 	ctx.JSON(http.StatusOK, ads)
@@ -227,20 +228,21 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.OriginAdvertiseV2, sType server_structs.ServerType, originatorName string) {
 	directorAdMutex.RLock()
 	defer directorAdMutex.RUnlock()
-	directorAds.Range(func(item *ttlcache.Item[string, *directorInfo]) bool {
+	// Use Items() instead of Range() to avoid race conditions with the cache's internal eviction goroutine
+	items := directorAds.Items()
+	for _, item := range items {
 		dinfo := item.Value()
 		if dinfo.ad == nil {
-			return true
+			continue
 		}
 		// Do not forward to the director that sent the ad
 		if originatorName != "" && dinfo.ad.Name == originatorName {
-			return true
+			continue
 		}
 		if self, err := server_utils.IsDirectorAdFromSelf(engineCtx, dinfo.ad); err == nil && !self {
 			dinfo.forwardService(engineCtx, serviceAd, sType)
 		}
-		return true
-	})
+	}
 }
 
 // Forward a director ad to the single director represented by the `dir` object.
@@ -474,6 +476,13 @@ func getMyName(ctx context.Context) (string, error) {
 // Create an ad representing the current director service and forward it to all known
 // directors (except myself).
 func sendMyAd(ctx context.Context) {
+	// Check if context is cancelled before accessing the cache
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
 	name, err := getMyName(ctx)
 	if err != nil {
 		log.Errorln("Local service does not know its own name (cannot forward ad to remote directors):", err)
@@ -490,16 +499,17 @@ func sendMyAd(ctx context.Context) {
 
 	directorAdMutex.RLock()
 	defer directorAdMutex.RUnlock()
-	directorAds.Range(func(item *ttlcache.Item[string, *directorInfo]) bool {
+	// Use Items() instead of Range() to avoid race conditions with the cache's internal eviction goroutine
+	items := directorAds.Items()
+	for _, item := range items {
 		dinfo := item.Value()
 		if dinfo.ad == nil {
-			return true
+			continue
 		}
 		if self, err := server_utils.IsDirectorAdFromSelf(ctx, dinfo.ad); err == nil && !self {
 			dinfo.forwardDirector(directorAd)
 		}
-		return true
-	})
+	}
 }
 
 // Update the internal directorAds cache with the provided ad
@@ -532,14 +542,15 @@ func updateInternalDirectorCache(ctx context.Context, egrp *errgroup.Group, dire
 				item.Value().ad = directorAd
 				directorAds.Set(directorAd.Name, item.Value(), adTTL)
 				if after == server_structs.AdAfterTrue {
-					directorAds.Range(func(item *ttlcache.Item[string, *directorInfo]) bool {
+					// Use Items() instead of Range() to avoid race conditions with the cache's internal eviction goroutine
+					items := directorAds.Items()
+					for _, item := range items {
 						if item.Value() != nil && item.Value().ad != nil {
 							if self, err := server_utils.IsDirectorAdFromSelf(ctx, item.Value().ad); err == nil && !self {
 								item.Value().forwardDirector(directorAd)
 							}
 						}
-						return true
-					})
+					}
 				}
 			}
 		}

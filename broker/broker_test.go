@@ -37,7 +37,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -109,7 +108,10 @@ func runTestEngine(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		return server.Shutdown(shutdownCtx)
+		if err := server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		return nil
 	})
 
 	egrp.Go(func() error {
@@ -136,11 +138,11 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 	dirpath := t.TempDir()
 
 	server_utils.ResetTestState()
-	viper.Set(param.Logging_Level.GetName(), "Debug")
-	viper.Set("ConfigDir", filepath.Join(dirpath, "config"))
-	viper.Set(param.Server_WebPort.GetName(), "0")
-	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(dirpath, "ns-registry.sqlite"))
-	viper.Set(param.Origin_FederationPrefix.GetName(), "/foo")
+	require.NoError(t, param.Set(param.Logging_Level.GetName(), "Debug"))
+	require.NoError(t, param.Set("ConfigDir", filepath.Join(dirpath, "config")))
+	require.NoError(t, param.Set(param.Server_WebPort.GetName(), "0"))
+	require.NoError(t, param.Set(param.Server_DbLocation.GetName(), filepath.Join(dirpath, "ns-registry.sqlite")))
+	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/foo"))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
@@ -222,6 +224,7 @@ func doRetrieveRequest(t *testing.T, ctx context.Context, dur time.Duration) (*h
 
 // End-to-end test of the broker doing a TCP reversal
 func TestBroker(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -267,10 +270,11 @@ func TestBroker(t *testing.T) {
 	}
 
 	// Launch the origin-side monitoring of requests.
-	viper.Set("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString())
-	viper.Set("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString())
+	require.NoError(t, param.Set("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString()))
+	require.NoError(t, param.Set("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString()))
 	listenerChan := make(chan any)
 	ctxQuick, deadlineCancel := context.WithTimeout(ctx, 5*time.Second) // Have shorter timeout for this handshake
+	defer deadlineCancel()
 
 	externalWebUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	require.NoError(t, err)
@@ -361,6 +365,7 @@ func TestBroker(t *testing.T) {
 
 // Ensure the retrieve handler times out
 func TestRetrieveTimeout(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -384,8 +389,8 @@ func TestRetrieveTimeout(t *testing.T) {
 	err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/", "Web UI", http.StatusNotFound, false)
 	require.NoError(t, err)
 
-	viper.Set("Federation.BrokerUrl", param.Server_ExternalWebUrl.GetString())
-	viper.Set("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString())
+	require.NoError(t, param.Set("Federation.BrokerUrl", param.Server_ExternalWebUrl.GetString()))
+	require.NoError(t, param.Set("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString()))
 
 	resp, err := doRetrieveRequest(t, ctx, time.Millisecond)
 	require.NoError(t, err)

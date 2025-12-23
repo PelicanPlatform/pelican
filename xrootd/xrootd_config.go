@@ -42,7 +42,6 @@ import (
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/cache"
@@ -50,6 +49,7 @@ import (
 	"github.com/pelicanplatform/pelican/lotman"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/origin"
+	"github.com/pelicanplatform/pelican/p11proxy"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -257,7 +257,9 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 			}
 		}
 		// Set the mount to our export path now that everything is symlinked
-		viper.Set("Xrootd.Mount", exportPath)
+		if err := param.Set("Xrootd.Mount", exportPath); err != nil {
+			return err
+		}
 	}
 
 	if param.Origin_SelfTest.GetBool() {
@@ -376,46 +378,8 @@ func CheckCacheXrootdEnv(server server_structs.XRootDServer, uid int, gid int) e
 		}
 	}
 
-	fedInfo, err := config.GetFederation(context.Background())
-	if err != nil {
-		return errors.Wrap(err, "Failed to pull information from the federation")
-	}
-
-	if discoveryUrlStr := param.Federation_DiscoveryUrl.GetString(); discoveryUrlStr != "" {
-		discoveryUrl, err := url.Parse(discoveryUrlStr)
-		if err == nil {
-			log.Debugln("Parsing discovery URL for 'pss.origin' setting:", discoveryUrlStr)
-			if len(discoveryUrl.Path) > 0 && len(discoveryUrl.Host) == 0 {
-				discoveryUrl.Host = discoveryUrl.Path
-				discoveryUrl.Path = ""
-			} else if discoveryUrl.Path != "" && discoveryUrl.Path != "/" {
-				return errors.New("The Federation.DiscoveryUrl's path is non-empty, ensure the Federation.DiscoveryUrl has the format <host>:<port>")
-			}
-			discoveryUrl.Scheme = "pelican"
-			discoveryUrl.Path = ""
-			discoveryUrl.RawQuery = ""
-			viper.Set("Cache.PSSOrigin", discoveryUrl.String())
-		} else {
-			return errors.Wrapf(err, "Failed to parse discovery URL %s", discoveryUrlStr)
-		}
-	}
-
-	if directorUrlStr := fedInfo.DirectorEndpoint; directorUrlStr != "" {
-		directorUrl, err := url.Parse(directorUrlStr)
-		if err == nil {
-			log.Debugln("Parsing director URL for 'pss.origin' setting:", directorUrlStr)
-			if directorUrl.Path != "" && directorUrl.Path != "/" {
-				return errors.New("The Federation.DirectorUrl's path is non-empty, ensure the Federation.DirectorUrl has the format <host>:<port>")
-			}
-			directorUrl.Scheme = "pelican"
-			viper.Set("Cache.PSSOrigin", directorUrl.String())
-		} else {
-			return errors.Wrapf(err, "Failed to parse director URL %s", directorUrlStr)
-		}
-	}
-
-	if viper.GetString("Cache.PSSOrigin") == "" {
-		return errors.New("One of Federation.DiscoveryUrl or Federation.DirectorUrl must be set to configure a cache")
+	if _, err := ensureCachePSSOrigin(context.Background()); err != nil {
+		return err
 	}
 
 	if cacheServer, ok := server.(*cache.CacheServer); ok {
@@ -426,6 +390,62 @@ func CheckCacheXrootdEnv(server server_structs.XRootDServer, uid int, gid int) e
 	}
 
 	return nil
+}
+
+func ensureCachePSSOrigin(ctx context.Context) (string, error) {
+	if existing := param.Cache_PSSOrigin.GetString(); existing != "" {
+		return existing, nil
+	}
+
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to pull information from the federation")
+	}
+
+	pssOrigin := ""
+
+	if discoveryUrlStr := param.Federation_DiscoveryUrl.GetString(); discoveryUrlStr != "" {
+		discoveryUrl, err := url.Parse(discoveryUrlStr)
+		if err == nil {
+			log.Debugln("Parsing discovery URL for 'pss.origin' setting:", discoveryUrlStr)
+			if len(discoveryUrl.Path) > 0 && len(discoveryUrl.Host) == 0 {
+				discoveryUrl.Host = discoveryUrl.Path
+				discoveryUrl.Path = ""
+			} else if discoveryUrl.Path != "" && discoveryUrl.Path != "/" {
+				return "", errors.New("The Federation.DiscoveryUrl's path is non-empty, ensure the Federation.DiscoveryUrl has the format <host>:<port>")
+			}
+			discoveryUrl.Scheme = "pelican"
+			discoveryUrl.Path = ""
+			discoveryUrl.RawQuery = ""
+			pssOrigin = discoveryUrl.String()
+		} else {
+			return "", errors.Wrapf(err, "Failed to parse discovery URL %s", discoveryUrlStr)
+		}
+	}
+
+	if directorUrlStr := fedInfo.DirectorEndpoint; directorUrlStr != "" {
+		directorUrl, err := url.Parse(directorUrlStr)
+		if err == nil {
+			log.Debugln("Parsing director URL for 'pss.origin' setting:", directorUrlStr)
+			if directorUrl.Path != "" && directorUrl.Path != "/" {
+				return "", errors.New("The Federation.DirectorUrl's path is non-empty, ensure the Federation.DirectorUrl has the format <host>:<port>")
+			}
+			directorUrl.Scheme = "pelican"
+			pssOrigin = directorUrl.String()
+		} else {
+			return "", errors.Wrapf(err, "Failed to parse director URL %s", directorUrlStr)
+		}
+	}
+
+	if pssOrigin == "" {
+		return "", errors.New("One of Federation.DiscoveryUrl or Federation.DirectorUrl must be set to configure a cache")
+	}
+
+	if err := param.Set("Cache.PSSOrigin", pssOrigin); err != nil {
+		return "", err
+	}
+
+	return pssOrigin, nil
 }
 
 func CheckXrootdEnv(server server_structs.XRootDServer) error {
@@ -545,7 +565,9 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 			if _, err := file.WriteString(robotsTxt); err != nil {
 				return errors.Wrap(err, "Failed to write out a default robots.txt file")
 			}
-			viper.Set("Xrootd.RobotsTxtFile", newPath)
+			if err := param.Set("Xrootd.RobotsTxtFile", newPath); err != nil {
+				return err
+			}
 		} else {
 			return err
 		}
@@ -572,7 +594,19 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 	return nil
 }
 
-func writeX509Credentials(fp *os.File) error {
+// Returns the path to the runtime TLS certificate file for the given server type
+func runtimeTLSCertPath(isCache bool) string {
+	base := param.Origin_RunLocation.GetString()
+	if isCache {
+		base = param.Cache_RunLocation.GetString()
+	}
+	if param.Server_DropPrivileges.GetBool() {
+		base = filepath.Join(base, "pelican")
+	}
+	return filepath.Join(base, "copied-tls-creds.crt")
+}
+
+func writeX509Credentials(fp *os.File, includeKey bool) error {
 	srcFile, err := os.Open(param.Server_TLSCertificateChain.GetString())
 	if err != nil {
 		return errors.Wrap(err, "Failure when opening source certificate for xrootd")
@@ -581,6 +615,10 @@ func writeX509Credentials(fp *os.File) error {
 
 	if _, err = io.Copy(fp, srcFile); err != nil {
 		return errors.Wrapf(err, "Failure when copying source certificate for xrootd")
+	}
+
+	if !includeKey {
+		return nil
 	}
 
 	if _, err = fp.Write([]byte{'\n', '\n'}); err != nil {
@@ -632,7 +670,9 @@ func copyXrootdCertificates(server server_structs.XRootDServer) error {
 		return errors.Wrap(err, "Failure when chown'ing certificate key pair file for xrootd")
 	}
 
-	if err = writeX509Credentials(destFile); err != nil {
+	pkcs11Info := p11proxy.CurrentInfo()
+	pkcs11Active := param.Server_EnablePKCS11.GetBool() && pkcs11Info.Enabled
+	if err = writeX509Credentials(destFile, !pkcs11Active); err != nil {
 		return err
 	}
 
@@ -660,11 +700,7 @@ func dropPrivilegeCopy(server server_structs.XRootDServer) error {
 		return builtin_errors.Join(err, errBadKeyPair)
 	}
 
-	destination := filepath.Join(param.Origin_RunLocation.GetString(), "pelican")
-	if server.GetServerType().IsEnabled(server_structs.CacheType) {
-		destination = filepath.Join(param.Cache_RunLocation.GetString(), "pelican")
-	}
-	destination = filepath.Join(destination, "copied-tls-creds.crt")
+	destination := runtimeTLSCertPath(server.GetServerType().IsEnabled(server_structs.CacheType))
 
 	// If the file already exists, delete it so that OpenFile will create a new one.
 	// Because the destination file is read-only (0400), user cannot update it (os.O_TRUNC will hit an permission denied error).
@@ -679,7 +715,9 @@ func dropPrivilegeCopy(server server_structs.XRootDServer) error {
 	}
 	defer destFile.Close()
 
-	if err = writeX509Credentials(destFile); err != nil {
+	pkcs11Info := p11proxy.CurrentInfo()
+	pkcs11Active := param.Server_EnablePKCS11.GetBool() && pkcs11Info.Enabled
+	if err = writeX509Credentials(destFile, !pkcs11Active); err != nil {
 		return err
 	}
 
@@ -820,9 +858,9 @@ func durationStrToSecondsHookFuncGenerator(structName, fieldName, configName str
 		}
 
 		// Get the value, load as a time.Duration, and then update the value with seconds as an int
-		dataMap, ok := data.(map[string]interface{})
+		dataMap, ok := data.(map[string]any)
 		if !ok {
-			return nil, errors.New("data is not a map[string]interface{}")
+			return nil, errors.New("data is not a map[string]any")
 		}
 
 		uncastDur, ok := dataMap[fieldName]
@@ -831,33 +869,70 @@ func durationStrToSecondsHookFuncGenerator(structName, fieldName, configName str
 			return data, nil
 		}
 
-		var durStr string
-		if _, isInt := uncastDur.(int); isInt {
-			durStr = strconv.Itoa(uncastDur.(int))
-		} else {
+		var (
+			duration time.Duration
+			durStr   string
+		)
+
+		switch v := uncastDur.(type) {
+		case time.Duration:
+			duration = v
+			durStr = v.String()
+		case int8:
+			val := int64(v)
+			duration = time.Duration(val) * time.Second
+			durStr = strconv.FormatInt(val, 10)
+		case int16:
+			val := int64(v)
+			duration = time.Duration(val) * time.Second
+			durStr = strconv.FormatInt(val, 10)
+		case int32:
+			val := int64(v)
+			duration = time.Duration(val) * time.Second
+			durStr = strconv.FormatInt(val, 10)
+		case int64:
+			val := int64(v)
+			duration = time.Duration(val) * time.Second
+			durStr = strconv.FormatInt(val, 10)
+		case int:
+			val := int64(v)
+			duration = time.Duration(val) * time.Second
+			durStr = strconv.FormatInt(val, 10)
+		case uint, uint8, uint16, uint32, uint64:
+			val := reflect.ValueOf(v).Uint()
+			duration = time.Duration(val) * time.Second
+			durStr = strconv.FormatUint(val, 10)
+		case float64:
+			duration = time.Duration(v * float64(time.Second))
+			durStr = strconv.FormatFloat(v, 'f', -1, 64)
+		case float32:
+			duration = time.Duration(v * float32(time.Second))
+			durStr = strconv.FormatFloat(float64(v), 'f', -1, 32)
+		default:
 			durStr, ok = uncastDur.(string)
 			if !ok {
-				return nil, errors.Errorf("%s is not a string or int", fieldName)
+				return nil, errors.Errorf("%s is not a string, duration, or numeric type", fieldName)
 			}
-		}
 
-		// Sanitize the input to guarantee we have a unit
-		suffixes := []string{"s", "m", "h"}
-		hasSuffix := false
-		for _, suffix := range suffixes {
-			if strings.HasSuffix(durStr, suffix) {
-				hasSuffix = true
-				break
+			// Sanitize the input to guarantee we have a unit
+			suffixes := []string{"s", "m", "h"}
+			hasSuffix := false
+			for _, suffix := range suffixes {
+				if strings.HasSuffix(durStr, suffix) {
+					hasSuffix = true
+					break
+				}
 			}
-		}
-		if !hasSuffix {
-			log.Warningf("'%s' does not have a time unit (s, m, h). Interpreting as seconds", configName)
-			durStr = durStr + "s"
-		}
+			if !hasSuffix {
+				log.Warningf("'%s' does not have a time unit (s, m, h). Interpreting as seconds", configName)
+				durStr = durStr + "s"
+			}
 
-		duration, err := time.ParseDuration(durStr)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to parse '%s' of %s as a duration", configName, durStr)
+			var err error
+			duration, err = time.ParseDuration(durStr)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to parse '%s' of %s as a duration", configName, durStr)
+			}
 		}
 
 		if validation != nil {
@@ -930,13 +1005,46 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 		return "", err
 	}
 
-	var xrdConfig XrootdConfig
-	xrdConfig.Xrootd.LocalMonitoringPort = -1
-	if err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(xrootdDecodeHook())); err != nil {
-		return "", errors.Wrap(err, "failed to unmarshal xrootd config")
+	configSnapshot, err := param.GetUnmarshaledConfig()
+	if err != nil {
+		configSnapshot, err = param.Refresh()
+		if err != nil {
+			return "", errors.Wrap(err, "failed to load configuration for xrootd")
+		}
 	}
 
+	var xrdConfig XrootdConfig
+	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		TagName:          "mapstructure",
+		WeaklyTypedInput: true,
+		DecodeHook:       xrootdDecodeHook(),
+		MatchName: func(mapKey, fieldName string) bool {
+			return strings.EqualFold(mapKey, fieldName)
+		},
+		Result: &xrdConfig,
+	})
+	if err != nil {
+		return "", errors.Wrap(err, "failed to build xrootd config decoder")
+	}
+
+	if err := decoder.Decode(configSnapshot); err != nil {
+		return "", errors.Wrap(err, "failed to decode xrootd config from parameters")
+	}
+
+	// Ensure monitoring endpoints use the actual listener port configured by SetUpMonitoring.
+	monitorPort := param.Xrootd_LocalMonitoringPort.GetInt()
+	if monitorPort <= 0 {
+		return "", errors.Errorf("%s must be set by SetUpMonitoring before generating xrootd config", param.Xrootd_LocalMonitoringPort.GetName())
+	}
+	xrdConfig.Xrootd.LocalMonitoringPort = monitorPort
+
 	if !isOrigin {
+		pssOrigin, err := ensureCachePSSOrigin(ctx)
+		if err != nil {
+			return "", err
+		}
+		xrdConfig.Cache.PSSOrigin = pssOrigin
+
 		// For cache watermarks, convert integer percentage value [0,100] to decimal fraction [0.00, 1.00]
 		if num, err := strconv.Atoi(xrdConfig.Cache.HighWaterMark); err == nil {
 			if num <= 100 && num > 0 {
@@ -1073,6 +1181,20 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 		xrdConfig.Server.TLSCACertificateFile = runtimeCAs
 	}
 
+	runtimeCertPath := runtimeTLSCertPath(!isOrigin)
+	xrdConfig.Server.TLSCertificateChain = runtimeCertPath
+
+	pkcs11Info := p11proxy.CurrentInfo()
+	pkcs11Active := param.Server_EnablePKCS11.GetBool() && pkcs11Info.Enabled
+	if pkcs11Active {
+		xrdConfig.Server.TLSKey = pkcs11Info.PKCS11URL
+	} else {
+		if param.Server_EnablePKCS11.GetBool() && !pkcs11Info.Enabled {
+			log.Warn("Server.EnablePKCS11 is true but the PKCS#11 helper is not active; falling back to the local TLS key file for XRootD")
+		}
+		xrdConfig.Server.TLSKey = runtimeCertPath
+	}
+
 	if isOrigin {
 		if xrdConfig.Origin.Multiuser {
 			ok, err := config.HasMultiuserCaps()
@@ -1181,7 +1303,9 @@ func SetUpMonitoring(ctx context.Context, egrp *errgroup.Group) error {
 		}
 	}
 
-	viper.Set("Xrootd.LocalMonitoringPort", monitorPort)
+	if err := param.Set(param.Xrootd_LocalMonitoringPort.GetName(), monitorPort); err != nil {
+		return err
+	}
 
 	return nil
 }

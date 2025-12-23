@@ -176,8 +176,10 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 		clientIpRandAssignmentCache.Stop()
 		clientIpGeoOverrideCache.DeleteAll()
 		clientIpGeoOverrideCache.Stop()
+		directorAdMutex.Lock()
 		directorAds.DeleteAll()
 		directorAds.Stop()
+		directorAdMutex.Unlock()
 		log.Info("Director TTL cache eviction has been stopped")
 		return nil
 	})

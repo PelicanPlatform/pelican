@@ -69,9 +69,9 @@ func findPolicyIndex(policyName string, policies []PurgePolicy) int {
 func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl string, nsAds []server_structs.NamespaceAdV2) (bool, func()) {
 	// Load in our config and handle overriding the SHOULD_OVERRIDE keys with the discUrl
 	// Load in our config
-	viper.Set("Cache.HighWaterMark", "100g")
-	viper.Set("Cache.LowWaterMark", "50g")
-	viper.Set("Logging.Level", "debug")
+	param.Set("Cache.HighWaterMark", "100g")
+	param.Set("Cache.LowWaterMark", "50g")
+	param.Set("Logging.Level", "debug")
 	if readConfig {
 		viper.SetConfigType("yaml")
 		err := viper.ReadConfig(strings.NewReader(yamlMockup))
@@ -99,11 +99,11 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 
 		// Update the policy in viper
 		policies[policyIndex] = policy
-		viper.Set("Lotman.PolicyDefinitions", policies)
+		param.Set("Lotman.PolicyDefinitions", policies)
 	} else {
 		// If we're not reading from the embedded yaml, grab the
 		// default configuration. We need _some_ configuration to work.
-		viper.Set("ConfigDir", t.TempDir())
+		param.Set("ConfigDir", t.TempDir())
 		config.InitServer(context.Background(), server_structs.CacheType)
 	}
 
@@ -111,7 +111,7 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
 	require.NoError(t, err)
 
-	viper.Set("Lotman.LotHome", tmpPath)
+	param.Set("Lotman.LotHome", tmpPath)
 	success := InitLotman(nsAds)
 	//reset func
 	return success, func() {
@@ -139,6 +139,7 @@ func getMockDiscoveryHost() *httptest.Server {
 
 // Test the library initializer. NOTE: this also tests CreateLot, which is a part of initialization.
 func TestLotmanInit(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
 	t.Run("TestBadInit", func(t *testing.T) {
@@ -149,12 +150,12 @@ func TestLotmanInit(t *testing.T) {
 	})
 
 	t.Run("TestGoodInit", func(t *testing.T) {
-		viper.Set("Log.Level", "debug")
-		viper.Set(param.Cache_DataLocations.GetName(), []string{})
+		param.Set("Log.Level", "debug")
+		param.Set(param.Cache_DataLocations.GetName(), []string{})
 		server := getMockDiscoveryHost()
 		// Set the Federation.DiscoveryUrl to the test server's URL
 		// Lotman uses the discovered URLs/keys to determine some aspects of lot ownership
-		viper.Set("Federation.DiscoveryUrl", server.URL)
+		param.Set("Federation.DiscoveryUrl", server.URL)
 
 		success, cleanup := setupLotmanFromConf(t, false, "LotmanGoodInit", server.URL, nil)
 		defer cleanup()
@@ -198,9 +199,10 @@ func TestLotmanInit(t *testing.T) {
 }
 
 func TestLotmanInitFromConfig(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
-	viper.Set("Federation.DiscoveryUrl", server.URL)
+	param.Set("Federation.DiscoveryUrl", server.URL)
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
@@ -280,6 +282,7 @@ func TestLotmanInitFromConfig(t *testing.T) {
 }
 
 func TestGetLotmanLib(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	libLoc := getLotmanLib()
 	require.Equal(t, "/usr/lib64/libLotMan.so", libLoc)
 
@@ -288,16 +291,17 @@ func TestGetLotmanLib(t *testing.T) {
 	logOutput := &(bytes.Buffer{})
 	log.SetOutput(logOutput)
 	log.SetLevel(log.DebugLevel)
-	viper.Set("Lotman.LibLocation", "/not/a/pathlibLotMan.so")
+	param.Set("Lotman.LibLocation", "/not/a/pathlibLotMan.so")
 	libLoc = getLotmanLib()
 	require.Equal(t, "/usr/lib64/libLotMan.so", libLoc)
 	require.Contains(t, logOutput.String(), "libLotMan.so not found in configured path, attempting to find using known fallbacks")
 }
 
 func TestGetAuthzCallers(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
-	viper.Set("Federation.DiscoveryUrl", server.URL)
+	param.Set("Federation.DiscoveryUrl", server.URL)
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanGetAuthzCalleres", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
@@ -316,9 +320,10 @@ func TestGetAuthzCallers(t *testing.T) {
 }
 
 func TestGetLot(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
-	viper.Set("Federation.DiscoveryUrl", server.URL)
+	param.Set("Federation.DiscoveryUrl", server.URL)
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanGetLot", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
@@ -341,9 +346,10 @@ func TestGetLot(t *testing.T) {
 }
 
 func TestUpdateLot(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
-	viper.Set("Federation.DiscoveryUrl", server.URL)
+	param.Set("Federation.DiscoveryUrl", server.URL)
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
@@ -381,20 +387,21 @@ func TestUpdateLot(t *testing.T) {
 }
 
 func TestAddToLot(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
-	viper.Set("Federation.DiscoveryUrl", server.URL)
+	param.Set("Federation.DiscoveryUrl", server.URL)
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
 
 	newLotPath := LotPath{
-		Path: "/a/new/path",
+		Path:      "/a/new/path",
 		Recursive: true,
 	}
 	addition := LotAddition{
 		LotName: "test-1",
-		Paths: []LotPath{newLotPath},
+		Paths:   []LotPath{newLotPath},
 		Parents: []string{"default"},
 	}
 
@@ -414,9 +421,10 @@ func TestAddToLot(t *testing.T) {
 }
 
 func TestRemoveLotParents(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
-	viper.Set("Federation.DiscoveryUrl", server.URL)
+	param.Set("Federation.DiscoveryUrl", server.URL)
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
@@ -452,9 +460,10 @@ func TestRemoveLotParents(t *testing.T) {
 }
 
 func TestRemoveLotPaths(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
-	viper.Set("Federation.DiscoveryUrl", server.URL)
+	param.Set("Federation.DiscoveryUrl", server.URL)
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
@@ -474,9 +483,10 @@ func TestRemoveLotPaths(t *testing.T) {
 }
 
 func TestDeleteLotsRec(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
-	viper.Set("Federation.DiscoveryUrl", server.URL)
+	param.Set("Federation.DiscoveryUrl", server.URL)
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
@@ -497,6 +507,7 @@ func TestDeleteLotsRec(t *testing.T) {
 
 // In any case where two MPA values are both set, the value in MPA1 should win.
 func TestMergeMPAs(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	dedicatedGB1 := 10.0
 	maxNumObjects1 := Int64FromFloat{Value: 50}
 	creationTime1 := Int64FromFloat{Value: 200}
@@ -535,6 +546,7 @@ func TestMergeMPAs(t *testing.T) {
 }
 
 func TestLotMerging(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Owner should be set to lot1 owner
 	owner1 := "owner1"
 	owner2 := "owner2"
@@ -621,6 +633,7 @@ func TestLotMerging(t *testing.T) {
 
 // Read the mockup yaml and make sure we grab the list of policy definitions as expected
 func TestGetPolicyMap(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -668,6 +681,7 @@ func TestGetPolicyMap(t *testing.T) {
 }
 
 func TestByteConversions(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	bytes := uint64(120530000000) // 120.53 GB
 
 	// forward pass
@@ -682,6 +696,7 @@ func TestByteConversions(t *testing.T) {
 // Valid lot configuration not only requires that all fields are present, but also that the sum of all lots' dedicatedGB values
 // does not exceed the high watermark.
 func TestLotValidation(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	type testCase struct {
 		name            string
 		lots            []Lot
@@ -813,7 +828,7 @@ func TestLotValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			server_utils.ResetTestState()
 			defer server_utils.ResetTestState()
-			viper.Set("Cache.HighWaterMark", tc.hwm)
+			param.Set("Cache.HighWaterMark", tc.hwm)
 			err := validateLotsConfig(tc.lots, tc.totalDiskSpaceB)
 			if len(tc.errorStrings) > 0 {
 				require.Error(t, err)
@@ -829,6 +844,7 @@ func TestLotValidation(t *testing.T) {
 
 // Make sure we handle various suffixes and non-suffixed percentages correctly
 func TestConvertWatermarkToBytes(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	type testCase struct {
 		Name          string
 		Watermark     string
@@ -901,6 +917,7 @@ func TestConvertWatermarkToBytes(t *testing.T) {
 // I don't test for errors here because the internal functions capable of generating
 // errors are tested elsewhere (e.g. convertWatermarkToBytes)
 func TestDivideRemainingSpace(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	dedGB := float64(10.0)
@@ -936,7 +953,7 @@ func TestDivideRemainingSpace(t *testing.T) {
 
 	lotMap := createLotMap()
 	totalDiskSpaceB := uint64(30000000000) // 30GB
-	viper.Set("Cache.HighWaterMark", "25g")
+	param.Set("Cache.HighWaterMark", "25g")
 	err := divideRemainingSpace(&lotMap, totalDiskSpaceB)
 	require.NoError(t, err)
 	// dedGB divisions should sum to HWM
@@ -951,7 +968,7 @@ func TestDivideRemainingSpace(t *testing.T) {
 	require.Equal(t, 1.5, *lotMap["lot4"].MPA.OpportunisticGB)
 
 	// Now make sure we this allocation fails if sum of dedGB is lower than HWM
-	viper.Set("Cache.HighWaterMark", "1g")
+	param.Set("Cache.HighWaterMark", "1g")
 	lotMap = createLotMap()
 	err = divideRemainingSpace(&lotMap, totalDiskSpaceB)
 	require.Error(t, err)
@@ -960,11 +977,12 @@ func TestDivideRemainingSpace(t *testing.T) {
 // Pretty straightforward -- tests should make sure we can grab viper config and use it when
 // setting lot timestamps if they're not pre-configured.
 func TestConfigLotTimestamps(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	now := time.Now().UnixMilli()
-	viper.Set("Lotman.DefaultLotExpirationLifetime", "24h")
-	viper.Set("Lotman.DefaultLotDeletionLifetime", "48h")
+	param.Set("Lotman.DefaultLotExpirationLifetime", "24h")
+	param.Set("Lotman.DefaultLotDeletionLifetime", "48h")
 
 	defaultExpiration := now + 24*60*60*1000 // 24 hours in milliseconds
 	defaultDeletion := now + 48*60*60*1000   // 48 hours in milliseconds
@@ -1040,6 +1058,7 @@ func TestConfigLotTimestamps(t *testing.T) {
 }
 
 func TestConfigLotsFromFedPrefixes(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -1147,7 +1166,7 @@ func TestConfigLotsFromFedPrefixes(t *testing.T) {
 			federationIssuer: "",
 			// Discovery will happen via the Director, but we'll still discover
 			// the federation root there.
-			directorUrl:      discUrl,
+			directorUrl: discUrl,
 			expectedLotMap: map[string]Lot{
 				"/namespace1": {
 					LotName: "/namespace1",

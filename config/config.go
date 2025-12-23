@@ -388,6 +388,25 @@ func wrapWithHttpsIfNeeded(urlStr string) string {
 	return urlStr
 }
 
+// Strip port 443 from a URL string if present
+func stripPort443(urlStr string) string {
+	if urlStr == "" {
+		return urlStr
+	}
+
+	parsedUrl, err := url.Parse(urlStr)
+	if err != nil {
+		return urlStr // Return original if we can't parse it
+	}
+
+	if parsedUrl.Port() == "443" {
+		parsedUrl.Host = parsedUrl.Hostname()
+		return parsedUrl.String()
+	}
+
+	return urlStr
+}
+
 // Validate that the federation Discovery URL does not contain a path and is otherwise a valid URL.
 func validateDiscoveryUrl(discUrlStr string) (*url.URL, error) {
 	errPrfx := fmt.Sprintf("invalid federation discovery url of '%s' (config parameter %s):", discUrlStr, param.Federation_DiscoveryUrl.GetName())
@@ -446,13 +465,13 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 		}
 
 		// Make sure any values in global federation metadata are url-parseable
-		fedInfo.DiscoveryEndpoint = wrapWithHttpsIfNeeded(fedInfo.DiscoveryEndpoint)
-		fedInfo.DirectorEndpoint = wrapWithHttpsIfNeeded(fedInfo.DirectorEndpoint)
-		fedInfo.RegistryEndpoint = wrapWithHttpsIfNeeded(fedInfo.RegistryEndpoint)
-		fedInfo.JwksUri = wrapWithHttpsIfNeeded(fedInfo.JwksUri)
-		fedInfo.BrokerEndpoint = wrapWithHttpsIfNeeded(fedInfo.BrokerEndpoint)
+		fedInfo.DiscoveryEndpoint = stripPort443(wrapWithHttpsIfNeeded(fedInfo.DiscoveryEndpoint))
+		fedInfo.DirectorEndpoint = stripPort443(wrapWithHttpsIfNeeded(fedInfo.DirectorEndpoint))
+		fedInfo.RegistryEndpoint = stripPort443(wrapWithHttpsIfNeeded(fedInfo.RegistryEndpoint))
+		fedInfo.JwksUri = stripPort443(wrapWithHttpsIfNeeded(fedInfo.JwksUri))
+		fedInfo.BrokerEndpoint = stripPort443(wrapWithHttpsIfNeeded(fedInfo.BrokerEndpoint))
 		for i, advUrl := range fedInfo.DirectorAdvertiseEndpoints {
-			fedInfo.DirectorAdvertiseEndpoints[i] = wrapWithHttpsIfNeeded(advUrl)
+			fedInfo.DirectorAdvertiseEndpoints[i] = stripPort443(wrapWithHttpsIfNeeded(advUrl))
 		}
 	}()
 
@@ -509,6 +528,8 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 	var metadata pelican_url.FederationDiscovery
 	if federationStr == externalUrlStr {
 		log.Debugln("Current web engine hosts the federation; skipping auto-discovery of services")
+	} else if federationStr == "" {
+		log.Debugln("No federation discovery URL configured; skipping auto-discovery of services")
 	} else {
 		log.Debugln("Attempting to discover federation services via URL:", federationStr)
 		httpClient := GetClient()
@@ -578,12 +599,17 @@ func GetFederation(ctx context.Context) (pelican_url.FederationDiscovery, error)
 
 // Set the current global federation metadata
 func SetFederation(fd pelican_url.FederationDiscovery) {
-	viper.Set(param.Federation_DiscoveryUrl.GetName(), fd.DiscoveryEndpoint)
-	viper.Set("Federation.DirectorUrl", fd.DirectorEndpoint)
-	viper.Set("Federation.RegistryUrl", fd.RegistryEndpoint)
-	viper.Set("Federation.BrokerUrl", fd.BrokerEndpoint)
-	viper.Set("Federation.JwkUrl", fd.JwksUri)
-	viper.Set("Federation.DirectorAdvertiseEndpoints", fd.DirectorAdvertiseEndpoints)
+	// Best-effort update of config state; this should not fail under normal circumstances
+	if err := param.MultiSet(map[string]interface{}{
+		param.Federation_DiscoveryUrl.GetName(): fd.DiscoveryEndpoint,
+		"Federation.DirectorUrl":                fd.DirectorEndpoint,
+		"Federation.RegistryUrl":                fd.RegistryEndpoint,
+		"Federation.BrokerUrl":                  fd.BrokerEndpoint,
+		"Federation.JwkUrl":                     fd.JwksUri,
+		"Federation.DirectorAdvertiseEndpoints": fd.DirectorAdvertiseEndpoints,
+	}); err != nil {
+		log.WithError(err).Warn("Failed to update federation configuration")
+	}
 
 	globalFedInfo = fd
 }
@@ -643,7 +669,9 @@ func GetServerIssuerURL() (issuerUrl string, err error) {
 	// based on whatever we determine here.
 	defer func() {
 		if err == nil && param.Server_IssuerUrl.GetString() == "" {
-			viper.Set(param.Server_IssuerUrl.GetName(), issuerUrl)
+			if setErr := param.Set(param.Server_IssuerUrl.GetName(), issuerUrl); setErr != nil {
+				log.WithError(setErr).Debugf("Failed to cache %s", param.Server_IssuerUrl.GetName())
+			}
 		}
 	}()
 
@@ -715,7 +743,9 @@ func handleDeprecatedConfig() {
 						} else {
 							log.Warningf("The configuration key %q is deprecated. Please use %q instead. Will use the value of deprecated config key %q for the new config key %q.", deprecated, rep, deprecated, rep)
 							value := viper.Get(deprecated)
-							viper.Set(rep, value)
+							if err := param.Set(rep, value); err != nil {
+								log.WithError(err).Warnf("Failed to set replacement config key %q from deprecated key %q", rep, deprecated)
+							}
 						}
 					}
 				}
@@ -821,6 +851,12 @@ func setWebConfigOverride(v *viper.Viper, configPath string) error {
 		v.Set(key, tempV.Get(key))
 	}
 
+	// Keep the param package's cached config in sync with viper after overrides.
+	// Without this, subsequent reads via `param.*.GetString()` may see stale values.
+	if _, err := param.Refresh(); err != nil {
+		return err
+	}
+
 	// Use any new viper keys to re-set
 	// the logging level.
 	if err = setLoggingInternal(); err != nil {
@@ -851,7 +887,6 @@ func SetBaseDefaultsInConfig(v *viper.Viper) {
 			cobra.CheckErr(err)
 		}
 	}
-
 }
 
 // Helper func that uses configured params to toggle the correct logging level
@@ -864,15 +899,20 @@ func setLoggingInternal() error {
 		warnDebugOnce.Do(func() {
 			log.Warnf("The config param %q is set in your configuration, which will override any values set for %q ", param.Debug.GetName(), param.Logging_Level.GetName())
 		})
-		viper.Set(param.Logging_Level.GetName(), "debug")
+		if err := param.Set(param.Logging_Level.GetName(), "debug"); err != nil {
+			return err
+		}
 	}
 
 	logLevel := param.Logging_Level.GetString()
 	level, err := log.ParseLevel(logLevel)
 	if err != nil {
-		return errors.Wrapf(err, "failed to parse value of config param %s", param.Logging_Level.GetString())
+		return errors.Wrapf(err, "failed to parse value of config param %s: %q", param.Logging_Level.GetName(), logLevel)
 	}
 	SetLogging(level)
+
+	// Initialize the log level manager with our custom functions after setting up logging
+	logging.InitLogLevelManager(nil, nil, SetLogging, GetEffectiveLogLevel)
 
 	return nil
 }
@@ -925,6 +965,12 @@ func InitConfigInternal(logLevel log.Level) {
 
 	// Set default values in the global Viper instance
 	SetBaseDefaultsInConfig(viper.GetViper())
+	// Refresh the cached param config now that base defaults are loaded.
+	// Some callers may touch `param.*` during init; without this, the cache can
+	// remain an empty struct and cause missing defaults later (e.g. in InitServer).
+	if _, err := param.Refresh(); err != nil {
+		cobra.CheckErr(err)
+	}
 
 	InitConfigDir(viper.GetViper())
 
@@ -962,10 +1008,16 @@ func InitConfigInternal(logLevel log.Level) {
 			}
 		}
 	}
-
 	// Handle any extra yaml configurations specified in the ConfigLocations key
 	err := handleContinuedCfg()
 	if err != nil {
+		cobra.CheckErr(err)
+	}
+
+	// Now that defaults + config files + env (including continued configs) have
+	// been applied to viper, refresh the cached param config struct used by
+	// generated accessors.
+	if _, err := param.Refresh(); err != nil {
 		cobra.CheckErr(err)
 	}
 
@@ -1034,7 +1086,7 @@ func printConfigHelper(bytes []byte) {
 
 // PrintConfig logs the full config dump in YAML format.
 func PrintConfig() error {
-	rawConfig, err := param.UnmarshalConfig(viper.GetViper())
+	rawConfig, err := param.UnmarshalConfig()
 	if err != nil {
 		return err
 	}
@@ -1060,7 +1112,7 @@ func contains(slice []string, item string) bool {
 // GetComponentConfig filters the full config and returns only the config parameters related to the given component.
 // The filtering is based on whether the given component is part of the components in docs.parameters.yaml.
 func GetComponentConfig(component string) (map[string]interface{}, error) {
-	rawConfig, err := param.UnmarshalConfig(viper.GetViper())
+	rawConfig, err := param.UnmarshalConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -1139,6 +1191,87 @@ func PrintClientConfig() error {
 	return nil
 }
 
+// ensureRuntimeDir populates the runtime directory configuration and indicates whether
+// the directory should be cleaned up on shutdown. If the runtime directory is already
+// set in the provided viper instance, the existing configuration is returned.
+const runtimeDirCleanupKey = "runtimeDirCleanupInternal"
+
+func ensureRuntimeDir(v *viper.Viper) (string, bool, error) {
+	if runtimeDir := v.GetString(param.RuntimeDir.GetName()); runtimeDir != "" {
+		return runtimeDir, v.GetBool(runtimeDirCleanupKey), nil
+	}
+
+	if IsRootExecution() {
+		runtimeDir := filepath.Join("/run", "pelican")
+		v.SetDefault(param.RuntimeDir.GetName(), runtimeDir)
+		v.Set(param.RuntimeDir.GetName(), runtimeDir)
+		v.Set(runtimeDirCleanupKey, false)
+		return runtimeDir, false, nil
+	}
+
+	if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
+		runtimeDir := filepath.Join(userRuntimeDir, "pelican")
+		v.SetDefault(param.RuntimeDir.GetName(), runtimeDir)
+		v.Set(param.RuntimeDir.GetName(), runtimeDir)
+		v.Set(runtimeDirCleanupKey, false)
+		return runtimeDir, false, nil
+	}
+
+	runtimeDir, err := os.MkdirTemp("", "pelican-xrootd-*")
+	if err != nil {
+		return "", false, errors.Wrap(err, "Failed to create temporary runtime directory for Pelican")
+	}
+	// Temporary runtime directories are cleaned up on shutdown.
+	v.SetDefault(param.RuntimeDir.GetName(), runtimeDir)
+	v.Set(param.RuntimeDir.GetName(), runtimeDir)
+	v.Set(runtimeDirCleanupKey, true)
+	return runtimeDir, true, nil
+}
+
+// ComputeExternalWebUrl computes the Server.ExternalWebUrl if not explicitly set.
+// This is extracted from SetServerDefaults so it can be called independently
+// by client commands that need to determine the server's web URL.
+// It sets the default based on Server.Hostname and Server.WebPort if not already configured.
+func ComputeExternalWebUrl(v *viper.Viper) error {
+	// Only compute if not already set
+	if !v.IsSet(param.Server_ExternalWebUrl.GetName()) {
+		// Get or set default hostname
+		hostname := v.GetString(param.Server_Hostname.GetName())
+		if hostname == "" {
+			osHostname, err := os.Hostname()
+			if err != nil {
+				return errors.Wrap(err, "failed to determine hostname")
+			}
+			hostname = osHostname
+		}
+
+		// Get web port
+		webPort := v.GetInt(param.Server_WebPort.GetName())
+		if webPort == 0 {
+			webPort = 8444 // Default web port
+		}
+
+		// Compute External Web URL
+		if webPort != 443 {
+			v.SetDefault(param.Server_ExternalWebUrl.GetName(), fmt.Sprintf("https://%s:%d", hostname, webPort))
+		} else {
+			v.SetDefault(param.Server_ExternalWebUrl.GetName(), fmt.Sprintf("https://%s", hostname))
+		}
+	}
+
+	// Strip port 443 if present (even if URL was explicitly set)
+	externalAddressStr := v.GetString(param.Server_ExternalWebUrl.GetName())
+	parsedExtAdd, err := url.Parse(externalAddressStr)
+	if err != nil {
+		return errors.Wrap(err, fmt.Sprint("invalid Server.ExternalWebUrl: ", externalAddressStr))
+	} else if parsedExtAdd.Port() == "443" {
+		parsedExtAdd.Host = parsedExtAdd.Hostname()
+		v.Set(param.Server_ExternalWebUrl.GetName(), parsedExtAdd.String())
+	}
+
+	return nil
+}
+
 // Set all defaults relevant to servers (defaults can be set only for active servers)
 // but only for the passed viper instance.
 // We operate on the passed viper instance instead of the global because it lets us
@@ -1175,6 +1308,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Server_UIActivationCodeFile.GetName(), filepath.Join(configDir, "server-web-activation-code"))
 	v.SetDefault(param.OIDC_ClientIDFile.GetName(), filepath.Join(configDir, "oidc-client-id"))
 	v.SetDefault(param.OIDC_ClientSecretFile.GetName(), filepath.Join(configDir, "oidc-client-secret"))
+	v.SetDefault(param.Server_EnablePKCS11.GetName(), false)
 	v.SetDefault(param.Cache_ExportLocation.GetName(), "/")
 	v.SetDefault(param.Registry_RequireKeyChaining.GetName(), true)
 	v.SetDefault(param.Origin_StorageType.GetName(), "posix")
@@ -1184,6 +1318,11 @@ func SetServerDefaults(v *viper.Viper) error {
 	// Defaults for XRootD authfile, scitokens config, and self-test staleness checks
 	v.SetDefault(param.Xrootd_AutoShutdownEnabled.GetName(), true)
 	v.SetDefault(param.Xrootd_ConfigUpdateFailureTimeout.GetName(), 1*time.Hour)
+
+	runtimeDir, _, err := ensureRuntimeDir(v)
+	if err != nil {
+		return err
+	}
 	v.SetDefault(param.Origin_SelfTestMaxAge.GetName(), 1*time.Hour)
 	v.SetDefault(param.Cache_SelfTestMaxAge.GetName(), 1*time.Hour)
 	v.SetDefault(param.Origin_DirectorTest.GetName(), true)
@@ -1237,15 +1376,15 @@ func SetServerDefaults(v *viper.Viper) error {
 	}
 
 	if IsRootExecution() {
-		v.SetDefault(param.Origin_RunLocation.GetName(), filepath.Join("/run", "pelican", "xrootd", "origin"))
-		v.SetDefault(param.Cache_RunLocation.GetName(), filepath.Join("/run", "pelican", "xrootd", "cache"))
+		v.SetDefault(param.Origin_RunLocation.GetName(), filepath.Join(runtimeDir, "xrootd", "origin"))
+		v.SetDefault(param.Cache_RunLocation.GetName(), filepath.Join(runtimeDir, "xrootd", "cache"))
 
-		v.SetDefault(param.Cache_StorageLocation.GetName(), filepath.Join("/run", "pelican", "cache"))
+		v.SetDefault(param.Cache_StorageLocation.GetName(), filepath.Join(runtimeDir, "cache"))
 		v.SetDefault(param.Cache_NamespaceLocation.GetName(), filepath.Join(param.Cache_StorageLocation.GetString(), "namespace"))
 		v.SetDefault(param.Cache_DataLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "data")})
 		v.SetDefault(param.Cache_MetaLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "meta")})
 
-		v.SetDefault(param.LocalCache_RunLocation.GetName(), filepath.Join("/run", "pelican", "localcache"))
+		v.SetDefault(param.LocalCache_RunLocation.GetName(), filepath.Join(runtimeDir, "localcache"))
 		v.SetDefault(param.Origin_Multiuser.GetName(), true)
 		v.SetDefault(param.Origin_DbLocation.GetName(), "/var/lib/pelican/origin.sqlite")
 		v.SetDefault(param.Director_GeoIPLocation.GetName(), "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
@@ -1258,7 +1397,7 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Monitoring_DataLocation.GetName(), "/var/lib/pelican/monitoring/data")
 		v.SetDefault(param.Shoveler_QueueDirectory.GetName(), "/var/spool/pelican/shoveler/queue")
 		v.SetDefault(param.Shoveler_AMQPTokenLocation.GetName(), "/etc/pelican/shoveler-token")
-		v.SetDefault(param.Origin_GlobusConfigLocation.GetName(), filepath.Join("/run", "pelican", "xrootd", "origin", "globus"))
+		v.SetDefault(param.Origin_GlobusConfigLocation.GetName(), filepath.Join(runtimeDir, "xrootd", "origin", "globus"))
 	} else {
 		v.SetDefault(param.Origin_DbLocation.GetName(), filepath.Join(configDir, "origin.sqlite"))
 		v.SetDefault(param.Director_GeoIPLocation.GetName(), filepath.Join(configDir, "maxmind", "GeoLite2-City.mmdb"))
@@ -1271,17 +1410,6 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Monitoring_DataLocation.GetName(), filepath.Join(configDir, "monitoring/data"))
 		v.SetDefault(param.Shoveler_QueueDirectory.GetName(), filepath.Join(configDir, "shoveler/queue"))
 		v.SetDefault(param.Shoveler_AMQPTokenLocation.GetName(), filepath.Join(configDir, "shoveler-token"))
-
-		var runtimeDir string
-		if v == viper.GetViper() && os.Getenv("XDG_RUNTIME_DIR") != "" {
-			runtimeDir = filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "pelican")
-		} else {
-			var err error
-			runtimeDir, err = os.MkdirTemp("", "pelican-xrootd-*")
-			if err != nil {
-				return errors.Wrap(err, "Failed to create temporary runtime directory for Pelican")
-			}
-		}
 
 		v.SetDefault(param.Cache_RunLocation.GetName(), filepath.Join(runtimeDir, "cache"))
 		v.SetDefault(param.Origin_RunLocation.GetName(), filepath.Join(runtimeDir, "origin"))
@@ -1313,7 +1441,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.LocalCache_DataLocation.GetName(), filepath.Join(fcRunLocation, "cache"))
 
 	// Any platform-specific paths should go here
-	err := InitServerOSDefaults(v)
+	err = InitServerOSDefaults(v)
 	if err != nil {
 		return errors.Wrapf(err, "Failure when setting up OS-specific configuration")
 	}
@@ -1357,19 +1485,9 @@ func SetServerDefaults(v *viper.Viper) error {
 		return errors.Errorf("the Server.WebPort setting of %d is invalid; TCP ports must be greater than 0", webPort)
 	}
 
-	if webPort != 443 {
-		v.SetDefault(param.Server_ExternalWebUrl.GetName(), fmt.Sprintf("https://%s:%d", hostname, webPort))
-	} else {
-		v.SetDefault(param.Server_ExternalWebUrl.GetName(), fmt.Sprintf("https://%s", hostname))
-	}
-
-	externalAddressStr := v.GetString(param.Server_ExternalWebUrl.GetName())
-	parsedExtAdd, err := url.Parse(externalAddressStr)
-	if err != nil {
-		return errors.Wrap(err, fmt.Sprint("invalid Server.ExternalWebUrl: ", externalAddressStr))
-	} else if parsedExtAdd.Port() == "443" {
-		parsedExtAdd.Host = parsedExtAdd.Hostname()
-		v.Set(param.Server_ExternalWebUrl.GetName(), parsedExtAdd.String())
+	// Compute Server.ExternalWebUrl
+	if err := ComputeExternalWebUrl(v); err != nil {
+		return err
 	}
 
 	if originConcurrency := v.GetInt(param.Origin_Concurrency.GetName()); originConcurrency < 0 {
@@ -1449,17 +1567,28 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	// of Origin.StorageType to "posix" and Origin.SelfTest to true. After these defaults are applied,
 	// it becomes impossible to determine if the values are coming from the default settings or from user input.
 	if currentServers.IsEnabled(server_structs.OriginType) && param.Origin_StorageType.GetString() != "posix" {
+		updates := make(map[string]interface{})
 		if param.Origin_SelfTest.GetBool() {
 			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-			viper.Set(param.Origin_SelfTest.GetName(), false)
+			updates[param.Origin_SelfTest.GetName()] = false
 		}
 		if param.Origin_DirectorTest.GetBool() {
 			log.Warning("Origin.DirectorTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-			viper.Set(param.Origin_DirectorTest.GetName(), false)
+			updates[param.Origin_DirectorTest.GetName()] = false
+		}
+		if len(updates) > 0 {
+			if err := param.MultiSet(updates); err != nil {
+				logging.FlushLogs(true)
+				return err
+			}
 		}
 	}
 
 	if err := SetServerDefaults(viper.GetViper()); err != nil {
+		logging.FlushLogs(true)
+		return err
+	}
+	if _, err := param.Refresh(); err != nil {
 		logging.FlushLogs(true)
 		return err
 	}
@@ -1480,19 +1609,16 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	// be done in sequence because the web UI may change the log location.
 	logging.FlushLogs(true)
 
+	runtimeDir, cleanupRuntimeDir, err := ensureRuntimeDir(viper.GetViper())
+	if err != nil {
+		return err
+	}
+
 	if !IsRootExecution() {
-		var runtimeDir string
-		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
-			runtimeDir = filepath.Join(userRuntimeDir, "pelican")
-			if err := os.MkdirAll(runtimeDir, 0750); err != nil {
-				return err
-			}
-		} else {
-			var err error
-			runtimeDir, err = os.MkdirTemp("", "pelican-xrootd-*")
-			if err != nil {
-				return err
-			}
+		if err := os.MkdirAll(runtimeDir, 0750); err != nil {
+			return err
+		}
+		if cleanupRuntimeDir {
 			cleanupDirOnShutdown(ctx, runtimeDir)
 		}
 		if !param.Cache_RunLocation.IsSet() && !param.Origin_RunLocation.IsSet() && param.Xrootd_RunLocation.IsSet() {
@@ -1707,14 +1833,17 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		refreshInterval := param.Director_RegistryQueryInterval.GetDuration()
 		if refreshInterval < 1*time.Second {
 			log.Warnf("Director.RegistryQueryInterval is set to: %v, which is too low. Falling back to default: 1m", refreshInterval)
-
-			viper.Set(param.Director_RegistryQueryInterval.GetName(), "1m")
+			if err := param.Set(param.Director_RegistryQueryInterval.GetName(), "1m"); err != nil {
+				return err
+			}
 		}
 
 		if adTTL := param.Director_AdvertisementTTL.GetDuration(); adTTL <= 0 {
 			log.Warningf("Invalid value of %q for config param %s; must be greater than 0, falling back to default of 15 minutes",
 				adTTL, param.Director_AdvertisementTTL.GetName())
-			viper.Set(param.Director_AdvertisementTTL.GetName(), "15m")
+			if err := param.Set(param.Director_AdvertisementTTL.GetName(), "15m"); err != nil {
+				return err
+			}
 		}
 
 		viper.SetDefault("Federation.DirectorUrl", param.Server_ExternalWebUrl.GetString())
@@ -1731,7 +1860,9 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		case server_structs.DistanceType, server_structs.DistanceAndLoadType, server_structs.RandomType, server_structs.AdaptiveType:
 			break
 		case server_structs.SortType(""):
-			viper.Set(param.Director_CacheSortMethod.GetName(), server_structs.DistanceType)
+			if err := param.Set(param.Director_CacheSortMethod.GetName(), server_structs.DistanceType); err != nil {
+				return err
+			}
 		default:
 			return errors.New(fmt.Sprintf("invalid Director.CacheSortMethod. Must be one of %q, %q, %q, or %q, but you configured %q.",
 				server_structs.DistanceType, server_structs.DistanceAndLoadType, server_structs.RandomType, server_structs.AdaptiveType, s))
@@ -1756,8 +1887,12 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	tokenExpiresIn := param.Monitoring_TokenExpiresIn.GetDuration()
 
 	if tokenExpiresIn == 0 || tokenRefreshInterval == 0 || tokenRefreshInterval > tokenExpiresIn {
-		viper.Set(param.Monitoring_TokenRefreshInterval.GetName(), time.Minute*5)
-		viper.Set(param.Monitoring_TokenExpiresIn.GetName(), time.Hour*1)
+		if err := param.MultiSet(map[string]interface{}{
+			param.Monitoring_TokenRefreshInterval.GetName(): time.Minute * 5,
+			param.Monitoring_TokenExpiresIn.GetName():       time.Hour * 1,
+		}); err != nil {
+			return err
+		}
 		log.Warningln("Invalid Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Fallback to 5m for refresh interval and 1h for valid interval")
 	}
 
@@ -1784,19 +1919,23 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	// Fallback `SelfTestInterval` to 15 seconds, if user sets a very small value
 	if currentServers.IsEnabled(server_structs.OriginType) {
 		if param.Origin_SelfTestInterval.GetDuration() < 1*time.Second {
-			viper.Set(param.Origin_SelfTestInterval.GetName(), "15s")
+			if err := param.Set(param.Origin_SelfTestInterval.GetName(), "15s"); err != nil {
+				return err
+			}
 			log.Warningf("Invalid %s value of %s. Falling back to 15s", param.Origin_SelfTestInterval.GetName(), param.Origin_SelfTestInterval.GetDuration().String())
 		}
 	}
 	if currentServers.IsEnabled(server_structs.CacheType) {
 		if param.Cache_SelfTestInterval.GetDuration() < 1*time.Second {
-			viper.Set(param.Cache_SelfTestInterval.GetName(), "15s")
+			if err := param.Set(param.Cache_SelfTestInterval.GetName(), "15s"); err != nil {
+				return err
+			}
 			log.Warningf("Invalid %s value of %s. Falling back to 15s", param.Cache_SelfTestInterval.GetName(), param.Cache_SelfTestInterval.GetDuration().String())
 		}
 	}
 
 	// Unmarshal Viper config into a Go struct
-	unmarshalledConfig, err := param.UnmarshalConfig(viper.GetViper())
+	unmarshalledConfig, err := param.UnmarshalConfig()
 	if err != nil || unmarshalledConfig == nil {
 		return err
 	}
@@ -1889,8 +2028,18 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	// Sets up the server log filter mechanism
 	initFilterLogging()
 
-	// Sets (or resets) the federation info.  Unlike in clients, we do this at startup
-	// instead of deferring it
+	// Register callback for runtime log level changes
+	RegisterLoggingCallback()
+
+	// Ensure server defaults are applied before any federation discovery; several
+	// tests rely on URL defaults being derived from Server.ExternalWebUrl.
+	if err := SetServerDefaults(viper.GetViper()); err != nil {
+		logging.FlushLogs(true)
+		return err
+	}
+
+	// Sets (or resets) the federation info. Unlike in clients, we do this at startup
+	// instead of deferring it.
 	fedDiscoveryOnce = &sync.Once{}
 	if _, err := GetFederation(ctx); err != nil {
 		return err
@@ -1939,7 +2088,6 @@ func SetClientDefaults(v *viper.Viper) error {
 	if v.IsSet(param.MinimumDownloadSpeed.GetName()) {
 		v.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), v.GetInt(param.MinimumDownloadSpeed.GetName()))
 	}
-
 	// Some client actions may take different defaults depending on whether we detect the plugin
 	v.SetDefault(param.Client_IsPlugin.GetName(), false)
 	v.SetDefault(param.Client_DirectorRetries.GetName(), 5)
@@ -1964,14 +2112,24 @@ func InitClient() error {
 	// This must happen after InitConfigInternal but before SetClientDefaults
 	bindLegacyClientEnv()
 
+	// Bind configuration from HTCondor job ClassAd (e.g., PelicanCfg_* attributes)
+	// This should happen after legacy env binding but before SetClientDefaults
+	bindClassAdConfig()
+
 	if err := SetClientDefaults(viper.GetViper()); err != nil {
 		return err
+	}
+
+	// Compute Server.ExternalWebUrl so client commands can access it if needed
+	// (e.g., for server management commands like set-logging-level)
+	if err := ComputeExternalWebUrl(viper.GetViper()); err != nil {
+		log.Debugln("Failed to compute Server.ExternalWebUrl:", err)
 	}
 
 	setupTransport()
 
 	// Unmarshal Viper config into a Go struct
-	unmarshalledConfig, err := param.UnmarshalConfig(viper.GetViper())
+	unmarshalledConfig, err := param.UnmarshalConfig()
 	if err != nil || unmarshalledConfig == nil {
 		return err
 	}
@@ -2011,7 +2169,9 @@ func ClearServerAds() {
 func ResetConfig() {
 	// Close any open log files and reset logger output
 	logging.CloseLogger()
-	viper.Reset()
+	if err := param.Reset(); err != nil {
+		log.WithError(err).Warn("Failed to reset configuration")
+	}
 
 	// Clear cached preferred prefix
 	testingPreferredPrefix = ""

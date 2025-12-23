@@ -28,14 +28,15 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func TestLaunchRegistryPeriodicQuery(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	config.ResetConfig()
 	defer config.ResetConfig()
 
@@ -64,8 +65,8 @@ func TestLaunchRegistryPeriodicQuery(t *testing.T) {
 	defer server.Close()
 
 	// Set the registry URL to the mock server.
-	viper.Set("Federation.Registryurl", server.URL)
-	viper.Set("Director.RegistryQueryInterval", "200ms")
+	require.NoError(t, param.Set("Federation.Registryurl", server.URL))
+	require.NoError(t, param.Set("Director.RegistryQueryInterval", "200ms"))
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()

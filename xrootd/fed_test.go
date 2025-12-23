@@ -28,7 +28,6 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -36,6 +35,7 @@ import (
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 var (
@@ -44,6 +44,7 @@ var (
 )
 
 func TestHttpOriginConfig(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	// temp place holder so we can start the test server before this value has been parsed
@@ -66,7 +67,7 @@ func TestHttpOriginConfig(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
-	viper.Set("Origin.HttpServiceUrl", srv.URL)
+	require.NoError(t, param.Set("Origin.HttpServiceUrl", srv.URL))
 
 	fed := fed_test_utils.NewFedTest(t, httpsOriginConfig)
 	storageName = fed.Exports[0].StoragePrefix + "/hello_world"

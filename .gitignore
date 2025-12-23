@@ -7,3 +7,8 @@ web_ui/frontend/app/api/docs/pelican-swagger.yaml
 .goreleaser.dev.yml
 .DS_Store
 .idea
+pelican.yaml
+oidc-client-id
+oidc-client-secret
+MaxMindKey
+e2e_fed_tests.test

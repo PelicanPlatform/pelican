@@ -1,6 +1,6 @@
 #!/bin/bash -xe
 
-# Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+# Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you
 # may not use this file except in compliance with the License.  You may
@@ -19,59 +19,61 @@
 
 set -e
 
-mkdir -p /tmp/pelican-test/stat_test
+# Note we don't use $TMPDIR here to avoid issues with long temp paths;
+# XRootD uses Unix domain sockets which have a max path length of 108 characters.
+TEST_ROOT="$(mktemp -d "/tmp/pelican-stat-test.XXXXXX")"
+chmod 755 "${TEST_ROOT}"
 
-mkdir -p /tmp/pelican-test/stat_test/origin
-chmod 777 /tmp/pelican-test/stat_test/origin
+mkdir -p "${TEST_ROOT}/origin"
+chown xrootd: "${TEST_ROOT}/origin"
 
-# Helper func that finds an available port for the servers
-find_available_port() {
-    # Use Python to bind to port 0 and find an available port
-    python3 -c "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.bind(('', 0)); print(s.getsockname()[1]); s.close()"
-}
-
-# Get two random available ports
-WEBUI_PORT=$(find_available_port)
-ORIGIN_PORT=$(find_available_port)
-
-# Setup env variables needed
-export PELICAN_FEDERATION_DIRECTORURL="https://$HOSTNAME:$WEBUI_PORT"
-export PELICAN_FEDERATION_REGISTRYURL="https://$HOSTNAME:$WEBUI_PORT"
-export PELICAN_ORIGIN_PORT=$ORIGIN_PORT
+# Setup env variables needed - use port 0 to let Pelican choose random ports
+export PELICAN_ORIGIN_PORT=0
 export PELICAN_TLSSKIPVERIFY=true
 export PELICAN_SERVER_ENABLEUI=false
-export PELICAN_SERVER_WEBPORT=$WEBUI_PORT
-export PELICAN_ORIGIN_RUNLOCATION=/tmp/pelican-test/stat_test/xrootdRunLocation
+export PELICAN_SERVER_WEBPORT=0
+export PELICAN_ORIGIN_RUNLOCATION="${TEST_ROOT}/xrootdRunLocation"
+export PELICAN_ORIGIN_ENABLEVOMS=false
 
-export PELICAN_CONFIGDIR=/tmp/pelican-test/stat_test
-export PELICAN_SERVER_DBLOCATION=/tmp/pelican-test/stat_test/test-registry.sql
-export PELICAN_CONFIG=${PELICAN_CONFIGDIR}/empty.yaml
+export PELICAN_CONFIGDIR="${TEST_ROOT}"
+export PELICAN_RUNTIMEDIR="${TEST_ROOT}"
+export PELICAN_SERVER_DBLOCATION="${TEST_ROOT}/test-registry.sql"
+export PELICAN_CONFIG="${PELICAN_CONFIGDIR}/empty.yaml"
 export PELICAN_OIDC_CLIENTID="sometexthere"
-export PELICAN_OIDC_CLIENTSECRETFILE=/tmp/pelican-test/stat_test/oidc-secret
-echo "Placeholder OIDC secret" > /tmp/pelican-test/stat_test/oidc-secret
+export PELICAN_OIDC_CLIENTSECRETFILE="${TEST_ROOT}/oidc-secret"
+echo "Placeholder OIDC secret" > "${TEST_ROOT}/oidc-secret"
 
 export PELICAN_ORIGIN_ENABLEDIRECTREADS=true
 export PELICAN_ORIGIN_FEDERATIONPREFIX="/test"
-export PELICAN_ORIGIN_STORAGEPREFIX="/tmp/pelican-test/stat_test/origin"
+export PELICAN_ORIGIN_STORAGEPREFIX="${TEST_ROOT}/origin"
 export PELICAN_ORIGIN_ENABLEPUBLICREADS=true
 export PELICAN_DIRECTOR_STATTIMEOUT=1s
 export PELICAN_LOGGING_LEVEL=debug
 
+# Report the xrootd found on PATH (do not alter PATH or fallback).
+if command -v xrootd >/dev/null 2>&1; then
+    XROOTD_BIN="$(command -v xrootd)"
+    echo "Using xrootd at $XROOTD_BIN"
+else
+    echo "ERROR: xrootd not found on PATH"
+    exit 1
+fi
+
 # Function to cleanup after test ends
 cleanup() {
-    local pid=$1  # Get the PID from the function argument
     echo "Cleaning up..."
-    if [ ! -z "$pid" ]; then
-        echo "Sending SIGINT to PID $pid"
-        kill -SIGINT "$pid"
+    if [ -n "${pid_federationServe:-}" ]; then
+        echo "Sending SIGINT to PID ${pid_federationServe}"
+        kill -SIGINT "${pid_federationServe}"
     else
         echo "No PID provided for cleanup."
     fi
 
     # Clean up temporary files
-    rm -rf /tmp/pelican-test/stat_test
+    rm -rf "${TEST_ROOT:-}"
 
     unset PELICAN_CONFIGDIR
+    unset PELICAN_RUNTIMEDIR
     unset PELICAN_FEDERATION_DIRECTORURL
     unset PELICAN_FEDERATION_REGISTRYURL
     unset PELICAN_TLSSKIPVERIFY
@@ -89,22 +91,62 @@ cleanup() {
     unset PELICAN_ORIGIN_PORT
 }
 
-echo "This is some random content in the random file" > /tmp/pelican-test/stat_test/origin/input.txt
-touch ${PELICAN_CONFIG}
+echo "This is some random content in the random file" > "${TEST_ROOT}/origin/input.txt"
+touch "${PELICAN_CONFIG}"
 
-# Prepare token for calling stat
-TOKEN=$(./pelican --config ${PELICAN_CONFIG} origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:$WEBUI_PORT" --scope "web_ui.access" --subject "bar" --lifetime 3600)
+# Run federation in the background with port 0 (random port)
+federationServe="./pelican --config ${PELICAN_CONFIG} serve --module director --module registry --module origin --port 0 || :"
 
-# Run federation in the background
-federationServe="./pelican --config ${PELICAN_CONFIG} serve --module director --module registry --module origin --port $WEBUI_PORT"
 $federationServe &
 pid_federationServe=$!
 
 # Setup trap with the PID as an argument to the cleanup function
-trap 'cleanup $pid_federationServe' EXIT
+trap cleanup EXIT
+
+# Wait for the address file to be created
+# Address file is in runtime directory: $XDG_RUNTIME_DIR/pelican if set, otherwise falls back to ConfigDir
+if [ -n "$XDG_RUNTIME_DIR" ]; then
+    RUNTIME_BASE="${XDG_RUNTIME_DIR%/}"
+    ADDRESS_FILE="${RUNTIME_BASE}/pelican/pelican.addresses"
+else
+    CONFIG_BASE="${PELICAN_CONFIGDIR%/}"
+    ADDRESS_FILE="${CONFIG_BASE}/pelican.addresses"
+fi
+echo "Waiting for address file: $ADDRESS_FILE"
+TOTAL_WAIT=0
+while [ ! -f "$ADDRESS_FILE" ]; do
+    if ! kill -0 "${pid_federationServe:-0}" 2>/dev/null; then
+        echo "Pelican process exited before address file was created"
+        echo "TEST FAILED"
+        unset pid_federationServe
+        exit 1
+    fi
+    sleep 0.5
+    TOTAL_WAIT=$((TOTAL_WAIT + 1))
+    if [ "$TOTAL_WAIT" -gt 40 ]; then
+        echo "Address file not created after 20 seconds, exiting..."
+        echo "TEST FAILED"
+        exit 1
+    fi
+done
+
+echo "Address file found, sourcing it..."
+# Source the address file to get the actual server addresses
+# shellcheck source=/dev/null
+source "$ADDRESS_FILE"
+
+echo "SERVER_EXTERNAL_WEB_URL=$SERVER_EXTERNAL_WEB_URL"
+echo "ORIGIN_URL=$ORIGIN_URL"
+
+# Set environment variables for federation discovery based on actual addresses
+export PELICAN_FEDERATION_DIRECTORURL="$SERVER_EXTERNAL_WEB_URL"
+export PELICAN_FEDERATION_REGISTRYURL="$SERVER_EXTERNAL_WEB_URL"
+
+# Prepare token for calling stat
+TOKEN=$(./pelican --config "${PELICAN_CONFIG}" origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "$SERVER_EXTERNAL_WEB_URL" --scope "web_ui.access" --subject "bar" --lifetime 3600)
 
 # Give the federation time to spin up:
-API_URL="https://$HOSTNAME:$WEBUI_PORT/api/v1.0/health"
+API_URL="$SERVER_EXTERNAL_WEB_URL/api/v1.0/health"
 DESIRED_RESPONSE="200"
 
 # Function to check if the response indicates all servers are running
@@ -126,7 +168,7 @@ check_response() {
 # We don't want to do this loop for too long, indicates there is an error
 TOTAL_SLEEP_TIME=0
 
-while check_response; [ $? -ne 0 ]
+until check_response
 do
     sleep .5
     TOTAL_SLEEP_TIME=$((TOTAL_SLEEP_TIME + 1))
@@ -139,16 +181,54 @@ do
     fi
 done
 
-STAT_URL="https://$HOSTNAME:$WEBUI_PORT/api/v1.0/director_ui/servers/origins/stat/test/input.txt"
+STAT_URL="$SERVER_EXTERNAL_WEB_URL/api/v1.0/director_ui/servers/origins/stat/test/input.txt"
 
-RESPONSE=$(curl -k -H "Cookie: login=$TOKEN" -H "Content-Type: application/json" "$STAT_URL")
+# Function to query the stat endpoint with retry logic for 429 responses
+query_stat_endpoint() {
+    local max_retries=10
+    local retry_count=0
 
-if echo "$RESPONSE" | grep -q "\"status\":\"success\""; then
-    echo "Desired response received: $RESPONSE"
-    echo "Test Succeeded"
+    while [ $retry_count -lt $max_retries ]; do
+        # Make the curl request and capture both the response body and HTTP status code
+        HTTP_RESPONSE=$(curl -k -w "\n%{http_code}" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" "$STAT_URL" 2>/dev/null)
+
+        # Extract the status code (last line) and response body (everything else)
+        HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -n1)
+        RESPONSE=$(echo "$HTTP_RESPONSE" | sed '$d')
+
+        # Check if we got a 429 status code
+        if [ "$HTTP_CODE" = "429" ]; then
+            echo "Received 429 status code (director recently restarted), retrying in 1 second... (attempt $((retry_count + 1))/$max_retries)"
+            retry_count=$((retry_count + 1))
+            sleep 1
+            continue
+        fi
+
+        # For any other status code, check if we got a successful response
+        if echo "$RESPONSE" | grep -q "\"status\":\"success\""; then
+            echo "Desired response received: $RESPONSE"
+            echo "Test Succeeded"
+            return 0
+        else
+            echo "Stat response returns error: $RESPONSE (HTTP status: $HTTP_CODE)"
+            echo "Test Failed"
+            return 1
+        fi
+    done
+
+    # If we exhausted all retries
+    echo "Exceeded maximum retries ($max_retries) for stat endpoint query"
+    echo "Test Failed"
+    return 1
+}
+
+# Query the stat endpoint with retry logic
+if query_stat_endpoint; then
+    trap - EXIT
+    cleanup
     exit 0
 else
-    echo "Stat response returns error: $RESPONSE"
-    echo "Test Failed"
+    trap - EXIT
+    cleanup
     exit 1
 fi

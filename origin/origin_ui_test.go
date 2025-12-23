@@ -16,7 +16,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -59,6 +58,7 @@ func generateToken(t *testing.T, scopes []token_scopes.TokenScope, subject strin
 }
 
 func TestCollectionsAPI(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	gin.SetMode(gin.TestMode)
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() {
@@ -70,7 +70,7 @@ func TestCollectionsAPI(t *testing.T) {
 
 	testCfgDir, err := os.MkdirTemp("", "tmpDir")
 	require.NoError(t, err, "Failed to create temp config dir")
-	viper.Set("ConfigDir", testCfgDir)
+	require.NoError(t, param.Set("ConfigDir", testCfgDir))
 
 	// set a temporary password file:
 	tempFile, err := os.CreateTemp("", "web-ui-passwd")
@@ -78,16 +78,16 @@ func TestCollectionsAPI(t *testing.T) {
 	tempPasswdFile = tempFile
 
 	// Override viper default for testing
-	viper.Set(param.Server_UIPasswordFile.GetName(), tempPasswdFile.Name())
+	require.NoError(t, param.Set(param.Server_UIPasswordFile.GetName(), tempPasswdFile.Name()))
 
 	// Make a testing issuer.jwk file to get a cookie
 	tempJWKDir, err := os.MkdirTemp("", "tempDir")
 	require.NoError(t, err, "Failed to create temp jwk dir")
 
 	// Override viper default for testing
-	viper.Set(param.IssuerKeysDirectory.GetName(), filepath.Join(tempJWKDir, "issuer-keys"))
+	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), filepath.Join(tempJWKDir, "issuer-keys")))
 
-	viper.Set(param.Server_UILoginRateLimit.GetName(), 100)
+	require.NoError(t, param.Set(param.Server_UILoginRateLimit.GetName(), 100))
 
 	// Set up origin exports
 	exportDir, err := os.MkdirTemp("", "test-export")
@@ -97,8 +97,8 @@ func TestCollectionsAPI(t *testing.T) {
 	err = os.WriteFile(filepath.Join(exportDir, "test-origin"), []byte("test"), 0644)
 	require.NoError(t, err)
 
-	viper.Set(param.Origin_StorageType.GetName(), "posix")
-	viper.Set(param.Origin_Exports.GetName(), []map[string]interface{}{
+	require.NoError(t, param.Set(param.Origin_StorageType.GetName(), "posix"))
+	require.NoError(t, param.Set(param.Origin_Exports.GetName(), []map[string]interface{}{
 		{
 			"StoragePrefix":    exportDir,
 			"FederationPrefix": "/test1",
@@ -108,7 +108,7 @@ func TestCollectionsAPI(t *testing.T) {
 			"StoragePrefix":    "/test2",
 			"FederationPrefix": "/test2",
 		},
-	})
+	}))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err = config.InitServer(ctx, server_structs.OriginType)

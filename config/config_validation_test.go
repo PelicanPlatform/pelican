@@ -24,10 +24,21 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/param"
 )
+
+// assertNoUnknownKeyLogs validates that no log entry mentions unknown configuration keys.
+// The logging callback can emit other messages (for example, when parsing log levels),
+// so the checks target only the unknown-key warnings.
+func assertNoUnknownKeyLogs(t *testing.T, entries []*logrus.Entry) {
+	t.Helper()
+	for _, entry := range entries {
+		assert.NotContains(t, entry.Message, "Unknown configuration keys found")
+	}
+}
 
 // Test that Pelican notifies users about unrecognized configuration keys.
 func TestBadConfigKeys(t *testing.T) {
@@ -35,16 +46,16 @@ func TestBadConfigKeys(t *testing.T) {
 
 	setupFunc := func() *test.Hook {
 		ResetConfig()
-		viper.Set("ConfigDir", t.TempDir())
+		require.NoError(t, param.Set("ConfigDir", t.TempDir()))
 		hook := test.NewLocal(logrus.StandardLogger())
 		return hook
 	}
 	t.Run("testRecognizedViperKey", func(t *testing.T) {
 		hook := setupFunc()
-		viper.Set("Origin.FederationPrefix", "/a/prefix")
+		require.NoError(t, param.Set("Origin.FederationPrefix", "/a/prefix"))
 		InitConfigInternal(logrus.DebugLevel)
 
-		require.Nil(t, hook.LastEntry())
+		assertNoUnknownKeyLogs(t, hook.AllEntries())
 	})
 
 	t.Run("testRecognizedEnvKey", func(t *testing.T) {
@@ -53,12 +64,12 @@ func TestBadConfigKeys(t *testing.T) {
 		defer os.Unsetenv("PELICAN_ORIGIN_FEDERATIONPREFIX")
 		InitConfigInternal(logrus.DebugLevel)
 
-		require.Nil(t, hook.LastEntry())
+		assertNoUnknownKeyLogs(t, hook.AllEntries())
 	})
 
 	t.Run("testBadViperKey", func(t *testing.T) {
 		hook := setupFunc()
-		viper.Set("Origin.Bad.Key", "/a/prefix")
+		require.NoError(t, param.Set("Origin.Bad.Key", "/a/prefix"))
 		InitConfigInternal(logrus.DebugLevel)
 
 		require.NotNil(t, hook.LastEntry())

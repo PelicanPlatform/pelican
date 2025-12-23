@@ -192,7 +192,7 @@ func putMain(cmd *cobra.Command, args []string) {
 			os.Exit(1)
 		}
 		var err error
-		dest, err = addPackQuery(dest, packOption)
+		dest, err = addQueryParam(dest, "pack", packOption)
 		if err != nil {
 			log.Errorln("Failed to process --pack option:", err)
 			os.Exit(1)
@@ -254,7 +254,8 @@ func putMain(cmd *cobra.Command, args []string) {
 
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		transferResults, result := client.DoPut(ctx, src, dest, isRecursive, options...)
+		transferResults, err := client.DoPut(ctx, src, dest, isRecursive, options...)
+		result = err
 		if result != nil {
 			lastSrc = src
 			break

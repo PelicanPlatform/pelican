@@ -23,6 +23,7 @@ package launchers
 import (
 	"context"
 	_ "embed"
+	"net"
 	"net/url"
 	"strconv"
 	"time"
@@ -30,7 +31,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/broker"
@@ -73,6 +73,9 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		return nil, err
 	}
 
+	// Initialize PKCS#11 helper after the defaults are set up
+	initPKCS11(ctx, modules)
+
 	// Register Lotman
 	if param.Cache_EnableLotman.GetBool() {
 		// Register the web endpoints
@@ -112,12 +115,6 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		cache.LaunchFedTokManager(ctx, egrp, cacheServer)
 	}
 
-	if param.Cache_EnableEvictionMonitoring.GetBool() {
-		metrics.LaunchXrootdCacheEvictionMonitoring(ctx, egrp)
-	}
-
-	metrics.LaunchXrdCurlStatsMonitoring(ctx, egrp)
-
 	concLimit := param.Cache_Concurrency.GetInt()
 	if concLimit > 0 {
 		server_utils.LaunchConcurrencyMonitoring(ctx, egrp, cacheServer.GetServerType())
@@ -138,20 +135,31 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 	}
 
 	log.Info("Launching cache")
-	launchers, err := xrootd.ConfigureLaunchers(false, configPath, false, true)
+	useCMSD := false
+	privileged := false
+	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, useCMSD, true)
 	if err != nil {
 		return nil, err
 	}
 
 	portStartCallback := func(port int) {
-		viper.Set(param.Cache_Port.GetName(), port)
+		if err := param.Set(param.Cache_Port.GetName(), port); err != nil {
+			log.WithError(err).Warnf("Failed to set %s to %d", param.Cache_Port.GetName(), port)
+		}
 		if cacheUrl, err := url.Parse(param.Cache_Url.GetString()); err == nil {
-			if cacheUrl.Port() == "" {
-				cacheUrl.Host = cacheUrl.Hostname() + ":" + strconv.Itoa(port)
+			host := cacheUrl.Hostname()
+			if host == "" {
+				host = param.Server_Hostname.GetString()
 			}
-
-			viper.Set(param.Cache_Url.GetName(), cacheUrl.String())
-			log.Debugf("Resetting %s to %s", param.Cache_Url.GetName(), cacheUrl.String())
+			currentPort := cacheUrl.Port()
+			if currentPort == "" || currentPort == "0" {
+				cacheUrl.Host = net.JoinHostPort(host, strconv.Itoa(port))
+				if err := param.Set(param.Cache_Url.GetName(), cacheUrl.String()); err != nil {
+					log.WithError(err).Warnf("Failed to set %s to %s", param.Cache_Url.GetName(), cacheUrl.String())
+				} else {
+					log.Debugf("Resetting %s to %s", param.Cache_Url.GetName(), cacheUrl.String())
+				}
+			}
 		}
 		log.Infoln("Cache startup complete on port", port)
 	}
@@ -161,6 +169,20 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		return nil, err
 	}
 	cacheServer.SetPids(pids)
+
+	// Store restart information after PIDs are known
+	xrootd.StoreRestartInfo(launchers, pids, egrp, portStartCallback, true, useCMSD, privileged)
+
+	// Register callback for xrootd logging configuration changes
+	// This must be done after LaunchDaemons so the server has PIDs
+	xrootd.RegisterXrootdLoggingCallback()
+
+	if param.Cache_EnableEvictionMonitoring.GetBool() {
+		metrics.LaunchXrootdCacheEvictionMonitoring(ctx, egrp)
+	}
+
+	metrics.LaunchXrdCurlStatsMonitoring(ctx, egrp)
+
 	return cacheServer, nil
 }
 

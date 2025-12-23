@@ -30,7 +30,6 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -46,6 +45,7 @@ import (
 )
 
 func TestVerifyAdvertiseToken(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -56,7 +56,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	kDir := filepath.Join(tDir, "t-issuer-keys")
 
 	//Setup a private key and a token
-	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
+	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), kDir))
 
 	// Mock registry server
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -64,15 +64,14 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 			res := server_structs.CheckNamespaceStatusRes{Approved: true}
 			resByte, err := json.Marshal(res)
 			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-			_, err = w.Write(resByte)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
+				http.Error(w, "marshal error", http.StatusInternalServerError)
 				return
 			}
 			w.WriteHeader(http.StatusOK)
+			if _, err = w.Write(resByte); err != nil {
+				// Cannot write another header; log via test logger instead
+				return
+			}
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -84,8 +83,8 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	test_utils.MockFederationRoot(t, &fedInfo, nil)
 
 	// Mock cached jwks
-	viper.Set("ConfigDir", t.TempDir())
-	err := config.InitServer(ctx, server_structs.DirectorType)
+	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
+	err := initServerForTest(t, ctx, server_structs.DirectorType)
 	require.NoError(t, err)
 
 	kSet, err := config.GetIssuerPublicJWKS()
@@ -141,6 +140,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 }
 
 func TestNamespaceKeysCacheEviction(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Run("evict-after-expire-time", func(t *testing.T) {
 		// Start cache eviction
 		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
@@ -195,6 +195,7 @@ func TestNamespaceKeysCacheEviction(t *testing.T) {
 // prevents TTL refresh on cache access. This validates the fix for the bug
 // where stale keys would remain cached indefinitely if accessed frequently.
 func TestNamespaceKeysCacheTTLExpiration(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -262,18 +263,18 @@ func TestNamespaceKeysCacheTTLExpiration(t *testing.T) {
 	// Initialize director
 	tDir := t.TempDir()
 	kDir := filepath.Join(tDir, "t-issuer-keys")
-	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
-	viper.Set("ConfigDir", tDir)
+	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), kDir))
+	require.NoError(t, param.Set("ConfigDir", tDir))
 
 	// Use a shorter TTL for testing (2 seconds instead of 15 minutes)
 	// This affects both the server ad cache and the namespaceKeys cache expiration
 	originalTTL := param.Director_AdvertisementTTL.GetDuration()
-	viper.Set(param.Director_AdvertisementTTL.GetName(), 2*time.Second)
+	require.NoError(t, param.Set(param.Director_AdvertisementTTL.GetName(), 2*time.Second))
 	t.Cleanup(func() {
-		viper.Set(param.Director_AdvertisementTTL.GetName(), originalTTL)
+		require.NoError(t, param.Set(param.Director_AdvertisementTTL.GetName(), originalTTL))
 	})
 
-	err = config.InitServer(ctx, server_structs.DirectorType)
+	err = initServerForTest(t, ctx, server_structs.DirectorType)
 	require.NoError(t, err)
 
 	// Start the TTL cache

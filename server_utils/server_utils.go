@@ -55,6 +55,13 @@ import (
 	"github.com/pelicanplatform/pelican/utils"
 )
 
+var xrootdReset func()
+
+// RegisterXrootdReset allows the xrootd package to provide a reset hook without introducing import cycles.
+func RegisterXrootdReset(fn func()) {
+	xrootdReset = fn
+}
+
 // GetTopologyJSON returns the namespaces and caches from OSDF topology
 func GetTopologyJSON(ctx context.Context) (*server_structs.TopologyNamespacesJSON, error) {
 	topoNamespaceUrl := param.Federation_TopologyNamespaceUrl.GetString()
@@ -312,8 +319,13 @@ func LaunchWatcherMaintenance(ctx context.Context, dirPaths []string, descriptio
 // 1. viper settings, 2. preferred prefix, 3. transport object, 4. Federation metadata, 5. origin exports
 func ResetTestState() {
 	config.ResetConfig()
+	param.ClearCallbacks()
+	if xrootdReset != nil {
+		xrootdReset()
+	}
 	ResetOriginExports()
 	logging.ResetLogFlush()
+	logging.ResetGlobalManager()
 	baseAdOnce = sync.Once{}
 	baseAd = server_structs.ServerBaseAd{}
 	baseAdErr = nil

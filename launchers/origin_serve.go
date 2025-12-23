@@ -30,7 +30,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/database"
@@ -59,6 +58,9 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	if err != nil {
 		return nil, err
 	}
+
+	// Initialize PKCS#11 helper after the defaults are set up
+	initPKCS11(ctx, modules)
 
 	if err := origin.InitializeDB(); err != nil {
 		return nil, errors.Wrap(err, "failed to initialize origin sqlite database")
@@ -118,7 +120,8 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	}
 
 	privileged := param.Origin_Multiuser.GetBool()
-	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, param.Origin_EnableCmsd.GetBool(), false)
+	useCMSD := param.Origin_EnableCmsd.GetBool()
+	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, useCMSD, false)
 	if err != nil {
 		return nil, err
 	}
@@ -132,10 +135,14 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	}
 
 	portStartCallback := func(port int) {
-		viper.Set("Origin.Port", port)
+		if err := param.Set("Origin.Port", port); err != nil {
+			log.WithError(err).Warnf("Failed to set Origin.Port to %d", port)
+		}
 		if originUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {
 			originUrl.Host = originUrl.Hostname() + ":" + strconv.Itoa(port)
-			viper.Set("Origin.Url", originUrl.String())
+			if err := param.Set("Origin.Url", originUrl.String()); err != nil {
+				log.WithError(err).Warnf("Failed to set Origin.Url to %s", originUrl.String())
+			}
 			log.Debugln("Resetting Origin.Url to", originUrl.String())
 		}
 		log.Infoln("Origin startup complete on port", port)
@@ -146,6 +153,13 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		return nil, err
 	}
 	originServer.SetPids(pids)
+
+	// Store restart information after PIDs are known
+	xrootd.StoreRestartInfo(launchers, pids, egrp, portStartCallback, false, useCMSD, privileged)
+
+	// Register callback for xrootd logging configuration changes
+	// This must be done after LaunchDaemons so the server has PIDs
+	xrootd.RegisterXrootdLoggingCallback()
 
 	// LaunchOriginDaemons may edit the viper config; these launched goroutines are purposely
 	// delayed until after the viper config is done.
