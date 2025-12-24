@@ -81,10 +81,11 @@ type (
 
 	// An object that iterates through the various possible tokens
 	tokenContentIterator struct {
-		Location      string
-		Name          string
-		CredLocations []string
-		Method        int
+		Location         string
+		Name             string
+		CredLocations    []string
+		Method           int
+		CurrentTokenPath string // Tracks the path of the current token being returned
 	}
 )
 
@@ -234,6 +235,7 @@ func (tci *tokenContentIterator) next() (string, bool) {
 			if _, err := os.Stat(tci.Location); err != nil {
 				log.Warningln("Client was asked to read token from location", tci.Location, "but it is not readable:", err)
 			} else if jwtSerialized, err := utils.GetTokenFromFile(tci.Location); err == nil {
+				tci.CurrentTokenPath = tci.Location
 				return jwtSerialized, true
 			}
 		}
@@ -243,6 +245,7 @@ func (tci *tokenContentIterator) next() (string, bool) {
 		tci.Method += 1
 		if bearerToken, isBearerTokenSet := os.LookupEnv("BEARER_TOKEN"); isBearerTokenSet {
 			log.Debugln("Using token from BEARER_TOKEN environment variable")
+			tci.CurrentTokenPath = "BEARER_TOKEN"
 			return bearerToken, true
 		}
 		fallthrough
@@ -253,6 +256,7 @@ func (tci *tokenContentIterator) next() (string, bool) {
 			if _, err := os.Stat(bearerTokenFile); err != nil {
 				log.Warningln("Environment variable BEARER_TOKEN_FILE is set, but file being point to does not exist:", err)
 			} else if jwtSerialized, err := utils.GetTokenFromFile(bearerTokenFile); err == nil {
+				tci.CurrentTokenPath = bearerTokenFile
 				return jwtSerialized, true
 			}
 		}
@@ -266,6 +270,7 @@ func (tci *tokenContentIterator) next() (string, bool) {
 			if _, err := os.Stat(tmpTokenPath); err == nil {
 				log.Debugln("Using token from XDG_RUNTIME_DIR")
 				if jwtSerialized, err := utils.GetTokenFromFile(tmpTokenPath); err == nil {
+					tci.CurrentTokenPath = tmpTokenPath
 					return jwtSerialized, true
 				}
 			}
@@ -279,6 +284,7 @@ func (tci *tokenContentIterator) next() (string, bool) {
 		if _, err := os.Stat(tmpTokenPath); err == nil {
 			log.Debugln("Using token from", tmpTokenPath)
 			if jwtSerialized, err := utils.GetTokenFromFile(tmpTokenPath); err == nil {
+				tci.CurrentTokenPath = tmpTokenPath
 				return jwtSerialized, true
 			}
 		}
@@ -292,6 +298,7 @@ func (tci *tokenContentIterator) next() (string, bool) {
 				log.Warningln("Environment variable TOKEN is set, but file being point to does not exist:", err)
 			} else if jwtSerialized, err := utils.GetTokenFromFile(tokenFile); err == nil {
 				log.Debugln("Using token from TOKEN environment variable")
+				tci.CurrentTokenPath = tokenFile
 				return jwtSerialized, true
 			}
 		}
@@ -310,6 +317,7 @@ func (tci *tokenContentIterator) next() (string, bool) {
 				return "", false
 			}
 			if jwtSerialized, err := utils.GetTokenFromFile(tci.CredLocations[idx]); err == nil {
+				tci.CurrentTokenPath = tci.CredLocations[idx]
 				return jwtSerialized, true
 			}
 		}
@@ -332,6 +340,7 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 	}
 
 	potentialTokens := make([]tokenInfo, 0)
+	var lastTokenLocation string
 
 	if tg.TokenName == "" {
 		tg.TokenName = tg.Destination.GetTokenName()
@@ -358,13 +367,22 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 			return contents, nil
 		} else if contents != "" {
 			potentialTokens = append(potentialTokens, info)
+			// Track the location of the last token we found
+			if tg.Iterator.CurrentTokenPath != "" {
+				lastTokenLocation = tg.Iterator.CurrentTokenPath
+			}
 		}
 	}
 
 	// If _any_ potential token is found, even though it's not thought to be acceptable,
 	// return that instead of failing outright under the theory the user knows better.
 	if len(potentialTokens) > 0 {
-		log.Warningf("Using provided token %s even though it does not appear to be acceptable to perform transfer", tg.TokenLocation)
+		// Use the tracked location, or fall back to TokenLocation if available
+		tokenLoc := lastTokenLocation
+		if tokenLoc == "" {
+			tokenLoc = tg.TokenLocation
+		}
+		log.Warningf("Using provided token %q even though it does not appear to be acceptable to perform transfer", tokenLoc)
 		tg.Token.Store(&potentialTokens[0])
 		token = potentialTokens[0].Contents
 		err = nil
@@ -496,44 +514,104 @@ func tokenIsAcceptable(jwtSerialized string, objectName string, dirResp server_s
 		targetResource = path.Clean("/" + osdfPathCleaned[len(dirResp.XPelTokGenHdr.BasePaths[0]):])
 	}
 
-	scopes_iface, ok := tok.Get("scope")
+	scopesIface, ok := tok.Get("scope")
 	if !ok {
 		return false
 	}
-	if scopes, ok := scopes_iface.(string); ok {
-		acceptableScope := false
-		for _, scope := range strings.Split(scopes, " ") {
-			scope_info := strings.Split(scope, ":")
-			var scopeOK bool
-			if opts.Operation.IsEnabled(config.TokenWrite) || opts.Operation.IsEnabled(config.TokenSharedWrite) {
-				scopeOK = (scope_info[0] == "storage.modify" || scope_info[0] == "storage.create")
-			} else if opts.Operation.IsEnabled(config.TokenDelete) {
-				scopeOK = (scope_info[0] == "storage.modify")
-			} else if opts.Operation.IsEnabled(config.TokenRead) || opts.Operation.IsEnabled(config.TokenSharedRead) {
-				scopeOK = (scope_info[0] == "storage.read")
-			} else {
-				scopeOK = false
-			}
-			if !scopeOK {
-				continue
-			}
+	scopes, ok := scopesIface.(string)
+	if !ok {
+		return false
+	}
 
-			if len(scope_info) == 1 {
-				acceptableScope = true
-				break
-			}
-			// Shared URLs must have exact matches; otherwise, prefix matching is acceptable.
-			if ((opts.Operation.IsEnabled(config.TokenSharedWrite) || opts.Operation.IsEnabled(config.TokenSharedRead)) && (targetResource == scope_info[1])) ||
-				strings.HasPrefix(targetResource, scope_info[1]) {
-				acceptableScope = true
-				break
-			}
+	return hasAcceptableScope(scopes, isWLCG, isSci, targetResource, opts)
+}
+
+// parseScope splits a scope string into authorization and resource parts.
+// If no colon is present, returns the entire scope as authz with empty resource.
+func parseScope(scope string) (authz, resource string, hasResource bool) {
+	parts := strings.SplitN(scope, ":", 2)
+	if len(parts) == 1 {
+		return parts[0], "", false
+	}
+	return parts[0], parts[1], true
+}
+
+// hasAcceptableScope checks if any scope in the space-separated scope string
+// is acceptable for the given operation and resource.
+func hasAcceptableScope(scopes string, isWLCG, isSci bool, targetResource string, opts config.TokenGenerationOpts) bool {
+	for _, scope := range strings.Fields(scopes) {
+		authz, resource, hasResource := parseScope(scope)
+		if authz == "" {
+			continue
 		}
-		if acceptableScope {
+
+		// Check if the authorization scope is valid for WLCG or Sci tokens
+		scopeValid := (isWLCG && isValidWLCGScope(authz, opts.Operation)) || (isSci && isValidSciScope(authz, opts.Operation))
+		if !scopeValid {
+			continue
+		}
+
+		// If scope has no resource part, accept it
+		if !hasResource {
+			return true
+		}
+
+		// If scope has a resource part, check if it matches (exact for shared URLs, prefix otherwise)
+		if matchesResource(targetResource, resource, opts.Operation) {
 			return true
 		}
 	}
 	return false
+}
+
+// matchesResource checks if the target resource matches the scope resource.
+// For shared URLs, exact matches are preferred, but prefix matching is also acceptable.
+func matchesResource(targetResource, scopeResource string, operation config.TokenOperation) bool {
+	isSharedOperation := operation.IsEnabled(config.TokenSharedWrite) || operation.IsEnabled(config.TokenSharedRead)
+
+	// Normalize paths for comparison: remove trailing slashes (except for root "/")
+	// A scope like "/gluex/" should match both "/gluex/something" and "/gluex"
+	targetNorm := targetResource
+	if len(targetNorm) > 1 && strings.HasSuffix(targetNorm, "/") {
+		targetNorm = strings.TrimSuffix(targetNorm, "/")
+	}
+	scopeNorm := scopeResource
+	if len(scopeNorm) > 1 && strings.HasSuffix(scopeNorm, "/") {
+		scopeNorm = strings.TrimSuffix(scopeNorm, "/")
+	}
+
+	// For shared operations, exact match is preferred; otherwise, prefix matching is acceptable.
+	// However, prefix matching is always acceptable as a fallback.
+	// Check exact match on normalized paths, or prefix match on original paths
+	return (isSharedOperation && targetNorm == scopeNorm) ||
+		strings.HasPrefix(targetResource, scopeResource) ||
+		strings.HasPrefix(targetNorm, scopeNorm)
+}
+
+func isValidWLCGScope(authz string, operation config.TokenOperation) bool {
+	switch {
+	case operation.IsEnabled(config.TokenWrite) || operation.IsEnabled(config.TokenSharedWrite):
+		return authz == token_scopes.Wlcg_Storage_Modify.String() || authz == token_scopes.Wlcg_Storage_Create.String()
+	case operation.IsEnabled(config.TokenDelete):
+		return authz == token_scopes.Wlcg_Storage_Modify.String()
+	case operation.IsEnabled(config.TokenRead) || operation.IsEnabled(config.TokenSharedRead):
+		return authz == token_scopes.Wlcg_Storage_Read.String()
+	default:
+		return false
+	}
+}
+
+func isValidSciScope(authz string, operation config.TokenOperation) bool {
+	switch {
+	case operation.IsEnabled(config.TokenWrite) || operation.IsEnabled(config.TokenSharedWrite):
+		return authz == token_scopes.Scitokens_Write.String()
+	case operation.IsEnabled(config.TokenDelete):
+		return authz == token_scopes.Scitokens_Write.String()
+	case operation.IsEnabled(config.TokenRead) || operation.IsEnabled(config.TokenSharedRead):
+		return authz == token_scopes.Scitokens_Read.String()
+	default:
+		return false
+	}
 }
 
 // Return whether the JWT represented by jwtSerialized is valid.
