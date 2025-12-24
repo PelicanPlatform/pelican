@@ -384,7 +384,7 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 							Status:        HealthStatusInit,
 						}
 						errgrp.Go(func() error {
-							LaunchPeriodicDirectorTest(cancelCtx, sAd)
+							LaunchPeriodicDirectorTest(cancelCtx, ad.URL.String())
 							return nil
 						})
 						log.Debugf("New director test suite issued for %s %s. Errgroup was evicted", string(ad.Type), ad.URL.String())
@@ -392,7 +392,7 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 						// Existing errorgroup still working
 						cancelCtx, cancel := context.WithCancel(existingUtil.ErrGrpContext)
 						started := existingUtil.ErrGrp.TryGo(func() error {
-							LaunchPeriodicDirectorTest(cancelCtx, sAd)
+							LaunchPeriodicDirectorTest(cancelCtx, ad.URL.String())
 							return nil
 						})
 						if !started {
@@ -422,7 +422,7 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 				Status:        HealthStatusInit,
 			}
 			errgrp.Go(func() error {
-				LaunchPeriodicDirectorTest(cancelCtx, sAd)
+				LaunchPeriodicDirectorTest(cancelCtx, ad.URL.String())
 				return nil
 			})
 		}
@@ -544,6 +544,16 @@ func applyServerDowntimes(serverName string, downtimes []server_structs.Downtime
 			delete(filteredServers, serverName)
 		}
 	}
+}
+
+// isServerInDowntime checks if a server is in the filteredServers map with an active filter.
+// A server is considered in downtime if it exists in filteredServers with any filter type except tempAllowed.
+func isServerInDowntime(serverName string) bool {
+	filteredServersMutex.RLock()
+	defer filteredServersMutex.RUnlock()
+
+	existingFilterType, isServerFiltered := filteredServers[serverName]
+	return isServerFiltered && existingFilterType != tempAllowed
 }
 
 // applyActiveDowntimeFilter checks federationDowntimes for any active downtime for the given server
