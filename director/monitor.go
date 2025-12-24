@@ -252,7 +252,7 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverUrlStr string) {
 				"report_status":  string(reportStatusMetric),
 			},
 		).Inc()
-		
+
 		return true // Test was run successfully
 	}
 
