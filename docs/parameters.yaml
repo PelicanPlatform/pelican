@@ -1870,6 +1870,21 @@ components: ["cache"]
 ############################
 #  Director-level configs  #
 ############################
+name: Director.EnableFederationMetadataHosting
+description: |+
+  Controls whether or not the Director should host a copy of the Federation's metadata.
+
+  This feature should be enabled whenever your Director is expected to serve as the federation's
+  root discovery source through the `Federation.DiscoveryUrl` parameter, or whenever clients
+  reference your Director's hostname with their Pelican URLs, e.g. `pelican object get pelican://<director-hostname> ...`.
+
+  If your federation uses a "federation hostname" or "discovery URL" that is different from the Director hostname
+  (for example, the OSDF uses https://osg-htc.org for discovery, whereas the Director is hosted at
+  https://osdf-director.osg-htc.org), then this feature should be set to `false`.
+type: bool
+default: true
+components: ["director"]
+---
 name: Director.AdvertiseUrl
 description: |+
   The URL that director advertisements should be sent to.
