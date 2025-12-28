@@ -709,10 +709,12 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
         gdb \
         gcc-c++ \
         git \
+        graphviz \
         jq \
         make \
         nano \
         procps \
+        psmisc \
         python3-pip \
         systemd \
         valgrind \
