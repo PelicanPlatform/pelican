@@ -2,7 +2,7 @@
 
 # ***************************************************************
 #
-#  Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+#  Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
 #
 #  Licensed under the Apache License, Version 2.0 (the "License"); you
 #  may not use this file except in compliance with the License.  You may
@@ -19,6 +19,16 @@
 # ***************************************************************
 
 # Usage: entrypoint.sh [osdf|pelican] [daemon name] [args...]
+
+# Add additional CAs and certificates to the trust store.
+if [ -d /certs ]; then
+  shopt -s nullglob
+  for ca_cert in /certs/*.crt; do
+    cp "${ca_cert}" /etc/pki/ca-trust/source/anchors/
+  done
+  update-ca-trust extract
+  shopt -u nullglob
+fi
 
 # Set up OA4MP only if this is an origin.
 if [ "$2" == "origin" ]; then

@@ -1,7 +1,7 @@
 #!/bin/bash
 # ***************************************************************
 #
-#  Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+#  Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
 #
 #  Licensed under the Apache License, Version 2.0 (the "License"); you
 #  may not use this file except in compliance with the License.  You may
@@ -17,10 +17,22 @@
 #
 # ***************************************************************
 
-# Run pre-commit install
-pre-commit install
+# Add additional CAs and certificates to the trust store.
+if [ -d /certs ]; then
+  shopt -s nullglob
+  for ca_cert in /certs/*.crt; do
+    cp "${ca_cert}" /etc/pki/ca-trust/source/anchors/
+  done
+  update-ca-trust extract
+  shopt -u nullglob
+fi
 
-# Default to bash but if a command is passed, run it
+# Install the pre-commit hook.
+if [ -d ./.git ]; then
+  pre-commit install
+fi
+
+# Default to bash but if a command is passed, run it.
 if [ $# -eq 0 ]; then
   exec /bin/bash
 else
