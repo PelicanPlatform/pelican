@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -37,15 +37,12 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
-	"github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 type (
 	oa4mpConfig struct {
-		ClientID                string
-		ClientSecret            string
 		IssuerURL               string
 		JwksLocation            string
 		ScitokensServerLocation string
@@ -79,16 +76,19 @@ type (
 )
 
 var (
-	//go:embed resources/server-config.xml
+	//go:embed resources/tomcat-config/server.xml
+	tomcatConfigTmpl string
+
+	//go:embed resources/oa4mp-config/cfg.xml
 	serverConfigTmpl string
 
-	//go:embed resources/proxy-config.xml
-	proxyConfigTmpl string
+	//go:embed resources/oa4mp-config/web.xml
+	webappConfigTmpl string
 
-	//go:embed resources/policies.qdl
+	//go:embed resources/qdl-scripts/policies.qdl
 	policiesQdlTmpl string
 
-	//go:embed resources/id_token_policies.qdl
+	//go:embed resources/qdl-scripts/id_token_policies.qdl
 	idTokenPoliciesQdlTmpl string
 )
 
@@ -176,13 +176,6 @@ func writeOA4MPConfig(oconf oa4mpConfig, fname, templateInput string) error {
 }
 
 func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
-	var oauth2Client oauth2.Config
-	oauth2Client, _, err = oauth2.ServerOIDCClient()
-	if err != nil {
-		err = errors.Wrap(err, "Unable to launch token issuer component because OIDC is not configured")
-		return
-	}
-
 	// For now, we only request the openid scope -- but OA4MP requires us to list all the ones we
 	// don't want as well.
 	scopesSupported, err := config.GetOIDCSupportedScopes()
@@ -328,8 +321,6 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 	}
 
 	oconf := oa4mpConfig{
-		ClientID:                oauth2Client.ClientID,
-		ClientSecret:            oauth2Client.ClientSecret,
 		IssuerURL:               param.Server_ExternalWebUrl.GetString() + "/api/v1.0/issuer",
 		JwksLocation:            keyPath,
 		ScitokensServerLocation: param.Issuer_ScitokensServerLocation.GetString(),
@@ -351,11 +342,7 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 	varQdlScitokensPath := filepath.Join(param.Issuer_ScitokensServerLocation.GetString(), "var",
 		"qdl", "scitokens")
 
-	err = writeOA4MPConfig(oconf, filepath.Join(etcPath, "server-config.xml"), serverConfigTmpl)
-	if err != nil {
-		return
-	}
-	err = writeOA4MPConfig(oconf, filepath.Join(etcPath, "proxy-config.xml"), proxyConfigTmpl)
+	err = writeOA4MPConfig(oconf, filepath.Join(etcPath, "cfg.xml"), serverConfigTmpl)
 	if err != nil {
 		return
 	}
@@ -366,11 +353,6 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 		return
 	}
 
-	user, err := config.GetOA4MPUser()
-	if err != nil {
-		return
-	}
-
 	// If the HTTP socket already exists then tomcat will refuse to configure.
 	socketName := filepath.Join(param.Issuer_ScitokensServerLocation.GetString(), "var", "http.sock")
 	if err = os.Remove(socketName); err != nil && !errors.Is(err, syscall.ENOENT) {
@@ -378,28 +360,49 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 		return
 	}
 
-	// Ensure the OA4MP storage directory exists and has correct permissions and ownership
-	OA4MPStoragePath := "/opt/scitokens-server/var/storage"
+	// Ensure the OA4MP storage directory exists and has the correct permissions and ownership.
+	// We cannot be certain that the current UID and GID of the OA4MP user matches any existing
+	// files because it was only in v7.24 that we finally set those IDs in stone.
+	OA4MPStoragePath := filepath.Join(param.Issuer_ScitokensServerLocation.GetString(), "var", "storage")
 
-	if err = os.Chmod(OA4MPStoragePath, 0700); err != nil {
-		if os.IsNotExist(err) {
-			log.Debugln("OA4MP storage directory does not exist. Creating", OA4MPStoragePath)
-			if err = os.MkdirAll(OA4MPStoragePath, 0755); err != nil {
-				err = errors.Wrap(err, "failed to create OA4MP storage directory")
-				return
-			}
-			if err = os.Chmod(OA4MPStoragePath, 0700); err != nil {
-				err = errors.Wrap(err, "failed to change the permissions of OA4MP storage directory after creating it")
-				return
-			}
-		} else {
-			err = errors.Wrap(err, "failed to change the permissions of OA4MP storage directory")
-			return
-		}
+	user, err := config.GetOA4MPUser()
+	if err != nil {
+		return
 	}
 
-	if err = os.Chown(OA4MPStoragePath, user.Uid, user.Gid); err != nil {
-		err = errors.Wrap(err, "failed to change the ownership of OA4MP storage directory")
+	// Create the directory if it doesn't exist
+	if err = os.MkdirAll(OA4MPStoragePath, 0700); err != nil {
+		err = errors.Wrap(err, "failed to create OA4MP's storage directory")
+		return
+	}
+
+	// Walk the entire directory tree to set ownership and permissions
+	err = filepath.WalkDir(OA4MPStoragePath, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+
+		// Set ownership to OA4MP user
+		if chownErr := os.Chown(path, user.Uid, user.Gid); chownErr != nil {
+			return errors.Wrapf(chownErr, "failed to change ownership of '%s'", path)
+		}
+
+		// Set permissions: u=rwX,go= (0700 for directories, 0600 for files)
+		var perm os.FileMode
+		if d.IsDir() {
+			perm = 0700 // rwx------ for directories
+		} else {
+			perm = 0600 // rw------- for files
+		}
+
+		if chmodErr := os.Chmod(path, perm); chmodErr != nil {
+			return errors.Wrapf(chmodErr, "failed to change permissions of '%s'", path)
+		}
+
+		return nil
+	})
+	if err != nil {
+		err = errors.Wrap(err, "failed to set ownership and permissions for OA4MP's storage directory tree")
 		return
 	}
 
@@ -427,6 +430,18 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 		//err = nil
 	}
 	log.Debugln("Output from issuer environment bootstrap script:", string(stdoutErr))
+
+	tomcatConfigPath := filepath.Join(param.Issuer_TomcatLocation.GetString(), "conf", "server.xml")
+	err = writeOA4MPConfig(oconf, tomcatConfigPath, tomcatConfigTmpl)
+	if err != nil {
+		return
+	}
+
+	webappConfigPath := filepath.Join(param.Issuer_TomcatLocation.GetString(), "webapps", "scitokens-server", "WEB-INF", "web.xml")
+	err = writeOA4MPConfig(oconf, webappConfigPath, webappConfigTmpl)
+	if err != nil {
+		return
+	}
 
 	tomcatPath := filepath.Join(param.Issuer_TomcatLocation.GetString(), "bin", "catalina.sh")
 	launcher = daemon.DaemonLauncher{
