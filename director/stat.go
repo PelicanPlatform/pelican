@@ -350,11 +350,12 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 		return
 	}
 	timeout := param.Director_StatTimeout.GetDuration()
-	// Note there is a small buffer in each channel; in the case of a cache hit, we write
-	// to the channel from within this goroutine.
-	positiveReqChan := make(chan *objectMetadata, 5)
-	negativeReqChan := make(chan error, 5)
-	deniedReqChan := make(chan *headReqForbiddenErr, 5) // Requests with 403 response
+	// We both send to *and* receive from these channels within this
+	// goroutine, so ensure that they have sufficiently large buffers
+	// to prevent the goroutine from blocking on itself.
+	positiveReqChan := make(chan *objectMetadata, len(ads))
+	negativeReqChan := make(chan error, len(ads))
+	deniedReqChan := make(chan *headReqForbiddenErr, len(ads)) // Requests with 403 response
 	// Cancel the rest of the requests when requests received >= max required
 	maxCancelCtx, maxCancel := context.WithCancel(ctx)
 	numTotalReq := 0
@@ -489,14 +490,13 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 				}
 				totalLabels["cached_result"] = "true"
 				if metadata := item.Value(); metadata != nil {
-					totalLabels["result"] = string(metrics.StatSucceeded)
-					metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
+					log.Tracef("Object %s found at %s server %s: (cached result)", objectName, serverAd.Type, baseUrl.String())
 					positiveReqChan <- metadata
+					totalLabels["result"] = string(metrics.StatSucceeded)
 				} else {
-					log.Debugf("Object %s not found at %s server %s: (cached result)", objectName, serverAd.Type, baseUrl.String())
+					log.Tracef("Object %s not found at %s server %s: (cached result)", objectName, serverAd.Type, baseUrl.String())
 					negativeReqChan <- &headReqNotFoundErr{}
 					totalLabels["result"] = string(metrics.StatNotFound)
-					metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
 				}
 				metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
 			} else {
