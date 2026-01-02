@@ -62,6 +62,7 @@ import (
 	"github.com/prometheus/prometheus/model/metadata"
 	"github.com/prometheus/prometheus/model/relabel"
 	"github.com/prometheus/prometheus/promql"
+	"github.com/prometheus/prometheus/rules"
 	"github.com/prometheus/prometheus/scrape"
 	"github.com/prometheus/prometheus/storage"
 
@@ -346,6 +347,31 @@ func (a LogrusAdapter) Log(keyvals ...interface{}) error {
 	return nil
 }
 
+// stubRulesRetriever is a no-op implementation of api_v1.RulesRetriever
+// that returns empty results instead of nil to prevent nil pointer panics
+// when external tools (like Grafana) query the /rules or /alerts endpoints.
+type stubRulesRetriever struct{}
+
+func (s stubRulesRetriever) RuleGroups() []*rules.Group {
+	return []*rules.Group{}
+}
+
+func (s stubRulesRetriever) AlertingRules() []*rules.AlertingRule {
+	return []*rules.AlertingRule{}
+}
+
+// stubAlertmanagerRetriever is a no-op implementation of api_v1.AlertmanagerRetriever
+// that returns empty results instead of nil to prevent nil pointer panics.
+type stubAlertmanagerRetriever struct{}
+
+func (s stubAlertmanagerRetriever) Alertmanagers() []*url.URL {
+	return []*url.URL{}
+}
+
+func (s stubAlertmanagerRetriever) DroppedAlertmanagers() []*url.URL {
+	return []*url.URL{}
+}
+
 func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine, dialContextFunc func(context.Context, string, string) (net.Conn, error)) error {
 	// This is fine if each process has only one server enabled
 	// Since the "federation-in-the-box" feature won't include any web components
@@ -571,8 +597,8 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine, dialCo
 
 	factorySPr := func(_ context.Context) api_v1.ScrapePoolsRetriever { return scrapeManager }
 	factoryTr := func(_ context.Context) api_v1.TargetRetriever { return scrapeManager }
-	factoryAr := func(_ context.Context) api_v1.AlertmanagerRetriever { return nil }
-	FactoryRr := func(_ context.Context) api_v1.RulesRetriever { return nil }
+	factoryAr := func(_ context.Context) api_v1.AlertmanagerRetriever { return stubAlertmanagerRetriever{} }
+	factoryRr := func(_ context.Context) api_v1.RulesRetriever { return stubRulesRetriever{} }
 
 	readyHandler := ReadyHandler{}
 	readyHandler.SetReady(false)
@@ -602,7 +628,7 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine, dialCo
 		TSDBDir,
 		false,
 		logger,
-		FactoryRr,
+		factoryRr,
 		RemoteReadSampleLimit,
 		RemoteReadConcurrencyLimit,
 		RemoteReadBytesInFrame,
