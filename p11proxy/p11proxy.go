@@ -46,10 +46,22 @@ type Options struct {
 	// SocketDir is the directory under which the Unix socket is created.
 	SocketDir string
 	// EngineDynamicPath is the full path to the OpenSSL pkcs11 engine shared object.
+	// Used for OpenSSL ENGINE API (legacy, but widely supported).
 	EngineDynamicPath string
+	// ProviderModulePath is the full path to the pkcs11-provider module for OpenSSL 3.0+.
+	// Used when ENGINE is not available (e.g., AlmaLinux 10).
+	ProviderModulePath string
 	// ModulePath is the full path to the p11-kit client module shared object.
 	ModulePath string
 }
+
+// pkcs11Mode indicates which OpenSSL API to use for PKCS#11
+type pkcs11Mode int
+
+const (
+	modeEngine   pkcs11Mode = iota // Legacy: ENGINE API for OpenSSL 1.1.x (EL8)
+	modeProvider                   // Modern: Provider API for OpenSSL 3.x+ (EL9+, AlmaLinux 10)
+)
 
 // Proxy represents a running p11proxy helper instance.
 // Use Stop() to cleanup resources.
@@ -196,24 +208,50 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 
 	proxy := &Proxy{tmpDir: tmpDir}
 
-	// Determine engine/module paths.
-	enginePath := opts.EngineDynamicPath
-	if enginePath == "" {
-		enginePath = autoDetectEngine()
-	}
+	// Determine p11-kit client module path.
 	modulePath := opts.ModulePath
 	if modulePath == "" {
 		modulePath = autoDetectP11KitClient()
 	}
-	missing := make([]string, 0, 2)
-	if enginePath == "" {
-		missing = append(missing, "openssl-pkcs11")
-	}
 	if modulePath == "" {
-		missing = append(missing, "p11-kit-server")
+		log.Errorf("PKCS#11 helper disabled: missing p11-kit-server. Please install p11-kit to use PKCS#11 mode.")
+		_ = proxy.Stop()
+		disabled := Info{Enabled: false}
+		setCurrentInfo(disabled)
+		return &Proxy{info: disabled}, nil
 	}
-	if len(missing) > 0 {
-		log.Errorf("PKCS#11 helper disabled: missing %s. Please install these packages to use PKCS#11 mode.", strings.Join(missing, ", "))
+
+	// Determine which PKCS#11 mode to use:
+	// - Provider (preferred): For OpenSSL 3.x+ (EL9+, AlmaLinux 10, modern distros)
+	// - ENGINE (legacy): For OpenSSL 1.1.x (EL8) as a compatibility shim
+	//
+	// Provider is preferred because:
+	// - It's the modern, supported API for OpenSSL 3.0+
+	// - ENGINE is deprecated in OpenSSL 3.0 and may be removed in future versions
+	// - Provider modules only exist on OpenSSL 3.x, so this naturally falls back to ENGINE on EL8
+	var mode pkcs11Mode
+	var enginePath, providerPath string
+
+	providerPath = opts.ProviderModulePath
+	if providerPath == "" {
+		providerPath = autoDetectPKCS11Provider()
+	}
+	enginePath = opts.EngineDynamicPath
+	if enginePath == "" {
+		enginePath = autoDetectEngine()
+	}
+
+	if providerPath != "" {
+		// OpenSSL 3.x with pkcs11-provider available - use modern Provider API
+		mode = modeProvider
+		log.Debugf("PKCS#11 helper using Provider mode (OpenSSL 3.x) with %s", providerPath)
+	} else if enginePath != "" {
+		// OpenSSL 1.1.x or 3.x without provider - use legacy ENGINE API
+		log.Debugf("PKCS#11 helper using ENGINE mode (legacy/OpenSSL 1.1.x) with %s", enginePath)
+		mode = modeEngine
+	} else {
+		log.Errorf("PKCS#11 helper disabled: no PKCS#11 integration found. " +
+			"For OpenSSL 3.x: install pkcs11-provider. For OpenSSL 1.1.x: install openssl-pkcs11.")
 		_ = proxy.Stop()
 		disabled := Info{Enabled: false}
 		setCurrentInfo(disabled)
@@ -253,10 +291,16 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 	}
 	proxy.sock = sockPath
 
-	// Generate OpenSSL engine config.
+	// Generate OpenSSL config (ENGINE or Provider based on detected mode).
 	opensslConf := filepath.Join(tmpDir, "openssl-pkcs11.cnf")
-	if err := writeOpenSSLConf(opensslConf, enginePath, modulePath); err != nil {
-		log.Warnf("PKCS#11 helper disabled: cannot write OpenSSL config: %v", err)
+	var confErr error
+	if mode == modeEngine {
+		confErr = writeOpenSSLConfEngine(opensslConf, enginePath, modulePath)
+	} else {
+		confErr = writeOpenSSLConfProvider(opensslConf, providerPath, modulePath)
+	}
+	if confErr != nil {
+		log.Warnf("PKCS#11 helper disabled: cannot write OpenSSL config: %v", confErr)
 		_ = proxy.Stop()
 		disabled := Info{Enabled: false}
 		setCurrentInfo(disabled)
@@ -324,7 +368,10 @@ func uniqueSocketPath(sockDir string) (string, error) {
 	return filepath.Join(sockDir, name), nil
 }
 
-func writeOpenSSLConf(path, enginePath, modulePath string) error {
+// writeOpenSSLConfEngine generates an OpenSSL config file for ENGINE-based PKCS#11.
+// This is a legacy compatibility shim for OpenSSL 1.1.x (EL8).
+// Uses libp11/engine_pkcs11.
+func writeOpenSSLConfEngine(path, enginePath, modulePath string) error {
 	content := strings.Builder{}
 	content.WriteString("openssl_conf = openssl_init\n\n")
 	content.WriteString("[openssl_init]\n")
@@ -340,6 +387,30 @@ func writeOpenSSLConf(path, enginePath, modulePath string) error {
 	content.WriteString(modulePath)
 	content.WriteString("\n")
 	content.WriteString("init = 0\n")
+	return os.WriteFile(path, []byte(content.String()), 0644)
+}
+
+// writeOpenSSLConfProvider generates an OpenSSL config file for Provider-based PKCS#11.
+// This is the modern, preferred method for OpenSSL 3.x+ (EL9+, AlmaLinux 10).
+// Uses pkcs11-provider (https://github.com/latchset/pkcs11-provider).
+func writeOpenSSLConfProvider(path, providerPath, modulePath string) error {
+	content := strings.Builder{}
+	content.WriteString("openssl_conf = openssl_init\n\n")
+	content.WriteString("[openssl_init]\n")
+	content.WriteString("providers = provider_section\n\n")
+	content.WriteString("[provider_section]\n")
+	content.WriteString("default = default_section\n")
+	content.WriteString("pkcs11 = pkcs11_section\n\n")
+	content.WriteString("[default_section]\n")
+	content.WriteString("activate = 1\n\n")
+	content.WriteString("[pkcs11_section]\n")
+	content.WriteString("module = ")
+	content.WriteString(providerPath)
+	content.WriteString("\n")
+	content.WriteString("pkcs11-module-path = ")
+	content.WriteString(modulePath)
+	content.WriteString("\n")
+	content.WriteString("activate = 1\n")
 	return os.WriteFile(path, []byte(content.String()), 0644)
 }
 
@@ -364,6 +435,26 @@ func autoDetectP11KitClient() string {
 		"/usr/lib64/pkcs11/p11-kit-client.so",
 		"/usr/lib/pkcs11/p11-kit-client.so",
 		"/usr/lib/p11-kit-client.so",
+	}
+	for _, p := range candidates {
+		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
+			return p
+		}
+	}
+	return ""
+}
+
+// autoDetectPKCS11Provider finds the pkcs11-provider module for OpenSSL 3.x+.
+// This is the preferred PKCS#11 method for modern systems (EL9+, AlmaLinux 10).
+func autoDetectPKCS11Provider() string {
+	candidates := []string{
+		// Standard OpenSSL 3.0 provider locations
+		"/usr/lib64/ossl-modules/pkcs11.so",
+		"/usr/lib/x86_64-linux-gnu/ossl-modules/pkcs11.so",
+		"/usr/lib/ossl-modules/pkcs11.so",
+		// Some distros use different naming
+		"/usr/lib64/ossl-modules/pkcs11-provider.so",
+		"/usr/lib/x86_64-linux-gnu/ossl-modules/pkcs11-provider.so",
 	}
 	for _, p := range candidates {
 		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
