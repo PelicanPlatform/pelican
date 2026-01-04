@@ -726,6 +726,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
         libcap-devel \
         libuuid-devel \
         openssl-devel \
+        python3-devel \
         sqlite-devel \
         tinyxml2-devel \
         zlib-devel \
