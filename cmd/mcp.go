@@ -36,7 +36,7 @@ var (
 functionality to AI assistants and other MCP clients.
 
 The MCP server allows AI assistants to download files, get file information,
-and list directories using the Pelican client. It communicates via JSON-RPC
+and list collections using the Pelican client. It communicates via JSON-RPC
 over stdin/stdout.
 
 Example usage with an MCP client:
@@ -45,7 +45,7 @@ Example usage with an MCP client:
 Tools provided:
   - pelican_download: Download files from Pelican URLs
   - pelican_stat: Get metadata about Pelican objects
-  - pelican_list: List contents of Pelican directories`,
+  - pelican_list: List contents of Pelican collections`,
 	}
 
 	mcpServeCmd = &cobra.Command{
