@@ -141,6 +141,10 @@ func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error
 	// Step 1: Gracefully shutdown existing XRootD processes
 	log.Debug("Sending SIGTERM to existing XRootD processes")
 	for _, pid := range oldPids {
+		if pid <= 1 {
+			log.Warnf("Skipping restart signal for critical PID %d", pid)
+			continue
+		}
 		if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
 			log.WithError(err).Warnf("Failed to send SIGTERM to PID %d", pid)
 		}
@@ -168,6 +172,9 @@ func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error
 
 	// Force kill any remaining processes
 	for _, pid := range oldPids {
+		if pid <= 1 {
+			continue
+		}
 		process, err := os.FindProcess(pid)
 		if err == nil && process != nil {
 			if err := process.Signal(syscall.Signal(0)); err == nil {

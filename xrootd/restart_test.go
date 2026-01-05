@@ -96,7 +96,7 @@ func TestRestartXrootd_NoProcesses(t *testing.T) {
 	var launchers []daemon.Launcher
 	egrp := &errgroup.Group{}
 	callback := func(int) {}
-	StoreRestartInfo(launchers, []int{1, 2}, egrp, callback, false, false, false)
+	StoreRestartInfo(launchers, []int{999999, 999998}, egrp, callback, false, false, false)
 
 	// Try to restart with empty PID list - should fail since there's no xrootd config
 	_, err := RestartXrootd(ctx, []int{})
