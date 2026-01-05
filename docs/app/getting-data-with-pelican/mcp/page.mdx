@@ -1,14 +1,16 @@
 # Using Pelican with AI Assistants via MCP
 
-The Pelican Model Context Protocol (MCP) server enables AI assistants like Claude Code, VS Code Copilot, and other MCP-compatible tools to download files, inspect metadata, and list directories from Pelican federations. This allows you to use natural language to interact with Pelican data directly from your AI-powered development environment.
+The Pelican Model Context Protocol (MCP) server enables AI assistants like Claude Code, VS Code Copilot, and other MCP-compatible tools to download files, inspect metadata, and list collections from Pelican federations.
+This allows you to use natural language to interact with Pelican data directly from your AI-powered development environment.
 
 ## What is MCP?
 
-The [Model Context Protocol](https://modelcontextprotocol.io/) is an open standard that allows AI assistants to connect to external tools and data sources. By running a Pelican MCP server, your AI assistant can work with **public** namespaces (not support protected namespaces):
+The [Model Context Protocol](https://modelcontextprotocol.io/) is an open standard that allows AI assistants to connect to external tools and data sources.
+By running a Pelican MCP server, your AI assistant can work with **public** namespaces, but not protected namespaces:
 
 - Download objects from Pelican federations using natural language requests
 - Get metadata about objects (size, modification time, checksums)
-- List directory contents
+- List collection contents
 
 ## Before Starting
 
@@ -28,7 +30,8 @@ Ensure the Pelican MCP server is available:
 pelican mcp --help
 ```
 
-You should see output describing the `pelican mcp serve` command. If not, refer to the [Pelican installation docs](../../install.mdx) to install or update Pelican.
+You should see output describing the `pelican mcp serve` command.
+If not, refer to the [Pelican installation docs](../../install.mdx) to install or update Pelican.
 
 ## Setting Up with Claude Code
 
@@ -36,20 +39,23 @@ Claude Code CLI natively supports MCP servers, making it easy to integrate Pelic
 
 ### 1. Add Pelican MCP Server
 
-Ensure you have Claude Code installed. Run the following command to add Pelican binary to Claude Code as a local stdio server:
+Ensure you have Claude Code installed.
+Run the following command to add the Pelican binary to Claude Code as a local stdio server:
 
 ```bash copy
 claude mcp add pelican --transport stdio pelican mcp serve
 ```
 
-After you see a confirmation, Claude Code will automatically load the Pelican MCP server when you start a new session. No restart is required - the MCP server is loaded on-demand.
+After you see a confirmation, Claude Code will automatically load the Pelican MCP server when you start a new session.
+No restart is required; the MCP server is loaded on-demand.
 
 ### 2. Use Claude Code with Pelican
 
-Start a Claude Code session in your terminal. You can now ask Claude to download Pelican objects using natural language:
+Start a Claude Code session in your terminal.
+You can now ask Claude to download Pelican objects using natural language:
 
 ```
-Download the file pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt to my Downloads folder
+Download the file pelican://osg-htc.org/pelicanplatform/test/hello-world.txt to my Downloads folder
 ```
 
 Claude will fetch the file and confirm when it's complete.
@@ -105,59 +111,62 @@ Once configured, your AI assistant has access to three Pelican tools:
 Downloads objects from Pelican URLs to your local filesystem.
 
 **Example prompts**:
-- "Download pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt to /tmp/test.txt"
+- "Download pelican://osg-htc.org/pelicanplatform/test/hello-world.txt to /tmp/test.txt"
 - "Get the hello-world.txt file from pelican://osg-htc.org/pelicanplatform/test/ and save it locally"
-- "Download the entire validation directory recursively from pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/"
+- "Download the entire pelican://osg-htc.org/pelicanplatform/test/ collection recursively"
 
 **Parameters**:
 - `source`: The Pelican URL to download from
 - `destination`: Local path where the object should be saved
-- `recursive`: (optional) Set to true to download directories recursively
+- `recursive`: (optional) Set to true to download collections recursively
+
 ### pelican_stat
 
 Gets metadata about a Pelican object including size, modification time, and checksums.
 
 **Example prompts**:
 - "What's the size of pelican://osg-htc.org/pelicanplatform/test/hello-world.txt?"
-- "Get information about the validation test file"
-- "Show me the metadata for pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt"
+- "Get information about the hello-world test file"
+- "Show me the metadata for pelican://osg-htc.org/pelicanplatform/test/hello-world.txt"
 
 **Parameters**:
 - `url`: The Pelican URL to inspect
 
 ### pelican_list
 
-Lists the contents of a Pelican directory.
+Lists the contents of a Pelican collection.
 
 **Example prompts**:
-- "List the contents of pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/"
-- "What files are in the pelicanplatform test directory?"
+- "List the contents of pelican://osg-htc.org/pelicanplatform/test/"
+- "What files are in the pelicanplatform test collection?"
 - "Show me all objects under pelican://osg-htc.org/pelicanplatform/test/"
 
 **Parameters**:
-- `url`: The Pelican URL of the directory to list
+- `url`: The Pelican URL of the collection to list
 
 ## Example Workflows
 
-### Downloading Research Data
+### Downloading Test Data
 
 ```
-User: I need to download the LIGO gravitational wave data from
-pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt
+User: I need to download the hello-world test file from
+pelican://osg-htc.org/pelicanplatform/test/hello-world.txt
 to my research directory
 
-AI: I'll download that file for you. [Uses pelican_download tool]
-Successfully downloaded to ~/research/strain.hdf5 (2.3 GB)
+AI: I'll download that file for you.
+[Uses pelican_download tool]
+Successfully downloaded to ~/research/hello-world.txt (27 bytes)
 ```
 
 ### Exploring Available Data
 
 ```
-User: What data is available in the pelican://osg-htc.org/pelicanplatform/test/ directory?
+User: What data is available in the pelican://osg-htc.org/pelicanplatform/test/ collection?
 
-AI: Let me check that for you. [Uses pelican_list tool]
+AI: Let me check that for you.
+[Uses pelican_list tool]
 
-The directory contains:
+The collection contains:
 - hello-world.txt (27 bytes)
 - sample-data.csv (1.2 MB)
 - README.md (543 bytes)
@@ -166,18 +175,19 @@ The directory contains:
 ### Checking File Metadata Before Download
 
 ```
-User: Before I download pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt,
+User: Before I download pelican://osg-htc.org/pelicanplatform/test/hello-world.txt,
 can you tell me how large it is?
 
 AI: [Uses pelican_stat tool]
 
-The file is 27 bytes, last modified on 2024-03-15. It has MD5 checksum: a1b2c3d4...
+The file is 27 bytes, last modified on 2024-03-15.
+It has MD5 checksum: a1b2c3d4...
 Since it's very small, would you like me to download it?
 
 User: Yes please, to /tmp/
 
 AI: [Uses pelican_download tool]
-Downloaded to /tmp/test.txt
+Downloaded to /tmp/hello-world.txt
 ```
 
 ## Troubleshooting
@@ -196,10 +206,12 @@ If your AI assistant shows the Pelican MCP server as disconnected:
    ```bash
    pelican mcp serve
    ```
-   You should see "Pelican MCP server started" in the output. Press Ctrl+C to exit.
+   You should see "Pelican MCP server started" in the output.
+   Press Ctrl+C to exit.
 
 3. **Check configuration syntax**:
-   Ensure your JSON configuration is valid. Use a JSON validator if needed.
+   Ensure your JSON configuration is valid.
+   Use a JSON validator if needed.
 
 4. **Restart your AI assistant completely**:
    Make sure you fully quit (not just close) and relaunch.
@@ -225,7 +237,7 @@ pelican object get pelican://... /tmp/test
 
 If your AI assistant isn't using the Pelican tools:
 
-1. **Be explicit**: Say "Use the pelican to..."
+1. **Be explicit**: Say "Use Pelican to..."
 2. **Check MCP connection**: Verify the server shows as connected
 3. **Provide complete Pelican URLs**: Include the full `pelican://` URL
 
@@ -297,7 +309,7 @@ Download pelican://osg-htc.org/pelicanplatform/test/hello-world.txt to ~/Downloa
 
 ### Verify Before Large Downloads
 
-For large files or directories, ask for metadata first:
+For large files or collections, ask for metadata first:
 
 ```
 How large is pelican://osg-htc.org/ospool/data/large-dataset/ recursively?
@@ -310,8 +322,8 @@ Then download if appropriate.
 Specify organized destination paths:
 
 ```
-Download pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt
-to ~/pelican-data/validation/test.txt
+Download pelican://osg-htc.org/pelicanplatform/test/hello-world.txt
+to ~/pelican-data/hello-world.txt
 ```
 
 The MCP server will create directories as needed.
@@ -325,7 +337,8 @@ The MCP server will create directories as needed.
 
 ## Support
 
-The Pelican MCP server feature just rolled out, if you encounter issues:
+The Pelican MCP server feature just rolled out.
+If you encounter issues, try the following:
 
 1. Check the [Pelican documentation](../../) for general Pelican help
 2. Verify your configuration follows the examples above
