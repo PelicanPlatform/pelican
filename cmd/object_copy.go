@@ -19,7 +19,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,19 +174,16 @@ func copyMain(cmd *cobra.Command, args []string) {
 
 	// Exit with failure
 	if result != nil {
+		if handleCredentialPasswordError(result) {
+			os.Exit(1)
+		}
 		// Print the list of errors
 		errMsg := result.Error()
 		var te *client.TransferErrors
-		if errors.Is(result, config.ErrIncorrectPassword) {
-			fmt.Fprintln(os.Stderr, "Failed to access local credential file - entered incorrect local decryption password")
-			fmt.Fprintln(os.Stderr, "If you have forgotten your password, you can reset the local state (deleting all on-disk credentials)")
-			fmt.Fprintf(os.Stderr, "by running '%s credentials reset-local'\n", os.Args[0])
-		} else {
-			if errors.As(result, &te) {
-				errMsg = te.UserError()
-			}
-			log.Errorln("Failure transferring " + lastSrc + ": " + errMsg)
+		if errors.As(result, &te) {
+			errMsg = te.UserError()
 		}
+		log.Errorln("Failure transferring " + lastSrc + ": " + errMsg)
 		if client.ShouldRetry(err) {
 			log.Errorln("Errors are retryable")
 			os.Exit(11)

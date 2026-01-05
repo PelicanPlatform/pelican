@@ -20,11 +20,9 @@ package main
 
 import (
 	"fmt"
-	"os"
-
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"os"
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
@@ -81,13 +79,10 @@ func deleteMain(cmd *cobra.Command, args []string) error {
 	err = client.DoDelete(ctx, remoteDestination, isRecursive, client.WithTokenLocation(tokenLocation))
 
 	if err != nil {
-		if errors.Is(err, config.ErrIncorrectPassword) {
-			fmt.Fprintln(os.Stderr, "Failed to access local credential file - entered incorrect local decryption password")
-			fmt.Fprintln(os.Stderr, "If you have forgotten your password, you can reset the local state (deleting all on-disk credentials)")
-			fmt.Fprintf(os.Stderr, "by running '%s credentials reset-local'\n", os.Args[0])
-		} else {
-			log.Errorf("Failure deleting %s: %v", remoteDestination, err.Error())
+		if handleCredentialPasswordError(err) {
+			os.Exit(1)
 		}
+		log.Errorf("Failure deleting %s: %v", remoteDestination, err.Error())
 		os.Exit(1)
 	}
 
