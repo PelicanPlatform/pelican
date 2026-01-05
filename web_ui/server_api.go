@@ -217,13 +217,9 @@ func HandleCreateDowntime(ctx *gin.Context) {
 	}
 
 	// Mirror to Registry when running as Origin/Cache so downtime persists centrally (Director polls Registry for all sources)
-	// This prevents the Registry database from getting out of sync with the Origin/Cache local downtime state.
+	// If mirroring fails, we proceed with the local operation and rely on eventual consistency through server advertisements.
 	if err := mirrorDowntimeToRegistry(ctx, downtime, http.MethodPost, idStr); err != nil {
-		ctx.JSON(http.StatusBadGateway, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to create downtime with UUID " + idStr + " at the Registry: " + err.Error(),
-		})
-		return
+		log.Warningf("Failed to sync downtime creation to the Registry immediately; synchronization will occur during the next server advertisement: %v", err)
 	}
 
 	if err := database.CreateDowntime(&downtime); err != nil {
@@ -378,13 +374,9 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 	// To avoid confusion, we don't allow to change the server name and id in an update
 
 	// Mirror updates to the Registry to keep the central downtime records consistent with local changes.
-	// This prevents the Registry database from getting out of sync with the Origin/Cache local downtime state.
+	// If mirroring fails, we proceed with the local operation and rely on eventual consistency through server advertisements.
 	if err := mirrorDowntimeToRegistry(ctx, updatedDowntime, http.MethodPut, uuid); err != nil {
-		ctx.JSON(http.StatusBadGateway, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to update downtime with UUID " + uuid + " at the Registry: " + err.Error(),
-		})
-		return
+		log.Warningf("Failed to sync downtime update to the Registry immediately; synchronization will occur during the next server advertisement: %v", err)
 	}
 
 	if err := database.UpdateDowntime(uuid, &updatedDowntime); err != nil {
@@ -416,13 +408,9 @@ func HandleDeleteDowntime(ctx *gin.Context) {
 	}
 
 	// Mirror deletion to the Registry so the central DB removes the downtime as well.
-	// This prevents the Registry database from getting out of sync with the Origin/Cache local downtime state.
+	// If mirroring fails, we proceed with the local operation and rely on eventual consistency through server advertisements.
 	if err := mirrorDowntimeToRegistry(ctx, *existingDowntime, http.MethodDelete, uuid); err != nil {
-		ctx.JSON(http.StatusBadGateway, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to delete downtime with UUID " + uuid + " at the Registry: " + err.Error(),
-		})
-		return
+		log.Warningf("Failed to sync downtime deletion to the Registry immediately; synchronization will occur during the next server advertisement: %v", err)
 	}
 
 	if err := database.DeleteDowntime(uuid); err != nil {
