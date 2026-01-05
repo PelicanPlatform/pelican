@@ -70,12 +70,6 @@ func runMCPServe(cmd *cobra.Command, args []string) error {
 
 	// Set up logging to stderr so it doesn't interfere with JSON-RPC on stdout
 	log.SetOutput(os.Stderr)
-	log.SetLevel(log.InfoLevel)
-
-	// Check for debug flag
-	if debugFlag, _ := cmd.Flags().GetBool("debug"); debugFlag {
-		log.SetLevel(log.DebugLevel)
-	}
 
 	// Create and run the MCP server
 	server := mcp.NewServer(ctx, os.Stdin, os.Stdout)
