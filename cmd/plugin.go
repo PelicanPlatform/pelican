@@ -969,6 +969,11 @@ func addDataToClassAd(resultAd *classad.ClassAd, result *client.TransferResults,
 				if adErr != nil {
 					log.Errorf("Failed to set DataAge%d: %s", attempt.Number, adErr)
 				}
+				// CacheHit is true if CacheAge > 0 (data was already in cache), false if CacheAge == 0 (cache miss)
+				adErr = developerData.Set(fmt.Sprintf("CacheHit%d", attempt.Number), attempt.CacheAge > 0)
+				if adErr != nil {
+					log.Errorf("Failed to set CacheHit%d: %s", attempt.Number, adErr)
+				}
 			}
 			if attempt.Error != nil {
 				adErr := developerData.Set(fmt.Sprintf("TransferError%d", attempt.Number), attempt.Error.Error())
