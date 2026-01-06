@@ -77,7 +77,7 @@ sudo mkdir -p /etc/xrootd/client.plugins.d/
 sudo cp release_dir/etc/xrootd/client.plugins.d/{curl,pelican}-plugin.conf /etc/xrootd/client.plugins.d/
 popd
 
-git clone --recurse-submodules --branch v0.5.3 https://github.com/PelicanPlatform/xrootd-s3-http.git
+git clone --recurse-submodules --branch v0.6.0 https://github.com/PelicanPlatform/xrootd-s3-http.git
 pushd xrootd-s3-http
 mkdir build
 cd build
@@ -86,8 +86,15 @@ ninja install
 xrootd_libdir=$(grealpath "$(dirname "$(grealpath "$(which xrootd)")")"/../lib/)
 echo "Will install into: $xrootd_libdir"
 sudo mkdir -p "$xrootd_libdir"
+sudo ln -s "$PWD/release_dir/lib/libXrdPelicanHttpCore-5.so" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdHTTPServer-5.so" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdS3-5.so" "$xrootd_libdir"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssHttp-5.so" "$xrootd_libdir"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssGlobus-5.so" "$xrootd_libdir"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssS3-5.so" "$xrootd_libdir"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssFilter-5.so" "$xrootd_libdir"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssPosc-5.so" "$xrootd_libdir"
+sudo ln -s "$PWD/release_dir/lib/libXrdN2NPrefix-5.so" "$xrootd_libdir"
 popd
 
 popd
