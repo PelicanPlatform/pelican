@@ -34,7 +34,7 @@ func TestWriteOpenSSLConf(t *testing.T) {
 	conf := filepath.Join(dir, "o.cnf")
 	engine := "/usr/lib/x86_64-linux-gnu/engines-3/pkcs11.so"
 	module := "/usr/lib/x86_64-linux-gnu/pkcs11/p11-kit-client.so"
-	if err := writeOpenSSLConf(conf, engine, module); err != nil {
+	if err := writeOpenSSLConfEngine(conf, engine, module); err != nil {
 		t.Fatalf("writeOpenSSLConf failed: %v", err)
 	}
 	b, err := os.ReadFile(conf)

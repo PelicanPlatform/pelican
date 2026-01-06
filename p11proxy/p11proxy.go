@@ -198,9 +198,21 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 	}
 
 	// Prepare temp workspace.
-	tmpDir, err := os.MkdirTemp("", "pelican-p11proxy-*")
+
+	xrootdRun := param.Origin_RunLocation.GetString()
+	if modules.IsEnabled(server_structs.CacheType) {
+		xrootdRun = param.Cache_RunLocation.GetString()
+	}
+
+	tmpDir, err := os.MkdirTemp(xrootdRun, "pelican-p11proxy-*")
 	if err != nil {
 		log.Warnf("PKCS#11 helper disabled: cannot create temp dir: %v", err)
+		disabled := Info{Enabled: false}
+		setCurrentInfo(disabled)
+		return &Proxy{info: disabled}, nil
+	}
+	if err := applyP11ProxyPermissions(tmpDir, 0750); err != nil {
+		log.Warnf("PKCS#11 helper disabled: cannot set p11proxy dir permissions: %v", err)
 		disabled := Info{Enabled: false}
 		setCurrentInfo(disabled)
 		return &Proxy{info: disabled}, nil
@@ -258,11 +270,6 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 		return &Proxy{info: disabled}, nil
 	}
 
-	xrootdRun := param.Origin_RunLocation.GetString()
-	if modules.IsEnabled(server_structs.CacheType) {
-		xrootdRun = param.Cache_RunLocation.GetString()
-	}
-
 	// Create a path for the Unix socket
 	var runtimeBase string
 	if xrootdRun != "" {
@@ -305,6 +312,9 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 		disabled := Info{Enabled: false}
 		setCurrentInfo(disabled)
 		return &Proxy{info: disabled}, nil
+	}
+	if err := applyP11ProxyPermissions(opensslConf, 0640); err != nil {
+		log.Warnf("p11proxy: failed to set OpenSSL config permissions: %v", err)
 	}
 
 	// Build PKCS#11 URL.
@@ -366,6 +376,17 @@ func uniqueSocketPath(sockDir string) (string, error) {
 	}
 	name := fmt.Sprintf("pelican-p11-%d-%s.sock", os.Getpid(), hex.EncodeToString(randBytes))
 	return filepath.Join(sockDir, name), nil
+}
+
+func applyP11ProxyPermissions(path string, mode os.FileMode) error {
+	if err := os.Chmod(path, mode); err != nil {
+		return err
+	}
+	gid, err := config.GetDaemonGID()
+	if err != nil {
+		return err
+	}
+	return os.Chown(path, 0, gid)
 }
 
 // writeOpenSSLConfEngine generates an OpenSSL config file for ENGINE-based PKCS#11.
