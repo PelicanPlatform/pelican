@@ -40,6 +40,16 @@ import (
 	"github.com/pelicanplatform/pelican/utils"
 )
 
+const (
+	incorrectPasswordAccessMessage = "Failed to access local credential file - entered incorrect local decryption password"
+	incorrectPasswordResetMessage  = "Failed to reset password - entered incorrect local decryption password"
+
+	// The API path for downtime management
+	serverDowntimeAPIPath = "/api/v1.0/downtime"
+	// The API path for API key management
+	serverApiKeyAPIPath = "/api/v1.0/tokens"
+)
+
 // Given an input map of flag-->viper config, convert any comma-delineated
 // input lists and store them as a string slice with Viper
 func commaFlagsListToViperSlice(cmd *cobra.Command, flags map[string]string) {
@@ -71,16 +81,6 @@ func getPreferredCaches() ([]*url.URL, error) {
 
 	return caches, nil
 }
-
-const (
-	incorrectPasswordAccessMessage = "Failed to access local credential file - entered incorrect local decryption password"
-	incorrectPasswordResetMessage  = "Failed to reset password - entered incorrect local decryption password"
-
-	// The API path for downtime management
-	serverDowntimeAPIPath = "/api/v1.0/downtime"
-	// The API path for API key management
-	serverApiKeyAPIPath = "/api/v1.0/tokens"
-)
 
 func handleIncorrectPassword(err error, actionMessage string) bool {
 	if err == nil || !errors.Is(err, config.ErrIncorrectPassword) {

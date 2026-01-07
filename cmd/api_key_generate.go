@@ -32,17 +32,11 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/web_ui"
 )
 
-// CreateApiTokenReq matches the request structure expected by the API
-type CreateApiTokenReq struct {
-	Name       string   `json:"name"`
-	Expiration string   `json:"expiration"` // RFC3339 format, if not provided or "never" or "", token will not expire
-	Scopes     []string `json:"scopes"`
-}
-
 // ApiTokenResponse matches the response structure from the API
-type ApiTokenResponse struct {
+type apiTokenResponse struct {
 	Token string `json:"token"`
 }
 
@@ -121,7 +115,7 @@ func generateApiKey(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build request payload
-	payload := CreateApiTokenReq{
+	payload := web_ui.CreateApiTokenReq{
 		Name:       name,
 		Expiration: expiration,
 		Scopes:     scopesList,
@@ -162,7 +156,7 @@ func generateApiKey(cmd *cobra.Command, args []string) error {
 	}
 
 	// Parse response to extract token
-	var tokenResp ApiTokenResponse
+	var tokenResp apiTokenResponse
 	if err := json.Unmarshal(bodyBytes, &tokenResp); err != nil {
 		// If parsing fails, just print the raw response
 		fmt.Println("API key generated successfully:")
