@@ -258,12 +258,12 @@ func TestDirectorFedTokenCacheAPI(t *testing.T) {
 
 			tok, err := jwt.ParseInsecure([]byte(tokStr))
 			require.NoError(t, err, "Failed to parse token")
-			// In this case, the "fed issuer" is the director because we're running as fed-in-a-box.
-			// However, that need not be true in general wherever the Director has a configured Federation.DiscoveryUrl.
+			// The fed-test utility uses a separate HTTP server for hosting federation metadata,
+			// and sets it as the Discovery endpoint -- tokens need to be issued by that endpoint
 			fedInfo, err := config.GetFederation(ctx)
 			require.NoError(t, err, "Failed to get federation info")
-			directorUrlStr := fedInfo.DirectorEndpoint
-			assert.Equal(t, directorUrlStr, tok.Issuer())
+			discoveryUrlStr := fedInfo.DiscoveryEndpoint
+			assert.Equal(t, discoveryUrlStr, tok.Issuer())
 			var scopes []string
 			if rawScopes, exists := tok.Get("scope"); exists {
 				if scopeStr, ok := rawScopes.(string); ok {

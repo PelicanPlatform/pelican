@@ -406,6 +406,9 @@ func GetAdvertisementTok(server server_structs.XRootDServer, directorUrl string)
 // GetFedTok retrieves a federation token from the Director, which can be passed to other
 // federation services as proof of federation membership.
 func CreateFedTok(ctx context.Context, server server_structs.XRootDServer) (tok string, err error) {
+	// Note: This is iterating over advertisements for _Directors_, not for Origins/Caches at a specific Director
+	// (the function naming is a bit confusing, but `GetDirectorAds` does not get ads from a Director, it gets all the
+	// known advertisements _of_ Directors in a HA setup)
 	for _, ad := range GetDirectorAds() {
 		directorUrl := ad.AdvertiseUrl
 		var directorEndpoint string
