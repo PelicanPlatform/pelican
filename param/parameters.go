@@ -150,6 +150,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Director.DbLocation": false,
 	"Director.DefaultResponse": false,
 	"Director.EnableBroker": false,
+	"Director.EnableFederationMetadataHosting": false,
 	"Director.EnableOIDC": false,
 	"Director.EnableStat": false,
 	"Director.FedTokenLifetime": false,
