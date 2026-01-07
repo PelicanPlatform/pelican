@@ -414,6 +414,10 @@ func writeOpenSSLConfEngine(path, enginePath, modulePath string) error {
 // writeOpenSSLConfProvider generates an OpenSSL config file for Provider-based PKCS#11.
 // This is the modern, preferred method for OpenSSL 3.x+ (EL9+, AlmaLinux 10).
 // Uses pkcs11-provider (https://github.com/latchset/pkcs11-provider).
+//
+// Both the default provider and pkcs11 provider are activated. The pkcs11 provider
+// handles PKCS#11 URIs (for OSSL_STORE key loading), while the default provider
+// handles standard crypto operations.
 func writeOpenSSLConfProvider(path, providerPath, modulePath string) error {
 	content := strings.Builder{}
 	content.WriteString("openssl_conf = openssl_init\n\n")
