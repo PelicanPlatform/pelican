@@ -212,6 +212,9 @@ type Config struct {
 		PortLower int `mapstructure:"portlower" yaml:"PortLower"`
 		PromQLAuthorization bool `mapstructure:"promqlauthorization" yaml:"PromQLAuthorization"`
 		SampleLimit int `mapstructure:"samplelimit" yaml:"SampleLimit"`
+		StorageCriticalThreshold int `mapstructure:"storagecriticalthreshold" yaml:"StorageCriticalThreshold"`
+		StorageHealthCheckInterval time.Duration `mapstructure:"storagehealthcheckinterval" yaml:"StorageHealthCheckInterval"`
+		StorageWarningThreshold int `mapstructure:"storagewarningthreshold" yaml:"StorageWarningThreshold"`
 		TokenExpiresIn time.Duration `mapstructure:"tokenexpiresin" yaml:"TokenExpiresIn"`
 		TokenRefreshInterval time.Duration `mapstructure:"tokenrefreshinterval" yaml:"TokenRefreshInterval"`
 	} `mapstructure:"monitoring" yaml:"Monitoring"`
@@ -597,6 +600,9 @@ type configWithType struct {
 		PortLower struct { Type string; Value int }
 		PromQLAuthorization struct { Type string; Value bool }
 		SampleLimit struct { Type string; Value int }
+		StorageCriticalThreshold struct { Type string; Value int }
+		StorageHealthCheckInterval struct { Type string; Value time.Duration }
+		StorageWarningThreshold struct { Type string; Value int }
 		TokenExpiresIn struct { Type string; Value time.Duration }
 		TokenRefreshInterval struct { Type string; Value time.Duration }
 	}

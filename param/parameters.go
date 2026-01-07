@@ -241,6 +241,9 @@ var runtimeConfigurableMap = map[string]bool{
 	"Monitoring.PortLower": false,
 	"Monitoring.PromQLAuthorization": false,
 	"Monitoring.SampleLimit": false,
+	"Monitoring.StorageCriticalThreshold": false,
+	"Monitoring.StorageHealthCheckInterval": false,
+	"Monitoring.StorageWarningThreshold": false,
 	"Monitoring.TokenExpiresIn": false,
 	"Monitoring.TokenRefreshInterval": false,
 	"OIDC.AuthorizationEndpoint": false,
@@ -864,6 +867,10 @@ func (iP IntParam) GetInt() int {
 			return config.Monitoring.PortLower
 		case "Monitoring.SampleLimit":
 			return config.Monitoring.SampleLimit
+		case "Monitoring.StorageCriticalThreshold":
+			return config.Monitoring.StorageCriticalThreshold
+		case "Monitoring.StorageWarningThreshold":
+			return config.Monitoring.StorageWarningThreshold
 		case "Origin.Concurrency":
 			return config.Origin.Concurrency
 		case "Origin.ConcurrencyDegradedThreshold":
@@ -1112,6 +1119,8 @@ func (dP DurationParam) GetDuration() time.Duration {
 			return config.Lotman.DefaultLotExpirationLifetime
 		case "Monitoring.DataRetention":
 			return config.Monitoring.DataRetention
+		case "Monitoring.StorageHealthCheckInterval":
+			return config.Monitoring.StorageHealthCheckInterval
 		case "Monitoring.TokenExpiresIn":
 			return config.Monitoring.TokenExpiresIn
 		case "Monitoring.TokenRefreshInterval":
@@ -1350,6 +1359,9 @@ var allParameterNames = []string{
 	"Monitoring.PortLower",
 	"Monitoring.PromQLAuthorization",
 	"Monitoring.SampleLimit",
+	"Monitoring.StorageCriticalThreshold",
+	"Monitoring.StorageHealthCheckInterval",
+	"Monitoring.StorageWarningThreshold",
 	"Monitoring.TokenExpiresIn",
 	"Monitoring.TokenRefreshInterval",
 	"OIDC.AuthorizationEndpoint",
@@ -1729,6 +1741,8 @@ var (
 	Monitoring_PortHigher = IntParam{"Monitoring.PortHigher"}
 	Monitoring_PortLower = IntParam{"Monitoring.PortLower"}
 	Monitoring_SampleLimit = IntParam{"Monitoring.SampleLimit"}
+	Monitoring_StorageCriticalThreshold = IntParam{"Monitoring.StorageCriticalThreshold"}
+	Monitoring_StorageWarningThreshold = IntParam{"Monitoring.StorageWarningThreshold"}
 	Origin_Concurrency = IntParam{"Origin.Concurrency"}
 	Origin_ConcurrencyDegradedThreshold = IntParam{"Origin.ConcurrencyDegradedThreshold"}
 	Origin_Port = IntParam{"Origin.Port"}
@@ -1840,6 +1854,7 @@ var (
 	Lotman_DefaultLotDeletionLifetime = DurationParam{"Lotman.DefaultLotDeletionLifetime"}
 	Lotman_DefaultLotExpirationLifetime = DurationParam{"Lotman.DefaultLotExpirationLifetime"}
 	Monitoring_DataRetention = DurationParam{"Monitoring.DataRetention"}
+	Monitoring_StorageHealthCheckInterval = DurationParam{"Monitoring.StorageHealthCheckInterval"}
 	Monitoring_TokenExpiresIn = DurationParam{"Monitoring.TokenExpiresIn"}
 	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
 	Origin_SelfTestInterval = DurationParam{"Origin.SelfTestInterval"}
