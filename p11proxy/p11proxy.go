@@ -30,7 +30,7 @@ type Info struct {
 	Enabled         bool
 	ServerAddress   string // value to export as P11_KIT_SERVER_ADDRESS, e.g., unix:path=/tmp/p11-kit/pkcs11-<pid>.sock
 	PKCS11URL       string // e.g., pkcs11:token=pelican-tls;object=server-key;type=private
-	OpenSSLConfPath string // generated OpenSSL engine config path
+	OpenSSLConfPath string // generated OpenSSL config path (ENGINE or Provider mode)
 	CertPath        string // path to certificate chain for -cert
 	ModulePath      string // path to p11-kit client module
 }
@@ -49,13 +49,14 @@ type Options struct {
 	// Used for OpenSSL ENGINE API (legacy, but widely supported).
 	EngineDynamicPath string
 	// ProviderModulePath is the full path to the pkcs11-provider module for OpenSSL 3.0+.
-	// Used when ENGINE is not available (e.g., AlmaLinux 10).
+	// This is the preferred method when available (e.g., EL9+, AlmaLinux 10).
 	ProviderModulePath string
 	// ModulePath is the full path to the p11-kit client module shared object.
 	ModulePath string
 }
 
-// pkcs11Mode indicates which OpenSSL API to use for PKCS#11
+// pkcs11Mode indicates which OpenSSL API to use for PKCS#11 integration.
+// This determines how Pelican communicates PKCS#11 configuration to XRootD/OpenSSL.
 type pkcs11Mode int
 
 const (
@@ -258,7 +259,7 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 		mode = modeProvider
 		log.Debugf("PKCS#11 helper using Provider mode (OpenSSL 3.x) with %s", providerPath)
 	} else if enginePath != "" {
-		// OpenSSL 1.1.x or 3.x without provider - use legacy ENGINE API
+		// OpenSSL 1.1.x (EL8) uses legacy ENGINE API
 		log.Debugf("PKCS#11 helper using ENGINE mode (legacy/OpenSSL 1.1.x) with %s", enginePath)
 		mode = modeEngine
 	} else {
@@ -417,7 +418,11 @@ func writeOpenSSLConfEngine(path, enginePath, modulePath string) error {
 //
 // Both the default provider and pkcs11 provider are activated. The pkcs11 provider
 // handles PKCS#11 URIs (for OSSL_STORE key loading), while the default provider
-// handles standard crypto operations.
+// handles standard crypto operations (TLS, signature verification, etc.).
+//
+// Important: We do NOT set "default_properties" to force provider preference, as this
+// would cause TLS operations to fail. OpenSSL automatically routes operations to the
+// appropriate provider based on the key URI scheme.
 func writeOpenSSLConfProvider(path, providerPath, modulePath string) error {
 	content := strings.Builder{}
 	content.WriteString("openssl_conf = openssl_init\n\n")

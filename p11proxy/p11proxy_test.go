@@ -29,13 +29,13 @@ func TestStartDisabledGraceful(t *testing.T) {
 	}
 }
 
-func TestWriteOpenSSLConf(t *testing.T) {
+func TestWriteOpenSSLConfEngine(t *testing.T) {
 	dir := t.TempDir()
-	conf := filepath.Join(dir, "o.cnf")
+	conf := filepath.Join(dir, "openssl-engine.cnf")
 	engine := "/usr/lib/x86_64-linux-gnu/engines-3/pkcs11.so"
 	module := "/usr/lib/x86_64-linux-gnu/pkcs11/p11-kit-client.so"
 	if err := writeOpenSSLConfEngine(conf, engine, module); err != nil {
-		t.Fatalf("writeOpenSSLConf failed: %v", err)
+		t.Fatalf("writeOpenSSLConfEngine failed: %v", err)
 	}
 	b, err := os.ReadFile(conf)
 	if err != nil {
@@ -44,6 +44,48 @@ func TestWriteOpenSSLConf(t *testing.T) {
 	s := string(b)
 	if !strings.Contains(s, engine) || !strings.Contains(s, module) {
 		t.Fatalf("openssl conf missing paths: %s", s)
+	}
+	// Verify ENGINE-specific sections
+	if !strings.Contains(s, "engines = engine_section") {
+		t.Fatalf("openssl conf missing engines section: %s", s)
+	}
+	if !strings.Contains(s, "engine_id = pkcs11") {
+		t.Fatalf("openssl conf missing engine_id: %s", s)
+	}
+}
+
+func TestWriteOpenSSLConfProvider(t *testing.T) {
+	dir := t.TempDir()
+	conf := filepath.Join(dir, "openssl-provider.cnf")
+	provider := "/usr/lib64/ossl-modules/pkcs11.so"
+	module := "/usr/lib64/pkcs11/p11-kit-client.so"
+	if err := writeOpenSSLConfProvider(conf, provider, module); err != nil {
+		t.Fatalf("writeOpenSSLConfProvider failed: %v", err)
+	}
+	b, err := os.ReadFile(conf)
+	if err != nil {
+		t.Fatalf("cannot read conf: %v", err)
+	}
+	s := string(b)
+	if !strings.Contains(s, provider) || !strings.Contains(s, module) {
+		t.Fatalf("openssl conf missing paths: %s", s)
+	}
+	// Verify Provider-specific sections
+	if !strings.Contains(s, "providers = provider_section") {
+		t.Fatalf("openssl conf missing providers section: %s", s)
+	}
+	// Verify both default and pkcs11 providers are activated
+	if !strings.Contains(s, "default = default_section") {
+		t.Fatalf("openssl conf missing default provider: %s", s)
+	}
+	if !strings.Contains(s, "pkcs11 = pkcs11_section") {
+		t.Fatalf("openssl conf missing pkcs11 provider: %s", s)
+	}
+	// Verify both are activated
+	defaultActivated := strings.Contains(s, "[default_section]") && strings.Contains(s, "activate = 1")
+	pkcs11Activated := strings.Contains(s, "[pkcs11_section]") && strings.Contains(s, "activate = 1")
+	if !defaultActivated || !pkcs11Activated {
+		t.Fatalf("openssl conf providers not properly activated: %s", s)
 	}
 }
 
