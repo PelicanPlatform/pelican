@@ -25,10 +25,12 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 // LaunchStorageHealthMonitor is a no-op on Windows as the storage health check
 // currently only supports Unix-like systems.
-func LaunchStorageHealthMonitor(ctx context.Context, egrp *errgroup.Group) {
+func LaunchStorageHealthMonitor(ctx context.Context, egrp *errgroup.Group, modules server_structs.ServerType) {
 	log.Debug("Storage health monitoring is not supported on Windows")
 }
