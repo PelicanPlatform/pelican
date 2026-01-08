@@ -19,12 +19,15 @@
 package main
 
 import (
+	"fmt"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 )
 
@@ -58,4 +61,23 @@ func getPreferredCaches() ([]*url.URL, error) {
 	}
 
 	return caches, nil
+}
+
+const (
+	incorrectPasswordAccessMessage = "Failed to access local credential file - entered incorrect local decryption password"
+	incorrectPasswordResetMessage  = "Failed to reset password - entered incorrect local decryption password"
+)
+
+func handleIncorrectPassword(err error, actionMessage string) bool {
+	if err == nil || !errors.Is(err, config.ErrIncorrectPassword) {
+		return false
+	}
+	fmt.Fprintln(os.Stderr, actionMessage)
+	fmt.Fprintln(os.Stderr, "If you have forgotten your password, you can reset the local state (deleting all on-disk credentials)")
+	fmt.Fprintf(os.Stderr, "by running '%s credentials reset-local'\n", os.Args[0])
+	return true
+}
+
+func handleCredentialPasswordError(err error) bool {
+	return handleIncorrectPassword(err, incorrectPasswordAccessMessage)
 }

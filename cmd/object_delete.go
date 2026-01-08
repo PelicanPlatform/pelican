@@ -80,6 +80,9 @@ func deleteMain(cmd *cobra.Command, args []string) error {
 	err = client.DoDelete(ctx, remoteDestination, isRecursive, client.WithTokenLocation(tokenLocation))
 
 	if err != nil {
+		if handleCredentialPasswordError(err) {
+			os.Exit(1)
+		}
 		log.Errorf("Failure deleting %s: %v", remoteDestination, err.Error())
 		os.Exit(1)
 	}

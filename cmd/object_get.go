@@ -177,6 +177,9 @@ func getMain(cmd *cobra.Command, args []string) {
 	// Exit with failure
 	if attemptErr != nil {
 		// Print the list of errors
+		if handleCredentialPasswordError(attemptErr) {
+			os.Exit(1)
+		}
 		errMsg := attemptErr.Error()
 		var pe error_codes.PelicanError
 		var te *client.TransferErrors
