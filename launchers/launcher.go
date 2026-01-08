@@ -427,7 +427,7 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	// Launch storage health monitoring
 	log.Debug("Launching storage health monitor")
-	metrics.LaunchStorageHealthMonitor(ctx, egrp)
+	metrics.LaunchStorageHealthMonitor(ctx, egrp, modules)
 
 	if param.Server_EnableUI.GetBool() {
 		log.Info("Starting web login...")

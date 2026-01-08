@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -16,8 +18,6 @@
  *
  ***************************************************************/
 
-//go:build !windows
-
 package metrics
 
 import (
@@ -32,6 +32,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 const (
@@ -39,9 +40,17 @@ const (
 	firstCheckDelay = 5 * time.Second
 )
 
+type storageUsageOverrideKey struct{}
+
+// storageUsageOverride is an internal testing override for getFilesystemUsage.
+// It allows tests to fake the usage percentage while keeping real total bytes.
+type storageUsageOverride struct {
+	usagePercent float64
+}
+
 // getFilesystemUsage returns the percentage of storage used for a given path.
 // Returns usage percentage (0-100), total bytes, used bytes, and any error.
-func getFilesystemUsage(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
+func getFilesystemUsage(ctx context.Context, path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
 	var stat syscall.Statfs_t
 	if err = syscall.Statfs(path, &stat); err != nil {
 		err = errors.Wrapf(err, "unable to determine filesystem usage for path %s", path)
@@ -52,9 +61,16 @@ func getFilesystemUsage(path string) (usagePercent float64, totalBytes uint64, u
 	totalBytes = stat.Blocks * uint64(stat.Bsize)
 	availableBytes := stat.Bavail * uint64(stat.Bsize)
 	usedBytes = totalBytes - availableBytes
-	
+
 	if totalBytes > 0 {
 		usagePercent = float64(usedBytes) / float64(totalBytes) * 100.0
+	}
+
+	// Check for test override
+	if override, ok := ctx.Value(storageUsageOverrideKey{}).(storageUsageOverride); ok {
+		// Keep totalBytes from statfs but fake the usedBytes based on override percentage
+		usagePercent = override.usagePercent
+		usedBytes = uint64(float64(totalBytes) * override.usagePercent / 100.0)
 	}
 
 	return
@@ -62,26 +78,55 @@ func getFilesystemUsage(path string) (usagePercent float64, totalBytes uint64, u
 
 // getPathsToCheck returns a deduplicated list of filesystem paths that should be checked
 // for storage consumption. It gathers paths from various configuration parameters.
-func getPathsToCheck() []string {
+func getPathsToCheck(modules server_structs.ServerType) []string {
 	pathsMap := make(map[string]bool)
 	var paths []string
 
-	// Add logging location if configured
-	if logPath := param.Logging_LogLocation.GetString(); logPath != "" {
+	// Add logging location if configured and not /dev/null
+	// Empty string means stdout, so we skip it
+	if logPath := param.Logging_LogLocation.GetString(); logPath != "" && logPath != "/dev/null" {
 		// Get the directory containing the log file
 		logDir := filepath.Dir(logPath)
 		pathsMap[logDir] = true
 	}
 
-	// Add database location
+	// Add Server.DbLocation (always used)
 	if dbPath := param.Server_DbLocation.GetString(); dbPath != "" {
 		dbDir := filepath.Dir(dbPath)
 		pathsMap[dbDir] = true
 	}
 
-	// Add monitoring data location
-	if monitoringPath := param.Monitoring_DataLocation.GetString(); monitoringPath != "" {
-		pathsMap[monitoringPath] = true
+	// Add module-specific database locations
+	if modules.IsEnabled(server_structs.RegistryType) {
+		if dbPath := param.Registry_DbLocation.GetString(); dbPath != "" {
+			dbDir := filepath.Dir(dbPath)
+			pathsMap[dbDir] = true
+		}
+	}
+	if modules.IsEnabled(server_structs.OriginType) {
+		if dbPath := param.Origin_DbLocation.GetString(); dbPath != "" {
+			dbDir := filepath.Dir(dbPath)
+			pathsMap[dbDir] = true
+		}
+	}
+	if modules.IsEnabled(server_structs.DirectorType) {
+		if dbPath := param.Director_DbLocation.GetString(); dbPath != "" {
+			dbDir := filepath.Dir(dbPath)
+			pathsMap[dbDir] = true
+		}
+	}
+	if modules.IsEnabled(server_structs.CacheType) {
+		if dbPath := param.Cache_DbLocation.GetString(); dbPath != "" {
+			dbDir := filepath.Dir(dbPath)
+			pathsMap[dbDir] = true
+		}
+	}
+
+	// Add monitoring data location only if Prometheus is enabled
+	if param.Monitoring_EnablePrometheus.GetBool() {
+		if monitoringPath := param.Monitoring_DataLocation.GetString(); monitoringPath != "" {
+			pathsMap[monitoringPath] = true
+		}
 	}
 
 	// Convert map keys to slice
@@ -94,9 +139,9 @@ func getPathsToCheck() []string {
 
 // checkStorageHealth checks the storage usage for all configured paths and updates
 // the health status accordingly.
-func checkStorageHealth() {
-	paths := getPathsToCheck()
-	
+func checkStorageHealth(ctx context.Context, modules server_structs.ServerType) {
+	paths := getPathsToCheck(modules)
+
 	if len(paths) == 0 {
 		log.Debug("No paths configured for storage health check")
 		SetComponentHealthStatus(Server_StorageHealth, StatusOK, "No paths configured for monitoring")
@@ -111,7 +156,7 @@ func checkStorageHealth() {
 	var statusMessages []string
 
 	for _, path := range paths {
-		usage, totalBytes, usedBytes, err := getFilesystemUsage(path)
+		usage, totalBytes, usedBytes, err := getFilesystemUsage(ctx, path)
 		if err != nil {
 			log.Warningf("Failed to check storage for path %s: %v", path, err)
 			worstStatus = StatusWarning
@@ -136,9 +181,10 @@ func checkStorageHealth() {
 	}
 
 	// Set the overall status
-	if worstStatus == StatusOK {
+	switch worstStatus {
+	case StatusOK:
 		SetComponentHealthStatus(Server_StorageHealth, StatusOK, "All monitored filesystems have adequate storage")
-	} else if worstStatus == StatusWarning {
+	case StatusWarning:
 		msg := "Storage usage is elevated: "
 		for i, m := range statusMessages {
 			if i > 0 {
@@ -147,7 +193,7 @@ func checkStorageHealth() {
 			msg += m
 		}
 		SetComponentHealthStatus(Server_StorageHealth, StatusWarning, msg)
-	} else if worstStatus == StatusCritical {
+	case StatusCritical:
 		msg := "Storage usage is critical: "
 		for i, m := range statusMessages {
 			if i > 0 {
@@ -161,9 +207,9 @@ func checkStorageHealth() {
 
 // LaunchStorageHealthMonitor starts a goroutine that periodically checks filesystem
 // storage consumption for configured paths and updates health status accordingly.
-func LaunchStorageHealthMonitor(ctx context.Context, egrp *errgroup.Group) {
+func LaunchStorageHealthMonitor(ctx context.Context, egrp *errgroup.Group, modules server_structs.ServerType) {
 	checkInterval := param.Monitoring_StorageHealthCheckInterval.GetDuration()
-	
+
 	if checkInterval <= 0 {
 		log.Debug("Storage health check disabled (interval <= 0)")
 		return
@@ -175,13 +221,13 @@ func LaunchStorageHealthMonitor(ctx context.Context, egrp *errgroup.Group) {
 	egrp.Go(func() error {
 		defer ticker.Stop()
 		log.Debugf("Storage health monitor started with interval: %s", checkInterval)
-		
+
 		for {
 			select {
 			case <-firstCheck:
-				checkStorageHealth()
+				checkStorageHealth(ctx, modules)
 			case <-ticker.C:
-				checkStorageHealth()
+				checkStorageHealth(ctx, modules)
 			case <-ctx.Done():
 				log.Info("Storage health monitor has been terminated")
 				return nil
