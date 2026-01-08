@@ -51,10 +51,9 @@ func extractTokens(r *http.Request) []string {
 		// Split by comma to handle multiple tokens
 		for _, part := range strings.Split(authHeader, ",") {
 			part = strings.TrimSpace(part)
-			if strings.HasPrefix(strings.ToLower(part), "bearer ") {
-				token := strings.TrimPrefix(part, "Bearer ")
-				token = strings.TrimPrefix(token, "bearer ")
-				token = strings.TrimSpace(token)
+			// Case-insensitive bearer token extraction
+			if len(part) > 7 && strings.ToLower(part[:7]) == "bearer " {
+				token := strings.TrimSpace(part[7:])
 				if token != "" {
 					tokens = append(tokens, token)
 				}
@@ -150,7 +149,7 @@ func authMiddleware() gin.HandlerFunc {
 // InitializeHandlers initializes the WebDAV handlers for each export
 func InitializeHandlers(exports []server_utils.OriginExport) error {
 	webdavHandlers = make(map[string]*webdav.Handler)
-	exportPrefixMap := make(map[string]string) // Maps federation prefix to storage prefix
+	exportPrefixMap = make(map[string]string) // Initialize the global map
 	
 	for _, export := range exports {
 		// Create a filesystem for this export
