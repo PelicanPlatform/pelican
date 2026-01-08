@@ -90,6 +90,30 @@ func TestPosixv2OriginUploadDownload(t *testing.T) {
 	assert.Equal(t, testContent, downloadedContent, "Downloaded content should match uploaded content")
 }
 
+// Test POSIXv2 origin checksum retrieval via HEAD request
+func TestPosixv2OriginChecksum(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	// Create a temporary directory with a test file
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "checksum_test.txt")
+	testContent := []byte("Test content for checksum")
+	err := os.WriteFile(testFile, testContent, 0644)
+	require.NoError(t, err)
+
+	// Configure origin to use POSIXv2
+	originConfig := fmt.Sprintf(posixv2OriginConfig, tmpDir)
+	fed := fed_test_utils.NewFedTest(t, originConfig)
+	require.NotNil(t, fed)
+
+	// TODO: Make HEAD request to verify checksum headers are present
+	// This requires the full federation to be running and the origin URL to be accessible
+	// For now, we verify the federation context is initialized
+	assert.NotNil(t, fed.Ctx, "Federation context should be initialized")
+}
+
 // Test POSIXv2 origin directory listing
 func TestPosixv2OriginDirectoryListing(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))

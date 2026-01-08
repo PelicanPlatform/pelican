@@ -255,6 +255,79 @@ func (ac *authConfig) authorize(action token_scopes.TokenScope, resource, token 
 	return false
 }
 
+// authorizeWithContext checks authorization and extracts user/group info from token
+func (ac *authConfig) authorizeWithContext(ctx context.Context, action token_scopes.TokenScope, resource, token string) (context.Context, bool) {
+	aclsItem := ac.tokenAuthz.Get(token)
+	if aclsItem == nil {
+		return ctx, false
+	}
+	
+	rsScope := token_scopes.NewResourceScope(action, resource)
+	authorized := false
+	for _, acl := range aclsItem.Value() {
+		if acl.Contains(rsScope) {
+			authorized = true
+			break
+		}
+	}
+	
+	if !authorized {
+		return ctx, false
+	}
+	
+	// Extract user and group information from the token
+	userInfo := extractUserInfoFromToken(token)
+	ctx = SetUserInfo(ctx, userInfo)
+	
+	return ctx, true
+}
+
+// extractUserInfoFromToken extracts user and group information from a JWT token
+func extractUserInfoFromToken(tokenStr string) *UserInfo {
+	userInfo := &UserInfo{
+		User:   "nobody",
+		Groups: []string{},
+	}
+	
+	tok, err := jwt.Parse([]byte(tokenStr), jwt.WithVerify(false))
+	if err != nil {
+		log.Debugf("Failed to parse token for user info extraction: %v", err)
+		return userInfo
+	}
+	
+	// Extract subject (user)
+	if sub := tok.Subject(); sub != "" {
+		userInfo.User = sub
+	}
+	
+	// Extract groups from various possible claim names
+	// Try "wlcg.groups" first (WLCG tokens)
+	if groups, ok := tok.Get("wlcg.groups"); ok {
+		if groupList, ok := groups.([]interface{}); ok {
+			for _, g := range groupList {
+				if groupStr, ok := g.(string); ok {
+					userInfo.Groups = append(userInfo.Groups, groupStr)
+				}
+			}
+		}
+	}
+	
+	// Try "groups" (generic claim)
+	if len(userInfo.Groups) == 0 {
+		if groups, ok := tok.Get("groups"); ok {
+			if groupList, ok := groups.([]interface{}); ok {
+				for _, g := range groupList {
+					if groupStr, ok := g.(string); ok {
+						userInfo.Groups = append(userInfo.Groups, groupStr)
+					}
+				}
+			}
+		}
+	}
+	
+	return userInfo
+}
+
 // InitAuthConfig initializes the global auth config
 func InitAuthConfig(ctx context.Context, egrp *errgroup.Group, exports []server_utils.OriginExport) error {
 	globalAuthConfig = newAuthConfig(ctx, egrp)

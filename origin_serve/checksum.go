@@ -1,0 +1,188 @@
+/***************************************************************
+ *
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you
+ * may not use this file except in compliance with the License.  You may
+ * obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ***************************************************************/
+
+package origin_serve
+
+import (
+	"crypto/md5"
+	"crypto/sha1"
+	"encoding/hex"
+	"fmt"
+	"hash/crc32"
+	"io"
+	"os"
+
+	"github.com/pkg/errors"
+	"github.com/pkg/xattr"
+	log "github.com/sirupsen/logrus"
+)
+
+type (
+	// ChecksumType represents the type of checksum
+	ChecksumType string
+
+	// Checksummer is an interface for fetching and computing checksums
+	Checksummer interface {
+		GetChecksum(filename string, checksumType ChecksumType) (string, error)
+	}
+
+	// XattrChecksummer uses extended attributes to store and retrieve checksums
+	XattrChecksummer struct{}
+)
+
+const (
+	ChecksumTypeMD5    ChecksumType = "md5"
+	ChecksumTypeSHA1   ChecksumType = "sha1"
+	ChecksumTypeCRC32  ChecksumType = "crc32"
+
+	// Extended attribute names for checksums
+	xattrMD5   = "user.checksum.md5"
+	xattrSHA1  = "user.checksum.sha1"
+	xattrCRC32 = "user.checksum.crc32"
+)
+
+var globalChecksummer Checksummer
+
+// InitializeChecksummer initializes the global checksummer
+func InitializeChecksummer() {
+	globalChecksummer = &XattrChecksummer{}
+}
+
+// GetChecksummer returns the global checksummer
+func GetChecksummer() Checksummer {
+	if globalChecksummer == nil {
+		InitializeChecksummer()
+	}
+	return globalChecksummer
+}
+
+// GetChecksum retrieves or computes the checksum for a file
+func (xc *XattrChecksummer) GetChecksum(filename string, checksumType ChecksumType) (string, error) {
+	// First, try to get the checksum from extended attributes
+	xattrName := getXattrName(checksumType)
+	if xattrName != "" {
+		data, err := xattr.Get(filename, xattrName)
+		if err == nil && len(data) > 0 {
+			// Verify the file hasn't been modified since checksum was stored
+			if isChecksumValid(filename, xattrName) {
+				return string(data), nil
+			}
+		}
+	}
+
+	// If not found or invalid, compute the checksum
+	checksum, err := computeChecksum(filename, checksumType)
+	if err != nil {
+		return "", err
+	}
+
+	// Store the checksum in extended attributes for future use
+	if xattrName != "" {
+		if err := xattr.Set(filename, xattrName, []byte(checksum)); err != nil {
+			log.Debugf("Failed to store checksum in xattr for %s: %v", filename, err)
+		} else {
+			// Also store the file modification time
+			fileInfo, err := os.Stat(filename)
+			if err == nil {
+				mtimeAttr := xattrName + ".mtime"
+				mtimeStr := fmt.Sprintf("%d", fileInfo.ModTime().Unix())
+				if err := xattr.Set(filename, mtimeAttr, []byte(mtimeStr)); err != nil {
+					log.Debugf("Failed to store mtime in xattr for %s: %v", filename, err)
+				}
+			}
+		}
+	}
+
+	return checksum, nil
+}
+
+// getXattrName returns the extended attribute name for a checksum type
+func getXattrName(checksumType ChecksumType) string {
+	switch checksumType {
+	case ChecksumTypeMD5:
+		return xattrMD5
+	case ChecksumTypeSHA1:
+		return xattrSHA1
+	case ChecksumTypeCRC32:
+		return xattrCRC32
+	default:
+		return ""
+	}
+}
+
+// isChecksumValid checks if the stored checksum is still valid by comparing file mtime
+func isChecksumValid(filename string, xattrName string) bool {
+	// Get file modification time
+	fileInfo, err := os.Stat(filename)
+	if err != nil {
+		return false
+	}
+	
+	// Try to get stored modification time from xattr
+	mtimeAttr := xattrName + ".mtime"
+	mtimeData, err := xattr.Get(filename, mtimeAttr)
+	if err != nil {
+		// No stored mtime, checksum is invalid
+		return false
+	}
+	
+	// Parse stored mtime
+	var storedMtime int64
+	_, err = fmt.Sscanf(string(mtimeData), "%d", &storedMtime)
+	if err != nil {
+		return false
+	}
+	
+	// Compare modification times
+	return fileInfo.ModTime().Unix() == storedMtime
+}
+
+// computeChecksum computes the checksum for a file
+func computeChecksum(filename string, checksumType ChecksumType) (string, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to open file for checksum")
+	}
+	defer file.Close()
+
+	switch checksumType {
+	case ChecksumTypeMD5:
+		hash := md5.New()
+		if _, err := io.Copy(hash, file); err != nil {
+			return "", errors.Wrap(err, "failed to compute MD5 checksum")
+		}
+		return hex.EncodeToString(hash.Sum(nil)), nil
+
+	case ChecksumTypeSHA1:
+		hash := sha1.New()
+		if _, err := io.Copy(hash, file); err != nil {
+			return "", errors.Wrap(err, "failed to compute SHA1 checksum")
+		}
+		return hex.EncodeToString(hash.Sum(nil)), nil
+
+	case ChecksumTypeCRC32:
+		hash := crc32.NewIEEE()
+		if _, err := io.Copy(hash, file); err != nil {
+			return "", errors.Wrap(err, "failed to compute CRC32 checksum")
+		}
+		return hex.EncodeToString(hash.Sum(nil)), nil
+
+	default:
+		return "", errors.Errorf("unsupported checksum type: %s", checksumType)
+	}
+}

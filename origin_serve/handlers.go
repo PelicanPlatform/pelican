@@ -20,6 +20,7 @@ package origin_serve
 
 import (
 	"net/http"
+	"path"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -32,22 +33,45 @@ import (
 )
 
 var (
-	webdavHandlers map[string]*webdav.Handler
+	webdavHandlers  map[string]*webdav.Handler
+	exportPrefixMap map[string]string // Maps federation prefix to storage prefix
 )
 
-// extractToken extracts the bearer token from the request
-func extractToken(r *http.Request) string {
+// extractTokens extracts bearer tokens from the request
+// Tokens can come from:
+// 1. Authorization header (may have multiple comma-separated tokens)
+// 2. Query parameter "access_token" (standard)
+// 3. Query parameter "authz" (non-standard)
+func extractTokens(r *http.Request) []string {
+	tokens := make([]string, 0)
+	
+	// Check Authorization header
 	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		return ""
+	if authHeader != "" {
+		// Split by comma to handle multiple tokens
+		for _, part := range strings.Split(authHeader, ",") {
+			part = strings.TrimSpace(part)
+			if strings.HasPrefix(strings.ToLower(part), "bearer ") {
+				token := strings.TrimPrefix(part, "Bearer ")
+				token = strings.TrimPrefix(token, "bearer ")
+				token = strings.TrimSpace(token)
+				if token != "" {
+					tokens = append(tokens, token)
+				}
+			}
+		}
 	}
 	
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-		return ""
+	// Check query parameters
+	query := r.URL.Query()
+	if accessToken := query.Get("access_token"); accessToken != "" {
+		tokens = append(tokens, accessToken)
+	}
+	if authzToken := query.Get("authz"); authzToken != "" {
+		tokens = append(tokens, authzToken)
 	}
 	
-	return parts[1]
+	return tokens
 }
 
 // getActionFromMethod determines the token scope action from HTTP method
@@ -69,7 +93,10 @@ func getActionFromMethod(method string) token_scopes.TokenScope {
 // authMiddleware handles token-based authorization
 func authMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token := extractToken(c.Request)
+		// Log the request
+		log.Infof("Request: %s %s from %s", c.Request.Method, c.Request.URL.Path, c.ClientIP())
+		
+		tokens := extractTokens(c.Request)
 		action := getActionFromMethod(c.Request.Method)
 		resource := c.Request.URL.Path
 		
@@ -98,37 +125,32 @@ func authMiddleware() gin.HandlerFunc {
 			}
 		}
 		
-		// If not public read, check authorization
-		if token == "" {
+		// If not public read, check authorization with each token
+		if len(tokens) == 0 {
 			log.Debugf("No token provided for %s %s", c.Request.Method, resource)
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
 		
-		if !ac.authorize(action, resource, token) {
-			log.Debugf("Authorization failed for %s %s", c.Request.Method, resource)
-			c.AbortWithStatus(http.StatusForbidden)
-			return
+		// Try each token until one authorizes the request
+		for _, token := range tokens {
+			ctx, authorized := ac.authorizeWithContext(c.Request.Context(), action, resource, token)
+			if authorized {
+				c.Request = c.Request.WithContext(ctx)
+				c.Next()
+				return
+			}
 		}
 		
-		// TODO: Extract user and group information from the token and add to context
-		// For now, we'll use a placeholder
-		userInfo := &UserInfo{
-			User:   "nobody",
-			Groups: []string{},
-		}
-		
-		// Add user info to the request context
-		ctx := SetUserInfo(c.Request.Context(), userInfo)
-		c.Request = c.Request.WithContext(ctx)
-		
-		c.Next()
+		log.Debugf("Authorization failed for %s %s", c.Request.Method, resource)
+		c.AbortWithStatus(http.StatusForbidden)
 	}
 }
 
 // InitializeHandlers initializes the WebDAV handlers for each export
 func InitializeHandlers(exports []server_utils.OriginExport) error {
 	webdavHandlers = make(map[string]*webdav.Handler)
+	exportPrefixMap := make(map[string]string) // Maps federation prefix to storage prefix
 	
 	for _, export := range exports {
 		// Create a filesystem for this export
@@ -147,6 +169,7 @@ func InitializeHandlers(exports []server_utils.OriginExport) error {
 		}
 		
 		webdavHandlers[export.FederationPrefix] = handler
+		exportPrefixMap[export.FederationPrefix] = export.StoragePrefix
 		log.Infof("Initialized WebDAV handler for %s -> %s", export.FederationPrefix, export.StoragePrefix)
 	}
 	
@@ -155,14 +178,30 @@ func InitializeHandlers(exports []server_utils.OriginExport) error {
 
 // RegisterHandlers registers the HTTP handlers with the Gin engine
 func RegisterHandlers(engine *gin.Engine) error {
+	// Initialize checksummer
+	InitializeChecksummer()
+	
 	// Register handlers for each export
 	for prefix, handler := range webdavHandlers {
+		// Get the storage prefix for this federation prefix
+		storagePrefix := exportPrefixMap[prefix]
+		
 		// Create a route group for this prefix
 		group := engine.Group(prefix)
 		group.Use(authMiddleware())
 		
-		// Register the WebDAV handler for all HTTP methods
+		// Custom HEAD handler to add checksums
+		group.HEAD("/*path", func(c *gin.Context) {
+			handleHeadWithChecksum(c, handler, storagePrefix)
+		})
+		
+		// Register the WebDAV handler for all other HTTP methods
 		group.Any("/*path", func(c *gin.Context) {
+			// Skip if it's a HEAD request (already handled above)
+			if c.Request.Method == http.MethodHead {
+				c.Next()
+				return
+			}
 			handler.ServeHTTP(c.Writer, c.Request)
 		})
 		
@@ -170,4 +209,36 @@ func RegisterHandlers(engine *gin.Engine) error {
 	}
 	
 	return nil
+}
+
+// handleHeadWithChecksum handles HEAD requests and adds checksum headers
+func handleHeadWithChecksum(c *gin.Context, handler *webdav.Handler, storagePrefix string) {
+	// First, let the WebDAV handler process the HEAD request normally
+	handler.ServeHTTP(c.Writer, c.Request)
+	
+	// If successful, add checksum headers
+	if c.Writer.Status() == http.StatusOK {
+		// Get the relative path from the request
+		relativePath := c.Param("path")
+		
+		// Construct the full filesystem path
+		fullPath := path.Join(storagePrefix, relativePath)
+		
+		checksummer := GetChecksummer()
+		
+		// Add MD5 checksum header
+		if md5sum, err := checksummer.GetChecksum(fullPath, ChecksumTypeMD5); err == nil {
+			c.Header("Digest", "md5="+md5sum)
+		}
+		
+		// Add SHA1 checksum header (alternative)
+		if sha1sum, err := checksummer.GetChecksum(fullPath, ChecksumTypeSHA1); err == nil {
+			c.Header("X-Checksum-Sha1", sha1sum)
+		}
+		
+		// Add CRC32 checksum header
+		if crc32sum, err := checksummer.GetChecksum(fullPath, ChecksumTypeCRC32); err == nil {
+			c.Header("X-Checksum-Crc32", crc32sum)
+		}
+	}
 }
