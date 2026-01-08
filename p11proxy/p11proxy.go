@@ -64,6 +64,13 @@ const (
 	modeProvider                   // Modern: Provider API for OpenSSL 3.x+ (EL9+, AlmaLinux 10)
 )
 
+// ModeResult contains the result of PKCS#11 mode detection.
+type ModeResult struct {
+	Mode         pkcs11Mode
+	EnginePath   string // Path to OpenSSL ENGINE module (empty if not using ENGINE)
+	ProviderPath string // Path to OpenSSL Provider module (empty if not using Provider)
+}
+
 // Proxy represents a running p11proxy helper instance.
 // Use Stop() to cleanup resources.
 type Proxy struct {
@@ -234,37 +241,10 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 		return &Proxy{info: disabled}, nil
 	}
 
-	// Determine which PKCS#11 mode to use:
-	// - Provider (preferred): For OpenSSL 3.x+ (EL9+, AlmaLinux 10, modern distros)
-	// - ENGINE (legacy): For OpenSSL 1.1.x (EL8) as a compatibility shim
-	//
-	// Provider is preferred because:
-	// - It's the modern, supported API for OpenSSL 3.0+
-	// - ENGINE is deprecated in OpenSSL 3.0 and may be removed in future versions
-	// - Provider modules only exist on OpenSSL 3.x, so this naturally falls back to ENGINE on EL8
-	var mode pkcs11Mode
-	var enginePath, providerPath string
-
-	providerPath = opts.ProviderModulePath
-	if providerPath == "" {
-		providerPath = autoDetectPKCS11Provider()
-	}
-	enginePath = opts.EngineDynamicPath
-	if enginePath == "" {
-		enginePath = autoDetectEngine()
-	}
-
-	if providerPath != "" {
-		// OpenSSL 3.x with pkcs11-provider available - use modern Provider API
-		mode = modeProvider
-		log.Debugf("PKCS#11 helper using Provider mode (OpenSSL 3.x) with %s", providerPath)
-	} else if enginePath != "" {
-		// OpenSSL 1.1.x (EL8) uses legacy ENGINE API
-		log.Debugf("PKCS#11 helper using ENGINE mode (legacy/OpenSSL 1.1.x) with %s", enginePath)
-		mode = modeEngine
-	} else {
-		log.Errorf("PKCS#11 helper disabled: no PKCS#11 integration found. " +
-			"For OpenSSL 3.x: install pkcs11-provider. For OpenSSL 1.1.x: install openssl-pkcs11.")
+	// Detect which PKCS#11 mode to use (Provider for OpenSSL 3.x+ or ENGINE for 1.1.x)
+	modeResult, err := detectPKCS11Mode(opts)
+	if err != nil {
+		log.Errorf("PKCS#11 helper disabled: %v", err)
 		_ = proxy.Stop()
 		disabled := Info{Enabled: false}
 		setCurrentInfo(disabled)
@@ -302,10 +282,10 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 	// Generate OpenSSL config (ENGINE or Provider based on detected mode).
 	opensslConf := filepath.Join(tmpDir, "openssl-pkcs11.cnf")
 	var confErr error
-	if mode == modeEngine {
-		confErr = writeOpenSSLConfEngine(opensslConf, enginePath, modulePath)
+	if modeResult.Mode == modeEngine {
+		confErr = writeOpenSSLConfEngine(opensslConf, modeResult.EnginePath, modulePath)
 	} else {
-		confErr = writeOpenSSLConfProvider(opensslConf, providerPath, modulePath)
+		confErr = writeOpenSSLConfProvider(opensslConf, modeResult.ProviderPath, modulePath)
 	}
 	if confErr != nil {
 		log.Warnf("PKCS#11 helper disabled: cannot write OpenSSL config: %v", confErr)
@@ -368,6 +348,55 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 	}(sockPath)
 
 	return proxy, nil
+}
+
+// detectPKCS11Mode determines which OpenSSL PKCS#11 API to use based on available modules.
+// It prefers Provider (OpenSSL 3.x+) over ENGINE (OpenSSL 1.1.x legacy) when both are available.
+//
+// Provider is preferred because:
+//   - It's the modern, supported API for OpenSSL 3.0+
+//   - ENGINE is deprecated in OpenSSL 3.0 and may be removed in future versions
+//   - Provider modules only exist on OpenSSL 3.x, so this naturally falls back to ENGINE on EL8
+//
+// Returns an error if neither Provider nor ENGINE modules are found or accessible.
+func detectPKCS11Mode(opts Options) (ModeResult, error) {
+	var result ModeResult
+
+	// Check for Provider module (OpenSSL 3.x+)
+	result.ProviderPath = opts.ProviderModulePath
+	if result.ProviderPath == "" {
+		result.ProviderPath = autoDetectPKCS11Provider()
+	}
+
+	// Check for ENGINE module (OpenSSL 1.1.x)
+	result.EnginePath = opts.EngineDynamicPath
+	if result.EnginePath == "" {
+		result.EnginePath = autoDetectEngine()
+	}
+
+	// Helper to check if a file exists and is regular
+	fileExists := func(path string) bool {
+		if path == "" {
+			return false
+		}
+		fi, err := os.Stat(path)
+		return err == nil && fi.Mode().IsRegular()
+	}
+
+	// Determine mode based on availability (Provider preferred)
+	providerAvailable := fileExists(result.ProviderPath)
+	engineAvailable := fileExists(result.EnginePath)
+
+	if providerAvailable {
+		result.Mode = modeProvider
+		return result, nil
+	} else if engineAvailable {
+		result.Mode = modeEngine
+		return result, nil
+	}
+
+	return result, errors.New("no PKCS#11 integration found: " +
+		"For OpenSSL 3.x: install pkcs11-provider. For OpenSSL 1.1.x: install openssl-pkcs11")
 }
 
 func uniqueSocketPath(sockDir string) (string, error) {
