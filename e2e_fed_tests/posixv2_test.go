@@ -110,12 +110,8 @@ func TestPosixv2OriginDirectoryListing(t *testing.T) {
 	fed := fed_test_utils.NewFedTest(t, originConfig)
 	require.NotNil(t, fed)
 
-	// List directory contents
-	dirURL := "pelican:///test/"
-	
-	// Note: The actual directory listing implementation depends on the client
-	// For now, we just verify the federation is running with POSIXv2
-	assert.NotNil(t, fed.Ctx, "Federation context should be initialized")
+	// List directory contents - currently just verify files can be accessed
+	// Full directory listing support via PROPFIND can be added later
 	
 	// Verify files can be accessed
 	for _, filename := range testFiles {
