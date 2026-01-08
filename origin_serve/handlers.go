@@ -80,7 +80,31 @@ func authMiddleware() gin.HandlerFunc {
 			return
 		}
 		
-		// Check if the request is authorized
+		// Check for public reads first
+		exports := ac.exports.Load()
+		if exports != nil && action == token_scopes.Wlcg_Storage_Read {
+			for _, export := range *exports {
+				if export.Capabilities.PublicReads && strings.HasPrefix(resource, export.FederationPrefix) {
+					// Allow public reads without token
+					userInfo := &UserInfo{
+						User:   "nobody",
+						Groups: []string{},
+					}
+					ctx := SetUserInfo(c.Request.Context(), userInfo)
+					c.Request = c.Request.WithContext(ctx)
+					c.Next()
+					return
+				}
+			}
+		}
+		
+		// If not public read, check authorization
+		if token == "" {
+			log.Debugf("No token provided for %s %s", c.Request.Method, resource)
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+		
 		if !ac.authorize(action, resource, token) {
 			log.Debugf("Authorization failed for %s %s", c.Request.Method, resource)
 			c.AbortWithStatus(http.StatusForbidden)
