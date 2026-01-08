@@ -57,6 +57,7 @@ const (
 	GroupSourceTypeOIDC     string = "oidc"
 	GroupSourceTypeFile     string = "file"
 	GroupSourceTypeInternal string = "internal"
+	GroupSourceTypeGitHub   string = "github"
 )
 
 var (
@@ -172,6 +173,51 @@ func handleOAuthLogin(ctx *gin.Context) {
 	ctx.Redirect(http.StatusTemporaryRedirect, redirectUrl)
 }
 
+// Fetch GitHub organization memberships for the authenticated user
+// Uses the OAuth access token to call GitHub's /user/orgs endpoint
+func fetchGitHubOrganizations(accessToken string) ([]string, error) {
+	client := config.GetClient()
+
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/user/orgs", nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create GitHub orgs request")
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to fetch GitHub organizations")
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to read GitHub orgs response")
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		log.Errorf("GitHub orgs API returned status %d with body: %s", resp.StatusCode, string(body))
+		return nil, errors.Errorf("GitHub orgs API returned status %d", resp.StatusCode)
+	}
+
+	var orgs []struct {
+		Login string `json:"login"`
+	}
+	if err := json.Unmarshal(body, &orgs); err != nil {
+		return nil, errors.Wrap(err, "failed to parse GitHub orgs response")
+	}
+
+	groups := make([]string, 0, len(orgs))
+	for _, org := range orgs {
+		groups = append(groups, org.Login)
+	}
+
+	log.Debugf("Fetched %d GitHub organizations for user", len(groups))
+	return groups, nil
+}
+
 // Given a user name, return the list of groups they belong to
 func generateGroupInfo(user string) (groups []string, err error) {
 	groupFile := param.Issuer_GroupFile.GetString()
@@ -194,7 +240,8 @@ func generateGroupInfo(user string) (groups []string, err error) {
 
 // Given the maps for the UserInfo and ID token JSON objects, generate
 // user/group information according to the current policy.
-func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]interface{}) (userRecord *database.User, groups []string, err error) {
+// The accessToken parameter is optional and only used when GroupSource is "github"
+func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]interface{}, accessToken string) (userRecord *database.User, groups []string, err error) {
 	claimsSource := maps.Clone(userInfo)
 	if param.Issuer_OIDCPreferClaimsFromIDToken.GetBool() {
 		maps.Copy(claimsSource, idToken)
@@ -359,7 +406,17 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 		for _, group := range groupList {
 			groups = append(groups, group.Name)
 		}
-
+	case GroupSourceTypeGitHub:
+		if accessToken == "" {
+			log.Errorf("GitHub group source requires an access token")
+			err = errors.New("GitHub group source requires an access token")
+			return nil, nil, err
+		}
+		groups, err = fetchGitHubOrganizations(accessToken)
+		if err != nil {
+			log.Errorf("Failed to fetch GitHub organizations: %v", err)
+			return nil, nil, errors.Wrap(err, "failed to fetch GitHub organizations")
+		}
 	case "", "none":
 		log.Debugf("No group source specified; no groups will be used")
 		return
@@ -538,7 +595,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 		return
 	}
 
-	userRecord, groups, err := generateUserGroupInfo(userInfo, idToken)
+	userRecord, groups, err := generateUserGroupInfo(userInfo, idToken, token.AccessToken)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError,
 			server_structs.SimpleApiResp{

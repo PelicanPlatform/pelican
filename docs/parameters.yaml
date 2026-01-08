@@ -2743,7 +2743,7 @@ description: |+
   The claim to be used as the unique subject identifier for the user.
   For OIDC providers, this is typically "sub".
   For OAuth2 providers like GitHub, this might be "id".
-  
+
   If the claim is not found in the user info response, the system will fall back to using the username.
   If the claim value is numeric, it will be converted to a string.
 type: string
@@ -2781,6 +2781,8 @@ description: |+
     the value of the claim specified by `Issuer.OIDCGroupClaim` (defaults to "groups") as a list of groups.
     The value may either be a comma-separated string or an array of strings.
   - `internal`: Take group information from the Pelican server's internal user database.
+  - `github`: Fetch group information from GitHub organization. Each GitHub organization the user
+    belongs to becomes a group. Requires the OAuth2 application to have the `read:org` scope.
 type: string
 default: none
 components: ["origin"]
@@ -2971,7 +2973,7 @@ description: |+
 
   If the OIDC auto-discovery failed, Pelican will fall back to use individual endpoints set in the configuration. For
   any unset endpoints, Pelican will use default values, which are from CILogon.
-  
+
   **Note**: If you explicitly set the OIDC endpoints (AuthorizationEndpoint, TokenEndpoint, etc.), those values will
   take precedence over auto-discovery. This is useful for OAuth2 providers like GitHub that don't support OIDC discovery.
 
