@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
@@ -40,17 +41,28 @@ import (
 // PelicanFS implements io.FS for the Pelican data federation.
 // It provides a filesystem-like interface to objects stored in the federation.
 type PelicanFS struct {
-	ctx     context.Context
-	options []TransferOption
+	ctx       context.Context
+	urlPrefix string // URL prefix for all paths (e.g., "osdf:///")
+	options   []TransferOption
 }
 
 // NewPelicanFS creates a new filesystem interface to the Pelican federation.
 // The provided context is used for all operations, and the options are applied
-// to all transfers.
+// to all transfers. If urlPrefix is empty or "/", it defaults to "osdf:///".
 func NewPelicanFS(ctx context.Context, options ...TransferOption) *PelicanFS {
+	return NewPelicanFSWithPrefix(ctx, "", options...)
+}
+
+// NewPelicanFSWithPrefix creates a new filesystem interface with a URL prefix.
+// All paths will be relative to this prefix. If prefix is empty or "/", defaults to "osdf:///".
+func NewPelicanFSWithPrefix(ctx context.Context, urlPrefix string, options ...TransferOption) *PelicanFS {
+	if urlPrefix == "" || urlPrefix == "/" {
+		urlPrefix = "osdf:///"
+	}
 	return &PelicanFS{
-		ctx:     ctx,
-		options: options,
+		ctx:       ctx,
+		urlPrefix: urlPrefix,
+		options:   options,
 	}
 }
 
@@ -69,8 +81,14 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrInvalid}
 	}
 
+	// Prepend URL prefix to the name
+	fullPath := name
+	if pfs.urlPrefix != "" && pfs.urlPrefix != "/" {
+		fullPath = pfs.urlPrefix + name
+	}
+
 	// Parse the URL
-	pUrl, err := ParseRemoteAsPUrl(pfs.ctx, name)
+	pUrl, err := ParseRemoteAsPUrl(pfs.ctx, fullPath)
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 	}
@@ -78,11 +96,12 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 	// Determine the operation type based on flags
 	writeMode := (flag&os.O_WRONLY) != 0 || (flag&os.O_RDWR) != 0
 	readMode := (flag&os.O_RDONLY) != 0 || (flag&os.O_RDWR) != 0
+	rdwrMode := (flag & os.O_RDWR) != 0
 	
 	// Get director info and token generator
 	httpMethod := http.MethodGet
 	operation := config.TokenSharedRead
-	if writeMode {
+	if writeMode && !rdwrMode {
 		httpMethod = http.MethodPut
 		operation = config.TokenSharedWrite
 	}
@@ -114,13 +133,41 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 	}
 
 	// Stat the file for reads (writes may create new file)
+	// For O_RDWR, try to stat first. If file doesn't exist, switch to write-only mode.
 	var fileInfo *FileInfo
 	if readMode {
 		fi, err := statHttp(pUrl, dirResp, token)
 		if err != nil {
-			return nil, &fs.PathError{Op: "open", Path: name, Err: err}
+			if rdwrMode {
+				// File doesn't exist in RDWR mode - switch to write-only
+				readMode = false
+				writeMode = true
+				// Update director info and token for PUT
+				dirResp, err = GetDirectorInfoForPath(pfs.ctx, pUrl, http.MethodPut, "")
+				if err != nil {
+					return nil, &fs.PathError{Op: "open", Path: name, Err: err}
+				}
+				token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, true)
+				for _, option := range pfs.options {
+					switch option.Ident() {
+					case identTransferOptionTokenLocation{}:
+						token.SetTokenLocation(option.Value().(string))
+					case identTransferOptionAcquireToken{}:
+						token.EnableAcquire = option.Value().(bool)
+					case identTransferOptionToken{}:
+						token.SetToken(option.Value().(string))
+					}
+				}
+				tokenContents, err = token.Get()
+				if err != nil || tokenContents == "" {
+					return nil, &fs.PathError{Op: "open", Path: name, Err: errors.Wrap(err, "failed to get token")}
+				}
+			} else {
+				return nil, &fs.PathError{Op: "open", Path: name, Err: err}
+			}
+		} else {
+			fileInfo = &fi
 		}
-		fileInfo = &fi
 	}
 
 	// Create transfer engine
@@ -148,7 +195,6 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 		dirResp:         dirResp,
 		token:           token,
 		tokenContents:   tokenContents,
-		currentEndpoint: 0,
 		readMode:        readMode,
 		writeMode:       writeMode,
 		rdwrMutex:       flag&os.O_RDWR != 0,
@@ -172,7 +218,7 @@ type PelicanFile struct {
 	dirResp        server_structs.DirectorResponse
 	token          *tokenGenerator
 	tokenContents  string
-	currentEndpoint int  // Sticky endpoint index
+	currentEndpoint atomic.Int32  // Sticky endpoint index (atomic for lock-free access)
 	
 	// Position tracking
 	position       int64  // Current position in file
@@ -185,6 +231,11 @@ type PelicanFile struct {
 	writePipe       io.WriteCloser
 	transferErr     error
 	transferDone    chan struct{}
+	transferResults []TransferResults  // Results from transfer client shutdown
+	
+	// ReadDir state (for pagination)
+	dirEntries     []fs.DirEntry
+	dirEntriesRead int  // Number of entries already returned by ReadDir
 	
 	// Mode flags
 	readMode       bool
@@ -250,46 +301,42 @@ func (pf *PelicanFile) startTransferRead(p []byte) (int, error) {
 	pf.transferStarted = true
 	pf.transferOffset = 0
 
-	// Start the transfer in a goroutine using TransferEngine directly
-	go func() {
-		defer close(pf.transferDone)
-		defer pw.Close()
+	// Create a transfer job with the pipe writer
+	tj, err := pf.transferClient.NewTransferJob(pf.ctx, pf.pUrl.GetRawUrl(), "", false, false, WithWriter(pw))
+	if err != nil {
+		pw.Close()
+		return 0, err
+	}
+	pf.transferJob = tj
 
-		// Create a transfer job with the pipe writer
-		tj, err := pf.transferClient.NewTransferJob(pf.ctx, pf.pUrl.GetRawUrl(), "", false, false, WithWriter(pw))
-		if err != nil {
-			pf.transferErr = err
-			pw.CloseWithError(err)
-			return
-		}
-		pf.transferJob = tj
-
-		if err := pf.transferClient.Submit(tj); err != nil {
-			pf.transferErr = err
-			pw.CloseWithError(err)
-			return
-		}
-
-		// Wait for results
-		results, err := pf.transferClient.Shutdown()
-		if err != nil {
-			pf.transferErr = err
-			pw.CloseWithError(err)
-			return
-		}
-
-		// Check for errors in results
-		for _, result := range results {
-			if result.Error != nil {
-				pf.transferErr = result.Error
-				pw.CloseWithError(result.Error)
-				return
-			}
-		}
-	}()
+	if err := pf.transferClient.Submit(tj); err != nil {
+		pw.Close()
+		return 0, err
+	}
 
 	// Read the first chunk
 	n, err := pf.readPipe.Read(p)
+	
+	// Check if pipe was closed - indicates transfer completion or error
+	if err == io.ErrClosedPipe || err == io.EOF {
+		// Shutdown client and get results
+		pf.mu.Lock()
+		results, shutdownErr := pf.transferClient.Shutdown()
+		pf.transferResults = results
+		pf.mu.Unlock()
+		
+		if shutdownErr != nil {
+			return n, shutdownErr
+		}
+		
+		// Check for transfer errors
+		for _, result := range results {
+			if result.Error != nil {
+				return n, result.Error
+			}
+		}
+	}
+	
 	pf.position += int64(n)
 	pf.transferOffset += int64(n)
 	return n, err
@@ -328,12 +375,15 @@ func (pf *PelicanFile) doRangeRead(p []byte, offset int64) (int, error) {
 		return 0, errors.New("no object servers available")
 	}
 
+	// Get current endpoint atomically
+	currentIdx := int(pf.currentEndpoint.Load())
+	
 	// Reorder to try current endpoint first
 	tryOrder := make([]*url.URL, len(endpoints))
 	copy(tryOrder, endpoints)
-	if pf.currentEndpoint > 0 && pf.currentEndpoint < len(tryOrder) {
+	if currentIdx > 0 && currentIdx < len(tryOrder) {
 		// Move current endpoint to front
-		tryOrder[0], tryOrder[pf.currentEndpoint] = tryOrder[pf.currentEndpoint], tryOrder[0]
+		tryOrder[0], tryOrder[currentIdx] = tryOrder[currentIdx], tryOrder[0]
 	}
 
 	var lastErr error
@@ -381,12 +431,12 @@ func (pf *PelicanFile) doRangeRead(p []byte, offset int64) (int, error) {
 			continue
 		}
 
-		// Update sticky endpoint on success
+		// Update sticky endpoint on success (atomically)
 		if idx != 0 {
 			// Find the original index of this endpoint
 			for origIdx, ep := range endpoints {
 				if ep.String() == objServer.String() {
-					pf.currentEndpoint = origIdx
+					pf.currentEndpoint.Store(int32(origIdx))
 					break
 				}
 			}
@@ -480,40 +530,20 @@ func (pf *PelicanFile) startTransferWrite() error {
 	pf.transferStarted = true
 	pf.writePosition = 0
 
-	// Start the transfer in a goroutine
-	go func() {
-		defer close(pf.transferDone)
+	// Create a transfer job with the pipe reader
+	tj, err := pf.transferClient.NewTransferJob(pf.ctx, pf.pUrl.GetRawUrl(), "", true, false, WithReader(pr))
+	if err != nil {
+		pr.Close()
+		pw.Close()
+		return err
+	}
+	pf.transferJob = tj
 
-		// Create a transfer job with the pipe reader
-		tj, err := pf.transferClient.NewTransferJob(pf.ctx, pf.pUrl.GetRawUrl(), "", true, false, WithReader(pr))
-		if err != nil {
-			pf.transferErr = err
-			pr.CloseWithError(err)
-			return
-		}
-		pf.transferJob = tj
-
-		if err := pf.transferClient.Submit(tj); err != nil {
-			pf.transferErr = err
-			pr.CloseWithError(err)
-			return
-		}
-
-		// Wait for results
-		results, err := pf.transferClient.Shutdown()
-		if err != nil {
-			pf.transferErr = err
-			return
-		}
-
-		// Check for errors
-		for _, result := range results {
-			if result.Error != nil {
-				pf.transferErr = result.Error
-				return
-			}
-		}
-	}()
+	if err := pf.transferClient.Submit(tj); err != nil {
+		pr.Close()
+		pw.Close()
+		return err
+	}
 
 	return nil
 }
@@ -554,7 +584,7 @@ func (pf *PelicanFile) Seek(offset int64, whence int) (int64, error) {
 }
 
 // ReadDir reads the contents of the directory and returns a slice of DirEntry values.
-// It implements fs.ReadDirFile.
+// It implements fs.ReadDirFile. Can be called multiple times to paginate through entries.
 func (pf *PelicanFile) ReadDir(n int) ([]fs.DirEntry, error) {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
@@ -567,28 +597,50 @@ func (pf *PelicanFile) ReadDir(n int) ([]fs.DirEntry, error) {
 		return nil, &fs.PathError{Op: "readdir", Path: pf.name, Err: errors.New("not a directory")}
 	}
 
-	// Use existing DoList functionality
-	fileInfos, err := DoList(pf.ctx, pf.name, pf.options...)
-	if err != nil {
-		return nil, &fs.PathError{Op: "readdir", Path: pf.name, Err: err}
+	// Fetch entries on first call
+	if pf.dirEntries == nil {
+		// Use listHttp directly instead of DoList to reuse cached dirResp and token
+		fileInfos, err := listHttp(pf.pUrl, pf.dirResp, pf.token, false, 0)
+		if err != nil {
+			return nil, &fs.PathError{Op: "readdir", Path: pf.name, Err: err}
+		}
+
+		// Convert FileInfo to DirEntry
+		pf.dirEntries = make([]fs.DirEntry, 0, len(fileInfos))
+		for _, fi := range fileInfos {
+			pf.dirEntries = append(pf.dirEntries, &pelicanDirEntry{
+				name:  fi.Name,
+				isDir: fi.IsCollection,
+				size:  fi.Size,
+				mtime: fi.ModTime,
+			})
+		}
+		pf.dirEntriesRead = 0
 	}
 
-	// Convert FileInfo to DirEntry
-	entries := make([]fs.DirEntry, 0, len(fileInfos))
-	for _, fi := range fileInfos {
-		entries = append(entries, &pelicanDirEntry{
-			name:  fi.Name,
-			isDir: fi.IsCollection,
-			size:  fi.Size,
-			mtime: fi.ModTime,
-		})
+	// Return remaining entries
+	remaining := len(pf.dirEntries) - pf.dirEntriesRead
+	if remaining == 0 {
+		return nil, io.EOF
 	}
 
 	// Handle n parameter
-	if n > 0 && n < len(entries) {
-		return entries[:n], nil
+	if n <= 0 {
+		// Return all remaining entries
+		entries := pf.dirEntries[pf.dirEntriesRead:]
+		pf.dirEntriesRead = len(pf.dirEntries)
+		return entries, nil
 	}
 
+	// Return up to n entries
+	end := pf.dirEntriesRead + n
+	if end > len(pf.dirEntries) {
+		end = len(pf.dirEntries)
+	}
+	
+	entries := pf.dirEntries[pf.dirEntriesRead:end]
+	pf.dirEntriesRead = end
+	
 	return entries, nil
 }
 
@@ -638,25 +690,51 @@ func (pf *PelicanFile) Close() error {
 		pf.writePipe = nil
 	}
 
-	// Wait for transfer to complete if it was started
-	if pf.transferDone != nil {
-		<-pf.transferDone
-	}
-
 	// Close the read pipe if it's open
 	if pf.readPipe != nil {
 		pf.readPipe.Close()
 		pf.readPipe = nil
 	}
 
-	// Shutdown the transfer client and engine
-	if pf.transferClient != nil {
-		pf.transferClient.Shutdown()
+	// Shutdown the transfer client and engine, get results with mutex held
+	var err error
+	if pf.transferClient != nil && pf.transferStarted {
+		// Check if we already have results (from earlier shutdown)
+		if pf.transferResults == nil {
+			results, shutdownErr := pf.transferClient.Shutdown()
+			pf.transferResults = results
+			if shutdownErr != nil {
+				err = shutdownErr
+			}
+			
+			// Check for transfer errors in results
+			if err == nil {
+				for _, result := range results {
+					if result.Error != nil {
+						err = result.Error
+						break
+					}
+				}
+			}
+		} else {
+			// Use cached results
+			for _, result := range pf.transferResults {
+				if result.Error != nil {
+					err = result.Error
+					break
+				}
+			}
+		}
 	}
+	
 	if pf.transferEngine != nil {
 		pf.transferEngine.Shutdown()
 	}
 
+	// Return any transfer error or cached error
+	if err != nil {
+		return err
+	}
 	return pf.transferErr
 }
 
