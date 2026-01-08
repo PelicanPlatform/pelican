@@ -51,18 +51,19 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		return nil, errors.Wrap(err, "failed to initialize origin exports")
 	}
 
-	// Check if we're using POSIXv2 backend - if so, use origin_serve instead of XRootD
-	if param.Origin_StorageType.GetString() == string(server_structs.OriginStoragePosixv2) {
-		return OriginServePosixv2(ctx, engine, egrp, modules, originExports)
-	}
+	// Determine if we should use XRootD or native HTTP server
+	useXRootD := param.Origin_StorageType.GetString() != string(server_structs.OriginStoragePosixv2)
+	
+	if useXRootD {
+		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusWarning, "XRootD is initializing")
+		metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusWarning, "CMSD is initializting")
 
-	// Otherwise, use the traditional XRootD-based origin
-	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusWarning, "XRootD is initializing")
-	metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusWarning, "CMSD is initializting")
-
-	err = xrootd.SetUpMonitoring(ctx, egrp)
-	if err != nil {
-		return nil, err
+		err = xrootd.SetUpMonitoring(ctx, egrp)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		log.Info("Initializing POSIXv2 origin backend")
 	}
 
 	originServer := &origin.OriginServer{}
@@ -113,131 +114,80 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		}
 	}
 
-	configPath, err := xrootd.ConfigXrootd(ctx, true)
-	if err != nil {
-		return nil, err
-	}
-
-	if param.Origin_SelfTest.GetBool() {
-		xrootd.PeriodicSelfTest(ctx, egrp, true)
-	}
-
-	privileged := param.Origin_Multiuser.GetBool()
-	useCMSD := param.Origin_EnableCmsd.GetBool()
-	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, useCMSD, false)
-	if err != nil {
-		return nil, err
-	}
-
-	if param.Origin_EnableIssuer.GetBool() {
-		oa4mp_launcher, err := oa4mp.ConfigureOA4MP()
+	// Handle XRootD-specific initialization
+	if useXRootD {
+		configPath, err := xrootd.ConfigXrootd(ctx, true)
 		if err != nil {
 			return nil, err
 		}
-		launchers = append(launchers, oa4mp_launcher)
-	}
 
-	portStartCallback := func(port int) {
-		if err := param.Set("Origin.Port", port); err != nil {
-			log.WithError(err).Warnf("Failed to set Origin.Port to %d", port)
+		if param.Origin_SelfTest.GetBool() {
+			xrootd.PeriodicSelfTest(ctx, egrp, true)
 		}
-		if originUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {
-			originUrl.Host = originUrl.Hostname() + ":" + strconv.Itoa(port)
-			if err := param.Set("Origin.Url", originUrl.String()); err != nil {
-				log.WithError(err).Warnf("Failed to set Origin.Url to %s", originUrl.String())
-			}
-			log.Debugln("Resetting Origin.Url to", originUrl.String())
-		}
-		log.Infoln("Origin startup complete on port", port)
-	}
 
-	pids, err := xrootd.LaunchDaemons(ctx, launchers, egrp, portStartCallback)
-	if err != nil {
-		return nil, err
-	}
-	originServer.SetPids(pids)
-
-	// Store restart information after PIDs are known
-	xrootd.StoreRestartInfo(launchers, pids, egrp, portStartCallback, false, useCMSD, privileged)
-
-	// Register callback for xrootd logging configuration changes
-	// This must be done after LaunchDaemons so the server has PIDs
-	xrootd.RegisterXrootdLoggingCallback()
-
-	// LaunchOriginDaemons may edit the viper config; these launched goroutines are purposely
-	// delayed until after the viper config is done.
-	xrootd.LaunchXrootdMaintenance(ctx, originServer, 2*time.Minute)
-	origin.LaunchOriginFileTestMaintenance(ctx)
-
-	return originServer, nil
-}
-
-// OriginServePosixv2 serves an origin using the built-in POSIXv2 backend instead of XRootD
-func OriginServePosixv2(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules server_structs.ServerType, originExports []server_utils.OriginExport) (server_structs.XRootDServer, error) {
-	log.Info("Initializing POSIXv2 origin backend")
-	
-	originServer := &origin.OriginServer{}
-	err := launcher_utils.CheckDefaults(originServer)
-	if err != nil {
-		return nil, err
-	}
-
-	// Initialize PKCS#11 helper after the defaults are set up
-	initPKCS11(ctx, modules)
-
-	if err := origin.InitializeDB(); err != nil {
-		return nil, errors.Wrap(err, "failed to initialize origin sqlite database")
-	}
-
-	if err := database.InitServerDatabase(server_structs.OriginType); err != nil {
-		return nil, errors.Wrap(err, "failed to initialize server sqlite database")
-	}
-
-	origin.ConfigOriginTTLCache(ctx, egrp)
-
-	concLimit := param.Origin_Concurrency.GetInt()
-	if concLimit > 0 {
-		server_utils.LaunchConcurrencyMonitoring(ctx, egrp, originServer.GetServerType())
-	}
-
-	// Set up the APIs unrelated to UI
-	if err = origin.RegisterOriginAPI(engine, ctx, egrp); err != nil {
-		return nil, err
-	}
-
-	// Set up the APIs for the origin UI
-	if err = origin.RegisterOriginWebAPI(engine); err != nil {
-		return nil, err
-	}
-
-	// Director also registers this metadata URL; avoid registering twice.
-	if !modules.IsEnabled(server_structs.DirectorType) {
-		server_utils.RegisterOIDCAPI(engine.Group("/", web_ui.ServerHeaderMiddleware), false)
-	}
-
-	if param.Origin_EnableIssuer.GetBool() {
-		if err = oa4mp.ConfigureOA4MPProxy(engine); err != nil {
+		privileged := param.Origin_Multiuser.GetBool()
+		useCMSD := param.Origin_EnableCmsd.GetBool()
+		launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, useCMSD, false)
+		if err != nil {
 			return nil, err
 		}
+
+		if param.Origin_EnableIssuer.GetBool() {
+			oa4mp_launcher, err := oa4mp.ConfigureOA4MP()
+			if err != nil {
+				return nil, err
+			}
+			launchers = append(launchers, oa4mp_launcher)
+		}
+
+		portStartCallback := func(port int) {
+			if err := param.Set("Origin.Port", port); err != nil {
+				log.WithError(err).Warnf("Failed to set Origin.Port to %d", port)
+			}
+			if originUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {
+				originUrl.Host = originUrl.Hostname() + ":" + strconv.Itoa(port)
+				if err := param.Set("Origin.Url", originUrl.String()); err != nil {
+					log.WithError(err).Warnf("Failed to set Origin.Url to %s", originUrl.String())
+				}
+				log.Debugln("Resetting Origin.Url to", originUrl.String())
+			}
+			log.Infoln("Origin startup complete on port", port)
+		}
+
+		pids, err := xrootd.LaunchDaemons(ctx, launchers, egrp, portStartCallback)
+		if err != nil {
+			return nil, err
+		}
+		originServer.SetPids(pids)
+
+		// Store restart information after PIDs are known
+		xrootd.StoreRestartInfo(launchers, pids, egrp, portStartCallback, false, useCMSD, privileged)
+
+		// Register callback for xrootd logging configuration changes
+		// This must be done after LaunchDaemons so the server has PIDs
+		xrootd.RegisterXrootdLoggingCallback()
+
+		// LaunchOriginDaemons may edit the viper config; these launched goroutines are purposely
+		// delayed until after the viper config is done.
+		xrootd.LaunchXrootdMaintenance(ctx, originServer, 2*time.Minute)
+		origin.LaunchOriginFileTestMaintenance(ctx)
+	} else {
+		// Handle POSIXv2-specific initialization
+		if err := origin_serve.InitAuthConfig(ctx, egrp, originExports); err != nil {
+			return nil, errors.Wrap(err, "failed to initialize origin_serve auth config")
+		}
+
+		if err := origin_serve.InitializeHandlers(originExports); err != nil {
+			return nil, errors.Wrap(err, "failed to initialize origin_serve handlers")
+		}
+
+		if err := origin_serve.RegisterHandlers(engine); err != nil {
+			return nil, errors.Wrap(err, "failed to register origin_serve handlers")
+		}
+
+		log.Info("POSIXv2 origin backend initialized successfully")
 	}
 
-	// Initialize origin_serve authorization
-	if err := origin_serve.InitAuthConfig(ctx, egrp, originExports); err != nil {
-		return nil, errors.Wrap(err, "failed to initialize origin_serve auth config")
-	}
-
-	// Initialize origin_serve handlers
-	if err := origin_serve.InitializeHandlers(originExports); err != nil {
-		return nil, errors.Wrap(err, "failed to initialize origin_serve handlers")
-	}
-
-	// Register HTTP handlers
-	if err := origin_serve.RegisterHandlers(engine); err != nil {
-		return nil, errors.Wrap(err, "failed to register origin_serve handlers")
-	}
-
-	log.Info("POSIXv2 origin backend initialized successfully")
-	
 	return originServer, nil
 }
 
