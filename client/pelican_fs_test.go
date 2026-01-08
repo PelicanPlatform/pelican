@@ -135,7 +135,7 @@ func TestPelicanFS_Seek(t *testing.T) {
 
 		pfs := client.NewPelicanFS(fed.Ctx)
 		remotePath := fmt.Sprintf("%s/osdf_osdf/%s", export.FederationPrefix, fileName)
-		
+
 		file, err := pfs.Open(remotePath)
 		require.NoError(t, err)
 		defer file.Close()
@@ -213,7 +213,7 @@ func TestPelicanFS_ReadAt(t *testing.T) {
 
 		pfs := client.NewPelicanFS(fed.Ctx)
 		remotePath := fmt.Sprintf("%s/osdf_osdf/%s", export.FederationPrefix, fileName)
-		
+
 		file, err := pfs.Open(remotePath)
 		require.NoError(t, err)
 		defer file.Close()
@@ -224,7 +224,7 @@ func TestPelicanFS_ReadAt(t *testing.T) {
 
 		// Test ReadAt from different positions
 		buf := make([]byte, 5)
-		
+
 		// Read "quick" at offset 4
 		n, err := readerAt.ReadAt(buf, 4)
 		require.NoError(t, err)
@@ -293,7 +293,7 @@ func TestPelicanFS_Interfaces(t *testing.T) {
 		var _ fs.FS = pfs
 
 		remotePath := fmt.Sprintf("%s/osdf_osdf/%s", export.FederationPrefix, fileName)
-		
+
 		file, err := pfs.Open(remotePath)
 		require.NoError(t, err)
 		defer file.Close()
