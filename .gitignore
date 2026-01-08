@@ -12,3 +12,5 @@ oidc-client-id
 oidc-client-secret
 MaxMindKey
 e2e_fed_tests.test
+client.test
+*.test
