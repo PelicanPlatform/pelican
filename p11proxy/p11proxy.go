@@ -219,8 +219,8 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 		setCurrentInfo(disabled)
 		return &Proxy{info: disabled}, nil
 	}
-	if err := applyP11ProxyPermissions(tmpDir, 0750); err != nil {
-		log.Warnf("PKCS#11 helper disabled: cannot set p11proxy dir permissions: %v", err)
+	if err := setOpenSSLCfgFilePerms(tmpDir, 0750); err != nil {
+		log.Warnf("PKCS#11 helper disabled: fail to set permissions on pkcs11 temporary directory: %v", err)
 		disabled := Info{Enabled: false}
 		setCurrentInfo(disabled)
 		return &Proxy{info: disabled}, nil
@@ -294,7 +294,7 @@ func Start(ctx context.Context, opts Options, modules server_structs.ServerType)
 		setCurrentInfo(disabled)
 		return &Proxy{info: disabled}, nil
 	}
-	if err := applyP11ProxyPermissions(opensslConf, 0640); err != nil {
+	if err := setOpenSSLCfgFilePerms(opensslConf, 0640); err != nil {
 		log.Warnf("p11proxy: failed to set OpenSSL config permissions: %v", err)
 	}
 
@@ -408,15 +408,17 @@ func uniqueSocketPath(sockDir string) (string, error) {
 	return filepath.Join(sockDir, name), nil
 }
 
-func applyP11ProxyPermissions(path string, mode os.FileMode) error {
+func setOpenSSLCfgFilePerms(path string, mode os.FileMode) error {
 	if err := os.Chmod(path, mode); err != nil {
 		return err
 	}
-	gid, err := config.GetDaemonGID()
+
+	// Set group ownership to allow XRootD daemon to read the file
+	xrootdGid, err := config.GetDaemonGID()
 	if err != nil {
 		return err
 	}
-	return os.Chown(path, 0, gid)
+	return os.Chown(path, -1, xrootdGid)
 }
 
 // writeOpenSSLConfEngine generates an OpenSSL config file for ENGINE-based PKCS#11.
@@ -438,7 +440,7 @@ func writeOpenSSLConfEngine(path, enginePath, modulePath string) error {
 	content.WriteString(modulePath)
 	content.WriteString("\n")
 	content.WriteString("init = 0\n")
-	return os.WriteFile(path, []byte(content.String()), 0644)
+	return os.WriteFile(path, []byte(content.String()), 0640)
 }
 
 // writeOpenSSLConfProvider generates an OpenSSL config file for Provider-based PKCS#11.
@@ -470,7 +472,7 @@ func writeOpenSSLConfProvider(path, providerPath, modulePath string) error {
 	content.WriteString(modulePath)
 	content.WriteString("\n")
 	content.WriteString("activate = 1\n")
-	return os.WriteFile(path, []byte(content.String()), 0644)
+	return os.WriteFile(path, []byte(content.String()), 0640)
 }
 
 func autoDetectEngine() string {
