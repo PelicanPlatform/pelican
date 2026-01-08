@@ -61,12 +61,32 @@ jobs:
         key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
         restore-keys: |
           ${{ runner.os }}-go-
-    - name: Test
+    - name: Install gotestsum
       run: |
+        if ! command -v gotestsum &> /dev/null; then
+          go install gotest.tools/gotestsum@latest
+        fi
+        # Ensure ~/go/bin is in PATH for subsequent steps
+        echo "$HOME/go/bin" >> $GITHUB_PATH
+    - name: Test
+      env:
+        JUNIT_FILE: junit-${{ matrix.binary_name }}.xml
+      run: |
+        echo "::group::Building web UI"
         make web-build
-        # Disabling until we are able to make it more reliable -- shouldn't punish other folks for challenging tests!
-        #go test      -timeout 15m -coverpkg=./director -covermode=count -coverprofile=${{ matrix.coverprofile }} -tags=${{ matrix.tags }} ./director -run TestStatMemory
-        go test -p=4 -timeout 15m -coverpkg=./...      -covermode=count -coverprofile=${{ matrix.coverprofile }} -tags=${{ matrix.tags }} ./... -skip TestStatMemory
+        echo "::endgroup::"
+        gotestsum --format pkgname-and-test-fails --hide-summary=output --junitfile "$JUNIT_FILE" -- -p=4 -timeout 15m -coverpkg=./...      -covermode=count -coverprofile=${{ matrix.coverprofile }} -tags=${{ matrix.tags }} ./...
+    - name: Upload junit report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: junit-${{ matrix.binary_name }}-linux
+        path: junit-${{ matrix.binary_name }}.xml
+    - name: Publish JUnit summary
+      if: always()
+      uses: test-summary/action@v2
+      with:
+        paths: junit-${{ matrix.binary_name }}.xml
     - name: Get total code coverage
       if: github.event_name == 'pull_request'
       id: cc
@@ -94,3 +114,5 @@ jobs:
       run: ./github_scripts/stat_test.sh
     - name: Run end-to-end test for --version flag
       run: ./github_scripts/version_test.sh
+    - name: Run end-to-end test for site-local cache standup
+      run: ./github_scripts/site_local_cache_test.sh

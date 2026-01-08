@@ -22,13 +22,11 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"strings"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/features"
 	"github.com/pelicanplatform/pelican/metrics"
 	pelican_oauth2 "github.com/pelicanplatform/pelican/oauth2"
@@ -79,7 +77,7 @@ func (server *OriginServer) GetRequiredFeatures() []features.Feature {
 	return requiredFeatures
 }
 
-func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
+func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWebUrl string, downtimes []server_structs.Downtime) (*server_structs.OriginAdvertiseV2, error) {
 	isGlobusBackend := param.Origin_StorageType.GetString() == string(server_structs.OriginStorageGlobus)
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	serverIssuerUrlStr, err := config.GetServerIssuerURL()
@@ -162,12 +160,6 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		prefixes = append(prefixes, export.FederationPrefix)
 	}
 
-	// Fetch origin's active and future downtimes
-	downtimes, err := database.GetIncompleteDowntimes(strings.ToLower(server_structs.OriginType.String()))
-	if err != nil {
-		return nil, err
-	}
-
 	// Determine whether this origin requires any special features that may place
 	// limitations on the other servers (e.g. caches) it can work with.
 	requiredFeatures := server.GetRequiredFeatures()
@@ -187,6 +179,7 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 	status := metrics.GetHealthStatus().OverallStatus
 
 	ad := server_structs.OriginAdvertiseV2{
+		ServerID:       id,
 		RegistryPrefix: registryPrefix,
 		DataURL:        originUrlStr,
 		WebURL:         originWebUrl,
@@ -210,9 +203,9 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		}},
 		StorageType:         ost,
 		DisableDirectorTest: !param.Origin_DirectorTest.GetBool(),
-		Downtimes:           downtimes,
 		RequiredFeatures:    featureNames,
 		Status:              status,
+		Downtimes:           downtimes,
 	}
 	ad.Initialize(name)
 
@@ -225,31 +218,31 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 				errMsg += fmt.Sprintf(". The Globus app expects the following redirect URL: %s ", callbackUrl)
 			}
 			return nil, errors.New(errMsg)
-		} else {
-			return nil, errors.New("failed to create advertisement: no valid export")
 		}
-	} else if len(prefixes) == 1 {
-		if param.Origin_EnableBroker.GetBool() {
-			var brokerUrl *url.URL
-			fedInfo, err := config.GetFederation(context.Background())
-			if err != nil {
-				return nil, err
-			}
-			brokerUrl, err = url.Parse(fedInfo.BrokerEndpoint)
-			if err != nil {
-				err = errors.Wrap(err, "Invalid Broker URL")
-				return nil, err
-			}
-			brokerUrl.Path = "/api/v1.0/broker/reverse"
-			values := brokerUrl.Query()
-			values.Set("origin", param.Server_Hostname.GetString())
-			values.Set("prefix", prefixes[0])
-			brokerUrl.RawQuery = values.Encode()
-			ad.BrokerURL = brokerUrl.String()
-		}
-	} else {
-		log.Warningf("Multiple prefixes are not yet supported with the broker. Skipping broker configuration")
+
+		return nil, errors.New("failed to create advertisement: no valid export")
 	}
+
+	if param.Origin_EnableBroker.GetBool() && len(prefixes) == 1 {
+		var brokerUrl *url.URL
+		fedInfo, err := config.GetFederation(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		brokerUrl, err = url.Parse(fedInfo.BrokerEndpoint)
+		if err != nil {
+			return nil, errors.Wrap(err, "federation metadata discovery provided an invalid broker endpoint")
+		}
+		brokerUrl.Path = "/api/v1.0/broker/reverse"
+		values := brokerUrl.Query()
+		values.Set("origin", param.Server_Hostname.GetString())
+		values.Set("prefix", prefixes[0])
+		brokerUrl.RawQuery = values.Encode()
+		ad.BrokerURL = brokerUrl.String()
+	} else if param.Origin_EnableBroker.GetBool() && len(prefixes) > 1 {
+		log.Warningf("Multiple federation prefixes are not yet supported with the broker. Skipping broker configuration")
+	}
+
 	return &ad, nil
 }
 

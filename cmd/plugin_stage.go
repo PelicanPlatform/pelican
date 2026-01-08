@@ -32,7 +32,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/pelicanplatform/pelican/classads"
+	classad "github.com/PelicanPlatform/classad/classad"
+
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/param"
 )
@@ -225,18 +226,18 @@ func processTransferInput(reader io.Reader, mountPrefixStr string, originPrefixP
 	if err != nil {
 		return nil, nil, fmt.Errorf("Failed to read ClassAd from stdin: %v", err), 1
 	}
-	classad, err := classads.ParseShadowClassAd(string(buffer[:bytesread]))
+	classad, err := classad.Parse(string(buffer[:bytesread]))
 	if err != nil {
 		return nil, nil, fmt.Errorf("Failed to parse ClassAd from stdin: %v", err), 1
 	}
-	inputList, err := classad.Get("TransferInput")
-	if err != nil || inputList == nil {
+	inputList := classad.EvaluateAttr("TransferInput")
+	if inputList.IsUndefined() {
 		// No TransferInput, no need to transform therefore we exit(0)
 		return nil, nil, fmt.Errorf("No transfer input found in classad, no need to transform."), 0
 	}
-	inputListStr, ok := inputList.(string)
-	if !ok {
-		return nil, nil, fmt.Errorf("TransferInput is not a string"), 1
+	var inputListStr string
+	if inputList.IsString() {
+		inputListStr = inputList.String()
 	}
 	re := regexp.MustCompile(`[,\s]+`)
 	for _, source := range re.Split(inputListStr, -1) {

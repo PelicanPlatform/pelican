@@ -30,8 +30,10 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // Config commands use ansi encoding for color output. This function strips
@@ -44,13 +46,13 @@ func stripAnsiCodes(input string) string {
 // Mock configuration setup
 func setupMockConfig(t *testing.T) error {
 	// Setting Non-default values, mimics what we'd get from config file
-	viper.Set("Logging.Level", "trace")
-	viper.Set("Logging.Cache.Http", "info")
-	viper.Set("Logging.Cache.Xrootd", "info")
-	viper.Set("Logging.Origin.Http", "info")
+	require.NoError(t, param.Set("Logging.Level", "trace"))
+	require.NoError(t, param.Set("Logging.Cache.Http", "info"))
+	require.NoError(t, param.Set("Logging.Cache.Xrootd", "info"))
+	require.NoError(t, param.Set("Logging.Origin.Http", "info"))
 
 	// Set default config
-	viper.Set("ConfigDir", t.TempDir())
+	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
 
 	config.InitConfigInternal(log.InfoLevel)
 	if err := config.SetServerDefaults(viper.GetViper()); err != nil {

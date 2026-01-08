@@ -154,6 +154,69 @@ func init() {
 	hookServerAdsCache()
 }
 
+// shutdownHealthTests cancels and waits for all active health test errgroups. Intended for tests to prevent
+// goroutine leaks when LaunchPeriodicDirectorTest has been started.
+func shutdownHealthTests() {
+	// Snapshot and clear under write lock
+	healthTestUtilsMutex.Lock()
+	utils := make([]*healthTestUtil, 0, len(healthTestUtils))
+	for _, util := range healthTestUtils {
+		utils = append(utils, util)
+	}
+	healthTestUtils = make(map[string]*healthTestUtil)
+	healthTestUtilsMutex.Unlock()
+
+	// Cancel and wait outside the lock
+	for _, util := range utils {
+		if util == nil {
+			continue
+		}
+		if util.Cancel != nil {
+			util.Cancel()
+		}
+		if util.ErrGrp != nil {
+			if err := util.ErrGrp.Wait(); err != nil {
+				log.Debugf("health test errgroup wait returned error: %v", err)
+			}
+		}
+	}
+}
+
+// resetHealthTests cancels all active health test goroutines and clears state. Prefer this over manually
+// resetting the map in tests so that goroutines spawned by LaunchPeriodicDirectorTest are stopped.
+func resetHealthTests() {
+	shutdownHealthTests()
+}
+
+// shutdownStatUtils cancels and waits for all active stat utility goroutines and clears the statUtils map.
+// This is used by tests to avoid leaking goroutines that hold on to cached result watchers.
+func shutdownStatUtils() {
+	statUtilsMutex.Lock()
+	utils := make([]*serverStatUtil, 0, len(statUtils))
+	for _, util := range statUtils {
+		utils = append(utils, util)
+	}
+	statUtils = make(map[string]*serverStatUtil)
+	statUtilsMutex.Unlock()
+
+	for _, util := range utils {
+		if util == nil {
+			continue
+		}
+		if util.Cancel != nil {
+			util.Cancel()
+		}
+		if util.ResultCache != nil {
+			util.ResultCache.Stop()
+		}
+		if util.Errgroup != nil {
+			if err := util.Errgroup.Wait(); err != nil {
+				log.Debugf("stat util errgroup wait returned error: %v", err)
+			}
+		}
+	}
+}
+
 // Used for testing, where the Director has pretty much _always_ been started in the
 // last 5 minutes.
 func SetStartupTime(t time.Time) {
@@ -1289,6 +1352,7 @@ func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, adV2 *se
 	}
 
 	sAd := server_structs.ServerAd{
+		ServerID:            adV2.ServerID,
 		RegistryPrefix:      adV2.RegistryPrefix,
 		StorageType:         st,
 		DisableDirectorTest: adV2.DisableDirectorTest,

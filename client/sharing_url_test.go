@@ -20,6 +20,8 @@ package client_test
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,6 +30,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -39,7 +42,23 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
+// Helper function to create an unsigned JWT for testing
+func createUnsignedJWT(t *testing.T, payload map[string]any) string {
+	header := map[string]string{"alg": "none", "typ": "JWT"}
+	headerBytes, err := json.Marshal(header)
+	require.NoError(t, err)
+	payloadBytes, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	encode := func(data []byte) string {
+		return base64.RawURLEncoding.EncodeToString(data)
+	}
+
+	return fmt.Sprintf("%s.%s.", encode(headerBytes), encode(payloadBytes))
+}
+
 func TestSharingUrl(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Construct a local server that we can poke with QueryDirector. Start with a placeholder handler
 	// so that we can update the server.URL with the actual server address in the handler we overwrite later.
 	log.SetLevel(log.DebugLevel)
@@ -77,9 +96,21 @@ func TestSharingUrl(t *testing.T) {
 			_, err := w.Write([]byte(`{"device_code": "1234", "user_code": "5678", "interval": 1, "verification_uri": "https://example.com", "expires_in": 20}`))
 			assert.NoError(t, err)
 		} else if r.URL.Path == "/issuer/token" {
+			expires := time.Now().Add(time.Hour).Unix()
+			scope := "storage.create:/foo/bar storage.read:/foo/bar"
+			tokenPayload := map[string]any{
+				"wlcg.ver": "1.0",
+				"iss":      issuerLoc,
+				"scope":    scope,
+				"aud":      []string{"test-audience"},
+				"exp":      expires,
+				"nbf":      time.Now().Add(-time.Minute).Unix(),
+				"iat":      time.Now().Unix(),
+			}
+			token := createUnsignedJWT(t, tokenPayload)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			_, err := w.Write([]byte(`{"access_token": "token1234", "token_type": "jwt"}`))
+			_, err := w.Write([]byte(fmt.Sprintf(`{"access_token": "%s", "token_type": "jwt"}`, token)))
 			assert.NoError(t, err)
 		} else {
 			fmt.Println(r)

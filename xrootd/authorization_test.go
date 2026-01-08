@@ -99,6 +99,7 @@ base_path = /ospool/ap20
 )
 
 func TestOSDFAuthRetrieval(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -130,8 +131,8 @@ func TestOSDFAuthRetrieval(t *testing.T) {
 	})
 
 	server_utils.ResetTestState()
-	viper.Set("Federation.TopologyUrl", "https://topology.opensciencegrid.org/")
-	viper.Set("Server.Hostname", "sc-origin.chtc.wisc.edu")
+	require.NoError(t, param.Set(param.Federation_TopologyUrl.GetName(), "https://topology.opensciencegrid.org/"))
+	require.NoError(t, param.Set(param.Server_Hostname.GetName(), "sc-origin.chtc.wisc.edu"))
 
 	originServer := &origin.OriginServer{}
 	_, err := getOSDFAuthFiles(originServer)
@@ -141,6 +142,7 @@ func TestOSDFAuthRetrieval(t *testing.T) {
 }
 
 func TestAuthPathCompToWord(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		component authPathComponent
 		word      string
@@ -166,6 +168,7 @@ func TestAuthPathCompToWord(t *testing.T) {
 }
 
 func TestConstructAuthEntry(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name        string
 		prefix      string
@@ -234,6 +237,7 @@ func TestConstructAuthEntry(t *testing.T) {
 }
 
 func TestAuthPrivilegesFromWord(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		privsWord   string
 		privs       authPrivileges
@@ -269,6 +273,7 @@ func TestAuthPrivilegesFromWord(t *testing.T) {
 }
 
 func TestAuthPoliciesFromLine(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name            string
 		line            string
@@ -411,7 +416,7 @@ func setupExports(t *testing.T, config string) {
 	for _, key := range viper.AllKeys() {
 		if strings.Contains(viper.GetString(key), "<WILL BE REPLACED IN TEST>") {
 			tmpFile := getTmpFile(t)
-			viper.Set(key, tmpFile)
+			require.NoError(t, param.Set(key, tmpFile))
 		} else if key == "origin.exports" { // keys will be lowercased
 			// We also need to override paths for any exports that define "SHOULD-OVERRIDE-TEMPFILE"
 			exports := viper.Get(key).([]interface{})
@@ -425,12 +430,12 @@ func setupExports(t *testing.T, config string) {
 				}
 			}
 			// Set the modified exports back to viper after all overrides
-			viper.Set(key, exports)
+			require.NoError(t, param.Set(key, exports))
 		}
 	}
 
 	// Provide an issuer URL so setup doesn't fail
-	viper.Set(param.Server_IssuerUrl.GetName(), "https://foo.bar.com")
+	require.NoError(t, param.Set(param.Server_IssuerUrl.GetName(), "https://foo.bar.com"))
 
 	// Now call GetOriginExports and check the struct
 	_, err = server_utils.GetOriginExports()
@@ -438,6 +443,7 @@ func setupExports(t *testing.T, config string) {
 }
 
 func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name              string
 		inputAuthLinesMap map[string]*authLine
@@ -546,6 +552,7 @@ func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
 }
 
 func TestPopulateAuthLinesMapForCache(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	nsAds := []server_structs.NamespaceAdV2{
 		{
 			Caps: server_structs.Capabilities{PublicReads: true, Listings: true, Reads: true},
@@ -646,6 +653,7 @@ func TestPopulateAuthLinesMapForCache(t *testing.T) {
 }
 
 func TestSerializeAuthline(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name     string
 		authLine authLine
@@ -692,6 +700,7 @@ func TestSerializeAuthline(t *testing.T) {
 }
 
 func TestGetSortedSerializedAuthLines(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	tests := []struct {
 		name     string
 		input    map[string]*authLine
@@ -746,6 +755,7 @@ func TestGetSortedSerializedAuthLines(t *testing.T) {
 }
 
 func TestEmitAuthfile(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name                 string
 		serverType           server_structs.ServerType
@@ -903,14 +913,14 @@ u * /second/namespace -lr /first/namespace lr /.well-known lr /valid/path r
 			server_utils.ResetTestState()
 			defer server_utils.ResetTestState()
 
-			viper.Set(param.Origin_RunLocation.GetName(), filepath.Join(dirname, "origin"))
-			viper.Set(param.Cache_RunLocation.GetName(), filepath.Join(dirname, "cache"))
+			require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), filepath.Join(dirname, "origin")))
+			require.NoError(t, param.Set(param.Cache_RunLocation.GetName(), filepath.Join(dirname, "cache")))
 			if tc.inputAuthfile != "" {
-				viper.Set(param.Xrootd_Authfile.GetName(), filepath.Join(dirname, "input-authfile"))
+				require.NoError(t, param.Set(param.Xrootd_Authfile.GetName(), filepath.Join(dirname, "input-authfile")))
 			}
-			viper.Set(param.Federation_TopologyUrl.GetName(), ts.URL)
+			require.NoError(t, param.Set(param.Federation_TopologyUrl.GetName(), ts.URL))
 
-			viper.Set(param.Server_DropPrivileges.GetName(), tc.dropPrivileges)
+			require.NoError(t, param.Set(param.Server_DropPrivileges.GetName(), tc.dropPrivileges))
 
 			// Toggle whether the OSDF Authfile discovery should be triggered
 			if tc.discoverOSDFAuthfile {
@@ -920,11 +930,11 @@ u * /second/namespace -lr /first/namespace lr /.well-known lr /valid/path r
 					_, _ = config.SetPreferredPrefix(oldPrefix)
 				})
 
-				viper.Set(param.Topology_DisableCacheX509.GetName(), false)
-				viper.Set(param.Topology_DisableOriginX509.GetName(), false)
+				require.NoError(t, param.Set(param.Topology_DisableCacheX509.GetName(), false))
+				require.NoError(t, param.Set(param.Topology_DisableOriginX509.GetName(), false))
 			} else {
-				viper.Set(param.Topology_DisableCacheX509.GetName(), true)
-				viper.Set(param.Topology_DisableOriginX509.GetName(), true)
+				require.NoError(t, param.Set(param.Topology_DisableCacheX509.GetName(), true))
+				require.NoError(t, param.Set(param.Topology_DisableOriginX509.GetName(), true))
 			}
 
 			// Write the input authfile if provided
@@ -965,13 +975,14 @@ u * /second/namespace -lr /first/namespace lr /.well-known lr /valid/path r
 }
 
 func TestEmitCfg(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	dirname := t.TempDir()
 	server_utils.ResetTestState()
 
 	defer server_utils.ResetTestState()
 
 	test_utils.InitClient(t, nil)
-	viper.Set(param.Origin_RunLocation.GetName(), dirname)
+	require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), dirname))
 
 	configTester := func(cfg *ScitokensCfg, configResult string) func(t *testing.T) {
 		return func(t *testing.T) {
@@ -995,6 +1006,7 @@ func TestEmitCfg(t *testing.T) {
 }
 
 func TestDeduplicateBasePaths(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	tests := []struct {
 		name        string
 		initialCfg  ScitokensCfg
@@ -1044,6 +1056,7 @@ func TestDeduplicateBasePaths(t *testing.T) {
 }
 
 func TestLoadScitokensConfig(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	dirname := t.TempDir()
 	server_utils.ResetTestState()
 
@@ -1051,7 +1064,7 @@ func TestLoadScitokensConfig(t *testing.T) {
 
 	test_utils.InitClient(t, nil)
 
-	viper.Set(param.Origin_RunLocation.GetName(), dirname)
+	require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), dirname))
 
 	configTester := func(configResult string) func(t *testing.T) {
 		return func(t *testing.T) {
@@ -1079,23 +1092,24 @@ func TestLoadScitokensConfig(t *testing.T) {
 
 // Test that merging the configuration works without throwing any errors
 func TestMergeConfig(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	dirname := t.TempDir()
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
-	viper.Set(param.Origin_RunLocation.GetName(), dirname)
-	viper.Set(param.Origin_Port.GetName(), 8443)
-	viper.Set(param.Origin_StoragePrefix.GetName(), "/")
-	viper.Set(param.Origin_FederationPrefix.GetName(), "/")
-	viper.Set("ConfigDir", dirname)
+	require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), dirname))
+	require.NoError(t, param.Set(param.Origin_Port.GetName(), 8443))
+	require.NoError(t, param.Set(param.Origin_StoragePrefix.GetName(), "/"))
+	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/"))
+	require.NoError(t, param.Set("ConfigDir", dirname))
 	// We don't inherit any defaults at this level of code -- in order to recognize
 	// that this is an authorized prefix, we must set either EnableReads && !EnablePublicReads
 	// or EnableWrites
-	viper.Set(param.Origin_EnableReads.GetName(), true)
+	require.NoError(t, param.Set(param.Origin_EnableReads.GetName(), true))
 	scitokensConfigFile := filepath.Join(dirname, "scitokens-input.cfg")
-	viper.Set(param.Xrootd_ScitokensConfig.GetName(), scitokensConfigFile)
+	require.NoError(t, param.Set(param.Xrootd_ScitokensConfig.GetName(), scitokensConfigFile))
 
 	configTester := func(configInput string, postProcess func(*testing.T, ScitokensCfg)) func(t *testing.T) {
 		return func(t *testing.T) {
@@ -1125,6 +1139,7 @@ func TestMergeConfig(t *testing.T) {
 }
 
 func TestGenerateMonitoringIssuer(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -1165,8 +1180,8 @@ func TestGenerateMonitoringIssuer(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			viper.Set(param.Origin_SelfTest.GetName(), tc.selfTestEnabled)
-			viper.Set(param.Server_ExternalWebUrl.GetName(), tc.externalWebUrl)
+			require.NoError(t, param.Set(param.Origin_SelfTest.GetName(), tc.selfTestEnabled))
+			require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), tc.externalWebUrl))
 			issuer, err := GenerateMonitoringIssuer()
 			if tc.expectError {
 				require.Error(t, err)
@@ -1180,6 +1195,7 @@ func TestGenerateMonitoringIssuer(t *testing.T) {
 }
 
 func TestGenerateOriginIssuer(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -1299,8 +1315,8 @@ func TestGenerateOriginIssuer(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			defer server_utils.ResetTestState()
 			ctx, _, _ := test_utils.TestContext(context.Background(), t)
-			viper.Set("ConfigDir", t.TempDir())
-			viper.Set(param.Logging_Level.GetName(), "debug")
+			require.NoError(t, param.Set("ConfigDir", t.TempDir()))
+			require.NoError(t, param.Set(param.Logging_Level.GetName(), "debug"))
 
 			test_utils.MockFederationRoot(t, nil, nil)
 
@@ -1313,7 +1329,7 @@ func TestGenerateOriginIssuer(t *testing.T) {
 
 			// Set extra Viper settings if provided
 			for key, value := range tc.extraViperSettings {
-				viper.Set(key, value)
+				require.NoError(t, param.Set(key, value))
 			}
 
 			issuers, err := GenerateOriginIssuers()
@@ -1335,6 +1351,7 @@ func TestGenerateOriginIssuer(t *testing.T) {
 // various combinations of public/private capabilities, multiple issuers,
 // and overlapping base paths.
 func TestGenerateCacheIssuers(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
@@ -1535,6 +1552,7 @@ func TestGenerateCacheIssuers(t *testing.T) {
 }
 
 func TestGenerateFederationIssuer(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name           string
 		PublicReads    bool
@@ -1559,20 +1577,20 @@ func TestGenerateFederationIssuer(t *testing.T) {
 			ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 			tmpDir := t.TempDir()
-			viper.Set("ConfigDir", tmpDir)
-			viper.Set(param.Logging_Level.GetName(), "debug")
-			viper.Set(param.Origin_RunLocation.GetName(), tmpDir)
-			viper.Set(param.Origin_SelfTest.GetName(), true)
-			viper.Set(param.Server_Hostname.GetName(), "origin.example.com")
-			viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
-			viper.Set(param.Origin_DisableDirectClients.GetName(), true)
-			viper.Set(param.Origin_EnableDirectReads.GetName(), false)
-			viper.Set(param.Origin_EnablePublicReads.GetName(), tc.PublicReads)
-			viper.Set(param.Origin_EnableListings.GetName(), false)
-			viper.Set(param.Origin_EnableWrites.GetName(), false)
-			viper.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter")
-			viper.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar")
-			viper.Set(param.TLSSkipVerify.GetName(), true)
+			require.NoError(t, param.Set("ConfigDir", tmpDir))
+			require.NoError(t, param.Set(param.Logging_Level.GetName(), "debug"))
+			require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), tmpDir))
+			require.NoError(t, param.Set(param.Origin_SelfTest.GetName(), true))
+			require.NoError(t, param.Set(param.Server_Hostname.GetName(), "origin.example.com"))
+			require.NoError(t, param.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix)))
+			require.NoError(t, param.Set(param.Origin_DisableDirectClients.GetName(), true))
+			require.NoError(t, param.Set(param.Origin_EnableDirectReads.GetName(), false))
+			require.NoError(t, param.Set(param.Origin_EnablePublicReads.GetName(), tc.PublicReads))
+			require.NoError(t, param.Set(param.Origin_EnableListings.GetName(), false))
+			require.NoError(t, param.Set(param.Origin_EnableWrites.GetName(), false))
+			require.NoError(t, param.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter"))
+			require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar"))
+			require.NoError(t, param.Set(param.TLSSkipVerify.GetName(), true))
 
 			test_utils.MockFederationRoot(t, nil, nil)
 
@@ -1594,19 +1612,20 @@ func TestGenerateFederationIssuer(t *testing.T) {
 }
 
 func TestWriteOriginScitokensConfig(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	tmpDir := t.TempDir()
-	viper.Set("ConfigDir", tmpDir)
-	viper.Set(param.Logging_Level.GetName(), "debug")
-	viper.Set(param.Origin_RunLocation.GetName(), tmpDir)
-	viper.Set(param.Origin_SelfTest.GetName(), true)
-	viper.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar")
-	viper.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter")
-	viper.Set(param.Server_Hostname.GetName(), "origin.example.com")
-	viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
+	require.NoError(t, param.Set("ConfigDir", tmpDir))
+	require.NoError(t, param.Set(param.Logging_Level.GetName(), "debug"))
+	require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), tmpDir))
+	require.NoError(t, param.Set(param.Origin_SelfTest.GetName(), true))
+	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar"))
+	require.NoError(t, param.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter"))
+	require.NoError(t, param.Set(param.Server_Hostname.GetName(), "origin.example.com"))
+	require.NoError(t, param.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix)))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
@@ -1638,16 +1657,17 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 // when namespace ads change during runtime. It simulates runtime by invoking the same write
 // functions the maintenance loop uses.
 func TestConfigFilesUpdateDuringRuntime(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
 	dirName := t.TempDir()
 
 	// Set up basic configuration for cache
-	viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
-	viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirName, "scitokens.cfg"))
-	viper.Set("Cache.RunLocation", dirName)
-	viper.Set("Server.DropPrivileges", false) // Not testing drop privileges mode
+	require.NoError(t, param.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile")))
+	require.NoError(t, param.Set("Xrootd.ScitokensConfig", filepath.Join(dirName, "scitokens.cfg")))
+	require.NoError(t, param.Set("Cache.RunLocation", dirName))
+	require.NoError(t, param.Set("Server.DropPrivileges", false)) // Not testing drop privileges mode
 
 	// Create minimal input files
 	err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(""), fs.FileMode(0600))

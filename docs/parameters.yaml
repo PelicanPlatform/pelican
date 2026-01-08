@@ -47,6 +47,13 @@ type: stringSlice
 default: []
 components: ["*"]
 ---
+name: RuntimeDir
+description: |+
+  Directory where Pelican writes runtime artifacts such as address files; if unset it defaults to /run/pelican for root, $XDG_RUNTIME_DIR/pelican when XDG_RUNTIME_DIR is set, or a temporary directory that Pelican cleans up on shutdown.
+type: filename
+default: ""
+components: ["cache", "director", "origin", "registry"]
+---
 name: Debug
 description: |+
   [Deprecated] To enable debug logging, set ${Logging.Level} to "debug".
@@ -68,6 +75,7 @@ description: |+
 type: bool
 default: false
 components: ["cache", "director", "origin", "registry"]
+runtime_configurable: false
 ---
 name: IssuerKey
 description: |+
@@ -200,6 +208,7 @@ default: none
 client_default: warn
 server_default: info
 components: ["*"]
+runtime_configurable: true
 ---
 name: Logging.LogLocation
 description: |+
@@ -235,6 +244,7 @@ description: |+
 type: string
 default: error
 components: ["origin"]
+runtime_configurable: true
 ---
 name: Logging.Origin.Scitokens
 description: |+
@@ -246,6 +256,7 @@ description: |+
 type: string
 default: fatal
 components: ["origin"]
+runtime_configurable: true
 ---
 name: Logging.Origin.Xrd
 description: |+
@@ -257,6 +268,7 @@ description: |+
 type: string
 default: error
 components: ["origin"]
+runtime_configurable: true
 ---
 name: Logging.Origin.Xrootd
 description: |+
@@ -270,6 +282,7 @@ description: |+
 type: string
 default: info
 components: ["origin"]
+runtime_configurable: true
 ---
 name: Logging.Origin.Http
 description: |+
@@ -282,6 +295,7 @@ description: |+
 type: string
 default: error
 components: ["origin"]
+runtime_configurable: true
 ---
 name: Logging.Origin.Ofs
 description: |+
@@ -293,6 +307,7 @@ description: |+
 type: string
 default: error
 components: ["origin"]
+runtime_configurable: true
 ---
 name: Logging.Origin.Oss
 description: |+
@@ -304,6 +319,7 @@ description: |+
 type: string
 default: error
 components: ["origin"]
+runtime_configurable: true
 ---
 name: Logging.Cache.Http
 description: |+
@@ -315,6 +331,7 @@ description: |+
 type: string
 default: error
 components: ["cache"]
+runtime_configurable: true
 ---
 name: Logging.Cache.Ofs
 description: |+
@@ -327,6 +344,7 @@ description: |+
 type: string
 default: error
 components: ["cache"]
+runtime_configurable: true
 ---
 name: Logging.Cache.Pfc
 description: |+
@@ -339,6 +357,7 @@ description: |+
 type: string
 default: info
 components: ["cache"]
+runtime_configurable: true
 ---
 name: Logging.Cache.Pss
 description: |+
@@ -351,6 +370,7 @@ description: |+
 type: string
 default: error
 components: ["cache"]
+runtime_configurable: true
 ---
 name: Logging.Cache.PssSetOpt
 description: |+
@@ -362,6 +382,7 @@ description: |+
 type: string
 default: error
 components: ["cache"]
+runtime_configurable: true
 ---
 name: Logging.Cache.Scitokens
 description: |+
@@ -373,6 +394,7 @@ description: |+
 type: string
 default: fatal
 components: ["cache"]
+runtime_configurable: true
 ---
 name: Logging.Cache.Xrd
 description: |+
@@ -384,6 +406,7 @@ description: |+
 type: string
 default: error
 components: ["cache"]
+runtime_configurable: true
 ---
 name: Logging.Cache.Xrootd
 description: |+
@@ -396,6 +419,7 @@ description: |+
 type: string
 default: error
 components: ["cache"]
+runtime_configurable: true
 ---
 ############################
 # Federation-Level Configs #
@@ -538,6 +562,20 @@ description: |+
   A bool indicating whether the client is being run in "plugin" mode. Some client actions may use alternative logic
   when the plugin is detected, such as more aggressive retries, because we often assume failure is more costly for the
   plugin
+type: bool
+default: false
+hidden: true
+components: ["client"]
+---
+name: Client.EnableOverwrites
+description: |+
+  A bool indicating whether the client should skip overwrite protection checks when uploading objects.
+  When enabled, uploads will overwrite existing objects without checking if they already exist.
+
+  WARNING: This is an extremely sharp edge. Careless use of overwrites could cause havoc for regular users.
+  This parameter is hidden and should only be enabled by knowledgeable administrators or power users who
+  understand the potential issues. This is primarily intended for specialized use cases with zero reuse
+  and exclusive direct read mode.
 type: bool
 default: false
 hidden: true
@@ -914,6 +952,21 @@ type: int
 default: none
 components: ["origin"]
 ---
+name: Origin.ConcurrencyDegradedThreshold
+description: |+
+  The percentage of permissible concurrency that indicates when the Origin should enter the "degraded" state.
+
+  For example, if `${Origin.Concurrency}` is set to 100 and `${Origin.ConcurrencyDegradedThreshold}` is set to 80,
+  then the Origin will enter the degraded state when active IO exceeds 80.
+
+  The Director will continue to deprioritize the Origin while in the degraded state until the active IO drops below
+  the threshold.
+
+  This setting only has effect when `${Origin.Concurrency}` is set.
+type: int
+default: 90
+components: ["origin"]
+---
 name: Origin.DirectorTest
 description: |+
   A bool indicating whether the director should send file transfer tests to the origin.
@@ -937,13 +990,6 @@ description: |+
   The interval of which the origin starts a new file transfer test to itself.
 type: duration
 default: 15s
-components: ["origin"]
----
-name: Origin.EnableUI
-description: |+
-  Indicate whether the origin should enable its web UI.
-type: bool
-default: true
 components: ["origin"]
 ---
 name: Origin.EnableOIDC
@@ -1530,6 +1576,16 @@ type: url
 default: https://${Server.Hostname}:${Cache.Port}
 components: ["cache"]
 ---
+name: Cache.PSSOrigin
+description: |+
+  The URL provided to the xrootd daemon to fetch information from the data federation
+
+  Normally derived automatically from federation discovery and not intended for manual configuration.
+type: url
+default: none
+hidden: true
+components: ["cache"]
+---
 name: Cache.Port
 description: |+
   The TCP port the cache service should use.  If set to 0,
@@ -1644,6 +1700,21 @@ type: int
 default: none
 components: ["cache"]
 ---
+name: Cache.ConcurrencyDegradedThreshold
+description: |+
+  The percentage of permissible concurrency that indicates when the Cache should enter the "degraded" state.
+
+  For example, if `${Cache.Concurrency}` is set to 100 and `${Cache.ConcurrencyDegradedThreshold}` is set to 80,
+  then the Cache will enter the degraded state when active IO exceeds 80.
+
+  The Director will continue to deprioritize the Cache while in the degraded state until the active IO drops below
+  the threshold.
+
+  This setting only has effect when `${Cache.Concurrency}` is set.
+type: int
+default: 90
+components: ["cache"]
+---
 name: Cache.EnableLotman
 description: |+
   LotMan is a library that provides management of storage space in the cache.
@@ -1713,6 +1784,8 @@ type: filename
 root_default: /var/lib/pelican/cache.sqlite
 default: $ConfigBase/cache.sqlite
 components: ["cache"]
+deprecated: true
+replacedby: ["Server.DbLocation"]
 ---
 name: Cache.EnableTLSClientAuth
 description: |+
@@ -1785,6 +1858,26 @@ type: duration
 default: 1h
 components: ["cache"]
 ---
+name: Cache.EnableSiteLocalMode
+description: |+
+  When true, the Cache will run without fully joining its configured federation. This means it will not register at its Registry and it
+  will not advertise to its Director.
+
+  This mode is intended for those who want the Cache to be used only by clients at their local site, without being part of a larger Pelican
+  federation.
+
+  Because this Cache will not be discoverable via the Director, Clients will need to be run with the ${Client.PreferredCaches} configuration
+  set to the URL:port of this Cache's XRootD component in order to use it. If you need help finding this URL, see the Cache's ${Cache.Url}
+  configuration.
+
+  Note: When running in site-local mode, the operators of your federation will remain unaware of your Cache's existence, and thus will not be
+  able to automatically detect its health or version. Furthermore, any statistics or usage data that would normally be collected by the Director
+  will not include this Cache. Administrators of site-local Caches should watch closely for releases with cache-related security patches to ensure
+  their systems remain secure.
+type: bool
+default: false
+components: ["cache"]
+---
 ############################
 #  Director-level configs  #
 ############################
@@ -1808,6 +1901,8 @@ type: filename
 root_default: /var/lib/pelican/director.sqlite
 default: $ConfigBase/director.sqlite
 components: ["director"]
+deprecated: true
+replacedby: ["Server.DbLocation"]
 ---
 name: Director.DefaultResponse
 description: |+
@@ -2127,6 +2222,8 @@ type: filename
 root_default: /var/lib/pelican/registry.sqlite
 default: $ConfigBase/ns-registry.sqlite
 components: ["registry"]
+deprecated: true
+replacedby: ["Server.DbLocation"]
 ---
 name: Registry.RequireKeyChaining
 description: |+
@@ -2339,7 +2436,7 @@ components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.EnableUI
 description: |+
-  Indicate whether a server should enable its web UI.
+  Indicate whether a server should enable its web UI. This only controls the serving of web UI resources and pages. Backend functionality such as OIDC authentication, OAuth endpoints, and API routes will remain enabled regardless of this setting.
 type: bool
 default: true
 components: ["origin", "registry", "director", "cache"]
@@ -2552,6 +2649,14 @@ type: filename
 root_default: /var/lib/pelican/pelican.sqlite
 default: $ConfigBase/pelican.sqlite
 components: ["cache", "director", "origin", "registry"]
+---
+name: Server.EnablePKCS11
+description: |+
+  Enable PKCS11 for the server. It allows the server to sign TLS connection without accessing the private key.
+type: bool
+default: false
+components: ["cache", "origin"]
+hidden: true
 ---
 ################################
 #   Issuer's Configurations    #
@@ -3025,6 +3130,17 @@ description: |+
   A URL pointing toward the XRootD instance's Local Monitoring Host.
 type: url
 default: none
+components: ["cache", "origin"]
+---
+name: Xrootd.LocalMonitoringPort
+description: |+
+  XRootD sends the pelican process monitoring information over UDP.  The port is typically
+  determined automatically based on free ports; free port search starts at 9930 by default.
+
+  Since it is automatically set, this is rarely configured by administrators.
+type: int
+default: none
+hidden: true
 components: ["cache", "origin"]
 ---
 name: Xrootd.Sitename

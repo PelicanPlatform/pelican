@@ -32,7 +32,6 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -207,6 +206,7 @@ var (
 )
 
 func TestGetNamespaceById(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
@@ -249,6 +249,7 @@ func TestGetNamespaceById(t *testing.T) {
 }
 
 func TestGetNamespaceStatusById(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
@@ -288,6 +289,7 @@ func TestGetNamespaceStatusById(t *testing.T) {
 }
 
 func TestAddNamespace(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
@@ -357,6 +359,7 @@ func TestAddNamespace(t *testing.T) {
 }
 
 func TestUpdateNamespace(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
@@ -401,6 +404,7 @@ func TestUpdateNamespace(t *testing.T) {
 }
 
 func TestUpdateNamespaceStatusById(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 	t.Run("return-error-if-id-dne", func(t *testing.T) {
@@ -469,6 +473,7 @@ func TestUpdateNamespaceStatusById(t *testing.T) {
 }
 
 func TestGetNamespacesByFilter(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -776,6 +781,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 // getAllowedPrefixesForCaches correctly constructs the mapping
 // from cache hostnames to allowed prefixes.
 func TestGetAllowedPrefixesForCaches(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
@@ -814,6 +820,7 @@ func TestGetAllowedPrefixesForCaches(t *testing.T) {
 }
 
 func TestGetNamespaceJwksByPrefix(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
@@ -871,6 +878,7 @@ func topologyMockup(t *testing.T, namespaces []string) *httptest.Server {
 }
 
 func TestRegistryTopology(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
 	topoNamespaces := []string{"/topo/foo", "/topo/bar"}
@@ -878,9 +886,9 @@ func TestRegistryTopology(t *testing.T) {
 	defer svr.Close()
 
 	registryDB := t.TempDir()
-	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(registryDB, "test.sqlite"))
-	viper.Set("Federation.TopologyNamespaceURL", svr.URL)
-	viper.Set("ConfigDir", t.TempDir())
+	require.NoError(t, param.Set(param.Server_DbLocation.GetName(), filepath.Join(registryDB, "test.sqlite")))
+	require.NoError(t, param.Set("Federation.TopologyNamespaceURL", svr.URL))
+	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
 
 	err := database.InitServerDatabase(server_structs.RegistryType)
 	require.NoError(t, err)
@@ -938,7 +946,7 @@ func TestRegistryTopology(t *testing.T) {
 
 	topoNamespaces = []string{"/topo/foo", "/topo/baz"}
 	svr = topologyMockup(t, topoNamespaces)
-	viper.Set("Federation.TopologyNamespaceURL", svr.URL)
+	require.NoError(t, param.Set("Federation.TopologyNamespaceURL", svr.URL))
 	defer svr.Close()
 
 	// Re-populate topo
@@ -965,6 +973,7 @@ func TestRegistryTopology(t *testing.T) {
 }
 
 func TestGetTopoPrefixString(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Run("empty-arr", func(t *testing.T) {
 		re := GetTopoPrefixString([]Topology{})
 		assert.Empty(t, re)

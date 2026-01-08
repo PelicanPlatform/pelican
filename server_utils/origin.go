@@ -495,15 +495,29 @@ func (b *BaseOrigin) mapSingleExportIfNeeded(o Origin) {
 	export := b.Exports[0]
 
 	// Map prefixes
-	viper.Set(param.Origin_FederationPrefix.GetName(), export.FederationPrefix)
-	viper.Set(param.Origin_StoragePrefix.GetName(), export.StoragePrefix)
+	if err := param.Set(param.Origin_FederationPrefix.GetName(), export.FederationPrefix); err != nil {
+		log.Warningf("Failed to set %s: %v", param.Origin_FederationPrefix.GetName(), err)
+	}
+	if err := param.Set(param.Origin_StoragePrefix.GetName(), export.StoragePrefix); err != nil {
+		log.Warningf("Failed to set %s: %v", param.Origin_StoragePrefix.GetName(), err)
+	}
 
 	// Map capabilities
-	viper.Set(param.Origin_EnablePublicReads.GetName(), export.Capabilities.PublicReads)
-	viper.Set(param.Origin_EnableReads.GetName(), export.Capabilities.Reads || export.Capabilities.PublicReads)
-	viper.Set(param.Origin_EnableWrites.GetName(), export.Capabilities.Writes)
-	viper.Set(param.Origin_EnableListings.GetName(), export.Capabilities.Listings)
-	viper.Set(param.Origin_EnableDirectReads.GetName(), export.Capabilities.DirectReads)
+	if err := param.Set(param.Origin_EnablePublicReads.GetName(), export.Capabilities.PublicReads); err != nil {
+		log.Warningf("Failed to set %s: %v", param.Origin_EnablePublicReads.GetName(), err)
+	}
+	if err := param.Set(param.Origin_EnableReads.GetName(), export.Capabilities.Reads || export.Capabilities.PublicReads); err != nil {
+		log.Warningf("Failed to set %s: %v", param.Origin_EnableReads.GetName(), err)
+	}
+	if err := param.Set(param.Origin_EnableWrites.GetName(), export.Capabilities.Writes); err != nil {
+		log.Warningf("Failed to set %s: %v", param.Origin_EnableWrites.GetName(), err)
+	}
+	if err := param.Set(param.Origin_EnableListings.GetName(), export.Capabilities.Listings); err != nil {
+		log.Warningf("Failed to set %s: %v", param.Origin_EnableListings.GetName(), err)
+	}
+	if err := param.Set(param.Origin_EnableDirectReads.GetName(), export.Capabilities.DirectReads); err != nil {
+		log.Warningf("Failed to set %s: %v", param.Origin_EnableDirectReads.GetName(), err)
+	}
 
 	// invoke the incoming origin's mapSingleExtra method
 	o.mapSingleExtra()

@@ -66,12 +66,14 @@ ARG LOTMAN_VER=0.0.4
 # when doing version changes.
 ARG XRDCL_PELICAN_SRC_BUILD=false
 ARG XRDCL_PELICAN_VER=1.5.6
-ARG XRDHTTP_PELICAN_SRC_BUILD=false
-ARG XRDHTTP_PELICAN_VER=0.0.7
 ARG XROOTD_LOTMAN_SRC_BUILD=false
 ARG XROOTD_LOTMAN_VER=0.0.5
 ARG XROOTD_S3_HTTP_SRC_BUILD=true
-ARG XROOTD_S3_HTTP_VER=0.5.2
+ARG XROOTD_S3_HTTP_VER=0.6.0
+# Installed from Koji if not building it from source
+ARG XRDHTTP_PELICAN_SRC_BUILD=false
+ARG XRDHTTP_PELICAN_VER=0.0.8
+ARG XRDHTTP_PELICAN_RELEASE="1.osg${OSG_SERIES}.${BASE_OS}"
 
 # Set scitokens-oauth2-server image as a build stage so that we can copy its
 # OA4MP installation into the images being built here.
@@ -237,8 +239,8 @@ RUN groupadd -g ${XROOTD_GID} xrootd \
 # Pelican's patches are ingested into the OSG repositories.
 # NOTE: If you update this version, you must also update the version in
 # github_scripts/osx_install.sh
-ARG XROOTD_VER="5.8.4"
-ARG XROOTD_RELEASE="1.4.osg${OSG_SERIES}.${BASE_OS}"
+ARG XROOTD_VER="5.9.1"
+ARG XROOTD_RELEASE="1.2.osg${OSG_SERIES}.${BASE_OS}"
 ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VER}/${XROOTD_RELEASE}"
 
 # The packages from Koji need to be installed in a single dnf command in
@@ -390,16 +392,22 @@ ENDRUN
 # for running an origin and plugins for running a cache.
 #################################################################
 FROM xrootd-software-init AS xrootd-software-base
+ARG TARGETARCH
 ARG LOTMAN_SRC_BUILD
 ARG LOTMAN_VER
 ARG XRDCL_PELICAN_SRC_BUILD
 ARG XRDCL_PELICAN_VER
 ARG XRDHTTP_PELICAN_SRC_BUILD
 ARG XRDHTTP_PELICAN_VER
+ARG XRDHTTP_PELICAN_RELEASE
 ARG XROOTD_LOTMAN_SRC_BUILD
 ARG XROOTD_LOTMAN_VER
 ARG XROOTD_S3_HTTP_SRC_BUILD
 ARG XROOTD_S3_HTTP_VER
+
+# If we didn't build it from source, install it from Koji instead.
+# Note the %ARCH% placeholders that need to be substituted.
+ARG XRDHTTP_PELICAN_KOJI_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrdhttp-pelican/${XRDHTTP_PELICAN_VER}/${XRDHTTP_PELICAN_RELEASE}/%ARCH%/xrdhttp-pelican-${XRDHTTP_PELICAN_VER}-${XRDHTTP_PELICAN_RELEASE}.%ARCH%.rpm"
 
 RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-build \
     --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
@@ -408,6 +416,13 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
   set -eux
 
   dnf install -y xrootd-multiuser
+
+  if [ "$TARGETARCH" = "amd64" ]; then
+      PKG_ARCH=x86_64
+  elif [ "$TARGETARCH" = "arm64" ]; then
+      PKG_ARCH=aarch64
+  fi
+
 
   # NOTE: We include the `PROJECT` parameter here, even thought it is not
   # used, in order to maintain symmetry with the xrootd-build stage above.
@@ -419,9 +434,13 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
 
     local SRC_BUILD=${ARG}_SRC_BUILD
     local VER=${ARG}_VER
+    local KOJI_URL=${ARG}_KOJI_URL
 
     if ${!SRC_BUILD}; then
       dnf install -y /xrootd-build/RPMS/*/${REPO}-*.rpm
+    elif [ -n "${!KOJI_URL-}" ]; then
+      echo ${!KOJI_URL} | sed "s/%ARCH%/${PKG_ARCH}/g" | xargs \
+          dnf install -y --enablerepo=epel-testing --enablerepo=osg-testing
     else
       dnf install -y --enablerepo=epel-testing --enablerepo=osg-development --enablerepo=osg-testing --enablerepo=osg-upcoming-testing ${REPO}-${!VER}
     fi
@@ -646,6 +665,14 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   dnf install -y goreleaser
 ENDRUN
 
+# Install gotestsum for better test output formatting
+RUN --mount=type=cache,id=go-mod-cache-${TARGETPLATFORM},target=/root/go,sharing=locked <<ENDRUN
+  set -eux
+  go install gotest.tools/gotestsum@latest
+  # Move gotestsum to a system location that is world readable
+  mv /root/go/bin/gotestsum /usr/local/bin/gotestsum
+ENDRUN
+
 # Install Node.js using the same commands as the pelican-build-init stage.
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
@@ -660,10 +687,23 @@ ENDRUN
 # Enable the CodeReady Linux Builder repository.
 RUN /usr/bin/crb enable
 
+# Add HTCondor repository for development and testing
+RUN <<ENDRUN
+  set -eux
+  cd /etc/yum.repos.d
+  if wget -q https://htcss-downloads.chtc.wisc.edu/repo/25.x/htcondor-release-current.el9.noarch.rpm; then
+    dnf install -y htcondor-release-current.el9.noarch.rpm
+    rm -f htcondor-release-current.el9.noarch.rpm
+  else
+    echo "Warning: Failed to download HTCondor repository RPM, HTCondor will not be available"
+  fi
+ENDRUN
+
 # Install a kitchen sink's worth of development tools and libraries.
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
   dnf install -y --enablerepo=osg-contrib \
         cmake3 \
+        condor \
         delve \
         docker \
         gdb \

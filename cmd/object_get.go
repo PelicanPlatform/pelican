@@ -55,6 +55,7 @@ the client should fallback to discovered caches if all preferred caches fail.`)
 	flagSet.String("caches", "", "A JSON file containing the list of caches")
 	flagSet.String("transfer-stats", "", "A path to a file to write transfer statistics to")
 	flagSet.String("pack", "", "Package transfer using remote packing functionality (same as '?pack=' query). Options: auto, tar, tar.gz, tar.xz, zip. Default: auto when flag is provided without an explicit value")
+	flagSet.Bool("direct", false, "Download directly from an origin, bypassing any caches (same as '?directread' query)")
 	objectCmd.AddCommand(getCmd)
 }
 
@@ -103,9 +104,33 @@ func getMain(cmd *cobra.Command, args []string) {
 			os.Exit(1)
 		}
 		for i, src := range source {
-			newSrc, err := addPackQuery(src, packOption)
+			newSrc, err := addQueryParam(src, "pack", packOption)
 			if err != nil {
 				log.Errorln("Failed to process --pack option:", err)
+				os.Exit(1)
+			}
+			source[i] = newSrc
+		}
+	}
+
+	// Handle --direct flag by appending the directread query parameter to each source URL
+	directRead, _ := cmd.Flags().GetBool("direct")
+	if directRead {
+		for i, src := range source {
+			// Check for conflicting prefercached parameter
+			u, err := url.Parse(src)
+			if err != nil {
+				log.Errorln("Failed to parse URL:", err)
+				os.Exit(1)
+			}
+			if u.Query().Has("prefercached") {
+				log.Errorln("Cannot use --direct flag with URLs that have '?prefercached' query parameter")
+				os.Exit(1)
+			}
+
+			newSrc, err := addQueryParam(src, "directread", "")
+			if err != nil {
+				log.Errorln("Failed to process --direct option:", err)
 				os.Exit(1)
 			}
 			source[i] = newSrc
@@ -186,14 +211,14 @@ func getMain(cmd *cobra.Command, args []string) {
 	}
 }
 
-// addPackQuery appends or updates the "pack" query parameter on the provided URL string.
-func addPackQuery(rawURL string, packOption string) (string, error) {
+// addQueryParam appends or updates a query parameter on the provided URL string.
+func addQueryParam(rawURL string, key string, value string) (string, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return "", err
 	}
 	q := u.Query()
-	q.Set("pack", packOption)
+	q.Set(key, value)
 	u.RawQuery = q.Encode()
 	return u.String(), nil
 }

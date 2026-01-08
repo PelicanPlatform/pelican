@@ -23,17 +23,18 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -60,6 +61,7 @@ func setupRouter() *gin.Engine {
 }
 
 func TestDowntime(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	config.ResetConfig()
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
@@ -72,21 +74,40 @@ func TestDowntime(t *testing.T) {
 	database.SetupMockDowntimeDB(t)
 	defer database.TeardownMockDowntimeDB(t)
 
-	viper.Set(param.Server_WebPort.GetName(), 0)
-	viper.Set(param.Server_ExternalWebUrl.GetName(), "https://mock-server.com")
-	viper.Set(param.Xrootd_Sitename.GetName(), "mock-sitename")
+	require.NoError(t, param.Set(param.Server_WebPort.GetName(), 0))
+	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "https://mock-server.com"))
+	require.NoError(t, param.Set(param.Xrootd_Sitename.GetName(), "mock-sitename"))
 
 	dirName := t.TempDir()
-	viper.Set("ConfigDir", dirName)
-	viper.Set(param.Logging_Level.GetName(), "debug")
-	viper.Set(param.Origin_Port.GetName(), 0)
+	require.NoError(t, param.Set("ConfigDir", dirName))
+	require.NoError(t, param.Set(param.Logging_Level.GetName(), "debug"))
+	require.NoError(t, param.Set(param.Origin_Port.GetName(), 0))
 
-	test_utils.MockFederationRoot(t, nil, nil)
+	// This mock registry handles the downtime mirror operations for the test
+	mockRegistry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v1.0/downtime/") {
+			w.Header().Set("Content-Type", "application/json")
+			if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodDelete {
+				w.WriteHeader(http.StatusOK)
+			} else {
+				w.WriteHeader(http.StatusMethodNotAllowed)
+			}
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+			return
+		}
+	}))
+	t.Cleanup(mockRegistry.Close)
+
+	fInfo := &pelican_url.FederationDiscovery{
+		RegistryEndpoint: mockRegistry.URL,
+	}
+	test_utils.MockFederationRoot(t, fInfo, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
 	r := setupRouter()
 	activeDowntime := server_structs.Downtime{
+		ServerID:    "test-server-id",
 		UUID:        "01952a2f-d4e7-7413-91d6-fdb025176c9f",
 		CreatedBy:   "admin",
 		Class:       "SCHEDULED",
@@ -98,6 +119,7 @@ func TestDowntime(t *testing.T) {
 		UpdatedAt:   time.Now().UTC().UnixMilli(),
 	}
 	pastDowntime := server_structs.Downtime{
+		ServerID:    "test-server-id",
 		UUID:        "01952a5a-fdc4-72a7-88e7-c98aaee5278d",
 		CreatedBy:   "John Doe",
 		Class:       "UNSCHEDULED",
@@ -145,6 +167,7 @@ func TestDowntime(t *testing.T) {
 
 	t.Run("create-active-downtime", func(t *testing.T) {
 		incompleteDowntime := DowntimeInput{
+			ServerID:    "test-server-id",
 			Class:       "SCHEDULED",
 			Description: "",
 			Severity:    "Intermittent Outage (may be up for some of the time)",
@@ -159,6 +182,7 @@ func TestDowntime(t *testing.T) {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
+		t.Log("Downtime Creation Response: ", w.Body.String())
 		assert.Equal(t, http.StatusOK, w.Code)
 		var resp server_structs.Downtime
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))

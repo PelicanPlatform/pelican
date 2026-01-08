@@ -33,9 +33,12 @@ import (
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func TestFilterZeroAndNegWeights(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	testCases := []struct {
 		name            string
 		input           SwapMaps
@@ -105,6 +108,7 @@ func TestFilterZeroAndNegWeights(t *testing.T) {
 }
 
 func TestSwapMapsSortDescending(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Test that SortDescending correctly sorts SwapMaps in descending order by weight,
 	// and filters out any entries with zero or negative weights. The return for the method
 	// should indicate which indices had negative weights.
@@ -194,6 +198,8 @@ func TestSwapMapsSortDescending(t *testing.T) {
 }
 
 func TestSwapMapsSortStochastic(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	// This test's strategy is to run the stochastic sort ~1000 times for each input,
 	// and to assert correctness based on the statistical distribution of results.
 	// For each index in the input, we record how often it appears at each position
@@ -329,6 +335,8 @@ func TestSwapMapsSortStochastic(t *testing.T) {
 }
 
 func TestGetSortedAds(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	// Here we only test expected order of ads for descending sort to avoid dealing
 	// with probability distributions in stochastic sort.
 	// The SortDescending and SortStochastic methods are tested separately, so all
@@ -428,7 +436,11 @@ func TestGetSortedAds(t *testing.T) {
 			// Set up logrus test logger and hook
 			// Initialize the logger and add a test hook
 			hook := test.NewGlobal()
+			origLevel := logrus.GetLevel()
 			logrus.SetLevel(logrus.WarnLevel)
+			t.Cleanup(func() {
+				logrus.SetLevel(origLevel)
+			})
 
 			sortedAds := tc.swapMaps.GetSortedAds(tc.ads, tc.sortType)
 
@@ -467,6 +479,8 @@ func TestGetSortedAds(t *testing.T) {
 }
 
 func TestDistanceWeightFn(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	testCases := []struct {
 		name          string
 		clientCoord   server_structs.Coordinate
@@ -518,6 +532,8 @@ func TestDistanceWeightFn(t *testing.T) {
 }
 
 func TestIOLoadWeightFn(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	testCases := []struct {
 		name          string
 		load          float64
@@ -575,6 +591,8 @@ func TestIOLoadWeightFn(t *testing.T) {
 }
 
 func TestStatusWeightFn(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	testCases := []struct {
 		name            string
 		statusWeightRaw float64
@@ -615,6 +633,8 @@ func TestStatusWeightFn(t *testing.T) {
 }
 
 func TestAvailabilityWeightFn(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	sAd := server_structs.ServerAd{}
 	sAd.Initialize("ad1")
 
@@ -675,6 +695,8 @@ func getAdBase(name string, lat, long float64) server_structs.ServerAd {
 }
 
 func TestDistanceSortAlg(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	// Note that this test is relatively paired back and doesn't
 	// exhaustively test cases like invalid client IPs. This is because
 	// the internal functions that handle these edge cases are tested
@@ -781,6 +803,8 @@ func TestDistanceSortAlg(t *testing.T) {
 }
 
 func TestAdaptiveSortAlg(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	// There are two primary test types here:
 	// - A set of tests that test adaptive sorting along individual weight axes.
 	//   These work by setting all but one weight to a constant value, and
@@ -1108,6 +1132,8 @@ func TestAdaptiveSortAlg(t *testing.T) {
 }
 
 func TestSortServerAdsByTopo(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	mock1 := server_structs.Advertisement{
 		ServerAd: server_structs.ServerAd{
 			FromTopology: true,
@@ -1154,6 +1180,8 @@ func TestSortServerAdsByTopo(t *testing.T) {
 }
 
 func TestSortServerAdsByAvailability(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	firstUrl := url.URL{Host: "first.org", Scheme: "https"}
 	secondUrl := url.URL{Host: "second.org", Scheme: "https"}
 	thirdUrl := url.URL{Host: "third.org", Scheme: "https"}

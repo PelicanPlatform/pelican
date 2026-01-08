@@ -35,7 +35,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -68,13 +67,14 @@ func migrateTestDB(t *testing.T) {
 }
 
 func TestWaitUntilLogin(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
-	viper.Set("ConfigDir", dirName)
+	require.NoError(t, param.Set("ConfigDir", dirName))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
@@ -118,6 +118,7 @@ func TestWaitUntilLogin(t *testing.T) {
 }
 
 func TestCodeBasedLogin(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
 	setupWebUIEnv(t)
@@ -172,6 +173,7 @@ func TestCodeBasedLogin(t *testing.T) {
 }
 
 func TestPasswordResetAPI(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	setupWebUIEnv(t)
 
@@ -309,6 +311,7 @@ func TestPasswordResetAPI(t *testing.T) {
 }
 
 func TestPasswordBasedLoginAPI(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	setupWebUIEnv(t)
 
@@ -425,6 +428,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 }
 
 func TestWhoamiAPI(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	setupWebUIEnv(t)
 
@@ -511,6 +515,7 @@ func TestWhoamiAPI(t *testing.T) {
 }
 
 func TestAdminAuthHandler(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Define test cases
 	testCases := []struct {
 		name          string
@@ -521,7 +526,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "user-not-logged-in",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2"})
+				require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2"}))
 				ctx.Set("User", "")
 			},
 			expectedCode:  http.StatusUnauthorized,
@@ -530,7 +535,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "general-admin-access",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set(param.Server_UIAdminUsers.GetName(), []string{})
+				require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), []string{}))
 				ctx.Set("User", "admin")
 			},
 			expectedCode: http.StatusOK,
@@ -538,7 +543,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "specific-admin-user-access",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2"})
+				require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2"}))
 				ctx.Set("User", "admin1")
 			},
 			expectedCode: http.StatusOK,
@@ -546,7 +551,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "non-admin-user-access",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2"})
+				require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2"}))
 				ctx.Set("User", "user")
 			},
 			expectedCode:  http.StatusForbidden,
@@ -555,7 +560,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "admin-list-empty",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set(param.Server_UIAdminUsers.GetName(), []string{})
+				require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), []string{}))
 				ctx.Set("User", "user")
 			},
 			expectedCode:  http.StatusForbidden,
@@ -564,7 +569,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "admin-list-multiple-users",
 			setupUserFunc: func(ctx *gin.Context) {
-				viper.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2", "admin3"})
+				require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2", "admin3"}))
 				ctx.Set("User", "admin2")
 			},
 			expectedCode: http.StatusOK,
@@ -598,6 +603,7 @@ func TestAdminAuthHandler(t *testing.T) {
 }
 
 func TestLogoutAPI(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	setupWebUIEnv(t)
 
@@ -676,6 +682,7 @@ func TestLogoutAPI(t *testing.T) {
 }
 
 func TestListOIDCEnabledServersHandler(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	router := gin.New()
 	router.GET("/oauth", listOIDCEnabledServersHandler)
 	t.Cleanup(func() {
@@ -704,7 +711,7 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 
 	t.Run("origin-included-if-flag-is-on", func(t *testing.T) {
 		server_utils.ResetTestState()
-		viper.Set(param.Origin_EnableOIDC.GetName(), true)
+		require.NoError(t, param.Set(param.Origin_EnableOIDC.GetName(), true))
 		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "origin"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
 		assert.NoError(t, err)
@@ -726,7 +733,7 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 
 	t.Run("cache-included-if-flag-is-on", func(t *testing.T) {
 		server_utils.ResetTestState()
-		viper.Set(param.Cache_EnableOIDC.GetName(), true)
+		require.NoError(t, param.Set(param.Cache_EnableOIDC.GetName(), true))
 		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "cache"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
 		assert.NoError(t, err)
@@ -748,7 +755,7 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 
 	t.Run("director-included-if-flag-is-on", func(t *testing.T) {
 		server_utils.ResetTestState()
-		viper.Set(param.Director_EnableOIDC.GetName(), true)
+		require.NoError(t, param.Set(param.Director_EnableOIDC.GetName(), true))
 		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "director"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
 		assert.NoError(t, err)
@@ -770,9 +777,9 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 
 	t.Run("origin-cache-both-included-if-flags-are-on", func(t *testing.T) {
 		server_utils.ResetTestState()
-		viper.Set(param.Origin_EnableOIDC.GetName(), true)
-		viper.Set(param.Cache_EnableOIDC.GetName(), true)
-		viper.Set(param.Director_EnableOIDC.GetName(), true)
+		require.NoError(t, param.Set(param.Origin_EnableOIDC.GetName(), true))
+		require.NoError(t, param.Set(param.Cache_EnableOIDC.GetName(), true))
+		require.NoError(t, param.Set(param.Director_EnableOIDC.GetName(), true))
 		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "origin", "cache", "director"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
 		assert.NoError(t, err)

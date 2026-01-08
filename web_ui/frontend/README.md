@@ -51,7 +51,7 @@ If you would like to proxy the prometheus requests to another service you can do
 and placing it as .env.local. Then run the docker statement like so to add those variables to the container.
 
 ```shell
-docker run --name pelican-dev-proxy --rm -it -p 8443:8443 --env-file dev/.env.local -d pelican-api-proxy
+docker run --name pelican-dev-proxy --rm -it -p 8443:8443 -p 8448:8448 -p 8118:8118 -p 8228:8228 -p 8338:8338 --env-file dev/.env.local -d pelican-api-proxy
 ```
 
 First make sure that the ports are correct in `dev/nginx.conf` so that they point to

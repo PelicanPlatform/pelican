@@ -1,0 +1,50 @@
+// For format details, see https://aka.ms/devcontainer.json
+// For config options, see https://containers.dev/implementors/json_reference/
+{
+	"name": "Pelican",
+	"image": "hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb",
+	"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+	"forwardPorts": [
+		8444,
+		8443,
+		8080
+	],
+	"portsAttributes": {
+		"8444": {
+			"label": "Pelican Server",
+			"onAutoForward": "notify"
+		},
+		"8443": {
+			"label": "Pelican Web UI",
+			"onAutoForward": "notify"
+		},
+		"8080": {
+			"label": "Additional Service",
+			"onAutoForward": "silent"
+		}
+	},
+	"customizations": {
+		"vscode": {
+			"settings": {
+				"go.gopath": "/root/go",
+				"go.goroot": "/usr/local/go",
+				"go.useLanguageServer": true
+			},
+			"extensions": [
+				"golang.go",
+				"ms-vscode.makefile-tools",
+				"redhat.vscode-yaml"
+			]
+		}
+	},
+	"postCreateCommand": "go install github.com/go-delve/delve/cmd/dlv@latest",
+	"remoteEnv": {
+		"PATH": "/usr/local/go/bin:/root/go/bin:${containerEnv:PATH}"
+	},
+	"remoteUser": "root",
+	"features": {
+		"ghcr.io/devcontainers/features/git:1": {
+			"version": "latest"
+		}
+	}
+}

@@ -34,7 +34,6 @@ import (
 	"time"
 
 	_ "github.com/glebarez/sqlite"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -53,11 +52,13 @@ type serverAdUnmarshalCustom struct {
 	serverAdUnmarshal
 	WebURL    string                    `json:"webUrl"`
 	Name      string                    `json:"name"`
+	ServerID  string                    `json:"serverId"`
 	Downtimes []server_structs.Downtime `json:"downtimes"`
 }
 
 // Verify that the director correctly handles a downtime declared by a cache server
 func TestServerDowntimeDirectorForwarding(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
@@ -67,10 +68,10 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	})
 
 	// Spin up a federation and get the Director's URL
-	viper.Set(param.Server_UIAdminUsers.GetName(), "admin-user")
-	viper.Set(param.Director_RegistryQueryInterval.GetName(), 1*time.Second)
+	require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), "admin-user"))
+	require.NoError(t, param.Set(param.Director_RegistryQueryInterval.GetName(), 1*time.Second))
 	customAdvertisementInterval := 100 * time.Millisecond
-	viper.Set(param.Server_AdvertisementInterval.GetName(), customAdvertisementInterval) // was 1 minute by default
+	require.NoError(t, param.Set(param.Server_AdvertisementInterval.GetName(), customAdvertisementInterval)) // was 1 minute by default
 	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
 	fedInfo, err := config.GetFederation(ctx)
 	require.NoError(t, err, "Failed to get federation service info")
@@ -105,11 +106,13 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	require.NoError(t, err, "Failed to unmarshal server ads")
 	var cacheWebUrlStr string
 	var cacheServerName string
+	var cacheServerID string
 	found := false
 	for _, serverAd := range serverAds {
 		if serverAd.Type == server_structs.CacheType.String() {
 			cacheWebUrlStr = serverAd.WebURL
 			cacheServerName = serverAd.Name
+			cacheServerID = serverAd.ServerID
 			found = true
 			break
 		}
@@ -120,6 +123,8 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 
 	// Assemble a downtime creation request to the cache server
 	incompleteDowntime := web_ui.DowntimeInput{
+		ServerName:  cacheServerName,
+		ServerID:    cacheServerID,
 		Source:      strings.ToLower(server_structs.CacheType.String()),
 		Class:       "SCHEDULED",
 		Description: "",
@@ -141,6 +146,7 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	tk.Lifetime = 5 * time.Minute
 	tk.AddAudiences(fedInfo.DiscoveryEndpoint)
 	tk.AddScopes(token_scopes.WebUi_Access)
+	tk.Claims = map[string]string{"user_id": "test-user-id"} // Required by GetUserGroups
 	tok, err := tk.CreateToken()
 	require.NoError(t, err)
 	downtimeCreationReq, _ := http.NewRequest("POST", cacheWebUrl.String(), bytes.NewBuffer(body))
@@ -162,7 +168,7 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	registryUrl.Path = downtimeCreationPath
 
 	downtimeByFedAdmin := web_ui.DowntimeInput{
-		ServerName:  server_structs.GetCacheNs(cacheServerName), // In Registry downtime table, the server name uses server's registered prefix
+		ServerName:  cacheServerName,
 		Source:      strings.ToLower(server_structs.RegistryType.String()),
 		Class:       "SCHEDULED",
 		Description: "This is a test downtime set by federation admin",

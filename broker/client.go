@@ -215,8 +215,7 @@ func ConnectToService(ctx context.Context, brokerUrl, prefix, originName string)
 	brokerAud.RawQuery = ""
 	brokerAud.Path = ""
 
-	cachePrefix := server_structs.GetCacheNs(param.Server_Hostname.GetString())
-	token, err := createToken(cachePrefix, param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Reverse)
+	token, err := createToken(prefix, param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Reverse)
 	if err != nil {
 		err = errors.Wrap(err, "failure when constructing the broker request token")
 		return
@@ -565,17 +564,27 @@ func doCallback(ctx context.Context, sType server_structs.ServerType, brokerResp
 // The request monitor is used by the "private service" (the service behind the
 // firewall) to know when to setup connections requested by the "public service"
 // (e.g., a cache).
-func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, sType server_structs.ServerType, privateName string, resultChan chan any) (err error) {
+//
+// The registeredPrefix parameter, if non-empty, specifies the namespace prefix
+// to use for token authentication. This should be the prefix that the service
+// is registered under in the registry. If empty, the prefix is constructed from
+// privateName. This is useful when polling for multiple addresses (e.g., both
+// web URL and XRootD URL) but authenticating with a single registered namespace.
+func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, sType server_structs.ServerType, privateName, registeredPrefix string, resultChan chan any) (err error) {
 	fedInfo, err := config.GetFederation(ctx)
 	if err != nil {
 		return err
 	}
 
-	prefix := ""
-	if sType.IsEnabled(server_structs.CacheType) {
-		prefix = server_structs.GetCacheNs(privateName)
-	} else {
-		prefix = server_structs.GetOriginNs(privateName)
+	// Use the provided registeredPrefix for authentication if specified,
+	// otherwise construct it from privateName
+	prefix := registeredPrefix
+	if prefix == "" {
+		if sType.IsEnabled(server_structs.CacheType) {
+			prefix = server_structs.GetCacheNs(privateName)
+		} else {
+			prefix = server_structs.GetOriginNs(privateName)
+		}
 	}
 
 	brokerUrl := fedInfo.BrokerEndpoint
@@ -618,7 +627,7 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, sType serve
 			sleepDuration := time.Second + time.Duration(mrand.Intn(500))*time.Microsecond
 			select {
 			case <-ctx.Done():
-				return
+				return nil
 			default:
 				// Send a request to the broker for a connection reversal
 				reqReader.Reset(req)

@@ -37,14 +37,13 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 
 	"github.com/pelicanplatform/pelican/logging"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
-
-var server *httptest.Server
 
 // Generate a context associated with the test
 //
@@ -107,49 +106,118 @@ func mockFederationRoot(t *testing.T) string {
 	// Cleanup, cleanup, everybody do your share!
 	t.Cleanup(server.Close)
 
-	viper.Set(param.TLSSkipVerify.GetName(), true)
-	viper.Set(param.Federation_DiscoveryUrl.GetName(), server.URL)
+	require.NoError(t, param.Set(param.TLSSkipVerify.GetName(), true))
+	require.NoError(t, param.Set(param.Federation_DiscoveryUrl.GetName(), server.URL))
 
 	return server.URL
 }
 
-func TestMain(m *testing.M) {
-	// Create a test server
-	server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// simuilate long server response
+func configureTransportTestDefaults(t *testing.T) {
+	t.Helper()
+	require.NoError(t, param.Set("Transport.MaxIdleConns", 30))
+	require.NoError(t, param.Set("Transport.IdleConnTimeout", time.Second*90))
+	require.NoError(t, param.Set("Transport.TLSHandshakeTimeout", time.Second*15))
+	require.NoError(t, param.Set("Transport.ExpectContinueTimeout", time.Second*1))
+	require.NoError(t, param.Set("Transport.ResponseHeaderTimeout", time.Second*10))
+	require.NoError(t, param.Set("Transport.Dialer.Timeout", time.Second*1))
+	require.NoError(t, param.Set("Transport.Dialer.KeepAlive", time.Second*30))
+	require.NoError(t, param.Set("TLSSkipVerify", true))
+	require.NoError(t, param.Set(param.Logging_Level.GetName(), "debug"))
+}
+
+func newTimeoutTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	configureTransportTestDefaults(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Simulate long server response so ResponseHeaderTimeout fires
 		time.Sleep(5 * time.Second)
 		w.WriteHeader(http.StatusOK)
-		code, err := w.Write([]byte("Success"))
-		if err != nil {
-			fmt.Printf("Error writing out response: %d, %v", code, err)
-			os.Exit(1)
+		if _, err := w.Write([]byte("Success")); err != nil {
+			t.Fatalf("Error writing out response: %v", err)
 		}
 	}))
-	// Init server to get configs initiallized
-	viper.Set("Transport.MaxIdleConns", 30)
-	viper.Set("Transport.IdleConnTimeout", time.Second*90)
-	viper.Set("Transport.TLSHandshakeTimeout", time.Second*15)
-	viper.Set("Transport.ExpectContinueTimeout", time.Second*1)
-	viper.Set("Transport.ResponseHeaderTimeout", time.Second*10)
+	t.Cleanup(srv.Close)
+	return srv
+}
 
-	viper.Set("Transport.Dialer.Timeout", time.Second*1)
-	viper.Set("Transport.Dialer.KeepAlive", time.Second*30)
-	viper.Set("TLSSkipVerify", true)
-	viper.Set(param.Logging_Level.GetName(), "debug")
-	server.StartTLS()
-	defer server.Close()
-	exitCode := m.Run()
-	os.Exit(exitCode)
+// Test that no deprecated config keys are present in defaultsYaml or osdfDefaultsYaml
+func TestNoReplacementKeysInDefaults(t *testing.T) {
+	type testCase struct {
+		yamlStr     string
+		fName       string
+		shouldError bool
+	}
+	testCases := []testCase{
+		{yamlStr: defaultsYaml, fName: "defaults.yaml", shouldError: false},
+		{yamlStr: osdfDefaultsYaml, fName: "osdfDefaults.yaml", shouldError: false},
+		// Example: Client.DisableHttpProxy is a replacement for DisableHttpProxy
+		{yamlStr: `
+Client:
+  DisableHttpProxy: true
+`, fName: "inline test case with replacement key Client.DisableHttpProxy", shouldError: true},
+	}
+
+	deprecatedMap := param.GetDeprecated()
+	for _, tc := range testCases {
+		var m map[string]any
+		err := yaml.Unmarshal([]byte(tc.yamlStr), &m)
+		require.NoError(t, err, "Failed to parse %s", tc.fName)
+
+		// Map replacement key -> deprecated key(s)
+		found := make(map[string]string)
+		for deprecated, replacements := range deprecatedMap {
+			for _, rep := range replacements {
+				if rep == "none" {
+					continue
+				}
+				// Check for top-level and nested keys (e.g., Logging.Level)
+				parts := strings.Split(rep, ".")
+				node := m
+				foundKey := true
+				for _, part := range parts {
+					val, ok := node[part]
+					if !ok {
+						foundKey = false
+						break
+					}
+					// If not at the last part, descend if possible
+					if mp, ok := val.(map[string]any); ok {
+						node = mp
+					} else if part != parts[len(parts)-1] {
+						foundKey = false
+						break
+					}
+				}
+				if foundKey {
+					found[rep] = deprecated
+				}
+			}
+		}
+
+		if tc.shouldError {
+			assert.NotEmpty(t, found, "Expected replacement key(s) in %s, but none found", tc.fName)
+		} else {
+			if len(found) > 0 {
+				var details []string
+				for rep, dep := range found {
+					details = append(details, fmt.Sprintf("%q (replacement for deprecated key %q)", rep, dep))
+				}
+				t.Errorf("Replacement config key(s) found in %s: %v. Please remove them from the defaults yaml and set them in a SetDefaults() function in the config package.", tc.fName, details)
+			}
+		}
+	}
 }
 
 func TestResponseHeaderTimeout(t *testing.T) {
+	srv := newTimeoutTestServer(t)
+
 	// Change the viper value of the timeout
-	viper.Set("Transport.ResponseHeaderTimeout", time.Millisecond*25)
+	require.NoError(t, param.Set("Transport.ResponseHeaderTimeout", time.Millisecond*25))
 	setupTransport()
 	transport := GetTransport()
 	client := &http.Client{Transport: transport}
 	// make a request
-	req, err := http.NewRequest("GET", server.URL, nil)
+	req, err := http.NewRequest("GET", srv.URL, nil)
 	if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}
@@ -163,12 +231,14 @@ func TestResponseHeaderTimeout(t *testing.T) {
 		t.Fatalf("Test returned no error when there should be")
 	}
 
-	viper.Set("Transport.ResponseHeaderTimeout", time.Second*10)
+	require.NoError(t, param.Set("Transport.ResponseHeaderTimeout", time.Second*10))
 }
 
 func TestDialerTimeout(t *testing.T) {
+	configureTransportTestDefaults(t)
+
 	// Change the viper value of the timeout
-	viper.Set("Transport.Dialer.Timeout", time.Millisecond*25)
+	require.NoError(t, param.Set("Transport.Dialer.Timeout", time.Millisecond*25))
 	setupTransport()
 	transport := GetTransport()
 	client := &http.Client{Transport: transport}
@@ -190,7 +260,7 @@ func TestDialerTimeout(t *testing.T) {
 		t.Fatalf("Test returned no error when there should be")
 	}
 
-	viper.Set("Transport.Dialer.Timeout", time.Second*10)
+	require.NoError(t, param.Set("Transport.Dialer.Timeout", time.Second*10))
 }
 
 func TestInitConfig(t *testing.T) {
@@ -203,10 +273,10 @@ func TestInitConfig(t *testing.T) {
 
 	// Create a temp config file to use
 	tempCfgFile, err := os.CreateTemp("", "pelican-*.yaml")
-	viper.Set("config", tempCfgFile.Name())
 	if err != nil {
 		t.Fatalf("Failed to make temp file: %v", err)
 	}
+	require.NoError(t, param.Set("config", tempCfgFile.Name()))
 
 	InitConfigInternal(logrus.DebugLevel) // Should set up pelican.yaml, osdf.yaml and defaults.yaml
 
@@ -215,12 +285,12 @@ func TestInitConfig(t *testing.T) {
 	// Check that Federation Discovery url is correct by osdf.yaml
 	assert.Equal(t, "osg-htc.org", param.Federation_DiscoveryUrl.GetString())
 
-	viper.Set("Server.WebHost", "1.1.1.1") // should write to temp config file
+	require.NoError(t, param.Set("Server.WebHost", "1.1.1.1")) // should write to temp config file
 	if err := viper.WriteConfigAs(tempCfgFile.Name()); err != nil {
 		t.Fatalf("Failed to write to config file: %v", err)
 	}
 	ResetConfig()
-	viper.Set("config", tempCfgFile.Name()) // Set the temp file as the new 'pelican.yaml'
+	require.NoError(t, param.Set("config", tempCfgFile.Name())) // Set the temp file as the new 'pelican.yaml'
 	InitConfigInternal(logrus.DebugLevel)
 
 	// Check if server address overrides the default
@@ -230,10 +300,10 @@ func TestInitConfig(t *testing.T) {
 	//Test if prefix is not set, should not be able to find osdfYaml configuration
 	testingPreferredPrefix = ""
 	tempCfgFile, err = os.CreateTemp("", "pelican-*.yaml")
-	viper.Set("config", tempCfgFile.Name())
 	if err != nil {
 		t.Fatalf("Failed to make temp file: %v", err)
 	}
+	require.NoError(t, param.Set("config", tempCfgFile.Name()))
 	InitConfigInternal(logrus.DebugLevel)
 	assert.Equal(t, "", param.Federation_DiscoveryUrl.GetString())
 }
@@ -302,10 +372,10 @@ func TestHomeDir(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			isRootExec = tc.isRootExec
-			viper.Reset()
+			require.NoError(t, param.Reset())
 
 			if tc.configDir != "" {
-				viper.Set("ConfigDir", tc.configDir)
+				require.NoError(t, param.Set("ConfigDir", tc.configDir))
 			}
 
 			if !tc.homeEnv {
@@ -470,12 +540,12 @@ func TestDeprecationHandling(t *testing.T) {
 
 	tlsCertPath := filepath.Join(tmpConfigDirPath, "somerandomfile.txt")
 
-	viper.Set("ConfigDir", tmpConfigDirPath)
-	viper.Set("Logging.Level", "Warning")
+	require.NoError(t, param.Set("ConfigDir", tmpConfigDirPath))
+	require.NoError(t, param.Set("Logging.Level", "Warning"))
 
 	// Set the deprecated config parameter `Server.TLSCertificate`.
 	// This parameter is replaced by the new `Server.TLSCertificateChain`.
-	viper.Set("Server.TLSCertificate", tlsCertPath)
+	require.NoError(t, param.Set("Server.TLSCertificate", tlsCertPath))
 
 	var logBuffer bytes.Buffer
 	logrus.SetOutput(&logBuffer)
@@ -630,19 +700,19 @@ func TestInitServerUrl(t *testing.T) {
 		ResetConfig()
 		mockFederationRoot(t)
 		tempDir := t.TempDir()
-		viper.Set("ConfigDir", tempDir)
+		require.NoError(t, param.Set("ConfigDir", tempDir))
 	}
 
 	initDirectoryConfig := func() {
 		initConfig()
-		viper.Set(param.Director_MinStatResponse.GetName(), 1)
-		viper.Set(param.Director_MaxStatResponse.GetName(), 4)
+		require.NoError(t, param.Set(param.Director_MinStatResponse.GetName(), 1))
+		require.NoError(t, param.Set(param.Director_MaxStatResponse.GetName(), 4))
 	}
 
 	t.Run("web-url-defaults-to-hostname-port", func(t *testing.T) {
 		initDirectoryConfig()
-		viper.Set(param.Server_Hostname.GetName(), mockHostname)
-		viper.Set(param.Server_WebPort.GetName(), mockNon443Port)
+		require.NoError(t, param.Set(param.Server_Hostname.GetName(), mockHostname))
+		require.NoError(t, param.Set(param.Server_WebPort.GetName(), mockNon443Port))
 		err := InitServer(context.Background(), 0)
 		require.NoError(t, err)
 		assert.Equal(t, mockWebUrlWNon443Port, param.Server_ExternalWebUrl.GetString())
@@ -650,8 +720,8 @@ func TestInitServerUrl(t *testing.T) {
 
 	t.Run("default-web-url-removes-443-port", func(t *testing.T) {
 		initDirectoryConfig()
-		viper.Set(param.Server_Hostname.GetName(), mockHostname)
-		viper.Set(param.Server_WebPort.GetName(), mock443Port)
+		require.NoError(t, param.Set(param.Server_Hostname.GetName(), mockHostname))
+		require.NoError(t, param.Set(param.Server_WebPort.GetName(), mock443Port))
 		err := InitServer(context.Background(), 0)
 		require.NoError(t, err)
 		assert.Equal(t, mockWebUrlWoPort, param.Server_ExternalWebUrl.GetString())
@@ -660,7 +730,7 @@ func TestInitServerUrl(t *testing.T) {
 	t.Run("remove-443-port-for-set-web-url", func(t *testing.T) {
 		// We respect the URL value set directly by others. Won't remove 443 port
 		initDirectoryConfig()
-		viper.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlW443Port)
+		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlW443Port))
 		err := InitServer(context.Background(), 0)
 		require.NoError(t, err)
 		assert.Equal(t, mockWebUrlWoPort, param.Server_ExternalWebUrl.GetString())
@@ -671,8 +741,8 @@ func TestInitServerUrl(t *testing.T) {
 		initDirectoryConfig()
 		// If Server_ExternalWebUrl is not set, Federation_DirectorUrl defaults to https://<hostname>:<non-443-port>
 		// In this case, the port is 443, so Federation_DirectorUrl = https://example.com
-		viper.Set(param.Server_Hostname.GetName(), mockHostname)
-		viper.Set(param.Server_WebPort.GetName(), mock443Port)
+		require.NoError(t, param.Set(param.Server_Hostname.GetName(), mockHostname))
+		require.NoError(t, param.Set(param.Server_WebPort.GetName(), mock443Port))
 		err := InitServer(ctx, server_structs.DirectorType)
 		require.NoError(t, err)
 		fedInfo, err := GetFederation(ctx)
@@ -682,7 +752,7 @@ func TestInitServerUrl(t *testing.T) {
 		// If Server_ExternalWebUrl is explicitly set, Federation_DirectorUrl defaults to whatever it is
 		// But 443 port is stripped if provided
 		initDirectoryConfig()
-		viper.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlW443Port)
+		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlW443Port))
 		err = InitServer(ctx, server_structs.DirectorType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
@@ -690,8 +760,8 @@ func TestInitServerUrl(t *testing.T) {
 		assert.Equal(t, mockWebUrlWoPort, fedInfo.DirectorEndpoint)
 
 		initDirectoryConfig()
-		viper.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlWoPort)
-		viper.Set("Federation.DirectorUrl", "https://example-director.com")
+		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlWoPort))
+		require.NoError(t, param.Set("Federation.DirectorUrl", "https://example-director.com"))
 		err = InitServer(ctx, server_structs.DirectorType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
@@ -704,8 +774,8 @@ func TestInitServerUrl(t *testing.T) {
 		initConfig()
 		// If Server_ExternalWebUrl is not set, Federation_RegistryUrl defaults to https://<hostname>:<non-443-port>
 		// In this case, the port is 443, so Federation_RegistryUrl = https://example.com
-		viper.Set(param.Server_Hostname.GetName(), mockHostname)
-		viper.Set(param.Server_WebPort.GetName(), mock443Port)
+		require.NoError(t, param.Set(param.Server_Hostname.GetName(), mockHostname))
+		require.NoError(t, param.Set(param.Server_WebPort.GetName(), mock443Port))
 		err := InitServer(ctx, server_structs.RegistryType)
 		require.NoError(t, err)
 		fedInfo, err := GetFederation(ctx)
@@ -715,7 +785,7 @@ func TestInitServerUrl(t *testing.T) {
 		// If Server_ExternalWebUrl is explicitly set, Federation_RegistryUrl defaults to whatever it is
 		// But 443 port is stripped if provided
 		initConfig()
-		viper.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlW443Port)
+		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlW443Port))
 		err = InitServer(ctx, server_structs.RegistryType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
@@ -723,8 +793,8 @@ func TestInitServerUrl(t *testing.T) {
 		assert.Equal(t, mockWebUrlWoPort, fedInfo.RegistryEndpoint)
 
 		initConfig()
-		viper.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlWoPort)
-		viper.Set("Federation.RegistryUrl", "https://example-registry.com")
+		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlWoPort))
+		require.NoError(t, param.Set("Federation.RegistryUrl", "https://example-registry.com"))
 		err = InitServer(ctx, server_structs.RegistryType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
@@ -737,8 +807,8 @@ func TestInitServerUrl(t *testing.T) {
 		initConfig()
 		// If Server_ExternalWebUrl is not set, Federation_BrokerUrl defaults to https://<hostname>:<non-443-port>
 		// In this case, the port is 443, so Federation_BrokerUrl = https://example.com
-		viper.Set(param.Server_Hostname.GetName(), mockHostname)
-		viper.Set(param.Server_WebPort.GetName(), mock443Port)
+		require.NoError(t, param.Set(param.Server_Hostname.GetName(), mockHostname))
+		require.NoError(t, param.Set(param.Server_WebPort.GetName(), mock443Port))
 		err := InitServer(ctx, server_structs.BrokerType)
 		require.NoError(t, err)
 		fedInfo, err := GetFederation(ctx)
@@ -748,7 +818,7 @@ func TestInitServerUrl(t *testing.T) {
 		// If Server_ExternalWebUrl is explicitly set, Federation_BrokerUrl defaults to whatever it is
 		// But 443 port is stripped if provided
 		initConfig()
-		viper.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlW443Port)
+		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlW443Port))
 		err = InitServer(ctx, server_structs.BrokerType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
@@ -756,8 +826,8 @@ func TestInitServerUrl(t *testing.T) {
 		assert.Equal(t, mockWebUrlWoPort, fedInfo.BrokerEndpoint)
 
 		initConfig()
-		viper.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlWoPort)
-		viper.Set("Federation.BrokerUrl", "https://example-registry.com")
+		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), mockWebUrlWoPort))
+		require.NoError(t, param.Set("Federation.BrokerUrl", "https://example-registry.com"))
 		err = InitServer(ctx, server_structs.BrokerType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
@@ -771,10 +841,10 @@ func TestWebConfigSetsLogFile(t *testing.T) {
 	ResetConfig()
 	defer ResetConfig()
 	configDir := t.TempDir()
-	viper.Set("ConfigDir", configDir)
-	viper.Set(param.Logging_Level.GetName(), "debug")
+	require.NoError(t, param.Set("ConfigDir", configDir))
+	require.NoError(t, param.Set(param.Logging_Level.GetName(), "debug"))
 	webConfigFile := filepath.Join(configDir, "web-config.yaml")
-	viper.Set(param.Server_WebConfigFile.GetName(), webConfigFile)
+	require.NoError(t, param.Set(param.Server_WebConfigFile.GetName(), webConfigFile))
 	logFile := filepath.Join(configDir, "test-log.txt")
 
 	mockFederationRoot(t)
@@ -889,11 +959,11 @@ func TestDiscoverFederationImpl(t *testing.T) {
 			// for discovery metadata.
 			serverUrl := mockFederationRoot(t)
 			if tc.mockMetadataIsFedRoot {
-				viper.Set(param.Federation_DiscoveryUrl.GetName(), serverUrl)
+				require.NoError(t, param.Set(param.Federation_DiscoveryUrl.GetName(), serverUrl))
 				tc.expectedFed.DiscoveryEndpoint = serverUrl
 			} else {
-				viper.Set(param.Federation_DiscoveryUrl.GetName(), "")
-				viper.Set("Federation.DirectorUrl", serverUrl)
+				require.NoError(t, param.Set(param.Federation_DiscoveryUrl.GetName(), ""))
+				require.NoError(t, param.Set("Federation.DirectorUrl", serverUrl))
 				tc.expectedFed.DirectorEndpoint = serverUrl
 			}
 
@@ -901,22 +971,22 @@ func TestDiscoverFederationImpl(t *testing.T) {
 			// Note that federation params other than discovery URL cannot be set with param because
 			// they're hidden to force access through `config.GetFederation()`
 			if tc.inputFed.DiscoveryEndpoint != "" {
-				viper.Set(param.Federation_DiscoveryUrl.GetName(), tc.inputFed.DiscoveryEndpoint)
+				require.NoError(t, param.Set(param.Federation_DiscoveryUrl.GetName(), tc.inputFed.DiscoveryEndpoint))
 			}
 			if tc.inputFed.RegistryEndpoint != "" {
-				viper.Set("Federation.RegistryUrl", tc.inputFed.RegistryEndpoint)
+				require.NoError(t, param.Set("Federation.RegistryUrl", tc.inputFed.RegistryEndpoint))
 			}
 			if tc.inputFed.DirectorEndpoint != "" {
-				viper.Set("Federation.DirectorUrl", tc.inputFed.DirectorEndpoint)
+				require.NoError(t, param.Set("Federation.DirectorUrl", tc.inputFed.DirectorEndpoint))
 			}
 			if tc.inputFed.BrokerEndpoint != "" {
-				viper.Set("Federation.BrokerUrl", tc.inputFed.BrokerEndpoint)
+				require.NoError(t, param.Set("Federation.BrokerUrl", tc.inputFed.BrokerEndpoint))
 			}
 			if tc.inputFed.JwksUri != "" {
-				viper.Set("Federation.JwksUrl", tc.inputFed.JwksUri)
+				require.NoError(t, param.Set("Federation.JwksUrl", tc.inputFed.JwksUri))
 			}
 
-			viper.Set(param.Server_ExternalWebUrl.GetName(), tc.extWebUrl)
+			require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), tc.extWebUrl))
 
 			// Run discovery
 			ctx := testConfigContext(t)
@@ -926,6 +996,145 @@ func TestDiscoverFederationImpl(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 				assert.Equal(t, tc.expectedFed, result)
+			}
+		})
+	}
+}
+
+// TestEnvVarConfigMapping tests that environment variables are correctly mapped into
+// Pelican config structs for both client and server initialization paths.
+// This addresses issue #2819 where PELICAN_* env vars were ignored in certain modes.
+func TestEnvVarConfigMapping(t *testing.T) {
+	type initMode string
+	const (
+		clientMode initMode = "client"
+		serverMode initMode = "server"
+	)
+
+	type testCase struct {
+		name              string
+		binaryPrefix      ConfigPrefix // PELICAN or OSDF
+		envVarPrefix      string       // PELICAN, OSDF, or other
+		envVarSuffix      string       // e.g., CLIENT_PREFERREDCACHES, SERVER_WEBPORT
+		configValue       string       // the value to set for the env var
+		mode              initMode     // client or server
+		configShouldApply bool         // whether the config should be picked up
+		validateFunc      func(t *testing.T)
+	}
+
+	tests := []testCase{
+		// Client mode tests
+		{
+			name:              "pelican-binary-pelican-env-client",
+			binaryPrefix:      PelicanPrefix,
+			envVarPrefix:      "PELICAN",
+			envVarSuffix:      "CLIENT_PREFERREDCACHES",
+			configValue:       "https://cache.example.com:8443",
+			mode:              clientMode,
+			configShouldApply: true,
+			validateFunc: func(t *testing.T) {
+				caches := param.Client_PreferredCaches.GetStringSlice()
+				require.Len(t, caches, 1)
+				assert.Equal(t, "https://cache.example.com:8443", caches[0])
+			},
+		},
+		{
+			name:              "osdf-binary-pelican-env-client",
+			binaryPrefix:      OsdfPrefix,
+			envVarPrefix:      "PELICAN",
+			envVarSuffix:      "CLIENT_PREFERREDCACHES",
+			configValue:       "https://cache.example.com:8443",
+			mode:              clientMode,
+			configShouldApply: true,
+			validateFunc: func(t *testing.T) {
+				caches := param.Client_PreferredCaches.GetStringSlice()
+				require.Len(t, caches, 1)
+				assert.Equal(t, "https://cache.example.com:8443", caches[0])
+			},
+		},
+		{
+			name:              "osdf-binary-osdf-env-client-backward-compat",
+			binaryPrefix:      OsdfPrefix,
+			envVarPrefix:      "OSDF",
+			envVarSuffix:      "CLIENT_PREFERREDCACHES",
+			configValue:       "https://cache.example.com:8443",
+			mode:              clientMode,
+			configShouldApply: true,
+			validateFunc: func(t *testing.T) {
+				caches := param.Client_PreferredCaches.GetStringSlice()
+				require.Len(t, caches, 1)
+				assert.Equal(t, "https://cache.example.com:8443", caches[0])
+			},
+		},
+		// Server mode tests - verify env vars work for server initialization too
+		{
+			name:              "pelican-binary-pelican-env-server",
+			binaryPrefix:      PelicanPrefix,
+			envVarPrefix:      "PELICAN",
+			envVarSuffix:      "SERVER_WEBPORT",
+			configValue:       "9999",
+			mode:              serverMode,
+			configShouldApply: true,
+			validateFunc: func(t *testing.T) {
+				assert.Equal(t, 9999, param.Server_WebPort.GetInt())
+			},
+		},
+		{
+			name:              "osdf-binary-pelican-env-server",
+			binaryPrefix:      OsdfPrefix,
+			envVarPrefix:      "PELICAN",
+			envVarSuffix:      "SERVER_WEBPORT",
+			configValue:       "9999",
+			mode:              serverMode,
+			configShouldApply: true,
+			validateFunc: func(t *testing.T) {
+				assert.Equal(t, 9999, param.Server_WebPort.GetInt())
+			},
+		},
+		{
+			name:              "osdf-binary-osdf-env-server-backward-compat",
+			binaryPrefix:      OsdfPrefix,
+			envVarPrefix:      "OSDF",
+			envVarSuffix:      "SERVER_WEBPORT",
+			configValue:       "9999",
+			mode:              serverMode,
+			configShouldApply: true,
+			validateFunc: func(t *testing.T) {
+				assert.Equal(t, 9999, param.Server_WebPort.GetInt())
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ResetConfig()
+			t.Cleanup(func() {
+				ResetConfig()
+			})
+
+			// Set the binary prefix (ResetConfig already clears this)
+			_, err := SetPreferredPrefix(tc.binaryPrefix)
+			require.NoError(t, err)
+
+			// Set the environment variable (t.Setenv handles cleanup automatically)
+			envVar := tc.envVarPrefix + "_" + tc.envVarSuffix
+			t.Setenv(envVar, tc.configValue)
+
+			// Initialize config based on mode
+			switch tc.mode {
+			case clientMode:
+				InitConfigInternal(logrus.WarnLevel)
+				err = SetClientDefaults(viper.GetViper())
+				require.NoError(t, err)
+			case serverMode:
+				InitConfigInternal(logrus.InfoLevel)
+				err = SetServerDefaults(viper.GetViper())
+				require.NoError(t, err)
+			}
+
+			// Validate the config was applied (or not) as expected
+			if tc.configShouldApply {
+				tc.validateFunc(t)
 			}
 		})
 	}

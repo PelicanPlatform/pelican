@@ -37,18 +37,33 @@ func UpdateConfigFromListener(ln net.Listener) {
 		addr := ln.Addr()
 		tcpAddr, ok := addr.(*net.TCPAddr)
 		if ok {
-			viper.Set("Server.WebPort", tcpAddr.Port)
+			if err := param.Set("Server.WebPort", tcpAddr.Port); err != nil {
+				log.WithError(err).Warn("Failed to update Server.WebPort from listener")
+			}
 			serverUrlStr := param.Server_ExternalWebUrl.GetString()
 			serverUrl, err := url.Parse(serverUrlStr)
 			if err == nil {
 				newUrlStr := "https://" + serverUrl.Hostname() + ":" + strconv.Itoa(tcpAddr.Port)
-				viper.Set("Server.WebHost", serverUrl.Hostname())
-				viper.Set("Server.ExternalWebUrl", newUrlStr)
+				if err := param.Set("Server.WebHost", serverUrl.Hostname()); err != nil {
+					log.WithError(err).Warn("Failed to update Server.WebHost from listener")
+				}
+				if err := param.Set("Server.ExternalWebUrl", newUrlStr); err != nil {
+					log.WithError(err).Warn("Failed to update Server.ExternalWebUrl from listener")
+				}
 				if viper.GetString("Federation.DirectorUrl") == serverUrlStr {
-					viper.Set("Federation.DirectorUrl", newUrlStr)
+					if err := param.Set("Federation.DirectorUrl", newUrlStr); err != nil {
+						log.WithError(err).Warn("Failed to update Federation.DirectorUrl from listener")
+					}
 				}
 				if viper.GetString("Federation.RegistryUrl") == serverUrlStr {
-					viper.Set("Federation.RegistryUrl", newUrlStr)
+					if err := param.Set("Federation.RegistryUrl", newUrlStr); err != nil {
+						log.WithError(err).Warn("Failed to update Federation.RegistryUrl from listener")
+					}
+				}
+				if brokerUrlStr := viper.GetString("Federation.BrokerUrl"); brokerUrlStr == serverUrlStr {
+					if err := param.Set("Federation.BrokerUrl", newUrlStr); err != nil {
+						log.WithError(err).Warn("Failed to update Federation.BrokerUrl from listener")
+					}
 				}
 				fedDiscoveryOnce = &sync.Once{}
 				log.Debugln("Random web port used; updated external web URL to", param.Server_ExternalWebUrl.GetString())

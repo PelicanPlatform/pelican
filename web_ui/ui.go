@@ -97,7 +97,7 @@ func getConfigValues(ctx *gin.Context) {
 		})
 		return
 	}
-	rawConfig, err := param.UnmarshalConfig(viper.GetViper())
+	rawConfig, err := param.UnmarshalConfig()
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -586,6 +586,9 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.PATCH("/api/v1.0/config", AuthHandler, AdminAuthHandler, updateConfigValues)
 	engine.POST("/api/v1.0/restart", AuthHandler, AdminAuthHandler, hotRestartServer)
 	engine.GET("/api/v1.0/servers", getEnabledServers)
+	if config.ValidateServerType([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType}) {
+		engine.GET("/api/v1.0/server", AuthHandler, AdminAuthHandler, HandleGetServerLocalMetadataHistory)
+	}
 	// Health check endpoint for web engine
 	engine.GET("/api/v1.0/health", func(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Web Engine Running. Time: %s", time.Now().String())})
@@ -595,13 +598,22 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.GET("/api/v1.0/tokens", AuthHandler, AdminAuthHandler, listApiTokens)
 	engine.GET("/api/v1.0/version", getVersionHandler)
 
+	// Logging level management API
+	loggingAPI := engine.Group("/api/v1.0/logging")
+	{
+		loggingAPI.POST("/level", AuthHandler, AdminAuthHandler, HandleSetLogLevel)
+		loggingAPI.GET("/level", AuthHandler, AdminAuthHandler, HandleGetLogLevel)
+		loggingAPI.DELETE("/level/:changeId", AuthHandler, AdminAuthHandler, HandleDeleteLogLevel)
+	}
+
 	downtimeAPI := engine.Group("/api/v1.0/downtime")
 	{
-		downtimeAPI.POST("", AuthHandler, AdminAuthHandler, HandleCreateDowntime)
+		downtimeAPI.POST("", DowntimeAuthHandler, HandleCreateDowntime)
+		downtimeAPI.POST("/:uuid", DowntimeAuthHandler, HandleCreateDowntime)
 		downtimeAPI.GET("", HandleGetDowntime)
 		downtimeAPI.GET("/:uuid", HandleGetDowntimeByUUID)
-		downtimeAPI.PUT("/:uuid", AuthHandler, AdminAuthHandler, HandleUpdateDowntime)
-		downtimeAPI.DELETE("/:uuid", AuthHandler, AdminAuthHandler, HandleDeleteDowntime)
+		downtimeAPI.PUT("/:uuid", DowntimeAuthHandler, HandleUpdateDowntime)
+		downtimeAPI.DELETE("/:uuid", DowntimeAuthHandler, HandleDeleteDowntime)
 	}
 
 	engine.GET("/api/v1.0/groups", AuthHandler, handleListGroups)
@@ -767,10 +779,12 @@ func ConfigureServerWebAPI(ctx context.Context, engine *gin.Engine, egrp *errgro
 	if err := configureMetrics(engine); err != nil {
 		return err
 	}
+
+	if err := configureAuthEndpoints(ctx, engine, egrp); err != nil {
+		return err
+	}
+
 	if param.Server_EnableUI.GetBool() {
-		if err := configureAuthEndpoints(ctx, engine, egrp); err != nil {
-			return err
-		}
 		configureWebResource(engine)
 	}
 
@@ -913,10 +927,11 @@ func runEngineWithListener(ctx context.Context, ln net.Listener, engine *gin.Eng
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		err = server.Shutdown(ctx)
-		if err != nil {
+		if err != nil && !errors.Is(err, context.DeadlineExceeded) {
 			log.Errorln("Failed to shutdown server:", err)
+			return err
 		}
-		return err
+		return nil
 	})
 
 	if err := server.ServeTLS(ln, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {

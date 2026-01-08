@@ -26,7 +26,6 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -70,7 +69,7 @@ func setupMockOriginDB(t *testing.T) {
 	// Setup encryption
 	tmp := t.TempDir()
 	keyDir := filepath.Join(tmp, "issuer-keys")
-	viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
+	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), keyDir))
 
 	// Also update the refresh token to be encrypted
 	for idx := range mockGC {

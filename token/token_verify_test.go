@@ -35,8 +35,9 @@ import (
 
 // MockAuthChecker is the mock implementation of AuthChecker.
 type MockAuthChecker struct {
-	FederationCheckFunc func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error
-	IssuerCheckFunc     func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error
+	FederationCheckFunc       func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error
+	IssuerCheckFunc           func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error
+	RegisteredServerCheckFunc func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error
 }
 
 func (m *MockAuthChecker) checkFederationIssuer(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
@@ -45,6 +46,10 @@ func (m *MockAuthChecker) checkFederationIssuer(ctx *gin.Context, token string, 
 
 func (m *MockAuthChecker) checkLocalIssuer(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
 	return m.IssuerCheckFunc(ctx, token, expectedScopes, allScope)
+}
+
+func (m *MockAuthChecker) checkRegisteredServer(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
+	return m.RegisteredServerCheckFunc(ctx, token, expectedScopes, allScope)
 }
 
 // Helper function to create a gin context with different token sources
@@ -88,6 +93,14 @@ func TestVerify(t *testing.T) {
 		IssuerCheckFunc: func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
 			if token != "" {
 				ctx.Set("User", "Issuer")
+				return nil
+			} else {
+				return errors.New("No token is present")
+			}
+		},
+		RegisteredServerCheckFunc: func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
+			if token != "" {
+				ctx.Set("AuthMethod", "registered-server-token")
 				return nil
 			} else {
 				return errors.New("No token is present")
@@ -272,6 +285,73 @@ func TestVerify(t *testing.T) {
 			},
 			expectedResult: false,
 			expectedStatus: 403,
+		},
+		{
+			name: "valid-token-with-registered-server-issuer",
+			authOption: AuthOption{
+				Sources: []TokenSource{Header},
+				Issuers: []TokenIssuer{RegisteredServer},
+			},
+			setupMock: func() {
+				mock.RegisteredServerCheckFunc = func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
+					if token == "valid-server-token" {
+						ctx.Set("AuthMethod", "registered-server-token")
+						return nil
+					}
+					return errors.New(fmt.Sprint("Invalid Token: ", token))
+				}
+			},
+			tokenSetup: func() *gin.Context {
+				return createContextWithToken("", "valid-server-token", "")
+			},
+			expectedResult: true,
+		},
+		{
+			name: "invalid-token-with-registered-server-issuer",
+			authOption: AuthOption{
+				Sources: []TokenSource{Header},
+				Issuers: []TokenIssuer{RegisteredServer},
+			},
+			setupMock: func() {
+				mock.RegisteredServerCheckFunc = func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
+					if token == "valid-server-token" {
+						ctx.Set("AuthMethod", "registered-server-token")
+						return nil
+					}
+					return errors.New(fmt.Sprint("Invalid Token: ", token))
+				}
+			},
+			tokenSetup: func() *gin.Context {
+				return createContextWithToken("", "invalid-server-token", "")
+			},
+			expectedResult: false,
+			expectedStatus: 403,
+		},
+		{
+			name: "valid-token-with-multiple-issuers-including-registered-server",
+			authOption: AuthOption{
+				Sources: []TokenSource{Header},
+				Issuers: []TokenIssuer{FederationIssuer, LocalIssuer, RegisteredServer},
+			},
+			setupMock: func() {
+				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
+					return errors.New("Not a federation token")
+				}
+				mock.IssuerCheckFunc = func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
+					return errors.New("Not a local issuer token")
+				}
+				mock.RegisteredServerCheckFunc = func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
+					if token == "server-token" {
+						ctx.Set("AuthMethod", "registered-server-token")
+						return nil
+					}
+					return errors.New("Not a registered server token")
+				}
+			},
+			tokenSetup: func() *gin.Context {
+				return createContextWithToken("", "server-token", "")
+			},
+			expectedResult: true,
 		},
 	}
 

@@ -110,6 +110,13 @@ description: >-
   The client attempted to contact a server but the connection was reset by the remote peer.
   This is often a transient network error that can be resolved by retrying.
 retryable: true
+---
+type: Contact.ConnectionSetup
+code: 3006
+clientExitCode: 6
+description: >-
+  The client attempted to establish a connection to the server but failed before the request could be completed.
+retryable: true
 
 ############################
 #   Authorization Errors   #
@@ -164,28 +171,28 @@ retryable: true
 ---
 type: Transfer.StoppedTransfer
 code: 6001
-clientExitCode: 11
+clientExitCode: 9
 description: >-
   The client started transferring file(s) but it got cancelled by Pelican as stopped transferring data.
 retryable: true
 ---
 type: Transfer.SlowTransfer
 code: 6002
-clientExitCode: 11
+clientExitCode: 9
 description: >-
   The client started transferring data but the transfer was slower than the minimum configured timeout rate.
 retryable: true
 ---
 type: Transfer.TimedOut
 code: 6003
-clientExitCode: 11
+clientExitCode: 9
 description: >-
   The client started transferring data but the transfer timed out.
 retryable: true
 ---
 type: Transfer.HeaderTimeout
 code: 6004
-clientExitCode: 11
+clientExitCode: 9
 description: >-
   The client attempted to contact the server but timed out waiting for response headers.
   This indicates the server did not respond before the header timeout threshold.
@@ -193,8 +200,16 @@ retryable: true
 ---
 type: Transfer.DirectorTimeout
 code: 6005
-clientExitCode: 11
+clientExitCode: 9
 description: >-
   The client timed out while querying the director for namespace information.
   This indicates the director did not respond before the timeout threshold.
+retryable: true
+---
+type: Transfer.ChecksumMismatch
+code: 6006
+clientExitCode: 9
+description: >-
+  The client successfully transferred the file but the checksum computed by the client
+  did not match the checksum reported by the server.
 retryable: true

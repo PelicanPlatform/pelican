@@ -24,15 +24,16 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func TestFilterNsAdsForCache(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	tests := []struct {
 		desc          string
 		permittedNS   []string
@@ -133,9 +134,9 @@ func TestFilterNsAdsForCache(t *testing.T) {
 			// We don't bother passing info to the federation mock server
 			// because we only need it to be queryable (not to be correct)
 			test_utils.MockFederationRoot(t, nil, nil)
-			viper.Set("Federation.DirectorURL", ts.URL)
+			require.NoError(t, param.Set("Federation.DirectorURL", ts.URL))
 			if testInput.permittedNS != nil {
-				viper.Set("Cache.PermittedNamespaces", testInput.permittedNS)
+				require.NoError(t, param.Set("Cache.PermittedNamespaces", testInput.permittedNS))
 			}
 			defer server_utils.ResetTestState()
 

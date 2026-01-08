@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -169,16 +168,16 @@ func SetupMockServiceNameDB(t *testing.T) {
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err, "opening in-memory sqlite DB")
 	ServerDatabase = mockDB
-	err = ServerDatabase.AutoMigrate(&server_structs.ServiceName{})
+	err = ServerDatabase.AutoMigrate(&server_structs.ServerLocalMetadata{})
 	require.NoError(t, err, "migrating ServiceName schema")
 }
 
 func TeardownMockServiceNameDB(t *testing.T) {
-	err := ServerDatabase.Migrator().DropTable(&server_structs.ServiceName{})
+	err := ServerDatabase.Migrator().DropTable(&server_structs.ServerLocalMetadata{})
 	require.NoError(t, err, "dropping ServiceName table")
 }
 
-func TestUpsertServiceName(t *testing.T) {
+func TestUpsertServerLocalMetadata(t *testing.T) {
 	config.ResetConfig()
 	SetupMockServiceNameDB(t)
 	t.Cleanup(func() {
@@ -187,46 +186,50 @@ func TestUpsertServiceName(t *testing.T) {
 	})
 
 	const name1 = "server-one"
-	origType := server_structs.NewServerType()
-	origType.SetString("origin")
-	cacheType := server_structs.NewServerType()
-	cacheType.SetString("cache")
+	const id1 = "test123"
+	buildMetadata := func(name, id string, isOrigin, isCache bool) server_structs.ServerRegistration {
+		return server_structs.ServerRegistration{
+			ID:       id,
+			Name:     name,
+			IsOrigin: isOrigin,
+			IsCache:  isCache,
+		}
+	}
 
 	t.Run("insert-when-empty", func(t *testing.T) {
-		typ := server_structs.NewServerType()
-		typ.SetString("origin")
-		err := UpsertServiceName(name1, typ)
+		err := UpsertServerLocalMetadata(buildMetadata(name1, id1, true, false))
 		require.NoError(t, err)
 
-		var got server_structs.ServiceName
-		err = ServerDatabase.First(&got, "name = ?", name1).Error
+		var got server_structs.ServerLocalMetadata
+		err = ServerDatabase.First(&got, "id = ?", id1).Error
 		require.NoError(t, err)
 
 		assert.Equal(t, name1, got.Name)
-		assert.Equal(t, strings.ToLower(typ.String()), got.Type)
+		assert.Equal(t, id1, got.ID)
+		assert.Equal(t, "origin", got.Type)
 		assert.WithinDuration(t, time.Now().UTC(), got.CreatedAt, time.Second)
 		assert.WithinDuration(t, time.Now().UTC(), got.UpdatedAt, time.Second)
 	})
 
 	t.Run("update-existing-record", func(t *testing.T) {
 		// seed initial
-		err := UpsertServiceName(name1, origType)
+		err := UpsertServerLocalMetadata(buildMetadata(name1, id1, true, false))
 		require.NoError(t, err)
 
 		// capture original timestamps & ID
-		var original server_structs.ServiceName
+		var original server_structs.ServerLocalMetadata
 		require.NoError(t,
-			ServerDatabase.First(&original, "name = ?", name1).Error,
+			ServerDatabase.First(&original, "id = ?", id1).Error,
 		)
 
-		// Upsert with same name
+		// Upsert with same ID
 		time.Sleep(10 * time.Millisecond) // ensure UpdatedAt is different
-		err = UpsertServiceName(name1, origType)
+		err = UpsertServerLocalMetadata(buildMetadata(name1, id1, true, false))
 		require.NoError(t, err)
 
-		var updated server_structs.ServiceName
+		var updated server_structs.ServerLocalMetadata
 		require.NoError(t,
-			ServerDatabase.First(&updated, "name = ?", name1).Error,
+			ServerDatabase.First(&updated, "id = ?", id1).Error,
 		)
 
 		assert.Equal(t, original.ID, updated.ID, "ID should be unchanged")
@@ -234,24 +237,23 @@ func TestUpsertServiceName(t *testing.T) {
 			"CreatedAt should be unchanged")
 		assert.True(t, updated.UpdatedAt.After(original.UpdatedAt),
 			"UpdatedAt should be newer")
-		assert.Equal(t, strings.ToLower(origType.String()), updated.Type, "Type should not be updated")
+		assert.Equal(t, "origin", updated.Type, "Type should remain origin")
 	})
 
-	t.Run("insert-second-record-when-name-differs", func(t *testing.T) {
-		err := UpsertServiceName(name1, origType)
-		require.NoError(t, err)
-		err = UpsertServiceName("server-two", cacheType)
+	t.Run("insert-second-record-when-id-differs", func(t *testing.T) {
+		id2 := "test223"
+		err := UpsertServerLocalMetadata(buildMetadata("server-two", id2, false, true))
 		require.NoError(t, err)
 
 		var count int64
 		require.NoError(t,
-			ServerDatabase.Model(&server_structs.ServiceName{}).Count(&count).Error,
+			ServerDatabase.Model(&server_structs.ServerLocalMetadata{}).Count(&count).Error,
 		)
 		assert.Equal(t, int64(2), count, "should have two distinct rows")
 	})
 }
 
-func TestGetServiceName(t *testing.T) {
+func TestGetServerName(t *testing.T) {
 	config.ResetConfig()
 	SetupMockServiceNameDB(t)
 	t.Cleanup(func() {
@@ -260,21 +262,21 @@ func TestGetServiceName(t *testing.T) {
 	})
 
 	t.Run("empty-table", func(t *testing.T) {
-		_, err := GetServiceName()
+		_, err := GetServerLocalMetadata()
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, gorm.ErrRecordNotFound))
 	})
 
 	t.Run("returns-latest-by-updated_at", func(t *testing.T) {
 		now := time.Now().UTC()
-		old := server_structs.ServiceName{
+		old := server_structs.ServerLocalMetadata{
 			ID:        uuid.NewString(),
 			Name:      "old-server",
 			Type:      "cache",
 			CreatedAt: now.Add(-2 * time.Hour),
 			UpdatedAt: now.Add(-2 * time.Hour),
 		}
-		recent := server_structs.ServiceName{
+		recent := server_structs.ServerLocalMetadata{
 			ID:        uuid.NewString(),
 			Name:      "new-server",
 			Type:      "origin",
@@ -284,9 +286,9 @@ func TestGetServiceName(t *testing.T) {
 		require.NoError(t, ServerDatabase.Create(&old).Error)
 		require.NoError(t, ServerDatabase.Create(&recent).Error)
 
-		got, err := GetServiceName()
+		got, err := GetServerLocalMetadata()
 		require.NoError(t, err)
-		assert.Equal(t, "new-server", got)
+		assert.Equal(t, "new-server", got.Name)
 	})
 }
 

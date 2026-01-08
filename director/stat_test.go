@@ -32,14 +32,13 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -70,10 +69,12 @@ func initMockStatUtils() {
 }
 
 func TestQueryServersForObject(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	server_utils.ResetTestState()
-	viper.Set("Director.MinStatResponse", 1)
-	viper.Set("Director.MaxStatResponse", 1)
-	viper.Set("Director.StatTimeout", time.Microsecond*200)
+	require.NoError(t, param.Set("Director.MinStatResponse", 1))
+	require.NoError(t, param.Set("Director.MaxStatResponse", 1))
+	require.NoError(t, param.Set("Director.StatTimeout", time.Microsecond*200))
 
 	// Preserve existing serverAds for other test funcs
 	oldAds := serverAds
@@ -507,8 +508,10 @@ func TestQueryServersForObject(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		viper.Set("Director.MaxStatResponse", 2)
-		defer viper.Set("Director.MaxStatResponse", 1)
+		require.NoError(t, param.Set("Director.MaxStatResponse", 2))
+		t.Cleanup(func() {
+			require.NoError(t, param.Set("Director.MaxStatResponse", 1))
+		})
 
 		mockTTLCache()
 		initMockStatUtils()
@@ -533,8 +536,10 @@ func TestQueryServersForObject(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		viper.Set("Director.MaxStatResponse", 3)
-		defer viper.Set("Director.MaxStatResponse", 1)
+		require.NoError(t, param.Set("Director.MaxStatResponse", 3))
+		t.Cleanup(func() {
+			require.NoError(t, param.Set("Director.MaxStatResponse", 1))
+		})
 
 		mockTTLCache()
 		initMockStatUtils()
@@ -560,10 +565,14 @@ func TestQueryServersForObject(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		viper.Set("Director.MinStatResponse", 3)
-		viper.Set("Director.MaxStatResponse", 4)
-		defer viper.Set("Director.MinStatResponse", 1)
-		defer viper.Set("Director.MaxStatResponse", 1)
+		require.NoError(t, param.Set("Director.MinStatResponse", 3))
+		require.NoError(t, param.Set("Director.MaxStatResponse", 4))
+		t.Cleanup(func() {
+			require.NoError(t, param.Set("Director.MinStatResponse", 1))
+		})
+		t.Cleanup(func() {
+			require.NoError(t, param.Set("Director.MaxStatResponse", 1))
+		})
 
 		mockTTLCache()
 		initMockStatUtils()
@@ -585,10 +594,14 @@ func TestQueryServersForObject(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		viper.Set("Director.MinStatResponse", 3)
-		viper.Set("Director.MaxStatResponse", 4)
-		defer viper.Set("Director.MinStatResponse", 1)
-		defer viper.Set("Director.MaxStatResponse", 1)
+		require.NoError(t, param.Set("Director.MinStatResponse", 3))
+		require.NoError(t, param.Set("Director.MaxStatResponse", 4))
+		t.Cleanup(func() {
+			require.NoError(t, param.Set("Director.MinStatResponse", 1))
+		})
+		t.Cleanup(func() {
+			require.NoError(t, param.Set("Director.MaxStatResponse", 1))
+		})
 
 		mockTTLCache()
 		initMockStatUtils()
@@ -814,9 +827,11 @@ func TestQueryServersForObject(t *testing.T) {
 }
 
 func TestCache(t *testing.T) {
-	viper.Reset()
-	viper.Set("Logging.Level", "Debug")
-	viper.Set("ConfigDir", t.TempDir())
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	require.NoError(t, param.Reset())
+	require.NoError(t, param.Set("Logging.Level", "Debug"))
+	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
 
 	var reqCounter atomic.Int32
 
@@ -835,8 +850,8 @@ func TestCache(t *testing.T) {
 	}))
 	defer server.Close()
 
-	viper.Set("Server.ExternalWebUrl", server.URL)
-	viper.Set("IssuerUrl", server.URL)
+	require.NoError(t, param.Set("Server.ExternalWebUrl", server.URL))
+	require.NoError(t, param.Set("IssuerUrl", server.URL))
 	realServerUrl, err := url.Parse(server.URL)
 	require.NoError(t, err)
 
@@ -859,7 +874,7 @@ func TestCache(t *testing.T) {
 	)
 	initMockStatUtils()
 	t.Cleanup(cleanupMock)
-	require.NoError(t, config.InitServer(context.Background(), server_structs.DirectorType))
+	require.NoError(t, initServerForTest(t, context.Background(), server_structs.DirectorType))
 
 	t.Run("repeated-cache-access-found", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -913,6 +928,8 @@ func TestCache(t *testing.T) {
 }
 
 func TestSendHeadReq(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	server_utils.ResetTestState()
 
 	// Start a local HTTP server
@@ -940,8 +957,8 @@ func TestSendHeadReq(t *testing.T) {
 	}))
 	defer server.Close()
 
-	viper.Set("Server.ExternalWebUrl", server.URL)
-	viper.Set("IssuerUrl", server.URL)
+	require.NoError(t, param.Set("Server.ExternalWebUrl", server.URL))
+	require.NoError(t, param.Set("IssuerUrl", server.URL))
 	realServerUrl, err := url.Parse(server.URL)
 	require.NoError(t, err)
 
@@ -950,11 +967,11 @@ func TestSendHeadReq(t *testing.T) {
 
 	tDir := t.TempDir()
 	kDir := filepath.Join(tDir, "testKeyDir")
-	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
+	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), kDir))
 
-	viper.Set("ConfigDir", t.TempDir())
+	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
 
-	err = config.InitServer(context.Background(), server_structs.DirectorType)
+	err = initServerForTest(t, context.Background(), server_structs.DirectorType)
 	require.NoError(t, err)
 
 	t.Run("correct-input-gives-no-error", func(t *testing.T) {

@@ -37,7 +37,6 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -65,6 +64,7 @@ var (
 // The download is done twice -- once to verify functionality and once
 // as a cache hit.
 func TestFedPublicGet(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
@@ -90,6 +90,7 @@ func TestFedPublicGet(t *testing.T) {
 
 // Test the local cache library on an authenticated GET.
 func TestFedAuthGet(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	ft := fed_test_utils.NewFedTest(t, authOriginCfg)
 
@@ -122,6 +123,7 @@ func TestFedAuthGet(t *testing.T) {
 
 // Test a raw HTTP request (no Pelican client) works with the local cache
 func TestHttpReq(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	ft := fed_test_utils.NewFedTest(t, authOriginCfg)
 
@@ -148,6 +150,7 @@ func TestHttpReq(t *testing.T) {
 // Ensure that the cache.sock existing doesn't prevent the local cache
 // from starting up.
 func TestDirtyStartup(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
 	socketPath := filepath.Join(t.TempDir(), "lc.s")
@@ -182,6 +185,7 @@ func TestDirtyStartup(t *testing.T) {
 
 // Test a raw HTTP request (no Pelican client) returns a 404 for an unknown object
 func TestHttpFailures(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	fed_test_utils.NewFedTest(t, authOriginCfg)
 
@@ -226,6 +230,7 @@ func TestHttpFailures(t *testing.T) {
 
 // Test that the client library (with authentication) works with the local cache
 func TestClient(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	ft := fed_test_utils.NewFedTest(t, authOriginCfg)
 
@@ -385,6 +390,7 @@ func TestClient(t *testing.T) {
 
 // Test that HEAD requests to the local cache return the correct result
 func TestStat(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
@@ -410,6 +416,7 @@ func TestStat(t *testing.T) {
 //
 // This triggers multiple internal requests to wait on the slow download
 func TestLargeFile(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	tmpDir := t.TempDir()
 
 	server_utils.ResetTestState()
@@ -458,11 +465,12 @@ func TestLargeFile(t *testing.T) {
 // Create a federation then SIGSTOP the origin to prevent it from responding.
 // Ensure the various client timeouts are reported correctly up to the user
 func TestOriginUnresponsive(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	tmpDir := t.TempDir()
 
 	server_utils.ResetTestState()
-	viper.Set("Transport.ResponseHeaderTimeout", "5s")
-	viper.Set("Logging.Level", "debug")
+	require.NoError(t, param.Set("Transport.ResponseHeaderTimeout", "5s"))
+	require.NoError(t, param.Set("Logging.Level", "debug"))
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
 	cacheUrl := &url.URL{

@@ -198,7 +198,12 @@ func (lc *LocalCache) LaunchListener(ctx context.Context, egrp *errgroup.Group) 
 	})
 	egrp.Go(func() error {
 		<-ctx.Done()
-		return srv.Shutdown(ctx)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		return nil
 	})
 
 	if err = os.Rename(startupSockName, socketName); err != nil {

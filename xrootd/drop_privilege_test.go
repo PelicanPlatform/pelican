@@ -28,12 +28,12 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/origin"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -123,12 +123,24 @@ func generateTestCert(runDir string) (certPath, keyPath string, err error) {
 	certPath = filepath.Join(runDir, "cert.pem")
 	keyPath = filepath.Join(runDir, "key.pem")
 
-	viper.Set("IssuerKey", keyPath)
-	viper.Set("Server.TLSCertificateChain", certPath)
-	viper.Set("Server.TLSKey", keyPath)
-	viper.Set("Server.TLSCACertificateFile", filepath.Join(runDir, "ca.pem"))
-	viper.Set("Server.TLSCAKey", filepath.Join(runDir, "ca-key.pem"))
-	viper.Set("Server.Hostname", "localhost")
+	if err = param.Set("IssuerKey", keyPath); err != nil {
+		return
+	}
+	if err = param.Set("Server.TLSCertificateChain", certPath); err != nil {
+		return
+	}
+	if err = param.Set("Server.TLSKey", keyPath); err != nil {
+		return
+	}
+	if err = param.Set("Server.TLSCACertificateFile", filepath.Join(runDir, "ca.pem")); err != nil {
+		return
+	}
+	if err = param.Set("Server.TLSCAKey", filepath.Join(runDir, "ca-key.pem")); err != nil {
+		return
+	}
+	if err = param.Set("Server.Hostname", "localhost"); err != nil {
+		return
+	}
 
 	err = config.GenerateCert() // GenerateCert uses the viper config set above
 
@@ -136,6 +148,7 @@ func generateTestCert(runDir string) (certPath, keyPath string, err error) {
 }
 
 func TestDropPrivilegeSignaling(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
@@ -166,9 +179,9 @@ func TestDropPrivilegeSignaling(t *testing.T) {
 			})
 			t.Log("Global origin FDs: ", g_origin_fds)
 			runDir := t.TempDir()
-			viper.Set("Origin.RunLocation", runDir)
-			viper.Set("Cache.RunLocation", runDir)
-			viper.Set("ConfigDir", runDir)
+			require.NoError(t, param.Set("Origin.RunLocation", runDir))
+			require.NoError(t, param.Set("Cache.RunLocation", runDir))
+			require.NoError(t, param.Set("ConfigDir", runDir))
 
 			pelicanDir := filepath.Join(runDir, "pelican")
 			err := os.Mkdir(pelicanDir, 0755)
@@ -206,7 +219,7 @@ func TestDropPrivilegeSignaling(t *testing.T) {
 			// The ready channel signals to the test function that the mock XRootD process is ready to receive data (the command byte)
 			<-ready
 
-			viper.Set("Server.DropPrivileges", true)
+			require.NoError(t, param.Set("Server.DropPrivileges", true))
 
 			// Send the command byte BEFORE calling dropPrivilegeCopy
 			command := []byte{byte(CmdUpdateCA)}

@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, University of Nebraska-Lincoln
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -81,6 +81,10 @@ var (
 
 	// ErrObjectNotFound is returned when the requested remote object does not exist.
 	ErrObjectNotFound = errors.New("remote object not found")
+
+	// maxWebDavRetries is the maximum number of attempts (including the initial attempt)
+	// for WebDAV operations that encounter idle connection errors.
+	maxWebDavRetries = 2
 )
 
 type (
@@ -470,15 +474,6 @@ func checksumValueToHttpDigest(checksumType ChecksumType, checksumValue []byte) 
 	return "(unknown checksum type)"
 }
 
-func (e *ChecksumMismatchError) Error() string {
-	return fmt.Sprintf(
-		"checksum mismatch for %s; client computed %s, server reported %s",
-		HttpDigestFromChecksum(e.Info.Algorithm),
-		checksumValueToHttpDigest(e.Info.Algorithm, e.Info.Value),
-		checksumValueToHttpDigest(e.Info.Algorithm, e.ServerValue),
-	)
-}
-
 // Reset the memory-cached copy of the HTCondor job ad
 //
 // The client will search through the process's environment to find
@@ -544,131 +539,6 @@ func mergeCancel(ctx1, ctx2 context.Context) (context.Context, context.CancelFun
 	}
 }
 
-func (e *HeaderTimeoutError) Error() string {
-	return "timeout waiting for HTTP response (TCP connection successful)"
-}
-
-func (e *HeaderTimeoutError) Is(target error) bool {
-	_, ok := target.(*HeaderTimeoutError)
-	return ok
-}
-
-func (e *NetworkResetError) Error() string {
-	return "the existing TCP connection was broken (potentially caused by server restart or NAT/firewall issue)"
-
-}
-
-func (e *StoppedTransferError) Error() (errMsg string) {
-	if e.StoppedTime > 0 {
-		errMsg = "no progress for more than " + e.StoppedTime.Truncate(time.Millisecond).String()
-	} else {
-		errMsg = "no progress"
-	}
-	errMsg += " after " + ByteCountSI(e.BytesTransferred) + " transferred"
-	if !e.Upload {
-		if e.CacheHit {
-			errMsg += " (cache hit)"
-		} else {
-			errMsg += " (cache miss)"
-		}
-	}
-	return
-}
-
-func (e *StoppedTransferError) Is(target error) bool {
-	_, ok := target.(*StoppedTransferError)
-	return ok
-}
-
-func (e *allocateMemoryError) Error() string {
-	return e.Err.Error()
-}
-
-func (e *allocateMemoryError) Unwrap() error {
-	return e.Err
-}
-
-func (e *allocateMemoryError) Is(target error) bool {
-	_, ok := target.(*allocateMemoryError)
-	return ok
-}
-
-func (e *dirListingNotSupportedError) Error() string {
-	return e.Err.Error()
-}
-
-func (e *dirListingNotSupportedError) Unwrap() error {
-	return e.Err
-}
-
-func (e *dirListingNotSupportedError) Is(target error) bool {
-	_, ok := target.(*dirListingNotSupportedError)
-	return ok
-}
-
-func (e *InvalidByteInChunkLengthError) Error() string {
-	return e.Err.Error()
-}
-
-func (e *InvalidByteInChunkLengthError) Unwrap() error {
-	return e.Err
-}
-
-func (e *InvalidByteInChunkLengthError) Is(target error) bool {
-	_, ok := target.(*InvalidByteInChunkLengthError)
-	return ok
-}
-
-func (e *UnexpectedEOFError) Error() string {
-	return e.Err.Error()
-}
-
-func (e *UnexpectedEOFError) Unwrap() error {
-	return e.Err
-}
-
-func (e *UnexpectedEOFError) Is(target error) bool {
-	_, ok := target.(*UnexpectedEOFError)
-	return ok
-}
-
-type HttpErrResp struct {
-	Code int
-	Str  string
-	Err  error
-}
-
-func (e *HttpErrResp) Error() string {
-	if e.Err != nil {
-		return e.Str + ": " + e.Err.Error()
-	}
-	return e.Str
-}
-
-func (e *HttpErrResp) Unwrap() error {
-	return e.Err
-}
-
-func (e *SlowTransferError) Error() (errMsg string) {
-	errMsg = "cancelled transfer, too slow; detected speed=" +
-		ByteCountSI(e.BytesPerSecond) +
-		"/s, total transferred=" +
-		ByteCountSI(e.BytesTransferred) +
-		", total transfer time=" +
-		e.Duration.Round(time.Millisecond).String()
-	if e.CacheAge == 0 {
-		errMsg += ", cache miss"
-	} else if e.CacheAge > 0 {
-		errMsg += ", cache hit"
-	}
-	return
-}
-
-func (e *SlowTransferError) Is(target error) bool {
-	_, ok := target.(*SlowTransferError)
-	return ok
-}
-
 // Determines whether or not we can interact with the site HTTP proxy
 func isProxyEnabled() bool {
 	if _, isSet := os.LookupEnv("http_proxy"); !isSet {
@@ -685,80 +555,6 @@ func CanDisableProxy() bool {
 	return !param.Client_DisableProxyFallback.GetBool()
 }
 
-func (e *ConnectionSetupError) Error() string {
-	if e.Err != nil {
-		if len(e.URL) > 0 {
-			return "failed connection setup to " + e.URL + ": " + e.Err.Error()
-		} else {
-			return "failed connection setup: " + e.Err.Error()
-		}
-	} else {
-		return "Connection to remote server failed"
-	}
-
-}
-
-func (e *ConnectionSetupError) Unwrap() error {
-	return e.Err
-}
-
-func (e *ConnectionSetupError) Is(target error) bool {
-	_, ok := target.(*ConnectionSetupError)
-	return ok
-}
-
-func (e *StatusCodeError) Error() string {
-	if int(*e) == http.StatusGatewayTimeout {
-		return "cache timed out waiting on origin"
-	}
-	return fmt.Sprintf("server returned %d %s", int(*e), http.StatusText(int(*e)))
-}
-
-func (e *StatusCodeError) Is(target error) bool {
-	sce, ok := target.(*StatusCodeError)
-	if !ok {
-		return false
-	}
-	return int(*sce) == int(*e)
-}
-
-func (tae *TransferAttemptError) Error() (errMsg string) {
-	errMsg = "failed download from "
-	if tae.isUpload {
-		errMsg = "failed upload to "
-	}
-	if tae.serviceHost == "" {
-		errMsg += "unknown host"
-	} else {
-		errMsg += tae.serviceHost
-	}
-	if tae.isProxyErr {
-		if tae.proxyHost == "" {
-			errMsg += " due to unknown proxy"
-		} else {
-			errMsg += " due to proxy " + tae.proxyHost
-		}
-	} else if tae.proxyHost != "" {
-		errMsg += "+proxy=" + tae.proxyHost
-	}
-	if tae.err != nil {
-		errMsg += ": " + tae.err.Error()
-	}
-	return
-}
-
-func (tae *TransferAttemptError) Unwrap() error {
-	return tae.err
-}
-
-func (tae *TransferAttemptError) Is(target error) bool {
-	other, ok := target.(*TransferAttemptError)
-	if !ok {
-		return false
-	}
-	return tae.isUpload == other.isUpload && tae.serviceHost == other.serviceHost && tae.isProxyErr == other.isProxyErr && tae.proxyHost == other.proxyHost
-}
-
 func compatToDuration(dur time.Duration, paramName string) (result time.Duration) {
 	// Backward compat: some parameters were previously integers, in seconds.
 	// If you give viper an integer without a suffix then it interprets it as a
@@ -769,17 +565,6 @@ func compatToDuration(dur time.Duration, paramName string) (result time.Duration
 		result = time.Duration(dur.Nanoseconds()) * time.Second
 	} else {
 		result = dur
-	}
-	return
-}
-
-func newTransferAttemptError(service string, proxy string, isProxyErr bool, isUpload bool, err error) (tae *TransferAttemptError) {
-	tae = &TransferAttemptError{
-		serviceHost: service,
-		proxyHost:   proxy,
-		isProxyErr:  isProxyErr,
-		isUpload:    isUpload,
-		err:         err,
 	}
 	return
 }
@@ -2218,9 +2003,6 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 
 		if err != nil {
 			log.WithFields(fields).Debugln("Failed to download from", transferEndpoint.Url, ":", err)
-			var ope *net.OpError
-			var cse *ConnectionSetupError
-			var pde *PermissionDeniedError
 			proxyStr, _ := os.LookupEnv("http_proxy")
 			if !transferEndpoint.Proxy {
 				proxyStr = ""
@@ -2229,50 +2011,11 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			if transferEndpointUrl.Scheme == "unix" {
 				serviceStr = "local-cache"
 			}
-			if errors.As(err, &ope) && ope.Op == "proxyconnect" {
-				if ope.Addr != nil {
-					proxyStr += "(" + ope.Addr.String() + ")"
-				}
-				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, true, false, err)
-			} else if errors.As(err, &pde) {
-				// If the token is expired we can retry because we will just get a new token
-				// otherwise something is wrong with the token
-				// We use the same token that was used to make the request to check if it is expired
-				expired, expiration, err := tokenIsExpired(tokenContents)
-				if err != nil {
-					pde.message = "Permission denied: token could not be parsed"
-					pde.expired = false
-				} else {
-					if expired {
-						pde.message = "Permission denied: token expired at " + expiration.Format(time.RFC3339)
-						pde.expired = true
-					} else {
-						pde.message = "Permission denied: token appears valid but was rejected by the server"
-						pde.expired = false
-					}
-				}
-				// Re-wrap with PelicanError after modifying the fields
-				wrappedPde := error_codes.NewAuthorizationError(pde)
-				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, wrappedPde)
-			} else if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
-				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, &NetworkResetError{})
-			} else if errors.As(err, &cse) {
-				if sce, ok := cse.Unwrap().(*StatusCodeError); ok {
-					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, sce)
-				} else if ue, ok := cse.Unwrap().(*url.Error); ok {
-					httpErr := ue.Unwrap()
-					if httpErr.Error() == "net/http: timeout awaiting response headers" {
-						headerTimeoutErr := error_codes.NewTransfer_HeaderTimeoutError(&HeaderTimeoutError{})
-						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, headerTimeoutErr)
-					} else {
-						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, httpErr)
-					}
-				} else {
-					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
-				}
-			} else {
-				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
+			wrappedErr, isProxyErr, modifiedProxyStr := wrapDownloadError(err, transferEndpoint.Url.String(), tokenContents)
+			if isProxyErr {
+				proxyStr += modifiedProxyStr
 			}
+			attempt.Error = newTransferAttemptError(serviceStr, proxyStr, isProxyErr, false, wrappedErr)
 			xferErrors.AddPastError(attempt.Error, endTime)
 		}
 		transferResults.Attempts = append(transferResults.Attempts, attempt)
@@ -2348,7 +2091,8 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 							},
 							ServerValue: checksumInfo.Value,
 						}
-						transferResults.Error = mismatchErr
+						// Wrap ChecksumMismatchError as Transfer.ChecksumMismatch (post-transfer validation failure)
+						transferResults.Error = error_codes.NewTransfer_ChecksumMismatchError(mismatchErr)
 						log.WithFields(fields).Errorln(transferResults.Error)
 						break
 					} else {
@@ -2762,9 +2506,16 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		if errors.As(err, &cam) && cam == syscall.ENOMEM {
 			// ENOMEM is error from os for unable to allocate memory
 			err = &allocateMemoryError{Err: err}
-		} else {
+		} else if isTLSCertificateValidationError(err) {
+			// TLS certificate validation error - wrap as SpecificationError (configuration issue, not retryable)
+			err = error_codes.NewSpecificationError(err)
+		} else if isContextDeadlineError(err) || isDNSError(err) || (isTLSError(err) && !isTLSCertificateValidationError(err)) || isDialError(err) {
+			// Connection setup errors (timeout, DNS, TLS handshake, dial) - wrap as ConnectionSetupError (retryable)
 			err = &ConnectionSetupError{Err: err}
 		}
+		// Note: Any other errors from client.Do that don't match the above conditions will remain unwrapped for now.
+		// In practice, client.Do primarily returns connection-related errors, so most should be caught above.
+		// TODO: Wrap any other errors from client.Do with appropriate PelicanError types.
 		log.WithFields(fields).Errorln("Failed to download:", err)
 		return
 	}
@@ -2784,17 +2535,10 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 			return 0, 0, -1, serverVersion, error_codes.NewAuthorizationError(&PermissionDeniedError{})
 		}
 		sce := StatusCodeError(resp.StatusCode)
-		err = &sce
+		// Wrap StatusCodeError with appropriate PelicanError based on status code
+		wrappedErr := wrapStatusCodeError(&sce)
 		httpErr := &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
-			resp.StatusCode, strings.TrimSpace(bodyStr)), err}
-		// Wrap specific status codes with appropriate PelicanError types
-		if resp.StatusCode == http.StatusNotFound {
-			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
-				resp.StatusCode, strings.TrimSpace(bodyStr)), error_codes.NewSpecification_FileNotFoundError(err)}
-		} else if resp.StatusCode == http.StatusGatewayTimeout {
-			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
-				resp.StatusCode, strings.TrimSpace(bodyStr)), error_codes.NewTransfer_TimedOutError(err)}
-		}
+			resp.StatusCode, strings.TrimSpace(bodyStr)), wrappedErr}
 		return 0, 0, -1, serverVersion, httpErr
 	}
 
@@ -3033,7 +2777,7 @@ Loop:
 		if errors.Is(err, syscall.ECONNREFUSED) ||
 			errors.Is(err, syscall.ECONNRESET) ||
 			errors.Is(err, syscall.ECONNABORTED) {
-			err = &ConnectionSetupError{URL: req.URL.String()}
+			err = &ConnectionSetupError{URL: req.URL.String(), Err: err}
 			return
 		}
 		// Add a check for InvalidByteInChunkLengthError
@@ -3072,20 +2816,17 @@ Loop:
 			// We will update the error message in the caller
 			return 0, 0, -1, serverVersion, error_codes.NewAuthorizationError(&PermissionDeniedError{})
 		}
+		var wrappedErr error
 		if err == nil {
 			sce := StatusCodeError(resp.StatusCode)
-			err = &sce
+			// Wrap StatusCodeError with appropriate PelicanError based on status code
+			wrappedErr = wrapStatusCodeError(&sce)
+		} else {
+			// If err is already set, use it as-is (might be from trailer status)
+			wrappedErr = err
 		}
 		httpErr := &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
-			resp.StatusCode), err}
-		// Wrap specific status codes with appropriate PelicanError types
-		if resp.StatusCode == http.StatusNotFound {
-			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
-				resp.StatusCode), error_codes.NewSpecification_FileNotFoundError(err)}
-		} else if resp.StatusCode == http.StatusGatewayTimeout {
-			httpErr = &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
-				resp.StatusCode), error_codes.NewTransfer_TimedOutError(err)}
-		}
+			resp.StatusCode), wrappedErr}
 		return 0, 0, -1, serverVersion, httpErr
 	}
 
@@ -3219,7 +2960,8 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	// Check if the remote object already exists using statHttp
 	// If the job is recursive, we skip this check as the check is already performed in walkDirUpload
 	// If the job is not recursive, we check if the object exists at the origin
-	if transfer.remoteURL != nil && transfer.job != nil && transfer.job.syncLevel != SyncNone && !transfer.job.recursive {
+	// Skip this check if Client.EnableOverwrites is enabled
+	if transfer.remoteURL != nil && transfer.job != nil && transfer.job.syncLevel != SyncNone && !transfer.job.recursive && !param.Client_EnableOverwrites.GetBool() {
 		remoteUrl, dirResp, token := transfer.job.remoteURL, transfer.job.dirResp, transfer.job.token
 		_, statErr := statHttp(remoteUrl, dirResp, token)
 		if statErr == nil {
@@ -3444,23 +3186,62 @@ Loop:
 			if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
 				log.Errorln("Got failure status code:", response.StatusCode)
 				sce := StatusCodeError(response.StatusCode)
+				// Wrap StatusCodeError with appropriate PelicanError based on status code
+				wrappedErr := wrapStatusCodeError(&sce)
 				lastError = &HttpErrResp{response.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
-					response.StatusCode), &sce}
+					response.StatusCode), wrappedErr}
 				break Loop
 			}
 			break Loop
 
 		case err := <-errorChan:
 			log.Errorln("Unexpected error when performing upload:", err)
+			var ope *net.OpError
 			var ue *url.Error
+			var cse *ConnectionSetupError
+			// Check for proxy connection errors first (may be wrapped in url.Error)
 			if errors.As(err, &ue) {
-				err = ue.Unwrap()
-				if err.Error() == "net/http: timeout awaiting response headers" {
+				innerErr := ue.Unwrap()
+				if ope, ok := innerErr.(*net.OpError); ok && ope.Op == "proxyconnect" {
+					// Wrap proxy connection error as Contact.ConnectionSetupError (code 3006, retryable)
+					proxyErr := &ConnectionSetupError{URL: request.URL.String(), Err: err}
+					err = error_codes.NewContact_ConnectionSetupError(proxyErr)
+				} else if innerErr.Error() == "net/http: timeout awaiting response headers" {
 					err = error_codes.NewTransfer_HeaderTimeoutError(&HeaderTimeoutError{})
+				} else {
+					// Restore original url.Error for further processing
+					err = ue
 				}
+			} else if errors.As(err, &ope) && ope.Op == "proxyconnect" {
+				// Direct proxy connection error (not wrapped in url.Error)
+				proxyErr := &ConnectionSetupError{URL: request.URL.String(), Err: err}
+				err = error_codes.NewContact_ConnectionSetupError(proxyErr)
+			} else if errors.As(err, &cse) {
+				// ConnectionSetupError already created in runPut - only check for special cases
+				innerErr := cse.Unwrap()
+				if isTLSCertificateValidationError(innerErr) {
+					// TLS certificate validation error - wrap as SpecificationError (configuration issue, not retryable)
+					err = error_codes.NewSpecificationError(err)
+				} else if ue, ok := innerErr.(*url.Error); ok {
+					httpErr := ue.Unwrap()
+					if httpErr.Error() == "net/http: timeout awaiting response headers" {
+						err = error_codes.NewTransfer_HeaderTimeoutError(&HeaderTimeoutError{})
+					} else {
+						// Wrap ConnectionSetupError even if it contains a url.Error (it's still a connection setup error)
+						err = error_codes.NewContact_ConnectionSetupError(cse)
+					}
+				} else {
+					// All other ConnectionSetupError cases - wrap as ConnectionSetupError (already identified as connection setup error)
+					err = error_codes.NewContact_ConnectionSetupError(cse)
+				}
+			} else if isContextDeadlineError(err) || isDNSError(err) || (isTLSError(err) && !isTLSCertificateValidationError(err)) || isDialError(err) {
+				// Connection setup errors (timeout, DNS, TLS handshake, dial) - wrap as ConnectionSetupError (retryable)
+				cse := &ConnectionSetupError{URL: request.URL.String(), Err: err}
+				err = error_codes.NewContact_ConnectionSetupError(cse)
 			}
 			if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
-				err = &NetworkResetError{}
+				// Wrap NetworkResetError as Contact.ConnectionReset (code 3005, retryable)
+				err = error_codes.NewContact_ConnectionResetError(&NetworkResetError{})
 			}
 			lastError = err
 			break Loop
@@ -3518,13 +3299,15 @@ Loop:
 				if checksumInfo.Algorithm == checksum {
 					found = true
 					if !bytes.Equal(checksumInfo.Value, computedValue) {
-						transferResult.Error = &ChecksumMismatchError{
+						mismatchErr := &ChecksumMismatchError{
 							Info: ChecksumInfo{
 								Algorithm: checksum,
 								Value:     computedValue,
 							},
 							ServerValue: checksumInfo.Value,
 						}
+						// Wrap ChecksumMismatchError as Transfer.ChecksumMismatch (post-transfer validation failure)
+						transferResult.Error = error_codes.NewTransfer_ChecksumMismatchError(mismatchErr)
 						log.WithFields(fields).Errorln(transferResult.Error)
 						break
 					} else {
@@ -3604,8 +3387,11 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
 			log.Errorln("Error with PUT:", err)
-			// Wrap TLS errors in a ConnectionSetupError
-			if strings.Contains(err.Error(), "certificate") || strings.Contains(err.Error(), "tls") {
+			// Wrap connection setup errors (timeout, DNS, TLS handshake, dial) in ConnectionSetupError
+			// Note: TLS certificate validation errors are handled separately (not retryable)
+			if isTLSCertificateValidationError(err) {
+				// TLS certificate validation error - leave unwrapped, will be wrapped as SpecificationError in upload error handler
+			} else if isContextDeadlineError(err) || isDNSError(err) || (isTLSError(err) && !isTLSCertificateValidationError(err)) || isDialError(err) {
 				err = &ConnectionSetupError{URL: request.URL.String(), Err: err}
 			}
 		}
@@ -3686,6 +3472,10 @@ func skipUpload(job *TransferJob, localPath string, remoteUrl *pelican_url.Pelic
 	if job.syncLevel == SyncNone {
 		return false
 	}
+	// Skip the synchronization check if overwrites are enabled
+	if param.Client_EnableOverwrites.GetBool() {
+		return false
+	}
 
 	localInfo, err := os.Stat(localPath)
 	if err != nil {
@@ -3728,13 +3518,23 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 	if err := job.job.ctx.Err(); err != nil {
 		return err
 	}
-	infos, err := client.ReadDir(remotePath)
+	var infos []fs.FileInfo
+	err := retryWebDavOperation("ReadDir", func() error {
+		var err error
+		infos, err = client.ReadDir(remotePath)
+		return err
+	})
 	if err != nil {
 		// Check if we got a 404:
 		if gowebdav.IsErrNotFound(err) {
 			return error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
 		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
-			info, err := client.Stat(remotePath)
+			var info fs.FileInfo
+			err := retryWebDavOperation("Stat", func() error {
+				var err error
+				info, err = client.Stat(remotePath)
+				return err
+			})
 			if err != nil {
 				return errors.Wrap(err, "failed to stat remote path")
 			}
@@ -3951,14 +3751,24 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 	}
 
 	// Non-recursive listing (original behavior)
-	infos, err := client.ReadDir(remotePath)
+	var infos []fs.FileInfo
+	err = retryWebDavOperation("ReadDir", func() error {
+		var err error
+		infos, err = client.ReadDir(remotePath)
+		return err
+	})
 	if err != nil {
 		// Check if we got a 404:
 		if gowebdav.IsErrNotFound(err) {
 			return nil, error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
 		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
 			// If we get an error code 500 (internal server error), we should check if the user is trying to ls on a file
-			info, err := client.Stat(remotePath)
+			var info fs.FileInfo
+			err := retryWebDavOperation("Stat", func() error {
+				var err error
+				info, err = client.Stat(remotePath)
+				return err
+			})
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to stat remote path")
 			}
@@ -3976,7 +3786,10 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 			}
 		} else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
 			// We replace the error from gowebdav with our own because gowebdav returns: "ReadDir /prefix/different-path/: 405" which is not very user friendly
-			return nil, errors.Errorf("405: object listings are not supported by the discovered origin")
+			listingErr := &dirListingNotSupportedError{
+				Err: errors.New("405: object listings are not supported by the discovered origin"),
+			}
+			return nil, error_codes.NewSpecificationError(listingErr)
 		}
 		// Otherwise, a different error occurred and we should return it
 		return nil, errors.Wrap(err, "failed to read remote collection")
@@ -4008,14 +3821,24 @@ func listHttpRecursiveHelper(client *gowebdav.Client, remotePath string, current
 		return fileInfos, nil
 	}
 
-	infos, err := client.ReadDir(remotePath)
+	var infos []fs.FileInfo
+	err = retryWebDavOperation("ReadDir", func() error {
+		var err error
+		infos, err = client.ReadDir(remotePath)
+		return err
+	})
 	if err != nil {
 		// Check if we got a 404:
 		if gowebdav.IsErrNotFound(err) {
 			return nil, error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
 		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
 			// If we get an error code 500 (internal server error), we should check if the user is trying to ls on a file
-			info, err := client.Stat(remotePath)
+			var info fs.FileInfo
+			err := retryWebDavOperation("Stat", func() error {
+				var err error
+				info, err = client.Stat(remotePath)
+				return err
+			})
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to stat remote path")
 			}
@@ -4031,7 +3854,10 @@ func listHttpRecursiveHelper(client *gowebdav.Client, remotePath string, current
 				return fileInfos, nil
 			}
 		} else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
-			return nil, errors.Errorf("405: object listings are not supported by the discovered origin")
+			listingErr := &dirListingNotSupportedError{
+				Err: errors.New("405: object listings are not supported by the discovered origin"),
+			}
+			return nil, error_codes.NewSpecificationError(listingErr)
 		}
 		// Otherwise, a different error occurred and we should return it
 		return nil, errors.Wrap(err, "failed to read remote collection")
@@ -4061,6 +3887,26 @@ func listHttpRecursiveHelper(client *gowebdav.Client, remotePath string, current
 	}
 
 	return fileInfos, nil
+}
+
+// retryWebDavOperation executes a WebDAV operation with retry logic for idle connection errors.
+// The operation is retried up to maxWebDavRetries times if an idle connection error is encountered.
+func retryWebDavOperation(operationName string, operation func() error) error {
+	var err error
+	for attempt := 0; attempt < maxWebDavRetries; attempt++ {
+		err = operation()
+		if err == nil {
+			return nil
+		}
+		// Retry if it's an idle connection error and we have attempts remaining
+		if isIdleConnectionError(err) && attempt < maxWebDavRetries-1 {
+			log.Debugf("Retrying %s after idle connection error: %v", operationName, err)
+			continue
+		}
+		// For all other errors or final attempt, return the error
+		break
+	}
+	return err
 }
 
 // deleteHttp takes the collection URL from the director response to perform the delete operation.
@@ -4123,19 +3969,33 @@ func deleteHttp(ctx context.Context, remoteUrl *pelican_url.PelicanURL, recursiv
 	client := createWebDavClient(collectionsUrl, token, project)
 	remotePath := remoteUrl.Path
 
-	info, err := client.Stat(remotePath)
-	if err != nil {
-		if gowebdav.IsErrNotFound(err) {
-			return error_codes.NewSpecification_FileNotFoundError(errors.Wrapf(ErrObjectNotFound, "cannot remove remote path %s: no such object or collection", remotePath))
+	// Use retry logic for Stat() to handle idle connection errors
+	var info fs.FileInfo
+	err = retryWebDavOperation("Stat", func() error {
+		var err error
+		info, err = client.Stat(remotePath)
+		if err != nil {
+			if gowebdav.IsErrNotFound(err) {
+				return error_codes.NewSpecification_FileNotFoundError(errors.Wrapf(ErrObjectNotFound, "cannot remove remote path %s: no such object or collection", remotePath))
+			}
+			return err
 		}
+		return nil
+	})
+	if err != nil {
 		return errors.Wrap(err, "failed to check object existence")
 	}
 
 	if info.IsDir() {
-		children, err := client.ReadDir(remotePath)
+		var children []fs.FileInfo
+		// Use retry logic for ReadDir() to handle idle connection errors
+		err = retryWebDavOperation("ReadDir", func() error {
+			var err error
+			children, err = client.ReadDir(remotePath)
+			return err
+		})
 		if err != nil {
 			return errors.Wrapf(err, "failed to read contents of collection %s", remotePath)
-
 		}
 		if !recursive && len(children) > 0 {
 			return errors.Errorf("%s is a non-empty collection, use recursive flag or recursive query in the url to delete it", remotePath)
@@ -4205,6 +4065,7 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 		go func(endpoint *url.URL) {
 			canDisableProxy := CanDisableProxy()
 			disableProxy := !isProxyEnabled()
+			idleConnRetries := 0
 
 			var info FileInfo
 			for {
@@ -4242,6 +4103,12 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 						disableProxy = true
 						continue
 					}
+				}
+				// If we have an idle connection error, retry once
+				if isIdleConnectionError(err) && idleConnRetries < maxWebDavRetries-1 {
+					log.Debugln("Retrying Stat after idle connection error:", err)
+					idleConnRetries++
+					continue
 				}
 				log.Errorln("Failed to get HTTP response:", err)
 				resultsChan <- statResults{FileInfo{}, err}

@@ -24,33 +24,30 @@ jobs:
 
       - name: Validate PR is linked to an issue
         id: check_linked_issues
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           PR_NUMBER=$(jq -r '.pull_request.number' $GITHUB_EVENT_PATH)
           REPO_OWNER=$(jq -r '.repository.owner.login' $GITHUB_EVENT_PATH)
           REPO_NAME=$(jq -r '.repository.name' $GITHUB_EVENT_PATH)
-          TIMELINE_JSON=$(curl -s "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/issues/$PR_NUMBER/timeline?per_page=100")
 
-          # Count the number of times the timeline sees a "connected" event and subtract the number of "disconnected" events
-          # We might also consider using the "cross-referenced" event in the future if actual connecting/disconnecting is too heavy-handed
-          LINKED_ISSUES=$(echo "$TIMELINE_JSON" | jq '
-            reduce .[] as $event (
-              0;
-              if $event.event == "connected" then
-                . + 1
-              elif $event.event == "disconnected" then
-                . - 1
-              else
-                .
-              end
-            )')
+          # Use GraphQL API to query closingIssuesReferences which detects:
+          # 1. Manual connections via the sidebar UI
+          # 2. Keyword-based links (Fixes, Closes, Resolves) in PR body/comments
+          GRAPHQL_QUERY=$(cat <<EOF
+          {
+            "query": "query { repository(owner: \"$REPO_OWNER\", name: \"$REPO_NAME\") { pullRequest(number: $PR_NUMBER) { closingIssuesReferences(first: 10) { totalCount } } } }"
+          }
+          EOF
+          )
 
-          # If the sum is 0, then no linked issues were found
-          if [ "$LINKED_ISSUES" -eq "0" ]; then
+          LINKED_ISSUES=$(echo "$GRAPHQL_QUERY" | curl -s -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" -d @- https://api.github.com/graphql | jq -r '.data.repository.pullRequest.closingIssuesReferences.totalCount')
+
+          # If the count is 0 or null, then no linked issues were found
+          if [ -z "$LINKED_ISSUES" ] || [ "$LINKED_ISSUES" = "null" ] || [ "$LINKED_ISSUES" -eq "0" ]; then
             echo "❌ No linked issues found in the pull request."
-            exit 1
-          elif [ "$LINKED_ISSUES" -lt "0" ]; then
-            echo "Error: More disconnected events than connected events. This shouldn't be possible and likely indicates a big ol' 🪲"
+            echo "Please link this PR to an issue using keywords (Fixes #123, Closes #456) or the GitHub UI sidebar."
             exit 1
           else
-            echo "Linked issues found: $LINKED_ISSUES"
+            echo "✅ Linked issues found: $LINKED_ISSUES"
           fi

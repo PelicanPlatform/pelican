@@ -27,7 +27,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
@@ -47,7 +46,7 @@ var (
 	// namespaceKeys caches jwks from various origins.
 	// The cache key is jwks endpoint (e.g. https://example.com/path/to/issuer.jwks).
 	// TTL cache is thread-safe
-	namespaceKeys = ttlcache.New(ttlcache.WithTTL[string, jwk.Set](15 * time.Minute))
+	namespaceKeys = ttlcache.New(ttlcache.WithTTL[string, jwk.Set](param.Director_AdvertisementTTL.GetDuration()), ttlcache.WithDisableTouchOnHit[string, jwk.Set]())
 
 	adminApprovalErr error
 )
@@ -149,12 +148,7 @@ func verifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 		if err != nil {
 			return false, errors.Wrapf(err, "failed to get jwks at %s", keyLoc)
 		}
-		customTTL := param.Director_AdvertisementTTL.GetDuration()
-		if customTTL == 0 {
-			namespaceKeys.Set(keyLoc, keyset, ttlcache.DefaultTTL)
-		} else {
-			namespaceKeys.Set(keyLoc, keyset, customTTL)
-		}
+		namespaceKeys.Set(keyLoc, keyset, param.Director_AdvertisementTTL.GetDuration())
 	}
 
 	tok, err := jwt.Parse([]byte(token), jwt.WithKeySet(keyset), jwt.WithValidate(true))

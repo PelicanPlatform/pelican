@@ -79,6 +79,11 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		return
 	}
 
+	// After config is loaded, check if director should enable broker
+	if modules.IsEnabled(server_structs.DirectorType) && param.Director_EnableBroker.GetBool() {
+		modules.Set(server_structs.BrokerType)
+	}
+
 	// Print Pelican config at server start if it's in debug or info level
 	if log.GetLevel() >= log.InfoLevel {
 		if err = config.PrintConfig(); err != nil {
@@ -91,19 +96,19 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		return
 	}
 
-	// Register OIDC endpoint
+	// Warn if Prometheus is disabled, but Web UI is enabled. Metrics via Web UI will not be available.
 	if param.Server_EnableUI.GetBool() {
-		// Warn if Prometheus is disabled, but Web UI is enabled. Metrics via Web UI will not be available.
 		if !param.Monitoring_EnablePrometheus.GetBool() {
 			log.Warn("Prometheus is disabled, but Web UI is enabled. Metrics via Web UI will not be available.")
 		}
-		if modules.IsEnabled(server_structs.RegistryType) ||
-			(modules.IsEnabled(server_structs.OriginType) && param.Origin_EnableOIDC.GetBool()) ||
-			(modules.IsEnabled(server_structs.CacheType) && param.Cache_EnableOIDC.GetBool()) ||
-			(modules.IsEnabled(server_structs.DirectorType) && param.Director_EnableOIDC.GetBool()) {
-			if err = web_ui.ConfigOAuthClientAPIs(engine); err != nil {
-				return
-			}
+	}
+
+	if modules.IsEnabled(server_structs.RegistryType) ||
+		(modules.IsEnabled(server_structs.OriginType) && param.Origin_EnableOIDC.GetBool()) ||
+		(modules.IsEnabled(server_structs.CacheType) && param.Cache_EnableOIDC.GetBool()) ||
+		(modules.IsEnabled(server_structs.DirectorType) && param.Director_EnableOIDC.GetBool()) {
+		if err = web_ui.ConfigOAuthClientAPIs(engine); err != nil {
+			return
 		}
 	}
 
@@ -115,9 +120,16 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	}
 
 	if modules.IsEnabled(server_structs.BrokerType) {
+		log.Debug("Enabling broker endpoints")
 		rootGroup := engine.Group("/", web_ui.ServerHeaderMiddleware)
 		broker.RegisterBroker(ctx, rootGroup)
 		broker.LaunchNamespaceKeyMaintenance(ctx, egrp)
+	}
+
+	// Directors with broker support need to initialize the broker client to handle reverse connections.
+	// This initializes the broker callback endpoint needed to reverse connections from origins/caches behind firewalls.
+	if modules.IsEnabled(server_structs.DirectorType) && param.Director_EnableBroker.GetBool() {
+		broker.InitializeBrokerClient(ctx, egrp, engine)
 	}
 
 	if modules.IsEnabled(server_structs.DirectorType) {
@@ -145,7 +157,11 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	}()
 	config.UpdateConfigFromListener(ln)
 
+	// The servers slice holds all running XRootD servers, whereas the
+	// serversRequireAdvertisement slice only holds those that need to
+	// be advertised to the director.
 	servers = make([]server_structs.XRootDServer, 0)
+	serversRequireAdvertisement := make([]server_structs.XRootDServer, 0)
 
 	if modules.IsEnabled(server_structs.OriginType) {
 
@@ -155,6 +171,7 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 			return
 		}
 		servers = append(servers, server)
+		serversRequireAdvertisement = append(serversRequireAdvertisement, server)
 
 		var originExports []server_utils.OriginExport
 		originExports, err = server_utils.GetOriginExports()
@@ -197,8 +214,8 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	healthCheckUrl := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
 	if err = server_utils.WaitUntilWorking(ctx, "GET", healthCheckUrl, "Web UI", http.StatusOK, true); err != nil {
-		log.Errorf("The server was unable to unable to ping its health test endpoint at the configured %s during startup: %v",
-			param.Server_ExternalWebUrl.GetName(), err)
+		log.Errorf("The server was unable to ping its health test endpoint at its external web URL %q (param %s) during startup: %v",
+			param.Server_ExternalWebUrl.GetName(), param.Server_ExternalWebUrl.GetName(), err)
 		return
 	}
 
@@ -242,9 +259,10 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	}
 
 	// Origin needs to advertise once before the cache starts
-	if modules.IsEnabled(server_structs.CacheType) && modules.IsEnabled(server_structs.OriginType) {
-		log.Debug("Advertise Origin and Cache to the Director")
-		if err = launcher_utils.Advertise(ctx, servers); err != nil {
+	if modules.IsEnabled(server_structs.CacheType) && modules.IsEnabled(server_structs.OriginType) && !param.Cache_EnableSiteLocalMode.GetBool() {
+		// At this point, the `servers` slice has _only_ the Origin server in it
+		log.Debug("Detected both Origin and Cache modules; performing initial advertisement of Origin to Director before starting Cache")
+		if err = launcher_utils.Advertise(ctx, serversRequireAdvertisement); err != nil {
 			err = errors.Wrap(err, "failed to do initial advertisement to the director")
 			return
 		}
@@ -325,6 +343,9 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		}
 
 		servers = append(servers, cacheServer)
+		if !param.Cache_EnableSiteLocalMode.GetBool() {
+			serversRequireAdvertisement = append(serversRequireAdvertisement, cacheServer)
+		}
 	}
 
 	if modules.IsEnabled(server_structs.CacheType) {
@@ -335,7 +356,7 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	}
 
 	// Launch the broker listener.  Needs the federation information to determine the broker endpoint.
-	if fedInfo.BrokerEndpoint != "" && !(modules.IsEnabled(server_structs.OriginType) && param.Origin_EnableBroker.GetBool()) && modules.IsEnabled(server_structs.CacheType) && param.Cache_EnableBroker.GetBool() {
+	if fedInfo.BrokerEndpoint != "" && !(modules.IsEnabled(server_structs.OriginType) && param.Origin_EnableBroker.GetBool()) && modules.IsEnabled(server_structs.CacheType) && param.Cache_EnableBroker.GetBool() && !param.Cache_EnableSiteLocalMode.GetBool() {
 		// Note we unconditionally launch the broker listener for the cache if there
 		// is one available.  This is to reduce the need for the cache to have a second
 		// incoming TCP connection to function.
@@ -346,9 +367,10 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	// If we are a director, we will potentially contact other
 	// services with the broker, so we need to set up the broker dialer
+	var brokerDialer *broker.BrokerDialer
 	if modules.IsEnabled(server_structs.DirectorType) {
-		fmt.Println("Setting up broker dialer for director")
-		brokerDialer := broker.NewBrokerDialer(ctx, egrp)
+		log.Debug("Setting up broker dialer for director")
+		brokerDialer = broker.NewBrokerDialer(ctx, egrp)
 		config.SetTransportDialer(brokerDialer.DialContext)
 		director.SetBrokerDialer(brokerDialer)
 	}
@@ -360,9 +382,9 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		}
 	}
 
-	if modules.IsEnabled(server_structs.OriginType) || modules.IsEnabled(server_structs.CacheType) {
+	if modules.IsEnabled(server_structs.OriginType) || modules.IsEnabled(server_structs.CacheType) && len(serversRequireAdvertisement) > 0 {
 		log.Debug("Launching periodic advertise of origin/cache server to the director")
-		if err = launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
+		if err = launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, serversRequireAdvertisement); err != nil {
 			return
 		}
 	}
@@ -385,7 +407,11 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		// and not for each server. This is why we use a sync.Once here.
 		oncePrometheus.Do(func() {
 			metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusWarning, "Prometheus not started")
-			prometheusInitErr = web_ui.ConfigureEmbeddedPrometheus(ctx, engine)
+			var dialContextFunc func(context.Context, string, string) (net.Conn, error)
+			if brokerDialer != nil {
+				dialContextFunc = brokerDialer.DialContext
+			}
+			prometheusInitErr = web_ui.ConfigureEmbeddedPrometheus(ctx, engine, dialContextFunc)
 			if prometheusInitErr != nil {
 				prometheusInitErr = errors.Wrap(prometheusInitErr, "failed to configure embedded Prometheus instance")
 				metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusCritical, prometheusInitErr.Error())
@@ -440,6 +466,12 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 			}
 		}
 	})
+
+	// Write the address file now that all services are running and health checks have passed
+	if err = config.WriteAddressFile(modules); err != nil {
+		log.WithError(err).Warning("Failed to write address file")
+		// Don't fail startup if we can't write the address file
+	}
 
 	return
 }

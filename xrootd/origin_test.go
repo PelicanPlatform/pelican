@@ -54,6 +54,38 @@ var (
 	multiExportOriginConfig string
 )
 
+func ensureXrdS3PluginAvailable(t *testing.T) {
+	searchPaths := []string{
+		"/usr/lib",
+		"/usr/lib64",
+		"/usr/local/lib",
+		"/opt/homebrew/lib",
+	}
+
+	appendEnvPaths := func(env string) {
+		for _, path := range strings.Split(os.Getenv(env), ":") {
+			if path != "" {
+				searchPaths = append(searchPaths, path)
+			}
+		}
+	}
+
+	appendEnvPaths("XRD_PLUGINPATH")
+	appendEnvPaths("LD_LIBRARY_PATH")
+	appendEnvPaths("DYLD_LIBRARY_PATH")
+
+	pluginNames := []string{"libXrdS3.so", "libXrdS3-5.so", "libXrdS3-6.so", "libXrdS3.dylib", "libXrdS3-5.dylib", "libXrdS3-6.dylib"}
+	for _, dir := range searchPaths {
+		for _, name := range pluginNames {
+			if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+				return
+			}
+		}
+	}
+
+	t.Skip("Skipping: XRootD S3 plugin not found on this system")
+}
+
 func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) context.CancelFunc {
 	originServer := &origin.OriginServer{}
 
@@ -67,8 +99,8 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	err = os.Chmod(tmpPath, permissions)
 	require.NoError(t, err)
 
-	viper.Set("ConfigDir", tmpPath)
-	viper.Set(param.Origin_RunLocation.GetName(), filepath.Join(tmpPath, "xorigin"))
+	require.NoError(t, param.Set("ConfigDir", tmpPath))
+	require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), filepath.Join(tmpPath, "xorigin")))
 	t.Cleanup(func() {
 		os.RemoveAll(tmpPath)
 	})
@@ -76,7 +108,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	test_utils.MockFederationRoot(t, nil, nil)
 
 	// Increase the log level; otherwise, its difficult to debug failures
-	viper.Set(param.Logging_Level.GetName(), "Debug")
+	require.NoError(t, param.Set(param.Logging_Level.GetName(), "Debug"))
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
@@ -107,6 +139,8 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 		}
 	}()
 	config.UpdateConfigFromListener(ln)
+	// Clear cached issuer URL so it gets recalculated with the actual port
+	require.NoError(t, param.Set(param.Server_IssuerUrl.GetName(), ""))
 
 	err = CheckXrootdEnv(originServer)
 	require.NoError(t, err)
@@ -121,10 +155,10 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	require.NoError(t, err)
 
 	portStartCallback := func(port int) {
-		viper.Set(param.Origin_Port.GetName(), port)
+		require.NoError(t, param.Set(param.Origin_Port.GetName(), port))
 		if originUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {
 			originUrl.Host = originUrl.Hostname() + ":" + strconv.Itoa(port)
-			viper.Set("Origin.Url", originUrl.String())
+			require.NoError(t, param.Set("Origin.Url", originUrl.String()))
 			log.Debugln("Resetting Origin.Url to", originUrl.String())
 		}
 		log.Infoln("Origin startup complete on port", port)
@@ -149,6 +183,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 }
 
 func TestOrigin(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -157,28 +192,23 @@ func TestOrigin(t *testing.T) {
 
 	defer server_utils.ResetTestState()
 
-	// Get available, unique ports
-	ports, err := test_utils.GetUniqueAvailablePorts(2)
-	require.NoError(t, err)
-	require.Len(t, ports, 2)
-
-	viper.Set(param.Origin_StoragePrefix.GetName(), t.TempDir())
-	viper.Set(param.Origin_FederationPrefix.GetName(), "/test")
-	viper.Set(param.Origin_StorageType.GetName(), "posix")
+	require.NoError(t, param.Set(param.Origin_StoragePrefix.GetName(), t.TempDir()))
+	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/test"))
+	require.NoError(t, param.Set(param.Origin_StorageType.GetName(), "posix"))
 	// Disable functionality we're not using (and is difficult to make work on Mac)
-	viper.Set(param.Origin_EnableCmsd.GetName(), false)
-	viper.Set(param.Origin_EnableMacaroons.GetName(), false)
-	viper.Set(param.Origin_EnableVoms.GetName(), false)
-	viper.Set(param.Origin_Port.GetName(), ports[0])
-	viper.Set(param.Server_WebPort.GetName(), ports[1])
-	viper.Set(param.TLSSkipVerify.GetName(), true)
-	viper.Set(param.Logging_Origin_Scitokens.GetName(), "debug")
+	require.NoError(t, param.Set(param.Origin_EnableCmsd.GetName(), false))
+	require.NoError(t, param.Set(param.Origin_EnableMacaroons.GetName(), false))
+	require.NoError(t, param.Set(param.Origin_EnableVoms.GetName(), false))
+	require.NoError(t, param.Set(param.Origin_Port.GetName(), 0))
+	require.NoError(t, param.Set(param.Server_WebPort.GetName(), 0))
+	require.NoError(t, param.Set(param.TLSSkipVerify.GetName(), true))
+	require.NoError(t, param.Set(param.Logging_Origin_Scitokens.GetName(), "debug"))
 
 	mockupCancel := originMockup(ctx, egrp, t)
 	defer mockupCancel()
 
 	// In this case a 403 means its running
-	err = server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString(), "xrootd", 403, false)
+	err := server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString(), "xrootd", 403, false)
 	if err != nil {
 		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
 	}
@@ -192,6 +222,7 @@ func TestOrigin(t *testing.T) {
 }
 
 func TestMultiExportOrigin(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -204,23 +235,18 @@ func TestMultiExportOrigin(t *testing.T) {
 	err := viper.ReadConfig(strings.NewReader(multiExportOriginConfig))
 	require.NoError(t, err, "error reading config")
 
-	// Get available, unique ports and pre-allocate for xrootd startup.
-	ports, err := test_utils.GetUniqueAvailablePorts(2)
-	require.NoError(t, err)
-	require.Len(t, ports, 2)
-
 	// Disable functionality we're not using for the tests
-	viper.Set(param.Origin_EnableCmsd.GetName(), false)
-	viper.Set(param.Origin_EnableVoms.GetName(), false)
-	viper.Set(param.Origin_Port.GetName(), ports[0])
-	viper.Set(param.Server_WebPort.GetName(), ports[1])
-	viper.Set(param.TLSSkipVerify.GetName(), true)
-	viper.Set(param.Logging_Origin_Scitokens.GetName(), "debug")
+	require.NoError(t, param.Set(param.Origin_EnableCmsd.GetName(), false))
+	require.NoError(t, param.Set(param.Origin_EnableVoms.GetName(), false))
+	require.NoError(t, param.Set(param.Origin_Port.GetName(), 0))
+	require.NoError(t, param.Set(param.Server_WebPort.GetName(), 0))
+	require.NoError(t, param.Set(param.TLSSkipVerify.GetName(), true))
+	require.NoError(t, param.Set(param.Logging_Origin_Scitokens.GetName(), "debug"))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
 	// Initialize the origin before getting origin exports
-	viper.Set("ConfigDir", t.TempDir())
+	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
@@ -229,8 +255,6 @@ func TestMultiExportOrigin(t *testing.T) {
 	require.Len(t, exports, 2)
 
 	// Override the object store prefix to a temp directory
-	issuerUrl, err := config.GetServerIssuerURL()
-	require.NoError(t, err)
 	for i := range exports {
 		exports[i].StoragePrefix = t.TempDir()
 	}
@@ -244,6 +268,8 @@ func TestMultiExportOrigin(t *testing.T) {
 		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
 	}
 	fileTests := server_utils.TestFileTransferImpl{}
+	issuerUrl, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
 
 	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), param.Origin_TokenAudience.GetString(), issuerUrl, server_utils.ServerSelfTest)
 	require.NoError(t, err)
@@ -253,31 +279,29 @@ func TestMultiExportOrigin(t *testing.T) {
 func mockupS3Origin(ctx context.Context, egrp *errgroup.Group, t *testing.T, federationPrefix, bucketName, urlStyle string) context.CancelFunc {
 	regionName := "us-east-1"
 	serviceUrl := "https://s3.amazonaws.com"
-	viper.Set(param.Origin_FederationPrefix.GetName(), federationPrefix)
-	viper.Set(param.Origin_S3Bucket.GetName(), bucketName)
-	viper.Set(param.Origin_S3Region.GetName(), regionName)
-	viper.Set(param.Origin_S3ServiceUrl.GetName(), serviceUrl)
-	viper.Set(param.Origin_S3UrlStyle.GetName(), urlStyle)
-	viper.Set(param.Origin_StorageType.GetName(), "s3")
-	viper.Set(param.Origin_EnablePublicReads.GetName(), true)
-
-	ports, err := test_utils.GetUniqueAvailablePorts(2)
-	require.NoError(t, err)
-	require.Len(t, ports, 2)
+	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), federationPrefix))
+	require.NoError(t, param.Set(param.Origin_S3Bucket.GetName(), bucketName))
+	require.NoError(t, param.Set(param.Origin_S3Region.GetName(), regionName))
+	require.NoError(t, param.Set(param.Origin_S3ServiceUrl.GetName(), serviceUrl))
+	require.NoError(t, param.Set(param.Origin_S3UrlStyle.GetName(), urlStyle))
+	require.NoError(t, param.Set(param.Origin_StorageType.GetName(), "s3"))
+	require.NoError(t, param.Set(param.Origin_EnablePublicReads.GetName(), true))
 
 	// Disable functionality we're not using (and is difficult to make work on Mac)
-	viper.Set(param.Origin_EnableCmsd.GetName(), false)
-	viper.Set(param.Origin_EnableMacaroons.GetName(), false)
-	viper.Set(param.Origin_EnableVoms.GetName(), false)
-	viper.Set(param.Origin_SelfTest.GetName(), false)
-	viper.Set(param.Origin_Port.GetName(), ports[0])
-	viper.Set(param.Server_WebPort.GetName(), ports[1])
-	viper.Set(param.TLSSkipVerify.GetName(), true)
+	require.NoError(t, param.Set(param.Origin_EnableCmsd.GetName(), false))
+	require.NoError(t, param.Set(param.Origin_EnableMacaroons.GetName(), false))
+	require.NoError(t, param.Set(param.Origin_EnableVoms.GetName(), false))
+	require.NoError(t, param.Set(param.Origin_SelfTest.GetName(), false))
+	require.NoError(t, param.Set(param.Origin_Port.GetName(), 0))
+	require.NoError(t, param.Set(param.Server_WebPort.GetName(), 0))
+	require.NoError(t, param.Set(param.TLSSkipVerify.GetName(), true))
 
 	return originMockup(ctx, egrp, t)
 }
 
 func runS3Test(t *testing.T, bucketName, urlStyle, objectName string) {
+	ensureXrdS3PluginAvailable(t)
+
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -318,6 +342,7 @@ func runS3Test(t *testing.T, bucketName, urlStyle, objectName string) {
 }
 
 func TestS3OriginConfig(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Run("S3OriginPathBucket", func(t *testing.T) {
 		runS3Test(t, "noaa-wod-pds", "path", "MD5SUMS")
 	})
@@ -332,6 +357,8 @@ func TestS3OriginConfig(t *testing.T) {
 }
 
 func TestS3OriginWithSentinel(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	ensureXrdS3PluginAvailable(t)
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -392,6 +419,7 @@ func TestS3OriginWithSentinel(t *testing.T) {
 }
 
 func TestPosixOriginWithSentinel(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -407,21 +435,17 @@ func TestPosixOriginWithSentinel(t *testing.T) {
 	err = os.Chmod(tmpPath, 0755)
 	require.NoError(t, err)
 
-	ports, err := test_utils.GetUniqueAvailablePorts(2)
-	require.NoError(t, err)
-	require.Len(t, ports, 2)
-
-	viper.Set(param.Origin_StoragePrefix.GetName(), tmpPath)
-	viper.Set(param.Origin_FederationPrefix.GetName(), "/test")
-	viper.Set(param.Origin_StorageType.GetName(), "posix")
+	require.NoError(t, param.Set(param.Origin_StoragePrefix.GetName(), tmpPath))
+	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/test"))
+	require.NoError(t, param.Set(param.Origin_StorageType.GetName(), "posix"))
 	// Disable functionality we're not using (and is difficult to make work on Mac)
-	viper.Set(param.Origin_EnableCmsd.GetName(), false)
-	viper.Set(param.Origin_EnableMacaroons.GetName(), false)
-	viper.Set(param.Origin_EnableVoms.GetName(), false)
-	viper.Set(param.Origin_Port.GetName(), ports[0])
-	viper.Set(param.Server_WebPort.GetName(), ports[1])
-	viper.Set(param.TLSSkipVerify.GetName(), true)
-	viper.Set(param.Logging_Origin_Scitokens.GetName(), "trace")
+	require.NoError(t, param.Set(param.Origin_EnableCmsd.GetName(), false))
+	require.NoError(t, param.Set(param.Origin_EnableMacaroons.GetName(), false))
+	require.NoError(t, param.Set(param.Origin_EnableVoms.GetName(), false))
+	require.NoError(t, param.Set(param.Origin_Port.GetName(), 0))
+	require.NoError(t, param.Set(param.Server_WebPort.GetName(), 0))
+	require.NoError(t, param.Set(param.TLSSkipVerify.GetName(), true))
+	require.NoError(t, param.Set(param.Logging_Origin_Scitokens.GetName(), "trace"))
 
 	mockupCancel := originMockup(ctx, egrp, t)
 	defer mockupCancel()

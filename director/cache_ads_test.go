@@ -25,17 +25,20 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func TestLaunchTTLCache(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	mockPelicanOriginServerAd := server_structs.ServerAd{
 		AuthURL: url.URL{},
 		URL: url.URL{
@@ -80,14 +83,14 @@ func TestLaunchTTLCache(t *testing.T) {
 
 		func() {
 			serverAds.DeleteAll()
+			resetHealthTests()
+
 			serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
 				ServerAd:     mockPelicanOriginServerAd,
 				NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
 			}, ttlcache.DefaultTTL)
 			healthTestUtilsMutex.Lock()
 			defer healthTestUtilsMutex.Unlock()
-			// Clear the map for the new test
-			healthTestUtils = make(map[string]*healthTestUtil)
 			healthTestUtils[mockPelicanOriginServerAd.URL.String()] = &healthTestUtil{
 				Cancel:        cancelFunc,
 				ErrGrp:        errgrp,
@@ -124,6 +127,8 @@ func TestLaunchTTLCache(t *testing.T) {
 }
 
 func TestServerAdsCacheEviction(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	mockServerAd := server_structs.ServerAd{Type: server_structs.OriginType.String(), URL: url.URL{Host: "mock.server.org"}}
 	mockServerAd.Initialize("foo")
 
@@ -178,9 +183,21 @@ func TestServerAdsCacheEviction(t *testing.T) {
 }
 
 func TestRecordAd(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	t.Cleanup(func() {
+		// Drain any background goroutines spawned by health/stat utilities to avoid leaks across tests.
+		shutdownHealthTests()
+		shutdownStatUtils()
+	})
+
+	resetHealthTests()
+	shutdownStatUtils()
+
 	serverAds.DeleteAll()
+	go serverAds.Start()
 	t.Cleanup(func() {
 		serverAds.DeleteAll()
+		serverAds.Stop()
 	})
 
 	topologyServerUrl := url.URL{Scheme: "http", Host: "origin.chtc.wisc.edu"} // Topology server URL is always in http
@@ -202,18 +219,21 @@ func TestRecordAd(t *testing.T) {
 	}
 
 	t.Run("topology-server-added-if-no-duplicate", func(t *testing.T) {
+		defer serverAds.DeleteAll()
 		recordAd(context.Background(), mockTopology.ServerAd, &mockTopology.NamespaceAds)
 		assert.Len(t, serverAds.Items(), 1)
 		assert.True(t, serverAds.Has(topologyServerUrl.String()))
 	})
 
 	t.Run("pelican-server-added-if-no-duplicate", func(t *testing.T) {
+		defer serverAds.DeleteAll()
 		recordAd(context.Background(), mockPelican.ServerAd, &mockPelican.NamespaceAds)
 		assert.Len(t, serverAds.Items(), 1)
 		assert.True(t, serverAds.Has(pelicanServerUrl.String()))
 	})
 
 	t.Run("pelican-server-overwrites-topology", func(t *testing.T) {
+		defer serverAds.DeleteAll()
 		recordAd(context.Background(), mockTopology.ServerAd, &mockTopology.NamespaceAds)
 		recordAd(context.Background(), mockPelican.ServerAd, &mockPelican.NamespaceAds)
 
@@ -225,6 +245,7 @@ func TestRecordAd(t *testing.T) {
 	})
 
 	t.Run("topology-server-is-ignored-with-dup-pelican-server", func(t *testing.T) {
+		defer serverAds.DeleteAll()
 		recordAd(context.Background(), mockPelican.ServerAd, &mockPelican.NamespaceAds)
 		recordAd(context.Background(), mockTopology.ServerAd, &mockTopology.NamespaceAds)
 
@@ -238,31 +259,20 @@ func TestRecordAd(t *testing.T) {
 	t.Run("recorded-sad-should-match-health-test-utils-one", func(t *testing.T) {
 		t.Cleanup(func() {
 			server_utils.ResetTestState()
-			healthTestUtilsMutex.Lock()
-			statUtilsMutex.Lock()
-			defer statUtilsMutex.Unlock()
-			defer healthTestUtilsMutex.Unlock()
-			healthTestUtils = make(map[string]*healthTestUtil)
-			statUtils = make(map[string]*serverStatUtil)
-
+			resetHealthTests()
+			shutdownStatUtils()
 			serverAds.DeleteAll()
 			geoNetOverrides = nil
 		})
 		server_utils.ResetTestState()
 		func() {
 			geoNetOverrides = nil
-
-			healthTestUtilsMutex.Lock()
-			statUtilsMutex.Lock()
-			defer statUtilsMutex.Unlock()
-			defer healthTestUtilsMutex.Unlock()
-			healthTestUtils = make(map[string]*healthTestUtil)
-			statUtils = make(map[string]*serverStatUtil)
-
+			resetHealthTests()
+			shutdownStatUtils()
 			serverAds.DeleteAll()
 		}()
 
-		viper.Set("GeoIPOverrides", []map[string]interface{}{{"IP": "192.168.100.100", "Coordinate": map[string]float64{"lat": 43.567, "long": -65.322}}})
+		require.NoError(t, param.Set("GeoIPOverrides", []map[string]interface{}{{"IP": "192.168.100.100", "Coordinate": map[string]float64{"lat": 43.567, "long": -65.322}}}))
 		mockUrl := url.URL{Scheme: "https", Host: "192.168.100.100"}
 		serverAd := server_structs.ServerAd{URL: mockUrl, WebURL: mockUrl, FromTopology: false}
 		serverAd.Initialize("TEST_ORIGIN")
@@ -275,6 +285,8 @@ func TestRecordAd(t *testing.T) {
 }
 
 func TestGetRawStatusWeight(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	testCases := []struct {
 		name           string
 		status         metrics.HealthStatusEnum
@@ -318,6 +330,8 @@ func TestGetRawStatusWeight(t *testing.T) {
 }
 
 func TestPopulateEWMAStatusWeightSequence(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	// Note: Expected weights calculated using this online calculator:
 	// https://calculatorsforhome.com/ewma-estimator/
 	// For mixed-delta tests, calculations must be done pair-wise because
@@ -502,4 +516,132 @@ func TestPopulateEWMAStatusWeightSequence(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestApplyDowntimeFilters(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	now := time.Now().UTC().UnixMilli()
+
+	activeDowntime := server_structs.Downtime{
+		ServerName: "active-new",
+		StartTime:  now - 1_000,
+		EndTime:    now + 1_000,
+	}
+	tempAllowedDowntime := server_structs.Downtime{
+		ServerName: "temp-allowed",
+		StartTime:  now - 500,
+		EndTime:    now + 500,
+	}
+	futureDowntime := server_structs.Downtime{
+		ServerName: "future-only",
+		StartTime:  now + 5_000,
+		EndTime:    now + 6_000,
+	}
+	indefDowntime := server_structs.Downtime{
+		ServerName: "indef",
+		StartTime:  now - 2_000,
+		EndTime:    server_structs.IndefiniteEndTime,
+	}
+	permFilteredDowntime := server_structs.Downtime{
+		ServerName: "perm-filtered",
+		StartTime:  now - 1_000,
+		EndTime:    now + 1_000,
+	}
+
+	offlineOnly := server_structs.Downtime{
+		ServerName: "offline-only",
+		StartTime:  now - 10_000,
+		EndTime:    now - 5_000,
+	}
+
+	allDowntimes := []server_structs.Downtime{
+		activeDowntime,
+		tempAllowedDowntime,
+		futureDowntime,
+		indefDowntime,
+		permFilteredDowntime,
+		offlineOnly,
+	}
+
+	currentFilters := map[string]filterType{
+		"perm-filtered":       permFiltered,
+		"temp-filter-cleanup": tempFiltered,
+		"temp-allowed":        tempAllowed,
+	}
+	currentFederation := map[string][]server_structs.Downtime{
+		"legacy": {
+			{ServerName: "legacy"},
+		},
+	}
+
+	newFilters, newFederation := applyDowntimeFilters(allDowntimes, currentFilters, currentFederation)
+
+	require.NotNil(t, newFilters)
+	require.NotNil(t, newFederation)
+
+	// Ensure the original maps are untouched.
+	assert.Contains(t, currentFilters, "temp-filter-cleanup")
+	assert.Contains(t, currentFederation, "legacy")
+
+	// tempFiltered entries should be removed from the new state.
+	_, exists := newFilters["temp-filter-cleanup"]
+	assert.False(t, exists)
+
+	// Existing filters that are not tempAllowed should stay as-is.
+	assert.Equal(t, permFiltered, newFilters["perm-filtered"])
+	// tempAllowed filters should be overwritten if there is an active downtime.
+	assert.Equal(t, tempFiltered, newFilters["temp-allowed"])
+
+	// Active downtimes should mark the server as tempFiltered.
+	assert.Equal(t, tempFiltered, newFilters["active-new"])
+	assert.Equal(t, tempFiltered, newFilters["indef"])
+
+	// Future downtimes should not mark servers as filtered yet.
+	_, exists = newFilters["future-only"]
+	assert.False(t, exists)
+
+	// Federation downtimes include every server from the provided list, including offline ones.
+	assert.Len(t, newFederation["active-new"], 1)
+	assert.Len(t, newFederation["offline-only"], 1)
+	assert.NotContains(t, newFederation, "legacy")
+}
+
+func TestGetCachedDowntimesDedup(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	serverName := "TEST_CACHE"
+	now := time.Now().UnixMilli()
+	dup := server_structs.Downtime{
+		UUID:        "dup-id",
+		ServerName:  serverName,
+		ServerID:    "server-id",
+		Source:      "cache",
+		StartTime:   now - 1_000,
+		EndTime:     now + 1_000,
+		Description: "cache downtime",
+	}
+	registry := server_structs.Downtime{
+		UUID:        "registry-id",
+		ServerName:  serverName,
+		Source:      "registry",
+		StartTime:   now + 10_000,
+		EndTime:     server_structs.IndefiniteEndTime,
+		Description: "registry downtime",
+	}
+
+	filteredServersMutex.Lock()
+	serverDowntimes = map[string][]server_structs.Downtime{
+		serverName: {dup},
+	}
+	federationDowntimes = map[string][]server_structs.Downtime{
+		serverName: {dup, registry},
+	}
+	filteredServersMutex.Unlock()
+
+	downtimes, err := getCachedDowntimes(serverName)
+	require.NoError(t, err)
+	require.Len(t, downtimes, 2)
+
+	assert.ElementsMatch(t, []string{"dup-id", "registry-id"}, []string{downtimes[0].UUID, downtimes[1].UUID})
 }

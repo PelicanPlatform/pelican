@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -41,6 +40,7 @@ import (
 )
 
 func TestVerifyCreateSciTokens2(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Start by feeding it a valid claims map
 	tokenConfig := TokenConfig{tokenProfile: Scitokens2Profile{}, audience: []string{"foo"}, version: "scitokens:2.0", scope: "read:/storage"}
 	err := tokenConfig.verifyCreateSciTokens2()
@@ -69,6 +69,7 @@ func TestVerifyCreateSciTokens2(t *testing.T) {
 }
 
 func TestVerifyCreateWLCG(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Start by feeding it a valid claims map
 	tokenConfig := TokenConfig{tokenProfile: WlcgProfile{}, audience: []string{"director"}, version: "1.0", Subject: "foo"}
 	err := tokenConfig.verifyCreateWLCG()
@@ -98,6 +99,7 @@ func TestVerifyCreateWLCG(t *testing.T) {
 
 // TestAddScopes tests the AddScopes method of TokenConfig
 func TestAddScopes(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	tests := []struct {
 		name             string
 		initialScope     string
@@ -147,6 +149,7 @@ func TestAddScopes(t *testing.T) {
 
 // TestAddRawScope tests the AddRawScope method of TokenConfig
 func TestAddRawScope(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	tests := []struct {
 		name          string
 		initialScope  string
@@ -201,17 +204,18 @@ func TestAddRawScope(t *testing.T) {
 }
 
 func TestCreateToken(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
 	// Some viper pre-requisites
 	config.ResetConfig()
-	viper.Set("IssuerUrl", "https://my-issuer.com")
+	require.NoError(t, param.Set("IssuerUrl", "https://my-issuer.com"))
 	tDir := t.TempDir()
 	kDir := filepath.Join(tDir, "testKeyDir")
-	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
-	viper.Set("ConfigDir", t.TempDir())
+	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), kDir))
+	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
 	err := config.InitServer(ctx, server_structs.DirectorType)
 	require.NoError(t, err)
 
@@ -251,7 +255,7 @@ func TestCreateToken(t *testing.T) {
 	assert.Equal(t, "bar", val)
 
 	// Test providing issuer via claim
-	viper.Set("IssuerUrl", "")
+	require.NoError(t, param.Set("IssuerUrl", ""))
 	tokenConfig = TokenConfig{tokenProfile: WlcgProfile{}, audience: []string{"foo"}, Subject: "bar", Issuer: "https://localhost:9999", Lifetime: time.Minute * 10}
 	_, err = tokenConfig.CreateToken()
 	assert.NoError(t, err)
@@ -262,6 +266,7 @@ func TestCreateToken(t *testing.T) {
 }
 
 func TestLookupIssuerJwksUrl(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	var resp *string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/issuer/.well-known/openid-configuration" {
@@ -330,6 +335,7 @@ func TestLookupIssuerJwksUrl(t *testing.T) {
 	}
 }
 func TestGetWLCGAudience(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	tests := []struct {
 		name        string
 		urlStr      string

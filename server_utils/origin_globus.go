@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/param"
@@ -80,9 +81,13 @@ func (o *GlobusOrigin) mapSingleExtra() {
 
 	e := o.Exports[0]
 	if e.GlobusCollectionID != "" {
-		viper.Set(param.Origin_GlobusCollectionID.GetName(), e.GlobusCollectionID)
+		if err := param.Set(param.Origin_GlobusCollectionID.GetName(), e.GlobusCollectionID); err != nil {
+			log.Warningf("Failed to set %s: %v", param.Origin_GlobusCollectionID.GetName(), err)
+		}
 	}
 	if e.GlobusCollectionName != "" {
-		viper.Set(param.Origin_GlobusCollectionName.GetName(), e.GlobusCollectionName)
+		if err := param.Set(param.Origin_GlobusCollectionName.GetName(), e.GlobusCollectionName); err != nil {
+			log.Warningf("Failed to set %s: %v", param.Origin_GlobusCollectionName.GetName(), err)
+		}
 	}
 }

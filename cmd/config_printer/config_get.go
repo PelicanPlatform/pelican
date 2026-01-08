@@ -147,6 +147,9 @@ func configGet(cmd *cobra.Command, args []string) {
 	for _, match := range matches {
 		fmt.Printf("%s: %s\n", match.HighlightedKey, match.HighlightedValue)
 	}
+
+	// Add an eye break before any other logs are printed.
+	fmt.Println()
 }
 
 // flattenConfig recursively flattens the config structure into a map[string]string.

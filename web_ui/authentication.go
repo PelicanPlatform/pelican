@@ -21,6 +21,7 @@ package web_ui
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -131,10 +132,102 @@ func configureAuthDB() error {
 	return nil
 }
 
-// Get user information including userId from the login cookie.
+// extractUserFromBearerToken parses and verifies a Bearer token, extracting user info.
+// Uses early-exit pattern for cleaner flow control.
+func extractUserFromBearerToken(ctx *gin.Context, tokenStr string) (user string, userId string, groups []string, err error) {
+	// Parse token without verification first to check issuer
+	parsed, err := jwt.Parse([]byte(tokenStr), jwt.WithVerify(false))
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	// Verify issuer matches local issuer
+	serverURL := param.Server_ExternalWebUrl.GetString()
+	if parsed.Issuer() != serverURL {
+		return "", "", nil, errors.New("token issuer does not match server URL")
+	}
+
+	// Verify signature
+	jwks, err := config.GetIssuerPublicJWKS()
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	verified, err := jwt.Parse([]byte(tokenStr), jwt.WithKeySet(jwks))
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	if err = jwt.Validate(verified); err != nil {
+		return "", "", nil, err
+	}
+
+	// Extract user from subject
+	user = verified.Subject()
+	if user == "" {
+		return "", "", nil, errors.New("token has empty subject")
+	}
+
+	// Extract groups
+	groupsIface, ok := verified.Get("wlcg.groups")
+	if ok {
+		if groupsTmp, ok := groupsIface.([]interface{}); ok {
+			groups = make([]string, 0, len(groupsTmp))
+			for _, groupObj := range groupsTmp {
+				if groupStr, ok := groupObj.(string); ok {
+					groups = append(groups, groupStr)
+				}
+			}
+		}
+	}
+
+	// Set in context for later use
+	ctx.Set("User", user)
+	if len(groups) > 0 {
+		ctx.Set("Groups", groups)
+	}
+
+	return user, userId, groups, nil
+}
+
+// Get user information including userId from the login cookie or Bearer token.
 // Returns username, userId, sub, issuer, groups, and error.
 func GetUserGroups(ctx *gin.Context) (user string, userId string, groups []string, err error) {
-	token, err := ctx.Cookie("login")
+	// First check if user info was already set in context (e.g., from Bearer token verification)
+	if userIface, exists := ctx.Get("User"); exists {
+		if userStr, ok := userIface.(string); ok && userStr != "" {
+			user = userStr
+			// Extract userId from context if available
+			if userIdIface, exists := ctx.Get("UserId"); exists {
+				if userIdStr, ok := userIdIface.(string); ok {
+					userId = userIdStr
+				}
+			}
+			// Extract groups from context if available
+			if groupsIface, exists := ctx.Get("Groups"); exists {
+				if groupsSlice, ok := groupsIface.([]string); ok {
+					groups = groupsSlice
+				}
+			}
+			return
+		}
+	}
+
+	// Check for Bearer token in Authorization header
+	headerToken := ctx.Request.Header["Authorization"]
+	if len(headerToken) > 0 {
+		tokenStr, found := strings.CutPrefix(headerToken[0], "Bearer ")
+		if found && tokenStr != "" {
+			user, userId, groups, err = extractUserFromBearerToken(ctx, tokenStr)
+			if err == nil && user != "" {
+				return
+			}
+			// Bearer token failed, fall through to cookie check
+		}
+	}
+
+	var token string
+	token, err = ctx.Cookie("login")
 	if err != nil {
 		if err == http.ErrNoCookie {
 			err = nil
@@ -197,8 +290,15 @@ func setLoginCookie(ctx *gin.Context, userRecord *database.User, groups []string
 	loginCookieTokenCfg.Issuer = param.Server_ExternalWebUrl.GetString()
 	loginCookieTokenCfg.AddAudiences(param.Server_ExternalWebUrl.GetString())
 	loginCookieTokenCfg.Subject = userRecord.Username
-	loginCookieTokenCfg.AddScopes(token_scopes.WebUi_Access, token_scopes.Monitoring_Query, token_scopes.Monitoring_Scrape)
+	loginCookieTokenCfg.AddScopes(token_scopes.WebUi_Access)
 	loginCookieTokenCfg.AddGroups(groups...)
+
+	// For backwards compatibility (see #398), add additional scopes
+	// for expert admins who extract the login cookie from their browser
+	// and use it to query monitoring endpoints directly.
+	if isAdmin, _ := CheckAdmin(loginCookieTokenCfg.Subject); isAdmin {
+		loginCookieTokenCfg.AddScopes(token_scopes.Monitoring_Query, token_scopes.Monitoring_Scrape)
+	}
 
 	// Add claims for unique user resolution using userId
 	loginCookieTokenCfg.Claims = map[string]string{
@@ -309,6 +409,52 @@ func AdminAuthHandler(ctx *gin.Context) {
 				Msg:    msg,
 			})
 	}
+}
+
+// DowntimeAuthHandler allows EITHER:
+// 1. Admin cookie authentication (req from this server itself), OR
+// 2. Server bearer token authentication (req from another server, i.e. origin/cache)
+func DowntimeAuthHandler(ctx *gin.Context) {
+	// First, try cookie-based admin auth (this block consolidates AuthHandler and AdminAuthHandler)
+	user, _, groups, err := GetUserGroups(ctx)
+	if user != "" && err == nil {
+		// User has valid cookie, check if admin
+		isAdmin, _ := CheckAdmin(user)
+		if isAdmin {
+			ctx.Set("User", user)
+			ctx.Set("Groups", groups)
+			ctx.Set("AuthMethod", "admin-cookie")
+			ctx.Next()
+			return
+		}
+	}
+
+	// If not admin cookie, try bearer token from header
+	var requiredScope token_scopes.TokenScope
+	switch ctx.Request.Method {
+	case http.MethodPost:
+		requiredScope = token_scopes.Pelican_DowntimeCreate
+	case http.MethodPut:
+		requiredScope = token_scopes.Pelican_DowntimeModify
+	case http.MethodDelete:
+		requiredScope = token_scopes.Pelican_DowntimeDelete
+	default:
+		// Fallback: require create/modify/delete not for GETs (which don't hit this handler).
+		requiredScope = token_scopes.Pelican_DowntimeModify
+	}
+	status, ok, err := token.Verify(ctx, token.AuthOption{
+		Sources: []token.TokenSource{token.Header},
+		Issuers: []token.TokenIssuer{token.RegisteredServer},
+		Scopes:  []token_scopes.TokenScope{requiredScope},
+	})
+	if !ok || err != nil {
+		ctx.AbortWithStatusJSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprint("Failed to verify the token: ", err),
+		})
+		return
+	}
+
 }
 
 // Handle regular username/password based login

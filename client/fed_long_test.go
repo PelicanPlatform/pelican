@@ -33,7 +33,6 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -44,6 +43,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -54,6 +54,7 @@ var (
 )
 
 func TestRecursiveUploadsAndDownloads(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Create instance of test federation
 	server_utils.ResetTestState()
 
@@ -85,7 +86,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	tempToken.Close()
 
 	// Disable progress bars to not reuse the same mpb instance
-	viper.Set("Logging.DisableProgressBars", true)
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 	// Make our test directories and files
 	tempDir, err := os.MkdirTemp("", "UploadDir")
@@ -278,6 +279,7 @@ func verifySuccessfulTransfer(t *testing.T, transferResults []client.TransferRes
 
 // Test that recursive uploads and downloads work with the ?recursive query
 func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Create instance of test federation
 	server_utils.ResetTestState()
 
@@ -318,7 +320,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 	tempToken.Close()
 
 	// Disable progress bars to not reuse the same mpb instance
-	viper.Set("Logging.DisableProgressBars", true)
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 	// Make our test directories and files
 	tempDir, err := os.MkdirTemp("", "UploadDir")
@@ -357,6 +359,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 
 	// Test we work with just the query
 	t.Run("testRecursiveGetAndPutWithQuery", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		require.NoError(t, err)
 
@@ -386,6 +389,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 
 	// Test we work with a value assigned to it (we print deprecation warning)
 	t.Run("testRecursiveGetAndPutWithQueryWithValueTrue", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		require.NoError(t, err)
 
@@ -415,6 +419,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 
 	// Test we work with a value assigned to it but says recursive=false (we print deprecation warning and ignore arguments in query so we still work)
 	t.Run("testRecursiveGetAndPutWithQueryWithValueFalse", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		require.NoError(t, err)
 
@@ -444,6 +449,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 
 	// Test we work with both recursive and directread query params
 	t.Run("testRecursiveGetAndPutWithQueryAndDirectread", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		require.NoError(t, err)
 
@@ -475,6 +481,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 // This tests that is origins disable listings, we should fail the download
 // Note: origins disabling listings override the existence of dirlisthost, causing a failure
 func TestFailureOnOriginDisablingListings(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 
 	fed := fed_test_utils.NewFedTest(t, pubExportNoDirectRead)
@@ -499,6 +506,7 @@ func TestFailureOnOriginDisablingListings(t *testing.T) {
 }
 
 func TestSyncUpload(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Create instance of test federation
 	server_utils.ResetTestState()
 
@@ -527,7 +535,7 @@ func TestSyncUpload(t *testing.T) {
 	tempToken.Close()
 
 	// Disable progress bars to not reuse the same mpb instance
-	viper.Set("Logging.DisableProgressBars", true)
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 	// Make our test directories and files
 	tempDir := t.TempDir()
@@ -560,6 +568,7 @@ func TestSyncUpload(t *testing.T) {
 	innerTempFile.Close()
 
 	t.Run("testSyncUploadFull", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		// Set path for object to upload/download
 		tempPath := tempDir
 		dirName := filepath.Base(tempPath)
@@ -578,6 +587,7 @@ func TestSyncUpload(t *testing.T) {
 	})
 
 	t.Run("testSyncUploadNone", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		// Set path for object to upload/download
 		dirName := filepath.Base(tempDir)
 		uploadUrl := fmt.Sprintf("pelican://%s/first/namespace/sync_upload_none/%s", discoveryUrl.Host, dirName)
@@ -597,6 +607,7 @@ func TestSyncUpload(t *testing.T) {
 	})
 
 	t.Run("testSyncUploadPartial", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		// Set path for object to upload/download
 		dirName := filepath.Base(tempDir)
 		uploadUrl := fmt.Sprintf("pelican://%s/first/namespace/sync_upload_partial/%s", discoveryUrl.Host, dirName)
@@ -631,6 +642,7 @@ func TestSyncUpload(t *testing.T) {
 	})
 
 	t.Run("testSyncUploadFile", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		// Create a new test file to upload
 		newDir := t.TempDir()
 		newTestFile, err := os.CreateTemp(newDir, "newTest")
@@ -696,6 +708,7 @@ func TestSyncUpload(t *testing.T) {
 }
 
 func TestSyncDownload(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Create instance of test federation
 	server_utils.ResetTestState()
 
@@ -724,7 +737,7 @@ func TestSyncDownload(t *testing.T) {
 	tempToken.Close()
 
 	// Disable progress bars to not reuse the same mpb instance
-	viper.Set("Logging.DisableProgressBars", true)
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 	// Make our test directories and files
 	tempDir := t.TempDir()
@@ -767,6 +780,7 @@ func TestSyncDownload(t *testing.T) {
 	verifySuccessfulTransfer(t, transferDetailsUpload)
 
 	t.Run("testSyncDownloadFull", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		// Download the files we just uploaded
 		transferDetailsDownload, err := client.DoGet(fed.Ctx, uploadUrl, t.TempDir(), true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
 		require.NoError(t, err)
@@ -774,6 +788,7 @@ func TestSyncDownload(t *testing.T) {
 	})
 
 	t.Run("testSyncDownloadNone", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		// Set path for object to upload/download
 		dirName := t.TempDir()
 
@@ -789,6 +804,7 @@ func TestSyncDownload(t *testing.T) {
 	})
 
 	t.Run("testSyncDownloadObject", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		// Set path for object to upload/download
 		dirName := t.TempDir()
 		filename1 := filepath.Base(tempFile1.Name())
@@ -835,6 +851,7 @@ func TestSyncDownload(t *testing.T) {
 	})
 
 	t.Run("testSyncDownloadPartial", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		// Set path for object to upload/download
 		downloadDir := t.TempDir()
 		dirName := filepath.Base(tempDir)
@@ -907,6 +924,7 @@ func TestSyncDownload(t *testing.T) {
 // This test verifies the behavior when a directory path is passed to the object put command without the recursive option.
 // In this scenario, an appropriate error message should be logged, and no directory or file should be created at the destination.
 func TestObjectPutNonRecursiveDirPath(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Create instance of test federation
 	server_utils.ResetTestState()
 
@@ -938,7 +956,7 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 	tempToken.Close()
 
 	// Disable progress bars to not reuse the same mpb instance
-	viper.Set("Logging.DisableProgressBars", true)
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 	tempDir, err := os.MkdirTemp("", "UploadDir")
 	require.NoError(t, err)
@@ -948,6 +966,7 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("testObjectPutNonRecursiveDirPath", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 
 		oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		require.NoError(t, err)
@@ -995,6 +1014,7 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 // - Failing to delete a non-empty directory when the recursive flag is not set.
 // - Ensuring the proper error messages are displayed for various failure cases.
 func TestObjectDelete(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	fed := fed_test_utils.NewFedTest(t, originConfigWithAndWithoutWrite)
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
@@ -1022,7 +1042,7 @@ func TestObjectDelete(t *testing.T) {
 	require.NoError(t, err)
 	tempToken.Close()
 
-	viper.Set("Logging.DisableProgressBars", true)
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
 	storagePrefix := fed.Exports[0].StoragePrefix
 
@@ -1100,6 +1120,7 @@ func TestObjectDelete(t *testing.T) {
 	// Test deleting a non-existent object.
 	// The operation should fail with a 404 error indicating that the object does not exist.
 	t.Run("testDeleteNonExistentObject", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		doesNotExistPath := fmt.Sprintf("pelican://%s%s/doesNotExist", discoveryUrl.Host, "/with-write")
 		err := client.DoDelete(fed.Ctx, doesNotExistPath, false, client.WithTokenLocation(tempToken.Name()))
 		require.Error(t, err)
@@ -1114,6 +1135,7 @@ func TestObjectDelete(t *testing.T) {
 	// Test deleting an existing object.
 	// The operation should succeed, and the object should no longer be accessible.
 	t.Run("testDeleteObject", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		objectToDeletePelicanUrl := fmt.Sprintf("pelican://%s/with-write/%s", discoveryUrl.Host, filepath.Base(objectToBeDeleted))
 		err = client.DoDelete(fed.Ctx, objectToDeletePelicanUrl, false, client.WithTokenLocation(tempToken.Name()))
 		require.NoError(t, err)
@@ -1127,6 +1149,7 @@ func TestObjectDelete(t *testing.T) {
 	// Test deleting an empty collection.
 	// The operation should succeed, and the collection should no longer be accessible.
 	t.Run("testDeleteEmptyCollection", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		emptyCollectionPelicanUrl := fmt.Sprintf("pelican://%s/with-write/%s", discoveryUrl.Host, filepath.Base(emptyCollectionToBeDeleted))
 		err := client.DoDelete(fed.Ctx, emptyCollectionPelicanUrl, false, client.WithTokenLocation(tempToken.Name()))
 		require.NoError(t, err)
@@ -1139,6 +1162,7 @@ func TestObjectDelete(t *testing.T) {
 	// Test deleting a non-empty collection without the recursive flag.
 	// The operation should fail with an error indicating that the collection cannot be deleted because it is not empty, and the collection should still exist.
 	t.Run("testDeleteNonEmptyCollectionWithoutRecursive", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		collectionToDeletePelicanUrl := fmt.Sprintf("pelican://%s/with-write/%s", discoveryUrl.Host, filepath.Base(complexCollection))
 		err := client.DoDelete(fed.Ctx, collectionToDeletePelicanUrl, false, client.WithTokenLocation(tempToken.Name()))
 		require.Error(t, err)
@@ -1152,6 +1176,7 @@ func TestObjectDelete(t *testing.T) {
 	// Test deleting a non-empty collection with the recursive flag.
 	// The operation should succeed, and the collection and its contents should no longer be accessible.
 	t.Run("testDeleteNonEmptyCollectionWithRecursive", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		collectionToDeletePelicanUrl := fmt.Sprintf("pelican://%s/with-write/%s", discoveryUrl.Host, filepath.Base(complexCollection))
 		err = client.DoDelete(fed.Ctx, collectionToDeletePelicanUrl, true, client.WithTokenLocation(tempToken.Name()))
 		require.NoError(t, err)
@@ -1164,6 +1189,7 @@ func TestObjectDelete(t *testing.T) {
 	// Test attempting to delete an object in a prefix without writes capability.
 	// The operation should fail with a 403 permission error.
 	t.Run("testDeleteForNonWritableNamespace", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
 		collectionToDeletePelicanUrl := fmt.Sprintf("pelican://%s/without-write/%s", discoveryUrl.Host, filepath.Base(objectNonWritableNs))
 		err := client.DoDelete(fed.Ctx, collectionToDeletePelicanUrl, false, client.WithTokenLocation(tempToken.Name()))
 

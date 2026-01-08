@@ -30,7 +30,6 @@ import (
 	"testing"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -44,6 +43,8 @@ import (
 )
 
 func TestFedServePosixOrigin(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -70,8 +71,10 @@ func TestFedServePosixOrigin(t *testing.T) {
 	err = os.Chmod(tmpPath, permissions)
 	require.NoError(t, err)
 
-	viper.Set("ConfigDir", tmpPath)
-	viper.Set("Origin.RunLocation", filepath.Join(tmpPath, "xrd"))
+	require.NoError(t, param.Set("ConfigDir", tmpPath))
+	// Set RuntimeDir to avoid race conditions with parallel tests using shared /run/pelican
+	require.NoError(t, param.Set(param.RuntimeDir.GetName(), tmpPath))
+	require.NoError(t, param.Set("Origin.RunLocation", filepath.Join(tmpPath, "xrd")))
 	t.Cleanup(func() {
 		if err := os.RemoveAll(tmpPath); err != nil {
 			t.Fatal("Failed to clean up temp path")
@@ -79,26 +82,33 @@ func TestFedServePosixOrigin(t *testing.T) {
 	})
 
 	// Increase the log level; otherwise, its difficult to debug failures
-	viper.Set("Logging.Level", "Debug")
+	require.NoError(t, param.Set("Logging.Level", "Debug"))
 
-	viper.Set("Origin.StoragePrefix", t.TempDir())
-	viper.Set("Origin.FederationPrefix", "/test")
-	viper.Set("Origin.StorageType", "posix")
-	viper.Set("Origin.Port", 0)
-	viper.Set("Server.WebPort", 0)
+	require.NoError(t, param.Set("Origin.StoragePrefix", t.TempDir()))
+	require.NoError(t, param.Set("Origin.FederationPrefix", "/test"))
+	require.NoError(t, param.Set("Origin.StorageType", "posix"))
+	require.NoError(t, param.Set("Origin.Port", 0))
+	require.NoError(t, param.Set("Server.WebPort", 0))
 
 	// Disable functionality we're not using (and is difficult to make work on Mac)
-	viper.Set("Origin.EnableCmsd", false)
-	viper.Set("Origin.EnableMacaroons", false)
-	viper.Set("Origin.EnableVoms", false)
-	viper.Set("TLSSkipVerify", true)
-	viper.Set("Server.EnableUI", false)
-	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(t.TempDir(), "ns-registry.sqlite"))
-	viper.Set("Registry.RequireOriginApproval", false)
-	viper.Set("Registry.RequireCacheApproval", false)
-	viper.Set("Director.DbLocation", filepath.Join(t.TempDir(), "director.sqlite"))
-	viper.Set(param.Origin_DbLocation.GetName(), filepath.Join(t.TempDir(), "origin.sqlite"))
-	viper.Set(param.Cache_DbLocation.GetName(), filepath.Join(t.TempDir(), "cache.sqlite"))
+	require.NoError(t, param.Set("Origin.EnableCmsd", false))
+	require.NoError(t, param.Set("Origin.EnableMacaroons", false))
+	require.NoError(t, param.Set("Origin.EnableVoms", false))
+	require.NoError(t, param.Set("TLSSkipVerify", true))
+	require.NoError(t, param.Set("Server.EnableUI", false))
+	require.NoError(t, param.Set(param.Server_DbLocation.GetName(), filepath.Join(t.TempDir(), "ns-registry.sqlite")))
+	require.NoError(t, param.Set("Registry.RequireOriginApproval", false))
+	require.NoError(t, param.Set("Registry.RequireCacheApproval", false))
+	require.NoError(t, param.Set("Director.DbLocation", filepath.Join(t.TempDir(), "director.sqlite")))
+	require.NoError(t, param.Set(param.Origin_DbLocation.GetName(), filepath.Join(t.TempDir(), "origin.sqlite")))
+	require.NoError(t, param.Set(param.Cache_DbLocation.GetName(), filepath.Join(t.TempDir(), "cache.sqlite")))
+	// Set up OIDC client configuration for registry OAuth functionality
+	oidcClientIDFile := filepath.Join(tmpPath, "oidc-client-id")
+	oidcClientSecretFile := filepath.Join(tmpPath, "oidc-client-secret")
+	require.NoError(t, os.WriteFile(oidcClientIDFile, []byte("test-client-id"), 0644))
+	require.NoError(t, os.WriteFile(oidcClientSecretFile, []byte("test-client-secret"), 0644))
+	require.NoError(t, param.Set(param.OIDC_ClientIDFile.GetName(), oidcClientIDFile))
+	require.NoError(t, param.Set(param.OIDC_ClientSecretFile.GetName(), oidcClientSecretFile))
 
 	defer cancel()
 

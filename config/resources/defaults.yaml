@@ -49,8 +49,6 @@ Director:
   AdvertisementTTL: 15m
   OriginCacheHealthTestInterval: 15s
   EnableBroker: true
-  CheckOriginPresence: true
-  CheckCachePresence: true
   AssumePresenceAtSingleOrigin: true
   CachePresenceTTL: 1m
   # This was originally 10k entries; after some informal measurements,
@@ -63,7 +61,6 @@ Cache:
   DefaultCacheTimeout: "9.5s"
   EnableBroker: true
   EnablePrefetch: true
-  Port: 8442
   SelfTest: true
   SelfTestInterval: 15s
   LowWatermark: 90
@@ -88,13 +85,6 @@ Origin:
   Multiuser: false
   EnableMacaroons: false
   EnableVoms: true
-  EnableUI: true
-  EnablePublicReads: false
-  EnableReads: true
-  EnableWrites: true
-  EnableListings: true
-  EnableDirectReads: true
-  Port: 8443
   SelfTestInterval: 15s
 Registry:
   InstitutionsUrlReloadMinutes: 15m

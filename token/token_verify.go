@@ -28,6 +28,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -56,8 +57,11 @@ type (
 	AuthChecker interface {
 		checkFederationIssuer(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScopes bool) error
 		checkLocalIssuer(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScopes bool) error
+		checkRegisteredServer(ctx *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error
 	}
 	AuthCheckImpl struct{}
+
+	RegisteredServerJWKSResolver func(ctx *gin.Context, serverID string) (jwk.Set, error)
 )
 
 const (
@@ -70,6 +74,7 @@ const (
 	FederationIssuer TokenIssuer = "FederationIssuer"
 	LocalIssuer      TokenIssuer = "LocalIssuer"
 	APITokenIssuer   TokenIssuer = "APITokenIssuer"
+	RegisteredServer TokenIssuer = "RegisteredServer"
 )
 
 var (
@@ -80,10 +85,33 @@ var (
 	)
 	// API token format: <5-char ID>.<64-char secret>, total length = 70, alphanumeric
 	ApiTokenRegex = regexp.MustCompile(`^[a-zA-Z0-9]{5}\.[a-zA-Z0-9]{64}$`)
+
+	registeredServerJWKSResolver atomic.Pointer[RegisteredServerJWKSResolver]
 )
 
 func init() {
 	authChecker = &AuthCheckImpl{}
+}
+
+// RegisterServerJWKSResolver allows other packages (e.g. the Registry) to provide a
+// direct lookup mechanism for registered server keys, avoiding HTTP round-trips and
+// import cycles.
+func RegisterServerJWKSResolver(resolver RegisteredServerJWKSResolver) {
+	if resolver == nil {
+		registeredServerJWKSResolver.Store(nil)
+		return
+	}
+	registeredServerJWKSResolver.Store(&resolver)
+}
+
+func resolveRegisteredServerJWKS(ctx *gin.Context, serverID string) (jwk.Set, bool, error) {
+	resolverPtr := registeredServerJWKSResolver.Load()
+	if resolverPtr == nil {
+		return nil, false, nil
+	}
+	resolver := *resolverPtr
+	jwks, err := resolver(ctx, serverID)
+	return jwks, true, err
 }
 
 // Checks that the given token was signed by the federation jwk and also checks that the token has the expected scope
@@ -145,7 +173,15 @@ func (a AuthCheckImpl) checkFederationIssuer(c *gin.Context, strToken string, ex
 		return errors.Wrap(err, fmt.Sprintf("Failed to verify the scope of the token. Require %v", expectedScopes))
 	}
 
-	c.Set("User", "Federation")
+	c.Set("User", parsed.Subject())
+
+	// Also extract and set userId if present in the token
+	if userIdIface, ok := parsed.Get("user_id"); ok {
+		if userId, ok := userIdIface.(string); ok && userId != "" {
+			c.Set("UserId", userId)
+		}
+	}
+
 	return nil
 }
 
@@ -183,7 +219,101 @@ func (a AuthCheckImpl) checkLocalIssuer(c *gin.Context, strToken string, expecte
 		return errors.Wrap(err, fmt.Sprintf("Failed to verify the scope of the token. Require %v", expectedScopes))
 	}
 
-	c.Set("User", "Origin")
+	c.Set("User", parsed.Subject())
+
+	// Also extract and set userId if present in the token
+	if userIdIface, ok := parsed.Get("user_id"); ok {
+		if userId, ok := userIdIface.(string); ok && userId != "" {
+			c.Set("UserId", userId)
+		}
+	}
+
+	return nil
+}
+
+// Verify a token against a registered server's public key
+// The token's subject should identify the server (i.e. server id)
+func (a AuthCheckImpl) checkRegisteredServer(ctx *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
+	// First parse token without verification to extract claims
+	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
+	if err != nil {
+		return errors.Wrap(err, "invalid JWT")
+	}
+
+	// Extract server id from token subject (e.g. "g2dsvf3")
+	subject := token.Subject()
+	if subject == "" {
+		return errors.New("Token missing subject claim")
+	}
+	// Expose subject for downstream handlers (e.g., ownership checks)
+	ctx.Set("TokenSubject", subject)
+
+	// Look up the server's public key set and metadata based on the the server id in the token subject
+	jwks, resolved, err := resolveRegisteredServerJWKS(ctx, subject)
+	if err != nil {
+		return errors.Wrap(err, "failed to resolve registered server JWKS")
+	}
+	if !resolved {
+		return errors.New("no JWKS resolver is configured; unable to lookup registered server's key set")
+	}
+
+	// Now verify the token with the server's public key
+	parsed, err := jwt.Parse([]byte(strToken), jwt.WithKeySet(jwks))
+	if err != nil {
+		return errors.Wrap(err, "failed to verify JWT with server's registered key set")
+	}
+
+	// Validate expiration and other standard claims
+	if err := jwt.Validate(parsed); err != nil {
+		return errors.Wrap(err, "token validation failed")
+	}
+
+	// Validate audience. The audience should be Registry's host:port.
+	federationInfo, err := config.GetFederation(context.Background())
+	if err != nil {
+		return errors.Wrap(err, "failed to get federation information")
+	}
+	registryURL := federationInfo.RegistryEndpoint
+	if registryURL == "" {
+		return errors.New("registry URL is not set")
+	}
+	url, parseErr := url.Parse(registryURL)
+	if parseErr != nil {
+		return errors.Wrapf(parseErr, "failed to parse registry URL %s", registryURL)
+	}
+	isAudienceValid := false
+	log.Tracef("Token audience: %v; Registry's 'host:port': %s", parsed.Audience(), url.Host)
+	for _, audience := range parsed.Audience() {
+		if audience == url.Host {
+			isAudienceValid = true
+			break
+		}
+	}
+	if !isAudienceValid {
+		return errors.New(fmt.Sprintf("failed to verify the audience of the token. Require %s", url.Host))
+	}
+
+	if len(expectedScopes) > 0 {
+		// Log the token scope for debugging
+		if scopeAny, present := parsed.Get("scope"); present {
+			if scopeStr, ok := scopeAny.(string); ok {
+				log.Tracef("Token scope: %s; expected scopes: %v", scopeStr, expectedScopes)
+			} else {
+				log.Tracef("Token scope is non-string (type %T); expected scopes: %v", scopeAny, expectedScopes)
+			}
+		} else {
+			log.Tracef("Token has no 'scope' claim; expected scopes: %v", expectedScopes)
+		}
+		// Validate scopes
+		scopeValidator := token_scopes.CreateScopeValidator(expectedScopes, allScopes)
+		if err := jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
+			return errors.Wrap(err, fmt.Sprintf("failed to verify the scope of the token. Require %v", expectedScopes))
+		}
+	}
+
+	// Set context variables for downstream handlers
+	ctx.Set("AuthMethod", "registered-server-token")
+
 	return nil
 }
 
@@ -257,6 +387,12 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 		case APITokenIssuer:
 			if err := checkApiTokenIssuer(token, authOption.Scopes, authOption.AllScopes); err != nil {
 				compoundErr = append(compoundErr, errors.Wrap(err, "cannot verify token with API token issuer"))
+			} else {
+				return http.StatusOK, true, nil
+			}
+		case RegisteredServer:
+			if err := authChecker.checkRegisteredServer(ctx, token, authOption.Scopes, authOption.AllScopes); err != nil {
+				compoundErr = append(compoundErr, errors.Wrap(err, "cannot verify token with server's registered public key"))
 			} else {
 				return http.StatusOK, true, nil
 			}
@@ -377,7 +513,7 @@ func GetJWKSFromIssUrl(issuer string) (*jwk.Set, error) {
 	}
 
 	// Query the JWKS URL for the public keys
-	httpClient := &http.Client{Transport: config.GetTransport()}
+	httpClient := config.GetClient()
 	req, err := http.NewRequest("GET", pubkeyUrlStr, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "Error creating request to issuer's JWKS URL")

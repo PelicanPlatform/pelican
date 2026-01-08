@@ -91,7 +91,19 @@ func getTransport() *http.Transport {
 }
 
 func proxyOrigin(resp http.ResponseWriter, req *http.Request, engine *gin.Engine) {
+	log.Debugf("Origin broker proxy received request: %s %s", req.Method, req.URL.Path)
+
+	// Handle /metrics endpoint - route to gin engine for Prometheus metrics
+	if req.URL.Path == "/metrics" {
+		log.Debug("Origin broker proxy: routing /metrics to gin engine")
+		PelicanBrokerApiRequests.WithLabelValues("origin").Inc()
+		engine.ServeHTTP(resp, req)
+		return
+	}
+
+	// Handle /api endpoints - route to gin engine
 	if strings.HasPrefix(req.URL.Path, "/api") {
+		log.Debugf("Origin broker proxy: routing API request %s to gin engine", req.URL.Path)
 		PelicanBrokerApiRequests.WithLabelValues("origin").Inc()
 		engine.ServeHTTP(resp, req)
 		return
@@ -133,13 +145,19 @@ func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group, engine *gin
 		return
 	}
 
+	// The origin is registered under its external web URL, so we use that
+	// as the prefix for token authentication regardless of which address
+	// we're polling for. This ensures the broker can verify our tokens
+	// against the registered namespace.
+	registeredPrefix := server_structs.GetOriginNs(externalWebUrl.Host)
+
 	// Startup 5 continuous polling routines
 	for cnt := 0; cnt < 5; cnt += 1 {
-		err = broker.LaunchRequestMonitor(ctx, egrp, server_structs.OriginType, externalWebUrl.Host, listenerChan)
+		err = broker.LaunchRequestMonitor(ctx, egrp, server_structs.OriginType, externalWebUrl.Host, registeredPrefix, listenerChan)
 		if err != nil {
 			return
 		}
-		err = broker.LaunchRequestMonitor(ctx, egrp, server_structs.OriginType, originUrl.Host, listenerChan)
+		err = broker.LaunchRequestMonitor(ctx, egrp, server_structs.OriginType, originUrl.Host, registeredPrefix, listenerChan)
 		if err != nil {
 			return
 		}
@@ -161,12 +179,14 @@ func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group, engine *gin
 					log.Errorln("Failed to determine callback result:", res)
 					break
 				}
+				log.Debugf("Origin received broker reverse connection from %s", listener.Addr())
 				srv := http.Server{
 					Handler: http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) { proxyOrigin(resp, req, engine) }),
 				}
 				PelicanBrokerConnections.WithLabelValues("origin").Inc()
 				go func() {
 					// A one-shot listener should do a single "accept" then shutdown.
+					log.Debug("Origin starting to serve broker reverse connection")
 					err = srv.Serve(listener)
 					if !errors.Is(err, net.ErrClosed) {
 						log.Errorln("Failed to serve reverse connection:", err)

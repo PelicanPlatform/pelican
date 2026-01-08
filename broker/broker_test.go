@@ -23,7 +23,9 @@ package broker
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -32,9 +34,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -47,7 +49,6 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 type (
@@ -65,6 +66,65 @@ func getTransport(conn net.Conn) (tr *http.Transport) {
 	return
 }
 
+// setupTestEngine creates a gin engine for testing, similar to web_ui.GetEngine()
+func setupTestEngine() *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+	return engine
+}
+
+// runTestEngine starts an HTTPS server with the given gin engine for testing
+// Note: This uses HTTPS (not HTTP) to match production behavior and the broker's
+// reversed connection mechanism which always uses TLS
+func runTestEngine(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
+	addr := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	config.UpdateConfigFromListener(ln)
+
+	certFile := param.Server_TLSCertificateChain.GetString()
+	keyFile := param.Server_TLSKey.GetString()
+
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return err
+	}
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		NextProtos:   []string{"http/1.1"},
+	}
+
+	server := &http.Server{
+		Addr:      addr,
+		Handler:   engine,
+		TLSConfig: tlsConfig,
+	}
+
+	egrp.Go(func() error {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		return nil
+	})
+
+	egrp.Go(func() error {
+		defer ln.Close()
+		if err := server.ServeTLS(ln, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	})
+
+	return nil
+}
+
 // Returns a HTTP HandlerFunc that always returns the plaintext "Hello world"
 func getHelloWorldHandler(t *testing.T) func(resp http.ResponseWriter, req *http.Request) {
 	return func(resp http.ResponseWriter, req *http.Request) {
@@ -78,11 +138,11 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 	dirpath := t.TempDir()
 
 	server_utils.ResetTestState()
-	viper.Set(param.Logging_Level.GetName(), "Debug")
-	viper.Set("ConfigDir", filepath.Join(dirpath, "config"))
-	viper.Set(param.Server_WebPort.GetName(), "0")
-	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(dirpath, "ns-registry.sqlite"))
-	viper.Set(param.Origin_FederationPrefix.GetName(), "/foo")
+	require.NoError(t, param.Set(param.Logging_Level.GetName(), "Debug"))
+	require.NoError(t, param.Set("ConfigDir", filepath.Join(dirpath, "config")))
+	require.NoError(t, param.Set(param.Server_WebPort.GetName(), "0"))
+	require.NoError(t, param.Set(param.Server_DbLocation.GetName(), filepath.Join(dirpath, "ns-registry.sqlite")))
+	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/foo"))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
@@ -164,6 +224,7 @@ func doRetrieveRequest(t *testing.T, ctx context.Context, dur time.Duration) (*h
 
 // End-to-end test of the broker doing a TCP reversal
 func TestBroker(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -171,14 +232,13 @@ func TestBroker(t *testing.T) {
 	Setup(t, ctx, egrp)
 
 	// Setup the broker APIs
-	engine, err := web_ui.GetEngine()
-	require.NoError(t, err)
+	engine := setupTestEngine()
 	rootGroup := engine.Group("/")
 	RegisterBroker(ctx, rootGroup)
 	RegisterBrokerCallback(ctx, rootGroup)
 	registry.RegisterRegistryAPI(rootGroup)
 	// Register routes for APIs to registry Web UI
-	err = registry.RegisterRegistryWebAPI(rootGroup)
+	err := registry.RegisterRegistryWebAPI(rootGroup)
 	require.NoError(t, err)
 
 	egrp.Go(func() error {
@@ -187,26 +247,39 @@ func TestBroker(t *testing.T) {
 	})
 
 	// Run the web engine, wait for it to be online.
-	err = web_ui.RunEngineRoutine(ctx, engine, egrp, false)
+	err = runTestEngine(ctx, engine, egrp)
 	require.NoError(t, err)
 	err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/", "Web UI", http.StatusNotFound, false)
 	require.NoError(t, err)
 
-	// Create a HTTP server we'll use to serve up the reversed connection
+	// Create an HTTPS server we'll use to serve up the reversed connection
+	// The reversed connection uses TLS by design
 	srv := http.Server{
 		Handler: http.HandlerFunc(getHelloWorldHandler(t)),
+		TLSConfig: &tls.Config{
+			Certificates: []tls.Certificate{},
+			// Load the server certificate
+			GetCertificate: func(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
+				cert, err := tls.LoadX509KeyPair(
+					param.Server_TLSCertificateChain.GetString(),
+					param.Server_TLSKey.GetString(),
+				)
+				return &cert, err
+			},
+		},
 	}
 
 	// Launch the origin-side monitoring of requests.
-	viper.Set("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString())
-	viper.Set("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString())
+	require.NoError(t, param.Set("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString()))
+	require.NoError(t, param.Set("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString()))
 	listenerChan := make(chan any)
 	ctxQuick, deadlineCancel := context.WithTimeout(ctx, 5*time.Second) // Have shorter timeout for this handshake
+	defer deadlineCancel()
 
 	externalWebUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	require.NoError(t, err)
 
-	err = LaunchRequestMonitor(ctxQuick, egrp, server_structs.CacheType, externalWebUrl.Hostname(), listenerChan)
+	err = LaunchRequestMonitor(ctxQuick, egrp, server_structs.CacheType, externalWebUrl.Hostname(), "", listenerChan)
 	require.NoError(t, err)
 
 	// Initiate the callback using the cache-based routines.
@@ -247,7 +320,8 @@ func TestBroker(t *testing.T) {
 
 	go func() {
 		log.Debug("Starting reversed server for connection")
-		err = srv.Serve(listener)
+		// Use ServeTLS since the server has TLS config
+		err = srv.ServeTLS(listener, "", "")
 		if errors.Is(err, net.ErrClosed) {
 			err = nil
 		}
@@ -264,11 +338,17 @@ func TestBroker(t *testing.T) {
 		return
 	})
 
-	// Make a simple HTTP request against our server
-	tr := getTransport(clientConn)
+	// Wrap the client connection in TLS to match the origin's TLS listener
+	// The broker's reversed connection mechanism always uses TLS
+	tlsConfig := config.GetTransport().TLSClientConfig
+	tlsConn := tls.Client(clientConn, tlsConfig)
+	err = tlsConn.HandshakeContext(ctx)
+	require.NoError(t, err)
+
+	// Make a simple HTTPS request against the reversed connection server
+	tr := getTransport(tlsConn)
 	client := http.Client{Transport: tr}
-	url := param.Server_ExternalWebUrl.GetString()
-	//url := "http://" + clientConn.RemoteAddr().String()
+	url := "https://" + clientConn.RemoteAddr().String()
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	require.NoError(t, err)
 
@@ -285,6 +365,7 @@ func TestBroker(t *testing.T) {
 
 // Ensure the retrieve handler times out
 func TestRetrieveTimeout(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -292,8 +373,7 @@ func TestRetrieveTimeout(t *testing.T) {
 	Setup(t, ctx, egrp)
 
 	// Setup the broker APIs
-	engine, err := web_ui.GetEngine()
-	require.NoError(t, err)
+	engine := setupTestEngine()
 	rootGroup := engine.Group("/")
 	RegisterBroker(ctx, rootGroup)
 	registry.RegisterRegistryAPI(rootGroup)
@@ -304,13 +384,13 @@ func TestRetrieveTimeout(t *testing.T) {
 	})
 
 	// Run the web engine, wait for it to be online.
-	err = web_ui.RunEngineRoutine(ctx, engine, egrp, false)
+	err := runTestEngine(ctx, engine, egrp)
 	require.NoError(t, err)
 	err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/", "Web UI", http.StatusNotFound, false)
 	require.NoError(t, err)
 
-	viper.Set("Federation.BrokerUrl", param.Server_ExternalWebUrl.GetString())
-	viper.Set("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString())
+	require.NoError(t, param.Set("Federation.BrokerUrl", param.Server_ExternalWebUrl.GetString()))
+	require.NoError(t, param.Set("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString()))
 
 	resp, err := doRetrieveRequest(t, ctx, time.Millisecond)
 	require.NoError(t, err)

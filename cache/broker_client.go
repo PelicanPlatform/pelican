@@ -39,6 +39,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
@@ -225,9 +226,18 @@ func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group, engine *gin
 		return
 	}
 
+	metadata, err := database.GetServerLocalMetadata()
+	if err != nil {
+		return errors.Wrap(err, "failed to get server local metadata")
+	}
+
+	registeredPrefix := server_structs.GetCacheNs(metadata.Name)
+
 	// Startup 5 continuous polling routines
+	// For caches, the registered prefix matches the constructed one (hostname only),
+	// so we pass an empty string to use the default behavior.
 	for cnt := 0; cnt < 5; cnt += 1 {
-		err = broker.LaunchRequestMonitor(ctx, egrp, server_structs.CacheType, externalWebUrl.Hostname(), listenerChan)
+		err = broker.LaunchRequestMonitor(ctx, egrp, server_structs.CacheType, externalWebUrl.Hostname(), registeredPrefix, listenerChan)
 		if err != nil {
 			return
 		}

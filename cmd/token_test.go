@@ -32,6 +32,7 @@ import (
 )
 
 func TestSplitClaim(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name          string
 		claim         string
@@ -91,6 +92,7 @@ func TestSplitClaim(t *testing.T) {
 }
 
 func TestIssuerMatchesKey(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name           string
 		useMockIssuer  bool
@@ -160,6 +162,7 @@ func TestIssuerMatchesKey(t *testing.T) {
 }
 
 func TestGetIssuer(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	jwksStr, err := test_utils.GenerateJWKS()
 	require.NoError(t, err)
 	jwks, err := jwk.ParseString(jwksStr)

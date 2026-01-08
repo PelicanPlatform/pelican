@@ -33,6 +33,7 @@ import (
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func hasServerAdWithName(ads []copyAd, name string) bool {
@@ -48,6 +49,25 @@ func hasServerAdWithName(ads []copyAd, name string) bool {
 // this really tests matchesPrefix, but we test this higher level function to
 // avoid having to mess with the cache.
 func TestGetAdsForPath(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	// Ensure we start from a clean slate and detect leaks spawned during this test.
+	resetHealthTests()
+	shutdownStatUtils()
+
+	t.Cleanup(func() {
+		shutdownHealthTests()
+		shutdownStatUtils()
+		serverAds.DeleteAll()
+	})
+
+	serverAds.DeleteAll()
+	go serverAds.Start()
+	t.Cleanup(func() {
+		serverAds.DeleteAll()
+		serverAds.Stop()
+	})
+
 	/*
 		FLOW:
 			- Set up a few dummy namespaces, origin, and cache ads
@@ -283,6 +303,7 @@ func TestGetAdsForPath(t *testing.T) {
 }
 
 func TestAllPredicatesPass(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx := &gin.Context{}
 	ad := copyAd{
 		ServerAd:    server_structs.ServerAd{},
@@ -298,6 +319,7 @@ func TestAllPredicatesPass(t *testing.T) {
 }
 
 func TestOriginSupportsVerb(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name           string
 		nsCaps         server_structs.Capabilities
@@ -386,6 +408,7 @@ func TestOriginSupportsVerb(t *testing.T) {
 }
 
 func TestOriginSupportsQuery(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name       string
 		query      string
@@ -478,6 +501,7 @@ func TestOriginSupportsQuery(t *testing.T) {
 }
 
 func TestComputeFeaturesUnion(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name              string
 		origins           []copyAd
@@ -568,6 +592,7 @@ func produceAd(name, adType, vString string) copyAd {
 }
 
 func TestFilterOrigins(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name          string
 		origins       []copyAd
@@ -654,6 +679,7 @@ func TestFilterOrigins(t *testing.T) {
 }
 
 func TestCacheSupportsFeature(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name             string
 		ad               copyAd
@@ -714,6 +740,8 @@ func TestCacheSupportsFeature(t *testing.T) {
 }
 
 func TestCacheMightSupportFeature(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	testCases := []struct {
 		name             string
 		ad               copyAd
@@ -750,6 +778,8 @@ func TestCacheMightSupportFeature(t *testing.T) {
 }
 
 func TestCacheNotFromTopoIfPubReads(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	testCases := []struct {
 		name        string
 		fromTopo    bool
@@ -802,6 +832,7 @@ func TestCacheNotFromTopoIfPubReads(t *testing.T) {
 }
 
 func TestCacheNotInErrorState(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
 		name     string
 		status   metrics.HealthStatusEnum
@@ -854,6 +885,8 @@ func TestCacheNotInErrorState(t *testing.T) {
 }
 
 func TestFilterCaches(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	testCases := []struct {
 		name            string
 		ads             []copyAd

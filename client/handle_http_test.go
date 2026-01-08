@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, University of Nebraska-Lincoln
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -29,6 +29,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"io/fs"
@@ -42,6 +43,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -62,15 +64,21 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	cleanup := test_utils.SetupGlobalTestLogging()
+
 	server_utils.ResetTestState()
 	if err := config.InitClient(); err != nil {
+		cleanup()
 		os.Exit(1)
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	cleanup()
+	os.Exit(code)
 }
 
 // TestNewTransferDetails checks the creation of transfer details
 func TestNewTransferDetails(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	os.Setenv("http_proxy", "http://proxy.edu:3128")
 	t.Cleanup(func() {
 		require.NoError(t, os.Unsetenv("http_proxy"))
@@ -122,6 +130,7 @@ func TestNewTransferDetails(t *testing.T) {
 }
 
 func TestNewTransferDetailsEnv(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	os.Setenv("http_proxy", "http://proxy.edu:3128")
 	t.Cleanup(func() {
 		require.NoError(t, os.Unsetenv("http_proxy"))
@@ -149,11 +158,15 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 }
 
 func TestSlowTransfers(t *testing.T) {
-	defer goleak.VerifyNone(t,
-		// Ignore the progress bars
-		goleak.IgnoreTopFunction("github.com/vbauerster/mpb/v8.(*Progress).serve"),
-		goleak.IgnoreTopFunction("github.com/vbauerster/mpb/v8.heapManager.run"),
-	)
+	t.Cleanup(func() {
+		goleak.VerifyNone(t,
+			// Ignore the progress bars
+			goleak.IgnoreTopFunction("github.com/vbauerster/mpb/v8.(*Progress).serve"),
+			goleak.IgnoreTopFunction("github.com/vbauerster/mpb/v8.heapManager.run"),
+		)
+	})
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 	// Adjust down some timeouts to speed up the test
 	test_utils.InitClient(t, map[string]any{
@@ -240,6 +253,8 @@ func TestSlowTransfers(t *testing.T) {
 
 // Test stopped transfer
 func TestStoppedTransfer(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	os.Setenv("http_proxy", "http://proxy.edu:3128")
 	t.Cleanup(func() {
 		require.NoError(t, os.Unsetenv("http_proxy"))
@@ -328,6 +343,8 @@ func TestStoppedTransfer(t *testing.T) {
 
 // Test connection error
 func TestConnectionError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -347,11 +364,210 @@ func TestConnectionError(t *testing.T) {
 		fname, writer, 0, -1, "", "",
 	)
 
-	assert.IsType(t, &ConnectionSetupError{}, err)
+	// downloadHTTP returns unwrapped ConnectionSetupError; wrapping happens in the download loop
+	var cse *ConnectionSetupError
+	require.True(t, errors.As(err, &cse), "Error should be a ConnectionSetupError")
+
+	// Verify that when wrapped, it has the correct properties (simulating download loop behavior)
+	wrappedErr := error_codes.NewContact_ConnectionSetupError(cse)
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(wrappedErr, &pe), "Wrapped error should be a PelicanError")
+	// Use the generated error code instead of hardcoding to make the test robust to code changes
+	expectedErr := error_codes.NewContact_ConnectionSetupError(errors.New("test"))
+	assert.Equal(t, expectedErr.Code(), pe.Code(), "Should map to Contact.ConnectionSetup error code")
+	assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType(), "Should map to Contact.ConnectionSetup error type")
+	assert.Equal(t, expectedErr.IsRetryable(), pe.IsRetryable(), "Connection setup failures should be retryable")
+}
+
+func TestAllocateMemoryError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	// Create a custom transport that returns ENOMEM to simulate the actual error condition
+	// In production, this happens at handle_http.go:2780-2784 when client.Do returns ENOMEM
+	enomemTransport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return nil, syscall.Errno(syscall.ENOMEM)
+		},
+	}
+
+	// Create an HTTP client with the custom transport
+	client := &http.Client{
+		Transport: enomemTransport,
+		Timeout:   time.Second,
+	}
+
+	// Create a request that will trigger the ENOMEM error
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://example.com/test", nil)
+	require.NoError(t, err)
+
+	// Call client.Do which should return ENOMEM
+	_, err = client.Do(req)
+	require.Error(t, err, "Should have an error from ENOMEM")
+
+	// Verify that the error contains ENOMEM
+	var sysErr syscall.Errno
+	require.True(t, errors.As(err, &sysErr), "Error should be a syscall.Errno")
+	assert.Equal(t, syscall.ENOMEM, sysErr, "Error should be ENOMEM")
 
 }
 
+func TestNetworkResetError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	// Set up an HTTP server that hijacks the connection and resets it during transfer
+	// This simulates ECONNRESET/EPIPE during transfer
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Hijack the connection so we can control when to reset it
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "webserver doesn't support hijacking", http.StatusInternalServerError)
+			return
+		}
+		conn, bufrw, err := hj.Hijack()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer conn.Close()
+
+		// Send HTTP response headers
+		_, _ = bufrw.WriteString("HTTP/1.1 200 OK\r\n")
+		_, _ = bufrw.WriteString("Content-Length: 1000\r\n")
+		_, _ = bufrw.WriteString("\r\n")
+		_ = bufrw.Flush()
+
+		// Send some data to ensure client starts reading
+		_, _ = conn.Write([]byte("some data"))
+		_ = conn.(*net.TCPConn).SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
+
+		// Give the client time to start reading the response body
+		time.Sleep(100 * time.Millisecond)
+
+		// Force TCP RST by setting SO_LINGER to 0
+		// This causes the connection to send RST instead of FIN when closed
+		if tcpConn, ok := conn.(*net.TCPConn); ok {
+			_ = tcpConn.SetLinger(0) // Set linger to 0 to send RST on close
+			rawConn, err := tcpConn.SyscallConn()
+			if err == nil {
+				_ = rawConn.Control(func(fd uintptr) {
+					// Also set SO_LINGER via syscall to ensure RST
+					var linger syscall.Linger
+					linger.Onoff = 1
+					linger.Linger = 0
+					_ = syscall.SetsockoptLinger(int(fd), syscall.SOL_SOCKET, syscall.SO_LINGER, &linger)
+				})
+			}
+		}
+		// Close connection with RST (due to SO_LINGER) while client is reading
+		conn.Close()
+	}))
+	defer svr.Close()
+
+	serverAddr := strings.TrimPrefix(svr.URL, "http://")
+
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	assert.NoError(t, err)
+	defer writer.Close()
+
+	// Call downloadHTTP which should trigger NetworkResetError when connection is reset
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil,
+		transferAttemptDetails{Url: &url.URL{Scheme: "http", Host: serverAddr}, Proxy: false},
+		fname, writer, 0, -1, "", "",
+	)
+
+	// The error should be wrapped as Contact.ConnectionReset in the download loop
+	// We need to check the TransferAttemptError to see the wrapped error
+	// But downloadHTTP returns the raw error, so we need to simulate the wrapping
+	require.Error(t, err, "Should have an error from connection reset")
+
+	// Check if it's a syscall error that would trigger NetworkResetError
+	// The download loop checks for ECONNRESET/EPIPE at using errors.Is
+	// errors.Is should work even if the error is wrapped (through ConnectionSetupError -> OpError -> ECONNRESET)
+	require.True(t, errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE),
+		"Error should be ECONNRESET or EPIPE (possibly wrapped), got: %T, error: %v", err, err)
+}
+
+func TestProxyConnectionError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	// Create a custom transport that simulates a proxy connection failure
+	// In production, this happens when http.Client.Do() tries to connect to a proxy
+	// and the connection fails (e.g., proxy is unreachable)
+	proxyAddr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:3128")
+	require.NoError(t, err)
+
+	proxyConnectionErr := &net.OpError{
+		Op:   "proxyconnect",
+		Net:  "tcp",
+		Addr: proxyAddr,
+		Err:  errors.New("connection refused"),
+	}
+
+	// Create a custom transport that returns the proxy connection error
+	customTransport := &http.Transport{
+		Proxy: func(*http.Request) (*url.URL, error) {
+			// Return a proxy URL to force proxy usage
+			return url.Parse("http://127.0.0.1:3128")
+		},
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			// When the client tries to dial the proxy, return the proxy connection error
+			if addr == "127.0.0.1:3128" {
+				return nil, proxyConnectionErr
+			}
+			// For other addresses, use default dialer
+			var d net.Dialer
+			return d.DialContext(ctx, network, addr)
+		},
+	}
+
+	// Create an HTTP client with the custom transport
+	client := &http.Client{
+		Transport: customTransport,
+		Timeout:   time.Second,
+	}
+
+	// Create a request that will trigger the proxy connection
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://example.com/test", nil)
+	require.NoError(t, err)
+
+	// Call client.Do which should return the proxy connection error
+	_, err = client.Do(req)
+	require.Error(t, err, "Should have an error from proxy connection failure")
+
+	// Verify that the error is a *net.OpError with Op == "proxyconnect"
+	// The error might be wrapped in url.Error
+	var ope *net.OpError
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		innerErr := ue.Unwrap()
+		if innerOpe, ok := innerErr.(*net.OpError); ok {
+			ope = innerOpe
+		}
+	}
+
+	if ope == nil {
+		require.True(t, errors.As(err, &ope), "Error should be a *net.OpError, got: %T, error: %v", err, err)
+	}
+	assert.Equal(t, "proxyconnect", ope.Op, "Error should be a proxyconnect operation")
+
+	// Verify that when wrapped (as it would be in the download loop), it has the correct properties
+	proxyErr := &ConnectionSetupError{URL: "http://example.com/test", Err: err}
+	wrappedErr := error_codes.NewContact_ConnectionSetupError(proxyErr)
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(wrappedErr, &pe), "Wrapped error should be a PelicanError")
+	// Use the generated error code instead of hardcoding to make the test robust to code changes
+	expectedErr := error_codes.NewContact_ConnectionSetupError(errors.New("test"))
+	assert.Equal(t, expectedErr.Code(), pe.Code(), "Should map to Contact.ConnectionSetup error code")
+	assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType(), "Should map to Contact.ConnectionSetup error type")
+	assert.Equal(t, expectedErr.IsRetryable(), pe.IsRetryable(), "Proxy connection failures should be retryable")
+}
+
 func TestTrailerError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// Set up an HTTP server that returns an error trailer
@@ -399,6 +615,7 @@ func TestTrailerError(t *testing.T) {
 }
 
 func TestUploadZeroLengthFile(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
 		//t.Logf("%s", dump)
@@ -427,6 +644,7 @@ func TestUploadZeroLengthFile(t *testing.T) {
 }
 
 func TestFailedUpload(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
 		//t.Logf("%s", dump)
@@ -457,6 +675,7 @@ func TestFailedUpload(t *testing.T) {
 }
 
 func TestUploadLocalFileNotFound(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{})
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -514,6 +733,7 @@ func TestUploadLocalFileNotFound(t *testing.T) {
 }
 
 func TestSortAttempts(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
 
 	neverRespond := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -581,6 +801,7 @@ func TestSortAttempts(t *testing.T) {
 }
 
 func TestTimeoutHeaderSetForDownload(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		"Transport.ResponseHeaderTimeout": 10 * time.Second,
 	})
@@ -617,6 +838,7 @@ func TestTimeoutHeaderSetForDownload(t *testing.T) {
 }
 
 func TestJobIdHeaderSetForDownload(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{})
 
 	// Create a test .job.ad file
@@ -674,6 +896,7 @@ type (
 
 // Test to ensure the user-agent header is being updating in the request made within DownloadHTTP()
 func TestProjInUserAgent(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	server_test := server_test{}
@@ -708,6 +931,7 @@ func TestProjInUserAgent(t *testing.T) {
 // The test should prove that the function getObjectServersToTry returns the correct number of servers,
 // and that any duplicates are removed
 func TestGetObjectServersToTry(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	sortedServers := []string{
 		"http://cache-1.com", // set an HTTP scheme to check that it's switched to https
 		"https://cache-2.com",
@@ -771,6 +995,7 @@ func TestGetObjectServersToTry(t *testing.T) {
 
 // Test that the project name is correctly extracted from the job ad file
 func TestSearchJobAd(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Create a temporary file
 	tempFile, err := os.CreateTemp("", "test")
 	assert.NoError(t, err)
@@ -817,6 +1042,7 @@ func TestSearchJobAd(t *testing.T) {
 
 // Test error messages when a 504 Gateway Timeout occurs
 func TestGatewayTimeout(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		"Logging.Level": "debug",
 	})
@@ -866,8 +1092,463 @@ func TestGatewayTimeout(t *testing.T) {
 	}
 }
 
+// TestStatusCodeErrorWrapping tests that different HTTP status codes are wrapped correctly
+func TestStatusCodeErrorWrapping(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	test_utils.InitClient(t, map[string]any{
+		"Logging.Level": "debug",
+	})
+
+	testCases := []struct {
+		name          string
+		statusCode    int
+		expectedCode  int
+		expectedType  string
+		expectedRetry bool
+		expectedErrFn func(error) *error_codes.PelicanError
+	}{
+		{
+			name:          "401 Unauthorized",
+			statusCode:    http.StatusUnauthorized,
+			expectedCode:  4000,
+			expectedType:  "Authorization",
+			expectedRetry: false,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewAuthorizationError(errors.New("test"))
+			},
+		},
+		{
+			name:          "403 Forbidden",
+			statusCode:    http.StatusForbidden,
+			expectedCode:  4000,
+			expectedType:  "Authorization",
+			expectedRetry: false,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewAuthorizationError(errors.New("test"))
+			},
+		},
+		{
+			name:          "404 Not Found",
+			statusCode:    http.StatusNotFound,
+			expectedCode:  5011,
+			expectedType:  "Specification.FileNotFound",
+			expectedRetry: false,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewSpecification_FileNotFoundError(errors.New("test"))
+			},
+		},
+		{
+			name:          "400 Bad Request",
+			statusCode:    http.StatusBadRequest,
+			expectedCode:  5000,
+			expectedType:  "Specification",
+			expectedRetry: false,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewSpecificationError(errors.New("test"))
+			},
+		},
+		{
+			name:          "500 Internal Server Error",
+			statusCode:    http.StatusInternalServerError,
+			expectedCode:  6000,
+			expectedType:  "Transfer",
+			expectedRetry: true,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewTransferError(errors.New("test"))
+			},
+		},
+		{
+			name:          "502 Bad Gateway",
+			statusCode:    http.StatusBadGateway,
+			expectedCode:  6000,
+			expectedType:  "Transfer",
+			expectedRetry: true,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewTransferError(errors.New("test"))
+			},
+		},
+		{
+			name:          "503 Service Unavailable",
+			statusCode:    http.StatusServiceUnavailable,
+			expectedCode:  6000,
+			expectedType:  "Transfer",
+			expectedRetry: true,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewTransferError(errors.New("test"))
+			},
+		},
+		{
+			name:          "504 Gateway Timeout",
+			statusCode:    http.StatusGatewayTimeout,
+			expectedCode:  6003,
+			expectedType:  "Transfer.TimedOut",
+			expectedRetry: true,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewTransfer_TimedOutError(errors.New("test"))
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.statusCode)
+			}))
+			defer svr.Close()
+			svrURL, err := url.Parse(svr.URL)
+			require.NoError(t, err)
+
+			transfer := &transferFile{
+				ctx: context.Background(),
+				job: &TransferJob{
+					remoteURL: &pelican_url.PelicanURL{
+						Scheme: "pelican://",
+						Host:   svrURL.Host,
+						Path:   svrURL.Path + "/test.txt",
+					},
+				},
+				localPath: "/dev/null",
+				remoteURL: svrURL,
+				attempts: []transferAttemptDetails{
+					{
+						Url: svrURL,
+					},
+				},
+			}
+			transferResult, err := downloadObject(transfer)
+			assert.NoError(t, err)
+			err = transferResult.Error
+			require.Error(t, err, "Should have an error for status code %d", tc.statusCode)
+
+			// Check that it's wrapped in a PelicanError with the expected type
+			var pe *error_codes.PelicanError
+			require.True(t, errors.As(err, &pe), "Error should be wrapped in PelicanError for status %d", tc.statusCode)
+
+			// Use the expected error function to get the expected values
+			expectedErr := tc.expectedErrFn(errors.New("test"))
+			assert.Equal(t, expectedErr.Code(), pe.Code(), "Status %d should map to error code %d", tc.statusCode, tc.expectedCode)
+			assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType(), "Status %d should map to error type %s", tc.statusCode, tc.expectedType)
+			assert.Equal(t, expectedErr.IsRetryable(), pe.IsRetryable(), "Status %d retryability should be %v", tc.statusCode, tc.expectedRetry)
+		})
+	}
+}
+
+// TestStatusCodeErrorWrappingUpload tests that different HTTP status codes are wrapped correctly during uploads
+func TestStatusCodeErrorWrappingUpload(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	test_utils.InitClient(t, map[string]any{
+		"Logging.Level": "debug",
+		"TLSSkipVerify": true,
+	})
+
+	testCases := []struct {
+		name          string
+		statusCode    int
+		expectedCode  int
+		expectedType  string
+		expectedRetry bool
+		expectedErrFn func(error) *error_codes.PelicanError
+	}{
+		{
+			name:          "401 Unauthorized",
+			statusCode:    http.StatusUnauthorized,
+			expectedCode:  4000,
+			expectedType:  "Authorization",
+			expectedRetry: false,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewAuthorizationError(errors.New("test"))
+			},
+		},
+		{
+			name:          "403 Forbidden",
+			statusCode:    http.StatusForbidden,
+			expectedCode:  4000,
+			expectedType:  "Authorization",
+			expectedRetry: false,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewAuthorizationError(errors.New("test"))
+			},
+		},
+		{
+			name:          "400 Bad Request",
+			statusCode:    http.StatusBadRequest,
+			expectedCode:  5000,
+			expectedType:  "Specification",
+			expectedRetry: false,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewSpecificationError(errors.New("test"))
+			},
+		},
+		{
+			name:          "500 Internal Server Error",
+			statusCode:    http.StatusInternalServerError,
+			expectedCode:  6000,
+			expectedType:  "Transfer",
+			expectedRetry: true,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewTransferError(errors.New("test"))
+			},
+		},
+		{
+			name:          "502 Bad Gateway",
+			statusCode:    http.StatusBadGateway,
+			expectedCode:  6000,
+			expectedType:  "Transfer",
+			expectedRetry: true,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewTransferError(errors.New("test"))
+			},
+		},
+		{
+			name:          "503 Service Unavailable",
+			statusCode:    http.StatusServiceUnavailable,
+			expectedCode:  6000,
+			expectedType:  "Transfer",
+			expectedRetry: true,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewTransferError(errors.New("test"))
+			},
+		},
+		{
+			name:          "504 Gateway Timeout",
+			statusCode:    http.StatusGatewayTimeout,
+			expectedCode:  6003,
+			expectedType:  "Transfer.TimedOut",
+			expectedRetry: true,
+			expectedErrFn: func(err error) *error_codes.PelicanError {
+				return error_codes.NewTransfer_TimedOutError(errors.New("test"))
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			configDir := t.TempDir()
+			testfileLocation := filepath.Join(configDir, "testfile.txt")
+			err := os.WriteFile(testfileLocation, []byte("test content"), fs.FileMode(0600))
+			require.NoError(t, err)
+
+			svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Return 404 for PROPFIND (stat) requests so upload doesn't think file exists
+				if r.Method == "PROPFIND" {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				// For PUT requests, return the test status code
+				if r.Method == "PUT" {
+					w.WriteHeader(tc.statusCode)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer svr.Close()
+			svrURL, err := url.Parse(svr.URL)
+			require.NoError(t, err)
+
+			transfer := &transferFile{
+				ctx: context.Background(),
+				job: &TransferJob{
+					remoteURL: &pelican_url.PelicanURL{
+						Scheme: "pelican://",
+						Host:   svrURL.Host,
+						Path:   svrURL.Path + "/test.txt",
+					},
+					dirResp: server_structs.DirectorResponse{
+						XPelNsHdr: server_structs.XPelNs{
+							Namespace:      "/test",
+							RequireToken:   false,
+							CollectionsUrl: svrURL,
+						},
+					},
+				},
+				localPath: testfileLocation,
+				remoteURL: svrURL,
+				attempts: []transferAttemptDetails{
+					{
+						Url: svrURL,
+					},
+				},
+			}
+			transferResult, err := uploadObject(transfer)
+			assert.NoError(t, err)
+			err = transferResult.Error
+			require.Error(t, err, "Should have an error for status code %d", tc.statusCode)
+
+			// Check that it's wrapped in a PelicanError with the expected type
+			// The error might be in TransferErrors, so we need to check both
+			var te *TransferErrors
+			if errors.As(err, &te) {
+				// Extract the first error from TransferErrors
+				if len(te.errors) > 0 {
+					if tsErr, ok := te.errors[0].(*TimestampedError); ok && tsErr != nil {
+						err = tsErr.err
+					} else {
+						err = te.errors[0]
+					}
+				}
+			}
+
+			var pe *error_codes.PelicanError
+			require.True(t, errors.As(err, &pe), "Error should be wrapped in PelicanError for status %d, got: %T %v", tc.statusCode, err, err)
+
+			// Use the expected error function to get the expected values
+			expectedErr := tc.expectedErrFn(errors.New("test"))
+			assert.Equal(t, expectedErr.Code(), pe.Code(), "Status %d should map to error code %d", tc.statusCode, tc.expectedCode)
+			assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType(), "Status %d should map to error type %s", tc.statusCode, tc.expectedType)
+			assert.Equal(t, expectedErr.IsRetryable(), pe.IsRetryable(), "Status %d retryability should be %v", tc.statusCode, tc.expectedRetry)
+		})
+	}
+}
+
+// TestHttpErrRespWithNonStatusCodeError tests that HttpErrResp with non-StatusCodeError inner error
+// is wrapped correctly based on HTTP status code using wrapErrorByStatusCode
+func TestHttpErrRespWithNonStatusCodeError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	test_utils.InitClient(t, map[string]any{
+		"Logging.Level": "debug",
+	})
+
+	testCases := []struct {
+		name          string
+		statusCode    int
+		expectedCode  int
+		expectedType  string
+		expectedRetry bool
+		innerError    error
+	}{
+		{
+			name:          "404 with generic error",
+			statusCode:    http.StatusNotFound,
+			expectedCode:  5011,
+			expectedType:  "Specification.FileNotFound",
+			expectedRetry: false,
+			innerError:    errors.New("some other error"),
+		},
+		{
+			name:          "500 with generic error",
+			statusCode:    http.StatusInternalServerError,
+			expectedCode:  6000,
+			expectedType:  "Transfer",
+			expectedRetry: true,
+			innerError:    errors.New("server error"),
+		},
+		{
+			name:          "400 with generic error",
+			statusCode:    http.StatusBadRequest,
+			expectedCode:  5000,
+			expectedType:  "Specification",
+			expectedRetry: false,
+			innerError:    errors.New("bad request"),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Test wrapErrorByStatusCode directly (used by HttpErrResp handler)
+			wrappedErr := wrapErrorByStatusCode(tc.statusCode, tc.innerError)
+			require.Error(t, wrappedErr)
+
+			var pe *error_codes.PelicanError
+			require.True(t, errors.As(wrappedErr, &pe), "Error should be wrapped in PelicanError")
+			assert.Equal(t, tc.expectedCode, pe.Code(), "Status %d should map to error code %d", tc.statusCode, tc.expectedCode)
+			assert.Equal(t, tc.expectedType, pe.ErrorType(), "Status %d should map to error type %s", tc.statusCode, tc.expectedType)
+			assert.Equal(t, tc.expectedRetry, pe.IsRetryable(), "Status %d retryability should be %v", tc.statusCode, tc.expectedRetry)
+
+			// Verify the inner error is preserved
+			assert.True(t, errors.Is(wrappedErr, tc.innerError), "Original error should be preserved in error chain")
+		})
+	}
+}
+
+// TestCatchAllErrorWrapping tests that unknown error types are wrapped as generic TransferError
+func TestCatchAllErrorWrapping(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	test_utils.InitClient(t, map[string]any{
+		"Logging.Level": "debug",
+	})
+
+	// Create a generic error that doesn't match any specific error type checks
+	genericErr := errors.New("some unknown error type")
+
+	// Test that wrapErrorByStatusCode wraps it correctly for a 500 status
+	wrappedErr := wrapErrorByStatusCode(http.StatusInternalServerError, genericErr)
+	require.Error(t, wrappedErr)
+
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(wrappedErr, &pe), "Error should be wrapped in PelicanError")
+	assert.Equal(t, 6000, pe.Code(), "Should be Transfer error code")
+	assert.Equal(t, "Transfer", pe.ErrorType(), "Should be Transfer error type")
+	assert.True(t, pe.IsRetryable(), "Should be retryable")
+
+	// Verify the original error is preserved
+	assert.True(t, errors.Is(wrappedErr, genericErr), "Original error should be preserved in error chain")
+}
+
+func TestInvalidByteInChunkLengthError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	// Set up an HTTP server that sends malformed chunk encoding
+	// This simulates the "invalid byte in chunk length" error
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Hijack the connection so we can send malformed chunk encoding
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "webserver doesn't support hijacking", http.StatusInternalServerError)
+			return
+		}
+		conn, bufrw, err := hj.Hijack()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer conn.Close()
+
+		// Send HTTP response headers with chunked transfer encoding
+		_, _ = bufrw.WriteString("HTTP/1.1 200 OK\r\n")
+		_, _ = bufrw.WriteString("Transfer-Encoding: chunked\r\n")
+		_, _ = bufrw.WriteString("\r\n")
+		_ = bufrw.Flush()
+
+		// Send malformed chunk length (invalid byte 'X' in chunk length)
+		// This should trigger "invalid byte in chunk length" error in Go's HTTP client
+		_, _ = conn.Write([]byte("X\r\n")) // Invalid chunk length
+		_ = bufrw.Flush()
+	}))
+	defer svr.Close()
+
+	serverAddr := strings.TrimPrefix(svr.URL, "http://")
+
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	assert.NoError(t, err)
+	defer writer.Close()
+
+	// Call downloadHTTP which should trigger InvalidByteInChunkLengthError
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil,
+		transferAttemptDetails{Url: &url.URL{Scheme: "http", Host: serverAddr}, Proxy: false},
+		fname, writer, 0, -1, "", "",
+	)
+
+	require.Error(t, err, "Should have an error from invalid chunk length")
+
+	// Verify that the error is an InvalidByteInChunkLengthError (unwrapped, since it's created in downloadHTTP)
+	var invalidChunkErr *InvalidByteInChunkLengthError
+	require.True(t, errors.As(err, &invalidChunkErr), "Error should be an InvalidByteInChunkLengthError, got: %T, error: %v", err, err)
+
+	// Verify that when wrapped, it has the correct properties (simulating download loop behavior)
+	wrappedErr := error_codes.NewTransferError(invalidChunkErr)
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(wrappedErr, &pe), "Wrapped error should be a PelicanError")
+	expectedErr := error_codes.NewTransferError(errors.New("test"))
+	assert.Equal(t, expectedErr.Code(), pe.Code(), "Should map to TransferError error code")
+	assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType(), "Should map to TransferError error type")
+	assert.Equal(t, expectedErr.IsRetryable(), pe.IsRetryable(), "InvalidByteInChunkLengthError should be retryable (wrapped as TransferError)")
+}
+
 // Test checksum calculation and validation
 func TestChecksum(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		param.Logging_Level.GetName(): "debug",
 	})
@@ -924,6 +1605,7 @@ func TestChecksum(t *testing.T) {
 
 // Test behavior when checksum is incorrect
 func TestChecksumIncorrectWhenRequired(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		param.Logging_Level.GetName(): "debug",
 	})
@@ -967,8 +1649,18 @@ func TestChecksumIncorrectWhenRequired(t *testing.T) {
 	transferResult, err := downloadObject(transfer)
 	assert.NoError(t, err)
 	assert.Error(t, transferResult.Error)
-	incorrectChecksumError := &ChecksumMismatchError{}
-	assert.True(t, errors.As(transferResult.Error, &incorrectChecksumError), "Expected a checksum mismatch error")
+
+	// Verify that the error is wrapped as a PelicanError
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(transferResult.Error, &pe), "Error should be wrapped as PelicanError")
+	expectedErr := error_codes.NewTransfer_ChecksumMismatchError(errors.New("test"))
+	assert.Equal(t, expectedErr.Code(), pe.Code(), "Should map to Transfer.ChecksumMismatch error code")
+	assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType(), "Should map to Transfer.ChecksumMismatch error type")
+	assert.Equal(t, expectedErr.IsRetryable(), pe.IsRetryable(), "ChecksumMismatchError should be retryable (wrapped as Transfer.ChecksumMismatch)")
+
+	// Extract the inner ChecksumMismatchError to verify the error message
+	var incorrectChecksumError *ChecksumMismatchError
+	require.True(t, errors.As(transferResult.Error, &incorrectChecksumError), "Error should contain ChecksumMismatchError")
 	assert.Equal(t, "checksum mismatch for crc32c; client computed 977b8112, server reported 977b8111", incorrectChecksumError.Error())
 
 	// Checksum validation
@@ -984,6 +1676,7 @@ func TestChecksumIncorrectWhenRequired(t *testing.T) {
 }
 
 func TestChecksumIncorrectWhenNotRequired(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		param.Logging_Level.GetName(): "debug",
 	})
@@ -1044,6 +1737,7 @@ func TestChecksumIncorrectWhenNotRequired(t *testing.T) {
 
 // Test behavior when checksum is missing
 func TestChecksumMissing(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		param.Logging_Level.GetName(): "debug",
 	})
@@ -1090,6 +1784,7 @@ func TestChecksumMissing(t *testing.T) {
 }
 
 func TestChecksumPut(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Run("test-good-checksum", func(t *testing.T) {
 		test_utils.InitClient(t, map[string]any{
 			param.Logging_Level.GetName(): "debug",
@@ -1220,9 +1915,18 @@ func TestChecksumPut(t *testing.T) {
 		transferResult, err := uploadObject(transfer)
 		assert.NoError(t, err)
 		require.Error(t, transferResult.Error)
+
+		// Verify that the error is wrapped as a PelicanError
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(transferResult.Error, &pe), "Error should be wrapped as PelicanError")
+		expectedErr := error_codes.NewTransfer_ChecksumMismatchError(errors.New("test"))
+		assert.Equal(t, expectedErr.Code(), pe.Code(), "Should map to Transfer.ChecksumMismatch error code")
+		assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType(), "Should map to Transfer.ChecksumMismatch error type")
+		assert.Equal(t, expectedErr.IsRetryable(), pe.IsRetryable(), "ChecksumMismatchError should be retryable (wrapped as Transfer.ChecksumMismatch)")
+
+		// Extract the inner ChecksumMismatchError to verify the error message
 		var checksumError *ChecksumMismatchError
 		require.ErrorAs(t, transferResult.Error, &checksumError)
-
 		assert.Equal(t, "checksum mismatch for crc32c; client computed 977b8112, server reported 977b8111", checksumError.Error())
 
 		assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
@@ -1463,6 +2167,7 @@ func TestChecksumPut(t *testing.T) {
 // error), and another that returns the rest of the file. The test checks that the transfer resumes
 // after the first attempt and that the checksums are calculated and validated properly.
 func TestResume(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		"Logging.Level": "debug",
 	})
@@ -1542,7 +2247,8 @@ func TestResume(t *testing.T) {
 	assert.Equal(t, 2, len(transferResult.Attempts), "Expected 2 attempts, got %d", len(transferResult.Attempts))
 	tae := &TransferAttemptError{}
 	require.True(t, errors.As(transferResult.Attempts[0].Error, &tae), "Got error of type %T; expected transfer attempt error", transferResult.Attempts[0].Error)
-	assert.Equal(t, "unexpected EOF", tae.Unwrap().Error())
+	// The error should be wrapped as a PelicanError, but the original io.ErrUnexpectedEOF should be preserved
+	assert.True(t, errors.Is(tae.Unwrap(), io.ErrUnexpectedEOF), "Expected original error to be preserved in error chain")
 	assert.Equal(t, int64(9), transferResult.Attempts[0].TransferFileBytes)
 	assert.NoError(t, transferResult.Attempts[1].Error)
 	assert.Equal(t, int64(8), transferResult.Attempts[1].TransferFileBytes)
@@ -1551,6 +2257,7 @@ func TestResume(t *testing.T) {
 
 // Test failed connection setup error message for downloads
 func TestFailedConnectionSetupError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		"Transport.ResponseHeaderTimeout": "500ms",
 		"Logging.Level":                   "debug",
@@ -1598,6 +2305,7 @@ func TestFailedConnectionSetupError(t *testing.T) {
 
 // Test that head requests with downloads contain the download token if it exists
 func TestHeadRequestWithDownloadToken(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "HEAD" {
 			assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
@@ -1636,6 +2344,7 @@ func TestHeadRequestWithDownloadToken(t *testing.T) {
 // Creates a server that does nothing but stall; examines the
 // corresponding error message out to the user.
 func TestFailedUploadError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	configDir := t.TempDir()
 	test_utils.InitClient(t, map[string]any{
@@ -1709,6 +2418,7 @@ func TestFailedUploadError(t *testing.T) {
 // Creates a server that does nothing but stall; examines the
 // corresponding error message out to the user.
 func TestFailedLargeUploadError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		"Transport.ResponseHeaderTimeout": "500ms",
 		"TLSSkipVerify":                   true,
@@ -1778,6 +2488,7 @@ func TestFailedLargeUploadError(t *testing.T) {
 }
 
 func TestNewTransferEngine(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	// Test we fail if we do not call initclient() before
@@ -1799,6 +2510,7 @@ func TestNewTransferEngine(t *testing.T) {
 }
 
 func TestListHttp(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	type test struct {
 		name          string
 		pUrl          *pelican_url.PelicanURL
@@ -1856,6 +2568,7 @@ func TestListHttp(t *testing.T) {
 }
 
 func TestInvalidByteInChunkLength(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// Create a test server that sends an invalid chunk length
@@ -1914,10 +2627,18 @@ func TestInvalidByteInChunkLength(t *testing.T) {
 	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, "", "")
 	require.Error(t, err)
 	t.Logf("error: %v", err)
-	assert.True(t, IsRetryable(err), "Invalid chunk length error should be retryable")
+
+	// Verify that the error is an InvalidByteInChunkLengthError (unwrapped, since it's created in downloadHTTP)
+	var invalidChunkErr *InvalidByteInChunkLengthError
+	require.True(t, errors.As(err, &invalidChunkErr), "Error should be an InvalidByteInChunkLengthError")
+
+	// Wrap the error as it would be in the download loop, then check retryability
+	wrappedErr := error_codes.NewTransferError(invalidChunkErr)
+	assert.True(t, IsRetryable(wrappedErr), "Invalid chunk length error should be retryable (wrapped as TransferError)")
 }
 
 func TestUnexpectedEOFInTransferStatus(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// Create a test server that sends an EOF error in the X-Transfer-Status trailer
@@ -1949,6 +2670,7 @@ func TestUnexpectedEOFInTransferStatus(t *testing.T) {
 }
 
 func TestTLSCertificateError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Generate a self-signed certificate
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
@@ -2020,7 +2742,12 @@ func TestTLSCertificateError(t *testing.T) {
 		require.Error(t, err)
 		t.Logf("error: %v", err)
 		assert.Contains(t, err.Error(), "certificate signed by unknown authority")
-		assert.True(t, IsRetryable(err), "TLS certificate error should be retryable")
+		// runPut returns the underlying TLS validation error; wrapping happens in the upload error handler.
+		require.True(t, isTLSCertificateValidationError(err), "Error should be TLS certificate validation error")
+		// Simulate upload error handler wrapping (TLS certificate validation errors are specification errors,
+		// not retryable)
+		wrappedErr := error_codes.NewSpecificationError(err)
+		assert.False(t, IsRetryable(wrappedErr), "Wrapped TLS certificate validation error should not be retryable")
 	case response := <-responseChan:
 		t.Fatalf("Expected error but got response: %v", response)
 	case <-time.After(time.Second * 2):
@@ -2029,6 +2756,7 @@ func TestTLSCertificateError(t *testing.T) {
 }
 
 func TestPutOverwrite(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		"TLSSkipVerify": true,
 	})
@@ -2234,9 +2962,101 @@ func TestPutOverwrite(t *testing.T) {
 		// Ensure the expected warning was logged
 		assert.Contains(t, logBuf.String(), "Failed to check if object exists at the origin, proceeding with upload")
 	})
+
+	t.Run("OverwriteEnabled", func(t *testing.T) {
+		// Create a server that responds to WebDAV PROPFIND requests indicating the object exists
+		// But the upload should still proceed because overwrites are enabled
+		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PROPFIND" {
+				// Simulate existing object - return WebDAV response
+				w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+				w.WriteHeader(http.StatusMultiStatus)
+				response := `<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/test.txt</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:resourcetype/>
+        <D:getcontentlength>1024</D:getcontentlength>
+        <D:getlastmodified>Wed, 01 Jan 2024 00:00:00 GMT</D:getlastmodified>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>`
+				_, err := w.Write([]byte(response))
+				require.NoError(t, err)
+				return
+			}
+			if r.Method == "PUT" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}))
+		defer svr.Close()
+
+		// Trust the test server certificate instead of skipping verification
+		certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: svr.Certificate().Raw})
+		certFile := filepath.Join(t.TempDir(), "ca.pem")
+		require.NoError(t, os.WriteFile(certFile, certPEM, 0o644))
+
+		// Test that overwrite protection is skipped when Client.EnableOverwrites is enabled
+		test_utils.InitClient(t, map[string]any{
+			param.Server_TLSCACertificateFile.GetName(): certFile,
+			param.Client_EnableOverwrites.GetName():     true,
+		})
+
+		svrURL, err := url.Parse(svr.URL)
+		require.NoError(t, err)
+
+		// Create a token generator with a test token
+		token := NewTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token.SetToken("test-token")
+
+		// Create a test file to upload
+		testData := []byte("test content for overwrite")
+		fname := filepath.Join(t.TempDir(), "test.txt")
+		err = os.WriteFile(fname, testData, 0o644)
+		require.NoError(t, err)
+
+		transfer := &transferFile{
+			ctx: context.Background(),
+			job: &TransferJob{
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/test.txt",
+				},
+				dirResp: server_structs.DirectorResponse{
+					XPelNsHdr: server_structs.XPelNs{
+						Namespace:      "/test",
+						RequireToken:   true,
+						CollectionsUrl: svrURL,
+					},
+				},
+				token: token,
+			},
+			remoteURL: svrURL,
+			localPath: fname,
+			token:     token,
+			attempts: []transferAttemptDetails{
+				{
+					Url: svrURL,
+				},
+			},
+		}
+
+		// The upload should succeed despite the object existing because overwrites are enabled
+		result, err := uploadObject(transfer)
+		require.NoError(t, err)
+		require.NoError(t, result.Error) // Should succeed with overwrites enabled
+	})
 }
 
 func TestPackAutoSegfaultRegression(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		param.Logging_Level.GetName(): "debug",
 	})
@@ -2310,6 +3130,7 @@ func TestPackAutoSegfaultRegression(t *testing.T) {
 }
 
 func TestPermissionDeniedError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
@@ -2359,6 +3180,7 @@ func TestPermissionDeniedError(t *testing.T) {
 
 // Test recursive listings and depth handling using a minimal WebDAV-like server
 func TestListHttpRecursiveAndDepth(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
 		param.Logging_Level.GetName(): "debug",
 	})
@@ -2440,5 +3262,312 @@ func TestListHttpRecursiveAndDepth(t *testing.T) {
 		require.Contains(t, s, "/root/dirA")
 		require.Contains(t, s, "/root/file1.txt")
 		assert.NotContains(t, s, "/root/dirA/file2.txt")
+	})
+}
+
+// TestWrapDownloadError tests the wrapDownloadError function to ensure it correctly wraps
+// all error types that can be returned from downloadHTTP. This test verifies that the
+// refactored function behaves exactly like the original inline error handling code.
+func TestWrapDownloadError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	test_utils.InitClient(t, map[string]any{
+		"Logging.Level": "debug",
+	})
+
+	transferEndpointURL := "http://example.com/test"
+
+	t.Run("proxy_connection_error", func(t *testing.T) {
+		proxyAddr, _ := net.ResolveTCPAddr("tcp", "127.0.0.1:3128")
+		proxyErr := &net.OpError{
+			Op:   "proxyconnect",
+			Net:  "tcp",
+			Addr: proxyAddr,
+			Err:  errors.New("connection refused"),
+		}
+
+		wrappedErr, isProxyErr, modifiedProxyStr := wrapDownloadError(proxyErr, transferEndpointURL, "")
+		require.True(t, isProxyErr, "Should be identified as proxy error")
+		assert.Contains(t, modifiedProxyStr, "127.0.0.1:3128", "Should include proxy address in modifiedProxyStr")
+
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
+		assert.Equal(t, "Contact.ConnectionSetup", pe.ErrorType(), "Should be Contact.ConnectionSetup error type")
+		assert.True(t, pe.IsRetryable(), "Should be retryable")
+	})
+
+	t.Run("proxy_connection_error_no_addr", func(t *testing.T) {
+		proxyErr := &net.OpError{
+			Op:  "proxyconnect",
+			Net: "tcp",
+			Err: errors.New("connection refused"),
+		}
+
+		_, isProxyErr, modifiedProxyStr := wrapDownloadError(proxyErr, transferEndpointURL, "")
+		require.True(t, isProxyErr, "Should be identified as proxy error")
+		assert.Empty(t, modifiedProxyStr, "Should be empty when no address")
+	})
+
+	t.Run("permission_denied_error_expired_token", func(t *testing.T) {
+		expiredTime := time.Now().Add(-time.Hour)
+		expiredJWT := fmt.Sprintf(`{"alg":"none","typ":"JWT"}.{"exp":%d,"iat":%d,"sub":"test"}.`,
+			expiredTime.Unix(), expiredTime.Add(-time.Hour).Unix())
+
+		pde := &PermissionDeniedError{}
+		wrappedErr, isProxyErr, _ := wrapDownloadError(pde, transferEndpointURL, expiredJWT)
+		require.False(t, isProxyErr, "Should not be proxy error")
+
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
+		assert.Equal(t, "Authorization", pe.ErrorType(), "Should be Authorization error type")
+
+		// Verify the PermissionDeniedError was updated
+		var wrappedPde *PermissionDeniedError
+		require.True(t, errors.As(wrappedErr, &wrappedPde), "Should contain PermissionDeniedError")
+		assert.True(t, wrappedPde.expired, "Token should be marked as expired")
+		assert.Contains(t, wrappedPde.message, "token expired", "Message should indicate token expired")
+	})
+
+	t.Run("permission_denied_error_invalid_token", func(t *testing.T) {
+		emptyToken := ""
+		pde := &PermissionDeniedError{}
+		wrappedErr, _, _ := wrapDownloadError(pde, transferEndpointURL, emptyToken)
+
+		var wrappedPde *PermissionDeniedError
+		require.True(t, errors.As(wrappedErr, &wrappedPde), "Should contain PermissionDeniedError")
+		// With empty/invalid token, it should say "token could not be parsed"
+		assert.Contains(t, wrappedPde.message, "token could not be parsed", "Message should indicate parsing error")
+		assert.False(t, wrappedPde.expired, "Token should not be marked as expired when parsing fails")
+		// Note: The "valid but rejected" case is tested in TestPermissionDeniedError integration test
+	})
+
+	t.Run("permission_denied_error_invalid_token", func(t *testing.T) {
+		pde := &PermissionDeniedError{}
+		wrappedErr, _, _ := wrapDownloadError(pde, transferEndpointURL, "invalid-jwt")
+
+		var wrappedPde *PermissionDeniedError
+		require.True(t, errors.As(wrappedErr, &wrappedPde), "Should contain PermissionDeniedError")
+		assert.Contains(t, wrappedPde.message, "token could not be parsed", "Message should indicate parsing error")
+	})
+
+	t.Run("connection_reset_error", func(t *testing.T) {
+		resetErr := syscall.ECONNRESET
+		wrappedErr, isProxyErr, _ := wrapDownloadError(resetErr, transferEndpointURL, "")
+		require.False(t, isProxyErr, "Should not be proxy error")
+
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
+		assert.Equal(t, "Contact.ConnectionReset", pe.ErrorType(), "Should be Contact.ConnectionReset error type")
+		assert.True(t, pe.IsRetryable(), "Should be retryable")
+	})
+
+	t.Run("epipe_error", func(t *testing.T) {
+		pipeErr := syscall.EPIPE
+		wrappedErr, _, _ := wrapDownloadError(pipeErr, transferEndpointURL, "")
+
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
+		assert.Equal(t, "Contact.ConnectionReset", pe.ErrorType(), "Should be Contact.ConnectionReset error type")
+	})
+
+	t.Run("allocate_memory_error", func(t *testing.T) {
+		allocErr := &allocateMemoryError{Err: errors.New("out of memory")}
+		wrappedErr, _, _ := wrapDownloadError(allocErr, transferEndpointURL, "")
+
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
+		assert.Equal(t, "Transfer", pe.ErrorType(), "Should be Transfer error type")
+		assert.True(t, pe.IsRetryable(), "Should be retryable")
+	})
+
+	t.Run("invalid_chunk_length_error", func(t *testing.T) {
+		chunkErr := &InvalidByteInChunkLengthError{Err: errors.New("invalid byte in chunk length")}
+		wrappedErr, _, _ := wrapDownloadError(chunkErr, transferEndpointURL, "")
+
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
+		assert.Equal(t, "Transfer", pe.ErrorType(), "Should be Transfer error type")
+		assert.True(t, pe.IsRetryable(), "Should be retryable")
+	})
+
+	t.Run("httperrresp_with_pelicanerror_inner", func(t *testing.T) {
+		innerErr := error_codes.NewTransferError(errors.New("inner error"))
+		httpErr := &HttpErrResp{
+			Code: http.StatusInternalServerError,
+			Str:  "request failed",
+			Err:  innerErr,
+		}
+
+		wrappedErr, _, _ := wrapDownloadError(httpErr, transferEndpointURL, "")
+		// Should return the inner error directly since it's already a PelicanError
+		assert.Equal(t, innerErr, wrappedErr, "Should return inner error directly")
+	})
+
+	t.Run("httperrresp_with_statuscodeerror_inner", func(t *testing.T) {
+		sce := StatusCodeError(http.StatusNotFound)
+		httpErr := &HttpErrResp{
+			Code: http.StatusNotFound,
+			Str:  "request failed",
+			Err:  &sce,
+		}
+
+		wrappedErr, _, _ := wrapDownloadError(httpErr, transferEndpointURL, "")
+
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
+		assert.Equal(t, "Specification.FileNotFound", pe.ErrorType(), "Should be FileNotFound for 404")
+	})
+
+	t.Run("httperrresp_with_generic_inner", func(t *testing.T) {
+		genericErr := errors.New("generic error")
+		httpErr := &HttpErrResp{
+			Code: http.StatusInternalServerError,
+			Str:  "request failed",
+			Err:  genericErr,
+		}
+
+		wrappedErr, _, _ := wrapDownloadError(httpErr, transferEndpointURL, "")
+
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
+		assert.Equal(t, "Transfer", pe.ErrorType(), "Should be Transfer error for 5xx")
+		assert.True(t, errors.Is(wrappedErr, genericErr), "Should preserve original error")
+	})
+
+	t.Run("connectionsetuperror_with_statuscodeerror_inner", func(t *testing.T) {
+		sce := StatusCodeError(http.StatusUnauthorized)
+		cse := &ConnectionSetupError{
+			URL: transferEndpointURL,
+			Err: &sce,
+		}
+
+		wrappedErr, _, _ := wrapDownloadError(cse, transferEndpointURL, "")
+
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
+		assert.Equal(t, "Authorization", pe.ErrorType(), "Should be Authorization for 401")
+	})
+
+	t.Run("connectionsetuperror_with_tls_certificate_error", func(t *testing.T) {
+		tlsErr := errors.New("x509: certificate verification failed")
+		cse := &ConnectionSetupError{
+			URL: transferEndpointURL,
+			Err: tlsErr,
+		}
+
+		wrappedErr, _, _ := wrapDownloadError(cse, transferEndpointURL, "")
+
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
+		assert.Equal(t, "Specification", pe.ErrorType(), "Should be Specification error for TLS certificate validation")
+		assert.False(t, pe.IsRetryable(), "TLS certificate errors should not be retryable")
+	})
+
+	t.Run("connectionsetuperror_with_header_timeout", func(t *testing.T) {
+		headerTimeoutErr := errors.New("net/http: timeout awaiting response headers")
+		urlErr := &url.Error{
+			Op:  "GET",
+			URL: transferEndpointURL,
+			Err: headerTimeoutErr,
+		}
+		cse := &ConnectionSetupError{
+			URL: transferEndpointURL,
+			Err: urlErr,
+		}
+
+		wrappedErr, _, _ := wrapDownloadError(cse, transferEndpointURL, "")
+
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
+		assert.Equal(t, "Transfer.HeaderTimeout", pe.ErrorType(), "Should be HeaderTimeout error")
+	})
+
+	t.Run("connectionsetuperror_generic", func(t *testing.T) {
+		cse := &ConnectionSetupError{
+			URL: transferEndpointURL,
+			Err: errors.New("connection failed"),
+		}
+
+		wrappedErr, _, _ := wrapDownloadError(cse, transferEndpointURL, "")
+
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
+		assert.Equal(t, "Contact.ConnectionSetup", pe.ErrorType(), "Should be ConnectionSetup error")
+		assert.True(t, pe.IsRetryable(), "Should be retryable")
+	})
+
+	t.Run("dns_error", func(t *testing.T) {
+		dnsErr := &net.DNSError{
+			Err:         "no such host",
+			Name:        "example.invalid",
+			Server:      "",
+			IsTimeout:   false,
+			IsTemporary: false,
+		}
+
+		wrappedErr, _, _ := wrapDownloadError(dnsErr, transferEndpointURL, "")
+
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
+		assert.Equal(t, "Contact.ConnectionSetup", pe.ErrorType(), "Should be ConnectionSetup error")
+		assert.True(t, pe.IsRetryable(), "Should be retryable")
+	})
+
+	t.Run("context_deadline_error", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+		defer cancel()
+		time.Sleep(time.Millisecond) // Ensure deadline is exceeded
+		deadlineErr := ctx.Err()
+
+		wrappedErr, _, _ := wrapDownloadError(deadlineErr, transferEndpointURL, "")
+
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
+		assert.Equal(t, "Contact.ConnectionSetup", pe.ErrorType(), "Should be ConnectionSetup error")
+		assert.True(t, pe.IsRetryable(), "Should be retryable")
+	})
+
+	t.Run("already_wrapped_pelicanerror", func(t *testing.T) {
+		originalErr := errors.New("some error")
+		pe := error_codes.NewTransferError(originalErr)
+
+		wrappedErr, _, _ := wrapDownloadError(pe, transferEndpointURL, "")
+
+		// Should return the error directly without double-wrapping
+		assert.Equal(t, pe, wrappedErr, "Should return PelicanError directly")
+	})
+
+	t.Run("generic_unknown_error", func(t *testing.T) {
+		unknownErr := errors.New("some unknown error type")
+
+		wrappedErr, _, _ := wrapDownloadError(unknownErr, transferEndpointURL, "")
+
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(wrappedErr, &pe), "Should be wrapped as PelicanError")
+		assert.Equal(t, "Transfer", pe.ErrorType(), "Should be Transfer error type")
+		assert.True(t, pe.IsRetryable(), "Should be retryable")
+		assert.True(t, errors.Is(wrappedErr, unknownErr), "Should preserve original error")
+	})
+}
+
+func TestIsIdleConnectionError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	t.Run("detects_idle_connection_error", func(t *testing.T) {
+		err := errors.New("http: server closed idle connection")
+		assert.True(t, isIdleConnectionError(err), "Should detect idle connection error")
+	})
+
+	t.Run("detects_wrapped_idle_connection_error", func(t *testing.T) {
+		innerErr := errors.New("http: server closed idle connection")
+		wrappedErr := errors.Wrap(innerErr, "additional context")
+		assert.True(t, isIdleConnectionError(wrappedErr), "Should detect wrapped idle connection error")
+	})
+
+	t.Run("does_not_detect_other_errors", func(t *testing.T) {
+		err := errors.New("some other error")
+		assert.False(t, isIdleConnectionError(err), "Should not detect non-idle connection errors")
+	})
+
+	t.Run("handles_nil_error", func(t *testing.T) {
+		assert.False(t, isIdleConnectionError(nil), "Should handle nil error")
 	})
 }

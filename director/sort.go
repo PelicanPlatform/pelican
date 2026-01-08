@@ -346,6 +346,10 @@ func cacheSupportsFeature(requiredFeatures map[string]features.Feature) AdPredic
 		if len(requiredFeatures) == 0 {
 			return true
 		}
+		// Skip feature checks when server type is unknown to avoid noisy debug logging in tests.
+		if ad.ServerAd.Type == "" {
+			return false
+		}
 		for _, feature := range requiredFeatures {
 			if features.ServerSupportsFeature(feature, ad.ServerAd) == utils.Tern_True {
 				return true

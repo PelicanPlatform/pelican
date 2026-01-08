@@ -23,6 +23,7 @@ package launchers
 import (
 	"context"
 	_ "embed"
+	"net"
 	"net/url"
 	"strconv"
 	"time"
@@ -30,7 +31,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/broker"
@@ -73,6 +73,9 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		return nil, err
 	}
 
+	// Initialize PKCS#11 helper after the defaults are set up
+	initPKCS11(ctx, modules)
+
 	// Register Lotman
 	if param.Cache_EnableLotman.GetBool() {
 		// Register the web endpoints
@@ -94,8 +97,10 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		}
 	}
 
-	broker.RegisterBrokerCallback(ctx, engine.Group("/", web_ui.ServerHeaderMiddleware))
-	broker.LaunchNamespaceKeyMaintenance(ctx, egrp)
+	// Don't perform Broker operations for site-local caches.
+	if !param.Cache_EnableSiteLocalMode.GetBool() {
+		broker.InitializeBrokerClient(ctx, egrp, engine)
+	}
 	configPath, err := xrootd.ConfigXrootd(ctx, false)
 	if err != nil {
 		return nil, err
@@ -103,15 +108,12 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 
 	xrootd.LaunchXrootdMaintenance(ctx, cacheServer, 2*time.Minute)
 
-	cache.LaunchDirectorTestFileCleanup(ctx)
-
-	cache.LaunchFedTokManager(ctx, egrp, cacheServer)
-
-	if param.Cache_EnableEvictionMonitoring.GetBool() {
-		metrics.LaunchXrootdCacheEvictionMonitoring(ctx, egrp)
+	// Site-local caches aren't part of the federation, so they don't expect
+	// Director tests or federation tokens.
+	if !param.Cache_EnableSiteLocalMode.GetBool() {
+		cache.LaunchDirectorTestFileCleanup(ctx)
+		cache.LaunchFedTokManager(ctx, egrp, cacheServer)
 	}
-
-	metrics.LaunchXrdCurlStatsMonitoring(ctx, egrp)
 
 	concLimit := param.Cache_Concurrency.GetInt()
 	if concLimit > 0 {
@@ -133,20 +135,31 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 	}
 
 	log.Info("Launching cache")
-	launchers, err := xrootd.ConfigureLaunchers(false, configPath, false, true)
+	useCMSD := false
+	privileged := false
+	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, useCMSD, true)
 	if err != nil {
 		return nil, err
 	}
 
 	portStartCallback := func(port int) {
-		viper.Set("Cache.Port", port)
+		if err := param.Set(param.Cache_Port.GetName(), port); err != nil {
+			log.WithError(err).Warnf("Failed to set %s to %d", param.Cache_Port.GetName(), port)
+		}
 		if cacheUrl, err := url.Parse(param.Cache_Url.GetString()); err == nil {
-			if cacheUrl.Port() == "" {
-				cacheUrl.Host = cacheUrl.Hostname() + ":" + strconv.Itoa(port)
+			host := cacheUrl.Hostname()
+			if host == "" {
+				host = param.Server_Hostname.GetString()
 			}
-
-			viper.Set("Cache.Url", cacheUrl.String())
-			log.Debugln("Resetting Cache.Url to", cacheUrl.String())
+			currentPort := cacheUrl.Port()
+			if currentPort == "" || currentPort == "0" {
+				cacheUrl.Host = net.JoinHostPort(host, strconv.Itoa(port))
+				if err := param.Set(param.Cache_Url.GetName(), cacheUrl.String()); err != nil {
+					log.WithError(err).Warnf("Failed to set %s to %s", param.Cache_Url.GetName(), cacheUrl.String())
+				} else {
+					log.Debugf("Resetting %s to %s", param.Cache_Url.GetName(), cacheUrl.String())
+				}
+			}
 		}
 		log.Infoln("Cache startup complete on port", port)
 	}
@@ -156,11 +169,30 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		return nil, err
 	}
 	cacheServer.SetPids(pids)
+
+	// Store restart information after PIDs are known
+	xrootd.StoreRestartInfo(launchers, pids, egrp, portStartCallback, true, useCMSD, privileged)
+
+	// Register callback for xrootd logging configuration changes
+	// This must be done after LaunchDaemons so the server has PIDs
+	xrootd.RegisterXrootdLoggingCallback()
+
+	if param.Cache_EnableEvictionMonitoring.GetBool() {
+		metrics.LaunchXrootdCacheEvictionMonitoring(ctx, egrp)
+	}
+
+	metrics.LaunchXrdCurlStatsMonitoring(ctx, egrp)
+
 	return cacheServer, nil
 }
 
 // Finish configuration of the cache server.
 func CacheServeFinish(ctx context.Context, egrp *errgroup.Group, cacheServer server_structs.XRootDServer) error {
+	if param.Cache_EnableSiteLocalMode.GetBool() {
+		log.Debugf("Skipping Cache registration because site-local mode is enabled (see %s)", param.Cache_EnableSiteLocalMode.GetName())
+		return nil
+	}
+
 	log.Debug("Register Cache")
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the cache server")
 	if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, server_structs.GetCacheNs(param.Xrootd_Sitename.GetString())); err != nil {

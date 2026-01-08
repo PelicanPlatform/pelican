@@ -33,7 +33,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -47,6 +46,7 @@ import (
 )
 
 func TestRegistration(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Cleanup(func() {
 		server_utils.ResetTestState()
 	})
@@ -62,13 +62,13 @@ func TestRegistration(t *testing.T) {
 	defer cancel()
 
 	server_utils.ResetTestState()
-	viper.Set("ConfigDir", tempConfigDir)
+	require.NoError(t, param.Set("ConfigDir", tempConfigDir))
 	keysDir := filepath.Join(tempConfigDir, "issuer-keys")
-	viper.Set(param.IssuerKeysDirectory.GetName(), keysDir)
+	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), keysDir))
 
 	test_utils.MockFederationRoot(t, nil, nil)
-	viper.Set(param.Registry_DbLocation.GetName(), "")
-	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(tempConfigDir, "test.sql"))
+	require.NoError(t, param.Set(param.Registry_DbLocation.GetName(), ""))
+	require.NoError(t, param.Set(param.Server_DbLocation.GetName(), filepath.Join(tempConfigDir, "test.sql")))
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
@@ -97,8 +97,8 @@ func TestRegistration(t *testing.T) {
 	defer svr.CloseClientConnections()
 	defer svr.Close()
 
-	viper.Set("Federation.RegistryUrl", svr.URL)
-	viper.Set(param.Origin_FederationPrefix.GetName(), "/test123")
+	require.NoError(t, param.Set("Federation.RegistryUrl", svr.URL))
+	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/test123"))
 
 	// Re-run the InitServer to reflect the new RegistryUrl set above
 	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
@@ -171,6 +171,7 @@ func TestRegistration(t *testing.T) {
 }
 
 func TestMultiKeysRegistration(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Cleanup(func() {
 		server_utils.ResetTestState()
 	})
@@ -186,7 +187,7 @@ func TestMultiKeysRegistration(t *testing.T) {
 	defer cancel()
 
 	server_utils.ResetTestState()
-	viper.Set("ConfigDir", tempConfigDir)
+	require.NoError(t, param.Set("ConfigDir", tempConfigDir))
 
 	// MockFederationRoot must be called before setting IssuerKeysDirectory because that
 	// function overrides the IssuerKeysDirectory value if not already set. Since we don't
@@ -195,10 +196,10 @@ func TestMultiKeysRegistration(t *testing.T) {
 	test_utils.MockFederationRoot(t, nil, nil)
 
 	keysDir := filepath.Join(tempConfigDir, "issuer-keys")
-	viper.Set(param.IssuerKeysDirectory.GetName(), keysDir)
+	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), keysDir))
 
-	viper.Set(param.Registry_DbLocation.GetName(), "")
-	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(tempConfigDir, "test.sql"))
+	require.NoError(t, param.Set(param.Registry_DbLocation.GetName(), ""))
+	require.NoError(t, param.Set(param.Server_DbLocation.GetName(), filepath.Join(tempConfigDir, "test.sql")))
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
@@ -255,8 +256,8 @@ func TestMultiKeysRegistration(t *testing.T) {
 	defer svr.CloseClientConnections()
 	defer svr.Close()
 
-	viper.Set("Federation.RegistryUrl", svr.URL)
-	viper.Set(param.Origin_FederationPrefix.GetName(), "/test123")
+	require.NoError(t, param.Set("Federation.RegistryUrl", svr.URL))
+	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/test123"))
 
 	// Remove the original key, forcing us to register with the new one
 	require.NoError(t, os.Remove(filepath.Join(keysDir, dirEntries[0].Name())))
