@@ -242,6 +242,8 @@ type (
 		requireChecksum    bool
 		requestedChecksums []ChecksumType
 		err                error
+		writer             io.WriteCloser // Optional writer for downloads
+		reader             io.ReadCloser  // Optional reader for uploads
 	}
 
 	// A representation of a "transfer job".  The job
@@ -272,6 +274,8 @@ type (
 		directorUrl        string
 		token              *tokenGenerator
 		project            string
+		writer             io.WriteCloser // Optional writer for downloads - if set, write to this instead of localPath
+		reader             io.ReadCloser  // Optional reader for uploads - if set, read from this instead of localPath
 	}
 
 	// A TransferJob associated with a client's request
@@ -346,6 +350,8 @@ type (
 	identTransferOptionRequireChecksum struct{}
 	identTransferOptionRecursive       struct{}
 	identTransferOptionDepth           struct{}
+	identTransferOptionWriter          struct{}
+	identTransferOptionReader          struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -693,6 +699,22 @@ func WithAcquireToken(enable bool) TransferOption {
 // object already exists.
 func WithSynchronize(level SyncLevel) TransferOption {
 	return option.New(identTransferOptionSynchronize{}, level)
+}
+
+// Create an option to provide an io.WriteCloser for download destination
+//
+// When provided, downloaded data will be written to this writer instead of localPath.
+// The writer will be closed on completion or error.
+func WithWriter(writer io.WriteCloser) TransferOption {
+	return option.New(identTransferOptionWriter{}, writer)
+}
+
+// Create an option to provide an io.ReadCloser for upload source
+//
+// When provided, upload data will be read from this reader instead of localPath.
+// The reader will be closed on completion or error.
+func WithReader(reader io.ReadCloser) TransferOption {
+	return option.New(identTransferOptionReader{}, reader)
 }
 
 // Create an option to enable recursive listing
@@ -1133,6 +1155,10 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			tj.requestedChecksums = option.Value().([]ChecksumType)
 		case identTransferOptionRequireChecksum{}:
 			tj.requireChecksum = option.Value().(bool)
+		case identTransferOptionWriter{}:
+			tj.writer = option.Value().(io.WriteCloser)
+		case identTransferOptionReader{}:
+			tj.reader = option.Value().(io.ReadCloser)
 		}
 	}
 
@@ -1664,6 +1690,8 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			token:              job.job.token,
 			attempts:           transfers,
 			project:            job.job.project,
+			writer:             job.job.writer,
+			reader:             job.job.reader,
 		},
 	}:
 	}
@@ -1890,7 +1918,14 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	// By time this block has finished, we have a writer interface representing the transfer
 	// destination (could be io.Discard!) that we'll join with the hashesWriter.
 	var fileWriter io.Writer
-	if transfer.xferType == transferTypeDownload {
+	var fileCloser io.Closer
+	
+	// Check if we have a custom writer provided (e.g., for io.FS implementation)
+	if transfer.writer != nil {
+		fileWriter = transfer.writer
+		fileCloser = transfer.writer
+		localPath = "" // Don't use localPath when using custom writer
+	} else if transfer.xferType == transferTypeDownload {
 		var info os.FileInfo
 		if info, err = os.Stat(localPath); err != nil {
 			if os.IsNotExist(err) {
@@ -1948,6 +1983,16 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		localPath = "/dev/null"
 		fileWriter = io.Discard
 	}
+	
+	// Close the custom writer at the end if provided
+	if fileCloser != nil {
+		defer func() {
+			if closeErr := fileCloser.Close(); closeErr != nil && err == nil {
+				err = closeErr
+			}
+		}()
+	}
+	
 	fileWriter = io.MultiWriter(fileWriter, hashesWriter)
 
 	var size int64 = -1
