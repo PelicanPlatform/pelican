@@ -41,8 +41,8 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
-
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -258,12 +258,12 @@ func TestDirectorFedTokenCacheAPI(t *testing.T) {
 
 			tok, err := jwt.ParseInsecure([]byte(tokStr))
 			require.NoError(t, err, "Failed to parse token")
-			// In this case, the "fed issuer" is the director because we're running as fed-in-a-box.
-			// However, that need not be true in general wherever the Director has a configured Federation.DiscoveryUrl.
+			// The fed-test utility uses a separate HTTP server for hosting federation metadata,
+			// and sets it as the Discovery endpoint -- tokens need to be issued by that endpoint
 			fedInfo, err := config.GetFederation(ctx)
 			require.NoError(t, err, "Failed to get federation info")
-			directorUrlStr := fedInfo.DirectorEndpoint
-			assert.Equal(t, directorUrlStr, tok.Issuer())
+			discoveryUrlStr := fedInfo.DiscoveryEndpoint
+			assert.Equal(t, discoveryUrlStr, tok.Issuer())
 			var scopes []string
 			if rawScopes, exists := tok.Get("scope"); exists {
 				if scopeStr, ok := rawScopes.(string); ok {
@@ -271,6 +271,152 @@ func TestDirectorFedTokenCacheAPI(t *testing.T) {
 				}
 			}
 			assert.ElementsMatch(t, tc.scopeShouldHave, scopes)
+		})
+	}
+}
+
+// Test that the Director.EnableFederationMetadataHosting knob correctly
+// toggles hosting of the federation discovery metadata at the Director.
+func TestDirectorMetadataHosting(t *testing.T) {
+	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
+
+	discoveryPath, err := url.JoinPath(".well-known", "pelican-configuration")
+	require.NoError(t, err)
+
+	newInsecureClient := func() *http.Client {
+		return &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
+		}
+	}
+
+	// Helper function that tries to fetch the federation discovery metadata
+	// from a given URL, and checks for the expected status code.
+	//
+	// If the expected status code is http.StatusOK, it also returns the response body
+	// containing the metadata JSON
+	fetchDiscovery := func(
+		t *testing.T,
+		client *http.Client,
+		baseURL string,
+		expectedStatus int,
+	) []byte {
+		t.Helper()
+
+		u, err := url.Parse(baseURL)
+		require.NoError(t, err, "Failed to parse base URL")
+
+		u.Path = discoveryPath
+
+		t.Log("Fetching discovery URL:", u.String())
+
+		req, err := http.NewRequest("GET", u.String(), nil)
+		require.NoError(t, err, "Failed to create request")
+
+		resp, err := client.Do(req)
+		require.NoError(t, err, "Failed to perform request")
+		t.Cleanup(func() { resp.Body.Close() })
+
+		require.Equal(t, expectedStatus, resp.StatusCode)
+
+		if expectedStatus != http.StatusOK {
+			return nil
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err, "Failed to read response body")
+		return body
+	}
+
+	tests := []struct {
+		name           string
+		enableHosting  bool
+		expectedStatus int
+	}{
+		{
+			name:           "director-hosts-metadata",
+			enableHosting:  true,
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "director-does-not-host-metadata",
+			enableHosting:  false,
+			expectedStatus: http.StatusGone,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.NoError(t, param.Set(param.Director_EnableFederationMetadataHosting.GetName(), tt.enableHosting))
+			_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
+
+			ctx := context.Background()
+			ctx, _, _ = test_utils.TestContext(ctx, t)
+
+			fedInfo, err := config.GetFederation(ctx)
+			require.NoError(t, err)
+
+			client := newInsecureClient()
+
+			// Always test the Director endpoint
+			directorBody := fetchDiscovery(
+				t,
+				client,
+				fedInfo.DirectorEndpoint,
+				tt.expectedStatus,
+			)
+
+			// If hosting is enabled at the Director, also test the Discovery endpoint
+			if tt.enableHosting {
+				// Because the fed tests set up a separate Discovery server,
+				// the Director and Discovery endpoints should differ
+				require.NotEqual(
+					t,
+					fedInfo.DirectorEndpoint,
+					fedInfo.DiscoveryEndpoint,
+					"Director and Discovery endpoints must differ",
+				)
+
+				discoveryBody := fetchDiscovery(
+					t,
+					client,
+					fedInfo.DiscoveryEndpoint,
+					http.StatusOK,
+				)
+
+				// Contents must match exactly
+				require.JSONEq(
+					t,
+					string(discoveryBody),
+					string(directorBody),
+					"Metadata from Director and Discovery endpoints must match",
+				)
+
+				// Optional: still unmarshal once for semantic validation
+				var fedMetadata pelican_url.FederationDiscovery
+				require.NoError(
+					t,
+					json.Unmarshal(directorBody, &fedMetadata),
+				)
+
+				require.Equal(
+					t,
+					fedInfo.DiscoveryEndpoint,
+					fedMetadata.DiscoveryEndpoint,
+				)
+			} else {
+				// Here we don't actually care about the content because there's
+				// nothing to compare it against -- we only want to verify that
+				// discovery resulted in an okay status code.
+				_ = fetchDiscovery(
+					t,
+					client,
+					fedInfo.DiscoveryEndpoint,
+					http.StatusOK,
+				)
+			}
 		})
 	}
 }

@@ -88,6 +88,7 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	}
 	rootGroup := engine.Group("/", web_ui.ServerHeaderMiddleware)
 	director.RegisterDirectorOIDCAPI(rootGroup)
+	director.RegisterFedMetadata(rootGroup)
 	director.RegisterDirectorWebAPI(rootGroup)
 	engine.Use(director.ShortcutMiddleware(defaultResponse))
 	director.RegisterDirectorAPI(ctx, rootGroup)

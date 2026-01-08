@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -20,18 +20,22 @@ package director
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 const (
@@ -43,6 +47,59 @@ const (
 // Director hosts a discovery endpoint at federationDiscoveryPath to provide URLs to various
 // Pelican central servers in a federation.
 func federationDiscoveryHandler(ctx *gin.Context) {
+	// Because of the class of bugs related to federation metadata hosting at the Director, we record
+	// who's trying to access this endpoint as a prometheus metric
+	ipAddr := utils.ClientIPAddr(ctx)
+	network, ok := utils.ApplyIPMask(ipAddr.String())
+	if !ok {
+		log.Warningf("Failed to apply IP mask to address %s", ipAddr.String())
+		network = "unknown"
+	}
+
+	// A hacky way to bootstrap service type ("who's" contacting the Director) from the user agent -- we don't use
+	// the raw user agent because we must protect against cardinality explosion in prometheus.
+	var serviceType string
+	userAgents := ctx.Request.Header.Values("User-Agent")
+	for _, ua := range userAgents {
+		uaLower := strings.ToLower(ua)
+		switch {
+		case strings.Contains(uaLower, "director"):
+			serviceType = "director"
+		case strings.Contains(uaLower, "registry"):
+			serviceType = "registry"
+		case strings.Contains(uaLower, "origin"):
+			serviceType = "origin"
+		case strings.Contains(uaLower, "cache"):
+			serviceType = "cache"
+		}
+		if serviceType != "" {
+			break
+		}
+	}
+	if serviceType == "" {
+		serviceType = "unknown"
+	}
+
+	labels := prometheus.Labels{
+		"network":      network,
+		"service_type": serviceType,
+	}
+	metrics.PelicanDirectorFederationMetadataRequestsTotal.With(labels).Inc()
+
+	// If federation metadata hosting is disabled, return an error
+	if !param.Director_EnableFederationMetadataHosting.GetBool() {
+		// Use 410 Gone to indicate that the resource is no longer available.
+		// While it's possible it was _never_ available (an argument to use 404), 410 is a
+		// louder signal to clients that they should _quit_ trying to access this endpoint.
+		ctx.JSON(http.StatusGone,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg: fmt.Sprintf("This Director is configured to disallow federation metadata hosting; "+
+					"your service is likely misconfigured to use a Director as its %s URL", param.Federation_DiscoveryUrl.GetName()),
+			})
+		return
+	}
+
 	fedInfo, err := config.GetFederation(ctx)
 	if err != nil {
 		log.Errorln("Bad server configuration: Federation discovery could not resolve:", err)
@@ -51,6 +108,7 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 				Status: server_structs.RespFailed,
 				Msg:    "Bad server configuration: Federation discovery could not resolve",
 			})
+		return
 	}
 
 	discoveryUrlStr := fedInfo.DiscoveryEndpoint
@@ -158,6 +216,12 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 }
 
 func RegisterDirectorOIDCAPI(router *gin.RouterGroup) {
-	router.GET(federationDiscoveryPath, federationDiscoveryHandler)
 	server_utils.RegisterOIDCAPI(router, true)
+}
+
+// Register the federation metadata hosting endpoint -- we do this even if the fed metadata hosting is disabled
+// because the endpoint handler will still record metrics about the attempted access (which can be used by fed
+// operators to detect misconfigurations).
+func RegisterFedMetadata(router *gin.RouterGroup) {
+	router.GET(federationDiscoveryPath, federationDiscoveryHandler)
 }

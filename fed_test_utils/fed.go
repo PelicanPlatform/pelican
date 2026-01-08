@@ -44,6 +44,7 @@ import (
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -259,26 +260,40 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 		ft.Pids = append(ft.Pids, server.GetPids()...)
 	}
 
+	var discoveryServer *httptest.Server
 	// Set up discovery for federation metadata hosting. This needs to be done AFTER launching
 	// servers, because they populate the param values we use to set the metadata.
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/.well-known/pelican-configuration" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			_, err := w.Write([]byte(fmt.Sprintf(`{
-				"director_endpoint": "%s",
-				"namespace_registration_endpoint": "%s",
-				"broker_endpoint": "%s",
-				"jwks_uri": "%s"
-			}`, param.Server_ExternalWebUrl.GetString(), param.Server_ExternalWebUrl.GetString(), param.Server_ExternalWebUrl.GetString(), param.Server_ExternalWebUrl.GetString())))
-			assert.NoError(t, err)
+
+			discoveryMetadata := pelican_url.FederationDiscovery{
+				DiscoveryEndpoint:          discoveryServer.URL,
+				DirectorEndpoint:           param.Server_ExternalWebUrl.GetString(),
+				RegistryEndpoint:           param.Server_ExternalWebUrl.GetString(),
+				BrokerEndpoint:             param.Server_ExternalWebUrl.GetString(),
+				JwksUri:                    param.Server_ExternalWebUrl.GetString() + "/.well-known/issuer.jwks",
+				DirectorAdvertiseEndpoints: param.Server_DirectorUrls.GetStringSlice(),
+			}
+
+			discoveryJSONBytes, err := json.Marshal(discoveryMetadata)
+			require.NoError(t, err, "Failed to marshal discovery metadata")
+			_, err = w.Write(discoveryJSONBytes)
+			require.NoError(t, err)
 		} else {
 			http.NotFound(w, r)
 		}
 	}
-	discoveryServer := httptest.NewTLSServer(http.HandlerFunc(handler))
+	discoveryServer = httptest.NewTLSServer(http.HandlerFunc(handler))
 	t.Cleanup(discoveryServer.Close)
+
+	// Set the discovery URL in both viper and the global fed info object
 	require.NoError(t, param.Set(param.Federation_DiscoveryUrl.GetName(), discoveryServer.URL))
+	fedInfo, err := config.GetFederation(ctx)
+	require.NoError(t, err, "error getting federation info")
+	fedInfo.DiscoveryEndpoint = discoveryServer.URL
+	config.SetFederation(fedInfo)
 
 	desiredURL := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
 	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200, false)

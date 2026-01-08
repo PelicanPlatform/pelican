@@ -135,6 +135,9 @@ func TestFederationDiscoveryHandler(t *testing.T) {
 				param.TLSSkipVerify.GetName():           true,
 			})
 
+			// Enable federation metadata hosting for the test -- must be done _after_
+			// the test client initialization because that function blows out any existing params
+			require.NoError(t, param.Set(param.Director_EnableFederationMetadataHosting.GetName(), true))
 			w := httptest.NewRecorder()
 			req, _ := http.NewRequest("GET", "/test", nil)
 			router.ServeHTTP(w, req)

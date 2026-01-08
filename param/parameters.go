@@ -150,6 +150,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Director.DbLocation": false,
 	"Director.DefaultResponse": false,
 	"Director.EnableBroker": false,
+	"Director.EnableFederationMetadataHosting": false,
 	"Director.EnableOIDC": false,
 	"Director.EnableStat": false,
 	"Director.FedTokenLifetime": false,
@@ -946,6 +947,8 @@ func (bP BoolParam) GetBool() bool {
 			return config.Director.CheckOriginPresence
 		case "Director.EnableBroker":
 			return config.Director.EnableBroker
+		case "Director.EnableFederationMetadataHosting":
+			return config.Director.EnableFederationMetadataHosting
 		case "Director.EnableOIDC":
 			return config.Director.EnableOIDC
 		case "Director.EnableStat":
@@ -1250,6 +1253,7 @@ var allParameterNames = []string{
 	"Director.DbLocation",
 	"Director.DefaultResponse",
 	"Director.EnableBroker",
+	"Director.EnableFederationMetadataHosting",
 	"Director.EnableOIDC",
 	"Director.EnableStat",
 	"Director.FedTokenLifetime",
@@ -1753,6 +1757,7 @@ var (
 	Director_CheckCachePresence = BoolParam{"Director.CheckCachePresence"}
 	Director_CheckOriginPresence = BoolParam{"Director.CheckOriginPresence"}
 	Director_EnableBroker = BoolParam{"Director.EnableBroker"}
+	Director_EnableFederationMetadataHosting = BoolParam{"Director.EnableFederationMetadataHosting"}
 	Director_EnableOIDC = BoolParam{"Director.EnableOIDC"}
 	Director_EnableStat = BoolParam{"Director.EnableStat"}
 	Director_FilterCachesInErrorState = BoolParam{"Director.FilterCachesInErrorState"}

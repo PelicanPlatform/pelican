@@ -99,6 +99,7 @@ type Config struct {
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DefaultResponse string `mapstructure:"defaultresponse" yaml:"DefaultResponse"`
 		EnableBroker bool `mapstructure:"enablebroker" yaml:"EnableBroker"`
+		EnableFederationMetadataHosting bool `mapstructure:"enablefederationmetadatahosting" yaml:"EnableFederationMetadataHosting"`
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
 		EnableStat bool `mapstructure:"enablestat" yaml:"EnableStat"`
 		FedTokenLifetime time.Duration `mapstructure:"fedtokenlifetime" yaml:"FedTokenLifetime"`
@@ -481,6 +482,7 @@ type configWithType struct {
 		DbLocation struct { Type string; Value string }
 		DefaultResponse struct { Type string; Value string }
 		EnableBroker struct { Type string; Value bool }
+		EnableFederationMetadataHosting struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
 		EnableStat struct { Type string; Value bool }
 		FedTokenLifetime struct { Type string; Value time.Duration }
