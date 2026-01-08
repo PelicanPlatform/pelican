@@ -21,6 +21,7 @@
 package client_test
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -248,12 +249,9 @@ func TestPelicanFS_ReadAt(t *testing.T) {
 }
 
 func TestPelicanFS_InvalidPath(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-
-	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
-
-	pfs := client.NewPelicanFS(fed.Ctx)
+	// This test doesn't require a full federation setup
+	ctx := context.Background()
+	pfs := client.NewPelicanFS(ctx)
 
 	// Test with invalid path (should fail validation)
 	_, err := pfs.Open("../etc/passwd")
