@@ -25,11 +25,12 @@ type (
 )
 
 const (
-	OriginStoragePosix  OriginStorageType = "posix"
-	OriginStorageS3     OriginStorageType = "s3"
-	OriginStorageHTTPS  OriginStorageType = "https"
-	OriginStorageGlobus OriginStorageType = "globus"
-	OriginStorageXRoot  OriginStorageType = "xroot" // Not meant to be extensible, but facilitates legacy OSDF --> Pelican transition
+	OriginStoragePosix   OriginStorageType = "posix"
+	OriginStoragePosixv2 OriginStorageType = "posixv2"
+	OriginStorageS3      OriginStorageType = "s3"
+	OriginStorageHTTPS   OriginStorageType = "https"
+	OriginStorageGlobus  OriginStorageType = "globus"
+	OriginStorageXRoot   OriginStorageType = "xroot" // Not meant to be extensible, but facilitates legacy OSDF --> Pelican transition
 )
 
 var (
@@ -45,12 +46,14 @@ func ParseOriginStorageType(storageType string) (ost OriginStorageType, err erro
 		ost = OriginStorageHTTPS
 	case string(OriginStoragePosix):
 		ost = OriginStoragePosix
+	case string(OriginStoragePosixv2):
+		ost = OriginStoragePosixv2
 	case string(OriginStorageXRoot):
 		ost = OriginStorageXRoot
 	case string(OriginStorageGlobus):
 		ost = OriginStorageGlobus
 	default:
-		err = errors.Wrapf(ErrUnknownOriginStorageType, "storage type %s (known types are posix, s3, https, globus, and xroot)", storageType)
+		err = errors.Wrapf(ErrUnknownOriginStorageType, "storage type %s (known types are posix, posixv2, s3, https, globus, and xroot)", storageType)
 	}
 	return
 }
