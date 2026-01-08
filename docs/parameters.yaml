@@ -1241,7 +1241,7 @@ description: |+
   Authorization header.
 
   If the origin backend is configured with the `globus` storage type, any value set here will be overridden with the filepath to
-  the first file ending in `.tok` found in the $(Origin.GlobusConfigLocation)/tokens directory
+  the file ending in `.tok` found in the $(Origin.GlobusConfigLocation)/tokens directory
 type: filename
 default: none
 components: ["origin"]
@@ -1311,6 +1311,17 @@ description: |+
 type: filename
 root_default: /run/pelican/xrootd/origin/globus
 default: $XDG_RUNTIME_DIR/pelican/xrootd/origin/globus
+components: ["origin"]
+---
+name: Origin.GlobusTransferTokenFile
+description: |+
+  When set, all requests from the Globus backend to the Globus Transfer API will include the contents
+  of the file as a bearer token in the authorization header.
+
+  Any value set here will be overridden with the filepath to the file ending in `.transfer.tok` found
+  in the $(Origin.GlobusConfigLocation)/tokens directory
+type: filename
+default: none
 components: ["origin"]
 ---
 name: Origin.FedTokenLocation

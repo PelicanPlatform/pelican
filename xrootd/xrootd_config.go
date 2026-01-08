@@ -117,7 +117,11 @@ type (
 		S3Region     string
 		S3ServiceUrl string
 		S3UrlStyle   string
-		Exports      []server_utils.OriginExport
+
+		// Globus specific options
+		GlobusTransferTokenFile string
+
+		Exports []server_utils.OriginExport
 	}
 
 	LotmanCfg struct {
@@ -1101,8 +1105,7 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 			xrdConfig.Origin.FederationPrefix = param.Origin_FederationPrefix.GetString()
 		}
 	case "globus":
-		// There's no real globus backend for xrd yet! We use https as the real backend
-		xrdConfig.Origin.StorageType = "https"
+		xrdConfig.Origin.StorageType = "globus"
 		// Set activeOnly to false so that we can use the inactive ones as placeholders
 		globusExports := origin.GetGlobusExportsValues(false)
 		// If there's no activated Globus collection, then set the Http config to empty
@@ -1120,28 +1123,8 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 			xrdConfig.Origin.FederationPrefix = globusExports[0].FederationPrefix
 
 			if globusExports[0].Status == origin.GlobusActivated {
-				// Check the contents of $(Origin.GlobusConfigLocation)/tokens and grab the first `.tok` file
-				// Feed this to the HTTP Plugin as the auth token file
-				tknFldr := filepath.Join(param.Origin_GlobusConfigLocation.GetString(), "tokens")
-				tokenFiles, err := os.ReadDir(tknFldr)
-				if err != nil {
-					return "", errors.Wrap(err, "failed to read Globus token directory for token files")
-				}
-
-				if len(tokenFiles) == 0 {
-					return "", errors.Errorf("failed to find a Globus auth token in %s", tknFldr)
-				}
-				var tFileName string
-				for _, tFile := range tokenFiles {
-					if ext := filepath.Ext(tFile.Name()); ext == origin.GlobusTokenFileExt {
-						tFileName = tFile.Name()
-						break
-					}
-				}
-				if tFileName == "" {
-					return "", errors.Errorf("no Globus auth tokens ending in %s could be found in %s", origin.GlobusTokenFileExt, tknFldr)
-				}
-				xrdConfig.Origin.HttpAuthTokenFile = filepath.Join(param.Origin_GlobusConfigLocation.GetString(), "tokens", tFileName)
+				xrdConfig.Origin.HttpAuthTokenFile = globusExports[0].TokenFile
+				xrdConfig.Origin.GlobusTransferTokenFile = globusExports[0].TransferTokenFile
 			}
 		}
 	}
