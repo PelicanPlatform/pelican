@@ -3686,3 +3686,310 @@ func TestDirectoryPermissionsRespectUmask(t *testing.T) {
 		})
 	}
 }
+
+// TestUpload403WithSyncEnabled verifies that when sync is enabled, a 403 response
+// during upload is treated as "file already exists" and doesn't cause an error
+func TestUpload403WithSyncEnabled(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		param.TLSSkipVerify.GetName(): true,
+	})
+
+	// Create a temporary file to upload
+	tempFile, err := os.CreateTemp("", "test-upload-*.txt")
+	require.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+	_, err = tempFile.WriteString("test content")
+	require.NoError(t, err)
+	tempFile.Close()
+
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Return 404 for PROPFIND (stat) requests
+		if r.Method == "PROPFIND" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		// Return 403 Forbidden for PUT (file already exists, no overwrite)
+		if r.Method == "PUT" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+	}))
+	defer ts.Close()
+
+	tsURL, err := url.Parse(ts.URL)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	transfer := &transferFile{
+		ctx:       ctx,
+		localPath: tempFile.Name(),
+		remoteURL: tsURL,
+		xferType:  transferTypeUpload,
+		job: &TransferJob{
+			ctx:       ctx,
+			syncLevel: SyncSize, // Sync is enabled
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   tsURL.Host,
+				Path:   "/test/file.txt",
+			},
+			dirResp: server_structs.DirectorResponse{
+				XPelNsHdr: server_structs.XPelNs{
+					CollectionsUrl: tsURL,
+				},
+			},
+		},
+		callback: nil,
+		attempts: []transferAttemptDetails{
+			{
+				Url:   tsURL,
+				Proxy: false,
+			},
+		},
+	}
+
+	transferResult, err := uploadObject(transfer)
+	// With sync enabled, 403 should be treated as success (file already exists)
+	assert.NoError(t, err, "Upload with sync enabled should not error on 403")
+	assert.NoError(t, transferResult.Error, "Transfer result should not contain error on 403 with sync")
+
+	// Verify the object was recorded in the skipped list
+	transfer.job.skipped403.Lock()
+	assert.Equal(t, 1, len(transfer.job.skipped403Objs), "Should have recorded 1 skipped object")
+	assert.Contains(t, transfer.job.skipped403Objs, tsURL.Path, "Should have recorded the correct object path")
+	transfer.job.skipped403.Unlock()
+}
+
+// TestUpload403WithSyncDisabled verifies that when sync is disabled, a 403 response
+// during upload is still treated as an error
+func TestUpload403WithSyncDisabled(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		param.TLSSkipVerify.GetName(): true,
+	})
+
+	// Create a temporary file to upload
+	tempFile, err := os.CreateTemp("", "test-upload-*.txt")
+	require.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+	_, err = tempFile.WriteString("test content")
+	require.NoError(t, err)
+	tempFile.Close()
+
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Return 403 Forbidden for PUT
+		if r.Method == "PUT" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+	}))
+	defer ts.Close()
+
+	tsURL, err := url.Parse(ts.URL)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	transfer := &transferFile{
+		ctx:       ctx,
+		localPath: tempFile.Name(),
+		remoteURL: tsURL,
+		xferType:  transferTypeUpload,
+		job: &TransferJob{
+			ctx:       ctx,
+			syncLevel: SyncNone, // Sync is disabled
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   tsURL.Host,
+				Path:   "/test/file.txt",
+			},
+			dirResp: server_structs.DirectorResponse{
+				XPelNsHdr: server_structs.XPelNs{
+					CollectionsUrl: tsURL,
+				},
+			},
+		},
+		callback: nil,
+		attempts: []transferAttemptDetails{
+			{
+				Url:   tsURL,
+				Proxy: false,
+			},
+		},
+	}
+
+	transferResult, err := uploadObject(transfer)
+	// uploadObject always returns nil for err; check transferResult.Error instead
+	assert.NoError(t, err, "uploadObject should not return error in err return value")
+	// With sync disabled, 403 should still be an error in transferResult.Error
+	require.Error(t, transferResult.Error, "Transfer result should contain error on 403 without sync")
+
+	// Verify it contains an HTTP 403 error
+	// The error is wrapped in TransferErrors, so we need to unwrap it
+	var te *TransferErrors
+	require.True(t, errors.As(transferResult.Error, &te), "Error should be TransferErrors")
+	require.Greater(t, len(te.errors), 0, "TransferErrors should contain at least one error")
+
+	// Check if any of the errors is a 403
+	var found403 bool
+	for _, wrappedErr := range te.errors {
+		var httpErr *HttpErrResp
+		if errors.As(wrappedErr, &httpErr) && httpErr.Code == http.StatusForbidden {
+			found403 = true
+			break
+		}
+	}
+	assert.True(t, found403, "Should find an HTTP 403 error in the transfer errors")
+
+	// Verify the object was NOT recorded in the skipped list (since sync is disabled)
+	transfer.job.skipped403.Lock()
+	assert.Equal(t, 0, len(transfer.job.skipped403Objs), "Should not have recorded any skipped objects when sync is disabled")
+	transfer.job.skipped403.Unlock()
+}
+
+// TestRecursiveUpload403WithSync verifies that recursive directory uploads properly handle 403 errors
+// This tests the walkDirUpload -> uploadObject flow
+func TestRecursiveUpload403WithSync(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		param.TLSSkipVerify.GetName(): true,
+	})
+
+	// Create a temporary directory with multiple files
+	tempDir := t.TempDir()
+	file1Path := filepath.Join(tempDir, "file1.txt")
+	file2Path := filepath.Join(tempDir, "file2.txt")
+	file3Path := filepath.Join(tempDir, "file3.txt")
+
+	err := os.WriteFile(file1Path, []byte("content1"), 0644)
+	require.NoError(t, err)
+	err = os.WriteFile(file2Path, []byte("content2"), 0644)
+	require.NoError(t, err)
+	err = os.WriteFile(file3Path, []byte("content3"), 0644)
+	require.NoError(t, err)
+
+	// Mock server that returns:
+	// - 403 for file1 and file2 (already exist)
+	// - 201 for file3 (new file, successfully created)
+	uploadedFiles := make(map[string]bool)
+	var mu sync.Mutex
+
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Return 404 for PROPFIND (stat) requests - simulate listing disabled
+		if r.Method == "PROPFIND" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		// Handle PUT requests
+		if r.Method == "PUT" {
+			mu.Lock()
+			defer mu.Unlock()
+
+			// file1 and file2 already exist (403), file3 is new (201)
+			if strings.Contains(r.URL.Path, "file1.txt") || strings.Contains(r.URL.Path, "file2.txt") {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			if strings.Contains(r.URL.Path, "file3.txt") {
+				uploadedFiles[r.URL.Path] = true
+				w.WriteHeader(http.StatusCreated)
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer ts.Close()
+
+	tsURL, err := url.Parse(ts.URL)
+	require.NoError(t, err)
+
+	// Create a transfer engine and client
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	te, err := NewTransferEngine(ctx)
+	require.NoError(t, err)
+
+	// Create a transfer job for recursive upload with sync enabled
+	remoteURL, err := pelican_url.Parse("pelican://"+tsURL.Host+"/test/dir", nil, nil)
+	require.NoError(t, err)
+
+	tj := &TransferJob{
+		ctx:       ctx,
+		uuid:      uuid.New(),
+		localPath: tempDir,
+		remoteURL: remoteURL,
+		recursive: true,
+		syncLevel: SyncSize, // Sync enabled
+		xferType:  transferTypeUpload,
+		dirResp: server_structs.DirectorResponse{
+			XPelNsHdr: server_structs.XPelNs{
+				CollectionsUrl: tsURL,
+			},
+			ObjectServers: []*url.URL{tsURL},
+		},
+	}
+
+	// Manually create the transfer attempts
+	transfers := []transferAttemptDetails{{Url: tsURL, Proxy: false}}
+
+	// Create channel for files
+	files := make(chan *clientTransferFile, 10)
+
+	// Run walkDirUpload to queue files
+	err = te.walkDirUpload(&clientTransferJob{uuid: uuid.New(), job: tj}, transfers, files, tempDir)
+	require.NoError(t, err)
+
+	close(files)
+
+	// Process all queued files
+	var results []TransferResults
+	for file := range files {
+		result, err := uploadObject(file.file)
+		require.NoError(t, err, "uploadObject should not return error")
+		results = append(results, result)
+		tj.activeXfer.Add(-1)
+	}
+
+	// Verify results:
+	// - 3 transfers attempted (file1, file2, file3)
+	// - 2 skipped due to 403 (file1, file2)
+	// - 1 successful upload (file3)
+	require.Equal(t, 3, len(results), "Should have 3 transfer results")
+
+	tj.skipped403.Lock()
+	skippedCount := len(tj.skipped403Objs)
+	skippedPaths := make([]string, len(tj.skipped403Objs))
+	copy(skippedPaths, tj.skipped403Objs)
+	tj.skipped403.Unlock()
+
+	// Verify 2 files were skipped (file1 and file2)
+	assert.Equal(t, 2, skippedCount, "Should have skipped 2 files due to 403")
+
+	// Verify file3 was uploaded (path will be /test/dir/file3.txt)
+	mu.Lock()
+	var file3Uploaded bool
+	for path := range uploadedFiles {
+		if strings.Contains(path, "file3.txt") {
+			file3Uploaded = true
+			break
+		}
+	}
+	mu.Unlock()
+	assert.True(t, file3Uploaded, "file3.txt should have been uploaded")
+
+	// Verify the skipped files are file1 and file2
+	var hasFile1, hasFile2 bool
+	for _, path := range skippedPaths {
+		if strings.Contains(path, "file1.txt") {
+			hasFile1 = true
+		}
+		if strings.Contains(path, "file2.txt") {
+			hasFile2 = true
+		}
+	}
+	assert.True(t, hasFile1, "file1.txt should be in skipped list")
+	assert.True(t, hasFile2, "file2.txt should be in skipped list")
+
+	// Verify none of the results have errors
+	for i, result := range results {
+		assert.NoError(t, result.Error, "Result %d should not have error", i)
+	}
+}
