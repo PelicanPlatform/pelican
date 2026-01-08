@@ -160,7 +160,7 @@ func (ac *authConfig) getResourceScopes(token string) (scopes []token_scopes.Res
 
 	item := issuerConfItem.Value()
 	if item.set == nil {
-		if item.err == nil {
+		if item.err != nil {
 			err = item.err
 		} else {
 			err = errors.Errorf("failed to fetch public key set")
