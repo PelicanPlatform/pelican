@@ -25,6 +25,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -32,6 +33,21 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 )
+
+// bytesWriter wraps a byte slice to implement io.Writer
+type bytesWriter struct {
+	buf []byte
+	n   int
+}
+
+func (w *bytesWriter) Write(p []byte) (n int, err error) {
+	n = copy(w.buf[w.n:], p)
+	w.n += n
+	if n < len(p) {
+		return n, io.ErrShortWrite
+	}
+	return n, nil
+}
 
 // PelicanFS implements io.FS for the Pelican data federation.
 // It provides a filesystem-like interface to objects stored in the federation.
@@ -143,7 +159,7 @@ func (pf *PelicanFile) startTransferRead(p []byte) (int, error) {
 
 		// Use a temporary file for the transfer, then copy to the pipe
 		// This is simpler than modifying the entire transfer engine
-		tempDir := "/tmp"
+		tempDir := os.TempDir()
 		tempFile, err := os.CreateTemp(tempDir, "pelican-fs-*")
 		if err != nil {
 			pf.transferErr = err
@@ -185,7 +201,7 @@ func (pf *PelicanFile) startTransferRead(p []byte) (int, error) {
 	return n, err
 }
 
-// rangeRead performs a partial read using HTTP range requests
+// rangeRead performs a partial read using HTTP range requests and updates position
 func (pf *PelicanFile) rangeRead(p []byte, offset int64) (int, error) {
 	if offset >= pf.fileInfo.Size {
 		return 0, io.EOF
@@ -197,8 +213,8 @@ func (pf *PelicanFile) rangeRead(p []byte, offset int64) (int, error) {
 		length = pf.fileInfo.Size - offset
 	}
 
-	// Use downloadHTTPRange to fetch the data directly
-	n, err := pf.downloadHTTPRange(p, offset, length)
+	// Use doRangeRead to fetch the data directly
+	n, err := pf.doRangeRead(p, offset)
 	if err != nil {
 		return n, err
 	}
@@ -207,8 +223,14 @@ func (pf *PelicanFile) rangeRead(p []byte, offset int64) (int, error) {
 	return n, nil
 }
 
-// downloadHTTPRange downloads a specific byte range from the file using HTTP range requests
-func (pf *PelicanFile) downloadHTTPRange(p []byte, offset int64, length int64) (int, error) {
+// doRangeRead performs the actual HTTP range request without updating position
+func (pf *PelicanFile) doRangeRead(p []byte, offset int64) (int, error) {
+	// Calculate the range to read
+	length := int64(len(p))
+	if offset+length > pf.fileInfo.Size {
+		length = pf.fileInfo.Size - offset
+	}
+
 	// Get director information for the path
 	pUrl, err := ParseRemoteAsPUrl(pf.ctx, pf.name)
 	if err != nil {
@@ -285,13 +307,16 @@ func (pf *PelicanFile) downloadHTTPRange(p []byte, offset int64, length int64) (
 		}
 
 		// Read the response body into the buffer
-		n, err := io.ReadFull(resp.Body, p[:length])
-		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		// Use io.Copy with LimitReader for safer partial content handling
+		limitedReader := io.LimitReader(resp.Body, length)
+		bw := &bytesWriter{buf: p}
+		n, err := io.Copy(bw, limitedReader)
+		if err != nil {
 			lastErr = err
 			continue
 		}
 
-		return n, nil
+		return int(n), nil
 	}
 
 	if lastErr != nil {
@@ -302,7 +327,7 @@ func (pf *PelicanFile) downloadHTTPRange(p []byte, offset int64, length int64) (
 }
 
 // ReadAt reads len(p) bytes into p starting at offset off in the file.
-// It implements io.ReaderAt.
+// It implements io.ReaderAt. Note: ReadAt does not affect the file position.
 func (pf *PelicanFile) ReadAt(p []byte, off int64) (n int, err error) {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
@@ -323,8 +348,8 @@ func (pf *PelicanFile) ReadAt(p []byte, off int64) (n int, err error) {
 		return 0, io.EOF
 	}
 
-	// Use HTTP range request
-	return pf.rangeRead(p, off)
+	// Use HTTP range request - don't update position as per io.ReaderAt contract
+	return pf.doRangeRead(p, off)
 }
 
 // Seek sets the offset for the next Read operation and returns the new offset.
@@ -375,19 +400,7 @@ func (pf *PelicanFile) Stat() (fs.FileInfo, error) {
 	}
 
 	// Extract just the basename for the name
-	name := pf.name
-	if idx := len(name) - 1; idx >= 0 {
-		if name[idx] == '/' {
-			name = name[:idx]
-		}
-	}
-	// Find the last slash
-	for i := len(name) - 1; i >= 0; i-- {
-		if name[i] == '/' {
-			name = name[i+1:]
-			break
-		}
-	}
+	name := filepath.Base(pf.name)
 
 	return &pelicanFileInfo{
 		name:    name,
