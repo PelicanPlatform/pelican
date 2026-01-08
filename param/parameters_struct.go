@@ -341,12 +341,12 @@ type Config struct {
 		IPMapping interface{} `mapstructure:"ipmapping" yaml:"IPMapping"`
 		MessageQueueProtocol string `mapstructure:"messagequeueprotocol" yaml:"MessageQueueProtocol"`
 		OutputDestinations []string `mapstructure:"outputdestinations" yaml:"OutputDestinations"`
+		PasswordLocation string `mapstructure:"passwordlocation" yaml:"PasswordLocation"`
 		PortHigher int `mapstructure:"porthigher" yaml:"PortHigher"`
 		PortLower int `mapstructure:"portlower" yaml:"PortLower"`
 		QueueDirectory string `mapstructure:"queuedirectory" yaml:"QueueDirectory"`
 		StompCert string `mapstructure:"stompcert" yaml:"StompCert"`
 		StompCertKey string `mapstructure:"stompcertkey" yaml:"StompCertKey"`
-		StompPassword string `mapstructure:"stomppassword" yaml:"StompPassword"`
 		StompUsername string `mapstructure:"stompusername" yaml:"StompUsername"`
 		Topic string `mapstructure:"topic" yaml:"Topic"`
 		URL string `mapstructure:"url" yaml:"URL"`
@@ -724,12 +724,12 @@ type configWithType struct {
 		IPMapping struct { Type string; Value interface{} }
 		MessageQueueProtocol struct { Type string; Value string }
 		OutputDestinations struct { Type string; Value []string }
+		PasswordLocation struct { Type string; Value string }
 		PortHigher struct { Type string; Value int }
 		PortLower struct { Type string; Value int }
 		QueueDirectory struct { Type string; Value string }
 		StompCert struct { Type string; Value string }
 		StompCertKey struct { Type string; Value string }
-		StompPassword struct { Type string; Value string }
 		StompUsername struct { Type string; Value string }
 		Topic struct { Type string; Value string }
 		URL struct { Type string; Value string }

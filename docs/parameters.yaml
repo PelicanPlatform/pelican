@@ -3377,7 +3377,7 @@ description: |+
    - URL: messagebroker.org:port
    - Topic: mytopic
    - StompUsername: username
-   - StompPassword: password
+   - PasswordLocation: path/to/password/file
    - StompCert: path/to/cert/file
    - StompCertKey: path/to/certkey/file
 type: string
@@ -3430,12 +3430,12 @@ type: string
 default: none
 components: ["origin", "cache"]
 ---
-name: Shoveler.StompPassword
+name: Shoveler.PasswordLocation
 description: |+
   For stomp only.
 
-  Password for authentication.
-type: string
+  Password file location for authentication.
+type: filename
 default: none
 components: ["origin", "cache"]
 ---
