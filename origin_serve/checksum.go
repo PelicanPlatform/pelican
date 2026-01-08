@@ -78,10 +78,11 @@ func (xc *XattrChecksummer) GetChecksum(filename string, checksumType ChecksumTy
 	if xattrName != "" {
 		data, err := xattr.Get(filename, xattrName)
 		if err == nil && len(data) > 0 {
-			// Verify the file hasn't been modified since checksum was stored
+			// Check if the cached checksum is still valid
 			if isChecksumValid(filename, xattrName) {
 				return string(data), nil
 			}
+			// Cached checksum is stale, will recompute below
 		}
 	}
 
