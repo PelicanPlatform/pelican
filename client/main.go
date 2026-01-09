@@ -576,12 +576,12 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 				log.Debugln("Failure when shutting down temporary transfer engine:", err)
 			}
 		}()
-		
+
 		tc, err := te.NewClient(options...)
 		if err != nil {
 			return nil, err
 		}
-		
+
 		// Create a temporary transfer job just to get director info
 		tempTj, err := tc.NewTransferJob(ctx, pUrl.GetRawUrl(), localObject, true, false, options...)
 		if err != nil {
