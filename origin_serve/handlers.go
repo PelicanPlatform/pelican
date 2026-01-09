@@ -44,7 +44,7 @@ var (
 // 3. Query parameter "authz" (non-standard)
 func extractTokens(r *http.Request) []string {
 	tokens := make([]string, 0)
-	
+
 	// Check Authorization header
 	authHeader := r.Header.Get("Authorization")
 	if authHeader != "" {
@@ -60,7 +60,7 @@ func extractTokens(r *http.Request) []string {
 			}
 		}
 	}
-	
+
 	// Check query parameters
 	query := r.URL.Query()
 	if accessToken := query.Get("access_token"); accessToken != "" {
@@ -69,7 +69,7 @@ func extractTokens(r *http.Request) []string {
 	if authzToken := query.Get("authz"); authzToken != "" {
 		tokens = append(tokens, authzToken)
 	}
-	
+
 	return tokens
 }
 
@@ -94,18 +94,18 @@ func authMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Log the request
 		log.Infof("Request: %s %s from %s", c.Request.Method, c.Request.URL.Path, c.ClientIP())
-		
+
 		tokens := extractTokens(c.Request)
 		action := getActionFromMethod(c.Request.Method)
 		resource := c.Request.URL.Path
-		
+
 		ac := GetAuthConfig()
 		if ac == nil {
 			log.Error("Auth config not initialized")
 			c.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
-		
+
 		// Check for public reads first
 		exports := ac.exports.Load()
 		if exports != nil && action == token_scopes.Wlcg_Storage_Read {
@@ -123,14 +123,14 @@ func authMiddleware() gin.HandlerFunc {
 				}
 			}
 		}
-		
+
 		// If not public read, check authorization with each token
 		if len(tokens) == 0 {
 			log.Debugf("No token provided for %s %s", c.Request.Method, resource)
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
-		
+
 		// Try each token until one authorizes the request
 		for _, token := range tokens {
 			ctx, authorized := ac.authorizeWithContext(c.Request.Context(), action, resource, token)
@@ -140,7 +140,7 @@ func authMiddleware() gin.HandlerFunc {
 				return
 			}
 		}
-		
+
 		log.Debugf("Authorization failed for %s %s", c.Request.Method, resource)
 		c.AbortWithStatus(http.StatusForbidden)
 	}
@@ -150,32 +150,32 @@ func authMiddleware() gin.HandlerFunc {
 func InitializeHandlers(exports []server_utils.OriginExport) error {
 	webdavHandlers = make(map[string]*webdav.Handler)
 	exportPrefixMap = make(map[string]string) // Initialize the global map
-	
+
 	for _, export := range exports {
 		// Create a filesystem for this export
 		fs := afero.NewBasePathFs(afero.NewOsFs(), export.StoragePrefix)
-		
+
 		// Create logger function
 		logger := func(r *http.Request, err error) {
 			if err != nil {
 				log.Debugf("WebDAV error for %s %s: %v", r.Method, r.URL.Path, err)
 			}
 		}
-		
+
 		afs := newAferoFileSystem(fs, "", logger)
-		
+
 		// Create a WebDAV handler
 		handler := &webdav.Handler{
 			FileSystem: afs,
 			LockSystem: webdav.NewMemLS(),
 			Logger:     logger,
 		}
-		
+
 		webdavHandlers[export.FederationPrefix] = handler
 		exportPrefixMap[export.FederationPrefix] = export.StoragePrefix
 		log.Infof("Initialized WebDAV handler for %s -> %s", export.FederationPrefix, export.StoragePrefix)
 	}
-	
+
 	return nil
 }
 
@@ -183,65 +183,80 @@ func InitializeHandlers(exports []server_utils.OriginExport) error {
 func RegisterHandlers(engine *gin.Engine) error {
 	// Initialize checksummer
 	InitializeChecksummer()
-	
+
 	// Register handlers for each export
 	for prefix, handler := range webdavHandlers {
 		// Get the storage prefix for this federation prefix
 		storagePrefix := exportPrefixMap[prefix]
-		
+
 		// Create a route group for this prefix
 		group := engine.Group(prefix)
 		group.Use(authMiddleware())
-		
-		// Custom HEAD handler to add checksums
-		group.HEAD("/*path", func(c *gin.Context) {
-			handleHeadWithChecksum(c, handler, storagePrefix)
-		})
-		
-		// Register the WebDAV handler for all other HTTP methods
+
+		// Register the WebDAV handler for all HTTP methods with special handling for HEAD
 		group.Any("/*path", func(c *gin.Context) {
-			// Skip if it's a HEAD request (already handled above)
 			if c.Request.Method == http.MethodHead {
-				c.Next()
-				return
+				handleHeadWithChecksum(c, handler, storagePrefix)
+			} else {
+				handler.ServeHTTP(c.Writer, c.Request)
 			}
-			handler.ServeHTTP(c.Writer, c.Request)
 		})
-		
+
 		log.Infof("Registered HTTP handlers for prefix: %s", prefix)
 	}
-	
+
 	return nil
 }
 
-// handleHeadWithChecksum handles HEAD requests and adds checksum headers
+// handleHeadWithChecksum handles HEAD requests and adds checksum headers per RFC 3230
 func handleHeadWithChecksum(c *gin.Context, handler *webdav.Handler, storagePrefix string) {
 	// First, let the WebDAV handler process the HEAD request normally
 	handler.ServeHTTP(c.Writer, c.Request)
-	
-	// If successful, add checksum headers
+
+	// If successful, add checksum headers per RFC 3230
 	if c.Writer.Status() == http.StatusOK {
 		// Get the relative path from the request
 		relativePath := c.Param("path")
-		
+
 		// Construct the full filesystem path
 		fullPath := path.Join(storagePrefix, relativePath)
-		
+
+		// Check if client requested checksums via Want-Digest header
+		wantDigest := c.GetHeader("Want-Digest")
+		if wantDigest == "" {
+			// Default to MD5 if not specified
+			wantDigest = "md5"
+		}
+
 		checksummer := GetChecksummer()
-		
-		// Add MD5 checksum header
-		if md5sum, err := checksummer.GetChecksum(fullPath, ChecksumTypeMD5); err == nil {
-			c.Header("Digest", "md5="+md5sum)
+		digestValues := []string{}
+
+		// Parse Want-Digest header and compute requested checksums
+		for _, alg := range strings.Split(wantDigest, ",") {
+			alg = strings.TrimSpace(strings.ToLower(alg))
+
+			var checksumType ChecksumType
+			switch alg {
+			case "md5":
+				checksumType = ChecksumTypeMD5
+			case "sha", "sha-1", "sha1":
+				checksumType = ChecksumTypeSHA1
+			case "crc32":
+				checksumType = ChecksumTypeCRC32
+			default:
+				continue
+			}
+
+			if xc, ok := checksummer.(*XattrChecksummer); ok {
+				if digest, err := xc.GetChecksumRFC3230(fullPath, checksumType); err == nil {
+					digestValues = append(digestValues, digest)
+				}
+			}
 		}
-		
-		// Add SHA1 checksum header (alternative)
-		if sha1sum, err := checksummer.GetChecksum(fullPath, ChecksumTypeSHA1); err == nil {
-			c.Header("X-Checksum-Sha1", sha1sum)
-		}
-		
-		// Add CRC32 checksum header
-		if crc32sum, err := checksummer.GetChecksum(fullPath, ChecksumTypeCRC32); err == nil {
-			c.Header("X-Checksum-Crc32", crc32sum)
+
+		// Set Digest header with all requested checksums (RFC 3230)
+		if len(digestValues) > 0 {
+			c.Header("Digest", strings.Join(digestValues, ","))
 		}
 	}
 }

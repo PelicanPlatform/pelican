@@ -27,7 +27,6 @@ import (
 	"sync"
 
 	"github.com/spf13/afero"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/webdav"
 )
 
@@ -88,12 +87,12 @@ func (afs *aferoFileSystem) OpenFile(ctx context.Context, name string, flag int,
 	if afs.logger != nil {
 		afs.logger(nil, nil) // Use the logger provided by webdav
 	}
-	
+
 	file, err := afs.fs.OpenFile(fullPath, flag, perm)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &aferoFile{
 		File:   file,
 		fs:     afs.fs,
@@ -144,7 +143,7 @@ type aferoFile struct {
 func (af *aferoFile) Readdir(count int) ([]os.FileInfo, error) {
 	af.dirMutex.Lock()
 	defer af.dirMutex.Unlock()
-	
+
 	// On first call or when count <= 0, read all entries
 	if af.dirEntries == nil {
 		entries, err := afero.ReadDir(af.fs, af.name)
@@ -154,28 +153,28 @@ func (af *aferoFile) Readdir(count int) ([]os.FileInfo, error) {
 		af.dirEntries = entries
 		af.dirOffset = 0
 	}
-	
+
 	// If count <= 0, return all remaining entries and reset
 	if count <= 0 {
 		result := af.dirEntries[af.dirOffset:]
 		af.dirOffset = len(af.dirEntries)
 		return result, nil
 	}
-	
+
 	// Return up to count entries from current offset
 	remaining := len(af.dirEntries) - af.dirOffset
 	if remaining == 0 {
 		// No more entries, return io.EOF
 		return nil, io.EOF
 	}
-	
+
 	if count > remaining {
 		count = remaining
 	}
-	
+
 	result := af.dirEntries[af.dirOffset : af.dirOffset+count]
 	af.dirOffset += count
-	
+
 	return result, nil
 }
 

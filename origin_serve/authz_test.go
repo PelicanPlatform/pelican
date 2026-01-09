@@ -60,10 +60,10 @@ func createTestToken(t *testing.T, key jwk.Key, issuer string, subject string, g
 func generateTestKey(t *testing.T) jwk.Key {
 	privEC, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
-	
+
 	key, err := jwk.FromRaw(privEC)
 	require.NoError(t, err)
-	
+
 	require.NoError(t, key.Set(jwk.KeyIDKey, "test-key"))
 	return key
 }
@@ -72,7 +72,7 @@ func generateTestKey(t *testing.T) jwk.Key {
 func TestSciTokenScopes(t *testing.T) {
 	// Create a test key pair
 	key := generateTestKey(t)
-	
+
 	pubKey, err := key.PublicKey()
 	require.NoError(t, err)
 	require.NoError(t, pubKey.Set(jwk.KeyIDKey, "test-key"))
@@ -104,7 +104,7 @@ func TestSciTokenScopes(t *testing.T) {
 	// Test authorization - should fail because we don't have the public key registered
 	ac := GetAuthConfig()
 	authorized := ac.authorize(token_scopes.Wlcg_Storage_Read, "/test/file.txt", token)
-	
+
 	// This will fail in the test since we don't have a real JWKS endpoint
 	// In a real scenario, the key would be fetched from the issuer
 	assert.False(t, authorized)
@@ -114,7 +114,7 @@ func TestSciTokenScopes(t *testing.T) {
 func TestWLCGTokenScopes(t *testing.T) {
 	// Create a test key pair
 	key := generateTestKey(t)
-	
+
 	pubKey, err := key.PublicKey()
 	require.NoError(t, err)
 	require.NoError(t, pubKey.Set(jwk.KeyIDKey, "test-key"))
@@ -146,7 +146,7 @@ func TestWLCGTokenScopes(t *testing.T) {
 	// Test authorization
 	ac := GetAuthConfig()
 	authorized := ac.authorize(token_scopes.Wlcg_Storage_Read, "/test/file.txt", token)
-	
+
 	// This will fail because we don't have the public key registered
 	assert.False(t, authorized)
 }
@@ -182,7 +182,7 @@ func TestExtractUserInfo(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			token := createTestToken(t, key, "https://test.example.com", tt.subject, tt.groups, "read:/test")
-			
+
 			userInfo := extractUserInfoFromToken(token)
 			require.NotNil(t, userInfo)
 			assert.Equal(t, tt.expectedUser, userInfo.User)
@@ -254,7 +254,83 @@ func TestAuthorizeWithContext(t *testing.T) {
 
 	// Authorization will fail without proper key setup, but we can test that context is created
 	_ = authorized
-	
+
 	// Even if not authorized, the function should return a context
 	assert.NotNil(t, newCtx)
+}
+
+// TestPathPrefixBoundaryCheck tests path prefix boundary checking for security
+func TestPathPrefixBoundaryCheck(t *testing.T) {
+	tests := []struct {
+		name             string
+		requestPath      string
+		authorizedPrefix string
+		expected         bool
+		description      string
+	}{
+		{
+			name:             "ExactMatch",
+			requestPath:      "/foo/bar",
+			authorizedPrefix: "/foo/bar",
+			expected:         true,
+			description:      "Exact path match should be allowed",
+		},
+		{
+			name:             "ValidSubpath",
+			requestPath:      "/foo/bar/file.txt",
+			authorizedPrefix: "/foo/bar",
+			expected:         true,
+			description:      "File under authorized prefix should be allowed",
+		},
+		{
+			name:             "BoundaryViolation",
+			requestPath:      "/foo/bar2/file.txt",
+			authorizedPrefix: "/foo/bar",
+			expected:         false,
+			description:      "Sibling directory /foo/bar2 should NOT be accessible from /foo/bar",
+		},
+		{
+			name:             "ParentDirectory",
+			requestPath:      "/foo",
+			authorizedPrefix: "/foo/bar",
+			expected:         false,
+			description:      "Cannot access parent directory when only subdir authorized",
+		},
+		{
+			name:             "DifferentRoot",
+			requestPath:      "/home/file.txt",
+			authorizedPrefix: "/root",
+			expected:         false,
+			description:      "Completely different paths should not match",
+		},
+		{
+			name:             "PathTraversal",
+			requestPath:      "/foo/bar/../../../etc/passwd",
+			authorizedPrefix: "/foo/bar",
+			expected:         false,
+			description:      "Normalized path traversal should fail (../../.. resolves to /)",
+		},
+		{
+			name:             "NormalizedPaths",
+			requestPath:      "/foo/bar//file.txt",
+			authorizedPrefix: "/foo/bar/",
+			expected:         true,
+			description:      "Both paths should be normalized before comparison",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := hasPathPrefix(tt.requestPath, tt.authorizedPrefix)
+			assert.Equal(t, tt.expected, result, tt.description)
+		})
+	}
+}
+
+// BenchmarkPathPrefixCheck benchmarks path prefix validation
+func BenchmarkPathPrefixCheck(b *testing.B) {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = hasPathPrefix("/foo/bar/baz/qux/file.txt", "/foo/bar")
+	}
 }
