@@ -31,6 +31,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -41,9 +42,11 @@ import (
 // PelicanFS implements io.FS for the Pelican data federation.
 // It provides a filesystem-like interface to objects stored in the federation.
 type PelicanFS struct {
-	ctx       context.Context
-	urlPrefix string // URL prefix for all paths (e.g., "osdf:///")
-	options   []TransferOption
+	ctx            context.Context
+	urlPrefix      string // URL prefix for all paths (e.g., "osdf:///")
+	options        []TransferOption
+	transferEngine *TransferEngine
+	mu             sync.Mutex // Protects transferEngine
 }
 
 // NewPelicanFS creates a new filesystem interface to the Pelican federation.
@@ -59,10 +62,12 @@ func NewPelicanFSWithPrefix(ctx context.Context, urlPrefix string, options ...Tr
 	if urlPrefix == "" || urlPrefix == "/" {
 		urlPrefix = "osdf:///"
 	}
+	te, _ := NewTransferEngine(ctx)
 	return &PelicanFS{
-		ctx:       ctx,
-		urlPrefix: urlPrefix,
-		options:   options,
+		ctx:            ctx,
+		urlPrefix:      urlPrefix,
+		options:        options,
+		transferEngine: te,
 	}
 }
 
@@ -76,8 +81,14 @@ func (pfs *PelicanFS) Open(name string) (fs.File, error) {
 // OpenFile opens the named file with specified flags.
 // Supported flags: os.O_RDONLY, os.O_WRONLY, os.O_RDWR, os.O_CREATE
 func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
+	// Strip leading slash if present (fs.ValidPath requires unrooted paths)
+	cleanName := name
+	if len(name) > 0 && name[0] == '/' {
+		cleanName = name[1:]
+	}
+
 	// Validate the name
-	if !fs.ValidPath(name) {
+	if !fs.ValidPath(cleanName) {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrInvalid}
 	}
 
@@ -94,10 +105,11 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 	}
 
 	// Determine the operation type based on flags
+	// Note: os.O_RDONLY is 0, so we check for absence of write flags for read mode
 	writeMode := (flag&os.O_WRONLY) != 0 || (flag&os.O_RDWR) != 0
-	readMode := (flag&os.O_RDONLY) != 0 || (flag&os.O_RDWR) != 0
+	readMode := (flag & os.O_WRONLY) == 0 // Read is allowed if not write-only
 	rdwrMode := (flag & os.O_RDWR) != 0
-	
+
 	// Get director info and token generator
 	httpMethod := http.MethodGet
 	operation := config.TokenSharedRead
@@ -123,11 +135,10 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 		}
 	}
 
-	// Get token if required
-	var tokenContents string
+	// Test token generation if required (will return error if it fails)
 	if dirResp.XPelNsHdr.RequireToken || writeMode {
-		tokenContents, err = token.Get()
-		if err != nil || tokenContents == "" {
+		_, err = token.Get()
+		if err != nil {
 			return nil, &fs.PathError{Op: "open", Path: name, Err: errors.Wrap(err, "failed to get token")}
 		}
 	}
@@ -158,8 +169,8 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 						token.SetToken(option.Value().(string))
 					}
 				}
-				tokenContents, err = token.Get()
-				if err != nil || tokenContents == "" {
+				_, err = token.Get()
+				if err != nil {
 					return nil, &fs.PathError{Op: "open", Path: name, Err: errors.Wrap(err, "failed to get token")}
 				}
 			} else {
@@ -170,34 +181,38 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 		}
 	}
 
-	// Create transfer engine
-	te, err := NewTransferEngine(pfs.ctx)
-	if err != nil {
-		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
+	// Create transfer client from filesystem's engine
+	pfs.mu.Lock()
+	if pfs.transferEngine == nil {
+		var err error
+		pfs.transferEngine, err = NewTransferEngine(pfs.ctx)
+		if err != nil {
+			pfs.mu.Unlock()
+			return nil, &fs.PathError{Op: "open", Path: name, Err: err}
+		}
 	}
 
-	tc, err := te.NewClient(pfs.options...)
+	tc, err := pfs.transferEngine.NewClient(pfs.options...)
+	pfs.mu.Unlock()
 	if err != nil {
-		te.Shutdown()
 		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 	}
 
 	// Create and return a PelicanFile
 	pf := &PelicanFile{
-		ctx:             pfs.ctx,
-		name:            name,
-		pUrl:            pUrl,
-		fileInfo:        fileInfo,
-		options:         pfs.options,
-		position:        0,
-		transferEngine:  te,
-		transferClient:  tc,
-		dirResp:         dirResp,
-		token:           token,
-		tokenContents:   tokenContents,
-		readMode:        readMode,
-		writeMode:       writeMode,
-		rdwrMutex:       flag&os.O_RDWR != 0,
+		ctx:            pfs.ctx,
+		name:           name,
+		pUrl:           pUrl,
+		fileInfo:       fileInfo,
+		options:        pfs.options,
+		position:       0,
+		transferClient: tc,
+		dirResp:        dirResp,
+		token:          token,
+		readMode:       readMode,
+		writeMode:      writeMode,
+		rdwrMutex:      flag&os.O_RDWR != 0,
+		shouldShutdown: true,
 	}
 
 	return pf, nil
@@ -205,49 +220,44 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 
 // PelicanFile represents an open file in the Pelican federation.
 // It implements fs.File, io.ReaderAt, io.Seeker, io.Writer, and fs.ReadDirFile.
+//
+// Thread-safety: Most fields that can change during the file's lifetime are protected by mu.
+// The currentEndpoint field uses atomic operations for lock-free access during range reads.
+// Functions with "Locked" suffix must be called with mu held.
 type PelicanFile struct {
+	// Immutable fields (safe to access without lock after construction)
 	ctx             context.Context
 	name            string
 	pUrl            *pelican_url.PelicanURL
 	fileInfo        *FileInfo
 	options         []TransferOption
-	
-	// Transfer infrastructure
-	transferEngine *TransferEngine
-	transferClient *TransferClient
-	dirResp        server_structs.DirectorResponse
-	token          *tokenGenerator
-	tokenContents  string
-	currentEndpoint atomic.Int32  // Sticky endpoint index (atomic for lock-free access)
-	
-	// Position tracking
-	position       int64  // Current position in file
-	transferOffset int64  // Offset in the active transfer stream
-	
-	// Transfer state
-	transferStarted bool
-	transferJob     *TransferJob
-	readPipe        io.ReadCloser
-	writePipe       io.WriteCloser
-	transferErr     error
-	transferDone    chan struct{}
-	transferResults []TransferResults  // Results from transfer client shutdown
-	
-	// ReadDir state (for pagination)
-	dirEntries     []fs.DirEntry
-	dirEntriesRead int  // Number of entries already returned by ReadDir
-	
-	// Mode flags
-	readMode       bool
-	writeMode      bool
-	rdwrMutex      bool  // If true, forbid reads after writes and vice versa
-	hasRead        bool  // Track if any reads occurred
-	hasWritten     bool  // Track if any writes occurred
-	writePosition  int64 // Track write position for linear write enforcement
-	
-	closed bool
-	mu     sync.Mutex
-	rangeMu sync.Mutex  // Separate mutex for parallel range reads
+	transferClient  *TransferClient
+	dirResp         server_structs.DirectorResponse
+	token           *tokenGenerator // Token generator (thread-safe, ensures tokens don't expire)
+	currentEndpoint atomic.Int32    // Sticky endpoint index (atomic for lock-free access)
+	readMode        bool
+	writeMode       bool
+	rdwrMutex       bool // If true, forbid reads after writes and vice versa
+
+	// Mutable state - protected by mu
+	// Functions suffixed with "Locked" must be called with mu held
+	position        int64          // Current position in file
+	transferOffset  int64          // Offset in the active transfer stream
+	transferStarted bool           // Whether a transfer has been initiated
+	transferJob     *TransferJob   // Active transfer job
+	readPipe        io.ReadCloser  // Pipe for reading transfer data
+	writePipe       io.WriteCloser // Pipe for writing transfer data
+	transferErr     error          // Cached transfer error
+	transferDone    chan struct{}  // Signal channel for transfer completion
+	shouldShutdown  bool           // Indicates if transfer engine should be shutdown on Close
+	dirEntries      []fs.DirEntry  // Cached directory entries for ReadDir
+	dirEntriesRead  int            // Number of entries already returned by ReadDir
+	hasRead         bool           // Track if any reads occurred
+	hasWritten      bool           // Track if any writes occurred
+	writePosition   int64          // Track write position for linear write enforcement
+	closed          bool           // Whether the file has been closed
+
+	mu sync.Mutex // Protects all mutable state above
 }
 
 // Read reads up to len(p) bytes into p.
@@ -316,39 +326,45 @@ func (pf *PelicanFile) startTransferRead(p []byte) (int, error) {
 
 	// Read the first chunk
 	n, err := pf.readPipe.Read(p)
-	
+
 	// Check if pipe was closed - indicates transfer completion or error
 	if err == io.ErrClosedPipe || err == io.EOF {
 		// Shutdown client and get results
 		pf.mu.Lock()
 		results, shutdownErr := pf.transferClient.Shutdown()
-		pf.transferResults = results
+		pf.shouldShutdown = false
 		pf.mu.Unlock()
-		
+
 		if shutdownErr != nil {
 			return n, shutdownErr
 		}
-		
-		// Check for transfer errors
+
+		// Check for transfer errors, filtering by job UUID
+		jobUUID := pf.transferJob.uuid
 		for _, result := range results {
+			if result.JobId != jobUUID {
+				continue
+			}
 			if result.Error != nil {
 				return n, result.Error
 			}
 		}
 	}
-	
+
 	pf.position += int64(n)
 	pf.transferOffset += int64(n)
 	return n, err
 }
 
-// rangeRead performs a partial read using HTTP range requests and updates position
+// rangeRead performs a partial read using HTTP range requests and updates position.
+// Invoked by `Read`, which needs to be serialized to keep the offset correct.
 func (pf *PelicanFile) rangeRead(p []byte, offset int64) (int, error) {
 	if pf.fileInfo != nil && offset >= pf.fileInfo.Size {
 		return 0, io.EOF
 	}
 
 	n, err := pf.doRangeRead(p, offset)
+
 	if err != nil {
 		return n, err
 	}
@@ -357,12 +373,11 @@ func (pf *PelicanFile) rangeRead(p []byte, offset int64) (int, error) {
 	return n, nil
 }
 
-// doRangeRead performs the actual HTTP range request without updating position
-// This doesn't hold the main mutex, allowing parallel range reads
+// doRangeRead performs the actual HTTP range request without updating position.
+// This function can be called without holding pf.mu since it only accesses:
+// - Immutable fields (pUrl, fileInfo, dirResp, token, ctx)
+// - currentEndpoint via atomic operations
 func (pf *PelicanFile) doRangeRead(p []byte, offset int64) (int, error) {
-	pf.rangeMu.Lock()
-	defer pf.rangeMu.Unlock()
-
 	// Calculate the range to read
 	length := int64(len(p))
 	if pf.fileInfo != nil && offset+length > pf.fileInfo.Size {
@@ -377,13 +392,23 @@ func (pf *PelicanFile) doRangeRead(p []byte, offset int64) (int, error) {
 
 	// Get current endpoint atomically
 	currentIdx := int(pf.currentEndpoint.Load())
-	
+
 	// Reorder to try current endpoint first
 	tryOrder := make([]*url.URL, len(endpoints))
 	copy(tryOrder, endpoints)
 	if currentIdx > 0 && currentIdx < len(tryOrder) {
 		// Move current endpoint to front
 		tryOrder[0], tryOrder[currentIdx] = tryOrder[currentIdx], tryOrder[0]
+	}
+
+	// Get token if needed (token generator is thread-safe)
+	var tokenContents string
+	if pf.dirResp.XPelNsHdr.RequireToken {
+		var err error
+		tokenContents, err = pf.token.Get()
+		if err != nil {
+			return 0, errors.Wrap(err, "failed to get auth token")
+		}
 	}
 
 	var lastErr error
@@ -402,8 +427,8 @@ func (pf *PelicanFile) doRangeRead(p []byte, offset int64) (int, error) {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, offset+length-1))
 
 		// Set authorization if needed
-		if pf.tokenContents != "" {
-			req.Header.Set("Authorization", "Bearer "+pf.tokenContents)
+		if tokenContents != "" {
+			req.Header.Set("Authorization", "Bearer "+tokenContents)
 		}
 
 		// Set user agent
@@ -599,8 +624,9 @@ func (pf *PelicanFile) ReadDir(n int) ([]fs.DirEntry, error) {
 
 	// Fetch entries on first call
 	if pf.dirEntries == nil {
-		// Use listHttp directly instead of DoList to reuse cached dirResp and token
+		// Mutex is kept held during listHttp to prevent multiple concurrent fetches
 		fileInfos, err := listHttp(pf.pUrl, pf.dirResp, pf.token, false, 0)
+
 		if err != nil {
 			return nil, &fs.PathError{Op: "readdir", Path: pf.name, Err: err}
 		}
@@ -637,10 +663,10 @@ func (pf *PelicanFile) ReadDir(n int) ([]fs.DirEntry, error) {
 	if end > len(pf.dirEntries) {
 		end = len(pf.dirEntries)
 	}
-	
+
 	entries := pf.dirEntries[pf.dirEntriesRead:end]
 	pf.dirEntriesRead = end
-	
+
 	return entries, nil
 }
 
@@ -690,45 +716,47 @@ func (pf *PelicanFile) Close() error {
 		pf.writePipe = nil
 	}
 
-	// Close the read pipe if it's open
-	if pf.readPipe != nil {
-		pf.readPipe.Close()
-		pf.readPipe = nil
-	}
-
-	// Shutdown the transfer client and engine, get results with mutex held
+	// Only shutdown and wait for results if this is a write operation.
+	// For reads, just close the client without waiting to avoid blocking
+	// on large file downloads that may have been interrupted.
 	var err error
-	if pf.transferClient != nil && pf.transferStarted {
-		// Check if we already have results (from earlier shutdown)
-		if pf.transferResults == nil {
-			results, shutdownErr := pf.transferClient.Shutdown()
-			pf.transferResults = results
-			if shutdownErr != nil {
-				err = shutdownErr
-			}
-			
-			// Check for transfer errors in results
-			if err == nil {
-				for _, result := range results {
-					if result.Error != nil {
-						err = result.Error
-						break
-					}
+	if pf.shouldShutdown && pf.transferClient != nil && pf.transferStarted && pf.writeMode {
+		// Get our transfer job's UUID for filtering results
+		var jobUUID uuid.UUID
+		if pf.transferJob != nil {
+			jobUUID = pf.transferJob.uuid
+		}
+
+		// Shutdown and process results locally
+		results, shutdownErr := pf.transferClient.Shutdown()
+		if shutdownErr != nil {
+			err = shutdownErr
+		}
+		pf.shouldShutdown = false
+
+		// Check for transfer errors in results, but only for our job's UUID
+		if err == nil {
+			for _, result := range results {
+				// Skip results from different transfer jobs
+				if result.JobId != jobUUID {
+					continue
 				}
-			}
-		} else {
-			// Use cached results
-			for _, result := range pf.transferResults {
 				if result.Error != nil {
 					err = result.Error
 					break
 				}
 			}
 		}
+	} else if pf.transferClient != nil && pf.transferStarted && !pf.writeMode {
+		// For read mode, just close the client without waiting for shutdown
+		pf.transferClient.Close()
+		pf.shouldShutdown = false
 	}
-	
-	if pf.transferEngine != nil {
-		pf.transferEngine.Shutdown()
+
+	// Now that the transfer has drained (or client is closed), it is safe to close the read-side of the pipe.
+	if pf.readPipe != nil {
+		pf.readPipe.Close()
+		pf.readPipe = nil
 	}
 
 	// Return any transfer error or cached error
@@ -746,9 +774,9 @@ type pelicanFileInfo struct {
 	isDir   bool
 }
 
-func (pfi *pelicanFileInfo) Name() string       { return pfi.name }
-func (pfi *pelicanFileInfo) Size() int64        { return pfi.size }
-func (pfi *pelicanFileInfo) Mode() fs.FileMode  { 
+func (pfi *pelicanFileInfo) Name() string { return pfi.name }
+func (pfi *pelicanFileInfo) Size() int64  { return pfi.size }
+func (pfi *pelicanFileInfo) Mode() fs.FileMode {
 	if pfi.isDir {
 		return fs.ModeDir | 0755
 	}
