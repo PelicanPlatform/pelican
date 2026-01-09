@@ -35,7 +35,7 @@ function AutocompleteField<T extends string>({
         getOptionLabel={(option) => option}
         renderValue={(tagValue, getValueProps) =>
           tagValue.map((option, index) => {
-            const {key, ...tagProps} = getValueProps({ index });
+            const { key, ...tagProps } = getValueProps({ index });
             return <Chip key={key} label={option} {...tagProps} />;
           })
         }
@@ -44,8 +44,8 @@ function AutocompleteField<T extends string>({
             {...params}
             id={id}
             label={name}
-            variant="outlined"
-            size="small"
+            variant='outlined'
+            size='small'
             autoFocus={!!focused}
           />
         )}
