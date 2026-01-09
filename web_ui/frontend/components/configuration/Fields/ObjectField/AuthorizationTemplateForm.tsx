@@ -9,6 +9,8 @@ import {
   StringField,
   StringSliceField,
 } from '@/components/configuration';
+import useApiSWR from "@/hooks/useApiSWR";
+import { User, Group } from '@/types';
 
 const verifyForm = (x: AuthorizationTemplate) => {
   return x.prefix != '' && x.actions.length > 0;
@@ -28,6 +30,19 @@ const AuthorizationTemplateForm = ({
   onSubmit,
   value,
 }: FormProps<AuthorizationTemplate>) => {
+
+  const {data: users} = useApiSWR<User[]>(
+    "Could not fetch users",
+    "getUsers",
+    async () => fetch('/api/v1.0/users')
+  )
+
+  const {data: groups} = useApiSWR<Group[]>(
+    "Could not fetch groups",
+    "getGroups",
+    async () => fetch('/api/v1.0/groups')
+  )
+
   const [authorizationTemplate, setAuthorizationTemplate] =
     React.useState<AuthorizationTemplate>(
       value || createDefaultAuthorizationTemplate()
@@ -62,21 +77,23 @@ const AuthorizationTemplateForm = ({
         />
       </Box>
       <Box mb={2}>
-        <StringSliceField
+        <MultiSelectField<string>
           name={'Users (Optional)'}
-          value={authorizationTemplate.users || []}
           onChange={(e) =>
-              setAuthorizationTemplate({ ...authorizationTemplate, users: e })
+            setAuthorizationTemplate({ ...authorizationTemplate, users: e })
           }
+          value={authorizationTemplate.users || []}
+          possibleValues={users ? users.map((u) => u.username) : []}
         />
       </Box>
       <Box mb={2}>
-        <StringSliceField
+        <MultiSelectField<string>
           name={'Groups (Optional)'}
-          value={authorizationTemplate.groups || []}
           onChange={(e) =>
             setAuthorizationTemplate({ ...authorizationTemplate, groups: e })
           }
+          value={authorizationTemplate.groups || []}
+          possibleValues={groups ? groups.map((g) => g.name) : []}
         />
       </Box>
       <Box mb={2}>
