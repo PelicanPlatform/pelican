@@ -92,10 +92,9 @@ func configShoveler(c *shoveler.Config) error {
 
 		passwordLocation := param.Shoveler_PasswordLocation.GetString()
 		if passwordLocation != "" {
-			log.Debugln("STOMP Password location:", passwordLocation)
 			passwordContents, err := os.ReadFile(passwordLocation)
 			if err != nil {
-				return fmt.Errorf("Unable to read password file at %s: %s", passwordLocation, err.Error())
+				return fmt.Errorf("Unable to read password file for Shoveler: %s", err.Error())
 			}
 			c.StompPassword = strings.TrimSpace(string(passwordContents))
 		} else {
