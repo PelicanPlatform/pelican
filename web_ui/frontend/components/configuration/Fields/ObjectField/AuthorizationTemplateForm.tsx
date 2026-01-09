@@ -7,6 +7,7 @@ import {
   FormProps,
   MultiSelectField,
   StringField,
+  StringSliceField,
 } from '@/components/configuration';
 
 const verifyForm = (x: AuthorizationTemplate) => {
@@ -17,6 +18,9 @@ const createDefaultAuthorizationTemplate = (): AuthorizationTemplate => {
   return {
     prefix: '',
     actions: [],
+    users: [],
+    groups: [],
+    'group_regexes': [],
   };
 };
 
@@ -54,6 +58,33 @@ const AuthorizationTemplateForm = ({
           value={authorizationTemplate.prefix}
           onChange={(e) =>
             setAuthorizationTemplate({ ...authorizationTemplate, prefix: e })
+          }
+        />
+      </Box>
+      <Box mb={2}>
+        <StringSliceField
+          name={'Users (Optional)'}
+          value={authorizationTemplate.users || []}
+          onChange={(e) =>
+              setAuthorizationTemplate({ ...authorizationTemplate, users: e })
+          }
+        />
+      </Box>
+      <Box mb={2}>
+        <StringSliceField
+          name={'Groups (Optional)'}
+          value={authorizationTemplate.groups || []}
+          onChange={(e) =>
+            setAuthorizationTemplate({ ...authorizationTemplate, groups: e })
+          }
+        />
+      </Box>
+      <Box mb={2}>
+        <StringSliceField
+          name={'Group Regexes (Optional)'}
+          value={authorizationTemplate['group_regexes'] || []}
+          onChange={(e) =>
+            setAuthorizationTemplate({ ...authorizationTemplate, group_regexes: e })
           }
         />
       </Box>
