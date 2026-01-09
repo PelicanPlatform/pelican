@@ -178,12 +178,21 @@ func GetOIDCAuthorizationEndpoint() (result string, err error) {
 
 func GetOIDCSupportedScopes() (results []string, err error) {
 	onceMetadata.Do(getMetadata)
-	err = metadataError
-	if err != nil {
+	// First check if we have scopes from OIDC discovery metadata
+	if metadataError == nil && len(oidcMetadata.ScopesSupported) > 0 {
+		results = make([]string, len(oidcMetadata.ScopesSupported))
+		copy(results, oidcMetadata.ScopesSupported)
 		return
 	}
-	results = make([]string, len(oidcMetadata.ScopesSupported))
-	copy(results, oidcMetadata.ScopesSupported)
+	// Fall back to explicitly configured OIDC.Scopes (e.g., for OAuth2-only providers like GitHub)
+	configuredScopes := param.OIDC_Scopes.GetStringSlice()
+	if len(configuredScopes) > 0 {
+		results = make([]string, len(configuredScopes))
+		copy(results, configuredScopes)
+		return
+	}
+	// If neither metadata nor explicit config, return the metadata error
+	err = metadataError
 	return
 }
 
