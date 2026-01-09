@@ -254,7 +254,20 @@ func putMain(cmd *cobra.Command, args []string) {
 
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		transferResults, err := client.DoPut(ctx, src, dest, isRecursive, options...)
+
+		// For non-recursive single file uploads, check if destination is a directory
+		// and infer the filename if needed
+		actualDest := dest
+		if !isRecursive {
+			var err error
+			actualDest, err = inferDestinationPath(ctx, src, dest, options...)
+			if err != nil {
+				log.Warningln("Failed to infer destination path:", err)
+				actualDest = dest
+			}
+		}
+
+		transferResults, err := client.DoPut(ctx, src, actualDest, isRecursive, options...)
 		result = err
 		if result != nil {
 			lastSrc = src
