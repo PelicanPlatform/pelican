@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -635,7 +636,7 @@ func (pf *PelicanFile) ReadDir(n int) ([]fs.DirEntry, error) {
 		pf.dirEntries = make([]fs.DirEntry, 0, len(fileInfos))
 		for _, fi := range fileInfos {
 			pf.dirEntries = append(pf.dirEntries, &pelicanDirEntry{
-				name:  fi.Name,
+				name:  path.Base(fi.Name),
 				isDir: fi.IsCollection,
 				size:  fi.Size,
 				mtime: fi.ModTime,

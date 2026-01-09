@@ -176,6 +176,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 
 	// Launch origin file test maintenance (not XRootD specific)
 	origin.LaunchOriginFileTestMaintenance(ctx)
+	origin.LaunchDiskUsageCalculator(ctx, egrp)
 
 	return originServer, nil
 }

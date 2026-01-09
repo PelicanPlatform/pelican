@@ -172,7 +172,7 @@ npm run format:fix    # Fix formatting
 
 1. **Error Handling**: Always check and handle errors appropriately
 
-1. **Testing**: Place test files alongside source files with `_test.go` suffix. Tests should be isolated (use temp directories and config reset functions) and not depend on state from other tests.
+1. **Testing**: Place test files alongside source files with `_test.go` suffix. Tests should be isolated (use temp directories and config reset functions) and not depend on state from other tests. Tests should *avoid* arbitrary sleeps (`time.Sleep` calls will be rejected) for a condition to occur as they lead to unreliable tests Instead, use `require.Eventually` or similar to wait for a specific condition to become true.
 
 1. **Imports**: Organize imports in three groups separated by blank lines:
 
@@ -192,6 +192,8 @@ npm run format:fix    # Fix formatting
        "github.com/pelicanplatform/pelican/utils"
    )
    ```
+
+1. **Configuration**: Where possible, configuration should be set using the `param` package which is a wrapper around the commonly-used `viper` with project-specific conventions. Do not use `viper` directly unless making edits to `param` or `config` modules; instead, use `param`.
 
 ### TypeScript/React Code
 
