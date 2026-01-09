@@ -1,4 +1,4 @@
-# Example configuration for using GitHub OAuth2 with Pelican
+# Example configuration addition for using GitHub OAuth2 with Pelican
 #
 # GitHub uses OAuth2 (not OIDC), so you need to explicitly configure
 # the endpoints and claim names. This example shows how to set up
@@ -17,8 +17,7 @@ OIDC:
   AuthorizationEndpoint: https://github.com/login/oauth/authorize
   TokenEndpoint: https://github.com/login/oauth/access_token
   UserInfoEndpoint: https://api.github.com/user
-  # GitHub supports device auth at this endpoint; the registry requires it for login
-  # If you're not running a registry (or otherwise don't need device flow), you can omit this
+  # GitHub supports device auth; this endpoint is required for `Origin.EnableIssuer: true`
   DeviceAuthEndpoint: https://github.com/login/device/code
 
   # Your GitHub OAuth App credentials
@@ -58,21 +57,17 @@ Issuer:
   # Define authorization based on GitHub organization membership
   # This example grants read access to members of specific organizations
   AuthorizationTemplates:
-    - actions: ["read"]
-      prefix: /public
-      # All authenticated users can read /public (no group requirement)
-
     - actions: ["read", "create", "modify"]
       prefix: /projects/foo
       groups: ["my-github-org"]
       # Members of "my-github-org" can read/create/modify objects in /projects/foo
 
-    - actions: ["read"]
-      prefix: /data
-      groups: ["my-github-org", "another-allowed-org"]
-      # Members of these orgs can read /data
 
 Server:
   ExternalWebUrl: https://your-server.example.com
   # If you want to have the admin access to web UI after logging in via GitHub, set:
   UIAdminUsers: ["<YOUR-GITHUB-USERNAME>"]
+
+Origin:
+  EnableIssuer: true
+  EnableOIDC: true
