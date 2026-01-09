@@ -90,9 +90,16 @@ func configShoveler(c *shoveler.Config) error {
 	} else { // Stomp
 		viper.SetDefault("Shoveler.Topic", "xrootd.shoveler")
 
-		c.StompUser = param.Shoveler_StompUsername.GetString()
-		log.Debugln("STOMP User:", c.StompUser)
-		c.StompPassword = param.Shoveler_StompPassword.GetString()
+		passwordLocation := param.Shoveler_PasswordLocation.GetString()
+		if passwordLocation != "" {
+			passwordContents, err := os.ReadFile(passwordLocation)
+			if err != nil {
+				return fmt.Errorf("Unable to read password file for Shoveler: %s", err.Error())
+			}
+			c.StompPassword = strings.TrimSpace(string(passwordContents))
+		} else {
+			c.StompPassword = ""
+		}
 
 		// Get the STOMP URL
 		c.StompURL, err = url.Parse(param.Shoveler_URL.GetString())

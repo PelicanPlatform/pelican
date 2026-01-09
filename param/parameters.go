@@ -358,12 +358,12 @@ var runtimeConfigurableMap = map[string]bool{
 	"Shoveler.IPMapping": false,
 	"Shoveler.MessageQueueProtocol": false,
 	"Shoveler.OutputDestinations": false,
+	"Shoveler.PasswordLocation": false,
 	"Shoveler.PortHigher": false,
 	"Shoveler.PortLower": false,
 	"Shoveler.QueueDirectory": false,
 	"Shoveler.StompCert": false,
 	"Shoveler.StompCertKey": false,
-	"Shoveler.StompPassword": false,
 	"Shoveler.StompUsername": false,
 	"Shoveler.Topic": false,
 	"Shoveler.URL": false,
@@ -692,14 +692,14 @@ func (sP StringParam) GetString() string {
 			return config.Shoveler.AMQPTokenLocation
 		case "Shoveler.MessageQueueProtocol":
 			return config.Shoveler.MessageQueueProtocol
+		case "Shoveler.PasswordLocation":
+			return config.Shoveler.PasswordLocation
 		case "Shoveler.QueueDirectory":
 			return config.Shoveler.QueueDirectory
 		case "Shoveler.StompCert":
 			return config.Shoveler.StompCert
 		case "Shoveler.StompCertKey":
 			return config.Shoveler.StompCertKey
-		case "Shoveler.StompPassword":
-			return config.Shoveler.StompPassword
 		case "Shoveler.StompUsername":
 			return config.Shoveler.StompUsername
 		case "Shoveler.Topic":
@@ -1461,12 +1461,12 @@ var allParameterNames = []string{
 	"Shoveler.IPMapping",
 	"Shoveler.MessageQueueProtocol",
 	"Shoveler.OutputDestinations",
+	"Shoveler.PasswordLocation",
 	"Shoveler.PortHigher",
 	"Shoveler.PortLower",
 	"Shoveler.QueueDirectory",
 	"Shoveler.StompCert",
 	"Shoveler.StompCertKey",
-	"Shoveler.StompPassword",
 	"Shoveler.StompUsername",
 	"Shoveler.Topic",
 	"Shoveler.URL",
@@ -1649,10 +1649,10 @@ var (
 	Shoveler_AMQPExchange = StringParam{"Shoveler.AMQPExchange"}
 	Shoveler_AMQPTokenLocation = StringParam{"Shoveler.AMQPTokenLocation"}
 	Shoveler_MessageQueueProtocol = StringParam{"Shoveler.MessageQueueProtocol"}
+	Shoveler_PasswordLocation = StringParam{"Shoveler.PasswordLocation"}
 	Shoveler_QueueDirectory = StringParam{"Shoveler.QueueDirectory"}
 	Shoveler_StompCert = StringParam{"Shoveler.StompCert"}
 	Shoveler_StompCertKey = StringParam{"Shoveler.StompCertKey"}
-	Shoveler_StompPassword = StringParam{"Shoveler.StompPassword"}
 	Shoveler_StompUsername = StringParam{"Shoveler.StompUsername"}
 	Shoveler_Topic = StringParam{"Shoveler.Topic"}
 	Shoveler_URL = StringParam{"Shoveler.URL"}
