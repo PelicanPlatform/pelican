@@ -112,11 +112,11 @@ func authMiddleware() gin.HandlerFunc {
 			for _, export := range *exports {
 				if export.Capabilities.PublicReads && strings.HasPrefix(resource, export.FederationPrefix) {
 					// Allow public reads without token
-					userInfo := &UserInfo{
+					ui := &userInfo{
 						User:   "nobody",
 						Groups: []string{},
 					}
-					ctx := SetUserInfo(c.Request.Context(), userInfo)
+					ctx := setUserInfo(c.Request.Context(), ui)
 					c.Request = c.Request.WithContext(ctx)
 					c.Next()
 					return
@@ -154,17 +154,21 @@ func InitializeHandlers(exports []server_utils.OriginExport) error {
 	for _, export := range exports {
 		// Create a filesystem for this export
 		fs := afero.NewBasePathFs(afero.NewOsFs(), export.StoragePrefix)
-		afs := newAferoFileSystem(fs, "")
+		
+		// Create logger function
+		logger := func(r *http.Request, err error) {
+			if err != nil {
+				log.Debugf("WebDAV error for %s %s: %v", r.Method, r.URL.Path, err)
+			}
+		}
+		
+		afs := newAferoFileSystem(fs, "", logger)
 		
 		// Create a WebDAV handler
 		handler := &webdav.Handler{
 			FileSystem: afs,
 			LockSystem: webdav.NewMemLS(),
-			Logger: func(r *http.Request, err error) {
-				if err != nil {
-					log.Debugf("WebDAV error for %s %s: %v", r.Method, r.URL.Path, err)
-				}
-			},
+			Logger:     logger,
 		}
 		
 		webdavHandlers[export.FederationPrefix] = handler

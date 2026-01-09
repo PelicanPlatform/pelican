@@ -108,6 +108,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		server_utils.RegisterOIDCAPI(engine.Group("/", web_ui.ServerHeaderMiddleware), false)
 	}
 
+	// OA4MP is not XRootD specific - configure if enabled
 	if param.Origin_EnableIssuer.GetBool() {
 		if err = oa4mp.ConfigureOA4MPProxy(engine); err != nil {
 			return nil, err
@@ -170,7 +171,6 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		// LaunchOriginDaemons may edit the viper config; these launched goroutines are purposely
 		// delayed until after the viper config is done.
 		xrootd.LaunchXrootdMaintenance(ctx, originServer, 2*time.Minute)
-		origin.LaunchOriginFileTestMaintenance(ctx)
 	} else {
 		// Handle POSIXv2-specific initialization
 		if err := origin_serve.InitAuthConfig(ctx, egrp, originExports); err != nil {
@@ -187,6 +187,9 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 
 		log.Info("POSIXv2 origin backend initialized successfully")
 	}
+	
+	// Launch origin file test maintenance (not XRootD specific)
+	origin.LaunchOriginFileTestMaintenance(ctx)
 
 	return originServer, nil
 }

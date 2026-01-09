@@ -276,15 +276,15 @@ func (ac *authConfig) authorizeWithContext(ctx context.Context, action token_sco
 	}
 	
 	// Extract user and group information from the token
-	userInfo := extractUserInfoFromToken(token)
-	ctx = SetUserInfo(ctx, userInfo)
+	ui := extractUserInfoFromToken(token)
+	ctx = setUserInfo(ctx, ui)
 	
 	return ctx, true
 }
 
 // extractUserInfoFromToken extracts user and group information from a JWT token
-func extractUserInfoFromToken(tokenStr string) *UserInfo {
-	userInfo := &UserInfo{
+func extractUserInfoFromToken(tokenStr string) *userInfo {
+	ui := &userInfo{
 		User:   "nobody",
 		Groups: []string{},
 	}
@@ -297,7 +297,7 @@ func extractUserInfoFromToken(tokenStr string) *UserInfo {
 	
 	// Extract subject (user)
 	if sub := tok.Subject(); sub != "" {
-		userInfo.User = sub
+		ui.User = sub
 	}
 	
 	// Extract groups from various possible claim names
@@ -306,26 +306,26 @@ func extractUserInfoFromToken(tokenStr string) *UserInfo {
 		if groupList, ok := groups.([]interface{}); ok {
 			for _, g := range groupList {
 				if groupStr, ok := g.(string); ok {
-					userInfo.Groups = append(userInfo.Groups, groupStr)
+					ui.Groups = append(ui.Groups, groupStr)
 				}
 			}
 		}
 	}
 	
 	// Try "groups" (generic claim)
-	if len(userInfo.Groups) == 0 {
+	if len(ui.Groups) == 0 {
 		if groups, ok := tok.Get("groups"); ok {
 			if groupList, ok := groups.([]interface{}); ok {
 				for _, g := range groupList {
 					if groupStr, ok := g.(string); ok {
-						userInfo.Groups = append(userInfo.Groups, groupStr)
+						ui.Groups = append(ui.Groups, groupStr)
 					}
 				}
 			}
 		}
 	}
 	
-	return userInfo
+	return ui
 }
 
 // InitAuthConfig initializes the global auth config
