@@ -114,6 +114,9 @@ export type Action = 'read' | 'modify' | 'create';
 export interface AuthorizationTemplate {
   actions: Action[];
   prefix: string;
+  users?: string[];
+  groups?: string[];
+  group_regexes?: string[];
 }
 
 export interface IPMappingAll {
