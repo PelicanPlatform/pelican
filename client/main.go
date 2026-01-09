@@ -583,6 +583,7 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 		}
 
 		// Create a temporary transfer job just to get director info
+		// Parameters: upload=true, recursive=false
 		tempTj, err := tc.NewTransferJob(ctx, pUrl.GetRawUrl(), localObject, true, false, options...)
 		if err != nil {
 			// If we can't create the transfer job, we'll proceed anyway - the actual upload will fail with a better error
