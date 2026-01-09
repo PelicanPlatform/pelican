@@ -24,6 +24,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -40,17 +41,14 @@ const (
 	firstCheckDelay = 5 * time.Second
 )
 
-type storageUsageOverrideKey struct{}
+type filesystemUsageFuncKey struct{}
 
-// storageUsageOverride is an internal testing override for getFilesystemUsage.
-// It allows tests to fake the usage percentage while keeping real total bytes.
-type storageUsageOverride struct {
-	usagePercent float64
-}
+// filesystemUsageFunc is a function that returns filesystem usage for a given path.
+// This allows tests to inject custom implementations.
+type filesystemUsageFunc func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error)
 
-// getFilesystemUsage returns the percentage of storage used for a given path.
-// Returns usage percentage (0-100), total bytes, used bytes, and any error.
-func getFilesystemUsage(ctx context.Context, path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
+// defaultFilesystemUsage is the default implementation that uses syscall.Statfs.
+func defaultFilesystemUsage(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
 	var stat syscall.Statfs_t
 	if err = syscall.Statfs(path, &stat); err != nil {
 		err = errors.Wrapf(err, "unable to determine filesystem usage for path %s", path)
@@ -66,14 +64,17 @@ func getFilesystemUsage(ctx context.Context, path string) (usagePercent float64,
 		usagePercent = float64(usedBytes) / float64(totalBytes) * 100.0
 	}
 
-	// Check for test override
-	if override, ok := ctx.Value(storageUsageOverrideKey{}).(storageUsageOverride); ok {
-		// Keep totalBytes from statfs but fake the usedBytes based on override percentage
-		usagePercent = override.usagePercent
-		usedBytes = uint64(float64(totalBytes) * override.usagePercent / 100.0)
-	}
-
 	return
+}
+
+// getFilesystemUsage returns the percentage of storage used for a given path.
+// Returns usage percentage (0-100), total bytes, used bytes, and any error.
+func getFilesystemUsage(ctx context.Context, path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
+	// Check if a custom function is provided in context (for testing)
+	if fn, ok := ctx.Value(filesystemUsageFuncKey{}).(filesystemUsageFunc); ok && fn != nil {
+		return fn(path)
+	}
+	return defaultFilesystemUsage(path)
 }
 
 // getPathsToCheck returns a deduplicated list of filesystem paths that should be checked
@@ -151,6 +152,21 @@ func checkStorageHealth(ctx context.Context, modules server_structs.ServerType) 
 	warningThreshold := param.Monitoring_StorageWarningThreshold.GetInt()
 	criticalThreshold := param.Monitoring_StorageCriticalThreshold.GetInt()
 
+	// Validate thresholds
+	if warningThreshold < 0 || warningThreshold > 100 {
+		log.Warningf("Invalid warning threshold %d%%, using default 80%%", warningThreshold)
+		warningThreshold = 80
+	}
+	if criticalThreshold < 0 || criticalThreshold > 100 {
+		log.Warningf("Invalid critical threshold %d%%, using default 90%%", criticalThreshold)
+		criticalThreshold = 90
+	}
+	if warningThreshold >= criticalThreshold {
+		log.Warningf("Warning threshold (%d%%) must be less than critical threshold (%d%%), using defaults", warningThreshold, criticalThreshold)
+		warningThreshold = 80
+		criticalThreshold = 90
+	}
+
 	// Track the worst status found
 	worstStatus := StatusOK
 	var statusMessages []string
@@ -168,14 +184,10 @@ func checkStorageHealth(ctx context.Context, modules server_structs.ServerType) 
 
 		// Determine status for this path
 		if usage >= float64(criticalThreshold) {
-			if worstStatus < StatusCritical || worstStatus == StatusOK {
-				worstStatus = StatusCritical
-			}
+			worstStatus = StatusCritical
 			statusMessages = append(statusMessages, fmt.Sprintf("%s: %.1f%% used (critical threshold: %d%%)", path, usage, criticalThreshold))
-		} else if usage >= float64(warningThreshold) {
-			if worstStatus < StatusWarning || worstStatus == StatusOK {
-				worstStatus = StatusWarning
-			}
+		} else if usage >= float64(warningThreshold) && worstStatus > StatusWarning {
+			worstStatus = StatusWarning
 			statusMessages = append(statusMessages, fmt.Sprintf("%s: %.1f%% used (warning threshold: %d%%)", path, usage, warningThreshold))
 		}
 	}
@@ -185,22 +197,10 @@ func checkStorageHealth(ctx context.Context, modules server_structs.ServerType) 
 	case StatusOK:
 		SetComponentHealthStatus(Server_StorageHealth, StatusOK, "All monitored filesystems have adequate storage")
 	case StatusWarning:
-		msg := "Storage usage is elevated: "
-		for i, m := range statusMessages {
-			if i > 0 {
-				msg += "; "
-			}
-			msg += m
-		}
+		msg := "Storage usage is elevated: " + strings.Join(statusMessages, "; ")
 		SetComponentHealthStatus(Server_StorageHealth, StatusWarning, msg)
 	case StatusCritical:
-		msg := "Storage usage is critical: "
-		for i, m := range statusMessages {
-			if i > 0 {
-				msg += "; "
-			}
-			msg += m
-		}
+		msg := "Storage usage is critical: " + strings.Join(statusMessages, "; ")
 		SetComponentHealthStatus(Server_StorageHealth, StatusCritical, msg)
 	}
 }

@@ -55,26 +55,20 @@ func TestGetFilesystemUsageInvalidPath(t *testing.T) {
 	assert.Error(t, err, "Should return error for non-existent path")
 }
 
-func TestGetFilesystemUsageWithOverride(t *testing.T) {
-	ctx := context.Background()
+func TestGetFilesystemUsageWithCustomFunction(t *testing.T) {
+	// Create a custom function that returns fixed values
+	customFunc := func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
+		return 75.0, 1000000, 750000, nil
+	}
 
-	// Create a temporary directory to test
-	tempDir := t.TempDir()
+	// Create context with custom function
+	ctx := context.WithValue(context.Background(), filesystemUsageFuncKey{}, filesystemUsageFunc(customFunc))
 
-	// Test without override
-	usage, totalBytes, _, err := getFilesystemUsage(ctx, tempDir)
+	usage, totalBytes, usedBytes, err := getFilesystemUsage(ctx, "/any/path")
 	require.NoError(t, err)
-	assert.Greater(t, totalBytes, uint64(0))
-	assert.GreaterOrEqual(t, usage, 0.0)
-	assert.LessOrEqual(t, usage, 100.0)
-
-	// Test with override
-	overrideCtx := context.WithValue(ctx, storageUsageOverrideKey{}, storageUsageOverride{usagePercent: 75.0})
-	usageOverride, totalBytesOverride, usedBytesOverride, err := getFilesystemUsage(overrideCtx, tempDir)
-	require.NoError(t, err)
-	assert.Equal(t, 75.0, usageOverride)
-	assert.Equal(t, totalBytes, totalBytesOverride) // Total bytes should remain the same
-	assert.Equal(t, uint64(float64(totalBytes)*0.75), usedBytesOverride)
+	assert.Equal(t, 75.0, usage)
+	assert.Equal(t, uint64(1000000), totalBytes)
+	assert.Equal(t, uint64(750000), usedBytes)
 }
 
 func TestCheckStorageHealthOK(t *testing.T) {
@@ -94,8 +88,11 @@ func TestCheckStorageHealthOK(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Create context with override to simulate 50% usage (OK status)
-	ctx := context.WithValue(context.Background(), storageUsageOverrideKey{}, storageUsageOverride{usagePercent: 50.0})
+	// Create context with custom function to simulate 50% usage (OK status)
+	customFunc := func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
+		return 50.0, 1000000, 500000, nil
+	}
+	ctx := context.WithValue(context.Background(), filesystemUsageFuncKey{}, filesystemUsageFunc(customFunc))
 
 	modules := server_structs.ServerType(0)
 	checkStorageHealth(ctx, modules)
@@ -122,8 +119,11 @@ func TestCheckStorageHealthWarning(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Create context with override to simulate 85% usage (Warning status)
-	ctx := context.WithValue(context.Background(), storageUsageOverrideKey{}, storageUsageOverride{usagePercent: 85.0})
+	// Create context with custom function to simulate 85% usage (Warning status)
+	customFunc := func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
+		return 85.0, 1000000, 850000, nil
+	}
+	ctx := context.WithValue(context.Background(), filesystemUsageFuncKey{}, filesystemUsageFunc(customFunc))
 
 	modules := server_structs.ServerType(0)
 	checkStorageHealth(ctx, modules)
@@ -150,8 +150,11 @@ func TestCheckStorageHealthCritical(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Create context with override to simulate 95% usage (Critical status)
-	ctx := context.WithValue(context.Background(), storageUsageOverrideKey{}, storageUsageOverride{usagePercent: 95.0})
+	// Create context with custom function to simulate 95% usage (Critical status)
+	customFunc := func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
+		return 95.0, 1000000, 950000, nil
+	}
+	ctx := context.WithValue(context.Background(), filesystemUsageFuncKey{}, filesystemUsageFunc(customFunc))
 
 	modules := server_structs.ServerType(0)
 	checkStorageHealth(ctx, modules)
@@ -354,8 +357,11 @@ func TestCheckStorageHealthMultiplePaths(t *testing.T) {
 	modules.Set(server_structs.OriginType)
 	modules.Set(server_structs.RegistryType)
 
-	// Create context with override
-	ctx := context.WithValue(context.Background(), storageUsageOverrideKey{}, storageUsageOverride{usagePercent: 60.0})
+	// Create context with custom function
+	customFunc := func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
+		return 60.0, 1000000, 600000, nil
+	}
+	ctx := context.WithValue(context.Background(), filesystemUsageFuncKey{}, filesystemUsageFunc(customFunc))
 
 	checkStorageHealth(ctx, modules)
 
@@ -363,3 +369,112 @@ func TestCheckStorageHealthMultiplePaths(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, StatusOK.String(), statusStr)
 }
+
+func TestCheckStorageHealthInvalidThresholds(t *testing.T) {
+	tests := []struct {
+		name              string
+		warningThreshold  int
+		criticalThreshold int
+		usage             float64
+		expectedStatus    HealthStatusEnum
+	}{
+		{
+			name:              "Inverted thresholds",
+			warningThreshold:  95,
+			criticalThreshold: 80,
+			usage:             85.0,
+			expectedStatus:    StatusWarning, // Should use defaults (80/90), so 85% is warning
+		},
+		{
+			name:              "Negative warning threshold",
+			warningThreshold:  -5,
+			criticalThreshold: 90,
+			usage:             85.0,
+			expectedStatus:    StatusWarning, // Should use default warning (80)
+		},
+		{
+			name:              "Out of range critical threshold",
+			warningThreshold:  80,
+			criticalThreshold: 150,
+			usage:             85.0,
+			expectedStatus:    StatusWarning, // Should use default critical (90)
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := param.Reset()
+			require.NoError(t, err)
+			config.ResetConfig()
+			defer config.ResetConfig()
+
+			tempDir := t.TempDir()
+			dbPath := filepath.Join(tempDir, "test.sqlite")
+
+			err = param.MultiSet(map[string]interface{}{
+				param.Server_DbLocation.GetName():                   dbPath,
+				param.Monitoring_StorageWarningThreshold.GetName():  tt.warningThreshold,
+				param.Monitoring_StorageCriticalThreshold.GetName(): tt.criticalThreshold,
+			})
+			require.NoError(t, err)
+
+			customFunc := func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
+				return tt.usage, 1000000, uint64(tt.usage * 10000), nil
+			}
+			ctx := context.WithValue(context.Background(), filesystemUsageFuncKey{}, filesystemUsageFunc(customFunc))
+
+			modules := server_structs.ServerType(0)
+			checkStorageHealth(ctx, modules)
+
+			statusStr, err := GetComponentStatus(Server_StorageHealth)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedStatus.String(), statusStr)
+		})
+	}
+}
+
+func TestCheckStorageHealthCriticalUpgradesFromWarning(t *testing.T) {
+	err := param.Reset()
+	require.NoError(t, err)
+	config.ResetConfig()
+	defer config.ResetConfig()
+
+	tempDir := t.TempDir()
+
+	dir1 := filepath.Join(tempDir, "dir1")
+	dir2 := filepath.Join(tempDir, "dir2")
+	err = os.MkdirAll(dir1, 0755)
+	require.NoError(t, err)
+	err = os.MkdirAll(dir2, 0755)
+	require.NoError(t, err)
+
+	err = param.MultiSet(map[string]interface{}{
+		param.Server_DbLocation.GetName():                   filepath.Join(dir1, "server.sqlite"),
+		param.Origin_DbLocation.GetName():                   filepath.Join(dir2, "origin.sqlite"),
+		param.Logging_LogLocation.GetName():                 "",
+		param.Monitoring_DataLocation.GetName():             "",
+		param.Monitoring_StorageWarningThreshold.GetName():  80,
+		param.Monitoring_StorageCriticalThreshold.GetName(): 90,
+	})
+	require.NoError(t, err)
+
+	modules := server_structs.ServerType(0)
+	modules.Set(server_structs.OriginType)
+
+	callCount := 0
+	customFunc := func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
+		callCount++
+		if callCount == 1 {
+			return 85.0, 1000000, 850000, nil
+		}
+		return 95.0, 1000000, 950000, nil
+	}
+	ctx := context.WithValue(context.Background(), filesystemUsageFuncKey{}, filesystemUsageFunc(customFunc))
+
+	checkStorageHealth(ctx, modules)
+
+	statusStr, err := GetComponentStatus(Server_StorageHealth)
+	require.NoError(t, err)
+	assert.Equal(t, StatusCritical.String(), statusStr, "Critical status should override warning status")
+}
+
