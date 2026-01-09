@@ -21,6 +21,7 @@ package origin_serve
 import (
 	"context"
 	"net/http"
+	"path"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -55,6 +56,28 @@ type (
 )
 
 var globalAuthConfig *authConfig
+
+// hasPathPrefix checks if the request path is under the authorized prefix.
+// Unlike strings.HasPrefix, this checks path boundaries to prevent
+// access to /foo/bar2 when only /foo/bar is authorized.
+func hasPathPrefix(requestPath, authorizedPrefix string) bool {
+	// Clean both paths to normalize them
+	requestPath = path.Clean(requestPath)
+	authorizedPrefix = path.Clean(authorizedPrefix)
+
+	// Exact match is always allowed
+	if requestPath == authorizedPrefix {
+		return true
+	}
+
+	// Ensure authorizedPrefix ends with / for comparison
+	if !strings.HasSuffix(authorizedPrefix, "/") {
+		authorizedPrefix += "/"
+	}
+
+	// Check if requestPath starts with authorizedPrefix
+	return strings.HasPrefix(requestPath, authorizedPrefix)
+}
 
 func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 	ac = &authConfig{}
@@ -206,7 +229,7 @@ func (ac *authConfig) getAcls(token string) (newAcls acls, err error) {
 				if resource.Authorization == token_scopes.Wlcg_Storage_Read && !export.Capabilities.Reads {
 					continue
 				}
-				
+
 				// Check if issuer is authorized for this export
 				authorized := false
 				for _, exportIssuer := range export.IssuerUrls {
@@ -219,8 +242,10 @@ func (ac *authConfig) getAcls(token string) (newAcls acls, err error) {
 					continue
 				}
 
-				// For origin, we check if the resource matches the federation prefix
-				if strings.HasPrefix(resource.Resource, export.FederationPrefix) || strings.HasPrefix(export.FederationPrefix, resource.Resource) {
+				// Use path-aware prefix matching:
+				// Token resource /foo/bar authorizes paths under export /foo
+				// Export /foo/bar can be authorized by token resource /foo or /foo/bar
+				if hasPathPrefix(export.FederationPrefix, resource.Resource) || hasPathPrefix(resource.Resource, export.FederationPrefix) {
 					newAcls = append(newAcls, resource)
 				}
 			}
@@ -261,7 +286,7 @@ func (ac *authConfig) authorizeWithContext(ctx context.Context, action token_sco
 	if aclsItem == nil {
 		return ctx, false
 	}
-	
+
 	rsScope := token_scopes.NewResourceScope(action, resource)
 	authorized := false
 	for _, acl := range aclsItem.Value() {
@@ -270,15 +295,15 @@ func (ac *authConfig) authorizeWithContext(ctx context.Context, action token_sco
 			break
 		}
 	}
-	
+
 	if !authorized {
 		return ctx, false
 	}
-	
+
 	// Extract user and group information from the token
 	ui := extractUserInfoFromToken(token)
 	ctx = setUserInfo(ctx, ui)
-	
+
 	return ctx, true
 }
 
@@ -288,18 +313,18 @@ func extractUserInfoFromToken(tokenStr string) *userInfo {
 		User:   "nobody",
 		Groups: []string{},
 	}
-	
+
 	tok, err := jwt.Parse([]byte(tokenStr), jwt.WithVerify(false))
 	if err != nil {
 		log.Debugf("Failed to parse token for user info extraction: %v", err)
-		return userInfo
+		return ui
 	}
-	
+
 	// Extract subject (user)
 	if sub := tok.Subject(); sub != "" {
 		ui.User = sub
 	}
-	
+
 	// Extract groups from various possible claim names
 	// Try "wlcg.groups" first (WLCG tokens)
 	if groups, ok := tok.Get("wlcg.groups"); ok {
@@ -311,7 +336,7 @@ func extractUserInfoFromToken(tokenStr string) *userInfo {
 			}
 		}
 	}
-	
+
 	// Try "groups" (generic claim)
 	if len(ui.Groups) == 0 {
 		if groups, ok := tok.Get("groups"); ok {
@@ -324,7 +349,7 @@ func extractUserInfoFromToken(tokenStr string) *userInfo {
 			}
 		}
 	}
-	
+
 	return ui
 }
 

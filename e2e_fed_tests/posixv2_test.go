@@ -21,6 +21,7 @@
 package fed_tests
 
 import (
+	"crypto/md5"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,6 +32,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -47,7 +49,7 @@ Director:
   MaxStatResponse: 1
 `
 
-// Test POSIXv2 origin with upload and download
+// Test POSIXv2 origin upload and download with the Pelican client
 func TestPosixv2OriginUploadDownload(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
@@ -55,94 +57,208 @@ func TestPosixv2OriginUploadDownload(t *testing.T) {
 
 	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()
-	
+
+	// Configure origin to use POSIXv2
+	originConfig := fmt.Sprintf(posixv2OriginConfig, tmpDir)
+	ft := fed_test_utils.NewFedTest(t, originConfig)
+	require.NotNil(t, ft)
+
+	// Verify the federation initialized with POSIXv2 exports
+	require.Greater(t, len(ft.Exports), 0, "Federation should have at least one export")
+	assert.Equal(t, "/test", ft.Exports[0].FederationPrefix)
+	assert.True(t, ft.Exports[0].Capabilities.PublicReads, "Export should allow public reads")
+	assert.True(t, ft.Exports[0].Capabilities.Writes, "Export should allow writes")
+
 	// Create a test file to upload
-	testFilePath := filepath.Join(tmpDir, "test_upload.txt")
-	testContent := []byte("Hello from POSIXv2 origin!")
-	err := os.WriteFile(testFilePath, testContent, 0644)
+	testContent := "Hello from POSIXv2 origin! This is test data."
+	localTmpDir := t.TempDir()
+	localFile := filepath.Join(localTmpDir, "test_file.txt")
+	require.NoError(t, os.WriteFile(localFile, []byte(testContent), 0644))
+
+	// Upload the file using the Pelican client
+	uploadURL := fmt.Sprintf("pelican://%s:%d/test/test_file.txt",
+		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+
+	transferResultsUpload, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithTokenLocation(ft.Token))
 	require.NoError(t, err)
+	require.NotEmpty(t, transferResultsUpload)
+	assert.Greater(t, transferResultsUpload[0].TransferredBytes, int64(0), "Should have transferred bytes")
 
-	// Configure origin to use POSIXv2
-	originConfig := fmt.Sprintf(posixv2OriginConfig, tmpDir)
-	fed := fed_test_utils.NewFedTest(t, originConfig)
-	require.NotNil(t, fed)
+	// Download the file using the Pelican client
+	downloadFile := filepath.Join(localTmpDir, "downloaded_file.txt")
+	transferResultsDownload, err := client.DoGet(ft.Ctx, uploadURL, downloadFile, false, client.WithTokenLocation(ft.Token))
+	require.NoError(t, err)
+	require.NotEmpty(t, transferResultsDownload)
+	assert.Equal(t, transferResultsUpload[0].TransferredBytes, transferResultsDownload[0].TransferredBytes,
+		"Downloaded bytes should match uploaded bytes")
 
-	// Upload a file
-	destURL := "pelican:///test/uploaded_file.txt"
-	transferred, err := client.DoCopy(fed.Ctx, testFilePath, destURL, false, client.WithToken(fed.Token))
-	require.NoError(t, err, "Failed to upload file")
-	assert.Greater(t, transferred, int64(0), "No bytes transferred during upload")
+	// Verify downloaded file content matches
+	downloadedContent, err := os.ReadFile(downloadFile)
+	require.NoError(t, err)
+	assert.Equal(t, testContent, string(downloadedContent), "Downloaded content should match uploaded content")
 
-	// Verify the file was written to storage
-	uploadedFilePath := filepath.Join(tmpDir, "uploaded_file.txt")
-	_, err = os.Stat(uploadedFilePath)
-	require.NoError(t, err, "Uploaded file should exist in storage")
-
-	// Download the file
-	downloadPath := filepath.Join(t.TempDir(), "downloaded_file.txt")
-	transferred, err = client.DoCopy(fed.Ctx, destURL, downloadPath, false, client.WithToken(fed.Token))
-	require.NoError(t, err, "Failed to download file")
-	assert.Greater(t, transferred, int64(0), "No bytes transferred during download")
-
-	// Verify downloaded content matches original
-	downloadedContent, err := os.ReadFile(downloadPath)
-	require.NoError(t, err, "Failed to read downloaded file")
-	assert.Equal(t, testContent, downloadedContent, "Downloaded content should match uploaded content")
+	// Verify the file also exists in the backend storage
+	backendFile := filepath.Join(tmpDir, "test_file.txt")
+	backendContent, err := os.ReadFile(backendFile)
+	require.NoError(t, err)
+	assert.Equal(t, testContent, string(backendContent), "Backend content should match uploaded content")
 }
 
-// Test POSIXv2 origin checksum retrieval via HEAD request
-func TestPosixv2OriginChecksum(t *testing.T) {
+// Test POSIXv2 origin stat with checksum verification
+func TestPosixv2OriginStat(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	// Create a temporary directory with a test file
+	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()
-	testFile := filepath.Join(tmpDir, "checksum_test.txt")
-	testContent := []byte("Test content for checksum")
-	err := os.WriteFile(testFile, testContent, 0644)
-	require.NoError(t, err)
+
+	// Create a test file directly in the backend
+	testContent := []byte("Test content for stat and checksum verification")
+	backendFile := filepath.Join(tmpDir, "stat_test.txt")
+	require.NoError(t, os.WriteFile(backendFile, testContent, 0644))
 
 	// Configure origin to use POSIXv2
 	originConfig := fmt.Sprintf(posixv2OriginConfig, tmpDir)
-	fed := fed_test_utils.NewFedTest(t, originConfig)
-	require.NotNil(t, fed)
+	ft := fed_test_utils.NewFedTest(t, originConfig)
+	require.NotNil(t, ft)
 
-	// TODO: Make HEAD request to verify checksum headers are present
-	// This requires the full federation to be running and the origin URL to be accessible
-	// For now, we verify the federation context is initialized
-	assert.NotNil(t, fed.Ctx, "Federation context should be initialized")
+	// Stat the file using the Pelican client
+	statURL := fmt.Sprintf("pelican://%s:%d/test/stat_test.txt",
+		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+
+	// Stat without checksum
+	statInfo, err := client.DoStat(ft.Ctx, statURL, client.WithTokenLocation(ft.Token))
+	require.NoError(t, err)
+	assert.Equal(t, int64(len(testContent)), statInfo.Size, "File size should match")
+	assert.Equal(t, "/test/stat_test.txt", statInfo.Name, "File name should match")
+	assert.Nil(t, statInfo.Checksums, "Checksums should be nil when not requested")
+
+	// Stat with checksum request
+	statInfo, err = client.DoStat(ft.Ctx, statURL, client.WithTokenLocation(ft.Token),
+		client.WithRequestChecksums([]client.ChecksumType{client.AlgCRC32C}))
+	require.NoError(t, err)
+	assert.Equal(t, int64(len(testContent)), statInfo.Size, "File size should match")
+	assert.NotNil(t, statInfo.Checksums, "Checksums should be present")
+	_, ok := statInfo.Checksums["crc32c"]
+	assert.True(t, ok, "CRC32C checksum should be present")
 }
 
-// Test POSIXv2 origin directory listing
-func TestPosixv2OriginDirectoryListing(t *testing.T) {
+// Test POSIXv2 origin with multiple file uploads
+func TestPosixv2OriginMultipleFiles(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	// Create a temporary directory with some files
+	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()
-	testFiles := []string{"file1.txt", "file2.txt", "file3.txt"}
-	for _, filename := range testFiles {
-		filePath := filepath.Join(tmpDir, filename)
-		err := os.WriteFile(filePath, []byte("test content"), 0644)
+
+	// Configure origin to use POSIXv2
+	originConfig := fmt.Sprintf(posixv2OriginConfig, tmpDir)
+	ft := fed_test_utils.NewFedTest(t, originConfig)
+	require.NotNil(t, ft)
+
+	// Create multiple test files with different content
+	testFiles := map[string]string{
+		"file1.txt": "Content of file 1 - This is the first test file",
+		"file2.txt": "Content of file 2 - This is the second test file",
+		"file3.txt": "Content of file 3 - This is the third test file",
+	}
+
+	localTmpDir := t.TempDir()
+
+	// Upload all files using the Pelican client
+	for filename, content := range testFiles {
+		localFile := filepath.Join(localTmpDir, filename)
+		require.NoError(t, os.WriteFile(localFile, []byte(content), 0644))
+
+		uploadURL := fmt.Sprintf("pelican://%s:%d/test/%s",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), filename)
+
+		transferResults, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithTokenLocation(ft.Token))
+		require.NoError(t, err, "Failed to upload %s", filename)
+		require.NotEmpty(t, transferResults)
+		assert.Greater(t, transferResults[0].TransferredBytes, int64(0), "Should have transferred bytes for %s", filename)
+	}
+
+	// Download and verify all files
+	for filename, expectedContent := range testFiles {
+		downloadURL := fmt.Sprintf("pelican://%s:%d/test/%s",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), filename)
+		downloadFile := filepath.Join(localTmpDir, "downloaded_"+filename)
+
+		transferResults, err := client.DoGet(ft.Ctx, downloadURL, downloadFile, false, client.WithTokenLocation(ft.Token))
+		require.NoError(t, err, "Failed to download %s", filename)
+		require.NotEmpty(t, transferResults)
+
+		// Verify content
+		content, err := os.ReadFile(downloadFile)
 		require.NoError(t, err)
+		assert.Equal(t, expectedContent, string(content), "Content of %s should match", filename)
+
+		// Verify file exists in backend storage
+		backendFile := filepath.Join(tmpDir, filename)
+		backendContent, err := os.ReadFile(backendFile)
+		require.NoError(t, err)
+		assert.Equal(t, expectedContent, string(backendContent), "Backend content of %s should match", filename)
 	}
+}
+
+// Test POSIXv2 origin with large file transfer
+func TestPosixv2OriginLargeFile(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	// Create a temporary directory for the origin storage
+	tmpDir := t.TempDir()
 
 	// Configure origin to use POSIXv2
 	originConfig := fmt.Sprintf(posixv2OriginConfig, tmpDir)
-	fed := fed_test_utils.NewFedTest(t, originConfig)
-	require.NotNil(t, fed)
+	ft := fed_test_utils.NewFedTest(t, originConfig)
+	require.NotNil(t, ft)
 
-	// List directory contents - currently just verify files can be accessed
-	// Full directory listing support via PROPFIND can be added later
-	
-	// Verify files can be accessed
-	for _, filename := range testFiles {
-		fileURL := "pelican:///test/" + filename
-		downloadPath := filepath.Join(t.TempDir(), "downloaded_"+filename)
-		transferred, err := client.DoCopy(fed.Ctx, fileURL, downloadPath, false, client.WithToken(fed.Token))
-		require.NoError(t, err, "Failed to download file: %s", filename)
-		assert.Greater(t, transferred, int64(0), "No bytes transferred for file: %s", filename)
+	// Create a large test file (10MB)
+	largeContent := make([]byte, 10*1024*1024) // 10MB
+	for i := range largeContent {
+		largeContent[i] = byte(i % 256)
 	}
+
+	localTmpDir := t.TempDir()
+	localFile := filepath.Join(localTmpDir, "large_file.bin")
+	require.NoError(t, os.WriteFile(localFile, largeContent, 0644))
+
+	// Calculate hash of original file
+	originalHash := fmt.Sprintf("%x", md5.Sum(largeContent))
+
+	// Upload the large file using the Pelican client
+	uploadURL := fmt.Sprintf("pelican://%s:%d/test/large_file.bin",
+		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+
+	transferResultsUpload, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithTokenLocation(ft.Token))
+	require.NoError(t, err)
+	require.NotEmpty(t, transferResultsUpload)
+	assert.Equal(t, int64(len(largeContent)), transferResultsUpload[0].TransferredBytes,
+		"Should have transferred all bytes")
+
+	// Download the large file
+	downloadFile := filepath.Join(localTmpDir, "downloaded_large_file.bin")
+	transferResultsDownload, err := client.DoGet(ft.Ctx, uploadURL, downloadFile, false, client.WithTokenLocation(ft.Token))
+	require.NoError(t, err)
+	require.NotEmpty(t, transferResultsDownload)
+	assert.Equal(t, transferResultsUpload[0].TransferredBytes, transferResultsDownload[0].TransferredBytes,
+		"Downloaded bytes should match uploaded bytes")
+
+	// Verify downloaded file content hash
+	downloadedContent, err := os.ReadFile(downloadFile)
+	require.NoError(t, err)
+	downloadedHash := fmt.Sprintf("%x", md5.Sum(downloadedContent))
+	assert.Equal(t, originalHash, downloadedHash, "Downloaded file hash should match original")
+
+	// Verify backend storage file
+	backendFile := filepath.Join(tmpDir, "large_file.bin")
+	backendContent, err := os.ReadFile(backendFile)
+	require.NoError(t, err)
+	backendHash := fmt.Sprintf("%x", md5.Sum(backendContent))
+	assert.Equal(t, originalHash, backendHash, "Backend file hash should match original")
 }

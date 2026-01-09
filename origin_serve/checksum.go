@@ -21,7 +21,7 @@ package origin_serve
 import (
 	"crypto/md5"
 	"crypto/sha1"
-	"encoding/hex"
+	"encoding/base64"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -46,9 +46,9 @@ type (
 )
 
 const (
-	ChecksumTypeMD5    ChecksumType = "md5"
-	ChecksumTypeSHA1   ChecksumType = "sha1"
-	ChecksumTypeCRC32  ChecksumType = "crc32"
+	ChecksumTypeMD5   ChecksumType = "md5"
+	ChecksumTypeSHA1  ChecksumType = "sha1"
+	ChecksumTypeCRC32 ChecksumType = "crc32"
 
 	// Extended attribute names for checksums
 	xattrMD5   = "user.checksum.md5"
@@ -112,6 +112,27 @@ func (xc *XattrChecksummer) GetChecksum(filename string, checksumType ChecksumTy
 	return checksum, nil
 }
 
+// GetChecksumRFC3230 retrieves the checksum in RFC 3230 format (algorithm=value)
+// MD5 and SHA1 are base64-encoded, CRC32 is hex-encoded
+func (xc *XattrChecksummer) GetChecksumRFC3230(filename string, checksumType ChecksumType) (string, error) {
+	checksum, err := xc.GetChecksum(filename, checksumType)
+	if err != nil {
+		return "", err
+	}
+
+	// Format according to RFC 3230
+	switch checksumType {
+	case ChecksumTypeMD5:
+		return "md5=" + checksum, nil
+	case ChecksumTypeSHA1:
+		return "sha=" + checksum, nil
+	case ChecksumTypeCRC32:
+		return "crc32=" + checksum, nil
+	default:
+		return "", errors.Errorf("unsupported checksum type for RFC 3230: %s", checksumType)
+	}
+}
+
 // getXattrName returns the extended attribute name for a checksum type
 func getXattrName(checksumType ChecksumType) string {
 	switch checksumType {
@@ -133,7 +154,7 @@ func isChecksumValid(filename string, xattrName string) bool {
 	if err != nil {
 		return false
 	}
-	
+
 	// Try to get stored modification time from xattr
 	mtimeAttr := xattrName + ".mtime"
 	mtimeData, err := xattr.Get(filename, mtimeAttr)
@@ -141,19 +162,20 @@ func isChecksumValid(filename string, xattrName string) bool {
 		// No stored mtime, checksum is invalid
 		return false
 	}
-	
+
 	// Parse stored mtime
 	var storedMtime int64
 	_, err = fmt.Sscanf(string(mtimeData), "%d", &storedMtime)
 	if err != nil {
 		return false
 	}
-	
+
 	// Compare modification times
 	return fileInfo.ModTime().Unix() == storedMtime
 }
 
-// computeChecksum computes the checksum for a file
+// computeChecksum computes the checksum for a file and returns it in RFC 3230 format
+// (base64 for MD5/SHA1, hex for CRC32)
 func computeChecksum(filename string, checksumType ChecksumType) (string, error) {
 	file, err := os.Open(filename)
 	if err != nil {
@@ -167,21 +189,22 @@ func computeChecksum(filename string, checksumType ChecksumType) (string, error)
 		if _, err := io.Copy(hash, file); err != nil {
 			return "", errors.Wrap(err, "failed to compute MD5 checksum")
 		}
-		return hex.EncodeToString(hash.Sum(nil)), nil
+		return base64.StdEncoding.EncodeToString(hash.Sum(nil)), nil
 
 	case ChecksumTypeSHA1:
 		hash := sha1.New()
 		if _, err := io.Copy(hash, file); err != nil {
 			return "", errors.Wrap(err, "failed to compute SHA1 checksum")
 		}
-		return hex.EncodeToString(hash.Sum(nil)), nil
+		return base64.StdEncoding.EncodeToString(hash.Sum(nil)), nil
 
 	case ChecksumTypeCRC32:
 		hash := crc32.NewIEEE()
 		if _, err := io.Copy(hash, file); err != nil {
 			return "", errors.Wrap(err, "failed to compute CRC32 checksum")
 		}
-		return hex.EncodeToString(hash.Sum(nil)), nil
+		// CRC32 is hex-encoded per RFC 3230 and IANA registry
+		return fmt.Sprintf("%08x", hash.Sum32()), nil
 
 	default:
 		return "", errors.Errorf("unsupported checksum type: %s", checksumType)
