@@ -155,9 +155,9 @@ RUN --mount=type=cache,id=go-cache,target=/root/.cache/go-build,sharing=shared \
   set -eux
 
   if ${IS_NONRELEASE_BUILD}; then
-    goreleaser build --clean --single-target --snapshot
+    goreleaser build --id pelican-server --clean --single-target --snapshot
   else
-    goreleaser build --clean --single-target
+    goreleaser build --id pelican-server --clean --single-target
   fi
 
   # NOTE (brianaydemir): GoReleaser creates a dist directory whose path
@@ -208,7 +208,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
 
   printf '%s\n' "metadata_expire=1800" >> /etc/dnf/dnf.conf
 
-  dnf install -y tini 'dnf-command(versionlock)'
+  dnf install -y tini 'dnf-command(versionlock)' python3-pip
 
   mkdir -p /etc/pelican/config.d
   mkdir -p /usr/share/pelican/config.d
@@ -531,13 +531,14 @@ ENV JAVA_HOME="/usr/lib/jvm/jre" \
 #################################################################
 # Pelican Director
 #################################################################
-FROM pelican-software-base AS director
+FROM pelican-software-base AS director-base
+RUN python3 -m pip install --no-cache-dir geoip2
+
+FROM director-base AS director
 ARG TARGETOS TARGETARCH
 COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
 COPY images/entrypoint.sh /entrypoint.sh
 COPY scripts/geoquery.py /usr/local/sbin/geoquery
-RUN dnf install -y python3-pip \
-    && python3 -m pip install geoip2
 ENTRYPOINT ["/entrypoint.sh", "pelican-server", "director"]
 CMD ["serve"]
 
@@ -573,7 +574,7 @@ CMD ["serve"]
 
 FROM origin AS osdf-origin
 ARG TARGETPLATFORM
-RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
+RUN <<ENDRUN
   set -eux
 
   # These IDs must match OSG's sssd sidecar containers.
@@ -709,10 +710,12 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
         gdb \
         gcc-c++ \
         git \
+        graphviz \
         jq \
         make \
         nano \
         procps \
+        psmisc \
         python3-pip \
         systemd \
         valgrind \
@@ -723,6 +726,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
         libcap-devel \
         libuuid-devel \
         openssl-devel \
+        python3-devel \
         sqlite-devel \
         tinyxml2-devel \
         zlib-devel \
