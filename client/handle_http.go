@@ -1919,7 +1919,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	// destination (could be io.Discard!) that we'll join with the hashesWriter.
 	var fileWriter io.Writer
 	var fileCloser io.Closer
-	
+
 	// Check if we have a custom writer provided (e.g., for io.FS implementation)
 	if transfer.writer != nil {
 		fileWriter = transfer.writer
@@ -1983,7 +1983,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		localPath = "/dev/null"
 		fileWriter = io.Discard
 	}
-	
+
 	// Close the custom writer at the end if provided
 	if fileCloser != nil {
 		defer func() {
@@ -1992,7 +1992,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			}
 		}()
 	}
-	
+
 	fileWriter = io.MultiWriter(fileWriter, hashesWriter)
 
 	var size int64 = -1
@@ -3052,65 +3052,80 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	hashesWriter := io.MultiWriter(hashes...)
 
 	var attempt TransferResult
-	// Stat the file to get the size (for progress bar)
-	fileInfo, err := os.Stat(transfer.localPath)
-	transferResult.Scheme = transfer.remoteURL.Scheme
-	if err != nil {
-		log.Errorln("Error checking local file ", transfer.localPath, ":", err)
-		if os.IsNotExist(err) {
-			transferResult.Error = error_codes.NewParameter_FileNotFoundError(errors.Wrapf(err, "local file %q does not exist", transfer.localPath))
-		} else if os.IsPermission(err) {
-			transferResult.Error = error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied accessing local file %q", transfer.localPath))
-		} else {
-			transferResult.Error = error_codes.NewParameterError(errors.Wrapf(err, "failed to stat local file %q", transfer.localPath))
-		}
-		return transferResult, transferResult.Error
-	}
-
 	var ioreader io.ReadCloser
 	nonZeroSize := true
 	pack := transfer.packOption
-	if pack != "" {
-		if !fileInfo.IsDir() {
-			err = errors.Errorf("Upload with pack=%v only works when input (%v) is a directory", pack, transfer.localPath)
-			transferResult.Error = err
-			return transferResult, err
+	fileSizeHint := int64(0)
+	hasFileSize := false
+	transferResult.Scheme = transfer.remoteURL.Scheme
+
+	// If a reader was provided (used by PelicanFS writes), bypass filesystem stat/open.
+	if transfer.reader != nil {
+		ioreader = transfer.reader
+		// Size is unknown; track bytes as they are read unless the reader self-reports.
+		if sizedReader, ok := ioreader.(Sizer); ok {
+			sizer = sizedReader
+		} else {
+			sizer = &ConstantSizer{size: 0}
 		}
-		behavior, err := GetBehavior(pack)
-		if err != nil {
-			transferResult.Error = err
-			return transferResult, err
-		}
-		if behavior == autoBehavior {
-			behavior = defaultBehavior
-		}
-		ap := newAutoPacker(transfer.localPath, behavior)
-		ioreader = ap
-		sizer = ap
 	} else {
-
-		if fileInfo.IsDir() {
-			err := error_codes.NewParameterError(errors.New("the provided path '" + transfer.localPath + "' is a directory, but a file is expected"))
-			transferResult.Error = err
-			return transferResult, err
-		}
-
-		// Try opening the file to send
-		file, err := os.Open(transfer.localPath)
-		if err != nil {
-			log.Errorln("Error opening local file:", err)
-			if os.IsNotExist(err) {
-				transferResult.Error = error_codes.NewParameter_FileNotFoundError(errors.Wrapf(err, "local file %q does not exist", transfer.localPath))
-			} else if os.IsPermission(err) {
-				transferResult.Error = error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied opening local file %q", transfer.localPath))
+		// Stat the file to get the size (for progress bar)
+		fileInfo, statErr := os.Stat(transfer.localPath)
+		if statErr != nil {
+			log.Errorln("Error checking local file ", transfer.localPath, ":", statErr)
+			if os.IsNotExist(statErr) {
+				transferResult.Error = error_codes.NewParameter_FileNotFoundError(errors.Wrapf(statErr, "local file %q does not exist", transfer.localPath))
+			} else if os.IsPermission(statErr) {
+				transferResult.Error = error_codes.NewAuthorizationError(errors.Wrapf(statErr, "permission denied accessing local file %q", transfer.localPath))
 			} else {
-				transferResult.Error = error_codes.NewParameterError(errors.Wrapf(err, "failed to open local file %q", transfer.localPath))
+				transferResult.Error = error_codes.NewParameterError(errors.Wrapf(statErr, "failed to stat local file %q", transfer.localPath))
 			}
 			return transferResult, transferResult.Error
 		}
-		ioreader = file
-		sizer = &ConstantSizer{size: fileInfo.Size()}
-		nonZeroSize = fileInfo.Size() > 0
+
+		if pack != "" {
+			if !fileInfo.IsDir() {
+				err = errors.Errorf("Upload with pack=%v only works when input (%v) is a directory", pack, transfer.localPath)
+				transferResult.Error = err
+				return transferResult, err
+			}
+			behavior, err := GetBehavior(pack)
+			if err != nil {
+				transferResult.Error = err
+				return transferResult, err
+			}
+			if behavior == autoBehavior {
+				behavior = defaultBehavior
+			}
+			ap := newAutoPacker(transfer.localPath, behavior)
+			ioreader = ap
+			sizer = ap
+		} else {
+			if fileInfo.IsDir() {
+				err := error_codes.NewParameterError(errors.New("the provided path '" + transfer.localPath + "' is a directory, but a file is expected"))
+				transferResult.Error = err
+				return transferResult, err
+			}
+
+			// Try opening the file to send
+			file, openErr := os.Open(transfer.localPath)
+			if openErr != nil {
+				log.Errorln("Error opening local file:", openErr)
+				if os.IsNotExist(openErr) {
+					transferResult.Error = error_codes.NewParameter_FileNotFoundError(errors.Wrapf(openErr, "local file %q does not exist", transfer.localPath))
+				} else if os.IsPermission(openErr) {
+					transferResult.Error = error_codes.NewAuthorizationError(errors.Wrapf(openErr, "permission denied opening local file %q", transfer.localPath))
+				} else {
+					transferResult.Error = error_codes.NewParameterError(errors.Wrapf(openErr, "failed to open local file %q", transfer.localPath))
+				}
+				return transferResult, transferResult.Error
+			}
+			ioreader = file
+			sizer = &ConstantSizer{size: fileInfo.Size()}
+			fileSizeHint = fileInfo.Size()
+			hasFileSize = true
+			nonZeroSize = fileInfo.Size() > 0
+		}
 	}
 	if transfer.callback != nil {
 		transfer.callback(transfer.localPath, 0, sizer.Size(), false)
@@ -3152,9 +3167,9 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	// Hint upload size
 	// Only do this for non-zero size files and not for pack uploads
 	// Because with compressed files, we don't know the decompressed size
-	if nonZeroSize && pack == "" {
+	if nonZeroSize && pack == "" && hasFileSize {
 		query := request.URL.Query()
-		query.Add("oss.asize", strconv.FormatInt(fileInfo.Size(), 10))
+		query.Add("oss.asize", strconv.FormatInt(fileSizeHint, 10))
 		request.URL.RawQuery = query.Encode()
 	}
 
