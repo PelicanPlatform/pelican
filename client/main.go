@@ -562,6 +562,46 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 		file.Close()
 	}
 
+	// If uploading a single file (not recursive), check if the remote destination is a directory.
+	// If so, infer the destination filename from the source file, similar to unix cp/scp behavior.
+	if !recursive && !info.IsDir() {
+		// We need to check if the remote destination exists and is a directory.
+		// To do this, we need to query the director first to get namespace info.
+		te, err := NewTransferEngine(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			if err := te.Shutdown(); err != nil {
+				log.Debugln("Failure when shutting down temporary transfer engine:", err)
+			}
+		}()
+		
+		tc, err := te.NewClient(options...)
+		if err != nil {
+			return nil, err
+		}
+		
+		// Create a temporary transfer job just to get director info
+		tempTj, err := tc.NewTransferJob(ctx, pUrl.GetRawUrl(), localObject, true, false, options...)
+		if err != nil {
+			// If we can't create the transfer job, we'll proceed anyway - the actual upload will fail with a better error
+			log.Debugln("Failed to create temporary transfer job for directory check:", err)
+		} else {
+			// Try to stat the remote destination
+			remoteInfo, statErr := statHttp(tempTj.remoteURL, tempTj.dirResp, tempTj.token)
+			if statErr == nil && remoteInfo.IsCollection {
+				// Remote destination is a directory, append the source filename
+				localFilename := filepath.Base(localObject)
+				// Use path.Join for URL paths (not filepath.Join which is OS-specific)
+				newPath := path.Join(pUrl.Path, localFilename)
+				pUrl.Path = newPath
+				remoteDestination = pUrl.String()
+				log.Debugln("Remote destination is a directory, inferred destination:", remoteDestination)
+			}
+		}
+	}
+
 	te, err := NewTransferEngine(ctx)
 	if err != nil {
 		return nil, err
