@@ -63,7 +63,7 @@ var (
 	})
 
 	// Health component for disk usage calculation
-	Origin_DiskUsage metrics.HealthStatusComponent = "disk-usage"
+	OriginCache_DiskUsage metrics.HealthStatusComponent = "disk-usage"
 )
 
 // diskUsageResult stores the results of a disk usage calculation for one export
@@ -239,15 +239,15 @@ func calculateDiskUsage(ctx context.Context) error {
 	percentTime := (duration.Seconds() / interval.Seconds()) * 100
 
 	if percentTime > 30 {
-		metrics.SetComponentHealthStatus(Origin_DiskUsage, metrics.StatusCritical,
+		metrics.SetComponentHealthStatus(OriginCache_DiskUsage, metrics.StatusCritical,
 			fmt.Sprintf("Disk usage crawl took %.1f%% of interval (%.1fs out of %.1fs)",
 				percentTime, duration.Seconds(), interval.Seconds()))
 	} else if percentTime > 10 {
-		metrics.SetComponentHealthStatus(Origin_DiskUsage, metrics.StatusWarning,
+		metrics.SetComponentHealthStatus(OriginCache_DiskUsage, metrics.StatusWarning,
 			fmt.Sprintf("Disk usage crawl took %.1f%% of interval (%.1fs out of %.1fs)",
 				percentTime, duration.Seconds(), interval.Seconds()))
 	} else {
-		metrics.SetComponentHealthStatus(Origin_DiskUsage, metrics.StatusOK,
+		metrics.SetComponentHealthStatus(OriginCache_DiskUsage, metrics.StatusOK,
 			fmt.Sprintf("Disk usage crawl completed in %.1fs (%.1f%% of interval)",
 				duration.Seconds(), percentTime))
 	}
@@ -266,7 +266,7 @@ func LaunchDiskUsageCalculator(ctx context.Context, egrp *errgroup.Group) {
 	log.Infof("Starting periodic disk usage calculator with interval %v", interval)
 
 	// Set initial health status
-	metrics.SetComponentHealthStatus(Origin_DiskUsage, metrics.StatusWarning, "Disk usage calculation initializing")
+	metrics.SetComponentHealthStatus(OriginCache_DiskUsage, metrics.StatusWarning, "Disk usage calculation initializing")
 
 	egrp.Go(func() error {
 		ticker := time.NewTicker(interval)
@@ -275,7 +275,7 @@ func LaunchDiskUsageCalculator(ctx context.Context, egrp *errgroup.Group) {
 		// Run immediately on startup
 		if err := calculateDiskUsage(ctx); err != nil {
 			log.Errorf("Initial disk usage calculation failed: %v", err)
-			metrics.SetComponentHealthStatus(Origin_DiskUsage, metrics.StatusCritical,
+			metrics.SetComponentHealthStatus(OriginCache_DiskUsage, metrics.StatusCritical,
 				fmt.Sprintf("Disk usage calculation failed: %v", err))
 		}
 
@@ -287,7 +287,7 @@ func LaunchDiskUsageCalculator(ctx context.Context, egrp *errgroup.Group) {
 			case <-ticker.C:
 				if err := calculateDiskUsage(ctx); err != nil {
 					log.Errorf("Disk usage calculation failed: %v", err)
-					metrics.SetComponentHealthStatus(Origin_DiskUsage, metrics.StatusCritical,
+					metrics.SetComponentHealthStatus(OriginCache_DiskUsage, metrics.StatusCritical,
 						fmt.Sprintf("Disk usage calculation failed: %v", err))
 				}
 			}
