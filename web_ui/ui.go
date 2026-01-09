@@ -277,7 +277,7 @@ func handleWebUIRedirect(ctx *gin.Context) {
 func handleWebUIAuth(ctx *gin.Context) {
 	requestPath := ctx.Param("requestPath")
 	db := authDB.Load()
-	user, _, _, err := GetUserGroups(ctx)
+	user, _, groups, err := GetUserGroups(ctx)
 
 	// Skip auth check for static files other than html pages
 	if path.Ext(requestPath) != "" && path.Ext(requestPath) != ".html" {
@@ -338,7 +338,7 @@ func handleWebUIAuth(ctx *gin.Context) {
 
 	// If rootPage requires admin privilege
 	if slices.Contains(adminAccessPages, rootPage) {
-		isAdmin, _ := CheckAdmin(user)
+		isAdmin, _ := CheckAdmin(user, groups)
 		if isAdmin {
 
 			// If user is admin, pass the check

@@ -464,7 +464,7 @@ func handleUpdateCollection(ctx *gin.Context) {
 		return
 	}
 
-	isAdmin, _ := web_ui.CheckAdmin(user)
+	isAdmin, _ := web_ui.CheckAdmin(user, groups)
 
 	var visibility database.Visibility
 	if req.Visibility != nil {
@@ -885,7 +885,7 @@ func handlePutCollectionMetadata(ctx *gin.Context) {
 		return
 	}
 
-	isAdmin, _ := web_ui.CheckAdmin(user)
+	isAdmin, _ := web_ui.CheckAdmin(user, groups)
 
 	err = database.UpsertCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, groups, key, value, isAdmin)
 	if err != nil {
@@ -941,7 +941,7 @@ func handleDeleteCollectionMetadata(ctx *gin.Context) {
 		return
 	}
 
-	isAdmin, _ := web_ui.CheckAdmin(user)
+	isAdmin, _ := web_ui.CheckAdmin(user, groups)
 
 	err = database.DeleteCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, groups, key, isAdmin)
 	if err != nil {
@@ -1056,7 +1056,7 @@ func handleDeleteCollection(ctx *gin.Context) {
 	}
 
 	// we will use this check to determine if we can bypass the collection owner check
-	isAdmin, _ := web_ui.CheckAdmin(user)
+	isAdmin, _ := web_ui.CheckAdmin(user, groups)
 
 	err = database.DeleteCollection(database.ServerDatabase, ctx.Param("id"), user, groups, isAdmin)
 	if err != nil {
@@ -1175,7 +1175,7 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 		return
 	}
 
-	isAdmin, _ := web_ui.CheckAdmin(user)
+	isAdmin, _ := web_ui.CheckAdmin(user, groups)
 
 	err = database.GrantCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, groups, req.GroupID, role, req.ExpiresAt, isAdmin)
 	if err != nil {
@@ -1248,7 +1248,7 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 		return
 	}
 
-	isAdmin, _ := web_ui.CheckAdmin(user)
+	isAdmin, _ := web_ui.CheckAdmin(user, groups)
 
 	err = database.RevokeCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, groups, req.GroupID, role, isAdmin)
 	if err != nil {
