@@ -75,7 +75,9 @@ func getPreferredCaches() ([]*url.URL, error) {
 //   - dest: Remote destination URL
 //   - options: Transfer options to pass to DoStat
 //
-// Returns the potentially modified destination URL.
+// Returns:
+//   - string: The potentially modified destination URL
+//   - error: An error if URL parsing fails, otherwise nil
 func inferDestinationPath(ctx context.Context, source string, dest string, options ...client.TransferOption) (string, error) {
 	// Check if destination is a directory by using DoStat
 	statInfo, err := client.DoStat(ctx, dest, options...)

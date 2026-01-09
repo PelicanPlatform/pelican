@@ -259,10 +259,10 @@ func putMain(cmd *cobra.Command, args []string) {
 		// and infer the filename if needed
 		actualDest := dest
 		if !isRecursive {
-			var err error
-			actualDest, err = inferDestinationPath(ctx, src, dest, options...)
-			if err != nil {
-				log.Warningln("Failed to infer destination path:", err)
+			var inferErr error
+			actualDest, inferErr = inferDestinationPath(ctx, src, dest, options...)
+			if inferErr != nil {
+				log.Warningln("Failed to infer destination path:", inferErr)
 				actualDest = dest
 			}
 		}
