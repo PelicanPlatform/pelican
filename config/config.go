@@ -2145,8 +2145,8 @@ func InitClient() error {
 
 	var printClientConfigErr error
 	printClientConfigOnce.Do(func() {
-		if log.GetLevel() == log.DebugLevel {
-			PrintPelicanVersion(os.Stdout)
+		if GetEffectiveLogLevel() >= log.DebugLevel {
+			LogPelicanVersion()
 			printClientConfigErr = PrintClientConfig()
 		}
 	})
