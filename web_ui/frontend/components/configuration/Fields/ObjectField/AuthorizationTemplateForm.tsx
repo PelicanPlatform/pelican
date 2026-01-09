@@ -9,9 +9,9 @@ import {
   StringField,
   StringSliceField,
 } from '@/components/configuration';
-import useApiSWR from "@/hooks/useApiSWR";
+import useApiSWR from '@/hooks/useApiSWR';
 import { User, Group } from '@/types';
-import AutocompleteField from "@/components/configuration/Fields/AutocompleteField";
+import AutocompleteField from '@/components/configuration/Fields/AutocompleteField';
 
 const verifyForm = (x: AuthorizationTemplate) => {
   return x.prefix != '' && x.actions.length > 0;
@@ -23,7 +23,7 @@ const createDefaultAuthorizationTemplate = (): AuthorizationTemplate => {
     actions: [],
     users: [],
     groups: [],
-    'group_regexes': [],
+    group_regexes: [],
   };
 };
 
@@ -31,18 +31,17 @@ const AuthorizationTemplateForm = ({
   onSubmit,
   value,
 }: FormProps<AuthorizationTemplate>) => {
-
-  const {data: users} = useApiSWR<User[]>(
-    "Could not fetch users",
-    "getUsers",
+  const { data: users } = useApiSWR<User[]>(
+    'Could not fetch users',
+    'getUsers',
     async () => fetch('/api/v1.0/users')
-  )
+  );
 
-  const {data: groups} = useApiSWR<Group[]>(
-    "Could not fetch groups",
-    "getGroups",
+  const { data: groups } = useApiSWR<Group[]>(
+    'Could not fetch groups',
+    'getGroups',
     async () => fetch('/api/v1.0/groups')
-  )
+  );
 
   const [authorizationTemplate, setAuthorizationTemplate] =
     React.useState<AuthorizationTemplate>(
@@ -104,7 +103,10 @@ const AuthorizationTemplateForm = ({
           name={'Group Regexes (Optional)'}
           value={authorizationTemplate['group_regexes'] || []}
           onChange={(e) =>
-            setAuthorizationTemplate({ ...authorizationTemplate, group_regexes: e })
+            setAuthorizationTemplate({
+              ...authorizationTemplate,
+              group_regexes: e,
+            })
           }
         />
       </Box>
