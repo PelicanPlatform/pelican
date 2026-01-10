@@ -504,6 +504,10 @@ func (sP StringParam) GetString() string {
 			return config.Issuer.OIDCAuthenticationUserClaim
 		case "Issuer.OIDCGroupClaim":
 			return config.Issuer.OIDCGroupClaim
+		case "Issuer.OIDCIssuerClaim":
+			return config.Issuer.OIDCIssuerClaim
+		case "Issuer.OIDCSubjectClaim":
+			return config.Issuer.OIDCSubjectClaim
 		case "Issuer.QDLLocation":
 			return config.Issuer.QDLLocation
 		case "Issuer.ScitokensServerLocation":
@@ -1287,7 +1291,9 @@ var allParameterNames = []string{
 	"Issuer.OIDCAuthenticationRequirements",
 	"Issuer.OIDCAuthenticationUserClaim",
 	"Issuer.OIDCGroupClaim",
+	"Issuer.OIDCIssuerClaim",
 	"Issuer.OIDCPreferClaimsFromIDToken",
+	"Issuer.OIDCSubjectClaim",
 	"Issuer.QDLLocation",
 	"Issuer.RedirectUris",
 	"Issuer.ScitokensServerLocation",
@@ -1555,6 +1561,8 @@ var (
 	Issuer_IssuerClaimValue = StringParam{"Issuer.IssuerClaimValue"}
 	Issuer_OIDCAuthenticationUserClaim = StringParam{"Issuer.OIDCAuthenticationUserClaim"}
 	Issuer_OIDCGroupClaim = StringParam{"Issuer.OIDCGroupClaim"}
+	Issuer_OIDCIssuerClaim = StringParam{"Issuer.OIDCIssuerClaim"}
+	Issuer_OIDCSubjectClaim = StringParam{"Issuer.OIDCSubjectClaim"}
 	Issuer_QDLLocation = StringParam{"Issuer.QDLLocation"}
 	Issuer_ScitokensServerLocation = StringParam{"Issuer.ScitokensServerLocation"}
 	Issuer_TomcatLocation = StringParam{"Issuer.TomcatLocation"}

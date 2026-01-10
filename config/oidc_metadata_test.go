@@ -19,6 +19,7 @@
 package config
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -83,5 +84,60 @@ func TestGetOIDCProvider(t *testing.T) {
 		get, err = GetOIDCProdiver()
 		require.NoError(t, err)
 		assert.Equal(t, Globus, get)
+	})
+}
+
+func TestGetMetadataRespectsExplicitEndpoints(t *testing.T) {
+	t.Cleanup(func() {
+		ResetConfig()
+		// Note: Resetting sync.Once in tests is generally not recommended due to potential race conditions.
+		// However, in this case, we run tests sequentially and need to re-trigger metadata discovery.
+		// In production code, sync.Once ensures getMetadata() is only called once per process lifetime.
+		onceMetadata = sync.Once{}
+		metadataError = nil
+		oidcMetadata = nil
+	})
+
+	t.Run("explicit-endpoints-not-overridden-by-issuer", func(t *testing.T) {
+		ResetConfig()
+		// Reset the sync.Once so we can test getMetadata again in this isolated test
+		onceMetadata = sync.Once{}
+		metadataError = nil
+		oidcMetadata = nil
+
+		// Set explicit endpoints (e.g., for GitHub OAuth2)
+		explicitAuthEndpoint := "https://github.com/login/oauth/authorize"
+		explicitTokenEndpoint := "https://github.com/login/oauth/access_token"
+		explicitUserInfoEndpoint := "https://api.github.com/user"
+		explicitDeviceAuthEndpoint := "https://github.com/login/device/code"
+
+		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint.GetName(), explicitAuthEndpoint))
+		require.NoError(t, param.Set(param.OIDC_TokenEndpoint.GetName(), explicitTokenEndpoint))
+		require.NoError(t, param.Set(param.OIDC_UserInfoEndpoint.GetName(), explicitUserInfoEndpoint))
+		require.NoError(t, param.Set(param.OIDC_DeviceAuthEndpoint.GetName(), explicitDeviceAuthEndpoint))
+
+		// Set OIDC.Issuer to CILogon (which has OIDC discovery)
+		// This should NOT override the explicitly set endpoints
+		require.NoError(t, param.Set(param.OIDC_Issuer.GetName(), "https://cilogon.org"))
+
+		// Call the metadata discovery - it will try to fetch from CILogon but should not override
+		onceMetadata.Do(getMetadata)
+
+		// Verify the endpoints are still what we set explicitly, not CILogon's
+		authEndpoint, err := GetOIDCAuthorizationEndpoint()
+		require.NoError(t, err)
+		assert.Equal(t, explicitAuthEndpoint, authEndpoint, "Authorization endpoint should not be overridden")
+
+		tokenEndpoint, err := GetOIDCTokenEndpoint()
+		require.NoError(t, err)
+		assert.Equal(t, explicitTokenEndpoint, tokenEndpoint, "Token endpoint should not be overridden")
+
+		userInfoEndpoint, err := GetOIDCUserInfoEndpoint()
+		require.NoError(t, err)
+		assert.Equal(t, explicitUserInfoEndpoint, userInfoEndpoint, "UserInfo endpoint should not be overridden")
+
+		deviceAuthEndpoint, err := GetOIDCDeviceAuthEndpoint()
+		require.NoError(t, err)
+		assert.Equal(t, explicitDeviceAuthEndpoint, deviceAuthEndpoint, "DeviceAuth endpoint should not be overridden")
 	})
 }
