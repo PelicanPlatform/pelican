@@ -87,7 +87,9 @@ func TestDirectorCacheHealthTest(t *testing.T) {
 	client := http.Client{Transport: tr}
 	resp, err := client.Do(request)
 	assert.NoError(t, err, "Failed to get response")
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	require.Equal(t, resp.StatusCode, http.StatusOK, "Failed to get server list from director")
 	dirBody, err := io.ReadAll(resp.Body)
 	require.NoError(t, err, "Failed to read server list body")
@@ -123,7 +125,9 @@ func TestDirectorCacheHealthTest(t *testing.T) {
 
 	resp, err = client.Do(request)
 	assert.NoError(t, err, "Failed to get response")
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	cacheBody, err := io.ReadAll(resp.Body)
 	require.NoError(t, err, "Failed to read cache body")
 	assert.Equal(t, resp.StatusCode, http.StatusOK, "Failed to get director test file from cache")
@@ -317,7 +321,7 @@ func TestDirectorMetadataHosting(t *testing.T) {
 
 		resp, err := client.Do(req)
 		require.NoError(t, err, "Failed to perform request")
-		t.Cleanup(func() { resp.Body.Close() })
+		t.Cleanup(func() { _ = resp.Body.Close() })
 
 		require.Equal(t, expectedStatus, resp.StatusCode)
 

@@ -478,7 +478,9 @@ Director:
 
 	resp, err := httpClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	// The director should redirect us to a cache server
 	require.True(t, resp.StatusCode >= 300 && resp.StatusCode < 400, "Director should redirect, got %d", resp.StatusCode)
