@@ -20,12 +20,12 @@ package origin_serve
 
 import (
 	"net/http"
-	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/spf13/afero"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/afero"
 	"golang.org/x/net/webdav"
 
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -33,9 +33,23 @@ import (
 )
 
 var (
-	webdavHandlers  map[string]*webdav.Handler
-	exportPrefixMap map[string]string // Maps federation prefix to storage prefix
+	webdavHandlers     map[string]*webdav.Handler
+	exportPrefixMap    map[string]string // Maps federation prefix to storage prefix
+	handlersRegistered bool              // Tracks whether handlers have been registered
 )
+
+func init() {
+	// Register the reset callback with server_utils
+	server_utils.RegisterPOSIXv2Reset(ResetHandlers)
+}
+
+// ResetHandlers resets the handler state (for testing)
+func ResetHandlers() {
+	webdavHandlers = nil
+	exportPrefixMap = nil
+	handlersRegistered = false
+	globalChecksummer = nil
+}
 
 // extractTokens extracts bearer tokens from the request
 // Tokens can come from:
@@ -98,7 +112,14 @@ func authMiddleware() gin.HandlerFunc {
 		tokens := extractTokens(c.Request)
 		action := getActionFromMethod(c.Request.Method)
 		resource := c.Request.URL.Path
-
+		// Strip the /api/v1.0/origin/data prefix if present
+		// This happens when the director is co-located with the origin
+		// Token scopes are always for the federation prefix (e.g., /test/...),
+		// not the HTTP route prefix
+		const apiPrefix = "/api/v1.0/origin/data"
+		if strings.HasPrefix(resource, apiPrefix) {
+			resource = strings.TrimPrefix(resource, apiPrefix)
+		}
 		ac := GetAuthConfig()
 		if ac == nil {
 			log.Error("Auth config not initialized")
@@ -141,7 +162,7 @@ func authMiddleware() gin.HandlerFunc {
 			}
 		}
 
-		log.Debugf("Authorization failed for %s %s", c.Request.Method, resource)
+		log.Warningf("Authorization failed for %s %s - tried %d token(s)", c.Request.Method, resource, len(tokens))
 		c.AbortWithStatus(http.StatusForbidden)
 	}
 }
@@ -152,8 +173,9 @@ func InitializeHandlers(exports []server_utils.OriginExport) error {
 	exportPrefixMap = make(map[string]string) // Initialize the global map
 
 	for _, export := range exports {
-		// Create a filesystem for this export
-		fs := afero.NewBasePathFs(afero.NewOsFs(), export.StoragePrefix)
+		// Create a filesystem for this export with auto-directory creation
+		baseFs := afero.NewBasePathFs(afero.NewOsFs(), export.StoragePrefix)
+		fs := newAutoCreateDirFs(baseFs)
 
 		// Create logger function
 		logger := func(r *http.Request, err error) {
@@ -179,8 +201,18 @@ func InitializeHandlers(exports []server_utils.OriginExport) error {
 	return nil
 }
 
-// RegisterHandlers registers the HTTP handlers with the Gin engine
-func RegisterHandlers(engine *gin.Engine) error {
+// RegisterHandlers registers the HTTP handlers with the Gin engine.
+// When the director is also running in the same server, handlers are registered
+// under /api/v1.0/origin/<prefix> so the director can distinguish between its routing
+// and the origin's file serving. Otherwise, handlers are registered directly at the
+// federation prefix for standalone origins.
+func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
+	// Prevent double registration when both director and POSIXv2 origin are running
+	if handlersRegistered {
+		log.Debug("POSIXv2 handlers already registered, skipping")
+		return nil
+	}
+
 	// Initialize checksummer
 	InitializeChecksummer()
 
@@ -189,74 +221,106 @@ func RegisterHandlers(engine *gin.Engine) error {
 		// Get the storage prefix for this federation prefix
 		storagePrefix := exportPrefixMap[prefix]
 
+		// When director is enabled, register under /api/v1.0/origin/data/<prefix>
+		// This allows the director to distinguish between routing requests and origin file serving
+		var routePrefix string
+		if directorEnabled {
+			routePrefix = "/api/v1.0/origin/data" + prefix
+		} else {
+			routePrefix = prefix
+		}
+
 		// Create a route group for this prefix
-		group := engine.Group(prefix)
+		group := engine.Group(routePrefix)
 		group.Use(authMiddleware())
 
-		// Register the WebDAV handler for all HTTP methods with special handling for HEAD
-		group.Any("/*path", func(c *gin.Context) {
-			if c.Request.Method == http.MethodHead {
-				handleHeadWithChecksum(c, handler, storagePrefix)
-			} else {
-				handler.ServeHTTP(c.Writer, c.Request)
-			}
-		})
+		// Create a handler function for all requests
+		handleRequest := func(c *gin.Context) {
+			// Get the path relative to the export (strip the federation prefix)
+			wildcardPath := c.Param("path")
 
-		log.Infof("Registered HTTP handlers for prefix: %s", prefix)
+			// The wildcardPath is relative to the federation prefix (e.g., /test)
+			// Pass only the wildcardPath to WebDAV so it writes relative to storage root
+			newPath := wildcardPath
+
+			// Create a shallow copy of the request and modify its URL
+			modifiedReq := c.Request.Clone(c.Request.Context())
+			modifiedURL := *c.Request.URL
+			modifiedURL.Path = newPath
+			modifiedReq.URL = &modifiedURL
+
+			if c.Request.Method == http.MethodHead {
+				// Pass the modified request and file path info to handleHeadWithChecksum
+				handleHeadWithChecksum(c, handler, modifiedReq, wildcardPath, storagePrefix)
+			} else {
+				handler.ServeHTTP(c.Writer, modifiedReq)
+			}
+		}
+
+		// Register handler for standard HTTP methods
+		group.Any("/*path", handleRequest)
+
+		// Register handler for WebDAV methods (not covered by Any())
+		group.Handle("PROPFIND", "/*path", handleRequest)
+		group.Handle("PROPPATCH", "/*path", handleRequest)
+		group.Handle("MKCOL", "/*path", handleRequest)
+		group.Handle("COPY", "/*path", handleRequest)
+		group.Handle("MOVE", "/*path", handleRequest)
+		group.Handle("LOCK", "/*path", handleRequest)
+		group.Handle("UNLOCK", "/*path", handleRequest)
+
+		log.Infof("Registered HTTP handlers for prefix: %s (route: %s)", prefix, routePrefix)
 	}
 
+	handlersRegistered = true
 	return nil
 }
 
 // handleHeadWithChecksum handles HEAD requests and adds checksum headers per RFC 3230
-func handleHeadWithChecksum(c *gin.Context, handler *webdav.Handler, storagePrefix string) {
-	// First, let the WebDAV handler process the HEAD request normally
-	handler.ServeHTTP(c.Writer, c.Request)
+func handleHeadWithChecksum(c *gin.Context, handler *webdav.Handler, modifiedReq *http.Request, relativePath string, storagePrefix string) {
+	// Compute checksums BEFORE processing the HEAD request so we can add headers
+	fullPath := filepath.Join(storagePrefix, relativePath)
 
-	// If successful, add checksum headers per RFC 3230
-	if c.Writer.Status() == http.StatusOK {
-		// Get the relative path from the request
-		relativePath := c.Param("path")
+	// Check if client requested checksums via Want-Digest header
+	wantDigest := c.GetHeader("Want-Digest")
+	if wantDigest == "" {
+		// Default to MD5 if not specified
+		wantDigest = "md5"
+	}
 
-		// Construct the full filesystem path
-		fullPath := path.Join(storagePrefix, relativePath)
+	checksummer := GetChecksummer()
+	digestValues := []string{}
 
-		// Check if client requested checksums via Want-Digest header
-		wantDigest := c.GetHeader("Want-Digest")
-		if wantDigest == "" {
-			// Default to MD5 if not specified
-			wantDigest = "md5"
+	// Parse Want-Digest header and compute requested checksums
+	for _, alg := range strings.Split(wantDigest, ",") {
+		alg = strings.TrimSpace(strings.ToLower(alg))
+
+		var checksumType ChecksumType
+		switch alg {
+		case "md5":
+			checksumType = ChecksumTypeMD5
+		case "sha", "sha-1", "sha1":
+			checksumType = ChecksumTypeSHA1
+		case "crc32":
+			checksumType = ChecksumTypeCRC32
+		case "crc32c":
+			checksumType = ChecksumTypeCRC32C
+		default:
+			continue
 		}
 
-		checksummer := GetChecksummer()
-		digestValues := []string{}
-
-		// Parse Want-Digest header and compute requested checksums
-		for _, alg := range strings.Split(wantDigest, ",") {
-			alg = strings.TrimSpace(strings.ToLower(alg))
-
-			var checksumType ChecksumType
-			switch alg {
-			case "md5":
-				checksumType = ChecksumTypeMD5
-			case "sha", "sha-1", "sha1":
-				checksumType = ChecksumTypeSHA1
-			case "crc32":
-				checksumType = ChecksumTypeCRC32
-			default:
-				continue
+		if xc, ok := checksummer.(*XattrChecksummer); ok {
+			if digest, err := xc.GetChecksumRFC3230(fullPath, checksumType); err == nil {
+				digestValues = append(digestValues, digest)
 			}
-
-			if xc, ok := checksummer.(*XattrChecksummer); ok {
-				if digest, err := xc.GetChecksumRFC3230(fullPath, checksumType); err == nil {
-					digestValues = append(digestValues, digest)
-				}
-			}
-		}
-
-		// Set Digest header with all requested checksums (RFC 3230)
-		if len(digestValues) > 0 {
-			c.Header("Digest", strings.Join(digestValues, ","))
 		}
 	}
+
+	// Set Digest header BEFORE calling WebDAV handler
+	if len(digestValues) > 0 {
+		c.Header("Digest", strings.Join(digestValues, ","))
+	}
+
+	// Now let the WebDAV handler process the HEAD request
+	handler.ServeHTTP(c.Writer, modifiedReq)
 }

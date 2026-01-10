@@ -239,7 +239,7 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	if modules.IsEnabled(server_structs.OriginType) {
 		log.Debug("Finishing origin server configuration")
-		if err = OriginServeFinish(ctx, egrp); err != nil {
+		if err = OriginServeFinish(ctx, egrp, engine, modules); err != nil {
 			return
 		}
 	}

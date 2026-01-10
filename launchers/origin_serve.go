@@ -53,7 +53,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 
 	// Determine if we should use XRootD or native HTTP server
 	useXRootD := param.Origin_StorageType.GetString() != string(server_structs.OriginStoragePosixv2)
-	
+
 	if useXRootD {
 		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusWarning, "XRootD is initializing")
 		metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusWarning, "CMSD is initializing")
@@ -171,23 +171,9 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		// LaunchOriginDaemons may edit the viper config; these launched goroutines are purposely
 		// delayed until after the viper config is done.
 		xrootd.LaunchXrootdMaintenance(ctx, originServer, 2*time.Minute)
-	} else {
-		// Handle POSIXv2-specific initialization
-		if err := origin_serve.InitAuthConfig(ctx, egrp, originExports); err != nil {
-			return nil, errors.Wrap(err, "failed to initialize origin_serve auth config")
-		}
-
-		if err := origin_serve.InitializeHandlers(originExports); err != nil {
-			return nil, errors.Wrap(err, "failed to initialize origin_serve handlers")
-		}
-
-		if err := origin_serve.RegisterHandlers(engine); err != nil {
-			return nil, errors.Wrap(err, "failed to register origin_serve handlers")
-		}
-
-		log.Info("POSIXv2 origin backend initialized successfully")
 	}
-	
+	// POSIXv2-specific initialization is deferred to OriginServeFinish()
+
 	// Launch origin file test maintenance (not XRootD specific)
 	origin.LaunchOriginFileTestMaintenance(ctx)
 
@@ -196,10 +182,37 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 
 // Finish configuration of the origin server.  To be invoked after the web UI components
 // have been launched.
-func OriginServeFinish(ctx context.Context, egrp *errgroup.Group) error {
+func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.Engine, modules server_structs.ServerType) error {
 	originExports, err := server_utils.GetOriginExports()
 	if err != nil {
 		return err
+	}
+
+	// Handle POSIXv2-specific initialization now that the web server is running
+	useXRootD := param.Origin_StorageType.GetString() != string(server_structs.OriginStoragePosixv2)
+	if !useXRootD {
+		if err := origin_serve.InitAuthConfig(ctx, egrp, originExports); err != nil {
+			return errors.Wrap(err, "failed to initialize origin_serve auth config")
+		}
+
+		if err := origin_serve.InitializeHandlers(originExports); err != nil {
+			return errors.Wrap(err, "failed to initialize origin_serve handlers")
+		}
+
+		directorEnabled := modules.IsEnabled(server_structs.DirectorType)
+		if err := origin_serve.RegisterHandlers(engine, directorEnabled); err != nil {
+			return errors.Wrap(err, "failed to register origin_serve handlers")
+		}
+
+		// For POSIXv2, the origin serves files directly via the web server, not XRootD.
+		// Update Origin.Url to use the external web URL which is now set to the correct port.
+		externalWebUrl := param.Server_ExternalWebUrl.GetString()
+		if err := param.Set("Origin.Url", externalWebUrl); err != nil {
+			log.WithError(err).Warnf("Failed to set Origin.Url to %s", externalWebUrl)
+		}
+		log.Debugf("Set Origin.Url to %s for POSIXv2 origin", externalWebUrl)
+
+		log.Info("POSIXv2 origin backend initialized successfully")
 	}
 
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the origin server")
