@@ -943,6 +943,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 		// If this is a OPTIONS request, we should just return OK
 		if c.Request.Method == http.MethodOptions {
 			c.Status(http.StatusOK)
+			c.Header("Allow", "HEAD,GET,PUT,PROPFIND,OPTIONS,POST")
 			c.Abort()
 			return
 		}
