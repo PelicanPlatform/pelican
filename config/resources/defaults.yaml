@@ -86,6 +86,7 @@ Origin:
   EnableMacaroons: false
   EnableVoms: true
   SelfTestInterval: 15s
+  StorageType: "posix"
 Registry:
   InstitutionsUrlReloadMinutes: 15m
   RequireCacheApproval: false
@@ -109,6 +110,7 @@ Shoveler:
   PortLower: 9930
   PortHigher: 9999
   AMQPExchange: shoveled-xrd
+  Topic: "xrootd.shoveler"
 Xrootd:
   MaxStartupWait: "10s"
   Mount: ""
