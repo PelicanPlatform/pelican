@@ -110,7 +110,18 @@ func (pb *progressBars) launchDisplay(ctx context.Context) {
 						pbMap[path].xfer = -1
 					}
 					for path := range pb.status {
-						if pbMap[path] == nil {
+						newStatus := pb.status[path]
+						// If the transfer has completed, stop tracking its status.
+						// Update its progress bar one final time, if it already exists.
+						// (At this point, a new bar would only be visual clutter.)
+						if newStatus.completed {
+							delete(pb.status, path)
+							if pbMap[path] == nil {
+								continue
+							}
+						}
+						// If the transfer is still ongoing, create its progress bar.
+						if !newStatus.completed && pbMap[path] == nil {
 							pbMap[path] = &progressBar{
 								bar: progressCtr.AddBar(0,
 									mpb.PrependDecorators(
@@ -127,7 +138,6 @@ func (pb *progressBars) launchDisplay(ctx context.Context) {
 							}
 						}
 						oldStatus := pbMap[path].progressStatus
-						newStatus := pb.status[path]
 						if oldStatus.size == 0 && newStatus.size > 0 {
 							pbMap[path].bar.SetTotal(newStatus.size, false)
 							pbMap[path].bar.EnableTriggerComplete()
