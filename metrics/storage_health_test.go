@@ -477,4 +477,3 @@ func TestCheckStorageHealthCriticalUpgradesFromWarning(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, StatusCritical.String(), statusStr, "Critical status should override warning status")
 }
-
