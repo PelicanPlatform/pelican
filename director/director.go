@@ -238,6 +238,13 @@ func getRedirectURL(reqPath string, ad server_structs.ServerAd, requiresAuth boo
 		serverURL = ad.URL
 	}
 	reqPath = path.Clean("/" + reqPath)
+	// If the server URL has a path component, we need to prepend it to the request path.
+	// A non-empty path is used by the POSIXv2 origin which serves objects from
+	// the same server as the director.
+	if serverURL.Path != "" && serverURL.Path != "/" {
+		reqPath = path.Clean(serverURL.Path + reqPath)
+	}
+
 	if requiresAuth {
 		redirectURL.Scheme = "https"
 	} else {

@@ -166,6 +166,7 @@ func (ac *authConfig) getResourceScopes(token string) (scopes []token_scopes.Res
 	issuers := ac.issuers.Load()
 	if !(*issuers)[issuer] {
 		err = errors.Errorf("token issuer %s is not one of the trusted issuers", issuer)
+		log.Warningf("%s; trusted issuers: %v", err, *issuers)
 		return
 	}
 
@@ -221,33 +222,35 @@ func (ac *authConfig) getAcls(token string) (newAcls acls, err error) {
 	for _, export := range *exports {
 		if export.Capabilities.PublicReads {
 			newAcls = append(newAcls, token_scopes.ResourceScope{Authorization: token_scopes.Wlcg_Storage_Read, Resource: export.FederationPrefix})
-		} else {
-			for _, resource := range resources {
-				if (resource.Authorization == token_scopes.Wlcg_Storage_Create || resource.Authorization == token_scopes.Wlcg_Storage_Modify) && !export.Capabilities.Writes {
-					continue
-				}
-				if resource.Authorization == token_scopes.Wlcg_Storage_Read && !export.Capabilities.Reads {
-					continue
-				}
+		}
 
-				// Check if issuer is authorized for this export
-				authorized := false
-				for _, exportIssuer := range export.IssuerUrls {
-					if exportIssuer == issuer {
-						authorized = true
-						break
-					}
-				}
-				if !authorized {
-					continue
-				}
+		// Always check token-based authorization for write operations (even if PublicReads is true)
+		for _, resource := range resources {
+			if (resource.Authorization == token_scopes.Wlcg_Storage_Create || resource.Authorization == token_scopes.Wlcg_Storage_Modify) && !export.Capabilities.Writes {
+				continue
+			}
+			if resource.Authorization == token_scopes.Wlcg_Storage_Read && !export.Capabilities.Reads {
+				continue
+			}
 
-				// Use path-aware prefix matching:
-				// Token resource /foo/bar authorizes paths under export /foo
-				// Export /foo/bar can be authorized by token resource /foo or /foo/bar
-				if hasPathPrefix(export.FederationPrefix, resource.Resource) || hasPathPrefix(resource.Resource, export.FederationPrefix) {
-					newAcls = append(newAcls, resource)
+			// Check if issuer is authorized for this export
+			authorized := false
+			for _, exportIssuer := range export.IssuerUrls {
+				if exportIssuer == issuer {
+					authorized = true
+					break
 				}
+			}
+			if !authorized {
+				log.Debugf("Token issuer %s not authorized for export %s (export issuers: %v)", issuer, export.FederationPrefix, export.IssuerUrls)
+				continue
+			}
+
+			// Use path-aware prefix matching:
+			// Token resource /foo/bar authorizes paths under export /foo
+			// Export /foo/bar can be authorized by token resource /foo or /foo/bar
+			if hasPathPrefix(export.FederationPrefix, resource.Resource) || hasPathPrefix(resource.Resource, export.FederationPrefix) {
+				newAcls = append(newAcls, resource)
 			}
 		}
 	}

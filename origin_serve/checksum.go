@@ -46,14 +46,16 @@ type (
 )
 
 const (
-	ChecksumTypeMD5   ChecksumType = "md5"
-	ChecksumTypeSHA1  ChecksumType = "sha1"
-	ChecksumTypeCRC32 ChecksumType = "crc32"
+	ChecksumTypeMD5    ChecksumType = "md5"
+	ChecksumTypeSHA1   ChecksumType = "sha1"
+	ChecksumTypeCRC32  ChecksumType = "crc32"
+	ChecksumTypeCRC32C ChecksumType = "crc32c"
 
 	// Extended attribute names for checksums
-	xattrMD5   = "user.checksum.md5"
-	xattrSHA1  = "user.checksum.sha1"
-	xattrCRC32 = "user.checksum.crc32"
+	xattrMD5    = "user.checksum.md5"
+	xattrSHA1   = "user.checksum.sha1"
+	xattrCRC32  = "user.checksum.crc32"
+	xattrCRC32C = "user.checksum.crc32c"
 )
 
 var globalChecksummer Checksummer
@@ -128,6 +130,8 @@ func (xc *XattrChecksummer) GetChecksumRFC3230(filename string, checksumType Che
 		return "sha=" + checksum, nil
 	case ChecksumTypeCRC32:
 		return "crc32=" + checksum, nil
+	case ChecksumTypeCRC32C:
+		return "crc32c=" + checksum, nil
 	default:
 		return "", errors.Errorf("unsupported checksum type for RFC 3230: %s", checksumType)
 	}
@@ -142,6 +146,8 @@ func getXattrName(checksumType ChecksumType) string {
 		return xattrSHA1
 	case ChecksumTypeCRC32:
 		return xattrCRC32
+	case ChecksumTypeCRC32C:
+		return xattrCRC32C
 	default:
 		return ""
 	}
@@ -204,6 +210,14 @@ func computeChecksum(filename string, checksumType ChecksumType) (string, error)
 			return "", errors.Wrap(err, "failed to compute CRC32 checksum")
 		}
 		// CRC32 is hex-encoded per RFC 3230 and IANA registry
+		return fmt.Sprintf("%08x", hash.Sum32()), nil
+
+	case ChecksumTypeCRC32C:
+		hash := crc32.New(crc32.MakeTable(crc32.Castagnoli))
+		if _, err := io.Copy(hash, file); err != nil {
+			return "", errors.Wrap(err, "failed to compute CRC32C checksum")
+		}
+		// CRC32C is hex-encoded per RFC 3230 and IANA registry
 		return fmt.Sprintf("%08x", hash.Sum32()), nil
 
 	default:

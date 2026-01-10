@@ -24,11 +24,41 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"sync"
 
 	"github.com/spf13/afero"
 	"golang.org/x/net/webdav"
 )
+
+// autoCreateDirFs wraps an afero.Fs to automatically create parent directories
+// when opening a file for writing
+type autoCreateDirFs struct {
+	afero.Fs
+}
+
+// newAutoCreateDirFs creates a new filesystem that auto-creates parent directories
+func newAutoCreateDirFs(fs afero.Fs) afero.Fs {
+	return &autoCreateDirFs{Fs: fs}
+}
+
+// OpenFile wraps the underlying OpenFile and auto-creates parent directories if needed
+func (fs *autoCreateDirFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	file, err := fs.Fs.OpenFile(name, flag, perm)
+
+	// If opening for write failed with "no such file or directory", create parent dirs and retry
+	if err != nil && os.IsNotExist(err) && (flag&os.O_CREATE != 0 || flag&os.O_WRONLY != 0 || flag&os.O_RDWR != 0) {
+		dir := filepath.Dir(name)
+		if dir != "" && dir != "." && dir != "/" {
+			if mkdirErr := fs.Fs.MkdirAll(dir, 0755); mkdirErr == nil {
+				// Retry opening the file after creating parent directories
+				file, err = fs.Fs.OpenFile(name, flag, perm)
+			}
+		}
+	}
+
+	return file, err
+}
 
 type (
 	// contextKey is used to store user/group info in the context
@@ -131,12 +161,12 @@ func (afs *aferoFileSystem) fullPath(name string) string {
 // aferoFile wraps an afero.File to implement webdav.File
 type aferoFile struct {
 	afero.File
-	fs          afero.Fs
-	name        string
-	dirEntries  []os.FileInfo // Cached directory entries for pagination
-	dirOffset   int           // Current offset in directory entries
-	dirMutex    sync.Mutex    // Mutex for concurrent access
-	logger      func(*http.Request, error) // WebDAV logger
+	fs         afero.Fs
+	name       string
+	dirEntries []os.FileInfo              // Cached directory entries for pagination
+	dirOffset  int                        // Current offset in directory entries
+	dirMutex   sync.Mutex                 // Mutex for concurrent access
+	logger     func(*http.Request, error) // WebDAV logger
 }
 
 // Readdir implements webdav.File

@@ -33,6 +33,6 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	return nil, errors.New("Origin module is not supported on Windows")
 }
 
-func OriginServeFinish(ctx context.Context, egrp *errgroup.Group) error {
+func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.Engine, modules server_structs.ServerType) error {
 	return errors.New("Origin module is not supported on Windows")
 }

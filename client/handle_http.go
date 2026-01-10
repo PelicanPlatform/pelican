@@ -3134,10 +3134,11 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	// Parse the writeback host as a URL
 	writebackhostUrl := transfer.attempts[0].Url
 
+	// Use the full redirected URL from the director (including path and query params)
 	dest := &url.URL{
-		Host:   writebackhostUrl.Host,
 		Scheme: "https",
-		Path:   transfer.remoteURL.Path,
+		Host:   writebackhostUrl.Host,
+		Path:   writebackhostUrl.Path,
 	}
 	attempt.Endpoint = dest.Host
 	// Create the wrapped reader and send it to the request
