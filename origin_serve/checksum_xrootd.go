@@ -68,18 +68,28 @@ func SerializeXRootDChecksum(name string, checksumBytes []byte, fileModTime time
 
 	// Write fmTime (file modification time as Unix timestamp in network byte order)
 	fmTime := fileModTime.Unix()
-	binary.Write(buf, binary.BigEndian, fmTime)
+	if err := binary.Write(buf, binary.BigEndian, fmTime); err != nil {
+		return nil, err
+	}
 
 	// Write csTime (delta from fmTime when checksum was computed - use 0 for now)
 	csTime := int32(0)
-	binary.Write(buf, binary.BigEndian, csTime)
+	if err := binary.Write(buf, binary.BigEndian, csTime); err != nil {
+		return nil, err
+	}
 
 	// Write reserved fields
-	binary.Write(buf, binary.BigEndian, int16(0)) // Rsvd1
-	binary.Write(buf, binary.BigEndian, byte(0))  // Rsvd2
+	if err := binary.Write(buf, binary.BigEndian, int16(0)); err != nil { // Rsvd1
+		return nil, err
+	}
+	if err := binary.Write(buf, binary.BigEndian, byte(0)); err != nil { // Rsvd2
+		return nil, err
+	}
 
 	// Write length of checksum value
-	binary.Write(buf, binary.BigEndian, byte(len(checksumBytes)))
+	if err := binary.Write(buf, binary.BigEndian, byte(len(checksumBytes))); err != nil {
+		return nil, err
+	}
 
 	// Write checksum value (padded with zeros)
 	valueBytes := make([]byte, xrootdValueSize)

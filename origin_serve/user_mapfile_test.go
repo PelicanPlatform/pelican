@@ -389,10 +389,12 @@ func BenchmarkMapfileMatching(b *testing.B) {
 	}
 
 	data, _ := json.Marshal(rules)
-	os.WriteFile(testPath, data, 0644)
+	err := os.WriteFile(testPath, data, 0644)
+	require.NoError(b, err)
 
 	mapfile := NewMapfile(testPath)
-	mapfile.Load()
+	err = mapfile.Load()
+	require.NoError(b, err)
 
 	groups := []string{"/group50"}
 

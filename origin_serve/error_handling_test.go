@@ -26,6 +26,7 @@ import (
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // FailingFS implements afero.Fs interface that can inject failures
@@ -151,11 +152,12 @@ func TestErrorHandlerMapping(t *testing.T) {
 // TestFailingFSPermissionDenied tests filesystem permission denied failures
 func TestFailingFSPermissionDenied(t *testing.T) {
 	memFS := afero.NewMemMapFs()
-	memFS.Create("/test/file.txt")
+	_, err := memFS.Create("/test/file.txt")
+	require.NoError(t, err)
 
 	failingFS := NewFailingFS(memFS, "permission_denied", "/test/file.txt")
 
-	_, err := failingFS.Open("/test/file.txt")
+	_, err = failingFS.Open("/test/file.txt")
 	assert.Error(t, err, "Should fail with permission denied")
 	assert.Contains(t, err.Error(), "permission denied")
 
@@ -207,8 +209,10 @@ func TestFailingFSReadOnly(t *testing.T) {
 // TestFailingFSSelectivePath tests that failures only affect specific paths
 func TestFailingFSSelectivePath(t *testing.T) {
 	memFS := afero.NewMemMapFs()
-	afero.WriteFile(memFS, "/allowed/file.txt", []byte("data"), 0644)
-	afero.WriteFile(memFS, "/denied/secret.txt", []byte("secret"), 0644)
+	err := afero.WriteFile(memFS, "/allowed/file.txt", []byte("data"), 0644)
+	require.NoError(t, err)
+	err = afero.WriteFile(memFS, "/denied/secret.txt", []byte("secret"), 0644)
+	require.NoError(t, err)
 
 	failingFS := NewFailingFS(memFS, "permission_denied", "/denied/secret.txt")
 

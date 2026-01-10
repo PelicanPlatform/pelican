@@ -75,14 +75,6 @@ const (
 	userInfoKey contextKey = iota
 )
 
-// getUserInfo retrieves user info from context
-func getUserInfo(ctx context.Context) *userInfo {
-	if ui, ok := ctx.Value(userInfoKey).(*userInfo); ok {
-		return ui
-	}
-	return nil
-}
-
 // setUserInfo stores user info in context
 func setUserInfo(ctx context.Context, ui *userInfo) context.Context {
 	return context.WithValue(ctx, userInfoKey, ui)
