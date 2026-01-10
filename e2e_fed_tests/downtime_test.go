@@ -94,7 +94,9 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	client := http.Client{Transport: tr}
 	resp, err := client.Do(request)
 	require.NoError(t, err, "Failed to get response")
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	require.Equal(t, resp.StatusCode, http.StatusOK, "Failed to get server list from director")
 	dirBody, err := io.ReadAll(resp.Body)
 	require.NoError(t, err, "Failed to read server list body")
@@ -156,7 +158,9 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 
 	downtimeCreationResp, err := client.Do(downtimeCreationReq)
 	require.NoError(t, err, "Failed to get response from downtime creation request")
-	defer downtimeCreationResp.Body.Close()
+	defer func() {
+		_ = downtimeCreationResp.Body.Close()
+	}()
 	assert.Equal(t, http.StatusOK, downtimeCreationResp.StatusCode, "Failed to create downtime")
 	downtimeCreationRespBody, err := io.ReadAll(downtimeCreationResp.Body)
 	require.NoError(t, err, "Failed to read downtime creation response body")
@@ -184,7 +188,9 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 
 	registryDowntimeCreationResp, err := client.Do(registryDowntimeCreationReq)
 	require.NoError(t, err, "Failed to get response from registry downtime creation request")
-	defer registryDowntimeCreationResp.Body.Close()
+	defer func() {
+		_ = registryDowntimeCreationResp.Body.Close()
+	}()
 	assert.Equal(t, http.StatusOK, registryDowntimeCreationResp.StatusCode, "Failed to create downtime")
 	registryDowntimeCreationRespBody, err := io.ReadAll(registryDowntimeCreationResp.Body)
 	require.NoError(t, err, "Failed to read downtime creation response body")
@@ -222,7 +228,7 @@ LOOP:
 			require.Equal(t, http.StatusOK, specificServerDowntimeResp.StatusCode,
 				"Expected 200 OK from server downtime endpoint. Got %d. Body: %s",
 				specificServerDowntimeResp.StatusCode, string(dtBody))
-			specificServerDowntimeResp.Body.Close()
+			_ = specificServerDowntimeResp.Body.Close()
 			err = json.Unmarshal(dtBody, &downtimes)
 			require.NoError(t, err, "Failed to unmarshal server downtimes")
 
