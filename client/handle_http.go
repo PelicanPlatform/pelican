@@ -3214,12 +3214,24 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	// Parse the writeback host as a URL
 	writebackhostUrl := transfer.attempts[0].Url
 
-	// Use the full redirected URL from the director (including path and query params)
-	dest := &url.URL{
-		Scheme: "https",
-		Host:   writebackhostUrl.Host,
-		Path:   writebackhostUrl.Path,
+	// Start from the director-provided URL but override the path/query with the
+	// per-file destination so recursive uploads target each object, not just the
+	// collection root. For POSIXv2 origins that include a base path, preserve the
+	// prefix when constructing the final destination.
+	destCopy := *writebackhostUrl
+	if transfer.remoteURL != nil {
+		destCopy.Path = computeUploadDestPath(transfer.remoteURL.Path, destCopy.Path)
+		// Preserve query parameters from the director (for example, authz tokens) unless the
+		// per-file URL explicitly provides its own query.
+		destCopy.RawQuery = writebackhostUrl.RawQuery
+		if transfer.remoteURL.RawQuery != "" {
+			destCopy.RawQuery = transfer.remoteURL.RawQuery
+		}
 	}
+	if destCopy.Scheme == "" {
+		destCopy.Scheme = "https"
+	}
+	dest := &destCopy
 	// Add the oss.asize query parameter for PUT requests
 	query := dest.Query()
 	query.Set("oss.asize", fmt.Sprintf("%d", sizer.Size()))
