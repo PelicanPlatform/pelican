@@ -165,6 +165,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	// delayed until after the viper config is done.
 	xrootd.LaunchXrootdMaintenance(ctx, originServer, 2*time.Minute)
 	origin.LaunchOriginFileTestMaintenance(ctx)
+	origin.LaunchDiskUsageCalculator(ctx, egrp)
 
 	return originServer, nil
 }
