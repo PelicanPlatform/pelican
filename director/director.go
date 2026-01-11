@@ -628,9 +628,10 @@ func requiresCacheChaining(ctx *gin.Context, oAds []server_structs.ServerAd) boo
 	return false
 }
 
-// Given an HTTP verb, return the corresponding Pelican verb. Used for creating
-// more user-friendly error messages.
-func mapHTTPVerbToPelVerb(httpVerb string) string {
+// Given an HTTP verb and optional request context, return the corresponding Pelican verb.
+// Used for creating more user-friendly error messages.
+// For PROPFIND, checks the Depth header to determine if it's a "stat" or "ls" operation.
+func mapHTTPVerbToPelVerbWithContext(httpVerb string, ctx *gin.Context) string {
 	switch httpVerb {
 	case http.MethodGet:
 		return "get"
@@ -639,6 +640,11 @@ func mapHTTPVerbToPelVerb(httpVerb string) string {
 	case http.MethodDelete:
 		return "delete"
 	case "PROPFIND":
+		// PROPFIND with Depth: 0 is a stat operation
+		if ctx != nil && ctx.Request.Header.Get("Depth") == "0" {
+			return "stat"
+		}
+		// Otherwise it's a listing operation
 		return "ls"
 	default:
 		return "unknown"
