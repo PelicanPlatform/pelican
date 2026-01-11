@@ -284,17 +284,18 @@ func originSupportsVerb(verb string) AdPredicate {
 		case http.MethodDelete:
 			return ad.ServerAd.Caps.Writes && ad.NamespaceAd.Caps.Writes
 		case "PROPFIND":
-			// PROPFIND with Depth: 0 is a stat operation that only requires Reads capability
+			// PROPFIND with Depth: 0 (or no Depth header) is a stat operation that only requires Reads capability
 			// PROPFIND with Depth: 1+ is a listing operation that requires Listings capability
+			depthHeader := ""
 			if ctx != nil && ctx.Request != nil {
-				depthHeader := ctx.Request.Header.Get("Depth")
-				if depthHeader == "0" {
-					// Stat operation - requires Reads
-					return (ad.ServerAd.Caps.Reads && ad.NamespaceAd.Caps.Reads) ||
-						(ad.ServerAd.Caps.PublicReads && ad.NamespaceAd.Caps.PublicReads)
-				}
+				depthHeader = ctx.Request.Header.Get("Depth")
 			}
-			// Default to listing for missing or other Depth values
+			if depthHeader == "" || depthHeader == "0" {
+				// Stat operation - requires Reads
+				return (ad.ServerAd.Caps.Reads && ad.NamespaceAd.Caps.Reads) ||
+					(ad.ServerAd.Caps.PublicReads && ad.NamespaceAd.Caps.PublicReads)
+			}
+			// Default to listing for other Depth values
 			return ad.ServerAd.Caps.Listings && ad.NamespaceAd.Caps.Listings
 		default:
 			return false

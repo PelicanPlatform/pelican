@@ -640,11 +640,14 @@ func mapHTTPVerbToPelVerbWithContext(httpVerb string, ctx *gin.Context) string {
 	case http.MethodDelete:
 		return "delete"
 	case "PROPFIND":
-		// PROPFIND with Depth: 0 is a stat operation
-		if ctx != nil && ctx.Request.Header.Get("Depth") == "0" {
+		// PROPFIND with Depth: 0 (or missing Depth) is a stat operation; otherwise listing
+		depth := ""
+		if ctx != nil && ctx.Request != nil {
+			depth = ctx.Request.Header.Get("Depth")
+		}
+		if depth == "" || depth == "0" {
 			return "stat"
 		}
-		// Otherwise it's a listing operation
 		return "ls"
 	default:
 		return "unknown"
