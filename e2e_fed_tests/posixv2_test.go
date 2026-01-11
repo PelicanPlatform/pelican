@@ -424,6 +424,8 @@ Director:
 
 // Test cache proxying of directory listings
 func TestCacheProxyDirectoryListing(t *testing.T) {
+	t.Skip("This test exposed bugs in xrdcl-pelican; see https://github.com/PelicanPlatform/xrdcl-pelican/pull/103.  Skip can be removed for the 1.6.2 release.")
+
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
