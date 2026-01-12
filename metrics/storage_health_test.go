@@ -58,7 +58,7 @@ func TestGetFilesystemUsageInvalidPath(t *testing.T) {
 func TestGetFilesystemUsageWithCustomFunction(t *testing.T) {
 	// Save original implementation
 	originalImpl := getFilesystemUsageImpl
-	defer func() { getFilesystemUsageImpl = originalImpl }()
+	t.Cleanup(func() { getFilesystemUsageImpl = originalImpl })
 
 	// Override with custom implementation
 	getFilesystemUsageImpl = func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
@@ -75,7 +75,7 @@ func TestGetFilesystemUsageWithCustomFunction(t *testing.T) {
 func TestCheckStorageHealthOK(t *testing.T) {
 	// Save original implementation
 	originalImpl := getFilesystemUsageImpl
-	defer func() { getFilesystemUsageImpl = originalImpl }()
+	t.Cleanup(func() { getFilesystemUsageImpl = originalImpl })
 
 	err := param.Reset()
 	require.NoError(t, err)
@@ -109,7 +109,7 @@ func TestCheckStorageHealthOK(t *testing.T) {
 func TestCheckStorageHealthWarning(t *testing.T) {
 	// Save original implementation
 	originalImpl := getFilesystemUsageImpl
-	defer func() { getFilesystemUsageImpl = originalImpl }()
+	t.Cleanup(func() { getFilesystemUsageImpl = originalImpl })
 
 	err := param.Reset()
 	require.NoError(t, err)
@@ -143,7 +143,7 @@ func TestCheckStorageHealthWarning(t *testing.T) {
 func TestCheckStorageHealthCritical(t *testing.T) {
 	// Save original implementation
 	originalImpl := getFilesystemUsageImpl
-	defer func() { getFilesystemUsageImpl = originalImpl }()
+	t.Cleanup(func() { getFilesystemUsageImpl = originalImpl })
 
 	err := param.Reset()
 	require.NoError(t, err)
@@ -337,7 +337,7 @@ func TestGetPathsToCheckPrometheusConditional(t *testing.T) {
 func TestCheckStorageHealthMultiplePaths(t *testing.T) {
 	// Save original implementation
 	originalImpl := getFilesystemUsageImpl
-	defer func() { getFilesystemUsageImpl = originalImpl }()
+	t.Cleanup(func() { getFilesystemUsageImpl = originalImpl })
 
 	err := param.Reset()
 	require.NoError(t, err)
@@ -418,7 +418,7 @@ func TestCheckStorageHealthInvalidThresholds(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Save original implementation
 			originalImpl := getFilesystemUsageImpl
-			defer func() { getFilesystemUsageImpl = originalImpl }()
+			t.Cleanup(func() { getFilesystemUsageImpl = originalImpl })
 
 			err := param.Reset()
 			require.NoError(t, err)
@@ -453,7 +453,7 @@ func TestCheckStorageHealthInvalidThresholds(t *testing.T) {
 func TestCheckStorageHealthCriticalUpgradesFromWarning(t *testing.T) {
 	// Save original implementation
 	originalImpl := getFilesystemUsageImpl
-	defer func() { getFilesystemUsageImpl = originalImpl }()
+	t.Cleanup(func() { getFilesystemUsageImpl = originalImpl })
 
 	err := param.Reset()
 	require.NoError(t, err)
