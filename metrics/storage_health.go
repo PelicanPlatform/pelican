@@ -166,7 +166,10 @@ func checkStorageHealth(ctx context.Context, modules server_structs.ServerType) 
 		usage, totalBytes, usedBytes, err := getFilesystemUsage(ctx, path)
 		if err != nil {
 			log.Warningf("Failed to check storage for path %s: %v", path, err)
-			worstStatus = StatusWarning
+			// Only downgrade status if currently better than warning
+			if worstStatus > StatusWarning {
+				worstStatus = StatusWarning
+			}
 			statusMessages = append(statusMessages, fmt.Sprintf("Failed to check %s: %v", path, err))
 			continue
 		}
@@ -177,8 +180,12 @@ func checkStorageHealth(ctx context.Context, modules server_structs.ServerType) 
 		if usage >= float64(criticalThreshold) {
 			worstStatus = StatusCritical
 			statusMessages = append(statusMessages, fmt.Sprintf("%s: %.1f%% used (critical threshold: %d%%)", path, usage, criticalThreshold))
-		} else if usage >= float64(warningThreshold) && worstStatus > StatusWarning {
-			worstStatus = StatusWarning
+		} else if usage >= float64(warningThreshold) {
+			// Only downgrade status if currently better than warning
+			if worstStatus > StatusWarning {
+				worstStatus = StatusWarning
+			}
+			// Always report warning-level paths in the status message
 			statusMessages = append(statusMessages, fmt.Sprintf("%s: %.1f%% used (warning threshold: %d%%)", path, usage, warningThreshold))
 		}
 	}
