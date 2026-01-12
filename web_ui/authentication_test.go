@@ -288,7 +288,7 @@ func TestPasswordResetAPI(t *testing.T) {
 		//Check ok http response
 		assert.Equal(t, 403, recorderReset.Code)
 		//Check that success message returned
-		assert.JSONEq(t, `{"msg":"Server.UIAdminUsers is not set, and user is not root user. Admin check returns false", "status":"error"}`, recorderReset.Body.String())
+		assert.JSONEq(t, `{"msg":"Server.UIAdminUsers and Server.UIAdminGroups are not set, and user is not root user. Admin check returns false", "status":"error"}`, recorderReset.Body.String())
 	})
 
 	//Invoking password reset without a cookie should result in failure
@@ -514,6 +514,174 @@ func TestWhoamiAPI(t *testing.T) {
 	})
 }
 
+func TestCheckAdmin(t *testing.T) {
+	testCases := []struct {
+		name          string
+		user          string
+		groups        []string
+		adminUsers    []string
+		adminGroups   []string
+		expectedAdmin bool
+		expectedMsg   string
+	}{
+		{
+			name:          "root-admin-user",
+			user:          "admin",
+			groups:        nil,
+			adminUsers:    nil,
+			adminGroups:   nil,
+			expectedAdmin: true,
+			expectedMsg:   "",
+		},
+		{
+			name:          "user-in-admin-users-list",
+			user:          "admin1",
+			groups:        nil,
+			adminUsers:    []string{"admin1", "admin2"},
+			adminGroups:   nil,
+			expectedAdmin: true,
+			expectedMsg:   "",
+		},
+		{
+			name:          "user-not-in-admin-users-list",
+			user:          "user1",
+			groups:        nil,
+			adminUsers:    []string{"admin1", "admin2"},
+			adminGroups:   nil,
+			expectedAdmin: false,
+			expectedMsg:   "You don't have permission to perform this action",
+		},
+		{
+			name:          "user-in-admin-group",
+			user:          "user1",
+			groups:        []string{"pelican-admins"},
+			adminUsers:    nil,
+			adminGroups:   []string{"pelican-admins"},
+			expectedAdmin: true,
+			expectedMsg:   "",
+		},
+		{
+			name:          "user-in-multiple-groups-one-admin",
+			user:          "user1",
+			groups:        []string{"pelican-users", "pelican-admins", "other-group"},
+			adminUsers:    nil,
+			adminGroups:   []string{"pelican-admins"},
+			expectedAdmin: true,
+			expectedMsg:   "",
+		},
+		{
+			name:          "user-not-in-admin-group",
+			user:          "user1",
+			groups:        []string{"pelican-users"},
+			adminUsers:    nil,
+			adminGroups:   []string{"pelican-admins"},
+			expectedAdmin: false,
+			expectedMsg:   "You don't have permission to perform this action",
+		},
+		{
+			name:          "user-in-admin-group-and-admin-users",
+			user:          "user1",
+			groups:        []string{"pelican-admins"},
+			adminUsers:    []string{"user1"},
+			adminGroups:   []string{"pelican-admins"},
+			expectedAdmin: true,
+			expectedMsg:   "",
+		},
+		{
+			name:          "user-in-admin-group-not-in-admin-users",
+			user:          "user1",
+			groups:        []string{"pelican-admins"},
+			adminUsers:    []string{"admin1"},
+			adminGroups:   []string{"pelican-admins"},
+			expectedAdmin: true,
+			expectedMsg:   "",
+		},
+		{
+			name:          "user-in-admin-users-not-in-admin-group",
+			user:          "user1",
+			groups:        []string{"pelican-users"},
+			adminUsers:    []string{"user1"},
+			adminGroups:   []string{"pelican-admins"},
+			expectedAdmin: true,
+			expectedMsg:   "",
+		},
+		{
+			name:          "user-with-empty-groups",
+			user:          "user1",
+			groups:        []string{},
+			adminUsers:    nil,
+			adminGroups:   []string{"pelican-admins"},
+			expectedAdmin: false,
+			expectedMsg:   "You don't have permission to perform this action",
+		},
+		{
+			name:          "user-with-nil-groups",
+			user:          "user1",
+			groups:        nil,
+			adminUsers:    nil,
+			adminGroups:   []string{"pelican-admins"},
+			expectedAdmin: false,
+			expectedMsg:   "You don't have permission to perform this action",
+		},
+		{
+			name:          "multiple-admin-groups-user-in-one",
+			user:          "user1",
+			groups:        []string{"pelican-users"},
+			adminUsers:    nil,
+			adminGroups:   []string{"pelican-admins", "pelican-users", "other-admins"},
+			expectedAdmin: true,
+			expectedMsg:   "",
+		},
+		{
+			name:          "no-admin-config-no-groups",
+			user:          "user1",
+			groups:        nil,
+			adminUsers:    nil,
+			adminGroups:   nil,
+			expectedAdmin: false,
+			expectedMsg:   "Server.UIAdminUsers and Server.UIAdminGroups are not set, and user is not root user. Admin check returns false",
+		},
+		{
+			name:          "admin-groups-empty-list",
+			user:          "user1",
+			groups:        []string{"pelican-admins"},
+			adminUsers:    nil,
+			adminGroups:   []string{},
+			expectedAdmin: false,
+			expectedMsg:   "You don't have permission to perform this action",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			server_utils.ResetTestState()
+
+			// Setup admin users config
+			// Only set if explicitly provided (nil means not set, empty slice means set but empty)
+			if tc.adminUsers != nil {
+				require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), tc.adminUsers))
+			}
+
+			// Setup admin groups config
+			// Only set if explicitly provided (nil means not set, empty slice means set but empty)
+			if tc.adminGroups != nil {
+				require.NoError(t, param.Set(param.Server_AdminGroups.GetName(), tc.adminGroups))
+			}
+
+			// Call CheckAdmin
+			var isAdmin bool
+			var msg string
+			isAdmin, msg = CheckAdmin(tc.user, tc.groups)
+
+			// Verify results
+			assert.Equal(t, tc.expectedAdmin, isAdmin, "Admin status mismatch for user %s", tc.user)
+			if tc.expectedMsg != "" {
+				assert.Equal(t, tc.expectedMsg, msg, "Error message mismatch")
+			}
+		})
+	}
+}
+
 func TestAdminAuthHandler(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	// Define test cases
@@ -573,6 +741,27 @@ func TestAdminAuthHandler(t *testing.T) {
 				ctx.Set("User", "admin2")
 			},
 			expectedCode: http.StatusOK,
+		},
+		{
+			name: "admin-group-access",
+			setupUserFunc: func(ctx *gin.Context) {
+				require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), []string{}))
+				require.NoError(t, param.Set(param.Server_AdminGroups.GetName(), []string{"pelican-admins"}))
+				ctx.Set("User", "user1")
+				ctx.Set("Groups", []string{"pelican-admins"})
+			},
+			expectedCode: http.StatusOK,
+		},
+		{
+			name: "non-admin-group-access",
+			setupUserFunc: func(ctx *gin.Context) {
+				require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), []string{}))
+				require.NoError(t, param.Set(param.Server_AdminGroups.GetName(), []string{"pelican-admins"}))
+				ctx.Set("User", "user1")
+				ctx.Set("Groups", []string{"pelican-users"})
+			},
+			expectedCode:  http.StatusForbidden,
+			expectedError: "You don't have permission to perform this action",
 		},
 	}
 

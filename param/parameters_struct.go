@@ -303,6 +303,7 @@ type Config struct {
 	RuntimeDir string `mapstructure:"runtimedir" yaml:"RuntimeDir"`
 	Server struct {
 		AdLifetime time.Duration `mapstructure:"adlifetime" yaml:"AdLifetime"`
+		AdminGroups []string `mapstructure:"admingroups" yaml:"AdminGroups"`
 		AdvertisementInterval time.Duration `mapstructure:"advertisementinterval" yaml:"AdvertisementInterval"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DirectorUrls []string `mapstructure:"directorurls" yaml:"DirectorUrls"`
@@ -688,6 +689,7 @@ type configWithType struct {
 	RuntimeDir struct { Type string; Value string }
 	Server struct {
 		AdLifetime struct { Type string; Value time.Duration }
+		AdminGroups struct { Type string; Value []string }
 		AdvertisementInterval struct { Type string; Value time.Duration }
 		DbLocation struct { Type string; Value string }
 		DirectorUrls struct { Type string; Value []string }
