@@ -74,19 +74,27 @@ func getMetadata() {
 	}
 	oidcMetadata = metadata
 
-	// We don't check if the endpoint(s) are set. Just overwrite to ensure
-	// our default values are not being used if the issuer is not CILogon
-	if err := param.Set("OIDC.DeviceAuthEndpoint", metadata.DeviceAuthURL); err != nil {
-		log.WithError(err).Warn("Failed to set OIDC.DeviceAuthEndpoint from issuer metadata")
+	// Only set endpoints from metadata if they were not explicitly configured by the user.
+	// This allows users to override discovery with explicit endpoint URLs (e.g., for GitHub OAuth2)
+	if !param.OIDC_DeviceAuthEndpoint.IsSet() {
+		if err := param.Set("OIDC.DeviceAuthEndpoint", metadata.DeviceAuthURL); err != nil {
+			log.WithError(err).Warn("Failed to set OIDC.DeviceAuthEndpoint from issuer metadata")
+		}
 	}
-	if err := param.Set("OIDC.TokenEndpoint", metadata.TokenURL); err != nil {
-		log.WithError(err).Warn("Failed to set OIDC.TokenEndpoint from issuer metadata")
+	if !param.OIDC_TokenEndpoint.IsSet() {
+		if err := param.Set("OIDC.TokenEndpoint", metadata.TokenURL); err != nil {
+			log.WithError(err).Warn("Failed to set OIDC.TokenEndpoint from issuer metadata")
+		}
 	}
-	if err := param.Set("OIDC.UserInfoEndpoint", metadata.UserInfoURL); err != nil {
-		log.WithError(err).Warn("Failed to set OIDC.UserInfoEndpoint from issuer metadata")
+	if !param.OIDC_UserInfoEndpoint.IsSet() {
+		if err := param.Set("OIDC.UserInfoEndpoint", metadata.UserInfoURL); err != nil {
+			log.WithError(err).Warn("Failed to set OIDC.UserInfoEndpoint from issuer metadata")
+		}
 	}
-	if err := param.Set("OIDC.AuthorizationEndpoint", metadata.AuthURL); err != nil {
-		log.WithError(err).Warn("Failed to set OIDC.AuthorizationEndpoint from issuer metadata")
+	if !param.OIDC_AuthorizationEndpoint.IsSet() {
+		if err := param.Set("OIDC.AuthorizationEndpoint", metadata.AuthURL); err != nil {
+			log.WithError(err).Warn("Failed to set OIDC.AuthorizationEndpoint from issuer metadata")
+		}
 	}
 }
 
@@ -170,12 +178,21 @@ func GetOIDCAuthorizationEndpoint() (result string, err error) {
 
 func GetOIDCSupportedScopes() (results []string, err error) {
 	onceMetadata.Do(getMetadata)
-	err = metadataError
-	if err != nil {
+	// First check if we have scopes from OIDC discovery metadata
+	if metadataError == nil && len(oidcMetadata.ScopesSupported) > 0 {
+		results = make([]string, len(oidcMetadata.ScopesSupported))
+		copy(results, oidcMetadata.ScopesSupported)
 		return
 	}
-	results = make([]string, len(oidcMetadata.ScopesSupported))
-	copy(results, oidcMetadata.ScopesSupported)
+	// Fall back to explicitly configured OIDC.Scopes (e.g., for OAuth2-only providers like GitHub)
+	configuredScopes := param.OIDC_Scopes.GetStringSlice()
+	if len(configuredScopes) > 0 {
+		results = make([]string, len(configuredScopes))
+		copy(results, configuredScopes)
+		return
+	}
+	// If neither metadata nor explicit config, return the metadata error
+	err = metadataError
 	return
 }
 

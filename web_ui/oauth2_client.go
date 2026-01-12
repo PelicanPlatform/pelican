@@ -57,6 +57,7 @@ const (
 	GroupSourceTypeOIDC     string = "oidc"
 	GroupSourceTypeFile     string = "file"
 	GroupSourceTypeInternal string = "internal"
+	GroupSourceTypeGitHub   string = "github"
 )
 
 var (
@@ -172,6 +173,51 @@ func handleOAuthLogin(ctx *gin.Context) {
 	ctx.Redirect(http.StatusTemporaryRedirect, redirectUrl)
 }
 
+// Fetch GitHub organization memberships for the authenticated user
+// Uses the OAuth access token to call GitHub's /user/orgs endpoint
+func fetchGitHubOrganizations(accessToken string) ([]string, error) {
+	client := config.GetClient()
+
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/user/orgs", nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create GitHub orgs request")
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to fetch GitHub organizations")
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to read GitHub orgs response")
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		log.Errorf("GitHub orgs API returned status %d with body: %s", resp.StatusCode, string(body))
+		return nil, errors.Errorf("GitHub orgs API returned status %d", resp.StatusCode)
+	}
+
+	var orgs []struct {
+		Login string `json:"login"`
+	}
+	if err := json.Unmarshal(body, &orgs); err != nil {
+		return nil, errors.Wrap(err, "failed to parse GitHub orgs response")
+	}
+
+	groups := make([]string, 0, len(orgs))
+	for _, org := range orgs {
+		groups = append(groups, org.Login)
+	}
+
+	log.Debugf("Fetched %d GitHub organizations for user", len(groups))
+	return groups, nil
+}
+
 // Given a user name, return the list of groups they belong to
 func generateGroupInfo(user string) (groups []string, err error) {
 	groupFile := param.Issuer_GroupFile.GetString()
@@ -194,7 +240,8 @@ func generateGroupInfo(user string) (groups []string, err error) {
 
 // Given the maps for the UserInfo and ID token JSON objects, generate
 // user/group information according to the current policy.
-func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]interface{}) (userRecord *database.User, groups []string, err error) {
+// The accessToken parameter is optional and only used when GroupSource is "github"
+func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]interface{}, accessToken string) (userRecord *database.User, groups []string, err error) {
 	claimsSource := maps.Clone(userInfo)
 	if param.Issuer_OIDCPreferClaimsFromIDToken.GetBool() {
 		maps.Copy(claimsSource, idToken)
@@ -228,36 +275,90 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 	}
 	username := userIdentifier
 
-	subIface, ok := claimsSource["sub"]
-	if !ok {
-		log.Errorln("User info endpoint did not return a value for the sub claim")
-		err = errors.New("identity provider did not return a subject for logged-in user")
-		return
-	}
-	sub, ok := subIface.(string)
-	if !ok {
-		log.Errorln("User info endpoint did not return a string for the sub claim")
-		err = errors.New("identity provider did not return a subject for logged-in user")
-		return
+	// Get the subject (sub) claim - this uniquely identifies the user at the identity provider
+	// For OIDC, this is the standard "sub" claim. For OAuth2 providers like GitHub, we may need
+	// to use a different claim (e.g., "id" for GitHub)
+	subClaim := param.Issuer_OIDCSubjectClaim.GetString()
+	if subClaim == "" {
+		subClaim = "sub"
 	}
 
-	issuerClaim := param.Issuer_IssuerClaimValue.GetString()
-	if issuerClaim == "" {
-		issuerClaim = "iss"
+	subIface, ok := claimsSource[subClaim]
+	var sub string
+	if !ok {
+		// If the sub claim is not found, log a warning and fall back to the username
+		// This allows OAuth2 providers that don't provide a sub claim to still work
+		log.Warnf("User info endpoint did not return a value for the subject claim '%s', falling back to username '%s'", subClaim, username)
+		sub = username
+	} else {
+		// Try to convert the sub claim to a string
+		if subStr, ok := subIface.(string); ok {
+			sub = subStr
+		} else if subNum, ok := subIface.(float64); ok {
+			// Some providers (like GitHub) return a numeric ID
+			// Convert to int64 first to avoid floating-point precision issues
+			if subNum >= 0 && subNum <= float64(^uint64(0)>>1) && subNum == float64(int64(subNum)) {
+				sub = fmt.Sprintf("%d", int64(subNum))
+			} else {
+				log.Errorf("User info endpoint returned an out-of-range numeric value for the subject claim '%s': %v", subClaim, subNum)
+				err = errors.New("identity provider returned an invalid numeric subject for logged-in user")
+				return
+			}
+		} else {
+			log.Errorf("User info endpoint returned a non-string/non-numeric value for the subject claim '%s'", subClaim)
+			err = errors.New("identity provider did not return a valid subject for logged-in user")
+			return
+		}
 	}
 
-	issuerClaimValueIface, ok := claimsSource[issuerClaim]
-	if !ok {
-		log.Errorf("'%s' field of user info response from auth provider is not found", issuerClaim)
-		err = errors.New("identity provider returned an invalid issuer claim value")
-		return
+	// Get the issuer claim - this identifies the authentication provider
+	// For OIDC, this is the standard "iss" claim. For OAuth2 providers like GitHub,
+	// we may need to fall back to a configured value or the OIDC.Issuer setting
+	issuerClaimName := param.Issuer_OIDCIssuerClaim.GetString()
+	if issuerClaimName == "" {
+		issuerClaimName = "iss"
 	}
 
-	issuerClaimValue, ok := issuerClaimValueIface.(string)
+	issuerClaimValueIface, ok := claimsSource[issuerClaimName]
+	var issuerClaimValue string
 	if !ok {
-		log.Errorf("'%s' field of user info response from auth provider is not a string", issuerClaim)
-		err = errors.New("identity provider returned an invalid issuer claim value")
-		return
+		// If the issuer claim is not found in the user info, fall back to OIDC.Issuer or authorization endpoint
+		log.Warnf("User info endpoint did not return a value for the issuer claim '%s'", issuerClaimName)
+
+		// Try to get from OIDC.Issuer configuration
+		if param.OIDC_Issuer.IsSet() {
+			issuerClaimValue = param.OIDC_Issuer.GetString()
+			log.Debugf("Using OIDC.Issuer as issuer: %s", issuerClaimValue)
+		} else if param.OIDC_AuthorizationEndpoint.IsSet() {
+			// Fall back to using the authorization endpoint hostname as the issuer
+			authEndpoint := param.OIDC_AuthorizationEndpoint.GetString()
+			parsedURL, parseErr := url.Parse(authEndpoint)
+			if parseErr == nil {
+				// Construct the issuer URL from scheme and host
+				issuerURL := &url.URL{
+					Scheme: parsedURL.Scheme,
+					Host:   parsedURL.Host,
+				}
+				issuerClaimValue = issuerURL.String()
+				log.Debugf("Using authorization endpoint host as issuer: %s", issuerClaimValue)
+			} else {
+				log.Errorf("Failed to parse authorization endpoint to determine issuer")
+				err = errors.New("identity provider did not return an issuer and unable to determine one from configuration")
+				return
+			}
+		} else {
+			log.Errorf("Unable to determine issuer: no '%s' claim in user info and OIDC.Issuer is not set", issuerClaimName)
+			err = errors.New("identity provider did not return an issuer claim value")
+			return
+		}
+	} else {
+		var ok bool
+		issuerClaimValue, ok = issuerClaimValueIface.(string)
+		if !ok {
+			log.Errorf("'%s' field of user info response from auth provider is not a string", issuerClaimName)
+			err = errors.New("identity provider returned an invalid issuer claim value")
+			return
+		}
 	}
 
 	// now that we have verified that the user belongs to a group we should create the user if it doesn't exist
@@ -305,7 +406,17 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 		for _, group := range groupList {
 			groups = append(groups, group.Name)
 		}
-
+	case GroupSourceTypeGitHub:
+		if accessToken == "" {
+			log.Errorf("GitHub group source requires an access token")
+			err = errors.New("GitHub group source requires an access token")
+			return nil, nil, err
+		}
+		groups, err = fetchGitHubOrganizations(accessToken)
+		if err != nil {
+			log.Errorf("Failed to fetch GitHub organizations: %v", err)
+			return nil, nil, errors.Wrap(err, "failed to fetch GitHub organizations")
+		}
 	case "", "none":
 		log.Debugf("No group source specified; no groups will be used")
 		return
@@ -388,30 +499,37 @@ func handleOAuthCallback(ctx *gin.Context) {
 
 	var idToken = make(map[string]interface{})
 	if idTokenRaw := token.Extra("id_token"); idTokenRaw != nil {
-		// We were given this ID token by the authentication provider, not
-		// some third party. If we don't trust the provider, we have greater
-		// issues.
-		skew, _ := time.ParseDuration("6s")
-		idTokenJWT, err := jwt.ParseString(idTokenRaw.(string), jwt.WithVerify(false), jwt.WithAcceptableSkew(skew))
-		if err != nil {
-			log.Errorf("Error parsing OIDC ID token: %v", err)
-			ctx.JSON(http.StatusInternalServerError,
-				server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    fmt.Sprint("Error parsing OIDC ID token: ", ctx.Request.URL),
-				})
-			return
-		}
+		// Check if the id_token is a non-empty string before parsing
+		// Some OAuth2 providers (e.g., GitHub) don't provide an ID token
+		idTokenStr, ok := idTokenRaw.(string)
+		if !ok || idTokenStr == "" {
+			log.Debugf("ID token is not a valid string or is empty")
+		} else {
+			// We were given this ID token by the authentication provider, not
+			// some third party. If we don't trust the provider, we have greater
+			// issues.
+			skew, _ := time.ParseDuration("6s")
+			idTokenJWT, err := jwt.ParseString(idTokenStr, jwt.WithVerify(false), jwt.WithAcceptableSkew(skew))
+			if err != nil {
+				log.Errorf("Error parsing OIDC ID token: %v", err)
+				ctx.JSON(http.StatusInternalServerError,
+					server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    fmt.Sprint("Error parsing OIDC ID token: ", ctx.Request.URL),
+					})
+				return
+			}
 
-		idToken, err = idTokenJWT.AsMap(ctx)
-		if err != nil {
-			log.Errorf("Error converting OIDC ID token to a map: %v", err)
-			ctx.JSON(http.StatusInternalServerError,
-				server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    fmt.Sprint("Error converting OIDC ID token to a map: ", ctx.Request.URL),
-				})
-			return
+			idToken, err = idTokenJWT.AsMap(ctx)
+			if err != nil {
+				log.Errorf("Error converting OIDC ID token to a map: %v", err)
+				ctx.JSON(http.StatusInternalServerError,
+					server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    fmt.Sprint("Error converting OIDC ID token to a map: ", ctx.Request.URL),
+					})
+				return
+			}
 		}
 	} else {
 		log.Debugf("Did not find an OIDC ID token")
@@ -477,7 +595,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 		return
 	}
 
-	userRecord, groups, err := generateUserGroupInfo(userInfo, idToken)
+	userRecord, groups, err := generateUserGroupInfo(userInfo, idToken, token.AccessToken)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError,
 			server_structs.SimpleApiResp{

@@ -141,7 +141,9 @@ type Config struct {
 		OIDCAuthenticationRequirements interface{} `mapstructure:"oidcauthenticationrequirements" yaml:"OIDCAuthenticationRequirements"`
 		OIDCAuthenticationUserClaim string `mapstructure:"oidcauthenticationuserclaim" yaml:"OIDCAuthenticationUserClaim"`
 		OIDCGroupClaim string `mapstructure:"oidcgroupclaim" yaml:"OIDCGroupClaim"`
+		OIDCIssuerClaim string `mapstructure:"oidcissuerclaim" yaml:"OIDCIssuerClaim"`
 		OIDCPreferClaimsFromIDToken bool `mapstructure:"oidcpreferclaimsfromidtoken" yaml:"OIDCPreferClaimsFromIDToken"`
+		OIDCSubjectClaim string `mapstructure:"oidcsubjectclaim" yaml:"OIDCSubjectClaim"`
 		QDLLocation string `mapstructure:"qdllocation" yaml:"QDLLocation"`
 		RedirectUris []string `mapstructure:"redirecturis" yaml:"RedirectUris"`
 		ScitokensServerLocation string `mapstructure:"scitokensserverlocation" yaml:"ScitokensServerLocation"`
@@ -524,7 +526,9 @@ type configWithType struct {
 		OIDCAuthenticationRequirements struct { Type string; Value interface{} }
 		OIDCAuthenticationUserClaim struct { Type string; Value string }
 		OIDCGroupClaim struct { Type string; Value string }
+		OIDCIssuerClaim struct { Type string; Value string }
 		OIDCPreferClaimsFromIDToken struct { Type string; Value bool }
+		OIDCSubjectClaim struct { Type string; Value string }
 		QDLLocation struct { Type string; Value string }
 		RedirectUris struct { Type string; Value []string }
 		ScitokensServerLocation struct { Type string; Value string }
