@@ -397,11 +397,15 @@ const (
 	AlgDefault = AlgCRC32C // Default checksum algorithm is CRC32C if the client doesn't specify one.
 	algFirst   = AlgMD5
 	algLast    = AlgUnknown
+)
 
-	SyncNone  = iota // When synchronizing, always re-transfer, regardless of existence at destination.
-	SyncExist        // Skip synchronization transfer if the destination exists
-	SyncSize         // Skip synchronization transfer if the destination exists and matches the current source size
+const (
+	SyncNone  SyncLevel = iota // When synchronizing, always re-transfer, regardless of existence at destination.
+	SyncExist                  // Skip synchronization transfer if the destination exists
+	SyncSize                   // Skip synchronization transfer if the destination exists and matches the current source size
+)
 
+const (
 	transferTypeDownload transferType = iota // Transfer is downloading from the federation
 	transferTypeUpload                       // Transfer is uploading to the federation
 	transferTypePrestage                     // Transfer is staging at a federation cache
