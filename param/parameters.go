@@ -279,6 +279,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.GlobusCollectionID": false,
 	"Origin.GlobusCollectionName": false,
 	"Origin.GlobusConfigLocation": false,
+	"Origin.GlobusTransferTokenFile": false,
 	"Origin.HttpAuthTokenFile": false,
 	"Origin.HttpServiceUrl": false,
 	"Origin.Mode": false,
@@ -599,6 +600,8 @@ func (sP StringParam) GetString() string {
 			return config.Origin.GlobusCollectionName
 		case "Origin.GlobusConfigLocation":
 			return config.Origin.GlobusConfigLocation
+		case "Origin.GlobusTransferTokenFile":
+			return config.Origin.GlobusTransferTokenFile
 		case "Origin.HttpAuthTokenFile":
 			return config.Origin.HttpAuthTokenFile
 		case "Origin.HttpServiceUrl":
@@ -1379,6 +1382,7 @@ var allParameterNames = []string{
 	"Origin.GlobusCollectionID",
 	"Origin.GlobusCollectionName",
 	"Origin.GlobusConfigLocation",
+	"Origin.GlobusTransferTokenFile",
 	"Origin.HttpAuthTokenFile",
 	"Origin.HttpServiceUrl",
 	"Origin.Mode",
