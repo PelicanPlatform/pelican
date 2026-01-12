@@ -215,7 +215,10 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 			callbackUrl, err := pelican_oauth2.GetRedirectURL(globusCallbackPath)
 			errMsg := fmt.Sprintf("failed to create advertisement: no activated Globus collection. Go to %s to activate your collection", activateUrl)
 			if err == nil {
-				errMsg += fmt.Sprintf(". The Globus app expects the following redirect URL: %s ", callbackUrl)
+				errMsg += fmt.Sprintf(". Pelican will try %q as the redirect callback URL "+
+					"(this must match the redirect URL configured via Globus when setting up the OAuth client)", callbackUrl)
+			} else {
+				log.Errorf("failed to determine redirect URL for Globus activation: %v", err)
 			}
 			return nil, errors.New(errMsg)
 		}
