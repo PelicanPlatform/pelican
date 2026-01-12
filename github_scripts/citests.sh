@@ -19,7 +19,7 @@ cp pelican stashcp
 cp pelican stash_plugin
 
 to_exit=0
-./stashcp -d osdf:///ospool/uc-shared/public/OSG-Staff/validation/test.txt ./query1
+./stashcp -d osdf:///pelicanplatform/test/hello-world.txt ./query1
 rm query1
 
 # Test the plugin interface
@@ -35,11 +35,11 @@ if ! [[ $classad_output =~ "SupportedMethods = \"stash, osdf, pelican\"" ]]; the
   to_exit=1
 fi
 
-plugin_output=$(./stash_plugin osdf:///ospool/uc-shared/public/OSG-Staff/validation/test.txt query1)
+plugin_output=$(./stash_plugin osdf:///pelicanplatform/test/hello-world.txt query1)
 rm query1
 
 # shellcheck disable=SC2076
-if ! [[ $plugin_output =~ "TransferUrl = \"osdf:///ospool/uc-shared/public/OSG-Staff/validation/test.txt\"" ]]; then
+if ! [[ $plugin_output =~ "TransferUrl = \"osdf:///pelicanplatform/test/hello-world.txt\"" ]]; then
   echo "TransferUrl not in plugin output"
   to_exit=1
 fi
@@ -50,7 +50,7 @@ if ! [[ $plugin_output =~ "TransferSuccess = true" ]]; then
 fi
 
 cat > infile <<EOF
-[ LocalFileName = "$PWD/query1"; Url = "osdf:///ospool/uc-shared/public/OSG-Staff/validation/test.txt" ]
+[ LocalFileName = "$PWD/query1"; Url = "osdf:///pelicanplatform/test/hello-world.txt" ]
 EOF
 
 ./stash_plugin -infile $PWD/infile -outfile $PWD/outfile
@@ -89,7 +89,7 @@ if [ ! -e "$SOCKET_DIR/socket" ]; then
 fi
 
 
-NEAREST_CACHE="unix://$SOCKET_DIR/socket" ./stash_plugin -d osdf:///ospool/uc-shared/public/OSG-Staff/validation/test.txt /dev/null
+NEAREST_CACHE="unix://$SOCKET_DIR/socket" ./stash_plugin -d osdf:///pelicanplatform/test/hello-world.txt /dev/null
 exit_status=$?
 
 if ! [[ "$exit_status" = 0 ]]; then
@@ -97,13 +97,13 @@ if ! [[ "$exit_status" = 0 ]]; then
   exit 1
 fi
 
-if [ ! -e "$SOCKET_DIR/data/ospool/uc-shared/public/OSG-Staff/validation/test.txt.DONE" ]; then
+if [ ! -e "$SOCKET_DIR/data/pelicanplatform/test/hello-world.txt.DONE" ]; then
   echo "Test file not in local cache"
   exit 1
 fi
 
 # Test we work with PELICAN_NEAREST_CACHE as well
-PELICAN_PREFFERREDCACHES="unix://$SOCKET_DIR/socket" ./stash_plugin -d osdf:///ospool/uc-shared/public/OSG-Staff/validation/test.txt /dev/null
+PELICAN_PREFFERREDCACHES="unix://$SOCKET_DIR/socket" ./stash_plugin -d osdf:///pelicanplatform/test/hello-world.txt /dev/null
 exit_status=$?
 
 if ! [[ "$exit_status" = 0 ]]; then
@@ -111,7 +111,7 @@ if ! [[ "$exit_status" = 0 ]]; then
   exit 1
 fi
 
-if [ ! -e "$SOCKET_DIR/data/ospool/uc-shared/public/OSG-Staff/validation/test.txt.DONE" ]; then
+if [ ! -e "$SOCKET_DIR/data/pelicanplatform/test/hello-world.txt.DONE" ]; then
   echo "Test file not in local cache"
   exit 1
 fi

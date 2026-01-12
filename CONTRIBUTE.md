@@ -295,7 +295,7 @@ $ cd dist/pelican_linux_*/
 and run Pelican client to fetch an object:
 
 ```bash
-$ ./pelican object copy -f https://osg-htc.org /ospool/uc-shared/public/OSG-Staff/validation/test.txt downloaded-testfile.txt
+$ ./pelican object copy -f https://osg-htc.org /pelicanplatform/test/hello-world.txt downloaded-testfile.txt
 ```
 
 This will download a test file from our OSDF federation to your current working directory. Check the object is downloaded:
