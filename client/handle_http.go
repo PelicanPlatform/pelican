@@ -3072,7 +3072,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	// If the job is recursive, we skip this check as the check is already performed in walkDirUpload
 	// If the job is not recursive, we check if the object exists at the origin
 	// Skip this check if Client.EnableOverwrites is enabled
-	if transfer.remoteURL != nil && transfer.job != nil && transfer.job.syncLevel != SyncNone && !transfer.job.recursive && !param.Client_EnableOverwrites.GetBool() {
+	if transfer.remoteURL != nil && transfer.job != nil && transfer.job.syncLevel == SyncNone && !transfer.job.recursive && !param.Client_EnableOverwrites.GetBool() {
 		remoteUrl, dirResp, token := transfer.job.remoteURL, transfer.job.dirResp, transfer.job.token
 		_, statErr := statHttp(remoteUrl, dirResp, token)
 		if statErr == nil {
