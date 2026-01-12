@@ -41,14 +41,9 @@ const (
 	firstCheckDelay = 5 * time.Second
 )
 
-type filesystemUsageFuncKey struct{}
-
-// filesystemUsageFunc is a function that returns filesystem usage for a given path.
-// This allows tests to inject custom implementations.
-type filesystemUsageFunc func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error)
-
-// defaultFilesystemUsage is the default implementation that uses syscall.Statfs.
-func defaultFilesystemUsage(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
+// getFilesystemUsageImpl is a package-level variable that holds the function to get filesystem usage.
+// It can be overridden in tests to inject custom implementations.
+var getFilesystemUsageImpl = func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
 	var stat syscall.Statfs_t
 	if err = syscall.Statfs(path, &stat); err != nil {
 		err = errors.Wrapf(err, "unable to determine filesystem usage for path %s", path)
@@ -70,11 +65,7 @@ func defaultFilesystemUsage(path string) (usagePercent float64, totalBytes uint6
 // getFilesystemUsage returns the percentage of storage used for a given path.
 // Returns usage percentage (0-100), total bytes, used bytes, and any error.
 func getFilesystemUsage(ctx context.Context, path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
-	// Check if a custom function is provided in context (for testing)
-	if fn, ok := ctx.Value(filesystemUsageFuncKey{}).(filesystemUsageFunc); ok && fn != nil {
-		return fn(path)
-	}
-	return defaultFilesystemUsage(path)
+	return getFilesystemUsageImpl(path)
 }
 
 // getPathsToCheck returns a deduplicated list of filesystem paths that should be checked

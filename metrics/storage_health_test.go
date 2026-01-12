@@ -56,15 +56,16 @@ func TestGetFilesystemUsageInvalidPath(t *testing.T) {
 }
 
 func TestGetFilesystemUsageWithCustomFunction(t *testing.T) {
-	// Create a custom function that returns fixed values
-	customFunc := func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
+	// Save original implementation
+	originalImpl := getFilesystemUsageImpl
+	defer func() { getFilesystemUsageImpl = originalImpl }()
+
+	// Override with custom implementation
+	getFilesystemUsageImpl = func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
 		return 75.0, 1000000, 750000, nil
 	}
 
-	// Create context with custom function
-	ctx := context.WithValue(context.Background(), filesystemUsageFuncKey{}, filesystemUsageFunc(customFunc))
-
-	usage, totalBytes, usedBytes, err := getFilesystemUsage(ctx, "/any/path")
+	usage, totalBytes, usedBytes, err := getFilesystemUsage(context.Background(), "/any/path")
 	require.NoError(t, err)
 	assert.Equal(t, 75.0, usage)
 	assert.Equal(t, uint64(1000000), totalBytes)
@@ -72,6 +73,10 @@ func TestGetFilesystemUsageWithCustomFunction(t *testing.T) {
 }
 
 func TestCheckStorageHealthOK(t *testing.T) {
+	// Save original implementation
+	originalImpl := getFilesystemUsageImpl
+	defer func() { getFilesystemUsageImpl = originalImpl }()
+
 	err := param.Reset()
 	require.NoError(t, err)
 	config.ResetConfig()
@@ -88,14 +93,13 @@ func TestCheckStorageHealthOK(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Create context with custom function to simulate 50% usage (OK status)
-	customFunc := func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
+	// Override with custom implementation to simulate 50% usage (OK status)
+	getFilesystemUsageImpl = func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
 		return 50.0, 1000000, 500000, nil
 	}
-	ctx := context.WithValue(context.Background(), filesystemUsageFuncKey{}, filesystemUsageFunc(customFunc))
 
 	modules := server_structs.ServerType(0)
-	checkStorageHealth(ctx, modules)
+	checkStorageHealth(context.Background(), modules)
 
 	statusStr, err := GetComponentStatus(Server_StorageHealth)
 	require.NoError(t, err)
@@ -103,6 +107,10 @@ func TestCheckStorageHealthOK(t *testing.T) {
 }
 
 func TestCheckStorageHealthWarning(t *testing.T) {
+	// Save original implementation
+	originalImpl := getFilesystemUsageImpl
+	defer func() { getFilesystemUsageImpl = originalImpl }()
+
 	err := param.Reset()
 	require.NoError(t, err)
 	config.ResetConfig()
@@ -119,14 +127,13 @@ func TestCheckStorageHealthWarning(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Create context with custom function to simulate 85% usage (Warning status)
-	customFunc := func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
+	// Override with custom implementation to simulate 85% usage (Warning status)
+	getFilesystemUsageImpl = func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
 		return 85.0, 1000000, 850000, nil
 	}
-	ctx := context.WithValue(context.Background(), filesystemUsageFuncKey{}, filesystemUsageFunc(customFunc))
 
 	modules := server_structs.ServerType(0)
-	checkStorageHealth(ctx, modules)
+	checkStorageHealth(context.Background(), modules)
 
 	statusStr, err := GetComponentStatus(Server_StorageHealth)
 	require.NoError(t, err)
@@ -134,6 +141,10 @@ func TestCheckStorageHealthWarning(t *testing.T) {
 }
 
 func TestCheckStorageHealthCritical(t *testing.T) {
+	// Save original implementation
+	originalImpl := getFilesystemUsageImpl
+	defer func() { getFilesystemUsageImpl = originalImpl }()
+
 	err := param.Reset()
 	require.NoError(t, err)
 	config.ResetConfig()
@@ -150,14 +161,13 @@ func TestCheckStorageHealthCritical(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Create context with custom function to simulate 95% usage (Critical status)
-	customFunc := func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
+	// Override with custom implementation to simulate 95% usage (Critical status)
+	getFilesystemUsageImpl = func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
 		return 95.0, 1000000, 950000, nil
 	}
-	ctx := context.WithValue(context.Background(), filesystemUsageFuncKey{}, filesystemUsageFunc(customFunc))
 
 	modules := server_structs.ServerType(0)
-	checkStorageHealth(ctx, modules)
+	checkStorageHealth(context.Background(), modules)
 
 	statusStr, err := GetComponentStatus(Server_StorageHealth)
 	require.NoError(t, err)
@@ -325,6 +335,10 @@ func TestGetPathsToCheckPrometheusConditional(t *testing.T) {
 }
 
 func TestCheckStorageHealthMultiplePaths(t *testing.T) {
+	// Save original implementation
+	originalImpl := getFilesystemUsageImpl
+	defer func() { getFilesystemUsageImpl = originalImpl }()
+
 	err := param.Reset()
 	require.NoError(t, err)
 	config.ResetConfig()
@@ -357,13 +371,12 @@ func TestCheckStorageHealthMultiplePaths(t *testing.T) {
 	modules.Set(server_structs.OriginType)
 	modules.Set(server_structs.RegistryType)
 
-	// Create context with custom function
-	customFunc := func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
+	// Override with custom implementation
+	getFilesystemUsageImpl = func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
 		return 60.0, 1000000, 600000, nil
 	}
-	ctx := context.WithValue(context.Background(), filesystemUsageFuncKey{}, filesystemUsageFunc(customFunc))
 
-	checkStorageHealth(ctx, modules)
+	checkStorageHealth(context.Background(), modules)
 
 	statusStr, err := GetComponentStatus(Server_StorageHealth)
 	require.NoError(t, err)
@@ -403,6 +416,10 @@ func TestCheckStorageHealthInvalidThresholds(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Save original implementation
+			originalImpl := getFilesystemUsageImpl
+			defer func() { getFilesystemUsageImpl = originalImpl }()
+
 			err := param.Reset()
 			require.NoError(t, err)
 			config.ResetConfig()
@@ -418,13 +435,13 @@ func TestCheckStorageHealthInvalidThresholds(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			customFunc := func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
+			// Override with custom implementation
+			getFilesystemUsageImpl = func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
 				return tt.usage, 1000000, uint64(tt.usage * 10000), nil
 			}
-			ctx := context.WithValue(context.Background(), filesystemUsageFuncKey{}, filesystemUsageFunc(customFunc))
 
 			modules := server_structs.ServerType(0)
-			checkStorageHealth(ctx, modules)
+			checkStorageHealth(context.Background(), modules)
 
 			statusStr, err := GetComponentStatus(Server_StorageHealth)
 			require.NoError(t, err)
@@ -434,6 +451,10 @@ func TestCheckStorageHealthInvalidThresholds(t *testing.T) {
 }
 
 func TestCheckStorageHealthCriticalUpgradesFromWarning(t *testing.T) {
+	// Save original implementation
+	originalImpl := getFilesystemUsageImpl
+	defer func() { getFilesystemUsageImpl = originalImpl }()
+
 	err := param.Reset()
 	require.NoError(t, err)
 	config.ResetConfig()
@@ -462,16 +483,16 @@ func TestCheckStorageHealthCriticalUpgradesFromWarning(t *testing.T) {
 	modules.Set(server_structs.OriginType)
 
 	callCount := 0
-	customFunc := func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
+	// Override with custom implementation
+	getFilesystemUsageImpl = func(path string) (usagePercent float64, totalBytes uint64, usedBytes uint64, err error) {
 		callCount++
 		if callCount == 1 {
 			return 85.0, 1000000, 850000, nil
 		}
 		return 95.0, 1000000, 950000, nil
 	}
-	ctx := context.WithValue(context.Background(), filesystemUsageFuncKey{}, filesystemUsageFunc(customFunc))
 
-	checkStorageHealth(ctx, modules)
+	checkStorageHealth(context.Background(), modules)
 
 	statusStr, err := GetComponentStatus(Server_StorageHealth)
 	require.NoError(t, err)
