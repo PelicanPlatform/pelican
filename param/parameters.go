@@ -322,6 +322,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Registry.RequireOriginApproval": false,
 	"RuntimeDir": false,
 	"Server.AdLifetime": false,
+	"Server.AdminGroups": false,
 	"Server.AdvertisementInterval": false,
 	"Server.DbLocation": false,
 	"Server.DirectorUrls": false,
@@ -791,6 +792,8 @@ func (slP StringSliceParam) GetStringSlice() []string {
 			return config.Origin.ScitokensRestrictedPaths
 		case "Registry.AdminUsers":
 			return config.Registry.AdminUsers
+		case "Server.AdminGroups":
+			return config.Server.AdminGroups
 		case "Server.DirectorUrls":
 			return config.Server.DirectorUrls
 		case "Server.Modules":
@@ -1431,6 +1434,7 @@ var allParameterNames = []string{
 	"Registry.RequireOriginApproval",
 	"RuntimeDir",
 	"Server.AdLifetime",
+	"Server.AdminGroups",
 	"Server.AdvertisementInterval",
 	"Server.DbLocation",
 	"Server.DirectorUrls",
