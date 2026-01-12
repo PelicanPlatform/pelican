@@ -3139,6 +3139,10 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		Scheme: "https",
 		Path:   transfer.remoteURL.Path,
 	}
+	// Add the oss.asize query parameter for PUT requests
+	query := dest.Query()
+	query.Set("oss.asize", fmt.Sprintf("%d", sizer.Size()))
+	dest.RawQuery = query.Encode()
 	attempt.Endpoint = dest.Host
 	// Create the wrapped reader and send it to the request
 	closed := make(chan bool, 1)

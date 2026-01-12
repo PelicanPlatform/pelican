@@ -257,6 +257,7 @@ type Config struct {
 		GlobusCollectionID string `mapstructure:"globuscollectionid" yaml:"GlobusCollectionID"`
 		GlobusCollectionName string `mapstructure:"globuscollectionname" yaml:"GlobusCollectionName"`
 		GlobusConfigLocation string `mapstructure:"globusconfiglocation" yaml:"GlobusConfigLocation"`
+		GlobusTransferTokenFile string `mapstructure:"globustransfertokenfile" yaml:"GlobusTransferTokenFile"`
 		HttpAuthTokenFile string `mapstructure:"httpauthtokenfile" yaml:"HttpAuthTokenFile"`
 		HttpServiceUrl string `mapstructure:"httpserviceurl" yaml:"HttpServiceUrl"`
 		Mode string `mapstructure:"mode" yaml:"Mode"`
@@ -643,6 +644,7 @@ type configWithType struct {
 		GlobusCollectionID struct { Type string; Value string }
 		GlobusCollectionName struct { Type string; Value string }
 		GlobusConfigLocation struct { Type string; Value string }
+		GlobusTransferTokenFile struct { Type string; Value string }
 		HttpAuthTokenFile struct { Type string; Value string }
 		HttpServiceUrl struct { Type string; Value string }
 		Mode struct { Type string; Value string }

@@ -29,6 +29,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/features"
 	"github.com/pelicanplatform/pelican/metrics"
+	pelican_oauth2 "github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -211,7 +212,15 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 	if len(prefixes) == 0 {
 		if isGlobusBackend {
 			activateUrl := param.Server_ExternalWebUrl.GetString() + "/view/origin/globus"
-			return nil, fmt.Errorf("failed to create advertisement: no activated Globus collection. Go to %s to activate your collection.", activateUrl)
+			callbackUrl, err := pelican_oauth2.GetRedirectURL(globusCallbackPath)
+			errMsg := fmt.Sprintf("failed to create advertisement: no activated Globus collection. Go to %s to activate your collection", activateUrl)
+			if err == nil {
+				errMsg += fmt.Sprintf(". Pelican will try %q as the redirect callback URL "+
+					"(this must match the redirect URL configured via Globus when setting up the OAuth client)", callbackUrl)
+			} else {
+				log.Errorf("failed to determine redirect URL for Globus activation: %v", err)
+			}
+			return nil, errors.New(errMsg)
 		}
 
 		return nil, errors.New("failed to create advertisement: no valid export")
