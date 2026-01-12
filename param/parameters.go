@@ -157,6 +157,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Director.FilterCachesInErrorState": false,
 	"Director.FilteredServers": false,
 	"Director.GeoIPLocation": false,
+	"Director.MaxMindKey": false,
 	"Director.MaxMindKeyFile": false,
 	"Director.MaxStatResponse": false,
 	"Director.MinStatResponse": false,
@@ -476,6 +477,8 @@ func (sP StringParam) GetString() string {
 			return config.Director.DefaultResponse
 		case "Director.GeoIPLocation":
 			return config.Director.GeoIPLocation
+		case "Director.MaxMindKey":
+			return config.Director.MaxMindKey
 		case "Director.MaxMindKeyFile":
 			return config.Director.MaxMindKeyFile
 		case "Director.SupportContactEmail":
@@ -1174,6 +1177,10 @@ func (oP ObjectParam) Unmarshal(rawVal any) error {
 	return viper.UnmarshalKey(oP.name, rawVal)
 }
 
+func (oP ObjectParam) UnmarshalWithHook(rawVal any, decodeHook any) error {
+	return viper.UnmarshalKey(oP.name, rawVal, viper.DecodeHook(decodeHook))
+}
+
 func (oP ObjectParam) GetName() string {
 	return oP.name
 }
@@ -1266,6 +1273,7 @@ var allParameterNames = []string{
 	"Director.FilterCachesInErrorState",
 	"Director.FilteredServers",
 	"Director.GeoIPLocation",
+	"Director.MaxMindKey",
 	"Director.MaxMindKeyFile",
 	"Director.MaxStatResponse",
 	"Director.MinStatResponse",
@@ -1548,6 +1556,7 @@ var (
 	Director_DbLocation = StringParam{"Director.DbLocation"}
 	Director_DefaultResponse = StringParam{"Director.DefaultResponse"}
 	Director_GeoIPLocation = StringParam{"Director.GeoIPLocation"}
+	Director_MaxMindKey = StringParam{"Director.MaxMindKey"}
 	Director_MaxMindKeyFile = StringParam{"Director.MaxMindKeyFile"}
 	Director_SupportContactEmail = StringParam{"Director.SupportContactEmail"}
 	Director_SupportContactUrl = StringParam{"Director.SupportContactUrl"}

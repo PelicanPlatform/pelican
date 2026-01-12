@@ -36,7 +36,6 @@ import (
 	"github.com/oschwald/geoip2-golang/v2"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -76,17 +75,17 @@ func downloadDB(localFile string) error {
 
 	var licenseKey string
 	keyFile := param.Director_MaxMindKeyFile.GetString()
-	keyFromEnv := viper.GetString("MAXMINDKEY")
+	keyFromParam := param.Director_MaxMindKey.GetString()
 	if keyFile != "" {
 		contents, err := os.ReadFile(keyFile)
 		if err != nil {
 			return err
 		}
 		licenseKey = strings.TrimSpace(string(contents))
-	} else if keyFromEnv != "" {
-		licenseKey = keyFromEnv
+	} else if keyFromParam != "" {
+		licenseKey = keyFromParam
 	} else {
-		return errors.New("A MaxMind key file must be specified in the config (Director.MaxMindKeyFile), in the environment (PELICAN_DIRECTOR_MAXMINDKEYFILE), or the key must be provided via the environment variable PELICAN_MAXMINDKEY)")
+		return errors.New("A MaxMind key file must be specified in the config (Director.MaxMindKeyFile), in the environment (PELICAN_DIRECTOR_MAXMINDKEYFILE), or the key must be provided via the environment variable PELICAN_DIRECTOR_MAXMINDKEY)")
 	}
 
 	url := fmt.Sprintf(maxMindURL, licenseKey)

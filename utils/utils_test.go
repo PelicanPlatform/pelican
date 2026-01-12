@@ -57,6 +57,10 @@ func TestValidateWatermark(t *testing.T) {
 	defer func() { require.NoError(t, param.Reset()) }()
 
 	t.Parallel()
+
+	// Use a real parameter for testing
+	testParam := param.Cache_LowWatermark
+
 	testCases := []struct {
 		name          string
 		wm            string
@@ -173,8 +177,8 @@ func TestValidateWatermark(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.NoError(t, param.Set(tc.name, tc.wm))
-			val, isAbs, err := ValidateWatermark(tc.name, tc.requireSuffix)
+			require.NoError(t, param.Set(testParam.GetName(), tc.wm))
+			val, isAbs, err := ValidateWatermark(testParam, tc.requireSuffix)
 			if tc.expectErr {
 				assert.Equal(t, 0.0, val)
 				assert.False(t, isAbs)

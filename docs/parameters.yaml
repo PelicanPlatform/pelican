@@ -2021,6 +2021,15 @@ type: filename
 default: none
 components: ["director"]
 ---
+name: Director.MaxMindKey
+description: |+
+  A MaxMind API key provided directly as a string. This is an alternative to providing the key via a file
+  (Director.MaxMindKeyFile). If both are set, the file takes precedence. This parameter can be set via the
+  environment variable PELICAN_DIRECTOR_MAXMINDKEY.
+type: string
+default: none
+components: ["director"]
+---
 name: Director.GeoIPLocation
 description: |+
   A filepath to the intended location of the MaxMind GeoLite City database. This option can be used either to load
