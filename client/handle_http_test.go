@@ -2810,6 +2810,12 @@ func TestPutOverwrite(t *testing.T) {
 		token := NewTokenGenerator(nil, nil, config.TokenSharedWrite, false)
 		token.SetToken("test-token")
 
+		// Create a test file to upload
+		testData := []byte("test content")
+		fname := filepath.Join(t.TempDir(), "test.txt")
+		err = os.WriteFile(fname, testData, 0o644)
+		require.NoError(t, err)
+
 		transfer := &transferFile{
 			ctx: context.Background(),
 			job: &TransferJob{
@@ -2828,6 +2834,7 @@ func TestPutOverwrite(t *testing.T) {
 				token: token,
 			},
 			remoteURL: svrURL,
+			localPath: fname,
 			token:     token,
 		}
 
