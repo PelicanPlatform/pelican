@@ -32,6 +32,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/common/route"
+	"github.com/prometheus/prometheus/rules"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -288,5 +289,46 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 		r.ServeHTTP(w, c.Request)
 
 		assert.Equal(t, 403, w.Result().StatusCode, "Expected status code of 403 due to bad token scope")
+	})
+}
+
+// TestStubRulesRetriever verifies that the stubRulesRetriever implementation
+// returns empty slices instead of nil to prevent nil pointer panics when
+// external tools query the /rules or /alerts endpoints.
+func TestStubRulesRetriever(t *testing.T) {
+	stub := stubRulesRetriever{}
+
+	t.Run("RuleGroups-returns-empty-slice", func(t *testing.T) {
+		result := stub.RuleGroups()
+		assert.NotNil(t, result, "RuleGroups should return a non-nil slice")
+		assert.Empty(t, result, "RuleGroups should return an empty slice")
+		assert.IsType(t, []*rules.Group{}, result, "RuleGroups should return correct type")
+	})
+
+	t.Run("AlertingRules-returns-empty-slice", func(t *testing.T) {
+		result := stub.AlertingRules()
+		assert.NotNil(t, result, "AlertingRules should return a non-nil slice")
+		assert.Empty(t, result, "AlertingRules should return an empty slice")
+		assert.IsType(t, []*rules.AlertingRule{}, result, "AlertingRules should return correct type")
+	})
+}
+
+// TestStubAlertmanagerRetriever verifies that the stubAlertmanagerRetriever
+// implementation returns empty slices instead of nil to prevent nil pointer panics.
+func TestStubAlertmanagerRetriever(t *testing.T) {
+	stub := stubAlertmanagerRetriever{}
+
+	t.Run("Alertmanagers-returns-empty-slice", func(t *testing.T) {
+		result := stub.Alertmanagers()
+		assert.NotNil(t, result, "Alertmanagers should return a non-nil slice")
+		assert.Empty(t, result, "Alertmanagers should return an empty slice")
+		assert.IsType(t, []*url.URL{}, result, "Alertmanagers should return correct type")
+	})
+
+	t.Run("DroppedAlertmanagers-returns-empty-slice", func(t *testing.T) {
+		result := stub.DroppedAlertmanagers()
+		assert.NotNil(t, result, "DroppedAlertmanagers should return a non-nil slice")
+		assert.Empty(t, result, "DroppedAlertmanagers should return an empty slice")
+		assert.IsType(t, []*url.URL{}, result, "DroppedAlertmanagers should return correct type")
 	})
 }
