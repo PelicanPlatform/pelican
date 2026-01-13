@@ -1536,6 +1536,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 		Warn:  "warning",
 		Error: "error",
 		Fatal: "none",
+		Panic: "none",
 	}); err != nil {
 		return errors.Wrapf(err, "failed to map logging level for Logging.Cache.Lotman")
 	}
