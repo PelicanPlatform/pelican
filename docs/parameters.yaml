@@ -333,6 +333,19 @@ default: error
 components: ["cache"]
 runtime_configurable: true
 ---
+name: Logging.Cache.Lotman
+description: |+
+  Trace level of Lotman, the Lot Manager plugin for XRootD cache eviction. This component manages cache
+  eviction policies and storage allocation. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`.
+  Note that lotman trace levels are additive (e.g., info also includes warning and error).
+
+  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  overridden here. Levels are case-insensitive.
+type: string
+default: error
+components: ["cache"]
+runtime_configurable: true
+---
 name: Logging.Cache.Ofs
 description: |+
   Trace level of XRootD's Open File System. This component cares about files and directories from the administrative perspective.

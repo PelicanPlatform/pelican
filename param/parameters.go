@@ -201,6 +201,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"LocalCache.Size": false,
 	"LocalCache.Socket": false,
 	"Logging.Cache.Http": true,
+	"Logging.Cache.Lotman": true,
 	"Logging.Cache.Ofs": true,
 	"Logging.Cache.Pfc": true,
 	"Logging.Cache.Pss": true,
@@ -528,6 +529,8 @@ func (sP StringParam) GetString() string {
 			return config.LocalCache.Socket
 		case "Logging.Cache.Http":
 			return config.Logging.Cache.Http
+		case "Logging.Cache.Lotman":
+			return config.Logging.Cache.Lotman
 		case "Logging.Cache.Ofs":
 			return config.Logging.Cache.Ofs
 		case "Logging.Cache.Pfc":
@@ -1316,6 +1319,7 @@ var allParameterNames = []string{
 	"LocalCache.Size",
 	"LocalCache.Socket",
 	"Logging.Cache.Http",
+	"Logging.Cache.Lotman",
 	"Logging.Cache.Ofs",
 	"Logging.Cache.Pfc",
 	"Logging.Cache.Pss",
@@ -1581,6 +1585,7 @@ var (
 	LocalCache_Size = StringParam{"LocalCache.Size"}
 	LocalCache_Socket = StringParam{"LocalCache.Socket"}
 	Logging_Cache_Http = StringParam{"Logging.Cache.Http"}
+	Logging_Cache_Lotman = StringParam{"Logging.Cache.Lotman"}
 	Logging_Cache_Ofs = StringParam{"Logging.Cache.Ofs"}
 	Logging_Cache_Pfc = StringParam{"Logging.Cache.Pfc"}
 	Logging_Cache_Pss = StringParam{"Logging.Cache.Pss"}
