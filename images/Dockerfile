@@ -638,6 +638,12 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   rm -f ./minio.rpm
 ENDRUN
 
+# Create alice user for multi-user testing
+RUN <<ENDRUN
+  set -eux
+  useradd -m -s /bin/bash alice
+ENDRUN
+
 ENTRYPOINT []
 CMD ["/bin/bash"]
 WORKDIR /app

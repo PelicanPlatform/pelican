@@ -23,7 +23,8 @@ This directory contains the devcontainer configuration for developing Pelican us
 ## Container Details
 
 - **Base Image**: `hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb`
-- **User**: root
+- **User**: root (default)
+- **Non-root Users (for testing)**: alice
 - **Forwarded Ports**:
   - 8444: Default Pelican server port
   - 8443: Pelican web UI port
@@ -60,6 +61,19 @@ go test ./...
 
 # Run tests for a specific module
 cd director && go test
+```
+
+## Testing as Non-Root Users
+
+The dev container includes a non-root user `alice` for scenarios such as:
+- Bootstrapping Pelican config locations for non-root users
+- Multi-user Origins
+- Testing privilege dropping and unprivileged operations
+
+To switch to the `alice` user:
+
+```bash
+su - alice
 ```
 
 ## More Information
