@@ -154,7 +154,9 @@ func TestGenerateTempPathFormat(t *testing.T) {
 	// Use filepath to construct platform-specific pattern
 	expectedDir := filepath.FromSlash("/data")
 	expectedBase := `.myfile\.dat\.[a-zA-Z0-9]{6}`
-	pattern := regexp.MustCompile(fmt.Sprintf(`^%s%c%s$`, regexp.QuoteMeta(expectedDir), filepath.Separator, expectedBase))
+	// Escape the separator for regex (Windows uses \ which needs to be escaped)
+	sep := regexp.QuoteMeta(string(filepath.Separator))
+	pattern := regexp.MustCompile(fmt.Sprintf(`^%s%s%s$`, regexp.QuoteMeta(expectedDir), sep, expectedBase))
 	assert.True(t, pattern.MatchString(tempPath),
 		"Temp path should match rsync pattern, got: %s", tempPath)
 }
