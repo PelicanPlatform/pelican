@@ -65,15 +65,15 @@ cd director && go test
 
 ## Testing as Non-Root Users
 
-The dev container includes a non-root user `` for scenarios such as:
+The dev container includes a non-root user `alice` for scenarios such as:
 - Bootstrapping Pelican config locations for non-root users
 - Multi-user Origins
 - Testing privilege dropping and unprivileged operations
 
-To switch to the  user:
+To switch to the `alice` user:
 
 ```bash
-su - 
+su - alice
 ```
 
 ## More Information
