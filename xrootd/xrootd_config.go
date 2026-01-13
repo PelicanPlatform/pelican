@@ -1538,7 +1538,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 		Fatal: "none",
 		Panic: "none",
 	}); err != nil {
-		return errors.Wrapf(err, "failed to map logging level for Logging.Cache.Lotman")
+		return errors.Wrapf(err, "failed to map logging level for %s", param.Logging_Cache_Lotman.GetName())
 	}
 
 	// Cache Scitokens
