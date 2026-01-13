@@ -192,6 +192,7 @@ type (
 		OriginXrd       string
 		OriginXrootd    string
 		CacheHttp       string
+		CacheLotman     string
 		CacheOfs        string
 		CachePfc        string
 		CachePss        string
@@ -1523,6 +1524,20 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 		Info:  "none",
 	}); err != nil {
 		return errors.Wrapf(err, "failed to map logging level for Logging.Cache.Http")
+	}
+
+	// Cache Lotman
+	// lotman.trace levels are additive: trace includes all levels, info includes warning and error, etc.
+	// Supported values: none, error, warning, info, debug, trace
+	if xrdConfig.Logging.CacheLotman, err = genLoggingConfig(param.Logging_Cache_Lotman.GetString(), loggingMap{
+		Trace: "trace",
+		Debug: "debug",
+		Info:  "info",
+		Warn:  "warning",
+		Error: "error",
+		Fatal: "none",
+	}); err != nil {
+		return errors.Wrapf(err, "failed to map logging level for Logging.Cache.Lotman")
 	}
 
 	// Cache Scitokens

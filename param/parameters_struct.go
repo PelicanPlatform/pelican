@@ -163,6 +163,7 @@ type Config struct {
 	Logging struct {
 		Cache struct {
 			Http string `mapstructure:"http" yaml:"Http"`
+			Lotman string `mapstructure:"lotman" yaml:"Lotman"`
 			Ofs string `mapstructure:"ofs" yaml:"Ofs"`
 			Pfc string `mapstructure:"pfc" yaml:"Pfc"`
 			Pss string `mapstructure:"pss" yaml:"Pss"`
@@ -550,6 +551,7 @@ type configWithType struct {
 	Logging struct {
 		Cache struct {
 			Http struct { Type string; Value string }
+			Lotman struct { Type string; Value string }
 			Ofs struct { Type string; Value string }
 			Pfc struct { Type string; Value string }
 			Pss struct { Type string; Value string }
