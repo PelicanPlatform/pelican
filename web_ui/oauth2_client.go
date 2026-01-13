@@ -505,6 +505,8 @@ func handleOAuthCallback(ctx *gin.Context) {
 		if !ok || idTokenStr == "" {
 			log.Debugf("ID token is not a valid string or is empty")
 		} else {
+			log.Debugln("ID token from auth provider:", idTokenStr)
+
 			// We were given this ID token by the authentication provider, not
 			// some third party. If we don't trust the provider, we have greater
 			// issues.
