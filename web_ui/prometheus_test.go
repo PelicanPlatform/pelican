@@ -318,7 +318,8 @@ func TestPrometheusRulesEndpoint(t *testing.T) {
 				"groups": ruleGroups,
 			},
 		}
-		json.NewEncoder(w).Encode(response)
+		err := json.NewEncoder(w).Encode(response)
+		require.NoError(t, err)
 	})
 
 	// Create temp dir for the origin key file
@@ -384,7 +385,8 @@ func TestPrometheusAlertsEndpoint(t *testing.T) {
 				"droppedAlertmanagers": droppedAlertmanagers,
 			},
 		}
-		json.NewEncoder(w).Encode(response)
+		err := json.NewEncoder(w).Encode(response)
+		require.NoError(t, err)
 	})
 
 	// Test the alerts endpoint as well
@@ -400,7 +402,8 @@ func TestPrometheusAlertsEndpoint(t *testing.T) {
 				"alerts": alertingRules,
 			},
 		}
-		json.NewEncoder(w).Encode(response)
+		err := json.NewEncoder(w).Encode(response)
+		require.NoError(t, err)
 	})
 
 	// Create temp dir for the origin key file
