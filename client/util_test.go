@@ -19,6 +19,7 @@
 package client
 
 import (
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -103,11 +104,15 @@ func TestGenerateTempPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tempPath := generateTempPath(tt.input)
+			// Convert paths to platform-specific format (handles Windows)
+			input := filepath.FromSlash(tt.input)
+			expectedDir := filepath.FromSlash(tt.expectedDir)
+
+			tempPath := generateTempPath(input)
 
 			// Verify the directory part is correct
 			dir := filepath.Dir(tempPath)
-			assert.Equal(t, tt.expectedDir, dir, "Directory should match")
+			assert.Equal(t, expectedDir, dir, "Directory should match")
 
 			// Verify the base name follows rsync pattern: .filename.XXXXXX
 			base := filepath.Base(tempPath)
@@ -141,12 +146,15 @@ func TestGenerateTempPathUniqueness(t *testing.T) {
 }
 
 func TestGenerateTempPathFormat(t *testing.T) {
-	input := "/data/myfile.dat"
+	input := filepath.FromSlash("/data/myfile.dat")
 	tempPath := generateTempPath(input)
 
-	// Expected format: /data/.myfile.dat.XXXXXX
+	// Expected format: {separator}data{separator}.myfile.dat.XXXXXX
 	// Where XXXXXX is 6 alphanumeric characters
-	pattern := regexp.MustCompile(`^/data/\.myfile\.dat\.[a-zA-Z0-9]{6}$`)
+	// Use filepath to construct platform-specific pattern
+	expectedDir := filepath.FromSlash("/data")
+	expectedBase := `.myfile\.dat\.[a-zA-Z0-9]{6}`
+	pattern := regexp.MustCompile(fmt.Sprintf(`^%s%c%s$`, regexp.QuoteMeta(expectedDir), filepath.Separator, expectedBase))
 	assert.True(t, pattern.MatchString(tempPath),
 		"Temp path should match rsync pattern, got: %s", tempPath)
 }
