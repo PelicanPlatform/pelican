@@ -196,6 +196,9 @@ func syncMain(cmd *cobra.Command, args []string) {
 
 	// Exit with failure
 	if err != nil {
+		if handleCredentialPasswordError(err) {
+			os.Exit(1)
+		}
 		// Print the list of errors
 		errMsg := err.Error()
 		var pe error_codes.PelicanError

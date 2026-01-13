@@ -174,6 +174,9 @@ func copyMain(cmd *cobra.Command, args []string) {
 
 	// Exit with failure
 	if result != nil {
+		if handleCredentialPasswordError(result) {
+			os.Exit(1)
+		}
 		// Print the list of errors
 		errMsg := result.Error()
 		var te *client.TransferErrors

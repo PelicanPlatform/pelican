@@ -110,12 +110,26 @@ func addConfigSubcommands(configCmd *cobra.Command) {
 		Run: func(cmd *cobra.Command, args []string) {
 			err := config.ResetPassword()
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "Failed to get reset password:", err)
+				if handleIncorrectPassword(err, incorrectPasswordResetMessage) {
+					os.Exit(1)
+				}
+				fmt.Fprintln(os.Stderr, "Failed to reset password:", err)
 				os.Exit(1)
 			}
 		},
 	})
 
+	configCmd.AddCommand(&cobra.Command{
+		Use:   "reset-local",
+		Short: "Delete all local credentials for the current user",
+		Long:  "Delete all local credentials for the current user",
+		Run: func(cmd *cobra.Command, args []string) {
+			if err := config.DeleteCredentials(); err != nil {
+				fmt.Fprintln(os.Stderr, "Failed to delete local credentials:", err)
+				os.Exit(1)
+			}
+		},
+	})
 }
 
 func printOauthConfig() {

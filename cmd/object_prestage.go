@@ -112,6 +112,9 @@ func prestageMain(cmd *cobra.Command, args []string) {
 	// Exit with failure
 	if err != nil {
 		// Print the list of errors
+		if handleCredentialPasswordError(err) {
+			os.Exit(1)
+		}
 		errMsg := err.Error()
 		var pe error_codes.PelicanError
 		var te *client.TransferErrors
