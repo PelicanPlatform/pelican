@@ -734,6 +734,12 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
         json-schema-validator-devel \
         nlohmann-json-devel
 
+# Create alice user for multi-user testing
+RUN <<ENDRUN
+  set -eux
+  useradd -m -s /bin/bash alice
+ENDRUN
+
 # Suppress Git's "dubious ownership" warning.
 ENV GOFLAGS="-buildvcs=false"
 
