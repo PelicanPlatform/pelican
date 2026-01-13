@@ -63,9 +63,9 @@ go test ./...
 cd director && go test
 ```
 
-## Multi-User Testing
+## Testing as Non-Root Users
 
-The dev container includes a non-root user `alice` for testing multi-user scenarios, such as:
+The dev container includes a non-root user `alice` for scenarios such as:
 - Bootstrapping Pelican config locations for non-root users
 - Multi-user Origins
 - Testing privilege dropping and unprivileged operations
