@@ -1962,6 +1962,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	var fileWriter io.Writer
 	var writeDestination string // Path to write to (may be temporary file or final destination)
 	var fileCloser io.Closer
+	var fp *os.File // File pointer for temp file that needs to be closed before rename on Windows
 
 	// Check if we have a custom writer provided (e.g., for io.FS implementation)
 	if transfer.writer != nil {
@@ -2034,10 +2035,13 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			}
 			// If the destination is something strange, like a block device, then the OpenFile below
 			// will create the appropriate error message
-			var fp *os.File
 			if fp, err = os.OpenFile(writeDestination, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644); err == nil {
 				fileWriter = fp
-				defer fp.Close()
+				defer func() {
+					if fp != nil {
+						fp.Close()
+					}
+				}()
 			} else {
 				return
 			}
@@ -2268,6 +2272,16 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 
 	// Atomically rename temporary file to final destination on successful download
 	if success && !transfer.job.inPlace && writeDestination != "" && writeDestination != localPath && transfer.packOption == "" {
+		// On Windows, we must close the file before renaming it
+		// On Unix, this is unnecessary but harmless
+		if fp != nil {
+			if closeErr := fp.Close(); closeErr != nil {
+				transferResults.Error = errors.Wrap(closeErr, "failed to close temporary file before rename")
+				log.Warningln("Failed to close temporary file:", closeErr)
+				return
+			}
+			fp = nil // Prevent deferred close from closing again
+		}
 		if renameErr := os.Rename(writeDestination, localPath); renameErr != nil {
 			transferResults.Error = errors.Wrap(renameErr, "failed to rename temporary file to final destination")
 			log.Warningln("Failed to rename temporary file:", renameErr)
