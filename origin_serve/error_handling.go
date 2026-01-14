@@ -19,9 +19,12 @@
 package origin_serve
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"strings"
+	"syscall"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -68,12 +71,65 @@ func NewErrorHandler() *ErrorHandler {
 	}
 }
 
-// MapToHTTPStatus maps an error to an HTTP status code
+// MapToHTTPStatus maps an error to an HTTP status code using proper error type checking
 func (eh *ErrorHandler) MapToHTTPStatus(err error) int {
 	if err == nil {
 		return http.StatusOK
 	}
 
+	// Use errors.Is for standard error comparisons (more reliable than string matching)
+	if errors.Is(err, fs.ErrPermission) {
+		return http.StatusForbidden
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return http.StatusNotFound
+	}
+	if errors.Is(err, fs.ErrExist) {
+		return http.StatusConflict
+	}
+	if errors.Is(err, fs.ErrInvalid) {
+		return http.StatusBadRequest
+	}
+
+	// Check for specific syscall errors using errors.As
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) {
+		// Check the underlying error
+		if errors.Is(pathErr.Err, fs.ErrPermission) {
+			return http.StatusForbidden
+		}
+		if errors.Is(pathErr.Err, fs.ErrNotExist) {
+			return http.StatusNotFound
+		}
+		if errors.Is(pathErr.Err, fs.ErrExist) {
+			return http.StatusConflict
+		}
+	}
+
+	// Check for specific syscall error codes
+	var syscallErr syscall.Errno
+	if errors.As(err, &syscallErr) {
+		switch syscallErr {
+		case syscall.EACCES, syscall.EPERM:
+			return http.StatusForbidden
+		case syscall.ENOENT:
+			return http.StatusNotFound
+		case syscall.EEXIST:
+			return http.StatusConflict
+		case syscall.EISDIR:
+			return http.StatusBadRequest
+		case syscall.EMFILE, syscall.ENFILE:
+			return http.StatusServiceUnavailable
+		case syscall.EDQUOT:
+			return http.StatusInsufficientStorage
+		case syscall.ECONNREFUSED:
+			return http.StatusServiceUnavailable
+		case syscall.EROFS:
+			return http.StatusForbidden
+		}
+	}
+
+	// Fall back to string-based matching for other error types (backward compatibility)
 	errMsg := strings.ToLower(err.Error())
 
 	// Check for exact matches first
@@ -214,11 +270,12 @@ func (oe *OperationError) String() string {
 
 // TokenValidationError represents token validation failures
 type TokenValidationError struct {
-	Reason  string
-	Issuer  string
-	Subject string
-	Code    int
-	Details string
+	Reason   string
+	Issuer   string
+	Subject  string
+	Code     int
+	Details  string
+	Verified bool // Whether the token signature was verified before extracting metadata
 }
 
 // NewTokenValidationError creates a new token validation error
@@ -247,6 +304,12 @@ func (tve *TokenValidationError) WithDetails(details string) *TokenValidationErr
 	return tve
 }
 
+// WithVerified marks whether the token was cryptographically verified before extracting metadata
+func (tve *TokenValidationError) WithVerified(verified bool) *TokenValidationError {
+	tve.Verified = verified
+	return tve
+}
+
 // Error implements the error interface
 func (tve *TokenValidationError) Error() string {
 	return fmt.Sprintf("token validation failed: %s", tve.Reason)
@@ -257,11 +320,17 @@ func (tve *TokenValidationError) String() string {
 	result := fmt.Sprintf("[%d] %s\n  Reason: %s",
 		tve.Code, http.StatusText(tve.Code), tve.Reason)
 
+	// If token metadata (issuer/subject) was extracted without verification, make that clear
+	verificationNote := ""
+	if !tve.Verified && (tve.Issuer != "" || tve.Subject != "") {
+		verificationNote = " (unverified)"
+	}
+
 	if tve.Issuer != "" {
-		result += fmt.Sprintf("\n  Issuer: %s", tve.Issuer)
+		result += fmt.Sprintf("\n  Issuer%s: %s", verificationNote, tve.Issuer)
 	}
 	if tve.Subject != "" {
-		result += fmt.Sprintf("\n  Subject: %s", tve.Subject)
+		result += fmt.Sprintf("\n  Subject%s: %s", verificationNote, tve.Subject)
 	}
 	if tve.Details != "" {
 		result += fmt.Sprintf("\n  Details: %s", tve.Details)

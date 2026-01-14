@@ -28,7 +28,8 @@ import (
 
 // Test serialization and deserialization roundtrip
 func TestXRootDChecksumSerialization(t *testing.T) {
-	testTime := time.Unix(1609459200, 0) // 2021-01-01 00:00:00 UTC
+	testTime := time.Unix(1609459200, 0)     // 2021-01-01 00:00:00 UTC
+	checksumTime := time.Unix(1609459205, 0) // 5 seconds later
 
 	tests := []struct {
 		name      string
@@ -68,7 +69,7 @@ func TestXRootDChecksumSerialization(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Serialize
-			serialized, err := SerializeXRootDChecksum(tt.alg, tt.checksum, testTime)
+			serialized, err := serializeXRootDChecksum(tt.alg, tt.checksum, testTime, checksumTime)
 			if tt.wantError {
 				require.Error(t, err)
 				return
@@ -76,10 +77,10 @@ func TestXRootDChecksumSerialization(t *testing.T) {
 			require.NoError(t, err)
 
 			// Expected size: 16 (name) + 8 (fmTime) + 4 (csTime) + 2 (Rsvd1) + 1 (Rsvd2) + 1 (Length) + 64 (Value)
-			assert.Equal(t, xrootdNameSize+8+4+2+1+1+xrootdValueSize, len(serialized))
+			assert.Equal(t, xrootdBinarySize, len(serialized))
 
 			// Deserialize
-			name, checksum, fileModTime, err := DeserializeXRootDChecksum(serialized)
+			name, checksum, fileModTime, err := deserializeXRootDChecksum(serialized)
 			require.NoError(t, err)
 
 			// Verify

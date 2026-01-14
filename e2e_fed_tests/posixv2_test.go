@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -32,6 +32,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/xattr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/studio-b12/gowebdav"
@@ -220,6 +221,12 @@ func TestPosixv2OriginStat(t *testing.T) {
 	assert.NotNil(t, statInfo.Checksums, "Checksums should be present")
 	_, ok := statInfo.Checksums["crc32c"]
 	assert.True(t, ok, "CRC32C checksum should be present")
+
+	// Verify xattr was stored on disk (if xattrs are supported)
+	_, err = xattr.Get(backendFile, "user.XrdCks.crc32c")
+	if err == nil {
+		assert.NotNil(t, statInfo.Checksums["crc32c"], "Checksum should be cached in xattr")
+	}
 }
 
 // Test POSIXv2 origin with multiple file uploads
@@ -644,7 +651,7 @@ Director:
 	require.True(t, foundLevel2File, "Should find level2_file.txt via PROPFIND")
 }
 
-// Test recursive downloads using the Pelican client
+// Test recursive downloads using the Pelican client with recursive flag
 func TestRecursiveDownload(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
@@ -665,116 +672,64 @@ Director:
 	ft := fed_test_utils.NewFedTest(t, originConfig)
 	require.NotNil(t, ft)
 
-	// Create nested directory structure
-	storageDir := ft.Exports[0].StoragePrefix
-	subdir := filepath.Join(storageDir, "subdir")
-	deepdir := filepath.Join(subdir, "deepdir")
-	require.NoError(t, os.MkdirAll(deepdir, 0755))
+	// Create nested directory structure in source location
+	sourceDir := t.TempDir()
+	sourceSubdir := filepath.Join(sourceDir, "subdir")
+	sourceDeepdir := filepath.Join(sourceSubdir, "deepdir")
+	require.NoError(t, os.MkdirAll(sourceDeepdir, 0755))
 
 	// Create test files
-	require.NoError(t, os.WriteFile(filepath.Join(storageDir, "file1.txt"), []byte("content1"), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(storageDir, "file2.txt"), []byte("content2"), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(subdir, "file3.txt"), []byte("content3"), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(deepdir, "file4.txt"), []byte("content4"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "file1.txt"), []byte("content1"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "file2.txt"), []byte("content2"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceSubdir, "file3.txt"), []byte("content3"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDeepdir, "file4.txt"), []byte("content4"), 0644))
 
 	// Get token
 	testToken := getTempTokenForTest(t)
 
+	// Test recursive upload - upload entire directory structure
+	uploadURL := fmt.Sprintf("pelican://%s:%d/test/",
+		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+
+	_, err := client.DoPut(ft.Ctx, sourceDir, uploadURL, true, client.WithToken(testToken))
+	require.NoError(t, err, "Should be able to recursively upload directory")
+
 	// Create a local directory for downloads
 	downloadDir := t.TempDir()
 
-	// Test recursive download of directory
-	dirURL := fmt.Sprintf("pelican://%s:%d/test/",
-		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+	// Test recursive download - download entire directory structure
+	_, err = client.DoGet(ft.Ctx, uploadURL, downloadDir, true, client.WithToken(testToken))
+	require.NoError(t, err, "Should be able to recursively download directory")
 
-	// List root directory
-	entries, err := client.DoList(ft.Ctx, dirURL, client.WithToken(testToken))
-	require.NoError(t, err, "Should be able to list root directory")
-	require.NotEmpty(t, entries, "Should have entries in root")
-
-	// Verify root entries
-	var hasFile1, hasSubdir bool
-	for _, entry := range entries {
-		if strings.Contains(entry.Name, "file1.txt") && !entry.IsCollection {
-			hasFile1 = true
-		} else if strings.Contains(entry.Name, "subdir") && entry.IsCollection {
-			hasSubdir = true
-		}
+	// Verify all expected files are present
+	expectedFiles := []string{
+		"file1.txt",
+		"file2.txt",
+		filepath.Join("subdir", "file3.txt"),
+		filepath.Join("subdir", "deepdir", "file4.txt"),
 	}
 
-	require.True(t, hasFile1, "Should find file1.txt at root level")
-	require.True(t, hasSubdir, "Should find subdir directory")
-
-	// List subdir
-	subdirURL := fmt.Sprintf("pelican://%s:%d/test/subdir/",
-		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
-
-	subdirEntries, err := client.DoList(ft.Ctx, subdirURL, client.WithToken(testToken))
-	require.NoError(t, err, "Should be able to list subdir")
-	require.NotEmpty(t, subdirEntries, "Should have entries in subdir")
-
-	var hasFile3, hasDeepdir bool
-	for _, entry := range subdirEntries {
-		if strings.Contains(entry.Name, "file3.txt") && !entry.IsCollection {
-			hasFile3 = true
-		} else if strings.Contains(entry.Name, "deepdir") && entry.IsCollection {
-			hasDeepdir = true
-		}
+	for _, expectedFile := range expectedFiles {
+		downloadedPath := filepath.Join(downloadDir, expectedFile)
+		_, err := os.Stat(downloadedPath)
+		require.NoError(t, err, "File %s should exist after recursive download", expectedFile)
 	}
 
-	require.True(t, hasFile3, "Should find file3.txt in subdir")
-	require.True(t, hasDeepdir, "Should find deepdir in subdir")
-
-	// List deepdir
-	deepdirURL := fmt.Sprintf("pelican://%s:%d/test/subdir/deepdir/",
-		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
-
-	deepdirEntries, err := client.DoList(ft.Ctx, deepdirURL, client.WithToken(testToken))
-	require.NoError(t, err, "Should be able to list deepdir")
-	require.NotEmpty(t, deepdirEntries, "Should have entries in deepdir")
-
-	var hasFile4 bool
-	for _, entry := range deepdirEntries {
-		if strings.Contains(entry.Name, "file4.txt") && !entry.IsCollection {
-			hasFile4 = true
-		}
+	// Verify content of downloaded files
+	testCases := []struct {
+		relativePath    string
+		expectedContent string
+	}{
+		{"file1.txt", "content1"},
+		{"file2.txt", "content2"},
+		{filepath.Join("subdir", "file3.txt"), "content3"},
+		{filepath.Join("subdir", "deepdir", "file4.txt"), "content4"},
 	}
 
-	require.True(t, hasFile4, "Should find file4.txt in deepdir")
-
-	// Download individual files to verify content
-	file1URL := fmt.Sprintf("pelican://%s:%d/test/file1.txt",
-		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
-
-	localFile1 := filepath.Join(downloadDir, "file1.txt")
-	_, err = client.DoGet(ft.Ctx, file1URL, localFile1, false, client.WithToken(testToken))
-	require.NoError(t, err, "Should be able to download file1.txt")
-
-	content1, err := os.ReadFile(localFile1)
-	require.NoError(t, err, "Should be able to read downloaded file")
-	require.Equal(t, "content1", string(content1), "Downloaded file should have correct content")
-
-	// Download file from subdirectory
-	file3URL := fmt.Sprintf("pelican://%s:%d/test/subdir/file3.txt",
-		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
-
-	localFile3 := filepath.Join(downloadDir, "file3.txt")
-	_, err = client.DoGet(ft.Ctx, file3URL, localFile3, false, client.WithToken(testToken))
-	require.NoError(t, err, "Should be able to download file3.txt from subdir")
-
-	content3, err := os.ReadFile(localFile3)
-	require.NoError(t, err, "Should be able to read downloaded file")
-	require.Equal(t, "content3", string(content3), "Downloaded file should have correct content")
-
-	// Download file from deep subdirectory
-	file4URL := fmt.Sprintf("pelican://%s:%d/test/subdir/deepdir/file4.txt",
-		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
-
-	localFile4 := filepath.Join(downloadDir, "file4.txt")
-	_, err = client.DoGet(ft.Ctx, file4URL, localFile4, false, client.WithToken(testToken))
-	require.NoError(t, err, "Should be able to download file4.txt from deep subdir")
-
-	content4, err := os.ReadFile(localFile4)
-	require.NoError(t, err, "Should be able to read downloaded file")
-	require.Equal(t, "content4", string(content4), "Downloaded file should have correct content")
+	for _, tc := range testCases {
+		downloadedPath := filepath.Join(downloadDir, tc.relativePath)
+		content, err := os.ReadFile(downloadedPath)
+		require.NoError(t, err, "Should be able to read %s", tc.relativePath)
+		assert.Equal(t, tc.expectedContent, string(content), "Content of %s should match", tc.relativePath)
+	}
 }

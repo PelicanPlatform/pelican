@@ -878,6 +878,29 @@ default: false
 hidden: true
 components: ["origin"]
 ---
+name: Origin.SupportedChecksumTypes
+description: |+
+  A list of checksum algorithms that the origin is configured to compute and serve.
+  Supported values are "md5", "sha1", "crc32", and "crc32c". If a client requests
+  a checksum that is not in this list, the request will be rejected.
+
+  An empty list means all supported algorithms are available.
+type: stringSlice
+default: []
+hidden: true
+components: ["origin"]
+---
+name: Origin.DefaultChecksumTypes
+description: |+
+  A list of checksum algorithms that the origin will automatically compute and
+  cache in extended attributes, even if not explicitly requested by the client.
+  This allows the server to pre-compute commonly needed checksums for performance.
+
+  Supported values are "md5", "sha1", "crc32", and "crc32c".
+type: stringSlice
+default: ["crc32c"]
+components: ["origin"]
+---
 name: Origin.RunLocation
 description: |+
   A directory where temporary configurations will be stored for the XRootD daemon
@@ -1084,6 +1107,17 @@ type: string
 default: none
 components: ["origin"]
 ---
+name: Origin.ScitokensGroupsClaim
+description: |+
+  The JWT claim to use for extracting group information from tokens during authorization.
+  This is used by the Pelican authorization system to map token claims to local groups
+  for access control decisions.
+
+  Common values are "wlcg.groups" (WLCG tokens) or "groups" (generic OAuth2 tokens).
+type: string
+default: wlcg.groups
+components: ["origin"]
+---
 name: Origin.ScitokensNameMapFile
 description: |+
   This parameter is used to configure
@@ -1096,6 +1130,16 @@ description: |+
   for more information on the mapfile's format.
 type: string
 default: none
+components: ["origin"]
+---
+name: Origin.UserMapfileRefreshInterval
+description: |+
+  The interval at which the origin will check for updates to the user mapfile.
+  When set, the origin will periodically reload the mapfile if it has been modified on disk.
+  This allows administrators to update user mappings without restarting the origin server.
+  Set to 0 to disable automatic refresh.
+type: duration
+default: 1m
 components: ["origin"]
 ---
 name: Origin.TokenAudience

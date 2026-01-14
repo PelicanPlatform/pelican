@@ -80,6 +80,15 @@ func setUserInfo(ctx context.Context, ui *userInfo) context.Context {
 	return context.WithValue(ctx, userInfoKey, ui)
 }
 
+// getUserInfo retrieves user info from context
+func getUserInfo(ctx context.Context) *userInfo {
+	ui, ok := ctx.Value(userInfoKey).(*userInfo)
+	if !ok {
+		return nil
+	}
+	return ui
+}
+
 // aferoFileSystem wraps an afero.Fs to implement webdav.FileSystem
 type aferoFileSystem struct {
 	fs     afero.Fs

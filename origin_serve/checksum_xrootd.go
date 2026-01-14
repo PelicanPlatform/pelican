@@ -20,16 +20,9 @@ package origin_serve
 
 import (
 	"bytes"
-	"crypto/md5"
 	"encoding/binary"
 	"fmt"
-	"hash"
-	"hash/crc32"
-	"io"
-	"os"
 	"time"
-
-	log "github.com/sirupsen/logrus"
 )
 
 // XRootD checksum format according to the spec:
@@ -45,13 +38,17 @@ import (
 // char      Value[ValSize];       // The binary checksum value (max 64 bytes)
 
 const (
-	xrootdNameSize  = 16
-	xrootdValueSize = 64
+	xrootdNameSize   = 16
+	xrootdValueSize  = 64
+	xrootdBinarySize = xrootdNameSize + 8 + 4 + 2 + 1 + 1 + xrootdValueSize // Total fixed size: 96 bytes
 )
 
-// SerializeXRootDChecksum serializes a checksum into XRootD binary format
-// Returns the binary representation suitable for storage in xattr user.XrdCks.$(NAME)
-func SerializeXRootDChecksum(name string, checksumBytes []byte, fileModTime time.Time) ([]byte, error) {
+// serializeXRootDChecksum serializes a checksum into XRootD binary format.
+// Returns the binary representation suitable for storage in xattr user.XrdCks.$(NAME).
+// checksumStartTime is the time when the checksum computation started; the delta
+// from fileModTime to checksumStartTime is recorded in the csTime field.
+func serializeXRootDChecksum(name string, checksumBytes []byte, fileModTime, checksumStartTime time.Time) ([]byte, error) {
+	// Enforce that checksum names fit in the fixed-size name field (including null terminator)
 	if len(name) >= xrootdNameSize {
 		return nil, fmt.Errorf("checksum name too long: %d >= %d", len(name), xrootdNameSize)
 	}
@@ -59,7 +56,8 @@ func SerializeXRootDChecksum(name string, checksumBytes []byte, fileModTime time
 		return nil, fmt.Errorf("checksum value too long: %d > %d", len(checksumBytes), xrootdValueSize)
 	}
 
-	buf := new(bytes.Buffer)
+	// Pre-reserve the exact size needed for XRootD format
+	buf := bytes.NewBuffer(make([]byte, 0, xrootdBinarySize))
 
 	// Write name (padded with null terminators)
 	nameBytes := make([]byte, xrootdNameSize)
@@ -72,8 +70,9 @@ func SerializeXRootDChecksum(name string, checksumBytes []byte, fileModTime time
 		return nil, err
 	}
 
-	// Write csTime (delta from fmTime when checksum was computed - use 0 for now)
-	csTime := int32(0)
+	// Write csTime (delta from fmTime when checksum was computed)
+	// Calculated as seconds between file modification time and checksum start time
+	csTime := int32(checksumStartTime.Unix() - fileModTime.Unix())
 	if err := binary.Write(buf, binary.BigEndian, csTime); err != nil {
 		return nil, err
 	}
@@ -99,8 +98,8 @@ func SerializeXRootDChecksum(name string, checksumBytes []byte, fileModTime time
 	return buf.Bytes(), nil
 }
 
-// DeserializeXRootDChecksum deserializes XRootD binary checksum format
-func DeserializeXRootDChecksum(data []byte) (name string, checksumBytes []byte, fileModTime time.Time, err error) {
+// deserializeXRootDChecksum deserializes XRootD binary checksum format.
+func deserializeXRootDChecksum(data []byte) (name string, checksumBytes []byte, fileModTime time.Time, err error) {
 	if len(data) < xrootdNameSize+8+4+2+1+1 {
 		err = fmt.Errorf("checksum data too short: %d bytes", len(data))
 		return
@@ -162,52 +161,4 @@ func DeserializeXRootDChecksum(data []byte) (name string, checksumBytes []byte, 
 
 	checksumBytes = valueBytes[:length]
 	return
-}
-
-// ComputeXRootDChecksum computes a checksum and returns it in XRootD binary format
-// This is useful for storing checksums in XRootD-compatible attributes
-func ComputeXRootDChecksum(filePath string, algorithm string) ([]byte, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	// Get file modification time for XRootD format
-	fileInfo, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
-
-	var h hash.Hash
-	var xrootdAlgName string
-
-	switch algorithm {
-	case "md5":
-		h = md5.New()
-		xrootdAlgName = "md5"
-	case "sha1", "sha":
-		h = md5.New() // Default to MD5 for XRootD storage
-		xrootdAlgName = "md5"
-	case "crc32":
-		h = crc32.NewIEEE()
-		xrootdAlgName = "crc32"
-	default:
-		return nil, fmt.Errorf("unsupported algorithm: %s", algorithm)
-	}
-
-	// Read file and compute hash
-	_, err = io.Copy(h, file)
-	if err != nil {
-		return nil, err
-	}
-
-	checksumBytes := h.Sum(nil)
-	xrootdData, err := SerializeXRootDChecksum(xrootdAlgName, checksumBytes, fileInfo.ModTime())
-	if err != nil {
-		log.WithError(err).Warnf("Failed to serialize XRootD checksum for %s", filePath)
-		return nil, err
-	}
-
-	return xrootdData, nil
 }

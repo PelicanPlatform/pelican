@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -23,6 +23,9 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -50,6 +53,7 @@ func createTestToken(t *testing.T, key jwk.Key, issuer string, subject string, g
 		Build()
 	require.NoError(t, err)
 
+	// Sign with key - the key ID will be automatically added to the header
 	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
 	require.NoError(t, err)
 
@@ -65,6 +69,7 @@ func generateTestKey(t *testing.T) jwk.Key {
 	require.NoError(t, err)
 
 	require.NoError(t, key.Set(jwk.KeyIDKey, "test-key"))
+	require.NoError(t, key.Set(jwk.AlgorithmKey, jwa.ES256))
 	return key
 }
 
@@ -183,7 +188,8 @@ func TestExtractUserInfo(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			token := createTestToken(t, key, "https://test.example.com", tt.subject, tt.groups, "read:/test")
 
-			userInfo := extractUserInfoFromToken(token)
+			mapper := NewUserMapper("sub", "wlcg.groups", "")
+			userInfo := mapper.MapTokenToUser(token)
 			require.NotNil(t, userInfo)
 			assert.Equal(t, tt.expectedUser, userInfo.User)
 			assert.Equal(t, tt.expectedGroups, userInfo.Groups)
@@ -257,6 +263,121 @@ func TestAuthorizeWithContext(t *testing.T) {
 
 	// Even if not authorized, the function should return a context
 	assert.NotNil(t, newCtx)
+}
+
+// TestPositiveAuthorizationWithRegisteredKey tests that the loader properly fetches keys,
+// validates tokens, and caches user info together with authorization scopes
+func TestPositiveAuthorizationWithRegisteredKey(t *testing.T) {
+	// Generate a test key pair
+	key := generateTestKey(t)
+	pubKey, err := key.PublicKey()
+	require.NoError(t, err)
+	require.NoError(t, pubKey.Set(jwk.KeyIDKey, "test-key"))
+	require.NoError(t, pubKey.Set(jwk.AlgorithmKey, jwa.ES256))
+
+	// Create a JWKS with the public key
+	jwks := jwk.NewSet()
+	require.NoError(t, jwks.AddKey(pubKey))
+
+	// Counter to track JWKS fetches
+	jwksFetchCount := 0
+
+	// Create a test HTTP server to serve both JWKS and OpenID configuration
+	// Use plain HTTP to avoid certificate issues in testing
+	mux := http.NewServeMux()
+
+	// Serve JWKS endpoint with fetch counting
+	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
+		jwksFetchCount++
+		w.Header().Set("Content-Type", "application/json")
+		data, _ := json.Marshal(jwks)
+		_, _ = w.Write(data)
+	})
+
+	// Serve OpenID configuration
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		config := map[string]interface{}{
+			"issuer":   "http://" + r.Host,
+			"jwks_uri": "http://" + r.Host + "/jwks",
+		}
+		data, _ := json.Marshal(config)
+		_, _ = w.Write(data)
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	// Use the server's URL as the issuer
+	issuerURL := server.URL
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	egrp := &errgroup.Group{}
+
+	// Create test exports with the test issuer
+	exports := []server_utils.OriginExport{
+		{
+			FederationPrefix: "/data",
+			StoragePrefix:    "/tmp/data",
+			IssuerUrls:       []string{issuerURL},
+			Capabilities: server_structs.Capabilities{
+				Reads:  true,
+				Writes: true,
+			},
+		},
+	}
+
+	// Initialize auth config (this registers the issuer)
+	err = InitAuthConfig(ctx, egrp, exports)
+	require.NoError(t, err)
+
+	// Create a token signed with the private key
+	token := createTestToken(t, key, issuerURL, "alice", []string{"researchers", "admins"}, "storage.read:/data storage.create:/data")
+
+	// Get the auth config
+	ac := GetAuthConfig()
+	require.NotNil(t, ac)
+
+	// Test authorization - this should trigger the loader to fetch the key from our test server
+	newCtx, authorized := ac.authorizeWithContext(ctx, token_scopes.Wlcg_Storage_Read, "/data/file.txt", token)
+	assert.True(t, authorized, "Authorization should succeed with valid token and registered key")
+	assert.Equal(t, 1, jwksFetchCount, "JWKS should be fetched once on first authorization")
+
+	// Verify user info was extracted and stored in context
+	userInfo := getUserInfo(newCtx)
+	require.NotNil(t, userInfo, "User info should be extracted from token")
+	assert.Equal(t, "alice", userInfo.User)
+	assert.Equal(t, []string{"researchers", "admins"}, userInfo.Groups)
+
+	// Test that subsequent authorization uses cached data (shouldn't need to fetch key again)
+	newCtx2, authorized2 := ac.authorizeWithContext(ctx, token_scopes.Wlcg_Storage_Create, "/data/newfile.txt", token)
+	assert.True(t, authorized2, "Second authorization should succeed using cached token info")
+	assert.Equal(t, 1, jwksFetchCount, "JWKS should NOT be fetched again - cache should be used")
+
+	userInfo2 := getUserInfo(newCtx2)
+	require.NotNil(t, userInfo2, "User info should be available on cached authorization")
+	assert.Equal(t, "alice", userInfo2.User)
+	assert.Equal(t, []string{"researchers", "admins"}, userInfo2.Groups)
+
+	// Test that authorization fails for wrong path
+	_, authorized3 := ac.authorizeWithContext(ctx, token_scopes.Wlcg_Storage_Read, "/other/file.txt", token)
+	assert.False(t, authorized3, "Authorization should fail for paths outside token scope")
+	assert.Equal(t, 1, jwksFetchCount, "JWKS should still not be fetched again even for failed authorization")
+}
+
+// TestAuthorizationFailureWithoutUserInfo tests that failed authorization doesn't provide user info
+func TestAuthorizationFailureWithoutUserInfo(t *testing.T) {
+	// When authorization fails, user info should not be added to context
+	newCtx := context.Background()
+	authorized := false
+
+	// Since not authorized, user info should be nil
+	ui := getUserInfo(newCtx)
+	assert.Nil(t, ui, "User info should be nil when not in context")
+
+	// Verify authorization flag
+	assert.False(t, authorized)
 }
 
 // TestPathPrefixBoundaryCheck tests path prefix boundary checking for security

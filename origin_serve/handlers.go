@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -19,15 +19,16 @@
 package origin_serve
 
 import (
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/afero"
 	"golang.org/x/net/webdav"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -75,13 +76,19 @@ func extractTokens(r *http.Request) []string {
 		}
 	}
 
-	// Check query parameters
+	// Check query parameters (may be multi-valued)
 	query := r.URL.Query()
-	if accessToken := query.Get("access_token"); accessToken != "" {
-		tokens = append(tokens, accessToken)
+	// Handle multi-valued access_token parameters
+	for _, accessToken := range query["access_token"] {
+		if accessToken != "" {
+			tokens = append(tokens, accessToken)
+		}
 	}
-	if authzToken := query.Get("authz"); authzToken != "" {
-		tokens = append(tokens, authzToken)
+	// Handle multi-valued authz parameters
+	for _, authzToken := range query["authz"] {
+		if authzToken != "" {
+			tokens = append(tokens, authzToken)
+		}
 	}
 
 	return tokens
@@ -127,6 +134,16 @@ func authMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		// Check if direct clients are disabled
+		// In that case, all requests must have a federation token
+		if param.Origin_DisableDirectClients.GetBool() {
+			if len(tokens) == 0 {
+				log.Debugf("Direct clients disabled but no token provided for %s %s", c.Request.Method, resource)
+				c.AbortWithStatus(http.StatusUnauthorized)
+				return
+			}
+		}
+
 		// Check for public reads first
 		exports := ac.exports.Load()
 		if exports != nil && action == token_scopes.Wlcg_Storage_Read {
@@ -169,13 +186,27 @@ func authMiddleware() gin.HandlerFunc {
 
 // InitializeHandlers initializes the WebDAV handlers for each export
 func InitializeHandlers(exports []server_utils.OriginExport) error {
+	// Validate that if DisableDirectClients is enabled, no exports have DirectReads
+	if param.Origin_DisableDirectClients.GetBool() {
+		for _, export := range exports {
+			if export.Capabilities.DirectReads {
+				return fmt.Errorf("cannot enable DisableDirectClients with exports that have DirectReads capability (export: %s)", export.FederationPrefix)
+			}
+		}
+	}
+
 	webdavHandlers = make(map[string]*webdav.Handler)
 	exportPrefixMap = make(map[string]string) // Initialize the global map
 
 	for _, export := range exports {
 		// Create a filesystem for this export with auto-directory creation
-		baseFs := afero.NewBasePathFs(afero.NewOsFs(), export.StoragePrefix)
-		fs := newAutoCreateDirFs(baseFs)
+		// Use OsRootFs to prevent symlink traversal attacks
+		// OsRootFs is already rooted at StoragePrefix, so we don't need BasePathFs
+		osRootFs, err := NewOsRootFs(export.StoragePrefix)
+		if err != nil {
+			return fmt.Errorf("failed to create OsRootFs for %s: %w", export.StoragePrefix, err)
+		}
+		fs := newAutoCreateDirFs(osRootFs)
 
 		// Create logger function
 		logger := func(r *http.Request, err error) {
@@ -291,28 +322,28 @@ func handleHeadWithChecksum(c *gin.Context, handler *webdav.Handler, modifiedReq
 	checksummer := GetChecksummer()
 	digestValues := []string{}
 
-	// Parse Want-Digest header and compute requested checksums
+	// Parse Want-Digest header into types and compute in bulk
+	var types []ChecksumType
 	for _, alg := range strings.Split(wantDigest, ",") {
 		alg = strings.TrimSpace(strings.ToLower(alg))
 
-		var checksumType ChecksumType
 		switch alg {
 		case "md5":
-			checksumType = ChecksumTypeMD5
+			types = append(types, ChecksumTypeMD5)
 		case "sha", "sha-1", "sha1":
-			checksumType = ChecksumTypeSHA1
+			types = append(types, ChecksumTypeSHA1)
 		case "crc32":
-			checksumType = ChecksumTypeCRC32
+			types = append(types, ChecksumTypeCRC32)
 		case "crc32c":
-			checksumType = ChecksumTypeCRC32C
+			types = append(types, ChecksumTypeCRC32C)
 		default:
 			continue
 		}
+	}
 
-		if xc, ok := checksummer.(*XattrChecksummer); ok {
-			if digest, err := xc.GetChecksumRFC3230(fullPath, checksumType); err == nil {
-				digestValues = append(digestValues, digest)
-			}
+	if xc, ok := checksummer.(*XattrChecksummer); ok {
+		if digests, err := xc.GetChecksumsRFC3230(fullPath, types); err == nil {
+			digestValues = append(digestValues, digests...)
 		}
 	}
 

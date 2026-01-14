@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -20,6 +20,7 @@ package origin_serve
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"path"
 	"strings"
@@ -34,6 +35,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -44,12 +46,19 @@ type (
 		exports    atomic.Pointer[[]server_utils.OriginExport]
 		issuers    atomic.Pointer[map[string]bool]
 		issuerKeys *ttlcache.Cache[string, authConfigItem]
-		tokenAuthz *ttlcache.Cache[string, acls]
+		tokenAuthz *ttlcache.Cache[string, cachedTokenInfo]
+		userMapper *UserMapper // Maps JWT claims to local users/groups
 	}
 
 	authConfigItem struct {
 		set jwk.Set
 		err error
+	}
+
+	// cachedTokenInfo stores both authorization scopes and user info for a token
+	cachedTokenInfo struct {
+		Scopes   []token_scopes.ResourceScope
+		UserInfo *userInfo
 	}
 
 	acls []token_scopes.ResourceScope
@@ -81,6 +90,26 @@ func hasPathPrefix(requestPath, authorizedPrefix string) bool {
 
 func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 	ac = &authConfig{}
+
+	// Initialize UserMapper for mapping JWT claims to local users/groups
+	// Read configuration from parameters
+	usernameClaim := param.Origin_ScitokensUsernameClaim.GetString()
+	if usernameClaim == "" {
+		usernameClaim = "sub" // fallback to default
+	}
+
+	groupsClaim := param.Origin_ScitokensGroupsClaim.GetString()
+	if groupsClaim == "" {
+		groupsClaim = "wlcg.groups" // fallback to default
+	}
+
+	mapfilePath := param.Origin_ScitokensNameMapFile.GetString()
+
+	ac.userMapper = NewUserMapper(usernameClaim, groupsClaim, mapfilePath)
+
+	// Start periodic mapfile refresh if configured
+	refreshInterval := param.Origin_UserMapfileRefreshInterval.GetDuration()
+	ac.userMapper.StartPeriodicRefresh(refreshInterval)
 
 	loader := ttlcache.LoaderFunc[string, authConfigItem](
 		func(cache *ttlcache.Cache[string, authConfigItem], issuerUrl string) *ttlcache.Item[string, authConfigItem] {
@@ -114,9 +143,9 @@ func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 		ttlcache.WithLoader[string, authConfigItem](ttlcache.NewSuppressedLoader[string, authConfigItem](loader, nil)),
 	)
 
-	ac.tokenAuthz = ttlcache.New[string, acls](
-		ttlcache.WithTTL[string, acls](5*time.Minute),
-		ttlcache.WithLoader[string, acls](ttlcache.LoaderFunc[string, acls](ac.loader)),
+	ac.tokenAuthz = ttlcache.New[string, cachedTokenInfo](
+		ttlcache.WithTTL[string, cachedTokenInfo](5*time.Minute),
+		ttlcache.WithLoader[string, cachedTokenInfo](ttlcache.LoaderFunc[string, cachedTokenInfo](ac.loader)),
 	)
 
 	egrp.Go(func() error {
@@ -158,15 +187,24 @@ func (ac *authConfig) getResourceScopes(token string) (scopes []token_scopes.Res
 
 	tok, err := jwt.Parse([]byte(token), jwt.WithVerify(false))
 	if err != nil {
-		err = errors.Wrap(err, "failed to parse incoming JWT when authorizing request")
+		// Failed to parse token - mark as unverified since we couldn't verify it
+		tokenErr := NewTokenValidationError("failed to parse incoming JWT when authorizing request").
+			WithVerified(false).
+			WithDetails(err.Error())
+		err = tokenErr
 		return
 	}
 	issuer = tok.Issuer()
 
 	issuers := ac.issuers.Load()
 	if !(*issuers)[issuer] {
-		err = errors.Errorf("token issuer %s is not one of the trusted issuers", issuer)
-		log.Warningf("%s; trusted issuers: %v", err, *issuers)
+		// Token was parsed without verification (jwt.WithVerify(false)), so issuer is unverified
+		tokenErr := NewTokenValidationError("token issuer is not one of the trusted issuers").
+			WithIssuer(issuer).
+			WithVerified(false).
+			WithDetails(fmt.Sprintf("trusted issuers: %v", *issuers))
+		log.Warningln(tokenErr.String())
+		err = tokenErr
 		return
 	}
 
@@ -193,12 +231,24 @@ func (ac *authConfig) getResourceScopes(token string) (scopes []token_scopes.Res
 	}
 	tok, err = jwt.Parse([]byte(token), jwt.WithKeySet(item.set))
 	if err != nil {
+		// Token signature verification failed - mark as unverified
+		tokenErr := NewTokenValidationError("failed to verify token signature").
+			WithVerified(false).
+			WithDetails(err.Error())
+		err = tokenErr
 		return
 	}
 
 	err = jwt.Validate(tok)
 	if err != nil {
-		err = errors.Wrap(err, "unable to get resource scopes because validation failed")
+		// Token was cryptographically verified but validation (exp, nbf, etc) failed
+		// Mark as verified since we successfully checked the signature
+		tokenErr := NewTokenValidationError("unable to get resource scopes because validation failed").
+			WithVerified(true).
+			WithIssuer(issuer).
+			WithSubject(tok.Subject()).
+			WithDetails(err.Error())
+		err = tokenErr
 		return
 	}
 
@@ -257,7 +307,7 @@ func (ac *authConfig) getAcls(token string) (newAcls acls, err error) {
 	return
 }
 
-func (ac *authConfig) loader(cache *ttlcache.Cache[string, acls], token string) *ttlcache.Item[string, acls] {
+func (ac *authConfig) loader(cache *ttlcache.Cache[string, cachedTokenInfo], token string) *ttlcache.Item[string, cachedTokenInfo] {
 	acls, err := ac.getAcls(token)
 	if err != nil {
 		// If the token is not a valid one signed by a known issuer, do not keep it in memory (avoids a DoS)
@@ -265,17 +315,26 @@ func (ac *authConfig) loader(cache *ttlcache.Cache[string, acls], token string) 
 		return nil
 	}
 
-	item := cache.Set(token, acls, ttlcache.DefaultTTL)
+	// Extract user information from the token at cache time (only once)
+	// Use the UserMapper to map JWT claims to local users/groups
+	userInfo := ac.userMapper.MapTokenToUser(token)
+
+	info := cachedTokenInfo{
+		Scopes:   acls,
+		UserInfo: userInfo,
+	}
+	item := cache.Set(token, info, ttlcache.DefaultTTL)
 	return item
 }
 
 func (ac *authConfig) authorize(action token_scopes.TokenScope, resource, token string) bool {
-	aclsItem := ac.tokenAuthz.Get(token)
-	if aclsItem == nil {
+	tokenItem := ac.tokenAuthz.Get(token)
+	if tokenItem == nil {
 		return false
 	}
+	info := tokenItem.Value()
 	rsScope := token_scopes.NewResourceScope(action, resource)
-	for _, acl := range aclsItem.Value() {
+	for _, acl := range info.Scopes {
 		if acl.Contains(rsScope) {
 			return true
 		}
@@ -285,14 +344,15 @@ func (ac *authConfig) authorize(action token_scopes.TokenScope, resource, token 
 
 // authorizeWithContext checks authorization and extracts user/group info from token
 func (ac *authConfig) authorizeWithContext(ctx context.Context, action token_scopes.TokenScope, resource, token string) (context.Context, bool) {
-	aclsItem := ac.tokenAuthz.Get(token)
-	if aclsItem == nil {
+	tokenItem := ac.tokenAuthz.Get(token)
+	if tokenItem == nil {
 		return ctx, false
 	}
 
+	info := tokenItem.Value()
 	rsScope := token_scopes.NewResourceScope(action, resource)
 	authorized := false
-	for _, acl := range aclsItem.Value() {
+	for _, acl := range info.Scopes {
 		if acl.Contains(rsScope) {
 			authorized = true
 			break
@@ -303,57 +363,9 @@ func (ac *authConfig) authorizeWithContext(ctx context.Context, action token_sco
 		return ctx, false
 	}
 
-	// Extract user and group information from the token
-	ui := extractUserInfoFromToken(token)
-	ctx = setUserInfo(ctx, ui)
-
+	// User info is already extracted during cache load, just attach it to context
+	ctx = setUserInfo(ctx, info.UserInfo)
 	return ctx, true
-}
-
-// extractUserInfoFromToken extracts user and group information from a JWT token
-func extractUserInfoFromToken(tokenStr string) *userInfo {
-	ui := &userInfo{
-		User:   "nobody",
-		Groups: []string{},
-	}
-
-	tok, err := jwt.Parse([]byte(tokenStr), jwt.WithVerify(false))
-	if err != nil {
-		log.Debugf("Failed to parse token for user info extraction: %v", err)
-		return ui
-	}
-
-	// Extract subject (user)
-	if sub := tok.Subject(); sub != "" {
-		ui.User = sub
-	}
-
-	// Extract groups from various possible claim names
-	// Try "wlcg.groups" first (WLCG tokens)
-	if groups, ok := tok.Get("wlcg.groups"); ok {
-		if groupList, ok := groups.([]interface{}); ok {
-			for _, g := range groupList {
-				if groupStr, ok := g.(string); ok {
-					ui.Groups = append(ui.Groups, groupStr)
-				}
-			}
-		}
-	}
-
-	// Try "groups" (generic claim)
-	if len(ui.Groups) == 0 {
-		if groups, ok := tok.Get("groups"); ok {
-			if groupList, ok := groups.([]interface{}); ok {
-				for _, g := range groupList {
-					if groupStr, ok := g.(string); ok {
-						ui.Groups = append(ui.Groups, groupStr)
-					}
-				}
-			}
-		}
-	}
-
-	return ui
 }
 
 // InitAuthConfig initializes the global auth config
@@ -365,4 +377,11 @@ func InitAuthConfig(ctx context.Context, egrp *errgroup.Group, exports []server_
 // GetAuthConfig returns the global auth config
 func GetAuthConfig() *authConfig {
 	return globalAuthConfig
+}
+
+// ShutdownAuthConfig stops the auth config's background processes
+func ShutdownAuthConfig() {
+	if globalAuthConfig != nil && globalAuthConfig.userMapper != nil {
+		globalAuthConfig.userMapper.Shutdown()
+	}
 }

@@ -257,6 +257,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.Concurrency": false,
 	"Origin.ConcurrencyDegradedThreshold": false,
 	"Origin.DbLocation": false,
+	"Origin.DefaultChecksumTypes": false,
 	"Origin.DirectorTest": false,
 	"Origin.DisableDirectClients": false,
 	"Origin.EnableBroker": false,
@@ -308,8 +309,10 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.SelfTestMaxAge": false,
 	"Origin.StoragePrefix": false,
 	"Origin.StorageType": false,
+	"Origin.SupportedChecksumTypes": false,
 	"Origin.TokenAudience": false,
 	"Origin.Url": false,
+	"Origin.UserMapfileRefreshInterval": false,
 	"Origin.XRootDPrefix": false,
 	"Origin.XRootServiceUrl": false,
 	"Plugin.Token": false,
@@ -792,10 +795,14 @@ func (slP StringSliceParam) GetStringSlice() []string {
 			return config.Monitoring.AggregatePrefixes
 		case "OIDC.Scopes":
 			return config.OIDC.Scopes
+		case "Origin.DefaultChecksumTypes":
+			return config.Origin.DefaultChecksumTypes
 		case "Origin.ExportVolumes":
 			return config.Origin.ExportVolumes
 		case "Origin.ScitokensRestrictedPaths":
 			return config.Origin.ScitokensRestrictedPaths
+		case "Origin.SupportedChecksumTypes":
+			return config.Origin.SupportedChecksumTypes
 		case "Registry.AdminUsers":
 			return config.Registry.AdminUsers
 		case "Server.AdminGroups":
@@ -1129,6 +1136,8 @@ func (dP DurationParam) GetDuration() time.Duration {
 			return config.Origin.SelfTestInterval
 		case "Origin.SelfTestMaxAge":
 			return config.Origin.SelfTestMaxAge
+		case "Origin.UserMapfileRefreshInterval":
+			return config.Origin.UserMapfileRefreshInterval
 		case "Registry.InstitutionsUrlReloadMinutes":
 			return config.Registry.InstitutionsUrlReloadMinutes
 		case "Server.AdLifetime":
@@ -1375,6 +1384,7 @@ var allParameterNames = []string{
 	"Origin.Concurrency",
 	"Origin.ConcurrencyDegradedThreshold",
 	"Origin.DbLocation",
+	"Origin.DefaultChecksumTypes",
 	"Origin.DirectorTest",
 	"Origin.DisableDirectClients",
 	"Origin.EnableBroker",
@@ -1426,8 +1436,10 @@ var allParameterNames = []string{
 	"Origin.SelfTestMaxAge",
 	"Origin.StoragePrefix",
 	"Origin.StorageType",
+	"Origin.SupportedChecksumTypes",
 	"Origin.TokenAudience",
 	"Origin.Url",
+	"Origin.UserMapfileRefreshInterval",
 	"Origin.XRootDPrefix",
 	"Origin.XRootServiceUrl",
 	"Plugin.Token",
@@ -1640,6 +1652,7 @@ var (
 	Origin_S3ServiceUrl = StringParam{"Origin.S3ServiceUrl"}
 	Origin_S3UrlStyle = StringParam{"Origin.S3UrlStyle"}
 	Origin_ScitokensDefaultUser = StringParam{"Origin.ScitokensDefaultUser"}
+	Origin_ScitokensGroupsClaim = StringParam{"Origin.ScitokensGroupsClaim"}
 	Origin_ScitokensNameMapFile = StringParam{"Origin.ScitokensNameMapFile"}
 	Origin_ScitokensUsernameClaim = StringParam{"Origin.ScitokensUsernameClaim"}
 	Origin_StoragePrefix = StringParam{"Origin.StoragePrefix"}
@@ -1710,8 +1723,10 @@ var (
 	Issuer_RedirectUris = StringSliceParam{"Issuer.RedirectUris"}
 	Monitoring_AggregatePrefixes = StringSliceParam{"Monitoring.AggregatePrefixes"}
 	OIDC_Scopes = StringSliceParam{"OIDC.Scopes"}
+	Origin_DefaultChecksumTypes = StringSliceParam{"Origin.DefaultChecksumTypes"}
 	Origin_ExportVolumes = StringSliceParam{"Origin.ExportVolumes"}
 	Origin_ScitokensRestrictedPaths = StringSliceParam{"Origin.ScitokensRestrictedPaths"}
+	Origin_SupportedChecksumTypes = StringSliceParam{"Origin.SupportedChecksumTypes"}
 	Registry_AdminUsers = StringSliceParam{"Registry.AdminUsers"}
 	Server_AdminGroups = StringSliceParam{"Server.AdminGroups"}
 	Server_DirectorUrls = StringSliceParam{"Server.DirectorUrls"}
@@ -1859,6 +1874,7 @@ var (
 	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
 	Origin_SelfTestInterval = DurationParam{"Origin.SelfTestInterval"}
 	Origin_SelfTestMaxAge = DurationParam{"Origin.SelfTestMaxAge"}
+	Origin_UserMapfileRefreshInterval = DurationParam{"Origin.UserMapfileRefreshInterval"}
 	Registry_InstitutionsUrlReloadMinutes = DurationParam{"Registry.InstitutionsUrlReloadMinutes"}
 	Server_AdLifetime = DurationParam{"Server.AdLifetime"}
 	Server_AdvertisementInterval = DurationParam{"Server.AdvertisementInterval"}

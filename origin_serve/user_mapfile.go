@@ -19,6 +19,7 @@
 package origin_serve
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -27,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -181,6 +183,8 @@ type UserMapper struct {
 	groupsClaim   string
 	mapfile       *Mapfile
 	mu            sync.RWMutex
+	ctx           context.Context
+	cancel        context.CancelFunc
 }
 
 // NewUserMapper creates a new user mapper
@@ -188,9 +192,12 @@ type UserMapper struct {
 // groupsClaim: token claim to use for groups (default: "wlcg.groups")
 // mapfilePath: optional path to mapfile for username mapping
 func NewUserMapper(usernameClaim, groupsClaim string, mapfilePath string) *UserMapper {
+	ctx, cancel := context.WithCancel(context.Background())
 	um := &UserMapper{
 		usernameClaim: usernameClaim,
 		groupsClaim:   groupsClaim,
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 
 	if mapfilePath != "" {
@@ -213,7 +220,11 @@ func (um *UserMapper) RefreshMapfile() error {
 	}
 
 	if um.mapfile.IsStale() {
-		return um.mapfile.Load()
+		log.Infof("Mapfile has changed on disk, reloading: %s", um.mapfile.path)
+		if err := um.mapfile.Load(); err != nil {
+			return fmt.Errorf("failed to reload mapfile: %w", err)
+		}
+		log.Infof("Successfully reloaded mapfile: %s", um.mapfile.path)
 	}
 
 	return nil
@@ -256,4 +267,100 @@ func (um *UserMapper) ExtractUserInfo(tokenClaims map[string]interface{}, reques
 	}
 
 	return ui
+}
+
+// MapTokenToUser parses a JWT token and extracts user/group information with optional mapfile mapping
+// The token is parsed without verification (assumes it was already verified upstream)
+// Returns a userInfo struct suitable for caching with token authorization information
+func (um *UserMapper) MapTokenToUser(tokenStr string) *userInfo {
+	// Parse token without verification (it should have been verified upstream by getAcls)
+	tok, err := jwt.Parse([]byte(tokenStr), jwt.WithVerify(false))
+	if err != nil {
+		log.Debugf("Failed to parse token for user mapping: %v", err)
+		return &userInfo{User: "nobody", Groups: []string{}}
+	}
+
+	// Extract user and group information from token claims
+	tokenClaims := make(map[string]interface{})
+
+	// Extract username from the configured claim or fallback to "sub"
+	if username, ok := tok.Get(um.usernameClaim); ok {
+		if usernameStr, ok := username.(string); ok {
+			tokenClaims[um.usernameClaim] = usernameStr
+		}
+	}
+	if _, ok := tokenClaims[um.usernameClaim]; !ok {
+		if subject := tok.Subject(); subject != "" {
+			tokenClaims["sub"] = subject
+		}
+	}
+
+	// Extract groups from the configured claim
+	if groups, ok := tok.Get(um.groupsClaim); ok {
+		if groupList, ok := groups.([]interface{}); ok {
+			tokenClaims[um.groupsClaim] = groupList
+		}
+	}
+
+	// Also try generic "groups" claim if no groups found yet
+	if _, ok := tokenClaims[um.groupsClaim]; !ok {
+		if groups, ok := tok.Get("groups"); ok {
+			if groupList, ok := groups.([]interface{}); ok {
+				tokenClaims["groups"] = groupList
+			}
+		}
+	}
+
+	// Extract user info using the UserMapper
+	ui := um.ExtractUserInfo(tokenClaims, "")
+
+	// Convert to userInfo struct for use in auth flow
+	return &userInfo{
+		User:   ui.User,
+		Groups: ui.Groups,
+	}
+}
+
+// StartPeriodicRefresh starts a goroutine that periodically checks and reloads
+// the mapfile if it has been modified on disk. The refresh interval is controlled
+// by the provided interval parameter.
+//
+// The goroutine will run until the UserMapper's context is cancelled (typically
+// on server shutdown via Shutdown() method).
+func (um *UserMapper) StartPeriodicRefresh(interval time.Duration) {
+	if um.mapfile == nil {
+		log.Debug("No mapfile configured, skipping periodic refresh")
+		return
+	}
+
+	if interval <= 0 {
+		log.Debug("Mapfile refresh interval is 0 or negative, disabling periodic refresh")
+		return
+	}
+
+	log.Infof("Starting periodic mapfile refresh with interval: %v", interval)
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				if err := um.RefreshMapfile(); err != nil {
+					log.Warnf("Error refreshing mapfile: %v", err)
+				}
+			case <-um.ctx.Done():
+				log.Debug("Stopping mapfile refresh goroutine")
+				return
+			}
+		}
+	}()
+}
+
+// Shutdown stops the periodic refresh goroutine and cleans up resources
+func (um *UserMapper) Shutdown() {
+	if um.cancel != nil {
+		um.cancel()
+	}
 }
