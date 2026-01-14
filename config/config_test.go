@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -1135,6 +1135,231 @@ func TestEnvVarConfigMapping(t *testing.T) {
 			// Validate the config was applied (or not) as expected
 			if tc.configShouldApply {
 				tc.validateFunc(t)
+			}
+		})
+	}
+}
+
+// TestGetConfigBase tests the getConfigBase function for root and non-root users
+func TestGetConfigBase(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping test on Windows")
+	}
+
+	type testCase struct {
+		name         string
+		isRootExec   bool
+		homeEnv      string
+		expectedPath string
+	}
+
+	testCases := []testCase{
+		{
+			name:         "RootExecution",
+			isRootExec:   true,
+			homeEnv:      "/root",
+			expectedPath: "/etc/pelican",
+		},
+		{
+			name:         "RootIgnoresNonStandardHome",
+			isRootExec:   true,
+			homeEnv:      "/home/different-root-home",
+			expectedPath: "/etc/pelican",
+		},
+		{
+			name:         "NonRootWithHome",
+			isRootExec:   false,
+			homeEnv:      "/home/testuser",
+			expectedPath: "/home/testuser/.config/pelican",
+		},
+		{
+			name:         "NonRootWithoutHome",
+			isRootExec:   false,
+			homeEnv:      "",
+			expectedPath: "/etc/pelican",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Save and restore state at subtest level for proper isolation
+			oldIsRootExec := isRootExec
+			t.Cleanup(func() {
+				isRootExec = oldIsRootExec
+			})
+
+			isRootExec = tc.isRootExec
+			t.Setenv("HOME", tc.homeEnv)
+
+			configBase := getConfigBase()
+			require.Equal(t, tc.expectedPath, configBase)
+		})
+	}
+}
+
+// configParam is an interface for params that can be used as config keys in tests.
+// It provides GetName() for YAML key generation and GetString() for value assertion.
+type configParam interface {
+	GetName() string
+	GetString() string
+}
+
+// buildYAMLFromMap converts a param->value map into YAML content
+func buildYAMLFromMap(configMap map[configParam]string) string {
+	var lines []string
+	for p, v := range configMap {
+		lines = append(lines, p.GetName()+": "+v)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// TestConfigFileLookup tests the behavior of config file lookup for root and non-root users
+// by testing the actual InitConfigInternal implementation with mocked system config location
+func TestConfigFileBootstrapping(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping test on Windows")
+	}
+
+	// Table-driven test cases for config file lookup behavior
+	testCases := []struct {
+		name           string
+		isRoot         bool
+		homeConfig     map[configParam]string // config for ~/.config/pelican/pelican.yaml
+		etcConfig      map[configParam]string // config for "/etc/pelican/pelican.yaml" (which is overridden to a temp dir)
+		createHomeDir  bool                   // whether to create ~/.config/pelican dir (even without config)
+		expectedConfig map[configParam]string // expected param values after loading
+	}{
+		{
+			name:   "RootUserLoadsFromEtc",
+			isRoot: true,
+			etcConfig: map[configParam]string{
+				param.Server_WebHost: "root-etc-config",
+			},
+			expectedConfig: map[configParam]string{
+				param.Server_WebHost: "root-etc-config",
+			},
+		},
+		{
+			name:   "NonRootUserLoadsFromHome",
+			isRoot: false,
+			homeConfig: map[configParam]string{
+				param.Server_WebHost: "user-home-config",
+			},
+			etcConfig: map[configParam]string{
+				param.Server_WebHost: "should-not-be-used",
+			},
+			expectedConfig: map[configParam]string{
+				param.Server_WebHost: "user-home-config",
+			},
+		},
+		{
+			name:          "NonRootUserFallbackToEtc",
+			isRoot:        false,
+			createHomeDir: true, // Create the directory but no config file
+			etcConfig: map[configParam]string{
+				param.Server_WebHost: "etc-fallback-config",
+			},
+			expectedConfig: map[configParam]string{
+				param.Server_WebHost: "etc-fallback-config",
+			},
+		},
+		{
+			name:   "NonRootUserPreferHomeOverEtc",
+			isRoot: false,
+			homeConfig: map[configParam]string{
+				param.Server_WebHost: "user-home-preferred",
+			},
+			etcConfig: map[configParam]string{
+				param.Server_WebHost: "etc-config",
+			},
+			expectedConfig: map[configParam]string{
+				param.Server_WebHost: "user-home-preferred",
+			},
+		},
+		{
+			name:   "NonRootUserDoesNotMergeHomeAndEtc",
+			isRoot: false,
+			homeConfig: map[configParam]string{
+				param.Server_WebHost: "home-host",
+			},
+			etcConfig: map[configParam]string{
+				// Use a different string param to test no-merge behavior
+				param.Server_Hostname: "etc-hostname-should-not-appear",
+			},
+			// Home config shadows /etc completely, so Hostname stays at default (empty), not from /etc
+			expectedConfig: map[configParam]string{
+				param.Server_WebHost:  "home-host",
+				param.Server_Hostname: "", // Default value, not merged from /etc
+			},
+		},
+		{
+			name:   "NonRootUserHomeConfigCompleteShadowsEtc",
+			isRoot: false,
+			homeConfig: map[configParam]string{
+				param.Server_WebHost: "home-value-used",
+			},
+			etcConfig: map[configParam]string{
+				param.Server_WebHost: "etc-value-should-be-ignored",
+			},
+			expectedConfig: map[configParam]string{
+				param.Server_WebHost: "home-value-used",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ResetConfig()
+			t.Cleanup(func() {
+				ResetConfig()
+			})
+
+			// Save and restore state
+			oldIsRootExec := isRootExec
+			oldSysConfigLocation := sysConfigLocation
+			t.Cleanup(func() {
+				isRootExec = oldIsRootExec
+				sysConfigLocation = oldSysConfigLocation
+			})
+
+			// Set up /etc/pelican mock
+			etcDir := t.TempDir()
+			sysConfigLocation = etcDir
+			if len(tc.etcConfig) > 0 {
+				err := os.WriteFile(filepath.Join(etcDir, "pelican.yaml"),
+					[]byte(buildYAMLFromMap(tc.etcConfig)), 0644)
+				require.NoError(t, err)
+			}
+
+			// Set up home directory
+			homeDir := t.TempDir()
+			userConfigDir := filepath.Join(homeDir, ".config", "pelican")
+			if len(tc.homeConfig) > 0 || tc.createHomeDir {
+				err := os.MkdirAll(userConfigDir, 0755)
+				require.NoError(t, err)
+			}
+			if len(tc.homeConfig) > 0 {
+				err := os.WriteFile(filepath.Join(userConfigDir, "pelican.yaml"),
+					[]byte(buildYAMLFromMap(tc.homeConfig)), 0644)
+				require.NoError(t, err)
+			}
+
+			// Set execution mode
+			isRootExec = tc.isRoot
+			if !tc.isRoot {
+				t.Setenv("HOME", homeDir)
+			} else {
+				// Make sure HOME is set to something for root tests too
+				t.Setenv("HOME", "/root")
+			}
+
+			// Call the actual implementation
+			InitConfigInternal(logrus.WarnLevel)
+
+			// Assert all expected config values
+			for p, expected := range tc.expectedConfig {
+				assert.Equal(t, expected, p.GetString(),
+					"param %s: expected %q but got %q", p.GetName(), expected, p.GetString())
 			}
 		})
 	}
