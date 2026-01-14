@@ -162,7 +162,7 @@ GitHub uses OAuth2, not full OIDC (OpenID Connect). This means you need to expli
 1. **Create a GitHub OAuth App**: Go to [GitHub Developer Settings](https://github.com/settings/developers) and create a new OAuth App.
 2. **Set the callback URL**: Use `https://<your-origin-hostname>/api/v1.0/auth/oauth/callback` as the authorization callback URL.
 3. **Note your credentials**: Save your Client ID and generate a Client Secret.
-4. **Grant organization access**: If you want to restrict access based on GitHub organization membership, you must authorize the OAuth App to access those organizations. When users authenticate, they'll see a page like this where they can grant access:
+4. **Grant organization access**: If you want to restrict access based on GitHub organization membership, you must authorize the OAuth App to access those organizations.
 
 #### Configuration
 
@@ -189,9 +189,10 @@ OIDC:
 Origin:
   EnableIssuer: true
   EnableOIDC: true
-  # Note: GitHub OAuth uses Pelican's built-in OA4MP token issuer, which currently
-  # only supports Origins with a single export. Multi-export Origins are not yet
-  # supported with GitHub OAuth authentication.
+  # Note: Pelican's built-in OA4MP token issuer currently supports only one
+  # protected (non-public) export per Origin. This limitation applies to all
+  # authentication providers, including GitHub and CILogon. However, the Origin
+  # can still export any number of fully-public namespaces.
   Exports:
     - FederationPrefix: /my-origin/protected-data
       StoragePrefix: /data
@@ -203,8 +204,6 @@ Issuer:
   OIDCAuthenticationUserClaim: login
   # GitHub returns "id" (numeric) instead of OIDC standard "sub"
   OIDCSubjectClaim: id
-  # GitHub doesn't return "iss" claim, fall back to OIDC.Issuer
-  OIDCIssuerClaim: iss
   # Use GitHub organization membership as groups
   GroupSource: github
 
