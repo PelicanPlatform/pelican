@@ -12,31 +12,32 @@ The Pelican registry follows [OIDC](https://openid.net/developers/how-connect-wo
 
 For Pelican registry to work, you need to obtain a client id and associated client secret from CILogon. [This page](https://www.cilogon.org/oidc#h.p_ID_38) details how you can request a client credential. You will need to register your client at https://cilogon.org/oauth2/register and wait for approval before proceeding. Below is a guidance on how to fill in the registration form for CILogon.
 
-- **`Client Name`**: a human-readable name of your service. For example: Pelican Data Federation
-- **`Callback URLs`**: fill in `https://<hostname>:<server_port>/api/v1.0/auth/oauth/callback` where `<hostname>:<server_port>` is your server's public endpoint. For example, `https://example-origin.org:8444/api/v1.0/auth/oauth/callback`
-- **`Client Type`**: select `Confidential`
-- **`Scopes`**: select `email`, `openid`, `org.cilogon.userinfo`, and `profile`
-- **`Refresh Tokens`**: select `No`
+* **`Client Name`**: a human-readable name of your service. For example: Pelican Data Federation
+* **`Callback URLs`**: fill in `https://<hostname>:<server_port>/api/v1.0/auth/oauth/callback` where `<hostname>:<server_port>` is your server's public endpoint. For example, `https://example-origin.org:8444/api/v1.0/auth/oauth/callback`
+* **`Client Type`**: select `Confidential`
+* **`Scopes`**: select `email`, `openid`, `org.cilogon.userinfo`, and `profile`
+* **`Refresh Tokens`**: select `No`
 
 Once approved, you will get your `client_id` and `client_secret` from CILogon. Pass them as configuration parameters and configuration files to Pelican.
 
-- Set the `OIDC.ClientID` config parameter to your `<client_id>` value.
-
-- Create a file named `/etc/pelican/oidc-client-secret`
+* Set the `OIDC.ClientID` config parameter to your `<client_id>` value.
+* Create a file named `/etc/pelican/oidc-client-secret`
 
   ```bash copy
   touch /etc/pelican/oidc-client-secret
   ```
 
-- Copy and paste your `client_secret` into the file you just created. Please don't share your `client_secret`.
+* Copy and paste your `client_secret` into the file you just created. Please don't share your `client_secret`.
 
 If you prefer to store your `client_secret` file in a path different from the default file path, change `OIDC.ClientSecretFile` to your desired file location.
+
 
 ### Bypass Required Credential Check
 
 To run the registry without CILogon credentials, create two files named `/etc/pelican/oidc-client-id` and `/etc/pelican/oidc-client-secret` and populate the files with non-empty content. Pelican checks if the files exist and are non-empty. It won't check the content of the file.
 
 Note that, by doing this, when users attempt to use `CILogon` to login to the registry they will get an error page from `CILogon` and it's only possible to login using admin password.
+
 
 ## Launch the Registry
 
@@ -56,13 +57,14 @@ To initialize, login at https://<hostname>:8444/view/initialization/code/ with t
 
 > Note that your code will be different from what is being shown here.
 
-By default, a registry runs on port `8444`. You may change the port number by passing `-p <port>` when serving the registry or by setting `Server.WebPort` in the configuration file.
+By default, a registry runs on port `8444`. You may change the port number by passing `-p <port>` when serving
+the registry or by setting `Server.WebPort` in the configuration file.
 
 Now you want to initialize the admin account for your registry web UI. You may refer to [Login to Admin Website](/federating-your-data#login-to-admin-website) for details.
 
 Once you finish the initialization, you should be able to see the following page as an admin user (lists are expected to be empty at a fresh start):
 
-\<ExportedImage width={1000} height={1000} src={"/pelican/registry-admin.png"} alt={"Image registry home page in public view"} />
+<ExportedImage width={1000} height={1000} src={"/pelican/registry-admin.png"} alt={"Image registry home page in public view"} />
 
 You may view and manage namespaces registered in your federation. Pending registrations are shown as the first list and you can click each namespace strip for more detailed information. You can click the check button to approve a namespace registration or the cross button to deny the registration. As an admin user, you can also edit the registration by clicking the pencil icon.
 
@@ -70,7 +72,7 @@ For approved namespaces, you can download the public key associated with the nam
 
 The homepage of the registry web UI is also publicly accessible, meaning users can see a list of *approved* namespaces without logging into the registry. Denied and pending registrations are hidden from the public view. The image below shows what the public view looks like.
 
-\<ExportedImage width={1000} height={1000} src={"/pelican/registry-public.png"} alt={"Image of registry homepage in public view"} />
+<ExportedImage width={1000} height={1000} src={"/pelican/registry-public.png"} alt={"Image of registry homepage in public view"} />
 
 ## Useful Configurations for the Registry
 
@@ -88,6 +90,7 @@ However, Pelican also allows you to pass a list of CILogon user identities and g
 Server:
   UIAdminUsers: ["http://cilogon.org/serverA/users/123456"]
 ```
+
 
 ### `Registry.RequireOriginApproval`
 

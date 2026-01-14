@@ -1,44 +1,13 @@
-import parameters from '/public/static/parameters.json'; import Parameters from "/components/Parameters"; import { Callout } from 'nextra/components'
+import parameters from '/public/static/parameters.json';
+import Parameters from "/components/Parameters";
+import { Callout } from 'nextra/components'
 
 # Configuration
 
 ## Yaml Configuration
-
-Pelican's preferred configuration mechanism is via a [YAML](https://yaml.org/) file, typically named `pelican.yaml`. Each config value is represented by a key-value pair.
-
-### Configuration File Location
-
-Pelican automatically searches for its configuration file in different locations depending on the user running the process:
-
-- **Root User**:
-
-  - The default location is `/etc/pelican/pelican.yaml` (or `C:\ProgramData\pelican\pelican.yaml` on Windows).
-
-- **Non-Root User**:
-
-  - Pelican first checks for a user-specific configuration at `$HOME/.config/pelican/pelican.yaml` (or `C:\Users\<username>\.config\pelican` on Windows).
-  - If that file does not exist, it falls back to checking `/etc/pelican/pelican.yaml` (or `C:\ProgramData\pelican\pelican.yaml` on Windows).
-
-<Callout type="info">
-  If both exist, Pelican uses the user-specific configuration and **completely ignores** the system-wide configuration at `/etc/pelican/pelican.yaml`.
-  It does not merge them.
-</Callout>
-
-If you wish to override these defaults, you can explicitly specify a config file using the `--config` flag or the `PELICAN_CONFIG` environment variable.
-
-### Checking Configuration
-
-The `pelican config` tool helps you inspect how the derived configuration in the current environment (including merged configs when the `ConfigLocations` parameter is used):
-
-- `pelican config dump`: Prints the full effective configuration (including defaults, file-based values, and environment variable overrides) to the terminal.
-- `pelican config summary`: Prints only the parameters that differ from their default values.
-- `pelican config get <param>`: Retrieve a specific configuration value (e.g., `pelican config get Server.WebPort`).
-
-Using these tools allows you to verify exactly what configuration Pelican is using.
-
-### Example Configuration
-
-Below is an example configuration file with a key-value pair, a nested key-value pair, and a list of key-value pairs.
+Pelican's preferred configuration mechanism is via a [YAML](https://yaml.org/) file found at `/etc/pelican/pelican.yaml`. Each config
+value is represented by a key-value pair. Below is an example configuration file with a key-value pair, a nested key-value pair, and a
+list of key-value pairs.
 
 ```yaml  filename="/etc/pelican/pelican.yaml"
 IssuerKeysDirectory: /some/directory
@@ -56,29 +25,37 @@ Registry:
 
 ## Environment Variable Configuration
 
-Pelican configuration is typically set via the `pelican.yaml` file, in part because config parameters that have the `object` type cannot be fully represented with environment variables. If, however, there is a corresponding environment variable set in the shell where the command is executed, that will override the configuration provided in the `pelican.yaml` file.
+Pelican configuration is typically set via the `pelican.yaml` file, in part because config parameters that
+have the `object` type cannot be fully represented with environment variables. If, however, there is a corresponding
+environment variable set in the shell where the command is executed, that will override the configuration provided in
+the `pelican.yaml` file.
 
 <Callout type="warning">
-  Using environment variables to change the configuration means the state of the Pelican component is not easily reproducible, especially if inheriting the environment from multiple parents.
+  Using environment variables to change the configuration means the state of the Pelican component
+  is not easily reproducible, especially if inheriting the environment from multiple parents.
   Furthermore, the changes will be lost upon restart of the host machine/container.
-  While this approach is useful for testing changes to the configuration, any "permanent" changes should be set via the appropriate `pelican.yaml` file.
+  While this approach is useful for testing changes to the configuration,
+  any "permanent" changes should be set via the appropriate `pelican.yaml` file.
 </Callout>
 
 ### Syntax
 
-The environment variable name is constructed from the one-line address of the configuration parameter, e.g., `Level1.Level2`, as follows:
+The environment variable name is constructed from the one-line address of the configuration parameter,
+e.g., `Level1.Level2`, as follows:
 
 1. Capitalize all letters.
-1. Replace the period `.` with an underscore `_`.
-1. Prefix with `PELICAN_`
+2. Replace the period `.` with an underscore `_`.
+3. Prefix with `PELICAN_`
 
 This leads to an environment variable name of the form `PELICAN_LEVEL1_LEVEL2`.
 
 ### Examples
 
-To demonstrate the syntax for setting the environment variable, consider the following examples.
+To demonstrate the syntax for setting the environment variable,
+consider the following examples.
 
-To set the logging level for a Pelican component to "Debug" in the `pelican.yaml` file, you would use the following:
+To set the logging level for a Pelican component to "Debug" in the `pelican.yaml` file,
+you would use the following:
 
 ```yaml
 # /etc/pelican/pelican.yaml
@@ -86,14 +63,15 @@ Logging:
   Level: Debug
 ```
 
-To set the logging level for a Pelican component to "Debug" via an environment variable, you would use
+To set the logging level for a Pelican component to "Debug" via an environment variable,
+you would use
 
 ```bash
 export PELICAN_LOGGING_LEVEL=Debug
 ```
 
-Note that the environment variable is prefixed by `PELICAN_` and that the nested keys are capitalized and separated by underscores (`_`).
+Note that the environment variable is prefixed by `PELICAN_` and
+that the nested keys are capitalized and separated by underscores (`_`).
 
 ## Configurable Parameters
-
 <Parameters parameters={parameters}/>

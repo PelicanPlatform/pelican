@@ -55,4 +55,5 @@ repos:
         additional_dependencies:
         -   mdformat-simple-breaks
         args: [--wrap, "no"]
-        files: \.(md|mdx)$
+        files: \.md$
+        exclude: \.mdx$
