@@ -17,6 +17,7 @@ Pelican is a data federation platform that allows users to serve and access data
 ## Tech Stack
 
 ### Backend (Go)
+
 - **Language**: Go 1.24+
 - **Web Framework**: Gin (HTTP server)
 - **CLI Framework**: Cobra
@@ -27,6 +28,7 @@ Pelican is a data federation platform that allows users to serve and access data
 - **Storage Backend**: XRootD
 
 ### Frontend (TypeScript/React)
+
 - **Language**: TypeScript
 - **Framework**: React 19.x with Next.js 15.x
 - **UI Library**: Material-UI (MUI) v7
@@ -37,6 +39,7 @@ Pelican is a data federation platform that allows users to serve and access data
 - **Formatting**: Prettier
 
 ### Additional Dependencies
+
 - **XRootD**: Underlying storage management for Origins and Caches
 - **Prometheus**: Server observability and monitoring
 - **OA4MP**: OAuth Server
@@ -64,22 +67,27 @@ Pelican is a data federation platform that allows users to serve and access data
 ### Build Commands
 
 **Full build with GoReleaser:**
+
 ```bash
 goreleaser build --clean --snapshot
 ```
 
 **Faster build for testing (single architecture):**
+
 ```bash
 goreleaser build --clean --snapshot --single-target
 ```
 
 **Development build (faster):**
+
 ```bash
 make pelican-dev-build
 ```
+
 _Note: Requires creating a `.goreleaser.dev.yml` configuration file. See README.md for an example configuration._
 
 **Build web UI:**
+
 ```bash
 make web-build
 ```
@@ -87,16 +95,19 @@ make web-build
 ### Test Commands
 
 **Go tests:**
+
 ```bash
 go test ./...
 ```
 
 **Test individual modules:**
+
 ```bash
 cd director && go test
 ```
 
 **Frontend tests:**
+
 ```bash
 cd web_ui/frontend
 npm test
@@ -105,22 +116,26 @@ npm test
 ### Linting
 
 **Go linting:**
+
 ```bash
 golangci-lint run
 ```
 
 **Go formatting:**
+
 ```bash
 gofmt -w .
 ```
 
 **Frontend linting:**
+
 ```bash
 cd web_ui/frontend
 npm run lint
 ```
 
 **Frontend formatting:**
+
 ```bash
 cd web_ui/frontend
 npm run format        # Check formatting
@@ -132,6 +147,7 @@ npm run format:fix    # Fix formatting
 ### Go Code
 
 1. **License Headers**: All Go files must include the Apache 2.0 license header at the top (use current year):
+
    ```go
    /***************************************************************
     *
@@ -152,13 +168,14 @@ npm run format:fix    # Fix formatting
     ***************************************************************/
    ```
 
-2. **Package Naming**: Use lowercase package names matching the directory name
+1. **Package Naming**: Use lowercase package names matching the directory name
 
-3. **Error Handling**: Always check and handle errors appropriately
+1. **Error Handling**: Always check and handle errors appropriately
 
-4. **Testing**: Place test files alongside source files with `_test.go` suffix. Tests should be isolated (use temp directories and config reset functions) and not depend on state from other tests.
+1. **Testing**: Place test files alongside source files with `_test.go` suffix. Tests should be isolated (use temp directories and config reset functions) and not depend on state from other tests.
 
-5. **Imports**: Organize imports in three groups separated by blank lines:
+1. **Imports**: Organize imports in three groups separated by blank lines:
+
    ```go
    import (
        // Standard library imports (alphabetized)
@@ -180,17 +197,18 @@ npm run format:fix    # Fix formatting
 
 1. **Components**: Use functional components with hooks
 
-2. **Type Safety**: Prefer explicit types over `any`
+1. **Type Safety**: Prefer explicit types over `any`
 
-3. **File Organization**:
+1. **File Organization**:
+
    - Components in `web_ui/frontend/components/`
    - Pages/routes in `web_ui/frontend/app/`
    - Utilities in `web_ui/frontend/helpers/`
    - Custom hooks in `web_ui/frontend/hooks/`
 
-4. **Styling**: Use Material-UI components and styling system
+1. **Styling**: Use Material-UI components and styling system
 
-5. **Formatting**: Follow Prettier configuration (`.prettierrc.json`)
+1. **Formatting**: Follow Prettier configuration (`.prettierrc.json`)
 
 ## Development Workflow
 
@@ -199,11 +217,12 @@ npm run format:fix    # Fix formatting
 Pelican uses Docker containers and VSCode Dev Containers for development. See [CONTRIBUTE.md](CONTRIBUTE.md) for detailed setup instructions.
 
 Key steps:
+
 1. Fork and clone the repository
-2. Install Docker and VSCode
-3. Pull the development container: `hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb`
-4. Create `.devcontainer/devcontainer.json` using the template from `dev/devcontainer.json`
-5. Build Pelican from source inside the container
+1. Install Docker and VSCode
+1. Pull the development container: `hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb`
+1. Create `.devcontainer/devcontainer.json` using the template from `dev/devcontainer.json`
+1. Build Pelican from source inside the container
 
 ### Pull Request Guidelines
 
@@ -279,10 +298,10 @@ API endpoints are documented using OpenAPI V2.0. The specification is generated 
 ## Common Gotchas
 
 1. **XRootD Integration**: Origins and Caches require XRootD to be properly configured
-2. **MaxMind License**: Director benefits from a MaxMind license key for GeoIP lookups (functions without it, but cannot use GeoIP services)
-3. **OAuth Setup**: Registry requires CILogon OAuth credentials for web authentication
-4. **Port Conflicts**: Default ports may conflict with local services
-5. **TLS Certificates**: Development often uses `TLSSkipVerify: true` but production requires proper certificates
+1. **MaxMind License**: Director benefits from a MaxMind license key for GeoIP lookups (functions without it, but cannot use GeoIP services)
+1. **OAuth Setup**: Registry requires CILogon OAuth credentials for web authentication
+1. **Port Conflicts**: Default ports may conflict with local services
+1. **TLS Certificates**: Development often uses `TLSSkipVerify: true` but production requires proper certificates
 
 ## Useful Commands
 

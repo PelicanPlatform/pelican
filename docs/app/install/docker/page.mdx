@@ -8,10 +8,10 @@ This document explains how to run a Pelican server using Pelican docker image. I
 
 Pelican builds separate images for each Pelican server components, e.g. origin, cache, director, and registry. Depending on which Pelican server you want to run, you need to select a different Docker image from the list below.
 
-* Pelican origin server: `hub.opensciencegrid.org/pelican_platform/origin:latest`
-* Pelican cache server: `hub.opensciencegrid.org/pelican_platform/cache:latest`
-* Pelican director server: `hub.opensciencegrid.org/pelican_platform/director:latest`
-* Pelican registry server: `hub.opensciencegrid.org/pelican_platform/registry:latest`
+- Pelican origin server: `hub.opensciencegrid.org/pelican_platform/origin:latest`
+- Pelican cache server: `hub.opensciencegrid.org/pelican_platform/cache:latest`
+- Pelican director server: `hub.opensciencegrid.org/pelican_platform/director:latest`
+- Pelican registry server: `hub.opensciencegrid.org/pelican_platform/registry:latest`
 
 <Callout type="info">
 The `latest` tag will pull the Pelican server image with the latest released version. You may pull an image with explicit Pelican version by passing the version as the tag (e.g. `v7.6.4`) instead. For a list of available tags, refer to [Pelican Harbor repository](https://hub.opensciencegrid.org/harbor/projects/883/repositories/origin/artifacts-tab?publicAndNotLogged=yes).
@@ -20,7 +20,6 @@ The `latest` tag will pull the Pelican server image with the latest released ver
 ## Run Pelican server via Docker CLI
 
 This section describes how to run various Pelican server images using the Docker CLI. If you haven't installed Docker engine, follow the [documentation from Docker](https://docs.docker.com/get-docker/) to install and start the Docker engine first.
-
 
 ### Run Pelican origin server
 
@@ -32,15 +31,15 @@ docker run -it -p 8444:8444 -p 8443:8443 -v /path/to/your/data/:/tmp/pelican --n
 
 Where:
 
-* `docker run` is a Docker CLI command that runs a new container from an image
-* `-it` (`--interactive --tty`) runs the container in interactive mode and uses a tty terminal
-* `-p <host-port>:<container-port>` (`--publish`) publishes a container’s port(s) to the host, allowing you to reach the container’s port via a host port. In this case, we can reach the container’s port `8444` via the host’s port `8444`. Note that the admin website of Pelican servers run on port `8444` by default, and the objects transfer endpoint of the Pelican origin server runs on port `8443` by default.
-* `-v <host-location>:<container-location>` (`--volume`) binds mount a volume from the host location(s) to the container's location(s). This allow you to share files in your host machine to the container. In this case, we bind `/path/to/your/data/` on your host machine to `/tmp/pelican` in the container. You need to replace `/path/to/your/data/` to the directory where your data to publish is located.
-* `--name` assigns a logical name to the container (e.g. pelican-origin). This allows you to refer to the container by name instead of by ID.
-* `hub.opensciencegrid.org/pelican_platform/origin:latest` is the image to run
-* `serve` is the command to run the Pelican binary
-* `-v /tmp/pelican:/foo/bar` is the Pelican argument to bind `/tmp/pelican` directory in the container as namespace `/foo/bar` in Pelican. You need to change `/foo/bar` to a meaningful path that can represent your data, e.g. `/chtc/public-data`. You may pass additional arguments to Pelican server by appending them after this argument.
-* `-f <federation>` sets the federation discovery URL, where `<federation>` is the URL to the federation the origin will be joining in. For instructions on how to find a federation to join, refer to [Serve a Pelican Origin](../serving_an_origin.mdx#find-a-federation-to-join)
+- `docker run` is a Docker CLI command that runs a new container from an image
+- `-it` (`--interactive --tty`) runs the container in interactive mode and uses a tty terminal
+- `-p <host-port>:<container-port>` (`--publish`) publishes a container’s port(s) to the host, allowing you to reach the container’s port via a host port. In this case, we can reach the container’s port `8444` via the host’s port `8444`. Note that the admin website of Pelican servers run on port `8444` by default, and the objects transfer endpoint of the Pelican origin server runs on port `8443` by default.
+- `-v <host-location>:<container-location>` (`--volume`) binds mount a volume from the host location(s) to the container's location(s). This allow you to share files in your host machine to the container. In this case, we bind `/path/to/your/data/` on your host machine to `/tmp/pelican` in the container. You need to replace `/path/to/your/data/` to the directory where your data to publish is located.
+- `--name` assigns a logical name to the container (e.g. pelican-origin). This allows you to refer to the container by name instead of by ID.
+- `hub.opensciencegrid.org/pelican_platform/origin:latest` is the image to run
+- `serve` is the command to run the Pelican binary
+- `-v /tmp/pelican:/foo/bar` is the Pelican argument to bind `/tmp/pelican` directory in the container as namespace `/foo/bar` in Pelican. You need to change `/foo/bar` to a meaningful path that can represent your data, e.g. `/chtc/public-data`. You may pass additional arguments to Pelican server by appending them after this argument.
+- `-f <federation>` sets the federation discovery URL, where `<federation>` is the URL to the federation the origin will be joining in. For instructions on how to find a federation to join, refer to [Serve a Pelican Origin](../serving_an_origin.mdx#find-a-federation-to-join)
 
 ### Run Pelican cache server
 
@@ -51,7 +50,8 @@ docker run -it -p 8444:8444 -p 8442:8442 --name=pelican-cache hub.opensciencegri
 ```
 
 Where most of the command overlaps with the one to run the Pelican origin server, with the following differences:
-* `-p 8444:8444 -p 8442:8442` publishes port `8444` and `8442` from the container to the same port on the host machine. Note that the admin website of the Pelican server runs on port `8444` by default, and the objects transfer endpoint of the Pelican cache server runs on port `8442` by default.
+
+- `-p 8444:8444 -p 8442:8442` publishes port `8444` and `8442` from the container to the same port on the host machine. Note that the admin website of the Pelican server runs on port `8444` by default, and the objects transfer endpoint of the Pelican cache server runs on port `8442` by default.
 
 ### Run Pelican director server
 
@@ -103,7 +103,7 @@ There are two ways to configure a Pelican server running in a container. One is 
 
 Most Pelican configuration parameters described in [parameters page](../parameters.mdx) can be passed to a Pelican server as environment variables. For a configuration parameter, the corresponding environment variable is `PELICAN_<PARAMETER_NAME>`, where `PELICAN` is the prefix, and `<PARAMETER_NAME>` is the name of the parameter, with dots `.` replaced by underscores `_`. For example, a Pelican configuration named `Logging.Level` has a corresponding environment variable named `PELICAN_LOGGING_LEVEL`.
 
-To pass environment variables to the Docker container, append `-e` flag to your `docker run` command. For example, if you want to pass  `PELICAN_LOGGING_LEVEL` to the container, run:
+To pass environment variables to the Docker container, append `-e` flag to your `docker run` command. For example, if you want to pass `PELICAN_LOGGING_LEVEL` to the container, run:
 
 ```bash
 docker run -it -e PELICAN_LOGGING_LEVEL=debug -p 8444:8444 -p 8443:8443 -v /path/to/your/data/:/tmp/pelican --name=pelican-origin hub.opensciencegrid.org/pelican_platform/origin:latest serve -v /tmp/pelican:/foo/bar -f <federation>
@@ -123,28 +123,28 @@ It is recommended that admins bind a Pelican configuration file on the host mach
 
 1. Prepare a `yaml` file on the host machine:
 
-    ```bash
-    touch pelican.yaml
-    ```
+   ```bash
+   touch pelican.yaml
+   ```
 
-2. Modify and save the `pelican.yaml` file on host machine with the following content:
+1. Modify and save the `pelican.yaml` file on host machine with the following content:
 
-    ```yaml filename="pelican.yaml"
-    Logging:
-      Level: debug
-    ```
+   ```yaml filename="pelican.yaml"
+   Logging:
+     Level: debug
+   ```
 
-2. Bind the configuration file on the host machine to the container when running the Pelican server image:
+1. Bind the configuration file on the host machine to the container when running the Pelican server image:
 
-    ```bash
-    docker run -it -p 8444:8444 -p 8443:8443 -v /path/to/your/data/:/tmp/pelican -v $PWD/pelican.yaml:/etc/pelican/pelican.yaml --name=pelican-origin hub.opensciencegrid.org/pelican_platform/origin:latest serve -v /tmp/pelican:/foo/bar -f <federation>
-    ```
+   ```bash
+   docker run -it -p 8444:8444 -p 8443:8443 -v /path/to/your/data/:/tmp/pelican -v $PWD/pelican.yaml:/etc/pelican/pelican.yaml --name=pelican-origin hub.opensciencegrid.org/pelican_platform/origin:latest serve -v /tmp/pelican:/foo/bar -f <federation>
+   ```
 
-    where
-    * `-v $PWD/pelican.yaml:/etc/pelican/pelican.yaml` is the flag to bind the `pelican.yaml` file under current working directory `$PWD` to `/etc/pelican/pelican.yaml` directory inside the container
+   where
 
+   - `-v $PWD/pelican.yaml:/etc/pelican/pelican.yaml` is the flag to bind the `pelican.yaml` file under current working directory `$PWD` to `/etc/pelican/pelican.yaml` directory inside the container
 
-4. You should note that your running Pelican origin server is logging debug level messages.
+1. You should note that your running Pelican origin server is logging debug level messages.
 
 ## Additional Configurations for Running Pelican in a Container
 
@@ -170,23 +170,15 @@ For more information about how Docker networking works, refer to [Docker Network
 
 ## Persisting Data Across Container Restarts
 
-When running Pelican servers in containers, certain files and directories need to persist across container restarts to maintain server identity, configurations, and data.
-Without proper volume mounts, restarting a container will cause data loss, including cryptographic keys, databases, and configuration files.
+When running Pelican servers in containers, certain files and directories need to persist across container restarts to maintain server identity, configurations, and data. Without proper volume mounts, restarting a container will cause data loss, including cryptographic keys, databases, and configuration files.
 
 This section describes which data should be persisted for each Pelican server type and how to configure volume mounts appropriately.
 
 ### Quick Reference: Essential Volume Mounts
 
-The table below shows the minimum recommended volume mounts for each server type at the directory level.
-For additional information about using config params to set the location of specific files in your container, see the section for your service.
+The table below shows the minimum recommended volume mounts for each server type at the directory level. For additional information about using config params to set the location of specific files in your container, see the section for your service.
 
-| Server Type | Essential Volume Mounts |
-|-------------|------------------------|
-| **All** | `-v /host/pelican/config:/etc/pelican` <br/> `-v /host/pelican/lib:/var/lib/pelican` <br/> `-v /host/pelican/certificates:/etc/pelican/certificates` |
-| **Origin** | 'All' + <br/> `-v /host/data:/data` (your data directory) |
-| **Cache** | 'All' + <br/> `-v /host/cache/storage:/var/cache/pelican` (cache storage) |
-| **Director** | 'All' + <br/> `-v /host/pelican/maxmind:/var/cache/pelican/maxmind` (optional, for GeoIP) |
-| **Registry** | 'All' (no additional mounts required) |
+| Server Type | Essential Volume Mounts | |-------------|------------------------| | **All** | `-v /host/pelican/config:/etc/pelican` <br/> `-v /host/pelican/lib:/var/lib/pelican` <br/> `-v /host/pelican/certificates:/etc/pelican/certificates` | | **Origin** | 'All' + <br/> `-v /host/data:/data` (your data directory) | | **Cache** | 'All' + <br/> `-v /host/cache/storage:/var/cache/pelican` (cache storage) | | **Director** | 'All' + <br/> `-v /host/pelican/maxmind:/var/cache/pelican/maxmind` (optional, for GeoIP) | | **Registry** | 'All' (no additional mounts required) |
 
 <Callout type="warning">
 The `/etc/pelican` directory contains cryptographic keys that establish your server's identity in the federation.
@@ -197,6 +189,7 @@ See ["Issuer Keys Directory"](./docker#issuer-keys-directory) for more informati
 ### Understanding Default Paths
 
 Pelican uses different default paths depending on whether the server runs as root (which is the case in containers):
+
 - **Root user** (including root-ly containers such as in Docker, and in unprivileged containers where pelican still appears to run as PID 0): Configuration and data are stored in `/etc/pelican` and `/var/lib/pelican`
 - **Non-root user**: Configuration and data are stored in `~/.config/pelican`
 
@@ -204,12 +197,9 @@ All examples below assume the server runs as root inside a container.
 
 ### Mounting Directories vs Individual Files
 
-The volume mount examples in this document show mounting entire directories (e.g., `-v /host/pelican/config:/etc/pelican`).
-This is the recommended approach for Docker deployments as it's simpler and ensures all related files are persisted together.
+The volume mount examples in this document show mounting entire directories (e.g., `-v /host/pelican/config:/etc/pelican`). This is the recommended approach for Docker deployments as it's simpler and ensures all related files are persisted together.
 
-However, in some deployment scenarios (such as Kubernetes with sealed secrets), you may need to mount individual files instead of entire directories.
-In such cases, consult the configuration parameter documentation linked for each file to determine or customize the file's path.
-Each file's default location is also specified in the sections below.
+However, in some deployment scenarios (such as Kubernetes with sealed secrets), you may need to mount individual files instead of entire directories. In such cases, consult the configuration parameter documentation linked for each file to determine or customize the file's path. Each file's default location is also specified in the sections below.
 
 ### Data That Should Persist for All Server Types
 
@@ -219,28 +209,25 @@ The following data should be persisted for all Pelican server types (Origin, Cac
 
 **Configuration**: To customize the path, see the [`IssuerKeysDirectory`](../parameters.mdx#IssuerKeysDirectory) parameter.
 
-**Purpose**: Contains PEM-encoded ECDSA private keys used to sign credentials issued by the server.
-These keys establish the server's cryptographic identity within the federation.
+**Purpose**: Contains PEM-encoded ECDSA private keys used to sign credentials issued by the server. These keys establish the server's cryptographic identity within the federation.
 
 **Default Path**: `/etc/pelican/issuer-keys`
 
-**Best Practice**: Pre-generate these keys outside the container and mount them into the container's issuer keys directory.
-This prevents accidental re-generation of keys in the event of a typo in volume mounts, as the keys remain persisted on the host.
+**Best Practice**: Pre-generate these keys outside the container and mount them into the container's issuer keys directory. This prevents accidental re-generation of keys in the event of a typo in volume mounts, as the keys remain persisted on the host.
 
 **Volume Mount**:
+
 ```bash
 -v /host/pelican/issuer-keys:/etc/pelican/issuer-keys
 ```
 
 For mounting individual key files:
+
 ```bash
 -v /host/pelican/issuer.pem:/etc/pelican/issuer-keys/issuer.pem
 ```
 
-**Why it must persist**: If these keys are lost, the server will generate new ones, causing authentication failures with other federation services that trust the old keys.
-For Caches/Origins, this is the source of the "namespace/service is registered with a different key" error.
-When this error is encountered, you must contact your federation's administrators to have them delete the old registration.
-For security, this cannot be fixed without help from the federation administrators.
+**Why it must persist**: If these keys are lost, the server will generate new ones, causing authentication failures with other federation services that trust the old keys. For Caches/Origins, this is the source of the "namespace/service is registered with a different key" error. When this error is encountered, you must contact your federation's administrators to have them delete the old registration. For security, this cannot be fixed without help from the federation administrators.
 
 #### Server Database
 
@@ -251,11 +238,13 @@ For security, this cannot be fixed without help from the federation administrato
 **Default Path**: `/var/lib/pelican/pelican.sqlite`
 
 **Volume Mount**:
+
 ```bash
 -v /host/pelican/lib:/var/lib/pelican
 ```
 
 For mounting individual database files:
+
 ```bash
 -v /host/pelican/pelican.sqlite:/var/lib/pelican/pelican.sqlite
 ```
@@ -269,11 +258,13 @@ For mounting individual database files:
 **Default Path**: `/etc/pelican/server-web-passwd`
 
 **Volume Mount**:
+
 ```bash
 -v /host/pelican/config:/etc/pelican
 ```
 
 For mounting individual password files:
+
 ```bash
 -v /host/pelican/server-web-passwd:/etc/pelican/server-web-passwd
 ```
@@ -282,20 +273,22 @@ For mounting individual password files:
 
 **Configuration**: To customize paths, see [`Server.TLSCertificateChain`](../parameters.mdx#Server-TLSCertificateChain), [`Server.TLSKey`](../parameters.mdx#Server-TLSKey), and [`Server.TLSCACertificateFile`](../parameters.mdx#Server-TLSCACertificateFile) parameters.
 
-**Purpose**: TLS certificate chain and private key for HTTPS communication.
-Generally you _must_ mount these into your container because while Pelican will generate them if they're not provided, the Pelican-generated versions are self-signed and will not be trusted by most other web services.
+**Purpose**: TLS certificate chain and private key for HTTPS communication. Generally you _must_ mount these into your container because while Pelican will generate them if they're not provided, the Pelican-generated versions are self-signed and will not be trusted by most other web services.
 
 **Default Paths**:
+
 - Certificate chain: `/etc/pelican/certificates/tls.crt`
 - Private key: `/etc/pelican/certificates/tls.key`
 - CA certificate: `/etc/pelican/certificates/tlsca.pem`
 
 **Volume Mount**:
+
 ```bash
 -v /host/pelican/certificates:/etc/pelican/certificates
 ```
 
 For mounting individual certificate files:
+
 ```bash
 -v /host/tls.crt:/etc/pelican/certificates/tls.crt
 -v /host/tls.key:/etc/pelican/certificates/tls.key
@@ -321,6 +314,7 @@ For mounting individual certificate files:
 **Default Path**: Logs are written to stderr/stdout by default, but can be redirected to a file.
 
 **Volume Mount**:
+
 ```bash
 -v /host/pelican/logs:/var/log/pelican
 ```
@@ -334,6 +328,7 @@ For mounting individual certificate files:
 **Default Path**: `/var/lib/pelican/monitoring/data`
 
 **Volume Mount**:
+
 ```bash
 -v /host/pelican/monitoring:/var/lib/pelican/monitoring
 ```
@@ -345,15 +340,18 @@ For mounting individual certificate files:
 **Purpose**: OIDC client ID and secret for OAuth2/OIDC authentication.
 
 **Default Paths**:
+
 - Client ID: `/etc/pelican/oidc-client-id`
 - Client secret: `/etc/pelican/oidc-client-secret`
 
 **Volume Mount**:
+
 ```bash
 -v /host/pelican/config:/etc/pelican
 ```
 
 For mounting individual credential files:
+
 ```bash
 -v /host/oidc-client-id:/etc/pelican/oidc-client-id
 -v /host/oidc-client-secret:/etc/pelican/oidc-client-secret
@@ -375,8 +373,8 @@ In addition to the common data above, Origins need to persist:
 
 #### Origin Data Directory
 
-**Configuration**: Use the [`Origin.Exports`](../parameters.mdx#Origin-Exports) parameter to define exports.
-For example, in `/etc/pelican/pelican.yaml`:
+**Configuration**: Use the [`Origin.Exports`](../parameters.mdx#Origin-Exports) parameter to define exports. For example, in `/etc/pelican/pelican.yaml`:
+
 ```yaml
 Origin:
   Exports:
@@ -389,6 +387,7 @@ Origin:
 **Default Path**: Configured via the [`Origin.Exports`](../parameters.mdx#Origin-Exports) parameter.
 
 **Volume Mount Example**:
+
 ```bash
 -v /host/data:/data
 ```
@@ -418,8 +417,8 @@ In addition to the common data, Caches need to persist:
 
 #### Cache Storage Location
 
-**Configuration**: Set [`Cache.StorageLocation`](../parameters.mdx#Cache-StorageLocation) to point to the mounted cache storage.
-In `/etc/pelican/pelican.yaml`:
+**Configuration**: Set [`Cache.StorageLocation`](../parameters.mdx#Cache-StorageLocation) to point to the mounted cache storage. In `/etc/pelican/pelican.yaml`:
+
 ```yaml
 Cache:
   StorageLocation: /var/cache/pelican
@@ -429,11 +428,10 @@ Cache:
 
 **Default Path**: `/run/pelican/xrootd/cache`
 
-**Important**: The default path is in `/run`, which is typically a temporary filesystem.
-All Cache administrators should change this value to point at their mounted cache disks to ensure cached data persists across container restarts.
-If this configuration is not changed, cached data will fill up `/run`, potentially causing system instability and the Cache will lose all cached objects on restart.
+**Important**: The default path is in `/run`, which is typically a temporary filesystem. All Cache administrators should change this value to point at their mounted cache disks to ensure cached data persists across container restarts. If this configuration is not changed, cached data will fill up `/run`, potentially causing system instability and the Cache will lose all cached objects on restart.
 
 **Volume Mount**:
+
 ```bash
 -v /host/cache/storage:/var/cache/pelican
 ```
@@ -470,6 +468,7 @@ In addition to the common data, Directors need to persist:
 **Default Path**: `/var/cache/pelican/maxmind/GeoLite2-City.mmdb`
 
 **Volume Mount**:
+
 ```bash
 -v /host/pelican/maxmind:/var/cache/pelican/maxmind
 ```
@@ -513,8 +512,7 @@ All Registry configuration, including federation URL, should be provided via `/e
 
 ### Using Docker Compose for Persistent Data
 
-For production deployments, Docker Compose provides a cleaner way to manage volumes.
-Here's an example for an Origin:
+For production deployments, Docker Compose provides a cleaner way to manage volumes. Here's an example for an Origin:
 
 ```yaml
 version: '3.8'
@@ -546,14 +544,14 @@ Note: Configuration including exports and federation URL should be provided in a
 
 1. **Always persist `/etc/pelican` and `/var/lib/pelican`**: These directories contain most of the critical persistent data.
 
-2. **Use named volumes or bind mounts consistently**: Avoid mixing approaches to prevent confusion.
+1. **Use named volumes or bind mounts consistently**: Avoid mixing approaches to prevent confusion.
 
-3. **Back up databases regularly**: The SQLite databases in `/var/lib/pelican` should be backed up regularly.
+1. **Back up databases regularly**: The SQLite databases in `/var/lib/pelican` should be backed up regularly.
 
-4. **Protect private keys**: The issuer keys and TLS private keys in `/etc/pelican` are sensitive and should be protected with appropriate file system permissions on the host.
+1. **Protect private keys**: The issuer keys and TLS private keys in `/etc/pelican` are sensitive and should be protected with appropriate file system permissions on the host.
 
-5. **Monitor disk usage**: Cache storage and monitoring data can grow over time. Monitor disk usage and configure appropriate limits.
+1. **Monitor disk usage**: Cache storage and monitoring data can grow over time. Monitor disk usage and configure appropriate limits.
 
-6. **Test container restarts**: After setting up persistent volumes, test that the container can be stopped and restarted without losing data or generating new keys.
+1. **Test container restarts**: After setting up persistent volumes, test that the container can be stopped and restarted without losing data or generating new keys.
 
-7. **Document your volume mounts**: Keep a record of which host directories are mounted to which container paths for each server.
+1. **Document your volume mounts**: Keep a record of which host directories are mounted to which container paths for each server.

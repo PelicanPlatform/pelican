@@ -6,11 +6,7 @@ This ui is generated with Next.js.
 
 ### Local
 
-In production builds the website is compiled and included with the code. This step
-takes a couple minutes and is not well suited for development. Since the website
-sits on top of the api the best way to develop just the website is to run the api
-and the website separately and then use nginx to make them come from the same host
-as they would in production.
+In production builds the website is compiled and included with the code. This step takes a couple minutes and is not well suited for development. Since the website sits on top of the api the best way to develop just the website is to run the api and the website separately and then use nginx to make them come from the same host as they would in production.
 
 #### To run the api:
 
@@ -47,15 +43,13 @@ docker restart pelican-dev-proxy
 docker run --name pelican-dev-proxy --rm -it -p 8443:8443 -d pelican-api-proxy
 ```
 
-If you would like to proxy the prometheus requests to another service you can do so by filling out .env.template
-and placing it as .env.local. Then run the docker statement like so to add those variables to the container.
+If you would like to proxy the prometheus requests to another service you can do so by filling out .env.template and placing it as .env.local. Then run the docker statement like so to add those variables to the container.
 
 ```shell
 docker run --name pelican-dev-proxy --rm -it -p 8443:8443 -p 8448:8448 -p 8118:8118 -p 8228:8228 -p 8338:8338 --env-file dev/.env.local -d pelican-api-proxy
 ```
 
-First make sure that the ports are correct in `dev/nginx.conf` so that they point to
-the website and the api as expected. Then run the following command.
+First make sure that the ports are correct in `dev/nginx.conf` so that they point to the website and the api as expected. Then run the following command.
 
 ```shell
 

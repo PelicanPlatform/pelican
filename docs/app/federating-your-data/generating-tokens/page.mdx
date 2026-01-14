@@ -20,6 +20,7 @@ pelican origin token create \
 where:
 
 - `--scope` defines the access permission of the token. It follows [WLCG claim semantics](https://github.com/WLCG-AuthZ-WG/common-jwt-profile/blob/master/profile.md#capability-based-authorization-scope). There are three scopes that are most frequently used:
+
   - `storage.read`: Read data.
   - `storage.create`: Upload data. This capability includes the creation of directories and subdirectories at the specified path, and the creation of any non-existent directories required to create the path itself. This authorization does **not** permit overwriting or deletion of stored data.
   - `storage.modify`: Change the data, including creating new files and writing data. This permission includes overwriting or replacing stored data in addition to deleting or truncating data. This is a strict superset of storage.create.
@@ -29,11 +30,14 @@ where:
   In this example, the token has `read` permission to the `/` prefix, meaning it can be used to read any objects on this Origin.
 
   For other scope options, refer to [WLCG GitHub website](https://github.com/WLCG-AuthZ-WG/common-jwt-profile/blob/master/profile.md#capability-based-authorization-scope).
-- `--issuer` tells Pelican the issuer URL it should embed in the token, which will be used by other Pelican servers to verify the integrity of the token. The issuer should be the publicly accessible URL of the Origin server. The port number should also be included if the issuer URL contains a port number other than `443`.
-- `--claim` encodes an additional JWT claim, `wlcg.ver` with value `1.0` to the token. `wlcg.ver` is a special claim to indicate the version of the token profile. Pelican Origin accepts both `SciToken` token profile and `WLCG` token profile. Here we set the token profile to `WLCG`. See details [here](https://github.com/WLCG-AuthZ-WG/common-jwt-profile/blob/master/profile.md#common-claims).
-- `--subject` encodes the entity that issues the token.
-- `--audience` encodes the entities who requested the token. In most of cases, Pelican uses the special `any` audience.
 
+- `--issuer` tells Pelican the issuer URL it should embed in the token, which will be used by other Pelican servers to verify the integrity of the token. The issuer should be the publicly accessible URL of the Origin server. The port number should also be included if the issuer URL contains a port number other than `443`.
+
+- `--claim` encodes an additional JWT claim, `wlcg.ver` with value `1.0` to the token. `wlcg.ver` is a special claim to indicate the version of the token profile. Pelican Origin accepts both `SciToken` token profile and `WLCG` token profile. Here we set the token profile to `WLCG`. See details [here](https://github.com/WLCG-AuthZ-WG/common-jwt-profile/blob/master/profile.md#common-claims).
+
+- `--subject` encodes the entity that issues the token.
+
+- `--audience` encodes the entities who requested the token. In most of cases, Pelican uses the special `any` audience.
 
 ### Additional Command Line Arguments
 

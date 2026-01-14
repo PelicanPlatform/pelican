@@ -4,8 +4,7 @@ This document explains how to install Pelican on a Linux operating system as a s
 
 ## Quickstart
 
-To download the latest version of Pelican and unpack it into the default location for user binaries on most Linux hosts, copy/paste
-the following into a terminal:
+To download the latest version of Pelican and unpack it into the default location for user binaries on most Linux hosts, copy/paste the following into a terminal:
 
 ```bash
 wget -O - "https://dl.pelicanplatform.org/latest/pelican_$(uname -s)_$(uname -m).tar.gz" | tar zx -C ~/.local/bin/ --strip-components=1
@@ -17,37 +16,37 @@ To test the binary, execute:
 pelican --version
 ```
 
-If a version number did not print, then you may have a special platform or configuration on your host; follow the subsequent sections.  Otherwise, you're done and may follow the [Next Steps](#next-steps).
+If a version number did not print, then you may have a special platform or configuration on your host; follow the subsequent sections. Otherwise, you're done and may follow the [Next Steps](#next-steps).
 
 ## Download Pelican Binary
 
 1. Navigate to the [Pelican download page](../install.mdx#download-pelican-binary) to select the Pelican standalone binary you want to install.
 
-2. In **Operating System** section, select **Linux**. In **Architectures** section, select **X86_64** or **ARM64** depending on the architecture of your machine.
+1. In **Operating System** section, select **Linux**. In **Architectures** section, select **X86_64** or **ARM64** depending on the architecture of your machine.
 
-3. In the list of candidates, copy the link to `pelican_Linux_x86_64.tar.gz` or `pelican_Linux_arm64.tar.gz`, as appropriate.
+1. In the list of candidates, copy the link to `pelican_Linux_x86_64.tar.gz` or `pelican_Linux_arm64.tar.gz`, as appropriate.
 
-4. Change the following command with the link to the binary you copied in the previous step and run the command
+1. Change the following command with the link to the binary you copied in the previous step and run the command
 
-    ```bash
-    wget <replace-with-the-link-you-copied>
-    mkdir -p ~/.local/bin
-    tar -zxvf -C ~/.local/bin/ --strip-components=1 pelican_Linux_$(uname -m).tar.gz
-    ```
+   ```bash
+   wget <replace-with-the-link-you-copied>
+   mkdir -p ~/.local/bin
+   tar -zxvf -C ~/.local/bin/ --strip-components=1 pelican_Linux_$(uname -m).tar.gz
+   ```
 
-    > **Note**: The shell should expand `$(uname -m)` with the machine's hardware platform.  If it fails, you may need to replace the filename with `pelican_Linux_x86_64.tar.gz` with `pelican_Linux_arm64.tar.gz`, as appropriate.
+   > **Note**: The shell should expand `$(uname -m)` with the machine's hardware platform. If it fails, you may need to replace the filename with `pelican_Linux_x86_64.tar.gz` with `pelican_Linux_arm64.tar.gz`, as appropriate.
 
-    Example to install Pelican standalone binary on an `X86_64` machine:
+   Example to install Pelican standalone binary on an `X86_64` machine:
 
-    ```bash
-    $ wget https://dl.pelicanplatform.org/latest/pelican_Linux_x86_64.tar.gz
-    $ mkdir -p ~/.local/bin
-    $ tar -zxvf -C ~/.local/bin/ --strip-components=1 pelican_Linux_x86_64.tar.gz
-    ```
+   ```bash
+   $ wget https://dl.pelicanplatform.org/latest/pelican_Linux_x86_64.tar.gz
+   $ mkdir -p ~/.local/bin
+   $ tar -zxvf -C ~/.local/bin/ --strip-components=1 pelican_Linux_x86_64.tar.gz
+   ```
 
 ## Make Pelican Binary Available
 
-The above command extracted the binary from the `tar` file and placed it inside `.local/bin/` in your home directory.  On most Linux distributions, this makes the binary automatically available.
+The above command extracted the binary from the `tar` file and placed it inside `.local/bin/` in your home directory. On most Linux distributions, this makes the binary automatically available.
 
 You may test this by running:
 
@@ -62,7 +61,7 @@ $ command -v pelican
 /home/username/.local/bin/pelican
 ```
 
-then you may skip this section.  If not, you need to alter the `PATH` environment variable that controls which directories are searched for binaries.
+then you may skip this section. If not, you need to alter the `PATH` environment variable that controls which directories are searched for binaries.
 
 ### Add Pelican binary to your `PATH` for the current terminal
 
@@ -107,7 +106,7 @@ Built By: goreleaser
 
 ## Next steps
 
-* [Verify Pelican is installed](../install.mdx#verify-pelican-is-installed)
-* [Read our quick start guide on accessing data using Pelican client](../getting-started/accessing-data.mdx)
-* [Federate your data via Pelican Origin server](../federating-your-data.mdx)
-* [Operate a Pelican data federation](../operating-a-federation.mdx)
+- [Verify Pelican is installed](../install.mdx#verify-pelican-is-installed)
+- [Read our quick start guide on accessing data using Pelican client](../getting-started/accessing-data.mdx)
+- [Federate your data via Pelican Origin server](../federating-your-data.mdx)
+- [Operate a Pelican data federation](../operating-a-federation.mdx)
