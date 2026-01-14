@@ -1,6 +1,6 @@
 # ***************************************************************
 #
-#  Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+#  Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 #
 #  Licensed under the Apache License, Version 2.0 (the "License"); you
 #  may not use this file except in compliance with the License.  You may
@@ -30,6 +30,7 @@
 # ARG TARGETARCH
 
 # For selecting OSG-maintained packages.
+ARG ALMALINUX_TAG=9
 ARG BASE_OS=el9
 ARG OSG_SERIES=24
 ARG OSG_REPO=release
@@ -40,8 +41,12 @@ ARG GORELEASER_CURRENT_TAG
 ARG NODEJS_VER=20
 
 # For controlling the UID/GID of users in the container images.
+# Note that XRootD's UID and GID here are effectively set in stone
+# because of existing data in the wild that is owned by these IDs.
+ARG PELICAN_USERNAME=pelican
 ARG PELICAN_UID=10941
 ARG PELICAN_GID=10941
+ARG XROOTD_USERNAME=xrootd
 ARG XROOTD_UID=10940
 ARG XROOTD_GID=10940
 
@@ -61,7 +66,7 @@ ARG XROOTD_GID=10940
 
 ARG LOTMAN_SRC_BUILD=false
 ARG LOTMAN_VER=0.0.4
-# Note: github_scripts/osx_install.sh also (separately) specifies the version to use
+# Note: github_scripts/osx_install.sh also (separately) specifies the version to use.
 # Until the two places are programmatically synchronized, please double-check by hand
 # when doing version changes.
 ARG XRDCL_PELICAN_SRC_BUILD=false
@@ -70,7 +75,7 @@ ARG XROOTD_LOTMAN_SRC_BUILD=false
 ARG XROOTD_LOTMAN_VER=0.0.5
 ARG XROOTD_S3_HTTP_SRC_BUILD=true
 ARG XROOTD_S3_HTTP_VER=0.6.0
-# Installed from Koji if not building it from source
+# Installed from Koji if not building it from source.
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
 ARG XRDHTTP_PELICAN_VER=0.0.8
 ARG XRDHTTP_PELICAN_RELEASE="1.osg${OSG_SERIES}.${BASE_OS}"
@@ -86,7 +91,7 @@ FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-ser
 # binaries. The actual build happens in a later stage because it
 # depends on the target we're building for.
 #################################################################
-FROM --platform=${BUILDPLATFORM} almalinux:9 AS pelican-build-base
+FROM --platform=${BUILDPLATFORM} almalinux:${ALMALINUX_TAG} AS pelican-build-base
 ARG BUILDPLATFORM
 ARG BUILDOS
 ARG BUILDARCH
@@ -94,30 +99,32 @@ ARG GO_VER
 ARG NODEJS_VER
 
 WORKDIR /pelican-build
-
-COPY <<ENDCOPY /etc/yum.repos.d/goreleaser.repo
-[goreleaser]
-name=GoReleaser
-baseurl=https://repo.goreleaser.com/yum/
-enabled=1
-gpgcheck=0
-ENDCOPY
 RUN --mount=type=cache,id=dnf-${BUILDPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
+  set -o pipefail
+
+  # Install GoReleaser and other build tools.
+
+  cat >/etc/yum.repos.d/goreleaser.repo <<-EOF
+		[goreleaser]
+		name=GoReleaser
+		baseurl=https://repo.goreleaser.com/yum/
+		enabled=1
+		gpgcheck=0
+	EOF
   dnf install -y goreleaser make
-ENDRUN
 
-RUN curl -O https://dl.google.com/go/go${GO_VER}.${BUILDOS}-${BUILDARCH}.tar.gz \
-    && rm -rf /usr/local/go \
-    && tar -C /usr/local -xzf go${GO_VER}.${BUILDOS}-${BUILDARCH}.tar.gz \
-    && rm -rf go${GO_VER}.${BUILDOS}-${BUILDARCH}.tar.gz
-ENV PATH="/usr/local/go/bin:${PATH}"
+  # Install Go.
 
-# We use npm to bootstrap the installation of the required Node.js version
-# and an updated version of npm itself. The `dnf remove` in the middle is to
-# avoid there being multiple, incompatible versions of npm.
-RUN --mount=type=cache,id=dnf-${BUILDPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
-  set -eux
+  rm -rf /usr/local/go
+  curl -fSL https://dl.google.com/go/go${GO_VER}.${BUILDOS}-${BUILDARCH}.tar.gz | tar -xz -f - -C /usr/local
+
+  # Install Node.js.
+  #
+  # We use npm to bootstrap the installation of the required Node.js version
+  # and an updated version of npm itself. The `dnf remove` in the middle is to
+  # avoid there being multiple, incompatible versions of npm.
+
   dnf install -y npm
   npm install -g n
   n ${NODEJS_VER}
@@ -125,6 +132,7 @@ RUN --mount=type=cache,id=dnf-${BUILDPLATFORM},target=/var/cache/dnf,sharing=loc
   npm install -g npm@latest
   n prune
 ENDRUN
+ENV PATH="/usr/local/go/bin:${PATH}"
 
 #################################################################
 # Pelican Build
@@ -136,10 +144,10 @@ FROM --platform=${BUILDPLATFORM} pelican-build-base AS pelican-build
 ARG TARGETPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
-
 ARG GORELEASER_CURRENT_TAG
-ENV GORELEASER_CURRENT_TAG=${GORELEASER_CURRENT_TAG}
 ARG IS_NONRELEASE_BUILD=true
+
+ENV GORELEASER_CURRENT_TAG=${GORELEASER_CURRENT_TAG}
 ENV GOOS=${TARGETOS}
 ENV GOARCH=${TARGETARCH}
 
@@ -153,6 +161,7 @@ RUN --mount=type=cache,id=go-cache,target=/root/.cache/go-build,sharing=shared \
     <<ENDRUN
 
   set -eux
+  set -o pipefail
 
   if ${IS_NONRELEASE_BUILD}; then
     goreleaser build --id pelican-server --clean --single-target --snapshot
@@ -184,9 +193,11 @@ ENDRUN
 # This stage should contain setup common to all images that we wish
 # to build (director, registry, origin, cache, etc.).
 #################################################################
-FROM hub.opensciencegrid.org/osg-htc/software-base:${OSG_SERIES}-${BASE_OS}-${OSG_REPO} AS pelican-software-base
+FROM almalinux:${ALMALINUX_TAG} AS pelican-software-base
 ARG TARGETPLATFORM
-ARG PELICAN_USER=pelican
+ARG BASE_OS
+ARG OSG_SERIES
+ARG PELICAN_USERNAME
 ARG PELICAN_UID
 ARG PELICAN_GID
 
@@ -194,10 +205,7 @@ WORKDIR /pelican
 
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
-
-  # Create pelican user and group
-  groupadd -g ${PELICAN_GID} ${PELICAN_USER}
-  useradd -u ${PELICAN_UID} -g ${PELICAN_GID} -d / -s /sbin/nologin ${PELICAN_USER}
+  set -o pipefail
 
   # Throughout this build, we will have Docker's build process cache dnf's
   # cache directory, so that we can not include it in any final images and
@@ -208,12 +216,34 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
 
   printf '%s\n' "metadata_expire=1800" >> /etc/dnf/dnf.conf
 
-  dnf install -y tini 'dnf-command(versionlock)' python3-pip
+  # Install the OSG Yum Repositories.
 
+  dnf install -y \
+    epel-release \
+    yum-utils \
+    https://repo.osg-htc.org/osg/${OSG_SERIES}-main/osg-${OSG_SERIES}-main-${BASE_OS}-release-latest.rpm
+  crb enable
+  yum-config-manager --setopt=install_weak_deps=False --save
+
+  # Install common software.
+
+  dnf install -y \
+    'dnf-command(versionlock)' \
+    jq \
+    less \
+    osg-ca-certs \
+    procps \
+    psmisc \
+    python3-pip \
+    tini
+
+  # Create Pelican's user, group, and configuration directories.
+
+  groupadd -g ${PELICAN_GID} ${PELICAN_USERNAME}
+  useradd -u ${PELICAN_UID} -g ${PELICAN_GID} -d / -s /sbin/nologin ${PELICAN_USERNAME}
   mkdir -p /etc/pelican/config.d
   mkdir -p /usr/share/pelican/config.d
 ENDRUN
-
 COPY images/pelican.yaml /etc/pelican/pelican.yaml
 
 #################################################################
@@ -227,18 +257,14 @@ ARG TARGETPLATFORM
 ARG TARGETARCH
 ARG BASE_OS
 ARG OSG_SERIES
+ARG XROOTD_USERNAME
 ARG XROOTD_UID
 ARG XROOTD_GID
-
-# xrootd's UID and GID here are effectively set in stone because of the
-# existing data out in the wild that is owned by these IDs.
-RUN groupadd -g ${XROOTD_GID} xrootd \
-    && useradd -u ${XROOTD_UID} -g ${XROOTD_GID} -d / -s /sbin/nologin xrootd
 
 # We need to pin the install for many of the RPMs to "Koji" until all of
 # Pelican's patches are ingested into the OSG repositories.
 # NOTE: If you update this version, you must also update the version in
-# github_scripts/osx_install.sh
+# github_scripts/osx_install.sh.
 ARG XROOTD_VER="5.9.1"
 ARG XROOTD_RELEASE="1.2.osg${OSG_SERIES}.${BASE_OS}"
 ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VER}/${XROOTD_RELEASE}"
@@ -247,6 +273,12 @@ ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xroot
 # order to avoid unresolvable dependencies.
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
+  set -o pipefail
+
+  # Create XRootD's user and group.
+
+  groupadd -g ${XROOTD_GID} ${XROOTD_USERNAME}
+  useradd -u ${XROOTD_UID} -g ${XROOTD_GID} -d / -s /sbin/nologin ${XROOTD_USERNAME}
 
   # NOTE: The `devel` packages are not necessary for any production
   # container images, but including them here means we that don't need to
@@ -315,6 +347,7 @@ WORKDIR /xrootd-build
 
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
+  set -o pipefail
 
   # Install the build requirements only if we actually need them, so that we
   # don't slow down the overall build unnecessarily.
@@ -327,6 +360,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
             cmake3 \
             gcc-c++ \
             git \
+            rpmdevtools \
             systemd \
             \
             curl-devel \
@@ -414,6 +448,7 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
     <<ENDRUN
 
   set -eux
+  set -o pipefail
 
   dnf install -y xrootd-multiuser
 
@@ -422,7 +457,6 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
   elif [ "$TARGETARCH" = "arm64" ]; then
       PKG_ARCH=aarch64
   fi
-
 
   # NOTE: We include the `PROJECT` parameter here, even thought it is not
   # used, in order to maintain symmetry with the xrootd-build stage above.
@@ -467,6 +501,7 @@ ARG TARGETPLATFORM
 
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
+  set -o pipefail
 
   # We need OpenJDK for OA4MP.
   # We need sssd-client for some xrootd-multiuser setups.
@@ -509,6 +544,7 @@ COPY --from=scitokens-oauth2-server /usr/local/bin/generate_jwk.sh /usr/local/bi
 
 RUN <<ENDRUN
   set -eux
+  set -o pipefail
 
   ln -sf /usr/lib64/libapr-1.so.0 /opt/tomcat/lib/libapr-1.so.0
 
@@ -576,6 +612,7 @@ FROM origin AS osdf-origin
 ARG TARGETPLATFORM
 RUN <<ENDRUN
   set -eux
+  set -o pipefail
 
   # These IDs must match OSG's sssd sidecar containers.
   groupadd -r -g 990 sssd
@@ -626,6 +663,7 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 # Install the MinIO server and client for S3 tests.
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
+  set -o pipefail
 
   if [ "$TARGETARCH" = "amd64" ]; then
       PKG_ARCH=x86_64
@@ -641,6 +679,8 @@ ENDRUN
 # Create alice user for multi-user testing
 RUN <<ENDRUN
   set -eux
+  set -o pipefail
+
   useradd -m -s /bin/bash alice
 ENDRUN
 
@@ -669,12 +709,15 @@ gpgcheck=0
 ENDCOPY
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
+  set -o pipefail
+
   dnf install -y goreleaser
 ENDRUN
 
 # Install gotestsum for better test output formatting
 RUN --mount=type=cache,id=go-mod-cache-${TARGETPLATFORM},target=/root/go,sharing=locked <<ENDRUN
   set -eux
+  set -o pipefail
   go install gotest.tools/gotestsum@latest
   # Move gotestsum to a system location that is world readable
   mv /root/go/bin/gotestsum /usr/local/bin/gotestsum
@@ -683,6 +726,7 @@ ENDRUN
 # Install Node.js using the same commands as the pelican-build-init stage.
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
+  set -o pipefail
   dnf install -y npm
   npm install -g n
   n ${NODEJS_VER}
@@ -697,6 +741,7 @@ RUN /usr/bin/crb enable
 # Add HTCondor repository for development and testing
 RUN <<ENDRUN
   set -eux
+  set -o pipefail
   cd /etc/yum.repos.d
   if wget -q https://htcss-downloads.chtc.wisc.edu/repo/25.x/htcondor-release-current.el9.noarch.rpm; then
     dnf install -y htcondor-release-current.el9.noarch.rpm
