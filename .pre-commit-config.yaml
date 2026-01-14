@@ -47,3 +47,12 @@ repos:
     hooks:
     -   id: shellcheck
         args: [--severity=warning]
+-   repo: https://github.com/executablebooks/mdformat
+    rev: 0.7.19
+    hooks:
+    -   id: mdformat
+        name: Format markdown files (one sentence per line)
+        additional_dependencies:
+        -   mdformat-simple-breaks
+        args: [--wrap, "no"]
+        files: \.(md|mdx)$
