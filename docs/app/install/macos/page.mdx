@@ -8,68 +8,68 @@ Pelican provides a binary executable file instead of a `DMG` installer for MacOS
 
 1. If you've not yet determined which executable you need, refer to the [download page](../install.mdx#determine-which-executable-to-download) and copy the relevant link: In the **Operating System** section, select **macOS**. In **Architectures** section, select **X86_64** or **ARM64** depending on the architecture of your machine.
 
-   > **Note:** If you don't know your computer's architecture, click the **Apple menu**  in the top-left corner of your screen, then click **About This Mac** and check the **Chip** or **Processor** field. If it mentions **Intel** your computer needs Pelican's **X86_64** executable, and if it mentions Apple M1, M2, or later, you'll need the **ARM64** executable. Intel Macs (x86_64) should see the file `pelican_Darwin_x86_64.tar.gz` and Apple Silicon Macs (ARM64) should see `pelican_Darwin_arm64.tar.gz`.
+    > **Note:** If you don't know your computer's architecture, click the **Apple menu**  in the top-left corner of your screen, then click **About This Mac** and check the **Chip** or **Processor** field. If it mentions **Intel** your computer needs Pelican's **X86_64** executable, and if it mentions Apple M1, M2, or later, you'll need the **ARM64** executable. Intel Macs (x86_64) should see the file `pelican_Darwin_x86_64.tar.gz` and Apple Silicon Macs (ARM64) should see `pelican_Darwin_arm64.tar.gz`.
 
 1. Open a terminal and navigate to a directory where you can download, extract and store the Pelican executable. Then use your command line tools of choice to download and extract the link you copied in the previous step. The rest of these instructions assume `curl` for downloading and `tar` for extraction:
 
-   ```bash
-   curl -LO <replace-with-the-link-you-copied>
-   tar -zxvf <name-of-downloaded-file>
-   ```
+    ```bash
+    curl -LO <replace-with-the-link-you-copied>
+    tar -zxvf <name-of-downloaded-file>
+    ```
 
-   Example to install Pelican executable for an Apple Silicon Mac:
+    Example to install Pelican executable for an Apple Silicon Mac:
 
-   ```bash
-   curl -LO https://github.com/PelicanPlatform/pelican/releases/download/v7.10.5/pelican_Darwin_arm64.tar.gz
-   tar -zxvf pelican_Darwin_arm64.tar.gz
-   ```
+    ```bash
+    curl -LO https://github.com/PelicanPlatform/pelican/releases/download/v7.10.5/pelican_Darwin_arm64.tar.gz
+    tar -zxvf pelican_Darwin_arm64.tar.gz
+    ```
 
 1. There should now be another directory called `pelican-<version>` containing a Pelican executable that you can run directly using a relative `./` path. For example:
 
-   ```bash
-   $ cd pelican-7.10.5
-   $ ./pelican --version # Print the executable version
+    ```bash
+    $ cd pelican-7.10.5
+    $ ./pelican --version # Print the executable version
 
-   Version: 7.10.8
-   Build Date: 2024-10-09T14:56:56Z
-   Build Commit: 1ef2c25a1585803e0c74a9e41fceb214b80bf3da
-   Built By: goreleaser
-   ```
+    Version: 7.10.8
+    Build Date: 2024-10-09T14:56:56Z
+    Build Commit: 1ef2c25a1585803e0c74a9e41fceb214b80bf3da
+    Built By: goreleaser
+    ```
 
-   However, to make the `pelican` command available everywhere on your Mac without needing a relative path, you still need to add it to your system's `PATH` environment variable.
+    However, to make the `pelican` command available everywhere on your Mac without needing a relative path, you still need to add it to your system's `PATH` environment variable.
 
 ## Add Pelican Executable to Your `PATH`
 
-- Add the Pelican executable to your `PATH` for the current terminal session (disappears after closing the terminal)
+  * Add the Pelican executable to your `PATH` for the current terminal session (disappears after closing the terminal)
 
-  ```bash
-  $ cd pelican-7.10.5 # Go to the executable folder
-  $ export PATH=$PWD:$PATH # Add current folder to the PATH
-  $ pelican --version # Run Pelican executable
+    ```bash
+    $ cd pelican-7.10.5 # Go to the executable folder
+    $ export PATH=$PWD:$PATH # Add current folder to the PATH
+    $ pelican --version # Run Pelican executable
 
-  Version: 7.10.8
-  Build Date: 2024-10-09T14:56:56Z
-  Build Commit: 1ef2c25a1585803e0c74a9e41fceb214b80bf3da
-  Built By: goreleaser
-  ```
+    Version: 7.10.8
+    Build Date: 2024-10-09T14:56:56Z
+    Build Commit: 1ef2c25a1585803e0c74a9e41fceb214b80bf3da
+    Built By: goreleaser
+    ```
 
-- Add the Pelican executable to your `PATH` permanently (persists through terminal restarts)
+  * Add the Pelican executable to your `PATH` permanently (persists through terminal restarts)
 
-  ```bash
-  $ cd pelican-7.10.5 # Go to the executable folder
-  $ echo "export PATH=$PWD:\$PATH" >> ~/.zshrc # Add the current folder to your .zshrc file
-  $ source ~/.zshrc # Apply the change
-  $ pelican --version # Run Pelican executable
+    ```bash
+    $ cd pelican-7.10.5 # Go to the executable folder
+    $ echo "export PATH=$PWD:\$PATH" >> ~/.zshrc # Add the current folder to your .zshrc file
+    $ source ~/.zshrc # Apply the change
+    $ pelican --version # Run Pelican executable
 
-  Version: 7.10.8
-  Build Date: 2024-10-09T14:56:56Z
-  Build Commit: 1ef2c25a1585803e0c74a9e41fceb214b80bf3da
-  Built By: goreleaser
-  ```
+    Version: 7.10.8
+    Build Date: 2024-10-09T14:56:56Z
+    Build Commit: 1ef2c25a1585803e0c74a9e41fceb214b80bf3da
+    Built By: goreleaser
+    ```
 
 ## Next steps
 
-- [Verify Pelican is installed](../install.mdx#verify-pelican-is-installed)
-- [Read our quick start guide on accessing data using Pelican client](../getting-started/accessing-data.mdx)
-- [Federate your data via Pelican Origin server](../federating-your-data.mdx)
-- [Operate a Pelican data federation](../operating-a-federation.mdx)
+* [Verify Pelican is installed](../install.mdx#verify-pelican-is-installed)
+* [Read our quick start guide on accessing data using Pelican client](../getting-started/accessing-data.mdx)
+* [Federate your data via Pelican Origin server](../federating-your-data.mdx)
+* [Operate a Pelican data federation](../operating-a-federation.mdx)

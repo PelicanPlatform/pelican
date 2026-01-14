@@ -12,25 +12,25 @@ You can install Pelican by downloading an `.apk` package or by downloading a bin
 
 1. Navigate to [Pelican download page](../install.mdx#download-pelican-binary) and select the Pelican APK you want to install.
 
-1. In the **Operating System** section, select **Linux**. In **Architectures** section, select **X86_64** or **ARM64** depending on the architecture of your machine.
+2. In the **Operating System** section, select **Linux**. In **Architectures** section, select **X86_64** or **ARM64** depending on the architecture of your machine.
 
-1. In the list of download candidates, copy the link to `pelican_x.x.x_p1_x86_64.apk` if you select **X86_64**, or `pelican_x.x.x_p1_aarch64.apk` if you select **ARM64**, where `x.x.x` is the version number.
+3. In the list of download candidates, copy the link to `pelican_x.x.x_p1_x86_64.apk` if you select **X86_64**, or `pelican_x.x.x_p1_aarch64.apk` if you select **ARM64**, where `x.x.x` is the version number.
 
-1. Change the following command with the link to the binary you copied in the previous step and run the command
+4. Change the following command with the link to the binary you copied in the previous step and run the command
 
-   ```bash
-   wget <replace-with-the-link-you-copied>
-   sudo apk add --allow-untrusted pelican_7.5.8_p1_x86_64.apk
-   ```
+    ```bash
+    wget <replace-with-the-link-you-copied>
+    sudo apk add --allow-untrusted pelican_7.5.8_p1_x86_64.apk
+    ```
 
-   > **Note**: You need to replace `pelican_7.5.8_p1_x86_64.apk` with `pelican_7.5.8-1_aarch64.apk` if you are running an `ARM64` machine.
+    > **Note**: You need to replace `pelican_7.5.8_p1_x86_64.apk` with `pelican_7.5.8-1_aarch64.apk` if you are running an `ARM64` machine.
 
-   Example to install Pelican `v7.5.8` APK package on an `X86_64` machine:
+    Example to install Pelican `v7.5.8` APK package on an `X86_64` machine:
 
-   ```bash
-   wget https://github.com/PelicanPlatform/pelican/releases/download/v7.5.8/pelican_7.5.8_p1_x86_64.apk
-   sudo apk add --allow-untrusted pelican_7.5.8_p1_x86_64.apk
-   ```
+    ```bash
+    wget https://github.com/PelicanPlatform/pelican/releases/download/v7.5.8/pelican_7.5.8_p1_x86_64.apk
+    sudo apk add --allow-untrusted pelican_7.5.8_p1_x86_64.apk
+    ```
 
 ### Install Pelican as a standalone binary
 
@@ -46,7 +46,7 @@ sudo apk del pelican
 
 ## Next steps
 
-- [Verify Pelican is installed](../install.mdx#verify-pelican-is-installed)
-- [Read our quick start guide on accessing data using Pelican client](../getting-started/accessing-data.mdx)
-- [Federate your data via Pelican Origin server](../federating-your-data.mdx)
-- [Operate a Pelican data federation](../operating-a-federation.mdx)
+* [Verify Pelican is installed](../install.mdx#verify-pelican-is-installed)
+* [Read our quick start guide on accessing data using Pelican client](../getting-started/accessing-data.mdx)
+* [Federate your data via Pelican Origin server](../federating-your-data.mdx)
+* [Operate a Pelican data federation](../operating-a-federation.mdx)
