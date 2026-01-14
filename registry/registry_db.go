@@ -787,6 +787,7 @@ func setRegistrationPubKey(prefix string, pubkeyDbString string) error {
 // remove the corresponding entry in the “services” table.
 // Additionally, if this server only has this single service registration (i.e., the server is only an
 // origin or only a cache, not both), then delete the corresponding entry in the “servers” table.
+// If services remain, update the server's is_origin and is_cache fields accordingly.
 func deleteRegistrationByID(id int) error {
 	// Wrap in a transaction to perform an atomic operation
 	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
@@ -805,16 +806,47 @@ func deleteRegistrationByID(id int) error {
 			return err
 		}
 
-		// Conditionally delete the server atomically only if no services remain
 		if svc.ServerID != "" {
-			// The nested NOT EXISTS subquery ensures we only delete the server if
-			// there are no remaining rows in `services` referencing this server. Within
-			// the same transaction, this makes the check-and-delete atomic: if a new
-			// service is inserted concurrently, the subquery returns a row and the
-			// DELETE is skipped.
-			subq := tx.Model(&server_structs.Service{}).Select("1").Where("server_id = ?", svc.ServerID).Limit(1)
-			if err := tx.Where("id = ? AND NOT EXISTS (?)", svc.ServerID, subq).Delete(&server_structs.Server{}).Error; err != nil {
+			var remainingSvcs []server_structs.Service
+			if err := tx.Where("server_id = ?", svc.ServerID).Preload("Registration").Find(&remainingSvcs).Error; err != nil {
 				return err
+			}
+
+			if len(remainingSvcs) == 0 {
+				// Also delete the server only if no services belonging to it remain.
+				//
+				// The nested NOT EXISTS subquery ensures we only delete the server if
+				// there are no remaining rows in `services` referencing this server. Within
+				// the same transaction, this makes the check-and-delete atomic: if a new
+				// service is inserted concurrently, the subquery returns a row and the
+				// DELETE is skipped.
+				subq := tx.Model(&server_structs.Service{}).Select("1").Where("server_id = ?", svc.ServerID).Limit(1)
+				if err := tx.Where("id = ? AND NOT EXISTS (?)", svc.ServerID, subq).Delete(&server_structs.Server{}).Error; err != nil {
+					return err
+				}
+			} else {
+				// Update server flags to reflect remaining service types
+				var hasOrigin, hasCache bool
+				for _, remaining := range remainingSvcs {
+					if remaining.Registration.ID == 0 {
+						continue
+					}
+					prefix := remaining.Registration.Prefix
+					if strings.HasPrefix(prefix, server_structs.OriginPrefix.String()) {
+						hasOrigin = true
+					}
+					if strings.HasPrefix(prefix, server_structs.CachePrefix.String()) {
+						hasCache = true
+					}
+				}
+				updates := map[string]interface{}{
+					"is_origin":  hasOrigin,
+					"is_cache":   hasCache,
+					"updated_at": time.Now(),
+				}
+				if err := tx.Model(&server_structs.Server{}).Where("id = ?", svc.ServerID).Updates(updates).Error; err != nil {
+					return err
+				}
 			}
 		}
 
