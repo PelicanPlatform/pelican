@@ -650,6 +650,8 @@ func CleanupTempResources() (err error) {
 }
 
 // getConfigBase returns where Pelican will look for its configuration files by default.
+// It does not handle setting fallback locations for system config in the event that the
+// user's home directory doesn't actually contain config.
 func getConfigBase() string {
 	if IsRootExecution() {
 		os := runtime.GOOS

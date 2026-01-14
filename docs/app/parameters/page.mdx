@@ -5,8 +5,38 @@ import { Callout } from 'nextra/components'
 # Configuration
 
 ## Yaml Configuration
-Pelican's preferred configuration mechanism is via a [YAML](https://yaml.org/) file found at `/etc/pelican/pelican.yaml`. Each config
-value is represented by a key-value pair. Below is an example configuration file with a key-value pair, a nested key-value pair, and a
+Pelican's preferred configuration mechanism is via a [YAML](https://yaml.org/) file, typically named `pelican.yaml`.
+Each config value is represented by a key-value pair.
+
+### Configuration File Location
+
+Pelican automatically searches for its configuration file in different locations depending on the user running the process:
+
+- **Root User**:
+  - The default location is `/etc/pelican/pelican.yaml` (or `C:\ProgramData\pelican\pelican.yaml` on Windows).
+
+- **Non-Root User**:
+  - Pelican first checks for a user-specific configuration at `$HOME/.config/pelican/pelican.yaml`.
+  - If that file does not exist, it falls back to checking `/etc/pelican/pelican.yaml`.
+
+<Callout type="info">
+  If both exist, Pelican uses the user-specific configuration and **completely ignores** the system-wide configuration at `/etc/pelican/pelican.yaml`.
+  It does not merge them.
+</Callout>
+
+If you wish to override these defaults, you can explicitly specify a config file using the `--config` flag or the `PELICAN_CONFIG` environment variable.
+
+### Checking Configuration
+The `pelican config` tool helps you inspect how the derived configuration in the current environment (including merged configs when the `ConfigLocations` parameter is used):
+
+- `pelican config dump`: Prints the full effective configuration (including defaults, file-based values, and environment variable overrides) to the terminal.
+- `pelican config summary`: Prints only the parameters that differ from their default values.
+- `pelican config get <param>`: Retrieve a specific configuration value (e.g., `pelican config get Server.WebPort`).
+
+Using these tools allows you to verify exactly what configuration Pelican is using.
+
+### Example Configuration
+Below is an example configuration file with a key-value pair, a nested key-value pair, and a
 list of key-value pairs.
 
 ```yaml  filename="/etc/pelican/pelican.yaml"
