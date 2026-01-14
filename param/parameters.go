@@ -300,6 +300,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.S3ServiceUrl": false,
 	"Origin.S3UrlStyle": false,
 	"Origin.ScitokensDefaultUser": false,
+	"Origin.ScitokensGroupsClaim": false,
 	"Origin.ScitokensMapSubject": false,
 	"Origin.ScitokensNameMapFile": false,
 	"Origin.ScitokensRestrictedPaths": false,
@@ -642,6 +643,8 @@ func (sP StringParam) GetString() string {
 			return config.Origin.S3UrlStyle
 		case "Origin.ScitokensDefaultUser":
 			return config.Origin.ScitokensDefaultUser
+		case "Origin.ScitokensGroupsClaim":
+			return config.Origin.ScitokensGroupsClaim
 		case "Origin.ScitokensNameMapFile":
 			return config.Origin.ScitokensNameMapFile
 		case "Origin.ScitokensUsernameClaim":
@@ -1427,6 +1430,7 @@ var allParameterNames = []string{
 	"Origin.S3ServiceUrl",
 	"Origin.S3UrlStyle",
 	"Origin.ScitokensDefaultUser",
+	"Origin.ScitokensGroupsClaim",
 	"Origin.ScitokensMapSubject",
 	"Origin.ScitokensNameMapFile",
 	"Origin.ScitokensRestrictedPaths",

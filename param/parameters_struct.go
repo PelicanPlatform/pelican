@@ -275,6 +275,7 @@ type Config struct {
 		S3ServiceUrl string `mapstructure:"s3serviceurl" yaml:"S3ServiceUrl"`
 		S3UrlStyle string `mapstructure:"s3urlstyle" yaml:"S3UrlStyle"`
 		ScitokensDefaultUser string `mapstructure:"scitokensdefaultuser" yaml:"ScitokensDefaultUser"`
+		ScitokensGroupsClaim string `mapstructure:"scitokensgroupsclaim" yaml:"ScitokensGroupsClaim"`
 		ScitokensMapSubject bool `mapstructure:"scitokensmapsubject" yaml:"ScitokensMapSubject"`
 		ScitokensNameMapFile string `mapstructure:"scitokensnamemapfile" yaml:"ScitokensNameMapFile"`
 		ScitokensRestrictedPaths []string `mapstructure:"scitokensrestrictedpaths" yaml:"ScitokensRestrictedPaths"`
@@ -666,6 +667,7 @@ type configWithType struct {
 		S3ServiceUrl struct { Type string; Value string }
 		S3UrlStyle struct { Type string; Value string }
 		ScitokensDefaultUser struct { Type string; Value string }
+		ScitokensGroupsClaim struct { Type string; Value string }
 		ScitokensMapSubject struct { Type string; Value bool }
 		ScitokensNameMapFile struct { Type string; Value string }
 		ScitokensRestrictedPaths struct { Type string; Value []string }

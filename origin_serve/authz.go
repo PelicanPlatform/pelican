@@ -55,13 +55,17 @@ type (
 		err error
 	}
 
-	// cachedTokenInfo stores both authorization scopes and user info for a token
+	// cachedTokenInfo stores authorization scopes, user info, and issuer for a token
 	cachedTokenInfo struct {
 		Scopes   []token_scopes.ResourceScope
 		UserInfo *userInfo
+		Issuer   string
 	}
 
 	acls []token_scopes.ResourceScope
+
+	// issuerContextKey is the typed key for storing token issuer in context
+	issuerContextKey struct{}
 )
 
 var globalAuthConfig *authConfig
@@ -315,6 +319,12 @@ func (ac *authConfig) loader(cache *ttlcache.Cache[string, cachedTokenInfo], tok
 		return nil
 	}
 
+	// Extract issuer from the token
+	issuer := ""
+	if tok, err := jwt.Parse([]byte(token), jwt.WithVerify(false)); err == nil {
+		issuer = tok.Issuer()
+	}
+
 	// Extract user information from the token at cache time (only once)
 	// Use the UserMapper to map JWT claims to local users/groups
 	userInfo := ac.userMapper.MapTokenToUser(token)
@@ -322,6 +332,7 @@ func (ac *authConfig) loader(cache *ttlcache.Cache[string, cachedTokenInfo], tok
 	info := cachedTokenInfo{
 		Scopes:   acls,
 		UserInfo: userInfo,
+		Issuer:   issuer,
 	}
 	item := cache.Set(token, info, ttlcache.DefaultTTL)
 	return item
@@ -365,6 +376,8 @@ func (ac *authConfig) authorizeWithContext(ctx context.Context, action token_sco
 
 	// User info is already extracted during cache load, just attach it to context
 	ctx = setUserInfo(ctx, info.UserInfo)
+	// Add issuer to context for tracking token source
+	ctx = context.WithValue(ctx, issuerContextKey{}, info.Issuer)
 	return ctx, true
 }
 

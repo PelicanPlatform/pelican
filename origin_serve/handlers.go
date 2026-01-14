@@ -19,6 +19,7 @@
 package origin_serve
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -28,6 +29,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/webdav"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -124,9 +126,7 @@ func authMiddleware() gin.HandlerFunc {
 		// Token scopes are always for the federation prefix (e.g., /test/...),
 		// not the HTTP route prefix
 		const apiPrefix = "/api/v1.0/origin/data"
-		if strings.HasPrefix(resource, apiPrefix) {
-			resource = strings.TrimPrefix(resource, apiPrefix)
-		}
+		resource = strings.TrimPrefix(resource, apiPrefix)
 		ac := GetAuthConfig()
 		if ac == nil {
 			log.Error("Auth config not initialized")
@@ -134,53 +134,83 @@ func authMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Check if direct clients are disabled
-		// In that case, all requests must have a federation token
-		if param.Origin_DisableDirectClients.GetBool() {
-			if len(tokens) == 0 {
-				log.Debugf("Direct clients disabled but no token provided for %s %s", c.Request.Method, resource)
-				c.AbortWithStatus(http.StatusUnauthorized)
-				return
-			}
-		}
-
 		// Check for public reads first
+		isPublicRead := false
 		exports := ac.exports.Load()
 		if exports != nil && action == token_scopes.Wlcg_Storage_Read {
 			for _, export := range *exports {
-				if export.Capabilities.PublicReads && strings.HasPrefix(resource, export.FederationPrefix) {
-					// Allow public reads without token
-					ui := &userInfo{
-						User:   "nobody",
-						Groups: []string{},
-					}
-					ctx := setUserInfo(c.Request.Context(), ui)
-					c.Request = c.Request.WithContext(ctx)
-					c.Next()
-					return
+				if export.Capabilities.PublicReads && hasPathPrefix(resource, export.FederationPrefix) {
+					isPublicRead = true
+					break
 				}
 			}
 		}
 
-		// If not public read, check authorization with each token
+		// No tokens available
 		if len(tokens) == 0 {
 			log.Debugf("No token provided for %s %s", c.Request.Method, resource)
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
 
-		// Try each token until one authorizes the request
-		for _, token := range tokens {
-			ctx, authorized := ac.authorizeWithContext(c.Request.Context(), action, resource, token)
-			if authorized {
-				c.Request = c.Request.WithContext(ctx)
-				c.Next()
+		disableDirectClients := param.Origin_DisableDirectClients.GetBool()
+		var fedDiscoveryURL string
+
+		// If DisableDirectClients is enabled, validate federation token presence
+		if disableDirectClients {
+			fedInfo, err := config.GetFederation(c.Request.Context())
+			if err != nil {
+				log.Errorf("DisableDirectClients enabled but failed to get federation info: %v", err)
+				c.AbortWithStatus(http.StatusInternalServerError)
+				return
+			}
+			fedDiscoveryURL = fedInfo.DiscoveryEndpoint
+			if fedDiscoveryURL == "" {
+				log.Error("DisableDirectClients enabled but federation discovery URL not configured")
+				c.AbortWithStatus(http.StatusInternalServerError)
 				return
 			}
 		}
 
-		log.Warningf("Authorization failed for %s %s - tried %d token(s)", c.Request.Method, resource, len(tokens))
-		c.AbortWithStatus(http.StatusForbidden)
+		// Try each token and collect authorization results
+		var authorizedContext context.Context
+		var federationCtx context.Context
+
+		for _, tok := range tokens {
+			ctx, authorized := ac.authorizeWithContext(c.Request.Context(), action, resource, tok)
+			if authorized {
+				// Check if this token is from the federation issuer (for DisableDirectClients tracking)
+				if disableDirectClients && fedDiscoveryURL != "" {
+					issuer, ok := ctx.Value(issuerContextKey{}).(string)
+					if ok && issuer == fedDiscoveryURL {
+						federationCtx = ctx
+					}
+				} else {
+					authorizedContext = ctx
+				}
+				if authorizedContext != nil && (!disableDirectClients || federationCtx != nil) {
+					break // No need to check more tokens
+				}
+			}
+		}
+
+		// If DisableDirectClients is enabled, validate federation token requirements
+		if disableDirectClients && federationCtx == nil {
+			log.Debugf("DisableDirectClients requires federation token for %s %s", c.Request.Method, resource)
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+
+		// For non-public reads, require an authorized context
+		// For public reads, the authorizedContext may be nil
+		if !isPublicRead && authorizedContext == nil {
+			log.Warningf("Authorization failed for %s %s - tried %d token(s)", c.Request.Method, resource, len(tokens))
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
+		} else if authorizedContext != nil {
+			c.Request = c.Request.WithContext(authorizedContext)
+		}
+		c.Next()
 	}
 }
 
