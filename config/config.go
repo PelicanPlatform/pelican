@@ -193,6 +193,12 @@ var (
 
 	// This variable will be set by another package (director) to clear the server ads
 	ClearServerAdsCallback ClearServerAdsFunc
+
+	// sysConfigLocation is the system-wide configuration directory.
+	// This is a variable (not const) to allow unit tests to mock the
+	// /etc/pelican location without requiring filesystem permissions.
+	// Production code should NOT modify this value.
+	sysConfigLocation string = filepath.Join("/etc", "pelican")
 )
 
 func init() {
@@ -643,7 +649,17 @@ func CleanupTempResources() (err error) {
 	return
 }
 
+// getConfigBase returns where Pelican will look for its configuration files by default.
 func getConfigBase() string {
+	if IsRootExecution() {
+		os := runtime.GOOS
+		if os == "windows" {
+			return filepath.Join("C:", "ProgramData", "pelican")
+		} else {
+			return sysConfigLocation
+		}
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		os := runtime.GOOS
@@ -652,8 +668,8 @@ func getConfigBase() string {
 			log.Warningln("No home directory found for user -- will check for configuration yaml in ", windowsPath)
 			return windowsPath
 		}
-		log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
-		return filepath.Join("/etc", "pelican")
+		log.Warningf("No home directory found for user -- will check for configuration yaml in %q", sysConfigLocation)
+		return sysConfigLocation
 	}
 
 	return filepath.Join(home, ".config", "pelican")
@@ -919,20 +935,8 @@ func setLoggingInternal() error {
 
 // For the given Viper instance, set the default config directory.
 func InitConfigDir(v *viper.Viper) {
-
-	configDir := v.GetString("ConfigDir")
-	if configDir == "" {
-		if IsRootExecution() {
-			os := runtime.GOOS
-			if os == "windows" {
-				configDir = filepath.Join("C:", "ProgramData", "pelican")
-			} else {
-				configDir = filepath.Join("/etc", "pelican")
-			}
-		} else {
-			configDir = getConfigBase()
-		}
-		v.SetDefault("ConfigDir", configDir)
+	if configDir := v.GetString("ConfigDir"); configDir == "" {
+		v.SetDefault("ConfigDir", getConfigBase())
 	}
 	v.SetConfigName("pelican")
 }
@@ -978,6 +982,13 @@ func InitConfigInternal(logLevel log.Level) {
 		viper.SetConfigFile(configFile)
 	} else {
 		viper.AddConfigPath(viper.GetString("ConfigDir"))
+
+		// Add /etc/pelican as a fallback path for all configs
+		// Note that viper only grabs the first config file it finds
+		// after checking the paths in the order they were added.
+		if !IsRootExecution() {
+			viper.AddConfigPath(sysConfigLocation)
+		}
 	}
 
 	// Load environment variables into the config
