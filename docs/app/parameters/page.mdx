@@ -16,8 +16,8 @@ Pelican automatically searches for its configuration file in different locations
 
 - **Non-Root User**:
 
-  - Pelican first checks for a user-specific configuration at `$HOME/.config/pelican/pelican.yaml`.
-  - If that file does not exist, it falls back to checking `/etc/pelican/pelican.yaml`.
+  - Pelican first checks for a user-specific configuration at `$HOME/.config/pelican/pelican.yaml` (or `C:\Users\<username>\.config\pelican` on Windows).
+  - If that file does not exist, it falls back to checking `/etc/pelican/pelican.yaml` (or `C:\ProgramData\pelican\pelican.yaml` on Windows).
 
 <Callout type="info">
   If both exist, Pelican uses the user-specific configuration and **completely ignores** the system-wide configuration at `/etc/pelican/pelican.yaml`.
