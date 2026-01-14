@@ -1562,6 +1562,9 @@ func SetServerDefaults(v *viper.Viper) error {
 func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
 	InitConfigInternal(log.InfoLevel)
 
+	// Bind any legacy env vars to their new config params -- will generate warnings about deprecated env vars
+	bindLegacyServerEnv()
+
 	setEnabledServer(currentServers)
 
 	// Output warnings before the defaults are set. The SetServerDefaults function sets the default values

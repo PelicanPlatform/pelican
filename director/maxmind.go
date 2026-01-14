@@ -36,7 +36,6 @@ import (
 	"github.com/oschwald/geoip2-golang/v2"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -76,18 +75,16 @@ func downloadDB(localFile string) error {
 
 	var licenseKey string
 	keyFile := param.Director_MaxMindKeyFile.GetString()
-	keyFromEnv := viper.GetString("MAXMINDKEY")
-	if keyFile != "" {
-		contents, err := os.ReadFile(keyFile)
-		if err != nil {
-			return err
-		}
-		licenseKey = strings.TrimSpace(string(contents))
-	} else if keyFromEnv != "" {
-		licenseKey = keyFromEnv
-	} else {
-		return errors.New("A MaxMind key file must be specified in the config (Director.MaxMindKeyFile), in the environment (PELICAN_DIRECTOR_MAXMINDKEYFILE), or the key must be provided via the environment variable PELICAN_MAXMINDKEY)")
+	if keyFile == "" {
+		return errors.Errorf("A MaxMind API key file must be specified in the config (%s)", param.Director_MaxMindKeyFile.GetName())
 	}
+
+	contents, err := os.ReadFile(keyFile)
+	if err != nil {
+		return errors.Wrapf(err, "unable to read MaxMind license key file %q", keyFile)
+	}
+
+	licenseKey = strings.TrimSpace(string(contents))
 
 	url := fmt.Sprintf(maxMindURL, licenseKey)
 	localDir := filepath.Dir(localFile)
@@ -169,7 +166,7 @@ func InitializeGeoIPDB(ctx context.Context) {
 	localFile := param.Director_GeoIPLocation.GetString()
 	localReader, err := geoip2.Open(localFile)
 	if err != nil {
-		log.Warningln("Local GeoIP database file not present; will attempt a download.", err)
+		log.Infoln("Local GeoIP database file not present; will attempt a download.", err)
 		err = downloadDB(localFile)
 		if err != nil {
 			log.Errorln("Failed to download GeoIP database!  Will not be available:", err)

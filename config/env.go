@@ -266,3 +266,24 @@ func bindClassAdConfig() {
 		}
 	}
 }
+
+// Bind any legacy/deprecated server environment variables to their new config parameters.
+// The function should log any warnings about deprecation; this class of env vars is so old
+// these config parameters are not included in the params table, meaning
+// `config/config.go::handleDeprecatedConfig` will not catch them/log warnings.
+func bindLegacyServerEnv() {
+	prefixes := GetAllPrefixes()
+
+	// MAXMINDKEY
+	for _, prefix := range prefixes {
+		if val, isSet := os.LookupEnv(prefix.String() + "_MAXMINDKEY"); isSet {
+			log.Warningf("You are using a legacy/deprecated parameter '%s_MAXMINDKEY' to indicate the MaxMind license key. "+
+				"Support for this environment variable will be removed in a future release. Please use %s instead", prefix.String(),
+				param.Director_MaxMindKeyFile.GetName())
+
+			// Use SetDefault so that if both the env var and the config param are set, the config param takes precedence
+			viper.SetDefault(param.Director_MaxMindKeyFile.GetName(), val)
+			break
+		}
+	}
+}
