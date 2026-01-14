@@ -10,8 +10,7 @@ This document contains instructions on how to serve a Pelican Cache.
 
 If you haven't installed Pelican, follow the instructions to [install pelican](../install.mdx).
 
-For _Linux_ users, it is recommended to install Pelican using one of the package managers (RPM, APK, Deb, etc.) so that Pelican dependencies are automatically handled. You may also run a [Pelican Docker image](../install/docker.mdx) to serve a Pelican cache.
-If you prefer to install Pelican as a standalone binary, you need to follow [additional instructions](https://osg-htc.org/docs/data/xrootd/install-standalone/#install-xrootd-standalone) to install dependencies for the Pelican cache.
+For _Linux_ users, it is recommended to install Pelican using one of the package managers (RPM, APK, Deb, etc.) so that Pelican dependencies are automatically handled. You may also run a [Pelican Docker image](../install/docker.mdx) to serve a Pelican cache. If you prefer to install Pelican as a standalone binary, you need to follow [additional instructions](https://osg-htc.org/docs/data/xrootd/install-standalone/#install-xrootd-standalone) to install dependencies for the Pelican cache.
 
 > Note that serving a Pelican cache with a standalone Pelican binary is possible, but not recommended or supported.
 
@@ -41,7 +40,7 @@ pelican cache serve -f <federation>
 
 Where:
 
-* `<federation>` is the URL to the federation the cache will be joining
+- `<federation>` is the URL to the federation the cache will be joining
 
 This will start a Pelican cache as a daemon process.
 
@@ -49,12 +48,15 @@ This will start a Pelican cache as a daemon process.
 
 This section documents the additional arguments you can pass to the command above to run the cache.
 
-* **-h or --help**: Output documentation on the `serve` command and its arguments.
-* **-p or --port**: Set the port at which the Pelican admin website should be accessible.
+- **-h or --help**: Output documentation on the `serve` command and its arguments.
 
-* **--config**: Set the location of the configuration file.
-* **-d or --debug**: Enable the debugging mode, allowing for more verbose log
-* **-l or --log**: Set the location of the file where log messages should be redirected to and not output the the console.
+- **-p or --port**: Set the port at which the Pelican admin website should be accessible.
+
+- **--config**: Set the location of the configuration file.
+
+- **-d or --debug**: Enable the debugging mode, allowing for more verbose log
+
+- **-l or --log**: Set the location of the file where log messages should be redirected to and not output the the console.
 
 There are other configurations available to modify via the configuration file. Refer to the [Parameters](../parameters.mdx) page for details.
 
@@ -63,16 +65,16 @@ There are other configurations available to modify via the configuration file. R
 Once you have your cache set up, follow the steps below to test if your cache can access a file through a Pelican federation.
 
 1. Have data available and accessible via an origin. Since a cache only works with data available via an origin that’s in the same Pelican federation, the following assumes that you have a an accessible namespace within the same Pelican federation. For more information on how to set that up, refer to [Federating Your Data](../federating-your-data.mdx) page. The following also assume that the object to test is public file. To set up a public file through a Pelican origin, refer to the [Parameters](../parameters.mdx#Origin-Exports) page.
-2. Curl the director for the test file and ensure that the url used is the cache that you set up. Assuming your directory is `/tmp/demo`, run the following command to curl your known public file from the cache.
+1. Curl the director for the test file and ensure that the url used is the cache that you set up. Assuming your directory is `/tmp/demo`, run the following command to curl your known public file from the cache.
 
 ```bash
 $ curl -v https://<cache-url>/<namespace/path-to-public-file>
 ```
 
 Where:
-* `<cache-url>` is the of your cache
-* `<namespace/path-to-public-file>` is the namespace and the path of the known public file
-* Check that the curl output contains the data from the public file.
 
+- `<cache-url>` is the of your cache
+- `<namespace/path-to-public-file>` is the namespace and the path of the known public file
+- Check that the curl output contains the data from the public file.
 
 Congratulations! You have finished setting up and running your cache.

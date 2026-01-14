@@ -7,18 +7,18 @@ This directory contains the devcontainer configuration for developing Pelican us
 ### GitHub Codespaces
 
 1. Navigate to the [Pelican repository](https://github.com/PelicanPlatform/pelican) on GitHub
-2. Click the "Code" button and select "Codespaces"
-3. Click "Create codespace on main" (or your branch)
-4. Wait for the container to build and start
-5. The development environment will be ready to use!
+1. Click the "Code" button and select "Codespaces"
+1. Click "Create codespace on main" (or your branch)
+1. Wait for the container to build and start
+1. The development environment will be ready to use!
 
 ### VS Code Dev Containers (Local)
 
 1. Install [Docker](https://docs.docker.com/get-docker/) and [VS Code](https://code.visualstudio.com/)
-2. Install the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
-3. Clone this repository
-4. Open the repository in VS Code
-5. Click "Reopen in Container" when prompted (or use Command Palette > "Dev Containers: Reopen in Container")
+1. Install the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
+1. Clone this repository
+1. Open the repository in VS Code
+1. Click "Reopen in Container" when prompted (or use Command Palette > "Dev Containers: Reopen in Container")
 
 ## Container Details
 
@@ -33,6 +33,7 @@ This directory contains the devcontainer configuration for developing Pelican us
 ## Included Tools
 
 The development container includes:
+
 - Go development environment with language server
 - Delve debugger (installed via postCreateCommand)
 - Git
@@ -79,5 +80,6 @@ su - alice
 ## More Information
 
 For detailed development setup and contribution guidelines, see:
+
 - [CONTRIBUTE.md](../CONTRIBUTE.md)
 - [Pelican Documentation](https://docs.pelicanplatform.org/)

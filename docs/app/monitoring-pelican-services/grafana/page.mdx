@@ -26,16 +26,16 @@ On a Linux system, you can start Grafana with systemd. For starting Grafana on o
 
 1. To start the service, run the following commands:
 
-    ```bash copy
-    sudo systemctl daemon-reload && \
-    sudo systemctl start grafana-server
-    ```
+   ```bash copy
+   sudo systemctl daemon-reload && \
+   sudo systemctl start grafana-server
+   ```
 
-2. To verify that the service is running, run the following command:
+1. To verify that the service is running, run the following command:
 
-    ```bash copy
-    sudo systemctl status grafana-server
-    ```
+   ```bash copy
+   sudo systemctl status grafana-server
+   ```
 
 ### Initialize Grafana
 
@@ -43,16 +43,15 @@ To sign in to Grafana for the first time, follow these steps:
 
 1. Open your web browser and go to the root URL. Unless you have configured Grafana differently, it is set to use http://localhost:3000 by default.
 
-2. On the sign-in page, enter `admin` for username and password.
+1. On the sign-in page, enter `admin` for username and password.
 
-3. Click Sign in.
+1. Click Sign in.
 
-4. If successful, you will see a prompt to change the password.
+1. If successful, you will see a prompt to change the password.
 
-5. Click OK on the prompt and change your password.
+1. Click OK on the prompt and change your password.
 
 > **Note**: We strongly recommend that you change the default administrator password.
-
 
 ## Connect Grafana to Pelican
 
@@ -62,27 +61,27 @@ This section describes how to connect Grafana to the Pelican Prometheus instance
 
 1. If you haven't installed Pelican, follow the instructions to [install Pelican](../install.mdx).
 
-2. Run your Pelican Origin server. You may run other Pelican servers, but in this documentation we will use the Origin server for demonstration. For details about serving a Pelican Origin, refer to [Federating Your Data](../federating-your-data.mdx) page.
+1. Run your Pelican Origin server. You may run other Pelican servers, but in this documentation we will use the Origin server for demonstration. For details about serving a Pelican Origin, refer to [Federating Your Data](../federating-your-data.mdx) page.
 
-    ```bash copy
-    pelican origin serve -v /tmp/stash:/test-namespace -f "osg-htc.org"
-    ```
+   ```bash copy
+   pelican origin serve -v /tmp/stash:/test-namespace -f "osg-htc.org"
+   ```
 
-3. Go to the URL for Web UI and confirm it's working. The default URL is `https://localhost:8444`. You should be directed to the Pelican login page.
+1. Go to the URL for Web UI and confirm it's working. The default URL is `https://localhost:8444`. You should be directed to the Pelican login page.
 
 ### Add a data source
 
 1. Click **Connections** in the left-side menu. If there is no menu on the left-side, click the icon of stacked bars to toggle the menu. This is located on the top-left side of the page next to **Home**
 
-<ExportedImage width={1000} height={1000} src={"/pelican/grafana-menu-location.png"} alt={"Screenshot of Grafana page to locate the menu"} />
+\<ExportedImage width={1000} height={1000} src={"/pelican/grafana-menu-location.png"} alt={"Screenshot of Grafana page to locate the menu"} />
 
 2. Enter **Prometheus** in the search dialog
 
-<ExportedImage width={1000} height={1000} src={"/pelican/grafana-search-prometheus.png"} alt={"Screenshot of Grafana page to search for Prometheus"} />
+\<ExportedImage width={1000} height={1000} src={"/pelican/grafana-search-prometheus.png"} alt={"Screenshot of Grafana page to search for Prometheus"} />
 
 3. Click Prometheus and click **Add new data source**
 
-<ExportedImage width={1000} height={1000} src={"/pelican/grafana-add-data-source.png"} alt={"Screenshot of Grafana page to add Prometheus data source"} />
+\<ExportedImage width={1000} height={1000} src={"/pelican/grafana-add-data-source.png"} alt={"Screenshot of Grafana page to add Prometheus data source"} />
 
 4. Configure the data source following instructions in the next section
 
@@ -92,26 +91,25 @@ Follow the instructions below to configure your Prometheus data source to work w
 
 #### Connection
 
-* **Name**: Change the name to `Pelican Prometheus`, or any name to distinguish it from other data sources
-
+- **Name**: Change the name to `Pelican Prometheus`, or any name to distinguish it from other data sources
 
 #### Authentication
 
-* **Prometheus server URL**: `https://<server-hostname>:<server-web-port>/api/v1.0/prometheus`
+- **Prometheus server URL**: `https://<server-hostname>:<server-web-port>/api/v1.0/prometheus`
 
   Where `<server-hostname>:<server-web-port>` is your Pelican server Web URL that Grafana can access. By default, it's https://localhost:8444
 
-* **TLS settings**: Check "Skip TLS certificate validation" if you don't have a TLS certificate for your *Pelican* server, or if you are in local development environment
+- **TLS settings**: Check "Skip TLS certificate validation" if you don't have a TLS certificate for your *Pelican* server, or if you are in local development environment
 
-<ExportedImage width={1000} height={1000} src={"/pelican/grafana-data-source-configuration.png"} alt={"Screenshot of Grafana page to configure the data source"} />
+\<ExportedImage width={1000} height={1000} src={"/pelican/grafana-data-source-configuration.png"} alt={"Screenshot of Grafana page to configure the data source"} />
 
 #### Advanced settings
 
-* **Other**: Select `GET` for "HTTP Method"
+- **Other**: Select `GET` for "HTTP Method"
 
 Before finishing the configuration, you need to set up authentication credentials for Grafana to access Prometheus instance on Pelican or change Pelican configuration to disable authentication. Follow the next section for instructions.
 
-<ExportedImage width={1000} height={1000} src={"/pelican/grafana-data-source-configuration-advanced.png"} alt={"Screenshot of Grafana page to configure advanced settings of the data source"} />
+\<ExportedImage width={1000} height={1000} src={"/pelican/grafana-data-source-configuration-advanced.png"} alt={"Screenshot of Grafana page to configure advanced settings of the data source"} />
 
 ## Configure authentication
 
@@ -123,21 +121,21 @@ By default, Pelican protects the Prometheus endpoint by asking for a [JWT](https
 
 1. Run the following command
 
-    * Replace `<server-web-url>` with the URL to your Pelican server Web UI. By default, it's `https://localhost:8444`.
+   - Replace `<server-web-url>` with the URL to your Pelican server Web UI. By default, it's `https://localhost:8444`.
 
-    * Replace `--lifetime 604800` with your desired lifetime for the token. The value is in seconds. The example below generates a token with a lifetime of 7 days.
+   - Replace `--lifetime 604800` with your desired lifetime for the token. The value is in seconds. The example below generates a token with a lifetime of 7 days.
 
-    ```bash
-    $ pelican origin token create --scope monitoring.query --claim wlcg.ver=1.0 --issuer <server-web-url> --subject grafana --audience <server-web-url> --lifetime 604800
+   ```bash
+   $ pelican origin token create --scope monitoring.query --claim wlcg.ver=1.0 --issuer <server-web-url> --subject grafana --audience <server-web-url> --lifetime 604800
 
-    eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwczovL2V4YW1wbGUuY29tIiwiaWF0IjoxNzA5NjUwMjMyLCJleHAiOjE3NDExODYyMzIsImF1ZCI6Imh0dHBzOi8vZXhhbXBsZS5jb20iLCJzdWIiOiJncmFmYW5hIiwic2NvcGUiOiJtb25pdG9yaW5nLnF1ZXJ5Iiwid2xjZy52ZXIiOiIxLjAifQ.cK5QyYJinn3QCPa6YB10Wn37MEEKzt_kyDMR9meN1Ec
-    ```
+   eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwczovL2V4YW1wbGUuY29tIiwiaWF0IjoxNzA5NjUwMjMyLCJleHAiOjE3NDExODYyMzIsImF1ZCI6Imh0dHBzOi8vZXhhbXBsZS5jb20iLCJzdWIiOiJncmFmYW5hIiwic2NvcGUiOiJtb25pdG9yaW5nLnF1ZXJ5Iiwid2xjZy52ZXIiOiIxLjAifQ.cK5QyYJinn3QCPa6YB10Wn37MEEKzt_kyDMR9meN1Ec
+   ```
 
-2. Copy the generated token. Note that your token will be different from the example above.
+1. Copy the generated token. Note that your token will be different from the example above.
 
-3. In the Grafana data source configuration page, go to the **Authentication** section, expand the **HTTP Headers** subsection, and click **Add header**
+1. In the Grafana data source configuration page, go to the **Authentication** section, expand the **HTTP Headers** subsection, and click **Add header**
 
-4. Fill in `Authorization` for the **Header** field and `Bearer <token>` for the **Value** field with your generated token. Note that there is a whitespace between `Bearer` and your token.
+1. Fill in `Authorization` for the **Header** field and `Bearer <token>` for the **Value** field with your generated token. Note that there is a whitespace between `Bearer` and your token.
 
 That's it! Now you can scroll to the bottom of the configuration page and click **Save & Test**. There should be green alert with a title **Successfully queried the Prometheus API.**
 
@@ -186,45 +184,47 @@ With Grafana connected to the Pelican Prometheus instance, you are able to build
 
 1. Make sure your Pelican origin server is running
 
-2. Download the template dashboard file from [here](https://github.com/PelicanPlatform/pelican/blob/main/docs/public/origin-dashboard-template.json)
-
+1. Download the template dashboard file from [here](https://github.com/PelicanPlatform/pelican/blob/main/docs/public/origin-dashboard-template.json)
 
 ### Modify dashboard template
 
 There are a couple of placeholders that need to be changed before you can import the dashboard template to Grafana. To do a batch replace, it is recommended that you use a text editor to find and replace placeholders to corresponding values.
 
-* Replace `<YOUR-DATA-SOURCE-UID>` to the id of your Prometheus data source. You can find the ID on the data source configuration page.
+- Replace `<YOUR-DATA-SOURCE-UID>` to the id of your Prometheus data source. You can find the ID on the data source configuration page.
 
-    1. Navigate to the configuration page
-    2. Copy the ID from your browser's URL box, which should have a value similar to
+  1. Navigate to the configuration page
 
-        ```console
-        http://localhost:3000/connections/datasources/edit/fc2115e0-ede3-4fdb-9056-ecefa1b3160a
-        ```
+  1. Copy the ID from your browser's URL box, which should have a value similar to
 
-        Where `fc2115e0-ede3-4fdb-9056-ecefa1b3160a` is the ID you want to copy. Note that the ID in the example above will be different from your data source ID
+     ```console
+     http://localhost:3000/connections/datasources/edit/fc2115e0-ede3-4fdb-9056-ecefa1b3160a
+     ```
 
-    3. Batch replace `<YOUR-DATA-SOURCE-UID>` in the template dashboard file with the copied value
+     Where `fc2115e0-ede3-4fdb-9056-ecefa1b3160a` is the ID you want to copy. Note that the ID in the example above will be different from your data source ID
 
-* Batch replace `<YOUR-ORIGIN-SERVER-WEB-URL>` with the web URL of your Pelican origin server, without the `https://` portion. Example: `localhost:8444`
+  1. Batch replace `<YOUR-DATA-SOURCE-UID>` in the template dashboard file with the copied value
 
-* Save the changes to your template dashboard file.
+- Batch replace `<YOUR-ORIGIN-SERVER-WEB-URL>` with the web URL of your Pelican origin server, without the `https://` portion. Example: `localhost:8444`
+
+- Save the changes to your template dashboard file.
 
 ### Import template file to Grafana
 
 1. Go to the home page of Grafana
-2. Click **Dashboards** in the left-side menu. If there is no menu on the left-side, click the icon of stacked bars to toggle the menu, which is located on the top-left side of the page next to **Home**
-3. Click the **New** button on the top-right side. Select the **Import** option in the dropdown menu.
-4. Drag and drop the template JSON file from your computer to the upload section of the page. It should look like the screenshot below.
 
-    <ExportedImage width={1000} height={1000} src={"/pelican/import-dashboard.png"} alt={"Screenshot of Grafana page to import dashboard"} />
+1. Click **Dashboards** in the left-side menu. If there is no menu on the left-side, click the icon of stacked bars to toggle the menu, which is located on the top-left side of the page next to **Home**
 
-5. Click **Import**
+1. Click the **New** button on the top-right side. Select the **Import** option in the dropdown menu.
 
+1. Drag and drop the template JSON file from your computer to the upload section of the page. It should look like the screenshot below.
+
+   \<ExportedImage width={1000} height={1000} src={"/pelican/import-dashboard.png"} alt={"Screenshot of Grafana page to import dashboard"} />
+
+1. Click **Import**
 
 Grafana should then redirect you to the page of the import dashboard, which should look like the screenshot below.
 
-<ExportedImage width={1000} height={1000} src={"/pelican/grafana-dashboard-origin.png"} alt={"Screenshot of Grafana page to import dashboard"} />
+\<ExportedImage width={1000} height={1000} src={"/pelican/grafana-dashboard-origin.png"} alt={"Screenshot of Grafana page to import dashboard"} />
 
 You may notice that some panels have a `No data` warning. This should go away once you have run your server for a couple of minutes and refreshed the page. It takes about 15s for Pelican to collect the initial data points and there could be delay in visualizing the data.
 

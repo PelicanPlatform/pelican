@@ -8,28 +8,28 @@ Pelican provides a binary file instead of a `MSI` installer for Windows. You nee
 
 1. Navigate to [Pelican download page](../install.mdx#download-pelican-binary) and select the Pelican Windows binary.
 
-2. In the **Operating System** section, select **Windows**. Download the file `pelican_Windows_x86_64.zip` to your computer.
+1. In the **Operating System** section, select **Windows**. Download the file `pelican_Windows_x86_64.zip` to your computer.
 
-3. Using Windows Explorer, navigate to folder containing the downloaded `.zip` file and extract it.
+1. Using Windows Explorer, navigate to folder containing the downloaded `.zip` file and extract it.
 
-4. You may run the binary in the extracted folder, but it is recommended that you add Pelican binary to your `PATH` environment variable to allow `pelican` to be called directly from your PowerShell. To run Pelican binary from the extracted folder, do the following in [PowerShell](https://learn.microsoft.com/en-us/powershell/scripting/learn/ps101/01-getting-started?view=powershell-7.4):
+1. You may run the binary in the extracted folder, but it is recommended that you add Pelican binary to your `PATH` environment variable to allow `pelican` to be called directly from your PowerShell. To run Pelican binary from the extracted folder, do the following in [PowerShell](https://learn.microsoft.com/en-us/powershell/scripting/learn/ps101/01-getting-started?view=powershell-7.4):
 
-    ```bat
-    rem Go to the downloaded Pelican folder
-    $ cd D:\Downloads\pelican_Windows_x86_64
+   ```bat
+   rem Go to the downloaded Pelican folder
+   $ cd D:\Downloads\pelican_Windows_x86_64
 
-    rem Run Pelican binary
-    $ pelican.exe --version
+   rem Run Pelican binary
+   $ pelican.exe --version
 
-    Version: 7.5.8
-    Build Date: 2024-03-01T18:13:00Z
-    Build Commit: d260a07d3b057d19b7fdd36125f91a8768531258
-    Built By: goreleaser
-    ```
+   Version: 7.5.8
+   Build Date: 2024-03-01T18:13:00Z
+   Build Commit: d260a07d3b057d19b7fdd36125f91a8768531258
+   Built By: goreleaser
+   ```
 
 ## Add Pelican binary to your `PATH`
 
-* Add Pelican binary to your `PATH` for the current [PowerShell](https://learn.microsoft.com/en-us/powershell/scripting/learn/ps101/01-getting-started?view=powershell-7.4)
+- Add Pelican binary to your `PATH` for the current [PowerShell](https://learn.microsoft.com/en-us/powershell/scripting/learn/ps101/01-getting-started?view=powershell-7.4)
 
   ```bat
   rem Go to the binary folder
@@ -47,36 +47,40 @@ Pelican provides a binary file instead of a `MSI` installer for Windows. You nee
   Built By: goreleaser
   ```
 
-* Add Pelican binary to your `PATH` permanently
+- Add Pelican binary to your `PATH` permanently
 
-   1. **Open System Properties**:
-      * Press `Win + R`, type `sysdm.cpl`, and press `Enter`.
+  1. **Open System Properties**:
 
-   2. **Access Environment Variables**:
-      * In the System Properties window, go to the `Advanced` tab.
-      * Click on the `Environment Variables` button.
+     - Press `Win + R`, type `sysdm.cpl`, and press `Enter`.
 
-   3. **Edit the PATH Variable**:
-      * In the Environment Variables window, under the `System variables` section, scroll down and find the `Path` variable, then select it and click `Edit`.
-      * In the Edit Environment Variable window, click `New` and add the path to the directory containing `pelican.exe` (e.g., `C:\path\to\directory`).
-      * Click `OK` to close all windows.
+  1. **Access Environment Variables**:
 
-   4. Verify Pelican is added to `PATH`
-      * In a **new** PowerShell window, run the following command:
+     - In the System Properties window, go to the `Advanced` tab.
+     - Click on the `Environment Variables` button.
 
-        ```bat
-        rem Run Pelican binary
-        $ pelican --version
+  1. **Edit the PATH Variable**:
 
-        Version: 7.5.8
-        Build Date: 2024-03-01T18:13:00Z
-        Build Commit: d260a07d3b057d19b7fdd36125f91a8768531258
-        Built By: goreleaser
-        ```
+     - In the Environment Variables window, under the `System variables` section, scroll down and find the `Path` variable, then select it and click `Edit`.
+     - In the Edit Environment Variable window, click `New` and add the path to the directory containing `pelican.exe` (e.g., `C:\path\to\directory`).
+     - Click `OK` to close all windows.
+
+  1. Verify Pelican is added to `PATH`
+
+     - In a **new** PowerShell window, run the following command:
+
+       ```bat
+       rem Run Pelican binary
+       $ pelican --version
+
+       Version: 7.5.8
+       Build Date: 2024-03-01T18:13:00Z
+       Build Commit: d260a07d3b057d19b7fdd36125f91a8768531258
+       Built By: goreleaser
+       ```
 
 ## Next steps
 
-* [Verify Pelican is installed](../install.mdx#verify-pelican-is-installed)
-* [Read our quick start guide on accessing data using Pelican client](../getting-started/accessing-data.mdx)
-* [Federate your data via Pelican Origin server](../federating-your-data.mdx)
-* [Operate a Pelican data federation](../operating-a-federation.mdx)
+- [Verify Pelican is installed](../install.mdx#verify-pelican-is-installed)
+- [Read our quick start guide on accessing data using Pelican client](../getting-started/accessing-data.mdx)
+- [Federate your data via Pelican Origin server](../federating-your-data.mdx)
+- [Operate a Pelican data federation](../operating-a-federation.mdx)

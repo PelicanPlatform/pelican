@@ -8,31 +8,24 @@ The Pelican [*Director*](../about-pelican/core-concepts.mdx#director-service) ha
 
 ### Get MaxMind License key (required)
 
-A Pelican director uses the [MaxMind GeoLite City database](https://dev.maxmind.com/geoip/docs/databases/city-and-country)
-to determine which cache is nearest to a client's IP address.
-The database, if not already found,
-will be downloaded automatically when a director is served and a valid key is present. The database is free to use, but you need a GeoLite2 account
-and provide a license key to Pelican so that we can download the database for you.
-Please follow the instructions [here](https://dev.maxmind.com/geoip/docs/databases/city-and-country) to [register a free account](https://www.maxmind.com/en/geolite2/signup) and [get your license key](https://www.maxmind.com/en/accounts/current/license-key/).
+A Pelican director uses the [MaxMind GeoLite City database](https://dev.maxmind.com/geoip/docs/databases/city-and-country) to determine which cache is nearest to a client's IP address. The database, if not already found, will be downloaded automatically when a director is served and a valid key is present. The database is free to use, but you need a GeoLite2 account and provide a license key to Pelican so that we can download the database for you. Please follow the instructions [here](https://dev.maxmind.com/geoip/docs/databases/city-and-country) to [register a free account](https://www.maxmind.com/en/geolite2/signup) and [get your license key](https://www.maxmind.com/en/accounts/current/license-key/).
 
-Once you have the key, copy and paste it to a desired location on your server.
-Then pass the file location to `Director.MaxMindKeyFile`.
+Once you have the key, copy and paste it to a desired location on your server. Then pass the file location to `Director.MaxMindKeyFile`.
 
 ### Set Registry URL (required)
 
-A Pelican director needs to talk to the registry to get the public keys for namespaces. You will need to set `Federation.RegistryUrl` to the public endpoint of your registry
-for your Pelican director to work. An example value looks like `https://your-registry.org:9999`
+A Pelican director needs to talk to the registry to get the public keys for namespaces. You will need to set `Federation.RegistryUrl` to the public endpoint of your registry for your Pelican director to work. An example value looks like `https://your-registry.org:9999`
 
 ### Director as a Federation
 
-For Pelican origin, cache, and client, they need to know where the *federation* they belong to so that they can make themselves known to other services or a access objects. This can be done by either manually passing configuration values (e.g. `Federation.DirectorUrl`, `Federation.RegistryUrl`, etc) or by setting the
-`Federation.DiscoveryUrl` and Pelican will fetch the metadata from the endpoint automatically. Pelican uses `Federation.DiscoveryUrl` to discover where a federation's central services live, including the registry and director.
+For Pelican origin, cache, and client, they need to know where the *federation* they belong to so that they can make themselves known to other services or a access objects. This can be done by either manually passing configuration values (e.g. `Federation.DirectorUrl`, `Federation.RegistryUrl`, etc) or by setting the `Federation.DiscoveryUrl` and Pelican will fetch the metadata from the endpoint automatically. Pelican uses `Federation.DiscoveryUrl` to discover where a federation's central services live, including the registry and director.
 
 By default, Pelican director hosts the federation discovery endpoint. Therefore, for origins and caches in your federation, as well as Pelican clients that want to access objects in your federation, their `Federation.DiscoveryUrl` value can be set to the director's public URL, i.e. `https://<your-director-hostname>:<director-web-port>` or `https://<your-director-hostname>` if the port number is simply `443`.
 
 Make sure your director is up and running before starting your origins and caches.
 
 ### Set Support Contact Information (Recommended)
+
 > `Director.SupportContact` is only available for Pelican >=7.7.0
 
 The Pelican director is your federation's entrypoint, and it is where other services in the federation can learn about each other. Because of this, it is also used to host the contact information for federation administrators. Setting values for the configuration options `Director.SupportContactEmail` and `Director.SupportContactUrl` causes the director to display the information through its website so that users know who and how to contact you for support. See [Configuration](./parameters.mdx#Director-SupportContact) page for details.
@@ -61,12 +54,11 @@ To initialize, login at https://<hostname>:8444/view/initialization/code/ with t
 865309
 ```
 
-By default, a director runs on port `8444`. You may change the port number by passing `-p <port>` when serving
-the director or by setting `Server.WebPort` in the configuration file.
+By default, a director runs on port `8444`. You may change the port number by passing `-p <port>` when serving the director or by setting `Server.WebPort` in the configuration file.
 
 To finish setting up the web UI for the director, please refer to [Login to Admin Website](./serving_an_origin.mdx#login-to-admin-website) for details. Once you have finished the initialization and login with your admin password, you should be able to see the following page as an admin user (lists are expected to be empty at a fresh start):
 
-<ExportedImage width={1000} height={1000} src={"/pelican/director-homepage.png"} alt={"Image of director homepage in admin view"} />
+\<ExportedImage width={1000} height={1000} src={"/pelican/director-homepage.png"} alt={"Image of director homepage in admin view"} />
 
 The "Origins" table and "Caches" table show the *active* origins and caches in the federation.
 

@@ -1,4 +1,3 @@
-
 <h1 align="center">Pelican Command Line</h1>
 
 <p align="center">
@@ -9,27 +8,21 @@
   <img alt="Go Report" src="https://img.shields.io/badge/go%20report-A+-brightgreen.svg?style=for-the-badge">
 </p>
 
-The Pelican command line tool allows one to use a Pelican
-federation as a client and serve datasets through running a
-Pelican origin service.
+The Pelican command line tool allows one to use a Pelican federation as a client and serve datasets through running a Pelican origin service.
 
 For more information on Pelican, see the [Pelican Platform page](https://pelicanplatform.org/).
 
 For documentation on using the Pelican Platform, see the [Pelican Platform documentation page](https://docs.pelicanplatform.org/).
 
-Testing and Usage
------------------
+## Testing and Usage
 
-Run the following command to download a test file (`/test/query1`) from the
-configured federation:
+Run the following command to download a test file (`/test/query1`) from the configured federation:
 
 ```
 $ pelican object get /test/query1 ./
 ```
 
-
-Running an Pelican origin
--------------------------
+## Running an Pelican origin
 
 To launch a Pelican origin, run the following:
 
@@ -37,14 +30,11 @@ To launch a Pelican origin, run the following:
 pelican origin serve -f https://director.example.com -v /tmp/stash/:/test
 ```
 
-Running an OSDF origin or client
---------------------------------
+## Running an OSDF origin or client
 
-The Open Science Data Federation (OSDF) is a well-known Pelican federation
-in support of the science and engineering communities in the US.
+The Open Science Data Federation (OSDF) is a well-known Pelican federation in support of the science and engineering communities in the US.
 
-To launch an origin using OSDF defaults, rename the output binary from
-`pelican` to `osdf`.  Then, run:
+To launch an origin using OSDF defaults, rename the output binary from `pelican` to `osdf`. Then, run:
 
 ```
 osdf origin serve -v /tmp/stash/:/test
@@ -56,9 +46,7 @@ Similarly, the `osdf` binary can be used to download from the OSDF:
 $ osdf object get /osgconnect/public/dweitzel/blast/queries/query1 ./
 ```
 
-To ease the transition of `stashcp`
-[users](https://github.com/htcondor/osdf-client) to pelican, the tool can also
-be renamed or symlinked to `stashcp`:
+To ease the transition of `stashcp` [users](https://github.com/htcondor/osdf-client) to pelican, the tool can also be renamed or symlinked to `stashcp`:
 
 ```
 $ stashcp /osgconnect/public/dweitzel/blast/queries/query1 ./
@@ -66,13 +54,13 @@ $ stashcp /osgconnect/public/dweitzel/blast/queries/query1 ./
 
 and it shares the same defaults and behavior as stashcp.
 
+## Building
 
-Building
---------
+Building is performed with the [goreleaser](https://goreleaser.com/) tool. To build a snapshot (not release):
 
-Building is performed with the [goreleaser](https://goreleaser.com/) tool.  To build a snapshot (not release):
-
-    $ goreleaser --clean --snapshot
+```
+$ goreleaser --clean --snapshot
+```
 
 The binaries will be located in `./dist` directory.
 
@@ -81,6 +69,7 @@ The binaries will be located in `./dist` directory.
 To enable more rapid development you can include a `dev` goreleaser configuration. This allows you to only build the binaries that you will be using.
 
 ### Example `.goreleaser.dev.yml` File
+
 ```
 project_name: pelican
 version: 2
@@ -118,6 +107,7 @@ builds:
 ```
 
 ### Build using the dev file
+
 ```
 make pelican-dev-build
 ```
