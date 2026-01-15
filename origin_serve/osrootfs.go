@@ -51,6 +51,9 @@ func (ofs *OsRootFs) Name() string {
 
 // normalizePath removes leading slashes from paths for os.Root compatibility
 func (ofs *OsRootFs) normalizePath(name string) string {
+	if name == "/" {
+		return "."
+	}
 	if len(name) > 0 && name[0] == '/' {
 		return name[1:]
 	}

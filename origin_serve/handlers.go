@@ -22,7 +22,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"path/filepath"
+	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -144,13 +144,6 @@ func authMiddleware() gin.HandlerFunc {
 					break
 				}
 			}
-		}
-
-		// No tokens available
-		if len(tokens) == 0 {
-			log.Debugf("No token provided for %s %s", c.Request.Method, resource)
-			c.AbortWithStatus(http.StatusUnauthorized)
-			return
 		}
 
 		disableDirectClients := param.Origin_DisableDirectClients.GetBool()
@@ -339,9 +332,6 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 
 // handleHeadWithChecksum handles HEAD requests and adds checksum headers per RFC 3230
 func handleHeadWithChecksum(c *gin.Context, handler *webdav.Handler, modifiedReq *http.Request, relativePath string, storagePrefix string) {
-	// Compute checksums BEFORE processing the HEAD request so we can add headers
-	fullPath := filepath.Join(storagePrefix, relativePath)
-
 	// Check if client requested checksums via Want-Digest header
 	wantDigest := c.GetHeader("Want-Digest")
 	if wantDigest == "" {
@@ -371,9 +361,24 @@ func handleHeadWithChecksum(c *gin.Context, handler *webdav.Handler, modifiedReq
 		}
 	}
 
-	if xc, ok := checksummer.(*XattrChecksummer); ok {
-		if digests, err := xc.GetChecksumsRFC3230(fullPath, types); err == nil {
-			digestValues = append(digestValues, digests...)
+	// Use os.Root to prevent symlink attacks when accessing checksums
+	// Open the storage root directory
+	root, err := os.OpenRoot(storagePrefix)
+	if err != nil {
+		log.Debugf("Failed to open storage root for checksum: %v", err)
+	} else {
+		defer root.Close()
+
+		if xc, ok := checksummer.(*XattrChecksummer); ok {
+			// Normalize the path for os.Root (remove leading slash)
+			normalizedPath := relativePath
+			if len(normalizedPath) > 0 && normalizedPath[0] == '/' {
+				normalizedPath = normalizedPath[1:]
+			}
+
+			if digests, err := xc.GetChecksumsRFC3230(root, normalizedPath, types); err == nil {
+				digestValues = append(digestValues, digests...)
+			}
 		}
 	}
 

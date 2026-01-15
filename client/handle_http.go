@@ -1688,6 +1688,13 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 
 	if job.job.recursive {
 		if job.job.xferType == transferTypeUpload {
+			// The URL returned by the director for directory /foo may be
+			// something like https://example.com/prefix/foo.  The transfers emitted
+			// by walkDirUpload are in the federation namespaces (i.e., /foo/bar.txt) so
+			// we need to provide it with a transfer string that is the root of the
+			// federation namespace, https://example.com/prefix/ in this case.
+			remotePath := transfers[0].Url.Path
+			transfers[0].Url.Path = strings.TrimSuffix(path.Clean(remotePath), path.Clean(job.job.remoteURL.Path))
 			return te.walkDirUpload(job, transfers, te.files, job.job.localPath)
 		} else {
 			return te.walkDirDownload(job, transfers, te.files, remoteUrl)
@@ -3744,7 +3751,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 	}
 	localBase := strings.TrimPrefix(remotePath, job.job.remoteURL.Path)
 	for _, info := range infos {
-		newPath := remotePath + "/" + info.Name()
+		newPath := path.Join(remotePath, info.Name())
 		if info.IsDir() {
 			err := te.walkDirDownloadHelper(job, transfers, files, newPath, client)
 			if err != nil {

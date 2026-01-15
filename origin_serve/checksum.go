@@ -16,6 +16,13 @@
  *
  ***************************************************************/
 
+// Package origin_serve provides checksum computation and caching for origin servers.
+//
+// Security: All checksum operations use os.Root (Go 1.24+) to prevent symlink
+// traversal attacks that could escape the storage directory. The os.Root type
+// provides a secure filesystem view that prevents access to files outside the
+// designated root directory, similar to a chroot jail but implemented at the
+// Go runtime level without requiring special system privileges.
 package origin_serve
 
 import (
@@ -41,8 +48,9 @@ type (
 	ChecksumType string
 
 	// Checksummer is an interface for fetching and computing checksums
+	// Uses os.Root to ensure all file operations stay within the root directory
 	Checksummer interface {
-		GetChecksum(filename string, checksumType ChecksumType) (string, error)
+		GetChecksum(root *os.Root, filename string, checksumType ChecksumType) (string, error)
 	}
 
 	// XattrChecksummer uses extended attributes to store and retrieve checksums
@@ -88,19 +96,20 @@ func isValidChecksumType(checksumType ChecksumType) bool {
 }
 
 // GetChecksum retrieves or computes the checksum for a file
-func (xc *XattrChecksummer) GetChecksum(filename string, checksumType ChecksumType) (string, error) {
+// Uses the provided os.Root to ensure all file operations stay within the root directory
+func (xc *XattrChecksummer) GetChecksum(root *os.Root, filename string, checksumType ChecksumType) (string, error) {
 	// Try to read XRootD-formatted xattr and validate mtime
-	bytes, ok, err := readChecksumFromXattr(filename, checksumType)
+	bytes, ok, err := readChecksumFromXattr(root, filename, checksumType)
 	if err != nil {
 		return "", err
 	}
 	if !ok {
 		// Compute requested checksum and store (along with defaults)
 		types := mergeWithDefault([]ChecksumType{checksumType})
-		if err := computeAndStoreChecksums(filename, types); err != nil {
+		if err := computeAndStoreChecksums(root, filename, types); err != nil {
 			return "", err
 		}
-		bytes, ok, err = readChecksumFromXattr(filename, checksumType)
+		bytes, ok, err = readChecksumFromXattr(root, filename, checksumType)
 		if err != nil {
 			return "", err
 		}
@@ -114,8 +123,9 @@ func (xc *XattrChecksummer) GetChecksum(filename string, checksumType ChecksumTy
 
 // GetChecksumRFC3230 retrieves the checksum in RFC 3230 format (algorithm=value)
 // MD5 and SHA1 are base64-encoded, CRC32 is hex-encoded
-func (xc *XattrChecksummer) GetChecksumRFC3230(filename string, checksumType ChecksumType) (string, error) {
-	checksum, err := xc.GetChecksum(filename, checksumType)
+// Uses the provided os.Root to ensure all file operations stay within the root directory
+func (xc *XattrChecksummer) GetChecksumRFC3230(root *os.Root, filename string, checksumType ChecksumType) (string, error) {
+	checksum, err := xc.GetChecksum(root, filename, checksumType)
 	if err != nil {
 		return "", err
 	}
@@ -137,11 +147,12 @@ func (xc *XattrChecksummer) GetChecksumRFC3230(filename string, checksumType Che
 
 // GetChecksumsRFC3230 returns a list of RFC 3230 digest strings for requested types.
 // If any requested checksum is missing or stale, computes all requested plus defaults and stores.
-func (xc *XattrChecksummer) GetChecksumsRFC3230(filename string, types []ChecksumType) ([]string, error) {
+// Uses the provided os.Root to ensure all file operations stay within the root directory
+func (xc *XattrChecksummer) GetChecksumsRFC3230(root *os.Root, filename string, types []ChecksumType) ([]string, error) {
 	// Determine which are present and valid
 	haveAll := true
 	for _, t := range types {
-		_, ok, err := readChecksumFromXattr(filename, t)
+		_, ok, err := readChecksumFromXattr(root, filename, t)
 		if err != nil {
 			return nil, err
 		}
@@ -153,7 +164,7 @@ func (xc *XattrChecksummer) GetChecksumsRFC3230(filename string, types []Checksu
 	if !haveAll {
 		// Compute and store requested + defaults
 		allTypes := mergeWithDefault(types)
-		if err := computeAndStoreChecksums(filename, allTypes); err != nil {
+		if err := computeAndStoreChecksums(root, filename, allTypes); err != nil {
 			return nil, err
 		}
 	}
@@ -161,7 +172,7 @@ func (xc *XattrChecksummer) GetChecksumsRFC3230(filename string, types []Checksu
 	// Build digest strings
 	digests := make([]string, 0, len(types))
 	for _, t := range types {
-		bytes, ok, err := readChecksumFromXattr(filename, t)
+		bytes, ok, err := readChecksumFromXattr(root, filename, t)
 		if err != nil {
 			return nil, err
 		}
@@ -190,8 +201,9 @@ func getXattrName(checksumType ChecksumType) string {
 }
 
 // computeChecksumBytes computes the checksum for a file and returns raw bytes
-func computeChecksumBytes(filename string, checksumType ChecksumType) ([]byte, error) {
-	file, err := os.Open(filename)
+// Uses the provided os.Root to ensure all file operations stay within the root directory
+func computeChecksumBytes(root *os.Root, filename string, checksumType ChecksumType) ([]byte, error) {
+	file, err := root.Open(filename)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to open file for checksum")
 	}
@@ -237,12 +249,30 @@ func computeChecksumBytes(filename string, checksumType ChecksumType) ([]byte, e
 
 // readChecksumFromXattr reads and validates a checksum from XRootD-formatted xattr.
 // Returns (bytes, true) if present and valid; (nil, false) if missing or stale.
-func readChecksumFromXattr(filename string, checksumType ChecksumType) ([]byte, bool, error) {
+// Uses the provided os.Root to ensure all file operations stay within the root directory
+func readChecksumFromXattr(root *os.Root, filename string, checksumType ChecksumType) ([]byte, bool, error) {
 	xattrName := getXattrName(checksumType)
 	if xattrName == "" {
 		return nil, false, nil
 	}
-	data, err := xattr.Get(filename, xattrName)
+	// Open file first to avoid TOCTOU issues
+	// root.Open validates the path and prevents symlink attacks
+	f, err := root.Open(filename)
+	if err != nil {
+		return nil, false, nil
+	}
+	defer f.Close()
+
+	// Get file info from already-opened file descriptor (fstat)
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, false, nil
+	}
+
+	// Get the xattr using the file descriptor
+	// Note: pkg/xattr supports both path-based and fd-based operations
+	// We'll use Fgetxattr to work with the file descriptor
+	data, err := xattr.FGet(f, xattrName)
 	if err != nil || len(data) == 0 {
 		return nil, false, nil
 	}
@@ -254,12 +284,7 @@ func readChecksumFromXattr(filename string, checksumType ChecksumType) ([]byte, 
 	if name != string(checksumType) {
 		return nil, false, nil
 	}
-	// Validate mtime
-	fi, err := os.Stat(filename)
-	if err != nil {
-		return nil, false, errors.Wrap(err, "failed to stat file for checksum validation")
-	}
-	// If the file's current mtime differs, consider stale
+	// Validate mtime - use the fi we already got from fstat
 	currMTime := fi.ModTime().Unix()
 	if currMTime != fileModTime.Unix() {
 		return nil, false, nil
@@ -269,20 +294,22 @@ func readChecksumFromXattr(filename string, checksumType ChecksumType) ([]byte, 
 
 // computeAndStoreChecksums computes all requested checksum types and stores them in XRootD-format xattrs.
 // Reads the file once and computes all checksums simultaneously for efficiency.
-func computeAndStoreChecksums(filename string, types []ChecksumType) error {
-	fi, err := os.Stat(filename)
+// Uses the provided os.Root to ensure all file operations stay within the root directory
+func computeAndStoreChecksums(root *os.Root, filename string, types []ChecksumType) error {
+	// Open file first to avoid TOCTOU issues
+	file, err := root.Open(filename)
+	if err != nil {
+		return errors.Wrap(err, "failed to open file for checksum computation")
+	}
+	defer file.Close()
+
+	// Get file info from already-opened file descriptor (fstat)
+	fi, err := file.Stat()
 	if err != nil {
 		return errors.Wrap(err, "failed to stat file for checksum computation")
 	}
 	fileModTime := fi.ModTime()
 	start := time.Now()
-
-	// Open file once
-	file, err := os.Open(filename)
-	if err != nil {
-		return errors.Wrap(err, "failed to open file for checksum computation")
-	}
-	defer file.Close()
 
 	// Create hash instances for all requested types
 	type hashResult struct {
@@ -359,7 +386,15 @@ func computeAndStoreChecksums(filename string, types []ChecksumType) error {
 		if xattrName == "" {
 			continue
 		}
-		if err := xattr.Set(filename, xattrName, bin); err != nil {
+		// Use FSet to write xattr through the file descriptor
+		// We need to reopen the file in write mode for xattr setting
+		// Note: We already validated the path through root.Open above
+		writeFile, err := root.OpenFile(filename, os.O_RDWR, 0)
+		if err != nil {
+			log.Debugf("Failed to open file for xattr write %s: %v", filename, err)
+			continue
+		}
+		if err := xattr.FSet(writeFile, xattrName, bin); err != nil {
 			// Check if the error is due to xattr size limits
 			if err.Error() == "no space left on device" || err.Error() == "Operation not supported" {
 				log.Warnf("Failed to store checksum in xattr for %s (%s): xattr storage limit exceeded or not supported. "+
@@ -368,6 +403,7 @@ func computeAndStoreChecksums(filename string, types []ChecksumType) error {
 				log.Debugf("Failed to store checksum in xattr for %s (%s): %v", filename, xattrName, err)
 			}
 		}
+		writeFile.Close()
 	}
 	return nil
 }

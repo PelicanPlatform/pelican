@@ -55,8 +55,13 @@ func TestChecksumStaleDetection(t *testing.T) {
 	time.Sleep(10 * time.Millisecond) // Ensure mtime differences
 	modTime1, _ := os.Stat(testFile)
 
+	// Open root for secure access
+	root, err := os.OpenRoot(tmpDir)
+	require.NoError(t, err)
+	defer root.Close()
+
 	xc := &XattrChecksummer{}
-	hash1, err := xc.GetChecksum(testFile, ChecksumTypeCRC32C)
+	hash1, err := xc.GetChecksum(root, "test.txt", ChecksumTypeCRC32C)
 	require.NoError(t, err)
 
 	// Verify xattr was written
@@ -73,7 +78,7 @@ func TestChecksumStaleDetection(t *testing.T) {
 	assert.NotEqual(t, modTime1.ModTime().Unix(), modTime2.ModTime().Unix(), "mtime should have changed")
 
 	// Get checksum again - should detect stale and recompute
-	hash2, err := xc.GetChecksum(testFile, ChecksumTypeCRC32C)
+	hash2, err := xc.GetChecksum(root, "test.txt", ChecksumTypeCRC32C)
 	require.NoError(t, err)
 
 	// Hashes should differ because content changed
@@ -95,6 +100,11 @@ func TestDefaultChecksumTypes(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(testFile, content, 0644))
 
+	// Open root for secure access
+	root, err := os.OpenRoot(tmpDir)
+	require.NoError(t, err)
+	defer root.Close()
+
 	types := []ChecksumType{ChecksumTypeMD5, ChecksumTypeCRC32C}
 	merged := mergeWithDefault(types)
 
@@ -104,7 +114,7 @@ func TestDefaultChecksumTypes(t *testing.T) {
 
 	// Compute and verify all are stored
 	xc := &XattrChecksummer{}
-	digests, err := xc.GetChecksumsRFC3230(testFile, types)
+	digests, err := xc.GetChecksumsRFC3230(root, "test.txt", types)
 	require.NoError(t, err)
 	require.Equal(t, len(types), len(digests), "Should return digest for each requested type")
 
@@ -132,6 +142,11 @@ func TestConcurrentChecksumComputation(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(testFile, content, 0644))
 
+	// Open root for secure access
+	root, err := os.OpenRoot(tmpDir)
+	require.NoError(t, err)
+	defer root.Close()
+
 	xc := &XattrChecksummer{}
 	var wg sync.WaitGroup
 	numGoroutines := 10
@@ -143,7 +158,7 @@ func TestConcurrentChecksumComputation(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			hash, err := xc.GetChecksum(testFile, ChecksumTypeCRC32C)
+			hash, err := xc.GetChecksum(root, "test.txt", ChecksumTypeCRC32C)
 			if err != nil {
 				errors <- err
 			} else {
@@ -188,6 +203,11 @@ func TestRFC3230DigestFormat(t *testing.T) {
 	_ = xattr.Remove(testFile, "user.test")
 
 	require.NoError(t, os.WriteFile(testFile, content, 0644))
+
+	// Open root for secure access
+	root, err := os.OpenRoot(tmpDir)
+	require.NoError(t, err)
+	defer root.Close()
 
 	xc := &XattrChecksummer{}
 
@@ -255,7 +275,7 @@ func TestRFC3230DigestFormat(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			digest, err := xc.GetChecksumRFC3230(testFile, tt.checksumType)
+			digest, err := xc.GetChecksumRFC3230(root, "test.txt", tt.checksumType)
 			require.NoError(t, err)
 			assert.True(t, strings.HasPrefix(digest, tt.prefix), "Digest should start with %s", tt.prefix)
 			assert.True(t, tt.validate(digest), "Digest format should be valid: %s", digest)
@@ -277,8 +297,13 @@ func TestEmptyFileChecksum(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(testFile, []byte{}, 0644))
 
+	// Open root for secure access
+	root, err := os.OpenRoot(tmpDir)
+	require.NoError(t, err)
+	defer root.Close()
+
 	xc := &XattrChecksummer{}
-	digest, err := xc.GetChecksumRFC3230(testFile, ChecksumTypeCRC32C)
+	digest, err := xc.GetChecksumRFC3230(root, "empty.txt", ChecksumTypeCRC32C)
 	require.NoError(t, err)
 
 	// Empty file has deterministic checksums
@@ -295,11 +320,16 @@ func TestComputeChecksumBytesConsistency(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(testFile, content, 0644))
 
+	// Open root for secure access
+	root, err := os.OpenRoot(tmpDir)
+	require.NoError(t, err)
+	defer root.Close()
+
 	// Compute raw bytes twice
-	bytes1, err := computeChecksumBytes(testFile, ChecksumTypeCRC32C)
+	bytes1, err := computeChecksumBytes(root, "consistency.txt", ChecksumTypeCRC32C)
 	require.NoError(t, err)
 
-	bytes2, err := computeChecksumBytes(testFile, ChecksumTypeCRC32C)
+	bytes2, err := computeChecksumBytes(root, "consistency.txt", ChecksumTypeCRC32C)
 	require.NoError(t, err)
 
 	// Should be identical
@@ -369,9 +399,14 @@ func BenchmarkChecksumComputation(b *testing.B) {
 
 	require.NoError(b, os.WriteFile(testFile, content, 0644))
 
+	// Open root for secure access
+	root, err := os.OpenRoot(tmpDir)
+	require.NoError(b, err)
+	defer root.Close()
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = computeChecksumBytes(testFile, ChecksumTypeCRC32C)
+		_, _ = computeChecksumBytes(root, "bench.txt", ChecksumTypeCRC32C)
 	}
 }
 
@@ -387,9 +422,14 @@ func BenchmarkXattrRoundTrip(b *testing.B) {
 		b.Skipf("Xattrs not supported: %v", err)
 	}
 
+	// Open root for secure access
+	root, err := os.OpenRoot(tmpDir)
+	require.NoError(b, err)
+	defer root.Close()
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _, _ = readChecksumFromXattr(testFile, ChecksumTypeCRC32C)
+		_, _, _ = readChecksumFromXattr(root, "bench_xattr.txt", ChecksumTypeCRC32C)
 	}
 }
 
