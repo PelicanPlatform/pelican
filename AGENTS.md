@@ -18,7 +18,7 @@ Pelican is a data federation platform that allows users to serve and access data
 
 ### Backend (Go)
 
-- **Language**: Go 1.24+
+- **Language**: Go 1.25+
 - **Web Framework**: Gin (HTTP server)
 - **CLI Framework**: Cobra
 - **Configuration**: Viper
