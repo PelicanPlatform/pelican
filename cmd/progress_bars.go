@@ -104,8 +104,8 @@ func (pb *progressBars) launchDisplay(ctx context.Context) {
 				return nil
 			case <-ticker.C:
 				func() {
-					pb.lock.RLock()
-					defer pb.lock.RUnlock()
+					pb.lock.Lock()
+					defer pb.lock.Unlock()
 					for path := range pbMap {
 						pbMap[path].xfer = -1
 					}
