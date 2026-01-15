@@ -21,6 +21,7 @@ package web_ui
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -288,5 +289,178 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 		r.ServeHTTP(w, c.Request)
 
 		assert.Equal(t, 403, w.Result().StatusCode, "Expected status code of 403 due to bad token scope")
+	})
+}
+
+// TestPrometheusRulesEndpoint tests that the Prometheus /rules endpoint returns empty results
+// without panicking when using the stub implementation.
+func TestPrometheusRulesEndpoint(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	server_utils.ResetTestState()
+
+	// Create a mock Prometheus API v1 router with stub implementations
+	av1 := route.New().WithPrefix("/api/v1.0/prometheus/api/v1")
+
+	// Register handlers that use the stub implementations
+	stubRules := stubRulesRetriever{}
+	av1.Get("/rules", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// Simulate what Prometheus API would do with the stub
+		ruleGroups := stubRules.RuleGroups()
+		response := map[string]interface{}{
+			"status": "success",
+			"data": map[string]interface{}{
+				"groups": ruleGroups,
+			},
+		}
+		err := json.NewEncoder(w).Encode(response)
+		require.NoError(t, err)
+	})
+
+	// Create temp dir for the origin key file
+	tDir := t.TempDir()
+	kDir := filepath.Join(tDir, "testKeyDir")
+	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), kDir))
+	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
+
+	test_utils.MockFederationRoot(t, nil, nil)
+	err := config.InitServer(ctx, server_structs.OriginType)
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	c, r := gin.CreateTestContext(w)
+
+	require.NoError(t, param.Set(param.Monitoring_PromQLAuthorization.GetName(), false))
+	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "https://test-origin.org:8444"))
+
+	c.Request = &http.Request{
+		URL: &url.URL{},
+	}
+
+	// Set the request to run through the promQueryEngineAuthHandler function
+	r.GET("/api/v1.0/prometheus/api/v1/*any", promQueryEngineAuthHandler(av1))
+	c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/api/v1/rules", nil)
+	r.ServeHTTP(w, c.Request)
+
+	assert.Equal(t, 200, w.Result().StatusCode, "Expected status code 200 for /rules endpoint")
+	resultBytes, err := io.ReadAll(w.Result().Body)
+	require.NoError(t, err, "Error reading the response body")
+
+	assert.NotEmpty(t, string(resultBytes), "Response should not be empty")
+	assert.Contains(t, string(resultBytes), "success", "Response should contain success status")
+	assert.Contains(t, string(resultBytes), "groups", "Response should contain groups field")
+	assert.Contains(t, string(resultBytes), "[]", "Response should contain empty array")
+}
+
+// TestPrometheusAlertsEndpoint tests that the Prometheus /alerts endpoint returns empty results
+// without panicking when using the stub implementation.
+func TestPrometheusAlertsEndpoint(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	server_utils.ResetTestState()
+
+	// Create a mock Prometheus API v1 router with stub implementations
+	av1 := route.New().WithPrefix("/api/v1.0/prometheus/api/v1")
+
+	// Register handler that uses the stub implementation
+	stubAlertmgr := stubAlertmanagerRetriever{}
+	av1.Get("/alertmanagers", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// Simulate what Prometheus API would do with the stub
+		activeAlertmanagers := stubAlertmgr.Alertmanagers()
+		droppedAlertmanagers := stubAlertmgr.DroppedAlertmanagers()
+		response := map[string]interface{}{
+			"status": "success",
+			"data": map[string]interface{}{
+				"activeAlertmanagers":  activeAlertmanagers,
+				"droppedAlertmanagers": droppedAlertmanagers,
+			},
+		}
+		err := json.NewEncoder(w).Encode(response)
+		require.NoError(t, err)
+	})
+
+	// Test the alerts endpoint as well
+	stubRules := stubRulesRetriever{}
+	av1.Get("/alerts", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// Simulate what Prometheus API would do with the stub
+		alertingRules := stubRules.AlertingRules()
+		response := map[string]interface{}{
+			"status": "success",
+			"data": map[string]interface{}{
+				"alerts": alertingRules,
+			},
+		}
+		err := json.NewEncoder(w).Encode(response)
+		require.NoError(t, err)
+	})
+
+	// Create temp dir for the origin key file
+	tDir := t.TempDir()
+	kDir := filepath.Join(tDir, "testKeyDir")
+	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), kDir))
+	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
+
+	test_utils.MockFederationRoot(t, nil, nil)
+	err := config.InitServer(ctx, server_structs.OriginType)
+	require.NoError(t, err)
+
+	require.NoError(t, param.Set(param.Monitoring_PromQLAuthorization.GetName(), false))
+	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "https://test-origin.org:8444"))
+
+	t.Run("alertmanagers-endpoint", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, r := gin.CreateTestContext(w)
+
+		c.Request = &http.Request{
+			URL: &url.URL{},
+		}
+
+		r.GET("/api/v1.0/prometheus/api/v1/*any", promQueryEngineAuthHandler(av1))
+		c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/api/v1/alertmanagers", nil)
+		r.ServeHTTP(w, c.Request)
+
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code 200 for /alertmanagers endpoint")
+		resultBytes, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err, "Error reading the response body")
+
+		assert.NotEmpty(t, string(resultBytes), "Response should not be empty")
+		assert.Contains(t, string(resultBytes), "success", "Response should contain success status")
+		assert.Contains(t, string(resultBytes), "activeAlertmanagers", "Response should contain activeAlertmanagers field")
+		assert.Contains(t, string(resultBytes), "droppedAlertmanagers", "Response should contain droppedAlertmanagers field")
+		assert.Contains(t, string(resultBytes), "[]", "Response should contain empty arrays")
+	})
+
+	t.Run("alerts-endpoint", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, r := gin.CreateTestContext(w)
+
+		c.Request = &http.Request{
+			URL: &url.URL{},
+		}
+
+		r.GET("/api/v1.0/prometheus/api/v1/*any", promQueryEngineAuthHandler(av1))
+		c.Request, _ = http.NewRequest(http.MethodGet, "/api/v1.0/prometheus/api/v1/alerts", nil)
+		r.ServeHTTP(w, c.Request)
+
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code 200 for /alerts endpoint")
+		resultBytes, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err, "Error reading the response body")
+
+		assert.NotEmpty(t, string(resultBytes), "Response should not be empty")
+		assert.Contains(t, string(resultBytes), "success", "Response should contain success status")
+		assert.Contains(t, string(resultBytes), "alerts", "Response should contain alerts field")
+		assert.Contains(t, string(resultBytes), "[]", "Response should contain empty array")
 	})
 }
