@@ -284,6 +284,18 @@ func originSupportsVerb(verb string) AdPredicate {
 		case http.MethodDelete:
 			return ad.ServerAd.Caps.Writes && ad.NamespaceAd.Caps.Writes
 		case "PROPFIND":
+			// PROPFIND with Depth: 0 (or no Depth header) is a stat operation that only requires Reads capability
+			// PROPFIND with Depth: 1+ is a listing operation that requires Listings capability
+			depthHeader := ""
+			if ctx != nil && ctx.Request != nil {
+				depthHeader = ctx.Request.Header.Get("Depth")
+			}
+			if depthHeader == "" || depthHeader == "0" {
+				// Stat operation - requires Reads
+				return (ad.ServerAd.Caps.Reads && ad.NamespaceAd.Caps.Reads) ||
+					(ad.ServerAd.Caps.PublicReads && ad.NamespaceAd.Caps.PublicReads)
+			}
+			// Default to listing for other Depth values
 			return ad.ServerAd.Caps.Listings && ad.NamespaceAd.Caps.Listings
 		default:
 			return false
@@ -454,7 +466,7 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	if len(sortedOrigins) == 0 {
 		// Since caches are supposed to act on behalf of origins, the fact that there are no
 		// origins capable of supporting the request means we can fail early.
-		return nil, nil, noOriginsForReqErr{verb: mapHTTPVerbToPelVerb(reqVerb), queries: mapQueriesToCaps(ctx)}
+		return nil, nil, noOriginsForReqErr{verb: mapHTTPVerbToPelVerbWithContext(reqVerb, ctx), queries: mapQueriesToCaps(ctx)}
 	}
 
 	// Some of the Origins we're keeping track of up to this point may require specific features

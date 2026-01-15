@@ -1688,6 +1688,13 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 
 	if job.job.recursive {
 		if job.job.xferType == transferTypeUpload {
+			// The URL returned by the director for directory /foo may be
+			// something like https://example.com/prefix/foo.  The transfers emitted
+			// by walkDirUpload are in the federation namespaces (i.e., /foo/bar.txt) so
+			// we need to provide it with a transfer string that is the root of the
+			// federation namespace, https://example.com/prefix/ in this case.
+			remotePath := transfers[0].Url.Path
+			transfers[0].Url.Path = strings.TrimSuffix(path.Clean(remotePath), path.Clean(job.job.remoteURL.Path))
 			return te.walkDirUpload(job, transfers, te.files, job.job.localPath)
 		} else {
 			return te.walkDirDownload(job, transfers, te.files, remoteUrl)
@@ -3214,11 +3221,24 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	// Parse the writeback host as a URL
 	writebackhostUrl := transfer.attempts[0].Url
 
-	dest := &url.URL{
-		Host:   writebackhostUrl.Host,
-		Scheme: "https",
-		Path:   transfer.remoteURL.Path,
+	// Start from the director-provided URL but override the path/query with the
+	// per-file destination so recursive uploads target each object, not just the
+	// collection root. For POSIXv2 origins that include a base path, preserve the
+	// prefix when constructing the final destination.
+	destCopy := *writebackhostUrl
+	if transfer.remoteURL != nil {
+		destCopy.Path = computeUploadDestPath(transfer.remoteURL.Path, destCopy.Path)
+		// Preserve query parameters from the director (for example, authz tokens) unless the
+		// per-file URL explicitly provides its own query.
+		destCopy.RawQuery = writebackhostUrl.RawQuery
+		if transfer.remoteURL.RawQuery != "" {
+			destCopy.RawQuery = transfer.remoteURL.RawQuery
+		}
 	}
+	if destCopy.Scheme == "" {
+		destCopy.Scheme = "https"
+	}
+	dest := &destCopy
 	// Add the oss.asize query parameter for PUT requests
 	query := dest.Query()
 	query.Set("oss.asize", fmt.Sprintf("%d", sizer.Size()))
@@ -3731,7 +3751,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 	}
 	localBase := strings.TrimPrefix(remotePath, job.job.remoteURL.Path)
 	for _, info := range infos {
-		newPath := remotePath + "/" + info.Name()
+		newPath := path.Join(remotePath, info.Name())
 		if info.IsDir() {
 			err := te.walkDirDownloadHelper(job, transfers, files, newPath, client)
 			if err != nil {

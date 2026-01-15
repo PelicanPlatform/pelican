@@ -1509,7 +1509,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 
 	// Cache Setopt:
 	if xrdConfig.Logging.PssSetOptCache, err = genLoggingConfig(param.Logging_Cache_PssSetOpt.GetString(), loggingMap{
-		Trace: "DebugLevel 4",
+		Debug: "DebugLevel 4",
 		Info:  "DebugLevel 3",
 		Warn:  "DebugLevel 2",
 		Error: "DebugLevel 1",

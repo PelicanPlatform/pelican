@@ -37,6 +37,7 @@ import (
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/origin"
+	"github.com/pelicanplatform/pelican/origin_serve"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -45,12 +46,24 @@ import (
 )
 
 func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules server_structs.ServerType) (server_structs.XRootDServer, error) {
-	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusWarning, "XRootD is initializing")
-	metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusWarning, "CMSD is initializting")
-
-	err := xrootd.SetUpMonitoring(ctx, egrp)
+	originExports, err := server_utils.GetOriginExports()
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to initialize origin exports")
+	}
+
+	// Determine if we should use XRootD or native HTTP server
+	useXRootD := param.Origin_StorageType.GetString() != string(server_structs.OriginStoragePosixv2)
+
+	if useXRootD {
+		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusWarning, "XRootD is initializing")
+		metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusWarning, "CMSD is initializing")
+
+		err = xrootd.SetUpMonitoring(ctx, egrp)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		log.Info("Initializing POSIXv2 origin backend")
 	}
 
 	originServer := &origin.OriginServer{}
@@ -67,11 +80,6 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	}
 
 	origin.ConfigOriginTTLCache(ctx, egrp)
-
-	originExports, err := server_utils.GetOriginExports()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to initialize origin exports")
-	}
 
 	if param.Origin_StorageType.GetString() == string(server_structs.OriginStorageGlobus) {
 		if err := origin.InitGlobusBackend(originExports); err != nil {
@@ -100,66 +108,73 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		server_utils.RegisterOIDCAPI(engine.Group("/", web_ui.ServerHeaderMiddleware), false)
 	}
 
+	// OA4MP is not XRootD specific - configure if enabled
 	if param.Origin_EnableIssuer.GetBool() {
 		if err = oa4mp.ConfigureOA4MPProxy(engine); err != nil {
 			return nil, err
 		}
 	}
 
-	configPath, err := xrootd.ConfigXrootd(ctx, true)
-	if err != nil {
-		return nil, err
-	}
-
-	if param.Origin_SelfTest.GetBool() {
-		xrootd.PeriodicSelfTest(ctx, egrp, true)
-	}
-
-	privileged := param.Origin_Multiuser.GetBool()
-	useCMSD := param.Origin_EnableCmsd.GetBool()
-	launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, useCMSD, false)
-	if err != nil {
-		return nil, err
-	}
-
-	if param.Origin_EnableIssuer.GetBool() {
-		oa4mp_launcher, err := oa4mp.ConfigureOA4MP()
+	// Handle XRootD-specific initialization
+	if useXRootD {
+		configPath, err := xrootd.ConfigXrootd(ctx, true)
 		if err != nil {
 			return nil, err
 		}
-		launchers = append(launchers, oa4mp_launcher)
-	}
 
-	portStartCallback := func(port int) {
-		if err := param.Set("Origin.Port", port); err != nil {
-			log.WithError(err).Warnf("Failed to set Origin.Port to %d", port)
+		if param.Origin_SelfTest.GetBool() {
+			xrootd.PeriodicSelfTest(ctx, egrp, true)
 		}
-		if originUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {
-			originUrl.Host = originUrl.Hostname() + ":" + strconv.Itoa(port)
-			if err := param.Set("Origin.Url", originUrl.String()); err != nil {
-				log.WithError(err).Warnf("Failed to set Origin.Url to %s", originUrl.String())
+
+		privileged := param.Origin_Multiuser.GetBool()
+		useCMSD := param.Origin_EnableCmsd.GetBool()
+		launchers, err := xrootd.ConfigureLaunchers(privileged, configPath, useCMSD, false)
+		if err != nil {
+			return nil, err
+		}
+
+		if param.Origin_EnableIssuer.GetBool() {
+			oa4mp_launcher, err := oa4mp.ConfigureOA4MP()
+			if err != nil {
+				return nil, err
 			}
-			log.Debugln("Resetting Origin.Url to", originUrl.String())
+			launchers = append(launchers, oa4mp_launcher)
 		}
-		log.Infoln("Origin startup complete on port", port)
+
+		portStartCallback := func(port int) {
+			if err := param.Set("Origin.Port", port); err != nil {
+				log.WithError(err).Warnf("Failed to set Origin.Port to %d", port)
+			}
+			if originUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {
+				originUrl.Host = originUrl.Hostname() + ":" + strconv.Itoa(port)
+				if err := param.Set("Origin.Url", originUrl.String()); err != nil {
+					log.WithError(err).Warnf("Failed to set Origin.Url to %s", originUrl.String())
+				}
+				log.Debugln("Resetting Origin.Url to", originUrl.String())
+			}
+			log.Infoln("Origin startup complete on port", port)
+		}
+
+		pids, err := xrootd.LaunchDaemons(ctx, launchers, egrp, portStartCallback)
+		if err != nil {
+			return nil, err
+		}
+		originServer.SetPids(pids)
+
+		// Store restart information after PIDs are known
+		xrootd.StoreRestartInfo(launchers, pids, egrp, portStartCallback, false, useCMSD, privileged)
+
+		// Register callback for xrootd logging configuration changes
+		// This must be done after LaunchDaemons so the server has PIDs
+		xrootd.RegisterXrootdLoggingCallback()
+
+		// LaunchOriginDaemons may edit the viper config; these launched goroutines are purposely
+		// delayed until after the viper config is done.
+		xrootd.LaunchXrootdMaintenance(ctx, originServer, 2*time.Minute)
 	}
+	// POSIXv2-specific initialization is deferred to OriginServeFinish()
 
-	pids, err := xrootd.LaunchDaemons(ctx, launchers, egrp, portStartCallback)
-	if err != nil {
-		return nil, err
-	}
-	originServer.SetPids(pids)
-
-	// Store restart information after PIDs are known
-	xrootd.StoreRestartInfo(launchers, pids, egrp, portStartCallback, false, useCMSD, privileged)
-
-	// Register callback for xrootd logging configuration changes
-	// This must be done after LaunchDaemons so the server has PIDs
-	xrootd.RegisterXrootdLoggingCallback()
-
-	// LaunchOriginDaemons may edit the viper config; these launched goroutines are purposely
-	// delayed until after the viper config is done.
-	xrootd.LaunchXrootdMaintenance(ctx, originServer, 2*time.Minute)
+	// Launch origin file test maintenance (not XRootD specific)
 	origin.LaunchOriginFileTestMaintenance(ctx)
 
 	return originServer, nil
@@ -167,10 +182,37 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 
 // Finish configuration of the origin server.  To be invoked after the web UI components
 // have been launched.
-func OriginServeFinish(ctx context.Context, egrp *errgroup.Group) error {
+func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.Engine, modules server_structs.ServerType) error {
 	originExports, err := server_utils.GetOriginExports()
 	if err != nil {
 		return err
+	}
+
+	// Handle POSIXv2-specific initialization now that the web server is running
+	useXRootD := param.Origin_StorageType.GetString() != string(server_structs.OriginStoragePosixv2)
+	if !useXRootD {
+		if err := origin_serve.InitAuthConfig(ctx, egrp, originExports); err != nil {
+			return errors.Wrap(err, "failed to initialize origin_serve auth config")
+		}
+
+		if err := origin_serve.InitializeHandlers(originExports); err != nil {
+			return errors.Wrap(err, "failed to initialize origin_serve handlers")
+		}
+
+		directorEnabled := modules.IsEnabled(server_structs.DirectorType)
+		if err := origin_serve.RegisterHandlers(engine, directorEnabled); err != nil {
+			return errors.Wrap(err, "failed to register origin_serve handlers")
+		}
+
+		// For POSIXv2, the origin serves files directly via the web server, not XRootD.
+		// Update Origin.Url to use the external web URL which is now set to the correct port.
+		externalWebUrl := param.Server_ExternalWebUrl.GetString()
+		if err := param.Set("Origin.Url", externalWebUrl); err != nil {
+			log.WithError(err).Warnf("Failed to set Origin.Url to %s", externalWebUrl)
+		}
+		log.Debugf("Set Origin.Url to %s for POSIXv2 origin", externalWebUrl)
+
+		log.Info("POSIXv2 origin backend initialized successfully")
 	}
 
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the origin server")

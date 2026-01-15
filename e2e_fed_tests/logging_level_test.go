@@ -52,7 +52,9 @@ func TestCLILoggingLevelChanges(t *testing.T) {
 	// Write current config to a temporary file so the subprocess can access issuer keys
 	configFile, err := os.CreateTemp(t.TempDir(), "pelican-config-*.yaml")
 	require.NoError(t, err)
-	defer configFile.Close()
+	defer func() {
+		_ = configFile.Close()
+	}()
 
 	// Ensure critical paths are set so they get written to the config file
 	// The subprocess needs these to generate admin tokens

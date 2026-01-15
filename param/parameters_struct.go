@@ -232,6 +232,7 @@ type Config struct {
 		Concurrency int `mapstructure:"concurrency" yaml:"Concurrency"`
 		ConcurrencyDegradedThreshold int `mapstructure:"concurrencydegradedthreshold" yaml:"ConcurrencyDegradedThreshold"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
+		DefaultChecksumTypes []string `mapstructure:"defaultchecksumtypes" yaml:"DefaultChecksumTypes"`
 		DirectorTest bool `mapstructure:"directortest" yaml:"DirectorTest"`
 		DisableDirectClients bool `mapstructure:"disabledirectclients" yaml:"DisableDirectClients"`
 		EnableBroker bool `mapstructure:"enablebroker" yaml:"EnableBroker"`
@@ -274,6 +275,7 @@ type Config struct {
 		S3ServiceUrl string `mapstructure:"s3serviceurl" yaml:"S3ServiceUrl"`
 		S3UrlStyle string `mapstructure:"s3urlstyle" yaml:"S3UrlStyle"`
 		ScitokensDefaultUser string `mapstructure:"scitokensdefaultuser" yaml:"ScitokensDefaultUser"`
+		ScitokensGroupsClaim string `mapstructure:"scitokensgroupsclaim" yaml:"ScitokensGroupsClaim"`
 		ScitokensMapSubject bool `mapstructure:"scitokensmapsubject" yaml:"ScitokensMapSubject"`
 		ScitokensNameMapFile string `mapstructure:"scitokensnamemapfile" yaml:"ScitokensNameMapFile"`
 		ScitokensRestrictedPaths []string `mapstructure:"scitokensrestrictedpaths" yaml:"ScitokensRestrictedPaths"`
@@ -283,8 +285,10 @@ type Config struct {
 		SelfTestMaxAge time.Duration `mapstructure:"selftestmaxage" yaml:"SelfTestMaxAge"`
 		StoragePrefix string `mapstructure:"storageprefix" yaml:"StoragePrefix"`
 		StorageType string `mapstructure:"storagetype" yaml:"StorageType"`
+		SupportedChecksumTypes []string `mapstructure:"supportedchecksumtypes" yaml:"SupportedChecksumTypes"`
 		TokenAudience string `mapstructure:"tokenaudience" yaml:"TokenAudience"`
 		Url string `mapstructure:"url" yaml:"Url"`
+		UserMapfileRefreshInterval time.Duration `mapstructure:"usermapfilerefreshinterval" yaml:"UserMapfileRefreshInterval"`
 		XRootDPrefix string `mapstructure:"xrootdprefix" yaml:"XRootDPrefix"`
 		XRootServiceUrl string `mapstructure:"xrootserviceurl" yaml:"XRootServiceUrl"`
 	} `mapstructure:"origin" yaml:"Origin"`
@@ -620,6 +624,7 @@ type configWithType struct {
 		Concurrency struct { Type string; Value int }
 		ConcurrencyDegradedThreshold struct { Type string; Value int }
 		DbLocation struct { Type string; Value string }
+		DefaultChecksumTypes struct { Type string; Value []string }
 		DirectorTest struct { Type string; Value bool }
 		DisableDirectClients struct { Type string; Value bool }
 		EnableBroker struct { Type string; Value bool }
@@ -662,6 +667,7 @@ type configWithType struct {
 		S3ServiceUrl struct { Type string; Value string }
 		S3UrlStyle struct { Type string; Value string }
 		ScitokensDefaultUser struct { Type string; Value string }
+		ScitokensGroupsClaim struct { Type string; Value string }
 		ScitokensMapSubject struct { Type string; Value bool }
 		ScitokensNameMapFile struct { Type string; Value string }
 		ScitokensRestrictedPaths struct { Type string; Value []string }
@@ -671,8 +677,10 @@ type configWithType struct {
 		SelfTestMaxAge struct { Type string; Value time.Duration }
 		StoragePrefix struct { Type string; Value string }
 		StorageType struct { Type string; Value string }
+		SupportedChecksumTypes struct { Type string; Value []string }
 		TokenAudience struct { Type string; Value string }
 		Url struct { Type string; Value string }
+		UserMapfileRefreshInterval struct { Type string; Value time.Duration }
 		XRootDPrefix struct { Type string; Value string }
 		XRootServiceUrl struct { Type string; Value string }
 	}

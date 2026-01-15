@@ -3,9 +3,7 @@ module github.com/pelicanplatform/pelican
 // Unpublish Go package as we are not intended to allow users us import our packages for now
 retract [v1.0.0, v1.0.5]
 
-go 1.24.0
-
-toolchain go1.24.7
+go 1.25.0
 
 require (
 	github.com/JGLTechnologies/gin-rate-limit v1.5.4
@@ -32,6 +30,7 @@ require (
 	github.com/opensciencegrid/xrootd-monitoring-shoveler v1.3.0
 	github.com/oschwald/geoip2-golang/v2 v2.0.0-beta.4
 	github.com/pkg/errors v0.9.1
+	github.com/pkg/xattr v0.4.12
 	github.com/pressly/goose/v3 v3.18.0
 	github.com/prometheus/client_golang v1.17.0
 	github.com/prometheus/common v0.44.0
@@ -183,7 +182,7 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/segmentio/asm v1.2.0 // indirect
 	github.com/shurcooL/httpfs v0.0.0-20230704072500-f1e31cf0ba5c // indirect
-	github.com/spf13/afero v1.12.0 // indirect
+	github.com/spf13/afero v1.12.0
 	github.com/spf13/cast v1.6.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect

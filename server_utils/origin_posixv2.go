@@ -1,8 +1,6 @@
-//go:build windows
-
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -18,21 +16,23 @@
  *
  ***************************************************************/
 
-package launchers
+package server_utils
 
 import (
-	"context"
-
-	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pkg/errors"
-	"golang.org/x/sync/errgroup"
 )
 
-func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules server_structs.ServerType) (server_structs.XRootDServer, error) {
-	return nil, errors.New("Origin module is not supported on Windows")
+// Inherit from the base origin
+type Posixv2Origin struct {
+	BaseOrigin
 }
 
-func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.Engine, modules server_structs.ServerType) error {
-	return errors.New("Origin module is not supported on Windows")
+func (o *Posixv2Origin) Type(_ Origin) server_structs.OriginStorageType {
+	return server_structs.OriginStoragePosixv2
+}
+
+func (o *Posixv2Origin) validateStoragePrefix(prefix string) error {
+	// For posixv2 origins, the storage prefix is validated the same way we validate
+	// the federation prefix.
+	return validateFederationPrefix(prefix)
 }

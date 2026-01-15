@@ -238,6 +238,13 @@ func getRedirectURL(reqPath string, ad server_structs.ServerAd, requiresAuth boo
 		serverURL = ad.URL
 	}
 	reqPath = path.Clean("/" + reqPath)
+	// If the server URL has a path component, we need to prepend it to the request path.
+	// A non-empty path is used by the POSIXv2 origin which serves objects from
+	// the same server as the director.
+	if serverURL.Path != "" && serverURL.Path != "/" {
+		reqPath = path.Clean(serverURL.Path + reqPath)
+	}
+
 	if requiresAuth {
 		redirectURL.Scheme = "https"
 	} else {
@@ -621,9 +628,10 @@ func requiresCacheChaining(ctx *gin.Context, oAds []server_structs.ServerAd) boo
 	return false
 }
 
-// Given an HTTP verb, return the corresponding Pelican verb. Used for creating
-// more user-friendly error messages.
-func mapHTTPVerbToPelVerb(httpVerb string) string {
+// Given an HTTP verb and optional request context, return the corresponding Pelican verb.
+// Used for creating more user-friendly error messages.
+// For PROPFIND, checks the Depth header to determine if it's a "stat" or "ls" operation.
+func mapHTTPVerbToPelVerbWithContext(httpVerb string, ctx *gin.Context) string {
 	switch httpVerb {
 	case http.MethodGet:
 		return "get"
@@ -632,6 +640,14 @@ func mapHTTPVerbToPelVerb(httpVerb string) string {
 	case http.MethodDelete:
 		return "delete"
 	case "PROPFIND":
+		// PROPFIND with Depth: 0 (or missing Depth) is a stat operation; otherwise listing
+		depth := ""
+		if ctx != nil && ctx.Request != nil {
+			depth = ctx.Request.Header.Get("Depth")
+		}
+		if depth == "" || depth == "0" {
+			return "stat"
+		}
 		return "ls"
 	default:
 		return "unknown"
@@ -936,6 +952,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 		// If this is a OPTIONS request, we should just return OK
 		if c.Request.Method == http.MethodOptions {
 			c.Status(http.StatusOK)
+			c.Header("Allow", "HEAD,GET,PUT,PROPFIND,OPTIONS,POST")
 			c.Abort()
 			return
 		}

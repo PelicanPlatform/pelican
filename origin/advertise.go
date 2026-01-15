@@ -178,10 +178,21 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 	// Get the overall health status as reported by the origin.
 	status := metrics.GetHealthStatus().OverallStatus
 
+	// For POSIXv2 origins, DataURL (which becomes ServerAd.URL) should have
+	// the /api/v1.0/origin/data prefix so the director redirects to the right endpoint.
+	// WebURL stays as the base server URL for web browser access.
+	dataUrlToAdvertise := originUrlStr
+	if ost == server_structs.OriginStoragePosixv2 {
+		if parsedUrl, err := url.Parse(originUrlStr); err == nil {
+			parsedUrl.Path = "/api/v1.0/origin/data"
+			dataUrlToAdvertise = parsedUrl.String()
+		}
+	}
+
 	ad := server_structs.OriginAdvertiseV2{
 		ServerID:       id,
 		RegistryPrefix: registryPrefix,
-		DataURL:        originUrlStr,
+		DataURL:        dataUrlToAdvertise,
 		WebURL:         originWebUrl,
 		Namespaces:     nsAds,
 		Caps: server_structs.Capabilities{

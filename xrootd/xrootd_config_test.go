@@ -226,7 +226,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 		{"TestCachePfcIncorrectConfig", "Logging.Cache.Pfc", "degub", true, ""},
 		{"TestCachePssCorrectConfig", "Logging.Cache.Pss", "debug", false, "pss.trace on"},
 		{"TestCachePssIncorrectConfig", "Logging.Cache.Pss", "degub", true, ""},
-		{"TestCachePssSetOptCorrectConfig", "Logging.Cache.PssSetOpt", "debug", false, "pss.setopt DebugLevel 3"},
+		{"TestCachePssSetOptCorrectConfig", "Logging.Cache.PssSetOpt", "debug", false, "pss.setopt DebugLevel 4"},
 		{"TestCacheScitokensCorrectConfig", "Logging.Cache.Scitokens", "debug", false, "scitokens.trace debug"},
 		{"TestCacheScitokensIncorrectConfig", "Logging.Cache.Scitokens", "degub", true, ""},
 		{"TestCacheXrdCorrectConfig", "Logging.Cache.Xrd", "debug", false, "xrd.trace debug"},
