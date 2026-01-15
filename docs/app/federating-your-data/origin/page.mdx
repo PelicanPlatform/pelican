@@ -148,6 +148,116 @@ Pelican tries to resolve differences between Origin and namespace configurations
 If you serve an Origin that enables public reads, but the underlying prefix it exports disables all reads, you won't be able to read from that namespace.
 </Callout>
 
+### Origin with GitHub OAuth2 for Protected Namespaces
+
+For Origins that require token-based authentication (i.e., namespaces with `Reads` instead of `PublicReads`), Pelican can be configured to authenticate users via GitHub OAuth2.
+This allows you to restrict data access to members of specific GitHub organizations.
+
+<Callout type="info">
+GitHub uses OAuth2, not full OIDC (OpenID Connect). This means you need to explicitly configure the OAuth endpoints and specify which claims to use from GitHub's user info response (see the configuration example below).
+</Callout>
+
+#### Prerequisites
+
+1. **Create a GitHub OAuth App**: Go to [GitHub Developer Settings](https://github.com/settings/developers) and create a new OAuth App.
+2. **Set the callback URL**: Use `https://<your-origin-hostname>/api/v1.0/auth/oauth/callback` as the authorization callback URL.
+3. **Note your credentials**: Save your Client ID and generate a Client Secret.
+4. **Grant organization access**: If you want to restrict access based on GitHub organization membership, you must authorize the OAuth App to access those organizations.
+
+#### Configuration
+
+Add the following to your Origin's configuration file to enable GitHub OAuth2:
+
+```yaml filename="pelican.yaml" copy
+# GitHub OAuth2 endpoints (required since GitHub doesn't support OIDC discovery)
+OIDC:
+  Issuer: https://github.com
+  AuthorizationEndpoint: https://github.com/login/oauth/authorize
+  TokenEndpoint: https://github.com/login/oauth/access_token
+  UserInfoEndpoint: https://api.github.com/user
+  DeviceAuthEndpoint: https://github.com/login/device/code
+
+  # Your GitHub OAuth App credentials
+  ClientID: <your-github-client-id>
+  ClientSecretFile: /path/to/client-secret-file
+
+  # GitHub-specific scopes
+  Scopes:
+    - user
+    - read:org  # Required for organization-based access control
+
+Origin:
+  EnableIssuer: true
+  EnableOIDC: true
+  # Note: Pelican's built-in OA4MP token issuer currently supports only one
+  # protected (non-public) export per Origin. This limitation applies to all
+  # authentication providers, including GitHub and CILogon. However, the Origin
+  # can still export any number of fully-public namespaces.
+  Exports:
+    - FederationPrefix: /my-origin/protected-data
+      StoragePrefix: /data
+      # No PublicReads - this is a protected namespace
+      Capabilities: ["Writes", "DirectReads", "Reads", "Listings"]
+
+Issuer:
+  # GitHub returns "login" for username instead of OIDC standard "sub"
+  OIDCAuthenticationUserClaim: login
+  # GitHub returns "id" (numeric) instead of OIDC standard "sub"
+  OIDCSubjectClaim: id
+  # Use GitHub organization membership as groups
+  GroupSource: github
+
+  # Require users to be members of at least one of these GitHub orgs
+  GroupRequirements:
+    - "my-github-org"
+
+  # Define authorization based on GitHub org membership
+  # The `prefix` field specifies which path under the FederationPrefix to authorize.
+  # Use "/" to grant access to the entire namespace, or a subpath like "/subdir" for finer control.
+  AuthorizationTemplates:
+    - actions: ["read", "create", "modify"]
+      prefix: "/"
+      groups: ["my-github-org"]
+
+Server:
+  ExternalWebUrl: https://your-origin.example.com
+  # Grant admin access to specific GitHub users
+  UIAdminUsers: ["<your-github-username>"]
+```
+
+#### User Authentication Flow
+
+When a user attempts to access data from a protected namespace, they will go through the following device authorization flow:
+
+1. **Run the Pelican client command**:
+   ```bash
+   pelican object get pelican://<federation-url>/my-origin/protected-data/file.txt .
+   ```
+
+2. **Enter the local client password** (if configured).
+
+3. **Follow the authorization URL**: The client will display a URL like:
+   ```
+   https://<origin-hostname>/api/v1.0/issuer/device?user_code=XXXX-XXXX
+   ```
+
+4. **Authenticate with GitHub**: The user is redirected to GitHub's login page.
+
+5. **Grant consent**: After GitHub authentication, the user sees a Pelican consent page.
+
+6. **Access granted or denied**:
+   - If the user is a member of a required GitHub organization (e.g., `my-github-org`), access is granted.
+   - If the user is not a member, they will see an authorization error:
+     ```
+     Authorization Error: Error code 4000: acquired token not valid for /my-origin/protected-data/file.txt
+     (missing scope or namespace/base-path mismatch)
+     ```
+
+<Callout type="warning">
+For organization-based access control to work, the GitHub OAuth App must have permission to access the organization.
+Users must grant this permission when authorizing the app.
+</Callout>
+
 ### Multi-Export Origins
 
 Origins can export more than one prefix, and these are referred to as "multi-export" Origins.
