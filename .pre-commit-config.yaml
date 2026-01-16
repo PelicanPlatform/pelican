@@ -57,3 +57,10 @@ repos:
         args: [--wrap, "no"]
         files: \.md$
         exclude: \.mdx$
+-   repo: local
+    hooks:
+    -   id: go-vet
+        name: go vet
+        entry: bash -c 'for dir in $(printf "%s\n" "$@" | xargs -n1 dirname | sort -u); do go vet "./$dir"; done' --
+        language: system
+        types: [go]
