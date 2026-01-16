@@ -1,0 +1,54 @@
+name: Check for Large Objects
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  check-large-objects:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for objects larger than 1MB
+        run: |
+          echo "Checking for objects larger than 1MB in PR commits..."
+
+          # Get the base branch commit
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+
+          echo "Base: $BASE_SHA"
+          echo "Head: $HEAD_SHA"
+
+          # Find all blob objects in the commits that are part of this PR
+          LARGE_OBJECTS=$(git rev-list --objects "$BASE_SHA".."$HEAD_SHA" | \
+            cut -d' ' -f1 | \
+            git cat-file --batch-check='%(objectname) %(objecttype) %(objectsize)' | \
+            awk '$2 == "blob" && $3 > 1048576 {print $1, $3}')
+
+          if [ -n "$LARGE_OBJECTS" ]; then
+            echo "❌ Found objects larger than 1MB:"
+            echo ""
+            echo "$LARGE_OBJECTS" | while read -r obj_hash obj_size; do
+              size_mb=$(echo "scale=2; $obj_size / 1048576" | bc)
+              echo "  - Object: $obj_hash (${size_mb}MB)"
+
+              # Try to find the file path for this object
+              git rev-list "$BASE_SHA".."$HEAD_SHA" | while read -r commit; do
+                file_path=$(git ls-tree -r "$commit" | grep "$obj_hash" | awk '{print $4}')
+                if [ -n "$file_path" ]; then
+                  echo "    File: $file_path in commit $commit"
+                fi
+              done
+            done
+            echo ""
+            echo "Please remove large files from the commit history."
+            echo "Consider using Git LFS for large binary files: https://git-lfs.github.com/"
+            exit 1
+          else
+            echo "✅ No objects larger than 1MB found in PR commits."
+          fi
