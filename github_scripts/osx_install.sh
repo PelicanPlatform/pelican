@@ -89,16 +89,12 @@ sudo mkdir -p "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdPelicanHttpCore-5.so" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdHTTPServer-5.so" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdS3-5.so" "$xrootd_libdir"
-<<<<<<< HEAD
 sudo ln -s "$PWD/release_dir/lib/libXrdOssHttp-5.so" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdOssGlobus-5.so" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdOssS3-5.so" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdOssFilter-5.so" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdOssPosc-5.so" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdN2NPrefix-5.so" "$xrootd_libdir"
-=======
-sudo ln -s "$PWD/release_dir/lib/libXrdOssPosc-5.so" "$xrootd_libdir"
->>>>>>> ae80db8d (Copy over posc plugin to xrootd plugin directory)
 popd
 
 popd
