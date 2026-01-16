@@ -79,12 +79,12 @@ func setupPingEngine(t *testing.T, ctx context.Context, egrp *errgroup.Group) (c
 		return err
 	})
 
-	transport := *config.GetTransport()
+	transport := config.GetTransport().Clone()
 	transport.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
 		return net.Dial("unix", socketLocation)
 	}
 	httpc := http.Client{
-		Transport: &transport,
+		Transport: transport,
 	}
 
 	engineReady := false

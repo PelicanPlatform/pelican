@@ -59,8 +59,7 @@ func getTransport() *http.Transport {
 	onceTransport.Do(func() {
 		socketName := filepath.Join(param.Issuer_ScitokensServerLocation.GetString(),
 			"var", "http.sock")
-		var copyTransport http.Transport = *config.GetTransport()
-		transport = &copyTransport
+		transport = config.GetTransport().Clone()
 		// When creating a new socket out to the remote server, ignore the actual
 		// requested address and return a Unix socket instead.
 		transport.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
