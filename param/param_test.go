@@ -19,6 +19,9 @@
 package param
 
 import (
+	"os"
+	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -338,4 +341,247 @@ func TestCallbackWithConfigChanges(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Fatal("Second callback was not invoked")
 	}
+}
+
+// TestStringToSliceHookFunc tests that the custom hook function correctly handles
+// both comma-separated and whitespace-separated strings for slice fields.
+// This is important for supporting YAML >- folding style in config files.
+func TestStringToSliceHookFunc(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{
+			name:     "comma-separated",
+			input:    "a,b,c",
+			expected: []string{"a", "b", "c"},
+		},
+		{
+			name:     "comma-separated-with-spaces",
+			input:    "a, b, c",
+			expected: []string{"a", "b", "c"},
+		},
+		{
+			name:     "whitespace-separated",
+			input:    "a b c",
+			expected: []string{"a", "b", "c"},
+		},
+		{
+			name:     "newline-separated",
+			input:    "a\nb\nc",
+			expected: []string{"a", "b", "c"},
+		},
+		{
+			name:     "tab-separated",
+			input:    "a\tb\tc",
+			expected: []string{"a", "b", "c"},
+		},
+		{
+			name:     "cilogon-subjects-space-separated",
+			input:    "http://cilogon.org/serverE/users/123 http://cilogon.org/serverA/users/456",
+			expected: []string{"http://cilogon.org/serverE/users/123", "http://cilogon.org/serverA/users/456"},
+		},
+		{
+			name:     "cilogon-subjects-comma-separated",
+			input:    "http://cilogon.org/serverE/users/123,http://cilogon.org/serverA/users/456",
+			expected: []string{"http://cilogon.org/serverE/users/123", "http://cilogon.org/serverA/users/456"},
+		},
+		{
+			name:     "single-value",
+			input:    "single",
+			expected: []string{"single"},
+		},
+		{
+			name:     "empty-string",
+			input:    "",
+			expected: []string{},
+		},
+		{
+			name:     "mixed-whitespace",
+			input:    "  a   b  \n  c  ",
+			expected: []string{"a", "b", "c"},
+		},
+	}
+
+	hook := stringToSliceHookFunc()
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Call the hook function
+			result, err := hook.(func(f, t reflect.Kind, data interface{}) (interface{}, error))(
+				reflect.String,
+				reflect.Slice,
+				tc.input,
+			)
+			require.NoError(t, err)
+
+			// Verify the result
+			resultSlice, ok := result.([]string)
+			require.True(t, ok, "Result should be []string")
+			assert.Equal(t, tc.expected, resultSlice)
+		})
+	}
+}
+
+// TestDecodeConfigWithYAMLFoldingStyle tests that DecodeConfig correctly handles
+// YAML >- folding style for UIAdminUsers (and other string slice fields).
+// These tests use actual YAML files to verify the full parsing flow.
+func TestDecodeConfigWithYAMLFoldingStyle(t *testing.T) {
+	user1 := "http://cilogon.org/serverE/users/123"
+	user2 := "http://cilogon.org/serverA/users/456"
+
+	t.Run("yaml-folding-style-with-actual-yaml", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		// Create a temporary YAML file with >- folding style
+		// This is exactly what users might write in their pelican.yaml
+		yamlContent := `Server:
+  UIAdminUsers: >-
+    http://cilogon.org/serverE/users/123
+    http://cilogon.org/serverA/users/456
+`
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "pelican.yaml")
+		err := os.WriteFile(configPath, []byte(yamlContent), 0644)
+		require.NoError(t, err)
+
+		// Parse the YAML file using viper
+		v := viper.New()
+		v.SetConfigFile(configPath)
+		err = v.ReadInConfig()
+		require.NoError(t, err)
+
+		// Log what viper sees (useful for debugging)
+		rawValue := v.Get("Server.UIAdminUsers")
+		t.Logf("Raw viper value type: %T", rawValue)
+		t.Logf("Raw viper value: %v", rawValue)
+
+		// Decode into Config struct
+		cfg, err := DecodeConfig(v)
+		require.NoError(t, err)
+
+		// Verify the config has two separate elements
+		t.Logf("Decoded UIAdminUsers: %v (len=%d)", cfg.Server.UIAdminUsers, len(cfg.Server.UIAdminUsers))
+		assert.Len(t, cfg.Server.UIAdminUsers, 2, "Should have two admin users")
+		assert.Contains(t, cfg.Server.UIAdminUsers, user1)
+		assert.Contains(t, cfg.Server.UIAdminUsers, user2)
+	})
+
+	t.Run("yaml-list-style-with-actual-yaml", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		// Create a YAML file with proper list syntax
+		yamlContent := `Server:
+  UIAdminUsers:
+    - "http://cilogon.org/serverE/users/123"
+    - "http://cilogon.org/serverA/users/456"
+`
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "pelican.yaml")
+		err := os.WriteFile(configPath, []byte(yamlContent), 0644)
+		require.NoError(t, err)
+
+		v := viper.New()
+		v.SetConfigFile(configPath)
+		err = v.ReadInConfig()
+		require.NoError(t, err)
+
+		cfg, err := DecodeConfig(v)
+		require.NoError(t, err)
+
+		assert.Len(t, cfg.Server.UIAdminUsers, 2, "Should have two admin users")
+		assert.Contains(t, cfg.Server.UIAdminUsers, user1)
+		assert.Contains(t, cfg.Server.UIAdminUsers, user2)
+	})
+
+	t.Run("yaml-inline-list-with-actual-yaml", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		// Create a YAML file with inline list syntax (JSON-style)
+		yamlContent := `Server:
+  UIAdminUsers: ["http://cilogon.org/serverE/users/123", "http://cilogon.org/serverA/users/456"]
+`
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "pelican.yaml")
+		err := os.WriteFile(configPath, []byte(yamlContent), 0644)
+		require.NoError(t, err)
+
+		v := viper.New()
+		v.SetConfigFile(configPath)
+		err = v.ReadInConfig()
+		require.NoError(t, err)
+
+		cfg, err := DecodeConfig(v)
+		require.NoError(t, err)
+
+		assert.Len(t, cfg.Server.UIAdminUsers, 2, "Should have two admin users")
+		assert.Contains(t, cfg.Server.UIAdminUsers, user1)
+		assert.Contains(t, cfg.Server.UIAdminUsers, user2)
+	})
+
+	t.Run("yaml-literal-block-style-with-actual-yaml", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		// Create a YAML file with literal block style (|-)
+		// This preserves newlines, so each user is on its own line
+		yamlContent := `Server:
+  UIAdminUsers: |-
+    http://cilogon.org/serverE/users/123
+    http://cilogon.org/serverA/users/456
+`
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "pelican.yaml")
+		err := os.WriteFile(configPath, []byte(yamlContent), 0644)
+		require.NoError(t, err)
+
+		v := viper.New()
+		v.SetConfigFile(configPath)
+		err = v.ReadInConfig()
+		require.NoError(t, err)
+
+		// Log what viper sees
+		rawValue := v.Get("Server.UIAdminUsers")
+		t.Logf("Raw viper value type: %T", rawValue)
+		t.Logf("Raw viper value: %q", rawValue)
+
+		cfg, err := DecodeConfig(v)
+		require.NoError(t, err)
+
+		// Literal block style preserves newlines, which our hook splits on
+		t.Logf("Decoded UIAdminUsers: %v (len=%d)", cfg.Server.UIAdminUsers, len(cfg.Server.UIAdminUsers))
+		assert.Len(t, cfg.Server.UIAdminUsers, 2, "Should have two admin users")
+		assert.Contains(t, cfg.Server.UIAdminUsers, user1)
+		assert.Contains(t, cfg.Server.UIAdminUsers, user2)
+	})
+
+	t.Run("yaml-comma-separated-string-with-actual-yaml", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		// Create a YAML file with comma-separated string
+		yamlContent := `Server:
+  UIAdminUsers: "http://cilogon.org/serverE/users/123,http://cilogon.org/serverA/users/456"
+`
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "pelican.yaml")
+		err := os.WriteFile(configPath, []byte(yamlContent), 0644)
+		require.NoError(t, err)
+
+		v := viper.New()
+		v.SetConfigFile(configPath)
+		err = v.ReadInConfig()
+		require.NoError(t, err)
+
+		cfg, err := DecodeConfig(v)
+		require.NoError(t, err)
+
+		assert.Len(t, cfg.Server.UIAdminUsers, 2, "Should have two admin users")
+		assert.Contains(t, cfg.Server.UIAdminUsers, user1)
+		assert.Contains(t, cfg.Server.UIAdminUsers, user2)
+	})
 }
