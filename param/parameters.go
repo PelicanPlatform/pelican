@@ -310,6 +310,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.GlobusTransferTokenFile": false,
 	"Origin.HttpAuthTokenFile": false,
 	"Origin.HttpServiceUrl": false,
+	"Origin.InProgressLocation": false,
 	"Origin.Mode": false,
 	"Origin.Multiuser": false,
 	"Origin.NamespacePrefix": false,
@@ -660,6 +661,8 @@ func (sP StringParam) GetString() string {
 			return config.Origin.HttpAuthTokenFile
 		case "Origin.HttpServiceUrl":
 			return config.Origin.HttpServiceUrl
+		case "Origin.InProgressLocation":
+			return config.Origin.InProgressLocation
 		case "Origin.Mode":
 			return config.Origin.Mode
 		case "Origin.NamespacePrefix":
@@ -1547,6 +1550,7 @@ var allParameterNames = []string{
 	"Origin.GlobusTransferTokenFile",
 	"Origin.HttpAuthTokenFile",
 	"Origin.HttpServiceUrl",
+	"Origin.InProgressLocation",
 	"Origin.Mode",
 	"Origin.Multiuser",
 	"Origin.NamespacePrefix",
