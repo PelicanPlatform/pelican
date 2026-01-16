@@ -77,6 +77,50 @@ func BindAllParameters(v *viper.Viper) {
 	}
 }
 
+// stringToSliceHookFunc returns a DecodeHookFunc that converts strings to slices
+// by splitting on commas or whitespace. This handles both:
+//   - Comma-separated: "a,b,c" → ["a", "b", "c"]
+//   - Whitespace-separated: "a b c" → ["a", "b", "c"] (supports YAML >- folding style)
+//
+// If the string contains commas, it splits on commas (and trims whitespace from each element).
+// Otherwise, it splits on whitespace.
+// Empty strings after splitting are filtered out.
+func stringToSliceHookFunc() mapstructure.DecodeHookFunc {
+	return func(f reflect.Kind, t reflect.Kind, data interface{}) (interface{}, error) {
+		if f != reflect.String || t != reflect.Slice {
+			return data, nil
+		}
+
+		raw := data.(string)
+		if raw == "" {
+			return []string{}, nil
+		}
+
+		var result []string
+
+		// If the string contains commas, split on commas (standard behavior)
+		if strings.Contains(raw, ",") {
+			parts := strings.Split(raw, ",")
+			for _, part := range parts {
+				trimmed := strings.TrimSpace(part)
+				if trimmed != "" {
+					result = append(result, trimmed)
+				}
+			}
+		} else {
+			// Otherwise, split on whitespace (handles YAML >- folding style)
+			parts := strings.Fields(raw)
+			for _, part := range parts {
+				if part != "" {
+					result = append(result, part)
+				}
+			}
+		}
+
+		return result, nil
+	}
+}
+
 // DecodeConfig decodes the provided viper instance into a new Config struct.
 //
 // Unlike UnmarshalConfig/Refresh, this does NOT update the global atomic cache.
@@ -95,7 +139,7 @@ func DecodeConfig(v *viper.Viper) (*Config, error) {
 		WeaklyTypedInput: true,
 		DecodeHook: mapstructure.ComposeDecodeHookFunc(
 			mapstructure.StringToTimeDurationHookFunc(),
-			mapstructure.StringToSliceHookFunc(","),
+			stringToSliceHookFunc(),
 		),
 		MatchName: func(mapKey, fieldName string) bool {
 			return strings.EqualFold(mapKey, fieldName)
