@@ -1657,6 +1657,7 @@ var (
 	Origin_GlobusTransferTokenFile = StringParam{"Origin.GlobusTransferTokenFile"}
 	Origin_HttpAuthTokenFile = StringParam{"Origin.HttpAuthTokenFile"}
 	Origin_HttpServiceUrl = StringParam{"Origin.HttpServiceUrl"}
+	Origin_InProgressLocation = StringParam{"Origin.InProgressLocation"}
 	Origin_Mode = StringParam{"Origin.Mode"}
 	Origin_NamespacePrefix = StringParam{"Origin.NamespacePrefix"}
 	Origin_RunLocation = StringParam{"Origin.RunLocation"}
