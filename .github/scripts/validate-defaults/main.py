@@ -1,43 +1,44 @@
+from typing import Any
+
 import yaml
+
+DEFAULTS_FILE = "./config/resources/defaults.yaml"
+PARAMETERS_FILE = "./docs/parameters.yaml"
+
+
+def flatten_dict(x: dict[str, Any]) -> dict[str, Any]:
+    result = {}
+    for key, value in x.items():
+        if isinstance(value, dict):
+            for key2, value2 in flatten_dict(value).items():
+                result[f"{key}.{key2}"] = value2
+        else:
+            result[key] = value
+    return result
 
 
 def main():
-    """Validate the defaults file."""
+    with open(DEFAULTS_FILE, mode="r", encoding="utf-8") as fp:
+        defaults = flatten_dict(yaml.safe_load(fp.read()))
 
-    defaults = yaml.safe_load(open("./config/resources/defaults.yaml"))
-    defaults = flatten_dictionary(defaults)
+    with open(PARAMETERS_FILE, mode="r", encoding="utf-8") as fp:
+        parameters = yaml.safe_load_all(fp.read())
+        parameters = {p["name"]: p for p in parameters}
 
-    parameters = yaml.load_all(open("./docs/parameters.yaml"), Loader=yaml.FullLoader)
-    parameters = {parameter["name"]: parameter for parameter in parameters}
+    errors = []
+    for key, default in defaults.items():
+        if key not in parameters:
+            errors.append(f"Key for default value is not in the parameters file: {key}")
+            continue
 
-    error_list = []
-    for d_key, d_value in defaults.items():
+        # If the defaults file has a value, it must match the parameters
+        # file. The reverse need not be true (the default value may be set
+        # via other means, i.e., code).
+        if default != parameters[key]["default"]:
+            errors.append(f"Default value does not match the parameters file: {key}")
 
-        if d_key not in parameters:
-            error_list.append(f"Parameter {d_key} is not in the parameters file.")
-
-        # Check if the default value is different from the parameters file
-        if (
-            (parameters[d_key]['default'] != d_value and parameters[d_key]['default'] != 'none') or
-            (parameters[d_key]['default'] == 'none' and d_value != "")
-        ):
-
-            error_list.append(f"Parameter[{d_key}]: {parameters[d_key]['default']} != {d_value}")
-
-    if error_list:
-        raise Exception("\n" + "\n".join(error_list))
-
-
-def flatten_dictionary(x: dict):
-    """Flatten a dictionary."""
-    out = {}
-    for key, value in x.items():
-        if isinstance(value, dict):
-            for key2, value2 in flatten_dictionary(value).items():
-                out[f"{key}.{key2}"] = value2
-        else:
-            out[key] = value
-    return out
+    if errors:
+        raise RuntimeError("\n" + "\n".join(errors))
 
 
 if __name__ == "__main__":
