@@ -32,6 +32,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-kit/log/term"
@@ -155,7 +156,7 @@ var (
 	// Note the 'once' object is a pointer so we can reset the client multiple
 	// times during unit tests
 	fedDiscoveryOnce *sync.Once
-	globalFedInfo    pelican_url.FederationDiscovery
+	globalFedInfo    atomic.Pointer[pelican_url.FederationDiscovery]
 	globalFedErr     error
 
 	// Global struct validator
@@ -598,9 +599,15 @@ func GetFederation(ctx context.Context) (pelican_url.FederationDiscovery, error)
 		fedDiscoveryOnce = &sync.Once{}
 	}
 	fedDiscoveryOnce.Do(func() {
-		globalFedInfo, globalFedErr = discoverFederationImpl(ctx)
+		var fedInfo pelican_url.FederationDiscovery
+		fedInfo, globalFedErr = discoverFederationImpl(ctx)
+		globalFedInfo.Store(&fedInfo)
 	})
-	return globalFedInfo, globalFedErr
+	loadedInfo := globalFedInfo.Load()
+	if loadedInfo == nil {
+		return pelican_url.FederationDiscovery{}, globalFedErr
+	}
+	return *loadedInfo, globalFedErr
 }
 
 // Set the current global federation metadata
@@ -617,7 +624,7 @@ func SetFederation(fd pelican_url.FederationDiscovery) {
 		log.WithError(err).Warn("Failed to update federation configuration")
 	}
 
-	globalFedInfo = fd
+	globalFedInfo.Store(&fd)
 }
 
 // TODO: It's not clear that this function works correctly.  We should
@@ -2210,7 +2217,7 @@ func ResetConfig() {
 
 	// Reset federation metadata
 	fedDiscoveryOnce = &sync.Once{}
-	globalFedInfo = pelican_url.FederationDiscovery{}
+	globalFedInfo.Store(&pelican_url.FederationDiscovery{})
 	globalFedErr = nil
 
 	warnDeprecatedOnce = sync.Once{}
