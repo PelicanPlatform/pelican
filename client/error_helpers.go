@@ -155,9 +155,10 @@ func isIdleConnectionError(err error) bool {
 	if err == nil {
 		return false
 	}
-	// Check if the error message contains "server closed idle connection"
-	// This is a specific error message from the Go HTTP client
-	return strings.Contains(err.Error(), "server closed idle connection")
+	// Check if the error message contains "server closed idle connection" or "tls: unexpected message"
+	// These are specific error messages from the Go HTTP client indicating connection issues
+	return strings.Contains(err.Error(), "server closed idle connection") ||
+		strings.Contains(err.Error(), "tls: unexpected message")
 }
 
 // ConnectionSetupError methods
