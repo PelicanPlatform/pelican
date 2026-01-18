@@ -321,7 +321,7 @@ func TestBroker(t *testing.T) {
 	go func() {
 		log.Debug("Starting reversed server for connection")
 		// Use ServeTLS since the server has TLS config
-		err = srv.ServeTLS(listener, "", "")
+		err := srv.ServeTLS(listener, "", "")
 		if errors.Is(err, net.ErrClosed) {
 			err = nil
 		}
