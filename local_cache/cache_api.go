@@ -146,7 +146,7 @@ func (lc *LocalCache) LaunchListener(ctx context.Context, egrp *errgroup.Group) 
 				w.Header().Set("Content-Length", strconv.FormatUint(size, 10))
 			}
 		} else {
-			ctx = context.Background()
+			ctx := context.Background()
 			if headerTimeout > 0 {
 				var cancelReqFunc context.CancelFunc
 				ctx, cancelReqFunc = context.WithTimeout(ctx, headerTimeout)
