@@ -3578,6 +3578,11 @@ func TestIsIdleConnectionError(t *testing.T) {
 		assert.True(t, isIdleConnectionError(wrappedErr), "Should detect wrapped idle connection error")
 	})
 
+	t.Run("detects_tls_unexpected_message", func(t *testing.T) {
+		err := errors.New("tls: unexpected message")
+		assert.True(t, isIdleConnectionError(err), "Should detect TLS unexpected message error")
+	})
+
 	t.Run("does_not_detect_other_errors", func(t *testing.T) {
 		err := errors.New("some other error")
 		assert.False(t, isIdleConnectionError(err), "Should not detect non-idle connection errors")
