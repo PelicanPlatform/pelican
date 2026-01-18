@@ -482,13 +482,13 @@ func SetupGlobalTestLogging() func() {
 	globalLogMu.Unlock()
 
 	logrus.SetOutput(&globalLogBuffer)
-	logrus.StandardLogger().Hooks = make(logrus.LevelHooks)
+	logrus.StandardLogger().ReplaceHooks(make(logrus.LevelHooks))
 	logrus.SetReportCaller(true)
 	logrus.AddHook(&globalBufferHook{buf: &globalLogBuffer, mu: &globalLogMu})
 
 	return func() {
 		logrus.SetOutput(originalOut)
-		logrus.StandardLogger().Hooks = originalHooks
+		logrus.StandardLogger().ReplaceHooks(originalHooks)
 		logrus.SetFormatter(originalFormatter)
 		logrus.SetReportCaller(originalReportCaller)
 	}
@@ -519,7 +519,7 @@ func SetupTestLogging(t *testing.T) func() {
 
 	// Disable standard output and use only the test hook
 	logrus.SetOutput(io.Discard)
-	logrus.StandardLogger().Hooks = make(logrus.LevelHooks)
+	logrus.StandardLogger().ReplaceHooks(make(logrus.LevelHooks))
 	logrus.SetReportCaller(true)
 	hook := NewTestLogHook(t)
 	logrus.AddHook(hook)
@@ -539,7 +539,7 @@ func SetupTestLogging(t *testing.T) func() {
 		// Reset global logging hooks so they don't output during subsequent config initialization
 		config.ResetGlobalLoggingHooks()
 		logrus.SetOutput(originalOut)
-		logrus.StandardLogger().Hooks = originalHooks
+		logrus.StandardLogger().ReplaceHooks(originalHooks)
 		logrus.SetFormatter(originalFormatter)
 		logrus.SetReportCaller(originalReportCaller)
 		globalHookEnabled.Store(previousGlobalHookState)
