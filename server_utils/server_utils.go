@@ -57,6 +57,7 @@ import (
 
 var xrootdReset func()
 var posixv2Reset func()
+var brokerReset func()
 
 // RegisterXrootdReset allows the xrootd package to provide a reset hook without introducing import cycles.
 func RegisterXrootdReset(fn func()) {
@@ -66,6 +67,11 @@ func RegisterXrootdReset(fn func()) {
 // RegisterPOSIXv2Reset allows the origin_serve package to provide a reset hook without introducing import cycles.
 func RegisterPOSIXv2Reset(fn func()) {
 	posixv2Reset = fn
+}
+
+// RegisterBrokerReset allows the broker package to provide a reset hook without introducing import cycles.
+func RegisterBrokerReset(fn func()) {
+	brokerReset = fn
 }
 
 // GetTopologyJSON returns the namespaces and caches from OSDF topology
@@ -335,6 +341,9 @@ func ResetTestState() {
 	}
 	if posixv2Reset != nil {
 		posixv2Reset()
+	}
+	if brokerReset != nil {
+		brokerReset()
 	}
 	ResetOriginExports()
 	logging.ResetLogFlush()

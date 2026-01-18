@@ -83,6 +83,7 @@ func LaunchNamespaceKeyMaintenance(ctx context.Context, egrp *errgroup.Group) {
 		<-ctx.Done()
 		namespaceKeys.Stop()
 		namespaceKeys.DeleteAll()
+		namespaceKeys = nil
 		return nil
 	})
 }
@@ -120,6 +121,11 @@ func getRegistryIssuerInfo(ctx context.Context, prefix string) (iss string, keys
 
 	// The actual location of the JWKS at the registry
 	jwksUrl := iss + "/.well-known/issuer.jwks"
+
+	if namespaceKeys == nil {
+		err = errors.New("namespace key cache not initialized; call LaunchNamespaceKeyMaintenance first")
+		return
+	}
 
 	item := namespaceKeys.Get(prefix)
 	if item.Value() == nil {
