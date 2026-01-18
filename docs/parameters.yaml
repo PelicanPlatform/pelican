@@ -1802,6 +1802,13 @@ type: duration
 default: 15s
 components: ["cache"]
 ---
+name: Cache.DirectorTest
+description: |+
+  A bool indicating whether the director should send file transfer tests to the cache.
+type: bool
+default: true
+components: ["cache"]
+---
 name: Cache.EnableOIDC
 description: |+
   Indicate whether the cache should allow users to login to the admin website via OAuth2/OIDC with third-party

@@ -54,8 +54,16 @@ func notifyNewDirectorResponse(ctx context.Context, nChan chan bool) {
 // Launch a go routine in errorgroup to report timeout if director-based health test
 // response was not sent within the defined time limit
 func LaunchPeriodicDirectorTimeout(ctx context.Context, egrp *errgroup.Group, nChan chan bool) {
-	if !param.Origin_DirectorTest.GetBool() {
-		metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusOK, "Origin.DirectorTest is set to false. No director tests expected.")
+	// Check if director tests are enabled based on server type
+	directorTestEnabled := false
+	if param.Origin_DirectorTest.GetBool() {
+		directorTestEnabled = true
+	} else if param.Cache_DirectorTest.GetBool() {
+		directorTestEnabled = true
+	}
+
+	if !directorTestEnabled {
+		metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusOK, "Origin.DirectorTest and Cache.DirectorTest are set to false. No director tests expected.")
 		return
 	}
 	directorTimeoutTicker := time.NewTicker(directorTimeoutDuration)
@@ -102,10 +110,11 @@ func HandleDirectorTestResponse(ctx *gin.Context, nChan chan bool) {
 		return
 	}
 
-	if !param.Origin_DirectorTest.GetBool() {
+	// Check if director tests are enabled based on server type
+	if !param.Origin_DirectorTest.GetBool() && !param.Cache_DirectorTest.GetBool() {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Origin has Origin.DirectorTest set to false. Reject the test result.",
+			Msg:    "Origin.DirectorTest and Cache.DirectorTest are set to false. Reject the test result.",
 		})
 		return
 	}

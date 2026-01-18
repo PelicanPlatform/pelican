@@ -89,6 +89,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.DataLocations": false,
 	"Cache.DbLocation": false,
 	"Cache.DefaultCacheTimeout": false,
+	"Cache.DirectorTest": false,
 	"Cache.EnableBroker": false,
 	"Cache.EnableEvictionMonitoring": false,
 	"Cache.EnableLotman": false,
@@ -932,6 +933,8 @@ func (iP IntParam) IsRuntimeConfigurable() bool {
 func (bP BoolParam) GetBool() bool {
 	config := getOrCreateConfig()
 	switch bP.name {
+		case "Cache.DirectorTest":
+			return config.Cache.DirectorTest
 		case "Cache.EnableBroker":
 			return config.Cache.EnableBroker
 		case "Cache.EnableEvictionMonitoring":
@@ -1219,6 +1222,7 @@ var allParameterNames = []string{
 	"Cache.DataLocations",
 	"Cache.DbLocation",
 	"Cache.DefaultCacheTimeout",
+	"Cache.DirectorTest",
 	"Cache.EnableBroker",
 	"Cache.EnableEvictionMonitoring",
 	"Cache.EnableLotman",
@@ -1781,6 +1785,7 @@ var (
 )
 
 var (
+	Cache_DirectorTest = BoolParam{"Cache.DirectorTest"}
 	Cache_EnableBroker = BoolParam{"Cache.EnableBroker"}
 	Cache_EnableEvictionMonitoring = BoolParam{"Cache.EnableEvictionMonitoring"}
 	Cache_EnableLotman = BoolParam{"Cache.EnableLotman"}
