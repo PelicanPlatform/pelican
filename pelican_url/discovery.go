@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -75,9 +76,11 @@ type (
 var (
 	MetadataTimeoutErr *MetadataErr = &MetadataErr{msg: "Timeout when querying metadata"}
 
-	successTTL      = ttlcache.DefaultTTL
-	failureTTL      = 5 * time.Minute
-	pelicanUrlCache *Cache
+	successTTL        = ttlcache.DefaultTTL
+	failureTTL        = 5 * time.Minute
+	pelicanUrlCache   atomic.Pointer[Cache]
+	globalCacheEgrp   *errgroup.Group
+	globalCacheCancel context.CancelFunc
 
 	// Not a constant, because we want to be able to change it in tests
 	OsdfDiscoveryHost string = "osg-htc.org"
@@ -100,6 +103,21 @@ func SetOsdfDiscoveryHost(host string) (oldHost string, er error) {
 	oldHost = OsdfDiscoveryHost
 	OsdfDiscoveryHost = url.Host
 	return
+}
+
+// ResetState resets the pelican URL cache for testing purposes.
+// This is safe to call from tests to clean up between test runs.
+func ResetState() {
+	if globalCacheCancel != nil {
+		globalCacheCancel()
+		globalCacheCancel = nil
+	}
+	if globalCacheEgrp != nil {
+		// Wait for the cache to fully shut down
+		_ = globalCacheEgrp.Wait()
+		globalCacheEgrp = nil
+	}
+	pelicanUrlCache.Store(nil)
 }
 
 func StartCache(ctx context.Context, egrp *errgroup.Group) *Cache {
@@ -427,11 +445,62 @@ func (p *PelicanURL) PopulateFedInfo(opts ...DiscoveryOption) error {
 	}
 
 	if options.useCached {
-		if pelicanUrlCache == nil {
-			pelicanUrlCache = StartCache(ctx, nil)
+		cache := pelicanUrlCache.Load()
+		if cache == nil {
+			// Create a new errgroup and context for the cache lifecycle
+			var cacheCtx context.Context
+			var cacheCancel context.CancelFunc
+			var cacheEgrp *errgroup.Group
+
+			if ctx == nil {
+				cacheCtx, cacheCancel = context.WithCancel(context.Background())
+				cacheEgrp = &errgroup.Group{}
+			} else {
+				// Check if the context already has an errgroup
+				egrp, ok := ctx.Value("errgroup").(*errgroup.Group)
+				if !ok {
+					cacheEgrp = &errgroup.Group{}
+				} else {
+					cacheEgrp = egrp
+				}
+				cacheCtx, cacheCancel = context.WithCancel(ctx)
+			}
+
+			newCache := StartCache(cacheCtx, cacheEgrp)
+
+			// Try to atomically swap nil with the new cache
+			swapped := pelicanUrlCache.CompareAndSwap(nil, newCache)
+			if swapped {
+				// We successfully installed the cache, save the cancel function
+				globalCacheEgrp = cacheEgrp
+				globalCacheCancel = cacheCancel
+				cache = newCache
+			} else {
+				// Someone else beat us to it, try to load their cache
+				// Repeat until we get a non-nil cache
+				for {
+					cache = pelicanUrlCache.Load()
+					if cache != nil {
+						break
+					}
+					// Cache was reset to nil, try to install ours again
+					if pelicanUrlCache.CompareAndSwap(nil, newCache) {
+						globalCacheEgrp = cacheEgrp
+						globalCacheCancel = cacheCancel
+						cache = newCache
+						swapped = true
+						break
+					}
+					// CAS failed again, loop and try to load again
+				}
+				// We're using someone else's cache, so cancel ours
+				if !swapped && cacheCancel != nil {
+					cacheCancel()
+				}
+			}
 		}
 
-		item := pelicanUrlCache.Get(discoveryUrl.String(), ttlcache.WithLoader(getDynamicLoader(WithClient(httpClient), WithContext(ctx))))
+		item := cache.Get(discoveryUrl.String(), ttlcache.WithLoader(getDynamicLoader(WithClient(httpClient), WithContext(ctx))))
 		if item != nil {
 			if item.Value().err != nil {
 				return item.Value().err
