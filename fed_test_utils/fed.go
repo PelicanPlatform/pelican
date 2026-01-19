@@ -22,10 +22,12 @@ package fed_test_utils
 
 import (
 	"context"
+	"crypto/tls"
 	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -150,7 +152,10 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	require.NoError(t, param.Set(param.Logging_Cache_Scitokens.GetName(), "fatal"))
 	require.NoError(t, param.Set(param.Logging_Cache_Pfc.GetName(), "info"))
 
-	require.NoError(t, param.Set(param.TLSSkipVerify.GetName(), true))
+	// Do NOT skip TLS verification in tests.  This has hidden *real bugs* in the past
+	// and there should be no need since we generate CA certs when needed.  If you think
+	// this should be changed, talk to the rest of the dev team first.
+	require.NoError(t, param.Set(param.TLSSkipVerify.GetName(), false))
 
 	// Disable functionality we're not using (and is difficult to make work on Mac)
 	require.NoError(t, param.Set(param.Registry_DbLocation.GetName(), filepath.Join(t.TempDir(), "ns-registry.sqlite")))
@@ -294,7 +299,37 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 			http.NotFound(w, r)
 		}
 	}
-	discoveryServer = httptest.NewTLSServer(http.HandlerFunc(handler))
+	// Use the generated server certificate instead of httptest's self-signed cert
+	discoveryServer = httptest.NewUnstartedServer(http.HandlerFunc(handler))
+	cert, err := config.LoadCertificate(param.Server_TLSCertificateChain.GetString())
+	require.NoError(t, err, "Failed to load server certificate")
+
+	// Get the server hostname that matches the certificate
+	serverHostname := param.Server_Hostname.GetString()
+
+	// Create a listener on the server hostname instead of 127.0.0.1
+	// This ensures the certificate's DNS name matches the connection
+	listener, err := net.Listen("tcp", serverHostname+":0")
+	require.NoError(t, err, "Failed to create listener on server hostname")
+	discoveryServer.Listener = listener
+
+	discoveryServer.TLS = config.GetTransport().TLSClientConfig.Clone()
+	discoveryServer.TLS.Certificates = make([]tls.Certificate, 1)
+	discoveryServer.TLS.Certificates[0], err = tls.LoadX509KeyPair(
+		param.Server_TLSCertificateChain.GetString(),
+		param.Server_TLSKey.GetString(),
+	)
+	require.NoError(t, err, "Failed to load X509 key pair")
+	_ = cert // We loaded the cert just to verify it exists, but we use the keypair for TLS
+	discoveryServer.StartTLS()
+
+	// Override the URL to use the hostname instead of the IP address
+	// httptest might set URL to https://127.0.0.1:<port>, but our cert is for the hostname
+	// Extract the port from the listener address and construct the URL with the hostname
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	require.NoError(t, err, "Failed to parse listener address")
+	discoveryServer.URL = "https://" + net.JoinHostPort(serverHostname, port)
+
 	t.Cleanup(discoveryServer.Close)
 
 	// Set the discovery URL in both viper and the global fed info object

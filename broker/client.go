@@ -284,7 +284,12 @@ func ConnectToService(ctx context.Context, brokerUrl, prefix, originName string)
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
 	}
-	template.DNSNames = []string{originName}
+	// Strip port from originName for DNS name (hostname:port -> hostname)
+	dnsName := originName
+	if host, _, err := net.SplitHostPort(originName); err == nil {
+		dnsName = host
+	}
+	template.DNSNames = []string{dnsName}
 	derBytes, err := x509.CreateCertificate(rand.Reader, &template, caCert, &privKey.PublicKey, caPrivateKey)
 	if err != nil {
 		return
