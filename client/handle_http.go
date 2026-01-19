@@ -4186,7 +4186,25 @@ func deleteHttp(ctx context.Context, remoteUrl *pelican_url.PelicanURL, recursiv
 		}
 	}
 
-	err = client.Remove(remotePath)
+	// Retry logic for Remove operation to handle spurious HTTP 400 errors
+	err = func() error {
+		var lastErr error
+		for attempt := range 2 {
+			lastErr = client.Remove(remotePath)
+			if lastErr == nil {
+				return nil
+			}
+			// Retry once if we get an HTTP 400 error (spurious server errors)
+			if attempt == 0 && gowebdav.IsErrCode(lastErr, http.StatusBadRequest) {
+				log.Debugln("Received HTTP 400 on delete attempt, retrying once:", remotePath)
+				continue
+			}
+			// For all other errors or final attempt, return the error
+			return lastErr
+		}
+		return lastErr
+	}()
+
 	if err != nil {
 		if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
 			return errors.Wrap(err, "method not allowed on the remote object, deletion is not permitted")
