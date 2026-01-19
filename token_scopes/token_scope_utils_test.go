@@ -110,6 +110,14 @@ func TestResourceScopes(t *testing.T) {
 		{"noPath", NewResourceScope(Wlcg_Storage_Create, "/foo"), NewResourceScope(Wlcg_Storage_Create, "/foobar"), false},
 		{"sameDeep", NewResourceScope(Wlcg_Storage_Create, "/foo/bar"), NewResourceScope(Wlcg_Storage_Create, "/foo/bar"), true},
 		{"sameDeep", NewResourceScope(Wlcg_Storage_Create, "/foo/bar"), NewResourceScope(Wlcg_Storage_Create, "/foo/barbaz"), false},
+		// Test scope hierarchy: storage.modify implies storage.create
+		{"modifyImpliesCreate", NewResourceScope(Wlcg_Storage_Modify, "/foo"), NewResourceScope(Wlcg_Storage_Create, "/foo"), true},
+		{"modifyImpliesCreateSubpath", NewResourceScope(Wlcg_Storage_Modify, "/foo"), NewResourceScope(Wlcg_Storage_Create, "/foo/bar"), true},
+		{"modifyImpliesCreateRoot", NewResourceScope(Wlcg_Storage_Modify, "/"), NewResourceScope(Wlcg_Storage_Create, "/any/path"), true},
+		// Test that storage.create does NOT imply storage.modify (opposite should not hold)
+		{"createDoesNotImplyModify", NewResourceScope(Wlcg_Storage_Create, "/foo"), NewResourceScope(Wlcg_Storage_Modify, "/foo"), false},
+		{"createDoesNotImplyModifySubpath", NewResourceScope(Wlcg_Storage_Create, "/foo"), NewResourceScope(Wlcg_Storage_Modify, "/foo/bar"), false},
+		{"createDoesNotImplyModifyRoot", NewResourceScope(Wlcg_Storage_Create, "/"), NewResourceScope(Wlcg_Storage_Modify, "/any/path"), false},
 	}
 
 	for _, tt := range tests {
