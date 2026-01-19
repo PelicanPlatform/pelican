@@ -119,6 +119,34 @@ func (afs *aferoFileSystem) OpenFile(ctx context.Context, name string, flag int,
 		afs.logger(nil, nil) // Use the logger provided by webdav
 	}
 
+	// WORKAROUND: When attempting to upload a file to a path that is actually a directory/collection,
+	// the underlying filesystem will correctly return EISDIR (syscall.EISDIR on Unix).
+	// However, the golang.org/x/net/webdav handler has the following error handling logic:
+	//
+	//   if os.IsNotExist(err) {
+	//       return http.StatusConflict, err  // 409
+	//   }
+	//   return http.StatusNotFound, err      // 404
+	//
+	// This means EISDIR gets mapped to 404 Not Found instead of 409 Conflict, which is incorrect
+	// per WebDAV RFC 4918. When a client attempts to PUT a file to a URL that represents a collection,
+	// the server should return 409 Conflict, not 404 Not Found.
+	//
+	// To work around this handler limitation, we check if the target is a directory before attempting
+	// to open it with write flags (O_WRONLY, O_RDWR, O_CREATE, O_TRUNC). If so, we return an error
+	// that satisfies os.IsNotExist() so the handler returns the correct 409 status code.
+	//
+	// This is semantically incorrect (the directory DOES exist), but necessary because the webdav
+	// handler doesn't distinguish between "path doesn't exist" and "path is wrong type" errors.
+	if flag&(os.O_WRONLY|os.O_RDWR|os.O_CREATE|os.O_TRUNC) != 0 {
+		info, statErr := afs.fs.Stat(fullPath)
+		if statErr == nil && info.IsDir() {
+			// Return a "not exist" error instead of "is a directory" error to trigger
+			// the webdav handler's 409 Conflict response instead of 404 Not Found
+			return nil, os.ErrNotExist
+		}
+	}
+
 	file, err := afs.fs.OpenFile(fullPath, flag, perm)
 	if err != nil {
 		return nil, err
