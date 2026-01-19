@@ -50,12 +50,23 @@ func (ofs *OsRootFs) Name() string {
 }
 
 // normalizePath removes leading slashes from paths for os.Root compatibility
+// and removes trailing slashes to handle cases where clients incorrectly
+// add trailing slashes to file paths when they think it'll be treated as a directory.
 func (ofs *OsRootFs) normalizePath(name string) string {
 	if name == "/" {
 		return "."
 	}
+	// Remove leading slash
 	if len(name) > 0 && name[0] == '/' {
-		return name[1:]
+		name = name[1:]
+	}
+	// Remove trailing slash (unless it's now empty, meaning it was just "/")
+	if len(name) > 0 && name[len(name)-1] == '/' {
+		name = name[:len(name)-1]
+	}
+	// If we ended up with an empty string, use "." for current directory
+	if name == "" {
+		return "."
 	}
 	return name
 }
@@ -71,7 +82,8 @@ func (ofs *OsRootFs) Create(name string) (afero.File, error) {
 
 // Open opens the named file for reading.
 func (ofs *OsRootFs) Open(name string) (afero.File, error) {
-	f, err := ofs.root.Open(ofs.normalizePath(name))
+	normalized := ofs.normalizePath(name)
+	f, err := ofs.root.Open(normalized)
 	if f == nil {
 		return nil, err
 	}
@@ -80,7 +92,8 @@ func (ofs *OsRootFs) Open(name string) (afero.File, error) {
 
 // OpenFile opens the named file with specified flags and permissions
 func (ofs *OsRootFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
-	f, err := ofs.root.OpenFile(ofs.normalizePath(name), flag, perm)
+	normalized := ofs.normalizePath(name)
+	f, err := ofs.root.OpenFile(normalized, flag, perm)
 	if f == nil {
 		return nil, err
 	}
@@ -114,7 +127,8 @@ func (ofs *OsRootFs) MkdirAll(path string, perm os.FileMode) error {
 
 // Stat returns file information
 func (ofs *OsRootFs) Stat(name string) (os.FileInfo, error) {
-	return ofs.root.Stat(ofs.normalizePath(name))
+	normalized := ofs.normalizePath(name)
+	return ofs.root.Stat(normalized)
 }
 
 // Chmod changes file permissions
@@ -135,12 +149,14 @@ func (ofs *OsRootFs) Chtimes(name string, atime time.Time, mtime time.Time) erro
 // Lstat returns file info without following symlinks
 // Since os.Root prevents escaping via symlinks, this is safe
 func (ofs *OsRootFs) Lstat(name string) (os.FileInfo, error) {
-	return ofs.root.Lstat(ofs.normalizePath(name))
+	normalized := ofs.normalizePath(name)
+	return ofs.root.Lstat(normalized)
 }
 
 // LstatIfPossible returns file info without following symlinks if possible
 func (ofs *OsRootFs) LstatIfPossible(name string) (os.FileInfo, bool, error) {
-	fi, err := ofs.root.Lstat(ofs.normalizePath(name))
+	normalized := ofs.normalizePath(name)
+	fi, err := ofs.root.Lstat(normalized)
 	return fi, true, err
 }
 

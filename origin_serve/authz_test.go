@@ -333,7 +333,7 @@ func TestPositiveAuthorizationWithRegisteredKey(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create a token signed with the private key
-	token := createTestToken(t, key, issuerURL, "alice", []string{"researchers", "admins"}, "storage.read:/data storage.create:/data")
+	token := createTestToken(t, key, issuerURL, "alice", []string{"researchers", "admins"}, "storage.read:/file.txt storage.create:/newfile.txt")
 
 	// Get the auth config
 	ac := GetAuthConfig()

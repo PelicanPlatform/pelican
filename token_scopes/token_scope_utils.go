@@ -62,9 +62,21 @@ func (rc ResourceScope) String() string {
 }
 
 func (rc ResourceScope) Contains(other ResourceScope) bool {
-	if rc.Authorization != other.Authorization {
+	// Check if authorizations match exactly
+	authMatches := rc.Authorization == other.Authorization
+
+	// If not an exact match, check for scope hierarchy implications
+	// Per WLCG token profile: storage.modify implies storage.create
+	if !authMatches {
+		if rc.Authorization == Wlcg_Storage_Modify && other.Authorization == Wlcg_Storage_Create {
+			authMatches = true
+		}
+	}
+
+	if !authMatches {
 		return false
 	}
+
 	if strings.HasPrefix(other.Resource, rc.Resource) {
 		if len(rc.Resource) == 1 {
 			return true

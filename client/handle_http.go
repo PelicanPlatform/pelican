@@ -1686,6 +1686,16 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 		}
 	}
 
+	// Ensure all transfer URLs have the proper path set (except for unix:// URLs)
+	for idx := range transfers {
+		if transfers[idx].Url.Scheme == "unix" {
+			continue
+		}
+		if transfers[idx].Url.Path == "/" || transfers[idx].Url.Path == "" {
+			transfers[idx].Url.Path = path.Clean(job.job.remoteURL.Path)
+		}
+	}
+
 	if job.job.recursive {
 		if job.job.xferType == transferTypeUpload {
 			// The URL returned by the director for directory /foo may be
@@ -1696,9 +1706,26 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			remotePath := transfers[0].Url.Path
 			transfers[0].Url.Path = strings.TrimSuffix(path.Clean(remotePath), path.Clean(job.job.remoteURL.Path))
 			return te.walkDirUpload(job, transfers, te.files, job.job.localPath)
-		} else {
-			return te.walkDirDownload(job, transfers, te.files, remoteUrl)
+		} else if job.job.xferType == transferTypeDownload {
+			// For downloads, we need to stat the remote path to see if it's a collection
+			// If it is not a collection, we just proceed with a single file transfer
+			var statInfo FileInfo
+			var statErr error
+			var pelicanUrl *pelican_url.PelicanURL
+			pelicanUrl, err = pelican_url.Parse(remoteUrl.String(), nil, nil)
+			if err != nil {
+				return errors.Wrap(err, "failed to parse remote URL for recursive download")
+			}
+			if statInfo, statErr = statHttp(pelicanUrl, job.job.dirResp, job.job.token); statErr != nil {
+				log.Infoln("Error is not found:", errors.Is(statErr, ErrObjectNotFound))
+				return errors.Wrap(statErr, "failed to stat remote path for recursive download")
+			}
+
+			if statInfo.IsCollection {
+				return te.walkDirDownload(job, transfers, te.files, remoteUrl)
+			}
 		}
+		log.Debugln("Remote path is not a collection; proceeding with single file transfer")
 	} else if job.job.xferType == transferTypePrestage {
 		// For prestage, from day one we handle internally whether it's recursive
 		// (as opposed to making the user specify explicitly)
@@ -1717,6 +1744,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 		}
 	}
 
+	log.Debugln("Queuing transfer for object", remoteUrl.String(), "with first transfer URL:", transfers[0].Url.String())
 	job.job.totalXfer += 1
 	job.job.activeXfer.Add(1)
 	select {
@@ -2093,8 +2121,10 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		// Make a copy of the transfer endpoint URL; otherwise, when we mutate the pointer, other parallel
 		// workers might download from the wrong path.
 		transferEndpointUrl := *transferEndpoint.Url
-		transferEndpointUrl.Path = transfer.remoteURL.Path
 		transferEndpoint.Url = &transferEndpointUrl
+		if transferEndpointUrl.Scheme == "unix" {
+			transferEndpointUrl.Path = transfer.remoteURL.Path
+		}
 		transferUrls[idx] = transferEndpoint.Url
 		fields := log.Fields{
 			"url": transferEndpoint.Url.String(),
@@ -3704,6 +3734,10 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 		if gowebdav.IsErrNotFound(err) {
 			return error_codes.NewSpecification_FileNotFoundError(errors.New("404: object not found"))
 		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
+			// XRootD workaround!
+			// If you attempt a directory listing on a path that is actually a file,
+			// XRootD returns a 500 error.  In this case, we need to stat the path
+			// to see if it's a file, and if so, create a download job for it.
 			var info fs.FileInfo
 			err := retryWebDavOperation("Stat", func() error {
 				var err error
@@ -3718,6 +3752,35 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 				if skipDownload(job.job.syncLevel, info, job.job.localPath) {
 					log.Infoln("Skipping download of object", remotePath, "as it already exists at", job.job.localPath)
 				} else {
+					// Construct URL using the transfer URL's base, _not the collections URL base_
+					// The transfer URL base may differ: "/" for downloads from XRootD or
+					// "/api/v1.0/origin/data" for uploads to a POSIXv2 origin in some configurations.
+					// The collections URL base may be different for POSIXv2 versus POSIX origins.  Hence,
+					// we should never assume they are comparable.
+					//
+					// Calculate the base by stripping the federation namespace path from the transfer URL
+					transferAttempts := make([]transferAttemptDetails, len(transfers))
+					for i, attempt := range transfers {
+						transferAttempts[i] = attempt
+						attemptPath := attempt.Url.Path
+						if attemptPath != "" && !strings.HasSuffix(attemptPath, "/") {
+							attemptPath += "/"
+						}
+						federationPath := job.job.remoteURL.Path
+						if federationPath != "" && !strings.HasSuffix(federationPath, "/") {
+							federationPath += "/"
+						}
+						log.Debugln("Attempt path:", attemptPath, "federation path:", federationPath)
+						transferBase := strings.TrimSuffix(attemptPath, federationPath)
+						fileURL := &url.URL{
+							Scheme:   attempt.Url.Scheme,
+							Host:     attempt.Url.Host,
+							Path:     path.Join(transferBase, remotePath),
+							RawQuery: attempt.Url.RawQuery,
+						}
+						transferAttempts[i].Url = fileURL
+						log.Debugln("Constructed attempt URL for download:", fileURL.String(), "remote path:", remotePath)
+					}
 					job.job.activeXfer.Add(1)
 					select {
 					case <-job.job.ctx.Done():
@@ -3737,7 +3800,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 							localPath:          job.job.localPath,
 							xferType:           job.job.xferType,
 							token:              job.job.token,
-							attempts:           transfers,
+							attempts:           transferAttempts,
 						},
 					}:
 						job.job.totalXfer += 1
@@ -3774,6 +3837,30 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 				continue
 			}
 
+			// Construct URL using the transfer URL's base, not the collections URL base.
+			// The two bases may differ in arbitrary ways; see notes above for explanation.
+			transferAttempts := make([]transferAttemptDetails, len(transfers))
+			for i, attempt := range transfers {
+				transferAttempts[i] = attempt
+				attemptPath := attempt.Url.Path
+				if attemptPath != "" && !strings.HasSuffix(attemptPath, "/") {
+					attemptPath += "/"
+				}
+				federationPath := job.job.remoteURL.Path
+				if federationPath != "" && !strings.HasSuffix(federationPath, "/") {
+					federationPath += "/"
+				}
+				log.Debugln("Attempt path:", attemptPath, "federation path:", federationPath)
+				transferBase := strings.TrimSuffix(attemptPath, federationPath)
+				fileURL := &url.URL{
+					Scheme:   attempt.Url.Scheme,
+					Host:     attempt.Url.Host,
+					Path:     path.Join(transferBase, newPath),
+					RawQuery: attempt.Url.RawQuery,
+				}
+				transferAttempts[i].Url = fileURL
+				log.Debugln("Constructed attempt URL for download:", fileURL.String(), "remote path:", remotePath)
+			}
 			job.job.activeXfer.Add(1)
 			select {
 			case <-job.job.ctx.Done():
@@ -3793,7 +3880,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 					localPath:          targetPath,
 					xferType:           job.job.xferType,
 					token:              job.job.token,
-					attempts:           transfers,
+					attempts:           transferAttempts,
 				},
 			}:
 				job.job.totalXfer += 1
@@ -4254,6 +4341,9 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 		destCopy := *(dest.GetRawUrl())
 		destCopy.Host = statUrl.Host
 		destCopy.Scheme = statUrl.Scheme
+		if destCopy.Path != "" {
+			destCopy.Path = path.Clean(destCopy.Path)
+		}
 
 		go func(endpoint *url.URL) {
 			canDisableProxy := CanDisableProxy()
