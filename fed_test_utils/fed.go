@@ -77,6 +77,15 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 		originConfig = fedTestDefaultConfig
 	}
 
+	// Allow quick switching between POSIX backends for tests.
+	// If TEST_POSIXV2=1, replace occurrences of "posix" with "posixv2" in the origin config.
+	if os.Getenv("TEST_POSIXV2") == "1" {
+		// Since "posixv2" contains "posix", we need to do the replacement in two steps
+		// to avoid ending up with "posixv2v2".
+		originConfig = strings.ReplaceAll(originConfig, "posixv2", "posix")
+		originConfig = strings.ReplaceAll(originConfig, "posix", "posixv2")
+	}
+
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	shutdownCtx, shutdownCancel := context.WithCancel(ctx)
 	ctx = context.WithValue(ctx, director.AdvertiseShutdownKey, shutdownCtx)
