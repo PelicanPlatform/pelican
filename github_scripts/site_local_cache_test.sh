@@ -31,7 +31,8 @@
 set -e
 
 # Create temporary directories for the test
-SITE_TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/pelican_site_local_test.XXXXXX")
+tmpbase="${TMPDIR:-/tmp}"
+SITE_TEST_ROOT=$(mktemp -d "${tmpbase%/}/pelican_site_local_test.XXXXXX")
 chmod 755 "$SITE_TEST_ROOT"
 FED_CONFIG_DIR="$SITE_TEST_ROOT/fed_config"
 FED_RUNTIME_DIR="$SITE_TEST_ROOT/runtime_fed"
@@ -44,12 +45,14 @@ SITE_LOCAL_DOWNLOAD_LOG="$SITE_TEST_ROOT/download_log.txt"
 
 mkdir -p "$FED_CONFIG_DIR" "$FED_RUNTIME_DIR" "$FED_ORIGIN_DIR" "$SITE_LOCAL_CONFIG_DIR" "$SITE_LOCAL_RUNTIME_DIR" "$SITE_LOCAL_CACHE_RUN"
 chmod 755 "$FED_CONFIG_DIR" "$FED_RUNTIME_DIR" "$FED_ORIGIN_DIR" "$SITE_LOCAL_CONFIG_DIR" "$SITE_LOCAL_RUNTIME_DIR" "$SITE_LOCAL_CACHE_RUN"
-chown xrootd: "$FED_ORIGIN_DIR"
+if [ "$(id -u)" -eq 0 ]; then
+    chown xrootd: "$FED_ORIGIN_DIR"
+fi
 
 echo "fake oidc client secret" > "$FED_CONFIG_DIR/oidc-client-secret"
 
-FED_CACHE_STORAGE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/pelican_test_fed_cache_storage.XXXXXX")
-SITE_LOCAL_CACHE_STORAGE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/pelican_test_site_local_storage.XXXXXX")
+FED_CACHE_STORAGE_DIR=$(mktemp -d "${tmpbase%/}/pelican_test_fed_cache_storage.XXXXXX")
+SITE_LOCAL_CACHE_STORAGE_DIR=$(mktemp -d "${tmpbase%/}/pelican_test_site_local_storage.XXXXXX")
 chmod 777 "$FED_CACHE_STORAGE_DIR" "$SITE_LOCAL_CACHE_STORAGE_DIR"
 
 # Setup env variables for the federation
@@ -58,8 +61,26 @@ export PELICAN_REGISTRY_REQUIREORIGINAPPROVAL=false
 export PELICAN_TLSSKIPVERIFY=true
 export PELICAN_ORIGIN_ENABLEDIRECTREADS=true
 export PELICAN_ORIGIN_ENABLEPUBLICREADS=true
+export PELICAN_ORIGIN_ENABLEVOMS=false
 export PELICAN_SERVER_ENABLEUI=false
-export PELICAN_ORIGIN_RUNLOCATION="$SITE_TEST_ROOT/xrootdRunLocation"
+
+# XRootD has a 100-character limit on admin paths, so if SITE_TEST_ROOT is too long,
+# create a separate short directory in /tmp for the origin run location
+ORIGIN_RUN_LOCATION="$SITE_TEST_ROOT/xrootdRunLocation"
+if [ ${#ORIGIN_RUN_LOCATION} -gt 80 ]; then
+    ORIGIN_RUN_LOCATION=$(mktemp -d /tmp/pelican_origin_run.XXXXXX)
+    chmod 755 "$ORIGIN_RUN_LOCATION"
+fi
+export PELICAN_ORIGIN_RUNLOCATION="$ORIGIN_RUN_LOCATION"
+
+# XRootD has a 100-character limit on admin paths, so if SITE_TEST_ROOT is too long,
+# create a separate short directory in /tmp for the cache run location
+CACHE_RUN_LOCATION="$SITE_TEST_ROOT/cacheRunLocation"
+if [ ${#CACHE_RUN_LOCATION} -gt 80 ]; then
+    CACHE_RUN_LOCATION=$(mktemp -d /tmp/pelican_cache_run.XXXXXX)
+    chmod 755 "$CACHE_RUN_LOCATION"
+fi
+export PELICAN_CACHE_RUNLOCATION="$CACHE_RUN_LOCATION"
 export PELICAN_RUNTIMEDIR="$FED_RUNTIME_DIR"
 export PELICAN_SERVER_WEBPORT=0
 export PELICAN_ORIGIN_PORT=0
@@ -102,7 +123,15 @@ cleanup() {
     if [ -n "${SITE_TEST_ROOT:-}" ]; then
         rm -rf "$SITE_TEST_ROOT"
     fi
-    rm -rf "xrootdRunLocation"
+    if [ -n "${ORIGIN_RUN_LOCATION:-}" ] && [ "$ORIGIN_RUN_LOCATION" != "$SITE_TEST_ROOT/xrootdRunLocation" ]; then
+        rm -rf "$ORIGIN_RUN_LOCATION"
+    fi
+    if [ -n "${CACHE_RUN_LOCATION:-}" ] && [ "$CACHE_RUN_LOCATION" != "$SITE_TEST_ROOT/cacheRunLocation" ]; then
+        rm -rf "$CACHE_RUN_LOCATION"
+    fi
+    if [ -n "${SITE_LOCAL_CACHE_RUN:-}" ] && [ "$SITE_LOCAL_CACHE_RUN" != "$SITE_TEST_ROOT/site_local_cache_run" ]; then
+        rm -rf "$SITE_LOCAL_CACHE_RUN"
+    fi
     if [ -n "${FED_CACHE_STORAGE_DIR:-}" ]; then
         rm -rf "$FED_CACHE_STORAGE_DIR"
     fi
@@ -122,7 +151,9 @@ cleanup() {
     unset PELICAN_OIDC_CLIENTID
     unset PELICAN_ORIGIN_ENABLEDIRECTREADS
     unset PELICAN_ORIGIN_ENABLEPUBLICREADS
+    unset PELICAN_ORIGIN_ENABLEVOMS
     unset PELICAN_ORIGIN_RUNLOCATION
+    unset PELICAN_CACHE_RUNLOCATION
     unset PELICAN_CONFIGDIR
     unset PELICAN_SERVER_DBLOCATION
     unset PELICAN_CACHE_STORAGELOCATION
@@ -404,15 +435,20 @@ OBJECT_URL="pelican://${FED_DISCOVERY_HOSTPORT}${OBJECT_PATH}"
 
 # Download via the site-local cache by specifying it as a preferred cache
 # Note: We use the --cache flag to force the client to use the site-local cache
+# Temporarily disable set -e to properly handle and report failures
+set +e
 ./pelican object get "$OBJECT_URL" "$SITE_LOCAL_DOWNLOAD" \
     -d -L "$SITE_LOCAL_DOWNLOAD_LOG" \
     --cache "$SITE_LOCAL_CACHE_URL"
+DOWNLOAD_EXIT_CODE=$?
+set -e
 
 # Verify the download was successful
-if grep -q "HTTP Transfer was successful" "$SITE_LOCAL_DOWNLOAD_LOG"; then
+if [ $DOWNLOAD_EXIT_CODE -eq 0 ] && grep -q "HTTP Transfer was successful" "$SITE_LOCAL_DOWNLOAD_LOG"; then
     echo "Download successful!"
 else
     echo "TEST FAILED: Download did not complete successfully"
+    echo "Exit code: $DOWNLOAD_EXIT_CODE"
     cat "$SITE_LOCAL_DOWNLOAD_LOG"
     exit 1
 fi
