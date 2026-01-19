@@ -1686,6 +1686,16 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 		}
 	}
 
+	// Ensure all transfer URLs have the proper path set (except for unix:// URLs)
+	for idx := range transfers {
+		if transfers[idx].Url.Scheme == "unix" {
+			continue
+		}
+		if transfers[idx].Url.Path == "/" || transfers[idx].Url.Path == "" {
+			transfers[idx].Url.Path = path.Clean(job.job.remoteURL.Path)
+		}
+	}
+
 	if job.job.recursive {
 		if job.job.xferType == transferTypeUpload {
 			// The URL returned by the director for directory /foo may be
