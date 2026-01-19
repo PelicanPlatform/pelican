@@ -4331,6 +4331,9 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 		destCopy := *(dest.GetRawUrl())
 		destCopy.Host = statUrl.Host
 		destCopy.Scheme = statUrl.Scheme
+		if destCopy.Path != "" {
+			destCopy.Path = path.Clean(destCopy.Path)
+		}
 
 		go func(endpoint *url.URL) {
 			canDisableProxy := CanDisableProxy()
