@@ -264,10 +264,14 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.DefaultChecksumTypes": false,
 	"Origin.DirectorTest": false,
 	"Origin.DisableDirectClients": false,
+	"Origin.DiskUsageCalculationDelay": false,
+	"Origin.DiskUsageCalculationInterval": false,
+	"Origin.DiskUsageCalculationRateLimit": false,
 	"Origin.EnableBroker": false,
 	"Origin.EnableCmsd": false,
 	"Origin.EnableDirListing": false,
 	"Origin.EnableDirectReads": false,
+	"Origin.EnableDiskUsageCalculation": false,
 	"Origin.EnableFallbackRead": false,
 	"Origin.EnableIssuer": false,
 	"Origin.EnableListings": false,
@@ -895,6 +899,8 @@ func (iP IntParam) GetInt() int {
 			return config.Origin.Concurrency
 		case "Origin.ConcurrencyDegradedThreshold":
 			return config.Origin.ConcurrencyDegradedThreshold
+		case "Origin.DiskUsageCalculationRateLimit":
+			return config.Origin.DiskUsageCalculationRateLimit
 		case "Origin.Port":
 			return config.Origin.Port
 		case "Server.IssuerPort":
@@ -1020,6 +1026,8 @@ func (bP BoolParam) GetBool() bool {
 			return config.Origin.EnableDirListing
 		case "Origin.EnableDirectReads":
 			return config.Origin.EnableDirectReads
+		case "Origin.EnableDiskUsageCalculation":
+			return config.Origin.EnableDiskUsageCalculation
 		case "Origin.EnableFallbackRead":
 			return config.Origin.EnableFallbackRead
 		case "Origin.EnableIssuer":
@@ -1147,6 +1155,10 @@ func (dP DurationParam) GetDuration() time.Duration {
 			return config.Monitoring.TokenExpiresIn
 		case "Monitoring.TokenRefreshInterval":
 			return config.Monitoring.TokenRefreshInterval
+		case "Origin.DiskUsageCalculationDelay":
+			return config.Origin.DiskUsageCalculationDelay
+		case "Origin.DiskUsageCalculationInterval":
+			return config.Origin.DiskUsageCalculationInterval
 		case "Origin.SelfTestInterval":
 			return config.Origin.SelfTestInterval
 		case "Origin.SelfTestMaxAge":
@@ -1406,10 +1418,14 @@ var allParameterNames = []string{
 	"Origin.DefaultChecksumTypes",
 	"Origin.DirectorTest",
 	"Origin.DisableDirectClients",
+	"Origin.DiskUsageCalculationDelay",
+	"Origin.DiskUsageCalculationInterval",
+	"Origin.DiskUsageCalculationRateLimit",
 	"Origin.EnableBroker",
 	"Origin.EnableCmsd",
 	"Origin.EnableDirListing",
 	"Origin.EnableDirectReads",
+	"Origin.EnableDiskUsageCalculation",
 	"Origin.EnableFallbackRead",
 	"Origin.EnableIssuer",
 	"Origin.EnableListings",
@@ -1783,6 +1799,7 @@ var (
 	Monitoring_StorageWarningThreshold = IntParam{"Monitoring.StorageWarningThreshold"}
 	Origin_Concurrency = IntParam{"Origin.Concurrency"}
 	Origin_ConcurrencyDegradedThreshold = IntParam{"Origin.ConcurrencyDegradedThreshold"}
+	Origin_DiskUsageCalculationRateLimit = IntParam{"Origin.DiskUsageCalculationRateLimit"}
 	Origin_Port = IntParam{"Origin.Port"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
 	Server_UILoginRateLimit = IntParam{"Server.UILoginRateLimit"}
@@ -1839,6 +1856,7 @@ var (
 	Origin_EnableCmsd = BoolParam{"Origin.EnableCmsd"}
 	Origin_EnableDirListing = BoolParam{"Origin.EnableDirListing"}
 	Origin_EnableDirectReads = BoolParam{"Origin.EnableDirectReads"}
+	Origin_EnableDiskUsageCalculation = BoolParam{"Origin.EnableDiskUsageCalculation"}
 	Origin_EnableFallbackRead = BoolParam{"Origin.EnableFallbackRead"}
 	Origin_EnableIssuer = BoolParam{"Origin.EnableIssuer"}
 	Origin_EnableListings = BoolParam{"Origin.EnableListings"}
@@ -1896,6 +1914,8 @@ var (
 	Monitoring_StorageHealthCheckInterval = DurationParam{"Monitoring.StorageHealthCheckInterval"}
 	Monitoring_TokenExpiresIn = DurationParam{"Monitoring.TokenExpiresIn"}
 	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
+	Origin_DiskUsageCalculationDelay = DurationParam{"Origin.DiskUsageCalculationDelay"}
+	Origin_DiskUsageCalculationInterval = DurationParam{"Origin.DiskUsageCalculationInterval"}
 	Origin_SelfTestInterval = DurationParam{"Origin.SelfTestInterval"}
 	Origin_SelfTestMaxAge = DurationParam{"Origin.SelfTestMaxAge"}
 	Origin_UserMapfileRefreshInterval = DurationParam{"Origin.UserMapfileRefreshInterval"}

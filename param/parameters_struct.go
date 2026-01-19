@@ -239,10 +239,14 @@ type Config struct {
 		DefaultChecksumTypes []string `mapstructure:"defaultchecksumtypes" yaml:"DefaultChecksumTypes"`
 		DirectorTest bool `mapstructure:"directortest" yaml:"DirectorTest"`
 		DisableDirectClients bool `mapstructure:"disabledirectclients" yaml:"DisableDirectClients"`
+		DiskUsageCalculationDelay time.Duration `mapstructure:"diskusagecalculationdelay" yaml:"DiskUsageCalculationDelay"`
+		DiskUsageCalculationInterval time.Duration `mapstructure:"diskusagecalculationinterval" yaml:"DiskUsageCalculationInterval"`
+		DiskUsageCalculationRateLimit int `mapstructure:"diskusagecalculationratelimit" yaml:"DiskUsageCalculationRateLimit"`
 		EnableBroker bool `mapstructure:"enablebroker" yaml:"EnableBroker"`
 		EnableCmsd bool `mapstructure:"enablecmsd" yaml:"EnableCmsd"`
 		EnableDirListing bool `mapstructure:"enabledirlisting" yaml:"EnableDirListing"`
 		EnableDirectReads bool `mapstructure:"enabledirectreads" yaml:"EnableDirectReads"`
+		EnableDiskUsageCalculation bool `mapstructure:"enablediskusagecalculation" yaml:"EnableDiskUsageCalculation"`
 		EnableFallbackRead bool `mapstructure:"enablefallbackread" yaml:"EnableFallbackRead"`
 		EnableIssuer bool `mapstructure:"enableissuer" yaml:"EnableIssuer"`
 		EnableListings bool `mapstructure:"enablelistings" yaml:"EnableListings"`
@@ -635,10 +639,14 @@ type configWithType struct {
 		DefaultChecksumTypes struct { Type string; Value []string }
 		DirectorTest struct { Type string; Value bool }
 		DisableDirectClients struct { Type string; Value bool }
+		DiskUsageCalculationDelay struct { Type string; Value time.Duration }
+		DiskUsageCalculationInterval struct { Type string; Value time.Duration }
+		DiskUsageCalculationRateLimit struct { Type string; Value int }
 		EnableBroker struct { Type string; Value bool }
 		EnableCmsd struct { Type string; Value bool }
 		EnableDirListing struct { Type string; Value bool }
 		EnableDirectReads struct { Type string; Value bool }
+		EnableDiskUsageCalculation struct { Type string; Value bool }
 		EnableFallbackRead struct { Type string; Value bool }
 		EnableIssuer struct { Type string; Value bool }
 		EnableListings struct { Type string; Value bool }

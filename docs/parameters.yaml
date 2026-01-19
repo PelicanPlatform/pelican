@@ -1398,6 +1398,43 @@ type: duration
 default: 1h
 components: ["origin"]
 ---
+name: Origin.EnableDiskUsageCalculation
+description: |+
+  Enable periodic calculation of disk usage for origin exports.
+  When enabled, the origin will periodically scan each export to count objects and sum sizes, and report these metrics via Prometheus.
+  For POSIX backends, this performs a local directory walk.
+  For Ceph-backed POSIX storage with extended attributes available, the xattr-based fast path is used.
+  This feature is disabled by default to avoid unnecessary disk I/O.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Origin.DiskUsageCalculationInterval
+description: |+
+  How often to calculate disk usage for origin exports.
+  This only has effect when Origin.EnableDiskUsageCalculation is true.
+type: duration
+default: 24h
+components: ["origin"]
+---
+name: Origin.DiskUsageCalculationRateLimit
+description: |+
+  Maximum number of filesystem operations per second when calculating disk usage.
+  This rate limit helps prevent the disk usage calculation from impacting normal origin operations.
+  This only has effect when Origin.EnableDiskUsageCalculation is true.
+type: int
+default: 1000
+components: ["origin"]
+---
+name: Origin.DiskUsageCalculationDelay
+description: |+
+  Initial delay after startup before the first disk usage crawl begins.
+  This allows the origin to stabilize (and caches to populate) before starting IO-intensive crawls.
+type: duration
+default: 5m
+components: ["origin"]
+hidden: true
+---
 ############################
 #   Local cache configs    #
 ############################

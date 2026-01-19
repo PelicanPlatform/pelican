@@ -762,3 +762,11 @@ func ListUsers(db *gorm.DB) ([]User, error) {
 	}
 	return users, nil
 }
+
+func GetAllCollections(db *gorm.DB) ([]Collection, error) {
+	var collections []Collection
+	if result := db.Find(&collections); result.Error != nil {
+		return nil, result.Error
+	}
+	return collections, nil
+}
