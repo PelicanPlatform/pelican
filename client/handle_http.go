@@ -4073,9 +4073,9 @@ func retryWebDavOperation(operationName string, operation func() error) error {
 		if err == nil {
 			return nil
 		}
-		// Retry if it's an idle connection error and we have attempts remaining
-		if isIdleConnectionError(err) && attempt < maxWebDavRetries-1 {
-			log.Debugf("Retrying %s after idle connection error: %v", operationName, err)
+		// Retry if it's a retriable error (idle connection, timeout, etc.) and we have attempts remaining
+		if isRetryableWebDavError(err) && attempt < maxWebDavRetries-1 {
+			log.Debugf("Retrying %s after retriable error (attempt %d/%d): %v", operationName, attempt+1, maxWebDavRetries, err)
 			continue
 		}
 		// For all other errors or final attempt, return the error
@@ -4297,9 +4297,9 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 						continue
 					}
 				}
-				// If we have an idle connection error, retry once
-				if isIdleConnectionError(err) && idleConnRetries < maxWebDavRetries-1 {
-					log.Debugln("Retrying Stat after idle connection error:", err)
+				// If we have a retryable error (idle connection, timeout, etc.), retry
+				if isRetryableWebDavError(err) && idleConnRetries < maxWebDavRetries-1 {
+					log.Debugf("Retrying Stat after retryable error (attempt %d/%d): %v", idleConnRetries+1, maxWebDavRetries, err)
 					idleConnRetries++
 					continue
 				}

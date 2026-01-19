@@ -161,6 +161,21 @@ func isIdleConnectionError(err error) bool {
 		strings.Contains(err.Error(), "tls: unexpected message")
 }
 
+// isRetryableWebDavError checks if an error should trigger a retry for WebDAV operations
+// This includes idle connection errors and timeout errors
+func isRetryableWebDavError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Check for idle connection errors
+	if isIdleConnectionError(err) {
+		return true
+	}
+	// Check for timeout errors (both connection timeout and response header timeout)
+	errStr := err.Error()
+	return strings.Contains(errStr, "timeout awaiting response headers")
+}
+
 // ConnectionSetupError methods
 
 func (e *ConnectionSetupError) Error() string {
