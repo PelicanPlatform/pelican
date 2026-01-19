@@ -88,6 +88,10 @@ func TestXRootDRestart(t *testing.T) {
 	// Create a federation with origin and cache
 	ft := fed_test_utils.NewFedTest(t, bothPubNamespaces)
 
+	if param.Origin_StorageType.GetString() == "posixv2" {
+		t.Skip("Skipping XRootD restart test with posixv2 storage type; not supported")
+	}
+
 	// Create a test file to upload
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "test.txt")
@@ -177,6 +181,10 @@ func TestXRootDRestart(t *testing.T) {
 
 // TestXRootDRestartConcurrent tests that concurrent restart attempts are properly serialized
 func TestXRootDRestartConcurrent(t *testing.T) {
+	if param.Origin_StorageType.GetString() == "posixv2" {
+		t.Skip("Skipping XRootD restart test with posixv2 storage type; not supported")
+	}
+
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
