@@ -18,7 +18,7 @@
 
 # Throughout the build, we need to refer to the platform that
 # we're building *on* and the platform that we're building *for*.
-# (Go supports cross-compilation.)
+# (Docker BuildKit and Go both support cross-compilation.)
 #
 # Reference: https://docs.docker.com/reference/dockerfile/#automatic-platform-args-in-the-global-scope
 #
@@ -35,10 +35,9 @@ ARG BASE_OS=el9
 ARG OSG_SERIES=25
 ARG OSG_REPO=release
 
-# For compiling Pelican.
-ARG GO_VER=1.25.5
+# For compiling custom/one-off releases of Pelican.
+# (We cannot supply a default value because GoReleaser will use it as-is.)
 ARG GORELEASER_CURRENT_TAG
-ARG NODEJS_VER=20
 
 # For controlling the UID/GID of users in the container images.
 # Note that XRootD's UID and GID here are effectively set in stone
@@ -62,8 +61,6 @@ ARG XROOTD_GID=10940
 #     WARNING: When building an RPM from source, the version the built RPM
 #     claims to be will *always* come from the .spec file. The upstream Git
 #     repository must have a correct .spec file, or confusion will ensue.
-#
-
 ARG LOTMAN_SRC_BUILD=false
 ARG LOTMAN_VER=0.0.4
 # Note: github_scripts/osx_install.sh also (separately) specifies the version to use.
@@ -95,15 +92,17 @@ FROM --platform=${BUILDPLATFORM} almalinux:${ALMALINUX_TAG} AS pelican-build-bas
 ARG BUILDPLATFORM
 ARG BUILDOS
 ARG BUILDARCH
-ARG GO_VER
-ARG NODEJS_VER
 
 WORKDIR /pelican-build
-RUN --mount=type=cache,id=dnf-${BUILDPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
+RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
+    --mount=type=bind,source=web_ui/frontend/package.json,target=/context/package.json \
+    --mount=type=cache,id=dnf-${BUILDPLATFORM},target=/var/cache/dnf,sharing=locked \
+    <<ENDRUN
+
   set -eux
   set -o pipefail
 
-  # Install GoReleaser and other build tools.
+  # Install GoReleaser and other tools.
 
   cat >/etc/yum.repos.d/goreleaser.repo <<-EOF
 		[goreleaser]
@@ -112,10 +111,11 @@ RUN --mount=type=cache,id=dnf-${BUILDPLATFORM},target=/var/cache/dnf,sharing=loc
 		enabled=1
 		gpgcheck=0
 	EOF
-  dnf install -y goreleaser make
+  dnf install -y goreleaser jq make
 
   # Install Go.
 
+  GO_VER=$(grep '^toolchain' /context/go.mod | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
   rm -rf /usr/local/go
   curl -fSL https://dl.google.com/go/go${GO_VER}.${BUILDOS}-${BUILDARCH}.tar.gz | tar -xz -f - -C /usr/local
 
@@ -127,7 +127,7 @@ RUN --mount=type=cache,id=dnf-${BUILDPLATFORM},target=/var/cache/dnf,sharing=loc
 
   dnf install -y npm
   npm install -g n
-  n ${NODEJS_VER}
+  n $(jq < /context/package.json -r .engines.node)
   dnf remove -y npm
   npm install -g npm@latest
   n prune
@@ -202,10 +202,23 @@ ARG PELICAN_UID
 ARG PELICAN_GID
 
 WORKDIR /pelican
+RUN --mount=type=bind,source=images/pelican.yaml,target=/context/pelican.yaml \
+    --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
+    <<ENDRUN
 
-RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
   set -o pipefail
+
+  # Create a user and group for running Pelican daemons.
+
+  groupadd -g ${PELICAN_GID} ${PELICAN_USERNAME}
+  useradd -u ${PELICAN_UID} -g ${PELICAN_GID} -d / -s /sbin/nologin -c "Pelican daemons" ${PELICAN_USERNAME}
+
+  # Create directories for Pelican's configuration files.
+
+  mkdir -p /usr/share/pelican/config.d
+  mkdir -p /etc/pelican/config.d
+  cp /context/pelican.yaml /etc/pelican/pelican.yaml
 
   # Throughout this build, we will have Docker's build process cache dnf's
   # cache directory, so that we can not include it in any final images and
@@ -216,7 +229,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
 
   printf '%s\n' "metadata_expire=1800" >> /etc/dnf/dnf.conf
 
-  # Install the OSG Yum Repositories.
+  # Install OSG's yum repositories (https://osg-htc.org/docs/common/yum/).
 
   dnf install -y \
     epel-release \
@@ -236,15 +249,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
     psmisc \
     python3-pip \
     tini
-
-  # Create Pelican's user, group, and configuration directories.
-
-  groupadd -g ${PELICAN_GID} ${PELICAN_USERNAME}
-  useradd -u ${PELICAN_UID} -g ${PELICAN_GID} -d / -s /sbin/nologin ${PELICAN_USERNAME}
-  mkdir -p /etc/pelican/config.d
-  mkdir -p /usr/share/pelican/config.d
 ENDRUN
-COPY images/pelican.yaml /etc/pelican/pelican.yaml
 
 #################################################################
 # XRootD Software Init
@@ -275,10 +280,10 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   set -eux
   set -o pipefail
 
-  # Create XRootD's user and group.
+  # Create a user and group for running XRootD daemons.
 
   groupadd -g ${XROOTD_GID} ${XROOTD_USERNAME}
-  useradd -u ${XROOTD_UID} -g ${XROOTD_GID} -d / -s /sbin/nologin ${XROOTD_USERNAME}
+  useradd -u ${XROOTD_UID} -g ${XROOTD_GID} -d / -s /sbin/nologin -c "XRootD daemons" ${XROOTD_USERNAME}
 
   # NOTE: The `devel` packages are not necessary for any production
   # container images, but including them here means we that don't need to
@@ -496,7 +501,7 @@ ENDRUN
 # This stage assembles together everything needed to run a Pelican
 # origin, except for the `pelican` binary itself.
 #################################################################
-FROM xrootd-software-base AS origin-base
+FROM xrootd-software-base AS origin-software-base
 ARG TARGETPLATFORM
 
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
@@ -504,8 +509,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   set -o pipefail
 
   # We need OpenJDK for OA4MP.
-  # We need sssd-client for some xrootd-multiuser setups.
-  dnf install -y java-17-openjdk-headless sssd-client
+  dnf install -y java-17-openjdk-headless
 ENDRUN
 
 # Install OA4MP. Most of the installation is in /opt, but there are
@@ -565,15 +569,15 @@ ENV JAVA_HOME="/usr/lib/jvm/jre" \
     PATH="${ST_HOME}/bin:${QDL_HOME}/bin:${PATH}"
 
 #################################################################
-# Pelican Director
+# Pelican Director and Registry (a.k.a. the Central Services)
 #################################################################
-FROM pelican-software-base AS director-base
-RUN python3 -m pip install --no-cache-dir geoip2
-
-FROM director-base AS director
+FROM pelican-software-base AS central-services-base
 ARG TARGETOS TARGETARCH
 COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
 COPY images/entrypoint.sh /entrypoint.sh
+
+FROM central-services-base AS director
+RUN python3 -m pip install --no-cache-dir geoip2
 COPY scripts/geoquery.py /usr/local/sbin/geoquery
 ENTRYPOINT ["/entrypoint.sh", "pelican-server", "director"]
 CMD ["serve"]
@@ -583,13 +587,7 @@ RUN ln -s pelican-server /usr/local/sbin/osdf-server
 ENTRYPOINT ["/entrypoint.sh", "osdf-server", "director"]
 CMD ["serve"]
 
-#################################################################
-# Pelican Registry
-#################################################################
-FROM pelican-software-base AS registry
-ARG TARGETOS TARGETARCH
-COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
-COPY images/entrypoint.sh /entrypoint.sh
+FROM central-services-base AS registry
 ENTRYPOINT ["/entrypoint.sh", "pelican-server", "registry"]
 CMD ["serve"]
 
@@ -601,7 +599,7 @@ CMD ["serve"]
 #################################################################
 # Pelican Origin
 #################################################################
-FROM origin-base AS origin
+FROM origin-software-base AS origin
 ARG TARGETOS TARGETARCH
 COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
 COPY images/entrypoint.sh /entrypoint.sh
@@ -610,15 +608,19 @@ CMD ["serve"]
 
 FROM origin AS osdf-origin
 ARG TARGETPLATFORM
-RUN <<ENDRUN
+RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
   set -o pipefail
 
-  # These IDs must match OSG's sssd sidecar containers.
+  ln -s pelican-server /usr/local/sbin/osdf-server
+
+  # Some XRootD multi-user setups require sssd-client.
+  # The IDs here are chosen to match OSG's sssd sidecar containers.
+
   groupadd -r -g 990 sssd
   useradd -r -g sssd -u 990 -d / -s /usr/sbin/nologin -c "System user for sssd" sssd
+  dnf install -y sssd-client
 ENDRUN
-RUN ln -s pelican-server /usr/local/sbin/osdf-server
 ENTRYPOINT ["/entrypoint.sh", "osdf-server", "origin"]
 CMD ["serve"]
 
@@ -640,14 +642,15 @@ CMD ["serve"]
 #################################################################
 # Testing Environment
 #
-# This container should contain a minimum of extra packages and
-# other software for testing a Pelican release.
+# This container is for use in GitHub Actions workflows and should
+# contain all of Pelican's runtime dependencies. It also contains
+# additional packages that are needed for various test cases and that
+# can reasonably be baked into the container.
 #################################################################
-FROM origin-base AS pelican-test
+FROM origin-software-base AS pelican-test
 ARG TARGETPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
-ARG GO_VER
 
 # Install select development packages.
 # We need to work around a bug with ARM64 emulation and `tar`:
@@ -658,43 +661,33 @@ ARG GO_VER
 # The locale settings below should match the defaults in /etc/locale.conf
 # and are necessary for `bsdtar` to be able to extract the Go distribution.
 ENV LANG=C.utf8 LC_ALL=C.utf8
-RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
-  dnf install -y git make bsdtar && ln -sf /usr/bin/bsdtar /usr/bin/tar
-
-# Install Go using the same commands as the pelican-build-init stage.
-RUN curl -O https://dl.google.com/go/go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz \
-    && rm -rf /usr/local/go \
-    && tar -C /usr/local -xzf go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz \
-    && rm -rf go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz
-ENV PATH="/usr/local/go/bin:${PATH}"
-
-# Install the MinIO server and client for S3 tests.
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
   set -o pipefail
 
+  # Install packages for building Pelican.
+  dnf install -y git make bsdtar && ln -sf /usr/bin/bsdtar /usr/bin/tar
+
+  # Install HTCondor for integration tests, but forcibly remove the
+  # Pelican packages that it pulls in so that there is zero chance tests
+  # are run using the wrong binary.
+  dnf install -y condor
+  rpm -e --nodeps pelican pelican-osdf-compat
+
+  # Install the MinIO server and client for S3 tests.
   if [ "$TARGETARCH" = "amd64" ]; then
       PKG_ARCH=x86_64
   elif [ "$TARGETARCH" = "arm64" ]; then
       PKG_ARCH=aarch64
   fi
+  dnf install -y https://dl.min.io/server/minio/release/${TARGETOS}-${TARGETARCH}/archive/minio-20231214185157.0.0-1.${PKG_ARCH}.rpm
 
-  curl -o ./minio.rpm https://dl.min.io/server/minio/release/${TARGETOS}-${TARGETARCH}/archive/minio-20231214185157.0.0-1.${PKG_ARCH}.rpm
-  dnf install -y ./minio.rpm
-  rm -f ./minio.rpm
+  # Add some normal user accounts for testing.
+  # The inspiration for their names: https://en.wikipedia.org/wiki/Alice_and_Bob#Cast_of_characters.
+  for name in alice bob carol dave; do
+    useradd -m -s /bin/bash -c "Someone who would like to test Pelican" ${name}
+  done
 ENDRUN
-
-# Create alice user for multi-user testing
-RUN <<ENDRUN
-  set -eux
-  set -o pipefail
-
-  useradd -m -s /bin/bash alice
-ENDRUN
-
-ENTRYPOINT []
-CMD ["/bin/bash"]
-WORKDIR /app
 
 #################################################################
 # Development Environment
@@ -705,77 +698,63 @@ WORKDIR /app
 #################################################################
 FROM pelican-test AS pelican-dev
 ARG TARGETPLATFORM
-ARG NODEJS_VER
+ARG TARGETOS
+ARG TARGETARCH
 
-# Install GoReleaser using the same commands as the pelican-build-init stage.
-COPY <<ENDCOPY /etc/yum.repos.d/goreleaser.repo
-[goreleaser]
-name=GoReleaser
-baseurl=https://repo.goreleaser.com/yum/
-enabled=1
-gpgcheck=0
-ENDCOPY
-RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
+RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
+    --mount=type=bind,source=web_ui/frontend/package.json,target=/context/package.json \
+    --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
+    <<ENDRUN
+
   set -eux
   set -o pipefail
 
-  dnf install -y goreleaser
-ENDRUN
+  # Install GoReleaser and other tools.
 
-# Install gotestsum for better test output formatting
-RUN --mount=type=cache,id=go-mod-cache-${TARGETPLATFORM},target=/root/go,sharing=locked <<ENDRUN
-  set -eux
-  set -o pipefail
-  go install gotest.tools/gotestsum@latest
-  # Move gotestsum to a system location that is world readable
-  mv /root/go/bin/gotestsum /usr/local/bin/gotestsum
-ENDRUN
+  cat >/etc/yum.repos.d/goreleaser.repo <<-EOF
+		[goreleaser]
+		name=GoReleaser
+		baseurl=https://repo.goreleaser.com/yum/
+		enabled=1
+		gpgcheck=0
+	EOF
+  dnf install -y goreleaser jq make
 
-# Install Node.js using the same commands as the pelican-build-init stage.
-RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
-  set -eux
-  set -o pipefail
+  # Install Go.
+
+  GO_VER=$(grep '^toolchain' /context/go.mod | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+  rm -rf /usr/local/go
+  curl -fSL https://dl.google.com/go/go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz | tar -xz -f - -C /usr/local
+
+  # Install Node.js.
+  #
+  # We use npm to bootstrap the installation of the required Node.js version
+  # and an updated version of npm itself. The `dnf remove` in the middle is to
+  # avoid there being multiple, incompatible versions of npm.
+
   dnf install -y npm
   npm install -g n
-  n ${NODEJS_VER}
+  n $(jq < /context/package.json -r .engines.node)
   dnf remove -y npm
   npm install -g npm@latest
   n prune
-ENDRUN
 
-# Enable the CodeReady Linux Builder repository.
-RUN /usr/bin/crb enable
+  # Install gotestsum for better test output formatting.
+  # Make a copy of the binary so that non-root users can use it.
 
-# Add HTCondor repository for development and testing
-RUN <<ENDRUN
-  set -eux
-  set -o pipefail
-  cd /etc/yum.repos.d
-  if wget -q https://htcss-downloads.chtc.wisc.edu/repo/25.x/htcondor-release-current.el9.noarch.rpm; then
-    dnf install -y htcondor-release-current.el9.noarch.rpm
-    rm -f htcondor-release-current.el9.noarch.rpm
-  else
-    echo "Warning: Failed to download HTCondor repository RPM, HTCondor will not be available"
-  fi
-ENDRUN
+  /usr/local/go/bin/go install gotest.tools/gotestsum@latest
+  cp ~/go/bin/gotestsum /usr/local/bin/gotestsum
 
-# Install a kitchen sink's worth of development tools and libraries.
-RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
+  # Install a kitchen sink's worth of development tools and libraries.
+
   dnf install -y --enablerepo=osg-contrib \
         cmake3 \
-        condor \
         delve \
         docker \
         gdb \
         gcc-c++ \
-        git \
         graphviz \
-        jq \
-        make \
         nano \
-        procps \
-        psmisc \
-        python3-pip \
         systemd \
         valgrind \
         vim \
@@ -792,6 +771,8 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
         \
         json-schema-validator-devel \
         nlohmann-json-devel
+ENDRUN
+ENV PATH="/usr/local/go/bin:${PATH}"
 
 # Suppress Git's "dubious ownership" warning.
 ENV GOFLAGS="-buildvcs=false"
