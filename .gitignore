@@ -11,6 +11,10 @@ pelican.yaml
 oidc-client-id
 oidc-client-secret
 MaxMindKey
+
+# Various ways test binaries have almost been committed
+# from top-level directories to the code base via `git -A`.
 e2e_fed_tests.test
-client.test
 *.test
+/client.test
+/pelican

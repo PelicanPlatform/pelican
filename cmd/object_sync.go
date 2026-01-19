@@ -50,6 +50,7 @@ func init() {
 the client should fallback to discovered caches if all preferred caches fail.`)
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
 	flagSet.Bool("inplace", false, "Write files directly to destination (default: use temporary files)")
+	flagSet.Bool("dry-run", false, "Show what would be synchronized without actually modifying the destination")
 	objectCmd.AddCommand(syncCmd)
 }
 
@@ -169,12 +170,19 @@ func syncMain(cmd *cobra.Command, args []string) {
 
 	lastSrc := ""
 
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+
 	if doDownload {
 		for _, src := range sources {
-			if _, err = client.DoGet(ctx, src, dest, true,
-				client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation),
-				client.WithCaches(caches...), client.WithSynchronize(client.SyncSize),
-				client.WithInPlace(inPlace)); err != nil {
+			options := []client.TransferOption{
+				client.WithCallback(pb.callback),
+				client.WithTokenLocation(tokenLocation),
+				client.WithSynchronize(client.SyncSize),
+				client.WithCaches(caches...),
+				client.WithInPlace(inPlace),
+				client.WithDryRun(dryRun),
+			}
+			if _, err = client.DoGet(ctx, src, dest, true, options...); err != nil {
 				lastSrc = src
 				break
 			}
@@ -188,9 +196,14 @@ func syncMain(cmd *cobra.Command, args []string) {
 				log.Warningln("Destination: " + dest + " ends with '/', but the source is a file. If the destination does not exist, it will be treated as an object, not a collection.")
 			}
 
-			if _, err = client.DoPut(ctx, src, dest, true,
-				client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation),
-				client.WithCaches(caches...), client.WithSynchronize(client.SyncSize)); err != nil {
+			options := []client.TransferOption{
+				client.WithCallback(pb.callback),
+				client.WithTokenLocation(tokenLocation),
+				client.WithSynchronize(client.SyncSize),
+				client.WithCaches(caches...),
+				client.WithDryRun(dryRun),
+			}
+			if _, err = client.DoPut(ctx, src, dest, true, options...); err != nil {
 				lastSrc = src
 				break
 			}
