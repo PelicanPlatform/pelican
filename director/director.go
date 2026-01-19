@@ -518,6 +518,9 @@ func getFinalRedirectURL(rurl url.URL, requestParams url.Values) string {
 		}
 	}
 	rurl.RawQuery = rQuery.Encode()
+	if rurl.Path != "" {
+		rurl.Path = path.Clean(rurl.Path)
+	}
 	return rurl.String()
 }
 
