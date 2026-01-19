@@ -300,12 +300,16 @@ func (ac *authConfig) getAcls(token string) (newAcls acls, err error) {
 				continue
 			}
 
-			// Use path-aware prefix matching:
-			// Token resource /foo/bar authorizes paths under export /foo
-			// Export /foo/bar can be authorized by token resource /foo or /foo/bar
-			if hasPathPrefix(export.FederationPrefix, resource.Resource) || hasPathPrefix(resource.Resource, export.FederationPrefix) {
-				newAcls = append(newAcls, resource)
+			// Token scopes are relative to the namespace (federation prefix)
+			// So we need to prepend the federation prefix to the token's resource to get the full path
+			fullResourcePath := path.Join(export.FederationPrefix, resource.Resource)
+
+			// Add the scope with the full path (including federation prefix)
+			fullScope := token_scopes.ResourceScope{
+				Authorization: resource.Authorization,
+				Resource:      fullResourcePath,
 			}
+			newAcls = append(newAcls, fullScope)
 		}
 	}
 	return
