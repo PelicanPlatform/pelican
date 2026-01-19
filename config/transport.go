@@ -162,7 +162,7 @@ func setupTransport() {
 		KeepAlive: transportKeepAlive,
 	}
 	defaultDialerContext := defaultDialer.DialContext
-	dialerFunc.CompareAndSwap(nil, &defaultDialerContext)
+	dialerFunc.Store(&defaultDialerContext)
 
 	//Set up the transport
 	transport = &http.Transport{

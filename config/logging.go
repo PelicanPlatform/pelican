@@ -19,9 +19,11 @@
 package config
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"regexp"
+	"sync"
 	"sync/atomic"
 
 	"github.com/go-kit/log/term"
@@ -32,6 +34,12 @@ import (
 )
 
 type (
+	// syncWriter wraps an io.Writer to make writes thread-safe
+	syncWriter struct {
+		mu     sync.Mutex
+		writer io.Writer
+	}
+
 	RegexpFilter struct {
 		Regexp *regexp.Regexp
 		Name   string
@@ -52,12 +60,8 @@ type (
 	//
 	// Intended to be used to censor or transform logs
 	regexpTransformHook struct {
-		replacements []replacement
-		hook         *writer.Hook
-	}
-
-	replacement struct {
-		regex    *regexp.Regexp
+		hook     atomic.Pointer[writer.Hook]
+		regex    atomic.Pointer[regexp.Regexp]
 		template string
 	}
 )
@@ -65,32 +69,73 @@ type (
 var (
 	globalFilters      RegexpFilterHook
 	addedGlobalFilters bool
+	globalTransformMu  sync.Mutex // Protects globalTransform, addedGlobalFilters, and related setup/teardown
 
 	bearerTokenRegexStr string = `(?P<prefix>Bearer%20)?(?P<header>ey[A-Za-z0-9_=-]{18,})[.](?P<payload>ey[A-Za-z0-9_=-]{18,})[.]([A-Za-z0-9_=-]{64,})`
 
-	globalTransform *regexpTransformHook = &regexpTransformHook{
-		hook: &writer.Hook{
-			Writer:    os.Stderr,
-			LogLevels: log.AllLevels,
-		},
-		replacements: []replacement{
-			{
-				regex:    regexp.MustCompile(bearerTokenRegexStr),
-				template: "$prefix$header.$payload.REDACTED",
-			},
-		},
-	}
+	globalTransform *regexpTransformHook
 
 	// Track whether we've already configured the formatter to avoid resetting it
 	formatterConfigured bool
 )
+
+func (sw *syncWriter) Write(p []byte) (n int, err error) {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	return sw.writer.Write(p)
+}
+
+// ensureThreadSafeWriter wraps writers that are not inherently thread-safe (like bytes.Buffer)
+// with a syncWriter to protect concurrent access. Files and os.Stderr/os.Stdout are thread-safe
+// and don't need wrapping.
+func ensureThreadSafeWriter(w io.Writer) io.Writer {
+	// Check if already wrapped
+	if _, ok := w.(*syncWriter); ok {
+		return w
+	}
+
+	// Files (including os.Stderr, os.Stdout) are thread-safe
+	if _, ok := w.(*os.File); ok {
+		return w
+	}
+
+	// io.Discard is thread-safe
+	if w == io.Discard {
+		return w
+	}
+
+	// For bytes.Buffer and other potentially unsafe writers, wrap them
+	if _, ok := w.(*bytes.Buffer); ok {
+		return &syncWriter{writer: w}
+	}
+
+	// Default: assume unsafe and wrap
+	return &syncWriter{writer: w}
+}
+
+func init() {
+	globalTransform = &regexpTransformHook{
+		template: "$prefix$header.$payload.REDACTED",
+	}
+	initialHook := &writer.Hook{
+		Writer:    os.Stderr,
+		LogLevels: log.AllLevels,
+	}
+	globalTransform.hook.Store(initialHook)
+	initialRegex := regexp.MustCompile(bearerTokenRegexStr)
+	globalTransform.regex.Store(initialRegex)
+}
 
 func (fh *RegexpFilterHook) Levels() []log.Level {
 	return log.AllLevels
 }
 
 func (rt *regexpTransformHook) Levels() []log.Level {
-	return rt.hook.LogLevels
+	hook := rt.hook.Load()
+	if hook == nil {
+		return log.AllLevels
+	}
+	return hook.LogLevels
 }
 
 // Process a single log entry coming from logrus; iterate through the
@@ -111,16 +156,22 @@ func (fh *RegexpFilterHook) Fire(entry *log.Entry) (err error) {
 
 // Process a single log entry, updating it as necessary
 func (rt *regexpTransformHook) Fire(entry *log.Entry) (err error) {
-	// Skip if writer is io.Discard (test mode)
-	if rt.hook != nil && rt.hook.Writer == io.Discard {
+	// Use atomic loads for lock-free access on hot path
+	hook := rt.hook.Load()
+	if hook == nil {
 		return nil
 	}
-	for _, replace := range rt.replacements {
-		if replace.regex != nil {
-			entry.Message = replace.regex.ReplaceAllString(entry.Message, replace.template)
-		}
+
+	// Skip if writer is io.Discard (test mode)
+	if hook.Writer == io.Discard {
+		return nil
 	}
-	return rt.hook.Fire(entry)
+
+	regex := rt.regex.Load()
+	if regex != nil {
+		entry.Message = regex.ReplaceAllString(entry.Message, rt.template)
+	}
+	return hook.Fire(entry)
 }
 
 func initFilterLogging() {
@@ -142,28 +193,41 @@ func initFilterLogging() {
 
 	// Unit tests may initialize the server multiple times; avoid configuring
 	// the global logging multiple times
+	globalTransformMu.Lock()
 	if !addedGlobalFilters {
-		log.AddHook(&globalFilters)
 		addedGlobalFilters = true
+		globalTransformMu.Unlock()
 		// Set the writer to what logrus has
-		globalTransform.hook.Writer = log.StandardLogger().Out
-		globalTransform.hook.LogLevels = hookLevel
+		newHook := &writer.Hook{
+			Writer:    ensureThreadSafeWriter(log.StandardLogger().Out),
+			LogLevels: hookLevel,
+		}
+		globalTransform.hook.Store(newHook)
+		log.AddHook(&globalFilters)
 		log.SetOutput(io.Discard)
 		log.AddHook(globalTransform)
 	} else {
 		// Reset the regular expression.  This is done to reduce jitter in the memory
 		// stress test; as this is called for each unit test run, this reduces the chance
 		// prior unit tests affect this one.
-		globalTransform.replacements[0].regex = regexp.MustCompile(bearerTokenRegexStr)
+		newRegex := regexp.MustCompile(bearerTokenRegexStr)
+		globalTransform.regex.Store(newRegex)
+		globalTransformMu.Unlock()
 	}
 }
 
 // ResetGlobalLoggingHooks resets the global logging hooks and flags for testing.
 // This should be called by test_utils.SetupTestLogging to ensure clean test state.
 func ResetGlobalLoggingHooks() {
+	globalTransformMu.Lock()
+	defer globalTransformMu.Unlock()
 	addedGlobalFilters = false
-	if globalTransform != nil && globalTransform.hook != nil {
-		globalTransform.hook.Writer = io.Discard
+	if globalTransform != nil {
+		newHook := &writer.Hook{
+			Writer:    ensureThreadSafeWriter(io.Discard),
+			LogLevels: log.AllLevels,
+		}
+		globalTransform.hook.Store(newHook)
 	}
 }
 
@@ -206,37 +270,66 @@ func SetLogging(logLevel log.Level) {
 
 	// Note: don't call log.SetLevel directly here as we filter at the transform
 	// hook, not at the logrus level.
+	globalTransformMu.Lock()
 	if addedGlobalFilters {
 		log.SetLevel(log.DebugLevel)
 		hookLevel := make([]log.Level, 0, len(log.AllLevels))
-		hooks := log.StandardLogger().Hooks
+
+		// Atomically get current hooks
+		emptyHooks := log.LevelHooks{}
+		currentHooks := log.StandardLogger().ReplaceHooks(emptyHooks)
+
+		// Build new hooks map, removing our global hooks
+		newHooks := log.LevelHooks{}
 		for _, lvl := range log.AllLevels {
-			originalHooks := hooks[lvl]
-			hooks[lvl] = make([]log.Hook, 0, len(originalHooks))
+			originalHooks := currentHooks[lvl]
+			newHooks[lvl] = make([]log.Hook, 0, len(originalHooks))
 			for _, hook := range originalHooks {
 				if hook != &globalFilters && hook != globalTransform {
-					hooks[lvl] = append(hooks[lvl], hook)
+					newHooks[lvl] = append(newHooks[lvl], hook)
 				}
 			}
 			if lvl <= logLevel {
 				hookLevel = append(hookLevel, lvl)
 			}
 		}
-		globalTransform.hook.LogLevels = hookLevel
-		log.AddHook(&globalFilters)
-		log.AddHook(globalTransform)
+
+		// Update hook with new log levels
+		currentHook := globalTransform.hook.Load()
+		newHook := &writer.Hook{
+			Writer:    ensureThreadSafeWriter(currentHook.Writer),
+			LogLevels: hookLevel,
+		}
+		globalTransform.hook.Store(newHook)
+
+		// Add our hooks back
+		for _, lvl := range log.AllLevels {
+			newHooks[lvl] = append(newHooks[lvl], &globalFilters)
+			newHooks[lvl] = append(newHooks[lvl], globalTransform)
+		}
+		globalTransformMu.Unlock()
+
+		// Atomically replace all hooks
+		log.StandardLogger().ReplaceHooks(newHooks)
 	} else {
+		globalTransformMu.Unlock()
 		log.SetLevel(logLevel)
 	}
 }
 
 // GetEffectiveLogLevel returns the effective log level based on the transform hook
 func GetEffectiveLogLevel() log.Level {
+	globalTransformMu.Lock()
+	defer globalTransformMu.Unlock()
 	if addedGlobalFilters && globalTransform != nil {
+		hook := globalTransform.hook.Load()
+		if hook == nil {
+			return log.GetLevel()
+		}
 		// Find the highest level in the hook
 		for _, lvl := range log.AllLevels {
 			found := false
-			for _, hookLvl := range globalTransform.hook.LogLevels {
+			for _, hookLvl := range hook.LogLevels {
 				if hookLvl == lvl {
 					found = true
 					break
@@ -260,7 +353,7 @@ func GetEffectiveLogLevel() log.Level {
 // Provided so we can disable the censoring in unit tests;
 // otherwise, it should not be used
 func DisableLoggingCensor() {
-	globalTransform.replacements[0].regex = nil
+	globalTransform.regex.Store(nil)
 }
 
 // RegisterLoggingCallback registers a callback with the param module

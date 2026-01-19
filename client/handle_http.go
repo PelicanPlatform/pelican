@@ -4073,9 +4073,9 @@ func retryWebDavOperation(operationName string, operation func() error) error {
 		if err == nil {
 			return nil
 		}
-		// Retry if it's an idle connection error and we have attempts remaining
-		if isIdleConnectionError(err) && attempt < maxWebDavRetries-1 {
-			log.Debugf("Retrying %s after idle connection error: %v", operationName, err)
+		// Retry if it's a retriable error (idle connection, timeout, etc.) and we have attempts remaining
+		if isRetryableWebDavError(err) && attempt < maxWebDavRetries-1 {
+			log.Debugf("Retrying %s after retriable error (attempt %d/%d): %v", operationName, attempt+1, maxWebDavRetries, err)
 			continue
 		}
 		// For all other errors or final attempt, return the error
@@ -4186,7 +4186,25 @@ func deleteHttp(ctx context.Context, remoteUrl *pelican_url.PelicanURL, recursiv
 		}
 	}
 
-	err = client.Remove(remotePath)
+	// Retry logic for Remove operation to handle spurious HTTP 400 errors
+	err = func() error {
+		var lastErr error
+		for attempt := range 2 {
+			lastErr = client.Remove(remotePath)
+			if lastErr == nil {
+				return nil
+			}
+			// Retry once if we get an HTTP 400 error (spurious server errors)
+			if attempt == 0 && gowebdav.IsErrCode(lastErr, http.StatusBadRequest) {
+				log.Debugln("Received HTTP 400 on delete attempt, retrying once:", remotePath)
+				continue
+			}
+			// For all other errors or final attempt, return the error
+			return lastErr
+		}
+		return lastErr
+	}()
+
 	if err != nil {
 		if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
 			return errors.Wrap(err, "method not allowed on the remote object, deletion is not permitted")
@@ -4279,9 +4297,9 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 						continue
 					}
 				}
-				// If we have an idle connection error, retry once
-				if isIdleConnectionError(err) && idleConnRetries < maxWebDavRetries-1 {
-					log.Debugln("Retrying Stat after idle connection error:", err)
+				// If we have a retryable error (idle connection, timeout, etc.), retry
+				if isRetryableWebDavError(err) && idleConnRetries < maxWebDavRetries-1 {
+					log.Debugf("Retrying Stat after retryable error (attempt %d/%d): %v", idleConnRetries+1, maxWebDavRetries, err)
 					idleConnRetries++
 					continue
 				}

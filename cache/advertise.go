@@ -57,13 +57,14 @@ func (server *CacheServer) CreateAdvertisement(name, id, originUrl, originWebUrl
 	status := metrics.GetHealthStatus().OverallStatus
 
 	ad := server_structs.OriginAdvertiseV2{
-		ServerID:       id,
-		RegistryPrefix: registryPrefix,
-		DataURL:        originUrl,
-		WebURL:         originWebUrl,
-		Namespaces:     server.GetNamespaceAds(),
-		Status:         status,
-		Downtimes:      downtimes,
+		ServerID:            id,
+		RegistryPrefix:      registryPrefix,
+		DataURL:             originUrl,
+		DisableDirectorTest: !param.Cache_DirectorTest.GetBool(),
+		WebURL:              originWebUrl,
+		Namespaces:          server.GetNamespaceAds(),
+		Status:              status,
+		Downtimes:           downtimes,
 	}
 	ad.Initialize(name)
 

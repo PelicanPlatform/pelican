@@ -1096,9 +1096,15 @@ func TestPrestage(t *testing.T) {
 		assert.Equal(t, 1, len(results))
 
 		// Check if object is cached.
-		age, size, err = tc.CacheInfo(fed.Ctx, innerFileUrl)
-		require.NoError(t, err)
-		assert.Equal(t, int64(len(testFileContent)), size)
-		require.NotEqual(t, -1, age)
+		require.Eventually(t, func() bool {
+			age, size, err = tc.CacheInfo(fed.Ctx, innerFileUrl)
+			if err != nil {
+				return false
+			}
+			if size != int64(len(testFileContent)) {
+				return false
+			}
+			return age != -1
+		}, 2*time.Second, 100*time.Millisecond, "object should be cached after prestage")
 	}
 }

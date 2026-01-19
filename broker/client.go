@@ -90,6 +90,21 @@ var (
 
 const requestIdBytes = "abcdefghijklmnopqrstuvwxyz0123456789"
 
+// ResetState clears all pending broker requests; used for testing
+func ResetState() {
+	responseMapLock.Lock()
+	defer responseMapLock.Unlock()
+	// Close all pending channels to unblock any waiting goroutines
+	for _, pending := range response {
+		close(pending.channel)
+	}
+	response = make(map[string]pendingReversals)
+
+	// Note: We don't touch namespaceKeys here. The errgroup cleanup goroutine
+	// in LaunchNamespaceKeyMaintenance will call Stop(), DeleteAll(), and set it to nil
+	// when the context is cancelled. Touching it here would create a race condition.
+}
+
 func (hj *hijackConn) Close() error {
 	return nil
 }

@@ -166,12 +166,11 @@ func TestParseServerAdFromTopology(t *testing.T) {
 
 	t.Run("test-invalid-url", func(t *testing.T) {
 		// Capture logs
-		originalHooks := logrus.StandardLogger().Hooks
-		logrus.StandardLogger().Hooks = make(logrus.LevelHooks)
+		originalHooks := logrus.StandardLogger().ReplaceHooks(make(logrus.LevelHooks))
 		hook := logrustest.NewLocal(logrus.StandardLogger())
 		defer func() {
 			hook.Reset()
-			logrus.StandardLogger().Hooks = originalHooks
+			logrus.StandardLogger().ReplaceHooks(originalHooks)
 		}()
 
 		server.Endpoint = "http://a server "

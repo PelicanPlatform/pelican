@@ -3578,6 +3578,11 @@ func TestIsIdleConnectionError(t *testing.T) {
 		assert.True(t, isIdleConnectionError(wrappedErr), "Should detect wrapped idle connection error")
 	})
 
+	t.Run("detects_tls_unexpected_message", func(t *testing.T) {
+		err := errors.New("tls: unexpected message")
+		assert.True(t, isIdleConnectionError(err), "Should detect TLS unexpected message error")
+	})
+
 	t.Run("does_not_detect_other_errors", func(t *testing.T) {
 		err := errors.New("some other error")
 		assert.False(t, isIdleConnectionError(err), "Should not detect non-idle connection errors")
@@ -3585,6 +3590,34 @@ func TestIsIdleConnectionError(t *testing.T) {
 
 	t.Run("handles_nil_error", func(t *testing.T) {
 		assert.False(t, isIdleConnectionError(nil), "Should handle nil error")
+	})
+}
+
+func TestIsRetryableWebDavError(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	t.Run("detects_idle_connection_error", func(t *testing.T) {
+		err := errors.New("http: server closed idle connection")
+		assert.True(t, isRetryableWebDavError(err), "Should detect idle connection error")
+	})
+
+	t.Run("detects_timeout_awaiting_response_headers", func(t *testing.T) {
+		err := errors.New("net/http: timeout awaiting response headers")
+		assert.True(t, isRetryableWebDavError(err), "Should detect timeout awaiting response headers")
+	})
+
+	t.Run("detects_wrapped_timeout_error", func(t *testing.T) {
+		innerErr := errors.New("timeout awaiting response headers")
+		wrappedErr := errors.Wrap(innerErr, "Propfind failed")
+		assert.True(t, isRetryableWebDavError(wrappedErr), "Should detect wrapped timeout error")
+	})
+
+	t.Run("does_not_detect_other_errors", func(t *testing.T) {
+		err := errors.New("some other error")
+		assert.False(t, isRetryableWebDavError(err), "Should not detect non-retriable errors")
+	})
+
+	t.Run("handles_nil_error", func(t *testing.T) {
+		assert.False(t, isRetryableWebDavError(nil), "Should handle nil error")
 	})
 }
 

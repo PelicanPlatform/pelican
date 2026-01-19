@@ -4,6 +4,9 @@ Director:
   EnableBroker: true
 
 Origin:
+  SelfTest: False
+  DirectorTest: False
+
   StorageType: "posix"
   EnableBroker: true
   EnableDirectReads: true
@@ -11,3 +14,7 @@ Origin:
     - StoragePrefix: /<SHOULD BE OVERRIDDEN>
       FederationPrefix: /test
       Capabilities: ["PublicReads", "Writes", "DirectReads", "Listings"]
+
+Cache:
+  SelfTest: False
+  DirectorTest: False

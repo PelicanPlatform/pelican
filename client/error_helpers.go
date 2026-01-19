@@ -155,9 +155,25 @@ func isIdleConnectionError(err error) bool {
 	if err == nil {
 		return false
 	}
-	// Check if the error message contains "server closed idle connection"
-	// This is a specific error message from the Go HTTP client
-	return strings.Contains(err.Error(), "server closed idle connection")
+	// Check if the error message contains "server closed idle connection" or "tls: unexpected message"
+	// These are specific error messages from the Go HTTP client indicating connection issues
+	return strings.Contains(err.Error(), "server closed idle connection") ||
+		strings.Contains(err.Error(), "tls: unexpected message")
+}
+
+// isRetryableWebDavError checks if an error should trigger a retry for WebDAV operations
+// This includes idle connection errors and timeout errors
+func isRetryableWebDavError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Check for idle connection errors
+	if isIdleConnectionError(err) {
+		return true
+	}
+	// Check for timeout errors (both connection timeout and response header timeout)
+	errStr := err.Error()
+	return strings.Contains(errStr, "timeout awaiting response headers")
 }
 
 // ConnectionSetupError methods
