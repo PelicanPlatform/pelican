@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"net/url"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"time"
 
@@ -216,21 +217,57 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 			statUrls = append(statUrls, pUrl.GetRawUrl())
 		}
 
-		var lastErr error
+		remaining := make(map[ChecksumType]struct{}, len(requestedChecksums))
+		for _, alg := range requestedChecksums {
+			remaining[alg] = struct{}{}
+		}
+
+		var checksumErr error
+		collected := false
 		for _, statUrl := range statUrls {
 			checksums, err := fetchChecksum(ctx, requestedChecksums, statUrl, tokenContents, project)
 			if err != nil {
-				lastErr = err
+				checksumErr = err
 				continue
 			}
-			statInfo.Checksums = make(map[string]string)
+			if len(checksums) == 0 {
+				continue
+			}
+			if statInfo.Checksums == nil {
+				statInfo.Checksums = make(map[string]string)
+			}
 			for _, info := range checksums {
-				statInfo.Checksums[HttpDigestFromChecksum(info.Algorithm)] = hex.EncodeToString(info.Value)
+				digestName := HttpDigestFromChecksum(info.Algorithm)
+				if digestName == "" {
+					continue
+				}
+				statInfo.Checksums[digestName] = hex.EncodeToString(info.Value)
+				delete(remaining, info.Algorithm)
+				collected = true
+			}
+			if len(remaining) == 0 {
+				checksumErr = nil
+				break
 			}
 		}
-		if lastErr != nil {
-			err = errors.Wrap(lastErr, "failed to fetch checksums")
+		if !collected {
+			if checksumErr == nil {
+				checksumErr = errors.New("no checksum data returned by server")
+			}
+			err = errors.Wrap(checksumErr, "failed to fetch checksums")
 			return
+		}
+		if len(remaining) > 0 {
+			missing := make([]string, 0, len(remaining))
+			for alg := range remaining {
+				if digestName := HttpDigestFromChecksum(alg); digestName != "" {
+					missing = append(missing, digestName)
+				} else {
+					missing = append(missing, fmt.Sprintf("%d", alg))
+				}
+			}
+			sort.Strings(missing)
+			log.Warnf("Did not receive requested checksum(s): %s", strings.Join(missing, ", "))
 		}
 	}
 	return &statInfo, nil
