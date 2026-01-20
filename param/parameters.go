@@ -159,6 +159,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Director.GeoIPLocation": false,
 	"Director.MaxMindKeyFile": false,
 	"Director.MaxStatResponse": false,
+	"Director.MetadataComparisonInterval": false,
 	"Director.MinStatResponse": false,
 	"Director.OriginCacheHealthTestInterval": false,
 	"Director.OriginResponseHostnames": false,
@@ -1105,6 +1106,8 @@ func (dP DurationParam) GetDuration() time.Duration {
 			return config.Director.CachePresenceTTL
 		case "Director.FedTokenLifetime":
 			return config.Director.FedTokenLifetime
+		case "Director.MetadataComparisonInterval":
+			return config.Director.MetadataComparisonInterval
 		case "Director.OriginCacheHealthTestInterval":
 			return config.Director.OriginCacheHealthTestInterval
 		case "Director.RegistryQueryInterval":
@@ -1277,6 +1280,7 @@ var allParameterNames = []string{
 	"Director.GeoIPLocation",
 	"Director.MaxMindKeyFile",
 	"Director.MaxStatResponse",
+	"Director.MetadataComparisonInterval",
 	"Director.MinStatResponse",
 	"Director.OriginCacheHealthTestInterval",
 	"Director.OriginResponseHostnames",
@@ -1847,6 +1851,7 @@ var (
 	Director_AdvertisementTTL = DurationParam{"Director.AdvertisementTTL"}
 	Director_CachePresenceTTL = DurationParam{"Director.CachePresenceTTL"}
 	Director_FedTokenLifetime = DurationParam{"Director.FedTokenLifetime"}
+	Director_MetadataComparisonInterval = DurationParam{"Director.MetadataComparisonInterval"}
 	Director_OriginCacheHealthTestInterval = DurationParam{"Director.OriginCacheHealthTestInterval"}
 	Director_RegistryQueryInterval = DurationParam{"Director.RegistryQueryInterval"}
 	Director_StatTimeout = DurationParam{"Director.StatTimeout"}
