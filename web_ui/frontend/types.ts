@@ -163,3 +163,24 @@ export interface WellKnownConfiguration {
   namespace_registration_endpoint: string;
   jwks_uri: string;
 }
+
+/**
+ * Federation Metadata Discrepancy Types
+ */
+
+export interface UrlMismatch {
+  directorValue: string;
+  discoveryValue: string;
+}
+
+export interface MetadataDiscrepancy {
+  hasDiscrepancy: boolean;
+  directorUrlMismatch?: UrlMismatch;
+  registryUrlMismatch?: UrlMismatch;
+  jwksHasOverlap: boolean;
+  jwksOverlapChecked: boolean;
+  jwksError?: string;
+  lastChecked: string;
+  discoveryUrl: string;
+  enabled: boolean;
+}
