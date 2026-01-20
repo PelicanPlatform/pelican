@@ -109,6 +109,7 @@ type Config struct {
 		GeoIPLocation string `mapstructure:"geoiplocation" yaml:"GeoIPLocation"`
 		MaxMindKeyFile string `mapstructure:"maxmindkeyfile" yaml:"MaxMindKeyFile"`
 		MaxStatResponse int `mapstructure:"maxstatresponse" yaml:"MaxStatResponse"`
+		MetadataComparisonInterval time.Duration `mapstructure:"metadatacomparisoninterval" yaml:"MetadataComparisonInterval"`
 		MinStatResponse int `mapstructure:"minstatresponse" yaml:"MinStatResponse"`
 		OriginCacheHealthTestInterval time.Duration `mapstructure:"origincachehealthtestinterval" yaml:"OriginCacheHealthTestInterval"`
 		OriginResponseHostnames []string `mapstructure:"originresponsehostnames" yaml:"OriginResponseHostnames"`
@@ -509,6 +510,7 @@ type configWithType struct {
 		GeoIPLocation struct { Type string; Value string }
 		MaxMindKeyFile struct { Type string; Value string }
 		MaxStatResponse struct { Type string; Value int }
+		MetadataComparisonInterval struct { Type string; Value time.Duration }
 		MinStatResponse struct { Type string; Value int }
 		OriginCacheHealthTestInterval struct { Type string; Value time.Duration }
 		OriginResponseHostnames struct { Type string; Value []string }

@@ -2321,6 +2321,20 @@ hidden: true
 default: 1m
 components: ["director"]
 ---
+name: Director.MetadataComparisonInterval
+description: |+
+  Defines the interval at which the director compares its local federation metadata (director URL, registry URL, and JWKS)
+  against the federation's discovery URL.
+  This comparison helps detect configuration mismatches that could cause unexpected behavior for clients.
+  When discrepancies are detected, alerts are displayed in the Director's web UI for administrators.
+
+  This comparison is only performed when the Director is not itself the federation's discovery URL.
+  If the Director serves as the discovery URL (i.e., `Server.ExternalWebUrl` matches `Federation.DiscoveryUrl`),
+  the comparison is skipped.
+type: duration
+default: 10m
+components: ["director"]
+---
 name: Director.FedTokenLifetime
 description: |+
   The default lifetime assigned to tokens issued by the director on behalf of the federation. These tokens may be issued
