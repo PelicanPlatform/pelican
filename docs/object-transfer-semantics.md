@@ -56,12 +56,12 @@ Uploads a single object or a directory tree from the local filesystem to the fed
 
 ### Single source, `--recursive=false`
 
-| #   | Local source is | Remote destination            | Behavior                                                                                                                                                                                                                            |
-| --- | --------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P1  | a file          | a non-existent remote path    | Upload as-is (destination is treated as the target object URL).                                                                                                                                                                     |
-| P2  | a file          | an existing remote object     | `remote object already exists, upload aborted` (write-once semantic enforced by the origin).                                                                                                                                        |
-| P3  | a file          | an existing remote collection | **Currently (main):** `remote object already exists, upload aborted` — no CLI-level inference. **After PR #2970 lands:** filename inferred, uploaded to `REMOTE/basename(LOCAL)`, matching the download G2 asymmetry the PR closes. |
-| P4  | a directory     | any                           | Client library error: `local object %q is a directory but recursive is not enabled`.                                                                                                                                                |
+| #   | Local source is | Remote destination            | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| --- | --------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| P1  | a file          | a non-existent remote path    | Upload as-is (destination is treated as the target object URL).                                                                                                                                                                                                                                                                                                                                                                |
+| P2  | a file          | an existing remote object     | `remote object already exists, upload aborted` (write-once semantic enforced by the origin).                                                                                                                                                                                                                                                                                                                                   |
+| P3  | a file          | an existing remote collection | `remote object already exists, upload aborted` at the **library** layer (`client.DoPut`) both before and after PR #2970 — the PR does NOT change library behavior. At the **CLI** layer (`pelican object put`), PR #2970 adds a `client.DoStat` up front and, when the destination is a collection, rewrites the target to `REMOTE/basename(LOCAL)` so the CLI succeeds. See "Library vs. CLI asymmetry after PR #2970" below. |
+| P4  | a directory     | any                           | Client library error: `local object %q is a directory but recursive is not enabled`.                                                                                                                                                                                                                                                                                                                                           |
 
 ### Single source, `--recursive=true`
 
@@ -80,6 +80,18 @@ Same shape as get: the last positional argument is the remote destination. Curre
 | P8  | Any single URL     | First upload may succeed; every subsequent upload sees `remote object already exists`. There is no CLI-level "destination must be a directory" precheck (unlike get). |
 
 PR #2970 adds a `client.DoStat` up front to detect a remote collection (or a stat-miss on a URL treated as a "would-be directory" for multi-source puts) and rewrites the per-file destination to `REMOTE/basename(LOCAL_i)`.
+
+## Library vs. CLI asymmetry after PR #2970
+
+PR #2970 adds directory-typed-destination filename inference for `put`, matching the `get` side's G2 behavior — but only at the CLI level (`cmd/object_put.go`). `client.DoPut` in the library still returns the "already exists" error for a file → existing-collection put. This is a deliberate scope choice by the PR: it fixes the user-facing CLI surface without changing library semantics that downstream automation may already be handling.
+
+The practical consequences:
+
+- A user running `pelican object put ./f.txt osdf:///ns/existing-dir` gets the inferred upload behavior after PR #2970.
+- A Go caller of `client.DoPut(ctx, "./f.txt", "osdf:///ns/existing-dir", false, ...)` still receives the "already exists" error. Handle it or do the destination rewrite in the caller.
+- If a future change wants to move inference into the library, do it as a separate PR and update row P3 above (plus its regression test) to drop the "library still errors" note.
+
+The CLI-side regression is covered by `TestObjectPutToDirectoryInfersFilename` in `cmd/object_put_test.go` (shipped as part of PR #2970). The library-side regression is covered by row P3 in `cmd/object_transfer_semantics_test.go`.
 
 ## Design principles the matrix follows
 

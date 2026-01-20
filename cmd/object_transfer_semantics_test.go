@@ -226,11 +226,13 @@ func TestObjectTransferSemantics(t *testing.T) {
 			"P2: error must mention already-exists so callers can distinguish this case")
 	})
 
-	// P3 is the row PR #2970 targets. The current-main assertion:
-	//   put single file to existing remote *collection* fails with
-	//   "already exists" (no CLI-level inference).
-	// After the PR lands, this test must be updated to assert that
-	// the object was inferred to REMOTE/basename(LOCAL).
+	// P3 is the library-level pin for the row PR #2970 targets. Note
+	// that PR #2970 only adds the inference at the CLI level
+	// (cmd/object_put.go); client.DoPut still errors "already exists"
+	// even after the PR. So this test's expectation does NOT change
+	// when the PR is applied. The CLI side is pinned by
+	// TestObjectPutToDirectoryInfersFilename in object_put_test.go
+	// (shipped as part of the PR).
 	t.Run("P3_put_file_to_existing_remote_collection_currently_errors", func(t *testing.T) {
 		// Seed the remote with a collection.
 		require.NoError(t, os.MkdirAll(filepath.Join(storage, "p3-dir"), 0o755))
