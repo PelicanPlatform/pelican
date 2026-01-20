@@ -24,10 +24,9 @@ import (
 
 var (
 	apiKeyCmd = &cobra.Command{
-		Use:   "api-key",
+		Use:   "apikey",
 		Short: "Manage API keys for server operations",
-		Long: `Provide commands to generate and manage API keys for Pelican servers (Origins/Caches).
-These commands interact with the server's administrative API endpoint.`,
+		Long:  `Provide commands to generate and manage API keys for Pelican servers.`,
 	}
 
 	apiKeyServerURLStr  string

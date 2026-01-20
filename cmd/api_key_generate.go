@@ -44,7 +44,7 @@ var (
 	apiKeyGenerateCmd = &cobra.Command{
 		Use:   "generate",
 		Short: "Generate a new API key for the server",
-		Long:  "Generate a new API key with specified scopes. The generated token will be displayed and can be used for API authentication.",
+		Long:  "Generate a new API key with specified scopes.",
 		RunE:  generateApiKey,
 	}
 
@@ -58,12 +58,17 @@ func init() {
 
 	apiKeyGenerateCmd.Flags().StringVar(&apiKeyScopes, "scopes", "", "Comma-separated list of scopes (e.g., monitoring.query,monitoring.scrape) (required)")
 	apiKeyGenerateCmd.Flags().StringVar(&apiKeyName, "name", "", "Name for the API key (defaults to cli-generated-{timestamp})")
-	apiKeyGenerateCmd.Flags().StringVar(&apiKeyExpiration, "expiration", "never", "Expiration time in RFC3339 format or 'never' for no expiration (default: never)")
+	apiKeyGenerateCmd.Flags().StringVar(&apiKeyExpiration, "expiration", "", "Expiration time in RFC3339 format")
 
 	// Mark scopes as required
 	err := apiKeyGenerateCmd.MarkFlagRequired("scopes")
 	if err != nil {
 		log.Errorln("Failed to mark scopes flag as required:", err)
+	}
+
+	err = apiKeyGenerateCmd.MarkFlagRequired("expiration")
+	if err != nil {
+		log.Errorln("Failed to mark expiration flag as required:", err)
 	}
 }
 
@@ -99,13 +104,12 @@ func generateApiKey(cmd *cobra.Command, args []string) error {
 	// Validate expiration format if provided
 	expiration := apiKeyExpiration
 	if expiration == "" {
-		expiration = "never"
-	} else if expiration != "never" {
-		// Try to parse as RFC3339 to validate format
-		_, err := time.Parse(time.RFC3339, expiration)
-		if err != nil {
-			return errors.Wrapf(err, "expiration must be in RFC3339 format (e.g., 2025-12-31T23:59:59Z) or 'never'")
-		}
+		return errors.New("--expiration flag is required")
+	}
+	// Try to parse as RFC3339 to validate format
+	_, err := time.Parse(time.RFC3339, expiration)
+	if err != nil {
+		return errors.Wrapf(err, "expiration must be in RFC3339 format (e.g., 2025-12-31T23:59:59Z) or 'never'")
 	}
 
 	// Construct API URL
