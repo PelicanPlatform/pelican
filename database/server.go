@@ -11,6 +11,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	"github.com/pelicanplatform/pelican/database/utils"
 	"github.com/pelicanplatform/pelican/param"
@@ -487,9 +488,11 @@ func UpsertServerLocalMetadata(metadata server_structs.ServerRegistration) error
 	now := time.Now()
 	serverType := serverTypeFromFlags(metadata.IsOrigin, metadata.IsCache)
 
-	// look for existing
+	// look for existing entry; use silent logger to suppress "record not found" log noise
 	var entry server_structs.ServerLocalMetadata
-	err := ServerDatabase.Where("id = ?", metadata.ID).First(&entry).Error
+	err := ServerDatabase.Session(&gorm.Session{
+		Logger: logger.Default.LogMode(logger.Silent),
+	}).Where("id = ?", metadata.ID).First(&entry).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		// no existing row → insert
 		entry = server_structs.ServerLocalMetadata{
