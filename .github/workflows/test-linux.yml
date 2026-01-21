@@ -30,10 +30,6 @@ jobs:
       uses: actions/checkout@v6
       with:
         fetch-depth: 0  # GoReleaser needs history
-    - name: Mark the checkout as safe
-      # NOTE (brianaydemir): This appears to be required for TestHandleCLIExecutableAlias.
-      run: |
-        git config --global --add safe.directory /__w/pelican/pelican
     - name: Set up Node.js
       uses: actions/setup-node@v6
       with:
@@ -90,6 +86,10 @@ jobs:
     - name: Add coverage information to action summary
       if: github.event_name == 'pull_request'
       run: echo 'Code coverage ' ${{steps.cc.outputs.cc_total}}'%' >> $GITHUB_STEP_SUMMARY
+    - name: Mark the checkout as safe
+      # This is required by the GoReleaser build below and subsequent tests.
+      run: |
+        git config --global --add safe.directory "$GITHUB_WORKSPACE"
     - name: Run GoReleaser
       uses: goreleaser/goreleaser-action@v6
       with:
