@@ -92,6 +92,9 @@ func stashPluginMain(args []string) {
 		log.Warningln("Failed to set plugin mode:", err)
 	}
 
+	// Set up signal handlers to flush logs on SIGTERM
+	client.SetupSignalHandlers()
+
 	// Handler function to recover from panics
 	defer func() {
 		if r := recover(); r != nil {
