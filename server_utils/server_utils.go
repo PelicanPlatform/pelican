@@ -278,7 +278,11 @@ func LaunchWatcherMaintenance(ctx context.Context, dirPaths []string, descriptio
 		egrp = &errgroup.Group{}
 	}
 	egrp.Go(func() error {
-		defer watcher.Close()
+		defer func() {
+			if watcher != nil {
+				watcher.Close()
+			}
+		}()
 		defer ticker.Stop()
 		for {
 			chosen, recv, ok := reflect.Select(cases)
