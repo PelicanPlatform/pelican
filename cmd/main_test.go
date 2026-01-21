@@ -159,14 +159,14 @@ func TestHandleCLIExecutableAlias(t *testing.T) {
 	} else {
 		// Compile the test binary.
 		if runningOS := runtime.GOOS; runningOS == "windows" {
-			cmd := exec.Command("go", "build", "-o", "pelican.exe", ".")
+			cmd := exec.Command("go", "build", "-buildvcs=false", "-o", "pelican.exe", ".")
 			err := cmd.Run()
 			if err != nil {
 				t.Fatal(err, "Error copying the binary to pelican.exe")
 			}
 			defer os.Remove("pelican.exe") // Clean up the test binary when done.
 		} else {
-			cmd := exec.Command("go", "build", "-o", "pelican", ".")
+			cmd := exec.Command("go", "build", "-buildvcs=false", "-o", "pelican", ".")
 			err := cmd.Run()
 			if err != nil {
 				t.Fatal(err, "Error copying the binary to pelican")
