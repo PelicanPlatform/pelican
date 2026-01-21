@@ -280,6 +280,7 @@ type (
 		writer             io.WriteCloser // Optional writer for downloads - if set, write to this instead of localPath
 		reader             io.ReadCloser  // Optional reader for uploads - if set, read from this instead of localPath
 		inPlace            bool           // If true, write directly to final destination; if false, use temporary file
+		forcePrestageAPI   bool           // If true, force use of prestage API and error if not supported (no fallback)
 	}
 
 	// A TransferJob associated with a client's request
@@ -300,25 +301,27 @@ type (
 
 	// An object able to process transfer jobs.
 	TransferEngine struct {
-		ctx             context.Context // The context provided upon creation of the engine.
-		cancel          context.CancelFunc
-		egrp            *errgroup.Group // The errgroup for the worker goroutines
-		work            chan *clientTransferJob
-		files           chan *clientTransferFile
-		results         chan *clientTransferResults
-		jobLookupDone   chan *clientTransferJob // Indicates the job lookup handler is done with the job
-		workersActive   int
-		resultsMap      map[uuid.UUID]chan *TransferResults
-		workMap         map[uuid.UUID]chan *TransferJob
-		notifyChan      chan bool
-		closeChan       chan bool
-		closeDoneChan   chan bool
-		ewmaTick        *time.Ticker
-		ewma            ewma.MovingAverage
-		ewmaVal         atomic.Int64
-		ewmaCtr         atomic.Int64
-		clientLock      sync.RWMutex
-		pelicanUrlCache *pelican_url.Cache
+		ctx                context.Context // The context provided upon creation of the engine.
+		cancel             context.CancelFunc
+		egrp               *errgroup.Group // The errgroup for the worker goroutines
+		work               chan *clientTransferJob
+		files              chan *clientTransferFile
+		results            chan *clientTransferResults
+		jobLookupDone      chan *clientTransferJob // Indicates the job lookup handler is done with the job
+		workersActive      int
+		resultsMap         map[uuid.UUID]chan *TransferResults
+		workMap            map[uuid.UUID]chan *TransferJob
+		notifyChan         chan bool
+		closeChan          chan bool
+		closeDoneChan      chan bool
+		ewmaTick           *time.Ticker
+		ewma               ewma.MovingAverage
+		ewmaVal            atomic.Int64
+		ewmaCtr            atomic.Int64
+		clientLock         sync.RWMutex
+		pelicanUrlCache    *pelican_url.Cache
+		prestageAPISupport map[string]bool // Lookup table for caches that support the Pelican prestage API (key: host)
+		prestageAPIMutex   sync.RWMutex    // Protects the prestageAPISupport map
 	}
 
 	TransferCallbackFunc = func(path string, downloaded int64, totalSize int64, completed bool)
@@ -343,22 +346,23 @@ type (
 		setupResults   sync.Once
 	}
 
-	TransferOption                     = option.Interface
-	identTransferOptionCaches          struct{}
-	identTransferOptionCallback        struct{}
-	identTransferOptionTokenLocation   struct{}
-	identTransferOptionAcquireToken    struct{}
-	identTransferOptionToken           struct{}
-	identTransferOptionSynchronize     struct{}
-	identTransferOptionCollectionsUrl  struct{}
-	identTransferOptionChecksums       struct{}
-	identTransferOptionRequireChecksum struct{}
-	identTransferOptionRecursive       struct{}
-	identTransferOptionDepth           struct{}
-	identTransferOptionWriter          struct{}
-	identTransferOptionReader          struct{}
-	identTransferOptionInPlace         struct{}
-	identTransferOptionDryRun          struct{}
+	TransferOption                      = option.Interface
+	identTransferOptionCaches           struct{}
+	identTransferOptionCallback         struct{}
+	identTransferOptionTokenLocation    struct{}
+	identTransferOptionAcquireToken     struct{}
+	identTransferOptionToken            struct{}
+	identTransferOptionSynchronize      struct{}
+	identTransferOptionCollectionsUrl   struct{}
+	identTransferOptionChecksums        struct{}
+	identTransferOptionRequireChecksum  struct{}
+	identTransferOptionRecursive        struct{}
+	identTransferOptionDepth            struct{}
+	identTransferOptionWriter           struct{}
+	identTransferOptionReader           struct{}
+	identTransferOptionInPlace          struct{}
+	identTransferOptionDryRun           struct{}
+	identTransferOptionForcePrestageAPI struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -619,21 +623,22 @@ func NewTransferEngine(ctx context.Context) (te *TransferEngine, err error) {
 	pelicanUrlCache := pelican_url.StartCache(ctx, egrp)
 
 	te = &TransferEngine{
-		ctx:             ctx,
-		cancel:          cancel,
-		egrp:            egrp,
-		work:            work,
-		files:           files,
-		results:         results,
-		resultsMap:      make(map[uuid.UUID]chan *TransferResults),
-		workMap:         make(map[uuid.UUID]chan *TransferJob),
-		jobLookupDone:   make(chan *clientTransferJob, 5),
-		notifyChan:      make(chan bool),
-		closeChan:       make(chan bool),
-		closeDoneChan:   make(chan bool),
-		ewmaTick:        time.NewTicker(ewmaInterval),
-		ewma:            ewma.NewMovingAverage(20), // By explicitly setting the age to 20s, the first 10 seconds will use an average of historical samples instead of EWMA
-		pelicanUrlCache: pelicanUrlCache,
+		ctx:                ctx,
+		cancel:             cancel,
+		egrp:               egrp,
+		work:               work,
+		files:              files,
+		results:            results,
+		resultsMap:         make(map[uuid.UUID]chan *TransferResults),
+		workMap:            make(map[uuid.UUID]chan *TransferJob),
+		jobLookupDone:      make(chan *clientTransferJob, 5),
+		notifyChan:         make(chan bool),
+		closeChan:          make(chan bool),
+		closeDoneChan:      make(chan bool),
+		ewmaTick:           time.NewTicker(ewmaInterval),
+		ewma:               ewma.NewMovingAverage(20), // By explicitly setting the age to 20s, the first 10 seconds will use an average of historical samples instead of EWMA
+		pelicanUrlCache:    pelicanUrlCache,
+		prestageAPISupport: make(map[string]bool),
 	}
 	workerCount := param.Client_WorkerCount.GetInt()
 	if workerCount <= 0 {
@@ -762,6 +767,15 @@ func WithDryRun(enable bool) TransferOption {
 	return option.New(identTransferOptionDryRun{}, enable)
 }
 
+// Create an option to force use of the Pelican prestage API
+//
+// When enabled for prestage transfers, the client will return an error if the cache
+// does not support the Pelican prestage API instead of falling back to the traditional
+// method. This is useful for testing to ensure the API is actually being used.
+func WithForcePrestageAPI(force bool) TransferOption {
+	return option.New(identTransferOptionForcePrestageAPI{}, force)
+}
+
 // Create a new client to work with an engine
 func (te *TransferEngine) NewClient(options ...TransferOption) (client *TransferClient, err error) {
 	log.Debugln("Making new clients")
@@ -794,6 +808,9 @@ func (te *TransferEngine) NewClient(options ...TransferOption) (client *Transfer
 			client.syncLevel = option.Value().(SyncLevel)
 		case identTransferOptionDryRun{}:
 			client.dryRun = option.Value().(bool)
+		case identTransferOptionForcePrestageAPI{}:
+			// This option is handled at the job level, not client level
+			// Skip it here; it will be processed in NewTransferJob/NewPrestageJob
 		}
 	}
 	func() {
@@ -1311,6 +1328,8 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 			tj.token.SetToken(option.Value().(string))
 		case identTransferOptionSynchronize{}:
 			tj.syncLevel = option.Value().(SyncLevel)
+		case identTransferOptionForcePrestageAPI{}:
+			tj.forcePrestageAPI = option.Value().(bool)
 		}
 	}
 
@@ -2111,7 +2130,89 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				return
 			}
 		}
-	} else {
+	} else { // Prestage case
+		// Check if we should use the Pelican prestage API
+		// We'll try the API for the first attempt (if supported), then fall back to the traditional method
+		if len(transfer.attempts) > 0 {
+			firstAttempt := transfer.attempts[0]
+			cacheHost := firstAttempt.Url.Host
+
+			// Check if this cache supports the prestage API
+			supportsAPI := false
+			if transfer.engine != nil {
+				// First check with read lock
+				transfer.engine.prestageAPIMutex.RLock()
+				supported, checked := transfer.engine.prestageAPISupport[cacheHost]
+				transfer.engine.prestageAPIMutex.RUnlock()
+
+				if !checked {
+					// Acquire write lock to perform the check
+					transfer.engine.prestageAPIMutex.Lock()
+					// Double-check in case another thread already did the check while we were waiting
+					supported, checked = transfer.engine.prestageAPISupport[cacheHost]
+					if !checked {
+						// We're the first thread to check, perform the API support test
+						supportsAPI = checkPrestageAPISupport(transfer.ctx, firstAttempt.Url, transfer.token)
+						transfer.engine.prestageAPISupport[cacheHost] = supportsAPI
+					} else {
+						supportsAPI = supported
+					}
+					transfer.engine.prestageAPIMutex.Unlock()
+				} else {
+					supportsAPI = supported
+				}
+			}
+
+			if supportsAPI {
+				// Use the Pelican prestage API
+				log.Debugln("Using Pelican prestage API for", transfer.remoteURL.Path, "at", cacheHost)
+				transferResults = newTransferResults(transfer.job)
+				transferStartTime := time.Now()
+
+				bytesTransferred, err := invokePrestageAPI(transfer.ctx, firstAttempt.Url, transfer.remoteURL.Path, transfer.token, transfer.callback)
+
+				endTime := time.Now()
+				attempt := TransferResult{
+					CacheAge:          -1,
+					Number:            0,
+					Endpoint:          cacheHost,
+					TransferEndTime:   endTime,
+					TransferTime:      endTime.Sub(transferStartTime),
+					TransferFileBytes: bytesTransferred,
+				}
+
+				if err != nil {
+					log.Debugln("Prestage API failed:", err)
+					attempt.Error = newTransferAttemptError(cacheHost, "", false, false, err)
+					transferResults.Error = err
+				} else {
+					transferResults.TransferredBytes = bytesTransferred
+				}
+
+				transferResults.Attempts = append(transferResults.Attempts, attempt)
+				transferResults.TransferStartTime = transferStartTime
+
+				// If the API succeeded, return early
+				if err == nil {
+					return transferResults, nil
+				}
+
+				// If API failed and we're forcing API usage, return the error
+				if transfer.job != nil && transfer.job.forcePrestageAPI {
+					return transferResults, errors.Wrap(err, "prestage API required but failed")
+				}
+
+				// If API failed, fall through to traditional method
+				log.Debugln("Falling back to traditional prestage method")
+			} else if transfer.job != nil && transfer.job.forcePrestageAPI {
+				// API not supported but forced - return error immediately
+				transferResults = newTransferResults(transfer.job)
+				transferResults.Error = errors.Errorf("cache %s does not support the Pelican prestage API, but API usage is required", cacheHost)
+				return transferResults, transferResults.Error
+			}
+		}
+
+		// Traditional prestage: download to /dev/null
 		localPath = os.DevNull
 		fileWriter = io.Discard
 	}
