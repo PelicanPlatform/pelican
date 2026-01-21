@@ -32,7 +32,7 @@
 # For selecting OSG-maintained packages.
 ARG ALMALINUX_TAG=9
 ARG BASE_OS=el9
-ARG OSG_SERIES=24
+ARG OSG_SERIES=25
 ARG OSG_REPO=release
 
 # For compiling Pelican.
