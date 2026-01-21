@@ -16,7 +16,7 @@ export default {
 	"federating-your-data": "Federating Your Data",
 	"operating-a-federation": "Operating a Federation",
 	"monitoring-pelican-services": "Monitoring Pelican Services",
-	"advanced-usage": "Advanced Usage",
+	"advanced-usage": "Advanced Concepts",
 	"faq": "FAQs and Troubleshooting",
 	"api-docs": "API Documentation",
 	"versions": {

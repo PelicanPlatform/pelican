@@ -1,0 +1,169 @@
+import { Callout } from '@/components/Callout'
+import { Terminal } from '@/components/Terminal'
+
+# Working with Protected Data
+Whenever a new namespace joins a Pelican Federation, the Origins that serve the namespace tell the Federation about their data access policies.
+These policies say something about *who's* allowed to access the data and *how* they're allowed to access it.
+For example, a namespace's policy might declare that all its data is publicly-readable, meaning anyone can access its objects via Pelican without any extra steps.
+In this case, anyone could use the Pelican CLI to download the data with a simple `pelican object get <pelican:// URL> <local name>`.
+
+However, some namespaces use policies that impose authorization limits on their data.
+This is the case whenever a namespace allows writes (the ability to upload data is always protected) or non-public reads (see "[Origin and Namespace Capabilities](../../federating-your-data/origin#origin-and-namespace-capabilities)").
+In these settings, users must prove to the Origin that they're authorized to perform an operation (read/GET or write/PUT) on an object in the namespace.
+
+This document describes how Pelican CLI Client users can interact with data that requires some form of access authorization.
+It will gloss over most technical terms, preferring instead to provide only what's needed for a client user to work with protected data.
+
+For a more technical walkthrough of Pelican's authorization framework including how "authorization" differs from "authentication", see "[Advanced Usage/Pelican's Authorization System](../../advanced-usage/auth)".
+
+## Background
+Most people are familiar with using "username & password" authentication to protect data, but this setup rarely scales well in federated services whose components cross administrative boundaries, which is how the OSDF functions.
+Instead, Pelican uses [authorization tokens](../../advanced-usage/auth#tokens) to decide whether to grant or deny object access.
+
+The simplest description of authorization tokens is that they function much like concert tickets:
+- whoever has the ticket is allowed to sit in a specific seat at the concert venue
+- if you don't have a ticket with the right paper, hologram or barcode, the ticket isn't valid
+- you're not allowed to sit in a seat other than what your ticket permits
+- your ticket gets you into the concert on Saturday night, but not the concerts on Friday or Sunday
+
+In Pelican, tokens act like digital concert tickets by granting the ability to perform a specific operation (e.g. GET or PUT) on a specific part of a namespace or object to anyone who possesses the token.
+Whenever a user tries to work with a protected resource, the success of their request depends on having the right token.
+
+While Pelican needs these tokens to enforce access policies, they can be very confusing for anyone who doesn't regularly work with them.
+That's why, in most cases, Pelican Client users won't need to explicitly interact with tokens; Pelican Clients work hard to deal with them under the hood while exposing users to more familiar access methods, such as the ability to log into a "Single Sign-On" service like [CILogon](https://www.cilogon.org/home) that generates tokens on users' behalf.
+
+The section of this page titled "[Automatic Token Generation](./#automatic-token-generation)" describes the various setups that let users access protected data without needing to explicitly interact with tokens.
+
+If your namespace or local environment are not configured using one of these options, you may need to create tokens manually.
+See this page's "[Explicit Token Creation/Management with Pelican](./#explicit-token-creation-&-management-with-pelican)" for instructions in that case.
+
+## Automatic Token Generation
+Wherever possible, Pelican services should be set up in a way that does not require users to interact with tokens directly.
+The two methods that accomplish this apply to different Origin/namespace setups and are intended to serve different user audiences.
+
+In both cases, client user who runs a command like `pelican object <VERB> <RESOURCE> <DESTINATION>` will be walked through the steps to complete the transfer.
+
+The first of these methods -- [OAuth2/OIDC integration](#automatic-tokens-for-namespacesorigins-that-support-oauth2oidc) -- should be the standard case for the majority of users.
+This option most often applies to multi-tenant namespaces whose protected data is meant to be accessed by a variety of people.
+
+The second method is for users that own a namespace or otherwise possess the secret "private signing key" used to create the namespace at the Federation's Registry service.
+If the last sentence didn't mean anything to you, you probably don't fall in this category!
+
+### Automatic Tokens for Namespaces/Origins that Support OAuth2/OIDC
+This is the setup that should apply to most users; when you execute the Pelican CLI, it'll provide you with a link that can be copy-pasted into the browser to complete the action.
+
+<Callout type="default">
+This section does not cover how Origin administrators can set up their services to function in this way; it's meant only to describe client access to Origins/namespaces that already support it.
+
+For more information on Origin configuration, see "[Federating Your Data](../../federating-your-data)". Documentation specific to Origin Issuer configuration is under development. For additional help with this in the meantime, reach out to [help@pelicanplatform.org](mailto:help@pelicanplatform.org).
+</Callout>
+
+Here's what it looks like in practice (note that this example is not copy-pastable -- it's for demonstration purposes only):
+
+<Callout type="example">
+Download a protected object to the local directory
+<Terminal>
+$ pelican object get pelican://osg-htc.org/protected-namespace/foo.txt ./
+
+The OSDF client configuration is encrypted.  Enter your password for the local OSDF client configuration file:
+&lt;password gets entered here&gt;
+
+To approve credentials for this operation, please navigate to the following URL and approve the request:
+
+`https://osdf-example-issuer.com/device?user_code=ABC-123-XYZ`
+</Terminal>
+
+After copy-pasting the URL into a browser and logging into the portal, the Client should automatically proceed to download the object
+</Callout>
+
+In this example, the user is asked to enter a password _before_ being given the URL.
+This password unlocks a local, encrypted "token cache" that may already contain tokens to fulfill the request.
+When such a token exists, the URL will not be provided and the download will proceed with the cached token.
+
+<Callout type="default">
+If you ever forget the password for this local token cache, you can only reset it by deleting the file located at:
+- (for non-root users) ` ~/.config/pelican/credentials/client-credentials.pem`
+- (for root users) ` /etc/pelican/credentials/client-credentials.pem`
+
+Deleting this file is generally safe, but it may force you to re-generate some tokens using the procedure described above.
+</Callout>
+
+### Automatic Token Generation for Clients that Possess an Issuer Signing Key
+When an Origin/namespace owner possesses the private key for their own token issuer, this key can be connected to Pelican Clients to enable the Client to generate its own tokens.
+This is accomplished by dropping the private signing key into one of the following directories:
+- (for non-root users) `~/.config/pelican/issuer-keys`
+- (for root users) `/etc/pelican/issuer-keys`
+
+When this is done, running a command like `pelican object <VERB> <RESOURCE> <DESTINATION>` should automatically generate the needed token without additional input.
+
+## Explicit Token Creation & Management with Pelican
+The Pelican CLI provides a token creation tool for cases where automatic token generation is not preferred or does not succeed.
+
+This command lives under `pelican token create <pelican-url> [flags]`, and it lets anyone who possesses a namespace issuer's private signing key create tokens on behalf of the namespace.
+By default, it will look for these signing keys under `~/.config/pelican/issuer-keys` for non-root users or `/etc/pelican/issuer-keys` for root users.
+
+Before continuing, it's recommended that you have an overview understanding of the concepts discussed in "[Advanced Usage/Pelican's Authorization System](../../advanced-usage/auth)" because this command lets you build arbitrary data access tokens.
+<Callout type="warning">
+  Generating tokens without understanding what they permit could result in unintentionally exposing your data to the wrong people.
+  It's ***highly*** recommended that you always limit your tokens with fine-grained access scopes and minimal lifetimes as opposed to long-lived tokens that can access data from anywhere in the namespace.
+</Callout>
+
+### Flags for Access Permissions
+The `pelican token create` command uses a set capability flags to apply various access permissions to the generated token for a namespaced resource.
+These flags are:
+- `-r, --read`: adds the ability to _read_ the specified resource. All tokens needed for a `pelican object get` should apply this flag.
+- `-w, --write`: adds the ability to _write_ or _create_ the specified resource. Note that this **does not** grant permission to _overwrite_ or _delete_ the resource. All tokens needed for a `pelican object put` should apply this flag.
+- `-m, --modify`: adds the ability to _modify_ or _delete_ the specified resource, but will also grant the ability to _write_ or _create_. All tokens needed for a `pelican object delete` should apply this flag.
+
+<Callout type="example">
+To create a token that lets Client users **read/get** or **write/put** anything under the `/foobar` namespace in the `osg-htc.org` federation (OSDF), run
+```bash
+pelican token create --read --write pelican://osg-htc.org/foobar
+```
+
+(Note that this assumes the private signing key of the `/foobar` issuer resides in your `~/.config/pelican/issuer-keys` or `/etc/pelican/issuer-keys` directory.)
+</Callout>
+
+### Specifying Token Issuers
+Tokens contain information about "who" created/issued them, and this information is required for token authorization to work at whichever Origin or Cache that examines the token.
+In most cases, Pelican can figure out what values to set in your token by comparing what's known about the specified namespace with the private key you're using to sign the token.
+
+The `pelican token create` command uses this information to warn you when it thinks there's an error that will prevent your token from functioning.
+These errors typically take one of several forms:
+- the command determines the valid issuer(s), but the key you're signing with does not match any of the public keys those issuers advertise
+- the command cannot determine valid issuer(s) via the federation's Director, and thus needs to be told explicitly what value to use
+
+<Callout type="example">
+In this example, the command determines your signing key isn't expected to work for the indicated namespace
+```bash
+$ pelican token create --read pelican://osg-htc.org/my-prefix --private-key wrong-key.pem
+Error: unable to determine issuer for resource pelican://osg-htc.org/my-prefix; you may need to re-run with '--issuer <issuer URL>' to specify an issuer: none of the issuers discovered at the director match your signing key; issuers that were checked: https://correct-issuer.com
+```
+
+If you encounter this error, it means you either don't have the correct signing key to create tokens, or the namespace's issuer is misconfigured.
+Fixing this error usually requires help from the namespace's Origin administrator.
+</Callout>
+
+<Callout type="example">
+In this example, the command discovers an issuer from the Director that is not reachable on the web (`https://issuer-does-not-exist.com`).
+
+command cannot determine which issuer(s) are valid for the indicated namespace.
+```bash
+$ pelican token create --read pelican://osg-htc.org/my-prefix
+WARNING[2025-10-03T15:38:47Z] Unable to get JWKS from issuer URL https://issuer-does-not-exist.com: Error getting JWKS URL from issuer URL: failed to lookup openid-configuration for issuer https://issuer-does-not-exist.com: Get "https://issuer-does-not-exist.com": dial tcp: lookup https://issuer-does-not-exist.com on 192.168.65.7:53: no such host; skipping
+Error: unable to determine issuer for resource pelican://osg-htc.org/my-prefix; you may need to re-run with '--issuer <issuer URL>' to specify an issuer: none of the issuers discovered at the director match your signing key; issuers that were checked: https://issuer-does-not-exist.com
+```
+
+This usually points to misconfiguration at the namespace's Origin service (the configured issuer does not exist or is not reachable) and fixing it likely requires help from the Origin's administrator.
+</Callout>
+
+If you encounter these errors or any related to issuers, you can still force the creation your token by manually specifying your issuer.
+Before you do, double check your federation's Director to see which "Token Issuer" is configured for the namespace by clicking on the relevant namespace in the "Namespaces" dropdown.
+
+Then re-run the command and set the `--issuer` flag to the desired value:
+<Callout type="example">
+Manually set an issuer for your token
+```bash
+pelican token create --read --write pelican://osg-htc.org/my-prefix --issuer https://my-prefix-issuer.com
+```
+</Callout>
