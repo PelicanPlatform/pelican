@@ -267,32 +267,58 @@ func TestGetRuntimeConfigurable(t *testing.T) {
 	assert.False(t, tlsSkipVerify, "TLSSkipVerify should be false in the map")
 }
 
+// Test various parameter types to ensure they return correct environment variable names
 func TestGetEnvVarName(t *testing.T) {
-	// Test various parameter types to ensure they return correct environment variable names
+	// Define an interface to generalize over different param for ease of testing -- this probably
+	// should have been done at the package level from the getgo ¯\_(ツ)_/¯
+	type param interface {
+		GetEnvVarName() string
+		GetName() string
+	}
 
-	// Test StringParam
-	envVar := Cache_Port.GetEnvVarName()
-	assert.Equal(t, "PELICAN_CACHE_PORT", envVar, "Cache.Port should map to PELICAN_CACHE_PORT")
+	testCases := []struct {
+		name     string
+		param    param
+		expected string
+	}{
+		{
+			name:     "test-string-param",
+			param:    Cache_Port,
+			expected: "PELICAN_CACHE_PORT",
+		},
+		{
+			name:     "test-single-word-param",
+			param:    TLSSkipVerify,
+			expected: "PELICAN_TLSSKIPVERIFY",
+		},
+		{
+			name:     "test-bool-and-nested-param",
+			param:    Origin_EnableListings,
+			expected: "PELICAN_ORIGIN_ENABLELISTINGS",
+		},
+		{
+			name:     "test-string-slice-param",
+			param:    ConfigLocations,
+			expected: "PELICAN_CONFIGLOCATIONS",
+		},
+		{
+			name:     "test-duration-param",
+			param:    Cache_SelfTestInterval,
+			expected: "PELICAN_CACHE_SELFTESTINTERVAL",
+		},
+		{
+			name:     "test-object-param",
+			param:    Registry_Institutions,
+			expected: "PELICAN_REGISTRY_INSTITUTIONS",
+		},
+	}
 
-	// Test with single word parameter
-	envVar = Debug.GetEnvVarName()
-	assert.Equal(t, "PELICAN_DEBUG", envVar, "Debug should map to PELICAN_DEBUG")
-
-	// Test with nested parameter (multiple dots)
-	envVar = Director_CacheSortMethod.GetEnvVarName()
-	assert.Equal(t, "PELICAN_DIRECTOR_CACHESORTMETHOD", envVar, "Director.CacheSortMethod should map to PELICAN_DIRECTOR_CACHESORTMETHOD")
-
-	// Test BoolParam
-	envVar = TLSSkipVerify.GetEnvVarName()
-	assert.Equal(t, "PELICAN_TLSSKIPVERIFY", envVar, "TLSSkipVerify should map to PELICAN_TLSSKIPVERIFY")
-
-	// Test StringSliceParam
-	envVar = ConfigLocations.GetEnvVarName()
-	assert.Equal(t, "PELICAN_CONFIGLOCATIONS", envVar, "ConfigLocations should map to PELICAN_CONFIGLOCATIONS")
-
-	// Test DurationParam
-	envVar = Cache_SelfTestInterval.GetEnvVarName()
-	assert.Equal(t, "PELICAN_CACHE_SELFTESTINTERVAL", envVar, "Cache.SelfTestInterval should map to PELICAN_CACHE_SELFTESTINTERVAL")
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			envVar := tc.param.GetEnvVarName()
+			assert.Equal(t, tc.expected, envVar, "%s should map to %s", tc.param.GetName(), tc.expected)
+		})
+	}
 }
 
 func TestCallbackRegistration(t *testing.T) {
