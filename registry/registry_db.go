@@ -29,6 +29,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
@@ -314,7 +315,10 @@ func getServerByRegistrationID(registrationID int) (*server_structs.ServerRegist
 // Retrieve the details of a server by server name
 func getServerByName(serverName string) (*server_structs.ServerRegistration, error) {
 	var server server_structs.Server
-	if err := database.ServerDatabase.Where("name = ?", serverName).First(&server).Error; err != nil {
+	// Use a silent session to suppress "record not found" log noise for this expected lookup
+	if err := database.ServerDatabase.Session(&gorm.Session{
+		Logger: logger.Default.LogMode(logger.Silent),
+	}).Where("name = ?", serverName).First(&server).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, gorm.ErrRecordNotFound
 		}
