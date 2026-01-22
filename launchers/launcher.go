@@ -355,16 +355,6 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		}
 	}
 
-	// Launch the broker listener.  Needs the federation information to determine the broker endpoint.
-	if fedInfo.BrokerEndpoint != "" && !(modules.IsEnabled(server_structs.OriginType) && param.Origin_EnableBroker.GetBool()) && modules.IsEnabled(server_structs.CacheType) && param.Cache_EnableBroker.GetBool() && !param.Cache_EnableSiteLocalMode.GetBool() {
-		// Note we unconditionally launch the broker listener for the cache if there
-		// is one available.  This is to reduce the need for the cache to have a second
-		// incoming TCP connection to function.
-		if err = cache.LaunchBrokerListener(ctx, egrp, engine); err != nil {
-			return
-		}
-	}
-
 	// If we are a director, we will potentially contact other
 	// services with the broker, so we need to set up the broker dialer
 	var brokerDialer *broker.BrokerDialer
@@ -382,9 +372,22 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		}
 	}
 
+	// Launch periodic advertise BEFORE broker listener because the broker listener
+	// needs server metadata which is populated during the first advertisement.
 	if modules.IsEnabled(server_structs.OriginType) || modules.IsEnabled(server_structs.CacheType) && len(serversRequireAdvertisement) > 0 {
 		log.Debug("Launching periodic advertise of origin/cache server to the director")
 		if err = launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, serversRequireAdvertisement); err != nil {
+			return
+		}
+	}
+
+	// Launch the broker listener.  Needs the federation information to determine the broker endpoint.
+	// This must be called AFTER LaunchPeriodicAdvertise because it needs server metadata from the database.
+	if fedInfo.BrokerEndpoint != "" && !(modules.IsEnabled(server_structs.OriginType) && param.Origin_EnableBroker.GetBool()) && modules.IsEnabled(server_structs.CacheType) && param.Cache_EnableBroker.GetBool() && !param.Cache_EnableSiteLocalMode.GetBool() {
+		// Note we unconditionally launch the broker listener for the cache if there
+		// is one available.  This is to reduce the need for the cache to have a second
+		// incoming TCP connection to function.
+		if err = cache.LaunchBrokerListener(ctx, egrp, engine); err != nil {
 			return
 		}
 	}
