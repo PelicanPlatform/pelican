@@ -32,7 +32,7 @@
 # For selecting OSG-maintained packages.
 ARG ALMALINUX_TAG=9
 ARG BASE_OS=el9
-ARG OSG_SERIES=24
+ARG OSG_SERIES=25
 ARG OSG_REPO=release
 
 # For compiling Pelican.
@@ -77,7 +77,7 @@ ARG XROOTD_S3_HTTP_SRC_BUILD=true
 ARG XROOTD_S3_HTTP_VER=0.6.0
 # Installed from Koji if not building it from source.
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
-ARG XRDHTTP_PELICAN_VER=0.0.8
+ARG XRDHTTP_PELICAN_VER=0.0.9
 ARG XRDHTTP_PELICAN_RELEASE="1.osg${OSG_SERIES}.${BASE_OS}"
 
 # Set scitokens-oauth2-server image as a build stage so that we can copy its
