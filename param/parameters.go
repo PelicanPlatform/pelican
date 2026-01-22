@@ -20,6 +20,7 @@
 package param
 
 import (
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -442,6 +443,15 @@ func IsRuntimeConfigurable(paramName string) bool {
 	return false
 }
 
+// paramNameToEnvVar converts a parameter name (e.g., "Cache.Port") to its
+// corresponding Pelican environment variable name (e.g., "PELICAN_CACHE_PORT").
+func paramNameToEnvVar(paramName string) string {
+	// Replace dots with underscores and convert to uppercase
+	envVar := strings.ReplaceAll(paramName, ".", "_")
+	envVar = strings.ToUpper(envVar)
+	return "PELICAN_" + envVar
+}
+
 func (sP StringParam) GetString() string {
 	config := getOrCreateConfig()
 	switch sP.name {
@@ -779,6 +789,10 @@ func (sP StringParam) IsRuntimeConfigurable() bool {
 	return IsRuntimeConfigurable(sP.name)
 }
 
+func (sP StringParam) GetEnvVarName() string {
+	return paramNameToEnvVar(sP.name)
+}
+
 func (slP StringSliceParam) GetStringSlice() []string {
 	config := getOrCreateConfig()
 	switch slP.name {
@@ -840,6 +854,10 @@ func (slP StringSliceParam) IsSet() bool {
 
 func (slP StringSliceParam) IsRuntimeConfigurable() bool {
 	return IsRuntimeConfigurable(slP.name)
+}
+
+func (slP StringSliceParam) GetEnvVarName() string {
+	return paramNameToEnvVar(slP.name)
 }
 
 func (iP IntParam) GetInt() int {
@@ -941,6 +959,10 @@ func (iP IntParam) IsSet() bool {
 
 func (iP IntParam) IsRuntimeConfigurable() bool {
 	return IsRuntimeConfigurable(iP.name)
+}
+
+func (iP IntParam) GetEnvVarName() string {
+	return paramNameToEnvVar(iP.name)
 }
 
 func (bP BoolParam) GetBool() bool {
@@ -1108,6 +1130,10 @@ func (bP BoolParam) IsRuntimeConfigurable() bool {
 	return IsRuntimeConfigurable(bP.name)
 }
 
+func (bP BoolParam) GetEnvVarName() string {
+	return paramNameToEnvVar(bP.name)
+}
+
 func (dP DurationParam) GetDuration() time.Duration {
 	config := getOrCreateConfig()
 	switch dP.name {
@@ -1215,6 +1241,10 @@ func (dP DurationParam) IsRuntimeConfigurable() bool {
 	return IsRuntimeConfigurable(dP.name)
 }
 
+func (dP DurationParam) GetEnvVarName() string {
+	return paramNameToEnvVar(dP.name)
+}
+
 func (oP ObjectParam) Unmarshal(rawVal any) error {
 	return viper.UnmarshalKey(oP.name, rawVal)
 }
@@ -1229,6 +1259,10 @@ func (oP ObjectParam) IsSet() bool {
 
 func (oP ObjectParam) IsRuntimeConfigurable() bool {
 	return IsRuntimeConfigurable(oP.name)
+}
+
+func (oP ObjectParam) GetEnvVarName() string {
+	return paramNameToEnvVar(oP.name)
 }
 
 // allParameterNames is the list of all config keys generated from
