@@ -78,14 +78,12 @@ func TestGetPluginVariants(t *testing.T) {
 
 func TestGetPluginSearchPaths(t *testing.T) {
 	// Save original env vars
-	originalXrdPluginPath := os.Getenv("XRD_PLUGINPATH")
 	originalLdLibraryPath := os.Getenv("LD_LIBRARY_PATH")
 	originalDyldLibraryPath := os.Getenv("DYLD_LIBRARY_PATH")
 	originalDyldFallbackLibraryPath := os.Getenv("DYLD_FALLBACK_LIBRARY_PATH")
 
 	// Clean up after test
 	defer func() {
-		os.Setenv("XRD_PLUGINPATH", originalXrdPluginPath)
 		os.Setenv("LD_LIBRARY_PATH", originalLdLibraryPath)
 		os.Setenv("DYLD_LIBRARY_PATH", originalDyldLibraryPath)
 		os.Setenv("DYLD_FALLBACK_LIBRARY_PATH", originalDyldFallbackLibraryPath)
@@ -94,7 +92,6 @@ func TestGetPluginSearchPaths(t *testing.T) {
 
 	t.Run("DefaultPaths", func(t *testing.T) {
 		resetPluginSearchPathsForTesting()
-		os.Unsetenv("XRD_PLUGINPATH")
 		os.Unsetenv("LD_LIBRARY_PATH")
 		os.Unsetenv("DYLD_LIBRARY_PATH")
 		os.Unsetenv("DYLD_FALLBACK_LIBRARY_PATH")
@@ -113,12 +110,11 @@ func TestGetPluginSearchPaths(t *testing.T) {
 
 	t.Run("WithEnvironmentVariables", func(t *testing.T) {
 		resetPluginSearchPathsForTesting()
-		os.Unsetenv("LD_LIBRARY_PATH")
 		os.Unsetenv("DYLD_LIBRARY_PATH")
 		os.Unsetenv("DYLD_FALLBACK_LIBRARY_PATH")
 
 		testPath := "/custom/plugin/path"
-		os.Setenv("XRD_PLUGINPATH", testPath)
+		os.Setenv("LD_LIBRARY_PATH", testPath)
 
 		paths := getPluginSearchPaths()
 		// Convert testPath to absolute path for comparison (handles Windows paths)
@@ -129,7 +125,6 @@ func TestGetPluginSearchPaths(t *testing.T) {
 
 	t.Run("WithMultiplePathsInEnvVar", func(t *testing.T) {
 		resetPluginSearchPathsForTesting()
-		os.Unsetenv("XRD_PLUGINPATH")
 		os.Unsetenv("DYLD_LIBRARY_PATH")
 		os.Unsetenv("DYLD_FALLBACK_LIBRARY_PATH")
 
@@ -153,7 +148,6 @@ func TestGetPluginSearchPaths(t *testing.T) {
 		}
 
 		resetPluginSearchPathsForTesting()
-		os.Unsetenv("XRD_PLUGINPATH")
 		os.Unsetenv("LD_LIBRARY_PATH")
 		os.Unsetenv("DYLD_LIBRARY_PATH")
 
@@ -168,11 +162,169 @@ func TestGetPluginSearchPaths(t *testing.T) {
 	})
 }
 
+func TestParsePluginConfigFile(t *testing.T) {
+	t.Run("ValidEnabledPlugin", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configFile := filepath.Join(tmpDir, "test.conf")
+		content := `# Test plugin config
+lib=/usr/local/lib/libTestPlugin.so
+enable=true
+url=pelican://
+`
+		err := os.WriteFile(configFile, []byte(content), 0644)
+		require.NoError(t, err)
+
+		libPath, enabled := parsePluginConfigFile(configFile)
+		assert.Equal(t, "/usr/local/lib/libTestPlugin.so", libPath)
+		assert.True(t, enabled)
+	})
+
+	t.Run("DisabledPlugin", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configFile := filepath.Join(tmpDir, "test.conf")
+		content := `lib=/usr/local/lib/libTestPlugin.so
+enable=false
+`
+		err := os.WriteFile(configFile, []byte(content), 0644)
+		require.NoError(t, err)
+
+		libPath, enabled := parsePluginConfigFile(configFile)
+		assert.Equal(t, "/usr/local/lib/libTestPlugin.so", libPath)
+		assert.False(t, enabled)
+	})
+
+	t.Run("EnabledVariants", func(t *testing.T) {
+		for _, enableValue := range []string{"true", "1", "yes"} {
+			tmpDir := t.TempDir()
+			configFile := filepath.Join(tmpDir, "test.conf")
+			content := "lib=/test/lib.so\nenable=" + enableValue + "\n"
+			err := os.WriteFile(configFile, []byte(content), 0644)
+			require.NoError(t, err)
+
+			_, enabled := parsePluginConfigFile(configFile)
+			assert.True(t, enabled, "enabled=%s should be true", enableValue)
+		}
+	})
+
+	t.Run("RelativePath", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configFile := filepath.Join(tmpDir, "test.conf")
+		content := `lib=libTestPlugin.so
+enable=true
+`
+		err := os.WriteFile(configFile, []byte(content), 0644)
+		require.NoError(t, err)
+
+		libPath, enabled := parsePluginConfigFile(configFile)
+		assert.Equal(t, "libTestPlugin.so", libPath)
+		assert.True(t, enabled)
+	})
+}
+
+func TestParseClientPluginDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create config files
+	configs := map[string]string{
+		"01-absolute.conf": "lib=/custom/lib/libPlugin1.so\nenable=true\n",
+		"02-relative.conf": "lib=libPlugin2.so\nenable=true\n",
+		"03-disabled.conf": "lib=/another/lib/libPlugin3.so\nenable=false\n",
+		"04-absolute.conf": "lib=/opt/lib/libPlugin4.so\nenable=true\n",
+	}
+
+	for name, content := range configs {
+		err := os.WriteFile(filepath.Join(tmpDir, name), []byte(content), 0644)
+		require.NoError(t, err)
+	}
+
+	paths := parseClientPluginDir(tmpDir)
+
+	// Should only include directories from absolute, enabled paths
+	// Convert expected paths to absolute for Windows compatibility
+	expectedPath1, _ := filepath.Abs("/custom/lib")
+	expectedPath1 = filepath.Clean(expectedPath1)
+	expectedPath2, _ := filepath.Abs("/opt/lib")
+	expectedPath2 = filepath.Clean(expectedPath2)
+
+	assert.Contains(t, paths, expectedPath1)
+	assert.Contains(t, paths, expectedPath2)
+	// Should not include relative paths or disabled plugins
+	assert.NotContains(t, paths, ".")
+
+	expectedPath3, _ := filepath.Abs("/another/lib")
+	expectedPath3 = filepath.Clean(expectedPath3)
+	assert.NotContains(t, paths, expectedPath3)
+}
+
+func TestGetClientPluginPaths(t *testing.T) {
+	// Save original env var
+	originalPluginConfDir := os.Getenv("XRD_PLUGINCONFDIR")
+	defer os.Setenv("XRD_PLUGINCONFDIR", originalPluginConfDir)
+
+	// Create a temporary config directory
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "plugins.d")
+	err := os.MkdirAll(configDir, 0755)
+	require.NoError(t, err)
+
+	// Create a test config file
+	configFile := filepath.Join(configDir, "test.conf")
+	content := "lib=/test/custom/lib/libPlugin.so\nenable=true\n"
+	err = os.WriteFile(configFile, []byte(content), 0644)
+	require.NoError(t, err)
+
+	// Set environment variable
+	os.Setenv("XRD_PLUGINCONFDIR", configDir)
+
+	paths := getClientPluginPaths()
+
+	// Should include the custom directory
+	// Convert expected path to absolute for Windows compatibility
+	expectedPath, _ := filepath.Abs("/test/custom/lib")
+	expectedPath = filepath.Clean(expectedPath)
+	assert.Contains(t, paths, expectedPath)
+}
+
+func TestCheckClientPluginExists(t *testing.T) {
+	// Save original env var
+	originalPluginConfDir := os.Getenv("XRD_PLUGINCONFDIR")
+	defer os.Setenv("XRD_PLUGINCONFDIR", originalPluginConfDir)
+
+	// Create a temporary config directory
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "plugins.d")
+	err := os.MkdirAll(configDir, 0755)
+	require.NoError(t, err)
+
+	// Create plugin directory and plugin file
+	pluginDir := filepath.Join(tmpDir, "custom", "lib")
+	err = os.MkdirAll(pluginDir, 0755)
+	require.NoError(t, err)
+
+	pluginName := "libXrdClPelican-5.so"
+	pluginPath := filepath.Join(pluginDir, pluginName)
+	err = os.WriteFile(pluginPath, []byte("mock plugin content"), 0644)
+	require.NoError(t, err)
+
+	// Create a config file pointing to this plugin
+	configFile := filepath.Join(configDir, "pelican.conf")
+	content := "lib=" + pluginPath + "\nenable=true\n"
+	err = os.WriteFile(configFile, []byte(content), 0644)
+	require.NoError(t, err)
+
+	// Set environment variable
+	os.Setenv("XRD_PLUGINCONFDIR", configDir)
+
+	// Should find the plugin through client plugin config
+	exists := checkPluginExists("libXrdClPelican.so", true)
+	assert.True(t, exists, "Should find client plugin via client plugin config")
+}
+
 func TestCheckPluginExists(t *testing.T) {
 	// Save original env vars
-	originalXrdPluginPath := os.Getenv("XRD_PLUGINPATH")
+	originalLdLibraryPath := os.Getenv("LD_LIBRARY_PATH")
 	defer func() {
-		os.Setenv("XRD_PLUGINPATH", originalXrdPluginPath)
+		os.Setenv("LD_LIBRARY_PATH", originalLdLibraryPath)
 		resetPluginSearchPathsForTesting()
 	}()
 
@@ -188,16 +340,16 @@ func TestCheckPluginExists(t *testing.T) {
 
 	// Set environment variable to include our temp directory
 	resetPluginSearchPathsForTesting()
-	os.Setenv("XRD_PLUGINPATH", tmpDir)
+	os.Setenv("LD_LIBRARY_PATH", tmpDir)
 
 	t.Run("PluginExists", func(t *testing.T) {
 		// Should find the plugin even when searching for the base name
-		exists := CheckPluginExists("libMockPlugin.so")
+		exists := checkPluginExists("libMockPlugin.so", false)
 		assert.True(t, exists, "Should find the versioned plugin when searching for base name")
 	})
 
 	t.Run("PluginDoesNotExist", func(t *testing.T) {
-		exists := CheckPluginExists("libNonExistentPlugin.so")
+		exists := checkPluginExists("libNonExistentPlugin.so", false)
 		assert.False(t, exists, "Should not find non-existent plugin")
 	})
 }
