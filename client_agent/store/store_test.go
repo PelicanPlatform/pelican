@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -59,7 +59,7 @@ func TestCreateAndGetJob(t *testing.T) {
 	optionsJSON := `{"token":"test-token","caches":["cache1","cache2"]}`
 
 	// Create job
-	err := store.CreateJob(jobID, status, createdAt, optionsJSON)
+	err := store.CreateJob(jobID, status, createdAt, optionsJSON, 0)
 	require.NoError(t, err)
 
 	// Get job
@@ -81,7 +81,7 @@ func TestUpdateJobStatus(t *testing.T) {
 	store, _ := setupTestDB(t)
 
 	jobID := "test-job-2"
-	err := store.CreateJob(jobID, "pending", time.Now(), "{}")
+	err := store.CreateJob(jobID, "pending", time.Now(), "{}", 0)
 	require.NoError(t, err)
 
 	// Update status
@@ -100,7 +100,7 @@ func TestUpdateJobTimes(t *testing.T) {
 	store, _ := setupTestDB(t)
 
 	jobID := "test-job-3"
-	err := store.CreateJob(jobID, "pending", time.Now(), "{}")
+	err := store.CreateJob(jobID, "pending", time.Now(), "{}", 0)
 	require.NoError(t, err)
 
 	// Update started_at
@@ -138,7 +138,7 @@ func TestListJobs(t *testing.T) {
 		if i%2 == 0 {
 			status = "completed"
 		}
-		err := store.CreateJob(jobID, status, time.Now(), "{}")
+		err := store.CreateJob(jobID, status, time.Now(), "{}", 0)
 		require.NoError(t, err)
 	}
 
@@ -171,7 +171,7 @@ func TestCreateAndGetTransfer(t *testing.T) {
 	store, _ := setupTestDB(t)
 
 	jobID := "test-job-1"
-	err := store.CreateJob(jobID, "pending", time.Now(), "{}")
+	err := store.CreateJob(jobID, "pending", time.Now(), "{}", 0)
 	require.NoError(t, err)
 
 	transfer := &StoredTransfer{
@@ -204,7 +204,7 @@ func TestGetTransfersByJob(t *testing.T) {
 	store, _ := setupTestDB(t)
 
 	jobID := "test-job-1"
-	err := store.CreateJob(jobID, "pending", time.Now(), "{}")
+	err := store.CreateJob(jobID, "pending", time.Now(), "{}", 0)
 	require.NoError(t, err)
 
 	// Create multiple transfers
@@ -237,7 +237,7 @@ func TestUpdateTransferProgress(t *testing.T) {
 	store, _ := setupTestDB(t)
 
 	jobID := "test-job-1"
-	err := store.CreateJob(jobID, "pending", time.Now(), "{}")
+	err := store.CreateJob(jobID, "pending", time.Now(), "{}", 0)
 	require.NoError(t, err)
 
 	transfer := &StoredTransfer{
@@ -278,7 +278,7 @@ func TestGetRecoverableJobs(t *testing.T) {
 
 	for i, status := range statuses {
 		jobID := "test-job-" + string(rune(i))
-		err := store.CreateJob(jobID, status, time.Now(), "{}")
+		err := store.CreateJob(jobID, status, time.Now(), "{}", 0)
 		require.NoError(t, err)
 	}
 
@@ -303,7 +303,7 @@ func TestArchiveJob(t *testing.T) {
 	completedAt := createdAt.Add(10 * time.Second)
 
 	// Create job
-	err := store.CreateJob(jobID, "running", createdAt, "{}")
+	err := store.CreateJob(jobID, "running", createdAt, "{}", 0)
 	require.NoError(t, err)
 	err = store.UpdateJobTimes(jobID, &startedAt, nil)
 	require.NoError(t, err)
@@ -360,7 +360,7 @@ func TestPruneHistory(t *testing.T) {
 	oldTime := time.Now().Add(-48 * time.Hour)
 	for i := 0; i < 3; i++ {
 		jobID := "old-job-" + string(rune(i))
-		err := store.CreateJob(jobID, "completed", oldTime, "{}")
+		err := store.CreateJob(jobID, "completed", oldTime, "{}", 0)
 		require.NoError(t, err)
 		completedAt := oldTime.Add(1 * time.Hour)
 		err = store.UpdateJobTimes(jobID, nil, &completedAt)
@@ -373,7 +373,7 @@ func TestPruneHistory(t *testing.T) {
 	recentTime := time.Now().Add(-1 * time.Hour)
 	for i := 0; i < 2; i++ {
 		jobID := "recent-job-" + string(rune(i))
-		err := store.CreateJob(jobID, "completed", recentTime, "{}")
+		err := store.CreateJob(jobID, "completed", recentTime, "{}", 0)
 		require.NoError(t, err)
 		completedAt := recentTime.Add(10 * time.Minute)
 		err = store.UpdateJobTimes(jobID, nil, &completedAt)
