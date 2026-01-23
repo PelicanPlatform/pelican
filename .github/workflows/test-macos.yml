@@ -1,28 +1,26 @@
 ---
-name: Run Tests (Linux)
-
-# Unlike the macOS and Windows workflows, there is no direct trigger for
-# this workflow, because it depends on the container image in which all the
-# tests will be run.
-#
-# The workflows that trigger this one include:
-#
-#   - build-and-test.yml
-#   - test-linux-pr.yml
+name: Run Tests (macOS)
 
 on:
-  workflow_call:
-    inputs:
-      image:
-        required: true
-        type: string
+  pull_request:
+  push:
+    branches:
+      - "main"
+    tags:
+      # Run only for v7.0.0 and up. Include release candidates.
+      - "v[7-9].[0-9]+.[0-9]+"
+      - "v[7-9].[0-9]+.[0-9]+-rc.[0-9]+"
+      - "v[1-9][0-9]+.[0-9]+.[0-9]+"
+      - "v[1-9][0-9]+.[0-9]+.[0-9]+-rc.[0-9]+"
+  repository_dispatch:
+    types:
+      - dispatch-build
+  workflow_dispatch:
 
 jobs:
   run-tests:
-    name: Linux (${{ matrix.binary_name }})
-    runs-on: ubuntu-latest
-    container:
-      image: ${{ inputs.image }}
+    name: macOS (${{ matrix.binary_name }})
+    runs-on: macos-latest
     strategy:
       fail-fast: false
       matrix:
@@ -30,9 +28,6 @@ jobs:
           - binary_name: pelican
             coverprofile: coverage.out
             tags: ""
-          - binary_name: pelican-server
-            coverprofile: coverage-server.out
-            tags: lotman
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -71,6 +66,9 @@ jobs:
           # Ensure that ~/go/bin is in PATH for subsequent steps.
           echo "$HOME/go/bin" >> $GITHUB_PATH
 
+      - name: Install macOS dependencies
+        run: ./github_scripts/osx_install.sh
+
       - name: Run "go test"
         env:
           JUNIT_FILE: junit-${{ matrix.binary_name }}.xml
@@ -94,44 +92,9 @@ jobs:
         with:
           paths: junit-${{ matrix.binary_name }}.xml
 
-      - name: Get total code coverage
-        if: github.event_name == 'pull_request'
-        id: cc
-        run: |
-          set -x
-          cc_total=`go tool cover -func=${{ matrix.coverprofile }} | grep total | grep -Eo '[0-9]+\.[0-9]+'`
-          echo "cc_total=$cc_total" >> $GITHUB_OUTPUT
-
-      - name: Add coverage information to action summary
-        if: github.event_name == 'pull_request'
-        run: echo 'Code coverage ${{ steps.cc.outputs.cc_total }}%' >> $GITHUB_STEP_SUMMARY
-
-      - name: Mark the checkout as safe
-        # Because we're using a custom container image to run this workflow,
-        # we trigger Git's "dubious ownership" warning when trying to interact
-        # with the checkout, unless we mark it as "safe".
-        run: |
-          # NOTE: Refer to '${{ github.repository }}' in workflow step
-          # definitions, but '$GITHUB_WORKSPACE' in scripts.
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: latest
           args: build --single-target --clean --snapshot
-
-      - name: Copy the pelican binary for the end-to-end tests
-        run: |
-          cp dist/${{ matrix.binary_name }}_linux_amd64_v1/${{ matrix.binary_name }} ./pelican
-      - name: Run integration tests
-        run: ./github_scripts/citests.sh
-      - name: Run end-to-end test for object get/put
-        run: ./github_scripts/get_put_test.sh
-      - name: Run end-to-end test for director stat
-        run: ./github_scripts/stat_test.sh
-      - name: Run end-to-end test for --version flag
-        run: ./github_scripts/version_test.sh
-      - name: Run end-to-end test for site-local cache standup
-        run: ./github_scripts/site_local_cache_test.sh
