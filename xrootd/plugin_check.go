@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 
@@ -45,6 +46,28 @@ var (
 func resetPluginSearchPathsForTesting() {
 	pluginSearchPathsOnce = sync.Once{}
 	pluginSearchPaths = nil
+}
+
+// deduplicatePaths resolves paths to absolute paths and removes duplicates while preserving order.
+func deduplicatePaths(paths []string) []string {
+	seen := make(map[string]bool)
+	var result []string
+	for _, path := range paths {
+		// Resolve to absolute path
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			// If we can't resolve, use the original path
+			absPath = path
+		}
+		// Clean the path to normalize it
+		absPath = filepath.Clean(absPath)
+		// Add if not seen before
+		if !seen[absPath] {
+			seen[absPath] = true
+			result = append(result, absPath)
+		}
+	}
+	return result
 }
 
 // getPluginSearchPaths returns a list of directories to search for XRootD plugins.
@@ -87,7 +110,6 @@ func getPluginSearchPaths() []string {
 			}
 		}
 
-		appendEnvPaths("XRD_PLUGINPATH")
 		appendEnvPaths("LD_LIBRARY_PATH")
 		appendEnvPaths("DYLD_LIBRARY_PATH")
 		appendEnvPaths("DYLD_FALLBACK_LIBRARY_PATH")
@@ -101,25 +123,7 @@ func getPluginSearchPaths() []string {
 		searchPaths = append(searchPaths, getXRootDRPaths()...)
 
 		// Resolve absolute paths and remove duplicates while preserving order
-		seen := make(map[string]bool)
-		var result []string
-		for _, path := range searchPaths {
-			// Resolve to absolute path
-			absPath, err := filepath.Abs(path)
-			if err != nil {
-				// If we can't resolve, use the original path
-				absPath = path
-			}
-			// Clean the path to normalize it
-			absPath = filepath.Clean(absPath)
-			// Add if not seen before
-			if !seen[absPath] {
-				seen[absPath] = true
-				result = append(result, absPath)
-			}
-		}
-
-		pluginSearchPaths = result
+		pluginSearchPaths = deduplicatePaths(searchPaths)
 	})
 
 	return pluginSearchPaths
@@ -210,6 +214,118 @@ func getXRootDRPaths() []string {
 	return paths
 }
 
+// getClientPluginPaths parses XRootD client plugin configuration files and returns
+// directories containing absolute library paths from enabled plugins.
+// Checks in order: /etc/xrootd/client.plugins.d/, ~/.xrootd/client.plugins.d/,
+// and directory pointed to by XRD_PLUGINCONFDIR.
+func getClientPluginPaths() []string {
+	paths := []string{}
+	configDirs := []string{}
+
+	// Standard directories
+	configDirs = append(configDirs, "/etc/xrootd/client.plugins.d/")
+
+	// User directory
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		configDirs = append(configDirs, filepath.Join(homeDir, ".xrootd", "client.plugins.d"))
+	}
+
+	// XRD_PLUGINCONFDIR environment variable
+	if pluginConfDir := os.Getenv("XRD_PLUGINCONFDIR"); pluginConfDir != "" {
+		configDirs = append(configDirs, pluginConfDir)
+	}
+
+	// Parse each directory
+	for _, dir := range configDirs {
+		paths = append(paths, parseClientPluginDir(dir)...)
+	}
+
+	return paths
+}
+
+// parseClientPluginDir reads plugin configuration files from a directory
+// and extracts directories from absolute lib paths of enabled plugins.
+func parseClientPluginDir(dir string) []string {
+	paths := []string{}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return paths
+	}
+
+	// Sort entries alphabetically as per xrootd behavior
+	fileNames := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			fileNames = append(fileNames, entry.Name())
+		}
+	}
+	sort.Strings(fileNames)
+
+	// Process files in alphabetical order
+	for _, fileName := range fileNames {
+		filePath := filepath.Join(dir, fileName)
+		libPath, enabled := parsePluginConfigFile(filePath)
+
+		// Only consider paths, not filenames; linker will be handed
+		// filenames and will search in standard paths.
+		if enabled {
+			libDir := filepath.Dir(libPath)
+			// Only add if libPath contains a directory component (not just a bare filename)
+			if libDir != "." && libDir != "" {
+				// For absolute paths, use as-is; for relative paths, resolve against config dir
+				if !filepath.IsAbs(libDir) {
+					libDir = filepath.Join(dir, libDir)
+				}
+				paths = append(paths, libDir)
+			}
+		}
+	}
+
+	return paths
+}
+
+// parsePluginConfigFile parses a single plugin configuration file
+// and returns the lib path and whether it's enabled.
+func parsePluginConfigFile(filePath string) (string, bool) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", false
+	}
+	defer file.Close()
+
+	var libPath string
+	enabled := false
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Parse key=value pairs
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+
+		switch key {
+		case "lib":
+			libPath = value
+		case "enable":
+			// Accept various forms of enabled
+			enabled = value == "true" || value == "1" || value == "yes"
+		}
+	}
+
+	return libPath, enabled
+}
+
 // getXRootDVersion runs 'xrootd -v' and extracts the major version number
 func getXRootDVersion() string {
 	xrootdVersionOnce.Do(func() {
@@ -242,6 +358,9 @@ func getPluginVariants(baseName string) []string {
 
 	// XRootD uses .so extension on all platforms, including macOS
 	exts := []string{".so"}
+	if runtime.GOOS == "darwin" {
+		exts = append(exts, ".dylib")
+	}
 
 	// Strip any existing extension from baseName
 	nameWithoutExt := baseName
@@ -272,10 +391,17 @@ func getPluginVariants(baseName string) []string {
 	return variants
 }
 
-// CheckPluginExists checks if a plugin exists in any of the standard library search paths.
+// checkPluginExists checks if a plugin exists in any of the standard library search paths.
+// If includeClientPaths is true, also includes XRootD client plugin configuration directories.
 // It returns true if the plugin is found, false otherwise.
-func CheckPluginExists(pluginName string) bool {
+func checkPluginExists(pluginName string, includeClientPaths bool) bool {
 	searchPaths := getPluginSearchPaths()
+
+	if includeClientPaths {
+		searchPaths = append(searchPaths, getClientPluginPaths()...)
+		searchPaths = deduplicatePaths(searchPaths)
+	}
+
 	variants := getPluginVariants(pluginName)
 
 	for _, dir := range searchPaths {
@@ -298,14 +424,14 @@ func ValidateRequiredPlugins(isOrigin bool, xrdConfig *XrootdConfig) error {
 	if isOrigin {
 		// Check for libXrdHttpPelican if drop privileges is enabled
 		if xrdConfig.Server.DropPrivileges {
-			if !CheckPluginExists("libXrdHttpPelican.so") {
+			if !checkPluginExists("libXrdHttpPelican.so", false) {
 				missingPlugins = append(missingPlugins, "libXrdHttpPelican.so")
 			}
 		}
 
 		// Check for libXrdS3 if using S3 storage type
 		if xrdConfig.Origin.StorageType == "s3" {
-			if !CheckPluginExists("libXrdS3.so") {
+			if !checkPluginExists("libXrdS3.so", false) {
 				missingPlugins = append(missingPlugins, "libXrdS3.so")
 			}
 		}
@@ -313,7 +439,7 @@ func ValidateRequiredPlugins(isOrigin bool, xrdConfig *XrootdConfig) error {
 		// Cache-specific checks
 		// Check for libXrdHttpPelican if drop privileges is enabled
 		if xrdConfig.Server.DropPrivileges {
-			if !CheckPluginExists("libXrdHttpPelican.so") {
+			if !checkPluginExists("libXrdHttpPelican.so", false) {
 				missingPlugins = append(missingPlugins, "libXrdHttpPelican.so")
 			}
 		}
@@ -322,7 +448,8 @@ func ValidateRequiredPlugins(isOrigin bool, xrdConfig *XrootdConfig) error {
 		// The cache configuration writes client plugin settings to the cache-client.plugins.d directory
 		// (see CheckCacheEnv in xrootd_config.go), which configures XRootD to use libXrdClPelican.so
 		// for handling pelican:// protocol requests.
-		if !CheckPluginExists("libXrdClPelican.so") {
+		// Include client plugin configuration paths for this check.
+		if !checkPluginExists("libXrdClPelican.so", true) {
 			missingPlugins = append(missingPlugins, "libXrdClPelican.so")
 		}
 	}
