@@ -58,6 +58,7 @@ import (
 var xrootdReset func()
 var posixv2Reset func()
 var brokerReset func()
+var pelicanUrlReset func()
 
 // RegisterXrootdReset allows the xrootd package to provide a reset hook without introducing import cycles.
 func RegisterXrootdReset(fn func()) {
@@ -72,6 +73,11 @@ func RegisterPOSIXv2Reset(fn func()) {
 // RegisterBrokerReset allows the broker package to provide a reset hook without introducing import cycles.
 func RegisterBrokerReset(fn func()) {
 	brokerReset = fn
+}
+
+// RegisterPelicanUrlReset allows the pelican_url package to provide a reset hook without introducing import cycles.
+func RegisterPelicanUrlReset(fn func()) {
+	pelicanUrlReset = fn
 }
 
 // GetTopologyJSON returns the namespaces and caches from OSDF topology
@@ -344,6 +350,9 @@ func ResetTestState() {
 	}
 	if brokerReset != nil {
 		brokerReset()
+	}
+	if pelicanUrlReset != nil {
+		pelicanUrlReset()
 	}
 	ResetOriginExports()
 	logging.ResetLogFlush()

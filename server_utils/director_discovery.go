@@ -47,6 +47,11 @@ var (
 	directorEndpoints atomic.Pointer[[]server_structs.DirectorAd]
 )
 
+func init() {
+	// Register pelican_url's ResetState function with our test reset mechanism
+	RegisterPelicanUrlReset(pelican_url.ResetState)
+}
+
 const (
 	// Context value key; used to store a second context that will
 	// indicate the director discovery should stop.

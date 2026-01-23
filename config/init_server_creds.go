@@ -527,10 +527,32 @@ func GenerateCert() error {
 	// and `Server.ExternalWebUrl` parameters. Whenever such a test needs to run config.InitServer(),
 	// it's necessary that the value of both `Server.Hostname` and `Server.ExternalWebUrl` are baked
 	// into the cert, and so even if the two don't match we add both to the cert's DNS names.
-	addSAN(hostname)
-	externalWebUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
-	if err == nil && externalWebUrl.Hostname() != hostname {
-		addSAN(externalWebUrl.Hostname())
+	// Additionally, we include Cache.Url and Origin.Url hostnames if they're set and differ from
+	// the other hostnames.
+
+	// Collect all unique hostnames into a set
+	hostnameSet := make(map[string]bool)
+	hostnameSet[hostname] = true
+
+	if externalWebUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString()); err == nil && externalWebUrl.Hostname() != "" {
+		hostnameSet[externalWebUrl.Hostname()] = true
+	}
+
+	if param.Cache_Url.IsSet() {
+		if cacheUrl, err := url.Parse(param.Cache_Url.GetString()); err == nil && cacheUrl.Hostname() != "" {
+			hostnameSet[cacheUrl.Hostname()] = true
+		}
+	}
+
+	if param.Origin_Url.IsSet() {
+		if originUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil && originUrl.Hostname() != "" {
+			hostnameSet[originUrl.Hostname()] = true
+		}
+	}
+
+	// Add all unique hostnames to the certificate
+	for host := range hostnameSet {
+		addSAN(host)
 	}
 
 	// If there's pre-existing CA certificates, self-sign instead of using the generated CA
