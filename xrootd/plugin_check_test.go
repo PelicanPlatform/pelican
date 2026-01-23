@@ -222,6 +222,10 @@ enable=true
 }
 
 func TestParseClientPluginDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping server test on Windows - server not supported on Windows")
+	}
+
 	tmpDir := t.TempDir()
 
 	// Create config files
@@ -257,6 +261,10 @@ func TestParseClientPluginDir(t *testing.T) {
 }
 
 func TestGetClientPluginPaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping server test on Windows - server not supported on Windows")
+	}
+
 	// Save original env var
 	originalPluginConfDir := os.Getenv("XRD_PLUGINCONFDIR")
 	defer os.Setenv("XRD_PLUGINCONFDIR", originalPluginConfDir)
@@ -286,6 +294,10 @@ func TestGetClientPluginPaths(t *testing.T) {
 }
 
 func TestCheckClientPluginExists(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping server test on Windows - server not supported on Windows")
+	}
+
 	// Save original env var
 	originalPluginConfDir := os.Getenv("XRD_PLUGINCONFDIR")
 	defer os.Setenv("XRD_PLUGINCONFDIR", originalPluginConfDir)
