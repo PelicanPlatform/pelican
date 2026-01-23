@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -230,7 +230,7 @@ func TestJobArchival(t *testing.T) {
 	sixMinutesAgo := now.Add(-6 * time.Minute)
 	completedAt := sixMinutesAgo.Add(10 * time.Second) // Completed shortly after it started
 
-	err := testStore.CreateJob(jobID, StatusCompleted, sixMinutesAgo, "{}")
+	err := testStore.CreateJob(jobID, StatusCompleted, sixMinutesAgo, "{}", 0)
 	require.NoError(t, err)
 
 	err = testStore.UpdateJobStatus(jobID, StatusCompleted)
@@ -297,7 +297,7 @@ func TestHistoryPruning(t *testing.T) {
 
 	// Create old job
 	oldJobID := "old-job-123"
-	err := testStore.CreateJob(oldJobID, StatusCompleted, oldTime, "{}")
+	err := testStore.CreateJob(oldJobID, StatusCompleted, oldTime, "{}", 0)
 	require.NoError(t, err)
 	err = testStore.UpdateJobTimes(oldJobID, &oldTime, &oldTime)
 	require.NoError(t, err)
@@ -306,7 +306,7 @@ func TestHistoryPruning(t *testing.T) {
 
 	// Create recent job
 	recentJobID := "recent-job-456"
-	err = testStore.CreateJob(recentJobID, StatusCompleted, recentTime, "{}")
+	err = testStore.CreateJob(recentJobID, StatusCompleted, recentTime, "{}", 0)
 	require.NoError(t, err)
 	err = testStore.UpdateJobTimes(recentJobID, &recentTime, &recentTime)
 	require.NoError(t, err)
@@ -347,7 +347,7 @@ func TestFullLifecycleWithRestart(t *testing.T) {
 	// Create a job
 	jobID := "lifecycle-job-123"
 	now := time.Now()
-	err := testStore.CreateJob(jobID, StatusPending, now, "{}")
+	err := testStore.CreateJob(jobID, StatusPending, now, "{}", 0)
 	require.NoError(t, err)
 
 	// Create a transfer for the job (required for recovery)
@@ -478,7 +478,7 @@ func TestHistoryFiltering(t *testing.T) {
 	}
 
 	for _, job := range jobs {
-		err := testStore.CreateJob(job.id, job.status, job.time, "{}")
+		err := testStore.CreateJob(job.id, job.status, job.time, "{}", 0)
 		require.NoError(t, err)
 		err = testStore.UpdateJobTimes(job.id, &job.time, &job.time)
 		require.NoError(t, err)
@@ -586,7 +586,7 @@ func TestDeleteJobHistory(t *testing.T) {
 	// Create and archive a job
 	jobID := "delete-test-job-123"
 	now := time.Now()
-	err := testStore.CreateJob(jobID, StatusCompleted, now, "{}")
+	err := testStore.CreateJob(jobID, StatusCompleted, now, "{}", 0)
 	require.NoError(t, err)
 	err = testStore.UpdateJobTimes(jobID, &now, &now)
 	require.NoError(t, err)
