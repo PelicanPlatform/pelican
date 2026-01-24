@@ -28,6 +28,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/client"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // Transfer represents an individual file transfer
@@ -80,6 +81,16 @@ type TransferManager struct {
 // NewTransferManager creates a new transfer manager
 func NewTransferManager(ctx context.Context, maxConcurrentJobs int, store StoreInterface) *TransferManager {
 	managerCtx, cancel := context.WithCancel(ctx)
+
+	// Use parameter value if maxConcurrentJobs is not positive
+	if maxConcurrentJobs <= 0 {
+		providedValue := maxConcurrentJobs
+		maxConcurrentJobs = param.ClientAgent_MaxConcurrentJobs.GetInt()
+		if maxConcurrentJobs <= 0 {
+			log.Warnf("Invalid max concurrent jobs configuration (provided=%d, param=%d), using default value of 5", providedValue, maxConcurrentJobs)
+			maxConcurrentJobs = 5 // Final fallback
+		}
+	}
 
 	tm := &TransferManager{
 		jobs:      make(map[string]*TransferJob),

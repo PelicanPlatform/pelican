@@ -30,13 +30,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 const (
-	DefaultSocketPath        = "~/.pelican/client-api.sock"
-	DefaultPidFile           = "~/.pelican/client-api.pid"
-	DefaultMaxConcurrentJobs = 5
-	DefaultShutdownTimeout   = 30 * time.Second
+	DefaultSocketPath      = "~/.pelican/client-api.sock"
+	DefaultPidFile         = "~/.pelican/client-api.pid"
+	DefaultShutdownTimeout = 30 * time.Second
 )
 
 // Server represents the client API server
@@ -126,9 +127,15 @@ func NewServer(config ServerConfig) (*Server, error) {
 	}
 
 	// Create transfer manager
+	// Use config value if provided, otherwise fall back to parameter
 	maxJobs := config.MaxConcurrentJobs
 	if maxJobs <= 0 {
-		maxJobs = DefaultMaxConcurrentJobs
+		providedValue := maxJobs
+		maxJobs = param.ClientAgent_MaxConcurrentJobs.GetInt()
+		if maxJobs <= 0 {
+			log.Warnf("Invalid max concurrent jobs configuration (provided=%d, param=%d), using default value of 5", providedValue, maxJobs)
+			maxJobs = 5 // Final fallback
+		}
 	}
 	transferManager := NewTransferManager(ctx, maxJobs, storeInstance)
 
