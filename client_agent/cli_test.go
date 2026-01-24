@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,16 +47,43 @@ import (
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
-// buildPelicanBinary builds the pelican binary for testing
+var (
+	buildOnce      sync.Once
+	pelicanBinPath string
+	binaryTempDir  string
+)
+
+// TestMain sets up fixtures that persist across all tests
+func TestMain(m *testing.M) {
+	// Run all tests
+	code := m.Run()
+
+	// Cleanup binary temp directory if it was created
+	if binaryTempDir != "" {
+		os.RemoveAll(binaryTempDir)
+	}
+	os.Exit(code)
+}
+
+// buildPelicanBinary builds the pelican binary on first call and returns its path
 func buildPelicanBinary(t *testing.T) string {
-	tmpDir := t.TempDir()
-	binaryPath := filepath.Join(tmpDir, "pelican")
+	buildOnce.Do(func() {
+		var err error
+		binaryTempDir, err = os.MkdirTemp("", "pelican-cli-test-*")
+		if err != nil {
+			t.Fatalf("Failed to create temp directory: %v", err)
+		}
 
-	cmd := exec.Command("go", "build", "-o", binaryPath, "../cmd")
-	output, err := cmd.CombinedOutput()
-	require.NoError(t, err, "Failed to build pelican binary: %s", output)
+		pelicanBinPath = filepath.Join(binaryTempDir, "pelican")
+		cmd := exec.Command("go", "build", "-buildvcs=false", "-o", pelicanBinPath, "../cmd")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			os.RemoveAll(binaryTempDir)
+			t.Fatalf("Failed to build pelican binary: %s", output)
+		}
+	})
 
-	return binaryPath
+	return pelicanBinPath
 }
 
 // TestCLIAsyncGet tests the pelican object get --async command
@@ -96,15 +124,8 @@ func TestCLIAsyncGet(t *testing.T) {
 	err = os.WriteFile(tokenFile, []byte(tkn), 0644)
 	require.NoError(t, err)
 
-	// Set up client API server
-	socketPath := filepath.Join(tempDir, "client-api.sock")
-	pidFile := filepath.Join(tempDir, "client-api.pid")
-
-	serverConfig := client_agent.ServerConfig{
-		SocketPath:        socketPath,
-		PidFile:           pidFile,
-		MaxConcurrentJobs: 5,
-	}
+	// Set up client API server with proper temp directory handling
+	serverConfig, _ := client_agent.CreateTestServerConfig(t)
 
 	server, err := client_agent.NewServer(serverConfig)
 	require.NoError(t, err)
@@ -133,7 +154,7 @@ func TestCLIAsyncGet(t *testing.T) {
 
 	// Upload with async + wait to ensure file is present before testing downloads
 	uploadCmd := exec.Command(pelicanBin, "object", "put", "--async", "--wait", uploadFile, uploadURL, "--token", tokenFile)
-	uploadCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
+	uploadCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", serverConfig.SocketPath))
 	output, err := uploadCmd.CombinedOutput()
 	require.NoError(t, err, "Failed to upload file: %s", output)
 
@@ -142,7 +163,7 @@ func TestCLIAsyncGet(t *testing.T) {
 		downloadFile := filepath.Join(tempDir, "downloaded-async.txt")
 
 		cmd := exec.Command(pelicanBin, "object", "get", "--async", uploadURL, downloadFile, "--token", tokenFile)
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", serverConfig.SocketPath))
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Failed to run async get: %s", output)
@@ -174,7 +195,7 @@ func TestCLIAsyncGet(t *testing.T) {
 		downloadFile := filepath.Join(tempDir, "downloaded-wait.txt")
 
 		cmd := exec.Command(pelicanBin, "object", "get", "--async", "--wait", uploadURL, downloadFile, "--token", tokenFile)
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", serverConfig.SocketPath))
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Failed to run async get with wait: %s", output)
@@ -196,16 +217,23 @@ func TestCLIAsyncGet(t *testing.T) {
 
 // TestCLIAsyncPut tests the pelican object put --async command
 func TestCLIAsyncPut(t *testing.T) {
+	startTime := time.Now()
+	t.Logf("TestCLIAsyncPut started at %s", startTime)
+
 	// Reset test state
 	server_utils.ResetTestState()
+	t.Logf("Reset test state took %s", time.Since(startTime))
 
 	// Create test federation
+	fedStart := time.Now()
 	fed := fed_test_utils.NewFedTest(t, testOriginConfig)
+	t.Logf("Federation setup took %s", time.Since(fedStart))
 
 	// Create temporary directory
 	tempDir := t.TempDir()
 
 	// Create token
+	tokenStart := time.Now()
 	viper.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
@@ -228,16 +256,11 @@ func TestCLIAsyncPut(t *testing.T) {
 	tokenFile := filepath.Join(tempDir, "token")
 	err = os.WriteFile(tokenFile, []byte(tkn), 0644)
 	require.NoError(t, err)
+	t.Logf("Token creation took %s", time.Since(tokenStart))
 
 	// Set up client API server
-	socketPath := filepath.Join(tempDir, "client-api.sock")
-	pidFile := filepath.Join(tempDir, "client-api.pid")
-
-	serverConfig := client_agent.ServerConfig{
-		SocketPath:        socketPath,
-		PidFile:           pidFile,
-		MaxConcurrentJobs: 5,
-	}
+	serverStart := time.Now()
+	serverConfig, _ := client_agent.CreateTestServerConfig(t)
 
 	server, err := client_agent.NewServer(serverConfig)
 	require.NoError(t, err)
@@ -249,9 +272,12 @@ func TestCLIAsyncPut(t *testing.T) {
 		err := server.Shutdown()
 		assert.NoError(t, err)
 	})
+	t.Logf("Server setup took %s", time.Since(serverStart))
 
 	// Build pelican binary
+	buildStart := time.Now()
 	pelicanBin := buildPelicanBinary(t)
+	t.Logf("Binary build took %s", time.Since(buildStart))
 
 	// Create test file
 	testContent := []byte("Test file for async put\n")
@@ -264,10 +290,14 @@ func TestCLIAsyncPut(t *testing.T) {
 	require.NoError(t, err)
 	uploadURL := fmt.Sprintf("pelican://%s%s/async-put-test.txt", discoveryUrl.Host, federationPrefix)
 
+	t.Logf("Setup complete, total time so far: %s", time.Since(startTime))
+
 	// Test async put without --wait
 	t.Run("AsyncPutWithoutWait", func(t *testing.T) {
+		subtestStart := time.Now()
+		t.Logf("AsyncPutWithoutWait subtest started")
 		cmd := exec.Command(pelicanBin, "object", "put", "--async", uploadFile, uploadURL, "--token", tokenFile)
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", serverConfig.SocketPath))
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Failed to run async put: %s", output)
@@ -278,14 +308,17 @@ func TestCLIAsyncPut(t *testing.T) {
 		// Should contain job ID
 		assert.Contains(t, outputStr, "Job created:")
 		assert.Contains(t, outputStr, "Check status with: pelican job status")
+		t.Logf("AsyncPutWithoutWait subtest took %s", time.Since(subtestStart))
 	})
 
 	// Test async put with --wait
 	t.Run("AsyncPutWithWait", func(t *testing.T) {
+		subtestStart := time.Now()
+		t.Logf("AsyncPutWithWait subtest started")
 		uploadURL2 := fmt.Sprintf("pelican://%s%s/async-put-wait-test.txt", discoveryUrl.Host, federationPrefix)
 
 		cmd := exec.Command(pelicanBin, "object", "put", "--async", "--wait", uploadFile, uploadURL2, "--token", tokenFile)
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", serverConfig.SocketPath))
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Failed to run async put with wait: %s", output)
@@ -297,7 +330,10 @@ func TestCLIAsyncPut(t *testing.T) {
 		assert.Contains(t, outputStr, "Job created:")
 		assert.Contains(t, outputStr, "Waiting for job to complete")
 		assert.Contains(t, outputStr, "Job completed successfully")
+		t.Logf("AsyncPutWithWait subtest took %s", time.Since(subtestStart))
 	})
+
+	t.Logf("TestCLIAsyncPut complete, total time: %s", time.Since(startTime))
 }
 
 // TestCLIJobCommands tests the pelican job subcommands
@@ -336,14 +372,7 @@ func TestCLIJobCommands(t *testing.T) {
 	require.NoError(t, err)
 
 	// Set up client API server
-	socketPath := filepath.Join(tempDir, "client-api.sock")
-	pidFile := filepath.Join(tempDir, "client-api.pid")
-
-	serverConfig := client_agent.ServerConfig{
-		SocketPath:        socketPath,
-		PidFile:           pidFile,
-		MaxConcurrentJobs: 5,
-	}
+	serverConfig, _ := client_agent.CreateTestServerConfig(t)
 
 	server, err := client_agent.NewServer(serverConfig)
 	require.NoError(t, err)
@@ -374,7 +403,7 @@ func TestCLIJobCommands(t *testing.T) {
 	// Create an async job
 	t.Logf("Creating async job uploading to %s", uploadURL)
 	cmd := exec.Command(pelicanBin, "object", "put", "--async", uploadFile, uploadURL, "--token", tokenFile)
-	cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
+	cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", serverConfig.SocketPath))
 
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, "Failed to create job: %s", output)
@@ -390,7 +419,7 @@ func TestCLIJobCommands(t *testing.T) {
 	t.Run("JobStatus", func(t *testing.T) {
 		log.Debugln("Running job status for job ID:", jobID)
 		cmd := exec.Command(pelicanBin, "job", "status", jobID, "--debug")
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", serverConfig.SocketPath))
 
 		output, err := cmd.CombinedOutput()
 		log.Debug("Job status output:", string(output))
@@ -408,7 +437,7 @@ func TestCLIJobCommands(t *testing.T) {
 	// Test job list command
 	t.Run("JobList", func(t *testing.T) {
 		cmd := exec.Command(pelicanBin, "job", "list")
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", serverConfig.SocketPath))
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Failed to list jobs: %s", output)
@@ -422,11 +451,19 @@ func TestCLIJobCommands(t *testing.T) {
 
 	// Test job list with status filter
 	t.Run("JobListWithFilter", func(t *testing.T) {
-		// Wait for job to complete
-		time.Sleep(2 * time.Second)
+		// Wait for at least one job to complete
+		require.Eventually(t, func() bool {
+			cmd := exec.Command(pelicanBin, "job", "list", "--status", "completed")
+			cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", serverConfig.SocketPath))
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				return false
+			}
+			return len(output) > 0
+		}, 10*time.Second, 200*time.Millisecond, "At least one job should complete")
 
 		cmd := exec.Command(pelicanBin, "job", "list", "--status", "completed")
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", serverConfig.SocketPath))
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Failed to list completed jobs: %s", output)
@@ -450,7 +487,7 @@ func TestCLIJobCommands(t *testing.T) {
 
 		// Create async job
 		createCmd := exec.Command(pelicanBin, "object", "put", "--async", largeFile, cancelURL, "--token", tokenFile)
-		createCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
+		createCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", serverConfig.SocketPath))
 
 		output, err := createCmd.CombinedOutput()
 		require.NoError(t, err, "Failed to create job for cancellation: %s", output)
@@ -460,12 +497,20 @@ func TestCLIJobCommands(t *testing.T) {
 		require.Len(t, matches, 2, "Could not extract job ID from output")
 		cancelJobID := matches[1]
 
-		// Give it a moment to start
-		time.Sleep(200 * time.Millisecond)
+		// Wait for job to start
+		require.Eventually(t, func() bool {
+			statusCmd := exec.Command(pelicanBin, "job", "status", cancelJobID)
+			statusCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", serverConfig.SocketPath))
+			output, err := statusCmd.CombinedOutput()
+			if err != nil {
+				return false
+			}
+			return len(output) > 0
+		}, 5*time.Second, 100*time.Millisecond, "Job should start")
 
 		// Cancel the job
 		cancelCmd := exec.Command(pelicanBin, "job", "cancel", cancelJobID)
-		cancelCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
+		cancelCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", serverConfig.SocketPath))
 
 		output, err = cancelCmd.CombinedOutput()
 		outputStr := string(output)

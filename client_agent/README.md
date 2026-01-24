@@ -152,6 +152,7 @@ GET /api/v1/xfer/jobs?status=running&limit=10&offset=0
 ```
 
 **Query Parameters:**
+
 - `status` (optional): Filter by job status (`pending`, `running`, `completed`, `failed`, `cancelled`)
 - `limit` (optional, default=10, max=100): Number of jobs to return
 - `offset` (optional, default=0): Pagination offset
@@ -350,6 +351,7 @@ POST /shutdown
 ```
 
 **Notes:**
+
 - The server responds immediately and then begins shutdown
 - All active transfers are cancelled gracefully
 - The server waits for HTTP connections to complete (with timeout)
@@ -498,10 +500,10 @@ The Unix socket is created with mode 0600 (owner read/write only) for security. 
 ### Job Execution Model
 
 1. Jobs are created with multiple transfers
-2. Transfers within a job execute sequentially
-3. Jobs execute concurrently (up to `max-jobs` limit)
-4. Cancelling a job stops all incomplete transfers
-5. Job completes when all transfers finish
+1. Transfers within a job execute sequentially
+1. Jobs execute concurrently (up to `max-jobs` limit)
+1. Cancelling a job stops all incomplete transfers
+1. Job completes when all transfers finish
 
 ### Concurrency
 
@@ -520,12 +522,14 @@ The Unix socket is created with mode 0600 (owner read/write only) for security. 
 ## Future Enhancements (Phase 2 & 3)
 
 ### Phase 2: CLI Integration
+
 - `pelican object get --async` returns job ID
 - `pelican job status <job-id>` checks status
 - `pelican job cancel <job-id>` cancels job
 - `pelican job list` lists all jobs
 
 ### Phase 3: Persistent State
+
 - SQLite database for job/transfer state
 - Survives server restarts
 - Historical job records
@@ -825,16 +829,18 @@ The `apiclient.APIClient` provides the following methods:
 ### Prerequisites for Async Mode
 
 1. **Server Running**: Client Agent server must be running:
+
    ```bash
    pelican client-api serve
    ```
 
-2. **Socket Path**: CLI automatically uses default socket. Override with:
+1. **Socket Path**: CLI automatically uses default socket. Override with:
+
    ```bash
    export PELICAN_CLIENTAGENT_SOCKET=/custom/path/socket
    ```
 
-3. **Authentication**: Same token requirements as direct execution
+1. **Authentication**: Same token requirements as direct execution
 
 ### Error Handling
 
@@ -865,10 +871,10 @@ make build
 ### Adding New Endpoints
 
 1. Add request/response types to `models.go`
-2. Implement handler in `handlers.go`
-3. Register route in `server.go` `setupRoutes()`
-4. Update OpenAPI documentation
-5. Add tests
+1. Implement handler in `handlers.go`
+1. Register route in `server.go` `setupRoutes()`
+1. Update OpenAPI documentation
+1. Add tests
 
 ## License
 

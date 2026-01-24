@@ -134,6 +134,11 @@ var runtimeConfigurableMap = map[string]bool{
 	"Client.SlowTransferWindow": false,
 	"Client.StoppedTransferTimeout": false,
 	"Client.WorkerCount": false,
+	"ClientAgent.DatabasePath": false,
+	"ClientAgent.EnableAutoRecovery": false,
+	"ClientAgent.HistoryRetentionDays": false,
+	"ClientAgent.MaxConnections": false,
+	"ClientAgent.Socket": false,
 	"ConfigLocations": false,
 	"Debug": false,
 	"Director.AdaptiveSortEWMATimeConstant": false,
@@ -481,6 +486,10 @@ func (sP StringParam) GetString() string {
 			return config.Cache.Url
 		case "Cache.XRootDPrefix":
 			return config.Cache.XRootDPrefix
+		case "ClientAgent.DatabasePath":
+			return config.ClientAgent.DatabasePath
+		case "ClientAgent.Socket":
+			return config.ClientAgent.Socket
 		case "Director.AdvertiseUrl":
 			return config.Director.AdvertiseUrl
 		case "Director.CacheSortMethod":
@@ -855,6 +864,10 @@ func (iP IntParam) GetInt() int {
 			return config.Cache.EvictionMonitoringMaxDepth
 		case "Cache.Port":
 			return config.Cache.Port
+		case "ClientAgent.HistoryRetentionDays":
+			return config.ClientAgent.HistoryRetentionDays
+		case "ClientAgent.MaxConnections":
+			return config.ClientAgent.MaxConnections
 		case "Client.DirectorRetries":
 			return config.Client.DirectorRetries
 		case "Client.MaximumDownloadSpeed":
@@ -966,6 +979,8 @@ func (bP BoolParam) GetBool() bool {
 			return config.Cache.EnableVoms
 		case "Cache.SelfTest":
 			return config.Cache.SelfTest
+		case "ClientAgent.EnableAutoRecovery":
+			return config.ClientAgent.EnableAutoRecovery
 		case "Client.AssumeDirectorServerHeader":
 			return config.Client.AssumeDirectorServerHeader
 		case "Client.DisableHttpProxy":
@@ -1288,6 +1303,11 @@ var allParameterNames = []string{
 	"Client.SlowTransferWindow",
 	"Client.StoppedTransferTimeout",
 	"Client.WorkerCount",
+	"ClientAgent.DatabasePath",
+	"ClientAgent.EnableAutoRecovery",
+	"ClientAgent.HistoryRetentionDays",
+	"ClientAgent.MaxConnections",
+	"ClientAgent.Socket",
 	"ConfigLocations",
 	"Debug",
 	"Director.AdaptiveSortEWMATimeConstant",

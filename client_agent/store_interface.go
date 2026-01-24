@@ -18,18 +18,23 @@
 
 package client_agent
 
-import "time"
+import (
+	"time"
+
+	"github.com/pelicanplatform/pelican/client_agent/types"
+)
 
 // StoreInterface defines the interface for persistent storage operations
 // This interface is implemented by client_api/store.Store to avoid import cycles
 type StoreInterface interface {
 	// Job operations
 	CreateJob(jobID, status string, createdAt time.Time, optionsJSON string, retryCount int) error
+	CreateJobWithTransfers(jobID, status string, createdAt time.Time, optionsJSON string, retryCount int, transfers []map[string]interface{}) error
 	UpdateJobStatus(jobID, status string) error
 	UpdateJobTimes(jobID string, startedAt, completedAt *time.Time) error
 	UpdateJobError(jobID, errorMsg string) error
-	GetJob(jobID string) (interface{}, error)
-	ListJobs(status string, limit, offset int) (interface{}, int, error)
+	GetJob(jobID string) (*types.StoredJob, error)
+	ListJobs(status string, limit, offset int) ([]*types.StoredJob, int, error)
 	DeleteJob(jobID string) error
 
 	// Transfer operations
@@ -38,15 +43,16 @@ type StoreInterface interface {
 	UpdateTransferProgress(transferID string, bytesTransferred, totalBytes int64) error
 	UpdateTransferTimes(transferID string, startedAt, completedAt *time.Time) error
 	UpdateTransferError(transferID, errorMsg string) error
-	GetTransfer(transferID string) (interface{}, error)
-	GetTransfersByJob(jobID string) (interface{}, error)
+	GetTransfer(transferID string) (*types.StoredTransfer, error)
+	GetTransfersByJob(jobID string) ([]*types.StoredTransfer, error)
 
 	// Recovery operations
-	GetRecoverableJobs() (interface{}, error)
+	GetRecoverableJobs() ([]*types.StoredJob, error)
+	RecoverJob(jobID string, retryCount int, createdAt time.Time, optionsJSON string, transfers []map[string]interface{}) error
 
 	// History operations
 	ArchiveJob(jobID string) error
-	GetJobHistory(status string, from, to time.Time, limit, offset int) (interface{}, int, error)
+	GetJobHistory(status string, from, to time.Time, limit, offset int) ([]*types.HistoricalJob, int, error)
 	DeleteJobHistory(jobID string) error
 	PruneHistory(olderThan time.Time) (int, error)
 

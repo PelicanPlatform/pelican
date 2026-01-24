@@ -26,6 +26,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/client_agent/types"
 )
 
 func setupTestDB(t *testing.T) (*Store, string) {
@@ -63,10 +65,8 @@ func TestCreateAndGetJob(t *testing.T) {
 	require.NoError(t, err)
 
 	// Get job
-	jobData, err := store.GetJob(jobID)
+	job, err := store.GetJob(jobID)
 	require.NoError(t, err)
-	job, ok := jobData.(*StoredJob)
-	require.True(t, ok)
 	assert.Equal(t, jobID, job.ID)
 	assert.Equal(t, status, job.Status)
 	assert.Equal(t, createdAt.Unix(), job.CreatedAt)
@@ -89,10 +89,8 @@ func TestUpdateJobStatus(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify update
-	jobData, err := store.GetJob(jobID)
+	job, err := store.GetJob(jobID)
 	require.NoError(t, err)
-	job, ok := jobData.(*StoredJob)
-	require.True(t, ok)
 	assert.Equal(t, "running", job.Status)
 }
 
@@ -108,10 +106,8 @@ func TestUpdateJobTimes(t *testing.T) {
 	err = store.UpdateJobTimes(jobID, &startedAt, nil)
 	require.NoError(t, err)
 
-	jobData, err := store.GetJob(jobID)
+	job, err := store.GetJob(jobID)
 	require.NoError(t, err)
-	job, ok := jobData.(*StoredJob)
-	require.True(t, ok)
 	assert.NotNil(t, job.StartedAt)
 	assert.Equal(t, startedAt.Unix(), job.StartedAt.Unix())
 
@@ -120,10 +116,8 @@ func TestUpdateJobTimes(t *testing.T) {
 	err = store.UpdateJobTimes(jobID, nil, &completedAt)
 	require.NoError(t, err)
 
-	jobData, err = store.GetJob(jobID)
+	job, err = store.GetJob(jobID)
 	require.NoError(t, err)
-	job, ok = jobData.(*StoredJob)
-	require.True(t, ok)
 	assert.NotNil(t, job.CompletedAt)
 	assert.Equal(t, completedAt.Unix(), job.CompletedAt.Unix())
 }
@@ -143,27 +137,21 @@ func TestListJobs(t *testing.T) {
 	}
 
 	// List all jobs
-	jobsData, total, err := store.ListJobs("", 10, 0)
+	jobs, total, err := store.ListJobs("", 10, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 5, total)
-	jobs, ok := jobsData.([]*StoredJob)
-	require.True(t, ok)
 	assert.Len(t, jobs, 5)
 
 	// List by status
-	jobsData, total, err = store.ListJobs("completed", 10, 0)
+	jobs, total, err = store.ListJobs("completed", 10, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 3, total)
-	jobs, ok = jobsData.([]*StoredJob)
-	require.True(t, ok)
 	assert.Len(t, jobs, 3)
 
 	// Test pagination
-	jobsData, total, err = store.ListJobs("", 2, 0)
+	jobs, total, err = store.ListJobs("", 2, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 5, total)
-	jobs, ok = jobsData.([]*StoredJob)
-	require.True(t, ok)
 	assert.Len(t, jobs, 2)
 }
 
@@ -174,7 +162,7 @@ func TestCreateAndGetTransfer(t *testing.T) {
 	err := store.CreateJob(jobID, "pending", time.Now(), "{}", 0)
 	require.NoError(t, err)
 
-	transfer := &StoredTransfer{
+	transfer := &types.StoredTransfer{
 		ID:          "transfer-1",
 		JobID:       jobID,
 		Operation:   "get",
@@ -189,10 +177,8 @@ func TestCreateAndGetTransfer(t *testing.T) {
 	require.NoError(t, err)
 
 	// Get transfer
-	retrievedData, err := store.GetTransfer(transfer.ID)
+	retrieved, err := store.GetTransfer(transfer.ID)
 	require.NoError(t, err)
-	retrieved, ok := retrievedData.(*StoredTransfer)
-	require.True(t, ok)
 	assert.Equal(t, transfer.ID, retrieved.ID)
 	assert.Equal(t, transfer.JobID, retrieved.JobID)
 	assert.Equal(t, transfer.Operation, retrieved.Operation)
@@ -209,7 +195,7 @@ func TestGetTransfersByJob(t *testing.T) {
 
 	// Create multiple transfers
 	for i := 0; i < 3; i++ {
-		transfer := &StoredTransfer{
+		transfer := &types.StoredTransfer{
 			ID:          "transfer-" + string(rune(i)),
 			JobID:       jobID,
 			Operation:   "get",
@@ -223,10 +209,8 @@ func TestGetTransfersByJob(t *testing.T) {
 	}
 
 	// Get transfers by job
-	transfersData, err := store.GetTransfersByJob(jobID)
+	transfers, err := store.GetTransfersByJob(jobID)
 	require.NoError(t, err)
-	transfers, ok := transfersData.([]*StoredTransfer)
-	require.True(t, ok)
 	assert.Len(t, transfers, 3)
 	for _, transfer := range transfers {
 		assert.Equal(t, jobID, transfer.JobID)
@@ -240,7 +224,7 @@ func TestUpdateTransferProgress(t *testing.T) {
 	err := store.CreateJob(jobID, "pending", time.Now(), "{}", 0)
 	require.NoError(t, err)
 
-	transfer := &StoredTransfer{
+	transfer := &types.StoredTransfer{
 		ID:          "transfer-1",
 		JobID:       jobID,
 		Operation:   "get",
@@ -257,10 +241,8 @@ func TestUpdateTransferProgress(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify update
-	retrievedData, err := store.GetTransfer(transfer.ID)
+	retrieved, err := store.GetTransfer(transfer.ID)
 	require.NoError(t, err)
-	retrieved, ok := retrievedData.(*StoredTransfer)
-	require.True(t, ok)
 	assert.Equal(t, int64(512), retrieved.BytesTransferred)
 	assert.Equal(t, int64(1024), retrieved.TotalBytes)
 }
@@ -283,10 +265,8 @@ func TestGetRecoverableJobs(t *testing.T) {
 	}
 
 	// Get recoverable jobs (only pending and running)
-	jobsData, err := store.GetRecoverableJobs()
+	jobs, err := store.GetRecoverableJobs()
 	require.NoError(t, err)
-	jobs, ok := jobsData.([]*StoredJob)
-	require.True(t, ok)
 	assert.Len(t, jobs, 2)
 
 	for _, job := range jobs {
@@ -310,7 +290,7 @@ func TestArchiveJob(t *testing.T) {
 
 	// Create transfers
 	for i := 0; i < 3; i++ {
-		transfer := &StoredTransfer{
+		transfer := &types.StoredTransfer{
 			ID:          "transfer-" + string(rune(i)),
 			JobID:       jobID,
 			Operation:   "get",
@@ -342,11 +322,9 @@ func TestArchiveJob(t *testing.T) {
 	assert.Error(t, err)
 
 	// Verify job is in history
-	jobsData, total, err := store.GetJobHistory("", time.Time{}, time.Time{}, 10, 0)
+	jobs, total, err := store.GetJobHistory("", time.Time{}, time.Time{}, 10, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 1, total)
-	jobs, ok := jobsData.([]*HistoricalJob)
-	require.True(t, ok)
 	assert.Len(t, jobs, 1)
 	assert.Equal(t, jobID, jobs[0].ID)
 	assert.Equal(t, 3, jobs[0].TransfersCompleted)
@@ -389,10 +367,8 @@ func TestPruneHistory(t *testing.T) {
 	assert.Equal(t, 3, pruned)
 
 	// Verify only recent jobs remain
-	jobsData, total, err := store.GetJobHistory("", time.Time{}, time.Time{}, 10, 0)
+	jobs, total, err := store.GetJobHistory("", time.Time{}, time.Time{}, 10, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 2, total)
-	jobs, ok := jobsData.([]*HistoricalJob)
-	require.True(t, ok)
 	assert.Len(t, jobs, 2)
 }
