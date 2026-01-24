@@ -29,7 +29,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -72,7 +71,8 @@ func setupTestEnvironment(t *testing.T) (apiClient *apiclient.APIClient, fed *fe
 
 	// Create token for authenticated operations
 	t.Log("setupTestEnvironment: Creating token")
-	viper.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	err := param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	require.NoError(t, err)
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 

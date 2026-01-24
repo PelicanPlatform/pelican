@@ -136,9 +136,8 @@ var runtimeConfigurableMap = map[string]bool{
 	"Client.StoppedTransferTimeout": false,
 	"Client.WorkerCount": false,
 	"ClientAgent.DatabasePath": false,
-	"ClientAgent.EnableAutoRecovery": false,
 	"ClientAgent.HistoryRetentionDays": false,
-	"ClientAgent.MaxConnections": false,
+	"ClientAgent.MaxConcurrentJobs": false,
 	"ClientAgent.Socket": false,
 	"ConfigLocations": false,
 	"Debug": false,
@@ -885,8 +884,8 @@ func (iP IntParam) GetInt() int {
 			return config.Cache.Port
 		case "ClientAgent.HistoryRetentionDays":
 			return config.ClientAgent.HistoryRetentionDays
-		case "ClientAgent.MaxConnections":
-			return config.ClientAgent.MaxConnections
+		case "ClientAgent.MaxConcurrentJobs":
+			return config.ClientAgent.MaxConcurrentJobs
 		case "Client.DirectorRetries":
 			return config.Client.DirectorRetries
 		case "Client.MaximumDownloadSpeed":
@@ -1002,8 +1001,6 @@ func (bP BoolParam) GetBool() bool {
 			return config.Cache.EnableVoms
 		case "Cache.SelfTest":
 			return config.Cache.SelfTest
-		case "ClientAgent.EnableAutoRecovery":
-			return config.ClientAgent.EnableAutoRecovery
 		case "Client.AssumeDirectorServerHeader":
 			return config.Client.AssumeDirectorServerHeader
 		case "Client.DisableHttpProxy":
@@ -1341,9 +1338,8 @@ var allParameterNames = []string{
 	"Client.StoppedTransferTimeout",
 	"Client.WorkerCount",
 	"ClientAgent.DatabasePath",
-	"ClientAgent.EnableAutoRecovery",
 	"ClientAgent.HistoryRetentionDays",
-	"ClientAgent.MaxConnections",
+	"ClientAgent.MaxConcurrentJobs",
 	"ClientAgent.Socket",
 	"ConfigLocations",
 	"Debug",
@@ -1838,7 +1834,7 @@ var (
 	Cache_EvictionMonitoringMaxDepth = IntParam{"Cache.EvictionMonitoringMaxDepth"}
 	Cache_Port = IntParam{"Cache.Port"}
 	ClientAgent_HistoryRetentionDays = IntParam{"ClientAgent.HistoryRetentionDays"}
-	ClientAgent_MaxConnections = IntParam{"ClientAgent.MaxConnections"}
+	ClientAgent_MaxConcurrentJobs = IntParam{"ClientAgent.MaxConcurrentJobs"}
 	Client_DirectorRetries = IntParam{"Client.DirectorRetries"}
 	Client_MaximumDownloadSpeed = IntParam{"Client.MaximumDownloadSpeed"}
 	Client_MinimumDownloadSpeed = IntParam{"Client.MinimumDownloadSpeed"}
@@ -1888,7 +1884,6 @@ var (
 	Cache_EnableTLSClientAuth = BoolParam{"Cache.EnableTLSClientAuth"}
 	Cache_EnableVoms = BoolParam{"Cache.EnableVoms"}
 	Cache_SelfTest = BoolParam{"Cache.SelfTest"}
-	ClientAgent_EnableAutoRecovery = BoolParam{"ClientAgent.EnableAutoRecovery"}
 	Client_AssumeDirectorServerHeader = BoolParam{"Client.AssumeDirectorServerHeader"}
 	Client_DisableHttpProxy = BoolParam{"Client.DisableHttpProxy"}
 	Client_DisableProxyFallback = BoolParam{"Client.DisableProxyFallback"}
