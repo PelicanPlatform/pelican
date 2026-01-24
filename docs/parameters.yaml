@@ -694,17 +694,6 @@ type: filename
 default: $ConfigBase/client-api.db
 components: ["client"]
 ---
-name: ClientAgent.EnableAutoRecovery
-description: |+
-  A boolean indicating whether the client API server should automatically attempt
-  to recover incomplete jobs from the database on startup. When enabled, interrupted
-  jobs will be marked as failed and archived to history.
-
-  Disabling this may be useful for debugging or when manual recovery is preferred.
-type: bool
-default: true
-components: ["client"]
----
 name: ClientAgent.HistoryRetentionDays
 description: |+
   The number of days to retain completed job history in the database before
@@ -716,16 +705,15 @@ type: int
 default: 30
 components: ["client"]
 ---
-name: ClientAgent.MaxConnections
+name: ClientAgent.MaxConcurrentJobs
 description: |+
-  The maximum number of concurrent database connections allowed by the client API
-  server's SQLite connection pool. This limits resource usage but may impact
-  performance under high load.
+  The maximum number of concurrent transfer jobs that the client API server
+  can process simultaneously. This limits resource usage and prevents overwhelming
+  the system with too many parallel transfers.
 
-  Increase this value if you experience database lock contention or timeouts
-  with many concurrent API requests.
+  Set to 0 or negative to use the default value (5).
 type: int
-default: 10
+default: 5
 components: ["client"]
 ---
 name: ClientAgent.Socket
@@ -734,9 +722,7 @@ description: |+
   inter-process communication. Clients connect to this socket to submit transfer
   jobs and query their status.
 
-  If not specified, the default location is used based on the platform and user
-  permissions. This parameter allows overriding the default location for testing
-  or custom deployment scenarios.
+  If not specified, the default location is `~/.pelican/client-api.db`.
 type: filename
 default: ""
 components: ["client"]

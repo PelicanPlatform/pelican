@@ -83,9 +83,8 @@ type Config struct {
 	} `mapstructure:"client" yaml:"Client"`
 	ClientAgent struct {
 		DatabasePath string `mapstructure:"databasepath" yaml:"DatabasePath"`
-		EnableAutoRecovery bool `mapstructure:"enableautorecovery" yaml:"EnableAutoRecovery"`
 		HistoryRetentionDays int `mapstructure:"historyretentiondays" yaml:"HistoryRetentionDays"`
-		MaxConnections int `mapstructure:"maxconnections" yaml:"MaxConnections"`
+		MaxConcurrentJobs int `mapstructure:"maxconcurrentjobs" yaml:"MaxConcurrentJobs"`
 		Socket string `mapstructure:"socket" yaml:"Socket"`
 	} `mapstructure:"clientagent" yaml:"ClientAgent"`
 	ConfigDir string `mapstructure:"configdir" yaml:"ConfigDir"`
@@ -491,9 +490,8 @@ type configWithType struct {
 	}
 	ClientAgent struct {
 		DatabasePath struct { Type string; Value string }
-		EnableAutoRecovery struct { Type string; Value bool }
 		HistoryRetentionDays struct { Type string; Value int }
-		MaxConnections struct { Type string; Value int }
+		MaxConcurrentJobs struct { Type string; Value int }
 		Socket struct { Type string; Value string }
 	}
 	ConfigDir struct { Type string; Value string }

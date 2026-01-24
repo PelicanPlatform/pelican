@@ -34,7 +34,6 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -98,7 +97,8 @@ func TestCLIAsyncGet(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create token
-	viper.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	err := param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	require.NoError(t, err)
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
@@ -234,7 +234,8 @@ func TestCLIAsyncPut(t *testing.T) {
 
 	// Create token
 	tokenStart := time.Now()
-	viper.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	err := param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	require.NoError(t, err)
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
@@ -348,7 +349,8 @@ func TestCLIJobCommands(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create token
-	viper.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	err := param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	require.NoError(t, err)
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
