@@ -1,3 +1,4 @@
+---
 name: Build and Test
 
 # This workflow is responsible for building Pelican's container images and
@@ -12,7 +13,7 @@ name: Build and Test
 #
 #   - Pushes to main: We push only pelican-test and pelican-dev.
 #
-#   - Pushes to semvar tags: We push pelican-test and all the "server" images.
+#   - Pushes to semver tags: We push pelican-test and all the "server" images.
 
 on:
   pull_request:
@@ -30,20 +31,47 @@ on:
       - dispatch-build
   workflow_dispatch:
 
+defaults:
+  run:
+    # bash-isms have a way of sneaking in unnoticed.
+    shell: bash
+
 jobs:
-  set-build-parameters:
+
+  # This first job determines the work to be done:
+  #
+  #   - The list of images to build.
+  #   - The architectures and platforms to target for those builds.
+  #   - The list of images to push and where to push them.
+
+  params:
+    name: Set build parameters
     outputs:
-      # While some of these outputs are intended to be treated as booleans,
-      # they are actually strings ('true', 'false'). In any conditionals, test
-      # their values using "== 'true'" or "== 'false'".
-      registry-repo: ${{ steps.parameters.outputs.REGISTRY_REPO }}
-      platforms: ${{ steps.parameters.outputs.PLATFORMS }}
-      push-devtest: ${{ steps.parameters.outputs.PUSH_DEVTEST }}
-      push-server: ${{ steps.parameters.outputs.PUSH_SERVER }}
+      # NOTE: While some of the outputs below are intended to be treated
+      # as booleans, they are actually strings. In conditionals, test their
+      # values using "== 'true'" or "== 'false'".
+      images-to-build: |
+        [
+          "cache",
+          "director",
+          "origin",
+          "registry",
+          "osdf-cache",
+          "osdf-director",
+          "osdf-origin",
+          "osdf-registry",
+          "pelican-dev",
+          "pelican-test"
+        ]
+      architectures: ${{ steps.params.outputs.ARCHITECTURES }}
+      platforms: ${{ steps.params.outputs.PLATFORMS }}
+      images-to-push: ${{ steps.params.outputs.IMAGES }}
+      registry-repo: ${{ steps.params.outputs.REGISTRY_REPO }}
+      registry-cache: ${{ steps.params.outputs.REGISTRY_REPO }}/pelican-dev:buildcache
     runs-on: ubuntu-latest
     steps:
-      - name: Determine build parameters
-        id: parameters
+      - name: Determine how to build and push container images
+        id: params
         run: |
           set -eu
 
@@ -51,7 +79,7 @@ jobs:
 
           case '${{ github.repository }}' in
             PelicanPlatform/pelican)
-              REGISTRY_REPO="pelican_platform"
+              REGISTRY_REPO="hub.opensciencegrid.org/pelican_platform"
               IS_PRIMARY_GITHUB_REPO=true ;;
 
             # Some testing scenarios require the ability to push container
@@ -60,104 +88,154 @@ jobs:
             # images somewhere.
 
             brianaydemir/pelicanplatform-pelican)
-              REGISTRY_REPO="brian.aydemir.r1" ;;
+              REGISTRY_REPO="hub.opensciencegrid.org/brian.aydemir.r1" ;;
           esac
 
-          # By default, we assume that we are unable to push containers.
+          # By default, assume that we are unable to push container images
+          # because the credentials are not available.
+
           PUSH_DEVTEST=false
           PUSH_SERVER=false
 
           if [ -n '${{ secrets.PELICAN_HARBOR_ROBOT_USER }}' ] \
              && [ -n '${{ secrets.PELICAN_HARBOR_ROBOT_PASSWORD }}' ]
           then
-            if [ "$IS_PRIMARY_GITHUB_REPO" == "true" ]; then
-              # For the PelicanPlatform/pelican repo, we push test and dev
-              # containers built off of 'main', and server containers built
-              # off of semvar tags.
+            if ${IS_PRIMARY_GITHUB_REPO}; then
+              # For the PelicanPlatform/pelican repo, we push test and
+              # dev images built off of 'main', and server images built
+              # off of semver tags.
               PUSH_DEVTEST=${{ github.ref == 'refs/heads/main' }}
               PUSH_SERVER=${{ startsWith(github.ref, 'refs/tags/') }}
             else
-              # For forks, we push only the server containers, which is
-              # sufficient because they include the testing container.
+              # For forks, we push only the server images.
               PUSH_DEVTEST=false
               PUSH_SERVER=${{ startsWith(github.ref, 'refs/tags/') }}
             fi
           fi
 
+          # Having determined which sets of images to push, turn those
+          # sets into a JSON list.
+
+          IMAGES=()
+          if ${PUSH_SERVER}; then
+            IMAGES+=(cache director origin registry)
+            IMAGES+=(osdf-cache osdf-director osdf-origin osdf-registry)
+            IMAGES+=(pelican-test)  # for testing semver tags
+          fi
+          if ${PUSH_DEVTEST}; then
+            IMAGES+=(pelican-dev pelican-test)
+          fi
+          # Turn a space-delimited list into a JSON list.
+          IMAGES="$(jq -cr '. | split(" ") | unique' <<< '"'"${IMAGES[*]}"'"')"
+
+          # In order to form the matrix in build-images below, we need
+          # the list of architectures being targeted so that we can take
+          # the Cartesian product of it with the list of images.
+          #
+          # The "platforms" list can then be used to augment each member
+          # of the product via 'matrix.include'. The 'id' is for situations
+          # where the slash in 'platform' is prohibited.
+
           if ${PUSH_DEVTEST} || ${PUSH_SERVER}; then
-            PLATFORMS=linux/amd64,linux/arm64
+            ARCHITECTURES='[ "amd64", "arm64" ]'
+            PLATFORMS='[
+              { "arch": "amd64", "id": "linux-amd64", "platform": "linux/amd64", "runner": "ubuntu-latest" },
+              { "arch": "arm64", "id": "linux-arm64", "platform": "linux/arm64", "runner": "ubuntu-24.04-arm" }
+            ]'
           else
             # If we're not pushing images to a registry, then save resources.
-            PLATFORMS=linux/amd64
+            ARCHITECTURES='[ "amd64" ]'
+            PLATFORMS='[
+              { "arch": "amd64", "id": "linux-amd64", "platform": "linux/amd64", "runner": "ubuntu-latest" }
+            ]'
           fi
 
-          echo "REGISTRY_REPO=${REGISTRY_REPO}" >> $GITHUB_OUTPUT
-          echo "PLATFORMS=${PLATFORMS}" >> $GITHUB_OUTPUT
-          echo "PUSH_DEVTEST=${PUSH_DEVTEST}" >> $GITHUB_OUTPUT
-          echo "PUSH_SERVER=${PUSH_SERVER}" >> $GITHUB_OUTPUT
+          printf 'ARCHITECTURES=%s\n'        "${ARCHITECTURES}" >> $GITHUB_OUTPUT
+          printf 'PLATFORMS<<EOF\n%s\nEOF\n' "${PLATFORMS}"     >> $GITHUB_OUTPUT
+          printf 'IMAGES=%s\n'               "${IMAGES}"        >> $GITHUB_OUTPUT
+          printf 'REGISTRY_REPO=%s\n'        "${REGISTRY_REPO}" >> $GITHUB_OUTPUT
 
-  set-tags:
-    runs-on: ubuntu-latest
+  tags:
+    name: Set image tags
     outputs:
-      TIMESTAMP: ${{ steps.make_timestamp.outputs.TIMESTAMP }}
       IS_LATEST: ${{ steps.is_latest.outputs.IS_LATEST }}
-      GITHUB_TAG: ${{ steps.determine_tags.outputs.GITHUB_TAG }}
+      TAG: ${{ steps.tag.outputs.TAG }}
+      TIMESTAMP: ${{ steps.timestamp.outputs.TIMESTAMP }}
+    runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
 
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Set timestamp
+        id: timestamp
+        run: echo "TIMESTAMP=$(date -u +%Y%m%d-%H%M)" >> $GITHUB_OUTPUT
 
-      - name: Make timestamp tag
-        id: make_timestamp
-        run: echo "TIMESTAMP=$(date +%Y%m%d-%H%M)" >> $GITHUB_OUTPUT
-
-      - name: Determine whether to tag this build with "latest"
+      - name: Set whether to tag this build with "latest"
         id: is_latest
         run: |
           git fetch --tags
-          tags=$(git tag -l 'v*.*.*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)
-          highest_tag=$(echo "${tags}" | tail -n1)
-          echo "Highest version tag is ${highest_tag}"
-          if [[ "${GITHUB_REF##*/}" == "${highest_tag}" ]]; then
+
+          highest_tag=$(git tag -l 'v*.*.*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+          echo "Current ref: ${GITHUB_REF}"
+          echo "Highest release tag: ${highest_tag}"
+
+          if [ "${GITHUB_REF##*/}" = "${highest_tag}" ]; then
             echo "IS_LATEST=true" >> $GITHUB_OUTPUT
           else
             echo "IS_LATEST=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Determine the tags that triggered this build
-        id: determine_tags
+      - name: Set the tag to use for this build
+        id: tag
         run: |
-          # Check if we're working with a tagged version
-          if [ -z "${{ inputs.tag }}" ]
-          then
-            # Use regex to check for a semver tag match.
-            if [[ ${GITHUB_REF##*/} =~ v[0-9]+\.[0-9]+\.[0-9]+ ]]
-            then
-              GITHUB_TAG=${GITHUB_REF##*/}
-            else
-              GITHUB_TAG="latest-dev"
-            fi
+          if [ -n '${{ inputs.tag }}' ]; then
+            TAG=${{ inputs.tag }}
           else
-            GITHUB_TAG=${{ inputs.tag }}
+            # Check for a semver tag match.
+            if [[ ${GITHUB_REF##*/} =~ v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+              TAG=${GITHUB_REF##*/}
+            else
+              TAG="latest-itb"
+            fi
           fi
 
-          echo "Master SHA:"
+          echo "SHA for current ref:"
           echo $(git rev-parse $GITHUB_REF_NAME)
 
-          echo "Current SHA:"
+          echo "SHA for HEAD:"
           echo $(git rev-parse HEAD)
 
-          echo "Computed tags:"
-          echo $GITHUB_TAG
-          echo "GITHUB_TAG=$GITHUB_TAG" >> $GITHUB_OUTPUT
+          echo "Computed tag:"
+          echo $TAG
+          echo "TAG=$TAG" >> $GITHUB_OUTPUT
+
+  # Building the Pelican binary and putting together an XRootD install
+  # are time consuming tasks that are needed by all of Pelican's images.
+  # This next job carries out those tasks, and then saves the results.
+  #
+  # Later jobs can then build the final images without repeating that work.
+  # If the images end up sharing layers because of this, that's a happy
+  # little accident. It is not worth the additional complexity to see that
+  # happens optimally.
 
   cache-image-layers:
-    needs: [set-build-parameters]
-    runs-on: ubuntu-latest
+    name: Cache ${{ matrix.arch }} layers
+    needs: [params]
+    strategy:
+      fail-fast: true
+      matrix:
+        arch: ${{ fromJson(needs.params.outputs.architectures) }}
+        include: ${{ fromJson(needs.params.outputs.platforms) }}
+    runs-on: ${{ matrix.runner }}
+    env:
+      REGISTRY_IMAGE: ${{ needs.params.outputs.registry-repo }}/origin
     steps:
 
+      # As of 2026-01-26, GitHub documents the Ubuntu runners as having
+      # only 14 GB of storage. In practice, that is not always sufficient
+      # to build XRootD and Pelican.
+
       - name: Free disk space
-        shell: bash
         run: |
           # Use `df` to quickly check how much space is available.
 
@@ -171,99 +249,144 @@ jobs:
           df -h
           echo "::endgroup::"
 
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v6
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - name: Set up metadata
+        id: meta
+        uses: docker/metadata-action@v5
         with:
-          platforms: amd64,arm64
+          images: ${{ env.REGISTRY_IMAGE }}
+          tags: |
+            type=raw,sha-{{ sha }}-${{ matrix.arch }}
 
-      # NOTE (brianaydemir): Do not try to be clever and/or ambitious here.
-      # Keep the cache small by restricting it to the current GitHub Action
-      # run. We need to be able to save it for future jobs.
+      # Docker's build cache and the GitHub workspace need to be cached in
+      # tandem because each new checkout of the repository results in files
+      # in .git that contain the timestamp of when the checkout happened,
+      # which is enough to invalidate Docker's build cache.
+      #
+      # These caches are the key to keeping the overall runtime of this
+      # workflow short, and also a source of fragility if we try to be too
+      # clever. Along these lines, a couple of considerations:
+      #
+      #   - There is no way to delete layers from Docker's build cache.
+      #
+      #   - It is a challenge to predict what will happen if one cache is
+      #     already present but not the other.
+      #
+      # To address the first point, we will restrict the caches to the
+      # current Git commit.
+      #
+      # To address the second point, we will restrict the caches to the
+      # current workflow run *and* attempt.
+      #
+      # If a developer wants to re-run the workflow because of an issue
+      # during the build jobs, then they should re-run the entire workflow.
+      # The new attempt will automatically use its own, fresh caches.
 
       - name: Create a cache for Docker Buildx
         uses: actions/cache@v4
         with:
-          path: /tmp/.base-buildx-cache
-          key: base-buildx-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/.base-buildx-cache
+          key: base-buildx-${{ matrix.id }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Create a cache for the GitHub workspace
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}
+          key: github-workspace-${{ matrix.id }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
           buildkitd-flags: --debug
 
-      - name: Save the GitHub workspace
-        uses: actions/cache/save@v4
+      - name: Log in to OSG Harbor
+        if: ${{ contains(fromJson(needs.params.outputs.images-to-push), 'origin') }}
+        uses: docker/login-action@v3
         with:
-          path: ${{ github.workspace }}
-          key: github-workspace-${{ github.sha }}-${{ github.run_id }}
+          registry: hub.opensciencegrid.org
+          username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
+          password: ${{ secrets.PELICAN_HARBOR_ROBOT_PASSWORD }}
 
-      - name: Create and cache image layers
+      # The origin container image is one of the largest images we build,
+      # and the one that pulls in almost all the layers of interest. Only
+      # the testing and dev images are significantly larger.
+      #
+      # If we need to push the origin image, then we can do so here, and
+      # hopefully remove the possibility that later jobs end up uploading
+      # these layers multiple times over.
+
+      - name: Build and push origin
         uses: docker/build-push-action@v5
         with:
-          context: .
           file: ./images/Dockerfile
-          platforms: ${{ needs.set-build-parameters.outputs.platforms }}
           target: origin
-          cache-from: |
-            type=registry,ref=hub.opensciencegrid.org/${{ needs.set-build-parameters.outputs.registry-repo }}/pelican-dev:buildcache
-            type=local,src=/tmp/.base-buildx-cache
-          cache-to: type=local,dest=/tmp/.base-buildx-cache,mode=max
+          platforms: ${{ matrix.platform }}
+          tags: ${{ steps.meta.outputs.tags }}
+          push: ${{ contains(fromJson(needs.params.outputs.images-to-push), 'origin') }}
 
-  build-server-images:
-    needs: [set-build-parameters, cache-image-layers, set-tags]
+          # Configure the build to use the current workspace as the context.
+          context: .
+
+          # Configure the build cache.
+          cache-from: |
+            type=registry,ref=${{ needs.params.outputs.registry-cache }}-${{ matrix.arch }}
+            type=local,src=${{ runner.temp }}/.base-buildx-cache
+
+          # Save Docker's build cache to the file/directory we set up
+          # earlier to be saved to the GitHub Actions cache.
+          cache-to: type=local,dest=${{ runner.temp }}/.base-buildx-cache,mode=max
+
+  # Taking inspiration from
+  # https://docs.docker.com/build/ci/github-actions/multi-platform/#distribute-build-across-multiple-runners,
+  # we now build the final, multi-architecture images.
+  #
+  # For each final image, the basic flow is this:
+  #
+  #   1. For each architecture, use a separate runner to build and push
+  #      an image, tagging it with its architecture.
+  #
+  #   2. In a second job, create and push a manifest that encompasses all
+  #      of the images from the first step.
+
+  build-images:
+    name: Build ${{ matrix.image }}-${{ matrix.arch }}
+    needs: [cache-image-layers, params, tags]
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
-        image:
-          - origin
-          - cache
-          - director
-          - registry
-          - osdf-origin
-          - osdf-cache
-          - osdf-director
-          - osdf-registry
-          # For release candidates, this is where we build and push the testing container.
-          - pelican-test
-    runs-on: ubuntu-latest
-
+        image: ${{ fromJson(needs.params.outputs.images-to-build) }}
+        arch: ${{ fromJson(needs.params.outputs.architectures) }}
+        include: ${{ fromJson(needs.params.outputs.platforms) }}
+    runs-on: ${{ matrix.runner }}
+    env:
+      REGISTRY_IMAGE: ${{ needs.params.outputs.registry-repo }}/${{ matrix.image }}
     steps:
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - name: Set up metadata
+        id: meta
+        uses: docker/metadata-action@v5
         with:
-          platforms: amd64,arm64
-
-      - name: Generate tag list
-        id: generate-tag-list
-        env:
-          GITHUB_TAG: ${{ needs.set-tags.outputs.GITHUB_TAG }}
-          IS_LATEST: ${{ needs.set-tags.outputs.IS_LATEST }}
-        run: |
-          docker_repo=${{ needs.set-build-parameters.outputs.registry-repo }}
-          image_name=${{ matrix.image }}
-          tag_list=()
-          for registry in hub.opensciencegrid.org; do
-            for image_tag in "$GITHUB_TAG"; do
-              tag_list+=("$registry/$docker_repo/$image_name":"$image_tag")
-            done
-          done
-          if [[ "$IS_LATEST" == "true" ]]; then
-            tag_list+=("$registry/$docker_repo/$image_name:latest")
-          fi
-          # This causes the tag_list array to be comma-separated below,
-          # which is required for build-push-action
-          IFS=,
-          echo "taglist=${tag_list[*]}" >> $GITHUB_OUTPUT
+          images: ${{ env.REGISTRY_IMAGE }}
+          tags: |
+            type=raw,${{ needs.tags.outputs.TAG }}-${{ matrix.arch }}
+            type=raw,${{ needs.tags.outputs.TIMESTAMP }}-${{ matrix.arch }}
+            type=raw,sha-{{ sha }}-${{ matrix.arch }}
+            type=raw,enable=${{ needs.tags.outputs.IS_LATEST }},latest-${{ matrix.arch }}
 
       - name: Restore the cache for Docker Buildx
         uses: actions/cache/restore@v4
         with:
-          path: /tmp/.base-buildx-cache
-          key: base-buildx-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/.base-buildx-cache
+          key: base-buildx-${{ matrix.id }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          fail-on-cache-miss: true  # don't let cache-image-layers be for naught
+
+      - name: Restore the cache for the GitHub workspace
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}
+          key: github-workspace-${{ matrix.id }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          fail-on-cache-miss: true  # don't let cache-image-layers be for naught
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -271,149 +394,112 @@ jobs:
           buildkitd-flags: --debug
 
       - name: Log in to OSG Harbor
+        if: ${{ contains(fromJson(needs.params.outputs.images-to-push), matrix.image) }}
         uses: docker/login-action@v3
-        if: ${{ needs.set-build-parameters.outputs.push-server == 'true' }}
         with:
           registry: hub.opensciencegrid.org
           username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
           password: ${{ secrets.PELICAN_HARBOR_ROBOT_PASSWORD }}
 
-      - name: Restore the GitHub workspace
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ github.workspace }}
-          key: github-workspace-${{ github.sha }}-${{ github.run_id }}
-          #
-          # NOTE (brianaydemir): If we've somehow managed to get the GitHub
-          # workspace cache evicted, then there are likely serious problems
-          # with how we're triggering and using GitHub actions. Make noise!
-          #
-          fail-on-cache-miss: true
-
-      - name: Build and push Docker images
+      - name: Build and push image
+        id: build
         uses: docker/build-push-action@v5
         with:
-          context: .
           file: ./images/Dockerfile
-          platforms: ${{ needs.set-build-parameters.outputs.platforms }}
           target: ${{ matrix.image }}
-          push: ${{ needs.set-build-parameters.outputs.push-server == 'true' }}
-          tags: "${{ steps.generate-tag-list.outputs.taglist }}"
+          platforms: ${{ matrix.platform }}
+          tags: ${{ steps.meta.outputs.tags }}
+          push: ${{ contains(fromJson(needs.params.outputs.images-to-push), matrix.image) }}
+
+          # Configure the build to use the current workspace as the context.
+          context: .
+
+          # Configure the build cache.
           cache-from: |
-            type=registry,ref=hub.opensciencegrid.org/${{ needs.set-build-parameters.outputs.registry-repo }}/pelican-dev:buildcache
-            type=local,src=/tmp/.base-buildx-cache
+            type=registry,ref=${{ needs.params.outputs.registry-cache }}-${{ matrix.arch }}
+            type=local,src=${{ runner.temp }}/.base-buildx-cache
 
-  build-devtest-images:
-    needs: [set-build-parameters, cache-image-layers]
+          # Upload the dev image as a build cache because, in theory,
+          # it contains layers that change relatively infrequently and
+          # thus could be used to reduce future build times.
+          cache-to: ${{ contains(fromJson(needs.params.outputs.images-to-push), matrix.image) && matrix.image == 'pelican-dev' && format('{0}{1}-{2}{3}', 'type=registry,ref=', needs.params.outputs.registry-cache, matrix.arch, ',mode=max,ignore-error=true,image-manifest=true,oci-mediatypes=true') || null }}
+
+      - name: Export digest
+        if: ${{ contains(fromJson(needs.params.outputs.images-to-push), matrix.image) }}
+        run: |
+          mkdir "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        if: ${{ contains(fromJson(needs.params.outputs.images-to-push), matrix.image) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.image }}-${{ matrix.id }}
+          path: ${{ runner.temp }}/digests/*
+          overwrite: true  # allow the workflow to be re-run
+          retention-days: 1  # we need this artifact only for the following job
+          if-no-files-found: error
+
+  create-manifests:
+    name: Create manifest
+    if: ${{ needs.params.outputs.images-to-push != '[]' }}
+    needs: [build-images, params, tags]
+    strategy:
+      fail-fast: true
+      matrix:
+        image: ${{ fromJson(needs.params.outputs.images-to-push) }}
     runs-on: ubuntu-latest
+    env:
+      REGISTRY_IMAGE: ${{ needs.params.outputs.registry-repo }}/${{ matrix.image }}
     steps:
-
-      # NOTE (brianaydemir): If it wasn't for the potential expense of
-      # loading the Docker Buildx cache, we could implement this job using
-      # a matrix and eliminate near-identical steps.
-
-      - name: Determine image tags (pelican-test)
-        id: pelican-test-tags
+      - name: Set up metadata
+        id: meta
         uses: docker/metadata-action@v5
         with:
-          images: hub.opensciencegrid.org/${{ needs.set-build-parameters.outputs.registry-repo }}/pelican-test
+          images: ${{ env.REGISTRY_IMAGE }}
           tags: |
-            type=raw,value=latest-itb
-            type=raw,value=sha-{{sha}}
-
-      - name: Determine image tags (pelican-dev)
-        id: pelican-dev-tags
-        uses: docker/metadata-action@v5
-        with:
-          images: hub.opensciencegrid.org/${{ needs.set-build-parameters.outputs.registry-repo }}/pelican-dev
-          tags: |
-            type=raw,value=latest-itb
-            type=raw,value=sha-{{sha}}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: amd64,arm64
-
-      - name: Restore the cache for Docker Buildx
-        uses: actions/cache/restore@v4
-        with:
-          path: /tmp/.base-buildx-cache
-          key: base-buildx-${{ github.sha }}-${{ github.run_id }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          buildkitd-flags: --debug
+            type=raw,${{ needs.tags.outputs.TAG }}
+            type=raw,${{ needs.tags.outputs.TIMESTAMP }}
+            type=raw,sha-{{ sha }}
+            type=raw,enable=${{ needs.tags.outputs.IS_LATEST }},latest
 
       - name: Log in to OSG Harbor
         uses: docker/login-action@v3
-        if: ${{ needs.set-build-parameters.outputs.push-devtest == 'true' }}
         with:
           registry: hub.opensciencegrid.org
           username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
           password: ${{ secrets.PELICAN_HARBOR_ROBOT_PASSWORD }}
 
-      - name: Restore the GitHub workspace
-        uses: actions/cache/restore@v4
+      - name: Download digests
+        uses: actions/download-artifact@v4
         with:
-          path: ${{ github.workspace }}
-          key: github-workspace-${{ github.sha }}-${{ github.run_id }}
-          #
-          # NOTE (brianaydemir): If we've somehow managed to get the GitHub
-          # workspace cache evicted, then there are likely serious problems
-          # with how we're triggering and using GitHub actions. Make noise!
-          #
-          fail-on-cache-miss: true
+          pattern: digests-${{ matrix.image }}-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/digests
 
-      - name: Build and push Docker images (pelican-test)
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./images/Dockerfile
-          platforms: ${{ needs.set-build-parameters.outputs.platforms }}
-          target: pelican-test
-          push: ${{ needs.set-build-parameters.outputs.push-devtest == 'true' }}
-          tags: ${{ steps.pelican-test-tags.outputs.tags }}
-          cache-from: |
-            type=registry,ref=hub.opensciencegrid.org/${{ needs.set-build-parameters.outputs.registry-repo }}/pelican-dev:buildcache
-            type=local,src=/tmp/.base-buildx-cache
+      - name: Create and push manifest
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
 
-      - name: Build and push Docker images (pelican-dev)
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./images/Dockerfile
-          platforms: ${{ needs.set-build-parameters.outputs.platforms }}
-          target: pelican-dev
-          push: ${{ needs.set-build-parameters.outputs.push-devtest == 'true' }}
-          tags: ${{ steps.pelican-dev-tags.outputs.tags }}
-          cache-from: |
-            type=registry,ref=hub.opensciencegrid.org/${{ needs.set-build-parameters.outputs.registry-repo }}/pelican-dev:buildcache
-            type=local,src=/tmp/.base-buildx-cache
-          cache-to: type=registry,ref=hub.opensciencegrid.org/${{ needs.set-build-parameters.outputs.registry-repo }}/pelican-dev:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true
-
-  # The macOS and Windows tests do not depend on any of the images being
-  # built above. Thus, there is a separate workflow for running the tests:
-  # test-macos-windows.yaml.
+  # The macOS and Windows tests do not depend on the container images being
+  # built above. Thus, there are separate workflows for running those tests:
+  # test-macos.yml and test-windows.yml.
   #
-  # The Linux tests are less straightforward because we need to decide
-  # which container image to run the tests in, which might require waiting
-  # for the image to be built.
+  # The Linux tests depend on the most recent version of the testing
+  # container, which depends on whether this is a push to main, a push to
+  # a semver tag, or a pull request.
   #
-  # For a pull request, we cannot build and push a newer image. Thus, there
-  # is a separate workflow for running the tests: test-linux-pr.yaml.
+  # Pull requests are, in fact, handled in test-linux-pr.yml because we
+  # cannot push a newer version of the testing container, so there is no
+  # need to wait for it to be built.
 
-  test-linux-push-to-main:
-    needs: [set-build-parameters, build-devtest-images]
-    if: ${{ needs.set-build-parameters.outputs.push-devtest == 'true' }}
+  test:
+    name: Test ${{ needs.tags.outputs.TAG }}
+    needs: [create-manifests, params, tags]
     uses: ./.github/workflows/test-linux.yml
     with:
-      image: hub.opensciencegrid.org/${{ needs.set-build-parameters.outputs.registry-repo }}/pelican-test:latest-itb
-
-  test-linux-push-to-tag:
-    needs: [set-build-parameters, set-tags, build-server-images]
-    if: ${{ needs.set-build-parameters.outputs.push-server == 'true' }}
-    uses: ./.github/workflows/test-linux.yml
-    with:
-      image: hub.opensciencegrid.org/${{ needs.set-build-parameters.outputs.registry-repo }}/pelican-test:${{ needs.set-tags.outputs.GITHUB_TAG }}
+      image: ${{ needs.params.outputs.registry-repo }}/pelican-test:${{ needs.tags.outputs.TAG }}
