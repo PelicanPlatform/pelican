@@ -35,7 +35,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -115,7 +114,8 @@ func TestClientAPIIntegration(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create token for authenticated operations
-	viper.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	err = param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	require.NoError(t, err)
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 

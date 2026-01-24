@@ -233,8 +233,8 @@ func init() {
 		"Path to the PID file")
 
 	// Serve-specific flags
-	clientAgentServeCmd.Flags().IntVar(&clientAgentMaxJobs, "max-jobs", client_agent.DefaultMaxConcurrentJobs,
-		"Maximum number of concurrent transfer jobs")
+	clientAgentServeCmd.Flags().IntVar(&clientAgentMaxJobs, "max-jobs", 0,
+		"Maximum number of concurrent transfer jobs (default: uses ClientAgent.MaxConcurrentJobs parameter, or 5)")
 	clientAgentServeCmd.Flags().StringVar(&clientAgentDbPath, "database", "",
 		"Path to the SQLite database file for persistence (default: ~/.pelican/client-api.db)")
 
