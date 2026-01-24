@@ -16,13 +16,12 @@
  *
  ***************************************************************/
 
-package store
+package types
 
-import (
-	"time"
-)
+import "time"
 
 // StoredJob represents a job stored in the database
+// This type is shared between transfer_manager and store to avoid import cycles
 type StoredJob struct {
 	ID           string
 	Status       string
@@ -35,6 +34,7 @@ type StoredJob struct {
 }
 
 // StoredTransfer represents a transfer stored in the database
+// This type is shared between transfer_manager and store to avoid import cycles
 type StoredTransfer struct {
 	ID               string
 	JobID            string
@@ -51,18 +51,19 @@ type StoredTransfer struct {
 	ErrorMessage     string
 }
 
-// HistoricalJob represents a job in the history table
+// HistoricalJob represents a completed job archived to history
 type HistoricalJob struct {
 	ID                 string
 	Status             string
 	CreatedAt          int64
 	StartedAt          *time.Time
 	CompletedAt        *time.Time
+	Options            map[string]interface{}
 	ErrorMessage       string
+	RetryCount         int
 	TransfersCompleted int
 	TransfersFailed    int
 	TransfersTotal     int
 	BytesTransferred   int64
 	TotalBytes         int64
-	RetryCount         int // Number of times this job was retried before completion
 }

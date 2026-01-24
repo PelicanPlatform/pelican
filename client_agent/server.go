@@ -76,10 +76,11 @@ func NewServer(config ServerConfig) (*Server, error) {
 		return nil, errors.Wrap(err, "failed to expand pid file path")
 	}
 
-	// Ensure directory exists
+	// Ensure socket directory exists with secure permissions (0700)
+	// This must be done before socket creation to prevent race conditions
 	socketDir := filepath.Dir(socketPath)
-	if err := os.MkdirAll(socketDir, 0755); err != nil {
-		return nil, errors.Wrap(err, "failed to create socket directory")
+	if err := ensureSecureDirectory(socketDir); err != nil {
+		return nil, errors.Wrap(err, "failed to ensure secure socket directory")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -95,14 +96,21 @@ func NewServer(config ServerConfig) (*Server, error) {
 		} else {
 			dbPath = filepath.Join(homeDir, ".pelican", "client-api.db")
 			dbDir := filepath.Dir(dbPath)
-			if err := os.MkdirAll(dbDir, 0755); err != nil {
-				log.Warnf("Failed to create database directory, database will not be initialized: %v", err)
+			if err := ensureSecureDirectory(dbDir); err != nil {
+				log.Warnf("Failed to create secure database directory, database will not be initialized: %v", err)
 				dbPath = ""
 			}
 		}
 	}
 
 	if dbPath != "" {
+		// Verify database directory security before initializing
+		dbDir := filepath.Dir(dbPath)
+		if err := ensureSecureDirectory(dbDir); err != nil {
+			cancel()
+			return nil, errors.Wrapf(err, "database directory %s failed security check", dbDir)
+		}
+
 		// Import is done via interface, actual store creation happens in a separate package
 		log.Infof("Initializing database at %s", dbPath)
 		// Note: Store initialization will be handled by importing client_api/store
@@ -284,8 +292,8 @@ func (s *Server) Wait() {
 // writePidFile writes the current process ID to the PID file
 func (s *Server) writePidFile() error {
 	pidDir := filepath.Dir(s.pidFile)
-	if err := os.MkdirAll(pidDir, 0755); err != nil {
-		return errors.Wrap(err, "failed to create PID directory")
+	if err := ensureSecureDirectory(pidDir); err != nil {
+		return errors.Wrap(err, "failed to ensure secure PID directory")
 	}
 
 	pid := os.Getpid()
@@ -395,4 +403,42 @@ func ReadPidFile(pidFile string) (int, error) {
 	}
 
 	return pid, nil
+}
+
+// ensureSecureDirectory ensures a directory exists with secure permissions (0700) and correct ownership.
+// This must be called before creating sockets or database files to prevent race conditions and security vulnerabilities.
+func ensureSecureDirectory(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Create with secure permissions
+			if err := os.MkdirAll(path, 0700); err != nil {
+				return errors.Wrap(err, "failed to create directory")
+			}
+			return nil
+		}
+		return errors.Wrap(err, "failed to stat directory")
+	}
+
+	if !info.IsDir() {
+		return errors.New("path exists but is not a directory")
+	}
+
+	// Check ownership first - must be owned by current user
+	// (We can't fix ownership without root, so check this before trying to fix permissions)
+	currentUID := os.Getuid()
+	if err := verifyDirectoryOwnership(path, currentUID); err != nil {
+		return err
+	}
+
+	// Check permissions - must be 0700 (owner only)
+	perm := info.Mode().Perm()
+	if perm != 0700 {
+		log.Warningf("Directory %s has insecure permissions %o, fixing to 0700", path, perm)
+		if err := os.Chmod(path, 0700); err != nil {
+			return errors.Wrapf(err, "failed to fix permissions (has %o, need 0700)", perm)
+		}
+	}
+
+	return nil
 }
