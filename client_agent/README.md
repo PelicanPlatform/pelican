@@ -11,7 +11,9 @@ The Pelican Client Agent Server provides a RESTful API for interacting with Peli
 - **File Operations**: Stat, list, and delete remote objects
 - **Unix Domain Socket**: Secure local IPC without network exposure
 - **RESTful API**: Standard HTTP methods and JSON payloads
-- **OpenAPI Documentation**: Auto-generated API specification
+- **Persistent State**: SQLite database with job history and recovery
+- **CLI Integration**: `--async` flags and `pelican job` commands
+- **API Client Library**: Go package for programmatic access
 
 ## Quick Start
 
@@ -507,10 +509,10 @@ The Unix socket is created with mode 0600 (owner read/write only) for security. 
 
 ### Concurrency
 
-- Maximum concurrent jobs controlled by `--max-jobs` flag
+- Maximum concurrent jobs controlled by `--max-jobs` flag (default: 5)
 - Transfers within a job execute sequentially
 - Server uses goroutines and channels for async execution
-- Transfer progress tracked in memory (Phase 1)
+- Transfer progress tracked in memory and persisted to database
 
 ### Error Handling
 
@@ -519,21 +521,22 @@ The Unix socket is created with mode 0600 (owner read/write only) for security. 
 - Cancellation: Graceful shutdown of transfers
 - Panic recovery: Middleware catches panics
 
-## Future Enhancements (Phase 2 & 3)
+## Persistent State and Job Recovery
 
-### Phase 2: CLI Integration
+The server uses SQLite to persist job and transfer state:
 
-- `pelican object get --async` returns job ID
-- `pelican job status <job-id>` checks status
-- `pelican job cancel <job-id>` cancels job
-- `pelican job list` lists all jobs
+- **Database Location**: `~/.pelican/client-agent.db` (default)
+- **Job Recovery**: Incomplete jobs are automatically recovered on server restart
+- **Job History**: Completed jobs are archived for historical queries
+- **Retention Policy**: Historical jobs older than 30 days are automatically pruned
+- **Migrations**: Schema managed with Goose migrations for easy upgrades
 
-### Phase 3: Persistent State
+### Job Lifecycle
 
-- SQLite database for job/transfer state
-- Survives server restarts
-- Historical job records
-- Job cleanup policies
+1. **Active Jobs**: Stored in `jobs` and `transfers` tables
+1. **Archival**: Jobs completed >5 minutes ago are moved to history tables
+1. **Recovery**: On restart, incomplete jobs are retried with incremented retry count
+1. **Pruning**: Historical jobs older than 30 days are deleted (configurable)
 
 ## Troubleshooting
 
