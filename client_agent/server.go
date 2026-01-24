@@ -20,7 +20,6 @@ package client_agent
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -44,6 +43,7 @@ const (
 type Server struct {
 	socketPath      string
 	pidFile         string
+	pidLockFd       *os.File // Held open for the lifetime of the server (flock on Unix)
 	listener        net.Listener
 	httpServer      *http.Server
 	router          *gin.Engine
@@ -79,9 +79,11 @@ func NewServer(config ServerConfig) (*Server, error) {
 	// Ensure socket directory exists with secure permissions (0700)
 	// This must be done before socket creation to prevent race conditions
 	socketDir := filepath.Dir(socketPath)
-	if err := ensureSecureDirectory(socketDir); err != nil {
+	socketDirRoot, err := ensureSecureDirectory(socketDir)
+	if err != nil {
 		return nil, errors.Wrap(err, "failed to ensure secure socket directory")
 	}
+	socketDirRoot.Close() // We don't need to keep this open for sockets
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -96,9 +98,12 @@ func NewServer(config ServerConfig) (*Server, error) {
 		} else {
 			dbPath = filepath.Join(homeDir, ".pelican", "client-api.db")
 			dbDir := filepath.Dir(dbPath)
-			if err := ensureSecureDirectory(dbDir); err != nil {
+			dbDirRoot, err := ensureSecureDirectory(dbDir)
+			if err != nil {
 				log.Warnf("Failed to create secure database directory, database will not be initialized: %v", err)
 				dbPath = ""
+			} else {
+				dbDirRoot.Close() // We don't need to keep this open for database
 			}
 		}
 	}
@@ -106,10 +111,12 @@ func NewServer(config ServerConfig) (*Server, error) {
 	if dbPath != "" {
 		// Verify database directory security before initializing
 		dbDir := filepath.Dir(dbPath)
-		if err := ensureSecureDirectory(dbDir); err != nil {
+		dbDirRoot, err := ensureSecureDirectory(dbDir)
+		if err != nil {
 			cancel()
 			return nil, errors.Wrapf(err, "database directory %s failed security check", dbDir)
 		}
+		dbDirRoot.Close() // We don't need to keep this open for database
 
 		// Import is done via interface, actual store creation happens in a separate package
 		log.Infof("Initializing database at %s", dbPath)
@@ -194,30 +201,35 @@ func (s *Server) Start() error {
 		return errors.New("server already started")
 	}
 
+	// Acquire exclusive lock BEFORE creating socket to prevent race conditions
+	// This also prevents starting if another instance is running
+	pidLockFd, err := acquireServerLock(s.pidFile, 2*time.Second)
+	if err != nil {
+		return err
+	}
+	s.pidLockFd = pidLockFd
+
 	// Remove existing socket if it exists
 	if err := removeSocket(s.socketPath); err != nil {
+		s.pidLockFd.Close()
 		return errors.Wrap(err, "failed to remove existing socket")
 	}
 
 	// Create Unix listener
 	listener, err := net.Listen("unix", s.socketPath)
 	if err != nil {
+		s.pidLockFd.Close()
 		return errors.Wrap(err, "failed to create Unix listener")
 	}
 
 	// Set socket permissions
 	if err := os.Chmod(s.socketPath, 0600); err != nil {
 		listener.Close()
+		s.pidLockFd.Close()
 		return errors.Wrap(err, "failed to set socket permissions")
 	}
 
 	s.listener = listener
-
-	// Write PID file
-	if err := s.writePidFile(); err != nil {
-		listener.Close()
-		return errors.Wrap(err, "failed to write PID file")
-	}
 
 	// Create HTTP server
 	s.httpServer = &http.Server{
@@ -289,23 +301,19 @@ func (s *Server) Wait() {
 	s.wg.Wait()
 }
 
-// writePidFile writes the current process ID to the PID file
-func (s *Server) writePidFile() error {
-	pidDir := filepath.Dir(s.pidFile)
-	if err := ensureSecureDirectory(pidDir); err != nil {
-		return errors.Wrap(err, "failed to ensure secure PID directory")
-	}
-
-	pid := os.Getpid()
-	return os.WriteFile(s.pidFile, []byte(fmt.Sprintf("%d", pid)), 0644)
-}
-
-// cleanup removes the socket and PID file
+// cleanup removes the socket, PID file, and releases the lock
 func (s *Server) cleanup() {
 	if err := removeSocket(s.socketPath); err != nil {
 		log.Warnf("Failed to remove socket: %v", err)
 	}
 
+	// Release PID file lock (this automatically releases the flock on Unix)
+	if s.pidLockFd != nil {
+		s.pidLockFd.Close()
+		s.pidLockFd = nil
+	}
+
+	// Remove PID file
 	if err := os.Remove(s.pidFile); err != nil && !os.IsNotExist(err) {
 		log.Warnf("Failed to remove PID file: %v", err)
 	}
@@ -385,60 +393,64 @@ func CheckServerRunning(socketPath string) (bool, error) {
 	return true, nil
 }
 
-// ReadPidFile reads the PID from the PID file
-func ReadPidFile(pidFile string) (int, error) {
-	expandedPath, err := ExpandPath(pidFile)
-	if err != nil {
-		return 0, err
-	}
-
-	data, err := os.ReadFile(expandedPath)
-	if err != nil {
-		return 0, err
-	}
-
-	var pid int
-	if _, err := fmt.Sscanf(string(data), "%d", &pid); err != nil {
-		return 0, errors.Wrap(err, "failed to parse PID")
-	}
-
-	return pid, nil
+// GetServerPID returns the PID of the server holding the lock on the PID file, or 0 if no server is running
+// On Unix, this queries the flock holder via fcntl F_GETLK
+// On Windows, this reads the PID from the file (may be stale after reboot)
+func GetServerPID(pidFile string) (int, error) {
+	return getServerPIDFromLock(pidFile)
 }
 
 // ensureSecureDirectory ensures a directory exists with secure permissions (0700) and correct ownership.
 // This must be called before creating sockets or database files to prevent race conditions and security vulnerabilities.
-func ensureSecureDirectory(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// Create with secure permissions
-			if err := os.MkdirAll(path, 0700); err != nil {
-				return errors.Wrap(err, "failed to create directory")
-			}
-			return nil
+// The directory is opened as a Root first, then all checks are performed through the Root to prevent TOCTOU attacks.
+func ensureSecureDirectory(path string) (*os.Root, error) {
+	// First check if directory exists, create if not
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		// Create with secure permissions
+		if err := os.MkdirAll(path, 0700); err != nil {
+			return nil, errors.Wrap(err, "failed to create directory")
 		}
-		return errors.Wrap(err, "failed to stat directory")
+	}
+
+	// Open the Root filesystem FIRST, before doing any checks
+	// This prevents TOCTOU between checking and using
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to open root directory")
+	}
+
+	// Now perform all checks through the opened Root
+	// Stat "." within the Root to get info about the directory itself
+	info, err := root.Stat(".")
+	if err != nil {
+		root.Close()
+		return nil, errors.Wrap(err, "failed to stat directory")
 	}
 
 	if !info.IsDir() {
-		return errors.New("path exists but is not a directory")
+		root.Close()
+		return nil, errors.New("path exists but is not a directory")
 	}
 
 	// Check ownership first - must be owned by current user
 	// (We can't fix ownership without root, so check this before trying to fix permissions)
 	currentUID := os.Getuid()
-	if err := verifyDirectoryOwnership(path, currentUID); err != nil {
-		return err
+	if err := verifyOwnership(info, currentUID); err != nil {
+		root.Close()
+		return nil, err
 	}
 
 	// Check permissions - must be 0700 (owner only)
 	perm := info.Mode().Perm()
 	if perm != 0700 {
 		log.Warningf("Directory %s has insecure permissions %o, fixing to 0700", path, perm)
-		if err := os.Chmod(path, 0700); err != nil {
-			return errors.Wrapf(err, "failed to fix permissions (has %o, need 0700)", perm)
+		// Fix permissions through the Root to be safe
+		if err := root.Chmod(".", 0700); err != nil {
+			root.Close()
+			return nil, errors.Wrapf(err, "failed to fix permissions (has %o, need 0700)", perm)
 		}
 	}
 
-	return nil
+	// All checks passed, return the opened and verified Root
+	return root, nil
 }
