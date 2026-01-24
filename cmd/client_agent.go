@@ -156,10 +156,14 @@ var clientAgentStopCmd = &cobra.Command{
 			return nil
 		}
 
-		// Read PID from file
-		pid, err := client_agent.ReadPidFile(clientAgentPidFile)
+		// Read PID using GetServerPID
+		pid, err := client_agent.GetServerPID(clientAgentPidFile)
 		if err != nil {
-			return errors.Wrap(err, "Failed to read PID file")
+			return errors.Wrap(err, "Failed to get server PID")
+		}
+		if pid == 0 {
+			fmt.Println("Server is not running")
+			return nil
 		}
 
 		// Find process
@@ -199,9 +203,9 @@ var clientAgentStatusCmd = &cobra.Command{
 		}
 
 		if running {
-			// Try to read PID
-			pid, err := client_agent.ReadPidFile(clientAgentPidFile)
-			if err == nil {
+			// Try to get PID using GetServerPID
+			pid, err := client_agent.GetServerPID(clientAgentPidFile)
+			if err == nil && pid > 0 {
 				fmt.Printf("Client API server is running (PID: %d)\n", pid)
 				fmt.Printf("Socket: %s\n", clientAgentSocketPath)
 			} else {
