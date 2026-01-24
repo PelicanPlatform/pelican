@@ -20,7 +20,6 @@ package client_agent
 
 import (
 	"context"
-	"reflect"
 	"sync"
 	"time"
 
@@ -62,6 +61,7 @@ type TransferJob struct {
 	Error       error
 	CancelFunc  context.CancelFunc
 	ctx         context.Context
+	wg          sync.WaitGroup
 }
 
 // TransferManager manages all transfer jobs and their execution
@@ -104,12 +104,9 @@ func NewTransferManager(ctx context.Context, maxConcurrentJobs int, store StoreI
 func (tm *TransferManager) recoverJobs() {
 	log.Info("Starting job recovery from database...")
 
-	// The most reliable way is to use GetRecoverableJobs which returns interface{}
-	// containing []*store.StoredJob, but since we can't import store from here,
-	// we use ListJobs and extract IDs using reflection
 	var recoveredCount int
 	for _, status := range []string{StatusPending, StatusRunning} {
-		statusJobsData, statusTotal, err := tm.store.ListJobs(status, 1000, 0)
+		jobs, statusTotal, err := tm.store.ListJobs(status, 1000, 0)
 		if err != nil {
 			log.Warnf("Failed to get %s jobs: %v", status, err)
 			continue
@@ -121,35 +118,10 @@ func (tm *TransferManager) recoverJobs() {
 
 		log.Infof("Found %d incomplete jobs with status %s", statusTotal, status)
 
-		// statusJobsData is []*store.StoredJob as interface{}
-		// We can use reflection to extract job IDs
-		v := reflect.ValueOf(statusJobsData)
-		if v.Kind() == reflect.Slice {
-			for i := 0; i < v.Len(); i++ {
-				jobVal := v.Index(i)
-				if jobVal.Kind() == reflect.Ptr {
-					jobVal = jobVal.Elem()
-				}
-				if jobVal.Kind() == reflect.Struct {
-					idField := jobVal.FieldByName("ID")
-					if idField.IsValid() && idField.Kind() == reflect.String {
-						jobID := idField.String()
-
-						// Skip jobs that are already in memory (actively managed)
-						tm.mu.RLock()
-						_, exists := tm.jobs[jobID]
-						tm.mu.RUnlock()
-
-						if exists {
-							log.Debugf("Skipping recovery for job %s (already in memory)", jobID)
-							continue
-						}
-
-						tm.recoverSingleJob(jobID)
-						recoveredCount++
-					}
-				}
-			}
+		// Now we have concrete typed []*StoredJob (from same package)
+		for _, storedJob := range jobs {
+			tm.recoverSingleJob(storedJob.ID)
+			recoveredCount++
 		}
 	}
 
@@ -165,31 +137,14 @@ func (tm *TransferManager) recoverSingleJob(jobID string) {
 	log.Infof("Recovering and restarting incomplete job %s", jobID)
 
 	// Get the job from the database
-	jobData, err := tm.store.GetJob(jobID)
+	storedJob, err := tm.store.GetJob(jobID)
 	if err != nil {
 		log.Warnf("Failed to get job %s for recovery: %v", jobID, err)
 		return
 	}
 
-	// Use reflection to extract job details including retry count
-	jobVal := reflect.ValueOf(jobData)
-	if jobVal.Kind() == reflect.Ptr {
-		jobVal = jobVal.Elem()
-	}
-	if jobVal.Kind() != reflect.Struct {
-		log.Warnf("Invalid job data type for recovery: %s", jobID)
-		return
-	}
-
-	// Extract retry count from the job
-	retryCountField := jobVal.FieldByName("RetryCount")
-	var currentRetryCount int
-	if retryCountField.IsValid() && retryCountField.Kind() == reflect.Int {
-		currentRetryCount = int(retryCountField.Int())
-	}
-
 	// Get transfers for this job
-	transfersData, err := tm.store.GetTransfersByJob(jobID)
+	storedTransfers, err := tm.store.GetTransfersByJob(jobID)
 	if err != nil {
 		log.Warnf("Failed to get transfers for recovered job %s: %v", jobID, err)
 		return
@@ -197,33 +152,13 @@ func (tm *TransferManager) recoverSingleJob(jobID string) {
 
 	// Convert transfers to TransferRequest format
 	var requests []TransferRequest
-	transfersVal := reflect.ValueOf(transfersData)
-	if transfersVal.Kind() == reflect.Slice {
-		for i := 0; i < transfersVal.Len(); i++ {
-			transfer := transfersVal.Index(i)
-			if transfer.Kind() == reflect.Ptr {
-				transfer = transfer.Elem()
-			}
-
-			// Extract transfer fields
-			operationField := transfer.FieldByName("Operation")
-			sourceField := transfer.FieldByName("Source")
-			destinationField := transfer.FieldByName("Destination")
-			recursiveField := transfer.FieldByName("Recursive")
-
-			if !operationField.IsValid() || !sourceField.IsValid() || !destinationField.IsValid() || !recursiveField.IsValid() {
-				log.Warnf("Failed to extract transfer fields for recovery")
-				continue
-			}
-
-			request := TransferRequest{
-				Operation:   operationField.String(),
-				Source:      sourceField.String(),
-				Destination: destinationField.String(),
-				Recursive:   recursiveField.Bool(),
-			}
-			requests = append(requests, request)
-		}
+	for _, st := range storedTransfers {
+		requests = append(requests, TransferRequest{
+			Operation:   st.Operation,
+			Source:      st.Source,
+			Destination: st.Destination,
+			Recursive:   st.Recursive,
+		})
 	}
 
 	if len(requests) == 0 {
@@ -231,43 +166,37 @@ func (tm *TransferManager) recoverSingleJob(jobID string) {
 		return
 	}
 
-	// Delete the old job and transfers from the database
-	// First delete from jobs table (cascades to transfers)
-	if err := tm.store.DeleteJob(jobID); err != nil {
-		log.Warnf("Failed to delete old job %s during recovery: %v", jobID, err)
-		// Continue anyway - CreateJob will create new entries
-	}
-
-	// Recreate the job with the SAME ID but incremented retry count
-	// This preserves the job ID known to the user
-	tm.mu.Lock()
-	newRetryCount := currentRetryCount + 1
+	// Create in-memory job structure
+	newRetryCount := storedJob.RetryCount + 1
 	jobCtx, jobCancel := context.WithCancel(tm.ctx)
+	createdAt := time.Now()
 
 	job := &TransferJob{
 		ID:         jobID, // PRESERVE the original job ID
 		Status:     StatusPending,
-		CreatedAt:  time.Now(),
+		CreatedAt:  createdAt,
 		Transfers:  make([]*Transfer, 0, len(requests)),
 		Options:    nil, // Options are not persisted, so we can't recover them
 		CancelFunc: jobCancel,
 		ctx:        jobCtx,
 	}
 
-	// Create transfers for the job
+	// Prepare transfer data for atomic recovery
+	transferData := make([]map[string]interface{}, 0, len(requests))
+	tm.mu.Lock()
 	for _, req := range requests {
 		transferID := uuid.New().String()
 		transferCtx, transferCancel := context.WithCancel(jobCtx)
 
 		transfer := &Transfer{
 			ID:          transferID,
-			JobID:       jobID, // Use the original job ID
+			JobID:       jobID,
 			Operation:   req.Operation,
 			Source:      req.Source,
 			Destination: req.Destination,
 			Recursive:   req.Recursive,
 			Status:      StatusPending,
-			CreatedAt:   time.Now(),
+			CreatedAt:   createdAt,
 			CancelFunc:  transferCancel,
 			ctx:         transferCtx,
 		}
@@ -275,34 +204,40 @@ func (tm *TransferManager) recoverSingleJob(jobID string) {
 		job.Transfers = append(job.Transfers, transfer)
 		tm.transfers[transferID] = transfer
 
-		// Persist transfer to database
-		storedTransfer := map[string]interface{}{
+		transferData = append(transferData, map[string]interface{}{
 			"ID":          transferID,
-			"JobID":       jobID, // Use the original job ID
+			"JobID":       jobID,
 			"Operation":   req.Operation,
 			"Source":      req.Source,
 			"Destination": req.Destination,
 			"Recursive":   req.Recursive,
 			"Status":      StatusPending,
-			"CreatedAt":   transfer.CreatedAt.Unix(),
-		}
-		if err := tm.store.CreateTransfer(storedTransfer); err != nil {
-			log.Warnf("Failed to persist recovered transfer %s to database: %v", transferID, err)
-		}
+			"CreatedAt":   createdAt.Unix(),
+		})
 	}
 
-	tm.jobs[jobID] = job // Use the original job ID
+	tm.jobs[jobID] = job
 	tm.mu.Unlock()
 
-	// Persist job to database with incremented retry count
+	// Use atomic RecoverJob transaction - deletes old job and creates new one with transfers
+	// All operations succeed or all fail (atomic)
 	optionsJSON := "{}"
-	if err := tm.store.CreateJob(jobID, StatusPending, job.CreatedAt, optionsJSON, newRetryCount); err != nil {
-		log.Warnf("Failed to persist recovered job %s to database: %v", jobID, err)
+	if err := tm.store.RecoverJob(jobID, newRetryCount, createdAt, optionsJSON, transferData); err != nil {
+		log.Errorf("Failed to atomically recover job %s in database: %v", jobID, err)
+		// Clean up in-memory structures on failure
+		tm.mu.Lock()
+		delete(tm.jobs, jobID)
+		for _, t := range job.Transfers {
+			delete(tm.transfers, t.ID)
+		}
+		tm.mu.Unlock()
+		return
 	}
 
 	log.Infof("Job %s recovered and restarted with %d transfers (retry attempt %d)", jobID, len(requests), newRetryCount)
 
 	// Start the job asynchronously
+	job.wg.Add(1)
 	tm.wg.Add(1)
 	go tm.executeJob(job)
 }
@@ -325,7 +260,10 @@ func (tm *TransferManager) CreateJob(requests []TransferRequest, options []clien
 		ctx:        jobCtx,
 	}
 
+	tm.jobs[jobID] = job
+
 	// Create transfers for the job
+	transferData := make([]map[string]interface{}, 0, len(requests))
 	for _, req := range requests {
 		transferID := uuid.New().String()
 		transferCtx, transferCancel := context.WithCancel(jobCtx)
@@ -346,35 +284,36 @@ func (tm *TransferManager) CreateJob(requests []TransferRequest, options []clien
 		job.Transfers = append(job.Transfers, transfer)
 		tm.transfers[transferID] = transfer
 
-		// Persist transfer to database if store is available
-		if tm.store != nil {
-			storedTransfer := map[string]interface{}{
-				"ID":          transferID,
-				"JobID":       jobID,
-				"Operation":   req.Operation,
-				"Source":      req.Source,
-				"Destination": req.Destination,
-				"Recursive":   req.Recursive,
-				"Status":      StatusPending,
-				"CreatedAt":   transfer.CreatedAt.Unix(),
-			}
-			if err := tm.store.CreateTransfer(storedTransfer); err != nil {
-				log.Warnf("Failed to persist transfer %s to database: %v", transferID, err)
-			}
-		}
+		// Prepare transfer data for atomic database insertion
+		transferData = append(transferData, map[string]interface{}{
+			"ID":          transferID,
+			"JobID":       jobID,
+			"Operation":   req.Operation,
+			"Source":      req.Source,
+			"Destination": req.Destination,
+			"Recursive":   req.Recursive,
+			"Status":      StatusPending,
+			"CreatedAt":   transfer.CreatedAt.Unix(),
+		})
 	}
 
-	tm.jobs[jobID] = job
-
-	// Persist job to database if store is available (initial creation with retry_count=0)
+	// Atomically persist job and all transfers to database in a single transaction
 	if tm.store != nil {
 		optionsJSON := "{}"
-		if err := tm.store.CreateJob(jobID, StatusPending, job.CreatedAt, optionsJSON, 0); err != nil {
-			log.Warnf("Failed to persist job %s to database: %v", jobID, err)
+		if err := tm.store.CreateJobWithTransfers(jobID, StatusPending, job.CreatedAt, optionsJSON, 0, transferData); err != nil {
+			log.Errorf("Failed to persist job %s to database: %v", jobID, err)
+			// Clean up in-memory structures on database failure
+			delete(tm.jobs, jobID)
+			for _, transfer := range job.Transfers {
+				delete(tm.transfers, transfer.ID)
+			}
+			jobCancel()
+			return nil, errors.Wrap(err, "failed to persist job to database")
 		}
 	}
 
 	// Start the job asynchronously
+	job.wg.Add(1)
 	tm.wg.Add(1)
 	go tm.executeJob(job)
 
@@ -384,6 +323,7 @@ func (tm *TransferManager) CreateJob(requests []TransferRequest, options []clien
 // executeJob runs all transfers in a job
 func (tm *TransferManager) executeJob(job *TransferJob) {
 	defer tm.wg.Done()
+	defer job.wg.Done() // Signal job completion
 
 	// Acquire semaphore slot
 	select {
@@ -630,8 +570,20 @@ func (tm *TransferManager) CancelJob(jobID string) (int, int, error) {
 	// Cancel the job context
 	job.CancelFunc()
 
-	// Wait a moment for cancellation to propagate
-	time.Sleep(100 * time.Millisecond)
+	// Wait for job to complete with timeout
+	done := make(chan struct{})
+	go func() {
+		job.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Job completed successfully
+	case <-time.After(30 * time.Second):
+		// Timeout waiting for job to cancel
+		return 0, 0, errors.Errorf("timeout waiting for job %s to cancel after 30 seconds", jobID)
+	}
 
 	tm.mu.Lock()
 	defer tm.mu.Unlock()

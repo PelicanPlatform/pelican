@@ -28,6 +28,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/pressly/goose/v3"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/client_agent/types"
 )
 
 //go:embed migrations/*.sql
@@ -50,6 +52,12 @@ func NewStore(dbPath string) (*Store, error) {
 	if err := db.Ping(); err != nil {
 		db.Close()
 		return nil, errors.Wrap(err, "failed to ping database")
+	}
+
+	// Enable foreign key constraints (required for CASCADE DELETE to work)
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		db.Close()
+		return nil, errors.Wrap(err, "failed to enable foreign keys")
 	}
 
 	// Set connection pool settings
@@ -89,6 +97,101 @@ func (s *Store) Close() error {
 	if s.db != nil {
 		return s.db.Close()
 	}
+	return nil
+}
+
+// RecoverJob atomically recovers a job by deleting the old version and creating a new one
+// with the same ID but incremented retry count. Uses a transaction to ensure atomicity.
+func (s *Store) RecoverJob(jobID string, retryCount int, createdAt time.Time, optionsJSON string, transfers []map[string]interface{}) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return errors.Wrap(err, "failed to begin transaction")
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Warnf("Failed to rollback transaction: %v", err)
+		}
+	}()
+
+	// Delete old job (cascades to transfers via foreign key constraint)
+	deleteQuery := `DELETE FROM jobs WHERE id = ?`
+	if _, err := tx.Exec(deleteQuery, jobID); err != nil {
+		return errors.Wrap(err, "failed to delete old job")
+	}
+
+	// Create new job with same ID but incremented retry count
+	insertJobQuery := `INSERT INTO jobs (id, status, created_at, options, retry_count) VALUES (?, ?, ?, ?, ?)`
+	if _, err := tx.Exec(insertJobQuery, jobID, "pending", createdAt.Unix(), optionsJSON, retryCount); err != nil {
+		return errors.Wrap(err, "failed to create recovered job")
+	}
+
+	// Create transfers for the recovered job
+	insertTransferQuery := `INSERT INTO transfers (id, job_id, operation, source, destination, recursive, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+	for _, transfer := range transfers {
+		_, err := tx.Exec(insertTransferQuery,
+			transfer["ID"],
+			transfer["JobID"],
+			transfer["Operation"],
+			transfer["Source"],
+			transfer["Destination"],
+			transfer["Recursive"],
+			transfer["Status"],
+			transfer["CreatedAt"],
+		)
+		if err != nil {
+			return errors.Wrapf(err, "failed to create transfer %s", transfer["ID"])
+		}
+	}
+
+	// Commit transaction - all operations succeed or all fail
+	if err := tx.Commit(); err != nil {
+		return errors.Wrap(err, "failed to commit recovery transaction")
+	}
+
+	return nil
+}
+
+// CreateJobWithTransfers atomically creates a job and all its transfers in a single transaction
+func (s *Store) CreateJobWithTransfers(jobID, status string, createdAt time.Time, optionsJSON string, retryCount int, transfers []map[string]interface{}) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return errors.Wrap(err, "failed to begin transaction")
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Warnf("Failed to rollback transaction: %v", err)
+		}
+	}()
+
+	// Create job
+	insertJobQuery := `INSERT INTO jobs (id, status, created_at, options, retry_count) VALUES (?, ?, ?, ?, ?)`
+	if _, err := tx.Exec(insertJobQuery, jobID, status, createdAt.Unix(), optionsJSON, retryCount); err != nil {
+		return errors.Wrap(err, "failed to create job")
+	}
+
+	// Create all transfers
+	insertTransferQuery := `INSERT INTO transfers (id, job_id, operation, source, destination, recursive, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+	for _, transfer := range transfers {
+		_, err := tx.Exec(insertTransferQuery,
+			transfer["ID"],
+			transfer["JobID"],
+			transfer["Operation"],
+			transfer["Source"],
+			transfer["Destination"],
+			transfer["Recursive"],
+			transfer["Status"],
+			transfer["CreatedAt"],
+		)
+		if err != nil {
+			return errors.Wrapf(err, "failed to create transfer %s", transfer["ID"])
+		}
+	}
+
+	// Commit transaction - all operations succeed or all fail
+	if err := tx.Commit(); err != nil {
+		return errors.Wrap(err, "failed to commit job creation transaction")
+	}
+
 	return nil
 }
 
@@ -151,11 +254,11 @@ func (s *Store) UpdateJobError(jobID, errorMsg string) error {
 }
 
 // GetJob retrieves a job by ID
-func (s *Store) GetJob(jobID string) (interface{}, error) {
+func (s *Store) GetJob(jobID string) (*types.StoredJob, error) {
 	query := `SELECT id, status, created_at, started_at, completed_at, options, error_message, retry_count
 	          FROM jobs WHERE id = ?`
 
-	var job StoredJob
+	var job types.StoredJob
 	var startedAt, completedAt sql.NullInt64
 	var options, errorMsg sql.NullString
 
@@ -196,7 +299,7 @@ func (s *Store) GetJob(jobID string) (interface{}, error) {
 }
 
 // ListJobs retrieves jobs with optional filtering
-func (s *Store) ListJobs(status string, limit, offset int) (interface{}, int, error) {
+func (s *Store) ListJobs(status string, limit, offset int) ([]*types.StoredJob, int, error) {
 	// Build query with filters
 	query := `SELECT id, status, created_at, started_at, completed_at, options, error_message, retry_count FROM jobs`
 	countQuery := `SELECT COUNT(*) FROM jobs`
@@ -225,9 +328,9 @@ func (s *Store) ListJobs(status string, limit, offset int) (interface{}, int, er
 	}
 	defer rows.Close()
 
-	var jobs []*StoredJob
+	var jobs []*types.StoredJob
 	for rows.Next() {
-		var job StoredJob
+		var job types.StoredJob
 		var startedAt, completedAt sql.NullInt64
 		var options, errorMsg sql.NullString
 
@@ -288,15 +391,15 @@ func (s *Store) DeleteJob(jobID string) error {
 
 // CreateTransfer inserts a new transfer into the database
 func (s *Store) CreateTransfer(transferData interface{}) error {
-	var transfer *StoredTransfer
+	var transfer *types.StoredTransfer
 
 	// Handle different input types
 	switch t := transferData.(type) {
-	case *StoredTransfer:
+	case *types.StoredTransfer:
 		transfer = t
 	case map[string]interface{}:
 		// Convert map to StoredTransfer
-		transfer = &StoredTransfer{}
+		transfer = &types.StoredTransfer{}
 		if id, ok := t["ID"].(string); ok {
 			transfer.ID = id
 		}
@@ -384,12 +487,12 @@ func (s *Store) UpdateTransferError(transferID, errorMsg string) error {
 }
 
 // GetTransfer retrieves a transfer by ID
-func (s *Store) GetTransfer(transferID string) (interface{}, error) {
+func (s *Store) GetTransfer(transferID string) (*types.StoredTransfer, error) {
 	query := `SELECT id, job_id, operation, source, destination, recursive, status,
 	          created_at, started_at, completed_at, bytes_transferred, total_bytes, error_message
 	          FROM transfers WHERE id = ?`
 
-	var transfer StoredTransfer
+	var transfer types.StoredTransfer
 	var startedAt, completedAt sql.NullInt64
 	var errorMsg sql.NullString
 
@@ -424,7 +527,7 @@ func (s *Store) GetTransfer(transferID string) (interface{}, error) {
 }
 
 // GetTransfersByJob retrieves all transfers for a job
-func (s *Store) GetTransfersByJob(jobID string) (interface{}, error) {
+func (s *Store) GetTransfersByJob(jobID string) ([]*types.StoredTransfer, error) {
 	query := `SELECT id, job_id, operation, source, destination, recursive, status,
 	          created_at, started_at, completed_at, bytes_transferred, total_bytes, error_message
 	          FROM transfers WHERE job_id = ? ORDER BY created_at ASC`
@@ -435,9 +538,9 @@ func (s *Store) GetTransfersByJob(jobID string) (interface{}, error) {
 	}
 	defer rows.Close()
 
-	var transfers []*StoredTransfer
+	var transfers []*types.StoredTransfer
 	for rows.Next() {
-		var transfer StoredTransfer
+		var transfer types.StoredTransfer
 		var startedAt, completedAt sql.NullInt64
 		var errorMsg sql.NullString
 
@@ -471,7 +574,8 @@ func (s *Store) GetTransfersByJob(jobID string) (interface{}, error) {
 }
 
 // GetRecoverableJobs returns jobs that need recovery (pending or running status)
-func (s *Store) GetRecoverableJobs() (interface{}, error) {
+// GetRecoverableJobs returns all jobs that are incomplete (pending/running)
+func (s *Store) GetRecoverableJobs() ([]*types.StoredJob, error) {
 	query := `SELECT id, status, created_at, started_at, completed_at, options, error_message, retry_count
 	          FROM jobs WHERE status IN ('pending', 'running') ORDER BY created_at ASC`
 
@@ -481,9 +585,9 @@ func (s *Store) GetRecoverableJobs() (interface{}, error) {
 	}
 	defer rows.Close()
 
-	var jobs []*StoredJob
+	var jobs []*types.StoredJob
 	for rows.Next() {
-		var job StoredJob
+		var job types.StoredJob
 		var startedAt, completedAt sql.NullInt64
 		var options, errorMsg sql.NullString
 
@@ -533,23 +637,15 @@ func (s *Store) ArchiveJob(jobID string) error {
 	}()
 
 	// Get job details
-	jobData, err := s.GetJob(jobID)
+	job, err := s.GetJob(jobID)
 	if err != nil {
 		return errors.Wrap(err, "failed to get job for archival")
 	}
-	job, ok := jobData.(*StoredJob)
-	if !ok {
-		return errors.New("failed to convert job data")
-	}
 
 	// Get all transfers for this job
-	transfersData, err := s.GetTransfersByJob(jobID)
+	transfers, err := s.GetTransfersByJob(jobID)
 	if err != nil {
 		return errors.Wrap(err, "failed to get transfers for archival")
-	}
-	transfers, ok := transfersData.([]*StoredTransfer)
-	if !ok {
-		return errors.New("failed to convert transfers data")
 	}
 
 	// Calculate summary statistics
@@ -643,7 +739,7 @@ func (s *Store) ArchiveJob(jobID string) error {
 }
 
 // GetJobHistory retrieves historical jobs with optional filtering
-func (s *Store) GetJobHistory(status string, from, to time.Time, limit, offset int) (interface{}, int, error) {
+func (s *Store) GetJobHistory(status string, from, to time.Time, limit, offset int) ([]*types.HistoricalJob, int, error) {
 	// Build query with filters
 	query := `SELECT id, status, created_at, started_at, completed_at, error_message,
 	          transfers_completed, transfers_failed, transfers_total, bytes_transferred, total_bytes, retry_count
@@ -686,9 +782,9 @@ func (s *Store) GetJobHistory(status string, from, to time.Time, limit, offset i
 	}
 	defer rows.Close()
 
-	var jobs []*HistoricalJob
+	var jobs []*types.HistoricalJob
 	for rows.Next() {
-		var job HistoricalJob
+		var job types.HistoricalJob
 		var startedAt, completedAt sql.NullInt64
 		var errorMsg sql.NullString
 

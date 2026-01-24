@@ -148,8 +148,11 @@ func TestCancelJob(t *testing.T) {
 	}, nil)
 	require.NoError(t, err)
 
-	// Wait a moment for job to start
-	time.Sleep(100 * time.Millisecond)
+	// Wait for job to have a status
+	require.Eventually(t, func() bool {
+		job, _ := tm.GetJob(job.ID)
+		return job != nil && job.Status != ""
+	}, 5*time.Second, 100*time.Millisecond, "Job should have a status")
 
 	// Create server
 	server := &Server{
@@ -332,8 +335,20 @@ func TestTransferManagerConcurrency(t *testing.T) {
 		jobs[i] = job
 	}
 
-	// Wait for jobs to start
-	time.Sleep(500 * time.Millisecond)
+	// Wait for some jobs to start processing (they may quickly fail since client isn't initialized)
+	require.Eventually(t, func() bool {
+		hasProcessedJobs := 0
+		for _, job := range jobs {
+			if updatedJob, _ := tm.GetJob(job.ID); updatedJob != nil {
+				// Job has been processed if it's running, failed, or completed
+				if updatedJob.Status == StatusRunning || updatedJob.Status == StatusFailed || updatedJob.Status == StatusCompleted {
+					hasProcessedJobs++
+				}
+			}
+		}
+		// At least some jobs should have been processed (up to maxJobs at once)
+		return hasProcessedJobs > 0
+	}, 5*time.Second, 100*time.Millisecond, "At least one job should be processed")
 
 	// Count running jobs (should not exceed maxJobs)
 	runningCount := 0
@@ -382,8 +397,8 @@ func TestShutdownHandler(t *testing.T) {
 
 	assert.Equal(t, "Server shutdown initiated", resp["message"])
 
-	// Wait a bit for the shutdown goroutine to attempt execution
-	time.Sleep(200 * time.Millisecond)
+	// Note: The shutdown goroutine starts but we can't reliably test its execution
+	// without a real running server. The important part is the handler responds correctly.
 
 	// The shutdown should have been called (even if it errors due to not being started)
 	// The important part is that the handler responds correctly

@@ -1,25 +1,26 @@
 # Design Document: Pelican Client Agent Server
 
-**Author:** Design Proposal
-**Date:** October 29, 2025
-**Status:** Proposed
+**Author:** Design Proposal **Date:** October 29, 2025 **Status:** Proposed
 
 ## Executive Summary
 
 This document proposes the design and implementation of a RESTful server that exposes Pelican's client agent functionality over a Unix domain socket. The server will enable programmatic access to Pelican's data transfer capabilities, supporting operations like get, put, copy, delete, stat, and list through a well-defined REST API.
 
 The implementation will proceed in three phases:
+
 1. **Phase 1:** Basic stateless server with OpenAPI schema
-2. **Phase 2:** Command-line integration with dual-mode execution (server vs. direct)
-3. **Phase 3:** Persistent state management with transfer history
+1. **Phase 2:** Command-line integration with dual-mode execution (server vs. direct)
+1. **Phase 3:** Persistent state management with transfer history
 
 ## Background
 
 Currently, Pelican's client functionality is accessible only through:
+
 - Command-line interface (`pelican object get/put/copy/delete/stat/ls`)
 - Direct Go API calls (`client.DoGet()`, `client.DoPut()`, etc.)
 
 This design adds a third access method: a RESTful agent server that can be accessed over a Unix domain socket, enabling:
+
 - Language-agnostic client implementations
 - Long-running daemon for managing transfers
 - Web-based or programmatic monitoring of transfers
@@ -64,6 +65,7 @@ This design adds a third access method: a RESTful agent server that can be acces
 ## Phase 1: Basic Stateless Server
 
 ### Goals
+
 - Launch a RESTful agent server listening on Unix domain socket
 - Expose core client operations through REST endpoints
 - Generate OpenAPI 3.0 specification
@@ -72,12 +74,14 @@ This design adds a third access method: a RESTful agent server that can be acces
 ### Socket Configuration
 
 #### Default Socket Location
+
 ```
 Linux/macOS: $HOME/.pelican/client-api.sock
 Windows:     \\.\pipe\pelican-client-api (Named Pipe)
 ```
 
 #### Configuration Parameters
+
 ```yaml
 # parameters.yaml
 ClientAgent:
@@ -86,8 +90,7 @@ ClientAgent:
   RequestTimeout: 300s  # Default request timeout
 ```
 
-The file `param/parameters.go` is auto-generated.  Instead, update
-the command line description in `docs/parameters.yaml`.
+The file `param/parameters.go` is auto-generated. Instead, update the command line description in `docs/parameters.yaml`.
 
 ### Command Structure
 
@@ -122,19 +125,22 @@ Examples:
 ### REST API Specification
 
 #### Base URL
+
 All endpoints are relative to `/api/v1/xfer`
 
 #### Authentication
-Phase 1: No authentication (Unix socket permissions provide security)
-Phase 2+: Optional token-based authentication
+
+Phase 1: No authentication (Unix socket permissions provide security) Phase 2+: Optional token-based authentication
 
 #### Terminology
+
 - **Transfer Job**: A collection of one or more related transfers submitted together. Jobs can be cancelled as a unit.
 - **Transfer**: An individual file transfer operation (source → destination). Multiple transfers may belong to a single job.
 
 #### Endpoints
 
 ##### 1. Health Check
+
 ```
 GET /health
 
@@ -147,6 +153,7 @@ Response 200:
 ```
 
 ##### 2. Create Transfer Job
+
 ```
 POST /jobs
 
@@ -214,6 +221,7 @@ Response 500 (Internal Error):
 ```
 
 ##### 3. Get Job Status
+
 ```
 GET /jobs/{job_id}
 
@@ -266,6 +274,7 @@ Response 404:
 ```
 
 ##### 4. Get Individual Transfer Status
+
 ```
 GET /jobs/{job_id}/transfers/{transfer_id}
 
@@ -294,6 +303,7 @@ Response 404:
 ```
 
 ##### 5. List Jobs
+
 ```
 GET /jobs?status=running&limit=50&offset=0
 
@@ -322,6 +332,7 @@ Response 200:
 ```
 
 ##### 6. Cancel Job
+
 ```
 DELETE /jobs/{job_id}
 
@@ -350,6 +361,7 @@ Response 409:
 ```
 
 ##### 7. Stat Remote Object
+
 ```
 POST /stat
 
@@ -381,6 +393,7 @@ Response 404:
 ```
 
 ##### 8. List Remote Directory
+
 ```
 POST /list
 
@@ -412,6 +425,7 @@ Response 200:
 ```
 
 ##### 9. Delete Remote Object
+
 ```
 POST /delete
 
@@ -440,11 +454,13 @@ Response 404:
 ### OpenAPI Schema
 
 Generate OpenAPI 3.0 specification using [swag](https://github.com/swaggo/swag) annotations in the code. The schema will be:
+
 - Embedded in the server binary
 - Served at `/api/v1/openapi.json` and `/api/v1/openapi.yaml`
 - Used to generate Swagger UI at `/api/v1/docs`
 
 Example annotation:
+
 ```go
 // @Summary Create a transfer job
 // @Description Create a new job with one or more transfer operations
@@ -634,22 +650,26 @@ func (s *APIServer) Daemonize() error {
 ### Daemonization
 
 #### Unix (Linux/macOS)
+
 Use traditional Unix daemon approach:
+
 1. Fork parent process
-2. Create new session (setsid)
-3. Fork again to prevent acquiring controlling terminal
-4. Change working directory to /
-5. Close stdin, stdout, stderr (redirect to log file)
-6. Write PID to file
+1. Create new session (setsid)
+1. Fork again to prevent acquiring controlling terminal
+1. Change working directory to /
+1. Close stdin, stdout, stderr (redirect to log file)
+1. Write PID to file
 
 Library: Use `github.com/sevlyar/go-daemon` or custom implementation
 
 #### Windows
+
 Create a Windows service using `golang.org/x/sys/windows/svc`
 
 ### Testing Strategy
 
 #### Unit Tests
+
 ```
 client_agent/
 ├── server_test.go          # Server lifecycle tests
@@ -659,30 +679,36 @@ client_agent/
 ```
 
 Test scenarios:
+
 1. **Server Lifecycle**
+
    - Start/stop server
    - Socket creation and cleanup
    - Graceful shutdown with active transfers
 
-2. **API Endpoints**
+1. **API Endpoints**
+
    - Request validation
    - Successful transfers (get/put/copy)
    - Error handling (invalid URLs, missing files)
    - Concurrent transfers
    - Transfer cancellation
 
-3. **Transfer Manager**
+1. **Transfer Manager**
+
    - Job queueing and execution
    - Progress tracking
    - Concurrent transfer limits
    - Resource cleanup on cancellation
 
-4. **Mock Testing**
+1. **Mock Testing**
+
    - Mock HTTP clients for director/origin responses
    - Mock file system operations
    - Mock transfer engine
 
 Example test:
+
 ```go
 func TestCreateJobEndpoint(t *testing.T) {
     server := setupTestServer(t)
@@ -742,6 +768,7 @@ func TestCancelJob(t *testing.T) {
 ### Configuration Integration
 
 Add to `cmd/client_agent.go`:
+
 ```go
 var clientAPICmd = &cobra.Command{
     Use:   "client-api",
@@ -771,6 +798,7 @@ func init() {
 ### Error Handling
 
 Define standard error codes:
+
 ```go
 const (
     ErrCodeInvalidRequest  = "INVALID_REQUEST"
@@ -784,6 +812,7 @@ const (
 ```
 
 Map Pelican client errors to HTTP status codes:
+
 - `client.IsRetryable(err)` → 503 Service Unavailable
 - URL parse errors → 400 Bad Request
 - Not found errors → 404 Not Found
@@ -792,6 +821,7 @@ Map Pelican client errors to HTTP status codes:
 ### Dependencies
 
 Add to `go.mod`:
+
 ```go
 require (
     github.com/gin-gonic/gin v1.10.0  // HTTP framework
@@ -808,6 +838,7 @@ require (
 ## Phase 2: Command-Line Integration
 
 ### Goals
+
 - Update CLI to support dual-mode execution (server vs. direct)
 - Transparent server discovery and fallback
 - Full integration testing with running federation
@@ -815,6 +846,7 @@ require (
 ### Command Behavior
 
 Add global flag to all `pelican object` commands:
+
 ```bash
 pelican object get [flags] source dest
 
@@ -911,6 +943,7 @@ func shouldUseAPIServer(cmd *cobra.Command) bool {
 ### Configuration
 
 Add parameters:
+
 ```yaml
 ClientAgent:
   AutoConnect: false  # Phase 2: default false; Phase 3: default true
@@ -921,6 +954,7 @@ ClientAgent:
 ### Progress Reporting
 
 When using agent server:
+
 - Poll transfer status at regular intervals
 - Display progress bar (reuse existing progress bar infrastructure)
 - Stream logs if available
@@ -1053,23 +1087,25 @@ func TestRecursiveTransferExpansion(t *testing.T) {
 ```
 
 Tests should cover:
+
 1. All operations (get, put, copy, delete, stat, list) via API
-2. Recursive transfers (expansion into multiple transfers per job)
-3. Multi-file jobs with multiple explicit transfers
-4. Large file transfers with progress tracking
-5. Concurrent jobs
-6. Job cancellation (cancels all incomplete transfers)
-7. Server failure and fallback behavior
-8. Authentication with tokens
-9. Cache preferences
-10. Error conditions (network failures, missing files, partial job failures)
-11. Individual transfer tracking within jobs
+1. Recursive transfers (expansion into multiple transfers per job)
+1. Multi-file jobs with multiple explicit transfers
+1. Large file transfers with progress tracking
+1. Concurrent jobs
+1. Job cancellation (cancels all incomplete transfers)
+1. Server failure and fallback behavior
+1. Authentication with tokens
+1. Cache preferences
+1. Error conditions (network failures, missing files, partial job failures)
+1. Individual transfer tracking within jobs
 
 ---
 
 ## Phase 3: Persistent State Management
 
 ### Goals
+
 - Persist ongoing transfers to survive crashes/restarts
 - Resume interrupted transfers
 - Maintain transfer history
@@ -1218,11 +1254,12 @@ func (s *Store) GetRecoverableTransfers(jobID string) ([]*Transfer, error)
 ### Resume Logic
 
 On server startup:
+
 1. Query database for jobs with status 'pending' or 'running'
-2. For each job, query its transfers
-3. Attempt to resume incomplete transfers
-4. Update job status based on transfer states
-5. Re-initiate transfers for incomplete portions
+1. For each job, query its transfers
+1. Attempt to resume incomplete transfers
+1. Update job status based on transfer states
+1. Re-initiate transfers for incomplete portions
 
 ```go
 func (tm *TransferManager) RecoverJobs(store *Store) error {
@@ -1291,6 +1328,7 @@ func (tm *TransferManager) RecoverJobs(store *Store) error {
 ### New API Endpoints
 
 #### Get Transfer History
+
 ```
 GET /history?status=completed&from=2025-10-01&to=2025-10-31&limit=100&offset=0
 
@@ -1324,6 +1362,7 @@ Response 200:
 ```
 
 #### Get Job History Details
+
 ```
 GET /history/{job_id}
 
@@ -1350,6 +1389,7 @@ Response 200:
 ```
 
 #### Get Transfer Statistics
+
 ```
 GET /stats?from=2025-10-01&to=2025-10-31
 
@@ -1379,6 +1419,7 @@ Response 200:
 ```
 
 #### Prune History
+
 ```
 DELETE /history?older_than=2025-09-01
 
@@ -1393,6 +1434,7 @@ Response 200:
 ### Configuration
 
 Add parameters:
+
 ```yaml
 ClientAgent:
   Database:
@@ -1411,10 +1453,11 @@ ClientAgent:
 ### Periodic Tasks
 
 Implement background goroutines for:
+
 1. **State Persistence**: Update database every 5 seconds with current job and transfer progress
-2. **History Archival**: Move completed jobs (and their transfers) older than 24 hours to history tables
-3. **History Pruning**: Delete history entries older than retention period (daily)
-4. **Health Check**: Verify database integrity (weekly)
+1. **History Archival**: Move completed jobs (and their transfers) older than 24 hours to history tables
+1. **History Pruning**: Delete history entries older than retention period (daily)
+1. **Health Check**: Verify database integrity (weekly)
 
 ```go
 func (s *APIServer) startBackgroundTasks() {
@@ -1474,6 +1517,7 @@ func (s *APIServer) startBackgroundTasks() {
 ### Testing
 
 #### Crash Recovery Tests
+
 ```go
 func TestJobRecovery(t *testing.T) {
     // Start server
@@ -1493,6 +1537,7 @@ func TestPartialJobRecovery(t *testing.T) {
 ```
 
 #### History Tests
+
 ```go
 func TestJobHistory(t *testing.T) {
     // Create multiple jobs over time
@@ -1513,6 +1558,7 @@ func TestHistoryPruning(t *testing.T) {
 ## Implementation Timeline
 
 ### Phase 1: Stateless Server (4-6 weeks)
+
 - Week 1-2: Core server infrastructure, socket handling, daemonization
 - Week 2-3: REST API implementation (handlers, models)
 - Week 3-4: Transfer manager and job execution
@@ -1520,11 +1566,13 @@ func TestHistoryPruning(t *testing.T) {
 - Week 5-6: Unit tests and bug fixes
 
 ### Phase 2: CLI Integration (3-4 weeks)
+
 - Week 1-2: API client library and CLI integration
 - Week 2-3: Progress reporting and error handling
 - Week 3-4: Integration tests with federation
 
 ### Phase 3: Persistence (3-4 weeks)
+
 - Week 1-2: Database schema and store implementation
 - Week 2-3: Resume logic and recovery
 - Week 3-4: History APIs and background tasks
@@ -1537,17 +1585,20 @@ func TestHistoryPruning(t *testing.T) {
 ## Security Considerations
 
 ### Phase 1
+
 - Unix socket permissions restrict access to socket owner
 - No network exposure (local-only)
 - Input validation on all API endpoints
 - Rate limiting on endpoints
 
 ### Phase 2
+
 - Secure token handling (never log tokens)
 - Environment variable support for tokens
 - Token file permissions validation (must be readable only by owner)
 
 ### Phase 3
+
 - Database encryption at rest (optional)
 - Secure credential storage using OS keychain (future)
 - Audit logging of all operations
@@ -1557,7 +1608,9 @@ func TestHistoryPruning(t *testing.T) {
 ## Monitoring and Observability
 
 ### Metrics
+
 Expose Prometheus metrics at `/metrics`:
+
 - Job counts by status
 - Transfer counts by operation and status
 - Job duration histograms
@@ -1568,12 +1621,14 @@ Expose Prometheus metrics at `/metrics`:
 - API request counts and latencies
 
 ### Logging
+
 - Structured JSON logging
 - Separate log file for agent server
 - Rotation and retention policies
 - Debug mode for troubleshooting
 
 ### Health Checks
+
 - `/health` endpoint for monitoring
 - Include database connectivity check
 - Include transfer manager status
@@ -1584,35 +1639,42 @@ Expose Prometheus metrics at `/metrics`:
 ## Future Enhancements
 
 ### Phase 4+ (Not in Initial Scope)
+
 1. **Authentication and Multi-User Support**
+
    - JWT-based authentication
    - User isolation (separate databases per user)
    - Role-based access control
 
-2. **Advanced Transfer Features**
+1. **Advanced Transfer Features**
+
    - Job priorities and scheduling
    - Bandwidth throttling per job or transfer
    - Automatic retry with exponential backoff
    - Job dependencies (start job B after job A completes)
    - Batch job submission with templating
 
-3. **Web UI**
+1. **Web UI**
+
    - Browser-based job and transfer monitoring
    - Real-time progress updates (WebSockets)
    - Job management interface
    - Transfer history visualization
 
-4. **Notifications**
+1. **Notifications**
+
    - Email/webhook notifications on completion/failure
    - Slack/Discord integrations
 
-5. **Performance Optimizations**
+1. **Performance Optimizations**
+
    - Job deduplication
    - Parallel chunk transfers
    - Client-side caching
    - Transfer bundling for small files
 
-6. **Enhanced Observability**
+1. **Enhanced Observability**
+
    - Distributed tracing (OpenTelemetry)
    - Grafana dashboards
    - Alerting rules
@@ -1622,12 +1684,15 @@ Expose Prometheus metrics at `/metrics`:
 ## Alternatives Considered
 
 ### Alternative 1: gRPC API
+
 **Pros:**
+
 - Better performance (binary protocol)
 - Built-in code generation for multiple languages
 - Streaming support
 
 **Cons:**
+
 - More complex for simple HTTP clients
 - Harder to debug (binary protocol)
 - RESTful API is more familiar and widely supported
@@ -1635,11 +1700,14 @@ Expose Prometheus metrics at `/metrics`:
 **Decision:** RESTful API chosen for simplicity and accessibility
 
 ### Alternative 2: Embedded Database (BoltDB)
+
 **Pros:**
+
 - Pure Go implementation
 - Simple key-value interface
 
 **Cons:**
+
 - Less SQL query flexibility
 - Smaller ecosystem
 - SQLite is already a dependency in Pelican
@@ -1647,10 +1715,13 @@ Expose Prometheus metrics at `/metrics`:
 **Decision:** SQLite chosen for consistency and SQL query capabilities
 
 ### Alternative 3: Stateful Server from Phase 1
+
 **Pros:**
+
 - Simpler implementation path (no need for two phases)
 
 **Cons:**
+
 - Increased complexity for initial implementation
 - Harder to test and debug
 - Database adds operational overhead
@@ -1662,24 +1733,31 @@ Expose Prometheus metrics at `/metrics`:
 ## Open Questions
 
 1. **Transfer Resume Granularity**: Should we support byte-level resume (like HTTP range requests) or file-level resume for multi-file transfers?
+
    - **Recommendation**: Start with file-level resume, add byte-level in future
 
-2. **Maximum Concurrent Jobs**: What should be the default limit?
+1. **Maximum Concurrent Jobs**: What should be the default limit?
+
    - **Recommendation**: Start with 10 concurrent jobs, make configurable
 
-3. **Maximum Transfers Per Job**: Should there be a limit?
+1. **Maximum Transfers Per Job**: Should there be a limit?
+
    - **Recommendation**: Start with 1000 transfers per job, make configurable
 
-4. **Job Timeout**: Should jobs have overall timeouts independent of individual transfers?
+1. **Job Timeout**: Should jobs have overall timeouts independent of individual transfers?
+
    - **Recommendation**: Yes, default to 24 hours, configurable per job
 
-5. **Socket Buffer Size**: What buffer size for Unix socket?
+1. **Socket Buffer Size**: What buffer size for Unix socket?
+
    - **Recommendation**: Use OS defaults, tune if performance issues arise
 
-6. **History Retention**: Should we support external archival (S3, etc.)?
+1. **History Retention**: Should we support external archival (S3, etc.)?
+
    - **Recommendation**: Not in initial phases, could be future enhancement
 
-7. **Partial Job Cancellation**: Should users be able to cancel individual transfers within a job?
+1. **Partial Job Cancellation**: Should users be able to cancel individual transfers within a job?
+
    - **Recommendation**: Phase 1: cancel entire job only. Phase 4+: add selective transfer cancellation
 
 ---
