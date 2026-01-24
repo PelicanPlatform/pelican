@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -99,7 +99,7 @@ func TestClientAPIIntegration(t *testing.T) {
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
 	require.NoError(t, err)
 
-	// Create temporary directory for test files
+	// Create temporary directory for test files with socket path length checks
 	tempDir := t.TempDir()
 
 	// Create test file with unique content
@@ -141,15 +141,8 @@ func TestClientAPIIntegration(t *testing.T) {
 	err = os.WriteFile(tokenFile, []byte(tkn), 0644)
 	require.NoError(t, err)
 
-	// Set up client API server
-	socketPath := filepath.Join(tempDir, "client-api.sock")
-	pidFile := filepath.Join(tempDir, "client-api.pid")
-
-	serverConfig := client_agent.ServerConfig{
-		SocketPath:        socketPath,
-		PidFile:           pidFile,
-		MaxConcurrentJobs: 5,
-	}
+	// Set up client API server with proper temp directory handling
+	serverConfig, _ := client_agent.CreateTestServerConfig(t)
 
 	server, err := client_agent.NewServer(serverConfig)
 	require.NoError(t, err)
@@ -165,7 +158,7 @@ func TestClientAPIIntegration(t *testing.T) {
 	})
 
 	// Create HTTP client for Unix socket
-	httpClient := createUnixHTTPClient(socketPath)
+	httpClient := createUnixHTTPClient(serverConfig.SocketPath)
 
 	// Base URL for API requests (hostname doesn't matter for Unix sockets)
 	baseURL := "http://localhost/api/v1/xfer"
@@ -468,18 +461,8 @@ func TestClientAPIShutdown(t *testing.T) {
 	fed := fed_test_utils.NewFedTest(t, testOriginConfig)
 	_ = fed // Keep the federation running for the test
 
-	// Create temporary directory for test files
-	tempDir := t.TempDir()
-
 	// Set up client API server - use short socket name
-	socketPath := filepath.Join(tempDir, "api.sock")
-	pidFile := filepath.Join(tempDir, "api.pid")
-
-	serverConfig := client_agent.ServerConfig{
-		SocketPath:        socketPath,
-		PidFile:           pidFile,
-		MaxConcurrentJobs: 5,
-	}
+	serverConfig, _ := client_agent.CreateTestServerConfig(t)
 
 	server, err := client_agent.NewServer(serverConfig)
 	require.NoError(t, err)
@@ -489,7 +472,7 @@ func TestClientAPIShutdown(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create HTTP client for Unix socket
-	httpClient := createUnixHTTPClient(socketPath)
+	httpClient := createUnixHTTPClient(serverConfig.SocketPath)
 
 	// Test 1: Verify server is running with health check
 	t.Run("ServerIsRunning", func(t *testing.T) {
@@ -524,8 +507,14 @@ func TestClientAPIShutdown(t *testing.T) {
 
 	// Test 3: Wait for server to shut down and verify it's no longer accessible
 	t.Run("VerifyServerShutdown", func(t *testing.T) {
-		// Wait a bit for shutdown to complete
-		time.Sleep(1 * time.Second)
+		// Wait for server to shut down
+		require.Eventually(t, func() bool {
+			resp, err := httpClient.Get("http://localhost/health")
+			if resp != nil {
+				resp.Body.Close()
+			}
+			return err != nil
+		}, 5*time.Second, 200*time.Millisecond, "Server should shut down")
 
 		// Try to connect - should fail
 		resp, err := httpClient.Get("http://localhost/health")

@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/client_agent/store"
+	"github.com/pelicanplatform/pelican/client_agent/types"
 )
 
 // setupTestStore creates a temporary database for testing
@@ -68,19 +69,31 @@ func TestDatabasePersistence(t *testing.T) {
 	require.NoError(t, err, "Failed to create job")
 	require.NotNil(t, job)
 
-	// Give the job and persistence a moment to complete
-	time.Sleep(500 * time.Millisecond)
+	// Wait for job to be persisted and have a terminal status
+	require.Eventually(t, func() bool {
+		storedJob, err := testStore.GetJob(job.ID)
+		if err == nil {
+			return storedJob.Status == StatusFailed || storedJob.Status == StatusCompleted
+		}
+		// Check if archived
+		historyJobs, _, histErr := testStore.GetJobHistory("", time.Time{}, time.Time{}, 100, 0)
+		if histErr == nil {
+			for _, hJob := range historyJobs {
+				if hJob.ID == job.ID {
+					return true
+				}
+			}
+		}
+		return false
+	}, 5*time.Second, 100*time.Millisecond, "Job should be persisted")
 
 	// Verify job was persisted (it will be in failed status because client isn't initialized)
 	// Note: The recovery mechanism may have archived the failed job, so check history too
-	storedJobData, err := testStore.GetJob(job.ID)
+	storedJob, err := testStore.GetJob(job.ID)
 	if err != nil && err.Error() == "job "+job.ID+" not found" {
 		// Job was archived, check history
-		historyData, _, histErr := testStore.GetJobHistory("", time.Time{}, time.Time{}, 100, 0)
+		historyJobs, _, histErr := testStore.GetJobHistory("", time.Time{}, time.Time{}, 100, 0)
 		require.NoError(t, histErr, "Failed to retrieve job from history")
-
-		historyJobs, ok := historyData.([]*store.HistoricalJob)
-		require.True(t, ok, "Failed to cast history data")
 
 		found := false
 		for _, hJob := range historyJobs {
@@ -93,18 +106,15 @@ func TestDatabasePersistence(t *testing.T) {
 		require.True(t, found, "Job not found in active or history tables")
 	} else {
 		require.NoError(t, err, "Failed to retrieve job from database")
-		require.NotNil(t, storedJobData)
-
-		storedJob, ok := storedJobData.(*store.StoredJob)
-		require.True(t, ok, "Failed to cast stored job")
+		require.NotNil(t, storedJob)
 		assert.Equal(t, job.ID, storedJob.ID)
 		// Job may be pending or failed depending on execution speed
 		assert.Contains(t, []string{StatusPending, StatusRunning, StatusFailed}, storedJob.Status)
 	}
 
 	// Verify transfer was persisted (check active transfers first)
-	transfersData, err := testStore.GetTransfersByJob(job.ID)
-	if err != nil || transfersData == nil {
+	transfers, err := testStore.GetTransfersByJob(job.ID)
+	if err != nil || transfers == nil {
 		// Transfers may have been archived, which is OK for this test
 		// The important thing is that persistence worked
 		t.Log("Transfers were archived to history (expected behavior)")
@@ -112,10 +122,8 @@ func TestDatabasePersistence(t *testing.T) {
 	}
 
 	require.NoError(t, err, "Failed to retrieve transfers from database")
-	require.NotNil(t, transfersData)
+	require.NotNil(t, transfers)
 
-	transfers, ok := transfersData.([]*store.StoredTransfer)
-	require.True(t, ok, "Failed to cast transfers")
 	assert.Len(t, transfers, 1)
 	assert.Equal(t, job.Transfers[0].ID, transfers[0].ID)
 	assert.Equal(t, "get", transfers[0].Operation)
@@ -133,7 +141,7 @@ func TestJobRecovery(t *testing.T) {
 
 	// Create a transfer for the job
 	transferID := "test-transfer-recovery-123"
-	storedTransfer := &store.StoredTransfer{
+	storedTransfer := &types.StoredTransfer{
 		ID:          transferID,
 		JobID:       jobID,
 		Operation:   "get",
@@ -162,52 +170,32 @@ func TestJobRecovery(t *testing.T) {
 	}()
 
 	// Poll for recovery to complete (up to 2 seconds)
-	// The old job should be deleted and a new job created
-	var jobsData interface{}
-	var total int
-	recoveryComplete := false
+	// The job should be recreated with the same ID but incremented retry count
+	var recoveredJob *types.StoredJob
 
-	for i := 0; i < 20; i++ {
-		// Check if the old job has been deleted
-		_, err := testStore.GetJob(jobID)
-		oldJobDeleted := (err != nil && err.Error() == "job "+jobID+" not found")
-
-		// Check if any new jobs exist (the recovered job)
-		jobsData, total, err = testStore.ListJobs("", 10, 0)
-		require.NoError(t, err, "Failed to list jobs")
-
-		// Recovery is complete when:
-		// 1. Old job is deleted
-		// 2. New job(s) exist (could be pending, running, or completed/failed)
-		if oldJobDeleted && total > 0 {
-			recoveryComplete = true
-			break
+	// Wait for job recovery with retry count incremented
+	require.Eventually(t, func() bool {
+		storedJob, err := testStore.GetJob(jobID)
+		if err == nil && storedJob != nil && storedJob.RetryCount > 0 {
+			recoveredJob = storedJob
+			return true
 		}
+		return false
+	}, 2*time.Second, 100*time.Millisecond, "Recovery should complete with incremented retry count")
+	require.NotNil(t, recoveredJob, "Expected recovered job to exist")
 
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	require.True(t, recoveryComplete, "Recovery did not complete within 2 seconds")
-	require.Greater(t, total, 0, "Expected at least 1 job after recovery")
-
-	// Verify the old job was replaced with a new job
-	jobs, ok := jobsData.([]*store.StoredJob)
-	require.True(t, ok, "Failed to cast jobs data")
-	require.Greater(t, len(jobs), 0, "Expected at least 1 job in jobs array")
-
-	// The recovered job should have a different ID
-	newJob := jobs[0]
-	assert.NotEqual(t, jobID, newJob.ID, "Recovered job should have a new ID")
-	assert.Contains(t, []string{StatusPending, StatusRunning, StatusFailed}, newJob.Status)
+	// The recovered job should have the SAME ID (preserved for user tracking)
+	assert.Equal(t, jobID, recoveredJob.ID, "Recovered job should preserve the original job ID")
+	// But with incremented retry count
+	assert.Greater(t, recoveredJob.RetryCount, 0, "Recovered job should have incremented retry count")
+	assert.Contains(t, []string{StatusPending, StatusRunning, StatusFailed}, recoveredJob.Status)
 
 	// Verify the transfer was recreated
-	newTransfersData, err := testStore.GetTransfersByJob(newJob.ID)
-	if err == nil && newTransfersData != nil {
-		newTransfers, ok := newTransfersData.([]*store.StoredTransfer)
-		require.True(t, ok, "Failed to cast transfers")
-		require.Len(t, newTransfers, 1, "Expected 1 transfer for recovered job")
-		assert.Equal(t, "get", newTransfers[0].Operation)
-		assert.Equal(t, "pelican://example.com/test.txt", newTransfers[0].Source)
+	recoveredTransfers, err := testStore.GetTransfersByJob(recoveredJob.ID)
+	if err == nil && recoveredTransfers != nil {
+		require.Len(t, recoveredTransfers, 1, "Expected 1 transfer for recovered job")
+		assert.Equal(t, "get", recoveredTransfers[0].Operation)
+		assert.Equal(t, "pelican://example.com/test.txt", recoveredTransfers[0].Source)
 	}
 }
 
@@ -262,12 +250,9 @@ func TestJobArchival(t *testing.T) {
 	tm.archiveCompletedJobs()
 
 	// Verify job was archived
-	historyData, total, err := testStore.GetJobHistory("", time.Time{}, time.Time{}, 10, 0)
+	historyJobs, total, err := testStore.GetJobHistory("", time.Time{}, time.Time{}, 10, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, total, "Expected 1 job in history")
-
-	historyJobs, ok := historyData.([]*store.HistoricalJob)
-	require.True(t, ok)
 	require.Len(t, historyJobs, 1, "Expected 1 job in history array")
 	assert.Equal(t, jobID, historyJobs[0].ID)
 	assert.Equal(t, StatusCompleted, historyJobs[0].Status)
@@ -314,7 +299,6 @@ func TestHistoryPruning(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify both jobs are in history
-	var historyData interface{}
 	var total int
 	_, total, err = testStore.GetJobHistory("", time.Time{}, time.Time{}, 10, 0)
 	require.NoError(t, err)
@@ -327,12 +311,9 @@ func TestHistoryPruning(t *testing.T) {
 	assert.Equal(t, 1, pruned, "Should prune 1 old job")
 
 	// Verify only recent job remains
-	historyData, total, err = testStore.GetJobHistory("", time.Time{}, time.Time{}, 10, 0)
+	historyJobs, total, err := testStore.GetJobHistory("", time.Time{}, time.Time{}, 10, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 1, total, "Should have 1 job in history")
-
-	historyJobs, ok := historyData.([]*store.HistoricalJob)
-	require.True(t, ok)
 	assert.Len(t, historyJobs, 1)
 	assert.Equal(t, recentJobID, historyJobs[0].ID)
 }
@@ -352,7 +333,7 @@ func TestFullLifecycleWithRestart(t *testing.T) {
 
 	// Create a transfer for the job (required for recovery)
 	transferID := "lifecycle-transfer-123"
-	storedTransfer := &store.StoredTransfer{
+	storedTransfer := &types.StoredTransfer{
 		ID:          transferID,
 		JobID:       jobID,
 		Operation:   "get",
@@ -390,36 +371,38 @@ func TestFullLifecycleWithRestart(t *testing.T) {
 		_ = tm2.Shutdown()
 	}()
 
-	// Wait for recovery
-	time.Sleep(500 * time.Millisecond)
+	// Wait for job to be recovered
+	require.Eventually(t, func() bool {
+		_, err := testStore.GetJob(jobID)
+		if err == nil {
+			return true
+		}
+		// Check if archived
+		historyJobs, _, histErr := testStore.GetJobHistory("", time.Time{}, time.Time{}, 10, 0)
+		if histErr == nil && len(historyJobs) > 0 {
+			return true
+		}
+		return false
+	}, 5*time.Second, 100*time.Millisecond, "Job should be recovered")
 
-	// Verify the old job was deleted (it should be replaced with a new job)
-	_, err = testStore.GetJob(jobID)
-	assert.Error(t, err, "Old job should be removed from active table after recovery")
-
-	// The recovered job should have been retried and may have completed or failed
-	// Check for active jobs (new job created during recovery)
-	jobsData, total, err := testStore.ListJobs("", 10, 0)
-	require.NoError(t, err)
-
-	// If no active jobs, check history (job may have completed/failed quickly)
-	if total == 0 {
-		historyData, histTotal, histErr := testStore.GetJobHistory("", time.Time{}, time.Time{}, 10, 0)
+	// Verify the job was recovered with the SAME ID (preserved for user tracking)
+	recoveredJob, err := testStore.GetJob(jobID)
+	if err != nil {
+		// Job may have completed/failed quickly and been archived
+		historyJobs, histTotal, histErr := testStore.GetJobHistory("", time.Time{}, time.Time{}, 10, 0)
 		require.NoError(t, histErr)
 		assert.Greater(t, histTotal, 0, "Expected at least 1 job in history after recovery")
-
-		historyJobs, ok := historyData.([]*store.HistoricalJob)
-		require.True(t, ok)
 		assert.Greater(t, len(historyJobs), 0)
-		// The recovered job will have a different ID than the original
-		assert.NotEqual(t, jobID, historyJobs[0].ID, "Recovered job should have a new ID")
+		// The recovered job should have the SAME ID (preserved)
+		assert.Equal(t, jobID, historyJobs[0].ID, "Recovered job should preserve the original job ID")
+		// But with incremented retry count
+		assert.Greater(t, historyJobs[0].RetryCount, 0, "Recovered job should have incremented retry count")
 	} else {
 		// Job is still active (pending or running)
-		jobs, ok := jobsData.([]*store.StoredJob)
-		require.True(t, ok)
-		assert.Greater(t, len(jobs), 0)
-		// The recovered job will have a different ID than the original
-		assert.NotEqual(t, jobID, jobs[0].ID, "Recovered job should have a new ID")
+		// The recovered job should have the SAME ID (preserved)
+		assert.Equal(t, jobID, recoveredJob.ID, "Recovered job should preserve the original job ID")
+		// But with incremented retry count
+		assert.Greater(t, recoveredJob.RetryCount, 0, "Recovered job should have incremented retry count")
 	}
 }
 
@@ -454,8 +437,7 @@ func TestInMemoryMode(t *testing.T) {
 	assert.Equal(t, job.ID, retrievedJob.ID)
 	assert.Equal(t, StatusPending, retrievedJob.Status)
 
-	// Verify no database operations cause issues
-	time.Sleep(200 * time.Millisecond)
+	// With nil store, jobs remain in memory only - no database operations
 }
 
 // TestHistoryFiltering verifies history query filtering
@@ -487,12 +469,10 @@ func TestHistoryFiltering(t *testing.T) {
 	}
 
 	// Test filtering by status
-	historyData, total, err := testStore.GetJobHistory(StatusCompleted, time.Time{}, time.Time{}, 10, 0)
+	historyJobs, total, err := testStore.GetJobHistory(StatusCompleted, time.Time{}, time.Time{}, 10, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 2, total, "Should find 2 completed jobs")
 
-	historyJobs, ok := historyData.([]*store.HistoricalJob)
-	require.True(t, ok)
 	assert.Len(t, historyJobs, 2)
 
 	// Test filtering by time range
@@ -503,17 +483,13 @@ func TestHistoryFiltering(t *testing.T) {
 	assert.Equal(t, 2, total, "Should find 2 jobs in time range")
 
 	// Test pagination
-	historyData, total, err = testStore.GetJobHistory("", time.Time{}, time.Time{}, 2, 0)
+	historyJobs, total, err = testStore.GetJobHistory("", time.Time{}, time.Time{}, 2, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 4, total, "Total should be 4")
-	historyJobs, ok = historyData.([]*store.HistoricalJob)
-	require.True(t, ok)
 	assert.Len(t, historyJobs, 2, "Should return 2 jobs (limit)")
 
-	historyData, _, err = testStore.GetJobHistory("", time.Time{}, time.Time{}, 2, 2)
+	historyJobs, _, err = testStore.GetJobHistory("", time.Time{}, time.Time{}, 2, 2)
 	require.NoError(t, err)
-	historyJobs, ok = historyData.([]*store.HistoricalJob)
-	require.True(t, ok)
 	assert.Len(t, historyJobs, 2, "Should return 2 jobs (offset 2)")
 }
 
@@ -545,24 +521,40 @@ func TestConcurrentJobPersistence(t *testing.T) {
 		jobIDs[i] = job.ID
 	}
 
-	// Wait for persistence
-	time.Sleep(500 * time.Millisecond)
+	// Wait for all jobs to be persisted
+	require.Eventually(t, func() bool {
+		count := 0
+		for _, jobID := range jobIDs {
+			_, err := testStore.GetJob(jobID)
+			if err == nil {
+				count++
+				continue
+			}
+			// Check history
+			historyJobs, _, histErr := testStore.GetJobHistory("", time.Time{}, time.Time{}, 100, 0)
+			if histErr == nil {
+				for _, hJob := range historyJobs {
+					if hJob.ID == jobID {
+						count++
+						break
+					}
+				}
+			}
+		}
+		return count == numJobs
+	}, 10*time.Second, 100*time.Millisecond, "All jobs should be persisted")
 
 	// Verify all jobs were persisted (they may be in active or history tables)
 	jobsFound := 0
 	for _, jobID := range jobIDs {
-		storedJobData, err := testStore.GetJob(jobID)
+		storedJob, err := testStore.GetJob(jobID)
 		if err == nil {
-			storedJob, ok := storedJobData.(*store.StoredJob)
-			require.True(t, ok)
 			assert.Equal(t, jobID, storedJob.ID)
 			jobsFound++
 		} else {
 			// Job may have been archived, check history
-			historyData, _, histErr := testStore.GetJobHistory("", time.Time{}, time.Time{}, 100, 0)
+			historyJobs, _, histErr := testStore.GetJobHistory("", time.Time{}, time.Time{}, 100, 0)
 			require.NoError(t, histErr)
-			historyJobs, ok := historyData.([]*store.HistoricalJob)
-			require.True(t, ok)
 			for _, hJob := range historyJobs {
 				if hJob.ID == jobID {
 					jobsFound++
@@ -620,9 +612,6 @@ func TestBackgroundTasksShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	tm := NewTransferManager(ctx, 5, testStore)
-
-	// Let background tasks start
-	time.Sleep(100 * time.Millisecond)
 
 	// Trigger shutdown
 	cancel()

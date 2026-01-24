@@ -56,16 +56,22 @@ Origin:
 
 // setupTestEnvironment creates a test federation and API server
 func setupTestEnvironment(t *testing.T) (apiClient *apiclient.APIClient, fed *fed_test_utils.FedTest, tempDir string, tokenFile string, cleanup func()) {
+	t.Log("setupTestEnvironment: Starting")
+
 	// Reset test state
+	t.Log("setupTestEnvironment: Resetting test state")
 	server_utils.ResetTestState()
 
 	// Create test federation
+	t.Log("setupTestEnvironment: Creating test federation")
 	fed = fed_test_utils.NewFedTest(t, testOriginConfig)
+	t.Log("setupTestEnvironment: Federation created")
 
 	// Create temporary directory for test files
 	tempDir = t.TempDir()
 
 	// Create token for authenticated operations
+	t.Log("setupTestEnvironment: Creating token")
 	viper.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
@@ -91,34 +97,36 @@ func setupTestEnvironment(t *testing.T) (apiClient *apiclient.APIClient, fed *fe
 	tokenFile = filepath.Join(tempDir, "token")
 	err = os.WriteFile(tokenFile, []byte(tkn), 0644)
 	require.NoError(t, err)
+	t.Log("setupTestEnvironment: Token created")
 
-	// Set up client API server
-	socketPath := filepath.Join(tempDir, "client-api.sock")
-	pidFile := filepath.Join(tempDir, "client-api.pid")
-
-	serverConfig := client_agent.ServerConfig{
-		SocketPath:        socketPath,
-		PidFile:           pidFile,
-		MaxConcurrentJobs: 5,
-	}
+	// Set up client API server with proper temp directory handling
+	t.Log("setupTestEnvironment: Setting up client API server")
+	serverConfig, _ := client_agent.CreateTestServerConfig(t)
+	socketPath := serverConfig.SocketPath
 
 	server, err := client_agent.NewServer(serverConfig)
 	require.NoError(t, err)
 
 	// Start the server
+	t.Log("setupTestEnvironment: Starting server")
 	err = server.Start()
 	require.NoError(t, err)
+	t.Log("setupTestEnvironment: Server started")
 
 	// Create API client
+	t.Log("setupTestEnvironment: Creating API client")
 	apiClient, err = apiclient.NewAPIClient(socketPath)
 	require.NoError(t, err)
+	t.Log("setupTestEnvironment: API client created")
 
 	// Cleanup function
 	cleanup = func() {
+		t.Log("cleanup: Shutting down server")
 		err := server.Shutdown()
 		assert.NoError(t, err)
 	}
 
+	t.Log("setupTestEnvironment: Complete")
 	return apiClient, fed, tempDir, tokenFile, cleanup
 }
 
@@ -256,11 +264,14 @@ func TestAPIClientJobStatus(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("GetJobStatus", func(t *testing.T) {
-		// Wait a moment for job to start
-		time.Sleep(100 * time.Millisecond)
+		// Wait for job to have a status
+		var status *client_agent.JobStatus
+		require.Eventually(t, func() bool {
+			var err error
+			status, err = apiClient.GetJobStatus(ctx, jobID)
+			return err == nil && status != nil && status.Status != ""
+		}, 5*time.Second, 100*time.Millisecond, "Job should have a status")
 
-		status, err := apiClient.GetJobStatus(ctx, jobID)
-		require.NoError(t, err)
 		assert.NotNil(t, status)
 		assert.Equal(t, jobID, status.JobID)
 		assert.NotEmpty(t, status.Status)
@@ -397,8 +408,11 @@ func TestAPIClientListJobs(t *testing.T) {
 	})
 
 	t.Run("ListWithStatusFilter", func(t *testing.T) {
-		// Wait a moment for some jobs to complete
-		time.Sleep(2 * time.Second)
+		// Wait for at least one job to complete
+		require.Eventually(t, func() bool {
+			resp, err := apiClient.ListJobs(ctx, "completed", 100, 0)
+			return err == nil && len(resp.Jobs) > 0
+		}, 10*time.Second, 200*time.Millisecond, "At least one job should complete")
 
 		resp, err := apiClient.ListJobs(ctx, "completed", 100, 0)
 		require.NoError(t, err)
@@ -444,8 +458,11 @@ func TestAPIClientCancelJob(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("CancelRunningJob", func(t *testing.T) {
-		// Give it a moment to start
-		time.Sleep(100 * time.Millisecond)
+		// Wait for job to start running
+		require.Eventually(t, func() bool {
+			status, err := apiClient.GetJobStatus(ctx, jobID)
+			return err == nil && status != nil && status.Status != ""
+		}, 5*time.Second, 100*time.Millisecond, "Job should start")
 
 		err := apiClient.CancelJob(ctx, jobID)
 		require.NoError(t, err, "Should be able to cancel job")
@@ -529,7 +546,7 @@ func TestAPIClientEndToEnd(t *testing.T) {
 	downloadJobID, err := apiClient.CreateJob(ctx, downloadTransfers, options)
 	require.NoError(t, err)
 
-	err = apiClient.WaitForJob(ctx, downloadJobID, 30*time.Second)
+	err = apiClient.WaitForJob(ctx, downloadJobID, 10*time.Second)
 	require.NoError(t, err, "Download should complete")
 
 	downloadStatus, err := apiClient.GetJobStatus(ctx, downloadJobID)
