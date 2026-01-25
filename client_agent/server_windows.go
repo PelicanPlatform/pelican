@@ -31,13 +31,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// verifyDirectoryOwnership checks that the directory is owned by the specified user
-// On Windows, we can't easily verify ownership in the same way, so we just log a warning
-func verifyDirectoryOwnership(path string, expectedUID int) error {
-	log.Warn("Database directory ownership verification not implemented on Windows")
-	return nil
-}
-
 // verifyOwnership verifies that the directory (represented by FileInfo) is owned by the expected UID
 // On Windows, ownership verification is not implemented
 func verifyOwnership(info os.FileInfo, expectedUID int) error {

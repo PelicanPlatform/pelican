@@ -31,25 +31,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// verifyDirectoryOwnership checks that the directory is owned by the specified user
-func verifyDirectoryOwnership(path string, expectedUID int) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return errors.Wrap(err, "failed to stat directory")
-	}
-
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return errors.New("failed to get system-specific file info")
-	}
-
-	if int(stat.Uid) != expectedUID {
-		return errors.Errorf("database directory is owned by UID %d, expected %d (current user)", stat.Uid, expectedUID)
-	}
-
-	return nil
-}
-
 // verifyOwnership verifies that the directory (represented by FileInfo) is owned by the expected UID
 func verifyOwnership(info os.FileInfo, expectedUID int) error {
 	stat, ok := info.Sys().(*syscall.Stat_t)

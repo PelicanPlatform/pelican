@@ -19,6 +19,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/pkg/errors"
@@ -69,6 +70,19 @@ func jobCancelMain(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to cancel job")
 	}
 
-	fmt.Printf("Job %s has been cancelled\n", jobID)
+	if outputJSON {
+		result := map[string]string{
+			"job_id":  jobID,
+			"status":  "cancelled",
+			"message": fmt.Sprintf("Job %s has been cancelled", jobID),
+		}
+		jsonBytes, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return errors.Wrap(err, "failed to marshal JSON")
+		}
+		fmt.Println(string(jsonBytes))
+	} else {
+		fmt.Printf("Job %s has been cancelled\n", jobID)
+	}
 	return nil
 }

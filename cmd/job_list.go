@@ -19,6 +19,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -76,7 +77,24 @@ func jobListMain(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(resp.Jobs) == 0 {
-		fmt.Println("No jobs found")
+		if outputJSON {
+			jsonBytes, err := json.MarshalIndent(resp, "", "  ")
+			if err != nil {
+				return errors.Wrap(err, "failed to marshal JSON")
+			}
+			fmt.Println(string(jsonBytes))
+		} else {
+			fmt.Println("No jobs found")
+		}
+		return nil
+	}
+
+	if outputJSON {
+		jsonBytes, err := json.MarshalIndent(resp, "", "  ")
+		if err != nil {
+			return errors.Wrap(err, "failed to marshal JSON")
+		}
+		fmt.Println(string(jsonBytes))
 		return nil
 	}
 
