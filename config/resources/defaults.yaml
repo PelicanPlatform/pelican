@@ -22,6 +22,8 @@ Client:
   SlowTransferWindow: 30s
   StoppedTransferTimeout: 100s
   WorkerCount: 5
+ClientAgent:
+  MaxConcurrentJobs: 5
 Server:
   AdLifetime: 10m
   AdvertisementInterval: 1m
