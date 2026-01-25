@@ -202,12 +202,27 @@ func putMain(cmd *cobra.Command, args []string) {
 			os.Exit(1)
 		}
 
-		fmt.Printf("Job created: %s\n", jobID)
+		if outputJSON {
+			result := map[string]interface{}{
+				"job_id": jobID,
+				"status": "created",
+			}
+			jsonBytes, err := json.MarshalIndent(result, "", "  ")
+			if err != nil {
+				log.Errorln("Failed to marshal JSON:", err)
+				os.Exit(1)
+			}
+			fmt.Println(string(jsonBytes))
+		} else {
+			fmt.Printf("Job created: %s\n", jobID)
+		}
 
 		// Check if we should wait for completion
 		shouldWait, _ := cmd.Flags().GetBool("wait")
 		if shouldWait {
-			fmt.Println("Waiting for job to complete...")
+			if !outputJSON {
+				fmt.Println("Waiting for job to complete...")
+			}
 
 			// Wait with a reasonable timeout (e.g., 1 hour)
 			err := apiClient.WaitForJob(ctx, jobID, 1*time.Hour)
@@ -223,12 +238,23 @@ func putMain(cmd *cobra.Command, args []string) {
 				os.Exit(1)
 			}
 
-			fmt.Printf("Job completed successfully\n")
-			if finalStatus.Progress != nil {
-				fmt.Printf("Transferred: %d bytes\n", finalStatus.Progress.BytesTransferred)
+			if outputJSON {
+				jsonBytes, err := json.MarshalIndent(finalStatus, "", "  ")
+				if err != nil {
+					log.Errorln("Failed to marshal JSON:", err)
+					os.Exit(1)
+				}
+				fmt.Println(string(jsonBytes))
+			} else {
+				fmt.Printf("Job completed successfully\n")
+				if finalStatus.Progress != nil {
+					fmt.Printf("Transferred: %d bytes\n", finalStatus.Progress.BytesTransferred)
+				}
 			}
 		} else {
-			fmt.Printf("Check status with: pelican job status %s\n", jobID)
+			if !outputJSON {
+				fmt.Printf("Check status with: pelican job status %s\n", jobID)
+			}
 		}
 		return
 	}

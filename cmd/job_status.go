@@ -20,6 +20,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -79,7 +80,15 @@ func jobStatusMain(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to get job status")
 	}
 
-	printJobStatus(status)
+	if outputJSON {
+		jsonBytes, err := json.MarshalIndent(status, "", "  ")
+		if err != nil {
+			return errors.Wrap(err, "failed to marshal JSON")
+		}
+		fmt.Println(string(jsonBytes))
+	} else {
+		printJobStatus(status)
+	}
 	return nil
 }
 
@@ -99,7 +108,12 @@ func watchJobStatus(ctx context.Context, apiClient *apiclient.APIClient, jobID s
 
 			// Clear screen and reprint status
 			fmt.Print("\033[H\033[2J")
-			printJobStatus(status)
+			if outputJSON {
+				jsonBytes, _ := json.MarshalIndent(status, "", "  ")
+				fmt.Println(string(jsonBytes))
+			} else {
+				printJobStatus(status)
+			}
 
 			// Exit if job completed
 			if status.Status == "completed" || status.Status == "failed" || status.Status == "cancelled" {
