@@ -162,6 +162,7 @@ func init() {
 	rootCmd.AddCommand(generateCmd)
 	rootCmd.AddCommand(keyCmd)
 	rootCmd.AddCommand(downtimeCmd)
+	rootCmd.AddCommand(apiKeyCmd)
 	rootCmd.AddCommand(serverCmd)
 	rootCmd.AddCommand(config_printer.ConfigCmd)
 	preferredPrefix := config.GetPreferredPrefix()
