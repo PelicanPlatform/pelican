@@ -60,7 +60,7 @@ func jobListMain(cmd *cobra.Command, args []string) error {
 	}
 
 	// Ensure server is running (auto-start if needed)
-	apiClient, err := ensureClientAgentRunning(5)
+	apiClient, err := ensureClientAgentRunning(ctx, 5)
 	if err != nil {
 		return errors.Wrap(err, "failed to connect to client agent server")
 	}
