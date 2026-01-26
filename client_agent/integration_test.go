@@ -122,7 +122,7 @@ func TestClientAPIIntegration(t *testing.T) {
 	tokenConfig := token.NewWLCGToken()
 	tokenConfig.Lifetime = time.Minute * 5
 	tokenConfig.Issuer = issuer
-	tokenConfig.Subject = "test-client-api"
+	tokenConfig.Subject = "test-client-agent"
 	tokenConfig.AddAudienceAny()
 
 	scopes := []token_scopes.TokenScope{}
@@ -161,7 +161,7 @@ func TestClientAPIIntegration(t *testing.T) {
 	httpClient := createUnixHTTPClient(serverConfig.SocketPath)
 
 	// Base URL for API requests (hostname doesn't matter for Unix sockets)
-	baseURL := "http://localhost/api/v1/xfer"
+	baseURL := "http://localhost/api/v1.0/transfer-agent"
 
 	// Test 1: Health check
 	t.Run("HealthCheck", func(t *testing.T) {

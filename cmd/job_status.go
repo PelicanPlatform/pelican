@@ -38,8 +38,9 @@ var (
 		Short: "Get the status of a transfer job",
 		Long: `Get detailed status information about a transfer job, including
 the status of all transfers within the job and overall progress.`,
-		Args: cobra.ExactArgs(1),
-		RunE: jobStatusMain,
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE:         jobStatusMain,
 	}
 
 	jobStatusWatch bool
@@ -59,15 +60,10 @@ func jobStatusMain(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to initialize config")
 	}
 
-	// Create API client
-	apiClient, err := apiclient.NewAPIClient("")
+	// Ensure server is running (auto-start if needed)
+	apiClient, err := ensureClientAgentRunning(5)
 	if err != nil {
-		return errors.Wrap(err, "failed to create API client")
-	}
-
-	// Check if server is running
-	if !apiClient.IsServerRunning(ctx) {
-		return errors.New("API server is not running. Start it with: pelican client-api serve")
+		return errors.Wrap(err, "failed to connect to client agent server")
 	}
 
 	if jobStatusWatch {

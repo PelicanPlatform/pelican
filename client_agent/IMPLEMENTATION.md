@@ -67,9 +67,9 @@ Successfully implemented of the Pelican Client Agent Server as specified in the 
 
 7. **cmd/client_agent.go** (195 lines)
    - Cobra command integration
-   - `pelican client-api serve` - start server
-   - `pelican client-api stop` - stop server
-   - `pelican client-api status` - check status
+   - `pelican client-agent start` - start server
+   - `pelican client-agent stop` - stop server
+   - `pelican client-agent status` - check status
    - Command-line flag handling
    - Signal handling for graceful shutdown
 
@@ -158,11 +158,11 @@ Successfully implemented of the Pelican Client Agent Server as specified in the 
 
 ### API Design
 
-- **Base URL**: `/api/v1/xfer`
+- **Base URL**: `/api/v1.0/transfer-agent`
 - **Job Endpoints**: POST/GET/DELETE `/jobs`, GET `/jobs/:id`
 - **File Operations**: POST `/stat`, `/list`, `/delete`
 - **Health Check**: GET `/health`
-- **Transport**: Unix domain socket (default: `~/.pelican/client-api.sock`)
+- **Transport**: Unix domain socket (default: `~/.pelican/client-agent.sock`)
 
 ### Error Handling
 
@@ -184,25 +184,25 @@ go build -o /dev/null ./cmd/...
 
 ### Job Management
 
-1. **POST /api/v1/xfer/jobs**
+1. **POST /api/v1.0/transfer-agent/jobs**
 
    - Creates job with multiple transfers
    - Returns job ID and initial status
    - Validates request body
 
-1. **GET /api/v1/xfer/jobs/:job_id**
+1. **GET /api/v1.0/transfer-agent/jobs/:job_id**
 
    - Returns detailed job status
    - Includes all transfers with progress
    - Progress aggregation and statistics
 
-1. **GET /api/v1/xfer/jobs**
+1. **GET /api/v1.0/transfer-agent/jobs**
 
    - Lists jobs with filtering
    - Pagination support (limit/offset)
    - Status filtering
 
-1. **DELETE /api/v1/xfer/jobs/:job_id**
+1. **DELETE /api/v1.0/transfer-agent/jobs/:job_id**
 
    - Cancels job and incomplete transfers
    - Returns cancellation statistics
@@ -210,19 +210,19 @@ go build -o /dev/null ./cmd/...
 
 ### File Operations
 
-5. **POST /api/v1/xfer/stat**
+5. **POST /api/v1.0/transfer-agent/stat**
 
    - Gets file/directory metadata
    - Size, modification time, checksums
    - Collection detection
 
-1. **POST /api/v1/xfer/list**
+1. **POST /api/v1.0/transfer-agent/list**
 
    - Lists directory contents
    - Returns file metadata
    - Supports recursive listings
 
-1. **POST /api/v1/xfer/delete**
+1. **POST /api/v1.0/transfer-agent/delete**
 
    - Deletes remote objects
    - Recursive deletion support
@@ -241,13 +241,13 @@ go build -o /dev/null ./cmd/...
 
 ```bash
 # Start server
-pelican client-api serve [--socket PATH] [--max-jobs N]
+pelican client-agent start [--socket PATH] [--max-jobs N]
 
 # Stop server
-pelican client-api stop [--socket PATH]
+pelican client-agent stop [--socket PATH]
 
 # Check status
-pelican client-api status [--socket PATH]
+pelican client-agent status [--socket PATH]
 ```
 
 ## Features Delivered
@@ -313,17 +313,17 @@ pelican client-api status [--socket PATH]
 1. **Server Lifecycle**
 
    ```bash
-   pelican client-api serve
+   pelican client-agent start
    # In another terminal:
-   pelican client-api status
-   pelican client-api stop
+   pelican client-agent status
+   pelican client-agent stop
    ```
 
 1. **Job Creation**
 
    ```bash
-   curl -X POST --unix-socket ~/.pelican/client-api.sock \
-     http://localhost/api/v1/xfer/jobs \
+   curl -X POST --unix-socket ~/.pelican/client-agent.sock \
+     http://localhost/api/v1.0/transfer-agent/jobs \
      -H "Content-Type: application/json" \
      -d '{"transfers":[{"operation":"get","source":"osdf:///path","destination":"/tmp/test"}]}'
    ```
@@ -331,33 +331,33 @@ pelican client-api status [--socket PATH]
 1. **Job Status**
 
    ```bash
-   curl --unix-socket ~/.pelican/client-api.sock \
-     http://localhost/api/v1/xfer/jobs/{JOB_ID}
+   curl --unix-socket ~/.pelican/client-agent.sock \
+     http://localhost/api/v1.0/transfer-agent/jobs/{JOB_ID}
    ```
 
 1. **Job Cancellation**
 
    ```bash
-   curl -X DELETE --unix-socket ~/.pelican/client-api.sock \
-     http://localhost/api/v1/xfer/jobs/{JOB_ID}
+   curl -X DELETE --unix-socket ~/.pelican/client-agent.sock \
+     http://localhost/api/v1.0/transfer-agent/jobs/{JOB_ID}
    ```
 
 1. **File Operations**
 
    ```bash
    # Stat
-   curl -X POST --unix-socket ~/.pelican/client-api.sock \
-     http://localhost/api/v1/xfer/stat \
+   curl -X POST --unix-socket ~/.pelican/client-agent.sock \
+     http://localhost/api/v1.0/transfer-agent/stat \
      -d '{"url":"osdf:///path/file"}'
 
    # List
-   curl -X POST --unix-socket ~/.pelican/client-api.sock \
-     http://localhost/api/v1/xfer/list \
+   curl -X POST --unix-socket ~/.pelican/client-agent.sock \
+     http://localhost/api/v1.0/transfer-agent/list \
      -d '{"url":"osdf:///path/"}'
 
    # Delete
-   curl -X POST --unix-socket ~/.pelican/client-api.sock \
-     http://localhost/api/v1/xfer/delete \
+   curl -X POST --unix-socket ~/.pelican/client-agent.sock \
+     http://localhost/api/v1.0/transfer-agent/delete \
      -d '{"url":"osdf:///path/file","recursive":false}'
    ```
 

@@ -38,7 +38,6 @@ import (
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/client_agent"
-	"github.com/pelicanplatform/pelican/client_agent/apiclient"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 )
@@ -158,18 +157,11 @@ func putMain(cmd *cobra.Command, args []string) {
 		source := args[:len(args)-1]
 		dest := args[len(args)-1]
 
-		// Create API client (empty string uses default socket path)
-		apiClient, err := apiclient.NewAPIClient("")
+		// Ensure server is running, starting it if necessary
+		apiClient, err := ensureClientAgentRunning(5)
 		if err != nil {
-			log.Errorln("Failed to create API client:", err)
-			log.Errorln("Ensure the client API server is running with 'pelican client-api serve'")
-			os.Exit(1)
-		}
-
-		// Check if server is running
-		if !apiClient.IsServerRunning(ctx) {
-			log.Errorln("Client API server is not running")
-			log.Errorln("Start it with 'pelican client-api serve'")
+			log.Errorln("Failed to ensure API server is running:", err)
+			log.Errorln("You can manually start it with 'pelican client-api serve --daemonize'")
 			os.Exit(1)
 		}
 

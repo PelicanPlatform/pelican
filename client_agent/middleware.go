@@ -29,6 +29,13 @@ import (
 // LoggerMiddleware logs HTTP requests
 func LoggerMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Record activity on server if available
+		if server, exists := c.Get("server"); exists {
+			if srv, ok := server.(*Server); ok {
+				srv.UpdateActivity()
+			}
+		}
+
 		start := time.Now()
 		path := c.Request.URL.Path
 		raw := c.Request.URL.RawQuery

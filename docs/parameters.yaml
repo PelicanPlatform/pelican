@@ -682,16 +682,16 @@ components: ["client"]
 ############################
 #  ClientAgent-level Configs #
 ############################
-name: ClientAgent.DatabasePath
+name: ClientAgent.DbLocation
 description: |+
   The filepath to the SQLite database used by the client API server for persisting
   transfer job state, history, and recovery information. If not specified, defaults
-  to `~/.pelican/client-api.db`.
+  to `~/.pelican/client-agent.db`.
 
   Set this to an empty string to disable database persistence entirely and run
   the client API server in memory-only mode.
 type: filename
-default: $ConfigBase/client-api.db
+default: ""
 components: ["client"]
 ---
 name: ClientAgent.HistoryRetentionDays
@@ -716,15 +716,42 @@ type: int
 default: 5
 components: ["client"]
 ---
+name: ClientAgent.PidFile
+description: |+
+  The filepath to the PID file used by the client agent daemon process. If not
+  specified, defaults to `~/.pelican/client-agent.pid`.
+
+  The PID file is used to track the running daemon process and prevent multiple
+  instances from starting simultaneously.
+type: filename
+default: ""
+components: ["client"]
+---
 name: ClientAgent.Socket
 description: |+
   The filepath to the Unix domain socket used by the client API server for
   inter-process communication. Clients connect to this socket to submit transfer
   jobs and query their status.
 
-  If not specified, the default location is `~/.pelican/client-api.db`.
+  If not specified, the default location is `~/.pelican/client-api.sock`.
 type: filename
 default: ""
+components: ["client"]
+---
+name: ClientAgent.IdleTimeout
+description: |+
+  The duration of inactivity (no active jobs or requests) after which the client
+  API server will automatically shut down to conserve resources. Set to 0 to
+  disable automatic shutdown.
+
+  When running as a daemon spawned by object transfer commands, the server will
+  shut down after this period of inactivity. The server will NOT shut down while
+  there are active transfer jobs in progress.
+
+  This is particularly useful for reducing resource usage when the client API
+  server is automatically started by commands using the `--async` flag.
+type: duration
+default: 10m
 components: ["client"]
 ---
 ############################
