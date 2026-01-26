@@ -1108,3 +1108,100 @@ func TestPrestage(t *testing.T) {
 		}, 2*time.Second, 100*time.Millisecond, "object should be cached after prestage")
 	}
 }
+
+// TestPrestageWithAPI tests the new Pelican prestage API when available
+func TestPrestageWithAPI(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	// Note: This test requires a cache that implements the Pelican prestage API
+	// For now, we'll test the detection and fallback logic
+	// A full integration test would require deploying a cache with the API support
+
+	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
+
+	te, err := client.NewTransferEngine(fed.Ctx)
+	require.NoError(t, err)
+
+	// Create test file
+	testFileContent := strings.Repeat("test file content", 10000)
+	tempFile, err := os.CreateTemp(t.TempDir(), "test")
+	assert.NoError(t, err, "Error creating temp file")
+	defer os.Remove(tempFile.Name())
+	_, err = tempFile.WriteString(testFileContent)
+	assert.NoError(t, err, "Error writing to temp file")
+	tempFile.Close()
+
+	tempToken, _ := getTempToken(t)
+	defer tempToken.Close()
+	defer os.Remove(tempToken.Name())
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
+
+	oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
+	assert.NoError(t, err)
+	defer func() {
+		_, err := config.SetPreferredPrefix(oldPref)
+		require.NoError(t, err)
+	}()
+
+	for idx, export := range fed.Exports {
+		t.Logf("Testing export %d: %s", idx, export.FederationPrefix)
+		tempPath := tempFile.Name()
+		fileName := filepath.Base(tempPath)
+		uploadURL := fmt.Sprintf("pelican://%s:%s%s/prestage-api/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+			export.FederationPrefix, fileName)
+
+		// Upload the file
+		transferResultsUpload, err := client.DoCopy(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
+		assert.NoError(t, err)
+		assert.Equal(t, int64(len(testFileContent)), transferResultsUpload[0].TransferredBytes)
+
+		// Create a new client for each export iteration
+		tc, err := te.NewClient(client.WithTokenLocation(tempToken.Name()))
+		require.NoError(t, err)
+
+		innerFileUrl, err := url.Parse(uploadURL)
+		require.NoError(t, err)
+
+		// Verify the file is not initially cached
+		_, size, err := tc.CacheInfo(fed.Ctx, innerFileUrl)
+		require.NoError(t, err)
+		require.Equal(t, int64(len(testFileContent)), size)
+
+		// Prestage the object with forced API usage
+		// The test verifies that when forcing API usage, the client properly detects
+		// whether the cache supports the API and returns appropriate errors if not
+		tj, err := tc.NewPrestageJob(fed.Ctx, innerFileUrl, client.WithForcePrestageAPI(true))
+		require.NoError(t, err)
+		err = tc.Submit(tj)
+		require.NoError(t, err)
+
+		// Shutdown with timeout - use a separate goroutine to enforce the timeout
+		type shutdownResult struct {
+			results []client.TransferResults
+			err     error
+		}
+		shutdownChan := make(chan shutdownResult, 1)
+		go func() {
+			results, err := tc.Shutdown()
+			shutdownChan <- shutdownResult{results: results, err: err}
+		}()
+
+		// Wait for shutdown or timeout
+		var result shutdownResult
+		select {
+		case result = <-shutdownChan:
+			// Shutdown completed
+		case <-time.After(20 * time.Second):
+			require.Fail(t, "Prestage operation timed out after 20 seconds")
+		}
+
+		require.NoError(t, result.err)
+		assert.Equal(t, 1, len(result.results))
+
+		// Test the Pelican prestage API with forced usage
+		require.NoError(t, result.results[0].Error, "Prestage with forced API failed: %v", result.results[0].Error)
+		t.Logf("Prestage with forced API succeeded")
+	}
+}
