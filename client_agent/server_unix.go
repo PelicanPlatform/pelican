@@ -174,25 +174,28 @@ func getServerPIDFromLock(pidPath string) (int, error) {
 	}
 	defer fd.Close()
 
-	// Use fcntl F_GETLK to query the lock holder
-	lock := syscall.Flock_t{
-		Type:   syscall.F_WRLCK, // We want to test for a write lock
-		Whence: 0,
-		Start:  0,
-		Len:    0, // 0 means entire file
+	// Try to acquire a non-blocking exclusive flock
+	// If this succeeds, no server is holding the lock
+	// If this fails with EWOULDBLOCK, a server is holding the lock
+	if err := syscall.Flock(int(fd.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if err == syscall.EWOULDBLOCK {
+			// Lock is held by another process, read the PID from the file
+			pidData, readErr := os.ReadFile(expandedPath)
+			if readErr != nil {
+				return 0, errors.Wrap(readErr, "failed to read PID file")
+			}
+			var pid int
+			if _, scanErr := fmt.Sscanf(string(pidData), "%d", &pid); scanErr != nil {
+				return 0, errors.Wrap(scanErr, "failed to parse PID from file")
+			}
+			return pid, nil
+		}
+		// Other error
+		return 0, errors.Wrap(err, "failed to test lock")
 	}
 
-	// F_GETLK: If lock would succeed, Type is set to F_UNLCK
-	// If lock would block, Type remains F_WRLCK and Pid is set to holder's PID
-	if err := syscall.FcntlFlock(fd.Fd(), syscall.F_GETLK, &lock); err != nil {
-		return 0, errors.Wrap(err, "failed to query lock")
-	}
-
-	if lock.Type == syscall.F_UNLCK {
-		// No lock held
-		return 0, nil
-	}
-
-	// Lock is held, return the PID
-	return int(lock.Pid), nil
+	// Successfully acquired lock, which means no server is running
+	// Unlock and return 0
+	_ = syscall.Flock(int(fd.Fd()), syscall.LOCK_UN)
+	return 0, nil
 }

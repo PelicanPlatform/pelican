@@ -84,8 +84,8 @@ This design adds a third access method: a RESTful agent server that can be acces
 #### Default Socket Location
 
 ```
-Linux/macOS: $HOME/.pelican/client-api.sock
-Windows:     \\.\pipe\pelican-client-api (Named Pipe)
+Linux/macOS: $HOME/.pelican/client-agent.sock
+Windows:     \\.\pipe\pelican-client-agent (Named Pipe)
 ```
 
 #### Configuration Parameters
@@ -102,39 +102,39 @@ The file `param/parameters.go` is auto-generated. Instead, update the command li
 
 ### Command Structure
 
-#### New Command: `pelican client-api`
+#### New Command: `pelican client-agent`
 
 ```bash
-pelican client-api serve [flags]
+pelican client-agent start [flags]
 
 Flags:
   --socket-path string        Unix socket path (default: auto-detect)
   --foreground               Run in foreground (don't daemonize)
-  --pid-file string          PID file location (default: $HOME/.pelican/client-api.pid)
-  --log-file string          Log file location (default: $HOME/.pelican/client-api.log)
+  --pid-file string          PID file location (default: $HOME/.pelican/client-agent.pid)
+  --log-file string          Log file location (default: $HOME/.pelican/client-agent.log)
 
 Examples:
   # Start server with default settings (backgrounds itself)
-  pelican client-api serve
+  pelican client-agent start
 
   # Start server in foreground for debugging
-  pelican client-api serve --foreground
+  pelican client-agent start --foreground
 
   # Use custom socket path
-  pelican client-api serve --socket-path /tmp/my-pelican.sock
+  pelican client-agent start --socket-path /tmp/my-pelican.sock
 
   # Stop the server
-  pelican client-api stop
+  pelican client-agent stop
 
   # Check server status
-  pelican client-api status
+  pelican client-agent status
 ```
 
 ### REST API Specification
 
 #### Base URL
 
-All endpoints are relative to `/api/v1/xfer`
+All endpoints are relative to `/api/v1.0/transfer-agent`
 
 #### Authentication
 
@@ -739,7 +739,7 @@ func TestCreateJobEndpoint(t *testing.T) {
     }
 
     // Send request
-    resp := sendRequest(t, server, "POST", "/api/v1/xfer/jobs", req)
+    resp := sendRequest(t, server, "POST", "/api/v1.0/transfer-agent/jobs", req)
 
     // Validate response
     assert.Equal(t, http.StatusAccepted, resp.StatusCode)
@@ -759,7 +759,7 @@ func TestCancelJob(t *testing.T) {
     jobID := createTestJob(t, server)
 
     // Cancel the job
-    resp := sendRequest(t, server, "DELETE", "/api/v1/xfer/jobs/"+jobID, nil)
+    resp := sendRequest(t, server, "DELETE", "/api/v1.0/transfer-agent/jobs/"+jobID, nil)
     assert.Equal(t, http.StatusOK, resp.StatusCode)
 
     // Verify all transfers in job are cancelled
@@ -779,7 +779,7 @@ Add to `cmd/client_agent.go`:
 
 ```go
 var clientAPICmd = &cobra.Command{
-    Use:   "client-api",
+    Use:   "client-agent",
     Short: "Manage the Pelican client agent server",
 }
 
@@ -1123,7 +1123,7 @@ Tests should cover:
 
 Use SQLite for embedded database storage.
 
-Location: `$HOME/.pelican/client-api.db`
+Location: `$HOME/.pelican/client-agent.db`
 
 #### Tables
 
@@ -1446,7 +1446,7 @@ Add parameters:
 ```yaml
 ClientAgent:
   Database:
-    Path: ""  # Override default location ($HOME/.pelican/client-api.db)
+    Path: ""  # Override default location ($HOME/.pelican/client-agent.db)
     MaxConnections: 10
 
   History:
@@ -1787,12 +1787,12 @@ Expose Prometheus metrics at `/metrics`:
 
 ```bash
 # Check server health
-curl --unix-socket ~/.pelican/client-api.sock \
-     http://localhost/api/v1/xfer/health
+curl --unix-socket ~/.pelican/client-agent.sock \
+     http://localhost/api/v1.0/transfer-agent/health
 
 # Create a job with a single transfer (download)
-curl --unix-socket ~/.pelican/client-api.sock \
-     -X POST http://localhost/api/v1/xfer/jobs \
+curl --unix-socket ~/.pelican/client-agent.sock \
+     -X POST http://localhost/api/v1.0/transfer-agent/jobs \
      -H "Content-Type: application/json" \
      -d '{
        "transfers": [
@@ -1806,8 +1806,8 @@ curl --unix-socket ~/.pelican/client-api.sock \
      }'
 
 # Create a job with multiple transfers
-curl --unix-socket ~/.pelican/client-api.sock \
-     -X POST http://localhost/api/v1/xfer/jobs \
+curl --unix-socket ~/.pelican/client-agent.sock \
+     -X POST http://localhost/api/v1.0/transfer-agent/jobs \
      -H "Content-Type: application/json" \
      -d '{
        "transfers": [
@@ -1828,24 +1828,24 @@ curl --unix-socket ~/.pelican/client-api.sock \
      }'
 
 # Check job status
-curl --unix-socket ~/.pelican/client-api.sock \
-     http://localhost/api/v1/xfer/jobs/550e8400-e29b-41d4-a716-446655440000
+curl --unix-socket ~/.pelican/client-agent.sock \
+     http://localhost/api/v1.0/transfer-agent/jobs/550e8400-e29b-41d4-a716-446655440000
 
 # Check individual transfer status within a job
-curl --unix-socket ~/.pelican/client-api.sock \
-     http://localhost/api/v1/xfer/jobs/550e8400-e29b-41d4-a716-446655440000/transfers/650e8400-e29b-41d4-a716-446655440001
+curl --unix-socket ~/.pelican/client-agent.sock \
+     http://localhost/api/v1.0/transfer-agent/jobs/550e8400-e29b-41d4-a716-446655440000/transfers/650e8400-e29b-41d4-a716-446655440001
 
 # List all active jobs
-curl --unix-socket ~/.pelican/client-api.sock \
-     http://localhost/api/v1/xfer/jobs?status=running
+curl --unix-socket ~/.pelican/client-agent.sock \
+     http://localhost/api/v1.0/transfer-agent/jobs?status=running
 
 # Cancel a job (cancels all incomplete transfers)
-curl --unix-socket ~/.pelican/client-api.sock \
-     -X DELETE http://localhost/api/v1/xfer/jobs/550e8400-e29b-41d4-a716-446655440000
+curl --unix-socket ~/.pelican/client-agent.sock \
+     -X DELETE http://localhost/api/v1.0/transfer-agent/jobs/550e8400-e29b-41d4-a716-446655440000
 
 # Get job history
-curl --unix-socket ~/.pelican/client-api.sock \
-     http://localhost/api/v1/xfer/history?limit=10
+curl --unix-socket ~/.pelican/client-agent.sock \
+     http://localhost/api/v1.0/transfer-agent/history?limit=10
 ```
 
 ### Python Client Example
@@ -1857,10 +1857,10 @@ import os
 from requests_unixsocket import Session
 
 class PelicanAPIClient:
-    def __init__(self, socket_path="~/.pelican/client-api.sock"):
+    def __init__(self, socket_path="~/.pelican/client-agent.sock"):
         self.socket_path = socket_path.replace("~", os.path.expanduser("~"))
         self.session = Session()
-        self.base_url = f"http+unix://{self.socket_path.replace('/', '%2F')}/api/v1/xfer"
+        self.base_url = f"http+unix://{self.socket_path.replace('/', '%2F')}/api/v1.0/transfer-agent"
 
     def create_job(self, transfers, options=None):
         """Create a transfer job with one or more transfers"""
@@ -2034,7 +2034,7 @@ info:
     url: https://pelicanplatform.org
 
 servers:
-  - url: /api/v1/xfer
+  - url: /api/v1.0/transfer-agent
     description: Unix socket server
 
 paths:
