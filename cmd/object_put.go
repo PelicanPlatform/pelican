@@ -158,7 +158,7 @@ func putMain(cmd *cobra.Command, args []string) {
 		dest := args[len(args)-1]
 
 		// Ensure server is running, starting it if necessary
-		apiClient, err := ensureClientAgentRunning(5)
+		apiClient, err := ensureClientAgentRunning(cmd.Context(), 5)
 		if err != nil {
 			log.Errorln("Failed to ensure API server is running:", err)
 			log.Errorln("You can manually start it with 'pelican client-api serve --daemonize'")
