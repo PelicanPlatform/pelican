@@ -66,7 +66,7 @@ func TestCreateJob(t *testing.T) {
 	require.NoError(t, err)
 
 	// Make request
-	req, _ := http.NewRequest("POST", "/api/v1/xfer/jobs", bytes.NewBuffer(body))
+	req, _ := http.NewRequest("POST", "/api/v1.0/transfer-agent/jobs", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -112,7 +112,7 @@ func TestGetJobStatus(t *testing.T) {
 	server.setupRoutes()
 
 	// Get job status
-	req, _ := http.NewRequest("GET", "/api/v1/xfer/jobs/"+job.ID, nil)
+	req, _ := http.NewRequest("GET", "/api/v1.0/transfer-agent/jobs/"+job.ID, nil)
 	w := httptest.NewRecorder()
 
 	server.router.ServeHTTP(w, req)
@@ -164,7 +164,7 @@ func TestCancelJob(t *testing.T) {
 	server.setupRoutes()
 
 	// Cancel job
-	req, _ := http.NewRequest("DELETE", "/api/v1/xfer/jobs/"+job.ID, nil)
+	req, _ := http.NewRequest("DELETE", "/api/v1.0/transfer-agent/jobs/"+job.ID, nil)
 	w := httptest.NewRecorder()
 
 	server.router.ServeHTTP(w, req)
@@ -208,7 +208,7 @@ func TestListJobs(t *testing.T) {
 	server.setupRoutes()
 
 	// List jobs
-	req, _ := http.NewRequest("GET", "/api/v1/xfer/jobs?limit=10&offset=0", nil)
+	req, _ := http.NewRequest("GET", "/api/v1.0/transfer-agent/jobs?limit=10&offset=0", nil)
 	w := httptest.NewRecorder()
 
 	server.router.ServeHTTP(w, req)
@@ -268,7 +268,7 @@ func TestInvalidJobRequest(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(jobReq)
-	req, _ := http.NewRequest("POST", "/api/v1/xfer/jobs", bytes.NewBuffer(body))
+	req, _ := http.NewRequest("POST", "/api/v1.0/transfer-agent/jobs", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -299,7 +299,7 @@ func TestGetJobNotFound(t *testing.T) {
 	}
 	server.setupRoutes()
 
-	req, _ := http.NewRequest("GET", "/api/v1/xfer/jobs/nonexistent-id", nil)
+	req, _ := http.NewRequest("GET", "/api/v1.0/transfer-agent/jobs/nonexistent-id", nil)
 	w := httptest.NewRecorder()
 
 	server.router.ServeHTTP(w, req)

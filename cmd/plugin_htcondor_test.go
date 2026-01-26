@@ -117,20 +117,8 @@ Origin:
 
 	// Build the pelican binary to use as the plugin
 	t.Log("Building pelican binary for plugin...")
-	pelicanBinary := filepath.Join(tempDir, "pelican")
-
-	// Find the repository root
-	repoRoot, err := findRepoRoot()
-	require.NoError(t, err, "Failed to find git repository root")
-
-	buildCmd := exec.Command("go", "build", "-buildvcs=false", "-o", pelicanBinary, "./cmd")
-	buildCmd.Dir = repoRoot
-	output, err := buildCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Build output: %s", string(output))
-	}
-	require.NoError(t, err, "Failed to build pelican binary")
-	require.FileExists(t, pelicanBinary)
+	// Get the pelican binary (built once via sync.Once)
+	pelicanBinary := getPelicanBinary(t)
 
 	// Create HTCondor configuration
 	configFile := filepath.Join(tempDir, "condor_config")

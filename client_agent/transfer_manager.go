@@ -907,3 +907,16 @@ func (tm *TransferManager) Shutdown() error {
 		return errors.New("shutdown timeout")
 	}
 }
+
+// HasActiveJobs returns true if there are any jobs in pending or running status
+func (tm *TransferManager) HasActiveJobs() bool {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	for _, job := range tm.jobs {
+		if job.Status == StatusPending || job.Status == StatusRunning {
+			return true
+		}
+	}
+	return false
+}
