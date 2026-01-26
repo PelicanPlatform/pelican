@@ -103,14 +103,18 @@ on a Unix domain socket and handle job-based transfer requests.`,
 		// Check if we're in daemon mode (spawned as daemon child)
 		var inheritedLock *os.File
 		if client_agent.IsDaemonMode() {
-			log.Info("Running in daemon mode")
+			log.Infof("Running in daemon mode (PID: %d)", os.Getpid())
+			log.Infof("Socket path: %s, PID file: %s", clientAgentSocketPath, clientAgentPidFile)
 			clientAgentDaemonMode = true
 
 			// Inherit the lock from parent process
+			log.Debugln("About to inherit daemon lock")
 			lock, err := client_agent.InheritDaemonLock()
 			if err != nil {
+				log.Errorf("Failed to inherit daemon lock: %v", err)
 				return errors.Wrap(err, "Failed to inherit daemon lock")
 			}
+			log.Debugln("Successfully inherited daemon lock")
 			inheritedLock = lock
 		} else {
 			// Check if already running (only when not inheriting lock)
@@ -131,15 +135,19 @@ on a Unix domain socket and handle job-based transfer requests.`,
 			DbLocation:        clientAgentDbPath,
 			IdleTimeout:       param.ClientAgent_IdleTimeout.GetDuration(),
 		}
+		log.Infof("Server config: socket=%s, pidFile=%s, maxJobs=%d, idleTimeout=%v",
+			serverConfig.SocketPath, serverConfig.PidFile, serverConfig.MaxConcurrentJobs, serverConfig.IdleTimeout)
 
 		// Create server
 		server, err := client_agent.NewServer(serverConfig)
 		if err != nil {
+			log.Errorf("Failed to create server: %v", err)
 			if inheritedLock != nil {
 				inheritedLock.Close()
 			}
 			return errors.Wrap(err, "Failed to create server")
 		}
+		log.Debugln("Server instance created successfully")
 
 		// Initialize database store if database path is configured
 		if clientAgentDbPath != "" {
@@ -154,13 +162,18 @@ on a Unix domain socket and handle job-based transfer requests.`,
 
 		// If we inherited a lock, set it on the server before starting
 		if inheritedLock != nil {
+			log.Debugln("Setting inherited lock on server")
 			if err := server.SetInheritedLock(inheritedLock); err != nil {
+				log.Errorf("Failed to set inherited lock: %v", err)
 				return errors.Wrap(err, "Failed to set inherited lock")
 			}
+			log.Debugln("Inherited lock set on server successfully")
 		}
 
 		// Start server
+		log.Info("Starting server")
 		if err := server.Start(); err != nil {
+			log.Errorf("Failed to start server: %v", err)
 			return errors.Wrap(err, "Failed to start server")
 		}
 

@@ -22,6 +22,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -35,7 +36,7 @@ import (
 // ensureClientAgentRunning ensures the client API server is running, starting it if necessary
 // Returns an API client connected to the server
 // Retries up to maxRetries times with exponential backoff
-func ensureClientAgentRunning(maxRetries int) (*apiclient.APIClient, error) {
+func ensureClientAgentRunning(ctx context.Context, maxRetries int) (*apiclient.APIClient, error) {
 	if maxRetries <= 0 {
 		maxRetries = 5
 	}
@@ -52,10 +53,10 @@ func ensureClientAgentRunning(maxRetries int) (*apiclient.APIClient, error) {
 		return nil, errors.Wrap(err, "failed to create API client")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	checkCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	if client.IsServerRunning(ctx) {
+	if client.IsServerRunning(checkCtx) {
 		log.Debug("Client API server is already running")
 		return client, nil
 	}
@@ -89,10 +90,16 @@ func ensureClientAgentRunning(maxRetries int) (*apiclient.APIClient, error) {
 
 	pid, err := client_agent.StartDaemon(config)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to start daemon")
+		// Check if the error is due to the daemon already running
+		if strings.Contains(err.Error(), "already running") {
+			log.Debugf("Daemon is already running, attempting to connect...")
+		} else {
+			// Real error - don't proceed
+			return nil, errors.Wrap(err, "failed to start daemon")
+		}
+	} else {
+		log.Infof("Started client API daemon (PID: %d)", pid)
 	}
-
-	log.Infof("Started client API daemon (PID: %d)", pid)
 
 	// Retry connecting to the server with exponential backoff
 	backoff := 100 * time.Millisecond
@@ -109,8 +116,8 @@ func ensureClientAgentRunning(maxRetries int) (*apiclient.APIClient, error) {
 		}
 
 		// Try to connect
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		if client.IsServerRunning(ctx) {
+		retryCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		if client.IsServerRunning(retryCtx) {
 			cancel()
 			log.Debugf("Successfully connected to client API server (attempt %d/%d)", attempt+1, maxRetries)
 			return client, nil

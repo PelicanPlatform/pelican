@@ -48,6 +48,9 @@ func TestDaemonStartAndLock(t *testing.T) {
 	pidFile := filepath.Join(tempDir, "test-daemon.pid")
 	logFile := filepath.Join(tempDir, "test-daemon.log")
 
+	// Build pelican binary for testing
+	pelicanBin := buildPelicanBinary(t)
+
 	// Start daemon with short idle timeout for testing
 	config := client_agent.DaemonConfig{
 		SocketPath:  socketPath,
@@ -55,7 +58,8 @@ func TestDaemonStartAndLock(t *testing.T) {
 		LogLocation: logFile,
 		MaxJobs:     2,
 		DbLocation:  "",
-		IdleTimeout: 5 * time.Second, // Short timeout for testing
+		IdleTimeout: 5 * time.Second,
+		ExecPath:    pelicanBin, // Use built binary instead of test binary
 	}
 
 	pid, err := client_agent.StartDaemon(config)
@@ -92,7 +96,7 @@ func TestDaemonStartAndLock(t *testing.T) {
 
 	// Wait for idle timeout plus some buffer
 	t.Log("Waiting for idle timeout...")
-	time.Sleep(config.IdleTimeout + 2*time.Second)
+	time.Sleep(5*time.Second + 2*time.Second)
 
 	// Daemon should have shut down
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
@@ -113,6 +117,9 @@ func TestDaemonWithActivity(t *testing.T) {
 	pidFile := filepath.Join(tempDir, "test-daemon-activity.pid")
 	logFile := filepath.Join(tempDir, "test-daemon-activity.log")
 
+	// Build pelican binary for testing
+	pelicanBin := buildPelicanBinary(t)
+
 	// Start daemon with short idle timeout
 	config := client_agent.DaemonConfig{
 		SocketPath:  socketPath,
@@ -121,6 +128,7 @@ func TestDaemonWithActivity(t *testing.T) {
 		MaxJobs:     2,
 		DbLocation:  "",
 		IdleTimeout: 3 * time.Second,
+		ExecPath:    pelicanBin, // Use built binary instead of test binary
 	}
 
 	pid, err := client_agent.StartDaemon(config)
@@ -157,7 +165,7 @@ func TestDaemonWithActivity(t *testing.T) {
 	assert.True(t, running, "Daemon should still be running due to activity")
 
 	// Now wait for idle timeout without activity
-	time.Sleep(config.IdleTimeout + 2*time.Second)
+	time.Sleep(3*time.Second + 2*time.Second)
 
 	// Now it should have shut down
 	running = apiClient.IsServerRunning(ctx)
