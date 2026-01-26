@@ -293,7 +293,58 @@ While it is technically possible to run a Pelican Origin for data on your laptop
 * You would need to restart the Origin each time your laptop shut down.
 * There is the potential for high network usage on your laptop if a large amount of the data is requested at once.
 
-### How do I get the public JWKS key from the private JWK key that I have?
+### How do I get the public JWKS key from the private key that I have?
 
-[Howard TODO]
+Pelican uses cryptographic key pairs for creating and verifying user credentials (tokens). Private keys are stored in PEM format (`.pem` files), while public keys are stored in [JWKS (JSON Web Key Set)](https://datatracker.ietf.org/doc/html/rfc7517) format (`.jwks` files). If you have a Pelican-formatted private key and need to derive its corresponding public key, follow these steps:
+
+#### Step 1: Locate your private key file
+
+Pelican private keys are stored in PEM format. A typical private key file looks like:
+```
+-----BEGIN PRIVATE KEY-----
+M0G+AgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgzeomq6yJvek0fg2Z
+g+NY6qklGz4ZjVlrRgTDT9hk5EShRANCAAT0giQYTPJbLB5wGwiKysmwf79eoxqX
+5Tbl22Ed7BQLnIf9Q1KLTNqpyzz0YmuoRlzSmXaYvdlSebvzUq2fqXdH
+-----END PRIVATE KEY-----
+```
+
+Private keys are located in the directory specified by the `IssuerKeysDirectory` configuration parameter.
+
+#### Step 2: Use the Pelican CLI to derive the public key
+
+Run the following command to generate the public key from your existing private key:
+
+```bash
+pelican key create --private-key /path/to/your/private-key.pem
+```
+
+Replace `/path/to/your/private-key.pem` with the actual path to your private key file.
+
+#### Step 3: Retrieve the generated public key
+
+By default, the public key will be generated in the same directory as the private key with the filename `issuer-pub.jwks`. To specify a custom output location, use the `--public-key` flag:
+
+```bash
+pelican key create --private-key /path/to/your/private-key.pem --public-key /path/to/output/public-key.jwks
+```
+
+#### Step 4: Verify the public key format
+
+The generated public key file should be in JWKS format:
+```json
+{
+  "keys": [
+    {
+      "alg": "ES256",
+      "crv": "P-256",
+      "kid": "N3Tks9H791dG7bdzjjlQzV-fwwCrnXd_mcd_2D5ZvYE",
+      "kty": "EC",
+      "x": "9IIkGEzyWywecBsIisrJsH-_XqMal-U25dthHewUC5w",
+      "y": "h_1DUotM2qnLPPRia6hGXNKZdpi92VJ5u_NSrZ-pd0c"
+    }
+  ]
+}
+```
+
+For more information about managing Pelican keys, see [Managing Administrator Credentials](/advanced-usage/server).
 
