@@ -82,9 +82,11 @@ type Config struct {
 		WorkerCount int `mapstructure:"workercount" yaml:"WorkerCount"`
 	} `mapstructure:"client" yaml:"Client"`
 	ClientAgent struct {
-		DatabasePath string `mapstructure:"databasepath" yaml:"DatabasePath"`
+		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		HistoryRetentionDays int `mapstructure:"historyretentiondays" yaml:"HistoryRetentionDays"`
+		IdleTimeout time.Duration `mapstructure:"idletimeout" yaml:"IdleTimeout"`
 		MaxConcurrentJobs int `mapstructure:"maxconcurrentjobs" yaml:"MaxConcurrentJobs"`
+		PidFile string `mapstructure:"pidfile" yaml:"PidFile"`
 		Socket string `mapstructure:"socket" yaml:"Socket"`
 	} `mapstructure:"clientagent" yaml:"ClientAgent"`
 	ConfigDir string `mapstructure:"configdir" yaml:"ConfigDir"`
@@ -489,9 +491,11 @@ type configWithType struct {
 		WorkerCount struct { Type string; Value int }
 	}
 	ClientAgent struct {
-		DatabasePath struct { Type string; Value string }
+		DbLocation struct { Type string; Value string }
 		HistoryRetentionDays struct { Type string; Value int }
+		IdleTimeout struct { Type string; Value time.Duration }
 		MaxConcurrentJobs struct { Type string; Value int }
+		PidFile struct { Type string; Value string }
 		Socket struct { Type string; Value string }
 	}
 	ConfigDir struct { Type string; Value string }

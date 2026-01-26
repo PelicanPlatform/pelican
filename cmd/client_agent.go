@@ -39,6 +39,8 @@ var (
 	clientAgentPidFile    string
 	clientAgentMaxJobs    int
 	clientAgentDbPath     string
+	clientAgentDaemonMode bool
+	clientAgentForeground bool
 )
 
 // initializeStore creates a new database store instance
@@ -47,19 +49,20 @@ func initializeStore(dbPath string) (client_agent.StoreInterface, error) {
 }
 
 var clientAgentCmd = &cobra.Command{
-	Use:   "client-api",
-	Short: "Manage the Pelican client API server",
-	Long: `The client-api server provides a RESTful API for interacting with
+	Use:   "client-agent",
+	Short: "Manage the Pelican client agent server",
+	Long: `The client-agent server provides a RESTful API for interacting with
 the Pelican client functionality over a Unix domain socket. This enables
 external applications to use Pelican transfer capabilities without directly
 invoking the CLI.`,
 }
 
 var clientAgentServeCmd = &cobra.Command{
-	Use:   "serve",
-	Short: "Start the client API server",
-	Long: `Start the client API server as a daemon process. The server will listen
+	Use:   "start",
+	Short: "Start the client agent server",
+	Long: `Start the client agent server as a daemon process. The server will listen
 on a Unix domain socket and handle job-based transfer requests.`,
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Initialize config
 		if err := config.InitClient(); err != nil {
@@ -71,13 +74,53 @@ on a Unix domain socket and handle job-based transfer requests.`,
 			clientAgentSocketPath = socketParam
 		}
 
-		// Check if already running
-		running, err := client_agent.CheckServerRunning(clientAgentSocketPath)
-		if err != nil {
-			return errors.Wrap(err, "Failed to check server status")
+		// Use parameter PID file path if set, otherwise use flag value
+		if pidFileParam := param.ClientAgent_PidFile.GetString(); pidFileParam != "" {
+			clientAgentPidFile = pidFileParam
 		}
-		if running {
-			return errors.New("Server is already running")
+
+		// Default behavior: daemonize unless --foreground is set
+		if !clientAgentForeground && !client_agent.IsDaemonMode() {
+			daemonConfig := client_agent.DaemonConfig{
+				SocketPath:  clientAgentSocketPath,
+				PidFile:     clientAgentPidFile,
+				LogLocation: "", // Will default to ~/.pelican/client-agent.log in daemon mode
+				MaxJobs:     clientAgentMaxJobs,
+				DbLocation:  clientAgentDbPath,
+				IdleTimeout: param.ClientAgent_IdleTimeout.GetDuration(),
+			}
+
+			pid, err := client_agent.StartDaemon(daemonConfig)
+			if err != nil {
+				return errors.Wrap(err, "Failed to start daemon")
+			}
+
+			fmt.Printf("Client agent server started as daemon (PID: %d)\n", pid)
+			fmt.Printf("Socket: %s\n", clientAgentSocketPath)
+			return nil
+		}
+
+		// Check if we're in daemon mode (spawned as daemon child)
+		var inheritedLock *os.File
+		if client_agent.IsDaemonMode() {
+			log.Info("Running in daemon mode")
+			clientAgentDaemonMode = true
+
+			// Inherit the lock from parent process
+			lock, err := client_agent.InheritDaemonLock()
+			if err != nil {
+				return errors.Wrap(err, "Failed to inherit daemon lock")
+			}
+			inheritedLock = lock
+		} else {
+			// Check if already running (only when not inheriting lock)
+			running, err := client_agent.CheckServerRunning(clientAgentSocketPath)
+			if err != nil {
+				return errors.Wrap(err, "Failed to check server status")
+			}
+			if running {
+				return errors.New("Server is already running")
+			}
 		}
 
 		// Create server config
@@ -85,12 +128,16 @@ on a Unix domain socket and handle job-based transfer requests.`,
 			SocketPath:        clientAgentSocketPath,
 			PidFile:           clientAgentPidFile,
 			MaxConcurrentJobs: clientAgentMaxJobs,
-			DatabasePath:      clientAgentDbPath,
+			DbLocation:        clientAgentDbPath,
+			IdleTimeout:       param.ClientAgent_IdleTimeout.GetDuration(),
 		}
 
 		// Create server
 		server, err := client_agent.NewServer(serverConfig)
 		if err != nil {
+			if inheritedLock != nil {
+				inheritedLock.Close()
+			}
 			return errors.Wrap(err, "Failed to create server")
 		}
 
@@ -105,12 +152,19 @@ on a Unix domain socket and handle job-based transfer requests.`,
 			}
 		}
 
+		// If we inherited a lock, set it on the server before starting
+		if inheritedLock != nil {
+			if err := server.SetInheritedLock(inheritedLock); err != nil {
+				return errors.Wrap(err, "Failed to set inherited lock")
+			}
+		}
+
 		// Start server
 		if err := server.Start(); err != nil {
 			return errors.Wrap(err, "Failed to start server")
 		}
 
-		log.Infof("Client API server started on %s", server.GetSocketPath())
+		log.Infof("Client agent server started on %s", server.GetSocketPath())
 		log.Infof("PID file: %s", server.GetPidFile())
 
 		// Set up signal handling
@@ -126,15 +180,16 @@ on a Unix domain socket and handle job-based transfer requests.`,
 			return errors.Wrap(err, "Failed to shutdown server gracefully")
 		}
 
-		log.Info("Client API server stopped")
+		log.Info("Client agent server stopped")
 		return nil
 	},
 }
 
 var clientAgentStopCmd = &cobra.Command{
-	Use:   "stop",
-	Short: "Stop the client API server",
-	Long:  `Stop a running client API server daemon.`,
+	Use:          "stop",
+	Short:        "Stop the client agent server",
+	Long:         `Stop a running client agent server daemon.`,
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Initialize config to read parameters
 		if err := config.InitClient(); err != nil {
@@ -144,6 +199,11 @@ var clientAgentStopCmd = &cobra.Command{
 		// Use parameter socket path if set, otherwise use flag value
 		if socketParam := param.ClientAgent_Socket.GetString(); socketParam != "" {
 			clientAgentSocketPath = socketParam
+		}
+
+		// Use parameter PID file path if set, otherwise use flag value
+		if pidFileParam := param.ClientAgent_PidFile.GetString(); pidFileParam != "" {
+			clientAgentPidFile = pidFileParam
 		}
 
 		// Check if server is running
@@ -159,11 +219,12 @@ var clientAgentStopCmd = &cobra.Command{
 		// Read PID using GetServerPID
 		pid, err := client_agent.GetServerPID(clientAgentPidFile)
 		if err != nil {
-			return errors.Wrap(err, "Failed to get server PID")
+			return errors.Wrapf(err, "Failed to get server PID from %s", clientAgentPidFile)
 		}
-		if pid == 0 {
-			fmt.Println("Server is not running")
-			return nil
+		if pid <= 0 {
+			// Socket exists but PID file doesn't have a valid PID
+			// This can happen if the server is in the process of starting or stopping
+			return errors.Errorf("Server is running but PID is not available (got PID %d from %s). The server may be starting or stopping.", pid, clientAgentPidFile)
 		}
 
 		// Find process
@@ -183,9 +244,10 @@ var clientAgentStopCmd = &cobra.Command{
 }
 
 var clientAgentStatusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Check the status of the client API server",
-	Long:  `Check if the client API server is running.`,
+	Use:          "status",
+	Short:        "Check the status of the client agent server",
+	Long:         `Check if the client agent server is running.`,
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Initialize config to read parameters
 		if err := config.InitClient(); err != nil {
@@ -197,6 +259,11 @@ var clientAgentStatusCmd = &cobra.Command{
 			clientAgentSocketPath = socketParam
 		}
 
+		// Use parameter PID file path if set, otherwise use flag value
+		if pidFileParam := param.ClientAgent_PidFile.GetString(); pidFileParam != "" {
+			clientAgentPidFile = pidFileParam
+		}
+
 		running, err := client_agent.CheckServerRunning(clientAgentSocketPath)
 		if err != nil {
 			return errors.Wrap(err, "Failed to check server status")
@@ -206,14 +273,14 @@ var clientAgentStatusCmd = &cobra.Command{
 			// Try to get PID using GetServerPID
 			pid, err := client_agent.GetServerPID(clientAgentPidFile)
 			if err == nil && pid > 0 {
-				fmt.Printf("Client API server is running (PID: %d)\n", pid)
+				fmt.Printf("Client agent server is running (PID: %d)\n", pid)
 				fmt.Printf("Socket: %s\n", clientAgentSocketPath)
 			} else {
-				fmt.Println("Client API server is running")
+				fmt.Println("Client agent server is running")
 				fmt.Printf("Socket: %s\n", clientAgentSocketPath)
 			}
 		} else {
-			fmt.Println("Client API server is not running")
+			fmt.Println("Client agent server is not running")
 		}
 
 		return nil
@@ -236,7 +303,13 @@ func init() {
 	clientAgentServeCmd.Flags().IntVar(&clientAgentMaxJobs, "max-jobs", 0,
 		"Maximum number of concurrent transfer jobs (default: uses ClientAgent.MaxConcurrentJobs parameter, or 5)")
 	clientAgentServeCmd.Flags().StringVar(&clientAgentDbPath, "database", "",
-		"Path to the SQLite database file for persistence (default: ~/.pelican/client-api.db)")
+		"Path to the SQLite database file for persistence (default: ~/.pelican/client-agent.db)")
+	clientAgentServeCmd.Flags().BoolVar(&clientAgentForeground, "foreground", false,
+		"Run in foreground instead of daemonizing (default: daemonize)")
+	clientAgentServeCmd.Flags().BoolVar(&clientAgentDaemonMode, "daemon-mode", false,
+		"Internal flag indicating the process was spawned as a daemon")
+	// Hide the daemon-mode flag as it's for internal use only
+	_ = clientAgentServeCmd.Flags().MarkHidden("daemon-mode")
 
 	// Add to root command
 	rootCmd.AddCommand(clientAgentCmd)

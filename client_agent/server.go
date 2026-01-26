@@ -20,6 +20,7 @@ package client_agent
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -35,8 +36,8 @@ import (
 )
 
 const (
-	DefaultSocketPath      = "~/.pelican/client-api.sock"
-	DefaultPidFile         = "~/.pelican/client-api.pid"
+	DefaultSocketPath      = "~/.pelican/client-agent.sock"
+	DefaultPidFile         = "~/.pelican/client-agent.pid"
 	DefaultShutdownTimeout = 30 * time.Second
 )
 
@@ -54,6 +55,9 @@ type Server struct {
 	wg              sync.WaitGroup
 	mu              sync.Mutex
 	started         bool
+	lastActivity    time.Time
+	idleTimeout     time.Duration
+	activityMu      sync.Mutex
 }
 
 // ServerConfig holds configuration for the server
@@ -61,7 +65,8 @@ type ServerConfig struct {
 	SocketPath        string
 	PidFile           string
 	MaxConcurrentJobs int
-	DatabasePath      string
+	DbLocation        string
+	IdleTimeout       time.Duration
 }
 
 // NewServer creates a new client API server
@@ -90,7 +95,7 @@ func NewServer(config ServerConfig) (*Server, error) {
 
 	// Initialize database store
 	var storeInstance StoreInterface
-	dbPath := config.DatabasePath
+	dbPath := config.DbLocation
 	if dbPath == "" {
 		// Default to ~/.pelican/client-api.db
 		homeDir, err := os.UserHomeDir()
@@ -143,10 +148,6 @@ func NewServer(config ServerConfig) (*Server, error) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 
-	// Add middleware
-	router.Use(LoggerMiddleware())
-	router.Use(RecoveryMiddleware())
-
 	server := &Server{
 		socketPath:      socketPath,
 		pidFile:         pidFile,
@@ -154,7 +155,17 @@ func NewServer(config ServerConfig) (*Server, error) {
 		transferManager: transferManager,
 		ctx:             ctx,
 		cancel:          cancel,
+		lastActivity:    time.Now(),
+		idleTimeout:     config.IdleTimeout,
 	}
+
+	// Add middleware that has access to server instance
+	router.Use(func(c *gin.Context) {
+		c.Set("server", server)
+		c.Next()
+	})
+	router.Use(LoggerMiddleware())
+	router.Use(RecoveryMiddleware())
 
 	// Set up routes
 	server.setupRoutes()
@@ -164,7 +175,7 @@ func NewServer(config ServerConfig) (*Server, error) {
 
 // setupRoutes configures all API routes
 func (s *Server) setupRoutes() {
-	api := s.router.Group("/api/v1/xfer")
+	api := s.router.Group("/api/v1.0/transfer-agent")
 	{
 		// Job management
 		api.POST("/jobs", s.CreateJobHandler)
@@ -199,6 +210,33 @@ func (s *Server) SetStore(store StoreInterface) {
 	}
 }
 
+// SetInheritedLock sets a lock that was inherited from a parent process
+// This is used when running as a daemon spawned by another process
+func (s *Server) SetInheritedLock(lock *os.File) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.started {
+		return errors.New("cannot set inherited lock on running server")
+	}
+
+	s.pidLockFd = lock
+
+	// Update the PID file with our PID (child's PID, not parent's)
+	if err := lock.Truncate(0); err != nil {
+		log.Warnf("Failed to truncate PID file: %v", err)
+	}
+	if _, err := lock.Seek(0, 0); err != nil {
+		log.Warnf("Failed to seek PID file: %v", err)
+	}
+	if _, err := lock.WriteString(fmt.Sprintf("%d", os.Getpid())); err != nil {
+		log.Warnf("Failed to write PID to PID file: %v", err)
+	}
+
+	log.Infof("Inherited server lock from parent process (PID: %d)", os.Getpid())
+	return nil
+}
+
 // Start starts the server
 func (s *Server) Start() error {
 	s.mu.Lock()
@@ -210,29 +248,40 @@ func (s *Server) Start() error {
 
 	// Acquire exclusive lock BEFORE creating socket to prevent race conditions
 	// This also prevents starting if another instance is running
-	pidLockFd, err := acquireServerLock(s.pidFile, 2*time.Second)
-	if err != nil {
-		return err
+	// Skip if we already have an inherited lock
+	if s.pidLockFd == nil {
+		pidLockFd, err := acquireServerLock(s.pidFile, 2*time.Second)
+		if err != nil {
+			return err
+		}
+		s.pidLockFd = pidLockFd
+	} else {
+		log.Info("Using inherited lock, skipping lock acquisition")
 	}
-	s.pidLockFd = pidLockFd
 
 	// Remove existing socket if it exists
 	if err := removeSocket(s.socketPath); err != nil {
-		s.pidLockFd.Close()
+		if s.pidLockFd != nil {
+			s.pidLockFd.Close()
+		}
 		return errors.Wrap(err, "failed to remove existing socket")
 	}
 
 	// Create Unix listener
 	listener, err := net.Listen("unix", s.socketPath)
 	if err != nil {
-		s.pidLockFd.Close()
+		if s.pidLockFd != nil {
+			s.pidLockFd.Close()
+		}
 		return errors.Wrap(err, "failed to create Unix listener")
 	}
 
 	// Set socket permissions
 	if err := os.Chmod(s.socketPath, 0600); err != nil {
 		listener.Close()
-		s.pidLockFd.Close()
+		if s.pidLockFd != nil {
+			s.pidLockFd.Close()
+		}
 		return errors.Wrap(err, "failed to set socket permissions")
 	}
 
@@ -257,15 +306,78 @@ func (s *Server) Start() error {
 	}()
 
 	s.started = true
-	log.Info("Client API server started successfully")
+	log.Infof("Client API server started successfully (PID: %d, Socket: %s, IdleTimeout: %v)", os.Getpid(), s.socketPath, s.idleTimeout)
+
+	// Start idle timeout monitor if configured
+	if s.idleTimeout > 0 {
+		log.Infof("Starting idle timeout monitor with timeout: %v", s.idleTimeout)
+		s.wg.Add(1)
+		go s.monitorIdleTimeout()
+	} else {
+		log.Info("Idle timeout monitoring disabled (timeout not set)")
+	}
 
 	return nil
 }
 
+// UpdateActivity records activity on the server
+func (s *Server) UpdateActivity() {
+	s.activityMu.Lock()
+	s.lastActivity = time.Now()
+	s.activityMu.Unlock()
+}
+
+// monitorIdleTimeout monitors for idle timeout and shuts down if necessary
+func (s *Server) monitorIdleTimeout() {
+	defer s.wg.Done()
+
+	// Check frequently to ensure timely shutdown (every 1 second)
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	log.Infof("Idle timeout monitor started (timeout: %v, check interval: 1s)", s.idleTimeout)
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			log.Info("Idle timeout monitor stopping due to context cancellation")
+			return
+		case <-ticker.C:
+			s.activityMu.Lock()
+			lastActivity := s.lastActivity
+			s.activityMu.Unlock()
+
+			// Check if there are active jobs
+			hasActiveJobs := s.transferManager.HasActiveJobs()
+			if hasActiveJobs {
+				// Update activity since there are active jobs
+				s.UpdateActivity()
+				continue
+			}
+
+			idleTime := time.Since(lastActivity)
+			if idleTime > s.idleTimeout {
+				log.Infof("Server idle for %v (timeout: %v), initiating shutdown...", idleTime, s.idleTimeout)
+				// Trigger shutdown asynchronously to avoid deadlock
+				go func() {
+					if err := s.Shutdown(); err != nil {
+						log.Errorf("Auto-shutdown error: %v", err)
+					} else {
+						log.Info("Auto-shutdown completed successfully")
+					}
+				}()
+				return
+			}
+		}
+	}
+}
+
 // Shutdown gracefully shuts down the server
 func (s *Server) Shutdown() error {
+	log.Info("Shutdown requested")
 	s.mu.Lock()
 	if !s.started {
+		log.Warn("Shutdown called but server not started")
 		s.mu.Unlock()
 		return errors.New("server not started")
 	}

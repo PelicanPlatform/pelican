@@ -79,7 +79,7 @@ func NewAPIClient(socketPath string) (*APIClient, error) {
 	return &APIClient{
 		socketPath: socketPath,
 		httpClient: httpClient,
-		baseURL:    "http://localhost/api/v1/xfer",
+		baseURL:    "http://localhost/api/v1.0/transfer-agent",
 	}, nil
 }
 

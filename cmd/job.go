@@ -28,6 +28,7 @@ var (
 		Short: "Manage asynchronous transfer jobs",
 		Long: `Manage asynchronous transfer jobs created with the --async flag.
 Jobs can contain one or more file transfers and can be monitored, listed, and cancelled.`,
+		SilenceUsage: true,
 	}
 )
 

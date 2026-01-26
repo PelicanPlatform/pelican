@@ -135,9 +135,11 @@ var runtimeConfigurableMap = map[string]bool{
 	"Client.SlowTransferWindow": false,
 	"Client.StoppedTransferTimeout": false,
 	"Client.WorkerCount": false,
-	"ClientAgent.DatabasePath": false,
+	"ClientAgent.DbLocation": false,
 	"ClientAgent.HistoryRetentionDays": false,
+	"ClientAgent.IdleTimeout": false,
 	"ClientAgent.MaxConcurrentJobs": false,
+	"ClientAgent.PidFile": false,
 	"ClientAgent.Socket": false,
 	"ConfigLocations": false,
 	"Debug": false,
@@ -496,8 +498,10 @@ func (sP StringParam) GetString() string {
 			return config.Cache.Url
 		case "Cache.XRootDPrefix":
 			return config.Cache.XRootDPrefix
-		case "ClientAgent.DatabasePath":
-			return config.ClientAgent.DatabasePath
+		case "ClientAgent.DbLocation":
+			return config.ClientAgent.DbLocation
+		case "ClientAgent.PidFile":
+			return config.ClientAgent.PidFile
 		case "ClientAgent.Socket":
 			return config.ClientAgent.Socket
 		case "Director.AdvertiseUrl":
@@ -1158,6 +1162,8 @@ func (dP DurationParam) GetDuration() time.Duration {
 			return config.Cache.SelfTestInterval
 		case "Cache.SelfTestMaxAge":
 			return config.Cache.SelfTestMaxAge
+		case "ClientAgent.IdleTimeout":
+			return config.ClientAgent.IdleTimeout
 		case "Client.SlowTransferRampupTime":
 			return config.Client.SlowTransferRampupTime
 		case "Client.SlowTransferWindow":
@@ -1337,9 +1343,11 @@ var allParameterNames = []string{
 	"Client.SlowTransferWindow",
 	"Client.StoppedTransferTimeout",
 	"Client.WorkerCount",
-	"ClientAgent.DatabasePath",
+	"ClientAgent.DbLocation",
 	"ClientAgent.HistoryRetentionDays",
+	"ClientAgent.IdleTimeout",
 	"ClientAgent.MaxConcurrentJobs",
+	"ClientAgent.PidFile",
 	"ClientAgent.Socket",
 	"ConfigLocations",
 	"Debug",
@@ -1657,7 +1665,8 @@ var (
 	Cache_StorageLocation = StringParam{"Cache.StorageLocation"}
 	Cache_Url = StringParam{"Cache.Url"}
 	Cache_XRootDPrefix = StringParam{"Cache.XRootDPrefix"}
-	ClientAgent_DatabasePath = StringParam{"ClientAgent.DatabasePath"}
+	ClientAgent_DbLocation = StringParam{"ClientAgent.DbLocation"}
+	ClientAgent_PidFile = StringParam{"ClientAgent.PidFile"}
 	ClientAgent_Socket = StringParam{"ClientAgent.Socket"}
 	Director_AdvertiseUrl = StringParam{"Director.AdvertiseUrl"}
 	Director_CacheSortMethod = StringParam{"Director.CacheSortMethod"}
@@ -1954,6 +1963,7 @@ var (
 	Cache_EvictionMonitoringInterval = DurationParam{"Cache.EvictionMonitoringInterval"}
 	Cache_SelfTestInterval = DurationParam{"Cache.SelfTestInterval"}
 	Cache_SelfTestMaxAge = DurationParam{"Cache.SelfTestMaxAge"}
+	ClientAgent_IdleTimeout = DurationParam{"ClientAgent.IdleTimeout"}
 	Client_SlowTransferRampupTime = DurationParam{"Client.SlowTransferRampupTime"}
 	Client_SlowTransferWindow = DurationParam{"Client.SlowTransferWindow"}
 	Client_StoppedTransferTimeout = DurationParam{"Client.StoppedTransferTimeout"}

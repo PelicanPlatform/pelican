@@ -25,7 +25,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
-	"github.com/pelicanplatform/pelican/client_agent/apiclient"
 	"github.com/pelicanplatform/pelican/config"
 )
 
@@ -35,8 +34,9 @@ var (
 		Short: "Cancel a transfer job",
 		Long: `Cancel a transfer job and all its incomplete transfers.
 Completed transfers within the job are not affected.`,
-		Args: cobra.ExactArgs(1),
-		RunE: jobCancelMain,
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE:         jobCancelMain,
 	}
 )
 
@@ -53,15 +53,10 @@ func jobCancelMain(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to initialize config")
 	}
 
-	// Create API client
-	apiClient, err := apiclient.NewAPIClient("")
+	// Ensure server is running (auto-start if needed)
+	apiClient, err := ensureClientAgentRunning(5)
 	if err != nil {
-		return errors.Wrap(err, "failed to create API client")
-	}
-
-	// Check if server is running
-	if !apiClient.IsServerRunning(ctx) {
-		return errors.New("API server is not running. Start it with: pelican client-api serve")
+		return errors.Wrap(err, "failed to connect to client agent server")
 	}
 
 	// Cancel job

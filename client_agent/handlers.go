@@ -33,7 +33,7 @@ import (
 
 var serverStartTime = time.Now()
 
-// CreateJobHandler handles POST /api/v1/xfer/jobs
+// CreateJobHandler handles POST /api/v1.0/transfer-agent/jobs
 func (s *Server) CreateJobHandler(c *gin.Context) {
 	var req JobRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -89,7 +89,7 @@ func (s *Server) CreateJobHandler(c *gin.Context) {
 	c.JSON(http.StatusCreated, resp)
 }
 
-// GetJobStatusHandler handles GET /api/v1/xfer/jobs/:job_id
+// GetJobStatusHandler handles GET /api/v1.0/transfer-agent/jobs/:job_id
 func (s *Server) GetJobStatusHandler(c *gin.Context) {
 	jobID := c.Param("job_id")
 
@@ -144,7 +144,7 @@ func (s *Server) GetJobStatusHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, jobStatus)
 }
 
-// CancelJobHandler handles DELETE /api/v1/xfer/jobs/:job_id
+// CancelJobHandler handles DELETE /api/v1.0/transfer-agent/jobs/:job_id
 func (s *Server) CancelJobHandler(c *gin.Context) {
 	jobID := c.Param("job_id")
 
@@ -176,7 +176,7 @@ func (s *Server) CancelJobHandler(c *gin.Context) {
 	})
 }
 
-// ListJobsHandler handles GET /api/v1/xfer/jobs
+// ListJobsHandler handles GET /api/v1.0/transfer-agent/jobs
 func (s *Server) ListJobsHandler(c *gin.Context) {
 	status := c.Query("status")
 	limitStr := c.DefaultQuery("limit", "10")
@@ -205,7 +205,7 @@ func (s *Server) ListJobsHandler(c *gin.Context) {
 	})
 }
 
-// StatHandler handles POST /api/v1/xfer/stat
+// StatHandler handles POST /api/v1.0/transfer-agent/stat
 func (s *Server) StatHandler(c *gin.Context) {
 	var req StatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -239,7 +239,7 @@ func (s *Server) StatHandler(c *gin.Context) {
 	})
 }
 
-// ListHandler handles POST /api/v1/xfer/list
+// ListHandler handles POST /api/v1.0/transfer-agent/list
 func (s *Server) ListHandler(c *gin.Context) {
 	var req ListRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -280,7 +280,7 @@ func (s *Server) ListHandler(c *gin.Context) {
 	})
 }
 
-// DeleteHandler handles POST /api/v1/xfer/delete
+// DeleteHandler handles POST /api/v1.0/transfer-agent/delete
 func (s *Server) DeleteHandler(c *gin.Context) {
 	var req DeleteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -322,7 +322,7 @@ func (s *Server) HealthHandler(c *gin.Context) {
 	})
 }
 
-// GetJobHistoryHandler handles GET /api/v1/xfer/history
+// GetJobHistoryHandler handles GET /api/v1.0/transfer-agent/history
 // Query params: status, from, to, limit, offset
 func (s *Server) GetJobHistoryHandler(c *gin.Context) {
 	// Check if store is configured
@@ -403,7 +403,7 @@ func (s *Server) GetJobHistoryHandler(c *gin.Context) {
 	})
 }
 
-// DeleteJobHistoryHandler handles DELETE /api/v1/xfer/history
+// DeleteJobHistoryHandler handles DELETE /api/v1.0/transfer-agent/history
 // Can delete specific job or prune old history with olderThan param
 func (s *Server) DeleteJobHistoryHandler(c *gin.Context) {
 	// Check if store is configured

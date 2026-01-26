@@ -26,7 +26,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
-	"github.com/pelicanplatform/pelican/client_agent/apiclient"
 	"github.com/pelicanplatform/pelican/config"
 )
 
@@ -36,7 +35,8 @@ var (
 		Short: "List all transfer jobs",
 		Long: `List all transfer jobs, with optional filtering by status.
 Shows a summary of each job including completion status and transfer counts.`,
-		RunE: jobListMain,
+		SilenceUsage: true,
+		RunE:         jobListMain,
 	}
 
 	jobListStatus string
@@ -59,15 +59,10 @@ func jobListMain(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to initialize config")
 	}
 
-	// Create API client
-	apiClient, err := apiclient.NewAPIClient("")
+	// Ensure server is running (auto-start if needed)
+	apiClient, err := ensureClientAgentRunning(5)
 	if err != nil {
-		return errors.Wrap(err, "failed to create API client")
-	}
-
-	// Check if server is running
-	if !apiClient.IsServerRunning(ctx) {
-		return errors.New("API server is not running. Start it with: pelican client-api serve")
+		return errors.Wrap(err, "failed to connect to client agent server")
 	}
 
 	// List jobs

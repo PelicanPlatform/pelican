@@ -41,7 +41,7 @@ func getTestTempDir(t *testing.T) string {
 	tempDir := t.TempDir()
 
 	// Check if the path would be too long for socket creation
-	// (we need room for "/client-api.sock" or similar filenames)
+	// (we need room for "/client-agent.sock" or similar filenames)
 	testSocketPath := filepath.Join(tempDir, "test.sock")
 	if len(testSocketPath) <= maxSocketPathLength {
 		// Path is short enough, use t.TempDir() and let it handle cleanup
@@ -71,14 +71,14 @@ func getTestTempDir(t *testing.T) string {
 func CreateTestServerConfig(t *testing.T) (ServerConfig, string) {
 	tempDir := getTestTempDir(t)
 
-	socketPath := filepath.Join(tempDir, "client-api.sock")
-	pidFile := filepath.Join(tempDir, "client-api.pid")
-	dbPath := filepath.Join(tempDir, "client-api.db")
+	socketPath := filepath.Join(tempDir, "client-agent.sock")
+	pidFile := filepath.Join(tempDir, "client-agent.pid")
+	dbPath := filepath.Join(tempDir, "client-agent.db")
 
 	config := ServerConfig{
 		SocketPath:        socketPath,
 		PidFile:           pidFile,
-		DatabasePath:      dbPath,
+		DbLocation:        dbPath,
 		MaxConcurrentJobs: 5,
 	}
 

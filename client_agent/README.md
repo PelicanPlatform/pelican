@@ -21,32 +21,32 @@ The Pelican Client Agent Server provides a RESTful API for interacting with Peli
 
 ```bash
 # Start the server (runs in foreground)
-pelican client-api serve
+pelican client-agent start
 
 # Start with custom socket path
-pelican client-api serve --socket /tmp/pelican-api.sock
+pelican client-agent start --socket /tmp/pelican-api.sock
 
 # Start with custom concurrency limit
-pelican client-api serve --max-jobs 10
+pelican client-agent start --max-jobs 10
 ```
 
 ### Check Server Status
 
 ```bash
-pelican client-api status
+pelican client-agent status
 ```
 
 ### Stop the Server
 
 ```bash
-pelican client-api stop
+pelican client-agent stop
 ```
 
 Or press `Ctrl+C` if running in foreground.
 
 ## API Overview
 
-Base URL: `/api/v1/xfer`
+Base URL: `/api/v1.0/transfer-agent`
 
 ### Job Management Endpoints
 
@@ -55,7 +55,7 @@ Base URL: `/api/v1/xfer`
 Creates a new transfer job with one or more transfers.
 
 ```
-POST /api/v1/xfer/jobs
+POST /api/v1.0/transfer-agent/jobs
 ```
 
 **Request Body:**
@@ -107,7 +107,7 @@ POST /api/v1/xfer/jobs
 Retrieves detailed status of a job including all transfers and progress.
 
 ```
-GET /api/v1/xfer/jobs/:job_id
+GET /api/v1.0/transfer-agent/jobs/:job_id
 ```
 
 **Response (200 OK):**
@@ -150,7 +150,7 @@ GET /api/v1/xfer/jobs/:job_id
 Lists all jobs with optional filtering.
 
 ```
-GET /api/v1/xfer/jobs?status=running&limit=10&offset=0
+GET /api/v1.0/transfer-agent/jobs?status=running&limit=10&offset=0
 ```
 
 **Query Parameters:**
@@ -185,7 +185,7 @@ GET /api/v1/xfer/jobs?status=running&limit=10&offset=0
 Cancels a job and all its incomplete transfers.
 
 ```
-DELETE /api/v1/xfer/jobs/:job_id
+DELETE /api/v1.0/transfer-agent/jobs/:job_id
 ```
 
 **Response (200 OK):**
@@ -223,7 +223,7 @@ DELETE /api/v1/xfer/jobs/:job_id
 Gets metadata about a remote file or directory.
 
 ```
-POST /api/v1/xfer/stat
+POST /api/v1.0/transfer-agent/stat
 ```
 
 **Request Body:**
@@ -256,7 +256,7 @@ POST /api/v1/xfer/stat
 Lists files and subdirectories in a remote directory.
 
 ```
-POST /api/v1/xfer/list
+POST /api/v1.0/transfer-agent/list
 ```
 
 **Request Body:**
@@ -296,7 +296,7 @@ POST /api/v1/xfer/list
 Deletes a remote file or directory.
 
 ```
-POST /api/v1/xfer/delete
+POST /api/v1.0/transfer-agent/delete
 ```
 
 **Request Body:**
@@ -358,7 +358,7 @@ POST /shutdown
 - All active transfers are cancelled gracefully
 - The server waits for HTTP connections to complete (with timeout)
 - Socket and PID files are cleaned up automatically
-- This is equivalent to `pelican client-api stop` or sending `SIGTERM`
+- This is equivalent to `pelican client-agent stop` or sending `SIGTERM`
 
 ## Status Values
 
@@ -390,8 +390,8 @@ The API returns standard HTTP status codes along with error codes:
 ```bash
 # Create a job with multiple transfers
 curl -X POST \
-  --unix-socket ~/.pelican/client-api.sock \
-  http://localhost/api/v1/xfer/jobs \
+  --unix-socket ~/.pelican/client-agent.sock \
+  http://localhost/api/v1.0/transfer-agent/jobs \
   -H "Content-Type: application/json" \
   -d '{
     "transfers": [
@@ -404,32 +404,32 @@ curl -X POST \
   }'
 
 # Get job status
-curl --unix-socket ~/.pelican/client-api.sock \
-  http://localhost/api/v1/xfer/jobs/550e8400-e29b-41d4-a716-446655440000
+curl --unix-socket ~/.pelican/client-agent.sock \
+  http://localhost/api/v1.0/transfer-agent/jobs/550e8400-e29b-41d4-a716-446655440000
 
 # List all running jobs
-curl --unix-socket ~/.pelican/client-api.sock \
-  "http://localhost/api/v1/xfer/jobs?status=running"
+curl --unix-socket ~/.pelican/client-agent.sock \
+  "http://localhost/api/v1.0/transfer-agent/jobs?status=running"
 
 # Cancel a job
 curl -X DELETE \
-  --unix-socket ~/.pelican/client-api.sock \
-  http://localhost/api/v1/xfer/jobs/550e8400-e29b-41d4-a716-446655440000
+  --unix-socket ~/.pelican/client-agent.sock \
+  http://localhost/api/v1.0/transfer-agent/jobs/550e8400-e29b-41d4-a716-446655440000
 
 # Stat a file
 curl -X POST \
-  --unix-socket ~/.pelican/client-api.sock \
-  http://localhost/api/v1/xfer/stat \
+  --unix-socket ~/.pelican/client-agent.sock \
+  http://localhost/api/v1.0/transfer-agent/stat \
   -H "Content-Type: application/json" \
   -d '{"url": "osdf:///osgconnect/public/example.txt"}'
 
 # Health check
-curl --unix-socket ~/.pelican/client-api.sock \
+curl --unix-socket ~/.pelican/client-agent.sock \
   http://localhost/health
 
 # Shutdown the server
 curl -X POST \
-  --unix-socket ~/.pelican/client-api.sock \
+  --unix-socket ~/.pelican/client-agent.sock \
   http://localhost/shutdown
 ```
 
@@ -444,8 +444,8 @@ import json
 session = requests_unixsocket.Session()
 
 # Base URL for Unix socket
-socket_path = "/Users/username/.pelican/client-api.sock"
-base_url = f"http+unix://{socket_path.replace('/', '%2F')}/api/v1/xfer"
+socket_path = "/Users/username/.pelican/client-agent.sock"
+base_url = f"http+unix://{socket_path.replace('/', '%2F')}/api/v1.0/transfer-agent"
 
 # Create a job
 job_request = {
@@ -489,8 +489,8 @@ The server can be configured via command-line flags or environment variables:
 
 ### Command-Line Flags
 
-- `--socket`: Path to Unix socket (default: `~/.pelican/client-api.sock`)
-- `--pid-file`: Path to PID file (default: `~/.pelican/client-api.pid`)
+- `--socket`: Path to Unix socket (default: `~/.pelican/client-agent.sock`)
+- `--pid-file`: Path to PID file (default: `~/.pelican/client-agent.pid`)
 - `--max-jobs`: Maximum concurrent jobs (default: 5)
 
 ### Socket Permissions
@@ -544,14 +544,14 @@ The server uses SQLite to persist job and transfer state:
 
 ```bash
 # Check if already running
-pelican client-api status
+pelican client-agent status
 
 # Check socket file
-ls -la ~/.pelican/client-api.sock
+ls -la ~/.pelican/client-agent.sock
 
 # Remove stale socket
-rm ~/.pelican/client-api.sock
-pelican client-api serve
+rm ~/.pelican/client-agent.sock
+pelican client-agent start
 ```
 
 ### Connection Refused
@@ -559,14 +559,14 @@ pelican client-api serve
 Ensure the server is running:
 
 ```bash
-pelican client-api status
+pelican client-agent status
 ```
 
 Check socket path matches:
 
 ```bash
 # Default location
-~/.pelican/client-api.sock
+~/.pelican/client-agent.sock
 ```
 
 ### Permission Denied
@@ -772,7 +772,7 @@ func main() {
 
     // Check if server is running
     if !client.IsServerRunning(ctx) {
-        fmt.Println("Server is not running. Start with: pelican client-api serve")
+        fmt.Println("Server is not running. Start with: pelican client-agent start")
         return
     }
 
@@ -834,7 +834,7 @@ The `apiclient.APIClient` provides the following methods:
 1. **Server Running**: Client Agent server must be running:
 
    ```bash
-   pelican client-api serve
+   pelican client-agent start
    ```
 
 1. **Socket Path**: CLI automatically uses default socket. Override with:
@@ -852,7 +852,7 @@ If the server is not running, async commands will fail with a clear error:
 ```bash
 $ pelican object get --async osdf:///file /dest
 Error: Client Agent server is not running
-Start it with 'pelican serve --client-api'
+Start it with 'pelican serve --client-agent'
 ```
 
 ## Development
