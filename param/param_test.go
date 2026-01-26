@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -265,6 +266,59 @@ func TestGetRuntimeConfigurable(t *testing.T) {
 	tlsSkipVerify, exists := runtimeConfigMap["TLSSkipVerify"]
 	assert.True(t, exists, "TLSSkipVerify should exist in the map")
 	assert.False(t, tlsSkipVerify, "TLSSkipVerify should be false in the map")
+}
+
+func TestGetEnvVarName(t *testing.T) {
+	// Test various parameter types to ensure they return correct environment variable names
+
+	// Test StringParam
+	envVar := Cache_Port.GetEnvVarName()
+	assert.Equal(t, "PELICAN_CACHE_PORT", envVar, "Cache.Port should map to PELICAN_CACHE_PORT")
+
+	// Test with single word parameter
+	envVar = Debug.GetEnvVarName()
+	assert.Equal(t, "PELICAN_DEBUG", envVar, "Debug should map to PELICAN_DEBUG")
+
+	// Test with nested parameter (multiple dots)
+	envVar = Director_CacheSortMethod.GetEnvVarName()
+	assert.Equal(t, "PELICAN_DIRECTOR_CACHESORTMETHOD", envVar, "Director.CacheSortMethod should map to PELICAN_DIRECTOR_CACHESORTMETHOD")
+
+	// Test BoolParam
+	envVar = TLSSkipVerify.GetEnvVarName()
+	assert.Equal(t, "PELICAN_TLSSKIPVERIFY", envVar, "TLSSkipVerify should map to PELICAN_TLSSKIPVERIFY")
+
+	// Test StringSliceParam
+	envVar = ConfigLocations.GetEnvVarName()
+	assert.Equal(t, "PELICAN_CONFIGLOCATIONS", envVar, "ConfigLocations should map to PELICAN_CONFIGLOCATIONS")
+
+	// Test DurationParam
+	envVar = Cache_SelfTestInterval.GetEnvVarName()
+	assert.Equal(t, "PELICAN_CACHE_SELFTESTINTERVAL", envVar, "Cache.SelfTestInterval should map to PELICAN_CACHE_SELFTESTINTERVAL")
+}
+
+func TestGetEnvVarNameIntegration(t *testing.T) {
+	// This test verifies that GetEnvVarName() returns the correct environment variable name
+	// that viper actually uses to read configuration values.
+	
+	t.Setenv("PELICAN_CACHE_PORT", "9999")
+	t.Setenv("PELICAN_TLSSKIPVERIFY", "true")
+
+	v := viper.New()
+	v.SetEnvPrefix("pelican")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+
+	// Use GetEnvVarName to verify it returns the correct env var name
+	assert.Equal(t, "PELICAN_CACHE_PORT", Cache_Port.GetEnvVarName())
+	assert.Equal(t, "PELICAN_TLSSKIPVERIFY", TLSSkipVerify.GetEnvVarName())
+
+	// Verify that viper can read the environment variables
+	cfg, err := DecodeConfig(v)
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	
+	assert.Equal(t, 9999, cfg.Cache.Port, "Environment variable PELICAN_CACHE_PORT should be read as 9999")
+	assert.Equal(t, true, cfg.TLSSkipVerify, "Environment variable PELICAN_TLSSKIPVERIFY should be read as true")
 }
 
 func TestCallbackRegistration(t *testing.T) {
