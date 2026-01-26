@@ -42,6 +42,7 @@ type DaemonConfig struct {
 	MaxJobs     int
 	DbLocation  string
 	IdleTimeout time.Duration
+	ExecPath    string // Optional: override executable path (primarily for testing)
 }
 
 // StartDaemon spawns the server as a background daemon
@@ -123,10 +124,14 @@ func StartDaemon(config DaemonConfig) (int, error) {
 		}
 	}()
 
-	// Get current executable path
-	execPath, err := os.Executable()
-	if err != nil {
-		return 0, errors.Wrap(err, "failed to get executable path")
+	// Get executable path - use override if provided (for testing), otherwise current executable
+	execPath := config.ExecPath
+	if execPath == "" {
+		var err error
+		execPath, err = os.Executable()
+		if err != nil {
+			return 0, errors.Wrap(err, "failed to get executable path")
+		}
 	}
 
 	// Build command arguments
@@ -142,6 +147,10 @@ func StartDaemon(config DaemonConfig) (int, error) {
 
 	if config.DbLocation != "" {
 		args = append(args, "--database", config.DbLocation)
+	}
+
+	if logLocation != "" {
+		args = append(args, "--log", logLocation)
 	}
 
 	// Add daemon-specific flag (internal use)
@@ -177,10 +186,13 @@ func StartDaemon(config DaemonConfig) (int, error) {
 
 	// Set idle timeout if configured
 	if config.IdleTimeout > 0 {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("_PELICAN_INTERNAL_IDLE_TIMEOUT=%d", int(config.IdleTimeout.Seconds())))
+		cmd.Env = append(cmd.Env, fmt.Sprintf("PELICAN_CLIENTAGENT_IDLETIMEOUT=%s", config.IdleTimeout.String()))
 	}
 
 	// Start the daemon process
+	log.Debugf("Spawning daemon process with args: %v", args)
+	log.Debugf("Log file will be: %s", logLocation)
+	log.Debugf("Socket path: %s, PID file: %s", socketPath, pidFile)
 	if err := cmd.Start(); err != nil {
 		return 0, errors.Wrap(err, "failed to start daemon")
 	}
@@ -206,22 +218,34 @@ func IsDaemonMode() bool {
 // InheritDaemonLock inherits the lock file descriptor from parent process
 // This must be called early in daemon startup
 func InheritDaemonLock() (*os.File, error) {
+	log.Debugln("Attempting to inherit daemon lock from parent process")
 	fdStr := os.Getenv("_PELICAN_INTERNAL_LOCK_FD")
 	if fdStr == "" {
+		log.Error("_PELICAN_INTERNAL_LOCK_FD environment variable not set")
 		return nil, errors.New("_PELICAN_INTERNAL_LOCK_FD not set")
 	}
+	log.Debugf("Lock FD environment variable: %s", fdStr)
 
 	// File descriptor 3 was passed as the first ExtraFile
 	// We need to keep it open to maintain the lock
 	lockFd := os.NewFile(3, "inherited-lock")
 	if lockFd == nil {
+		log.Error("os.NewFile(3) returned nil - FD 3 may not be valid")
 		return nil, errors.New("failed to inherit lock file descriptor")
+	}
+
+	// Try to get file info to verify the FD is valid
+	if stat, err := lockFd.Stat(); err != nil {
+		log.Errorf("Failed to stat inherited lock FD: %v", err)
+		return nil, errors.Wrap(err, "inherited lock FD is not valid")
+	} else {
+		log.Debugf("Inherited lock FD is valid, file: %s", stat.Name())
 	}
 
 	// The lock is already held (inherited from parent)
 	// We cannot verify it by trying to acquire it again because flock is idempotent
 	// within the same process - trying to lock an already-held lock succeeds.
 	// We simply trust that the parent correctly passed us the locked FD.
-	log.Debug("Inherited lock file descriptor from parent process")
+	log.Debugln("Successfully inherited lock file descriptor from parent process")
 	return lockFd, nil
 }

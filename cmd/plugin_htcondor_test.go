@@ -252,16 +252,6 @@ queue
 	}
 }
 
-// findRepoRoot finds the root of the git repository
-func findRepoRoot() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(output)), nil
-}
-
 // findHTCondorSbin finds the sbin directory for HTCondor binaries
 func findHTCondorSbin() (string, error) {
 	condorMaster, err := exec.LookPath("condor_master")

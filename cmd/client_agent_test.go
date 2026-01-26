@@ -36,6 +36,30 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
+// getTempDir returns a temp directory, preferring t.TempDir() but falling back to /tmp
+// if the socket path would exceed 80 characters (to avoid Mac's 104 char limit)
+func getTempDir(t *testing.T) string {
+	tempDir := t.TempDir()
+	// Check if socket path would be too long (leave room for socket filename)
+	testSocketPath := filepath.Join(tempDir, "agent.sock")
+	if len(testSocketPath) <= 80 {
+		// Path is fine, use t.TempDir() which auto-cleans up
+		return tempDir
+	}
+
+	// Path too long, use /tmp instead
+	shortDir, err := os.MkdirTemp("/tmp", "pelican-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(shortDir); err != nil {
+			t.Logf("Warning: failed to remove temp directory %s: %v", shortDir, err)
+		}
+	})
+	return shortDir
+}
+
 // TestClientAgentCLI tests the client-agent CLI commands: start, status, stop
 func TestClientAgentCLI(t *testing.T) {
 	server_utils.ResetTestState()
@@ -44,17 +68,27 @@ func TestClientAgentCLI(t *testing.T) {
 	binaryPath := getPelicanBinary(t)
 
 	// Set up test paths
-	tempDir := t.TempDir()
-	socketPath := filepath.Join(tempDir, "client-agent.sock")
-	pidFile := filepath.Join(tempDir, "client-agent.pid")
-	logFile := filepath.Join(tempDir, "client-agent.log")
+	tempDir := getTempDir(t)
+
+	socketPath := filepath.Join(tempDir, "agent.sock")
+	pidFile := filepath.Join(tempDir, "agent.pid")
+	logFile := filepath.Join(tempDir, "agent.log")
+
+	// Helper to print logs on failure
+	defer func() {
+		if t.Failed() {
+			if logData, err := os.ReadFile(logFile); err == nil {
+				t.Logf("Daemon log:\n%s", string(logData))
+			}
+		}
+	}()
 
 	// Test 1: Start the server
 	t.Log("Starting client-agent server...")
 	startCmd := exec.Command(binaryPath, "client-agent", "start",
 		"--socket", socketPath,
-		"--pid-file", pidFile)
-	startCmd.Env = append(os.Environ(), "PELICAN_CLIENT_AGENT_LOG="+logFile)
+		"--pid-file", pidFile,
+		"--log", logFile)
 
 	startOutput, err := startCmd.CombinedOutput()
 	require.NoError(t, err, "Failed to start server: %s", string(startOutput))
@@ -70,11 +104,6 @@ func TestClientAgentCLI(t *testing.T) {
 		defer cancel()
 		return apiClient.IsServerRunning(ctx)
 	}, 10*time.Second, 500*time.Millisecond, "Daemon should be running after startup")
-
-	// Print log for debugging
-	if logData, err := os.ReadFile(logFile); err == nil {
-		t.Logf("Daemon log:\n%s", string(logData))
-	}
 
 	// Test 2: Check status
 	t.Log("Checking server status...")
@@ -144,9 +173,10 @@ func TestClientAgentForeground(t *testing.T) {
 	binaryPath := getPelicanBinary(t)
 
 	// Set up test paths
-	tempDir := t.TempDir()
-	socketPath := filepath.Join(tempDir, "client-agent-fg.sock")
-	pidFile := filepath.Join(tempDir, "client-agent-fg.pid")
+	tempDir := getTempDir(t)
+
+	socketPath := filepath.Join(tempDir, "agent.sock")
+	pidFile := filepath.Join(tempDir, "agent.pid")
 
 	// Start the server in foreground mode
 	t.Log("Starting client-agent in foreground mode...")
@@ -200,15 +230,32 @@ func TestClientAgentRestart(t *testing.T) {
 	binaryPath := getPelicanBinary(t)
 
 	// Set up test paths
-	tempDir := t.TempDir()
-	socketPath := filepath.Join(tempDir, "client-agent-restart.sock")
-	pidFile := filepath.Join(tempDir, "client-agent-restart.pid")
+	tempDir := getTempDir(t)
+
+	socketPath := filepath.Join(tempDir, "agent.sock")
+	pidFile := filepath.Join(tempDir, "agent.pid")
+	logFile := filepath.Join(tempDir, "agent.log")
+
+	// Helper to print logs on failure
+	defer func() {
+		if t.Failed() {
+			if logData, err := os.ReadFile(logFile); err == nil {
+				t.Logf("Daemon log:\n%s", string(logData))
+			} else {
+				t.Logf("Could not read log file %s: %v", logFile, err)
+			}
+		}
+	}()
 
 	// Start server
 	startCmd := exec.Command(binaryPath, "client-agent", "start",
 		"--socket", socketPath,
-		"--pid-file", pidFile)
-	_, err := startCmd.CombinedOutput()
+		"--pid-file", pidFile,
+		"--log", logFile)
+	output, err := startCmd.CombinedOutput()
+	if err != nil {
+		t.Logf("Start command output: %s", string(output))
+	}
 	require.NoError(t, err, "Failed to start server first time")
 
 	// Wait for ready
@@ -242,8 +289,12 @@ func TestClientAgentRestart(t *testing.T) {
 	// Start again
 	startCmd2 := exec.Command(binaryPath, "client-agent", "start",
 		"--socket", socketPath,
-		"--pid-file", pidFile)
+		"--pid-file", pidFile,
+		"--log", logFile)
 	startOutput2, err := startCmd2.CombinedOutput()
+	if err != nil {
+		t.Logf("Restart command output: %s", string(startOutput2))
+	}
 	require.NoError(t, err, "Failed to restart server: %s", string(startOutput2))
 
 	// Wait for ready again
@@ -274,15 +325,22 @@ func TestClientAgentAutoSpawn(t *testing.T) {
 	binaryPath := getPelicanBinary(t)
 
 	// Set up test paths
-	tempDir := t.TempDir()
-	socketPath := filepath.Join(tempDir, "client-agent-autospawn.sock")
-	configDir := t.TempDir()
-	logFile := filepath.Join(tempDir, "client-agent-autospawn.log")
+	tempDir := getTempDir(t)
 
-	// The autospawned server will use the configDir for its PID file
-	pidFile := filepath.Join(configDir, "client-agent.pid")
+	socketPath := filepath.Join(tempDir, "agent.sock")
+	pidFile := filepath.Join(tempDir, "agent.pid")
+	logFile := filepath.Join(tempDir, "agent.log")
+
+	// Helper to print logs on failure
+	defer func() {
+		if t.Failed() {
+			if logData, err := os.ReadFile(logFile); err == nil {
+				t.Logf("Daemon log:\n%s", string(logData))
+			}
+		}
+	}()
+
 	testEnv := append(os.Environ(),
-		"PELICAN_CONFIGDIR="+configDir,
 		"PELICAN_CLIENTAGENT_SOCKET="+socketPath,
 		"PELICAN_CLIENTAGENT_PIDFILE="+pidFile,
 		"PELICAN_LOGGING_LOGLOCATION="+logFile,
@@ -300,7 +358,7 @@ func TestClientAgentAutoSpawn(t *testing.T) {
 	// We use a fake URL because we don't want to set up a full federation just to test auto-spawn
 	t.Log("Running pelican object get --async to trigger auto-spawn...")
 	getCmd := exec.Command(binaryPath, "object", "get", "--async",
-		"pelican://nonexistent.example.com/test", filepath.Join(configDir, "output"))
+		"pelican://nonexistent.example.com/test", filepath.Join(tempDir, "output"))
 	getCmd.Env = testEnv
 	getOutput, _ := getCmd.CombinedOutput() // We expect this to fail, so ignore error
 	t.Logf("Get command output: %s", string(getOutput))
@@ -350,17 +408,24 @@ func TestClientAgentIdleShutdown(t *testing.T) {
 	// Get the pelican binary (built once via sync.Once)
 	binaryPath := getPelicanBinary(t)
 
-	// Set up test paths in a temp directory
-	tempDir := t.TempDir()
-	socketPath := filepath.Join(tempDir, "client-agent-idle.sock")
-	pidFile := filepath.Join(tempDir, "client-agent-idle.pid")
-	logFile := filepath.Join(tempDir, "client-agent-idle.log")
+	// Set up test paths
+	tempDir := getTempDir(t)
 
-	// Set a short idle timeout for testing (5 seconds) using environment variable
-	testEnv := append(os.Environ(),
-		"PELICAN_CLIENTAGENT_IDLETIMEOUT=5s",
-		"PELICAN_LOGGING_LOGLOCATION="+logFile,
-	)
+	socketPath := filepath.Join(tempDir, "agent.sock")
+	pidFile := filepath.Join(tempDir, "agent.pid")
+	logFile := filepath.Join(tempDir, "agent.log")
+
+	// Helper to print logs on failure
+	defer func() {
+		if t.Failed() {
+			if logData, err := os.ReadFile(logFile); err == nil {
+				t.Logf("Daemon log:\n%s", string(logData))
+			}
+		}
+	}()
+
+	// Set a short idle timeout for testing (3 seconds) using environment variable
+	testEnv := append(os.Environ(), "PELICAN_CLIENTAGENT_IDLETIMEOUT=3s")
 
 	// Clean up any leftover server at the end
 	defer func() {
@@ -374,7 +439,8 @@ func TestClientAgentIdleShutdown(t *testing.T) {
 	t.Log("Starting client-agent server with 3s idle timeout...")
 	startCmd := exec.Command(binaryPath, "client-agent", "start",
 		"--socket", socketPath,
-		"--pid-file", pidFile)
+		"--pid-file", pidFile,
+		"--log", logFile)
 	startCmd.Env = testEnv
 
 	startOutput, err := startCmd.CombinedOutput()

@@ -559,6 +559,7 @@ func TestCLIAsyncServerNotRunning(t *testing.T) {
 	assert.True(t,
 		strings.Contains(lowerOutput, "not running") ||
 			strings.Contains(lowerOutput, "failed to create") ||
+			strings.Contains(lowerOutput, "failed to connect") ||
 			strings.Contains(lowerOutput, "connection refused"),
 		"Error should indicate server is not running")
 }
