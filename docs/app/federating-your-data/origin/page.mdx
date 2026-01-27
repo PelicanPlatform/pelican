@@ -506,14 +506,14 @@ See [Logging in to the Origin's Admin Page](#logging-in-to-the-origins-admin-pag
 
 This section documents additional arguments you can pass via the command line when serving Origins.
 
-* **-h or --help**: Output documentation on the `serve` command and its arguments.
-* **-m or --mode**: Set the mode for the Origin service ('posix'|'s3, default to 'posix').
-* **-p or --port**: Set the port at which the Pelican admin website should be accessible.
-* **--writeable**: A boolean value to allow or disable writing to the Origin (default is true).
-* **-v**: A shortcut for configuring docker-style volume mounts/namespace prefixes for the Origin (POSIX only). For example, `-v /local/path:/federation/prefix` will bind a directory `/local/path` to the namespace prefix `/federation/prefix`. Use of configuration yaml is strongly preferred over this method because config passed with this flag cannot be picked up by tools like `pelican config summary`.
-* **--config**: Set the location of the configuration file.
-* **-d or --debug**: Enable debugging mode, which greatly increases the Pelican's logging verbosity
-* **-l or --log**: Set the location of a file that will capture Pelican logs. Setting this will prevent logging output from printing to your terminal.
+* **`-h` or `--help`**: Output documentation on the `serve` command and its arguments.
+* **`-m` or `--mode`**: Set the mode for the Origin service ('posix'|'s3, default to 'posix').
+* **`-p` or `--port`**: Set the port at which the Pelican admin website should be accessible.
+* **`--writeable`**: A boolean value to allow or disable writing to the Origin (default is true).
+* **`-v`**: A shortcut for configuring docker-style volume mounts/namespace prefixes for the Origin (POSIX only). For example, `-v /local/path:/federation/prefix` will bind a directory `/local/path` to the namespace prefix `/federation/prefix`. Use of configuration yaml is strongly preferred over this method because config passed with this flag cannot be picked up by tools like `pelican config summary`.
+* **`--config`**: Set the location of the configuration file.
+* **`-d` or `--debug`**: Enable debugging mode, which greatly increases the Pelican's logging verbosity
+* **`-l` or `--log`**: Set the location of a file that will capture Pelican logs. Setting this will prevent logging output from printing to your terminal.
 
 For more information about available yaml configuration options, refer to the [Parameters page](../parameters.mdx).
 
