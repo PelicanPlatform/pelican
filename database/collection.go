@@ -629,6 +629,14 @@ func GetOrCreateUser(db *gorm.DB, username string, sub string, issuer string) (*
 	return CreateUser(db, username, sub, issuer)
 }
 
+func GetUserByID(db *gorm.DB, id string) (*User, error) {
+	user := &User{}
+	if err := db.First(user, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
 func CreateUser(db *gorm.DB, username string, sub string, issuer string) (*User, error) {
 	slug, err := generateSlug()
 	if err != nil {
@@ -648,6 +656,28 @@ func CreateUser(db *gorm.DB, username string, sub string, issuer string) (*User,
 		return nil, err
 	}
 	return newUser, nil
+}
+
+func UpdateUser(db *gorm.DB, id string, username, sub, issuer *string) error {
+	updates := make(map[string]interface{})
+	if username != nil {
+		updates["username"] = *username
+	}
+	if sub != nil {
+		updates["sub"] = *sub
+	}
+	if issuer != nil {
+		updates["issuer"] = *issuer
+	}
+
+	if len(updates) == 0 {
+		return nil
+	}
+
+	if err := db.Model(&User{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+		return err
+	}
+	return nil
 }
 
 func CreateGroup(db *gorm.DB, name, description, createdByUserID string, groups []string) (*Group, error) {
@@ -685,10 +715,37 @@ func GetGroupWithMembers(db *gorm.DB, groupId string) (*Group, error) {
 
 func ListGroups(db *gorm.DB) ([]Group, error) {
 	groups := []Group{}
-	if err := db.Find(&groups).Error; err != nil {
+	if err := db.Preload("Members.User").Find(&groups).Error; err != nil {
 		return nil, err
 	}
 	return groups, nil
+}
+
+func UpdateGroup(db *gorm.DB, id string, name, description *string) error {
+	group := &Group{}
+	if err := db.First(group, "id = ?", id).Error; err != nil {
+		return err
+	}
+
+	updates := make(map[string]interface{})
+	if name != nil {
+		if strings.HasPrefix(*name, "user-") {
+			return ErrReservedGroupPrefix
+		}
+		updates["name"] = *name
+	}
+	if description != nil {
+		updates["description"] = *description
+	}
+
+	if len(updates) == 0 {
+		return nil
+	}
+
+	if err := db.Model(&Group{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+		return err
+	}
+	return nil
 }
 
 func AddGroupMember(db *gorm.DB, groupId, userId, addedByUserId string) error {
