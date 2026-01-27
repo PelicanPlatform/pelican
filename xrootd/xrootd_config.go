@@ -226,6 +226,7 @@ type (
 type xrootdMaintenanceState struct {
 	lastAuthfileSuccess  time.Time
 	lastScitokensSuccess time.Time
+	lastDirectorRefresh  time.Time // For caches: tracks last namespace refresh from director
 	authfileFailures     int
 	scitokensFailures    int
 	// Mutex is not needed because the XRootD maintenance callback is executed in a single goroutine,
@@ -833,10 +834,12 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 		// This initial set-to-now is a grace baseline to avoid tripping the timeout before the first successful cycle
 		lastAuthfileSuccess:  time.Now(),
 		lastScitokensSuccess: time.Now(),
+		lastDirectorRefresh:  time.Time{}, // Zero time so first refresh is always allowed
 	}
 	// Capture timeout and auto-shutdown config at launch time to avoid race conditions with Viper resets in tests
 	configTimeout := param.Xrootd_ConfigUpdateFailureTimeout.GetDuration()
 	autoShutdownEnabled := param.Xrootd_AutoShutdownEnabled.GetBool()
+	minDirectorRefreshInterval := param.Cache_MinDirectorRefreshInterval.GetDuration()
 
 	server_utils.LaunchWatcherMaintenance(
 		ctx,
@@ -848,6 +851,25 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 		"xrootd maintenance",
 		sleepTime,
 		func(notifyEvent bool) error {
+			// For caches, refresh namespace ads from director when scitokens config changes
+			// This ensures the generated scitokens config reflects current director state
+			if notifyEvent && server.GetServerType().IsEnabled(server_structs.CacheType) {
+				timeSinceLastRefresh := time.Since(state.lastDirectorRefresh)
+				if timeSinceLastRefresh >= minDirectorRefreshInterval {
+					log.Debugln("Scitokens config changed, refreshing namespace ads from director")
+					if err := server.GetNamespaceAdsFromDirector(); err != nil {
+						log.Warningln("Failed to refresh namespace ads from director:", err)
+						// Continue anyway - we'll use cached ads
+					} else {
+						state.lastDirectorRefresh = time.Now()
+						log.Debugln("Successfully refreshed namespace ads from director")
+					}
+				} else {
+					log.Debugf("Skipping director refresh (last refresh %s ago, minimum interval %s)",
+						timeSinceLastRefresh.Round(time.Second), minDirectorRefreshInterval.Round(time.Second))
+				}
+			}
+
 			var err error
 			if param.Server_DropPrivileges.GetBool() {
 				err = dropPrivilegeCopy(server)
