@@ -1695,9 +1695,9 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		if (currentServers.IsEnabled(server_structs.OriginType) || currentServers.IsEnabled(server_structs.CacheType)) && param.Shoveler_Enable.GetBool() {
 			pelicanDirs = append(pelicanDirs, param.Shoveler_QueueDirectory.GetString())
 		}
-		if currentServers.IsEnabled(server_structs.OriginType) {
-			pelicanDirs = append(pelicanDirs, param.Origin_GlobusConfigLocation.GetString())
-		}
+		// Note: Origin_GlobusConfigLocation is intentionally NOT added here.
+		// It's under Origin_RunLocation (e.g. /run/pelican/xrootd/origin/) which should be owned by xrootd, not pelican.
+		// InitGlobusBackend() handles creating and chowning the Globus directories properly.
 		if err = setDirPerms(pelicanDirs, 0750, 0640, puser.Uid, puser.Gid, true); err != nil {
 			return errors.Wrap(err, "failure when setting up the directory permissions for pelican")
 		}

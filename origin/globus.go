@@ -95,14 +95,16 @@ func loadTokenFromDB(cid string, refreshToken string, tokenType GlobusTokenType,
 
 // InitGlobusBackend initializes the Globus backend by loading existing collections from the database
 func InitGlobusBackend(exps []server_utils.OriginExport) error {
-	uid, err := config.GetDaemonUID()
+	// Get pelican user for directory ownership (pelican process writes tokens)
+	puser, err := config.GetPelicanUser()
 	if err != nil {
-		return errors.Wrap(err, "failed to initialize Globus backend: failed to get uid")
+		return errors.Wrap(err, "failed to initialize Globus backend: failed to get pelican user")
 	}
 
-	gid, err := config.GetDaemonGID()
+	// Get xrootd group so XRootD can read the token files
+	xrootdGid, err := config.GetDaemonGID()
 	if err != nil {
-		return errors.Wrap(err, "failed to initialize Globus backend: failed to get gid")
+		return errors.Wrap(err, "failed to initialize Globus backend: failed to get xrootd gid")
 	}
 
 	if server_structs.OriginStorageType(param.Origin_StorageType.GetString()) != server_structs.OriginStorageGlobus {
@@ -113,17 +115,26 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 	globusExports = make(map[string]*globusExport)
 
 	// Check and setup token location
+	// Directories are owned by pelican:xrootd with mode 0750:
+	// - pelican (owner) can write token files even after dropPrivileges
+	// - xrootd (group) can read token files at runtime
 	globusFdr := param.Origin_GlobusConfigLocation.GetString()
 	tokFdr := filepath.Join(globusFdr, "tokens")
-	if err := os.MkdirAll(tokFdr, 0755); err != nil {
+	if err := os.MkdirAll(tokFdr, 0750); err != nil {
 		return errors.Wrapf(err, "failed to create directory for Globus tokens: %s", tokFdr)
 	}
-	// We need to change the directory and file permission to XRootD user/group so that it can access the token
-	if err = os.Chown(globusFdr, uid, gid); err != nil {
-		return errors.Wrapf(err, "unable to change the ownership of %s to xrootd daemon uid %d and gid %d for Globus config", globusFdr, uid, gid)
+	if err = os.Chown(globusFdr, puser.Uid, xrootdGid); err != nil {
+		return errors.Wrapf(err, "unable to change the ownership of %s to pelican uid %d and xrootd gid %d for Globus config", globusFdr, puser.Uid, xrootdGid)
 	}
-	if err = os.Chown(tokFdr, uid, gid); err != nil {
-		return errors.Wrapf(err, "unable to change the ownership of %s to xrootd daemon uid %d and gid %d for Globus tokens", tokFdr, uid, gid)
+	if err = os.Chmod(globusFdr, 0750); err != nil {
+		return errors.Wrapf(err, "unable to change the permissions of %s for Globus config", globusFdr)
+	}
+	if err = os.Chown(tokFdr, puser.Uid, xrootdGid); err != nil {
+		return errors.Wrapf(err, "unable to change the ownership of %s to pelican uid %d and xrootd gid %d for Globus tokens", tokFdr, puser.Uid, xrootdGid)
+	}
+	// Set mode 02750 (setgid) so files created in tokens/ inherit the xrootd group
+	if err = os.Chmod(tokFdr, 02750); err != nil {
+		return errors.Wrapf(err, "unable to change the permissions of %s for Globus tokens", tokFdr)
 	}
 
 	globusAuthCfg, err := GetGlobusOAuthCfg()
