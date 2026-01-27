@@ -3,6 +3,7 @@ package web_ui
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
@@ -21,6 +22,11 @@ type CreateGroupReq struct {
 
 type AddGroupMemberReq struct {
 	UserID string `json:"userId"`
+}
+
+type UpdateGroupReq struct {
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
 }
 
 func handleListGroups(ctx *gin.Context) {
@@ -48,6 +54,49 @@ func handleListGroups(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, groups)
+}
+
+func handleGetGroup(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie, token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access},
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	id := ctx.Param("id")
+	if id == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "group id is required",
+		})
+		return
+	}
+
+	group, err := database.GetGroupWithMembers(database.ServerDatabase, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "group not found",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to get group: %v", err),
+			})
+		}
+		return
+	}
+
+	ctx.JSON(http.StatusOK, group)
 }
 
 func handleCreateGroup(ctx *gin.Context) {
@@ -108,6 +157,92 @@ func handleCreateGroup(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusCreated, group)
+}
+
+func handleUpdateGroup(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie, token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access},
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	id := ctx.Param("id")
+	if id == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "group id is required",
+		})
+		return
+	}
+
+	var req UpdateGroupReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid request body",
+		})
+		return
+	}
+
+	// Ensure the group exists and enforce that only the creator can modify it,
+	// mirroring the Add/Remove member authorization behavior.
+	_, userId, _, err := GetUserGroups(ctx)
+	if err != nil || userId == "" {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to identify group updater",
+		})
+		return
+	}
+
+	group, err := database.GetGroupWithMembers(database.ServerDatabase, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "group not found",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to update group: %v", err),
+			})
+		}
+		return
+	}
+
+	if group.CreatedBy != userId {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "you do not have permission to update this group",
+		})
+		return
+	}
+
+	if err := database.UpdateGroup(database.ServerDatabase, id, req.Name, req.Description); err != nil {
+		if errors.Is(err, database.ErrReservedGroupPrefix) {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Group name cannot start with 'user-'",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to update group: %v", err),
+			})
+		}
+		return
+	}
+
+	ctx.Status(http.StatusNoContent)
 }
 
 func handleListGroupMembers(ctx *gin.Context) {
@@ -365,4 +500,122 @@ func handleListUsers(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, users)
+}
+
+func handleGetUser(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie, token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access},
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	id := ctx.Param("id")
+	if id == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "user id is required",
+		})
+		return
+	}
+
+	user, err := database.GetUserByID(database.ServerDatabase, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "user not found",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to get user: %v", err),
+			})
+		}
+		return
+	}
+
+	ctx.JSON(http.StatusOK, user)
+}
+
+type UpdateUserReq struct {
+	Username *string `json:"username"`
+	Sub      *string `json:"sub"`
+	Issuer   *string `json:"issuer"`
+}
+
+func handleUpdateUser(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie, token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access},
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	id := ctx.Param("id")
+	if id == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "user id is required",
+		})
+		return
+	}
+
+	var req UpdateUserReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid request body",
+		})
+		return
+	}
+
+	// Ensure the user exists so we can return 404 for unknown IDs.
+	if _, err := database.GetUserByID(database.ServerDatabase, id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "user not found",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to update user: %v", err),
+			})
+		}
+		return
+	}
+
+	if err := database.UpdateUser(database.ServerDatabase, id, req.Username, req.Sub, req.Issuer); err != nil {
+		// Map uniqueness and validation-type errors to 400, others to 500.
+		msg := err.Error()
+		if strings.Contains(msg, "UNIQUE constraint failed") || strings.Contains(msg, "user shares either username or (sub and iss) with another") {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    msg,
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to update user: %v", err),
+			})
+		}
+		return
+	}
+
+	ctx.Status(http.StatusNoContent)
 }
