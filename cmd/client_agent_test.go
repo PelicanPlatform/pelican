@@ -73,6 +73,7 @@ func TestClientAgentCLI(t *testing.T) {
 	socketPath := filepath.Join(tempDir, "agent.sock")
 	pidFile := filepath.Join(tempDir, "agent.pid")
 	logFile := filepath.Join(tempDir, "agent.log")
+	dbFile := filepath.Join(tempDir, "agent.db")
 
 	// Helper to print logs on failure
 	defer func() {
@@ -88,7 +89,8 @@ func TestClientAgentCLI(t *testing.T) {
 	startCmd := exec.Command(binaryPath, "client-agent", "start",
 		"--socket", socketPath,
 		"--pid-file", pidFile,
-		"--log", logFile)
+		"--log", logFile,
+		"--database", dbFile)
 
 	startOutput, err := startCmd.CombinedOutput()
 	require.NoError(t, err, "Failed to start server: %s", string(startOutput))
@@ -177,12 +179,14 @@ func TestClientAgentForeground(t *testing.T) {
 
 	socketPath := filepath.Join(tempDir, "agent.sock")
 	pidFile := filepath.Join(tempDir, "agent.pid")
+	dbFile := filepath.Join(tempDir, "agent.db")
 
 	// Start the server in foreground mode
 	t.Log("Starting client-agent in foreground mode...")
 	startCmd := exec.Command(binaryPath, "client-agent", "start",
 		"--socket", socketPath,
 		"--pid-file", pidFile,
+		"--database", dbFile,
 		"--foreground")
 
 	// Start in background but keep the process
@@ -235,6 +239,7 @@ func TestClientAgentRestart(t *testing.T) {
 	socketPath := filepath.Join(tempDir, "agent.sock")
 	pidFile := filepath.Join(tempDir, "agent.pid")
 	logFile := filepath.Join(tempDir, "agent.log")
+	dbFile := filepath.Join(tempDir, "agent.db")
 
 	// Helper to print logs on failure
 	defer func() {
@@ -251,7 +256,8 @@ func TestClientAgentRestart(t *testing.T) {
 	startCmd := exec.Command(binaryPath, "client-agent", "start",
 		"--socket", socketPath,
 		"--pid-file", pidFile,
-		"--log", logFile)
+		"--log", logFile,
+		"--database", dbFile)
 	output, err := startCmd.CombinedOutput()
 	if err != nil {
 		t.Logf("Start command output: %s", string(output))
@@ -290,7 +296,8 @@ func TestClientAgentRestart(t *testing.T) {
 	startCmd2 := exec.Command(binaryPath, "client-agent", "start",
 		"--socket", socketPath,
 		"--pid-file", pidFile,
-		"--log", logFile)
+		"--log", logFile,
+		"--database", dbFile)
 	startOutput2, err := startCmd2.CombinedOutput()
 	if err != nil {
 		t.Logf("Restart command output: %s", string(startOutput2))
@@ -330,6 +337,7 @@ func TestClientAgentAutoSpawn(t *testing.T) {
 	socketPath := filepath.Join(tempDir, "agent.sock")
 	pidFile := filepath.Join(tempDir, "agent.pid")
 	logFile := filepath.Join(tempDir, "agent.log")
+	dbFile := filepath.Join(tempDir, "agent.db")
 
 	// Helper to print logs on failure
 	defer func() {
@@ -344,6 +352,7 @@ func TestClientAgentAutoSpawn(t *testing.T) {
 		"PELICAN_CLIENTAGENT_SOCKET="+socketPath,
 		"PELICAN_CLIENTAGENT_PIDFILE="+pidFile,
 		"PELICAN_LOGGING_LOGLOCATION="+logFile,
+		"PELICAN_CLIENTAGENT_DBLOCATION="+dbFile,
 	)
 
 	// Clean up any leftover server at the end
@@ -414,6 +423,7 @@ func TestClientAgentIdleShutdown(t *testing.T) {
 	socketPath := filepath.Join(tempDir, "agent.sock")
 	pidFile := filepath.Join(tempDir, "agent.pid")
 	logFile := filepath.Join(tempDir, "agent.log")
+	dbFile := filepath.Join(tempDir, "agent.db")
 
 	// Helper to print logs on failure
 	defer func() {
@@ -425,7 +435,7 @@ func TestClientAgentIdleShutdown(t *testing.T) {
 	}()
 
 	// Set a short idle timeout for testing (3 seconds) using environment variable
-	testEnv := append(os.Environ(), "PELICAN_CLIENTAGENT_IDLETIMEOUT=3s")
+	testEnv := append(os.Environ(), "PELICAN_CLIENTAGENT_IDLETIMEOUT=3s", "PELICAN_CLIENTAGENT_DBLOCATION="+dbFile)
 
 	// Clean up any leftover server at the end
 	defer func() {
@@ -440,7 +450,8 @@ func TestClientAgentIdleShutdown(t *testing.T) {
 	startCmd := exec.Command(binaryPath, "client-agent", "start",
 		"--socket", socketPath,
 		"--pid-file", pidFile,
-		"--log", logFile)
+		"--log", logFile,
+		"--database", dbFile)
 	startCmd.Env = testEnv
 
 	startOutput, err := startCmd.CombinedOutput()

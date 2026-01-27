@@ -35,6 +35,32 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
+// getTempDir returns a temp directory, preferring t.TempDir() but falling back to /tmp
+// if the socket path would exceed 80 characters (to avoid Mac's 104 char limit)
+func getTempDir(t *testing.T) string {
+	tempDir := t.TempDir()
+	// Check if socket path would be too long (leave room for socket filename)
+	testSocketPath := filepath.Join(tempDir, "daemon.sock")
+	if len(testSocketPath) <= 80 {
+		// Path is fine, use t.TempDir() which auto-cleans up
+		return tempDir
+	}
+
+	t.Logf("TempDir socket path too long (%d chars), using /tmp instead", len(testSocketPath))
+
+	// Path too long, use /tmp instead
+	shortDir, err := os.MkdirTemp("/tmp", "pelican-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(shortDir); err != nil {
+			t.Logf("Warning: failed to remove temp directory %s: %v", shortDir, err)
+		}
+	})
+	return shortDir
+}
+
 // TestDaemonStartAndLock tests that the daemon:
 // 1. Can be started
 // 2. Holds the lock file
@@ -43,10 +69,15 @@ import (
 func TestDaemonStartAndLock(t *testing.T) {
 	server_utils.ResetTestState()
 
-	tempDir := t.TempDir()
+	tempDir := getTempDir(t)
 	socketPath := filepath.Join(tempDir, "test-daemon.sock")
 	pidFile := filepath.Join(tempDir, "test-daemon.pid")
 	logFile := filepath.Join(tempDir, "test-daemon.log")
+	dbFile := filepath.Join(tempDir, "test-daemon.db")
+
+	// Log path information for debugging (especially useful on macOS with 104-char socket limit)
+	t.Logf("Socket path: %s (length: %d)", socketPath, len(socketPath))
+	t.Logf("Temp dir: %s", tempDir)
 
 	// Build pelican binary for testing
 	pelicanBin := buildPelicanBinary(t)
@@ -57,7 +88,7 @@ func TestDaemonStartAndLock(t *testing.T) {
 		PidFile:     pidFile,
 		LogLocation: logFile,
 		MaxJobs:     2,
-		DbLocation:  "",
+		DbLocation:  dbFile,
 		IdleTimeout: 5 * time.Second,
 		ExecPath:    pelicanBin, // Use built binary instead of test binary
 	}
@@ -112,10 +143,15 @@ func TestDaemonStartAndLock(t *testing.T) {
 func TestDaemonWithActivity(t *testing.T) {
 	server_utils.ResetTestState()
 
-	tempDir := t.TempDir()
+	tempDir := getTempDir(t)
 	socketPath := filepath.Join(tempDir, "test-daemon-activity.sock")
 	pidFile := filepath.Join(tempDir, "test-daemon-activity.pid")
 	logFile := filepath.Join(tempDir, "test-daemon-activity.log")
+	dbFile := filepath.Join(tempDir, "test-daemon-activity.db")
+
+	// Log path information for debugging (especially useful on macOS with 104-char socket limit)
+	t.Logf("Socket path: %s (length: %d)", socketPath, len(socketPath))
+	t.Logf("Temp dir: %s", tempDir)
 
 	// Build pelican binary for testing
 	pelicanBin := buildPelicanBinary(t)
@@ -126,7 +162,7 @@ func TestDaemonWithActivity(t *testing.T) {
 		PidFile:     pidFile,
 		LogLocation: logFile,
 		MaxJobs:     2,
-		DbLocation:  "",
+		DbLocation:  dbFile,
 		IdleTimeout: 3 * time.Second,
 		ExecPath:    pelicanBin, // Use built binary instead of test binary
 	}
@@ -142,7 +178,20 @@ func TestDaemonWithActivity(t *testing.T) {
 	require.Eventually(t, func() bool {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		return apiClient.IsServerRunning(ctx)
+		isRunning := apiClient.IsServerRunning(ctx)
+		if !isRunning {
+			// Check if socket file exists
+			if _, err := os.Stat(socketPath); err != nil {
+				t.Logf("Socket file does not exist: %v", err)
+			} else {
+				t.Logf("Socket file exists but connection failed")
+			}
+			// Check if log file has any errors
+			if logData, err := os.ReadFile(logFile); err == nil && len(logData) > 0 {
+				t.Logf("Daemon log:\n%s", string(logData))
+			}
+		}
+		return isRunning
 	}, 5*time.Second, 500*time.Millisecond, "Daemon should start within 5 seconds")
 
 	ctx := context.Background()

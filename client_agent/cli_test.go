@@ -22,6 +22,7 @@ package client_agent_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -38,6 +39,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/client_agent"
+	"github.com/pelicanplatform/pelican/client_agent/apiclient"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
@@ -531,35 +533,67 @@ func TestCLIJobCommands(t *testing.T) {
 	})
 }
 
-// TestCLIAsyncServerNotRunning tests behavior when server is not running
-func TestCLIAsyncServerNotRunning(t *testing.T) {
+// TestCLIAsyncAutoSpawn tests that async commands auto-spawn the agent when not running
+func TestCLIAsyncAutoSpawn(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Build pelican binary
 	pelicanBin := buildPelicanBinary(t)
 
-	// Try to use async without server running
+	// Create a test file
 	testFile := filepath.Join(tempDir, "test.txt")
-	err := os.WriteFile(testFile, []byte("test"), 0644)
+	err := os.WriteFile(testFile, []byte("test data"), 0644)
 	require.NoError(t, err)
 
-	socketPath := filepath.Join(tempDir, "nonexistent.sock")
+	socketPath := filepath.Join(tempDir, "agent.sock")
+	pidFile := filepath.Join(tempDir, "agent.pid")
+	dbFile := filepath.Join(tempDir, "agent.db")
+	logFile := filepath.Join(tempDir, "agent.log")
 
-	cmd := exec.Command(pelicanBin, "object", "put", "--async", testFile, "pelican://example.com/test", "--token", "fake-token")
-	cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath))
+	// Create clean environment to prevent test interference
+	cleanEnv := make([]string, 0, len(os.Environ()))
+	for _, env := range os.Environ() {
+		if !strings.HasPrefix(env, "PELICAN_CLIENTAGENT_") &&
+			!strings.HasPrefix(env, "PELICAN_LOGGING_") {
+			cleanEnv = append(cleanEnv, env)
+		}
+	}
 
-	output, err := cmd.CombinedOutput()
-	require.Error(t, err, "Should fail when server is not running")
+	// Set paths for the auto-spawned agent
+	testEnv := append(cleanEnv,
+		fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", socketPath),
+		fmt.Sprintf("PELICAN_CLIENTAGENT_PIDFILE=%s", pidFile),
+		fmt.Sprintf("PELICAN_CLIENTAGENT_DBLOCATION=%s", dbFile),
+		fmt.Sprintf("PELICAN_LOGGING_LOGLOCATION=%s", logFile))
 
-	outputStr := string(output)
-	t.Logf("Error output: %s", outputStr)
+	// Cleanup function
+	defer func() {
+		stopCmd := exec.Command(pelicanBin, "client-agent", "stop", "--socket", socketPath, "--pid-file", pidFile)
+		stopCmd.Env = testEnv
+		_ = stopCmd.Run()
+	}()
 
-	// Should contain helpful error message
-	lowerOutput := strings.ToLower(outputStr)
-	assert.True(t,
-		strings.Contains(lowerOutput, "not running") ||
-			strings.Contains(lowerOutput, "failed to create") ||
-			strings.Contains(lowerOutput, "failed to connect") ||
-			strings.Contains(lowerOutput, "connection refused"),
-		"Error should indicate server is not running")
+	// Run async command - should auto-spawn agent (will fail due to fake URL, but agent should start)
+	cmd := exec.Command(pelicanBin, "object", "get", "--async",
+		"pelican://nonexistent.example.com/test", filepath.Join(tempDir, "output"))
+	cmd.Env = testEnv
+	output, _ := cmd.CombinedOutput() // Ignore error - transfer will fail, but agent should spawn
+	t.Logf("Command output: %s", string(output))
+
+	// Verify the agent auto-spawned by checking if it's running
+	apiClient, err := apiclient.NewAPIClient(socketPath)
+	require.NoError(t, err, "Failed to create API client")
+
+	require.Eventually(t, func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		return apiClient.IsServerRunning(ctx)
+	}, 10*time.Second, 500*time.Millisecond, "Agent should have auto-spawned")
+
+	// Verify PID file was created
+	pid, err := client_agent.GetServerPID(pidFile)
+	require.NoError(t, err, "Should be able to read PID file")
+	require.Greater(t, pid, 0, "PID should be positive")
+
+	t.Logf("Agent successfully auto-spawned with PID: %d", pid)
 }
