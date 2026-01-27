@@ -55,6 +55,7 @@ type Config struct {
 		LocalRoot string `mapstructure:"localroot" yaml:"LocalRoot"`
 		LowWatermark string `mapstructure:"lowwatermark" yaml:"LowWatermark"`
 		MetaLocations []string `mapstructure:"metalocations" yaml:"MetaLocations"`
+		MinDirectorRefreshInterval time.Duration `mapstructure:"mindirectorrefreshinterval" yaml:"MinDirectorRefreshInterval"`
 		NamespaceLocation string `mapstructure:"namespacelocation" yaml:"NamespaceLocation"`
 		PSSOrigin string `mapstructure:"pssorigin" yaml:"PSSOrigin"`
 		PermittedNamespaces []string `mapstructure:"permittednamespaces" yaml:"PermittedNamespaces"`
@@ -468,6 +469,7 @@ type configWithType struct {
 		LocalRoot struct { Type string; Value string }
 		LowWatermark struct { Type string; Value string }
 		MetaLocations struct { Type string; Value []string }
+		MinDirectorRefreshInterval struct { Type string; Value time.Duration }
 		NamespaceLocation struct { Type string; Value string }
 		PSSOrigin struct { Type string; Value string }
 		PermittedNamespaces struct { Type string; Value []string }
