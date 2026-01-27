@@ -940,6 +940,76 @@ func TestGroupManagementAPI(t *testing.T) {
 		assert.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on DELETE, body: %s", recorder.Code, recorder.Body.String()))
 	})
 
+	t.Run("test-get-and-update-group", func(t *testing.T) {
+		// Create a group
+		groupName := "test-group-get-update"
+		createGroupReq := map[string]string{"name": groupName, "description": "original description"}
+		body, err := json.Marshal(createGroupReq)
+		require.NoError(t, err)
+
+		req, err := http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
+		require.NoError(t, err)
+
+		ownerToken := generateTestAdminUserToken(t)
+		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
+		req.Header.Set("Content-Type", "application/json")
+
+		recorder := httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusCreated, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
+
+		var createGroupResp map[string]string
+		err = json.NewDecoder(recorder.Body).Decode(&createGroupResp)
+		require.NoError(t, err)
+		groupID := createGroupResp["id"]
+		require.NotEmpty(t, groupID)
+
+		// Fetch the group via GET /groups/:id
+		req, err = http.NewRequest("GET", "/api/v1.0/groups/"+groupID, nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
+
+		recorder = httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusOK, recorder.Code)
+
+		var fetchedGroup map[string]interface{}
+		err = json.NewDecoder(recorder.Body).Decode(&fetchedGroup)
+		require.NoError(t, err)
+		require.Equal(t, groupName, fetchedGroup["name"])
+
+		// Update the group via PATCH /groups/:id
+		newName := "updated-group-name"
+		newDescription := "updated description"
+		updateReq := map[string]string{"name": newName, "description": newDescription}
+		body, err = json.Marshal(updateReq)
+		require.NoError(t, err)
+
+		req, err = http.NewRequest("PATCH", "/api/v1.0/groups/"+groupID, bytes.NewReader(body))
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
+		req.Header.Set("Content-Type", "application/json")
+
+		recorder = httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on PATCH, body: %s", recorder.Code, recorder.Body.String()))
+
+		// Verify the updates via GET
+		req, err = http.NewRequest("GET", "/api/v1.0/groups/"+groupID, nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
+
+		recorder = httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusOK, recorder.Code)
+
+		fetchedGroup = map[string]interface{}{}
+		err = json.NewDecoder(recorder.Body).Decode(&fetchedGroup)
+		require.NoError(t, err)
+		require.Equal(t, newName, fetchedGroup["name"])
+		require.Equal(t, newDescription, fetchedGroup["description"])
+	})
+
 	t.Run("test-regular-user-can-create-group", func(t *testing.T) {
 		// Test that a regular (non-admin) user can create a group
 		groupName := "test-regular-user-group"
