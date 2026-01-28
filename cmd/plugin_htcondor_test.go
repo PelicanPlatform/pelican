@@ -27,7 +27,9 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -37,6 +39,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -56,6 +59,36 @@ func TestHTCondorPlugin(t *testing.T) {
 		t.Skip("condor_master not found in PATH, skipping integration test")
 	}
 
+	var condorUsername string
+	var aliceUsername string
+
+	// Determine the user that will be running the HTCondor daemons
+	// and the user that will be submitting HTCondor jobs
+	if os.Geteuid() == 0 {
+		// Assume that we're running in Pelican's testing container
+		condorUsername = "condor"
+		aliceUsername = "alice"
+	} else {
+		currentUser, err := user.Current()
+		require.NoError(t, err)
+		condorUsername = currentUser.Username
+		aliceUsername = currentUser.Username
+	}
+
+	condorUser, err := user.Lookup(condorUsername)
+	require.NoError(t, err)
+	condorUid, err := strconv.Atoi(condorUser.Uid)
+	require.NoError(t, err)
+	condorGid, err := strconv.Atoi(condorUser.Gid)
+	require.NoError(t, err)
+
+	aliceUser, err := user.Lookup(aliceUsername)
+	require.NoError(t, err)
+	aliceUid, err := strconv.Atoi(aliceUser.Uid)
+	require.NoError(t, err)
+	aliceGid, err := strconv.Atoi(aliceUser.Gid)
+	require.NoError(t, err)
+
 	// Reset test state
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
@@ -65,6 +98,13 @@ func TestHTCondorPlugin(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { os.RemoveAll(tempDir) })
 
+	// Both the 'condor' and 'alice' users need access to subdirectories
+	require.NoError(t, os.Chmod(tempDir, 0711))
+
+	// The 'condor' user needs to be able to write to the log directory
+	logDir := filepath.Join(tempDir, "log")
+	require.NoError(t, config.MkdirAll(logDir, 0755, condorUid, condorGid))
+
 	// Create secure socket directory in /tmp to avoid path length issues
 	socketDir, err := os.MkdirTemp("/tmp", "htc_sock_*")
 	require.NoError(t, err)
@@ -72,10 +112,6 @@ func TestHTCondorPlugin(t *testing.T) {
 
 	t.Logf("Using temporary directory: %s", tempDir)
 	t.Logf("Using socket directory: %s", socketDir)
-
-	// Set XRD_PLUGINCONFDIR so XRootD can load the pelican protocol handler
-	// This allows the cache to handle pelican:// URLs
-	t.Setenv("XRD_PLUGINCONFDIR", "/Users/bbockelm/projects/xrdcl-curl/build/release_dir/etc/xrootd/client.plugins.d/")
 
 	// Start a Pelican data federation
 	t.Log("Starting Pelican data federation...")
@@ -119,12 +155,7 @@ Origin:
 	t.Log("Building pelican binary for plugin...")
 	pelicanBinary := filepath.Join(tempDir, "pelican")
 
-	// Find the repository root
-	repoRoot, err := findRepoRoot()
-	require.NoError(t, err, "Failed to find git repository root")
-
-	buildCmd := exec.Command("go", "build", "-buildvcs=false", "-o", pelicanBinary, "./cmd")
-	buildCmd.Dir = repoRoot
+	buildCmd := exec.Command("go", "build", "-buildvcs=false", "-o", pelicanBinary, "../cmd")
 	output, err := buildCmd.CombinedOutput()
 	if err != nil {
 		t.Logf("Build output: %s", string(output))
@@ -134,7 +165,7 @@ Origin:
 
 	// Create HTCondor configuration
 	configFile := filepath.Join(tempDir, "condor_config")
-	require.NoError(t, writeMiniCondorConfig(configFile, tempDir, socketDir, pelicanBinary))
+	require.NoError(t, writeMiniCondorConfig(configFile, tempDir, logDir, socketDir, pelicanBinary))
 
 	// Set CONDOR_CONFIG environment variable
 	t.Setenv("CONDOR_CONFIG", configFile)
@@ -166,7 +197,7 @@ Origin:
 
 	// Create a job submit directory
 	jobDir := filepath.Join(tempDir, "job")
-	require.NoError(t, os.MkdirAll(jobDir, 0755))
+	require.NoError(t, config.MkdirAll(jobDir, 0755, aliceUid, aliceGid))
 
 	// Create an executable script for the job
 	scriptPath := filepath.Join(jobDir, "test-script.sh")
@@ -219,6 +250,8 @@ queue
 	t.Log("Submitting job to HTCondor...")
 	submitCmd := exec.Command("condor_submit", submitFile)
 	submitCmd.Env = append(os.Environ(), "CONDOR_CONFIG="+configFile)
+	submitCmd.SysProcAttr = &syscall.SysProcAttr{}
+	submitCmd.SysProcAttr.Credential = &syscall.Credential{Uid: uint32(aliceUid), Gid: uint32(aliceGid)}
 	submitOutput, err := submitCmd.CombinedOutput()
 	t.Logf("Submit output: %s", string(submitOutput))
 	require.NoError(t, err, "Failed to submit job")
@@ -264,16 +297,6 @@ queue
 	}
 }
 
-// findRepoRoot finds the root of the git repository
-func findRepoRoot() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(output)), nil
-}
-
 // findHTCondorSbin finds the sbin directory for HTCondor binaries
 func findHTCondorSbin() (string, error) {
 	condorMaster, err := exec.LookPath("condor_master")
@@ -300,13 +323,13 @@ func findHTCondorLibexec() (string, error) {
 		return filepath.Dir(sharedPort), nil
 	}
 
-	// Derive from condor_master location
-	condorMaster, err := exec.LookPath("condor_master")
+	// Use condor_config_val to derive the location
+	cmd := exec.Command("condor_config_val", "LIBEXEC")
+	output, err := cmd.Output()
 	if err != nil {
-		return "", errors.New("could not find condor_master to derive libexec")
+		return "", errors.Wrapf(err, "failed to use condor_config_val to derive LIBEXEC")
 	}
-	sbinDir := filepath.Dir(condorMaster)
-	libexecDir := filepath.Join(filepath.Dir(sbinDir), "libexec")
+	libexecDir := strings.TrimSpace(string(output))
 
 	// Verify it exists
 	if _, err := os.Stat(filepath.Join(libexecDir, "condor_shared_port")); err != nil {
@@ -317,7 +340,7 @@ func findHTCondorLibexec() (string, error) {
 }
 
 // writeMiniCondorConfig writes a minimal HTCondor configuration for testing
-func writeMiniCondorConfig(configFile, tempDir, socketDir, pelicanBinary string) error {
+func writeMiniCondorConfig(configFile, tempDir, logDir, socketDir, pelicanBinary string) error {
 	// Find HTCondor binaries in PATH
 	sbinDir, err := findHTCondorSbin()
 	if err != nil {
@@ -337,7 +360,7 @@ func writeMiniCondorConfig(configFile, tempDir, socketDir, pelicanBinary string)
 	config := fmt.Sprintf(`# Mini HTCondor configuration for Pelican plugin testing
 CONDOR_HOST = 127.0.0.1
 LOCAL_DIR = %s
-LOG = $(LOCAL_DIR)/log
+LOG = %s
 SPOOL = $(LOCAL_DIR)/spool
 EXECUTE = $(LOCAL_DIR)/execute
 LOCK = $(LOCAL_DIR)/lock
@@ -389,7 +412,7 @@ PREEMPT = False
 KILL = False
 WANT_SUSPEND = False
 WANT_VACATE = False
-`, tempDir, sbinDir, binDir, libexecDir, socketDir)
+`, tempDir, logDir, sbinDir, binDir, libexecDir, socketDir)
 
 	if err := os.WriteFile(configFile, []byte(config), 0644); err != nil {
 		return err

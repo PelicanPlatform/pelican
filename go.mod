@@ -5,6 +5,8 @@ retract [v1.0.0, v1.0.5]
 
 go 1.25.0
 
+toolchain go1.25.5
+
 require (
 	github.com/JGLTechnologies/gin-rate-limit v1.5.4
 	github.com/PelicanPlatform/classad v0.0.5

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
-import sys
+import argparse
+
 import geoip2.database
 import geoip2.errors
-import argparse
+
 
 def resolve_ip(database_path, ip_address):
     try:
@@ -20,19 +21,20 @@ def resolve_ip(database_path, ip_address):
     except Exception as e:
         print(f"An error occurred: {e}")
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Resolve IP address using GeoIP2 database.")
     parser.add_argument(
         "-d",
         "--db-path",
         help="Path to the GeoIP2 database file",
-        default="/var/cache/pelican/maxmind/GeoLite2-City.mmdb"
+        default="/var/cache/pelican/maxmind/GeoLite2-City.mmdb",
     )
     parser.add_argument(
         "-i",
         "--ip",
         help="IP address to resolve",
-        required=True
+        required=True,
     )
 
     args = parser.parse_args()

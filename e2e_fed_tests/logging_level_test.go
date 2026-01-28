@@ -216,7 +216,7 @@ func buildPelicanCLI(t *testing.T) string {
 	cliPath := filepath.Join(tmpDir, "pelican-cli")
 
 	// Build from the parent directory
-	cmd := exec.Command("go", "build", "-o", cliPath, "../cmd")
+	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", cliPath, "../cmd")
 	cmd.Env = os.Environ()
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, "Failed to build CLI: %s", string(output))

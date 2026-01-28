@@ -90,7 +90,7 @@ endif
 
 web_ui/frontend/out/index.html : $(WEBSITE_SRC_FILES) swagger/pelican-swagger.yaml
 ifeq ($(USE_DOCKER),0)
-	@cd $(WEBSITE_SRC_PATH) && npm install && npm run build
+	@cd $(WEBSITE_SRC_PATH) && npm ci && npm run build
 else
 	@cd $(WEBSITE_SRC_PATH) && $(CONTAINER_TOOL) build -t origin-ui . && $(CONTAINER_TOOL) run --rm -v `pwd`:/webapp origin-ui npm run build
 endif

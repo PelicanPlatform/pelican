@@ -1,0 +1,21 @@
+---
+# Actions to take after a new release has been published on GitHub.
+name: Post-Release Actions
+
+on:
+  release:
+    types: [published]
+  workflow_call:
+
+jobs:
+  update-website:
+    name: Update pelicanplatform.org
+    if: ${{ github.repository == 'PelicanPlatform/pelican' }}
+    runs-on: ubuntu-latest
+    steps:
+
+      # Pull the latest release onto pelicanplatform.org and update various
+      # pointers on the website as needed.
+      - name: Call pelicanplatform.org webhook
+        run: |
+          curl -X POST https://dl.pelicanplatform.org/api/api/hooks/release-download-toggle
