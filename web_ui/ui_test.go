@@ -1068,4 +1068,115 @@ func TestGroupManagementAPI(t *testing.T) {
 		route.ServeHTTP(recorder, req)
 		assert.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 	})
+
+	t.Run("test-delete-group-authz-and-acl-cleanup", func(t *testing.T) {
+		// Create a group as a regular user (non-admin creator)
+		creatorToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "group-creator")
+		otherToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "not-creator")
+		adminToken := generateTestAdminUserToken(t)
+
+		groupName := "test-delete-group"
+		createGroupReq := map[string]string{"name": groupName, "description": "test group"}
+		body, err := json.Marshal(createGroupReq)
+		require.NoError(t, err)
+
+		req, err := http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: creatorToken})
+		req.Header.Set("Content-Type", "application/json")
+
+		recorder := httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusCreated, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
+
+		var createGroupResp map[string]string
+		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&createGroupResp))
+		groupID := createGroupResp["id"]
+		require.NotEmpty(t, groupID)
+
+		// Create a collection ACL entry referencing the group name (not group ID)
+		col, err := database.CreateCollection(database.ServerDatabase, "col-for-group-delete", "desc", "owner-user", "/test", database.VisibilityPrivate)
+		require.NoError(t, err)
+		acl := database.CollectionACL{
+			CollectionID: col.ID,
+			GroupID:      groupName,
+			Role:         database.AclRoleRead,
+			GrantedBy:    "owner-user",
+		}
+		require.NoError(t, database.ServerDatabase.Create(&acl).Error)
+
+		var aclCount int64
+		require.NoError(t, database.ServerDatabase.Model(&database.CollectionACL{}).Where("group_id = ?", groupName).Count(&aclCount).Error)
+		require.EqualValues(t, 1, aclCount)
+
+		// Non-creator, non-admin cannot delete
+		req, err = http.NewRequest("DELETE", "/api/v1.0/groups/"+groupID, nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: otherToken})
+		recorder = httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusForbidden, recorder.Code)
+
+		// Admin can delete and should cleanup the ACL
+		req, err = http.NewRequest("DELETE", "/api/v1.0/groups/"+groupID, nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: adminToken})
+		recorder = httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusNoContent, recorder.Code)
+
+		require.NoError(t, database.ServerDatabase.Model(&database.CollectionACL{}).Where("group_id = ?", groupName).Count(&aclCount).Error)
+		require.EqualValues(t, 0, aclCount)
+	})
+
+	t.Run("test-delete-user-admin-and-acl-cleanup", func(t *testing.T) {
+		adminToken := generateTestAdminUserToken(t)
+
+		// Create a user via API
+		username := "user-to-delete"
+		createUserReq := map[string]string{"username": username, "sub": "sub-to-delete", "issuer": "https://test-issuer.org"}
+		body, err := json.Marshal(createUserReq)
+		require.NoError(t, err)
+
+		req, err := http.NewRequest("POST", "/api/v1.0/users", bytes.NewReader(body))
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: adminToken})
+		req.Header.Set("Content-Type", "application/json")
+
+		recorder := httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusCreated, recorder.Code)
+
+		var createUserResp map[string]string
+		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&createUserResp))
+		userID := createUserResp["id"]
+		require.NotEmpty(t, userID)
+
+		// Create a collection ACL entry referencing the user's implicit personal group name
+		personalGroup := "user-" + username
+		col, err := database.CreateCollection(database.ServerDatabase, "col-for-user-delete", "desc", "owner-user2", "/test2", database.VisibilityPrivate)
+		require.NoError(t, err)
+		acl := database.CollectionACL{
+			CollectionID: col.ID,
+			GroupID:      personalGroup,
+			Role:         database.AclRoleRead,
+			GrantedBy:    "owner-user2",
+		}
+		require.NoError(t, database.ServerDatabase.Create(&acl).Error)
+
+		var aclCount int64
+		require.NoError(t, database.ServerDatabase.Model(&database.CollectionACL{}).Where("group_id = ?", personalGroup).Count(&aclCount).Error)
+		require.EqualValues(t, 1, aclCount)
+
+		// Delete user as admin and ensure ACL cleanup happened
+		req, err = http.NewRequest("DELETE", "/api/v1.0/users/"+userID, nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: adminToken})
+		recorder = httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusNoContent, recorder.Code)
+
+		require.NoError(t, database.ServerDatabase.Model(&database.CollectionACL{}).Where("group_id = ?", personalGroup).Count(&aclCount).Error)
+		require.EqualValues(t, 0, aclCount)
+	})
 }

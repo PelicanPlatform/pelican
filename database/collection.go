@@ -827,3 +827,67 @@ func GetAllCollections(db *gorm.DB) ([]Collection, error) {
 	}
 	return collections, nil
 }
+
+// DeleteGroup deletes a group and cleans up any collection ACL entries that reference the
+// group's name (ACLs store group names, not group slugs).
+//
+// If isAdmin is false, only the group creator (CreatedBy) may delete the group.
+func DeleteGroup(db *gorm.DB, groupID, requestorUserID string, isAdmin bool) error {
+	var group Group
+	if err := db.First(&group, "id = ?", groupID).Error; err != nil {
+		return err
+	}
+
+	if !isAdmin && group.CreatedBy != requestorUserID {
+		return ErrForbidden
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		// Remove any ACL entries referencing the group name.
+		if err := tx.Where("group_id = ?", group.Name).Delete(&CollectionACL{}).Error; err != nil {
+			return err
+		}
+
+		// Delete group members explicitly (in addition to any FK cascade).
+		if err := tx.Where("group_id = ?", group.ID).Delete(&GroupMember{}).Error; err != nil {
+			return err
+		}
+
+		// Finally, delete the group itself.
+		if err := tx.Delete(&group).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+}
+
+// DeleteUser deletes a user and cleans up any collection ACL entries that reference the
+// user's implicit personal group name ("user-"+username).
+func DeleteUser(db *gorm.DB, userID string) error {
+	var user User
+	if err := db.First(&user, "id = ?", userID).Error; err != nil {
+		return err
+	}
+
+	personalGroup := "user-" + user.Username
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		// Remove any ACL entries referencing the user's personal group name.
+		if err := tx.Where("group_id = ?", personalGroup).Delete(&CollectionACL{}).Error; err != nil {
+			return err
+		}
+
+		// Delete group memberships explicitly (in addition to any FK cascade).
+		if err := tx.Where("user_id = ?", user.ID).Delete(&GroupMember{}).Error; err != nil {
+			return err
+		}
+
+		// Finally, delete the user itself.
+		if err := tx.Delete(&user).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+}

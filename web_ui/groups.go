@@ -619,3 +619,102 @@ func handleUpdateUser(ctx *gin.Context) {
 
 	ctx.Status(http.StatusNoContent)
 }
+
+func handleDeleteGroup(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie, token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access},
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	id := ctx.Param("id")
+	if id == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "group id is required",
+		})
+		return
+	}
+
+	user, userId, groups, err := GetUserGroups(ctx)
+	if err != nil || userId == "" || user == "" {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to identify group deleter",
+		})
+		return
+	}
+	isAdmin, _ := CheckAdmin(user, groups)
+
+	if err := database.DeleteGroup(database.ServerDatabase, id, userId, isAdmin); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "group not found",
+			})
+		} else if errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "you do not have permission to delete this group",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to delete group: %v", err),
+			})
+		}
+		return
+	}
+
+	ctx.Status(http.StatusNoContent)
+}
+
+func handleDeleteUser(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie, token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access},
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	id := ctx.Param("id")
+	if id == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "user id is required",
+		})
+		return
+	}
+
+	if err := database.DeleteUser(database.ServerDatabase, id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "user not found",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to delete user: %v", err),
+			})
+		}
+		return
+	}
+
+	ctx.Status(http.StatusNoContent)
+}
