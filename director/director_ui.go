@@ -557,6 +557,13 @@ func getDowntimeDetails(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, downtimes)
 }
 
+// Get the current federation metadata discrepancy status.
+// This compares what the Director serves vs what the Discovery URL serves.
+func getFederationDiscrepancy(ctx *gin.Context) {
+	discrepancy := GetMetadataDiscrepancy()
+	ctx.JSON(http.StatusOK, discrepancy)
+}
+
 func RegisterDirectorWebAPI(router *gin.RouterGroup) {
 	directorWebAPI := router.Group("/api/v1.0/director_ui")
 	// Follow RESTful schema
@@ -570,5 +577,6 @@ func RegisterDirectorWebAPI(router *gin.RouterGroup) {
 		directorWebAPI.GET("/namespaces", listNamespacesHandler)
 		directorWebAPI.GET("/contact", handleDirectorContact)
 		directorWebAPI.GET("/downtimes", listDowntimeDetails)
+		directorWebAPI.GET("/federation/discrepancy", web_ui.AuthHandler, web_ui.AdminAuthHandler, getFederationDiscrepancy)
 	}
 }

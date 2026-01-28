@@ -359,3 +359,13 @@ export const getDowntime = async () => {
 export const getDirectorDowntime = async () => {
   return await fetch('/api/v1.0/director_ui/downtimes');
 };
+
+/**
+ * Get federation metadata discrepancy status
+ */
+export const getFederationDiscrepancy = async (): Promise<Response> => {
+  return await fetchApi(
+    async () =>
+      await secureFetch('/api/v1.0/director_ui/federation/discrepancy')
+  );
+};

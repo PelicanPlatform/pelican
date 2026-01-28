@@ -32,6 +32,7 @@ import { getDirectorNamespaces, getDirectorServers } from '@/helpers/get';
 import { alertOnError } from '@/helpers/util';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import GeoIpErrorDisplay from '@/components/GeoIpErrorDisplay';
+import MetadataDiscrepancyAlert from '@/components/MetadataDiscrepancyAlert';
 
 export default function Page() {
   const dispatch = useContext(AlertDispatchContext);
@@ -71,6 +72,9 @@ export default function Page() {
   return (
     <PaddedContent>
       <Box width={'100%'}>
+        <AuthenticatedContent allowedRoles={['admin']}>
+          <MetadataDiscrepancyAlert />
+        </AuthenticatedContent>
         <Grid container spacing={2}>
           <Grid
             size={{
