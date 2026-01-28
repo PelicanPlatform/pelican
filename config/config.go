@@ -2056,13 +2056,6 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	// Register callback for runtime log level changes
 	RegisterLoggingCallback()
 
-	// Ensure server defaults are applied before any federation discovery; several
-	// tests rely on URL defaults being derived from Server.ExternalWebUrl.
-	if err := SetServerDefaults(viper.GetViper()); err != nil {
-		logging.FlushLogs(true)
-		return err
-	}
-
 	// Sets (or resets) the federation info. Unlike in clients, we do this at startup
 	// instead of deferring it.
 	fedDiscoveryOnce = &sync.Once{}
