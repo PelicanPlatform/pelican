@@ -24,17 +24,20 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"hash"
 	"hash/crc32"
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/client"
+	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 )
@@ -57,6 +60,8 @@ func init() {
 	flagSet.String("checksums", "", "Verify files against a checksums manifest. The format is ALGORITHM:FILENAME")
 	flagSet.String("transfer-stats", "", "File to write transfer stats to")
 	flagSet.String("pack", "", "Package transfer using remote packing functionality (same as '?pack=' query). Options: auto, tar, tar.gz, tar.xz, zip. Default: auto when flag is provided without an explicit value")
+	flagSet.Bool("async", false, "Run the transfer asynchronously through the client API server and return a job ID")
+	flagSet.Bool("wait", false, "When used with --async, wait for the job to complete before returning")
 	objectCmd.AddCommand(putCmd)
 }
 
@@ -136,6 +141,114 @@ func putMain(cmd *cobra.Command, args []string) {
 		} else {
 			os.Exit(1)
 		}
+	}
+
+	// Check for async mode
+	isAsync, _ := cmd.Flags().GetBool("async")
+	if isAsync {
+		// Validate arguments
+		if len(args) < 2 {
+			log.Errorln("No Source or Destination")
+			if err := cmd.Help(); err != nil {
+				log.Errorln("Failed to print out help:", err)
+			}
+			os.Exit(1)
+		}
+		source := args[:len(args)-1]
+		dest := args[len(args)-1]
+
+		// Ensure server is running, starting it if necessary
+		apiClient, err := ensureClientAgentRunning(cmd.Context(), 5)
+		if err != nil {
+			log.Errorln("Failed to ensure API server is running:", err)
+			log.Errorln("You can manually start it with 'pelican client-api serve --daemonize'")
+			os.Exit(1)
+		}
+
+		// Get flags for transfer options
+		isRecursive, _ := cmd.Flags().GetBool("recursive")
+		tokenLocation, _ := cmd.Flags().GetString("token")
+		packOption, _ := cmd.Flags().GetString("pack")
+
+		// Build transfer options
+		options := client_agent.TransferOptions{
+			Token:      tokenLocation,
+			PackOption: packOption,
+		}
+
+		// Create transfers for each source
+		transfers := make([]client_agent.TransferRequest, len(source))
+		for i, src := range source {
+			transfers[i] = client_agent.TransferRequest{
+				Operation:   "put",
+				Source:      src,
+				Destination: dest,
+				Recursive:   isRecursive,
+			}
+		}
+
+		// Create job
+		jobID, err := apiClient.CreateJob(ctx, transfers, options)
+		if err != nil {
+			log.Errorln("Failed to create job:", err)
+			os.Exit(1)
+		}
+
+		if outputJSON {
+			result := map[string]interface{}{
+				"job_id": jobID,
+				"status": "created",
+			}
+			jsonBytes, err := json.MarshalIndent(result, "", "  ")
+			if err != nil {
+				log.Errorln("Failed to marshal JSON:", err)
+				os.Exit(1)
+			}
+			fmt.Println(string(jsonBytes))
+		} else {
+			fmt.Printf("Job created: %s\n", jobID)
+		}
+
+		// Check if we should wait for completion
+		shouldWait, _ := cmd.Flags().GetBool("wait")
+		if shouldWait {
+			if !outputJSON {
+				fmt.Println("Waiting for job to complete...")
+			}
+
+			// Wait with a reasonable timeout (e.g., 1 hour)
+			err := apiClient.WaitForJob(ctx, jobID, 1*time.Hour)
+			if err != nil {
+				log.Errorln("Error waiting for job:", err)
+				os.Exit(1)
+			}
+
+			// Get final status
+			finalStatus, err := apiClient.GetJobStatus(ctx, jobID)
+			if err != nil {
+				log.Errorln("Error getting final job status:", err)
+				os.Exit(1)
+			}
+
+			if outputJSON {
+				jsonBytes, err := json.MarshalIndent(finalStatus, "", "  ")
+				if err != nil {
+					log.Errorln("Failed to marshal JSON:", err)
+					os.Exit(1)
+				}
+				fmt.Println(string(jsonBytes))
+			} else {
+				fmt.Printf("Job completed successfully\n")
+				if finalStatus.Progress != nil {
+					fmt.Printf("Transferred: %d bytes\n", finalStatus.Progress.BytesTransferred)
+				}
+			}
+		} else {
+			if !outputJSON {
+				fmt.Printf("Check status with: pelican job status %s\n", jobID)
+			}
+		}
+		return
 	}
 
 	var options []client.TransferOption

@@ -106,7 +106,7 @@ func Execute() error {
 	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
 	exeErr := rootCmd.ExecuteContext(ctx)
 	if exeErr != nil {
-		log.Errorln("Fatal error occurred at the start of the program. Cleanup started:", exeErr)
+		log.Debugln("Fatal error occurred at the start of the program. Cleanup started:", exeErr)
 	}
 	// Wait until all goroutines in errgroup finish their clean up
 	egrpErr := egrp.Wait()
