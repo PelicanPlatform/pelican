@@ -1489,14 +1489,16 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Cache_Port.GetName(), xrootdPort)
 	}
 
-	if param.Origin_Port.GetInt() != 443 {
-		v.SetDefault(param.Origin_Url.GetName(), fmt.Sprintf("https://%v:%v", v.GetString(param.Server_Hostname.GetName()), param.Origin_Port.GetInt()))
+	originPort := v.GetInt(param.Origin_Port.GetName())
+	if originPort != 443 {
+		v.SetDefault(param.Origin_Url.GetName(), fmt.Sprintf("https://%v:%v", v.GetString(param.Server_Hostname.GetName()), originPort))
 	} else {
 		v.SetDefault(param.Origin_Url.GetName(), fmt.Sprintf("https://%v", v.GetString(param.Server_Hostname.GetName())))
 	}
 
-	if param.Cache_Port.GetInt() != 443 {
-		v.SetDefault(param.Cache_Url.GetName(), fmt.Sprintf("https://%v:%v", v.GetString(param.Server_Hostname.GetName()), param.Cache_Port.GetInt()))
+	cachePort := v.GetInt(param.Cache_Port.GetName())
+	if cachePort != 443 {
+		v.SetDefault(param.Cache_Url.GetName(), fmt.Sprintf("https://%v:%v", v.GetString(param.Server_Hostname.GetName()), cachePort))
 	} else {
 		v.SetDefault(param.Cache_Url.GetName(), fmt.Sprintf("https://%v", v.GetString(param.Server_Hostname.GetName())))
 	}
@@ -2054,13 +2056,6 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 
 	// Register callback for runtime log level changes
 	RegisterLoggingCallback()
-
-	// Ensure server defaults are applied before any federation discovery; several
-	// tests rely on URL defaults being derived from Server.ExternalWebUrl.
-	if err := SetServerDefaults(viper.GetViper()); err != nil {
-		logging.FlushLogs(true)
-		return err
-	}
 
 	// Sets (or resets) the federation info. Unlike in clients, we do this at startup
 	// instead of deferring it.
