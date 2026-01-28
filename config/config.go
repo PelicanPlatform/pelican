@@ -1489,14 +1489,16 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Cache_Port.GetName(), xrootdPort)
 	}
 
-	if param.Origin_Port.GetInt() != 443 {
-		v.SetDefault(param.Origin_Url.GetName(), fmt.Sprintf("https://%v:%v", v.GetString(param.Server_Hostname.GetName()), param.Origin_Port.GetInt()))
+	originPort := v.GetInt(param.Origin_Port.GetName())
+	if originPort != 443 {
+		v.SetDefault(param.Origin_Url.GetName(), fmt.Sprintf("https://%v:%v", v.GetString(param.Server_Hostname.GetName()), originPort))
 	} else {
 		v.SetDefault(param.Origin_Url.GetName(), fmt.Sprintf("https://%v", v.GetString(param.Server_Hostname.GetName())))
 	}
 
-	if param.Cache_Port.GetInt() != 443 {
-		v.SetDefault(param.Cache_Url.GetName(), fmt.Sprintf("https://%v:%v", v.GetString(param.Server_Hostname.GetName()), param.Cache_Port.GetInt()))
+	cachePort := v.GetInt(param.Cache_Port.GetName())
+	if cachePort != 443 {
+		v.SetDefault(param.Cache_Url.GetName(), fmt.Sprintf("https://%v:%v", v.GetString(param.Server_Hostname.GetName()), cachePort))
 	} else {
 		v.SetDefault(param.Cache_Url.GetName(), fmt.Sprintf("https://%v", v.GetString(param.Server_Hostname.GetName())))
 	}
