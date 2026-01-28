@@ -265,6 +265,14 @@ func GetUserGroups(ctx *gin.Context) (user string, userId string, groups []strin
 		return
 	}
 
+	// Extract oidc_sub claim (the OIDC subject identifier)
+	// This is set in context so admin checks can match against UIAdminUsers
+	if oidcSubIface, ok := parsed.Get("oidc_sub"); ok {
+		if oidcSub, ok := oidcSubIface.(string); ok && oidcSub != "" {
+			ctx.Set("OIDCSub", oidcSub)
+		}
+	}
+
 	groupsIface, ok := parsed.Get("wlcg.groups")
 	if ok {
 		if groupsTmp, ok := groupsIface.([]interface{}); ok {
@@ -348,7 +356,7 @@ func AuthHandler(ctx *gin.Context) {
 // The current implementation forces the OAuth2 endpoint; future work may instead use a generic
 // login page.
 func RequireAuthMiddleware(ctx *gin.Context) {
-	user, _, groups, err := GetUserGroups(ctx)
+	user, userId, groups, err := GetUserGroups(ctx)
 	if user == "" || err != nil {
 		origPath := ctx.Request.URL.RequestURI()
 		redirUrl := url.URL{
@@ -359,18 +367,29 @@ func RequireAuthMiddleware(ctx *gin.Context) {
 		ctx.Abort()
 	} else {
 		ctx.Set("User", user)
+		ctx.Set("UserId", userId)
 		ctx.Set("Groups", groups)
 		ctx.Next()
 	}
 }
 
-// checkAdmin checks if a user string has admin privilege. It returns boolean and a message
+// CheckAdmin checks if a user has admin privilege. It returns boolean and a message
 // indicating the error message.
 //
-// Note that by default it only checks if user == "admin". If you have a custom list of admin identifiers
-// to check, you should set Server.UIAdminUsers. If you want to grant admin privileges based on group
-// membership, you should set Server.AdminGroups.
-func CheckAdmin(user string, groups []string) (isAdmin bool, message string) {
+// The function checks the following in order:
+//  1. If user == "admin" (built-in admin)
+//  2. If any of the user's groups match Server.AdminGroups
+//  3. If any of the user's identifiers match Server.UIAdminUsers
+//
+// The identifiers checked against UIAdminUsers include:
+//   - The primary user identifier (typically username from Issuer.OIDCAuthenticationUserClaim)
+//   - Any additional identifiers passed (e.g., OIDC sub, internal user ID)
+//
+// This allows UIAdminUsers to contain any of: usernames, OIDC subs, or internal user IDs.
+//
+// Note: If you have a custom list of admin identifiers to check, set Server.UIAdminUsers.
+// If you want to grant admin privileges based on group membership, set Server.AdminGroups.
+func CheckAdmin(user string, groups []string, additionalIdentifiers ...string) (isAdmin bool, message string) {
 	if user == "admin" {
 		return true, ""
 	}
@@ -389,12 +408,21 @@ func CheckAdmin(user string, groups []string) (isAdmin bool, message string) {
 		}
 	}
 
-	// Check admin users
+	// Check admin users against all user identifiers (username, sub, userId, etc.)
 	adminList := param.Server_UIAdminUsers.GetStringSlice()
 	if param.Server_UIAdminUsers.IsSet() {
+		// Build list of all identifiers to check
+		allIdentifiers := make([]string, 0, 1+len(additionalIdentifiers))
+		if user != "" {
+			allIdentifiers = append(allIdentifiers, user)
+		}
+		allIdentifiers = append(allIdentifiers, additionalIdentifiers...)
+
 		for _, admin := range adminList {
-			if user == admin {
-				return true, ""
+			for _, identifier := range allIdentifiers {
+				if identifier != "" && identifier == admin {
+					return true, ""
+				}
 			}
 		}
 	}
@@ -407,7 +435,7 @@ func CheckAdmin(user string, groups []string) (isAdmin bool, message string) {
 	return false, "You don't have permission to perform this action"
 }
 
-// adminAuthHandler checks the admin status of a logged-in user. This middleware
+// AdminAuthHandler checks the admin status of a logged-in user. This middleware
 // should be cascaded behind the [web_ui.AuthHandler]
 func AdminAuthHandler(ctx *gin.Context) {
 	user := ctx.GetString("User")
@@ -427,7 +455,18 @@ func AdminAuthHandler(ctx *gin.Context) {
 			groups = groupsSlice
 		}
 	}
-	isAdmin, msg := CheckAdmin(user, groups)
+
+	// Collect additional identifiers (userId, OIDC sub) for admin check
+	// This allows UIAdminUsers to contain usernames, OIDC subs, or internal user IDs
+	var additionalIdentifiers []string
+	if userId := ctx.GetString("UserId"); userId != "" {
+		additionalIdentifiers = append(additionalIdentifiers, userId)
+	}
+	if oidcSub := ctx.GetString("OIDCSub"); oidcSub != "" {
+		additionalIdentifiers = append(additionalIdentifiers, oidcSub)
+	}
+
+	isAdmin, msg := CheckAdmin(user, groups, additionalIdentifiers...)
 	if isAdmin {
 		ctx.Next()
 		return
@@ -445,12 +484,22 @@ func AdminAuthHandler(ctx *gin.Context) {
 // 2. Server bearer token authentication (req from another server, i.e. origin/cache)
 func DowntimeAuthHandler(ctx *gin.Context) {
 	// First, try cookie-based admin auth (this block consolidates AuthHandler and AdminAuthHandler)
-	user, _, groups, err := GetUserGroups(ctx)
+	user, userId, groups, err := GetUserGroups(ctx)
 	if user != "" && err == nil {
+		// Collect additional identifiers for admin check
+		var additionalIdentifiers []string
+		if userId != "" {
+			additionalIdentifiers = append(additionalIdentifiers, userId)
+		}
+		if oidcSub := ctx.GetString("OIDCSub"); oidcSub != "" {
+			additionalIdentifiers = append(additionalIdentifiers, oidcSub)
+		}
+
 		// User has valid cookie, check if admin
-		isAdmin, _ := CheckAdmin(user, groups)
+		isAdmin, _ := CheckAdmin(user, groups, additionalIdentifiers...)
 		if isAdmin {
 			ctx.Set("User", user)
+			ctx.Set("UserId", userId)
 			ctx.Set("Groups", groups)
 			ctx.Set("AuthMethod", "admin-cookie")
 			ctx.Next()
