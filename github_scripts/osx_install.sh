@@ -99,7 +99,9 @@ ninja install
 xrootd_libdir=$(grealpath "$(dirname "$(grealpath "$(which xrootd)")")"/../lib/)
 echo "Will install into: $xrootd_libdir"
 sudo mkdir -p "$xrootd_libdir"
-sudo ln -s "$PWD/release_dir/lib/libXrdPelicanHttpCore-5.so" "$xrootd_libdir"
+# Symlink the versioned .dylib files (macOS naming) that plugins reference at runtime
+sudo ln -s "$PWD/release_dir/lib/libXrdPelicanHttpCore.0.dylib" "$xrootd_libdir"
+sudo ln -s "$PWD/release_dir/lib/libXrdPelicanHttpCore.dylib" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdHTTPServer-5.so" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdS3-5.so" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdOssHttp-5.so" "$xrootd_libdir"
@@ -108,6 +110,15 @@ sudo ln -s "$PWD/release_dir/lib/libXrdOssS3-5.so" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdOssFilter-5.so" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdOssPosc-5.so" "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdN2NPrefix-5.so" "$xrootd_libdir"
+# Provide unversioned aliases to match production config names
+sudo ln -s "$PWD/release_dir/lib/libXrdHTTPServer-5.so" "$xrootd_libdir/libXrdHTTPServer.so"
+sudo ln -s "$PWD/release_dir/lib/libXrdS3-5.so" "$xrootd_libdir/libXrdS3.so"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssHttp-5.so" "$xrootd_libdir/libXrdOssHttp.so"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssGlobus-5.so" "$xrootd_libdir/libXrdOssGlobus.so"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssS3-5.so" "$xrootd_libdir/libXrdOssS3.so"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssFilter-5.so" "$xrootd_libdir/libXrdOssFilter.so"
+sudo ln -s "$PWD/release_dir/lib/libXrdOssPosc-5.so" "$xrootd_libdir/libXrdOssPosc.so"
+sudo ln -s "$PWD/release_dir/lib/libXrdN2NPrefix-5.so" "$xrootd_libdir/libXrdN2NPrefix.so"
 popd
 
 popd
@@ -231,7 +242,7 @@ hostname
 xrootd -c test.cfg &
 oldproc=$!
 
-(sleep 2; kill $oldproc) &
+(sleep 2; kill "$oldproc" 2>/dev/null || true) &
 wait $oldproc
 if [ $? -eq 143 ]; then # Indicates the xrootd process lived until it was killed.
   exit 0
