@@ -1563,7 +1563,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	// stash a copy of its value now.
 	v.SetDefault(param.Origin_TokenAudience.GetName(), v.GetString(param.Origin_Url.GetName()))
 
-	// Set defaults for Director, Registry, and Broker URLs only if the Discovery URL is not set.
+	// Set defaults for Director and Registry URLs only if the Discovery URL is not set.
 	// This is necessary because, in Viper, there is currently no way to check if a value is coming
 	// from the default or was explicitly set by the user. Therefore, if the DiscoveryURL is present,
 	// when populating the Director, Registry, and Broker URLs, the discoverFederationImpl function
@@ -1577,7 +1577,6 @@ func SetServerDefaults(v *viper.Viper) error {
 	// https://github.com/spf13/viper/issues/1814
 	if !v.IsSet(param.Federation_DiscoveryUrl.GetName()) {
 		v.SetDefault("Federation.RegistryUrl", v.GetString(param.Server_ExternalWebUrl.GetName()))
-		v.SetDefault("Federation.BrokerURL", v.GetString(param.Server_ExternalWebUrl.GetName()))
 		v.SetDefault("Federation_DirectorUrl", v.GetString(param.Server_ExternalWebUrl.GetName()))
 	}
 
