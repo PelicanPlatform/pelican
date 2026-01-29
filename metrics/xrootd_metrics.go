@@ -1895,8 +1895,19 @@ func HandleSummaryPacket(packet []byte) error {
 				incBy = 0
 			}
 			ThreadCreations.Add(incBy)
-			ThreadDestructions.Add(float64(stat.ThreadDestructions - lastStats.ThreadDestructions))
-			ThreadLimitReached.Add(float64(stat.ThreadLimitReached - lastStats.ThreadLimitReached))
+
+			incBy = float64(stat.ThreadDestructions - lastStats.ThreadDestructions)
+			if stat.ThreadDestructions < lastStats.ThreadDestructions {
+				incBy = 0
+			}
+			ThreadDestructions.Add(incBy)
+
+			incBy = float64(stat.ThreadLimitReached - lastStats.ThreadLimitReached)
+			if stat.ThreadLimitReached < lastStats.ThreadLimitReached {
+				incBy = 0
+			}
+			ThreadLimitReached.Add(incBy)
+
 			lastStats.ThreadCreations = stat.ThreadCreations
 			lastStats.ThreadDestructions = stat.ThreadDestructions
 			lastStats.ThreadLimitReached = stat.ThreadLimitReached
