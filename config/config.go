@@ -1964,6 +1964,14 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		return err
 	}
 
+	// When drop privileges is enabled, ensure the pelican user can read TLS credentials.
+	// XRootD does not need direct access to these files as Pelican copies them to a runtime location.
+	if param.Server_DropPrivileges.GetBool() {
+		if err = CheckTLSCredsForDropPrivileges(); err != nil {
+			return err
+		}
+	}
+
 	// The certificate was either generated or has been provided by now. Verify that any configured
 	// hostnames are valid w.r.t the given certificate.
 	//

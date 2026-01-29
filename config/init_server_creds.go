@@ -27,6 +27,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	goerrors "errors"
 	"fmt"
 	"io/fs"
 	"math/big"
@@ -117,6 +118,51 @@ func createDirForKeys(dir string) error {
 	}
 	if err := MkdirAll(dir, 0750, -1, user.Gid); err != nil {
 		return errors.Wrapf(err, "failed to set the permission of %s", dir)
+	}
+	return nil
+}
+
+// CheckTLSCredsForDropPrivileges ensures proper permissions on TLS key and certificate files
+// when Server.DropPrivileges is enabled, so the pelican user can read them.
+func CheckTLSCredsForDropPrivileges() error {
+	if !param.Server_DropPrivileges.GetBool() {
+		return nil
+	}
+
+	puser, err := GetPelicanUser()
+	if err != nil {
+		return errors.Wrap(err, "failed to get pelican user for TLS credentials check")
+	}
+
+	tlsCert := param.Server_TLSCertificateChain.GetString()
+	tlsKey := param.Server_TLSKey.GetString()
+
+	// Check both TLS certificate and key files; collect all errors so we report
+	// every file with permission or existence problems instead of exiting on the first.
+	var errs []error
+	filesToCheck := []string{tlsCert, tlsKey}
+	for _, filePath := range filesToCheck {
+		if filePath == "" {
+			continue
+		}
+
+		fileInfo, err := os.Stat(filePath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				// File doesn't exist - this is an error at this point since GenerateCert
+				// should have been called first
+				return errors.Errorf("file %s does not exist when checking TLS credentials for drop privileges", filePath)
+			}
+			return errors.Wrapf(err, "failed to stat TLS file %s", filePath)
+		}
+
+		// Check file readability using platform-specific logic
+		if err := checkFileReadableByUser(filePath, fileInfo, puser); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return goerrors.Join(errs...)
 	}
 	return nil
 }
