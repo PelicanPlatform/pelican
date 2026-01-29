@@ -31,7 +31,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 
+	pelican_config "github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 )
 
@@ -51,8 +53,8 @@ type Server struct {
 	router          *gin.Engine
 	transferManager *TransferManager
 	ctx             context.Context
-	cancel          context.CancelFunc
-	wg              sync.WaitGroup
+	cancel          context.CancelFunc // Cancels server's internal context to signal shutdown
+	eg              *errgroup.Group
 	mu              sync.Mutex
 	started         bool
 	lastActivity    time.Time
@@ -70,7 +72,15 @@ type ServerConfig struct {
 }
 
 // NewServer creates a new client API server
-func NewServer(config ServerConfig) (*Server, error) {
+func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
+	// Extract errgroup from context
+	eg, ok := ctx.Value(pelican_config.EgrpKey).(*errgroup.Group)
+	if !ok || eg == nil {
+		// No errgroup provided, create one
+		eg, ctx = errgroup.WithContext(ctx)
+		ctx = context.WithValue(ctx, pelican_config.EgrpKey, eg)
+	}
+
 	// Expand home directory in paths
 	socketPath, err := ExpandPath(config.SocketPath)
 	if err != nil {
@@ -90,8 +100,6 @@ func NewServer(config ServerConfig) (*Server, error) {
 		return nil, errors.Wrap(err, "failed to ensure secure socket directory")
 	}
 	socketDirRoot.Close() // We don't need to keep this open for sockets
-
-	ctx, cancel := context.WithCancel(context.Background())
 
 	// Initialize database store
 	var storeInstance StoreInterface
@@ -119,7 +127,6 @@ func NewServer(config ServerConfig) (*Server, error) {
 		dbDir := filepath.Dir(dbPath)
 		dbDirRoot, err := ensureSecureDirectory(dbDir)
 		if err != nil {
-			cancel()
 			return nil, errors.Wrapf(err, "database directory %s failed security check", dbDir)
 		}
 		dbDirRoot.Close() // We don't need to keep this open for database
@@ -142,7 +149,11 @@ func NewServer(config ServerConfig) (*Server, error) {
 			maxJobs = 5 // Final fallback
 		}
 	}
-	transferManager := NewTransferManager(ctx, maxJobs, storeInstance)
+	// Create server's own cancellable context for internal goroutines
+	// This is a child of the passed-in context, allowing clean shutdown
+	serverCtx, cancel := context.WithCancel(ctx)
+
+	transferManager := NewTransferManager(serverCtx, maxJobs, storeInstance)
 
 	// Set up Gin router
 	gin.SetMode(gin.ReleaseMode)
@@ -153,8 +164,9 @@ func NewServer(config ServerConfig) (*Server, error) {
 		pidFile:         pidFile,
 		router:          router,
 		transferManager: transferManager,
-		ctx:             ctx,
+		ctx:             serverCtx,
 		cancel:          cancel,
+		eg:              eg,
 		lastActivity:    time.Now(),
 		idleTimeout:     config.IdleTimeout,
 	}
@@ -207,6 +219,10 @@ func (s *Server) SetStore(store StoreInterface) {
 	s.transferManager.store = store
 	if store != nil {
 		log.Info("Database store configured for transfer manager")
+		// Start background tasks if they weren't started during initialization
+		// (this happens when store is set after NewTransferManager is called)
+		// The startBackgroundTasks function is protected by sync.Once so it's safe to call multiple times
+		s.transferManager.startBackgroundTasks()
 	}
 }
 
@@ -296,14 +312,14 @@ func (s *Server) Start() error {
 	}
 
 	// Start serving
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.eg.Go(func() error {
 		log.Infof("Starting client API server on %s", s.socketPath)
 		if err := s.httpServer.Serve(s.listener); err != nil && err != http.ErrServerClosed {
 			log.Errorf("Server error: %v", err)
+			return err
 		}
-	}()
+		return nil
+	})
 
 	s.started = true
 	log.Infof("Client API server started successfully (PID: %d, Socket: %s, IdleTimeout: %v)", os.Getpid(), s.socketPath, s.idleTimeout)
@@ -311,8 +327,9 @@ func (s *Server) Start() error {
 	// Start idle timeout monitor if configured
 	if s.idleTimeout > 0 {
 		log.Infof("Starting idle timeout monitor with timeout: %v", s.idleTimeout)
-		s.wg.Add(1)
-		go s.monitorIdleTimeout()
+		s.eg.Go(func() error {
+			return s.monitorIdleTimeout()
+		})
 	} else {
 		log.Info("Idle timeout monitoring disabled (timeout not set)")
 	}
@@ -328,9 +345,7 @@ func (s *Server) UpdateActivity() {
 }
 
 // monitorIdleTimeout monitors for idle timeout and shuts down if necessary
-func (s *Server) monitorIdleTimeout() {
-	defer s.wg.Done()
-
+func (s *Server) monitorIdleTimeout() error {
 	// Check frequently to ensure timely shutdown (every 1 second)
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -341,7 +356,7 @@ func (s *Server) monitorIdleTimeout() {
 		select {
 		case <-s.ctx.Done():
 			log.Info("Idle timeout monitor stopping due to context cancellation")
-			return
+			return nil
 		case <-ticker.C:
 			s.activityMu.Lock()
 			lastActivity := s.lastActivity
@@ -358,7 +373,8 @@ func (s *Server) monitorIdleTimeout() {
 			idleTime := time.Since(lastActivity)
 			if idleTime > s.idleTimeout {
 				log.Infof("Server idle for %v (timeout: %v), initiating shutdown...", idleTime, s.idleTimeout)
-				// Trigger shutdown asynchronously to avoid deadlock
+				// Trigger shutdown asynchronously to avoid deadlock - shutdown blocks
+				// on all goroutines including this one.
 				go func() {
 					if err := s.Shutdown(); err != nil {
 						log.Errorf("Auto-shutdown error: %v", err)
@@ -366,7 +382,7 @@ func (s *Server) monitorIdleTimeout() {
 						log.Info("Auto-shutdown completed successfully")
 					}
 				}()
-				return
+				return nil
 			}
 		}
 	}
@@ -385,7 +401,7 @@ func (s *Server) Shutdown() error {
 
 	log.Info("Shutting down client API server...")
 
-	// Cancel context
+	// Signal shutdown to background goroutines (idle monitor, etc.)
 	s.cancel()
 
 	// Shutdown transfer manager
@@ -402,7 +418,9 @@ func (s *Server) Shutdown() error {
 	}
 
 	// Wait for goroutines
-	s.wg.Wait()
+	if err := s.eg.Wait(); err != nil && err != context.Canceled {
+		log.Warnf("Background task error during shutdown: %v", err)
+	}
 
 	// Clean up socket and PID file
 	s.cleanup()
@@ -416,8 +434,8 @@ func (s *Server) Shutdown() error {
 }
 
 // Wait blocks until the server is shut down
-func (s *Server) Wait() {
-	s.wg.Wait()
+func (s *Server) Wait() error {
+	return s.eg.Wait()
 }
 
 // cleanup removes the socket, PID file, and releases the lock

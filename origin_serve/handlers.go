@@ -27,6 +27,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/afero"
 	"golang.org/x/net/webdav"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -221,6 +222,12 @@ func InitializeHandlers(exports []server_utils.OriginExport) error {
 	webdavHandlers = make(map[string]*webdav.Handler)
 	exportPrefixMap = make(map[string]string) // Initialize the global map
 
+	// Get optional rate limit for testing
+	readRateLimit := param.Origin_ReadRateLimitBytesPerSecond.GetInt()
+	if readRateLimit > 0 {
+		log.Infof("Applying read rate limit: %d bytes/sec", readRateLimit)
+	}
+
 	for _, export := range exports {
 		// Create a filesystem for this export with auto-directory creation
 		// Use OsRootFs to prevent symlink traversal attacks
@@ -229,7 +236,14 @@ func InitializeHandlers(exports []server_utils.OriginExport) error {
 		if err != nil {
 			return fmt.Errorf("failed to create OsRootFs for %s: %w", export.StoragePrefix, err)
 		}
-		fs := newAutoCreateDirFs(osRootFs)
+
+		// Apply rate limiting if configured (for testing)
+		var fs afero.Fs = osRootFs
+		if readRateLimit > 0 {
+			fs = newRateLimitedFs(fs, readRateLimit)
+		}
+
+		fs = newAutoCreateDirFs(fs)
 
 		// Create logger function
 		logger := func(r *http.Request, err error) {

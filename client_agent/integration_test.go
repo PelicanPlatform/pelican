@@ -37,6 +37,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/config"
@@ -144,7 +145,11 @@ func TestClientAPIIntegration(t *testing.T) {
 	// Set up client API server with proper temp directory handling
 	serverConfig, _ := client_agent.CreateTestServerConfig(t)
 
-	server, err := client_agent.NewServer(serverConfig)
+	// Create context with errgroup
+	egrp, egrpCtx := errgroup.WithContext(context.Background())
+	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
+
+	server, err := client_agent.NewServer(ctx, serverConfig)
 	require.NoError(t, err)
 
 	// Start the server
@@ -464,7 +469,10 @@ func TestClientAPIShutdown(t *testing.T) {
 	// Set up client API server - use short socket name
 	serverConfig, _ := client_agent.CreateTestServerConfig(t)
 
-	server, err := client_agent.NewServer(serverConfig)
+	egrp, egrpCtx := errgroup.WithContext(context.Background())
+	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
+
+	server, err := client_agent.NewServer(ctx, serverConfig)
 	require.NoError(t, err)
 
 	// Start the server
