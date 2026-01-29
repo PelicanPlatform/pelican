@@ -30,6 +30,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/config"
 )
 
 func TestCreateJob(t *testing.T) {
@@ -369,6 +372,9 @@ func TestShutdownHandler(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	egrp, egrpCtx := errgroup.WithContext(ctx)
+	ctx = context.WithValue(egrpCtx, config.EgrpKey, egrp)
+
 	tm := NewTransferManager(ctx, 5, nil)
 	defer func() {
 		_ = tm.Shutdown()
@@ -378,7 +384,7 @@ func TestShutdownHandler(t *testing.T) {
 		transferManager: tm,
 		router:          gin.New(),
 		ctx:             ctx,
-		cancel:          cancel,
+		eg:              egrp,
 		started:         false, // Don't mark as started to prevent actual shutdown
 	}
 

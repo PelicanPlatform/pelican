@@ -19,6 +19,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -27,6 +28,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/client_agent/store"
@@ -138,8 +140,12 @@ on a Unix domain socket and handle job-based transfer requests.`,
 		log.Infof("Server config: socket=%s, pidFile=%s, maxJobs=%d, idleTimeout=%v",
 			serverConfig.SocketPath, serverConfig.PidFile, serverConfig.MaxConcurrentJobs, serverConfig.IdleTimeout)
 
+		// Create context with errgroup for managing background tasks
+		egrp, egrpCtx := errgroup.WithContext(context.Background())
+		ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
+
 		// Create server
-		server, err := client_agent.NewServer(serverConfig)
+		server, err := client_agent.NewServer(ctx, serverConfig)
 		if err != nil {
 			log.Errorf("Failed to create server: %v", err)
 			if inheritedLock != nil {

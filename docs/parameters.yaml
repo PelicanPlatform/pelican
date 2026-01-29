@@ -754,6 +754,18 @@ type: duration
 default: 10m
 components: ["client"]
 ---
+name: ClientAgent.ProgressUpdateInterval
+description: |+
+  The interval at which the transfer manager updates the database with current
+  progress (bytes transferred and total bytes) for all active transfers. This
+  ensures progress information persists across daemon restarts.
+
+  This is a hidden parameter intended for testing and tuning purposes.
+type: duration
+default: 5s
+hidden: true
+components: ["client"]
+---
 ############################
 #   Origin-level Configs   #
 ############################
@@ -963,6 +975,16 @@ description: |+
   An empty list means all supported algorithms are available.
 type: stringSlice
 default: []
+hidden: true
+components: ["origin"]
+---
+name: Origin.ReadRateLimitBytesPerSecond
+description: |+
+  Rate limit for read operations from the origin's filesystem, in bytes per second.
+  This is a hidden parameter intended for testing purposes to simulate slow storage backends.
+  A value of 0 (default) means no rate limiting is applied.
+type: int
+default: 0
 hidden: true
 components: ["origin"]
 ---

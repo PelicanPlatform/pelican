@@ -87,6 +87,7 @@ type Config struct {
 		IdleTimeout time.Duration `mapstructure:"idletimeout" yaml:"IdleTimeout"`
 		MaxConcurrentJobs int `mapstructure:"maxconcurrentjobs" yaml:"MaxConcurrentJobs"`
 		PidFile string `mapstructure:"pidfile" yaml:"PidFile"`
+		ProgressUpdateInterval time.Duration `mapstructure:"progressupdateinterval" yaml:"ProgressUpdateInterval"`
 		Socket string `mapstructure:"socket" yaml:"Socket"`
 	} `mapstructure:"clientagent" yaml:"ClientAgent"`
 	ConfigDir string `mapstructure:"configdir" yaml:"ConfigDir"`
@@ -283,6 +284,7 @@ type Config struct {
 		Multiuser bool `mapstructure:"multiuser" yaml:"Multiuser"`
 		NamespacePrefix string `mapstructure:"namespaceprefix" yaml:"NamespacePrefix"`
 		Port int `mapstructure:"port" yaml:"Port"`
+		ReadRateLimitBytesPerSecond int `mapstructure:"readratelimitbytespersecond" yaml:"ReadRateLimitBytesPerSecond"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
 		S3AccessKeyfile string `mapstructure:"s3accesskeyfile" yaml:"S3AccessKeyfile"`
 		S3Bucket string `mapstructure:"s3bucket" yaml:"S3Bucket"`
@@ -496,6 +498,7 @@ type configWithType struct {
 		IdleTimeout struct { Type string; Value time.Duration }
 		MaxConcurrentJobs struct { Type string; Value int }
 		PidFile struct { Type string; Value string }
+		ProgressUpdateInterval struct { Type string; Value time.Duration }
 		Socket struct { Type string; Value string }
 	}
 	ConfigDir struct { Type string; Value string }
@@ -692,6 +695,7 @@ type configWithType struct {
 		Multiuser struct { Type string; Value bool }
 		NamespacePrefix struct { Type string; Value string }
 		Port struct { Type string; Value int }
+		ReadRateLimitBytesPerSecond struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
 		S3AccessKeyfile struct { Type string; Value string }
 		S3Bucket struct { Type string; Value string }

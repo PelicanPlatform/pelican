@@ -115,8 +115,8 @@ func (s *Server) GetJobStatusHandler(c *gin.Context) {
 			CreatedAt:        transfer.CreatedAt,
 			StartedAt:        transfer.StartedAt,
 			CompletedAt:      transfer.CompletedAt,
-			BytesTransferred: transfer.BytesTransferred,
-			TotalBytes:       transfer.TotalBytes,
+			BytesTransferred: transfer.BytesTransferred.Load(),
+			TotalBytes:       transfer.TotalBytes.Load(),
 		}
 		if transfer.Error != nil {
 			status.Error = transfer.Error.Error()

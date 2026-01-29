@@ -31,6 +31,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/client_agent/apiclient"
@@ -104,7 +105,10 @@ func setupTestEnvironment(t *testing.T) (apiClient *apiclient.APIClient, fed *fe
 	serverConfig, _ := client_agent.CreateTestServerConfig(t)
 	socketPath := serverConfig.SocketPath
 
-	server, err := client_agent.NewServer(serverConfig)
+	egrp, egrpCtx := errgroup.WithContext(context.Background())
+	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
+
+	server, err := client_agent.NewServer(ctx, serverConfig)
 	require.NoError(t, err)
 
 	// Start the server
