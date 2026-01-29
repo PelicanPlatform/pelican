@@ -1,42 +1,67 @@
 digraph {
 
-  node [shape=rectangle];
+  node [shape=rectangle, penwidth=2];
 
-  // Declare this node here so that it floats to a reasonable location in the layout.
-  scitokens_oauth2_server;
+  // Declare this node here so that it floats to a reasonable location
+  // in the layout.
 
-  // Give the subgraphs generic names because the layout sorts them by name.
+  pelican_software_base;
+
+  // Give the subgraphs non-descriptive names because the names influence
+  // where in the layout the subgraphs go. With a little care (read as: lots
+  // of trial and error), we can get something that looks not bad.
+
   subgraph cluster_0 {
     style=invis;
     pelican_build_base -> pelican_build;
   }
 
-  subgraph cluster_1 {
+  subgraph cluster_1_1 {
     style=invis;
-    pelican_software_base -> xrootd_software_init -> xrootd_software_base -> origin_base;
+    pelican_software_base -> xrootd_software_init -> xrootd_software_base -> origin_software_base;
+  }
+
+  subgraph cluster_1_2 {
+    style=invis;
+    node [color=dimgray, fontcolor=dimgray];
+    edge [color=dimgray, fontcolor=dimgray];
+
     xrootd_software_init -> xrootd_build;
-    xrootd_build -> xrootd_software_base [style=dashed,color=gray];
-    scitokens_oauth2_server -> origin_base [style=dashed,color=gray];
+    xrootd_build -> xrootd_software_base [style=dashed, label="via mount"];
   }
 
   subgraph cluster_2 {
     style=invis;
-    pelican_software_base -> director -> osdf_director;
-    pelican_software_base -> registry -> osdf_registry;
-    pelican_build -> director [style=dotted,color=gray];
-    pelican_build -> registry [style=dotted,color=gray];
+    node [color=green, fontcolor=green];
+    edge [color=green, fontcolor=green];
+
+    origin_software_base -> pelican_test -> pelican_dev;
   }
 
   subgraph cluster_3 {
     style=invis;
-    origin_base -> origin -> osdf_origin;
+    node [color=mediumblue, fontcolor=mediumblue];
+    edge [color=mediumblue, fontcolor=mediumblue];
+
+    pelican_build -> origin [style=dashed, label="via COPY"];
+    origin_software_base -> origin -> osdf_origin;
+
+    pelican_build -> cache [style=dashed, label="via COPY"];
     xrootd_software_base -> cache -> osdf_cache;
-    pelican_build -> origin [style=dotted,color=gray];
-    pelican_build -> cache [style=dotted,color=gray];
   }
 
-  subgraph cluster_4 {
+  subgraph cluster_4_1 {
     style=invis;
-    origin_base -> pelican_test -> pelican_dev;
+    pelican_build -> central_services_base [style=dashed, label="via COPY"];
+    pelican_software_base -> central_services_base;
+  }
+
+  subgraph cluster_4_2 {
+    style=invis;
+    node [color=crimson, fontcolor=crimson];
+    edge [color=crimson, fontcolor=crimson];
+
+    central_services_base -> registry -> osdf_registry;
+    central_services_base -> director -> osdf_director;
   }
 }
