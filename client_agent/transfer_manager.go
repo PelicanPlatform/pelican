@@ -21,13 +21,16 @@ package client_agent
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/client"
+	pelican_config "github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 )
 
@@ -43,8 +46,8 @@ type Transfer struct {
 	CreatedAt        time.Time
 	StartedAt        *time.Time
 	CompletedAt      *time.Time
-	BytesTransferred int64
-	TotalBytes       int64
+	BytesTransferred atomic.Int64
+	TotalBytes       atomic.Int64
 	Error            error
 	CancelFunc       context.CancelFunc
 	ctx              context.Context
@@ -67,19 +70,29 @@ type TransferJob struct {
 
 // TransferManager manages all transfer jobs and their execution
 type TransferManager struct {
-	jobs      map[string]*TransferJob
-	transfers map[string]*Transfer
-	store     StoreInterface
-	mu        sync.RWMutex
-	maxJobs   int
-	semaphore chan struct{}
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
+	jobs                   map[string]*TransferJob
+	transfers              map[string]*Transfer
+	store                  StoreInterface
+	mu                     sync.RWMutex
+	maxJobs                int
+	semaphore              chan struct{}
+	ctx                    context.Context
+	cancel                 context.CancelFunc
+	eg                     *errgroup.Group
+	backgroundTasksStarted bool
 }
 
 // NewTransferManager creates a new transfer manager
 func NewTransferManager(ctx context.Context, maxConcurrentJobs int, store StoreInterface) *TransferManager {
+	// Extract errgroup from context
+	eg, ok := ctx.Value(pelican_config.EgrpKey).(*errgroup.Group)
+	if !ok || eg == nil {
+		// No errgroup provided, create one
+		eg, ctx = errgroup.WithContext(ctx)
+		ctx = context.WithValue(ctx, pelican_config.EgrpKey, eg)
+	}
+
+	// Create TransferManager's own cancellable context for internal control
 	managerCtx, cancel := context.WithCancel(ctx)
 
 	// Use parameter value if maxConcurrentJobs is not positive
@@ -100,12 +113,13 @@ func NewTransferManager(ctx context.Context, maxConcurrentJobs int, store StoreI
 		semaphore: make(chan struct{}, maxConcurrentJobs),
 		ctx:       managerCtx,
 		cancel:    cancel,
+		eg:        eg,
 	}
 
 	// Attempt to recover incomplete jobs from database
 	if store != nil {
 		tm.recoverJobs()
-		go tm.startBackgroundTasks()
+		tm.startBackgroundTasks()
 	}
 
 	return tm
@@ -249,8 +263,10 @@ func (tm *TransferManager) recoverSingleJob(jobID string) {
 
 	// Start the job asynchronously
 	job.wg.Add(1)
-	tm.wg.Add(1)
-	go tm.executeJob(job)
+	tm.eg.Go(func() error {
+		tm.executeJob(job)
+		return nil
+	})
 }
 
 // CreateJob creates a new transfer job
@@ -325,15 +341,16 @@ func (tm *TransferManager) CreateJob(requests []TransferRequest, options []clien
 
 	// Start the job asynchronously
 	job.wg.Add(1)
-	tm.wg.Add(1)
-	go tm.executeJob(job)
+	tm.eg.Go(func() error {
+		tm.executeJob(job)
+		return nil
+	})
 
 	return job, nil
 }
 
 // executeJob runs all transfers in a job
 func (tm *TransferManager) executeJob(job *TransferJob) {
-	defer tm.wg.Done()
 	defer job.wg.Done() // Signal job completion
 
 	// Acquire semaphore slot
@@ -434,6 +451,19 @@ func (tm *TransferManager) executeTransfer(transfer *Transfer, options []client.
 
 	log.Debugf("Executing transfer %s: %s %s -> %s", transfer.ID, transfer.Operation, transfer.Source, transfer.Destination)
 
+	// Add progress callback to update transfer state during execution
+	progressCallback := func(path string, downloaded int64, totalSize int64, completed bool) {
+		transfer.BytesTransferred.Store(downloaded)
+		transfer.TotalBytes.Store(totalSize)
+
+		log.Debugf("Transfer %s progress: %d/%d bytes (%.1f%%)",
+			transfer.ID, downloaded, totalSize,
+			float64(downloaded)/float64(totalSize)*100)
+	}
+
+	// Prepend callback to options so it's applied first
+	options = append([]client.TransferOption{client.WithCallback(progressCallback)}, options...)
+
 	var err error
 	var results []client.TransferResults
 
@@ -482,8 +512,8 @@ func (tm *TransferManager) executeTransfer(transfer *Transfer, options []client.
 		totalBytes += result.TransferredBytes
 	}
 
-	transfer.BytesTransferred = totalBytes
-	transfer.TotalBytes = totalBytes
+	transfer.BytesTransferred.Store(totalBytes)
+	transfer.TotalBytes.Store(totalBytes)
 	transfer.Status = StatusCompleted
 
 	// Persist success to database
@@ -686,8 +716,8 @@ func (tm *TransferManager) buildJobListItem(job *TransferJob) JobListItem {
 		if transfer.Status == StatusCompleted {
 			completed++
 		}
-		bytesTransferred += transfer.BytesTransferred
-		totalBytes += transfer.TotalBytes
+		bytesTransferred += transfer.BytesTransferred.Load()
+		totalBytes += transfer.TotalBytes.Load()
 	}
 
 	return JobListItem{
@@ -712,9 +742,9 @@ func (tm *TransferManager) GetJobProgress(job *TransferJob) *JobProgress {
 	total := len(job.Transfers)
 
 	for _, transfer := range job.Transfers {
-		bytesTransferred += transfer.BytesTransferred
-		if transfer.TotalBytes > 0 {
-			totalBytes += transfer.TotalBytes
+		bytesTransferred += transfer.BytesTransferred.Load()
+		if tb := transfer.TotalBytes.Load(); tb > 0 {
+			totalBytes += tb
 		}
 		if transfer.Status == StatusCompleted {
 			completed++
@@ -769,11 +799,10 @@ func (tm *TransferManager) startBackgroundTasks() {
 	}
 
 	log.Info("Starting background maintenance tasks")
+	tm.backgroundTasksStarted = true
 
 	// Archive completed jobs periodically (every hour)
-	tm.wg.Add(1)
-	go func() {
-		defer tm.wg.Done()
+	tm.eg.Go(func() error {
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
 
@@ -781,17 +810,15 @@ func (tm *TransferManager) startBackgroundTasks() {
 			select {
 			case <-tm.ctx.Done():
 				log.Debug("Stopping job archival task")
-				return
+				return nil
 			case <-ticker.C:
 				tm.archiveCompletedJobs()
 			}
 		}
-	}()
+	})
 
 	// Prune old history periodically (daily)
-	tm.wg.Add(1)
-	go func() {
-		defer tm.wg.Done()
+	tm.eg.Go(func() error {
 		ticker := time.NewTicker(24 * time.Hour)
 		defer ticker.Stop()
 
@@ -808,7 +835,7 @@ func (tm *TransferManager) startBackgroundTasks() {
 		case <-tm.ctx.Done():
 			timer.Stop()
 			log.Debug("Stopping history pruning task (before initial run)")
-			return
+			return nil
 		case <-timer.C:
 			tm.pruneOldHistory()
 		}
@@ -817,12 +844,33 @@ func (tm *TransferManager) startBackgroundTasks() {
 			select {
 			case <-tm.ctx.Done():
 				log.Debug("Stopping history pruning task")
-				return
+				return nil
 			case <-ticker.C:
 				tm.pruneOldHistory()
 			}
 		}
-	}()
+	})
+
+	// Update active transfer progress periodically
+	updateInterval := param.ClientAgent_ProgressUpdateInterval.GetDuration()
+	if updateInterval <= 0 {
+		updateInterval = 5 * time.Second // Default if not configured
+	}
+
+	tm.eg.Go(func() error {
+		ticker := time.NewTicker(updateInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-tm.ctx.Done():
+				log.Debug("Stopping progress update task")
+				return nil
+			case <-ticker.C:
+				tm.updateActiveTransferProgress()
+			}
+		}
+	})
 }
 
 // archiveCompletedJobs archives all completed/failed/cancelled jobs to history
@@ -866,6 +914,41 @@ func (tm *TransferManager) archiveCompletedJobs() {
 	}
 }
 
+// updateActiveTransferProgress persists current progress for all active transfers
+func (tm *TransferManager) updateActiveTransferProgress() {
+	if tm.store == nil {
+		log.Debug("Skipping progress update: store is nil")
+		return
+	}
+
+	tm.mu.RLock()
+	var activeTransfers []*Transfer
+	for _, transfer := range tm.transfers {
+		if transfer.Status == StatusRunning {
+			activeTransfers = append(activeTransfers, transfer)
+		}
+	}
+	tm.mu.RUnlock()
+
+	if len(activeTransfers) == 0 {
+		log.Debug("Skipping progress update: no active transfers")
+		return
+	}
+
+	log.Debugf("Updating progress for %d active transfers to database", len(activeTransfers))
+
+	for _, transfer := range activeTransfers {
+		bytesTransferred := transfer.BytesTransferred.Load()
+		totalBytes := transfer.TotalBytes.Load()
+
+		if err := tm.store.UpdateTransferProgress(transfer.ID, bytesTransferred, totalBytes); err != nil {
+			log.Warnf("Failed to update progress for transfer %s: %v", transfer.ID, err)
+		} else {
+			log.Debugf("Updated progress for transfer %s: %d/%d bytes", transfer.ID, bytesTransferred, totalBytes)
+		}
+	}
+}
+
 // pruneOldHistory removes historical jobs older than the retention period
 func (tm *TransferManager) pruneOldHistory() {
 	log.Debug("Running history pruning task")
@@ -889,23 +972,12 @@ func (tm *TransferManager) pruneOldHistory() {
 func (tm *TransferManager) Shutdown() error {
 	log.Info("Shutting down transfer manager...")
 
+	// Cancel context to signal all background goroutines to stop
 	tm.cancel()
 
-	// Wait for all jobs to complete with timeout
-	done := make(chan struct{})
-	go func() {
-		tm.wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		log.Info("Transfer manager shutdown complete")
-		return nil
-	case <-time.After(30 * time.Second):
-		log.Warn("Transfer manager shutdown timed out")
-		return errors.New("shutdown timeout")
-	}
+	// The errgroup will wait for all goroutines to complete
+	log.Info("Transfer manager shutdown initiated (waiting handled by errgroup)")
+	return nil
 }
 
 // HasActiveJobs returns true if there are any jobs in pending or running status

@@ -26,10 +26,100 @@ import (
 	"path"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/spf13/afero"
 	"golang.org/x/net/webdav"
+	"golang.org/x/time/rate"
 )
+
+// rateLimitedFs wraps an afero.Fs to rate-limit read operations
+type rateLimitedFs struct {
+	afero.Fs
+	limiter *rate.Limiter
+}
+
+// rateLimitedFile wraps an afero.File to rate-limit reads
+type rateLimitedFile struct {
+	afero.File
+	limiter *rate.Limiter
+}
+
+// newRateLimitedFs creates a filesystem with rate-limited reads
+// bytesPerSec is the maximum read rate in bytes per second (0 = unlimited)
+func newRateLimitedFs(fs afero.Fs, bytesPerSec int) afero.Fs {
+	if bytesPerSec <= 0 {
+		return fs
+	}
+	// Use a modest burst to allow reasonable read sizes without
+	// excessive bursting above the configured rate
+	burstSize := bytesPerSec / 2
+	if burstSize < 32768 {
+		burstSize = 32768 // Minimum 32KB burst
+	}
+	return &rateLimitedFs{
+		Fs:      fs,
+		limiter: rate.NewLimiter(rate.Limit(bytesPerSec), burstSize),
+	}
+}
+
+// Open wraps files with rate limiting
+func (fs *rateLimitedFs) Open(name string) (afero.File, error) {
+	f, err := fs.Fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	return &rateLimitedFile{File: f, limiter: fs.limiter}, nil
+}
+
+// OpenFile wraps files with rate limiting
+func (fs *rateLimitedFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	f, err := fs.Fs.OpenFile(name, flag, perm)
+	if err != nil {
+		return nil, err
+	}
+	return &rateLimitedFile{File: f, limiter: fs.limiter}, nil
+}
+
+// Read applies rate limiting to reads
+func (f *rateLimitedFile) Read(p []byte) (n int, err error) {
+	// Limit individual read size to avoid excessive waiting
+	// This ensures reads complete in reasonable time even with rate limiting
+	maxReadSize := f.limiter.Burst()
+	toRead := len(p)
+	if toRead > maxReadSize {
+		toRead = maxReadSize
+	}
+
+	// Try to do a non-blocking read with available tokens
+	// If requested size isn't available, try progressively smaller reads
+	// This allows short reads when tokens are limited, avoiding long waits
+	readSize := toRead
+	for readSize >= 1024 { // Don't try reads smaller than 1KB
+		if f.limiter.AllowN(time.Now(), readSize) {
+			// Sufficient tokens available, do the read immediately
+			return f.File.Read(p[:readSize])
+		}
+		// Try half the size for a short read
+		readSize = readSize / 2
+	}
+
+	// No tokens available for even small reads; wait for a minimal amount
+	// Use 1KB minimum to make reasonable progress
+	minRead := 1024
+	if minRead > toRead {
+		minRead = toRead
+	}
+	if minRead > 0 {
+		if err := f.limiter.WaitN(context.Background(), minRead); err != nil {
+			return 0, err
+		}
+		return f.File.Read(p[:minRead])
+	}
+
+	// Edge case: zero-length read
+	return f.File.Read(p[:0])
+}
 
 // autoCreateDirFs wraps an afero.Fs to automatically create parent directories
 // when opening a file for writing

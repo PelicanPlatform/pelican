@@ -140,6 +140,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"ClientAgent.IdleTimeout": false,
 	"ClientAgent.MaxConcurrentJobs": false,
 	"ClientAgent.PidFile": false,
+	"ClientAgent.ProgressUpdateInterval": false,
 	"ClientAgent.Socket": false,
 	"ConfigLocations": false,
 	"Debug": false,
@@ -307,6 +308,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.Multiuser": false,
 	"Origin.NamespacePrefix": false,
 	"Origin.Port": false,
+	"Origin.ReadRateLimitBytesPerSecond": false,
 	"Origin.RunLocation": false,
 	"Origin.S3AccessKeyfile": false,
 	"Origin.S3Bucket": false,
@@ -938,6 +940,8 @@ func (iP IntParam) GetInt() int {
 			return config.Origin.DiskUsageCalculationRateLimit
 		case "Origin.Port":
 			return config.Origin.Port
+		case "Origin.ReadRateLimitBytesPerSecond":
+			return config.Origin.ReadRateLimitBytesPerSecond
 		case "Server.IssuerPort":
 			return config.Server.IssuerPort
 		case "Server.UILoginRateLimit":
@@ -1164,6 +1168,8 @@ func (dP DurationParam) GetDuration() time.Duration {
 			return config.Cache.SelfTestMaxAge
 		case "ClientAgent.IdleTimeout":
 			return config.ClientAgent.IdleTimeout
+		case "ClientAgent.ProgressUpdateInterval":
+			return config.ClientAgent.ProgressUpdateInterval
 		case "Client.SlowTransferRampupTime":
 			return config.Client.SlowTransferRampupTime
 		case "Client.SlowTransferWindow":
@@ -1348,6 +1354,7 @@ var allParameterNames = []string{
 	"ClientAgent.IdleTimeout",
 	"ClientAgent.MaxConcurrentJobs",
 	"ClientAgent.PidFile",
+	"ClientAgent.ProgressUpdateInterval",
 	"ClientAgent.Socket",
 	"ConfigLocations",
 	"Debug",
@@ -1515,6 +1522,7 @@ var allParameterNames = []string{
 	"Origin.Multiuser",
 	"Origin.NamespacePrefix",
 	"Origin.Port",
+	"Origin.ReadRateLimitBytesPerSecond",
 	"Origin.RunLocation",
 	"Origin.S3AccessKeyfile",
 	"Origin.S3Bucket",
@@ -1868,6 +1876,7 @@ var (
 	Origin_ConcurrencyDegradedThreshold = IntParam{"Origin.ConcurrencyDegradedThreshold"}
 	Origin_DiskUsageCalculationRateLimit = IntParam{"Origin.DiskUsageCalculationRateLimit"}
 	Origin_Port = IntParam{"Origin.Port"}
+	Origin_ReadRateLimitBytesPerSecond = IntParam{"Origin.ReadRateLimitBytesPerSecond"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
 	Server_UILoginRateLimit = IntParam{"Server.UILoginRateLimit"}
 	Server_WebPort = IntParam{"Server.WebPort"}
@@ -1964,6 +1973,7 @@ var (
 	Cache_SelfTestInterval = DurationParam{"Cache.SelfTestInterval"}
 	Cache_SelfTestMaxAge = DurationParam{"Cache.SelfTestMaxAge"}
 	ClientAgent_IdleTimeout = DurationParam{"ClientAgent.IdleTimeout"}
+	ClientAgent_ProgressUpdateInterval = DurationParam{"ClientAgent.ProgressUpdateInterval"}
 	Client_SlowTransferRampupTime = DurationParam{"Client.SlowTransferRampupTime"}
 	Client_SlowTransferWindow = DurationParam{"Client.SlowTransferWindow"}
 	Client_StoppedTransferTimeout = DurationParam{"Client.StoppedTransferTimeout"}
