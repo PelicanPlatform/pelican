@@ -84,6 +84,7 @@ require (
 	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/muesli/termenv v0.15.3-0.20240618155329-98d742f6907a // indirect
 	github.com/oschwald/maxminddb-golang/v2 v2.0.0-beta.9 // indirect
+	github.com/pkg/xattr v0.4.12 // indirect
 	github.com/redis/go-redis/v9 v9.0.2 // indirect
 	github.com/sagikazarmark/locafero v0.6.0 // indirect
 	github.com/sethvargo/go-retry v0.2.4 // indirect
