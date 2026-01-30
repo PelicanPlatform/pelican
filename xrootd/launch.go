@@ -133,7 +133,10 @@ func makeUnprivilegedXrootdLauncher(daemonName string, xrootdRun string, configP
 
 	pkcs11Info := p11proxy.CurrentInfo()
 	pkcs11Active := param.Server_EnablePKCS11.GetBool() && pkcs11Info.Enabled
-	certPath := runtimeTLSCertPath(isCache)
+	// certPath is always xrootdRunDir/copied-tls-creds.crt (a directory the xrootd user can
+	// write to, no "pelican" subdir) so that the unprivileged XRD-HTTP plugin can write there
+	// when it receives the cert FD from the parent (pelican process).
+	certPath := filepath.Join(xrootdRun, "copied-tls-creds.crt")
 	caBundlePath := filepath.Join(xrootdRun, "ca-bundle.crt")
 	if param.Server_DropPrivileges.GetBool() {
 		caBundlePath = filepath.Join(xrootdRun, "pelican", "ca-bundle.crt")
