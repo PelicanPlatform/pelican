@@ -53,6 +53,17 @@ func (s *Server) CreateJobHandler(c *gin.Context) {
 		return
 	}
 
+	// Additional validation for specific operations
+	for _, transfer := range req.Transfers {
+		if transfer.Operation != "prestage" && transfer.Destination == "" {
+			c.JSON(http.StatusBadRequest, ErrorResponse{
+				Code:  ErrCodeInvalidRequest,
+				Error: "Destination is required for " + transfer.Operation + " operations",
+			})
+			return
+		}
+	}
+
 	// Build transfer options
 	options := buildTransferOptions(req.Options)
 

@@ -475,6 +475,8 @@ func (tm *TransferManager) executeTransfer(transfer *Transfer, options []client.
 		results, err = client.DoPut(transfer.ctx, transfer.Source, transfer.Destination, transfer.Recursive, options...)
 	case "copy":
 		results, err = client.DoCopy(transfer.ctx, transfer.Source, transfer.Destination, transfer.Recursive, options...)
+	case "prestage":
+		results, err = client.DoPrestage(transfer.ctx, transfer.Source, options...)
 	default:
 		err = errors.Errorf("unknown operation: %s", transfer.Operation)
 	}
