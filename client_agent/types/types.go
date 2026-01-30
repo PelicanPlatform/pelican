@@ -38,7 +38,7 @@ type StoredJob struct {
 type StoredTransfer struct {
 	ID               string
 	JobID            string
-	Operation        string // "get", "put", "copy"
+	Operation        string // "get", "put", "copy", "prestage"
 	Source           string
 	Destination      string
 	Recursive        bool

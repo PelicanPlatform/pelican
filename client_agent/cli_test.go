@@ -346,6 +346,163 @@ func TestCLIAsyncPut(t *testing.T) {
 	t.Logf("TestCLIAsyncPut complete, total time: %s", time.Since(startTime))
 }
 
+// TestCLIAsyncPrestage tests the pelican object prestage --async command
+func TestCLIAsyncPrestage(t *testing.T) {
+	// Reset test state
+	server_utils.ResetTestState()
+
+	// Create test federation
+	fed := fed_test_utils.NewFedTest(t, testOriginConfig)
+
+	// Create temporary directory
+	tempDir := t.TempDir()
+
+	// Create token
+	err := param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	require.NoError(t, err)
+	issuer, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+
+	tokenConfig := token.NewWLCGToken()
+	tokenConfig.Lifetime = time.Minute * 5
+	tokenConfig.Issuer = issuer
+	tokenConfig.Subject = "test-cli-async-prestage"
+	tokenConfig.AddAudienceAny()
+
+	scopes := []token_scopes.TokenScope{}
+	readScope, err := token_scopes.Wlcg_Storage_Read.Path("/")
+	require.NoError(t, err)
+	scopes = append(scopes, readScope)
+	modScope, err := token_scopes.Wlcg_Storage_Modify.Path("/")
+	require.NoError(t, err)
+	scopes = append(scopes, modScope)
+	tokenConfig.AddScopes(scopes...)
+
+	tkn, err := tokenConfig.CreateToken()
+	require.NoError(t, err)
+
+	tokenFile := filepath.Join(tempDir, "token")
+	err = os.WriteFile(tokenFile, []byte(tkn), 0644)
+	require.NoError(t, err)
+
+	// Set up client API server
+	serverConfig, _ := client_agent.CreateTestServerConfig(t)
+
+	egrp, egrpCtx := errgroup.WithContext(context.Background())
+	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
+
+	server, err := client_agent.NewServer(ctx, serverConfig)
+	require.NoError(t, err)
+
+	err = server.Start()
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		err := server.Shutdown()
+		assert.NoError(t, err)
+	})
+
+	// Build pelican binary
+	pelicanBin := buildPelicanBinary(t)
+
+	// Create test file and upload it first
+	testContent := []byte("Test file for async prestage\n")
+	uploadFile := filepath.Join(tempDir, "prestage-upload.txt")
+	err = os.WriteFile(uploadFile, testContent, 0644)
+	require.NoError(t, err)
+
+	federationPrefix := fed.Exports[0].FederationPrefix
+	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+	require.NoError(t, err)
+	uploadURL := fmt.Sprintf("pelican://%s%s/prestage-test.txt", discoveryUrl.Host, federationPrefix)
+
+	// Upload file first using async + wait
+	uploadCmd := exec.Command(pelicanBin, "object", "put", "--async", "--wait", uploadFile, uploadURL, "--token", tokenFile)
+	uploadCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", serverConfig.SocketPath))
+	output, err := uploadCmd.CombinedOutput()
+	require.NoError(t, err, "Failed to upload file: %s", output)
+
+	// Test async prestage without --wait
+	t.Run("AsyncPrestageWithoutWait", func(t *testing.T) {
+		cmd := exec.Command(pelicanBin, "object", "prestage", "--async", uploadURL, "--token", tokenFile)
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", serverConfig.SocketPath))
+
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "Failed to run async prestage: %s", output)
+
+		outputStr := string(output)
+		t.Logf("Command output: %s", outputStr)
+
+		// Should contain job ID
+		assert.Contains(t, outputStr, "Job created:")
+		assert.Contains(t, outputStr, "Check status with: pelican job status")
+
+		// Extract job ID from output
+		re := regexp.MustCompile(`Job created: ([a-f0-9-]+)`)
+		matches := re.FindStringSubmatch(outputStr)
+		require.Len(t, matches, 2, "Could not extract job ID from output")
+		jobID := matches[1]
+		t.Logf("Created job ID: %s", jobID)
+	})
+
+	// Test async prestage with --wait
+	t.Run("AsyncPrestageWithWait", func(t *testing.T) {
+		cmd := exec.Command(pelicanBin, "object", "prestage", "--async", "--wait", uploadURL, "--token", tokenFile)
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", serverConfig.SocketPath))
+
+		output, err := cmd.CombinedOutput()
+		outputStr := string(output)
+		t.Logf("Command output: %s", outputStr)
+
+		// Should contain job creation message
+		assert.Contains(t, outputStr, "Job created:")
+		assert.Contains(t, outputStr, "Waiting for job to complete")
+
+		// If prestage failed, log the client-agent log for debugging
+		if err != nil {
+			t.Logf("Prestage failed with error: %v", err)
+
+			// Extract job ID to query its status
+			re := regexp.MustCompile(`Job created: ([a-f0-9-]+)`)
+			matches := re.FindStringSubmatch(outputStr)
+			if len(matches) >= 2 {
+				jobID := matches[1]
+				t.Logf("Querying failed job ID: %s", jobID)
+
+				// Query the job status via API to get detailed error info
+				apiClient, apiErr := apiclient.NewAPIClient(serverConfig.SocketPath)
+				if apiErr != nil {
+					t.Logf("Failed to create API client: %v", apiErr)
+				} else {
+					ctx := context.Background()
+					if jobStatus, statusErr := apiClient.GetJobStatus(ctx, jobID); statusErr == nil {
+						t.Logf("Job Status: %s", jobStatus.Status)
+						if jobStatus.Error != "" {
+							t.Logf("Job Error: %s", jobStatus.Error)
+						}
+						if len(jobStatus.Transfers) > 0 {
+							for i, transfer := range jobStatus.Transfers {
+								t.Logf("Transfer %d: Status=%s, Operation=%s, Source=%s",
+									i, transfer.Status, transfer.Operation, transfer.Source)
+								if transfer.Error != "" {
+									t.Logf("  Transfer %d Error: %s", i, transfer.Error)
+								}
+							}
+						}
+					} else {
+						t.Logf("Failed to get job status: %v", statusErr)
+					}
+				}
+			}
+
+			require.NoError(t, err, "Prestage operation should not fail")
+		}
+
+		// Should contain completion message
+		assert.Contains(t, outputStr, "Job completed successfully")
+	})
+}
+
 // TestCLIJobCommands tests the pelican job subcommands
 func TestCLIJobCommands(t *testing.T) {
 	// Reset test state
