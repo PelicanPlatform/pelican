@@ -2631,7 +2631,7 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 // Verify that a file on disk matches the expected size. We ignore directories
 // and generic stat failures unless the file doesn't exist.
 func verifyFileSize(dest string, expectedSize int64, fields log.Fields) error {
-	if dest == os.DevNull {
+	if dest == os.DevNull || dest == "" {
 		log.WithFields(fields).Debugf("Skipping size check because destination is (%s)", os.DevNull)
 		return nil
 	}
@@ -3148,7 +3148,7 @@ Loop:
 
 		// Second sanity check to verify the file size as it appears on disk.
 		if err = verifyFileSize(dest, totalSize, fields); err != nil {
-			err = errors.Wrap(err, "failed to verify size of downloaded file on disk")
+			err = errors.Wrapf(err, "failed to verify size of downloaded file (%s) on disk", dest)
 			return
 		}
 	}

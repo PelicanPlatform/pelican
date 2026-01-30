@@ -24,9 +24,9 @@ import (
 
 // TransferRequest represents a single transfer operation within a job
 type TransferRequest struct {
-	Operation   string `json:"operation" binding:"required,oneof=get put copy"`
+	Operation   string `json:"operation" binding:"required,oneof=get put copy prestage"`
 	Source      string `json:"source" binding:"required"`
-	Destination string `json:"destination" binding:"required"`
+	Destination string `json:"destination"`
 	Recursive   bool   `json:"recursive"`
 }
 
