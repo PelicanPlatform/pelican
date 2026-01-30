@@ -1990,6 +1990,33 @@ func updateCounter[T int | uint | float32 | float64](new T, old T, counter prome
 	return new
 }
 
+// updateCounterWithUnified updates both the XRootD-specific counter and the unified storage counter
+func updateCounterWithUnified[T int | uint | float32 | float64](new T, old T, counter prometheus.Counter, unifiedCounter *prometheus.CounterVec) T {
+	incBy := float64(new - old)
+	if incBy < 0 {
+		incBy = float64(new)
+	}
+	if incBy > 0 {
+		counter.Add(incBy)
+		unifiedCounter.WithLabelValues(BackendXRootD).Add(incBy)
+	}
+	return new
+}
+
+// updateHistogramWithUnified updates both the XRootD-specific histogram and the unified storage histogram
+func updateHistogramWithUnified(newTotalTime, oldTotalTime float64, newCount, oldCount int, histogram prometheus.Histogram, unifiedHistogram *prometheus.HistogramVec) {
+	deltaTime := newTotalTime - oldTotalTime
+	deltaCount := newCount - oldCount
+	if deltaCount > 0 {
+		avgLatency := deltaTime / float64(deltaCount)
+		// Update both histograms for each operation that occurred
+		for i := 0; i < deltaCount; i++ {
+			histogram.Observe(avgLatency)
+			unifiedHistogram.WithLabelValues(BackendXRootD).Observe(avgLatency)
+		}
+	}
+}
+
 // handleS3CacheStats processes the S3 cache stats
 // It expects the blobs to be in JSON format and will update the metrics accordingly
 // It returns an error if the blobs are empty or if there is an error in unmarshalling
@@ -2161,11 +2188,12 @@ func handleOSSStats(blobs [][]byte) error {
 			log.Warningf("handleOSSStats received an OSS packet with an unrecognized event type (%s)", ossStats.Event)
 			continue
 		}
-		updateHistogram(ossStats.ReadT, lastOssStats.ReadT, ossStats.Reads, lastOssStats.Reads, OssReadTime)
+		// Update histograms (both XRootD-specific and unified metrics)
+		updateHistogramWithUnified(ossStats.ReadT, lastOssStats.ReadT, ossStats.Reads, lastOssStats.Reads, OssReadTime, StorageReadTime)
 		lastOssStats.ReadT = ossStats.ReadT
-		updateHistogram(ossStats.WriteT, lastOssStats.WriteT, ossStats.Writes, lastOssStats.Writes, OssWriteTime)
+		updateHistogramWithUnified(ossStats.WriteT, lastOssStats.WriteT, ossStats.Writes, lastOssStats.Writes, OssWriteTime, StorageWriteTime)
 		lastOssStats.WriteT = ossStats.WriteT
-		updateHistogram(ossStats.StatT, lastOssStats.StatT, ossStats.Stats, lastOssStats.Stats, OssStatTime)
+		updateHistogramWithUnified(ossStats.StatT, lastOssStats.StatT, ossStats.Stats, lastOssStats.Stats, OssStatTime, StorageStatTime)
 		lastOssStats.StatT = ossStats.StatT
 		updateHistogram(ossStats.PgreadT, lastOssStats.PgreadT, ossStats.Pgreads, lastOssStats.Pgreads, OssPgReadTime)
 		lastOssStats.PgreadT = ossStats.PgreadT
@@ -2173,24 +2201,24 @@ func handleOSSStats(blobs [][]byte) error {
 		lastOssStats.PgwriteT = ossStats.PgwriteT
 		updateHistogram(ossStats.ReadvT, lastOssStats.ReadvT, ossStats.Readvs, lastOssStats.Readvs, OssReadvTime)
 		lastOssStats.ReadvT = ossStats.ReadvT
-		updateHistogram(ossStats.DirlistT, lastOssStats.DirlistT, ossStats.Dirlists, lastOssStats.Dirlists, OssDirlistTime)
+		updateHistogramWithUnified(ossStats.DirlistT, lastOssStats.DirlistT, ossStats.Dirlists, lastOssStats.Dirlists, OssDirlistTime, StorageReaddirTime)
 		lastOssStats.DirlistT = ossStats.DirlistT
-		updateHistogram(ossStats.TruncateT, lastOssStats.TruncateT, ossStats.Truncates, lastOssStats.Truncates, OssTruncateTime)
+		updateHistogramWithUnified(ossStats.TruncateT, lastOssStats.TruncateT, ossStats.Truncates, lastOssStats.Truncates, OssTruncateTime, StorageTruncateTime)
 		lastOssStats.TruncateT = ossStats.TruncateT
-		updateHistogram(ossStats.UnlinkT, lastOssStats.UnlinkT, ossStats.Unlinks, lastOssStats.Unlinks, OssUnlinkTime)
+		updateHistogramWithUnified(ossStats.UnlinkT, lastOssStats.UnlinkT, ossStats.Unlinks, lastOssStats.Unlinks, OssUnlinkTime, StorageUnlinkTime)
 		lastOssStats.UnlinkT = ossStats.UnlinkT
-		updateHistogram(ossStats.ChmodT, lastOssStats.ChmodT, ossStats.Chmods, lastOssStats.Chmods, OssChmodTime)
+		updateHistogramWithUnified(ossStats.ChmodT, lastOssStats.ChmodT, ossStats.Chmods, lastOssStats.Chmods, OssChmodTime, StorageChmodTime)
 		lastOssStats.ChmodT = ossStats.ChmodT
-		updateHistogram(ossStats.OpenT, lastOssStats.OpenT, ossStats.Opens, lastOssStats.Opens, OssOpenTime)
+		updateHistogramWithUnified(ossStats.OpenT, lastOssStats.OpenT, ossStats.Opens, lastOssStats.Opens, OssOpenTime, StorageOpenTime)
 		lastOssStats.OpenT = ossStats.OpenT
-		updateHistogram(ossStats.RenameT, lastOssStats.RenameT, ossStats.Renames, lastOssStats.Renames, OssRenameTime)
+		updateHistogramWithUnified(ossStats.RenameT, lastOssStats.RenameT, ossStats.Renames, lastOssStats.Renames, OssRenameTime, StorageRenameTime)
 		lastOssStats.RenameT = ossStats.RenameT
 
-		updateHistogram(ossStats.SlowReadT, lastOssStats.SlowReadT, ossStats.SlowReads, lastOssStats.SlowReads, OssSlowReadTime)
+		updateHistogramWithUnified(ossStats.SlowReadT, lastOssStats.SlowReadT, ossStats.SlowReads, lastOssStats.SlowReads, OssSlowReadTime, StorageSlowReadTime)
 		lastOssStats.SlowReadT = ossStats.SlowReadT
-		updateHistogram(ossStats.SlowWriteT, lastOssStats.SlowWriteT, ossStats.SlowWrites, lastOssStats.SlowWrites, OssSlowWriteTime)
+		updateHistogramWithUnified(ossStats.SlowWriteT, lastOssStats.SlowWriteT, ossStats.SlowWrites, lastOssStats.SlowWrites, OssSlowWriteTime, StorageSlowWriteTime)
 		lastOssStats.SlowWriteT = ossStats.SlowWriteT
-		updateHistogram(ossStats.SlowStatT, lastOssStats.SlowStatT, ossStats.SlowStats, lastOssStats.SlowStats, OssSlowStatTime)
+		updateHistogramWithUnified(ossStats.SlowStatT, lastOssStats.SlowStatT, ossStats.SlowStats, lastOssStats.SlowStats, OssSlowStatTime, StorageSlowStatTime)
 		lastOssStats.SlowStatT = ossStats.SlowStatT
 		updateHistogram(ossStats.SlowPgreadT, lastOssStats.SlowPgreadT, ossStats.SlowPgreads, lastOssStats.SlowPgreads, OssSlowPgReadTime)
 		lastOssStats.SlowPgreadT = ossStats.SlowPgreadT
@@ -2198,48 +2226,48 @@ func handleOSSStats(blobs [][]byte) error {
 		lastOssStats.SlowPgwriteT = ossStats.SlowPgwriteT
 		updateHistogram(ossStats.SlowReadvT, lastOssStats.SlowReadvT, ossStats.SlowReadvs, lastOssStats.SlowReadvs, OssSlowReadvTime)
 		lastOssStats.SlowReadvT = ossStats.SlowReadvT
-		updateHistogram(ossStats.SlowDirlistT, lastOssStats.SlowDirlistT, ossStats.SlowDirlists, lastOssStats.SlowDirlists, OssSlowDirlistTime)
+		updateHistogramWithUnified(ossStats.SlowDirlistT, lastOssStats.SlowDirlistT, ossStats.SlowDirlists, lastOssStats.SlowDirlists, OssSlowDirlistTime, StorageSlowReaddirTime)
 		lastOssStats.SlowDirlistT = ossStats.SlowDirlistT
-		updateHistogram(ossStats.SlowTruncateT, lastOssStats.SlowTruncateT, ossStats.SlowTruncates, lastOssStats.SlowTruncates, OssSlowTruncateTime)
+		updateHistogramWithUnified(ossStats.SlowTruncateT, lastOssStats.SlowTruncateT, ossStats.SlowTruncates, lastOssStats.SlowTruncates, OssSlowTruncateTime, StorageSlowTruncateTime)
 		lastOssStats.SlowTruncateT = ossStats.SlowTruncateT
-		updateHistogram(ossStats.SlowUnlinkT, lastOssStats.SlowUnlinkT, ossStats.SlowUnlinks, lastOssStats.SlowUnlinks, OssSlowUnlinkTime)
+		updateHistogramWithUnified(ossStats.SlowUnlinkT, lastOssStats.SlowUnlinkT, ossStats.SlowUnlinks, lastOssStats.SlowUnlinks, OssSlowUnlinkTime, StorageSlowUnlinkTime)
 		lastOssStats.SlowUnlinkT = ossStats.SlowUnlinkT
-		updateHistogram(ossStats.SlowChmodT, lastOssStats.SlowChmodT, ossStats.SlowChmods, lastOssStats.SlowChmods, OssSlowChmodTime)
+		updateHistogramWithUnified(ossStats.SlowChmodT, lastOssStats.SlowChmodT, ossStats.SlowChmods, lastOssStats.SlowChmods, OssSlowChmodTime, StorageSlowChmodTime)
 		lastOssStats.SlowChmodT = ossStats.SlowChmodT
-		updateHistogram(ossStats.SlowOpenT, lastOssStats.SlowOpenT, ossStats.SlowOpens, lastOssStats.SlowOpens, OssSlowOpenTime)
+		updateHistogramWithUnified(ossStats.SlowOpenT, lastOssStats.SlowOpenT, ossStats.SlowOpens, lastOssStats.SlowOpens, OssSlowOpenTime, StorageSlowOpenTime)
 		lastOssStats.SlowOpenT = ossStats.SlowOpenT
-		updateHistogram(ossStats.SlowRenameT, lastOssStats.SlowRenameT, ossStats.SlowRenames, lastOssStats.SlowRenames, OssSlowRenameTime)
+		updateHistogramWithUnified(ossStats.SlowRenameT, lastOssStats.SlowRenameT, ossStats.SlowRenames, lastOssStats.SlowRenames, OssSlowRenameTime, StorageSlowRenameTime)
 		lastOssStats.SlowRenameT = ossStats.SlowRenameT
 
-		lastOssStats.Reads = updateCounter(ossStats.Reads, lastOssStats.Reads, OssReadsCounter)
-		lastOssStats.Writes = updateCounter(ossStats.Writes, lastOssStats.Writes, OssWritesCounter)
-		lastOssStats.Stats = updateCounter(ossStats.Stats, lastOssStats.Stats, OssStatsCounter)
+		lastOssStats.Reads = updateCounterWithUnified(ossStats.Reads, lastOssStats.Reads, OssReadsCounter, StorageReadsTotal)
+		lastOssStats.Writes = updateCounterWithUnified(ossStats.Writes, lastOssStats.Writes, OssWritesCounter, StorageWritesTotal)
+		lastOssStats.Stats = updateCounterWithUnified(ossStats.Stats, lastOssStats.Stats, OssStatsCounter, StorageStatsTotal)
 		lastOssStats.Pgreads = updateCounter(ossStats.Pgreads, lastOssStats.Pgreads, OssPgReadsCounter)
 		lastOssStats.Pgwrites = updateCounter(ossStats.Pgwrites, lastOssStats.Pgwrites, OssPgWritesCounter)
 		lastOssStats.Readvs = updateCounter(ossStats.Readvs, lastOssStats.Readvs, OssReadvCounter)
 		lastOssStats.ReadvSegs = updateCounter(ossStats.ReadvSegs, lastOssStats.ReadvSegs, OssReadvSegsCounter)
-		lastOssStats.Dirlists = updateCounter(ossStats.Dirlists, lastOssStats.Dirlists, OssDirlistCounter)
+		lastOssStats.Dirlists = updateCounterWithUnified(ossStats.Dirlists, lastOssStats.Dirlists, OssDirlistCounter, StorageReaddirTotal)
 		lastOssStats.DirlistEnts = updateCounter(ossStats.DirlistEnts, lastOssStats.DirlistEnts, OssDirlistEntsCounter)
-		lastOssStats.Truncates = updateCounter(ossStats.Truncates, lastOssStats.Truncates, OssTruncateCounter)
-		lastOssStats.Unlinks = updateCounter(ossStats.Unlinks, lastOssStats.Unlinks, OssUnlinkCounter)
-		lastOssStats.Chmods = updateCounter(ossStats.Chmods, lastOssStats.Chmods, OssChmodCounter)
-		lastOssStats.Opens = updateCounter(ossStats.Opens, lastOssStats.Opens, OssOpensCounter)
-		lastOssStats.Renames = updateCounter(ossStats.Renames, lastOssStats.Renames, OssRenamesCounter)
+		lastOssStats.Truncates = updateCounterWithUnified(ossStats.Truncates, lastOssStats.Truncates, OssTruncateCounter, StorageTruncatesTotal)
+		lastOssStats.Unlinks = updateCounterWithUnified(ossStats.Unlinks, lastOssStats.Unlinks, OssUnlinkCounter, StorageUnlinksTotal)
+		lastOssStats.Chmods = updateCounterWithUnified(ossStats.Chmods, lastOssStats.Chmods, OssChmodCounter, StorageChmodsTotal)
+		lastOssStats.Opens = updateCounterWithUnified(ossStats.Opens, lastOssStats.Opens, OssOpensCounter, StorageOpensTotal)
+		lastOssStats.Renames = updateCounterWithUnified(ossStats.Renames, lastOssStats.Renames, OssRenamesCounter, StorageRenamesTotal)
 
-		lastOssStats.SlowReads = updateCounter(ossStats.SlowReads, lastOssStats.SlowReads, OssSlowReadsCounter)
-		lastOssStats.SlowWrites = updateCounter(ossStats.SlowWrites, lastOssStats.SlowWrites, OssSlowWritesCounter)
-		lastOssStats.SlowStats = updateCounter(ossStats.SlowStats, lastOssStats.SlowStats, OssSlowStatsCounter)
+		lastOssStats.SlowReads = updateCounterWithUnified(ossStats.SlowReads, lastOssStats.SlowReads, OssSlowReadsCounter, StorageSlowReadsTotal)
+		lastOssStats.SlowWrites = updateCounterWithUnified(ossStats.SlowWrites, lastOssStats.SlowWrites, OssSlowWritesCounter, StorageSlowWritesTotal)
+		lastOssStats.SlowStats = updateCounterWithUnified(ossStats.SlowStats, lastOssStats.SlowStats, OssSlowStatsCounter, StorageSlowStatsTotal)
 		lastOssStats.SlowPgreads = updateCounter(ossStats.SlowPgreads, lastOssStats.SlowPgreads, OssSlowPgReadsCounter)
 		lastOssStats.SlowPgwrites = updateCounter(ossStats.SlowPgwrites, lastOssStats.SlowPgwrites, OssSlowPgWritesCounter)
 		lastOssStats.SlowReadvs = updateCounter(ossStats.SlowReadvs, lastOssStats.SlowReadvs, OssSlowReadvCounter)
 		lastOssStats.SlowReadvSegs = updateCounter(ossStats.SlowReadvSegs, lastOssStats.SlowReadvSegs, OssSlowReadvSegsCounter)
-		lastOssStats.SlowDirlists = updateCounter(ossStats.SlowDirlists, lastOssStats.SlowDirlists, OssSlowDirlistCounter)
+		lastOssStats.SlowDirlists = updateCounterWithUnified(ossStats.SlowDirlists, lastOssStats.SlowDirlists, OssSlowDirlistCounter, StorageSlowReaddirTotal)
 		lastOssStats.SlowDirlistEnts = updateCounter(ossStats.SlowDirlistEnts, lastOssStats.SlowDirlistEnts, OssSlowDirlistEntsCounter)
-		lastOssStats.SlowTruncates = updateCounter(ossStats.SlowTruncates, lastOssStats.SlowTruncates, OssSlowTruncateCounter)
-		lastOssStats.SlowUnlinks = updateCounter(ossStats.SlowUnlinks, lastOssStats.SlowUnlinks, OssSlowUnlinkCounter)
-		lastOssStats.SlowChmods = updateCounter(ossStats.SlowChmods, lastOssStats.SlowChmods, OssSlowChmodCounter)
-		lastOssStats.SlowOpens = updateCounter(ossStats.SlowOpens, lastOssStats.SlowOpens, OssSlowOpensCounter)
-		lastOssStats.SlowRenames = updateCounter(ossStats.SlowRenames, lastOssStats.SlowRenames, OssSlowRenamesCounter)
+		lastOssStats.SlowTruncates = updateCounterWithUnified(ossStats.SlowTruncates, lastOssStats.SlowTruncates, OssSlowTruncateCounter, StorageSlowTruncatesTotal)
+		lastOssStats.SlowUnlinks = updateCounterWithUnified(ossStats.SlowUnlinks, lastOssStats.SlowUnlinks, OssSlowUnlinkCounter, StorageSlowUnlinksTotal)
+		lastOssStats.SlowChmods = updateCounterWithUnified(ossStats.SlowChmods, lastOssStats.SlowChmods, OssSlowChmodCounter, StorageSlowChmodsTotal)
+		lastOssStats.SlowOpens = updateCounterWithUnified(ossStats.SlowOpens, lastOssStats.SlowOpens, OssSlowOpensCounter, StorageSlowOpensTotal)
+		lastOssStats.SlowRenames = updateCounterWithUnified(ossStats.SlowRenames, lastOssStats.SlowRenames, OssSlowRenamesCounter, StorageSlowRenamesTotal)
 		// Found and processed the last valid event, so we are done
 		break
 	}
