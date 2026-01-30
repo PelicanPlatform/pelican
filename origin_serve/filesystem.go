@@ -20,6 +20,7 @@ package origin_serve
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -28,98 +29,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/afero"
 	"golang.org/x/net/webdav"
-	"golang.org/x/time/rate"
+
+	"github.com/pelicanplatform/pelican/htb"
+	"github.com/pelicanplatform/pelican/metrics"
 )
-
-// rateLimitedFs wraps an afero.Fs to rate-limit read operations
-type rateLimitedFs struct {
-	afero.Fs
-	limiter *rate.Limiter
-}
-
-// rateLimitedFile wraps an afero.File to rate-limit reads
-type rateLimitedFile struct {
-	afero.File
-	limiter *rate.Limiter
-}
-
-// newRateLimitedFs creates a filesystem with rate-limited reads
-// bytesPerSec is the maximum read rate in bytes per second (0 = unlimited)
-func newRateLimitedFs(fs afero.Fs, bytesPerSec int) afero.Fs {
-	if bytesPerSec <= 0 {
-		return fs
-	}
-	// Use a modest burst to allow reasonable read sizes without
-	// excessive bursting above the configured rate
-	burstSize := bytesPerSec / 2
-	if burstSize < 32768 {
-		burstSize = 32768 // Minimum 32KB burst
-	}
-	return &rateLimitedFs{
-		Fs:      fs,
-		limiter: rate.NewLimiter(rate.Limit(bytesPerSec), burstSize),
-	}
-}
-
-// Open wraps files with rate limiting
-func (fs *rateLimitedFs) Open(name string) (afero.File, error) {
-	f, err := fs.Fs.Open(name)
-	if err != nil {
-		return nil, err
-	}
-	return &rateLimitedFile{File: f, limiter: fs.limiter}, nil
-}
-
-// OpenFile wraps files with rate limiting
-func (fs *rateLimitedFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
-	f, err := fs.Fs.OpenFile(name, flag, perm)
-	if err != nil {
-		return nil, err
-	}
-	return &rateLimitedFile{File: f, limiter: fs.limiter}, nil
-}
-
-// Read applies rate limiting to reads
-func (f *rateLimitedFile) Read(p []byte) (n int, err error) {
-	// Limit individual read size to avoid excessive waiting
-	// This ensures reads complete in reasonable time even with rate limiting
-	maxReadSize := f.limiter.Burst()
-	toRead := len(p)
-	if toRead > maxReadSize {
-		toRead = maxReadSize
-	}
-
-	// Try to do a non-blocking read with available tokens
-	// If requested size isn't available, try progressively smaller reads
-	// This allows short reads when tokens are limited, avoiding long waits
-	readSize := toRead
-	for readSize >= 1024 { // Don't try reads smaller than 1KB
-		if f.limiter.AllowN(time.Now(), readSize) {
-			// Sufficient tokens available, do the read immediately
-			return f.File.Read(p[:readSize])
-		}
-		// Try half the size for a short read
-		readSize = readSize / 2
-	}
-
-	// No tokens available for even small reads; wait for a minimal amount
-	// Use 1KB minimum to make reasonable progress
-	minRead := 1024
-	if minRead > toRead {
-		minRead = toRead
-	}
-	if minRead > 0 {
-		if err := f.limiter.WaitN(context.Background(), minRead); err != nil {
-			return 0, err
-		}
-		return f.File.Read(p[:minRead])
-	}
-
-	// Edge case: zero-length read
-	return f.File.Read(p[:0])
-}
 
 // autoCreateDirFs wraps an afero.Fs to automatically create parent directories
 // when opening a file for writing
@@ -179,11 +95,56 @@ func getUserInfo(ctx context.Context) *userInfo {
 	return ui
 }
 
+// operationMetrics holds the unified metrics for tracking a filesystem operation.
+type operationMetrics struct {
+	total         *prometheus.CounterVec
+	timeHistogram *prometheus.HistogramVec
+	slowTotal     *prometheus.CounterVec
+	slowHistogram *prometheus.HistogramVec
+}
+
+// trackOperation returns a cleanup function that records metrics for a filesystem operation.
+// It tracks both operation count and timing, including slow operations (>2s).
+// All metrics use the unified pelican_storage_* namespace with backend="posixv2" label.
+//
+// Usage:
+//
+//	defer trackOperation(opMetrics)()
+func trackOperation(om operationMetrics) func() {
+	start := time.Now()
+
+	// Increment operation counter
+	if om.total != nil {
+		om.total.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+	}
+
+	return func() {
+		elapsed := time.Since(start)
+		elapsedSec := elapsed.Seconds()
+
+		// Record operation timing
+		if om.timeHistogram != nil {
+			om.timeHistogram.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsedSec)
+		}
+
+		// Track slow operations (>2s)
+		if elapsed >= metrics.SlowOperationThreshold {
+			if om.slowTotal != nil {
+				om.slowTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+			}
+			if om.slowHistogram != nil {
+				om.slowHistogram.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsedSec)
+			}
+		}
+	}
+}
+
 // aferoFileSystem wraps an afero.Fs to implement webdav.FileSystem
 type aferoFileSystem struct {
-	fs     afero.Fs
-	prefix string
-	logger func(*http.Request, error)
+	fs          afero.Fs
+	prefix      string
+	logger      func(*http.Request, error)
+	rateLimiter *htb.HTB // Optional rate limiter for IO operations
 }
 
 // newAferoFileSystem creates a new aferoFileSystem
@@ -195,8 +156,25 @@ func newAferoFileSystem(fs afero.Fs, prefix string, logger func(*http.Request, e
 	}
 }
 
+// newAferoFileSystemWithRateLimiter creates a new aferoFileSystem with rate limiting
+func newAferoFileSystemWithRateLimiter(fs afero.Fs, prefix string, logger func(*http.Request, error), rateLimiter *htb.HTB) *aferoFileSystem {
+	return &aferoFileSystem{
+		fs:          fs,
+		prefix:      prefix,
+		logger:      logger,
+		rateLimiter: rateLimiter,
+	}
+}
+
 // Mkdir implements webdav.FileSystem
 func (afs *aferoFileSystem) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
+	defer trackOperation(operationMetrics{
+		total:         metrics.StorageMkdirsTotal,
+		timeHistogram: metrics.StorageMkdirTime,
+		slowTotal:     metrics.StorageSlowMkdirsTotal,
+		slowHistogram: metrics.StorageSlowMkdirTime,
+	})()
+
 	fullPath := afs.fullPath(name)
 	// Use webdav logger if available
 	return afs.fs.MkdirAll(fullPath, perm)
@@ -239,25 +217,69 @@ func (afs *aferoFileSystem) OpenFile(ctx context.Context, name string, flag int,
 
 	file, err := afs.fs.OpenFile(fullPath, flag, perm)
 	if err != nil {
+		if flag&(os.O_WRONLY|os.O_RDWR|os.O_CREATE|os.O_TRUNC) != 0 {
+			metrics.StorageOpenErrorsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+		}
 		return nil, err
 	}
 
+	// Track open operation metrics
+	trackOperation(operationMetrics{
+		total:         metrics.StorageOpensTotal,
+		timeHistogram: metrics.StorageOpenTime,
+		slowTotal:     metrics.StorageSlowOpensTotal,
+		slowHistogram: metrics.StorageSlowOpenTime,
+	})()
+
+	// Extract username from context for rate limiting
+	userID := "unauthenticated"
+	if afs.rateLimiter != nil {
+		// Try to get user info from context
+		if ui := getUserInfo(ctx); ui != nil && ui.User != "" {
+			userID = ui.User
+		}
+		// Try to get issuer from context and append to make unique per-issuer
+		if issuer, ok := ctx.Value(issuerContextKey{}).(string); ok && issuer != "" {
+			userID = fmt.Sprintf("%s@%s", userID, issuer)
+		}
+	}
+
+	// Wrap the file with metrics tracking
+	metricsWrappedFile := newMetricsFile(file, afs.rateLimiter, userID, ctx)
+
 	return &aferoFile{
-		File:   file,
-		fs:     afs.fs,
-		name:   fullPath,
-		logger: afs.logger,
+		File:        metricsWrappedFile,
+		fs:          afs.fs,
+		name:        fullPath,
+		logger:      afs.logger,
+		rateLimiter: afs.rateLimiter,
+		userID:      userID,
+		ctx:         ctx,
 	}, nil
 }
 
 // RemoveAll implements webdav.FileSystem
 func (afs *aferoFileSystem) RemoveAll(ctx context.Context, name string) error {
+	defer trackOperation(operationMetrics{
+		total:         metrics.StorageUnlinksTotal,
+		timeHistogram: metrics.StorageUnlinkTime,
+		slowTotal:     metrics.StorageSlowUnlinksTotal,
+		slowHistogram: metrics.StorageSlowUnlinkTime,
+	})()
+
 	fullPath := afs.fullPath(name)
 	return afs.fs.RemoveAll(fullPath)
 }
 
 // Rename implements webdav.FileSystem
 func (afs *aferoFileSystem) Rename(ctx context.Context, oldName, newName string) error {
+	defer trackOperation(operationMetrics{
+		total:         metrics.StorageRenamesTotal,
+		timeHistogram: metrics.StorageRenameTime,
+		slowTotal:     metrics.StorageSlowRenamesTotal,
+		slowHistogram: metrics.StorageSlowRenameTime,
+	})()
+
 	oldPath := afs.fullPath(oldName)
 	newPath := afs.fullPath(newName)
 	return afs.fs.Rename(oldPath, newPath)
@@ -265,6 +287,13 @@ func (afs *aferoFileSystem) Rename(ctx context.Context, oldName, newName string)
 
 // Stat implements webdav.FileSystem
 func (afs *aferoFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, error) {
+	defer trackOperation(operationMetrics{
+		total:         metrics.StorageStatsTotal,
+		timeHistogram: metrics.StorageStatTime,
+		slowTotal:     metrics.StorageSlowStatsTotal,
+		slowHistogram: metrics.StorageSlowStatTime,
+	})()
+
 	fullPath := afs.fullPath(name)
 	return afs.fs.Stat(fullPath)
 }
@@ -280,12 +309,15 @@ func (afs *aferoFileSystem) fullPath(name string) string {
 // aferoFile wraps an afero.File to implement webdav.File
 type aferoFile struct {
 	afero.File
-	fs         afero.Fs
-	name       string
-	dirEntries []os.FileInfo              // Cached directory entries for pagination
-	dirOffset  int                        // Current offset in directory entries
-	dirMutex   sync.Mutex                 // Mutex for concurrent access
-	logger     func(*http.Request, error) // WebDAV logger
+	fs          afero.Fs
+	name        string
+	dirEntries  []os.FileInfo              // Cached directory entries for pagination
+	dirOffset   int                        // Current offset in directory entries
+	dirMutex    sync.Mutex                 // Mutex for concurrent access
+	logger      func(*http.Request, error) // WebDAV logger
+	rateLimiter *htb.HTB                   // Optional rate limiter
+	userID      string                     // User ID for rate limiting
+	ctx         context.Context            // Context from OpenFile for rate limiting
 }
 
 // Readdir implements webdav.File
