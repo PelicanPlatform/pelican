@@ -28,6 +28,8 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
+
+	"github.com/pelicanplatform/pelican/byte_rate"
 )
 
 var (
@@ -121,6 +123,57 @@ func stringToSliceHookFunc() mapstructure.DecodeHookFunc {
 	}
 }
 
+// stringToByteRateHookFunc returns a DecodeHookFunc that converts strings to integers
+// representing bytes per second. It supports human-readable rate formats like:
+//   - "10MB/s", "100Mbps", "1.5GiB/m"
+//
+// Empty string or "0" returns 0 (no rate limiting).
+// For strings that don't look like byte rates (don't contain rate units), returns data unchanged
+// so other hooks or default conversions can handle them.
+func stringToByteRateHookFunc() mapstructure.DecodeHookFunc {
+	return func(f reflect.Type, t reflect.Type, data interface{}) (interface{}, error) {
+		// Only convert string to int
+		if f.Kind() != reflect.String || t.Kind() != reflect.Int {
+			return data, nil
+		}
+
+		raw, ok := data.(string)
+		if !ok {
+			return data, nil
+		}
+
+		// Empty or "0" means no rate limiting
+		if raw == "" || raw == "0" {
+			return 0, nil
+		}
+
+		// Check if this looks like a byte rate string (contains common rate units)
+		// If it doesn't contain rate units, pass it through unchanged for normal int parsing
+		lowerRaw := strings.ToLower(strings.TrimSpace(raw))
+		hasRateUnits := strings.Contains(lowerRaw, "b/s") ||
+			strings.Contains(lowerRaw, "bps") ||
+			strings.Contains(lowerRaw, "bit/s") ||
+			strings.Contains(lowerRaw, "byte/s") ||
+			strings.HasSuffix(lowerRaw, "/s") ||
+			strings.HasSuffix(lowerRaw, "/m") ||
+			strings.HasSuffix(lowerRaw, "/h")
+
+		if !hasRateUnits {
+			// Doesn't look like a rate string, pass it through unchanged
+			return data, nil
+		}
+
+		// Parse the rate string
+		rate, err := byte_rate.ParseRate(raw)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse byte rate '%s'", raw)
+		}
+
+		// Return as integer bytes per second
+		return int(rate), nil
+	}
+}
+
 // DecodeConfig decodes the provided viper instance into a new Config struct.
 //
 // Unlike UnmarshalConfig/Refresh, this does NOT update the global atomic cache.
@@ -140,6 +193,7 @@ func DecodeConfig(v *viper.Viper) (*Config, error) {
 		DecodeHook: mapstructure.ComposeDecodeHookFunc(
 			mapstructure.StringToTimeDurationHookFunc(),
 			stringToSliceHookFunc(),
+			stringToByteRateHookFunc(),
 		),
 		MatchName: func(mapKey, fieldName string) bool {
 			return strings.EqualFold(mapKey, fieldName)
@@ -328,6 +382,7 @@ func getOrCreateConfig() *Config {
 		DecodeHook: mapstructure.ComposeDecodeHookFunc(
 			mapstructure.StringToTimeDurationHookFunc(),
 			mapstructure.StringToSliceHookFunc(","),
+			stringToByteRateHookFunc(),
 		),
 		MatchName: func(mapKey, fieldName string) bool {
 			return strings.EqualFold(mapKey, fieldName)
@@ -372,6 +427,7 @@ func MultiSet(keyValues map[string]interface{}) error {
 		DecodeHook: mapstructure.ComposeDecodeHookFunc(
 			mapstructure.StringToTimeDurationHookFunc(),
 			mapstructure.StringToSliceHookFunc(","),
+			stringToByteRateHookFunc(),
 		),
 		MatchName: func(mapKey, fieldName string) bool {
 			return strings.EqualFold(mapKey, fieldName)

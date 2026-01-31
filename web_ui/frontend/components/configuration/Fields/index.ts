@@ -26,6 +26,7 @@ export interface ParameterMetadata {
   description: string;
   type:
     | 'bool'
+    | 'byterate'
     | 'filename'
     | 'duration'
     | 'int'

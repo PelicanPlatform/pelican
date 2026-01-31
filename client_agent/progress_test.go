@@ -53,7 +53,6 @@ func TestAsyncTransferProgressReporting(t *testing.T) {
 
 	// Test parameters
 	const (
-		rateLimit    = 500 * 1024       // 500 KB/s - slower to allow observing periodic updates
 		testFileSize = 10 * 1024 * 1024 // 10 MB
 		pollInterval = 500 * time.Millisecond
 	)
@@ -66,17 +65,17 @@ func TestAsyncTransferProgressReporting(t *testing.T) {
 
 	// Configure origin with POSIXv2 and rate-limited reads
 	// Rate limit at the origin level to simulate slow storage
-	originConfig := fmt.Sprintf(`
+	originConfig := `
 Origin:
   StorageType: posixv2
-  ReadRateLimitBytesPerSecond: %d
+  TransferRateLimit: 500KB/s
   Exports:
     - FederationPrefix: /test
       Capabilities: ["PublicReads", "Listings"]
 Director:
   MinStatResponse: 1
   MaxStatResponse: 1
-`, rateLimit)
+`
 
 	// Create federation
 	t.Log("Starting federation...")

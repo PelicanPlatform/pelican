@@ -5,7 +5,7 @@ PARAMETER_PATH = './docs/parameters.yaml'
 KEYS = ["name", "description", "type", "default", "components"]
 
 ENUMERATIONS = {
-    "type": ('url', 'object', 'filename', 'int', 'stringSlice', 'duration', 'string', 'bool')
+    "type": ('url', 'object', 'filename', 'int', 'stringSlice', 'duration', 'string', 'bool', 'byterate')
 }
 
 VERIFIED_OBJECT_STRUCTURES = [

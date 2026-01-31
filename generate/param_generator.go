@@ -176,6 +176,9 @@ func GenParamEnum() {
 			stringSliceParamMap[name] = rawName
 		case "int":
 			intParamMap[name] = rawName
+		case "byterate":
+			// byterate is stored as int (bytes per second) internally
+			intParamMap[name] = rawName
 		case "bool":
 			boolParamMap[name] = rawName
 		case "duration":
@@ -365,6 +368,9 @@ func GenParamStruct() {
 		case "stringSlice":
 			goType = "[]string"
 		case "int":
+			goType = "int"
+		case "byterate":
+			// byterate is parsed as string but stored as int (bytes per second)
 			goType = "int"
 		case "bool":
 			goType = "bool"

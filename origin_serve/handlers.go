@@ -223,7 +223,7 @@ func InitializeHandlers(exports []server_utils.OriginExport) error {
 	exportPrefixMap = make(map[string]string) // Initialize the global map
 
 	// Get optional rate limit for testing
-	readRateLimit := param.Origin_ReadRateLimitBytesPerSecond.GetInt()
+	readRateLimit := param.Origin_TransferRateLimit.GetInt()
 	if readRateLimit > 0 {
 		log.Infof("Applying read rate limit: %d bytes/sec", readRateLimit)
 	}
