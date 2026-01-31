@@ -375,9 +375,6 @@ func TestClientAgentAutoSpawn(t *testing.T) {
 	// The command should have output a job ID, indicating the server was spawned
 	assert.Contains(t, string(getOutput), "Job created:", "Should have created a job")
 
-	// Give the server a moment to fully initialize
-	time.Sleep(1 * time.Second)
-
 	// Verify server is now running
 	apiClient, err := apiclient.NewAPIClient(socketPath)
 	require.NoError(t, err, "Failed to create API client")
@@ -434,8 +431,14 @@ func TestClientAgentIdleShutdown(t *testing.T) {
 		}
 	}()
 
-	// Set a short idle timeout for testing (3 seconds) using environment variable
-	testEnv := append(os.Environ(), "PELICAN_CLIENTAGENT_IDLETIMEOUT=3s", "PELICAN_CLIENTAGENT_DBLOCATION="+dbFile)
+	// Set a short idle timeout for testing
+	testConfigDir := filepath.Join(tempDir, "config")
+	require.NoError(t, os.MkdirAll(testConfigDir, 0700))
+
+	testEnv := append(os.Environ(),
+		"PELICAN_CLIENTAGENT_IDLETIMEOUT=3s",
+		"PELICAN_CLIENTAGENT_DBLOCATION="+dbFile,
+		"PELICAN_CONFIGDIR="+testConfigDir)
 
 	// Clean up any leftover server at the end
 	defer func() {
@@ -475,27 +478,15 @@ func TestClientAgentIdleShutdown(t *testing.T) {
 	require.Greater(t, pid, 0, "PID should be positive")
 	t.Logf("Server running with PID: %d", pid)
 
-	// Wait for idle timeout (5 seconds) plus buffer for shutdown
-	t.Log("Waiting for idle timeout (5s + buffer)...")
-
-	// Check for shutdown - start checking after 6 seconds
-	time.Sleep(6 * time.Second)
-
-	// Verify server has automatically shut down
+	// Wait for idle timeout to trigger (3s timeout + 1s check interval)
+	t.Log("Waiting for idle timeout to trigger shutdown...")
 	require.Eventually(t, func() bool {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		return !apiClient.IsServerRunning(ctx)
 	}, 10*time.Second, 500*time.Millisecond, "Server should auto-shutdown after idle timeout")
 
-	t.Log("Server successfully shut down after idle timeout!")
-
-	// Read and display log file for debugging
-	if logData, err := os.ReadFile(logFile); err == nil {
-		t.Logf("Server log output:\n%s", string(logData))
-	} else {
-		t.Logf("Could not read log file: %v", err)
-	}
+	t.Log("Server successfully shut down after idle timeout")
 
 	// Verify status shows not running
 	statusCmd := exec.Command(binaryPath, "client-agent", "status",
