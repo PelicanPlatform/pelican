@@ -26,21 +26,22 @@ import (
 )
 
 const (
-	tickInterval     = 100 * time.Millisecond
-	stalenessTimeout = 10 * time.Second // Remove users after 10 seconds of inactivity
+	tickInterval            = 100 * time.Millisecond
+	defaultStalenessTimeout = 10 * time.Second // Remove users after 10 seconds of inactivity
 )
 
 // HTB represents a hierarchical token bucket rate limiter with two levels:
 // a parent bucket and multiple child buckets (one per user).
 type HTB struct {
-	mu         sync.Mutex
-	parent     *bucket
-	children   map[string]*bucket
-	rate       float64   // tokens per second
-	capacity   int64     // total capacity N
-	lastTick   time.Time // time of last tick
-	nextChild  int       // for round-robin waiter processing
-	childOrder []string  // stable ordering for round-robin
+	mu               sync.Mutex
+	parent           *bucket
+	children         map[string]*bucket
+	rate             float64       // tokens per second
+	capacity         int64         // total capacity N
+	lastTick         time.Time     // time of last tick
+	nextChild        int           // for round-robin waiter processing
+	childOrder       []string      // stable ordering for round-robin
+	stalenessTimeout time.Duration // timeout for removing stale users
 }
 
 // bucket represents a single token bucket (parent or child)
@@ -53,9 +54,10 @@ type bucket struct {
 
 // waiter represents a goroutine waiting for tokens
 type waiter struct {
-	n     int64
-	ready chan struct{}
-	ctx   context.Context
+	n            int64
+	ready        chan struct{}
+	ctx          context.Context
+	becomeLeader chan struct{} // closed when this waiter should become the lead
 }
 
 // Tokens represents an allocation of tokens that can be used and returned.
@@ -98,11 +100,12 @@ func New(rate float64, capacity int64) *HTB {
 			capacity: capacity,
 			waiters:  make([]*waiter, 0),
 		},
-		children:   make(map[string]*bucket),
-		rate:       rate,
-		capacity:   capacity,
-		lastTick:   time.Now(),
-		childOrder: make([]string, 0),
+		children:         make(map[string]*bucket),
+		rate:             rate,
+		capacity:         capacity,
+		lastTick:         time.Now(),
+		childOrder:       make([]string, 0),
+		stalenessTimeout: defaultStalenessTimeout,
 	}
 
 	return h
@@ -120,10 +123,13 @@ func (h *HTB) maybeTickLocked() {
 		return
 	}
 
-	// Perform ticks
+	// Perform ticks (stop early if system is fully saturated)
 	ticksPerformed := 0
 	for i := 0; i < numTicks; i++ {
-		h.tickOnce()
+		if !h.tickOnce() {
+			// System is fully saturated (all children and parent at capacity)
+			break
+		}
 		ticksPerformed++
 	}
 
@@ -132,17 +138,18 @@ func (h *HTB) maybeTickLocked() {
 }
 
 // tickOnce processes one tick: adds tokens, processes waiters, and removes stale users.
+// Returns true if more ticks would be useful, false if system is fully saturated.
 // Must be called with lock held.
-func (h *HTB) tickOnce() {
+func (h *HTB) tickOnce() bool {
 
 	// Calculate tokens to add per tick
 	tokensPerTick := h.rate * tickInterval.Seconds()
 
-	// Remove stale users (not used in 10 seconds)
+	// Remove stale users (not used in stalenessTimeout)
 	now := time.Now()
 	staleUsers := make([]string, 0)
 	for userID, child := range h.children {
-		if !child.lastUse.IsZero() && now.Sub(child.lastUse) > stalenessTimeout {
+		if !child.lastUse.IsZero() && now.Sub(child.lastUse) > h.stalenessTimeout {
 			staleUsers = append(staleUsers, userID)
 		}
 	}
@@ -183,6 +190,27 @@ func (h *HTB) tickOnce() {
 
 	// Process waiters in round-robin fashion
 	h.processWaiters()
+
+	// Check if system is fully saturated
+	// If parent is full and all children are at capacity, no more ticks are needed
+	if h.parent.tokens >= float64(h.parent.capacity) {
+		numChildren := len(h.children)
+		if numChildren > 0 {
+			childCapacity := h.capacity / int64(numChildren)
+			for _, child := range h.children {
+				if child.tokens < float64(childCapacity) {
+					// At least one child can still accept tokens
+					return true
+				}
+			}
+			// All children at capacity and parent full - system saturated
+			return false
+		}
+		// No children and parent full - system saturated
+		return false
+	}
+	// Parent not full - more ticks useful
+	return true
 }
 
 // processWaiters tries to satisfy waiting requests in round-robin order
@@ -233,12 +261,103 @@ func (h *HTB) processChildWaiters(userID string, child *bucket) {
 	child.waiters = newWaiters
 }
 
+// promoteNextLeader promotes the next waiter to lead after the current lead exits.
+// Must be called with lock held. The exiting waiter (exitingWaiter) may or may not
+// still be in the waiters slice depending on how it exited.
+func (h *HTB) promoteNextLeader(child *bucket, exitingWaiter *waiter) {
+	// Find and remove the exiting waiter if it's still in the list
+	for i, w := range child.waiters {
+		if w == exitingWaiter {
+			child.waiters = append(child.waiters[:i], child.waiters[i+1:]...)
+			break
+		}
+	}
+
+	// Promote the new first waiter (if any) to lead
+	if len(child.waiters) > 0 {
+		close(child.waiters[0].becomeLeader)
+	}
+}
+
+// runLeadWaiterLoop runs the lead waiter ticking loop. Returns Tokens on success, error on context cancellation.
+// Must be called WITHOUT lock held.
+func (h *HTB) runLeadWaiterLoop(ctx context.Context, userID string, child *bucket, w *waiter, n int64) (*Tokens, error) {
+	// Calculate time until next tick based on lastTick
+	h.mu.Lock()
+	elapsedSinceLastTick := time.Since(h.lastTick)
+	timeUntilNextTick := tickInterval - (elapsedSinceLastTick % tickInterval)
+	h.mu.Unlock()
+
+	// Use a timer for the first tick at the correct time
+	firstTick := time.NewTimer(timeUntilNextTick)
+	defer firstTick.Stop()
+
+	// Then use regular ticker for subsequent ticks
+	var ticker *time.Ticker
+	var tickerC <-chan time.Time
+
+	for {
+		select {
+		case <-w.ready:
+			// Success! Promote next waiter to lead if any
+			if ticker != nil {
+				ticker.Stop()
+			}
+			h.mu.Lock()
+			h.promoteNextLeader(child, w)
+			h.mu.Unlock()
+			return &Tokens{h: h, userID: userID, taken: n, used: 0}, nil
+		case <-ctx.Done():
+			// Cancelled! Promote next waiter to lead if any
+			if ticker != nil {
+				ticker.Stop()
+			}
+			h.mu.Lock()
+			h.promoteNextLeader(child, w)
+			h.mu.Unlock()
+			return nil, ctx.Err()
+		case <-firstTick.C:
+			// First tick at correct time - now create regular ticker
+			ticker = time.NewTicker(tickInterval)
+			defer ticker.Stop()
+			tickerC = ticker.C
+			// Process this tick
+			h.mu.Lock()
+			h.maybeTickLocked()
+			if h.tryAllocate(child, n, true) {
+				// Success! Promote next waiter to lead
+				h.promoteNextLeader(child, w)
+				h.mu.Unlock()
+				return &Tokens{h: h, userID: userID, taken: n, used: 0}, nil
+			}
+			h.processChildWaiters(userID, child)
+			h.mu.Unlock()
+		case <-tickerC:
+			// Periodically tick and retry allocation
+			h.mu.Lock()
+			h.maybeTickLocked()
+
+			// Try to allocate for this waiter
+			if h.tryAllocate(child, n, true) {
+				// Success! Promote next waiter to lead
+				h.promoteNextLeader(child, w)
+				h.mu.Unlock()
+				return &Tokens{h: h, userID: userID, taken: n, used: 0}, nil
+			}
+
+			// Also try to wake other waiters if possible
+			h.processChildWaiters(userID, child)
+			h.mu.Unlock()
+		}
+	}
+}
+
 // tryAllocate attempts to allocate n tokens from the child bucket,
 // borrowing from parent if needed. Supports burst by allowing negative balances.
 func (h *HTB) tryAllocate(child *bucket, n int64, allowBurst bool) bool {
 	needed := float64(n)
 
-	// First, use child's tokens
+	// First, use child's tokens if it has enough
 	if child.tokens >= needed {
 		child.tokens -= needed
 		child.lastUse = time.Now()
@@ -249,6 +368,7 @@ func (h *HTB) tryAllocate(child *bucket, n int64, allowBurst bool) bool {
 	childHas := child.tokens
 	needFromParent := needed - childHas
 
+	// If parent has enough, borrow it (this is normal hierarchical behavior)
 	if h.parent.tokens >= needFromParent {
 		child.tokens = 0
 		h.parent.tokens -= needFromParent
@@ -256,7 +376,7 @@ func (h *HTB) tryAllocate(child *bucket, n int64, allowBurst bool) bool {
 		return true
 	}
 
-	// Not enough tokens available, check if we can burst
+	// Not enough tokens available even with parent, check if we can burst (go negative)
 	if allowBurst && n <= h.capacity {
 		// Calculate what child could have if it were full
 		potentialTokens := childHas + h.parent.tokens
@@ -303,21 +423,34 @@ func (h *HTB) Wait(ctx context.Context, userID string, n int64) (*Tokens, error)
 		return &Tokens{h: h, userID: userID, taken: n, used: 0}, nil
 	}
 
-	// Need to wait
+	// Need to wait - check if this will be the lead waiter
+	isLeadWaiter := len(child.waiters) == 0
 	w := &waiter{
-		n:     n,
-		ready: make(chan struct{}),
-		ctx:   ctx,
+		n:            n,
+		ready:        make(chan struct{}),
+		ctx:          ctx,
+		becomeLeader: make(chan struct{}),
 	}
 	child.waiters = append(child.waiters, w)
 	h.mu.Unlock()
 
-	// Wait for tokens or context cancellation
-	select {
-	case <-w.ready:
-		return &Tokens{h: h, userID: userID, taken: n, used: 0}, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	// Lead waiter must periodically tick since there's no background goroutine
+	// This ensures forward progress when all goroutines are waiting
+	if isLeadWaiter {
+		return h.runLeadWaiterLoop(ctx, userID, child, w, n)
+	}
+
+	// Non-lead waiters wait for their channel or to become the lead
+	for {
+		select {
+		case <-w.ready:
+			return &Tokens{h: h, userID: userID, taken: n, used: 0}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-w.becomeLeader:
+			// We've been promoted to lead!
+			return h.runLeadWaiterLoop(ctx, userID, child, w, n)
+		}
 	}
 }
 
@@ -428,9 +561,21 @@ func (h *HTB) addChild(userID string) *bucket {
 	h.children[userID] = child
 	h.childOrder = append(h.childOrder, userID)
 
-	// Rebalance all children's capacities
+	// Rebalance all children's capacities and transfer excess to parent
 	for _, c := range h.children {
 		c.capacity = childCapacity
+
+		// If child now has more tokens than new capacity, transfer excess to parent
+		if c.tokens > float64(childCapacity) {
+			excess := c.tokens - float64(childCapacity)
+			c.tokens = float64(childCapacity)
+			h.parent.tokens += excess
+		}
+	}
+
+	// Cap parent tokens at parent capacity
+	if h.parent.tokens > float64(h.parent.capacity) {
+		h.parent.tokens = float64(h.parent.capacity)
 	}
 
 	return child
