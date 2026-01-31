@@ -71,7 +71,6 @@ func TestPOSIXv2MetricsCollection(t *testing.T) {
 	// Test 3: File open/write operation
 	file, err := fs.OpenFile(ctx, "/test.txt", os.O_CREATE|os.O_WRONLY, 0644)
 	require.NoError(t, err)
-	defer file.Close()
 
 	// Verify open metric incremented
 	openCount := promtest.ToFloat64(metrics.StorageOpensTotal.WithLabelValues("posixv2"))
@@ -83,8 +82,9 @@ func TestPOSIXv2MetricsCollection(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(testData), n)
 
-	// Close to flush metrics
-	file.Close()
+	// Close to flush metrics (removed defer to ensure immediate close)
+	err = file.Close()
+	require.NoError(t, err)
 
 	// Verify write metric incremented
 	writeCount := promtest.ToFloat64(metrics.StorageWritesTotal.WithLabelValues("posixv2"))
@@ -97,14 +97,15 @@ func TestPOSIXv2MetricsCollection(t *testing.T) {
 	// Test 4: File read operation
 	file, err = fs.OpenFile(ctx, "/test.txt", os.O_RDONLY, 0)
 	require.NoError(t, err)
-	defer file.Close()
 
 	readBuf := make([]byte, len(testData))
 	n, err = file.Read(readBuf)
 	require.NoError(t, err)
 	require.Equal(t, len(testData), n)
 
-	file.Close()
+	// Close immediately (removed defer to ensure immediate close)
+	err = file.Close()
+	require.NoError(t, err)
 
 	// Verify read metric incremented
 	readCount := promtest.ToFloat64(metrics.StorageReadsTotal.WithLabelValues("posixv2"))
