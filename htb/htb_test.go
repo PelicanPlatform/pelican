@@ -203,6 +203,9 @@ func TestHTBStaleUserRemoval(t *testing.T) {
 	h := New(1000, 1000)
 	defer h.Close()
 
+	// Use a short staleness timeout for testing
+	h.stalenessTimeout = 200 * time.Millisecond
+
 	ctx := context.Background()
 
 	// Add a user
@@ -214,7 +217,7 @@ func TestHTBStaleUserRemoval(t *testing.T) {
 	assert.Equal(t, 1, stats.NumChildren)
 
 	// Wait for staleness timeout + buffer
-	time.Sleep(11 * time.Second)
+	time.Sleep(300 * time.Millisecond)
 
 	// Trigger ticking with another user
 	tokens2, err := h.Wait(ctx, "user2", 100)
@@ -330,6 +333,9 @@ func TestHTBReturnToNonexistentUser(t *testing.T) {
 	h := New(1000, 1000)
 	defer h.Close()
 
+	// Use a short staleness timeout for testing
+	h.stalenessTimeout = 200 * time.Millisecond
+
 	ctx := context.Background()
 
 	// Get tokens for user1
@@ -338,7 +344,7 @@ func TestHTBReturnToNonexistentUser(t *testing.T) {
 	tokens.Use(250)
 
 	// Wait for user1 to become stale and be removed
-	time.Sleep(11 * time.Second)
+	time.Sleep(300 * time.Millisecond)
 
 	// Trigger removal with another user
 	_, _ = h.Wait(ctx, "user2", 100)
