@@ -1044,13 +1044,6 @@ func TestPrestage(t *testing.T) {
 	// Disable progress bars to not reuse the same mpb instance
 	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
-	oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
-	assert.NoError(t, err)
-	defer func() {
-		_, err := config.SetPreferredPrefix(oldPref)
-		require.NoError(t, err)
-	}()
-
 	// Set path for object to upload/download
 	for _, export := range fed.Exports {
 		tempPath := tempFile.Name()
@@ -1114,10 +1107,6 @@ func TestPrestageWithAPI(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
-
-	// Note: This test requires a cache that implements the Pelican prestage API
-	// For now, we'll test the detection and fallback logic
-	// A full integration test would require deploying a cache with the API support
 
 	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
 

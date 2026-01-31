@@ -67,6 +67,8 @@ func checkPrestageAPISupport(ctx context.Context, cacheUrl *url.URL, token *toke
 	}
 	defer resp.Body.Close()
 
+	_, _ = io.Copy(io.Discard, resp.Body)
+
 	// If we get a 400, the API is supported (missing required path parameter)
 	// If we get a 404, the API is not supported (endpoint doesn't exist)
 	if resp.StatusCode == http.StatusBadRequest {
@@ -109,10 +111,14 @@ func invokePrestageAPI(ctx context.Context, cacheUrl *url.URL, remotePath string
 	}
 
 	client := &http.Client{
-		Timeout:   5 * time.Minute, // Prestage operations can take time
 		Transport: config.GetTransport().Clone(),
 	}
 
+	// Use a context with timeout for the initial response
+	initialCtx, initialCancel := context.WithTimeout(ctx, 20*time.Second)
+	defer initialCancel()
+
+	req = req.WithContext(initialCtx)
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, errors.Wrap(err, "failed to invoke prestage API")
@@ -125,52 +131,94 @@ func invokePrestageAPI(ctx context.Context, cacheUrl *url.URL, remotePath string
 	}
 
 	// Read the chunked response and parse progress updates
+	// Track progress to ensure we're getting updates within 20s windows
 	scanner := bufio.NewScanner(resp.Body)
 	var lastOffset int64 = 0
 	var fileSize int64 = -1
+	lastProgressTime := time.Now()
+	progressTimeout := 20 * time.Second
 
-	for scanner.Scan() {
-		line := scanner.Text()
-		log.Debugf("Prestage API response: %s", line)
+	// Channel to signal scanner completion
+	scanDone := make(chan struct{})
+	var scanErr error
 
-		// Parse status updates
-		if strings.HasPrefix(line, "status: queued") {
-			// Request is queued
-			continue
-		} else if strings.HasPrefix(line, "status: active") {
-			// Parse offset from "status: active,offset=<bytes>"
-			parts := strings.Split(line, ",")
-			if len(parts) == 2 {
-				offsetPart := strings.TrimPrefix(parts[1], "offset=")
-				if offset, err := strconv.ParseInt(offsetPart, 10, 64); err == nil {
-					bytesTransferred = offset
-					if callback != nil && fileSize > 0 {
-						callback(remotePath, offset, fileSize, false)
+	go func() {
+		defer close(scanDone)
+		for scanner.Scan() {
+			line := scanner.Text()
+			log.Debugf("Prestage API response: %s", line)
+
+			// Parse status updates
+			if strings.HasPrefix(line, "status: queued") {
+				// Request is queued - reset progress timer
+				lastProgressTime = time.Now()
+				continue
+			} else if strings.HasPrefix(line, "status: active") {
+				// Parse offset from "status: active,offset=<bytes>"
+				parts := strings.Split(line, ",")
+				if len(parts) == 2 {
+					offsetPart := strings.TrimPrefix(parts[1], "offset=")
+					if offset, err := strconv.ParseInt(offsetPart, 10, 64); err == nil {
+						// Only reset timer if we're making progress
+						if offset > lastOffset {
+							lastProgressTime = time.Now()
+							bytesTransferred = offset
+							if callback != nil && fileSize > 0 {
+								callback(remotePath, offset, fileSize, false)
+							}
+							lastOffset = offset
+						}
 					}
-					lastOffset = offset
 				}
+			} else if strings.HasPrefix(line, "success: ok") {
+				// Prestage completed successfully
+				if callback != nil && fileSize > 0 {
+					callback(remotePath, fileSize, fileSize, true)
+				}
+				// If we didn't get any offset updates, the file was likely already cached
+				if lastOffset == 0 && fileSize > 0 {
+					bytesTransferred = fileSize
+				} else if lastOffset > 0 {
+					bytesTransferred = lastOffset
+				}
+				return
+			} else if strings.HasPrefix(line, "failure: ") {
+				// Parse failure message
+				scanErr = errors.Errorf("prestage failed: %s", strings.TrimPrefix(line, "failure: "))
+				return
 			}
-		} else if strings.HasPrefix(line, "success: ok") {
-			// Prestage completed successfully
-			if callback != nil && fileSize > 0 {
-				callback(remotePath, fileSize, fileSize, true)
-			}
-			// If we didn't get any offset updates, the file was likely already cached
-			if lastOffset == 0 && fileSize > 0 {
-				bytesTransferred = fileSize
-			} else if lastOffset > 0 {
-				bytesTransferred = lastOffset
+		}
+
+		if err := scanner.Err(); err != nil {
+			scanErr = errors.Wrap(err, "error reading prestage API response")
+		}
+	}()
+
+	// Monitor for progress timeout
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-scanDone:
+			if scanErr != nil {
+				return bytesTransferred, scanErr
 			}
 			return bytesTransferred, nil
-		} else if strings.HasPrefix(line, "failure: ") {
-			// Parse failure message
-			return bytesTransferred, errors.Errorf("prestage failed: %s", strings.TrimPrefix(line, "failure: "))
+		case <-ticker.C:
+			if time.Since(lastProgressTime) > progressTimeout {
+				// Close the response body to unblock the scanner goroutine
+				resp.Body.Close()
+				// Wait for goroutine to exit
+				<-scanDone
+				return bytesTransferred, errors.Errorf("prestage timed out: no progress for %v (last offset: %d)", progressTimeout, lastOffset)
+			}
+		case <-ctx.Done():
+			// Close the response body to unblock the scanner goroutine
+			resp.Body.Close()
+			// Wait for goroutine to exit
+			<-scanDone
+			return bytesTransferred, errors.Wrap(ctx.Err(), "prestage cancelled")
 		}
 	}
-
-	if err := scanner.Err(); err != nil {
-		return bytesTransferred, errors.Wrap(err, "error reading prestage API response")
-	}
-
-	return bytesTransferred, nil
 }
