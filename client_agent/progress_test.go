@@ -106,6 +106,12 @@ Director:
 	require.NoError(t, err)
 	t.Logf("Federation discovery URL: %s", discoveryUrl.String())
 
+	// Pass the federation's TLS CA certificate to the daemon via environment variable
+	// This ensures the daemon can verify the federation's self-signed certificates
+	tlsCACert := param.Server_TLSCACertificateFile.GetString()
+	t.Setenv("PELICAN_SERVER_TLSCACERTIFICATEFILE", tlsCACert)
+	t.Logf("TLS CA Certificate: %s", tlsCACert)
+
 	// Start client agent daemon
 	agentTempDir := getTempDir(t)
 	socketPath := filepath.Join(agentTempDir, "agent.sock")
