@@ -44,7 +44,11 @@ func ensureClientAgentRunning(ctx context.Context, maxRetries int) (*apiclient.A
 	// Get socket path from config
 	socketPath := param.ClientAgent_Socket.GetString()
 	if socketPath == "" {
-		socketPath = client_agent.DefaultSocketPath
+		var err error
+		socketPath, err = client_agent.GetDefaultSocketPath()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get default socket path")
+		}
 	}
 
 	// Try to connect to existing server first
@@ -66,7 +70,11 @@ func ensureClientAgentRunning(ctx context.Context, maxRetries int) (*apiclient.A
 
 	pidFile := param.ClientAgent_PidFile.GetString()
 	if pidFile == "" {
-		pidFile = client_agent.DefaultPidFile
+		var err error
+		pidFile, err = client_agent.GetDefaultPidFile()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get default PID file")
+		}
 	}
 
 	dbLocation := param.ClientAgent_DbLocation.GetString()

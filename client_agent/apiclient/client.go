@@ -49,20 +49,12 @@ func NewAPIClient(socketPath string) (*APIClient, error) {
 			socketPath = paramSocket
 		} else {
 			// Use default socket path
-			expandedPath, err := expandPath(client_agent.DefaultSocketPath)
+			defaultPath, err := client_agent.GetDefaultSocketPath()
 			if err != nil {
-				return nil, errors.Wrap(err, "failed to expand default socket path")
+				return nil, errors.Wrap(err, "failed to get default socket path")
 			}
-			socketPath = expandedPath
+			socketPath = defaultPath
 		}
-	}
-
-	if socketPath != "" {
-		expandedPath, err := expandPath(socketPath)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to expand socket path")
-		}
-		socketPath = expandedPath
 	}
 
 	// Create HTTP client with Unix socket transport
@@ -352,10 +344,4 @@ func (c *APIClient) Delete(ctx context.Context, url string, recursive bool, opti
 	}
 
 	return nil
-}
-
-// expandPath expands ~ to home directory (duplicated from server.go for package independence)
-func expandPath(path string) (string, error) {
-	// Implementation is same as in server.go but kept separate for independence
-	return client_agent.ExpandPath(path)
 }

@@ -38,10 +38,26 @@ import (
 )
 
 const (
-	DefaultSocketPath      = "~/.pelican/client-agent.sock"
-	DefaultPidFile         = "~/.pelican/client-agent.pid"
 	DefaultShutdownTimeout = 30 * time.Second
 )
+
+// GetDefaultSocketPath returns the default socket path with home directory expanded
+func GetDefaultSocketPath() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to get home directory")
+	}
+	return filepath.Join(homeDir, ".pelican", "client-agent.sock"), nil
+}
+
+// GetDefaultPidFile returns the default PID file path with home directory expanded
+func GetDefaultPidFile() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to get home directory")
+	}
+	return filepath.Join(homeDir, ".pelican", "client-agent.pid"), nil
+}
 
 // Server represents the client API server
 type Server struct {
@@ -81,16 +97,8 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		ctx = context.WithValue(ctx, pelican_config.EgrpKey, eg)
 	}
 
-	// Expand home directory in paths
-	socketPath, err := ExpandPath(config.SocketPath)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to expand socket path")
-	}
-
-	pidFile, err := ExpandPath(config.PidFile)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to expand pid file path")
-	}
+	socketPath := config.SocketPath
+	pidFile := config.PidFile
 
 	// Ensure socket directory exists with secure permissions (0700)
 	// This must be done before socket creation to prevent race conditions
@@ -485,42 +493,18 @@ func removeSocket(path string) error {
 	return nil
 }
 
-// ExpandPath expands ~ to home directory
-func ExpandPath(path string) (string, error) {
-	if len(path) == 0 {
-		return path, nil
-	}
 
-	if path[0] != '~' {
-		return path, nil
-	}
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", errors.Wrap(err, "failed to get home directory")
-	}
-
-	if len(path) == 1 {
-		return homeDir, nil
-	}
-
-	return filepath.Join(homeDir, path[1:]), nil
-}
 
 // CheckServerRunning checks if a server is already running at the socket path
 func CheckServerRunning(socketPath string) (bool, error) {
-	expandedPath, err := ExpandPath(socketPath)
-	if err != nil {
-		return false, err
-	}
 
 	// Check if socket exists
-	if _, err := os.Stat(expandedPath); os.IsNotExist(err) {
+	if _, err := os.Stat(socketPath); os.IsNotExist(err) {
 		return false, nil
 	}
 
 	// Try to connect to the socket
-	conn, err := net.DialTimeout("unix", expandedPath, 1*time.Second)
+	conn, err := net.DialTimeout("unix", socketPath, 1*time.Second)
 	if err != nil {
 		// Socket exists but can't connect - probably stale
 		return false, nil
