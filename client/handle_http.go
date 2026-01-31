@@ -2214,6 +2214,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 
 		// Traditional prestage: download to /dev/null
 		localPath = os.DevNull
+		writeDestination = os.DevNull
 		fileWriter = io.Discard
 	}
 
@@ -2234,7 +2235,11 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		size, attempts = sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts, transfer.token)
 	}
 
-	transferResults = newTransferResults(transfer.job)
+	// Create a new transferResults if we don't already have one
+	// (prestage attempt may have created it previously)
+	if transferResults.job == nil {
+		transferResults = newTransferResults(transfer.job)
+	}
 	xferErrors := NewTransferErrors()
 	success := false
 	// transferStartTime is the start time of the last transfer attempt
@@ -2316,12 +2321,18 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	transferResults.TransferStartTime = transferStartTime
 	transferResults.TransferredBytes = downloaded
 	if success {
+		// Clear any previous errors (e.g., from failed prestage attempts)
+		transferResults.Error = nil
+
 		// Fetch checksum of the downloaded file, compare it to the calculated.
-		attemptCnt := len(transferResults.Attempts)
+		transferUrlCnt := len(transferUrls)
 		gotChecksum := false
 		// Iterate through the various sources to fetch the checksums, starting with the successful one.
-		for idx := 0; idx < attemptCnt; idx++ {
-			url := transferUrls[attemptCnt-idx-1]
+		for idx := 0; idx < transferUrlCnt; idx++ {
+			url := transferUrls[transferUrlCnt-idx-1]
+			if url == nil {
+				continue
+			}
 			fields := log.Fields{
 				"url": url.String(),
 				"job": transfer.job.ID(),
