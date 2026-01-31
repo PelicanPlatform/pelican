@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -92,6 +93,8 @@ func setupE2ETestServer(t *testing.T) (*httptest.Server, string, func()) {
 	cleanup := func() {
 		server.Close()
 		ResetHandlers()
+		// Give handlers time to release file handles (important on Windows)
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	return server, storageDir, cleanup
