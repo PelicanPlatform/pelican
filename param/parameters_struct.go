@@ -284,7 +284,6 @@ type Config struct {
 		Multiuser bool `mapstructure:"multiuser" yaml:"Multiuser"`
 		NamespacePrefix string `mapstructure:"namespaceprefix" yaml:"NamespacePrefix"`
 		Port int `mapstructure:"port" yaml:"Port"`
-		ReadRateLimitBytesPerSecond int `mapstructure:"readratelimitbytespersecond" yaml:"ReadRateLimitBytesPerSecond"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
 		S3AccessKeyfile string `mapstructure:"s3accesskeyfile" yaml:"S3AccessKeyfile"`
 		S3Bucket string `mapstructure:"s3bucket" yaml:"S3Bucket"`
@@ -306,6 +305,7 @@ type Config struct {
 		StorageType string `mapstructure:"storagetype" yaml:"StorageType"`
 		SupportedChecksumTypes []string `mapstructure:"supportedchecksumtypes" yaml:"SupportedChecksumTypes"`
 		TokenAudience string `mapstructure:"tokenaudience" yaml:"TokenAudience"`
+		TransferRateLimit int `mapstructure:"transferratelimit" yaml:"TransferRateLimit"`
 		Url string `mapstructure:"url" yaml:"Url"`
 		UserMapfileRefreshInterval time.Duration `mapstructure:"usermapfilerefreshinterval" yaml:"UserMapfileRefreshInterval"`
 		XRootDPrefix string `mapstructure:"xrootdprefix" yaml:"XRootDPrefix"`
@@ -695,7 +695,6 @@ type configWithType struct {
 		Multiuser struct { Type string; Value bool }
 		NamespacePrefix struct { Type string; Value string }
 		Port struct { Type string; Value int }
-		ReadRateLimitBytesPerSecond struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
 		S3AccessKeyfile struct { Type string; Value string }
 		S3Bucket struct { Type string; Value string }
@@ -717,6 +716,7 @@ type configWithType struct {
 		StorageType struct { Type string; Value string }
 		SupportedChecksumTypes struct { Type string; Value []string }
 		TokenAudience struct { Type string; Value string }
+		TransferRateLimit struct { Type string; Value int }
 		Url struct { Type string; Value string }
 		UserMapfileRefreshInterval struct { Type string; Value time.Duration }
 		XRootDPrefix struct { Type string; Value string }

@@ -308,7 +308,6 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.Multiuser": false,
 	"Origin.NamespacePrefix": false,
 	"Origin.Port": false,
-	"Origin.ReadRateLimitBytesPerSecond": false,
 	"Origin.RunLocation": false,
 	"Origin.S3AccessKeyfile": false,
 	"Origin.S3Bucket": false,
@@ -330,6 +329,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.StorageType": false,
 	"Origin.SupportedChecksumTypes": false,
 	"Origin.TokenAudience": false,
+	"Origin.TransferRateLimit": false,
 	"Origin.Url": false,
 	"Origin.UserMapfileRefreshInterval": false,
 	"Origin.XRootDPrefix": false,
@@ -940,8 +940,8 @@ func (iP IntParam) GetInt() int {
 			return config.Origin.DiskUsageCalculationRateLimit
 		case "Origin.Port":
 			return config.Origin.Port
-		case "Origin.ReadRateLimitBytesPerSecond":
-			return config.Origin.ReadRateLimitBytesPerSecond
+		case "Origin.TransferRateLimit":
+			return config.Origin.TransferRateLimit
 		case "Server.IssuerPort":
 			return config.Server.IssuerPort
 		case "Server.UILoginRateLimit":
@@ -1522,7 +1522,6 @@ var allParameterNames = []string{
 	"Origin.Multiuser",
 	"Origin.NamespacePrefix",
 	"Origin.Port",
-	"Origin.ReadRateLimitBytesPerSecond",
 	"Origin.RunLocation",
 	"Origin.S3AccessKeyfile",
 	"Origin.S3Bucket",
@@ -1544,6 +1543,7 @@ var allParameterNames = []string{
 	"Origin.StorageType",
 	"Origin.SupportedChecksumTypes",
 	"Origin.TokenAudience",
+	"Origin.TransferRateLimit",
 	"Origin.Url",
 	"Origin.UserMapfileRefreshInterval",
 	"Origin.XRootDPrefix",
@@ -1876,7 +1876,7 @@ var (
 	Origin_ConcurrencyDegradedThreshold = IntParam{"Origin.ConcurrencyDegradedThreshold"}
 	Origin_DiskUsageCalculationRateLimit = IntParam{"Origin.DiskUsageCalculationRateLimit"}
 	Origin_Port = IntParam{"Origin.Port"}
-	Origin_ReadRateLimitBytesPerSecond = IntParam{"Origin.ReadRateLimitBytesPerSecond"}
+	Origin_TransferRateLimit = IntParam{"Origin.TransferRateLimit"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
 	Server_UILoginRateLimit = IntParam{"Server.UILoginRateLimit"}
 	Server_WebPort = IntParam{"Server.WebPort"}

@@ -20,6 +20,7 @@ ENUMERATIONS = {
     ],
     "type": [
         "bool",
+        "byterate",
         "duration",
         "filename",
         "int",

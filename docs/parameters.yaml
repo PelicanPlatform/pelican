@@ -978,13 +978,15 @@ default: []
 hidden: true
 components: ["origin"]
 ---
-name: Origin.ReadRateLimitBytesPerSecond
+name: Origin.TransferRateLimit
 description: |+
-  Rate limit for read operations from the origin's filesystem, in bytes per second.
-  This is a hidden parameter intended for testing purposes to simulate slow storage backends.
-  A value of 0 (default) means no rate limiting is applied.
-type: int
-default: 0
+  Rate limit for data transfers from the origin, specified as a rate such as "10MB/s" or "100Mbps".
+  This parameter is intended for testing purposes to simulate slow storage backends or network conditions.
+  A value of "0" or empty (default) means no rate limiting is applied.
+
+  Examples: "5MB/s", "100Mbps", "1.5GB/s"
+type: byterate
+default: "0"
 hidden: true
 components: ["origin"]
 ---

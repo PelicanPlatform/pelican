@@ -493,8 +493,6 @@ func removeSocket(path string) error {
 	return nil
 }
 
-
-
 // CheckServerRunning checks if a server is already running at the socket path
 func CheckServerRunning(socketPath string) (bool, error) {
 

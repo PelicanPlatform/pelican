@@ -639,3 +639,137 @@ func TestDecodeConfigWithYAMLFoldingStyle(t *testing.T) {
 		assert.Contains(t, cfg.Server.UIAdminUsers, user2)
 	})
 }
+
+func TestByteRateDecoding(t *testing.T) {
+	t.Run("decode-human-readable-rate", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		// Create a YAML file with human-readable byte rate
+		yamlContent := `Origin:
+  TransferRateLimit: 10MB/s
+`
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "pelican.yaml")
+		err := os.WriteFile(configPath, []byte(yamlContent), 0644)
+		require.NoError(t, err)
+
+		v := viper.New()
+		v.SetConfigFile(configPath)
+		err = v.ReadInConfig()
+		require.NoError(t, err)
+
+		cfg, err := DecodeConfig(v)
+		require.NoError(t, err)
+
+		// 10MB/s should be 10 * 1048576 (MiB) = 10485760 bytes/second
+		expected := 10 * 1048576
+		assert.Equal(t, expected, cfg.Origin.TransferRateLimit, "Should decode 10MB/s correctly")
+	})
+
+	t.Run("decode-bits-per-second", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		yamlContent := `Origin:
+  TransferRateLimit: 100Mbps
+`
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "pelican.yaml")
+		err := os.WriteFile(configPath, []byte(yamlContent), 0644)
+		require.NoError(t, err)
+
+		v := viper.New()
+		v.SetConfigFile(configPath)
+		err = v.ReadInConfig()
+		require.NoError(t, err)
+
+		cfg, err := DecodeConfig(v)
+		require.NoError(t, err)
+
+		// 100Mbps = 100 * 1048576 / 8 = 13107200 bytes/second
+		expected := 100 * 1048576 / 8
+		assert.Equal(t, expected, cfg.Origin.TransferRateLimit, "Should decode 100Mbps correctly")
+	})
+
+	t.Run("decode-zero-rate", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		yamlContent := `Origin:
+  TransferRateLimit: 0MB/s
+`
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "pelican.yaml")
+		err := os.WriteFile(configPath, []byte(yamlContent), 0644)
+		require.NoError(t, err)
+
+		v := viper.New()
+		v.SetConfigFile(configPath)
+		err = v.ReadInConfig()
+		require.NoError(t, err)
+
+		cfg, err := DecodeConfig(v)
+		require.NoError(t, err)
+
+		assert.Equal(t, 0, cfg.Origin.TransferRateLimit, "Should handle zero rate")
+	})
+
+	t.Run("decode-invalid-rate-should-error", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		yamlContent := `Origin:
+  TransferRateLimit: invalid-rate
+`
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "pelican.yaml")
+		err := os.WriteFile(configPath, []byte(yamlContent), 0644)
+		require.NoError(t, err)
+
+		v := viper.New()
+		v.SetConfigFile(configPath)
+		err = v.ReadInConfig()
+		require.NoError(t, err)
+
+		_, err = DecodeConfig(v)
+		assert.Error(t, err, "Should error on invalid rate format")
+	})
+
+	t.Run("decode-with-viper-set", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		v := viper.New()
+		v.Set("Origin.TransferRateLimit", "5GB/s")
+
+		cfg, err := DecodeConfig(v)
+		require.NoError(t, err)
+
+		// 5GB/s = 5 * 1073741824 = 5368709120 bytes/second
+		expected := 5 * 1073741824
+		assert.Equal(t, expected, cfg.Origin.TransferRateLimit, "Should decode rate set via viper.Set")
+	})
+
+	t.Run("accessor-function-with-byterate", func(t *testing.T) {
+		viper.Reset()
+		defer viper.Reset()
+
+		// Clear the atomic config
+		viperConfig.Store(nil)
+
+		// Set value directly in viper
+		viper.Set("Origin.TransferRateLimit", "50MB/s")
+
+		// Accessor should work even without explicit config creation
+		// because getOrCreateConfig will create it
+		rateLimit := Origin_TransferRateLimit.GetInt()
+		expected := 50 * 1048576
+		assert.Equal(t, expected, rateLimit, "Accessor should return correct byte rate value")
+
+		// Verify config was created and stored
+		config := viperConfig.Load()
+		require.NotNil(t, config)
+		assert.Equal(t, expected, config.Origin.TransferRateLimit)
+	})
+}
