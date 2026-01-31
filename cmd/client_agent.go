@@ -71,14 +71,26 @@ on a Unix domain socket and handle job-based transfer requests.`,
 			return errors.Wrap(err, "Failed to initialize Pelican client")
 		}
 
-		// Use parameter socket path if set, otherwise use flag value
+		// Use parameter socket path if set, otherwise use flag value, otherwise use default
 		if socketParam := param.ClientAgent_Socket.GetString(); socketParam != "" {
 			clientAgentSocketPath = socketParam
+		} else if clientAgentSocketPath == "" {
+			defaultPath, err := client_agent.GetDefaultSocketPath()
+			if err != nil {
+				return errors.Wrap(err, "Failed to get default socket path")
+			}
+			clientAgentSocketPath = defaultPath
 		}
 
-		// Use parameter PID file path if set, otherwise use flag value
+		// Use parameter PID file path if set, otherwise use flag value, otherwise use default
 		if pidFileParam := param.ClientAgent_PidFile.GetString(); pidFileParam != "" {
 			clientAgentPidFile = pidFileParam
+		} else if clientAgentPidFile == "" {
+			defaultPath, err := client_agent.GetDefaultPidFile()
+			if err != nil {
+				return errors.Wrap(err, "Failed to get default PID file")
+			}
+			clientAgentPidFile = defaultPath
 		}
 
 		// Default behavior: daemonize unless --foreground is set
@@ -215,14 +227,26 @@ var clientAgentStopCmd = &cobra.Command{
 			return errors.Wrap(err, "Failed to initialize Pelican client")
 		}
 
-		// Use parameter socket path if set, otherwise use flag value
+		// Use parameter socket path if set, otherwise use flag value, otherwise use default
 		if socketParam := param.ClientAgent_Socket.GetString(); socketParam != "" {
 			clientAgentSocketPath = socketParam
+		} else if clientAgentSocketPath == "" {
+			defaultPath, err := client_agent.GetDefaultSocketPath()
+			if err != nil {
+				return errors.Wrap(err, "Failed to get default socket path")
+			}
+			clientAgentSocketPath = defaultPath
 		}
 
-		// Use parameter PID file path if set, otherwise use flag value
+		// Use parameter PID file path if set, otherwise use flag value, otherwise use default
 		if pidFileParam := param.ClientAgent_PidFile.GetString(); pidFileParam != "" {
 			clientAgentPidFile = pidFileParam
+		} else if clientAgentPidFile == "" {
+			defaultPath, err := client_agent.GetDefaultPidFile()
+			if err != nil {
+				return errors.Wrap(err, "Failed to get default PID file")
+			}
+			clientAgentPidFile = defaultPath
 		}
 
 		// Check if server is running
@@ -273,14 +297,26 @@ var clientAgentStatusCmd = &cobra.Command{
 			return errors.Wrap(err, "Failed to initialize Pelican client")
 		}
 
-		// Use parameter socket path if set, otherwise use flag value
+		// Use parameter socket path if set, otherwise use flag value, otherwise use default
 		if socketParam := param.ClientAgent_Socket.GetString(); socketParam != "" {
 			clientAgentSocketPath = socketParam
+		} else if clientAgentSocketPath == "" {
+			defaultPath, err := client_agent.GetDefaultSocketPath()
+			if err != nil {
+				return errors.Wrap(err, "Failed to get default socket path")
+			}
+			clientAgentSocketPath = defaultPath
 		}
 
-		// Use parameter PID file path if set, otherwise use flag value
+		// Use parameter PID file path if set, otherwise use flag value, otherwise use default
 		if pidFileParam := param.ClientAgent_PidFile.GetString(); pidFileParam != "" {
 			clientAgentPidFile = pidFileParam
+		} else if clientAgentPidFile == "" {
+			defaultPath, err := client_agent.GetDefaultPidFile()
+			if err != nil {
+				return errors.Wrap(err, "Failed to get default PID file")
+			}
+			clientAgentPidFile = defaultPath
 		}
 
 		running, err := client_agent.CheckServerRunning(clientAgentSocketPath)
@@ -313,10 +349,11 @@ func init() {
 	clientAgentCmd.AddCommand(clientAgentStatusCmd)
 
 	// Persistent flags (available to all subcommands)
-	clientAgentCmd.PersistentFlags().StringVar(&clientAgentSocketPath, "socket", client_agent.DefaultSocketPath,
-		"Path to the Unix domain socket")
-	clientAgentCmd.PersistentFlags().StringVar(&clientAgentPidFile, "pid-file", client_agent.DefaultPidFile,
-		"Path to the PID file")
+	// Note: Default values for socket and pid-file will be computed at runtime if empty
+	clientAgentCmd.PersistentFlags().StringVar(&clientAgentSocketPath, "socket", "",
+		"Path to the Unix domain socket (default: ~/.pelican/client-agent.sock)")
+	clientAgentCmd.PersistentFlags().StringVar(&clientAgentPidFile, "pid-file", "",
+		"Path to the PID file (default: ~/.pelican/client-agent.pid)")
 
 	// Serve-specific flags
 	clientAgentServeCmd.Flags().IntVar(&clientAgentMaxJobs, "max-jobs", 0,

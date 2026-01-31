@@ -43,20 +43,16 @@ func verifyOwnership(info os.FileInfo, expectedUID int) error {
 // Note: This can result in stale PIDs after system reboot
 // timeout parameter is ignored on Windows for signature compatibility
 func acquireServerLock(pidPath string, timeout time.Duration) (*os.File, error) {
-	expandedPath, err := ExpandPath(pidPath)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to expand PID path")
-	}
 
 	// Ensure PID directory exists with secure permissions
-	pidDir := filepath.Dir(expandedPath)
+	pidDir := filepath.Dir(pidPath)
 	// Note: On Windows, we don't use the returned Root (not available)
 	if _, err := ensureSecureDirectory(pidDir); err != nil {
 		return nil, errors.Wrap(err, "failed to ensure secure PID directory")
 	}
 
 	// Check if PID file already exists
-	if existingPID, err := os.ReadFile(expandedPath); err == nil {
+	if existingPID, err := os.ReadFile(pidPath); err == nil {
 		// File exists, check if the process is still running
 		if pid, parseErr := strconv.Atoi(string(existingPID)); parseErr == nil {
 			// Check if process exists (this is a simple check and may have false positives)
@@ -68,14 +64,14 @@ func acquireServerLock(pidPath string, timeout time.Duration) (*os.File, error) 
 			}
 		}
 		// PID file exists but process is not running, remove stale PID file
-		log.Warnf("Removing stale PID file: %s", expandedPath)
-		if rmErr := os.Remove(expandedPath); rmErr != nil {
+		log.Warnf("Removing stale PID file: %s", pidPath)
+		if rmErr := os.Remove(pidPath); rmErr != nil {
 			log.Warnf("Failed to remove stale PID file: %v", rmErr)
 		}
 	}
 
 	// Create new PID file
-	fd, err := os.OpenFile(expandedPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0600)
+	fd, err := os.OpenFile(pidPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0600)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create PID file")
 	}
@@ -86,7 +82,7 @@ func acquireServerLock(pidPath string, timeout time.Duration) (*os.File, error) 
 		return nil, errors.Wrap(err, "failed to write PID to file")
 	}
 
-	log.Infof("Created PID file at %s", expandedPath)
+	log.Infof("Created PID file at %s", pidPath)
 	return fd, nil
 }
 
@@ -94,18 +90,14 @@ func acquireServerLock(pidPath string, timeout time.Duration) (*os.File, error) 
 // On Windows, this is a simple file read (no flock support)
 // Returns 0 if no PID file exists
 func getServerPIDFromLock(pidPath string) (int, error) {
-	expandedPath, err := ExpandPath(pidPath)
-	if err != nil {
-		return 0, errors.Wrap(err, "failed to expand PID path")
-	}
 
 	// Check if PID file exists
-	if _, err := os.Stat(expandedPath); os.IsNotExist(err) {
+	if _, err := os.Stat(pidPath); os.IsNotExist(err) {
 		return 0, nil // No PID file = no server running
 	}
 
 	// Read PID from file
-	pidBytes, err := os.ReadFile(expandedPath)
+	pidBytes, err := os.ReadFile(pidPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return 0, nil

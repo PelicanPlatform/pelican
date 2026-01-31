@@ -49,14 +49,10 @@ func verifyOwnership(info os.FileInfo, expectedUID int) error {
 // This prevents multiple server instances and survives reboots (unlike simple PID files)
 // timeout specifies how long to retry acquiring the lock before giving up
 func acquireServerLock(pidPath string, timeout time.Duration) (*os.File, error) {
-	expandedPath, err := ExpandPath(pidPath)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to expand PID path")
-	}
 
 	// Ensure PID directory exists with secure permissions and get Root filesystem
 	// This prevents TOCTOU between directory verification and opening
-	pidDir := filepath.Dir(expandedPath)
+	pidDir := filepath.Dir(pidPath)
 	root, err := ensureSecureDirectory(pidDir)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to ensure secure PID directory")
@@ -65,7 +61,7 @@ func acquireServerLock(pidPath string, timeout time.Duration) (*os.File, error) 
 
 	// Open the PID file relative to the root, using O_NOFOLLOW to prevent symlink attacks
 	// This prevents TOCTOU race conditions
-	pidFileName := filepath.Base(expandedPath)
+	pidFileName := filepath.Base(pidPath)
 	fd, err := root.OpenFile(pidFileName, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0600)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to open PID file")
@@ -147,25 +143,21 @@ func acquireServerLock(pidPath string, timeout time.Duration) (*os.File, error) 
 		log.Warnf("Failed to write PID to PID file: %v", err)
 	}
 
-	log.Infof("Acquired server lock at %s", expandedPath)
+	log.Infof("Acquired server lock at %s", pidPath)
 	return fd, nil
 }
 
 // getServerPIDFromLock queries the PID of the process holding the lock on the PID file
 // Returns 0 if no lock is held
 func getServerPIDFromLock(pidPath string) (int, error) {
-	expandedPath, err := ExpandPath(pidPath)
-	if err != nil {
-		return 0, errors.Wrap(err, "failed to expand PID path")
-	}
 
 	// Check if PID file exists
-	if _, err := os.Stat(expandedPath); os.IsNotExist(err) {
+	if _, err := os.Stat(pidPath); os.IsNotExist(err) {
 		return 0, nil // No PID file = no server running
 	}
 
 	// Open the PID file
-	fd, err := os.Open(expandedPath)
+	fd, err := os.Open(pidPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return 0, nil
@@ -180,7 +172,7 @@ func getServerPIDFromLock(pidPath string) (int, error) {
 	if err := syscall.Flock(int(fd.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		if err == syscall.EWOULDBLOCK {
 			// Lock is held by another process, read the PID from the file
-			pidData, readErr := os.ReadFile(expandedPath)
+			pidData, readErr := os.ReadFile(pidPath)
 			if readErr != nil {
 				return 0, errors.Wrap(readErr, "failed to read PID file")
 			}

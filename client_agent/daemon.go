@@ -49,16 +49,8 @@ type DaemonConfig struct {
 // It acquires the lock before forking to ensure only one daemon starts
 // Returns the PID of the daemon process
 func StartDaemon(config DaemonConfig) (int, error) {
-	// Expand paths
-	socketPath, err := ExpandPath(config.SocketPath)
-	if err != nil {
-		return 0, errors.Wrap(err, "failed to expand socket path")
-	}
-
-	pidFile, err := ExpandPath(config.PidFile)
-	if err != nil {
-		return 0, errors.Wrap(err, "failed to expand PID file path")
-	}
+	socketPath := config.SocketPath
+	pidFile := config.PidFile
 
 	logLocation := config.LogLocation
 	if logLocation == "" {
@@ -74,10 +66,7 @@ func StartDaemon(config DaemonConfig) (int, error) {
 		}
 	}
 
-	logLocation, err = ExpandPath(logLocation)
-	if err != nil {
-		return 0, errors.Wrap(err, "failed to expand log file path")
-	}
+
 
 	// Ensure log directory exists
 	logDir := filepath.Dir(logLocation)
