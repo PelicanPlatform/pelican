@@ -21,6 +21,7 @@ package origin_serve
 import (
 	"context"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -97,6 +98,10 @@ func TestAferoFileSystemUnauthenticated(t *testing.T) {
 }
 
 func TestAferoFileRateLimitedRead(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping test on Windows - timer granularity too coarse on platform")
+	}
+
 	memFs := afero.NewMemMapFs()
 
 	// Create a test file with data
@@ -136,6 +141,10 @@ func TestAferoFileRateLimitedRead(t *testing.T) {
 }
 
 func TestAferoFileRateLimitedWrite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping test on Windows - timer granularity too coarse on platform")
+	}
+
 	memFs := afero.NewMemMapFs()
 
 	// Create HTB with limited capacity - use nanoseconds for tokens
