@@ -24,6 +24,9 @@ Client:
   WorkerCount: 5
 ClientAgent:
   MaxConcurrentJobs: 5
+  HistoryRetentionDays: 30
+  IdleTimeout: 10m
+  ProgressUpdateInterval: 5s
 Server:
   AdLifetime: 10m
   AdvertisementInterval: 1m

@@ -66,8 +66,6 @@ func StartDaemon(config DaemonConfig) (int, error) {
 		}
 	}
 
-
-
 	// Ensure log directory exists
 	logDir := filepath.Dir(logLocation)
 	if err := os.MkdirAll(logDir, 0700); err != nil {
