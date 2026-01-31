@@ -25,12 +25,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -191,33 +193,6 @@ func TestInvokePrestageAPI(t *testing.T) {
 	})
 }
 
-// Test the TransferEngine lookup table for prestage API support
-func TestTransferEnginePrestageAPILookup(t *testing.T) {
-	test_utils.InitClient(t, map[string]any{})
-
-	ctx := context.Background()
-	te, err := NewTransferEngine(ctx)
-	require.NoError(t, err)
-	defer func() { _ = te.Shutdown() }()
-
-	// Initially, the lookup table should be empty
-	te.prestageAPIMutex.RLock()
-	assert.Equal(t, 0, len(te.prestageAPISupport))
-	te.prestageAPIMutex.RUnlock()
-
-	// Add an entry to the lookup table
-	te.prestageAPIMutex.Lock()
-	te.prestageAPISupport["cache1.example.com"] = true
-	te.prestageAPISupport["cache2.example.com"] = false
-	te.prestageAPIMutex.Unlock()
-
-	// Verify the entries
-	te.prestageAPIMutex.RLock()
-	assert.True(t, te.prestageAPISupport["cache1.example.com"])
-	assert.False(t, te.prestageAPISupport["cache2.example.com"])
-	te.prestageAPIMutex.RUnlock()
-}
-
 // Test prestage with API fallback to traditional method
 func TestPrestageWithAPIFallback(t *testing.T) {
 	test_utils.InitClient(t, map[string]any{})
@@ -227,7 +202,8 @@ func TestPrestageWithAPIFallback(t *testing.T) {
 	// 2. But fails to actually prestage (simulates API error)
 	// 3. Still serves the file via normal HTTP GET (fallback)
 	testContent := "test file content for fallback"
-	apiCalled := false
+	apiCallCount := 0
+	fallbackCallCount := 0
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/pelican/api/v1.0/prestage" {
@@ -238,7 +214,7 @@ func TestPrestageWithAPIFallback(t *testing.T) {
 				return
 			}
 			// Simulate API failure
-			apiCalled = true
+			apiCallCount++
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprintln(w, "failure: 500(Internal Server Error): Simulated API failure")
 			return
@@ -246,6 +222,7 @@ func TestPrestageWithAPIFallback(t *testing.T) {
 
 		// Fallback to normal GET
 		if r.Method == "GET" || r.Method == "HEAD" {
+			fallbackCallCount++
 			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(testContent)))
 			if r.Method == "GET" {
 				w.WriteHeader(http.StatusOK)
@@ -259,19 +236,55 @@ func TestPrestageWithAPIFallback(t *testing.T) {
 
 	serverURL, err := url.Parse(server.URL)
 	require.NoError(t, err)
+	serverURL.Path = "/test/file.txt" // Set the path for the file to prestage
 
 	ctx := context.Background()
 
-	// First, verify API support detection works
-	supported := checkPrestageAPISupport(ctx, serverURL, nil)
-	assert.True(t, supported, "Server should support prestage API")
+	// Create a transfer engine (needed for prestage API support caching)
+	te, err := NewTransferEngine(ctx)
+	require.NoError(t, err)
+	defer func() { _ = te.Shutdown() }()
 
-	// Now test the API invocation (which will fail)
-	_, err = invokePrestageAPI(ctx, serverURL, "/test/file.txt", nil, nil)
-	require.Error(t, err)
-	assert.True(t, apiCalled, "API should have been called")
-	assert.Contains(t, err.Error(), "prestage failed")
+	// Create a prestage transfer that will use the API and fall back
+	transfer := &transferFile{
+		xferType: transferTypePrestage,
+		ctx:      ctx,
+		engine:   te,
+		job: &TransferJob{
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   serverURL.Host,
+				Path:   "/test/file.txt",
+			},
+		},
+		localPath: os.DevNull,
+		remoteURL: serverURL,
+		attempts: []transferAttemptDetails{
+			{Url: serverURL},
+		},
+	}
 
-	// In a real scenario, the transfer engine would fall back to traditional download
-	// This is tested implicitly in the downloadObject function
+	// Call downloadObject which should:
+	// 1. Detect prestage API support
+	// 2. Try the API (which will fail; we use the test server above)
+	// 3. Fall back to traditional method (GET to /dev/null)
+	transferResult, err := downloadObject(transfer)
+	require.NoError(t, err)
+	require.NoError(t, transferResult.Error)
+
+	// Verify the API was called
+	assert.Equal(t, 1, apiCallCount, "Prestage API should have been called once")
+
+	// Verify fallback to traditional method occurred (HEAD + GET)
+	assert.GreaterOrEqual(t, fallbackCallCount, 1, "Fallback HTTP requests should have occurred")
+
+	// Verify we got transfer results with multiple attempts
+	assert.GreaterOrEqual(t, len(transferResult.Attempts), 2, "Should have at least 2 attempts (prestage API + fallback)")
+
+	// First attempt should be the failed API call
+	assert.NotNil(t, transferResult.Attempts[0].Error, "First attempt (prestage API) should have an error")
+
+	// Last attempt should be successful
+	lastAttempt := transferResult.Attempts[len(transferResult.Attempts)-1]
+	assert.Nil(t, lastAttempt.Error, "Last attempt (fallback) should succeed")
 }
