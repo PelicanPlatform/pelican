@@ -443,6 +443,7 @@ description: |+
   NOTE: this does not work if the url contains a path!
 type: url
 default: none
+osdf_default: osg-htc.org
 components: ["*"]
 ---
 name: Federation.DirectorUrl
@@ -485,7 +486,7 @@ description: |+
   A URL containing namespace information for origins and caches configured via the OSG Topology application (a legacy integration). The URL
   should point to the hosted namespace.json.
 type: url
-osdf_default: https://topology.opensciencegrid.org/osdf/namespaces
+osdf_default: https://topology.opensciencegrid.org/osdf/namespaces?production=1
 default: none
 components: ["director", "registry"]
 ---
@@ -3238,6 +3239,7 @@ description: |+
   A URL pointing toward the XRootD instance's Manager Host.
 type: url
 default: none
+osdf_default: redirector.osgstorage.org
 components: ["cache", "origin"]
 ---
 name: Xrootd.ManagerPort
@@ -3252,6 +3254,7 @@ description: |+
   A URL pointing toward the XRootD instance's Summary Monitoring Host.
 type: url
 default: none
+osdf_default: xrd-report.osgstorage.org
 components: ["cache", "origin"]
 ---
 name: Xrootd.SummaryMonitoringPort
@@ -3266,6 +3269,7 @@ description: |+
   A URL pointing toward the XRootD instance's Detailed Monitoring Host.
 type: url
 default: none
+osdf_default: xrd-mon.osgstorage.org
 components: ["cache", "origin"]
 ---
 name: Xrootd.DetailedMonitoringPort
@@ -3927,6 +3931,7 @@ description: |+
 type: bool
 hidden: true
 default: false
+osdf_default: false
 components: ["director"]
 ---
 name: Topology.DisableCacheX509
@@ -3935,6 +3940,7 @@ description: |+
 type: bool
 hidden: true
 default: false
+osdf_default: false
 components: ["cache"]
 ---
 name: Topology.DisableOriginX509
@@ -3943,6 +3949,7 @@ description: |+
 type: bool
 hidden: true
 default: false
+osdf_default: false
 components: ["origin"]
 ---
 name: Topology.DisableCaches
@@ -3951,6 +3958,7 @@ description: |+
 type: bool
 hidden: true
 default: false
+osdf_default: false
 components: ["director"]
 ---
 name: Topology.DisableOrigins
@@ -3959,4 +3967,5 @@ description: |+
 type: bool
 hidden: true
 default: false
+osdf_default: false
 components: ["director", "registry"]
