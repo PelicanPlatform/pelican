@@ -114,10 +114,15 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
   dnf install -y goreleaser jq make
 
   # Install Go.
+  # Use go.mod and the go.dev API to determine the most recent version.
+  # References:
+  #   - https://pkg.go.dev/golang.org/x/website/internal/dl
+  #   - https://github.com/golang/go/issues/34864
 
-  GO_VER=$(grep '^toolchain' /context/go.mod | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+  GO_LANG_VER=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' /context/go.mod | grep -oE '[0-9]+\.[0-9]+')
+  GO_TOOLCHAIN_VER=$(curl https://go.dev/dl/?mode=json | jq -r ".[].version | select(startswith(\"go${GO_LANG_VER}\"))" | sort -rV | head -n 1)
   rm -rf /usr/local/go
-  curl -fSL https://dl.google.com/go/go${GO_VER}.${BUILDOS}-${BUILDARCH}.tar.gz | tar -xz -f - -C /usr/local
+  curl -fSL https://dl.google.com/go/${GO_TOOLCHAIN_VER}.${BUILDOS}-${BUILDARCH}.tar.gz | tar -xz -f - -C /usr/local
 
   # Install Node.js.
   #
@@ -132,6 +137,8 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
   npm install -g npm@latest
   n prune
 ENDRUN
+
+# Make sure that the version of Go we just installed comes first.
 ENV PATH="/usr/local/go/bin:${PATH}"
 
 #################################################################
@@ -721,10 +728,15 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
   dnf install -y goreleaser jq make
 
   # Install Go.
+  # Use go.mod and the go.dev API to determine the most recent version.
+  # References:
+  #   - https://pkg.go.dev/golang.org/x/website/internal/dl
+  #   - https://github.com/golang/go/issues/34864
 
-  GO_VER=$(grep '^toolchain' /context/go.mod | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+  GO_LANG_VER=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' /context/go.mod | grep -oE '[0-9]+\.[0-9]+')
+  GO_TOOLCHAIN_VER=$(curl https://go.dev/dl/?mode=json | jq -r ".[].version | select(startswith(\"go${GO_LANG_VER}\"))" | sort -rV | head -n 1)
   rm -rf /usr/local/go
-  curl -fSL https://dl.google.com/go/go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz | tar -xz -f - -C /usr/local
+  curl -fSL https://dl.google.com/go/${GO_TOOLCHAIN_VER}.${TARGETOS}-${TARGETARCH}.tar.gz | tar -xz -f - -C /usr/local
 
   # Install Node.js.
   #
@@ -772,6 +784,8 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
         json-schema-validator-devel \
         nlohmann-json-devel
 ENDRUN
+
+# Make sure that the version of Go we just installed comes first.
 ENV PATH="/usr/local/go/bin:${PATH}"
 
 # Suppress Git's "dubious ownership" warning.
