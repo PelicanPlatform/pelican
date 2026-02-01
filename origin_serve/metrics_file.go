@@ -24,6 +24,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/afero"
 
 	"github.com/pelicanplatform/pelican/htb"
@@ -141,60 +142,78 @@ func (mf *metricsFile) metricsOnlyWrite(p []byte) (n int, err error) {
 	return n, err
 }
 
-// rateLimitedRead performs rate-limited read with metrics tracking
-func (mf *metricsFile) rateLimitedRead(p []byte) (n int, err error) {
+// ioMetrics defines the metrics to track for an I/O operation
+type ioMetrics struct {
+	activeCounter     *prometheus.GaugeVec
+	totalCounter      *prometheus.CounterVec
+	errorCounter      *prometheus.CounterVec
+	bytesCounter      *prometheus.CounterVec
+	sizeHistogram     *prometheus.HistogramVec
+	timeHistogram     *prometheus.HistogramVec
+	timeTotalCounter  *prometheus.CounterVec
+	slowCounter       *prometheus.CounterVec
+	slowTimeHistogram *prometheus.HistogramVec
+	ignoreEOF         bool
+}
+
+// rateLimitedIO performs rate-limited I/O with metrics tracking
+func (mf *metricsFile) rateLimitedIO(p []byte, ioFunc func([]byte) (int, error), m *ioMetrics) (n int, err error) {
 	const (
-		initialWaitNs = 50 * 1000 * 1000       // 50ms
-		chunkWaitNs   = 100 * 1000 * 1000      // 100ms
-		tickInterval  = 250 * time.Millisecond // Update metrics every 250ms
+		initialWaitNs = 50 * 1000 * 1000  // 50ms
+		chunkWaitNs   = 100 * 1000 * 1000 // 100ms
 	)
 
 	// Track that we're waiting for rate limiter
 	waitStart := time.Now()
 	tokens, err := mf.rateLimiter.Wait(mf.ctx, mf.userID, initialWaitNs)
 	if err != nil {
-		metrics.StorageReadErrorsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+		m.errorCounter.WithLabelValues(metrics.BackendPOSIXv2).Inc()
 		return 0, err
 	}
 	waitTime := time.Since(waitStart).Seconds()
-	if waitTime > 0.001 { // Only count if we actually waited >1ms
+	if waitTime > 0.0 {
 		metrics.StorageRateLimitWaitsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
 		metrics.StorageRateLimitWaitTime.WithLabelValues(metrics.BackendPOSIXv2).Add(waitTime)
 	}
 
-	allTokens := []*htb.Tokens{tokens}
-	defer func() {
-		for _, t := range allTokens {
-			mf.rateLimiter.Return(t)
-		}
-	}()
-
 	// Start tracking the operation
 	opStart := time.Now()
-	metrics.StorageActiveReads.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-	metrics.StorageActiveIO.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-	metrics.StorageReadsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-	defer func() {
-		metrics.StorageActiveReads.WithLabelValues(metrics.BackendPOSIXv2).Dec()
-		metrics.StorageActiveIO.WithLabelValues(metrics.BackendPOSIXv2).Dec()
-		elapsed := time.Since(opStart)
-		elapsedSec := elapsed.Seconds()
-		metrics.StorageReadTime.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsedSec)
-		metrics.StorageReadTimeTotal.WithLabelValues(metrics.BackendPOSIXv2).Add(elapsedSec)
-		metrics.StorageIOTimeTotal.WithLabelValues(metrics.BackendPOSIXv2).Add(elapsedSec)
+	tickerStart := opStart
 
-		// Track slow operations (>2s)
-		if elapsed >= metrics.SlowOperationThreshold {
-			metrics.StorageSlowReadsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-			metrics.StorageSlowReadTime.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsedSec)
+	m.activeCounter.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+	metrics.StorageActiveIO.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+	m.totalCounter.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+	defer func() {
+		m.activeCounter.WithLabelValues(metrics.BackendPOSIXv2).Dec()
+		metrics.StorageActiveIO.WithLabelValues(metrics.BackendPOSIXv2).Dec()
+		now := time.Now()
+		tickerElapsed := now.Sub(tickerStart)
+		tickerElapsedSec := tickerElapsed.Seconds()
+
+		elapsedNs := tickerElapsed.Nanoseconds()
+		if tokens != nil {
+			tokens.Use(elapsedNs)
+			mf.rateLimiter.Return(tokens)
 		}
 
-		if err != nil && err != io.EOF {
-			metrics.StorageReadErrorsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+		opElapsed := now.Sub(opStart)
+		opElapsedSec := opElapsed.Seconds()
+		m.timeHistogram.WithLabelValues(metrics.BackendPOSIXv2).Observe(opElapsedSec)
+		m.timeTotalCounter.WithLabelValues(metrics.BackendPOSIXv2).Add(tickerElapsedSec)
+		metrics.StorageIOTimeTotal.WithLabelValues(metrics.BackendPOSIXv2).Add(tickerElapsedSec)
+
+		// Track slow operations (>2s)
+		if opElapsed >= metrics.SlowOperationThreshold {
+			m.slowCounter.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+			m.slowTimeHistogram.WithLabelValues(metrics.BackendPOSIXv2).Observe(opElapsedSec)
+		}
+
+		if err != nil && !(m.ignoreEOF && err == io.EOF) {
+			m.errorCounter.WithLabelValues(metrics.BackendPOSIXv2).Inc()
 		}
 	}()
 
-	// Launch read in goroutine
+	// Launch I/O in goroutine
 	type ioResult struct {
 		n   int
 		err error
@@ -202,13 +221,9 @@ func (mf *metricsFile) rateLimitedRead(p []byte) (n int, err error) {
 	resultCh := make(chan ioResult, 1)
 
 	go func() {
-		n, err := mf.File.Read(p)
+		n, err := ioFunc(p)
 		resultCh <- ioResult{n, err}
 	}()
-
-	// Create ticker for periodic metric updates
-	ticker := time.NewTicker(tickInterval)
-	defer ticker.Stop()
 
 	// Timer for requesting more tokens
 	tokenTimer := time.NewTimer(time.Duration(initialWaitNs) * time.Nanosecond)
@@ -217,147 +232,77 @@ func (mf *metricsFile) rateLimitedRead(p []byte) (n int, err error) {
 	for {
 		select {
 		case <-mf.ctx.Done():
-			elapsed := time.Since(opStart).Nanoseconds()
-			tokens.Use(elapsed)
 			return 0, mf.ctx.Err()
 
 		case result := <-resultCh:
-			elapsed := time.Since(opStart).Nanoseconds()
-			tokens.Use(elapsed)
 			if result.n > 0 {
-				metrics.StorageBytesRead.WithLabelValues(metrics.BackendPOSIXv2).Add(float64(result.n))
-				metrics.StorageReadSizes.WithLabelValues(metrics.BackendPOSIXv2).Observe(float64(result.n))
+				m.bytesCounter.WithLabelValues(metrics.BackendPOSIXv2).Add(float64(result.n))
+				m.sizeHistogram.WithLabelValues(metrics.BackendPOSIXv2).Observe(float64(result.n))
 			}
 			return result.n, result.err
 
-		case <-ticker.C:
-			// Periodically update cumulative time counter while operation is running
-			elapsed := time.Since(opStart).Seconds()
-			metrics.StorageReadTimeTotal.WithLabelValues(metrics.BackendPOSIXv2).Add(elapsed)
-			metrics.StorageIOTimeTotal.WithLabelValues(metrics.BackendPOSIXv2).Add(elapsed)
-			// Reset the start time for next tick
-			opStart = time.Now()
-
 		case <-tokenTimer.C:
-			// Request more tokens
-			moreTokens, err := mf.rateLimiter.Wait(mf.ctx, mf.userID, chunkWaitNs)
+			// Operation is still running - we need more tokens immediately
+			// Use ForceWait because the I/O is already consuming time
+			now := time.Now()
+			elapsed := now.Sub(tickerStart)
+			tickerStart = now
+			elapsedNs := elapsed.Nanoseconds()
+			elapsedSec := elapsed.Seconds()
+
+			m.timeTotalCounter.WithLabelValues(metrics.BackendPOSIXv2).Add(elapsedSec)
+			metrics.StorageIOTimeTotal.WithLabelValues(metrics.BackendPOSIXv2).Add(elapsedSec)
+
+			if tokens != nil {
+				// If elapsed is nonzero, it means more time elapsed than tokens
+				// we have.  We'll have to "bill" them later.
+				elapsedNs = tokens.Use(elapsedNs)
+				mf.rateLimiter.Return(tokens)
+			}
+			// Get new tokens with force allocation (operation already started)
+			tokens, err = mf.rateLimiter.ForceWait(mf.ctx, mf.userID, chunkWaitNs+elapsedNs)
 			if err != nil {
-				elapsed := time.Since(opStart).Nanoseconds()
-				tokens.Use(elapsed)
-				metrics.StorageReadErrorsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+				m.errorCounter.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+				tokens = nil
 				return 0, err
 			}
-			allTokens = append(allTokens, moreTokens)
 			tokenTimer.Reset(time.Duration(chunkWaitNs) * time.Nanosecond)
 		}
 	}
 }
 
+// rateLimitedRead performs rate-limited read with metrics tracking
+func (mf *metricsFile) rateLimitedRead(p []byte) (n int, err error) {
+	m := &ioMetrics{
+		activeCounter:     metrics.StorageActiveReads,
+		totalCounter:      metrics.StorageReadsTotal,
+		errorCounter:      metrics.StorageReadErrorsTotal,
+		bytesCounter:      metrics.StorageBytesRead,
+		sizeHistogram:     metrics.StorageReadSizes,
+		timeHistogram:     metrics.StorageReadTime,
+		timeTotalCounter:  metrics.StorageReadTimeTotal,
+		slowCounter:       metrics.StorageSlowReadsTotal,
+		slowTimeHistogram: metrics.StorageSlowReadTime,
+		ignoreEOF:         true,
+	}
+	return mf.rateLimitedIO(p, mf.File.Read, m)
+}
+
 // rateLimitedWrite performs rate-limited write with metrics tracking
 func (mf *metricsFile) rateLimitedWrite(p []byte) (n int, err error) {
-	const (
-		initialWaitNs = 50 * 1000 * 1000  // 50ms
-		chunkWaitNs   = 100 * 1000 * 1000 // 100ms
-		tickInterval  = 250 * time.Millisecond
-	)
-
-	// Track rate limiter wait
-	waitStart := time.Now()
-	tokens, err := mf.rateLimiter.Wait(mf.ctx, mf.userID, initialWaitNs)
-	if err != nil {
-		metrics.StorageWriteErrorsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-		return 0, err
+	m := &ioMetrics{
+		activeCounter:     metrics.StorageActiveWrites,
+		totalCounter:      metrics.StorageWritesTotal,
+		errorCounter:      metrics.StorageWriteErrorsTotal,
+		bytesCounter:      metrics.StorageBytesWritten,
+		sizeHistogram:     metrics.StorageWriteSizes,
+		timeHistogram:     metrics.StorageWriteTime,
+		timeTotalCounter:  metrics.StorageWriteTimeTotal,
+		slowCounter:       metrics.StorageSlowWritesTotal,
+		slowTimeHistogram: metrics.StorageSlowWriteTime,
+		ignoreEOF:         false,
 	}
-	waitTime := time.Since(waitStart).Seconds()
-	if waitTime > 0.001 {
-		metrics.StorageRateLimitWaitsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-		metrics.StorageRateLimitWaitTime.WithLabelValues(metrics.BackendPOSIXv2).Add(waitTime)
-	}
-
-	allTokens := []*htb.Tokens{tokens}
-	defer func() {
-		for _, t := range allTokens {
-			mf.rateLimiter.Return(t)
-		}
-	}()
-
-	opStart := time.Now()
-	metrics.StorageActiveWrites.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-	metrics.StorageActiveIO.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-	metrics.StorageWritesTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-	defer func() {
-		metrics.StorageActiveWrites.WithLabelValues(metrics.BackendPOSIXv2).Dec()
-		metrics.StorageActiveIO.WithLabelValues(metrics.BackendPOSIXv2).Dec()
-		elapsed := time.Since(opStart)
-		elapsedSec := elapsed.Seconds()
-		metrics.StorageWriteTime.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsedSec)
-		metrics.StorageWriteTimeTotal.WithLabelValues(metrics.BackendPOSIXv2).Add(elapsedSec)
-		metrics.StorageIOTimeTotal.WithLabelValues(metrics.BackendPOSIXv2).Add(elapsedSec)
-
-		// Track slow operations (>2s)
-		if elapsed >= metrics.SlowOperationThreshold {
-			metrics.StorageSlowWritesTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-			metrics.StorageSlowWriteTime.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsedSec)
-		}
-
-		if err != nil {
-			metrics.StorageWriteErrorsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-		}
-	}()
-
-	// Launch write in goroutine
-	type ioResult struct {
-		n   int
-		err error
-	}
-	resultCh := make(chan ioResult, 1)
-
-	go func() {
-		n, err := mf.File.Write(p)
-		resultCh <- ioResult{n, err}
-	}()
-
-	ticker := time.NewTicker(tickInterval)
-	defer ticker.Stop()
-
-	tokenTimer := time.NewTimer(time.Duration(initialWaitNs) * time.Nanosecond)
-	defer tokenTimer.Stop()
-
-	for {
-		select {
-		case <-mf.ctx.Done():
-			elapsed := time.Since(opStart).Nanoseconds()
-			tokens.Use(elapsed)
-			return 0, mf.ctx.Err()
-
-		case result := <-resultCh:
-			elapsed := time.Since(opStart).Nanoseconds()
-			tokens.Use(elapsed)
-			if result.n > 0 {
-				metrics.StorageBytesWritten.WithLabelValues(metrics.BackendPOSIXv2).Add(float64(result.n))
-				metrics.StorageWriteSizes.WithLabelValues(metrics.BackendPOSIXv2).Observe(float64(result.n))
-			}
-			return result.n, result.err
-
-		case <-ticker.C:
-			// Periodic metric update
-			elapsed := time.Since(opStart).Seconds()
-			metrics.StorageWriteTimeTotal.WithLabelValues(metrics.BackendPOSIXv2).Add(elapsed)
-			metrics.StorageIOTimeTotal.WithLabelValues(metrics.BackendPOSIXv2).Add(elapsed)
-			opStart = time.Now()
-
-		case <-tokenTimer.C:
-			moreTokens, err := mf.rateLimiter.Wait(mf.ctx, mf.userID, chunkWaitNs)
-			if err != nil {
-				elapsed := time.Since(opStart).Nanoseconds()
-				tokens.Use(elapsed)
-				metrics.StorageWriteErrorsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
-				return 0, err
-			}
-			allTokens = append(allTokens, moreTokens)
-			tokenTimer.Reset(time.Duration(chunkWaitNs) * time.Nanosecond)
-		}
-	}
+	return mf.rateLimitedIO(p, mf.File.Write, m)
 }
 
 // Close implements afero.File.Close with metrics
@@ -375,16 +320,16 @@ func (mf *metricsFile) Close() error {
 // Stat implements afero.File.Stat with metrics
 func (mf *metricsFile) Stat() (os.FileInfo, error) {
 	start := time.Now()
-	metrics.PosixStatsTotal.Inc()
+	metrics.StorageStatsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
 	defer func() {
 		elapsed := time.Since(start)
 		elapsedSec := elapsed.Seconds()
-		metrics.PosixStatTime.Observe(elapsedSec)
+		metrics.StorageStatTime.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsedSec)
 
 		// Track slow operations (>2s)
 		if elapsed >= metrics.SlowOperationThreshold {
-			metrics.PosixSlowStatsTotal.Inc()
-			metrics.PosixSlowStatTime.Observe(elapsedSec)
+			metrics.StorageSlowStatsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+			metrics.StorageSlowStatTime.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsedSec)
 		}
 	}()
 
@@ -394,16 +339,16 @@ func (mf *metricsFile) Stat() (os.FileInfo, error) {
 // Readdir implements afero.File.Readdir with metrics
 func (mf *metricsFile) Readdir(count int) ([]os.FileInfo, error) {
 	start := time.Now()
-	metrics.PosixReaddirTotal.Inc()
+	metrics.StorageReaddirTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
 	defer func() {
 		elapsed := time.Since(start)
 		elapsedSec := elapsed.Seconds()
-		metrics.PosixReaddirTime.Observe(elapsedSec)
+		metrics.StorageReaddirTime.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsedSec)
 
 		// Track slow operations (>2s)
 		if elapsed >= metrics.SlowOperationThreshold {
-			metrics.PosixSlowReaddirTotal.Inc()
-			metrics.PosixSlowReaddirTime.Observe(elapsedSec)
+			metrics.StorageSlowReaddirTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+			metrics.StorageSlowReaddirTime.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsedSec)
 		}
 	}()
 

@@ -25,8 +25,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	promtest "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -126,28 +126,34 @@ func TestPOSIXv2SlowOperationMetrics(t *testing.T) {
 
 	tmpDir := t.TempDir()
 
-	// Create filesystem
+	// Create underlying filesystem
 	osRootFs, err := NewOsRootFs(tmpDir)
 	require.NoError(t, err)
-	fs := newAferoFileSystem(osRootFs, "", nil)
+
+	// Wrap with slowFs that delays Stat operations by 2.5 seconds
+	slowRootFs := &slowFs{
+		Fs:        osRootFs,
+		statDelay: 2500 * time.Millisecond,
+	}
+	fs := newAferoFileSystem(slowRootFs, "", nil)
 
 	ctx := context.Background()
+
+	// Create a file to stat
+	testFile := filepath.Join(tmpDir, "test.txt")
+	err = os.WriteFile(testFile, []byte("test"), 0644)
+	require.NoError(t, err)
 
 	// Get initial slow operation count
 	initialSlowStats := promtest.ToFloat64(metrics.StorageSlowStatsTotal.WithLabelValues("posixv2"))
 
-	// Note: We can't easily create a genuinely slow operation in a test without
-	// mocking the filesystem or actually blocking for 2 seconds. This test
-	// documents the metric exists and is labeled correctly.
-	// In real usage, slow operations would be tracked automatically by trackOperation()
+	// Perform a slow Stat operation (2.5s delay)
+	_, err = fs.Stat(ctx, "/test.txt")
+	require.NoError(t, err)
 
-	// Verify the metric exists with the posixv2 label
-	_, _ = fs.Stat(ctx, "/nonexistent")
-	// Error is expected for nonexistent file
-
-	// The metric should be queryable even if no slow operations occurred yet
+	// Verify slow stat metric incremented
 	slowStatCount := promtest.ToFloat64(metrics.StorageSlowStatsTotal.WithLabelValues("posixv2"))
-	assert.GreaterOrEqual(t, slowStatCount, initialSlowStats, "Slow stat metric should be accessible for backend=posixv2")
+	assert.Greater(t, slowStatCount, initialSlowStats, "Slow stat metric should increment for operations >2s with backend=posixv2")
 }
 
 // TestPOSIXv2ErrorHandling verifies that errors don't crash the metrics system
@@ -177,37 +183,70 @@ func TestPOSIXv2ErrorHandling(t *testing.T) {
 func TestPOSIXv2ActiveOperationMetrics(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create filesystem
+	// Create underlying filesystem
 	osRootFs, err := NewOsRootFs(tmpDir)
 	require.NoError(t, err)
-	fs := newAferoFileSystem(osRootFs, "", nil)
+
+	// Create a channel to control when Read proceeds
+	readReady := make(chan struct{})
+
+	// Wrap with slowFs that blocks Read operations until signaled
+	slowRootFs := &slowFs{
+		Fs:        osRootFs,
+		readReady: readReady,
+	}
+	fs := newAferoFileSystem(slowRootFs, "", nil)
 
 	ctx := context.Background()
 
-	// Active operations are tracked during the operation
-	// The gauge increments when operation starts, decrements when it ends
-	// We can't easily observe it mid-operation without complex synchronization,
-	// but we can verify the metric exists and is accessible
+	// Create a test file
+	testFile := filepath.Join(tmpDir, "test.txt")
+	err = os.WriteFile(testFile, []byte("test data for active metrics"), 0644)
+	require.NoError(t, err)
 
 	// Get initial active read count
 	initialActiveReads := promtest.ToFloat64(metrics.StorageActiveReads.WithLabelValues("posixv2"))
 
-	// Create and read a file
-	testFile := filepath.Join(tmpDir, "test.txt")
-	err = os.WriteFile(testFile, []byte("test"), 0644)
+	// Start a read operation in a goroutine
+	// The flow will be: file.Read() -> metricsFile.metricsOnlyRead() -> Inc gauge -> mf.File.Read(p) -> slowFile.Read(p) -> block on channel
+	readComplete := make(chan error, 1)
+	go func() {
+		file, err := fs.OpenFile(ctx, "/test.txt", os.O_RDONLY, 0)
+		if err != nil {
+			readComplete <- err
+			return
+		}
+		defer file.Close()
+
+		buf := make([]byte, 100)
+		_, err = file.Read(buf) // This will Inc gauge, then block in slowFile.Read waiting for channel
+		readComplete <- err
+	}()
+
+	// Give the Read call time to:
+	// 1. Enter metricsFile.metricsOnlyRead
+	// 2. Inc the StorageActiveReads gauge
+	// 3. Call mf.File.Read(p) which calls slowFile.Read
+	// 4. Block on the readReady channel
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify active reads incremented while operation is in progress
+	activeReads := promtest.ToFloat64(metrics.StorageActiveReads.WithLabelValues("posixv2"))
+	assert.Greater(t, activeReads, initialActiveReads, "Active reads should increment while read operation is in progress for backend=posixv2")
+
+	// Signal the Read to proceed
+	close(readReady)
+
+	// Wait for operation to complete
+	err = <-readComplete
 	require.NoError(t, err)
 
-	file, err := fs.OpenFile(ctx, "/test.txt", os.O_RDONLY, 0)
-	require.NoError(t, err)
-	defer file.Close()
-
-	buf := make([]byte, 4)
-	_, _ = file.Read(buf)
-	file.Close()
+	// Give metrics time to decrement
+	time.Sleep(10 * time.Millisecond)
 
 	// After operation completes, active reads should be back to baseline
-	activeReads := promtest.ToFloat64(metrics.StorageActiveReads.WithLabelValues("posixv2"))
-	assert.Equal(t, initialActiveReads, activeReads, "Active reads should return to baseline after operation completes")
+	activeReadsAfter := promtest.ToFloat64(metrics.StorageActiveReads.WithLabelValues("posixv2"))
+	assert.Equal(t, initialActiveReads, activeReadsAfter, "Active reads should return to baseline after operation completes for backend=posixv2")
 }
 
 // TestPOSIXv2MetricLabels verifies that all metrics use the correct backend label
@@ -221,31 +260,71 @@ func TestPOSIXv2MetricLabels(t *testing.T) {
 
 	ctx := context.Background()
 
+	// Get initial metric values to establish baseline
+	initialReads := promtest.ToFloat64(metrics.StorageReadsTotal.WithLabelValues("posixv2"))
+	initialWrites := promtest.ToFloat64(metrics.StorageWritesTotal.WithLabelValues("posixv2"))
+	initialStats := promtest.ToFloat64(metrics.StorageStatsTotal.WithLabelValues("posixv2"))
+	initialOpens := promtest.ToFloat64(metrics.StorageOpensTotal.WithLabelValues("posixv2"))
+	initialMkdirs := promtest.ToFloat64(metrics.StorageMkdirsTotal.WithLabelValues("posixv2"))
+	initialUnlinks := promtest.ToFloat64(metrics.StorageUnlinksTotal.WithLabelValues("posixv2"))
+	initialRenames := promtest.ToFloat64(metrics.StorageRenamesTotal.WithLabelValues("posixv2"))
+
 	// Perform various operations
-	_ = fs.Mkdir(ctx, "/dir", 0755)
-	_, _ = fs.Stat(ctx, "/dir")
-	file, _ := fs.OpenFile(ctx, "/file.txt", os.O_CREATE|os.O_WRONLY, 0644)
-	if file != nil {
-		_, _ = file.Write([]byte("test"))
-		file.Close()
-	}
+	err = fs.Mkdir(ctx, "/dir", 0755)
+	require.NoError(t, err)
 
-	// Verify metrics can be queried with backend="posixv2" label
-	metricsToCheck := []prometheus.Collector{
-		metrics.StorageReadsTotal,
-		metrics.StorageWritesTotal,
-		metrics.StorageStatsTotal,
-		metrics.StorageOpensTotal,
-		metrics.StorageMkdirsTotal,
-		metrics.StorageBytesRead,
-		metrics.StorageBytesWritten,
-	}
+	_, err = fs.Stat(ctx, "/dir")
+	require.NoError(t, err)
 
-	for _, metric := range metricsToCheck {
-		// This will panic if the label doesn't exist or is incorrect
-		// The test passing means all metrics have the posixv2 label
-		_ = promtest.ToFloat64(metric.(prometheus.Collector))
-	}
+	file, err := fs.OpenFile(ctx, "/file.txt", os.O_CREATE|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	_, err = file.Write([]byte("test"))
+	require.NoError(t, err)
+	file.Close()
+
+	// Read the file back
+	file, err = fs.OpenFile(ctx, "/file.txt", os.O_RDONLY, 0)
+	require.NoError(t, err)
+	buf := make([]byte, 4)
+	_, err = file.Read(buf)
+	require.NoError(t, err)
+	file.Close()
+
+	// Rename the file
+	err = fs.Rename(ctx, "/file.txt", "/renamed.txt")
+	require.NoError(t, err)
+
+	// Remove the file
+	err = fs.RemoveAll(ctx, "/renamed.txt")
+	require.NoError(t, err)
+
+	// Verify all metrics incremented with the correct backend="posixv2" label
+	assert.Greater(t, promtest.ToFloat64(metrics.StorageReadsTotal.WithLabelValues("posixv2")), initialReads,
+		"StorageReadsTotal should increment for backend=posixv2")
+	assert.Greater(t, promtest.ToFloat64(metrics.StorageWritesTotal.WithLabelValues("posixv2")), initialWrites,
+		"StorageWritesTotal should increment for backend=posixv2")
+	assert.Greater(t, promtest.ToFloat64(metrics.StorageStatsTotal.WithLabelValues("posixv2")), initialStats,
+		"StorageStatsTotal should increment for backend=posixv2")
+	assert.Greater(t, promtest.ToFloat64(metrics.StorageOpensTotal.WithLabelValues("posixv2")), initialOpens,
+		"StorageOpensTotal should increment for backend=posixv2")
+	assert.Greater(t, promtest.ToFloat64(metrics.StorageMkdirsTotal.WithLabelValues("posixv2")), initialMkdirs,
+		"StorageMkdirsTotal should increment for backend=posixv2")
+	assert.Greater(t, promtest.ToFloat64(metrics.StorageUnlinksTotal.WithLabelValues("posixv2")), initialUnlinks,
+		"StorageUnlinksTotal should increment for backend=posixv2")
+	assert.Greater(t, promtest.ToFloat64(metrics.StorageRenamesTotal.WithLabelValues("posixv2")), initialRenames,
+		"StorageRenamesTotal should increment for backend=posixv2")
+
+	// Verify byte counters also work
+	assert.Greater(t, promtest.ToFloat64(metrics.StorageBytesRead.WithLabelValues("posixv2")), 0.0,
+		"StorageBytesRead should be >0 for backend=posixv2")
+	assert.Greater(t, promtest.ToFloat64(metrics.StorageBytesWritten.WithLabelValues("posixv2")), 0.0,
+		"StorageBytesWritten should be >0 for backend=posixv2")
+
+	// Verify gauge metrics exist and can be queried (they may be 0 at this point)
+	_ = promtest.ToFloat64(metrics.StorageActiveReads.WithLabelValues("posixv2"))
+	_ = promtest.ToFloat64(metrics.StorageActiveWrites.WithLabelValues("posixv2"))
+
+	t.Log("All metrics verified with correct backend=posixv2 label")
 }
 
 // TestPOSIXv2RemoveMetrics verifies that remove/unlink operations are tracked

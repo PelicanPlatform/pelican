@@ -482,6 +482,55 @@ func (h *HTB) TryTake(userID string, n int64) *Tokens {
 	return nil
 }
 
+// ForceWait immediately allocates n tokens for the user, even if it puts the bucket into deficit.
+// This is used when an operation has already started and will consume time regardless of token availability.
+// Returns a Tokens object for tracking usage, or an error if the context is cancelled.
+func (h *HTB) ForceWait(ctx context.Context, userID string, n int64) (*Tokens, error) {
+	if n <= 0 {
+		return &Tokens{h: h, userID: userID, taken: 0, used: 0}, nil
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	// Update tokens based on elapsed time
+	h.maybeTickLocked()
+
+	// Ensure child bucket exists
+	child, exists := h.children[userID]
+	if !exists {
+		child = h.addChild(userID)
+	}
+
+	// Force allocation - go into deficit if needed
+	deficit := n - int64(child.tokens)
+	if deficit > 0 {
+		// Child doesn't have enough, take from parent
+		parentDeficit := deficit - int64(h.parent.tokens)
+		if parentDeficit > 0 {
+			// Even parent doesn't have enough, go negative
+			child.tokens = -float64(parentDeficit)
+			h.parent.tokens = 0
+		} else {
+			// Parent has enough to cover deficit
+			child.tokens = 0
+			h.parent.tokens -= float64(deficit)
+		}
+	} else {
+		// Child has enough
+		child.tokens -= float64(n)
+	}
+
+	child.lastUse = time.Now()
+	return &Tokens{h: h, userID: userID, taken: n, used: 0}, nil
+}
+
 // Return returns unused tokens from a Tokens object to the specified user's bucket.
 // This is used when a request took more tokens than needed.
 func (h *HTB) Return(tokens *Tokens) {
@@ -551,8 +600,15 @@ func (h *HTB) addChild(userID string) *bucket {
 	numChildren := len(h.children) + 1
 	childCapacity := h.capacity / int64(numChildren)
 
+	// New child starts by borrowing as much as possible from parent
+	borrowAmount := float64(childCapacity)
+	if h.parent.tokens < borrowAmount {
+		borrowAmount = h.parent.tokens
+	}
+	h.parent.tokens -= borrowAmount
+
 	child := &bucket{
-		tokens:   float64(childCapacity),
+		tokens:   borrowAmount,
 		capacity: childCapacity,
 		waiters:  make([]*waiter, 0),
 		// lastUse is zero - will be set on first actual use

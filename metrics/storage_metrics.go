@@ -19,6 +19,8 @@
 package metrics
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -357,3 +359,7 @@ const (
 	BackendXRootD  = "xrootd"
 	BackendPOSIXv2 = "posixv2"
 )
+
+// SlowOperationThreshold defines the duration above which an operation is considered "slow"
+// This matches the XRootD default of 2.0 seconds
+const SlowOperationThreshold = 2 * time.Second
