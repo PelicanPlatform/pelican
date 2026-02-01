@@ -62,17 +62,6 @@ var (
 		Help: "Number of currently active HTTP requests being processed",
 	}, []string{"server_type", "method"})
 
-	// Request queue depth (if rate limiting or connection limiting is applied)
-	HttpQueuedRequests = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "pelican_http_queued_requests",
-		Help: "Number of HTTP requests waiting to be processed",
-	}, []string{"server_type"})
-
-	HttpQueuedRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "pelican_http_queued_requests_total",
-		Help: "Total number of HTTP requests that were queued",
-	}, []string{"server_type"})
-
 	// Error metrics
 	HttpErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_http_errors_total",
