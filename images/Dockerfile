@@ -20,7 +20,13 @@
 # we're building *on* and the platform that we're building *for*.
 # (Docker BuildKit and Go both support cross-compilation.)
 #
-# Reference: https://docs.docker.com/reference/dockerfile/#automatic-platform-args-in-the-global-scope
+# For quick reference, the relevant build args are commented-out
+# below. They are present in the global scope by default, so they
+# only need to be declared in the build stages that need them.
+#
+# More thorough documentation can be found at:
+#
+#   https://docs.docker.com/reference/dockerfile/#automatic-platform-args-in-the-global-scope
 #
 # ARG BUILDPLATFORM
 # ARG BUILDOS

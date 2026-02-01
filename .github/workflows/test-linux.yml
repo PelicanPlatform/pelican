@@ -29,7 +29,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v6
       with:
-        fetch-depth: 0  # GoReleaser needs history
+        fetch-depth: 0  # GoReleaser needs history to look up the previous tag, and so on
     - name: Set up Node.js
       uses: actions/setup-node@v6
       with:
