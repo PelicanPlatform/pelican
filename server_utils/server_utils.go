@@ -540,8 +540,13 @@ func CreateFedTok(ctx context.Context, server server_structs.XRootDServer) (tok 
 	return
 }
 
+// FedTokCopyToXrootdFunc is an optional callback used when Server.DropPrivileges is true.
+// It is defined here so that server_utils does not import the xrootd package; the caller
+// (e.g. launchers/cache_serve) wires in xrootd.FileCopyToXrootdDir to avoid import cycles.
+type FedTokCopyToXrootdFunc func(*os.File) error
+
 // SetFedTok does an atomic write of a federation token to the server's token location.
-func SetFedTok(ctx context.Context, server server_structs.XRootDServer, tok string) error {
+func SetFedTok(ctx context.Context, server server_structs.XRootDServer, tok string, copyToXrootdDir FedTokCopyToXrootdFunc) error {
 	tokLoc := server.GetFedTokLocation()
 	if tokLoc == "" {
 		return errors.New("token location is empty")
@@ -581,6 +586,21 @@ func SetFedTok(ctx context.Context, server server_structs.XRootDServer, tok stri
 
 	if _, err := tmpFile.WriteString(tok); err != nil {
 		return errors.Wrap(err, "failed to write token to temporary file")
+	}
+
+	if param.Server_DropPrivileges.GetBool() && copyToXrootdDir != nil {
+		// After writing the token content to the file, the file pointer remains at the end.
+		// Seek back to the beginning so the copy operation reads from the start.
+		if _, err := tmpFile.Seek(0, io.SeekStart); err != nil {
+			return errors.Wrap(err, "failed to seek to beginning of the file")
+		}
+		if err := copyToXrootdDir(tmpFile); err != nil {
+			return errors.Wrapf(err, "failed to copy token file to xrootd directory")
+		}
+		if err := tmpFile.Close(); err != nil {
+			return errors.Wrap(err, "failed to close temporary token file")
+		}
+		return nil
 	}
 
 	if err := tmpFile.Sync(); err != nil {

@@ -198,15 +198,18 @@ func makeUnprivilegedXrootdLauncher(daemonName string, xrootdRun string, configP
 		xrootdRun := param.Origin_RunLocation.GetString()
 		authFileName := "authfile-origin-generated"
 		scitokensCfgFileName := "scitokens-origin-generated.cfg"
+		fedTokLoc := param.Origin_FedTokenLocation.GetString()
 		if isCache {
 			xrootdRun = param.Cache_RunLocation.GetString()
 			authFileName = "authfile-cache-generated"
 			scitokensCfgFileName = "scitokens-cache-generated.cfg"
+			fedTokLoc = param.Cache_FedTokenLocation.GetString()
 		}
 		authPath := filepath.Join(xrootdRun, authFileName)
 		configPath := filepath.Join(xrootdRun, scitokensCfgFileName)
 		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_AUTHFILE_GENERATED="+authPath)
 		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_SCITOKENS_GENERATED="+configPath)
+		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_FEDTOKEN="+fedTokLoc)
 	}
 	if pkcs11Active {
 		if pkcs11Info.ServerAddress != "" {

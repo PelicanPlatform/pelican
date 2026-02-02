@@ -281,7 +281,10 @@ func getTickerRate(tok string) time.Duration {
 	return validateTickerRate(tickerRate, tokenLifetime)
 }
 
-func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server_structs.XRootDServer) {
+// LaunchFedTokManager starts the federation token refresh loop. When Server.DropPrivileges
+// is true, the token file is chown'ed to the xrootd user and group by xrdhttp-pelican plugin
+// (via xrootd.FileCopyToXrootdDir(false, 9, file)); pass nil to skip (e.g. in tests).
+func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server_structs.XRootDServer, copyToXrootdDir server_utils.FedTokCopyToXrootdFunc) {
 	// Do our initial token fetch+set, then turn things over to the ticker
 	tok, err := server_utils.CreateFedTok(ctx, cache)
 	if err != nil {
@@ -295,7 +298,7 @@ func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server
 	tickerRate := getTickerRate(tok)
 
 	// Set the token in the cache
-	err = server_utils.SetFedTok(ctx, cache, tok)
+	err = server_utils.SetFedTok(ctx, cache, tok, copyToXrootdDir)
 	if err != nil {
 		log.Errorf("Failed to set the federation token: %v", err)
 	}
@@ -326,7 +329,7 @@ func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server
 				}
 
 				// Set the token in the cache
-				err = server_utils.SetFedTok(ctx, cache, tok)
+				err = server_utils.SetFedTok(ctx, cache, tok, copyToXrootdDir)
 				if err != nil {
 					log.Errorf("Failed to write the federation token: %v", err)
 				}

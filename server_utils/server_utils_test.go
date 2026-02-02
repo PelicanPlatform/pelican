@@ -272,7 +272,7 @@ func TestSetFedTok(t *testing.T) {
 				require.NoError(t, os.MkdirAll(filepath.Dir(tc.server.tokenLoc), 0755))
 			}
 
-			err := SetFedTok(context.Background(), tc.server, tc.token)
+			err := SetFedTok(context.Background(), tc.server, tc.token, nil)
 
 			if tc.expectErr {
 				require.Error(t, err)
