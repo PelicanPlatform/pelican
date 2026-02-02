@@ -297,6 +297,12 @@ func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server
 	// gives us a bit of buffer in the event the Director is down for a short period of time.
 	tickerRate := getTickerRate(tok)
 
+	// Set up the federation token directories in the cache
+	err = server_utils.SetupFedTokDirs(cache)
+	if err != nil {
+		log.Errorf("Failed to setup federation token directory: %v", err)
+	}
+
 	// Set the token in the cache
 	err = server_utils.SetFedTok(ctx, cache, tok, copyToXrootdDir)
 	if err != nil {

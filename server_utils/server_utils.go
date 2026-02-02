@@ -540,6 +540,53 @@ func CreateFedTok(ctx context.Context, server server_structs.XRootDServer) (tok 
 	return
 }
 
+// getFedTokenTempDir returns the temporary directory for fed token writes
+// This func is placed here to avoid circular dependencies.
+func getFedTokenTempDir(server server_structs.XRootDServer) string {
+	tokLoc := server.GetFedTokLocation()
+	tokDir := filepath.Dir(tokLoc)
+	dir := filepath.Dir(tokDir)
+	return filepath.Join(dir, "fed-token-temp")
+}
+
+// SetupFedTokDirs creates the permanent and temporary directory for the federation token file
+// and sets proper perms. It intends to be called once at server startup. The permanent directory
+// is always owned by xrootd user. In normal mode, the temporary directory is owned by the root.
+// While in drop privileges mode, it is owned by the pelican user.
+func SetupFedTokDirs(server server_structs.XRootDServer) error {
+	// Permanent directory
+	xrootdUid, err := config.GetDaemonUID()
+	if err != nil {
+		return errors.Wrap(err, "failed to get xrootd user")
+	}
+	xrootdGid, err := config.GetDaemonGID()
+	if err != nil {
+		return errors.Wrap(err, "failed to get xrootd group")
+	}
+	permanentDir := filepath.Dir(server.GetFedTokLocation())
+	err = config.MkdirAll(permanentDir, 0700, xrootdUid, xrootdGid)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create directory %s", permanentDir)
+	}
+
+	// Temporary directory
+	puser, err := config.GetPelicanUser()
+	if err != nil {
+		return errors.Wrap(err, "failed to get pelican user")
+	}
+
+	tempDir := getFedTokenTempDir(server)
+	if tempDir == "" {
+		return errors.New("the temporary directory for federation token writes is an empty string")
+	}
+
+	err = config.MkdirAll(tempDir, 0750, puser.Uid, puser.Gid)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create directory %s", tempDir)
+	}
+	return nil
+}
+
 // FedTokCopyToXrootdFunc is an optional callback used when Server.DropPrivileges is true.
 // It is defined here so that server_utils does not import the xrootd package; the caller
 // (e.g. launchers/cache_serve) wires in xrootd.FileCopyToXrootdDir to avoid import cycles.
@@ -552,14 +599,9 @@ func SetFedTok(ctx context.Context, server server_structs.XRootDServer, tok stri
 		return errors.New("token location is empty")
 	}
 
-	dir := filepath.Dir(tokLoc)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return errors.Wrap(err, "failed to create fed token directories")
-	}
-
 	// Create a temporary file for storing the token. Later we'll do an atomic rename
 	filenamePattern := fmt.Sprintf(".fedtoken.%d.*", time.Now().UnixNano())
-	tmpFile, err := os.CreateTemp(dir, filenamePattern)
+	tmpFile, err := os.CreateTemp(getFedTokenTempDir(server), filenamePattern)
 	if err != nil {
 		return errors.Wrap(err, "failed to create temporary token file")
 	}
@@ -570,49 +612,41 @@ func SetFedTok(ctx context.Context, server server_structs.XRootDServer, tok stri
 		os.Remove(tmpName)
 	}()
 
-	// Change ownership to xrootd user
-	uid, err := config.GetDaemonUID()
-	if err != nil {
-		return errors.Wrap(err, "failed to get daemon UID")
-	}
-	gid, err := config.GetDaemonGID()
-	if err != nil {
-		return errors.Wrap(err, "failed to get daemon GID")
-	}
-
-	if err := os.Chown(tmpName, uid, gid); err != nil {
-		return errors.Wrapf(err, "failed to change token file ownership of %s to %d:%d", tmpName, uid, gid)
-	}
-
 	if _, err := tmpFile.WriteString(tok); err != nil {
 		return errors.Wrap(err, "failed to write token to temporary file")
 	}
 
-	if param.Server_DropPrivileges.GetBool() && copyToXrootdDir != nil {
+	if !param.Server_DropPrivileges.GetBool() {
+		// Change ownership to xrootd user
+		uid, err := config.GetDaemonUID()
+		if err != nil {
+			return errors.Wrap(err, "failed to get daemon UID")
+		}
+		gid, err := config.GetDaemonGID()
+		if err != nil {
+			return errors.Wrap(err, "failed to get daemon GID")
+		}
+
+		if err := os.Chown(tmpName, uid, gid); err != nil {
+			return errors.Wrapf(err, "failed to change token file ownership of %s to %d:%d", tmpName, uid, gid)
+		}
+
+		if err := tmpFile.Sync(); err != nil {
+			return errors.Wrap(err, "failed to sync token file")
+		}
+
+		if err := os.Rename(tmpName, tokLoc); err != nil {
+			return errors.Wrap(err, "failed to move token file to final location")
+		}
+	} else if param.Server_DropPrivileges.GetBool() && copyToXrootdDir != nil {
 		// After writing the token content to the file, the file pointer remains at the end.
 		// Seek back to the beginning so the copy operation reads from the start.
 		if _, err := tmpFile.Seek(0, io.SeekStart); err != nil {
 			return errors.Wrap(err, "failed to seek to beginning of the file")
 		}
 		if err := copyToXrootdDir(tmpFile); err != nil {
-			return errors.Wrapf(err, "failed to copy token file to xrootd directory")
+			return errors.Wrapf(err, "failed to rename the federation token file via the xrdhttp-pelican plugin")
 		}
-		if err := tmpFile.Close(); err != nil {
-			return errors.Wrap(err, "failed to close temporary token file")
-		}
-		return nil
-	}
-
-	if err := tmpFile.Sync(); err != nil {
-		return errors.Wrap(err, "failed to sync token file")
-	}
-
-	if err := tmpFile.Close(); err != nil {
-		return errors.Wrap(err, "failed to close temporary token file")
-	}
-
-	if err := os.Rename(tmpName, tokLoc); err != nil {
-		return errors.Wrap(err, "failed to move token file to final location")
 	}
 
 	return nil

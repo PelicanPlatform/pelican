@@ -1341,8 +1341,8 @@ func SetServerDefaults(v *viper.Viper) error {
 
 	// Set fed token locations for cache/origin. Note that fed tokens aren't yet used by the
 	// Origin (2026-02-05), but they may be soon for things like third party copy.
-	v.SetDefault(param.Origin_FedTokenLocation.GetName(), filepath.Join(configDir, "origin-fed-token"))
-	v.SetDefault(param.Cache_FedTokenLocation.GetName(), filepath.Join(configDir, "cache-fed-token"))
+	v.SetDefault(param.Origin_FedTokenLocation.GetName(), filepath.Join(configDir, "fed-token", "origin-fed-token"))
+	v.SetDefault(param.Cache_FedTokenLocation.GetName(), filepath.Join(configDir, "fed-token", "cache-fed-token"))
 
 	runtimeDir, _, err := ensureRuntimeDir(v)
 	if err != nil {
@@ -1668,6 +1668,13 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		}
 		if (currentServers.IsEnabled(server_structs.OriginType) || currentServers.IsEnabled(server_structs.CacheType)) && param.Shoveler_Enable.GetBool() {
 			pelicanLocationsNoRecursive = append(pelicanLocationsNoRecursive, param.Shoveler_AMQPTokenLocation.GetString())
+		}
+		if currentServers.IsEnabled(server_structs.CacheType) {
+			tokLoc := param.Cache_FedTokenLocation.GetString()
+			tokDir := filepath.Dir(tokLoc)
+			dir := filepath.Dir(tokDir)
+			tempTokDir := filepath.Join(dir, "fed-token-temp")
+			pelicanLocationsNoRecursive = append(pelicanLocationsNoRecursive, tempTokDir)
 		}
 		if err = setFileAndDirPerms(pelicanLocationsNoRecursive, 0750, 0640, puser.Uid, 0, false); err != nil {
 			return errors.Wrap(err, "failure when setting up the file permissions for pelican")
