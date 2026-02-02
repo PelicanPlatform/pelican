@@ -183,7 +183,7 @@ func initFilterLogging() {
 	globalFilters.filters.Store(&filters)
 
 	configLevel := log.GetLevel()
-	log.SetLevel(log.DebugLevel)
+	log.SetLevel(log.TraceLevel)
 	hookLevel := make([]log.Level, 0)
 	for _, lvl := range log.AllLevels {
 		if lvl <= configLevel {
@@ -268,11 +268,14 @@ func SetLogging(logLevel log.Level) {
 		formatterConfigured = true
 	}
 
-	// Note: don't call log.SetLevel directly here as we filter at the transform
-	// hook, not at the logrus level.
+	// When global filters are active, we use hook-based filtering instead of logrus's
+	// internal level filtering. We set logrus to TraceLevel (the most permissive) so
+	// that ALL log messages pass through to our hooks; the hooks then filter based on
+	// the user's configured level via hookLevel. This approach allows our RegexpFilterHook
+	// to see all messages regardless of the configured output level.
 	globalTransformMu.Lock()
 	if addedGlobalFilters {
-		log.SetLevel(log.DebugLevel)
+		log.SetLevel(log.TraceLevel)
 		hookLevel := make([]log.Level, 0, len(log.AllLevels))
 
 		// Atomically get current hooks
