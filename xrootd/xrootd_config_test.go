@@ -172,7 +172,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 
 		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		require.NoError(t, err, "Failed to set preferred prefix to Pelican")
-		require.NoError(t, param.Set("Server.ExternalWebUrl", "https://my-xrootd.com:8443"))
+		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "https://my-xrootd.com:8443"))
 
 		configPath, err := ConfigXrootd(ctx, true)
 		require.NoError(t, err)
@@ -266,9 +266,9 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 	t.Run("TestNestedDataMetaNamespace", func(t *testing.T) {
 		testDir := t.TempDir()
-		require.NoError(t, param.Set("Cache.StorageLocation", testDir))
+		require.NoError(t, param.Set(param.Cache_StorageLocation.GetName(), testDir))
 		namespaceLocation := filepath.Join(testDir, "namespace")
-		require.NoError(t, param.Set("Cache.NamespaceLocation", namespaceLocation))
+		require.NoError(t, param.Set(param.Cache_NamespaceLocation.GetName(), namespaceLocation))
 
 		cache := &cache.CacheServer{}
 		uid := os.Getuid()
@@ -276,16 +276,16 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 		// Data location test
 		nestedDataLocation := filepath.Join(namespaceLocation, "data")
-		require.NoError(t, param.Set("Cache.DataLocations", []string{nestedDataLocation}))
+		require.NoError(t, param.Set(param.Cache_DataLocations.GetName(), []string{nestedDataLocation}))
 		err := CheckCacheXrootdEnv(cache, uid, gid)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "Please ensure these directories are not nested.")
 		// Now set to a valid location so we can hit the meta error in the next part of the test
-		require.NoError(t, param.Set("Cache.DataLocations", []string{filepath.Join(testDir, "data")}))
+		require.NoError(t, param.Set(param.Cache_DataLocations.GetName(), []string{filepath.Join(testDir, "data")}))
 
 		// Meta location test
 		nestedMetaLocation := filepath.Join(namespaceLocation, "meta")
-		require.NoError(t, param.Set("Cache.MetaLocations", []string{nestedMetaLocation}))
+		require.NoError(t, param.Set(param.Cache_MetaLocations.GetName(), []string{nestedMetaLocation}))
 		err = CheckCacheXrootdEnv(cache, uid, gid)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "Please ensure these directories are not nested.")
@@ -562,18 +562,18 @@ func TestCopyCertificatesWithPKCS11(t *testing.T) {
 	t.Cleanup(server_utils.ResetTestState)
 	runDir := t.TempDir()
 	configDir := t.TempDir()
-	viper.Set("Origin.RunLocation", runDir)
-	viper.Set("ConfigDir", configDir)
+	param.Set(param.Origin_RunLocation.GetName(), runDir)
+	param.Set("ConfigDir", configDir)
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
-	viper.Set(param.Server_EnablePKCS11.GetName(), true)
+	param.Set(param.Server_EnablePKCS11.GetName(), true)
 	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
 
 	p11proxy.SetCurrentInfoForTest(p11proxy.Info{Enabled: true, PKCS11URL: "pkcs11:test"})
 	t.Cleanup(func() {
 		p11proxy.SetCurrentInfoForTest(p11proxy.Info{})
-		viper.Set(param.Server_EnablePKCS11.GetName(), false)
+		param.Set(param.Server_EnablePKCS11.GetName(), false)
 	})
 
 	require.NoError(t, copyXrootdCertificates(&origin.OriginServer{}))
@@ -594,7 +594,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 	t.Run("test-minutes-to-seconds", func(t *testing.T) {
 		server_utils.ResetTestState()
 		var xrdConfig XrootdConfig
-		require.NoError(t, param.Set("Xrootd.AuthRefreshInterval", "5m"))
+		require.NoError(t, param.Set(param.Xrootd_AuthRefreshInterval.GetName(), "5m"))
 		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(xrootdDecodeHook()))
 		assert.NoError(t, err)
 		assert.Equal(t, 300, xrdConfig.Xrootd.AuthRefreshInterval)
@@ -603,7 +603,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 	t.Run("test-hours-to-seconds", func(t *testing.T) {
 		server_utils.ResetTestState()
 		var xrdConfig XrootdConfig
-		require.NoError(t, param.Set("Xrootd.AuthRefreshInterval", "24h"))
+		require.NoError(t, param.Set(param.Xrootd_AuthRefreshInterval.GetName(), "24h"))
 		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(xrootdDecodeHook()))
 		assert.NoError(t, err)
 		assert.Equal(t, 86400, xrdConfig.Xrootd.AuthRefreshInterval)
@@ -612,7 +612,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 	t.Run("test-seconds-to-seconds", func(t *testing.T) {
 		server_utils.ResetTestState()
 		var xrdConfig XrootdConfig
-		require.NoError(t, param.Set("Xrootd.AuthRefreshInterval", "100s"))
+		require.NoError(t, param.Set(param.Xrootd_AuthRefreshInterval.GetName(), "100s"))
 		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(xrootdDecodeHook()))
 		assert.NoError(t, err)
 		assert.Equal(t, 100, xrdConfig.Xrootd.AuthRefreshInterval)
@@ -621,7 +621,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 	t.Run("test-less-than-60s", func(t *testing.T) {
 		server_utils.ResetTestState()
 		var xrdConfig XrootdConfig
-		require.NoError(t, param.Set("Xrootd.AuthRefreshInterval", "10s"))
+		require.NoError(t, param.Set(param.Xrootd_AuthRefreshInterval.GetName(), "10s"))
 		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(xrootdDecodeHook()))
 		assert.NoError(t, err)
 		// Should fall back to 5m, or 300s
@@ -631,7 +631,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 	t.Run("test-no-suffix-to-seconds", func(t *testing.T) {
 		server_utils.ResetTestState()
 		var xrdConfig XrootdConfig
-		require.NoError(t, param.Set("Xrootd.AuthRefreshInterval", "99s"))
+		require.NoError(t, param.Set(param.Xrootd_AuthRefreshInterval.GetName(), "99s"))
 		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(xrootdDecodeHook()))
 		assert.NoError(t, err)
 		assert.Equal(t, 99, xrdConfig.Xrootd.AuthRefreshInterval)
@@ -640,7 +640,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 	t.Run("test-less-than-second", func(t *testing.T) {
 		server_utils.ResetTestState()
 		var xrdConfig XrootdConfig
-		require.NoError(t, param.Set("Xrootd.AuthRefreshInterval", "0.5s"))
+		require.NoError(t, param.Set(param.Xrootd_AuthRefreshInterval.GetName(), "0.5s"))
 		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(xrootdDecodeHook()))
 		assert.NoError(t, err)
 		assert.Equal(t, 300, xrdConfig.Xrootd.AuthRefreshInterval)
