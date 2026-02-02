@@ -51,26 +51,27 @@ def main():
 
     errors = []
     for parameter in parameters:
-        if not all(key in parameter for key in KEYS):
-            errors.append(f"Parameter is missing a required key: {parameter['name']}")
+        if missing := set(KEYS) - set(parameter):
+            errors.append(f"{PARAMETERS_FILE}: {parameter}: Missing required keys: {missing}")
             continue
+        name = parameter["name"]
 
         if not isinstance(parameter["name"], str):
-            errors.append(f"Parameter's name is not a string: {parameter['name']}")
+            errors.append(f"{PARAMETERS_FILE}: {name}: Name is not a string")
 
         if not isinstance(parameter["description"], str):
-            errors.append(f"Parameter's description is not a string: {parameter['name']}")
+            errors.append(f"{PARAMETERS_FILE}: {name}: Description is not a string")
 
         if parameter["type"] not in ENUMERATIONS["type"]:
-            errors.append(f"Parameter's type is not a known type: {parameter['name']}")
+            errors.append(f"{PARAMETERS_FILE}: {name}: Type is not one of {ENUMERATIONS['type']}")
 
         if not isinstance(parameter["components"], list):
-            errors.append(f"Parameter's components is not a list: {parameter['name']}")
-        elif set(parameter["components"]) - set(ENUMERATIONS["components"]):
-            errors.append(f"Parameter's components are not all known: {parameter['name']}")
+            errors.append(f"{PARAMETERS_FILE}: {name}: Components is not a list")
+        elif unknown := set(parameter["components"]) - set(ENUMERATIONS["components"]):
+            errors.append(f"{PARAMETERS_FILE}: {name}: Some components are not recognized: {unknown}")
 
         if parameter["type"] == "object" and parameter["name"] not in VERIFIED_OBJECT_STRUCTURES:
-            errors.append(f"Parameter's object structure not verified for configuration via the web UI: {parameter['name']}")
+            errors.append(f"Parameter's object structure not verified for configuration via the web UI; please contact a web developer: {parameter['name']}")
 
     if errors:
         raise RuntimeError("\n" + "\n".join(errors))
