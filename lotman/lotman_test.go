@@ -290,8 +290,8 @@ func TestGetLotmanLib(t *testing.T) {
 	// capturing the log output
 	logOutput := &(bytes.Buffer{})
 	log.SetOutput(logOutput)
-	log.SetLevel(log.DebugLevel)
-	param.Set("Lotman.LibLocation", "/not/a/pathlibLotMan.so")
+	config.SetLogging(log.DebugLevel)
+	param.Set(param.Lotman_LibLocation.GetName(), "/not/a/pathlibLotMan.so")
 	libLoc = getLotmanLib()
 	require.Equal(t, "/usr/lib64/libLotMan.so", libLoc)
 	require.Contains(t, logOutput.String(), "libLotMan.so not found in configured path, attempting to find using known fallbacks")

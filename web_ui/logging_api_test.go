@@ -67,8 +67,10 @@ func TestHandleSetLogLevel(t *testing.T) {
 	config.RegisterLoggingCallback()
 
 	// Save original level
-	origLevel := log.GetLevel()
-	defer config.SetLogging(origLevel)
+	origLevel := config.GetEffectiveLogLevel()
+	t.Cleanup(func() {
+		config.SetLogging(origLevel)
+	})
 
 	// Ensure a clean log level manager for each test
 	logging.ResetGlobalManager()
@@ -171,8 +173,10 @@ func TestHandleGetLogLevel(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	// Save original level
-	origLevel := log.GetLevel()
-	defer config.SetLogging(origLevel)
+	origLevel := config.GetEffectiveLogLevel()
+	t.Cleanup(func() {
+		config.SetLogging(origLevel)
+	})
 
 	// Ensure a clean log level manager for each test
 	logging.ResetGlobalManager()
@@ -239,8 +243,10 @@ func TestHandleDeleteLogLevel(t *testing.T) {
 	config.RegisterLoggingCallback()
 
 	// Save original level
-	origLevel := log.GetLevel()
-	defer config.SetLogging(origLevel)
+	origLevel := config.GetEffectiveLogLevel()
+	t.Cleanup(func() {
+		config.SetLogging(origLevel)
+	})
 
 	// Ensure a clean log level manager for each test
 	logging.ResetGlobalManager()
@@ -297,8 +303,10 @@ func TestLogLevelIntegration(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	// Save original level
-	origLevel := log.GetLevel()
-	defer config.SetLogging(origLevel)
+	origLevel := config.GetEffectiveLogLevel()
+	t.Cleanup(func() {
+		config.SetLogging(origLevel)
+	})
 
 	router := setupLoggingRouter()
 	manager := logging.GetLogLevelManager()
