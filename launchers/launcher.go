@@ -85,7 +85,7 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	}
 
 	// Print Pelican config at server start if it's in debug or info level
-	if log.GetLevel() >= log.InfoLevel {
+	if config.GetEffectiveLogLevel() >= log.InfoLevel {
 		if err = config.PrintConfig(); err != nil {
 			return
 		}

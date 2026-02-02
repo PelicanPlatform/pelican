@@ -22,8 +22,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sirupsen/logrus"
-
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
@@ -33,10 +31,10 @@ import (
 func initServerForTest(t *testing.T, ctx context.Context, serverType server_structs.ServerType) error {
 	t.Helper()
 
-	origLevel := logrus.GetLevel()
+	originLevel := config.GetEffectiveLogLevel()
 	err := config.InitServer(ctx, serverType)
 	t.Cleanup(func() {
-		logrus.SetLevel(origLevel)
+		config.SetLogging(originLevel)
 	})
 
 	return err

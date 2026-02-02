@@ -34,7 +34,7 @@ import (
 )
 
 func TestOsdfEnvToPelican(t *testing.T) {
-	log.SetLevel(log.DebugLevel)
+	SetLogging(log.DebugLevel)
 	hook := test.NewGlobal()
 
 	t.Run("non-osdf-prefix-does-nothing", func(t *testing.T) {
@@ -159,7 +159,7 @@ func TestOsdfEnvToPelican(t *testing.T) {
 }
 
 func TestBindClassAdConfig(t *testing.T) {
-	log.SetLevel(log.DebugLevel)
+	SetLogging(log.DebugLevel)
 
 	t.Run("no-job-ad-file", func(t *testing.T) {
 		ResetConfig()

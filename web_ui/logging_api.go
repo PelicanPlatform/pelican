@@ -26,7 +26,9 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/logging"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
@@ -161,9 +163,9 @@ func HandleGetLogLevel(ctx *gin.Context) {
 	}
 
 	parameters := make([]ParameterLevelStatus, 0, len(parameterSnapshot))
-	globalCurrent := log.GetLevel()
-	globalBase := log.GetLevel()
-	if globalStatus, ok := parameterSnapshot["Logging.Level"]; ok {
+	globalCurrent := config.GetEffectiveLogLevel()
+	globalBase := config.GetEffectiveLogLevel()
+	if globalStatus, ok := parameterSnapshot[param.Logging_Level.GetName()]; ok {
 		globalCurrent = globalStatus.Current
 		globalBase = globalStatus.Base
 	}
