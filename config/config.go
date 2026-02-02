@@ -1350,12 +1350,12 @@ func SetServerDefaults(v *viper.Viper) error {
 	// we want to be able to check if this is user-provided (which we can't do for defaults.yaml)
 	v.SetDefault(param.Origin_S3UrlStyle.GetName(), "path")
 
-	// At the time of this comment, Pelican's default log level is set to "Error". However, that's still
+	// At the time of this comment, Pelican's default log level is set to "info" for servers. However, that's still
 	// too verbose for some XRootD parameters. Because we generally want to use Pelican's configured log level as a
 	// default for the XRootD parameters, we only set the corrected default values for these special XRootD directives
 	// when Pelican is running in its own default Error level. Otherwise we use Pelican's configured log level as a
 	// default for other params.
-	defaultLevel := log.GetLevel().String()
+	defaultLevel := GetEffectiveLogLevel().String()
 	// Logrus parses "warn" and converts it to "warning". Pelican uses "warn" in its config and docs,
 	// so we map it back here. This makes sure that something like `param.Logging_Origin_Cms.GetString()`
 	// returns a pelican-compatible log level.
@@ -1374,12 +1374,13 @@ func SetServerDefaults(v *viper.Viper) error {
 		param.Logging_Cache_Http,
 		param.Logging_Cache_Xrd,
 		param.Logging_Cache_Xrootd,
+		param.Logging_Cache_Lotman,
 	} {
 		v.SetDefault(param.GetName(), defaultLevel)
 	}
 
 	// If Pelican is at its default error level, do our custom mapping
-	if defaultLevel == log.ErrorLevel.String() {
+	if defaultLevel == log.InfoLevel.String() {
 		v.SetDefault(param.Logging_Origin_Scitokens.GetName(), "fatal")
 		v.SetDefault(param.Logging_Origin_Xrootd.GetName(), "info")
 		v.SetDefault(param.Logging_Cache_Scitokens.GetName(), "fatal")
