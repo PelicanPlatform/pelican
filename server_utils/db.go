@@ -31,6 +31,8 @@ import (
 	gormlog "github.com/thomas-tacquet/gormv2-logrus"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"github.com/pelicanplatform/pelican/config"
 )
 
 func InitSQLiteDB(dbPath string) (*gorm.DB, error) {
@@ -51,7 +53,7 @@ func InitSQLiteDB(dbPath string) (*gorm.DB, error) {
 
 	dbName := dbPath + "?_busy_timeout=5000&_journal_mode=WAL"
 
-	globalLogLevel := log.GetLevel()
+	globalLogLevel := config.GetEffectiveLogLevel()
 	var ormLevel logger.LogLevel
 	if globalLogLevel == log.DebugLevel || globalLogLevel == log.TraceLevel || globalLogLevel == log.InfoLevel {
 		ormLevel = logger.Info

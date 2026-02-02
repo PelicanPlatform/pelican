@@ -42,10 +42,10 @@ func initClientAndServerConfig(v *viper.Viper) *param.Config {
 	// Note: InitConfigInternal operates on the *global* viper instance. Only invoke it when
 	// we are also operating on the global viper instance.
 	if v == viper.GetViper() {
-		currentLevel := log.GetLevel()
-		log.SetLevel(log.ErrorLevel) // Suppress debug, warnings and info messages
+		currentLevel := config.GetEffectiveLogLevel()
+		config.SetLogging(log.ErrorLevel)
 		config.InitConfigInternal(log.InfoLevel)
-		log.SetLevel(currentLevel)
+		config.SetLogging(currentLevel)
 	}
 
 	if err := config.SetClientDefaults(v); err != nil {

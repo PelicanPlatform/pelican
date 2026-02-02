@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -436,10 +437,10 @@ func TestGetSortedAds(t *testing.T) {
 			// Set up logrus test logger and hook
 			// Initialize the logger and add a test hook
 			hook := test.NewGlobal()
-			origLevel := logrus.GetLevel()
-			logrus.SetLevel(logrus.WarnLevel)
+			origLevel := config.GetEffectiveLogLevel()
+			config.SetLogging(logrus.WarnLevel)
 			t.Cleanup(func() {
-				logrus.SetLevel(origLevel)
+				config.SetLogging(origLevel)
 			})
 
 			sortedAds := tc.swapMaps.GetSortedAds(tc.ads, tc.sortType)

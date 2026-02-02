@@ -35,6 +35,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -43,10 +44,10 @@ import (
 func TestWaitUntilWorking(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	hook := test.NewGlobal()
-	origLevel := logrus.GetLevel()
-	logrus.SetLevel(logrus.DebugLevel) // Ensure all log levels are captured
+	origLevel := config.GetEffectiveLogLevel()
+	config.SetLogging(logrus.DebugLevel) // Ensure all log levels are captured
 	t.Cleanup(func() {
-		logrus.SetLevel(origLevel)
+		config.SetLogging(origLevel)
 	})
 	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {

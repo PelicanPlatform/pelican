@@ -2964,11 +2964,11 @@ func TestPutOverwrite(t *testing.T) {
 		var logBuf bytes.Buffer
 		origOut := log.StandardLogger().Out
 		log.SetOutput(&logBuf)
-		origLevel := log.GetLevel()
-		log.SetLevel(log.WarnLevel)
+		origLevel := config.GetEffectiveLogLevel()
+		config.SetLogging(log.WarnLevel)
 		defer func() {
 			log.SetOutput(origOut)
-			log.SetLevel(origLevel)
+			config.SetLogging(origLevel)
 		}()
 
 		result, err := uploadObject(transfer)
