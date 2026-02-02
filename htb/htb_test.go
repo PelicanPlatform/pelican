@@ -231,28 +231,39 @@ func TestHTBStaleUserRemoval(t *testing.T) {
 }
 
 func TestHTBWaitWithContext(t *testing.T) {
-	h := New(10, 200) // Very low rate
+	// Create HTB with low capacity so we can quickly exhaust it
+	h := New(10, 50) // 10 tokens/sec, 50 capacity
 	defer h.Close()
 
 	ctx := context.Background()
 
-	// Drain completely
-	tokens, err := h.Wait(ctx, "user1", 200)
+	// Take 50 tokens - this succeeds immediately
+	tokens, err := h.Wait(ctx, "user1", 50)
 	require.NoError(t, err)
-	tokens.Use(200)
+	tokens.Use(50)
+	h.Return(tokens)
 
-	tokens2, err := h.Wait(ctx, "user1", 200)
-	require.NoError(t, err)
-	tokens2.Use(200)
-
-	// Create a context with very short timeout
-	ctx2, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	// Now bucket is empty (child=0, parent=0)
+	// Try to get more tokens with a very short timeout
+	// Timeout is much shorter than tick interval (100ms)
+	ctx2, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
 	defer cancel()
 
-	// This should timeout
-	_, err = h.Wait(ctx2, "user1", 100)
+	// This should timeout because:
+	// 1. Bucket is empty (used 50 tokens, capacity 50)
+	// 2. Rate is only 10/sec = 1 token per 100ms
+	// 3. Context times out in 5ms, well before the next 100ms tick
+	start := time.Now()
+	_, err = h.Wait(ctx2, "user1", 10)
+	elapsed := time.Since(start)
+	t.Logf("Wait returned after %v with error: %v", elapsed, err)
+
+	// Should timeout
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	// Should have waited close to the timeout duration
+	assert.Greater(t, elapsed.Milliseconds(), int64(3), "Should have waited at least 3ms")
+	assert.Less(t, elapsed.Milliseconds(), int64(20), "Should have timed out before 20ms")
 }
 
 func TestHTBTryTake(t *testing.T) {
