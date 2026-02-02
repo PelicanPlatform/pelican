@@ -114,7 +114,7 @@ func TestCLILoggingLevelChanges(t *testing.T) {
 	t.Log("Test 1: Change to info level, verify debug logs suppressed, then verify restoration")
 
 	// Set to info level for 2 seconds
-	runSetLevel("Logging.Level", "info", "2s")
+	runSetLevel(param.Logging_Level.GetName(), "info", "2s")
 
 	// Wait for the change to take effect
 	require.Eventually(t, func() bool {
@@ -143,7 +143,7 @@ func TestCLILoggingLevelChanges(t *testing.T) {
 	originBase := param.Logging_Origin_Xrootd.GetString()
 	t.Logf("Origin base XRootD logging level: %s", originBase)
 
-	runSetLevel("Logging.Origin.Xrootd", "trace", "4s")
+	runSetLevel(param.Logging_Origin_Xrootd.GetName(), "trace", "4s")
 
 	require.Eventually(t, func() bool {
 		level := param.Logging_Origin_Xrootd.GetString()
