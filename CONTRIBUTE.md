@@ -18,6 +18,8 @@ If anything doesn't make sense, or doesn't work when you run it, please open a [
   - [Issues](#issues)
   - [Pull Requests](#pull-requests)
 - [Development Environment Setup](#development-environment-setup)
+- [Code Quality Tools](#code-quality-tools)
+  - [Using Pre-commit Hooks](#using-pre-commit-hooks)
 - [Ask for Help](#ask-for-help)
 
 ## Ways to Contribute
@@ -316,6 +318,51 @@ To start "federation in a box", run the following command instead:
 ```
 
 This will spin up a fully functional Pelican local federation for you.
+
+## Code Quality Tools
+
+### Using Pre-commit Hooks
+
+We use [pre-commit](https://pre-commit.com/) to automatically run a variety of code quality checks before you commit your changes. This helps maintain consistent code quality across the project and catches common issues early in the development process.
+
+#### Why We Use Pre-commit
+
+Pre-commit hooks automatically check your code for issues when you run `git commit`, helping to:
+
+- **Catch formatting issues**: Automatically fix trailing whitespace, ensure files end with newlines, and format markdown files
+- **Prevent common mistakes**: Check for large files being accidentally committed, validate YAML syntax
+- **Enforce code quality**: Run linters like `golangci-lint` for Go code and `shellcheck` for shell scripts
+- **Fix typos**: Automatically detect and suggest fixes for spelling errors using the `typos` checker
+- **Save review time**: Fix issues locally before creating a PR, reducing back-and-forth during code review
+
+#### Installation and Setup
+
+To set up pre-commit in your local repository clone:
+
+1. Install pre-commit (requires Python 3):
+
+   ```bash
+   $ python3 -m pip install pre-commit
+   ```
+
+1. Install the git hook scripts (from the repository root):
+
+   ```bash
+   $ pre-commit install
+   pre-commit installed at .git/hooks/pre-commit
+   ```
+
+Once installed, pre-commit will automatically run every time you execute `git commit`. If any hooks fail, the commit will be aborted and you'll see the issues that need to be fixed. Many hooks will automatically fix the issues for you - double check what they've changed and if all looks good, just stage the changes and commit again.
+
+#### Skipping Pre-commit (Not Recommended)
+
+If you need to commit without running the hooks (e.g., for a work-in-progress commit), you can use:
+
+```bash
+$ git commit --no-verify -m "WIP: work in progress"
+```
+
+However, this is not recommended for final commits as the CI/CD pipeline runs similar checks and will fail if issues are detected.
 
 ## Ask for Help
 

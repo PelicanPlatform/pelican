@@ -51,7 +51,7 @@ repos:
     rev: 0.7.19
     hooks:
     -   id: mdformat
-        name: Format markdown files (one sentence per line)
+        name: Format markdown files
         additional_dependencies:
         -   mdformat-simple-breaks
         args: [--wrap, "no"]
