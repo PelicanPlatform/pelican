@@ -317,7 +317,10 @@ func SetLogging(logLevel log.Level) {
 	}
 }
 
-// GetEffectiveLogLevel returns the effective log level based on the transform hook
+// GetEffectiveLogLevel returns the effective log level based on the transform hook.
+// When global filters are active, logrus's log.GetLevel() is set to DebugLevel to allow
+// filters to see all messages, while the actual filtering happens via hooks. This function
+// returns the true effective level by examining what levels the hook is configured to output.
 func GetEffectiveLogLevel() log.Level {
 	globalTransformMu.Lock()
 	defer globalTransformMu.Unlock()
@@ -326,24 +329,17 @@ func GetEffectiveLogLevel() log.Level {
 		if hook == nil {
 			return log.GetLevel()
 		}
-		// Find the highest level in the hook
-		for _, lvl := range log.AllLevels {
-			found := false
-			for _, hookLvl := range hook.LogLevels {
-				if hookLvl == lvl {
-					found = true
-					break
-				}
-			}
-			if !found && lvl > log.PanicLevel {
-				// Return the level just below the first one not in the hook
-				for i := len(log.AllLevels) - 1; i >= 0; i-- {
-					if log.AllLevels[i] < lvl {
-						return log.AllLevels[i]
-					}
-				}
+		// Find the highest (most verbose) level in the hook's configured levels.
+		// In logrus, higher numeric values = more verbose (Trace=6 > Debug=5 > ... > Panic=0).
+		// The hook's LogLevels contains all levels that should be output, so the max
+		// value represents the effective log level.
+		var maxLevel log.Level
+		for _, hookLvl := range hook.LogLevels {
+			if hookLvl > maxLevel {
+				maxLevel = hookLvl
 			}
 		}
+		return maxLevel
 	}
 	return log.GetLevel()
 }
