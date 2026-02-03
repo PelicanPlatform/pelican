@@ -255,7 +255,7 @@ func createToken(cmd *cobra.Command, args []string) error {
 		if issuer == "" || (sPath == "" && len(rawScopes) == 0) {
 			return errors.Errorf(
 				"Failed to get director info. You can try re-running with --issuer <issuer URL> "+
-					"and either --scope-path <scope path> or --scope <scope> to specify them manually. "+
+					"and --scope-path <scope path> to specify needed information manually. "+
 					"URL parsing error: %v, Director error: %v", pUrlErr, directorErr)
 		}
 		log.Warning("Proceeding with user-supplied --issuer and --scope-path due to discovery failures.")
