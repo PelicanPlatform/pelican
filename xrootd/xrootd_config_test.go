@@ -562,12 +562,12 @@ func TestCopyCertificatesWithPKCS11(t *testing.T) {
 	t.Cleanup(server_utils.ResetTestState)
 	runDir := t.TempDir()
 	configDir := t.TempDir()
-	param.Set(param.Origin_RunLocation.GetName(), runDir)
-	param.Set("ConfigDir", configDir)
+	require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), runDir))
+	require.NoError(t, param.Set("ConfigDir", configDir))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
-	param.Set(param.Server_EnablePKCS11.GetName(), true)
+	require.NoError(t, param.Set(param.Server_EnablePKCS11.GetName(), true))
 	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
 
 	p11proxy.SetCurrentInfoForTest(p11proxy.Info{Enabled: true, PKCS11URL: "pkcs11:test"})
