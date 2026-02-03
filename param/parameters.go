@@ -134,6 +134,13 @@ var runtimeConfigurableMap = map[string]bool{
 	"Client.SlowTransferWindow": false,
 	"Client.StoppedTransferTimeout": false,
 	"Client.WorkerCount": false,
+	"ClientAgent.DbLocation": false,
+	"ClientAgent.HistoryRetentionDays": false,
+	"ClientAgent.IdleTimeout": false,
+	"ClientAgent.MaxConcurrentJobs": false,
+	"ClientAgent.PidFile": false,
+	"ClientAgent.ProgressUpdateInterval": false,
+	"ClientAgent.Socket": false,
 	"ConfigLocations": false,
 	"Debug": false,
 	"Director.AdaptiveSortEWMATimeConstant": false,
@@ -320,6 +327,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.StorageType": false,
 	"Origin.SupportedChecksumTypes": false,
 	"Origin.TokenAudience": false,
+	"Origin.TransferRateLimit": false,
 	"Origin.Url": false,
 	"Origin.UserMapfileRefreshInterval": false,
 	"Origin.XRootDPrefix": false,
@@ -481,6 +489,12 @@ func (sP StringParam) GetString() string {
 			return config.Cache.Url
 		case "Cache.XRootDPrefix":
 			return config.Cache.XRootDPrefix
+		case "ClientAgent.DbLocation":
+			return config.ClientAgent.DbLocation
+		case "ClientAgent.PidFile":
+			return config.ClientAgent.PidFile
+		case "ClientAgent.Socket":
+			return config.ClientAgent.Socket
 		case "Director.AdvertiseUrl":
 			return config.Director.AdvertiseUrl
 		case "Director.CacheSortMethod":
@@ -855,6 +869,10 @@ func (iP IntParam) GetInt() int {
 			return config.Cache.EvictionMonitoringMaxDepth
 		case "Cache.Port":
 			return config.Cache.Port
+		case "ClientAgent.HistoryRetentionDays":
+			return config.ClientAgent.HistoryRetentionDays
+		case "ClientAgent.MaxConcurrentJobs":
+			return config.ClientAgent.MaxConcurrentJobs
 		case "Client.DirectorRetries":
 			return config.Client.DirectorRetries
 		case "Client.MaximumDownloadSpeed":
@@ -903,6 +921,8 @@ func (iP IntParam) GetInt() int {
 			return config.Origin.DiskUsageCalculationRateLimit
 		case "Origin.Port":
 			return config.Origin.Port
+		case "Origin.TransferRateLimit":
+			return config.Origin.TransferRateLimit
 		case "Server.IssuerPort":
 			return config.Server.IssuerPort
 		case "Server.UILoginRateLimit":
@@ -1119,6 +1139,10 @@ func (dP DurationParam) GetDuration() time.Duration {
 			return config.Cache.SelfTestInterval
 		case "Cache.SelfTestMaxAge":
 			return config.Cache.SelfTestMaxAge
+		case "ClientAgent.IdleTimeout":
+			return config.ClientAgent.IdleTimeout
+		case "ClientAgent.ProgressUpdateInterval":
+			return config.ClientAgent.ProgressUpdateInterval
 		case "Client.SlowTransferRampupTime":
 			return config.Client.SlowTransferRampupTime
 		case "Client.SlowTransferWindow":
@@ -1288,6 +1312,13 @@ var allParameterNames = []string{
 	"Client.SlowTransferWindow",
 	"Client.StoppedTransferTimeout",
 	"Client.WorkerCount",
+	"ClientAgent.DbLocation",
+	"ClientAgent.HistoryRetentionDays",
+	"ClientAgent.IdleTimeout",
+	"ClientAgent.MaxConcurrentJobs",
+	"ClientAgent.PidFile",
+	"ClientAgent.ProgressUpdateInterval",
+	"ClientAgent.Socket",
 	"ConfigLocations",
 	"Debug",
 	"Director.AdaptiveSortEWMATimeConstant",
@@ -1474,6 +1505,7 @@ var allParameterNames = []string{
 	"Origin.StorageType",
 	"Origin.SupportedChecksumTypes",
 	"Origin.TokenAudience",
+	"Origin.TransferRateLimit",
 	"Origin.Url",
 	"Origin.UserMapfileRefreshInterval",
 	"Origin.XRootDPrefix",
@@ -1603,6 +1635,9 @@ var (
 	Cache_StorageLocation = StringParam{"Cache.StorageLocation"}
 	Cache_Url = StringParam{"Cache.Url"}
 	Cache_XRootDPrefix = StringParam{"Cache.XRootDPrefix"}
+	ClientAgent_DbLocation = StringParam{"ClientAgent.DbLocation"}
+	ClientAgent_PidFile = StringParam{"ClientAgent.PidFile"}
+	ClientAgent_Socket = StringParam{"ClientAgent.Socket"}
 	Director_AdvertiseUrl = StringParam{"Director.AdvertiseUrl"}
 	Director_CacheSortMethod = StringParam{"Director.CacheSortMethod"}
 	Director_DbLocation = StringParam{"Director.DbLocation"}
@@ -1777,6 +1812,8 @@ var (
 	Cache_ConcurrencyDegradedThreshold = IntParam{"Cache.ConcurrencyDegradedThreshold"}
 	Cache_EvictionMonitoringMaxDepth = IntParam{"Cache.EvictionMonitoringMaxDepth"}
 	Cache_Port = IntParam{"Cache.Port"}
+	ClientAgent_HistoryRetentionDays = IntParam{"ClientAgent.HistoryRetentionDays"}
+	ClientAgent_MaxConcurrentJobs = IntParam{"ClientAgent.MaxConcurrentJobs"}
 	Client_DirectorRetries = IntParam{"Client.DirectorRetries"}
 	Client_MaximumDownloadSpeed = IntParam{"Client.MaximumDownloadSpeed"}
 	Client_MinimumDownloadSpeed = IntParam{"Client.MinimumDownloadSpeed"}
@@ -1801,6 +1838,7 @@ var (
 	Origin_ConcurrencyDegradedThreshold = IntParam{"Origin.ConcurrencyDegradedThreshold"}
 	Origin_DiskUsageCalculationRateLimit = IntParam{"Origin.DiskUsageCalculationRateLimit"}
 	Origin_Port = IntParam{"Origin.Port"}
+	Origin_TransferRateLimit = IntParam{"Origin.TransferRateLimit"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
 	Server_UILoginRateLimit = IntParam{"Server.UILoginRateLimit"}
 	Server_WebPort = IntParam{"Server.WebPort"}
@@ -1896,6 +1934,8 @@ var (
 	Cache_EvictionMonitoringInterval = DurationParam{"Cache.EvictionMonitoringInterval"}
 	Cache_SelfTestInterval = DurationParam{"Cache.SelfTestInterval"}
 	Cache_SelfTestMaxAge = DurationParam{"Cache.SelfTestMaxAge"}
+	ClientAgent_IdleTimeout = DurationParam{"ClientAgent.IdleTimeout"}
+	ClientAgent_ProgressUpdateInterval = DurationParam{"ClientAgent.ProgressUpdateInterval"}
 	Client_SlowTransferRampupTime = DurationParam{"Client.SlowTransferRampupTime"}
 	Client_SlowTransferWindow = DurationParam{"Client.SlowTransferWindow"}
 	Client_StoppedTransferTimeout = DurationParam{"Client.StoppedTransferTimeout"}

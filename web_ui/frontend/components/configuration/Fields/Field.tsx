@@ -111,6 +111,15 @@ const Field = ({
           value={value as number}
         />
       );
+    case 'byterate':
+      return (
+        <StringField
+          focused={focused}
+          onChange={handleChange<string>}
+          name={name}
+          value={value as string}
+        />
+      );
     case 'object':
       switch (name.split('.').slice(-1)[0]) {
         case 'Institutions':

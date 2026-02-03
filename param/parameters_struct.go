@@ -81,6 +81,15 @@ type Config struct {
 		StoppedTransferTimeout time.Duration `mapstructure:"stoppedtransfertimeout" yaml:"StoppedTransferTimeout"`
 		WorkerCount int `mapstructure:"workercount" yaml:"WorkerCount"`
 	} `mapstructure:"client" yaml:"Client"`
+	ClientAgent struct {
+		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
+		HistoryRetentionDays int `mapstructure:"historyretentiondays" yaml:"HistoryRetentionDays"`
+		IdleTimeout time.Duration `mapstructure:"idletimeout" yaml:"IdleTimeout"`
+		MaxConcurrentJobs int `mapstructure:"maxconcurrentjobs" yaml:"MaxConcurrentJobs"`
+		PidFile string `mapstructure:"pidfile" yaml:"PidFile"`
+		ProgressUpdateInterval time.Duration `mapstructure:"progressupdateinterval" yaml:"ProgressUpdateInterval"`
+		Socket string `mapstructure:"socket" yaml:"Socket"`
+	} `mapstructure:"clientagent" yaml:"ClientAgent"`
 	ConfigDir string `mapstructure:"configdir" yaml:"ConfigDir"`
 	ConfigLocations []string `mapstructure:"configlocations" yaml:"ConfigLocations"`
 	Debug bool `mapstructure:"debug" yaml:"Debug"`
@@ -295,6 +304,7 @@ type Config struct {
 		StorageType string `mapstructure:"storagetype" yaml:"StorageType"`
 		SupportedChecksumTypes []string `mapstructure:"supportedchecksumtypes" yaml:"SupportedChecksumTypes"`
 		TokenAudience string `mapstructure:"tokenaudience" yaml:"TokenAudience"`
+		TransferRateLimit int `mapstructure:"transferratelimit" yaml:"TransferRateLimit"`
 		Url string `mapstructure:"url" yaml:"Url"`
 		UserMapfileRefreshInterval time.Duration `mapstructure:"usermapfilerefreshinterval" yaml:"UserMapfileRefreshInterval"`
 		XRootDPrefix string `mapstructure:"xrootdprefix" yaml:"XRootDPrefix"`
@@ -480,6 +490,15 @@ type configWithType struct {
 		SlowTransferWindow struct { Type string; Value time.Duration }
 		StoppedTransferTimeout struct { Type string; Value time.Duration }
 		WorkerCount struct { Type string; Value int }
+	}
+	ClientAgent struct {
+		DbLocation struct { Type string; Value string }
+		HistoryRetentionDays struct { Type string; Value int }
+		IdleTimeout struct { Type string; Value time.Duration }
+		MaxConcurrentJobs struct { Type string; Value int }
+		PidFile struct { Type string; Value string }
+		ProgressUpdateInterval struct { Type string; Value time.Duration }
+		Socket struct { Type string; Value string }
 	}
 	ConfigDir struct { Type string; Value string }
 	ConfigLocations struct { Type string; Value []string }
@@ -695,6 +714,7 @@ type configWithType struct {
 		StorageType struct { Type string; Value string }
 		SupportedChecksumTypes struct { Type string; Value []string }
 		TokenAudience struct { Type string; Value string }
+		TransferRateLimit struct { Type string; Value int }
 		Url struct { Type string; Value string }
 		UserMapfileRefreshInterval struct { Type string; Value time.Duration }
 		XRootDPrefix struct { Type string; Value string }
