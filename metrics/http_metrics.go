@@ -27,17 +27,6 @@ import (
 // These parallel XRootD's transfer and connection metrics but at the HTTP layer
 
 var (
-	// Connection metrics
-	HttpConnectionsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "pelican_http_connections_total",
-		Help: "Total number of HTTP connections accepted",
-	}, []string{"server_type"}) // server_type: origin/cache
-
-	HttpActiveConnections = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "pelican_http_active_connections",
-		Help: "Number of currently active HTTP connections",
-	}, []string{"server_type"})
-
 	// Request/Transfer operation metrics
 	HttpRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_http_requests_total",
