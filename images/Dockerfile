@@ -653,11 +653,13 @@ ARG GO_VER
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
   dnf install -y git make
 
-# Install Go using the same commands as the pelican-build-init stage.
-RUN curl -O https://dl.google.com/go/go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz \
+# Install Go using almost the same commands as the pelican-build-init stage.
+# We need to hack around an issue with `tar` and our ARM64 images.
+RUN curl -o /tmp/go.tar.gz https://dl.google.com/go/go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz \
     && rm -rf /usr/local/go \
-    && tar -C /usr/local -xzf go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz \
-    && rm -rf go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz
+    && cd /usr/local \
+    && python3 -m tarfile --extract /tmp/go.tar.gz \
+    && rm -f /tmp/go.tar.gz
 ENV PATH="/usr/local/go/bin:${PATH}"
 
 # Install the MinIO server and client for S3 tests.
