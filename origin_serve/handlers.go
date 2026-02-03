@@ -21,6 +21,7 @@ package origin_serve
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -60,6 +61,22 @@ func (mrw *metricsResponseWriter) WriteString(s string) (int, error) {
 	n, err := mrw.ResponseWriter.WriteString(s)
 	mrw.bytesWritten += int64(n)
 	return n, err
+}
+
+// metricsRequestReader wraps http.Request.Body to track bytes read
+type metricsRequestReader struct {
+	reader    io.ReadCloser
+	bytesRead int64
+}
+
+func (mrr *metricsRequestReader) Read(p []byte) (int, error) {
+	n, err := mrr.reader.Read(p)
+	mrr.bytesRead += int64(n)
+	return n, err
+}
+
+func (mrr *metricsRequestReader) Close() error {
+	return mrr.reader.Close()
 }
 
 func init() {
@@ -234,22 +251,13 @@ func httpMetricsMiddleware() gin.HandlerFunc {
 		start := time.Now()
 		method := c.Request.Method
 
-		// Track new connection (approximate - tracks each request)
-		metrics.HttpConnectionsTotal.WithLabelValues(metrics.ServerTypeOrigin).Inc()
-
-		// Track active connections
-		metrics.HttpActiveConnections.WithLabelValues(metrics.ServerTypeOrigin).Inc()
-		defer metrics.HttpActiveConnections.WithLabelValues(metrics.ServerTypeOrigin).Dec()
-
 		// Track active requests
 		metrics.HttpActiveRequests.WithLabelValues(metrics.ServerTypeOrigin, method).Inc()
 		defer metrics.HttpActiveRequests.WithLabelValues(metrics.ServerTypeOrigin, method).Dec()
 
-		// Get request body size
-		bytesIn := c.Request.ContentLength
-		if bytesIn > 0 {
-			metrics.HttpBytesTotal.WithLabelValues(metrics.ServerTypeOrigin, metrics.DirectionIn, method).Add(float64(bytesIn))
-		}
+		// Wrap request body to track bytes read
+		mrr := &metricsRequestReader{reader: c.Request.Body}
+		c.Request.Body = mrr
 
 		// Wrap response writer to track bytes out
 		mrw := &metricsResponseWriter{ResponseWriter: c.Writer}
@@ -267,15 +275,20 @@ func httpMetricsMiddleware() gin.HandlerFunc {
 		metrics.HttpRequestsTotal.WithLabelValues(metrics.ServerTypeOrigin, method, statusStr).Inc()
 		metrics.HttpRequestDuration.WithLabelValues(metrics.ServerTypeOrigin, method, statusStr).Observe(duration)
 
+		// Track bytes in (actual bytes read from request body)
+		if mrr.bytesRead > 0 {
+			metrics.HttpBytesTotal.WithLabelValues(metrics.ServerTypeOrigin, metrics.DirectionIn, method).Add(float64(mrr.bytesRead))
+		}
+
 		// Track bytes out
 		if mrw.bytesWritten > 0 {
 			metrics.HttpBytesTotal.WithLabelValues(metrics.ServerTypeOrigin, metrics.DirectionOut, method).Add(float64(mrw.bytesWritten))
 		}
 
 		// Track large transfers (>100MB)
-		if bytesIn >= metrics.LargeTransferThreshold {
+		if mrr.bytesRead >= metrics.LargeTransferThreshold {
 			metrics.HttpLargeTransfersTotal.WithLabelValues(metrics.ServerTypeOrigin, method).Inc()
-			metrics.HttpLargeTransferBytes.WithLabelValues(metrics.ServerTypeOrigin, metrics.DirectionIn, method).Add(float64(bytesIn))
+			metrics.HttpLargeTransferBytes.WithLabelValues(metrics.ServerTypeOrigin, metrics.DirectionIn, method).Add(float64(mrr.bytesRead))
 		}
 		if mrw.bytesWritten >= metrics.LargeTransferThreshold {
 			metrics.HttpLargeTransfersTotal.WithLabelValues(metrics.ServerTypeOrigin, method).Inc()

@@ -382,25 +382,3 @@ func TestHTBBurstCapability(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, tokens)
 }
-
-func TestHTBNoGoroutineAfterClose(t *testing.T) {
-	h := New(1000, 1000)
-
-	// Get initial goroutine count
-	beforeCount := numGoRoutines()
-
-	h.Close()
-
-	// Wait a bit for cleanup
-	time.Sleep(100 * time.Millisecond)
-
-	afterCount := numGoRoutines()
-
-	// Should not have leaked goroutines (allow some tolerance for test framework)
-	assert.InDelta(t, beforeCount, afterCount, 5)
-}
-
-// Helper to count goroutines (approximate)
-func numGoRoutines() int {
-	return 0 // This would need runtime.NumGoroutine() but keeping test simple
-}
