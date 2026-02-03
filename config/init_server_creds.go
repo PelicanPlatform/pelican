@@ -207,9 +207,6 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve, allowRSA bool)
 		return errors.Wrap(err, "Failed to load private key due to I/O error")
 	}
 
-	// If we're generating a new key, log a warning in case the user intended to pass an existing key (maybe they made a typo)
-	log.Warningf("Will generate a new private key at location: %v", keyLocation)
-
 	keyDir := filepath.Dir(keyLocation)
 	if err := MkdirAll(keyDir, 0750, -1, user.Gid); err != nil {
 		return err
