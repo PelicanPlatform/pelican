@@ -691,13 +691,13 @@ func ListGroups(db *gorm.DB) ([]Group, error) {
 	return groups, nil
 }
 
-func AddGroupMember(db *gorm.DB, groupId, userId, addedByUserId string) error {
+func AddGroupMember(db *gorm.DB, groupId, userId, addedByUserId string, isAdmin bool) error {
 	var group Group
 	if err := db.First(&group, "id = ?", groupId).Error; err != nil {
 		return err
 	}
 
-	if group.CreatedBy != addedByUserId {
+	if !isAdmin && group.CreatedBy != addedByUserId {
 		return ErrForbidden
 	}
 
