@@ -301,7 +301,8 @@ func TestBroker(t *testing.T) {
 	case res := <-listenerChan:
 		if err, ok := res.(error); ok {
 			require.NoError(t, err)
-		} else if listener, ok = res.(net.Listener); ok {
+		} else if brokerListener, ok := res.(BrokerListener); ok {
+			listener = brokerListener.Listener
 			log.Debugln("Origin got reversed listener socket listening at local", listener.Addr())
 			break
 		} else {

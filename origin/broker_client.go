@@ -174,24 +174,29 @@ func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group, engine *gin
 					log.Errorln("Callback failed:", err)
 					break
 				}
-				listener, ok := res.(net.Listener)
+				brokerListener, ok := res.(broker.BrokerListener)
 				if !ok {
 					log.Errorln("Failed to determine callback result:", res)
 					break
 				}
-				log.Debugf("Origin received broker reverse connection from %s", listener.Addr())
+				listener := brokerListener.Listener
+				logFields := log.Fields{
+					"request_id":  brokerListener.RequestId,
+					"remote_addr": listener.Addr().String(),
+				}
+				log.WithFields(logFields).Debug("Origin received broker reverse connection")
 				srv := http.Server{
 					Handler: http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) { proxyOrigin(resp, req, engine) }),
 				}
 				PelicanBrokerConnections.WithLabelValues("origin").Inc()
-				go func() {
+				go func(fields log.Fields) {
 					// A one-shot listener should do a single "accept" then shutdown.
-					log.Debug("Origin starting to serve broker reverse connection")
+					log.WithFields(fields).Debug("Origin starting to serve broker reverse connection")
 					err = srv.Serve(listener)
 					if !errors.Is(err, net.ErrClosed) {
-						log.Errorln("Failed to serve reverse connection:", err)
+						log.WithFields(fields).WithError(err).Error("Failed to serve reverse connection")
 					}
-				}()
+				}(logFields)
 			}
 		}
 	})
