@@ -321,7 +321,7 @@ func SetLogging(logLevel log.Level) {
 }
 
 // GetEffectiveLogLevel returns the effective log level based on the transform hook.
-// When global filters are active, logrus's log.GetLevel() is set to DebugLevel to allow
+// When global filters are active, logrus's log.GetLevel() is set to TraceLevel to allow
 // filters to see all messages, while the actual filtering happens via hooks. This function
 // returns the true effective level by examining what levels the hook is configured to output.
 func GetEffectiveLogLevel() log.Level {
