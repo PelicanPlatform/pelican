@@ -51,6 +51,7 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: "go.mod"
+        check-latest: true
     - name: Create Go temporary directories (Windows workaround)
       if: runner.os == 'Windows'
       shell: pwsh
@@ -65,6 +66,7 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: "go.mod"
+        check-latest: true
     - name: Install macOS Dependencies
       run: ./github_scripts/osx_install.sh
       if: runner.os == 'macOS'
