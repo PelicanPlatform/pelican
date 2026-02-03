@@ -254,21 +254,28 @@ func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group, engine *gin
 					log.Errorln("Callback failed:", err)
 					break
 				}
-				listener, ok := res.(net.Listener)
+				brokerListener, ok := res.(broker.BrokerListener)
 				if !ok {
 					log.Errorln("Failed to determine callback result:", res)
 					break
 				}
+				listener := brokerListener.Listener
+				logFields := log.Fields{
+					"request_id":  brokerListener.RequestId,
+					"remote_addr": listener.Addr().String(),
+				}
+				log.WithFields(logFields).Debug("Cache received broker reverse connection")
 				srv := http.Server{
 					Handler: http.HandlerFunc(engine.ServeHTTP),
 				}
-				go func() {
+				go func(fields log.Fields) {
 					// A one-shot listener should do a single "accept" then shutdown.
+					log.WithFields(fields).Debug("Cache starting to serve broker reverse connection")
 					err = srv.Serve(listener)
 					if !errors.Is(err, net.ErrClosed) {
-						log.Errorln("Failed to serve reverse connection:", err)
+						log.WithFields(fields).WithError(err).Error("Failed to serve reverse connection")
 					}
-				}()
+				}(logFields)
 			}
 		}
 	})

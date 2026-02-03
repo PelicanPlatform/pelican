@@ -111,6 +111,7 @@ func retrieveRequest(ctx context.Context, ginCtx *gin.Context) {
 	}
 	if !ok {
 		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, newBrokerRespFail("Authorization denied"))
+		return
 	}
 
 	req, err := handleRetrieve(ctx, ginCtx, originReq.Origin, timeoutVal)
@@ -235,6 +236,8 @@ func handleCallback(ctx context.Context, ginCtx *gin.Context) {
 		return
 	}
 
+	logFields := log.Fields{"request_id": callbackReq.RequestId, "remote_addr": ginCtx.Request.RemoteAddr}
+
 	token := ginCtx.Request.Header.Get("Authorization")
 	token, hasPrefix := strings.CutPrefix(token, "Bearer ")
 	if !hasPrefix {
@@ -252,6 +255,7 @@ func handleCallback(ctx context.Context, ginCtx *gin.Context) {
 		return
 	}()
 	if err != nil {
+		log.WithFields(logFields).WithError(err).Warn("Cache callback for unknown request ID")
 		ginCtx.JSON(http.StatusBadRequest, newBrokerRespFail("No such request ID"))
 		ginCtx.Abort()
 		return
@@ -259,21 +263,25 @@ func handleCallback(ctx context.Context, ginCtx *gin.Context) {
 
 	ok, err := verifyToken(ctx, token, pendingRev.prefix, param.Server_ExternalWebUrl.GetString(), token_scopes.Broker_Callback)
 	if err != nil {
-		log.Errorln("Failed to verify token for cache callback:", err)
+		log.WithFields(logFields).WithError(err).Error("Failed to verify token for cache callback")
 		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, newBrokerRespFail("Failed to verify provided token"))
 		return
 	}
 	if !ok {
+		log.WithFields(logFields).Warn("Cache callback authorization denied")
 		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, newBrokerRespFail("Authorization denied"))
+		return
 	}
 
 	// Pass the response writer to the handler (or wait for
 	// a context cancel)
 	select {
 	case <-ctx.Done():
+		log.WithFields(logFields).Debug("Cache callback context cancelled before passing to handler")
 		ginCtx.AbortWithStatus(http.StatusBadGateway)
 		return
 	case <-ginCtx.Done():
+		log.WithFields(logFields).Debug("Cache callback gin context cancelled before passing to handler")
 		ginCtx.AbortWithStatus(http.StatusBadGateway)
 		return
 	case pendingRev.channel <- ginCtx.Writer:
@@ -287,8 +295,10 @@ func handleCallback(ctx context.Context, ginCtx *gin.Context) {
 	case <-pendingRev.channel:
 		return
 	case <-ctx.Done():
+		log.WithFields(logFields).Debug("Cache callback context cancelled while waiting for handler")
 		return
 	case <-ginCtx.Done():
+		log.WithFields(logFields).Debug("Cache callback gin context cancelled while waiting for handler")
 		return
 	}
 }
