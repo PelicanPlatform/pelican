@@ -24,11 +24,13 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,6 +44,54 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
+
+// verifyMetricValue verifies that a metric exists with specific labels and has a non-zero value
+func verifyMetricValue(t *testing.T, metricsText, metricName string, labels map[string]string) {
+	found := false
+	for _, line := range strings.Split(metricsText, "\n") {
+		if line == "" || line[0] == '#' {
+			continue
+		}
+		if !strings.Contains(line, metricName) {
+			continue
+		}
+
+		// Check all required labels are present on this line
+		allLabelsMatch := true
+		for key, value := range labels {
+			expectedLabel := fmt.Sprintf(`%s="%s"`, key, value)
+			if !strings.Contains(line, expectedLabel) {
+				allLabelsMatch = false
+				break
+			}
+		}
+
+		if allLabelsMatch {
+			found = true
+			t.Logf("Found metric: %s", line)
+
+			// Extract and verify non-zero value
+			parts := strings.Fields(line)
+			require.GreaterOrEqual(t, len(parts), 2, "Metric line should have at least 2 parts")
+			value := parts[len(parts)-1]
+			assert.NotEqual(t, "0", value, "Metric %s should have non-zero value", metricName)
+			break
+		}
+	}
+	assert.True(t, found, "Should find %s with labels %v", metricName, labels)
+}
+
+// queryPrometheusMetrics fetches and returns the Prometheus metrics text
+func queryPrometheusMetrics(t *testing.T, serverURL string) string {
+	resp, err := http.Get(serverURL + "/metrics")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return string(body)
+}
 
 // setupE2ETestServer creates a complete test server with POSIXv2 backend
 // It returns the server, storage directory, and cleanup function
@@ -149,39 +199,27 @@ func TestMetricsEndToEnd(t *testing.T) {
 	assert.GreaterOrEqual(t, storageBytes, initialStorageBytes+float64(len(body)), "Storage read bytes should track actual bytes read")
 
 	// Verify metrics are scrapable from /metrics endpoint
-	metricsResp, err := http.Get(server.URL + "/metrics")
-	require.NoError(t, err)
-	defer metricsResp.Body.Close()
-	assert.Equal(t, http.StatusOK, metricsResp.StatusCode)
+	metricsText := queryPrometheusMetrics(t, server.URL)
 
-	metricsBody, err := io.ReadAll(metricsResp.Body)
-	require.NoError(t, err)
-	metricsText := string(metricsBody)
+	// Verify unified storage metrics with backend label and non-zero values
+	verifyMetricValue(t, metricsText, "pelican_storage_reads_total", map[string]string{
+		"backend": "posixv2",
+	})
+	verifyMetricValue(t, metricsText, "pelican_storage_bytes_read_total", map[string]string{
+		"backend": "posixv2",
+	})
 
-	// Verify unified storage metrics are present with backend label
-	assert.Contains(t, metricsText, "pelican_storage_reads_total", "Should export unified storage metrics")
-	assert.Contains(t, metricsText, `backend="posixv2"`, "Should include backend=posixv2 label")
-
-	// Verify HTTP metrics are present
-	assert.Contains(t, metricsText, "pelican_http_requests_total", "Should export HTTP request metrics")
-	assert.Contains(t, metricsText, "pelican_http_bytes_total", "Should export HTTP byte metrics")
-	assert.Contains(t, metricsText, `server_type="origin"`, "Should include server_type=origin label")
-
-	// Verify specific metric values in scraped output
-	assert.Contains(t, metricsText, "pelican_storage_reads_total{backend=\"posixv2\"}", "Should have posixv2 read counter")
-	assert.Contains(t, metricsText, "pelican_http_requests_total{code=\"200\",method=\"GET\",server_type=\"origin\"}", "Should have HTTP GET/200 counter")
-}
-
-// TestMetricsEndToEndWithAuth tests metrics with authorization
-// NOTE: Moved to e2e_fed_tests/metrics_test.go to use fed_test_utils infrastructure
-func TestMetricsEndToEndWithAuth(t *testing.T) {
-	t.Skip("Test moved to e2e_fed_tests/metrics_test.go to avoid import cycle with fed_test_utils")
-}
-
-// TestMetricsEndToEndWriteOperations tests write operation metrics
-// NOTE: Moved to e2e_fed_tests/metrics_test.go to use fed_test_utils infrastructure
-func TestMetricsEndToEndWriteOperations(t *testing.T) {
-	t.Skip("Test moved to e2e_fed_tests/metrics_test.go to avoid import cycle with fed_test_utils")
+	// Verify HTTP metrics with proper labels and non-zero values
+	verifyMetricValue(t, metricsText, "pelican_http_requests_total", map[string]string{
+		"code":        "200",
+		"method":      "GET",
+		"server_type": "origin",
+	})
+	verifyMetricValue(t, metricsText, "pelican_http_bytes_total", map[string]string{
+		"direction":   "out",
+		"method":      "GET",
+		"server_type": "origin",
+	})
 }
 
 // TestMetricsPrometheusIntegration tests that metrics are properly exported in Prometheus format
@@ -190,28 +228,27 @@ func TestMetricsPrometheusIntegration(t *testing.T) {
 	defer cleanup()
 
 	// Make some requests to generate metrics
-	_, _ = http.Get(server.URL + "/test/test.txt")
+	resp, err := http.Get(server.URL + "/test/test.txt")
+	require.NoError(t, err)
+	resp.Body.Close()
 
 	// Scrape metrics endpoint
-	resp, err := http.Get(server.URL + "/metrics")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	metricsText := string(body)
+	metricsText := queryPrometheusMetrics(t, server.URL)
 
 	// Verify Prometheus format
 	assert.Contains(t, metricsText, "# HELP", "Should include metric help text")
 	assert.Contains(t, metricsText, "# TYPE", "Should include metric type declarations")
 
-	// Verify storage metrics structure (check for reads since we did a GET)
-	assert.Contains(t, metricsText, "pelican_storage_reads_total{backend=\"posixv2\"}", "Should have posixv2 backend label")
+	// Verify storage metrics structure with proper label verification
+	verifyMetricValue(t, metricsText, "pelican_storage_reads_total", map[string]string{
+		"backend": "posixv2",
+	})
 
-	// Verify HTTP metrics structure
-	assert.Contains(t, metricsText, "pelican_http_requests_total{", "Should have HTTP request metrics")
-	assert.Contains(t, metricsText, "server_type=\"origin\"", "Should have server_type label")
-	assert.Contains(t, metricsText, "method=\"GET\"", "Should have method label")
+	// Verify HTTP metrics structure with all labels together
+	verifyMetricValue(t, metricsText, "pelican_http_requests_total", map[string]string{
+		"server_type": "origin",
+		"method":      "GET",
+	})
 
 	// Verify histogram metrics (should have _bucket, _sum, _count)
 	assert.Contains(t, metricsText, "pelican_http_request_duration_seconds_bucket", "Should have duration histogram buckets")
@@ -219,6 +256,5 @@ func TestMetricsPrometheusIntegration(t *testing.T) {
 	assert.Contains(t, metricsText, "pelican_http_request_duration_seconds_count", "Should have duration count")
 
 	// Verify gauge metrics are present
-	assert.Contains(t, metricsText, "pelican_http_active_connections", "Should have active connections gauge")
 	assert.Contains(t, metricsText, "pelican_http_active_requests", "Should have active requests gauge")
 }

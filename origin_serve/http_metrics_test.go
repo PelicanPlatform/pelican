@@ -68,13 +68,11 @@ func setupTestServer() *gin.Engine {
 // TestHTTPMetricsMiddlewareBasic tests basic HTTP request tracking
 func TestHTTPMetricsMiddlewareBasic(t *testing.T) {
 	// Reset metrics to avoid interference from other tests
-	metrics.HttpConnectionsTotal.Reset()
 	metrics.HttpRequestsTotal.Reset()
 
 	router := setupTestServer()
 
 	// Get initial metric values
-	initialConnections := promtest.ToFloat64(metrics.HttpConnectionsTotal.WithLabelValues(metrics.ServerTypeOrigin))
 	initialRequests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(metrics.ServerTypeOrigin, "GET", "200"))
 
 	// Make a GET request
@@ -85,10 +83,6 @@ func TestHTTPMetricsMiddlewareBasic(t *testing.T) {
 	// Verify response
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "Hello World", w.Body.String())
-
-	// Verify connection metric incremented
-	connections := promtest.ToFloat64(metrics.HttpConnectionsTotal.WithLabelValues(metrics.ServerTypeOrigin))
-	assert.Greater(t, connections, initialConnections, "Connection count should increment")
 
 	// Verify request metric incremented
 	requests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(metrics.ServerTypeOrigin, "GET", "200"))
@@ -165,11 +159,12 @@ func TestHTTPMetricsLargeTransfers(t *testing.T) {
 	initialLargeTransfers := promtest.ToFloat64(metrics.HttpLargeTransfersTotal.WithLabelValues(metrics.ServerTypeOrigin, "PUT"))
 	initialLargeBytes := promtest.ToFloat64(metrics.HttpLargeTransferBytes.WithLabelValues(metrics.ServerTypeOrigin, metrics.DirectionIn, "PUT"))
 
-	// Simulate a large upload (>100MB)
-	// We set Content-Length without actually sending the data (mock)
+	// Create a large upload (>100MB) using a zero reader
 	largeSize := int64(150 * 1024 * 1024) // 150MB
-	req := httptest.NewRequest("PUT", "/upload", bytes.NewReader([]byte("mock")))
-	req.ContentLength = largeSize
+	// Create a reader that generates zeros on demand
+	largeReader := io.LimitReader(zeroReader{}, largeSize)
+
+	req := httptest.NewRequest("PUT", "/upload", largeReader)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -179,7 +174,17 @@ func TestHTTPMetricsLargeTransfers(t *testing.T) {
 
 	// Verify large transfer bytes tracked
 	largeBytes := promtest.ToFloat64(metrics.HttpLargeTransferBytes.WithLabelValues(metrics.ServerTypeOrigin, metrics.DirectionIn, "PUT"))
-	assert.Greater(t, largeBytes, initialLargeBytes, "Should track bytes for large transfers")
+	assert.GreaterOrEqual(t, largeBytes-initialLargeBytes, float64(largeSize), "Should track bytes for large transfers")
+}
+
+// zeroReader is an io.Reader that always returns zeros
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (n int, err error) {
+	for i := range p {
+		p[i] = 0
+	}
+	return len(p), nil
 }
 
 // TestHTTPMetricsRequestDuration tests request duration histogram
@@ -225,23 +230,6 @@ func TestHTTPMetricsMultipleMethods(t *testing.T) {
 		requests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(metrics.ServerTypeOrigin, method, statusStr))
 		assert.Greater(t, requests, initialRequests, "Should track %s requests", method)
 	}
-}
-
-// TestHTTPMetricsActiveConnections tests active connection gauge
-func TestHTTPMetricsActiveConnections(t *testing.T) {
-	router := setupTestServer()
-
-	// Get initial active connections
-	initialActive := promtest.ToFloat64(metrics.HttpActiveConnections.WithLabelValues(metrics.ServerTypeOrigin))
-
-	// Make a request (synchronous, so active connections will go back to baseline)
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	// After request completes, active connections should be back to baseline
-	activeAfter := promtest.ToFloat64(metrics.HttpActiveConnections.WithLabelValues(metrics.ServerTypeOrigin))
-	assert.Equal(t, initialActive, activeAfter, "Active connections should return to baseline after request completes")
 }
 
 // TestHTTPMetricsActiveRequests tests active request gauge
@@ -303,8 +291,7 @@ func TestHTTPMetricsLabels(t *testing.T) {
 
 	// Verify metrics can be queried with server_type="origin" label
 	// This will panic if labels are incorrect
-	_ = promtest.ToFloat64(metrics.HttpConnectionsTotal.WithLabelValues(metrics.ServerTypeOrigin))
-	_ = promtest.ToFloat64(metrics.HttpActiveConnections.WithLabelValues(metrics.ServerTypeOrigin))
+
 	_ = promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(metrics.ServerTypeOrigin, "GET", "200"))
 	_ = promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(metrics.ServerTypeOrigin, metrics.DirectionIn, "GET"))
 	_ = promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(metrics.ServerTypeOrigin, metrics.DirectionOut, "GET"))
