@@ -102,5 +102,12 @@ func (d *BrokerDialer) DialContext(ctx context.Context, network, addr string) (n
 	}
 
 	log.Debugf("BrokerDialer: Using broker to connect to %s via %s", addr, info.Value().BrokerUrl)
-	return ConnectToService(ctx, info.Value().BrokerUrl, info.Value().Prefix, addr)
+	conn, err := ConnectToService(ctx, info.Value().BrokerUrl, info.Value().Prefix, addr)
+	if err != nil {
+		log.Errorf("BrokerDialer: Failed to connect to %s via broker at %s: %v", addr, info.Value().BrokerUrl, err)
+		return nil, err
+	} else {
+		log.Debugf("BrokerDialer: Successfully connected to %s via broker at %s", addr, info.Value().BrokerUrl)
+	}
+	return conn, err
 }
