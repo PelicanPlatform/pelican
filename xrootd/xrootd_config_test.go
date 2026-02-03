@@ -573,7 +573,7 @@ func TestCopyCertificatesWithPKCS11(t *testing.T) {
 	p11proxy.SetCurrentInfoForTest(p11proxy.Info{Enabled: true, PKCS11URL: "pkcs11:test"})
 	t.Cleanup(func() {
 		p11proxy.SetCurrentInfoForTest(p11proxy.Info{})
-		param.Set(param.Server_EnablePKCS11.GetName(), false)
+		require.NoError(t, param.Set(param.Server_EnablePKCS11.GetName(), false))
 	})
 
 	require.NoError(t, copyXrootdCertificates(&origin.OriginServer{}))
