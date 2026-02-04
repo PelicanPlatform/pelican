@@ -10,14 +10,12 @@ import {
   getDirectorNamespaces as getDirectorNamespacesResponse,
   getDirectorServers as getDirectorServersResponse,
   getNamespaces,
-  getFederationDiscrepancy as getFederationDiscrepancyResponse,
 } from '@/helpers/api';
 import { flattenObject } from '@/app/config/util';
 import {
   DirectorNamespace,
   WellKnownConfiguration,
   ServerGeneral,
-  MetadataDiscrepancy,
 } from '@/types';
 import { RegistryNamespace } from '@/index';
 
@@ -86,12 +84,3 @@ export const getExtendedNamespaces = async (): Promise<
 
   return sortedData;
 };
-
-/**
- * Get federation metadata discrepancy status
- */
-export const getFederationDiscrepancy =
-  async (): Promise<MetadataDiscrepancy> => {
-    const response = await getFederationDiscrepancyResponse();
-    return (await response.json()) as MetadataDiscrepancy;
-  };

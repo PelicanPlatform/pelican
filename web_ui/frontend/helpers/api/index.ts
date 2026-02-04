@@ -363,9 +363,9 @@ export const getDirectorDowntime = async () => {
 /**
  * Get federation metadata discrepancy status
  */
-export const getFederationDiscrepancy = async (): Promise<Response> => {
-  return await fetchApi(
-    async () =>
-      await secureFetch('/api/v1.0/director_ui/federation/discrepancy')
-  );
+export const getFederationDiscrepancyConfig = {
+  errorMessage: 'Could not fetch federation discrepancy status',
+  key: '/api/v1.0/director_ui/federation/discrepancy',
+  fetcher: async () =>
+    await secureFetch('/api/v1.0/director_ui/federation/discrepancy'),
 };
