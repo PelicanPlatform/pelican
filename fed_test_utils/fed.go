@@ -140,7 +140,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	require.NoError(t, param.Set(param.Logging_Origin_Xrd.GetName(), "error"))
 	require.NoError(t, param.Set(param.Logging_Origin_Ofs.GetName(), "error"))
 	require.NoError(t, param.Set(param.Logging_Origin_Oss.GetName(), "error"))
-	require.NoError(t, param.Set(param.Logging_Origin_Http.GetName(), "error"))
+	require.NoError(t, param.Set(param.Logging_Origin_Http.GetName(), "debug"))
 	require.NoError(t, param.Set(param.Logging_Origin_Scitokens.GetName(), "fatal"))
 	require.NoError(t, param.Set(param.Logging_Origin_Xrootd.GetName(), "info"))
 	require.NoError(t, param.Set(param.Logging_Cache_Ofs.GetName(), "error"))
