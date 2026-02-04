@@ -396,6 +396,27 @@ type (
 	}
 )
 
+// String returns a human-readable representation of XrdCurlStats
+func (s XrdCurlStats) String() string {
+	startTime := time.Unix(int64(s.Start), int64((s.Start-float64(int64(s.Start)))*1e9))
+	nowTime := time.Unix(int64(s.Now), int64((s.Now-float64(int64(s.Now)))*1e9))
+	return fmt.Sprintf("XrdCurlStats{Event=%s, Start=%s, Now=%s, File.Prefetch={Count=%.0f, Expired=%.0f, Failed=%.0f, ReadsHit=%.0f, ReadsMiss=%.0f, BytesUsed=%.0f}, Queues={Produced=%.0f, Consumed=%.0f, Pending=%.0f, Rejected=%.0f}, Workers=%s}",
+		s.Event,
+		startTime.Format(time.RFC3339),
+		nowTime.Format(time.RFC3339),
+		s.File.Prefetch.Count,
+		s.File.Prefetch.Expired,
+		s.File.Prefetch.Failed,
+		s.File.Prefetch.ReadsHit,
+		s.File.Prefetch.ReadsMiss,
+		s.File.Prefetch.BytesUsed,
+		s.Queues.Produced,
+		s.Queues.Consumed,
+		s.Queues.Pending,
+		s.Queues.Rejected,
+		string(s.Workers))
+}
+
 // XrdXrootdMonFileHdr
 // Ref: https://github.com/xrootd/xrootd/blob/f3b2e86b9b80bb35f97dd4ad30c4cd5904902a4c/src/XrdXrootd/XrdXrootdMonData.hh#L173
 const (
@@ -2317,7 +2338,7 @@ func handleXrdcurlstatsPacket(stats []byte) error {
 		return errors.Wrap(err, "failed to unmarshal xrdcurlstats packet")
 	}
 
-	log.Tracef("XrdCurlStats: %v", xrdCurlStats)
+	log.Tracef("XrdCurlStats: %v (raw: %s)", xrdCurlStats, string(stats))
 
 	// File prefetch stats
 	lastXrdCurlStats.File.Prefetch.Count = updateCounter(xrdCurlStats.File.Prefetch.Count, lastXrdCurlStats.File.Prefetch.Count, XrdclFilePrefetchCount)
