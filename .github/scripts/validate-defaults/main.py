@@ -1,43 +1,57 @@
+from typing import Any
+
 import yaml
+
+DEFAULTS_FILE = "./config/resources/defaults.yaml"
+OSDF_DEFAULTS_FILE = "./config/resources/osdf.yaml"
+PARAMETERS_FILE = "./docs/parameters.yaml"
+
+
+def flatten_dict(x: dict[str, Any]) -> dict[str, Any]:
+    result = {}
+    for key, value in x.items():
+        if isinstance(value, dict):
+            for key2, value2 in flatten_dict(value).items():
+                result[f"{key}.{key2}"] = value2
+        else:
+            result[key] = value
+    return result
+
+
+def check_one_file(defaults_file: str, parameters_key: str) -> list[str]:
+    with open(defaults_file, mode="r", encoding="utf-8") as fp:
+        defaults = flatten_dict(yaml.safe_load(fp.read()))
+
+    with open(PARAMETERS_FILE, mode="r", encoding="utf-8") as fp:
+        parameters = yaml.safe_load_all(fp.read())
+        parameters = {p["name"]: p for p in parameters}
+
+    errors = []
+    for key, default in defaults.items():
+        if key not in parameters:
+            errors.append(f"{defaults_file}: {key}: Not a parameter in '{PARAMETERS_FILE}'")
+            continue
+
+        if parameters_key not in parameters[key]:
+            errors.append(f"{defaults_file}: {key}: The '{parameters_key}' key is not in '{PARAMETERS_FILE}'")
+            continue
+
+        # If the defaults file has a value, it must match the parameters
+        # file. The reverse need not be true (the default value may be set
+        # via other means, i.e., code).
+        if default != (val := parameters[key][parameters_key]):
+            errors.append(f"{defaults_file}: {key}: Expected '{default}', but found '{val}' for '{parameters_key}' in '{PARAMETERS_FILE}'")
+
+    return errors
 
 
 def main():
-    """Validate the defaults file."""
+    errors = []
+    errors.extend(check_one_file(DEFAULTS_FILE, "default"))
+    errors.extend(check_one_file(OSDF_DEFAULTS_FILE, "osdf_default"))
 
-    defaults = yaml.safe_load(open("./config/resources/defaults.yaml"))
-    defaults = flatten_dictionary(defaults)
-
-    parameters = yaml.load_all(open("./docs/parameters.yaml"), Loader=yaml.FullLoader)
-    parameters = {parameter["name"]: parameter for parameter in parameters}
-
-    error_list = []
-    for d_key, d_value in defaults.items():
-
-        if d_key not in parameters:
-            error_list.append(f"Parameter {d_key} is not in the parameters file.")
-
-        # Check if the default value is different from the parameters file
-        if (
-            (parameters[d_key]['default'] != d_value and parameters[d_key]['default'] != 'none') or
-            (parameters[d_key]['default'] == 'none' and d_value != "")
-        ):
-
-            error_list.append(f"Parameter[{d_key}]: {parameters[d_key]['default']} != {d_value}")
-
-    if error_list:
-        raise Exception("\n" + "\n".join(error_list))
-
-
-def flatten_dictionary(x: dict):
-    """Flatten a dictionary."""
-    out = {}
-    for key, value in x.items():
-        if isinstance(value, dict):
-            for key2, value2 in flatten_dictionary(value).items():
-                out[f"{key}.{key2}"] = value2
-        else:
-            out[key] = value
-    return out
+    if errors:
+        raise RuntimeError("\n" + "\n".join(errors))
 
 
 if __name__ == "__main__":

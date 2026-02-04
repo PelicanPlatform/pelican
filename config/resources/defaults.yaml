@@ -111,7 +111,6 @@ Shoveler:
   AMQPExchange: shoveled-xrd
 Xrootd:
   MaxStartupWait: "10s"
-  Mount: ""
   ManagerPort: 1213
   DetailedMonitoringPort: 9930
   SummaryMonitoringPort: 9931

@@ -18,13 +18,13 @@ on:
   pull_request:
   push:
     branches:
-      - main
+      - "main"
     tags:
-      # Run only on release tags for v7.0.0 and up.
-      - v[7-9]\.[0-9]+\.[0-9]+
-      - v[7-9]\.[0-9]+\.[0-9]+-rc\.[0-9]+
-      - v[1-9][0-9]+\.[0-9]+\.[0-9]+
-      - v[1-9][0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+
+      # Run only for v7.0.0 and up. Include release candidates.
+      - "v[7-9].[0-9]+.[0-9]+"
+      - "v[7-9].[0-9]+.[0-9]+-rc.[0-9]+"
+      - "v[1-9][0-9]+.[0-9]+.[0-9]+"
+      - "v[1-9][0-9]+.[0-9]+.[0-9]+-rc.[0-9]+"
   repository_dispatch:
     types:
       - dispatch-build
@@ -33,31 +33,67 @@ on:
 jobs:
   set-build-parameters:
     outputs:
-      #
       # While some of these outputs are intended to be treated as booleans,
       # they are actually strings ('true', 'false'). In any conditionals, test
       # their values using "== 'true'" or "== 'false'".
-      #
+      registry-repo: ${{ steps.parameters.outputs.REGISTRY_REPO }}
       platforms: ${{ steps.parameters.outputs.PLATFORMS }}
-      push-dev: ${{ steps.parameters.outputs.PUSH_DEV }}
+      push-devtest: ${{ steps.parameters.outputs.PUSH_DEVTEST }}
       push-server: ${{ steps.parameters.outputs.PUSH_SERVER }}
     runs-on: ubuntu-latest
     steps:
       - name: Determine build parameters
         id: parameters
         run: |
-          PUSH_DEV=${{ github.repository == 'PelicanPlatform/pelican' && github.ref == 'refs/heads/main' }}
-          PUSH_SERVER=${{ github.repository == 'PelicanPlatform/pelican' && startsWith(github.ref, 'refs/tags/') }}
+          set -eu
 
-          if ${PUSH_DEV} || ${PUSH_SERVER}; then
+          IS_PRIMARY_GITHUB_REPO=false
+
+          case '${{ github.repository }}' in
+            PelicanPlatform/pelican)
+              REGISTRY_REPO="pelican_platform"
+              IS_PRIMARY_GITHUB_REPO=true ;;
+
+            # Some testing scenarios require the ability to push container
+            # images to a registry. Here, we list developers who have forked
+            # the main PelicanPlatform/pelican repo and are able to push
+            # images somewhere.
+
+            brianaydemir/pelicanplatform-pelican)
+              REGISTRY_REPO="brian.aydemir.r1" ;;
+          esac
+
+          # By default, we assume that we are unable to push containers.
+          PUSH_DEVTEST=false
+          PUSH_SERVER=false
+
+          if [ -n '${{ secrets.PELICAN_HARBOR_ROBOT_USER }}' ] \
+             && [ -n '${{ secrets.PELICAN_HARBOR_ROBOT_PASSWORD }}' ]
+          then
+            if [ "$IS_PRIMARY_GITHUB_REPO" == "true" ]; then
+              # For the PelicanPlatform/pelican repo, we push test and dev
+              # containers built off of 'main', and server containers built
+              # off of semvar tags.
+              PUSH_DEVTEST=${{ github.ref == 'refs/heads/main' }}
+              PUSH_SERVER=${{ startsWith(github.ref, 'refs/tags/') }}
+            else
+              # For forks, we push only the server containers, which is
+              # sufficient because they include the testing container.
+              PUSH_DEVTEST=false
+              PUSH_SERVER=${{ startsWith(github.ref, 'refs/tags/') }}
+            fi
+          fi
+
+          if ${PUSH_DEVTEST} || ${PUSH_SERVER}; then
             PLATFORMS=linux/amd64,linux/arm64
           else
             # If we're not pushing images to a registry, then save resources.
             PLATFORMS=linux/amd64
           fi
 
+          echo "REGISTRY_REPO=${REGISTRY_REPO}" >> $GITHUB_OUTPUT
           echo "PLATFORMS=${PLATFORMS}" >> $GITHUB_OUTPUT
-          echo "PUSH_DEV=${PUSH_DEV}" >> $GITHUB_OUTPUT
+          echo "PUSH_DEVTEST=${PUSH_DEVTEST}" >> $GITHUB_OUTPUT
           echo "PUSH_SERVER=${PUSH_SERVER}" >> $GITHUB_OUTPUT
 
   set-tags:
@@ -172,7 +208,7 @@ jobs:
           platforms: ${{ needs.set-build-parameters.outputs.platforms }}
           target: origin
           cache-from: |
-            type=registry,ref=hub.opensciencegrid.org/pelican_platform/pelican-dev:buildcache
+            type=registry,ref=hub.opensciencegrid.org/${{ needs.set-build-parameters.outputs.registry-repo }}/pelican-dev:buildcache
             type=local,src=/tmp/.base-buildx-cache
           cache-to: type=local,dest=/tmp/.base-buildx-cache,mode=max
 
@@ -207,7 +243,7 @@ jobs:
           GITHUB_TAG: ${{ needs.set-tags.outputs.GITHUB_TAG }}
           IS_LATEST: ${{ needs.set-tags.outputs.IS_LATEST }}
         run: |
-          docker_repo="pelican_platform"
+          docker_repo=${{ needs.set-build-parameters.outputs.registry-repo }}
           image_name=${{ matrix.image }}
           tag_list=()
           for registry in hub.opensciencegrid.org; do
@@ -264,7 +300,7 @@ jobs:
           push: ${{ needs.set-build-parameters.outputs.push-server == 'true' }}
           tags: "${{ steps.generate-tag-list.outputs.taglist }}"
           cache-from: |
-            type=registry,ref=hub.opensciencegrid.org/pelican_platform/pelican-dev:buildcache
+            type=registry,ref=hub.opensciencegrid.org/${{ needs.set-build-parameters.outputs.registry-repo }}/pelican-dev:buildcache
             type=local,src=/tmp/.base-buildx-cache
 
   build-devtest-images:
@@ -280,7 +316,7 @@ jobs:
         id: pelican-test-tags
         uses: docker/metadata-action@v5
         with:
-          images: hub.opensciencegrid.org/pelican_platform/pelican-test
+          images: hub.opensciencegrid.org/${{ needs.set-build-parameters.outputs.registry-repo }}/pelican-test
           tags: |
             type=raw,value=latest-itb
             type=raw,value=sha-{{sha}}
@@ -289,7 +325,7 @@ jobs:
         id: pelican-dev-tags
         uses: docker/metadata-action@v5
         with:
-          images: hub.opensciencegrid.org/pelican_platform/pelican-dev
+          images: hub.opensciencegrid.org/${{ needs.set-build-parameters.outputs.registry-repo }}/pelican-dev
           tags: |
             type=raw,value=latest-itb
             type=raw,value=sha-{{sha}}
@@ -312,7 +348,7 @@ jobs:
 
       - name: Log in to OSG Harbor
         uses: docker/login-action@v3
-        if: ${{ needs.set-build-parameters.outputs.push-dev == 'true' }}
+        if: ${{ needs.set-build-parameters.outputs.push-devtest == 'true' }}
         with:
           registry: hub.opensciencegrid.org
           username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
@@ -337,10 +373,10 @@ jobs:
           file: ./images/Dockerfile
           platforms: ${{ needs.set-build-parameters.outputs.platforms }}
           target: pelican-test
-          push: ${{ needs.set-build-parameters.outputs.push-dev == 'true' }}
+          push: ${{ needs.set-build-parameters.outputs.push-devtest == 'true' }}
           tags: ${{ steps.pelican-test-tags.outputs.tags }}
           cache-from: |
-            type=registry,ref=hub.opensciencegrid.org/pelican_platform/pelican-dev:buildcache
+            type=registry,ref=hub.opensciencegrid.org/${{ needs.set-build-parameters.outputs.registry-repo }}/pelican-dev:buildcache
             type=local,src=/tmp/.base-buildx-cache
 
       - name: Build and push Docker images (pelican-dev)
@@ -350,12 +386,12 @@ jobs:
           file: ./images/Dockerfile
           platforms: ${{ needs.set-build-parameters.outputs.platforms }}
           target: pelican-dev
-          push: ${{ needs.set-build-parameters.outputs.push-dev == 'true' }}
+          push: ${{ needs.set-build-parameters.outputs.push-devtest == 'true' }}
           tags: ${{ steps.pelican-dev-tags.outputs.tags }}
           cache-from: |
-            type=registry,ref=hub.opensciencegrid.org/pelican_platform/pelican-dev:buildcache
+            type=registry,ref=hub.opensciencegrid.org/${{ needs.set-build-parameters.outputs.registry-repo }}/pelican-dev:buildcache
             type=local,src=/tmp/.base-buildx-cache
-          cache-to: type=registry,ref=hub.opensciencegrid.org/pelican_platform/pelican-dev:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true
+          cache-to: type=registry,ref=hub.opensciencegrid.org/${{ needs.set-build-parameters.outputs.registry-repo }}/pelican-dev:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true
 
   # The macOS and Windows tests do not depend on any of the images being
   # built above. Thus, there is a separate workflow for running the tests:
@@ -370,14 +406,14 @@ jobs:
 
   test-linux-push-to-main:
     needs: [set-build-parameters, build-devtest-images]
-    if: ${{ needs.set-build-parameters.outputs.push-dev == 'true' }}
+    if: ${{ needs.set-build-parameters.outputs.push-devtest == 'true' }}
     uses: ./.github/workflows/test-linux.yml
     with:
-      image: hub.opensciencegrid.org/pelican_platform/pelican-test:latest-itb
+      image: hub.opensciencegrid.org/${{ needs.set-build-parameters.outputs.registry-repo }}/pelican-test:latest-itb
 
   test-linux-push-to-tag:
     needs: [set-build-parameters, set-tags, build-server-images]
     if: ${{ needs.set-build-parameters.outputs.push-server == 'true' }}
     uses: ./.github/workflows/test-linux.yml
     with:
-      image: hub.opensciencegrid.org/pelican_platform/pelican-test:${{ needs.set-tags.outputs.GITHUB_TAG }}
+      image: hub.opensciencegrid.org/${{ needs.set-build-parameters.outputs.registry-repo }}/pelican-test:${{ needs.set-tags.outputs.GITHUB_TAG }}

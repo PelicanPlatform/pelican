@@ -17,6 +17,7 @@ If anything doesn't make sense, or doesn't work when you run it, please open a [
 - [Getting Started](#getting-started)
   - [Issues](#issues)
   - [Pull Requests](#pull-requests)
+  - [Pull Requests that Modify Pelican's Dependencies](#pull-requests-that-modify-pelicans-dependencies)
 - [Development Environment Setup](#development-environment-setup)
 - [Ask for Help](#ask-for-help)
 
@@ -92,6 +93,28 @@ In general, we follow the ["fork-and-pull" Git workflow](https://github.com/susa
 1. Following any formatting and testing guidelines specific to this repo
 1. Push changes to your fork
 1. Open a PR in our repository and follow the PR template so that we can efficiently review the changes.
+
+### Pull Requests that Modify Pelican's Dependencies
+
+Due to how Pelican's build and test workflows are structured, any proposed development that makes changes to the packages installed into [the container images](images/Dockerfile) must be split into two separate PRs: one for updating the packages, and one for the other changes, e.g., to code, that depend on those updated packages being present.
+
+It is possible to test the combined affect of these PRs on your fork, albeit with a bit of work. We ask that you go through this extra work because it serves no one well if the proposed changes to the packages do not actually support your other proposed changes.
+
+First, you will need access to a container image registry where you can push and pull images, and where you can create a "robot" account with similar privileges. Do not give GitHub Actions access to your own credentials.
+
+Second, you will need to do the following:
+
+1. Enable the running of GitHub Actions on your fork. They are disabled by default.
+
+1. Update [.github/workflows/build-and-test.yml](.github/workflows/build-and-test.yml) with your GitHub fork and corresponding container image registry. (At the discretion of Pelican's core contributors, this change can be merged into the main [PelicanPlatform/pelican](https://github.com/PelicanPlatform/pelican) repository.)
+
+1. Add `PELICAN_HARBOR_ROBOT_USER` and `PELICAN_HARBOR_ROBOT_PASSWORD` repository secrets to your fork, with contents befitting of their names. (The image registry used by Pelican is implemented by [Harbor](https://goharbor.io/), hence the secrets' names, but any Docker-like registry should work.)
+
+1. As needed, create a new release or pre-release on your fork. The tag should be a [semver](https://semver.org/) tag following Pelican's release tagging scheme. The branch should be the one that you will eventually use to create pull requests against the main [PelicanPlatform/pelican](https://github.com/PelicanPlatform/pelican) repo.
+
+1. Review the results of the GitHub Actions that were triggered.
+
+1. Delete releases and pre-releases, and their corresponding tags, as needed to keep your fork clean.
 
 ## Development Environment Setup
 
