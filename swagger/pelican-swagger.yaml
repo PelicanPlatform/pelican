@@ -4050,6 +4050,38 @@ paths:
           description: Internal server error
           schema:
             $ref: "#/definitions/ErrorModelV2"
+    delete:
+      tags:
+        - groups
+      summary: Delete a group
+      description: "`Authentication Required`. Only the group creator or an admin can delete the group."
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the group to delete
+          required: true
+          type: string
+      responses:
+        "204":
+          description: Group deleted successfully
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Forbidden - only group creator or admin can delete the group
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Group not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
   /groups/{id}/members:
     get:
       tags:
@@ -4318,6 +4350,38 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
         "401":
           description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: User not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    delete:
+      tags:
+        - groups
+      summary: Delete a user
+      description: "`Authentication Required`. Only the user themselves or an admin can delete the user."
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the user to delete
+          required: true
+          type: string
+      responses:
+        "204":
+          description: User deleted successfully
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Forbidden - only the user themselves or admin can delete the user
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "404":
