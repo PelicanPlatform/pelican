@@ -2,8 +2,8 @@
 
 import { Alert, AlertTitle, Box, Collapse, Typography } from '@mui/material';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import useSWR from 'swr';
-import { getFederationDiscrepancy } from '@/helpers/get';
+import useApiSWR from '@/hooks/useApiSWR';
+import { getFederationDiscrepancyConfig } from '@/helpers/api';
 import { MetadataDiscrepancy } from '@/types';
 import { DateTime } from 'luxon';
 
@@ -32,9 +32,11 @@ const DiscrepancyItem = ({
 );
 
 const MetadataDiscrepancyAlert = () => {
-  const { data: discrepancy, error } = useSWR<MetadataDiscrepancy>(
-    'getFederationDiscrepancy',
-    getFederationDiscrepancy,
+  const { errorMessage, key, fetcher } = getFederationDiscrepancyConfig;
+  const { data: discrepancy } = useApiSWR<MetadataDiscrepancy>(
+    errorMessage,
+    key,
+    fetcher,
     {
       refreshInterval: 10 * 60 * 1000, // Refresh every 10 minutes
       revalidateOnFocus: false,
@@ -43,15 +45,10 @@ const MetadataDiscrepancyAlert = () => {
 
   // Don't render if:
   // - Still loading
-  // - Error fetching (user might not be admin)
   // - Comparison is disabled (Director is the discovery URL)
   // - No discrepancy detected
-  if (
-    error ||
-    !discrepancy ||
-    !discrepancy.enabled ||
-    !discrepancy.hasDiscrepancy
-  ) {
+  // Note: Errors are automatically handled by useApiSWR
+  if (!discrepancy || !discrepancy.enabled || !discrepancy.hasDiscrepancy) {
     return null;
   }
 
