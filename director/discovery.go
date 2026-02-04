@@ -184,10 +184,10 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 
 	jwksUri := fedInfo.JwksUri
 	if jwksUri == "" {
-		log.Error("Bad server configuration: fail to get JwksUri: ", err)
+		log.Error("Bad server configuration: Director is missing federation keys (jwks_uri is empty)")
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Bad server configuration: unable to get JwksUri",
+			Msg:    "Bad server configuration: Director is missing federation keys (jwks_uri is empty)",
 		})
 		return
 	}
