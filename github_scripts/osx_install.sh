@@ -90,7 +90,7 @@ sudo mkdir -p "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdHttpPelican-5.so" "$xrootd_libdir"
 popd
 
-git clone --recurse-submodules --branch v0.6.3 https://github.com/PelicanPlatform/xrootd-s3-http.git
+git clone --recurse-submodules --branch v0.6.4 https://github.com/PelicanPlatform/xrootd-s3-http.git
 pushd xrootd-s3-http
 mkdir build
 cd build
