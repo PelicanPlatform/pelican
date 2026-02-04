@@ -116,26 +116,25 @@ func TestCLILoggingLevelChanges(t *testing.T) {
 	// Set to info level for 2 seconds
 	runSetLevel(param.Logging_Level.GetName(), "info", "2s")
 
-	// Wait for the change to take effect
+	// Wait for the change to take effect - check BOTH param and effective level
+	// (These can both take some time to eventually update)
 	require.Eventually(t, func() bool {
 		current := param.Logging_Level.GetString()
-		t.Logf("Polling: Current param level = %s, Expected = info", current)
-		return current == "info"
-	}, 2*time.Second, 100*time.Millisecond, "Expected param level to change to info")
-
-	// Now debug logs should NOT be captured
-	require.Equal(t, log.InfoLevel, config.GetEffectiveLogLevel())
+		effectiveLevel := config.GetEffectiveLogLevel()
+		t.Logf("Polling: param=%s, effective=%s (expecting both=info)", current, effectiveLevel)
+		return current == "info" && effectiveLevel == log.InfoLevel
+	}, 5*time.Second, 200*time.Millisecond, "Expected both param and effective level to change to info")
 
 	// Wait for expiration - give extra time for the log level manager to check for expired changes
 	// The manager checks every ~1 second, and we need to wait beyond the 3-second duration plus manager check time
 	t.Log("Waiting for temporary change to expire and restore to initial level...")
 	require.Eventually(t, func() bool {
 		currentLevel := param.Logging_Level.GetString()
-		t.Logf("Checking param level - Current: %s, Expected: %s", currentLevel, initialLevelStr)
-		return currentLevel == initialLevelStr
-	}, 6*time.Second, 100*time.Millisecond, "Expected param level to restore to initial level")
-
-	require.Equal(t, log.DebugLevel, config.GetEffectiveLogLevel())
+		effectiveLevel := config.GetEffectiveLogLevel()
+		t.Logf("Checking restoration - param=%s (expected=%s), effective=%s (expected=%s)",
+			currentLevel, initialLevelStr, effectiveLevel, log.DebugLevel)
+		return currentLevel == initialLevelStr && effectiveLevel == log.DebugLevel
+	}, 6*time.Second, 200*time.Millisecond, "Expected both param and effective level to restore to initial level")
 	t.Log("✓ Log level restored to initial level")
 
 	// Test 2: Origin XRootD log level change and verify xrootd restart
@@ -179,6 +178,7 @@ func TestCLILoggingLevelChanges(t *testing.T) {
 	t.Logf("PIDs after first restart: %v", restartedPids)
 
 	// Wait for expiration and verify another restart
+	// Callbacks are async, so allow extra time for expiration + callback processing
 	t.Log("Waiting for log level to expire and verify second restart")
 	require.Eventually(t, func() bool {
 		level := param.Logging_Origin_Xrootd.GetString()
