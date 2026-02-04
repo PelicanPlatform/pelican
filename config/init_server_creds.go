@@ -157,7 +157,7 @@ func LoadPrivateKey(keyLocation string, allowRSA bool) (crypto.PrivateKey, error
 					return nil, fmt.Errorf("RSA type private key in PKCS #8 form is not allowed for %s. Use an ECDSA key instead.", keyLocation)
 				}
 			default:
-				return nil, fmt.Errorf("Unsupported private key type: %T in the private key file %s with PEM block type as PRIVATE KEY", key, keyLocation)
+				return nil, fmt.Errorf("unsupported private key type: %T in the private key file %s with PEM block type as PRIVATE KEY", key, keyLocation)
 			}
 			break
 		} else if block.Type == "RSA PRIVATE KEY" {
@@ -176,9 +176,9 @@ func LoadPrivateKey(keyLocation string, allowRSA bool) (crypto.PrivateKey, error
 	}
 	if privateKey == nil {
 		if keyExists {
-			return nil, fmt.Errorf("Private key file, %v, contains unsupported key type", keyLocation)
+			return nil, fmt.Errorf("private key file, %v, contains unsupported key type", keyLocation)
 		} else {
-			return nil, fmt.Errorf("Private key file, %v, contains no private key", keyLocation)
+			return nil, fmt.Errorf("private key file, %v, contains no private key", keyLocation)
 		}
 	}
 	return privateKey, nil
@@ -204,11 +204,8 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve, allowRSA bool)
 		}
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return errors.Wrap(err, "Failed to load private key due to I/O error")
+		return errors.Wrap(err, "failed to load private key due to I/O error")
 	}
-
-	// If we're generating a new key, log a warning in case the user intended to pass an existing key (maybe they made a typo)
-	log.Warningf("Will generate a new private key at location: %v", keyLocation)
 
 	keyDir := filepath.Dir(keyLocation)
 	if err := MkdirAll(keyDir, 0750, -1, user.Gid); err != nil {
@@ -217,7 +214,7 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve, allowRSA bool)
 	// In this case, the private key file doesn't exist.
 	file, err := os.OpenFile(keyLocation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0400)
 	if err != nil {
-		return errors.Wrap(err, "Failed to create new private key file at "+keyLocation)
+		return errors.Wrap(err, "failed to create new private key file at "+keyLocation)
 	}
 	defer file.Close()
 
@@ -227,12 +224,12 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve, allowRSA bool)
 		cmd := exec.Command("icacls", keyLocation, "/grant", user.Username+":F")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v: %s",
+			return errors.Wrapf(err, "failed to chown generated key %v to daemon group %v: %s",
 				keyLocation, user.Groupname, string(output))
 		}
 	} else { // Else we are running on linux/mac
 		if err = os.Chown(keyLocation, user.Uid, user.Gid); err != nil {
-			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
+			return errors.Wrapf(err, "failed to chown generated key %v to daemon group %v",
 				keyLocation, user.Groupname)
 		}
 	}
@@ -278,11 +275,11 @@ func GenerateCACert() error {
 			file.Close()
 			return nil
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return errors.Wrap(err, "Failed to load TLS CA private key due to I/O error")
+			return errors.Wrap(err, "failed to load TLS CA private key due to I/O error")
 		}
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return errors.Wrap(err, "Failed to load TLS CA certificate due to I/O error")
+		return errors.Wrap(err, "failed to load TLS CA certificate due to I/O error")
 	}
 
 	// No existing CA cert present, generate a new CA root certificate and private key
@@ -310,7 +307,7 @@ func GenerateCACert() error {
 		return errors.Errorf("unsupported private key type: %T", key)
 	}
 
-	log.Debugln("Server.TLSCACertificateFile does not exist. Will generate a new CA certificate for the server")
+	log.Debugf("%s does not exist. Will generate a new CA certificate for the server", param.Server_TLSCACertificateFile.GetName())
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
 	if err != nil {
@@ -348,12 +345,12 @@ func GenerateCACert() error {
 		cmd := exec.Command("icacls", tlsCACert, "/grant", user.Username+":F")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v: %s",
+			return errors.Wrapf(err, "failed to chown generated key %v to daemon group %v: %s",
 				tlsCACert, user.Groupname, string(output))
 		}
 	} else { // Else we are running on linux/mac
 		if err = os.Chown(tlsCACert, user.Uid, user.Gid); err != nil {
-			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
+			return errors.Wrapf(err, "failed to chown generated key %v to daemon group %v",
 				tlsCACert, user.Groupname)
 		}
 	}
@@ -418,7 +415,7 @@ func GenerateCert() error {
 				file.Close()
 				// Check that the CA is a valid CA
 				if _, err := LoadCertificate(caCert); err != nil {
-					return errors.Wrap(err, "Failed to load CA cert")
+					return errors.Wrap(err, "failed to load CA cert")
 				} else {
 					// TODO: Check that the private key is a pair of the server cert
 
@@ -429,13 +426,13 @@ func GenerateCert() error {
 					return nil
 				}
 			} else if !errors.Is(err, os.ErrNotExist) {
-				return errors.Wrap(err, "Failed to load TLS CA cert due to I/O error")
+				return errors.Wrap(err, "failed to load TLS CA cert due to I/O error")
 			}
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return errors.Wrap(err, "Failed to load TLS host private key due to I/O error")
+			return errors.Wrap(err, "failed to load TLS host private key due to I/O error")
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return errors.Wrap(err, "Failed to load TLS host certificate due to I/O error")
+		return errors.Wrap(err, "failed to load TLS host certificate due to I/O error")
 	}
 
 	// In this case, no host certificate exists - we should generate our own.
@@ -487,7 +484,7 @@ func GenerateCert() error {
 		return errors.Errorf("unsupported private key type: %T", key)
 	}
 
-	log.Debugln("Server.TLSCertificateChain and/or Server.TLSKey do not exist. Will generate a new host certificate and its private key for the server")
+	log.Debugf("%s and/or %s do not exist. Will generate a new host certificate and its private key for the server", param.Server_TLSCertificateChain.GetName(), param.Server_TLSKey.GetName())
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
 	if err != nil {
@@ -670,7 +667,7 @@ func loadPEMFiles(dir string) (jwk.Key, error) {
 		if _, err := os.Stat(issuerKeyPath); err == nil {
 			issuerKey, err := LoadSinglePEM(issuerKeyPath)
 			if err != nil {
-				log.Warnf("Failed to load key %s: %v", issuerKeyPath, err)
+				log.Warnf("failed to load key %s: %v", issuerKeyPath, err)
 			} else {
 				latestKeys[issuerKey.KeyID()] = issuerKey
 				if firstFileName == "" || filepath.Base(issuerKeyPath) < firstFileName {
@@ -851,7 +848,7 @@ func loadIssuerPublicJWKS(existingJWKS string, issuerKeysDir string, keyPathOver
 		var err error
 		jwks, err = jwk.ReadFile(existingJWKS)
 		if err != nil {
-			return nil, errors.Wrap(err, "Failed to read issuer JWKS file")
+			return nil, errors.Wrap(err, "failed to read issuer JWKS file")
 		}
 	} else if len(keyPathOverridePEM) > 0 && keyPathOverridePEM[0] != "" {
 		key, err := LoadSinglePEM(keyPathOverridePEM[0])
@@ -863,7 +860,7 @@ func loadIssuerPublicJWKS(existingJWKS string, issuerKeysDir string, keyPathOver
 			return nil, errors.Wrapf(err, "failed to generate public key from key %s", key.KeyID())
 		}
 		if err = jwks.AddKey(pkey); err != nil {
-			return nil, errors.Wrapf(err, "Failed to add public key %s to new JWKS", key.KeyID())
+			return nil, errors.Wrapf(err, "failed to add public key %s to new JWKS", key.KeyID())
 		}
 		return jwks, nil
 	}
@@ -874,7 +871,7 @@ func loadIssuerPublicJWKS(existingJWKS string, issuerKeysDir string, keyPathOver
 		// files on disk, or generate a new private key
 		_, err := loadIssuerPrivateKey(issuerKeysDir)
 		if err != nil {
-			return nil, errors.Wrap(err, "Failed to load issuer private JWK")
+			return nil, errors.Wrap(err, "failed to load issuer private JWK")
 		}
 		// Reload the keys after the key refresh/creation
 		keys = GetIssuerPrivateKeys()
@@ -888,7 +885,7 @@ func loadIssuerPublicJWKS(existingJWKS string, issuerKeysDir string, keyPathOver
 		}
 
 		if err = jwks.AddKey(pkey); err != nil {
-			return nil, errors.Wrapf(err, "Failed to add public key %s to new JWKS", key.KeyID())
+			return nil, errors.Wrapf(err, "failed to add public key %s to new JWKS", key.KeyID())
 		}
 	}
 	return jwks, nil
@@ -915,7 +912,7 @@ func GetIssuerPrivateJWK(keyPathOverridePEM ...string) (jwk.Key, error) {
 	if keysPtr == nil || keysPtr.CurrentKey == nil {
 		newKey, err := loadIssuerPrivateKey(issuerKeysDir)
 		if err != nil {
-			return nil, errors.Wrap(err, "Failed to load issuer private key")
+			return nil, errors.Wrap(err, "failed to load issuer private key")
 		}
 		newKeys := IssuerKeys{
 			CurrentKey: newKey,
@@ -952,7 +949,7 @@ func GenerateSessionSecret() error {
 	secretLocation := param.Server_SessionSecretFile.GetString()
 
 	if secretLocation == "" {
-		return errors.New("Empty filename for Server_SessionSecretFile")
+		return errors.New("empty filename for Server_SessionSecretFile")
 	}
 
 	user, err := GetPelicanUser()
@@ -966,14 +963,14 @@ func GenerateSessionSecret() error {
 		existingSecretBytes := make([]byte, 1024)
 		_, err := file.Read(existingSecretBytes)
 		if err != nil {
-			return errors.Wrap(err, "Failed to read existing session secret file")
+			return errors.Wrap(err, "failed to read existing session secret file")
 		}
 		if len(string(existingSecretBytes)) == 0 {
-			return errors.Wrap(err, "Empty session secret file")
+			return errors.Wrap(err, "empty session secret file")
 		}
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return errors.Wrap(err, "Failed to load session secret due to I/O error")
+		return errors.Wrap(err, "failed to load session secret due to I/O error")
 	}
 	keyDir := filepath.Dir(secretLocation)
 	if err := MkdirAll(keyDir, 0750, user.Uid, user.Gid); err != nil {
@@ -983,7 +980,7 @@ func GenerateSessionSecret() error {
 	// In this case, the session secret file doesn't exist.
 	file, err := os.OpenFile(secretLocation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0400)
 	if err != nil {
-		return errors.Wrap(err, fmt.Sprint("Failed to create new session secret file at ", secretLocation))
+		return errors.Wrapf(err, "failed to create new session secret file at %s", secretLocation)
 	}
 	defer file.Close()
 	// Windows does not have "chown", has to work differently
@@ -992,12 +989,12 @@ func GenerateSessionSecret() error {
 		cmd := exec.Command("icacls", secretLocation, "/grant", user.Username+":F")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			return errors.Wrapf(err, "Failed to chown generated session secret %v to daemon group %v: %s",
+			return errors.Wrapf(err, "failed to chown generated session secret %v to daemon group %v: %s",
 				secretLocation, user.Groupname, string(output))
 		}
 	} else { // Else we are running on linux/mac
 		if err = os.Chown(secretLocation, user.Uid, user.Gid); err != nil {
-			return errors.Wrapf(err, "Failed to chown generated session secret %v to daemon group %v",
+			return errors.Wrapf(err, "failed to chown generated session secret %v to daemon group %v",
 				secretLocation, user.Groupname)
 		}
 	}
@@ -1025,7 +1022,7 @@ func LoadSessionSecret() ([]byte, error) {
 	secretLocation := param.Server_SessionSecretFile.GetString()
 
 	if secretLocation == "" {
-		return []byte{}, errors.New("Empty filename for Server_SessionSecretFile")
+		return []byte{}, errors.New("empty filename for Server_SessionSecretFile")
 	}
 
 	if err := GenerateSessionSecret(); err != nil {
@@ -1034,7 +1031,7 @@ func LoadSessionSecret() ([]byte, error) {
 
 	rest, err := os.ReadFile(secretLocation)
 	if err != nil {
-		return []byte{}, errors.Wrap(err, "Error reading secret file")
+		return []byte{}, errors.Wrap(err, "error reading secret file")
 	}
 	return rest, nil
 }
