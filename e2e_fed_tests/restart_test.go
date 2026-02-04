@@ -52,31 +52,21 @@ func waitForComponentStatus(t *testing.T, component metrics.HealthStatusComponen
 	}, timeout, 100*time.Millisecond, "component %s did not reach status %s", component, desired)
 }
 
-func waitForComponentStatusMatch(t *testing.T, component metrics.HealthStatusComponent, desired []metrics.HealthStatusEnum, timeout time.Duration) {
+func waitForComponentStatusNotOK(t *testing.T, component metrics.HealthStatusComponent, timeout time.Duration) string {
 	t.Helper()
+	var observedStatus string
 	require.Eventually(t, func() bool {
 		status, err := metrics.GetComponentStatus(component)
 		if err != nil {
 			return false
 		}
-		for _, target := range desired {
-			if status == target.String() {
-				return true
-			}
+		if status != metrics.StatusOK.String() {
+			observedStatus = status
+			return true
 		}
 		return false
-	}, timeout, 100*time.Millisecond, "component %s did not reach expected statuses", component)
-}
-
-func waitForComponentStatusNotOK(t *testing.T, component metrics.HealthStatusComponent, timeout time.Duration) {
-	t.Helper()
-	require.Eventually(t, func() bool {
-		status, err := metrics.GetComponentStatus(component)
-		if err != nil {
-			return false
-		}
-		return status != metrics.StatusOK.String()
 	}, timeout, 50*time.Millisecond, "component %s never left OK state", component)
+	return observedStatus
 }
 
 // TestXRootDRestart tests that XRootD can be restarted and continues to function
@@ -135,8 +125,11 @@ func TestXRootDRestart(t *testing.T) {
 		close(restartDone)
 	}()
 
-	waitForComponentStatusNotOK(t, metrics.OriginCache_XRootD, 5*time.Second)
-	waitForComponentStatusMatch(t, metrics.OriginCache_XRootD, []metrics.HealthStatusEnum{metrics.StatusShuttingDown, metrics.StatusCritical}, 5*time.Second)
+	// Wait for the component to leave OK state, indicating restart has begun.
+	// Capture the observed status to verify it's an expected transitional state.
+	observedStatus := waitForComponentStatusNotOK(t, metrics.OriginCache_XRootD, 5*time.Second)
+	assert.True(t, observedStatus == metrics.StatusShuttingDown.String() || observedStatus == metrics.StatusCritical.String(),
+		"Expected ShuttingDown or Critical status during restart, got %s", observedStatus)
 
 	<-restartDone
 	require.NoError(t, restartErr)
