@@ -1,9 +1,9 @@
 export interface Capabilities {
-  PublicRead: boolean;
-  Read: boolean;
-  Write: boolean;
-  Listing: boolean;
-  FallBackRead: boolean;
+  PublicReads: boolean;
+  Reads: boolean;
+  Writes: boolean;
+  Listings: boolean;
+  DirectReads: boolean;
 }
 
 export interface TokenGeneration {

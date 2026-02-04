@@ -51,13 +51,28 @@ type (
 		CredentialIssuer url.URL      `json:"issuer"`
 	}
 
-	// Note that the json are kept in uppercase for backward compatibility
 	Capabilities struct {
-		PublicReads bool `json:"PublicRead"`
-		Reads       bool `json:"Read"`
-		Writes      bool `json:"Write"`
-		Listings    bool `json:"Listing"`
-		DirectReads bool `json:"FallBackRead"`
+		PublicReads bool `json:"PublicReads"`
+		Reads       bool `json:"Reads"`
+		Writes      bool `json:"Writes"`
+		Listings    bool `json:"Listings"`
+		DirectReads bool `json:"DirectReads"`
+	}
+
+	// Supports both old and new JSON field names
+	capabilitiesCompat struct {
+		// New field names
+		PublicReads bool `json:"PublicReads"`
+		Reads       bool `json:"Reads"`
+		Writes      bool `json:"Writes"`
+		Listings    bool `json:"Listings"`
+		DirectReads bool `json:"DirectReads"`
+		// Old field names (for backward compatibility)
+		PublicRead   bool `json:"PublicRead"`
+		Read         bool `json:"Read"`
+		Write        bool `json:"Write"`
+		Listing      bool `json:"Listing"`
+		FallBackRead bool `json:"FallBackRead"`
 	}
 
 	NamespaceAdV2 struct {
@@ -321,6 +336,24 @@ const (
 // Indicate the downtime is ongoing indefinitely.
 // We chose -1 to avoid the default value (0) of the int64 type
 const IndefiniteEndTime int64 = -1
+
+// Custom JSON unmarshalling for Capabilities to support backward compatibility.
+// Old field names from origins/caches running Pelican earlier than v7.22.0 will be converted to the new field names.
+func (c *Capabilities) UnmarshalJSON(data []byte) error {
+	var compat capabilitiesCompat
+	if err := json.Unmarshal(data, &compat); err != nil {
+		return err
+	}
+
+	// Use new field names if set, otherwise fall back to old field names
+	c.PublicReads = compat.PublicReads || compat.PublicRead
+	c.Reads = compat.Reads || compat.Read
+	c.Writes = compat.Writes || compat.Write
+	c.Listings = compat.Listings || compat.Listing
+	c.DirectReads = compat.DirectReads || compat.FallBackRead
+
+	return nil
+}
 
 func (x XPelNs) GetName() string {
 	return "X-Pelican-Namespace"
