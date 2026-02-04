@@ -37,10 +37,19 @@ jobs:
       # Unlike the Linux and macOS workflows, we do not need to set up
       # Node.js, because we do not do a real build of the web UI on Windows.
 
+      - name: Set Go version
+        # Determine the string to use in setup-go's "go-version" input.
+        id: go-version
+        # Use `bash` instead of PowerShell.
+        shell: bash
+        run: |
+          version=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' go.mod | grep -oE '[0-9]+\.[0-9]+')
+          echo "version=${version}.x" >> $GITHUB_OUTPUT
+
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: "go.mod"
+          go-version: "${{ steps.go-version.outputs.version }}"
           check-latest: true
 
       - name: Install gotestsum
