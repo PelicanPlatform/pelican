@@ -192,43 +192,28 @@ func handleUpdateGroup(ctx *gin.Context) {
 		return
 	}
 
-	// Ensure the group exists and enforce that only the creator can modify it,
-	// mirroring the Add/Remove member authorization behavior.
-	_, userId, _, err := GetUserGroups(ctx)
-	if err != nil || userId == "" {
+	user, userId, groups, err := GetUserGroups(ctx)
+	if err != nil || userId == "" || user == "" {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Failed to identify group updater",
 		})
 		return
 	}
+	isAdmin, _ := CheckAdmin(user, groups)
 
-	group, err := database.GetGroupWithMembers(database.ServerDatabase, id)
-	if err != nil {
+	if err := database.UpdateGroup(database.ServerDatabase, id, req.Name, req.Description, userId, isAdmin); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "group not found",
 			})
-		} else {
-			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+		} else if errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Failed to update group: %v", err),
+				Msg:    "you do not have permission to update this group",
 			})
-		}
-		return
-	}
-
-	if group.CreatedBy != userId {
-		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "you do not have permission to update this group",
-		})
-		return
-	}
-
-	if err := database.UpdateGroup(database.ServerDatabase, id, req.Name, req.Description); err != nil {
-		if errors.Is(err, database.ErrReservedGroupPrefix) {
+		} else if errors.Is(err, database.ErrReservedGroupPrefix) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "Group name cannot start with 'user-'",
@@ -584,6 +569,26 @@ func handleUpdateUser(ctx *gin.Context) {
 		return
 	}
 
+	// Get the requestor's identity for authorization
+	user, userId, groups, err := GetUserGroups(ctx)
+	if err != nil || userId == "" || user == "" {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to identify user updater",
+		})
+		return
+	}
+	isAdmin, _ := CheckAdmin(user, groups)
+
+	// Verify authorization: only the user themselves or an admin can update
+	if !isAdmin && userId != id {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "you do not have permission to update this user",
+		})
+		return
+	}
+
 	// Ensure the user exists so we can return 404 for unknown IDs.
 	if _, err := database.GetUserByID(database.ServerDatabase, id); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -701,11 +706,26 @@ func handleDeleteUser(ctx *gin.Context) {
 		return
 	}
 
-	if err := database.DeleteUser(database.ServerDatabase, id); err != nil {
+	user, userId, groups, err := GetUserGroups(ctx)
+	if err != nil || userId == "" || user == "" {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to identify user deleter",
+		})
+		return
+	}
+	isAdmin, _ := CheckAdmin(user, groups)
+
+	if err := database.DeleteUser(database.ServerDatabase, id, userId, isAdmin); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "user not found",
+			})
+		} else if errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "you do not have permission to delete this user",
 			})
 		} else {
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{

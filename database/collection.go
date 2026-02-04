@@ -721,12 +721,7 @@ func ListGroups(db *gorm.DB) ([]Group, error) {
 	return groups, nil
 }
 
-func UpdateGroup(db *gorm.DB, id string, name, description *string) error {
-	group := &Group{}
-	if err := db.First(group, "id = ?", id).Error; err != nil {
-		return err
-	}
-
+func UpdateGroup(db *gorm.DB, id string, name, description *string, requestorUserID string, isAdmin bool) error {
 	updates := make(map[string]interface{})
 	if name != nil {
 		if strings.HasPrefix(*name, "user-") {
@@ -742,10 +737,19 @@ func UpdateGroup(db *gorm.DB, id string, name, description *string) error {
 		return nil
 	}
 
-	if err := db.Model(&Group{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-		return err
-	}
-	return nil
+	return db.Transaction(func(tx *gorm.DB) error {
+		// Verify group exists and check authorization inside the transaction
+		var group Group
+		if err := tx.First(&group, "id = ?", id).Error; err != nil {
+			return err
+		}
+
+		if !isAdmin && group.CreatedBy != requestorUserID {
+			return ErrForbidden
+		}
+
+		return tx.Model(&Group{}).Where("id = ?", id).Updates(updates).Error
+	})
 }
 
 func AddGroupMember(db *gorm.DB, groupId, userId, addedByUserId string) error {
@@ -833,16 +837,17 @@ func GetAllCollections(db *gorm.DB) ([]Collection, error) {
 //
 // If isAdmin is false, only the group creator (CreatedBy) may delete the group.
 func DeleteGroup(db *gorm.DB, groupID, requestorUserID string, isAdmin bool) error {
-	var group Group
-	if err := db.First(&group, "id = ?", groupID).Error; err != nil {
-		return err
-	}
-
-	if !isAdmin && group.CreatedBy != requestorUserID {
-		return ErrForbidden
-	}
-
 	return db.Transaction(func(tx *gorm.DB) error {
+		// Fetch group inside transaction to avoid race conditions
+		var group Group
+		if err := tx.First(&group, "id = ?", groupID).Error; err != nil {
+			return err
+		}
+
+		if !isAdmin && group.CreatedBy != requestorUserID {
+			return ErrForbidden
+		}
+
 		// Remove any ACL entries referencing the group name.
 		if err := tx.Where("group_id = ?", group.Name).Delete(&CollectionACL{}).Error; err != nil {
 			return err
@@ -864,15 +869,22 @@ func DeleteGroup(db *gorm.DB, groupID, requestorUserID string, isAdmin bool) err
 
 // DeleteUser deletes a user and cleans up any collection ACL entries that reference the
 // user's implicit personal group name ("user-"+username).
-func DeleteUser(db *gorm.DB, userID string) error {
-	var user User
-	if err := db.First(&user, "id = ?", userID).Error; err != nil {
-		return err
-	}
-
-	personalGroup := "user-" + user.Username
-
+//
+// If isAdmin is false, only the user themselves may delete their account.
+func DeleteUser(db *gorm.DB, userID, requestorUserID string, isAdmin bool) error {
 	return db.Transaction(func(tx *gorm.DB) error {
+		// Fetch user inside transaction to avoid race conditions
+		var user User
+		if err := tx.First(&user, "id = ?", userID).Error; err != nil {
+			return err
+		}
+
+		if !isAdmin && user.ID != requestorUserID {
+			return ErrForbidden
+		}
+
+		personalGroup := "user-" + user.Username
+
 		// Remove any ACL entries referencing the user's personal group name.
 		if err := tx.Where("group_id = ?", personalGroup).Delete(&CollectionACL{}).Error; err != nil {
 			return err
