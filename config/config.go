@@ -1401,9 +1401,9 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Cache_RunLocation.GetName(), filepath.Join(runtimeDir, "xrootd", "cache"))
 
 		v.SetDefault(param.Cache_StorageLocation.GetName(), filepath.Join(runtimeDir, "cache"))
-		v.SetDefault(param.Cache_NamespaceLocation.GetName(), filepath.Join(param.Cache_StorageLocation.GetString(), "namespace"))
-		v.SetDefault(param.Cache_DataLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "data")})
-		v.SetDefault(param.Cache_MetaLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "meta")})
+		v.SetDefault(param.Cache_NamespaceLocation.GetName(), filepath.Join(v.GetString(param.Cache_StorageLocation.GetName()), "namespace"))
+		v.SetDefault(param.Cache_DataLocations.GetName(), []string{filepath.Join(v.GetString(param.Cache_StorageLocation.GetName()), "data")})
+		v.SetDefault(param.Cache_MetaLocations.GetName(), []string{filepath.Join(v.GetString(param.Cache_StorageLocation.GetName()), "meta")})
 
 		v.SetDefault(param.LocalCache_RunLocation.GetName(), filepath.Join(runtimeDir, "localcache"))
 		v.SetDefault(param.Origin_Multiuser.GetName(), true)
@@ -1438,9 +1438,9 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Origin_GlobusConfigLocation.GetName(), filepath.Join(runtimeDir, "xrootd", "origin", "globus"))
 
 		v.SetDefault(param.Cache_StorageLocation.GetName(), filepath.Join(runtimeDir, "cache"))
-		v.SetDefault(param.Cache_NamespaceLocation.GetName(), filepath.Join(param.Cache_StorageLocation.GetString(), "namespace"))
-		v.SetDefault(param.Cache_DataLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "data")})
-		v.SetDefault(param.Cache_MetaLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "meta")})
+		v.SetDefault(param.Cache_NamespaceLocation.GetName(), filepath.Join(v.GetString(param.Cache_StorageLocation.GetName()), "namespace"))
+		v.SetDefault(param.Cache_DataLocations.GetName(), []string{filepath.Join(v.GetString(param.Cache_StorageLocation.GetName()), "data")})
+		v.SetDefault(param.Cache_MetaLocations.GetName(), []string{filepath.Join(v.GetString(param.Cache_StorageLocation.GetName()), "meta")})
 
 		v.SetDefault(param.LocalCache_RunLocation.GetName(), filepath.Join(runtimeDir, "cache"))
 		v.SetDefault(param.Origin_Multiuser.GetName(), false)
@@ -1456,7 +1456,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Origin_EnableListings.GetName(), true)
 	v.SetDefault(param.Origin_EnableDirectReads.GetName(), true)
 
-	v.SetDefault(param.Cache_ClientStatisticsLocation.GetName(), filepath.Join(param.Cache_RunLocation.GetString(), "xrootd.stats"))
+	v.SetDefault(param.Cache_ClientStatisticsLocation.GetName(), filepath.Join(v.GetString(param.Cache_RunLocation.GetName()), "xrootd.stats"))
 
 	fcRunLocation := v.GetString(param.LocalCache_RunLocation.GetName())
 	v.SetDefault(param.LocalCache_Socket.GetName(), filepath.Join(fcRunLocation, "cache.sock"))
