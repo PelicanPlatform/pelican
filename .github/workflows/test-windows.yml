@@ -62,6 +62,9 @@ jobs:
         env:
           JUNIT_FILE: junit-${{ matrix.binary_name }}.xml
         run: |
+          # Building the web UI on Windows merely creates an empty file at
+          # web_ui/frontend/out/index.html. Nevertheless, we'll go through
+          # the same steps as for other OSes, in case that changes.
           echo "::group::Building web UI"
           make web-build
           echo "::endgroup::"
