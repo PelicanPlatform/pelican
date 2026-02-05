@@ -1,0 +1,92 @@
+---
+name: Run Tests (Windows)
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "main"
+    tags:
+      # Run only for v7.0.0 and up. Include release candidates.
+      - "v[7-9].[0-9]+.[0-9]+"
+      - "v[7-9].[0-9]+.[0-9]+-rc.[0-9]+"
+      - "v[1-9][0-9]+.[0-9]+.[0-9]+"
+      - "v[1-9][0-9]+.[0-9]+.[0-9]+-rc.[0-9]+"
+  repository_dispatch:
+    types:
+      - dispatch-build
+  workflow_dispatch:
+
+jobs:
+  run-tests:
+    name: Windows (${{ matrix.binary_name }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - binary_name: pelican
+            coverprofile: coverage.out
+            tags: ""
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # GoReleaser needs history to look up the previous tag, and so on
+
+      # Unlike the Linux and macOS workflows, we do not need to set up
+      # Node.js, because we do not do a real build of the web UI on Windows.
+
+      - name: Set Go version
+        # Determine the string to use in setup-go's "go-version" input.
+        id: go-version
+        # Use `bash` instead of PowerShell.
+        shell: bash
+        run: |
+          version=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' go.mod | grep -oE '[0-9]+\.[0-9]+')
+          echo "version=${version}.x" >> $GITHUB_OUTPUT
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "${{ steps.go-version.outputs.version }}"
+          check-latest: true
+
+      - name: Install gotestsum
+        run: |
+          go install gotest.tools/gotestsum@latest
+          # Ensure that ~/go/bin is in PATH for subsequent steps.
+          echo "$env:USERPROFILE\go\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Run "go test"
+        env:
+          JUNIT_FILE: junit-${{ matrix.binary_name }}.xml
+        run: |
+          # Building the web UI on Windows merely creates an empty file at
+          # web_ui/frontend/out/index.html. Nevertheless, we'll go through
+          # the same steps as for other OSes, in case that changes.
+          echo "::group::Building web UI"
+          make web-build
+          echo "::endgroup::"
+          gotestsum --format pkgname-and-test-fails --hide-summary=output --junitfile "$env:JUNIT_FILE" -- -p=4 -timeout=15m -coverpkg=./... -covermode=count -coverprofile=${{ matrix.coverprofile }} -tags=${{ matrix.tags }} ./...
+
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-${{ matrix.binary_name }}-${{ runner.os }}
+          path: junit-${{ matrix.binary_name }}.xml
+          overwrite: true  # allow the workflow to be re-run, e.g., for flakey tests
+
+      - name: Publish JUnit summary
+        if: always()
+        uses: test-summary/action@v2
+        with:
+          paths: junit-${{ matrix.binary_name }}.xml
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: build --single-target --clean --snapshot

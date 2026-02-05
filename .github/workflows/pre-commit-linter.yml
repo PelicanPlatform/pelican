@@ -17,10 +17,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Set Go version
+        # Determine the string to use in setup-go's "go-version" input.
+        id: go-version
+        run: |
+          version=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' go.mod | grep -oE '[0-9]+\.[0-9]+')
+          echo "version=${version}.x" >> $GITHUB_OUTPUT
+
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: "go.mod"
+          go-version: "${{ steps.go-version.outputs.version }}"
           check-latest: true
           cache: false
 
@@ -63,6 +70,7 @@ jobs:
           node-version-file: "web_ui/frontend/package.json"
           cache: "npm"
           cache-dependency-path: "web_ui/frontend/package-lock.json"
+          check-latest: true
 
       - name: Run Prettier
         run: |
