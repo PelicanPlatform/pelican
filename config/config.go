@@ -1475,7 +1475,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Server_Hostname.GetName(), hostname)
 	// For the rest of the function, use the hostname provided by the admin if
 	// they have overridden the defaults.
-	hostname = v.GetString("Server.Hostname")
+	hostname = v.GetString(param.Server_Hostname.GetName())
 	// We default to the value of Server.Hostname, which defaults to os.Hostname but can be overwritten
 	v.SetDefault(param.Xrootd_Sitename.GetName(), hostname)
 
