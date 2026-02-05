@@ -11,7 +11,7 @@ services:
   pelican-server:
     image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
     ports:
-      - "8444:8444"
+      - '8444:8444'
     working_dir: /app
     volumes:
       - ../../dist/pelican_linux_arm64_v8.0/:/app
@@ -26,7 +26,7 @@ services:
       dockerfile: Dockerfile
     container_name: pelican-dev-proxy
     ports:
-      - "8443:8443"
+      - '8443:8443'
     env_file:
       - ./dev/.env.local
     stdin_open: true
