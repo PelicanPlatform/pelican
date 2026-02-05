@@ -20,17 +20,12 @@ package director
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -97,33 +92,6 @@ func TestNormalizeUrl(t *testing.T) {
 	}
 }
 
-// generateTestJWKS creates a JWKS with a single ECDSA public key for testing
-func generateTestJWKS(t *testing.T) (jwk.Set, string) {
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
-
-	pKey, err := jwk.FromRaw(privateKey)
-	require.NoError(t, err)
-
-	err = jwk.AssignKeyID(pKey)
-	require.NoError(t, err)
-
-	err = pKey.Set(jwk.AlgorithmKey, jwa.ES256)
-	require.NoError(t, err)
-
-	publicKey, err := pKey.PublicKey()
-	require.NoError(t, err)
-
-	jwks := jwk.NewSet()
-	err = jwks.AddKey(publicKey)
-	require.NoError(t, err)
-
-	jsonData, err := json.Marshal(jwks)
-	require.NoError(t, err)
-
-	return jwks, string(jsonData)
-}
-
 func TestCompareJwksKeys(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 
@@ -138,7 +106,8 @@ func TestCompareJwksKeys(t *testing.T) {
 		ctx := context.Background()
 
 		// Generate a single JWKS that will be served by both endpoints
-		_, jwksJson := generateTestJWKS(t)
+		jwksJson, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -156,8 +125,10 @@ func TestCompareJwksKeys(t *testing.T) {
 		ctx := context.Background()
 
 		// Generate two different JWKS
-		_, jwksJson1 := generateTestJWKS(t)
-		_, jwksJson2 := generateTestJWKS(t)
+		jwksJson1, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		jwksJson2, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
 
 		callCount := 0
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
