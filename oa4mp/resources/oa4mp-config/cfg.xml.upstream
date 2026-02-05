@@ -1,0 +1,173 @@
+<!--
+     Basic configuration for OA4MP. This almost works in that you need to set the authorization method
+     below.
+-->
+<config>
+    <!--
+         This sets an alias. You then can simply always point to "default" as the
+         name of your active configuration.
+    -->
+    <service name="default" alias="localhost:default"/>
+
+    <!--
+         See https://oa4mp.org/server/dtd/server-dtd-service-tag.html
+         This sets the most commonly used defaults, such as lifetimes,
+         and such.
+    -->
+    <service
+            address="https://localhost:8443/oauth2"
+            authorizationGrantLifetime="750 sec"
+            clientSecretLength="64"
+            defaultAccessTokenLifetime="900 sec."
+            enableTokenExchange="true"
+            issuer="https://localhost:8443/oauth2"
+            maxAccessTokenLifetime="20 min"
+            maxAllowedNewClientRequests="100"
+            maxClientRefreshTokenLifetime="1296000000 ms."
+            maxRefreshTokenLifetime="2592000 sec"
+            name="localhost:default"
+            qdlConfigName="qdl-default"
+            refreshTokenEnabled="true"
+            refreshTokenLifetime="30 days"
+            rtGracePeriod="3600 sec"
+            scheme="oa4mp"
+            schemeSpecificPart="">
+        <!--
+             See https://oa4mp.org/server/configuration/signing.html
+             You should create a key by issuing.
+
+              /opt/scitokens-server/bin/jwt -in /opt/scitokens-server/etc/create_keys.cmd
+
+              this calls the very useful key utility included with OA4MP. It will
+              list keys at various strength. Defaults are set, but feel free to choose one of the
+              other id's as the default and put it in below.
+        -->
+        <JSONWebKey defaultKeyID="37FB06D02022C2209DD3DE11">
+            <path><![CDATA[/opt/scitokens-server/etc/keys.jwk]]></path>
+        </JSONWebKey>
+        <!--
+             See https://oa4mp.org/server/configuration/device-flow-servlet-configuration.html
+        -->
+        <deviceFlowServlet
+              verificationURI="https://localhost:8443/oauth2/device"
+              interval="5"
+              codeChars="0123456789ABCDEFX"
+              codeLength="12"
+              codeSeparator="+"
+              codePeriodLength="4"
+        />
+        <!--
+            See https://oa4mp.org/common/configuration/scopes.html
+        -->
+        <scopes>
+            <scope>openid</scope>
+            <scope>email</scope>
+            <scope>profile</scope>
+            <scope>org.cilogon.userinfo</scope>
+            <!-- <scope>org.oa4mp:userinfo</scope> -->
+        </scopes>
+        <!--
+            See https://oa4mp.org/server/configuration/authentication-servlet-configuration.html for a discussions
+            of these two possible authorization servlet configurations. The first is when using Tomcat
+            and the second is when proxying through another OAuth service (e.g. CILogon).
+        -->
+<!--
+                <authorizationServlet useHeader="true"
+                                      requireHeader="true"
+                                      headerFieldName="REMOTE_USER"
+                />
+-->
+<!--
+               <authorizationServlet useProxy="true"
+                                     cfgFile="/opt/scitokens-server/etc/client-oa2.xml"
+                                     cfgName="proxy-client"
+                                     authorizationURI="https://localhost:8443/oauth2/authorize"
+                                   />
+ -->
+
+        <!--
+     See https://oa4mp.org/common/configuration/file-store.html
+     Note that this is, in fact, deprecated. The issue is that
+     it does not scale and is therefore fine for smaller
+     installs or testing, but for anything that is actual
+     production you want a different store type.
+     The Derby file store is the correct replacement for this.
+-->
+<fileStore path="/opt/scitokens-server/var/storage/file_store">
+    <transactions/>
+    <clients/>
+    <clientApprovals/>
+    <permissions/>
+    <adminClients/>
+    <txStore/>
+    <voStore/>
+</fileStore>
+        <!--
+             See https://oa4mp.org/server/configuration/client_management-configuration.html
+        -->
+        <clientManagement>
+            <api protocol="rfc7591"
+                 enabled="true"
+                 anonymousOK="true"
+                 anonymousAllowedDomains="localhost,127.0.0.1"
+                 autoApprove="false"
+            />
+            <api protocol="rfc7592" enabled="true"/>
+        </clientManagement>
+        <!--
+             See https://oa4mp.org/common/configuration/logging.html
+        -->
+        <logging
+                logFileName="/opt/scitokens-server/log/server.log"
+                logName="oa4mp"
+                logSize="100000"
+                logFileCount="2"
+                debug="tue"/>
+        <!--
+             See https://oa4mp.org/server/configuration/qdl-config.html
+        -->
+        <qdl name="qdl-default"
+             enabled="true"
+             debug="info"
+             skipBadModulesOnLoad="true"
+             restricted_io="false"
+             strict_acls="false"
+             server_mode_on="false"
+             script_path="vfs#/scripts/">
+            <virtual_file_systems>
+                <vfs type="pass_through"
+                     access="rw">
+                    <root_dir>/opt/scitokens-server/qdl/scripts</root_dir>
+                    <scheme><![CDATA[vfs]]></scheme>
+                    <mount_point>/scripts</mount_point>
+                </vfs>
+            </virtual_file_systems>
+            <modules version="2.0">
+                <module type="java"
+                        import_on_start="true">
+                    <class_name>org.oa4mp.server.loader.qdl.OA2QDLLoader</class_name>
+                </module>
+            </modules>
+            <modules>
+                <module type="java"
+                        import_on_start="true">
+                    <class_name>org.oa4mp.server.loader.oauth2.claims.qdl.TokenHandlerLoader</class_name>
+                </module>
+            </modules>
+        </qdl>
+        <!--
+             See https://oa4mp.org/server/configuration/server-email.html
+        -->
+        <mail enabled="false"
+              username="YOUR_EMAIL_SERVER_LOGON_NAME"
+              password="YOUR_EMAIL_SERVER_PASSWORD"
+              server="YOUR_EMAIL_SERVER_ADDRESS"
+              recipients="RECIPIENT_0;RECIPIENT_1;...;RECIPIENT_N">
+          <messageTemplate>/opt/scitokens-server/etc/oa4mp-message.template</messageTemplate>
+          <subjectTemplate>${OA4P_HOME}etc/oa4mp-subject.template</subjectTemplate>
+        </mail>
+
+
+    </service>
+
+</config>

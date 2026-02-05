@@ -1,0 +1,33 @@
+#!/usr/bin/env qdl-run
+// Add templates in ${ST_HOME}/etc/templates to OA4MP's client store.
+
+
+//--------------------------------------------------------------------------
+// Set up access to OA4MP's client store.
+
+st_home := os_env().'ST_HOME';
+template_dir := st_home + '/etc/templates';
+cfg_file := st_home + '/etc/cfg.xml';
+
+clients := j_load('oa4mp.client.store');
+clients#init(cfg_file, 'default', 'client');
+
+
+//--------------------------------------------------------------------------
+// Add templates to OA4MP's client store.
+
+files. := dir(template_dir);
+files. := ~mask(files., '.*xml' =~ files.);
+
+say('Processing ' + size(files.) + ' templates from "' + template_dir + '".');
+
+while [for_next(t, files.)][
+   template. := clients#from_xml(file_read(template_dir + '/' + t));
+   if [!is_defined(template.'client_id')] then [
+      say('Warning: "' + t + '" might not be a client template. Skipping.');
+   ] else [
+      clients#save(template.);
+   ];
+];
+
+say('Done!');
