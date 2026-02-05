@@ -31,7 +31,9 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/ssh_posixv2"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
@@ -221,15 +223,11 @@ func InitializeHandlers(exports []server_utils.OriginExport) error {
 	webdavHandlers = make(map[string]*webdav.Handler)
 	exportPrefixMap = make(map[string]string) // Initialize the global map
 
+	// Determine storage type for filesystem creation
+	storageType := server_structs.OriginStorageType(param.Origin_StorageType.GetString())
+
 	for _, export := range exports {
-		// Create a filesystem for this export with auto-directory creation
-		// Use OsRootFs to prevent symlink traversal attacks
-		// OsRootFs is already rooted at StoragePrefix, so we don't need BasePathFs
-		osRootFs, err := NewOsRootFs(export.StoragePrefix)
-		if err != nil {
-			return fmt.Errorf("failed to create OsRootFs for %s: %w", export.StoragePrefix, err)
-		}
-		fs := newAutoCreateDirFs(osRootFs)
+		var fs webdav.FileSystem
 
 		// Create logger function
 		logger := func(r *http.Request, err error) {
@@ -238,18 +236,37 @@ func InitializeHandlers(exports []server_utils.OriginExport) error {
 			}
 		}
 
-		afs := newAferoFileSystem(fs, "", logger)
+		switch storageType {
+		case server_structs.OriginStorageSSH:
+			// Use SSH filesystem that proxies to the remote helper
+			sshFs, err := ssh_posixv2.GetSSHFileSystem(export.FederationPrefix, export.StoragePrefix)
+			if err != nil {
+				return fmt.Errorf("failed to create SSH filesystem for %s: %w", export.FederationPrefix, err)
+			}
+			fs = sshFs
+		default:
+			// Use local filesystem (POSIXv2)
+			// Create a filesystem for this export with auto-directory creation
+			// Use OsRootFs to prevent symlink traversal attacks
+			// OsRootFs is already rooted at StoragePrefix, so we don't need BasePathFs
+			osRootFs, err := NewOsRootFs(export.StoragePrefix)
+			if err != nil {
+				return fmt.Errorf("failed to create OsRootFs for %s: %w", export.StoragePrefix, err)
+			}
+			autoFs := newAutoCreateDirFs(osRootFs)
+			fs = newAferoFileSystem(autoFs, "", logger)
+		}
 
 		// Create a WebDAV handler
 		handler := &webdav.Handler{
-			FileSystem: afs,
+			FileSystem: fs,
 			LockSystem: webdav.NewMemLS(),
 			Logger:     logger,
 		}
 
 		webdavHandlers[export.FederationPrefix] = handler
 		exportPrefixMap[export.FederationPrefix] = export.StoragePrefix
-		log.Infof("Initialized WebDAV handler for %s -> %s", export.FederationPrefix, export.StoragePrefix)
+		log.Infof("Initialized WebDAV handler for %s -> %s (storage: %s)", export.FederationPrefix, export.StoragePrefix, storageType)
 	}
 
 	return nil

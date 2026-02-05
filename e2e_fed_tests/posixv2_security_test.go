@@ -368,3 +368,131 @@ Director:
 		}
 	}
 }
+
+// TestPosixv2CapabilityEnforcement tests that capabilities are properly enforced
+// This test verifies that writes are blocked when the Writes capability is disabled
+// Capabilities should be enforced at BOTH the origin layer AND the helper/WebDAV layer (defense in depth)
+func TestPosixv2CapabilityEnforcement(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	// Configure origin WITHOUT Writes capability
+	originConfig := `
+Origin:
+  StorageType: posixv2
+  Exports:
+    - FederationPrefix: /test
+      StoragePrefix: /tmp
+      Capabilities: ["PublicReads", "Reads", "Listings"]
+`
+
+	ft := fed_test_utils.NewFedTest(t, originConfig)
+	require.NotNil(t, ft)
+	require.Greater(t, len(ft.Exports), 0)
+
+	testToken := getTempTokenForTest(t)
+
+	// Test Case 1: Verify that reads still work (sanity check)
+	t.Run("ReadsStillWork", func(t *testing.T) {
+		// Create a test file directly in storage
+		testContent := "This file can be read"
+		testFile := filepath.Join(ft.Exports[0].StoragePrefix, "readable.txt")
+		require.NoError(t, os.WriteFile(testFile, []byte(testContent), 0644))
+
+		// Verify we can download it
+		downloadURL := fmt.Sprintf("pelican://%s:%d/test/readable.txt",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+
+		localDest := filepath.Join(t.TempDir(), "downloaded.txt")
+		_, err := client.DoGet(ft.Ctx, downloadURL, localDest, false, client.WithToken(testToken))
+
+		require.NoError(t, err, "Reads should work when Writes is disabled")
+
+		content, err := os.ReadFile(localDest)
+		assert.NoError(t, err)
+		assert.Equal(t, testContent, string(content))
+	})
+
+	// Test Case 2: Verify that writes are blocked
+	t.Run("WritesAreBlocked", func(t *testing.T) {
+		// Create a local file to upload
+		localFile := filepath.Join(t.TempDir(), "upload_me.txt")
+		require.NoError(t, os.WriteFile(localFile, []byte("Attempting to upload"), 0644))
+
+		// Try to upload - should fail because Writes capability is disabled
+		uploadURL := fmt.Sprintf("pelican://%s:%d/test/should_not_exist.txt",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+
+		_, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
+
+		// Upload should fail - capabilities are enforced at both origin and helper layers
+		require.Error(t, err, "Upload should fail when Writes capability is disabled")
+
+		// Verify the file was NOT created on storage
+		notExistPath := filepath.Join(ft.Exports[0].StoragePrefix, "should_not_exist.txt")
+		_, statErr := os.Stat(notExistPath)
+		assert.True(t, os.IsNotExist(statErr), "File should NOT exist in storage when writes are disabled")
+	})
+}
+
+// TestPosixv2ListingsCapabilityEnforcement tests that directory listing capabilities are enforced
+func TestPosixv2ListingsCapabilityEnforcement(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	// Configure origin WITHOUT Listings capability
+	originConfig := `
+Origin:
+  StorageType: posixv2
+  Exports:
+    - FederationPrefix: /test
+      StoragePrefix: /tmp
+      Capabilities: ["PublicReads", "Reads", "Writes"]
+`
+
+	ft := fed_test_utils.NewFedTest(t, originConfig)
+	require.NotNil(t, ft)
+	require.Greater(t, len(ft.Exports), 0)
+
+	// Create a temporary directory for storage with some files
+	require.NoError(t, os.WriteFile(filepath.Join(ft.Exports[0].StoragePrefix, "file1.txt"), []byte("content1"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(ft.Exports[0].StoragePrefix, "file2.txt"), []byte("content2"), 0644))
+
+	testToken := getTempTokenForTest(t)
+
+	// Test Case 1: Individual file reads should still work
+	t.Run("IndividualReadsWork", func(t *testing.T) {
+		downloadURL := fmt.Sprintf("pelican://%s:%d/test/file1.txt",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+
+		localDest := filepath.Join(t.TempDir(), "downloaded.txt")
+		_, err := client.DoGet(ft.Ctx, downloadURL, localDest, false, client.WithToken(testToken))
+
+		require.NoError(t, err, "Individual file reads should work when Listings is disabled")
+	})
+
+	// Test Case 2: Directory listing should be blocked
+	// Note: This test depends on the client trying to do PROPFIND with Depth:1 for directory ops
+	// The exact behavior depends on how the client implements directory operations
+	t.Run("DirectoryListingBlocked", func(t *testing.T) {
+		// Create a subdirectory with files
+		subDir := filepath.Join(ft.Exports[0].StoragePrefix, "subdir")
+		require.NoError(t, os.Mkdir(subDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(subDir, "nested.txt"), []byte("nested content"), 0644))
+
+		// Verify the capability flag is disabled as configured
+		assert.False(t, ft.Exports[0].Capabilities.Listings,
+			"Listings capability should be disabled as configured")
+
+		// Try to list the directory - should fail because Listings capability is disabled
+		listURL := fmt.Sprintf("pelican://%s:%d/test/subdir",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+
+		_, err := client.DoList(ft.Ctx, listURL, client.WithToken(testToken))
+
+		// Directory listing should fail when Listings capability is disabled
+		require.Error(t, err, "Directory listing should fail when Listings capability is disabled")
+	})
+}
