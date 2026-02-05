@@ -1339,6 +1339,11 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Xrootd_AutoShutdownEnabled.GetName(), true)
 	v.SetDefault(param.Xrootd_ConfigUpdateFailureTimeout.GetName(), 1*time.Hour)
 
+	// Set fed token locations for cache/origin. Note that fed tokens aren't yet used by the
+	// Origin (2026-02-05), but they may be soon for things like third party copy.
+	v.SetDefault(param.Origin_FedTokenLocation.GetName(), filepath.Join(configDir, "origin-fed-token"))
+	v.SetDefault(param.Cache_FedTokenLocation.GetName(), filepath.Join(configDir, "cache-fed-token"))
+
 	runtimeDir, _, err := ensureRuntimeDir(v)
 	if err != nil {
 		return err
@@ -1401,9 +1406,9 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Cache_RunLocation.GetName(), filepath.Join(runtimeDir, "xrootd", "cache"))
 
 		v.SetDefault(param.Cache_StorageLocation.GetName(), filepath.Join(runtimeDir, "cache"))
-		v.SetDefault(param.Cache_NamespaceLocation.GetName(), filepath.Join(param.Cache_StorageLocation.GetString(), "namespace"))
-		v.SetDefault(param.Cache_DataLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "data")})
-		v.SetDefault(param.Cache_MetaLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "meta")})
+		v.SetDefault(param.Cache_NamespaceLocation.GetName(), filepath.Join(v.GetString(param.Cache_StorageLocation.GetName()), "namespace"))
+		v.SetDefault(param.Cache_DataLocations.GetName(), []string{filepath.Join(v.GetString(param.Cache_StorageLocation.GetName()), "data")})
+		v.SetDefault(param.Cache_MetaLocations.GetName(), []string{filepath.Join(v.GetString(param.Cache_StorageLocation.GetName()), "meta")})
 
 		v.SetDefault(param.LocalCache_RunLocation.GetName(), filepath.Join(runtimeDir, "localcache"))
 		v.SetDefault(param.Origin_Multiuser.GetName(), true)
@@ -1438,9 +1443,9 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Origin_GlobusConfigLocation.GetName(), filepath.Join(runtimeDir, "xrootd", "origin", "globus"))
 
 		v.SetDefault(param.Cache_StorageLocation.GetName(), filepath.Join(runtimeDir, "cache"))
-		v.SetDefault(param.Cache_NamespaceLocation.GetName(), filepath.Join(param.Cache_StorageLocation.GetString(), "namespace"))
-		v.SetDefault(param.Cache_DataLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "data")})
-		v.SetDefault(param.Cache_MetaLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "meta")})
+		v.SetDefault(param.Cache_NamespaceLocation.GetName(), filepath.Join(v.GetString(param.Cache_StorageLocation.GetName()), "namespace"))
+		v.SetDefault(param.Cache_DataLocations.GetName(), []string{filepath.Join(v.GetString(param.Cache_StorageLocation.GetName()), "data")})
+		v.SetDefault(param.Cache_MetaLocations.GetName(), []string{filepath.Join(v.GetString(param.Cache_StorageLocation.GetName()), "meta")})
 
 		v.SetDefault(param.LocalCache_RunLocation.GetName(), filepath.Join(runtimeDir, "cache"))
 		v.SetDefault(param.Origin_Multiuser.GetName(), false)
@@ -1456,7 +1461,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Origin_EnableListings.GetName(), true)
 	v.SetDefault(param.Origin_EnableDirectReads.GetName(), true)
 
-	v.SetDefault(param.Cache_ClientStatisticsLocation.GetName(), filepath.Join(param.Cache_RunLocation.GetString(), "xrootd.stats"))
+	v.SetDefault(param.Cache_ClientStatisticsLocation.GetName(), filepath.Join(v.GetString(param.Cache_RunLocation.GetName()), "xrootd.stats"))
 
 	fcRunLocation := v.GetString(param.LocalCache_RunLocation.GetName())
 	v.SetDefault(param.LocalCache_Socket.GetName(), filepath.Join(fcRunLocation, "cache.sock"))
@@ -1475,7 +1480,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Server_Hostname.GetName(), hostname)
 	// For the rest of the function, use the hostname provided by the admin if
 	// they have overridden the defaults.
-	hostname = v.GetString("Server.Hostname")
+	hostname = v.GetString(param.Server_Hostname.GetName())
 	// We default to the value of Server.Hostname, which defaults to os.Hostname but can be overwritten
 	v.SetDefault(param.Xrootd_Sitename.GetName(), hostname)
 
@@ -1930,17 +1935,6 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 				return fmt.Errorf("fail to open the file Xrootd.ConfigFile at %s: %v", param.Xrootd_ConfigFile.GetString(), err)
 			}
 		}
-	}
-
-	// Set fed token locations for cache/origin. Note that fed tokens aren't yet used by the
-	// Origin (2025-02-04), but they may be soon for things like third party copy.
-	configDir := viper.GetString("ConfigDir")
-	if currentServers.IsEnabled(server_structs.OriginType) {
-		viper.SetDefault(param.Origin_FedTokenLocation.GetName(), filepath.Join(configDir, "origin-fed-token"))
-	}
-	if currentServers.IsEnabled(server_structs.CacheType) {
-		viper.SetDefault(param.Cache_FedTokenLocation.GetName(), filepath.Join(configDir, "cache-fed-token"))
-		os.Setenv("XRD_PELICANCACHETOKENLOCATION", param.Cache_FedTokenLocation.GetString())
 	}
 
 	// Fallback `SelfTestInterval` to 15 seconds, if user sets a very small value

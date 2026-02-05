@@ -147,6 +147,7 @@ func makeUnprivilegedXrootdLauncher(daemonName string, xrootdRun string, configP
 			"XRD_PLUGINCONFDIR=" + filepath.Join(xrootdRun, "cache-client.plugins.d"),
 			"X509_CERT_FILE=" + caBundlePath,
 			"XRD_PELICANCLIENTCERTFILE=" + certPath,
+			"XRD_PELICANCACHETOKENLOCATION=" + param.Cache_FedTokenLocation.GetString(),
 		}
 		if pkcs11Active {
 			result.ExtraEnv = append(result.ExtraEnv, "XRD_PELICANCLIENTKEYFILE=")
