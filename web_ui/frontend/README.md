@@ -1,69 +1,25 @@
-# Origin UI
+# Pelican Frontend
 
 This ui is generated with Next.js.
 
 ## Development
 
-### Local
+### Setup
 
-In production builds the website is compiled and included with the code. This step takes a couple minutes and is not well suited for development. Since the website sits on top of the api the best way to develop just the website is to run the api and the website separately and then use nginx to make them come from the same host as they would in production.
-
-#### To run the api:
+To develop the Pelican frontend you must run the backend in a separately, as well as set up a proxy to serve your backend and frontend requests from the same host.
 
 ```shell
-# From repo root
-make pelican-build
-docker run --rm -it -p 8444:8444 -w /app -v $PWD/dist/pelican_linux_arm64_v8.0/:/app -v $PWD/local/:/etc/pelican/ hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb ./pelican serve --module director,registry,origin,cache
+docker compose run pelican-builder
+docker compose up pelican-server pelican-api-proxy
 ```
 
-```shell
-# Inside the container
-cp pelican osdf
-./osdf origin serve -f https://osg-htc.org -v /tmp/stash/:/test
-```
+If you would like to proxy the prometheus requests to another service you can do so by filling out .env.template and placing it as .env.local.
 
-##### To run all the websites
+### Running the Frontend
+
+To run the frontend install the dependencies and run the development server.
 
 ```shell
-./pelican serve --module director,registry,origin,cache
-```
-
-#### To run the website and the reverse proxy:
-
-First build the proxy so that you can point api requests to a instance of Pelican.
-
-```shell
-docker build -t pelican-api-proxy -f dev/image/Dockerfile dev/image
-```
-
-Then run the following command to start the website and the proxy.
-
-```shell
-docker restart pelican-dev-proxy
-docker run --name pelican-dev-proxy --rm -it -p 8443:8443 -d pelican-api-proxy
-```
-
-If you would like to proxy the prometheus requests to another service you can do so by filling out .env.template and placing it as .env.local. Then run the docker statement like so to add those variables to the container.
-
-```shell
-docker run --name pelican-dev-proxy --rm -it -p 8443:8443 -p 8448:8448 -p 8118:8118 -p 8228:8228 -p 8338:8338 --env-file dev/.env.local -d pelican-api-proxy
-```
-
-First make sure that the ports are correct in `dev/nginx.conf` so that they point to the website and the api as expected. Then run the following command.
-
-```shell
-
+npm i
 npm run dev
 ```
-
-### Docker
-
-```shell
-docker build -t origin-ui .
-```
-
-```shell
-docker run -it -p 3000:3000 -v $(pwd):/webapp origin-ui npm run dev
-```
-
-You can also run if you have node installed locally via `npm install && npm run dev`.
