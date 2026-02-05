@@ -1339,6 +1339,11 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Xrootd_AutoShutdownEnabled.GetName(), true)
 	v.SetDefault(param.Xrootd_ConfigUpdateFailureTimeout.GetName(), 1*time.Hour)
 
+	// Set fed token locations for cache/origin. Note that fed tokens aren't yet used by the
+	// Origin (2026-02-05), but they may be soon for things like third party copy.
+	v.SetDefault(param.Origin_FedTokenLocation.GetName(), filepath.Join(configDir, "origin-fed-token"))
+	v.SetDefault(param.Cache_FedTokenLocation.GetName(), filepath.Join(configDir, "cache-fed-token"))
+
 	runtimeDir, _, err := ensureRuntimeDir(v)
 	if err != nil {
 		return err
@@ -1930,17 +1935,6 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 				return fmt.Errorf("fail to open the file Xrootd.ConfigFile at %s: %v", param.Xrootd_ConfigFile.GetString(), err)
 			}
 		}
-	}
-
-	// Set fed token locations for cache/origin. Note that fed tokens aren't yet used by the
-	// Origin (2025-02-04), but they may be soon for things like third party copy.
-	configDir := viper.GetString("ConfigDir")
-	if currentServers.IsEnabled(server_structs.OriginType) {
-		viper.SetDefault(param.Origin_FedTokenLocation.GetName(), filepath.Join(configDir, "origin-fed-token"))
-	}
-	if currentServers.IsEnabled(server_structs.CacheType) {
-		viper.SetDefault(param.Cache_FedTokenLocation.GetName(), filepath.Join(configDir, "cache-fed-token"))
-		os.Setenv("XRD_PELICANCACHETOKENLOCATION", param.Cache_FedTokenLocation.GetString())
 	}
 
 	// Fallback `SelfTestInterval` to 15 seconds, if user sets a very small value
