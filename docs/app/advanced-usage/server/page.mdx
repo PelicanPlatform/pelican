@@ -153,3 +153,107 @@ With support for Multiple Keys, Pelican allows the administrator to replace priv
 5. Wait for 60s, then go back to the Registry, download the latest registered public key set again. Verify the old public key has been removed.
 
 > If you are using a [Credmon](https://htcondor.readthedocs.io/en/main/admin-manual/file-and-cred-transfer.html#enabling-the-fetching-and-use-of-credentials) in HTCondor, increase the wait time in the above steps to the credmon's configured token lifetime (15 minutes by default).
+
+## PKCS#11 Enhanced TLS Security
+
+By default, the XRootD subprocess requires read access to the TLS private key file.
+This introduces a potential security risk: if an attacker could exploit XRootD to read arbitrary files (for example, through a symlink attack), they could potentially extract the private key.
+Starting with Pelican v7.23.0, Pelican can use [PKCS#11](https://en.wikipedia.org/wiki/PKCS_11) to protect the TLS private key used by the XRootD subprocess.
+When enabled, the TLS private key never leaves the Pelican process memory.
+XRootD performs TLS signing operations via a PKCS#11 interface without directly reading the key file.
+
+### How It Works
+
+When PKCS#11 is enabled, Pelican starts an internal `p11proxy` server that implements the PKCS#11 protocol over a Unix socket. The architecture works as follows:
+
+1. **Pelican** starts a PKCS#11 RPC server (via `go-p11-kit`) that holds the TLS private key in memory
+2. **XRootD** is configured to use a PKCS#11 URI instead of a direct key file path
+3. When XRootD needs to perform TLS signing, **OpenSSL** calls out to the PKCS#11 provider/engine
+4. The **p11-kit-client** library forwards the signing request over a Unix socket to Pelican
+5. **Pelican** signs the request and returns only the signature—never the key itself
+
+### Prerequisites
+
+Before enabling PKCS#11, you must install the required system packages. The packages differ based on your OpenSSL version:
+
+**For OpenSSL 3.x** (e.g., AlmaLinux 9, Fedora 37+, Ubuntu 22.04+):
+
+```bash copy
+dnf install -y pkcs11-provider p11-kit-server
+```
+
+**For OpenSSL 1.x** (e.g., CentOS 7, RHEL 8):
+
+```bash copy
+dnf install -y openssl-pkcs11 p11-kit-server
+```
+
+On Debian/Ubuntu systems, use `apt` instead:
+
+```bash copy
+# OpenSSL 3.x
+apt install -y pkcs11-provider p11-kit
+
+# OpenSSL 1.x
+apt install -y libengine-pkcs11-openssl p11-kit
+```
+
+> **Note**: Pelican automatically detects your OpenSSL version and uses the appropriate mode (Provider API for OpenSSL 3.x, ENGINE API for OpenSSL 1.x).
+
+### Enabling PKCS#11
+
+To enable PKCS#11 TLS key protection, add the following to your `pelican.yaml`:
+
+```yaml filename="pelican.yaml" copy
+Server:
+  EnablePKCS11: true
+```
+
+Once enabled, Pelican will:
+1. Start the internal p11proxy server
+2. Generate a PKCS#11-compatible OpenSSL configuration
+3. Configure XRootD to use the PKCS#11 URI for TLS operations
+
+### Verifying PKCS#11 is Active
+
+When PKCS#11 is enabled and working correctly, you will see log messages similar to:
+
+```console
+p11proxy: accepted connection ...
+```
+
+You can also run Pelican with verbose p11-kit debugging to see detailed RPC activity:
+
+```bash copy
+P11_KIT_DEBUG=rpc pelican origin serve
+```
+
+This will produce detailed output showing the PKCS#11 communication:
+
+```console
+(p11-kit:PID) rpc_unix_init: initialized rpc socket: ...
+(p11-kit:PID) rpc_C_GetSlotList: C_GetSlotList: enter ...
+```
+
+### Restricting Key File Permissions
+
+With PKCS#11 enabled, you can further harden your deployment by making the TLS key unreadable to the XRootD process:
+
+```bash copy
+chmod 600 /etc/pelican/certificates/tls.key
+chown pelican:pelican /etc/pelican/certificates/tls.key
+```
+
+### Troubleshooting
+
+If PKCS#11 fails to initialize, Pelican will log a warning and fall back to the traditional method where XRootD reads the key file directly.
+Common issues include:
+
+| Issue | Solution |
+|-------|----------|
+| Missing packages | Install the required packages for your OpenSSL version (see [Prerequisites](#prerequisites)) |
+| Socket permission errors | Ensure the XRootD user can access the p11-kit socket directory |
+| OpenSSL version mismatch | Pelican auto-detects the version; ensure correct packages are installed |
+
+> **Note**: If you explicitly set `Server.EnablePKCS11: true` but the required dependencies are missing, Pelican will log a warning.
+If the parameter is not set (defaulting to `false`), Pelican will silently skip PKCS#11 setup.
