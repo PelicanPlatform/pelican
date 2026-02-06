@@ -1467,6 +1467,11 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.LocalCache_Socket.GetName(), filepath.Join(fcRunLocation, "cache.sock"))
 	v.SetDefault(param.LocalCache_DataLocation.GetName(), filepath.Join(fcRunLocation, "cache"))
 
+	// Set the default for Origin.InProgressLocation
+	if v.GetString(param.Origin_StorageType.GetName()) == "posix" {
+		v.SetDefault(param.Origin_InProgressLocation.GetName(), filepath.Join(v.GetString(param.Origin_RunLocation.GetName()), "in-progress"))
+	}
+
 	// Any platform-specific paths should go here
 	err = InitServerOSDefaults(v)
 	if err != nil {
