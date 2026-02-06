@@ -267,6 +267,60 @@ func TestGetRuntimeConfigurable(t *testing.T) {
 	assert.False(t, tlsSkipVerify, "TLSSkipVerify should be false in the map")
 }
 
+// Test various parameter types to ensure they return correct environment variable names
+func TestGetEnvVarName(t *testing.T) {
+	// Define an interface to generalize over different param for ease of testing -- this probably
+	// should have been done at the package level from the getgo ¯\_(ツ)_/¯
+	type param interface {
+		GetEnvVarName() string
+		GetName() string
+	}
+
+	testCases := []struct {
+		name     string
+		param    param
+		expected string
+	}{
+		{
+			name:     "test-string-param",
+			param:    Cache_Port,
+			expected: "PELICAN_CACHE_PORT",
+		},
+		{
+			name:     "test-single-word-param",
+			param:    TLSSkipVerify,
+			expected: "PELICAN_TLSSKIPVERIFY",
+		},
+		{
+			name:     "test-bool-and-nested-param",
+			param:    Origin_EnableListings,
+			expected: "PELICAN_ORIGIN_ENABLELISTINGS",
+		},
+		{
+			name:     "test-string-slice-param",
+			param:    ConfigLocations,
+			expected: "PELICAN_CONFIGLOCATIONS",
+		},
+		{
+			name:     "test-duration-param",
+			param:    Cache_SelfTestInterval,
+			expected: "PELICAN_CACHE_SELFTESTINTERVAL",
+		},
+		{
+			name:     "test-object-param",
+			param:    Registry_Institutions,
+			expected: "PELICAN_REGISTRY_INSTITUTIONS",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			envVar := tc.param.GetEnvVarName()
+			assert.Equal(t, tc.expected, envVar, "%s should map to %s", tc.param.GetName(), tc.expected)
+		})
+	}
+}
+
 func TestCallbackRegistration(t *testing.T) {
 	// Reset before test
 	require.NoError(t, Reset())
