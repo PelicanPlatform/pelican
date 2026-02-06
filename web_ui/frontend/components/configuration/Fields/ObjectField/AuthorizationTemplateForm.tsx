@@ -11,7 +11,9 @@ import {
 } from '@/components/configuration';
 import useApiSWR from '@/hooks/useApiSWR';
 import { User, Group } from '@/types';
-import AutocompleteField from '@/components/configuration/Fields/AutocompleteField';
+import AutocompleteField, {
+  ObjectAutocompleteField,
+} from '@/components/configuration/Fields/AutocompleteField';
 
 const verifyForm = (x: AuthorizationTemplate) => {
   return x.prefix != '' && x.actions.length > 0;
@@ -77,14 +79,16 @@ const AuthorizationTemplateForm = ({
         />
       </Box>
       <Box mb={2}>
-        <AutocompleteField<string>
+        <ObjectAutocompleteField<User, string>
           name={'Users (Optional)'}
-          onChange={(e) =>
-            setAuthorizationTemplate({ ...authorizationTemplate, users: e })
+          onChange={(ids) =>
+            setAuthorizationTemplate({ ...authorizationTemplate, users: ids })
           }
           value={authorizationTemplate.users || []}
-          possibleValues={users ? users.map((u) => u.username) : []}
-          freeSolo={true}
+          possibleValues={users || []}
+          getOptionLabel={(user) => user.username}
+          getOptionValue={(user) => user.id}
+          findOption={(id, userList) => userList.find((u) => u.id === id)}
         />
       </Box>
       <Box mb={2}>

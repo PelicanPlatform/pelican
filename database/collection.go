@@ -691,13 +691,13 @@ func ListGroups(db *gorm.DB) ([]Group, error) {
 	return groups, nil
 }
 
-func AddGroupMember(db *gorm.DB, groupId, userId, addedByUserId string) error {
+func AddGroupMember(db *gorm.DB, groupId, userId, addedByUserId string, isAdmin bool) error {
 	var group Group
 	if err := db.First(&group, "id = ?", groupId).Error; err != nil {
 		return err
 	}
 
-	if group.CreatedBy != addedByUserId {
+	if !isAdmin && group.CreatedBy != addedByUserId {
 		return ErrForbidden
 	}
 
@@ -725,13 +725,14 @@ func AddGroupMember(db *gorm.DB, groupId, userId, addedByUserId string) error {
 	return nil
 }
 
-func RemoveGroupMember(db *gorm.DB, groupId, userId, removedByUserId string) error {
+func RemoveGroupMember(db *gorm.DB, groupId, userId, removedByUserId string, isAdmin bool) error {
 	var group Group
 	if err := db.First(&group, "id = ?", groupId).Error; err != nil {
 		return err
 	}
 
-	if group.CreatedBy != removedByUserId {
+	// Allow removal if user is admin or is the group creator
+	if !isAdmin && group.CreatedBy != removedByUserId {
 		return ErrForbidden
 	}
 
