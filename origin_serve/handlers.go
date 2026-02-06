@@ -21,15 +21,18 @@ package origin_serve
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/webdav"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -40,6 +43,40 @@ var (
 	exportPrefixMap    map[string]string // Maps federation prefix to storage prefix
 	handlersRegistered bool              // Tracks whether handlers have been registered
 )
+
+// metricsResponseWriter wraps gin.ResponseWriter to track bytes written
+type metricsResponseWriter struct {
+	gin.ResponseWriter
+	bytesWritten int64
+}
+
+func (mrw *metricsResponseWriter) Write(data []byte) (int, error) {
+	n, err := mrw.ResponseWriter.Write(data)
+	mrw.bytesWritten += int64(n)
+	return n, err
+}
+
+func (mrw *metricsResponseWriter) WriteString(s string) (int, error) {
+	n, err := mrw.ResponseWriter.WriteString(s)
+	mrw.bytesWritten += int64(n)
+	return n, err
+}
+
+// metricsRequestReader wraps http.Request.Body to track bytes read
+type metricsRequestReader struct {
+	reader    io.ReadCloser
+	bytesRead int64
+}
+
+func (mrr *metricsRequestReader) Read(p []byte) (int, error) {
+	n, err := mrr.reader.Read(p)
+	mrr.bytesRead += int64(n)
+	return n, err
+}
+
+func (mrr *metricsRequestReader) Close() error {
+	return mrr.reader.Close()
+}
 
 func init() {
 	// Register the reset callback with server_utils
@@ -207,6 +244,63 @@ func authMiddleware() gin.HandlerFunc {
 	}
 }
 
+// httpMetricsMiddleware tracks HTTP-level metrics for WebDAV requests
+func httpMetricsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		method := c.Request.Method
+
+		// Track active requests
+		metrics.HttpActiveRequests.WithLabelValues(metrics.ServerTypeOrigin, method).Inc()
+		defer metrics.HttpActiveRequests.WithLabelValues(metrics.ServerTypeOrigin, method).Dec()
+
+		// Wrap request body to track bytes read
+		mrr := &metricsRequestReader{reader: c.Request.Body}
+		c.Request.Body = mrr
+
+		// Wrap response writer to track bytes out
+		mrw := &metricsResponseWriter{ResponseWriter: c.Writer}
+		c.Writer = mrw
+
+		// Process request
+		c.Next()
+
+		// Calculate duration
+		duration := time.Since(start).Seconds()
+		status := c.Writer.Status()
+		statusStr := fmt.Sprintf("%d", status)
+
+		// Track request completion
+		metrics.HttpRequestsTotal.WithLabelValues(metrics.ServerTypeOrigin, method, statusStr).Inc()
+		metrics.HttpRequestDuration.WithLabelValues(metrics.ServerTypeOrigin, method, statusStr).Observe(duration)
+
+		// Track bytes in (actual bytes read from request body)
+		if mrr.bytesRead > 0 {
+			metrics.HttpBytesTotal.WithLabelValues(metrics.ServerTypeOrigin, metrics.DirectionIn, method).Add(float64(mrr.bytesRead))
+		}
+
+		// Track bytes out
+		if mrw.bytesWritten > 0 {
+			metrics.HttpBytesTotal.WithLabelValues(metrics.ServerTypeOrigin, metrics.DirectionOut, method).Add(float64(mrw.bytesWritten))
+		}
+
+		// Track large transfers (>100MB)
+		if mrr.bytesRead >= metrics.LargeTransferThreshold {
+			metrics.HttpLargeTransfersTotal.WithLabelValues(metrics.ServerTypeOrigin, method).Inc()
+			metrics.HttpLargeTransferBytes.WithLabelValues(metrics.ServerTypeOrigin, metrics.DirectionIn, method).Add(float64(mrr.bytesRead))
+		}
+		if mrw.bytesWritten >= metrics.LargeTransferThreshold {
+			metrics.HttpLargeTransfersTotal.WithLabelValues(metrics.ServerTypeOrigin, method).Inc()
+			metrics.HttpLargeTransferBytes.WithLabelValues(metrics.ServerTypeOrigin, metrics.DirectionOut, method).Add(float64(mrw.bytesWritten))
+		}
+
+		// Track errors (5xx status codes)
+		if status >= 500 && status < 600 {
+			metrics.HttpErrorsTotal.WithLabelValues(metrics.ServerTypeOrigin, method, statusStr).Inc()
+		}
+	}
+}
+
 // InitializeHandlers initializes the WebDAV handlers for each export
 func InitializeHandlers(exports []server_utils.OriginExport) error {
 	// Validate that if DisableDirectClients is enabled, no exports have DirectReads
@@ -286,6 +380,7 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 
 		// Create a route group for this prefix
 		group := engine.Group(routePrefix)
+		group.Use(httpMetricsMiddleware())
 		group.Use(authMiddleware())
 
 		// Create a handler function for all requests
