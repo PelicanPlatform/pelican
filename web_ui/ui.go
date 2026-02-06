@@ -618,12 +618,18 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 
 	engine.GET("/api/v1.0/groups", AuthHandler, handleListGroups)
 	engine.POST("/api/v1.0/groups", AuthHandler, handleCreateGroup)
+	engine.GET("/api/v1.0/groups/:id", AuthHandler, handleGetGroup)
+	engine.PATCH("/api/v1.0/groups/:id", AuthHandler, handleUpdateGroup)
+	engine.DELETE("/api/v1.0/groups/:id", AuthHandler, handleDeleteGroup)
 	engine.GET("/api/v1.0/groups/:id/members", AuthHandler, handleListGroupMembers)
 	engine.POST("/api/v1.0/groups/:id/members", AuthHandler, handleAddGroupMember)
 	engine.DELETE("/api/v1.0/groups/:id/members/:userId", AuthHandler, handleRemoveGroupMember)
 
 	engine.GET("/api/v1.0/users", AuthHandler, handleListUsers)
 	engine.POST("/api/v1.0/users", AuthHandler, handleAddUser)
+	engine.GET("/api/v1.0/users/:id", AuthHandler, handleGetUser)
+	engine.PATCH("/api/v1.0/users/:id", AuthHandler, handleUpdateUser)
+	engine.DELETE("/api/v1.0/users/:id", AuthHandler, AdminAuthHandler, handleDeleteUser)
 
 	return nil
 }
