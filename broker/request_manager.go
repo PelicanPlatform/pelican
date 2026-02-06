@@ -22,11 +22,18 @@ import (
 	"context"
 	"errors"
 	"math/rand"
+	"net"
 	"sync"
 	"time"
 )
 
 type (
+	// BrokerListener wraps a net.Listener with broker connection metadata
+	BrokerListener struct {
+		Listener  net.Listener
+		RequestId string
+	}
+
 	reversalRequest struct {
 		CallbackUrl string `json:"callback_url,omitempty"`
 		PrivateKey  string `json:"private_key,omitempty"`

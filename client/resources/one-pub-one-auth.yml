@@ -1,6 +1,8 @@
 # Origin export configuration to test full multi-export capabilities
 
 Origin:
+  DirectorTest: false
+  SelfTest: false
   # Things that configure the origin itself
   StorageType: "posix"
   EnableDirectReads: true
@@ -13,3 +15,6 @@ Origin:
     - StoragePrefix: /<SHOULD BE OVERRIDDEN>
       FederationPrefix: /second/namespace
       Capabilities: ["Reads", "Writes", "DirectReads", "Listings"]
+Cache:
+  DirectorTest: false
+  SelfTest: false

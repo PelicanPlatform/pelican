@@ -66,6 +66,10 @@ type (
 	hijackConn struct {
 		*net.TCPConn
 		realConn *net.TCPConn
+		// blockReads is set to true to make Read() return a timeout error immediately.
+		// This prevents the HTTP transport's background TLS reader from consuming
+		// data that we need after hijacking the connection.
+		blockReads atomic.Bool
 	}
 
 	// A listener that reverses an existing, connected TCP socket.  One can
@@ -107,6 +111,16 @@ func ResetState() {
 
 func (hj *hijackConn) Close() error {
 	return nil
+}
+
+// Read checks if reads are blocked before delegating to the underlying connection.
+// When blockReads is set, it returns a timeout error to stop the HTTP transport's
+// background TLS reader from consuming data we need after hijacking.
+func (hj *hijackConn) Read(b []byte) (n int, err error) {
+	if hj.blockReads.Load() {
+		return 0, os.ErrDeadlineExceeded
+	}
+	return hj.TCPConn.Read(b)
 }
 
 // Returns a new 'one shot listener' from a given TCP connection
@@ -199,6 +213,7 @@ func ConnectToService(ctx context.Context, brokerUrl, prefix, originName string)
 		OriginName:  originName,
 		Prefix:      prefix,
 	}
+	logFields := log.Fields{"request_id": reqC.RequestId, "origin": originName, "prefix": prefix}
 	reqBytes, err := json.Marshal(&reqC)
 	if err != nil {
 		return
@@ -306,20 +321,20 @@ func ConnectToService(ctx context.Context, brokerUrl, prefix, originName string)
 	// will write to the channel we originally posted.
 	tck := time.NewTicker(20 * time.Second)
 	defer tck.Stop()
-	log.Debugf("Cache waiting for up to 20 seconds for the origin %s to callback", originName)
+	log.WithFields(logFields).Debug("Cache waiting for up to 20 seconds for origin to callback")
 	select {
 	case <-ctx.Done():
-		log.Debug("Context has been cancelled while waiting for callback")
+		log.WithFields(logFields).Debug("Context has been cancelled while waiting for callback")
 		err = ctx.Err()
 		return
 	case <-tck.C:
-		log.Debug("Request has timed out when waiting for callback")
+		log.WithFields(logFields).Warn("Request has timed out when waiting for callback from origin")
 		err = errors.Errorf("Timeout when waiting for callback from origin")
 		return
 	case writer := <-responseChannel:
 		hj, ok := writer.(http.Hijacker)
 		if !ok {
-			log.Debug("Not able to hijack underlying TCP connection from server")
+			log.WithFields(logFields).Error("Not able to hijack underlying TCP connection from server")
 			resp := server_structs.SimpleApiResp{
 				Msg:    "Unable to reverse TCP connection; HTTP/2 in use",
 				Status: "error",
@@ -357,19 +372,26 @@ func ConnectToService(ctx context.Context, brokerUrl, prefix, originName string)
 		flusher.Flush()
 
 		conn, _, err = hj.Hijack()
+		if err != nil {
+			log.WithFields(logFields).WithError(err).Error("Failed to hijack connection")
+			return
+		}
 		tlsConn, ok := conn.(*tls.Conn)
 		if ok {
 			// Once the cache receives the HTTP response, it'll close the TLS connection
 			// That will cause a "close notify" to be sent back to the origin (this goroutine),
 			// which indicates the last TLS record has been received.  That will cause an EOF
 			// to be read from the TLS socket.
+			bytesRead := 0
 			for {
 				ignoreBytes := make([]byte, 1024)
-				_, err = tlsConn.Read(ignoreBytes)
-				if errors.Is(err, io.EOF) {
+				n, readErr := tlsConn.Read(ignoreBytes)
+				bytesRead += n
+				if errors.Is(readErr, io.EOF) {
 					break
-				} else if err != nil {
-					log.Error("Failed to get close notification from cache")
+				} else if readErr != nil {
+					log.WithFields(logFields).WithError(readErr).Errorf("Failed to get close notification from origin after reading %d bytes", bytesRead)
+					err = readErr
 					return
 				}
 			}
@@ -377,7 +399,7 @@ func ConnectToService(ctx context.Context, brokerUrl, prefix, originName string)
 			tcpConn, ok := conn.(*net.TCPConn)
 			if !ok {
 				tlsConn.Close()
-				log.Error("Remote connection is not over TCP")
+				log.WithFields(logFields).Error("Remote connection is not over TCP")
 				return
 			}
 			var fp *os.File
@@ -386,13 +408,13 @@ func ConnectToService(ctx context.Context, brokerUrl, prefix, originName string)
 			// from sending spurious TLS records to the remote side and confusing it.
 			tcpConn.Close()
 			if err != nil {
-				log.Error("Failed to duplicate TCP connection")
+				log.WithFields(logFields).WithError(err).Error("Failed to duplicate TCP connection")
 				return
 			}
 			defer fp.Close()
 			conn, err = net.FileConn(fp)
 			if err != nil {
-				log.Error("Failed to convert file pointer to a TCP connection")
+				log.WithFields(logFields).WithError(err).Error("Failed to convert file pointer to a TCP connection")
 				return
 			}
 		}
@@ -405,7 +427,8 @@ func ConnectToService(ctx context.Context, brokerUrl, prefix, originName string)
 // The TCP socket used for the callback will be converted to a one-shot listener
 // and reused with the origin as the "server".
 func doCallback(ctx context.Context, sType server_structs.ServerType, brokerResp reversalRequest) (listener net.Listener, err error) {
-	log.Debugln("Origin starting callback to cache at", brokerResp.CallbackUrl)
+	logFields := log.Fields{"request_id": brokerResp.RequestId, "callback_url": brokerResp.CallbackUrl}
+	log.WithFields(logFields).Debug("Origin starting callback to cache")
 
 	privateKey, err := privateKeyFromBytes(brokerResp.PrivateKey)
 	if err != nil {
@@ -469,7 +492,7 @@ func doCallback(ctx context.Context, sType server_structs.ServerType, brokerResp
 		}
 		// Take the connection and stash it onto our list.  After the client has shutdown, we will
 		// steal the last TCP connection
-		hj := &hijackConn{tcpConn, tcpConn}
+		hj := &hijackConn{tcpConn, tcpConn, atomic.Bool{}}
 		hijackConnMutex.Lock()
 		hijackConnList = append(hijackConnList, hj)
 		hijackConnMutex.Unlock()
@@ -508,11 +531,11 @@ func doCallback(ctx context.Context, sType server_structs.ServerType, brokerResp
 		} else {
 			err = errors.Errorf("Failure when invoking cache %s callback (status code %d): %s", brokerResp.CallbackUrl, resp.StatusCode, errResp.Msg)
 		}
-		log.Error("Callback failed:", err)
+		log.WithFields(logFields).WithError(err).Error("Callback failed")
 		return
 	}
 
-	log.Debugln("Origin finished callback to cache at", brokerResp.CallbackUrl)
+	log.WithFields(logFields).Debug("Origin received callback response from cache")
 	callbackResp := reversalCallbackResponse{}
 	if err = json.Unmarshal(responseBytes, &callbackResp); err != nil {
 		err = errors.Wrapf(err, "Failed to parse cache %s callback response", brokerResp.CallbackUrl)
@@ -525,8 +548,25 @@ func doCallback(ctx context.Context, sType server_structs.ServerType, brokerResp
 		return
 	}
 
-	// Send the "close notify" packet to the origin
+	// Before sending close notify, block reads on the hijacked connection.
+	// This is critical: the HTTP transport may have a background goroutine doing tls.Read()
+	// which internally reads from our hijacked TCP connection. If we don't stop that reader,
+	// it will consume the TLS ClientHello that the cache sends after receiving our close_notify,
+	// causing the subsequent TLS handshake to fail.
+	hijackConnMutex.Lock()
+	var lastHj *hijackConn
+	if len(hijackConnList) > 0 {
+		lastHj = hijackConnList[len(hijackConnList)-1]
+		lastHj.blockReads.Store(true)
+		if err := lastHj.realConn.SetReadDeadline(time.Now()); err != nil {
+			log.WithFields(logFields).WithError(err).Warn("Failed to set read deadline to stop TLS reader")
+		}
+	}
+	hijackConnMutex.Unlock()
+
+	// Send the "close notify" packet to the cache
 	client.CloseIdleConnections()
+	log.WithFields(logFields).Debugln("Sent close notify to cache; hijacking connection")
 
 	tlsConfig := tls.Config{
 		Certificates: []tls.Certificate{{
@@ -546,6 +586,7 @@ func doCallback(ctx context.Context, sType server_structs.ServerType, brokerResp
 	hijackConnMutex.Unlock()
 	if !gotConn {
 		err = errors.New("Internal error: no new connection made to remote cache")
+		log.WithFields(logFields).WithError(err).Error("No connection available to hijack")
 		return
 	}
 
@@ -554,18 +595,21 @@ func doCallback(ctx context.Context, sType server_structs.ServerType, brokerResp
 	fp, err := hj.realConn.File()
 	if err != nil {
 		err = errors.Wrap(err, "Failure when duplicating hijacked connection")
+		log.WithFields(logFields).WithError(err).Error("Failed to duplicate hijacked connection")
 		return
 	}
 	hj.realConn.Close()
 	newConn, err := net.FileConn(fp)
 	if err != nil {
 		err = errors.Wrap(err, "Failure when making socket from duplicated connection")
+		log.WithFields(logFields).WithError(err).Error("Failed to create connection from file descriptor")
 		return
 	}
 	fp.Close()
 	revConn, ok := newConn.(*net.TCPConn)
 	if !ok {
 		err = errors.New("Failed to cast connection back to TCP socket")
+		log.WithFields(logFields).WithError(err).Error("Connection is not TCP")
 		return
 	}
 
@@ -715,7 +759,7 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, sType serve
 						select {
 						case <-ctx.Done():
 							return nil
-						case resultChan <- listener:
+						case resultChan <- err:
 							break
 						}
 						break
@@ -723,7 +767,10 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, sType serve
 					select {
 					case <-ctx.Done():
 						return nil
-					case resultChan <- listener:
+					case resultChan <- BrokerListener{
+						Listener:  listener,
+						RequestId: brokerResp.Request.RequestId,
+					}:
 						break
 					}
 				} else if brokerResp.Status == server_structs.RespFailed {
