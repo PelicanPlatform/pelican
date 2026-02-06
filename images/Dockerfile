@@ -631,7 +631,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   # The IDs here are chosen to match OSG's sssd sidecar containers.
 
   groupadd -r -g 990 sssd
-  useradd -r -g sssd -u 990 -d / -s /usr/sbin/nologin -c "System user for sssd" sssd
+  useradd -r -u 990 -g 990 -d / -s /sbin/nologin -c "System user for sssd" sssd
   dnf install -y sssd-client
 ENDRUN
 ENTRYPOINT ["/entrypoint.sh", "osdf-server", "origin"]
