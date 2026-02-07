@@ -651,6 +651,14 @@ default: false
 components: ["client"]
 hidden: true
 ---
+name: Client.CredentialFile
+description: |+
+  Override the default path to the client credential file used for token generation.
+  When set, the client uses this file instead of the default credential location.
+type: filename
+default: none
+components: ["client"]
+---
 name: Client.PreferredCaches
 description: |+
   A list of preferred cache hostname/ports the Pelican client/plugin should use when interacting with a remote object. There are two configuration options:
@@ -676,16 +684,6 @@ description: |+
   When set via the `PELICAN_CLIENT_PREFERREDCACHES` environment variable, caches should be space-separated, e.g.:
   `PELICAN_CLIENT_PREFERREDCACHES="https://cache1.com:8443 https://cache2.com:8443 +"`
 type: stringSlice
-default: none
-components: ["client"]
----
-name: Client.CredentialFile
-description: |+
-  Override the default path to the client credential file used for token generation.
-  When set, the client will use this file instead of the default credential file location.
-  This is useful for non-interactive contexts where the default credential file may be
-  password-protected and prompts would fail.
-type: filename
 default: none
 components: ["client"]
 ---

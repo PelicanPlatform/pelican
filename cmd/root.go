@@ -164,6 +164,7 @@ func init() {
 	rootCmd.AddCommand(downtimeCmd)
 	rootCmd.AddCommand(apiKeyCmd)
 	rootCmd.AddCommand(serverCmd)
+	rootCmd.AddCommand(rcloneCmd)
 	rootCmd.AddCommand(config_printer.ConfigCmd)
 	rootCmd.AddCommand(sshHelperCmd) // Hidden command for SSH POSIXv2 helper
 	preferredPrefix := config.GetPreferredPrefix()
