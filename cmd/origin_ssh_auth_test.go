@@ -231,7 +231,7 @@ func TestSSHAuthTestCommandPasswordAuth(t *testing.T) {
 	assert.Equal(t, ssh_posixv2.StateConnected, conn.GetState())
 
 	// Test running a command
-	output, err := conn.RunCommand(ctx, "echo 'hello from ssh'")
+	output, err := conn.RunCommandArgs(ctx, []string{"echo", "hello from ssh"})
 	require.NoError(t, err)
 	assert.Contains(t, output, "command executed")
 }

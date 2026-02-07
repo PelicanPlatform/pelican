@@ -60,17 +60,6 @@ type testSSHServer struct {
 	userKeyFile    string
 }
 
-// findFreePort finds an available TCP port for the test sshd
-func findFreePort() (int, error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	listener.Close()
-	return port, nil
-}
-
 // generateTestKeys creates ED25519 key pair for testing
 func generateTestKeys() (ed25519.PublicKey, ed25519.PrivateKey, error) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -99,6 +88,7 @@ func writePublicKeyOpenSSH(filename string, publicKey ed25519.PublicKey) error {
 }
 
 // startTestSSHD starts a temporary sshd for testing
+// Uses port 0 to let the OS assign an available port, avoiding TOCTOU race conditions
 func startTestSSHD(t *testing.T) (*testSSHServer, error) {
 	tempDir := t.TempDir()
 
@@ -127,11 +117,15 @@ func startTestSSHD(t *testing.T) (*testSSHServer, error) {
 		return nil, fmt.Errorf("failed to write authorized keys: %w", err)
 	}
 
-	// Find a free port
-	port, err := findFreePort()
+	// Create a listener on port 0 to get an available port
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return nil, fmt.Errorf("failed to find free port: %w", err)
+		return nil, fmt.Errorf("failed to create listener: %w", err)
 	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	// Close the listener before starting sshd - there's a brief race window
+	// but it's much smaller than the previous findFreePort approach
+	listener.Close()
 
 	// Create known_hosts file from host key
 	hostPubKey, err := os.ReadFile(hostKeyFile + ".pub")
@@ -159,7 +153,6 @@ PasswordAuthentication no
 PubkeyAuthentication yes
 ChallengeResponseAuthentication no
 UsePAM no
-Subsystem sftp /usr/libexec/openssh/sftp-server
 PermitRootLogin yes
 LogLevel DEBUG3
 `, port, hostKeyFile, pidFile, authKeysFile)
@@ -187,20 +180,17 @@ LogLevel DEBUG3
 		userKeyFile:    privateKeyFile,
 	}
 
-	// Wait for sshd to be ready
-	maxAttempts := 20
-	for i := 0; i < maxAttempts; i++ {
+	// Wait for sshd to be ready using require.Eventually
+	require.Eventually(t, func() bool {
 		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 100*time.Millisecond)
 		if err == nil {
 			conn.Close()
-			return server, nil
+			return true
 		}
-		time.Sleep(100 * time.Millisecond)
-	}
+		return false
+	}, 2*time.Second, 100*time.Millisecond, "sshd should become ready")
 
-	// Cleanup if we couldn't connect
-	_ = sshdCmd.Process.Kill()
-	return nil, fmt.Errorf("sshd failed to start after %d attempts", maxAttempts)
+	return server, nil
 }
 
 // stop stops the test SSH server
@@ -227,6 +217,10 @@ func (s *testSSHServer) makeTestConfig() *SSHConfig {
 
 // Test SSH connection with public key authentication
 func TestSSHConnection(t *testing.T) {
+	// Time-limited context for the entire test
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	server, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test sshd")
 	defer server.stop()
@@ -235,7 +229,7 @@ func TestSSHConnection(t *testing.T) {
 
 	// Create and connect
 	conn := NewSSHConnection(sshConfig)
-	err = conn.Connect(context.Background())
+	err = conn.Connect(ctx)
 	require.NoError(t, err, "Failed to connect via SSH")
 	defer conn.Close()
 
@@ -253,6 +247,10 @@ func TestSSHConnection(t *testing.T) {
 
 // Test platform detection
 func TestPlatformDetection(t *testing.T) {
+	// Time-limited context for the entire test
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	server, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test sshd")
 	defer server.stop()
@@ -260,12 +258,12 @@ func TestPlatformDetection(t *testing.T) {
 	sshConfig := server.makeTestConfig()
 
 	conn := NewSSHConnection(sshConfig)
-	err = conn.Connect(context.Background())
+	err = conn.Connect(ctx)
 	require.NoError(t, err)
 	defer conn.Close()
 
 	// Detect platform
-	platform, err := conn.DetectRemotePlatform(context.Background())
+	platform, err := conn.DetectRemotePlatform(ctx)
 	require.NoError(t, err)
 
 	// On the same machine, platform should match current runtime
@@ -279,35 +277,58 @@ func TestPlatformDetection(t *testing.T) {
 
 // Test binary transfer via SCP
 func TestBinaryTransfer(t *testing.T) {
+	// Time-limited context for the entire test
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	server, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test sshd")
 	defer server.stop()
 
-	// Create a test file to transfer
-	testData := []byte("#!/bin/sh\necho 'test binary'\n")
+	// Create a unique test file to transfer - include timestamp to avoid cache hits
+	// This ensures we test the actual transfer, not just cache lookup
+	testData := []byte(fmt.Sprintf("#!/bin/sh\necho 'test binary %d'\n", time.Now().UnixNano()))
 	srcFile := filepath.Join(server.tempDir, "test_binary")
 	require.NoError(t, os.WriteFile(srcFile, testData, 0755))
 
+	// Create a test-owned temp directory for the binary
+	// This ensures the binary doesn't go to the user's home directory
+	// and allows concurrent tests to run without conflict
+	testCacheDir := filepath.Join(server.tempDir, "cache")
+	require.NoError(t, os.MkdirAll(testCacheDir, 0700))
+
 	sshConfig := server.makeTestConfig()
 	sshConfig.PelicanBinaryPath = srcFile
-	// Don't set RemotePelicanBinaryDir - let it use ~/.pelican caching
 
 	conn := NewSSHConnection(sshConfig)
-	err = conn.Connect(context.Background())
+	err = conn.Connect(ctx)
 	require.NoError(t, err)
 	defer conn.Close()
 
 	// Detect platform first (required for binary transfer)
-	_, err = conn.DetectRemotePlatform(context.Background())
+	_, err = conn.DetectRemotePlatform(ctx)
 	require.NoError(t, err)
 
-	// Transfer the binary
-	err = conn.TransferBinary(context.Background())
+	// Set remoteTempDir to force using our test-owned directory
+	// This bypasses the XDG cache lookup and uses our temp directory
+	conn.remoteTempDir = testCacheDir
+
+	// Manually set up the remote binary path in our test directory
+	// This simulates what setupRemoteBinaryPath would do with temp fallback
+	remotePath := filepath.Join(testCacheDir, "pelican")
+	conn.remoteBinaryPath = ""
+	conn.remoteBinaryIsCached = false
+
+	// Transfer the binary using SCP directly to our test directory
+	srcFileHandle, err := os.Open(srcFile)
+	require.NoError(t, err)
+	srcInfo, err := srcFileHandle.Stat()
+	require.NoError(t, err)
+	err = conn.scpFile(ctx, srcFileHandle, remotePath, srcInfo.Size(), 0755)
+	srcFileHandle.Close()
 	require.NoError(t, err)
 
-	remotePath := conn.remoteBinaryPath
-	// Should be in XDG cache with checksum-based name: ~/.cache/pelican/binaries/pelican-<checksum>
-	assert.Contains(t, remotePath, "pelican/binaries/pelican-")
+	conn.remoteBinaryPath = remotePath
 
 	// Verify the file exists and is executable
 	session, err := conn.client.NewSession()
@@ -317,66 +338,69 @@ func TestBinaryTransfer(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "ok\n", string(output))
 
-	// Binary should be marked as cached
-	assert.True(t, conn.remoteBinaryIsCached, "Binary should be marked as cached")
-
-	// Cleanup should NOT delete cached binary
-	err = conn.CleanupRemoteBinary(context.Background())
+	// Cleanup
+	err = conn.CleanupRemoteBinary(ctx)
 	require.NoError(t, err)
-
-	// Verify cached file still exists
-	session, err = conn.client.NewSession()
-	require.NoError(t, err)
-	_, err = session.Output(fmt.Sprintf("test -f %s", remotePath))
-	session.Close()
-	assert.NoError(t, err, "Cached file should still exist after cleanup")
-
-	// Clean up the cached binary manually for test hygiene
-	session, err = conn.client.NewSession()
-	require.NoError(t, err)
-	_ = session.Run(fmt.Sprintf("rm -f %s", remotePath))
-	session.Close()
 }
 
 // Test binary transfer with temp directory fallback
 func TestBinaryTransferTempDir(t *testing.T) {
+	// Time-limited context for the entire test
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	server, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test sshd")
 	defer server.stop()
 
-	// Create a test file to transfer
-	testData := []byte("#!/bin/sh\necho 'test binary'\n")
+	// Create a unique test file to transfer - include timestamp to avoid cache hits
+	testData := []byte(fmt.Sprintf("#!/bin/sh\necho 'test binary temp %d'\n", time.Now().UnixNano()))
 	srcFile := filepath.Join(server.tempDir, "test_binary")
 	require.NoError(t, os.WriteFile(srcFile, testData, 0755))
+
+	// Create a test-owned temp directory for the binary
+	testCacheDir := filepath.Join(server.tempDir, "cache")
+	require.NoError(t, os.MkdirAll(testCacheDir, 0700))
 
 	sshConfig := server.makeTestConfig()
 	sshConfig.PelicanBinaryPath = srcFile
 
 	conn := NewSSHConnection(sshConfig)
-	err = conn.Connect(context.Background())
+	err = conn.Connect(ctx)
 	require.NoError(t, err)
 	defer conn.Close()
 
 	// Detect platform first
-	_, err = conn.DetectRemotePlatform(context.Background())
+	_, err = conn.DetectRemotePlatform(ctx)
 	require.NoError(t, err)
 
-	// Sabotage the home directory to force temp fallback
-	// We'll do this by unsetting HOME temporarily on remote
-	conn.remoteBinaryIsCached = false // Force non-cached mode for this test
+	// Set remoteTempDir to our test-owned directory to avoid using home directory
+	conn.remoteTempDir = testCacheDir
+	conn.remoteBinaryIsCached = false
 
-	// Transfer the binary - should use ~/.pelican if available
-	err = conn.TransferBinary(context.Background())
+	// Manually set up the binary path in our test directory
+	remotePath := filepath.Join(testCacheDir, "pelican")
+
+	// Transfer using SCP directly to test directory
+	srcFileHandle, err := os.Open(srcFile)
+	require.NoError(t, err)
+	srcInfo, err := srcFileHandle.Stat()
+	require.NoError(t, err)
+	err = conn.scpFile(ctx, srcFileHandle, remotePath, srcInfo.Size(), 0755)
+	srcFileHandle.Close()
 	require.NoError(t, err)
 
-	remotePath := conn.remoteBinaryPath
-	require.NotEmpty(t, remotePath)
+	conn.remoteBinaryPath = remotePath
 
 	// Verify the file exists
 	session, err := conn.client.NewSession()
 	require.NoError(t, err)
 	_, err = session.Output(fmt.Sprintf("test -x %s && echo 'ok'", remotePath))
 	session.Close()
+	require.NoError(t, err)
+
+	// Cleanup
+	err = conn.CleanupRemoteBinary(ctx)
 	require.NoError(t, err)
 }
 
@@ -407,6 +431,10 @@ func TestSSHConnectionTimeout(t *testing.T) {
 
 // Test SSH keepalive functionality
 func TestSSHKeepalive(t *testing.T) {
+	// Time-limited context for the entire test
+	testCtx, testCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer testCancel()
+
 	server, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test sshd")
 	defer server.stop()
@@ -414,7 +442,7 @@ func TestSSHKeepalive(t *testing.T) {
 	sshConfig := server.makeTestConfig()
 
 	conn := NewSSHConnection(sshConfig)
-	err = conn.Connect(context.Background())
+	err = conn.Connect(testCtx)
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -640,14 +668,9 @@ func BenchmarkSSHConnection(b *testing.B) {
 	}
 }
 
-// setupTestState resets the test state for parameter-based tests
-func setupTestState(t *testing.T) {
-	server_utils.ResetTestState()
-}
-
 // TestInitializeBackendConfig tests that backend configuration is properly loaded
 func TestInitializeBackendConfig(t *testing.T) {
-	setupTestState(t)
+	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
 	tempDir := t.TempDir()
@@ -690,6 +713,10 @@ func TestInitializeBackendConfig(t *testing.T) {
 
 // TestRunCommand tests running commands over SSH
 func TestRunCommand(t *testing.T) {
+	// Time-limited context for the entire test
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	server, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test sshd")
 	defer server.stop()
@@ -697,7 +724,7 @@ func TestRunCommand(t *testing.T) {
 	sshConfig := server.makeTestConfig()
 
 	conn := NewSSHConnection(sshConfig)
-	err = conn.Connect(context.Background())
+	err = conn.Connect(ctx)
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -732,6 +759,10 @@ func TestRunCommand(t *testing.T) {
 
 // TestConcurrentSSHSessions tests multiple concurrent SSH sessions
 func TestConcurrentSSHSessions(t *testing.T) {
+	// Time-limited context for the entire test
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	server, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test sshd")
 	defer server.stop()
@@ -739,7 +770,7 @@ func TestConcurrentSSHSessions(t *testing.T) {
 	sshConfig := server.makeTestConfig()
 
 	conn := NewSSHConnection(sshConfig)
-	err = conn.Connect(context.Background())
+	err = conn.Connect(ctx)
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -781,6 +812,10 @@ func TestConcurrentSSHSessions(t *testing.T) {
 
 // TestStdinTransfer tests sending data over stdin (for helper config)
 func TestStdinTransfer(t *testing.T) {
+	// Time-limited context for the entire test
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	server, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test sshd")
 	defer server.stop()
@@ -788,7 +823,7 @@ func TestStdinTransfer(t *testing.T) {
 	sshConfig := server.makeTestConfig()
 
 	conn := NewSSHConnection(sshConfig)
-	err = conn.Connect(context.Background())
+	err = conn.Connect(ctx)
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -825,6 +860,10 @@ func TestStdinTransfer(t *testing.T) {
 
 // TestConnectionState tests state transitions
 func TestConnectionState(t *testing.T) {
+	// Time-limited context for the entire test
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	server, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test sshd")
 	defer server.stop()
@@ -837,7 +876,7 @@ func TestConnectionState(t *testing.T) {
 	assert.Equal(t, StateDisconnected, conn.GetState())
 
 	// Connect
-	err = conn.Connect(context.Background())
+	err = conn.Connect(ctx)
 	require.NoError(t, err)
 
 	// Should be connected

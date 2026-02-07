@@ -36,6 +36,8 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/term"
+
+	"github.com/pelicanplatform/pelican/config"
 )
 
 // PTYAuthClient handles interactive keyboard-interactive authentication via PTY
@@ -77,8 +79,16 @@ func NewPTYAuthClient(wsURL string) *PTYAuthClient {
 
 // Connect connects to the WebSocket server
 func (c *PTYAuthClient) Connect(ctx context.Context) error {
+	// Use config.GetTransport() for proper TLS configuration and broker-aware dialer
+	// This ensures wss:// connections work correctly with Pelican's TLS settings
+	transport := config.GetTransport()
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 10 * time.Second,
+		NetDialContext:   transport.DialContext,
+		TLSClientConfig:  transport.TLSClientConfig,
+		Proxy:            transport.Proxy,
+		ReadBufferSize:   1024,
+		WriteBufferSize:  1024,
 	}
 
 	// Parse the URL to add scheme if needed
@@ -204,6 +214,21 @@ func (c *PTYAuthClient) Run(ctx context.Context) error {
 			if err := c.handleChallenge(msg.Payload); err != nil {
 				return errors.Wrap(err, "failed to handle challenge")
 			}
+
+		case WsMsgTypeAuthComplete:
+			// Server indicates all authentication is complete
+			var payload map[string]string
+			if err := json.Unmarshal(msg.Payload, &payload); err == nil {
+				if message, ok := payload["message"]; ok && message != "" {
+					fmt.Fprintf(c.stdout, "\n%s\n", message)
+				} else {
+					fmt.Fprintln(c.stdout, "\nAuthentication complete. SSH connection established.")
+				}
+			} else {
+				fmt.Fprintln(c.stdout, "\nAuthentication complete. SSH connection established.")
+			}
+			// Clean exit - auth is done, no more interaction needed
+			return nil
 
 		case WsMsgTypeStatus:
 			var status map[string]interface{}
@@ -347,7 +372,8 @@ func GetConnectionStatus(ctx context.Context, originURL string) (map[string]inte
 		return nil, errors.Wrap(err, "failed to create request")
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	// Use config.GetClient() for broker-aware transport and proper TLS configuration
+	client := config.GetClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, errors.Wrap(err, "request failed")

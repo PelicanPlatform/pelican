@@ -643,7 +643,7 @@ func runSSHAuthTest(cmd *cobra.Command, args []string) error {
 	if sshTestConnectOnly {
 		// Phase 1.5: Run a quick command to verify
 		fmt.Println("\n[Phase 1.5] Testing command execution...")
-		output, err := conn.RunCommand(ctx, "echo 'SSH connection successful' && uname -a")
+		output, err := conn.RunCommandArgs(ctx, []string{"sh", "-c", "echo 'SSH connection successful' && uname -a"})
 		if err != nil {
 			return fmt.Errorf("command execution failed: %w", err)
 		}

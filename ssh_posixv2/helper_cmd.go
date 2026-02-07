@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -38,7 +39,6 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/afero"
 	"golang.org/x/net/webdav"
 	"golang.org/x/sync/errgroup"
 
@@ -57,6 +57,18 @@ type HelperProcess struct {
 
 	// lastHTTPKeepalive is the time of the last HTTP keepalive received
 	lastHTTPKeepalive atomic.Value // time.Time
+
+	// lastStdinKeepalive is the time of the last stdin keepalive received from origin
+	lastStdinKeepalive atomic.Value // time.Time
+
+	// stdinReader is a buffered reader for stdin
+	stdinReader *bufio.Reader
+
+	// stdinMu protects stdin read operations
+	stdinMu sync.Mutex
+
+	// stdoutMu protects stdout write operations
+	stdoutMu sync.Mutex
 
 	// mu protects shared state
 	mu sync.Mutex
@@ -83,13 +95,25 @@ type HelperKeepaliveResponse struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
+// StdinMessage is a message sent over stdin from the origin to the helper
+type StdinMessage struct {
+	Type string `json:"type"` // "ping" or "shutdown"
+}
+
+// StdoutMessage is a message sent over stdout from the helper to the origin
+type StdoutMessage struct {
+	Type      string    `json:"type"` // "pong" or "ready"
+	Timestamp time.Time `json:"timestamp"`
+	Uptime    string    `json:"uptime,omitempty"`
+}
+
 // RunHelper is the main entry point for the SSH helper process
 // It reads configuration from stdin and runs the WebDAV server
 func RunHelper(ctx context.Context) error {
 	log.Info("SSH helper process starting")
 
 	// Read configuration from stdin
-	config, err := readHelperConfig()
+	config, stdinReader, err := readHelperConfig()
 	if err != nil {
 		return errors.Wrap(err, "failed to read helper config from stdin")
 	}
@@ -99,12 +123,14 @@ func RunHelper(ctx context.Context) error {
 	// Create the helper process
 	ctx, cancel := context.WithCancel(ctx)
 	helper := &HelperProcess{
-		config:    config,
-		ctx:       ctx,
-		cancel:    cancel,
-		startTime: time.Now(),
+		config:      config,
+		ctx:         ctx,
+		cancel:      cancel,
+		startTime:   time.Now(),
+		stdinReader: stdinReader,
 	}
 	helper.lastHTTPKeepalive.Store(time.Now())
+	helper.lastStdinKeepalive.Store(time.Now())
 
 	// Initialize the WebDAV handlers
 	if err := helper.initializeHandlers(); err != nil {
@@ -115,43 +141,72 @@ func RunHelper(ctx context.Context) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 
-	// Start the keepalive monitor
-	go helper.runKeepaliveMonitor()
+	// Send ready message to origin
+	if err := helper.sendStdoutMessage(StdoutMessage{
+		Type:      "ready",
+		Timestamp: time.Now(),
+	}); err != nil {
+		log.Warnf("Failed to send ready message: %v", err)
+	}
 
-	// Start listening for broker connections
-	go helper.runBrokerListener()
+	// Use errgroup to track all goroutines
+	egrp, egrpCtx := errgroup.WithContext(ctx)
 
-	// Wait for signal or context cancellation
+	// Start the stdin keepalive handler (origin drives, helper responds)
+	egrp.Go(func() error {
+		return helper.runStdinKeepalive(egrpCtx)
+	})
+
+	// Start the keepalive monitor (checks both HTTP and stdin keepalives)
+	egrp.Go(func() error {
+		helper.runKeepaliveMonitor(egrpCtx)
+		return nil
+	})
+
+	// Start the broker listener
+	egrp.Go(func() error {
+		helper.runBrokerListener(egrpCtx)
+		return nil
+	})
+
+	// Wait for signal, context cancellation, or errgroup error
 	select {
 	case sig := <-sigChan:
 		log.Infof("Received signal %v, shutting down", sig)
-	case <-ctx.Done():
+		cancel()
+	case <-egrpCtx.Done():
 		log.Info("Context cancelled, shutting down")
 	}
 
 	// Graceful shutdown
 	helper.shutdown()
 
+	// Wait for all goroutines to finish
+	if err := egrp.Wait(); err != nil && !errors.Is(err, context.Canceled) {
+		log.Debugf("Errgroup finished with error: %v", err)
+	}
+
 	log.Info("SSH helper process exiting")
 	return nil
 }
 
 // readHelperConfig reads the HelperConfig from stdin
-func readHelperConfig() (*HelperConfig, error) {
+// Returns the config and the buffered reader for continued stdin use
+func readHelperConfig() (*HelperConfig, *bufio.Reader, error) {
 	reader := bufio.NewReader(os.Stdin)
 
 	// Read until newline
 	line, err := reader.ReadBytes('\n')
 	if err != nil && err != io.EOF {
-		return nil, errors.Wrap(err, "failed to read from stdin")
+		return nil, nil, errors.Wrap(err, "failed to read from stdin")
 	}
 
 	var config HelperConfig
 	if err := json.Unmarshal(line, &config); err != nil {
-		return nil, errors.Wrap(err, "failed to parse config JSON")
+		return nil, nil, errors.Wrap(err, "failed to parse config JSON")
 	}
 
-	return &config, nil
+	return &config, reader, nil
 }
 
 // initializeHandlers sets up the WebDAV handlers for each export
@@ -159,12 +214,16 @@ func (h *HelperProcess) initializeHandlers() error {
 	h.webdavHandlers = make(map[string]*webdav.Handler)
 
 	for _, export := range h.config.Exports {
-		// Create a base filesystem rooted at StoragePrefix
-		// Using afero.NewBasePathFs to restrict access to the storage prefix
-		baseFs := afero.NewBasePathFs(afero.NewOsFs(), export.StoragePrefix)
+		// Use OsRootFs from server_utils to prevent symlink traversal attacks
+		// This uses Go 1.25's os.Root to ensure all file operations
+		// stay within the designated storage prefix
+		osRootFs, err := server_utils.NewOsRootFs(export.StoragePrefix)
+		if err != nil {
+			return errors.Wrapf(err, "failed to create OsRootFs for %s", export.StoragePrefix)
+		}
 
-		// Wrap with auto-directory creation
-		fs := newHelperAutoCreateDirFs(baseFs)
+		// Wrap with auto-directory creation using server_utils
+		autoFs := server_utils.NewAutoCreateDirFs(osRootFs)
 
 		// Create the WebDAV handler
 		logger := func(r *http.Request, err error) {
@@ -173,11 +232,8 @@ func (h *HelperProcess) initializeHandlers() error {
 			}
 		}
 
-		afs := &helperAferoFileSystem{
-			fs:     fs,
-			prefix: "",
-			logger: logger,
-		}
+		// Use server_utils AferoFileSystem
+		afs := server_utils.NewAferoFileSystem(autoFs, "", logger)
 
 		handler := &webdav.Handler{
 			FileSystem: afs,
@@ -192,8 +248,112 @@ func (h *HelperProcess) initializeHandlers() error {
 	return nil
 }
 
-// runKeepaliveMonitor monitors keepalive messages and shuts down if no keepalive received
-func (h *HelperProcess) runKeepaliveMonitor() {
+// runStdinKeepalive handles ping/pong keepalive messages from the origin via stdin.
+// The origin drives the keepalive rate - it sends "ping" messages and the helper
+// responds with "pong". The origin can also send "shutdown" to gracefully stop the helper.
+func (h *HelperProcess) runStdinKeepalive(ctx context.Context) error {
+	// Use a single persistent goroutine for reading stdin to avoid orphaned goroutines.
+	// The reader goroutine will exit when stdin is closed (EOF) or on read error.
+	type readResult struct {
+		line []byte
+		err  error
+	}
+	resultChan := make(chan readResult)
+
+	// Start a single reader goroutine that persists for the lifetime of this function
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			h.stdinMu.Lock()
+			line, err := h.stdinReader.ReadBytes('\n')
+			h.stdinMu.Unlock()
+
+			select {
+			case resultChan <- readResult{line: line, err: err}:
+				if err != nil {
+					// Exit on any error (including EOF)
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Ensure the reader goroutine is cleaned up when we exit
+	defer func() {
+		// Close stdin to unblock the reader goroutine if it's waiting
+		os.Stdin.Close()
+		wg.Wait()
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case result := <-resultChan:
+			if result.err != nil {
+				if result.err == io.EOF {
+					log.Info("Stdin closed, shutting down")
+					h.cancel()
+					return nil
+				}
+				log.Warnf("Error reading from stdin: %v", result.err)
+				h.cancel()
+				return result.err
+			}
+
+			var msg StdinMessage
+			if err := json.Unmarshal(result.line, &msg); err != nil {
+				log.Debugf("Failed to parse stdin message: %v", err)
+				continue
+			}
+
+			switch msg.Type {
+			case "ping":
+				// Update last keepalive time
+				h.lastStdinKeepalive.Store(time.Now())
+
+				// Send pong response
+				if err := h.sendStdoutMessage(StdoutMessage{
+					Type:      "pong",
+					Timestamp: time.Now(),
+					Uptime:    time.Since(h.startTime).String(),
+				}); err != nil {
+					log.Warnf("Failed to send pong: %v", err)
+				}
+
+			case "shutdown":
+				log.Info("Received shutdown message from origin")
+				h.cancel()
+				return nil
+
+			default:
+				log.Debugf("Unknown stdin message type: %s", msg.Type)
+			}
+		}
+	}
+}
+
+// sendStdoutMessage sends a JSON message to stdout
+func (h *HelperProcess) sendStdoutMessage(msg StdoutMessage) error {
+	h.stdoutMu.Lock()
+	defer h.stdoutMu.Unlock()
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+
+	_, err = fmt.Fprintf(os.Stdout, "%s\n", data)
+	return err
+}
+
+// runKeepaliveMonitor monitors keepalive messages and shuts down if no keepalive received.
+// It checks both HTTP keepalives (from WebDAV requests) and stdin keepalives (from origin).
+func (h *HelperProcess) runKeepaliveMonitor(ctx context.Context) {
 	timeout := h.config.KeepaliveTimeout
 	if timeout <= 0 {
 		timeout = DefaultKeepaliveTimeout
@@ -204,13 +364,22 @@ func (h *HelperProcess) runKeepaliveMonitor() {
 
 	for {
 		select {
-		case <-h.ctx.Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			lastKeepalive := h.lastHTTPKeepalive.Load().(time.Time)
+			// Check both HTTP and stdin keepalives
+			lastHTTP := h.lastHTTPKeepalive.Load().(time.Time)
+			lastStdin := h.lastStdinKeepalive.Load().(time.Time)
+
+			// Use the more recent of the two
+			lastKeepalive := lastHTTP
+			if lastStdin.After(lastHTTP) {
+				lastKeepalive = lastStdin
+			}
+
 			if time.Since(lastKeepalive) > timeout {
-				log.Warnf("HTTP keepalive timeout exceeded (last: %v ago, timeout: %v), shutting down",
-					time.Since(lastKeepalive), timeout)
+				log.Warnf("Keepalive timeout exceeded (last HTTP: %v ago, last stdin: %v ago, timeout: %v), shutting down",
+					time.Since(lastHTTP), time.Since(lastStdin), timeout)
 				h.cancel()
 				return
 			}
@@ -219,7 +388,7 @@ func (h *HelperProcess) runKeepaliveMonitor() {
 }
 
 // runBrokerListener listens for incoming broker connections
-func (h *HelperProcess) runBrokerListener() {
+func (h *HelperProcess) runBrokerListener(ctx context.Context) {
 	// Register with the broker using the provided callback URL
 	// The helper will poll the broker for reverse connection requests
 	// and serve WebDAV over those connections
@@ -240,7 +409,7 @@ func (h *HelperProcess) runBrokerListener() {
 
 	// Start serving on a local port and register with the broker
 	// The broker will forward connections to us
-	h.serveWithBroker(mux)
+	h.serveWithBroker(ctx, mux)
 }
 
 // handleKeepalive handles keepalive requests from the origin
@@ -308,9 +477,13 @@ func (h *HelperProcess) wrapWithAuth(handler http.Handler) http.Handler {
 			}
 		}
 
-		// Check for auth cookie in header
-		cookie := r.Header.Get("X-Pelican-Auth-Cookie")
-		if cookie != h.config.AuthCookie {
+		// Check for auth token in Authorization header (Bearer token)
+		authHeader := r.Header.Get("Authorization")
+		token := ""
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			token = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+		if token != h.config.AuthCookie {
 			// For WebDAV, we need to check authorization more carefully
 			// Allow public reads if configured
 			if matchingExport != nil {
@@ -347,7 +520,7 @@ func matchesPrefix(path, prefix string) bool {
 // When a request is pending, the helper connects to the origin's callback endpoint,
 // and the connection gets reversed - the helper becomes the HTTP server while the
 // origin becomes the client.
-func (h *HelperProcess) serveWithBroker(handler http.Handler) {
+func (h *HelperProcess) serveWithBroker(ctx context.Context, handler http.Handler) {
 	log.Info("Starting broker-based reverse connection listener")
 
 	// Get the origin callback URL from config
@@ -369,14 +542,14 @@ func (h *HelperProcess) serveWithBroker(handler http.Handler) {
 	}
 
 	// Use errgroup for proper goroutine management
-	egrp, ctx := errgroup.WithContext(h.ctx)
+	egrp, egrpCtx := errgroup.WithContext(ctx)
 
 	// Number of concurrent polling goroutines
 	numPollers := 3
 
 	for i := 0; i < numPollers; i++ {
 		egrp.Go(func() error {
-			h.pollAndServe(ctx, client, retrieveURL, callbackURL, handler)
+			h.pollAndServe(egrpCtx, client, retrieveURL, callbackURL, handler)
 			return nil
 		})
 	}
@@ -452,19 +625,11 @@ func (h *HelperProcess) pollAndServe(ctx context.Context, client *http.Client, r
 
 // pollRetrieve polls the origin's retrieve endpoint for pending requests
 func (h *HelperProcess) pollRetrieve(ctx context.Context, client *http.Client, retrieveURL string) (string, error) {
-	reqBody := helperRetrieveRequest{
-		AuthCookie: h.config.AuthCookie,
-	}
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to marshal retrieve request")
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, retrieveURL, bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, retrieveURL, nil)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to create retrieve request")
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+h.config.AuthCookie)
 	req.Header.Set("X-Pelican-Timeout", "5s")
 
 	resp, err := client.Do(req)
@@ -494,8 +659,7 @@ func (h *HelperProcess) pollRetrieve(ctx context.Context, client *http.Client, r
 // in the reverse direction, maintaining encryption throughout.
 func (h *HelperProcess) callbackAndServe(ctx context.Context, client *http.Client, callbackURL, reqID string, handler http.Handler) error {
 	reqBody := helperCallbackRequest{
-		RequestID:  reqID,
-		AuthCookie: h.config.AuthCookie,
+		RequestID: reqID,
 	}
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
@@ -543,6 +707,7 @@ func (h *HelperProcess) callbackAndServe(ctx context.Context, client *http.Clien
 		return errors.Wrap(err, "failed to create callback request")
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+h.config.AuthCookie)
 
 	resp, err := callbackClient.Do(req)
 	if err != nil {
