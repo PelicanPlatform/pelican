@@ -122,6 +122,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.Url": false,
 	"Cache.XRootDPrefix": false,
 	"Client.AssumeDirectorServerHeader": false,
+	"Client.CredentialFile": false,
 	"Client.DirectorRetries": false,
 	"Client.DisableHttpProxy": false,
 	"Client.DisableProxyFallback": false,
@@ -481,6 +482,8 @@ func (sP StringParam) GetString() string {
 			return config.Cache.Url
 		case "Cache.XRootDPrefix":
 			return config.Cache.XRootDPrefix
+		case "Client.CredentialFile":
+			return config.Client.CredentialFile
 		case "Director.AdvertiseUrl":
 			return config.Director.AdvertiseUrl
 		case "Director.CacheSortMethod":
@@ -1276,6 +1279,7 @@ var allParameterNames = []string{
 	"Cache.Url",
 	"Cache.XRootDPrefix",
 	"Client.AssumeDirectorServerHeader",
+	"Client.CredentialFile",
 	"Client.DirectorRetries",
 	"Client.DisableHttpProxy",
 	"Client.DisableProxyFallback",
@@ -1603,6 +1607,7 @@ var (
 	Cache_StorageLocation = StringParam{"Cache.StorageLocation"}
 	Cache_Url = StringParam{"Cache.Url"}
 	Cache_XRootDPrefix = StringParam{"Cache.XRootDPrefix"}
+	Client_CredentialFile = StringParam{"Client.CredentialFile"}
 	Director_AdvertiseUrl = StringParam{"Director.AdvertiseUrl"}
 	Director_CacheSortMethod = StringParam{"Director.CacheSortMethod"}
 	Director_DbLocation = StringParam{"Director.DbLocation"}
