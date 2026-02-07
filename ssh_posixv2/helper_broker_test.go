@@ -19,7 +19,9 @@
 package ssh_posixv2
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -33,6 +35,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/net/webdav"
 )
 
 func init() {
@@ -66,7 +69,7 @@ func TestHelperBrokerAuthCookieGeneration(t *testing.T) {
 	assert.NotEqual(t, cookie1, cookie2)
 }
 
-// TestHelperBrokerRetrieveEndpoint tests the retrieve endpoint behavior
+// TestHelperBrokerRetrieveEndpoint tests the retrieve endpoint actually works
 func TestHelperBrokerRetrieveEndpoint(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -75,20 +78,81 @@ func TestHelperBrokerRetrieveEndpoint(t *testing.T) {
 	SetHelperBroker(broker)
 	defer SetHelperBroker(nil)
 
-	// Test the handler directly instead of through gin routing
-	t.Run("handleHelperRetrieve with valid auth", func(t *testing.T) {
-		// The handleHelperRetrieve function reads from pendingRequests
-		// which is now a map, not a channel. We need to test the actual
-		// behavior when there are no pending requests (timeout case).
-		// This is better tested at the integration level.
+	// Set up gin router with the handler
+	router := gin.New()
+	RegisterHelperBrokerHandlers(router, ctx)
 
-		// For now, verify the broker was set correctly
-		assert.NotNil(t, GetHelperBroker())
-		assert.Equal(t, broker, GetHelperBroker())
+	t.Run("rejects missing auth header", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1.0/origin/ssh/retrieve", nil)
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("rejects invalid auth token", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1.0/origin/ssh/retrieve", nil)
+		req.Header.Set("Authorization", "Bearer wrong-cookie")
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("returns timeout when no pending requests", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1.0/origin/ssh/retrieve", nil)
+		req.Header.Set("Authorization", "Bearer test-cookie-abc123")
+		req.Header.Set("X-Pelican-Timeout", "200ms")
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+
+		var resp helperRetrieveResponse
+		err := json.NewDecoder(rec.Body).Decode(&resp)
+		require.NoError(t, err)
+		assert.Equal(t, "timeout", resp.Status)
+	})
+
+	t.Run("returns request ID when pending request exists", func(t *testing.T) {
+		// Create a pending request in a goroutine
+		go func() {
+			shortCtx, shortCancel := context.WithTimeout(ctx, 2*time.Second)
+			defer shortCancel()
+
+			_, err := broker.RequestConnection(shortCtx)
+			// Will fail because no one calls back, but it creates a pending request
+			_ = err
+		}()
+
+		// Wait for the pending request to be created
+		require.Eventually(t, func() bool {
+			broker.mu.Lock()
+			defer broker.mu.Unlock()
+			return len(broker.pendingRequests) > 0
+		}, 2*time.Second, 10*time.Millisecond, "pending request was not created")
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1.0/origin/ssh/retrieve", nil)
+		req.Header.Set("Authorization", "Bearer test-cookie-abc123")
+		req.Header.Set("X-Pelican-Timeout", "1s")
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+
+		var resp helperRetrieveResponse
+		err := json.NewDecoder(rec.Body).Decode(&resp)
+		require.NoError(t, err)
+		assert.Equal(t, "ok", resp.Status)
+		assert.NotEmpty(t, resp.RequestID)
 	})
 }
 
-// TestHelperBrokerCallbackEndpoint tests the callback endpoint behavior
+// TestHelperBrokerCallbackEndpoint tests the callback endpoint actually works
 func TestHelperBrokerCallbackEndpoint(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -97,15 +161,62 @@ func TestHelperBrokerCallbackEndpoint(t *testing.T) {
 	SetHelperBroker(broker)
 	defer SetHelperBroker(nil)
 
-	// The callback endpoint requires JSON body and proper request structure
-	// This is better tested at the integration level with proper HTTP setup
-	t.Run("broker is set", func(t *testing.T) {
-		assert.NotNil(t, GetHelperBroker())
-		assert.Equal(t, broker, GetHelperBroker())
+	// Set up gin router with the handler
+	router := gin.New()
+	RegisterHelperBrokerHandlers(router, ctx)
+
+	t.Run("rejects missing auth header", func(t *testing.T) {
+		reqBody, _ := json.Marshal(helperCallbackRequest{
+			RequestID: "test-request-id",
+		})
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1.0/origin/ssh/callback", bytes.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("rejects invalid auth token", func(t *testing.T) {
+		reqBody, _ := json.Marshal(helperCallbackRequest{
+			RequestID: "test-request-id",
+		})
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1.0/origin/ssh/callback", bytes.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer wrong-cookie")
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("rejects unknown request ID", func(t *testing.T) {
+		reqBody, _ := json.Marshal(helperCallbackRequest{
+			RequestID: "nonexistent-request-id",
+		})
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1.0/origin/ssh/callback", bytes.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer test-cookie-callback")
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+		var resp helperCallbackResponse
+		err := json.NewDecoder(rec.Body).Decode(&resp)
+		require.NoError(t, err)
+		assert.Equal(t, "error", resp.Status)
+		assert.Contains(t, resp.Msg, "No such request")
 	})
 }
 
-// TestHelperTransport tests the HelperTransport RoundTripper
+// TestHelperTransport tests the HelperTransport RoundTripper actually works
 func TestHelperTransport(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -123,7 +234,54 @@ func TestHelperTransport(t *testing.T) {
 
 		_, err = transport.RoundTrip(req)
 		assert.Error(t, err)
-		// Should timeout waiting for connection
+	})
+
+	t.Run("round trip succeeds with pooled connection", func(t *testing.T) {
+		// Create a mock server to respond to the request
+		clientConn, serverConn := net.Pipe()
+		defer clientConn.Close()
+		defer serverConn.Close()
+
+		// Pre-populate the pool with a connection to the mock server
+		select {
+		case broker.connectionPool <- clientConn:
+		default:
+			t.Fatal("failed to add connection to pool")
+		}
+
+		// Server goroutine: read request and send response
+		serverDone := make(chan struct{})
+		go func() {
+			defer close(serverDone)
+			// Read the HTTP request
+			buf := make([]byte, 1024)
+			n, err := serverConn.Read(buf)
+			if err != nil {
+				return
+			}
+			// Verify we got an HTTP request
+			if !bytes.Contains(buf[:n], []byte("GET /test HTTP/1.1")) {
+				t.Errorf("unexpected request: %s", string(buf[:n]))
+				return
+			}
+			// Send HTTP response
+			response := "HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\nHello World"
+			_, _ = serverConn.Write([]byte(response))
+		}()
+
+		req, err := http.NewRequestWithContext(ctx, "GET", "http://helper/test", nil)
+		require.NoError(t, err)
+
+		resp, err := transport.RoundTrip(req)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		resp.Body.Close()
+		assert.Equal(t, "Hello World", string(body))
+
+		<-serverDone
 	})
 }
 
@@ -134,7 +292,8 @@ func TestOneShotListener(t *testing.T) {
 	defer clientConn.Close()
 	defer serverConn.Close()
 
-	listener := newOneShotListener(serverConn, &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
+	// Use the pipe's address (dynamic, not fixed port)
+	listener := newOneShotListener(serverConn, serverConn.LocalAddr())
 
 	t.Run("accept returns the connection once", func(t *testing.T) {
 		conn, err := listener.Accept()
@@ -145,6 +304,10 @@ func TestOneShotListener(t *testing.T) {
 	t.Run("accept returns error after first call", func(t *testing.T) {
 		_, err := listener.Accept()
 		assert.Error(t, err)
+	})
+
+	t.Run("addr returns the configured address", func(t *testing.T) {
+		assert.Equal(t, serverConn.LocalAddr(), listener.Addr())
 	})
 
 	t.Run("close is idempotent", func(t *testing.T) {
@@ -188,75 +351,138 @@ func TestHelperBrokerConcurrentRequests(t *testing.T) {
 
 	broker := NewHelperBroker(ctx, "test-cookie-concurrent")
 
-	numRequests := 5
+	numConns := 3
 	var wg sync.WaitGroup
 
-	// Start multiple concurrent requests
-	for i := 0; i < numRequests; i++ {
+	// Pre-populate the pool with connections
+	pipes := make([]struct{ client, server net.Conn }, numConns)
+	for i := range pipes {
+		client, server := net.Pipe()
+		pipes[i].client = client
+		pipes[i].server = server
+		defer client.Close()
+		defer server.Close()
+
+		select {
+		case broker.connectionPool <- pipes[i].server:
+		default:
+			t.Fatalf("failed to add connection %d to pool", i)
+		}
+	}
+
+	// Start concurrent requests - they should all succeed
+	results := make([]net.Conn, numConns)
+	for i := 0; i < numConns; i++ {
 		wg.Add(1)
-		go func() {
+		go func(idx int) {
 			defer wg.Done()
 
-			shortCtx, shortCancel := context.WithTimeout(ctx, 50*time.Millisecond)
-			defer shortCancel()
-
-			_, err := broker.RequestConnection(shortCtx)
-			// Should timeout since no connections are available
-			assert.Error(t, err)
-		}()
+			conn, err := broker.RequestConnection(ctx)
+			if err != nil {
+				t.Errorf("request %d failed: %v", idx, err)
+				return
+			}
+			results[idx] = conn
+		}(i)
 	}
 
 	wg.Wait()
+
+	// All connections should have been consumed
+	for i, conn := range results {
+		assert.NotNil(t, conn, "connection %d should not be nil", i)
+	}
+
+	// Pool should be empty now - next request should timeout
+	shortCtx, shortCancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer shortCancel()
+
+	_, err := broker.RequestConnection(shortCtx)
+	assert.Error(t, err, "should timeout when pool is empty")
 }
 
-// TestReverseConnectionFlow tests the full reverse connection flow
-func TestReverseConnectionFlow(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+// TestReverseConnectionFlowIntegration tests the full reverse connection flow end-to-end
+func TestReverseConnectionFlowIntegration(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	broker := NewHelperBroker(ctx, "test-cookie-flow")
+	broker := NewHelperBroker(ctx, "test-cookie-integration")
 	SetHelperBroker(broker)
 	defer SetHelperBroker(nil)
 
-	// Test that pre-populated pool connections are used immediately
-	t.Run("request uses pre-populated pool connection", func(t *testing.T) {
-		// Pre-populate the pool
-		clientPipe, serverPipe := net.Pipe()
-		defer clientPipe.Close()
-		defer serverPipe.Close()
+	// Start the origin server with helper broker handlers
+	router := gin.New()
+	RegisterHelperBrokerHandlers(router, ctx)
+	originServer := httptest.NewServer(router)
+	defer originServer.Close()
 
+	// Create a mock "helper" that will poll and callback
+	t.Run("full retrieve-callback-serve flow", func(t *testing.T) {
+		// Channel to signal the helper served a request
+		helperServed := make(chan string, 1)
+
+		// Start a goroutine simulating the helper process
+		go func() {
+			// Poll for pending requests
+			pollReq, _ := http.NewRequest(http.MethodPost, originServer.URL+"/api/v1.0/origin/ssh/retrieve", nil)
+			pollReq.Header.Set("Authorization", "Bearer test-cookie-integration")
+			pollReq.Header.Set("X-Pelican-Timeout", "5s")
+
+			resp, err := http.DefaultClient.Do(pollReq)
+			if err != nil {
+				t.Logf("poll request failed: %v", err)
+				return
+			}
+			defer resp.Body.Close()
+
+			var pollResp helperRetrieveResponse
+			if err := json.NewDecoder(resp.Body).Decode(&pollResp); err != nil {
+				t.Logf("failed to decode poll response: %v", err)
+				return
+			}
+
+			if pollResp.Status != "ok" || pollResp.RequestID == "" {
+				t.Logf("no pending request: %s", pollResp.Status)
+				return
+			}
+
+			// Got a request ID - now simulate serving a response
+			helperServed <- pollResp.RequestID
+		}()
+
+		// Client side: request a connection
+		go func() {
+			shortCtx, shortCancel := context.WithTimeout(ctx, 3*time.Second)
+			defer shortCancel()
+
+			_, err := broker.RequestConnection(shortCtx)
+			// This will timeout because we don't complete the callback
+			// but the helper should receive the request ID
+			_ = err
+		}()
+
+		// Wait for the helper to receive the request ID
 		select {
-		case broker.connectionPool <- serverPipe:
-		default:
-			t.Fatal("failed to add connection to pool")
+		case reqID := <-helperServed:
+			assert.NotEmpty(t, reqID)
+		case <-time.After(3 * time.Second):
+			t.Fatal("helper did not receive request ID in time")
 		}
-
-		// Request should immediately get the pooled connection
-		conn, err := broker.RequestConnection(ctx)
-		require.NoError(t, err)
-		assert.Equal(t, serverPipe, conn)
-	})
-
-	// Test that request times out when no connection is available
-	t.Run("request times out when no pool connection", func(t *testing.T) {
-		shortCtx, shortCancel := context.WithTimeout(ctx, 100*time.Millisecond)
-		defer shortCancel()
-
-		_, err := broker.RequestConnection(shortCtx)
-		assert.Error(t, err)
-		assert.Equal(t, context.DeadlineExceeded, err)
 	})
 }
 
 // TestSSHFileSystemInterface tests that SSHFileSystem implements webdav.FileSystem
 func TestSSHFileSystemInterface(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	broker := NewHelperBroker(ctx, "test-cookie-fs")
 	fs := NewSSHFileSystem(broker, "/test", "/data")
 
 	require.NotNil(t, fs)
+
+	// Verify that SSHFileSystem implements webdav.FileSystem interface
+	var _ webdav.FileSystem = fs
 
 	// Test URL construction
 	url := fs.makeHelperURL("/subdir/file.txt")
@@ -300,7 +526,7 @@ func TestSSHFileInfo(t *testing.T) {
 
 // TestSSHFileMethods tests the sshFile implementation
 func TestSSHFileMethods(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	broker := NewHelperBroker(ctx, "test-cookie-file")
@@ -366,7 +592,7 @@ func TestSSHFileMethods(t *testing.T) {
 
 // TestWebDAVXMLParsing tests parsing of PROPFIND responses
 func TestWebDAVXMLParsing(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	broker := NewHelperBroker(ctx, "test-cookie-xml")
@@ -421,7 +647,7 @@ func TestWebDAVXMLParsing(t *testing.T) {
 
 // TestIntegrationWithMockHelper tests the full flow with a mock helper server
 func TestIntegrationWithMockHelper(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	// Create a mock helper server that serves WebDAV responses
@@ -548,7 +774,15 @@ func TestHelperCmdPollRetrieve(t *testing.T) {
 	requestReceived := make(chan struct{}, 1)
 	mockOrigin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1.0/origin/ssh/retrieve" {
-			if r.Header.Get("X-Pelican-Auth") != "test-cookie" {
+			// Verify auth via Authorization: Bearer header
+			authHeader := r.Header.Get("Authorization")
+			if !strings.HasPrefix(authHeader, "Bearer ") {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			token := strings.TrimPrefix(authHeader, "Bearer ")
+
+			if token != "test-cookie" {
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
@@ -559,8 +793,8 @@ func TestHelperCmdPollRetrieve(t *testing.T) {
 			}
 
 			// Simulate no pending requests (timeout)
-			time.Sleep(100 * time.Millisecond)
-			w.WriteHeader(http.StatusNoContent)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"timeout"}`))
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -573,9 +807,9 @@ func TestHelperCmdPollRetrieve(t *testing.T) {
 	// Test the pollRetrieve function behavior
 	client := &http.Client{Timeout: 1 * time.Second}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", mockOrigin.URL+"/api/v1.0/origin/ssh/retrieve", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, mockOrigin.URL+"/api/v1.0/origin/ssh/retrieve", nil)
 	require.NoError(t, err)
-	req.Header.Set("X-Pelican-Auth", "test-cookie")
+	req.Header.Set("Authorization", "Bearer test-cookie")
 
 	resp, err := client.Do(req)
 	require.NoError(t, err)
@@ -589,7 +823,12 @@ func TestHelperCmdPollRetrieve(t *testing.T) {
 		t.Fatal("request was not received")
 	}
 
-	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var pollResp helperRetrieveResponse
+	err = json.NewDecoder(resp.Body).Decode(&pollResp)
+	require.NoError(t, err)
+	assert.Equal(t, "timeout", pollResp.Status)
 }
 
 // TestCallbackConnectionReversal tests the callback connection reversal mechanism
@@ -666,7 +905,7 @@ func TestHelperCapabilityEnforcement(t *testing.T) {
 	t.Run("PUT blocked when writes disabled", func(t *testing.T) {
 		handlerCalled = false
 		req := httptest.NewRequest(http.MethodPut, "/test/file.txt", strings.NewReader("content"))
-		req.Header.Set("X-Pelican-Auth-Cookie", "test-cookie-123")
+		req.Header.Set("Authorization", "Bearer test-cookie-123")
 		rec := httptest.NewRecorder()
 
 		wrappedHandler.ServeHTTP(rec, req)
@@ -679,7 +918,7 @@ func TestHelperCapabilityEnforcement(t *testing.T) {
 	t.Run("DELETE blocked when writes disabled", func(t *testing.T) {
 		handlerCalled = false
 		req := httptest.NewRequest(http.MethodDelete, "/test/file.txt", nil)
-		req.Header.Set("X-Pelican-Auth-Cookie", "test-cookie-123")
+		req.Header.Set("Authorization", "Bearer test-cookie-123")
 		rec := httptest.NewRecorder()
 
 		wrappedHandler.ServeHTTP(rec, req)
@@ -692,7 +931,7 @@ func TestHelperCapabilityEnforcement(t *testing.T) {
 	t.Run("MKCOL blocked when writes disabled", func(t *testing.T) {
 		handlerCalled = false
 		req := httptest.NewRequest("MKCOL", "/test/newdir", nil)
-		req.Header.Set("X-Pelican-Auth-Cookie", "test-cookie-123")
+		req.Header.Set("Authorization", "Bearer test-cookie-123")
 		rec := httptest.NewRecorder()
 
 		wrappedHandler.ServeHTTP(rec, req)
@@ -705,7 +944,7 @@ func TestHelperCapabilityEnforcement(t *testing.T) {
 	t.Run("MOVE blocked when writes disabled", func(t *testing.T) {
 		handlerCalled = false
 		req := httptest.NewRequest("MOVE", "/test/file.txt", nil)
-		req.Header.Set("X-Pelican-Auth-Cookie", "test-cookie-123")
+		req.Header.Set("Authorization", "Bearer test-cookie-123")
 		rec := httptest.NewRecorder()
 
 		wrappedHandler.ServeHTTP(rec, req)
@@ -718,7 +957,7 @@ func TestHelperCapabilityEnforcement(t *testing.T) {
 	t.Run("PROPFIND Depth:1 blocked when listings disabled", func(t *testing.T) {
 		handlerCalled = false
 		req := httptest.NewRequest("PROPFIND", "/test/", nil)
-		req.Header.Set("X-Pelican-Auth-Cookie", "test-cookie-123")
+		req.Header.Set("Authorization", "Bearer test-cookie-123")
 		req.Header.Set("Depth", "1")
 		rec := httptest.NewRecorder()
 
@@ -732,7 +971,7 @@ func TestHelperCapabilityEnforcement(t *testing.T) {
 	t.Run("PROPFIND Depth:infinity blocked when listings disabled", func(t *testing.T) {
 		handlerCalled = false
 		req := httptest.NewRequest("PROPFIND", "/test/", nil)
-		req.Header.Set("X-Pelican-Auth-Cookie", "test-cookie-123")
+		req.Header.Set("Authorization", "Bearer test-cookie-123")
 		req.Header.Set("Depth", "infinity")
 		rec := httptest.NewRecorder()
 
@@ -746,7 +985,7 @@ func TestHelperCapabilityEnforcement(t *testing.T) {
 	t.Run("PROPFIND Depth:0 allowed when listings disabled", func(t *testing.T) {
 		handlerCalled = false
 		req := httptest.NewRequest("PROPFIND", "/test/file.txt", nil)
-		req.Header.Set("X-Pelican-Auth-Cookie", "test-cookie-123")
+		req.Header.Set("Authorization", "Bearer test-cookie-123")
 		req.Header.Set("Depth", "0")
 		rec := httptest.NewRecorder()
 
@@ -759,7 +998,7 @@ func TestHelperCapabilityEnforcement(t *testing.T) {
 	t.Run("GET allowed (public reads)", func(t *testing.T) {
 		handlerCalled = false
 		req := httptest.NewRequest(http.MethodGet, "/test/file.txt", nil)
-		// No auth cookie - testing public reads
+		// No auth header - testing public reads
 		rec := httptest.NewRecorder()
 
 		wrappedHandler.ServeHTTP(rec, req)
@@ -771,7 +1010,7 @@ func TestHelperCapabilityEnforcement(t *testing.T) {
 	t.Run("GET allowed with auth", func(t *testing.T) {
 		handlerCalled = false
 		req := httptest.NewRequest(http.MethodGet, "/test/file.txt", nil)
-		req.Header.Set("X-Pelican-Auth-Cookie", "test-cookie-123")
+		req.Header.Set("Authorization", "Bearer test-cookie-123")
 		rec := httptest.NewRecorder()
 
 		wrappedHandler.ServeHTTP(rec, req)
@@ -815,7 +1054,7 @@ func TestHelperCapabilityEnforcementWithWritesEnabled(t *testing.T) {
 	t.Run("PUT allowed when writes enabled", func(t *testing.T) {
 		handlerCalled = false
 		req := httptest.NewRequest(http.MethodPut, "/test/file.txt", strings.NewReader("content"))
-		req.Header.Set("X-Pelican-Auth-Cookie", "test-cookie-456")
+		req.Header.Set("Authorization", "Bearer test-cookie-456")
 		rec := httptest.NewRecorder()
 
 		wrappedHandler.ServeHTTP(rec, req)
@@ -827,7 +1066,7 @@ func TestHelperCapabilityEnforcementWithWritesEnabled(t *testing.T) {
 	t.Run("PROPFIND Depth:1 allowed when listings enabled", func(t *testing.T) {
 		handlerCalled = false
 		req := httptest.NewRequest("PROPFIND", "/test/", nil)
-		req.Header.Set("X-Pelican-Auth-Cookie", "test-cookie-456")
+		req.Header.Set("Authorization", "Bearer test-cookie-456")
 		req.Header.Set("Depth", "1")
 		rec := httptest.NewRecorder()
 

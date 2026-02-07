@@ -25,6 +25,7 @@ require (
 	github.com/hashicorp/go-version v1.7.0
 	github.com/jellydator/ttlcache/v3 v3.3.0
 	github.com/jsipprell/keyctl v1.0.4-0.20211208153515-36ca02672b6c
+	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
 	github.com/lestrrat-go/jwx/v2 v2.0.21
 	github.com/mwitkow/go-conntrack v0.0.0-20190716064945-2f068394615f
 	github.com/oklog/run v1.1.0

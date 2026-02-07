@@ -26,6 +26,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -63,12 +64,6 @@ type helperRequest struct {
 	createdAt  time.Time
 }
 
-// helperRetrieveRequest is the request body for the retrieve endpoint
-type helperRetrieveRequest struct {
-	// AuthCookie authenticates the helper
-	AuthCookie string `json:"auth_cookie"`
-}
-
 // helperRetrieveResponse is the response for the retrieve endpoint
 type helperRetrieveResponse struct {
 	Status    string `json:"status"` // "ok", "timeout", "error"
@@ -77,9 +72,9 @@ type helperRetrieveResponse struct {
 }
 
 // helperCallbackRequest is the request body for the callback endpoint
+// Note: Authentication is via Authorization: Bearer header, not in JSON body
 type helperCallbackRequest struct {
-	RequestID  string `json:"request_id"`
-	AuthCookie string `json:"auth_cookie"`
+	RequestID string `json:"request_id"`
 }
 
 // helperCallbackResponse is the response for the callback endpoint
@@ -276,21 +271,20 @@ func handleHelperRetrieve(ctx context.Context, c *gin.Context) {
 		return
 	}
 
-	// Parse request
-	var req helperRetrieveRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, helperRetrieveResponse{
+	// Verify auth via Authorization: Bearer header
+	authHeader := c.GetHeader("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		c.JSON(http.StatusUnauthorized, helperRetrieveResponse{
 			Status: "error",
-			Msg:    "Invalid request",
+			Msg:    "Missing or invalid Authorization header",
 		})
 		return
 	}
-
-	// Verify auth cookie
-	if req.AuthCookie != broker.authCookie {
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	if token != broker.authCookie {
 		c.JSON(http.StatusUnauthorized, helperRetrieveResponse{
 			Status: "error",
-			Msg:    "Invalid auth cookie",
+			Msg:    "Invalid auth token",
 		})
 		return
 	}
@@ -358,21 +352,30 @@ func handleHelperCallback(ctx context.Context, c *gin.Context) {
 		return
 	}
 
-	// Parse request
+	// Verify auth via Authorization: Bearer header
+	authHeader := c.GetHeader("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		c.JSON(http.StatusUnauthorized, helperCallbackResponse{
+			Status: "error",
+			Msg:    "Missing or invalid Authorization header",
+		})
+		return
+	}
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	if token != broker.authCookie {
+		c.JSON(http.StatusUnauthorized, helperCallbackResponse{
+			Status: "error",
+			Msg:    "Invalid auth token",
+		})
+		return
+	}
+
+	// Parse request body for request ID
 	var req helperCallbackRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, helperCallbackResponse{
 			Status: "error",
 			Msg:    "Invalid request",
-		})
-		return
-	}
-
-	// Verify auth cookie
-	if req.AuthCookie != broker.authCookie {
-		c.JSON(http.StatusUnauthorized, helperCallbackResponse{
-			Status: "error",
-			Msg:    "Invalid auth cookie",
 		})
 		return
 	}
