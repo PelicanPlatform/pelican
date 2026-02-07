@@ -21,7 +21,9 @@
 package config
 
 import (
+	"fmt"
 	"os"
+	"os/user"
 	"syscall"
 
 	"github.com/pkg/errors"
@@ -30,6 +32,11 @@ import (
 
 // checkFileReadableByUser checks if the given user can read the file on Unix systems.
 // It examines the file's uid/gid/mode to determine readability.
+//
+// Note: This is a best-effort check performed at startup. It is subject to a TOCTOU
+// (time-of-check-time-of-use) race: file permissions could change between this check and
+// when the file is actually read. This is acceptable because the check is intended as an
+// early diagnostic to catch common misconfiguration, not as a security gate.
 func checkFileReadableByUser(filePath string, fileInfo os.FileInfo, puser User) error {
 	stat, ok := fileInfo.Sys().(*syscall.Stat_t)
 	if !ok {
@@ -44,7 +51,7 @@ func checkFileReadableByUser(filePath string, fileInfo os.FileInfo, puser User) 
 
 	// Check if the pelican user can read the file:
 	// 1. If pelican user owns the file and has read permission (owner read bit)
-	// 2. If pelican user's group matches file's group and group has read permission
+	// 2. If pelican user's primary or supplementary group matches file's group and group has read permission
 	// 3. If others have read permission
 	canRead := false
 
@@ -53,11 +60,10 @@ func checkFileReadableByUser(filePath string, fileInfo os.FileInfo, puser User) 
 		if fileMode&0400 != 0 {
 			canRead = true
 		}
-	} else if fileGid == puser.Gid || fileGid == 0 {
-		// Pelican user's group matches file's group (or root group), check group read permission
-		if fileMode&0040 != 0 {
-			canRead = true
-		}
+	} else if fileMode&0040 != 0 && userInGroup(puser, fileGid) {
+		// File has group read permission and the pelican user is in the file's group
+		// (either via primary GID or supplementary groups)
+		canRead = true
 	} else {
 		// Check others read permission
 		if fileMode&0004 != 0 {
@@ -73,4 +79,33 @@ func checkFileReadableByUser(filePath string, fileInfo os.FileInfo, puser User) 
 	}
 
 	return nil
+}
+
+// userInGroup returns true if the user's primary GID matches fileGid, or if
+// fileGid appears in the user's supplementary group list.
+func userInGroup(puser User, fileGid int) bool {
+	if fileGid == puser.Gid {
+		return true
+	}
+
+	// Look up supplementary groups for the user
+	u, err := user.Lookup(puser.Username)
+	if err != nil {
+		log.Debugf("Could not look up supplementary groups for user %s: %v", puser.Username, err)
+		return false
+	}
+	groupIds, err := u.GroupIds()
+	if err != nil {
+		log.Debugf("Could not retrieve supplementary groups for user %s: %v", puser.Username, err)
+		return false
+	}
+
+	fileGidStr := fmt.Sprintf("%d", fileGid)
+	for _, gidStr := range groupIds {
+		if gidStr == fileGidStr {
+			return true
+		}
+	}
+
+	return false
 }

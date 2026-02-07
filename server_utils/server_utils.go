@@ -647,6 +647,9 @@ func SetFedTok(ctx context.Context, server server_structs.XRootDServer, tok stri
 		if err := copyToXrootdDir(tmpFile); err != nil {
 			return errors.Wrapf(err, "failed to rename the federation token file via the xrdhttp-pelican plugin")
 		}
+	} else {
+		// DropPrivileges is true but no copyToXrootdDir callback provided.
+		return errors.New("drop privileges is true but no copyToXrootdDir callback provided")
 	}
 
 	return nil

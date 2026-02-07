@@ -125,22 +125,22 @@ func generateTestCert(runDir string) (certPath, keyPath string, err error) {
 	certPath = filepath.Join(runDir, "cert.pem")
 	keyPath = filepath.Join(runDir, "key.pem")
 
-	if err = param.Set("IssuerKey", keyPath); err != nil {
+	if err = param.Set(param.IssuerKey.GetName(), keyPath); err != nil {
 		return
 	}
-	if err = param.Set("Server.TLSCertificateChain", certPath); err != nil {
+	if err = param.Set(param.Server_TLSCertificateChain.GetName(), certPath); err != nil {
 		return
 	}
-	if err = param.Set("Server.TLSKey", keyPath); err != nil {
+	if err = param.Set(param.Server_TLSKey.GetName(), keyPath); err != nil {
 		return
 	}
-	if err = param.Set("Server.TLSCACertificateFile", filepath.Join(runDir, "ca.pem")); err != nil {
+	if err = param.Set(param.Server_TLSCACertificateFile.GetName(), filepath.Join(runDir, "ca.pem")); err != nil {
 		return
 	}
-	if err = param.Set("Server.TLSCAKey", filepath.Join(runDir, "ca-key.pem")); err != nil {
+	if err = param.Set(param.Server_TLSCAKey.GetName(), filepath.Join(runDir, "ca-key.pem")); err != nil {
 		return
 	}
-	if err = param.Set("Server.Hostname", "localhost"); err != nil {
+	if err = param.Set(param.Server_Hostname.GetName(), "localhost"); err != nil {
 		return
 	}
 
@@ -181,8 +181,8 @@ func TestDropPrivilegeSignaling(t *testing.T) {
 			})
 			t.Log("Global origin FDs: ", g_origin_fds)
 			runDir := t.TempDir()
-			require.NoError(t, param.Set("Origin.RunLocation", runDir))
-			require.NoError(t, param.Set("Cache.RunLocation", runDir))
+			require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), runDir))
+			require.NoError(t, param.Set(param.Cache_RunLocation.GetName(), runDir))
 			require.NoError(t, param.Set("ConfigDir", runDir))
 
 			pelicanDir := filepath.Join(runDir, "pelican")
@@ -221,7 +221,7 @@ func TestDropPrivilegeSignaling(t *testing.T) {
 			// The ready channel signals to the test function that the mock XRootD process is ready to receive data (the command byte)
 			<-ready
 
-			require.NoError(t, param.Set("Server.DropPrivileges", true))
+			require.NoError(t, param.Set(param.Server_DropPrivileges.GetName(), true))
 
 			// Send the command byte BEFORE calling dropPrivilegeCopy
 			command := []byte{byte(CmdUpdateCA)}
@@ -288,7 +288,7 @@ func TestCheckTLSCredsForDropPrivileges(t *testing.T) {
 		})
 
 		// When Server.DropPrivileges is false, the function should return nil immediately
-		require.NoError(t, param.Set("Server.DropPrivileges", false))
+		require.NoError(t, param.Set(param.Server_DropPrivileges.GetName(), false))
 
 		err := config.CheckTLSCredsForDropPrivileges()
 		assert.NoError(t, err, "Should return nil when DropPrivileges is disabled")
@@ -302,14 +302,14 @@ func TestCheckTLSCredsForDropPrivileges(t *testing.T) {
 
 		runDir := t.TempDir()
 		require.NoError(t, param.Set("ConfigDir", runDir))
-		require.NoError(t, param.Set("Server.DropPrivileges", true))
-		require.NoError(t, param.Set("Server.UnprivilegedUser", currentUser.Username))
+		require.NoError(t, param.Set(param.Server_DropPrivileges.GetName(), true))
+		require.NoError(t, param.Set(param.Server_UnprivilegedUser.GetName(), currentUser.Username))
 
 		// Set TLS paths to non-existent files
 		nonExistentCert := filepath.Join(runDir, "nonexistent", "tls.crt")
 		nonExistentKey := filepath.Join(runDir, "nonexistent", "tls.key")
-		require.NoError(t, param.Set("Server.TLSCertificateChain", nonExistentCert))
-		require.NoError(t, param.Set("Server.TLSKey", nonExistentKey))
+		require.NoError(t, param.Set(param.Server_TLSCertificateChain.GetName(), nonExistentCert))
+		require.NoError(t, param.Set(param.Server_TLSKey.GetName(), nonExistentKey))
 
 		err := config.CheckTLSCredsForDropPrivileges()
 		assert.Error(t, err, "Should return error when TLS files don't exist")
@@ -324,8 +324,8 @@ func TestCheckTLSCredsForDropPrivileges(t *testing.T) {
 
 		runDir := t.TempDir()
 		require.NoError(t, param.Set("ConfigDir", runDir))
-		require.NoError(t, param.Set("Server.DropPrivileges", true))
-		require.NoError(t, param.Set("Server.UnprivilegedUser", currentUser.Username))
+		require.NoError(t, param.Set(param.Server_DropPrivileges.GetName(), true))
+		require.NoError(t, param.Set(param.Server_UnprivilegedUser.GetName(), currentUser.Username))
 
 		// Create TLS files with owner-readable permissions (0600)
 		certPath := filepath.Join(runDir, "tls.crt")
@@ -336,8 +336,8 @@ func TestCheckTLSCredsForDropPrivileges(t *testing.T) {
 		err = os.WriteFile(keyPath, []byte("test key content"), 0600)
 		require.NoError(t, err)
 
-		require.NoError(t, param.Set("Server.TLSCertificateChain", certPath))
-		require.NoError(t, param.Set("Server.TLSKey", keyPath))
+		require.NoError(t, param.Set(param.Server_TLSCertificateChain.GetName(), certPath))
+		require.NoError(t, param.Set(param.Server_TLSKey.GetName(), keyPath))
 
 		// The test is running as current user, so files owned by current user
 		// with mode 0600 should be readable
@@ -353,8 +353,8 @@ func TestCheckTLSCredsForDropPrivileges(t *testing.T) {
 
 		runDir := t.TempDir()
 		require.NoError(t, param.Set("ConfigDir", runDir))
-		require.NoError(t, param.Set("Server.DropPrivileges", true))
-		require.NoError(t, param.Set("Server.UnprivilegedUser", currentUser.Username))
+		require.NoError(t, param.Set(param.Server_DropPrivileges.GetName(), true))
+		require.NoError(t, param.Set(param.Server_UnprivilegedUser.GetName(), currentUser.Username))
 
 		// Create TLS files with group-readable permissions (0640)
 		certPath := filepath.Join(runDir, "tls.crt")
@@ -365,8 +365,8 @@ func TestCheckTLSCredsForDropPrivileges(t *testing.T) {
 		err = os.WriteFile(keyPath, []byte("test key content"), 0640)
 		require.NoError(t, err)
 
-		require.NoError(t, param.Set("Server.TLSCertificateChain", certPath))
-		require.NoError(t, param.Set("Server.TLSKey", keyPath))
+		require.NoError(t, param.Set(param.Server_TLSCertificateChain.GetName(), certPath))
+		require.NoError(t, param.Set(param.Server_TLSKey.GetName(), keyPath))
 
 		// Files are owned by current user, so they should be readable
 		err = config.CheckTLSCredsForDropPrivileges()
@@ -381,8 +381,8 @@ func TestCheckTLSCredsForDropPrivileges(t *testing.T) {
 
 		runDir := t.TempDir()
 		require.NoError(t, param.Set("ConfigDir", runDir))
-		require.NoError(t, param.Set("Server.DropPrivileges", true))
-		require.NoError(t, param.Set("Server.UnprivilegedUser", currentUser.Username))
+		require.NoError(t, param.Set(param.Server_DropPrivileges.GetName(), true))
+		require.NoError(t, param.Set(param.Server_UnprivilegedUser.GetName(), currentUser.Username))
 
 		// Create TLS files with world-readable permissions (0644)
 		certPath := filepath.Join(runDir, "tls.crt")
@@ -393,8 +393,8 @@ func TestCheckTLSCredsForDropPrivileges(t *testing.T) {
 		err = os.WriteFile(keyPath, []byte("test key content"), 0644)
 		require.NoError(t, err)
 
-		require.NoError(t, param.Set("Server.TLSCertificateChain", certPath))
-		require.NoError(t, param.Set("Server.TLSKey", keyPath))
+		require.NoError(t, param.Set(param.Server_TLSCertificateChain.GetName(), certPath))
+		require.NoError(t, param.Set(param.Server_TLSKey.GetName(), keyPath))
 
 		err = config.CheckTLSCredsForDropPrivileges()
 		assert.NoError(t, err, "Should succeed when TLS files are world-readable")
@@ -406,10 +406,10 @@ func TestCheckTLSCredsForDropPrivileges(t *testing.T) {
 			server_utils.ResetTestState()
 		})
 
-		require.NoError(t, param.Set("Server.DropPrivileges", true))
-		require.NoError(t, param.Set("Server.UnprivilegedUser", currentUser.Username))
-		require.NoError(t, param.Set("Server.TLSCertificateChain", ""))
-		require.NoError(t, param.Set("Server.TLSKey", ""))
+		require.NoError(t, param.Set(param.Server_DropPrivileges.GetName(), true))
+		require.NoError(t, param.Set(param.Server_UnprivilegedUser.GetName(), currentUser.Username))
+		require.NoError(t, param.Set(param.Server_TLSCertificateChain.GetName(), ""))
+		require.NoError(t, param.Set(param.Server_TLSKey.GetName(), ""))
 
 		// Empty paths should be skipped
 		err := config.CheckTLSCredsForDropPrivileges()
@@ -424,16 +424,16 @@ func TestCheckTLSCredsForDropPrivileges(t *testing.T) {
 
 		runDir := t.TempDir()
 		require.NoError(t, param.Set("ConfigDir", runDir))
-		require.NoError(t, param.Set("Server.DropPrivileges", true))
-		require.NoError(t, param.Set("Server.UnprivilegedUser", currentUser.Username))
+		require.NoError(t, param.Set(param.Server_DropPrivileges.GetName(), true))
+		require.NoError(t, param.Set(param.Server_UnprivilegedUser.GetName(), currentUser.Username))
 
 		// Create only cert file
 		certPath := filepath.Join(runDir, "tls.crt")
 		err := os.WriteFile(certPath, []byte("test cert content"), 0600)
 		require.NoError(t, err)
 
-		require.NoError(t, param.Set("Server.TLSCertificateChain", certPath))
-		require.NoError(t, param.Set("Server.TLSKey", ""))
+		require.NoError(t, param.Set(param.Server_TLSCertificateChain.GetName(), certPath))
+		require.NoError(t, param.Set(param.Server_TLSKey.GetName(), ""))
 
 		err = config.CheckTLSCredsForDropPrivileges()
 		assert.NoError(t, err, "Should succeed when only cert path is set and readable")
@@ -447,8 +447,8 @@ func TestCheckTLSCredsForDropPrivileges(t *testing.T) {
 
 		runDir := t.TempDir()
 		require.NoError(t, param.Set("ConfigDir", runDir))
-		require.NoError(t, param.Set("Server.DropPrivileges", true))
-		require.NoError(t, param.Set("Server.UnprivilegedUser", currentUser.Username))
+		require.NoError(t, param.Set(param.Server_DropPrivileges.GetName(), true))
+		require.NoError(t, param.Set(param.Server_UnprivilegedUser.GetName(), currentUser.Username))
 
 		// Create only cert file, but set both paths
 		certPath := filepath.Join(runDir, "tls.crt")
@@ -457,8 +457,8 @@ func TestCheckTLSCredsForDropPrivileges(t *testing.T) {
 		err := os.WriteFile(certPath, []byte("test cert content"), 0600)
 		require.NoError(t, err)
 
-		require.NoError(t, param.Set("Server.TLSCertificateChain", certPath))
-		require.NoError(t, param.Set("Server.TLSKey", keyPath))
+		require.NoError(t, param.Set(param.Server_TLSCertificateChain.GetName(), certPath))
+		require.NoError(t, param.Set(param.Server_TLSKey.GetName(), keyPath))
 
 		err = config.CheckTLSCredsForDropPrivileges()
 		assert.Error(t, err, "Should return error when key file doesn't exist")
@@ -473,8 +473,8 @@ func TestCheckTLSCredsForDropPrivileges(t *testing.T) {
 
 		runDir := t.TempDir()
 		require.NoError(t, param.Set("ConfigDir", runDir))
-		require.NoError(t, param.Set("Server.DropPrivileges", true))
-		require.NoError(t, param.Set("Server.UnprivilegedUser", currentUser.Username))
+		require.NoError(t, param.Set(param.Server_DropPrivileges.GetName(), true))
+		require.NoError(t, param.Set(param.Server_UnprivilegedUser.GetName(), currentUser.Username))
 
 		// Generate actual TLS certs using the existing helper
 		certPath, keyPath, err := generateTestCert(runDir)
