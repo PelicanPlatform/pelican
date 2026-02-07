@@ -19,19 +19,24 @@
 package mcp
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/pelicanplatform/pelican/client"
 )
+
+// Timeout for polling in pelican_auth_complete (should be less than MCP client timeout, typically 60s)
+const authCompletionPollTimeout = 45 * time.Second
 
 // getToolsList returns the list of available MCP tools
 func getToolsList() []Tool {
 	return []Tool{
 		{
 			Name:        "pelican_download",
-			Description: "Download an object from a Pelican URL to a local destination. Supports both single files and recursive directory downloads.",
+			Description: "Download an object from a Pelican URL to a local destination. IMPORTANT: Always ask the user to provide a destination directory/path before calling this tool. Do not assume or guess the destination - the user must explicitly specify where to save the file to avoid permission issues.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -41,7 +46,7 @@ func getToolsList() []Tool {
 					},
 					"destination": map[string]interface{}{
 						"type":        "string",
-						"description": "The local file path where the object should be saved",
+						"description": "The local file path where the object should be saved. MUST be provided by the user - do not assume a path. Ask the user: 'Where would you like me to save this file?'",
 					},
 					"recursive": map[string]interface{}{
 						"type":        "boolean",
@@ -156,8 +161,15 @@ func (s *Server) handleDownload(args map[string]interface{}) CallToolResult {
 
 	// Build transfer options
 	var options []client.TransferOption
+
+	// First check if token was explicitly provided
 	if token, ok := args["token"].(string); ok && token != "" {
 		options = append(options, client.WithToken(token))
+	} else {
+		// Check for cached token from previous authentication
+		if cachedToken := s.getTokenForURL(source); cachedToken != "" {
+			options = append(options, client.WithToken(cachedToken))
+		}
 	}
 
 	// Create destination directory if it doesn't exist
@@ -214,8 +226,15 @@ func (s *Server) handleStat(args map[string]interface{}) CallToolResult {
 
 	// Build transfer options
 	var options []client.TransferOption
+
+	// First check if token was explicitly provided
 	if token, ok := args["token"].(string); ok && token != "" {
 		options = append(options, client.WithToken(token))
+	} else {
+		// Check for cached token from previous authentication
+		if cachedToken := s.getTokenForURL(url); cachedToken != "" {
+			options = append(options, client.WithToken(cachedToken))
+		}
 	}
 
 	// Get file info
@@ -267,8 +286,15 @@ func (s *Server) handleList(args map[string]interface{}) CallToolResult {
 
 	// Build transfer options
 	var options []client.TransferOption
+
+	// First check if token was explicitly provided
 	if token, ok := args["token"].(string); ok && token != "" {
 		options = append(options, client.WithToken(token))
+	} else {
+		// Check for cached token from previous authentication
+		if cachedToken := s.getTokenForURL(url); cachedToken != "" {
+			options = append(options, client.WithToken(cachedToken))
+		}
 	}
 
 	// List directory contents
@@ -297,6 +323,157 @@ func (s *Server) handleList(args map[string]interface{}) CallToolResult {
 
 	return CallToolResult{
 		Content: []ContentItem{{Type: "text", Text: message}},
+		IsError: false,
+	}
+}
+
+// handleAuth implements the pelican_auth tool for starting authentication to protected namespaces.
+// This returns the verification URL immediately without blocking for user authorization.
+func (s *Server) handleAuth(args map[string]interface{}) CallToolResult {
+	// Ensure Pelican client is initialized
+	if err := s.ensureInitialized(); err != nil {
+		return CallToolResult{
+			Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("Error: Failed to initialize Pelican client: %v", err)}},
+			IsError: true,
+		}
+	}
+
+	url, ok := args["url"].(string)
+	if !ok {
+		return CallToolResult{
+			Content: []ContentItem{{Type: "text", Text: "Error: 'url' parameter is required and must be a string"}},
+			IsError: true,
+		}
+	}
+
+	// Initiate device auth
+	authInfo, err := client.InitiateDeviceAuth(s.ctx, url)
+	if err != nil {
+		return CallToolResult{
+			Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("Failed to initiate authentication: %v", err)}},
+			IsError: true,
+		}
+	}
+
+	// Store the pending auth for later completion and clean up expired entries
+	s.authMutex.Lock()
+	// Clean up expired pending auths to prevent memory leaks
+	for u, pa := range s.pendingAuths {
+		if pa.authInfo.ExpiresIn > 0 {
+			maxAge := time.Duration(pa.authInfo.ExpiresIn) * time.Second
+			if time.Since(pa.createdAt) > maxAge {
+				delete(s.pendingAuths, u)
+			}
+		}
+	}
+	// Store the new pending auth
+	s.pendingAuths[url] = &pendingAuth{
+		authInfo:  authInfo,
+		url:       url,
+		createdAt: time.Now(),
+	}
+	s.authMutex.Unlock()
+
+	// Calculate expiry time from server's ExpiresIn
+	expiryMinutes := float64(authInfo.ExpiresIn) / 60
+
+	// Build response message with the verification URL
+	var message string
+	if authInfo.VerificationURLComplete != "" {
+		message = fmt.Sprintf("🔐 **Authentication Required**\n\nTo access the protected namespace at `%s`, please:\n\n1. **Click or visit this URL** to authenticate:\n\n   %s\n\n2. Complete the authorization in your browser\n\n", url, authInfo.VerificationURLComplete)
+	} else {
+		message = fmt.Sprintf("🔐 **Authentication Required**\n\nTo access the protected namespace at `%s`, please:\n\n1. **Visit this URL:**\n\n   %s\n\n2. **Enter this code:** `%s`\n\n3. Complete the authorization in your browser\n\n", url, authInfo.VerificationURL, authInfo.UserCode)
+	}
+	message += fmt.Sprintf("⏱️ You have **%.0f minutes** to complete authentication.\n\n", expiryMinutes)
+	message += "**IMPORTANT:** After you complete authorization in your browser, tell me and I'll call `pelican_auth_complete` to finish the process."
+
+	return CallToolResult{
+		Content: []ContentItem{{Type: "text", Text: message}},
+		IsError: false,
+	}
+}
+
+// handleAuthComplete implements the pelican_auth_complete tool for completing authentication.
+// This polls for the token after the user has authorized in their browser.
+func (s *Server) handleAuthComplete(args map[string]interface{}) CallToolResult {
+	// Ensure Pelican client is initialized
+	if err := s.ensureInitialized(); err != nil {
+		return CallToolResult{
+			Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("Error: Failed to initialize Pelican client: %v", err)}},
+			IsError: true,
+		}
+	}
+
+	url, ok := args["url"].(string)
+	if !ok {
+		return CallToolResult{
+			Content: []ContentItem{{Type: "text", Text: "Error: 'url' parameter is required and must be a string"}},
+			IsError: true,
+		}
+	}
+
+	// Get the pending auth
+	s.authMutex.Lock()
+	pending, exists := s.pendingAuths[url]
+	if exists {
+		// Remove it from pending regardless of outcome
+		delete(s.pendingAuths, url)
+	}
+	s.authMutex.Unlock()
+
+	if !exists {
+		return CallToolResult{
+			Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("❌ No pending authentication found for `%s`.\n\nPlease start authentication first with `pelican_auth`.", url)}},
+			IsError: true,
+		}
+	}
+
+	// Check if the auth has expired using server's ExpiresIn
+	elapsed := time.Since(pending.createdAt)
+	maxDuration := time.Duration(pending.authInfo.ExpiresIn) * time.Second
+	if maxDuration <= 0 {
+		// Default to 1 minute if server didn't specify
+		maxDuration = 1 * time.Minute
+	}
+
+	if elapsed > maxDuration {
+		return CallToolResult{
+			Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("❌ **Authentication expired.** The authorization request for `%s` has expired.\n\nPlease start a new authentication with `pelican_auth`.", url)}},
+			IsError: true,
+		}
+	}
+
+	// Create a timeout context - use the shorter of remaining time or our poll timeout
+	remaining := maxDuration - elapsed
+	timeout := authCompletionPollTimeout
+	if remaining < timeout {
+		timeout = remaining
+	}
+	authCtx, cancel := context.WithTimeout(s.ctx, timeout)
+	defer cancel()
+
+	// Poll for completion
+	token, namespace, err := client.CompleteDeviceAuth(authCtx, url, pending.authInfo)
+	if err != nil {
+		if authCtx.Err() == context.DeadlineExceeded {
+			return CallToolResult{
+				Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("⏳ **Still waiting for authorization.**\n\nIf you haven't completed authorization yet, please visit the URL and approve the request, then call `pelican_auth_complete` again.\n\nIf you've already authorized, there might be a delay. Please wait a moment and try again.")}},
+				IsError: true,
+			}
+		}
+		return CallToolResult{
+			Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("❌ **Authorization failed:** %v\n\nPlease start a new authentication with `pelican_auth`.", err)}},
+			IsError: true,
+		}
+	}
+
+	// Cache the token in the MCP server's memory for use by subsequent operations
+	if namespace != "" && token != "" {
+		s.cacheToken(namespace, token)
+	}
+
+	return CallToolResult{
+		Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("✅ **Authorization successful!** Token has been cached.\n\nYou can now access protected resources at `%s`.", url)}},
 		IsError: false,
 	}
 }
