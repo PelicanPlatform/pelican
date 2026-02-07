@@ -1671,7 +1671,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	r := gin.Default()
 	r.GET("/test", discoverOriginCache)
 
-	t.Run("no-token-should-give-401", func(t *testing.T) {
+	t.Run("no-token-should-give-403", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "/test", nil)
 		if err != nil {
 			t.Fatalf("Could not make a GET request: %v", err)

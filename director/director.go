@@ -36,6 +36,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-version"
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
@@ -719,6 +720,64 @@ func generateRedirectResponse(ctx *gin.Context, chosenAds []server_structs.Serve
 	ctx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
 }
 
+// validateClientToken inspects the client's bearer token, if one is present, and
+// returns 401 Unauthorized if the token is expired. This enables clients like rclone
+// to re-run their bearer_token_command to obtain a fresh token.
+//
+// If no token is present, the request is allowed through — the Director does not
+// require tokens. The origin or cache will enforce authorization as needed.
+//
+// Returns (http.StatusOK, nil) if no token is present or the token is not expired.
+// Returns (http.StatusUnauthorized, err) if a token is present but expired.
+func validateClientToken(ctx *gin.Context, nsAd server_structs.NamespaceAdV2, requestId uuid.UUID) (int, error) {
+	// Extract a bearer token from Authorization header or authz query parameter.
+	// If none is present, pass through — the Director does not require tokens.
+	var rawToken string
+	if authzHeader := ctx.Request.Header.Get("Authorization"); authzHeader != "" {
+		rawToken, _ = strings.CutPrefix(authzHeader, "Bearer ")
+	} else if authzQuery := ctx.Query("authz"); authzQuery != "" {
+		rawToken = strings.TrimPrefix(authzQuery, "Bearer ")
+	}
+
+	if rawToken == "" {
+		return http.StatusOK, nil
+	}
+
+	// Parse the token without signature verification — we only need the expiration claim.
+	// Not all bearer tokens are JWTs (e.g., opaque tokens, SciTokens v1); if parsing
+	// fails, treat the token as valid and let the origin/cache decide.
+	parsed, err := jwt.Parse([]byte(rawToken), jwt.WithVerify(false), jwt.WithValidate(false))
+	if err != nil {
+		return http.StatusOK, nil
+	}
+
+	// Check if the token has expired or is about to expire. We add a grace
+	// period because the token could expire between the redirect and the
+	// client reaching the origin/cache. Use 10 seconds, or half the token
+	// lifetime if the lifetime is shorter than 10 seconds, to also account
+	// for clock skew.
+	exp := parsed.Expiration()
+	if !exp.IsZero() {
+		iat := parsed.IssuedAt()
+		grace := 10 * time.Second
+		if !iat.IsZero() {
+			lifetime := exp.Sub(iat)
+			if halfLife := lifetime / 2; halfLife < grace {
+				grace = halfLife
+			}
+		}
+		if time.Now().Add(grace).After(exp) {
+			reqPath := getObjectPathFromRequest(ctx)
+			log.Debugf("Client token for path %s expired (or within grace period) at %s (Request ID: %s)", reqPath, exp.String(), requestId.String())
+			// RFC 7235 §3.1 requires a WWW-Authenticate header with any 401 response.
+			ctx.Header("WWW-Authenticate", `Bearer error="invalid_token", error_description="token has expired"`)
+			return http.StatusUnauthorized, errors.New("bearer token has expired")
+		}
+	}
+
+	return http.StatusOK, nil
+}
+
 // Get or create a taint we can use for tracking the behavior of this request
 // through the system.
 func getRequestID(ctx *gin.Context) uuid.UUID {
@@ -845,6 +904,15 @@ func redirectToCache(ginCtx *gin.Context) {
 		oServers = append(oServers, ad.ServerAd)
 	}
 
+	// Validate client token if required for this namespace
+	if status, err := validateClientToken(ginCtx, oAds[0].NamespaceAd, requestId); err != nil {
+		ginCtx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("%v: Request ID: %s", err, requestId.String()),
+		})
+		return
+	}
+
 	redirectSucceeded = true
 	generateRedirectResponse(ginCtx, chosenServers, oServers, oAds[0].NamespaceAd, requestId)
 }
@@ -911,6 +979,15 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	oServers := make([]server_structs.ServerAd, 0, len(oAds))
 	for _, ad := range oAds {
 		oServers = append(oServers, ad.ServerAd)
+	}
+
+	// Validate client token if required for this namespace
+	if status, err := validateClientToken(ginCtx, oAds[0].NamespaceAd, requestId); err != nil {
+		ginCtx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("%v: Request ID: %s", err, requestId.String()),
+		})
+		return
 	}
 
 	redirectSucceeded = true
