@@ -394,6 +394,12 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 			routePrefix = prefix
 		}
 
+		// Set the Prefix on the WebDAV handler so that:
+		// 1. stripPrefix correctly removes the route prefix to get the filesystem path
+		// 2. PROPFIND responses include the full route prefix in href elements,
+		//    which is required for WebDAV clients like rclone to properly resolve paths
+		handler.Prefix = routePrefix
+
 		// Create a route group for this prefix
 		group := engine.Group(routePrefix)
 		group.Use(httpMetricsMiddleware())
@@ -404,21 +410,20 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 			// Get the path relative to the export (strip the federation prefix)
 			wildcardPath := c.Param("path")
 
-			// The wildcardPath is relative to the federation prefix (e.g., /test)
-			// Pass only the wildcardPath to WebDAV so it writes relative to storage root
-			newPath := wildcardPath
-
-			// Create a shallow copy of the request and modify its URL
-			modifiedReq := c.Request.Clone(c.Request.Context())
-			modifiedURL := *c.Request.URL
-			modifiedURL.Path = newPath
-			modifiedReq.URL = &modifiedURL
-
 			if c.Request.Method == http.MethodHead {
-				// Pass the modified request and file path info to handleHeadWithChecksum
+				// For HEAD requests, create a modified request with just the wildcard path
+				// since handleHeadWithChecksum handles the response directly
+				modifiedReq := c.Request.Clone(c.Request.Context())
+				modifiedURL := *c.Request.URL
+				modifiedURL.Path = wildcardPath
+				modifiedReq.URL = &modifiedURL
 				handleHeadWithChecksum(c, handler, modifiedReq, wildcardPath, storagePrefix)
 			} else {
-				handler.ServeHTTP(c.Writer, modifiedReq)
+				// For all other methods (including PROPFIND), pass the original request
+				// to the WebDAV handler. The handler's Prefix field ensures it strips
+				// the route prefix for filesystem access while using it to construct
+				// correct href values in responses.
+				handler.ServeHTTP(c.Writer, c.Request)
 			}
 		}
 

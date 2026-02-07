@@ -651,6 +651,14 @@ default: false
 components: ["client"]
 hidden: true
 ---
+name: Client.CredentialFile
+description: |+
+  Override the default path to the client credential file used for token generation.
+  When set, the client uses this file instead of the default credential location.
+type: filename
+default: none
+components: ["client"]
+---
 name: Client.PreferredCaches
 description: |+
   A list of preferred cache hostname/ports the Pelican client/plugin should use when interacting with a remote object. There are two configuration options:
