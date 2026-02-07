@@ -579,15 +579,6 @@ func handleGlobusAuth(ctx *gin.Context) {
 
 // Persist a Globus access token on the disk
 func persistToken(collectionID string, token *oauth2.Token, tokenType GlobusTokenType) (string, error) {
-	uid, err := config.GetDaemonUID()
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to persist Globus %s access token on disk: failed to get uid", tokenType)
-	}
-
-	gid, err := config.GetDaemonGID()
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to persist Globus %s access token on disk: failed to get gid", tokenType)
-	}
 	globusFdr := param.Origin_GlobusConfigLocation.GetString()
 	tokBase := filepath.Join(globusFdr, "tokens")
 	if filepath.Clean(tokBase) == "" {
@@ -609,11 +600,13 @@ func persistToken(collectionID string, token *oauth2.Token, tokenType GlobusToke
 	if err != nil {
 		return "", errors.Wrapf(err, "failed to update Globus %s token: unable to create a temporary Globus %s token file", tokenType, tokenType)
 	}
-	// We need to change the directory and file permission to XRootD user/group so that it can access the token
-	if err = tmpTokFile.Chown(uid, gid); err != nil {
-		return "", errors.Wrapf(err, "unable to change the ownership of Globus %s token file at %s to xrootd daemon", tokenType, tmpTokFile.Name())
-	}
 	defer tmpTokFile.Close()
+
+	// Set file permissions to 0640 (owner read/write, group read) so XRootD can read the token.
+	// The file inherits the xrootd group from the tokens directory's setgid bit (set in InitGlobusBackend).
+	if err = tmpTokFile.Chmod(0640); err != nil {
+		return "", errors.Wrapf(err, "unable to set permissions on Globus %s token file at %s", tokenType, tmpTokFile.Name())
+	}
 
 	_, err = tmpTokFile.Write([]byte(token.AccessToken + "\n"))
 	if err != nil {

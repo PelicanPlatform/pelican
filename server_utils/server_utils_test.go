@@ -269,10 +269,11 @@ func TestSetFedTok(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.setupDir {
-				require.NoError(t, os.MkdirAll(filepath.Dir(tc.server.tokenLoc), 0755))
+				err := SetupFedTokDirs(tc.server)
+				require.NoError(t, err)
 			}
 
-			err := SetFedTok(context.Background(), tc.server, tc.token)
+			err := SetFedTok(context.Background(), tc.server, tc.token, nil)
 
 			if tc.expectErr {
 				require.Error(t, err)
