@@ -92,6 +92,34 @@ func getToolsList() []Tool {
 				"required": []string{"url"},
 			},
 		},
+		{
+			Name:        "pelican_auth",
+			Description: "Start authentication to a protected Pelican namespace using OAuth device flow. This returns a verification URL that the user must visit to authorize access. IMPORTANT: After the user completes authorization in their browser, call pelican_auth_complete to finish authentication and cache the token.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"url": map[string]interface{}{
+						"type":        "string",
+						"description": "The Pelican URL of the protected resource to authenticate for (e.g., pelican://osg-htc.org/protected/path)",
+					},
+				},
+				"required": []string{"url"},
+			},
+		},
+		{
+			Name:        "pelican_auth_complete",
+			Description: "Complete the OAuth device flow authentication after the user has visited the verification URL. Call this AFTER the user confirms they have completed authorization in their browser. This will poll for the token and cache it for future operations.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"url": map[string]interface{}{
+						"type":        "string",
+						"description": "The same Pelican URL that was used to start authentication with pelican_auth",
+					},
+				},
+				"required": []string{"url"},
+			},
+		},
 	}
 }
 
