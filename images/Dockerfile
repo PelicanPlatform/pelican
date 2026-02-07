@@ -665,21 +665,12 @@ ARG TARGETPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
 
-# Install select development packages.
-# We need to work around a bug with ARM64 emulation and `tar`:
-#
-#   - Issue: https://github.com/tonistiigi/binfmt/issues/285
-#   - Workaround: https://github.com/apollographql/apollo-runtime/pull/71
-#
-# The locale settings below should match the defaults in /etc/locale.conf
-# and are necessary for `bsdtar` to be able to extract the Go distribution.
-ENV LANG=C.utf8 LC_ALL=C.utf8
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
   set -o pipefail
 
   # Install packages for building Pelican.
-  dnf install -y git make bsdtar && ln -sf /usr/bin/bsdtar /usr/bin/tar
+  dnf install -y git make
 
   # Install HTCondor for integration tests, but forcibly remove the
   # Pelican packages that it pulls in so that there is zero chance tests
