@@ -414,9 +414,9 @@ func runConnection(ctx context.Context, conn *SSHConnection, exports []ExportCon
 
 // getCertificateChain reads and returns the PEM-encoded certificate chain
 func getCertificateChain() (string, error) {
-	certFile := param.Server_TLSCertificate.GetString()
+	certFile := param.Server_TLSCertificateChain.GetString()
 	if certFile == "" {
-		return "", errors.New("TLS certificate not configured")
+		return "", errors.New("TLS certificate chain not configured")
 	}
 
 	certPEM, err := config.LoadCertificateChainPEM(certFile)
