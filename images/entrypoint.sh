@@ -30,54 +30,6 @@ if [ -d /certs ]; then
   shopt -u nullglob
 fi
 
-# Set up OA4MP only if this is an origin.
-if [ "$2" == "origin" ]; then
-    ####
-    # Set up the OA4MP configuration. These items are taken from
-    # https://github.com/scitokens/scitokens-oauth2-server/blob/master/start.sh,
-    # which appears to have an Apache 2.0 license.
-    #
-    # NOTE: Some set up is taken care of by oa4mp/serve.go.
-    ####
-
-    # check for one or more files in a directory
-    if [ -e /opt/scitokens-server/etc/qdl/ ]; then
-        # Note that `-L` is added here; this is because Kubernetes sets up some volume mounts
-        # as symlinks and `-r` will copy the symlinks (which then becomes broken).  `-L` will
-        # dereference the symlink and copy the data, which is what we want.
-        cp -rL /opt/scitokens-server/etc/qdl/*.qdl /opt/scitokens-server/var/qdl/scitokens/
-        chown -R tomcat /opt/scitokens-server/var/qdl/
-    fi
-
-    # Load up additional trust roots.  If OA4MP needs to contact a LDAP server, we will need
-    # the CA that signed the LDAP server's certificate to be in the java trust store.
-    if [ -e /opt/scitokens-server/etc/trusted-cas ]; then
-
-        shopt -s nullglob
-        for fullfile in /opt/scitokens-server/etc/trusted-cas/*.pem; do
-            filename=$(basename "$fullfile")
-            aliasname="${filename%.*}"
-            keytool -cacerts -importcert -noprompt -storepass changeit -file "$fullfile" -alias "$aliasname"
-        done
-        shopt -u nullglob
-
-    fi
-
-    # Tomcat requires us to provide the intermediate chain (which, in Kubernetes, is often in the same
-    # file as the host certificate itself.  If there wasn't one provided, try splitting it out.
-    if [ ! -e /opt/tomcat/conf/chain.pem ]; then
-        pushd /tmp > /dev/null || { echo "pushd failed"; exit 1; }
-        if csplit -f tls- -b "%02d.crt.pem" -s -z "/opt/tomcat/conf/hostcert.pem" '/-----BEGIN CERTIFICATE-----/' '{1}' 2>/dev/null ; then
-            cp /tmp/tls-01.crt.pem /opt/tomcat/conf/chain.pem
-            rm /tmp/tls-*.crt.pem
-        else
-            # No intermediate CAs found.  Create an empty file.
-            touch /opt/tomcat/conf/chain.pem
-        fi
-        popd > /dev/null || { echo "popd failed"; exit 1; }
-    fi
-fi
-
 echo "Starting Pelican..."
 
 # The first argument is the program selector
