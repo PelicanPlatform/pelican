@@ -6,11 +6,12 @@ This allows you to use natural language to interact with Pelican data directly f
 ## What is MCP?
 
 The [Model Context Protocol](https://modelcontextprotocol.io/) is an open standard that allows AI assistants to connect to external tools and data sources.
-By running a Pelican MCP server, your AI assistant can work with **public** namespaces, but not protected namespaces:
+By running a Pelican MCP server, your AI assistant can work with both public and protected namespaces:
 
 - Download objects from Pelican federations using natural language requests
 - Get metadata about objects (size, modification time, checksums)
 - List collection contents
+- Authenticate to protected namespaces using OAuth device flow
 
 ## Before Starting
 
@@ -104,7 +105,7 @@ Copilot will use the Pelican MCP server to download the file.
 
 ## Available Tools
 
-Once configured, your AI assistant has access to three Pelican tools:
+Once configured, your AI assistant has access to five Pelican tools:
 
 ### pelican_download
 
@@ -144,7 +145,66 @@ Lists the contents of a Pelican collection.
 **Parameters**:
 - `url`: The Pelican URL of the collection to list
 
+### pelican_auth
+
+Starts authentication to a protected Pelican namespace using OAuth device flow.
+This tool returns a verification URL immediately that you can click to authorize access.
+After authorization, call `pelican_auth_complete` to finish the authentication process.
+
+**Example prompts**:
+- "Authenticate to pelican://osg-htc.org/protected/data/"
+- "I need to access a protected namespace at pelican://federation.example.com/private/, please authenticate"
+- "Get access token for pelican://osg-htc.org/restricted/path"
+
+**Parameters**:
+- `url`: The Pelican URL of the protected resource to authenticate for
+
+### pelican_auth_complete
+
+Completes the OAuth device flow authentication after the user has visited the verification URL.
+Call this after the user confirms they have completed authorization in their browser.
+
+**Parameters**:
+- `url`: The same Pelican URL that was used with `pelican_auth`
+
+**How authentication works (two-step process)**:
+1. Call `pelican_auth` - returns a verification URL immediately
+2. User clicks the URL and completes authorization in their browser
+3. User tells the AI they have completed authorization
+4. AI calls `pelican_auth_complete` to verify and cache the token
+5. The token is now cached for future operations
+
 ## Example Workflows
+
+### Accessing Protected Namespaces
+
+```
+User: I need to download data from pelican://osg-htc.org/protected/data/file.txt
+but it requires authentication.
+
+AI: I'll help you authenticate.
+[Uses pelican_auth tool]
+
+🔐 Authentication Required
+
+To access the protected namespace, please:
+1. Click or visit this URL to authenticate:
+   https://cilogon.org/device?user_code=ABCD-EFGH
+2. Complete the authorization in your browser
+
+You have 3 minutes to complete authentication.
+Let me know when you're done!
+
+User: Done, I authorized it.
+
+AI: Great! Let me verify the authorization.
+[Uses pelican_auth_complete tool]
+
+✅ Authorization successful! Token has been cached.
+Now let me download the file.
+[Uses pelican_download tool]
+Successfully downloaded to ./file.txt
+```
 
 ### Downloading Test Data
 
@@ -228,7 +288,11 @@ chmod +x $(which pelican)
 
 If downloads fail with authentication errors:
 
-1. Ensure it is a public namespace, and verify the URL is correct using the CLI:
+1. For protected namespaces, use the `pelican_auth` tool first to authenticate:
+   - Ask your AI assistant to "authenticate to pelican://..."
+   - Click the verification URL provided
+   - Complete authorization in your browser
+2. Verify the URL is correct using the CLI:
 ```bash
 pelican object get pelican://... /tmp/test
 ```
