@@ -1,8 +1,6 @@
-//go:build go1.25
-
 /***************************************************************
  *
- * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -18,7 +16,7 @@
  *
  ***************************************************************/
 
-package origin_serve
+package server_utils
 
 import (
 	"io"
@@ -28,7 +26,7 @@ import (
 	"github.com/spf13/afero"
 )
 
-// OsRootFs is a filesystem implementation using os.Root (Go 1.24+)
+// OsRootFs is a filesystem implementation using os.Root (Go 1.25+)
 // to prevent symlink traversal attacks. It wraps all filesystem operations
 // to ensure they stay within a designated root directory.
 type OsRootFs struct {

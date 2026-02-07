@@ -312,6 +312,7 @@ type Config struct {
 			ProxyJump string `mapstructure:"proxyjump" yaml:"ProxyJump"`
 			RemotePelicanBinaryDir string `mapstructure:"remotepelicanbinarydir" yaml:"RemotePelicanBinaryDir"`
 			RemotePelicanBinaryOverrides []string `mapstructure:"remotepelicanbinaryoverrides" yaml:"RemotePelicanBinaryOverrides"`
+			SessionEstablishTimeout time.Duration `mapstructure:"sessionestablishtimeout" yaml:"SessionEstablishTimeout"`
 			User string `mapstructure:"user" yaml:"User"`
 		} `mapstructure:"ssh" yaml:"SSH"`
 		ScitokensDefaultUser string `mapstructure:"scitokensdefaultuser" yaml:"ScitokensDefaultUser"`
@@ -743,6 +744,7 @@ type configWithType struct {
 			ProxyJump struct { Type string; Value string }
 			RemotePelicanBinaryDir struct { Type string; Value string }
 			RemotePelicanBinaryOverrides struct { Type string; Value []string }
+			SessionEstablishTimeout struct { Type string; Value time.Duration }
 			User struct { Type string; Value string }
 		}
 		ScitokensDefaultUser struct { Type string; Value string }

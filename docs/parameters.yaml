@@ -1702,6 +1702,17 @@ type: string
 default: none
 components: ["origin"]
 ---
+name: Origin.SSH.SessionEstablishTimeout
+description: |+
+  Maximum time allowed to establish a complete working SSH session.
+  This includes connecting, authenticating, detecting the remote platform,
+  transferring the helper binary (if needed), and starting the helper process.
+  If this timeout is exceeded, the connection attempt is aborted and retried.
+  This is an end-to-end timeout that bounds all session establishment operations.
+type: duration
+default: 5m
+components: ["origin"]
+---
 ############################
 #   Local cache configs    #
 ############################

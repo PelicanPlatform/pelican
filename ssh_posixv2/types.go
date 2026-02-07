@@ -32,6 +32,7 @@ import (
 
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -49,6 +50,10 @@ const (
 
 	// DefaultMaxRetries is the maximum number of connection retries
 	DefaultMaxRetries = 5
+
+	// DefaultSessionEstablishTimeout is the maximum time to establish a working SSH session
+	// (connect, authenticate, detect platform, transfer binary, start helper)
+	DefaultSessionEstablishTimeout = 5 * time.Minute
 )
 
 // AuthMethod represents the type of SSH authentication to use
@@ -345,6 +350,18 @@ type SSHConnection struct {
 
 	// errChan is used to signal errors from the helper process
 	errChan chan error
+
+	// helperIO manages stdin/stdout communication with the remote helper
+	helperIO *helperIO
+
+	// helperErrgroup manages goroutines for the helper process
+	helperErrgroup *errgroup.Group
+
+	// helperCtx is the context for helper goroutines
+	helperCtx context.Context
+
+	// helperCancel cancels the helper context and triggers clean shutdown
+	helperCancel func()
 }
 
 // GetState returns the current connection state

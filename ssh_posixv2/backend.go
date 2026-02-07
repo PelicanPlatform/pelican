@@ -21,6 +21,8 @@ package ssh_posixv2
 import (
 	"context"
 	"fmt"
+	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,6 +31,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
@@ -219,6 +222,10 @@ func InitializeBackend(ctx context.Context, egrp *errgroup.Group, exports []serv
 	// Start cleanup routine for stale requests (every 30 seconds, remove requests older than 5 minutes)
 	backend.helperBroker.StartCleanupRoutine(ctx, egrp, 5*time.Minute, 30*time.Second)
 
+	// Set initial health status - SSH backend is initializing
+	metrics.SetComponentHealthStatus(metrics.Origin_SSHBackend, metrics.StatusWarning,
+		fmt.Sprintf("SSH backend initializing, connecting to %s", host))
+
 	// Launch the connection manager
 	egrp.Go(func() error {
 		return runConnectionManager(ctx, backend, sshConfig, exportConfigs)
@@ -236,6 +243,13 @@ func runConnectionManager(ctx context.Context, backend *SSHBackend, sshConfig *S
 		maxRetries = DefaultMaxRetries
 	}
 
+	// Get the session establishment timeout - this bounds the entire time to establish
+	// a working SSH connection (connect, detect platform, transfer binary, start helper)
+	sessionEstablishTimeout := param.Origin_SSH_SessionEstablishTimeout.GetDuration()
+	if sessionEstablishTimeout <= 0 {
+		sessionEstablishTimeout = DefaultSessionEstablishTimeout
+	}
+
 	// Get the auth cookie from the helper broker
 	authCookie := ""
 	if backend.helperBroker != nil {
@@ -251,42 +265,63 @@ func runConnectionManager(ctx context.Context, backend *SSHBackend, sshConfig *S
 		default:
 		}
 
-		// Create a new connection
+		// Create a new connection with a session establishment timeout context
+		sessionCtx, sessionCancel := context.WithTimeout(ctx, sessionEstablishTimeout)
 		conn := NewSSHConnection(sshConfig)
 		backend.AddConnection(sshConfig.Host, conn)
 
 		// Try to establish the connection
-		err := runConnection(ctx, conn, exports, authCookie)
+		err := runConnection(sessionCtx, conn, exports, authCookie)
+		sessionCancel() // Cancel the session context when done
+
 		if err != nil {
-			if errors.Is(err, context.Canceled) {
+			if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+				// Parent context was cancelled, exit gracefully
+				metrics.SetComponentHealthStatus(metrics.Origin_SSHBackend, metrics.StatusShuttingDown,
+					"SSH backend shutting down")
 				return nil
 			}
 
 			consecutiveFailures++
-			log.Errorf("SSH connection failed (attempt %d/%d): %v", consecutiveFailures, maxRetries, err)
+			if errors.Is(err, context.DeadlineExceeded) {
+				log.Errorf("SSH session establishment timed out after %v (attempt %d/%d)", sessionEstablishTimeout, consecutiveFailures, maxRetries)
+				metrics.SetComponentHealthStatus(metrics.Origin_SSHBackend, metrics.StatusCritical,
+					fmt.Sprintf("SSH session establishment timed out (attempt %d/%d)", consecutiveFailures, maxRetries))
+			} else {
+				log.Errorf("SSH connection failed (attempt %d/%d): %v", consecutiveFailures, maxRetries, err)
+				metrics.SetComponentHealthStatus(metrics.Origin_SSHBackend, metrics.StatusCritical,
+					fmt.Sprintf("SSH connection failed (attempt %d/%d): %v", consecutiveFailures, maxRetries, err))
+			}
 
 			// Check if we've exceeded max retries
 			if consecutiveFailures >= maxRetries {
 				log.Errorf("Max SSH connection retries (%d) exceeded", maxRetries)
+				metrics.SetComponentHealthStatus(metrics.Origin_SSHBackend, metrics.StatusCritical,
+					fmt.Sprintf("SSH connection failed after max retries (%d)", maxRetries))
 				return errors.Wrap(err, "SSH connection failed after max retries")
 			}
 
-			// Exponential backoff with jitter
+			// Exponential backoff with jitter (+/-25% of delay)
 			retryDelay = time.Duration(float64(retryDelay) * 1.5)
 			if retryDelay > MaxReconnectDelay {
 				retryDelay = MaxReconnectDelay
 			}
+			jitter := time.Duration(float64(retryDelay) * (0.5*rand.Float64() - 0.25)) // -25% to +25%
+			delayWithJitter := retryDelay + jitter
 
-			log.Infof("Retrying SSH connection in %v", retryDelay)
+			log.Infof("Retrying SSH connection in %v", delayWithJitter)
+			metrics.SetComponentHealthStatus(metrics.Origin_SSHBackend, metrics.StatusWarning,
+				fmt.Sprintf("SSH connection lost, retrying in %v", delayWithJitter))
 			select {
 			case <-ctx.Done():
 				return nil
-			case <-time.After(retryDelay):
+			case <-time.After(delayWithJitter):
 			}
 		} else {
 			// Connection completed normally (helper exited gracefully)
 			consecutiveFailures = 0
 			retryDelay = DefaultReconnectDelay
+			// Note: Status will be set back to Warning when we start the reconnection loop
 		}
 
 		// Clean up the connection
@@ -302,6 +337,14 @@ func runConnection(ctx context.Context, conn *SSHConnection, exports []ExportCon
 		return errors.Wrap(err, "failed to connect")
 	}
 
+	// Notify WebSocket clients that authentication is complete
+	// This includes all ProxyJump hops - the SSH connection is fully established
+	host := conn.config.Host
+	if err := NotifyAuthComplete(host, "SSH connection established successfully."); err != nil {
+		log.Warnf("Failed to notify auth complete: %v", err)
+		// Non-fatal - continue even if WebSocket notification fails
+	}
+
 	// Detect the remote platform
 	if _, err := conn.DetectRemotePlatform(ctx); err != nil {
 		return errors.Wrap(err, "failed to detect remote platform")
@@ -313,6 +356,16 @@ func runConnection(ctx context.Context, conn *SSHConnection, exports []ExportCon
 			return errors.Wrap(err, "failed to transfer binary")
 		}
 	}
+
+	// Ensure we clean up the remote binary on all exit paths
+	// Use a background context for cleanup since the main context may be cancelled
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		if err := conn.CleanupRemoteBinary(cleanupCtx); err != nil {
+			log.Warnf("Failed to cleanup remote binary: %v", err)
+		}
+	}()
 
 	// Get the callback URL - this is the origin's helper broker callback endpoint
 	// The helper will use this URL to establish reverse connections
@@ -335,6 +388,10 @@ func runConnection(ctx context.Context, conn *SSHConnection, exports []ExportCon
 		return errors.Wrap(err, "failed to start helper")
 	}
 
+	// SSH backend is now fully operational - helper is running and ready to serve requests
+	metrics.SetComponentHealthStatus(metrics.Origin_SSHBackend, metrics.StatusOK,
+		fmt.Sprintf("SSH backend connected to %s, helper running", conn.config.Host))
+
 	// Start keepalive
 	var wg sync.WaitGroup
 	conn.StartKeepalive(ctx, &wg)
@@ -350,11 +407,6 @@ func runConnection(ctx context.Context, conn *SSHConnection, exports []ExportCon
 		if err != nil {
 			return errors.Wrap(err, "helper process failed")
 		}
-	}
-
-	// Clean up the remote binary
-	if err := conn.CleanupRemoteBinary(ctx); err != nil {
-		log.Warnf("Failed to cleanup remote binary: %v", err)
 	}
 
 	return nil
@@ -377,17 +429,11 @@ func getCertificateChain() (string, error) {
 
 // splitOnce splits a string on the first occurrence of sep
 func splitOnce(s, sep string) []string {
-	idx := -1
-	for i := 0; i < len(s)-len(sep)+1; i++ {
-		if s[i:i+len(sep)] == sep {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
+	before, after, found := strings.Cut(s, sep)
+	if !found {
 		return []string{s}
 	}
-	return []string{s[:idx], s[idx+len(sep):]}
+	return []string{before, after}
 }
 
 // GetKeyboardChannel returns the channel for keyboard-interactive challenges

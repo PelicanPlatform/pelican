@@ -29,11 +29,38 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
+	"github.com/kballard/go-shellquote"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 )
+
+// signalEscalationTimeout is the duration to wait after SIGTERM before sending SIGKILL
+const signalEscalationTimeout = 3 * time.Second
+
+// terminateSession sends SIGTERM to a session, and if it doesn't terminate within
+// the timeout, escalates to SIGKILL.
+func terminateSession(session *ssh.Session, done <-chan error) {
+	// First try SIGTERM for graceful shutdown
+	if err := session.Signal(ssh.SIGTERM); err != nil {
+		log.Debugf("Failed to send SIGTERM: %v", err)
+	}
+
+	// Wait for process to exit or timeout
+	select {
+	case <-done:
+		// Process exited gracefully
+		return
+	case <-time.After(signalEscalationTimeout):
+		// Escalate to SIGKILL
+		log.Debugf("Process did not exit after SIGTERM, sending SIGKILL")
+		if err := session.Signal(ssh.SIGKILL); err != nil {
+			log.Debugf("Failed to send SIGKILL: %v", err)
+		}
+	}
+}
 
 // normalizeArch normalizes architecture names to Go's GOARCH format
 func normalizeArch(arch string) string {
@@ -80,13 +107,13 @@ func (c *SSHConnection) DetectRemotePlatform(ctx context.Context) (*PlatformInfo
 	}
 
 	// Run uname -s for OS
-	osOutput, err := c.runCommand(ctx, "uname -s")
+	osOutput, err := c.RunCommandArgs(ctx, []string{"uname", "-s"})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to detect remote OS")
 	}
 
 	// Run uname -m for architecture
-	archOutput, err := c.runCommand(ctx, "uname -m")
+	archOutput, err := c.RunCommandArgs(ctx, []string{"uname", "-m"})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to detect remote architecture")
 	}
@@ -102,14 +129,15 @@ func (c *SSHConnection) DetectRemotePlatform(ctx context.Context) (*PlatformInfo
 	return platformInfo, nil
 }
 
-// RunCommand runs a command on the remote host and returns the output.
-// This is the exported version for external callers.
-func (c *SSHConnection) RunCommand(ctx context.Context, cmd string) (string, error) {
-	return c.runCommand(ctx, cmd)
-}
+// RunCommandArgs runs a command on the remote host with arguments passed as a slice.
+// Each argument is properly quoted using go-shellquote to prevent shell injection attacks.
+func (c *SSHConnection) RunCommandArgs(ctx context.Context, args []string) (string, error) {
+	if len(args) == 0 {
+		return "", errors.New("no command provided")
+	}
 
-// runCommand runs a command on the remote host and returns the output
-func (c *SSHConnection) runCommand(ctx context.Context, cmd string) (string, error) {
+	cmd := shellquote.Join(args...)
+
 	session, err := c.client.NewSession()
 	if err != nil {
 		return "", errors.Wrap(err, "failed to create SSH session")
@@ -128,9 +156,7 @@ func (c *SSHConnection) runCommand(ctx context.Context, cmd string) (string, err
 
 	select {
 	case <-ctx.Done():
-		if err := session.Signal(ssh.SIGTERM); err != nil {
-			log.Debugf("Failed to send SIGTERM: %v", err)
-		}
+		terminateSession(session, done)
 		return "", ctx.Err()
 	case err := <-done:
 		if err != nil {
@@ -202,7 +228,7 @@ func computeFileChecksum(path string) (string, error) {
 //   - $HOME/.cache/pelican/binaries otherwise
 func (c *SSHConnection) setupRemoteBinaryPath(ctx context.Context, checksum string) (string, bool, error) {
 	// Try to determine cache directory following XDG spec
-	cacheDir, err := c.runCommand(ctx, `echo "${XDG_CACHE_HOME:-$HOME/.cache}"`)
+	cacheDir, err := c.RunCommandArgs(ctx, []string{"sh", "-c", `echo "${XDG_CACHE_HOME:-$HOME/.cache}"`})
 	if err != nil {
 		log.Debugf("Failed to determine cache directory: %v", err)
 	} else {
@@ -211,7 +237,9 @@ func (c *SSHConnection) setupRemoteBinaryPath(ctx context.Context, checksum stri
 			pelicanCacheDir := filepath.Join(cacheDir, "pelican", "binaries")
 
 			// Try to create the directory with secure permissions
-			_, err := c.runCommand(ctx, fmt.Sprintf("mkdir -p %s && chmod 700 %s", pelicanCacheDir, pelicanCacheDir))
+			// Use shellquote.Join for safe quoting of the path in the shell command
+			quotedPath := shellquote.Join(pelicanCacheDir)
+			_, err := c.RunCommandArgs(ctx, []string{"sh", "-c", "mkdir -p " + quotedPath + " && chmod 700 " + quotedPath})
 			if err == nil {
 				// Use checksum-based filename for caching
 				binaryPath := filepath.Join(pelicanCacheDir, fmt.Sprintf("pelican-%s", checksum[:16]))
@@ -223,14 +251,14 @@ func (c *SSHConnection) setupRemoteBinaryPath(ctx context.Context, checksum stri
 	}
 
 	// Fallback: create a secure temp directory
-	tmpDir, err := c.runCommand(ctx, "mktemp -d -t pelican-tmp-XXXXXX")
+	tmpDir, err := c.RunCommandArgs(ctx, []string{"mktemp", "-d", "-t", "pelican-tmp-XXXXXX"})
 	if err != nil {
 		return "", false, errors.Wrap(err, "failed to create temp directory on remote host")
 	}
 	tmpDir = strings.TrimSpace(tmpDir)
 
 	// Set restrictive permissions on the temp directory
-	_, err = c.runCommand(ctx, fmt.Sprintf("chmod 700 %s", tmpDir))
+	_, err = c.RunCommandArgs(ctx, []string{"chmod", "700", tmpDir})
 	if err != nil {
 		log.Warnf("Failed to set permissions on temp directory: %v", err)
 	}
@@ -267,7 +295,7 @@ func (c *SSHConnection) TransferBinary(ctx context.Context) error {
 		// First check for configured overrides
 		if override, ok := c.config.RemotePelicanBinaryOverrides[platformKey]; ok {
 			// Verify the override binary exists and is executable on the remote
-			_, err := c.runCommand(ctx, fmt.Sprintf("test -x %s && echo OK", override))
+			_, err := c.RunCommandArgs(ctx, []string{"test", "-x", override})
 			if err != nil {
 				return errors.Wrapf(err, "configured binary override %s is not executable on remote host", override)
 			}
@@ -323,7 +351,9 @@ func (c *SSHConnection) TransferBinary(ctx context.Context) error {
 
 	// Check if a binary with this checksum already exists
 	if isCached {
-		existsOutput, err := c.runCommand(ctx, fmt.Sprintf("test -x %s && echo EXISTS || echo MISSING", remotePath))
+		// Using shell to get EXISTS/MISSING output is okay since remotePath is checksum-based
+		// Use shellquote.Join for safe quoting of the path
+		existsOutput, err := c.RunCommandArgs(ctx, []string{"sh", "-c", "test -x " + shellquote.Join(remotePath) + " && echo EXISTS || echo MISSING"})
 		if err == nil && strings.TrimSpace(existsOutput) == "EXISTS" {
 			log.Infof("Binary with checksum %s already exists at %s, skipping transfer", checksum[:12], remotePath)
 			c.remoteBinaryPath = remotePath
@@ -355,7 +385,7 @@ func (c *SSHConnection) TransferBinary(ctx context.Context) error {
 	}
 
 	// Verify the transfer
-	_, err = c.runCommand(ctx, fmt.Sprintf("test -x %s && echo OK", remotePath))
+	_, err = c.RunCommandArgs(ctx, []string{"test", "-x", remotePath})
 	if err != nil {
 		return errors.Wrap(err, "transferred binary is not executable on remote host")
 	}
@@ -386,11 +416,18 @@ func (c *SSHConnection) scpFile(ctx context.Context, src io.Reader, destPath str
 	session.Stdout = &stdout
 	session.Stderr = &stderr
 
-	// Start the SCP command
+	// Start the SCP command - use shellquote for safe directory escaping
 	destDir := filepath.Dir(destPath)
 	destFile := filepath.Base(destPath)
 
-	if err := session.Start(fmt.Sprintf("scp -t %s", destDir)); err != nil {
+	// Validate filename doesn't contain characters that could break SCP protocol
+	// The SCP protocol header format is "C<mode> <size> <filename>\n"
+	// so newlines or null bytes in filename would cause protocol issues
+	if strings.ContainsAny(destFile, "\n\r\x00") {
+		return errors.Errorf("invalid filename for SCP transfer: contains control characters")
+	}
+
+	if err := session.Start("scp -t " + shellquote.Join(destDir)); err != nil {
 		return errors.Wrap(err, "failed to start SCP command")
 	}
 
@@ -428,9 +465,7 @@ func (c *SSHConnection) scpFile(ctx context.Context, src io.Reader, destPath str
 
 	select {
 	case <-ctx.Done():
-		if err := session.Signal(ssh.SIGTERM); err != nil {
-			log.Debugf("Failed to send SIGTERM: %v", err)
-		}
+		terminateSession(session, done)
 		return ctx.Err()
 	case err := <-done:
 		if err != nil {
@@ -459,7 +494,7 @@ func (c *SSHConnection) CleanupRemoteBinary(ctx context.Context) error {
 	dir := filepath.Dir(c.remoteBinaryPath)
 	if c.remoteTempDir != "" && strings.HasPrefix(dir, c.remoteTempDir) {
 		// Remove the entire temp directory we created
-		_, err := c.runCommand(ctx, fmt.Sprintf("rm -rf %s", c.remoteTempDir))
+		_, err := c.RunCommandArgs(ctx, []string{"rm", "-rf", c.remoteTempDir})
 		if err != nil {
 			log.Warnf("Failed to cleanup remote temp directory %s: %v", c.remoteTempDir, err)
 			return err
@@ -467,7 +502,7 @@ func (c *SSHConnection) CleanupRemoteBinary(ctx context.Context) error {
 		log.Debugf("Cleaned up temp directory %s", c.remoteTempDir)
 	} else if strings.Contains(dir, "pelican-tmp-") {
 		// Fallback: clean up if it looks like our temp directory pattern
-		_, err := c.runCommand(ctx, fmt.Sprintf("rm -rf %s", dir))
+		_, err := c.RunCommandArgs(ctx, []string{"rm", "-rf", dir})
 		if err != nil {
 			log.Warnf("Failed to cleanup remote binary directory %s: %v", dir, err)
 			return err

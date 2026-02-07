@@ -59,12 +59,13 @@ type WebSocketMessage struct {
 
 // WebSocketMessageType constants
 const (
-	WsMsgTypeChallenge = "challenge"
-	WsMsgTypeResponse  = "response"
-	WsMsgTypeStatus    = "status"
-	WsMsgTypeError     = "error"
-	WsMsgTypePing      = "ping"
-	WsMsgTypePong      = "pong"
+	WsMsgTypeChallenge    = "challenge"
+	WsMsgTypeResponse     = "response"
+	WsMsgTypeStatus       = "status"
+	WsMsgTypeError        = "error"
+	WsMsgTypePing         = "ping"
+	WsMsgTypePong         = "pong"
+	WsMsgTypeAuthComplete = "auth_complete" // Server sends this when all auth is done
 )
 
 // RegisterWebSocketHandler registers the WebSocket endpoint for keyboard-interactive auth
@@ -305,4 +306,30 @@ func CloseWebSocket(host string) {
 		ws.Close()
 		delete(activeWebSockets, host)
 	}
+}
+
+// NotifyAuthComplete sends an auth_complete message to the WebSocket client,
+// indicating that all authentication (including ProxyJump hops) is complete
+// and the SSH connection is fully established. The client can then cleanly
+// disconnect without waiting for more challenges.
+func NotifyAuthComplete(host string, message string) error {
+	activeWebSocketsMu.RLock()
+	ws, ok := activeWebSockets[host]
+	activeWebSocketsMu.RUnlock()
+
+	if !ok {
+		return nil // No WebSocket connected, that's fine
+	}
+
+	payload := map[string]string{
+		"status":  "complete",
+		"message": message,
+	}
+
+	if err := sendWebSocketMessage(ws, WsMsgTypeAuthComplete, payload); err != nil {
+		return errors.Wrap(err, "failed to send auth_complete message")
+	}
+
+	log.Infof("Sent auth_complete notification to WebSocket client for %s", host)
+	return nil
 }

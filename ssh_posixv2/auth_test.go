@@ -48,8 +48,12 @@ type testSSHServerConfig struct {
 	// password is the password to accept for password auth
 	password string
 
-	// keyboardInteractivePrompts defines the prompts and expected answers
+	// keyboardInteractivePrompts defines the prompts and expected answers (single step)
 	keyboardInteractivePrompts []testKIPrompt
+
+	// keyboardInteractiveSteps defines multi-step keyboard-interactive auth
+	// Each step is a separate challenge/response round
+	keyboardInteractiveSteps []testKIStep
 
 	// publicKey is the authorized public key for publickey auth
 	publicKey ssh.PublicKey
@@ -65,6 +69,12 @@ type testKIPrompt struct {
 	Answer string
 }
 
+// testKIStep defines a single step in multi-step keyboard-interactive auth
+type testKIStep struct {
+	Instruction string         // Instruction to display for this step
+	Prompts     []testKIPrompt // Prompts for this step
+}
+
 // testSSHServerGo represents a Go-based SSH server for testing
 type testSSHServerGo struct {
 	listener    net.Listener
@@ -74,7 +84,8 @@ type testSSHServerGo struct {
 	tempDir     string
 	knownHosts  string
 	wg          sync.WaitGroup
-	stopCh      chan struct{}
+	ctx         context.Context
+	cancelFunc  context.CancelFunc
 	connections []net.Conn
 	connMu      sync.Mutex
 }
@@ -144,6 +155,48 @@ func startTestSSHServerGo(t *testing.T, cfg *testSSHServerConfig) (*testSSHServe
 		}
 	}
 
+	// Add multi-step keyboard-interactive auth if steps are defined
+	if len(cfg.keyboardInteractiveSteps) > 0 {
+		serverConfig.KeyboardInteractiveCallback = func(c ssh.ConnMetadata, client ssh.KeyboardInteractiveChallenge) (*ssh.Permissions, error) {
+			// Process each step sequentially
+			for stepIdx, step := range cfg.keyboardInteractiveSteps {
+				// Build prompts and echos for this step
+				prompts := make([]string, len(step.Prompts))
+				echos := make([]bool, len(step.Prompts))
+				expectedAnswers := make([]string, len(step.Prompts))
+
+				for i, p := range step.Prompts {
+					prompts[i] = p.Prompt
+					echos[i] = p.Echo
+					expectedAnswers[i] = p.Answer
+				}
+
+				// Send the challenge for this step
+				instruction := step.Instruction
+				if instruction == "" {
+					instruction = fmt.Sprintf("Step %d", stepIdx+1)
+				}
+				answers, err := client(c.User(), instruction, prompts, echos)
+				if err != nil {
+					return nil, err
+				}
+
+				// Verify answers
+				if len(answers) != len(expectedAnswers) {
+					return nil, fmt.Errorf("step %d: expected %d answers, got %d", stepIdx+1, len(expectedAnswers), len(answers))
+				}
+
+				for i, expected := range expectedAnswers {
+					if answers[i] != expected {
+						return nil, fmt.Errorf("step %d answer %d mismatch: expected %q, got %q", stepIdx+1, i, expected, answers[i])
+					}
+				}
+			}
+
+			return &ssh.Permissions{}, nil
+		}
+	}
+
 	// Add publickey auth if public key is set
 	if cfg.publicKey != nil {
 		serverConfig.PublicKeyCallback = func(c ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
@@ -183,8 +236,8 @@ func startTestSSHServerGo(t *testing.T, cfg *testSSHServerConfig) (*testSSHServe
 		port:       port,
 		tempDir:    tempDir,
 		knownHosts: knownHostsPath,
-		stopCh:     make(chan struct{}),
 	}
+	server.ctx, server.cancelFunc = context.WithCancel(context.Background())
 
 	// Start accepting connections
 	server.wg.Add(1)
@@ -199,12 +252,12 @@ func (s *testSSHServerGo) acceptConnections() {
 
 	for {
 		select {
-		case <-s.stopCh:
+		case <-s.ctx.Done():
 			return
 		default:
 		}
 
-		// Set a deadline so we can check stopCh periodically
+		// Set a deadline so we can check ctx periodically
 		_ = s.listener.(*net.TCPListener).SetDeadline(time.Now().Add(100 * time.Millisecond))
 
 		conn, err := s.listener.Accept()
@@ -237,8 +290,26 @@ func (s *testSSHServerGo) handleConnection(conn net.Conn) {
 	}
 	defer sshConn.Close()
 
-	// Discard global requests
-	go ssh.DiscardRequests(reqs)
+	// Discard global requests in a context-aware goroutine
+	var discardWg sync.WaitGroup
+	discardWg.Add(1)
+	go func() {
+		defer discardWg.Done()
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case req, ok := <-reqs:
+				if !ok {
+					return
+				}
+				if req.WantReply {
+					_ = req.Reply(false, nil)
+				}
+			}
+		}
+	}()
+	defer discardWg.Wait()
 
 	// Handle channels
 	for newChannel := range chans {
@@ -262,13 +333,10 @@ func (s *testSSHServerGo) handleConnection(conn net.Conn) {
 						cmdLen := int(req.Payload[0])<<24 | int(req.Payload[1])<<16 | int(req.Payload[2])<<8 | int(req.Payload[3])
 						if len(req.Payload) >= 4+cmdLen {
 							cmd := string(req.Payload[4 : 4+cmdLen])
-							// Handle simple commands for testing
-							switch {
-							case cmd == "echo hello":
-								_, _ = ch.Write([]byte("hello\n"))
-							case strings.HasPrefix(cmd, "echo "):
+							// Handle echo commands for testing
+							if strings.HasPrefix(cmd, "echo ") {
 								_, _ = ch.Write([]byte(cmd[5:] + "\n"))
-							default:
+							} else {
 								_, _ = ch.Write([]byte("unknown command\n"))
 							}
 						}
@@ -290,12 +358,12 @@ func (s *testSSHServerGo) handleConnection(conn net.Conn) {
 
 // stop stops the test SSH server
 func (s *testSSHServerGo) stop() {
-	close(s.stopCh)
-	s.listener.Close()
+	s.cancelFunc()
+	_ = s.listener.Close()
 
 	s.connMu.Lock()
 	for _, conn := range s.connections {
-		conn.Close()
+		_ = conn.Close()
 	}
 	s.connMu.Unlock()
 
@@ -304,6 +372,9 @@ func (s *testSSHServerGo) stop() {
 
 // TestPasswordAuthentication tests SSH password authentication
 func TestPasswordAuthentication(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	// Create test server with password auth
 	serverCfg := &testSSHServerConfig{
 		password: "secretpassword123",
@@ -330,7 +401,6 @@ func TestPasswordAuthentication(t *testing.T) {
 
 	// Connect
 	conn := NewSSHConnection(sshConfig)
-	ctx := context.Background()
 	err = conn.Connect(ctx)
 	require.NoError(t, err)
 	defer conn.Close()
@@ -349,6 +419,9 @@ func TestPasswordAuthentication(t *testing.T) {
 
 // TestPasswordAuthenticationWrongPassword tests password auth with wrong password
 func TestPasswordAuthenticationWrongPassword(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	serverCfg := &testSSHServerConfig{
 		password: "correctpassword",
 	}
@@ -372,13 +445,16 @@ func TestPasswordAuthenticationWrongPassword(t *testing.T) {
 	}
 
 	conn := NewSSHConnection(sshConfig)
-	err = conn.Connect(context.Background())
+	err = conn.Connect(ctx)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unable to authenticate")
 }
 
 // TestKeyboardInteractiveLocal tests keyboard-interactive with local channel-based responses
 func TestKeyboardInteractiveLocal(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	// Create test server with keyboard-interactive auth
 	serverCfg := &testSSHServerConfig{
 		keyboardInteractivePrompts: []testKIPrompt{
@@ -402,7 +478,6 @@ func TestKeyboardInteractiveLocal(t *testing.T) {
 	}
 
 	conn := NewSSHConnection(sshConfig)
-	ctx := context.Background()
 
 	// Start a goroutine to respond to keyboard-interactive challenges
 	go func() {
@@ -423,8 +498,8 @@ func TestKeyboardInteractiveLocal(t *testing.T) {
 			}
 			conn.GetResponseChannel() <- response
 
-		case <-time.After(5 * time.Second):
-			t.Error("Timeout waiting for keyboard-interactive challenge")
+		case <-ctx.Done():
+			t.Error("Context cancelled waiting for keyboard-interactive challenge")
 		}
 	}()
 
@@ -437,6 +512,9 @@ func TestKeyboardInteractiveLocal(t *testing.T) {
 
 // TestKeyboardInteractiveWrongAnswer tests keyboard-interactive with wrong answers
 func TestKeyboardInteractiveWrongAnswer(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	serverCfg := &testSSHServerConfig{
 		keyboardInteractivePrompts: []testKIPrompt{
 			{Prompt: "Password: ", Echo: false, Answer: "correctanswer"},
@@ -457,7 +535,6 @@ func TestKeyboardInteractiveWrongAnswer(t *testing.T) {
 	}
 
 	conn := NewSSHConnection(sshConfig)
-	ctx := context.Background()
 
 	// Respond with wrong answer
 	go func() {
@@ -468,8 +545,8 @@ func TestKeyboardInteractiveWrongAnswer(t *testing.T) {
 				Answers:   []string{"wronganswer"},
 			}
 			conn.GetResponseChannel() <- response
-		case <-time.After(5 * time.Second):
-			t.Error("Timeout waiting for challenge")
+		case <-ctx.Done():
+			t.Error("Context cancelled waiting for challenge")
 		}
 	}()
 
@@ -561,9 +638,12 @@ func TestKeyboardInteractiveWebSocket(t *testing.T) {
 	defer wsConn.Close()
 
 	// Start SSH connection in a goroutine
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	connErr := make(chan error, 1)
 	go func() {
-		connErr <- conn.Connect(context.Background())
+		connErr <- conn.Connect(ctx)
 	}()
 
 	// Wait for challenge and respond via WebSocket
@@ -609,13 +689,16 @@ func TestKeyboardInteractiveWebSocket(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, StateConnected, conn.GetState())
 		conn.Close()
-	case <-time.After(15 * time.Second):
-		t.Fatal("Timeout waiting for SSH connection")
+	case <-ctx.Done():
+		t.Fatal("Context deadline exceeded waiting for SSH connection")
 	}
 }
 
 // TestMultipleAuthMethods tests fallback between auth methods
 func TestMultipleAuthMethods(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	// Server only accepts password auth
 	serverCfg := &testSSHServerConfig{
 		password: "mysecret",
@@ -649,7 +732,7 @@ func TestMultipleAuthMethods(t *testing.T) {
 	}
 
 	conn := NewSSHConnection(sshConfig)
-	err = conn.Connect(context.Background())
+	err = conn.Connect(ctx)
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -681,7 +764,8 @@ func TestKeyboardInteractiveMultiRound(t *testing.T) {
 	}
 
 	conn := NewSSHConnection(sshConfig)
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Respond to challenges
 	go func() {
@@ -699,8 +783,8 @@ func TestKeyboardInteractiveMultiRound(t *testing.T) {
 			}
 			conn.GetResponseChannel() <- response
 
-		case <-time.After(5 * time.Second):
-			t.Error("Timeout waiting for challenge")
+		case <-ctx.Done():
+			t.Error("Context cancelled waiting for challenge")
 		}
 	}()
 
@@ -711,8 +795,97 @@ func TestKeyboardInteractiveMultiRound(t *testing.T) {
 	assert.Equal(t, StateConnected, conn.GetState())
 }
 
+// TestKeyboardInteractiveMultiStep tests multi-step keyboard-interactive authentication
+// where the server issues multiple separate challenge/response rounds (not just multiple
+// prompts in one round). This simulates services that require sequential authentication
+// steps, like entering username first, then password, then 2FA code.
+func TestKeyboardInteractiveMultiStep(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Configure server with multiple authentication steps
+	serverCfg := &testSSHServerConfig{
+		keyboardInteractiveSteps: []testKIStep{
+			{
+				Instruction: "Step 1: Identity Verification",
+				Prompts: []testKIPrompt{
+					{Prompt: "Username: ", Echo: true, Answer: "admin"},
+				},
+			},
+			{
+				Instruction: "Step 2: Password Authentication",
+				Prompts: []testKIPrompt{
+					{Prompt: "Password: ", Echo: false, Answer: "secret123"},
+				},
+			},
+			{
+				Instruction: "Step 3: Two-Factor Authentication",
+				Prompts: []testKIPrompt{
+					{Prompt: "Enter 2FA code: ", Echo: true, Answer: "123456"},
+				},
+			},
+		},
+	}
+
+	server, err := startTestSSHServerGo(t, serverCfg)
+	require.NoError(t, err)
+	defer server.stop()
+
+	sshConfig := &SSHConfig{
+		Host:           "127.0.0.1",
+		Port:           server.port,
+		User:           "testuser",
+		AuthMethods:    []AuthMethod{AuthMethodKeyboardInteractive},
+		KnownHostsFile: server.knownHosts,
+		ConnectTimeout: 30 * time.Second,
+	}
+
+	conn := NewSSHConnection(sshConfig)
+
+	// Track the number of challenges received
+	challengeCount := 0
+	expectedResponses := [][]string{
+		{"admin"},     // Step 1 response
+		{"secret123"}, // Step 2 response
+		{"123456"},    // Step 3 response
+	}
+
+	// Respond to challenges
+	go func() {
+		for {
+			select {
+			case challenge := <-conn.GetKeyboardChannel():
+				if challengeCount >= len(expectedResponses) {
+					t.Errorf("Received more challenges than expected: %d", challengeCount+1)
+					return
+				}
+
+				response := KeyboardInteractiveResponse{
+					SessionID: challenge.SessionID,
+					Answers:   expectedResponses[challengeCount],
+				}
+				challengeCount++
+				conn.GetResponseChannel() <- response
+
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	err = conn.Connect(ctx)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	assert.Equal(t, StateConnected, conn.GetState())
+	assert.Equal(t, 3, challengeCount, "Expected exactly 3 authentication steps")
+}
+
 // TestPasswordFromFileWithWhitespace tests password file with trailing whitespace
 func TestPasswordFromFileWithWhitespace(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	serverCfg := &testSSHServerConfig{
 		password: "cleanpassword",
 	}
@@ -736,7 +909,7 @@ func TestPasswordFromFileWithWhitespace(t *testing.T) {
 	}
 
 	conn := NewSSHConnection(sshConfig)
-	err = conn.Connect(context.Background())
+	err = conn.Connect(ctx)
 	require.NoError(t, err)
 	defer conn.Close()
 

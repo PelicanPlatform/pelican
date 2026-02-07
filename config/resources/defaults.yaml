@@ -99,6 +99,7 @@ Origin:
     KeepaliveInterval: 5s
     KeepaliveTimeout: 20s
     Port: 22
+    SessionEstablishTimeout: 5m
 Registry:
   InstitutionsUrlReloadMinutes: 15m
   RequireCacheApproval: false

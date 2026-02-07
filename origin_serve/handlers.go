@@ -351,7 +351,7 @@ func InitializeHandlers(exports []server_utils.OriginExport) error {
 			// Create a filesystem for this export with auto-directory creation
 			// Use OsRootFs to prevent symlink traversal attacks
 			// OsRootFs is already rooted at StoragePrefix, so we don't need BasePathFs
-			osRootFs, err := NewOsRootFs(export.StoragePrefix)
+			osRootFs, err := server_utils.NewOsRootFs(export.StoragePrefix)
 			if err != nil {
 				return fmt.Errorf("failed to create OsRootFs for %s: %w", export.StoragePrefix, err)
 			}
