@@ -341,6 +341,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.SSH.ProxyJump": false,
 	"Origin.SSH.RemotePelicanBinaryDir": false,
 	"Origin.SSH.RemotePelicanBinaryOverrides": false,
+	"Origin.SSH.SessionEstablishTimeout": false,
 	"Origin.SSH.User": false,
 	"Origin.ScitokensDefaultUser": false,
 	"Origin.ScitokensGroupsClaim": false,
@@ -1314,6 +1315,8 @@ func (dP DurationParam) GetDuration() time.Duration {
 			return config.Origin.SSH.KeepaliveInterval
 		case "Origin.SSH.KeepaliveTimeout":
 			return config.Origin.SSH.KeepaliveTimeout
+		case "Origin.SSH.SessionEstablishTimeout":
+			return config.Origin.SSH.SessionEstablishTimeout
 		case "Origin.SelfTestInterval":
 			return config.Origin.SelfTestInterval
 		case "Origin.SelfTestMaxAge":
@@ -1653,6 +1656,7 @@ var allParameterNames = []string{
 	"Origin.SSH.ProxyJump",
 	"Origin.SSH.RemotePelicanBinaryDir",
 	"Origin.SSH.RemotePelicanBinaryOverrides",
+	"Origin.SSH.SessionEstablishTimeout",
 	"Origin.SSH.User",
 	"Origin.ScitokensDefaultUser",
 	"Origin.ScitokensGroupsClaim",
@@ -2151,6 +2155,7 @@ var (
 	Origin_SSH_ConnectTimeout = DurationParam{"Origin.SSH.ConnectTimeout"}
 	Origin_SSH_KeepaliveInterval = DurationParam{"Origin.SSH.KeepaliveInterval"}
 	Origin_SSH_KeepaliveTimeout = DurationParam{"Origin.SSH.KeepaliveTimeout"}
+	Origin_SSH_SessionEstablishTimeout = DurationParam{"Origin.SSH.SessionEstablishTimeout"}
 	Origin_SelfTestInterval = DurationParam{"Origin.SelfTestInterval"}
 	Origin_SelfTestMaxAge = DurationParam{"Origin.SelfTestMaxAge"}
 	Origin_UserMapfileRefreshInterval = DurationParam{"Origin.UserMapfileRefreshInterval"}
