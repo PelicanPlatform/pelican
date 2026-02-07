@@ -912,3 +912,182 @@ func generateToken(destination *url.URL, dirResp server_structs.DirectorResponse
 	tkn, err = tc.CreateTokenWithKey(key)
 	return
 }
+
+// DeviceAuthInfo contains information returned from initiating a device auth flow
+// for client-side use in the MCP server
+type DeviceAuthInfo struct {
+	// The verification URL the user should visit
+	VerificationURL string
+	// The complete verification URL with user code (if available)
+	VerificationURLComplete string
+	// The user code to enter at the verification URL
+	UserCode string
+	// How long until the auth expires (in seconds)
+	ExpiresIn int
+	// Internal state for completing auth
+	authInfo *oauth2.DeviceAuthInfo
+}
+
+// InitiateDeviceAuth starts the device authorization flow for a Pelican URL and returns
+// the verification URL without blocking for user interaction. This is useful for
+// non-terminal environments like MCP servers that need to display the URL to users
+// through other means.
+//
+// After the user visits the verification URL and completes authorization,
+// call CompleteDeviceAuth to obtain the token.
+func InitiateDeviceAuth(ctx context.Context, sourceUrl string) (*DeviceAuthInfo, error) {
+	// Parse the URL with federation discovery enabled
+	pUrl, err := ParseRemoteAsPUrl(ctx, sourceUrl)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse Pelican URL")
+	}
+
+	// Get director response to find issuer info
+	dirResp, err := GetDirectorInfoForPath(ctx, pUrl, http.MethodGet, "")
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get director info")
+	}
+
+	// Check if token is required
+	if !dirResp.XPelNsHdr.RequireToken {
+		return nil, errors.New("this namespace does not require authentication")
+	}
+
+	nsPrefix := dirResp.XPelNsHdr.Namespace
+
+	// Check token strategy
+	switch tokStrategy := dirResp.XPelTokGenHdr.Strategy; tokStrategy {
+	case server_structs.OAuthStrategy:
+		// continue
+	case server_structs.VaultStrategy:
+		return nil, fmt.Errorf("vault credential generation strategy is not supported")
+	default:
+		return nil, fmt.Errorf("unknown credential generation strategy (%s) for prefix %s",
+			tokStrategy, nsPrefix)
+	}
+
+	issuers := dirResp.XPelTokGenHdr.Issuers
+	if len(issuers) == 0 {
+		return nil, fmt.Errorf("no issuer information for prefix '%s' is provided", nsPrefix)
+	}
+
+	issuerUrl := issuers[0].String()
+	if len(issuerUrl) == 0 {
+		return nil, fmt.Errorf("issuer URL for prefix %s is unknown", nsPrefix)
+	}
+
+	// Try to get existing client credentials from the config file.
+	// If we can't read the config (e.g., it's encrypted and we're not in a terminal),
+	// we'll register a new client without caching.
+	osdfConfig, configErr := config.GetCredentialConfigContents()
+	canSaveConfig := configErr == nil
+
+	if configErr != nil {
+		log.Debugf("Could not read credential config (will register new client without caching): %v", configErr)
+		// Initialize empty config to proceed
+		osdfConfig = config.OSDFConfig{}
+	}
+
+	prefixIdx := -1
+	for idx, entry := range osdfConfig.OSDF.OauthClient {
+		if entry.Prefix == nsPrefix {
+			prefixIdx = idx
+			break
+		}
+	}
+
+	var prefixEntry *config.PrefixEntry
+	newEntry := false
+	if prefixIdx < 0 {
+		log.Infof("Prefix configuration for %s not in configuration file; will request new client", nsPrefix)
+		prefixEntry, err = registerClient(dirResp)
+		if err != nil {
+			return nil, err
+		}
+		osdfConfig.OSDF.OauthClient = append(osdfConfig.OSDF.OauthClient, *prefixEntry)
+		prefixEntry = &osdfConfig.OSDF.OauthClient[len(osdfConfig.OSDF.OauthClient)-1]
+		newEntry = true
+	} else {
+		prefixEntry = &osdfConfig.OSDF.OauthClient[prefixIdx]
+		if len(prefixEntry.ClientID) == 0 || len(prefixEntry.ClientSecret) == 0 {
+			log.Infof("Prefix configuration for %s missing OAuth2 client information", nsPrefix)
+			prefixEntry, err = registerClient(dirResp)
+			if err != nil {
+				return nil, err
+			}
+			osdfConfig.OSDF.OauthClient[prefixIdx] = *prefixEntry
+			newEntry = true
+		}
+	}
+	if newEntry && canSaveConfig {
+		if err = config.SaveConfigContents(&osdfConfig); err != nil {
+			log.Warningln("Failed to save new client to configuration file:", err)
+		}
+	}
+
+	opts := config.TokenGenerationOpts{
+		Operation: config.TokenRead,
+	}
+
+	// Initiate device auth
+	authInfo, err := oauth2.InitiateDeviceAuth(ctx, issuerUrl, prefixEntry, dirResp, pUrl.GetRawUrl().Path, opts)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to initiate device authorization")
+	}
+
+	return &DeviceAuthInfo{
+		VerificationURL:         authInfo.VerificationURL,
+		VerificationURLComplete: authInfo.VerificationURLComplete,
+		UserCode:                authInfo.UserCode,
+		ExpiresIn:               authInfo.ExpiresIn,
+		authInfo:                authInfo,
+	}, nil
+}
+
+// CompleteDeviceAuth polls the OAuth2 server to complete the device authorization flow.
+// This function blocks until the user authorizes or the context is cancelled.
+// On success, the token is cached for future use.
+// Returns the access token and the namespace prefix it's valid for.
+func CompleteDeviceAuth(ctx context.Context, sourceUrl string, authInfo *DeviceAuthInfo) (tokenStr string, namespace string, err error) {
+	if authInfo == nil || authInfo.authInfo == nil {
+		return "", "", errors.New("invalid device auth info")
+	}
+
+	// Poll for the token
+	token, err := oauth2.PollDeviceAuth(ctx, authInfo.authInfo)
+	if err != nil {
+		return "", "", errors.Wrap(err, "failed to complete device authorization")
+	}
+
+	// Parse the URL with federation discovery to get director info for caching
+	pUrl, err := ParseRemoteAsPUrl(ctx, sourceUrl)
+	if err != nil {
+		return "", "", errors.Wrap(err, "failed to parse Pelican URL")
+	}
+
+	dirResp, err := GetDirectorInfoForPath(ctx, pUrl, http.MethodGet, "")
+	if err != nil {
+		return "", "", errors.Wrap(err, "failed to get director info")
+	}
+
+	nsPrefix := dirResp.XPelNsHdr.Namespace
+
+	// Cache the token
+	osdfConfig, err := config.GetCredentialConfigContents()
+	if err != nil {
+		log.Warningln("Failed to get credential config for caching token:", err)
+		return token.AccessToken, nsPrefix, nil
+	}
+
+	for idx, entry := range osdfConfig.OSDF.OauthClient {
+		if entry.Prefix == nsPrefix {
+			osdfConfig.OSDF.OauthClient[idx].Tokens = append(osdfConfig.OSDF.OauthClient[idx].Tokens, *token)
+			if err = config.SaveConfigContents(&osdfConfig); err != nil {
+				log.Warningln("Failed to save token to configuration file:", err)
+			}
+			break
+		}
+	}
+
+	return token.AccessToken, nsPrefix, nil
+}
