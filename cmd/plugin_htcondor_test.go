@@ -160,9 +160,15 @@ Origin:
 	// Get the pelican binary (built once via sync.Once)
 	pelicanBinary := getPelicanBinary(t)
 
+	// Create temporary plugin directory in /tmp
+	pluginDir, err := os.MkdirTemp("/tmp", "pelican-libexec-*")
+	require.NoError(t, err)
+	require.NoError(t, os.Chmod(pluginDir, 0755))
+	t.Cleanup(func() { os.RemoveAll(pluginDir) })
+
 	// Create HTCondor configuration
 	configFile := filepath.Join(tempDir, "condor_config")
-	require.NoError(t, writeMiniCondorConfig(configFile, tempDir, logDir, socketDir, pelicanBinary))
+	require.NoError(t, writeMiniCondorConfig(configFile, tempDir, logDir, socketDir, pelicanBinary, pluginDir))
 
 	// Set CONDOR_CONFIG environment variable
 	t.Setenv("CONDOR_CONFIG", configFile)
@@ -337,7 +343,7 @@ func findHTCondorLibexec() (string, error) {
 }
 
 // writeMiniCondorConfig writes a minimal HTCondor configuration for testing
-func writeMiniCondorConfig(configFile, tempDir, logDir, socketDir, pelicanBinary string) error {
+func writeMiniCondorConfig(configFile, tempDir, logDir, socketDir, pelicanBinary, pluginDir string) error {
 	// Find HTCondor binaries in PATH
 	sbinDir, err := findHTCondorSbin()
 	if err != nil {
@@ -352,6 +358,15 @@ func writeMiniCondorConfig(configFile, tempDir, logDir, socketDir, pelicanBinary
 	libexecDir, err := findHTCondorLibexec()
 	if err != nil {
 		return errors.Wrap(err, "failed to find HTCondor libexec directory")
+	}
+
+	pluginPath := filepath.Join(pluginDir, "pelican_plugin")
+	pluginContent, err := os.ReadFile(pelicanBinary)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(pluginPath, pluginContent, 0755); err != nil {
+		return err
 	}
 
 	config := fmt.Sprintf(`# Mini HTCondor configuration for Pelican plugin testing
@@ -391,7 +406,7 @@ SEC_DEFAULT_AUTHENTICATION = OPTIONAL
 SEC_DEFAULT_AUTHENTICATION_METHODS = FS, PASSWORD
 
 # File transfer plugin configuration
-FILETRANSFER_PLUGINS = $(LIBEXEC)/pelican_plugin
+FILETRANSFER_PLUGINS = %s
 
 # Schedd configuration
 SCHEDD_INTERVAL = 5
@@ -409,18 +424,9 @@ PREEMPT = False
 KILL = False
 WANT_SUSPEND = False
 WANT_VACATE = False
-`, tempDir, logDir, sbinDir, binDir, libexecDir, socketDir)
+`, tempDir, logDir, sbinDir, binDir, libexecDir, socketDir, pluginPath)
 
 	if err := os.WriteFile(configFile, []byte(config), 0644); err != nil {
-		return err
-	}
-
-	// Create symlink for pelican_plugin in HTCondor's LIBEXEC directory
-	// The pelican binary detects its name and behaves as a plugin when named pelican_plugin
-	pluginLink := filepath.Join(libexecDir, "pelican_plugin")
-	// Remove if it exists (from previous test run)
-	os.Remove(pluginLink)
-	if err := os.Symlink(pelicanBinary, pluginLink); err != nil {
 		return err
 	}
 
