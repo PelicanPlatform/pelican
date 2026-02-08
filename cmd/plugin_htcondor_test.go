@@ -76,14 +76,18 @@ func TestHTCondorPlugin(t *testing.T) {
 	}
 
 	condorUser, err := user.Lookup(condorUsername)
-	require.NoError(t, err)
+	if err != nil {
+		t.Skipf("Required user %q not found: %v", condorUsername, err)
+	}
 	condorUid, err := strconv.Atoi(condorUser.Uid)
 	require.NoError(t, err)
 	condorGid, err := strconv.Atoi(condorUser.Gid)
 	require.NoError(t, err)
 
 	aliceUser, err := user.Lookup(aliceUsername)
-	require.NoError(t, err)
+	if err != nil {
+		t.Skipf("Required user %q not found: %v", aliceUsername, err)
+	}
 	aliceUid, err := strconv.Atoi(aliceUser.Uid)
 	require.NoError(t, err)
 	aliceGid, err := strconv.Atoi(aliceUser.Gid)
