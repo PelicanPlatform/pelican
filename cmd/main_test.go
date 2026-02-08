@@ -212,6 +212,7 @@ func TestHandleCLIExecutableAlias(t *testing.T) {
 			t.Fatalf("Function returns error")
 		}
 		return
+	}
 
 	oldArgs := os.Args
 	os.Args = []string{}
@@ -270,6 +271,9 @@ func TestHandleCLIExecutableAlias(t *testing.T) {
 	batchTest := func(t *testing.T, arguments []string, expected string) {
 		aliasTestMutex.Lock()
 		defer aliasTestMutex.Unlock()
+
+		// Get the pelican binary (built once via sync.Once)
+		pelicanBinary := getPelicanBinary(t)
 
 		if _, err := os.Stat(arguments[0]); err != nil { // Binary not found, copy it
 			if err := exec.Command("cp", pelicanBinary, arguments[0]).Run(); err != nil {
