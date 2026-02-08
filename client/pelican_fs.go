@@ -113,10 +113,10 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 
 	// Get director info and token generator
 	httpMethod := http.MethodGet
-	operation := config.TokenSharedRead
+	operation := config.TokenRead
 	if writeMode && !rdwrMode {
 		httpMethod = http.MethodPut
-		operation = config.TokenSharedWrite
+		operation = config.TokenWrite
 	}
 
 	dirResp, err := GetDirectorInfoForPath(pfs.ctx, pUrl, httpMethod, "")
@@ -159,7 +159,7 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 				if err != nil {
 					return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 				}
-				token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, true)
+				token = NewTokenGenerator(pUrl, &dirResp, config.TokenWrite, true)
 				for _, option := range pfs.options {
 					switch option.Ident() {
 					case identTransferOptionTokenLocation{}:
