@@ -575,32 +575,73 @@ func parseScope(scope string) (authz, resource string, hasResource bool) {
 	return parts[0], parts[1], true
 }
 
-// hasAcceptableScope checks if any scope in the space-separated scope string
-// is acceptable for the given operation and resource.
+// hasAcceptableScope checks whether the space-separated scope string satisfies
+// ALL operation requirements. For multi-operation requests (e.g. Read+Write),
+// each operation must be independently satisfied by at least one scope.
 func hasAcceptableScope(scopes string, isWLCG, isSci bool, targetResource string, opts config.TokenGenerationOpts) bool {
+	// Build a requirement for each distinct operation type requested.
+	type requirement struct {
+		check     func(authz string) bool
+		satisfied bool
+	}
+	var requirements []*requirement
+
+	if opts.Operation.IsEnabled(config.TokenRead) || opts.Operation.IsEnabled(config.TokenSharedRead) || opts.Operation.IsEnabled(config.TokenList) {
+		requirements = append(requirements, &requirement{
+			check: func(authz string) bool {
+				return (isWLCG && authz == token_scopes.Wlcg_Storage_Read.String()) ||
+					(isSci && authz == token_scopes.Scitokens_Read.String())
+			},
+		})
+	}
+	if opts.Operation.IsEnabled(config.TokenWrite) || opts.Operation.IsEnabled(config.TokenSharedWrite) {
+		requirements = append(requirements, &requirement{
+			check: func(authz string) bool {
+				return (isWLCG && (authz == token_scopes.Wlcg_Storage_Modify.String() || authz == token_scopes.Wlcg_Storage_Create.String())) ||
+					(isSci && authz == token_scopes.Scitokens_Write.String())
+			},
+		})
+	}
+	if opts.Operation.IsEnabled(config.TokenDelete) {
+		requirements = append(requirements, &requirement{
+			check: func(authz string) bool {
+				return (isWLCG && authz == token_scopes.Wlcg_Storage_Modify.String()) ||
+					(isSci && authz == token_scopes.Scitokens_Write.String())
+			},
+		})
+	}
+
+	// If no operations are requested, there is nothing to validate against.
+	if len(requirements) == 0 {
+		return false
+	}
+
 	for _, scope := range strings.Fields(scopes) {
 		authz, resource, hasResource := parseScope(scope)
 		if authz == "" {
 			continue
 		}
 
-		// Check if the authorization scope is valid for WLCG or Sci tokens
-		scopeValid := (isWLCG && isValidWLCGScope(authz, opts.Operation)) || (isSci && isValidSciScope(authz, opts.Operation))
-		if !scopeValid {
+		// Check resource path: if the scope has a resource, it must match.
+		if hasResource && !matchesResource(targetResource, resource, opts.Operation) {
 			continue
 		}
 
-		// If scope has no resource part, accept it
-		if !hasResource {
-			return true
-		}
-
-		// If scope has a resource part, check if it matches (exact for shared URLs, prefix otherwise)
-		if matchesResource(targetResource, resource, opts.Operation) {
-			return true
+		// Mark any requirement whose authz predicate matches.
+		for _, req := range requirements {
+			if !req.satisfied && req.check(authz) {
+				req.satisfied = true
+			}
 		}
 	}
-	return false
+
+	// All requirements must be satisfied.
+	for _, req := range requirements {
+		if !req.satisfied {
+			return false
+		}
+	}
+	return true
 }
 
 // matchesResource checks if the target resource matches the scope resource.
@@ -619,11 +660,12 @@ func matchesResource(targetResource, scopeResource string, operation config.Toke
 		scopeNorm = strings.TrimSuffix(scopeNorm, "/")
 	}
 
-	// For shared operations, exact match is preferred; otherwise, prefix matching is acceptable.
-	// However, prefix matching is always acceptable as a fallback.
-	// Check exact match on normalized paths, or prefix match on original paths
-	return (isSharedOperation && targetNorm == scopeNorm) ||
-		strings.HasPrefix(targetResource, scopeResource) ||
+	// For shared operations, exact match on normalized paths is required.
+	// For non-shared operations, prefix matching is acceptable.
+	if isSharedOperation {
+		return targetNorm == scopeNorm
+	}
+	return strings.HasPrefix(targetResource, scopeResource) ||
 		strings.HasPrefix(targetNorm, scopeNorm)
 }
 
