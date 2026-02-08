@@ -113,6 +113,7 @@ func rcloneTokenMain(cmd *cobra.Command, args []string) error {
 	var operation config.TokenOperation
 	if rcloneTokenReadWrite {
 		operation.Set(config.TokenWrite)
+		operation.Set(config.TokenDelete)
 	}
 	operation.Set(config.TokenRead)
 	operation.Set(config.TokenList)

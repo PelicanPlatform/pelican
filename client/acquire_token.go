@@ -501,43 +501,91 @@ func tokenIsAcceptable(jwtSerialized string, objectName string, dirResp server_s
 	}
 
 	scopes_iface, ok := tok.Get("scope")
+
+	// Build the set of scope types required by the requested operations.
+	// Each entry maps a required scope-type predicate to a "satisfied" flag.
+	type requirement struct {
+		matches   func(string) bool
+		satisfied bool
+	}
+	var requirements []*requirement
+
+	if opts.Operation.IsEnabled(config.TokenRead) || opts.Operation.IsEnabled(config.TokenSharedRead) || opts.Operation.IsEnabled(config.TokenList) {
+		requirements = append(requirements, &requirement{
+			matches: func(s string) bool {
+				if s == "storage.read" {
+					return true
+				}
+				return isSci && s == "read"
+			},
+		})
+	}
+	if opts.Operation.IsEnabled(config.TokenWrite) || opts.Operation.IsEnabled(config.TokenSharedWrite) {
+		requirements = append(requirements, &requirement{
+			matches: func(s string) bool {
+				if s == "storage.modify" || s == "storage.create" {
+					return true
+				}
+				return isSci && s == "write"
+			},
+		})
+	}
+	if opts.Operation.IsEnabled(config.TokenDelete) {
+		requirements = append(requirements, &requirement{
+			matches: func(s string) bool {
+				if s == "storage.modify" {
+					return true
+				}
+				return isSci && s == "write"
+			},
+		})
+	}
+
+	// If operations are requested but the token has no scopes at all, reject.
+	if len(requirements) == 0 {
+		return false
+	}
 	if !ok {
 		return false
 	}
-	if scopes, ok := scopes_iface.(string); ok {
-		acceptableScope := false
-		for _, scope := range strings.Split(scopes, " ") {
-			scope_info := strings.Split(scope, ":")
-			var scopeOK bool
-			if opts.Operation.IsEnabled(config.TokenWrite) || opts.Operation.IsEnabled(config.TokenSharedWrite) {
-				scopeOK = (scope_info[0] == "storage.modify" || scope_info[0] == "storage.create")
-			} else if opts.Operation.IsEnabled(config.TokenDelete) {
-				scopeOK = (scope_info[0] == "storage.modify")
-			} else if opts.Operation.IsEnabled(config.TokenRead) || opts.Operation.IsEnabled(config.TokenSharedRead) {
-				scopeOK = (scope_info[0] == "storage.read")
-			} else {
-				scopeOK = false
-			}
-			if !scopeOK {
-				continue
-			}
+	scopes, ok := scopes_iface.(string)
+	if !ok || scopes == "" {
+		return false
+	}
 
-			if len(scope_info) == 1 {
-				acceptableScope = true
-				break
-			}
-			// Shared URLs must have exact matches; otherwise, prefix matching is acceptable.
-			if ((opts.Operation.IsEnabled(config.TokenSharedWrite) || opts.Operation.IsEnabled(config.TokenSharedRead)) && (targetResource == scope_info[1])) ||
-				strings.HasPrefix(targetResource, scope_info[1]) {
-				acceptableScope = true
-				break
-			}
+	// Check each token scope against every unsatisfied requirement.
+	for _, scope := range strings.Split(scopes, " ") {
+		scope_info := strings.Split(scope, ":")
+
+		// Verify the scope path is acceptable.
+		pathOK := false
+		if len(scope_info) == 1 {
+			pathOK = true
+		} else if opts.Operation.IsEnabled(config.TokenSharedWrite) || opts.Operation.IsEnabled(config.TokenSharedRead) {
+			// Shared operations require an exact path match.
+			pathOK = targetResource == scope_info[1]
+		} else {
+			pathOK = strings.HasPrefix(targetResource, scope_info[1])
 		}
-		if acceptableScope {
-			return true
+		if !pathOK {
+			continue
+		}
+
+		// Mark any requirement whose scope-type predicate matches.
+		for _, req := range requirements {
+			if !req.satisfied && req.matches(scope_info[0]) {
+				req.satisfied = true
+			}
 		}
 	}
-	return false
+
+	// All requirements must be satisfied.
+	for _, req := range requirements {
+		if !req.satisfied {
+			return false
+		}
+	}
+	return true
 }
 
 // Return whether the JWT represented by jwtSerialized is valid.
