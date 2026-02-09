@@ -83,9 +83,14 @@ func BindAllParameters(v *viper.Viper) {
 // by splitting on commas or whitespace. This handles both:
 //   - Comma-separated: "a,b,c" → ["a", "b", "c"]
 //   - Whitespace-separated: "a b c" → ["a", "b", "c"] (supports YAML >- folding style)
+//   - Mixed: "a, b c" → ["a", "b", "c"]
 //
-// If the string contains commas, it splits on commas (and trims whitespace from each element).
+// The function supports both comma and space as separators. If the string contains
+// commas, it splits on commas (and trims whitespace from each element).
 // Otherwise, it splits on whitespace.
+// Surrounding quotes (both single and double) are trimmed from the entire string
+// first (to handle Docker env files where quotes are preserved), and then from each
+// element after splitting.
 // Empty strings after splitting are filtered out.
 func stringToSliceHookFunc() mapstructure.DecodeHookFunc {
 	return func(f reflect.Kind, t reflect.Kind, data interface{}) (interface{}, error) {
@@ -98,13 +103,20 @@ func stringToSliceHookFunc() mapstructure.DecodeHookFunc {
 			return []string{}, nil
 		}
 
+		// First, trim surrounding quotes from the entire string (handles Docker env files
+		// where quotes are preserved as-is, unlike shell which strips them)
+		raw = strings.Trim(raw, `"'`)
+
 		var result []string
 
 		// If the string contains commas, split on commas (standard behavior)
 		if strings.Contains(raw, ",") {
 			parts := strings.Split(raw, ",")
 			for _, part := range parts {
+				// Trim whitespace first
 				trimmed := strings.TrimSpace(part)
+				// Trim surrounding quotes (both single and double) from each element
+				trimmed = strings.Trim(trimmed, `"'`)
 				if trimmed != "" {
 					result = append(result, trimmed)
 				}
@@ -113,8 +125,10 @@ func stringToSliceHookFunc() mapstructure.DecodeHookFunc {
 			// Otherwise, split on whitespace (handles YAML >- folding style)
 			parts := strings.Fields(raw)
 			for _, part := range parts {
-				if part != "" {
-					result = append(result, part)
+				// Trim surrounding quotes (both single and double) from each element
+				trimmed := strings.Trim(part, `"'`)
+				if trimmed != "" {
+					result = append(result, trimmed)
 				}
 			}
 		}
@@ -388,7 +402,7 @@ func getOrCreateConfig() *Config {
 		WeaklyTypedInput: true,
 		DecodeHook: mapstructure.ComposeDecodeHookFunc(
 			mapstructure.StringToTimeDurationHookFunc(),
-			mapstructure.StringToSliceHookFunc(","),
+			stringToSliceHookFunc(),
 			stringToByteRateHookFunc(),
 		),
 		MatchName: func(mapKey, fieldName string) bool {
@@ -433,7 +447,7 @@ func MultiSet(keyValues map[string]interface{}) error {
 		WeaklyTypedInput: true,
 		DecodeHook: mapstructure.ComposeDecodeHookFunc(
 			mapstructure.StringToTimeDurationHookFunc(),
-			mapstructure.StringToSliceHookFunc(","),
+			stringToSliceHookFunc(),
 			stringToByteRateHookFunc(),
 		),
 		MatchName: func(mapKey, fieldName string) bool {
