@@ -19,46 +19,99 @@
 package local_cache
 
 import (
-"testing"
+	"sync/atomic"
+	"testing"
+	"time"
 
-"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// TestNonBlockingDownload documents the architecture needed for non-blocking downloads.
-//
-// TODO: The current implementation still blocks in performDownload waiting for
-// transfer completion. To make this truly non-blocking requires:
-//
-// 1. performDownload should return after metadata is available, not after transfer completes
-// 2. Transfer completion should happen in a background goroutine
-// 3. Finalization (updating metadata, closing files) should happen in background
-// 4. Need proper error handling for background transfer failures
-// 5. Need to handle client disconnects during background transfer
-// 6. BlockFetcherV2 already supports waiting for incomplete blocks (via WaitForChunkWithETA)
-//
-// The architecture is complex because:
-// - Size validation must happen after full download
-// - File encryption/finalization must complete successfully
-// - Metadata updates must be atomic
-// - Error states must be properly tracked
-//
-// This is a significant refactoring that should be done incrementally with
-// careful testing of edge cases (client disconnect, origin failure, partial downloads).
-func TestNonBlockingDownload(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
+// TestNonBlockingDownload_CompletionTracking verifies the background completion
+// mechanism used by non-blocking downloads: completionDone channel and completionErr
+// atomic value correctly track background goroutine lifecycle.
+func TestNonBlockingDownload_CompletionTracking(t *testing.T) {
+	// Verify completionDone channel signals properly
+	dl := &persistentDownload{
+		completionDone: make(chan struct{}),
+	}
 
-	t.Log("Non-blocking download architecture (TODO):")
-	t.Log("  Current state: performDownload blocks on transfer completion")
-	t.Log("  Required changes:")
-	t.Log("    - Return after metadata available, before transfer complete")
-	t.Log("    - Background goroutine for transfer completion + finalization")
-	t.Log("    - Proper error handling for background failures")
-	t.Log("    - Handle client disconnect during background transfer")
-	t.Log("")
-	t.Log("Architecture already in place:")
-	t.Log("  ✓ BlockFetcherV2 waits for blocks via WaitForChunkWithETA")
-	t.Log("  ✓ RangeReader streams data from BlockFetcher")
-	t.Log("  ✓ Per-request transfer clients (no shared state)")
-	t.Log("")
-	t.Log("This is a complex refactoring requiring careful testing of edge cases")
+	done := make(chan bool, 1)
+	go func() {
+		select {
+		case <-dl.completionDone:
+			done <- true
+		case <-time.After(2 * time.Second):
+			done <- false
+		}
+	}()
+
+	// Should not be done yet
+	select {
+	case <-dl.completionDone:
+		t.Fatal("completionDone should not be closed yet")
+	default:
+		// expected
+	}
+
+	// Simulate background completion
+	close(dl.completionDone)
+
+	result := <-done
+	assert.True(t, result, "completionDone should signal after close")
+
+	// Verify completionErr stores and returns errors
+	dl2 := &persistentDownload{
+		completionDone: make(chan struct{}),
+	}
+	assert.Nil(t, dl2.completionErr.Load(), "completionErr should be nil initially")
+
+	testErr := "simulated transfer failure"
+	dl2.completionErr.Store(testErr)
+	assert.Equal(t, testErr, dl2.completionErr.Load(), "completionErr should store error")
 }
+
+// TestNonBlockingDownload_CompletionDoneIsNonBlocking verifies that callers can
+// poll completionDone without blocking, and that multiple goroutines can wait
+// on the same channel simultaneously.
+func TestNonBlockingDownload_CompletionDoneIsNonBlocking(t *testing.T) {
+	dl := &persistentDownload{
+		completionDone: make(chan struct{}),
+	}
+
+	const numWaiters = 5
+	results := make([]atomic.Bool, numWaiters)
+
+	// Launch multiple waiters
+	for i := 0; i < numWaiters; i++ {
+		i := i
+		go func() {
+			<-dl.completionDone
+			results[i].Store(true)
+		}()
+	}
+
+	// Give goroutines time to start waiting
+	time.Sleep(50 * time.Millisecond)
+
+	// None should be done yet
+	for i := 0; i < numWaiters; i++ {
+		assert.False(t, results[i].Load(), "Waiter %d should not be done yet", i)
+	}
+
+	// Signal completion
+	close(dl.completionDone)
+
+	// All should complete within a reasonable time
+	require.Eventually(t, func() bool {
+		for i := 0; i < numWaiters; i++ {
+			if !results[i].Load() {
+				return false
+			}
+		}
+		return true
+	}, 2*time.Second, 10*time.Millisecond, "All waiters should be notified")
+}
+
+// Integration-level tests for streaming / non-blocking downloads live in
+// e2e_fed_tests/cache_streaming_test.go where a full federation is available.

@@ -36,9 +36,9 @@ const (
 	PrefixState = "s:"
 	// PrefixInline stores encrypted inline data for small objects (< 4KB)
 	PrefixInline = "d:"
-	// PrefixLRU stores sorted index for eviction candidates: l:<prefix_id>:<ts>:<instance_hash>
+	// PrefixLRU stores sorted index for eviction candidates: l:<storage_id>:<namespace_id>:<ts>:<instance_hash>
 	PrefixLRU = "l:"
-	// PrefixUsage stores total bytes used by a specific namespace prefix
+	// PrefixUsage stores total bytes used per storage+namespace: u:<storage_id>:<namespace_id>
 	PrefixUsage = "u:"
 	// PrefixDiskMap stores the mapping of disk IDs to directories
 	PrefixDiskMap = "di:"
@@ -59,6 +59,16 @@ const (
 	// Additional disk modes can be added for multiple storage directories
 	// StorageModeDiskB uint8 = 2
 	// StorageModeDiskC uint8 = 3
+)
+
+// Storage ID constants
+const (
+	// StorageIDInline is the storage ID for inline data stored in BadgerDB
+	StorageIDInline uint8 = 0
+	// StorageIDPrimaryDisk is the storage ID for the primary disk storage location
+	StorageIDPrimaryDisk uint8 = 1
+	// Storage IDs 2-255 are reserved for additional disk storage paths
+	// Configured via LocalCache.DataLocations parameter
 )
 
 // Block size constants for encryption and storage
@@ -127,13 +137,13 @@ type CacheMetadata struct {
 
 	// Storage fields
 	StorageMode uint8  `msgpack:"mode"` // 0=Inline, 1=Disk
-	StoragePath string `msgpack:"sp"`   // Storage directory path (for multi-storage support)
+	StorageID   uint8  `msgpack:"sid"`  // Storage ID: 0=inline, 1+=disk path ID (see DiskMapping)
 	DataKey     []byte `msgpack:"key"`  // Encrypted DEK (Data Encryption Key)
 	Nonce       []byte `msgpack:"iv"`   // Base IV/nonce for file encryption
 
-	// Namespace tracking for fairness-aware eviction
-	// TODO: Split into NamespaceID and StorageID to track usage per-storage independently
+	// Namespace and storage tracking for fairness-aware eviction
 	NamespaceID uint32 `msgpack:"ns"` // ID of the namespace prefix
+	// Usage is tracked per (StorageID, NamespaceID) pair for multi-storage fairness
 
 	// LRU tracking
 	LastAccessTime time.Time `msgpack:"la"` // Last access time for LRU index
@@ -309,13 +319,13 @@ func NamespaceKey(prefix string) []byte {
 }
 
 // LRUKey returns the BadgerDB key for LRU tracking
-// Format: l:<prefix_id>:<timestamp_ns>:<instance_hash>
-func LRUKey(prefixID uint32, timestamp time.Time, instanceHash string) []byte {
-	return []byte(fmt.Sprintf("%s%d:%019d:%s", PrefixLRU, prefixID, timestamp.UnixNano(), instanceHash))
+// Format: l:<storage_id>:<namespace_id>:<timestamp_ns>:<instance_hash>
+func LRUKey(storageID uint8, namespaceID uint32, timestamp time.Time, instanceHash string) []byte {
+	return []byte(fmt.Sprintf("%s%d:%d:%019d:%s", PrefixLRU, storageID, namespaceID, timestamp.UnixNano(), instanceHash))
 }
 
-// ParseLRUKey parses an LRU key and returns prefixID, timestamp, and instanceHash
-func ParseLRUKey(key []byte) (prefixID uint32, timestamp time.Time, instanceHash string, err error) {
+// ParseLRUKey parses an LRU key and returns storageID, namespaceID, timestamp, and instanceHash
+func ParseLRUKey(key []byte) (storageID uint8, namespaceID uint32, timestamp time.Time, instanceHash string, err error) {
 	keyStr := string(key)
 	if !strings.HasPrefix(keyStr, PrefixLRU) {
 		err = fmt.Errorf("invalid LRU key prefix: %s", keyStr)
@@ -323,43 +333,58 @@ func ParseLRUKey(key []byte) (prefixID uint32, timestamp time.Time, instanceHash
 	}
 	keyStr = keyStr[len(PrefixLRU):]
 
-	parts := strings.SplitN(keyStr, ":", 3)
-	if len(parts) != 3 {
+	parts := strings.SplitN(keyStr, ":", 4)
+	if len(parts) != 4 {
 		err = fmt.Errorf("invalid LRU key format: %s", keyStr)
 		return
 	}
 
+	var sid, nid uint32
 	var n int
-	_, err = fmt.Sscanf(parts[0], "%d", &prefixID)
+	_, err = fmt.Sscanf(parts[0], "%d", &sid)
 	if err != nil {
 		return
 	}
+	storageID = uint8(sid)
+
+	_, err = fmt.Sscanf(parts[1], "%d", &nid)
+	if err != nil {
+		return
+	}
+	namespaceID = nid
 
 	var tsNano int64
-	n, err = fmt.Sscanf(parts[1], "%d", &tsNano)
+	n, err = fmt.Sscanf(parts[2], "%d", &tsNano)
 	if err != nil || n != 1 {
-		err = fmt.Errorf("invalid timestamp in LRU key: %s", parts[1])
+		err = fmt.Errorf("invalid timestamp in LRU key: %s", parts[2])
 		return
 	}
 	timestamp = time.Unix(0, tsNano)
 
-	instanceHash = parts[2]
+	instanceHash = parts[3]
 	return
 }
 
-// UsageKey returns the BadgerDB key for namespace usage counter
-func UsageKey(prefixID uint32) []byte {
-	return []byte(fmt.Sprintf("%s%d", PrefixUsage, prefixID))
+// UsageKey returns the BadgerDB key for namespace usage counter per storage
+// Format: u:<storage_id>:<namespace_id>
+func UsageKey(storageID uint8, namespaceID uint32) []byte {
+	return []byte(fmt.Sprintf("%s%d:%d", PrefixUsage, storageID, namespaceID))
 }
 
-// ParseUsageKey extracts the prefix ID from a usage key
-func ParseUsageKey(key []byte) (prefixID uint32, err error) {
+// ParseUsageKey extracts the storage ID and namespace ID from a usage key
+func ParseUsageKey(key []byte) (storageID uint8, namespaceID uint32, err error) {
 	keyStr := string(key)
 	if !strings.HasPrefix(keyStr, PrefixUsage) {
 		err = fmt.Errorf("invalid usage key prefix: %s", keyStr)
 		return
 	}
-	_, err = fmt.Sscanf(keyStr[len(PrefixUsage):], "%d", &prefixID)
+	var sid, nid uint32
+	_, err = fmt.Sscanf(keyStr[len(PrefixUsage):], "%d:%d", &sid, &nid)
+	if err != nil {
+		return
+	}
+	storageID = uint8(sid)
+	namespaceID = nid
 	return
 }
 

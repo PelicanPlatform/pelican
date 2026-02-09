@@ -24,6 +24,7 @@ import (
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
+	"fmt"
 	"hash"
 	"hash/crc32"
 	"io"
@@ -635,11 +636,16 @@ func (cc *ConsistencyChecker) RunDataScan(ctx context.Context) error {
 
 	// Start DB scan in background goroutine
 	go func() {
-		lastKey := ""
 		const transactionTimeout = 5 * time.Second
 
-		// Collect all items first for randomization
-		allItems := make([]scanItem, 0, 10000)
+		// Generate random 4-byte hex starting point (16 bits = 4 hex chars)
+		// This randomizes where we start scanning through the database
+		rng := rand.New(rand.NewSource(scanStartTime.UnixNano()))
+		randomStart := fmt.Sprintf("%04x", rng.Intn(1<<16))
+		
+		startKey := randomStart
+		lastKey := startKey
+		wrappedAround := false
 
 		for {
 			transactionStart := time.Now()
@@ -652,9 +658,18 @@ func (cc *ConsistencyChecker) RunDataScan(ctx context.Context) error {
 				default:
 				}
 
-				allItems = append(allItems, scanItem{instanceHash: instanceHash, meta: meta})
-				scannedThisTx++
-				lastKey = instanceHash
+				// If we've wrapped around and reached our starting point, we're done
+				if wrappedAround && instanceHash >= startKey {
+					return errChannelFull // Use as "scan complete" signal
+				}
+
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case objectChan <- scanItem{instanceHash: instanceHash, meta: meta}:
+					scannedThisTx++
+					lastKey = instanceHash
+				}
 
 				// Restart transaction after timeout
 				if time.Since(transactionStart) > transactionTimeout {
@@ -664,36 +679,32 @@ func (cc *ConsistencyChecker) RunDataScan(ctx context.Context) error {
 				return nil
 			})
 
-			if err != nil && !errors.Is(err, errTransactionTimeout) {
+			if err != nil && !errors.Is(err, errTransactionTimeout) && !errors.Is(err, errChannelFull) {
 				scanErr <- err
 				close(objectChan)
 				close(scanErr)
 				return
 			}
 
-			// If no items scanned, we're done
-			if scannedThisTx == 0 {
-				// Randomize order using deterministic seed based on scan start time
-				// This avoids sequential disk access patterns that may interfere with cache operations
-				rng := rand.New(rand.NewSource(scanStartTime.UnixNano()))
-				rng.Shuffle(len(allItems), func(i, j int) {
-					allItems[i], allItems[j] = allItems[j], allItems[i]
-				})
-
-				// Send all items to channel in randomized order
-				for _, item := range allItems {
-					select {
-					case <-ctx.Done():
-						close(objectChan)
-						close(scanErr)
-						return
-					case objectChan <- item:
-					}
-				}
-
+			// Check if scan is complete
+			if errors.Is(err, errChannelFull) {
 				close(objectChan)
 				close(scanErr)
 				return
+			}
+
+			// If no items scanned, we've reached the end of the database
+			if scannedThisTx == 0 {
+				if wrappedAround {
+					// Already wrapped and reached end again - done
+					close(objectChan)
+					close(scanErr)
+					return
+				}
+				// Wrap around to beginning
+				wrappedAround = true
+				lastKey = ""
+				log.Debugf("Data scan wrapping around from end to beginning (started at %s)", startKey)
 			}
 		}
 	}()

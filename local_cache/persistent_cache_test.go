@@ -286,33 +286,34 @@ func TestCacheDBUsageCounter(t *testing.T) {
 	defer db.Close()
 
 	namespaceID := uint32(1)
+	storageID := StorageIDPrimaryDisk
 
 	// Initial usage should be 0
-	usage, err := db.GetUsage(namespaceID)
+	usage, err := db.GetUsage(storageID, namespaceID)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), usage)
 
 	// Add usage
-	err = db.AddUsage(namespaceID, 1000)
+	err = db.AddUsage(storageID, namespaceID, 1000)
 	require.NoError(t, err)
 
-	usage, err = db.GetUsage(namespaceID)
+	usage, err = db.GetUsage(storageID, namespaceID)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1000), usage)
 
 	// Add more usage
-	err = db.AddUsage(namespaceID, 500)
+	err = db.AddUsage(storageID, namespaceID, 500)
 	require.NoError(t, err)
 
-	usage, err = db.GetUsage(namespaceID)
+	usage, err = db.GetUsage(storageID, namespaceID)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1500), usage)
 
 	// Subtract usage (negative delta)
-	err = db.AddUsage(namespaceID, -200)
+	err = db.AddUsage(storageID, namespaceID, -200)
 	require.NoError(t, err)
 
-	usage, err = db.GetUsage(namespaceID)
+	usage, err = db.GetUsage(storageID, namespaceID)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1300), usage)
 }
@@ -353,9 +354,9 @@ func TestCacheDBMergeUpdate(t *testing.T) {
 		instanceHash2: bitmap2Data,
 	}
 
-	usageDeltas := map[uint32]int64{
-		1: 1000, // namespace 1: +1000 bytes
-		2: 2000, // namespace 2: +2000 bytes
+	usageDeltas := map[StorageUsageKey]int64{
+		{StorageID: StorageIDPrimaryDisk, NamespaceID: 1}: 1000, // storage 1, namespace 1: +1000 bytes
+		{StorageID: StorageIDPrimaryDisk, NamespaceID: 2}: 2000, // storage 1, namespace 2: +2000 bytes
 	}
 
 	err = db.MergeUpdate(bitmapMerges, usageDeltas)
@@ -376,11 +377,11 @@ func TestCacheDBMergeUpdate(t *testing.T) {
 	assert.False(t, resultBitmap2.Contains(15))
 
 	// Verify usage counters
-	usage1, err := db.GetUsage(1)
+	usage1, err := db.GetUsage(StorageIDPrimaryDisk, 1)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1000), usage1)
 
-	usage2, err := db.GetUsage(2)
+	usage2, err := db.GetUsage(StorageIDPrimaryDisk, 2)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2000), usage2)
 
@@ -393,7 +394,7 @@ func TestCacheDBMergeUpdate(t *testing.T) {
 
 	err = db.MergeUpdate(
 		map[string][]byte{instanceHash1: moreBitmap1Data},
-		map[uint32]int64{1: 500},
+		map[StorageUsageKey]int64{{StorageID: StorageIDPrimaryDisk, NamespaceID: 1}: 500},
 	)
 	require.NoError(t, err)
 
@@ -406,7 +407,7 @@ func TestCacheDBMergeUpdate(t *testing.T) {
 	assert.False(t, resultBitmap1.Contains(10))
 
 	// Verify accumulated usage
-	usage1, err = db.GetUsage(1)
+	usage1, err = db.GetUsage(StorageIDPrimaryDisk, 1)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1500), usage1)
 }
@@ -545,8 +546,8 @@ func TestEvictionManager(t *testing.T) {
 	eviction.RecordAccess("instance_hash_2")
 
 	// Test adding usage
-	eviction.AddUsage(1, 100000)
-	eviction.AddUsage(2, 200000)
+	eviction.AddUsage(StorageIDPrimaryDisk, 1, 100000)
+	eviction.AddUsage(StorageIDPrimaryDisk, 2, 200000)
 
 	// Get stats
 	stats := eviction.GetStats()
