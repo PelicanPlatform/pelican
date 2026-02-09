@@ -463,6 +463,7 @@ nfpms:
           - "pelican-director = 7"
         dependencies:
           - "pelican >= 7.11.0"
+          # Minimum XRootD version 5.8.2 is also enforced in xrootd/version.go - keep these in sync
           - "xrootd-server >= 1:5.8.2"
           - "xrootd-scitokens"
           - "xrootd-voms"
@@ -474,6 +475,7 @@ nfpms:
           - "pelican-director (= 7)"
         dependencies:
           - "pelican (>= 7.11.0)"
+          # Minimum XRootD version 5.8.2 is also enforced in xrootd/version.go - keep these in sync
           - "xrootd-server (>= 5.8.2)"
           - "xrootd-scitokens-plugins"
           - "xrootd-voms-plugins"
