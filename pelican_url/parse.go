@@ -25,6 +25,8 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
+
+	"github.com/pelicanplatform/pelican/error_codes"
 )
 
 type (
@@ -179,7 +181,9 @@ func validateOsdfStashUrl(parsedUrl *url.URL) error {
 
 func validatePelicanUrl(parsedUrl *url.URL) error {
 	if parsedUrl.Host == "" {
-		return errors.New(fmt.Sprintf("pelican URL '%s' is invalid because it has no host", parsedUrl.String()))
+		return error_codes.NewParameterError(
+			fmt.Errorf("pelican URL '%s' is invalid because it has no host", parsedUrl.String()),
+		)
 	}
 	return nil
 }
