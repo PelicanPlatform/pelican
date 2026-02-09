@@ -826,10 +826,6 @@ func (tm *TransferManager) startBackgroundTasks() {
 
 		// Run once on startup after a short delay (use shorter delay for tests)
 		startupDelay := 5 * time.Minute
-		if tm.maxJobs < 10 {
-			// Likely a test environment with low maxJobs, use shorter delay
-			startupDelay = 1 * time.Second
-		}
 
 		// Use a timer instead of sleep to respect context cancellation
 		timer := time.NewTimer(startupDelay)
