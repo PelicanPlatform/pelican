@@ -437,6 +437,38 @@ func LoadCertificate(certFile string) (*x509.Certificate, error) {
 	return cert, nil
 }
 
+// LoadCertificateChainPEM reads a PEM-encoded TLS certificate file and returns
+// the full PEM-encoded certificate chain as a string. This includes all certificates
+// in the file (not just the first one). Only certificate blocks are returned; any
+// private keys in the file are excluded.
+func LoadCertificateChainPEM(certFile string) (string, error) {
+	data, err := os.ReadFile(certFile)
+	if err != nil {
+		return "", err
+	}
+
+	// Extract only certificate blocks, excluding any private keys
+	rest := data
+	var certBlocks []byte
+	var block *pem.Block
+	for {
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type == "CERTIFICATE" {
+			// Re-encode only certificate blocks
+			certBlocks = append(certBlocks, pem.EncodeToMemory(block)...)
+		}
+	}
+
+	if len(certBlocks) == 0 {
+		return "", fmt.Errorf("certificate file, %v, contains no certificate", certFile)
+	}
+
+	return string(certBlocks), nil
+}
+
 // Generate a TLS certificate (host certificate) and its private key
 // for non-production environment if the required TLS files are not present
 func GenerateCert() error {

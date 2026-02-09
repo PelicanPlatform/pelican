@@ -229,4 +229,5 @@ instead.
 	originUiResetCmd.Flags().Bool("stdin", false, "Read the password in from stdin.")
 
 	originCmd.AddCommand(originCollectionCmd)
+	originCmd.AddCommand(sshAuthCmd)
 }

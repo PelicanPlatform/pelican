@@ -57,6 +57,7 @@ import (
 
 var xrootdReset func()
 var posixv2Reset func()
+var sshBackendReset func()
 var brokerReset func()
 var pelicanUrlReset func()
 
@@ -68,6 +69,11 @@ func RegisterXrootdReset(fn func()) {
 // RegisterPOSIXv2Reset allows the origin_serve package to provide a reset hook without introducing import cycles.
 func RegisterPOSIXv2Reset(fn func()) {
 	posixv2Reset = fn
+}
+
+// RegisterSSHBackendReset allows the ssh_posixv2 package to provide a reset hook without introducing import cycles.
+func RegisterSSHBackendReset(fn func()) {
+	sshBackendReset = fn
 }
 
 // RegisterBrokerReset allows the broker package to provide a reset hook without introducing import cycles.
@@ -347,6 +353,9 @@ func ResetTestState() {
 	}
 	if posixv2Reset != nil {
 		posixv2Reset()
+	}
+	if sshBackendReset != nil {
+		sshBackendReset()
 	}
 	if brokerReset != nil {
 		brokerReset()
