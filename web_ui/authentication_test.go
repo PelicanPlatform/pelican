@@ -518,6 +518,8 @@ func TestCheckAdmin(t *testing.T) {
 	testCases := []struct {
 		name          string
 		user          string
+		id            string
+		sub           string
 		groups        []string
 		adminUsers    []string
 		adminGroups   []string
@@ -650,6 +652,83 @@ func TestCheckAdmin(t *testing.T) {
 			expectedAdmin: false,
 			expectedMsg:   "You don't have permission to perform this action",
 		},
+		// Test cases for ID-based admin matching (#3050)
+		{
+			name:          "user-matched-by-id",
+			user:          "user1",
+			id:            "internal-id-123",
+			adminUsers:    []string{"internal-id-123"},
+			adminGroups:   nil,
+			expectedAdmin: true,
+			expectedMsg:   "",
+		},
+		{
+			name:          "user-matched-by-sub",
+			user:          "user1",
+			sub:           "http://cilogon.org/serverA/users/12345",
+			adminUsers:    []string{"http://cilogon.org/serverA/users/12345"},
+			adminGroups:   nil,
+			expectedAdmin: true,
+			expectedMsg:   "",
+		},
+		{
+			name:          "user-matched-by-id-not-username",
+			user:          "user1",
+			id:            "internal-id-456",
+			adminUsers:    []string{"internal-id-456", "other-admin"},
+			adminGroups:   nil,
+			expectedAdmin: true,
+			expectedMsg:   "",
+		},
+		{
+			name:          "user-matched-by-sub-not-username",
+			user:          "user1",
+			sub:           "oidc-sub-789",
+			adminUsers:    []string{"oidc-sub-789"},
+			adminGroups:   nil,
+			expectedAdmin: true,
+			expectedMsg:   "",
+		},
+		{
+			name:          "empty-id-and-sub-no-false-positive",
+			user:          "user1",
+			id:            "",
+			sub:           "",
+			adminUsers:    []string{"admin1"},
+			adminGroups:   nil,
+			expectedAdmin: false,
+			expectedMsg:   "You don't have permission to perform this action",
+		},
+		{
+			name:          "empty-id-sub-dont-match-empty-admin-entry",
+			user:          "user1",
+			id:            "",
+			sub:           "",
+			adminUsers:    []string{""},
+			adminGroups:   nil,
+			expectedAdmin: false,
+			expectedMsg:   "You don't have permission to perform this action",
+		},
+		{
+			name:          "id-and-sub-present-username-not-in-list",
+			user:          "display-name",
+			id:            "stable-id",
+			sub:           "oidc-sub",
+			adminUsers:    []string{"some-other-admin"},
+			adminGroups:   nil,
+			expectedAdmin: false,
+			expectedMsg:   "You don't have permission to perform this action",
+		},
+		{
+			name:          "username-changed-but-id-still-matches",
+			user:          "new-display-name",
+			id:            "stable-id-001",
+			sub:           "oidc-sub-001",
+			adminUsers:    []string{"stable-id-001"},
+			adminGroups:   nil,
+			expectedAdmin: true,
+			expectedMsg:   "",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -671,7 +750,13 @@ func TestCheckAdmin(t *testing.T) {
 			// Call CheckAdmin
 			var isAdmin bool
 			var msg string
-			isAdmin, msg = CheckAdmin(tc.user, tc.groups)
+			identity := UserIdentity{
+				Username: tc.user,
+				ID:       tc.id,
+				Sub:      tc.sub,
+				Groups:   tc.groups,
+			}
+			isAdmin, msg = CheckAdmin(identity)
 
 			// Verify results
 			assert.Equal(t, tc.expectedAdmin, isAdmin, "Admin status mismatch for user %s", tc.user)
