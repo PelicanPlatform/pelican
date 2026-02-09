@@ -63,6 +63,20 @@ func (o *PosixOrigin) validateExtra(e *OriginExport, _ int) error {
 		return errors.Wrapf(err, "unable to resolve absolute path for StoragePrefix '%s'", e.StoragePrefix)
 	}
 
+	// When StoragePrefix is "/", every absolute path is technically "under" it, and
+	// filepath.Rel will never produce a ".." prefix. This is a real security issue, not
+	// just a filepath.Rel quirk: the POSC plugin hides logical paths under /in-progress
+	// but does NOT prevent access through export symlinks. If UploadTempLocation is under
+	// StoragePrefix, temp files are reachable via the export's federation path, bypassing
+	// POSC's path-based isolation entirely.
+	if storageAbs == "/" {
+		return errors.Errorf("Origin.UploadTempLocation '%s' cannot be used when StoragePrefix is '%s' "+
+			"(export for federation prefix '%s'). When StoragePrefix is '/', any absolute UploadTempLocation "+
+			"falls under the exported namespace, making in-progress upload files accessible to federation clients. "+
+			"Please use a more specific StoragePrefix or leave UploadTempLocation unset (defaults to a safe location under Origin.RunLocation).",
+			uploadTempLocation, e.StoragePrefix, e.FederationPrefix)
+	}
+
 	// Check if UploadTempLocation is equal to or under StoragePrefix
 	rel, err := filepath.Rel(storageAbs, uploadTempAbs)
 	if err != nil {

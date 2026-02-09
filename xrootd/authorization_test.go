@@ -1099,9 +1099,11 @@ func TestMergeConfig(t *testing.T) {
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
+	storageDir := filepath.Join(dirname, "storage")
+	require.NoError(t, os.MkdirAll(storageDir, 0755))
 	require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), dirname))
 	require.NoError(t, param.Set(param.Origin_Port.GetName(), 8443))
-	require.NoError(t, param.Set(param.Origin_StoragePrefix.GetName(), "/"))
+	require.NoError(t, param.Set(param.Origin_StoragePrefix.GetName(), storageDir))
 	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/"))
 	require.NoError(t, param.Set("ConfigDir", dirname))
 	// We don't inherit any defaults at this level of code -- in order to recognize
