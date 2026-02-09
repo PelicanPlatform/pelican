@@ -92,6 +92,13 @@ Origin:
   EnableMacaroons: false
   EnableVoms: true
   SelfTestInterval: 15s
+  SSH:
+    AuthMethods: ["publickey", "agent", "keyboard-interactive", "password"]
+    ChallengeTimeout: 1m
+    ConnectTimeout: 30s
+    KeepaliveInterval: 5s
+    KeepaliveTimeout: 20s
+    Port: 22
 Registry:
   InstitutionsUrlReloadMinutes: 15m
   RequireCacheApproval: false

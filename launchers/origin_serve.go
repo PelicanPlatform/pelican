@@ -41,6 +41,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/ssh_posixv2"
 	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pelicanplatform/pelican/xrootd"
 )
@@ -52,7 +53,8 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	}
 
 	// Determine if we should use XRootD or native HTTP server
-	useXRootD := param.Origin_StorageType.GetString() != string(server_structs.OriginStoragePosixv2)
+	storageType := param.Origin_StorageType.GetString()
+	useXRootD := storageType != string(server_structs.OriginStoragePosixv2) && storageType != string(server_structs.OriginStorageSSH)
 
 	if useXRootD {
 		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusWarning, "XRootD is initializing")
@@ -189,9 +191,22 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 		return err
 	}
 
-	// Handle POSIXv2-specific initialization now that the web server is running
-	useXRootD := param.Origin_StorageType.GetString() != string(server_structs.OriginStoragePosixv2)
+	// Handle POSIXv2 and SSH-specific initialization now that the web server is running
+	storageType := param.Origin_StorageType.GetString()
+	useXRootD := storageType != string(server_structs.OriginStoragePosixv2) && storageType != string(server_structs.OriginStorageSSH)
 	if !useXRootD {
+		// For SSH backend, initialize the SSH connection before setting up handlers
+		if storageType == string(server_structs.OriginStorageSSH) {
+			// Register WebSocket handlers for keyboard-interactive auth
+			ssh_posixv2.RegisterWebSocketHandler(engine, ctx, egrp)
+
+			// Initialize the SSH backend (creates helper broker and starts connection manager)
+			if err := ssh_posixv2.InitializeBackend(ctx, egrp, originExports); err != nil {
+				return errors.Wrap(err, "failed to initialize SSH backend")
+			}
+			log.Info("SSH backend initialized")
+		}
+
 		if err := origin_serve.InitAuthConfig(ctx, egrp, originExports); err != nil {
 			return errors.Wrap(err, "failed to initialize origin_serve auth config")
 		}

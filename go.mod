@@ -19,6 +19,7 @@ require (
 	github.com/go-kit/log v0.2.1
 	github.com/google/go-p11-kit v0.4.0
 	github.com/gorilla/csrf v1.7.3
+	github.com/gorilla/websocket v1.5.0
 	github.com/grafana/regexp v0.0.0-20221122212121-6b5c0a4cb7fd
 	github.com/gwatts/gin-adapter v1.0.0
 	github.com/hashicorp/go-version v1.7.0

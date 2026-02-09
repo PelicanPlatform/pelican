@@ -322,6 +322,24 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.S3ServiceName": false,
 	"Origin.S3ServiceUrl": false,
 	"Origin.S3UrlStyle": false,
+	"Origin.SSH.AuthMethods": false,
+	"Origin.SSH.AutoAddHostKey": false,
+	"Origin.SSH.ChallengeTimeout": false,
+	"Origin.SSH.ConnectTimeout": false,
+	"Origin.SSH.Host": false,
+	"Origin.SSH.KeepaliveInterval": false,
+	"Origin.SSH.KeepaliveTimeout": false,
+	"Origin.SSH.KnownHostsFile": false,
+	"Origin.SSH.MaxRetries": false,
+	"Origin.SSH.PasswordFile": false,
+	"Origin.SSH.PelicanBinaryPath": false,
+	"Origin.SSH.Port": false,
+	"Origin.SSH.PrivateKeyFile": false,
+	"Origin.SSH.PrivateKeyPassphraseFile": false,
+	"Origin.SSH.ProxyJump": false,
+	"Origin.SSH.RemotePelicanBinaryDir": false,
+	"Origin.SSH.RemotePelicanBinaryOverrides": false,
+	"Origin.SSH.User": false,
 	"Origin.ScitokensDefaultUser": false,
 	"Origin.ScitokensGroupsClaim": false,
 	"Origin.ScitokensMapSubject": false,
@@ -680,6 +698,24 @@ func (sP StringParam) GetString() string {
 			return config.Origin.S3ServiceUrl
 		case "Origin.S3UrlStyle":
 			return config.Origin.S3UrlStyle
+		case "Origin.SSH.Host":
+			return config.Origin.SSH.Host
+		case "Origin.SSH.KnownHostsFile":
+			return config.Origin.SSH.KnownHostsFile
+		case "Origin.SSH.PasswordFile":
+			return config.Origin.SSH.PasswordFile
+		case "Origin.SSH.PelicanBinaryPath":
+			return config.Origin.SSH.PelicanBinaryPath
+		case "Origin.SSH.PrivateKeyFile":
+			return config.Origin.SSH.PrivateKeyFile
+		case "Origin.SSH.PrivateKeyPassphraseFile":
+			return config.Origin.SSH.PrivateKeyPassphraseFile
+		case "Origin.SSH.ProxyJump":
+			return config.Origin.SSH.ProxyJump
+		case "Origin.SSH.RemotePelicanBinaryDir":
+			return config.Origin.SSH.RemotePelicanBinaryDir
+		case "Origin.SSH.User":
+			return config.Origin.SSH.User
 		case "Origin.ScitokensDefaultUser":
 			return config.Origin.ScitokensDefaultUser
 		case "Origin.ScitokensGroupsClaim":
@@ -845,6 +881,10 @@ func (slP StringSliceParam) GetStringSlice() []string {
 			return config.Origin.DefaultChecksumTypes
 		case "Origin.ExportVolumes":
 			return config.Origin.ExportVolumes
+		case "Origin.SSH.AuthMethods":
+			return config.Origin.SSH.AuthMethods
+		case "Origin.SSH.RemotePelicanBinaryOverrides":
+			return config.Origin.SSH.RemotePelicanBinaryOverrides
 		case "Origin.ScitokensRestrictedPaths":
 			return config.Origin.ScitokensRestrictedPaths
 		case "Origin.SupportedChecksumTypes":
@@ -946,6 +986,10 @@ func (iP IntParam) GetInt() int {
 			return config.Origin.DiskUsageCalculationRateLimit
 		case "Origin.Port":
 			return config.Origin.Port
+		case "Origin.SSH.MaxRetries":
+			return config.Origin.SSH.MaxRetries
+		case "Origin.SSH.Port":
+			return config.Origin.SSH.Port
 		case "Server.IssuerPort":
 			return config.Server.IssuerPort
 		case "Server.UILoginRateLimit":
@@ -1122,6 +1166,8 @@ func (bP BoolParam) GetBool() bool {
 			return config.Origin.EnableWrites
 		case "Origin.Multiuser":
 			return config.Origin.Multiuser
+		case "Origin.SSH.AutoAddHostKey":
+			return config.Origin.SSH.AutoAddHostKey
 		case "Origin.ScitokensMapSubject":
 			return config.Origin.ScitokensMapSubject
 		case "Origin.SelfTest":
@@ -1241,6 +1287,14 @@ func (dP DurationParam) GetDuration() time.Duration {
 			return config.Origin.DiskUsageCalculationDelay
 		case "Origin.DiskUsageCalculationInterval":
 			return config.Origin.DiskUsageCalculationInterval
+		case "Origin.SSH.ChallengeTimeout":
+			return config.Origin.SSH.ChallengeTimeout
+		case "Origin.SSH.ConnectTimeout":
+			return config.Origin.SSH.ConnectTimeout
+		case "Origin.SSH.KeepaliveInterval":
+			return config.Origin.SSH.KeepaliveInterval
+		case "Origin.SSH.KeepaliveTimeout":
+			return config.Origin.SSH.KeepaliveTimeout
 		case "Origin.SelfTestInterval":
 			return config.Origin.SelfTestInterval
 		case "Origin.SelfTestMaxAge":
@@ -1559,6 +1613,24 @@ var allParameterNames = []string{
 	"Origin.S3ServiceName",
 	"Origin.S3ServiceUrl",
 	"Origin.S3UrlStyle",
+	"Origin.SSH.AuthMethods",
+	"Origin.SSH.AutoAddHostKey",
+	"Origin.SSH.ChallengeTimeout",
+	"Origin.SSH.ConnectTimeout",
+	"Origin.SSH.Host",
+	"Origin.SSH.KeepaliveInterval",
+	"Origin.SSH.KeepaliveTimeout",
+	"Origin.SSH.KnownHostsFile",
+	"Origin.SSH.MaxRetries",
+	"Origin.SSH.PasswordFile",
+	"Origin.SSH.PelicanBinaryPath",
+	"Origin.SSH.Port",
+	"Origin.SSH.PrivateKeyFile",
+	"Origin.SSH.PrivateKeyPassphraseFile",
+	"Origin.SSH.ProxyJump",
+	"Origin.SSH.RemotePelicanBinaryDir",
+	"Origin.SSH.RemotePelicanBinaryOverrides",
+	"Origin.SSH.User",
 	"Origin.ScitokensDefaultUser",
 	"Origin.ScitokensGroupsClaim",
 	"Origin.ScitokensMapSubject",
@@ -1789,6 +1861,15 @@ var (
 	Origin_S3ServiceName = StringParam{"Origin.S3ServiceName"}
 	Origin_S3ServiceUrl = StringParam{"Origin.S3ServiceUrl"}
 	Origin_S3UrlStyle = StringParam{"Origin.S3UrlStyle"}
+	Origin_SSH_Host = StringParam{"Origin.SSH.Host"}
+	Origin_SSH_KnownHostsFile = StringParam{"Origin.SSH.KnownHostsFile"}
+	Origin_SSH_PasswordFile = StringParam{"Origin.SSH.PasswordFile"}
+	Origin_SSH_PelicanBinaryPath = StringParam{"Origin.SSH.PelicanBinaryPath"}
+	Origin_SSH_PrivateKeyFile = StringParam{"Origin.SSH.PrivateKeyFile"}
+	Origin_SSH_PrivateKeyPassphraseFile = StringParam{"Origin.SSH.PrivateKeyPassphraseFile"}
+	Origin_SSH_ProxyJump = StringParam{"Origin.SSH.ProxyJump"}
+	Origin_SSH_RemotePelicanBinaryDir = StringParam{"Origin.SSH.RemotePelicanBinaryDir"}
+	Origin_SSH_User = StringParam{"Origin.SSH.User"}
 	Origin_ScitokensDefaultUser = StringParam{"Origin.ScitokensDefaultUser"}
 	Origin_ScitokensGroupsClaim = StringParam{"Origin.ScitokensGroupsClaim"}
 	Origin_ScitokensNameMapFile = StringParam{"Origin.ScitokensNameMapFile"}
@@ -1863,6 +1944,8 @@ var (
 	OIDC_Scopes = StringSliceParam{"OIDC.Scopes"}
 	Origin_DefaultChecksumTypes = StringSliceParam{"Origin.DefaultChecksumTypes"}
 	Origin_ExportVolumes = StringSliceParam{"Origin.ExportVolumes"}
+	Origin_SSH_AuthMethods = StringSliceParam{"Origin.SSH.AuthMethods"}
+	Origin_SSH_RemotePelicanBinaryOverrides = StringSliceParam{"Origin.SSH.RemotePelicanBinaryOverrides"}
 	Origin_ScitokensRestrictedPaths = StringSliceParam{"Origin.ScitokensRestrictedPaths"}
 	Origin_SupportedChecksumTypes = StringSliceParam{"Origin.SupportedChecksumTypes"}
 	Registry_AdminUsers = StringSliceParam{"Registry.AdminUsers"}
@@ -1905,6 +1988,8 @@ var (
 	Origin_ConcurrencyDegradedThreshold = IntParam{"Origin.ConcurrencyDegradedThreshold"}
 	Origin_DiskUsageCalculationRateLimit = IntParam{"Origin.DiskUsageCalculationRateLimit"}
 	Origin_Port = IntParam{"Origin.Port"}
+	Origin_SSH_MaxRetries = IntParam{"Origin.SSH.MaxRetries"}
+	Origin_SSH_Port = IntParam{"Origin.SSH.Port"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
 	Server_UILoginRateLimit = IntParam{"Server.UILoginRateLimit"}
 	Server_WebPort = IntParam{"Server.WebPort"}
@@ -1976,6 +2061,7 @@ var (
 	Origin_EnableWrite = BoolParam{"Origin.EnableWrite"}
 	Origin_EnableWrites = BoolParam{"Origin.EnableWrites"}
 	Origin_Multiuser = BoolParam{"Origin.Multiuser"}
+	Origin_SSH_AutoAddHostKey = BoolParam{"Origin.SSH.AutoAddHostKey"}
 	Origin_ScitokensMapSubject = BoolParam{"Origin.ScitokensMapSubject"}
 	Origin_SelfTest = BoolParam{"Origin.SelfTest"}
 	Registry_RequireCacheApproval = BoolParam{"Registry.RequireCacheApproval"}
@@ -2027,6 +2113,10 @@ var (
 	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
 	Origin_DiskUsageCalculationDelay = DurationParam{"Origin.DiskUsageCalculationDelay"}
 	Origin_DiskUsageCalculationInterval = DurationParam{"Origin.DiskUsageCalculationInterval"}
+	Origin_SSH_ChallengeTimeout = DurationParam{"Origin.SSH.ChallengeTimeout"}
+	Origin_SSH_ConnectTimeout = DurationParam{"Origin.SSH.ConnectTimeout"}
+	Origin_SSH_KeepaliveInterval = DurationParam{"Origin.SSH.KeepaliveInterval"}
+	Origin_SSH_KeepaliveTimeout = DurationParam{"Origin.SSH.KeepaliveTimeout"}
 	Origin_SelfTestInterval = DurationParam{"Origin.SelfTestInterval"}
 	Origin_SelfTestMaxAge = DurationParam{"Origin.SelfTestMaxAge"}
 	Origin_UserMapfileRefreshInterval = DurationParam{"Origin.UserMapfileRefreshInterval"}

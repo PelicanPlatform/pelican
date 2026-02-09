@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -105,4 +106,56 @@ func WriteAddressFile(modules server_structs.ServerType) error {
 
 	log.Infof("Address file written to %s", addressFilePath)
 	return nil
+}
+
+// AddressFileContents holds the parsed contents of the pelican.addresses file
+type AddressFileContents struct {
+	ServerExternalWebURL string
+	OriginURL            string
+	CacheURL             string
+}
+
+// ReadAddressFile reads the pelican.addresses file from the runtime directory
+// and returns the parsed contents. Returns an error if the file doesn't exist
+// or cannot be parsed.
+func ReadAddressFile() (*AddressFileContents, error) {
+	runtimeDir, err := getServerRuntimeDir()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to determine runtime directory")
+	}
+
+	addressFilePath := filepath.Join(runtimeDir, "pelican.addresses")
+	content, err := os.ReadFile(addressFilePath)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to read address file")
+	}
+
+	result := &AddressFileContents{}
+	lines := strings.Split(string(content), "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || line[0] == '#' {
+			continue
+		}
+
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+
+		switch key {
+		case "SERVER_EXTERNAL_WEB_URL":
+			result.ServerExternalWebURL = value
+		case "ORIGIN_URL":
+			result.OriginURL = value
+		case "CACHE_URL":
+			result.CacheURL = value
+		}
+	}
+
+	return result, nil
 }
