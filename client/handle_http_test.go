@@ -2840,7 +2840,11 @@ func TestPutOverwrite(t *testing.T) {
 
 		result, err := uploadObject(transfer)
 		require.Error(t, err)
-		require.Equal(t, "remote object already exists, upload aborted", result.Error.Error())
+		var pe *error_codes.PelicanError
+		require.ErrorAs(t, result.Error, &pe)
+		expectedErr := error_codes.NewSpecification_FileAlreadyExistsError(nil)
+		assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType())
+		assert.Contains(t, result.Error.Error(), "remote object already exists, upload aborted")
 	})
 
 	t.Run("ObjectDoesNotExist", func(t *testing.T) {
