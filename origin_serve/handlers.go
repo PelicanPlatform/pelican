@@ -35,6 +35,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -250,10 +251,11 @@ func httpMetricsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		method := c.Request.Method
+		serverTypeOrigin := strings.ToLower(server_structs.OriginType.String())
 
 		// Track active requests
-		metrics.HttpActiveRequests.WithLabelValues(metrics.ServerTypeOrigin, method).Inc()
-		defer metrics.HttpActiveRequests.WithLabelValues(metrics.ServerTypeOrigin, method).Dec()
+		metrics.HttpActiveRequests.WithLabelValues(serverTypeOrigin, method).Inc()
+		defer metrics.HttpActiveRequests.WithLabelValues(serverTypeOrigin, method).Dec()
 
 		// Wrap request body to track bytes read
 		mrr := &metricsRequestReader{reader: c.Request.Body}
@@ -272,32 +274,32 @@ func httpMetricsMiddleware() gin.HandlerFunc {
 		statusStr := fmt.Sprintf("%d", status)
 
 		// Track request completion
-		metrics.HttpRequestsTotal.WithLabelValues(metrics.ServerTypeOrigin, method, statusStr).Inc()
-		metrics.HttpRequestDuration.WithLabelValues(metrics.ServerTypeOrigin, method, statusStr).Observe(duration)
+		metrics.HttpRequestsTotal.WithLabelValues(serverTypeOrigin, method, statusStr).Inc()
+		metrics.HttpRequestDuration.WithLabelValues(serverTypeOrigin, method, statusStr).Observe(duration)
 
 		// Track bytes in (actual bytes read from request body)
 		if mrr.bytesRead > 0 {
-			metrics.HttpBytesTotal.WithLabelValues(metrics.ServerTypeOrigin, metrics.DirectionIn, method).Add(float64(mrr.bytesRead))
+			metrics.HttpBytesTotal.WithLabelValues(serverTypeOrigin, metrics.DirectionIn, method).Add(float64(mrr.bytesRead))
 		}
 
 		// Track bytes out
 		if mrw.bytesWritten > 0 {
-			metrics.HttpBytesTotal.WithLabelValues(metrics.ServerTypeOrigin, metrics.DirectionOut, method).Add(float64(mrw.bytesWritten))
+			metrics.HttpBytesTotal.WithLabelValues(serverTypeOrigin, metrics.DirectionOut, method).Add(float64(mrw.bytesWritten))
 		}
 
 		// Track large transfers (>100MB)
 		if mrr.bytesRead >= metrics.LargeTransferThreshold {
-			metrics.HttpLargeTransfersTotal.WithLabelValues(metrics.ServerTypeOrigin, method).Inc()
-			metrics.HttpLargeTransferBytes.WithLabelValues(metrics.ServerTypeOrigin, metrics.DirectionIn, method).Add(float64(mrr.bytesRead))
+			metrics.HttpLargeTransfersTotal.WithLabelValues(serverTypeOrigin, method).Inc()
+			metrics.HttpLargeTransferBytes.WithLabelValues(serverTypeOrigin, metrics.DirectionIn, method).Add(float64(mrr.bytesRead))
 		}
 		if mrw.bytesWritten >= metrics.LargeTransferThreshold {
-			metrics.HttpLargeTransfersTotal.WithLabelValues(metrics.ServerTypeOrigin, method).Inc()
-			metrics.HttpLargeTransferBytes.WithLabelValues(metrics.ServerTypeOrigin, metrics.DirectionOut, method).Add(float64(mrw.bytesWritten))
+			metrics.HttpLargeTransfersTotal.WithLabelValues(serverTypeOrigin, method).Inc()
+			metrics.HttpLargeTransferBytes.WithLabelValues(serverTypeOrigin, metrics.DirectionOut, method).Add(float64(mrw.bytesWritten))
 		}
 
 		// Track errors (5xx status codes)
 		if status >= 500 && status < 600 {
-			metrics.HttpErrorsTotal.WithLabelValues(metrics.ServerTypeOrigin, method, statusStr).Inc()
+			metrics.HttpErrorsTotal.WithLabelValues(serverTypeOrigin, method, statusStr).Inc()
 		}
 	}
 }
