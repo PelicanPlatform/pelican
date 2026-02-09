@@ -43,9 +43,31 @@ func (o *PosixOrigin) validateStoragePrefix(prefix string) error {
 	return validateFederationPrefix(prefix)
 }
 
-func (o *PosixOrigin) validateExtra(e *OriginExport, _ int) error {
-	// Check that UploadTempLocation is not under any StoragePrefix
-	// This prevents temporary upload files from being accessible via the federation namespace
+// validateStoragePrefixNotRoot rejects StoragePrefix values that resolve to "/".
+// Exporting the entire root filesystem is dangerous: anyone with write access could
+// overwrite security-policy files (e.g. auth/scitokens configuration), and every
+// absolute path on the system becomes reachable through the federation namespace.
+func (o *PosixOrigin) validateStoragePrefixNotRoot(e *OriginExport) error {
+	storageAbs, err := filepath.Abs(e.StoragePrefix)
+	if err != nil {
+		return errors.Wrapf(err, "unable to resolve absolute path for StoragePrefix '%s'", e.StoragePrefix)
+	}
+
+	if storageAbs == "/" {
+		return errors.Errorf("StoragePrefix '%s' resolves to the root filesystem '/' "+
+			"(export for federation prefix '%s'). Exporting '/' would make the entire filesystem accessible "+
+			"through the federation namespace, allowing overwrites of security-policy files and other sensitive data. "+
+			"Please use a more specific StoragePrefix.",
+			e.StoragePrefix, e.FederationPrefix)
+	}
+
+	return nil
+}
+
+// validateTempUploadLocation ensures that Origin.UploadTempLocation does not fall
+// under any export's StoragePrefix. If it did, in-progress upload files would be
+// reachable via the federation namespace, bypassing POSC's path-based isolation.
+func (o *PosixOrigin) validateTempUploadLocation(e *OriginExport) error {
 	uploadTempLocation := param.Origin_UploadTempLocation.GetString()
 	if uploadTempLocation == "" {
 		// If not set, it will use the default which is under RunLocation, so no conflict
@@ -55,26 +77,12 @@ func (o *PosixOrigin) validateExtra(e *OriginExport, _ int) error {
 	// Normalize paths for comparison
 	uploadTempAbs, err := filepath.Abs(uploadTempLocation)
 	if err != nil {
-		return errors.Wrapf(err, "unable to resolve absolute path for Origin.UploadTempLocation '%s'", uploadTempLocation)
+		return errors.Wrapf(err, "unable to resolve absolute path for %s '%s'", param.Origin_UploadTempLocation.GetName(), uploadTempLocation)
 	}
 
 	storageAbs, err := filepath.Abs(e.StoragePrefix)
 	if err != nil {
 		return errors.Wrapf(err, "unable to resolve absolute path for StoragePrefix '%s'", e.StoragePrefix)
-	}
-
-	// When StoragePrefix is "/", every absolute path is technically "under" it, and
-	// filepath.Rel will never produce a ".." prefix. This is a real security issue, not
-	// just a filepath.Rel quirk: the POSC plugin hides logical paths under /in-progress
-	// but does NOT prevent access through export symlinks. If UploadTempLocation is under
-	// StoragePrefix, temp files are reachable via the export's federation path, bypassing
-	// POSC's path-based isolation entirely.
-	if storageAbs == "/" {
-		return errors.Errorf("Origin.UploadTempLocation '%s' cannot be used when StoragePrefix is '%s' "+
-			"(export for federation prefix '%s'). When StoragePrefix is '/', any absolute UploadTempLocation "+
-			"falls under the exported namespace, making in-progress upload files accessible to federation clients. "+
-			"Please use a more specific StoragePrefix or leave UploadTempLocation unset (defaults to a safe location under Origin.RunLocation).",
-			uploadTempLocation, e.StoragePrefix, e.FederationPrefix)
 	}
 
 	// Check if UploadTempLocation is equal to or under StoragePrefix
@@ -87,10 +95,21 @@ func (o *PosixOrigin) validateExtra(e *OriginExport, _ int) error {
 	// If rel doesn't start with "..", then uploadTempLocation is equal to or under storagePrefix
 	// rel == "." means they're equal, and rel without ".." prefix means uploadTempLocation is under storagePrefix
 	if !strings.HasPrefix(rel, "..") {
-		return errors.Errorf("Origin.UploadTempLocation '%s' cannot be equal to or under StoragePrefix '%s' (export for federation prefix '%s'). "+
+		return errors.Errorf("%s '%s' cannot be equal to or under StoragePrefix '%s' (export for federation prefix '%s'). "+
 			"This would make temporary upload files accessible via the federation namespace, which is a security risk. "+
 			"Please configure UploadTempLocation to be outside of all StoragePrefix directories.",
-			uploadTempLocation, e.StoragePrefix, e.FederationPrefix)
+			param.Origin_UploadTempLocation.GetName(), uploadTempLocation, e.StoragePrefix, e.FederationPrefix)
+	}
+
+	return nil
+}
+
+func (o *PosixOrigin) validateExtra(e *OriginExport, _ int) error {
+	if err := o.validateStoragePrefixNotRoot(e); err != nil {
+		return err
+	}
+	if err := o.validateTempUploadLocation(e); err != nil {
+		return err
 	}
 
 	return nil
