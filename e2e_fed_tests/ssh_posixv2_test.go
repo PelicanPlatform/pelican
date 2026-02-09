@@ -26,6 +26,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -209,9 +210,10 @@ func (s *testSSHDServer) stop() {
 
 // sshOriginConfig generates the origin configuration template for SSH backend
 func sshOriginConfig(sshPort int, storageDir, knownHostsFile, privateKeyFile, pelicanBinaryPath string) string {
-	currentUser := os.Getenv("USER")
-	if currentUser == "" {
-		currentUser = "root"
+	currentUserInfo, err := user.Current()
+	currentUser := "root"
+	if err == nil {
+		currentUser = currentUserInfo.Username
 	}
 
 	return fmt.Sprintf(`
