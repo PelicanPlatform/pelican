@@ -4603,7 +4603,7 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 	// Allow response body to fail to read; we are only interested in the headers
 	// of the response, not the contents.
 	if _, err := io.Copy(io.Discard, headResponse.Body); err != nil {
-		log.Warningln("Failure when reading the one-byte-response body:", err)
+		log.Debugln("Failure when reading the one-byte-response body - expected because the body is discarded:", err)
 	}
 	headResponse.Body.Close()
 	gotContentRange := false
