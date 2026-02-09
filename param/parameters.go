@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
+
+	"github.com/pelicanplatform/pelican/byte_rate"
 )
 
 type StringParam struct {
@@ -39,6 +41,10 @@ type BoolParam struct {
 }
 
 type IntParam struct {
+	name string
+}
+
+type ByteRateParam struct {
 	name string
 }
 
@@ -940,8 +946,6 @@ func (iP IntParam) GetInt() int {
 			return config.Origin.DiskUsageCalculationRateLimit
 		case "Origin.Port":
 			return config.Origin.Port
-		case "Origin.TransferRateLimit":
-			return config.Origin.TransferRateLimit
 		case "Server.IssuerPort":
 			return config.Server.IssuerPort
 		case "Server.UILoginRateLimit":
@@ -984,6 +988,31 @@ func (iP IntParam) IsRuntimeConfigurable() bool {
 
 func (iP IntParam) GetEnvVarName() string {
 	return paramNameToEnvVar(iP.name)
+}
+
+func (bRP ByteRateParam) GetByteRate() byte_rate.ByteRate {
+	config := getOrCreateConfig()
+	switch bRP.name {
+		case "Origin.TransferRateLimit":
+			return config.Origin.TransferRateLimit
+	}
+	return 0
+}
+
+func (bRP ByteRateParam) GetName() string {
+	return bRP.name
+}
+
+func (bRP ByteRateParam) IsSet() bool {
+	return viper.IsSet(bRP.name)
+}
+
+func (bRP ByteRateParam) IsRuntimeConfigurable() bool {
+	return IsRuntimeConfigurable(bRP.name)
+}
+
+func (bRP ByteRateParam) GetEnvVarName() string {
+	return paramNameToEnvVar(bRP.name)
 }
 
 func (bP BoolParam) GetBool() bool {
@@ -1876,7 +1905,6 @@ var (
 	Origin_ConcurrencyDegradedThreshold = IntParam{"Origin.ConcurrencyDegradedThreshold"}
 	Origin_DiskUsageCalculationRateLimit = IntParam{"Origin.DiskUsageCalculationRateLimit"}
 	Origin_Port = IntParam{"Origin.Port"}
-	Origin_TransferRateLimit = IntParam{"Origin.TransferRateLimit"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
 	Server_UILoginRateLimit = IntParam{"Server.UILoginRateLimit"}
 	Server_WebPort = IntParam{"Server.WebPort"}
@@ -1889,6 +1917,10 @@ var (
 	Xrootd_MaxThreads = IntParam{"Xrootd.MaxThreads"}
 	Xrootd_Port = IntParam{"Xrootd.Port"}
 	Xrootd_SummaryMonitoringPort = IntParam{"Xrootd.SummaryMonitoringPort"}
+)
+
+var (
+	Origin_TransferRateLimit = ByteRateParam{"Origin.TransferRateLimit"}
 )
 
 var (

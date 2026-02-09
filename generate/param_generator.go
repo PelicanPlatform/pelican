@@ -83,6 +83,7 @@ func GenParamEnum() {
 	stringParamMap := make(map[string]string)
 	stringSliceParamMap := make(map[string]string)
 	intParamMap := make(map[string]string)
+	byteRateParamMap := make(map[string]string)
 	boolParamMap := make(map[string]string)
 	durationParamMap := make(map[string]string)
 	objectParamMap := make(map[string]string)
@@ -177,8 +178,7 @@ func GenParamEnum() {
 		case "int":
 			intParamMap[name] = rawName
 		case "byterate":
-			// byterate is stored as int (bytes per second) internally
-			intParamMap[name] = rawName
+			byteRateParamMap[name] = rawName
 		case "bool":
 			boolParamMap[name] = rawName
 		case "duration":
@@ -207,13 +207,14 @@ func GenParamEnum() {
 		StringMap              map[string]string
 		StringSliceMap         map[string]string
 		IntMap                 map[string]string
+		ByteRateMap            map[string]string
 		BoolMap                map[string]string
 		DurationMap            map[string]string
 		ObjectMap              map[string]string
 		DeprecatedMap          map[string][]string
 		RuntimeConfigurableMap map[string]bool
 		AllParamNames          []string
-	}{StringMap: stringParamMap, StringSliceMap: stringSliceParamMap, IntMap: intParamMap, BoolMap: boolParamMap, DurationMap: durationParamMap, ObjectMap: objectParamMap, DeprecatedMap: deprecatedMap, RuntimeConfigurableMap: runtimeConfigurableMap, AllParamNames: allParamNames})
+	}{StringMap: stringParamMap, StringSliceMap: stringSliceParamMap, IntMap: intParamMap, ByteRateMap: byteRateParamMap, BoolMap: boolParamMap, DurationMap: durationParamMap, ObjectMap: objectParamMap, DeprecatedMap: deprecatedMap, RuntimeConfigurableMap: runtimeConfigurableMap, AllParamNames: allParamNames})
 
 	if err != nil {
 		panic(err)
@@ -370,8 +371,7 @@ func GenParamStruct() {
 		case "int":
 			goType = "int"
 		case "byterate":
-			// byterate is parsed as string but stored as int (bytes per second)
-			goType = "int"
+			goType = "byte_rate.ByteRate"
 		case "bool":
 			goType = "bool"
 		case "duration":
@@ -459,6 +459,8 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
+
+	"github.com/pelicanplatform/pelican/byte_rate"
 )
 
 type StringParam struct {
@@ -474,6 +476,10 @@ type BoolParam struct {
 }
 
 type IntParam struct {
+	name string
+}
+
+type ByteRateParam struct {
 	name string
 }
 
@@ -604,6 +610,31 @@ func (iP IntParam) GetEnvVarName() string {
 	return paramNameToEnvVar(iP.name)
 }
 
+func (bRP ByteRateParam) GetByteRate() byte_rate.ByteRate {
+	config := getOrCreateConfig()
+	switch bRP.name {
+		case "Origin.TransferRateLimit":
+			return config.Origin.TransferRateLimit
+	}
+	return 0
+}
+
+func (bRP ByteRateParam) GetName() string {
+	return bRP.name
+}
+
+func (bRP ByteRateParam) IsSet() bool {
+	return viper.IsSet(bRP.name)
+}
+
+func (bRP ByteRateParam) IsRuntimeConfigurable() bool {
+	return IsRuntimeConfigurable(bRP.name)
+}
+
+func (bRP ByteRateParam) GetEnvVarName() string {
+	return paramNameToEnvVar(bRP.name)
+}
+
 func (bP BoolParam) GetBool() bool {
 	config := getOrCreateConfig()
 	switch bP.name {
@@ -702,6 +733,11 @@ var ({{range $key, $value := .IntMap}}
 	{{- end}}
 )
 
+var ({{range $key, $value := .ByteRateMap}}
+	{{$key}} = ByteRateParam{{"{"}}{{printf "%q" $value}}{{"}"}}
+	{{- end}}
+)
+
 var ({{range $key, $value := .BoolMap}}
 	{{$key}} = BoolParam{{"{"}}{{printf "%q" $value}}{{"}"}}
 	{{- end}}
@@ -741,6 +777,8 @@ package param
 
 import (
 	"time"
+
+	"github.com/pelicanplatform/pelican/byte_rate"
 )
 
 {{.GeneratedConfig}}
