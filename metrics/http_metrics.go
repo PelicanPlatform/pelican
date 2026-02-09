@@ -69,23 +69,12 @@ var (
 	}, []string{"server_type", "direction", "method"})
 )
 
-// Server type constants for labeling
+// WebDAV HTTP methods not defined in net/http
 const (
-	ServerTypeOrigin = "origin"
-	ServerTypeCache  = "cache"
-)
-
-// HTTP method tracking
-const (
-	MethodGET      = "GET"
-	MethodPUT      = "PUT"
-	MethodDELETE   = "DELETE"
 	MethodMKCOL    = "MKCOL"
 	MethodMOVE     = "MOVE"
 	MethodCOPY     = "COPY"
 	MethodPROPFIND = "PROPFIND"
-	MethodOPTIONS  = "OPTIONS"
-	MethodHEAD     = "HEAD"
 )
 
 // Direction constants for byte transfer metrics

@@ -168,8 +168,8 @@ func TestMetricsEndToEnd(t *testing.T) {
 	metrics.StorageBytesRead.Reset()
 
 	// Get initial metric values
-	initialHTTPRequests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(metrics.ServerTypeOrigin, "GET", "200"))
-	initialHTTPBytesOut := promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(metrics.ServerTypeOrigin, metrics.DirectionOut, "GET"))
+	initialHTTPRequests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, "GET", "200"))
+	initialHTTPBytesOut := promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(originServerType, metrics.DirectionOut, "GET"))
 	initialStorageReads := promtest.ToFloat64(metrics.StorageReadsTotal.WithLabelValues("posixv2"))
 	initialStorageBytes := promtest.ToFloat64(metrics.StorageBytesRead.WithLabelValues("posixv2"))
 
@@ -185,10 +185,10 @@ func TestMetricsEndToEnd(t *testing.T) {
 	assert.Equal(t, "test content", string(body))
 
 	// Verify HTTP metrics were updated
-	httpRequests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(metrics.ServerTypeOrigin, "GET", "200"))
+	httpRequests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, "GET", "200"))
 	assert.Greater(t, httpRequests, initialHTTPRequests, "HTTP request metric should increment")
 
-	httpBytesOut := promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(metrics.ServerTypeOrigin, metrics.DirectionOut, "GET"))
+	httpBytesOut := promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(originServerType, metrics.DirectionOut, "GET"))
 	assert.Greater(t, httpBytesOut, initialHTTPBytesOut, "HTTP bytes out metric should increment")
 
 	// Verify storage metrics were updated
