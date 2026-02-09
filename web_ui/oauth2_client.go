@@ -250,30 +250,51 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 	if userClaim == "" {
 		userClaim = "sub"
 	}
-	userIdentifierIface, ok := claimsSource[userClaim]
-	if !ok {
-		log.Errorln("User info endpoint did not return a value for the user claim", userClaim)
-		err = errors.New("identity provider did not return an identity for logged-in user")
-		return
-	}
-	userIdentifier, ok := userIdentifierIface.(string)
-	if !ok {
-		log.Errorln("User info endpoint did not return a string for the user claim", userClaim)
-		err = errors.New("identity provider did not return an identity for logged-in user")
-		return
-	}
-	if param.Issuer_UserStripDomain.GetBool() {
-		lastAt := strings.LastIndex(userIdentifier, "@")
-		if lastAt >= 0 {
-			userIdentifier = userIdentifier[:strings.LastIndex(userIdentifier, "@")]
+
+	var displayName string
+	// If the configured claim is "sub" (default), try to find a more human-readable username from standard claims
+	// This addresses Issue #3044 where users get non-sensical usernames like "http://cilogon.org/..."
+	if userClaim == "sub" {
+		usernameCandidates := []string{"preferred_username", "name", "nickname", "email"}
+		for _, candidate := range usernameCandidates {
+			if val, ok := claimsSource[candidate]; ok {
+				if strVal, ok := val.(string); ok && strVal != "" {
+					displayName = strVal
+					log.Debugf("Found human-readable username from claim '%s': %s", candidate, displayName)
+					break
+				}
+			}
 		}
 	}
-	if userIdentifier == "" {
+
+	// Fallback: If no human-readable name found, or if configured claim is not "sub", use the configured claim
+	if displayName == "" {
+		if val, ok := claimsSource[userClaim]; ok {
+			if strVal, ok := val.(string); ok {
+				displayName = strVal
+			} else {
+				log.Errorln("User info endpoint did not return a string for the user claim", userClaim)
+				err = errors.New("identity provider did not return an identity for logged-in user")
+				return
+			}
+		} else {
+			log.Errorln("User info endpoint did not return a value for the user claim", userClaim)
+			err = errors.New("identity provider did not return an identity for logged-in user")
+			return
+		}
+	}
+	if param.Issuer_UserStripDomain.GetBool() {
+		lastAt := strings.LastIndex(displayName, "@")
+		if lastAt >= 0 {
+			displayName = displayName[:strings.LastIndex(displayName, "@")]
+		}
+	}
+	if displayName == "" {
 		log.Errorf("'%s' field of user info response from auth provider is empty. Can't determine user identity", userClaim)
 		err = errors.New("identity provider returned an empty username")
 		return
 	}
-	username := userIdentifier
+	username := displayName
 
 	// Get the subject (sub) claim - this uniquely identifies the user at the identity provider
 	// For OIDC, this is the standard "sub" claim. For OAuth2 providers like GitHub, we may need
