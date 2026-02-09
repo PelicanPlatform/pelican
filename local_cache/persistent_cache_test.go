@@ -808,12 +808,12 @@ func TestConsistencyChecker_TransactionRestart(t *testing.T) {
 	// that the test takes too long
 	numObjects := 100
 	validHashes := make([]string, numObjects)
-	
+
 	for i := 0; i < numObjects; i++ {
 		// Generate predictable hash (still 64 hex chars)
 		hash := fmt.Sprintf("%064d", i)
 		validHashes[i] = hash
-		
+
 		meta := &CacheMetadata{
 			StorageMode:   StorageModeDisk,
 			ContentLength: 100,
@@ -872,4 +872,3 @@ func TestConsistencyChecker_TransactionRestart(t *testing.T) {
 		assert.Nil(t, meta, "Orphaned entry should be deleted: %s", hash)
 	}
 }
-

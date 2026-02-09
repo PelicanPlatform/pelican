@@ -155,7 +155,7 @@ func (m *CacheMetadata) SetCacheControl(header string) {
 		return
 	}
 	cd := ParseCacheControl(header)
-	
+
 	// Pack boolean flags into bitset
 	m.CCFlags = 0
 	if cd.NoStore {
@@ -170,7 +170,7 @@ func (m *CacheMetadata) SetCacheControl(header string) {
 	if cd.MustRevalidate {
 		m.CCFlags |= CCFlagMustRevalidate
 	}
-	
+
 	// Combine max-age and s-maxage: use minimum if both present, otherwise use whichever is set
 	if cd.MaxAgeSet && cd.SMaxAgeSet {
 		// Both set - use minimum
@@ -217,7 +217,7 @@ func (m *CacheMetadata) GetCacheControlHeader() string {
 	if m.CCFlags == 0 && m.CCMaxAge == 0 {
 		return "" // No cache-control directives set
 	}
-	
+
 	var parts []string
 	if (m.CCFlags & CCFlagNoStore) != 0 {
 		parts = append(parts, "no-store")

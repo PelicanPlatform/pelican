@@ -642,7 +642,7 @@ func (cc *ConsistencyChecker) RunDataScan(ctx context.Context) error {
 		// This randomizes where we start scanning through the database
 		rng := rand.New(rand.NewSource(scanStartTime.UnixNano()))
 		randomStart := fmt.Sprintf("%04x", rng.Intn(1<<16))
-		
+
 		startKey := randomStart
 		lastKey := startKey
 		wrappedAround := false

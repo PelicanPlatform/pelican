@@ -1077,4 +1077,3 @@ func (bw *BlockWriter) BytesWritten() int64 {
 	defer bw.mu.Unlock()
 	return bw.bytesWritten
 }
-
