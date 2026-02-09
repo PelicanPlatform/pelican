@@ -40,6 +40,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
@@ -768,7 +769,11 @@ func TestNewTransferJob(t *testing.T) {
 		require.NoError(t, err)
 		_, err = tc.NewTransferJob(context.Background(), mockRemoteUrl, "/dest", false, false, client.WithAcquireToken(false))
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to get token for transfer: credential is required for")
+		// Verify the error is properly wrapped as Authorization.TokenNotFound
+		var pe *error_codes.PelicanError
+		require.ErrorAs(t, err, &pe)
+		expectedErr := error_codes.NewAuthorization_TokenNotFoundError(nil)
+		assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType())
 	})
 
 	// Test success
@@ -851,7 +856,11 @@ func TestObjectList(t *testing.T) {
 				get, err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(""), client.WithAcquireToken(false))
 				require.Error(t, err)
 				assert.Len(t, get, 0)
-				assert.Contains(t, err.Error(), "failed to get token for transfer: credential is required")
+				// Verify the error is properly wrapped as Authorization.TokenNotFound
+				var pe *error_codes.PelicanError
+				require.ErrorAs(t, err, &pe)
+				expectedErr := error_codes.NewAuthorization_TokenNotFoundError(nil)
+				assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType())
 
 				// No error if it's with token
 				get, err = client.DoList(fed.Ctx, listURL, client.WithTokenLocation(tempToken.Name()), client.WithAcquireToken(false))
