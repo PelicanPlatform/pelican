@@ -31,6 +31,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -203,10 +204,14 @@ func (s *testSSHServer) stop() {
 
 // makeTestConfig creates an SSHConfig for testing
 func (s *testSSHServer) makeTestConfig() *SSHConfig {
+	currentUser, err := user.Current()
+	if err != nil {
+		panic(fmt.Sprintf("failed to get current user: %v", err))
+	}
 	return &SSHConfig{
 		Host:           "127.0.0.1",
 		Port:           s.port,
-		User:           os.Getenv("USER"),
+		User:           currentUser.Username,
 		AuthMethods:    []AuthMethod{AuthMethodPublicKey},
 		PrivateKeyFile: s.userKeyFile,
 		KnownHostsFile: s.knownHostsFile,
