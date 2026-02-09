@@ -525,6 +525,11 @@ func ensureCachePSSOrigin(ctx context.Context) (string, error) {
 }
 
 func CheckXrootdEnv(server server_structs.XRootDServer) error {
+	// Check XRootD version before proceeding with environment setup
+	if err := CheckXrootdVersion(); err != nil {
+		return err
+	}
+
 	uid, err := config.GetDaemonUID()
 	if err != nil {
 		return err
