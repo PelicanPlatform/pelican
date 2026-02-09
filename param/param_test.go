@@ -29,6 +29,8 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/byte_rate"
 )
 
 func TestSetAndGet(t *testing.T) {
@@ -663,7 +665,7 @@ func TestByteRateDecoding(t *testing.T) {
 		require.NoError(t, err)
 
 		// 10MB/s should be 10 * 1048576 (MiB) = 10485760 bytes/second
-		expected := 10 * 1048576
+		expected := byte_rate.ByteRate(10 * 1048576)
 		assert.Equal(t, expected, cfg.Origin.TransferRateLimit, "Should decode 10MB/s correctly")
 	})
 
@@ -688,7 +690,7 @@ func TestByteRateDecoding(t *testing.T) {
 		require.NoError(t, err)
 
 		// 100Mbps = 100 * 1048576 / 8 = 13107200 bytes/second
-		expected := 100 * 1048576 / 8
+		expected := byte_rate.ByteRate(100 * 1048576 / 8)
 		assert.Equal(t, expected, cfg.Origin.TransferRateLimit, "Should decode 100Mbps correctly")
 	})
 
@@ -712,7 +714,7 @@ func TestByteRateDecoding(t *testing.T) {
 		cfg, err := DecodeConfig(v)
 		require.NoError(t, err)
 
-		assert.Equal(t, 0, cfg.Origin.TransferRateLimit, "Should handle zero rate")
+		assert.Equal(t, byte_rate.ByteRate(0), cfg.Origin.TransferRateLimit, "Should handle zero rate")
 	})
 
 	t.Run("decode-invalid-rate-should-error", func(t *testing.T) {
@@ -747,7 +749,7 @@ func TestByteRateDecoding(t *testing.T) {
 		require.NoError(t, err)
 
 		// 5GB/s = 5 * 1073741824 = 5368709120 bytes/second
-		expected := 5 * 1073741824
+		expected := byte_rate.ByteRate(5 * 1073741824)
 		assert.Equal(t, expected, cfg.Origin.TransferRateLimit, "Should decode rate set via viper.Set")
 	})
 
@@ -763,8 +765,8 @@ func TestByteRateDecoding(t *testing.T) {
 
 		// Accessor should work even without explicit config creation
 		// because getOrCreateConfig will create it
-		rateLimit := Origin_TransferRateLimit.GetInt()
-		expected := 50 * 1048576
+		rateLimit := Origin_TransferRateLimit.GetByteRate()
+		expected := byte_rate.ByteRate(50 * 1048576)
 		assert.Equal(t, expected, rateLimit, "Accessor should return correct byte rate value")
 
 		// Verify config was created and stored

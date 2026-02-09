@@ -123,7 +123,7 @@ func stringToSliceHookFunc() mapstructure.DecodeHookFunc {
 	}
 }
 
-// stringToByteRateHookFunc returns a DecodeHookFunc that converts strings to integers
+// stringToByteRateHookFunc returns a DecodeHookFunc that converts strings to byte rates
 // representing bytes per second. It supports human-readable rate formats like:
 //   - "10MB/s", "100Mbps", "1.5GiB/m"
 //
@@ -132,8 +132,9 @@ func stringToSliceHookFunc() mapstructure.DecodeHookFunc {
 // so other hooks or default conversions can handle them.
 func stringToByteRateHookFunc() mapstructure.DecodeHookFunc {
 	return func(f reflect.Type, t reflect.Type, data interface{}) (interface{}, error) {
-		// Only convert string to int
-		if f.Kind() != reflect.String || t.Kind() != reflect.Int {
+		// Only convert string to int or ByteRate
+		byteRateType := reflect.TypeOf(byte_rate.ByteRate(0))
+		if f.Kind() != reflect.String || (t.Kind() != reflect.Int && t != byteRateType) {
 			return data, nil
 		}
 
@@ -144,6 +145,9 @@ func stringToByteRateHookFunc() mapstructure.DecodeHookFunc {
 
 		// Empty or "0" means no rate limiting
 		if raw == "" || raw == "0" {
+			if t == byteRateType {
+				return byte_rate.ByteRate(0), nil
+			}
 			return 0, nil
 		}
 
@@ -169,7 +173,10 @@ func stringToByteRateHookFunc() mapstructure.DecodeHookFunc {
 			return nil, errors.Wrapf(err, "failed to parse byte rate '%s'", raw)
 		}
 
-		// Return as integer bytes per second
+		if t == byteRateType {
+			return rate, nil
+		}
+		// Return as integer bytes per second for int targets
 		return int(rate), nil
 	}
 }

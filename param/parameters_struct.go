@@ -21,6 +21,8 @@ package param
 
 import (
 	"time"
+
+	"github.com/pelicanplatform/pelican/byte_rate"
 )
 
 type Config struct {
@@ -305,7 +307,7 @@ type Config struct {
 		StorageType string `mapstructure:"storagetype" yaml:"StorageType"`
 		SupportedChecksumTypes []string `mapstructure:"supportedchecksumtypes" yaml:"SupportedChecksumTypes"`
 		TokenAudience string `mapstructure:"tokenaudience" yaml:"TokenAudience"`
-		TransferRateLimit int `mapstructure:"transferratelimit" yaml:"TransferRateLimit"`
+		TransferRateLimit byte_rate.ByteRate `mapstructure:"transferratelimit" yaml:"TransferRateLimit"`
 		Url string `mapstructure:"url" yaml:"Url"`
 		UserMapfileRefreshInterval time.Duration `mapstructure:"usermapfilerefreshinterval" yaml:"UserMapfileRefreshInterval"`
 		XRootDPrefix string `mapstructure:"xrootdprefix" yaml:"XRootDPrefix"`
@@ -716,7 +718,7 @@ type configWithType struct {
 		StorageType struct { Type string; Value string }
 		SupportedChecksumTypes struct { Type string; Value []string }
 		TokenAudience struct { Type string; Value string }
-		TransferRateLimit struct { Type string; Value int }
+		TransferRateLimit struct { Type string; Value byte_rate.ByteRate }
 		Url struct { Type string; Value string }
 		UserMapfileRefreshInterval struct { Type string; Value time.Duration }
 		XRootDPrefix struct { Type string; Value string }
