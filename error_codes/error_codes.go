@@ -65,6 +65,28 @@ func NewResolutionError(err error) *PelicanError {
 	}
 }
 
+func NewResolution_TimeoutError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Resolution.Timeout",
+		exitCode:    5,
+		code:        2001,
+		retryable:   true,
+		description: "The client timed out while querying for federation metadata during discovery. This could be a DNS timeout, a dial timeout, or a header timeout. This is often a transient network error that can be resolved by retrying.",
+		err:         err,
+	}
+}
+
+func NewResolution_ConnectionFailureError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Resolution.ConnectionFailure",
+		exitCode:    5,
+		code:        2002,
+		retryable:   true,
+		description: "The client failed to connect while querying for federation metadata during discovery. This could be a network unreachable error, no route to host, proxy connection refused, or DNS connection refused. This is often a transient network error that can be resolved by retrying.",
+		err:         err,
+	}
+}
+
 func NewContactError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Contact",
@@ -153,6 +175,17 @@ func NewAuthorizationError(err error) *PelicanError {
 	}
 }
 
+func NewAuthorization_TokenNotFoundError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Authorization.TokenNotFound",
+		exitCode:    7,
+		code:        4010,
+		retryable:   false,
+		description: "The client requires a credential or token for the transfer but none was discovered or could be generated. The user may need to provide credentials or configure token acquisition.",
+		err:         err,
+	}
+}
+
 func NewSpecificationError(err error) *PelicanError {
 	return &PelicanError{
 		errorType:   "Specification",
@@ -182,6 +215,17 @@ func NewSpecification_FileNotCreatedError(err error) *PelicanError {
 		code:        5002,
 		retryable:   false,
 		description: "If the client successfully contacted the server but the desired file for upload could not be created.",
+		err:         err,
+	}
+}
+
+func NewSpecification_FileAlreadyExistsError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Specification.FileAlreadyExists",
+		exitCode:    8,
+		code:        5012,
+		retryable:   false,
+		description: "If the client attempted to upload a file but the remote object already exists at the destination and overwrites are not enabled.",
 		err:         err,
 	}
 }
