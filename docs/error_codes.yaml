@@ -63,6 +63,25 @@ clientExitCode: 5
 description: >-
   Indicates that the client failed to even attempt to contact the server.
 retryable: false
+---
+type: Resolution.Timeout
+code: 2001
+clientExitCode: 5
+description: >-
+  The client timed out while querying for federation metadata during discovery.
+  This could be a DNS timeout, a dial timeout, or a header timeout. This is
+  often a transient network error that can be resolved by retrying.
+retryable: true
+---
+type: Resolution.ConnectionFailure
+code: 2002
+clientExitCode: 5
+description: >-
+  The client failed to connect while querying for federation metadata during discovery.
+  This could be a network unreachable error, no route to host, proxy connection refused,
+  or DNS connection refused. This is often a transient network error that can be resolved
+  by retrying.
+retryable: true
 
 ############################
 #      Contact Errors      #
@@ -129,6 +148,15 @@ description: >-
   The client contacted the server but failed to authenticate, or failed to authorize, or if
   the server replied with an authorization error when the file was requested or sent.
 retryable: false
+---
+type: Authorization.TokenNotFound
+code: 4010
+clientExitCode: 7
+description: >-
+  The client requires a credential or token for the transfer but none was
+  discovered or could be generated. The user may need to provide credentials
+  or configure token acquisition.
+retryable: false
 
 ############################
 #   Specification Errors   #
@@ -155,6 +183,14 @@ code: 5002
 clientExitCode: 8
 description: >-
   If the client successfully contacted the server but the desired file for upload could not be created.
+retryable: false
+---
+type: Specification.FileAlreadyExists
+code: 5012
+clientExitCode: 8
+description: >-
+  If the client attempted to upload a file but the remote object already exists
+  at the destination and overwrites are not enabled.
 retryable: false
 
 ############################

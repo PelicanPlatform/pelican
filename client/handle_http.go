@@ -3278,7 +3278,9 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		_, statErr := statHttp(remoteUrl, dirResp, token)
 		if statErr == nil {
 			// Object exists, abort upload
-			transferResult.Error = errors.New("remote object already exists, upload aborted")
+			transferResult.Error = error_codes.NewSpecification_FileAlreadyExistsError(
+				errors.New("remote object already exists, upload aborted"),
+			)
 			return transferResult, transferResult.Error
 		} else if !errors.Is(statErr, ErrObjectNotFound) {
 			// We encountered an unexpected error while checking for object existence.

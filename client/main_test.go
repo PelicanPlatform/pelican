@@ -39,6 +39,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/mock"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
@@ -334,7 +335,11 @@ func TestGetToken(t *testing.T) {
 	// Check that we haven't regressed on our error messages
 	token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
 	_, err = token.Get()
-	assert.EqualError(t, err, "credential is required for osdf:///user/ligo/frames but was not discovered")
+	var pe *error_codes.PelicanError
+	require.ErrorAs(t, err, &pe)
+	expectedErr := error_codes.NewAuthorization_TokenNotFoundError(nil)
+	assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType())
+	assert.Contains(t, err.Error(), "credential is required for osdf:///user/ligo/frames but was not discovered")
 }
 
 // TestGetTokenName tests getTokenName
