@@ -336,6 +336,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.SupportedChecksumTypes": false,
 	"Origin.TokenAudience": false,
 	"Origin.TransferRateLimit": false,
+	"Origin.UploadTempLocation": false,
 	"Origin.Url": false,
 	"Origin.UserMapfileRefreshInterval": false,
 	"Origin.XRootDPrefix": false,
@@ -694,6 +695,8 @@ func (sP StringParam) GetString() string {
 			return config.Origin.StorageType
 		case "Origin.TokenAudience":
 			return config.Origin.TokenAudience
+		case "Origin.UploadTempLocation":
+			return config.Origin.UploadTempLocation
 		case "Origin.Url":
 			return config.Origin.Url
 		case "Origin.XRootDPrefix":
@@ -1573,6 +1576,7 @@ var allParameterNames = []string{
 	"Origin.SupportedChecksumTypes",
 	"Origin.TokenAudience",
 	"Origin.TransferRateLimit",
+	"Origin.UploadTempLocation",
 	"Origin.Url",
 	"Origin.UserMapfileRefreshInterval",
 	"Origin.XRootDPrefix",
@@ -1796,6 +1800,7 @@ var (
 	Origin_StoragePrefix = StringParam{"Origin.StoragePrefix"}
 	Origin_StorageType = StringParam{"Origin.StorageType"}
 	Origin_TokenAudience = StringParam{"Origin.TokenAudience"}
+	Origin_UploadTempLocation = StringParam{"Origin.UploadTempLocation"}
 	Origin_Url = StringParam{"Origin.Url"}
 	Origin_XRootDPrefix = StringParam{"Origin.XRootDPrefix"}
 	Origin_XRootServiceUrl = StringParam{"Origin.XRootServiceUrl"}

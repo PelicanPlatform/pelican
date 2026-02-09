@@ -1467,6 +1467,16 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.LocalCache_Socket.GetName(), filepath.Join(fcRunLocation, "cache.sock"))
 	v.SetDefault(param.LocalCache_DataLocation.GetName(), filepath.Join(fcRunLocation, "cache"))
 
+	// Set the default for Origin.UploadTempLocation
+	originStorageType, err := server_structs.ParseOriginStorageType(v.GetString(param.Origin_StorageType.GetName()))
+	if err != nil {
+		return errors.Wrapf(err, "failed to parse Origin.StorageType: %s", v.GetString(param.Origin_StorageType.GetName()))
+	}
+
+	if originStorageType == server_structs.OriginStoragePosix {
+		v.SetDefault(param.Origin_UploadTempLocation.GetName(), filepath.Join(v.GetString(param.Origin_RunLocation.GetName()), "in-progress"))
+	}
+
 	// Any platform-specific paths should go here
 	err = InitServerOSDefaults(v)
 	if err != nil {
