@@ -184,14 +184,30 @@ func handleAddGroupMember(ctx *gin.Context) {
 		return
 	}
 
-	_, userId, _, err := GetUserGroups(ctx)
-	if err != nil || userId == "" {
+	user, userId, groups, err := GetUserGroups(ctx)
+	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Failed to identify user adding member",
 		})
 		return
 	}
+	if userId == "" {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Unable to determine user identity for group management",
+		})
+		return
+	}
+
+	// Check if user is admin (allows bypassing ownership check)
+	identity := UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+	}
+	isAdmin, _ := CheckAdmin(identity)
 
 	id := ctx.Param("id")
 	if id == "" {
@@ -201,7 +217,7 @@ func handleAddGroupMember(ctx *gin.Context) {
 		})
 		return
 	}
-	err = database.AddGroupMember(database.ServerDatabase, id, req.UserID, userId)
+	err = database.AddGroupMember(database.ServerDatabase, id, req.UserID, userId, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -299,14 +315,30 @@ func handleRemoveGroupMember(ctx *gin.Context) {
 		return
 	}
 
-	_, userId, _, err := GetUserGroups(ctx)
-	if err != nil || userId == "" {
+	user, userId, groups, err := GetUserGroups(ctx)
+	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Failed to identify user removing member",
 		})
 		return
 	}
+	if userId == "" {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Unable to determine user identity for group management",
+		})
+		return
+	}
+
+	// Check if user is admin (allows bypassing ownership check)
+	identity := UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+	}
+	isAdmin, _ := CheckAdmin(identity)
 
 	id := ctx.Param("id")
 	if id == "" {
@@ -316,7 +348,7 @@ func handleRemoveGroupMember(ctx *gin.Context) {
 		})
 		return
 	}
-	err = database.RemoveGroupMember(database.ServerDatabase, id, memberUserId, userId)
+	err = database.RemoveGroupMember(database.ServerDatabase, id, memberUserId, userId, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
