@@ -167,7 +167,10 @@ func (c *SSHConnection) RunCommandArgs(ctx context.Context, args []string) (stri
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-// NeedsBinaryTransfer checks if we need to transfer a binary to the remote host
+// NeedsBinaryTransfer checks if we need to transfer a binary to the remote host.
+// This is true unless there's a pre-configured remote binary override for the
+// detected platform. Even when local and remote platforms match, the binary must
+// be transferred because the remote host accesses it via its own filesystem.
 func (c *SSHConnection) NeedsBinaryTransfer() bool {
 	if c.platformInfo == nil {
 		return true // Need to detect platform first
@@ -179,8 +182,9 @@ func (c *SSHConnection) NeedsBinaryTransfer() bool {
 		return false // Use pre-deployed binary
 	}
 
-	// Check if local platform matches remote
-	return c.platformInfo.OS != runtime.GOOS || c.platformInfo.Arch != runtime.GOARCH
+	// Always need to transfer — even when platforms match, the remote host
+	// needs the binary available on its own filesystem.
+	return true
 }
 
 // GetRemoteBinaryPath returns the path to the Pelican binary on the remote host
