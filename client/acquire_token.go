@@ -389,12 +389,16 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 		}
 		log.Errorln("Failed to generate a new authorization token for this transfer: ", err)
 		log.Errorln("This transfer requires authorization to complete and no token is available")
-		err = errors.Wrap(err, "failed to find or generate a token as required for "+tg.Destination.String())
+		err = error_codes.NewAuthorization_TokenNotFoundError(
+			errors.Wrap(err, "failed to find or generate a token as required for "+tg.Destination.String()),
+		)
 		return
 	}
 
 	log.Errorln("Credential is required, but currently missing")
-	return "", errors.New("credential is required for " + tg.Destination.String() + " but was not discovered")
+	return "", error_codes.NewAuthorization_TokenNotFoundError(
+		errors.New("credential is required for " + tg.Destination.String() + " but was not discovered"),
+	)
 }
 
 // Return the token contents associated with the generator
