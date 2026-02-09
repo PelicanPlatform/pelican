@@ -277,7 +277,7 @@ func TestPlatformDetection(t *testing.T) {
 
 	assert.Equal(t, expectedOS, platform.OS, "OS should match")
 	assert.Equal(t, expectedArch, platform.Arch, "Architecture should match")
-	assert.False(t, conn.NeedsBinaryTransfer(), "Should not need binary transfer on same platform")
+	assert.True(t, conn.NeedsBinaryTransfer(), "Should need binary transfer even on same platform (no remote override configured)")
 }
 
 // Test binary transfer via SCP
