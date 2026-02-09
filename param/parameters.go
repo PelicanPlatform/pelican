@@ -310,7 +310,6 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.GlobusTransferTokenFile": false,
 	"Origin.HttpAuthTokenFile": false,
 	"Origin.HttpServiceUrl": false,
-	"Origin.InProgressLocation": false,
 	"Origin.Mode": false,
 	"Origin.Multiuser": false,
 	"Origin.NamespacePrefix": false,
@@ -337,6 +336,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.SupportedChecksumTypes": false,
 	"Origin.TokenAudience": false,
 	"Origin.TransferRateLimit": false,
+	"Origin.UploadTempLocation": false,
 	"Origin.Url": false,
 	"Origin.UserMapfileRefreshInterval": false,
 	"Origin.XRootDPrefix": false,
@@ -661,8 +661,6 @@ func (sP StringParam) GetString() string {
 			return config.Origin.HttpAuthTokenFile
 		case "Origin.HttpServiceUrl":
 			return config.Origin.HttpServiceUrl
-		case "Origin.InProgressLocation":
-			return config.Origin.InProgressLocation
 		case "Origin.Mode":
 			return config.Origin.Mode
 		case "Origin.NamespacePrefix":
@@ -697,6 +695,8 @@ func (sP StringParam) GetString() string {
 			return config.Origin.StorageType
 		case "Origin.TokenAudience":
 			return config.Origin.TokenAudience
+		case "Origin.UploadTempLocation":
+			return config.Origin.UploadTempLocation
 		case "Origin.Url":
 			return config.Origin.Url
 		case "Origin.XRootDPrefix":
@@ -1550,7 +1550,6 @@ var allParameterNames = []string{
 	"Origin.GlobusTransferTokenFile",
 	"Origin.HttpAuthTokenFile",
 	"Origin.HttpServiceUrl",
-	"Origin.InProgressLocation",
 	"Origin.Mode",
 	"Origin.Multiuser",
 	"Origin.NamespacePrefix",
@@ -1577,6 +1576,7 @@ var allParameterNames = []string{
 	"Origin.SupportedChecksumTypes",
 	"Origin.TokenAudience",
 	"Origin.TransferRateLimit",
+	"Origin.UploadTempLocation",
 	"Origin.Url",
 	"Origin.UserMapfileRefreshInterval",
 	"Origin.XRootDPrefix",
@@ -1783,7 +1783,6 @@ var (
 	Origin_GlobusTransferTokenFile = StringParam{"Origin.GlobusTransferTokenFile"}
 	Origin_HttpAuthTokenFile = StringParam{"Origin.HttpAuthTokenFile"}
 	Origin_HttpServiceUrl = StringParam{"Origin.HttpServiceUrl"}
-	Origin_InProgressLocation = StringParam{"Origin.InProgressLocation"}
 	Origin_Mode = StringParam{"Origin.Mode"}
 	Origin_NamespacePrefix = StringParam{"Origin.NamespacePrefix"}
 	Origin_RunLocation = StringParam{"Origin.RunLocation"}
@@ -1801,6 +1800,7 @@ var (
 	Origin_StoragePrefix = StringParam{"Origin.StoragePrefix"}
 	Origin_StorageType = StringParam{"Origin.StorageType"}
 	Origin_TokenAudience = StringParam{"Origin.TokenAudience"}
+	Origin_UploadTempLocation = StringParam{"Origin.UploadTempLocation"}
 	Origin_Url = StringParam{"Origin.Url"}
 	Origin_XRootDPrefix = StringParam{"Origin.XRootDPrefix"}
 	Origin_XRootServiceUrl = StringParam{"Origin.XRootServiceUrl"}

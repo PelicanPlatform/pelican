@@ -282,7 +282,6 @@ type Config struct {
 		GlobusTransferTokenFile string `mapstructure:"globustransfertokenfile" yaml:"GlobusTransferTokenFile"`
 		HttpAuthTokenFile string `mapstructure:"httpauthtokenfile" yaml:"HttpAuthTokenFile"`
 		HttpServiceUrl string `mapstructure:"httpserviceurl" yaml:"HttpServiceUrl"`
-		InProgressLocation string `mapstructure:"inprogresslocation" yaml:"InProgressLocation"`
 		Mode string `mapstructure:"mode" yaml:"Mode"`
 		Multiuser bool `mapstructure:"multiuser" yaml:"Multiuser"`
 		NamespacePrefix string `mapstructure:"namespaceprefix" yaml:"NamespacePrefix"`
@@ -309,6 +308,7 @@ type Config struct {
 		SupportedChecksumTypes []string `mapstructure:"supportedchecksumtypes" yaml:"SupportedChecksumTypes"`
 		TokenAudience string `mapstructure:"tokenaudience" yaml:"TokenAudience"`
 		TransferRateLimit byte_rate.ByteRate `mapstructure:"transferratelimit" yaml:"TransferRateLimit"`
+		UploadTempLocation string `mapstructure:"uploadtemplocation" yaml:"UploadTempLocation"`
 		Url string `mapstructure:"url" yaml:"Url"`
 		UserMapfileRefreshInterval time.Duration `mapstructure:"usermapfilerefreshinterval" yaml:"UserMapfileRefreshInterval"`
 		XRootDPrefix string `mapstructure:"xrootdprefix" yaml:"XRootDPrefix"`
@@ -694,7 +694,6 @@ type configWithType struct {
 		GlobusTransferTokenFile struct { Type string; Value string }
 		HttpAuthTokenFile struct { Type string; Value string }
 		HttpServiceUrl struct { Type string; Value string }
-		InProgressLocation struct { Type string; Value string }
 		Mode struct { Type string; Value string }
 		Multiuser struct { Type string; Value bool }
 		NamespacePrefix struct { Type string; Value string }
@@ -721,6 +720,7 @@ type configWithType struct {
 		SupportedChecksumTypes struct { Type string; Value []string }
 		TokenAudience struct { Type string; Value string }
 		TransferRateLimit struct { Type string; Value byte_rate.ByteRate }
+		UploadTempLocation struct { Type string; Value string }
 		Url struct { Type string; Value string }
 		UserMapfileRefreshInterval struct { Type string; Value time.Duration }
 		XRootDPrefix struct { Type string; Value string }

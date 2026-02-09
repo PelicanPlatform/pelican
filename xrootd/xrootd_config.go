@@ -111,7 +111,7 @@ type (
 		XRootServiceUrl    string
 		RunLocation        string
 		StorageType        string
-		InProgressLocation string
+		UploadTempLocation string
 
 		// S3 specific options that are kept top-level because
 		// they aren't specific to each export
@@ -267,26 +267,34 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 			return err
 		}
 
-		// Create the user specified in-progress directory with appropriate permissions
-		inProgressDir := param.Origin_InProgressLocation.GetString()
+		// Create the upload temp directory with appropriate permissions.
+		// When the multiuser plugin is enabled, XRootD performs filesystem operations as the
+		// authenticated user rather than root. This means each uploading user needs the ability
+		// to create their own subdirectory (e.g., <uploadTempDir>/<username>/) for temporary
+		// files. Mode 1777 (world-writable + sticky bit) allows any user to create entries
+		// while the sticky bit prevents them from deleting each other's directories.
+		// An alternative to 1777 is to pre-create per-user subdirectories with appropriate
+		// ownership. See the "Configure the POSC" section of pelicanplatform/xrootd-s3-http/README.md for
+		// the full discussion of these two models.
+		uploadTempDir := param.Origin_UploadTempLocation.GetString()
 
 		// Check if the directory exists
-		if stat, err := os.Stat(inProgressDir); os.IsNotExist(err) {
+		if stat, err := os.Stat(uploadTempDir); os.IsNotExist(err) {
 			// Directory doesn't exist - create it with mode 1777 (world-writable + sticky bit)
-			log.Infof("Creating in-progress directory %v with mode 1777 (world-writable + sticky bit)", inProgressDir)
-			if err = config.MkdirAll(inProgressDir, 0777|os.ModeSticky, uid, gid); err != nil {
-				return errors.Wrapf(err, "Unable to create in-progress directory %v", inProgressDir)
+			log.Infof("Creating in-progress directory %v with mode 1777 (world-writable + sticky bit)", uploadTempDir)
+			if err = config.MkdirAll(uploadTempDir, 0777|os.ModeSticky, uid, gid); err != nil {
+				return errors.Wrapf(err, "unable to create in-progress directory %v", uploadTempDir)
 			}
-			if err = os.Chown(inProgressDir, uid, -1); err != nil {
-				return errors.Wrapf(err, "Unable to change ownership of in-progress directory %v"+
-					" to desired daemon user %v", inProgressDir, username)
+			if err = os.Chown(uploadTempDir, uid, -1); err != nil {
+				return errors.Wrapf(err, "unable to change ownership of in-progress directory %v"+
+					" to desired daemon user %v", uploadTempDir, username)
 			}
 		} else if err != nil {
 			// Error checking directory
-			return errors.Wrapf(err, "Unable to stat in-progress directory %v", inProgressDir)
+			return errors.Wrapf(err, "unable to stat in-progress directory %v", uploadTempDir)
 		} else if !stat.IsDir() {
 			// Path exists but is not a directory
-			return errors.Errorf("In-progress location %v exists but is not a directory", inProgressDir)
+			return errors.Errorf("in-progress location %v exists but is not a directory", uploadTempDir)
 		} else {
 			// Directory exists - check its permissions
 			mode := stat.Mode()
@@ -301,32 +309,32 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 
 				if hasStickyBit {
 					log.Infof("In-progress directory %v exists with mode %04o - using shared sticky-bit model",
-						inProgressDir, perm)
+						uploadTempDir, perm)
 				} else {
-					log.Warningf("In-progress directory %v has mode %04o (world-writable without sticky bit). "+
-						"This is UNSAFE! Any user can delete others' files. "+
-						"Consider setting permissions to 1777 (chmod 1777 %v)",
-						inProgressDir, perm, inProgressDir)
+					return errors.Errorf("in-progress directory %v has mode %04o (world-writable without sticky bit); "+
+						"this is unsafe because any user can delete others' files. "+
+						"Set permissions to 1777 (chmod 1777 %v) to enable the sticky bit",
+						uploadTempDir, perm, uploadTempDir)
 				}
 			} else {
 				// Not world-writable - per-user model
 				log.Infof("In-progress directory %v has mode %04o (per-user model). "+
 					"Users must have pre-created subdirectories (%v/$USER) with proper ownership and permissions.",
-					inProgressDir, perm, inProgressDir)
+					uploadTempDir, perm, uploadTempDir)
 			}
 
 			// Ensure ownership is correct
-			if err = os.Chown(inProgressDir, uid, -1); err != nil {
-				return errors.Wrapf(err, "Unable to change ownership of in-progress directory %v"+
-					" to desired daemon user %v", inProgressDir, username)
+			if err = os.Chown(uploadTempDir, uid, -1); err != nil {
+				return errors.Wrapf(err, "unable to change ownership of in-progress directory %v"+
+					" to desired daemon user %v", uploadTempDir, username)
 			}
 		}
 		// At this point, the in-progress directory is created and owned by the user specified in the config
 		// We need to symlink the user-specified in-progress directory to the actual in-progress directory
 
-		err = os.Symlink(inProgressDir, filepath.Join(exportPath, "in-progress"))
+		err = os.Symlink(uploadTempDir, filepath.Join(exportPath, "in-progress"))
 		if err != nil {
-			return errors.Wrapf(err, "Failed to create in-progress symlink from %v to %v", inProgressDir, filepath.Join(exportPath, "in-progress"))
+			return errors.Wrapf(err, "Failed to create in-progress symlink from %v to %v", uploadTempDir, filepath.Join(exportPath, "in-progress"))
 		}
 	}
 

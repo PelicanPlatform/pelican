@@ -1013,14 +1013,27 @@ root_default: /run/pelican/xrootd/origin
 default: $XDG_RUNTIME_DIR/pelican/origin
 components: ["origin"]
 ---
-name: Origin.InProgressLocation
+name: Origin.UploadTempLocation
 description: |+
-  A directory where objects being uploaded to the origin are temporarily stored until they are committed under the namespace.
+  A directory where objects being uploaded to the origin are temporarily stored until
+  they are committed under the namespace. This enables atomic writes: if an upload fails
+  or is cancelled partway through, the partially-written file is automatically cleaned up
+  rather than leaving an incomplete object visible in the namespace. Without this, a PUT
+  that fails mid-transfer would burn a name in the namespace, leaving behind a corrupt or
+  truncated file that clients may attempt to read.
 
-  This is only available for origins that have a StorageType of "posix".
+  For example, if a client uploads a 1 GiB file and the connection drops at 500 MiB, the
+  origin will automatically remove the partial file from the temporary location. Without
+  atomic writes, the 500 MiB fragment would remain at the intended path and be served to
+  any client that requests it.
+
+  This is only available for origins that have a StorageType of "posix". The configured
+  location must not be equal to or under any export's StoragePrefix, as that would make
+  temporary upload files accessible via the federation namespace.
 type: filename
 default: $Origin.RunLocation/in-progress
 components: ["origin"]
+hidden: true
 ---
 name: Origin.NamespacePrefix
 description: |+
