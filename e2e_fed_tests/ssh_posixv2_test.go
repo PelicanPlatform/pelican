@@ -30,6 +30,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -315,7 +316,8 @@ func TestSSHPosixv2OriginUploadDownload(t *testing.T) {
 	require.NoError(t, err, "Upload should succeed")
 
 	// Verify file exists in backend storage
-	backendFile := filepath.Join(sshServer.storageDir, "test.txt")
+	require.NotEmpty(t, ft.Exports, "Should have at least one export")
+	backendFile := filepath.Join(ft.Exports[0].StoragePrefix, "test.txt")
 	backendContent, err := os.ReadFile(backendFile)
 	require.NoError(t, err, "File should exist in backend storage")
 	assert.Equal(t, testContent, backendContent, "Backend file content should match")
@@ -478,10 +480,13 @@ func TestSSHPosixv2OriginDirectoryListing(t *testing.T) {
 	waitForSSHBackendReady(t, 60*time.Second)
 
 	// Create directory structure in the storage backend directly
-	subdir := filepath.Join(sshServer.storageDir, "subdir")
+	// Note: NewFedTest overrides StoragePrefix, so use ft.Exports for actual path.
+	require.NotEmpty(t, ft.Exports, "Should have at least one export")
+	actualStorageDir := ft.Exports[0].StoragePrefix
+	subdir := filepath.Join(actualStorageDir, "subdir")
 	require.NoError(t, os.Mkdir(subdir, 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(sshServer.storageDir, "file1.txt"), []byte("content1"), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(sshServer.storageDir, "file2.txt"), []byte("content2"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(actualStorageDir, "file1.txt"), []byte("content1"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(actualStorageDir, "file2.txt"), []byte("content2"), 0644))
 	require.NoError(t, os.WriteFile(filepath.Join(subdir, "file3.txt"), []byte("content3"), 0644))
 
 	testToken := getTempTokenForTest(t)
@@ -588,4 +593,200 @@ func TestSSHPosixv2OriginMultipleFiles(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, expectedContent, downloadedContent, "Content should match for %s", filename)
 	}
+}
+
+// TestSSHPosixv2OriginConnectionStress stress-tests the reverse connection
+// mechanism by performing many rapid sequential and concurrent operations.
+// This exercises the helper broker's ability to cycle through connections
+// quickly without leaks, panics, or EOF errors.
+func TestSSHPosixv2OriginConnectionStress(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	// Skip if sshd is not available
+	if _, err := exec.LookPath("/usr/sbin/sshd"); err != nil {
+		t.Skip("sshd not available, skipping SSH E2E test")
+	}
+
+	// Build the pelican binary (built once and shared across tests)
+	pelicanBinary := buildPelicanBinary(t)
+
+	sshServer, err := startTestSSHD(t)
+	require.NoError(t, err, "Failed to start test SSH server")
+	t.Cleanup(sshServer.stop)
+
+	originConfig := sshOriginConfig(sshServer.port, sshServer.storageDir, sshServer.knownHostsFile, sshServer.privateKeyFile, pelicanBinary)
+
+	ft := fed_test_utils.NewFedTest(t, originConfig)
+	require.NotNil(t, ft)
+
+	// Wait for SSH backend to be ready
+	waitForSSHBackendReady(t, 60*time.Second)
+
+	require.NotEmpty(t, ft.Exports, "Should have at least one export")
+	actualStorageDir := ft.Exports[0].StoragePrefix
+	testToken := getTempTokenForTest(t)
+	localTmpDir := t.TempDir()
+
+	// Seed the storage with a handful of small files and a subdirectory
+	// so stat / read / list operations have something to hit.
+	const numSeedFiles = 10
+	seedContents := make(map[string][]byte, numSeedFiles)
+	for i := 0; i < numSeedFiles; i++ {
+		name := fmt.Sprintf("stress_%03d.txt", i)
+		content := []byte(fmt.Sprintf("content-for-file-%d", i))
+		seedContents[name] = content
+		require.NoError(t, os.WriteFile(filepath.Join(actualStorageDir, name), content, 0644))
+	}
+	// Add a subdirectory with a file for listing tests
+	require.NoError(t, os.MkdirAll(filepath.Join(actualStorageDir, "stressdir"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(actualStorageDir, "stressdir", "inner.txt"), []byte("inner"), 0644))
+
+	// ---- Sub-test 1: Rapid sequential stat (PROPFIND Depth:0) ----
+	t.Run("RapidSequentialStat", func(t *testing.T) {
+		const iterations = 20
+		for i := 0; i < iterations; i++ {
+			name := fmt.Sprintf("stress_%03d.txt", i%numSeedFiles)
+			statURL := fmt.Sprintf("pelican://%s:%d/test/%s",
+				param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), name)
+
+			info, err := client.DoStat(ft.Ctx, statURL, client.WithToken(testToken))
+			require.NoError(t, err, "Stat #%d (%s) should succeed", i, name)
+			require.NotNil(t, info)
+			assert.Equal(t, int64(len(seedContents[name])), info.Size,
+				"Stat #%d size mismatch for %s", i, name)
+		}
+	})
+
+	// ---- Sub-test 2: Rapid sequential reads ----
+	t.Run("RapidSequentialReads", func(t *testing.T) {
+		const iterations = 15
+		for i := 0; i < iterations; i++ {
+			name := fmt.Sprintf("stress_%03d.txt", i%numSeedFiles)
+			readURL := fmt.Sprintf("pelican://%s:%d/test/%s",
+				param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), name)
+			dest := filepath.Join(localTmpDir, fmt.Sprintf("seq_read_%03d.txt", i))
+
+			results, err := client.DoGet(ft.Ctx, readURL, dest, false, client.WithToken(ft.Token))
+			require.NoError(t, err, "Sequential read #%d (%s) should succeed", i, name)
+			require.NotEmpty(t, results)
+
+			got, err := os.ReadFile(dest)
+			require.NoError(t, err)
+			assert.Equal(t, seedContents[name], got, "Content mismatch on read #%d", i)
+		}
+	})
+
+	// ---- Sub-test 3: Rapid sequential directory listings (PROPFIND Depth:1) ----
+	t.Run("RapidSequentialListings", func(t *testing.T) {
+		const iterations = 10
+		listURL := fmt.Sprintf("pelican://%s:%d/test/",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+
+		for i := 0; i < iterations; i++ {
+			entries, err := client.DoList(ft.Ctx, listURL, client.WithToken(testToken))
+			require.NoError(t, err, "Listing #%d should succeed", i)
+			// We seeded numSeedFiles + 1 directory = numSeedFiles+1 entries
+			assert.GreaterOrEqual(t, len(entries), numSeedFiles,
+				"Listing #%d should return at least %d entries, got %d", i, numSeedFiles, len(entries))
+		}
+	})
+
+	// ---- Sub-test 4: Concurrent reads of different files ----
+	t.Run("ConcurrentReads", func(t *testing.T) {
+		const concurrency = 5
+		var wg sync.WaitGroup
+		var failures atomic.Int32
+
+		for i := 0; i < concurrency; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				name := fmt.Sprintf("stress_%03d.txt", idx%numSeedFiles)
+				readURL := fmt.Sprintf("pelican://%s:%d/test/%s",
+					param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), name)
+				dest := filepath.Join(localTmpDir, fmt.Sprintf("conc_read_%03d.txt", idx))
+
+				results, err := client.DoGet(ft.Ctx, readURL, dest, false, client.WithToken(ft.Token))
+				if err != nil {
+					t.Logf("Concurrent read %d (%s) failed: %v", idx, name, err)
+					failures.Add(1)
+					return
+				}
+				if len(results) == 0 {
+					t.Logf("Concurrent read %d (%s) returned no results", idx, name)
+					failures.Add(1)
+					return
+				}
+
+				got, err := os.ReadFile(dest)
+				if err != nil || string(got) != string(seedContents[name]) {
+					t.Logf("Concurrent read %d (%s) content mismatch", idx, name)
+					failures.Add(1)
+				}
+			}(i)
+		}
+		wg.Wait()
+		assert.Zero(t, failures.Load(), "All concurrent reads should succeed")
+	})
+
+	// ---- Sub-test 5: Concurrent stats ----
+	t.Run("ConcurrentStats", func(t *testing.T) {
+		const concurrency = 8
+		var wg sync.WaitGroup
+		var failures atomic.Int32
+
+		for i := 0; i < concurrency; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				name := fmt.Sprintf("stress_%03d.txt", idx%numSeedFiles)
+				statURL := fmt.Sprintf("pelican://%s:%d/test/%s",
+					param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), name)
+
+				info, err := client.DoStat(ft.Ctx, statURL, client.WithToken(testToken))
+				if err != nil {
+					t.Logf("Concurrent stat %d (%s) failed: %v", idx, name, err)
+					failures.Add(1)
+					return
+				}
+				if info == nil || info.Size != int64(len(seedContents[name])) {
+					t.Logf("Concurrent stat %d (%s) returned unexpected size", idx, name)
+					failures.Add(1)
+				}
+			}(i)
+		}
+		wg.Wait()
+		assert.Zero(t, failures.Load(), "All concurrent stats should succeed")
+	})
+
+	// ---- Sub-test 6: Mixed rapid operations (stat, read, list interleaved) ----
+	t.Run("MixedRapidOperations", func(t *testing.T) {
+		const iterations = 15
+		for i := 0; i < iterations; i++ {
+			switch i % 3 {
+			case 0: // stat
+				name := fmt.Sprintf("stress_%03d.txt", i%numSeedFiles)
+				statURL := fmt.Sprintf("pelican://%s:%d/test/%s",
+					param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), name)
+				info, err := client.DoStat(ft.Ctx, statURL, client.WithToken(testToken))
+				require.NoError(t, err, "Mixed stat #%d should succeed", i)
+				require.NotNil(t, info)
+			case 1: // read
+				name := fmt.Sprintf("stress_%03d.txt", i%numSeedFiles)
+				readURL := fmt.Sprintf("pelican://%s:%d/test/%s",
+					param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), name)
+				dest := filepath.Join(localTmpDir, fmt.Sprintf("mixed_%03d.txt", i))
+				_, err := client.DoGet(ft.Ctx, readURL, dest, false, client.WithToken(ft.Token))
+				require.NoError(t, err, "Mixed read #%d should succeed", i)
+			case 2: // list
+				listURL := fmt.Sprintf("pelican://%s:%d/test/",
+					param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+				entries, err := client.DoList(ft.Ctx, listURL, client.WithToken(testToken))
+				require.NoError(t, err, "Mixed list #%d should succeed", i)
+				assert.NotEmpty(t, entries)
+			}
+		}
+	})
 }

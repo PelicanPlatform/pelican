@@ -50,6 +50,11 @@ type HelperBroker struct {
 	// connectionPool holds available reverse connections to the helper
 	connectionPool chan net.Conn
 
+	// pendingCh carries new helperRequests directly to retrieve handlers.
+	// RequestConnection sends the request; handleHelperRetrieve receives it,
+	// adds it to the pendingRequests map, and returns the ID to the helper.
+	pendingCh chan *helperRequest
+
 	// ctx is the context for the broker
 	ctx context.Context
 
@@ -61,6 +66,7 @@ type HelperBroker struct {
 type helperRequest struct {
 	id         string
 	responseCh chan http.ResponseWriter
+	doneCh     chan struct{} // closed after hijackConnection completes
 	createdAt  time.Time
 }
 
@@ -100,6 +106,7 @@ func NewHelperBroker(ctx context.Context, authCookie string) *HelperBroker {
 	return &HelperBroker{
 		pendingRequests: make(map[string]*helperRequest),
 		connectionPool:  make(chan net.Conn, 10), // Buffer for connection reuse
+		pendingCh:       make(chan *helperRequest),
 		ctx:             ctx,
 		authCookie:      authCookie,
 	}
@@ -158,17 +165,25 @@ func (b *HelperBroker) RequestConnection(ctx context.Context) (net.Conn, error) 
 		// No pooled connection available
 	}
 
-	// Create a pending request
+	// Create a pending request and send it to a waiting retrieve handler.
+	// The retrieve handler will add it to the pendingRequests map for
+	// callback lookup; we defer the cleanup.
 	reqID := generateRequestID()
-	responseCh := make(chan http.ResponseWriter, 1)
-
-	b.mu.Lock()
-	b.pendingRequests[reqID] = &helperRequest{
+	pending := &helperRequest{
 		id:         reqID,
-		responseCh: responseCh,
+		responseCh: make(chan http.ResponseWriter, 1),
+		doneCh:     make(chan struct{}),
 		createdAt:  time.Now(),
 	}
-	b.mu.Unlock()
+
+	// Send the request to a retrieve handler. This blocks until one is ready.
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-b.ctx.Done():
+		return nil, errors.New("helper broker shutdown")
+	case b.pendingCh <- pending:
+	}
 
 	defer func() {
 		b.mu.Lock()
@@ -182,9 +197,12 @@ func (b *HelperBroker) RequestConnection(ctx context.Context) (net.Conn, error) 
 		return nil, ctx.Err()
 	case <-b.ctx.Done():
 		return nil, errors.New("helper broker shutdown")
-	case writer := <-responseCh:
+	case writer := <-pending.responseCh:
 		// The helper has called back - hijack the connection
-		return b.hijackConnection(writer, reqID)
+		conn, err := b.hijackConnection(writer, reqID)
+		// Signal the callback handler that hijacking is done so it can return
+		close(pending.doneCh)
+		return conn, err
 	}
 }
 
@@ -237,17 +255,6 @@ func (b *HelperBroker) hijackConnection(writer http.ResponseWriter, reqID string
 
 	log.Debugf("Helper broker: hijacked TLS connection for request %s", reqID)
 	return conn, nil
-}
-
-// hasPendingRequest checks if there are any pending requests
-func (b *HelperBroker) hasPendingRequest() (string, bool) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	for id := range b.pendingRequests {
-		return id, true
-	}
-	return "", false
 }
 
 // RegisterHelperBrokerHandlers registers the HTTP handlers for the helper broker
@@ -309,35 +316,32 @@ func handleHelperRetrieve(ctx context.Context, c *gin.Context) {
 		effectiveTimeout = 0
 	}
 
-	// Wait for a pending request or timeout
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	timeoutCh := time.After(effectiveTimeout)
+	// Wait for a request to arrive on pendingCh, or timeout.
+	// Only one retrieve handler will receive each request.
+	select {
+	case <-ctx.Done():
+		c.JSON(http.StatusServiceUnavailable, helperRetrieveResponse{
+			Status: "error",
+			Msg:    "Server shutting down",
+		})
+		return
+	case <-c.Done():
+		return
+	case <-time.After(effectiveTimeout):
+		c.JSON(http.StatusOK, helperRetrieveResponse{
+			Status: "timeout",
+		})
+		return
+	case pending := <-broker.pendingCh:
+		// Register the request in the map so the callback handler can find it.
+		broker.mu.Lock()
+		broker.pendingRequests[pending.id] = pending
+		broker.mu.Unlock()
 
-	for {
-		select {
-		case <-ctx.Done():
-			c.JSON(http.StatusServiceUnavailable, helperRetrieveResponse{
-				Status: "error",
-				Msg:    "Server shutting down",
-			})
-			return
-		case <-c.Done():
-			return
-		case <-timeoutCh:
-			c.JSON(http.StatusOK, helperRetrieveResponse{
-				Status: "timeout",
-			})
-			return
-		case <-ticker.C:
-			if reqID, ok := broker.hasPendingRequest(); ok {
-				c.JSON(http.StatusOK, helperRetrieveResponse{
-					Status:    "ok",
-					RequestID: reqID,
-				})
-				return
-			}
-		}
+		c.JSON(http.StatusOK, helperRetrieveResponse{
+			Status:    "ok",
+			RequestID: pending.id,
+		})
 	}
 }
 
@@ -404,9 +408,10 @@ func handleHelperCallback(ctx context.Context, c *gin.Context) {
 	case <-c.Done():
 		return
 	case pending.responseCh <- c.Writer:
-		// The hijackConnection will handle the response
-		// Wait for it to complete by blocking here
-		<-pending.responseCh
+		// Keep this handler alive until hijackConnection completes.
+		// If the handler returns before Hijack() is called, Gin's
+		// ServeHTTP will finish and the Hijack will panic.
+		<-pending.doneCh
 	}
 }
 
@@ -454,8 +459,11 @@ func (t *HelperTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	// Create a client that uses the reverse connection.
 	// The helper will be the server, we are the client.
+	// DisableKeepAlives ensures the transport releases the connection after
+	// the response is fully read, so both sides cleanly finish.
 	client := &http.Client{
 		Transport: &http.Transport{
+			DisableKeepAlives: true,
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				return conn, nil
 			},
@@ -467,6 +475,11 @@ func (t *HelperTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	helperReq := req.Clone(req.Context())
 	helperReq.URL.Scheme = "http" // Connection is already established
 	helperReq.URL.Host = "helper" // Placeholder, connection is pre-established
+
+	// Inject the auth cookie so the helper's auth middleware accepts the request.
+	// The origin has already validated the client's token; the auth cookie proves
+	// to the helper that this request came from the trusted origin.
+	helperReq.Header.Set("Authorization", "Bearer "+t.broker.GetAuthCookie())
 
 	resp, err := client.Do(helperReq)
 	if err != nil {
@@ -509,6 +522,7 @@ func (b *HelperBroker) cleanupOldRequests(maxAge time.Duration) {
 	for id, req := range b.pendingRequests {
 		if now.Sub(req.createdAt) > maxAge {
 			close(req.responseCh)
+			close(req.doneCh)
 			delete(b.pendingRequests, id)
 			log.Debugf("Cleaned up stale request %s (age: %v)", id, now.Sub(req.createdAt))
 		}
