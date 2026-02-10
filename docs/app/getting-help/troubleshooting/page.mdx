@@ -143,7 +143,17 @@ This section discusses common errors when working with the [Pelican CLI](/gettin
 If the you've followed the other troubleshooting instructions but you continue to experience the issue,
 or if you are experiencing an issue not listed here,
 there may be a problem with the local configuration for your client.
-You can reset the local configuration as described below.
+
+If you enter the password incorrectly for your local configuration file, you should see a message suggesting that you use the command `pelican credentials reset-local` to remove your configuration file.
+This is generally safe to do, unless you are actively transferring data in another process.
+
+You can reset your local configuration at anytime by running
+
+```
+pelican credentials reset-local
+```
+
+If that doesn't work, you can also manually reset your local configuration as follows.
 
 <Callout type="error">
 Resetting your local configuration will remove any stored credentials or custom configuration.
