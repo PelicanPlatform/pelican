@@ -39,11 +39,6 @@ jobs:
         with:
           fetch-depth: 0  # GoReleaser needs history to look up the previous tag, and so on
 
-      - name: Mark the checkout as safe
-        # NOTE (brianaydemir): This appears to be required for TestHandleCLIExecutableAlias.
-        run: |
-          git config --global --add safe.directory /__w/pelican/pelican
-
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
@@ -77,16 +72,6 @@ jobs:
         with:
           go-version: "${{ steps.go-version.outputs.version }}"
           check-latest: true
-
-      - name: Cache Go
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
 
       - name: Install gotestsum
         run: |
