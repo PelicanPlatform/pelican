@@ -28,6 +28,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -69,9 +70,14 @@ func NewSSHFileSystem(broker *HelperBroker, federationPrefix, storagePrefix stri
 // makeHelperURL constructs the URL for a request to the helper
 // The helper serves WebDAV at /<federationPrefix>/<path>
 func (fs *SSHFileSystem) makeHelperURL(name string) string {
-	// The helper uses the federation prefix as its route
-	// Clean the path to avoid double slashes
+	// The helper uses the federation prefix as its route.
+	// Preserve trailing slashes so that directory requests match the
+	// http.ServeMux pattern registered with a trailing slash.
+	trailingSlash := strings.HasSuffix(name, "/")
 	cleanPath := path.Clean(path.Join(fs.federationPrefix, name))
+	if trailingSlash && !strings.HasSuffix(cleanPath, "/") {
+		cleanPath += "/"
+	}
 	return "http://helper" + cleanPath
 }
 
@@ -306,8 +312,11 @@ type sshFile struct {
 	reader     io.ReadCloser
 	readOffset int64
 
-	// For writing
-	writer *io.PipeWriter
+	// For writing - uses a pipe to stream data through a single PUT request
+	writeOnce sync.Once // ensures the background PUT starts exactly once
+	writer    *io.PipeWriter
+	writeErr  error         // error from the background PUT goroutine
+	writeDone chan struct{} // closed when the background PUT completes
 
 	// Cached stat info
 	info os.FileInfo
@@ -323,6 +332,13 @@ func (f *sshFile) Close() error {
 	if f.writer != nil {
 		f.writer.Close()
 		f.writer = nil
+		// Wait for the background PUT to finish
+		if f.writeDone != nil {
+			<-f.writeDone
+		}
+		if f.writeErr != nil {
+			err = f.writeErr
+		}
 	}
 	return err
 }
@@ -398,28 +414,43 @@ func (f *sshFile) Seek(offset int64, whence int) (int64, error) {
 	return newOffset, nil
 }
 
-// Write writes data to the file via HTTP PUT
+// Write writes data to the file via HTTP PUT using a streaming pipe.
+// On the first call, a background goroutine starts a single PUT request
+// with a PipeReader as the body. Subsequent writes go to the PipeWriter.
+// The PUT completes when Close() is called, which closes the pipe.
 func (f *sshFile) Write(p []byte) (n int, err error) {
-	// For simplicity, we'll buffer writes and send on Close
-	// A more sophisticated implementation would use chunked transfer
-	url := f.fs.makeHelperURL(f.name)
-	req, err := http.NewRequestWithContext(f.ctx, "PUT", url, strings.NewReader(string(p)))
-	if err != nil {
-		return 0, errors.Wrap(err, "failed to create PUT request")
-	}
-	req.Header.Set("Content-Type", "application/octet-stream")
+	f.writeOnce.Do(func() {
+		// Start the background PUT with a pipe; subsequent writes go to the PipeWriter.
+		pr, pw := io.Pipe()
+		f.writer = pw
+		f.writeDone = make(chan struct{})
 
-	resp, err := f.fs.httpClient.Do(req)
-	if err != nil {
-		return 0, errors.Wrap(err, "PUT request failed")
-	}
-	defer resp.Body.Close()
+		go func() {
+			defer close(f.writeDone)
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
-		return 0, fmt.Errorf("PUT failed with status %d", resp.StatusCode)
-	}
+			helperURL := f.fs.makeHelperURL(f.name)
+			req, err := http.NewRequestWithContext(f.ctx, "PUT", helperURL, pr)
+			if err != nil {
+				f.writeErr = errors.Wrap(err, "failed to create PUT request")
+				pr.CloseWithError(f.writeErr)
+				return
+			}
+			req.Header.Set("Content-Type", "application/octet-stream")
 
-	return len(p), nil
+			resp, err := f.fs.httpClient.Do(req)
+			if err != nil {
+				f.writeErr = errors.Wrap(err, "PUT request failed")
+				return
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
+				f.writeErr = fmt.Errorf("PUT failed with status %d", resp.StatusCode)
+			}
+		}()
+	})
+
+	return f.writer.Write(p)
 }
 
 // Readdir reads directory entries via PROPFIND with Depth: 1

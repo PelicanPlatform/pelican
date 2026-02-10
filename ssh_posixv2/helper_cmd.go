@@ -20,7 +20,6 @@ package ssh_posixv2
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -29,6 +28,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -520,6 +520,10 @@ func matchesPrefix(path, prefix string) bool {
 // When a request is pending, the helper connects to the origin's callback endpoint,
 // and the connection gets reversed - the helper becomes the HTTP server while the
 // origin becomes the client.
+//
+// Each poller loops: poll for a request, launch callbackAndServe in an errgroup
+// goroutine, and immediately loop back to polling. This keeps the pollers always
+// available while serving happens concurrently.
 func (h *HelperProcess) serveWithBroker(ctx context.Context, handler http.Handler) {
 	log.Info("Starting broker-based reverse connection listener")
 
@@ -544,12 +548,13 @@ func (h *HelperProcess) serveWithBroker(ctx context.Context, handler http.Handle
 	// Use errgroup for proper goroutine management
 	egrp, egrpCtx := errgroup.WithContext(ctx)
 
-	// Number of concurrent polling goroutines
+	// Fixed number of pollers. Each poller loops continuously, launching
+	// callbackAndServe in a separate goroutine so the poller immediately
+	// returns to polling.
 	numPollers := 3
-
 	for i := 0; i < numPollers; i++ {
 		egrp.Go(func() error {
-			h.pollAndServe(egrpCtx, client, retrieveURL, callbackURL, handler)
+			h.pollAndServe(egrpCtx, egrp, client, retrieveURL, callbackURL, handler)
 			return nil
 		})
 	}
@@ -586,8 +591,10 @@ func (h *HelperProcess) createBrokerClient() (*http.Client, error) {
 	}, nil
 }
 
-// pollAndServe continuously polls the origin for connection requests and serves them
-func (h *HelperProcess) pollAndServe(ctx context.Context, client *http.Client, retrieveURL, callbackURL string, handler http.Handler) {
+// pollAndServe continuously polls the origin for connection requests.
+// When it picks up a request, it launches callbackAndServe in an errgroup
+// goroutine and immediately loops back to polling.
+func (h *HelperProcess) pollAndServe(ctx context.Context, egrp *errgroup.Group, client *http.Client, retrieveURL, callbackURL string, handler http.Handler) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -615,11 +622,16 @@ func (h *HelperProcess) pollAndServe(ctx context.Context, client *http.Client, r
 			continue
 		}
 
-		// Got a request - callback to origin and serve
-		log.Debugf("Got connection request %s, calling back to origin", reqID)
-		if err := h.callbackAndServe(ctx, client, callbackURL, reqID, handler); err != nil {
-			log.Errorf("Failed to handle connection request %s: %v", reqID, err)
-		}
+		// Got a request - serve it in a separate goroutine so this
+		// poller can immediately loop back to polling.
+		serveReqID := reqID
+		egrp.Go(func() error {
+			log.Debugf("Got connection request %s, calling back to origin", serveReqID)
+			if err := h.callbackAndServe(ctx, client, callbackURL, serveReqID, handler); err != nil {
+				log.Errorf("Failed to handle connection request %s: %v", serveReqID, err)
+			}
+			return nil
+		})
 	}
 }
 
@@ -666,73 +678,73 @@ func (h *HelperProcess) callbackAndServe(ctx context.Context, client *http.Clien
 		return errors.Wrap(err, "failed to marshal callback request")
 	}
 
+	// Parse the callback URL to get host and path
+	parsedURL, err := url.Parse(callbackURL)
+	if err != nil {
+		return errors.Wrap(err, "failed to parse callback URL")
+	}
+
 	// Parse the origin's certificate chain for TLS verification
 	certPool := x509.NewCertPool()
 	if !certPool.AppendCertsFromPEM([]byte(h.config.CertificateChain)) {
 		return errors.New("failed to parse origin certificate chain")
 	}
 
-	// Create a custom transport that captures the TLS connection for reversal.
-	// We capture the TLS connection itself (not the underlying TCP) to maintain
-	// encryption on the reversed connection.
-	var capturedConn net.Conn
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{
+	// Establish a raw TLS connection to the origin.
+	// We do NOT use Go's http.Client because its transport takes ownership of the
+	// connection and runs background goroutines (readLoop/writeLoop) that interfere
+	// with connection reversal. Instead, we do manual HTTP over the TLS connection
+	// so we retain full control for the reverse-serving step.
+	dialer := &tls.Dialer{
+		Config: &tls.Config{
 			RootCAs: certPool,
 		},
-		// Disable HTTP/2 to allow connection hijacking
-		TLSNextProto: make(map[string]func(string, *tls.Conn) http.RoundTripper),
-		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			// Dial and perform TLS handshake
-			dialer := &tls.Dialer{
-				Config: &tls.Config{
-					RootCAs: certPool,
-				},
-			}
-			conn, err := dialer.DialContext(ctx, network, addr)
-			if err == nil {
-				capturedConn = conn
-			}
-			return conn, err
-		},
 	}
-
-	callbackClient := &http.Client{
-		Transport: transport,
-		Timeout:   30 * time.Second,
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, callbackURL, bytes.NewReader(bodyBytes))
+	conn, err := dialer.DialContext(ctx, "tcp", parsedURL.Host)
 	if err != nil {
-		return errors.Wrap(err, "failed to create callback request")
+		return errors.Wrap(err, "failed to establish TLS connection for callback")
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+h.config.AuthCookie)
 
-	resp, err := callbackClient.Do(req)
-	if err != nil {
-		return errors.Wrap(err, "callback request failed")
+	// Write the HTTP request manually
+	reqLine := fmt.Sprintf("POST %s HTTP/1.1\r\n", parsedURL.RequestURI())
+	headers := fmt.Sprintf("Host: %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nAuthorization: Bearer %s\r\nConnection: keep-alive\r\n\r\n",
+		parsedURL.Host, len(bodyBytes), h.config.AuthCookie)
+
+	if _, err := io.WriteString(conn, reqLine+headers); err != nil {
+		conn.Close()
+		return errors.Wrap(err, "failed to write callback request headers")
 	}
-	defer resp.Body.Close()
+	if _, err := conn.Write(bodyBytes); err != nil {
+		conn.Close()
+		return errors.Wrap(err, "failed to write callback request body")
+	}
+
+	// Read the HTTP response manually
+	reader := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		conn.Close()
+		return errors.Wrap(err, "failed to read callback response")
+	}
 
 	var respBody helperCallbackResponse
 	if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
+		resp.Body.Close()
+		conn.Close()
 		return errors.Wrap(err, "failed to decode callback response")
 	}
+	// Drain and close the response body
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
 
 	if respBody.Status != "ok" {
+		conn.Close()
 		return errors.Errorf("callback failed: %s", respBody.Msg)
 	}
 
-	// Connection should now be reversed - we become the server.
-	// The TLS connection is still valid and encrypted.
-	if capturedConn == nil {
-		return errors.New("no connection captured for reversal")
-	}
-
-	// Close idle connections to ensure the transport releases our connection
-	// without sending a close_notify. The connection is still valid for us to use.
-	callbackClient.CloseIdleConnections()
+	// Connection is now reversed - we become the HTTP server.
+	// The TLS connection is still valid and encrypted, and we have full ownership
+	// since no Go HTTP transport goroutines are associated with it.
 
 	// Serve a single HTTP request on the TLS-encrypted reversed connection
 	log.Debugf("Serving HTTP on reversed TLS connection for request %s", reqID)
@@ -743,7 +755,7 @@ func (h *HelperProcess) callbackAndServe(ctx context.Context, client *http.Clien
 	}
 
 	// Create a one-shot listener using the TLS connection
-	listener := newOneShotConnListener(capturedConn)
+	listener := newOneShotConnListener(conn)
 	if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		// ErrServerClosed is expected after serving one request
 		if !errors.Is(err, net.ErrClosed) {
