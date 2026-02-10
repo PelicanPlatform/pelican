@@ -101,25 +101,22 @@ func reportStatusToServer(ctx context.Context, serverWebUrl string, status strin
 
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "pelican-director"+config.GetVersion())
 
-	tr := config.GetTransport()
-	client := http.Client{Transport: tr}
+	client := config.GetClient()
 	resp, err := client.Do(req)
 	if err != nil {
-		return errors.Wrap(err, "Failed to start request for reporting director test")
+		return errors.Wrap(err, "failed to start request for reporting director test")
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return errors.Wrap(err, "Failed to read response body for reporting director test")
+		return errors.Wrap(err, "failed to read response body for reporting director test")
 	}
 
-	if resp.StatusCode > 404 { // For all servers, >404 is a failure
-		return errors.Errorf("error response %v from reporting director test: %v", resp.StatusCode, string(body))
-	}
-	if serverType == server_structs.OriginType.String() && resp.StatusCode != 200 {
-		return errors.Errorf("error response %v from reporting director test: %v", resp.StatusCode, string(body))
+	if resp.StatusCode != 200 {
+		return errors.Errorf("error response %v from reporting director test to %s server at %s: %v", resp.StatusCode, string(serverType), reportUrl.String(), string(body))
 	}
 
 	return nil
