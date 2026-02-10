@@ -54,7 +54,7 @@ func CheckXrootdVersion() error {
 		// If exec.LookPath would fail, exec.Command returns a specific error
 		if errors.Is(err, exec.ErrNotFound) || strings.Contains(err.Error(), "executable file not found") {
 			return errors.New("XRootD binary not found in PATH. Please install XRootD version " + MinXrootdVersion + " or later. " +
-				"See installation instructions at https://xrootd.slac.stanford.edu/")
+				"See installation instructions at https://xrootd.org/")
 		}
 		return errors.Wrap(err, "failed to execute 'xrootd -v' to determine XRootD version")
 	}
