@@ -54,15 +54,7 @@ func notifyNewDirectorResponse(ctx context.Context, nChan chan bool) {
 // Launch a go routine in errorgroup to report timeout if director-based health test
 // response was not sent within the defined time limit
 func LaunchPeriodicDirectorTimeout(ctx context.Context, egrp *errgroup.Group, nChan chan bool) {
-	// Check if director tests are enabled based on server type
-	directorTestEnabled := false
-	if param.Origin_DirectorTest.GetBool() {
-		directorTestEnabled = true
-	} else if param.Cache_DirectorTest.GetBool() {
-		directorTestEnabled = true
-	}
-
-	if !directorTestEnabled {
+	if !param.Cache_DirectorTest.GetBool() && !param.Origin_DirectorTest.GetBool() {
 		metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusOK, "Origin.DirectorTest and Cache.DirectorTest are set to false. No director tests expected.")
 		return
 	}
