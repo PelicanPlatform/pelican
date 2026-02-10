@@ -1350,7 +1350,6 @@ func SetServerDefaults(v *viper.Viper) error {
 	}
 	v.SetDefault(param.Origin_SelfTestMaxAge.GetName(), 1*time.Hour)
 	v.SetDefault(param.Cache_SelfTestMaxAge.GetName(), 1*time.Hour)
-	v.SetDefault(param.Origin_DirectorTest.GetName(), true)
 	// Set up the default S3 URL style to be path-style here as opposed to in the defaults.yaml because
 	// we want to be able to check if this is user-provided (which we can't do for defaults.yaml)
 	v.SetDefault(param.Origin_S3UrlStyle.GetName(), "path")
