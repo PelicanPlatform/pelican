@@ -73,7 +73,8 @@ func (fs *SSHFileSystem) makeHelperURL(name string) string {
 	// The helper uses the federation prefix as its route.
 	// Preserve trailing slashes so that directory requests match the
 	// http.ServeMux pattern registered with a trailing slash.
-	trailingSlash := strings.HasSuffix(name, "/")
+	// Exclude bare "/" (root) — it maps to the prefix itself and needs no slash.
+	trailingSlash := strings.HasSuffix(name, "/") && name != "/"
 	cleanPath := path.Clean(path.Join(fs.federationPrefix, name))
 	if trailingSlash && !strings.HasSuffix(cleanPath, "/") {
 		cleanPath += "/"
