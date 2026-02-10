@@ -21,34 +21,34 @@ Regardless of how a Pelican client is implemented, it will be interacting with t
 
 * Connecting to Federation services
 * Getting information about a namespace
-* Transferring data 
+* Transferring data
 
 among other things. (For more information, see [About Pelican](/about-pelican) and [Getting Data with Pelican](/getting-data-with-pelican).)
 Furthermore, these operations are conducted over the internet and so common networking problems can impact these operations.
 
 ### Understanding Pelican client error messages
 
-The Pelican client you are using will return an error if something goes wrong. 
+The Pelican client you are using will return an error if something goes wrong.
 Ideally, you can use this error to understand the problem and what needs to be done.
 
 [Emma TODO: How to parse a pelican error message]
 
 ### Authentication issues
 
-For protected reads and rights, Pelican can integrate with authentication services such as CILogon. 
+For protected reads and rights, Pelican can integrate with authentication services such as CILogon.
 When you try to run a protected operation, you'll be prompted by Pelican to authenticate, usually by going to a web address in your browser and signing in with the necessary identity.
 
-Often times, the browser will store a cookie regarding your login to remember you next time. 
+Often times, the browser will store a cookie regarding your login to remember you next time.
 In some cases, this cookie may become invalid and cause issues with the authentication flow for using Pelican.
 
-We recommend that you clear the cookies in your browser when troubleshooting issues with authenticated actions. 
+We recommend that you clear the cookies in your browser when troubleshooting issues with authenticated actions.
 To do so, follow these instructions:
 
 [Patrick TODO]
 
 ## Pelican CLI
 
-This section discusses common errors when working with the [Pelican CLI](/getting-data-with-pelican/client) client. 
+This section discusses common errors when working with the [Pelican CLI](/getting-data-with-pelican/client) client.
 
 ### Reset local client
 
@@ -78,7 +78,7 @@ To reset your local configuration on **Linux**/**MacOS**:
     ```
 
     <Callout type="warning">
-    Make sure you avoid any typos! This command will **recursively delete** whatever you provide to it. 
+    Make sure you avoid any typos! This command will **recursively delete** whatever you provide to it.
     </Callout>
 
 To reset your local configuration on **Windows**:
@@ -116,13 +116,42 @@ In principle, once you've successfully completed a transfer this way, everything
 
 Keep in mind that general networking issues can complicate the testing process, so it's also a good idea to test the transfer multiple times before jumping into troubleshooting your configuration.
 
-### Unable to transfer data via a cache
+### Unable to transfer data via Caches
 
-A common issue is that you **are** able to download an object **directly** from the origin (using the `pelican object get --direct` command) but **are not** able to download the object **via a cache** (using the `pelican object get` command).
+One issue you may face with some Origins is the case where you can download an object **directly** from the Origin (using the `pelican object get --direct` command) but **are not** able to download the object **via a Cache** (using the `pelican object get` command).
 
-To troubleshoot this issue, [Justin TODO]
+This typically arises when the Origin restricts read access using additional authorization policies configured with parameters like `Xrootd.ScitokensConfig`, `Xrootd.Authfile` or even `Xrootd.ConfigFile`.
+Some Origin administrators may use these parameters to give special privileges to a subset of users, to side door the Origin for externally-integrated data services like Rucio, or to enable x509 authentication at the Origin.
+
+The problem with providing Origins with authorization configuration using these parameters is that this information doesn't propagate to the rest of the federation because these parameters are local to the Origin and aren't shared via the federation's advertisement protocol.
+
+### Troubleshooting Steps
+
+#### Checking the Director
+To troubleshoot this issue, start by visiting your federation's Director and searching for the namespace in question.
+If the Director does not have your namespace, there is likely an issue with your Origin's ability to advertise to the federation, and this can only be fixed by the Origin administrator or the federation's central services operators.
+
+If the namespace **does** exist at the Director, click on it to see two important pieces of information:
+1. The namespace capabilities explaining what operations the federation thinks is allowable for the namespace (e.g. "Reads", "Writes", "Listings")
+1. The namespace's configured issuer(s) (use the "Token Issuer" display, not the "Token Generation" display)
+
+Double check that these are what you expect to see for the namespace.
+Any incorrect values should be addressed by modifying the Origin's configuration.
+If you're unsure, you may need to consult the namespace/Origin's system administrator.
+
+#### Checking your token
+If there are no obvious issues there, it's time to inspect any token you're using to successfully access data via the Origin.
+There are two tools you can use to inspect the token:
+1. The CLI called [`htgettoken`](https://pypi.org/project/htgettoken/)
+1. The [jwt.io](jwt.io) interface
+
+The key things to look for in the token are the `iss` (issuer) and the `aud` (audience) fields.
+The token's issuer **must** match one of the issuers configured in the Director, and the audience must be set to the correct "any" string for the token's token profile (`"https://wlcg.cern.ch/jwt/v1/any"` for wlcg and `"ANY"` for scitokens).
+Caches will only approve tokens using the issuers it discovers from the Director, and they expect tokens with a broad audience so they can validate the request on behalf of any client.
+
+When these two things aren't true, the token cannot work with Caches.
+Since the token works with the Origin, it implies special authorization polices were configured with one of the params listed above, and a different token is needed to access objects through Caches.
 
 ## Operating a Federation
 
 If you are deploying your own Pelican Federation, we recommend that you contact the Pelican team for assistance in getting started and troubleshooting issues: [pelicanplatform.org/contact](https://pelicanplatform.org/contact).
-
