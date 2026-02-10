@@ -25,26 +25,114 @@ Regardless of how a Pelican client is implemented, it will be interacting with t
 
 among other things. (For more information, see [About Pelican](/about-pelican) and [Getting Data with Pelican](/getting-data-with-pelican).)
 Furthermore, these operations are conducted over the internet and so common networking problems can impact these operations.
+These issues can range from slow internet or an interrupted connection to more obscure problems with finding or connecting to web servers.
+
+The error message you encounter should describe where in the chain of services the issue occurred.
+
+<Callout type="tip">
+When troubleshooting issues, you should always consider upgrading your client to the latest version!
+</Callout>
 
 ### Understanding Pelican client error messages
 
 The Pelican client you are using will return an error if something goes wrong.
 Ideally, you can use this error to understand the problem and what needs to be done.
 
-[Emma TODO: How to parse a pelican error message]
+Most errors are structured as a single line in the form `ERROR[<timestamp>] Message`.
+One error may raise additional errors for actions dependent on the original action that failed.
+In that case, you'll see multiple such `ERROR` lines, but the last one should summarize the failure including the sequence of events.
+
+### Issues connecting to Federation services
+
+A Pelican Federation relies on several central services for validating and directing transfer requests.
+If these services are offline or your Pelican client cannot otherwise reach them, you will get an error.
+
+In most cases, the server running the services is restarting.
+Typically, you just need to wait a few minutes for the restart to complete and the error will go away on its own.
+
+If the services are under maintenance or otherwise experiencing an outage, then trying again will not fix the issue.
+Check with the Federation administrators if there are any outages.
+For example, the status of OSDF services is reported here: [status.osg-htc.org](https://status.osg-htc.org/).
+
+If there are no outages, then it may be that your device or local internet network is unable to connect to the central services.
+Check if you are able to connect to the Federation from a different device or a different internet network (perhaps by activating a VPN).
+
+### Issues finding a namespace
+
+When you request something from a Federation, the Director is responsible for redirecting the request to the appropriate service.
+The namespace you are trying to access has to be registered with the central services in order for the redirection to occur.
+
+If the Director is unable to redirect the request, you will get an error along the lines of `no sources found for the requested namespace`.
+This could happen for a couple of reasons.
+
+* The namespace does not exist in the Federation
+* The Origin service for the namespace is not online
+* The Origin service for the namespace is not registered with the Federation
+
+The most common cause is a typo in the namespace address that you are trying to access.
+Double check that everything is spelled correctly.
+If there is a typo in what you entered, then the namespace as written doesn't actually exist in the Federation!
+
+<Callout type="tip">
+You may be able to check if the namespace exists in the Federation by checking the Director website.
+The error message should report the Director's web address and you should be able to navigate to that address in a web browser.
+If you are able to connect to the Director website, there should be a section called `Namespaces` where you can search for the namespaces registered with the Federation.
+</Callout>
+
+If you have used the exact same command in the past, successfully, then it is likely that the Origin service is offline or otherwise unable to connect to the Director.
+In that case, the service may be restarting and you just need to try again later.
+If you are having persistent errors, then you should contact the Origin administrator for further assistance.
 
 ### Authentication issues
 
 For protected reads and rights, Pelican can integrate with authentication services such as CILogon.
 When you try to run a protected operation, you'll be prompted by Pelican to authenticate, usually by going to a web address in your browser and signing in with the necessary identity.
+If the identity you authenticated with is not authorized to view a namespace, you will get an `Authorization error`.
 
-Often times, the browser will store a cookie regarding your login to remember you next time.
-In some cases, this cookie may become invalid and cause issues with the authentication flow for using Pelican.
+Here are some things to check to troubleshoot issues with authentication:
 
-We recommend that you clear the cookies in your browser when troubleshooting issues with authenticated actions.
-To do so, follow these instructions:
+* Make sure you are trying to access the correct namespace
+* Make sure that you are logging in with the correct identity
+* Install (or upgrade to) the latest version of the Pelican CLI and try again
 
-[Patrick TODO]
+If you continue to have issues, contact the namespace administrator for assistance.
+It could be that the authentication integration is broken, or that you need to follow additional steps in order to authenticate.
+
+### Issues downloading data via a Federation
+
+A common issue is that the data being requested does not exist.
+This could be because of a typo in the object name, or that the bytes do not exist on the connected storage.
+Double check that the object address does not have typos.
+Here, use of the `pelican object ls` command can help identify whether or not the object exists as written.
+
+Another issue is slow transfers.
+This could be because of an issue with the Origin serving the namespace, but usually it's a problem with a Cache.
+This error typically results in a `transfer timeout` message.
+The problem usually resolves itself and you just need to try again.
+For persistent errors, you should contact the Federation administrator.
+
+#### Downloaded data is corrupted
+
+For the purposes of caching, Pelican assumes that **the content of an object does not change** once it has been fetched.
+If an object (as identified by its name) has its contents changed, this causes "undefined behavior".
+
+More specifically, if an object has been cached but the content has changed at the original storage, the data downloaded by the client could be
+
+* the original version of the object
+* the new version of the object
+* **or some combination thereof (!)**
+
+To avoid this scenario, **always change the name of the object when you modify its contents**.
+
+### Issues uploading data via a Federation
+
+The most common issue when uploading data via a Federation is that an object with the same name already exists.
+By default, Pelican will not attempt to modify or overwrite an object that already exists (to avoid the behavior described above).
+Changing the name of the object that you are trying to upload should avoid this problem.
+
+This issue frequently occurs because of an interrupted upload.
+Currently, the only workaround is to change the name of the object you are uploading.
+In the future, Pelican will not create an object until it is certain the upload was successful (e.g., not interrupted).
 
 ## Pelican CLI
 
@@ -101,7 +189,24 @@ To reset your local configuration on **Windows**:
 
 ## Pelican HTCondor Plugin
 
-TBD
+If an HTCondor job encounters an error with the Pelican Plugin, the job will either (a) automatically retry, or (b) go on hold.
+In the former case, the user does not have to do anything.
+
+If the job goes on hold because of a Pelican Plugin error, the hold reason should explain the issue.
+The Plugin is susceptible to the general client issues described [above](#general-client-issues).
+
+<Callout type="tip">
+For information on investigating held jobs in HTCondor, see [this manual page](https://htcondor.readthedocs.io/en/latest/users-manual/troubleshooting.html#how-to-debug-a-held-jobs).
+</Callout>
+
+If you are having persistent issues, check if you are able to perform the equivalent action using the Pelican CLI client.
+Access Points (APs) with HTCondor installed should also have the `pelican` command installed.
+
+<Callout type="warning">
+The namespace you are attempting to access may have specific authentication requirements involving the HTCondor Access Point,
+such that you may not be able to authenticate properly using the Pelican CLI client.
+If this is the case, you should contact your Access Point administrator for further assistance.
+</Callout>
 
 ## Federating data
 
@@ -109,8 +214,8 @@ When setting up an Origin to make your data available via a Pelican Federation, 
 To make it easier to identify failure points, we recommend this ordering:
 
 1. Test that `pelican object ls` works
-2. Test that `pelican object get --direct` works
-3. Test that `pelican object get` works
+1. Test that `pelican object get --direct` works
+1. Test that `pelican object get` works
 
 In principle, once you've successfully completed a transfer this way, everything should be good to go.
 
