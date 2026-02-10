@@ -675,7 +675,11 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 	return nil
 }
 
-// Returns the path to the runtime TLS certificate file for the given server type
+// Returns the path to the Pelican-generated TLS certificate file
+// for the given server type at runtime.
+// In normal mode, this file can be directly used by XRootD.
+// In drop-privileges mode, XRootD-HTTP plugin will send this file
+// to another directory that the xrootd user can access.
 func runtimeTLSCertPath(isCache bool) string {
 	base := param.Origin_RunLocation.GetString()
 	if isCache {
@@ -781,16 +785,18 @@ func dropPrivilegeCopy(server server_structs.XRootDServer) error {
 		return builtin_errors.Join(err, errBadKeyPair)
 	}
 
-	destination := runtimeTLSCertPath(server.GetServerType().IsEnabled(server_structs.CacheType))
+	// This intermediate file is written by the parent (pelican process) and sent to XRootD-HTTP plugin.
+	// XRootD-HTTP plugin will then copy this file to the runtime directory that the xrootd user can access.
+	intermediatePath := runtimeTLSCertPath(server.GetServerType().IsEnabled(server_structs.CacheType))
 
 	// If the file already exists, delete it so that OpenFile will create a new one.
-	// Because the destination file is read-only (0400), user cannot update it (os.O_TRUNC will hit an permission denied error).
-	err := os.Remove(destination)
+	// Because this intermediate file is read-only (0400), user cannot update it (os.O_TRUNC will hit an permission denied error).
+	err := os.Remove(intermediatePath)
 	if err != nil && !os.IsNotExist(err) {
 		return errors.Wrapf(err, "Failure when removing existing certificate key pair file for xrootd")
 	}
 
-	destFile, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fs.FileMode(0400))
+	destFile, err := os.OpenFile(intermediatePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fs.FileMode(0400))
 	if err != nil {
 		return errors.Wrap(err, "Failure when opening certificate key pair file to pass to xrootd")
 	}
@@ -803,7 +809,7 @@ func dropPrivilegeCopy(server server_structs.XRootDServer) error {
 	}
 
 	for idx := 0; idx < 2; idx++ {
-		rdDestFile, err := os.OpenFile(destination, os.O_RDONLY, fs.FileMode(0400))
+		rdDestFile, err := os.OpenFile(intermediatePath, os.O_RDONLY, fs.FileMode(0400))
 		if err != nil {
 			return errors.Wrap(err, "Failed to re-open the copied certificate key pair file as read-only")
 		}
@@ -1212,11 +1218,12 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 		return "", err
 	}
 
-	// Set up the runtime CA bundle
-	runtimeCAs := filepath.Join(param.Origin_RunLocation.GetString())
+	runtimeXRootdDir := filepath.Join(param.Origin_RunLocation.GetString())
 	if !isOrigin {
-		runtimeCAs = filepath.Join(param.Cache_RunLocation.GetString())
+		runtimeXRootdDir = filepath.Join(param.Cache_RunLocation.GetString())
 	}
+	// Set up the runtime CA bundle
+	runtimeCAs := runtimeXRootdDir
 	// If we plan to drop privileges, we'll write the CA bundle to a location that is owned
 	// by the pelican daemon.  Since it's going to be marked as world-readable, we don't need
 	// to periodically update it as the xrootd user like we do for the host key.
@@ -1241,7 +1248,7 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 		xrdConfig.Server.TLSCACertificateFile = runtimeCAs
 	}
 
-	runtimeCertPath := runtimeTLSCertPath(!isOrigin)
+	runtimeCertPath := filepath.Join(runtimeXRootdDir, "copied-tls-creds.crt")
 	xrdConfig.Server.TLSCertificateChain = runtimeCertPath
 
 	pkcs11Info := p11proxy.CurrentInfo()

@@ -1341,8 +1341,8 @@ func SetServerDefaults(v *viper.Viper) error {
 
 	// Set fed token locations for cache/origin. Note that fed tokens aren't yet used by the
 	// Origin (2026-02-05), but they may be soon for things like third party copy.
-	v.SetDefault(param.Origin_FedTokenLocation.GetName(), filepath.Join(configDir, "origin-fed-token"))
-	v.SetDefault(param.Cache_FedTokenLocation.GetName(), filepath.Join(configDir, "cache-fed-token"))
+	v.SetDefault(param.Origin_FedTokenLocation.GetName(), filepath.Join(configDir, "fed-token", "origin-fed-token"))
+	v.SetDefault(param.Cache_FedTokenLocation.GetName(), filepath.Join(configDir, "fed-token", "cache-fed-token"))
 
 	runtimeDir, _, err := ensureRuntimeDir(v)
 	if err != nil {
@@ -1572,7 +1572,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	// stash a copy of its value now.
 	v.SetDefault(param.Origin_TokenAudience.GetName(), v.GetString(param.Origin_Url.GetName()))
 
-	// Set defaults for Director, Registry, and Broker URLs only if the Discovery URL is not set.
+	// Set defaults for Director and Registry URLs only if the Discovery URL is not set.
 	// This is necessary because, in Viper, there is currently no way to check if a value is coming
 	// from the default or was explicitly set by the user. Therefore, if the DiscoveryURL is present,
 	// when populating the Director, Registry, and Broker URLs, the discoverFederationImpl function
@@ -1586,7 +1586,6 @@ func SetServerDefaults(v *viper.Viper) error {
 	// https://github.com/spf13/viper/issues/1814
 	if !v.IsSet(param.Federation_DiscoveryUrl.GetName()) {
 		v.SetDefault("Federation.RegistryUrl", v.GetString(param.Server_ExternalWebUrl.GetName()))
-		v.SetDefault("Federation.BrokerURL", v.GetString(param.Server_ExternalWebUrl.GetName()))
 		v.SetDefault("Federation_DirectorUrl", v.GetString(param.Server_ExternalWebUrl.GetName()))
 	}
 
@@ -1673,25 +1672,18 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		// Set up the directories for the server to run as a non-root user;
 		// for the most part, we need to recursively chown and chmod the directory
 		// so either root or pelican can access it.
-		pelicanLocations := []string{
+		pelicanLocationsNoRecursive := []string{
 			param.Server_DbLocation.GetString(),
 		}
-		if currentServers.IsEnabled(server_structs.RegistryType) {
-			pelicanLocations = append(pelicanLocations, param.Registry_DbLocation.GetString())
-		}
-		if currentServers.IsEnabled(server_structs.OriginType) {
-			pelicanLocations = append(pelicanLocations, param.Origin_DbLocation.GetString())
-		}
-		if currentServers.IsEnabled(server_structs.DirectorType) {
-			pelicanLocations = append(pelicanLocations, param.Director_DbLocation.GetString(), param.Director_GeoIPLocation.GetString())
-		}
-		if err = setFileAndDirPerms(pelicanLocations, 0750, 0640, puser.Uid, 0, true); err != nil {
-			return errors.Wrap(err, "failure when setting up the file permissions for pelican")
-		}
-
-		pelicanLocationsNoRecursive := []string{}
 		if (currentServers.IsEnabled(server_structs.OriginType) || currentServers.IsEnabled(server_structs.CacheType)) && param.Shoveler_Enable.GetBool() {
 			pelicanLocationsNoRecursive = append(pelicanLocationsNoRecursive, param.Shoveler_AMQPTokenLocation.GetString())
+		}
+		if currentServers.IsEnabled(server_structs.CacheType) {
+			tokLoc := param.Cache_FedTokenLocation.GetString()
+			tokDir := filepath.Dir(tokLoc)
+			dir := filepath.Dir(tokDir)
+			tempTokDir := filepath.Join(dir, "fed-token-temp")
+			pelicanLocationsNoRecursive = append(pelicanLocationsNoRecursive, tempTokDir)
 		}
 		if err = setFileAndDirPerms(pelicanLocationsNoRecursive, 0750, 0640, puser.Uid, 0, false); err != nil {
 			return errors.Wrap(err, "failure when setting up the file permissions for pelican")
@@ -1718,9 +1710,9 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		if (currentServers.IsEnabled(server_structs.OriginType) || currentServers.IsEnabled(server_structs.CacheType)) && param.Shoveler_Enable.GetBool() {
 			pelicanDirs = append(pelicanDirs, param.Shoveler_QueueDirectory.GetString())
 		}
-		if currentServers.IsEnabled(server_structs.OriginType) {
-			pelicanDirs = append(pelicanDirs, param.Origin_GlobusConfigLocation.GetString())
-		}
+		// Note: Origin_GlobusConfigLocation is intentionally NOT added here.
+		// It's under Origin_RunLocation (e.g. /run/pelican/xrootd/origin/) which should be owned by xrootd, not pelican.
+		// InitGlobusBackend() handles creating and chowning the Globus directories properly.
 		if err = setDirPerms(pelicanDirs, 0750, 0640, puser.Uid, puser.Gid, true); err != nil {
 			return errors.Wrap(err, "failure when setting up the directory permissions for pelican")
 		}
@@ -1986,6 +1978,14 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	err = GenerateCert()
 	if err != nil {
 		return err
+	}
+
+	// When drop privileges is enabled, ensure the pelican user can read TLS credentials.
+	// XRootD does not need direct access to these files as Pelican copies them to a runtime location.
+	if param.Server_DropPrivileges.GetBool() {
+		if err = CheckTLSCredsForDropPrivileges(); err != nil {
+			return err
+		}
 	}
 
 	// The certificate was either generated or has been provided by now. Verify that any configured

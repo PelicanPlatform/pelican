@@ -25,6 +25,7 @@ import (
 	_ "embed"
 	"net"
 	"net/url"
+	"os"
 	"strconv"
 	"time"
 
@@ -112,7 +113,11 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 	// Director tests or federation tokens.
 	if !param.Cache_EnableSiteLocalMode.GetBool() {
 		cache.LaunchDirectorTestFileCleanup(ctx)
-		cache.LaunchFedTokManager(ctx, egrp, cacheServer)
+		cache.LaunchFedTokManager(ctx, egrp, cacheServer, func(f *os.File) error {
+			// In drop-privileges mode, the token file is chown'ed to the xrootd user
+			// and group by xrdhttp-pelican plugin by passing command "9" to the plugin.
+			return xrootd.FileCopyToXrootdDir(false, 9, f)
+		})
 	}
 
 	concLimit := param.Cache_Concurrency.GetInt()

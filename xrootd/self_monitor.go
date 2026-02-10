@@ -184,18 +184,14 @@ func generateTestFile() (string, error) {
 // then copies them to the selfTestDir using the xrdhttp-pelican plugin. This function is used
 // when drop privileges is enabled, as the pelican server is running as an unprivileged user
 // and cannot directly create files in the selfTestDir.
+//
+// Note: The self-test directory should already exist, created by InitSelfTestDir() which runs
+// before privileges are dropped. We don't attempt to create it here because after privilege
+// drop, the pelican user doesn't have permission to create directories in xrootd's runtime location.
 func generateTestFileViaPlugin() (string, error) {
 	user, err := config.GetPelicanUser()
 	if err != nil {
 		return "", errors.Wrap(err, "failed to get user")
-	}
-
-	// Make sure the self-test directory exists.
-	// This is also done in InitSelfTestDir, but we repeat it here to be robust.
-	basePath := param.Cache_NamespaceLocation.GetString()
-	selfTestPath := filepath.Join(basePath, selfTestDir)
-	if err := os.MkdirAll(selfTestPath, 0750); err != nil {
-		return "", errors.Wrap(err, "failed to create self-test directory")
 	}
 
 	// Create a temp directory own by pelican user to bypass privilege restrictions, named "birthplace"
