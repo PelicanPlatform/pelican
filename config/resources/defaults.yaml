@@ -59,6 +59,7 @@ Director:
   FedTokenLifetime: 15m
 Cache:
   DefaultCacheTimeout: "9.5s"
+  DirectorTest: true
   EnableBroker: true
   EnablePrefetch: true
   SelfTest: true
@@ -82,6 +83,7 @@ LocalCache:
   HighWaterMarkPercentage: 95
   LowWaterMarkPercentage: 85
 Origin:
+  DirectorTest: true
   Multiuser: false
   EnableMacaroons: false
   EnableVoms: true
