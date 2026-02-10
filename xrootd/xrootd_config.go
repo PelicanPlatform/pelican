@@ -1387,7 +1387,7 @@ func genLoggingConfig(input string, logMap loggingMap) (string, error) {
 func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	/////////////////////////ORIGIN/////////////////////////////
 	// Origin Cms
-	// https://xrootd.slac.stanford.edu/doc/dev54/cms_config.htm
+	// https://xrootd.web.cern.ch/doc/dev6/cms_config.htm
 	var err error
 	if xrdConfig.Logging.OriginCms, err = genLoggingConfig(param.Logging_Origin_Cms.GetString(), loggingMap{
 		Trace: "debug",
@@ -1412,7 +1412,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	}
 
 	// Origin Xrd
-	// https://xrootd.slac.stanford.edu/doc/dev56/xrd_config.htm
+	// https://xrootd.web.cern.ch/doc/dev6/xrd_config.htm
 	if xrdConfig.Logging.OriginXrd, err = genLoggingConfig(param.Logging_Origin_Xrd.GetString(), loggingMap{
 		Trace: "all",
 		Debug: "debug",
@@ -1422,7 +1422,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	}
 
 	// Origin Xrootd
-	// https://xrootd.slac.stanford.edu/doc/dev56/xrd_config.htm
+	// https://xrootd.web.cern.ch/doc/dev6/xrd_config.htm
 	if xrdConfig.Logging.OriginXrootd, err = genLoggingConfig(param.Logging_Origin_Xrootd.GetString(), loggingMap{
 		Trace: "all",
 		Debug: "debug emsg login stall redirect request stall",
@@ -1434,7 +1434,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	}
 
 	// Origin Ofs
-	// https://xrootd.slac.stanford.edu/doc/dev56/ofs_config.htm
+	// https://xrootd.web.cern.ch/doc/dev56/ofs_config.htm
 	if xrdConfig.Logging.OriginOfs, err = genLoggingConfig(param.Logging_Origin_Ofs.GetString(), loggingMap{
 		Trace: "all",
 		Debug: "debug",
@@ -1467,7 +1467,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 
 	//////////////////////////CACHE/////////////////////////////
 	// Cache Ofs
-	// https://xrootd.slac.stanford.edu/doc/dev56/ofs_config.htm
+	// https://xrootd.web.cern.ch/doc/dev56/ofs_config.htm
 	if xrdConfig.Logging.CacheOfs, err = genLoggingConfig(param.Logging_Cache_Ofs.GetString(), loggingMap{
 		Trace: "all",
 		Debug: "debug",
@@ -1479,7 +1479,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	}
 
 	// Cache Pfc
-	// https://xrootd.slac.stanford.edu/doc/dev56/pss_config.htm
+	// https://xrootd.web.cern.ch/doc/dev6/pss_config.htm
 	if xrdConfig.Logging.CachePfc, err = genLoggingConfig(param.Logging_Cache_Pfc.GetString(), loggingMap{
 		Trace: "dump",
 		Debug: "debug",
@@ -1492,7 +1492,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	}
 
 	// Cache PssSetOptCache and Cache Pss
-	// https://xrootd.slac.stanford.edu/doc/dev56/pss_config.htm
+	// https://xrootd.web.cern.ch/doc/dev6/pss_config.htm
 	// Note: pss has interesting config options:
 	// all     informational events.
 	// on      warning events.
@@ -1555,7 +1555,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	}
 
 	// Cache Xrd
-	// https://xrootd.slac.stanford.edu/doc/dev56/xrd_config.htm
+	// https://xrootd.web.cern.ch/doc/dev6/xrd_config.htm
 	if xrdConfig.Logging.CacheXrd, err = genLoggingConfig(param.Logging_Cache_Xrd.GetString(), loggingMap{
 		Trace: "all",
 		Debug: "debug",
@@ -1565,7 +1565,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	}
 
 	// Cache Xrootd
-	// https://xrootd.slac.stanford.edu/doc/dev56/xrd_config.htm
+	// https://xrootd.web.cern.ch/doc/dev6/xrd_config.htm
 	if xrdConfig.Logging.CacheXrootd, err = genLoggingConfig(param.Logging_Cache_Xrootd.GetString(), loggingMap{
 		Trace: "all",
 		Debug: "debug emsg login stall redirect request stall",
