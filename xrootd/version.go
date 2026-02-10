@@ -86,7 +86,7 @@ func CheckXrootdVersion() error {
 	if xrootdVersion.LessThan(requiredVersion) {
 		return errors.Errorf("XRootD version %s is insufficient (minimum required: %s). "+
 			"Please upgrade XRootD to version %s or later. "+
-			"This requirement is necessary for proper operation of Pelican cache and origin servers.",
+			"This requirement is necessary for proper operation of Pelican Cache and Origin servers.",
 			xrootdVersion.String(), MinXrootdVersion, MinXrootdVersion)
 	}
 
