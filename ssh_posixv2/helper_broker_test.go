@@ -118,7 +118,37 @@ func TestHelperBrokerRetrieveEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns request ID when pending request exists", func(t *testing.T) {
-		// Create a pending request in a goroutine
+		// With the pendingCh design, RequestConnection blocks until a retrieve
+		// handler receives the request from the channel.  So we must run the
+		// retrieve handler concurrently with RequestConnection.
+
+		// Channel to capture the retrieve response
+		type retrieveResult struct {
+			code int
+			resp helperRetrieveResponse
+		}
+		resultCh := make(chan retrieveResult, 1)
+
+		// Start the retrieve handler — it will block on pendingCh until a
+		// RequestConnection sends a request.
+		go func() {
+			req := httptest.NewRequest(http.MethodPost, "/api/v1.0/origin/ssh/retrieve", nil)
+			req.Header.Set("Authorization", "Bearer test-cookie-abc123")
+			req.Header.Set("X-Pelican-Timeout", "2s")
+			rec := httptest.NewRecorder()
+
+			router.ServeHTTP(rec, req)
+
+			var r helperRetrieveResponse
+			_ = json.NewDecoder(rec.Body).Decode(&r)
+			resultCh <- retrieveResult{code: rec.Code, resp: r}
+		}()
+
+		// Give the retrieve handler a moment to start selecting on pendingCh
+		time.Sleep(50 * time.Millisecond)
+
+		// Create a pending request — this will unblock once the retrieve handler
+		// receives it from pendingCh.
 		go func() {
 			shortCtx, shortCancel := context.WithTimeout(ctx, 2*time.Second)
 			defer shortCancel()
@@ -128,27 +158,15 @@ func TestHelperBrokerRetrieveEndpoint(t *testing.T) {
 			_ = err
 		}()
 
-		// Wait for the pending request to be created
-		require.Eventually(t, func() bool {
-			broker.mu.Lock()
-			defer broker.mu.Unlock()
-			return len(broker.pendingRequests) > 0
-		}, 2*time.Second, 10*time.Millisecond, "pending request was not created")
-
-		req := httptest.NewRequest(http.MethodPost, "/api/v1.0/origin/ssh/retrieve", nil)
-		req.Header.Set("Authorization", "Bearer test-cookie-abc123")
-		req.Header.Set("X-Pelican-Timeout", "1s")
-		rec := httptest.NewRecorder()
-
-		router.ServeHTTP(rec, req)
-
-		assert.Equal(t, http.StatusOK, rec.Code)
-
-		var resp helperRetrieveResponse
-		err := json.NewDecoder(rec.Body).Decode(&resp)
-		require.NoError(t, err)
-		assert.Equal(t, "ok", resp.Status)
-		assert.NotEmpty(t, resp.RequestID)
+		// Wait for the retrieve response
+		select {
+		case res := <-resultCh:
+			assert.Equal(t, http.StatusOK, res.code)
+			assert.Equal(t, "ok", res.resp.Status)
+			assert.NotEmpty(t, res.resp.RequestID)
+		case <-time.After(3 * time.Second):
+			t.Fatal("retrieve handler did not return in time")
+		}
 	})
 }
 
