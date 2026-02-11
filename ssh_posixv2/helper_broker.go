@@ -461,12 +461,18 @@ func (t *HelperTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// The helper will be the server, we are the client.
 	// DisableKeepAlives ensures the transport releases the connection after
 	// the response is fully read, so both sides cleanly finish.
+	// CheckRedirect prevents automatic redirect following: each reverse
+	// connection carries exactly one HTTP exchange, so a redirect would
+	// attempt to re-dial on an already-consumed connection, causing EOF.
 	client := &http.Client{
 		Transport: &http.Transport{
 			DisableKeepAlives: true,
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				return conn, nil
 			},
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
 		},
 	}
 

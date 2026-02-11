@@ -510,7 +510,7 @@ func TestSSHFileSystemInterface(t *testing.T) {
 	assert.Equal(t, "http://helper/test", url)
 
 	url = fs.makeHelperURL("/")
-	assert.Equal(t, "http://helper/test", url)
+	assert.Equal(t, "http://helper/test/", url)
 }
 
 // TestSSHFileInfo tests the sshFileInfo implementation

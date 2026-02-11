@@ -73,8 +73,7 @@ func (fs *SSHFileSystem) makeHelperURL(name string) string {
 	// The helper uses the federation prefix as its route.
 	// Preserve trailing slashes so that directory requests match the
 	// http.ServeMux pattern registered with a trailing slash.
-	// Exclude bare "/" (root) — it maps to the prefix itself and needs no slash.
-	trailingSlash := strings.HasSuffix(name, "/") && name != "/"
+	trailingSlash := strings.HasSuffix(name, "/")
 	cleanPath := path.Clean(path.Join(fs.federationPrefix, name))
 	if trailingSlash && !strings.HasSuffix(cleanPath, "/") {
 		cleanPath += "/"
@@ -456,7 +455,15 @@ func (f *sshFile) Write(p []byte) (n int, err error) {
 
 // Readdir reads directory entries via PROPFIND with Depth: 1
 func (f *sshFile) Readdir(count int) ([]os.FileInfo, error) {
-	url := f.fs.makeHelperURL(f.name)
+	// Ensure a trailing slash so the request matches the mux pattern
+	// registered as prefix+"/".  Without it the helper's ServeMux would
+	// issue a 301 redirect, which cannot be followed over a one-shot
+	// reverse connection.
+	dirName := f.name
+	if !strings.HasSuffix(dirName, "/") {
+		dirName += "/"
+	}
+	url := f.fs.makeHelperURL(dirName)
 	req, err := http.NewRequestWithContext(f.ctx, "PROPFIND", url, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create PROPFIND request")
