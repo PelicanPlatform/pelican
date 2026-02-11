@@ -1,3 +1,7 @@
+# The main build stage that depends on Docker's build context is the one
+# that builds Pelican's binaries. As such, we want to exclude anything that
+# the binaries do not or should not depend on.
+
 # Exclude build outputs and caches.
 # These can get quite large and should be built from scratch, anyway.
 /dist/
@@ -8,3 +12,10 @@
 # Exclude generated data files. These also should be built from scratch.
 /docs/parameters.json
 /web_ui/frontend/public/data/parameters.json
+
+# Exclude the Dockerfile.
+# Docker itself will take care of propagating changes made to it.
+/images/Dockerfile
+
+# Exclude temporary files created by vim.
+**/*.swp

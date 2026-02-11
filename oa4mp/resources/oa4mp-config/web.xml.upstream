@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<web-app xmlns="http://java.sun.com/xml/ns/javaee"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://java.sun.com/xml/ns/javaee
+                  http://java.sun.com/xml/ns/javaee/web-app_2_5.xsd"
+         version="2.5">
+
+    <display-name>The OA4MP Service</display-name>
+
+
+    <servlet>
+        <servlet-name>discovery</servlet-name>
+        <servlet-class>org.oa4mp.server.loader.oauth2.servlet.OA2DiscoveryServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>discovery</servlet-name>
+        <url-pattern>/.well-known/*</url-pattern>
+    </servlet-mapping>
+    <servlet-mapping>
+        <servlet-name>discovery</servlet-name>
+        <url-pattern>/certs/*</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>callback</servlet-name>
+        <servlet-class>org.oa4mp.server.proxy.ProxyCallbackServlet</servlet-class>
+        <load-on-startup>0</load-on-startup>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>callback</servlet-name>
+        <url-pattern>/ready</url-pattern>
+    </servlet-mapping>
+
+
+    <servlet>
+        <servlet-name>accessToken</servlet-name>
+        <servlet-class>org.oa4mp.server.proxy.OA2ATServlet</servlet-class>
+        <load-on-startup>0</load-on-startup>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>accessToken</servlet-name>
+        <url-pattern>/token</url-pattern>
+    </servlet-mapping>
+
+
+
+    <servlet>
+        <servlet-name>oidc-cm</servlet-name>
+        <servlet-class>org.oa4mp.server.loader.oauth2.cm.oidc_cm.OIDCCMServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>oidc-cm</servlet-name>
+        <url-pattern>/oidc-cm/*</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>error</servlet-name>
+        <servlet-class>org.oa4mp.server.api.storage.servlet.ErrorServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>error</servlet-name>
+        <url-pattern>/error</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>authorize</servlet-name>
+        <servlet-class>org.oa4mp.server.proxy.OA2AuthenticationServer</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>authorize</servlet-name>
+        <url-pattern>/authorize</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>device_authorization</servlet-name>
+        <servlet-class>org.oa4mp.server.proxy.RFC8628Servlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>device_authorization</servlet-name>
+        <url-pattern>/device_authorization</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>device</servlet-name>
+        <servlet-class>org.oa4mp.server.proxy.RFC8628AuthenticationServer</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>device</servlet-name>
+        <url-pattern>/device</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>admin-register</servlet-name>
+        <servlet-class>org.oa4mp.server.loader.oauth2.servlet.OA2AdminRegistrationServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>admin-register</servlet-name>
+        <url-pattern>/admin-register</url-pattern>
+    </servlet-mapping>
+
+
+    <servlet>
+        <servlet-name>clientVetting</servlet-name>
+        <servlet-class>org.oa4mp.server.loader.oauth2.servlet.OA2RegistrationServlet</servlet-class>
+        <load-on-startup>1</load-on-startup>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>clientVetting</servlet-name>
+        <url-pattern>/register</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>userInfo</servlet-name>
+        <servlet-class>org.oa4mp.server.loader.oauth2.servlet.UserInfoServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>userInfo</servlet-name>
+        <url-pattern>/userinfo</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>revoke</servlet-name>
+        <servlet-class>org.oa4mp.server.loader.oauth2.servlet.RFC7009</servlet-class>
+        <load-on-startup>0</load-on-startup>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>revoke</servlet-name>
+        <url-pattern>/revoke</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>introspect</servlet-name>
+        <servlet-class>org.oa4mp.server.loader.oauth2.servlet.RFC7662</servlet-class>
+        <load-on-startup>0</load-on-startup>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>introspect</servlet-name>
+        <url-pattern>/introspect</url-pattern>
+    </servlet-mapping>
+
+    <!-- This forces all endpoints to use https. -->
+    <security-constraint>
+        <web-resource-collection>
+            <web-resource-name>portalSecurity</web-resource-name>
+            <url-pattern>/*</url-pattern>
+            <http-method>GET</http-method>
+            <http-method>POST</http-method>
+        </web-resource-collection>
+        <user-data-constraint>
+            <transport-guarantee>CONFIDENTIAL</transport-guarantee>
+        </user-data-constraint>
+    </security-constraint>
+
+    <!-- This password protects the authorize endpoint -->
+    <security-constraint>
+        <web-resource-collection>
+            <web-resource-name>OAuth Security Device Flow</web-resource-name>
+            <url-pattern>/authorize</url-pattern>
+            <http-method>POST</http-method>
+            <http-method>GET</http-method>
+        </web-resource-collection>
+        <auth-constraint>
+            <role-name>oa4mp</role-name>
+        </auth-constraint>
+        <user-data-constraint>
+            <transport-guarantee>NONE</transport-guarantee>
+        </user-data-constraint>
+    </security-constraint>
+
+    <!-- This password protects the device endpoint -->
+
+    <security-constraint>
+        <web-resource-collection>
+            <web-resource-name>OAuth Security</web-resource-name>
+            <url-pattern>/device</url-pattern>
+            <http-method>POST</http-method>
+            <http-method>GET</http-method>
+        </web-resource-collection>
+        <auth-constraint>
+            <role-name>oa4mp</role-name>
+        </auth-constraint>
+        <user-data-constraint>
+            <transport-guarantee>NONE</transport-guarantee>
+        </user-data-constraint>
+    </security-constraint>
+    <!-- no matter which security constraint(s) are allowed, this next bit has to be
+         ucommented to since it is what allows for logging -->
+    <login-config>
+        <auth-method>BASIC</auth-method>
+    </login-config>
+
+    <resource-ref>
+        <description>
+            Resource reference to a factory for javax.mail.Session
+            instances that may be used for sending electronic mail
+            messages, preconfigured to connect to the appropriate
+            SMTP server.
+        </description>
+        <res-ref-name>mail/Session</res-ref-name>
+        <res-type>javax.mail.Session</res-type>
+        <res-auth>Container</res-auth>
+    </resource-ref>
+    <listener>
+        <listener-class>org.oa4mp.server.loader.oauth2.loader.OA2Bootstrapper</listener-class>
+    </listener>
+
+    <error-page>
+        <exception-type>org.oa4mp.server.api.storage.servlet.TooManyRequestsException</exception-type>
+        <location>/tooManyClientRequests.jsp</location>
+    </error-page>
+
+</web-app>

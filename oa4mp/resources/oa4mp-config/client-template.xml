@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE properties SYSTEM "http://java.sun.com/dtd/properties.dtd">
+<!--
+    Template for dynamically registered clients.
+
+    This should be referenced in the server configuration so that any
+    client created via the client management API is automatically approved
+    and starts with the properties here.
+
+    See also: https://oa4mp.org/server/manuals/dynamic-client-registration.html.
+-->
+<properties>
+<entry key="client_id">pelicanplatform-oauth2-client:template</entry>
+<entry key="name">Pelican Platform OAuth2 client</entry>
+
+<!-- A callback URI is required. Default to something arbitrary. -->
+<entry key="callback_uri">["https://localhost:9443/client2/ready"]</entry>
+
+<!-- Assume that the typical client will be requesting access tokens. -->
+<entry key="public_client">false</entry>
+<entry key="scopes">["openid", "wlcg"]</entry>
+<entry key="strict_scopes">false</entry>
+
+<!-- OA4MP: Do not require asserting the refresh token grant. -->
+<entry key="rt_lifetime">-1</entry>
+
+<!-- OA4MP: Set other required properties to arbitrary values. -->
+<entry key="creation_ts">2026-02-09T07:24:00.000Z</entry>
+<entry key="last_modified_ts">2026-02-09T07:24:01.000Z</entry>
+
+<!-- OA4MP: Scripting configuration. -->
+<entry key="cfg">
+{
+  "tokens": {
+    "access": {
+      "audience": "ANY",
+      "type": "sci_token",
+      "qdl": {
+        "load": "vfs#/scripts/scitokens/policies.qdl",
+        "xmd": {
+          "exec_phase": [
+            "post_token",
+            "post_refresh",
+            "post_exchange"
+          ]
+        }
+      }
+    },
+    "identity": {
+      "type": "identity",
+      "qdl": {
+        "load": "vfs#/scripts/scitokens/id_token_policies.qdl",
+        "xmd": {
+          "exec_phase": [
+            "pre_auth",
+            "post_token",
+            "post_refresh",
+            "post_exchange"
+          ]
+        }
+      }
+    }
+  }
+}
+</entry>
+</properties>

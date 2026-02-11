@@ -2934,23 +2934,28 @@ hidden: true
 ################################
 name: Issuer.TomcatLocation
 description: |+
-  Location of the system tomcat installation
+  Location where [Apache Tomcat](https://tomcat.apache.org/) is installed.
 type: string
 default: /opt/tomcat
+hidden: true
 components: ["origin"]
 ---
 name: Issuer.ScitokensServerLocation
 description: |+
-  Location of the scitoken server installation
+  Location where [OA4MP](https://oa4mp.org/), a.k.a. the SciTokens OAuth2
+  server, is installed.
 type: string
 default: /opt/scitokens-server
+hidden: true
 components: ["origin"]
 ---
 name: Issuer.QDLLocation
 description: |+
-  Location of the QDL language and scripts install on the system
+  Location where the [QDL language](https://qdl-lang.org/) distribution is
+  installed.
 type: string
 default: /opt/qdl
+hidden: true
 components: ["origin"]
 ---
 name: Issuer.IssuerClaimValue

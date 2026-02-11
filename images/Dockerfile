@@ -54,6 +54,9 @@ ARG PELICAN_GID=10941
 ARG XROOTD_USERNAME=xrootd
 ARG XROOTD_UID=10940
 ARG XROOTD_GID=10940
+ARG TOMCAT_USERNAME=tomcat
+ARG TOMCAT_UID=10443
+ARG TOMCAT_GID=10443
 
 # For controlling how XRootD plugins are installed:
 #
@@ -83,9 +86,16 @@ ARG XRDHTTP_PELICAN_SRC_BUILD=false
 ARG XRDHTTP_PELICAN_VER=0.0.10
 ARG XRDHTTP_PELICAN_RELEASE="1.osg${OSG_SERIES}.${BASE_OS}"
 
-# Set scitokens-oauth2-server image as a build stage so that we can copy its
-# OA4MP installation into the images being built here.
-FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20250625-2352 AS scitokens-oauth2-server
+# For controlling the version of OA4MP that is installed.
+ARG OA4MP_VER=6.2.3
+ARG JAVA_VER=17
+ARG TOMCAT_VER=9.0.115
+
+# For controlling where OA4MP is installed.
+# The args' names loosely match Pelican's configuration parameters.
+ARG QDL_LOC=/opt/qdl
+ARG SCITOKENS_SERVER_LOC=/opt/scitokens-server
+ARG TOMCAT_LOC=/opt/tomcat
 
 #################################################################
 # Pelican Build Base
@@ -261,7 +271,8 @@ RUN --mount=type=bind,source=images/pelican.yaml,target=/context/pelican.yaml \
     procps \
     psmisc \
     python3-pip \
-    tini
+    tini \
+    unzip
 ENDRUN
 
 #################################################################
@@ -509,77 +520,144 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
 ENDRUN
 
 #################################################################
-# Origin Base
+# Origin Software Base
 #
 # This stage assembles together everything needed to run a Pelican
-# origin, except for the `pelican` binary itself.
+# origin, except for the `pelican` binary itself. Most of the work
+# here is installing OA4MP and its dependencies by hand.
 #################################################################
 FROM xrootd-software-base AS origin-software-base
 ARG TARGETPLATFORM
+ARG TOMCAT_USERNAME
+ARG TOMCAT_UID
+ARG TOMCAT_GID
+ARG OA4MP_VER
+ARG JAVA_VER
+ARG TOMCAT_VER
+ARG QDL_LOC
+ARG SCITOKENS_SERVER_LOC
+ARG TOMCAT_LOC
 
-RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
-  set -eux
-  set -o pipefail
+# Define environment variables for where OA4MP and Apache Tomcat are
+# installed, and for how to run them. Note that their names follow the
+# conventions and requirements of these apps, not Pelican's.
 
-  # We need OpenJDK for OA4MP.
-  dnf install -y java-17-openjdk-headless
-ENDRUN
+ENV ST_HOME="${SCITOKENS_SERVER_LOC}" \
+    QDL_HOME="${QDL_LOC}" \
+    CATALINA_HOME="${TOMCAT_LOC}"
 
-# Install OA4MP. Most of the installation is in /opt, but there are
-# additional files and configuration required.
-# Reference: https://github.com/scitokens/scitokens-oauth2-server/blob/master/Dockerfile
-COPY --from=scitokens-oauth2-server --chown=root:root /opt /opt
-
-# Fix ownership and permissions. This is necessary so long as the tomcat
-# user's UID and GID are not fixed by scitokens-oauth2-server.
-RUN useradd -r -s /sbin/nologin tomcat && \
-    chgrp -R tomcat /opt/tomcat/conf && \
-    chmod g+rwx /opt/tomcat/conf && \
-    chmod g+r /opt/tomcat/conf/* && \
-    chown -R tomcat /opt/tomcat/logs/ /opt/tomcat/temp/ /opt/tomcat/webapps/ /opt/tomcat/work/ && \
-    chgrp -R tomcat /opt/tomcat/bin /opt/tomcat/lib && \
-    chmod g+rwx /opt/tomcat/bin && \
-    chmod g+r /opt/tomcat/bin/* && \
-    chown -R tomcat:tomcat /opt/tomcat/webapps/scitokens-server/ && \
-    chown -R tomcat:tomcat /opt/scitokens-server/
-
-# Replace the Tomcat server's default configuration so that Pelican can
-# communicate with it over a socket.
-COPY --chown=root:tomcat oa4mp/resources/server.xml /opt/tomcat/conf/server.xml
-
-# Replace other bits and bobs to take into account the fact that Pelican
-# authenticates the user and proxies requests.
-COPY --chown=tomcat:tomcat oa4mp/resources/client-template.xml /opt/scitokens-server/etc/templates/client-template.xml
-COPY --chown=tomcat:tomcat oa4mp/resources/device-consent.jsp /opt/tomcat/webapps/scitokens-server/device-consent.jsp
-COPY --chown=tomcat:tomcat oa4mp/resources/authorize-remote-user.jsp /opt/tomcat/webapps/scitokens-server/authorize-remote-user.jsp
-COPY --chown=tomcat:tomcat oa4mp/resources/device-fail.jsp /opt/tomcat/webapps/scitokens-server/device-fail.jsp
-COPY --chown=tomcat:tomcat oa4mp/resources/device-ok.jsp /opt/tomcat/webapps/scitokens-server/device-ok.jsp
-
-# This script is a documented part of OA4MP's bootstrap process, but we
-# otherwise do not need it.
-COPY --from=scitokens-oauth2-server /usr/local/bin/generate_jwk.sh /usr/local/bin/generate_jwk.sh
-
-RUN <<ENDRUN
-  set -eux
-  set -o pipefail
-
-  ln -sf /usr/lib64/libapr-1.so.0 /opt/tomcat/lib/libapr-1.so.0
-
-  # This security constraint line forces a redirect to HTTPS, which we aren't using.
-  sed 's/<security-constraint>/<!--&/; s/\/security-constraint>/&-->/;' /opt/scitokens-server/web.xml > /opt/tomcat/webapps/scitokens-server/WEB-INF/web.xml
-ENDRUN
-
-ENV JAVA_HOME="/usr/lib/jvm/jre" \
-    JAVA_OPTS="-Djava.awt.headless=true -Djava.security.egd=file:/dev/./urandom -Djava.library.path=/opt/tomcat/lib" \
-    \
-    CATALINA_HOME="/opt/tomcat" \
-    CATALINA_BASE="/opt/tomcat" \
+ENV CATALINA_PID="${CATALINA_HOME}/temp/tomcat.pid" \
     CATALINA_OPTS="-Xms512M -Xmx1024M -server -XX:+UseParallelGC" \
-    CATALINA_PID="/opt/tomcat/temp/tomcat.pid" \
-    \
-    ST_HOME="/opt/scitokens-server" \
-    QDL_HOME="/opt/qdl" \
+    JAVA_HOME="/usr/lib/jvm/jre" \
+    JAVA_OPTS="-Djava.awt.headless=true -Djava.security.egd=file:/dev/urandom -Djava.library.path=${CATALINA_HOME}/lib" \
     PATH="${ST_HOME}/bin:${QDL_HOME}/bin:${PATH}"
+
+RUN --mount=type=bind,source=oa4mp/resources,target=/context \
+    --mount=type=tmpfs,target=/tmp \
+    --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
+    <<ENDRUN
+
+  # In the same vein as the cache mount for 'dnf', this step uses a tmpfs
+  # mount for '/tmp' so that we can download files somewhere and not worry
+  # about cleaning up after ourselves.
+
+  set -eux
+  set -o pipefail
+
+  # OA4MP and Apache Tomcat both require a Java runtime.
+  dnf install -y java-${JAVA_VER}-openjdk-headless
+
+  #---------------------------------------------------------------
+  # Install Apache Tomcat.
+
+  # Create a user and group for running the Tomcat server.
+  groupadd -g ${TOMCAT_GID} ${TOMCAT_USERNAME}
+  useradd -u ${TOMCAT_UID} -g ${TOMCAT_GID} -d / -s /sbin/nologin -c "Apache Tomcat server" ${TOMCAT_USERNAME}
+
+  # Download and install Tomcat.
+  mkdir -p ${CATALINA_HOME}
+  curl -fSL https://archive.apache.org/dist/tomcat/tomcat-9/v${TOMCAT_VER}/bin/apache-tomcat-${TOMCAT_VER}.tar.gz | tar -xz -f - -C ${CATALINA_HOME} --strip-components=1
+
+  # Remove the demo apps to minimize unexpected behavior.
+  rm -rf ${CATALINA_HOME}/webapps/*
+
+  # Let Tomcat read its own installation.
+  # The permissions in the tarball are unusually restrictive.
+  chmod -R g+rX ${CATALINA_HOME}/*
+  chgrp -R ${TOMCAT_USERNAME} ${CATALINA_HOME}/*
+
+  # Let Tomcat write to its own working directories.
+  chmod g+w ${CATALINA_HOME}/logs
+  chmod g+w ${CATALINA_HOME}/temp
+  chmod g+w ${CATALINA_HOME}/work
+
+  #---------------------------------------------------------------
+  # Install OA4MP.
+  #
+  # The OA4MP installer is overkill in that it installs quite a bit more
+  # than what Pelican needs. However, to be consistent with QDL below, we
+  # run the installer as intended and then remove extra bits afterwards.
+
+  OA4MP_INSTALLER=/tmp/oa4mp-installer.jar
+  curl -fSL https://github.com/ncsa/oa4mp/releases/download/v${OA4MP_VER}/server-installer.jar -o ${OA4MP_INSTALLER}
+  java -jar ${OA4MP_INSTALLER} install -dir ${ST_HOME} -store file_store
+
+  OA4MP_WEBAPP=${CATALINA_HOME}/webapps/scitokens-server
+  mkdir -p ${OA4MP_WEBAPP}
+  unzip -d ${OA4MP_WEBAPP} ${ST_HOME}/lib/oauth2.war
+
+  # Make the unpacked webapp match the rest of the Tomcat installation.
+  chmod -R u=rwX,g=rX,o= ${OA4MP_WEBAPP}
+  chgrp -R ${TOMCAT_USERNAME} ${OA4MP_WEBAPP}
+
+  # We have no need for .war files now that we've unpacked the ones we need.
+  rm -rf ${ST_HOME}/lib/*.war
+
+  # We have no need for this OAuth2 command-line tool.
+  # (It does not even appear to come with a shell script for running it.)
+  rm ${ST_HOME}/lib/clc.jar
+
+  # We have no need for this JWT command-line tool.
+  rm ${ST_HOME}/bin/jwt
+  rm ${ST_HOME}/lib/jwt.jar
+
+  # We currently have no need for this database migration tool.
+  rm ${ST_HOME}/bin/migrate
+  rm ${ST_HOME}/lib/fs-migrate.jar
+
+  # Replace various web pages with Pelican-themed versions.
+  cp /context/jsp-overrides/*.jsp ${OA4MP_WEBAPP}
+
+  # Make OA4MP's executables executable by everyone, not only 'root'.
+  chmod a+rX ${ST_HOME}/bin/*
+
+  # Let OA4MP write to its own working directories.
+  chmod -R ug=rwX,o= ${ST_HOME}/var/storage
+  chgrp -R ${TOMCAT_USERNAME} ${ST_HOME}/var/storage
+
+  #---------------------------------------------------------------
+  # Install QDL.
+
+  QDL_INSTALLER=/tmp/qdl-installer.jar
+  curl -fSL https://github.com/ncsa/oa4mp/releases/download/v${OA4MP_VER}/qdl-installer.jar -o ${QDL_INSTALLER}
+  java -jar ${QDL_INSTALLER} install -dir ${QDL_HOME} -qdl
+
+  # Make QDL's executables executable by everyone, not only 'root'.
+  chmod a+rX ${QDL_HOME}/bin/*
+
+  #---------------------------------------------------------------
+  # Set up Pelican's OAuth2 client templates.
+
+  mkdir -p ${ST_HOME}/var/qdl/scitokens
+  mkdir -p ${ST_HOME}/etc/templates
+  cp /context/oa4mp-config/client-template.xml ${ST_HOME}/etc/templates
+  mkdir -p ${QDL_HOME}/var/scripts
+  cp /context/qdl-scripts/boot.qdl ${QDL_HOME}/var/scripts
+
+  # Let Tomcat create the socket file it listens on.
+  chmod ug=rwX,o= ${ST_HOME}/var
+  chgrp ${TOMCAT_USERNAME} ${ST_HOME}/var
+ENDRUN
 
 #################################################################
 # Pelican Director and Registry (a.k.a. the Central Services)
@@ -631,7 +709,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   # The IDs here are chosen to match OSG's sssd sidecar containers.
 
   groupadd -r -g 990 sssd
-  useradd -r -g sssd -u 990 -d / -s /usr/sbin/nologin -c "System user for sssd" sssd
+  useradd -r -u 990 -g 990 -d / -s /sbin/nologin -c "System user for sssd" sssd
   dnf install -y sssd-client
 ENDRUN
 ENTRYPOINT ["/entrypoint.sh", "osdf-server", "origin"]
@@ -665,21 +743,12 @@ ARG TARGETPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
 
-# Install select development packages.
-# We need to work around a bug with ARM64 emulation and `tar`:
-#
-#   - Issue: https://github.com/tonistiigi/binfmt/issues/285
-#   - Workaround: https://github.com/apollographql/apollo-runtime/pull/71
-#
-# The locale settings below should match the defaults in /etc/locale.conf
-# and are necessary for `bsdtar` to be able to extract the Go distribution.
-ENV LANG=C.utf8 LC_ALL=C.utf8
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
   set -o pipefail
 
   # Install packages for building Pelican.
-  dnf install -y git make bsdtar && ln -sf /usr/bin/bsdtar /usr/bin/tar
+  dnf install -y git make
 
   # Install HTCondor for integration tests, but forcibly remove the
   # Pelican packages that it pulls in so that there is zero chance tests
