@@ -95,23 +95,24 @@ enable = true
 
 type (
 	OriginConfig struct {
-		Multiuser          bool
-		DirectorTest       bool
-		EnableCmsd         bool
-		EnableMacaroons    bool
-		EnableVoms         bool
-		EnablePublicReads  bool
-		EnableListings     bool
-		SelfTest           bool
-		Concurrency        int
-		Port               int
-		FederationPrefix   string
-		HttpServiceUrl     string
-		HttpAuthTokenFile  string
-		XRootServiceUrl    string
-		RunLocation        string
-		StorageType        string
-		UploadTempLocation string
+		Multiuser           bool
+		DirectorTest        bool
+		EnableCmsd          bool
+		EnableMacaroons     bool
+		EnableVoms          bool
+		EnablePublicReads   bool
+		EnableListings      bool
+		EnableAtomicUploads bool
+		SelfTest            bool
+		Concurrency         int
+		Port                int
+		FederationPrefix    string
+		HttpServiceUrl      string
+		HttpAuthTokenFile   string
+		XRootServiceUrl     string
+		RunLocation         string
+		StorageType         string
+		UploadTempLocation  string
 
 		// S3 specific options that are kept top-level because
 		// they aren't specific to each export

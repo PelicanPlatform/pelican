@@ -1013,8 +1013,19 @@ root_default: /run/pelican/xrootd/origin
 default: $XDG_RUNTIME_DIR/pelican/origin
 components: ["origin"]
 ---
+name: Origin.EnableAtomicUploads
+description: |+
+  A boolean indicating whether the origin should enable atomic uploads. When true, the origin will enable atomic uploads.
+  When false, the origin will not enable atomic uploads. Atomic uploads are only available for origins that have a StorageType of "posix".
+type: bool
+default: false
+components: ["origin"]
+---
 name: Origin.UploadTempLocation
 description: |+
+  If Origin.EnableAtomicUploads is set to false, this parameter is ignored.
+  If set to true, the origin will use the configured location to store temporary upload files.
+
   A directory where objects being uploaded to the origin are temporarily stored until
   they are committed under the namespace. This enables atomic writes: if an upload fails
   or is cancelled partway through, the partially-written file is automatically cleaned up
