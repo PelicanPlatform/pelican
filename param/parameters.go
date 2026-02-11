@@ -282,6 +282,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.DiskUsageCalculationDelay": false,
 	"Origin.DiskUsageCalculationInterval": false,
 	"Origin.DiskUsageCalculationRateLimit": false,
+	"Origin.EnableAtomicUploads": false,
 	"Origin.EnableBroker": false,
 	"Origin.EnableCmsd": false,
 	"Origin.EnableDirListing": false,
@@ -1093,6 +1094,8 @@ func (bP BoolParam) GetBool() bool {
 			return config.Origin.DirectorTest
 		case "Origin.DisableDirectClients":
 			return config.Origin.DisableDirectClients
+		case "Origin.EnableAtomicUploads":
+			return config.Origin.EnableAtomicUploads
 		case "Origin.EnableBroker":
 			return config.Origin.EnableBroker
 		case "Origin.EnableCmsd":
@@ -1522,6 +1525,7 @@ var allParameterNames = []string{
 	"Origin.DiskUsageCalculationDelay",
 	"Origin.DiskUsageCalculationInterval",
 	"Origin.DiskUsageCalculationRateLimit",
+	"Origin.EnableAtomicUploads",
 	"Origin.EnableBroker",
 	"Origin.EnableCmsd",
 	"Origin.EnableDirListing",
@@ -1965,6 +1969,7 @@ var (
 	Monitoring_PromQLAuthorization = BoolParam{"Monitoring.PromQLAuthorization"}
 	Origin_DirectorTest = BoolParam{"Origin.DirectorTest"}
 	Origin_DisableDirectClients = BoolParam{"Origin.DisableDirectClients"}
+	Origin_EnableAtomicUploads = BoolParam{"Origin.EnableAtomicUploads"}
 	Origin_EnableBroker = BoolParam{"Origin.EnableBroker"}
 	Origin_EnableCmsd = BoolParam{"Origin.EnableCmsd"}
 	Origin_EnableDirListing = BoolParam{"Origin.EnableDirListing"}

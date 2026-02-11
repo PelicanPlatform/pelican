@@ -254,6 +254,7 @@ type Config struct {
 		DiskUsageCalculationDelay time.Duration `mapstructure:"diskusagecalculationdelay" yaml:"DiskUsageCalculationDelay"`
 		DiskUsageCalculationInterval time.Duration `mapstructure:"diskusagecalculationinterval" yaml:"DiskUsageCalculationInterval"`
 		DiskUsageCalculationRateLimit int `mapstructure:"diskusagecalculationratelimit" yaml:"DiskUsageCalculationRateLimit"`
+		EnableAtomicUploads bool `mapstructure:"enableatomicuploads" yaml:"EnableAtomicUploads"`
 		EnableBroker bool `mapstructure:"enablebroker" yaml:"EnableBroker"`
 		EnableCmsd bool `mapstructure:"enablecmsd" yaml:"EnableCmsd"`
 		EnableDirListing bool `mapstructure:"enabledirlisting" yaml:"EnableDirListing"`
@@ -666,6 +667,7 @@ type configWithType struct {
 		DiskUsageCalculationDelay struct { Type string; Value time.Duration }
 		DiskUsageCalculationInterval struct { Type string; Value time.Duration }
 		DiskUsageCalculationRateLimit struct { Type string; Value int }
+		EnableAtomicUploads struct { Type string; Value bool }
 		EnableBroker struct { Type string; Value bool }
 		EnableCmsd struct { Type string; Value bool }
 		EnableDirListing struct { Type string; Value bool }

@@ -66,6 +66,7 @@ func TestPOSCOrigin_CancelUpload(t *testing.T) {
 	originConfig := `
 Origin:
   StorageType: "posix"
+  EnableAtomicUploads: true
   Exports:
     - StoragePrefix: /<SHOULD BE OVERRIDDEN>
       FederationPrefix: /test-namespace
