@@ -443,7 +443,7 @@ description: |+
   NOTE: this does not work if the url contains a path!
 type: url
 default: none
-osdf_default: osg-htc.org
+osdf_default: https://osg-htc.org
 components: ["*"]
 ---
 name: Federation.DirectorUrl
