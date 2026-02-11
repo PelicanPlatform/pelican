@@ -1233,7 +1233,7 @@ func handlePacket(packet []byte) error {
 		}
 		// OSS Packet
 		if header.Gs.Type == "O" {
-			log.Debug("handlePacket: Received a g-stream OSS packet")
+			log.Trace("handlePacket: Received a g-stream OSS packet")
 			if len(blobs) < 2 {
 				return errors.New("Packet is too small to be valid g-stream OSS packet")
 			}
@@ -1263,7 +1263,7 @@ func handlePacket(packet []byte) error {
 
 	switch header.Code {
 	case 'd':
-		log.Debug("handlePacket: Received a file-open packet")
+		log.Trace("handlePacket: Received a file-open packet")
 		if len(packet) < 12 {
 			return errors.New("Packet is too small to be valid file-open packet")
 		}
@@ -1277,7 +1277,7 @@ func handlePacket(packet []byte) error {
 			transfers.Set(fileid, FileRecord{UserId: useridItem.Value(), Path: path}, ttlcache.DefaultTTL)
 		}
 	case 'f':
-		log.Debug("handlePacket: Received a f-stream packet")
+		log.Trace("handlePacket: Received a f-stream packet")
 		// sizeof(XrdXrootdMonHeader) + sizeof(XrdXrootdMonFileTOD)
 		if len(packet) < 8+24 {
 			return errors.New("Packet is too small to be a valid f-stream packet")
@@ -1295,7 +1295,7 @@ func handlePacket(packet []byte) error {
 			}
 			switch fileHdr.RecType {
 			case isClose: // XrdXrootdMonFileHdr::isClose
-				log.Debugln("Received a f-stream file-close packet of size ",
+				log.Traceln("Received a f-stream file-close packet of size ",
 					fileHdr.RecSize)
 				fileId := FileId{Id: fileHdr.FileId}
 				xferRecord := transfers.Get(fileId)
@@ -1418,9 +1418,9 @@ func handlePacket(packet []byte) error {
 					"network":      labels["network"],
 					"type":         labels["type"],
 				}
-				log.WithFields(logFields).Info("XRootD file closed")
+				log.WithFields(logFields).Trace("XRootD file closed")
 			case isOpen: // XrdXrootdMonFileHdr::isOpen
-				log.Debug("MonPacket: Received a f-stream file-open packet")
+				log.Trace("MonPacket: Received a f-stream file-open packet")
 				fileid := FileId{Id: fileHdr.FileId}
 				path := ""
 				userId := UserId{}
@@ -1429,7 +1429,7 @@ func handlePacket(packet []byte) error {
 					lfn := NullTermToString(packet[offset+20 : offset+lfnSize+20])
 					// path has been defined
 					path = computePrefix(lfn, monitorPaths)
-					log.Debugf("MonPacket: User LFN %v matches prefix %v",
+					log.Tracef("MonPacket: User LFN %v matches prefix %v",
 						lfn, path)
 					// UserId is part of LFN
 					userId = UserId{Id: binary.BigEndian.Uint32(packet[offset+16 : offset+20])}
@@ -1463,11 +1463,11 @@ func handlePacket(packet []byte) error {
 					logFields["org"] = userRecord.Value().Org
 					logFields["project"] = userRecord.Value().Project
 				}
-				log.WithFields(logFields).Info("XRootD file opened")
+				log.WithFields(logFields).Trace("XRootD file opened")
 			case isTime: // XrdXrootdMonFileHdr::isTime
-				log.Debug("MonPacket: Received a f-stream time packet")
+				log.Trace("MonPacket: Received a f-stream time packet")
 			case isXfr: // XrdXrootdMonFileHdr::isXfr
-				log.Debug("MonPacket: Received a f-stream transfer packet")
+				log.Trace("MonPacket: Received a f-stream transfer packet")
 				// NOTE: There's a lot to do here.  These records would allow us to
 				// capture partial file transfers or emulate a close on timeout.
 				// For now, we'll record the data but don't use it.
@@ -1558,10 +1558,10 @@ func handlePacket(packet []byte) error {
 				transfers.Set(fileid, record, ttlcache.DefaultTTL)
 
 				logFields["type"] = labels["type"]
-				log.WithFields(logFields).Info("XRootD file transfer")
+				log.WithFields(logFields).Trace("XRootD file transfer")
 
 			case isDisc: // XrdXrootdMonFileHdr::isDisc
-				log.Debug("MonPacket: Received a f-stream disconnect packet")
+				log.Trace("MonPacket: Received a f-stream disconnect packet")
 				userId := UserId{Id: fileHdr.UserId}
 				item, found := sessions.GetAndDelete(userId)
 				if found {
@@ -1576,7 +1576,7 @@ func handlePacket(packet []byte) error {
 			offset += uint32(fileHdr.RecSize)
 		}
 	case 'g':
-		log.Debug("handlePacket: Received a g-stream packet")
+		log.Trace("handlePacket: Received a g-stream packet")
 		if len(packet) < 8+16 {
 			return errors.New("Packet is too small to be a valid g-stream packet")
 		}
@@ -1591,11 +1591,11 @@ func handlePacket(packet []byte) error {
 		detail := NullTermToString(packet[24:])
 		strJsons := strings.Split(detail, "\n")
 		if providerID == 'C' { // pfc: Cache monitoring info
-			log.Debug("handlePacket: Received g-stream packet is from cache")
+			log.Trace("handlePacket: Received g-stream packet is from cache")
 			aggCacheStat := make(map[string]*CacheAccessStat)
 			for _, js := range strJsons {
 				cacheStat := CacheGS{}
-				log.Debug("handlePacket: Received cache stat json: ", string(js))
+				log.Trace("handlePacket: Received cache stat json: ", string(js))
 				if err := json.Unmarshal([]byte(js), &cacheStat); err != nil {
 					return errors.Wrap(err, "failed to parse cache stat json. Raw data is "+string(js))
 				}
@@ -1629,7 +1629,7 @@ func handlePacket(packet []byte) error {
 		}
 
 	case 'i':
-		log.Debug("handlePacket: Received an appinfo packet")
+		log.Trace("handlePacket: Received an appinfo packet")
 		infoSize := uint32(header.Plen - 12)
 		if xrdUserId, appinfo, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
 			item := userids.Get(xrdUserId)
@@ -1648,7 +1648,7 @@ func handlePacket(packet []byte) error {
 			return err
 		}
 	case 'u':
-		log.Debug("handlePacket: Received a user login packet")
+		log.Trace("handlePacket: Received a user login packet")
 		infoSize := uint32(header.Plen - 12)
 		if xrdUserId, auth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
 			var record UserRecord
@@ -1680,7 +1680,7 @@ func handlePacket(packet []byte) error {
 			return err
 		}
 	case 'T':
-		log.Debug("handlePacket: Received a token info packet")
+		log.Trace("handlePacket: Received a token info packet")
 		infoSize := uint32(header.Plen - 12)
 		if xrdUserId, tokenauth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
 			userId, userRecord, err := ParseTokenAuth(tokenauth)
