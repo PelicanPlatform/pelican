@@ -168,6 +168,20 @@ func extractUserFromBearerToken(ctx *gin.Context, tokenStr string) (user string,
 		return "", "", nil, errors.New("token has empty subject")
 	}
 
+	// Extract userId claim
+	if userIdIface, ok := verified.Get("user_id"); ok {
+		if userIdStr, ok := userIdIface.(string); ok && userIdStr != "" {
+			userId = userIdStr
+		}
+	}
+
+	// Extract oidc_sub claim for admin checks against UIAdminUsers
+	if oidcSubIface, ok := verified.Get("oidc_sub"); ok {
+		if oidcSub, ok := oidcSubIface.(string); ok && oidcSub != "" {
+			ctx.Set("OIDCSub", oidcSub)
+		}
+	}
+
 	// Extract groups
 	groupsIface, ok := verified.Get("wlcg.groups")
 	if ok {
@@ -183,6 +197,9 @@ func extractUserFromBearerToken(ctx *gin.Context, tokenStr string) (user string,
 
 	// Set in context for later use
 	ctx.Set("User", user)
+	if userId != "" {
+		ctx.Set("UserId", userId)
+	}
 	if len(groups) > 0 {
 		ctx.Set("Groups", groups)
 	}
