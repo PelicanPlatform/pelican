@@ -251,37 +251,36 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 		userClaim = "sub"
 	}
 
-	var displayName string
-	// If the configured claim is "sub" (default), try to find a more human-readable username from standard claims
-	// This addresses Issue #3044 where users get non-sensical usernames like "http://cilogon.org/..."
+	// Build an ordered list of claims to try for a human-readable display name.
+	// When the configured claim is "sub" (the default), we first try the standard OIDC claims
+	// (see https://openid.net/specs/openid-connect-core-1_0.html#StandardClaims) because "sub"
+	// often contains opaque identifiers like "http://cilogon.org/..." (Issue #3044).
+	// The configured userClaim is always the final fallback.
+	candidates := []string{userClaim}
 	if userClaim == "sub" {
-		usernameCandidates := []string{"preferred_username", "name", "nickname", "email"}
-		for _, candidate := range usernameCandidates {
-			if val, ok := claimsSource[candidate]; ok {
-				if strVal, ok := val.(string); ok && strVal != "" {
-					displayName = strVal
-					log.Debugf("Found human-readable username from claim '%s': %s", candidate, displayName)
-					break
+		candidates = append(
+			[]string{"preferred_username", "name", "nickname", "email"},
+			userClaim,
+		)
+	}
+
+	var displayName string
+	for _, c := range candidates {
+		if val, ok := claimsSource[c]; ok {
+			if strVal, ok := val.(string); ok && strVal != "" {
+				displayName = strVal
+				if c != userClaim {
+					log.Debugf("Found human-readable username from claim '%s': %s", c, displayName)
 				}
+				break
 			}
 		}
 	}
 
-	// Fallback: If no human-readable name found, or if configured claim is not "sub", use the configured claim
 	if displayName == "" {
-		if val, ok := claimsSource[userClaim]; ok {
-			if strVal, ok := val.(string); ok {
-				displayName = strVal
-			} else {
-				log.Errorln("User info endpoint did not return a string for the user claim", userClaim)
-				err = errors.New("identity provider did not return an identity for logged-in user")
-				return
-			}
-		} else {
-			log.Errorln("User info endpoint did not return a value for the user claim", userClaim)
-			err = errors.New("identity provider did not return an identity for logged-in user")
-			return
-		}
+		log.Errorln("User info endpoint did not return a valid identity claim", userClaim)
+		err = errors.New("identity provider did not return an identity for logged-in user")
+		return
 	}
 	if param.Issuer_UserStripDomain.GetBool() {
 		lastAt := strings.LastIndex(displayName, "@")

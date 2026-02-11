@@ -341,7 +341,7 @@ func setLoginCookie(ctx *gin.Context, userRecord *database.User, groups []string
 // Check if user is authenticated by checking if the "login" cookie is present and set the user identity to ctx
 func AuthHandler(ctx *gin.Context) {
 	user, userId, groups, err := GetUserGroups(ctx)
-	if user == "" {
+	if user == "" || err != nil {
 		if err != nil {
 			log.Errorln("Invalid user cookie or unable to parse user cookie:", err)
 		}
