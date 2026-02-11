@@ -414,12 +414,6 @@ func setupDiskUsageToken(ctx context.Context, egrp *errgroup.Group) (string, err
 
 	// Function to generate and write token
 	updateToken := func() error {
-		// Use the federation discovery URL as the audience
-		audience := param.Federation_DiscoveryUrl.GetString()
-		if audience == "" {
-			return errors.New("federation discovery URL is not set")
-		}
-
 		tokenConfig := token.NewWLCGToken()
 		tokenConfig.Lifetime = 30 * time.Minute
 		tokenConfig.Subject = "origin-disk-usage"
