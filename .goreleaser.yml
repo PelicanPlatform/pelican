@@ -467,6 +467,7 @@ nfpms:
           - "xrootd-server >= 1:5.8.2"
           - "xrootd-scitokens"
           - "xrootd-voms"
+          - "xrdhttp-pelican >= 0.0.10"
       deb:
         provides:
           - "pelican-origin (= 7)"
