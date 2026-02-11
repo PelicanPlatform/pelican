@@ -409,7 +409,7 @@ func ensureCachePSSOrigin(ctx context.Context) (string, error) {
 
 	pssOrigin := ""
 
-	if discoveryUrlStr := param.Federation_DiscoveryUrl.GetString(); discoveryUrlStr != "" {
+	if discoveryUrlStr := fedInfo.DiscoveryEndpoint; discoveryUrlStr != "" {
 		discoveryUrl, err := url.Parse(discoveryUrlStr)
 		if err == nil {
 			log.Debugln("Parsing discovery URL for 'pss.origin' setting:", discoveryUrlStr)

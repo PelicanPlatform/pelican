@@ -71,30 +71,48 @@ func (t TestType) String() string {
 	return string(t)
 }
 
-// This function returns a token with the federation issuer or the external web url based on the `useFederationIssuer` parameter
-// This is because we have old origins that expect the external web url of the director and new ones that expect the federation issuer
-// So downstream we will make two requests, one with the federation issuer and one with the external web url
+// WARNING: This function may be called by either a Director or an Origin, and will generate tokens differently depending on who invokes it.
+//
+// Cleanup of this function and the vestigial interface it's supposed to implement is described in
+// https://github.com/PelicanPlatform/pelican/issues/3107
+//
+// Until that is completed and this comment is removed, tread cautiously when editing this method!
+//
+// When invoked by the Director, this will generate a token whose issuer is either the Federation's Discovery URL, or the Director's own URL
+// (as determined by the value of `Server.ExternalWebUrl`). This is a fallback mechanism to generate tokens acceptable by both old and new Origins.
+//
+// When invoked by the Origin, the TestFileTransferImpl struct this acts on will come with a pre-populated `t.issuerUrl`, which will also be set to
+// the server's (Origin's) `Server.ExternalWebUrl`.
 func (t TestFileTransferImpl) generateFileTestScitoken(useFederationIssuer bool) (string, error) {
-	// The origin/cache server is using the federation issuer to verify the token
-	// See server_utils/monitor.go:HandleDirectorTestResponse
-	issuerUrl := param.Federation_DiscoveryUrl.GetString()
-	if !useFederationIssuer {
-		issuerUrl = param.Server_ExternalWebUrl.GetString()
+	// may be used as the Issuer, but should always be used as a URI for the token's subject line
+	var externalUrlStr string
+	if externalUrlStr = param.Server_ExternalWebUrl.GetString(); externalUrlStr == "" {
+		return "", errors.Errorf("failed to create token for test file transfer: %s is empty", param.Server_ExternalWebUrl.GetName())
 	}
 
-	// This branch is only hit in the the origin self monitoring
-	// See xrootd/self_monitor.go:doSelfMonitorOrigin
-	if t.issuerUrl != "" { // Get from param if it's not empty
-		issuerUrl = t.issuerUrl
-	}
-	if issuerUrl == "" { // if both are empty, then error
-		return "", errors.New("failed to create token: Invalid iss, Server_ExternalWebUrl is empty")
+	var issuerStr string
+	if t.issuerUrl != "" {
+		// The method caller is an Origin, the test token is for the Origin to access its own storage.
+		issuerStr = t.issuerUrl
+	} else if useFederationIssuer {
+		// The caller is a Director trying to create a token for newer Origins that expect a token issued by the Federation's Discovery URL.
+		fedInfo, err := config.GetFederation(context.Background())
+		if err != nil {
+			return "", errors.Wrap(err, "failed to get federation info for creating a token for test file transfer")
+		}
+		if fedInfo.DiscoveryEndpoint == "" {
+			return "", errors.New("failed to create token for test file transfer: federation discovery endpoint is empty")
+		}
+		issuerStr = fedInfo.DiscoveryEndpoint
+	} else {
+		// The caller is a Director trying to create a token for older Origins that expect a token issued by the Director itself.
+		issuerStr = externalUrlStr
 	}
 
 	fTestTokenCfg := token.NewWLCGToken()
 	fTestTokenCfg.Lifetime = time.Minute
-	fTestTokenCfg.Issuer = issuerUrl
-	fTestTokenCfg.Subject = "origin"
+	fTestTokenCfg.Issuer = issuerStr
+	fTestTokenCfg.Subject = externalUrlStr
 	fTestTokenCfg.Claims = map[string]string{"scope": "storage.read:/ storage.modify:/"}
 	fTestTokenCfg.AddAudiences(t.audiences...)
 
