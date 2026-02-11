@@ -42,10 +42,9 @@ func (o *XRootOrigin) validateStoragePrefix(prefix string) error {
 }
 
 func (o *XRootOrigin) validateExtra(e *OriginExport, numExports int) (err error) {
-	if e.FederationPrefix != e.StoragePrefix {
-		return errors.Errorf("FederationPrefix and StoragePrefix must be the same for XRoot origins, but you configured '%s' and '%s'", e.FederationPrefix, e.StoragePrefix)
-	}
-
+	// FederationPrefix is the path clients use; StoragePrefix is the path on the backend XRootD.
+	// When they differ, the xrootd-origin config uses the Name2Name (N2N) plugin to map
+	// federation path -> backend path (prefixn2n.rule). Only xroot storage type supports this.
 	xRootServiceUrl := param.Origin_XRootServiceUrl.GetString()
 	if xRootServiceUrl == "" {
 		return errors.New("Origin.XRootServiceUrl is required for XRoot origins")
