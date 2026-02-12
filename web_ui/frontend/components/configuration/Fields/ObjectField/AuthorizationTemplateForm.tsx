@@ -86,11 +86,18 @@ const AuthorizationTemplateForm = ({
                 return [...p, userId];
               }
               return p;
-            }, [] as string[])
-            setAuthorizationTemplate({ ...authorizationTemplate, users: userIds || [] });
+            }, [] as string[]);
+            setAuthorizationTemplate({
+              ...authorizationTemplate,
+              users: userIds || [],
+            });
           }}
-          value={authorizationTemplate.users?.map(userId => users?.find((u) => u.id === userId)?.username)?.filter((x): x is string => x !== undefined) || []}
-          possibleValues={users?.map(u => u.username) || []}
+          value={
+            authorizationTemplate.users
+              ?.map((userId) => users?.find((u) => u.id === userId)?.username)
+              ?.filter((x): x is string => x !== undefined) || []
+          }
+          possibleValues={users?.map((u) => u.username) || []}
         />
       </Box>
       <Box mb={2}>

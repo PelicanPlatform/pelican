@@ -16,7 +16,8 @@ export type SimpleAutocompleteFieldProps<T extends string> = {
   freeSolo?: boolean;
 };
 
-export type AutocompleteFieldProps<T extends string> = SimpleAutocompleteFieldProps<T>;
+export type AutocompleteFieldProps<T extends string> =
+  SimpleAutocompleteFieldProps<T>;
 
 /**
  * Simple string-based autocomplete field.
