@@ -283,7 +283,7 @@ func TestInitConfig(t *testing.T) {
 	// Check if server address is correct by defaults.yaml
 	assert.Equal(t, "0.0.0.0", param.Server_WebHost.GetString())
 	// Check that Federation Discovery url is correct by osdf.yaml
-	assert.Equal(t, "osg-htc.org", param.Federation_DiscoveryUrl.GetString())
+	assert.Equal(t, "https://osg-htc.org", param.Federation_DiscoveryUrl.GetString())
 
 	require.NoError(t, param.Set("Server.WebHost", "1.1.1.1")) // should write to temp config file
 	if err := viper.WriteConfigAs(tempCfgFile.Name()); err != nil {

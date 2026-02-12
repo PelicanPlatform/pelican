@@ -37,6 +37,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/pelicanplatform/pelican/client"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
@@ -171,7 +172,16 @@ func calculateDiskUsagePelican(ctx context.Context, export server_utils.OriginEx
 	var totalBytes uint64
 	var totalCount uint64
 
-	discoveryUrlStr := param.Federation_DiscoveryUrl.GetString()
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		return 0, 0, errors.Wrap(err, "failed to get federation info for disk usage calculation")
+	}
+
+	if fedInfo.DiscoveryEndpoint == "" {
+		return 0, 0, errors.New("federation discovery URL is not configured")
+	}
+
+	discoveryUrlStr := fedInfo.DiscoveryEndpoint
 	discoveryUrl, err := url.Parse(discoveryUrlStr)
 	if err != nil {
 		return 0, 0, errors.Wrap(err, "failed to parse federation discovery URL")
@@ -414,12 +424,6 @@ func setupDiskUsageToken(ctx context.Context, egrp *errgroup.Group) (string, err
 
 	// Function to generate and write token
 	updateToken := func() error {
-		// Use the federation discovery URL as the audience
-		audience := param.Federation_DiscoveryUrl.GetString()
-		if audience == "" {
-			return errors.New("federation discovery URL is not set")
-		}
-
 		tokenConfig := token.NewWLCGToken()
 		tokenConfig.Lifetime = 30 * time.Minute
 		tokenConfig.Subject = "origin-disk-usage"

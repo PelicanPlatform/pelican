@@ -123,7 +123,7 @@ func (a AuthCheckImpl) checkFederationIssuer(c *gin.Context, strToken string, ex
 		return err
 	}
 
-	fedURL := param.Federation_DiscoveryUrl.GetString()
+	fedURL := fedInfo.DiscoveryEndpoint
 	if fedURL == "" {
 		dirURL := fedInfo.DirectorEndpoint
 		if dirURL == "" {

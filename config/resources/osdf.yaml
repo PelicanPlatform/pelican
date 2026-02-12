@@ -19,7 +19,7 @@ Xrootd:
   SummaryMonitoringHost: xrd-report.osgstorage.org
   DetailedMonitoringHost: xrd-mon.osgstorage.org
 Federation:
-  DiscoveryUrl: osg-htc.org
+  DiscoveryUrl: https://osg-htc.org
   TopologyUrl: https://topology.opensciencegrid.org
   TopologyNamespaceUrl: https://topology.opensciencegrid.org/osdf/namespaces?production=1
   TopologyDowntimeUrl: https://topology.opensciencegrid.org/rgdowntime/xml

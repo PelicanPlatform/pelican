@@ -540,7 +540,7 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 	} else {
 		log.Debugln("Attempting to discover federation services via URL:", federationStr)
 		httpClient := GetClient()
-		if client == nil {
+		if httpClient == nil {
 			err = errors.New("no HTTP client available to perform federation discovery")
 			return
 		}

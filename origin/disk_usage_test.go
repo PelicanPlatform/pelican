@@ -32,6 +32,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func TestCalculateDiskUsagePOSIX(t *testing.T) {
@@ -97,8 +98,7 @@ func TestCalculateDiskUsageErrors(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	// Set a dummy discovery URL (invalid) to verify we try to use it
-	require.NoError(t, param.Set(param.Federation_DiscoveryUrl.GetName(), "https://example.com"))
+	test_utils.MockFederationRoot(t, nil, nil)
 
 	export := server_utils.OriginExport{
 		FederationPrefix: "/test",
