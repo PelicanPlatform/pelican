@@ -2013,18 +2013,20 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		// Only check if we have a director response (indicating namespace lookup succeeded)
 		if len(transfer.job.dirResp.ObjectServers) > 0 || transfer.job.dirResp.XPelNsHdr.CollectionsUrl != nil {
 			// Convert url.URL to pelican_url.PelicanURL for statHttp
-			pUrl := &pelican_url.PelicanURL{}
-			pUrl.SetRawUrl(transfer.remoteURL)
-
-			// Use statHttp to check if the object is a collection
-			info, statErr := statHttp(pUrl, transfer.job.dirResp, transfer.token)
-			if statErr == nil && info.IsCollection {
-				err = error_codes.NewParameterError(errors.Errorf("remote object %q is a directory but recursive is not enabled", transfer.remoteURL.Path))
-				transferResults.Error = err
-				return transferResults, err
+			pUrl, parseErr := pelican_url.Parse(transfer.remoteURL.String(), nil, nil)
+			if parseErr != nil {
+				log.Debugln("Failed to parse remote URL for collection check:", parseErr)
+			} else {
+				// Use statHttp to check if the object is a collection
+				info, statErr := statHttp(pUrl, transfer.job.dirResp, transfer.token)
+				if statErr == nil && info.IsCollection {
+					err = error_codes.NewParameterError(errors.Errorf("remote object %q is a directory but recursive is not enabled", transfer.remoteURL.Path))
+					transferResults.Error = err
+					return transferResults, err
+				}
+				// If stat fails, we'll continue with the download attempt and let it fail naturally
+				// This maintains backward compatibility with servers that don't support PROPFIND
 			}
-			// If stat fails, we'll continue with the download attempt and let it fail naturally
-			// This maintains backward compatibility with servers that don't support PROPFIND
 		}
 	}
 
