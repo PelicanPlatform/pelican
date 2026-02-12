@@ -272,6 +272,9 @@ func TestPasswordResetAPI(t *testing.T) {
 		loginCookieTokenCfg.AddAudiences(param.Server_ExternalWebUrl.GetString())
 		loginCookieTokenCfg.Subject = "user" // general user
 		loginCookieTokenCfg.AddScopes(token_scopes.WebUi_Access, token_scopes.Monitoring_Query, token_scopes.Monitoring_Scrape)
+		loginCookieTokenCfg.Claims = map[string]string{
+			"user_id": "user",
+		}
 
 		// CreateToken also handles validation for us
 		tok, err := loginCookieTokenCfg.CreateToken()
