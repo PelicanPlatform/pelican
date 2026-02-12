@@ -79,12 +79,25 @@ const AuthorizationTemplateForm = ({
       <Box mb={2}>
         <AutocompleteField<string>
           name={'Users (Optional)'}
-          onChange={(e) =>
-            setAuthorizationTemplate({ ...authorizationTemplate, users: e })
+          onChange={(usernames) => {
+            const userIds = usernames?.reduce((p, c) => {
+              const userId = users?.find((u) => u.username === c)?.id;
+              if (userId !== undefined) {
+                return [...p, userId];
+              }
+              return p;
+            }, [] as string[]);
+            setAuthorizationTemplate({
+              ...authorizationTemplate,
+              users: userIds || [],
+            });
+          }}
+          value={
+            authorizationTemplate.users
+              ?.map((userId) => users?.find((u) => u.id === userId)?.username)
+              ?.filter((x): x is string => x !== undefined) || []
           }
-          value={authorizationTemplate.users || []}
-          possibleValues={users ? users.map((u) => u.username) : []}
-          freeSolo={true}
+          possibleValues={users?.map((u) => u.username) || []}
         />
       </Box>
       <Box mb={2}>

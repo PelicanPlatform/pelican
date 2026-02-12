@@ -1,11 +1,13 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import Autocomplete from '@mui/material/Autocomplete';
 import TextField from '@mui/material/TextField';
-import Chip from '@mui/material/Chip';
 
 import { createId } from '../util';
 
-export type AutocompleteFieldProps<T extends string> = {
+/**
+ * Props for simple string-based autocomplete (backwards compatible)
+ */
+export type SimpleAutocompleteFieldProps<T extends string> = {
   name: string;
   value: T[];
   focused?: boolean;
@@ -14,6 +16,13 @@ export type AutocompleteFieldProps<T extends string> = {
   freeSolo?: boolean;
 };
 
+export type AutocompleteFieldProps<T extends string> =
+  SimpleAutocompleteFieldProps<T>;
+
+/**
+ * Simple string-based autocomplete field.
+ * For object-based autocomplete with label/value separation, use ObjectAutocompleteField.
+ */
 function AutocompleteField<T extends string>({
   onChange,
   name,
@@ -33,12 +42,6 @@ function AutocompleteField<T extends string>({
         value={value}
         onChange={(_, newValue) => onChange(newValue as T[])}
         getOptionLabel={(option) => option}
-        renderValue={(tagValue, getValueProps) =>
-          tagValue.map((option, index) => {
-            const { key, ...tagProps } = getValueProps({ index });
-            return <Chip key={key} label={option} {...tagProps} />;
-          })
-        }
         renderInput={(params) => (
           <TextField
             {...params}

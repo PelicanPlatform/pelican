@@ -428,6 +428,9 @@ func TestServerHostRestart(t *testing.T) {
 		tk.Lifetime = 5 * time.Minute
 		tk.AddAudiences("https://example.com")
 		tk.AddScopes(token_scopes.WebUi_Access)
+		tk.Claims = map[string]string{
+			"user_id": "regular-user",
+		}
 		tok, err := tk.CreateToken()
 		require.NoError(t, err)
 

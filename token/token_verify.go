@@ -182,6 +182,13 @@ func (a AuthCheckImpl) checkFederationIssuer(c *gin.Context, strToken string, ex
 		}
 	}
 
+	// Extract oidc_sub claim so admin checks can match against UIAdminUsers
+	if oidcSubIface, ok := parsed.Get("oidc_sub"); ok {
+		if oidcSub, ok := oidcSubIface.(string); ok && oidcSub != "" {
+			c.Set("OIDCSub", oidcSub)
+		}
+	}
+
 	return nil
 }
 
@@ -225,6 +232,13 @@ func (a AuthCheckImpl) checkLocalIssuer(c *gin.Context, strToken string, expecte
 	if userIdIface, ok := parsed.Get("user_id"); ok {
 		if userId, ok := userIdIface.(string); ok && userId != "" {
 			c.Set("UserId", userId)
+		}
+	}
+
+	// Extract oidc_sub claim so admin checks can match against UIAdminUsers
+	if oidcSubIface, ok := parsed.Get("oidc_sub"); ok {
+		if oidcSub, ok := oidcSubIface.(string); ok && oidcSub != "" {
+			c.Set("OIDCSub", oidcSub)
 		}
 	}
 

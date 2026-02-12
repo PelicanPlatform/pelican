@@ -250,30 +250,50 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 	if userClaim == "" {
 		userClaim = "sub"
 	}
-	userIdentifierIface, ok := claimsSource[userClaim]
-	if !ok {
-		log.Errorln("User info endpoint did not return a value for the user claim", userClaim)
-		err = errors.New("identity provider did not return an identity for logged-in user")
-		return
+
+	// Build an ordered list of claims to try for a human-readable display name.
+	// When the configured claim is "sub" (the default), we first try the standard OIDC claims
+	// (see https://openid.net/specs/openid-connect-core-1_0.html#StandardClaims) because "sub"
+	// often contains opaque identifiers like "http://cilogon.org/..." (Issue #3044).
+	// The configured userClaim is always the final fallback.
+	candidates := []string{userClaim}
+	if userClaim == "sub" {
+		candidates = append(
+			[]string{"preferred_username", "name", "nickname", "email"},
+			userClaim,
+		)
 	}
-	userIdentifier, ok := userIdentifierIface.(string)
-	if !ok {
-		log.Errorln("User info endpoint did not return a string for the user claim", userClaim)
+
+	var displayName string
+	for _, c := range candidates {
+		if val, ok := claimsSource[c]; ok {
+			if strVal, ok := val.(string); ok && strVal != "" {
+				displayName = strVal
+				if c != userClaim {
+					log.Debugf("Found human-readable username from claim '%s': %s", c, displayName)
+				}
+				break
+			}
+		}
+	}
+
+	if displayName == "" {
+		log.Errorln("User info endpoint did not return a valid identity claim", userClaim)
 		err = errors.New("identity provider did not return an identity for logged-in user")
 		return
 	}
 	if param.Issuer_UserStripDomain.GetBool() {
-		lastAt := strings.LastIndex(userIdentifier, "@")
+		lastAt := strings.LastIndex(displayName, "@")
 		if lastAt >= 0 {
-			userIdentifier = userIdentifier[:strings.LastIndex(userIdentifier, "@")]
+			displayName = displayName[:strings.LastIndex(displayName, "@")]
 		}
 	}
-	if userIdentifier == "" {
+	if displayName == "" {
 		log.Errorf("'%s' field of user info response from auth provider is empty. Can't determine user identity", userClaim)
 		err = errors.New("identity provider returned an empty username")
 		return
 	}
-	username := userIdentifier
+	username := displayName
 
 	// Get the subject (sub) claim - this uniquely identifies the user at the identity provider
 	// For OIDC, this is the standard "sub" claim. For OAuth2 providers like GitHub, we may need

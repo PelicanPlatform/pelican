@@ -89,23 +89,39 @@ func mergeGroups(groups1, groups2 []string) []string {
 	return result
 }
 
-func calculateAllowedScopes(user string, groupsList []string) ([]string, []string) {
+// calculateAllowedScopes determines which scopes the user is allowed based on
+// the configured authorization templates.
+//
+// Parameters:
+//   - user: The username (used for $USER substitution in prefixes and legacy user matching)
+//   - userId: The internal user ID (used for matching against the 'users' list in templates)
+//   - groupsList: The user's group memberships
+//
+// The 'users' list in authorization templates is matched against both the internal
+// user ID (preferred, set by the web UI) and the username (for backwards compatibility
+// with manually configured templates).
+//
+// Returns the allowed scopes and the groups that matched authorization rules.
+func calculateAllowedScopes(user string, userId string, groupsList []string) ([]string, []string) {
 	if len(compiledAuthzRules) == 0 {
 		log.Debugf("calculateAllowedScopes: compiledAuthzRules is empty")
 		return []string{}, []string{}
 	}
 
-	log.Debugf("calculateAllowedScopes: user=%s, groupsList=%v, numRules=%d", user, groupsList, len(compiledAuthzRules))
+	log.Debugf("calculateAllowedScopes: user=%s, userId=%s, groupsList=%v, numRules=%d", user, userId, groupsList, len(compiledAuthzRules))
 	scopeSet := make(map[string]struct{})
 	groupSet := make(map[string]struct{})
 	userEscaped := url.PathEscape(user)
 	for idx, rule := range compiledAuthzRules {
 		log.Debugf("calculateAllowedScopes: Processing rule %d: prefix=%s, actions=%v, groupLiterals=%v, groupRegexes=%d, userSet=%v",
 			idx, rule.Prefix, rule.Actions, rule.GroupLiterals, len(rule.GroupRegexes), rule.UserSet)
-		// First, check if the user is allowed by this rule
+		// First, check if the user is allowed by this rule.
+		// Check both userId (internal ID, preferred) and user (username, for backwards compatibility).
 		if len(rule.UserSet) > 0 {
-			if _, ok := rule.UserSet[user]; !ok {
-				log.Debugf("calculateAllowedScopes: Rule %d skipped - user not in UserSet", idx)
+			_, matchById := rule.UserSet[userId]
+			_, matchByUsername := rule.UserSet[user]
+			if !matchById && !matchByUsername {
+				log.Debugf("calculateAllowedScopes: Rule %d skipped - neither userId %s nor username %s in UserSet", idx, userId, user)
 				continue
 			}
 		}
@@ -308,6 +324,7 @@ func getUserCollectionScopes(db *gorm.DB, user string, groupsList []string) (sco
 func oa4mpProxy(ctx *gin.Context) {
 	var userEncoded string
 	var user string
+	var userId string
 	var groupsList []string
 	var allMatchedGroups []string
 	if ctx.Request.URL.Path == "/api/v1.0/issuer/device" || ctx.Request.URL.Path == "/api/v1.0/issuer/authorize" {
@@ -325,6 +342,14 @@ func oa4mpProxy(ctx *gin.Context) {
 			})
 			return
 		}
+		userId = ctx.GetString("UserId")
+		if userId == "" {
+			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "User ID not set in authentication context",
+			})
+			return
+		}
 		groupsList = ctx.GetStringSlice("Groups")
 		if groupsList == nil {
 			groupsList = make([]string, 0)
@@ -336,7 +361,7 @@ func oa4mpProxy(ctx *gin.Context) {
 		// side will appropriately unwrap this information.
 		userInfo := make(map[string]interface{})
 		userInfo["u"] = user
-		allowedScopes, authzMatchedGroups := calculateAllowedScopes(user, groupsList)
+		allowedScopes, authzMatchedGroups := calculateAllowedScopes(user, userId, groupsList)
 		userCollectionScopes, collectionMatchedGroups, err := getUserCollectionScopes(database.ServerDatabase, user, groupsList)
 		if err != nil {
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
