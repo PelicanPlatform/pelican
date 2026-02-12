@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 // TestPOSIXv2MetricsCollection verifies that POSIXv2 filesystem operations
@@ -41,7 +42,7 @@ func TestPOSIXv2MetricsCollection(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create filesystem
-	osRootFs, err := NewOsRootFs(tmpDir)
+	osRootFs, err := server_utils.NewOsRootFs(tmpDir)
 	require.NoError(t, err)
 	fs := newAferoFileSystem(osRootFs, "", nil)
 
@@ -127,7 +128,7 @@ func TestPOSIXv2SlowOperationMetrics(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create underlying filesystem
-	osRootFs, err := NewOsRootFs(tmpDir)
+	osRootFs, err := server_utils.NewOsRootFs(tmpDir)
 	require.NoError(t, err)
 
 	// Wrap with slowFs that delays Stat operations by 2.5 seconds
@@ -161,7 +162,7 @@ func TestPOSIXv2ErrorHandling(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create filesystem
-	osRootFs, err := NewOsRootFs(tmpDir)
+	osRootFs, err := server_utils.NewOsRootFs(tmpDir)
 	require.NoError(t, err)
 	fs := newAferoFileSystem(osRootFs, "", nil)
 
@@ -184,7 +185,7 @@ func TestPOSIXv2ActiveOperationMetrics(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create underlying filesystem
-	osRootFs, err := NewOsRootFs(tmpDir)
+	osRootFs, err := server_utils.NewOsRootFs(tmpDir)
 	require.NoError(t, err)
 
 	// Create a channel to control when Read proceeds
@@ -254,7 +255,7 @@ func TestPOSIXv2MetricLabels(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create filesystem
-	osRootFs, err := NewOsRootFs(tmpDir)
+	osRootFs, err := server_utils.NewOsRootFs(tmpDir)
 	require.NoError(t, err)
 	fs := newAferoFileSystem(osRootFs, "", nil)
 
@@ -332,7 +333,7 @@ func TestPOSIXv2RemoveMetrics(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create filesystem
-	osRootFs, err := NewOsRootFs(tmpDir)
+	osRootFs, err := server_utils.NewOsRootFs(tmpDir)
 	require.NoError(t, err)
 	fs := newAferoFileSystem(osRootFs, "", nil)
 
@@ -360,7 +361,7 @@ func TestPOSIXv2RenameMetrics(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create filesystem
-	osRootFs, err := NewOsRootFs(tmpDir)
+	osRootFs, err := server_utils.NewOsRootFs(tmpDir)
 	require.NoError(t, err)
 	fs := newAferoFileSystem(osRootFs, "", nil)
 

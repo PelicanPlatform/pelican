@@ -295,6 +295,27 @@ type Config struct {
 		S3ServiceName string `mapstructure:"s3servicename" yaml:"S3ServiceName"`
 		S3ServiceUrl string `mapstructure:"s3serviceurl" yaml:"S3ServiceUrl"`
 		S3UrlStyle string `mapstructure:"s3urlstyle" yaml:"S3UrlStyle"`
+		SSH struct {
+			AuthMethods []string `mapstructure:"authmethods" yaml:"AuthMethods"`
+			AutoAddHostKey bool `mapstructure:"autoaddhostkey" yaml:"AutoAddHostKey"`
+			ChallengeTimeout time.Duration `mapstructure:"challengetimeout" yaml:"ChallengeTimeout"`
+			ConnectTimeout time.Duration `mapstructure:"connecttimeout" yaml:"ConnectTimeout"`
+			Host string `mapstructure:"host" yaml:"Host"`
+			KeepaliveInterval time.Duration `mapstructure:"keepaliveinterval" yaml:"KeepaliveInterval"`
+			KeepaliveTimeout time.Duration `mapstructure:"keepalivetimeout" yaml:"KeepaliveTimeout"`
+			KnownHostsFile string `mapstructure:"knownhostsfile" yaml:"KnownHostsFile"`
+			MaxRetries int `mapstructure:"maxretries" yaml:"MaxRetries"`
+			PasswordFile string `mapstructure:"passwordfile" yaml:"PasswordFile"`
+			PelicanBinaryPath string `mapstructure:"pelicanbinarypath" yaml:"PelicanBinaryPath"`
+			Port int `mapstructure:"port" yaml:"Port"`
+			PrivateKeyFile string `mapstructure:"privatekeyfile" yaml:"PrivateKeyFile"`
+			PrivateKeyPassphraseFile string `mapstructure:"privatekeypassphrasefile" yaml:"PrivateKeyPassphraseFile"`
+			ProxyJump string `mapstructure:"proxyjump" yaml:"ProxyJump"`
+			RemotePelicanBinaryDir string `mapstructure:"remotepelicanbinarydir" yaml:"RemotePelicanBinaryDir"`
+			RemotePelicanBinaryOverrides []string `mapstructure:"remotepelicanbinaryoverrides" yaml:"RemotePelicanBinaryOverrides"`
+			SessionEstablishTimeout time.Duration `mapstructure:"sessionestablishtimeout" yaml:"SessionEstablishTimeout"`
+			User string `mapstructure:"user" yaml:"User"`
+		} `mapstructure:"ssh" yaml:"SSH"`
 		ScitokensDefaultUser string `mapstructure:"scitokensdefaultuser" yaml:"ScitokensDefaultUser"`
 		ScitokensGroupsClaim string `mapstructure:"scitokensgroupsclaim" yaml:"ScitokensGroupsClaim"`
 		ScitokensMapSubject bool `mapstructure:"scitokensmapsubject" yaml:"ScitokensMapSubject"`
@@ -708,6 +729,27 @@ type configWithType struct {
 		S3ServiceName struct { Type string; Value string }
 		S3ServiceUrl struct { Type string; Value string }
 		S3UrlStyle struct { Type string; Value string }
+		SSH struct {
+			AuthMethods struct { Type string; Value []string }
+			AutoAddHostKey struct { Type string; Value bool }
+			ChallengeTimeout struct { Type string; Value time.Duration }
+			ConnectTimeout struct { Type string; Value time.Duration }
+			Host struct { Type string; Value string }
+			KeepaliveInterval struct { Type string; Value time.Duration }
+			KeepaliveTimeout struct { Type string; Value time.Duration }
+			KnownHostsFile struct { Type string; Value string }
+			MaxRetries struct { Type string; Value int }
+			PasswordFile struct { Type string; Value string }
+			PelicanBinaryPath struct { Type string; Value string }
+			Port struct { Type string; Value int }
+			PrivateKeyFile struct { Type string; Value string }
+			PrivateKeyPassphraseFile struct { Type string; Value string }
+			ProxyJump struct { Type string; Value string }
+			RemotePelicanBinaryDir struct { Type string; Value string }
+			RemotePelicanBinaryOverrides struct { Type string; Value []string }
+			SessionEstablishTimeout struct { Type string; Value time.Duration }
+			User struct { Type string; Value string }
+		}
 		ScitokensDefaultUser struct { Type string; Value string }
 		ScitokensGroupsClaim struct { Type string; Value string }
 		ScitokensMapSubject struct { Type string; Value bool }

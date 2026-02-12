@@ -27,6 +27,7 @@ type (
 const (
 	OriginStoragePosix   OriginStorageType = "posix"
 	OriginStoragePosixv2 OriginStorageType = "posixv2"
+	OriginStorageSSH     OriginStorageType = "ssh"
 	OriginStorageS3      OriginStorageType = "s3"
 	OriginStorageHTTPS   OriginStorageType = "https"
 	OriginStorageGlobus  OriginStorageType = "globus"
@@ -48,12 +49,14 @@ func ParseOriginStorageType(storageType string) (ost OriginStorageType, err erro
 		ost = OriginStoragePosix
 	case string(OriginStoragePosixv2):
 		ost = OriginStoragePosixv2
+	case string(OriginStorageSSH):
+		ost = OriginStorageSSH
 	case string(OriginStorageXRoot):
 		ost = OriginStorageXRoot
 	case string(OriginStorageGlobus):
 		ost = OriginStorageGlobus
 	default:
-		err = errors.Wrapf(ErrUnknownOriginStorageType, "storage type %s (known types are posix, posixv2, s3, https, globus, and xroot)", storageType)
+		err = errors.Wrapf(ErrUnknownOriginStorageType, "storage type %s (known types are posix, posixv2, ssh, s3, https, globus, and xroot)", storageType)
 	}
 	return
 }
