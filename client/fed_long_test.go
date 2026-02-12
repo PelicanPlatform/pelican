@@ -1026,15 +1026,15 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 			require.NoError(t, err)
 
 			// Try to download the directory without recursive flag
-			downloadUrl := fmt.Sprintf("pelican://%s%s/%s/%s", discoveryUrl.Host,
+			downloadURL := fmt.Sprintf("pelican://%s%s/%s/%s", discoveryUrl.Host,
 				export.FederationPrefix, "osdf_osdf", testDirName)
 			destPath := filepath.Join(t.TempDir(), "downloaded-dir")
 
 			var getErr error
 			if export.Capabilities.PublicReads {
-				_, getErr = client.DoGet(fed.Ctx, downloadUrl, destPath, false)
+				_, getErr = client.DoGet(fed.Ctx, downloadURL, destPath, false)
 			} else {
-				_, getErr = client.DoGet(fed.Ctx, downloadUrl, destPath, false, client.WithTokenLocation(tempToken.Name()))
+				_, getErr = client.DoGet(fed.Ctx, downloadURL, destPath, false, client.WithTokenLocation(tempToken.Name()))
 			}
 
 			require.Error(t, getErr, "Expected an error when passing a dir path to object get command without recursive option set")
