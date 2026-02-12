@@ -23,22 +23,28 @@ repos:
     rev: v6.0.0
     hooks:
     -   id: trailing-whitespace
+        stages: [commit]
         exclude: github_scripts/pelican_protocol.patch
     -   id: end-of-file-fixer
+        stages: [commit]
     -   id: check-yaml
+        stages: [commit]
         # Multi-documents are yaml files with multiple --- separating blocks, like
         # in our docs/parameters.yaml. We need this argument so those parse.
         args: [--allow-multiple-documents]
     -   id: check-added-large-files
+        stages: [commit]
         args: ['--maxkb=1024']
 -   repo: https://github.com/golangci/golangci-lint
     rev: v2.4.0
     hooks:
     -   id: golangci-lint
+        stages: [push]
 -   repo: https://github.com/crate-ci/typos
     rev: v1.28.2
     hooks:
     -   id: typos
+        stages: [push]
         # Override the default arguments, which include writing back all
         # suggested changes. We don't want false positives to mangle files.
         args: [--force-exclude, --sort]
@@ -46,7 +52,17 @@ repos:
     rev: v0.11.0.1
     hooks:
     -   id: shellcheck
+        stages: [push]
         args: [--severity=warning]
+-   repo: local
+    hooks:
+    -   id: npm-format-fix
+        stages: [push]
+        name: Run npm format:fix on web_ui/frontend changes
+        entry: bash -c "cd web_ui/frontend && npm run format:fix"
+        language: system
+        files: web_ui/frontend/.*
+        pass_filenames: false
 -   repo: https://github.com/executablebooks/mdformat
     rev: 0.7.19
     hooks:
