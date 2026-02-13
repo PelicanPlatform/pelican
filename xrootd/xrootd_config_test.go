@@ -78,11 +78,11 @@ func setupXrootd(t *testing.T, ctx context.Context, server server_structs.Server
 func TestXrootDOriginConfig(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
 		cancel()
 		require.NoError(t, egrp.Wait())
+		server_utils.ResetTestState()
 	})
 
 	tests := []struct {
@@ -370,11 +370,10 @@ func TestUpdateAuth(t *testing.T) {
 	t.Cleanup(func() {
 		cancel()
 		require.NoError(t, egrp.Wait())
+		server_utils.ResetTestState()
 	})
 
 	server_utils.ResetTestState()
-
-	defer server_utils.ResetTestState()
 
 	require.NoError(t, param.Set(param.Logging_Level.GetName(), "Debug"))
 	require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), runDirname))
@@ -774,6 +773,7 @@ func TestAutoShutdownOnStaleAuthfile(t *testing.T) {
 	t.Cleanup(func() {
 		cancel()
 		require.NoError(t, egrp.Wait())
+		server_utils.ResetTestState()
 	})
 
 	require.NoError(t, param.Set(param.Logging_Level.GetName(), "Debug"))
