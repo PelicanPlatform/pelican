@@ -1,5 +1,5 @@
 ---
-name: Run Tests (Linux) [scheduled]
+name: Run Tests (Linux) [on schedule]
 
 # On Linux, we run tests in a custom container image. For a scheduled
 # run, we have no choice but to use the most recent container image that
@@ -12,13 +12,13 @@ on:
 
 jobs:
   run-tests:
-    name: Linux
+    name: Test
     uses: ./.github/workflows/test-linux.yml
     with:
       image: hub.opensciencegrid.org/pelican_platform/pelican-test:latest-itb
 
-  analyze-tests:
-    name: Analyze Tests
+  analyze-runs:
+    name: Analyze Runs
     if: always()
     needs: [run-tests]
     runs-on: ubuntu-latest
@@ -30,11 +30,14 @@ jobs:
           # Get the last 14 completed workflow runs
           run_ids=$(gh run list \
             --repo ${{ github.repository }} \
-            --workflow "Run Tests (Linux) [scheduled]" \
+            --workflow "Run Tests (Linux) [on schedule]" \
             --status completed \
             --limit 14 \
             --json databaseId \
             --jq '.[].databaseId')
+
+          # Add the current workflow run
+          run_ids=$(printf '%s\n%s' "$run_ids" "${{ github.run_id }}")
 
           # Download artifacts for each run into their own directory
           for run_id in $run_ids; do
@@ -45,7 +48,7 @@ jobs:
               --dir "artifacts/run-$run_id" || echo "No artifacts found for run $run_id"
           done
 
-          echo "Downloaded artifacts from $(echo "$run_ids" | wc -l) runs"
+          printf 'Downloaded artifacts from %s runs\n\n' "$(echo "$run_ids" | wc -l)" >> $GITHUB_STEP_SUMMARY
 
       - name: Analyze test results
         run: |
@@ -85,7 +88,7 @@ jobs:
 
                           # Parse test cases
                           for testcase in root.iter('testcase'):
-                              test_name = f"{testcase.get('classname')}.{testcase.get('name')}"
+                              test_name = f"{testcase.get('classname').split('/')[-1]}.{testcase.get('name')}"
 
                               # Check if test failed
                               if testcase.find('failure') is not None or testcase.find('error') is not None:
@@ -96,25 +99,23 @@ jobs:
           # Write results to file
           with open('test-failure-analysis.txt', 'w', encoding='utf-8') as f:
               for matrix_name in sorted(failures_by_matrix.keys()):
-                  f.write(f"\n{'='*80}\n")
-                  f.write(f"Matrix: {matrix_name}\n")
-                  f.write(f"{'='*80}\n")
+                  f.write(f"### {matrix_name}\n\n")
 
                   failures = failures_by_matrix[matrix_name]
                   if not failures:
-                      f.write("No failures found\n")
+                      f.write("No failures found\n\n")
                       continue
 
                   # Sort by failure count (descending), then by test name
                   sorted_failures = sorted(failures.items(), key=lambda x: (-x[1], x[0]))
 
-                  for test_name, count in sorted_failures:
-                      f.write(f"{count:3d} failures: {test_name}\n")
+                  f.write(f"{len(failures)} tests with failures:\n\n")
 
-                  f.write(f"\nTotal: {len(failures)} tests with failures\n")
+                  for test_name, count in sorted_failures:
+                      f.write(f"- {count} failures: {test_name}\n\n")
 
           print("Analysis complete. Results written to test-failure-analysis.txt.")
           EOF
 
           # Print the analysis file
-          cat test-failure-analysis.txt
+          cat test-failure-analysis.txt >> $GITHUB_STEP_SUMMARY
