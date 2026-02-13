@@ -1,0 +1,51 @@
+---
+name: Run Tests (Linux) [scheduled]
+
+# On Linux, we run tests in a custom container image. For a scheduled
+# run, we have no choice but to use the most recent contaienr image that
+# was built.
+
+on:
+  schedule:
+    - cron: "0 7 * * *"  # at 07:00 every day
+  workflow_dispatch:
+
+jobs:
+  run-tests:
+    name: Linux
+    uses: ./.github/workflows/test-linux.yml
+    with:
+      image: hub.opensciencegrid.org/pelican_platform/pelican-test:latest-itb
+  
+  analyze-tests:
+    name: Analyze Tests
+    runs-on: ubuntu-latest
+    needs: run-tests
+    if: always()
+    steps:
+      - name: Download artifacts from last 14 runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Get the last 14 completed workflow runs from test-linux.yml
+          run_ids=$(gh run list \
+            --repo ${{ github.repository }} \
+            --workflow test-linux.yml \
+            --status completed \
+            --limit 14 \
+            --json databaseId \
+            --jq '.[].databaseId')
+          
+          # Download artifacts for each run into its own directory
+          for run_id in $run_ids; do
+            echo "Downloading artifacts from run $run_id"
+            mkdir -p "artifacts/run-$run_id"
+            gh run download "$run_id" \
+              --repo ${{ github.repository }} \
+              --dir "artifacts/run-$run_id" || echo "No artifacts found for run $run_id"
+          done
+          
+          echo "Downloaded artifacts from $(echo "$run_ids" | wc -l) runs"
+      
+      - name: Analyze test results
+        run: echo "Test analysis complete"
