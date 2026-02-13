@@ -27,10 +27,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Get the last 14 completed workflow runs from test-linux.yml
+          # Get the last 14 completed workflow runs from test-linux.yml on main branch
           run_ids=$(gh run list \
             --repo ${{ github.repository }} \
             --workflow test-linux.yml \
+            --branch main \
             --status completed \
             --limit 14 \
             --json databaseId \
