@@ -359,14 +359,19 @@ func TestDurationStrToSecondsHookFuncGenerator(t *testing.T) {
 
 func TestUpdateAuth(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	// t.TempDir() registers its own cleanup; placing these before the
+	// cancel/egrp cleanup ensures LIFO ordering removes the dirs AFTER
+	// the context is cancelled and the maintenance goroutine has stopped.
+	runDirname := t.TempDir()
+	configDirname := t.TempDir()
+
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
 		cancel()
 		require.NoError(t, egrp.Wait())
 	})
 
-	runDirname := t.TempDir()
-	configDirname := t.TempDir()
 	server_utils.ResetTestState()
 
 	defer server_utils.ResetTestState()
@@ -462,14 +467,19 @@ default_user = user2
 
 func TestCopyCertificates(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	// t.TempDir() registers its own cleanup; placing these before the
+	// cancel/egrp cleanup ensures LIFO ordering removes the dirs AFTER
+	// the context is cancelled and the maintenance goroutine has stopped.
+	runDirname := t.TempDir()
+	configDirname := t.TempDir()
+
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
 		cancel()
 		require.NoError(t, egrp.Wait())
 	})
 
-	runDirname := t.TempDir()
-	configDirname := t.TempDir()
 	server_utils.ResetTestState()
 	require.NoError(t, param.Set(param.Logging_Level.GetName(), "Debug"))
 	require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), runDirname))
@@ -753,14 +763,18 @@ func TestGenLoggingConfig(t *testing.T) {
 
 func TestAutoShutdownOnStaleAuthfile(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+
+	// t.TempDir() registers its own cleanup; placing it before the
+	// cancel/egrp cleanup ensures LIFO ordering removes the dir AFTER
+	// the context is cancelled and the maintenance goroutine has stopped.
+	dir := t.TempDir()
+
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
 		cancel()
 		require.NoError(t, egrp.Wait())
 	})
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-	dir := t.TempDir()
 
 	require.NoError(t, param.Set(param.Logging_Level.GetName(), "Debug"))
 	require.NoError(t, param.Set("ConfigDir", dir))
@@ -827,6 +841,9 @@ func TestConfigUpdatesHealthOKWhenFresh(t *testing.T) {
 	t.Cleanup(func() {
 		cancel()
 		assert.NoError(t, egrp.Wait())
+		// ResetTestState must happen after Wait returns so the maintenance
+		// goroutine has fully exited; otherwise Cache_RunLocation gets wiped
+		// while the goroutine is still emitting files, causing writes to CWD.
 		server_utils.ResetTestState()
 	})
 
