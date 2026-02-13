@@ -16,7 +16,7 @@ jobs:
     uses: ./.github/workflows/test-linux.yml
     with:
       image: hub.opensciencegrid.org/pelican_platform/pelican-test:latest-itb
-  
+
   analyze-tests:
     name: Analyze Tests
     runs-on: ubuntu-latest
@@ -36,7 +36,7 @@ jobs:
             --limit 14 \
             --json databaseId \
             --jq '.[].databaseId')
-          
+
           # Download artifacts for each run into its own directory
           for run_id in $run_ids; do
             echo "Downloading artifacts from run $run_id"
@@ -45,8 +45,77 @@ jobs:
               --repo ${{ github.repository }} \
               --dir "artifacts/run-$run_id" || echo "No artifacts found for run $run_id"
           done
-          
+
           echo "Downloaded artifacts from $(echo "$run_ids" | wc -l) runs"
-      
+
       - name: Analyze test results
-        run: echo "Test analysis complete"
+        run: |
+          # Analyze JUnit files to count test failures
+          python3 << 'EOF'
+          import xml.etree.ElementTree as ET
+          from collections import defaultdict
+          from pathlib import Path
+          import sys
+          
+          # Track failures by matrix variant
+          failures_by_matrix = defaultdict(lambda: defaultdict(int))
+          
+          # Find all JUnit XML files
+          artifacts_dir = Path('artifacts')
+          if not artifacts_dir.exists():
+              print("No artifacts directory found")
+              sys.exit(0)
+          
+          for run_dir in sorted(artifacts_dir.iterdir()):
+              if not run_dir.is_dir():
+                  continue
+              
+              # Process each matrix variant
+              for artifact_dir in run_dir.iterdir():
+                  if not artifact_dir.is_dir() or not artifact_dir.name.startswith('junit-'):
+                      continue
+                  
+                  # Extract matrix variant name (e.g., "pelican" or "pelican-server")
+                  matrix_name = artifact_dir.name.replace('junit-', '').replace('-Linux', '')
+                  
+                  # Find JUnit XML files
+                  for xml_file in artifact_dir.glob('*.xml'):
+                      try:
+                          tree = ET.parse(xml_file)
+                          root = tree.getroot()
+                          
+                          # Parse test cases
+                          for testcase in root.iter('testcase'):
+                              test_name = f"{testcase.get('classname')}.{testcase.get('name')}"
+                              
+                              # Check if test failed
+                              if testcase.find('failure') is not None or testcase.find('error') is not None:
+                                  failures_by_matrix[matrix_name][test_name] += 1
+                      except Exception as e:
+                          print(f"Error parsing {xml_file}: {e}")
+          
+          # Write results to file
+          with open('test-failure-analysis.txt', 'w') as f:
+              for matrix_name in sorted(failures_by_matrix.keys()):
+                  f.write(f"\n{'='*80}\n")
+                  f.write(f"Matrix: {matrix_name}\n")
+                  f.write(f"{'='*80}\n")
+                  
+                  failures = failures_by_matrix[matrix_name]
+                  if not failures:
+                      f.write("No failures found\n")
+                      continue
+                  
+                  # Sort by failure count (descending), then by test name
+                  sorted_failures = sorted(failures.items(), key=lambda x: (-x[1], x[0]))
+                  
+                  for test_name, count in sorted_failures:
+                      f.write(f"{count:3d} failures: {test_name}\n")
+                  
+                  f.write(f"\nTotal: {len(failures)} tests with failures\n")
+          
+          print("Analysis complete. Results written to test-failure-analysis.txt")
+          EOF
+          
+          # Print the analysis file
+          cat test-failure-analysis.txt
