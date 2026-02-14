@@ -1,0 +1,14 @@
+name: "Pelican CodeQL Configuration"
+
+# Run the default queries plus our custom replacements.
+queries:
+  - uses: ./.github/codeql/go
+
+query-filters:
+  # Exclude the built-in go/clear-text-logging query. Our replacement in
+  # .github/codeql/go/CleartextLogging.ql keeps the same @id and logic but
+  # adds an allowlist for struct fields that hold file *paths* rather than
+  # secrets (S3SecretKeyfile, UIPasswordFile, PasswordLocation).
+  - exclude:
+      id: go/clear-text-logging
+      query path: /^Security\//
