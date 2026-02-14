@@ -933,6 +933,20 @@ type: bool
 default: true
 components: ["origin"]
 ---
+name: Origin.CacheControl
+description: |+
+  The value of the Cache-Control HTTP header the origin attaches to every successful response (2xx) and 304 Not Modified.
+  This tells downstream caches (and the Pelican local cache) how long content may be reused before revalidation is required.
+
+  Common values include:
+  - `"no-cache, must-revalidate"` — caches may store the content but must revalidate with the origin via ETags before every use.
+  - `"max-age=3600"` — content is considered fresh for one hour.
+  - `""` (the default) — no Cache-Control header is sent, which gives the downstream cache full discretion over freshness.
+    This matches the behaviour of a plain XRootD origin.
+type: string
+default: ""
+components: ["origin"]
+---
 name: Origin.ExportVolume
 description: |+
   [Deprecated] Origin.ExportVolume is being deprecated and will be removed in a future release. It is replaced by Origin.ExportVolumes.
@@ -1627,6 +1641,46 @@ type: int
 default: 85
 components: ["localcache"]
 ---
+name: LocalCache.PrefetchTimeout
+description: |+
+  The maximum time to wait for a prefetch operation to complete before giving up.
+  If a prefetch takes longer than this timeout, the operation is abandoned and the
+  client is expected to retry later.
+type: duration
+default: 20s
+components: ["localcache"]
+---
+name: LocalCache.MaxConcurrentPrefetch
+description: |+
+  The maximum number of concurrent prefetch operations allowed.
+  This limits how many blocks can be prefetched in parallel to avoid overwhelming
+  the upstream server or local resources.
+type: int
+default: 5
+components: ["localcache"]
+---
+name: LocalCache.DefaultMaxAge
+description: |+
+  The default freshness lifetime for cached objects when the origin server does not
+  provide explicit Cache-Control headers. This value determines how long an object
+  can be served from cache before revalidating with the origin.
+  Setting this higher reduces origin load but may serve slightly stale data.
+  Setting this lower ensures fresher data but increases origin requests.
+type: duration
+default: 24h
+components: ["localcache"]
+---
+name: LocalCache.RevalidationJitter
+description: |+
+  A percentage (0-100) of random jitter to apply to revalidation times to prevent
+  thundering herd problems. When multiple clients access the same object, jitter
+  ensures they don't all revalidate simultaneously.
+  For example, with DefaultMaxAge=24h and RevalidationJitter=10, objects will be
+  revalidated between 21.6h and 24h after caching (90% to 100% of max age).
+type: int
+default: 10
+components: ["localcache"]
+---
 ############################
 #   Cache-level configs    #
 ############################
@@ -1954,6 +2008,17 @@ description: |+
 type: bool
 default: false
 components: ["cache"]
+---
+name: Cache.EnableV2
+description: |+
+  Enable the XRootD-free persistent cache implementation.
+  When enabled, the cache uses a native Go implementation based on BadgerDB instead of XRootD.
+  This is an experimental feature intended for testing and development.
+  Set this to true to use the new implementation.
+type: bool
+default: false
+components: ["cache"]
+hidden: true
 ---
 name: Cache.PermittedNamespaces
 description: |+

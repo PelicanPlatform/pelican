@@ -43,6 +43,7 @@ type Config struct {
 		EnablePrefetch bool `mapstructure:"enableprefetch" yaml:"EnablePrefetch"`
 		EnableSiteLocalMode bool `mapstructure:"enablesitelocalmode" yaml:"EnableSiteLocalMode"`
 		EnableTLSClientAuth bool `mapstructure:"enabletlsclientauth" yaml:"EnableTLSClientAuth"`
+		EnableV2 bool `mapstructure:"enablev2" yaml:"EnableV2"`
 		EnableVoms bool `mapstructure:"enablevoms" yaml:"EnableVoms"`
 		EvictionMonitoringInterval time.Duration `mapstructure:"evictionmonitoringinterval" yaml:"EvictionMonitoringInterval"`
 		EvictionMonitoringMaxDepth int `mapstructure:"evictionmonitoringmaxdepth" yaml:"EvictionMonitoringMaxDepth"`
@@ -169,6 +170,8 @@ type Config struct {
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
 		HighWaterMarkPercentage int `mapstructure:"highwatermarkpercentage" yaml:"HighWaterMarkPercentage"`
 		LowWaterMarkPercentage int `mapstructure:"lowwatermarkpercentage" yaml:"LowWaterMarkPercentage"`
+		MaxConcurrentPrefetch int `mapstructure:"maxconcurrentprefetch" yaml:"MaxConcurrentPrefetch"`
+		PrefetchTimeout time.Duration `mapstructure:"prefetchtimeout" yaml:"PrefetchTimeout"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
 		Size string `mapstructure:"size" yaml:"Size"`
 		Socket string `mapstructure:"socket" yaml:"Socket"`
@@ -456,6 +459,7 @@ type configWithType struct {
 		EnablePrefetch struct { Type string; Value bool }
 		EnableSiteLocalMode struct { Type string; Value bool }
 		EnableTLSClientAuth struct { Type string; Value bool }
+		EnableV2 struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		EvictionMonitoringInterval struct { Type string; Value time.Duration }
 		EvictionMonitoringMaxDepth struct { Type string; Value int }
@@ -582,6 +586,8 @@ type configWithType struct {
 		DataLocation struct { Type string; Value string }
 		HighWaterMarkPercentage struct { Type string; Value int }
 		LowWaterMarkPercentage struct { Type string; Value int }
+		MaxConcurrentPrefetch struct { Type string; Value int }
+		PrefetchTimeout struct { Type string; Value time.Duration }
 		RunLocation struct { Type string; Value string }
 		Size struct { Type string; Value string }
 		Socket struct { Type string; Value string }

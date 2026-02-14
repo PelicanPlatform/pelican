@@ -38,9 +38,8 @@ import (
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
-	"github.com/pelicanplatform/pelican/launchers"
+	"github.com/pelicanplatform/pelican/local_cache"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
@@ -86,17 +85,21 @@ func TestPurge(t *testing.T) {
 	}
 
 	// Size of the cache should be just small enough that the 5th file triggers LRU deletion of the first.
-	for idx := 0; idx < 5; idx++ {
-		func() {
-			fp, err := os.Open(filepath.Join(param.LocalCache_DataLocation.GetString(), "test", fmt.Sprintf("hello_world.txt.%d.DONE", idx)))
-			if idx == 0 {
-				log.Errorln("Error:", err)
-				assert.ErrorIs(t, err, os.ErrNotExist)
-			} else {
-				assert.NoError(t, err)
-			}
-			defer fp.Close()
-		}()
+	// Eviction happens asynchronously, so we need to wait for it to complete.
+	socketPath := param.LocalCache_Socket.GetString()
+
+	// Wait for eviction to complete - file 0 should be evicted
+	require.Eventually(t, func() bool {
+		exists, err := local_cache.CheckCacheObjectIsCached(ctx, socketPath, "/test/hello_world.txt.0")
+		return err == nil && !exists
+	}, 10*time.Second, 100*time.Millisecond, "Expected file 0 to be evicted due to LRU")
+
+	// Verify files 1-4 still exist
+	for idx := 1; idx < 5; idx++ {
+		objectPath := fmt.Sprintf("/test/hello_world.txt.%d", idx)
+		exists, err := local_cache.CheckCacheObjectIsCached(ctx, socketPath, objectPath)
+		require.NoError(t, err)
+		assert.True(t, exists, "Expected file %d to exist", idx)
 	}
 	t.Cleanup(func() {
 		cancel()
@@ -169,28 +172,30 @@ func TestForcePurge(t *testing.T) {
 	}
 
 	// Size of the cache should be large enough that purge hasn't fired yet.
+	socketPath := param.LocalCache_Socket.GetString()
 	for idx := 0; idx < 4; idx++ {
-		func() {
-			fp, err := os.Open(filepath.Join(param.LocalCache_DataLocation.GetString(), "test", fmt.Sprintf("hello_world.txt.%d.DONE", idx)))
-			assert.NoError(t, err)
-			defer fp.Close()
-		}()
+		objectPath := fmt.Sprintf("/test/hello_world.txt.%d", idx)
+		exists, err := local_cache.CheckCacheObjectIsCached(ctx, socketPath, objectPath)
+		require.NoError(t, err)
+		assert.True(t, exists, "Expected file %d to exist before purge", idx)
 	}
 
 	_, err = utils.MakeRequest(ft.Ctx, tr, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/localcache/purge", "POST", nil, map[string]string{"Authorization": "Bearer " + token})
 	require.NoError(t, err)
 
 	// Low water mark is small enough that a force purge will delete a file.
-	for idx := 0; idx < 4; idx++ {
-		func() {
-			fp, err := os.Open(filepath.Join(param.LocalCache_DataLocation.GetString(), "test", fmt.Sprintf("hello_world.txt.%d.DONE", idx)))
-			if idx == 0 {
-				assert.ErrorIs(t, err, os.ErrNotExist)
-			} else {
-				assert.NoError(t, err)
-			}
-			defer fp.Close()
-		}()
+	// Wait for eviction to complete - file 0 should be evicted
+	require.Eventually(t, func() bool {
+		exists, err := local_cache.CheckCacheObjectIsCached(ctx, socketPath, "/test/hello_world.txt.0")
+		return err == nil && !exists
+	}, 10*time.Second, 100*time.Millisecond, "Expected file 0 to be evicted after purge")
+
+	// Verify files 1-3 still exist
+	for idx := 1; idx < 4; idx++ {
+		objectPath := fmt.Sprintf("/test/hello_world.txt.%d", idx)
+		exists, err := local_cache.CheckCacheObjectIsCached(ctx, socketPath, objectPath)
+		require.NoError(t, err)
+		assert.True(t, exists, "Expected file %d to exist after purge", idx)
 	}
 	t.Cleanup(func() {
 		cancel()
@@ -205,68 +210,61 @@ func TestForcePurge(t *testing.T) {
 	})
 }
 
-// TestPurgeFirst verifies that LocalCache correctly reconstructs its in-memory state from files
-// in the data location and prioritizes purging files marked PURGEFIRST during the purge routine.
+// TestPurgeFirst verifies that PersistentCache correctly prioritizes purging files
+// marked as PURGEFIRST during the purge routine.
 //
-// The test creates 5 test files (2MB each) in order from file-1 through file-5. File-5 is marked PURGEFIRST
-// by manually adding a sentinel file before LocalCache is started, and file-1 is marked PURGEFIRST via the API.
-// The purge is triggered with the low water mark set at 5MB, and the test asserts that three files are purged:
-// file-1 and file-5 (PURGEFIRST), and file-2 (the oldest among the remaining non-PURGEFIRST files).
+// The test creates 5 test files and downloads them through the cache. File-1 is then
+// marked PURGEFIRST via the API. The purge is triggered, and the test verifies that
+// file-1 (marked PURGEFIRST) is evicted before the oldest file (file-2) by LRU order.
 func TestPurgeFirst(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
+	tmpDir := t.TempDir()
 
-	configDir := t.TempDir()
-	require.NoError(t, param.Set("ConfigDir", configDir))
-	// Set RuntimeDir to avoid race conditions with parallel tests using shared /run/pelican
-	require.NoError(t, param.Set(param.RuntimeDir.GetName(), configDir))
-
-	test_utils.MockFederationRoot(t, nil, nil)
-
-	dataDir := t.TempDir()
-	require.NoError(t, param.Set(param.Logging_Level.GetName(), "debug"))
-	require.NoError(t, param.Set(param.LocalCache_DataLocation.GetName(), dataDir))
-	require.NoError(t, param.Set(param.LocalCache_Size.GetName(), "10MB"))
-	require.NoError(t, param.Set(param.LocalCache_LowWaterMarkPercentage.GetName(), "50"))
-	require.NoError(t, param.Set(param.Server_StartupTimeout.GetName(), "10s"))
-	require.NoError(t, param.Set(param.Server_AdvertisementInterval.GetName(), "10m"))
-	require.NoError(t, param.Set(param.Server_AdLifetime.GetName(), "10m"))
-
-	// Create test files and sentinel files
-	testFiles := []struct {
-		name         string
-		isPurgeFirst bool
-	}{
-		{"file1.txt", false},
-		{"file2.txt", false},
-		{"file3.txt", false},
-		{"file4.txt", false},
-		{"file5.txt", true},
-	}
-
-	testNsDir := filepath.Join(dataDir, "test")
-	require.NoError(t, os.MkdirAll(testNsDir, 0755))
-
-	twoMBData := make([]byte, 2*1024*1024) // 2 MB of zeroed bytes
-	for _, tf := range testFiles {
-		dataFilePath := filepath.Join(testNsDir, tf.name)
-		err := os.WriteFile(dataFilePath, twoMBData, 0644)
-		require.NoError(t, err)
-
-		sentinelFilePath := dataFilePath + ".DONE"
-		err = os.WriteFile(sentinelFilePath, []byte(""), 0644)
-		require.NoError(t, err)
-
-		if tf.isPurgeFirst {
-			sentinelFilePath := dataFilePath + ".PURGEFIRST"
-			err = os.WriteFile(sentinelFilePath, []byte(""), 0644)
-			require.NoError(t, err)
-		}
-	}
+	// Use a small cache size to trigger eviction
+	require.NoError(t, param.Set("LocalCache.Size", "5MB"))
+	// Set low water mark so that purge will actually delete files
+	require.NoError(t, param.Set("LocalCache.LowWaterMarkPercentage", "50"))
+	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	_, _, err := launchers.LaunchModules(ctx, server_structs.LocalCacheType)
+	te, err := client.NewTransferEngine(ctx)
 	require.NoError(t, err)
+
+	cacheUrl := &url.URL{
+		Scheme: "unix",
+		Path:   param.LocalCache_Socket.GetString(),
+	}
+
+	// Create 4 x 1MB files on the origin
+	size := 0
+	for idx := 0; idx < 4; idx++ {
+		log.Debugln("Will write origin file", filepath.Join(ft.Exports[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)))
+		fp, err := os.OpenFile(filepath.Join(ft.Exports[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+		require.NoError(t, err)
+		size = test_utils.WriteBigBuffer(t, fp, 1)
+	}
+	require.NotEqual(t, 0, size)
+
+	// Download all files through the cache
+	for idx := 0; idx < 4; idx++ {
+		tr, err := client.DoGet(ctx, fmt.Sprintf("pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt.%d", idx),
+			filepath.Join(tmpDir, fmt.Sprintf("hello_world.txt.%d", idx)), false, client.WithCaches(cacheUrl))
+		assert.NoError(t, err)
+		require.Equal(t, 1, len(tr))
+		assert.Equal(t, int64(size), tr[0].TransferredBytes)
+		assert.NoError(t, tr[0].Error)
+	}
+
+	// Verify all files are in cache
+	socketPath := param.LocalCache_Socket.GetString()
+	for idx := 0; idx < 4; idx++ {
+		objectPath := fmt.Sprintf("/test/hello_world.txt.%d", idx)
+		exists, err := local_cache.CheckCacheObjectIsCached(ctx, socketPath, objectPath)
+		require.NoError(t, err)
+		assert.True(t, exists, "Expected file %d to exist before purge-first", idx)
+	}
+
 	// Create token with proper scopes
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
@@ -277,49 +275,49 @@ func TestPurgeFirst(t *testing.T) {
 	tokConf.AddAudienceAny()
 	tokConf.AddScopes(token_scopes.Localcache_Purge)
 
-	token, err := tokConf.CreateToken()
+	tok, err := tokConf.CreateToken()
 	require.NoError(t, err)
 
-	// Make API call to mark /test/file1.txt as purge first
+	// Mark file 2 (not the oldest) as purge-first via API
 	tr := config.GetTransport()
-	body := map[string]interface{}{"Path": "/test/file1.txt"}
-
-	_, err = utils.MakeRequest(ctx, tr, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/localcache/purge_first", "POST", body, map[string]string{"Authorization": "Bearer " + token})
+	body := map[string]interface{}{"Path": "/test/hello_world.txt.2"}
+	_, err = utils.MakeRequest(ctx, tr, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/localcache/purge_first", "POST", body, map[string]string{"Authorization": "Bearer " + tok})
 	require.NoError(t, err)
 
-	// Verify the sentinel .PURGEFIRST file exists
-	expectedSentinel := filepath.Join(testNsDir, "file1.txt.PURGEFIRST")
-	_, statErr := os.Stat(expectedSentinel)
-	assert.NoError(t, statErr, "Expected .PURGEFIRST sentinel file not found")
-
-	_, err = utils.MakeRequest(ctx, tr, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/localcache/purge", "POST", nil, map[string]string{"Authorization": "Bearer " + token})
+	// Trigger a purge
+	_, err = utils.MakeRequest(ctx, tr, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/localcache/purge", "POST", nil, map[string]string{"Authorization": "Bearer " + tok})
 	require.NoError(t, err)
 
-	deletedFiles := []string{
-		"file1.txt", "file1.txt.DONE", "file1.txt.PURGEFIRST",
-		"file5.txt", "file5.txt.DONE", "file5.txt.PURGEFIRST",
-		"file5.txt", "file2.txt.DONE",
-	}
+	// File 2 should be evicted first (purge-first), not file 0 (oldest by LRU)
+	// With 4x1MB files and 50% low water mark (2.5MB), we expect 2 files to be evicted
+	// File 2 should definitely be gone (purge-first), and file 0 should be gone (oldest LRU)
 
-	for _, fname := range deletedFiles {
-		_, err := os.Stat(filepath.Join(testNsDir, fname))
-		assert.ErrorIs(t, err, os.ErrNotExist, "Expected %s to be deleted", fname)
-	}
+	// Wait for eviction to complete - file 2 (purge-first) should be evicted
+	require.Eventually(t, func() bool {
+		exists, err := local_cache.CheckCacheObjectIsCached(ctx, socketPath, "/test/hello_world.txt.2")
+		return err == nil && !exists
+	}, 10*time.Second, 100*time.Millisecond, "Expected file 2 (purge-first) to be evicted")
 
-	existingFiles := []string{
-		"file3.txt", "file3.txt.DONE",
-		"file4.txt", "file4.txt.DONE",
-	}
+	// File 0 should also be evicted (oldest LRU)
+	exists, err := local_cache.CheckCacheObjectIsCached(ctx, socketPath, "/test/hello_world.txt.0")
+	require.NoError(t, err)
+	assert.False(t, exists, "Expected file 0 to be evicted")
 
-	for _, fname := range existingFiles {
-		_, err := os.Stat(filepath.Join(testNsDir, fname))
-		assert.NoError(t, err, "Expected %s to exist", fname)
+	// Files 1 and 3 should still exist
+	for _, idx := range []int{1, 3} {
+		objectPath := fmt.Sprintf("/test/hello_world.txt.%d", idx)
+		exists, err := local_cache.CheckCacheObjectIsCached(ctx, socketPath, objectPath)
+		require.NoError(t, err)
+		assert.True(t, exists, "Expected file %d to exist", idx)
 	}
 
 	t.Cleanup(func() {
 		cancel()
 		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
 			require.NoError(t, err)
+		}
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
 		}
 		server_utils.ResetTestState()
 	})
