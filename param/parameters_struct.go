@@ -43,6 +43,7 @@ type Config struct {
 		EnablePrefetch bool `mapstructure:"enableprefetch" yaml:"EnablePrefetch"`
 		EnableSiteLocalMode bool `mapstructure:"enablesitelocalmode" yaml:"EnableSiteLocalMode"`
 		EnableTLSClientAuth bool `mapstructure:"enabletlsclientauth" yaml:"EnableTLSClientAuth"`
+		EnableV2 bool `mapstructure:"enablev2" yaml:"EnableV2"`
 		EnableVoms bool `mapstructure:"enablevoms" yaml:"EnableVoms"`
 		EvictionMonitoringInterval time.Duration `mapstructure:"evictionmonitoringinterval" yaml:"EvictionMonitoringInterval"`
 		EvictionMonitoringMaxDepth int `mapstructure:"evictionmonitoringmaxdepth" yaml:"EvictionMonitoringMaxDepth"`
@@ -167,8 +168,12 @@ type Config struct {
 	IssuerKeysDirectory string `mapstructure:"issuerkeysdirectory" yaml:"IssuerKeysDirectory"`
 	LocalCache struct {
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
+		DefaultMaxAge time.Duration `mapstructure:"defaultmaxage" yaml:"DefaultMaxAge"`
 		HighWaterMarkPercentage int `mapstructure:"highwatermarkpercentage" yaml:"HighWaterMarkPercentage"`
 		LowWaterMarkPercentage int `mapstructure:"lowwatermarkpercentage" yaml:"LowWaterMarkPercentage"`
+		MaxConcurrentPrefetch int `mapstructure:"maxconcurrentprefetch" yaml:"MaxConcurrentPrefetch"`
+		PrefetchTimeout time.Duration `mapstructure:"prefetchtimeout" yaml:"PrefetchTimeout"`
+		RevalidationJitter int `mapstructure:"revalidationjitter" yaml:"RevalidationJitter"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
 		Size string `mapstructure:"size" yaml:"Size"`
 		Socket string `mapstructure:"socket" yaml:"Socket"`
@@ -245,6 +250,7 @@ type Config struct {
 		UserInfoEndpoint string `mapstructure:"userinfoendpoint" yaml:"UserInfoEndpoint"`
 	} `mapstructure:"oidc" yaml:"OIDC"`
 	Origin struct {
+		CacheControl string `mapstructure:"cachecontrol" yaml:"CacheControl"`
 		Concurrency int `mapstructure:"concurrency" yaml:"Concurrency"`
 		ConcurrencyDegradedThreshold int `mapstructure:"concurrencydegradedthreshold" yaml:"ConcurrencyDegradedThreshold"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
@@ -456,6 +462,7 @@ type configWithType struct {
 		EnablePrefetch struct { Type string; Value bool }
 		EnableSiteLocalMode struct { Type string; Value bool }
 		EnableTLSClientAuth struct { Type string; Value bool }
+		EnableV2 struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		EvictionMonitoringInterval struct { Type string; Value time.Duration }
 		EvictionMonitoringMaxDepth struct { Type string; Value int }
@@ -580,8 +587,12 @@ type configWithType struct {
 	IssuerKeysDirectory struct { Type string; Value string }
 	LocalCache struct {
 		DataLocation struct { Type string; Value string }
+		DefaultMaxAge struct { Type string; Value time.Duration }
 		HighWaterMarkPercentage struct { Type string; Value int }
 		LowWaterMarkPercentage struct { Type string; Value int }
+		MaxConcurrentPrefetch struct { Type string; Value int }
+		PrefetchTimeout struct { Type string; Value time.Duration }
+		RevalidationJitter struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
 		Size struct { Type string; Value string }
 		Socket struct { Type string; Value string }
@@ -658,6 +669,7 @@ type configWithType struct {
 		UserInfoEndpoint struct { Type string; Value string }
 	}
 	Origin struct {
+		CacheControl struct { Type string; Value string }
 		Concurrency struct { Type string; Value int }
 		ConcurrencyDegradedThreshold struct { Type string; Value int }
 		DbLocation struct { Type string; Value string }

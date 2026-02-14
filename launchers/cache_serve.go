@@ -26,6 +26,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -36,8 +37,10 @@ import (
 
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/cache"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/launcher_utils"
+	"github.com/pelicanplatform/pelican/local_cache"
 	"github.com/pelicanplatform/pelican/lotman"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
@@ -47,7 +50,150 @@ import (
 	"github.com/pelicanplatform/pelican/xrootd"
 )
 
+// persistentCacheServer wraps the PersistentCache to implement server_structs.XRootDServer
+// It embeds cache.CacheServer to inherit the XRootDServer interface implementation
+type persistentCacheServer struct {
+	*local_cache.PersistentCache
+	*cache.CacheServer
+}
+
+func (pcs *persistentCacheServer) GetServerType() server_structs.ServerType {
+	return server_structs.CacheType
+}
+
+func (pcs *persistentCacheServer) SetPids(pids []int) {
+	// No PIDs for the persistent cache (no external processes)
+}
+
+func (pcs *persistentCacheServer) GetPids() []int {
+	return nil // No PIDs for the persistent cache
+}
+
 func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules server_structs.ServerType) (server_structs.XRootDServer, error) {
+	// Check if we should use the XRootD-free persistent cache implementation
+	usePersistentCache := param.Cache_EnableV2.GetBool()
+
+	if usePersistentCache {
+		return cacheServeWithPersistentCache(ctx, engine, egrp, modules)
+	}
+
+	return cacheServeWithXRootD(ctx, engine, egrp, modules)
+}
+
+// cacheServeWithPersistentCache launches the XRootD-free cache using the persistent cache implementation
+func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules server_structs.ServerType) (server_structs.XRootDServer, error) {
+	log.Info("Using new persistent cache implementation")
+
+	if err := database.InitServerDatabase(server_structs.CacheType); err != nil {
+		return nil, err
+	}
+
+	cache.RegisterCacheAPI(engine, ctx, egrp)
+
+	cacheServer := &cache.CacheServer{}
+	err := cacheServer.GetNamespaceAdsFromDirector()
+	cacheServer.SetFilters()
+	if err != nil {
+		return nil, err
+	}
+	err = launcher_utils.CheckDefaults(cacheServer)
+	if err != nil {
+		return nil, err
+	}
+
+	// Skipping PKCS#11 helper - no external XRootD processes to manage
+
+	// Don't perform Broker operations for site-local caches.
+	if !param.Cache_EnableSiteLocalMode.GetBool() {
+		broker.InitializeBrokerClient(ctx, egrp, engine)
+	}
+
+	// Site-local caches aren't part of the federation, so they don't expect
+	// Director tests or federation tokens.
+	if !param.Cache_EnableSiteLocalMode.GetBool() {
+		cache.LaunchDirectorTestFileCleanup(ctx)
+		cache.LaunchFedTokManager(ctx, egrp, cacheServer)
+	}
+
+	concLimit := param.Cache_Concurrency.GetInt()
+	if concLimit > 0 {
+		server_utils.LaunchConcurrencyMonitoring(ctx, egrp, cacheServer.GetServerType())
+	}
+
+	// Director and origin also registers this metadata URL; avoid registering twice.
+	if !modules.IsEnabled(server_structs.DirectorType) && !modules.IsEnabled(server_structs.OriginType) {
+		server_utils.RegisterOIDCAPI(engine.Group("/", web_ui.ServerHeaderMiddleware), false)
+	}
+
+	log.Info("Initializing persistent cache")
+
+	// Create the persistent cache instance
+	// For cache servers, use Cache.StorageLocation instead of LocalCache.DataLocation
+	// to avoid conflicts when both LocalCache and Cache modules are running
+	cacheStorageLocation := param.Cache_StorageLocation.GetString()
+	cfg := local_cache.PersistentCacheConfig{
+		BaseDir: filepath.Join(cacheStorageLocation, "persistent-cache"),
+	}
+	pc, err := local_cache.NewPersistentCache(ctx, egrp, cfg)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create persistent cache")
+	}
+
+	// Check if director is enabled to determine handler registration path
+	directorEnabled := modules.IsEnabled(server_structs.DirectorType)
+
+	// Register HTTP handlers on the Gin engine
+	if err := pc.RegisterCacheHandlers(engine, directorEnabled); err != nil {
+		return nil, errors.Wrap(err, "failed to register persistent cache handlers")
+	}
+
+	// Set Cache.Url to point to the API endpoint when director is enabled
+	// This ensures the director advertises the correct URL for clients to reach the cache
+	// The URL includes the discovery host:port (URL-encoded) to support multi-federation caches
+	if directorEnabled {
+		externalWebUrl := param.Server_ExternalWebUrl.GetString()
+		fedInfo, fedErr := config.GetFederation(ctx)
+		if fedErr != nil {
+			return nil, errors.Wrap(fedErr, "failed to get federation info for cache URL")
+		}
+		if parsedUrl, err := url.Parse(externalWebUrl); err == nil {
+			// Extract host:port from discovery endpoint (drop scheme) and URL-encode it
+			discoveryHost := fedInfo.DiscoveryEndpoint
+			if discoveryURL, err := url.Parse(fedInfo.DiscoveryEndpoint); err == nil {
+				discoveryHost = discoveryURL.Host
+			}
+			encodedDiscovery := url.PathEscape(discoveryHost)
+			parsedUrl.Path = "/api/v1.0/cache/data/" + encodedDiscovery
+			cacheDataUrl := parsedUrl.String()
+			if err := param.Set(param.Cache_Url.GetName(), cacheDataUrl); err != nil {
+				log.WithError(err).Warnf("Failed to set %s to %s", param.Cache_Url.GetName(), cacheDataUrl)
+			} else {
+				log.Debugf("Set %s to %s for persistent cache with director (discovery: %s)", param.Cache_Url.GetName(), cacheDataUrl, discoveryHost)
+			}
+		}
+	} else {
+		// For standalone cache, use the web URL directly
+		externalWebUrl := param.Server_ExternalWebUrl.GetString()
+		if err := param.Set(param.Cache_Url.GetName(), externalWebUrl); err != nil {
+			log.WithError(err).Warnf("Failed to set %s to %s", param.Cache_Url.GetName(), externalWebUrl)
+		} else {
+			log.Debugf("Set %s to %s for standalone persistent cache", param.Cache_Url.GetName(), externalWebUrl)
+		}
+	}
+
+	// Create wrapper server that embeds CacheServer for XRootDServer interface
+	pcServer := &persistentCacheServer{
+		PersistentCache: pc,
+		CacheServer:     cacheServer,
+	}
+
+	log.Info("Persistent cache initialization complete")
+
+	return pcServer, nil
+}
+
+// cacheServeWithXRootD launches the traditional XRootD-based cache
+func cacheServeWithXRootD(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules server_structs.ServerType) (server_structs.XRootDServer, error) {
 	err := xrootd.SetUpMonitoring(ctx, egrp)
 	if err != nil {
 		return nil, err
