@@ -1,6 +1,6 @@
 # ***************************************************************
 #
-#  Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+#  Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 #
 #  Licensed under the Apache License, Version 2.0 (the "License"); you
 #  may not use this file except in compliance with the License.  You may
@@ -19,57 +19,57 @@
 # See https://pre-commit.com for more information
 # See https://pre-commit.com/hooks.html for more hooks
 repos:
--   repo: https://github.com/pre-commit/pre-commit-hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
-    -   id: trailing-whitespace
-        stages: [commit]
+      - id: trailing-whitespace
+        stages: [pre-commit]
         exclude: github_scripts/pelican_protocol.patch
-    -   id: end-of-file-fixer
-        stages: [commit]
-    -   id: check-yaml
-        stages: [commit]
+      - id: end-of-file-fixer
+        stages: [pre-commit]
+      - id: check-yaml
+        stages: [pre-commit]
         # Multi-documents are yaml files with multiple --- separating blocks, like
         # in our docs/parameters.yaml. We need this argument so those parse.
         args: [--allow-multiple-documents]
-    -   id: check-added-large-files
-        stages: [commit]
+      - id: check-added-large-files
+        stages: [pre-commit]
         args: ['--maxkb=1024']
--   repo: https://github.com/golangci/golangci-lint
-    rev: v2.4.0
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v2.9.0
     hooks:
-    -   id: golangci-lint
-        stages: [push]
--   repo: https://github.com/crate-ci/typos
-    rev: v1.28.2
+      - id: golangci-lint
+        stages: [pre-push]
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.43.4
     hooks:
-    -   id: typos
-        stages: [push]
+      - id: typos
+        stages: [pre-push]
         # Override the default arguments, which include writing back all
         # suggested changes. We don't want false positives to mangle files.
         args: [--force-exclude, --sort]
--   repo: https://github.com/shellcheck-py/shellcheck-py
+  - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.11.0.1
     hooks:
-    -   id: shellcheck
-        stages: [push]
+      - id: shellcheck
+        stages: [pre-push]
         args: [--severity=warning]
--   repo: local
+  - repo: local
     hooks:
-    -   id: npm-format-fix
-        stages: [push]
+      - id: npm-format-fix
+        stages: [pre-push]
         name: Run npm format:fix on web_ui/frontend changes
         entry: bash -c "cd web_ui/frontend && npm run format:fix"
         language: system
         files: web_ui/frontend/.*
         pass_filenames: false
--   repo: https://github.com/executablebooks/mdformat
-    rev: 0.7.19
+  - repo: https://github.com/executablebooks/mdformat
+    rev: 1.0.0
     hooks:
-    -   id: mdformat
+      - id: mdformat
         name: Format markdown files (one sentence per line)
         additional_dependencies:
-        -   mdformat-simple-breaks
+          - mdformat-simple-breaks
         args: [--wrap, "no"]
         files: \.md$
         exclude: \.mdx$
