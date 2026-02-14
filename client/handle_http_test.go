@@ -221,7 +221,7 @@ func TestSlowTransfers(t *testing.T) {
 		writer, err = os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
 		assert.NoError(t, err)
 		defer writer.Close()
-		_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, "", "")
+		_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
 		finishedChannel <- true
 	}()
 
@@ -311,7 +311,7 @@ func TestStoppedTransfer(t *testing.T) {
 		assert.NoError(t, err)
 		defer writer.Close()
 
-		_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, "", "")
+		_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
 		finishedChannel <- true
 	}()
 
@@ -362,7 +362,7 @@ func TestConnectionError(t *testing.T) {
 
 	_, _, _, _, err = downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: &url.URL{Host: addr, Scheme: "http"}, Proxy: false},
-		fname, writer, 0, -1, "", "",
+		fname, writer, 0, -1, -1, "", "", nil,
 	)
 
 	// downloadHTTP returns unwrapped ConnectionSetupError; wrapping happens in the download loop
@@ -476,7 +476,7 @@ func TestNetworkResetError(t *testing.T) {
 	// Call downloadHTTP which should trigger NetworkResetError when connection is reset
 	_, _, _, _, err = downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: &url.URL{Scheme: "http", Host: serverAddr}, Proxy: false},
-		fname, writer, 0, -1, "", "",
+		fname, writer, 0, -1, -1, "", "", nil,
 	)
 
 	// The error should be wrapped as Contact.ConnectionReset in the download loop
@@ -603,7 +603,7 @@ func TestTrailerError(t *testing.T) {
 	assert.NoError(t, err)
 	defer writer.Close()
 
-	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, "", "")
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
 
 	assert.NotNil(t, err)
 	// Check that it's wrapped in a PelicanError
@@ -832,7 +832,7 @@ func TestTimeoutHeaderSetForDownload(t *testing.T) {
 	assert.NoError(t, err)
 	defer writer.Close()
 	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, 0, -1, "", "",
+		fname, writer, 0, -1, -1, "", "", nil,
 	)
 	assert.NoError(t, err)
 	server_utils.ResetTestState()
@@ -880,7 +880,7 @@ func TestJobIdHeaderSetForDownload(t *testing.T) {
 	assert.NoError(t, err)
 	defer writer.Close()
 	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, 0, -1, "", "",
+		fname, writer, 0, -1, -1, "", "", nil,
 	)
 	assert.NoError(t, err)
 	server_utils.ResetTestState()
@@ -922,7 +922,7 @@ func TestProjInUserAgent(t *testing.T) {
 	assert.NoError(t, err)
 	defer writer.Close()
 	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false},
-		fname, writer, 0, -1, "", "test")
+		fname, writer, 0, -1, -1, "", "test", nil)
 	assert.NoError(t, err)
 
 	// Test the user-agent header is what we expect it to be
@@ -1529,7 +1529,7 @@ func TestInvalidByteInChunkLengthError(t *testing.T) {
 	// Call downloadHTTP which should trigger InvalidByteInChunkLengthError
 	_, _, _, _, err = downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: &url.URL{Scheme: "http", Host: serverAddr}, Proxy: false},
-		fname, writer, 0, -1, "", "",
+		fname, writer, 0, -1, -1, "", "", nil,
 	)
 
 	require.Error(t, err, "Should have an error from invalid chunk length")
@@ -2633,7 +2633,7 @@ func TestInvalidByteInChunkLength(t *testing.T) {
 	require.NoError(t, err)
 	defer writer.Close()
 
-	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, "", "")
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
 	require.Error(t, err)
 	t.Logf("error: %v", err)
 
@@ -2672,7 +2672,7 @@ func TestUnexpectedEOFInTransferStatus(t *testing.T) {
 	require.NoError(t, err)
 	defer writer.Close()
 
-	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, "", "")
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
 	require.Error(t, err)
 	t.Logf("error: %v", err)
 	assert.True(t, IsRetryable(err), "Unexpected EOF error should be retryable")

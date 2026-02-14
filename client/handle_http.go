@@ -242,8 +242,10 @@ type (
 		requireChecksum    bool
 		requestedChecksums []ChecksumType
 		err                error
-		writer             io.WriteCloser // Optional writer for downloads
-		reader             io.ReadCloser  // Optional reader for uploads
+		writer             io.WriteCloser          // Optional writer for downloads
+		reader             io.ReadCloser           // Optional reader for uploads
+		byteRange          *ByteRange              // Optional byte range for partial downloads
+		metadataChan       chan<- TransferMetadata // Optional channel to receive early transfer metadata
 	}
 
 	// A representation of a "transfer job".  The job
@@ -277,10 +279,12 @@ type (
 		directorUrl        string
 		token              *tokenGenerator
 		project            string
-		writer             io.WriteCloser // Optional writer for downloads - if set, write to this instead of localPath
-		reader             io.ReadCloser  // Optional reader for uploads - if set, read from this instead of localPath
-		inPlace            bool           // If true, write directly to final destination; if false, use temporary file
-		forcePrestageAPI   bool           // If true, force use of prestage API and error if not supported (no fallback)
+		writer             io.WriteCloser          // Optional writer for downloads - if set, write to this instead of localPath
+		reader             io.ReadCloser           // Optional reader for uploads - if set, read from this instead of localPath
+		inPlace            bool                    // If true, write directly to final destination; if false, use temporary file
+		forcePrestageAPI   bool                    // If true, force use of prestage API and error if not supported (no fallback)
+		byteRange          *ByteRange              // Optional byte range for partial downloads
+		metadataChan       chan<- TransferMetadata // Optional channel to receive early transfer metadata
 	}
 
 	// A TransferJob associated with a client's request
@@ -340,6 +344,7 @@ type (
 		dryRun         bool      // Enable dry-run mode to display what would be transferred without actually doing it
 		work           chan *TransferJob
 		closed         bool
+		closeOnce      sync.Once
 		prefObjServers []*url.URL // holds any client-requested caches/origins
 		results        chan *TransferResults
 		finalResults   chan TransferResults
@@ -363,6 +368,16 @@ type (
 	identTransferOptionInPlace          struct{}
 	identTransferOptionDryRun           struct{}
 	identTransferOptionForcePrestageAPI struct{}
+	identTransferOptionByteRange        struct{}
+	identTransferOptionMetadataChannel  struct{}
+
+	// ByteRange specifies a byte range for partial object transfers
+	// Start and End are inclusive byte offsets (0-indexed)
+	// End of -1 means "to end of file"
+	ByteRange struct {
+		Start int64
+		End   int64 // -1 means "to end of file"
+	}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -774,6 +789,31 @@ func WithDryRun(enable bool) TransferOption {
 // method. This is useful for testing to ensure the API is actually being used.
 func WithForcePrestageAPI(force bool) TransferOption {
 	return option.New(identTransferOptionForcePrestageAPI{}, force)
+}
+
+// Create an option to specify a byte range for partial object downloads
+//
+// The start and end parameters are inclusive byte offsets (0-indexed).
+// Use end=-1 to download from start to the end of the file.
+// Example: WithByteRange(0, 1023) downloads the first 1024 bytes.
+// Example: WithByteRange(1024, -1) downloads from byte 1024 to the end.
+func WithByteRange(start, end int64) TransferOption {
+	return option.New(identTransferOptionByteRange{}, ByteRange{Start: start, End: end})
+}
+
+// Create an option to receive early transfer metadata before data transfer begins
+//
+// When provided, the channel will receive a TransferMetadata struct containing
+// information like ETag, Content-Length, and Last-Modified as soon as the server
+// response headers are received, but before any data is transferred.
+// This allows the caller to make decisions (e.g., verify ETag matches expected)
+// before committing to the full transfer.
+//
+// The channel is optional (non-blocking send). If the channel is full or nil,
+// the transfer will proceed without waiting.
+// The caller should ensure the channel has buffer capacity of at least 1.
+func WithMetadataChannel(ch chan<- TransferMetadata) TransferOption {
+	return option.New(identTransferOptionMetadataChannel{}, ch)
 }
 
 // Create a new client to work with an engine
@@ -1213,6 +1253,11 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			tj.inPlace = option.Value().(bool)
 		case identTransferOptionDryRun{}:
 			tj.dryRun = option.Value().(bool)
+		case identTransferOptionByteRange{}:
+			br := option.Value().(ByteRange)
+			tj.byteRange = &br
+		case identTransferOptionMetadataChannel{}:
+			tj.metadataChan = option.Value().(chan<- TransferMetadata)
 		}
 	}
 
@@ -1479,11 +1524,19 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 //
 // Any subsequent job submissions will cause a panic
 func (tc *TransferClient) Close() {
-	if !tc.closed {
+	tc.closeOnce.Do(func() {
 		log.Debugln("Closing transfer client", tc.id.String())
-		close(tc.work)
 		tc.closed = true
-	}
+		// TODO(bbockelm):
+		// It's not obvious from the API design but the engine shutdown
+		// will _also_ close tc.work (directly, bypassing the `closeOnce`),
+		// causing a panic if the client is manually closed afterward.  This
+		// could be fixed to avoid confusion around who is supposed to close
+		// what.  For now, to avoid panic's for users, we simply recover.
+		// recover from the panic if that happened.
+		defer func() { _ = recover() }()
+		close(tc.work)
+	})
 }
 
 // Shutdown the transfer client
@@ -1805,6 +1858,8 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			project:            job.job.project,
 			writer:             job.job.writer,
 			reader:             job.job.reader,
+			byteRange:          job.job.byteRange,
+			metadataChan:       job.job.metadataChan,
 		},
 	}:
 	}
@@ -2004,6 +2059,10 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 func downloadObject(transfer *transferFile) (transferResults TransferResults, err error) {
 	log.Debugln("Downloading object from", transfer.remoteURL, "to", transfer.localPath)
 	var downloaded int64
+	// If a byte range is specified, start from the range start offset
+	if transfer.byteRange != nil {
+		downloaded = transfer.byteRange.Start
+	}
 	localPath := transfer.localPath
 	transferResults.job = transfer.job
 
@@ -2272,9 +2331,16 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		if transfer.token != nil {
 			tokenContents, _ = transfer.token.Get()
 		}
+		// Determine byte range end (-1 means download to end of file)
+		byteRangeEnd := int64(-1)
+		if transfer.byteRange != nil {
+			byteRangeEnd = transfer.byteRange.End
+		}
 		attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, err := downloadHTTP(
-			ctx, transfer.engine, transfer.callback, transferEndpoint, writeDestination, fileWriter, downloaded, size, tokenContents, transfer.project,
+			ctx, transfer.engine, transfer.callback, transferEndpoint, writeDestination, fileWriter, downloaded, byteRangeEnd, size, tokenContents, transfer.project, transfer.metadataChan,
 		)
+		// Clear metadata channel after first attempt - we only want to send metadata once
+		transfer.metadataChan = nil
 		endTime := time.Now()
 		if cacheAge >= 0 {
 			attempt.CacheAge = cacheAge
@@ -2324,125 +2390,133 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		// Clear any previous errors (e.g., from failed prestage attempts)
 		transferResults.Error = nil
 
-		// Fetch checksum of the downloaded file, compare it to the calculated.
-		transferUrlCnt := len(transferUrls)
-		gotChecksum := false
-		// Iterate through the various sources to fetch the checksums, starting with the successful one.
-		for idx := 0; idx < transferUrlCnt; idx++ {
-			url := transferUrls[transferUrlCnt-idx-1]
-			if url == nil {
-				continue
-			}
-			fields := log.Fields{
-				"url": url.String(),
+		// Skip checksum verification for byte-range downloads.  The server's
+		// checksum covers the entire object, not the requested byte range, so
+		// comparing it against a partial download will always produce a
+		// spurious mismatch.
+		if transfer.byteRange != nil {
+			log.WithFields(log.Fields{
+				"url": transfer.remoteURL.String(),
 				"job": transfer.job.ID(),
-			}
-			ctx := context.WithValue(transfer.ctx, logFields("fields"), fields)
-			tokenContents := ""
-			if transfer.token != nil {
-				tokenContents, _ = transfer.token.Get()
-			}
-			if checksums, err := fetchChecksum(ctx, transfer.requestedChecksums, url, tokenContents, transfer.project); err == nil {
-				transferResults.ServerChecksums = checksums
-				gotChecksum = true
-			}
-		}
-		if !gotChecksum && transfer.requireChecksum {
-			transferResults.Error = errors.New("checksum is required but no endpoints were able to provide it")
-		}
-
-		// Compare the checksum values sent by the server versus the computed local values
-		checksumHashes := transfer.requestedChecksums
-		if len(checksumHashes) == 0 {
-			// Added to make sure the list of checksum types are consistent with the logic
-			// when we created the hashes []io.Writer previously.
-			checksumHashes = []ChecksumType{AlgDefault}
-		}
-		fields := log.Fields{
-			"url": transfer.remoteURL.String(),
-			"job": transfer.job.ID(),
-		}
-		successCtr := 0
-		transferResults.ClientChecksums = make([]ChecksumInfo, 0, len(checksumHashes))
-		for idx, checksum := range checksumHashes {
-			computedValue := hashes[idx].(hash.Hash).Sum(nil)
-			transferResults.ClientChecksums = append(transferResults.ClientChecksums, ChecksumInfo{
-				Algorithm: checksum,
-				Value:     computedValue,
-			})
-			found := false
-			for _, checksumInfo := range transferResults.ServerChecksums {
-				if checksumInfo.Algorithm == checksum {
-					found = true
-					if !bytes.Equal(checksumInfo.Value, computedValue) {
-						mismatchErr := &ChecksumMismatchError{
-							Info: ChecksumInfo{
-								Algorithm: checksum,
-								Value:     computedValue,
-							},
-							ServerValue: checksumInfo.Value,
-						}
-						// Wrap ChecksumMismatchError as Transfer.ChecksumMismatch (post-transfer validation failure)
-						transferResults.Error = error_codes.NewTransfer_ChecksumMismatchError(mismatchErr)
-						log.WithFields(fields).Errorln(transferResults.Error)
-						break
-					} else {
-						successCtr++
-						log.WithFields(fields).Debugf("Checksum %s matches: %s",
-							HttpDigestFromChecksum(checksumInfo.Algorithm),
-							checksumValueToHttpDigest(checksumInfo.Algorithm, checksumInfo.Value),
-						)
-					}
-					break
+			}).Debugln("Skipping checksum verification for byte-range download")
+		} else {
+			// Fetch checksum of the downloaded file, compare it to the calculated.
+			attemptCnt := len(transferResults.Attempts)
+			gotChecksum := false
+			// Iterate through the various sources to fetch the checksums, starting with the successful one.
+			for idx := 0; idx < attemptCnt; idx++ {
+				url := transferUrls[attemptCnt-idx-1]
+				fields := log.Fields{
+					"url": url.String(),
+					"job": transfer.job.ID(),
+				}
+				ctx := context.WithValue(transfer.ctx, logFields("fields"), fields)
+				tokenContents := ""
+				if transfer.token != nil {
+					tokenContents, _ = transfer.token.Get()
+				}
+				if checksums, err := fetchChecksum(ctx, transfer.requestedChecksums, url, tokenContents, transfer.project); err == nil {
+					transferResults.ServerChecksums = checksums
+					gotChecksum = true
 				}
 			}
-			if !found {
-				log.WithFields(fields).Debugf("Client requested checksum %s but server did not provide it",
-					HttpDigestFromChecksum(checksum),
-				)
+			if !gotChecksum && transfer.requireChecksum {
+				transferResults.Error = errors.New("checksum is required but no endpoints were able to provide it")
 			}
-		}
-		// Can happen if all the checksum values we received are not known checksum algorithms
-		// we computed (the server can ignore our requested checksums and send its preferred ones)
-		if successCtr == 0 && transfer.requireChecksum && transferResults.Error == nil {
-			if len(transfer.requestedChecksums) == 0 {
-				log.WithFields(fields).Errorln(
-					"Client requires checksum to succeed and it was not provided by server; client computed crc32c value is",
-					hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)),
-				)
-			} else {
-				log.WithFields(fields).Errorln(
-					"Client requires checksum to succeed and it was not provided by server; client computed",
-					HttpDigestFromChecksum(transfer.requestedChecksums[0]), "value as",
-					checksumValueToHttpDigest(transfer.requestedChecksums[0], hashes[0].(hash.Hash).Sum(nil)),
-				)
+
+			// Compare the checksum values sent by the server versus the computed local values
+			checksumHashes := transfer.requestedChecksums
+			if len(checksumHashes) == 0 {
+				// Added to make sure the list of checksum types are consistent with the logic
+				// when we created the hashes []io.Writer previously.
+				checksumHashes = []ChecksumType{AlgDefault}
 			}
-			transferResults.Error = ErrServerChecksumMissing
-			// Otherwise, it's not an error so we should log what we did
-		} else if successCtr == 0 && len(transferResults.ServerChecksums) == 0 && transferResults.Error == nil {
-			log.WithFields(fields).Debugln(
-				"Client computed crc32c value is", hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)),
-				"(server did not provide any checksum values to compare)",
-			)
-		} else if successCtr == 0 && transferResults.Error == nil {
-			for _, checksumInfo := range transferResults.ServerChecksums {
-				log.WithFields(fields).Debugf(
-					"Server provided checksum not requested by client (cannot compare to local) %s=%x",
-					HttpDigestFromChecksum(checksumInfo.Algorithm),
-					checksumValueToHttpDigest(checksumInfo.Algorithm, checksumInfo.Value),
-				)
+			fields := log.Fields{
+				"url": transfer.remoteURL.String(),
+				"job": transfer.job.ID(),
 			}
-			if len(transfer.requestedChecksums) == 0 {
+			successCtr := 0
+			transferResults.ClientChecksums = make([]ChecksumInfo, 0, len(checksumHashes))
+			for idx, checksum := range checksumHashes {
+				computedValue := hashes[idx].(hash.Hash).Sum(nil)
+				transferResults.ClientChecksums = append(transferResults.ClientChecksums, ChecksumInfo{
+					Algorithm: checksum,
+					Value:     computedValue,
+				})
+				found := false
+				for _, checksumInfo := range transferResults.ServerChecksums {
+					if checksumInfo.Algorithm == checksum {
+						found = true
+						if !bytes.Equal(checksumInfo.Value, computedValue) {
+							mismatchErr := &ChecksumMismatchError{
+								Info: ChecksumInfo{
+									Algorithm: checksum,
+									Value:     computedValue,
+								},
+								ServerValue: checksumInfo.Value,
+							}
+							// Wrap ChecksumMismatchError as Transfer.ChecksumMismatch (post-transfer validation failure)
+							transferResults.Error = error_codes.NewTransfer_ChecksumMismatchError(mismatchErr)
+							log.WithFields(fields).Errorln(transferResults.Error)
+							break
+						} else {
+							successCtr++
+							log.WithFields(fields).Debugf("Checksum %s matches: %s",
+								HttpDigestFromChecksum(checksumInfo.Algorithm),
+								checksumValueToHttpDigest(checksumInfo.Algorithm, checksumInfo.Value),
+							)
+						}
+						break
+					}
+				}
+				if !found {
+					log.WithFields(fields).Debugf("Client requested checksum %s but server did not provide it",
+						HttpDigestFromChecksum(checksum),
+					)
+				}
+			}
+			// Can happen if all the checksum values we received are not known checksum algorithms
+			// we computed (the server can ignore our requested checksums and send its preferred ones)
+			if successCtr == 0 && transfer.requireChecksum && transferResults.Error == nil {
+				if len(transfer.requestedChecksums) == 0 {
+					log.WithFields(fields).Errorln(
+						"Client requires checksum to succeed and it was not provided by server; client computed crc32c value is",
+						hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)),
+					)
+				} else {
+					log.WithFields(fields).Errorln(
+						"Client requires checksum to succeed and it was not provided by server; client computed",
+						HttpDigestFromChecksum(transfer.requestedChecksums[0]), "value as",
+						checksumValueToHttpDigest(transfer.requestedChecksums[0], hashes[0].(hash.Hash).Sum(nil)),
+					)
+				}
+				transferResults.Error = ErrServerChecksumMissing
+				// Otherwise, it's not an error so we should log what we did
+			} else if successCtr == 0 && len(transferResults.ServerChecksums) == 0 && transferResults.Error == nil {
 				log.WithFields(fields).Debugln(
-					"Checksum algorithms provided by server were not the requested crc32c; client-computed crc32c value is",
-					hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)),
+					"Client computed crc32c value is", hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)),
+					"(server did not provide any checksum values to compare)",
 				)
-			} else {
-				log.WithFields(fields).Debugln(
-					"Checksum algorithms provided by server were not the requested ones; client computed",
-					HttpDigestFromChecksum(transfer.requestedChecksums[0]), "value as",
-					checksumValueToHttpDigest(transfer.requestedChecksums[0], hashes[0].(hash.Hash).Sum(nil)),
-				)
+			} else if successCtr == 0 && transferResults.Error == nil {
+				for _, checksumInfo := range transferResults.ServerChecksums {
+					log.WithFields(fields).Debugf(
+						"Server provided checksum not requested by client (cannot compare to local) %s=%x",
+						HttpDigestFromChecksum(checksumInfo.Algorithm),
+						checksumValueToHttpDigest(checksumInfo.Algorithm, checksumInfo.Value),
+					)
+				}
+				if len(transfer.requestedChecksums) == 0 {
+					log.WithFields(fields).Debugln(
+						"Checksum algorithms provided by server were not the requested crc32c; client-computed crc32c value is",
+						hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)),
+					)
+				} else {
+					log.WithFields(fields).Debugln(
+						"Checksum algorithms provided by server were not the requested ones; client computed",
+						HttpDigestFromChecksum(transfer.requestedChecksums[0]), "value as",
+						checksumValueToHttpDigest(transfer.requestedChecksums[0], hashes[0].(hash.Hash).Sum(nil)),
+					)
+				}
 			}
 		}
 	} else {
@@ -2631,8 +2705,9 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 // Verify that a file on disk matches the expected size. We ignore directories
 // and generic stat failures unless the file doesn't exist.
 func verifyFileSize(dest string, expectedSize int64, fields log.Fields) error {
-	if dest == os.DevNull || dest == "" {
-		log.WithFields(fields).Debugf("Skipping size check because destination is (%s)", os.DevNull)
+	// Skip size check when using custom writer (dest is empty) or writing to /dev/null
+	if dest == "" || dest == os.DevNull {
+		log.WithFields(fields).Debugf("Skipping size check because destination is (%s)", dest)
 		return nil
 	}
 
@@ -2670,13 +2745,14 @@ func verifyFileSize(dest string, expectedSize int64, fields log.Fields) error {
 //   - dest: the destination file to write the object to.
 //   - writer: An io.Writer object where the downloaded bytes will be written to.
 //   - bytesSoFar: the number of bytes already downloaded prior to invocation.  This is used to set the Range header for the subsequent request.
+//   - byteRangeEnd: the end byte offset for partial downloads (-1 means download to end of file).
 //   - totalSize: the expected size of the object.  If this is -1, the size is unknown.
 //   - token: the token to use for authoriation.
 //   - project: the project name to be used in the header identifying the transfer to the server.
-//   - hashes: the list of hashes to be used for checksum verification.
+//   - metadataChan: optional channel to receive early transfer metadata (ETag, size, etc.) before data transfer.
 //
 // Returns the downloaded size, time to 1st byte downloaded, serverVersion and an error if there is one
-func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, writer io.Writer, bytesSoFar int64, totalSize int64, token string, project string) (downloaded int64, timeToFirstByte time.Duration, cacheAge time.Duration, serverVersion string, err error) {
+func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, writer io.Writer, bytesSoFar int64, byteRangeEnd int64, totalSize int64, token string, project string, metadataChan chan<- TransferMetadata) (downloaded int64, timeToFirstByte time.Duration, cacheAge time.Duration, serverVersion string, err error) {
 	fields, ok := ctx.Value(logFields("fields")).(log.Fields)
 	if !ok {
 		fields = log.Fields{}
@@ -2783,9 +2859,16 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	}
 	req.Header.Set("X-Transfer-Status", "true")
 	req.Header.Set("X-Pelican-Timeout", headerTimeout.Round(time.Millisecond).String())
-	if bytesSoFar > 0 {
-		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", bytesSoFar))
-		log.Debugln("Resuming transfer starting at offset", bytesSoFar)
+	if bytesSoFar > 0 || byteRangeEnd >= 0 {
+		var rangeHeader string
+		if byteRangeEnd >= 0 {
+			rangeHeader = fmt.Sprintf("bytes=%d-%d", bytesSoFar, byteRangeEnd)
+			log.Debugln("Requesting byte range", bytesSoFar, "to", byteRangeEnd)
+		} else {
+			rangeHeader = fmt.Sprintf("bytes=%d-", bytesSoFar)
+			log.Debugln("Resuming transfer starting at offset", bytesSoFar)
+		}
+		req.Header.Set("Range", rangeHeader)
 	}
 	req.Header.Set("TE", "trailers")
 	req.Header.Set("User-Agent", userAgent)
@@ -2863,9 +2946,20 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 
 	// Size of the download
 	totalSize = resp.ContentLength
-	if bytesSoFar > 0 && resp.StatusCode == http.StatusPartialContent {
-		// In this case, totalSize is the size of the response, not the object
-		if totalSize < 0 {
+	if resp.StatusCode == http.StatusPartialContent && (bytesSoFar > 0 || byteRangeEnd >= 0) {
+		// For range responses, Content-Length is the size of the range,
+		// not the full object.  Reconstruct the expected total so the
+		// size check (bytesSoFar + downloaded == totalSize) passes:
+		//   - Resume (bytesSoFar > 0, byteRangeEnd < 0): totalSize is
+		//     the full object size = Content-Length + bytesSoFar.
+		//   - Bounded byte-range (byteRangeEnd >= 0): totalSize is
+		//     byteRangeEnd + 1 so that bytesSoFar + downloaded ==
+		//     totalSize when downloaded == rangeSize.
+		if byteRangeEnd >= 0 {
+			// Explicit byte-range: the size check will compare
+			// bytesSoFar + downloaded, so set totalSize = end + 1.
+			totalSize = byteRangeEnd + 1
+		} else if totalSize < 0 {
 			rangeStr := resp.Header.Get("Content-Range")
 			if rangeStr != "" {
 				parts := strings.SplitN(rangeStr, "/", 2)
@@ -2916,6 +3010,29 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	}
 	if callback != nil {
 		callback(dest, bytesSoFar, totalSize, false)
+	}
+
+	// Send early metadata to the optional channel before starting the actual data transfer
+	// This allows the caller to make decisions (e.g., verify ETag) before committing to the transfer
+	if metadataChan != nil {
+		metadata := TransferMetadata{
+			Size:         totalSize,
+			ETag:         resp.Header.Get("ETag"),
+			ContentType:  resp.Header.Get("Content-Type"),
+			CacheControl: resp.Header.Get("Cache-Control"),
+		}
+		// Parse Last-Modified header if present
+		if lmStr := resp.Header.Get("Last-Modified"); lmStr != "" {
+			if lm, parseErr := http.ParseTime(lmStr); parseErr == nil {
+				metadata.LastModified = lm
+			}
+		}
+		// Non-blocking send - if the channel is full, we proceed without blocking
+		select {
+		case metadataChan <- metadata:
+		default:
+			log.WithFields(fields).Debugln("Metadata channel full or nil, skipping early metadata send")
+		}
 	}
 
 	stoppedTransferTimeout := compatToDuration(param.Client_StoppedTransferTimeout.GetDuration(), "Client.StoppedTransferTimeout")
@@ -4519,6 +4636,10 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 						IsCollection: fsinfo.IsDir(),
 						ModTime:      fsinfo.ModTime(),
 					}
+					// Extract ETag if the underlying type supports it (gowebdav.File)
+					if webdavFile, ok := fsinfo.(interface{ ETag() string }); ok {
+						info.ETag = webdavFile.ETag()
+					}
 					break
 				} else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
 					err = errors.Wrapf(err, "Stat request not allowed for object at endpoint %s", endpoint.String())
@@ -4555,6 +4676,7 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 				Size:         info.Size,
 				IsCollection: info.IsCollection,
 				ModTime:      info.ModTime,
+				ETag:         info.ETag,
 			}, nil}
 
 		}(&destCopy)

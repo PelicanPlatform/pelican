@@ -55,7 +55,19 @@ type FileInfo struct {
 	Size         int64
 	ModTime      time.Time
 	IsCollection bool
+	ETag         string            `json:"etag,omitempty"`      // HTTP ETag header value
 	Checksums    map[string]string `json:"checksums,omitempty"` // Checksum type (HTTP digest name) to hex-encoded value
+}
+
+// TransferMetadata contains early metadata about a transfer received from the server
+// before the data transfer begins. This allows making decisions (e.g., ETag verification)
+// before committing to the full transfer.
+type TransferMetadata struct {
+	Size         int64     // Content-Length from response
+	ETag         string    // ETag header from response
+	LastModified time.Time // Last-Modified header from response
+	ContentType  string    // Content-Type header from response
+	CacheControl string    // Cache-Control header from response
 }
 
 // handleSchemelessIfNeeded is a helper function that updates the input discovery options to use a configured discovery
