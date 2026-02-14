@@ -27,30 +27,29 @@ import (
 
 func TestParseCacheControl_Empty(t *testing.T) {
 	cd := ParseCacheControl("")
-	assert.False(t, cd.NoStore)
-	assert.False(t, cd.NoCache)
-	assert.False(t, cd.Private)
-	assert.False(t, cd.MustRevalidate)
-	assert.False(t, cd.MaxAgeSet)
-	assert.False(t, cd.SMaxAgeSet)
+	assert.False(t, cd.NoStore())
+	assert.False(t, cd.NoCache())
+	assert.False(t, cd.Private())
+	assert.False(t, cd.MustRevalidate())
+	assert.False(t, cd.MaxAgeSet())
 }
 
 func TestParseCacheControl_NoStore(t *testing.T) {
 	cd := ParseCacheControl("no-store")
-	assert.True(t, cd.NoStore)
+	assert.True(t, cd.NoStore())
 	assert.False(t, cd.ShouldStore())
 }
 
 func TestParseCacheControl_Private(t *testing.T) {
 	cd := ParseCacheControl("private")
-	assert.True(t, cd.Private)
+	assert.True(t, cd.Private())
 	assert.False(t, cd.ShouldStore())
 }
 
 func TestParseCacheControl_MaxAge(t *testing.T) {
 	cd := ParseCacheControl("max-age=3600")
-	assert.True(t, cd.MaxAgeSet)
-	assert.Equal(t, 3600*time.Second, cd.MaxAge)
+	assert.True(t, cd.MaxAgeSet())
+	assert.Equal(t, 3600*time.Second, cd.MaxAge())
 
 	freshness, ok := cd.Freshness()
 	assert.True(t, ok)
@@ -59,70 +58,66 @@ func TestParseCacheControl_MaxAge(t *testing.T) {
 
 func TestParseCacheControl_SMaxAge(t *testing.T) {
 	cd := ParseCacheControl("s-maxage=300, max-age=3600")
-	assert.True(t, cd.SMaxAgeSet)
-	assert.True(t, cd.MaxAgeSet)
-	assert.Equal(t, 300*time.Second, cd.SMaxAge)
-	assert.Equal(t, 3600*time.Second, cd.MaxAge)
+	assert.True(t, cd.MaxAgeSet())
 
-	// s-maxage takes priority for shared caches
+	// max-age and s-maxage are merged; the maximum of the two is kept
 	freshness, ok := cd.Freshness()
 	assert.True(t, ok)
-	assert.Equal(t, 300*time.Second, freshness)
+	assert.Equal(t, 3600*time.Second, freshness)
 }
 
 func TestParseCacheControl_CaseInsensitive(t *testing.T) {
 	cd := ParseCacheControl("No-Store, MAX-AGE=60")
-	assert.True(t, cd.NoStore)
-	assert.True(t, cd.MaxAgeSet)
-	assert.Equal(t, 60*time.Second, cd.MaxAge)
+	assert.True(t, cd.NoStore())
+	assert.True(t, cd.MaxAgeSet())
+	assert.Equal(t, 60*time.Second, cd.MaxAge())
 }
 
 func TestParseCacheControl_MustRevalidate(t *testing.T) {
 	cd := ParseCacheControl("must-revalidate, max-age=0")
-	assert.True(t, cd.MustRevalidate)
-	assert.True(t, cd.MaxAgeSet)
-	assert.Equal(t, time.Duration(0), cd.MaxAge)
+	assert.True(t, cd.MustRevalidate())
+	assert.True(t, cd.MaxAgeSet())
+	assert.Equal(t, time.Duration(0), cd.MaxAge())
 }
 
 func TestParseCacheControl_NoCache(t *testing.T) {
 	cd := ParseCacheControl("no-cache")
-	assert.True(t, cd.NoCache)
+	assert.True(t, cd.NoCache())
 	assert.True(t, cd.ShouldStore(), "no-cache is allowed to be stored, just must revalidate")
 }
 
 func TestParseCacheControl_Complex(t *testing.T) {
 	cd := ParseCacheControl("public, max-age=86400, s-maxage=600, must-revalidate")
-	assert.False(t, cd.NoStore)
-	assert.False(t, cd.Private)
-	assert.True(t, cd.MustRevalidate)
-	assert.Equal(t, 86400*time.Second, cd.MaxAge)
-	assert.Equal(t, 600*time.Second, cd.SMaxAge)
+	assert.False(t, cd.NoStore())
+	assert.False(t, cd.Private())
+	assert.True(t, cd.MustRevalidate())
+	assert.Equal(t, 86400*time.Second, cd.MaxAge()) // max of 86400 and 600
 	assert.True(t, cd.ShouldStore())
 }
 
 func TestParseCacheControl_InvalidMaxAge(t *testing.T) {
 	cd := ParseCacheControl("max-age=abc")
-	assert.False(t, cd.MaxAgeSet)
-	assert.Equal(t, time.Duration(0), cd.MaxAge)
+	assert.False(t, cd.MaxAgeSet())
+	assert.Equal(t, time.Duration(0), cd.MaxAge())
 }
 
 func TestParseCacheControl_NegativeMaxAge(t *testing.T) {
 	cd := ParseCacheControl("max-age=-10")
-	assert.False(t, cd.MaxAgeSet)
+	assert.False(t, cd.MaxAgeSet())
 }
 
 func TestParseCacheControl_QuotedValue(t *testing.T) {
 	cd := ParseCacheControl(`max-age="3600"`)
-	assert.True(t, cd.MaxAgeSet)
-	assert.Equal(t, 3600*time.Second, cd.MaxAge)
+	assert.True(t, cd.MaxAgeSet())
+	assert.Equal(t, 3600*time.Second, cd.MaxAge())
 }
 
 func TestParseCacheControl_ExtraWhitespace(t *testing.T) {
 	cd := ParseCacheControl("  no-store ,  max-age = 60  , private  ")
-	assert.True(t, cd.NoStore)
-	assert.True(t, cd.Private)
-	assert.True(t, cd.MaxAgeSet)
-	assert.Equal(t, 60*time.Second, cd.MaxAge)
+	assert.True(t, cd.NoStore())
+	assert.True(t, cd.Private())
+	assert.True(t, cd.MaxAgeSet())
+	assert.Equal(t, 60*time.Second, cd.MaxAge())
 }
 
 func TestShouldStore(t *testing.T) {
@@ -170,10 +165,13 @@ func TestIsStale(t *testing.T) {
 		assert.True(t, cd.IsStale(time.Now().Add(-2*time.Hour)))
 	})
 
-	t.Run("s-maxage overrides max-age for shared cache", func(t *testing.T) {
-		cd := ParseCacheControl("max-age=86400, s-maxage=60")
-		// 5 minutes ago exceeds s-maxage=60s
-		assert.True(t, cd.IsStale(time.Now().Add(-5*time.Minute)))
+	t.Run("merged freshness uses maximum of max-age and s-maxage", func(t *testing.T) {
+		cd := ParseCacheControl("max-age=60, s-maxage=120")
+		// Merged freshness is max(60, 120) = 120s
+		// 90 seconds ago is within 120s => still fresh
+		assert.False(t, cd.IsStale(time.Now().Add(-90*time.Second)))
+		// 3 minutes ago exceeds 120s => stale
+		assert.True(t, cd.IsStale(time.Now().Add(-3*time.Minute)))
 	})
 
 	t.Run("no freshness info means fresh (data federation default)", func(t *testing.T) {
@@ -201,10 +199,10 @@ func TestFreshness(t *testing.T) {
 		assert.Equal(t, 600*time.Second, f)
 	})
 
-	t.Run("s-maxage takes precedence", func(t *testing.T) {
+	t.Run("max-age and s-maxage merged to maximum", func(t *testing.T) {
 		cd := ParseCacheControl("max-age=3600, s-maxage=120")
 		f, ok := cd.Freshness()
 		assert.True(t, ok)
-		assert.Equal(t, 120*time.Second, f)
+		assert.Equal(t, 3600*time.Second, f)
 	})
 }

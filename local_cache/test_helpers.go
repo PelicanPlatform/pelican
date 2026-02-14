@@ -20,11 +20,13 @@ package local_cache
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -32,10 +34,38 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
+// BackdateObject shifts the Completed timestamp of a cached object backward
+// by the given duration. This is useful for testing the Age response header
+// without waiting for wall-clock time to elapse.
+func (pc *PersistentCache) BackdateObject(objectPath string, age time.Duration) error {
+	pelicanURL := pc.normalizePath(objectPath)
+	objectHash := ComputeObjectHash(pelicanURL)
+
+	etag, err := pc.db.GetLatestETag(objectHash)
+	if err != nil {
+		return fmt.Errorf("BackdateObject: lookup ETag: %w", err)
+	}
+
+	instanceHash := ComputeInstanceHash(etag, objectHash)
+	meta, err := pc.storage.GetMetadata(instanceHash)
+	if err != nil {
+		return fmt.Errorf("BackdateObject: get metadata: %w", err)
+	}
+	if meta == nil {
+		return fmt.Errorf("BackdateObject: object %q not cached", objectPath)
+	}
+
+	meta.Completed = meta.Completed.Add(-age)
+	if err := pc.storage.SetMetadata(instanceHash, meta); err != nil {
+		return fmt.Errorf("BackdateObject: set metadata: %w", err)
+	}
+	return nil
+}
+
 // InitIssuerKeyForTests initializes issuer keys for testing.
 // This must be called before creating a CacheDB or EncryptionManager.
 // It generates a new issuer key in a temporary directory and registers a cleanup.
-func InitIssuerKeyForTests(t *testing.T) {
+func InitIssuerKeyForTests(t testing.TB) {
 	t.Helper()
 
 	// Create a temp directory for the issuer keys
@@ -115,8 +145,8 @@ func CheckCacheObjectIsCached(ctx context.Context, socketPath, objectPath string
 		return false, err
 	}
 
-	// Add header to indicate we don't want to trigger a download
-	req.Header.Set("X-Pelican-NoDownload", "true")
+	// Only return a stored response; do not fetch from origin (RFC 7234 §5.2.1.7)
+	req.Header.Set("Cache-Control", "only-if-cached")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -124,6 +154,6 @@ func CheckCacheObjectIsCached(ctx context.Context, socketPath, objectPath string
 	}
 	defer resp.Body.Close()
 
-	// 200 OK means object is cached, 404/503 means it's not in cache
+	// 200 OK means object is cached, 504 means it's not (RFC 7234 only-if-cached)
 	return resp.StatusCode == http.StatusOK, nil
 }

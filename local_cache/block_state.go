@@ -19,6 +19,7 @@
 package local_cache
 
 import (
+	"context"
 	"sync"
 
 	"github.com/RoaringBitmap/roaring"
@@ -35,9 +36,20 @@ import (
 // clear-fetch-verify cycle.  Subsequent callers acquire repairMu, re-check
 // block availability, and skip the repair if it has already been done.
 type ObjectBlockState struct {
-	mu       sync.RWMutex
-	bitmap   *roaring.Bitmap
-	repairMu sync.Mutex
+	mu       sync.RWMutex    // protects bitmap, downloading
+	bitmap   *roaring.Bitmap // guarded by mu
+	repairMu sync.Mutex      // serializes repair operations; independent of mu
+
+	// cond is broadcast whenever a block is added (via Add/AddRange)
+	// or downloading transitions to false (via ClearDownloading).
+	// Waiters hold mu.RLock via cond (cond is bound to mu.RLocker()).
+	cond *sync.Cond
+
+	// downloading is true while a background download is writing
+	// blocks into this bitmap.  When true, WaitForBlock will block
+	// until the requested block appears or downloading becomes false.
+	// Guarded by mu (read under RLock, written under Lock).
+	downloading bool
 }
 
 // NewObjectBlockState wraps an existing bitmap in a thread-safe container.
@@ -45,7 +57,9 @@ func NewObjectBlockState(bitmap *roaring.Bitmap) *ObjectBlockState {
 	if bitmap == nil {
 		bitmap = roaring.New()
 	}
-	return &ObjectBlockState{bitmap: bitmap}
+	obs := &ObjectBlockState{bitmap: bitmap}
+	obs.cond = sync.NewCond(obs.mu.RLocker())
+	return obs
 }
 
 // Contains returns true if the given block is marked as downloaded.
@@ -83,15 +97,17 @@ func (obs *ObjectBlockState) MissingInRange(start, end uint32) []uint32 {
 // Add marks a single block as downloaded.
 func (obs *ObjectBlockState) Add(block uint32) {
 	obs.mu.Lock()
-	defer obs.mu.Unlock()
 	obs.bitmap.Add(block)
+	obs.mu.Unlock()
+	obs.cond.Broadcast()
 }
 
 // AddRange marks all blocks in [start, end] as downloaded.
 func (obs *ObjectBlockState) AddRange(start, end uint32) {
 	obs.mu.Lock()
-	defer obs.mu.Unlock()
 	obs.bitmap.AddRange(uint64(start), uint64(end)+1)
+	obs.mu.Unlock()
+	obs.cond.Broadcast()
 }
 
 // Remove marks a single block as not-downloaded.
@@ -134,6 +150,88 @@ func (obs *ObjectBlockState) LockRepair() {
 // UnlockRepair releases the per-object repair mutex.
 func (obs *ObjectBlockState) UnlockRepair() {
 	obs.repairMu.Unlock()
+}
+
+// SetDownloading marks this object as having a background download in
+// progress.  WaitForBlock will block while downloading is true.
+func (obs *ObjectBlockState) SetDownloading() {
+	obs.mu.Lock()
+	obs.downloading = true
+	obs.mu.Unlock()
+}
+
+// ClearDownloading marks the background download as finished and wakes
+// any goroutines waiting in WaitForBlock.
+func (obs *ObjectBlockState) ClearDownloading() {
+	obs.mu.Lock()
+	obs.downloading = false
+	obs.mu.Unlock()
+	obs.cond.Broadcast()
+}
+
+// WaitForBlock waits until the specified block is available in the bitmap.
+// It returns true if the block is available, false if the context was
+// cancelled or the background download finished without producing the
+// block.  This avoids starting duplicate range downloads when a full
+// download is already in progress.
+//
+// The implementation spawns a goroutine to wait on the sync.Cond (which
+// cannot be interrupted) and selects between it and ctx.Done().  On
+// context cancellation, we signal the goroutine via a done channel and
+// broadcast the cond, then wait for the goroutine to acknowledge exit
+// before returning.  This guarantees no goroutine leak.
+func (obs *ObjectBlockState) WaitForBlock(ctx context.Context, block uint32) bool {
+	// Fast path: block already available
+	obs.mu.RLock()
+	if obs.bitmap.Contains(block) {
+		obs.mu.RUnlock()
+		return true
+	}
+	if !obs.downloading {
+		obs.mu.RUnlock()
+		return false
+	}
+	obs.mu.RUnlock()
+
+	// Slow path: wait for the cond broadcast from Add/ClearDownloading.
+	//
+	// sync.Cond.Wait cannot be interrupted by context cancellation, so
+	// we run the cond loop in a separate goroutine.  The done channel
+	// lets the caller signal the goroutine to stop, and exited lets
+	// the caller wait for the goroutine to release the RLock.
+	ready := make(chan bool, 1)
+	done := make(chan struct{})   // closed by caller on ctx cancellation
+	exited := make(chan struct{}) // closed by goroutine on exit
+	go func() {
+		defer close(exited)
+		obs.mu.RLock()
+		defer obs.mu.RUnlock()
+		for !obs.bitmap.Contains(block) && obs.downloading {
+			// Check if the caller has cancelled before sleeping.
+			select {
+			case <-done:
+				return
+			default:
+			}
+			obs.cond.Wait()
+		}
+		select {
+		case ready <- obs.bitmap.Contains(block):
+		case <-done:
+		}
+	}()
+
+	select {
+	case found := <-ready:
+		return found
+	case <-ctx.Done():
+		close(done)
+		// Wake the goroutine so it unblocks from cond.Wait and sees done.
+		obs.cond.Broadcast()
+		// Wait for the goroutine to release the RLock and exit.
+		<-exited
+		return false
+	}
 }
 
 // GetSharedBlockState returns the shared, thread-safe block state for the

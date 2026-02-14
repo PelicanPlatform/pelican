@@ -59,28 +59,12 @@ const (
 type StorageManager struct {
 	db         *CacheDB
 	objectsDir string
-	mu         sync.RWMutex
-
-	// Active downloads tracking
-	downloads   map[string]*activeObjectDownload
-	downloadsMu sync.RWMutex
 
 	// Shared per-object block availability state.  All RangeReaders for the
 	// same instanceHash share one *ObjectBlockState so that block additions and
 	// removals are immediately visible across goroutines.
 	blockStates   map[string]*ObjectBlockState
 	blockStatesMu sync.Mutex
-}
-
-// activeObjectDownload tracks an in-progress download
-type activeObjectDownload struct {
-	instanceHash    string
-	encryptor   *BlockEncryptor
-	file        *os.File
-	mu          sync.Mutex
-	totalBlocks uint32
-	completed   bool
-	lastAccess  time.Time
 }
 
 // NewStorageManager creates a new storage manager
@@ -90,7 +74,6 @@ func NewStorageManager(db *CacheDB, baseDir string) (*StorageManager, error) {
 	return &StorageManager{
 		db:          db,
 		objectsDir:  objectsDir,
-		downloads:   make(map[string]*activeObjectDownload),
 		blockStates: make(map[string]*ObjectBlockState),
 	}, nil
 }
@@ -249,7 +232,9 @@ func (sm *StorageManager) InitDiskStorage(ctx context.Context, instanceHash stri
 	if err := sm.db.SetBlockState(instanceHash, roaring.New()); err != nil {
 		file.Close()
 		os.Remove(objectPath)
-		sm.db.DeleteMetadata(instanceHash)
+		if delErr := sm.db.DeleteMetadata(instanceHash); delErr != nil {
+			log.Warnf("Failed to clean up metadata for %s: %v", instanceHash, delErr)
+		}
 		return nil, errors.Wrap(err, "failed to initialize block state")
 	}
 
@@ -671,15 +656,15 @@ func (sm *StorageManager) HasObject(instanceHash string) (bool, error) {
 
 // ObjectReader provides a reader interface for cached objects
 type ObjectReader struct {
-	sm         *StorageManager
-	instanceHash   string
-	meta       *CacheMetadata
-	position   int64
-	length     int64
-	encryptor  *BlockEncryptor
-	file       *os.File
-	bitmap     *roaring.Bitmap
-	inlineData []byte
+	sm           *StorageManager
+	instanceHash string
+	meta         *CacheMetadata
+	position     int64
+	length       int64
+	encryptor    *BlockEncryptor
+	file         *os.File
+	bitmap       *roaring.Bitmap
+	inlineData   []byte
 }
 
 // NewObjectReader creates a reader for a cached object
@@ -693,11 +678,11 @@ func (sm *StorageManager) NewObjectReader(instanceHash string) (*ObjectReader, e
 	}
 
 	reader := &ObjectReader{
-		sm:       sm,
+		sm:           sm,
 		instanceHash: instanceHash,
-		meta:     meta,
-		position: 0,
-		length:   meta.ContentLength,
+		meta:         meta,
+		position:     0,
+		length:       meta.ContentLength,
 	}
 
 	if meta.StorageMode == StorageModeInline {
@@ -863,12 +848,12 @@ func (r *ObjectReader) ETag() string {
 // This is used for efficient streaming downloads with block-level encryption.
 type BlockWriter struct {
 	sm           *StorageManager
-	instanceHash     string
+	instanceHash string
 	file         *os.File
 	encryptor    *BlockEncryptor
 	meta         *CacheMetadata
-	bitmap       *roaring.Bitmap     // Snapshot used for skip-detection (optimization)
-	sharedState  *ObjectBlockState   // Shared state updated after each block write
+	bitmap       *roaring.Bitmap   // Snapshot used for skip-detection (optimization)
+	sharedState  *ObjectBlockState // Shared state updated after each block write
 	buffer       []byte
 	currentBlock uint32
 	totalBlocks  uint32
@@ -943,7 +928,7 @@ func (sm *StorageManager) NewBlockWriter(instanceHash string, startBlock uint32,
 
 	return &BlockWriter{
 		sm:           sm,
-		instanceHash:     instanceHash,
+		instanceHash: instanceHash,
 		file:         file,
 		encryptor:    encryptor,
 		meta:         meta,
@@ -998,8 +983,13 @@ func (bw *BlockWriter) writeCurrentBlock() error {
 		return nil
 	}
 
-	// Check if this block already exists in the bitmap
+	// Check if this block already exists — first the static snapshot
+	// (cheap), then the live shared state which other concurrent writers
+	// may have updated since we started.
 	alreadyExists := bw.bitmap != nil && bw.bitmap.Contains(bw.currentBlock)
+	if !alreadyExists && bw.sharedState != nil {
+		alreadyExists = bw.sharedState.Contains(bw.currentBlock)
+	}
 
 	if !alreadyExists {
 		// Encrypt the block

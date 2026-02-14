@@ -55,7 +55,7 @@ type FileInfo struct {
 	Size         int64
 	ModTime      time.Time
 	IsCollection bool
-	ETag         string            `json:"etag,omitempty"`     // HTTP ETag header value
+	ETag         string            `json:"etag,omitempty"`      // HTTP ETag header value
 	Checksums    map[string]string `json:"checksums,omitempty"` // Checksum type (HTTP digest name) to hex-encoded value
 }
 

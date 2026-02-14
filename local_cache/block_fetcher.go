@@ -65,12 +65,12 @@ const (
 // TransferEngine.  This prevents concurrent doFetch goroutines (e.g. during
 // auto-repair) from stealing results off a shared Results() channel.
 type BlockFetcherV2 struct {
-	storage   *StorageManager
-	instanceHash  string
-	originURL string
-	token     string
-	meta      *CacheMetadata
-	tc        *client.TransferClient
+	storage      *StorageManager
+	instanceHash string
+	originURL    string
+	token        string
+	meta         *CacheMetadata
+	tc           *client.TransferClient
 
 	// Prefetch configuration
 	prefetchTimeout time.Duration
@@ -104,9 +104,6 @@ type fetchOperation struct {
 	// Chunk completion tracking - maps chunk index to a channel that will be closed when complete
 	// Using close() for notification is safer than sending values (no panic on closed channel)
 	chunkComplete map[int64]chan struct{}
-
-	// Clients waiting for this fetch
-	clientCount atomic.Int32
 
 	// Completion state
 	done      bool
@@ -174,7 +171,7 @@ func NewBlockFetcherV2(
 
 	return &BlockFetcherV2{
 		storage:         storage,
-		instanceHash:        instanceHash,
+		instanceHash:    instanceHash,
 		originURL:       originURL,
 		token:           token,
 		meta:            meta,

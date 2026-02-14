@@ -37,6 +37,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/RoaringBitmap/roaring"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -117,10 +118,10 @@ type ConsistencyChecker struct {
 	statsMu sync.RWMutex
 
 	// Control
-	running             atomic.Bool
-	stopCh              chan struct{}
-	lastMetadataScan    atomic.Int64 // Unix timestamp of last metadata scan start
-	lastDataScan        atomic.Int64 // Unix timestamp of last data scan start
+	running          atomic.Bool
+	stopCh           chan struct{}
+	lastMetadataScan atomic.Int64 // Unix timestamp of last metadata scan start
+	lastDataScan     atomic.Int64 // Unix timestamp of last data scan start
 }
 
 // ConsistencyConfig holds configuration for the consistency checker
@@ -1012,7 +1013,8 @@ func (cc *ConsistencyChecker) calculateAndStoreChecksums(
 		}
 	} else {
 		// Read block-by-block for disk storage
-		bitmap, err := cc.db.GetBlockState(instanceHash)
+		var bitmap *roaring.Bitmap
+		bitmap, err = cc.db.GetBlockState(instanceHash)
 		if err != nil {
 			return errors.Wrap(err, "failed to get block state")
 		}

@@ -127,14 +127,14 @@ func FormatContentRange(start, end, total int64) string {
 
 // RangeReader provides a reader for range requests with on-demand fetching
 type RangeReader struct {
-	storage     *StorageManager
-	instanceHash    string
-	meta        *CacheMetadata
-	start       int64
-	end         int64
-	position    int64
-	encryptor   *BlockEncryptor
-	blockState  *ObjectBlockState
+	storage      *StorageManager
+	instanceHash string
+	meta         *CacheMetadata
+	start        int64
+	end          int64
+	position     int64
+	encryptor    *BlockEncryptor
+	blockState   *ObjectBlockState
 
 	// Fetch callback for missing blocks
 	fetchBlocks func(ctx context.Context, startBlock, endBlock uint32) error
@@ -145,9 +145,20 @@ type RangeReader struct {
 	reader io.ReadSeeker
 	size   int64
 
+	// noStoreReader is the read end of an io.Pipe for streaming no-store
+	// responses.  Unlike 'reader' (which is seekable), this is a forward-
+	// only stream.  When set, Read delegates here and Seek returns an error.
+	noStoreReader io.ReadCloser
+
 	// onClose is called when the reader is closed (e.g., to deregister
 	// from the BlockFetcherV2 client tracking).
 	onClose func()
+
+	// repairAttempted is set after the first auto-repair attempt. A second
+	// corrupt read returns the error directly instead of triggering another
+	// re-download, preventing an unbounded re-fetch loop on persistent
+	// disk corruption.
+	repairAttempted bool
 
 	mu sync.Mutex
 }
@@ -201,15 +212,15 @@ func NewRangeReader(
 	}
 
 	return &RangeReader{
-		storage:     storage,
-		instanceHash:    instanceHash,
-		meta:        meta,
-		start:       start,
-		end:         end,
-		position:    start,
-		encryptor:   encryptor,
-		blockState:  blockState,
-		fetchBlocks: fetchBlocks,
+		storage:      storage,
+		instanceHash: instanceHash,
+		meta:         meta,
+		start:        start,
+		end:          end,
+		position:     start,
+		encryptor:    encryptor,
+		blockState:   blockState,
+		fetchBlocks:  fetchBlocks,
 	}, nil
 }
 
@@ -223,7 +234,12 @@ func (rr *RangeReader) ReadContext(ctx context.Context, p []byte) (n int, err er
 	rr.mu.Lock()
 	defer rr.mu.Unlock()
 
-	// Pass-through mode (no-store responses): delegate to in-memory reader
+	// Streaming no-store mode: forward-only pipe from origin
+	if rr.noStoreReader != nil {
+		return rr.noStoreReader.Read(p)
+	}
+
+	// Pass-through mode (seekable no-store responses): delegate to in-memory reader
 	if rr.reader != nil {
 		return rr.reader.Read(p)
 	}
@@ -292,29 +308,45 @@ func (rr *RangeReader) ReadContext(ctx context.Context, p []byte) (n int, err er
 }
 
 // ensureBlocks checks that all blocks in [startBlock, endBlock] are in the
-// shared block state.  Missing blocks are fetched from origin via fetchBlocks.
+// shared block state.  If a background download is in progress (indicated by
+// ObjectBlockState.downloading), it waits for each block to be written before
+// falling back to an on-demand fetch from the origin.
 func (rr *RangeReader) ensureBlocks(ctx context.Context, startBlock, endBlock uint32) error {
 	for block := startBlock; block <= endBlock; block++ {
-		if !rr.blockState.Contains(block) {
-			if rr.fetchBlocks == nil {
-				return errors.Errorf("block %d not available and no fetch callback", block)
-			}
-			// Find contiguous range of missing blocks
-			fetchStart := block
-			fetchEnd := block
-			for fetchEnd < endBlock && !rr.blockState.Contains(fetchEnd+1) {
-				fetchEnd++
-			}
-
-			log.Debugf("Fetching blocks %d-%d for range read", fetchStart, fetchEnd)
-			if err := rr.fetchBlocks(ctx, fetchStart, fetchEnd); err != nil {
-				return errors.Wrapf(err, "failed to fetch blocks %d-%d", fetchStart, fetchEnd)
-			}
-
-			// The shared block state is updated by the BlockWriter,
-			// so we don't need to manually update here.
-			block = fetchEnd
+		if rr.blockState.Contains(block) {
+			continue
 		}
+
+		// Try waiting for the background download to produce this block.
+		if rr.blockState.WaitForBlock(ctx, block) {
+			continue
+		}
+
+		// If the context is done, bail out.
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		// Block still not available and no background download in
+		// progress — fall back to fetching from origin.
+		if rr.fetchBlocks == nil {
+			return errors.Errorf("block %d not available and no fetch callback", block)
+		}
+		// Find contiguous range of missing blocks
+		fetchStart := block
+		fetchEnd := block
+		for fetchEnd < endBlock && !rr.blockState.Contains(fetchEnd+1) {
+			fetchEnd++
+		}
+
+		log.Debugf("Fetching blocks %d-%d for range read", fetchStart, fetchEnd)
+		if err := rr.fetchBlocks(ctx, fetchStart, fetchEnd); err != nil {
+			return errors.Wrapf(err, "failed to fetch blocks %d-%d", fetchStart, fetchEnd)
+		}
+
+		// The shared block state is updated by the BlockWriter,
+		// so we don't need to manually update here.
+		block = fetchEnd
 	}
 	return nil
 }
@@ -325,6 +357,14 @@ func (rr *RangeReader) ensureBlocks(ctx context.Context, startBlock, endBlock ui
 // re-checks whether the blocks are actually corrupt (another goroutine may
 // have already repaired them).
 func (rr *RangeReader) repairAndRetry(ctx context.Context, startBlock, endBlock uint32, toRead int, origErr error) ([]byte, error) {
+	// Circuit breaker: only attempt auto-repair once per reader.  Persistent
+	// disk corruption (e.g. a bad sector) would otherwise cause an unbounded
+	// re-fetch loop since every Read() call triggers a new repair attempt.
+	if rr.repairAttempted {
+		return nil, errors.Wrap(origErr, "auto-repair already attempted for this reader; refusing to retry")
+	}
+	rr.repairAttempted = true
+
 	if rr.fetchBlocks == nil {
 		log.Warnf("Auto-repair: skipping repair for %s — no fetch callback available", rr.instanceHash)
 		return nil, origErr // can't repair without a fetch callback
@@ -394,9 +434,14 @@ func (rr *RangeReader) repairAndRetry(ctx context.Context, startBlock, endBlock 
 // Close closes the range reader
 func (rr *RangeReader) Close() error {
 	var err error
+	if rr.noStoreReader != nil {
+		err = rr.noStoreReader.Close()
+	}
 	if rr.reader != nil {
 		if closer, ok := rr.reader.(io.Closer); ok {
-			err = closer.Close()
+			if closeErr := closer.Close(); closeErr != nil && err == nil {
+				err = closeErr
+			}
 		}
 	}
 	if rr.onClose != nil {
@@ -409,6 +454,11 @@ func (rr *RangeReader) Close() error {
 func (rr *RangeReader) Seek(offset int64, whence int) (int64, error) {
 	rr.mu.Lock()
 	defer rr.mu.Unlock()
+
+	// Streaming no-store mode: cannot seek a pipe
+	if rr.noStoreReader != nil {
+		return 0, errors.New("seek not supported on streaming no-store response")
+	}
 
 	// Pass-through mode: delegate to the underlying reader
 	if rr.reader != nil {
@@ -440,7 +490,7 @@ func (rr *RangeReader) Seek(offset int64, whence int) (int64, error) {
 
 // ContentLength returns the length of the range
 func (rr *RangeReader) ContentLength() int64 {
-	if rr.reader != nil {
+	if rr.noStoreReader != nil || rr.reader != nil {
 		return rr.size
 	}
 	return rr.end - rr.start + 1

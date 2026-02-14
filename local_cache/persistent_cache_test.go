@@ -270,6 +270,116 @@ func TestCacheDBBlockState(t *testing.T) {
 	assert.True(t, bitmap.Contains(10))
 }
 
+func TestCacheDBAtomicBlockUsage(t *testing.T) {
+	// Verifies that MarkBlocksDownloaded atomically updates both the block
+	// bitmap and the usage counter in a single BadgerDB transaction.
+	InitIssuerKeyForTests(t)
+
+	tmpDir, err := os.MkdirTemp("", "cachedb_atomic_usage_*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db, err := NewCacheDB(ctx, tmpDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	instanceHash := "atomic_usage_test_hash"
+	storageID := StorageIDPrimaryDisk
+	namespaceID := uint32(7)
+
+	// Set metadata first (10 blocks * 4080 = 40800 bytes, but content is 40000 so last block is partial)
+	contentLength := int64(40000)
+	totalBlocks := CalculateBlockCount(contentLength) // 10 blocks
+	meta := &CacheMetadata{
+		ContentLength: contentLength,
+		StorageMode:   StorageModeDisk,
+		StorageID:     storageID,
+		NamespaceID:   namespaceID,
+		SourceURL:     "pelican://test.example.com/data",
+	}
+	err = db.SetMetadata(instanceHash, meta)
+	require.NoError(t, err)
+
+	// Usage starts at zero
+	usage, err := db.GetUsage(storageID, namespaceID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), usage)
+
+	// Mark first 3 full blocks (0, 1, 2) — each is BlockDataSize bytes
+	err = db.MarkBlocksDownloaded(instanceHash, 0, 2)
+	require.NoError(t, err)
+
+	usage, err = db.GetUsage(storageID, namespaceID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3*BlockDataSize), usage, "3 full blocks should add 3*BlockDataSize bytes")
+
+	// Re-mark the same blocks — usage should NOT increase (idempotent)
+	err = db.MarkBlocksDownloaded(instanceHash, 0, 2)
+	require.NoError(t, err)
+
+	usage, err = db.GetUsage(storageID, namespaceID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3*BlockDataSize), usage, "re-marking same blocks should not change usage")
+
+	// Mark the last block (partial: 40000 - 9*4080 = 3280 bytes)
+	lastBlock := totalBlocks - 1
+	err = db.MarkBlocksDownloaded(instanceHash, lastBlock, lastBlock)
+	require.NoError(t, err)
+
+	lastBlockSize := contentLength - int64(lastBlock)*int64(BlockDataSize) // 40000 - 36720 = 3280
+	expectedUsage := int64(3*BlockDataSize) + lastBlockSize
+	usage, err = db.GetUsage(storageID, namespaceID)
+	require.NoError(t, err)
+	assert.Equal(t, expectedUsage, usage, "last partial block should add only its actual size")
+
+	// Mark remaining middle blocks (3 through lastBlock-1, all full)
+	if lastBlock > 3 {
+		err = db.MarkBlocksDownloaded(instanceHash, 3, lastBlock-1)
+		require.NoError(t, err)
+	}
+
+	// Now all blocks are marked — total usage should equal contentLength
+	usage, err = db.GetUsage(storageID, namespaceID)
+	require.NoError(t, err)
+	assert.Equal(t, contentLength, usage, "total usage should equal content length when all blocks are present")
+}
+
+func TestCacheDBAtomicBlockUsage_NoMetadata(t *testing.T) {
+	// Verifies that MarkBlocksDownloaded still works when metadata is not set
+	// (usage tracking is skipped gracefully).
+	InitIssuerKeyForTests(t)
+
+	tmpDir, err := os.MkdirTemp("", "cachedb_atomic_nometa_*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db, err := NewCacheDB(ctx, tmpDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	instanceHash := "no_meta_test_hash"
+
+	// Mark blocks without setting metadata first — should succeed
+	err = db.MarkBlocksDownloaded(instanceHash, 0, 5)
+	require.NoError(t, err)
+
+	// Blocks should be marked
+	bitmap, err := db.GetBlockState(instanceHash)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(6), bitmap.GetCardinality())
+
+	// Usage should be zero (no metadata to derive storage/namespace)
+	usage, err := db.GetUsage(StorageIDPrimaryDisk, 1)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), usage)
+}
+
 func TestCacheDBUsageCounter(t *testing.T) {
 	// Initialize issuer keys for encryption
 	InitIssuerKeyForTests(t)
@@ -542,12 +652,12 @@ func TestEvictionManager(t *testing.T) {
 	})
 
 	// Test recording access
-	eviction.RecordAccess("instance_hash_1")
-	eviction.RecordAccess("instance_hash_2")
+	require.NoError(t, eviction.RecordAccess("instance_hash_1"))
+	require.NoError(t, eviction.RecordAccess("instance_hash_2"))
 
 	// Test adding usage
-	eviction.AddUsage(StorageIDPrimaryDisk, 1, 100000)
-	eviction.AddUsage(StorageIDPrimaryDisk, 2, 200000)
+	require.NoError(t, eviction.AddUsage(StorageIDPrimaryDisk, 1, 100000))
+	require.NoError(t, eviction.AddUsage(StorageIDPrimaryDisk, 2, 200000))
 
 	// Get stats
 	stats := eviction.GetStats()

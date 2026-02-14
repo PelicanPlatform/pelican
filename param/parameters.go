@@ -212,10 +212,12 @@ var runtimeConfigurableMap = map[string]bool{
 	"IssuerKey": false,
 	"IssuerKeysDirectory": false,
 	"LocalCache.DataLocation": false,
+	"LocalCache.DefaultMaxAge": false,
 	"LocalCache.HighWaterMarkPercentage": false,
 	"LocalCache.LowWaterMarkPercentage": false,
 	"LocalCache.MaxConcurrentPrefetch": false,
 	"LocalCache.PrefetchTimeout": false,
+	"LocalCache.RevalidationJitter": false,
 	"LocalCache.RunLocation": false,
 	"LocalCache.Size": false,
 	"LocalCache.Socket": false,
@@ -276,6 +278,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"OIDC.Scopes": false,
 	"OIDC.TokenEndpoint": false,
 	"OIDC.UserInfoEndpoint": false,
+	"Origin.CacheControl": false,
 	"Origin.Concurrency": false,
 	"Origin.ConcurrencyDegradedThreshold": false,
 	"Origin.DbLocation": false,
@@ -641,6 +644,8 @@ func (sP StringParam) GetString() string {
 			return config.OIDC.TokenEndpoint
 		case "OIDC.UserInfoEndpoint":
 			return config.OIDC.UserInfoEndpoint
+		case "Origin.CacheControl":
+			return config.Origin.CacheControl
 		case "Origin.DbLocation":
 			return config.Origin.DbLocation
 		case "Origin.ExportVolume":
@@ -929,6 +934,8 @@ func (iP IntParam) GetInt() int {
 			return config.LocalCache.LowWaterMarkPercentage
 		case "LocalCache.MaxConcurrentPrefetch":
 			return config.LocalCache.MaxConcurrentPrefetch
+		case "LocalCache.RevalidationJitter":
+			return config.LocalCache.RevalidationJitter
 		case "MinimumDownloadSpeed":
 			return config.MinimumDownloadSpeed
 		case "Monitoring.LabelLimit":
@@ -1236,6 +1243,8 @@ func (dP DurationParam) GetDuration() time.Duration {
 			return config.Director.StatTimeout
 		case "Federation.TopologyReloadInterval":
 			return config.Federation.TopologyReloadInterval
+		case "LocalCache.DefaultMaxAge":
+			return config.LocalCache.DefaultMaxAge
 		case "LocalCache.PrefetchTimeout":
 			return config.LocalCache.PrefetchTimeout
 		case "Logging.Client.ProgressInterval":
@@ -1464,10 +1473,12 @@ var allParameterNames = []string{
 	"IssuerKey",
 	"IssuerKeysDirectory",
 	"LocalCache.DataLocation",
+	"LocalCache.DefaultMaxAge",
 	"LocalCache.HighWaterMarkPercentage",
 	"LocalCache.LowWaterMarkPercentage",
 	"LocalCache.MaxConcurrentPrefetch",
 	"LocalCache.PrefetchTimeout",
+	"LocalCache.RevalidationJitter",
 	"LocalCache.RunLocation",
 	"LocalCache.Size",
 	"LocalCache.Socket",
@@ -1528,6 +1539,7 @@ var allParameterNames = []string{
 	"OIDC.Scopes",
 	"OIDC.TokenEndpoint",
 	"OIDC.UserInfoEndpoint",
+	"Origin.CacheControl",
 	"Origin.Concurrency",
 	"Origin.ConcurrencyDegradedThreshold",
 	"Origin.DbLocation",
@@ -1915,7 +1927,6 @@ var (
 	LocalCache_HighWaterMarkPercentage = IntParam{"LocalCache.HighWaterMarkPercentage"}
 	LocalCache_LowWaterMarkPercentage = IntParam{"LocalCache.LowWaterMarkPercentage"}
 	LocalCache_MaxConcurrentPrefetch = IntParam{"LocalCache.MaxConcurrentPrefetch"}
-	LocalCache_DefaultMaxAge = DurationParam{"LocalCache.DefaultMaxAge"}
 	LocalCache_RevalidationJitter = IntParam{"LocalCache.RevalidationJitter"}
 	MinimumDownloadSpeed = IntParam{"MinimumDownloadSpeed"}
 	Monitoring_LabelLimit = IntParam{"Monitoring.LabelLimit"}
@@ -2045,6 +2056,7 @@ var (
 	Director_RegistryQueryInterval = DurationParam{"Director.RegistryQueryInterval"}
 	Director_StatTimeout = DurationParam{"Director.StatTimeout"}
 	Federation_TopologyReloadInterval = DurationParam{"Federation.TopologyReloadInterval"}
+	LocalCache_DefaultMaxAge = DurationParam{"LocalCache.DefaultMaxAge"}
 	LocalCache_PrefetchTimeout = DurationParam{"LocalCache.PrefetchTimeout"}
 	Logging_Client_ProgressInterval = DurationParam{"Logging.Client.ProgressInterval"}
 	Lotman_DefaultLotDeletionLifetime = DurationParam{"Lotman.DefaultLotDeletionLifetime"}

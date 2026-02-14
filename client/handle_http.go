@@ -242,9 +242,9 @@ type (
 		requireChecksum    bool
 		requestedChecksums []ChecksumType
 		err                error
-		writer             io.WriteCloser         // Optional writer for downloads
-		reader             io.ReadCloser          // Optional reader for uploads
-		byteRange          *ByteRange             // Optional byte range for partial downloads
+		writer             io.WriteCloser          // Optional writer for downloads
+		reader             io.ReadCloser           // Optional reader for uploads
+		byteRange          *ByteRange              // Optional byte range for partial downloads
 		metadataChan       chan<- TransferMetadata // Optional channel to receive early transfer metadata
 	}
 
@@ -279,11 +279,11 @@ type (
 		directorUrl        string
 		token              *tokenGenerator
 		project            string
-		writer             io.WriteCloser         // Optional writer for downloads - if set, write to this instead of localPath
-		reader             io.ReadCloser          // Optional reader for uploads - if set, read from this instead of localPath
-		inPlace            bool                   // If true, write directly to final destination; if false, use temporary file
-		forcePrestageAPI   bool                   // If true, force use of prestage API and error if not supported (no fallback)
-		byteRange          *ByteRange             // Optional byte range for partial downloads
+		writer             io.WriteCloser          // Optional writer for downloads - if set, write to this instead of localPath
+		reader             io.ReadCloser           // Optional reader for uploads - if set, read from this instead of localPath
+		inPlace            bool                    // If true, write directly to final destination; if false, use temporary file
+		forcePrestageAPI   bool                    // If true, force use of prestage API and error if not supported (no fallback)
+		byteRange          *ByteRange              // Optional byte range for partial downloads
 		metadataChan       chan<- TransferMetadata // Optional channel to receive early transfer metadata
 	}
 
@@ -344,6 +344,7 @@ type (
 		dryRun         bool      // Enable dry-run mode to display what would be transferred without actually doing it
 		work           chan *TransferJob
 		closed         bool
+		closeOnce      sync.Once
 		prefObjServers []*url.URL // holds any client-requested caches/origins
 		results        chan *TransferResults
 		finalResults   chan TransferResults
@@ -1523,11 +1524,14 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 //
 // Any subsequent job submissions will cause a panic
 func (tc *TransferClient) Close() {
-	if !tc.closed {
+	tc.closeOnce.Do(func() {
 		log.Debugln("Closing transfer client", tc.id.String())
-		close(tc.work)
 		tc.closed = true
-	}
+		// The engine's shutdown path may have already closed tc.work;
+		// recover from the panic if that happened.
+		defer func() { _ = recover() }()
+		close(tc.work)
+	})
 }
 
 // Shutdown the transfer client
@@ -2937,9 +2941,20 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 
 	// Size of the download
 	totalSize = resp.ContentLength
-	if bytesSoFar > 0 && resp.StatusCode == http.StatusPartialContent {
-		// In this case, totalSize is the size of the response, not the object
-		if totalSize < 0 {
+	if resp.StatusCode == http.StatusPartialContent && (bytesSoFar > 0 || byteRangeEnd >= 0) {
+		// For range responses, Content-Length is the size of the range,
+		// not the full object.  Reconstruct the expected total so the
+		// size check (bytesSoFar + downloaded == totalSize) passes:
+		//   - Resume (bytesSoFar > 0, byteRangeEnd < 0): totalSize is
+		//     the full object size = Content-Length + bytesSoFar.
+		//   - Bounded byte-range (byteRangeEnd >= 0): totalSize is
+		//     byteRangeEnd + 1 so that bytesSoFar + downloaded ==
+		//     totalSize when downloaded == rangeSize.
+		if byteRangeEnd >= 0 {
+			// Explicit byte-range: the size check will compare
+			// bytesSoFar + downloaded, so set totalSize = end + 1.
+			totalSize = byteRangeEnd + 1
+		} else if totalSize < 0 {
 			rangeStr := resp.Header.Get("Content-Range")
 			if rangeStr != "" {
 				parts := strings.SplitN(rangeStr, "/", 2)

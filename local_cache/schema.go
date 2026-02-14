@@ -87,12 +87,14 @@ const (
 	KeySize = 32
 )
 
-// Cache-Control flag bits
+// Cache-Control flag bits — canonical definitions are in cache_control.go
+// (ccNoStore, ccNoCache, ccPrivate, ccMustRevalidate).  These aliases are
+// kept for any callers that reference the CCFlag* names directly.
 const (
-	CCFlagNoStore       uint8 = 0x01 // no-store
-	CCFlagNoCache       uint8 = 0x02 // no-cache
-	CCFlagPrivate       uint8 = 0x04 // private
-	CCFlagMustRevalidate uint8 = 0x08 // must-revalidate
+	CCFlagNoStore        = ccNoStore
+	CCFlagNoCache        = ccNoCache
+	CCFlagPrivate        = ccPrivate
+	CCFlagMustRevalidate = ccMustRevalidate
 )
 
 // ChecksumType identifies the type of checksum
@@ -109,7 +111,7 @@ const (
 type Checksum struct {
 	Type            ChecksumType `msgpack:"t"`
 	Value           []byte       `msgpack:"v"`
-	OriginVerified  bool         `msgpack:"ov"`          // True if checksum came from origin
+	OriginVerified  bool         `msgpack:"ov"`           // True if checksum came from origin
 	VerifyAttempted bool         `msgpack:"va,omitempty"` // True if we tried to get origin checksum
 }
 
@@ -117,12 +119,12 @@ type Checksum struct {
 // Serialized using MessagePack for efficiency
 type CacheMetadata struct {
 	// Validation fields
-	ETag          string     `msgpack:"etag"`           // HTTP ETag header
-	LastModified  time.Time  `msgpack:"lm"`             // HTTP Last-Modified header
-	Expires       time.Time  `msgpack:"exp"`            // HTTP Expires header
-	LastValidated time.Time  `msgpack:"lv"`             // When we last validated with origin
-	Completed     time.Time  `msgpack:"c"`              // When download was completed
-	Checksums     []Checksum `msgpack:"ck,omitempty"`   // Object checksums
+	ETag          string     `msgpack:"etag"`         // HTTP ETag header
+	LastModified  time.Time  `msgpack:"lm"`           // HTTP Last-Modified header
+	Expires       time.Time  `msgpack:"exp"`          // HTTP Expires header
+	LastValidated time.Time  `msgpack:"lv"`           // When we last validated with origin
+	Completed     time.Time  `msgpack:"c"`            // When download was completed
+	Checksums     []Checksum `msgpack:"ck,omitempty"` // Object checksums
 
 	// Identification fields
 	ContentType   string   `msgpack:"ct"`            // MIME type
@@ -132,8 +134,8 @@ type CacheMetadata struct {
 	ObjectHash    string   `msgpack:"oh"`            // Hash of the URL (for ETag table cleanup)
 
 	// Cache-Control directives (efficient packed representation)
-	CCFlags uint8 `msgpack:"ccf,omitempty"` // Bitset: 0x01=no-store, 0x02=no-cache, 0x04=private, 0x08=must-revalidate
-	CCMaxAge int32 `msgpack:"ccma,omitempty"` // Cache-Control: max-age/s-maxage (seconds, 0 = not set, uses min if both specified)
+	CCFlags  uint8 `msgpack:"ccf,omitempty"`  // Bitset: 0x01=no-store, 0x02=no-cache, 0x04=private, 0x08=must-revalidate
+	CCMaxAge int32 `msgpack:"ccma,omitempty"` // Merged max-age/s-maxage freshness lifetime (seconds, 0 = not set, max of both if both specified)
 
 	// Storage fields
 	StorageMode uint8  `msgpack:"mode"` // 0=Inline, 1=Disk
@@ -156,40 +158,16 @@ func (m *CacheMetadata) SetCacheControl(header string) {
 	}
 	cd := ParseCacheControl(header)
 
-	// Pack boolean flags into bitset
-	m.CCFlags = 0
-	if cd.NoStore {
-		m.CCFlags |= CCFlagNoStore
-	}
-	if cd.NoCache {
-		m.CCFlags |= CCFlagNoCache
-	}
-	if cd.Private {
-		m.CCFlags |= CCFlagPrivate
-	}
-	if cd.MustRevalidate {
-		m.CCFlags |= CCFlagMustRevalidate
-	}
+	// The storage flags use the same bit layout as CacheDirectives.flags,
+	// but only the lower 4 bits (the directive booleans).  ccMaxAgeSet
+	// (0x10) is not persisted in CCFlags because CCMaxAge > 0 already
+	// implies "set".
+	m.CCFlags = cd.Flags() & 0x0F
 
-	// Combine max-age and s-maxage: use minimum if both present, otherwise use whichever is set
-	if cd.MaxAgeSet && cd.SMaxAgeSet {
-		// Both set - use minimum
-		minAge := cd.MaxAge
-		if cd.SMaxAge < cd.MaxAge {
-			minAge = cd.SMaxAge
-		}
-		if minAge >= 0 && minAge <= time.Duration(0x7FFFFFFF)*time.Second {
-			m.CCMaxAge = int32(minAge / time.Second)
-		}
-	} else if cd.SMaxAgeSet {
-		// Only s-maxage set
-		if cd.SMaxAge >= 0 && cd.SMaxAge <= time.Duration(0x7FFFFFFF)*time.Second {
-			m.CCMaxAge = int32(cd.SMaxAge / time.Second)
-		}
-	} else if cd.MaxAgeSet {
-		// Only max-age set
-		if cd.MaxAge >= 0 && cd.MaxAge <= time.Duration(0x7FFFFFFF)*time.Second {
-			m.CCMaxAge = int32(cd.MaxAge / time.Second)
+	if cd.MaxAgeSet() {
+		age := cd.MaxAge()
+		if age >= 0 && age <= time.Duration(0x7FFFFFFF)*time.Second {
+			m.CCMaxAge = int32(age / time.Second)
 		}
 	}
 }
@@ -197,46 +175,64 @@ func (m *CacheMetadata) SetCacheControl(header string) {
 // GetCacheDirectives returns the parsed cache directives
 func (m *CacheMetadata) GetCacheDirectives() CacheDirectives {
 	cd := CacheDirectives{
-		NoStore:        (m.CCFlags & CCFlagNoStore) != 0,
-		NoCache:        (m.CCFlags & CCFlagNoCache) != 0,
-		Private:        (m.CCFlags & CCFlagPrivate) != 0,
-		MustRevalidate: (m.CCFlags & CCFlagMustRevalidate) != 0,
+		flags: m.CCFlags & 0x0F, // restore boolean flags
 	}
 	if m.CCMaxAge > 0 {
-		cd.MaxAge = time.Duration(m.CCMaxAge) * time.Second
-		cd.MaxAgeSet = true
-		// For shared cache, s-maxage has same value (we stored the minimum/only one)
-		cd.SMaxAge = cd.MaxAge
-		cd.SMaxAgeSet = true
+		cd.maxAge = time.Duration(m.CCMaxAge) * time.Second
+		cd.flags |= ccMaxAgeSet
 	}
 	return cd
 }
 
-// GetCacheControlHeader reconstructs the Cache-Control header string for HTTP responses
+// GetCacheControlHeader reconstructs the Cache-Control header string for HTTP responses.
+// It returns the origin's directives verbatim when present; when the origin did not
+// specify any Cache-Control, it returns "" (callers should use ResponseCacheControl
+// instead to get a header that reflects the default policy).
 func (m *CacheMetadata) GetCacheControlHeader() string {
 	if m.CCFlags == 0 && m.CCMaxAge == 0 {
 		return "" // No cache-control directives set
 	}
 
 	var parts []string
-	if (m.CCFlags & CCFlagNoStore) != 0 {
+	if m.CCFlags&ccNoStore != 0 {
 		parts = append(parts, "no-store")
 	}
-	if (m.CCFlags & CCFlagNoCache) != 0 {
+	if m.CCFlags&ccNoCache != 0 {
 		parts = append(parts, "no-cache")
 	}
-	if (m.CCFlags & CCFlagPrivate) != 0 {
+	if m.CCFlags&ccPrivate != 0 {
 		parts = append(parts, "private")
 	}
-	if (m.CCFlags & CCFlagMustRevalidate) != 0 {
+	if m.CCFlags&ccMustRevalidate != 0 {
 		parts = append(parts, "must-revalidate")
 	}
 	if m.CCMaxAge > 0 {
-		// Return both s-maxage and max-age with same value for compatibility
-		parts = append(parts, fmt.Sprintf("s-maxage=%d", m.CCMaxAge))
 		parts = append(parts, fmt.Sprintf("max-age=%d", m.CCMaxAge))
 	}
 	return strings.Join(parts, ", ")
+}
+
+// ResponseCacheControl returns the Cache-Control header value the cache should
+// send to downstream clients.  When the origin specified directives, those are
+// forwarded.  When it did not, the cache advertises the remaining freshness
+// lifetime (derived from LocalCache_DefaultMaxAge + jitter) as max-age so that
+// downstream clients can cache the response without re-contacting the cache
+// until revalidation is due.
+func (m *CacheMetadata) ResponseCacheControl() string {
+	// If the origin specified Cache-Control, forward it as-is.
+	if cc := m.GetCacheControlHeader(); cc != "" {
+		return cc
+	}
+
+	// No origin directives — compute remaining freshness from the default
+	// policy and expose it as max-age.
+	remaining := RemainingFreshness(m.LastValidated)
+	seconds := int64(remaining / time.Second)
+	if seconds <= 0 {
+		// Object is stale (or just about to be); tell clients to revalidate.
+		return "no-cache, must-revalidate"
+	}
+	return fmt.Sprintf("max-age=%d", seconds)
 }
 
 // DiskMapping stores the mapping of disk IDs to directory paths
@@ -284,7 +280,7 @@ func normalizeURL(pelicanURL string) string {
 }
 
 // GetInstanceStoragePath returns the 2-level directory path for storing a file
-// Given hash "42561abfe18ba...", returns "42/56/1abfe18ba..."
+// Given hash "42561abfe18be...", returns "42/56/1abfe18be..."
 func GetInstanceStoragePath(hash string) string {
 	if len(hash) < 4 {
 		return hash

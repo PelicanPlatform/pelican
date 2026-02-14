@@ -399,8 +399,8 @@ func TestPersistentCache_StatsAPI(t *testing.T) {
 	_, err = client.DoGet(ft.Ctx, uploadURL, downloadFile, false, client.WithToken(ft.Token))
 	require.NoError(t, err)
 
-	// Query the stats API endpoint
-	statsURL := fmt.Sprintf("https://%s:%d/api/v1.0/localcache/stats",
+	// Query the stats API endpoint (use /api/v1.0/cache/stats for the cache server module)
+	statsURL := fmt.Sprintf("https://%s:%d/api/v1.0/cache/stats",
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 
 	httpClient := &http.Client{

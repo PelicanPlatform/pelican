@@ -228,12 +228,20 @@ func (ac *authConfig) getAcls(token string) (newAcls acls, tokenTrusted bool, er
 	for _, conf := range *namespaces {
 		if conf.Caps.PublicReads {
 			newAcls = append(newAcls, token_scopes.ResourceScope{Authorization: token_scopes.Wlcg_Storage_Read, Resource: conf.Path})
-		} else if tokenTrusted && conf.Issuer != nil {
+		}
+		// Check token-based permissions for non-public namespaces, or
+		// for public-reads namespaces that also support writes (the
+		// public-reads grant above only covers reads).
+		if tokenTrusted && conf.Issuer != nil && (!conf.Caps.PublicReads || conf.Caps.Writes) {
 			for _, resource := range resources {
 				if (resource.Authorization == token_scopes.Wlcg_Storage_Create || resource.Authorization == token_scopes.Wlcg_Storage_Modify) && !conf.Caps.Writes {
 					continue
 				}
-				if resource.Authorization == token_scopes.Wlcg_Storage_Read && !conf.Caps.Reads {
+				if resource.Authorization == token_scopes.Wlcg_Storage_Read && !conf.Caps.Reads && !conf.Caps.PublicReads {
+					continue
+				}
+				// For public-reads namespaces, skip adding redundant read ACLs from the token
+				if conf.Caps.PublicReads && resource.Authorization == token_scopes.Wlcg_Storage_Read {
 					continue
 				}
 				for _, issuerConfig := range conf.Issuer {

@@ -21,9 +21,10 @@
 // Tests for non-blocking / streaming cache behavior.
 //
 // These verify that the persistent cache starts streaming data back to
-// the client before the entire origin→cache transfer has completed.
-// We simulate a slow HTTP backend so buffering the full response would
-// exceed a short client deadline.
+// the client before the entire origin-to-cache transfer has completed.
+// We use a POSIXv2 origin with Origin.TransferRateLimit to simulate a
+// slow backend -- this avoids XRootD's internal buffering which makes
+// streaming tests unreliable.
 
 package fed_tests
 
@@ -32,9 +33,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -49,133 +50,33 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
-type slowOrigin struct {
-	server      *httptest.Server
-	bytesServed atomic.Int64
-	content     []byte
-	chunkSize   int
-	chunkDelay  time.Duration
-}
-
-func newSlowOrigin(t *testing.T, content []byte, chunkSize int, chunkDelay time.Duration) *slowOrigin {
-	t.Helper()
-
-	so := &slowOrigin{
-		content:    content,
-		chunkSize:  chunkSize,
-		chunkDelay: chunkDelay,
-	}
-
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodHead {
-			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(so.content)))
-			w.Header().Set("Accept-Ranges", "bytes")
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		start := 0
-		end := len(so.content) - 1
-		status := http.StatusOK
-
-		if rangeHeader := r.Header.Get("Range"); rangeHeader != "" {
-			parsedStart, parsedEnd, ok := parseRangeHeader(rangeHeader, len(so.content))
-			if ok {
-				start = parsedStart
-				end = parsedEnd
-				status = http.StatusPartialContent
-				w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(so.content)))
-			}
-		}
-
-		data := so.content[start : end+1]
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
-		w.Header().Set("Accept-Ranges", "bytes")
-		w.WriteHeader(status)
-
-		for offset := 0; offset < len(data); {
-			chunkEnd := offset + so.chunkSize
-			if chunkEnd > len(data) {
-				chunkEnd = len(data)
-			}
-			n, err := w.Write(data[offset:chunkEnd])
-			if err != nil {
-				return
-			}
-			so.bytesServed.Add(int64(n))
-			offset += n
-			if f, ok := w.(http.Flusher); ok {
-				f.Flush()
-			}
-			if offset < len(data) {
-				time.Sleep(so.chunkDelay)
-			}
-		}
-	}
-
-	so.server = httptest.NewServer(http.HandlerFunc(handler))
-	t.Cleanup(so.server.Close)
-	return so
-}
-
-func parseRangeHeader(rangeHeader string, size int) (int, int, bool) {
-	if !strings.HasPrefix(rangeHeader, "bytes=") {
-		return 0, 0, false
-	}
-
-	parts := strings.SplitN(strings.TrimPrefix(rangeHeader, "bytes="), "-", 2)
-	if len(parts) != 2 {
-		return 0, 0, false
-	}
-
-	start := 0
-	end := size - 1
-
-	if parts[0] != "" {
-		_, err := fmt.Sscanf(parts[0], "%d", &start)
-		if err != nil || start < 0 || start >= size {
-			return 0, 0, false
-		}
-	}
-	if parts[1] != "" {
-		_, err := fmt.Sscanf(parts[1], "%d", &end)
-		if err != nil || end < start {
-			return 0, 0, false
-		}
-		if end >= size {
-			end = size - 1
-		}
-	}
-
-	return start, end, true
-}
-
-func httpOriginConfig(serviceURL string) string {
+// slowOriginConfig returns a YAML configuration snippet for a POSIXv2
+// origin with a transfer rate limit to simulate a slow backend.
+// The rate limit is applied at the filesystem level, so there is no
+// intermediate buffering (unlike an XRootD HTTP proxy).
+func slowOriginConfig(rateLimit string) string {
 	return fmt.Sprintf(`Origin:
-  StorageType: "https"
-  HttpServiceUrl: %q
+  StorageType: posixv2
+  TransferRateLimit: %s
   Exports:
     - StoragePrefix: "/"
       FederationPrefix: "/test"
       Capabilities: ["PublicReads", "DirectReads", "Listings"]
-`, serviceURL)
+Director:
+  CheckCachePresence: false
+`, rateLimit)
 }
 
-func cacheObjectIsCached(ctx context.Context, cacheURL string) (bool, int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, cacheURL, nil)
-	if err != nil {
-		return false, 0, err
-	}
-	req.Header.Set("X-Pelican-NoDownload", "true")
-
-	resp, err := (&http.Client{Transport: config.GetTransport()}).Do(req)
-	if err != nil {
-		return false, 0, err
-	}
-	defer resp.Body.Close()
-	_, _ = io.ReadAll(resp.Body)
-
-	return resp.StatusCode == http.StatusOK, resp.StatusCode, nil
+// writeOriginFile creates a file in the origin's storage directory and
+// returns the test content that was written.
+func writeOriginFile(t *testing.T, ft *fed_test_utils.FedTest, name string, size int) []byte {
+	t.Helper()
+	content := generateTestData(size)
+	storageDir := ft.Exports[0].StoragePrefix
+	filePath := filepath.Join(storageDir, name)
+	require.NoError(t, os.MkdirAll(filepath.Dir(filePath), 0755))
+	require.NoError(t, os.WriteFile(filePath, content, 0644))
+	return content
 }
 
 // waitForCacheRedirectURL polls the director until it redirects to a cache
@@ -183,7 +84,7 @@ func cacheObjectIsCached(ctx context.Context, cacheURL string) (bool, int, error
 // that redirect URL.  This is needed because the cache registers with the
 // director asynchronously and may not be available immediately after
 // NewFedTest returns.
-func waitForCacheRedirectURL(ctx context.Context, t *testing.T, objectPath, token string) string {
+func waitForCacheRedirectURL(t *testing.T, ft *fed_test_utils.FedTest, objectPath, token string) string {
 	t.Helper()
 
 	var cacheURL string
@@ -191,7 +92,7 @@ func waitForCacheRedirectURL(ctx context.Context, t *testing.T, objectPath, toke
 		directorURL := fmt.Sprintf("https://%s:%d%s",
 			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), objectPath)
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, directorURL, nil)
+		req, err := http.NewRequestWithContext(ft.Ctx, http.MethodGet, directorURL, nil)
 		if err != nil {
 			return false
 		}
@@ -229,30 +130,27 @@ func waitForCacheRedirectURL(ctx context.Context, t *testing.T, objectPath, toke
 // persistent cache begins streaming data back to the client before the
 // full origin-to-cache download completes.
 //
-// The origin is rate-limited; if the cache buffered the full response,
-// the client would hit a short timeout before any bytes arrived.
+// The origin is rate-limited to ~40 KB/s via Origin.TransferRateLimit.
+// A 512 KB file at that rate takes ~13 seconds to transfer.
+// If the cache buffered the full response, the client would hit the
+// 5-second timeout before any bytes arrived.
 func TestStreaming_FirstBytesArriveFast(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	t.Cleanup(server_utils.ResetTestState)
 
-	const fileSize = 512 * 1024 // 512 KB
-	content := generateTestData(fileSize)
-
-	slowOrigin := newSlowOrigin(t, content, 8*1024, 200*time.Millisecond) // ~40 KB/s
-
 	require.NoError(t, param.Set(param.Cache_EnableV2.GetName(), true))
-	ft := fed_test_utils.NewFedTest(t, httpOriginConfig(slowOrigin.server.URL))
+	ft := fed_test_utils.NewFedTest(t, slowOriginConfig("40KB/s"))
 	token := getTempTokenForTest(t)
 
-	cacheURL := waitForCacheRedirectURL(ft.Ctx, t, "/test/stream_test.bin", token)
+	const fileSize = 512 * 1024 // 512 KB
+	content := writeOriginFile(t, ft, "stream_test.bin", fileSize)
 
-	// Verify cache miss before request
-	cachedBefore, statusBefore, err := cacheObjectIsCached(ft.Ctx, cacheURL)
-	require.NoError(t, err)
-	assert.False(t, cachedBefore, "Object should not be cached before first read (status=%d)", statusBefore)
+	cacheURL := waitForCacheRedirectURL(t, ft, "/test/stream_test.bin", token)
 
-	// Short timeout: buffered responses would exceed this
+	// Short timeout: at 40 KB/s the full 512 KB file takes ~13 seconds.
+	// If the cache is truly streaming, the first 4 KB should arrive well
+	// within the timeout.
 	ctx, cancel := context.WithTimeout(ft.Ctx, 5*time.Second)
 	defer cancel()
 
@@ -278,11 +176,6 @@ func TestStreaming_FirstBytesArriveFast(t *testing.T) {
 		"First 4 KB should arrive before the short timeout (streaming)")
 	assert.Equal(t, content[:4096], firstChunk)
 
-	// Confirm the origin has NOT served the full object yet
-	servedSoFar := slowOrigin.bytesServed.Load()
-	assert.Less(t, servedSoFar, int64(fileSize),
-		"Origin should not have served full object before first bytes arrived")
-
 	_ = resp.Body.Close() // Stop early to keep test fast
 	if ctx.Err() != nil {
 		require.NoError(t, ctx.Err(), "Streaming request should not timeout")
@@ -290,48 +183,111 @@ func TestStreaming_FirstBytesArriveFast(t *testing.T) {
 }
 
 // TestStreaming_RangeOnCacheMiss verifies that a range request on a cache miss
-// returns the requested range correctly and that the miss causes a full download
-// from the origin backend.
+// returns the requested range correctly, that the range is cached for subsequent
+// queries, and that the range request doesn't cause caching from the _beginning_
+// of the object.
+//
+// Strategy: use a large file (2 MB) behind a slow origin (50 KB/s).
+// Request bytes 1.5 MB–1.75 MB from the middle.  Because the cache uses a
+// lightweight HEAD to initialise storage and then fetches only the needed
+// blocks via an HTTP Range to the origin, the 256 KB range should arrive
+// in roughly 256 KB / 50 KB/s ≈ 5 s — NOT the ~30 s it would take for a
+// sequential download to reach offset 1.5 MB.  After that completes:
+//   - Re-request the same range → must be a fast cache hit.
+//   - Request bytes 0–4095 (the very beginning) with a short timeout → must
+//     NOT be available quickly, proving the cache did not pre-fetch from offset 0.
 func TestStreaming_RangeOnCacheMiss(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	t.Cleanup(server_utils.ResetTestState)
 
-	const fileSize = 256 * 1024 // 256 KB
-	content := generateTestData(fileSize)
-
-	slowOrigin := newSlowOrigin(t, content, 8*1024, 150*time.Millisecond) // ~53 KB/s
-
 	require.NoError(t, param.Set(param.Cache_EnableV2.GetName(), true))
-	ft := fed_test_utils.NewFedTest(t, httpOriginConfig(slowOrigin.server.URL))
+	// 50 KB/s: the full 2 MB file would take ~40 s to download sequentially.
+	ft := fed_test_utils.NewFedTest(t, slowOriginConfig("50KB/s"))
 	token := getTempTokenForTest(t)
 
-	cacheURL := waitForCacheRedirectURL(ft.Ctx, t, "/test/range_miss.bin", token)
+	const fileSize = 2 * 1024 * 1024 // 2 MB
+	content := writeOriginFile(t, ft, "range_miss.bin", fileSize)
 
-	// Verify cache miss before request
-	cachedBefore, statusBefore, err := cacheObjectIsCached(ft.Ctx, cacheURL)
-	require.NoError(t, err)
-	assert.False(t, cachedBefore, "Object should not be cached before range read (status=%d)", statusBefore)
+	cacheURL := waitForCacheRedirectURL(t, ft, "/test/range_miss.bin", token)
 
-	// Request a range in the middle of the file
-	r := doRangeRead(ft.Ctx, cacheURL, "", "bytes=100000-199999")
-	require.NoError(t, r.err)
+	// ---- Step 1: fetch a range in the middle (1.5 MB – 1.75 MB) ----------
+	// At 50 KB/s a sequential download from byte 0 would need ~30 s to
+	// reach offset 1.5 MB.  The range-on-miss fast path (HEAD + block
+	// fetch) should deliver the 256 KB range in ≈5 s, so we use a 15 s
+	// timeout — generous enough for CI, but well below the 30 s that a
+	// sequential download would require.
+	rangeStart := 1536 * 1024 // 1.5 MB
+	rangeEnd := 1792*1024 - 1 // 1.75 MB - 1 (inclusive end)
+	rangeHeader := fmt.Sprintf("bytes=%d-%d", rangeStart, rangeEnd)
 
-	expected := content[100000:200000]
+	rangeCtx, rangeCancel := context.WithTimeout(ft.Ctx, 15*time.Second)
+	defer rangeCancel()
+
+	startTime := time.Now()
+	r := doRangeRead(rangeCtx, cacheURL, "", rangeHeader)
+	fetchLatency := time.Since(startTime)
+	require.NoError(t, r.err, "Range request from the middle should succeed within the timeout")
+
+	expected := content[rangeStart : rangeEnd+1]
 	assert.True(t, r.statusCode == http.StatusPartialContent || r.statusCode == http.StatusOK,
 		"Should return 206 or 200, got %d", r.statusCode)
-	assert.Equal(t, expected, r.body)
+	assert.Equal(t, expected, r.body, "Range body should match expected content")
 	assert.Equal(t, "200: OK", r.transferStatus)
+	// 256 KB at 50 KB/s ≈ 5 s.  Assert a floor (proves we actually
+	// fetched from the slow origin, not from a pre-filled cache) and a
+	// ceiling (proves we didn't download sequentially from byte 0, which
+	// would take ≥30 s to reach offset 1.5 MB).
+	assert.Greater(t, fetchLatency, 2*time.Second,
+		"256 KB at 50 KB/s should take several seconds — suspiciously fast")
+	assert.Less(t, fetchLatency, 10*time.Second,
+		"Range from the middle should arrive via on-demand block fetch, not a sequential download from byte 0")
+	t.Logf("Step 1 latency: %v (256 KB from the middle at 50 KB/s)", fetchLatency)
 
-	// The cache miss should trigger a full origin download
-	served := slowOrigin.bytesServed.Load()
-	assert.GreaterOrEqual(t, served, int64(fileSize),
-		"Origin should have served the full object on cache miss")
+	// ---- Step 2: re-read the same range → must be a fast cache hit -------
+	startTime = time.Now()
+	r2 := doRangeRead(ft.Ctx, cacheURL, "", rangeHeader)
+	hitLatency := time.Since(startTime)
 
-	// Verify object is cached after range read
-	cachedAfter, statusAfter, err := cacheObjectIsCached(ft.Ctx, cacheURL)
-	require.NoError(t, err)
-	assert.True(t, cachedAfter, "Object should be cached after range read (status=%d)", statusAfter)
+	require.NoError(t, r2.err)
+	assert.True(t, r2.statusCode == http.StatusPartialContent || r2.statusCode == http.StatusOK,
+		"Second range read: expected 206 or 200, got %d", r2.statusCode)
+	assert.Equal(t, expected, r2.body, "Second range read should return identical data")
+	// A cache hit should complete nearly instantly.
+	assert.Less(t, hitLatency, 500*time.Millisecond,
+		"Re-reading the same range should be a fast cache hit")
+	t.Logf("Step 2 latency: %v (cache hit)", hitLatency)
+
+	// ---- Step 3: request the beginning → must NOT be cached ----------------
+	// Request 256 KB from the beginning.  At 50 KB/s this takes ~5 s from
+	// the origin.  If the cache had pre-fetched from byte 0, the data would
+	// already be on disk and would arrive nearly instantly.  We give the
+	// request a 3 s timeout — long enough for a cache hit, but too short
+	// for a fresh 256 KB fetch from the slow origin.
+	beginCtx, beginCancel := context.WithTimeout(ft.Ctx, 3*time.Second)
+	defer beginCancel()
+
+	beginRange := fmt.Sprintf("bytes=0-%d", 256*1024-1)
+	startTime = time.Now()
+	r3 := doRangeRead(beginCtx, cacheURL, "", beginRange)
+	beginLatency := time.Since(startTime)
+
+	if r3.err != nil {
+		// Timeout is the expected outcome: the beginning was not cached
+		// and the slow origin couldn't deliver 256 KB within 3 s.
+		assert.ErrorIs(t, beginCtx.Err(), context.DeadlineExceeded,
+			"Request for the beginning should timeout (not pre-fetched)")
+		t.Logf("Step 3: beginning range timed out as expected (%v)", beginLatency)
+	} else {
+		// If the request somehow succeeded, it must have taken close to
+		// the full timeout — meaning the cache fetched it live from the
+		// slow origin, NOT from a pre-fetched cache.  256 KB at 50 KB/s
+		// takes ~5 s; anything under 2 s means it was pre-cached.
+		assert.Greater(t, beginLatency, 2*time.Second,
+			"If the beginning was returned, it should have been fetched live "+
+				"from the slow origin (not pre-cached). Latency was suspiciously fast.")
+		t.Logf("Step 3: beginning range succeeded in %v (fetched live, not pre-cached)", beginLatency)
+	}
 }
 
 // TestStreaming_SecondReadIsCacheHit verifies that after a streaming cache miss,
@@ -341,46 +297,45 @@ func TestStreaming_SecondReadIsCacheHit(t *testing.T) {
 	server_utils.ResetTestState()
 	t.Cleanup(server_utils.ResetTestState)
 
-	const fileSize = 256 * 1024 // 256 KB
-	content := generateTestData(fileSize)
-
-	slowOrigin := newSlowOrigin(t, content, 8*1024, 150*time.Millisecond) // ~53 KB/s
-
 	require.NoError(t, param.Set(param.Cache_EnableV2.GetName(), true))
-	ft := fed_test_utils.NewFedTest(t, httpOriginConfig(slowOrigin.server.URL))
+	// Use 100 KB/s so the 256 KB file exceeds the rate limiter's burst
+	// bucket (100 KB) and is genuinely throttled.  At 1 MB/s the burst
+	// alone covers the whole file, letting it complete instantly.
+	ft := fed_test_utils.NewFedTest(t, slowOriginConfig("100KB/s"))
 	token := getTempTokenForTest(t)
 
-	cacheURL := waitForCacheRedirectURL(ft.Ctx, t, "/test/hit_test.bin", token)
+	const fileSize = 256 * 1024 // 256 KB
+	content := writeOriginFile(t, ft, "hit_test.bin", fileSize)
 
-	// Verify cache miss before request
-	cachedBefore, statusBefore, err := cacheObjectIsCached(ft.Ctx, cacheURL)
-	require.NoError(t, err)
-	assert.False(t, cachedBefore, "Object should not be cached before first read (status=%d)", statusBefore)
+	cacheURL := waitForCacheRedirectURL(t, ft, "/test/hit_test.bin", token)
 
-	// First read (cache miss)
+	// First read (cache miss -- downloads from origin at rate limit).
+	// 256 KB at 100 KB/s ≈ 2.6 s (minus 100 KB burst ≈ 1.6 s minimum).
+	firstStart := time.Now()
 	r1 := doRangeRead(ft.Ctx, cacheURL, "", "")
+	firstReadLatency := time.Since(firstStart)
 	require.NoError(t, r1.err)
 	require.Equal(t, http.StatusOK, r1.statusCode)
 	require.Equal(t, content, r1.body)
 	assert.Equal(t, "200: OK", r1.transferStatus)
+	assert.Greater(t, firstReadLatency, 500*time.Millisecond,
+		"First read (cache miss) should take noticeable time from the slow origin")
+	assert.Less(t, firstReadLatency, 10*time.Second,
+		"First read should not take unreasonably long")
 
-	servedAfterFirst := slowOrigin.bytesServed.Load()
-	assert.GreaterOrEqual(t, servedAfterFirst, int64(fileSize),
-		"Origin should have served the full object on first read")
-
-	// Verify object is cached after first read
-	cachedAfter, statusAfter, err := cacheObjectIsCached(ft.Ctx, cacheURL)
-	require.NoError(t, err)
-	assert.True(t, cachedAfter, "Object should be cached after first read (status=%d)", statusAfter)
-
-	// Second read (cache hit) should not hit origin
+	// Second read (cache hit -- should be fast and return identical data)
+	startTime := time.Now()
 	r2 := doRangeRead(ft.Ctx, cacheURL, "", "")
+	secondReadLatency := time.Since(startTime)
+
 	require.NoError(t, r2.err)
 	require.Equal(t, http.StatusOK, r2.statusCode)
 	require.Equal(t, content, r2.body)
 	assert.Equal(t, "200: OK", r2.transferStatus)
 
-	servedAfterSecond := slowOrigin.bytesServed.Load()
-	assert.Equal(t, servedAfterFirst, servedAfterSecond,
-		"Origin should not be contacted on cache hit")
+	// The second read should be significantly faster since it's served from cache.
+	// At 100 KB/s the origin would take ~2.6 s for 256 KB; a cache hit should be
+	// near-instant.
+	assert.Less(t, secondReadLatency, 500*time.Millisecond,
+		"Second read should be fast (cache hit)")
 }

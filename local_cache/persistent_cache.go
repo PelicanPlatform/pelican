@@ -24,6 +24,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -46,39 +47,51 @@ import (
 )
 
 // ErrNoStore is returned when the origin sends Cache-Control: no-store (or private).
-// The response data is buffered in persistentDownload.noStoreData and must be served
-// directly without persisting to the cache.
+// The response data is streamed via persistentDownload.noStoreReader (an io.Pipe)
+// directly to the first caller without persisting to the cache.
 var ErrNoStore = errors.New("origin response has Cache-Control: no-store")
+
+// ErrNoStoreRetry is returned to waiters that attach to an in-flight no-store
+// download.  Because the stream can only be consumed once (by the first caller),
+// subsequent callers must retry independently.
+var ErrNoStoreRetry = errors.New("no-store download in progress; retry independently")
 
 // PersistentCache is the new persistent local cache implementation
 // It uses BadgerDB for metadata and block tracking, and encrypted files on disk
 type PersistentCache struct {
-	ctx           context.Context
-	egrp          *errgroup.Group
-	baseDir       string
+	ctx     context.Context
+	egrp    *errgroup.Group
+	baseDir string
 
 	// Core components
-	db           *CacheDB
-	storage      *StorageManager
-	eviction     *EvictionManager
-	consistency  *ConsistencyChecker
+	db          *CacheDB
+	storage     *StorageManager
+	eviction    *EvictionManager
+	consistency *ConsistencyChecker
 
 	// Transfer engine for creating per-request clients
-	te           *client.TransferEngine
+	te *client.TransferEngine
 
 	// Federation configuration
-	directorURL  *url.URL
-	defaultFed   string
-	ac           *authConfig
+	directorURL *url.URL
+	defaultFed  string
+	ac          *authConfig
 
 	// Namespace mapping (URL prefix -> namespace ID)
-	namespaceMap     map[string]uint32
-	namespaceMapMu   sync.RWMutex
-	nextNamespaceID  atomic.Uint32
+	namespaceMap    map[string]uint32
+	namespaceMapMu  sync.RWMutex
+	nextNamespaceID atomic.Uint32
 
 	// Active downloads tracking
 	activeDownloads   map[string]*persistentDownload
 	activeDownloadsMu sync.RWMutex
+	downloadWg        sync.WaitGroup     // Tracks in-flight completeDownload goroutines
+	downloadCtx       context.Context    // Cancelled during Close() to stop in-flight transfers
+	downloadCancel    context.CancelFunc // Cancels downloadCtx
+
+	// Active revalidations deduplication (keyed by objectHash)
+	activeRevalidations   map[string]*revalidation
+	activeRevalidationsMu sync.Mutex
 
 	// Configuration
 	wasConfigured bool
@@ -87,28 +100,65 @@ type PersistentCache struct {
 
 // persistentDownload tracks an active download operation
 type persistentDownload struct {
-	instanceHash     string
+	instanceHash string
 	objectHash   string // Hash of the URL (for ETag table)
 	sourceURL    string
 	namespaceID  uint32
 	etag         string    // ETag from origin
 	lastModified time.Time // Last-Modified from origin
 	cacheControl string    // Cache-Control from origin
-	meta         *CacheMetadata
-	waiters     []chan error
-	mu          sync.Mutex
-	done        bool
-	err         error
+	waiters      []chan error
+	mu           sync.Mutex
+	done         bool
+	err          error
 
-	// noStoreData holds the buffered response body when the origin sends
-	// Cache-Control: no-store (or private).  The data is served directly
-	// to the client without being persisted to the cache.
-	noStoreData []byte
-	noStoreMeta *CacheMetadata
+	// noStoreReader is the read end of an io.Pipe that streams the response
+	// body when the origin sends Cache-Control: no-store (or private).
+	// Only the first caller consumes this; waiters receive ErrNoStoreRetry.
+	noStoreReader io.ReadCloser
+	noStoreMeta   *CacheMetadata
 
 	// Background completion tracking (for non-blocking downloads)
 	completionDone chan struct{} // Closed when background finalization completes
 	completionErr  atomic.Value  // Stores error from background finalization (type error)
+
+	// Client tracking: counts how many readers are actively consuming
+	// data from this download.  completeDownload periodically checks
+	// this counter and cancels the download if it stays at zero for
+	// longer than LocalCache.PrefetchTimeout.
+	activeClients atomic.Int32
+	cancelFn      context.CancelFunc // Cancels the per-download context
+}
+
+// RegisterClient increments the active client count for this download and
+// returns a deregistration function that decrements it.  The caller must
+// invoke the returned function when it is done reading (typically in
+// RangeReader.onClose).
+func (dl *persistentDownload) RegisterClient() func() {
+	dl.activeClients.Add(1)
+	var once sync.Once
+	return func() {
+		once.Do(func() { dl.activeClients.Add(-1) })
+	}
+}
+
+// HasActiveClients returns true if at least one reader is consuming data
+// from this download.
+func (dl *persistentDownload) HasActiveClients() bool {
+	return dl.activeClients.Load() > 0
+}
+
+// revalidation tracks an in-flight revalidation of a stale cached object.
+// Multiple goroutines that discover the same object is stale will share a
+// single revalidation; the first goroutine does the work and the rest block
+// on the done channel.
+type revalidation struct {
+	done          chan struct{}  // Closed when revalidation finishes
+	instanceHash  string         // Updated instanceHash (may differ if origin returned new ETag)
+	meta          *CacheMetadata // Updated metadata (nil on failure)
+	err           error          // Non-nil only if revalidation failed AND stale data is unavailable
+	noStoreReader io.ReadCloser  // Non-nil if origin now says no-store
+	noStoreMeta   *CacheMetadata // Metadata for no-store response
 }
 
 // PersistentCacheConfig holds configuration for the persistent cache
@@ -218,20 +268,25 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		return nil, errors.Wrap(err, "failed to create transfer engine")
 	}
 
+	downloadCtx, downloadCancel := context.WithCancel(ctx)
+
 	pc := &PersistentCache{
-		ctx:             ctx,
-		egrp:            egrp,
-		baseDir:         cfg.BaseDir,
-		db:              db,
-		storage:         storage,
-		eviction:        eviction,
-		consistency:     consistency,
-		te:              te,
-		directorURL:     directorURL,
-		defaultFed:      cfg.DefaultFederation,
-		ac:              newAuthConfig(ctx, egrp),
-		namespaceMap:    make(map[string]uint32),
-		activeDownloads: make(map[string]*persistentDownload),
+		ctx:                 ctx,
+		egrp:                egrp,
+		baseDir:             cfg.BaseDir,
+		db:                  db,
+		storage:             storage,
+		eviction:            eviction,
+		consistency:         consistency,
+		te:                  te,
+		directorURL:         directorURL,
+		defaultFed:          cfg.DefaultFederation,
+		ac:                  newAuthConfig(ctx, egrp),
+		namespaceMap:        make(map[string]uint32),
+		activeDownloads:     make(map[string]*persistentDownload),
+		activeRevalidations: make(map[string]*revalidation),
+		downloadCtx:         downloadCtx,
+		downloadCancel:      downloadCancel,
 	}
 
 	// Restore persisted namespace mappings so that LRU keys and usage
@@ -249,6 +304,15 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	db.StartGC(ctx, egrp)
 	eviction.Start(ctx, egrp)
 	consistency.Start(ctx, egrp)
+
+	// Ensure all resources are released when the context is cancelled.
+	// Without this, the TransferEngine and BadgerDB leak across tests
+	// (each NewFedTest creates a new PersistentCache).
+	egrp.Go(func() error {
+		<-ctx.Done()
+		pc.Close()
+		return nil
+	})
 
 	// Configure authorization if not deferred
 	if !cfg.DeferConfig {
@@ -277,25 +341,44 @@ func (pc *PersistentCache) Config(egrp *errgroup.Group) error {
 	return nil
 }
 
-// Close shuts down the persistent cache
+// Close shuts down the persistent cache.
+//
+// Shutdown order:
+//  1. Cancel all in-flight downloads (via downloadCancel).
+//  2. Wait for completeDownload goroutines to finish — each one closes
+//     its own TransferClient, so all clients are gone before step 3.
+//  3. Shut down the transfer engine (no live clients remain).
+//  4. Stop the consistency checker.
+//  5. Close the database.
 func (pc *PersistentCache) Close() error {
 	if pc.closed.Swap(true) {
 		return nil
 	}
 
-	// Close transfer engine
+	// 1. Cancel all in-flight transfers.  This causes transfer workers to
+	//    produce error results, which flow back through the engine to each
+	//    completeDownload goroutine.
+	pc.downloadCancel()
+
+	// 2. Wait for every completeDownload goroutine to finish.  Each one
+	//    calls tc.Close() on its own TransferClient before returning, so
+	//    by the time downloadWg reaches zero all clients have shut down.
+	pc.downloadWg.Wait()
+
+	// 3. Shut down the transfer engine.  Because all clients already closed
+	//    their work channels, the engine can drain immediately.
 	if pc.te != nil {
 		if err := pc.te.Shutdown(); err != nil {
 			log.Warnf("Error shutting down transfer engine: %v", err)
 		}
 	}
 
-	// Stop consistency checker
+	// 4. Stop consistency checker.
 	if pc.consistency != nil {
 		pc.consistency.Stop()
 	}
 
-	// Close database
+	// 5. Close database.
 	if pc.db != nil {
 		if err := pc.db.Close(); err != nil {
 			log.Warnf("Error closing cache database: %v", err)
@@ -340,110 +423,134 @@ func (pc *PersistentCache) Get(ctx context.Context, objectPath, token string) (i
 
 // SeekableReader is a reader that supports seeking and on-demand block fetching.
 // It implements io.ReadSeekCloser for use with http.ServeContent.
+//
+// For no-store streaming responses, the reader is NOT seekable (IsNoStore returns true).
+// In that case the handler must use io.Copy instead of http.ServeContent.
 type SeekableReader struct {
 	*RangeReader
 }
 
-// GetSeekableReader returns a seekable reader for the full object with on-demand block fetching.
-// This is designed for use with http.ServeContent which handles Range requests internally.
-func (pc *PersistentCache) GetSeekableReader(ctx context.Context, objectPath, bearerToken string) (*SeekableReader, *CacheMetadata, error) {
-	// Normalize and compute object hash (URL-based)
+// IsNoStore returns true when this reader wraps a streaming no-store response.
+// The caller must NOT use http.ServeContent (which requires seeking); instead
+// it should stream the response with io.Copy and set headers manually.
+func (sr *SeekableReader) IsNoStore() bool {
+	return sr.RangeReader != nil && sr.RangeReader.noStoreReader != nil
+}
+
+// objectResolution holds the results of resolving an object path to its
+// cached (or newly downloaded) metadata.  It is produced by resolveObject
+// and consumed by GetSeekableReader / GetRange.
+type objectResolution struct {
+	instanceHash string
+	pelicanURL   string
+	token        string
+	meta         *CacheMetadata
+	dl           *persistentDownload // non-nil when a background download was started
+	noStoreRC    io.ReadCloser       // non-nil when the origin says no-store
+	noStoreMeta  *CacheMetadata      // metadata for no-store streaming responses
+}
+
+// resolveObject performs the shared lookup + download/init/revalidate
+// sequence used by every read path.  It returns an objectResolution on
+// success.  When the origin responds with no-store, the resolution
+// contains a noStoreRC that the caller must consume.
+//
+// tryRangeInit controls whether the lightweight HEAD-based init
+// (initObjectFromStat) is attempted on a cache miss before falling back
+// to a full download.
+func (pc *PersistentCache) resolveObject(
+	ctx context.Context,
+	objectPath, token string,
+	tryRangeInit bool,
+) (*objectResolution, error) {
 	pelicanURL := pc.normalizePath(objectPath)
 	objectHash := ComputeObjectHash(pelicanURL)
 
-	// Check authorization
-	if !pc.ac.authorize("storage.read", objectPath, bearerToken) {
-		return nil, nil, authorizationDenied
+	if !pc.ac.authorize("storage.read", objectPath, token) {
+		return nil, authorizationDenied
 	}
 
-	// Get or assign namespace ID
 	namespaceID := pc.getNamespaceID(objectPath)
 
-	// Look up latest ETag for this object
 	etag, err := pc.db.GetLatestETag(objectHash)
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "failed to check ETag cache")
+		return nil, errors.Wrap(err, "failed to check ETag cache")
 	}
 
-	// Compute file hash (etag:objectHash)
 	instanceHash := ComputeInstanceHash(etag, objectHash)
-
-	// Check if we have the object with this ETag
 	meta, err := pc.storage.GetMetadata(instanceHash)
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "failed to check cache")
+		return nil, errors.Wrap(err, "failed to check cache")
 	}
+
+	var dl *persistentDownload
 
 	if meta == nil {
-		// Need to download the object (will query for current ETag)
-		// Note: downloadObject starts the download asynchronously; it returns
-		// as soon as metadata is available, not when the download completes
-		var dl *persistentDownload
-		instanceHash, dl, err = pc.downloadObject(ctx, pelicanURL, objectHash, namespaceID, bearerToken)
-		if errors.Is(err, ErrNoStore) && dl != nil {
-			// Origin says no-store — serve directly from in-memory buffer
-			reader := bytes.NewReader(dl.noStoreData)
-			return &SeekableReader{RangeReader: &RangeReader{
-				reader: reader,
-				size:   int64(len(dl.noStoreData)),
-			}}, dl.noStoreMeta, nil
+		if tryRangeInit {
+			instanceHash, meta, err = pc.initObjectFromStat(ctx, pelicanURL, objectHash, namespaceID, token)
+			if err != nil {
+				log.Debugf("initObjectFromStat failed, falling back to full download: %v", err)
+				meta = nil
+			}
 		}
-		if err != nil {
-			return nil, nil, err
-		}
+		if meta == nil {
+			instanceHash, dl, err = pc.downloadObject(ctx, pelicanURL, objectHash, namespaceID, token)
+			if errors.Is(err, ErrNoStore) && dl != nil && dl.noStoreReader != nil {
+				return &objectResolution{
+					noStoreRC:   dl.noStoreReader,
+					noStoreMeta: dl.noStoreMeta,
+				}, nil
+			}
+			if errors.Is(err, ErrNoStoreRetry) {
+				return pc.resolveObject(ctx, objectPath, token, tryRangeInit)
+			}
+			if err != nil {
+				return nil, err
+			}
 
-		// Re-fetch metadata
-		meta, err = pc.storage.GetMetadata(instanceHash)
-		if err != nil || meta == nil {
-			return nil, nil, errors.New("download completed but metadata not found")
+			meta, err = pc.storage.GetMetadata(instanceHash)
+			if err != nil || meta == nil {
+				return nil, errors.New("download completed but metadata not found")
+			}
 		}
 	} else {
-		// Object is cached — check staleness via Cache-Control directives.
-		ccDirectives := meta.GetCacheDirectives()
-		// Only check staleness if any cache-control directive was set
-		if ccDirectives.NoStore || ccDirectives.NoCache || ccDirectives.Private || ccDirectives.MaxAgeSet || ccDirectives.SMaxAgeSet {
-			if ccDirectives.IsStale(meta.LastValidated) {
-				log.Debugf("Cached object %s is stale (validated %v), revalidating", instanceHash, meta.LastValidated)
-				newHash, dl, dlErr := pc.downloadObject(ctx, pelicanURL, objectHash, namespaceID, bearerToken)
-				if errors.Is(dlErr, ErrNoStore) && dl != nil {
-					reader := bytes.NewReader(dl.noStoreData)
-					return &SeekableReader{RangeReader: &RangeReader{
-						reader: reader,
-						size:   int64(len(dl.noStoreData)),
-					}}, dl.noStoreMeta, nil
-				}
-				if dlErr == nil && newHash != "" {
-					// Download succeeded — the origin returned a (possibly new) version.
-					// If the instanceHash changed (new ETag), use the new metadata.
-					if newHash != instanceHash {
-						log.Debugf("Revalidation fetched new version %s (was %s)", newHash, instanceHash)
-						instanceHash = newHash
-						meta, err = pc.storage.GetMetadata(instanceHash)
-						if err != nil || meta == nil {
-							return nil, nil, errors.New("revalidation completed but metadata not found")
-						}
-					} else {
-						// Same ETag — update LastValidated to extend freshness
-						meta.LastValidated = time.Now()
-						if setErr := pc.storage.SetMetadata(instanceHash, meta); setErr != nil {
-							log.Warnf("Failed to update LastValidated: %v", setErr)
-						}
-					}
-				} else if dlErr != nil {
-					// Revalidation failed — serve stale data rather than failing
-					log.Debugf("Revalidation failed for %s, serving stale: %v", instanceHash, dlErr)
-				}
-			}
+		var rv *revalidation
+		instanceHash, meta, rv, err = pc.revalidateObject(ctx, instanceHash, objectHash, pelicanURL, namespaceID, token, meta)
+		if err != nil {
+			return nil, err
+		}
+		if rv != nil && rv.noStoreReader != nil {
+			return &objectResolution{
+				noStoreRC:   rv.noStoreReader,
+				noStoreMeta: rv.noStoreMeta,
+			}, nil
 		}
 	}
 
-	// Record access for LRU
-	pc.eviction.RecordAccess(instanceHash)
+	if err := pc.eviction.RecordAccess(instanceHash); err != nil {
+		log.Debugf("Failed to record access for %s: %v", instanceHash, err)
+	}
 
-	// Create block fetcher for on-demand fetching
+	return &objectResolution{
+		instanceHash: instanceHash,
+		pelicanURL:   pelicanURL,
+		token:        token,
+		meta:         meta,
+		dl:           dl,
+	}, nil
+}
+
+// newFetchingRangeReader creates a RangeReader for the given byte range with
+// an attached BlockFetcherV2 for on-demand fetching, plus client registration
+// for both the fetcher and a background download (if any).  All cleanup is
+// wired into the RangeReader's onClose callback.
+func (pc *PersistentCache) newFetchingRangeReader(
+	res *objectResolution,
+	startByte, endByte int64,
+) (*RangeReader, error) {
 	fetcher, err := NewBlockFetcherV2(
-		pc.storage, instanceHash, pelicanURL, bearerToken, pc.te,
-		BlockFetcherV2Config{}, // Use defaults from params
+		pc.storage, res.instanceHash, res.pelicanURL, res.token, pc.te,
+		BlockFetcherV2Config{},
 	)
 	if err != nil {
 		log.Warnf("Failed to create block fetcher: %v", err)
@@ -456,138 +563,116 @@ func (pc *PersistentCache) GetSeekableReader(ctx context.Context, objectPath, be
 		clientDone = fetcher.RegisterClient()
 	}
 
-	// Create a RangeReader for the full object (0 to ContentLength-1)
-	rr, err := NewRangeReader(pc.storage, instanceHash, 0, meta.ContentLength-1, fetchCallback)
+	var dlClientDone func()
+	if res.dl != nil {
+		dlClientDone = res.dl.RegisterClient()
+	}
+
+	rr, err := NewRangeReader(pc.storage, res.instanceHash, startByte, endByte, fetchCallback)
 	if err != nil {
 		if clientDone != nil {
 			clientDone()
 		}
+		if dlClientDone != nil {
+			dlClientDone()
+		}
 		if fetcher != nil {
 			fetcher.Close()
 		}
-		return nil, nil, errors.Wrap(err, "failed to create seekable reader")
+		return nil, err
 	}
-	// Chain cleanup: deregister client and close the fetcher's TransferClient
+
 	rr.onClose = func() {
 		if clientDone != nil {
 			clientDone()
 		}
+		if dlClientDone != nil {
+			dlClientDone()
+		}
 		if fetcher != nil {
 			fetcher.Close()
 		}
 	}
 
-	return &SeekableReader{RangeReader: rr}, meta, nil
+	return rr, nil
+}
+
+// GetSeekableReader returns a seekable reader for the full object with on-demand block fetching.
+// This is designed for use with http.ServeContent which handles Range requests internally.
+//
+// When rangeOnly is true and the object is not yet cached, GetSeekableReader
+// uses a lightweight HEAD request to initialise on-disk storage instead of
+// starting a full sequential download.  This allows BlockFetcherV2 to fetch
+// only the blocks the caller actually reads, avoiding a potentially expensive
+// full transfer.  Callers should set rangeOnly when they know the request is
+// for a sub-range of the object (e.g. an HTTP Range request).
+func (pc *PersistentCache) GetSeekableReader(ctx context.Context, objectPath, bearerToken string, rangeOnly bool) (*SeekableReader, *CacheMetadata, error) {
+	res, err := pc.resolveObject(ctx, objectPath, bearerToken, rangeOnly)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Handle no-store streaming response
+	if res.noStoreRC != nil {
+		return &SeekableReader{RangeReader: &RangeReader{
+			reader:        nil,
+			size:          res.noStoreMeta.ContentLength,
+			noStoreReader: res.noStoreRC,
+		}}, res.noStoreMeta, nil
+	}
+
+	rr, err := pc.newFetchingRangeReader(res, 0, res.meta.ContentLength-1)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "failed to create seekable reader")
+	}
+
+	return &SeekableReader{RangeReader: rr}, res.meta, nil
 }
 
 // GetRange retrieves a range of an object from the cache
 func (pc *PersistentCache) GetRange(ctx context.Context, objectPath, token, rangeHeader string) (io.ReadCloser, error) {
-	// Normalize and compute object hash (URL-based)
-	pelicanURL := pc.normalizePath(objectPath)
-	objectHash := ComputeObjectHash(pelicanURL)
-
-	// Check authorization
-	if !pc.ac.authorize("storage.read", objectPath, token) {
-		return nil, authorizationDenied
-	}
-
-	// Get or assign namespace ID
-	namespaceID := pc.getNamespaceID(objectPath)
-
-	// Look up latest ETag for this object
-	etag, err := pc.db.GetLatestETag(objectHash)
+	res, err := pc.resolveObject(ctx, objectPath, token, rangeHeader != "")
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to check ETag cache")
+		return nil, err
 	}
 
-	// Compute file hash (etag:objectHash)
-	instanceHash := ComputeInstanceHash(etag, objectHash)
-
-	// Check if we have the object with this ETag
-	meta, err := pc.storage.GetMetadata(instanceHash)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to check cache")
+	// Handle no-store streaming response
+	if res.noStoreRC != nil {
+		return res.noStoreRC, nil
 	}
-
-	if meta == nil {
-		// Need to download the object (will query for current ETag)
-		var dl *persistentDownload
-		instanceHash, dl, err = pc.downloadObject(ctx, pelicanURL, objectHash, namespaceID, token)
-		if errors.Is(err, ErrNoStore) && dl != nil {
-			// Origin says no-store — serve directly from in-memory buffer
-			// For range requests we still need a seekable reader, but wrap in io.NopCloser
-			reader := bytes.NewReader(dl.noStoreData)
-			return io.NopCloser(reader), nil
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		// Re-fetch metadata
-		meta, err = pc.storage.GetMetadata(instanceHash)
-		if err != nil || meta == nil {
-			return nil, errors.New("download completed but metadata not found")
-		}
-	}
-
-	// Record access for LRU
-	pc.eviction.RecordAccess(instanceHash)
 
 	// Handle range request
 	if rangeHeader != "" {
-		fetcher, err := NewBlockFetcherV2(
-			pc.storage, instanceHash, pelicanURL, token, pc.te,
-			BlockFetcherV2Config{}, // Use defaults from params
-		)
+		ranges, err := ParseRangeHeader(rangeHeader, res.meta.ContentLength)
 		if err != nil {
-			log.Warnf("Failed to create block fetcher: %v", err)
-		}
-
-		ranges, err := ParseRangeHeader(rangeHeader, meta.ContentLength)
-		if err != nil {
-			if fetcher != nil {
-				fetcher.Close()
-			}
 			return nil, errors.Wrap(err, "invalid range header")
 		}
 
 		if len(ranges) > 0 {
 			r := ranges[0]
-			var fetchCallback func(ctx context.Context, startBlock, endBlock uint32) error
-			var clientDone func()
-			if fetcher != nil {
-				fetchCallback = fetcher.CreateFetchCallback()
-				clientDone = fetcher.RegisterClient()
-			}
-			rr, rrErr := NewRangeReader(pc.storage, instanceHash, r.Start, r.End, fetchCallback)
-			if rrErr != nil {
-				if clientDone != nil {
-					clientDone()
-				}
-				if fetcher != nil {
-					fetcher.Close()
-				}
-				return nil, rrErr
-			}
-			rr.onClose = func() {
-				if clientDone != nil {
-					clientDone()
-				}
-				if fetcher != nil {
-					fetcher.Close()
-				}
+			rr, err := pc.newFetchingRangeReader(res, r.Start, r.End)
+			if err != nil {
+				return nil, err
 			}
 			return rr, nil
 		}
-
-		// No valid ranges — close the fetcher
-		if fetcher != nil {
-			fetcher.Close()
-		}
 	}
 
-	// Return full object reader
-	return pc.storage.NewObjectReader(instanceHash)
+	// Return full object reader.  If a background download is in flight,
+	// register a client so completeDownload doesn't cancel it while we
+	// are reading.
+	objReader, objErr := pc.storage.NewObjectReader(res.instanceHash)
+	if objErr != nil {
+		return nil, objErr
+	}
+	if res.dl != nil {
+		dlDone := res.dl.RegisterClient()
+		return &readCloserWithCleanup{
+			ReadCloser: objReader,
+			cleanup:    dlDone,
+		}, nil
+	}
+	return objReader, nil
 }
 
 // GetMetadata returns the cache metadata for an object if it exists.
@@ -624,8 +709,61 @@ func (pc *PersistentCache) StatCachedOnly(objectPath, token string) (uint64, err
 	return pc.stat(objectPath, token, true)
 }
 
+// HeadResult contains the response metadata for a HEAD request.
+type HeadResult struct {
+	ContentLength int64
+	Meta          *CacheMetadata // non-nil when the object is cached
+}
+
+// HeadObject returns metadata for an object without triggering a download.
+// If the object is cached, the full CacheMetadata is returned.
+// If not cached, the origin is queried via HEAD (DoStat) for the size.
+func (pc *PersistentCache) HeadObject(objectPath, token string) (*HeadResult, error) {
+	if !pc.ac.authorize("storage.read", objectPath, token) {
+		return nil, authorizationDenied
+	}
+
+	pelicanURL := pc.normalizePath(objectPath)
+	objectHash := ComputeObjectHash(pelicanURL)
+
+	etag, err := pc.db.GetLatestETag(objectHash)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to check ETag cache")
+	}
+
+	instanceHash := ComputeInstanceHash(etag, objectHash)
+	meta, err := pc.storage.GetMetadata(instanceHash)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to check cache")
+	}
+
+	if meta != nil {
+		return &HeadResult{ContentLength: meta.ContentLength, Meta: meta}, nil
+	}
+
+	// Not cached — query the origin for size only.
+	dUrl := *pc.directorURL
+	dUrl.Path = objectPath
+	dUrl.Scheme = "pelican"
+	q := dUrl.Query()
+	q.Set("directread", "")
+	dUrl.RawQuery = q.Encode()
+
+	statInfo, err := client.DoStat(context.Background(), dUrl.String(), client.WithToken(token))
+	if err != nil {
+		return nil, err
+	}
+
+	return &HeadResult{ContentLength: statInfo.Size}, nil
+}
+
 // ErrNotCached is returned when an object is not in the cache
 var ErrNotCached = errors.New("object not cached")
+
+// ErrInitNoStore is a sentinel error returned by initObjectFromStat when
+// the origin's Cache-Control indicates the response must not be stored.
+// The caller should fall back to a full streaming download via downloadObject.
+var ErrInitNoStore = errors.New("object must not be stored (no-store/no-cache/private)")
 
 // stat returns the size of an object
 func (pc *PersistentCache) stat(objectPath, token string, cachedOnly bool) (uint64, error) {
@@ -676,6 +814,191 @@ func (pc *PersistentCache) stat(objectPath, token string, cachedOnly bool) (uint
 	return uint64(statInfo.Size), nil
 }
 
+// initObjectFromStat performs a lightweight HEAD request to the origin to
+// obtain metadata (ETag, Size, LastModified) and initializes on-disk storage
+// with an empty block bitmap.  This is the fast path for range-on-miss:
+// instead of starting a full sequential download, we only need metadata so
+// that BlockFetcherV2 can fetch the requested blocks on demand.
+//
+// Returns ErrInitNoStore if the origin's response headers indicate the
+// object must not be cached — the caller should fall back to downloadObject.
+func (pc *PersistentCache) initObjectFromStat(
+	ctx context.Context,
+	pelicanURL, objectHash string,
+	namespaceID uint32,
+	token string,
+) (string, *CacheMetadata, error) {
+	// Build a pelican:// URL with directread for the stat call
+	dUrl, err := url.Parse(pelicanURL)
+	if err != nil {
+		return "", nil, errors.Wrap(err, "invalid source URL")
+	}
+	dUrl.Scheme = "pelican"
+	q := dUrl.Query()
+	q.Set("directread", "")
+	dUrl.RawQuery = q.Encode()
+
+	statInfo, err := client.DoStat(ctx, dUrl.String(), client.WithToken(token))
+	if err != nil {
+		return "", nil, errors.Wrap(err, "stat failed for range-on-miss")
+	}
+
+	etag := statInfo.ETag
+	instanceHash := ComputeInstanceHash(etag, objectHash)
+
+	// If storage already exists (e.g. concurrent request created it), reuse it
+	existingMeta, err := pc.storage.GetMetadata(instanceHash)
+	if err != nil {
+		return "", nil, errors.Wrap(err, "failed to check existing storage")
+	}
+	if existingMeta != nil {
+		return instanceHash, existingMeta, nil
+	}
+
+	// Initialize disk storage with empty block bitmap
+	meta, err := pc.storage.InitDiskStorage(ctx, instanceHash, statInfo.Size)
+	if err != nil {
+		return "", nil, errors.Wrap(err, "failed to init disk storage for range-on-miss")
+	}
+
+	meta.ETag = etag
+	meta.LastModified = statInfo.ModTime
+	meta.SourceURL = pelicanURL
+	meta.ObjectHash = objectHash
+	meta.NamespaceID = namespaceID
+	meta.ContentType = "application/octet-stream"
+	meta.LastValidated = time.Now()
+
+	if err := pc.storage.SetMetadata(instanceHash, meta); err != nil {
+		return "", nil, errors.Wrap(err, "failed to set metadata for range-on-miss")
+	}
+
+	// Map objectHash → ETag so subsequent lookups find this instance
+	if err := pc.db.SetLatestETag(objectHash, etag); err != nil {
+		log.Warnf("Failed to update ETag table for range-on-miss: %v", err)
+	}
+
+	log.Debugf("initObjectFromStat: initialized storage for %s (size=%d, etag=%q)",
+		instanceHash, statInfo.Size, etag)
+	return instanceHash, meta, nil
+}
+
+// revalidateObject checks whether a cached object is stale and, if so,
+// triggers a single revalidation.  Multiple concurrent callers for the same
+// objectHash share one in-flight revalidation — the first caller does the
+// work and subsequent callers block until it completes.
+//
+// If the object is fresh (or has no cache-control directives), the method
+// returns the original instanceHash and metadata unchanged.
+//
+// Returns:
+//   - instanceHash: the (possibly new) instanceHash after revalidation
+//   - meta: updated metadata
+//   - rv: non-nil only when the origin responds with no-store (caller must
+//     handle the streaming reader)
+//   - err: non-nil only on unrecoverable errors; failed revalidations serve
+//     stale data silently
+func (pc *PersistentCache) revalidateObject(
+	ctx context.Context,
+	instanceHash, objectHash, pelicanURL string,
+	namespaceID uint32,
+	token string,
+	meta *CacheMetadata,
+) (string, *CacheMetadata, *revalidation, error) {
+	// Check whether staleness revalidation is needed at all
+	ccDirectives := meta.GetCacheDirectives()
+	if !ccDirectives.HasDirectives() {
+		return instanceHash, meta, nil, nil
+	}
+	if !ccDirectives.IsStale(meta.LastValidated) {
+		return instanceHash, meta, nil, nil
+	}
+
+	log.Debugf("Cached object %s is stale (validated %v), revalidating", instanceHash, meta.LastValidated)
+
+	// ---- single-flight deduplication ----
+	pc.activeRevalidationsMu.Lock()
+	if rv, exists := pc.activeRevalidations[objectHash]; exists {
+		// Another goroutine is already revalidating — wait for it.
+		pc.activeRevalidationsMu.Unlock()
+		select {
+		case <-rv.done:
+		case <-ctx.Done():
+			return "", nil, nil, ctx.Err()
+		}
+		if rv.noStoreReader != nil {
+			// The owner consumed the stream; subsequent waiters must
+			// retry their own download (just like ErrNoStoreRetry).
+			return "", nil, nil, ErrNoStoreRetry
+		}
+		if rv.err != nil {
+			// Revalidation failed — serve stale data
+			return instanceHash, meta, nil, nil
+		}
+		return rv.instanceHash, rv.meta, nil, nil
+	}
+
+	// We are the first — register the revalidation.
+	rv := &revalidation{done: make(chan struct{})}
+	pc.activeRevalidations[objectHash] = rv
+	pc.activeRevalidationsMu.Unlock()
+
+	// Ensure cleanup regardless of outcome.
+	defer func() {
+		close(rv.done)
+		pc.activeRevalidationsMu.Lock()
+		delete(pc.activeRevalidations, objectHash)
+		pc.activeRevalidationsMu.Unlock()
+	}()
+
+	// Do the actual revalidation (download with conditional GET)
+	newHash, dl, dlErr := pc.downloadObject(ctx, pelicanURL, objectHash, namespaceID, token)
+
+	if errors.Is(dlErr, ErrNoStore) && dl != nil && dl.noStoreReader != nil {
+		rv.noStoreReader = dl.noStoreReader
+		rv.noStoreMeta = dl.noStoreMeta
+		return "", nil, rv, nil
+	}
+	if errors.Is(dlErr, ErrNoStoreRetry) {
+		// Shouldn't happen (we are the only revalidator), but handle it
+		rv.err = dlErr
+		return "", nil, nil, ErrNoStoreRetry
+	}
+
+	if dlErr == nil && newHash != "" {
+		if newHash != instanceHash {
+			// Origin returned a new version (different ETag)
+			log.Debugf("Revalidation fetched new version %s (was %s)", newHash, instanceHash)
+			newMeta, getErr := pc.storage.GetMetadata(newHash)
+			if getErr != nil || newMeta == nil {
+				rv.err = errors.New("revalidation completed but metadata not found")
+				return instanceHash, meta, nil, nil
+			}
+			rv.instanceHash = newHash
+			rv.meta = newMeta
+			return newHash, newMeta, nil, nil
+		}
+		// Same ETag — update LastValidated to extend freshness.
+		// Only one goroutine writes, so no metadata commit race.
+		meta.LastValidated = time.Now()
+		if setErr := pc.storage.SetMetadata(instanceHash, meta); setErr != nil {
+			log.Warnf("Failed to update LastValidated: %v", setErr)
+		}
+		rv.instanceHash = instanceHash
+		rv.meta = meta
+		return instanceHash, meta, nil, nil
+	}
+
+	if dlErr != nil {
+		// Revalidation failed — serve stale data rather than failing
+		log.Debugf("Revalidation failed for %s, serving stale: %v", instanceHash, dlErr)
+		rv.err = dlErr
+	}
+	rv.instanceHash = instanceHash
+	rv.meta = meta
+	return instanceHash, meta, nil, nil
+}
+
 // downloadObject downloads an object from the origin and returns the resulting instanceHash.
 // The objectHash identifies the logical object (URL); the returned instanceHash includes the ETag.
 // When the origin responds with Cache-Control: no-store, the returned error is ErrNoStore
@@ -693,9 +1016,11 @@ func (pc *PersistentCache) downloadObject(ctx context.Context, pelicanURL, objec
 			dl.mu.Unlock()
 			pc.activeDownloadsMu.Unlock()
 			if errors.Is(err, ErrNoStore) {
-				return "", dl, err
+				// Stream already consumed by first caller — tell this
+				// caller to start its own download.
+				return "", nil, ErrNoStoreRetry
 			}
-			return instanceHash, nil, err
+			return instanceHash, dl, err
 		}
 		dl.waiters = append(dl.waiters, waiter)
 		dlRef := dl // Keep reference to download
@@ -709,9 +1034,10 @@ func (pc *PersistentCache) downloadObject(ctx context.Context, pelicanURL, objec
 			instanceHash := dlRef.instanceHash
 			dlRef.mu.Unlock()
 			if errors.Is(err, ErrNoStore) {
-				return "", dlRef, err
+				// Stream already consumed by first caller — retry.
+				return "", nil, ErrNoStoreRetry
 			}
-			return instanceHash, nil, err
+			return instanceHash, dlRef, err
 		case <-ctx.Done():
 			return "", nil, ctx.Err()
 		}
@@ -730,6 +1056,14 @@ func (pc *PersistentCache) downloadObject(ctx context.Context, pelicanURL, objec
 	// Perform download (this will set dl.instanceHash and dl.etag)
 	err := pc.performDownload(ctx, dl, token)
 
+	// Ensure completionDone is closed on error/no-store paths so that
+	// the deferred cleanup goroutine (and invalidateCachedObject waiters)
+	// don't block forever.  For successful inline downloads, performDownload
+	// already closed it; for disk mode, completeDownload handles it.
+	if err != nil && !errors.Is(err, ErrNoStore) {
+		close(dl.completionDone)
+	}
+
 	// Notify waiters
 	dl.mu.Lock()
 	dl.done = true
@@ -739,9 +1073,13 @@ func (pc *PersistentCache) downloadObject(ctx context.Context, pelicanURL, objec
 	}
 	dl.mu.Unlock()
 
-	// Clean up the active download entry
-	// Waiters have their own reference, so it's safe to delete immediately
+	// Defer cleanup of the active download entry until background
+	// completion finishes.  This keeps the entry (with dl.done == true)
+	// in the map so that invalidateCachedObject can find and wait on
+	// completionDone, and concurrent GETs for the same object still
+	// benefit from deduplication.
 	go func() {
+		<-dl.completionDone
 		pc.activeDownloadsMu.Lock()
 		delete(pc.activeDownloads, objectHash)
 		pc.activeDownloadsMu.Unlock()
@@ -750,7 +1088,7 @@ func (pc *PersistentCache) downloadObject(ctx context.Context, pelicanURL, objec
 	if errors.Is(err, ErrNoStore) {
 		return "", dl, err
 	}
-	return dl.instanceHash, nil, err
+	return dl.instanceHash, dl, err
 }
 
 // performDownload actually downloads the object without a prior stat.
@@ -773,7 +1111,14 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 	if err != nil {
 		return errors.Wrap(err, "failed to create transfer client")
 	}
-	defer tc.Close()
+	// tc ownership: if we spawn completeDownload, it takes over closing tc.
+	// Otherwise we must close it ourselves before returning.
+	tcHandedOff := false
+	defer func() {
+		if !tcHandedOff {
+			tc.Close()
+		}
+	}()
 
 	// Create a channel to receive early metadata (size, ETag) before body transfer
 	metadataChan := make(chan client.TransferMetadata, 1)
@@ -781,8 +1126,13 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 	// Create a decision writer that buffers data until we know the size
 	dw := newDecisionWriter(pc, dl)
 
-	// Start the transfer - the decision writer will buffer until we make a storage decision
-	tj, err := tc.NewTransferJob(ctx, sourceURL, "", false, false,
+	// Derive a per-download context from the cache-wide downloadCtx.
+	// PersistentCache.Close() cancels downloadCtx which cascades to all
+	// per-download contexts.  completeDownload can also cancel this
+	// individual context when no clients remain (idle download cleanup).
+	dlCtx, dlCancel := context.WithCancel(pc.downloadCtx)
+	dl.cancelFn = dlCancel
+	tj, err := tc.NewTransferJob(dlCtx, sourceURL, "", false, false,
 		client.WithToken(token),
 		client.WithWriter(dw),
 		client.WithMetadataChannel(metadataChan),
@@ -799,20 +1149,26 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 	var metadata client.TransferMetadata
 	var metadataReceived bool
 
-	// Channel to receive transfer results
+	// Channel to receive transfer results.
+	// This goroutine terminates when tc.Results() is closed by tc.Close().
 	resultChan := make(chan *client.TransferResults, 1)
-	go func() {
+	tjID := tj.ID()
+	pc.egrp.Go(func() error {
 		results := tc.Results()
 		for result := range results {
-			if result.ID() == tj.ID() {
+			if result.ID() == tjID {
 				resultChan <- &result
-				return
+				return nil
 			}
 		}
 		resultChan <- nil
-	}()
+		return nil
+	})
 
-	// Wait for either metadata or result (whichever comes first)
+	// Wait for either metadata or result (whichever comes first).
+	// We watch both the request context and the download context so that
+	// PersistentCache.Close() (which cancels downloadCtx) can abort the
+	// metadata wait promptly.
 	select {
 	case metadata = <-metadataChan:
 		metadataReceived = true
@@ -826,6 +1182,8 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 		// Check the decision writer's buffer for size
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-pc.downloadCtx.Done():
+		return pc.downloadCtx.Err()
 	}
 
 	// Use metadata to compute instanceHash and make storage decision
@@ -854,36 +1212,62 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 				dw.SetDiscard()
 				// Wait for transfer to complete (it may error due to discard, that's ok)
 				<-resultChan
+				close(dl.completionDone)
 				return nil
 			}
 		}
 
 		if !ccDirectives.ShouldStore() {
-			// Origin says not to store — buffer in memory and return ErrNoStore.
-			// We still need to finish receiving the transfer so the client gets data.
+			// Origin says not to store — stream directly to the caller via
+			// an io.Pipe instead of buffering the entire response in memory
+			// (which could OOM on large objects).
 			log.Debugf("performDownload: Origin sent Cache-Control %q — will not persist", dl.cacheControl)
-			if err := dw.SetInlineMode(ctx, metadata.Size); err != nil {
-				return errors.Wrap(err, "failed to set inline mode for no-store response")
+
+			pr, pw := io.Pipe()
+			buffered := dw.SetPipeMode(pw)
+
+			// Combine any data buffered before the decision with the pipe.
+			// This avoids writing into the pipe before a consumer is reading
+			// (io.Pipe is unbuffered, so that would deadlock).
+			var noStoreReader io.ReadCloser
+			if len(buffered) > 0 {
+				noStoreReader = &multiReadCloser{
+					Reader: io.MultiReader(bytes.NewReader(buffered), pr),
+					close:  pr.Close,
+				}
+			} else {
+				noStoreReader = pr
 			}
 
-			// Wait for transfer to finish
-			result := <-resultChan
-			if result != nil && result.Error != nil {
-				return result.Error
-			}
-
-			// Capture the buffered data and metadata for the caller
-			dl.noStoreData = dw.buffer
+			dl.noStoreReader = noStoreReader
 			dl.noStoreMeta = &CacheMetadata{
 				ETag:          dl.etag,
 				LastModified:  dl.lastModified,
 				ContentType:   "application/octet-stream",
-				ContentLength: int64(len(dw.buffer)),
+				ContentLength: metadata.Size,
 				SourceURL:     dl.sourceURL,
 				ObjectHash:    dl.objectHash,
 				NamespaceID:   dl.namespaceID,
 			}
 			dl.noStoreMeta.SetCacheControl(dl.cacheControl)
+
+			// Spawn a background goroutine to finish receiving the transfer
+			// and close the pipe writer when done.  The caller reads from pr.
+			tcHandedOff = true
+			pc.downloadWg.Add(1)
+			pc.egrp.Go(func() error {
+				defer pc.downloadWg.Done()
+				defer tc.Close()
+				defer close(dl.completionDone)
+				result := <-resultChan
+				if result != nil && result.Error != nil {
+					pw.CloseWithError(result.Error)
+				} else {
+					pw.Close()
+				}
+				return nil
+			})
+
 			return ErrNoStore
 		}
 
@@ -898,6 +1282,13 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 			if err := dw.SetDiskMode(ctx, metadata.Size); err != nil {
 				return errors.Wrap(err, "failed to set disk mode")
 			}
+			// Mark the shared block state as having an active download so
+			// that concurrent readers wait for blocks instead of starting
+			// duplicate range downloads from the origin.
+			sharedState, err := pc.storage.GetSharedBlockState(dl.instanceHash)
+			if err == nil {
+				sharedState.SetDownloading()
+			}
 		}
 	} else {
 		// No metadata received - use buffered data size
@@ -910,53 +1301,133 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 		}
 	}
 
-	// Storage decision made - spawn background goroutine for completion
-	// This allows reads to begin immediately while download continues
-	go pc.completeDownload(ctx, dl, dw, resultChan)
+	// For inline (small-file) mode, complete synchronously — the data is tiny
+	// and the caller needs metadata to be available immediately after
+	// downloadObject returns.
+	if dw.inlineMode {
+		result := <-resultChan
+		if result != nil && result.Error != nil {
+			return result.Error
+		}
+		if err := dw.Finalize(dl); err != nil {
+			return errors.Wrap(err, "failed to finalize inline storage")
+		}
+		close(dl.completionDone)
+		return nil
+	}
+
+	// For disk (large-file) mode, spawn a background goroutine so that
+	// reads can begin immediately while the download continues.
+	// Hand off tc ownership so the background goroutine closes it after
+	// the transfer finishes (the defer above will skip tc.Close).
+	tcHandedOff = true
+	pc.downloadWg.Add(1)
+	pc.egrp.Go(func() error {
+		defer pc.downloadWg.Done()
+		pc.completeDownload(dl, dw, resultChan, tc)
+		return nil
+	})
 
 	return nil
 }
 
-// completeDownload handles the background completion of a download after the
-// storage decision has been made. This runs in a separate goroutine to allow
-// non-blocking downloads.
-func (pc *PersistentCache) completeDownload(ctx context.Context, dl *persistentDownload, dw *decisionWriter, resultChan chan *client.TransferResults) {
+// completeDownload handles the background completion of a disk-mode download
+// after the storage decision has been made. This runs in a separate goroutine
+// to allow concurrent reads while the download continues.
+//
+// If no clients are registered (dl.HasActiveClients() == false) for longer
+// than LocalCache.PrefetchTimeout, the download is cancelled to avoid wasting
+// bandwidth on data nobody is reading.
+//
+// tc is the transfer client that owns the in-progress download; it must be
+// closed here (not in performDownload) so that the download is not cancelled
+// prematurely.
+func (pc *PersistentCache) completeDownload(dl *persistentDownload, dw *decisionWriter, resultChan chan *client.TransferResults, tc *client.TransferClient) {
 	defer close(dl.completionDone)
+	defer tc.Close()
 
-	// Wait for transfer completion
-	result := <-resultChan
-	if result != nil && result.Error != nil {
-		dl.completionErr.Store(result.Error)
-		log.Warnf("Transfer failed for %s: %v", dl.instanceHash, result.Error)
-		return
+	// Clear the "downloading" flag on the shared block state when this
+	// goroutine exits, regardless of success or failure.  This wakes any
+	// readers blocked in WaitForBlock.
+	defer func() {
+		if dw.diskMode {
+			if sharedState, err := pc.storage.GetSharedBlockState(dl.instanceHash); err == nil {
+				sharedState.ClearDownloading()
+			}
+		}
+	}()
+
+	// Idle-download cancellation: if no clients are consuming data from
+	// this download for PrefetchTimeout, cancel the transfer.  This
+	// mirrors the same logic in BlockFetcherV2.doFetch.
+	idleTimeout := param.LocalCache_PrefetchTimeout.GetDuration()
+	if idleTimeout == 0 {
+		idleTimeout = DefaultPrefetchTimeout
 	}
+	idleTimer := time.NewTimer(idleTimeout)
+	defer idleTimer.Stop()
 
-	// Finalize storage
-	if err := dw.Finalize(dl); err != nil {
-		dl.completionErr.Store(errors.Wrap(err, "failed to finalize storage"))
-		log.Warnf("Failed to finalize %s: %v", dl.instanceHash, err)
-		return
+	// Wait for transfer completion or idle timeout
+	for {
+		select {
+		case result := <-resultChan:
+			if result != nil && result.Error != nil {
+				dl.completionErr.Store(result.Error)
+				log.Warnf("Transfer failed for %s: %v", dl.instanceHash, result.Error)
+				return
+			}
+			// Transfer completed successfully — finalize storage.
+			if err := dw.Finalize(dl); err != nil {
+				dl.completionErr.Store(errors.Wrap(err, "failed to finalize storage"))
+				log.Warnf("Failed to finalize %s: %v", dl.instanceHash, err)
+				return
+			}
+			log.Debugf("Background completion finished for %s", dl.instanceHash)
+			return
+
+		case <-idleTimer.C:
+			if !dl.HasActiveClients() {
+				log.Debugf("Download idle timeout for %s — no active clients, cancelling", dl.instanceHash)
+				if dl.cancelFn != nil {
+					dl.cancelFn()
+				}
+				dl.completionErr.Store(errors.New("download cancelled: no active clients"))
+				return
+			}
+			// Clients are still reading — reset the timer.
+			idleTimer.Reset(idleTimeout)
+		}
 	}
-
-	log.Debugf("Background completion finished for %s", dl.instanceHash)
 }
 
-// inlineWriter is a simple io.WriteCloser that collects data in memory
-type inlineWriter struct {
-	data []byte
+// multiReadCloser combines an io.Reader (e.g. io.MultiReader) with a
+// close function.  This is used to prepend buffered data before a pipe
+// reader while still allowing Close() to clean up the pipe.
+type multiReadCloser struct {
+	io.Reader
+	close func() error
 }
 
-func (w *inlineWriter) Write(p []byte) (n int, err error) {
-	w.data = append(w.data, p...)
-	return len(p), nil
+func (m *multiReadCloser) Close() error {
+	return m.close()
 }
 
-func (w *inlineWriter) Close() error {
-	return nil
+// readCloserWithCleanup wraps an io.ReadCloser and calls a cleanup
+// function when Close is called.  Used to deregister a download client
+// when the reader is closed.
+type readCloserWithCleanup struct {
+	io.ReadCloser
+	cleanup func()
+}
+
+func (rc *readCloserWithCleanup) Close() error {
+	rc.cleanup()
+	return rc.ReadCloser.Close()
 }
 
 // decisionWriter buffers data until a storage decision is made based on response headers.
-// It supports three modes: inline (small files), disk (large files), and discard (cached).
+// It supports four modes: inline (small files), disk (large files), pipe (no-store streaming),
+// and discard (already cached).
 type decisionWriter struct {
 	pc     *PersistentCache
 	dl     *persistentDownload
@@ -964,10 +1435,11 @@ type decisionWriter struct {
 	cond   *sync.Cond
 	buffer []byte
 
-	// Mode indicators (set by SetInlineMode, SetDiskMode, or SetDiscard)
+	// Mode indicators (set by SetInlineMode, SetDiskMode, SetPipeMode, or SetDiscard)
 	decided     bool
 	inlineMode  bool
 	diskMode    bool
+	pipeMode    bool
 	discardMode bool
 
 	// For disk mode
@@ -975,6 +1447,9 @@ type decisionWriter struct {
 	diskMeta    *CacheMetadata
 	ctx         context.Context
 	size        int64
+
+	// For pipe mode (no-store streaming)
+	pipeWriter *io.PipeWriter
 
 	// Error from mode setup
 	setupErr error
@@ -1021,6 +1496,11 @@ func (w *decisionWriter) Write(p []byte) (n int, err error) {
 		return w.blockWriter.Write(p)
 	}
 
+	if w.pipeMode {
+		// Stream directly to the pipe (no buffering)
+		return w.pipeWriter.Write(p)
+	}
+
 	return 0, errors.New("decisionWriter: no mode set")
 }
 
@@ -1030,6 +1510,9 @@ func (w *decisionWriter) Close() error {
 
 	if w.diskMode && w.blockWriter != nil {
 		return w.blockWriter.Close()
+	}
+	if w.pipeMode && w.pipeWriter != nil {
+		return w.pipeWriter.Close()
 	}
 	return nil
 }
@@ -1041,6 +1524,32 @@ func (w *decisionWriter) SetDiscard() {
 	w.discardMode = true
 	w.decided = true
 	w.cond.Broadcast()
+}
+
+// SetPipeMode configures the writer to stream data directly to a pipe writer.
+// This is used for no-store responses where data must not be buffered in memory.
+// Any data already buffered (before the decision was made) is flushed to the pipe.
+// SetPipeMode configures the writer to stream subsequent data to the pipe.
+// It returns any data buffered before the decision was made.  The caller
+// must prepend this data (e.g. via io.MultiReader) so the full response
+// reaches the consumer.  We intentionally do NOT write the buffer into the
+// pipe here because the pipe reader is not yet connected to a consumer,
+// and io.Pipe is unbuffered — the write would deadlock.
+func (w *decisionWriter) SetPipeMode(pw *io.PipeWriter) (buffered []byte) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.pipeWriter = pw
+
+	// Hand the pre-decision buffer to the caller instead of writing it
+	// into the pipe (which would block).
+	buffered = w.buffer
+	w.buffer = nil
+
+	w.pipeMode = true
+	w.decided = true
+	w.cond.Broadcast()
+	return buffered
 }
 
 // SetInlineMode configures the writer for inline (in-memory) storage
@@ -1101,7 +1610,10 @@ func (w *decisionWriter) SetDiskMode(ctx context.Context, size int64) error {
 
 	// Create block writer
 	onComplete := func() {
-		w.pc.eviction.AddUsage(w.diskMeta.StorageID, w.dl.namespaceID, size)
+		// Usage was already tracked per-block atomically in MarkBlocksDownloaded.
+		// Notify the eviction manager so its in-memory counter stays current and
+		// an eviction check is triggered if needed.
+		w.pc.eviction.NoteUsageIncrease(size)
 		if err := w.pc.db.SetLatestETag(w.dl.objectHash, w.dl.etag); err != nil {
 			log.Warnf("Failed to update ETag table: %v", err)
 		}
@@ -1168,7 +1680,9 @@ func (w *decisionWriter) Finalize(dl *persistentDownload) error {
 		}
 
 		// StoreInline sets meta.StorageID = StorageIDInline
-		w.pc.eviction.AddUsage(StorageIDInline, dl.namespaceID, int64(len(w.buffer)))
+		if err := w.pc.eviction.AddUsage(StorageIDInline, dl.namespaceID, int64(len(w.buffer))); err != nil {
+			log.Warnf("Failed to record inline usage for %s: %v", dl.instanceHash, err)
+		}
 		log.Debugf("Completed inline download of %s (%d bytes)", dl.instanceHash, len(w.buffer))
 		return nil
 	}
@@ -1316,12 +1830,19 @@ func (pc *PersistentCache) GetStats() PersistentCacheStats {
 	evictStats := pc.eviction.GetStats()
 	consistStats := pc.consistency.GetStats()
 
+	// Convert StorageUsageKey map to string-keyed map for JSON serialization
+	nsUsage := make(map[string]int64, len(evictStats.NamespaceUsage))
+	for k, v := range evictStats.NamespaceUsage {
+		key := fmt.Sprintf("s%d:ns%d", k.StorageID, k.NamespaceID)
+		nsUsage[key] = v
+	}
+
 	return PersistentCacheStats{
-		TotalUsage:      evictStats.TotalUsage,
-		MaxSize:         evictStats.MaxSize,
-		HighWater:       evictStats.HighWater,
-		LowWater:        evictStats.LowWater,
-		NamespaceUsage:  evictStats.NamespaceUsage,
+		TotalUsage:       evictStats.TotalUsage,
+		MaxSize:          evictStats.MaxSize,
+		HighWater:        evictStats.HighWater,
+		LowWater:         evictStats.LowWater,
+		NamespaceUsage:   nsUsage,
 		ConsistencyStats: consistStats,
 	}
 }
@@ -1332,7 +1853,7 @@ type PersistentCacheStats struct {
 	MaxSize          uint64
 	HighWater        uint64
 	LowWater         uint64
-	NamespaceUsage   map[StorageUsageKey]int64
+	NamespaceUsage   map[string]int64
 	ConsistencyStats ConsistencyStats
 }
 
@@ -1398,33 +1919,6 @@ func makeRequest(ctx context.Context, tr http.RoundTripper, url, method string, 
 
 func unmarshalJSON(data []byte, v interface{}) error {
 	return json.Unmarshal(data, v)
-}
-
-// convertClientChecksums converts checksums from the client module format to our schema format
-func convertClientChecksums(clientChecksums []client.ChecksumInfo) []Checksum {
-	if len(clientChecksums) == 0 {
-		return nil
-	}
-
-	result := make([]Checksum, 0, len(clientChecksums))
-	for _, cc := range clientChecksums {
-		var csType ChecksumType
-		switch cc.Algorithm {
-		case client.AlgMD5:
-			csType = ChecksumMD5
-		case client.AlgSHA1:
-			csType = ChecksumSHA1
-		case client.AlgCRC32, client.AlgCRC32C:
-			csType = ChecksumCRC32
-		default:
-			continue // Skip unknown algorithms
-		}
-		result = append(result, Checksum{
-			Type:  csType,
-			Value: cc.Value,
-		})
-	}
-	return result
 }
 
 // ComputeObjectHashFromPath computes the object hash from a raw path (without federation URL).

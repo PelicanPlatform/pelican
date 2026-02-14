@@ -27,6 +27,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"io"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -35,6 +36,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/crypto/hkdf"
 
 	"github.com/pelicanplatform/pelican/config"
 )
@@ -170,20 +172,20 @@ func (em *EncryptionManager) saveMasterKey() error {
 	if err != nil {
 		return errors.Wrap(err, "failed to create temporary master key file")
 	}
-	
+
 	if _, err := tmpFile.Write(data); err != nil {
 		tmpFile.Close()
 		os.Remove(tmpPath)
 		return errors.Wrap(err, "failed to write temporary master key file")
 	}
-	
+
 	// Explicitly sync to ensure data is persisted before rename
 	if err := tmpFile.Sync(); err != nil {
 		tmpFile.Close()
 		os.Remove(tmpPath)
 		return errors.Wrap(err, "failed to sync temporary master key file")
 	}
-	
+
 	if err := tmpFile.Close(); err != nil {
 		os.Remove(tmpPath)
 		return errors.Wrap(err, "failed to close temporary master key file")
@@ -204,6 +206,22 @@ func (em *EncryptionManager) UpdateMasterKeyEncryption() error {
 	defer em.mu.Unlock()
 
 	return em.saveMasterKey()
+}
+
+// DeriveDBKey derives a separate encryption key for BadgerDB using HKDF.
+// This ensures proper key separation: the master key encrypts data blocks,
+// while this derived key encrypts BadgerDB's LSM tree and WAL files
+// (protecting metadata such as ETags, URLs, and timestamps at rest).
+func (em *EncryptionManager) DeriveDBKey() ([]byte, error) {
+	em.mu.RLock()
+	defer em.mu.RUnlock()
+
+	hkdfReader := hkdf.New(sha256.New, em.masterKey, nil, []byte("pelican-cache-badgerdb-encryption"))
+	dbKey := make([]byte, KeySize)
+	if _, err := io.ReadFull(hkdfReader, dbKey); err != nil {
+		return nil, errors.Wrap(err, "failed to derive BadgerDB encryption key")
+	}
+	return dbKey, nil
 }
 
 // GenerateDataKey generates a new random data encryption key (DEK)

@@ -204,21 +204,21 @@ func TestConcurrent_RangeReads_DifferentRanges(t *testing.T) {
 
 	// Define a variety of range requests spanning different blocks
 	type rangeSpec struct {
-		header   string
-		start    int
-		end      int
+		header string
+		start  int
+		end    int
 	}
 	ranges := []rangeSpec{
 		{"bytes=0-99", 0, 99},
-		{"bytes=100-4079", 100, 4079},           // Within first block
-		{"bytes=4080-8159", 4080, 8159},         // Second block exactly
-		{"bytes=4000-5000", 4000, 5000},         // Spans block boundary (block 0/1)
-		{"bytes=0-0", 0, 0},                     // Single byte
-		{"bytes=16000-16999", 16000, 16999},     // Middle of file
-		{"bytes=32700-32767", 32700, 32767},     // End of file
-		{"bytes=0-32767", 0, 32767},             // Entire file as range
-		{"bytes=8000-12000", 8000, 12000},       // Spans blocks 1/2
-		{"bytes=12000-24000", 12000, 24000},     // Spans multiple blocks
+		{"bytes=100-4079", 100, 4079},       // Within first block
+		{"bytes=4080-8159", 4080, 8159},     // Second block exactly
+		{"bytes=4000-5000", 4000, 5000},     // Spans block boundary (block 0/1)
+		{"bytes=0-0", 0, 0},                 // Single byte
+		{"bytes=16000-16999", 16000, 16999}, // Middle of file
+		{"bytes=32700-32767", 32700, 32767}, // End of file
+		{"bytes=0-32767", 0, 32767},         // Entire file as range
+		{"bytes=8000-12000", 8000, 12000},   // Spans blocks 1/2
+		{"bytes=12000-24000", 12000, 24000}, // Spans multiple blocks
 	}
 
 	const repeats = 3 // Each range is read this many times concurrently

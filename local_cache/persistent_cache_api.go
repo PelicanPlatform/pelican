@@ -19,6 +19,7 @@
 package local_cache
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -168,6 +169,289 @@ func handleError(w http.ResponseWriter, getErr error, sendTrailer bool) {
 	}
 }
 
+// requestOnlyIfCached returns true when the client indicates it only wants a
+// stored (cached) response.  This is signalled by the standard
+// Cache-Control: only-if-cached directive (RFC 7234 §5.2.1.7) or by the
+// legacy X-Pelican-NoDownload: true header.
+func requestOnlyIfCached(r *http.Request) bool {
+	if r.Header.Get("X-Pelican-NoDownload") == "true" {
+		return true
+	}
+	for _, v := range r.Header.Values("Cache-Control") {
+		for _, dir := range strings.Split(v, ",") {
+			if strings.TrimSpace(dir) == "only-if-cached" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// serveObject is the shared request handler for both the Unix-socket listener
+// and the Gin-based cache endpoint.  It handles GET, HEAD, and PROPFIND
+// requests for cached objects including:
+//   - Authorization checking
+//   - X-Transfer-Status trailer support
+//   - X-Pelican-Timeout request timeout
+//   - HEAD: stat-only (never downloads); with Cache-Control: only-if-cached returns 504 on miss
+//   - If-None-Match / ETag conditional responses (304)
+//   - Cache-Control / Age response headers from stored metadata
+//   - No-store streaming (io.Copy) for non-seekable responses
+//   - Range requests via http.ServeContent for seekable responses
+func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
+	authzHeader := r.Header.Get("Authorization")
+	bearerToken := ""
+	if strings.HasPrefix(authzHeader, "Bearer ") {
+		bearerToken = authzHeader[7:] // len("Bearer ") == 7
+	}
+	objectPath := path.Clean(r.URL.Path)
+
+	// Handle PROPFIND requests (directory listings) - proxy to origin
+	if r.Method == "PROPFIND" {
+		pc.proxyPropfind(w, r, objectPath, bearerToken)
+		return
+	}
+
+	// Handle write-through requests (PUT, DELETE) - proxy to origin
+	if r.Method == "PUT" || r.Method == "DELETE" {
+		pc.proxyWrite(w, r, objectPath, bearerToken)
+		return
+	}
+
+	if r.Method != "GET" && r.Method != "HEAD" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	transferStatusStr := r.Header.Get("X-Transfer-Status")
+	sendTrailer := false
+	if transferStatusStr == "true" {
+		// HTTP/2 natively supports trailers; HTTP/1.1 requires TE: trailers.
+		if r.ProtoMajor >= 2 {
+			sendTrailer = true
+			w.Header().Set("Trailer", "X-Transfer-Status")
+		} else {
+			for _, encoding := range r.Header.Values("TE") {
+				if encoding == "trailers" {
+					sendTrailer = true
+					w.Header().Set("Trailer", "X-Transfer-Status")
+					break
+				}
+			}
+		}
+	}
+
+	var headerTimeout time.Duration
+	timeoutStr := r.Header.Get("X-Pelican-Timeout")
+	if timeoutStr != "" {
+		if ht, parseErr := time.ParseDuration(timeoutStr); parseErr != nil {
+			log.Debugln("Invalid X-Pelican-Timeout value:", timeoutStr)
+		} else {
+			headerTimeout = ht
+		}
+	}
+	log.Debugln("Setting header timeout:", timeoutStr)
+
+	// Handle HEAD requests: never trigger a download.
+	// With only-if-cached: return 504 on cache miss (RFC 7234 §5.2.1.7).
+	// Without: query the origin for size if not cached.
+	if r.Method == "HEAD" {
+		if requestOnlyIfCached(r) {
+			size, statErr := pc.StatCachedOnly(objectPath, bearerToken)
+			if errors.Is(statErr, ErrNotCached) {
+				w.WriteHeader(http.StatusGatewayTimeout)
+				return
+			} else if errors.Is(statErr, authorizationDenied) {
+				w.WriteHeader(http.StatusForbidden)
+				if _, err := w.Write([]byte("Authorization Denied")); err != nil {
+					log.Errorln("Failed to write authorization denied to client")
+				}
+				return
+			} else if statErr != nil {
+				handleError(w, statErr, sendTrailer)
+				return
+			}
+			w.Header().Set("Content-Length", strconv.FormatUint(size, 10))
+			w.Header().Set("Accept-Ranges", "bytes")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		// Plain HEAD — stat only, no download.
+		result, headErr := pc.HeadObject(objectPath, bearerToken)
+		if errors.Is(headErr, authorizationDenied) {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		} else if headErr != nil {
+			handleError(w, headErr, sendTrailer)
+			return
+		}
+		w.Header().Set("Content-Length", strconv.FormatInt(result.ContentLength, 10))
+		w.Header().Set("Accept-Ranges", "bytes")
+		if result.Meta != nil {
+			if result.Meta.ETag != "" {
+				w.Header().Set("ETag", result.Meta.ETag)
+			}
+			w.Header().Set("Cache-Control", result.Meta.ResponseCacheControl())
+			if !result.Meta.Completed.IsZero() {
+				age := int(time.Since(result.Meta.Completed).Seconds())
+				if age > 0 {
+					w.Header().Set("Age", strconv.Itoa(age))
+				}
+			}
+		} else {
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		}
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Handle Cache-Control: only-if-cached for GET requests (RFC 7234 §5.2.1.7).
+	// Return the cached object if present, or 504 Gateway Timeout if not.
+	if requestOnlyIfCached(r) {
+		size, statErr := pc.StatCachedOnly(objectPath, bearerToken)
+		if errors.Is(statErr, ErrNotCached) {
+			w.WriteHeader(http.StatusGatewayTimeout)
+			return
+		} else if errors.Is(statErr, authorizationDenied) {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		} else if statErr != nil {
+			handleError(w, statErr, sendTrailer)
+			return
+		}
+		// Object is cached — fall through to the normal GET path which will
+		// serve it from cache without contacting the origin.
+		_ = size
+	}
+
+	// Create request context with optional timeout (GET only from here)
+	reqCtx := context.Background()
+	if headerTimeout > 0 {
+		var cancelReqFunc context.CancelFunc
+		reqCtx, cancelReqFunc = context.WithTimeout(reqCtx, headerTimeout)
+		defer cancelReqFunc()
+	}
+
+	// Get seekable reader for the object (handles on-demand fetching).
+	// When the client sent a Range header, tell the cache so that on a
+	// miss it can use a lightweight HEAD + on-demand block fetch instead
+	// of a full sequential download from the origin.
+	reader, meta, getErr := pc.GetSeekableReader(reqCtx, objectPath, bearerToken, r.Header.Get("Range") != "")
+	if getErr != nil {
+		handleError(w, getErr, sendTrailer)
+		return
+	}
+	defer reader.Close()
+
+	// Set cache-related headers from metadata
+	if meta != nil {
+		// Set Age header (time since object was cached)
+		if !meta.Completed.IsZero() {
+			age := int(time.Since(meta.Completed).Seconds())
+			if age > 0 {
+				w.Header().Set("Age", strconv.Itoa(age))
+			}
+		}
+
+		// Set ETag header if available
+		if meta.ETag != "" {
+			w.Header().Set("ETag", meta.ETag)
+		}
+
+		// Handle If-None-Match conditional request (http.ServeContent doesn't handle this)
+		if meta.ETag != "" {
+			ifNoneMatch := r.Header.Get("If-None-Match")
+			if ifNoneMatch != "" {
+				// Parse If-None-Match header (may contain multiple ETags)
+				for _, match := range strings.Split(ifNoneMatch, ",") {
+					match = strings.TrimSpace(match)
+					if match == "*" || match == meta.ETag {
+						// ETag matches, return 304 Not Modified
+						w.Header().Set("Cache-Control", meta.ResponseCacheControl())
+						w.WriteHeader(http.StatusNotModified)
+						return
+					}
+				}
+			}
+		}
+	}
+
+	// Set Cache-Control header from stored metadata or use sensible default.
+	// This must be set before http.ServeContent since it may return 304 for If-Modified-Since.
+	if meta != nil {
+		w.Header().Set("Cache-Control", meta.ResponseCacheControl())
+	} else {
+		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+	}
+
+	// For no-store streaming responses the reader is not seekable, so we
+	// cannot use http.ServeContent (which calls Seek).  Stream directly
+	// with io.Copy and set the response headers manually.
+	if reader.IsNoStore() {
+		contentLen := reader.ContentLength()
+		if contentLen > 0 {
+			w.Header().Set("Content-Length", strconv.FormatInt(contentLen, 10))
+		}
+		w.Header().Set("Accept-Ranges", "none")
+		w.WriteHeader(http.StatusOK)
+
+		var writeErr error
+		if _, err := io.Copy(w, reader); err != nil {
+			writeErr = err
+		}
+		if sendTrailer {
+			trailerVal := "200: OK"
+			if writeErr != nil {
+				trailerVal = fmt.Sprintf("%d: %s", 500, writeErr)
+			}
+			w.Header().Set("X-Transfer-Status", trailerVal)
+		}
+		return
+	}
+
+	// Use http.ServeContent which handles:
+	// - Range requests (bytes=start-end)
+	// - If-Modified-Since conditional requests
+	// - Content-Length, Content-Type detection
+	// - Proper status codes (200, 206, 304, 416)
+	// Note: It does NOT handle If-None-Match (ETag-based), which we handle above
+	var modTime time.Time
+	if meta != nil && !meta.LastModified.IsZero() {
+		modTime = meta.LastModified
+	}
+
+	// Create wrappers that track errors for trailer support.
+	// - trailerWriter captures write-side errors (e.g. client disconnect)
+	//   and suppresses Content-Length when sendTrailer is true so that
+	//   Go uses chunked transfer-encoding (required for HTTP/1.1 trailers).
+	// - errorTrackingReader captures read-side errors (e.g. AES-GCM
+	//   authentication failure from corrupted data) that http.ServeContent
+	//   would otherwise silently discard.
+	var writeErr, readErr error
+	wrappedWriter := &trailerWriter{
+		ResponseWriter: w,
+		writeErr:       &writeErr,
+		sendTrailer:    sendTrailer,
+	}
+	wrappedReader := &errorTrackingReader{
+		ReadSeeker: reader,
+		readErr:    &readErr,
+	}
+
+	http.ServeContent(wrappedWriter, r, objectPath, modTime, wrappedReader)
+
+	if sendTrailer {
+		trailerVal := "200: OK"
+		if writeErr != nil {
+			trailerVal = fmt.Sprintf("%d: %s", 500, writeErr)
+		} else if readErr != nil {
+			trailerVal = fmt.Sprintf("%d: %s", 500, readErr)
+		}
+		w.Header().Set("X-Transfer-Status", trailerVal)
+	}
+}
+
 // proxyPropfind forwards a PROPFIND request to the origin server.
 // Directory listings are NOT cached; they always go to the origin.
 func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request, objectPath string, bearerToken string) {
@@ -253,6 +537,152 @@ func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request,
 	}
 }
 
+// proxyWrite forwards a PUT or DELETE request to the origin server (write-through).
+// On success, any locally-cached copy of the object is invalidated so that
+// subsequent GETs retrieve the new version from the origin.
+func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, objectPath string, bearerToken string) {
+	// Check authorization — PUT requires storage.create, DELETE requires storage.modify
+	var requiredScope token_scopes.TokenScope
+	if r.Method == "DELETE" {
+		requiredScope = token_scopes.Wlcg_Storage_Modify
+	} else {
+		requiredScope = token_scopes.Wlcg_Storage_Create
+	}
+	if !pc.ac.authorize(requiredScope, objectPath, bearerToken) {
+		w.WriteHeader(http.StatusForbidden)
+		if _, err := w.Write([]byte("Authorization Denied")); err != nil {
+			log.Errorln("Failed to write authorization denied to client")
+		}
+		return
+	}
+
+	if pc.directorURL == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		if _, err := w.Write([]byte("Cache not configured")); err != nil {
+			log.Errorln("Failed to write service unavailable to client")
+		}
+		return
+	}
+
+	// Construct the origin URL using the director with directread to bypass other caches
+	originURL := *pc.directorURL
+	originURL.Path = objectPath
+	originURL.Scheme = "https"
+	q := originURL.Query()
+	q.Set("directread", "")
+	originURL.RawQuery = q.Encode()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// Buffer the request body so that Go's http.Client can re-send it across
+	// 307/308 redirects (the default redirect policy only re-sends bodies for
+	// types that implement io.Seeker or have GetBody set, which r.Body does not).
+	var bodyReader io.Reader
+	if r.Body != nil && r.Body != http.NoBody {
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			log.Errorln("Failed to read write-through request body:", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		bodyReader = bytes.NewReader(bodyBytes)
+	}
+
+	proxyReq, err := http.NewRequestWithContext(ctx, r.Method, originURL.String(), bodyReader)
+	if err != nil {
+		log.Errorln("Failed to create write-through request:", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	// Forward relevant headers
+	if bearerToken != "" {
+		proxyReq.Header.Set("Authorization", "Bearer "+bearerToken)
+	}
+	if ct := r.Header.Get("Content-Type"); ct != "" {
+		proxyReq.Header.Set("Content-Type", ct)
+	}
+	if cl := r.Header.Get("Content-Length"); cl != "" {
+		proxyReq.Header.Set("Content-Length", cl)
+	}
+	// Forward checksum headers
+	for _, hdr := range []string{"Digest", "Want-Digest", "Content-MD5"} {
+		if v := r.Header.Get(hdr); v != "" {
+			proxyReq.Header.Set(hdr, v)
+		}
+	}
+
+	httpClient := &http.Client{
+		Transport: config.GetTransport(),
+		Timeout:   5 * time.Minute,
+	}
+
+	resp, err := httpClient.Do(proxyReq)
+	if err != nil {
+		log.Errorln("Failed to proxy write-through request:", err)
+		if isConnectionError(err) || errors.Is(err, context.DeadlineExceeded) {
+			w.WriteHeader(http.StatusGatewayTimeout)
+		} else {
+			w.WriteHeader(http.StatusBadGateway)
+		}
+		return
+	}
+	defer resp.Body.Close()
+
+	// On successful write, invalidate any cached version of this object.
+	// This ensures subsequent GETs fetch the new version from the origin.
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		pc.invalidateCachedObject(objectPath)
+	}
+
+	// Copy response headers
+	for key, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+
+	w.WriteHeader(resp.StatusCode)
+
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		log.Debugln("Error copying write-through response body:", err)
+	}
+}
+
+// invalidateCachedObject removes any locally-cached version of the given
+// object path.  Called after a successful write-through PUT or DELETE so
+// that subsequent GETs retrieve the new version from the origin.
+func (pc *PersistentCache) invalidateCachedObject(objectPath string) {
+	pelicanURL := pc.normalizePath(objectPath)
+	objectHash := ComputeObjectHash(pelicanURL)
+
+	// If there's an active download for this object, wait for it to finish
+	// so that the ETag and metadata are committed before we try to delete.
+	pc.activeDownloadsMu.RLock()
+	dl, downloading := pc.activeDownloads[objectHash]
+	pc.activeDownloadsMu.RUnlock()
+	if downloading {
+		log.Debugf("Waiting for active download of %s to complete before invalidation", objectPath)
+		<-dl.completionDone
+	}
+
+	// Look up the latest ETag for this object
+	etag, err := pc.db.GetLatestETag(objectHash)
+	if err != nil || etag == "" {
+		// Not in cache — nothing to invalidate
+		return
+	}
+
+	instanceHash := ComputeInstanceHash(etag, objectHash)
+
+	if err := pc.storage.Delete(instanceHash); err != nil {
+		log.Warnf("Failed to invalidate cached object %s: %v", objectPath, err)
+	} else {
+		log.Debugf("Invalidated cached object %s after write-through", objectPath)
+	}
+}
+
 // LaunchListener launches the unix socket listener for the persistent cache
 func (pc *PersistentCache) LaunchListener(ctx context.Context, egrp *errgroup.Group) (err error) {
 	socketName := param.LocalCache_Socket.GetString()
@@ -315,174 +745,7 @@ func (pc *PersistentCache) LaunchListener(ctx context.Context, egrp *errgroup.Gr
 	}
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
-		authzHeader := r.Header.Get("Authorization")
-		bearerToken := ""
-		if strings.HasPrefix(authzHeader, "Bearer ") {
-			bearerToken = authzHeader[7:] // len("Bearer ") == 7
-		}
-		objectPath := path.Clean(r.URL.Path)
-
-		// Handle PROPFIND requests (directory listings) - proxy to origin
-		if r.Method == "PROPFIND" {
-			pc.proxyPropfind(w, r, objectPath, bearerToken)
-			return
-		}
-
-		if r.Method != "GET" && r.Method != "HEAD" {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-		transferStatusStr := r.Header.Get("X-Transfer-Status")
-		sendTrailer := false
-		if transferStatusStr == "true" {
-			// HTTP/2 natively supports trailers; HTTP/1.1 requires TE: trailers.
-			if r.ProtoMajor >= 2 {
-				sendTrailer = true
-				w.Header().Set("Trailer", "X-Transfer-Status")
-			} else {
-				for _, encoding := range r.Header.Values("TE") {
-					if encoding == "trailers" {
-						sendTrailer = true
-						w.Header().Set("Trailer", "X-Transfer-Status")
-						break
-					}
-				}
-			}
-		}
-
-		var headerTimeout time.Duration = 0
-		timeoutStr := r.Header.Get("X-Pelican-Timeout")
-		if timeoutStr != "" {
-			if headerTimeout, err = time.ParseDuration(timeoutStr); err != nil {
-				log.Debugln("Invalid X-Pelican-Timeout value:", timeoutStr)
-			}
-		}
-		log.Debugln("Setting header timeout:", timeoutStr)
-
-		// Handle HEAD with X-Pelican-NoDownload (stat-only for cached objects)
-		if r.Method == "HEAD" && r.Header.Get("X-Pelican-NoDownload") == "true" {
-			size, statErr := pc.StatCachedOnly(objectPath, bearerToken)
-			if errors.Is(statErr, ErrNotCached) {
-				w.WriteHeader(http.StatusNotFound)
-				return
-			} else if errors.Is(statErr, authorizationDenied) {
-				w.WriteHeader(http.StatusForbidden)
-				if _, err = w.Write([]byte("Authorization Denied")); err != nil {
-					log.Errorln("Failed to write authorization denied to client")
-				}
-				return
-			} else if statErr != nil {
-				handleError(w, statErr, sendTrailer)
-				return
-			}
-			w.Header().Set("Content-Length", strconv.FormatUint(size, 10))
-			w.Header().Set("Accept-Ranges", "bytes")
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		// Create request context with optional timeout
-		reqCtx := context.Background()
-		if headerTimeout > 0 {
-			var cancelReqFunc context.CancelFunc
-			reqCtx, cancelReqFunc = context.WithTimeout(reqCtx, headerTimeout)
-			defer cancelReqFunc()
-		}
-
-		// Get seekable reader for the object (handles on-demand fetching)
-		reader, meta, getErr := pc.GetSeekableReader(reqCtx, objectPath, bearerToken)
-		if getErr != nil {
-			handleError(w, getErr, sendTrailer)
-			return
-		}
-		defer reader.Close()
-
-		// Set cache-related headers from metadata
-		if meta != nil {
-			// Set Age header (time since object was cached)
-			if !meta.Completed.IsZero() {
-				age := int(time.Since(meta.Completed).Seconds())
-				if age > 0 {
-					w.Header().Set("Age", strconv.Itoa(age))
-				}
-			}
-
-			// Set ETag header if available
-			if meta.ETag != "" {
-				w.Header().Set("ETag", meta.ETag)
-			}
-
-			// Handle If-None-Match conditional request (http.ServeContent doesn't handle this)
-			if meta.ETag != "" {
-				ifNoneMatch := r.Header.Get("If-None-Match")
-				if ifNoneMatch != "" {
-					// Parse If-None-Match header (may contain multiple ETags)
-					for _, match := range strings.Split(ifNoneMatch, ",") {
-						match = strings.TrimSpace(match)
-						if match == "*" || match == meta.ETag {
-							// ETag matches, return 304 Not Modified
-							w.Header().Set("Cache-Control", "no-cache, must-revalidate")
-							w.WriteHeader(http.StatusNotModified)
-							return
-						}
-					}
-				}
-			}
-		}
-
-		// Set Cache-Control header from stored metadata or use sensible default.
-		// This must be set before http.ServeContent since it may return 304 for If-Modified-Since.
-		if meta != nil {
-			cacheControl := meta.GetCacheControlHeader()
-			if cacheControl != "" {
-				w.Header().Set("Cache-Control", cacheControl)
-			} else {
-				w.Header().Set("Cache-Control", "no-cache, must-revalidate")
-			}
-		} else {
-			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
-		}
-
-		// Use http.ServeContent which handles:
-		// - Range requests (bytes=start-end)
-		// - If-Modified-Since conditional requests
-		// - Content-Length, Content-Type detection
-		// - Proper status codes (200, 206, 304, 416)
-		// Note: It does NOT handle If-None-Match (ETag-based), which we handle above
-		var modTime time.Time
-		if meta != nil && !meta.LastModified.IsZero() {
-			modTime = meta.LastModified
-		}
-
-		// Create wrappers that track errors for trailer support.
-		// - trailerWriter captures write-side errors (e.g. client disconnect)
-		//   and suppresses Content-Length when sendTrailer is true so that
-		//   Go uses chunked transfer-encoding (required for HTTP/1.1 trailers).
-		// - errorTrackingReader captures read-side errors (e.g. AES-GCM
-		//   authentication failure from corrupted data) that http.ServeContent
-		//   would otherwise silently discard.
-		var writeErr, readErr error
-		wrappedWriter := &trailerWriter{
-			ResponseWriter: w,
-			writeErr:       &writeErr,
-			sendTrailer:    sendTrailer,
-		}
-		wrappedReader := &errorTrackingReader{
-			ReadSeeker: reader,
-			readErr:    &readErr,
-		}
-
-		http.ServeContent(wrappedWriter, r, objectPath, modTime, wrappedReader)
-
-		if sendTrailer {
-			trailerVal := "200: OK"
-			if writeErr != nil {
-				trailerVal = fmt.Sprintf("%d: %s", 500, writeErr)
-			} else if readErr != nil {
-				trailerVal = fmt.Sprintf("%d: %s", 500, readErr)
-			}
-			w.Header().Set("X-Transfer-Status", trailerVal)
-		}
+		pc.serveObject(w, r)
 	}
 
 	srv := http.Server{
@@ -512,11 +775,6 @@ func (pc *PersistentCache) Register(ctx context.Context, router *gin.RouterGroup
 	router.POST("/api/v1.0/localcache/purge", func(ginCtx *gin.Context) { pc.purgeCmd(ginCtx) })
 	router.POST("/api/v1.0/localcache/purge_first", func(ginCtx *gin.Context) { pc.purgeFirstCmd(ginCtx) })
 	router.GET("/api/v1.0/localcache/stats", func(ginCtx *gin.Context) { pc.statsCmd(ginCtx) })
-}
-
-// encodeDiscoveryHost URL-encodes a discovery host:port for use in URL paths
-func encodeDiscoveryHost(host string) string {
-	return url.PathEscape(host)
 }
 
 // decodeDiscoveryHost decodes a URL-encoded discovery host:port from a URL path
@@ -651,174 +909,7 @@ func (pc *PersistentCache) RegisterCacheHandlers(engine *gin.Engine, directorEna
 
 	// Create a handler function for all cache requests
 	handleCacheRequest := func(c *gin.Context) {
-		w := c.Writer
-		r := c.Request
-
-		authzHeader := r.Header.Get("Authorization")
-		bearerToken := ""
-		if strings.HasPrefix(authzHeader, "Bearer ") {
-			bearerToken = authzHeader[7:] // len("Bearer ") == 7
-		}
-		objectPath := path.Clean(r.URL.Path)
-
-		// Handle PROPFIND requests (directory listings) - proxy to origin
-		if r.Method == "PROPFIND" {
-			pc.proxyPropfind(w, r, objectPath, bearerToken)
-			return
-		}
-
-		if r.Method != "GET" && r.Method != "HEAD" {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-
-		transferStatusStr := r.Header.Get("X-Transfer-Status")
-		sendTrailer := false
-		if transferStatusStr == "true" {
-			// HTTP/2 natively supports trailers; HTTP/1.1 requires TE: trailers.
-			if r.ProtoMajor >= 2 {
-				sendTrailer = true
-				w.Header().Set("Trailer", "X-Transfer-Status")
-			} else {
-				for _, encoding := range r.Header.Values("TE") {
-					if encoding == "trailers" {
-						sendTrailer = true
-						w.Header().Set("Trailer", "X-Transfer-Status")
-						break
-					}
-				}
-			}
-		}
-
-		var headerTimeout time.Duration = 0
-		timeoutStr := r.Header.Get("X-Pelican-Timeout")
-		if timeoutStr != "" {
-			if ht, err := time.ParseDuration(timeoutStr); err != nil {
-				log.Debugln("Invalid X-Pelican-Timeout value:", timeoutStr)
-			} else {
-				headerTimeout = ht
-			}
-		}
-		log.Debugln("Setting header timeout:", timeoutStr)
-
-		// Handle HEAD with X-Pelican-NoDownload (stat-only for cached objects)
-		if r.Method == "HEAD" && r.Header.Get("X-Pelican-NoDownload") == "true" {
-			size, statErr := pc.StatCachedOnly(objectPath, bearerToken)
-			if errors.Is(statErr, ErrNotCached) {
-				w.WriteHeader(http.StatusNotFound)
-				return
-			} else if errors.Is(statErr, authorizationDenied) {
-				w.WriteHeader(http.StatusForbidden)
-				if _, err := w.Write([]byte("Authorization Denied")); err != nil {
-					log.Errorln("Failed to write authorization denied to client")
-				}
-				return
-			} else if statErr != nil {
-				handleError(w, statErr, sendTrailer)
-				return
-			}
-			w.Header().Set("Content-Length", strconv.FormatUint(size, 10))
-			w.Header().Set("Accept-Ranges", "bytes")
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		// Create request context with optional timeout
-		reqCtx := context.Background()
-		if headerTimeout > 0 {
-			var cancelReqFunc context.CancelFunc
-			reqCtx, cancelReqFunc = context.WithTimeout(reqCtx, headerTimeout)
-			defer cancelReqFunc()
-		}
-
-		// Get seekable reader for the object (handles on-demand fetching)
-		reader, meta, getErr := pc.GetSeekableReader(reqCtx, objectPath, bearerToken)
-		if getErr != nil {
-			handleError(w, getErr, sendTrailer)
-			return
-		}
-		defer reader.Close()
-
-		// Set cache-related headers from metadata
-		if meta != nil {
-			// Set Age header (time since object was cached)
-			if !meta.Completed.IsZero() {
-				age := int(time.Since(meta.Completed).Seconds())
-				if age > 0 {
-					w.Header().Set("Age", strconv.Itoa(age))
-				}
-			}
-
-			// Set ETag header if available
-			if meta.ETag != "" {
-				w.Header().Set("ETag", meta.ETag)
-			}
-
-			// Handle If-None-Match conditional request (http.ServeContent doesn't handle this)
-			if meta.ETag != "" {
-				ifNoneMatch := r.Header.Get("If-None-Match")
-				if ifNoneMatch != "" {
-					// Parse If-None-Match header (may contain multiple ETags)
-					for _, match := range strings.Split(ifNoneMatch, ",") {
-						match = strings.TrimSpace(match)
-						if match == "*" || match == meta.ETag {
-							// ETag matches, return 304 Not Modified
-							w.Header().Set("Cache-Control", "no-cache, must-revalidate")
-							w.WriteHeader(http.StatusNotModified)
-							return
-						}
-					}
-				}
-			}
-		}
-
-		// Set Cache-Control header from stored metadata or use sensible default.
-		// This must be set before http.ServeContent since it may return 304 for If-Modified-Since.
-		if meta != nil {
-			cacheControl := meta.GetCacheControlHeader()
-			if cacheControl != "" {
-				w.Header().Set("Cache-Control", cacheControl)
-			} else {
-				w.Header().Set("Cache-Control", "no-cache, must-revalidate")
-			}
-		} else {
-			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
-		}
-
-		// Use http.ServeContent which handles:
-		// - Range requests (bytes=start-end)
-		// - If-Modified-Since conditional requests
-		// - Content-Length, Content-Type detection
-		// - Proper status codes (200, 206, 304, 416)
-		// Note: It does NOT handle If-None-Match (ETag-based), which we handle above
-		var modTime time.Time
-		if meta != nil && !meta.LastModified.IsZero() {
-			modTime = meta.LastModified
-		}
-
-		// Create wrappers that track errors for trailer support.
-		var writeErr, readErr error
-		wrappedWriter := &trailerWriter{
-			ResponseWriter: w,
-			writeErr:       &writeErr,
-			sendTrailer:    sendTrailer,
-		}
-		wrappedReader := &errorTrackingReader{
-			ReadSeeker: reader,
-			readErr:    &readErr,
-		}
-
-		http.ServeContent(wrappedWriter, r, objectPath, modTime, wrappedReader)
-
-		if sendTrailer {
-			trailerVal := "200: OK"
-			if writeErr != nil {
-				trailerVal = fmt.Sprintf("%d: %s", 500, writeErr)
-			} else if readErr != nil {
-				trailerVal = fmt.Sprintf("%d: %s", 500, readErr)
-			}
-			w.Header().Set("X-Transfer-Status", trailerVal)
-		}
+		pc.serveObject(c.Writer, c.Request)
 	}
 
 	// Register the handler based on whether director is enabled
@@ -859,12 +950,30 @@ func (pc *PersistentCache) RegisterCacheHandlers(engine *gin.Engine, directorEna
 				handleCacheRequest(c)
 			}
 		})
+		// Register PUT for write-through caching (proxy to origin)
+		group.PUT("/:discovery/*path", func(c *gin.Context) {
+			if setupDiscoveryContext(c) {
+				handleCacheRequest(c)
+			}
+		})
+		// Register DELETE for write-through deletion (proxy to origin)
+		group.DELETE("/:discovery/*path", func(c *gin.Context) {
+			if setupDiscoveryContext(c) {
+				handleCacheRequest(c)
+			}
+		})
 		log.Info("Persistent cache HTTP handlers registered at /api/v1.0/cache/data/:discovery/*path")
 	} else {
 		// When running standalone, use NoRoute to catch all requests
 		engine.NoRoute(handleCacheRequest)
 		log.Info("Persistent cache HTTP handlers registered at root path")
 	}
+
+	// Register the management/monitoring API endpoints for the cache server.
+	// These are normally registered by pc.Register() for the local cache module,
+	// but the cache server module needs them too. Use NoRoute-safe individual
+	// registrations to avoid conflicts if the local cache module also registers them.
+	engine.GET("/api/v1.0/cache/stats", func(c *gin.Context) { pc.statsCmd(c) })
 
 	return nil
 }

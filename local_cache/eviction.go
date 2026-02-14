@@ -36,12 +36,12 @@ type EvictionManager struct {
 	storage *StorageManager
 
 	// Cache size limits
-	maxSize              uint64
-	highWater            uint64
-	lowWater             uint64
-	highWaterPercentage  int
-	lowWaterPercentage   int
-	configMu             sync.RWMutex // Protects watermark configuration
+	maxSize             uint64
+	highWater           uint64
+	lowWater            uint64
+	highWaterPercentage int
+	lowWaterPercentage  int
+	configMu            sync.RWMutex // Protects watermark configuration
 
 	// Current total usage
 	totalUsage uint64
@@ -140,6 +140,25 @@ func (em *EvictionManager) AddUsage(storageID uint8, namespaceID uint32, bytes i
 	}
 
 	return nil
+}
+
+// NoteUsageIncrease updates the in-memory usage counter and triggers an
+// eviction check if the high-water mark is exceeded.  Unlike AddUsage it does
+// NOT write to the persistent database — the caller is responsible for ensuring
+// the DB was already updated (e.g., via MergeBlockStateWithUsage which tracks
+// usage atomically alongside the bitmap merge).
+func (em *EvictionManager) NoteUsageIncrease(bytes int64) {
+	em.usageMu.Lock()
+	em.totalUsage += uint64(bytes)
+	em.usageMu.Unlock()
+
+	em.configMu.RLock()
+	highWater := em.highWater
+	em.configMu.RUnlock()
+
+	if em.GetTotalUsage() > highWater {
+		em.TriggerEviction()
+	}
 }
 
 // SubtractUsage tracks usage decrease for a storage+namespace combination

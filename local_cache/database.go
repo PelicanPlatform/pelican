@@ -18,26 +18,26 @@
 
 package local_cache
 
-// TODO: Multi-Storage Architecture
-// The current implementation tracks usage per-namespace, but future work should:
-//   1. Split tracking into both "namespace" and "storage path" dimensions
-//      - Allow multiple storage directories with independent usage limits
-//      - Support balancing across storage devices (e.g., fast SSD vs large HDD)
-//   2. Store the storage path in CacheMetadata.StoragePath (field added)
-//      - This tells DeleteObject where to remove the file from disk
-//   3. Make all periodic cleanup routines (ConsistencyChecker, EvictionManager)
-//      operate per-storage directory independently
-//   4. Treat inline data as a separate "storage resource" with configurable max usage
-//      - Add InlineStorageMaxBytes configuration parameter
-//      - Track inline data usage separately from disk storage
-//   5. Update usage keys to be composite: storage+namespace instead of just namespace
-//      - Example: PrefixUsage + storageID + namespaceID
+// Multi-Storage Architecture — Status
+//
+// The following items are already implemented in the current codebase:
+//   - Usage keys are composite: PrefixUsage + storageID + namespaceID (see UsageKey)
+//   - Inline data is tracked as a separate storage resource (StorageIDInline = 0)
+//   - CacheMetadata includes StorageID to distinguish storage backends
+//   - Block-state and usage updates are atomic (MergeBlockStateWithUsage)
+//
+// Future work for true multi-storage (multiple disk directories):
+//   - Allow multiple storage directories with independent size limits
+//   - Support device balancing (e.g., fast SSD vs large HDD)
+//   - Make ConsistencyChecker and EvictionManager operate per-directory
+//   - Add configurable InlineStorageMaxBytes limit
 
 import (
 	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"sync"
@@ -60,7 +60,6 @@ type CacheDB struct {
 	db        *badger.DB
 	encMgr    *EncryptionManager
 	baseDir   string
-	mu        sync.RWMutex
 	closeOnce sync.Once
 }
 
@@ -96,6 +95,19 @@ func NewCacheDB(ctx context.Context, baseDir string) (*CacheDB, error) {
 
 	// Reduce logging noise
 	opts.Logger = &badgerLogger{}
+
+	// Encrypt BadgerDB at rest so that metadata (ETags, URLs, timestamps)
+	// stored in LSM tree and WAL files is not readable without the key.
+	// We derive a separate key from the master key using HKDF for proper
+	// key separation (the master key itself encrypts data blocks).
+	dbKey, err := encMgr.DeriveDBKey()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to derive database encryption key")
+	}
+	opts.EncryptionKey = dbKey
+	opts.EncryptionKeyRotationDuration = 0 // Disable rotation; we manage keys ourselves
+	// BadgerDB requires IndexCacheSize > 0 when encryption is enabled
+	opts.IndexCacheSize = 64 << 20 // 64 MB
 
 	// Open the database
 	db, err := badger.Open(opts)
@@ -330,28 +342,71 @@ func (cdb *CacheDB) SetBlockState(instanceHash string, bitmap *roaring.Bitmap) e
 	})
 }
 
-// MergeBlockState atomically merges new blocks into the existing bitmap
-// Uses read-modify-write within a transaction to handle concurrent updates
-func (cdb *CacheDB) MergeBlockState(instanceHash string, newBlocks *roaring.Bitmap) error {
+// MergeBlockStateWithUsage atomically merges new blocks into the existing bitmap
+// AND updates usage statistics based on the number of newly-enabled bits.
+// It reads the object's metadata within the same transaction to determine the
+// content length (for the last partial block), storage ID, and namespace ID.
+// This ensures consistency between block state and usage counters.
+//
+// The method retries on BadgerDB transaction conflicts, which can occur when
+// multiple concurrent block fetchers write to the same object's bitmap.
+func (cdb *CacheDB) MergeBlockStateWithUsage(instanceHash string, newBlocks *roaring.Bitmap) error {
 	newData, err := newBlocks.ToBytes()
 	if err != nil {
 		return errors.Wrap(err, "failed to serialize new blocks bitmap")
 	}
 
-	return cdb.db.Update(func(txn *badger.Txn) error {
-		return mergeBlockStateInTxn(txn, instanceHash, newData)
-	})
+	const maxRetries = 20
+	backoff := 100 * time.Microsecond
+	for attempt := 0; ; attempt++ {
+		err := cdb.db.Update(func(txn *badger.Txn) error {
+			return cdb.mergeBlockStateWithUsageTxn(txn, instanceHash, newData, newBlocks)
+		})
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, badger.ErrConflict) && attempt < maxRetries-1 {
+			// Exponential backoff with jitter to avoid thundering herd
+			// when many concurrent writers conflict on the same bitmap.
+			jitter := time.Duration(rand.Int63n(int64(backoff)))
+			time.Sleep(backoff + jitter)
+			backoff *= 2
+			if backoff > 50*time.Millisecond {
+				backoff = 50 * time.Millisecond
+			}
+			continue
+		}
+		return err
+	}
 }
 
-// mergeBlockStateInTxn performs the bitmap merge within an existing transaction
-// TODO: For better consistency between block state and usage statistics, calculate
-// the usage increase directly from the number of newly-enabled bits in the bitmap
-// (except for the last block which may be partial). This requires:
-//   1. Getting metadata to know the block size and total content length
-//   2. Computing cardinality difference: (existing OR new).Cardinality() - existing.Cardinality()
-//   3. Multiplying by block size (except for last block)
-//   4. Calling addUsageInTxn within the same transaction
-func mergeBlockStateInTxn(txn *badger.Txn, instanceHash string, newData []byte) error {
+func (cdb *CacheDB) mergeBlockStateWithUsageTxn(txn *badger.Txn, instanceHash string, newData []byte, newBlocks *roaring.Bitmap) error {
+	newBitCount, err := mergeBlockStateInTxn(txn, instanceHash, newData)
+	if err != nil {
+		return err
+	}
+	if newBitCount == 0 {
+		return nil // No new blocks added; nothing to track
+	}
+
+	// Look up metadata for content length, storage ID, and namespace ID
+	meta, err := getMetadataInTxn(txn, instanceHash)
+	if err != nil || meta == nil {
+		// Metadata may not exist yet (e.g., blocks written before metadata).
+		// Skip usage tracking rather than failing the bitmap merge.
+		return nil
+	}
+
+	delta := calculateUsageDelta(meta, newBlocks, newBitCount)
+	if delta > 0 {
+		return addUsageInTxn(txn, meta.StorageID, meta.NamespaceID, delta)
+	}
+	return nil
+}
+
+// mergeBlockStateInTxn performs the bitmap merge within an existing transaction.
+// Returns the number of newly-enabled bits (blocks that were not previously set).
+func mergeBlockStateInTxn(txn *badger.Txn, instanceHash string, newData []byte) (uint64, error) {
 	key := StateKey(instanceHash)
 
 	// Get existing bitmap
@@ -363,26 +418,83 @@ func mergeBlockStateInTxn(txn *badger.Txn, instanceHash string, newData []byte) 
 			return err
 		})
 		if err != nil {
-			return errors.Wrap(err, "failed to deserialize existing bitmap")
+			return 0, errors.Wrap(err, "failed to deserialize existing bitmap")
 		}
 	} else if !errors.Is(err, badger.ErrKeyNotFound) {
-		return err
+		return 0, err
 	}
+
+	previousCardinality := existing.GetCardinality()
 
 	// Merge bitmaps using OR operation
 	newBitmap := roaring.New()
 	if _, err := newBitmap.FromBuffer(newData); err != nil {
-		return errors.Wrap(err, "failed to deserialize new bitmap")
+		return 0, errors.Wrap(err, "failed to deserialize new bitmap")
 	}
 	existing.Or(newBitmap)
+
+	newCardinality := existing.GetCardinality()
 
 	// Save merged result
 	mergedData, err := existing.ToBytes()
 	if err != nil {
-		return errors.Wrap(err, "failed to serialize merged bitmap")
+		return 0, errors.Wrap(err, "failed to serialize merged bitmap")
 	}
 
-	return txn.Set(key, mergedData)
+	if err := txn.Set(key, mergedData); err != nil {
+		return 0, err
+	}
+
+	return newCardinality - previousCardinality, nil
+}
+
+// getMetadataInTxn reads CacheMetadata within an existing transaction.
+// Returns nil (not an error) if the key does not exist.
+func getMetadataInTxn(txn *badger.Txn, instanceHash string) (*CacheMetadata, error) {
+	item, err := txn.Get(MetaKey(instanceHash))
+	if err != nil {
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var meta CacheMetadata
+	err = item.Value(func(val []byte) error {
+		return msgpack.Unmarshal(val, &meta)
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal metadata in txn")
+	}
+	return &meta, nil
+}
+
+// calculateUsageDelta returns the byte-level usage increase for newBitCount
+// newly-enabled blocks. Every full block contributes BlockDataSize bytes;
+// the last block of the object may be smaller.
+func calculateUsageDelta(meta *CacheMetadata, newBlocks *roaring.Bitmap, newBitCount uint64) int64 {
+	if meta.ContentLength <= 0 || newBitCount == 0 {
+		return 0
+	}
+
+	totalBlocks := CalculateBlockCount(meta.ContentLength)
+	lastBlock := totalBlocks - 1
+
+	// Start by assuming all new blocks are full-sized
+	delta := int64(newBitCount) * int64(BlockDataSize)
+
+	// If the last block is among the newly-added blocks, adjust for its
+	// potentially smaller size.
+	if newBlocks.Contains(lastBlock) {
+		remainder := meta.ContentLength % int64(BlockDataSize)
+		if remainder > 0 {
+			// Last block is partial: subtract the over-count
+			delta -= int64(BlockDataSize) - remainder
+		}
+		// If remainder == 0 the last block is exactly full, no adjustment needed
+	}
+
+	return delta
 }
 
 // addUsageInTxn performs the usage counter merge within an existing transaction
@@ -434,7 +546,7 @@ func (cdb *CacheDB) MergeUpdate(bitmapMerges map[string][]byte, usageDeltas map[
 	return cdb.db.Update(func(txn *badger.Txn) error {
 		// Merge all bitmap updates
 		for instanceHash, newData := range bitmapMerges {
-			if err := mergeBlockStateInTxn(txn, instanceHash, newData); err != nil {
+			if _, err := mergeBlockStateInTxn(txn, instanceHash, newData); err != nil {
 				return errors.Wrapf(err, "failed to merge bitmap for %s", instanceHash)
 			}
 		}
@@ -450,11 +562,15 @@ func (cdb *CacheDB) MergeUpdate(bitmapMerges map[string][]byte, usageDeltas map[
 	})
 }
 
-// MarkBlocksDownloaded marks specific blocks as downloaded
+// MarkBlocksDownloaded marks specific blocks as downloaded and atomically
+// updates usage statistics based on the number of newly-added blocks.
+// Usage tracking requires metadata to be set for the instanceHash;
+// if metadata is not yet available, the bitmap is still updated but
+// usage tracking is skipped.
 func (cdb *CacheDB) MarkBlocksDownloaded(instanceHash string, startBlock, endBlock uint32) error {
 	newBlocks := roaring.New()
 	newBlocks.AddRange(uint64(startBlock), uint64(endBlock)+1)
-	return cdb.MergeBlockState(instanceHash, newBlocks)
+	return cdb.MergeBlockStateWithUsage(instanceHash, newBlocks)
 }
 
 // ClearBlocks removes the specified blocks from the downloaded bitmap so they
