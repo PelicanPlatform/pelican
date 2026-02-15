@@ -1648,6 +1648,7 @@ description: |+
   client is expected to retry later.
 type: duration
 default: 20s
+hidden: true
 components: ["localcache"]
 ---
 name: LocalCache.MaxConcurrentPrefetch
@@ -1679,6 +1680,18 @@ description: |+
   revalidated between 21.6h and 24h after caching (90% to 100% of max age).
 type: int
 default: 10
+hidden: true
+components: ["localcache"]
+---
+name: LocalCache.StorageDirs
+description: |+
+  A list of directory paths to use for persistent cache object storage.
+  Each directory may reside on a different filesystem or disk.
+  When not set, the cache stores objects under the LocalCache.DataLocation directory.
+  A UUID file is placed in each directory so that storage IDs remain stable even if
+  paths are reordered or changed.
+type: stringSlice
+default: []
 components: ["localcache"]
 ---
 ############################

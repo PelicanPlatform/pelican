@@ -59,7 +59,6 @@ func TestHTCondorPlugin(t *testing.T) {
 		t.Skip("condor_master not found in PATH, skipping integration test")
 	}
 
-
 	var condorUsername string
 	var aliceUsername string
 

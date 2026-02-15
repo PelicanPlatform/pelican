@@ -50,26 +50,35 @@ const (
 	PrefixNamespace = "n:"
 )
 
-// Storage mode constants
-const (
-	// StorageModeInline indicates the object data is stored directly in BadgerDB
-	StorageModeInline uint8 = 0
-	// StorageModeDisk indicates the object data is stored on disk
-	StorageModeDisk uint8 = 1
-	// Additional disk modes can be added for multiple storage directories
-	// StorageModeDiskB uint8 = 2
-	// StorageModeDiskC uint8 = 3
-)
-
-// Storage ID constants
+// Storage ID constants.
+// The StorageID field in CacheMetadata doubles as the storage-mode indicator:
+// 0 means inline (data lives in BadgerDB), 1–255 mean disk-backed storage in
+// the directory mapped to that ID.
 const (
 	// StorageIDInline is the storage ID for inline data stored in BadgerDB
 	StorageIDInline uint8 = 0
-	// StorageIDPrimaryDisk is the storage ID for the primary disk storage location
-	StorageIDPrimaryDisk uint8 = 1
-	// Storage IDs 2-255 are reserved for additional disk storage paths
-	// Configured via LocalCache.DataLocations parameter
+	// StorageIDFirstDisk is the storage ID for the first configured disk directory.
+	// Additional directories use StorageIDFirstDisk+1, +2, etc.
+	StorageIDFirstDisk uint8 = 1
 )
+
+// StorageDirConfig describes one disk-backed storage directory.
+// Multiple directories can be configured to spread data across devices;
+// each directory has its own maximum size and optional watermark overrides.
+type StorageDirConfig struct {
+	// Path is the directory that will hold an "objects/" subdirectory
+	// and, for the first directory, the database.
+	Path string
+	// MaxSize is the maximum number of bytes stored on this directory.
+	// If 0, auto-detected from the filesystem at startup.
+	MaxSize uint64
+	// HighWaterMarkPercentage overrides the global high-water mark for this
+	// directory.  0 means use the global default.
+	HighWaterMarkPercentage int
+	// LowWaterMarkPercentage overrides the global low-water mark for this
+	// directory.  0 means use the global default.
+	LowWaterMarkPercentage int
+}
 
 // Block size constants for encryption and storage
 const (
@@ -137,11 +146,13 @@ type CacheMetadata struct {
 	CCFlags  uint8 `msgpack:"ccf,omitempty"`  // Bitset: 0x01=no-store, 0x02=no-cache, 0x04=private, 0x08=must-revalidate
 	CCMaxAge int32 `msgpack:"ccma,omitempty"` // Merged max-age/s-maxage freshness lifetime (seconds, 0 = not set, max of both if both specified)
 
-	// Storage fields
-	StorageMode uint8  `msgpack:"mode"` // 0=Inline, 1=Disk
-	StorageID   uint8  `msgpack:"sid"`  // Storage ID: 0=inline, 1+=disk path ID (see DiskMapping)
-	DataKey     []byte `msgpack:"key"`  // Encrypted DEK (Data Encryption Key)
-	Nonce       []byte `msgpack:"iv"`   // Base IV/nonce for file encryption
+	// Storage fields.
+	// StorageID encodes both location type and directory identity:
+	//   0         = inline (data stored directly in BadgerDB)
+	//   1 .. 255  = disk-backed (directory identified by this ID)
+	StorageID uint8  `msgpack:"sid"`
+	DataKey   []byte `msgpack:"key"` // Encrypted DEK (Data Encryption Key)
+	Nonce     []byte `msgpack:"iv"`  // Base IV/nonce for file encryption
 
 	// Namespace and storage tracking for fairness-aware eviction
 	NamespaceID uint32 `msgpack:"ns"` // ID of the namespace prefix
@@ -150,6 +161,12 @@ type CacheMetadata struct {
 	// LRU tracking
 	LastAccessTime time.Time `msgpack:"la"` // Last access time for LRU index
 }
+
+// IsInline returns true when the object data is stored directly in BadgerDB.
+func (m *CacheMetadata) IsInline() bool { return m.StorageID == StorageIDInline }
+
+// IsDisk returns true when the object data is stored on disk.
+func (m *CacheMetadata) IsDisk() bool { return m.StorageID != StorageIDInline }
 
 // SetCacheControl parses a Cache-Control header and stores the directives efficiently
 func (m *CacheMetadata) SetCacheControl(header string) {
@@ -219,8 +236,17 @@ func (m *CacheMetadata) GetCacheControlHeader() string {
 // downstream clients can cache the response without re-contacting the cache
 // until revalidation is due.
 func (m *CacheMetadata) ResponseCacheControl() string {
-	// If the origin specified Cache-Control, forward it as-is.
+	// If the origin specified Cache-Control, build the response header.
 	if cc := m.GetCacheControlHeader(); cc != "" {
+		// When the origin sets max-age, also advertise s-maxage with the
+		// same value so that downstream shared caches honour the
+		// directive (RFC 7234 §5.2.2.9).  Skip if s-maxage is already
+		// present or the response should not be stored.
+		if m.CCMaxAge > 0 && m.CCFlags&ccNoStore == 0 {
+			if !strings.Contains(cc, "s-maxage") {
+				cc = fmt.Sprintf("s-maxage=%d, %s", m.CCMaxAge, cc)
+			}
+		}
 		return cc
 	}
 
@@ -235,9 +261,12 @@ func (m *CacheMetadata) ResponseCacheControl() string {
 	return fmt.Sprintf("max-age=%d", seconds)
 }
 
-// DiskMapping stores the mapping of disk IDs to directory paths
+// DiskMapping stores the mapping of a storage ID to its directory path
+// and UUID.  The UUID file is dropped in the directory root so that
+// directories can be remounted at different paths and re-associated.
 type DiskMapping struct {
 	ID        uint8  `msgpack:"id"`
+	UUID      string `msgpack:"uuid"`
 	Directory string `msgpack:"dir"`
 }
 

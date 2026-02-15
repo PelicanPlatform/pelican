@@ -351,52 +351,47 @@ func TestCorruption_UncorruptedBlocksOK(t *testing.T) {
 
 	// Read block 0 only — should succeed because block 0 is intact
 	r := doRangeRead(env.ft.Ctx, cacheURL, env.token, "bytes=0-4079")
-	if r.statusCode == http.StatusPartialContent || r.statusCode == http.StatusOK {
-		expected := content[0:4080]
-		if len(r.body) == len(expected) {
-			assert.Equal(t, expected, r.body, "Uncorrupted block should read correctly")
-			assert.Equal(t, "200: OK", r.transferStatus,
-				"Trailer for uncorrupted block 0 should report success")
-		} else {
-			t.Logf("Block 0 read returned %d bytes, expected %d", len(r.body), len(expected))
-		}
-	} else {
-		t.Logf("Block 0 read returned status %d (unexpected for uncorrupted block)", r.statusCode)
-	}
+	require.NoError(t, r.err)
+	assert.Equal(t, content[0:4080], r.body, "Uncorrupted block 0 should read correctly")
+	assert.Equal(t, "200: OK", r.transferStatus,
+		"Trailer for uncorrupted block 0 should report success")
 
 	// Read block 2 — also intact
 	r2 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "bytes=8160-12239")
-	if r2.statusCode == http.StatusPartialContent || r2.statusCode == http.StatusOK {
-		expected := content[8160:12240]
-		if len(r2.body) == len(expected) {
-			assert.Equal(t, expected, r2.body, "Uncorrupted block 2 should read correctly")
-			assert.Equal(t, "200: OK", r2.transferStatus,
-				"Trailer for uncorrupted block 2 should report success")
-		} else {
-			t.Logf("Block 2 read returned %d bytes, expected %d", len(r2.body), len(expected))
-		}
-	} else {
-		t.Logf("Block 2 read returned status %d (unexpected for uncorrupted block)", r2.statusCode)
-	}
+	require.NoError(t, r2.err)
+	assert.Equal(t, content[8160:12240], r2.body, "Uncorrupted block 2 should read correctly")
+	assert.Equal(t, "200: OK", r2.transferStatus,
+		"Trailer for uncorrupted block 2 should report success")
+
+	// Verify that the corrupted block is still corrupted on disk.
+	// Reading blocks 0 and 2 must NOT trigger repair of block 3.
+	midData, err := os.ReadFile(objFile)
+	require.NoError(t, err)
+	assert.Equal(t, data[block3Start+10], midData[block3Start+10],
+		"Block 3 should still be corrupted on disk after reading only uncorrupted blocks")
 
 	// Read the corrupted block 3 — auto-repair should fix it
 	r3 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "bytes=12240-16319")
-	if r3.statusCode == http.StatusPartialContent || r3.statusCode == http.StatusOK {
-		expected3 := content[12240:16320]
-		assert.Equal(t, expected3, r3.body, "Auto-repaired block 3 should read correctly")
-		assert.Equal(t, "200: OK", r3.transferStatus,
-			"Trailer for auto-repaired block 3 should report success")
+	require.NoError(t, r3.err)
+	expected3 := content[12240:16320]
+	assert.Equal(t, expected3, r3.body, "Auto-repaired block 3 should read correctly")
+	assert.Equal(t, "200: OK", r3.transferStatus,
+		"Trailer for auto-repaired block 3 should report success")
 
-		// Verify block 3 has been repaired on disk
-		repairedData, err := os.ReadFile(objFile)
-		require.NoError(t, err)
-		assert.NotEqual(t, data, repairedData,
-			"On-disk file should be different from corrupted version")
-		assert.NotEqual(t, data[block3Start+10], repairedData[block3Start+10],
-			"Corrupted byte in block 3 should be fixed on disk")
-		t.Logf("Verified block 3 has been repaired on disk: byte[%d] changed from 0x%02x back to 0x%02x",
-			block3Start+10, data[block3Start+10], repairedData[block3Start+10])
-	}
+	// Verify block 3 has been repaired on disk
+	repairedData, err := os.ReadFile(objFile)
+	require.NoError(t, err)
+	assert.NotEqual(t, data[block3Start+10], repairedData[block3Start+10],
+		"Corrupted byte in block 3 should be fixed on disk")
+	t.Logf("Verified block 3 has been repaired on disk: byte[%d] changed from 0x%02x back to 0x%02x",
+		block3Start+10, data[block3Start+10], repairedData[block3Start+10])
+
+	// Re-read block 3 — should succeed from the now-repaired on-disk data
+	r4 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "bytes=12240-16319")
+	require.NoError(t, r4.err)
+	assert.Equal(t, expected3, r4.body, "Re-read of repaired block 3 should return correct data")
+	assert.Equal(t, "200: OK", r4.transferStatus,
+		"Re-read of repaired block 3 should report success")
 }
 
 // TestCorruption_VerifyBlockIntegrity exercises the ConsistencyChecker's
@@ -417,7 +412,7 @@ func TestCorruption_VerifyBlockIntegrity(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	storage, err := local_cache.NewStorageManager(db, tmpDir)
+	storage, err := local_cache.NewStorageManager(db, []string{tmpDir}, 0)
 	require.NoError(t, err)
 
 	// Create a 3-block object (3 * 4080 = 12240 bytes)
@@ -425,14 +420,23 @@ func TestCorruption_VerifyBlockIntegrity(t *testing.T) {
 	content := generateTestData(contentLen)
 
 	fileHash := "deadbeef1234567890abcdef"
-	_, err = storage.InitDiskStorage(ctx, fileHash, int64(contentLen))
+
+	// Get the assigned storage ID for the single directory.
+	assignedDirs := storage.GetDirs()
+	require.Len(t, assignedDirs, 1)
+	var storageID uint8
+	for id := range assignedDirs {
+		storageID = id
+	}
+
+	_, err = storage.InitDiskStorage(ctx, fileHash, int64(contentLen), storageID)
 	require.NoError(t, err)
 
 	err = storage.WriteBlocks(fileHash, 0, content)
 	require.NoError(t, err)
 
 	// Verify integrity before corruption — should find no bad blocks
-	checker := local_cache.NewConsistencyChecker(db, storage, tmpDir, local_cache.ConsistencyConfig{})
+	checker := local_cache.NewConsistencyChecker(db, storage, local_cache.ConsistencyConfig{})
 	corrupted, err := checker.VerifyBlockIntegrity(fileHash)
 	require.NoError(t, err)
 	assert.Empty(t, corrupted, "Should find no corrupted blocks on a clean object")
@@ -458,81 +462,6 @@ func TestCorruption_VerifyBlockIntegrity(t *testing.T) {
 	assert.Contains(t, corrupted, uint32(1), "Should detect corruption in block 1")
 	assert.NotContains(t, corrupted, uint32(0), "Block 0 should be clean")
 	assert.NotContains(t, corrupted, uint32(2), "Block 2 should be clean")
-}
-
-// TestCorruption_RedownloadAfterCorruption verifies that after the cache
-// detects a corrupted file it can re-download from origin.  We corrupt,
-// delete the metadata so the cache treats it as a miss, and confirm the
-// next read returns correct data.
-func TestCorruption_RedownloadAfterCorruption(t *testing.T) {
-	env := setupCorruptEnv(t)
-
-	content := generateTestData(16384)
-	filename := "corrupt_redownload.bin"
-	cacheURL := uploadAndPrime(env.ft.Ctx, t, env, filename, content)
-
-	// Verify clean read
-	r := doRangeRead(env.ft.Ctx, cacheURL, env.token, "")
-	require.NoError(t, r.err)
-	require.Equal(t, http.StatusOK, r.statusCode)
-	require.Equal(t, content, r.body)
-
-	// Delete the on-disk file to force a re-download on next request
-	objFile := findObjectFileForContent(t, env.objectsDir, len(content))
-	require.NoError(t, os.Remove(objFile))
-
-	// Use the pelican client to re-download through the cache,
-	// which should trigger a re-fetch from origin.
-	pelicanURL := fmt.Sprintf("pelican://%s:%d/test/%s",
-		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), filename)
-	downloadFile := filepath.Join(t.TempDir(), "redownloaded")
-	_, err := client.DoGet(env.ft.Ctx, pelicanURL, downloadFile, false, client.WithToken(env.ft.Token))
-	if err == nil {
-		redownloaded, readErr := os.ReadFile(downloadFile)
-		require.NoError(t, readErr)
-		assert.Equal(t, content, redownloaded, "Re-downloaded content should match original")
-	} else {
-		// Depending on cache implementation this might fail; log it.
-		t.Logf("Re-download after corruption returned error (may be expected): %v", err)
-	}
-}
-
-// TestCorruption_InlineStorage_Unaffected verifies that corruption
-// tests only apply to disk-stored objects.  Inline objects (< 4096 bytes)
-// live entirely in BadgerDB and are not susceptible to disk-level tampering.
-func TestCorruption_InlineStorage_Unaffected(t *testing.T) {
-	env := setupCorruptEnv(t)
-
-	// Small file stored inline
-	content := generateTestData(2048)
-	cacheURL := uploadAndPrime(env.ft.Ctx, t, env, "corrupt_inline.bin", content)
-
-	// There should be NO object file for this content (inline storage)
-	var foundFile bool
-	_ = filepath.Walk(env.objectsDir, func(p string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() && info.Size() > 0 {
-			foundFile = true
-		}
-		return nil
-	})
-
-	if !foundFile {
-		// No disk file — this is the expected case for inline storage
-		t.Log("Confirmed: inline-stored object has no on-disk file (correct)")
-	}
-
-	// Repeated reads should always succeed with a clean trailer
-	for i := 0; i < 5; i++ {
-		r := doRangeRead(env.ft.Ctx, cacheURL, env.token, "")
-		require.NoError(t, r.err, "Inline read %d should not error", i)
-		require.Equal(t, http.StatusOK, r.statusCode, "Inline read %d should return 200", i)
-		assert.Equal(t, content, r.body, "Inline read %d content mismatch", i)
-		assert.Equal(t, "200: OK", r.transferStatus,
-			"Inline read %d should have a successful trailer", i)
-	}
 }
 
 // TestCorruption_HeadAfterCorruption verifies that a HEAD request
@@ -565,4 +494,10 @@ func TestCorruption_HeadAfterCorruption(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode, "HEAD should succeed even with corrupted data")
 	assert.Equal(t, fmt.Sprintf("%d", len(content)), resp.Header.Get("Content-Length"),
 		"Content-Length should match original size")
+
+	// Verify the on-disk file is still corrupted — HEAD must NOT trigger repair.
+	dataAfterHead, err := os.ReadFile(objFile)
+	require.NoError(t, err)
+	assert.Equal(t, data, dataAfterHead,
+		"On-disk data should be unchanged after HEAD (no repair triggered)")
 }

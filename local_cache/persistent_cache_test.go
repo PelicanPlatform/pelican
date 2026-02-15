@@ -287,7 +287,7 @@ func TestCacheDBAtomicBlockUsage(t *testing.T) {
 	defer db.Close()
 
 	instanceHash := "atomic_usage_test_hash"
-	storageID := StorageIDPrimaryDisk
+	storageID := StorageIDFirstDisk
 	namespaceID := uint32(7)
 
 	// Set metadata first (10 blocks * 4080 = 40800 bytes, but content is 40000 so last block is partial)
@@ -295,7 +295,6 @@ func TestCacheDBAtomicBlockUsage(t *testing.T) {
 	totalBlocks := CalculateBlockCount(contentLength) // 10 blocks
 	meta := &CacheMetadata{
 		ContentLength: contentLength,
-		StorageMode:   StorageModeDisk,
 		StorageID:     storageID,
 		NamespaceID:   namespaceID,
 		SourceURL:     "pelican://test.example.com/data",
@@ -375,7 +374,7 @@ func TestCacheDBAtomicBlockUsage_NoMetadata(t *testing.T) {
 	assert.Equal(t, uint64(6), bitmap.GetCardinality())
 
 	// Usage should be zero (no metadata to derive storage/namespace)
-	usage, err := db.GetUsage(StorageIDPrimaryDisk, 1)
+	usage, err := db.GetUsage(StorageIDFirstDisk, 1)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), usage)
 }
@@ -396,7 +395,7 @@ func TestCacheDBUsageCounter(t *testing.T) {
 	defer db.Close()
 
 	namespaceID := uint32(1)
-	storageID := StorageIDPrimaryDisk
+	storageID := StorageIDFirstDisk
 
 	// Initial usage should be 0
 	usage, err := db.GetUsage(storageID, namespaceID)
@@ -465,8 +464,8 @@ func TestCacheDBMergeUpdate(t *testing.T) {
 	}
 
 	usageDeltas := map[StorageUsageKey]int64{
-		{StorageID: StorageIDPrimaryDisk, NamespaceID: 1}: 1000, // storage 1, namespace 1: +1000 bytes
-		{StorageID: StorageIDPrimaryDisk, NamespaceID: 2}: 2000, // storage 1, namespace 2: +2000 bytes
+		{StorageID: StorageIDFirstDisk, NamespaceID: 1}: 1000, // storage 1, namespace 1: +1000 bytes
+		{StorageID: StorageIDFirstDisk, NamespaceID: 2}: 2000, // storage 1, namespace 2: +2000 bytes
 	}
 
 	err = db.MergeUpdate(bitmapMerges, usageDeltas)
@@ -487,11 +486,11 @@ func TestCacheDBMergeUpdate(t *testing.T) {
 	assert.False(t, resultBitmap2.Contains(15))
 
 	// Verify usage counters
-	usage1, err := db.GetUsage(StorageIDPrimaryDisk, 1)
+	usage1, err := db.GetUsage(StorageIDFirstDisk, 1)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1000), usage1)
 
-	usage2, err := db.GetUsage(StorageIDPrimaryDisk, 2)
+	usage2, err := db.GetUsage(StorageIDFirstDisk, 2)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2000), usage2)
 
@@ -504,7 +503,7 @@ func TestCacheDBMergeUpdate(t *testing.T) {
 
 	err = db.MergeUpdate(
 		map[string][]byte{instanceHash1: moreBitmap1Data},
-		map[StorageUsageKey]int64{{StorageID: StorageIDPrimaryDisk, NamespaceID: 1}: 500},
+		map[StorageUsageKey]int64{{StorageID: StorageIDFirstDisk, NamespaceID: 1}: 500},
 	)
 	require.NoError(t, err)
 
@@ -517,7 +516,7 @@ func TestCacheDBMergeUpdate(t *testing.T) {
 	assert.False(t, resultBitmap1.Contains(10))
 
 	// Verify accumulated usage
-	usage1, err = db.GetUsage(StorageIDPrimaryDisk, 1)
+	usage1, err = db.GetUsage(StorageIDFirstDisk, 1)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1500), usage1)
 }
@@ -595,7 +594,7 @@ func TestStorageManagerInline(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	storage, err := NewStorageManager(db, tmpDir)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0)
 	require.NoError(t, err)
 
 	instanceHash := "inline_test_hash"
@@ -642,13 +641,17 @@ func TestEvictionManager(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	storage, err := NewStorageManager(db, tmpDir)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0)
 	require.NoError(t, err)
 
 	eviction := NewEvictionManager(db, storage, EvictionConfig{
-		MaxSize:             1000000, // 1MB max
-		HighWaterPercentage: 90,
-		LowWaterPercentage:  80,
+		DirConfigs: map[uint8]EvictionDirConfig{
+			StorageIDFirstDisk: {
+				MaxSize:             1000000, // 1MB max
+				HighWaterPercentage: 90,
+				LowWaterPercentage:  80,
+			},
+		},
 	})
 
 	// Test recording access
@@ -656,14 +659,16 @@ func TestEvictionManager(t *testing.T) {
 	require.NoError(t, eviction.RecordAccess("instance_hash_2"))
 
 	// Test adding usage
-	require.NoError(t, eviction.AddUsage(StorageIDPrimaryDisk, 1, 100000))
-	require.NoError(t, eviction.AddUsage(StorageIDPrimaryDisk, 2, 200000))
+	require.NoError(t, eviction.AddUsage(StorageIDFirstDisk, 1, 100000))
+	require.NoError(t, eviction.AddUsage(StorageIDFirstDisk, 2, 200000))
 
 	// Get stats
 	stats := eviction.GetStats()
-	assert.Equal(t, uint64(1000000), stats.MaxSize)
-	assert.Equal(t, uint64(900000), stats.HighWater)
-	assert.Equal(t, uint64(800000), stats.LowWater)
+	require.Contains(t, stats.DirStats, StorageIDFirstDisk)
+	dirStat := stats.DirStats[StorageIDFirstDisk]
+	assert.Equal(t, uint64(1000000), dirStat.MaxSize)
+	assert.Equal(t, uint64(900000), dirStat.HighWater)
+	assert.Equal(t, uint64(800000), dirStat.LowWater)
 }
 
 func TestConsistencyChecker(t *testing.T) {
@@ -681,10 +686,10 @@ func TestConsistencyChecker(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	storage, err := NewStorageManager(db, tmpDir)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0)
 	require.NoError(t, err)
 
-	checker := NewConsistencyChecker(db, storage, tmpDir, ConsistencyConfig{
+	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
 		MetadataScanActiveMs: 100,
 		DataScanBytesPerSec:  100 * 1024 * 1024,
 		MinAgeForCleanup:     0, // No grace period for tests
@@ -718,10 +723,18 @@ func TestConsistencyChecker_MetadataScan(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	storage, err := NewStorageManager(db, tmpDir)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0)
 	require.NoError(t, err)
 
-	checker := NewConsistencyChecker(db, storage, tmpDir, ConsistencyConfig{
+	// Discover the assigned storage ID for the single directory.
+	assignedDirs := storage.GetDirs()
+	require.Len(t, assignedDirs, 1)
+	var diskID uint8
+	for id := range assignedDirs {
+		diskID = id
+	}
+
+	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
 		MetadataScanActiveMs: 1000,
 		DataScanBytesPerSec:  100 * 1024 * 1024,
 		MinAgeForCleanup:     0, // No grace period for tests
@@ -735,8 +748,8 @@ func TestConsistencyChecker_MetadataScan(t *testing.T) {
 	}
 	for _, hash := range validHashes {
 		meta := &CacheMetadata{
-			StorageMode:   StorageModeDisk,
 			ContentLength: 100,
+			StorageID:     diskID,
 			NamespaceID:   1,
 			Completed:     time.Now().Add(-10 * time.Minute), // Old enough
 		}
@@ -754,8 +767,8 @@ func TestConsistencyChecker_MetadataScan(t *testing.T) {
 	// Create an orphaned DB entry (no file)
 	orphanedDBHash := "2222222222222222222222222222222222222222222222222222222222222222"
 	meta := &CacheMetadata{
-		StorageMode:   StorageModeDisk,
 		ContentLength: 100,
+		StorageID:     diskID,
 		NamespaceID:   1,
 		Completed:     time.Now().Add(-10 * time.Minute),
 	}
@@ -832,10 +845,10 @@ func TestConsistencyChecker_InlineStorage(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	storage, err := NewStorageManager(db, tmpDir)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0)
 	require.NoError(t, err)
 
-	checker := NewConsistencyChecker(db, storage, tmpDir, ConsistencyConfig{
+	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
 		MetadataScanActiveMs: 1000,
 		MinAgeForCleanup:     0,
 	})
@@ -844,7 +857,6 @@ func TestConsistencyChecker_InlineStorage(t *testing.T) {
 	validHash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	testData := []byte("test inline data")
 	meta := &CacheMetadata{
-		StorageMode:   StorageModeInline,
 		ContentLength: int64(len(testData)),
 		NamespaceID:   1,
 		Completed:     time.Now().Add(-10 * time.Minute),
@@ -855,7 +867,6 @@ func TestConsistencyChecker_InlineStorage(t *testing.T) {
 	// Create an orphaned inline entry (metadata exists but inline data is missing)
 	orphanedHash := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	orphanedMeta := &CacheMetadata{
-		StorageMode:   StorageModeInline,
 		ContentLength: 50,
 		NamespaceID:   1,
 		Completed:     time.Now().Add(-10 * time.Minute),
@@ -904,10 +915,10 @@ func TestConsistencyChecker_TransactionRestart(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	storage, err := NewStorageManager(db, tmpDir)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0)
 	require.NoError(t, err)
 
-	checker := NewConsistencyChecker(db, storage, tmpDir, ConsistencyConfig{
+	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
 		MetadataScanActiveMs: 1000,
 		DataScanBytesPerSec:  100 * 1024 * 1024,
 		MinAgeForCleanup:     0, // No grace period for tests
@@ -925,7 +936,6 @@ func TestConsistencyChecker_TransactionRestart(t *testing.T) {
 		validHashes[i] = hash
 
 		meta := &CacheMetadata{
-			StorageMode:   StorageModeDisk,
 			ContentLength: 100,
 			NamespaceID:   1,
 			Completed:     time.Now().Add(-10 * time.Minute),
@@ -948,7 +958,6 @@ func TestConsistencyChecker_TransactionRestart(t *testing.T) {
 	}
 	for _, hash := range orphanedHashes {
 		meta := &CacheMetadata{
-			StorageMode:   StorageModeDisk,
 			ContentLength: 100,
 			NamespaceID:   1,
 			Completed:     time.Now().Add(-10 * time.Minute),
@@ -981,4 +990,356 @@ func TestConsistencyChecker_TransactionRestart(t *testing.T) {
 		require.NoError(t, err)
 		assert.Nil(t, meta, "Orphaned entry should be deleted: %s", hash)
 	}
+}
+
+// TestMultiDirStoragePlacement verifies that multi-directory storage works
+// end-to-end: objects land in different directories, per-directory size stats
+// are correct, and storage IDs are persisted in metadata.
+func TestMultiDirStoragePlacement(t *testing.T) {
+	InitIssuerKeyForTests(t)
+
+	// Create two separate base directories to simulate independent disks.
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+
+	// Create a third directory just for the database.
+	dbDir := t.TempDir()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	db, err := NewCacheDB(ctx, dbDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	const storageID1 = StorageIDFirstDisk
+	const storageID2 = StorageIDFirstDisk + 1
+
+	// --- Set up subsystems with two directories ---
+
+	storage, err := NewStorageManager(db, []string{dir1, dir2}, 0)
+	require.NoError(t, err)
+
+	// Discover the assigned IDs for eviction config.
+	assignedDirs := storage.GetDirs()
+	require.Len(t, assignedDirs, 2, "expected exactly 2 storage dirs")
+
+	// Give both directories the same capacity so ChooseDiskStorage alternates
+	// between them (whichever has more free space after each write).
+	dirCfgs := make(map[uint8]EvictionDirConfig, len(assignedDirs))
+	for id := range assignedDirs {
+		dirCfgs[id] = EvictionDirConfig{MaxSize: 500_000, HighWaterPercentage: 90, LowWaterPercentage: 80}
+	}
+	eviction := NewEvictionManager(db, storage, EvictionConfig{
+		DirConfigs: dirCfgs,
+	})
+
+	// --- Store several objects, recording usage ---
+
+	type objectInfo struct {
+		instanceHash string
+		storageID    uint8
+		size         int64
+	}
+	var objects []objectInfo
+	const objectSize = 8192 // 2 blocks
+
+	for i := 0; i < 10; i++ {
+		instanceHash := fmt.Sprintf("%064x", i+0x10)
+		sid := eviction.ChooseDiskStorage()
+
+		meta, err := storage.InitDiskStorage(ctx, instanceHash, objectSize, sid)
+		require.NoError(t, err)
+
+		// Set metadata fields (NamespaceID, ETag, etc.) BEFORE WriteBlocks so
+		// that MergeBlockStateWithUsage can track usage under the correct
+		// namespace+storageID key.
+		meta.ETag = fmt.Sprintf("etag-%d", i)
+		meta.NamespaceID = 1
+		meta.ContentType = "application/octet-stream"
+		require.NoError(t, storage.SetMetadata(instanceHash, meta))
+
+		// Fill with a known pattern so WriteBlocks succeeds.
+		data := make([]byte, objectSize)
+		for j := range data {
+			data[j] = byte(i)
+		}
+		require.NoError(t, storage.WriteBlocks(instanceHash, 0, data))
+
+		// Mark as completed.
+		meta.Completed = time.Now()
+		require.NoError(t, storage.SetMetadata(instanceHash, meta))
+
+		// Inform the eviction manager's in-memory atomic counters
+		// about the usage increase so that ChooseDiskStorage can
+		// weight directories correctly.  In the full persistent cache
+		// this happens via PersistentCache.NoteUsageIncrease; here we
+		// call the EvictionManager directly since we're testing
+		// subsystems in isolation.
+		eviction.NoteUsageIncrease(sid, int64(objectSize))
+
+		objects = append(objects, objectInfo{
+			instanceHash: instanceHash,
+			storageID:    sid,
+			size:         objectSize,
+		})
+	}
+
+	// --- Assert: files are distributed across directories ---
+
+	filesInDir := map[uint8]int{storageID1: 0, storageID2: 0}
+	for _, obj := range objects {
+		filesInDir[obj.storageID]++
+
+		// Verify the file actually exists on the expected directory.
+		objPath := storage.GetDirs()[obj.storageID]
+		filePath := filepath.Join(objPath, GetInstanceStoragePath(obj.instanceHash))
+		_, err := os.Stat(filePath)
+		require.NoError(t, err, "file for %s should exist in dir storageID=%d", obj.instanceHash, obj.storageID)
+	}
+
+	t.Logf("Files per directory: dir1=%d dir2=%d", filesInDir[storageID1], filesInDir[storageID2])
+	// Both directories have the same capacity, so ChooseDiskStorage should
+	// alternate between them as each write changes the relative free space.
+	assert.Greater(t, filesInDir[storageID1], 0, "dir1 should have at least one object")
+	assert.Greater(t, filesInDir[storageID2], 0, "dir2 should have at least one object")
+
+	// --- Assert: per-directory usage stats are correct ---
+
+	stats := eviction.GetStats()
+	require.Contains(t, stats.DirStats, storageID1)
+	require.Contains(t, stats.DirStats, storageID2)
+
+	expectedUsage := map[uint8]int64{storageID1: 0, storageID2: 0}
+	for _, obj := range objects {
+		expectedUsage[obj.storageID] += obj.size
+	}
+
+	allUsage, err := db.GetAllUsage()
+	require.NoError(t, err)
+
+	actualUsage := map[uint8]int64{}
+	for key, usage := range allUsage {
+		actualUsage[key.StorageID] += usage
+	}
+	assert.Equal(t, expectedUsage[storageID1], actualUsage[storageID1],
+		"dir1 usage should match sum of objects placed there")
+	assert.Equal(t, expectedUsage[storageID2], actualUsage[storageID2],
+		"dir2 usage should match sum of objects placed there")
+
+	// --- Assert: storageID is persisted in metadata ---
+
+	for _, obj := range objects {
+		meta, err := storage.GetMetadata(obj.instanceHash)
+		require.NoError(t, err)
+		require.NotNil(t, meta)
+		assert.Equal(t, obj.storageID, meta.StorageID,
+			"metadata.StorageID should match the directory where the object was placed (%s)", obj.instanceHash)
+	}
+
+	// --- Assert: reading back data works across directories ---
+
+	for _, obj := range objects {
+		readData, err := storage.ReadBlocks(obj.instanceHash, 0, objectSize)
+		require.NoError(t, err, "should read back data from storageID=%d", obj.storageID)
+		assert.Equal(t, objectSize, len(readData))
+	}
+
+	// --- Assert: ConsistencyChecker sees objects in both directories ---
+
+	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
+		MetadataScanActiveMs: 1000,
+		DataScanBytesPerSec:  100 * 1024 * 1024,
+		MinAgeForCleanup:     0,
+	})
+
+	require.NoError(t, checker.RunMetadataScan(ctx))
+	checkStats := checker.GetStats()
+
+	// No orphans should be found.
+	assert.Equal(t, int64(0), checkStats.OrphanedDBEntries, "no orphaned DB entries")
+	assert.Equal(t, int64(0), checkStats.OrphanedFiles, "no orphaned files")
+}
+
+// TestPurgeStorageID verifies that PurgeStorageID removes all database
+// entries (metadata, block state, LRU, usage, disk mapping) for a
+// given storageID without touching entries belonging to other IDs.
+func TestPurgeStorageID(t *testing.T) {
+	InitIssuerKeyForTests(t)
+
+	dbDir := t.TempDir()
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	db, err := NewCacheDB(ctx, dbDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	storage, err := NewStorageManager(db, []string{dir1, dir2}, 0)
+	require.NoError(t, err)
+
+	assignedDirs := storage.GetDirs()
+	require.Len(t, assignedDirs, 2)
+
+	// Identify the two storage IDs.
+	var ids []uint8
+	for id := range assignedDirs {
+		ids = append(ids, id)
+	}
+	if ids[0] > ids[1] {
+		ids[0], ids[1] = ids[1], ids[0]
+	}
+	sidKeep := ids[0]
+	sidPurge := ids[1]
+
+	const objSize int64 = 8192
+
+	// Helper: create one object on a given storageID.
+	createObject := func(i int, sid uint8) string {
+		instanceHash := fmt.Sprintf("%064x", i)
+		meta, err := storage.InitDiskStorage(ctx, instanceHash, objSize, sid)
+		require.NoError(t, err)
+		meta.ETag = fmt.Sprintf("etag-%d", i)
+		meta.NamespaceID = 1
+		meta.ContentType = "application/octet-stream"
+		meta.ObjectHash = fmt.Sprintf("objhash-%d", i)
+		require.NoError(t, storage.SetMetadata(instanceHash, meta))
+
+		data := make([]byte, objSize)
+		for j := range data {
+			data[j] = byte(i)
+		}
+		require.NoError(t, storage.WriteBlocks(instanceHash, 0, data))
+
+		// Set ETag mapping
+		require.NoError(t, db.SetLatestETag(meta.ObjectHash, meta.ETag))
+		// Usage is tracked automatically by WriteBlocks → MergeBlockStateWithUsage.
+		// Record LRU access
+		require.NoError(t, db.UpdateLRU(instanceHash, 0))
+
+		return instanceHash
+	}
+
+	// Create 3 objects on each storageID.
+	var keepHashes, purgeHashes []string
+	for i := 0; i < 3; i++ {
+		keepHashes = append(keepHashes, createObject(i, sidKeep))
+	}
+	for i := 10; i < 13; i++ {
+		purgeHashes = append(purgeHashes, createObject(i, sidPurge))
+	}
+
+	// Verify objects exist before purge.
+	for _, h := range purgeHashes {
+		meta, err := storage.GetMetadata(h)
+		require.NoError(t, err)
+		require.NotNil(t, meta, "object %s should exist before purge", h)
+	}
+	purgeUsage, err := db.GetDirUsage(sidPurge)
+	require.NoError(t, err)
+	assert.NotEmpty(t, purgeUsage, "purge dir should have usage before purge")
+
+	// ---- Purge ----
+	require.NoError(t, db.PurgeStorageID(sidPurge))
+
+	// Verify purged objects are gone.
+	for _, h := range purgeHashes {
+		meta, err := storage.GetMetadata(h)
+		require.NoError(t, err)
+		assert.Nil(t, meta, "object %s should be gone after purge", h)
+
+		has, err := db.HasMetadata(h)
+		require.NoError(t, err)
+		assert.False(t, has, "metadata for %s should be deleted", h)
+	}
+
+	// Verify usage is gone.
+	purgeUsage, err = db.GetDirUsage(sidPurge)
+	require.NoError(t, err)
+	assert.Empty(t, purgeUsage, "purge dir should have no usage after purge")
+
+	// Verify disk mapping is gone.
+	mappings, err := db.LoadDiskMappings()
+	require.NoError(t, err)
+	for _, dm := range mappings {
+		assert.NotEqual(t, sidPurge, dm.ID, "disk mapping for purged ID should be removed")
+	}
+
+	// Verify kept objects are untouched.
+	for _, h := range keepHashes {
+		meta, err := storage.GetMetadata(h)
+		require.NoError(t, err)
+		require.NotNil(t, meta, "object %s on kept dir should still exist", h)
+	}
+	keepUsage, err := db.GetDirUsage(sidKeep)
+	require.NoError(t, err)
+	assert.NotEmpty(t, keepUsage, "kept dir should still have usage")
+}
+
+// TestStorageIDRecycling verifies that NewStorageManager recycles an
+// unmounted storageID when all 255 IDs are exhausted instead of
+// returning an error.
+func TestStorageIDRecycling(t *testing.T) {
+	InitIssuerKeyForTests(t)
+
+	dbDir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	db, err := NewCacheDB(ctx, dbDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	// Fill all 255 storageIDs (1–255) with fake disk mappings.
+	// Only the first dir is a real directory; the rest are just DB entries.
+	realDir := t.TempDir()
+	for id := uint8(StorageIDFirstDisk); ; id++ {
+		dm := DiskMapping{
+			ID:        id,
+			UUID:      fmt.Sprintf("uuid-%d", id),
+			Directory: fmt.Sprintf("/fake/dir/%d", id),
+		}
+		require.NoError(t, db.SaveDiskMapping(dm))
+		// Add a small amount of usage so FindRecyclableStorageID can rank them.
+		require.NoError(t, db.AddUsage(id, 1, int64(id)*100))
+		if id == 255 {
+			break
+		}
+	}
+
+	// The real directory has no UUID file, so NewStorageManager will try
+	// to assign it a new ID.  All 255 IDs are taken, so it must recycle.
+	// StorageID 1 has the smallest usage (1*100 = 100), so it should be
+	// recycled.
+	storage, err := NewStorageManager(db, []string{realDir}, 0)
+	require.NoError(t, err, "should recycle a storageID instead of failing")
+
+	dirs := storage.GetDirs()
+	require.Len(t, dirs, 1)
+
+	// The recycled ID should be 1 (smallest usage).
+	var assignedID uint8
+	for id := range dirs {
+		assignedID = id
+	}
+	assert.Equal(t, uint8(StorageIDFirstDisk), assignedID,
+		"should have recycled storage ID %d (smallest usage)", StorageIDFirstDisk)
+
+	// The old disk mapping for ID 1 should be replaced.
+	mappings, err := db.LoadDiskMappings()
+	require.NoError(t, err)
+	for _, dm := range mappings {
+		if dm.ID == assignedID {
+			assert.Equal(t, realDir, dm.Directory,
+				"recycled ID should now point to the new directory")
+		}
+	}
+
+	// Usage for the recycled ID should be 0 (was purged).
+	dirUsage, err := db.GetDirUsage(assignedID)
+	require.NoError(t, err)
+	assert.Empty(t, dirUsage, "recycled ID should have zero usage")
 }

@@ -65,7 +65,7 @@ func TestCacheFedTokMaint(t *testing.T) {
 
 	// Give this "cache" instance a unique location so it doesn't compete with the fed test cache token
 	require.NoError(t, param.Set(param.Cache_FedTokenLocation.GetName(), filepath.Join(t.TempDir(), t.Name()+"_fedtok")))
-	cache.LaunchFedTokManager(ctx, egrp, &cacheServer, nil)
+	cache.LaunchFedTokManager(ctx, egrp, &cacheServer, nil, nil)
 	tokFile := cacheServer.GetFedTokLocation()
 
 	ticker := time.NewTicker(1 * time.Second)

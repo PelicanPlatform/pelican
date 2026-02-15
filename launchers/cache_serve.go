@@ -70,7 +70,7 @@ func (pcs *persistentCacheServer) GetPids() []int {
 }
 
 func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules server_structs.ServerType) (server_structs.XRootDServer, error) {
-	// Check if we should use the XRootD-free persistent cache implementation
+	// Check if we should use the new persistent cache implementation
 	usePersistentCache := param.Cache_EnableV2.GetBool()
 
 	if usePersistentCache {
@@ -80,7 +80,7 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 	return cacheServeWithXRootD(ctx, engine, egrp, modules)
 }
 
-// cacheServeWithPersistentCache launches the XRootD-free cache using the persistent cache implementation
+// cacheServeWithPersistentCache launches the cache using the persistent cache implementation
 func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules server_structs.ServerType) (server_structs.XRootDServer, error) {
 	log.Info("Using new persistent cache implementation")
 
@@ -112,7 +112,8 @@ func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp
 	// Director tests or federation tokens.
 	if !param.Cache_EnableSiteLocalMode.GetBool() {
 		cache.LaunchDirectorTestFileCleanup(ctx)
-		cache.LaunchFedTokManager(ctx, egrp, cacheServer)
+		// Federation token manager is started below, after the PersistentCache
+		// is created, so the token can be delivered in-memory via pc.SetFedToken.
 	}
 
 	concLimit := param.Cache_Concurrency.GetInt()
@@ -134,9 +135,26 @@ func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp
 	cfg := local_cache.PersistentCacheConfig{
 		BaseDir: filepath.Join(cacheStorageLocation, "persistent-cache"),
 	}
+
+	// Populate storage directories from config if set.
+	if dirs := param.LocalCache_StorageDirs.GetStringSlice(); len(dirs) > 0 {
+		storageDirs := make([]local_cache.StorageDirConfig, len(dirs))
+		for i, d := range dirs {
+			storageDirs[i] = local_cache.StorageDirConfig{Path: d}
+		}
+		cfg.StorageDirs = storageDirs
+	}
+
 	pc, err := local_cache.NewPersistentCache(ctx, egrp, cfg)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create persistent cache")
+	}
+
+	// Now that the PersistentCache exists, start the federation token manager.
+	if !param.Cache_EnableSiteLocalMode.GetBool() {
+		cache.LaunchFedTokManager(ctx, egrp, cacheServer, func(_ *os.File) error {
+			return nil // No XRootD processes to copy tokens to
+		}, pc.SetFedToken)
 	}
 
 	// Check if director is enabled to determine handler registration path
@@ -263,7 +281,7 @@ func cacheServeWithXRootD(ctx context.Context, engine *gin.Engine, egrp *errgrou
 			// In drop-privileges mode, the token file is chown'ed to the xrootd user
 			// and group by xrdhttp-pelican plugin by passing command "9" to the plugin.
 			return xrootd.FileCopyToXrootdDir(false, 9, f)
-		})
+		}, nil)
 	}
 
 	concLimit := param.Cache_Concurrency.GetInt()

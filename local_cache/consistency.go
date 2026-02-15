@@ -102,11 +102,12 @@ var (
 	})
 )
 
-// ConsistencyChecker verifies cache consistency between database and disk
+// ConsistencyChecker verifies cache consistency between database and disk.
+// For multi-directory configurations, it scans each storage directory
+// independently.
 type ConsistencyChecker struct {
-	db         *CacheDB
-	storage    *StorageManager
-	objectsDir string
+	db      *CacheDB
+	storage *StorageManager
 
 	// Rate limiting (using rate.Limiter treating each token as 1ns)
 	metadataScanLimiter *rate.Limiter // Limits metadata scan active time
@@ -147,8 +148,8 @@ type ConsistencyStats struct {
 	ObjectsVerified    int64
 }
 
-// NewConsistencyChecker creates a new consistency checker
-func NewConsistencyChecker(db *CacheDB, storage *StorageManager, baseDir string, config ConsistencyConfig) *ConsistencyChecker {
+// NewConsistencyChecker creates a new consistency checker.
+func NewConsistencyChecker(db *CacheDB, storage *StorageManager, config ConsistencyConfig) *ConsistencyChecker {
 	if config.MetadataScanActiveMs <= 0 {
 		config.MetadataScanActiveMs = 100 // 100ms active per second
 	}
@@ -173,7 +174,6 @@ func NewConsistencyChecker(db *CacheDB, storage *StorageManager, baseDir string,
 	return &ConsistencyChecker{
 		db:                  db,
 		storage:             storage,
-		objectsDir:          filepath.Join(baseDir, objectsSubDir),
 		metadataScanLimiter: limiter,
 		dataScanBytesPerSec: config.DataScanBytesPerSec,
 		minAgeForCleanup:    config.MinAgeForCleanup,
@@ -276,19 +276,18 @@ func (cc *ConsistencyChecker) dataScanLoop(ctx context.Context) error {
 	}
 }
 
-// RunMetadataScan performs a metadata consistency scan
-// It verifies that database entries match files on disk and vice versa
-// using an efficient streaming merge algorithm over sorted lists.
+// RunMetadataScan performs a metadata consistency scan.
+// It verifies that database entries match files on disk and vice versa.
 func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 	log.Info("Starting metadata consistency scan")
 	scanStartTime := time.Now()
 	cc.lastMetadataScan.Store(scanStartTime.Unix())
 	metadataScanLastStartTime.Set(float64(scanStartTime.Unix()))
 
-	// Use os.DirFS to avoid symlink attacks
-	fsys := os.DirFS(cc.objectsDir)
-
-	// Stream files from disk via channel (filesystem walk is in lexicographical order)
+	// Stream files from disk via channel.  Each directory's WalkDir
+	// produces entries in lexicographic order.  A k-way merge goroutine
+	// combines the per-directory streams into a single globally-sorted
+	// stream on fileChan, which the merge-join algorithm requires.
 	type fileInfo struct {
 		instanceHash string
 		path         string
@@ -298,65 +297,103 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 	fileChan := make(chan fileInfo, 100)
 	walkErr := make(chan error, 1)
 
-	// Start filesystem walk in background
-	go func() {
-		err := fs.WalkDir(fsys, ".", func(relPath string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil // Skip errors
-			}
-
-			if d.IsDir() {
-				return nil
-			}
-
-			// Reconstruct hash from path (remove directory separators)
-			instanceHash := strings.ReplaceAll(relPath, string(filepath.Separator), "")
-
-			// Validate instance hash format: must be 64 hex characters (SHA256)
-			if len(instanceHash) != 64 {
-				return nil
-			}
-			// Quick validation: check if all characters are hex
-			for _, c := range instanceHash {
-				if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+	// walkOneDir walks a single objects directory, sending valid entries
+	// to the returned channel in lexicographic order.
+	walkOneDir := func(objectsDir string) <-chan fileInfo {
+		ch := make(chan fileInfo, 64)
+		go func() {
+			defer close(ch)
+			fsys := os.DirFS(objectsDir)
+			_ = fs.WalkDir(fsys, ".", func(relPath string, d fs.DirEntry, err error) error {
+				if err != nil || d.IsDir() {
 					return nil
 				}
-			}
 
-			// Get file info
-			info, err := d.Info()
-			if err != nil {
-				return nil
-			}
+				// Reconstruct hash from path (remove directory separators)
+				instanceHash := strings.ReplaceAll(relPath, string(filepath.Separator), "")
 
-			// Do not mark for deletion any file newer than the start of the current scan
-			if info.ModTime().After(scanStartTime) {
-				return nil
-			}
+				// Validate instance hash format: must be 64 hex characters (SHA256)
+				if len(instanceHash) != 64 {
+					return nil
+				}
+				for _, c := range instanceHash {
+					if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+						return nil
+					}
+				}
 
-			// Only include files old enough to avoid races
-			if cc.minAgeForCleanup > 0 && time.Since(info.ModTime()) < cc.minAgeForCleanup {
+				info, err := d.Info()
+				if err != nil {
+					return nil
+				}
+
+				// Skip files newer than scan start or younger than the grace period
+				if info.ModTime().After(scanStartTime) {
+					return nil
+				}
+				if cc.minAgeForCleanup > 0 && time.Since(info.ModTime()) < cc.minAgeForCleanup {
+					return nil
+				}
+
+				select {
+				case ch <- fileInfo{
+					instanceHash: instanceHash,
+					path:         filepath.Join(objectsDir, relPath),
+					modTime:      info.ModTime(),
+					size:         info.Size(),
+				}:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 				return nil
+			})
+		}()
+		return ch
+	}
+
+	// Launch one walker per directory.
+	objectsDirs := cc.storage.GetDirs()
+	dirChans := make([]<-chan fileInfo, 0, len(objectsDirs))
+	for _, objectsDir := range objectsDirs {
+		dirChans = append(dirChans, walkOneDir(objectsDir))
+	}
+
+	// k-way merge: read from all per-directory channels, always
+	// forwarding the entry with the smallest instanceHash.
+	go func() {
+		defer close(fileChan)
+		defer close(walkErr)
+
+		// heads[i] holds the next undelivered entry from dirChans[i].
+		// ok[i] is false once dirChans[i] is exhausted.
+		heads := make([]fileInfo, len(dirChans))
+		ok := make([]bool, len(dirChans))
+		for i, ch := range dirChans {
+			heads[i], ok[i] = <-ch
+		}
+
+		for {
+			// Find the channel with the smallest instanceHash.
+			minIdx := -1
+			for i := range dirChans {
+				if !ok[i] {
+					continue
+				}
+				if minIdx == -1 || heads[i].instanceHash < heads[minIdx].instanceHash {
+					minIdx = i
+				}
+			}
+			if minIdx == -1 {
+				return // All channels exhausted
 			}
 
 			select {
-			case fileChan <- fileInfo{
-				instanceHash: instanceHash,
-				path:         filepath.Join(cc.objectsDir, relPath),
-				modTime:      info.ModTime(),
-				size:         info.Size(),
-			}:
+			case fileChan <- heads[minIdx]:
 			case <-ctx.Done():
-				return ctx.Err()
+				return
 			}
-
-			return nil
-		})
-		close(fileChan)
-		if err != nil {
-			walkErr <- err
+			heads[minIdx], ok[minIdx] = <-dirChans[minIdx]
 		}
-		close(walkErr)
 	}()
 
 	// Structures to track what to delete (limit to 1k changes per transaction)
@@ -437,7 +474,7 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 			// Check if current file matches DB entry
 			if fileOk && currentFile.instanceHash == instanceHash {
 				// Match - both exist
-				if meta.StorageMode == StorageModeDisk {
+				if meta.IsDisk() {
 					// Expected: file exists for disk storage
 					filesScanned++
 					// Get next file
@@ -458,7 +495,7 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 				}
 			} else {
 				// No matching file for this DB entry
-				if meta.StorageMode == StorageModeDisk {
+				if meta.IsDisk() {
 					// Orphaned DB entry - file should exist but doesn't
 					if len(deletions) < maxDeletionsPerTx {
 						deletions = append(deletions, deleteAction{
@@ -467,7 +504,7 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 							size:         meta.ContentLength,
 						})
 					}
-				} else if meta.StorageMode == StorageModeInline {
+				} else if meta.IsInline() {
 					// Verify inline data exists
 					data, err := cc.db.GetInlineData(instanceHash)
 					if err != nil || data == nil {
@@ -524,12 +561,12 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 					meta, err := cc.db.GetMetadata(del.instanceHash)
 					if err == nil && meta != nil {
 						stillInconsistent := false
-						if meta.StorageMode == StorageModeDisk {
-							filePath := filepath.Join(cc.objectsDir, GetInstanceStoragePath(del.instanceHash))
+						if meta.IsDisk() {
+							filePath := cc.storage.getObjectPathForDir(meta.StorageID, del.instanceHash)
 							if _, err := os.Stat(filePath); os.IsNotExist(err) {
 								stillInconsistent = true
 							}
-						} else if meta.StorageMode == StorageModeInline {
+						} else if meta.IsInline() {
 							data, err := cc.db.GetInlineData(del.instanceHash)
 							if err != nil || data == nil {
 								stillInconsistent = true
@@ -798,7 +835,7 @@ func (cc *ConsistencyChecker) verifyObjectChecksum(
 	checksumMismatches, inconsistentBytes, bytesVerified, objectsVerified *int64,
 ) error {
 	// For disk storage, check if complete before attempting any checksumming
-	if meta.StorageMode == StorageModeDisk {
+	if meta.IsDisk() {
 		bitmap, err := cc.db.GetBlockState(instanceHash)
 		if err != nil {
 			return errors.Wrap(err, "failed to get block state")
@@ -821,7 +858,7 @@ func (cc *ConsistencyChecker) verifyObjectChecksum(
 	}
 
 	// For inline storage, verify directly
-	if meta.StorageMode == StorageModeInline {
+	if meta.IsInline() {
 		data, err := cc.storage.ReadInline(instanceHash)
 		if err != nil {
 			return errors.Wrap(err, "failed to read inline data")
@@ -864,7 +901,7 @@ func (cc *ConsistencyChecker) verifyObjectChecksum(
 		return err
 	}
 
-	filePath := filepath.Join(cc.objectsDir, GetInstanceStoragePath(instanceHash))
+	filePath := cc.storage.getObjectPathForDir(meta.StorageID, instanceHash)
 	file, err := os.Open(filePath)
 	if err != nil {
 		return errors.Wrap(err, "failed to open file")
@@ -1002,7 +1039,7 @@ func (cc *ConsistencyChecker) calculateAndStoreChecksums(
 	var data []byte
 	var err error
 
-	if meta.StorageMode == StorageModeInline {
+	if meta.IsInline() {
 		data, err = cc.storage.ReadInline(instanceHash)
 		if err != nil {
 			return errors.Wrap(err, "failed to read inline data")
@@ -1096,8 +1133,8 @@ func (cc *ConsistencyChecker) VerifyObject(instanceHash string) (bool, error) {
 	}
 
 	// Check file exists (for disk storage)
-	if meta.StorageMode == StorageModeDisk {
-		filePath := filepath.Join(cc.objectsDir, GetInstanceStoragePath(instanceHash))
+	if meta.IsDisk() {
+		filePath := cc.storage.getObjectPathForDir(meta.StorageID, instanceHash)
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {
 			return false, nil
 		}
@@ -1109,7 +1146,7 @@ func (cc *ConsistencyChecker) VerifyObject(instanceHash string) (bool, error) {
 	}
 
 	var data []byte
-	if meta.StorageMode == StorageModeInline {
+	if meta.IsInline() {
 		data, err = cc.storage.ReadInline(instanceHash)
 	} else {
 		var complete bool
@@ -1205,7 +1242,7 @@ func (cc *ConsistencyChecker) VerifyBlockIntegrity(instanceHash string) ([]uint3
 		return nil, errors.New("object not found")
 	}
 
-	if meta.StorageMode != StorageModeDisk {
+	if !meta.IsDisk() {
 		return nil, nil // Only applicable to disk storage
 	}
 
@@ -1222,7 +1259,7 @@ func (cc *ConsistencyChecker) VerifyBlockIntegrity(instanceHash string) ([]uint3
 	}
 
 	// Open the file
-	filePath := filepath.Join(cc.objectsDir, GetInstanceStoragePath(instanceHash))
+	filePath := cc.storage.getObjectPathForDir(meta.StorageID, instanceHash)
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to open object file")

@@ -30,6 +30,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -92,6 +93,9 @@ type PersistentCache struct {
 	// Active revalidations deduplication (keyed by objectHash)
 	activeRevalidations   map[string]*revalidation
 	activeRevalidationsMu sync.Mutex
+
+	// Federation token set by LaunchFedTokManager via SetFedToken.
+	fedToken atomic.Pointer[string]
 
 	// Configuration
 	wasConfigured bool
@@ -163,12 +167,30 @@ type revalidation struct {
 
 // PersistentCacheConfig holds configuration for the persistent cache
 type PersistentCacheConfig struct {
-	BaseDir                 string
+	// BaseDir is the root directory for the cache.  The BadgerDB database
+	// lives directly under BaseDir.  If StorageDirs is empty, a single
+	// storage directory is created under BaseDir/objects.
+	BaseDir string
+
+	// StorageDirs configures one or more storage directories.
+	// Each entry describes a directory path and its size limits.
+	// When empty, a single directory under BaseDir is used with
+	// MaxSize / HighWaterMarkPercentage / LowWaterMarkPercentage
+	// as its limits (for backward compatibility).
+	StorageDirs []StorageDirConfig
+
+	// Legacy single-directory fields — used only when StorageDirs is empty.
 	MaxSize                 uint64
 	HighWaterMarkPercentage int
 	LowWaterMarkPercentage  int
-	DefaultFederation       string
-	DeferConfig             bool
+
+	// InlineStorageMaxBytes sets the maximum size for objects stored
+	// inline in BadgerDB.  Objects at or below this threshold are stored
+	// inline; larger objects go to disk.  0 means use the default (4096).
+	InlineStorageMaxBytes int
+
+	DefaultFederation string
+	DeferConfig       bool
 }
 
 // NewPersistentCache creates a new persistent cache instance
@@ -186,35 +208,65 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		return nil, errors.Wrap(err, "failed to create cache directory")
 	}
 
-	if cfg.MaxSize == 0 {
-		sizeStr := param.LocalCache_Size.GetString()
-		if sizeStr != "" {
-			var err error
-			cfg.MaxSize, err = parseSize(sizeStr)
-			if err != nil {
-				return nil, errors.Wrap(err, "failed to parse LocalCache.Size")
-			}
-		} else {
-			// Get available space on disk
-			cacheSize, err := getCacheSize(cfg.BaseDir)
-			if err != nil {
-				return nil, errors.Wrap(err, "failed to determine cache size")
-			}
-			cfg.MaxSize = cacheSize
+	// Resolve default watermark percentages from config/params.
+	defaultHWP := cfg.HighWaterMarkPercentage
+	if defaultHWP == 0 {
+		defaultHWP = param.LocalCache_HighWaterMarkPercentage.GetInt()
+		if defaultHWP == 0 {
+			defaultHWP = 90
+		}
+	}
+	defaultLWP := cfg.LowWaterMarkPercentage
+	if defaultLWP == 0 {
+		defaultLWP = param.LocalCache_LowWaterMarkPercentage.GetInt()
+		if defaultLWP == 0 {
+			defaultLWP = 80
 		}
 	}
 
-	if cfg.HighWaterMarkPercentage == 0 {
-		cfg.HighWaterMarkPercentage = param.LocalCache_HighWaterMarkPercentage.GetInt()
-		if cfg.HighWaterMarkPercentage == 0 {
-			cfg.HighWaterMarkPercentage = 90
+	// Build storage dirs and eviction dir configs.
+	// If StorageDirs is configured, use them.  Otherwise fall back to the
+	// legacy single-dir config (BaseDir + MaxSize).
+	storageDirs := cfg.StorageDirs
+	if len(storageDirs) == 0 {
+		// Legacy single-directory mode
+		maxSz := cfg.MaxSize
+		if maxSz == 0 {
+			sizeStr := param.LocalCache_Size.GetString()
+			if sizeStr != "" {
+				var err error
+				maxSz, err = parseSize(sizeStr)
+				if err != nil {
+					return nil, errors.Wrap(err, "failed to parse LocalCache.Size")
+				}
+			} else {
+				cacheSize, err := getCacheSize(cfg.BaseDir)
+				if err != nil {
+					return nil, errors.Wrap(err, "failed to determine cache size")
+				}
+				maxSz = cacheSize
+			}
 		}
+		storageDirs = []StorageDirConfig{{
+			Path:                    cfg.BaseDir,
+			MaxSize:                 maxSz,
+			HighWaterMarkPercentage: defaultHWP,
+			LowWaterMarkPercentage:  defaultLWP,
+		}}
 	}
 
-	if cfg.LowWaterMarkPercentage == 0 {
-		cfg.LowWaterMarkPercentage = param.LocalCache_LowWaterMarkPercentage.GetInt()
-		if cfg.LowWaterMarkPercentage == 0 {
-			cfg.LowWaterMarkPercentage = 80
+	// Collect ordered paths and per-dir config keyed by path for later
+	// eviction config construction (storage IDs are assigned by
+	// NewStorageManager via UUID matching).
+	dirPaths := make([]string, len(storageDirs))
+	sdCfgByPath := make(map[string]StorageDirConfig, len(storageDirs))
+	for i, sd := range storageDirs {
+		dirPaths[i] = sd.Path
+		sdCfgByPath[sd.Path] = sd
+
+		// Ensure the storage base directory exists.
+		if err := os.MkdirAll(sd.Path, 0700); err != nil {
+			return nil, errors.Wrapf(err, "failed to create storage directory %q", sd.Path)
 		}
 	}
 
@@ -224,22 +276,60 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		return nil, errors.Wrap(err, "failed to initialize cache database")
 	}
 
-	// Initialize storage manager
-	storage, err := NewStorageManager(db, cfg.BaseDir)
+	// Initialize storage manager — assigns storageIDs internally via UUIDs.
+	storage, err := NewStorageManager(db, dirPaths, cfg.InlineStorageMaxBytes)
 	if err != nil {
 		db.Close()
 		return nil, errors.Wrap(err, "failed to initialize storage manager")
 	}
 
+	// Build eviction dir configs now that we know storageID → path mapping.
+	// GetDirs() returns paths with /objects appended; strip the suffix to
+	// match against the original config paths.
+	evictionDirCfgs := make(map[uint8]EvictionDirConfig, len(storageDirs))
+	for id, objDir := range storage.GetDirs() {
+		basePath := filepath.Dir(objDir) // strip "/objects"
+		sd, ok := sdCfgByPath[basePath]
+		if !ok {
+			// Should not happen — every directory in GetDirs was passed in.
+			db.Close()
+			return nil, errors.Errorf("storage directory %q not found in config", basePath)
+		}
+
+		// Resolve per-dir size.  0 means auto-detect from filesystem.
+		maxSz := sd.MaxSize
+		if maxSz == 0 {
+			cs, err := getCacheSize(sd.Path)
+			if err != nil {
+				db.Close()
+				return nil, errors.Wrapf(err, "failed to determine size for storage dir %q", sd.Path)
+			}
+			maxSz = cs
+		}
+
+		hwp := sd.HighWaterMarkPercentage
+		if hwp <= 0 {
+			hwp = defaultHWP
+		}
+		lwp := sd.LowWaterMarkPercentage
+		if lwp <= 0 {
+			lwp = defaultLWP
+		}
+
+		evictionDirCfgs[id] = EvictionDirConfig{
+			MaxSize:             maxSz,
+			HighWaterPercentage: hwp,
+			LowWaterPercentage:  lwp,
+		}
+	}
+
 	// Initialize eviction manager
 	eviction := NewEvictionManager(db, storage, EvictionConfig{
-		MaxSize:             cfg.MaxSize,
-		HighWaterPercentage: cfg.HighWaterMarkPercentage,
-		LowWaterPercentage:  cfg.LowWaterMarkPercentage,
+		DirConfigs: evictionDirCfgs,
 	})
 
 	// Initialize consistency checker
-	consistency := NewConsistencyChecker(db, storage, cfg.BaseDir, ConsistencyConfig{
+	consistency := NewConsistencyChecker(db, storage, ConsistencyConfig{
 		MinAgeForCleanup: -1, // Use default grace period
 	})
 
@@ -321,7 +411,7 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		}
 	}
 
-	log.Infof("Persistent cache initialized: %s (max size: %d bytes)", cfg.BaseDir, cfg.MaxSize)
+	log.Infof("Persistent cache initialized: %s (%d storage dir(s))", cfg.BaseDir, len(storageDirs))
 
 	return pc, nil
 }
@@ -548,8 +638,12 @@ func (pc *PersistentCache) newFetchingRangeReader(
 	res *objectResolution,
 	startByte, endByte int64,
 ) (*RangeReader, error) {
+	// Pass the user token and federation token separately.  The block
+	// fetcher forwards the user token via Authorization header and the
+	// federation token via access_token query parameter, which is
+	// compatible with both Go-based and XRootD-based origins.
 	fetcher, err := NewBlockFetcherV2(
-		pc.storage, res.instanceHash, res.pelicanURL, res.token, pc.te,
+		pc.storage, res.instanceHash, res.pelicanURL, res.token, pc.getFedToken(), pc.te,
 		BlockFetcherV2Config{},
 	)
 	if err != nil {
@@ -745,11 +839,12 @@ func (pc *PersistentCache) HeadObject(objectPath, token string) (*HeadResult, er
 	dUrl := *pc.directorURL
 	dUrl.Path = objectPath
 	dUrl.Scheme = "pelican"
-	q := dUrl.Query()
-	q.Set("directread", "")
-	dUrl.RawQuery = q.Encode()
 
-	statInfo, err := client.DoStat(context.Background(), dUrl.String(), client.WithToken(token))
+	opts := []client.TransferOption{client.WithToken(token), client.WithCacheEmbeddedClientMode()}
+	if ft := pc.getFedToken(); ft != "" {
+		opts = append(opts, client.WithFedToken(ft))
+	}
+	statInfo, err := client.DoStat(context.Background(), dUrl.String(), opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -798,15 +893,16 @@ func (pc *PersistentCache) stat(objectPath, token string, cachedOnly bool) (uint
 		return 0, ErrNotCached
 	}
 
-	// Query origin with directread to bypass cache (we ARE the cache)
+	// Query origin via the director's origin endpoint
 	dUrl := *pc.directorURL
 	dUrl.Path = objectPath
 	dUrl.Scheme = "pelican"
-	q := dUrl.Query()
-	q.Set("directread", "")
-	dUrl.RawQuery = q.Encode()
 
-	statInfo, err := client.DoStat(context.Background(), dUrl.String(), client.WithToken(token))
+	opts := []client.TransferOption{client.WithToken(token), client.WithCacheEmbeddedClientMode()}
+	if ft := pc.getFedToken(); ft != "" {
+		opts = append(opts, client.WithFedToken(ft))
+	}
+	statInfo, err := client.DoStat(context.Background(), dUrl.String(), opts...)
 	if err != nil {
 		return 0, err
 	}
@@ -828,17 +924,18 @@ func (pc *PersistentCache) initObjectFromStat(
 	namespaceID uint32,
 	token string,
 ) (string, *CacheMetadata, error) {
-	// Build a pelican:// URL with directread for the stat call
+	// Build a pelican:// URL routed through the director's origin endpoint
 	dUrl, err := url.Parse(pelicanURL)
 	if err != nil {
 		return "", nil, errors.Wrap(err, "invalid source URL")
 	}
 	dUrl.Scheme = "pelican"
-	q := dUrl.Query()
-	q.Set("directread", "")
-	dUrl.RawQuery = q.Encode()
 
-	statInfo, err := client.DoStat(ctx, dUrl.String(), client.WithToken(token))
+	opts := []client.TransferOption{client.WithToken(token), client.WithCacheEmbeddedClientMode()}
+	if ft := pc.getFedToken(); ft != "" {
+		opts = append(opts, client.WithFedToken(ft))
+	}
+	statInfo, err := client.DoStat(ctx, dUrl.String(), opts...)
 	if err != nil {
 		return "", nil, errors.Wrap(err, "stat failed for range-on-miss")
 	}
@@ -856,7 +953,8 @@ func (pc *PersistentCache) initObjectFromStat(
 	}
 
 	// Initialize disk storage with empty block bitmap
-	meta, err := pc.storage.InitDiskStorage(ctx, instanceHash, statInfo.Size)
+	storageID := pc.eviction.ChooseDiskStorage()
+	meta, err := pc.storage.InitDiskStorage(ctx, instanceHash, statInfo.Size, storageID)
 	if err != nil {
 		return "", nil, errors.Wrap(err, "failed to init disk storage for range-on-miss")
 	}
@@ -1100,14 +1198,21 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 		return errors.Wrap(err, "invalid source URL")
 	}
 
-	// Add directread query parameter to bypass cache (we ARE the cache)
+	// Route the request through the director's origin endpoint so that the
+	// director redirects us to the origin.  The client's cache mode causes
+	// queryDirector to use the /api/v1.0/director/origin/ prefix, avoiding
+	// the need for the origin to have the DirectReads capability.
 	sourceURL.Scheme = "pelican"
-	q := sourceURL.Query()
-	q.Set("directread", "")
-	sourceURL.RawQuery = q.Encode()
+
+	// Pass the user token and federation token as separate options.
+	// The client sends the user token via Authorization header (which the
+	// director copies to the authz query param on redirect) and the
+	// federation token as access_token query param on the origin URL.
+	userToken := token
+	fedToken := pc.getFedToken()
 
 	// Create per-request transfer client
-	tc, err := pc.te.NewClient(client.WithAcquireToken(false), client.WithCallback(pc.transferCallback))
+	tc, err := pc.te.NewClient(client.WithAcquireToken(false), client.WithCallback(pc.transferCallback), client.WithCacheEmbeddedClientMode())
 	if err != nil {
 		return errors.Wrap(err, "failed to create transfer client")
 	}
@@ -1132,11 +1237,15 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 	// individual context when no clients remain (idle download cleanup).
 	dlCtx, dlCancel := context.WithCancel(pc.downloadCtx)
 	dl.cancelFn = dlCancel
-	tj, err := tc.NewTransferJob(dlCtx, sourceURL, "", false, false,
-		client.WithToken(token),
+	transferOpts := []client.TransferOption{
+		client.WithToken(userToken),
 		client.WithWriter(dw),
 		client.WithMetadataChannel(metadataChan),
-	)
+	}
+	if fedToken != "" {
+		transferOpts = append(transferOpts, client.WithFedToken(fedToken))
+	}
+	tj, err := tc.NewTransferJob(dlCtx, sourceURL, "", false, false, transferOpts...)
 	if err != nil {
 		return errors.Wrap(err, "failed to create transfer job")
 	}
@@ -1272,7 +1381,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 		}
 
 		// Make storage decision based on size
-		if metadata.Size < InlineThreshold {
+		if metadata.Size < int64(pc.storage.InlineMaxBytes()) {
 			// Small file - use inline storage
 			if err := dw.SetInlineMode(ctx, metadata.Size); err != nil {
 				return errors.Wrap(err, "failed to set inline mode")
@@ -1582,7 +1691,8 @@ func (w *decisionWriter) SetDiskMode(ctx context.Context, size int64) error {
 	w.size = size
 
 	// Initialize disk storage
-	meta, err := w.pc.storage.InitDiskStorage(ctx, w.dl.instanceHash, size)
+	storageID := w.pc.eviction.ChooseDiskStorage()
+	meta, err := w.pc.storage.InitDiskStorage(ctx, w.dl.instanceHash, size, storageID)
 	if err != nil {
 		w.setupErr = errors.Wrap(err, "failed to initialize disk storage")
 		w.decided = true
@@ -1613,7 +1723,7 @@ func (w *decisionWriter) SetDiskMode(ctx context.Context, size int64) error {
 		// Usage was already tracked per-block atomically in MarkBlocksDownloaded.
 		// Notify the eviction manager so its in-memory counter stays current and
 		// an eviction check is triggered if needed.
-		w.pc.eviction.NoteUsageIncrease(size)
+		w.pc.eviction.NoteUsageIncrease(storageID, size)
 		if err := w.pc.db.SetLatestETag(w.dl.objectHash, w.dl.etag); err != nil {
 			log.Warnf("Failed to update ETag table: %v", err)
 		}
@@ -1701,6 +1811,23 @@ func (w *decisionWriter) Finalize(dl *persistentDownload) error {
 // transferCallback handles transfer progress updates
 func (pc *PersistentCache) transferCallback(path string, downloaded int64, size int64, completed bool) {
 	log.Debugf("Transfer progress: %s - %d/%d (complete: %v)", path, downloaded, size, completed)
+}
+
+// SetFedToken stores the federation token in memory.  It is called by
+// cache.LaunchFedTokManager (via the onTokenUpdate callback) whenever the
+// token is created or refreshed, eliminating the need to read the token
+// back from disk on every origin request.
+func (pc *PersistentCache) SetFedToken(tok string) {
+	pc.fedToken.Store(&tok)
+}
+
+// getFedToken returns the current federation token, or the empty string
+// if no token has been set yet (e.g. during startup or in site-local mode).
+func (pc *PersistentCache) getFedToken() string {
+	if p := pc.fedToken.Load(); p != nil {
+		return *p
+	}
+	return ""
 }
 
 // normalizePath converts a path to a full pelican URL
@@ -1839,9 +1966,7 @@ func (pc *PersistentCache) GetStats() PersistentCacheStats {
 
 	return PersistentCacheStats{
 		TotalUsage:       evictStats.TotalUsage,
-		MaxSize:          evictStats.MaxSize,
-		HighWater:        evictStats.HighWater,
-		LowWater:         evictStats.LowWater,
+		DirStats:         evictStats.DirStats,
 		NamespaceUsage:   nsUsage,
 		ConsistencyStats: consistStats,
 	}
@@ -1850,9 +1975,7 @@ func (pc *PersistentCache) GetStats() PersistentCacheStats {
 // PersistentCacheStats holds cache statistics
 type PersistentCacheStats struct {
 	TotalUsage       uint64
-	MaxSize          uint64
-	HighWater        uint64
-	LowWater         uint64
+	DirStats         map[uint8]DirEvictionStats
 	NamespaceUsage   map[string]int64
 	ConsistencyStats ConsistencyStats
 }

@@ -295,7 +295,7 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Cache-Control", result.Meta.ResponseCacheControl())
 			if !result.Meta.Completed.IsZero() {
 				age := int(time.Since(result.Meta.Completed).Seconds())
-				if age > 0 {
+				if age >= 0 {
 					w.Header().Set("Age", strconv.Itoa(age))
 				}
 			}
@@ -349,7 +349,7 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		// Set Age header (time since object was cached)
 		if !meta.Completed.IsZero() {
 			age := int(time.Since(meta.Completed).Seconds())
-			if age > 0 {
+			if age >= 0 {
 				w.Header().Set("Age", strconv.Itoa(age))
 			}
 		}
@@ -473,15 +473,11 @@ func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	// Construct the origin URL using the director
+	// Route through the director's origin endpoint so it redirects to the
+	// origin without requiring the DirectReads capability.
 	originURL := *pc.directorURL
-	originURL.Path = objectPath
+	originURL.Path = path.Join("/api/v1.0/director/origin", objectPath)
 	originURL.Scheme = "https"
-	q := originURL.Query()
-	q.Set("directread", "") // Bypass other caches
-	originURL.RawQuery = q.Encode()
-
-	// Create the PROPFIND request to the origin
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -492,10 +488,13 @@ func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	// Copy headers from the original request
+	// Send the user's token to the director via Authorization header.
+	// The federation token is added to the redirect URL (not the
+	// director request) in CheckRedirect below.
 	if bearerToken != "" {
 		proxyReq.Header.Set("Authorization", "Bearer "+bearerToken)
 	}
+	fedToken := pc.getFedToken()
 	if depth := r.Header.Get("Depth"); depth != "" {
 		proxyReq.Header.Set("Depth", depth)
 	}
@@ -503,10 +502,27 @@ func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request,
 		proxyReq.Header.Set("Content-Type", contentType)
 	}
 
-	// Make the request
+	// Make the request.  The director 307-redirects to the origin (a
+	// different host), so Go's default redirect policy strips the
+	// Authorization header.  Use a custom CheckRedirect that preserves it
+	// and adds the federation token as access_token on the origin URL.
 	httpClient := &http.Client{
 		Transport: config.GetTransport(),
 		Timeout:   30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			if auth := via[0].Header.Get("Authorization"); auth != "" {
+				req.Header.Set("Authorization", auth)
+			}
+			if fedToken != "" {
+				q := req.URL.Query()
+				q.Set("access_token", fedToken)
+				req.URL.RawQuery = q.Encode()
+			}
+			return nil
+		},
 	}
 
 	resp, err := httpClient.Do(proxyReq)
@@ -564,13 +580,11 @@ func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, ob
 		return
 	}
 
-	// Construct the origin URL using the director with directread to bypass other caches
+	// Route through the director's origin endpoint so it redirects to the
+	// origin without requiring the DirectReads capability.
 	originURL := *pc.directorURL
-	originURL.Path = objectPath
+	originURL.Path = path.Join("/api/v1.0/director/origin", objectPath)
 	originURL.Scheme = "https"
-	q := originURL.Query()
-	q.Set("directread", "")
-	originURL.RawQuery = q.Encode()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -596,10 +610,13 @@ func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, ob
 		return
 	}
 
-	// Forward relevant headers
+	// Send the user's token to the director via Authorization header.
+	// The federation token is added to the redirect URL (not the
+	// director request) in CheckRedirect below.
 	if bearerToken != "" {
 		proxyReq.Header.Set("Authorization", "Bearer "+bearerToken)
 	}
+	fedToken := pc.getFedToken()
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		proxyReq.Header.Set("Content-Type", ct)
 	}
@@ -613,9 +630,27 @@ func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, ob
 		}
 	}
 
+	// The director 307-redirects to the origin (a different host), so Go's
+	// default redirect policy strips the Authorization header.  Use a
+	// custom CheckRedirect that preserves it and adds the federation
+	// token as access_token on the origin URL.
 	httpClient := &http.Client{
 		Transport: config.GetTransport(),
 		Timeout:   5 * time.Minute,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			if auth := via[0].Header.Get("Authorization"); auth != "" {
+				req.Header.Set("Authorization", auth)
+			}
+			if fedToken != "" {
+				q := req.URL.Query()
+				q.Set("access_token", fedToken)
+				req.URL.RawQuery = q.Encode()
+			}
+			return nil
+		},
 	}
 
 	resp, err := httpClient.Do(proxyReq)

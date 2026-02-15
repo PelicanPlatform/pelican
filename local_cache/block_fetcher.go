@@ -69,6 +69,7 @@ type BlockFetcherV2 struct {
 	instanceHash string
 	originURL    string
 	token        string
+	fedToken     string // Federation token; sent as access_token query param to origins
 	meta         *CacheMetadata
 	tc           *client.TransferClient
 
@@ -132,7 +133,7 @@ type BlockFetcherV2Config struct {
 // sharing Results() channels with other callers.
 func NewBlockFetcherV2(
 	storage *StorageManager,
-	instanceHash, originURL, token string,
+	instanceHash, originURL, token, fedToken string,
 	te *client.TransferEngine,
 	cfg BlockFetcherV2Config,
 ) (*BlockFetcherV2, error) {
@@ -164,7 +165,7 @@ func NewBlockFetcherV2(
 	// Create a dedicated TransferClient so this fetcher's doFetch goroutines
 	// have their own Results() channel and cannot steal results intended for
 	// other callers sharing the same TransferEngine.
-	tc, err := te.NewClient(client.WithAcquireToken(false))
+	tc, err := te.NewClient(client.WithAcquireToken(false), client.WithCacheEmbeddedClientMode())
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create transfer client for block fetcher")
 	}
@@ -174,6 +175,7 @@ func NewBlockFetcherV2(
 		instanceHash:    instanceHash,
 		originURL:       originURL,
 		token:           token,
+		fedToken:        fedToken,
 		meta:            meta,
 		tc:              tc,
 		prefetchTimeout: cfg.PrefetchTimeout,
@@ -461,10 +463,9 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 		return
 	}
 	sourceURL.Scheme = "pelican"
-	// Add directread query parameter to bypass cache (we ARE the cache)
-	q := sourceURL.Query()
-	q.Set("directread", "")
-	sourceURL.RawQuery = q.Encode()
+	// The client's cache mode (set on the transfer client) causes
+	// queryDirector to route through the director's origin endpoint,
+	// so origins that disable direct clients are reachable.
 
 	// Build transfer options with a byte range so we only download the
 	// blocks we actually need instead of the entire object.
@@ -474,6 +475,9 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 	}
 	if bf.token != "" {
 		opts = append(opts, client.WithToken(bf.token))
+	}
+	if bf.fedToken != "" {
+		opts = append(opts, client.WithFedToken(bf.fedToken))
 	}
 
 	tj, err := bf.tc.NewTransferJob(ctx, sourceURL, "", false, false, opts...)
