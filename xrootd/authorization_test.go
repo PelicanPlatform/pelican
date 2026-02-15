@@ -453,7 +453,7 @@ func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
 		// Each of the tests uses the same multi-export Origin config, which has both
 		// public and protected namespaces.
 		{
-			"mulit-export, multi-auth origin with no input authfile",
+			"multi-export, multi-auth origin with no input authfile",
 			map[string]*authLine{},
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
@@ -466,7 +466,7 @@ func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
 			multiExportOrigin,
 		},
 		{
-			"mulit-export, multi-auth origin with non-conflicting input authfile",
+			"multi-export, multi-auth origin with non-conflicting input authfile",
 			map[string]*authLine{
 				"u another": {idType: "u", id: "another", authComponents: map[string]*authPathComponent{
 					"/first/namespace":  {prefix: "/first/namespace", privs: authPrivileges{reads: false, listings: true, subtractive: false}},
@@ -494,7 +494,7 @@ func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
 			multiExportOrigin,
 		},
 		{
-			"mulit-export, multi-auth origin with conflicting input authfile",
+			"multi-export, multi-auth origin with conflicting input authfile",
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
 					"/first/namespace": {prefix: "/first/namespace", privs: authPrivileges{reads: false, listings: true, subtractive: false}},
@@ -515,7 +515,7 @@ func TestPopulateAuthLinesMapForOrigin(t *testing.T) {
 			multiExportOrigin,
 		},
 		{
-			"mulit-export, multi-auth origin with no input authfile where one namespace has no reads",
+			"multi-export, multi-auth origin with no input authfile where one namespace has no reads",
 			map[string]*authLine{},
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
@@ -572,7 +572,7 @@ func TestPopulateAuthLinesMapForCache(t *testing.T) {
 		expectedEntries   map[string]*authLine
 	}{
 		{
-			"mulit-export, multi-auth cache with no input authfile",
+			"multi-export, multi-auth cache with no input authfile",
 			map[string]*authLine{},
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
@@ -584,7 +584,7 @@ func TestPopulateAuthLinesMapForCache(t *testing.T) {
 			},
 		},
 		{
-			"mulit-export, multi-auth cache with non-conflicting input authfile",
+			"multi-export, multi-auth cache with non-conflicting input authfile",
 			map[string]*authLine{
 				"u another": {idType: "u", id: "another", authComponents: map[string]*authPathComponent{
 					"/first/namespace":  {prefix: "/first/namespace", privs: authPrivileges{reads: false, listings: true, subtractive: false}},
@@ -611,7 +611,7 @@ func TestPopulateAuthLinesMapForCache(t *testing.T) {
 			},
 		},
 		{
-			"mulit-export, multi-auth cache with conflicting input authfile",
+			"multi-export, multi-auth cache with conflicting input authfile",
 			map[string]*authLine{
 				"u *": {idType: "u", id: "*", authComponents: map[string]*authPathComponent{
 					"/first/namespace": {prefix: "/first/namespace", privs: authPrivileges{reads: false, listings: true, subtractive: false}},

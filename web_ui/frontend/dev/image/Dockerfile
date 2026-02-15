@@ -10,7 +10,6 @@ RUN apt-get update && apt-get install -y cron
 
 # Update the entrypoint
 COPY ./entrypoint.sh /opt/bin/entrypoint.sh
-RUN chmod +x /opt/bin/entrypoint.sh
 ENTRYPOINT ["/opt/bin/entrypoint.sh"]
 
 # Copy the NGINX configuration file
@@ -18,7 +17,6 @@ COPY ./nginx.conf /etc/nginx/templates/nginx.conf.template
 
 # Copy the login script
 COPY ./login.sh /opt/bin/login.sh
-RUN chmod +x /opt/bin/login.sh
 
 # Copy the crontab file and set up cron job
 COPY ./crontab /etc/cron.d/login_cron
