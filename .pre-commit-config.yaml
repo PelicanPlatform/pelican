@@ -24,7 +24,6 @@ repos:
     hooks:
     -   id: trailing-whitespace
         stages: [commit]
-        exclude: github_scripts/pelican_protocol.patch
     -   id: end-of-file-fixer
         stages: [commit]
     -   id: check-yaml
