@@ -392,6 +392,16 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		if err = launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, serversRequireAdvertisement); err != nil {
 			return
 		}
+		// The first doAdvertise has been called synchronously above. For
+		// persistent cache servers whose initial federation token fetch
+		// failed (because the cache was not yet registered), trigger an
+		// immediate retry now that the director knows about us.
+		if pcs, ok := cacheServer.(*persistentCacheServer); ok && pcs.fedTokRetry != nil {
+			select {
+			case pcs.fedTokRetry <- struct{}{}:
+			default:
+			}
+		}
 	}
 
 	// Launch the broker listener.  Needs the federation information to determine the broker endpoint.

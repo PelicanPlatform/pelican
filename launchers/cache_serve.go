@@ -55,6 +55,9 @@ import (
 type persistentCacheServer struct {
 	*local_cache.PersistentCache
 	*cache.CacheServer
+	// fedTokRetry is signalled after the cache first advertises to the
+	// director so that the federation token manager retries immediately.
+	fedTokRetry chan struct{}
 }
 
 func (pcs *persistentCacheServer) GetServerType() server_structs.ServerType {
@@ -151,10 +154,14 @@ func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp
 	}
 
 	// Now that the PersistentCache exists, start the federation token manager.
+	// The retryNow channel allows the launcher to trigger an immediate
+	// federation token fetch after the cache is first registered and
+	// advertised to the director (at which point CreateFedTok will succeed).
+	fedTokRetry := make(chan struct{}, 1)
 	if !param.Cache_EnableSiteLocalMode.GetBool() {
 		cache.LaunchFedTokManager(ctx, egrp, cacheServer, func(_ *os.File) error {
 			return nil // No XRootD processes to copy tokens to
-		}, pc.SetFedToken)
+		}, pc.SetFedToken, fedTokRetry)
 	}
 
 	// Check if director is enabled to determine handler registration path
@@ -203,6 +210,7 @@ func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp
 	pcServer := &persistentCacheServer{
 		PersistentCache: pc,
 		CacheServer:     cacheServer,
+		fedTokRetry:     fedTokRetry,
 	}
 
 	log.Info("Persistent cache initialization complete")
@@ -281,7 +289,7 @@ func cacheServeWithXRootD(ctx context.Context, engine *gin.Engine, egrp *errgrou
 			// In drop-privileges mode, the token file is chown'ed to the xrootd user
 			// and group by xrdhttp-pelican plugin by passing command "9" to the plugin.
 			return xrootd.FileCopyToXrootdDir(false, 9, f)
-		}, nil)
+		}, nil, nil)
 	}
 
 	concLimit := param.Cache_Concurrency.GetInt()

@@ -288,7 +288,12 @@ func getTickerRate(tok string) time.Duration {
 // onTokenUpdate, if non-nil, is called with the token string every time a
 // new token is obtained.  The persistent cache uses this to keep the
 // token in memory.
-func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server_structs.XRootDServer, copyToXrootdDir server_utils.FedTokCopyToXrootdFunc, onTokenUpdate func(string)) {
+//
+// retryNow, if non-nil, is a channel that triggers an immediate token
+// fetch.  The launcher signals it after the cache is first registered
+// and advertised to the director so the token manager does not have to
+// wait for the next ticker fire.
+func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server_structs.XRootDServer, copyToXrootdDir server_utils.FedTokCopyToXrootdFunc, onTokenUpdate func(string), retryNow <-chan struct{}) {
 	// Do our initial token fetch+set, then turn things over to the ticker
 	tok, err := server_utils.CreateFedTok(ctx, cache)
 	if err != nil {
@@ -318,6 +323,32 @@ func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server
 		onTokenUpdate(tok)
 	}
 
+	// refreshFedTok performs a single fetch-and-set cycle, returning
+	// the new ticker rate and the token string (empty on failure).
+	refreshFedTok := func(currentRate time.Duration) (time.Duration, string) {
+		log.Debugln("Refreshing federation token")
+		newTok, err := server_utils.CreateFedTok(ctx, cache)
+		if err != nil {
+			log.Errorf("Failed to get a federation token: %v", err)
+			return currentRate, ""
+		}
+		log.Traceln("Successfully received new federation token")
+
+		newRate := getTickerRate(newTok)
+
+		if err := server_utils.SetFedTok(ctx, cache, newTok, copyToXrootdDir); err != nil {
+			log.Errorf("Failed to write the federation token: %v", err)
+		} else {
+			log.Traceln("Successfully wrote new federation token to disk")
+		}
+
+		if onTokenUpdate != nil {
+			onTokenUpdate(newTok)
+		}
+
+		return newRate, newTok
+	}
+
 	// TODO: Figure out what to do if the Director starts issuing tokens with a different
 	// lifetime --> we can adjust ticker period dynamically, but what's the sensible thing to do?
 	fedTokTicker := time.NewTicker(tickerRate)
@@ -326,33 +357,16 @@ func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server
 		for {
 			select {
 			case <-fedTokTicker.C:
-				// Time to ask the Director for a new token
-				log.Debugln("Refreshing federation token")
-				tok, err := server_utils.CreateFedTok(ctx, cache)
-				if err != nil {
-					log.Errorf("Failed to get a federation token: %v", err)
-					continue
+				newRate, _ := refreshFedTok(tickerRate)
+				if newRate != tickerRate {
+					fedTokTicker.Reset(newRate)
+					tickerRate = newRate
 				}
-				log.Traceln("Successfully received new federation token")
-
-				// Once again, parse the token, use it to set the next ticker fire
-				// while also building in a circuit breaker to set a min ticker rate
-				newTickerRate := getTickerRate(tok)
-				if newTickerRate != tickerRate {
-					fedTokTicker.Reset(newTickerRate)
-					tickerRate = newTickerRate
-				}
-
-				// Set the token in the cache
-				err = server_utils.SetFedTok(ctx, cache, tok, copyToXrootdDir)
-				if err != nil {
-					log.Errorf("Failed to write the federation token: %v", err)
-				}
-				log.Traceln("Successfully wrote new federation token to disk")
-
-				// Deliver refreshed token to the in-memory consumer.
-				if onTokenUpdate != nil {
-					onTokenUpdate(tok)
+			case <-retryNow:
+				newRate, _ := refreshFedTok(tickerRate)
+				if newRate != tickerRate {
+					fedTokTicker.Reset(newRate)
+					tickerRate = newRate
 				}
 			case <-ctx.Done():
 				return nil

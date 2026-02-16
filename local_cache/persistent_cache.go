@@ -95,7 +95,12 @@ type PersistentCache struct {
 	activeRevalidationsMu sync.Mutex
 
 	// Federation token set by LaunchFedTokManager via SetFedToken.
-	fedToken atomic.Pointer[string]
+	// fedTokenMu protects the token string. fedTokenReady is closed
+	// the first time a non-empty token is stored, allowing getFedToken()
+	// to block briefly during startup.
+	fedToken      string
+	fedTokenMu    sync.Mutex
+	fedTokenReady chan struct{} // closed on first non-empty SetFedToken
 
 	// Configuration
 	wasConfigured bool
@@ -378,6 +383,7 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		downloadCtx:         downloadCtx,
 		downloadCancel:      downloadCancel,
 	}
+	pc.fedTokenReady = make(chan struct{})
 
 	// Restore persisted namespace mappings so that LRU keys and usage
 	// counters from prior runs remain valid.
@@ -1818,16 +1824,44 @@ func (pc *PersistentCache) transferCallback(path string, downloaded int64, size 
 // token is created or refreshed, eliminating the need to read the token
 // back from disk on every origin request.
 func (pc *PersistentCache) SetFedToken(tok string) {
-	pc.fedToken.Store(&tok)
+	pc.fedTokenMu.Lock()
+	first := pc.fedToken == "" && tok != ""
+	pc.fedToken = tok
+	pc.fedTokenMu.Unlock()
+
+	// Signal any goroutine blocked in getFedToken().
+	if first {
+		close(pc.fedTokenReady)
+	}
 }
 
-// getFedToken returns the current federation token, or the empty string
-// if no token has been set yet (e.g. during startup or in site-local mode).
+// getFedToken returns the current federation token.  If no token has
+// been set yet it blocks for up to 2 seconds waiting for SetFedToken to
+// be called (which happens when the federation token manager
+// successfully fetches its first token).  Returns the empty string if
+// the wait times out (e.g. site-local mode where no token is expected).
 func (pc *PersistentCache) getFedToken() string {
-	if p := pc.fedToken.Load(); p != nil {
-		return *p
+	pc.fedTokenMu.Lock()
+	tok := pc.fedToken
+	pc.fedTokenMu.Unlock()
+	if tok != "" {
+		log.Tracef("getFedToken: returning cached token (len=%d)", len(tok))
+		return tok
 	}
-	return ""
+
+	// No token yet — wait briefly for the first successful fetch.
+	log.Debugf("getFedToken: no token available, waiting up to 2s")
+	select {
+	case <-pc.fedTokenReady:
+		log.Debugf("getFedToken: token became available via channel")
+	case <-time.After(2 * time.Second):
+		log.Debugf("getFedToken: timed out waiting for token")
+	}
+
+	pc.fedTokenMu.Lock()
+	tok = pc.fedToken
+	pc.fedTokenMu.Unlock()
+	return tok
 }
 
 // normalizePath converts a path to a full pelican URL

@@ -728,6 +728,22 @@ func GetServerIssuerURL() (issuerUrl string, err error) {
 		return issuerUrl, nil
 	}
 
+	// When both the origin and director run in the same process, the
+	// origin's issuer URL must differ from the federation/director issuer
+	// URL.  Otherwise, tokens minted by the origin have the same issuer
+	// as federation tokens minted by the director and the origin cannot
+	// distinguish them.  Default to a sub-path of the web URL so that
+	// the OIDC discovery documents are served at distinct paths.
+	if IsServerEnabled(server_structs.OriginType) && IsServerEnabled(server_structs.DirectorType) {
+		issuerUrl, err = url.JoinPath(param.Server_ExternalWebUrl.GetString(), "/api/v1.0/origin")
+		if err != nil {
+			return "", errors.Wrapf(err, "failed to construct co-located origin issuer URL from %q",
+				param.Server_ExternalWebUrl.GetString())
+		}
+		log.Debugf("Populating server's issuer URL as %q (origin co-located with director)", issuerUrl)
+		return issuerUrl, nil
+	}
+
 	// Finally, fall back to the external web URL
 	issuerUrl = param.Server_ExternalWebUrl.GetString()
 	if _, err := url.Parse(issuerUrl); err != nil {

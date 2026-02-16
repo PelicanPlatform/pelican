@@ -224,9 +224,9 @@ func authMiddleware() gin.HandlerFunc {
 		}
 
 		disableDirectClients := param.Origin_DisableDirectClients.GetBool()
-		var fedDiscoveryURL string
 
 		// If DisableDirectClients is enabled, validate federation token presence
+		var fedIssuers map[string]bool
 		if disableDirectClients {
 			fedInfo, err := config.GetFederation(c.Request.Context())
 			if err != nil {
@@ -234,28 +234,44 @@ func authMiddleware() gin.HandlerFunc {
 				c.AbortWithStatus(http.StatusInternalServerError)
 				return
 			}
-			fedDiscoveryURL = fedInfo.DiscoveryEndpoint
-			if fedDiscoveryURL == "" {
-				log.Error("DisableDirectClients enabled but federation discovery URL not configured")
+			fedIssuers = make(map[string]bool)
+			if fedInfo.DiscoveryEndpoint != "" {
+				fedIssuers[fedInfo.DiscoveryEndpoint] = true
+			}
+			// Also accept DirectorEndpoint because the director may create
+			// federation tokens before the canonical discovery URL has been
+			// established.  This is safe because the origin's own issuer URL
+			// is now a distinct sub-path when co-located with the director.
+			if fedInfo.DirectorEndpoint != "" {
+				fedIssuers[fedInfo.DirectorEndpoint] = true
+			}
+			if len(fedIssuers) == 0 {
+				log.Error("DisableDirectClients enabled but no federation issuer URLs configured")
 				c.AbortWithStatus(http.StatusInternalServerError)
 				return
 			}
 		}
 
-		// Try each token and collect authorization results
+		// Try each token and collect authorization results.
+		// When DisableDirectClients is enabled, we need both a user token
+		// (authorizedContext) and a federation token (federationCtx).  The
+		// federation token's issuer matches a known federation URL; any
+		// other valid token is treated as the user token.
 		var authorizedContext context.Context
 		var federationCtx context.Context
 
 		for _, tok := range tokens {
 			ctx, authorized := ac.authorizeWithContext(c.Request.Context(), action, resource, tok)
 			if authorized {
-				// Check if this token is from the federation issuer (for DisableDirectClients tracking)
-				if disableDirectClients && fedDiscoveryURL != "" {
+				isFedToken := false
+				if disableDirectClients && len(fedIssuers) > 0 {
 					issuer, ok := ctx.Value(issuerContextKey{}).(string)
-					if ok && issuer == fedDiscoveryURL {
+					if ok && fedIssuers[issuer] {
 						federationCtx = ctx
+						isFedToken = true
 					}
-				} else {
+				}
+				if !isFedToken {
 					authorizedContext = ctx
 				}
 				if authorizedContext != nil && (!disableDirectClients || federationCtx != nil) {

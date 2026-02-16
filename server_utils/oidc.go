@@ -88,7 +88,16 @@ func createOidcConfigExporter(isDirector bool) func(ctx *gin.Context) {
 				issuerStr = issuerUrl.String()
 			}
 		} else {
-			issuerStr = param.Server_ExternalWebUrl.GetString()
+			var issErr error
+			issuerStr, issErr = config.GetServerIssuerURL()
+			if issErr != nil {
+				log.Errorf("Bad server configuration: failed to determine issuer URL: %v", issErr)
+				ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "Bad server configuration: cannot determine issuer URL",
+				})
+				return
+			}
 		}
 		jwskUrl, err := url.JoinPath(issuerStr, jwksPath)
 		if err != nil {
