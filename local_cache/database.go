@@ -864,37 +864,6 @@ func (cdb *CacheDB) UpdateLRU(instanceHash string, debounceTime time.Duration) e
 	})
 }
 
-// DeleteLRU removes the LRU entry for a file using metadata for direct key lookup
-func (cdb *CacheDB) DeleteLRU(instanceHash string) error {
-	return cdb.db.Update(func(txn *badger.Txn) error {
-		// Get metadata to find prefixID and last access time
-		item, err := txn.Get(MetaKey(instanceHash))
-		if err != nil {
-			if errors.Is(err, badger.ErrKeyNotFound) {
-				return nil // No metadata, nothing to delete
-			}
-			return errors.Wrap(err, "failed to get metadata for LRU delete")
-		}
-
-		var meta CacheMetadata
-		err = item.Value(func(val []byte) error {
-			return msgpack.Unmarshal(val, &meta)
-		})
-		if err != nil {
-			return errors.Wrap(err, "failed to unmarshal metadata")
-		}
-
-		// Delete LRU key if we have a last access time
-		if !meta.LastAccessTime.IsZero() {
-			lruKey := LRUKey(meta.StorageID, meta.NamespaceID, meta.LastAccessTime, instanceHash)
-			if err := txn.Delete(lruKey); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
-				return errors.Wrap(err, "failed to delete LRU key")
-			}
-		}
-		return nil
-	})
-}
-
 // --- Usage Counter Operations ---
 
 // GetUsage retrieves the total bytes used by a storage+namespace combination
@@ -1220,9 +1189,6 @@ func (cdb *CacheDB) EvictByLRU(storageID uint8, namespaceID uint32, maxObjects i
 
 	return evicted, err
 }
-
-// NOTE: ListAllObjects was removed - use ScanMetadata or ScanMetadataFrom instead
-// to iterate over objects without loading all into memory.
 
 // --- Transaction Support ---
 

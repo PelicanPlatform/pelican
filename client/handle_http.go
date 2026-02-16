@@ -4841,22 +4841,36 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 	auth := &bearerAuth{token: authToken}
 
 	for _, statUrl := range statHosts {
-		// Build the gowebdav client root from host:port only; the
-		// object path is passed separately to client.Stat().
-		clientRoot := statUrl
-		clientRoot.Path = ""
-		clientRoot.RawQuery = ""
-		clientRoot.Fragment = ""
-		client := gowebdav.NewAuthClient(clientRoot.String(), auth)
+		isCollections := collectionsUrl != nil && statUrl.Host == collectionsUrl.Host && statUrl.Path == collectionsUrl.Path
 
-		// Use the path from the statUrl (ObjectServer origin-side
-		// path, or collectionsUrl base path).  Fall back to the
-		// pelican URL path if the statUrl has no path component.
-		propfindPath := statUrl.Path
-		if propfindPath == "" {
-			propfindPath = dest.Path
+		var client *gowebdav.Client
+		var propfindPath string
+		if isCollections {
+			// For collections URLs the path component is a base prefix
+			// (e.g. "/api/v1.0/origin/data"); the federation object path
+			// (dest.Path, e.g. "/test/") must be appended.  Use the full
+			// collectionsUrl (including its path) as the WebDAV client
+			// root and pass dest.Path to Stat(), matching how listHttp
+			// and walkDirDownload use the collections URL.
+			client = gowebdav.NewAuthClient(statUrl.String(), auth)
+			propfindPath = path.Clean(dest.Path)
+		} else {
+			// ObjectServer URLs already contain the full path to the
+			// object (e.g. "/test/" or "/api/v1.0/origin/data/test/").
+			// Strip the path to form the client root and use the URL
+			// path as the PROPFIND target.
+			clientRoot := statUrl
+			clientRoot.Path = ""
+			clientRoot.RawQuery = ""
+			clientRoot.Fragment = ""
+			client = gowebdav.NewAuthClient(clientRoot.String(), auth)
+
+			propfindPath = statUrl.Path
+			if propfindPath == "" {
+				propfindPath = dest.Path
+			}
+			propfindPath = path.Clean(propfindPath)
 		}
-		propfindPath = path.Clean(propfindPath)
 
 		destCopy := statUrl
 		destCopy.Path = propfindPath
@@ -4892,10 +4906,16 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 					err = errors.Wrapf(err, "Stat request not allowed for object at endpoint %s", endpoint.String())
 					resultsChan <- statResults{FileInfo{}, err}
 					return
-				} else if gowebdav.IsErrNotFound(err) || gowebdav.IsErrCode(err, http.StatusInternalServerError) {
-					// Treat 404 (not found) and 500 (internal server error) as not found for fallback logic
-					err = errors.Wrapf(ErrObjectNotFound, "object %s not found at the endpoint %s", dest.String(), endpoint.String())
+				} else if gowebdav.IsErrNotFound(err) {
+					err = errors.Wrapf(ErrObjectNotFound, "object %s not found at endpoint %s", dest.String(), endpoint.String())
 					err = error_codes.NewSpecification_FileNotFoundError(err)
+					resultsChan <- statResults{FileInfo{}, err}
+					return
+				} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
+					// 500 is NOT "not found"; report it as a server error so
+					// callers (e.g. uploadObject) can distinguish a genuine
+					// absence from an error.
+					err = errors.Errorf("stat of %s failed at endpoint %s: server returned 500", dest.String(), endpoint.String())
 					resultsChan <- statResults{FileInfo{}, err}
 					return
 				}

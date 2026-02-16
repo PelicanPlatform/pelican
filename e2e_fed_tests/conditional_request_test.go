@@ -571,6 +571,7 @@ func TestOrigin_CacheControlHeader(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
+	require.NoError(t, param.Origin_CacheControl.Set("no-cache, must-revalidate"))
 	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
 
 	// Setup test file
