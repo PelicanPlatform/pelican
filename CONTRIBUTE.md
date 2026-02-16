@@ -46,7 +46,7 @@ Pelican is developed based on the following tech stack:
 
 In addition, Pelican services rely on the following software dependencies:
 
-- [XRootD](https://xrootd.slac.stanford.edu/): Underlying storage management software for Pelican Origin and Caches
+- [XRootD](https://xrootd.org/): Underlying storage management software for Pelican Origin and Caches
 - [Prometheus](https://prometheus.io/): Server observability and monitoring
 - [OA4MP](https://github.com/ncsa/oa4mp): OAuth Server
 

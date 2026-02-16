@@ -1694,8 +1694,8 @@ description: |+
   For example, setting `Cache.DataLocations=["/mnt/cache1", "/mnt/cache2"]` will result in splitting cache data between two mounted drives,
   `/mnt/cache1` and `/mnt/cache2`. As such, these drives should be fast storage devices, such as SSDs.
 
-  For more information, see the [xrootd oss documentation](https://xrootd.slac.stanford.edu/doc/dev56/ofs_config.pdf) for the `oss.space` directive
-  as well as the [xrootd pfc documentation](https://xrootd.slac.stanford.edu/doc/dev56/pss_config.pdf) for the `pfc.spaces` directive.
+  For more information, see the [XRootD oss documentation](https://xrootd.web.cern.ch/doc/dev56/ofs_config.htm) for the `oss.space` directive
+  as well as the [XRootD pfc documentation](https://xrootd.web.cern.ch/doc/dev6/pss_config.htm) for the `pfc.spaces` directive.
 
   If this directory does not already exist, it will be created by Pelican.
 
@@ -1711,8 +1711,8 @@ description: |+
   as they're accessible by the cache service. For example, setting `Cache.MetaLocations=["/mnt/meta1", "/mnt/meta2"]` will result in
   splitting cache metadata between two the mounted drives. As such, these drives should be fast storage devices, such as SSDs.
 
-  For more information, see the [xrootd oss documentation](https://xrootd.slac.stanford.edu/doc/dev56/ofs_config.pdf) for the `oss.space` directive
-  as well as the [xrootd pfc documentation](https://xrootd.slac.stanford.edu/doc/dev56/pss_config.pdf) for the `pfc.spaces` directive.
+  For more information, see the [XRootD oss documentation](https://xrootd.web.cern.ch/doc/dev56/ofs_config.htm) for the `oss.space` directive
+  as well as the [XRootD pfc documentation](https://xrootd.web.cern.ch/doc/dev6/pss_config.htm) for the `pfc.spaces` directive.
 
   If this directory does not already exist, it will be created by Pelican.
 
@@ -3333,7 +3333,7 @@ description: |+
   `Xrootd.ConfigFile` will be used as the continuation of the Pelican generated XRootD configuration, via the `continue` directive.
   Existing configuration values may be overwritten or appended.
 
-  Refer to [Configuration File Continuation](https://xrootd.slac.stanford.edu/doc/dev55/Syntax_config.htm#_Toc520499864)
+  Refer to [Configuration File Continuation](https://xrootd.web.cern.ch/doc/dev55/Syntax_config.htm#_Toc520499864)
   for details
 type: filename
 default: none
