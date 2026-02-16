@@ -31,9 +31,11 @@
 package fed_tests
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -70,11 +72,18 @@ func cacheControlOriginConfig(cacheControl string) string {
 `, ccLine)
 }
 
-// writeTestFile writes a small deterministic file into the origin's
-// storage prefix and returns its content.
+// writeTestFile writes a deterministic file into the origin's
+// storage prefix and returns its content.  The bytes depend on both the
+// file size and its name, so two same-sized files with different names
+// will always have different content.
 func writeTestFile(t *testing.T, ft *fed_test_utils.FedTest, name string, size int) []byte {
 	t.Helper()
 	content := generateTestData(size)
+	// Mix in the filename so same-sized files produce distinct bytes.
+	h := sha256.Sum256([]byte(name))
+	for i := range content {
+		content[i] ^= h[i%len(h)]
+	}
 	storageDir := ft.Exports[0].StoragePrefix
 	filePath := filepath.Join(storageDir, name)
 	require.NoError(t, os.MkdirAll(filepath.Dir(filePath), 0755))
@@ -586,8 +595,14 @@ func TestCacheControl_EvictionUnderPressure(t *testing.T) {
 
 	// Get cache redirect URL using the first file
 	cacheURL0 := waitForCacheRedirectURL(t, ft, "/test/evict_0.bin", token)
-	// Derive base URL from the redirect (strip the file-specific suffix)
-	baseURL := strings.TrimSuffix(cacheURL0, "evict_0.bin")
+	// Derive base URL by parsing the redirect and trimming the filename
+	// from the path (the query string may contain an authz token, so
+	// simple string suffix matching would fail).
+	parsedURL, err := url.Parse(cacheURL0)
+	require.NoError(t, err)
+	parsedURL.Path = strings.TrimSuffix(parsedURL.Path, "evict_0.bin")
+	parsedURL.RawQuery = "" // drop file-specific authz; origin has PublicReads
+	baseURL := parsedURL.String()
 
 	// Fetch all 5 files sequentially (total ~100KB, exceeds 90KB high water)
 	for i := 0; i < 5; i++ {

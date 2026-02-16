@@ -416,9 +416,24 @@ func (rr *RangeReader) repairAndRetry(ctx context.Context, startBlock, endBlock 
 	// Update the shared block state (visible to all readers immediately)
 	rr.blockState.RemoveMany(corrupt)
 
-	// Re-fetch the corrupt blocks (ensureBlocks will see them as missing
-	// in the shared state)
-	if err := rr.ensureBlocks(ctx, startBlock, endBlock); err != nil {
+	// Re-fetch the corrupt blocks.  The corrupt slice may extend beyond the
+	// current read's [startBlock, endBlock] — for example, when the file is
+	// missing, IdentifyCorruptBlocks returns every block in the bitmap.
+	// We must ensure ALL of them are re-fetched now; otherwise the remaining
+	// blocks stay as zeros on the newly pre-allocated file and later Read()
+	// calls will hit AES-GCM decryption failures with the circuit breaker
+	// already tripped.
+	fetchStart := startBlock
+	fetchEnd := endBlock
+	for _, b := range corrupt {
+		if b < fetchStart {
+			fetchStart = b
+		}
+		if b > fetchEnd {
+			fetchEnd = b
+		}
+	}
+	if err := rr.ensureBlocks(ctx, fetchStart, fetchEnd); err != nil {
 		return nil, errors.Wrap(err, "auto-repair: failed to re-fetch corrupt blocks")
 	}
 

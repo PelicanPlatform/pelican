@@ -191,7 +191,10 @@ func (em *EvictionManager) AddUsage(storageID uint8, namespaceID uint32, bytes i
 // be exceeded.  Unlike AddUsage it does NOT write to the persistent
 // database — the caller is responsible for ensuring the DB was already
 // updated (e.g., via MergeBlockStateWithUsage which tracks usage
-// atomically alongside the bitmap merge).
+// atomically alongside the bitmap merge).  The database usage updates
+// handle race conditions where multiple writers may be updating the same
+// blocks simultaneously.  This doesn't - hence the estimated usage is going
+// to be potentially higher than the actual usage.
 //
 // The per-directory atomic counter is the fast path: if the counter
 // is under the high-water mark no database call is made at all.
@@ -594,91 +597,6 @@ func (em *EvictionManager) ChooseDiskStorage() uint8 {
 	table := em.rrTable.Load()
 	idx := em.rrIndex.Add(1)
 	return table[idx%rrTableSize]
-}
-
-// WaitForSpace blocks until there's room for the specified amount
-// Returns an error if context is cancelled
-func (em *EvictionManager) WaitForSpace(ctx context.Context, needed uint64) error {
-	if em.HasSpace(needed) {
-		return nil
-	}
-
-	// Trigger eviction
-	em.TriggerEviction()
-
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			if em.HasSpace(needed) {
-				return nil
-			}
-		}
-	}
-}
-
-// ForceEvict forces eviction of a specific amount of bytes across all directories
-func (em *EvictionManager) ForceEvict(targetBytes uint64) (uint64, error) {
-	em.evictMu.Lock()
-	if em.evicting {
-		em.evictMu.Unlock()
-		return 0, errors.New("eviction already in progress")
-	}
-	em.evicting = true
-	em.evictMu.Unlock()
-
-	defer func() {
-		em.evictMu.Lock()
-		em.evicting = false
-		em.evictMu.Unlock()
-	}()
-
-	evictedTotal := uint64(0)
-	startTime := time.Now()
-
-	dirIDs := make([]uint8, 0, len(em.dirLimits))
-	for id := range em.dirLimits {
-		dirIDs = append(dirIDs, id)
-	}
-
-	for evictedTotal < targetBytes {
-		// Rotate through directories, evicting from the greediest namespace in each
-		progress := false
-		for _, sid := range dirIDs {
-			targetKey, targetUsage, err := em.findGreediestNamespaceInDir(sid)
-			if err != nil || targetUsage <= 0 {
-				continue
-			}
-
-			remaining := int64(targetBytes - evictedTotal)
-			bytes, _, err := em.evictFromNamespace(targetKey.StorageID, targetKey.NamespaceID, 0, remaining)
-			if err != nil {
-				log.Warnf("Error during forced eviction: %v", err)
-				continue
-			}
-
-			evictedTotal += bytes
-			progress = true
-
-			if evictedTotal >= targetBytes {
-				break
-			}
-		}
-
-		if !progress {
-			break
-		}
-
-		if time.Since(startTime) > 60*time.Second {
-			return evictedTotal, errors.New("forced eviction timeout")
-		}
-	}
-
-	return evictedTotal, nil
 }
 
 // ForcePurge forces an immediate purge down to the low water mark

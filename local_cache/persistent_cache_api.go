@@ -956,6 +956,7 @@ func (pc *PersistentCache) RegisterCacheHandlers(engine *gin.Engine, directorEna
 		// Helper to extract discovery host and set up context
 		setupDiscoveryContext := func(c *gin.Context) bool {
 			encodedDiscovery := c.Param("discovery")
+			pathParam := c.Param("path")
 			discoveryHost, err := decodeDiscoveryHost(encodedDiscovery)
 			if err != nil {
 				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid discovery host encoding"})
@@ -964,7 +965,7 @@ func (pc *PersistentCache) RegisterCacheHandlers(engine *gin.Engine, directorEna
 			// Store discovery host in context for use by handlers
 			c.Set("discoveryHost", discoveryHost)
 			// Set the object path (strip the discovery prefix)
-			c.Request.URL.Path = c.Param("path")
+			c.Request.URL.Path = pathParam
 			return true
 		}
 

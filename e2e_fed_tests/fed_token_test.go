@@ -47,7 +47,9 @@ import (
 
 // disableDirectClientsOriginConfig returns a YAML configuration for a
 // POSIXv2 origin that does NOT have DirectReads (incompatible with
-// DisableDirectClients) but does have PublicReads and Listings.
+// DisableDirectClients) but does have PublicReads.
+// Listings is also omitted because the origin validation rejects it
+// when DisableDirectClients is enabled.
 // The Origin.DisableDirectClients flag itself is set via param.Set
 // before calling NewFedTest, because InitializeHandlers validates the
 // combination at startup.
@@ -57,7 +59,7 @@ func disableDirectClientsOriginConfig() string {
   Exports:
     - StoragePrefix: "/"
       FederationPrefix: "/test"
-      Capabilities: ["PublicReads", "Listings"]
+      Capabilities: ["PublicReads"]
 `
 }
 
