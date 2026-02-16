@@ -661,13 +661,14 @@ func (sm *StorageManager) IdentifyCorruptBlocks(instanceHash string, startBlock,
 	objectPath := sm.getObjectPathForDir(meta.StorageID, instanceHash)
 	file, err := os.Open(objectPath)
 	if err != nil {
-		// File missing entirely — all requested blocks are corrupt
-		var corrupt []uint32
-		for b := startBlock; b <= endBlock; b++ {
-			if blockState.Contains(b) {
-				corrupt = append(corrupt, b)
-			}
-		}
+		// File missing entirely — every block the bitmap thinks is present
+		// is corrupt, not just those in the requested [startBlock, endBlock]
+		// range.  Returning only the narrow range would leave the remaining
+		// blocks marked as present in the shared state, so subsequent reads
+		// of those blocks would hit zeros on the newly pre-allocated file
+		// and fail with decryption errors.
+		snapshot := blockState.Clone()
+		corrupt := snapshot.ToArray()
 		return corrupt, nil
 	}
 	defer file.Close()
