@@ -1203,3 +1203,107 @@ func TestPrestageWithAPI(t *testing.T) {
 		t.Logf("Prestage with forced API succeeded")
 	}
 }
+
+// TestTPCPublicRead tests third-party-copy between origins using a public namespace.
+// This verifies that "pelican object copy" can move data from one remote path
+// to another on the same origin via the HTTP COPY verb.
+func TestTPCPublicRead(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	server_utils.ResetTestState()
+
+	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
+
+	for _, export := range fed.Exports {
+		testFileContent := "test file content for TPC"
+		// Drop the testFileContent into the origin directory
+		srcDir := filepath.Join(export.StoragePrefix, "tpc_test")
+		require.NoError(t, os.MkdirAll(srcDir, os.FileMode(0755)))
+		err := os.WriteFile(filepath.Join(srcDir, "source.txt"), []byte(testFileContent), 0644)
+		require.NoError(t, err)
+
+		require.NoError(t, param.Set("Logging.DisableProgressBars", true))
+
+		sourceURL := fmt.Sprintf("pelican://%s:%s%s/tpc_test/source.txt", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+			export.FederationPrefix)
+		destURL := fmt.Sprintf("pelican://%s:%s%s/tpc_test/dest.txt", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+			export.FederationPrefix)
+
+		// Get a token for the write side (destination needs write access)
+		tempToken, tkn := getTempToken(t)
+		defer tempToken.Close()
+		defer os.Remove(tempToken.Name())
+
+		// Perform a third-party-copy from source to dest
+		transferResults, err := client.DoCopy(fed.Ctx, sourceURL, destURL, false,
+			client.WithTokenLocation(tempToken.Name()))
+		require.NoError(t, err)
+		require.Len(t, transferResults, 1)
+		assert.Equal(t, int64(len(testFileContent)), transferResults[0].TransferredBytes)
+
+		// Verify the copied file exists by downloading it
+		localDir := t.TempDir()
+		downloadResults, err := client.DoGet(fed.Ctx, destURL, localDir, false, client.WithToken(tkn))
+		require.NoError(t, err)
+		require.Len(t, downloadResults, 1)
+		assert.Equal(t, int64(len(testFileContent)), downloadResults[0].TransferredBytes)
+
+		// Read the downloaded file and verify content
+		downloadedContent, err := os.ReadFile(filepath.Join(localDir, "dest.txt"))
+		require.NoError(t, err)
+		assert.Equal(t, testFileContent, string(downloadedContent))
+	}
+}
+
+// TestTPCAuth tests third-party-copy between origins with authenticated access.
+func TestTPCAuth(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	server_utils.ResetTestState()
+
+	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
+
+	// Create a token with read+write permissions
+	tempToken, tkn := getTempToken(t)
+	defer tempToken.Close()
+	defer os.Remove(tempToken.Name())
+
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
+
+	for _, export := range fed.Exports {
+		testFileContent := "authenticated TPC test content"
+
+		// First upload a file using DoPut so we have a source
+		tempFile, err := os.CreateTemp(t.TempDir(), "tpc_auth_test")
+		require.NoError(t, err)
+		_, err = tempFile.WriteString(testFileContent)
+		require.NoError(t, err)
+		tempFile.Close()
+
+		uploadURL := fmt.Sprintf("pelican://%s:%s%s/tpc_auth/source.txt", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+			export.FederationPrefix)
+		destURL := fmt.Sprintf("pelican://%s:%s%s/tpc_auth/dest.txt", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+			export.FederationPrefix)
+
+		_, err = client.DoPut(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithToken(tkn))
+		require.NoError(t, err)
+
+		// Now do a TPC from source to dest
+		transferResults, err := client.DoCopy(fed.Ctx, uploadURL, destURL, false,
+			client.WithToken(tkn), client.WithSourceToken(tkn))
+		require.NoError(t, err)
+		require.Len(t, transferResults, 1)
+		assert.Equal(t, int64(len(testFileContent)), transferResults[0].TransferredBytes)
+
+		// Verify the copied file by downloading it
+		localDir := t.TempDir()
+		downloadResults, err := client.DoGet(fed.Ctx, destURL, localDir, false, client.WithToken(tkn))
+		require.NoError(t, err)
+		require.Len(t, downloadResults, 1)
+		assert.Equal(t, int64(len(testFileContent)), downloadResults[0].TransferredBytes)
+
+		downloadedContent, err := os.ReadFile(filepath.Join(localDir, "dest.txt"))
+		require.NoError(t, err)
+		assert.Equal(t, testFileContent, string(downloadedContent))
+	}
+}

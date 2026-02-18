@@ -4053,7 +4053,7 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 		} else {
 			log.Errorf("TPC request was not successful (status code %d): %s", resp.StatusCode, string(respBytes))
 			err = &HttpErrResp{resp.StatusCode, fmt.Sprintf("Request failed (HTTP status %d)",
-				resp.StatusCode)}
+				resp.StatusCode), nil}
 		}
 		return
 	}
