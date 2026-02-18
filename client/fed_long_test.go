@@ -1001,6 +1001,52 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 		}
 	})
 
+	t.Run("testObjectGetNonRecursiveDirPath", func(t *testing.T) {
+		t.Cleanup(test_utils.SetupTestLogging(t))
+
+		oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		require.NoError(t, err)
+		defer func() {
+			_, err := config.SetPreferredPrefix(oldPref)
+			require.NoError(t, err)
+		}()
+
+		for _, export := range fed.Exports {
+			// Create a directory on the origin to download
+			storagePrefix := export.StoragePrefix
+			testDirName := "test-directory-get-nonrecursive"
+			testDir := filepath.Join(storagePrefix, testDirName)
+			err := os.Mkdir(testDir, 0755)
+			require.NoError(t, err)
+			defer os.RemoveAll(testDir)
+
+			// Create a file inside the directory
+			testFilePath := filepath.Join(testDir, "testfile.txt")
+			err = os.WriteFile(testFilePath, []byte("test content"), 0644)
+			require.NoError(t, err)
+
+			// Try to download the directory without recursive flag
+			downloadURL := fmt.Sprintf("pelican://%s%s/%s/%s", discoveryUrl.Host,
+				export.FederationPrefix, "osdf_osdf", testDirName)
+			destPath := filepath.Join(t.TempDir(), "downloaded-dir")
+
+			var getErr error
+			if export.Capabilities.PublicReads {
+				_, getErr = client.DoGet(fed.Ctx, downloadURL, destPath, false)
+			} else {
+				_, getErr = client.DoGet(fed.Ctx, downloadURL, destPath, false, client.WithTokenLocation(tempToken.Name()))
+			}
+
+			require.Error(t, getErr, "Expected an error when passing a dir path to object get command without recursive option set")
+			expectedMessage := "is a directory but recursive is not enabled"
+			require.Contains(t, getErr.Error(), expectedMessage, "Error message did not match expected text")
+
+			// Verify that no file or directory was created at the destination
+			_, statErr := os.Stat(destPath)
+			require.True(t, os.IsNotExist(statErr), "Destination file/directory should not have been created")
+		}
+	})
+
 	t.Cleanup(func() {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)
