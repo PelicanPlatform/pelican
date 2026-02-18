@@ -124,14 +124,27 @@ func syncMain(cmd *cobra.Command, args []string) {
 	sources := args[:len(args)-1]
 	dest := args[len(args)-1]
 	doDownload := false
+	doTPC := false
 	if isPelicanUrl(dest) {
-		for _, src := range sources {
-			if isPelicanUrl(src) {
-				log.Errorf("URL (%s) cannot be a source when synchronizing to a federation URL", src)
-				os.Exit(1)
+		if isPelicanUrl(sources[0]) {
+			// Both source and destination are remote: third-party-copy sync
+			for _, src := range sources {
+				if !isPelicanUrl(src) {
+					log.Errorln("When synchronizing between federation URLs, all sources must be pelican URLs:", src)
+					os.Exit(1)
+				}
 			}
+			log.Debugln("Synchronizing between Pelican data federation endpoints (third-party-copy)")
+			doTPC = true
+		} else {
+			for _, src := range sources {
+				if isPelicanUrl(src) {
+					log.Errorf("URL (%s) cannot be a source when synchronizing to a federation URL from local files", src)
+					os.Exit(1)
+				}
+			}
+			log.Debugln("Synchronizing to a Pelican data federation")
 		}
-		log.Debugln("Synchronizing to a Pelican data federation")
 	} else {
 		if !isPelicanUrl(sources[0]) {
 			log.Errorln("Either the first or last argument must be a pelican:// or osdf://-style URL specifying a remote destination")
@@ -172,7 +185,19 @@ func syncMain(cmd *cobra.Command, args []string) {
 
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 
-	if doDownload {
+	if doTPC {
+		for _, src := range sources {
+			options := []client.TransferOption{
+				client.WithCallback(pb.callback),
+				client.WithTokenLocation(tokenLocation),
+				client.WithCaches(caches...),
+			}
+			if _, err = client.DoCopy(ctx, src, dest, true, options...); err != nil {
+				lastSrc = src
+				break
+			}
+		}
+	} else if doDownload {
 		for _, src := range sources {
 			options := []client.TransferOption{
 				client.WithCallback(pb.callback),

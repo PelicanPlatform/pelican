@@ -19,6 +19,7 @@
 package client
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/md5"
@@ -233,6 +234,8 @@ type (
 		job                *TransferJob
 		callback           TransferCallbackFunc
 		remoteURL          *url.URL
+		srcURL             *url.URL        // When a copy job, this is the source URL to use
+		srcToken           *tokenGenerator // When a copy job, the source token to use
 		localPath          string
 		token              *tokenGenerator
 		xferType           transferType
@@ -270,9 +273,12 @@ type (
 		requireChecksum    bool
 		recursive          bool
 		skipAcquire        bool
-		dryRun             bool       // Enable dry-run mode to display what would be transferred without actually doing it
-		syncLevel          SyncLevel  // Policy for handling synchronization when the destination exists
-		prefObjServers     []*url.URL // holds any client-requested caches/origins
+		dryRun             bool                           // Enable dry-run mode to display what would be transferred without actually doing it
+		srcURL             *url.URL                       // When a copy job, this is the source URL
+		srcDirResp         server_structs.DirectorResponse // When a copy job, this represents the source directory information
+		srcToken           *tokenGenerator                // When a copy job, this represents the source token
+		syncLevel          SyncLevel                      // Policy for handling synchronization when the destination exists
+		prefObjServers     []*url.URL                     // holds any client-requested caches/origins
 		dirResp            server_structs.DirectorResponse
 		directorUrl        string
 		token              *tokenGenerator
@@ -346,23 +352,25 @@ type (
 		setupResults   sync.Once
 	}
 
-	TransferOption                      = option.Interface
-	identTransferOptionCaches           struct{}
-	identTransferOptionCallback         struct{}
-	identTransferOptionTokenLocation    struct{}
-	identTransferOptionAcquireToken     struct{}
-	identTransferOptionToken            struct{}
-	identTransferOptionSynchronize      struct{}
-	identTransferOptionCollectionsUrl   struct{}
-	identTransferOptionChecksums        struct{}
-	identTransferOptionRequireChecksum  struct{}
-	identTransferOptionRecursive        struct{}
-	identTransferOptionDepth            struct{}
-	identTransferOptionWriter           struct{}
-	identTransferOptionReader           struct{}
-	identTransferOptionInPlace          struct{}
-	identTransferOptionDryRun           struct{}
-	identTransferOptionForcePrestageAPI struct{}
+	TransferOption                         = option.Interface
+	identTransferOptionCaches              struct{}
+	identTransferOptionCallback            struct{}
+	identTransferOptionTokenLocation       struct{}
+	identTransferOptionAcquireToken        struct{}
+	identTransferOptionToken               struct{}
+	identTransferOptionSourceTokenLocation struct{}
+	identTransferOptionSourceToken         struct{}
+	identTransferOptionSynchronize         struct{}
+	identTransferOptionCollectionsUrl      struct{}
+	identTransferOptionChecksums           struct{}
+	identTransferOptionRequireChecksum     struct{}
+	identTransferOptionRecursive           struct{}
+	identTransferOptionDepth               struct{}
+	identTransferOptionWriter              struct{}
+	identTransferOptionReader              struct{}
+	identTransferOptionInPlace             struct{}
+	identTransferOptionDryRun              struct{}
+	identTransferOptionForcePrestageAPI    struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -416,6 +424,7 @@ const (
 	transferTypeDownload transferType = iota // Transfer is downloading from the federation
 	transferTypeUpload                       // Transfer is uploading to the federation
 	transferTypePrestage                     // Transfer is staging at a federation cache
+	transferTypeCopy                         // Transfer copies objects between origins
 )
 
 var (
@@ -687,6 +696,16 @@ func WithTokenLocation(location string) TransferOption {
 // The contents of the token will be used as part of the HTTP request
 func WithToken(token string) TransferOption {
 	return option.New(identTransferOptionToken{}, token)
+}
+
+// Create an option to provide a source token for a third-party-copy transfer
+func WithSourceToken(token string) TransferOption {
+	return option.New(identTransferOptionSourceToken{}, token)
+}
+
+// Create an option to provide a source token location for a third-party-copy transfer
+func WithSourceTokenLocation(location string) TransferOption {
+	return option.New(identTransferOptionSourceTokenLocation{}, location)
 }
 
 // Create an option to specify the checksums to request for a given
@@ -1369,6 +1388,141 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 	return
 }
 
+// Create a new third-party copy job for the client.
+//
+// This creates a transfer that uses the HTTP COPY verb to instruct the
+// destination server to pull data directly from the source, without the
+// client acting as an intermediary.
+//
+// The returned object can be further customized as desired.
+// This function does not "submit" the job for execution.
+func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *url.URL, options ...TransferOption) (tj *TransferJob, err error) {
+
+	id, err := uuid.NewV7()
+	if err != nil {
+		return
+	}
+
+	destPUrl, err := ParseRemoteAsPUrl(ctx, dest.String())
+	if err != nil {
+		return
+	}
+
+	project, _ := searchJobAd(attrProjectName)
+	copyDestUrl := *destPUrl
+	tj = &TransferJob{
+		prefObjServers: tc.prefObjServers,
+		remoteURL:      &copyDestUrl,
+		callback:       tc.callback,
+		skipAcquire:    tc.skipAcquire,
+		syncLevel:      tc.syncLevel,
+		xferType:       transferTypeCopy,
+		uuid:           id,
+		project:        project,
+		token:          NewTokenGenerator(&copyDestUrl, nil, config.TokenSharedWrite, !tc.skipAcquire),
+	}
+	tj.srcURL = src
+	tj.srcToken = NewTokenGenerator(&copyDestUrl, nil, config.TokenSharedRead, !tc.skipAcquire)
+	if tc.token != "" {
+		tj.token.SetToken(tc.token)
+		tj.srcToken.SetToken(tc.token)
+	}
+	if tc.tokenLocation != "" {
+		tj.token.SetTokenLocation(tc.tokenLocation)
+		tj.srcToken.SetTokenLocation(tc.tokenLocation)
+	}
+
+	tj.ctx, tj.cancel = mergeCancel(ctx, tc.ctx)
+
+	for _, option := range options {
+		switch option.Ident() {
+		case identTransferOptionCaches{}:
+			tj.prefObjServers = option.Value().([]*url.URL)
+		case identTransferOptionCallback{}:
+			tj.callback = option.Value().(TransferCallbackFunc)
+		case identTransferOptionTokenLocation{}:
+			tj.token.SetTokenLocation(option.Value().(string))
+		case identTransferOptionAcquireToken{}:
+			tj.token.EnableAcquire = option.Value().(bool)
+		case identTransferOptionToken{}:
+			tj.token.SetToken(option.Value().(string))
+		case identTransferOptionSourceToken{}:
+			tj.srcToken.SetToken(option.Value().(string))
+		case identTransferOptionSourceTokenLocation{}:
+			tj.srcToken.SetTokenLocation(option.Value().(string))
+		case identTransferOptionSynchronize{}:
+			tj.syncLevel = option.Value().(SyncLevel)
+		}
+	}
+
+	// Resolve the destination director information
+	tj.directorUrl = copyDestUrl.FedInfo.DirectorEndpoint
+	dirResp, err := GetDirectorInfoForPath(tj.ctx, &copyDestUrl, http.MethodPut, "")
+	if err != nil {
+		log.Errorln(err)
+		err = errors.Wrapf(err, "failed to get namespace information for destination URL %s", dest.String())
+		return
+	}
+	tj.dirResp = dirResp
+	tj.token.DirResp = &dirResp
+
+	// Acquire token for the destination if needed
+	if dirResp.XPelNsHdr.RequireToken {
+		contents, tErr := tj.token.Get()
+		if tErr != nil || contents == "" {
+			err = errors.Wrap(tErr, "failed to get token for copy destination")
+			return nil, err
+		}
+		if contents != "" {
+			dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyDestUrl, http.MethodPut, contents)
+			if err != nil {
+				log.Errorln(err)
+				err = errors.Wrapf(err, "failed to get namespace information for destination URL %s", dest.String())
+				return nil, err
+			}
+			tj.dirResp = dirResp
+			tj.token.DirResp = &dirResp
+		}
+	}
+
+	// Resolve the source director information
+	srcPUrl, err := ParseRemoteAsPUrl(ctx, src.String())
+	if err != nil {
+		return
+	}
+	srcDirResp, err := GetDirectorInfoForPath(tj.ctx, srcPUrl, http.MethodGet, "")
+	if err != nil {
+		log.Errorln(err)
+		err = errors.Wrapf(err, "failed to get namespace information for source URL %s", src.String())
+		return
+	}
+	tj.srcDirResp = srcDirResp
+	tj.srcToken.DirResp = &srcDirResp
+
+	if srcDirResp.XPelNsHdr.RequireToken {
+		contents, tErr := tj.srcToken.Get()
+		if tErr != nil || contents == "" {
+			err = errors.Wrap(tErr, "failed to get token for copy source")
+			return nil, err
+		}
+		if contents != "" {
+			srcDirResp, err = GetDirectorInfoForPath(tj.ctx, srcPUrl, http.MethodGet, contents)
+			if err != nil {
+				log.Errorln(err)
+				err = errors.Wrapf(err, "failed to get namespace information for source URL %s", src.String())
+				return nil, err
+			}
+			tj.srcDirResp = srcDirResp
+			tj.srcToken.DirResp = &srcDirResp
+		}
+	} else {
+		tj.srcToken = nil
+	}
+
+	log.Debugf("Created new copy job, ID %s client %s, from %s to %s", tj.uuid.String(), tc.id.String(), src.String(), dest.String())
+	return
+}
+
 // Returns the status of the transfer job-to-file(s) lookup
 //
 // ok is true if the lookup has completed.
@@ -1685,6 +1839,12 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 	}
 	remoteUrl := &url.URL{Path: job.job.remoteURL.Path, Scheme: job.job.remoteURL.Scheme, Host: job.job.remoteURL.Host}
 
+	// For copy jobs, also build the source URL
+	var srcUrl *url.URL
+	if job.job.xferType == transferTypeCopy {
+		srcUrl = &url.URL{Path: job.job.srcURL.Path, Scheme: job.job.srcURL.Scheme}
+	}
+
 	var transfers []transferAttemptDetails
 	if job.job.xferType == transferTypeUpload { // Uploads use the redirected endpoint
 		if len(job.job.dirResp.ObjectServers) == 0 {
@@ -1695,6 +1855,26 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			Url:        job.job.dirResp.ObjectServers[0],
 			PackOption: packOption,
 		})
+	} else if job.job.xferType == transferTypeCopy {
+		// For copy, the "attempts" represent the source servers the destination will pull from
+		var sortedSrcServers []*url.URL
+		sortedSrcServers, err = generateSortedObjServers(job.job.srcDirResp, nil)
+		if err != nil {
+			log.Errorln("Failed to get source servers for copy:", err)
+			return
+		}
+		for _, srcServer := range sortedSrcServers {
+			srcServerUrl := *srcServer
+			srcServerUrl.Path = path.Clean(job.job.srcURL.Path)
+			copiedUrl := srcServerUrl
+			transfers = append(transfers, transferAttemptDetails{
+				Url: &copiedUrl,
+			})
+		}
+		if len(transfers) == 0 {
+			err = errors.New("No source servers found for copy")
+			return
+		}
 	} else {
 		var sortedServers []*url.URL
 		sortedServers, err = generateSortedObjServers(job.job.dirResp, job.job.prefObjServers)
@@ -1795,6 +1975,8 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			job:                job.job,
 			engine:             te,
 			remoteURL:          remoteUrl,
+			srcURL:             srcUrl,
+			srcToken:           job.job.srcToken,
 			requestedChecksums: job.job.requestedChecksums,
 			requireChecksum:    job.job.requireChecksum,
 			packOption:         packOption,
@@ -1865,6 +2047,8 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 			var transferResults TransferResults
 			if file.file.xferType == transferTypeUpload {
 				transferResults, err = uploadObject(file.file)
+			} else if file.file.xferType == transferTypeCopy {
+				transferResults, err = copyHTTP(file.file)
 			} else {
 				transferResults, err = downloadObject(file.file)
 			}
@@ -3730,6 +3914,274 @@ Loop:
 	// Note: the top-level `err` (second return value) is only for cases where no
 	// transfers were attempted.  If we got here, it must be nil.
 	return transferResult, nil
+}
+
+// tpcStatus represents a status update from a third-party-copy transfer
+type tpcStatus struct {
+	err     error
+	done    bool
+	xferred uint64
+}
+
+// copyHTTP uses the WebDAV COPY verb to perform a third-party-copy transfer.
+// Only implements the "push" mode where the destination side is the active
+// side performing the transfer.
+func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorln("Panic occurred in HTTP copy code:", r)
+			err = errors.Errorf("Unrecoverable error (panic) occurred in copyHTTP: %v", r)
+		}
+	}()
+	if len(xfer.attempts) == 0 {
+		log.Errorln("No source URLs specified; cannot copy")
+		err = errors.New("No source URLs specified")
+		return
+	}
+	if len(xfer.job.dirResp.ObjectServers) == 0 {
+		log.Errorln("No destination servers specified; cannot copy")
+		err = errors.New("No destination servers specified")
+		return
+	}
+	resolvedDestUrl := *xfer.job.dirResp.ObjectServers[0]
+	resolvedDestUrl.Path = path.Clean(xfer.remoteURL.Path)
+	resolvedDestUrl.RawQuery = xfer.remoteURL.RawQuery
+
+	log.Debugln("Copying object from", xfer.attempts[0].Url.String(), "to", resolvedDestUrl.String())
+	transferResults = newTransferResults(xfer.job)
+
+	lastUpdate := time.Now()
+	if xfer.callback != nil {
+		xfer.callback(xfer.remoteURL.String(), 0, 0, false)
+	}
+	downloaded := int64(-1)
+	totalSize := int64(-1)
+	transferStartTime := time.Now()
+	transferResults.TransferStartTime = transferStartTime
+	attempt := TransferResult{
+		CacheAge: -1,
+		Number:   0,
+		Endpoint: xfer.remoteURL.String(),
+	}
+
+	defer func() {
+		endTime := time.Now()
+		attempt.TransferEndTime = endTime
+		attempt.TransferTime = endTime.Sub(transferStartTime)
+		attempt.TransferFileBytes = totalSize
+		transferResults.Attempts = []TransferResult{attempt}
+
+		if xfer.callback != nil {
+			finalSize := int64(0)
+			if totalSize >= 0 {
+				finalSize = totalSize
+			}
+			xfer.callback(xfer.remoteURL.String(), downloaded, finalSize, true)
+		}
+		if xfer.engine != nil {
+			xfer.engine.ewmaCtr.Add(int64(time.Since(lastUpdate)))
+		}
+	}()
+
+	client := http.Client{
+		Transport: config.GetTransport(),
+	}
+
+	ctx, cancel := context.WithCancel(xfer.ctx)
+	defer cancel()
+
+	// HEAD request to get source size
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, xfer.attempts[0].Url.String(), nil)
+	if err != nil {
+		err = errors.Wrapf(err, "Failed to get size of the source object %s", xfer.attempts[0].Url.String())
+		return
+	}
+
+	if xfer.srcToken != nil {
+		srcTkn, tErr := xfer.srcToken.Get()
+		if tErr == nil && srcTkn != "" {
+			req.Header.Set("Authorization", "Bearer "+srcTkn)
+		}
+	}
+	req.Header.Set("User-Agent", getUserAgent(xfer.project))
+	log.Debugln("Starting the HEAD request to the HTTP Third Party Copy source...")
+	resp, err := client.Do(req)
+	if err != nil {
+		err = errors.Wrapf(err, "failed to execute the HEAD request to third-party-copy source %s", xfer.attempts[0].Url.String())
+		log.Errorln(err)
+		return
+	}
+	resp.Body.Close()
+	totalSize = resp.ContentLength
+	if resp.ContentLength < 0 {
+		log.Warningln("Third-party-copy source", xfer.attempts[0].Url.String(), "is of unknown size; download statistics may be incorrect")
+	}
+	attempt.ServerVersion = resp.Header.Get("Server")
+
+	// COPY request to the destination
+	req, err = http.NewRequestWithContext(ctx, "COPY", resolvedDestUrl.String(), nil)
+	if err != nil {
+		err = errors.Wrapf(err, "Unable to create request for third-party-copy to %s", xfer.remoteURL.String())
+		return
+	}
+
+	if tkn, tErr := xfer.token.Get(); tErr == nil && tkn != "" {
+		req.Header.Set("Authorization", "Bearer "+tkn)
+	}
+	if xfer.srcToken != nil {
+		if srcTkn, tErr := xfer.srcToken.Get(); tErr == nil && srcTkn != "" {
+			req.Header.Set("TransferHeaderAuthorization", "Bearer "+srcTkn)
+		}
+	}
+	req.Header.Set("User-Agent", getUserAgent(xfer.project))
+	req.Header.Set("Source", xfer.attempts[0].Url.String())
+
+	log.Debugln("Starting the HTTP Third Party Copy transfer...")
+	resp, err = client.Do(req)
+
+	if err != nil {
+		log.Errorf("Failed to execute the third-party-copy to %s: %s", xfer.remoteURL.String(), err.Error())
+		err = errors.Wrapf(err, "Failed to execute the third-party-copy to %s", xfer.remoteURL.String())
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		var respBytes []byte
+		respBytes, err = io.ReadAll(resp.Body)
+		if err != nil {
+			log.Errorf("TPC request was not successful (status code %d); when reading the error message, a further issue occurred: %s", resp.StatusCode, err.Error())
+		} else {
+			log.Errorf("TPC request was not successful (status code %d): %s", resp.StatusCode, string(respBytes))
+			err = &HttpErrResp{resp.StatusCode, fmt.Sprintf("Request failed (HTTP status %d)",
+				resp.StatusCode)}
+		}
+		return
+	}
+
+	serverMessages := make(chan tpcStatus)
+
+	xfer.engine.egrp.Go(func() error { return monitorTPC(serverMessages, resp.Body) })
+
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	gotFirstByte := false
+MessageHandler:
+	for {
+		select {
+		case msg, ok := <-serverMessages:
+			if !ok {
+				break MessageHandler
+			}
+			if msg.err != nil || msg.done {
+				err = msg.err
+				break MessageHandler
+			}
+			downloaded = int64(msg.xferred)
+			if !gotFirstByte && downloaded > 0 {
+				gotFirstByte = true
+				attempt.TimeToFirstByte = time.Since(transferStartTime)
+			}
+		case <-ticker.C:
+			if totalSize < downloaded {
+				totalSize = downloaded
+				attempt.TransferFileBytes = totalSize
+			}
+			if xfer.callback != nil {
+				log.Infof("Transfer %s->%s has downloaded %d bytes", xfer.attempts[0].Url.String(), xfer.remoteURL.String(), downloaded)
+				xfer.callback(xfer.remoteURL.String(), downloaded, totalSize, false)
+			}
+		case <-ctx.Done():
+			err = ctx.Err()
+			break MessageHandler
+		}
+	}
+
+	if err == nil && totalSize >= 0 {
+		transferResults.TransferredBytes = totalSize
+	}
+
+	return
+}
+
+// monitorTPC reads periodic updates from the HTTP TPC response body,
+// parses performance markers, and writes them to the channel.
+//
+// This is guaranteed to close the channel before exiting.
+func monitorTPC(messages chan tpcStatus, body io.Reader) error {
+	defer close(messages)
+	scanner := bufio.NewScanner(body)
+	perfMarker := false
+	stripes := make(map[int]uint64)
+	xferred := uint64(0)
+	curStripe := 0
+	curStripeBytes := uint64(0)
+	var err error
+Listener:
+	for scanner.Scan() {
+		text := scanner.Text()
+		if text == "Perf Marker" {
+			perfMarker = true
+		} else if text == "End" {
+			if !perfMarker {
+				log.Warning("Client received an end-of-performance marker but no beginning")
+			}
+			stripes[curStripe] = curStripeBytes
+			perfMarker = false
+			sum := uint64(0)
+			for _, val := range stripes {
+				sum += val
+			}
+			messages <- tpcStatus{
+				xferred: sum,
+			}
+			xferred = sum
+		} else { // All other messages have the format "key: value"
+			info := strings.SplitN(text, ":", 2)
+			if len(info) != 2 {
+				log.Warningln("Invalid line in the TPC update:", text)
+				continue
+			}
+			key := strings.TrimSpace(info[0])
+			value := strings.TrimSpace(info[1])
+			switch key {
+			case "failure":
+				err = errors.Errorf("TPC copy failed: %s", value)
+				break Listener
+			case "success":
+				break Listener
+			case "Stripe Index":
+				idx, pErr := strconv.Atoi(value)
+				if pErr == nil {
+					curStripe = idx
+				} else {
+					log.Warningf("Invalid integer in performance marker's 'Stripe Index': %s (%s)", pErr.Error(), value)
+				}
+			case "Stripe Bytes Transferred":
+				bytes, pErr := strconv.Atoi(value)
+				if pErr == nil {
+					curStripeBytes = uint64(bytes)
+				} else {
+					log.Warningf("Invalid integer in performance marker's 'Stripe Bytes Transferred': %s (%s)", pErr.Error(), value)
+				}
+			case "Total Stripe Count":
+				// Ignored
+			case "RemoteConnections":
+				// Ignored
+			default:
+				log.Debugln("Received performance marker with unknown key:", key)
+			}
+		}
+	}
+	if err == nil {
+		err = scanner.Err()
+	}
+	messages <- tpcStatus{
+		err:     err,
+		done:    true,
+		xferred: xferred,
+	}
+	return nil
 }
 
 // Actually perform the HTTP PUT request to the server.
