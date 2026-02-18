@@ -679,6 +679,16 @@ type: stringSlice
 default: none
 components: ["client"]
 ---
+name: Client.CredentialFile
+description: |+
+  Override the default path to the client credential file used for token generation.
+  When set, the client will use this file instead of the default credential file location.
+  This is useful for non-interactive contexts where the default credential file may be
+  password-protected and prompts would fail.
+type: filename
+default: none
+components: ["client"]
+---
 ############################
 #  ClientAgent-level Configs #
 ############################
