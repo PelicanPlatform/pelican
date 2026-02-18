@@ -51,6 +51,7 @@ the client should fallback to discovered caches if all preferred caches fail.`)
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
 	flagSet.Bool("inplace", false, "Write files directly to destination (default: use temporary files)")
 	flagSet.Bool("dry-run", false, "Show what would be synchronized without actually modifying the destination")
+	flagSet.Bool("direct", false, "Read directly from an origin, bypassing any caches (same as '?directread' query)")
 	objectCmd.AddCommand(syncCmd)
 }
 
@@ -160,6 +161,34 @@ func syncMain(cmd *cobra.Command, args []string) {
 		doDownload = true
 	}
 
+	// Handle --direct flag by appending the directread query parameter to each remote source URL
+	directRead, _ := cmd.Flags().GetBool("direct")
+	if directRead {
+		if doDownload || doTPC {
+			for i, src := range sources {
+				// Check for conflicting prefercached parameter
+				u, pErr := url.Parse(src)
+				if pErr != nil {
+					log.Errorln("Failed to parse URL:", pErr)
+					os.Exit(1)
+				}
+				if u.Query().Has("prefercached") {
+					log.Errorln("Cannot use --direct flag with URLs that have '?prefercached' query parameter")
+					os.Exit(1)
+				}
+
+				newSrc, pErr := addQueryParam(src, "directread", "")
+				if pErr != nil {
+					log.Errorln("Failed to process --direct option:", pErr)
+					os.Exit(1)
+				}
+				sources[i] = newSrc
+			}
+		} else {
+			log.Warningln("The --direct flag is ignored for upload syncs (local to remote)")
+		}
+	}
+
 	log.Debugln("Sources:", sources)
 	log.Debugln("Destination:", dest)
 
@@ -190,6 +219,7 @@ func syncMain(cmd *cobra.Command, args []string) {
 			options := []client.TransferOption{
 				client.WithCallback(pb.callback),
 				client.WithTokenLocation(tokenLocation),
+				client.WithSynchronize(client.SyncSize),
 				client.WithCaches(caches...),
 			}
 			if _, err = client.DoCopy(ctx, src, dest, true, options...); err != nil {

@@ -1396,7 +1396,7 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 //
 // The returned object can be further customized as desired.
 // This function does not "submit" the job for execution.
-func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *url.URL, options ...TransferOption) (tj *TransferJob, err error) {
+func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *url.URL, recursive bool, options ...TransferOption) (tj *TransferJob, err error) {
 
 	id, err := uuid.NewV7()
 	if err != nil {
@@ -1413,11 +1413,20 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 		return
 	}
 
+	// Check for recursive query parameter in source or destination URLs
+	if _, exists := srcPUrl.Query()[pelican_url.QueryRecursive]; exists {
+		recursive = true
+	}
+	if _, exists := destPUrl.Query()[pelican_url.QueryRecursive]; exists {
+		recursive = true
+	}
+
 	project, _ := searchJobAd(attrProjectName)
 	copyDestUrl := *destPUrl
 	copySrcUrl := *srcPUrl
 	tj = &TransferJob{
 		prefObjServers: tc.prefObjServers,
+		recursive:      recursive,
 		remoteURL:      &copyDestUrl,
 		callback:       tc.callback,
 		skipAcquire:    tc.skipAcquire,
@@ -1941,6 +1950,23 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 
 			if statInfo.IsCollection {
 				return te.walkDirDownload(job, transfers, te.files, remoteUrl)
+			}
+		} else if job.job.xferType == transferTypeCopy {
+			// For copy, stat the SOURCE to see if it's a collection.
+			// If it is, walk the source directory listing and emit individual TPC copy jobs.
+			srcUrl := &url.URL{Path: job.job.srcURL.Path, Scheme: job.job.srcURL.Scheme, Host: job.job.srcURL.Host}
+			var srcPelicanUrl *pelican_url.PelicanURL
+			srcPelicanUrl, err = pelican_url.Parse(srcUrl.String(), nil, nil)
+			if err != nil {
+				return errors.Wrap(err, "failed to parse source URL for recursive copy")
+			}
+			var statInfo FileInfo
+			if statInfo, err = statHttp(srcPelicanUrl, job.job.srcDirResp, job.job.srcToken); err != nil {
+				return errors.Wrap(err, "failed to stat source path for recursive copy")
+			}
+
+			if statInfo.IsCollection {
+				return te.walkDirCopy(job, transfers, te.files, srcUrl)
 			}
 		}
 		log.Debugln("Remote path is not a collection; proceeding with single file transfer")
@@ -4311,6 +4337,37 @@ func skipUpload(job *TransferJob, localPath string, remoteUrl *pelican_url.Pelic
 	return false
 }
 
+// Depending on the synchronization policy, decide if a TPC copy should be skipped.
+// This stats the destination remote path using the destination's collections URL
+// to check if the object already exists.
+// sourceInfo is the fs.FileInfo from the source WebDAV listing.
+// destCollClient is a WebDAV client pointed at the destination's collections URL.
+func skipCopy(syncLevel SyncLevel, sourceInfo fs.FileInfo, destPath string, destCollClient *gowebdav.Client) bool {
+	if syncLevel == SyncNone {
+		return false
+	}
+
+	// Stat the destination to see if it already exists
+	var destInfo fs.FileInfo
+	err := retryWebDavOperation("Stat", func() error {
+		var statErr error
+		destInfo, statErr = destCollClient.Stat(destPath)
+		return statErr
+	})
+	if err != nil {
+		// If stat fails (e.g., 404), the destination doesn't exist; don't skip
+		return false
+	}
+
+	switch syncLevel {
+	case SyncExist:
+		return true
+	case SyncSize:
+		return sourceInfo.Size() == destInfo.Size()
+	}
+	return false
+}
+
 // Walk a remote collection in a WebDAV server, emitting the files discovered
 func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, url *url.URL) error {
 	// Create the client to walk the filesystem
@@ -4496,6 +4553,159 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 				job.job.totalXfer += 1
 			}
 		}
+	}
+	return nil
+}
+
+// walkDirCopy walks the remote source directory and emits individual TPC copy jobs
+// for each file found. This is used for recursive third-party-copy operations.
+func (te *TransferEngine) walkDirCopy(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, srcUrl *url.URL) error {
+	// Use the source director response to get the collections URL for listing
+	collUrl := job.job.srcDirResp.XPelNsHdr.CollectionsUrl
+	if collUrl == nil {
+		return errors.New("Collections URL not found in source director response for recursive copy")
+	}
+	log.Debugln("Trying source collections URL for TPC walk: ", collUrl.String())
+
+	srcClient := createWebDavClient(collUrl, job.job.srcToken, job.job.project)
+
+	// Create a destination WebDAV client for sync skip checks (stat destination)
+	var destClient *gowebdav.Client
+	if job.job.syncLevel != SyncNone {
+		destCollUrl := job.job.dirResp.XPelNsHdr.CollectionsUrl
+		if destCollUrl == nil {
+			log.Warnln("Destination collections URL not found; sync skip checks will be disabled for TPC copy")
+		} else {
+			log.Debugln("Trying destination collections URL for TPC sync skip: ", destCollUrl.String())
+			destClient = createWebDavClient(destCollUrl, job.job.token, job.job.project)
+		}
+	}
+
+	return te.walkDirCopyHelper(job, transfers, files, srcUrl.Path, srcClient, destClient)
+}
+
+// walkDirCopyHelper recursively walks the remote source directory and emits individual
+// TPC copy transfer files. For each file found, it creates a copy job where the source
+// server URLs point to the individual file and the destination (via dirResp.ObjectServers)
+// is also adjusted to the corresponding destination path.
+// destWebDavClient may be nil if sync skip is disabled; used to stat destination files.
+func (te *TransferEngine) walkDirCopyHelper(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, remotePath string, webdavClient *gowebdav.Client, destWebDavClient *gowebdav.Client) error {
+	// Check for cancellation
+	if err := job.job.ctx.Err(); err != nil {
+		return err
+	}
+
+	var infos []fs.FileInfo
+	err := retryWebDavOperation("ReadDir", func() error {
+		var err error
+		infos, err = webdavClient.ReadDir(remotePath)
+		return err
+	})
+	if err != nil {
+		if gowebdav.IsErrNotFound(err) {
+			return error_codes.NewSpecification_FileNotFoundError(errors.New("404: source object not found"))
+		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
+			// XRootD workaround: a directory listing on a file path returns 500.
+			// Stat the path; if it is a file, emit a single copy job.
+			var info fs.FileInfo
+			err := retryWebDavOperation("Stat", func() error {
+				var err error
+				info, err = webdavClient.Stat(remotePath)
+				return err
+			})
+			if err != nil {
+				return errors.Wrap(err, "failed to stat source path for copy")
+			}
+			if !info.IsDir() {
+				return te.emitCopyJob(job, transfers, files, remotePath, info, destWebDavClient)
+			}
+			return nil
+		}
+		return errors.Wrap(err, "failed to read source collection for copy")
+	}
+
+	for _, info := range infos {
+		newPath := path.Join(remotePath, info.Name())
+		if info.IsDir() {
+			err := te.walkDirCopyHelper(job, transfers, files, newPath, webdavClient, destWebDavClient)
+			if err != nil {
+				return err
+			}
+		} else {
+			if err := te.emitCopyJob(job, transfers, files, newPath, info, destWebDavClient); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// emitCopyJob creates and emits a single TPC copy job for a file at the given source path.
+// It adjusts the source server URLs (in transfers/attempts) and the destination remote URL
+// to point at the individual file, computing the relative path within the source directory.
+// sourceInfo is the fs.FileInfo for the source file, used for sync skip checks.
+// destCollClient may be nil if sync skip is disabled; used to stat the destination file.
+func (te *TransferEngine) emitCopyJob(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, srcFilePath string, sourceInfo fs.FileInfo, destCollClient *gowebdav.Client) error {
+	// Compute relative path of this file within the source directory
+	relPath := strings.TrimPrefix(srcFilePath, job.job.srcURL.Path)
+	relPath = strings.TrimPrefix(relPath, "/")
+
+	// Build the destination path: the base destination + the relative path from source
+	destPath := path.Join(job.job.remoteURL.Path, relPath)
+
+	// Check if this copy should be skipped based on sync policy
+	if destCollClient != nil && skipCopy(job.job.syncLevel, sourceInfo, destPath, destCollClient) {
+		log.Infoln("Skipping copy of object", srcFilePath, "as it already exists at destination", destPath)
+		return nil
+	}
+
+	// Build source server attempts for this individual file.
+	// Each attempt in `transfers` has the source server URL with the source directory path;
+	// we need to replace that path with the individual file path.
+	srcAttempts := make([]transferAttemptDetails, len(transfers))
+	for i, attempt := range transfers {
+		srcAttempts[i] = attempt
+		// The attempt URL path is currently set to the source directory path.
+		// Compute the base by stripping the original source path, then append the file path.
+		attemptPath := attempt.Url.Path
+		if attemptPath != "" && !strings.HasSuffix(attemptPath, "/") {
+			attemptPath += "/"
+		}
+		srcBasePath := job.job.srcURL.Path
+		if srcBasePath != "" && !strings.HasSuffix(srcBasePath, "/") {
+			srcBasePath += "/"
+		}
+		transferBase := strings.TrimSuffix(attemptPath, srcBasePath)
+		fileURL := &url.URL{
+			Scheme:   attempt.Url.Scheme,
+			Host:     attempt.Url.Host,
+			Path:     path.Join(transferBase, srcFilePath),
+			RawQuery: attempt.Url.RawQuery,
+		}
+		srcAttempts[i].Url = fileURL
+		log.Debugln("Constructed source attempt URL for TPC copy:", fileURL.String(), "file:", srcFilePath)
+	}
+
+	job.job.activeXfer.Add(1)
+	select {
+	case <-job.job.ctx.Done():
+		return job.job.ctx.Err()
+	case files <- &clientTransferFile{
+		uuid:  job.uuid,
+		jobId: job.job.uuid,
+		file: &transferFile{
+			ctx:       job.job.ctx,
+			callback:  job.job.callback,
+			job:       job.job,
+			engine:    te,
+			remoteURL: &url.URL{Path: destPath},
+			xferType:  job.job.xferType,
+			token:     job.job.token,
+			srcToken:  job.job.srcToken,
+			attempts:  srcAttempts,
+		},
+	}:
+		job.job.totalXfer += 1
 	}
 	return nil
 }
