@@ -36,22 +36,20 @@ jobs:
         with:
           python-version: "3.14"
 
-      # We embed the contents of web_ui/frontend/out/* into Pelican's
-      # binaries. That directory normally contains the output from `npm
-      # run build`. However, to keep this workflow's run time short, we
-      # simply create a dummy, empty file.
-      #
-      # Without that file, the linters will raise an error.
+      # The Go linters need _something_ to exist under web_ui/frontend/out
+      # because web_ui/ui.go will not otherwise build (it embeds the entire
+      # directory). However, a full web build is unnecessary.
       - name: Generate placeholder files
         run: |
           go generate ./...
 
-      # We run this linter here so that issues are called out inline.
-      # (It's also run by pre-commit, below.)
+      # Run the Go linters here so that issues are called out inline, and
+      # because pre-commit (below) isn't configured to run them within the
+      # CI actions.
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.7.2
+          version: v2.9.0
           args: --config=.golangci.yaml
 
       - name: Run pre-commit

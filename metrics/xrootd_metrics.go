@@ -468,7 +468,7 @@ var (
 	}, []string{"path", "ap", "dn", "role", "org", "proj", "network"})
 
 	TransferReadvSegsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "xrootd_transfer_readv_segments_toal",
+		Name: "xrootd_transfer_readv_segments_total",
 		Help: "Number of segments in readv operations",
 	}, []string{"path", "ap", "dn", "role", "org", "proj", "network"})
 
@@ -866,7 +866,7 @@ var (
 		Buckets: TimeHistogramBuckets,
 	})
 
-	CPUUtilzation = promauto.NewGauge(prometheus.GaugeOpts{
+	CPUUtilization = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "xrootd_cpu_utilization",
 		Help: "CPU utilization of the XRootD server",
 	})
@@ -1964,8 +1964,8 @@ func HandleSummaryPacket(packet []byte) error {
 
 				if wallDelta > 0 {
 					// represents the average of cores utilized during the interval
-					utlizationRatio := cpuDelta / wallDelta
-					CPUUtilzation.Set(utlizationRatio)
+					utilizationRatio := cpuDelta / wallDelta
+					CPUUtilization.Set(utilizationRatio)
 				}
 			}
 

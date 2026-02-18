@@ -1746,7 +1746,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 				return errors.Wrap(err, "unable to parse Origin.HTTPServiceUrl as a URL")
 			}
 		case "globus":
-			pvd, err := GetOIDCProdiver()
+			pvd, err := GetOIDCProvider()
 			if err != nil || pvd != Globus {
 				log.Info("Server OIDC provider is not Globus. Use Origin.GlobusClientIDFile instead")
 			} else {

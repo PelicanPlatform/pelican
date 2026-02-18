@@ -555,7 +555,7 @@ func (ad *ServerBaseAd) Initialize(name string) {
 	ad.StartTime = startTime
 	ad.GenerationID = generationID.Add(1) + 1
 	adLifetime := param.Server_AdLifetime.GetDuration()
-	// Not all unit tests initializae the config, meaning adLifetime
+	// Not all unit tests initialize the config, meaning adLifetime
 	// may be 0.
 	if adLifetime == 0 {
 		adLifetime = 15 * time.Minute
