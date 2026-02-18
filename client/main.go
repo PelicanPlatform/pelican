@@ -792,19 +792,25 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	}
 }
 
+// normalizeURLScheme strips any Condor-style token prefix from a URL scheme
+// (e.g. "mytoken+osdf" → "osdf")
+func normalizeURLScheme(scheme string) string {
+	pieces := strings.Split(scheme, "+")
+	return pieces[len(pieces)-1]
+}
+
 // Start the transfer, whether read or write back. Primarily used for backwards compatibility
 func DoCopy(ctx context.Context, sourceFile string, destination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
-			log.Debugln("Panic captured while attempting to perform transfer (DoStashCPSingle):", r)
+			log.Debugln("Panic captured while attempting to perform transfer:", r)
 			log.Debugln("Panic caused by the following", string(debug.Stack()))
-			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoStashCPSingle: %v", r)
+			ret := fmt.Sprintf("Unrecoverable error (panic) captured: %v", r)
 			err = errors.New(ret)
 		}
 	}()
 
-	var isPut bool
 	// determine which direction we're headed
 	parsedDest, err := url.Parse(destination)
 	if err != nil {
@@ -817,27 +823,87 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 		return nil, err
 	}
 
-	var localPath string
-	var remotePath string
-	if parsedDest.Scheme != "" && (parsedSrc.Scheme == "" || parsedSrc.Scheme == "file") {
-		isPut = true
+	sourceScheme := normalizeURLScheme(parsedSrc.Scheme)
+	destScheme := normalizeURLScheme(parsedDest.Scheme)
+
+	isPut := destScheme == pelican_url.StashScheme || destScheme == pelican_url.OsdfScheme || destScheme == pelican_url.PelicanScheme
+	isGet := sourceScheme == pelican_url.StashScheme || sourceScheme == pelican_url.OsdfScheme || sourceScheme == pelican_url.PelicanScheme
+
+	if isPut && isGet {
+		// Both source and destination are remote: third-party-copy
+		return doThirdPartyCopy(ctx, parsedSrc, parsedDest, recursive, options...)
+	} else if isPut {
 		log.Debugf("Detected a PUT from %s to %s", parsedSrc.Path, parsedDest.String())
-		localPath = parsedSrc.Path
-		remotePath = parsedDest.String()
-	} else if (parsedDest.Scheme == "" || parsedDest.Scheme == "file") && parsedSrc.Scheme != "" {
-		isPut = false
+		return DoPut(ctx, parsedSrc.Path, parsedDest.String(), recursive, options...)
+	} else if isGet {
 		log.Debugf("Detected a GET from %s to %s", parsedSrc.String(), parsedDest.Path)
-		localPath = parsedDest.Path
-		remotePath = parsedSrc.String()
+		return DoGet(ctx, parsedSrc.String(), parsedDest.Path, recursive, options...)
 	} else {
-		return nil, errors.New("unable to determine direction of transfer.  Both source and destination are either local or remote")
+		return nil, errors.New("unable to determine direction of transfer.  Either source or destination must be a pelican/osdf URL")
+	}
+}
+
+// doThirdPartyCopy performs a third-party-copy transfer between two remote URLs
+func doThirdPartyCopy(ctx context.Context, sourceURL *url.URL, destURL *url.URL, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
+
+	te, err := NewTransferEngine(ctx)
+	if err != nil {
+		return nil, err
 	}
 
-	if isPut {
-		return DoPut(ctx, localPath, remotePath, recursive, options...)
-	} else {
-		return DoGet(ctx, remotePath, localPath, recursive, options...)
+	defer func() {
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+	}()
+
+	tc, err := te.NewClient(options...)
+	if err != nil {
+		return
 	}
+
+	tj, err := tc.NewCopyJob(ctx, sourceURL, destURL, options...)
+	if err != nil {
+		return
+	}
+	err = tc.Submit(tj)
+	if err != nil {
+		return
+	}
+
+	transferResults, err = tc.Shutdown()
+	if err == nil {
+		if tj.lookupErr != nil {
+			err = tj.lookupErr
+		}
+	}
+
+	success := true
+	for _, result := range transferResults {
+		if result.Error != nil {
+			success = false
+			if err == nil {
+				err = result.Error
+			}
+		}
+	}
+
+	if !success {
+		var te *TransferErrors
+		if errors.As(err, &te) {
+			if len(te.Unwrap()) == 1 {
+				var tae *TransferAttemptError
+				if errors.As(te.Unwrap()[0], &tae) {
+					return nil, tae
+				}
+				return nil, errors.Wrap(err, "failed third-party-copy")
+			}
+			return nil, te
+		}
+		return nil, errors.Wrap(err, "failed third-party-copy")
+	}
+
+	return transferResults, err
 }
 
 // getIPs will resolve a hostname and return all corresponding IP addresses
