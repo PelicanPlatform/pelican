@@ -284,7 +284,11 @@ func getTickerRate(tok string) time.Duration {
 // LaunchFedTokManager starts the federation token refresh loop. When Server.DropPrivileges
 // is true, the token file is chown'ed to the xrootd user and group by xrdhttp-pelican plugin
 // (via xrootd.FileCopyToXrootdDir(false, 9, file)); pass nil to skip (e.g. in tests).
-func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server_structs.XRootDServer, copyToXrootdDir server_utils.FedTokCopyToXrootdFunc) {
+//
+// onTokenUpdate, if non-nil, is called with the token string every time a
+// new token is obtained.  The persistent cache uses this to keep the
+// token in memory.
+func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server_structs.XRootDServer, copyToXrootdDir server_utils.FedTokCopyToXrootdFunc, onTokenUpdate func(string)) {
 	// Do our initial token fetch+set, then turn things over to the ticker
 	tok, err := server_utils.CreateFedTok(ctx, cache)
 	if err != nil {
@@ -307,6 +311,11 @@ func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server
 	err = server_utils.SetFedTok(ctx, cache, tok, copyToXrootdDir)
 	if err != nil {
 		log.Errorf("Failed to set the federation token: %v", err)
+	}
+
+	// Deliver the initial token to the in-memory consumer (if any).
+	if onTokenUpdate != nil && tok != "" {
+		onTokenUpdate(tok)
 	}
 
 	// TODO: Figure out what to do if the Director starts issuing tokens with a different
@@ -340,6 +349,11 @@ func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server
 					log.Errorf("Failed to write the federation token: %v", err)
 				}
 				log.Traceln("Successfully wrote new federation token to disk")
+
+				// Deliver refreshed token to the in-memory consumer.
+				if onTokenUpdate != nil {
+					onTokenUpdate(tok)
+				}
 			case <-ctx.Done():
 				return nil
 			}

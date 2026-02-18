@@ -8,9 +8,11 @@ go 1.25.0
 require (
 	github.com/JGLTechnologies/gin-rate-limit v1.5.4
 	github.com/PelicanPlatform/classad v0.0.5
+	github.com/RoaringBitmap/roaring v1.9.4
 	github.com/alecthomas/units v0.0.0-20211218093645-b94a6e3cc137
 	github.com/charmbracelet/glamour v0.8.0
 	github.com/cyphar/filepath-securejoin v0.4.1
+	github.com/dgraph-io/badger/v4 v4.9.1
 	github.com/ebitengine/purego v0.8.3
 	github.com/fatih/color v1.18.0
 	github.com/gin-gonic/gin v1.9.1
@@ -44,6 +46,7 @@ require (
 	github.com/tg123/go-htpasswd v1.2.1
 	github.com/thomas-tacquet/gormv2-logrus v1.2.3
 	github.com/vbauerster/mpb/v8 v8.6.1
+	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/youmark/pkcs8 v0.0.0-20201027041543-1326539a0a0a
 	github.com/zsais/go-gin-prometheus v0.1.0
 	go.uber.org/atomic v1.11.0
@@ -60,8 +63,10 @@ require (
 	github.com/alecthomas/chroma/v2 v2.14.0 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
+	github.com/bits-and-blooms/bitset v1.12.0 // indirect
 	github.com/charmbracelet/lipgloss v0.12.1 // indirect
 	github.com/charmbracelet/x/ansi v0.1.4 // indirect
+	github.com/dgraph-io/ristretto/v2 v2.2.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dlclark/regexp2 v1.11.0 // indirect
 	github.com/glebarez/go-sqlite v1.21.2 // indirect
@@ -69,6 +74,7 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
 	github.com/gofrs/flock v0.12.1 // indirect
 	github.com/golang-jwt/jwt/v5 v5.2.2 // indirect
+	github.com/google/flatbuffers v25.2.10+incompatible // indirect
 	github.com/gorilla/context v1.1.1 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
@@ -81,6 +87,7 @@ require (
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
+	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/muesli/termenv v0.15.3-0.20240618155329-98d742f6907a // indirect
 	github.com/oschwald/maxminddb-golang/v2 v2.0.0-beta.9 // indirect
@@ -89,8 +96,10 @@ require (
 	github.com/sethvargo/go-retry v0.2.4 // indirect
 	github.com/sourcegraph/conc v0.3.0 // indirect
 	github.com/streadway/amqp v1.0.0 // indirect
+	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/yuin/goldmark v1.7.13 // indirect
 	github.com/yuin/goldmark-emoji v1.0.3 // indirect
+	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/collector/pdata v1.0.0-rcv0016 // indirect
 	go.opentelemetry.io/collector/semconv v0.87.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
@@ -127,7 +136,7 @@ require (
 	github.com/gin-contrib/sessions v0.0.5
 	github.com/gin-contrib/sse v0.1.0 // indirect
 	github.com/go-logfmt/logfmt v0.6.0 // indirect
-	github.com/go-logr/logr v1.4.2 // indirect
+	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/analysis v0.21.4 // indirect
 	github.com/go-openapi/errors v0.20.4 // indirect
@@ -152,7 +161,7 @@ require (
 	github.com/jpillora/backoff v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/julienschmidt/httprouter v1.3.0 // indirect
-	github.com/klauspost/compress v1.17.2 // indirect
+	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.5 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/leodido/go-urn v1.2.4 // indirect
@@ -189,16 +198,16 @@ require (
 	github.com/ugorji/go/codec v1.2.11 // indirect
 	go.mongodb.org/mongo-driver v1.12.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.54.0 // indirect
-	go.opentelemetry.io/otel v1.29.0 // indirect
-	go.opentelemetry.io/otel/metric v1.29.0 // indirect
-	go.opentelemetry.io/otel/trace v1.29.0 // indirect
+	go.opentelemetry.io/otel v1.37.0 // indirect
+	go.opentelemetry.io/otel/metric v1.37.0 // indirect
+	go.opentelemetry.io/otel/trace v1.37.0 // indirect
 	go.uber.org/goleak v1.3.0
 	golang.org/x/arch v0.3.0 // indirect
 	golang.org/x/exp v0.0.0-20240909161429-701f63a606c0
 	golang.org/x/sync v0.18.0
 	golang.org/x/text v0.31.0
 	golang.org/x/time v0.8.0
-	google.golang.org/protobuf v1.36.5 // indirect
+	google.golang.org/protobuf v1.36.7 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	kernel.org/pub/linux/libs/security/libcap/psx v1.2.69 // indirect
 	modernc.org/libc v1.32.0 // indirect

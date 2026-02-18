@@ -80,6 +80,44 @@ func (mrr *metricsRequestReader) Close() error {
 	return mrr.reader.Close()
 }
 
+// etagResponseWriter wraps http.ResponseWriter to ensure ETag, Last-Modified,
+// and Cache-Control headers are set before response headers are flushed.
+// The Cache-Control value is driven by the Origin.CacheControl configuration
+// parameter.  When empty (the default), no Cache-Control header is set,
+// matching the behaviour of a plain XRootD origin.
+type etagResponseWriter struct {
+	http.ResponseWriter
+	etag         string
+	lastModified string
+	cacheControl string
+	wroteHeader  bool
+}
+
+func (w *etagResponseWriter) WriteHeader(code int) {
+	if !w.wroteHeader {
+		if w.etag != "" {
+			w.Header().Set("ETag", w.etag)
+		}
+		if w.lastModified != "" {
+			w.Header().Set("Last-Modified", w.lastModified)
+		}
+		// Set Cache-Control for successful responses (2xx) and 304,
+		// but only when the operator has configured a policy.
+		if w.cacheControl != "" && ((code >= 200 && code < 300) || code == http.StatusNotModified) {
+			w.Header().Set("Cache-Control", w.cacheControl)
+		}
+		w.wroteHeader = true
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *etagResponseWriter) Write(b []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(b)
+}
+
 func init() {
 	// Register the reset callback with server_utils
 	server_utils.RegisterPOSIXv2Reset(ResetHandlers)
@@ -417,6 +455,9 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 			if c.Request.Method == http.MethodHead {
 				// Pass the modified request and file path info to handleHeadWithChecksum
 				handleHeadWithChecksum(c, handler, modifiedReq, wildcardPath, storagePrefix)
+			} else if c.Request.Method == http.MethodGet {
+				// For GET requests, add ETag header based on file metadata
+				handleGetWithETag(c, handler, modifiedReq, wildcardPath, storagePrefix)
 			} else {
 				handler.ServeHTTP(c.Writer, modifiedReq)
 			}
@@ -500,4 +541,153 @@ func handleHeadWithChecksum(c *gin.Context, handler *webdav.Handler, modifiedReq
 
 	// Now let the WebDAV handler process the HEAD request
 	handler.ServeHTTP(c.Writer, modifiedReq)
+}
+
+// computeETag generates an ETag string based on file metadata (mtime and size).
+// This matches the default ETag format used by golang.org/x/net/webdav.
+func computeETag(modTime int64, size int64) string {
+	return fmt.Sprintf(`"%x%x"`, modTime, size)
+}
+
+// normalizeETag strips the weak validator prefix (W/) from an ETag for comparison.
+// Per RFC 7232: For If-None-Match, weak comparison is used (ignores W/ prefix).
+func normalizeETag(etag string) string {
+	if strings.HasPrefix(etag, "W/") {
+		return etag[2:]
+	}
+	return etag
+}
+
+// etagsMatch compares two ETags using weak comparison (suitable for If-None-Match).
+// Per RFC 7232 Section 2.3.2: Two ETags are weakly equivalent if their opaque-tags
+// match character-by-character, regardless of the weak indicator.
+func etagsMatch(a, b string) bool {
+	return normalizeETag(a) == normalizeETag(b)
+}
+
+// checkIfModifiedSince returns true if the resource has been modified since
+// the time specified in the If-Modified-Since header.
+// Returns false (304 should be sent) if the resource hasn't been modified.
+func checkIfModifiedSince(r *http.Request, modTime time.Time) bool {
+	ims := r.Header.Get("If-Modified-Since")
+	if ims == "" {
+		return true // No conditional, treat as modified
+	}
+
+	// Per HTTP spec, must use RFC 1123 date format
+	t, err := http.ParseTime(ims)
+	if err != nil {
+		return true // Invalid date, treat as modified
+	}
+
+	// Compare at second precision (HTTP Date header precision)
+	// Return false (not modified) if modTime <= ims
+	return modTime.Truncate(time.Second).After(t.Truncate(time.Second))
+}
+
+// handleGetWithETag handles GET requests and adds ETag header for HTTP caching.
+// It also handles conditional requests (If-None-Match, If-Modified-Since) returning 304 Not Modified.
+// Per RFC 7232:
+// - If-None-Match takes precedence over If-Modified-Since when both are present
+// - If-None-Match compares ETags (strong or weak comparison depending on method)
+// - If-Modified-Since compares modification times (only for GET/HEAD)
+func handleGetWithETag(c *gin.Context, handler *webdav.Handler, modifiedReq *http.Request, relativePath string, storagePrefix string) {
+	// Use os.Root to prevent symlink attacks
+	root, err := os.OpenRoot(storagePrefix)
+	if err != nil {
+		log.Debugf("Failed to open storage root for ETag: %v", err)
+		handler.ServeHTTP(c.Writer, modifiedReq)
+		return
+	}
+	defer root.Close()
+
+	// Normalize the path for os.Root (remove leading slash)
+	normalizedPath := relativePath
+	if len(normalizedPath) > 0 && normalizedPath[0] == '/' {
+		normalizedPath = normalizedPath[1:]
+	}
+
+	// Stat the file to get mtime and size for ETag
+	info, err := root.Stat(normalizedPath)
+	if err != nil {
+		// File doesn't exist or can't be accessed, let WebDAV handle the error
+		handler.ServeHTTP(c.Writer, modifiedReq)
+		return
+	}
+
+	// Don't set ETag for directories
+	if info.IsDir() {
+		handler.ServeHTTP(c.Writer, modifiedReq)
+		return
+	}
+
+	modTime := info.ModTime()
+	// Compute ETag based on mtime and size (same as WebDAV default)
+	etag := computeETag(modTime.UnixNano(), info.Size())
+	lastModifiedStr := modTime.UTC().Format(http.TimeFormat)
+
+	// Check for conditional request (If-None-Match) - takes precedence per RFC 7232
+	ifNoneMatch := modifiedReq.Header.Get("If-None-Match")
+	if ifNoneMatch != "" {
+		// Parse If-None-Match header (may contain multiple ETags)
+		for _, match := range strings.Split(ifNoneMatch, ",") {
+			match = strings.TrimSpace(match)
+			// Handle weak ETag comparison (W/"..." prefix)
+			// For GET/HEAD, weak comparison is used - strip W/ prefix for comparison
+			compareETag := etag
+			compareMatch := match
+			if strings.HasPrefix(match, "W/") {
+				compareMatch = match[2:]
+			}
+			if strings.HasPrefix(etag, "W/") {
+				compareETag = etag[2:]
+			}
+			if match == "*" || compareMatch == compareETag {
+				// ETag matches, return 304 Not Modified
+				c.Header("ETag", etag)
+				c.Header("Last-Modified", lastModifiedStr)
+				if cc := param.Origin_CacheControl.GetString(); cc != "" {
+					c.Header("Cache-Control", cc)
+				}
+				c.Writer.WriteHeader(http.StatusNotModified)
+				return
+			}
+		}
+	}
+
+	// Check for If-Modified-Since (only if If-None-Match not present or didn't match)
+	// Per RFC 7232, If-Modified-Since is only evaluated if If-None-Match is absent
+	ifModifiedSince := modifiedReq.Header.Get("If-Modified-Since")
+	if ifNoneMatch == "" && ifModifiedSince != "" {
+		// Parse the If-Modified-Since header (HTTP date format)
+		ifModifiedTime, err := http.ParseTime(ifModifiedSince)
+		if err == nil {
+			// Truncate to seconds for comparison (HTTP dates have second precision)
+			// Per RFC 7232: resource is considered not modified if the Last-Modified
+			// time is less than or equal to the If-Modified-Since time
+			if !modTime.Truncate(time.Second).After(ifModifiedTime.Truncate(time.Second)) {
+				// Resource has not been modified
+				c.Header("ETag", etag)
+				c.Header("Last-Modified", lastModifiedStr)
+				if cc := param.Origin_CacheControl.GetString(); cc != "" {
+					c.Header("Cache-Control", cc)
+				}
+				c.Writer.WriteHeader(http.StatusNotModified)
+				return
+			}
+		}
+		// If parsing fails, ignore the header and serve content normally
+	}
+
+	// Use a wrapper to ensure ETag and Last-Modified headers are set before response
+	// This is needed because the WebDAV handler may write headers before we can
+	wrapper := &etagResponseWriter{
+		ResponseWriter: c.Writer,
+		etag:           etag,
+		lastModified:   lastModifiedStr,
+		cacheControl:   param.Origin_CacheControl.GetString(),
+	}
+
+	// Let WebDAV handler serve the content with our wrapped writer
+	handler.ServeHTTP(wrapper, modifiedReq)
 }
