@@ -797,11 +797,15 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	}
 }
 
-// normalizeURLScheme strips any Condor-style token prefix from a URL scheme
-// (e.g. "mytoken+osdf" → "osdf")
-func normalizeURLScheme(scheme string) string {
-	pieces := strings.Split(scheme, "+")
-	return pieces[len(pieces)-1]
+// isPelicanScheme returns true if the given URL scheme (or scheme+token combo)
+// represents a known Pelican federation scheme (pelican, osdf, stash).
+func isPelicanScheme(scheme string) bool {
+	for _, valid := range pelican_url.ValidSchemes {
+		if scheme == valid || strings.HasSuffix(scheme, "+"+valid) {
+			return true
+		}
+	}
+	return false
 }
 
 // Start the transfer, whether read or write back. Primarily used for backwards compatibility
@@ -828,11 +832,8 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 		return nil, err
 	}
 
-	sourceScheme := normalizeURLScheme(parsedSrc.Scheme)
-	destScheme := normalizeURLScheme(parsedDest.Scheme)
-
-	isPut := destScheme == pelican_url.StashScheme || destScheme == pelican_url.OsdfScheme || destScheme == pelican_url.PelicanScheme
-	isGet := sourceScheme == pelican_url.StashScheme || sourceScheme == pelican_url.OsdfScheme || sourceScheme == pelican_url.PelicanScheme
+	isPut := isPelicanScheme(parsedDest.Scheme)
+	isGet := isPelicanScheme(parsedSrc.Scheme)
 
 	if isPut && isGet {
 		// Both source and destination are remote: third-party-copy
