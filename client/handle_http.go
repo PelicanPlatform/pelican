@@ -1408,8 +1408,14 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 		return
 	}
 
+	srcPUrl, err := ParseRemoteAsPUrl(ctx, src.String())
+	if err != nil {
+		return
+	}
+
 	project, _ := searchJobAd(attrProjectName)
 	copyDestUrl := *destPUrl
+	copySrcUrl := *srcPUrl
 	tj = &TransferJob{
 		prefObjServers: tc.prefObjServers,
 		remoteURL:      &copyDestUrl,
@@ -1422,7 +1428,7 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 		token:          NewTokenGenerator(&copyDestUrl, nil, config.TokenSharedWrite, !tc.skipAcquire),
 	}
 	tj.srcURL = src
-	tj.srcToken = NewTokenGenerator(&copyDestUrl, nil, config.TokenSharedRead, !tc.skipAcquire)
+	tj.srcToken = NewTokenGenerator(&copySrcUrl, nil, config.TokenSharedRead, !tc.skipAcquire)
 	if tc.token != "" {
 		tj.token.SetToken(tc.token)
 		tj.srcToken.SetToken(tc.token)
@@ -1486,11 +1492,7 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 	}
 
 	// Resolve the source director information
-	srcPUrl, err := ParseRemoteAsPUrl(ctx, src.String())
-	if err != nil {
-		return
-	}
-	srcDirResp, err := GetDirectorInfoForPath(tj.ctx, srcPUrl, http.MethodGet, "")
+	srcDirResp, err := GetDirectorInfoForPath(tj.ctx, &copySrcUrl, http.MethodGet, "")
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for source URL %s", src.String())
@@ -1506,7 +1508,7 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 			return nil, err
 		}
 		if contents != "" {
-			srcDirResp, err = GetDirectorInfoForPath(tj.ctx, srcPUrl, http.MethodGet, contents)
+			srcDirResp, err = GetDirectorInfoForPath(tj.ctx, &copySrcUrl, http.MethodGet, contents)
 			if err != nil {
 				log.Errorln(err)
 				err = errors.Wrapf(err, "failed to get namespace information for source URL %s", src.String())
@@ -4012,6 +4014,10 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 		return
 	}
 	resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		err = &HttpErrResp{resp.StatusCode, fmt.Sprintf("HEAD request to source failed (HTTP status %d)", resp.StatusCode), nil}
+		return
+	}
 	totalSize = resp.ContentLength
 	if resp.ContentLength < 0 {
 		log.Warningln("Third-party-copy source", xfer.attempts[0].Url.String(), "is of unknown size; download statistics may be incorrect")
@@ -4058,7 +4064,7 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 		return
 	}
 
-	serverMessages := make(chan tpcStatus)
+	serverMessages := make(chan tpcStatus, 1)
 
 	xfer.engine.egrp.Go(func() error { return monitorTPC(serverMessages, resp.Body) })
 
