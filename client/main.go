@@ -767,6 +767,17 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	}
 }
 
+// isPelicanScheme returns true if the given URL scheme (or scheme+token combo)
+// represents a known Pelican federation scheme (pelican, osdf, stash).
+func isPelicanScheme(scheme string) bool {
+	for _, valid := range pelican_url.ValidSchemes {
+		if scheme == valid || strings.HasSuffix(scheme, "+"+valid) {
+			return true
+		}
+	}
+	return false
+}
+
 // Start the transfer, whether read or write back. Primarily used for backwards compatibility
 func DoCopy(ctx context.Context, sourceFile string, destination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
 	// First, create a handler for any panics that occur
@@ -791,20 +802,11 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 		return nil, err
 	}
 
-	sourceScheme, _ := getTokenName(parsedSrc)
-	destScheme, _ := getTokenName(parsedDest)
-
-	isPut := destScheme == "stash" || destScheme == "osdf" || destScheme == "pelican"
-	isGet := sourceScheme == "stash" || sourceScheme == "osdf" || sourceScheme == "pelican"
+	isPut := isPelicanScheme(parsedDest.Scheme)
+	isGet := isPelicanScheme(parsedSrc.Scheme)
 
 	if isPut && isGet {
 		// Both source and destination are remote: third-party-copy
-		if err = schemeUnderstood(destScheme); err != nil {
-			return nil, err
-		}
-		if err = schemeUnderstood(sourceScheme); err != nil {
-			return nil, err
-		}
 		return doThirdPartyCopy(ctx, parsedSrc, parsedDest, recursive, options...)
 	} else if isPut {
 		log.Debugf("Detected a PUT from %s to %s", parsedSrc.Path, parsedDest.String())
