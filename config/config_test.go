@@ -869,6 +869,25 @@ Logging:
 	require.NoError(t, err)
 }
 
+func TestInitServerGlobusBackendRequiresUI(t *testing.T) {
+	ResetConfig()
+	t.Cleanup(func() {
+		ResetConfig()
+	})
+
+	mockFederationRoot(t)
+	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
+	require.NoError(t, param.Set(param.Origin_StorageType.GetName(), "globus"))
+	require.NoError(t, param.Set(param.Server_EnableUI.GetName(), false))
+	require.NoError(t, param.Set(param.OIDC_Issuer.GetName(), "globus"))
+
+	err := InitServer(context.Background(), server_structs.OriginType)
+	require.Error(t, err)
+	require.ErrorContains(t, err, param.Server_EnableUI.GetName())
+	require.ErrorContains(t, err, param.Origin_StorageType.GetName())
+	require.ErrorContains(t, err, "globus")
+}
+
 func TestDiscoverFederationImpl(t *testing.T) {
 	testCases := []struct {
 		name                  string
