@@ -41,6 +41,7 @@ interface AuthenticatedContentProps {
   promptLogin?: boolean;
   redirect?: boolean;
   trustThenValidate?: boolean;
+  preloadChildren?: boolean;
   boxProps?: BoxProps;
   allowedRoles?: User['role'][];
   replace?: boolean;
@@ -52,6 +53,7 @@ interface AuthenticatedContentProps {
  * @param promptLogin If true then the user will be prompted to login if they are not authenticated
  * @param redirect If true then the user will be redirected to the login page if they are not authenticated
  * @param trustThenValidate If true then the user will be shown the content if they are not authenticated but will be validated after
+ * @param preloadChildren If true then the children will be preloaded even if the user is not authenticated. This is useful for pages that require authentication but want to show a skeleton while loading.
  * @param boxProps The props to pass to the Box component
  * @param allowedRoles The roles that are allowed to see the content
  * @param replace If true then the
@@ -62,6 +64,7 @@ const AuthenticatedContent = ({
   promptLogin = false,
   redirect = false,
   trustThenValidate = false,
+  preloadChildren = false,
   children,
   boxProps,
   allowedRoles,
@@ -124,7 +127,7 @@ const AuthenticatedContent = ({
         }}
       >
         <Skeleton variant='rounded' height={'100%'} width={'100%'}>
-          {authenticated && children}
+          {preloadChildren && children}
         </Skeleton>
       </Box>
     );
