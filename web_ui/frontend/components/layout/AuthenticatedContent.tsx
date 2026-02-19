@@ -124,7 +124,7 @@ const AuthenticatedContent = ({
         }}
       >
         <Skeleton variant='rounded' height={'100%'} width={'100%'}>
-          {children}
+          {authenticated && children}
         </Skeleton>
       </Box>
     );
