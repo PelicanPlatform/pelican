@@ -15,7 +15,7 @@ on:
 
 jobs:
   run-tests:
-    name: Linux
+    name: Test
     uses: ./.github/workflows/test-linux.yml
     with:
       image: hub.opensciencegrid.org/pelican_platform/pelican-test:latest-itb
