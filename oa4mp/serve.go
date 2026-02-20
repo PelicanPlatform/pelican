@@ -130,6 +130,26 @@ func compileAuthzRules(raw authzTemplate) (*compiledAuthz, error) {
 	return compiled, nil
 }
 
+// InitAuthzRules compiles the Issuer.AuthorizationTemplates into the
+// compiledAuthzRules slice.  This can be called independently of
+// ConfigureOA4MP for the embedded OIDC issuer to use.
+func InitAuthzRules() error {
+	authzTemplates := []authzTemplate{}
+	if err := param.Issuer_AuthorizationTemplates.Unmarshal(&authzTemplates); err != nil {
+		return errors.Wrap(err, "Failed to parse the Issuer.AuthorizationTemplates config")
+	}
+
+	compiledAuthzRules = nil
+	for _, authz := range authzTemplates {
+		compiled, err := compileAuthzRules(authz)
+		if err != nil {
+			return errors.Wrapf(err, "failed to compile authorization template: %v", authz)
+		}
+		compiledAuthzRules = append(compiledAuthzRules, compiled)
+	}
+	return nil
+}
+
 func writeOA4MPFile(fname string, data []byte, perm os.FileMode) error {
 	user, err := config.GetOA4MPUser()
 	if err != nil {
