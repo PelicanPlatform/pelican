@@ -82,19 +82,9 @@ const AdminLogin = () => {
     if (response) {
       await mutate(getUser);
 
-      const url = new URL(window.location.href);
-      const returnUrl =
-        url.searchParams.get('nextUrl') ||
-        url.searchParams.get('returnURL') ||
-        '';
-      if (returnUrl) {
-        // nextUrl may point outside the Next.js app (e.g. /api/...),
-        // so use a full navigation instead of router.push which would
-        // prepend the Next.js basePath (/view).
-        window.location.href = returnUrl;
-      } else {
-        router.push('../');
-      }
+      let returnUrl = getReturnUrl(window.location.href);
+      returnUrl = returnUrl.replace(`/view`, '');
+      router.push(returnUrl ? returnUrl : '../');
     } else {
       setLoading(false);
     }
@@ -180,11 +170,7 @@ export default function Home() {
   );
 
   useEffect(() => {
-    const url = new URL(window.location.href);
-    const returnUrl =
-      url.searchParams.get('nextUrl') ||
-      url.searchParams.get('returnURL') ||
-      '';
+    const returnUrl = getReturnUrl(window.location.href);
     const encodedReturnUrl = encodeURIComponent(returnUrl);
     setReturnUrl(encodedReturnUrl);
   }, []);
@@ -247,3 +233,8 @@ export default function Home() {
     </>
   );
 }
+
+const getReturnUrl = (url: string) => {
+  const currentUrl = new URL(url);
+  return currentUrl.searchParams.get('returnURL') || currentUrl.searchParams.get('nextUrl') || '';
+};
