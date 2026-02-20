@@ -618,11 +618,19 @@ func loginHandler(ctx *gin.Context) {
 	}
 
 	setLoginCookie(ctx, userRecord, groups)
-	ctx.JSON(http.StatusOK,
-		server_structs.SimpleApiResp{
-			Status: server_structs.RespOK,
-			Msg:    "success",
-		})
+
+	// Return nextUrl in the response so clients can redirect after login.
+	// The frontend login page sends nextUrl when it wants the user redirected
+	// back to a specific page (e.g. the device code verification page).
+	nextUrl := ctx.Query("nextUrl")
+	resp := gin.H{
+		"status": server_structs.RespOK,
+		"msg":    "success",
+	}
+	if nextUrl != "" {
+		resp["nextUrl"] = nextUrl
+	}
+	ctx.JSON(http.StatusOK, resp)
 }
 
 // Handle initial code-based login for admin
