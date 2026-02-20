@@ -83,15 +83,15 @@ func handleIssuerDiscovery(provider *OIDCProvider) gin.HandlerFunc {
 		serviceURI := issuerURL + "/api/v1.0/issuer"
 
 		ctx.JSON(http.StatusOK, gin.H{
-			"issuer":                 issuerURL,
-			"token_endpoint":         serviceURI + "/token",
-			"authorization_endpoint": serviceURI + "/authorize",
-			"userinfo_endpoint":      serviceURI + "/userinfo",
-			"revocation_endpoint":    serviceURI + "/revoke",
-			"introspection_endpoint": serviceURI + "/introspect",
+			"issuer":                        issuerURL,
+			"token_endpoint":                serviceURI + "/token",
+			"authorization_endpoint":        serviceURI + "/authorize",
+			"userinfo_endpoint":             serviceURI + "/userinfo",
+			"revocation_endpoint":           serviceURI + "/revoke",
+			"introspection_endpoint":        serviceURI + "/introspect",
 			"device_authorization_endpoint": serviceURI + "/device_authorization",
 			"registration_endpoint":         serviceURI + "/oidc-cm",
-			"jwks_uri":             issuerURL + "/.well-known/issuer.jwks",
+			"jwks_uri":                      issuerURL + "/.well-known/issuer.jwks",
 			"grant_types_supported": []string{
 				"authorization_code",
 				"refresh_token",
@@ -104,8 +104,8 @@ func handleIssuerDiscovery(provider *OIDCProvider) gin.HandlerFunc {
 			"token_endpoint_auth_methods_supported": []string{
 				"client_secret_basic", "client_secret_post",
 			},
-			"response_types_supported": []string{"code"},
-			"subject_types_supported":  []string{"public"},
+			"response_types_supported":              []string{"code"},
+			"subject_types_supported":               []string{"public"},
 			"id_token_signing_alg_values_supported": []string{provider.signingAlgorithm()},
 		})
 	}
