@@ -49,11 +49,11 @@ import (
 )
 
 const (
-	testUser       = "testuser"
-	testUserID     = "testuser"
-	testClientID   = "test-integration-client"
-	testSecret     = "test-client-secret"
-	testRedirect   = "https://localhost/callback"
+	testUser     = "testuser"
+	testUserID   = "testuser"
+	testClientID = "test-integration-client"
+	testSecret   = "test-client-secret"
+	testRedirect = "https://localhost/callback"
 )
 
 var testGroups = []string{"/collab/analysis", "/collab/production"}
@@ -170,8 +170,6 @@ func approveDeviceCode(t *testing.T, httpClient *http.Client, baseURL, userCode 
 	require.NoError(t, err)
 	return approveResp
 }
-
-
 
 // ---- WLCG Token Validation Helpers ----
 

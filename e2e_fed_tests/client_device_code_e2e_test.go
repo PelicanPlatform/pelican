@@ -322,7 +322,7 @@ func simulateUserApproval(t *testing.T, serverURL, userCode, password string) {
 	verifyPageURL := fmt.Sprintf("%s/api/v1.0/issuer/device?user_code=%s", serverURL, userCode)
 	resp, err := browserClient.Get(verifyPageURL)
 	require.NoError(t, err)
-	io.ReadAll(resp.Body)
+	_, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	require.Equal(t, http.StatusTemporaryRedirect, resp.StatusCode,
 		"Unauthenticated GET to device page should redirect to login")
