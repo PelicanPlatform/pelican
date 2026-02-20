@@ -36,6 +36,11 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
+// WLCGAudienceAny is the WLCG "wildcard" audience value.
+// Tokens bearing this audience are accepted by any WLCG-compliant service.
+// See https://github.com/WLCG-AuthZ-WG/common-jwt-profile/blob/master/profile.md
+const WLCGAudienceAny = "https://wlcg.cern.ch/jwt/v1/any"
+
 // IssuerURL returns the issuer URL for the embedded OIDC provider.
 // It prefers Issuer.IssuerClaimValue when explicitly set, falling back to
 // Server.ExternalWebUrl.  This mirrors the logic in ConfigureOA4MP so that
@@ -207,6 +212,10 @@ func handleAuthorize(provider *OIDCProvider) gin.HandlerFunc {
 				}
 			}
 		}
+
+		// Grant the WLCG wildcard audience so that caches (and any
+		// other WLCG service) accept the resulting token.
+		ar.GrantAudience(WLCGAudienceAny)
 
 		issuerURL := IssuerURL()
 		session := DefaultOIDCSession(user, issuerURL, matchedGroups, ar.GetGrantedScopes())
@@ -499,6 +508,10 @@ func handleDeviceTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 	ar.Session = request.GetSession()
 	ar.Form = request.GetRequestForm()
 
+	// Grant the WLCG wildcard audience so that caches (and any
+	// other WLCG service) accept the resulting token.
+	ar.GrantAudience(WLCGAudienceAny)
+
 	// Set the access token expiration on the session - required by JWT strategy
 	ar.GetSession().SetExpiresAt(fosite.AccessToken, time.Now().Add(provider.config.AccessTokenLifespan))
 
@@ -720,6 +733,7 @@ func handleDynamicClientRegistration(provider *OIDCProvider) gin.HandlerFunc {
 			GrantTypes:    grantTypes,
 			ResponseTypes: responseTypes,
 			Scopes:        scopes,
+			Audience:      fosite.Arguments{WLCGAudienceAny},
 			Public:        false,
 		}
 

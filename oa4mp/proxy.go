@@ -164,6 +164,12 @@ func CalculateAllowedScopes(user string, userId string, groupsList []string) ([]
 			if hasGroupRequirements {
 				groupsToIterate = currentMatchingGroups
 			}
+			// When a $GROUP template rule has no explicit group restrictions,
+			// all user groups are used for scope expansion.  Record them in
+			// groupSet so they appear in the token's wlcg.groups claim.
+			for _, group := range groupsToIterate {
+				groupSet[group] = struct{}{}
+			}
 			for _, group := range groupsToIterate {
 				groupEscaped := url.PathEscape(group)
 				for _, action := range rule.Actions {

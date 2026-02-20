@@ -83,9 +83,18 @@ const AdminLogin = () => {
       await mutate(getUser);
 
       const url = new URL(window.location.href);
-      let returnUrl = url.searchParams.get('returnURL') || '';
-      returnUrl = returnUrl.replace(`/view`, '');
-      router.push(returnUrl ? returnUrl : '../');
+      const returnUrl =
+        url.searchParams.get('nextUrl') ||
+        url.searchParams.get('returnURL') ||
+        '';
+      if (returnUrl) {
+        // nextUrl may point outside the Next.js app (e.g. /api/...),
+        // so use a full navigation instead of router.push which would
+        // prepend the Next.js basePath (/view).
+        window.location.href = returnUrl;
+      } else {
+        router.push('../');
+      }
     } else {
       setLoading(false);
     }
@@ -172,7 +181,10 @@ export default function Home() {
 
   useEffect(() => {
     const url = new URL(window.location.href);
-    const returnUrl = url.searchParams.get('returnURL') || '';
+    const returnUrl =
+      url.searchParams.get('nextUrl') ||
+      url.searchParams.get('returnURL') ||
+      '';
     const encodedReturnUrl = encodeURIComponent(returnUrl);
     setReturnUrl(encodedReturnUrl);
   }, []);

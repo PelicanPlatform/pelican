@@ -112,14 +112,17 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	// Configure the issuer (OA4MP proxy or embedded fosite) if enabled
 	if param.Origin_EnableIssuer.GetBool() {
 		issuerMode := param.Origin_IssuerMode.GetString()
-		if issuerMode == "embedded" {
+		switch issuerMode {
+		case "embedded", "":
 			if err := configureEmbeddedIssuer(engine); err != nil {
 				return nil, errors.Wrap(err, "failed to configure embedded OIDC issuer")
 			}
-		} else {
+		case "oa4mp":
 			if err = oa4mp.ConfigureOA4MPProxy(engine); err != nil {
 				return nil, err
 			}
+		default:
+			return nil, errors.Errorf("unsupported Origin.IssuerMode %q; valid values are \"embedded\" and \"oa4mp\"", issuerMode)
 		}
 	}
 
@@ -141,7 +144,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 			return nil, err
 		}
 
-		if param.Origin_EnableIssuer.GetBool() && param.Origin_IssuerMode.GetString() != "embedded" {
+		if param.Origin_EnableIssuer.GetBool() && param.Origin_IssuerMode.GetString() == "oa4mp" {
 			oa4mp_launcher, err := oa4mp.ConfigureOA4MP()
 			if err != nil {
 				return nil, err
@@ -255,7 +258,10 @@ func configureEmbeddedIssuer(engine *gin.Engine) error {
 		return errors.Wrap(err, "failed to compile issuer authorization templates")
 	}
 
-	issuerURL := param.Server_ExternalWebUrl.GetString()
+	// Prefer Issuer.IssuerClaimValue over Server.ExternalWebUrl, matching
+	// the logic in ConfigureOA4MP so both issuer modes produce consistent
+	// token claims.
+	issuerURL := issuer.IssuerURL()
 	gracePeriod := param.Issuer_RefreshTokenGracePeriod.GetDuration()
 	if gracePeriod == 0 {
 		gracePeriod = 5 * time.Minute

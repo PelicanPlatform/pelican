@@ -1208,12 +1208,12 @@ components: ["origin"]
 name: Origin.IssuerMode
 description: |+
   Select the issuer implementation to use when Origin.EnableIssuer is true.
-  "oa4mp" uses the external Java-based OA4MP issuer (legacy default).
   "embedded" uses the built-in fosite-based OIDC provider which requires
-  no external processes.  When switching between modes, state is not migrated
-  between the two databases.
+  no external processes (default).
+  "oa4mp" uses the external Java-based OA4MP issuer (legacy).
+  When switching between modes, state is not migrated between the two databases.
 type: string
-default: "oa4mp"
+default: "embedded"
 hidden: true
 components: ["origin"]
 ---

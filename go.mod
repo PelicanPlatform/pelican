@@ -16,6 +16,7 @@ require (
 	github.com/gin-gonic/gin v1.9.1
 	github.com/glebarez/sqlite v1.10.0
 	github.com/go-ini/ini v1.67.0
+	github.com/go-jose/go-jose/v3 v3.0.3
 	github.com/go-kit/log v0.2.1
 	github.com/google/go-p11-kit v0.4.0
 	github.com/gorilla/csrf v1.7.3
@@ -25,6 +26,7 @@ require (
 	github.com/jellydator/ttlcache/v3 v3.3.0
 	github.com/jsipprell/keyctl v1.0.4-0.20211208153515-36ca02672b6c
 	github.com/lestrrat-go/jwx/v2 v2.0.21
+	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826
 	github.com/mwitkow/go-conntrack v0.0.0-20190716064945-2f068394615f
 	github.com/oklog/run v1.1.0
 	github.com/opensciencegrid/xrootd-monitoring-shoveler v1.3.0
@@ -69,7 +71,6 @@ require (
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dlclark/regexp2 v1.11.0 // indirect
 	github.com/glebarez/go-sqlite v1.21.2 // indirect
-	github.com/go-jose/go-jose/v3 v3.0.3 // indirect
 	github.com/go-stomp/stomp/v3 v3.0.3 // indirect
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
 	github.com/gobuffalo/pop/v6 v6.1.1 // indirect
@@ -93,7 +94,6 @@ require (
 	github.com/mattn/goveralls v0.0.12 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
-	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/muesli/termenv v0.15.3-0.20240618155329-98d742f6907a // indirect
 	github.com/openzipkin/zipkin-go v0.4.2 // indirect
