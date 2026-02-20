@@ -21,13 +21,13 @@ import (
 var ServerDatabase *gorm.DB
 
 //go:embed universal_migrations/*.sql
-var embedUniversalMigrations embed.FS
+var EmbedUniversalMigrations embed.FS
 
 //go:embed registry_migrations/*.sql
-var embedRegistryMigrations embed.FS
+var EmbedRegistryMigrations embed.FS
 
 //go:embed origin_migrations/*.sql
-var embedOriginMigrations embed.FS
+var EmbedOriginMigrations embed.FS
 
 type Counter struct {
 	Key   string `gorm:"primaryKey"`
@@ -57,7 +57,7 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 	}
 
 	// Always run universal migrations first
-	if err := utils.MigrateDB(sqlDB, embedUniversalMigrations, "universal_migrations"); err != nil {
+	if err := utils.MigrateDB(sqlDB, EmbedUniversalMigrations, "universal_migrations"); err != nil {
 		return err
 	}
 
@@ -95,9 +95,9 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 func runServerTypeMigrations(sqlDB *sql.DB, serverType server_structs.ServerType) error {
 	switch serverType {
 	case server_structs.RegistryType:
-		return utils.MigrateServerSpecificDB(sqlDB, embedRegistryMigrations, "registry_migrations", "registry")
+		return utils.MigrateServerSpecificDB(sqlDB, EmbedRegistryMigrations, "registry_migrations", "registry")
 	case server_structs.OriginType:
-		return utils.MigrateServerSpecificDB(sqlDB, embedOriginMigrations, "origin_migrations", "origin")
+		return utils.MigrateServerSpecificDB(sqlDB, EmbedOriginMigrations, "origin_migrations", "origin")
 	default:
 		log.Debugf("No specific migrations for server type: %s", serverType.String())
 	}

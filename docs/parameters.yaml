@@ -1195,6 +1195,18 @@ type: bool
 default: false
 components: ["origin"]
 ---
+name: Origin.IssuerMode
+description: |+
+  Select the issuer implementation to use when Origin.EnableIssuer is true.
+  "oa4mp" uses the external Java-based OA4MP issuer (legacy default).
+  "embedded" uses the built-in fosite-based OIDC provider which requires
+  no external processes.  When switching between modes, state is not migrated
+  between the two databases.
+type: string
+default: "oa4mp"
+hidden: true
+components: ["origin"]
+---
 name: Origin.ScitokensRestrictedPaths
 description: |+
   This parameter is used to configure
@@ -2949,6 +2961,28 @@ hidden: true
 ################################
 #   Issuer's Configurations    #
 ################################
+name: Issuer.DynamicClientStaleTimeout
+description: |+
+  Maximum duration of inactivity before a dynamically registered client
+  that was previously used is automatically deleted.
+  This timeout is longer than DynamicClientUnusedTimeout because the
+  client has demonstrated legitimate use.
+type: duration
+default: 336h
+hidden: true
+components: ["origin"]
+---
+name: Issuer.DynamicClientUnusedTimeout
+description: |+
+  Maximum age before a dynamically registered client that has never been
+  used is automatically deleted.
+  This timeout is intentionally short so that abandoned registrations are
+  cleaned up quickly.
+type: duration
+default: 1h
+hidden: true
+components: ["origin"]
+---
 name: Issuer.TomcatLocation
 description: |+
   Location where [Apache Tomcat](https://tomcat.apache.org/) is installed.
@@ -3048,6 +3082,16 @@ description: |+
 type: string
 default: iss
 components: ["origin", "registry", "cache", "director"]
+---
+name: Issuer.RefreshTokenGracePeriod
+description: |+
+  Duration during which a used refresh token may still be reused.
+  When a refresh token is exchanged, it is not invalidated immediately;
+  instead it remains valid for this grace period.
+type: duration
+default: 5m
+hidden: true
+components: ["origin"]
 ---
 name: Issuer.UserStripDomain
 description: |+
