@@ -49,58 +49,105 @@ import (
 )
 
 // deviceCodeOriginConfig enables the embedded OIDC issuer on a POSIXv2 origin
-// with authorization rules that grant authenticated users (the "admin" user
-// specifically) read, write, and create access under /test.
+// with three exports:
+//
+//   - /users: Accessible to any authenticated user under /users/$USER via the
+//     $USER authorization template variable.  This demonstrates per-user path
+//     scoping — each user receives scopes only for their own subdirectory.
+//   - /projects: Accessible to members of the matching group via $GROUP.
+//     This demonstrates group-based authorization.
+//   - /restricted: Accessible only to "privilegeduser", used for the negative
+//     authorization test (verifying that testuser receives a 403).
 const deviceCodeOriginConfig = `
 Origin:
   StorageType: posixv2
   EnableIssuer: true
   IssuerMode: embedded
   Exports:
-    - FederationPrefix: /test
+    - FederationPrefix: /users
+      StoragePrefix: %s
+      Capabilities: ["Reads", "Writes", "Listings"]
+    - FederationPrefix: /projects
+      StoragePrefix: %s
+      Capabilities: ["Reads", "Writes", "Listings"]
+    - FederationPrefix: /restricted
       StoragePrefix: %s
       Capabilities: ["Reads", "Writes", "Listings"]
 Issuer:
   AuthorizationTemplates:
-    - prefix: /test
+    - prefix: /users/$USER
       actions: ["read", "write", "create"]
-      users: ["admin"]
+    - prefix: /projects/$GROUP
+      actions: ["read", "write", "create"]
+    - prefix: /restricted
+      actions: ["read", "write", "create"]
+      users: ["privilegeduser"]
 `
 
 // TestDeviceCodeE2E exercises the entire OIDC device-code flow through a live
-// Pelican federation:
+// Pelican federation using a non-admin user ("testuser") to verify that no
+// admin-specific behavior leaks into the auth flow. It demonstrates:
 //
-//  1. Start federation with embedded issuer enabled.
-//  2. Perform Dynamic Client Registration (DCR).
-//  3. Initiate device authorization — obtain user_code / device_code.
-//  4. Log in via POST /api/v1.0/auth/login (emulating the user).
-//  5. Approve the device code via the device-verify page.
-//  6. Poll the token endpoint until an access token is issued.
-//  7. Validate that the access token conforms to the WLCG token profile.
-//  8. Upload and download a file using the token to prove transfer auth.
+//  1. Per-user path scoping via the $USER authorization template variable.
+//  2. Group-based path scoping via the $GROUP template variable.
+//  3. Positive authorization — upload/download within the user's own namespace
+//     and within a group-scoped namespace.
+//  4. Negative authorization — error when accessing a prefix the user lacks.
+//  5. Token refresh — using refresh_token to obtain a new access token and
+//     proving the refreshed token is valid for real transfers.
 func TestDeviceCodeE2E(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
 	// ----- Step 0: Create htpasswd file BEFORE federation starts -----
-	// The auth subsystem reads Server.UIPasswordFile at startup.
-	// It requires an 'admin' user for configureAuthDB() to succeed.
+	// The auth subsystem requires an "admin" user in the htpasswd file for
+	// configureAuthDB() to succeed.  We also add "testuser", the non-admin
+	// account used for the entire device-code flow.
 	htpasswdDir := t.TempDir()
 	htpasswdFile := filepath.Join(htpasswdDir, "htpasswd")
-	password := randomString(16)
+	adminPassword := randomString(16)
+	testUserPassword := randomString(16)
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	adminHash, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(htpasswdFile, []byte(fmt.Sprintf("admin:%s\n", string(hash))), 0600))
+	testUserHash, err := bcrypt.GenerateFromPassword([]byte(testUserPassword), bcrypt.DefaultCost)
+	require.NoError(t, err)
+
+	htpasswdContent := fmt.Sprintf("admin:%s\ntestuser:%s\n", string(adminHash), string(testUserHash))
+	require.NoError(t, os.WriteFile(htpasswdFile, []byte(htpasswdContent), 0600))
 	require.NoError(t, param.Set(param.Server_UIPasswordFile.GetName(), htpasswdFile))
+
+	// Create a JSON group file mapping testuser to groups.
+	// This exercises the file-based group source (Issuer.GroupSource = "file").
+	groupFileDir := t.TempDir()
+	groupFilePath := filepath.Join(groupFileDir, "groups.json")
+	groupData := `{"testuser": ["physics", "computing"], "admin": []}`
+	require.NoError(t, os.WriteFile(groupFilePath, []byte(groupData), 0600))
+	require.NoError(t, param.Set("Issuer.GroupSource", "file"))
+	require.NoError(t, param.Set("Issuer.GroupFile", groupFilePath))
 
 	// ----- Step 1: Start the federation -----
 	tmpDir := t.TempDir()
-	originConfig := fmt.Sprintf(deviceCodeOriginConfig, tmpDir)
+	usersDir := filepath.Join(tmpDir, "users-store")
+	projectsDir := filepath.Join(tmpDir, "projects-store")
+	restrictedDir := filepath.Join(tmpDir, "restricted-store")
+	require.NoError(t, os.MkdirAll(usersDir, 0755))
+	require.NoError(t, os.MkdirAll(projectsDir, 0755))
+	require.NoError(t, os.MkdirAll(restrictedDir, 0755))
+
+	// Pre-create the testuser subdirectory so the origin can write files there.
+	testUserDir := filepath.Join(usersDir, "testuser")
+	require.NoError(t, os.MkdirAll(testUserDir, 0755))
+
+	// Pre-create group subdirectories for $GROUP-scoped writes.
+	physicsDir := filepath.Join(projectsDir, "physics")
+	require.NoError(t, os.MkdirAll(physicsDir, 0755))
+
+	originConfig := fmt.Sprintf(deviceCodeOriginConfig, usersDir, projectsDir, restrictedDir)
 	ft := fed_test_utils.NewFedTest(t, originConfig)
 	require.NotNil(t, ft)
-	require.Greater(t, len(ft.Exports), 0, "Federation should have at least one export")
+	require.GreaterOrEqual(t, len(ft.Exports), 3, "Federation should have at least three exports")
 
 	serverURL := param.Server_ExternalWebUrl.GetString()
 	issuerURL := serverURL // embedded issuer URL == server URL
@@ -181,11 +228,11 @@ func TestDeviceCodeE2E(t *testing.T) {
 		"Polling before approval should return 400: %s", string(body))
 	assert.Contains(t, string(body), "authorization_pending")
 
-	// ----- Step 4: Log in as admin -----
+	// ----- Step 4: Log in as testuser (non-admin) -----
 	loginURL := serverURL + "/api/v1.0/auth/login"
 	loginForm := url.Values{
-		"user":     {"admin"},
-		"password": {password},
+		"user":     {"testuser"},
+		"password": {testUserPassword},
 	}
 	resp, err = httpClient.PostForm(loginURL, loginForm)
 	require.NoError(t, err)
@@ -203,7 +250,7 @@ func TestDeviceCodeE2E(t *testing.T) {
 		}
 	}
 	require.NotNil(t, loginCookie, "Login cookie should be set after successful authentication")
-	t.Log("Login succeeded; login cookie obtained")
+	t.Log("Login succeeded as testuser; login cookie obtained")
 
 	// ----- Step 5: Approve the device code -----
 	// GET the device verification page to obtain the CSRF cookie.
@@ -247,7 +294,7 @@ func TestDeviceCodeE2E(t *testing.T) {
 		"Device approval should return 200: %s", string(approveBody))
 	assert.Contains(t, string(approveBody), "User Code Accepted",
 		"Approval page should confirm approval: %s", string(approveBody))
-	t.Log("Device code approved by user")
+	t.Log("Device code approved by testuser")
 
 	// ----- Step 6: Poll for the access token -----
 	var tokenRespData struct {
@@ -277,38 +324,198 @@ func TestDeviceCodeE2E(t *testing.T) {
 	t.Logf("Access token obtained. type=%s expires_in=%d scope=%s",
 		tokenRespData.TokenType, tokenRespData.ExpiresIn, tokenRespData.Scope)
 
-	// ----- Step 7: Validate WLCG token profile -----
-	validateWLCGToken(t, tokenRespData.AccessToken, issuerURL)
+	// ----- Step 7: Validate WLCG token profile and $USER-scoped claims -----
+	claims := validateWLCGToken(t, tokenRespData.AccessToken, issuerURL)
 
-	// ----- Step 8: Upload and download using the token -----
+	// Verify the subject is "testuser", not "admin".
+	assert.Equal(t, "testuser", claims["sub"],
+		"Token subject should be testuser, not admin")
+
+	// Verify scopes contain the $USER-expanded path /users/testuser.
+	scopeStr := extractScopeString(claims)
+	assert.Contains(t, scopeStr, "storage.read:/users/testuser",
+		"$USER template should expand to testuser in storage.read scope")
+	assert.Contains(t, scopeStr, "storage.modify:/users/testuser",
+		"$USER template should expand to testuser in storage.modify scope")
+	assert.Contains(t, scopeStr, "storage.create:/users/testuser",
+		"$USER template should expand to testuser in storage.create scope")
+
+	// Ensure no scopes leak for /restricted.
+	assert.NotContains(t, scopeStr, "/restricted",
+		"Token should NOT contain scopes for /restricted (testuser is not authorized)")
+
+	// Verify group-scoped paths from the $GROUP template.
+	// testuser belongs to groups ["physics", "computing"], so the token should
+	// contain scopes for /projects/physics and /projects/computing.
+	assert.Contains(t, scopeStr, "storage.read:/projects/physics",
+		"$GROUP template should produce storage.read:/projects/physics")
+	assert.Contains(t, scopeStr, "storage.modify:/projects/physics",
+		"$GROUP template should produce storage.modify:/projects/physics")
+	assert.Contains(t, scopeStr, "storage.read:/projects/computing",
+		"$GROUP template should produce storage.read:/projects/computing")
+
+	// Verify wlcg.groups claim contains the user's groups.
+	var groupsClaim []string
+	if rawGroups, ok := claims["wlcg.groups"]; ok {
+		switch g := rawGroups.(type) {
+		case []interface{}:
+			for _, v := range g {
+				if s, ok := v.(string); ok {
+					groupsClaim = append(groupsClaim, s)
+				}
+			}
+		case string:
+			groupsClaim = strings.Split(g, " ")
+		}
+	}
+	assert.Contains(t, groupsClaim, "physics", "wlcg.groups should contain physics")
+	assert.Contains(t, groupsClaim, "computing", "wlcg.groups should contain computing")
+
+	t.Logf("WLCG token profile valid; $USER and $GROUP templates expanded correctly for testuser")
+
+	// ----- Step 8: Upload and download using the token (positive auth) -----
 	testContent := "Hello from the device code E2E test!"
 	localTmpDir := t.TempDir()
 	localFile := filepath.Join(localTmpDir, "device_code_test.txt")
 	require.NoError(t, os.WriteFile(localFile, []byte(testContent), 0644))
 
-	uploadURL := fmt.Sprintf("pelican://%s:%d/test/device_code_test.txt",
-		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+	hostname := param.Server_Hostname.GetString()
+	port := param.Server_WebPort.GetInt()
+	uploadURL := fmt.Sprintf("pelican://%s:%d/users/testuser/device_code_test.txt",
+		hostname, port)
 
 	// Upload with the device-code-issued token.
 	uploadResults, err := client.DoPut(ft.Ctx, localFile, uploadURL, false,
 		client.WithToken(tokenRespData.AccessToken))
-	require.NoError(t, err, "Upload with device-code token should succeed")
+	require.NoError(t, err, "Upload to /users/testuser should succeed with $USER-scoped token")
 	require.NotEmpty(t, uploadResults)
 	assert.Greater(t, uploadResults[0].TransferredBytes, int64(0))
-	t.Log("Upload succeeded using device-code-issued token")
+	t.Log("Upload succeeded to /users/testuser/ using $USER-scoped token")
 
 	// Download the file back.
 	downloadFile := filepath.Join(localTmpDir, "downloaded.txt")
 	downloadResults, err := client.DoGet(ft.Ctx, uploadURL, downloadFile, false,
 		client.WithToken(tokenRespData.AccessToken))
-	require.NoError(t, err, "Download with device-code token should succeed")
+	require.NoError(t, err, "Download from /users/testuser should succeed with $USER-scoped token")
 	require.NotEmpty(t, downloadResults)
 	assert.Equal(t, uploadResults[0].TransferredBytes, downloadResults[0].TransferredBytes)
 
 	downloadedContent, err := os.ReadFile(downloadFile)
 	require.NoError(t, err)
 	assert.Equal(t, testContent, string(downloadedContent), "Downloaded content should match uploaded")
-	t.Log("Download succeeded; content verified. E2E device code flow is fully working.")
+	t.Log("Download succeeded; content verified")
+
+	// ----- Step 8b: Group-based upload/download (/projects/physics) -----
+	groupContent := "Data for the physics project group"
+	groupFile := filepath.Join(localTmpDir, "group_test.txt")
+	require.NoError(t, os.WriteFile(groupFile, []byte(groupContent), 0644))
+
+	groupUploadURL := fmt.Sprintf("pelican://%s:%d/projects/physics/group_test.txt",
+		hostname, port)
+	groupUploadResults, err := client.DoPut(ft.Ctx, groupFile, groupUploadURL, false,
+		client.WithToken(tokenRespData.AccessToken))
+	require.NoError(t, err, "Upload to /projects/physics should succeed with group-scoped token")
+	require.NotEmpty(t, groupUploadResults)
+	assert.Greater(t, groupUploadResults[0].TransferredBytes, int64(0))
+
+	groupDownloadFile := filepath.Join(localTmpDir, "group_downloaded.txt")
+	groupDownloadResults, err := client.DoGet(ft.Ctx, groupUploadURL, groupDownloadFile, false,
+		client.WithToken(tokenRespData.AccessToken))
+	require.NoError(t, err, "Download from /projects/physics should succeed")
+	require.NotEmpty(t, groupDownloadResults)
+	groupDownloaded, err := os.ReadFile(groupDownloadFile)
+	require.NoError(t, err)
+	assert.Equal(t, groupContent, string(groupDownloaded),
+		"Downloaded group content should match uploaded")
+	t.Log("Group-based upload/download succeeded for /projects/physics")
+
+	// ----- Step 9: Negative authorization — access /restricted -----
+	// The testuser's token is scoped to /users/testuser and has NO scopes for
+	// /restricted (which requires the "privilegeduser" account). The origin
+	// must reject the request.
+	//
+	// We use a raw HTTP GET against the origin's data endpoint rather than the
+	// Pelican client, because the client falls back to the origin's local
+	// signing key when the supplied token is insufficient.
+	//
+	// First, pre-create a file in the restricted storage directory so that a
+	// successful GET would return data (ruling out 404).
+	require.NoError(t, os.WriteFile(filepath.Join(restrictedDir, "secret.txt"),
+		[]byte("top secret"), 0644))
+
+	restrictedDataURL := fmt.Sprintf("%s/api/v1.0/origin/data/restricted/secret.txt", serverURL)
+	req, err := http.NewRequest("GET", restrictedDataURL, nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+tokenRespData.AccessToken)
+	negResp, err := httpClient.Do(req)
+	require.NoError(t, err)
+	_, _ = io.ReadAll(negResp.Body)
+	negResp.Body.Close()
+	assert.True(t, negResp.StatusCode == http.StatusForbidden || negResp.StatusCode == http.StatusUnauthorized,
+		"GET /restricted with testuser token should return 401 or 403, got %d", negResp.StatusCode)
+	t.Logf("Negative test passed: origin returned %d for /restricted with testuser's token", negResp.StatusCode)
+
+	// ----- Step 10: Token refresh -----
+	// Use the refresh_token grant to obtain a new access token, then prove
+	// the refreshed token is valid for real data transfers.
+	refreshForm := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {tokenRespData.RefreshToken},
+		"client_id":     {dcrResp.ClientID},
+		"client_secret": {dcrResp.ClientSecret},
+	}
+	resp, err = httpClient.PostForm(tokenURL, refreshForm)
+	require.NoError(t, err)
+	refreshBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode,
+		"Token refresh should return 200: %s", string(refreshBody))
+
+	var refreshRespData struct {
+		AccessToken  string `json:"access_token"`
+		TokenType    string `json:"token_type"`
+		ExpiresIn    int    `json:"expires_in"`
+		Scope        string `json:"scope"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	require.NoError(t, json.Unmarshal(refreshBody, &refreshRespData))
+	require.NotEmpty(t, refreshRespData.AccessToken, "Refreshed access token must not be empty")
+	assert.NotEqual(t, tokenRespData.AccessToken, refreshRespData.AccessToken,
+		"Refreshed access token should differ from the original")
+	t.Logf("Token refresh succeeded. New token type=%s expires_in=%d",
+		refreshRespData.TokenType, refreshRespData.ExpiresIn)
+
+	// Validate the refreshed token also conforms to WLCG profile.
+	refreshClaims := validateWLCGToken(t, refreshRespData.AccessToken, issuerURL)
+	assert.Equal(t, "testuser", refreshClaims["sub"],
+		"Refreshed token subject should still be testuser")
+
+	// Prove the refreshed token works for a real transfer.
+	refreshContent := "Content uploaded with refreshed token"
+	refreshFile := filepath.Join(localTmpDir, "refreshed_upload.txt")
+	require.NoError(t, os.WriteFile(refreshFile, []byte(refreshContent), 0644))
+
+	refreshUploadURL := fmt.Sprintf("pelican://%s:%d/users/testuser/refreshed_upload.txt",
+		hostname, port)
+	refreshUploadResults, err := client.DoPut(ft.Ctx, refreshFile, refreshUploadURL, false,
+		client.WithToken(refreshRespData.AccessToken))
+	require.NoError(t, err, "Upload with refreshed token should succeed")
+	require.NotEmpty(t, refreshUploadResults)
+	assert.Greater(t, refreshUploadResults[0].TransferredBytes, int64(0))
+
+	refreshDownloadFile := filepath.Join(localTmpDir, "refreshed_downloaded.txt")
+	refreshDownloadResults, err := client.DoGet(ft.Ctx, refreshUploadURL, refreshDownloadFile, false,
+		client.WithToken(refreshRespData.AccessToken))
+	require.NoError(t, err, "Download with refreshed token should succeed")
+	require.NotEmpty(t, refreshDownloadResults)
+
+	refreshDownloaded, err := os.ReadFile(refreshDownloadFile)
+	require.NoError(t, err)
+	assert.Equal(t, refreshContent, string(refreshDownloaded),
+		"Content downloaded with refreshed token should match uploaded")
+	t.Log("Token refresh flow verified: refreshed access token is valid for real transfers")
+
+	t.Log("E2E device code flow complete: non-admin user, $USER templates, $GROUP templates, negative authz, token refresh — all verified")
 }
 
 // ----- Helper functions -----
@@ -338,9 +545,28 @@ func extractCSRFFromHTML(t *testing.T, html string) string {
 	return ""
 }
 
+// extractScopeString extracts the scope claim from JWT claims as a single
+// space-separated string, handling both string and array representations.
+func extractScopeString(claims map[string]interface{}) string {
+	switch s := claims["scope"].(type) {
+	case string:
+		return s
+	case []interface{}:
+		parts := make([]string, 0, len(s))
+		for _, v := range s {
+			if str, ok := v.(string); ok {
+				parts = append(parts, str)
+			}
+		}
+		return strings.Join(parts, " ")
+	}
+	return ""
+}
+
 // validateWLCGToken decodes the JWT (without signature verification, since
 // we're testing the structure) and asserts the required WLCG profile fields.
-func validateWLCGToken(t *testing.T, tokenStr string, expectedIssuer string) {
+// It returns the claims map so callers can make additional assertions.
+func validateWLCGToken(t *testing.T, tokenStr string, expectedIssuer string) map[string]interface{} {
 	t.Helper()
 
 	// Split JWT into parts
@@ -357,10 +583,9 @@ func validateWLCGToken(t *testing.T, tokenStr string, expectedIssuer string) {
 	// WLCG profile requirements:
 	// - iss: must match the issuer URL
 	// - sub: must be present
-	// - iat, exp, nbf: must be present
+	// - iat, exp: must be present
 	// - wlcg.ver: should be "1.0"
 	// - scope: should contain storage scopes
-
 	assert.Equal(t, expectedIssuer, claims["iss"], "Token issuer must match server URL")
 	assert.NotEmpty(t, claims["sub"], "Token must have a subject")
 	assert.NotNil(t, claims["iat"], "Token must have iat (issued-at)")
@@ -374,25 +599,10 @@ func validateWLCGToken(t *testing.T, tokenStr string, expectedIssuer string) {
 	}
 
 	// Check scope claim contains storage scopes
-	// The scope may be a string (space-separated) or an array of strings
-	var scopeStr string
-	switch s := claims["scope"].(type) {
-	case string:
-		scopeStr = s
-	case []interface{}:
-		parts := make([]string, 0, len(s))
-		for _, v := range s {
-			if str, ok := v.(string); ok {
-				parts = append(parts, str)
-			}
-		}
-		scopeStr = strings.Join(parts, " ")
-	}
+	scopeStr := extractScopeString(claims)
 	assert.NotEmpty(t, scopeStr, "Token should have a scope claim")
 	if scopeStr != "" {
 		t.Logf("Token scopes: %s", scopeStr)
-		// With our authz template giving admin read/write/create on /test,
-		// and the broad scope expansion, we should see at least storage.read:/test
 		assert.True(t,
 			strings.Contains(scopeStr, "storage.read:") ||
 				strings.Contains(scopeStr, "storage.modify:") ||
@@ -400,6 +610,8 @@ func validateWLCGToken(t *testing.T, tokenStr string, expectedIssuer string) {
 			"Token scope should contain storage scopes, got: %s", scopeStr)
 	}
 
-	t.Logf("WLCG token validation passed: iss=%v sub=%v wlcg.ver=%v scope=%v",
-		claims["iss"], claims["sub"], claims["wlcg.ver"], claims["scope"])
+	t.Logf("WLCG token validation passed: iss=%v sub=%v wlcg.ver=%v",
+		claims["iss"], claims["sub"], claims["wlcg.ver"])
+
+	return claims
 }
