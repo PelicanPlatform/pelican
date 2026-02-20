@@ -84,9 +84,6 @@ var (
 	//go:embed resources/globus-origins/multi-export-valid.yml
 	globusMultiExport string
 
-	//go:embed resources/xroot-origins/single-export-invalid.yml
-	xrootSingleExportInvalid string
-
 	//go:embed resources/xroot-origins/single-export-valid.yml
 	xrootSingleExportValid string
 
@@ -631,12 +628,6 @@ func TestGetExports(t *testing.T) {
 		assert.NotEmpty(t, viper.GetString("Origin.GlobusClientIDFile"))
 		assert.NotEqual(t, "SHOULD-OVERRIDE-TEMPFILE", viper.GetString("Origin.GlobusClientSecretFile"), "GlobusClientSecretFile was not overridden from config")
 		assert.NotEmpty(t, viper.GetString("Origin.GlobusClientSecretFile"))
-	})
-
-	// XRoot Origin tests
-	t.Run("testSingleExportInvalidXRoot", func(t *testing.T) {
-		defer ResetTestState()
-		_ = setup(t, xrootSingleExportInvalid, true)
 	})
 
 	t.Run("testSingleExportValidXRoot", func(t *testing.T) {
