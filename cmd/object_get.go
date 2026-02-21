@@ -299,6 +299,7 @@ func getMain(cmd *cobra.Command, args []string) {
 			client.WithCaches(caches...),
 			client.WithInPlace(inPlace),
 			client.WithDryRun(dryRun),
+			client.WithRejectCollections(!isRecursive),
 		}
 		transferResults, err := client.DoGet(ctx, src, dest, isRecursive, options...)
 		if err != nil {
