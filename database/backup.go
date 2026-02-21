@@ -30,7 +30,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/user"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -47,6 +49,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/version"
 )
 
 const (
@@ -62,8 +65,9 @@ const (
 	chunkSize = 16 * 1024
 
 	// PEM block types used in the backup format.
-	pemTypeKey  = "ENCRYPTED BACKUP KEY"
-	pemTypeData = "ENCRYPTED BACKUP DATA"
+	pemTypeMetadata = "BACKUP METADATA"
+	pemTypeKey      = "ENCRYPTED BACKUP KEY"
+	pemTypeData     = "ENCRYPTED BACKUP DATA"
 
 	// backupTimestampFormat is the Go reference-time layout used in backup
 	// filenames. It produces strings like "2026-01-02T150405".
@@ -89,6 +93,129 @@ type ErrNoMatchingKey struct {
 func (e *ErrNoMatchingKey) Error() string {
 	return fmt.Sprintf("failed to decrypt backup: no matching issuer key found; backup was encrypted with key(s): %s",
 		strings.Join(e.RequiredKeyIDs, ", "))
+}
+
+// BackupMetadata contains human-readable information about a backup file.
+// These fields are stored as PEM headers in the first block of the backup
+// file and are visible even without decryption keys.
+type BackupMetadata struct {
+	// FormatVersion is the backup format version (currently "1").
+	FormatVersion string `json:"format_version"`
+	// Timestamp is the RFC3339 UTC time the backup was created.
+	Timestamp string `json:"timestamp"`
+	// Hostname is the hostname of the machine that created the backup.
+	Hostname string `json:"hostname,omitempty"`
+	// Username is the OS user that created the backup.
+	Username string `json:"username,omitempty"`
+	// PelicanVersion is the version of Pelican that created the backup.
+	PelicanVersion string `json:"pelican_version"`
+	// ServerURL is the external web URL of the server, if configured.
+	ServerURL string `json:"server_url,omitempty"`
+	// DatabasePath is the path to the database that was backed up.
+	DatabasePath string `json:"database_path,omitempty"`
+	// GOOS is the operating system (e.g., "linux", "darwin").
+	GOOS string `json:"goos"`
+	// GOARCH is the architecture (e.g., "amd64", "arm64").
+	GOARCH string `json:"goarch"`
+}
+
+// collectBackupMetadata gathers metadata about the current system and
+// database being backed up.
+func collectBackupMetadata(dbPath string) BackupMetadata {
+	meta := BackupMetadata{
+		FormatVersion:  "1",
+		Timestamp:      time.Now().UTC().Format(time.RFC3339),
+		PelicanVersion: version.GetVersion(),
+		DatabasePath:   dbPath,
+		GOOS:           runtime.GOOS,
+		GOARCH:         runtime.GOARCH,
+	}
+	if h, err := os.Hostname(); err == nil {
+		meta.Hostname = h
+	}
+	if u, err := user.Current(); err == nil {
+		meta.Username = u.Username
+	}
+	if url := param.Server_ExternalWebUrl.GetString(); url != "" {
+		meta.ServerURL = url
+	}
+	return meta
+}
+
+// writeBackupMetadata writes a plaintext BACKUP METADATA PEM block to w.
+// All information is stored in PEM headers so it is human-readable with
+// any text viewer.
+func writeBackupMetadata(w io.Writer, meta BackupMetadata) error {
+	headers := map[string]string{
+		"Format-Version":  meta.FormatVersion,
+		"Timestamp":       meta.Timestamp,
+		"Pelican-Version": meta.PelicanVersion,
+		"GOOS":            meta.GOOS,
+		"GOARCH":          meta.GOARCH,
+	}
+	if meta.Hostname != "" {
+		headers["Hostname"] = meta.Hostname
+	}
+	if meta.Username != "" {
+		headers["Username"] = meta.Username
+	}
+	if meta.ServerURL != "" {
+		headers["Server-URL"] = meta.ServerURL
+	}
+	if meta.DatabasePath != "" {
+		headers["Database-Path"] = meta.DatabasePath
+	}
+	block := &pem.Block{
+		Type:    pemTypeMetadata,
+		Headers: headers,
+		Bytes:   nil,
+	}
+	return pem.Encode(w, block)
+}
+
+// readBackupMetadata reads the BACKUP METADATA PEM block from a backup file.
+// It returns the metadata and any error encountered. The file is rewound to
+// the beginning on success or failure, provided r supports Seek.
+func readBackupMetadata(r io.ReadSeeker) (*BackupMetadata, error) {
+	decoder := newPEMStreamDecoder(r)
+	block, err := decoder.next()
+	if err != nil {
+		if _, seekErr := r.Seek(0, io.SeekStart); seekErr != nil {
+			return nil, errors.Wrap(seekErr, "failed to rewind file after metadata read error")
+		}
+		return nil, errors.Wrap(err, "failed to read first PEM block")
+	}
+	if _, seekErr := r.Seek(0, io.SeekStart); seekErr != nil {
+		return nil, errors.Wrap(seekErr, "failed to rewind file after reading metadata")
+	}
+	if block.Type != pemTypeMetadata {
+		// Older format without metadata block — not an error.
+		return nil, nil
+	}
+	meta := &BackupMetadata{
+		FormatVersion:  block.Headers["Format-Version"],
+		Timestamp:      block.Headers["Timestamp"],
+		Hostname:       block.Headers["Hostname"],
+		Username:       block.Headers["Username"],
+		PelicanVersion: block.Headers["Pelican-Version"],
+		ServerURL:      block.Headers["Server-URL"],
+		DatabasePath:   block.Headers["Database-Path"],
+		GOOS:           block.Headers["GOOS"],
+		GOARCH:         block.Headers["GOARCH"],
+	}
+	return meta, nil
+}
+
+// ReadBackupMetadata reads the metadata from a backup file at the given path.
+// It returns nil (without error) for older backup files that lack a metadata
+// block.
+func ReadBackupMetadata(backupPath string) (*BackupMetadata, error) {
+	f, err := os.Open(backupPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to open backup file %s", backupPath)
+	}
+	defer f.Close()
+	return readBackupMetadata(f)
 }
 
 // deriveBackupKeyPair derives a Curve25519 key pair from an issuer JWK using
@@ -310,6 +437,12 @@ func createBackup(ctx context.Context) error {
 		tmpBackupFile.Close()
 		os.Remove(tmpBackupPath) // clean up on failure; no-op after rename
 	}()
+
+	// Write the metadata PEM block first (human-readable, unencrypted).
+	meta := collectBackupMetadata(dbPath)
+	if err := writeBackupMetadata(tmpBackupFile, meta); err != nil {
+		return errors.Wrap(err, "failed to write backup metadata block")
+	}
 
 	// Write the encrypted key PEM blocks.
 	dekAndNonce := make([]byte, 56) // 32-byte DEK + 24-byte nonce
@@ -750,10 +883,11 @@ func restoreFromSingleBackup(dbPath, backupPath string, issuerKeys map[string]jw
 // BackupInfo holds metadata about a backup file, suitable for display in
 // CLI listings.
 type BackupInfo struct {
-	Name      string    `json:"name"`
-	Path      string    `json:"path"`
-	Size      int64     `json:"size"`
-	Timestamp time.Time `json:"timestamp"`
+	Name      string          `json:"name"`
+	Path      string          `json:"path"`
+	Size      int64           `json:"size"`
+	Timestamp time.Time       `json:"timestamp"`
+	Metadata  *BackupMetadata `json:"metadata,omitempty"`
 }
 
 // CreateBackup creates a compressed and encrypted backup of the database.
@@ -981,12 +1115,17 @@ func ListBackups() ([]BackupInfo, error) {
 		tsStr = strings.TrimSuffix(tsStr, backupFileExt)
 		ts, _ := time.Parse(backupTimestampFormat, tsStr)
 
-		backups = append(backups, BackupInfo{
+		fullPath := filepath.Join(backupDir, name)
+		bi := BackupInfo{
 			Name:      name,
-			Path:      filepath.Join(backupDir, name),
+			Path:      fullPath,
 			Size:      info.Size(),
 			Timestamp: ts,
-		})
+		}
+		if meta, err := ReadBackupMetadata(fullPath); err == nil && meta != nil {
+			bi.Metadata = meta
+		}
+		backups = append(backups, bi)
 	}
 
 	// Sort newest-first.
