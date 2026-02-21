@@ -54,6 +54,9 @@ func setupMasterKeyDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
+	// Close the underlying SQL connection before TempDir cleanup so that
+	// Windows can delete the SQLite file (it keeps file handles open).
+	t.Cleanup(func() { sqlDB.Close() })
 	require.NoError(t, utils.MigrateDB(sqlDB, EmbedUniversalMigrations, "universal_migrations"))
 	return db
 }
