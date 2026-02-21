@@ -19,23 +19,28 @@
 package database
 
 import (
-	"bytes"
+	"bufio"
 	"compress/gzip"
 	"context"
 	"crypto/rand"
-	"encoding/base64"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/binary"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/crypto/curve25519"
+	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/crypto/nacl/secretbox"
 	"golang.org/x/sync/errgroup"
@@ -47,190 +52,190 @@ import (
 const (
 	backupFilePrefix = "pelican-db-backup-"
 	backupFileExt    = ".bak"
+	backupTempPrefix = "pelican-db-backup-"
+	backupTempSuffix = ".tmp"
+	vacuumTempPrefix = "pelican-db-vacuum-"
+
+	// chunkSize is the maximum plaintext size per encrypted chunk.
+	// NaCl secretbox docs recommend not encrypting large messages in a single
+	// call; 16 KiB chunks are a safe choice.
+	chunkSize = 16 * 1024
+
+	// PEM block types used in the backup format.
+	pemTypeKey  = "ENCRYPTED BACKUP KEY"
+	pemTypeData = "ENCRYPTED BACKUP DATA"
+
+	// backupTimestampFormat is the Go reference-time layout used in backup
+	// filenames. It produces strings like "2026-01-02T150405".
+	backupTimestampFormat = "2006-01-02T150405"
+
+	// tempFileMaxAge is the maximum age of temporary files before they are
+	// cleaned up by rotateBackups.
+	tempFileMaxAge = 1 * time.Hour
 )
 
-// encryptBackup encrypts the compressed database backup data.
-// It generates a random data encryption key (DEK), encrypts the data with it,
-// then wraps the DEK with each issuer key so any key can decrypt.
+// ErrDatabaseExists is returned by RestoreFromSpecificBackup when the
+// target database file already exists and force is false.
+var ErrDatabaseExists = errors.New("database already exists at restore target")
+
+// ErrNoMatchingKey is returned when a backup cannot be decrypted because
+// none of the currently-available issuer keys match the keys used to
+// encrypt the backup. The RequiredKeyIDs field lists the key IDs that
+// the backup was encrypted with.
+type ErrNoMatchingKey struct {
+	RequiredKeyIDs []string
+}
+
+func (e *ErrNoMatchingKey) Error() string {
+	return fmt.Sprintf("failed to decrypt backup: no matching issuer key found; backup was encrypted with key(s): %s",
+		strings.Join(e.RequiredKeyIDs, ", "))
+}
+
+// deriveBackupKeyPair derives a Curve25519 key pair from an issuer JWK using
+// HKDF-SHA256.
+func deriveBackupKeyPair(issuerKey jwk.Key) (privateKey, publicKey *[32]byte, err error) {
+	var rawKey any
+	if err := issuerKey.Raw(&rawKey); err != nil {
+		return nil, nil, errors.Wrap(err, "failed to extract raw key from JWK")
+	}
+
+	derPrivateKey, err := x509.MarshalPKCS8PrivateKey(rawKey)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "failed to marshal private key to PKCS8")
+	}
+
+	// Use HKDF-SHA256 to derive a 32-byte Curve25519 private key.
+	// The info string binds the derived key to backup encryption usage.
+	hkdfReader := hkdf.New(sha256.New, derPrivateKey, nil, []byte("pelican-backup-encryption"))
+
+	privateKey = new([32]byte)
+	if _, err := io.ReadFull(hkdfReader, privateKey[:]); err != nil {
+		return nil, nil, errors.Wrap(err, "failed to derive key via HKDF")
+	}
+
+	publicKey = new([32]byte)
+	curve25519.ScalarBaseMult(publicKey, privateKey)
+
+	return privateKey, publicKey, nil
+}
+
+// encryptedChunkWriter implements io.WriteCloser. Data written to it is
+// buffered into chunkSize pieces, each encrypted with NaCl secretbox and
+// emitted as a PEM block of type pemTypeData.
 //
-// Format:
-//
-//	[4 bytes: key count N]
-//	For each key:
-//	  [4 bytes: keyID length][keyID bytes][4 bytes: encrypted DEK length][encrypted DEK bytes]
-//	[encrypted data]
-func encryptBackup(data []byte, issuerKeys map[string]jwk.Key) ([]byte, error) {
+// For each chunk, the nonce is the base nonce XOR'd with the 1-based chunk
+// sequence number (big-endian in the first 8 bytes).
+type encryptedChunkWriter struct {
+	dest     io.Writer
+	dek      [32]byte
+	nonce    [24]byte
+	chunkNum uint64
+	buf      []byte
+}
+
+func newEncryptedChunkWriter(dest io.Writer, dek [32]byte, nonce [24]byte) *encryptedChunkWriter {
+	return &encryptedChunkWriter{
+		dest:  dest,
+		dek:   dek,
+		nonce: nonce,
+	}
+}
+
+func (w *encryptedChunkWriter) Write(p []byte) (int, error) {
+	total := len(p)
+	w.buf = append(w.buf, p...)
+	for len(w.buf) >= chunkSize {
+		if err := w.flushChunk(w.buf[:chunkSize]); err != nil {
+			return 0, err
+		}
+		w.buf = append([]byte(nil), w.buf[chunkSize:]...) // shrink underlying array
+	}
+	return total, nil
+}
+
+// Close flushes any remaining buffered data as a final chunk.
+func (w *encryptedChunkWriter) Close() error {
+	if len(w.buf) > 0 {
+		return w.flushChunk(w.buf)
+	}
+	return nil
+}
+
+// flushChunk encrypts one chunk and writes a PEM block to the destination.
+func (w *encryptedChunkWriter) flushChunk(data []byte) error {
+	w.chunkNum++
+
+	// Derive per-chunk nonce: base nonce XOR'd with the chunk number.
+	var chunkNonce [24]byte
+	copy(chunkNonce[:], w.nonce[:])
+	var numBuf [8]byte
+	binary.BigEndian.PutUint64(numBuf[:], w.chunkNum)
+	for i := 0; i < 8; i++ {
+		chunkNonce[i] ^= numBuf[i]
+	}
+
+	encrypted := secretbox.Seal(nil, data, &chunkNonce, &w.dek)
+
+	block := &pem.Block{
+		Type: pemTypeData,
+		Headers: map[string]string{
+			"Chunk": strconv.FormatUint(w.chunkNum, 10),
+		},
+		Bytes: encrypted,
+	}
+	return pem.Encode(w.dest, block)
+}
+
+// writeEncryptedKeys writes PEM blocks containing the DEK+nonce encrypted
+// with each issuer key via NaCl box.
+func writeEncryptedKeys(dest io.Writer, dekAndNonce []byte, issuerKeys map[string]jwk.Key) error {
 	if len(issuerKeys) == 0 {
-		return nil, errors.New("no issuer keys available for encryption")
+		return errors.New("no issuer keys available for encryption")
 	}
 
-	// Generate a random data encryption key (DEK) and nonce
-	var dek [32]byte
-	if _, err := io.ReadFull(rand.Reader, dek[:]); err != nil {
-		return nil, errors.Wrap(err, "failed to generate data encryption key")
-	}
-	var dataNonce [24]byte
-	if _, err := io.ReadFull(rand.Reader, dataNonce[:]); err != nil {
-		return nil, errors.Wrap(err, "failed to generate data nonce")
-	}
-
-	// Encrypt data with DEK using NaCl secretbox (symmetric encryption)
-	encryptedData := secretbox.Seal(nil, data, &dataNonce, &dek)
-
-	var buf bytes.Buffer
-
-	// Write key count
-	keyCount := uint32(len(issuerKeys))
-	if err := binary.Write(&buf, binary.BigEndian, keyCount); err != nil {
-		return nil, errors.Wrap(err, "failed to write key count")
-	}
-
-	// Sort key IDs for deterministic output
+	// Sort key IDs for deterministic output.
 	keyIDs := make([]string, 0, len(issuerKeys))
 	for keyID := range issuerKeys {
 		keyIDs = append(keyIDs, keyID)
 	}
 	sort.Strings(keyIDs)
 
-	// For each issuer key, encrypt the DEK+nonce
-	dekAndNonce := append(dek[:], dataNonce[:]...)
 	for _, keyID := range keyIDs {
 		issuerKey := issuerKeys[keyID]
 
-		privKey, pubKey, err := config.GetEncryptionKeyPair(issuerKey)
+		privKey, pubKey, err := deriveBackupKeyPair(issuerKey)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to get encryption key pair for key %s", keyID)
+			return errors.Wrapf(err, "failed to derive key pair for key %s", keyID)
 		}
 
-		// Encrypt DEK+nonce with this issuer key pair
+		// Encrypt DEK+nonce. The box nonce is prepended to the ciphertext.
 		var keyNonce [24]byte
 		if _, err := io.ReadFull(rand.Reader, keyNonce[:]); err != nil {
-			return nil, errors.Wrap(err, "failed to generate key nonce")
+			return errors.Wrap(err, "failed to generate key nonce")
 		}
 		encryptedDEK := box.Seal(keyNonce[:], dekAndNonce, &keyNonce, pubKey, privKey)
 
-		// Write keyID
-		keyIDBytes := []byte(keyID)
-		if err := binary.Write(&buf, binary.BigEndian, uint32(len(keyIDBytes))); err != nil {
-			return nil, err
+		block := &pem.Block{
+			Type: pemTypeKey,
+			Headers: map[string]string{
+				"Key-Id": keyID,
+			},
+			Bytes: encryptedDEK,
 		}
-		buf.Write(keyIDBytes)
-
-		// Write encrypted DEK
-		if err := binary.Write(&buf, binary.BigEndian, uint32(len(encryptedDEK))); err != nil {
-			return nil, err
+		if err := pem.Encode(dest, block); err != nil {
+			return errors.Wrapf(err, "failed to write PEM key block for %s", keyID)
 		}
-		buf.Write(encryptedDEK)
 	}
 
-	// Write encrypted data
-	buf.Write(encryptedData)
-
-	return buf.Bytes(), nil
+	return nil
 }
 
-// decryptBackup decrypts a backup file using the available issuer keys.
-func decryptBackup(encryptedData []byte, issuerKeys map[string]jwk.Key) ([]byte, error) {
-	if len(issuerKeys) == 0 {
-		return nil, errors.New("no issuer keys available for decryption")
-	}
-
-	buf := bytes.NewReader(encryptedData)
-
-	// Read key count
-	var keyCount uint32
-	if err := binary.Read(buf, binary.BigEndian, &keyCount); err != nil {
-		return nil, errors.Wrap(err, "failed to read key count from backup")
-	}
-
-	// Read each encrypted DEK entry and try to decrypt
-	var decryptedDEKAndNonce []byte
-	for i := uint32(0); i < keyCount; i++ {
-		// Read keyID
-		var keyIDLen uint32
-		if err := binary.Read(buf, binary.BigEndian, &keyIDLen); err != nil {
-			return nil, errors.Wrap(err, "failed to read key ID length")
-		}
-		keyIDBytes := make([]byte, keyIDLen)
-		if _, err := io.ReadFull(buf, keyIDBytes); err != nil {
-			return nil, errors.Wrap(err, "failed to read key ID")
-		}
-		keyID := string(keyIDBytes)
-
-		// Read encrypted DEK
-		var encDEKLen uint32
-		if err := binary.Read(buf, binary.BigEndian, &encDEKLen); err != nil {
-			return nil, errors.Wrap(err, "failed to read encrypted DEK length")
-		}
-		encDEK := make([]byte, encDEKLen)
-		if _, err := io.ReadFull(buf, encDEK); err != nil {
-			return nil, errors.Wrap(err, "failed to read encrypted DEK")
-		}
-
-		// Skip if already decrypted
-		if decryptedDEKAndNonce != nil {
-			continue
-		}
-
-		// Try to decrypt with matching issuer key
-		issuerKey, found := issuerKeys[keyID]
-		if !found {
-			continue
-		}
-
-		privKey, pubKey, err := config.GetEncryptionKeyPair(issuerKey)
-		if err != nil {
-			log.Debugf("Failed to get encryption key pair for key %s: %v", keyID, err)
-			continue
-		}
-
-		// Extract nonce from first 24 bytes
-		if len(encDEK) < 24 {
-			continue
-		}
-		var keyNonce [24]byte
-		copy(keyNonce[:], encDEK[:24])
-
-		dekAndNonce, ok := box.Open(nil, encDEK[24:], &keyNonce, pubKey, privKey)
-		if !ok {
-			log.Debugf("Failed to decrypt DEK with key %s", keyID)
-			continue
-		}
-		decryptedDEKAndNonce = dekAndNonce
-	}
-
-	if decryptedDEKAndNonce == nil {
-		return nil, errors.New("failed to decrypt backup: no matching issuer key found")
-	}
-
-	if len(decryptedDEKAndNonce) != 56 { // 32 bytes DEK + 24 bytes nonce
-		return nil, errors.New("invalid decrypted DEK+nonce length")
-	}
-
-	var dek [32]byte
-	copy(dek[:], decryptedDEKAndNonce[:32])
-	var dataNonce [24]byte
-	copy(dataNonce[:], decryptedDEKAndNonce[32:])
-
-	// Read remaining encrypted data
-	remainingData, err := io.ReadAll(buf)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to read encrypted data")
-	}
-
-	// Decrypt the data using NaCl secretbox (symmetric decryption)
-	decrypted, ok := secretbox.Open(nil, remainingData, &dataNonce, &dek)
-	if !ok {
-		return nil, errors.New("failed to decrypt backup data")
-	}
-
-	return decrypted, nil
-}
-
-// CreateBackup creates a compressed and encrypted backup of the SQLite database.
-// It uses VACUUM INTO for an atomic snapshot, then compresses with gzip and encrypts
-// with all available issuer keys.
-func CreateBackup(ctx context.Context) error {
+// createBackup creates a compressed and encrypted backup of the SQLite database.
+// It uses VACUUM INTO for an atomic snapshot, then streams the data through
+// gzip compression and chunked NaCl secretbox encryption, writing the result
+// as a sequence of PEM blocks. The final file is written atomically via
+// rename.
+func createBackup(ctx context.Context) error {
 	dbPath := param.Server_DbLocation.GetString()
 	backupDir := param.Server_DatabaseBackup_Location.GetString()
 
@@ -245,70 +250,111 @@ func CreateBackup(ctx context.Context) error {
 		return errors.New("server database is not initialized")
 	}
 
-	// Get issuer keys for encryption
+	// Get issuer keys for encryption.
 	allKeys := config.GetIssuerPrivateKeys()
 	if len(allKeys) == 0 {
 		return errors.New("no issuer keys available for backup encryption")
 	}
 
-	// Ensure backup directory exists
+	// Ensure backup directory exists.
 	if err := os.MkdirAll(backupDir, 0750); err != nil {
 		return errors.Wrapf(err, "failed to create backup directory %s", backupDir)
 	}
 
-	// Create a temporary file path for the VACUUM INTO output
-	tempPath := filepath.Join(backupDir, fmt.Sprintf("pelican-db-vacuum-%d.sqlite", time.Now().UnixNano()))
-	defer os.Remove(tempPath)
+	// Create a temporary file for the VACUUM INTO output.
+	vacuumFile, err := os.CreateTemp(backupDir, vacuumTempPrefix+"*.sqlite")
+	if err != nil {
+		return errors.Wrap(err, "failed to create temporary vacuum file")
+	}
+	vacuumPath := vacuumFile.Name()
+	vacuumFile.Close()
+	os.Remove(vacuumPath) // VACUUM INTO needs the file to not exist
+	defer os.Remove(vacuumPath)
 
-	// Use VACUUM INTO for atomic backup
+	// Use VACUUM INTO for an atomic database snapshot.
 	sqlDB, err := ServerDatabase.DB()
 	if err != nil {
 		return errors.Wrap(err, "failed to get underlying SQL database")
 	}
 
-	vacuumSQL := fmt.Sprintf("VACUUM INTO '%s'", tempPath)
-	if _, err := sqlDB.ExecContext(ctx, vacuumSQL); err != nil {
+	// Escape any single quotes in the path to prevent SQL injection.
+	escapedPath := strings.ReplaceAll(vacuumPath, "'", "''")
+	if _, err := sqlDB.ExecContext(ctx, "VACUUM INTO '"+escapedPath+"'"); err != nil {
 		return errors.Wrap(err, "failed to create database backup via VACUUM INTO")
 	}
 
-	// Read the vacuumed database file
-	rawData, err := os.ReadFile(tempPath)
+	// Open the vacuumed database for streaming.
+	sourceFile, err := os.Open(vacuumPath)
 	if err != nil {
-		return errors.Wrap(err, "failed to read vacuumed database file")
+		return errors.Wrap(err, "failed to open vacuumed database file")
+	}
+	defer sourceFile.Close()
+
+	// Generate a random data encryption key (DEK) and base nonce.
+	var dek [32]byte
+	if _, err := io.ReadFull(rand.Reader, dek[:]); err != nil {
+		return errors.Wrap(err, "failed to generate data encryption key")
+	}
+	var baseNonce [24]byte
+	if _, err := io.ReadFull(rand.Reader, baseNonce[:]); err != nil {
+		return errors.Wrap(err, "failed to generate base nonce")
 	}
 
-	// Compress with gzip
-	var compressed bytes.Buffer
-	gzWriter, err := gzip.NewWriterLevel(&compressed, gzip.BestCompression)
+	// Create a temporary file for the backup output (atomic write via rename).
+	tmpBackupFile, err := os.CreateTemp(backupDir, backupTempPrefix+"*.tmp")
+	if err != nil {
+		return errors.Wrap(err, "failed to create temporary backup file")
+	}
+	tmpBackupPath := tmpBackupFile.Name()
+	defer func() {
+		tmpBackupFile.Close()
+		os.Remove(tmpBackupPath) // clean up on failure; no-op after rename
+	}()
+
+	// Write the encrypted key PEM blocks.
+	dekAndNonce := make([]byte, 56) // 32-byte DEK + 24-byte nonce
+	copy(dekAndNonce[:32], dek[:])
+	copy(dekAndNonce[32:], baseNonce[:])
+	if err := writeEncryptedKeys(tmpBackupFile, dekAndNonce, allKeys); err != nil {
+		return errors.Wrap(err, "failed to write encrypted key blocks")
+	}
+
+	// Stream: source file → gzip → encrypted chunk writer → PEM → temp file
+	chunkWriter := newEncryptedChunkWriter(tmpBackupFile, dek, baseNonce)
+	gzWriter, err := gzip.NewWriterLevel(chunkWriter, gzip.BestCompression)
 	if err != nil {
 		return errors.Wrap(err, "failed to create gzip writer")
 	}
-	if _, err := gzWriter.Write(rawData); err != nil {
-		return errors.Wrap(err, "failed to compress backup data")
+	if _, err := io.Copy(gzWriter, sourceFile); err != nil {
+		return errors.Wrap(err, "failed to compress and encrypt backup data")
 	}
 	if err := gzWriter.Close(); err != nil {
 		return errors.Wrap(err, "failed to finalize gzip compression")
 	}
-
-	// Encrypt the compressed data
-	encrypted, err := encryptBackup(compressed.Bytes(), allKeys)
-	if err != nil {
-		return errors.Wrap(err, "failed to encrypt backup")
+	if err := chunkWriter.Close(); err != nil {
+		return errors.Wrap(err, "failed to finalize encrypted chunk writer")
 	}
 
-	// Write the final backup file with base64 encoding
-	timestamp := time.Now().UTC().Format("20060102-150405")
+	// Sync and close before rename.
+	if err := tmpBackupFile.Sync(); err != nil {
+		return errors.Wrap(err, "failed to sync temporary backup file")
+	}
+	if err := tmpBackupFile.Close(); err != nil {
+		return errors.Wrap(err, "failed to close temporary backup file")
+	}
+
+	// Atomically move the temporary file to the final backup path.
+	timestamp := time.Now().UTC().Format(backupTimestampFormat)
 	backupFileName := fmt.Sprintf("%s%s%s", backupFilePrefix, timestamp, backupFileExt)
 	backupPath := filepath.Join(backupDir, backupFileName)
 
-	encoded := base64.StdEncoding.EncodeToString(encrypted)
-	if err := os.WriteFile(backupPath, []byte(encoded), 0600); err != nil {
-		return errors.Wrapf(err, "failed to write backup file %s", backupPath)
+	if err := os.Rename(tmpBackupPath, backupPath); err != nil {
+		return errors.Wrapf(err, "failed to rename temporary backup to %s", backupPath)
 	}
 
 	log.Infof("Database backup created: %s", backupPath)
 
-	// Rotate old backups
+	// Rotate old backups.
 	if err := rotateBackups(backupDir); err != nil {
 		log.Warnf("Failed to rotate old backups: %v", err)
 	}
@@ -316,19 +362,50 @@ func CreateBackup(ctx context.Context) error {
 	return nil
 }
 
-// rotateBackups removes old backup files that exceed the configured maximum count.
+// rotateBackups removes old backup files that exceed the configured maximum
+// count. It also removes stale temporary files (from interrupted backups)
+// that are older than tempFileMaxAge.
 func rotateBackups(backupDir string) error {
 	maxCount := param.Server_DatabaseBackup_MaxCount.GetInt()
-	if maxCount <= 0 {
-		return nil
-	}
 
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
 		return errors.Wrapf(err, "failed to read backup directory %s", backupDir)
 	}
 
-	// Collect backup files
+	now := time.Now()
+
+	// Clean up stale temporary files from interrupted backups.
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		isTemp := strings.HasSuffix(name, backupTempSuffix) ||
+			strings.HasPrefix(name, vacuumTempPrefix)
+		if !isTemp {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			log.Debugf("Failed to stat temp file %s: %v", name, err)
+			continue
+		}
+		if now.Sub(info.ModTime()) > tempFileMaxAge {
+			path := filepath.Join(backupDir, name)
+			if err := os.Remove(path); err != nil {
+				log.Warnf("Failed to remove stale temp file %s: %v", path, err)
+			} else {
+				log.Infof("Removed stale temporary file: %s", path)
+			}
+		}
+	}
+
+	if maxCount <= 0 {
+		return nil
+	}
+
+	// Collect backup files.
 	var backupFiles []os.DirEntry
 	for _, entry := range entries {
 		if !entry.IsDir() && strings.HasPrefix(entry.Name(), backupFilePrefix) && strings.HasSuffix(entry.Name(), backupFileExt) {
@@ -340,12 +417,12 @@ func rotateBackups(backupDir string) error {
 		return nil
 	}
 
-	// Sort by name (includes timestamp, so lexicographic = chronological)
+	// Sort by name (includes timestamp, so lexicographic = chronological).
 	sort.Slice(backupFiles, func(i, j int) bool {
 		return backupFiles[i].Name() < backupFiles[j].Name()
 	})
 
-	// Remove oldest backups
+	// Remove oldest backups.
 	toRemove := len(backupFiles) - maxCount
 	for i := 0; i < toRemove; i++ {
 		path := filepath.Join(backupDir, backupFiles[i].Name())
@@ -359,21 +436,68 @@ func rotateBackups(backupDir string) error {
 	return nil
 }
 
-// RestoreFromBackup restores the database from the most recent backup file
+// pemStreamDecoder reads PEM blocks one at a time from a buffered reader,
+// avoiding the need to load the entire backup file into memory.
+type pemStreamDecoder struct {
+	reader *bufio.Reader
+}
+
+func newPEMStreamDecoder(r io.Reader) *pemStreamDecoder {
+	return &pemStreamDecoder{reader: bufio.NewReader(r)}
+}
+
+// next returns the next PEM block from the stream, or (nil, io.EOF) when done.
+func (d *pemStreamDecoder) next() (*pem.Block, error) {
+	// Accumulate lines belonging to one PEM block.
+	var buf []byte
+	inBlock := false
+
+	for {
+		line, err := d.reader.ReadBytes('\n')
+		if len(line) > 0 {
+			trimmed := strings.TrimSpace(string(line))
+			if strings.HasPrefix(trimmed, "-----BEGIN ") {
+				inBlock = true
+				buf = buf[:0]
+			}
+			if inBlock {
+				buf = append(buf, line...)
+			}
+			if inBlock && strings.HasPrefix(trimmed, "-----END ") {
+				block, _ := pem.Decode(buf)
+				if block == nil {
+					return nil, errors.New("failed to decode PEM block")
+				}
+				return block, nil
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				if inBlock {
+					return nil, errors.New("unexpected EOF inside PEM block")
+				}
+				return nil, io.EOF
+			}
+			return nil, err
+		}
+	}
+}
+
+// restoreFromBackup restores the database from the most recent backup file
 // if the primary database file is missing but backups exist.
 // Returns true if a restore was performed.
-func RestoreFromBackup(dbPath string) (bool, error) {
+func restoreFromBackup(dbPath string) (bool, error) {
 	backupDir := param.Server_DatabaseBackup_Location.GetString()
 	if backupDir == "" {
 		return false, nil
 	}
 
-	// Check if the primary database already exists
+	// Check if the primary database already exists.
 	if _, err := os.Stat(dbPath); err == nil {
 		return false, nil
 	}
 
-	// Check if backup directory exists
+	// Check if backup directory exists.
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -382,7 +506,7 @@ func RestoreFromBackup(dbPath string) (bool, error) {
 		return false, errors.Wrapf(err, "failed to read backup directory %s", backupDir)
 	}
 
-	// Collect backup files
+	// Collect backup files.
 	var backupFiles []os.DirEntry
 	for _, entry := range entries {
 		if !entry.IsDir() && strings.HasPrefix(entry.Name(), backupFilePrefix) && strings.HasSuffix(entry.Name(), backupFileExt) {
@@ -394,18 +518,18 @@ func RestoreFromBackup(dbPath string) (bool, error) {
 		return false, nil
 	}
 
-	// Sort descending to get the most recent backup first
+	// Sort descending to get the most recent backup first.
 	sort.Slice(backupFiles, func(i, j int) bool {
 		return backupFiles[i].Name() > backupFiles[j].Name()
 	})
 
-	// Get issuer keys for decryption
+	// Get issuer keys for decryption.
 	allKeys := config.GetIssuerPrivateKeys()
 	if len(allKeys) == 0 {
 		return false, errors.New("no issuer keys available for backup decryption")
 	}
 
-	// Try to restore from the most recent backup, falling back to older ones
+	// Try to restore from the most recent backup, falling back to older ones.
 	for _, backupEntry := range backupFiles {
 		backupPath := filepath.Join(backupDir, backupEntry.Name())
 		log.Infof("Attempting to restore database from backup: %s", backupPath)
@@ -424,53 +548,463 @@ func RestoreFromBackup(dbPath string) (bool, error) {
 	return false, errors.New("failed to restore database from any available backup")
 }
 
-// restoreFromSingleBackup attempts to restore the database from a single backup file.
+// restoreFromSingleBackup attempts to restore the database from a single
+// backup file. It streams PEM blocks from the file, decrypts chunks via
+// temporary files, and atomically places the restored database at dbPath.
 func restoreFromSingleBackup(dbPath, backupPath string, issuerKeys map[string]jwk.Key) (bool, error) {
-	encodedData, err := os.ReadFile(backupPath)
+	backupFile, err := os.Open(backupPath)
 	if err != nil {
-		return false, errors.Wrapf(err, "failed to read backup file %s", backupPath)
+		return false, errors.Wrapf(err, "failed to open backup file %s", backupPath)
+	}
+	defer backupFile.Close()
+
+	decoder := newPEMStreamDecoder(backupFile)
+
+	// Phase 1: read ENCRYPTED BACKUP KEY blocks and attempt to decrypt DEK.
+	var dek [32]byte
+	var baseNonce [24]byte
+	dekDecrypted := false
+
+	// We need to save un-tried key blocks in case we find the matching key later.
+	type keyBlockEntry struct {
+		keyID string
+		data  []byte
+	}
+	var keyBlocks []keyBlockEntry
+	var firstDataBlock *pem.Block
+
+	for {
+		block, err := decoder.next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return false, errors.Wrap(err, "failed to read PEM block")
+		}
+
+		if block.Type == pemTypeKey {
+			keyID := block.Headers["Key-Id"]
+			keyBlocks = append(keyBlocks, keyBlockEntry{keyID: keyID, data: block.Bytes})
+		} else if block.Type == pemTypeData {
+			// We've moved past key blocks; save this first data block.
+			firstDataBlock = block
+			break
+		}
 	}
 
-	// Base64 decode
-	encrypted, err := base64.StdEncoding.DecodeString(string(encodedData))
-	if err != nil {
-		return false, errors.Wrap(err, "failed to base64 decode backup data")
+	// Try to decrypt the DEK with any matching issuer key.
+	for _, kb := range keyBlocks {
+		issuerKey, found := issuerKeys[kb.keyID]
+		if !found {
+			continue
+		}
+
+		privKey, pubKey, err := deriveBackupKeyPair(issuerKey)
+		if err != nil {
+			log.Debugf("Failed to derive key pair for key %s: %v", kb.keyID, err)
+			continue
+		}
+
+		if len(kb.data) < 24 {
+			continue
+		}
+		var keyNonce [24]byte
+		copy(keyNonce[:], kb.data[:24])
+
+		dekAndNonce, ok := box.Open(nil, kb.data[24:], &keyNonce, pubKey, privKey)
+		if !ok {
+			log.Debugf("Failed to decrypt DEK with key %s", kb.keyID)
+			continue
+		}
+
+		if len(dekAndNonce) != 56 {
+			continue
+		}
+		copy(dek[:], dekAndNonce[:32])
+		copy(baseNonce[:], dekAndNonce[32:])
+		dekDecrypted = true
+		break
 	}
 
-	// Decrypt
-	compressed, err := decryptBackup(encrypted, issuerKeys)
-	if err != nil {
-		return false, errors.Wrap(err, "failed to decrypt backup")
+	if !dekDecrypted {
+		keyIDs := make([]string, len(keyBlocks))
+		for i, kb := range keyBlocks {
+			keyIDs[i] = kb.keyID
+		}
+		return false, &ErrNoMatchingKey{RequiredKeyIDs: keyIDs}
 	}
 
-	// Decompress
-	gzReader, err := gzip.NewReader(bytes.NewReader(compressed))
+	// Phase 2: decrypt data chunks into a temporary compressed file.
+	dbDir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dbDir, 0755); err != nil {
+		return false, errors.Wrap(err, "failed to create directory for restored database")
+	}
+
+	compressedTmp, err := os.CreateTemp(dbDir, "pelican-restore-compressed-*.tmp")
+	if err != nil {
+		return false, errors.Wrap(err, "failed to create temp file for compressed data")
+	}
+	compressedTmpPath := compressedTmp.Name()
+	defer os.Remove(compressedTmpPath)
+
+	decryptChunk := func(block *pem.Block) error {
+		chunkStr := block.Headers["Chunk"]
+		chunkNum, err := strconv.ParseUint(chunkStr, 10, 64)
+		if err != nil {
+			return errors.Wrapf(err, "invalid chunk number %q", chunkStr)
+		}
+
+		var chunkNonce [24]byte
+		copy(chunkNonce[:], baseNonce[:])
+		var numBuf [8]byte
+		binary.BigEndian.PutUint64(numBuf[:], chunkNum)
+		for i := 0; i < 8; i++ {
+			chunkNonce[i] ^= numBuf[i]
+		}
+
+		plaintext, ok := secretbox.Open(nil, block.Bytes, &chunkNonce, &dek)
+		if !ok {
+			return fmt.Errorf("failed to decrypt chunk %d", chunkNum)
+		}
+
+		_, err = compressedTmp.Write(plaintext)
+		return err
+	}
+
+	// Decrypt the first data block we already read.
+	if firstDataBlock != nil {
+		if err := decryptChunk(firstDataBlock); err != nil {
+			compressedTmp.Close()
+			return false, errors.Wrap(err, "failed to decrypt first data chunk")
+		}
+	}
+
+	// Continue reading and decrypting remaining data blocks.
+	for {
+		block, err := decoder.next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			compressedTmp.Close()
+			return false, errors.Wrap(err, "failed to read PEM data block")
+		}
+		if block.Type != pemTypeData {
+			continue
+		}
+		if err := decryptChunk(block); err != nil {
+			compressedTmp.Close()
+			return false, errors.Wrap(err, "failed to decrypt data chunk")
+		}
+	}
+
+	if err := compressedTmp.Close(); err != nil {
+		return false, errors.Wrap(err, "failed to close compressed temp file")
+	}
+
+	// Phase 3: decompress into a temporary database file, then rename atomically.
+	compressedFile, err := os.Open(compressedTmpPath)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to reopen compressed temp file")
+	}
+	defer compressedFile.Close()
+
+	gzReader, err := gzip.NewReader(compressedFile)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to create gzip reader")
 	}
 	defer gzReader.Close()
 
-	rawData, err := io.ReadAll(gzReader)
+	restoredTmp, err := os.CreateTemp(dbDir, "pelican-restore-db-*.tmp")
 	if err != nil {
+		return false, errors.Wrap(err, "failed to create temp file for restored database")
+	}
+	restoredTmpPath := restoredTmp.Name()
+	defer os.Remove(restoredTmpPath)
+
+	if _, err := io.Copy(restoredTmp, gzReader); err != nil {
+		restoredTmp.Close()
 		return false, errors.Wrap(err, "failed to decompress backup data")
 	}
-
-	// Ensure the directory for the database exists
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
-		return false, errors.Wrap(err, "failed to create directory for restored database")
+	if err := restoredTmp.Sync(); err != nil {
+		restoredTmp.Close()
+		return false, errors.Wrap(err, "failed to sync restored database file")
+	}
+	if err := restoredTmp.Close(); err != nil {
+		return false, errors.Wrap(err, "failed to close restored database file")
 	}
 
-	// Write the restored database
-	if err := os.WriteFile(dbPath, rawData, 0600); err != nil {
-		return false, errors.Wrap(err, "failed to write restored database")
+	// Set appropriate permissions before rename.
+	if err := os.Chmod(restoredTmpPath, 0600); err != nil {
+		return false, errors.Wrap(err, "failed to set permissions on restored database")
+	}
+
+	// Atomic rename.
+	if err := os.Rename(restoredTmpPath, dbPath); err != nil {
+		return false, errors.Wrap(err, "failed to rename restored database into place")
 	}
 
 	return true, nil
 }
 
+// BackupInfo holds metadata about a backup file, suitable for display in
+// CLI listings.
+type BackupInfo struct {
+	Name      string    `json:"name"`
+	Path      string    `json:"path"`
+	Size      int64     `json:"size"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// CreateBackup creates a compressed and encrypted backup of the database.
+// This is the exported entry point for the CLI.
+func CreateBackup(ctx context.Context) error {
+	return createBackup(ctx)
+}
+
+// RestoreFromBackup restores the database from the most recent backup file
+// if the primary database file is missing. This is the exported entry point
+// used by InitServerDatabase.
+func RestoreFromBackup(dbPath string) (bool, error) {
+	return restoreFromBackup(dbPath)
+}
+
+// RestoreFromSpecificBackup restores the database from a specific backup file.
+// If force is true, the existing database is backed up then overwritten.
+// Returns an error if the database already exists and force is false.
+func RestoreFromSpecificBackup(dbPath, backupPath string, force bool) error {
+	if dbPath == "" {
+		dbPath = param.Server_DbLocation.GetString()
+	}
+	if dbPath == "" {
+		return errors.New("database path is not configured")
+	}
+
+	// Check if the database already exists.
+	if _, err := os.Stat(dbPath); err == nil {
+		if !force {
+			return fmt.Errorf("%w: %s", ErrDatabaseExists, dbPath)
+		}
+		// Back up the existing database before overwriting.
+		bakPath := dbPath + ".pre-restore." + time.Now().UTC().Format(backupTimestampFormat)
+		log.Infof("Existing database backed up to %s", bakPath)
+		if err := os.Rename(dbPath, bakPath); err != nil {
+			return errors.Wrapf(err, "failed to move existing database to %s", bakPath)
+		}
+		// Also move WAL/SHM files if present.
+		for _, ext := range []string{"-wal", "-shm"} {
+			if _, err := os.Stat(dbPath + ext); err == nil {
+				_ = os.Rename(dbPath+ext, bakPath+ext)
+			}
+		}
+	}
+
+	allKeys := config.GetIssuerPrivateKeys()
+	if len(allKeys) == 0 {
+		return errors.New("no issuer keys available for backup decryption")
+	}
+
+	restored, err := restoreFromSingleBackup(dbPath, backupPath, allKeys)
+	if err != nil {
+		return errors.Wrapf(err, "failed to restore from backup %s", backupPath)
+	}
+	if !restored {
+		return errors.New("restore did not complete successfully")
+	}
+
+	log.Infof("Database restored from %s to %s", backupPath, dbPath)
+	return nil
+}
+
+// VerifyBackup checks that a backup file can be successfully decrypted
+// and decompressed without writing any data. Returns nil on success.
+func VerifyBackup(backupPath string) error {
+	allKeys := config.GetIssuerPrivateKeys()
+	if len(allKeys) == 0 {
+		return errors.New("no issuer keys available for backup verification")
+	}
+
+	backupFile, err := os.Open(backupPath)
+	if err != nil {
+		return errors.Wrapf(err, "failed to open backup file %s", backupPath)
+	}
+	defer backupFile.Close()
+
+	decoder := newPEMStreamDecoder(backupFile)
+
+	// Read key blocks and try to decrypt the DEK.
+	var dek [32]byte
+	var baseNonce [24]byte
+	dekDecrypted := false
+
+	type keyBlockEntry struct {
+		keyID string
+		data  []byte
+	}
+	var keyBlocks []keyBlockEntry
+	var firstDataBlock *pem.Block
+
+	for {
+		block, err := decoder.next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return errors.Wrap(err, "failed to read PEM block")
+		}
+		if block.Type == pemTypeKey {
+			keyID := block.Headers["Key-Id"]
+			keyBlocks = append(keyBlocks, keyBlockEntry{keyID: keyID, data: block.Bytes})
+		} else if block.Type == pemTypeData {
+			firstDataBlock = block
+			break
+		}
+	}
+
+	for _, kb := range keyBlocks {
+		issuerKey, found := allKeys[kb.keyID]
+		if !found {
+			continue
+		}
+		privKey, pubKey, err := deriveBackupKeyPair(issuerKey)
+		if err != nil {
+			continue
+		}
+		if len(kb.data) < 24 {
+			continue
+		}
+		var keyNonce [24]byte
+		copy(keyNonce[:], kb.data[:24])
+		dekAndNonce, ok := box.Open(nil, kb.data[24:], &keyNonce, pubKey, privKey)
+		if !ok {
+			continue
+		}
+		if len(dekAndNonce) != 56 {
+			continue
+		}
+		copy(dek[:], dekAndNonce[:32])
+		copy(baseNonce[:], dekAndNonce[32:])
+		dekDecrypted = true
+		break
+	}
+
+	if !dekDecrypted {
+		keyIDs := make([]string, len(keyBlocks))
+		for i, kb := range keyBlocks {
+			keyIDs[i] = kb.keyID
+		}
+		return &ErrNoMatchingKey{RequiredKeyIDs: keyIDs}
+	}
+
+	// Verify all data chunks can be decrypted.
+	verifyChunk := func(block *pem.Block) error {
+		chunkStr := block.Headers["Chunk"]
+		chunkNum, err := strconv.ParseUint(chunkStr, 10, 64)
+		if err != nil {
+			return errors.Wrapf(err, "invalid chunk number %q", chunkStr)
+		}
+		var chunkNonce [24]byte
+		copy(chunkNonce[:], baseNonce[:])
+		var numBuf [8]byte
+		binary.BigEndian.PutUint64(numBuf[:], chunkNum)
+		for i := 0; i < 8; i++ {
+			chunkNonce[i] ^= numBuf[i]
+		}
+		_, ok := secretbox.Open(nil, block.Bytes, &chunkNonce, &dek)
+		if !ok {
+			return fmt.Errorf("failed to decrypt chunk %d", chunkNum)
+		}
+		return nil
+	}
+
+	if firstDataBlock != nil {
+		if err := verifyChunk(firstDataBlock); err != nil {
+			return err
+		}
+	}
+
+	var chunkCount uint64
+	if firstDataBlock != nil {
+		chunkCount = 1
+	}
+	for {
+		block, err := decoder.next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return errors.Wrap(err, "failed to read PEM data block")
+		}
+		if block.Type != pemTypeData {
+			continue
+		}
+		if err := verifyChunk(block); err != nil {
+			return err
+		}
+		chunkCount++
+	}
+
+	log.Infof("Backup verified: %d key(s), %d data chunk(s)", len(keyBlocks), chunkCount)
+	return nil
+}
+
+// ListBackups returns metadata about all available backups in the configured
+// backup directory, sorted newest-first.
+func ListBackups() ([]BackupInfo, error) {
+	backupDir := param.Server_DatabaseBackup_Location.GetString()
+	if backupDir == "" {
+		return nil, errors.New("backup directory is not configured (Server.DatabaseBackup.Location)")
+	}
+
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, errors.Wrapf(err, "failed to read backup directory %s", backupDir)
+	}
+
+	var backups []BackupInfo
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), backupFilePrefix) || !strings.HasSuffix(entry.Name(), backupFileExt) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			log.Debugf("Failed to stat backup file %s: %v", entry.Name(), err)
+			continue
+		}
+
+		// Parse timestamp from filename: pelican-db-backup-2026-01-02T150405.bak
+		name := entry.Name()
+		tsStr := strings.TrimPrefix(name, backupFilePrefix)
+		tsStr = strings.TrimSuffix(tsStr, backupFileExt)
+		ts, _ := time.Parse(backupTimestampFormat, tsStr)
+
+		backups = append(backups, BackupInfo{
+			Name:      name,
+			Path:      filepath.Join(backupDir, name),
+			Size:      info.Size(),
+			Timestamp: ts,
+		})
+	}
+
+	// Sort newest-first.
+	sort.Slice(backups, func(i, j int) bool {
+		return backups[i].Name > backups[j].Name
+	})
+
+	return backups, nil
+}
+
 // LaunchPeriodicBackup starts a background goroutine that periodically creates
 // database backups. The goroutine is managed by the provided errgroup and
 // cancellable via the context.
+//
+// On startup, the function checks for existing backups. If none exist, one is
+// created immediately. Otherwise, the first backup is scheduled based on the
+// age of the most recent backup so that the configured frequency is maintained
+// across restarts.
 func LaunchPeriodicBackup(ctx context.Context, egrp *errgroup.Group) {
 	frequency := param.Server_DatabaseBackup_Frequency.GetDuration()
 	if frequency <= 0 {
@@ -478,9 +1012,62 @@ func LaunchPeriodicBackup(ctx context.Context, egrp *errgroup.Group) {
 		return
 	}
 
+	// Determine initial delay based on the most recent backup.
+	var initialDelay time.Duration
+	backups, err := ListBackups()
+	if err != nil {
+		log.Warnf("Failed to list existing backups; creating one now: %v", err)
+	}
+
+	if len(backups) == 0 || err != nil {
+		// No backups exist (or we couldn't list them) — run immediately.
+		initialDelay = 0
+		log.Info("No existing database backups found; creating one now")
+	} else {
+		lastBackup := backups[0].Timestamp
+		if lastBackup.IsZero() {
+			// Could not parse timestamp from filename; create one now.
+			initialDelay = 0
+		} else {
+			age := time.Since(lastBackup)
+			if age >= frequency {
+				initialDelay = 0
+			} else {
+				initialDelay = frequency - age
+			}
+		}
+		if initialDelay == 0 {
+			log.Info("Most recent backup is older than the configured frequency; creating one now")
+		} else {
+			log.Infof("Most recent backup is %s old; next backup in %s",
+				time.Since(backups[0].Timestamp).Truncate(time.Second),
+				initialDelay.Truncate(time.Second))
+		}
+	}
+
 	log.Infof("Starting periodic database backup every %s", frequency)
 
 	egrp.Go(func() error {
+		// Handle the initial backup or delay.
+		if initialDelay == 0 {
+			if err := createBackup(ctx); err != nil {
+				log.Errorf("Failed to create initial database backup: %v", err)
+			}
+		} else {
+			timer := time.NewTimer(initialDelay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				log.Info("Stopping periodic database backup")
+				return nil
+			case <-timer.C:
+				if err := createBackup(ctx); err != nil {
+					log.Errorf("Failed to create database backup: %v", err)
+				}
+			}
+		}
+
+		// Now tick at the regular frequency.
 		ticker := time.NewTicker(frequency)
 		defer ticker.Stop()
 
@@ -490,7 +1077,7 @@ func LaunchPeriodicBackup(ctx context.Context, egrp *errgroup.Group) {
 				log.Info("Stopping periodic database backup")
 				return nil
 			case <-ticker.C:
-				if err := CreateBackup(ctx); err != nil {
+				if err := createBackup(ctx); err != nil {
 					log.Errorf("Failed to create database backup: %v", err)
 				}
 			}
