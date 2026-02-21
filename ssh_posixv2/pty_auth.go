@@ -48,6 +48,9 @@ type PTYAuthClient struct {
 	// conn is the WebSocket connection
 	conn *websocket.Conn
 
+	// authToken is an optional bearer token for authenticating to the server
+	authToken string
+
 	// stdin is the input reader (usually os.Stdin)
 	stdin io.Reader
 
@@ -75,6 +78,11 @@ func NewPTYAuthClient(wsURL string) *PTYAuthClient {
 		termFd:     fd,
 		isTerminal: term.IsTerminal(fd),
 	}
+}
+
+// SetAuthToken sets the bearer token used for authenticating to the server
+func (c *PTYAuthClient) SetAuthToken(token string) {
+	c.authToken = token
 }
 
 // Connect connects to the WebSocket server
@@ -117,7 +125,13 @@ func (c *PTYAuthClient) Connect(ctx context.Context) error {
 
 	log.Infof("Connecting to WebSocket: %s", u.String())
 
-	conn, resp, err := dialer.DialContext(ctx, u.String(), nil)
+	// Build request headers with auth token if available
+	headers := http.Header{}
+	if c.authToken != "" {
+		headers.Set("Authorization", "Bearer "+c.authToken)
+	}
+
+	conn, resp, err := dialer.DialContext(ctx, u.String(), headers)
 	if err != nil {
 		if resp != nil {
 			return errors.Wrapf(err, "WebSocket dial failed (status %d)", resp.StatusCode)
@@ -333,9 +347,10 @@ func (c *PTYAuthClient) handleChallenge(payload json.RawMessage) error {
 	return nil
 }
 
-// RunInteractiveAuth starts an interactive authentication session
-// This is the main entry point for the CLI command
-func RunInteractiveAuth(ctx context.Context, originURL string, host string) error {
+// RunInteractiveAuth starts an interactive authentication session.
+// The authToken parameter is a bearer token used to authenticate to the origin's
+// admin WebSocket endpoint. If empty, the connection will be attempted without auth.
+func RunInteractiveAuth(ctx context.Context, originURL string, host string, authToken string) error {
 	// Build the WebSocket URL
 	wsURL := originURL
 	if !strings.HasSuffix(wsURL, "/") {
@@ -349,6 +364,7 @@ func RunInteractiveAuth(ctx context.Context, originURL string, host string) erro
 	}
 
 	client := NewPTYAuthClient(wsURL)
+	client.SetAuthToken(authToken)
 
 	if err := client.Connect(ctx); err != nil {
 		return err
@@ -358,8 +374,10 @@ func RunInteractiveAuth(ctx context.Context, originURL string, host string) erro
 	return client.Run(ctx)
 }
 
-// GetConnectionStatus retrieves the current SSH connection status from an origin
-func GetConnectionStatus(ctx context.Context, originURL string) (map[string]interface{}, error) {
+// GetConnectionStatus retrieves the current SSH connection status from an origin.
+// The authToken parameter is a bearer token used to authenticate to the origin's
+// admin status endpoint. If empty, the request will be attempted without auth.
+func GetConnectionStatus(ctx context.Context, originURL string, authToken string) (map[string]interface{}, error) {
 	// Build the status URL
 	statusURL := originURL
 	if !strings.HasSuffix(statusURL, "/") {
@@ -372,9 +390,15 @@ func GetConnectionStatus(ctx context.Context, originURL string) (map[string]inte
 		return nil, errors.Wrap(err, "failed to create request")
 	}
 
+	// Add auth token if available
+	if authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+authToken)
+		req.AddCookie(&http.Cookie{Name: "login", Value: authToken})
+	}
+
 	// Use config.GetClient() for broker-aware transport and proper TLS configuration
-	client := config.GetClient()
-	resp, err := client.Do(req)
+	httpClient := config.GetClient()
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, errors.Wrap(err, "request failed")
 	}
