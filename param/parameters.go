@@ -116,6 +116,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.LocalRoot": false,
 	"Cache.LowWatermark": false,
 	"Cache.MetaLocations": false,
+	"Cache.MinDirectorRefreshInterval": false,
 	"Cache.NamespaceLocation": false,
 	"Cache.PSSOrigin": false,
 	"Cache.PermittedNamespaces": false,
@@ -1197,6 +1198,8 @@ func (dP DurationParam) GetDuration() time.Duration {
 			return config.Cache.DefaultCacheTimeout
 		case "Cache.EvictionMonitoringInterval":
 			return config.Cache.EvictionMonitoringInterval
+		case "Cache.MinDirectorRefreshInterval":
+			return config.Cache.MinDirectorRefreshInterval
 		case "Cache.SelfTestInterval":
 			return config.Cache.SelfTestInterval
 		case "Cache.SelfTestMaxAge":
@@ -1359,6 +1362,7 @@ var allParameterNames = []string{
 	"Cache.LocalRoot",
 	"Cache.LowWatermark",
 	"Cache.MetaLocations",
+	"Cache.MinDirectorRefreshInterval",
 	"Cache.NamespaceLocation",
 	"Cache.PSSOrigin",
 	"Cache.PermittedNamespaces",
@@ -2012,6 +2016,7 @@ var (
 var (
 	Cache_DefaultCacheTimeout = DurationParam{"Cache.DefaultCacheTimeout"}
 	Cache_EvictionMonitoringInterval = DurationParam{"Cache.EvictionMonitoringInterval"}
+	Cache_MinDirectorRefreshInterval = DurationParam{"Cache.MinDirectorRefreshInterval"}
 	Cache_SelfTestInterval = DurationParam{"Cache.SelfTestInterval"}
 	Cache_SelfTestMaxAge = DurationParam{"Cache.SelfTestMaxAge"}
 	ClientAgent_IdleTimeout = DurationParam{"ClientAgent.IdleTimeout"}
