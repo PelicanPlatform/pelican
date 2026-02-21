@@ -68,13 +68,21 @@ const (
 	WsMsgTypeAuthComplete = "auth_complete" // Server sends this when all auth is done
 )
 
-// RegisterWebSocketHandler registers the WebSocket endpoint for keyboard-interactive auth
-func RegisterWebSocketHandler(router *gin.Engine, ctx context.Context, egrp *errgroup.Group) {
+// RegisterWebSocketHandler registers the WebSocket endpoint for keyboard-interactive auth.
+// The authMiddleware parameter should be a slice of gin.HandlerFunc that enforce admin-level
+// authentication (e.g., web_ui.AuthHandler, web_ui.AdminAuthHandler). These are applied to the
+// /auth and /status endpoints; the helper broker endpoints have their own auth mechanism.
+func RegisterWebSocketHandler(router *gin.Engine, ctx context.Context, egrp *errgroup.Group, authMiddleware ...gin.HandlerFunc) {
+	// Build the handler chains: auth middleware first, then the endpoint handler
+	authHandlers := make([]gin.HandlerFunc, 0, len(authMiddleware)+1)
+	authHandlers = append(authHandlers, authMiddleware...)
+
 	// The websocket is under /api/v1.0/origin/ssh/auth for admin access
-	router.GET("/api/v1.0/origin/ssh/auth", handleWebSocket(ctx))
-	router.GET("/api/v1.0/origin/ssh/status", handleSSHStatus(ctx))
+	router.GET("/api/v1.0/origin/ssh/auth", append(authHandlers, handleWebSocket(ctx))...)
+	router.GET("/api/v1.0/origin/ssh/status", append(authHandlers, handleSSHStatus(ctx))...)
 
 	// Register the helper broker endpoints for reverse connections
+	// (these have their own auth via bearer token check against broker.authCookie)
 	RegisterHelperBrokerHandlers(router, ctx)
 }
 

@@ -197,8 +197,8 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 	if !useXRootD {
 		// For SSH backend, initialize the SSH connection before setting up handlers
 		if storageType == string(server_structs.OriginStorageSSH) {
-			// Register WebSocket handlers for keyboard-interactive auth
-			ssh_posixv2.RegisterWebSocketHandler(engine, ctx, egrp)
+			// Register WebSocket handlers for keyboard-interactive auth with admin authentication
+			ssh_posixv2.RegisterWebSocketHandler(engine, ctx, egrp, web_ui.AuthHandler, web_ui.AdminAuthHandler)
 
 			// Initialize the SSH backend (creates helper broker and starts connection manager)
 			if err := ssh_posixv2.InitializeBackend(ctx, egrp, originExports); err != nil {
