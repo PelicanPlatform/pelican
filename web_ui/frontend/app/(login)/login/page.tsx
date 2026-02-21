@@ -236,5 +236,9 @@ export default function Home() {
 
 const getReturnUrl = (url: string) => {
   const currentUrl = new URL(url);
-  return currentUrl.searchParams.get('returnURL') || currentUrl.searchParams.get('nextUrl') || '';
+  return (
+    currentUrl.searchParams.get('returnURL') ||
+    currentUrl.searchParams.get('nextUrl') ||
+    ''
+  );
 };

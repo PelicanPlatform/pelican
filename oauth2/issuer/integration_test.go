@@ -92,6 +92,9 @@ func setupIntegration(t *testing.T) (*OIDCProvider, *httptest.Server) {
 
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
+	// Close the database when the test finishes so the file handle is
+	// released before t.TempDir cleanup (required on Windows).
+	t.Cleanup(func() { sqlDB.Close() })
 	require.NoError(t, dbutils.MigrateDB(sqlDB, database.EmbedUniversalMigrations, "universal_migrations"))
 	require.NoError(t, dbutils.MigrateServerSpecificDB(sqlDB, database.EmbedOriginMigrations, "origin_migrations", "origin"))
 

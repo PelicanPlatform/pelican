@@ -105,7 +105,7 @@ func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 	// origin are honoured.
 	ac.audiences = []string{
 		"https://wlcg.cern.ch/jwt/v1/any", // WLCG wildcard
-		"ANY", // SciTokens wildcard
+		"ANY",                             // SciTokens wildcard
 	}
 	if tokenAud := param.Origin_TokenAudience.GetString(); tokenAud != "" {
 		ac.audiences = append(ac.audiences, tokenAud)
