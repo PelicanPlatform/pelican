@@ -20,6 +20,12 @@
 
 package xrootd
 
+// ResetXrootdVersionForTesting is a no-op on Windows since XRootD is not supported on this platform.
+func ResetXrootdVersionForTesting() {}
+
+// GetXrootdMajorVersion is a no-op on Windows since XRootD is not supported on this platform.
+func GetXrootdMajorVersion() string { return "" }
+
 // CheckXrootdVersion is a no-op on Windows since XRootD is not supported on this platform.
 // Cache and origin servers are not available on Windows.
 func CheckXrootdVersion() error {

@@ -23,20 +23,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 )
 
 var (
-	xrootdVersionOnce sync.Once
-	xrootdVersion     string
-
 	pluginSearchPathsOnce sync.Once
 	pluginSearchPaths     []string
 )
@@ -326,30 +321,6 @@ func parsePluginConfigFile(filePath string) (string, bool) {
 	return libPath, enabled
 }
 
-// getXRootDVersion runs 'xrootd -v' and extracts the major version number
-func getXRootDVersion() string {
-	xrootdVersionOnce.Do(func() {
-		cmd := exec.Command("xrootd", "-v")
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			log.Debugf("Failed to get xrootd version: %v", err)
-			xrootdVersion = ""
-			return
-		}
-
-		// Parse version from output (e.g., "XRootD v5.7.1" or "v6.0.0")
-		re := regexp.MustCompile(`v(\d+)\.\d+\.\d+`)
-		matches := re.FindStringSubmatch(string(output))
-		if len(matches) > 1 {
-			xrootdVersion = matches[1] // Return major version like "5" or "6"
-		} else {
-			xrootdVersion = ""
-		}
-	})
-
-	return xrootdVersion
-}
-
 // getPluginVariants returns a list of possible plugin filenames for a given base name.
 // XRootD automatically adds the major version to plugin names, so libXrdHttpPelican.so
 // may be libXrdHttpPelican-5.so or libXrdHttpPelican-6.so on disk.
@@ -374,7 +345,7 @@ func getPluginVariants(baseName string) []string {
 		variants = append(variants, nameWithoutExt+ext)
 
 		// Try to get the actual XRootD version
-		version := getXRootDVersion()
+		version := GetXrootdMajorVersion()
 		if version != "" {
 			// Use the detected version
 			variants = append(variants, nameWithoutExt+"-"+version+ext)
