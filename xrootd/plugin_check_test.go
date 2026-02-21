@@ -448,13 +448,3 @@ func TestGetXRootDRPaths(t *testing.T) {
 		assert.True(t, filepath.IsAbs(path), "All paths should be absolute")
 	}
 }
-
-func TestGetXRootDVersion(t *testing.T) {
-	// This test checks that getXRootDVersion doesn't panic
-	// It may return empty if xrootd is not in PATH, which is okay
-	version := getXRootDVersion()
-	if version != "" {
-		// If we got a version, it should be a number
-		assert.Regexp(t, `^\d+$`, version, "Version should be a single digit")
-	}
-}

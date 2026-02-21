@@ -116,6 +116,9 @@ func TestCheckXrootdVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Reset cached version so each subtest gets a fresh detection
+			ResetXrootdVersionForTesting()
+
 			// Create a mock xrootd binary
 			tmpDir := createMockXrootd(t, tt.version, tt.exitCode)
 
@@ -146,6 +149,9 @@ func TestCheckXrootdVersion(t *testing.T) {
 
 // TestCheckXrootdVersion_BinaryNotFound tests the scenario where xrootd is not installed
 func TestCheckXrootdVersion_BinaryNotFound(t *testing.T) {
+	// Reset cached version for this test
+	ResetXrootdVersionForTesting()
+
 	// Create an empty temporary directory
 	tmpDir := t.TempDir()
 
@@ -187,6 +193,9 @@ func TestCheckXrootdVersion_InvalidVersionFormat(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Reset cached version so each subtest gets a fresh detection
+			ResetXrootdVersionForTesting()
+
 			// Create a mock xrootd binary
 			tmpDir := createMockXrootd(t, tt.version, 0)
 
@@ -211,6 +220,9 @@ func TestCheckXrootdVersion_InvalidVersionFormat(t *testing.T) {
 
 // TestCheckXrootdVersion_RealBinary tests with the actual xrootd binary if available
 func TestCheckXrootdVersion_RealBinary(t *testing.T) {
+	// Reset cached version for this test
+	ResetXrootdVersionForTesting()
+
 	// Check if xrootd is actually available
 	_, err := exec.LookPath("xrootd")
 	if err != nil {
