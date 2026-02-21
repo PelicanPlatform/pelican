@@ -70,6 +70,7 @@ type Config struct {
 	} `mapstructure:"cache" yaml:"Cache"`
 	Client struct {
 		AssumeDirectorServerHeader bool `mapstructure:"assumedirectorserverheader" yaml:"AssumeDirectorServerHeader"`
+		CredentialFile string `mapstructure:"credentialfile" yaml:"CredentialFile"`
 		DirectorRetries int `mapstructure:"directorretries" yaml:"DirectorRetries"`
 		DisableHttpProxy bool `mapstructure:"disablehttpproxy" yaml:"DisableHttpProxy"`
 		DisableProxyFallback bool `mapstructure:"disableproxyfallback" yaml:"DisableProxyFallback"`
@@ -147,6 +148,8 @@ type Config struct {
 	Issuer struct {
 		AuthenticationSource string `mapstructure:"authenticationsource" yaml:"AuthenticationSource"`
 		AuthorizationTemplates interface{} `mapstructure:"authorizationtemplates" yaml:"AuthorizationTemplates"`
+		DynamicClientStaleTimeout time.Duration `mapstructure:"dynamicclientstaletimeout" yaml:"DynamicClientStaleTimeout"`
+		DynamicClientUnusedTimeout time.Duration `mapstructure:"dynamicclientunusedtimeout" yaml:"DynamicClientUnusedTimeout"`
 		GroupFile string `mapstructure:"groupfile" yaml:"GroupFile"`
 		GroupRequirements []string `mapstructure:"grouprequirements" yaml:"GroupRequirements"`
 		GroupSource string `mapstructure:"groupsource" yaml:"GroupSource"`
@@ -159,6 +162,7 @@ type Config struct {
 		OIDCSubjectClaim string `mapstructure:"oidcsubjectclaim" yaml:"OIDCSubjectClaim"`
 		QDLLocation string `mapstructure:"qdllocation" yaml:"QDLLocation"`
 		RedirectUris []string `mapstructure:"redirecturis" yaml:"RedirectUris"`
+		RefreshTokenGracePeriod time.Duration `mapstructure:"refreshtokengraceperiod" yaml:"RefreshTokenGracePeriod"`
 		ScitokensServerLocation string `mapstructure:"scitokensserverlocation" yaml:"ScitokensServerLocation"`
 		TomcatLocation string `mapstructure:"tomcatlocation" yaml:"TomcatLocation"`
 		UserStripDomain bool `mapstructure:"userstripdomain" yaml:"UserStripDomain"`
@@ -283,6 +287,7 @@ type Config struct {
 		GlobusTransferTokenFile string `mapstructure:"globustransfertokenfile" yaml:"GlobusTransferTokenFile"`
 		HttpAuthTokenFile string `mapstructure:"httpauthtokenfile" yaml:"HttpAuthTokenFile"`
 		HttpServiceUrl string `mapstructure:"httpserviceurl" yaml:"HttpServiceUrl"`
+		IssuerMode string `mapstructure:"issuermode" yaml:"IssuerMode"`
 		Mode string `mapstructure:"mode" yaml:"Mode"`
 		Multiuser bool `mapstructure:"multiuser" yaml:"Multiuser"`
 		NamespacePrefix string `mapstructure:"namespaceprefix" yaml:"NamespacePrefix"`
@@ -483,6 +488,7 @@ type configWithType struct {
 	}
 	Client struct {
 		AssumeDirectorServerHeader struct { Type string; Value bool }
+		CredentialFile struct { Type string; Value string }
 		DirectorRetries struct { Type string; Value int }
 		DisableHttpProxy struct { Type string; Value bool }
 		DisableProxyFallback struct { Type string; Value bool }
@@ -560,6 +566,8 @@ type configWithType struct {
 	Issuer struct {
 		AuthenticationSource struct { Type string; Value string }
 		AuthorizationTemplates struct { Type string; Value interface{} }
+		DynamicClientStaleTimeout struct { Type string; Value time.Duration }
+		DynamicClientUnusedTimeout struct { Type string; Value time.Duration }
 		GroupFile struct { Type string; Value string }
 		GroupRequirements struct { Type string; Value []string }
 		GroupSource struct { Type string; Value string }
@@ -572,6 +580,7 @@ type configWithType struct {
 		OIDCSubjectClaim struct { Type string; Value string }
 		QDLLocation struct { Type string; Value string }
 		RedirectUris struct { Type string; Value []string }
+		RefreshTokenGracePeriod struct { Type string; Value time.Duration }
 		ScitokensServerLocation struct { Type string; Value string }
 		TomcatLocation struct { Type string; Value string }
 		UserStripDomain struct { Type string; Value bool }
@@ -696,6 +705,7 @@ type configWithType struct {
 		GlobusTransferTokenFile struct { Type string; Value string }
 		HttpAuthTokenFile struct { Type string; Value string }
 		HttpServiceUrl struct { Type string; Value string }
+		IssuerMode struct { Type string; Value string }
 		Mode struct { Type string; Value string }
 		Multiuser struct { Type string; Value bool }
 		NamespacePrefix struct { Type string; Value string }

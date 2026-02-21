@@ -82,8 +82,7 @@ const AdminLogin = () => {
     if (response) {
       await mutate(getUser);
 
-      const url = new URL(window.location.href);
-      let returnUrl = url.searchParams.get('returnURL') || '';
+      let returnUrl = getReturnUrl(window.location.href);
       returnUrl = returnUrl.replace(`/view`, '');
       router.push(returnUrl ? returnUrl : '../');
     } else {
@@ -171,8 +170,7 @@ export default function Home() {
   );
 
   useEffect(() => {
-    const url = new URL(window.location.href);
-    const returnUrl = url.searchParams.get('returnURL') || '';
+    const returnUrl = getReturnUrl(window.location.href);
     const encodedReturnUrl = encodeURIComponent(returnUrl);
     setReturnUrl(encodedReturnUrl);
   }, []);
@@ -235,3 +233,12 @@ export default function Home() {
     </>
   );
 }
+
+const getReturnUrl = (url: string) => {
+  const currentUrl = new URL(url);
+  return (
+    currentUrl.searchParams.get('returnURL') ||
+    currentUrl.searchParams.get('nextUrl') ||
+    ''
+  );
+};

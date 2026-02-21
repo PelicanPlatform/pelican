@@ -36,6 +36,7 @@ import (
 	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/oa4mp"
+	issuer "github.com/pelicanplatform/pelican/oauth2/issuer"
 	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/origin_serve"
 	"github.com/pelicanplatform/pelican/param"
@@ -108,10 +109,20 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		server_utils.RegisterOIDCAPI(engine.Group("/", web_ui.ServerHeaderMiddleware), false)
 	}
 
-	// OA4MP is not XRootD specific - configure if enabled
+	// Configure the issuer (OA4MP proxy or embedded fosite) if enabled
 	if param.Origin_EnableIssuer.GetBool() {
-		if err = oa4mp.ConfigureOA4MPProxy(engine); err != nil {
-			return nil, err
+		issuerMode := param.Origin_IssuerMode.GetString()
+		switch issuerMode {
+		case "embedded", "":
+			if err := configureEmbeddedIssuer(ctx, egrp, engine); err != nil {
+				return nil, errors.Wrap(err, "failed to configure embedded OIDC issuer")
+			}
+		case "oa4mp":
+			if err = oa4mp.ConfigureOA4MPProxy(engine); err != nil {
+				return nil, err
+			}
+		default:
+			return nil, errors.Errorf("unsupported Origin.IssuerMode %q; valid values are \"embedded\" and \"oa4mp\"", issuerMode)
 		}
 	}
 
@@ -133,7 +144,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 			return nil, err
 		}
 
-		if param.Origin_EnableIssuer.GetBool() {
+		if param.Origin_EnableIssuer.GetBool() && param.Origin_IssuerMode.GetString() == "oa4mp" {
 			oa4mp_launcher, err := oa4mp.ConfigureOA4MP()
 			if err != nil {
 				return nil, err
@@ -236,5 +247,61 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 		return database.ShutdownDB()
 	})
 
+	return nil
+}
+
+// configureEmbeddedIssuer initializes the fosite-based embedded OIDC issuer,
+// compiles authorization rules, and registers routes on the Gin engine.
+func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *gin.Engine) error {
+	// Compile Issuer.AuthorizationTemplates so scope mapping works
+	if err := oa4mp.InitAuthzRules(); err != nil {
+		return errors.Wrap(err, "failed to compile issuer authorization templates")
+	}
+
+	// Prefer Issuer.IssuerClaimValue over Server.ExternalWebUrl, matching
+	// the logic in ConfigureOA4MP so both issuer modes produce consistent
+	// token claims.
+	issuerURL := issuer.IssuerURL()
+	gracePeriod := param.Issuer_RefreshTokenGracePeriod.GetDuration()
+	if gracePeriod == 0 {
+		gracePeriod = 5 * time.Minute
+	}
+
+	provider, err := issuer.NewOIDCProvider(database.ServerDatabase, issuerURL, gracePeriod)
+	if err != nil {
+		return errors.Wrap(err, "failed to create embedded OIDC provider")
+	}
+
+	// Apply a non-aborting middleware to the issuer route group so that
+	// handlers which inspect ctx.GetString("User") (e.g., device-verify)
+	// will see the identity extracted from the login cookie.  Unlike
+	// AuthHandler, this middleware never aborts—it lets the handler decide
+	// how to react to an unauthenticated request.
+	issuer.RegisterRoutesWithMiddleware(engine, provider, func(ctx *gin.Context) {
+		user, userId, groups, _ := web_ui.GetUserGroups(ctx)
+		if user != "" {
+			ctx.Set("User", user)
+			if userId != "" {
+				ctx.Set("UserId", userId)
+			}
+			if len(groups) > 0 {
+				ctx.Set("Groups", groups)
+			}
+		}
+		ctx.Next()
+	})
+
+	// Start background cleanup of dynamically registered clients.
+	unusedTimeout := param.Issuer_DynamicClientUnusedTimeout.GetDuration()
+	if unusedTimeout == 0 {
+		unusedTimeout = 1 * time.Hour
+	}
+	staleTimeout := param.Issuer_DynamicClientStaleTimeout.GetDuration()
+	if staleTimeout == 0 {
+		staleTimeout = 336 * time.Hour // 2 weeks
+	}
+	provider.StartCleanup(ctx, egrp, unusedTimeout, staleTimeout)
+
+	log.Info("Embedded OIDC issuer configured successfully")
 	return nil
 }

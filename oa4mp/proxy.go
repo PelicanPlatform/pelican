@@ -69,8 +69,8 @@ func getTransport() *http.Transport {
 	return transport
 }
 
-// mergeGroups merges two slices of groups, removing duplicates.
-func mergeGroups(groups1, groups2 []string) []string {
+// MergeGroups merges two slices of groups, removing duplicates.
+func MergeGroups(groups1, groups2 []string) []string {
 	seen := make(map[string]struct{})
 	result := make([]string, 0, len(groups1)+len(groups2))
 
@@ -102,7 +102,7 @@ func mergeGroups(groups1, groups2 []string) []string {
 // with manually configured templates).
 //
 // Returns the allowed scopes and the groups that matched authorization rules.
-func calculateAllowedScopes(user string, userId string, groupsList []string) ([]string, []string) {
+func CalculateAllowedScopes(user string, userId string, groupsList []string) ([]string, []string) {
 	if len(compiledAuthzRules) == 0 {
 		log.Debugf("calculateAllowedScopes: compiledAuthzRules is empty")
 		return []string{}, []string{}
@@ -163,6 +163,12 @@ func calculateAllowedScopes(user string, userId string, groupsList []string) ([]
 			groupsToIterate := groupsList
 			if hasGroupRequirements {
 				groupsToIterate = currentMatchingGroups
+			}
+			// When a $GROUP template rule has no explicit group restrictions,
+			// all user groups are used for scope expansion.  Record them in
+			// groupSet so they appear in the token's wlcg.groups claim.
+			for _, group := range groupsToIterate {
+				groupSet[group] = struct{}{}
 			}
 			for _, group := range groupsToIterate {
 				groupEscaped := url.PathEscape(group)
@@ -245,7 +251,8 @@ func calculateAllowedScopes(user string, userId string, groupsList []string) ([]
 // getUserCollectionScopes returns collection scopes and matched groups for a user.
 // The matched groups are groups that have ACLs on collections, which should be
 // included in the token's wlcg.groups claim for collection ACL checking.
-func getUserCollectionScopes(db *gorm.DB, user string, groupsList []string) (scopes []string, matchedGroups []string, err error) {
+// GetUserCollectionScopes returns collection scopes and matched groups for a user.
+func GetUserCollectionScopes(db *gorm.DB, user string, groupsList []string) (scopes []string, matchedGroups []string, err error) {
 	scopes = make([]string, 0)
 	matchedGroupSet := make(map[string]struct{})
 
@@ -361,8 +368,8 @@ func oa4mpProxy(ctx *gin.Context) {
 		// side will appropriately unwrap this information.
 		userInfo := make(map[string]interface{})
 		userInfo["u"] = user
-		allowedScopes, authzMatchedGroups := calculateAllowedScopes(user, userId, groupsList)
-		userCollectionScopes, collectionMatchedGroups, err := getUserCollectionScopes(database.ServerDatabase, user, groupsList)
+		allowedScopes, authzMatchedGroups := CalculateAllowedScopes(user, userId, groupsList)
+		userCollectionScopes, collectionMatchedGroups, err := GetUserCollectionScopes(database.ServerDatabase, user, groupsList)
 		if err != nil {
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
@@ -376,7 +383,7 @@ func oa4mpProxy(ctx *gin.Context) {
 		// Merge groups from authorization templates and collection ACLs.
 		// Authorization templates may match different groups than collection ACLs,
 		// so we need both sets in wlcg.groups for proper access control.
-		allMatchedGroups = mergeGroups(authzMatchedGroups, collectionMatchedGroups)
+		allMatchedGroups = MergeGroups(authzMatchedGroups, collectionMatchedGroups)
 		userInfo["g"] = allMatchedGroups
 		userInfo["s"] = allowedScopes
 		log.Debugf("Before proxying to OA4MP: allowedScopes=%v, userCollectionScopes=%v, authzMatchedGroups=%v, collectionMatchedGroups=%v for user=%s", allowedScopes, userCollectionScopes, authzMatchedGroups, collectionMatchedGroups, user)
