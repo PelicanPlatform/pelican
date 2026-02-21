@@ -70,6 +70,17 @@ func setupTestDBAndKeys(t *testing.T) (dbPath, backupDir, keysDir string) {
 	require.NoError(t, err)
 	ServerDatabase = db
 
+	// Register cleanup to close the database before t.TempDir() removal.
+	// This must be registered after t.TempDir() so that LIFO ordering
+	// ensures the DB is closed before the temp directory is removed
+	// (required on Windows where open files cannot be deleted).
+	t.Cleanup(func() {
+		if ServerDatabase != nil {
+			_ = ShutdownDB()
+			ServerDatabase = nil
+		}
+	})
+
 	// Insert some test data
 	err = ServerDatabase.Exec("CREATE TABLE test_data (id INTEGER PRIMARY KEY, value TEXT)").Error
 	require.NoError(t, err)
@@ -326,9 +337,6 @@ func TestPEMStreamDecoder(t *testing.T) {
 func TestCreateBackup(t *testing.T) {
 	config.ResetConfig()
 	t.Cleanup(func() {
-		if ServerDatabase != nil {
-			_ = ShutdownDB()
-		}
 		config.ResetConfig()
 	})
 
@@ -466,9 +474,6 @@ func TestRotateBackupsCleansTempFiles(t *testing.T) {
 func TestRestoreFromBackup(t *testing.T) {
 	config.ResetConfig()
 	t.Cleanup(func() {
-		if ServerDatabase != nil {
-			_ = ShutdownDB()
-		}
 		config.ResetConfig()
 	})
 
@@ -546,9 +551,6 @@ func TestRestoreFromBackup(t *testing.T) {
 func TestLaunchPeriodicBackup(t *testing.T) {
 	config.ResetConfig()
 	t.Cleanup(func() {
-		if ServerDatabase != nil {
-			_ = ShutdownDB()
-		}
 		config.ResetConfig()
 	})
 
@@ -606,9 +608,6 @@ func TestLaunchPeriodicBackupDisabled(t *testing.T) {
 func TestBackupAndRestoreRoundTrip(t *testing.T) {
 	config.ResetConfig()
 	t.Cleanup(func() {
-		if ServerDatabase != nil {
-			_ = ShutdownDB()
-		}
 		config.ResetConfig()
 	})
 
@@ -740,9 +739,6 @@ func TestWriteAndReadBackupMetadata(t *testing.T) {
 func TestCreateBackupIncludesMetadata(t *testing.T) {
 	config.ResetConfig()
 	t.Cleanup(func() {
-		if ServerDatabase != nil {
-			_ = ShutdownDB()
-		}
 		config.ResetConfig()
 	})
 
