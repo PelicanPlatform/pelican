@@ -1575,6 +1575,184 @@ components: ["origin"]
 hidden: true
 ---
 ############################
+#      SSH configs         #
+############################
+name: Origin.SSH.Host
+description: |+
+  The hostname or IP address of the remote SSH server for the SSH backend.
+  When Origin.StorageType is set to "ssh", this parameter is required.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.SSH.Port
+description: |+
+  The SSH port to connect to on the remote server.
+type: int
+default: 22
+components: ["origin"]
+---
+name: Origin.SSH.User
+description: |+
+  The SSH username to use for authentication.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.SSH.AuthMethods
+description: |+
+  A list of SSH authentication methods to try, in order.
+  Supported methods are:
+  - "publickey": Use SSH public key authentication (requires PrivateKeyFile)
+  - "password": Use password authentication (requires PasswordFile)
+  - "keyboard-interactive": Use keyboard-interactive authentication (allows admin to complete via WebSocket)
+  - "agent": Use the SSH agent for authentication
+
+  If not specified, defaults to trying: publickey, agent, keyboard-interactive, password
+type: stringSlice
+default: ["publickey", "agent", "keyboard-interactive", "password"]
+components: ["origin"]
+---
+name: Origin.SSH.PasswordFile
+description: |+
+  Path to a file containing the SSH password.
+  The password should be the only content of the file.
+  This file should have restricted permissions (e.g., 0600).
+  Used when "password" is in the AuthMethods list.
+type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.SSH.PrivateKeyFile
+description: |+
+  Path to the SSH private key file for public key authentication.
+  Used when "publickey" is in the AuthMethods list.
+  Supports RSA, ECDSA, and Ed25519 keys.
+type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.SSH.PrivateKeyPassphraseFile
+description: |+
+  Path to a file containing the passphrase for an encrypted SSH private key.
+  This file should have restricted permissions (e.g., 0600).
+  Only needed if the private key is encrypted.
+type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.SSH.KnownHostsFile
+description: |+
+  Path to the SSH known_hosts file for host key verification.
+  If not specified, defaults to ~/.ssh/known_hosts.
+  The remote host must be present in this file for the connection to succeed (unless Origin.SSH.AutoAddHostKey is true).
+type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.SSH.AutoAddHostKey
+description: |+
+  Automatically add unknown host keys to the known_hosts file.
+  When false (default for server mode), the connection will fail if the remote host key is not already in the known_hosts file.
+  This provides better security by preventing man-in-the-middle attacks.
+  Set to true only in test/development environments where the risk is acceptable.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Origin.SSH.PelicanBinaryPath
+description: |+
+  Path to the Pelican binary to transfer to the remote host.
+  If not specified, the currently running Pelican executable is used.
+  This must be compatible with the remote host's OS and architecture.
+type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.SSH.RemotePelicanBinaryDir
+description: |+
+  Directory on the remote host where the Pelican binary should be placed.
+  If not specified, a temporary directory is created on the remote host.
+type: string
+default: none
+hidden: true
+components: ["origin"]
+---
+name: Origin.SSH.RemotePelicanBinaryOverrides
+description: |+
+  A list of platform-specific binary overrides for the remote host.
+  Format: "os/arch=/path/to/binary"
+  Example: ["linux/amd64=/opt/pelican/pelican", "linux/arm64=/opt/pelican/pelican-arm64"]
+
+  Use this when the remote host already has Pelican installed, or when you need
+  to use a different binary than the one that would be transferred automatically.
+  The platform is detected by running "uname -s" and "uname -m" on the remote host.
+type: stringSlice
+default: []
+components: ["origin"]
+---
+name: Origin.SSH.MaxRetries
+description: |+
+  Maximum number of times to retry the SSH connection if it fails.
+  After exceeding this limit, the origin will fail to start.
+type: int
+default: 5
+components: ["origin"]
+---
+name: Origin.SSH.ConnectTimeout
+description: |+
+  Timeout for establishing the SSH connection.
+type: duration
+default: 30s
+components: ["origin"]
+---
+name: Origin.SSH.KeepaliveInterval
+description: |+
+  How often to send SSH keepalive packets to verify the connection is still alive.
+type: duration
+default: 5s
+components: ["origin"]
+---
+name: Origin.SSH.KeepaliveTimeout
+description: |+
+  Maximum time to wait without receiving a keepalive response before
+  considering the connection dead and shutting down.
+  Both the SSH connection and the HTTP connection to the helper are monitored.
+type: duration
+default: 20s
+components: ["origin"]
+---
+name: Origin.SSH.ChallengeTimeout
+description: |+
+  Timeout for individual SSH authentication challenges (password prompts, keyboard-interactive questions).
+  This is the maximum time to wait for user input on a single authentication challenge.
+  The overall authentication timeout is controlled by Origin.SSH.ConnectTimeout.
+type: duration
+default: 1m
+components: ["origin"]
+---
+name: Origin.SSH.ProxyJump
+description: |+
+  Jump host(s) for SSH ProxyJump (similar to ssh -J flag).
+  Format: [user@]host[:port] for a single jump host.
+  For chained jumps, use comma-separated list: [user@]host1[:port1],[user@]host2[:port2]
+  This allows connecting to a remote host through one or more intermediate hosts.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.SSH.SessionEstablishTimeout
+description: |+
+  Maximum time allowed to establish a complete working SSH session.
+  This includes connecting, authenticating, detecting the remote platform,
+  transferring the helper binary (if needed), and starting the helper process.
+  If this timeout is exceeded, the connection attempt is aborted and retried.
+  This is an end-to-end timeout that bounds all session establishment operations.
+type: duration
+default: 5m
+components: ["origin"]
+---
+############################
 #   Local cache configs    #
 ############################
 name: LocalCache.RunLocation

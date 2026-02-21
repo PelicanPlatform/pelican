@@ -196,4 +196,42 @@ func TestWriteAddressFile(t *testing.T) {
 		assert.Equal(t, "https://parseable.example.com:8443", vars["SERVER_EXTERNAL_WEB_URL"])
 		assert.Equal(t, "https://parseable.example.com:8444", vars["ORIGIN_URL"])
 	})
+
+	t.Run("ReadAddressFile", func(t *testing.T) {
+		// Reset and set up
+		viper.Reset()
+		viper.Set("ConfigDir", tmpDir)
+		setRuntimeDir(t)
+		require.NoError(t, param.Set("Server.ExternalWebUrl", "https://read.example.com:8443"))
+		require.NoError(t, param.Set("Origin.Url", "https://read.example.com:8444"))
+		require.NoError(t, param.Set("Cache.Url", "https://read.example.com:8445"))
+
+		modules := server_structs.OriginType | server_structs.CacheType
+
+		// Write the address file
+		err := WriteAddressFile(modules)
+		require.NoError(t, err)
+
+		// Read the address file using our function
+		contents, err := ReadAddressFile()
+		require.NoError(t, err)
+
+		// Verify the parsed values
+		assert.Equal(t, "https://read.example.com:8443", contents.ServerExternalWebURL)
+		assert.Equal(t, "https://read.example.com:8444", contents.OriginURL)
+		assert.Equal(t, "https://read.example.com:8445", contents.CacheURL)
+	})
+
+	t.Run("ReadAddressFileNotFound", func(t *testing.T) {
+		// Reset and set up with a different directory
+		viper.Reset()
+		nonExistentDir := filepath.Join(tmpDir, "nonexistent")
+		viper.Set("ConfigDir", nonExistentDir)
+		viper.Set("RuntimeDir", nonExistentDir)
+
+		// Try to read the address file - should fail
+		_, err := ReadAddressFile()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read address file")
+	})
 }
