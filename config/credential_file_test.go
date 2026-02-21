@@ -22,6 +22,7 @@ import (
 	"encoding/pem"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -56,7 +57,9 @@ func TestSaveConfigContentsToFile(t *testing.T) {
 		// Verify file exists and has correct permissions
 		info, err := os.Stat(filePath)
 		require.NoError(t, err)
-		assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+		if runtime.GOOS != "windows" {
+			assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+		}
 
 		// Read the file and verify PEM structure
 		data, err := os.ReadFile(filePath)

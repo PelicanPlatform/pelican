@@ -273,12 +273,12 @@ type (
 		requireChecksum    bool
 		recursive          bool
 		skipAcquire        bool
-		dryRun             bool                           // Enable dry-run mode to display what would be transferred without actually doing it
-		srcURL             *url.URL                       // When a copy job, this is the source URL
+		dryRun             bool                            // Enable dry-run mode to display what would be transferred without actually doing it
+		srcURL             *url.URL                        // When a copy job, this is the source URL
 		srcDirResp         server_structs.DirectorResponse // When a copy job, this represents the source directory information
-		srcToken           *tokenGenerator                // When a copy job, this represents the source token
-		syncLevel          SyncLevel                      // Policy for handling synchronization when the destination exists
-		prefObjServers     []*url.URL                     // holds any client-requested caches/origins
+		srcToken           *tokenGenerator                 // When a copy job, this represents the source token
+		syncLevel          SyncLevel                       // Policy for handling synchronization when the destination exists
+		prefObjServers     []*url.URL                      // holds any client-requested caches/origins
 		dirResp            server_structs.DirectorResponse
 		directorUrl        string
 		token              *tokenGenerator
@@ -4081,11 +4081,23 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 		var respBytes []byte
 		respBytes, err = io.ReadAll(resp.Body)
 		if err != nil {
-			log.Errorf("TPC request was not successful (status code %d); when reading the error message, a further issue occurred: %s", resp.StatusCode, err.Error())
+			log.Errorf("TPC COPY to %s failed (HTTP status %d); additionally, reading the response body failed: %s", resolvedDestUrl.String(), resp.StatusCode, err.Error())
 		} else {
-			log.Errorf("TPC request was not successful (status code %d): %s", resp.StatusCode, string(respBytes))
-			err = &HttpErrResp{resp.StatusCode, fmt.Sprintf("Request failed (HTTP status %d)",
-				resp.StatusCode), nil}
+			if resp.StatusCode == http.StatusOK {
+				log.Errorf("TPC COPY to %s returned HTTP 200 instead of 201 Created; the destination server does not have the TPC module loaded: %s",
+					resolvedDestUrl.String(), string(respBytes))
+				err = &HttpErrResp{resp.StatusCode, fmt.Sprintf("TPC COPY to %s failed: the destination server does not have the TPC module loaded",
+					resolvedDestUrl.String()), nil}
+			} else if resp.StatusCode > 200 && resp.StatusCode < 300 {
+				log.Errorf("TPC COPY to %s returned HTTP %d instead of 201 Created; the destination server may not support HTTP third-party-copy (ensure the TPC module is loaded): %s",
+					resolvedDestUrl.String(), resp.StatusCode, string(respBytes))
+				err = &HttpErrResp{resp.StatusCode, fmt.Sprintf("TPC COPY failed (HTTP status %d)",
+					resp.StatusCode), nil}
+			} else {
+				log.Errorf("TPC COPY to %s failed (HTTP status %d): %s", resolvedDestUrl.String(), resp.StatusCode, string(respBytes))
+				err = &HttpErrResp{resp.StatusCode, fmt.Sprintf("TPC COPY failed (HTTP status %d)",
+					resp.StatusCode), nil}
+			}
 		}
 		return
 	}

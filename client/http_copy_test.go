@@ -145,7 +145,7 @@ func TestTPCMockServer(t *testing.T) {
 		case http.MethodGet:
 			w.Header().Set("Content-Length", fmt.Sprintf("%d", contentLen))
 			w.WriteHeader(http.StatusOK)
-			w.Write(fileContent)
+			_, _ = w.Write(fileContent)
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}

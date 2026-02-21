@@ -67,6 +67,17 @@ var (
 	pubOriginNoDirectRead string
 )
 
+// chownToDaemon changes ownership of the given paths to the XRootD daemon user.
+// When not running as root this is a no-op (the daemon user is the current user).
+func chownToDaemon(t *testing.T, paths ...string) {
+	t.Helper()
+	uinfo, err := config.GetDaemonUserInfo()
+	require.NoError(t, err)
+	for _, p := range paths {
+		require.NoError(t, os.Chown(p, uinfo.Uid, uinfo.Gid))
+	}
+}
+
 // Helper function to get a temporary token file
 // NOTE: when used make sure to call os.Remove() on the file
 func getTempToken(t *testing.T) (tempToken *os.File, tkn string) {
@@ -1221,6 +1232,7 @@ func TestTPCPublicRead(t *testing.T) {
 		require.NoError(t, os.MkdirAll(srcDir, os.FileMode(0755)))
 		err := os.WriteFile(filepath.Join(srcDir, "source.txt"), []byte(testFileContent), 0644)
 		require.NoError(t, err)
+		chownToDaemon(t, srcDir, filepath.Join(srcDir, "source.txt"))
 
 		require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
@@ -1326,6 +1338,7 @@ func TestTPCDirectRead(t *testing.T) {
 	srcDir := filepath.Join(export.StoragePrefix, "tpc_direct")
 	require.NoError(t, os.MkdirAll(srcDir, os.FileMode(0755)))
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "src.txt"), []byte(testFileContent), 0644))
+	chownToDaemon(t, srcDir, filepath.Join(srcDir, "src.txt"))
 
 	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
 
