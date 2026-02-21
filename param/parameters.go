@@ -356,6 +356,9 @@ var runtimeConfigurableMap = map[string]bool{
 	"Server.AdLifetime": false,
 	"Server.AdminGroups": false,
 	"Server.AdvertisementInterval": false,
+	"Server.DatabaseBackup.Frequency": false,
+	"Server.DatabaseBackup.Location": false,
+	"Server.DatabaseBackup.MaxCount": false,
 	"Server.DbLocation": false,
 	"Server.DirectorUrls": false,
 	"Server.DropPrivileges": false,
@@ -712,6 +715,8 @@ func (sP StringParam) GetString() string {
 			return config.Registry.InstitutionsUrl
 		case "RuntimeDir":
 			return config.RuntimeDir
+		case "Server.DatabaseBackup.Location":
+			return config.Server.DatabaseBackup.Location
 		case "Server.DbLocation":
 			return config.Server.DbLocation
 		case "Server.ExternalWebUrl":
@@ -950,6 +955,8 @@ func (iP IntParam) GetInt() int {
 			return config.Origin.DiskUsageCalculationRateLimit
 		case "Origin.Port":
 			return config.Origin.Port
+		case "Server.DatabaseBackup.MaxCount":
+			return config.Server.DatabaseBackup.MaxCount
 		case "Server.IssuerPort":
 			return config.Server.IssuerPort
 		case "Server.UILoginRateLimit":
@@ -1259,6 +1266,8 @@ func (dP DurationParam) GetDuration() time.Duration {
 			return config.Server.AdLifetime
 		case "Server.AdvertisementInterval":
 			return config.Server.AdvertisementInterval
+		case "Server.DatabaseBackup.Frequency":
+			return config.Server.DatabaseBackup.Frequency
 		case "Server.RegistrationRetryInterval":
 			return config.Server.RegistrationRetryInterval
 		case "Server.StartupTimeout":
@@ -1599,6 +1608,9 @@ var allParameterNames = []string{
 	"Server.AdLifetime",
 	"Server.AdminGroups",
 	"Server.AdvertisementInterval",
+	"Server.DatabaseBackup.Frequency",
+	"Server.DatabaseBackup.Location",
+	"Server.DatabaseBackup.MaxCount",
 	"Server.DbLocation",
 	"Server.DirectorUrls",
 	"Server.DropPrivileges",
@@ -1812,6 +1824,7 @@ var (
 	Registry_DbLocation = StringParam{"Registry.DbLocation"}
 	Registry_InstitutionsUrl = StringParam{"Registry.InstitutionsUrl"}
 	RuntimeDir = StringParam{"RuntimeDir"}
+	Server_DatabaseBackup_Location = StringParam{"Server.DatabaseBackup.Location"}
 	Server_DbLocation = StringParam{"Server.DbLocation"}
 	Server_ExternalWebUrl = StringParam{"Server.ExternalWebUrl"}
 	Server_Hostname = StringParam{"Server.Hostname"}
@@ -1914,6 +1927,7 @@ var (
 	Origin_ConcurrencyDegradedThreshold = IntParam{"Origin.ConcurrencyDegradedThreshold"}
 	Origin_DiskUsageCalculationRateLimit = IntParam{"Origin.DiskUsageCalculationRateLimit"}
 	Origin_Port = IntParam{"Origin.Port"}
+	Server_DatabaseBackup_MaxCount = IntParam{"Server.DatabaseBackup.MaxCount"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
 	Server_UILoginRateLimit = IntParam{"Server.UILoginRateLimit"}
 	Server_WebPort = IntParam{"Server.WebPort"}
@@ -2043,6 +2057,7 @@ var (
 	Registry_InstitutionsUrlReloadMinutes = DurationParam{"Registry.InstitutionsUrlReloadMinutes"}
 	Server_AdLifetime = DurationParam{"Server.AdLifetime"}
 	Server_AdvertisementInterval = DurationParam{"Server.AdvertisementInterval"}
+	Server_DatabaseBackup_Frequency = DurationParam{"Server.DatabaseBackup.Frequency"}
 	Server_RegistrationRetryInterval = DurationParam{"Server.RegistrationRetryInterval"}
 	Server_StartupTimeout = DurationParam{"Server.StartupTimeout"}
 	Transport_BrokerEndpointCacheTTL = DurationParam{"Transport.BrokerEndpointCacheTTL"}

@@ -38,6 +38,7 @@ import (
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/local_cache"
@@ -199,6 +200,9 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	// Start a routine to periodically refresh the private key directory
 	// This ensures that new or updated private keys are automatically loaded and registered
 	launcher_utils.LaunchIssuerKeysDirRefresh(ctx, egrp, modules)
+
+	// Start periodic database backup routine
+	database.LaunchPeriodicBackup(ctx, egrp)
 
 	log.Info("Starting web engine...")
 	lnReference = nil
