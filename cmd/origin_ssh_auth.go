@@ -33,8 +33,8 @@ import (
 
 var sshAuthCmd = &cobra.Command{
 	Use:   "ssh-auth",
-	Short: "SSH authentication tools for POSIXv2 backend",
-	Long: `Tools for SSH POSIXv2 backend authentication and testing.
+	Short: "SSH authentication tools for the SSH backend",
+	Long: `Tools for SSH backend authentication and testing.
 
 Sub-commands:
   login   - Interactive keyboard-interactive authentication via WebSocket
@@ -65,7 +65,7 @@ Example:
 var sshAuthLoginCmd = &cobra.Command{
 	Use:   "login",
 	Short: "Interactive keyboard-interactive authentication via WebSocket",
-	Long: `Connect to an origin's SSH POSIXv2 backend via WebSocket to complete
+	Long: `Connect to an origin's SSH backend via WebSocket to complete
 keyboard-interactive authentication challenges from your terminal.
 
 This is useful when the origin needs to authenticate to a remote SSH server
@@ -85,7 +85,7 @@ Example:
 var sshAuthStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Check SSH connection status of an origin",
-	Long: `Query the SSH connection status of an origin's POSIXv2 backend.
+	Long: `Query the SSH connection status of an origin's SSH backend.
 
 If --origin is not specified, the command will try to determine the origin URL
 from the pelican.addresses file (for local origins) or the configuration.
@@ -100,15 +100,18 @@ Example:
 var (
 	sshAuthOrigin string
 	sshAuthHost   string
+	sshAuthToken  string
 )
 
 func init() {
 	// Login command flags
 	sshAuthLoginCmd.Flags().StringVar(&sshAuthOrigin, "origin", "", "Origin URL to connect to (auto-detected if not specified)")
 	sshAuthLoginCmd.Flags().StringVar(&sshAuthHost, "host", "", "SSH host to authenticate (optional, uses default if not specified)")
+	sshAuthLoginCmd.Flags().StringVar(&sshAuthToken, "token", "", "Path to a file containing an admin token (auto-generated if not specified)")
 
 	// Status command uses same origin flag
 	sshAuthStatusCmd.Flags().StringVar(&sshAuthOrigin, "origin", "", "Origin URL to check (auto-detected if not specified)")
+	sshAuthStatusCmd.Flags().StringVar(&sshAuthToken, "token", "", "Path to a file containing an admin token (auto-generated if not specified)")
 
 	// Add sub-commands
 	sshAuthCmd.AddCommand(sshAuthLoginCmd)
@@ -147,11 +150,17 @@ func runSSHAuthLogin(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Generate or load an admin token for authenticating to the WebSocket endpoint
+	tok, err := fetchOrGenerateWebAPIAdminToken(originURL, sshAuthToken)
+	if err != nil {
+		return fmt.Errorf("failed to obtain admin token: %w", err)
+	}
+
 	fmt.Fprintln(os.Stdout, "Starting interactive SSH authentication...")
 	fmt.Fprintln(os.Stdout, "Press Ctrl+C to exit.")
 	fmt.Fprintln(os.Stdout, "")
 
-	return ssh_posixv2.RunInteractiveAuth(ctx, originURL, sshAuthHost)
+	return ssh_posixv2.RunInteractiveAuth(ctx, originURL, sshAuthHost, tok)
 }
 
 func runSSHAuthStatus(cmd *cobra.Command, args []string) error {
@@ -162,7 +171,13 @@ func runSSHAuthStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	status, err := ssh_posixv2.GetConnectionStatus(ctx, originURL)
+	// Generate or load an admin token for authenticating to the status endpoint
+	tok, err := fetchOrGenerateWebAPIAdminToken(originURL, sshAuthToken)
+	if err != nil {
+		return fmt.Errorf("failed to obtain admin token: %w", err)
+	}
+
+	status, err := ssh_posixv2.GetConnectionStatus(ctx, originURL, tok)
 	if err != nil {
 		return fmt.Errorf("failed to get status: %w", err)
 	}

@@ -21,6 +21,7 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -33,13 +34,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/ssh_posixv2"
+	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 // testSSHServer creates a simple SSH server for testing auth methods
@@ -323,9 +333,9 @@ func TestSSHAuthStatusEndpoint(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	// Get the status
+	// Get the status (no auth needed for mock server)
 	ctx := context.Background()
-	status, err := ssh_posixv2.GetConnectionStatus(ctx, server.URL)
+	status, err := ssh_posixv2.GetConnectionStatus(ctx, server.URL, "")
 	require.NoError(t, err)
 
 	assert.Equal(t, true, status["connected"])
@@ -444,4 +454,103 @@ func mustAtoi(s string) int {
 	var i int
 	_, _ = fmt.Sscanf(s, "%d", &i)
 	return i
+}
+
+// TestSSHWebSocketAuthRequired tests that the SSH WebSocket and status endpoints
+// reject unauthenticated requests and accept properly authenticated admin requests
+// when auth middleware is applied.
+func TestSSHWebSocketAuthRequired(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	gin.SetMode(gin.TestMode)
+
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	// Set up server config so issuer keys are available for token verification
+	dirName := t.TempDir()
+	require.NoError(t, param.Set("ConfigDir", dirName))
+	require.NoError(t, param.Set(param.Server_WebPort.GetName(), 0))
+	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "https://mock-origin.example.com"))
+	require.NoError(t, param.Set(param.Origin_Port.GetName(), 0))
+	test_utils.MockFederationRoot(t, nil, nil)
+	err := config.InitServer(ctx, server_structs.OriginType)
+	require.NoError(t, err)
+	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
+	require.NoError(t, err)
+
+	// Create router with SSH WebSocket handler protected by auth middleware
+	router := gin.New()
+	ssh_posixv2.RegisterWebSocketHandler(router, ctx, egrp, web_ui.AuthHandler, web_ui.AdminAuthHandler)
+
+	t.Run("status-endpoint-rejects-unauthenticated", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, err := http.NewRequest("GET", "/api/v1.0/origin/ssh/status", nil)
+		require.NoError(t, err)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code,
+			"Status endpoint should reject unauthenticated requests")
+	})
+
+	t.Run("auth-endpoint-rejects-unauthenticated-websocket", func(t *testing.T) {
+		// A plain GET without WebSocket upgrade headers should also be rejected
+		// by auth middleware before the upgrade attempt
+		w := httptest.NewRecorder()
+		req, err := http.NewRequest("GET", "/api/v1.0/origin/ssh/auth", nil)
+		require.NoError(t, err)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code,
+			"Auth WebSocket endpoint should reject unauthenticated requests")
+	})
+
+	t.Run("status-endpoint-rejects-non-admin", func(t *testing.T) {
+		// Create a valid token for a non-admin user
+		tc := token.NewWLCGToken()
+		tc.Issuer = param.Server_ExternalWebUrl.GetString()
+		tc.Subject = "regular-user"
+		tc.Lifetime = 5 * time.Minute
+		tc.AddAudiences(param.Server_ExternalWebUrl.GetString())
+		tc.AddScopes(token_scopes.WebUi_Access)
+		tc.Claims = map[string]string{"user_id": "regular-user"}
+		tok, err := tc.CreateToken()
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		req, err := http.NewRequest("GET", "/api/v1.0/origin/ssh/status", nil)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusForbidden, w.Code,
+			"Status endpoint should reject non-admin users")
+	})
+
+	t.Run("status-endpoint-allows-admin", func(t *testing.T) {
+		// Create a valid admin token
+		tc := token.NewWLCGToken()
+		tc.Issuer = param.Server_ExternalWebUrl.GetString()
+		tc.Subject = "admin"
+		tc.Lifetime = 5 * time.Minute
+		tc.AddAudiences(param.Server_ExternalWebUrl.GetString())
+		tc.AddScopes(token_scopes.WebUi_Access)
+		tc.Claims = map[string]string{"user_id": "admin"}
+		tok, err := tc.CreateToken()
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		req, err := http.NewRequest("GET", "/api/v1.0/origin/ssh/status", nil)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		router.ServeHTTP(w, req)
+
+		// The SSH backend isn't initialized, so we expect 503 (not 401/403),
+		// which means auth succeeded and the handler ran
+		assert.Equal(t, http.StatusServiceUnavailable, w.Code,
+			"Status endpoint should allow admin users (503 means auth passed, backend not initialized)")
+	})
 }
