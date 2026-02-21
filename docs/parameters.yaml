@@ -2273,6 +2273,15 @@ type: filename
 default: none
 components: ["director"]
 ---
+name: Director.MaxMindKey
+description: |+
+  A MaxMind API key provided directly as a string. This is an alternative to providing the key via a file
+  (Director.MaxMindKeyFile). If both are set, the file takes precedence. This parameter can be set via the
+  environment variable PELICAN_DIRECTOR_MAXMINDKEY.
+type: string
+default: none
+components: ["director"]
+---
 name: Director.GeoIPLocation
 description: |+
   A filepath to the intended location of the MaxMind GeoLite City database. This option can be used either to load
@@ -3743,9 +3752,9 @@ name: Shoveler.Topic
 description: |+
   For amqp and stomp.
 
-  The topic of the messages. For stomp, it defaults to xrootd.shoveler.
+  The topic of the messages.
 type: string
-default: none
+default: xrootd.shoveler
 components: ["origin", "cache"]
 ---
 name: Shoveler.AMQPExchange

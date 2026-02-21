@@ -23,7 +23,6 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -53,7 +52,7 @@ func (o *GlobusOrigin) validateExtra(e *OriginExport, numExports int) (err error
 		return errors.Errorf("GlobusCollectionName is required for export '%s'", e.FederationPrefix)
 	}
 
-	if viper.GetString(param.OIDC_Issuer.GetName()) != "globus" {
+	if param.OIDC_Issuer.GetString() != "globus" {
 		clientIDFile := param.Origin_GlobusClientIDFile.GetString()
 		if clientIDFile == "" {
 			return errors.Errorf("%s is a required parameter for Globus origins when 'OIDC.Issuer' is not Globus", param.Origin_GlobusClientIDFile.GetName())

@@ -693,6 +693,10 @@ func (oP ObjectParam) Unmarshal(rawVal any) error {
 	return viper.UnmarshalKey(oP.name, rawVal)
 }
 
+func (oP ObjectParam) UnmarshalWithHook(rawVal any, decodeHook any) error {
+	return viper.UnmarshalKey(oP.name, rawVal, viper.DecodeHook(decodeHook))
+}
+
 func (oP ObjectParam) GetName() string {
 	return oP.name
 }

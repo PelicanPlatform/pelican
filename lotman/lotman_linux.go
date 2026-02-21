@@ -42,7 +42,6 @@ import (
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
@@ -483,7 +482,7 @@ func GetPolicyMap() (map[string]PurgePolicy, error) {
 	policyMap := make(map[string]PurgePolicy)
 	var policies []PurgePolicy
 	// Use custom decoder hook to validate fields. This validates all the way down to the bottom of the lot object.
-	if err := viper.UnmarshalKey(param.Lotman_PolicyDefinitions.GetName(), &policies, viper.DecodeHook(validateFieldsHook())); err != nil {
+	if err := param.Lotman_PolicyDefinitions.UnmarshalWithHook(&policies, validateFieldsHook()); err != nil {
 		return policyMap, errors.Wrap(err, "error unmarshalling Lotman policy definitions")
 	}
 
