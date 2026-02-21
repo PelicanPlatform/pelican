@@ -19,6 +19,7 @@
 package issuer
 
 import (
+	"net"
 	"sync"
 	"time"
 )
@@ -48,18 +49,39 @@ func newRegistrationRateLimiter(rate float64, burst int) *registrationRateLimite
 	}
 }
 
+// normalizeIP returns a rate-limit key for the given IP string.
+// IPv4 addresses are returned as-is.  IPv6 addresses are masked to
+// a /64 prefix because a single end-site typically owns an entire /64
+// block — rate limiting individual IPv6 addresses would be trivially
+// bypassed by rotating through the block.
+func normalizeIP(raw string) string {
+	ip := net.ParseIP(raw)
+	if ip == nil {
+		return raw // unparseable; use the string verbatim
+	}
+	if ip.To4() != nil {
+		return ip.String() // IPv4 — per-address is fine
+	}
+	// IPv6 — mask to /64
+	masked := ip.Mask(net.CIDRMask(64, 128))
+	return masked.String() + "/64"
+}
+
 // Allow reports whether a registration from the given IP is allowed.
 // Returns false if the rate limit has been exceeded.
+// IPv6 addresses are aggregated to their /64 prefix so that an attacker
+// cannot bypass the limit by rotating through addresses in a single block.
 func (rl *registrationRateLimiter) Allow(ip string) bool {
+	key := normalizeIP(ip)
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
 	now := time.Now()
 
-	b, ok := rl.buckets[ip]
+	b, ok := rl.buckets[key]
 	if !ok {
 		// First request — start with burst-1 tokens (we're consuming one now)
-		rl.buckets[ip] = &bucket{
+		rl.buckets[key] = &bucket{
 			tokens:   float64(rl.burst) - 1,
 			lastSeen: now,
 		}

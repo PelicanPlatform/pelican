@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -23,7 +23,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -198,6 +197,10 @@ func validateWLCGToken(t *testing.T, tokenStr string, provider *OIDCProvider) jw
 	assert.False(t, tok.IssuedAt().IsZero(), "iat claim should be present")
 	assert.False(t, tok.Expiration().IsZero(), "exp claim should be present")
 	assert.True(t, tok.Expiration().After(time.Now()), "token should not be expired")
+
+	// WLCG requires an audience claim
+	assert.Contains(t, tok.Audience(), WLCGAudienceAny,
+		"aud claim should contain the WLCG wildcard audience")
 
 	return tok
 }
@@ -1213,6 +1216,3 @@ func refreshTokens(t *testing.T, ts *httptest.Server, client *http.Client, refre
 	require.NoError(t, json.Unmarshal(body, &result))
 	return result
 }
-
-// Suppress unused import warnings
-var _ = fmt.Sprintf
