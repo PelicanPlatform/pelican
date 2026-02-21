@@ -40,6 +40,14 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 	dbPath := param.Server_DbLocation.GetString()
 	log.Debugln("Initializing server database: ", dbPath)
 
+	// Attempt to restore from backup if the database file doesn't exist
+	restored, err := RestoreFromBackup(dbPath)
+	if err != nil {
+		log.Warnf("Failed to restore database from backup: %v", err)
+	} else if restored {
+		log.Info("Database restored from backup, proceeding with initialization")
+	}
+
 	tdb, err := utils.InitSQLiteDB(dbPath)
 	if err != nil {
 		return err

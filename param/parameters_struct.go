@@ -334,6 +334,11 @@ type Config struct {
 		AdLifetime time.Duration `mapstructure:"adlifetime" yaml:"AdLifetime"`
 		AdminGroups []string `mapstructure:"admingroups" yaml:"AdminGroups"`
 		AdvertisementInterval time.Duration `mapstructure:"advertisementinterval" yaml:"AdvertisementInterval"`
+		DatabaseBackup struct {
+			Frequency time.Duration `mapstructure:"frequency" yaml:"Frequency"`
+			Location string `mapstructure:"location" yaml:"Location"`
+			MaxCount int `mapstructure:"maxcount" yaml:"MaxCount"`
+		} `mapstructure:"databasebackup" yaml:"DatabaseBackup"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DirectorUrls []string `mapstructure:"directorurls" yaml:"DirectorUrls"`
 		DropPrivileges bool `mapstructure:"dropprivileges" yaml:"DropPrivileges"`
@@ -747,6 +752,11 @@ type configWithType struct {
 		AdLifetime struct { Type string; Value time.Duration }
 		AdminGroups struct { Type string; Value []string }
 		AdvertisementInterval struct { Type string; Value time.Duration }
+		DatabaseBackup struct {
+			Frequency struct { Type string; Value time.Duration }
+			Location struct { Type string; Value string }
+			MaxCount struct { Type string; Value int }
+		}
 		DbLocation struct { Type string; Value string }
 		DirectorUrls struct { Type string; Value []string }
 		DropPrivileges struct { Type string; Value bool }
