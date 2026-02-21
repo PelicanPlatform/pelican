@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/ory/fosite"
@@ -54,6 +55,17 @@ type OIDCStorage struct {
 	// valid for reuse after first being exchanged.
 	// Default: 5 minutes.
 	RefreshTokenGracePeriod time.Duration
+
+	// touchDebounce tracks the last time each client's last_used_at was
+	// flushed to disk, keyed by client ID → time.Time.
+	// TouchClientLastUsed skips the SQL UPDATE if the previous write was
+	// within TouchDebouncePeriod, avoiding write amplification on hot
+	// token-exchange paths.
+	touchDebounce sync.Map
+
+	// TouchDebouncePeriod is the minimum interval between successive
+	// last_used_at writes for the same client.  Default: 5 minutes.
+	TouchDebouncePeriod time.Duration
 }
 
 // NewOIDCStorage creates a new OIDC storage backed by the existing GORM database.
@@ -61,6 +73,7 @@ func NewOIDCStorage(db *gorm.DB) *OIDCStorage {
 	return &OIDCStorage{
 		db:                      db,
 		RefreshTokenGracePeriod: 5 * time.Minute,
+		TouchDebouncePeriod:     5 * time.Minute,
 	}
 }
 
@@ -190,36 +203,61 @@ func (s *OIDCStorage) GetBoundUser(_ context.Context, clientID string) (string, 
 // BindClientToUser atomically binds a dynamically registered client to the
 // given user.  If the client is already bound to a different user, returns
 // an error.  If already bound to the same user, this is a no-op.
+// If the client is not dynamically registered, this is also a no-op (returns nil).
 func (s *OIDCStorage) BindClientToUser(ctx context.Context, clientID, user string) error {
-	// Attempt the bind — only succeeds when bound_user is still empty.
-	result := s.db.WithContext(ctx).Exec(`
-		UPDATE oidc_clients SET bound_user = ?
-		WHERE id = ? AND dynamically_registered = 1 AND bound_user = ''
-	`, user, clientID)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 1 {
-		return nil // successfully bound
-	}
+	// Single transaction: read the client's registration type and current
+	// binding, then conditionally update — all under one lock.
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var dynReg int
+		var boundUser string
+		row := tx.Raw(`SELECT dynamically_registered, bound_user FROM oidc_clients WHERE id = ?`, clientID).Row()
+		if err := row.Scan(&dynReg, &boundUser); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fosite.ErrNotFound
+			}
+			return err
+		}
 
-	// 0 rows affected — either already bound (maybe to us) or not dynamic.
-	existing, err := s.GetBoundUser(ctx, clientID)
-	if err != nil {
-		return err
-	}
-	if existing == user {
-		return nil // already bound to this user
-	}
-	return fmt.Errorf("client %s is already bound to a different user", clientID)
+		// Not a dynamically registered client — nothing to enforce.
+		if dynReg != 1 {
+			return nil
+		}
+
+		// Already bound to this user — no-op.
+		if boundUser == user {
+			return nil
+		}
+
+		// Bound to a different user — reject.
+		if boundUser != "" {
+			return fmt.Errorf("client %s is already bound to a different user", clientID)
+		}
+
+		// Unbound — bind now.
+		return tx.Exec(`UPDATE oidc_clients SET bound_user = ? WHERE id = ?`, user, clientID).Error
+	})
 }
 
 // TouchClientLastUsed updates the last_used_at timestamp for a client.
+//
+// To avoid write amplification on hot paths (e.g. every token exchange),
+// the actual SQL UPDATE is debounced: if the same client was flushed to
+// disk within TouchDebouncePeriod the call is a no-op.
 func (s *OIDCStorage) TouchClientLastUsed(ctx context.Context, clientID string) error {
-	return s.db.WithContext(ctx).Exec(
+	now := time.Now()
+	if v, ok := s.touchDebounce.Load(clientID); ok {
+		if now.Sub(v.(time.Time)) < s.TouchDebouncePeriod {
+			return nil // debounced — skip write
+		}
+	}
+	err := s.db.WithContext(ctx).Exec(
 		`UPDATE oidc_clients SET last_used_at = ? WHERE id = ?`,
-		time.Now().UTC(), clientID,
+		now.UTC(), clientID,
 	).Error
+	if err == nil {
+		s.touchDebounce.Store(clientID, now)
+	}
+	return err
 }
 
 // DeleteUnusedDynamicClients removes dynamically registered clients that have
@@ -496,16 +534,15 @@ var (
 
 func (s *OIDCStorage) GetDeviceCodeSession(ctx context.Context, deviceCode string, session fosite.Session) (fosite.Requester, error) {
 	var dc DeviceCodeSession
-	var lastPolledAt sql.NullTime
 	row := s.db.WithContext(ctx).Raw(`
 		SELECT request_id, requested_at, client_id, scopes, granted_scopes,
-			   form_data, session_data, subject, status, expires_at, last_polled_at
+			   form_data, session_data, subject, status, expires_at
 		FROM oidc_device_codes WHERE device_code = ?
 	`, deviceCode).Row()
 
 	err := row.Scan(&dc.RequestID, &dc.RequestedAt, &dc.ClientID,
 		&dc.Scopes, &dc.GrantedScope, &dc.FormData, &dc.SessionData,
-		&dc.Subject, &dc.Status, &dc.ExpiresAt, &lastPolledAt)
+		&dc.Subject, &dc.Status, &dc.ExpiresAt)
 
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fosite.ErrNotFound
@@ -519,15 +556,23 @@ func (s *OIDCStorage) GetDeviceCodeSession(ctx context.Context, deviceCode strin
 	}
 
 	// RFC 8628 §3.5: enforce minimum polling interval (5 seconds).
-	// Check before examining status so slow_down applies even while pending.
+	// A single conditional UPDATE atomically checks and advances
+	// last_polled_at, eliminating the TOCTOU race of a separate
+	// SELECT-then-UPDATE.  If RowsAffected == 0 the previous poll
+	// was too recent → slow_down.
 	const pollingInterval = 5 * time.Second
-	if lastPolledAt.Valid && time.Since(lastPolledAt.Time) < pollingInterval {
-		// Update last_polled_at even on slow_down so the next interval
-		// is measured from this attempt (RFC 8628 recommends adding 5s).
-		_ = s.UpdateDeviceCodePolling(ctx, deviceCode)
+	now := time.Now().UTC()
+	cutoff := now.Add(-pollingInterval)
+	pollResult := s.db.WithContext(ctx).Exec(
+		`UPDATE oidc_device_codes SET last_polled_at = ? WHERE device_code = ? AND (last_polled_at IS NULL OR last_polled_at <= ?)`,
+		now, deviceCode, cutoff,
+	)
+	if pollResult.Error != nil {
+		return nil, pollResult.Error
+	}
+	if pollResult.RowsAffected == 0 {
 		return nil, ErrSlowDown
 	}
-	_ = s.UpdateDeviceCodePolling(ctx, deviceCode)
 
 	switch dc.Status {
 	case "pending":

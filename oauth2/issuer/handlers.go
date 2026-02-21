@@ -304,13 +304,8 @@ func handleDeviceVerify(provider *OIDCProvider) gin.HandlerFunc {
 		}
 		ctx.SetCookie("csrf_token", csrfToken, 600, "/api/v1.0/issuer/device", "", true, true)
 
-		tmpl, err := template.New("device-consent").Parse(deviceConsentTemplate)
-		if err != nil {
-			ctx.String(http.StatusInternalServerError, "Template error")
-			return
-		}
-
 		data := map[string]interface{}{
+			"CSS":         template.CSS(pelicanCSS),
 			"UserCode":    userCode,
 			"FormAction":  "/api/v1.0/issuer/device",
 			"HasUserCode": userCode != "",
@@ -318,7 +313,7 @@ func handleDeviceVerify(provider *OIDCProvider) gin.HandlerFunc {
 		}
 
 		ctx.Header("Content-Type", "text/html; charset=utf-8")
-		if err := tmpl.Execute(ctx.Writer, data); err != nil {
+		if err := deviceConsentTmpl.Execute(ctx.Writer, data); err != nil {
 			log.WithError(err).Warn("Embedded issuer: failed to render device consent template")
 		}
 	}
@@ -390,14 +385,12 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 
 		// For dynamically registered clients, enforce single-user binding.
 		// The first user to approve a device code for this client becomes the
-		// only user who can ever use it.
-		isDynamic, _ := provider.Storage().IsDynamicallyRegistered(ctx, dc.ClientID)
-		if isDynamic {
-			if err := provider.Storage().BindClientToUser(ctx, dc.ClientID, user); err != nil {
-				log.WithError(err).Warnf("Embedded issuer: user %s cannot use client %s (bound to different user)", user, dc.ClientID)
-				renderDeviceResult(ctx, "error", "This client is registered to a different user")
-				return
-			}
+		// only user who can ever use it.  For statically registered clients
+		// BindClientToUser is a no-op.
+		if err := provider.Storage().BindClientToUser(ctx, dc.ClientID, user); err != nil {
+			log.WithError(err).Warnf("Embedded issuer: user %s cannot use client %s (bound to different user)", user, dc.ClientID)
+			renderDeviceResult(ctx, "error", "This client is registered to a different user")
+			return
 		}
 
 		// Calculate allowed scopes
@@ -758,23 +751,18 @@ func handleDynamicClientRegistration(provider *OIDCProvider) gin.HandlerFunc {
 
 // renderDeviceResult renders the appropriate device flow result page.
 func renderDeviceResult(ctx *gin.Context, status, errorMsg string) {
-	var tmplStr string
+	var tmpl *template.Template
 	switch status {
 	case "approved":
-		tmplStr = deviceOkTemplate
+		tmpl = deviceOkTmpl
 	case "denied":
-		tmplStr = deviceFailTemplate
+		tmpl = deviceFailTmpl
 	default:
-		tmplStr = deviceFailTemplate
-	}
-
-	tmpl, err := template.New("device-result").Parse(tmplStr)
-	if err != nil {
-		ctx.String(http.StatusInternalServerError, "Template error")
-		return
+		tmpl = deviceFailTmpl
 	}
 
 	data := map[string]interface{}{
+		"CSS":          template.CSS(pelicanCSS),
 		"ErrorMessage": errorMsg,
 		"Status":       status,
 	}

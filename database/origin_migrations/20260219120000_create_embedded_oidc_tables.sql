@@ -128,6 +128,12 @@ CREATE INDEX IF NOT EXISTS idx_oidc_openid_sessions_client ON oidc_openid_sessio
 CREATE INDEX IF NOT EXISTS idx_oidc_device_codes_user_code ON oidc_device_codes(user_code);
 CREATE INDEX IF NOT EXISTS idx_oidc_device_codes_status ON oidc_device_codes(status);
 CREATE INDEX IF NOT EXISTS idx_oidc_jwt_assertions_expires ON oidc_jwt_assertions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_oidc_access_tokens_expires ON oidc_access_tokens(expires_at);
+CREATE INDEX IF NOT EXISTS idx_oidc_refresh_tokens_expires ON oidc_refresh_tokens(expires_at);
+CREATE INDEX IF NOT EXISTS idx_oidc_authorization_codes_expires ON oidc_authorization_codes(expires_at);
+CREATE INDEX IF NOT EXISTS idx_oidc_pkce_requests_expires ON oidc_pkce_requests(expires_at);
+CREATE INDEX IF NOT EXISTS idx_oidc_openid_sessions_expires ON oidc_openid_sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_oidc_device_codes_expires ON oidc_device_codes(expires_at);
 -- +goose StatementEnd
 
 -- +goose Down
