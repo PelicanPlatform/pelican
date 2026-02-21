@@ -509,14 +509,14 @@ func (sP StringParam) GetString() string {
 			return config.Cache.Url
 		case "Cache.XRootDPrefix":
 			return config.Cache.XRootDPrefix
-		case "Client.CredentialFile":
-			return config.Client.CredentialFile
 		case "ClientAgent.DbLocation":
 			return config.ClientAgent.DbLocation
 		case "ClientAgent.PidFile":
 			return config.ClientAgent.PidFile
 		case "ClientAgent.Socket":
 			return config.ClientAgent.Socket
+		case "Client.CredentialFile":
+			return config.Client.CredentialFile
 		case "Director.AdvertiseUrl":
 			return config.Director.AdvertiseUrl
 		case "Director.CacheSortMethod":
@@ -1714,10 +1714,10 @@ var (
 	Cache_StorageLocation = StringParam{"Cache.StorageLocation"}
 	Cache_Url = StringParam{"Cache.Url"}
 	Cache_XRootDPrefix = StringParam{"Cache.XRootDPrefix"}
-	Client_CredentialFile = StringParam{"Client.CredentialFile"}
 	ClientAgent_DbLocation = StringParam{"ClientAgent.DbLocation"}
 	ClientAgent_PidFile = StringParam{"ClientAgent.PidFile"}
 	ClientAgent_Socket = StringParam{"ClientAgent.Socket"}
+	Client_CredentialFile = StringParam{"Client.CredentialFile"}
 	Director_AdvertiseUrl = StringParam{"Director.AdvertiseUrl"}
 	Director_CacheSortMethod = StringParam{"Director.CacheSortMethod"}
 	Director_DbLocation = StringParam{"Director.DbLocation"}
