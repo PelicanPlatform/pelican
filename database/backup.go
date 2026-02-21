@@ -37,6 +37,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/nacl/box"
+	"golang.org/x/crypto/nacl/secretbox"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -73,8 +74,8 @@ func encryptBackup(data []byte, issuerKeys map[string]jwk.Key) ([]byte, error) {
 		return nil, errors.Wrap(err, "failed to generate data nonce")
 	}
 
-	// Encrypt data with DEK using NaCl box (using DEK as both keys for symmetric-like encryption)
-	encryptedData := box.Seal(nil, data, &dataNonce, &dek, &dek)
+	// Encrypt data with DEK using NaCl secretbox (symmetric encryption)
+	encryptedData := secretbox.Seal(nil, data, &dataNonce, &dek)
 
 	var buf bytes.Buffer
 
@@ -217,8 +218,8 @@ func decryptBackup(encryptedData []byte, issuerKeys map[string]jwk.Key) ([]byte,
 		return nil, errors.Wrap(err, "failed to read encrypted data")
 	}
 
-	// Decrypt the data
-	decrypted, ok := box.Open(nil, remainingData, &dataNonce, &dek, &dek)
+	// Decrypt the data using NaCl secretbox (symmetric decryption)
+	decrypted, ok := secretbox.Open(nil, remainingData, &dataNonce, &dek)
 	if !ok {
 		return nil, errors.New("failed to decrypt backup data")
 	}
