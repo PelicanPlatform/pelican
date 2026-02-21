@@ -19,15 +19,22 @@
 package database
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/pem"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/nacl/box"
+	"golang.org/x/crypto/nacl/secretbox"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -71,7 +78,7 @@ func setupTestDBAndKeys(t *testing.T) (dbPath, backupDir, keysDir string) {
 
 	// Set config values
 	require.NoError(t, param.MultiSet(map[string]interface{}{
-		"Server.DbLocation":              dbPath,
+		"Server.DbLocation":               dbPath,
 		"Server.DatabaseBackup.Location":  backupDir,
 		"Server.DatabaseBackup.MaxCount":  10,
 		"Server.DatabaseBackup.Frequency": "24h",
@@ -80,7 +87,7 @@ func setupTestDBAndKeys(t *testing.T) (dbPath, backupDir, keysDir string) {
 	return dbPath, backupDir, keysDir
 }
 
-func TestEncryptDecryptBackup(t *testing.T) {
+func TestDeriveBackupKeyPair(t *testing.T) {
 	config.ResetConfig()
 	t.Cleanup(func() {
 		config.ResetConfig()
@@ -88,81 +95,231 @@ func TestEncryptDecryptBackup(t *testing.T) {
 
 	keysDir := filepath.Join(t.TempDir(), "keys")
 	require.NoError(t, os.MkdirAll(keysDir, 0750))
-
 	require.NoError(t, param.Set("IssuerKeysDirectory", keysDir))
 	config.ResetIssuerPrivateKeys()
 
-	// Generate two issuer keys to test multi-key encryption
-	_, err := config.GeneratePEM(keysDir)
+	key, err := config.GeneratePEM(keysDir)
 	require.NoError(t, err)
 
-	_, err = config.GeneratePEM(keysDir)
-	require.NoError(t, err)
-
-	// Load generated keys into the global issuer keys store
-	_, err = config.GetIssuerPrivateJWK()
-	require.NoError(t, err)
-
-	// Refresh to pick up all keys
-	_, err = config.RefreshKeys()
-	require.NoError(t, err)
-
-	allKeys := config.GetIssuerPrivateKeys()
-	require.GreaterOrEqual(t, len(allKeys), 2, "expected at least 2 issuer keys")
-
-	testData := []byte("This is test backup data for encryption testing")
-
-	t.Run("encrypt-decrypt-with-all-keys", func(t *testing.T) {
-		encrypted, err := encryptBackup(testData, allKeys)
+	t.Run("deterministic-derivation", func(t *testing.T) {
+		priv1, pub1, err := deriveBackupKeyPair(key)
 		require.NoError(t, err)
-		require.NotEmpty(t, encrypted)
-
-		decrypted, err := decryptBackup(encrypted, allKeys)
+		priv2, pub2, err := deriveBackupKeyPair(key)
 		require.NoError(t, err)
-		assert.Equal(t, testData, decrypted)
+		assert.Equal(t, priv1, priv2, "same key should yield same private key")
+		assert.Equal(t, pub1, pub2, "same key should yield same public key")
 	})
 
-	t.Run("decrypt-with-single-key", func(t *testing.T) {
-		// Encrypt with all keys
-		encrypted, err := encryptBackup(testData, allKeys)
+	t.Run("different-keys-yield-different-pairs", func(t *testing.T) {
+		key2, err := config.GeneratePEM(keysDir)
 		require.NoError(t, err)
 
-		// Try to decrypt with just one key at a time
-		for keyID, key := range allKeys {
-			singleKey := map[string]jwk.Key{keyID: key}
-			decrypted, err := decryptBackup(encrypted, singleKey)
-			require.NoError(t, err, "should decrypt with key %s", keyID)
-			assert.Equal(t, testData, decrypted)
+		priv1, _, err := deriveBackupKeyPair(key)
+		require.NoError(t, err)
+		priv2, _, err := deriveBackupKeyPair(key2)
+		require.NoError(t, err)
+		assert.NotEqual(t, priv1, priv2, "different keys should yield different private keys")
+	})
+}
+
+func TestEncryptedChunkWriter(t *testing.T) {
+	var dek [32]byte
+	var nonce [24]byte
+	_, err := io.ReadFull(rand.Reader, dek[:])
+	require.NoError(t, err)
+	_, err = io.ReadFull(rand.Reader, nonce[:])
+	require.NoError(t, err)
+
+	t.Run("small-data-single-chunk", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := newEncryptedChunkWriter(&buf, dek, nonce)
+		data := []byte("hello world")
+		_, err := w.Write(data)
+		require.NoError(t, err)
+		require.NoError(t, w.Close())
+
+		// Should produce exactly one PEM block
+		block, rest := pem.Decode(buf.Bytes())
+		require.NotNil(t, block)
+		assert.Equal(t, pemTypeData, block.Type)
+		assert.Equal(t, "1", block.Headers["Chunk"])
+
+		// No more blocks
+		block2, _ := pem.Decode(rest)
+		assert.Nil(t, block2)
+	})
+
+	t.Run("large-data-multiple-chunks", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := newEncryptedChunkWriter(&buf, dek, nonce)
+		// Write 3.5 chunks worth of data
+		data := make([]byte, chunkSize*3+chunkSize/2)
+		_, err := io.ReadFull(rand.Reader, data)
+		require.NoError(t, err)
+		_, err = w.Write(data)
+		require.NoError(t, err)
+		require.NoError(t, w.Close())
+
+		// Count PEM blocks
+		rest := buf.Bytes()
+		var count int
+		for {
+			block, remaining := pem.Decode(rest)
+			if block == nil {
+				break
+			}
+			count++
+			rest = remaining
+		}
+		assert.Equal(t, 4, count, "should produce 4 chunks for 3.5x chunkSize data")
+	})
+
+	t.Run("roundtrip-decrypt", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := newEncryptedChunkWriter(&buf, dek, nonce)
+		original := []byte("This is test data for roundtrip encryption verification")
+		_, err := w.Write(original)
+		require.NoError(t, err)
+		require.NoError(t, w.Close())
+
+		// Manually decrypt
+		block, _ := pem.Decode(buf.Bytes())
+		require.NotNil(t, block)
+
+		var chunkNonce [24]byte
+		copy(chunkNonce[:], nonce[:])
+		// XOR with chunk 1
+		chunkNonce[7] ^= 1
+		decrypted, ok := secretbox.Open(nil, block.Bytes, &chunkNonce, &dek)
+		require.True(t, ok)
+		assert.Equal(t, original, decrypted)
+	})
+}
+
+func TestWriteEncryptedKeys(t *testing.T) {
+	config.ResetConfig()
+	t.Cleanup(func() {
+		config.ResetConfig()
+	})
+
+	keysDir := filepath.Join(t.TempDir(), "keys")
+	require.NoError(t, os.MkdirAll(keysDir, 0750))
+	require.NoError(t, param.Set("IssuerKeysDirectory", keysDir))
+	config.ResetIssuerPrivateKeys()
+
+	key1, err := config.GeneratePEM(keysDir)
+	require.NoError(t, err)
+	key2, err := config.GeneratePEM(keysDir)
+	require.NoError(t, err)
+
+	allKeys := map[string]jwk.Key{
+		key1.KeyID(): key1,
+		key2.KeyID(): key2,
+	}
+
+	dekAndNonce := make([]byte, 56)
+	_, err = io.ReadFull(rand.Reader, dekAndNonce)
+	require.NoError(t, err)
+
+	t.Run("writes-pem-blocks", func(t *testing.T) {
+		var buf bytes.Buffer
+		err := writeEncryptedKeys(&buf, dekAndNonce, allKeys)
+		require.NoError(t, err)
+
+		// Should produce two PEM blocks
+		rest := buf.Bytes()
+		var count int
+		for {
+			block, remaining := pem.Decode(rest)
+			if block == nil {
+				break
+			}
+			assert.Equal(t, pemTypeKey, block.Type)
+			assert.NotEmpty(t, block.Headers["Key-Id"])
+			count++
+			rest = remaining
+		}
+		assert.Equal(t, 2, count)
+	})
+
+	t.Run("decrypt-key-block", func(t *testing.T) {
+		var buf bytes.Buffer
+		err := writeEncryptedKeys(&buf, dekAndNonce, allKeys)
+		require.NoError(t, err)
+
+		// Try to decrypt with each key
+		rest := buf.Bytes()
+		for {
+			block, remaining := pem.Decode(rest)
+			if block == nil {
+				break
+			}
+			keyID := block.Headers["Key-Id"]
+			issuerKey, found := allKeys[keyID]
+			require.True(t, found)
+
+			privKey, pubKey, err := deriveBackupKeyPair(issuerKey)
+			require.NoError(t, err)
+
+			require.GreaterOrEqual(t, len(block.Bytes), 24)
+			var keyNonce [24]byte
+			copy(keyNonce[:], block.Bytes[:24])
+			decrypted, ok := box.Open(nil, block.Bytes[24:], &keyNonce, pubKey, privKey)
+			require.True(t, ok)
+			assert.Equal(t, dekAndNonce, decrypted)
+
+			rest = remaining
 		}
 	})
 
-	t.Run("decrypt-with-wrong-key-fails", func(t *testing.T) {
-		encrypted, err := encryptBackup(testData, allKeys)
-		require.NoError(t, err)
-
-		// Generate a completely new key that was not used for encryption
-		otherKeysDir := filepath.Join(t.TempDir(), "other-keys")
-		require.NoError(t, os.MkdirAll(otherKeysDir, 0750))
-
-		otherKey, err := config.GeneratePEM(otherKeysDir)
-		require.NoError(t, err)
-
-		wrongKeys := map[string]jwk.Key{otherKey.KeyID(): otherKey}
-		_, err = decryptBackup(encrypted, wrongKeys)
+	t.Run("no-keys-fails", func(t *testing.T) {
+		var buf bytes.Buffer
+		err := writeEncryptedKeys(&buf, dekAndNonce, map[string]jwk.Key{})
 		assert.Error(t, err)
 	})
+}
 
-	t.Run("encrypt-no-keys-fails", func(t *testing.T) {
-		_, err := encryptBackup(testData, map[string]jwk.Key{})
-		assert.Error(t, err)
+func TestPEMStreamDecoder(t *testing.T) {
+	t.Run("reads-multiple-blocks", func(t *testing.T) {
+		var buf bytes.Buffer
+		for i := 0; i < 3; i++ {
+			err := pem.Encode(&buf, &pem.Block{
+				Type:  "TEST BLOCK",
+				Bytes: []byte("data"),
+			})
+			require.NoError(t, err)
+		}
+
+		decoder := newPEMStreamDecoder(&buf)
+		var count int
+		for {
+			block, err := decoder.next()
+			if err == io.EOF {
+				break
+			}
+			require.NoError(t, err)
+			assert.Equal(t, "TEST BLOCK", block.Type)
+			count++
+		}
+		assert.Equal(t, 3, count)
 	})
 
-	t.Run("decrypt-no-keys-fails", func(t *testing.T) {
-		encrypted, err := encryptBackup(testData, allKeys)
+	t.Run("reads-blocks-with-headers", func(t *testing.T) {
+		var buf bytes.Buffer
+		err := pem.Encode(&buf, &pem.Block{
+			Type:    pemTypeKey,
+			Headers: map[string]string{"Key-Id": "test-key"},
+			Bytes:   []byte("encrypted-data"),
+		})
 		require.NoError(t, err)
 
-		_, err = decryptBackup(encrypted, map[string]jwk.Key{})
-		assert.Error(t, err)
+		decoder := newPEMStreamDecoder(&buf)
+		block, err := decoder.next()
+		require.NoError(t, err)
+		assert.Equal(t, "test-key", block.Headers["Key-Id"])
+
+		_, err = decoder.next()
+		assert.ErrorIs(t, err, io.EOF)
 	})
 }
 
@@ -180,7 +337,7 @@ func TestCreateBackup(t *testing.T) {
 
 	t.Run("creates-backup-file", func(t *testing.T) {
 		ctx := context.Background()
-		err := CreateBackup(ctx)
+		err := createBackup(ctx)
 		require.NoError(t, err)
 
 		// Verify backup file was created
@@ -189,6 +346,45 @@ func TestCreateBackup(t *testing.T) {
 		require.Len(t, entries, 1)
 		assert.Contains(t, entries[0].Name(), backupFilePrefix)
 		assert.Contains(t, entries[0].Name(), backupFileExt)
+	})
+
+	t.Run("backup-file-contains-pem-blocks", func(t *testing.T) {
+		entries, err := os.ReadDir(backupDir)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, len(entries), 1)
+
+		data, err := os.ReadFile(filepath.Join(backupDir, entries[0].Name()))
+		require.NoError(t, err)
+
+		// Verify it contains PEM blocks
+		rest := data
+		var keyBlocks, dataBlocks int
+		for {
+			block, remaining := pem.Decode(rest)
+			if block == nil {
+				break
+			}
+			switch block.Type {
+			case pemTypeKey:
+				keyBlocks++
+			case pemTypeData:
+				dataBlocks++
+			}
+			rest = remaining
+		}
+		assert.GreaterOrEqual(t, keyBlocks, 1, "should have at least one key block")
+		assert.GreaterOrEqual(t, dataBlocks, 1, "should have at least one data block")
+	})
+
+	t.Run("no-temp-files-remain", func(t *testing.T) {
+		entries, err := os.ReadDir(backupDir)
+		require.NoError(t, err)
+		for _, e := range entries {
+			assert.False(t, strings.HasSuffix(e.Name(), backupTempSuffix),
+				"temporary file should not remain: %s", e.Name())
+			assert.False(t, strings.HasPrefix(e.Name(), vacuumTempPrefix) && strings.HasSuffix(e.Name(), ".sqlite"),
+				"vacuum temp file should not remain: %s", e.Name())
+		}
 	})
 }
 
@@ -205,7 +401,7 @@ func TestRotateBackups(t *testing.T) {
 
 	// Create 5 backup files with different timestamps
 	for i := 0; i < 5; i++ {
-		ts := time.Date(2026, 1, 1+i, 0, 0, 0, 0, time.UTC).Format("20060102-150405")
+		ts := time.Date(2026, 1, 1+i, 0, 0, 0, 0, time.UTC).Format(backupTimestampFormat)
 		fname := backupFilePrefix + ts + backupFileExt
 		err := os.WriteFile(filepath.Join(backupDir, fname), []byte("test"), 0600)
 		require.NoError(t, err)
@@ -219,9 +415,49 @@ func TestRotateBackups(t *testing.T) {
 	assert.Len(t, entries, 3)
 
 	// Verify oldest files were removed (keep 3 newest)
-	assert.Equal(t, backupFilePrefix+"20260103-000000"+backupFileExt, entries[0].Name())
-	assert.Equal(t, backupFilePrefix+"20260104-000000"+backupFileExt, entries[1].Name())
-	assert.Equal(t, backupFilePrefix+"20260105-000000"+backupFileExt, entries[2].Name())
+	assert.Equal(t, backupFilePrefix+"2026-01-03T000000"+backupFileExt, entries[0].Name())
+	assert.Equal(t, backupFilePrefix+"2026-01-04T000000"+backupFileExt, entries[1].Name())
+	assert.Equal(t, backupFilePrefix+"2026-01-05T000000"+backupFileExt, entries[2].Name())
+}
+
+func TestRotateBackupsCleansTempFiles(t *testing.T) {
+	config.ResetConfig()
+	t.Cleanup(func() {
+		config.ResetConfig()
+	})
+
+	backupDir := filepath.Join(t.TempDir(), "backups")
+	require.NoError(t, os.MkdirAll(backupDir, 0750))
+	require.NoError(t, param.Set("Server.DatabaseBackup.MaxCount", 10))
+
+	// Create a stale temp file (pretend it's old)
+	staleTmpPath := filepath.Join(backupDir, backupTempPrefix+"stale.tmp")
+	require.NoError(t, os.WriteFile(staleTmpPath, []byte("stale"), 0600))
+	// Set mod time to 2 hours ago
+	oldTime := time.Now().Add(-2 * time.Hour)
+	require.NoError(t, os.Chtimes(staleTmpPath, oldTime, oldTime))
+
+	// Create a recent temp file (should not be removed)
+	recentTmpPath := filepath.Join(backupDir, backupTempPrefix+"recent.tmp")
+	require.NoError(t, os.WriteFile(recentTmpPath, []byte("recent"), 0600))
+
+	// Create a stale vacuum temp file
+	staleVacuumPath := filepath.Join(backupDir, vacuumTempPrefix+"stale.sqlite")
+	require.NoError(t, os.WriteFile(staleVacuumPath, []byte("vacuum"), 0600))
+	require.NoError(t, os.Chtimes(staleVacuumPath, oldTime, oldTime))
+
+	err := rotateBackups(backupDir)
+	require.NoError(t, err)
+
+	// Stale files should be removed
+	_, err = os.Stat(staleTmpPath)
+	assert.True(t, os.IsNotExist(err), "stale temp file should be removed")
+	_, err = os.Stat(staleVacuumPath)
+	assert.True(t, os.IsNotExist(err), "stale vacuum file should be removed")
+
+	// Recent temp file should remain
+	_, err = os.Stat(recentTmpPath)
+	assert.NoError(t, err, "recent temp file should not be removed")
 }
 
 func TestRestoreFromBackup(t *testing.T) {
@@ -237,7 +473,7 @@ func TestRestoreFromBackup(t *testing.T) {
 
 	// Create a backup first
 	ctx := context.Background()
-	err := CreateBackup(ctx)
+	err := createBackup(ctx)
 	require.NoError(t, err)
 
 	// Shut down the database
@@ -251,7 +487,7 @@ func TestRestoreFromBackup(t *testing.T) {
 	os.Remove(dbPath + "-shm")
 
 	t.Run("restore-from-backup", func(t *testing.T) {
-		restored, err := RestoreFromBackup(dbPath)
+		restored, err := restoreFromBackup(dbPath)
 		require.NoError(t, err)
 		assert.True(t, restored)
 
@@ -273,7 +509,7 @@ func TestRestoreFromBackup(t *testing.T) {
 
 	t.Run("no-restore-when-db-exists", func(t *testing.T) {
 		// DB now exists from the restore above
-		restored, err := RestoreFromBackup(dbPath)
+		restored, err := restoreFromBackup(dbPath)
 		require.NoError(t, err)
 		assert.False(t, restored)
 	})
@@ -282,7 +518,7 @@ func TestRestoreFromBackup(t *testing.T) {
 		nonExistentDB := filepath.Join(t.TempDir(), "nonexistent.sqlite")
 		require.NoError(t, param.Set("Server.DatabaseBackup.Location", filepath.Join(t.TempDir(), "no-such-dir")))
 
-		restored, err := RestoreFromBackup(nonExistentDB)
+		restored, err := restoreFromBackup(nonExistentDB)
 		require.NoError(t, err)
 		assert.False(t, restored)
 
@@ -296,7 +532,7 @@ func TestRestoreFromBackup(t *testing.T) {
 		require.NoError(t, param.Set("Server.DatabaseBackup.Location", emptyBackupDir))
 
 		nonExistentDB := filepath.Join(t.TempDir(), "nonexistent.sqlite")
-		restored, err := RestoreFromBackup(nonExistentDB)
+		restored, err := restoreFromBackup(nonExistentDB)
 		require.NoError(t, err)
 		assert.False(t, restored)
 
@@ -381,7 +617,7 @@ func TestBackupAndRestoreRoundTrip(t *testing.T) {
 
 	// Create backup
 	ctx := context.Background()
-	err = CreateBackup(ctx)
+	err = createBackup(ctx)
 	require.NoError(t, err)
 
 	// Get original data
@@ -397,7 +633,7 @@ func TestBackupAndRestoreRoundTrip(t *testing.T) {
 	os.Remove(dbPath + "-shm")
 
 	// Restore from backup
-	restored, err := RestoreFromBackup(dbPath)
+	restored, err := restoreFromBackup(dbPath)
 	require.NoError(t, err)
 	require.True(t, restored)
 
