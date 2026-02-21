@@ -114,7 +114,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		issuerMode := param.Origin_IssuerMode.GetString()
 		switch issuerMode {
 		case "embedded", "":
-			if err := configureEmbeddedIssuer(engine); err != nil {
+			if err := configureEmbeddedIssuer(ctx, egrp, engine); err != nil {
 				return nil, errors.Wrap(err, "failed to configure embedded OIDC issuer")
 			}
 		case "oa4mp":
@@ -252,7 +252,7 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 
 // configureEmbeddedIssuer initializes the fosite-based embedded OIDC issuer,
 // compiles authorization rules, and registers routes on the Gin engine.
-func configureEmbeddedIssuer(engine *gin.Engine) error {
+func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *gin.Engine) error {
 	// Compile Issuer.AuthorizationTemplates so scope mapping works
 	if err := oa4mp.InitAuthzRules(); err != nil {
 		return errors.Wrap(err, "failed to compile issuer authorization templates")
@@ -300,7 +300,7 @@ func configureEmbeddedIssuer(engine *gin.Engine) error {
 	if staleTimeout == 0 {
 		staleTimeout = 336 * time.Hour // 2 weeks
 	}
-	provider.StartCleanup(unusedTimeout, staleTimeout)
+	provider.StartCleanup(ctx, egrp, unusedTimeout, staleTimeout)
 
 	log.Info("Embedded OIDC issuer configured successfully")
 	return nil

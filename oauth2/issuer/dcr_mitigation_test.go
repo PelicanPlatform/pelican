@@ -89,6 +89,27 @@ func TestRegistrationRateLimiter(t *testing.T) {
 		assert.False(t, hasOld, "old-ip should have been cleaned up")
 		assert.True(t, hasNew, "new-ip should still exist")
 	})
+
+	t.Run("IPv6AggregatedToSlash64", func(t *testing.T) {
+		rl := newRegistrationRateLimiter(1.0, 2) // burst 2
+
+		// Two different addresses in the same /64 should share a bucket
+		assert.True(t, rl.Allow("2001:db8:1:2::1"), "first IPv6 request allowed")
+		assert.True(t, rl.Allow("2001:db8:1:2::ffff"), "second IPv6 request (same /64) allowed")
+		assert.False(t, rl.Allow("2001:db8:1:2::aaaa"), "third request in same /64 denied")
+
+		// A different /64 should have its own bucket
+		assert.True(t, rl.Allow("2001:db8:1:3::1"), "different /64 should be independent")
+	})
+
+	t.Run("IPv4NotAggregated", func(t *testing.T) {
+		rl := newRegistrationRateLimiter(1.0, 1) // burst 1
+
+		assert.True(t, rl.Allow("192.168.1.1"), "first IPv4 allowed")
+		assert.False(t, rl.Allow("192.168.1.1"), "same IPv4 denied")
+		// A different IPv4 in the same /24 should be independent
+		assert.True(t, rl.Allow("192.168.1.2"), "different IPv4 should be independent")
+	})
 }
 
 // TestDCRRateLimitIntegration tests that the HTTP endpoint returns 429 when the
@@ -275,6 +296,7 @@ func TestSingleUserClientBinding(t *testing.T) {
 // clients are cleaned up.
 func TestUnusedDynamicClientCleanup(t *testing.T) {
 	provider, ts := setupIntegration(t)
+	provider.storage.TouchDebouncePeriod = 0 // disable debounce for test
 	httpClient := ts.Client()
 	ctx := context.Background()
 
@@ -331,6 +353,7 @@ func TestUnusedDynamicClientCleanup(t *testing.T) {
 // recently-used clients and static clients are left alone.
 func TestStaleDynamicClientCleanup(t *testing.T) {
 	provider, ts := setupIntegration(t)
+	provider.storage.TouchDebouncePeriod = 0 // disable debounce for test
 	httpClient := ts.Client()
 	ctx := context.Background()
 

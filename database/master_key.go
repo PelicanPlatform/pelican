@@ -22,6 +22,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -44,19 +45,30 @@ const (
 	NaclNonceSize = 24
 )
 
-// naclKeyPairFromJWK derives a NaCl box keypair from a JWK private key.
-// This mirrors the approach used in config/encrypted.go.
+// naclKeyPairFromJWK derives a NaCl box keypair from a JWK private key
+// using HKDF-SHA256.  The raw PKCS#8 DER encoding of the private key is
+// used as the input keying material (IKM) and a fixed info string
+// distinguishes this derivation from any other use of the same key.
 func naclKeyPairFromJWK(issuerKey jwk.Key) (privKey, pubKey *[32]byte, err error) {
-	secret, err := config.GetSecret(issuerKey)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to derive secret from key %s: %w", issuerKey.KeyID(), err)
+	var rawKey interface{}
+	if err := issuerKey.Raw(&rawKey); err != nil {
+		return nil, nil, fmt.Errorf("failed to extract raw key from %s: %w", issuerKey.KeyID(), err)
 	}
 
+	derBytes, err := x509.MarshalPKCS8PrivateKey(rawKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to marshal key %s to PKCS#8: %w", issuerKey.KeyID(), err)
+	}
+
+	// HKDF-SHA256: IKM = DER key, salt = nil, info = purpose string.
+	hkdfReader := hkdf.New(sha256.New, derBytes, nil, []byte("pelican-nacl-box-key"))
 	privKey = new([32]byte)
-	copy(privKey[:], []byte(secret))
+	if _, err := io.ReadFull(hkdfReader, privKey[:]); err != nil {
+		return nil, nil, fmt.Errorf("HKDF derivation failed for key %s: %w", issuerKey.KeyID(), err)
+	}
 
 	pubKey = new([32]byte)
-	curve25519.ScalarBaseMult(pubKey, privKey) //nolint:staticcheck // matches config/encrypted.go
+	curve25519.ScalarBaseMult(pubKey, privKey) //nolint:staticcheck
 	return privKey, pubKey, nil
 }
 
@@ -166,44 +178,63 @@ func ClearMasterKeyRows(ctx context.Context, db *gorm.DB) error {
 // SyncMasterKeyRows ensures server_master_keys has exactly one row per
 // current server private key, each containing the master key encrypted
 // for that key.  Rows for keys no longer present are removed.
+//
+// All changes are made in a single database transaction so the table
+// is never left in an inconsistent state.  As a safety measure, if a
+// sync would delete every existing row (implying all server keys were
+// replaced at once), the deletion is skipped and an error is returned —
+// the admin may still be able to recover a missing key file.
 func SyncMasterKeyRows(db *gorm.DB, masterKey []byte, currentKeys map[string]jwk.Key) error {
 	ctx := context.Background()
 
-	existing, err := LoadMasterKeyRows(ctx, db)
-	if err != nil {
-		return fmt.Errorf("failed to load master key rows: %w", err)
-	}
-
-	// Remove rows for keys that are no longer present.
-	var toDelete []string
-	for fp := range existing {
-		if _, ok := currentKeys[fp]; !ok {
-			toDelete = append(toDelete, fp)
-		}
-	}
-	if len(toDelete) > 0 {
-		if err := DeleteMasterKeyRows(ctx, db, toDelete); err != nil {
-			return fmt.Errorf("failed to remove stale master key rows: %w", err)
-		}
-		log.Infof("Removed %d stale master key row(s)", len(toDelete))
-	}
-
-	// Add rows for keys that don't already have one.
-	for fp, key := range currentKeys {
-		if _, exists := existing[fp]; exists {
-			continue
-		}
-		encrypted, err := EncryptMasterKey(masterKey, key)
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		existing, err := LoadMasterKeyRows(ctx, tx)
 		if err != nil {
-			return fmt.Errorf("failed to encrypt master key for key %s: %w", fp, err)
+			return fmt.Errorf("failed to load master key rows: %w", err)
 		}
-		if err := SaveMasterKeyRow(ctx, db, fp, encrypted); err != nil {
-			return fmt.Errorf("failed to save master key row for key %s: %w", fp, err)
-		}
-		log.Infof("Added master key row for server key %s", fp)
-	}
 
-	return nil
+		// Determine which rows are stale (key no longer present).
+		var toDelete []string
+		for fp := range existing {
+			if _, ok := currentKeys[fp]; !ok {
+				toDelete = append(toDelete, fp)
+			}
+		}
+
+		// Safety: refuse to delete every row.  If all existing keys are
+		// gone, the admin may have accidentally moved or deleted a key
+		// file.  Leaving the old rows gives them a chance to recover.
+		if len(toDelete) > 0 && len(toDelete) == len(existing) {
+			return fmt.Errorf(
+				"refusing to delete all %d master key row(s); this would happen "+
+					"only if every server key was replaced at once — check that "+
+					"no key files were accidentally removed", len(toDelete))
+		}
+
+		if len(toDelete) > 0 {
+			if err := DeleteMasterKeyRows(ctx, tx, toDelete); err != nil {
+				return fmt.Errorf("failed to remove stale master key rows: %w", err)
+			}
+			log.Infof("Removed %d stale master key row(s)", len(toDelete))
+		}
+
+		// Add rows for keys that don't already have one.
+		for fp, key := range currentKeys {
+			if _, exists := existing[fp]; exists {
+				continue
+			}
+			encrypted, err := EncryptMasterKey(masterKey, key)
+			if err != nil {
+				return fmt.Errorf("failed to encrypt master key for key %s: %w", fp, err)
+			}
+			if err := SaveMasterKeyRow(ctx, tx, fp, encrypted); err != nil {
+				return fmt.Errorf("failed to save master key row for key %s: %w", fp, err)
+			}
+			log.Infof("Added master key row for server key %s", fp)
+		}
+
+		return nil
+	})
 }
 
 // LoadOrCreateMasterKey loads the master key by decrypting any available

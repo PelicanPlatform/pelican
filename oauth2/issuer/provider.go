@@ -37,6 +37,7 @@ import (
 	"github.com/ory/fosite/token/jwt"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -61,8 +62,6 @@ type OIDCProvider struct {
 	// RegistrationLimiter enforces per-IP rate limiting on the dynamic
 	// client registration endpoint.
 	RegistrationLimiter *registrationRateLimiter
-
-	stopCleanup chan struct{}
 }
 
 // NewOIDCProvider creates a new embedded OIDC provider.
@@ -152,7 +151,6 @@ func NewOIDCProvider(db *gorm.DB, issuerURL string, refreshGracePeriod time.Dura
 		privateKey:          privateKey,
 		DeviceCodeHandler:   deviceHandler,
 		RegistrationLimiter: regLimiter,
-		stopCleanup:         make(chan struct{}),
 	}, nil
 }
 
@@ -176,7 +174,8 @@ func (p *OIDCProvider) PrivateKey() crypto.Signer {
 	return p.privateKey
 }
 
-// StartCleanup launches background goroutines that periodically:
+// StartCleanup launches a background goroutine via the provided errgroup
+// that periodically:
 //   - Remove dynamically registered clients that were never used
 //     (controlled by unusedClientMaxAge).
 //   - Remove dynamically registered clients that were previously used but
@@ -186,14 +185,16 @@ func (p *OIDCProvider) PrivateKey() crypto.Signer {
 //   - Delete expired or consumed device codes.
 //   - Delete expired JWT assertion replay-prevention entries.
 //   - Evict stale entries from the in-memory registration rate limiter.
-func (p *OIDCProvider) StartCleanup(unusedClientMaxAge, staleClientMaxAge time.Duration) {
-	go func() {
+//
+// The goroutine exits when ctx is cancelled and is tracked by egrp so
+// callers (including tests) can wait for a clean shutdown.
+func (p *OIDCProvider) StartCleanup(ctx context.Context, egrp *errgroup.Group, unusedClientMaxAge, staleClientMaxAge time.Duration) {
+	egrp.Go(func() error {
 		ticker := time.NewTicker(10 * time.Minute)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				ctx := context.Background()
 				n, err := p.storage.DeleteUnusedDynamicClients(ctx, unusedClientMaxAge)
 				if err != nil {
 					log.WithError(err).Warn("Embedded issuer: failed to clean up unused dynamic clients")
@@ -225,16 +226,12 @@ func (p *OIDCProvider) StartCleanup(unusedClientMaxAge, staleClientMaxAge time.D
 					log.Infof("Embedded issuer: deleted %d expired JWT assertion(s)", n)
 				}
 				p.RegistrationLimiter.Cleanup(1 * time.Hour)
-			case <-p.stopCleanup:
-				return
+			case <-ctx.Done():
+				log.Info("Embedded issuer: cleanup goroutine stopped")
+				return nil
 			}
 		}
-	}()
-}
-
-// StopCleanup signals the background cleanup goroutine to exit.
-func (p *OIDCProvider) StopCleanup() {
-	close(p.stopCleanup)
+	})
 }
 
 // WLCGSession is a combined session that satisfies both fosite's JWTSessionContainer

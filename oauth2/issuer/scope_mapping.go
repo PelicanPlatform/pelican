@@ -30,14 +30,27 @@ import (
 
 // sciTokensScopeStrategy is a fosite ScopeStrategy that understands SciTokens/WLCG
 // hierarchical scopes (e.g., storage.read:/ covers storage.read:/data/analysis).
-// For non-hierarchical scopes, it falls back to fosite's WildcardScopeStrategy.
+//
+// For WLCG-style scopes (containing ":"), only exact match and hierarchical
+// path matching are used.  fosite's WildcardScopeStrategy is NOT applied to
+// these scopes because it splits on "." and treats "*" as a wildcard segment,
+// which could cause a matcher like "storage.*" to incorrectly grant access
+// to any storage action at any path.
+//
+// For plain OIDC scopes (openid, offline_access, etc.) the standard
+// WildcardScopeStrategy is used as a fallback.
 func sciTokensScopeStrategy(matchers []string, needle string) bool {
-	// First try fosite's standard wildcard strategy
-	if fosite.WildcardScopeStrategy(matchers, needle) {
-		return true
+	if strings.Contains(needle, ":") {
+		// WLCG-style scope — use only exact + hierarchical matching.
+		for _, m := range matchers {
+			if m == needle {
+				return true
+			}
+		}
+		return matchHierarchical(needle, matchers)
 	}
-	// Then try hierarchical matching for SciTokens-style scopes
-	return matchHierarchical(needle, matchers)
+	// Plain OIDC scope — fosite's standard strategy is safe here.
+	return fosite.WildcardScopeStrategy(matchers, needle)
 }
 
 // CalculateUserScopes computes the set of scopes a user should be granted

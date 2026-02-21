@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Pelican Device Authorization Failed</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:ital@0;1&display=swap" rel="stylesheet">
+  <style>{{.CSS}}</style>
+</head>
+<body>
+<div class="background-effect"></div>
+<main>
+  <div class="content-container">
+    <h2>User Code Denied!</h2>
+    {{if .ErrorMessage}}
+    <p>{{.ErrorMessage}}</p>
+    {{else}}
+    <p>You have exceeded the number of retry attempts for entering a code.</p>
+    {{end}}
+  </div>
+</main>
+<div class="footer-logo">
+  <img height="80" src="https://pelicanplatform.org/static/images/PelicanPlatformLogo_Icon.png" alt="Pelican Logo">
+</div>
+</body>
+</html>
