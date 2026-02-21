@@ -358,13 +358,15 @@ func TestCreateBackup(t *testing.T) {
 
 		// Verify it contains PEM blocks
 		rest := data
-		var keyBlocks, dataBlocks int
+		var metaBlocks, keyBlocks, dataBlocks int
 		for {
 			block, remaining := pem.Decode(rest)
 			if block == nil {
 				break
 			}
 			switch block.Type {
+			case pemTypeMetadata:
+				metaBlocks++
 			case pemTypeKey:
 				keyBlocks++
 			case pemTypeData:
@@ -372,6 +374,7 @@ func TestCreateBackup(t *testing.T) {
 			}
 			rest = remaining
 		}
+		assert.Equal(t, 1, metaBlocks, "should have exactly one metadata block")
 		assert.GreaterOrEqual(t, keyBlocks, 1, "should have at least one key block")
 		assert.GreaterOrEqual(t, dataBlocks, 1, "should have at least one data block")
 	})
@@ -647,4 +650,121 @@ func TestBackupAndRestoreRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, originalValues, restoredValues)
+}
+
+func TestWriteAndReadBackupMetadata(t *testing.T) {
+	t.Run("round-trip", func(t *testing.T) {
+		meta := BackupMetadata{
+			FormatVersion:  "1",
+			Timestamp:      "2026-02-21T12:00:00Z",
+			Hostname:       "testhost",
+			Username:       "testuser",
+			PelicanVersion: "7.14.0",
+			ServerURL:      "https://example.com:8444",
+			DatabasePath:   "/var/lib/pelican/pelican.sqlite",
+			GOOS:           "linux",
+			GOARCH:         "amd64",
+		}
+
+		var buf bytes.Buffer
+		err := writeBackupMetadata(&buf, meta)
+		require.NoError(t, err)
+
+		// The metadata should be a PEM block with all headers.
+		block, _ := pem.Decode(buf.Bytes())
+		require.NotNil(t, block)
+		assert.Equal(t, pemTypeMetadata, block.Type)
+		assert.Equal(t, "1", block.Headers["Format-Version"])
+		assert.Equal(t, "testhost", block.Headers["Hostname"])
+		assert.Equal(t, "testuser", block.Headers["Username"])
+		assert.Equal(t, "7.14.0", block.Headers["Pelican-Version"])
+		assert.Equal(t, "https://example.com:8444", block.Headers["Server-URL"])
+		assert.Equal(t, "/var/lib/pelican/pelican.sqlite", block.Headers["Database-Path"])
+		assert.Equal(t, "linux", block.Headers["GOOS"])
+		assert.Equal(t, "amd64", block.Headers["GOARCH"])
+		assert.Empty(t, block.Bytes)
+
+		// Now test the read path via readBackupMetadata.
+		reader := bytes.NewReader(buf.Bytes())
+		readMeta, err := readBackupMetadata(reader)
+		require.NoError(t, err)
+		require.NotNil(t, readMeta)
+		assert.Equal(t, meta, *readMeta)
+	})
+
+	t.Run("optional-fields-omitted", func(t *testing.T) {
+		meta := BackupMetadata{
+			FormatVersion:  "1",
+			Timestamp:      "2026-02-21T12:00:00Z",
+			PelicanVersion: "dev",
+			GOOS:           "darwin",
+			GOARCH:         "arm64",
+		}
+
+		var buf bytes.Buffer
+		err := writeBackupMetadata(&buf, meta)
+		require.NoError(t, err)
+
+		block, _ := pem.Decode(buf.Bytes())
+		require.NotNil(t, block)
+		assert.Equal(t, "", block.Headers["Hostname"])
+		assert.Equal(t, "", block.Headers["Username"])
+		assert.Equal(t, "", block.Headers["Server-URL"])
+		assert.Equal(t, "", block.Headers["Database-Path"])
+
+		reader := bytes.NewReader(buf.Bytes())
+		readMeta, err := readBackupMetadata(reader)
+		require.NoError(t, err)
+		require.NotNil(t, readMeta)
+		assert.Equal(t, "", readMeta.Hostname)
+		assert.Equal(t, "", readMeta.Username)
+	})
+
+	t.Run("no-metadata-block", func(t *testing.T) {
+		// Simulate an older backup that starts with a key block.
+		var buf bytes.Buffer
+		keyBlock := &pem.Block{
+			Type:    pemTypeKey,
+			Headers: map[string]string{"Key-Id": "test-key"},
+			Bytes:   []byte("fake-encrypted-key"),
+		}
+		require.NoError(t, pem.Encode(&buf, keyBlock))
+
+		reader := bytes.NewReader(buf.Bytes())
+		readMeta, err := readBackupMetadata(reader)
+		require.NoError(t, err)
+		assert.Nil(t, readMeta, "should return nil for backups without metadata")
+	})
+}
+
+func TestCreateBackupIncludesMetadata(t *testing.T) {
+	config.ResetConfig()
+	t.Cleanup(func() {
+		if ServerDatabase != nil {
+			_ = ShutdownDB()
+		}
+		config.ResetConfig()
+	})
+
+	_, backupDir, _ := setupTestDBAndKeys(t)
+
+	ctx := context.Background()
+	err := createBackup(ctx)
+	require.NoError(t, err)
+
+	entries, err := os.ReadDir(backupDir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+
+	meta, err := ReadBackupMetadata(filepath.Join(backupDir, entries[0].Name()))
+	require.NoError(t, err)
+	require.NotNil(t, meta, "backup should contain a metadata block")
+
+	assert.Equal(t, "1", meta.FormatVersion)
+	assert.NotEmpty(t, meta.Timestamp)
+	assert.NotEmpty(t, meta.PelicanVersion)
+	assert.NotEmpty(t, meta.GOOS)
+	assert.NotEmpty(t, meta.GOARCH)
+	// DatabasePath should be set since we configured Server.DbLocation.
+	assert.NotEmpty(t, meta.DatabasePath)
 }

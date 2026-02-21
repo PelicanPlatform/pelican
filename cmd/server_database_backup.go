@@ -103,6 +103,20 @@ inspection) instead of the configured database path.`,
 		RunE:         cliBackupRestore,
 		SilenceUsage: true,
 	}
+
+	serverDatabaseBackupInfoCmd = &cobra.Command{
+		Use:   "info [backup-file]",
+		Short: "Show metadata for a backup file",
+		Long: `Display the human-readable metadata stored in a backup file,
+including the hostname, username, Pelican version, server URL,
+and timestamp of when the backup was created. This information
+is stored unencrypted and can be read without issuer keys.
+
+If no file is specified, the most recent backup is used.`,
+		Args:         cobra.MaximumNArgs(1),
+		RunE:         cliBackupInfo,
+		SilenceUsage: true,
+	}
 )
 
 // initServerForBackup initializes server configuration so that issuer keys
@@ -358,6 +372,80 @@ func formatSize(bytes int64) string {
 	}
 }
 
+func cliBackupInfo(cmd *cobra.Command, args []string) error {
+	var backupPath string
+	if len(args) == 1 {
+		backupPath = args[0]
+	} else {
+		// Need server config to find the backup directory.
+		ctx, cancel := context.WithCancel(cmd.Context())
+		defer cancel()
+		if err := initServerForBackup(ctx); err != nil {
+			return err
+		}
+		backups, err := database.ListBackups()
+		if err != nil {
+			return err
+		}
+		if len(backups) == 0 {
+			return errors.New("no backups available")
+		}
+		backupPath = backups[0].Path
+		if !outputJSON {
+			fmt.Printf("Showing metadata for most recent backup: %s\n\n", backupPath)
+		}
+	}
+
+	meta, err := database.ReadBackupMetadata(backupPath)
+	if err != nil {
+		return errors.Wrapf(err, "failed to read metadata from %s", backupPath)
+	}
+
+	if meta == nil {
+		if outputJSON {
+			result := map[string]interface{}{
+				"path":   backupPath,
+				"status": "no_metadata",
+			}
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc.SetIndent("", "  ")
+			return enc.Encode(result)
+		}
+		fmt.Printf("Backup %s does not contain a metadata block (older format).\n", backupPath)
+		return nil
+	}
+
+	if outputJSON {
+		result := map[string]interface{}{
+			"path":     backupPath,
+			"metadata": meta,
+		}
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	}
+
+	// Human-readable table.
+	fmt.Printf("%-18s %s\n", "Format Version:", meta.FormatVersion)
+	fmt.Printf("%-18s %s\n", "Timestamp:", meta.Timestamp)
+	fmt.Printf("%-18s %s\n", "Pelican Version:", meta.PelicanVersion)
+	if meta.Hostname != "" {
+		fmt.Printf("%-18s %s\n", "Hostname:", meta.Hostname)
+	}
+	if meta.Username != "" {
+		fmt.Printf("%-18s %s\n", "Username:", meta.Username)
+	}
+	if meta.ServerURL != "" {
+		fmt.Printf("%-18s %s\n", "Server URL:", meta.ServerURL)
+	}
+	if meta.DatabasePath != "" {
+		fmt.Printf("%-18s %s\n", "Database Path:", meta.DatabasePath)
+	}
+	fmt.Printf("%-18s %s/%s\n", "Platform:", meta.GOOS, meta.GOARCH)
+
+	return nil
+}
+
 func init() {
 	// Build the command tree: pelican server database backup {create,list,verify,restore}
 	serverCmd.AddCommand(serverDatabaseCmd)
@@ -367,6 +455,7 @@ func init() {
 	serverDatabaseBackupCmd.AddCommand(serverDatabaseBackupListCmd)
 	serverDatabaseBackupCmd.AddCommand(serverDatabaseBackupVerifyCmd)
 	serverDatabaseBackupCmd.AddCommand(serverDatabaseBackupRestoreCmd)
+	serverDatabaseBackupCmd.AddCommand(serverDatabaseBackupInfoCmd)
 
 	// Restore-specific flags.
 	serverDatabaseBackupRestoreCmd.Flags().Bool("force", false,
