@@ -432,19 +432,19 @@ func TestCorruption_VerifyBlockIntegrity(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	storage, err := local_cache.NewStorageManager(db, []string{tmpDir}, 0)
+	storage, err := local_cache.NewStorageManager(db, []string{tmpDir}, 0, nil)
 	require.NoError(t, err)
 
 	// Create a 3-block object (3 * 4080 = 12240 bytes)
 	const contentLen = 3 * local_cache.BlockDataSize
 	content := generateTestData(contentLen)
 
-	fileHash := "deadbeef1234567890abcdef"
+	fileHash := local_cache.InstanceHash("deadbeef1234567890abcdef")
 
 	// Get the assigned storage ID for the single directory.
 	assignedDirs := storage.GetDirs()
 	require.Len(t, assignedDirs, 1)
-	var storageID uint8
+	var storageID local_cache.StorageID
 	for id := range assignedDirs {
 		storageID = id
 	}
