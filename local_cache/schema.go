@@ -636,6 +636,21 @@ func CalculateBlockCount(contentLength int64) uint32 {
 	return uint32((contentLength + BlockDataSize - 1) / BlockDataSize)
 }
 
+// CalculateFileSize returns the exact on-disk file size for a given content
+// length.  The last block is only as large as the remaining data plus its
+// AES-GCM authentication tag — it is not padded to a full BlockTotalSize.
+func CalculateFileSize(contentLength int64) int64 {
+	totalBlocks := CalculateBlockCount(contentLength)
+	if totalBlocks == 0 {
+		return 0
+	}
+	lastBlockData := contentLength % int64(BlockDataSize)
+	if lastBlockData == 0 {
+		lastBlockData = int64(BlockDataSize)
+	}
+	return BlockOffset(totalBlocks-1) + lastBlockData + int64(AuthTagSize)
+}
+
 // BlockOffset returns the byte offset in the file for a given block number
 func BlockOffset(blockNum uint32) int64 {
 	return int64(blockNum) * BlockTotalSize

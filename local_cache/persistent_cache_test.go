@@ -114,6 +114,13 @@ func TestBlockCalculations(t *testing.T) {
 	assert.Equal(t, int64(0), BlockOffset(0), "First block at offset 0")
 	assert.Equal(t, int64(BlockTotalSize), BlockOffset(1), "Second block offset (disk)")
 	assert.Equal(t, int64(BlockTotalSize)*10, BlockOffset(10), "Block 10 offset (disk)")
+
+	// Test CalculateFileSize - exact encrypted file size on disk
+	assert.Equal(t, int64(0), CalculateFileSize(0), "Empty file")
+	assert.Equal(t, int64(1+AuthTagSize), CalculateFileSize(1), "1 byte → 1 partial block")
+	assert.Equal(t, int64(BlockTotalSize), CalculateFileSize(BlockDataSize), "Exactly 1 full block")
+	assert.Equal(t, int64(BlockTotalSize+1+AuthTagSize), CalculateFileSize(BlockDataSize+1), "1 byte into 2nd block")
+	assert.Equal(t, int64(BlockTotalSize)*100, CalculateFileSize(int64(BlockDataSize)*100), "100 full blocks")
 }
 
 func TestParseRangeHeader(t *testing.T) {
@@ -865,6 +872,7 @@ func TestZeroBlockReadFailure(t *testing.T) {
 	egrp, _ := errgroup.WithContext(ctx)
 	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
 	require.NoError(t, err)
+	defer storage.Close()
 
 	instanceHash := InstanceHash("zero_block_test_0123456789abcdef0123456789abcdef01")
 
@@ -887,11 +895,11 @@ func TestZeroBlockReadFailure(t *testing.T) {
 	}
 	require.NoError(t, db.SetMetadata(instanceHash, meta))
 
-	// Create directory for the object file and pre-allocate it with
-	// zeros (simulates how NewBlockWriter pre-allocates).
+	// Create directory for the object file and pre-allocate it to the
+	// exact encrypted size (same as InitDiskStorage / NewBlockWriter).
 	objPath := storage.getObjectPath(instanceHash)
 	require.NoError(t, os.MkdirAll(filepath.Dir(objPath), 0750))
-	totalSize := BlockOffset(CalculateBlockCount(dataSize))
+	totalSize := CalculateFileSize(dataSize)
 	fp, err := os.OpenFile(objPath, os.O_RDWR|os.O_CREATE, 0600)
 	require.NoError(t, err)
 	require.NoError(t, fp.Truncate(totalSize))
@@ -935,6 +943,7 @@ func TestStorageManagerInline(t *testing.T) {
 	egrp, _ := errgroup.WithContext(ctx)
 	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
 	require.NoError(t, err)
+	defer storage.Close()
 
 	instanceHash := InstanceHash("inline_test_hash")
 	testData := []byte("Hello, World! This is inline test data.")
@@ -981,6 +990,7 @@ func TestEvictionManager(t *testing.T) {
 	egrp, _ := errgroup.WithContext(ctx)
 	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
 	require.NoError(t, err)
+	defer storage.Close()
 
 	eviction := NewEvictionManager(db, storage, EvictionConfig{
 		DirConfigs: map[StorageID]EvictionDirConfig{
@@ -1025,6 +1035,7 @@ func TestConsistencyChecker(t *testing.T) {
 	egrp, _ := errgroup.WithContext(ctx)
 	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
 	require.NoError(t, err)
+	defer storage.Close()
 
 	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
 		MetadataScanActiveMs: 100,
@@ -1060,6 +1071,7 @@ func TestConsistencyChecker_MetadataScan(t *testing.T) {
 	egrp, _ := errgroup.WithContext(ctx)
 	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
 	require.NoError(t, err)
+	defer storage.Close()
 
 	// Discover the assigned storage ID for the single directory.
 	assignedDirs := storage.GetDirs()
@@ -1181,6 +1193,7 @@ func TestConsistencyChecker_InlineStorage(t *testing.T) {
 	egrp, _ := errgroup.WithContext(ctx)
 	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
 	require.NoError(t, err)
+	defer storage.Close()
 
 	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
 		MetadataScanActiveMs: 1000,
@@ -1250,6 +1263,7 @@ func TestConsistencyChecker_OrphanCleanup(t *testing.T) {
 	egrp, _ := errgroup.WithContext(ctx)
 	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
 	require.NoError(t, err)
+	defer storage.Close()
 
 	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
 		MetadataScanActiveMs: 1000,
@@ -1344,6 +1358,7 @@ func TestConsistencyChecker_UsageReconciliation(t *testing.T) {
 	egrp, _ := errgroup.WithContext(ctx)
 	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
 	require.NoError(t, err)
+	defer storage.Close()
 
 	// Discover assigned storage ID.
 	assignedDirs := storage.GetDirs()
@@ -1484,6 +1499,7 @@ func TestVerifyObject_CorrectChecksum(t *testing.T) {
 	egrp, _ := errgroup.WithContext(ctx)
 	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
 	require.NoError(t, err)
+	defer storage.Close()
 
 	var diskID StorageID
 	for id := range storage.GetDirs() {
@@ -1539,6 +1555,7 @@ func TestVerifyObject_WrongChecksum(t *testing.T) {
 	egrp, _ := errgroup.WithContext(ctx)
 	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
 	require.NoError(t, err)
+	defer storage.Close()
 
 	var diskID StorageID
 	for id := range storage.GetDirs() {
@@ -1591,6 +1608,7 @@ func TestDataScan_CorrectChecksum(t *testing.T) {
 	egrp, _ := errgroup.WithContext(ctx)
 	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
 	require.NoError(t, err)
+	defer storage.Close()
 
 	var diskID StorageID
 	for id := range storage.GetDirs() {
@@ -1650,6 +1668,7 @@ func TestDataScan_WrongChecksum(t *testing.T) {
 	egrp, _ := errgroup.WithContext(ctx)
 	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
 	require.NoError(t, err)
+	defer storage.Close()
 
 	var diskID StorageID
 	for id := range storage.GetDirs() {
@@ -1732,6 +1751,7 @@ func TestDataScan_MissingChecksum(t *testing.T) {
 	egrp, _ := errgroup.WithContext(ctx)
 	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
 	require.NoError(t, err)
+	defer storage.Close()
 
 	var diskID StorageID
 	for id := range storage.GetDirs() {
@@ -1799,6 +1819,7 @@ func TestMultiDirStoragePlacement(t *testing.T) {
 	egrp, _ := errgroup.WithContext(ctx)
 	storage, err := NewStorageManager(db, []string{dir1, dir2}, 0, egrp)
 	require.NoError(t, err)
+	defer storage.Close()
 
 	// Discover the assigned IDs for eviction config.
 	assignedDirs := storage.GetDirs()
@@ -1961,6 +1982,7 @@ func TestPurgeStorageID(t *testing.T) {
 	egrp, _ := errgroup.WithContext(ctx)
 	storage, err := NewStorageManager(db, []string{dir1, dir2}, 0, egrp)
 	require.NoError(t, err)
+	defer storage.Close()
 
 	assignedDirs := storage.GetDirs()
 	require.Len(t, assignedDirs, 2)
@@ -2099,6 +2121,7 @@ func TestStorageIDRecycling(t *testing.T) {
 	egrp, _ := errgroup.WithContext(ctx)
 	storage, err := NewStorageManager(db, []string{realDir}, 0, egrp)
 	require.NoError(t, err, "should recycle a storageID instead of failing")
+	defer storage.Close()
 
 	dirs := storage.GetDirs()
 	require.Len(t, dirs, 1)
