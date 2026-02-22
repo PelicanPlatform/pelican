@@ -53,7 +53,8 @@ export type ParameterValue =
   | IPMapping[]
   | GeoIPOverride[]
   | Export[]
-  | PolicyDefinition[];
+  | PolicyDefinition[]
+  | StorageDir[];
 
 export type ParameterValueRecord = { [key: string]: ParameterValue };
 
@@ -144,6 +145,13 @@ export interface Export {
   federationprefix: string;
   capabilities: Capability[];
   sentinellocation: string;
+}
+
+export interface StorageDir {
+  path: string;
+  maxsize: string;
+  highwatermarkpercentage: number;
+  lowwatermarkpercentage: number;
 }
 
 export interface Path {
