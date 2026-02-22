@@ -602,9 +602,8 @@ func (sm *StorageManager) InitDiskStorage(ctx context.Context, instanceHash Inst
 		return nil, errors.Wrap(err, "failed to create object file")
 	}
 
-	// Pre-allocate the file to the expected size (blocks * BlockTotalSize)
-	totalBlocks := CalculateBlockCount(contentLength)
-	fileSize := int64(totalBlocks) * BlockTotalSize
+	// Pre-allocate the file to the exact encrypted size.
+	fileSize := CalculateFileSize(contentLength)
 	if err := file.Truncate(fileSize); err != nil {
 		file.Close()
 		os.Remove(objectPath)
@@ -1299,7 +1298,7 @@ func (sm *StorageManager) NewBlockWriter(instanceHash InstanceHash, startBlock u
 		file.Close()
 		return nil, errors.Wrap(err, "failed to stat object file")
 	}
-	expectedSize := int64(CalculateBlockCount(meta.ContentLength)) * BlockTotalSize
+	expectedSize := CalculateFileSize(meta.ContentLength)
 	if fi.Size() < expectedSize {
 		if err := file.Truncate(expectedSize); err != nil {
 			file.Close()
@@ -1499,15 +1498,13 @@ func (bw *BlockWriter) Close() error {
 		return errors.Wrap(err, "failed to flush write batch")
 	}
 
-	// Truncate the file to its actual encrypted size.  Pre-allocation
-	// (or OS-level block rounding) may have made the file larger than
-	// the data written, especially for the last partial block.
+	// For unknown-size (chunked) transfers the file was allocated with
+	// size 0 and grew via block writes; truncate to the exact final size
+	// now that ContentLength is known.  For known-size transfers the file
+	// was already pre-allocated to the exact size by InitDiskStorage /
+	// NewBlockWriter, so this is a no-op.
 	if bw.totalBlocks > 0 {
-		lastBlockDataSize := bw.meta.ContentLength % int64(BlockDataSize)
-		if lastBlockDataSize == 0 {
-			lastBlockDataSize = int64(BlockDataSize)
-		}
-		actualSize := BlockOffset(bw.totalBlocks-1) + lastBlockDataSize + int64(AuthTagSize)
+		actualSize := CalculateFileSize(bw.meta.ContentLength)
 		if err := bw.file.File().Truncate(actualSize); err != nil {
 			log.Warnf("Failed to truncate file to actual size: %v", err)
 		}

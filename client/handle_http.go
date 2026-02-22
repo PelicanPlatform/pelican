@@ -4918,6 +4918,14 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 					err = errors.Errorf("stat of %s failed at endpoint %s: server returned 500", dest.String(), endpoint.String())
 					resultsChan <- statResults{FileInfo{}, err}
 					return
+				} else if gowebdav.IsErrCode(err, http.StatusConflict) {
+					// 409 Conflict — XRootD caches return this for PROPFIND
+					// on directories.  Report as an error so the collections
+					// URL fallback can still succeed.
+					log.Debugf("Stat of %s at %s returned 409 (directory on cache?); falling back", dest.String(), endpoint.String())
+					err = errors.Errorf("stat of %s at endpoint %s: server returned 409", dest.String(), endpoint.String())
+					resultsChan <- statResults{FileInfo{}, err}
+					return
 				}
 
 				// If we have a proxy error, we can try again without the proxy

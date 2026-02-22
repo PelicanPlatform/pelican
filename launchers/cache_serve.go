@@ -378,3 +378,15 @@ func CacheServeFinish(ctx context.Context, egrp *errgroup.Group, cacheServer ser
 	log.Debug("Cache is registered")
 	return nil
 }
+
+// triggerPersistentCacheFedTokenRetry checks if the given cache server is a
+// persistent cache server and, if so, triggers an immediate retry of the
+// federation token fetch (useful after first advertisement to the director).
+func triggerPersistentCacheFedTokenRetry(cacheServer server_structs.XRootDServer) {
+	if pcs, ok := cacheServer.(*persistentCacheServer); ok && pcs.fedTokRetry != nil {
+		select {
+		case pcs.fedTokRetry <- struct{}{}:
+		default:
+		}
+	}
+}
