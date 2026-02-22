@@ -4802,8 +4802,10 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
    statHosts := make([]url.URL, 0, 3)
    collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
 
-   // Prefer cache/origin servers (ObjectServers) for stat.  Only fall
-   // back to the collections URL when no object servers are available.
+   // Prefer cache/origin servers (ObjectServers) for stat, but always
+   // include the collections URL as a fallback.  XRootD caches return
+   // 409 for PROPFIND on directories, so we need the collections URL
+   // as a fallback for recursive operations.
    if len(dirResp.ObjectServers) > 0 {
 	   for idx, oServer := range dirResp.ObjectServers {
 		   if idx > 2 {
@@ -4811,8 +4813,20 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 		   }
 		   statHosts = append(statHosts, *oServer)
 	   }
-   } else if collectionsUrl != nil {
-	   statHosts = append(statHosts, *collectionsUrl)
+   }
+   if collectionsUrl != nil {
+	   // Avoid duplicating the collections URL if it was already
+	   // added as an ObjectServer.
+	   isDup := false
+	   for _, h := range statHosts {
+		   if h.Host == collectionsUrl.Host && h.Path == collectionsUrl.Path {
+			   isDup = true
+			   break
+		   }
+	   }
+	   if !isDup {
+		   statHosts = append(statHosts, *collectionsUrl)
+	   }
    }
 	type statResults struct {
 		info FileInfo
@@ -4914,6 +4928,14 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 					   // callers (e.g. uploadObject) can distinguish a genuine
 					   // absence from an error.
 					   err = errors.Errorf("stat of %s failed at endpoint %s: server returned 500", dest.String(), endpoint.String())
+					   resultsChan <- statResults{FileInfo{}, err}
+					   return
+				   } else if gowebdav.IsErrCode(err, http.StatusConflict) {
+					   // 409 Conflict — XRootD caches return this for PROPFIND
+					   // on directories.  Report as an error so the collections
+					   // URL fallback can still succeed.
+					   log.Debugf("Stat of %s at %s returned 409 (directory on cache?); falling back", dest.String(), endpoint.String())
+					   err = errors.Errorf("stat of %s at endpoint %s: server returned 409", dest.String(), endpoint.String())
 					   resultsChan <- statResults{FileInfo{}, err}
 					   return
 				   }
