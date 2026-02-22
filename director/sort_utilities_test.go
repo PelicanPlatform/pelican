@@ -46,6 +46,12 @@ var yamlMockup string
 func TestCheckOverrides(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
+
+	// Reset override state at start, in case a prior test in this
+	// package triggered geoOverridesOnce via checkOverrides.
+	geoNetOverrides = nil
+	geoOverridesOnce = sync.Once{}
+
 	t.Cleanup(func() {
 		server_utils.ResetTestState()
 		geoNetOverrides = nil
@@ -147,8 +153,9 @@ func TestCheckOverrides(t *testing.T) {
 				assert.EqualValues(t, tc.expectCoord, coordinate, "coordinates do not match expected values")
 				// Make sure the IP is now in the cache
 				cached := clientIpGeoOverrideCache.Get(addr)
-				assert.NotNil(t, cached, "IP should be in cache after test")
-				assert.EqualValues(t, tc.expectCoord, cached.Value(), "cached coordinates do not match expected values")
+				if assert.NotNil(t, cached, "IP should be in cache after test") {
+					assert.EqualValues(t, tc.expectCoord, cached.Value(), "cached coordinates do not match expected values")
+				}
 			}
 		})
 	}

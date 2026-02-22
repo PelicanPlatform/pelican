@@ -21,6 +21,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"path"
 	"strings"
 	"sync"
@@ -83,10 +84,61 @@ func NewDirRespCache(ttl time.Duration) *DirRespCache {
 	}
 }
 
+// stripFederationPaths returns a shallow copy of resp where each
+// ObjectServer URL has had objectPath trimmed from the end of its
+// Path.  This ensures the cached response stores only the server-side
+// base path, so it can safely be reused for different files under the
+// same namespace prefix.
+func stripFederationPaths(resp server_structs.DirectorResponse, objectPath string) server_structs.DirectorResponse {
+	objectPath = path.Clean(objectPath)
+	if objectPath == "" || objectPath == "/" || objectPath == "." {
+		return resp
+	}
+	stripped := make([]*url.URL, len(resp.ObjectServers))
+	for i, u := range resp.ObjectServers {
+		if u == nil {
+			continue
+		}
+		clone := *u
+		clone.Path = strings.TrimSuffix(clone.Path, objectPath)
+		stripped[i] = &clone
+	}
+	resp.ObjectServers = stripped
+	return resp
+}
+
+// reconstitutePaths returns a shallow copy of resp where each
+// ObjectServer URL has objectPath appended to its Path.  This is the
+// inverse of stripFederationPaths and is applied on every cache
+// lookup so callers always receive complete ObjectServer URLs.
+func reconstitutePaths(resp server_structs.DirectorResponse, objectPath string) server_structs.DirectorResponse {
+	objectPath = path.Clean(objectPath)
+	if objectPath == "" || objectPath == "/" || objectPath == "." {
+		return resp
+	}
+	reconstituted := make([]*url.URL, len(resp.ObjectServers))
+	for i, u := range resp.ObjectServers {
+		if u == nil {
+			continue
+		}
+		clone := *u
+		clone.Path = clone.Path + objectPath
+		reconstituted[i] = &clone
+	}
+	resp.ObjectServers = reconstituted
+	return resp
+}
+
 // Store saves a DirectorResponse under the given prefix.  Any previous
 // entry for the same prefix is replaced.
-func (c *DirRespCache) Store(prefix string, resp server_structs.DirectorResponse) {
+//
+// objectPath is the federation object path (e.g. "/test/file.txt")
+// that was used to obtain this response from the director.  It is
+// stripped from each ObjectServer URL so the cached entry contains
+// only the server-side base path.  Pass "" if no stripping is needed.
+func (c *DirRespCache) Store(prefix string, objectPath string, resp server_structs.DirectorResponse) {
 	prefix = path.Clean(prefix)
+	resp = stripFederationPaths(resp, objectPath)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.entries[prefix] = dirRespCacheEntry{
@@ -117,7 +169,7 @@ func (c *DirRespCache) Lookup(objectPath string) (server_structs.DirectorRespons
 		if entry, ok := c.entries[candidate]; ok {
 			if now.Before(entry.expiry) {
 				log.Debugf("DirRespCache: hit for path %q → prefix %q", objectPath, candidate)
-				return entry.resp, true
+				return reconstitutePaths(entry.resp, objectPath), true
 			}
 			// Entry expired — don't return it, but continue looking
 			// for a shorter (potentially still-valid) prefix.
@@ -165,7 +217,11 @@ func (c *DirRespCache) LookupOrLoad(ctx context.Context, objectPath string, load
 	if cl, ok := c.inflight[objectPath]; ok {
 		c.sfMu.Unlock()
 		// Wait with context awareness.
-		return c.waitForCall(ctx, cl)
+		resp, err := c.waitForCall(ctx, cl)
+		if err != nil {
+			return resp, err
+		}
+		return reconstitutePaths(resp, objectPath), nil
 	}
 
 	// No in-flight request; create one.
@@ -181,13 +237,17 @@ func (c *DirRespCache) LookupOrLoad(ctx context.Context, objectPath string, load
 	go func() {
 		defer close(done)
 		resp, prefix, err := loader(context.WithoutCancel(ctx))
-		cl.val = inflightResult{resp: resp, prefix: prefix}
-		cl.err = err
 
-		// On success, store in cache.
+		// On success, store in cache (stripping the federation
+		// object path from ObjectServer URLs).
 		if err == nil && prefix != "" {
-			c.Store(prefix, resp)
+			c.Store(prefix, objectPath, resp)
 		}
+
+		// Store the stripped version; waitForCall callers will
+		// reconstitute with their objectPath before returning.
+		cl.val = inflightResult{resp: stripFederationPaths(resp, objectPath), prefix: prefix}
+		cl.err = err
 
 		cl.wg.Done()
 
@@ -197,7 +257,11 @@ func (c *DirRespCache) LookupOrLoad(ctx context.Context, objectPath string, load
 		c.sfMu.Unlock()
 	}()
 
-	return c.waitForCall(ctx, cl)
+	resp, err := c.waitForCall(ctx, cl)
+	if err != nil {
+		return resp, err
+	}
+	return reconstitutePaths(resp, objectPath), nil
 }
 
 // waitForCall waits for the in-flight call to complete, respecting

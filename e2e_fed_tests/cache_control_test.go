@@ -589,7 +589,7 @@ func TestCacheControl_EvictionUnderPressure(t *testing.T) {
 	// Write 5 × 20KB files on the origin
 	fileNames := make([]string, 5)
 	fileContents := make([][]byte, 5)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		name := fmt.Sprintf("evict_%d.bin", i)
 		fileNames[i] = name
 		fileContents[i] = writeTestFile(t, ft, name, 20*1024)
@@ -607,7 +607,7 @@ func TestCacheControl_EvictionUnderPressure(t *testing.T) {
 	baseURL := parsedURL.String()
 
 	// Fetch all 5 files sequentially (total ~100KB, exceeds 90KB high water)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		url := baseURL + fileNames[i]
 		r := fetchFromCache(t, ft, url, nil)
 		require.Equal(t, http.StatusOK, r.statusCode,
@@ -808,6 +808,15 @@ func TestWriteThrough_Unauthorized(t *testing.T) {
 	content := writeTestFile(t, ft, "secret.bin", 1024)
 	cacheURL := waitForCacheRedirectURL(t, ft, "/test/secret.bin", tkn)
 	_ = content
+
+	// Strip the ?authz= query parameter that the director embeds in the
+	// redirect URL so this PUT is truly unauthenticated.
+	u, err := url.Parse(cacheURL)
+	require.NoError(t, err)
+	q := u.Query()
+	q.Del("authz")
+	u.RawQuery = q.Encode()
+	cacheURL = u.String()
 
 	// PUT with no token — should be rejected
 	rPut := sendToCacheURL(t, ft, "PUT", cacheURL, "", []byte("evil data"))

@@ -53,7 +53,7 @@ func TestDirRespCacheLookup(t *testing.T) {
 
 	t.Run("ExactMatch", func(t *testing.T) {
 		resp := makeDirResp("/test")
-		cache.Store("/test", resp)
+		cache.Store("/test", "", resp)
 
 		got, ok := cache.Lookup("/test")
 		require.True(t, ok)
@@ -62,7 +62,7 @@ func TestDirRespCacheLookup(t *testing.T) {
 
 	t.Run("PrefixMatch", func(t *testing.T) {
 		resp := makeDirResp("/data/project")
-		cache.Store("/data/project", resp)
+		cache.Store("/data/project", "", resp)
 
 		got, ok := cache.Lookup("/data/project/subdir/file.txt")
 		require.True(t, ok)
@@ -70,9 +70,9 @@ func TestDirRespCacheLookup(t *testing.T) {
 	})
 
 	t.Run("LongestPrefixWins", func(t *testing.T) {
-		cache.Store("/a", makeDirResp("/a"))
-		cache.Store("/a/b", makeDirResp("/a/b"))
-		cache.Store("/a/b/c", makeDirResp("/a/b/c"))
+		cache.Store("/a", "", makeDirResp("/a"))
+		cache.Store("/a/b", "", makeDirResp("/a/b"))
+		cache.Store("/a/b/c", "", makeDirResp("/a/b/c"))
 
 		got, ok := cache.Lookup("/a/b/c/d/e.txt")
 		require.True(t, ok)
@@ -90,7 +90,7 @@ func TestDirRespCacheLookup(t *testing.T) {
 
 	t.Run("NoPartialSegmentMatch", func(t *testing.T) {
 		cache2 := NewDirRespCache(5 * time.Minute)
-		cache2.Store("/abc", makeDirResp("/abc"))
+		cache2.Store("/abc", "", makeDirResp("/abc"))
 
 		// "/abcdef" should NOT match "/abc" because "abc" is not a path prefix of "abcdef"
 		// (there's no "/" separator).  The lookup walks up path.Dir so:
@@ -101,7 +101,7 @@ func TestDirRespCacheLookup(t *testing.T) {
 
 	t.Run("FoobarNotCoveredByFoo", func(t *testing.T) {
 		cache2 := NewDirRespCache(5 * time.Minute)
-		cache2.Store("/foo", makeDirResp("/foo"))
+		cache2.Store("/foo", "", makeDirResp("/foo"))
 
 		// "/foobar" is a different path segment — it must NOT match "/foo".
 		_, ok := cache2.Lookup("/foobar")
@@ -120,7 +120,7 @@ func TestDirRespCacheLookup(t *testing.T) {
 
 func TestDirRespCacheExpiry(t *testing.T) {
 	cache := NewDirRespCache(50 * time.Millisecond)
-	cache.Store("/test", makeDirResp("/test"))
+	cache.Store("/test", "", makeDirResp("/test"))
 
 	// Should be present immediately
 	_, ok := cache.Lookup("/test/file.txt")
@@ -135,7 +135,7 @@ func TestDirRespCacheExpiry(t *testing.T) {
 
 func TestDirRespCacheInvalidate(t *testing.T) {
 	cache := NewDirRespCache(5 * time.Minute)
-	cache.Store("/test", makeDirResp("/test"))
+	cache.Store("/test", "", makeDirResp("/test"))
 
 	_, ok := cache.Lookup("/test/file.txt")
 	require.True(t, ok)
@@ -148,8 +148,8 @@ func TestDirRespCacheInvalidate(t *testing.T) {
 
 func TestDirRespCacheInvalidateAll(t *testing.T) {
 	cache := NewDirRespCache(5 * time.Minute)
-	cache.Store("/a", makeDirResp("/a"))
-	cache.Store("/b", makeDirResp("/b"))
+	cache.Store("/a", "", makeDirResp("/a"))
+	cache.Store("/b", "", makeDirResp("/b"))
 
 	assert.Equal(t, 2, cache.Len())
 
@@ -162,11 +162,11 @@ func TestDirRespCacheInvalidateAll(t *testing.T) {
 
 func TestDirRespCacheCleanExpired(t *testing.T) {
 	cache := NewDirRespCache(50 * time.Millisecond)
-	cache.Store("/expired", makeDirResp("/expired"))
+	cache.Store("/expired", "", makeDirResp("/expired"))
 
 	time.Sleep(60 * time.Millisecond)
 
-	cache.Store("/fresh", makeDirResp("/fresh"))
+	cache.Store("/fresh", "", makeDirResp("/fresh"))
 	assert.Equal(t, 2, cache.Len())
 
 	cache.cleanExpired()
@@ -183,8 +183,8 @@ func TestDirRespCacheOverwrite(t *testing.T) {
 	resp2 := makeDirResp("/test-updated")
 	resp2.XPelNsHdr.Namespace = "/test" // same namespace
 
-	cache.Store("/test", resp1)
-	cache.Store("/test", resp2)
+	cache.Store("/test", "", resp1)
+	cache.Store("/test", "", resp2)
 
 	got, ok := cache.Lookup("/test/file")
 	require.True(t, ok)
@@ -219,7 +219,7 @@ func TestMatchesPrefix(t *testing.T) {
 func TestLookupOrLoadCacheHit(t *testing.T) {
 	cache := NewDirRespCache(5 * time.Minute)
 	resp := makeDirResp("/data")
-	cache.Store("/data", resp)
+	cache.Store("/data", "", resp)
 
 	var loaderCalled atomic.Int32
 	got, err := cache.LookupOrLoad(context.Background(), "/data/file.txt", func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
@@ -313,7 +313,7 @@ func TestLookupOrLoadContextCancel(t *testing.T) {
 
 func TestLookupOrLoadNoPartialSegment(t *testing.T) {
 	cache := NewDirRespCache(5 * time.Minute)
-	cache.Store("/foo", makeDirResp("/foo"))
+	cache.Store("/foo", "", makeDirResp("/foo"))
 
 	var loaderCalled atomic.Int32
 	resp := makeDirResp("/foobar")
@@ -351,4 +351,81 @@ func TestLookupOrLoadLoaderError(t *testing.T) {
 	_, ok := cache.Lookup("/fail/file.txt")
 	assert.False(t, ok)
 	assert.Equal(t, 0, cache.Len())
+}
+
+// This test tackles a regression that occurred when the director response caching was first implemented
+// in the transfer engine.  It would cache the exact response for an object and on reuse, the original object's
+// URL would be used instead of the new object.
+func TestDirRespCacheStripsFederationPath(t *testing.T) {
+	t.Run("StoreStripsAndLookupReconstitutes", func(t *testing.T) {
+		cache := NewDirRespCache(5 * time.Minute)
+		resp := server_structs.DirectorResponse{
+			XPelNsHdr: server_structs.XPelNs{Namespace: "/test"},
+			ObjectServers: []*url.URL{
+				{Scheme: "https", Host: "origin.example.com", Path: "/api/v1.0/origin/data/test/file1.bin"},
+				{Scheme: "https", Host: "cache.example.com", Path: "/test/file1.bin"},
+			},
+		}
+
+		cache.Store("/test", "/test/file1.bin", resp)
+
+		// Looking up with the SAME file should return original full paths.
+		got, ok := cache.Lookup("/test/file1.bin")
+		require.True(t, ok)
+		assert.Equal(t, "/api/v1.0/origin/data/test/file1.bin", got.ObjectServers[0].Path)
+		assert.Equal(t, "/test/file1.bin", got.ObjectServers[1].Path)
+
+		// Looking up with a DIFFERENT file should return reconstituted paths
+		// with the new file's federation path.
+		got2, ok := cache.Lookup("/test/file2.bin")
+		require.True(t, ok)
+		assert.Equal(t, "/api/v1.0/origin/data/test/file2.bin", got2.ObjectServers[0].Path)
+		assert.Equal(t, "/test/file2.bin", got2.ObjectServers[1].Path)
+
+		// Original response should NOT be mutated.
+		assert.Equal(t, "/api/v1.0/origin/data/test/file1.bin", resp.ObjectServers[0].Path)
+		assert.Equal(t, "/test/file1.bin", resp.ObjectServers[1].Path)
+	})
+
+	t.Run("LookupOrLoadReconstitutes", func(t *testing.T) {
+		cache := NewDirRespCache(5 * time.Minute)
+		resp := server_structs.DirectorResponse{
+			XPelNsHdr: server_structs.XPelNs{Namespace: "/ns"},
+			ObjectServers: []*url.URL{
+				{Scheme: "https", Host: "origin.example.com", Path: "/prefix/ns/obj1.bin"},
+			},
+		}
+
+		got, err := cache.LookupOrLoad(context.Background(), "/ns/obj1.bin", func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+			return resp, "/ns", nil
+		})
+		require.NoError(t, err)
+
+		// Returned response should have full reconstituted path.
+		require.Len(t, got.ObjectServers, 1)
+		assert.Equal(t, "/prefix/ns/obj1.bin", got.ObjectServers[0].Path)
+
+		// Subsequent lookup for a different file should return reconstituted
+		// paths with the new file's federation path.
+		cached, ok := cache.Lookup("/ns/obj2.bin")
+		require.True(t, ok)
+		assert.Equal(t, "/prefix/ns/obj2.bin", cached.ObjectServers[0].Path)
+	})
+
+	t.Run("EmptyObjectPathNoOp", func(t *testing.T) {
+		cache := NewDirRespCache(5 * time.Minute)
+		resp := server_structs.DirectorResponse{
+			XPelNsHdr: server_structs.XPelNs{Namespace: "/test"},
+			ObjectServers: []*url.URL{
+				{Scheme: "https", Host: "origin.example.com", Path: "/some/path"},
+			},
+		}
+
+		cache.Store("/test", "", resp)
+		got, ok := cache.Lookup("/test/file.txt")
+		require.True(t, ok)
+		// With empty objectPath, nothing was stripped, so reconstitution
+		// appends the lookup path to the stored path.
+		assert.Equal(t, "/some/path/test/file.txt", got.ObjectServers[0].Path)
+	})
 }

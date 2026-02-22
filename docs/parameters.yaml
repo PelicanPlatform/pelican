@@ -1647,7 +1647,7 @@ description: |+
   If a prefetch takes longer than this timeout, the operation is abandoned and the
   client is expected to retry later.
 type: duration
-default: 20s
+default: 10s
 hidden: true
 components: ["localcache"]
 ---

@@ -396,12 +396,7 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		// persistent cache servers whose initial federation token fetch
 		// failed (because the cache was not yet registered), trigger an
 		// immediate retry now that the director knows about us.
-		if pcs, ok := cacheServer.(*persistentCacheServer); ok && pcs.fedTokRetry != nil {
-			select {
-			case pcs.fedTokRetry <- struct{}{}:
-			default:
-			}
-		}
+		triggerPersistentCacheFedTokenRetry(cacheServer)
 	}
 
 	// Launch the broker listener.  Needs the federation information to determine the broker endpoint.

@@ -328,8 +328,12 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 					return nil
 				}
 
-				// Reconstruct hash from path (remove directory separators)
-				instanceHash := InstanceHash(strings.ReplaceAll(relPath, string(filepath.Separator), ""))
+				// Reconstruct hash from path (remove directory separators).
+				// io/fs.WalkDir always uses forward slashes, but we also
+				// handle backslashes for robustness on Windows.
+				hash := strings.ReplaceAll(relPath, "/", "")
+				hash = strings.ReplaceAll(hash, "\\", "")
+				instanceHash := InstanceHash(hash)
 
 				// Validate instance hash format: must be 64 hex characters (SHA256)
 				if len(instanceHash) != 64 {

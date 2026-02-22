@@ -38,6 +38,7 @@ import (
 	_ "github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
@@ -97,22 +98,26 @@ func uploadAndPrime(ctx context.Context, t *testing.T, ft *fed_test_utils.FedTes
 	_, err := client.DoPut(ctx, localFile, uploadURL, false, client.WithToken(token))
 	require.NoError(t, err)
 
+	// Wait for the cache to register with the director before downloading.
+	// Without this, DoGet may follow the director redirect straight to the
+	// origin, never populating the cache.
+	cacheURL := waitForCacheRedirectURL(t, ft, "/test/"+filename, token)
+
 	// Download through cache to populate it
 	downloadFile := filepath.Join(localTmpDir, "prime_download")
 	_, err = client.DoGet(ctx, uploadURL, downloadFile, false, client.WithToken(ft.Token))
 	require.NoError(t, err)
 
-	cacheURL := getCacheRedirectURL(ctx, t, "/test/"+filename, token)
 	return cacheURL
 }
 
 // findObjectFileForContent walks the objects directory and returns the file
-// whose size is consistent with the given content length (within one
-// BlockTotalSize of the expected pre-allocated size).
+// whose size matches the actual on-disk size for the given content length.
+// CalculateFileSize accounts for the last block being shorter than a full
+// BlockTotalSize on disk.
 func findObjectFileForContent(t *testing.T, objectsDir string, contentLength int) string {
 	t.Helper()
-	expectedBlocks := local_cache.CalculateBlockCount(int64(contentLength))
-	expectedSize := int64(expectedBlocks) * local_cache.BlockTotalSize
+	expectedSize := local_cache.CalculateFileSize(int64(contentLength))
 	var found string
 	err := filepath.Walk(objectsDir, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -432,8 +437,10 @@ func TestCorruption_VerifyBlockIntegrity(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	storage, err := local_cache.NewStorageManager(db, []string{tmpDir}, 0, nil)
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := local_cache.NewStorageManager(db, []string{tmpDir}, 0, egrp)
 	require.NoError(t, err)
+	defer storage.Close()
 
 	// Create a 3-block object (3 * 4080 = 12240 bytes)
 	const contentLen = 3 * local_cache.BlockDataSize
