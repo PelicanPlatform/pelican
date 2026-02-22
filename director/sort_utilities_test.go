@@ -26,6 +26,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -48,6 +49,7 @@ func TestCheckOverrides(t *testing.T) {
 	t.Cleanup(func() {
 		server_utils.ResetTestState()
 		geoNetOverrides = nil
+		geoOverridesOnce = sync.Once{}
 	})
 
 	// Set up the override cache for the test

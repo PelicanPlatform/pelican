@@ -177,7 +177,7 @@ type Config struct {
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
 		Size string `mapstructure:"size" yaml:"Size"`
 		Socket string `mapstructure:"socket" yaml:"Socket"`
-		StorageDirs []string `mapstructure:"storagedirs" yaml:"StorageDirs"`
+		StorageDirs interface{} `mapstructure:"storagedirs" yaml:"StorageDirs"`
 	} `mapstructure:"localcache" yaml:"LocalCache"`
 	Logging struct {
 		Cache struct {
@@ -597,7 +597,7 @@ type configWithType struct {
 		RunLocation struct { Type string; Value string }
 		Size struct { Type string; Value string }
 		Socket struct { Type string; Value string }
-		StorageDirs struct { Type string; Value []string }
+		StorageDirs struct { Type string; Value interface{} }
 	}
 	Logging struct {
 		Cache struct {

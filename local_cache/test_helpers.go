@@ -39,14 +39,14 @@ import (
 // without waiting for wall-clock time to elapse.
 func (pc *PersistentCache) BackdateObject(objectPath string, age time.Duration) error {
 	pelicanURL := pc.normalizePath(objectPath)
-	objectHash := ComputeObjectHash(pelicanURL)
+	objectHash := pc.db.ObjectHash(pelicanURL)
 
 	etag, err := pc.db.GetLatestETag(objectHash)
 	if err != nil {
 		return fmt.Errorf("BackdateObject: lookup ETag: %w", err)
 	}
 
-	instanceHash := ComputeInstanceHash(etag, objectHash)
+	instanceHash := pc.db.InstanceHash(etag, objectHash)
 	meta, err := pc.storage.GetMetadata(instanceHash)
 	if err != nil {
 		return fmt.Errorf("BackdateObject: get metadata: %w", err)

@@ -45,11 +45,23 @@ const (
 	masterKeyFileName = "masterkey.json"
 )
 
-// EncryptionManager handles all encryption operations for the cache
+// EncryptionManager handles all encryption operations for the cache.
+//
+// The masterKey is loaded (or generated) once during construction and is
+// never mutated afterwards.  Two child keys are derived from it via HKDF
+// so that nothing ever uses the masterKey directly:
+//
+//   - dekWrapKey  – wraps/unwraps per-object data encryption keys (DEKs)
+//   - the DB key  – returned by DeriveDBKey for BadgerDB encryption
+//
+// The mu mutex protects only the on-disk serialisation in saveMasterKey
+// (called by UpdateMasterKeyEncryption); reader methods are lock-free
+// because the fields they touch are immutable after construction.
 type EncryptionManager struct {
-	masterKey []byte
-	baseDir   string
-	mu        sync.RWMutex
+	masterKey  []byte
+	dekWrapKey []byte // HKDF-derived key used to wrap per-object DEKs
+	baseDir    string
+	mu         sync.Mutex // protects saveMasterKey only
 }
 
 // NewEncryptionManager creates a new encryption manager
@@ -65,6 +77,13 @@ func NewEncryptionManager(baseDir string) (*EncryptionManager, error) {
 	// Try to load existing master key or create new one
 	if err := em.loadOrCreateMasterKey(); err != nil {
 		return nil, errors.Wrap(err, "failed to initialize encryption manager")
+	}
+
+	// Derive the DEK-wrapping key so nothing uses masterKey directly.
+	hkdfReader := hkdf.New(sha256.New, em.masterKey, nil, []byte("pelican-cache-dek-wrapping"))
+	em.dekWrapKey = make([]byte, KeySize)
+	if _, err := io.ReadFull(hkdfReader, em.dekWrapKey); err != nil {
+		return nil, errors.Wrap(err, "failed to derive DEK wrapping key")
 	}
 
 	return em, nil
@@ -209,13 +228,13 @@ func (em *EncryptionManager) UpdateMasterKeyEncryption() error {
 }
 
 // DeriveDBKey derives a separate encryption key for BadgerDB using HKDF.
-// This ensures proper key separation: the master key encrypts data blocks,
-// while this derived key encrypts BadgerDB's LSM tree and WAL files
-// (protecting metadata such as ETags, URLs, and timestamps at rest).
+// This ensures proper key separation: the DEK-wrapping key handles
+// per-object keys, while this derived key encrypts BadgerDB's LSM tree
+// and WAL files (protecting metadata such as ETags, URLs, and
+// timestamps at rest).
+//
+// masterKey is immutable after construction, so no lock is needed.
 func (em *EncryptionManager) DeriveDBKey() ([]byte, error) {
-	em.mu.RLock()
-	defer em.mu.RUnlock()
-
 	hkdfReader := hkdf.New(sha256.New, em.masterKey, nil, []byte("pelican-cache-badgerdb-encryption"))
 	dbKey := make([]byte, KeySize)
 	if _, err := io.ReadFull(hkdfReader, dbKey); err != nil {
@@ -233,21 +252,20 @@ func (em *EncryptionManager) GenerateDataKey() ([]byte, error) {
 	return key, nil
 }
 
-// GenerateNonce generates a new random nonce for AES-GCM
-func (em *EncryptionManager) GenerateNonce() ([]byte, error) {
-	nonce := make([]byte, NonceSize)
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, errors.Wrap(err, "failed to generate nonce")
-	}
-	return nonce, nil
+// zeroNonce returns a fresh zero nonce for AES-GCM.
+// Callers no longer need to generate or persist a nonce because each
+// instance already has a unique random DEK.  For block encryption
+// blockNonce XORs the block number into the last 4 bytes; for inline
+// objects there is exactly one encryption per DEK, so a zero nonce
+// is safe.
+func zeroNonce() []byte {
+	return make([]byte, NonceSize)
 }
 
-// EncryptDataKey encrypts a DEK using the master key
+// EncryptDataKey encrypts a DEK using the HKDF-derived wrapping key.
+// The wrapping key is immutable after construction, so no lock is needed.
 func (em *EncryptionManager) EncryptDataKey(dek []byte) ([]byte, error) {
-	em.mu.RLock()
-	defer em.mu.RUnlock()
-
-	block, err := aes.NewCipher(em.masterKey)
+	block, err := aes.NewCipher(em.dekWrapKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create cipher")
 	}
@@ -267,12 +285,10 @@ func (em *EncryptionManager) EncryptDataKey(dek []byte) ([]byte, error) {
 	return ciphertext, nil
 }
 
-// DecryptDataKey decrypts a DEK using the master key
+// DecryptDataKey decrypts a DEK using the HKDF-derived wrapping key.
+// The wrapping key is immutable after construction, so no lock is needed.
 func (em *EncryptionManager) DecryptDataKey(encryptedDEK []byte) ([]byte, error) {
-	em.mu.RLock()
-	defer em.mu.RUnlock()
-
-	block, err := aes.NewCipher(em.masterKey)
+	block, err := aes.NewCipher(em.dekWrapKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create cipher")
 	}

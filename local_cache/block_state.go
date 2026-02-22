@@ -21,8 +21,10 @@ package local_cache
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/RoaringBitmap/roaring"
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
 )
 
@@ -234,33 +236,53 @@ func (obs *ObjectBlockState) WaitForBlock(ctx context.Context, block uint32) boo
 	}
 }
 
-// GetSharedBlockState returns the shared, thread-safe block state for the
-// given instanceHash. The state is loaded from the persistent database on first
-// access and cached for the lifetime of the StorageManager. All callers
-// for the same instanceHash receive the same *ObjectBlockState.
-func (sm *StorageManager) GetSharedBlockState(instanceHash string) (*ObjectBlockState, error) {
-	sm.blockStatesMu.Lock()
-	defer sm.blockStatesMu.Unlock()
+// blockStateTTL is how long an idle ObjectBlockState lives in the
+// in-memory cache before being evicted.  Every GetSharedBlockState call
+// touches the entry, so actively-used states stay resident.  Evicted
+// states are simply reloaded from the database on next access.
+const blockStateTTL = 5 * time.Minute
 
-	if obs, exists := sm.blockStates[instanceHash]; exists {
-		return obs, nil
-	}
+// newBlockStateCache creates the TTL cache for shared ObjectBlockState entries.
+// The StorageManager calls this once during construction.
+func newBlockStateCache(db *CacheDB) *ttlcache.Cache[InstanceHash, *ObjectBlockState] {
+	loader := ttlcache.LoaderFunc[InstanceHash, *ObjectBlockState](
+		func(cache *ttlcache.Cache[InstanceHash, *ObjectBlockState], instanceHash InstanceHash) *ttlcache.Item[InstanceHash, *ObjectBlockState] {
+			bitmap, err := db.GetBlockState(instanceHash)
+			if err != nil {
+				// Return nil — the caller's Get will return nil and
+				// GetSharedBlockState will propagate the error.
+				return nil
+			}
+			obs := NewObjectBlockState(bitmap)
+			return cache.Set(instanceHash, obs, ttlcache.DefaultTTL)
+		},
+	)
 
-	bitmap, err := sm.db.GetBlockState(instanceHash)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to load block state from database")
-	}
-
-	obs := NewObjectBlockState(bitmap)
-	sm.blockStates[instanceHash] = obs
-	return obs, nil
+	return ttlcache.New[InstanceHash, *ObjectBlockState](
+		ttlcache.WithTTL[InstanceHash, *ObjectBlockState](blockStateTTL),
+		ttlcache.WithLoader[InstanceHash, *ObjectBlockState](
+			ttlcache.NewSuppressedLoader[InstanceHash, *ObjectBlockState](loader, nil),
+		),
+	)
 }
 
-// InvalidateSharedBlockState removes the cached block state for a instanceHash,
+// GetSharedBlockState returns the shared, thread-safe block state for the
+// given instanceHash.  The state is loaded from the persistent database on
+// first access and cached in a TTL cache that evicts idle entries after
+// blockStateTTL.  Every call touches the entry's TTL so actively-used
+// states remain resident.  All callers for the same instanceHash receive
+// the same *ObjectBlockState.
+func (sm *StorageManager) GetSharedBlockState(instanceHash InstanceHash) (*ObjectBlockState, error) {
+	item := sm.blockStates.Get(instanceHash) // auto-loads on miss via SuppressedLoader
+	if item == nil {
+		return nil, errors.New("failed to load block state from database")
+	}
+	return item.Value(), nil
+}
+
+// InvalidateSharedBlockState removes the cached block state for an instanceHash,
 // forcing the next GetSharedBlockState call to reload from the database.
-// This should be called when an object is deleted.
-func (sm *StorageManager) InvalidateSharedBlockState(instanceHash string) {
-	sm.blockStatesMu.Lock()
-	defer sm.blockStatesMu.Unlock()
-	delete(sm.blockStates, instanceHash)
+// This should be called when an object is deleted or evicted.
+func (sm *StorageManager) InvalidateSharedBlockState(instanceHash InstanceHash) {
+	sm.blockStates.Delete(instanceHash)
 }

@@ -26,6 +26,7 @@ import (
 	"net"
 	"net/netip"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -53,7 +54,10 @@ type (
 )
 
 var (
-	// Stores the unmarshalled GeoIP override config in a form that's efficient to test
+	// Lazily initializes geoNetOverrides exactly once.
+	geoOverridesOnce sync.Once
+	// Stores the unmarshalled GeoIP override config in a form that's efficient to test.
+	// Populated by geoOverridesOnce; read-only after initialization.
 	geoNetOverrides []GeoNetOverride
 
 	// Stores a mapping of client IPs that have been randomly assigned a coordinate
@@ -88,9 +92,6 @@ const (
 // Malformed IPs and CIDRs are logged but not returned as errors.
 func unmarshalOverrides() error {
 	var geoIPOverrides []GeoIPOverride
-
-	// Ensure that we're starting with an empty slice.
-	geoNetOverrides = nil
 
 	if err := param.GeoIPOverrides.Unmarshal(&geoIPOverrides); err != nil {
 		return err
@@ -153,13 +154,14 @@ func checkOverrides(addr netip.Addr) (coord server_structs.Coordinate, exists bo
 		return coord, true
 	}
 
-	// Unmarshal the GeoIP override config if we haven't already done so.
-	if geoNetOverrides == nil {
+	// Unmarshal the GeoIP override config exactly once.  sync.Once
+	// guarantees that concurrent callers block until the first call
+	// completes, eliminating the read/write race on geoNetOverrides.
+	geoOverridesOnce.Do(func() {
 		if err := unmarshalOverrides(); err != nil {
 			log.Warningf("Unable to unmarshal GeoIP overrides: %v", err)
-			return
 		}
-	}
+	})
 	for _, override := range geoNetOverrides {
 		if override.IPNet.Contains(addr) {
 			// Insert entry into cache with -1 to indicate no expiration

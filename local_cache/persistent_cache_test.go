@@ -20,6 +20,7 @@ package local_cache
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"os"
@@ -31,45 +32,63 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/dgraph-io/badger/v4"
 )
+
+// seedUsage is a test helper to directly write a usage delta to the DB
+// without going through the production AddUsage API (which was removed
+// to prevent double-counting).
+func seedUsage(db *CacheDB, storageID StorageID, namespaceID NamespaceID, delta int64) error {
+	return db.db.Update(func(txn *badger.Txn) error {
+		return addUsageInTxn(txn, storageID, namespaceID, delta)
+	})
+}
 
 func TestComputeInstanceHash(t *testing.T) {
 	// Test that ComputeObjectHash produces consistent hashes for the same URL
 	url1 := "pelican://director.example.com/namespace/path/to/file.txt"
 	url2 := "pelican://director.example.com/namespace/path/to/other.txt"
 
-	objectHash1 := ComputeObjectHash(url1)
-	objectHash2 := ComputeObjectHash(url1)
+	salt := []byte("test-salt-value")
+
+	objectHash1 := ComputeObjectHash(salt, url1)
+	objectHash2 := ComputeObjectHash(salt, url1)
 	assert.Equal(t, objectHash1, objectHash2, "Same URL should produce same objectHash")
 
 	// Test that different URLs produce different objectHashes
-	objectHash3 := ComputeObjectHash(url2)
+	objectHash3 := ComputeObjectHash(salt, url2)
 	assert.NotEqual(t, objectHash1, objectHash3, "Different URLs should produce different objectHashes")
 
 	// Test that ComputeInstanceHash includes ETag in the hash
 	etag1 := "abc123"
 	etag2 := "def456"
 
-	instanceHash1 := ComputeInstanceHash(etag1, objectHash1)
-	instanceHash2 := ComputeInstanceHash(etag1, objectHash1)
+	instanceHash1 := ComputeInstanceHash(salt, etag1, objectHash1)
+	instanceHash2 := ComputeInstanceHash(salt, etag1, objectHash1)
 	assert.Equal(t, instanceHash1, instanceHash2, "Same ETag+objectHash should produce same instanceHash")
 
 	// Different ETags should produce different instanceHashes for same object
-	instanceHash3 := ComputeInstanceHash(etag2, objectHash1)
+	instanceHash3 := ComputeInstanceHash(salt, etag2, objectHash1)
 	assert.NotEqual(t, instanceHash1, instanceHash3, "Different ETags should produce different instanceHashes")
 
 	// Empty ETag should also work
-	instanceHashEmpty := ComputeInstanceHash("", objectHash1)
+	instanceHashEmpty := ComputeInstanceHash(salt, "", objectHash1)
 	assert.Len(t, instanceHashEmpty, 64, "SHA256 hash should be 64 hex characters")
 	assert.NotEqual(t, instanceHash1, instanceHashEmpty, "Empty ETag should produce different hash than non-empty")
 
 	// Test hash format (should be 64 hex characters for SHA256)
 	assert.Len(t, objectHash1, 64, "SHA256 hash should be 64 hex characters")
 	assert.Len(t, instanceHash1, 64, "SHA256 hash should be 64 hex characters")
+
+	// Test that different salts produce different hashes
+	salt2 := []byte("different-salt")
+	objectHash4 := ComputeObjectHash(salt2, url1)
+	assert.NotEqual(t, objectHash1, objectHash4, "Different salts should produce different hashes")
 }
 
 func TestGetInstanceStoragePath(t *testing.T) {
-	hash := "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	hash := InstanceHash("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
 
 	path := GetInstanceStoragePath(hash)
 
@@ -170,9 +189,7 @@ func TestCacheDBBasicOperations(t *testing.T) {
 	InitIssuerKeyForTests(t)
 
 	// Create temporary directory for test
-	tmpDir, err := os.MkdirTemp("", "cachedb_test_*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -183,7 +200,7 @@ func TestCacheDBBasicOperations(t *testing.T) {
 	defer db.Close()
 
 	// Test metadata operations
-	instanceHash := "test_hash_12345"
+	instanceHash := InstanceHash("test_hash_12345")
 	meta := &CacheMetadata{
 		ContentLength: 1024,
 		ContentType:   "application/octet-stream",
@@ -217,13 +234,10 @@ func TestCacheDBBasicOperations(t *testing.T) {
 	assert.Nil(t, deleted)
 }
 
-func TestCacheDBBlockState(t *testing.T) {
-	// Initialize issuer keys for encryption
+func TestMergeMetadata(t *testing.T) {
 	InitIssuerKeyForTests(t)
 
-	tmpDir, err := os.MkdirTemp("", "cachedb_blocks_*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -232,7 +246,306 @@ func TestCacheDBBlockState(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	instanceHash := "test_block_hash"
+	t.Run("CreatesWhenMissing", func(t *testing.T) {
+		hash := InstanceHash("merge_create")
+		now := time.Now().Truncate(time.Millisecond)
+		incoming := &CacheMetadata{
+			ETag:          "etag-create",
+			ContentType:   "text/plain",
+			ContentLength: 512,
+			SourceURL:     "pelican://example.com/create",
+			StorageID:     1,
+			NamespaceID:   1,
+			LastValidated: now,
+		}
+		require.NoError(t, db.MergeMetadata(hash, incoming))
+
+		got, err := db.GetMetadata(hash)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		assert.Equal(t, "etag-create", got.ETag)
+		assert.Equal(t, "text/plain", got.ContentType)
+		assert.Equal(t, int64(512), got.ContentLength)
+		assert.Equal(t, "pelican://example.com/create", got.SourceURL)
+	})
+
+	t.Run("MaxTimeAdvancesForward", func(t *testing.T) {
+		hash := InstanceHash("merge_maxtime")
+		t0 := time.Now().Truncate(time.Millisecond)
+		t1 := t0.Add(10 * time.Second)
+		tEarlier := t0.Add(-5 * time.Second)
+
+		// Seed with t0 timestamps
+		require.NoError(t, db.SetMetadata(hash, &CacheMetadata{
+			LastModified:   t0,
+			LastValidated:  t0,
+			Completed:      t0,
+			Expires:        t0,
+			LastAccessTime: t0,
+		}))
+
+		// Merge with t1 for LastValidated, tEarlier for LastModified
+		require.NoError(t, db.MergeMetadata(hash, &CacheMetadata{
+			LastValidated: t1,
+			LastModified:  tEarlier,
+		}))
+
+		got, err := db.GetMetadata(hash)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		assert.Equal(t, t1, got.LastValidated, "LastValidated should advance to t1")
+		assert.Equal(t, t0, got.LastModified, "LastModified should stay at t0 (tEarlier is older)")
+		assert.Equal(t, t0, got.Completed, "Completed should be unchanged")
+		assert.Equal(t, t0, got.Expires, "Expires should be unchanged")
+		assert.Equal(t, t0, got.LastAccessTime, "LastAccessTime should be unchanged")
+	})
+
+	t.Run("AdditiveChecksums", func(t *testing.T) {
+		hash := InstanceHash("merge_checksums")
+
+		// Seed with a SHA-256 checksum
+		sha256Val := []byte("sha256-existing")
+		require.NoError(t, db.SetMetadata(hash, &CacheMetadata{
+			Checksums: []Checksum{
+				{Type: ChecksumSHA256, Value: sha256Val, OriginVerified: false},
+			},
+		}))
+
+		// Merge an MD5 checksum — should be unioned
+		md5Val := []byte("md5-incoming")
+		require.NoError(t, db.MergeMetadata(hash, &CacheMetadata{
+			Checksums: []Checksum{
+				{Type: ChecksumMD5, Value: md5Val},
+			},
+		}))
+
+		got, err := db.GetMetadata(hash)
+		require.NoError(t, err)
+		require.Len(t, got.Checksums, 2, "should have both SHA-256 and MD5")
+
+		byType := make(map[ChecksumType]Checksum)
+		for _, c := range got.Checksums {
+			byType[c.Type] = c
+		}
+		assert.Equal(t, sha256Val, byType[ChecksumSHA256].Value)
+		assert.Equal(t, md5Val, byType[ChecksumMD5].Value)
+	})
+
+	t.Run("ChecksumOriginVerifiedWins", func(t *testing.T) {
+		hash := InstanceHash("merge_cksum_ov")
+
+		localVal := []byte("local-sha256")
+		require.NoError(t, db.SetMetadata(hash, &CacheMetadata{
+			Checksums: []Checksum{
+				{Type: ChecksumSHA256, Value: localVal, OriginVerified: false},
+			},
+		}))
+
+		// Merge a SHA-256 with OriginVerified=true — should replace
+		originVal := []byte("origin-sha256")
+		require.NoError(t, db.MergeMetadata(hash, &CacheMetadata{
+			Checksums: []Checksum{
+				{Type: ChecksumSHA256, Value: originVal, OriginVerified: true},
+			},
+		}))
+
+		got, err := db.GetMetadata(hash)
+		require.NoError(t, err)
+		require.Len(t, got.Checksums, 1)
+		assert.Equal(t, originVal, got.Checksums[0].Value)
+		assert.True(t, got.Checksums[0].OriginVerified)
+	})
+
+	t.Run("LastWriterWins", func(t *testing.T) {
+		hash := InstanceHash("merge_lww")
+
+		require.NoError(t, db.SetMetadata(hash, &CacheMetadata{
+			ContentType:   "text/plain",
+			ContentLength: 100,
+			CCFlags:       0x01,
+			CCMaxAge:      300,
+			VaryHeaders:   []string{"Accept"},
+		}))
+
+		// Merge with new values — they should replace
+		require.NoError(t, db.MergeMetadata(hash, &CacheMetadata{
+			ContentType:   "application/json",
+			ContentLength: 200,
+			CCFlags:       0x02,
+			CCMaxAge:      600,
+			VaryHeaders:   []string{"Accept-Encoding"},
+		}))
+
+		got, err := db.GetMetadata(hash)
+		require.NoError(t, err)
+		assert.Equal(t, "application/json", got.ContentType)
+		assert.Equal(t, int64(200), got.ContentLength)
+		assert.Equal(t, uint8(0x02), got.CCFlags)
+		assert.Equal(t, int32(600), got.CCMaxAge)
+		assert.Equal(t, []string{"Accept-Encoding"}, got.VaryHeaders)
+	})
+
+	t.Run("LastWriterWinsZeroNoOverwrite", func(t *testing.T) {
+		hash := InstanceHash("merge_lww_zero")
+
+		require.NoError(t, db.SetMetadata(hash, &CacheMetadata{
+			ContentType:   "text/plain",
+			ContentLength: 100,
+		}))
+
+		// Merge with zero-value fields — existing should be preserved
+		require.NoError(t, db.MergeMetadata(hash, &CacheMetadata{}))
+
+		got, err := db.GetMetadata(hash)
+		require.NoError(t, err)
+		assert.Equal(t, "text/plain", got.ContentType, "zero incoming should not overwrite")
+		assert.Equal(t, int64(100), got.ContentLength, "zero incoming should not overwrite")
+	})
+
+	t.Run("SetOnceSameValueOK", func(t *testing.T) {
+		hash := InstanceHash("merge_setonce_same")
+
+		require.NoError(t, db.SetMetadata(hash, &CacheMetadata{
+			ETag:        "etag-1",
+			SourceURL:   "pelican://example.com/obj",
+			StorageID:   2,
+			NamespaceID: 3,
+			DataKey:     []byte("dek-abc"),
+		}))
+
+		// Re-merge with identical values — should succeed
+		require.NoError(t, db.MergeMetadata(hash, &CacheMetadata{
+			ETag:        "etag-1",
+			SourceURL:   "pelican://example.com/obj",
+			StorageID:   2,
+			NamespaceID: 3,
+			DataKey:     []byte("dek-abc"),
+		}))
+	})
+
+	t.Run("SetOnceConflictErrors", func(t *testing.T) {
+		cases := []struct {
+			name     string
+			initial  *CacheMetadata
+			incoming *CacheMetadata
+		}{
+			{
+				name:     "ETag",
+				initial:  &CacheMetadata{ETag: "etag-a"},
+				incoming: &CacheMetadata{ETag: "etag-b"},
+			},
+			{
+				name:     "SourceURL",
+				initial:  &CacheMetadata{SourceURL: "pelican://a.com/x"},
+				incoming: &CacheMetadata{SourceURL: "pelican://b.com/y"},
+			},
+			{
+				name:     "StorageID",
+				initial:  &CacheMetadata{StorageID: 1},
+				incoming: &CacheMetadata{StorageID: 2},
+			},
+			{
+				name:     "NamespaceID",
+				initial:  &CacheMetadata{NamespaceID: 1},
+				incoming: &CacheMetadata{NamespaceID: 2},
+			},
+			{
+				name:     "DataKey",
+				initial:  &CacheMetadata{DataKey: []byte("key-1")},
+				incoming: &CacheMetadata{DataKey: []byte("key-2")},
+			},
+		}
+
+		for i, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				hash := InstanceHash(fmt.Sprintf("merge_conflict_%d", i))
+				require.NoError(t, db.SetMetadata(hash, tc.initial))
+				err := db.MergeMetadata(hash, tc.incoming)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.name)
+			})
+		}
+	})
+
+	t.Run("SetOnceZeroToValueOK", func(t *testing.T) {
+		hash := InstanceHash("merge_setonce_zero2val")
+
+		// Start with empty metadata
+		require.NoError(t, db.SetMetadata(hash, &CacheMetadata{}))
+
+		// Merge set-once fields into the empty record
+		require.NoError(t, db.MergeMetadata(hash, &CacheMetadata{
+			ETag:        "etag-new",
+			SourceURL:   "pelican://example.com/new",
+			StorageID:   5,
+			NamespaceID: 10,
+			DataKey:     []byte("new-dek"),
+		}))
+
+		got, err := db.GetMetadata(hash)
+		require.NoError(t, err)
+		assert.Equal(t, "etag-new", got.ETag)
+		assert.Equal(t, "pelican://example.com/new", got.SourceURL)
+		assert.Equal(t, StorageID(5), got.StorageID)
+		assert.Equal(t, NamespaceID(10), got.NamespaceID)
+		assert.Equal(t, []byte("new-dek"), got.DataKey)
+	})
+
+	t.Run("CombinedMerge", func(t *testing.T) {
+		hash := InstanceHash("merge_combined")
+		t0 := time.Now().Truncate(time.Millisecond)
+
+		// Initial metadata
+		require.NoError(t, db.SetMetadata(hash, &CacheMetadata{
+			ETag:          "etag-combo",
+			SourceURL:     "pelican://combo.com/file",
+			StorageID:     1,
+			NamespaceID:   1,
+			ContentType:   "application/octet-stream",
+			ContentLength: 4096,
+			LastValidated: t0,
+			Checksums: []Checksum{
+				{Type: ChecksumMD5, Value: []byte("md5-v1")},
+			},
+		}))
+
+		// Merge: advance LastValidated, add SHA-256, update ContentType
+		t1 := t0.Add(30 * time.Second)
+		require.NoError(t, db.MergeMetadata(hash, &CacheMetadata{
+			ETag:          "etag-combo", // same — OK
+			SourceURL:     "pelican://combo.com/file",
+			ContentType:   "text/html",
+			LastValidated: t1,
+			Completed:     t1,
+			Checksums: []Checksum{
+				{Type: ChecksumSHA256, Value: []byte("sha256-v1"), OriginVerified: true},
+			},
+		}))
+
+		got, err := db.GetMetadata(hash)
+		require.NoError(t, err)
+		assert.Equal(t, t1, got.LastValidated)
+		assert.Equal(t, t1, got.Completed)
+		assert.Equal(t, "text/html", got.ContentType)
+		assert.Equal(t, int64(4096), got.ContentLength, "ContentLength should stay (incoming was 0)")
+		assert.Len(t, got.Checksums, 2, "should have MD5 + SHA-256")
+	})
+}
+
+func TestCacheDBBlockState(t *testing.T) {
+	// Initialize issuer keys for encryption
+	InitIssuerKeyForTests(t)
+
+	tmpDir := t.TempDir()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db, err := NewCacheDB(ctx, tmpDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	instanceHash := InstanceHash("test_block_hash")
 
 	// Initially no blocks downloaded
 	bitmap, err := db.GetBlockState(instanceHash)
@@ -240,11 +553,11 @@ func TestCacheDBBlockState(t *testing.T) {
 	assert.True(t, bitmap.IsEmpty())
 
 	// Add some blocks
-	err = db.MarkBlocksDownloaded(instanceHash, 0, 0)
+	err = db.MarkBlocksDownloaded(instanceHash, 0, 0, 0, 0, -1)
 	require.NoError(t, err)
-	err = db.MarkBlocksDownloaded(instanceHash, 5, 5)
+	err = db.MarkBlocksDownloaded(instanceHash, 5, 5, 0, 0, -1)
 	require.NoError(t, err)
-	err = db.MarkBlocksDownloaded(instanceHash, 10, 10)
+	err = db.MarkBlocksDownloaded(instanceHash, 10, 10, 0, 0, -1)
 	require.NoError(t, err)
 
 	// Verify blocks are set
@@ -257,7 +570,7 @@ func TestCacheDBBlockState(t *testing.T) {
 	assert.False(t, bitmap.Contains(100))
 
 	// Add more blocks via merge
-	err = db.MarkBlocksDownloaded(instanceHash, 1, 3)
+	err = db.MarkBlocksDownloaded(instanceHash, 1, 3, 0, 0, -1)
 	require.NoError(t, err)
 
 	bitmap, err = db.GetBlockState(instanceHash)
@@ -275,9 +588,7 @@ func TestCacheDBAtomicBlockUsage(t *testing.T) {
 	// bitmap and the usage counter in a single BadgerDB transaction.
 	InitIssuerKeyForTests(t)
 
-	tmpDir, err := os.MkdirTemp("", "cachedb_atomic_usage_*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -286,9 +597,9 @@ func TestCacheDBAtomicBlockUsage(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	instanceHash := "atomic_usage_test_hash"
+	instanceHash := InstanceHash("atomic_usage_test_hash")
 	storageID := StorageIDFirstDisk
-	namespaceID := uint32(7)
+	namespaceID := NamespaceID(7)
 
 	// Set metadata first (10 blocks * 4080 = 40800 bytes, but content is 40000 so last block is partial)
 	contentLength := int64(40000)
@@ -308,7 +619,7 @@ func TestCacheDBAtomicBlockUsage(t *testing.T) {
 	assert.Equal(t, int64(0), usage)
 
 	// Mark first 3 full blocks (0, 1, 2) — each is BlockDataSize bytes
-	err = db.MarkBlocksDownloaded(instanceHash, 0, 2)
+	err = db.MarkBlocksDownloaded(instanceHash, 0, 2, storageID, namespaceID, contentLength)
 	require.NoError(t, err)
 
 	usage, err = db.GetUsage(storageID, namespaceID)
@@ -316,7 +627,7 @@ func TestCacheDBAtomicBlockUsage(t *testing.T) {
 	assert.Equal(t, int64(3*BlockDataSize), usage, "3 full blocks should add 3*BlockDataSize bytes")
 
 	// Re-mark the same blocks — usage should NOT increase (idempotent)
-	err = db.MarkBlocksDownloaded(instanceHash, 0, 2)
+	err = db.MarkBlocksDownloaded(instanceHash, 0, 2, storageID, namespaceID, contentLength)
 	require.NoError(t, err)
 
 	usage, err = db.GetUsage(storageID, namespaceID)
@@ -325,7 +636,7 @@ func TestCacheDBAtomicBlockUsage(t *testing.T) {
 
 	// Mark the last block (partial: 40000 - 9*4080 = 3280 bytes)
 	lastBlock := totalBlocks - 1
-	err = db.MarkBlocksDownloaded(instanceHash, lastBlock, lastBlock)
+	err = db.MarkBlocksDownloaded(instanceHash, lastBlock, lastBlock, storageID, namespaceID, contentLength)
 	require.NoError(t, err)
 
 	lastBlockSize := contentLength - int64(lastBlock)*int64(BlockDataSize) // 40000 - 36720 = 3280
@@ -336,7 +647,7 @@ func TestCacheDBAtomicBlockUsage(t *testing.T) {
 
 	// Mark remaining middle blocks (3 through lastBlock-1, all full)
 	if lastBlock > 3 {
-		err = db.MarkBlocksDownloaded(instanceHash, 3, lastBlock-1)
+		err = db.MarkBlocksDownloaded(instanceHash, 3, lastBlock-1, storageID, namespaceID, contentLength)
 		require.NoError(t, err)
 	}
 
@@ -351,9 +662,7 @@ func TestCacheDBAtomicBlockUsage_NoMetadata(t *testing.T) {
 	// (usage tracking is skipped gracefully).
 	InitIssuerKeyForTests(t)
 
-	tmpDir, err := os.MkdirTemp("", "cachedb_atomic_nometa_*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -362,10 +671,10 @@ func TestCacheDBAtomicBlockUsage_NoMetadata(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	instanceHash := "no_meta_test_hash"
+	instanceHash := InstanceHash("no_meta_test_hash")
 
 	// Mark blocks without setting metadata first — should succeed
-	err = db.MarkBlocksDownloaded(instanceHash, 0, 5)
+	err = db.MarkBlocksDownloaded(instanceHash, 0, 5, 0, 0, -1)
 	require.NoError(t, err)
 
 	// Blocks should be marked
@@ -380,12 +689,10 @@ func TestCacheDBAtomicBlockUsage_NoMetadata(t *testing.T) {
 }
 
 func TestCacheDBUsageCounter(t *testing.T) {
-	// Initialize issuer keys for encryption
+	// Test that usage counters work correctly through the MarkBlocksDownloaded path
 	InitIssuerKeyForTests(t)
 
-	tmpDir, err := os.MkdirTemp("", "cachedb_usage_*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -394,7 +701,7 @@ func TestCacheDBUsageCounter(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	namespaceID := uint32(1)
+	namespaceID := NamespaceID(1)
 	storageID := StorageIDFirstDisk
 
 	// Initial usage should be 0
@@ -402,132 +709,48 @@ func TestCacheDBUsageCounter(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), usage)
 
-	// Add usage
-	err = db.AddUsage(storageID, namespaceID, 1000)
+	// Set up metadata for an instance so MarkBlocksDownloaded can track usage
+	instanceHash := InstanceHash("usage_counter_test_hash")
+	contentLength := int64(3 * BlockDataSize) // 3 full blocks
+	meta := &CacheMetadata{
+		ContentLength: contentLength,
+		StorageID:     storageID,
+		NamespaceID:   namespaceID,
+		SourceURL:     "pelican://test.example.com/usage",
+	}
+	err = db.SetMetadata(instanceHash, meta)
+	require.NoError(t, err)
+
+	// Mark 2 blocks — usage should increase by 2*BlockDataSize
+	err = db.MarkBlocksDownloaded(instanceHash, 0, 1, storageID, namespaceID, contentLength)
 	require.NoError(t, err)
 
 	usage, err = db.GetUsage(storageID, namespaceID)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1000), usage)
+	assert.Equal(t, int64(2*BlockDataSize), usage)
 
-	// Add more usage
-	err = db.AddUsage(storageID, namespaceID, 500)
+	// Mark the same blocks again — idempotent, usage should NOT increase
+	err = db.MarkBlocksDownloaded(instanceHash, 0, 1, storageID, namespaceID, contentLength)
 	require.NoError(t, err)
 
 	usage, err = db.GetUsage(storageID, namespaceID)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1500), usage)
+	assert.Equal(t, int64(2*BlockDataSize), usage)
 
-	// Subtract usage (negative delta)
-	err = db.AddUsage(storageID, namespaceID, -200)
+	// Mark third block — usage should increase by 1*BlockDataSize
+	err = db.MarkBlocksDownloaded(instanceHash, 2, 2, storageID, namespaceID, contentLength)
 	require.NoError(t, err)
 
 	usage, err = db.GetUsage(storageID, namespaceID)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1300), usage)
-}
-
-func TestCacheDBMergeUpdate(t *testing.T) {
-	// Initialize issuer keys for encryption
-	InitIssuerKeyForTests(t)
-
-	tmpDir, err := os.MkdirTemp("", "cachedb_merge_*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	db, err := NewCacheDB(ctx, tmpDir)
-	require.NoError(t, err)
-	defer db.Close()
-
-	// Create bitmap data for two files
-	instanceHash1 := "instance_hash_1"
-	instanceHash2 := "instance_hash_2"
-
-	bitmap1 := roaring.New()
-	bitmap1.AddRange(0, 5) // blocks 0-4
-
-	bitmap2 := roaring.New()
-	bitmap2.AddRange(10, 15) // blocks 10-14
-
-	bitmap1Data, err := bitmap1.ToBytes()
-	require.NoError(t, err)
-	bitmap2Data, err := bitmap2.ToBytes()
-	require.NoError(t, err)
-
-	// Perform a single MergeUpdate with multiple bitmaps and usage deltas
-	bitmapMerges := map[string][]byte{
-		instanceHash1: bitmap1Data,
-		instanceHash2: bitmap2Data,
-	}
-
-	usageDeltas := map[StorageUsageKey]int64{
-		{StorageID: StorageIDFirstDisk, NamespaceID: 1}: 1000, // storage 1, namespace 1: +1000 bytes
-		{StorageID: StorageIDFirstDisk, NamespaceID: 2}: 2000, // storage 1, namespace 2: +2000 bytes
-	}
-
-	err = db.MergeUpdate(bitmapMerges, usageDeltas)
-	require.NoError(t, err)
-
-	// Verify bitmap 1
-	resultBitmap1, err := db.GetBlockState(instanceHash1)
-	require.NoError(t, err)
-	assert.True(t, resultBitmap1.Contains(0))
-	assert.True(t, resultBitmap1.Contains(4))
-	assert.False(t, resultBitmap1.Contains(5))
-
-	// Verify bitmap 2
-	resultBitmap2, err := db.GetBlockState(instanceHash2)
-	require.NoError(t, err)
-	assert.True(t, resultBitmap2.Contains(10))
-	assert.True(t, resultBitmap2.Contains(14))
-	assert.False(t, resultBitmap2.Contains(15))
-
-	// Verify usage counters
-	usage1, err := db.GetUsage(StorageIDFirstDisk, 1)
-	require.NoError(t, err)
-	assert.Equal(t, int64(1000), usage1)
-
-	usage2, err := db.GetUsage(StorageIDFirstDisk, 2)
-	require.NoError(t, err)
-	assert.Equal(t, int64(2000), usage2)
-
-	// Now merge more blocks into existing bitmaps
-	moreBitmap1 := roaring.New()
-	moreBitmap1.AddRange(5, 10) // blocks 5-9
-
-	moreBitmap1Data, err := moreBitmap1.ToBytes()
-	require.NoError(t, err)
-
-	err = db.MergeUpdate(
-		map[string][]byte{instanceHash1: moreBitmap1Data},
-		map[StorageUsageKey]int64{{StorageID: StorageIDFirstDisk, NamespaceID: 1}: 500},
-	)
-	require.NoError(t, err)
-
-	// Verify merged bitmap has both ranges
-	resultBitmap1, err = db.GetBlockState(instanceHash1)
-	require.NoError(t, err)
-	for i := uint32(0); i < 10; i++ {
-		assert.True(t, resultBitmap1.Contains(i), "block %d should be set", i)
-	}
-	assert.False(t, resultBitmap1.Contains(10))
-
-	// Verify accumulated usage
-	usage1, err = db.GetUsage(StorageIDFirstDisk, 1)
-	require.NoError(t, err)
-	assert.Equal(t, int64(1500), usage1)
+	assert.Equal(t, contentLength, usage)
 }
 
 func TestEncryptionManager(t *testing.T) {
 	// Initialize issuer keys for encryption
 	InitIssuerKeyForTests(t)
 
-	tmpDir, err := os.MkdirTemp("", "encryption_test_*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Test creating encryption manager with properly initialized issuer keys
 	em, err := NewEncryptionManager(tmpDir)
@@ -577,15 +800,130 @@ func TestEncryptionManager(t *testing.T) {
 	decryptedInline, err := em.DecryptInline(encrypted, dek, nonce)
 	require.NoError(t, err)
 	assert.Equal(t, inlineData, decryptedInline)
+
+	// --- Negative tests ---
+
+	// Wrong DEK: decryption should fail with authentication error
+	wrongDEK := make([]byte, KeySize)
+	for i := range wrongDEK {
+		wrongDEK[i] = byte(i + 42)
+	}
+	wrongKeyDecryptor, err := NewBlockEncryptor(wrongDEK, nonce)
+	require.NoError(t, err)
+	_, err = wrongKeyDecryptor.DecryptBlock(0, ciphertext)
+	assert.Error(t, err, "Decryption with wrong DEK should fail")
+
+	// Wrong nonce: decryption should fail with authentication error
+	wrongNonce := make([]byte, NonceSize)
+	for i := range wrongNonce {
+		wrongNonce[i] = byte(i + 200)
+	}
+	wrongNonceDecryptor, err := NewBlockEncryptor(dek, wrongNonce)
+	require.NoError(t, err)
+	_, err = wrongNonceDecryptor.DecryptBlock(0, ciphertext)
+	assert.Error(t, err, "Decryption with wrong nonce should fail")
+
+	// Corrupt ciphertext: flip a byte in the middle of the block
+	corruptCiphertext := make([]byte, len(ciphertext))
+	copy(corruptCiphertext, ciphertext)
+	corruptCiphertext[len(corruptCiphertext)/2] ^= 0xFF
+	_, err = decryptor.DecryptBlock(0, corruptCiphertext)
+	assert.Error(t, err, "Decryption of corrupt data should fail")
+
+	// Corrupt auth tag: flip the last byte (part of the GCM tag)
+	corruptTag := make([]byte, len(ciphertext))
+	copy(corruptTag, ciphertext)
+	corruptTag[len(corruptTag)-1] ^= 0xFF
+	_, err = decryptor.DecryptBlock(0, corruptTag)
+	assert.Error(t, err, "Decryption with corrupt auth tag should fail")
+
+	// Wrong DEK for inline decryption
+	_, err = em.DecryptInline(encrypted, wrongDEK, nonce)
+	assert.Error(t, err, "Inline decryption with wrong DEK should fail")
+
+	// Wrong nonce for inline decryption
+	_, err = em.DecryptInline(encrypted, dek, wrongNonce)
+	assert.Error(t, err, "Inline decryption with wrong nonce should fail")
+}
+
+// TestZeroBlockReadFailure verifies that reading from an uninitialized
+// (all-zero) disk block fails.  This simulates a crash or I/O error
+// after the first block was written but before subsequent blocks were
+// flushed — the file was pre-allocated but the remaining blocks contain
+// zeros.  AES-GCM authentication must reject such blocks.
+func TestZeroBlockReadFailure(t *testing.T) {
+	InitIssuerKeyForTests(t)
+
+	tmpDir := t.TempDir()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db, err := NewCacheDB(ctx, tmpDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
+	require.NoError(t, err)
+
+	instanceHash := InstanceHash("zero_block_test_0123456789abcdef0123456789abcdef01")
+
+	// Generate encryption keys.
+	encMgr := db.GetEncryptionManager()
+	dek, err := encMgr.GenerateDataKey()
+	require.NoError(t, err)
+	encryptedDEK, err := encMgr.EncryptDataKey(dek)
+	require.NoError(t, err)
+
+	// Create a file spanning 3 blocks.
+	dataSize := int64(BlockDataSize*2 + 100)
+	meta := &CacheMetadata{
+		ContentLength: dataSize,
+		ContentType:   "application/octet-stream",
+		SourceURL:     "pelican://example.com/zero_block_test",
+		StorageID:     StorageIDFirstDisk,
+		NamespaceID:   1,
+		DataKey:       encryptedDEK,
+	}
+	require.NoError(t, db.SetMetadata(instanceHash, meta))
+
+	// Create directory for the object file and pre-allocate it with
+	// zeros (simulates how NewBlockWriter pre-allocates).
+	objPath := storage.getObjectPath(instanceHash)
+	require.NoError(t, os.MkdirAll(filepath.Dir(objPath), 0750))
+	totalSize := BlockOffset(CalculateBlockCount(dataSize))
+	fp, err := os.OpenFile(objPath, os.O_RDWR|os.O_CREATE, 0600)
+	require.NoError(t, err)
+	require.NoError(t, fp.Truncate(totalSize))
+	fp.Close()
+
+	// Write only the first block with real data.
+	firstBlockData := make([]byte, BlockDataSize)
+	for i := range firstBlockData {
+		firstBlockData[i] = byte(i % 251)
+	}
+	require.NoError(t, storage.WriteBlocks(instanceHash, 0, firstBlockData))
+
+	// Lie to the bitmap: mark blocks 1 and 2 as downloaded.
+	require.NoError(t, db.MarkBlocksDownloaded(instanceHash, 1, 2, StorageIDFirstDisk, 1, dataSize))
+
+	// Reading block 0 (real data) should succeed.
+	data, err := storage.ReadBlocks(instanceHash, 0, BlockDataSize)
+	require.NoError(t, err)
+	assert.Equal(t, firstBlockData, data)
+
+	// Reading block 1 (all zeros on disk) must fail — AES-GCM
+	// authentication should reject the zero ciphertext.
+	_, err = storage.ReadBlocks(instanceHash, int64(BlockDataSize), BlockDataSize)
+	require.Error(t, err, "reading an uninitialized (zero) block must fail")
+	assert.Contains(t, err.Error(), "decrypt", "error should mention decryption failure")
 }
 
 func TestStorageManagerInline(t *testing.T) {
 	// Initialize issuer keys for encryption
 	InitIssuerKeyForTests(t)
 
-	tmpDir, err := os.MkdirTemp("", "storage_inline_*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -594,10 +932,11 @@ func TestStorageManagerInline(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	storage, err := NewStorageManager(db, []string{tmpDir}, 0)
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
 	require.NoError(t, err)
 
-	instanceHash := "inline_test_hash"
+	instanceHash := InstanceHash("inline_test_hash")
 	testData := []byte("Hello, World! This is inline test data.")
 
 	meta := &CacheMetadata{
@@ -630,9 +969,7 @@ func TestEvictionManager(t *testing.T) {
 	// Initialize issuer keys for encryption
 	InitIssuerKeyForTests(t)
 
-	tmpDir, err := os.MkdirTemp("", "eviction_test_*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -641,11 +978,12 @@ func TestEvictionManager(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	storage, err := NewStorageManager(db, []string{tmpDir}, 0)
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
 	require.NoError(t, err)
 
 	eviction := NewEvictionManager(db, storage, EvictionConfig{
-		DirConfigs: map[uint8]EvictionDirConfig{
+		DirConfigs: map[StorageID]EvictionDirConfig{
 			StorageIDFirstDisk: {
 				MaxSize:             1000000, // 1MB max
 				HighWaterPercentage: 90,
@@ -658,9 +996,9 @@ func TestEvictionManager(t *testing.T) {
 	require.NoError(t, eviction.RecordAccess("instance_hash_1"))
 	require.NoError(t, eviction.RecordAccess("instance_hash_2"))
 
-	// Test adding usage
-	require.NoError(t, eviction.AddUsage(StorageIDFirstDisk, 1, 100000))
-	require.NoError(t, eviction.AddUsage(StorageIDFirstDisk, 2, 200000))
+	// Test adding usage — seed via addUsageInTxn (the DB-level helper)
+	require.NoError(t, seedUsage(db, StorageIDFirstDisk, 1, 100000))
+	require.NoError(t, seedUsage(db, StorageIDFirstDisk, 2, 200000))
 
 	// Get stats
 	stats := eviction.GetStats()
@@ -675,9 +1013,7 @@ func TestConsistencyChecker(t *testing.T) {
 	// Initialize issuer keys for encryption
 	InitIssuerKeyForTests(t)
 
-	tmpDir, err := os.MkdirTemp("", "consistency_test_*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -686,7 +1022,8 @@ func TestConsistencyChecker(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	storage, err := NewStorageManager(db, []string{tmpDir}, 0)
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
 	require.NoError(t, err)
 
 	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
@@ -701,7 +1038,6 @@ func TestConsistencyChecker(t *testing.T) {
 	assert.True(t, stats.LastDataScan.IsZero())
 
 	// Start checker (won't actually run scans due to long interval)
-	egrp := new(errgroup.Group)
 	checker.Start(ctx, egrp)
 
 	// Stop checker
@@ -712,9 +1048,7 @@ func TestConsistencyChecker_MetadataScan(t *testing.T) {
 	// Initialize issuer keys for encryption
 	InitIssuerKeyForTests(t)
 
-	tmpDir, err := os.MkdirTemp("", "consistency_scan_test_*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -723,13 +1057,14 @@ func TestConsistencyChecker_MetadataScan(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	storage, err := NewStorageManager(db, []string{tmpDir}, 0)
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
 	require.NoError(t, err)
 
 	// Discover the assigned storage ID for the single directory.
 	assignedDirs := storage.GetDirs()
 	require.Len(t, assignedDirs, 1)
-	var diskID uint8
+	var diskID StorageID
 	for id := range assignedDirs {
 		diskID = id
 	}
@@ -741,7 +1076,7 @@ func TestConsistencyChecker_MetadataScan(t *testing.T) {
 	})
 
 	// Create some valid disk-based objects
-	validHashes := []string{
+	validHashes := []InstanceHash{
 		"1111111111111111111111111111111111111111111111111111111111111111",
 		"3333333333333333333333333333333333333333333333333333333333333333",
 		"5555555555555555555555555555555555555555555555555555555555555555",
@@ -765,7 +1100,7 @@ func TestConsistencyChecker_MetadataScan(t *testing.T) {
 	}
 
 	// Create an orphaned DB entry (no file)
-	orphanedDBHash := "2222222222222222222222222222222222222222222222222222222222222222"
+	orphanedDBHash := InstanceHash("2222222222222222222222222222222222222222222222222222222222222222")
 	meta := &CacheMetadata{
 		ContentLength: 100,
 		StorageID:     diskID,
@@ -776,7 +1111,7 @@ func TestConsistencyChecker_MetadataScan(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create an orphaned file (no DB entry)
-	orphanedFileHash := "4444444444444444444444444444444444444444444444444444444444444444"
+	orphanedFileHash := InstanceHash("4444444444444444444444444444444444444444444444444444444444444444")
 	orphanedFilePath := filepath.Join(tmpDir, objectsSubDir, GetInstanceStoragePath(orphanedFileHash))
 	err = os.MkdirAll(filepath.Dir(orphanedFilePath), 0755)
 	require.NoError(t, err)
@@ -834,9 +1169,7 @@ func TestConsistencyChecker_InlineStorage(t *testing.T) {
 	// Initialize issuer keys for encryption
 	InitIssuerKeyForTests(t)
 
-	tmpDir, err := os.MkdirTemp("", "consistency_inline_test_*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -845,7 +1178,8 @@ func TestConsistencyChecker_InlineStorage(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	storage, err := NewStorageManager(db, []string{tmpDir}, 0)
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
 	require.NoError(t, err)
 
 	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
@@ -854,7 +1188,7 @@ func TestConsistencyChecker_InlineStorage(t *testing.T) {
 	})
 
 	// Create a valid inline object
-	validHash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	validHash := InstanceHash("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	testData := []byte("test inline data")
 	meta := &CacheMetadata{
 		ContentLength: int64(len(testData)),
@@ -865,7 +1199,7 @@ func TestConsistencyChecker_InlineStorage(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create an orphaned inline entry (metadata exists but inline data is missing)
-	orphanedHash := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	orphanedHash := InstanceHash("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 	orphanedMeta := &CacheMetadata{
 		ContentLength: 50,
 		NamespaceID:   1,
@@ -898,15 +1232,13 @@ func TestConsistencyChecker_InlineStorage(t *testing.T) {
 	assert.Equal(t, testData, retrievedData, "Inline data should be intact")
 }
 
-// TestConsistencyChecker_TransactionRestart verifies that metadata scans properly
-// restart transactions every 5 seconds to avoid long-lived transactions
-func TestConsistencyChecker_TransactionRestart(t *testing.T) {
+// TestConsistencyChecker_OrphanCleanup verifies that metadata scans detect
+// entries whose on-disk files have been removed and cleans them up.
+func TestConsistencyChecker_OrphanCleanup(t *testing.T) {
 	// Initialize issuer keys for encryption
 	InitIssuerKeyForTests(t)
 
-	tmpDir, err := os.MkdirTemp("", "consistency_restart_test_")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -915,7 +1247,8 @@ func TestConsistencyChecker_TransactionRestart(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	storage, err := NewStorageManager(db, []string{tmpDir}, 0)
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
 	require.NoError(t, err)
 
 	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
@@ -928,11 +1261,11 @@ func TestConsistencyChecker_TransactionRestart(t *testing.T) {
 	// We'll create enough to verify transaction restarts work, but not so many
 	// that the test takes too long
 	numObjects := 100
-	validHashes := make([]string, numObjects)
+	validHashes := make([]InstanceHash, numObjects)
 
 	for i := 0; i < numObjects; i++ {
 		// Generate predictable hash (still 64 hex chars)
-		hash := fmt.Sprintf("%064d", i)
+		hash := InstanceHash(fmt.Sprintf("%064d", i))
 		validHashes[i] = hash
 
 		meta := &CacheMetadata{
@@ -952,7 +1285,7 @@ func TestConsistencyChecker_TransactionRestart(t *testing.T) {
 	}
 
 	// Add a few orphaned entries
-	orphanedHashes := []string{
+	orphanedHashes := []InstanceHash{
 		"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
 	}
@@ -992,6 +1325,452 @@ func TestConsistencyChecker_TransactionRestart(t *testing.T) {
 	}
 }
 
+// TestConsistencyChecker_UsageReconciliation verifies that the metadata
+// scan detects and corrects drifted usage counters.  It seeds objects with
+// known block state, deliberately skews the stored usage counter by more
+// than 5 %, and asserts that RunMetadataScan corrects the value.
+func TestConsistencyChecker_UsageReconciliation(t *testing.T) {
+	InitIssuerKeyForTests(t)
+
+	tmpDir := t.TempDir()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	db, err := NewCacheDB(ctx, tmpDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
+	require.NoError(t, err)
+
+	// Discover assigned storage ID.
+	assignedDirs := storage.GetDirs()
+	require.Len(t, assignedDirs, 1)
+	var diskID StorageID
+	for id := range assignedDirs {
+		diskID = id
+	}
+
+	nsID := NamespaceID(1)
+
+	// Create two objects with known block state.
+	// Object 1: 3 full blocks = 3*BlockDataSize bytes.
+	hash1 := InstanceHash("aaaa111111111111111111111111111111111111111111111111111111111111")
+	contentLen1 := int64(3 * BlockDataSize)
+	meta1 := &CacheMetadata{
+		ContentLength: contentLen1,
+		StorageID:     diskID,
+		NamespaceID:   nsID,
+		Completed:     time.Now().Add(-10 * time.Minute),
+	}
+	require.NoError(t, db.SetMetadata(hash1, meta1))
+	// Mark all 3 blocks downloaded.
+	bm1 := roaring.NewBitmap()
+	bm1.AddRange(0, uint64(CalculateBlockCount(contentLen1)))
+	require.NoError(t, db.SetBlockState(hash1, bm1))
+	// Create the file so the metadata scan doesn't delete it as an orphan.
+	filePath1 := filepath.Join(tmpDir, objectsSubDir, GetInstanceStoragePath(hash1))
+	require.NoError(t, os.MkdirAll(filepath.Dir(filePath1), 0755))
+	require.NoError(t, os.WriteFile(filePath1, make([]byte, contentLen1), 0644))
+
+	// Object 2: 2 full blocks = 2*BlockDataSize bytes.
+	hash2 := InstanceHash("bbbb222222222222222222222222222222222222222222222222222222222222")
+	contentLen2 := int64(2 * BlockDataSize)
+	meta2 := &CacheMetadata{
+		ContentLength: contentLen2,
+		StorageID:     diskID,
+		NamespaceID:   nsID,
+		Completed:     time.Now().Add(-10 * time.Minute),
+	}
+	require.NoError(t, db.SetMetadata(hash2, meta2))
+	bm2 := roaring.NewBitmap()
+	bm2.AddRange(0, uint64(CalculateBlockCount(contentLen2)))
+	require.NoError(t, db.SetBlockState(hash2, bm2))
+	filePath2 := filepath.Join(tmpDir, objectsSubDir, GetInstanceStoragePath(hash2))
+	require.NoError(t, os.MkdirAll(filepath.Dir(filePath2), 0755))
+	require.NoError(t, os.WriteFile(filePath2, make([]byte, contentLen2), 0644))
+
+	// The actual total usage should be 5*BlockDataSize.
+	expectedUsage := int64(5 * BlockDataSize)
+
+	// --- Case 1: stored counter is too high (>5 % drift) ---
+	inflated := expectedUsage * 2 // 100 % over, far beyond 5 %
+	require.NoError(t, db.SetUsage(diskID, nsID, inflated))
+
+	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
+		MetadataScanActiveMs: 1000,
+		DataScanBytesPerSec:  100 * 1024 * 1024,
+		MinAgeForCleanup:     0,
+	})
+	require.NoError(t, checker.RunMetadataScan(ctx))
+
+	corrected, err := db.GetUsage(diskID, nsID)
+	require.NoError(t, err)
+	assert.Equal(t, expectedUsage, corrected, "inflated usage should be corrected")
+
+	// --- Case 2: stored counter is too low (>5 % drift) ---
+	deflated := expectedUsage / 2 // 50 % under, far beyond 5 %
+	require.NoError(t, db.SetUsage(diskID, nsID, deflated))
+
+	require.NoError(t, checker.RunMetadataScan(ctx))
+
+	corrected, err = db.GetUsage(diskID, nsID)
+	require.NoError(t, err)
+	assert.Equal(t, expectedUsage, corrected, "deflated usage should be corrected")
+
+	// --- Case 3: within tolerance — no correction ---
+	withinTolerance := expectedUsage + (expectedUsage * 4 / 100) // 4 % over, under 5 %
+	require.NoError(t, db.SetUsage(diskID, nsID, withinTolerance))
+
+	require.NoError(t, checker.RunMetadataScan(ctx))
+
+	// Should remain unchanged (within tolerance).
+	unchanged, err := db.GetUsage(diskID, nsID)
+	require.NoError(t, err)
+	assert.Equal(t, withinTolerance, unchanged, "within-tolerance usage should not change")
+}
+
+// ---------------------------------------------------------------------------
+// Checksum (RFC 3230 Digest) tests through the persistent cache
+// ---------------------------------------------------------------------------
+
+// storeTestObject is a helper that creates a disk-backed object with known
+// data, marks all blocks as downloaded, and returns the data that was
+// written.  The caller can optionally attach checksums to the metadata
+// before or after this call.
+func storeTestObject(
+	t *testing.T,
+	ctx context.Context,
+	storage *StorageManager,
+	instanceHash InstanceHash,
+	data []byte,
+	storageID StorageID,
+	namespaceID NamespaceID,
+) {
+	t.Helper()
+	contentLength := int64(len(data))
+
+	meta, err := storage.InitDiskStorage(ctx, instanceHash, contentLength, storageID)
+	require.NoError(t, err)
+	meta.NamespaceID = namespaceID
+	meta.Completed = time.Now().Add(-10 * time.Minute)
+	require.NoError(t, storage.SetMetadata(instanceHash, meta))
+
+	// Write data blocks
+	require.NoError(t, storage.WriteBlocks(instanceHash, 0, data))
+
+	// Mark all blocks downloaded in DB
+	totalBlocks := CalculateBlockCount(contentLength)
+	bm := roaring.NewBitmap()
+	bm.AddRange(0, uint64(totalBlocks))
+	require.NoError(t, storage.db.SetBlockState(instanceHash, bm))
+}
+
+// TestVerifyObject_CorrectChecksum creates a disk-backed object with a
+// correct SHA-256 checksum and verifies that VerifyObject returns true.
+func TestVerifyObject_CorrectChecksum(t *testing.T) {
+	InitIssuerKeyForTests(t)
+	tmpDir := t.TempDir()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	db, err := NewCacheDB(ctx, tmpDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
+	require.NoError(t, err)
+
+	var diskID StorageID
+	for id := range storage.GetDirs() {
+		diskID = id
+	}
+
+	// Deterministic test data: 2.5 blocks worth of bytes.
+	data := make([]byte, BlockDataSize*2+BlockDataSize/2)
+	for i := range data {
+		data[i] = byte(i % 251) // prime-cycle pattern
+	}
+
+	hash := InstanceHash("aaaa000000000000000000000000000000000000000000000000000000000001")
+	storeTestObject(t, ctx, storage, hash, data, diskID, NamespaceID(1))
+
+	// Compute the correct SHA-256 over the plaintext.
+	sum := sha256.Sum256(data)
+
+	// Attach the checksum to metadata.
+	meta, err := storage.GetMetadata(hash)
+	require.NoError(t, err)
+	meta.Checksums = []Checksum{{
+		Type:           ChecksumSHA256,
+		Value:          sum[:],
+		OriginVerified: true,
+	}}
+	require.NoError(t, storage.SetMetadata(hash, meta))
+
+	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
+		MetadataScanActiveMs: 1000,
+		DataScanBytesPerSec:  1 << 30,
+		MinAgeForCleanup:     0,
+	})
+
+	valid, err := checker.VerifyObject(hash)
+	require.NoError(t, err)
+	assert.True(t, valid, "object with correct checksum should verify")
+}
+
+// TestVerifyObject_WrongChecksum creates a disk-backed object with an
+// incorrect SHA-256 checksum and verifies that VerifyObject returns false.
+func TestVerifyObject_WrongChecksum(t *testing.T) {
+	InitIssuerKeyForTests(t)
+	tmpDir := t.TempDir()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	db, err := NewCacheDB(ctx, tmpDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
+	require.NoError(t, err)
+
+	var diskID StorageID
+	for id := range storage.GetDirs() {
+		diskID = id
+	}
+
+	data := make([]byte, BlockDataSize*2+BlockDataSize/2)
+	for i := range data {
+		data[i] = byte(i % 251)
+	}
+
+	hash := InstanceHash("bbbb000000000000000000000000000000000000000000000000000000000002")
+	storeTestObject(t, ctx, storage, hash, data, diskID, NamespaceID(1))
+
+	// Attach a deliberately wrong checksum.
+	wrongSum := sha256.Sum256([]byte("wrong data"))
+	meta, err := storage.GetMetadata(hash)
+	require.NoError(t, err)
+	meta.Checksums = []Checksum{{
+		Type:           ChecksumSHA256,
+		Value:          wrongSum[:],
+		OriginVerified: true,
+	}}
+	require.NoError(t, storage.SetMetadata(hash, meta))
+
+	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
+		MetadataScanActiveMs: 1000,
+		DataScanBytesPerSec:  1 << 30,
+		MinAgeForCleanup:     0,
+	})
+
+	valid, err := checker.VerifyObject(hash)
+	require.NoError(t, err)
+	assert.False(t, valid, "object with wrong checksum should NOT verify")
+}
+
+// TestDataScan_CorrectChecksum runs a full data integrity scan with
+// objects that have correct checksums and verifies nothing is flagged.
+func TestDataScan_CorrectChecksum(t *testing.T) {
+	InitIssuerKeyForTests(t)
+	tmpDir := t.TempDir()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	db, err := NewCacheDB(ctx, tmpDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
+	require.NoError(t, err)
+
+	var diskID StorageID
+	for id := range storage.GetDirs() {
+		diskID = id
+	}
+
+	// Create 3 objects with correct SHA-256 checksums.
+	for i := 0; i < 3; i++ {
+		data := make([]byte, BlockDataSize+int(i)*100)
+		for j := range data {
+			data[j] = byte((i*7 + j) % 251)
+		}
+		hash := InstanceHash(fmt.Sprintf("cccc%060x", i+1))
+
+		storeTestObject(t, ctx, storage, hash, data, diskID, NamespaceID(1))
+
+		sum := sha256.Sum256(data)
+		meta, err := storage.GetMetadata(hash)
+		require.NoError(t, err)
+		meta.Checksums = []Checksum{{
+			Type:           ChecksumSHA256,
+			Value:          sum[:],
+			OriginVerified: true,
+		}}
+		require.NoError(t, storage.SetMetadata(hash, meta))
+	}
+
+	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
+		MetadataScanActiveMs: 1000,
+		DataScanBytesPerSec:  1 << 30,
+		MinAgeForCleanup:     0,
+		ChecksumTypes:        []ChecksumType{ChecksumSHA256},
+	})
+
+	require.NoError(t, checker.RunDataScan(ctx))
+
+	stats := checker.GetStats()
+	assert.Equal(t, int64(0), stats.ChecksumMismatches, "no mismatches expected")
+	assert.Equal(t, int64(3), stats.ObjectsVerified, "all 3 objects should be verified")
+	assert.Greater(t, stats.BytesVerified, int64(0), "should have verified some bytes")
+}
+
+// TestDataScan_WrongChecksum runs a full data integrity scan with an object
+// whose checksum deliberately does not match, and verifies the scan detects
+// the mismatch and deletes the corrupt object.
+func TestDataScan_WrongChecksum(t *testing.T) {
+	InitIssuerKeyForTests(t)
+	tmpDir := t.TempDir()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	db, err := NewCacheDB(ctx, tmpDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
+	require.NoError(t, err)
+
+	var diskID StorageID
+	for id := range storage.GetDirs() {
+		diskID = id
+	}
+
+	// Object with WRONG checksum — should be detected and deleted.
+	data := make([]byte, BlockDataSize*2)
+	for i := range data {
+		data[i] = byte(i % 251)
+	}
+	corruptHash := InstanceHash("dddd000000000000000000000000000000000000000000000000000000000001")
+
+	storeTestObject(t, ctx, storage, corruptHash, data, diskID, NamespaceID(1))
+
+	wrongSum := sha256.Sum256([]byte("not the right data"))
+	meta, err := storage.GetMetadata(corruptHash)
+	require.NoError(t, err)
+	meta.Checksums = []Checksum{{
+		Type:           ChecksumSHA256,
+		Value:          wrongSum[:],
+		OriginVerified: true,
+	}}
+	require.NoError(t, storage.SetMetadata(corruptHash, meta))
+
+	// Also create a VALID object to confirm it is not damaged.
+	goodData := make([]byte, BlockDataSize)
+	for i := range goodData {
+		goodData[i] = byte(i % 199)
+	}
+	goodHash := InstanceHash("dddd000000000000000000000000000000000000000000000000000000000002")
+	storeTestObject(t, ctx, storage, goodHash, goodData, diskID, NamespaceID(1))
+
+	goodSum := sha256.Sum256(goodData)
+	goodMeta, err := storage.GetMetadata(goodHash)
+	require.NoError(t, err)
+	goodMeta.Checksums = []Checksum{{
+		Type:           ChecksumSHA256,
+		Value:          goodSum[:],
+		OriginVerified: true,
+	}}
+	require.NoError(t, storage.SetMetadata(goodHash, goodMeta))
+
+	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
+		MetadataScanActiveMs: 1000,
+		DataScanBytesPerSec:  1 << 30,
+		MinAgeForCleanup:     0,
+		ChecksumTypes:        []ChecksumType{ChecksumSHA256},
+	})
+
+	require.NoError(t, checker.RunDataScan(ctx))
+
+	stats := checker.GetStats()
+	assert.Equal(t, int64(1), stats.ChecksumMismatches, "one mismatch expected")
+
+	// The corrupt object's disk file should have been deleted.
+	corruptPath := storage.getObjectPathForDir(diskID, corruptHash)
+	_, statErr := os.Stat(corruptPath)
+	assert.True(t, os.IsNotExist(statErr), "corrupt object file should be removed")
+
+	// The good object should still be intact and verifiable.
+	valid, err := checker.VerifyObject(goodHash)
+	require.NoError(t, err)
+	assert.True(t, valid, "good object should still verify after scan")
+}
+
+// TestDataScan_MissingChecksum verifies that when an object has no stored
+// checksums, the data scan calculates and stores them.
+func TestDataScan_MissingChecksum(t *testing.T) {
+	InitIssuerKeyForTests(t)
+	tmpDir := t.TempDir()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	db, err := NewCacheDB(ctx, tmpDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{tmpDir}, 0, egrp)
+	require.NoError(t, err)
+
+	var diskID StorageID
+	for id := range storage.GetDirs() {
+		diskID = id
+	}
+
+	data := make([]byte, BlockDataSize+500)
+	for i := range data {
+		data[i] = byte(i % 211)
+	}
+	hash := InstanceHash("eeee000000000000000000000000000000000000000000000000000000000001")
+	storeTestObject(t, ctx, storage, hash, data, diskID, NamespaceID(1))
+
+	// Verify no checksums stored yet.
+	meta, err := storage.GetMetadata(hash)
+	require.NoError(t, err)
+	assert.Empty(t, meta.Checksums, "no checksums should be present initially")
+
+	checker := NewConsistencyChecker(db, storage, ConsistencyConfig{
+		MetadataScanActiveMs: 1000,
+		DataScanBytesPerSec:  1 << 30,
+		MinAgeForCleanup:     0,
+		ChecksumTypes:        []ChecksumType{ChecksumSHA256},
+	})
+
+	require.NoError(t, checker.RunDataScan(ctx))
+
+	// After the scan, checksum should be calculated and stored.
+	meta, err = storage.GetMetadata(hash)
+	require.NoError(t, err)
+	require.Len(t, meta.Checksums, 1, "data scan should calculate one checksum")
+	assert.Equal(t, ChecksumSHA256, meta.Checksums[0].Type)
+
+	// The stored checksum should match the SHA-256 of the original data.
+	expected := sha256.Sum256(data)
+	assert.Equal(t, expected[:], meta.Checksums[0].Value,
+		"stored checksum should match SHA-256 of original data")
+}
+
 // TestMultiDirStoragePlacement verifies that multi-directory storage works
 // end-to-end: objects land in different directories, per-directory size stats
 // are correct, and storage IDs are persisted in metadata.
@@ -1017,7 +1796,8 @@ func TestMultiDirStoragePlacement(t *testing.T) {
 
 	// --- Set up subsystems with two directories ---
 
-	storage, err := NewStorageManager(db, []string{dir1, dir2}, 0)
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{dir1, dir2}, 0, egrp)
 	require.NoError(t, err)
 
 	// Discover the assigned IDs for eviction config.
@@ -1026,7 +1806,7 @@ func TestMultiDirStoragePlacement(t *testing.T) {
 
 	// Give both directories the same capacity so ChooseDiskStorage alternates
 	// between them (whichever has more free space after each write).
-	dirCfgs := make(map[uint8]EvictionDirConfig, len(assignedDirs))
+	dirCfgs := make(map[StorageID]EvictionDirConfig, len(assignedDirs))
 	for id := range assignedDirs {
 		dirCfgs[id] = EvictionDirConfig{MaxSize: 500_000, HighWaterPercentage: 90, LowWaterPercentage: 80}
 	}
@@ -1037,15 +1817,15 @@ func TestMultiDirStoragePlacement(t *testing.T) {
 	// --- Store several objects, recording usage ---
 
 	type objectInfo struct {
-		instanceHash string
-		storageID    uint8
+		instanceHash InstanceHash
+		storageID    StorageID
 		size         int64
 	}
 	var objects []objectInfo
 	const objectSize = 8192 // 2 blocks
 
 	for i := 0; i < 10; i++ {
-		instanceHash := fmt.Sprintf("%064x", i+0x10)
+		instanceHash := InstanceHash(fmt.Sprintf("%064x", i+0x10))
 		sid := eviction.ChooseDiskStorage()
 
 		meta, err := storage.InitDiskStorage(ctx, instanceHash, objectSize, sid)
@@ -1087,7 +1867,7 @@ func TestMultiDirStoragePlacement(t *testing.T) {
 
 	// --- Assert: files are distributed across directories ---
 
-	filesInDir := map[uint8]int{storageID1: 0, storageID2: 0}
+	filesInDir := map[StorageID]int{storageID1: 0, storageID2: 0}
 	for _, obj := range objects {
 		filesInDir[obj.storageID]++
 
@@ -1110,7 +1890,7 @@ func TestMultiDirStoragePlacement(t *testing.T) {
 	require.Contains(t, stats.DirStats, storageID1)
 	require.Contains(t, stats.DirStats, storageID2)
 
-	expectedUsage := map[uint8]int64{storageID1: 0, storageID2: 0}
+	expectedUsage := map[StorageID]int64{storageID1: 0, storageID2: 0}
 	for _, obj := range objects {
 		expectedUsage[obj.storageID] += obj.size
 	}
@@ -1118,7 +1898,7 @@ func TestMultiDirStoragePlacement(t *testing.T) {
 	allUsage, err := db.GetAllUsage()
 	require.NoError(t, err)
 
-	actualUsage := map[uint8]int64{}
+	actualUsage := map[StorageID]int64{}
 	for key, usage := range allUsage {
 		actualUsage[key.StorageID] += usage
 	}
@@ -1178,14 +1958,15 @@ func TestPurgeStorageID(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	storage, err := NewStorageManager(db, []string{dir1, dir2}, 0)
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{dir1, dir2}, 0, egrp)
 	require.NoError(t, err)
 
 	assignedDirs := storage.GetDirs()
 	require.Len(t, assignedDirs, 2)
 
 	// Identify the two storage IDs.
-	var ids []uint8
+	var ids []StorageID
 	for id := range assignedDirs {
 		ids = append(ids, id)
 	}
@@ -1198,14 +1979,14 @@ func TestPurgeStorageID(t *testing.T) {
 	const objSize int64 = 8192
 
 	// Helper: create one object on a given storageID.
-	createObject := func(i int, sid uint8) string {
-		instanceHash := fmt.Sprintf("%064x", i)
+	createObject := func(i int, sid StorageID) InstanceHash {
+		instanceHash := InstanceHash(fmt.Sprintf("%064x", i))
 		meta, err := storage.InitDiskStorage(ctx, instanceHash, objSize, sid)
 		require.NoError(t, err)
 		meta.ETag = fmt.Sprintf("etag-%d", i)
 		meta.NamespaceID = 1
 		meta.ContentType = "application/octet-stream"
-		meta.ObjectHash = fmt.Sprintf("objhash-%d", i)
+		meta.SourceURL = fmt.Sprintf("pelican://example.com/obj-%d", i)
 		require.NoError(t, storage.SetMetadata(instanceHash, meta))
 
 		data := make([]byte, objSize)
@@ -1215,7 +1996,8 @@ func TestPurgeStorageID(t *testing.T) {
 		require.NoError(t, storage.WriteBlocks(instanceHash, 0, data))
 
 		// Set ETag mapping
-		require.NoError(t, db.SetLatestETag(meta.ObjectHash, meta.ETag))
+		objectHash := ComputeObjectHash(db.salt, meta.SourceURL)
+		require.NoError(t, db.SetLatestETag(objectHash, meta.ETag, time.Now()))
 		// Usage is tracked automatically by WriteBlocks → MergeBlockStateWithUsage.
 		// Record LRU access
 		require.NoError(t, db.UpdateLRU(instanceHash, 0))
@@ -1224,7 +2006,7 @@ func TestPurgeStorageID(t *testing.T) {
 	}
 
 	// Create 3 objects on each storageID.
-	var keepHashes, purgeHashes []string
+	var keepHashes, purgeHashes []InstanceHash
 	for i := 0; i < 3; i++ {
 		keepHashes = append(keepHashes, createObject(i, sidKeep))
 	}
@@ -1296,7 +2078,7 @@ func TestStorageIDRecycling(t *testing.T) {
 	// Fill all 255 storageIDs (1–255) with fake disk mappings.
 	// Only the first dir is a real directory; the rest are just DB entries.
 	realDir := t.TempDir()
-	for id := uint8(StorageIDFirstDisk); ; id++ {
+	for id := StorageID(StorageIDFirstDisk); ; id++ {
 		dm := DiskMapping{
 			ID:        id,
 			UUID:      fmt.Sprintf("uuid-%d", id),
@@ -1304,7 +2086,7 @@ func TestStorageIDRecycling(t *testing.T) {
 		}
 		require.NoError(t, db.SaveDiskMapping(dm))
 		// Add a small amount of usage so FindRecyclableStorageID can rank them.
-		require.NoError(t, db.AddUsage(id, 1, int64(id)*100))
+		require.NoError(t, seedUsage(db, id, 1, int64(id)*100))
 		if id == 255 {
 			break
 		}
@@ -1314,18 +2096,19 @@ func TestStorageIDRecycling(t *testing.T) {
 	// to assign it a new ID.  All 255 IDs are taken, so it must recycle.
 	// StorageID 1 has the smallest usage (1*100 = 100), so it should be
 	// recycled.
-	storage, err := NewStorageManager(db, []string{realDir}, 0)
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{realDir}, 0, egrp)
 	require.NoError(t, err, "should recycle a storageID instead of failing")
 
 	dirs := storage.GetDirs()
 	require.Len(t, dirs, 1)
 
 	// The recycled ID should be 1 (smallest usage).
-	var assignedID uint8
+	var assignedID StorageID
 	for id := range dirs {
 		assignedID = id
 	}
-	assert.Equal(t, uint8(StorageIDFirstDisk), assignedID,
+	assert.Equal(t, StorageIDFirstDisk, assignedID,
 		"should have recycled storage ID %d (smallest usage)", StorageIDFirstDisk)
 
 	// The old disk mapping for ID 1 should be replaced.

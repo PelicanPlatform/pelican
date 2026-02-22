@@ -222,7 +222,7 @@ func TestStreaming_RangeOnCacheMiss(t *testing.T) {
 	defer rangeCancel()
 
 	startTime := time.Now()
-	r := doRangeRead(rangeCtx, cacheURL, "", rangeHeader)
+	r := doRangeRead(rangeCtx, cacheURL, "", "", rangeHeader)
 	fetchLatency := time.Since(startTime)
 	require.NoError(t, r.err, "Range request from the middle should succeed within the timeout")
 
@@ -243,7 +243,7 @@ func TestStreaming_RangeOnCacheMiss(t *testing.T) {
 
 	// ---- Step 2: re-read the same range → must be a fast cache hit -------
 	startTime = time.Now()
-	r2 := doRangeRead(ft.Ctx, cacheURL, "", rangeHeader)
+	r2 := doRangeRead(ft.Ctx, cacheURL, "", "", rangeHeader)
 	hitLatency := time.Since(startTime)
 
 	require.NoError(t, r2.err)
@@ -266,7 +266,7 @@ func TestStreaming_RangeOnCacheMiss(t *testing.T) {
 
 	beginRange := fmt.Sprintf("bytes=0-%d", 256*1024-1)
 	startTime = time.Now()
-	r3 := doRangeRead(beginCtx, cacheURL, "", beginRange)
+	r3 := doRangeRead(beginCtx, cacheURL, "", "", beginRange)
 	beginLatency := time.Since(startTime)
 
 	if r3.err != nil {
@@ -309,7 +309,7 @@ func TestStreaming_SecondReadIsCacheHit(t *testing.T) {
 	// First read (cache miss -- downloads from origin at rate limit).
 	// 256 KB at 100 KB/s ≈ 2.6 s (minus 100 KB burst ≈ 1.6 s minimum).
 	firstStart := time.Now()
-	r1 := doRangeRead(ft.Ctx, cacheURL, "", "")
+	r1 := doRangeRead(ft.Ctx, cacheURL, "", "", "")
 	firstReadLatency := time.Since(firstStart)
 	require.NoError(t, r1.err)
 	require.Equal(t, http.StatusOK, r1.statusCode)
@@ -322,7 +322,7 @@ func TestStreaming_SecondReadIsCacheHit(t *testing.T) {
 
 	// Second read (cache hit -- should be fast and return identical data)
 	startTime := time.Now()
-	r2 := doRangeRead(ft.Ctx, cacheURL, "", "")
+	r2 := doRangeRead(ft.Ctx, cacheURL, "", "", "")
 	secondReadLatency := time.Since(startTime)
 
 	require.NoError(t, r2.err)

@@ -181,6 +181,7 @@ type (
 		job               *TransferJob
 		Error             error            `json:"error"`
 		TransferredBytes  int64            `json:"transferredBytes"`
+		ETag              string           `json:"etag,omitempty"`  // ETag from the server response (GET or PUT)
 		ServerChecksums   []ChecksumInfo   `json:"serverChecksums"` // Checksums returned by the server
 		ClientChecksums   []ChecksumInfo   `json:"clientChecksums"` // Checksums calculated by the client
 		TransferStartTime time.Time        `json:"transferStartTime"`
@@ -236,7 +237,7 @@ type (
 		remoteURL          *url.URL
 		localPath          string
 		token              *tokenGenerator
-		fedToken           string // Federation token; added as access_token query param on origin URLs
+		fedToken           TokenProvider // Federation token; added as access_token query param on origin URLs
 		xferType           transferType
 		packOption         string
 		attempts           []transferAttemptDetails
@@ -280,7 +281,7 @@ type (
 		dirResp            server_structs.DirectorResponse
 		directorUrl        string
 		token              *tokenGenerator
-		fedToken           string // Federation token; sent as access_token query param to origins (not to the director)
+		fedToken           TokenProvider // Federation token; sent as access_token query param to origins (not to the director)
 		cacheMode          bool   // When true, the client queries the director's origin endpoint (/api/v1.0/director/origin/) instead of the default endpoint
 		project            string
 		writer             io.WriteCloser          // Optional writer for downloads - if set, write to this instead of localPath
@@ -328,6 +329,7 @@ type (
 		ewmaCtr            atomic.Int64
 		clientLock         sync.RWMutex
 		pelicanUrlCache    *pelican_url.Cache
+		dirRespCache       *DirRespCache   // Prefix-matching cache for director responses
 		prestageAPISupport map[string]bool // Lookup table for caches that support the Pelican prestage API (key: host)
 		prestageAPIMutex   sync.RWMutex    // Protects the prestageAPISupport map
 	}
@@ -345,7 +347,7 @@ type (
 		syncLevel      SyncLevel // Policy for the client to synchronize data
 		tokenLocation  string    // Location of a token file to use for transfers
 		token          string    // Token that should be used for transfers
-		fedToken       string    // Federation token; sent as access_token query param to origins (not to the director)
+		fedToken       TokenProvider // Federation token; sent as access_token query param to origins (not to the director)
 		cacheMode      bool      // When true, the client queries the director's origin endpoint (/api/v1.0/director/origin/)
 		dryRun         bool      // Enable dry-run mode to display what would be transferred without actually doing it
 		work           chan *TransferJob
@@ -661,6 +663,7 @@ func NewTransferEngine(ctx context.Context) (te *TransferEngine, err error) {
 		ewmaTick:           time.NewTicker(ewmaInterval),
 		ewma:               ewma.NewMovingAverage(20), // By explicitly setting the age to 20s, the first 10 seconds will use an average of historical samples instead of EWMA
 		pelicanUrlCache:    pelicanUrlCache,
+		dirRespCache:       NewDirRespCache(5 * time.Minute),
 		prestageAPISupport: make(map[string]bool),
 	}
 	workerCount := param.Client_WorkerCount.GetInt()
@@ -719,8 +722,13 @@ func WithToken(token string) TransferOption {
 // is NOT sent to the director — it is appended to the URL only after
 // the director redirect, so it arrives at the origin as a query param.
 // This is compatible with both Go-based and XRootD-based origins.
-func WithFedToken(token string) TransferOption {
-	return option.New(identTransferOptionFedToken{}, token)
+//
+// The provider is queried for a fresh token on each transfer attempt,
+// so callers can pass a refreshable TokenProvider (e.g. one backed by
+// PersistentCache.getFedToken) to handle short-lived tokens that may
+// expire during long downloads.
+func WithFedToken(provider TokenProvider) TransferOption {
+	return option.New(identTransferOptionFedToken{}, provider)
 }
 
 // Create an option to specify the checksums to request for a given
@@ -879,7 +887,7 @@ func (te *TransferEngine) NewClient(options ...TransferOption) (client *Transfer
 		case identTransferOptionToken{}:
 			client.token = option.Value().(string)
 		case identTransferOptionFedToken{}:
-			client.fedToken = option.Value().(string)
+			client.fedToken = option.Value().(TokenProvider)
 		case identTransferOptionSynchronize{}:
 			client.syncLevel = option.Value().(SyncLevel)
 		case identTransferOptionDryRun{}:
@@ -1250,7 +1258,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		xferType:       transferTypeDownload,
 		uuid:           id,
 		project:        project,
-		token:          NewTokenGenerator(&copyUrl, nil, operation, !tc.skipAcquire),
+		token:          newTokenGenerator(&copyUrl, nil, operation, !tc.skipAcquire),
 		inPlace:        false, // Default to using temporary files (rsync-style)
 	}
 	if upload {
@@ -1280,7 +1288,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		case identTransferOptionToken{}:
 			tj.token.SetToken(option.Value().(string))
 		case identTransferOptionFedToken{}:
-			tj.fedToken = option.Value().(string)
+			tj.fedToken = option.Value().(TokenProvider)
 		case identTransferOptionSynchronize{}:
 			tj.syncLevel = option.Value().(SyncLevel)
 		case identTransferOptionChecksums{}:
@@ -1311,7 +1319,21 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	}
 
 	tj.directorUrl = copyUrl.FedInfo.DirectorEndpoint
-	dirResp, err := getDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, "", tj.cacheMode)
+
+	// Use the director response cache with singleflight coalescing.
+	// Concurrent jobs for paths under the same namespace will share
+	// a single director query.
+	var dirResp server_structs.DirectorResponse
+	if tc.engine != nil && tc.engine.dirRespCache != nil {
+		copyUrlRef := &copyUrl
+		cacheMode := tj.cacheMode
+		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+			resp, qErr := getDirectorInfoForPath(ctx, copyUrlRef, httpMethod, "", cacheMode)
+			return resp, resp.XPelNsHdr.Namespace, qErr
+		})
+	} else {
+		dirResp, err = getDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, "", tj.cacheMode)
+	}
 	if err != nil {
 		var sce *StatusCodeError
 		if errors.As(err, &sce) {
@@ -1344,6 +1366,10 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			}
 			tj.dirResp = dirResp
 			tj.token.DirResp = &dirResp
+			// Update the cache with the token-authenticated response.
+			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
+				tc.engine.dirRespCache.Store(dirResp.XPelNsHdr.Namespace, dirResp)
+			}
 		}
 	} else {
 		tj.token = nil
@@ -1392,7 +1418,7 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 		xferType:       transferTypePrestage,
 		uuid:           id,
 		project:        project,
-		token:          NewTokenGenerator(&copyUrl, nil, config.TokenSharedRead, !tc.skipAcquire),
+		token:          newTokenGenerator(&copyUrl, nil, config.TokenSharedRead, !tc.skipAcquire),
 	}
 	if tc.token != "" {
 		tj.token.SetToken(tc.token)
@@ -1417,7 +1443,7 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 		case identTransferOptionToken{}:
 			tj.token.SetToken(option.Value().(string))
 		case identTransferOptionFedToken{}:
-			tj.fedToken = option.Value().(string)
+			tj.fedToken = option.Value().(TokenProvider)
 		case identTransferOptionSynchronize{}:
 			tj.syncLevel = option.Value().(SyncLevel)
 		case identTransferOptionForcePrestageAPI{}:
@@ -1426,7 +1452,16 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 	}
 
 	tj.directorUrl = pelicanURL.FedInfo.DirectorEndpoint
-	dirResp, err := getDirectorInfoForPath(tj.ctx, pelicanURL, http.MethodGet, "", false)
+
+	var dirResp server_structs.DirectorResponse
+	if tc.engine != nil && tc.engine.dirRespCache != nil {
+		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, pelicanURL.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+			resp, qErr := getDirectorInfoForPath(ctx, pelicanURL, http.MethodGet, "", false)
+			return resp, resp.XPelNsHdr.Namespace, qErr
+		})
+	} else {
+		dirResp, err = getDirectorInfoForPath(tj.ctx, pelicanURL, http.MethodGet, "", false)
+	}
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
@@ -1452,6 +1487,9 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 			}
 			tj.dirResp = dirResp
 			tj.token.DirResp = &dirResp
+			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
+				tc.engine.dirRespCache.Store(dirResp.XPelNsHdr.Namespace, dirResp)
+			}
 		}
 	} else {
 		tj.token = nil
@@ -1495,7 +1533,7 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 	}
 
 	var prefObjServers []*url.URL
-	token := NewTokenGenerator(pelicanURL, nil, config.TokenSharedRead, true)
+	token := newTokenGenerator(pelicanURL, nil, config.TokenSharedRead, true)
 	if tc.token != "" {
 		token.SetToken(tc.token)
 	}
@@ -1521,7 +1559,15 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 	ctx, cancel := mergeCancel(tc.ctx, ctx)
 	defer cancel()
 
-	dirResp, err := getDirectorInfoForPath(ctx, pelicanURL, http.MethodGet, "", false)
+	var dirResp server_structs.DirectorResponse
+	if tc.engine != nil && tc.engine.dirRespCache != nil {
+		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(ctx, pelicanURL.Path, func(lCtx context.Context) (server_structs.DirectorResponse, string, error) {
+			resp, qErr := getDirectorInfoForPath(lCtx, pelicanURL, http.MethodGet, "", false)
+			return resp, resp.XPelNsHdr.Namespace, qErr
+		})
+	} else {
+		dirResp, err = getDirectorInfoForPath(ctx, pelicanURL, http.MethodGet, "", false)
+	}
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
@@ -1546,6 +1592,9 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 				return
 			}
 			token.DirResp = &dirResp
+			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
+				tc.engine.dirRespCache.Store(dirResp.XPelNsHdr.Namespace, dirResp)
+			}
 		}
 	} else {
 		token = nil
@@ -1851,11 +1900,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			   if err != nil {
 				   return errors.Wrap(err, "failed to parse remote URL for recursive download")
 			   }
-			   if job.job.dirResp.XPelNsHdr.CollectionsUrl != nil {
-				   statInfo, statErr = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken, true)
-			   } else {
-				   statInfo, statErr = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken)
-			   }
+			   statInfo, statErr = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken)
 			   if statErr != nil {
 				   return errors.Wrap(statErr, "failed to stat remote path for recursive download")
 			   }
@@ -1873,7 +1918,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			   if err != nil {
 				   return
 			   }
-			   statInfo, err = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken, true)
+			   statInfo, err = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken)
 			   if err != nil {
 				   err = errors.Wrap(err, "failed to stat object to prestage")
 				   return
@@ -2377,10 +2422,12 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		// parameter.  The transfer URL already points at the origin (post
 		// director redirect), so this goes directly to the origin and is
 		// NOT sent to the director.
-		if transfer.fedToken != "" {
-			q := transferEndpointUrl.Query()
-			q.Set("access_token", transfer.fedToken)
-			transferEndpointUrl.RawQuery = q.Encode()
+		if transfer.fedToken != nil {
+			if ft, ftErr := transfer.fedToken.Get(); ftErr == nil && ft != "" {
+				q := transferEndpointUrl.Query()
+				q.Set("access_token", ft)
+				transferEndpointUrl.RawQuery = q.Encode()
+			}
 		}
 		transferUrls[idx] = transferEndpoint.Url
 		fields := log.Fields{
@@ -2398,11 +2445,31 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		if transfer.byteRange != nil {
 			byteRangeEnd = transfer.byteRange.End
 		}
-		attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, err := downloadHTTP(
+		attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, attemptETag, err := downloadHTTP(
 			ctx, transfer.engine, transfer.callback, transferEndpoint, writeDestination, fileWriter, downloaded, byteRangeEnd, size, tokenContents, transfer.project, transfer.metadataChan,
 		)
 		// Clear metadata channel after first attempt - we only want to send metadata once
 		transfer.metadataChan = nil
+
+		// Track the ETag for resume validation: if the server provided an
+		// ETag and we already have one from a previous attempt, make sure
+		// they match.  A change means the object was modified between
+		// attempts and the partially-downloaded data is no longer valid.
+		if attemptETag != "" {
+			if transferResults.ETag == "" {
+				transferResults.ETag = attemptETag
+			} else if transferResults.ETag != attemptETag {
+				log.WithFields(fields).Errorf("ETag changed between download attempts (was %q, now %q); aborting resume",
+					transferResults.ETag, attemptETag)
+				attempt.Error = newTransferAttemptError(
+					attempt.Endpoint, "", false, false,
+					errors.New("object was modified between download attempts (ETag mismatch); cannot safely resume"),
+				)
+				transferResults.Attempts = append(transferResults.Attempts, attempt)
+				break
+			}
+		}
+
 		endTime := time.Now()
 		if cacheAge >= 0 {
 			attempt.CacheAge = cacheAge
@@ -2817,7 +2884,7 @@ func verifyFileSize(dest string, expectedSize int64, fields log.Fields) error {
 //   - metadataChan: optional channel to receive early transfer metadata (ETag, size, etc.) before data transfer.
 //
 // Returns the downloaded size, time to 1st byte downloaded, serverVersion and an error if there is one
-func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, writer io.Writer, bytesSoFar int64, byteRangeEnd int64, totalSize int64, token string, project string, metadataChan chan<- TransferMetadata) (downloaded int64, timeToFirstByte time.Duration, cacheAge time.Duration, serverVersion string, err error) {
+func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, writer io.Writer, bytesSoFar int64, byteRangeEnd int64, totalSize int64, token string, project string, metadataChan chan<- TransferMetadata) (downloaded int64, timeToFirstByte time.Duration, cacheAge time.Duration, serverVersion string, etag string, err error) {
 	fields, ok := ctx.Value(logFields("fields")).(log.Fields)
 	if !ok {
 		fields = log.Fields{}
@@ -2984,17 +3051,18 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		serverVersion = resp.Header.Get("Server")
 		if resp.StatusCode == http.StatusForbidden {
 			// We will update the error message in the caller
-			return 0, 0, -1, serverVersion, error_codes.NewAuthorizationError(&PermissionDeniedError{})
+			return 0, 0, -1, serverVersion, "", error_codes.NewAuthorizationError(&PermissionDeniedError{})
 		}
 		sce := StatusCodeError(resp.StatusCode)
 		// Wrap StatusCodeError with appropriate PelicanError based on status code
 		wrappedErr := wrapStatusCodeError(&sce)
 		httpErr := &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d): %s",
 			resp.StatusCode, strings.TrimSpace(bodyStr)), wrappedErr}
-		return 0, 0, -1, serverVersion, httpErr
+		return 0, 0, -1, serverVersion, "", httpErr
 	}
 
 	serverVersion = resp.Header.Get("Server")
+	etag = resp.Header.Get("ETag")
 
 	if ageStr := resp.Header.Get("Age"); ageStr != "" {
 		if ageSec, err := strconv.Atoi(ageStr); err == nil {
@@ -3300,7 +3368,7 @@ Loop:
 		log.WithFields(fields).Debugln("Got failure status code:", resp.StatusCode)
 		if resp.StatusCode == 403 {
 			// We will update the error message in the caller
-			return 0, 0, -1, serverVersion, error_codes.NewAuthorizationError(&PermissionDeniedError{})
+			return 0, 0, -1, serverVersion, "", error_codes.NewAuthorizationError(&PermissionDeniedError{})
 		}
 		var wrappedErr error
 		if err == nil {
@@ -3313,7 +3381,7 @@ Loop:
 		}
 		httpErr := &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
 			resp.StatusCode), wrappedErr}
-		return 0, 0, -1, serverVersion, httpErr
+		return 0, 0, -1, serverVersion, "", httpErr
 	}
 
 	// By now, we think the download succeeded. If we know how large the file was supposed to
@@ -3457,7 +3525,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	// Skip this check if Client.EnableOverwrites is enabled
 	if transfer.remoteURL != nil && transfer.job != nil && transfer.job.syncLevel == SyncNone && !transfer.job.recursive && !param.Client_EnableOverwrites.GetBool() {
 		remoteUrl, dirResp, token := transfer.job.remoteURL, transfer.job.dirResp, transfer.job.token
-		_, statErr := statHttp(remoteUrl, dirResp, token, "")
+		_, statErr := statHttp(remoteUrl, dirResp, token, nil)
 		if statErr == nil {
 			// Object exists, abort upload
 			transferResult.Error = error_codes.NewSpecification_FileAlreadyExistsError(
@@ -3705,6 +3773,11 @@ Loop:
 			log.Debugln("File closed")
 		case response := <-responseChan:
 			attempt.ServerVersion = response.Header.Get("Server")
+
+			// Capture ETag from the upload response
+			if responseETag := response.Header.Get("ETag"); responseETag != "" {
+				transferResult.ETag = responseETag
+			}
 
 			// Handle 403 specially when sync is enabled
 			if response.StatusCode == http.StatusForbidden && transfer.job.syncLevel != SyncNone {
@@ -4021,7 +4094,7 @@ func skipUpload(job *TransferJob, localPath string, remoteUrl *pelican_url.Pelic
 		return false
 	}
 
-	remoteInfo, err := statHttp(remoteUrl, job.dirResp, job.token, "")
+	remoteInfo, err := statHttp(remoteUrl, job.dirResp, job.token, nil)
 	if err != nil {
 		return false
 	}
@@ -4660,26 +4733,21 @@ func deleteHttp(ctx context.Context, remoteUrl *pelican_url.PelicanURL, recursiv
 // there is no collectionsUrl the origin has indicated it does not support
 // PROPFIND, so we must not attempt to stat against it directly.
 // preferCollectionsUrlOnly: if true, only use collectionsUrl (origin) for stat, never caches/ObjectServers.
-func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, fedToken string, preferCollectionsUrlOnly ...bool) (info FileInfo, err error) {
+func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, fedToken TokenProvider) (info FileInfo, err error) {
    statHosts := make([]url.URL, 0, 3)
    collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
 
-   useCollectionsOnly := len(preferCollectionsUrlOnly) > 0 && preferCollectionsUrlOnly[0]
-   if useCollectionsOnly {
-	   if collectionsUrl != nil {
-		   statHosts = append(statHosts, *collectionsUrl)
-	   }
-   } else {
-	   if len(dirResp.ObjectServers) > 0 {
-		   for idx, oServer := range dirResp.ObjectServers {
-			   if idx > 2 {
-				   break
-			   }
-			   statHosts = append(statHosts, *oServer)
+   // Prefer cache/origin servers (ObjectServers) for stat.  Only fall
+   // back to the collections URL when no object servers are available.
+   if len(dirResp.ObjectServers) > 0 {
+	   for idx, oServer := range dirResp.ObjectServers {
+		   if idx > 2 {
+			   break
 		   }
-	   } else if collectionsUrl != nil {
-		   statHosts = append(statHosts, *collectionsUrl)
+		   statHosts = append(statHosts, *oServer)
 	   }
+   } else if collectionsUrl != nil {
+	   statHosts = append(statHosts, *collectionsUrl)
    }
 	type statResults struct {
 		info FileInfo
@@ -4697,9 +4765,11 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 	// during the redirect, but Authorization headers survive same-host
 	// redirects.
 	authToken := token
-	if authToken == nil && fedToken != "" {
-		authToken = &tokenGenerator{Sync: new(singleflight.Group)}
-		authToken.SetToken(fedToken)
+	if authToken == nil && fedToken != nil {
+		if ft, ftErr := fedToken.Get(); ftErr == nil && ft != "" {
+			authToken = &tokenGenerator{Sync: new(singleflight.Group)}
+			authToken.SetToken(ft)
+		}
 	}
 	auth := &bearerAuth{token: authToken}
 
@@ -4813,7 +4883,6 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 		}(&destCopy)
 	}
 	   success := false
-	   notFound := false
 	   for ctr := 0; ctr < len(statHosts); ctr++ {
 		   result := <-resultsChan
 		   if result.err == nil {
@@ -4823,16 +4892,7 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 			   }
 		   } else if err == nil && result.err != context.Canceled {
 			   err = result.err
-			   // Check for not found error
-			   if errors.Is(result.err, ErrObjectNotFound) {
-				   notFound = true
-			   }
 		   }
-	   }
-	   // Fallback: if preferCollectionsUrlOnly, got not found, and object servers exist, try default logic
-	   if useCollectionsOnly && notFound && len(dirResp.ObjectServers) > 0 {
-		   // Recursively call statHttp without preferCollectionsUrlOnly
-		   return statHttp(dest, dirResp, token, fedToken)
 	   }
 	   if success {
 		   err = nil

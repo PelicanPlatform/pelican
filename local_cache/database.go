@@ -35,9 +35,10 @@ package local_cache
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"os"
 	"path/filepath"
 	"sync"
@@ -60,6 +61,7 @@ type CacheDB struct {
 	db        *badger.DB
 	encMgr    *EncryptionManager
 	baseDir   string
+	salt      []byte // random salt for hashing object/instance names
 	closeOnce sync.Once
 }
 
@@ -121,6 +123,15 @@ func NewCacheDB(ctx context.Context, baseDir string) (*CacheDB, error) {
 		baseDir: baseDir,
 	}
 
+	// Load or generate the hash salt.  The salt is persisted in the DB
+	// so that object/instance hashes are stable across restarts.
+	salt, err := cdb.loadOrCreateSalt()
+	if err != nil {
+		db.Close()
+		return nil, errors.Wrap(err, "failed to initialise hash salt")
+	}
+	cdb.salt = salt
+
 	log.Infof("Cache database initialized at %s", dbPath)
 	return cdb, nil
 }
@@ -159,10 +170,58 @@ func (cdb *CacheDB) GetEncryptionManager() *EncryptionManager {
 	return cdb.encMgr
 }
 
+// loadOrCreateSalt reads the hash salt from the DB, or generates a new
+// random salt and persists it if none exists yet.
+func (cdb *CacheDB) loadOrCreateSalt() ([]byte, error) {
+	var salt []byte
+	err := cdb.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte(KeySalt))
+		if err != nil {
+			return err
+		}
+		return item.Value(func(val []byte) error {
+			salt = make([]byte, len(val))
+			copy(salt, val)
+			return nil
+		})
+	})
+	if err == nil {
+		return salt, nil
+	}
+	if !errors.Is(err, badger.ErrKeyNotFound) {
+		return nil, err
+	}
+
+	// No salt yet — generate one.
+	salt = make([]byte, SaltSize)
+	if _, err := rand.Read(salt); err != nil {
+		return nil, errors.Wrap(err, "failed to generate random salt")
+	}
+	if err := cdb.db.Update(func(txn *badger.Txn) error {
+		return txn.Set([]byte(KeySalt), salt)
+	}); err != nil {
+		return nil, errors.Wrap(err, "failed to persist hash salt")
+	}
+	return salt, nil
+}
+
+// Salt returns the per-database random salt used for hashing.
+func (cdb *CacheDB) Salt() []byte { return cdb.salt }
+
+// ObjectHash computes the salted SHA-256 hash for a pelican URL.
+func (cdb *CacheDB) ObjectHash(pelicanURL string) ObjectHash {
+	return ComputeObjectHash(cdb.salt, pelicanURL)
+}
+
+// InstanceHash computes the salted SHA-256 hash for (etag, objectHash).
+func (cdb *CacheDB) InstanceHash(etag string, objectHash ObjectHash) InstanceHash {
+	return ComputeInstanceHash(cdb.salt, etag, objectHash)
+}
+
 // --- Metadata Operations ---
 
 // GetMetadata retrieves cache metadata for a file
-func (cdb *CacheDB) GetMetadata(instanceHash string) (*CacheMetadata, error) {
+func (cdb *CacheDB) GetMetadata(instanceHash InstanceHash) (*CacheMetadata, error) {
 	var meta CacheMetadata
 
 	err := cdb.db.View(func(txn *badger.Txn) error {
@@ -186,8 +245,11 @@ func (cdb *CacheDB) GetMetadata(instanceHash string) (*CacheMetadata, error) {
 	return &meta, nil
 }
 
-// SetMetadata stores cache metadata for a file
-func (cdb *CacheDB) SetMetadata(instanceHash string, meta *CacheMetadata) error {
+// SetMetadata stores cache metadata for a file, unconditionally replacing
+// any previously stored metadata.  Use this only for initial creation of a
+// metadata entry (e.g. InitDiskStorage, StoreInline); for subsequent updates
+// prefer MergeMetadata which applies field-level merge semantics.
+func (cdb *CacheDB) SetMetadata(instanceHash InstanceHash, meta *CacheMetadata) error {
 	data, err := msgpack.Marshal(meta)
 	if err != nil {
 		return errors.Wrap(err, "failed to marshal metadata")
@@ -198,8 +260,184 @@ func (cdb *CacheDB) SetMetadata(instanceHash string, meta *CacheMetadata) error 
 	})
 }
 
+// MergeMetadata performs an atomic read-modify-update of the metadata for
+// instanceHash.  If no metadata exists yet, incoming is written as-is (initial
+// creation).
+//
+// Field-level merge rules:
+//
+//   - Max-time (LastModified, LastValidated, LastAccessTime, Expires,
+//     Completed): keep the later of existing vs incoming.
+//   - Additive (Checksums): union by ChecksumType; if both sides provide the
+//     same Type, prefer the OriginVerified entry.
+//   - Last-writer-wins (ContentType, ContentLength, VaryHeaders, CCFlags,
+//     CCMaxAge): incoming replaces existing when the incoming value is non-zero /
+//     non-empty.
+//   - Set-once (ETag, SourceURL, DataKey, StorageID, NamespaceID): may transition
+//     from zero-value to a value, but changing a non-zero value to a different
+//     non-zero value returns an error.  ETag is set-once because it is part of
+//     the instance hash; a changed ETag produces a different instance.
+func (cdb *CacheDB) MergeMetadata(instanceHash InstanceHash, incoming *CacheMetadata) error {
+	return cdb.db.Update(func(txn *badger.Txn) error {
+		existing, err := getMetadataInTxn(txn, instanceHash)
+		if err != nil {
+			return errors.Wrap(err, "failed to read existing metadata for merge")
+		}
+
+		merged := incoming
+		if existing != nil {
+			if err := mergeMetadataFields(existing, incoming); err != nil {
+				return err
+			}
+			merged = existing // existing was mutated in place
+		}
+
+		data, err := msgpack.Marshal(merged)
+		if err != nil {
+			return errors.Wrap(err, "failed to marshal merged metadata")
+		}
+		return txn.Set(MetaKey(instanceHash), data)
+	})
+}
+
+// mergeMetadataFields applies incoming field values into existing according to
+// the merge semantics documented on CacheMetadata.  It mutates existing in place.
+func mergeMetadataFields(existing, incoming *CacheMetadata) error {
+	// --- Max-time fields ---
+	if incoming.LastModified.After(existing.LastModified) {
+		existing.LastModified = incoming.LastModified
+	}
+	if incoming.LastValidated.After(existing.LastValidated) {
+		existing.LastValidated = incoming.LastValidated
+	}
+	if incoming.LastAccessTime.After(existing.LastAccessTime) {
+		existing.LastAccessTime = incoming.LastAccessTime
+	}
+	if incoming.Expires.After(existing.Expires) {
+		existing.Expires = incoming.Expires
+	}
+	if incoming.Completed.After(existing.Completed) {
+		existing.Completed = incoming.Completed
+	}
+
+	// --- Additive: Checksums ---
+	existing.Checksums = mergeChecksums(existing.Checksums, incoming.Checksums)
+
+	// --- Last-writer-wins (non-zero incoming replaces existing) ---
+	if incoming.ContentType != "" {
+		existing.ContentType = incoming.ContentType
+	}
+	if incoming.ContentLength != 0 {
+		existing.ContentLength = incoming.ContentLength
+	}
+	if len(incoming.VaryHeaders) > 0 {
+		existing.VaryHeaders = incoming.VaryHeaders
+	}
+	if incoming.CCFlags != 0 {
+		existing.CCFlags = incoming.CCFlags
+	}
+	if incoming.CCMaxAge != 0 {
+		existing.CCMaxAge = incoming.CCMaxAge
+	}
+
+	// --- Set-once fields ---
+	if err := mergeSetOnce("ETag", &existing.ETag, incoming.ETag); err != nil {
+		return err
+	}
+	if err := mergeSetOnce("SourceURL", &existing.SourceURL, incoming.SourceURL); err != nil {
+		return err
+	}
+	if err := mergeSetOnceBytes("DataKey", &existing.DataKey, incoming.DataKey); err != nil {
+		return err
+	}
+	if err := mergeSetOnceComparable("StorageID", &existing.StorageID, incoming.StorageID); err != nil {
+		return err
+	}
+	if err := mergeSetOnceComparable("NamespaceID", &existing.NamespaceID, incoming.NamespaceID); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// mergeChecksums returns the union of two checksum slices.  If both sides
+// contain the same ChecksumType, the OriginVerified entry wins; ties go to
+// incoming.
+func mergeChecksums(existing, incoming []Checksum) []Checksum {
+	if len(incoming) == 0 {
+		return existing
+	}
+	if len(existing) == 0 {
+		return incoming
+	}
+
+	// Build map keyed by ChecksumType.
+	byType := make(map[ChecksumType]Checksum, len(existing)+len(incoming))
+	for _, c := range existing {
+		byType[c.Type] = c
+	}
+	for _, c := range incoming {
+		prev, ok := byType[c.Type]
+		if !ok || c.OriginVerified || !prev.OriginVerified {
+			byType[c.Type] = c
+		}
+	}
+
+	result := make([]Checksum, 0, len(byType))
+	for _, c := range byType {
+		result = append(result, c)
+	}
+	return result
+}
+
+// mergeSetOnce enforces set-once semantics for a string field.
+func mergeSetOnce(name string, existing *string, incoming string) error {
+	if incoming == "" {
+		return nil // incoming is zero-value, no change
+	}
+	if *existing == "" {
+		*existing = incoming
+		return nil
+	}
+	if *existing != incoming {
+		return errors.Errorf("set-once field %s: cannot change %q to %q", name, *existing, incoming)
+	}
+	return nil
+}
+
+// mergeSetOnceBytes enforces set-once semantics for a []byte field.
+func mergeSetOnceBytes(name string, existing *[]byte, incoming []byte) error {
+	if len(incoming) == 0 {
+		return nil
+	}
+	if len(*existing) == 0 {
+		*existing = incoming
+		return nil
+	}
+	if !bytes.Equal(*existing, incoming) {
+		return errors.Errorf("set-once field %s: cannot change non-zero value", name)
+	}
+	return nil
+}
+
+// mergeSetOnceComparable enforces set-once semantics for a comparable field.
+func mergeSetOnceComparable[T comparable](name string, existing *T, incoming T) error {
+	var zero T
+	if incoming == zero {
+		return nil
+	}
+	if *existing == zero {
+		*existing = incoming
+		return nil
+	}
+	if *existing != incoming {
+		return errors.Errorf("set-once field %s: cannot change value", name)
+	}
+	return nil
+}
+
 // DeleteMetadata removes metadata for a file
-func (cdb *CacheDB) DeleteMetadata(instanceHash string) error {
+func (cdb *CacheDB) DeleteMetadata(instanceHash InstanceHash) error {
 	return cdb.db.Update(func(txn *badger.Txn) error {
 		return txn.Delete(MetaKey(instanceHash))
 	})
@@ -208,7 +446,7 @@ func (cdb *CacheDB) DeleteMetadata(instanceHash string) error {
 // --- ETag Operations ---
 
 // GetLatestETag retrieves the latest ETag for an object
-func (cdb *CacheDB) GetLatestETag(objectHash string) (string, error) {
+func (cdb *CacheDB) GetLatestETag(objectHash ObjectHash) (string, error) {
 	var etag string
 
 	err := cdb.db.View(func(txn *badger.Txn) error {
@@ -218,7 +456,7 @@ func (cdb *CacheDB) GetLatestETag(objectHash string) (string, error) {
 		}
 
 		return item.Value(func(val []byte) error {
-			etag = string(val)
+			etag, _ = decodeETagEntry(val)
 			return nil
 		})
 	})
@@ -233,18 +471,55 @@ func (cdb *CacheDB) GetLatestETag(objectHash string) (string, error) {
 	return etag, nil
 }
 
-// SetLatestETag stores the latest ETag for an object
-func (cdb *CacheDB) SetLatestETag(objectHash, etag string) error {
+// SetLatestETag stores the latest ETag for an object, but only if
+// observedAt is more recent than the already-stored timestamp.  This
+// prevents a slow download that finishes late from clobbering a newer
+// ETag written by a more recent request.
+func (cdb *CacheDB) SetLatestETag(objectHash ObjectHash, etag string, observedAt time.Time) error {
+	key := ETagKey(objectHash)
 	return cdb.db.Update(func(txn *badger.Txn) error {
-		return txn.Set(ETagKey(objectHash), []byte(etag))
+		// Read-modify-write: only update if newer.
+		item, err := txn.Get(key)
+		if err == nil {
+			var existing time.Time
+			_ = item.Value(func(val []byte) error {
+				_, existing = decodeETagEntry(val)
+				return nil
+			})
+			if !existing.IsZero() && !observedAt.After(existing) {
+				return nil // existing entry is at least as recent
+			}
+		} else if !errors.Is(err, badger.ErrKeyNotFound) {
+			return err
+		}
+		return txn.Set(key, encodeETagEntry(etag, observedAt))
 	})
 }
 
 // DeleteLatestETag removes the ETag entry for an object
-func (cdb *CacheDB) DeleteLatestETag(objectHash string) error {
+func (cdb *CacheDB) DeleteLatestETag(objectHash ObjectHash) error {
 	return cdb.db.Update(func(txn *badger.Txn) error {
 		return txn.Delete(ETagKey(objectHash))
 	})
+}
+
+// encodeETagEntry packs an ETag and observation timestamp into a single
+// byte slice: [8-byte big-endian Unix-nano timestamp][etag bytes].
+func encodeETagEntry(etag string, observedAt time.Time) []byte {
+	buf := make([]byte, 8+len(etag))
+	binary.BigEndian.PutUint64(buf[:8], uint64(observedAt.UnixNano()))
+	copy(buf[8:], etag)
+	return buf
+}
+
+// decodeETagEntry unpacks an encoded ETag entry.  For legacy entries
+// (no timestamp prefix), the returned time is zero.
+func decodeETagEntry(val []byte) (string, time.Time) {
+	if len(val) < 8 {
+		return string(val), time.Time{}
+	}
+	nanos := int64(binary.BigEndian.Uint64(val[:8]))
+	return string(val[8:]), time.Unix(0, nanos)
 }
 
 // --- Namespace Mapping Operations ---
@@ -252,9 +527,9 @@ func (cdb *CacheDB) DeleteLatestETag(objectHash string) error {
 // SetNamespaceMapping persists the mapping from a namespace prefix string
 // to a numeric ID.  This ensures the IDs survive restarts so that LRU
 // keys and usage counters remain valid.
-func (cdb *CacheDB) SetNamespaceMapping(prefix string, id uint32) error {
+func (cdb *CacheDB) SetNamespaceMapping(prefix string, id NamespaceID) error {
 	val := make([]byte, 4)
-	binary.LittleEndian.PutUint32(val, id)
+	binary.LittleEndian.PutUint32(val, uint32(id))
 	return cdb.db.Update(func(txn *badger.Txn) error {
 		return txn.Set(NamespaceKey(prefix), val)
 	})
@@ -263,9 +538,9 @@ func (cdb *CacheDB) SetNamespaceMapping(prefix string, id uint32) error {
 // LoadNamespaceMappings loads all persisted namespace mappings and returns
 // them as a map[prefix]->id, along with the highest ID seen (so the
 // caller can resume the counter).
-func (cdb *CacheDB) LoadNamespaceMappings() (map[string]uint32, uint32, error) {
-	result := make(map[string]uint32)
-	var maxID uint32
+func (cdb *CacheDB) LoadNamespaceMappings() (map[string]NamespaceID, NamespaceID, error) {
+	result := make(map[string]NamespaceID)
+	var maxID NamespaceID
 
 	err := cdb.db.View(func(txn *badger.Txn) error {
 		prefix := []byte(PrefixNamespace)
@@ -282,7 +557,7 @@ func (cdb *CacheDB) LoadNamespaceMappings() (map[string]uint32, uint32, error) {
 				if len(val) != 4 {
 					return errors.Errorf("invalid namespace ID value for %s", key)
 				}
-				id := binary.LittleEndian.Uint32(val)
+				id := NamespaceID(binary.LittleEndian.Uint32(val))
 				result[key] = id
 				if id > maxID {
 					maxID = id
@@ -305,7 +580,7 @@ func (cdb *CacheDB) LoadNamespaceMappings() (map[string]uint32, uint32, error) {
 // --- Disk Mapping Operations ---
 
 // DiskMappingKey returns the BadgerDB key for a disk mapping entry.
-func DiskMappingKey(storageID uint8) []byte {
+func DiskMappingKey(storageID StorageID) []byte {
 	return []byte(fmt.Sprintf("%s%d", PrefixDiskMap, storageID))
 }
 
@@ -353,13 +628,32 @@ func (cdb *CacheDB) LoadDiskMappings() ([]DiskMapping, error) {
 
 // --- Block State Operations ---
 
-// GetBlockState retrieves the bitmap of downloaded blocks for a file
-func (cdb *CacheDB) GetBlockState(instanceHash string) (*roaring.Bitmap, error) {
+// GetBlockState retrieves the bitmap of downloaded blocks for a file.
+//
+// If the block-state key is absent but the object's metadata indicates a
+// completed download, a fully-populated bitmap is returned.  This allows
+// callers to treat completed objects uniformly without requiring a
+// separate completion check.  The block-state key is removed on
+// completion to save database space (see BlockWriter.Close).
+func (cdb *CacheDB) GetBlockState(instanceHash InstanceHash) (*roaring.Bitmap, error) {
 	bitmap := roaring.New()
 
 	err := cdb.db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get(StateKey(instanceHash))
 		if err != nil {
+			if errors.Is(err, badger.ErrKeyNotFound) {
+				// No block state key.  If the metadata says the
+				// download is complete, synthesize a full bitmap.
+				meta, metaErr := getMetadataInTxn(txn, instanceHash)
+				if metaErr != nil || meta == nil {
+					return nil // truly empty — no metadata either
+				}
+				if !meta.Completed.IsZero() && meta.ContentLength > 0 {
+					totalBlocks := CalculateBlockCount(meta.ContentLength)
+					bitmap.AddRange(0, uint64(totalBlocks))
+				}
+				return nil
+			}
 			return err
 		}
 
@@ -370,9 +664,6 @@ func (cdb *CacheDB) GetBlockState(instanceHash string) (*roaring.Bitmap, error) 
 	})
 
 	if err != nil {
-		if errors.Is(err, badger.ErrKeyNotFound) {
-			return bitmap, nil // Return empty bitmap
-		}
 		return nil, errors.Wrap(err, "failed to get block state")
 	}
 
@@ -380,7 +671,7 @@ func (cdb *CacheDB) GetBlockState(instanceHash string) (*roaring.Bitmap, error) 
 }
 
 // SetBlockState stores the bitmap of downloaded blocks
-func (cdb *CacheDB) SetBlockState(instanceHash string, bitmap *roaring.Bitmap) error {
+func (cdb *CacheDB) SetBlockState(instanceHash InstanceHash, bitmap *roaring.Bitmap) error {
 	data, err := bitmap.ToBytes()
 	if err != nil {
 		return errors.Wrap(err, "failed to serialize bitmap")
@@ -393,13 +684,16 @@ func (cdb *CacheDB) SetBlockState(instanceHash string, bitmap *roaring.Bitmap) e
 
 // MergeBlockStateWithUsage atomically merges new blocks into the existing bitmap
 // AND updates usage statistics based on the number of newly-enabled bits.
-// It reads the object's metadata within the same transaction to determine the
-// content length (for the last partial block), storage ID, and namespace ID.
-// This ensures consistency between block state and usage counters.
+//
+// contentLength controls how the usage delta is calculated:
+//   - If >= 0, the supplied contentLength, storageID, and namespaceID are used
+//     directly, avoiding a metadata DB read.
+//   - If < 0 (typically -1), the metadata is read within the transaction
+//     to obtain the content length, storage ID, and namespace ID.
 //
 // The method retries on BadgerDB transaction conflicts, which can occur when
 // multiple concurrent block fetchers write to the same object's bitmap.
-func (cdb *CacheDB) MergeBlockStateWithUsage(instanceHash string, newBlocks *roaring.Bitmap) error {
+func (cdb *CacheDB) MergeBlockStateWithUsage(instanceHash InstanceHash, newBlocks *roaring.Bitmap, storageID StorageID, namespaceID NamespaceID, contentLength int64) error {
 	newData, err := newBlocks.ToBytes()
 	if err != nil {
 		return errors.Wrap(err, "failed to serialize new blocks bitmap")
@@ -409,7 +703,7 @@ func (cdb *CacheDB) MergeBlockStateWithUsage(instanceHash string, newBlocks *roa
 	backoff := 100 * time.Microsecond
 	for attempt := 0; ; attempt++ {
 		err := cdb.db.Update(func(txn *badger.Txn) error {
-			return cdb.mergeBlockStateWithUsageTxn(txn, instanceHash, newData, newBlocks)
+			return cdb.mergeBlockStateWithUsageTxn(txn, instanceHash, newData, newBlocks, storageID, namespaceID, contentLength)
 		})
 		if err == nil {
 			return nil
@@ -417,7 +711,8 @@ func (cdb *CacheDB) MergeBlockStateWithUsage(instanceHash string, newBlocks *roa
 		if errors.Is(err, badger.ErrConflict) && attempt < maxRetries-1 {
 			// Exponential backoff with jitter to avoid thundering herd
 			// when many concurrent writers conflict on the same bitmap.
-			jitter := time.Duration(rand.Int63n(int64(backoff)))
+			n, _ := rand.Int(rand.Reader, big.NewInt(int64(backoff)))
+			jitter := time.Duration(n.Int64())
 			time.Sleep(backoff + jitter)
 			backoff *= 2
 			if backoff > 50*time.Millisecond {
@@ -429,7 +724,7 @@ func (cdb *CacheDB) MergeBlockStateWithUsage(instanceHash string, newBlocks *roa
 	}
 }
 
-func (cdb *CacheDB) mergeBlockStateWithUsageTxn(txn *badger.Txn, instanceHash string, newData []byte, newBlocks *roaring.Bitmap) error {
+func (cdb *CacheDB) mergeBlockStateWithUsageTxn(txn *badger.Txn, instanceHash InstanceHash, newData []byte, newBlocks *roaring.Bitmap, storageID StorageID, namespaceID NamespaceID, contentLength int64) error {
 	newBitCount, err := mergeBlockStateInTxn(txn, instanceHash, newData)
 	if err != nil {
 		return err
@@ -438,24 +733,30 @@ func (cdb *CacheDB) mergeBlockStateWithUsageTxn(txn *badger.Txn, instanceHash st
 		return nil // No new blocks added; nothing to track
 	}
 
-	// Look up metadata for content length, storage ID, and namespace ID
-	meta, err := getMetadataInTxn(txn, instanceHash)
-	if err != nil || meta == nil {
-		// Metadata may not exist yet (e.g., blocks written before metadata).
-		// Skip usage tracking rather than failing the bitmap merge.
-		return nil
+	if contentLength < 0 {
+		// Caller didn't supply the size — look up metadata.
+		meta, err := getMetadataInTxn(txn, instanceHash)
+		if err != nil || meta == nil {
+			// Metadata may not exist yet (e.g., blocks written before metadata).
+			// Skip usage tracking rather than failing the bitmap merge.
+			return nil
+		}
+		contentLength = meta.ContentLength
+		storageID = meta.StorageID
+		namespaceID = meta.NamespaceID
 	}
 
+	meta := &CacheMetadata{ContentLength: contentLength}
 	delta := calculateUsageDelta(meta, newBlocks, newBitCount)
 	if delta > 0 {
-		return addUsageInTxn(txn, meta.StorageID, meta.NamespaceID, delta)
+		return addUsageInTxn(txn, storageID, namespaceID, delta)
 	}
 	return nil
 }
 
 // mergeBlockStateInTxn performs the bitmap merge within an existing transaction.
 // Returns the number of newly-enabled bits (blocks that were not previously set).
-func mergeBlockStateInTxn(txn *badger.Txn, instanceHash string, newData []byte) (uint64, error) {
+func mergeBlockStateInTxn(txn *badger.Txn, instanceHash InstanceHash, newData []byte) (uint64, error) {
 	key := StateKey(instanceHash)
 
 	// Get existing bitmap
@@ -499,7 +800,7 @@ func mergeBlockStateInTxn(txn *badger.Txn, instanceHash string, newData []byte) 
 
 // getMetadataInTxn reads CacheMetadata within an existing transaction.
 // Returns nil (not an error) if the key does not exist.
-func getMetadataInTxn(txn *badger.Txn, instanceHash string) (*CacheMetadata, error) {
+func getMetadataInTxn(txn *badger.Txn, instanceHash InstanceHash) (*CacheMetadata, error) {
 	item, err := txn.Get(MetaKey(instanceHash))
 	if err != nil {
 		if errors.Is(err, badger.ErrKeyNotFound) {
@@ -521,9 +822,19 @@ func getMetadataInTxn(txn *badger.Txn, instanceHash string) (*CacheMetadata, err
 // calculateUsageDelta returns the byte-level usage increase for newBitCount
 // newly-enabled blocks. Every full block contributes BlockDataSize bytes;
 // the last block of the object may be smaller.
+//
+// When ContentLength is unknown (<= 0), each block is treated as full-sized.
+// For chunked (unknown-size) downloads, BlockWriter.Close sets ContentLength
+// before marking the final block so that the last partial block is correctly
+// sized.
 func calculateUsageDelta(meta *CacheMetadata, newBlocks *roaring.Bitmap, newBitCount uint64) int64 {
-	if meta.ContentLength <= 0 || newBitCount == 0 {
+	if newBitCount == 0 {
 		return 0
+	}
+
+	if meta.ContentLength <= 0 {
+		// Unknown content length: treat every block as full-sized.
+		return int64(newBitCount) * int64(BlockDataSize)
 	}
 
 	totalBlocks := CalculateBlockCount(meta.ContentLength)
@@ -547,7 +858,7 @@ func calculateUsageDelta(meta *CacheMetadata, newBlocks *roaring.Bitmap, newBitC
 }
 
 // addUsageInTxn performs the usage counter merge within an existing transaction
-func addUsageInTxn(txn *badger.Txn, storageID uint8, namespaceID uint32, delta int64) error {
+func addUsageInTxn(txn *badger.Txn, storageID StorageID, namespaceID NamespaceID, delta int64) error {
 	key := UsageKey(storageID, namespaceID)
 
 	var currentUsage int64
@@ -578,37 +889,8 @@ func addUsageInTxn(txn *badger.Txn, storageID uint8, namespaceID uint32, delta i
 
 // StorageUsageKey combines storage ID and namespace ID for usage tracking
 type StorageUsageKey struct {
-	StorageID   uint8
-	NamespaceID uint32
-}
-
-// MergeUpdate performs multiple merge operations atomically in a single transaction.
-// This is the "fire and forget" API for concurrent downloads as described in the design doc.
-// Operations:
-//   - bitmapMerges: map of instanceHash -> bitmap data to OR-merge into block state
-//   - usageDeltas: map of StorageUsageKey -> bytes to add to usage counter
-func (cdb *CacheDB) MergeUpdate(bitmapMerges map[string][]byte, usageDeltas map[StorageUsageKey]int64) error {
-	if len(bitmapMerges) == 0 && len(usageDeltas) == 0 {
-		return nil
-	}
-
-	return cdb.db.Update(func(txn *badger.Txn) error {
-		// Merge all bitmap updates
-		for instanceHash, newData := range bitmapMerges {
-			if _, err := mergeBlockStateInTxn(txn, instanceHash, newData); err != nil {
-				return errors.Wrapf(err, "failed to merge bitmap for %s", instanceHash)
-			}
-		}
-
-		// Merge all usage counter updates
-		for key, delta := range usageDeltas {
-			if err := addUsageInTxn(txn, key.StorageID, key.NamespaceID, delta); err != nil {
-				return errors.Wrapf(err, "failed to update usage for storage %d namespace %d", key.StorageID, key.NamespaceID)
-			}
-		}
-
-		return nil
-	})
+	StorageID   StorageID
+	NamespaceID NamespaceID
 }
 
 // MarkBlocksDownloaded marks specific blocks as downloaded and atomically
@@ -616,16 +898,16 @@ func (cdb *CacheDB) MergeUpdate(bitmapMerges map[string][]byte, usageDeltas map[
 // Usage tracking requires metadata to be set for the instanceHash;
 // if metadata is not yet available, the bitmap is still updated but
 // usage tracking is skipped.
-func (cdb *CacheDB) MarkBlocksDownloaded(instanceHash string, startBlock, endBlock uint32) error {
+func (cdb *CacheDB) MarkBlocksDownloaded(instanceHash InstanceHash, startBlock, endBlock uint32, storageID StorageID, namespaceID NamespaceID, contentLength int64) error {
 	newBlocks := roaring.New()
 	newBlocks.AddRange(uint64(startBlock), uint64(endBlock)+1)
-	return cdb.MergeBlockStateWithUsage(instanceHash, newBlocks)
+	return cdb.MergeBlockStateWithUsage(instanceHash, newBlocks, storageID, namespaceID, contentLength)
 }
 
 // ClearBlocks removes the specified blocks from the downloaded bitmap so they
 // will be re-fetched on the next read.  This is used during auto-repair when
 // corruption is detected.
-func (cdb *CacheDB) ClearBlocks(instanceHash string, blocks []uint32) error {
+func (cdb *CacheDB) ClearBlocks(instanceHash InstanceHash, blocks []uint32) error {
 	if len(blocks) == 0 {
 		return nil
 	}
@@ -659,7 +941,7 @@ func (cdb *CacheDB) ClearBlocks(instanceHash string, blocks []uint32) error {
 }
 
 // IsBlockDownloaded checks if a specific block has been downloaded
-func (cdb *CacheDB) IsBlockDownloaded(instanceHash string, blockNum uint32) (bool, error) {
+func (cdb *CacheDB) IsBlockDownloaded(instanceHash InstanceHash, blockNum uint32) (bool, error) {
 	bitmap, err := cdb.GetBlockState(instanceHash)
 	if err != nil {
 		return false, err
@@ -668,7 +950,7 @@ func (cdb *CacheDB) IsBlockDownloaded(instanceHash string, blockNum uint32) (boo
 }
 
 // GetDownloadedBlockCount returns the number of downloaded blocks
-func (cdb *CacheDB) GetDownloadedBlockCount(instanceHash string) (uint64, error) {
+func (cdb *CacheDB) GetDownloadedBlockCount(instanceHash InstanceHash) (uint64, error) {
 	bitmap, err := cdb.GetBlockState(instanceHash)
 	if err != nil {
 		return 0, err
@@ -677,7 +959,7 @@ func (cdb *CacheDB) GetDownloadedBlockCount(instanceHash string) (uint64, error)
 }
 
 // DeleteBlockState removes block state for a file
-func (cdb *CacheDB) DeleteBlockState(instanceHash string) error {
+func (cdb *CacheDB) DeleteBlockState(instanceHash InstanceHash) error {
 	return cdb.db.Update(func(txn *badger.Txn) error {
 		return txn.Delete(StateKey(instanceHash))
 	})
@@ -686,7 +968,7 @@ func (cdb *CacheDB) DeleteBlockState(instanceHash string) error {
 // --- Inline Data Operations ---
 
 // GetInlineData retrieves encrypted inline data for a small file
-func (cdb *CacheDB) GetInlineData(instanceHash string) ([]byte, error) {
+func (cdb *CacheDB) GetInlineData(instanceHash InstanceHash) ([]byte, error) {
 	var data []byte
 
 	err := cdb.db.View(func(txn *badger.Txn) error {
@@ -714,7 +996,7 @@ func (cdb *CacheDB) GetInlineData(instanceHash string) ([]byte, error) {
 
 // SetInlineData stores encrypted inline data for a small file
 // Also updates usage statistics for the inline storage namespace
-func (cdb *CacheDB) SetInlineData(instanceHash string, encryptedData []byte) error {
+func (cdb *CacheDB) SetInlineData(instanceHash InstanceHash, encryptedData []byte) error {
 	return cdb.db.Update(func(txn *badger.Txn) error {
 		// Check if inline data already exists to avoid double-counting
 		var oldSize int64
@@ -763,7 +1045,7 @@ func (cdb *CacheDB) SetInlineData(instanceHash string, encryptedData []byte) err
 
 // DeleteInlineData removes inline data for a file
 // Also decreases usage statistics for the inline storage namespace
-func (cdb *CacheDB) DeleteInlineData(instanceHash string) error {
+func (cdb *CacheDB) DeleteInlineData(instanceHash InstanceHash) error {
 	return cdb.db.Update(func(txn *badger.Txn) error {
 		// Get the size of the data being deleted
 		var dataSize int64
@@ -814,7 +1096,7 @@ func (cdb *CacheDB) DeleteInlineData(instanceHash string) error {
 // UpdateLRU updates the LRU access time for a file
 // Uses debouncing: only updates if last access was more than debounceTime ago
 // This is optimized to avoid iteration by storing the last access time in metadata
-func (cdb *CacheDB) UpdateLRU(instanceHash string, debounceTime time.Duration) error {
+func (cdb *CacheDB) UpdateLRU(instanceHash InstanceHash, debounceTime time.Duration) error {
 	return cdb.db.Update(func(txn *badger.Txn) error {
 		// Get metadata to find prefixID and last access time
 		item, err := txn.Get(MetaKey(instanceHash))
@@ -867,7 +1149,7 @@ func (cdb *CacheDB) UpdateLRU(instanceHash string, debounceTime time.Duration) e
 // --- Usage Counter Operations ---
 
 // GetUsage retrieves the total bytes used by a storage+namespace combination
-func (cdb *CacheDB) GetUsage(storageID uint8, namespaceID uint32) (int64, error) {
+func (cdb *CacheDB) GetUsage(storageID StorageID, namespaceID NamespaceID) (int64, error) {
 	var usage int64
 
 	err := cdb.db.View(func(txn *badger.Txn) error {
@@ -895,27 +1177,19 @@ func (cdb *CacheDB) GetUsage(storageID uint8, namespaceID uint32) (int64, error)
 	return usage, nil
 }
 
-// AddUsage atomically adds to the usage counter for a storage+namespace combination
-// Uses the shared addUsageInTxn helper for consistency with MergeUpdate
-func (cdb *CacheDB) AddUsage(storageID uint8, namespaceID uint32, delta int64) error {
-	return cdb.db.Update(func(txn *badger.Txn) error {
-		return addUsageInTxn(txn, storageID, namespaceID, delta)
-	})
-}
-
 // GetAllUsage returns usage for all storage+namespace combinations
 func (cdb *CacheDB) GetAllUsage() (map[StorageUsageKey]int64, error) {
 	return cdb.getUsageByPrefix([]byte(PrefixUsage))
 }
 
 // GetDirUsage returns usage for all namespaces within a single storage directory.
-func (cdb *CacheDB) GetDirUsage(storageID uint8) (map[uint32]int64, error) {
+func (cdb *CacheDB) GetDirUsage(storageID StorageID) (map[NamespaceID]int64, error) {
 	prefix := []byte(fmt.Sprintf("%s%d:", PrefixUsage, storageID))
 	full, err := cdb.getUsageByPrefix(prefix)
 	if err != nil {
 		return nil, err
 	}
-	result := make(map[uint32]int64, len(full))
+	result := make(map[NamespaceID]int64, len(full))
 	for key, usage := range full {
 		result[key.NamespaceID] = usage
 	}
@@ -959,6 +1233,96 @@ func (cdb *CacheDB) getUsageByPrefix(prefix []byte) (map[StorageUsageKey]int64, 
 	return usage, err
 }
 
+// SetUsage sets the absolute usage counter for a (storageID, namespaceID)
+// pair.  It overwrites the existing value (in contrast to addUsageInTxn which
+// adds a delta).
+func (cdb *CacheDB) SetUsage(storageID StorageID, namespaceID NamespaceID, value int64) error {
+	return cdb.db.Update(func(txn *badger.Txn) error {
+		key := UsageKey(storageID, namespaceID)
+		data := make([]byte, 8)
+		binary.LittleEndian.PutUint64(data, uint64(value))
+		return txn.Set(key, data)
+	})
+}
+
+// ComputeActualUsage performs a full scan of the metadata table to compute
+// the real byte-level usage per (StorageID, NamespaceID).
+//
+// Completed objects contribute their full ContentLength.  In-progress
+// objects contribute the bytes implied by their block bitmap.
+//
+// This is an expensive read-only operation.  The consistency checker
+// accumulates usage during its metadata scan instead of calling this;
+// it is retained for ad-hoc diagnostics and tests.
+func (cdb *CacheDB) ComputeActualUsage() (map[StorageUsageKey]int64, error) {
+	actual := make(map[StorageUsageKey]int64)
+
+	err := cdb.db.View(func(txn *badger.Txn) error {
+		metaPrefix := []byte(PrefixMeta)
+		opts := badger.DefaultIteratorOptions
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Seek(metaPrefix); it.ValidForPrefix(metaPrefix); it.Next() {
+			item := it.Item()
+			metaKey := item.Key()
+			instanceHash := InstanceHash(metaKey[len(PrefixMeta):])
+
+			// Decode metadata to get StorageID, NamespaceID, ContentLength.
+			var meta CacheMetadata
+			err := item.Value(func(val []byte) error {
+				return msgpack.Unmarshal(val, &meta)
+			})
+			if err != nil {
+				log.Warnf("ComputeActualUsage: failed to unmarshal metadata for %s: %v", instanceHash, err)
+				continue
+			}
+
+			key := StorageUsageKey{StorageID: meta.StorageID, NamespaceID: meta.NamespaceID}
+
+			// Completed objects: usage == ContentLength (bitmap is deleted on completion).
+			if !meta.Completed.IsZero() {
+				if meta.ContentLength > 0 {
+					actual[key] += meta.ContentLength
+				}
+				continue
+			}
+
+			// In-progress: compute from the block bitmap.
+			stateItem, err := txn.Get(StateKey(instanceHash))
+			if err != nil {
+				if errors.Is(err, badger.ErrKeyNotFound) {
+					continue // No blocks downloaded — contributes 0 bytes
+				}
+				return errors.Wrapf(err, "failed to read block state for %s", instanceHash)
+			}
+
+			var objectUsage int64
+			err = stateItem.Value(func(val []byte) error {
+				bm := roaring.New()
+				if _, err := bm.FromBuffer(val); err != nil {
+					return errors.Wrapf(err, "failed to deserialize bitmap for %s", instanceHash)
+				}
+				cardinality := bm.GetCardinality()
+				if cardinality == 0 {
+					return nil
+				}
+				objectUsage = calculateUsageDelta(&meta, bm, cardinality)
+				return nil
+			})
+			if err != nil {
+				log.Warnf("ComputeActualUsage: %v", err)
+				continue
+			}
+
+			actual[key] += objectUsage
+		}
+		return nil
+	})
+
+	return actual, err
+}
+
 // --- Bulk Operations ---
 
 // deleteObjectInTxn removes all DB keys for a cached object within an
@@ -966,7 +1330,10 @@ func (cdb *CacheDB) getUsageByPrefix(prefix []byte) (map[StorageUsageKey]int64, 
 // the caller can decide what to do with filesystem files and usage
 // counters.  The caller is responsible for usage adjustments — this
 // function does NOT modify usage counters.
-func deleteObjectInTxn(txn *badger.Txn, instanceHash string) (*CacheMetadata, error) {
+//
+// salt is required to recompute the ObjectHash from SourceURL for
+// ETag-table cleanup.
+func deleteObjectInTxn(txn *badger.Txn, salt []byte, instanceHash InstanceHash) (*CacheMetadata, error) {
 	var meta CacheMetadata
 	var hasMetadata bool
 
@@ -992,9 +1359,12 @@ func deleteObjectInTxn(txn *badger.Txn, instanceHash string) (*CacheMetadata, er
 		}
 	}
 
-	// Clean up ETag table if this was the latest version
-	if hasMetadata && meta.ObjectHash != "" {
-		etagItem, err := txn.Get(ETagKey(meta.ObjectHash))
+	// Clean up ETag table if this was the latest version.
+	// ObjectHash is derived from SourceURL + salt rather than stored
+	// redundantly in metadata.
+	if hasMetadata && meta.SourceURL != "" {
+		objectHash := ComputeObjectHash(salt, meta.SourceURL)
+		etagItem, err := txn.Get(ETagKey(objectHash))
 		if err == nil {
 			var currentETag string
 			err = etagItem.Value(func(val []byte) error {
@@ -1002,8 +1372,8 @@ func deleteObjectInTxn(txn *badger.Txn, instanceHash string) (*CacheMetadata, er
 				return nil
 			})
 			if err == nil && currentETag == meta.ETag {
-				if err := txn.Delete(ETagKey(meta.ObjectHash)); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
-					log.Warnf("Failed to delete ETag entry for %s: %v", meta.ObjectHash, err)
+				if err := txn.Delete(ETagKey(objectHash)); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+					log.Warnf("Failed to delete ETag entry for %s: %v", objectHash, err)
 				}
 			}
 		}
@@ -1039,9 +1409,9 @@ func deleteObjectInTxn(txn *badger.Txn, instanceHash string) (*CacheMetadata, er
 // Uses metadata to compute exact LRU key for efficient deletion.
 // Also cleans up ETag table, purge-first marker, and adjusts usage
 // counters — all within a single transaction.
-func (cdb *CacheDB) DeleteObject(instanceHash string) error {
+func (cdb *CacheDB) DeleteObject(instanceHash InstanceHash) error {
 	return cdb.db.Update(func(txn *badger.Txn) error {
-		meta, err := deleteObjectInTxn(txn, instanceHash)
+		meta, err := deleteObjectInTxn(txn, cdb.salt, instanceHash)
 		if err != nil {
 			return err
 		}
@@ -1058,10 +1428,10 @@ func (cdb *CacheDB) DeleteObject(instanceHash string) error {
 // evictedObject holds the information needed to clean up the filesystem
 // after the DB transaction commits.
 type evictedObject struct {
-	instanceHash string
-	storageID    uint8
+	instanceHash InstanceHash
+	storageID    StorageID
 	contentLen   int64
-	namespaceID  uint32
+	namespaceID  NamespaceID
 }
 
 // EvictByLRU evicts objects from a storage+namespace combination, draining
@@ -1073,7 +1443,7 @@ type evictedObject struct {
 // either limit means "no limit on that dimension".  The method is allowed
 // to go one object over the byte threshold so that progress is always
 // made even when only large objects remain.
-func (cdb *CacheDB) EvictByLRU(storageID uint8, namespaceID uint32, maxObjects int, maxBytes int64) ([]evictedObject, error) {
+func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, maxObjects int, maxBytes int64) ([]evictedObject, error) {
 	var evicted []evictedObject
 
 	err := cdb.db.Update(func(txn *badger.Txn) error {
@@ -1092,8 +1462,8 @@ func (cdb *CacheDB) EvictByLRU(storageID uint8, namespaceID uint32, maxObjects i
 		}
 
 		// --- helper: delete one object by hash, record results ---
-		evictOne := func(hash string) {
-			meta, err := deleteObjectInTxn(txn, hash)
+		evictOne := func(hash InstanceHash) {
+			meta, err := deleteObjectInTxn(txn, cdb.salt, hash)
 			if err != nil {
 				log.Warnf("Failed to delete object %s during eviction: %v", hash, err)
 				return
@@ -1128,7 +1498,7 @@ func (cdb *CacheDB) EvictByLRU(storageID uint8, namespaceID uint32, maxObjects i
 					break
 				}
 				keyStr := string(it.Item().Key())
-				hash := keyStr[len(PrefixPurgeFirst):]
+				hash := InstanceHash(keyStr[len(PrefixPurgeFirst):])
 				if hash == "" {
 					continue
 				}
@@ -1190,35 +1560,6 @@ func (cdb *CacheDB) EvictByLRU(storageID uint8, namespaceID uint32, maxObjects i
 	return evicted, err
 }
 
-// --- Transaction Support ---
-
-// Transaction represents a database transaction
-type Transaction struct {
-	txn *badger.Txn
-	cdb *CacheDB
-}
-
-// Begin starts a new transaction
-func (cdb *CacheDB) Begin(readOnly bool) *Transaction {
-	var txn *badger.Txn
-	if readOnly {
-		txn = cdb.db.NewTransaction(false)
-	} else {
-		txn = cdb.db.NewTransaction(true)
-	}
-	return &Transaction{txn: txn, cdb: cdb}
-}
-
-// Commit commits the transaction
-func (t *Transaction) Commit() error {
-	return t.txn.Commit()
-}
-
-// Discard discards the transaction
-func (t *Transaction) Discard() {
-	t.txn.Discard()
-}
-
 // badgerLogger adapts Pelican's logrus to BadgerDB's logger interface
 type badgerLogger struct{}
 
@@ -1242,12 +1583,12 @@ func (l *badgerLogger) Debugf(format string, args ...interface{}) {
 var _ badger.Logger = (*badgerLogger)(nil)
 
 // ScanMetadata iterates over all metadata entries
-func (cdb *CacheDB) ScanMetadata(fn func(instanceHash string, meta *CacheMetadata) error) error {
+func (cdb *CacheDB) ScanMetadata(fn func(instanceHash InstanceHash, meta *CacheMetadata) error) error {
 	return cdb.ScanMetadataFrom("", fn)
 }
 
 // ScanMetadataFrom scans metadata starting from the given instanceHash (empty string = start from beginning)
-func (cdb *CacheDB) ScanMetadataFrom(startKey string, fn func(instanceHash string, meta *CacheMetadata) error) error {
+func (cdb *CacheDB) ScanMetadataFrom(startKey InstanceHash, fn func(instanceHash InstanceHash, meta *CacheMetadata) error) error {
 	return cdb.db.View(func(txn *badger.Txn) error {
 		prefix := []byte(PrefixMeta)
 		opts := badger.DefaultIteratorOptions
@@ -1264,7 +1605,7 @@ func (cdb *CacheDB) ScanMetadataFrom(startKey string, fn func(instanceHash strin
 		for it.Seek(seekKey); it.ValidForPrefix(prefix); it.Next() {
 			item := it.Item()
 			key := string(item.Key())
-			instanceHash := key[len(PrefixMeta):]
+			instanceHash := InstanceHash(key[len(PrefixMeta):])
 
 			// Skip the start key itself if resuming (we already processed it)
 			if startKey != "" && instanceHash == startKey {
@@ -1289,7 +1630,7 @@ func (cdb *CacheDB) ScanMetadataFrom(startKey string, fn func(instanceHash strin
 }
 
 // HasMetadata checks if metadata exists for a file
-func (cdb *CacheDB) HasMetadata(instanceHash string) (bool, error) {
+func (cdb *CacheDB) HasMetadata(instanceHash InstanceHash) (bool, error) {
 	var exists bool
 	err := cdb.db.View(func(txn *badger.Txn) error {
 		_, err := txn.Get(MetaKey(instanceHash))
@@ -1335,48 +1676,10 @@ func (b *Batch) Cancel() {
 	b.wb.Cancel()
 }
 
-// IterateLRUByNamespace iterates over LRU entries for a specific storage+namespace combination
-// Entries are returned in order from oldest to newest
-func (cdb *CacheDB) IterateLRUByNamespace(storageID uint8, namespaceID uint32, fn func(instanceHash string, timestamp time.Time) error) error {
-	return cdb.db.View(func(txn *badger.Txn) error {
-		prefix := []byte(fmt.Sprintf("%s%d:%d:", PrefixLRU, storageID, namespaceID))
-		opts := badger.DefaultIteratorOptions
-		opts.PrefetchValues = false
-
-		it := txn.NewIterator(opts)
-		defer it.Close()
-
-		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-			key := it.Item().Key()
-			sid, nid, ts, hash, err := ParseLRUKey(key)
-			if err != nil {
-				continue
-			}
-			if sid == storageID && nid == namespaceID {
-				if err := fn(hash, ts); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	})
-}
-
-// CreateSnapshot creates a snapshot of the database for backup
-func (cdb *CacheDB) CreateSnapshot(w *bytes.Buffer) error {
-	_, err := cdb.db.Backup(w, 0)
-	return err
-}
-
-// RestoreFromSnapshot restores the database from a snapshot
-func (cdb *CacheDB) RestoreFromSnapshot(r *bytes.Buffer) error {
-	return cdb.db.Load(r, 256)
-}
-
 // --- Purge First Operations ---
 
 // MarkPurgeFirst marks a file hash for priority eviction
-func (cdb *CacheDB) MarkPurgeFirst(instanceHash string) error {
+func (cdb *CacheDB) MarkPurgeFirst(instanceHash InstanceHash) error {
 	return cdb.db.Update(func(txn *badger.Txn) error {
 		// Check if metadata exists first
 		_, err := txn.Get(MetaKey(instanceHash))
@@ -1392,14 +1695,14 @@ func (cdb *CacheDB) MarkPurgeFirst(instanceHash string) error {
 }
 
 // UnmarkPurgeFirst removes the purge first marker for a file hash
-func (cdb *CacheDB) UnmarkPurgeFirst(instanceHash string) error {
+func (cdb *CacheDB) UnmarkPurgeFirst(instanceHash InstanceHash) error {
 	return cdb.db.Update(func(txn *badger.Txn) error {
 		return txn.Delete(PurgeFirstKey(instanceHash))
 	})
 }
 
 // IsPurgeFirst checks if a file hash is marked for priority eviction
-func (cdb *CacheDB) IsPurgeFirst(instanceHash string) (bool, error) {
+func (cdb *CacheDB) IsPurgeFirst(instanceHash InstanceHash) (bool, error) {
 	var isPurgeFirst bool
 	err := cdb.db.View(func(txn *badger.Txn) error {
 		_, err := txn.Get(PurgeFirstKey(instanceHash))
@@ -1420,13 +1723,13 @@ func (cdb *CacheDB) IsPurgeFirst(instanceHash string) (bool, error) {
 // to directory path for IDs currently assigned to live directories —
 // those are excluded.  Returns the storageID and nil on success, or an
 // error if no recyclable ID exists.
-func (cdb *CacheDB) FindRecyclableStorageID(mountedDirs map[uint8]string) (uint8, error) {
+func (cdb *CacheDB) FindRecyclableStorageID(mountedDirs map[StorageID]string) (StorageID, error) {
 	mappings, err := cdb.LoadDiskMappings()
 	if err != nil {
 		return 0, errors.Wrap(err, "failed to load disk mappings")
 	}
 
-	bestID := uint8(0)
+	bestID := StorageID(0)
 	bestUsage := int64(-1)
 	found := false
 
@@ -1470,64 +1773,46 @@ func (cdb *CacheDB) FindRecyclableStorageID(mountedDirs map[uint8]string) (uint8
 //
 // Objects are deleted in batches to avoid exceeding BadgerDB's
 // transaction size limit.
-func (cdb *CacheDB) PurgeStorageID(storageID uint8) error {
+func (cdb *CacheDB) PurgeStorageID(storageID StorageID) error {
 	const batchSize = 500
 
-	// Phase 1: collect instance hashes from LRU entries for this storageID
-	// (the LRU prefix encodes storageID, so this is a fast prefix scan).
-	var hashes []string
 	lruPrefix := []byte(fmt.Sprintf("%s%d:", PrefixLRU, storageID))
+	totalDeleted := 0
 
-	err := cdb.db.View(func(txn *badger.Txn) error {
-		opts := badger.DefaultIteratorOptions
-		opts.PrefetchValues = false
-		it := txn.NewIterator(opts)
-		defer it.Close()
+	// Iterate the LRU in batch-sized chunks.  After deleting a batch the
+	// iterator is invalidated, so we re-seek from the prefix on each pass.
+	// The loop terminates when a scan finds no more keys.
+	for {
+		var hashes []InstanceHash
+		err := cdb.db.View(func(txn *badger.Txn) error {
+			opts := badger.DefaultIteratorOptions
+			opts.PrefetchValues = false
+			it := txn.NewIterator(opts)
+			defer it.Close()
 
-		for it.Seek(lruPrefix); it.ValidForPrefix(lruPrefix); it.Next() {
-			_, _, _, hash, err := ParseLRUKey(it.Item().Key())
-			if err != nil {
-				continue
+			for it.Seek(lruPrefix); it.ValidForPrefix(lruPrefix); it.Next() {
+				_, _, _, hash, err := ParseLRUKey(it.Item().Key())
+				if err != nil {
+					continue
+				}
+				hashes = append(hashes, hash)
+				if len(hashes) >= batchSize {
+					break
+				}
 			}
-			hashes = append(hashes, hash)
+			return nil
+		})
+		if err != nil {
+			return errors.Wrap(err, "failed to scan LRU entries for purge")
 		}
-		return nil
-	})
-	if err != nil {
-		return errors.Wrap(err, "failed to scan LRU entries for purge")
-	}
-
-	// Phase 2: catch any objects on this storageID that lack an LRU
-	// entry (e.g. partially-written objects).
-	hashSet := make(map[string]bool, len(hashes))
-	for _, h := range hashes {
-		hashSet[h] = true
-	}
-
-	err = cdb.ScanMetadata(func(instanceHash string, meta *CacheMetadata) error {
-		if meta.StorageID == storageID && !hashSet[instanceHash] {
-			hashes = append(hashes, instanceHash)
-			hashSet[instanceHash] = true
+		if len(hashes) == 0 {
+			break
 		}
-		return nil
-	})
-	if err != nil {
-		return errors.Wrap(err, "failed to scan metadata for purge stragglers")
-	}
 
-	// Phase 3: delete objects in batches.
-	for i := 0; i < len(hashes); i += batchSize {
-		end := i + batchSize
-		if end > len(hashes) {
-			end = len(hashes)
-		}
-		batch := hashes[i:end]
-
-		err := cdb.db.Update(func(txn *badger.Txn) error {
-			for _, hash := range batch {
-				if _, err := deleteObjectInTxn(txn, hash); err != nil {
+		err = cdb.db.Update(func(txn *badger.Txn) error {
+			for _, hash := range hashes {
+				if _, err := deleteObjectInTxn(txn, cdb.salt, hash); err != nil {
 					log.Warnf("Failed to delete object %s during storage purge: %v", hash, err)
-					// Continue — best-effort cleanup
 				}
 			}
 			return nil
@@ -1535,14 +1820,16 @@ func (cdb *CacheDB) PurgeStorageID(storageID uint8) error {
 		if err != nil {
 			return errors.Wrapf(err, "failed to delete object batch during purge of storage %d", storageID)
 		}
+		totalDeleted += len(hashes)
 	}
 
-	// Phase 4: delete usage counters and disk mapping for this storageID.
-	err = cdb.db.Update(func(txn *badger.Txn) error {
-		// Delete all usage keys for this storageID.
-		usagePrefix := []byte(fmt.Sprintf("%s%d:", PrefixUsage, storageID))
+	// Clean up usage counters, any straggler LRU keys, and the disk mapping.
+	err := cdb.db.Update(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
 		opts.PrefetchValues = false
+
+		// Delete all usage keys for this storageID.
+		usagePrefix := []byte(fmt.Sprintf("%s%d:", PrefixUsage, storageID))
 		it := txn.NewIterator(opts)
 		defer it.Close()
 
@@ -1578,6 +1865,6 @@ func (cdb *CacheDB) PurgeStorageID(storageID uint8) error {
 		return errors.Wrapf(err, "failed to clean up usage/mapping for storage %d", storageID)
 	}
 
-	log.Infof("Purged storage ID %d: deleted %d objects", storageID, len(hashes))
+	log.Infof("Purged storage ID %d: deleted %d objects", storageID, totalDeleted)
 	return nil
 }

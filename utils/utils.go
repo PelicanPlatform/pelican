@@ -260,3 +260,45 @@ func GetTokenFromFile(tokenLocation string) (string, error) {
 	}
 	return tokenStr, nil
 }
+
+// ParseBytes parses a human-readable byte-size string (e.g. "10GB",
+// "512MB", "1T") and returns the number of bytes.  Recognised suffixes
+// (case-insensitive): B, K/KB, M/MB, G/GB, T/TB.  A plain integer is
+// treated as bytes.
+func ParseBytes(sizeStr string) (uint64, error) {
+	sizeStr = strings.TrimSpace(strings.ToUpper(sizeStr))
+
+	// Check longer suffixes before shorter ones to avoid matching "MB" as "B"
+	suffixes := []struct {
+		suffix string
+		mult   uint64
+	}{
+		{"TB", 1024 * 1024 * 1024 * 1024},
+		{"GB", 1024 * 1024 * 1024},
+		{"MB", 1024 * 1024},
+		{"KB", 1024},
+		{"T", 1024 * 1024 * 1024 * 1024},
+		{"G", 1024 * 1024 * 1024},
+		{"M", 1024 * 1024},
+		{"K", 1024},
+		{"B", 1},
+	}
+
+	for _, s := range suffixes {
+		if strings.HasSuffix(sizeStr, s.suffix) {
+			numStr := strings.TrimSuffix(sizeStr, s.suffix)
+			num, err := strconv.ParseFloat(numStr, 64)
+			if err != nil {
+				return 0, err
+			}
+			return uint64(num * float64(s.mult)), nil
+		}
+	}
+
+	// Try parsing as plain number
+	num, err := strconv.ParseUint(sizeStr, 10, 64)
+	if err != nil {
+		return 0, errors.Errorf("invalid size format: %s", sizeStr)
+	}
+	return num, nil
+}

@@ -221,7 +221,7 @@ func TestSlowTransfers(t *testing.T) {
 		writer, err = os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
 		assert.NoError(t, err)
 		defer writer.Close()
-		_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
+		_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
 		finishedChannel <- true
 	}()
 
@@ -311,7 +311,7 @@ func TestStoppedTransfer(t *testing.T) {
 		assert.NoError(t, err)
 		defer writer.Close()
 
-		_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
+		_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
 		finishedChannel <- true
 	}()
 
@@ -360,7 +360,7 @@ func TestConnectionError(t *testing.T) {
 	assert.NoError(t, err)
 	defer writer.Close()
 
-	_, _, _, _, err = downloadHTTP(ctx, nil, nil,
+	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: &url.URL{Host: addr, Scheme: "http"}, Proxy: false},
 		fname, writer, 0, -1, -1, "", "", nil,
 	)
@@ -474,7 +474,7 @@ func TestNetworkResetError(t *testing.T) {
 	defer writer.Close()
 
 	// Call downloadHTTP which should trigger NetworkResetError when connection is reset
-	_, _, _, _, err = downloadHTTP(ctx, nil, nil,
+	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: &url.URL{Scheme: "http", Host: serverAddr}, Proxy: false},
 		fname, writer, 0, -1, -1, "", "", nil,
 	)
@@ -603,7 +603,7 @@ func TestTrailerError(t *testing.T) {
 	assert.NoError(t, err)
 	defer writer.Close()
 
-	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
+	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
 
 	assert.NotNil(t, err)
 	// Check that it's wrapped in a PelicanError
@@ -776,7 +776,7 @@ func TestSortAttempts(t *testing.T) {
 
 	defer cancel()
 
-	token := NewTokenGenerator(nil, nil, config.TokenSharedRead, false)
+	token := newTokenGenerator(nil, nil, config.TokenSharedRead, false)
 	token.SetToken("aaa")
 	size, results := sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt2, attempt3}, token)
 	assert.Equal(t, int64(42), size)
@@ -831,7 +831,7 @@ func TestTimeoutHeaderSetForDownload(t *testing.T) {
 	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
 	assert.NoError(t, err)
 	defer writer.Close()
-	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false},
+	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false},
 		fname, writer, 0, -1, -1, "", "", nil,
 	)
 	assert.NoError(t, err)
@@ -879,7 +879,7 @@ func TestJobIdHeaderSetForDownload(t *testing.T) {
 	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
 	assert.NoError(t, err)
 	defer writer.Close()
-	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false},
+	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false},
 		fname, writer, 0, -1, -1, "", "", nil,
 	)
 	assert.NoError(t, err)
@@ -921,7 +921,7 @@ func TestProjInUserAgent(t *testing.T) {
 	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
 	assert.NoError(t, err)
 	defer writer.Close()
-	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false},
+	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false},
 		fname, writer, 0, -1, -1, "", "test", nil)
 	assert.NoError(t, err)
 
@@ -1527,7 +1527,7 @@ func TestInvalidByteInChunkLengthError(t *testing.T) {
 	defer writer.Close()
 
 	// Call downloadHTTP which should trigger InvalidByteInChunkLengthError
-	_, _, _, _, err = downloadHTTP(ctx, nil, nil,
+	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil,
 		transferAttemptDetails{Url: &url.URL{Scheme: "http", Host: serverAddr}, Proxy: false},
 		fname, writer, 0, -1, -1, "", "", nil,
 	)
@@ -2324,7 +2324,7 @@ func TestHeadRequestWithDownloadToken(t *testing.T) {
 	svrURL, err := url.Parse(svr.URL)
 	require.NoError(t, err)
 
-	token := NewTokenGenerator(nil, nil, config.TokenSharedRead, false)
+	token := newTokenGenerator(nil, nil, config.TokenSharedRead, false)
 	token.SetToken("test-token")
 	transfer := &transferFile{
 		xferType: transferTypeDownload,
@@ -2633,7 +2633,7 @@ func TestInvalidByteInChunkLength(t *testing.T) {
 	require.NoError(t, err)
 	defer writer.Close()
 
-	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
+	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
 	require.Error(t, err)
 	t.Logf("error: %v", err)
 
@@ -2672,7 +2672,7 @@ func TestUnexpectedEOFInTransferStatus(t *testing.T) {
 	require.NoError(t, err)
 	defer writer.Close()
 
-	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
+	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, -1, "", "", nil)
 	require.Error(t, err)
 	t.Logf("error: %v", err)
 	assert.True(t, IsRetryable(err), "Unexpected EOF error should be retryable")
@@ -2807,7 +2807,7 @@ func TestPutOverwrite(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create a token generator with a test token
-		token := NewTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token := newTokenGenerator(nil, nil, config.TokenSharedWrite, false)
 		token.SetToken("test-token")
 
 		// Create a test file to upload
@@ -2867,7 +2867,7 @@ func TestPutOverwrite(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create a token generator with a test token
-		token := NewTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token := newTokenGenerator(nil, nil, config.TokenSharedWrite, false)
 		token.SetToken("test-token")
 
 		// Create a test file to upload
@@ -2928,7 +2928,7 @@ func TestPutOverwrite(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create a token generator with a test token
-		token := NewTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token := newTokenGenerator(nil, nil, config.TokenSharedWrite, false)
 		token.SetToken("test-token")
 
 		// Create a test file to upload
@@ -3032,7 +3032,7 @@ func TestPutOverwrite(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create a token generator with a test token
-		token := NewTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token := newTokenGenerator(nil, nil, config.TokenSharedWrite, false)
 		token.SetToken("test-token")
 
 		// Create a test file to upload
@@ -3166,7 +3166,7 @@ func TestPermissionDeniedError(t *testing.T) {
 	}
 	tj := &TransferJob{
 		remoteURL: remoteURL,
-		token:     NewTokenGenerator(remoteURL, nil, config.TokenSharedRead, false),
+		token:     newTokenGenerator(remoteURL, nil, config.TokenSharedRead, false),
 	}
 	transfer := &transferFile{
 		ctx:       context.Background(),
@@ -4036,4 +4036,312 @@ func TestRecursiveUpload403WithSync(t *testing.T) {
 	for i, result := range results {
 		assert.NoError(t, result.Error, "Result %d should not have error", i)
 	}
+}
+
+// TestDownloadHTTPETag verifies that downloadHTTP correctly extracts the
+// ETag from the HTTP response and returns it to the caller.
+func TestDownloadHTTPETag(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	test_utils.InitClient(t, map[string]any{})
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	expectedETag := `"abc123def456"`
+	body := []byte("Hello, ETag world!")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", expectedETag)
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
+		w.WriteHeader(http.StatusOK)
+		w.Write(body)
+	}))
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	require.NoError(t, err)
+	defer writer.Close()
+
+	downloaded, _, _, _, etag, err := downloadHTTP(ctx, nil, nil,
+		transferAttemptDetails{Url: serverURL, Proxy: false},
+		fname, writer, 0, -1, -1, "", "", nil,
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(len(body)), downloaded)
+	assert.Equal(t, expectedETag, etag, "ETag should be returned from the response")
+
+	// Verify content
+	readBack, err := os.ReadFile(fname)
+	require.NoError(t, err)
+	assert.Equal(t, body, readBack)
+}
+
+// TestDownloadHTTPETagMissing verifies that when the server does not
+// provide an ETag header, downloadHTTP returns an empty string.
+func TestDownloadHTTPETagMissing(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	test_utils.InitClient(t, map[string]any{})
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	body := []byte("No ETag here")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
+		w.WriteHeader(http.StatusOK)
+		w.Write(body)
+	}))
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	require.NoError(t, err)
+	defer writer.Close()
+
+	_, _, _, _, etag, err := downloadHTTP(ctx, nil, nil,
+		transferAttemptDetails{Url: serverURL, Proxy: false},
+		fname, writer, 0, -1, -1, "", "", nil,
+	)
+	assert.NoError(t, err)
+	assert.Empty(t, etag, "ETag should be empty when the server doesn't provide one")
+}
+
+// TestMetadataChannel verifies that downloadHTTP sends TransferMetadata
+// on the provided channel before starting the data transfer.
+func TestMetadataChannel(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	test_utils.InitClient(t, map[string]any{})
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	expectedETag := `"meta-etag-789"`
+	expectedSize := 42
+	body := bytes.Repeat([]byte("x"), expectedSize)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", expectedETag)
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Cache-Control", "max-age=3600")
+		w.Header().Set("Last-Modified", "Thu, 01 Jan 2025 00:00:00 GMT")
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
+		w.WriteHeader(http.StatusOK)
+		w.Write(body)
+	}))
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	require.NoError(t, err)
+	defer writer.Close()
+
+	metadataChan := make(chan TransferMetadata, 1)
+
+	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil,
+		transferAttemptDetails{Url: serverURL, Proxy: false},
+		fname, writer, 0, -1, -1, "", "", metadataChan,
+	)
+	assert.NoError(t, err)
+
+	select {
+	case metadata := <-metadataChan:
+		assert.Equal(t, expectedETag, metadata.ETag, "metadata ETag should match response header")
+		assert.Equal(t, int64(expectedSize), metadata.Size, "metadata Size should match Content-Length")
+		assert.Equal(t, "application/octet-stream", metadata.ContentType)
+		assert.Equal(t, "max-age=3600", metadata.CacheControl)
+		assert.False(t, metadata.LastModified.IsZero(), "Last-Modified should be parsed")
+	default:
+		t.Fatal("expected metadata on channel but none was sent")
+	}
+}
+
+// TestMetadataChannelNil verifies that downloadHTTP does not panic when
+// the metadata channel is nil.
+func TestMetadataChannelNil(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	test_utils.InitClient(t, map[string]any{})
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	body := []byte("no channel")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
+		w.WriteHeader(http.StatusOK)
+		w.Write(body)
+	}))
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	require.NoError(t, err)
+	defer writer.Close()
+
+	_, _, _, _, _, err = downloadHTTP(ctx, nil, nil,
+		transferAttemptDetails{Url: serverURL, Proxy: false},
+		fname, writer, 0, -1, -1, "", "", nil,
+	)
+	assert.NoError(t, err, "downloadHTTP should not panic when metadataChan is nil")
+}
+
+// TestDownloadHTTPByteRange verifies that downloadHTTP correctly requests
+// and receives a byte range from the server.
+func TestDownloadHTTPByteRange(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	test_utils.InitClient(t, map[string]any{})
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	fullBody := []byte("0123456789ABCDEFGHIJ") // 20 bytes
+	rangeEnd := int64(9)                       // bytes 0-9
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rangeHeader := r.Header.Get("Range")
+		if rangeHeader != "" {
+			assert.Equal(t, fmt.Sprintf("bytes=0-%d", rangeEnd), rangeHeader)
+
+			partial := fullBody[:rangeEnd+1]
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(partial)))
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes 0-%d/%d", rangeEnd, len(fullBody)))
+			w.WriteHeader(http.StatusPartialContent)
+			w.Write(partial)
+		} else {
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(fullBody)))
+			w.WriteHeader(http.StatusOK)
+			w.Write(fullBody)
+		}
+	}))
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	require.NoError(t, err)
+	defer writer.Close()
+
+	// bytesSoFar=0, byteRangeEnd=9 → Range: bytes=0-9
+	downloaded, _, _, _, _, err := downloadHTTP(ctx, nil, nil,
+		transferAttemptDetails{Url: serverURL, Proxy: false},
+		fname, writer, 0, rangeEnd, -1, "", "", nil,
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, rangeEnd+1, downloaded, "downloaded bytes should equal the range size")
+
+	readBack, err := os.ReadFile(fname)
+	require.NoError(t, err)
+	assert.Equal(t, fullBody[:rangeEnd+1], readBack, "downloaded content should match the requested range")
+}
+
+// TestDownloadHTTPResume verifies that downloadHTTP sends a Range header
+// when bytesSoFar > 0 for resume functionality.
+func TestDownloadHTTPResume(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	test_utils.InitClient(t, map[string]any{})
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	fullBody := []byte("Hello, resume world! This is a test of resume functionality.")
+	resumeOffset := int64(20)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rangeHeader := r.Header.Get("Range")
+		if rangeHeader != "" {
+			assert.Equal(t, fmt.Sprintf("bytes=%d-", resumeOffset), rangeHeader)
+
+			partial := fullBody[resumeOffset:]
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(partial)))
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", resumeOffset, int64(len(fullBody))-1, len(fullBody)))
+			w.WriteHeader(http.StatusPartialContent)
+			w.Write(partial)
+		} else {
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(fullBody)))
+			w.WriteHeader(http.StatusOK)
+			w.Write(fullBody)
+		}
+	}))
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	fname := filepath.Join(t.TempDir(), "test.txt")
+
+	// Pre-populate the file with the initial bytes that were "already downloaded"
+	err = os.WriteFile(fname, fullBody[:resumeOffset], 0644)
+	require.NoError(t, err)
+
+	// Open for append so downloadHTTP writes after the existing bytes
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_APPEND, 0o644)
+	require.NoError(t, err)
+	defer writer.Close()
+
+	downloaded, _, _, _, _, err := downloadHTTP(ctx, nil, nil,
+		transferAttemptDetails{Url: serverURL, Proxy: false},
+		fname, writer, resumeOffset, -1, -1, "", "", nil,
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(len(fullBody))-resumeOffset, downloaded, "should download remaining bytes after resume offset")
+}
+
+// TestUploadETag verifies that uploadObject captures the ETag from a
+// successful PUT response.
+func TestUploadETag(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	test_utils.InitClient(t, map[string]any{
+		"Client.EnableOverwrites": true,
+	})
+
+	expectedETag := `"upload-etag-xyz"`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PUT" {
+			// Drain the body
+			io.Copy(io.Discard, r.Body)
+			r.Body.Close()
+			w.Header().Set("ETag", expectedETag)
+			w.WriteHeader(http.StatusCreated)
+		} else if r.Method == "HEAD" {
+			// For checksum fetch
+			w.WriteHeader(http.StatusOK)
+		} else if r.Method == "PROPFIND" {
+			// statHttp uses PROPFIND — return 404 to indicate object doesn't exist
+			w.WriteHeader(http.StatusNotFound)
+		} else {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	// Create a temp file to upload
+	tmpDir := t.TempDir()
+	localPath := filepath.Join(tmpDir, "upload.txt")
+	err = os.WriteFile(localPath, []byte("upload content"), 0644)
+	require.NoError(t, err)
+
+	remoteURL, err := url.Parse(server.URL + "/test/upload.txt")
+	require.NoError(t, err)
+
+	job := &TransferJob{
+		uuid:      uuid.New(),
+		project:   "test",
+		syncLevel: SyncNone,
+	}
+	job.ctx = context.Background()
+
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		job:       job,
+		localPath: localPath,
+		remoteURL: remoteURL,
+		attempts:  []transferAttemptDetails{{Url: serverURL, Proxy: false}},
+	}
+
+	result, err := uploadObject(transfer)
+	assert.NoError(t, err)
+	assert.NoError(t, result.Error)
+	assert.Equal(t, expectedETag, result.ETag, "upload should capture ETag from PUT response")
 }

@@ -49,7 +49,7 @@ var persistentCacheConfig string
 
 // getCacheRedirectURL queries the director and extracts the cache redirect URL.
 // Returns the full redirect URL including any API path prefix.
-func getCacheRedirectURL(ctx context.Context, t *testing.T, objectPath string, token string) string {
+func getCacheRedirectURL(ctx context.Context, t testing.TB, objectPath string, token string) string {
 	// Query the director to get the cache location
 	directorURL := fmt.Sprintf("https://%s:%d%s",
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), objectPath)
@@ -281,26 +281,23 @@ func TestPersistentCache_ConditionalRequest(t *testing.T) {
 	etag := resp.Header.Get("ETag")
 	_, _ = io.ReadAll(resp.Body) // Drain body
 
-	// If ETag is present, test conditional request
-	if etag != "" {
-		// Make conditional request with If-None-Match
-		req2, err := http.NewRequestWithContext(ft.Ctx, http.MethodGet, cacheObjectURL, nil)
-		require.NoError(t, err)
-		req2.Header.Set("Authorization", "Bearer "+testToken)
-		req2.Header.Set("If-None-Match", etag)
+	require.NotEmpty(t, etag, "Response should contain an ETag header")
 
-		resp2, err := httpClient.Do(req2)
-		require.NoError(t, err)
-		defer func() {
-			_ = resp2.Body.Close()
-		}()
+	// Make conditional request with If-None-Match
+	req2, err := http.NewRequestWithContext(ft.Ctx, http.MethodGet, cacheObjectURL, nil)
+	require.NoError(t, err)
+	req2.Header.Set("Authorization", "Bearer "+testToken)
+	req2.Header.Set("If-None-Match", etag)
 
-		// Should return 304 Not Modified since content hasn't changed
-		assert.Equal(t, http.StatusNotModified, resp2.StatusCode,
-			"Conditional request with matching ETag should return 304 Not Modified")
-	} else {
-		t.Log("Note: ETag header not present in response, conditional request test skipped")
-	}
+	resp2, err := httpClient.Do(req2)
+	require.NoError(t, err)
+	defer func() {
+		_ = resp2.Body.Close()
+	}()
+
+	// Should return 304 Not Modified since content hasn't changed
+	assert.Equal(t, http.StatusNotModified, resp2.StatusCode,
+		"Conditional request with matching ETag should return 304 Not Modified")
 }
 
 // TestPersistentCache_RangeRequest tests that the cache handles Range requests correctly.

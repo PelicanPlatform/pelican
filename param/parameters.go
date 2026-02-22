@@ -850,8 +850,6 @@ func (slP StringSliceParam) GetStringSlice() []string {
 			return config.Issuer.GroupRequirements
 		case "Issuer.RedirectUris":
 			return config.Issuer.RedirectUris
-		case "LocalCache.StorageDirs":
-			return config.LocalCache.StorageDirs
 		case "Monitoring.AggregatePrefixes":
 			return config.Monitoring.AggregatePrefixes
 		case "OIDC.Scopes":
@@ -1330,6 +1328,12 @@ func (dP DurationParam) GetEnvVarName() string {
 
 func (oP ObjectParam) Unmarshal(rawVal any) error {
 	return viper.UnmarshalKey(oP.name, rawVal)
+}
+
+// GetRaw returns the raw value from the configuration store without
+// any type coercion.  Returns nil when the key is unset.
+func (oP ObjectParam) GetRaw() interface{} {
+	return viper.Get(oP.name)
 }
 
 func (oP ObjectParam) GetName() string {
@@ -1897,7 +1901,6 @@ var (
 	Director_OriginResponseHostnames = StringSliceParam{"Director.OriginResponseHostnames"}
 	Issuer_GroupRequirements = StringSliceParam{"Issuer.GroupRequirements"}
 	Issuer_RedirectUris = StringSliceParam{"Issuer.RedirectUris"}
-	LocalCache_StorageDirs = StringSliceParam{"LocalCache.StorageDirs"}
 	Monitoring_AggregatePrefixes = StringSliceParam{"Monitoring.AggregatePrefixes"}
 	OIDC_Scopes = StringSliceParam{"OIDC.Scopes"}
 	Origin_DefaultChecksumTypes = StringSliceParam{"Origin.DefaultChecksumTypes"}
@@ -2098,6 +2101,7 @@ var (
 	GeoIPOverrides = ObjectParam{"GeoIPOverrides"}
 	Issuer_AuthorizationTemplates = ObjectParam{"Issuer.AuthorizationTemplates"}
 	Issuer_OIDCAuthenticationRequirements = ObjectParam{"Issuer.OIDCAuthenticationRequirements"}
+	LocalCache_StorageDirs = ObjectParam{"LocalCache.StorageDirs"}
 	Lotman_PolicyDefinitions = ObjectParam{"Lotman.PolicyDefinitions"}
 	Origin_Exports = ObjectParam{"Origin.Exports"}
 	Registry_CustomRegistrationFields = ObjectParam{"Registry.CustomRegistrationFields"}

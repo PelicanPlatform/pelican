@@ -1685,13 +1685,41 @@ components: ["localcache"]
 ---
 name: LocalCache.StorageDirs
 description: |+
-  A list of directory paths to use for persistent cache object storage.
-  Each directory may reside on a different filesystem or disk.
-  When not set, the cache stores objects under the LocalCache.DataLocation directory.
+  A list of storage directory configurations for persistent cache object storage.
+  Each entry describes a directory path and its per-directory size and eviction settings.
+  When not set, the cache stores objects under the LocalCache.DataLocation directory
+  using global size and watermark settings.
   A UUID file is placed in each directory so that storage IDs remain stable even if
   paths are reordered or changed.
-type: stringSlice
-default: []
+
+  Each entry is an object with the following keys:
+
+  - **Path** (string, required): absolute path to the storage directory.
+  - **MaxSize** (string, optional): maximum size for this directory (e.g. "100GB").
+    When omitted or "0", auto-detected from the filesystem.
+  - **HighWaterMarkPercentage** (int, optional): eviction trigger threshold as a
+    percentage of MaxSize.
+    When omitted or 0, the global LocalCache.HighWaterMarkPercentage is used.
+  - **LowWaterMarkPercentage** (int, optional): eviction target threshold as a
+    percentage of MaxSize.
+    When omitted or 0, the global LocalCache.LowWaterMarkPercentage is used.
+
+  Example YAML:
+  ```yaml
+  LocalCache:
+    StorageDirs:
+      - Path: /mnt/nvme/cache
+        MaxSize: 500GB
+        HighWaterMarkPercentage: 95
+        LowWaterMarkPercentage: 85
+      - Path: /mnt/hdd/cache
+        MaxSize: 2TB
+  ```
+
+  For backward compatibility, a plain list of strings (directory paths) is also
+  accepted and treated as entries with only Path set.
+type: object
+default: none
 components: ["localcache"]
 ---
 ############################

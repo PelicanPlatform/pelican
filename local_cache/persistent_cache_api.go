@@ -46,6 +46,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 // isConnectionError checks if an error is a connection error (reset, refused, etc.)
@@ -204,10 +205,31 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(authzHeader, "Bearer ") {
 		bearerToken = authzHeader[7:] // len("Bearer ") == 7
 	}
+	// Fall back to the ?authz query parameter. The director's redirect
+	// passes the client token this way so it survives the 307 redirect
+	// (browsers and many HTTP clients strip the Authorization header on
+	// cross-origin redirects).
+	if bearerToken == "" {
+		if authzQuery := r.URL.Query().Get("authz"); authzQuery != "" {
+			bearerToken = strings.TrimPrefix(authzQuery, "Bearer ")
+		}
+	}
 	objectPath := path.Clean(r.URL.Path)
 
-	// Handle PROPFIND requests (directory listings) - proxy to origin
+	// Handle PROPFIND requests.
+	// Depth: 1 → always proxy to origin (directory listing).
+	// Depth: 0 (or unset) → if the object is cached, synthesize the
+	// response from local metadata instead of hitting the origin.
 	if r.Method == "PROPFIND" {
+		depth := r.Header.Get("Depth")
+		if depth != "1" {
+			// Try to answer from cache metadata (implies it's a file,
+			// not a directory, because only files get cached).
+			if served := pc.servePropfindFromCache(w, r, objectPath, bearerToken); served {
+				return
+			}
+		}
+		// Fall through to proxy if the object is not cached or Depth is 1.
 		pc.proxyPropfind(w, r, objectPath, bearerToken)
 		return
 	}
@@ -247,7 +269,13 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		if ht, parseErr := time.ParseDuration(timeoutStr); parseErr != nil {
 			log.Debugln("Invalid X-Pelican-Timeout value:", timeoutStr)
 		} else {
-			headerTimeout = ht
+			// Reduce the client's timeout to leave headroom for response
+			// framing.  The cache must finish before the client gives up.
+			if ht < 500*time.Millisecond {
+				headerTimeout = ht / 2
+			} else {
+				headerTimeout = ht - 500*time.Millisecond
+			}
 		}
 	}
 	log.Debugln("Setting header timeout:", timeoutStr)
@@ -325,19 +353,51 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		_ = size
 	}
 
-	// Create request context with optional timeout (GET only from here)
-	reqCtx := context.Background()
-	if headerTimeout > 0 {
-		var cancelReqFunc context.CancelFunc
-		reqCtx, cancelReqFunc = context.WithTimeout(reqCtx, headerTimeout)
-		defer cancelReqFunc()
-	}
-
 	// Get seekable reader for the object (handles on-demand fetching).
 	// When the client sent a Range header, tell the cache so that on a
 	// miss it can use a lightweight HEAD + on-demand block fetch instead
 	// of a full sequential download from the origin.
-	reader, meta, getErr := pc.GetSeekableReader(reqCtx, objectPath, bearerToken, r.Header.Get("Range") != "")
+	//
+	// The timeout is NOT placed on the context given to GetSeekableReader
+	// because a context cancellation would abort the background download
+	// to the origin.  Instead, we race GetSeekableReader against a timer
+	// so only the *waiter* gives up while the download continues.
+	type readerResult struct {
+		reader *SeekableReader
+		meta   *CacheMetadata
+		err    error
+	}
+	resCh := make(chan readerResult, 1)
+	go func() {
+		rd, md, err := pc.GetSeekableReader(context.Background(), objectPath, bearerToken, r.Header.Get("Range") != "")
+		resCh <- readerResult{rd, md, err}
+	}()
+
+	var reader *SeekableReader
+	var meta *CacheMetadata
+	var getErr error
+	if headerTimeout > 0 {
+		timer := time.NewTimer(headerTimeout)
+		defer timer.Stop()
+		select {
+		case res := <-resCh:
+			reader, meta, getErr = res.reader, res.meta, res.err
+		case <-timer.C:
+			// Client timeout expired.  The download continues in the
+			// background; close the reader if/when it eventually arrives.
+			go func() {
+				res := <-resCh
+				if res.reader != nil {
+					res.reader.Close()
+				}
+			}()
+			w.WriteHeader(http.StatusGatewayTimeout)
+			return
+		}
+	} else {
+		res := <-resCh
+		reader, meta, getErr = res.reader, res.meta, res.err
+	}
 	if getErr != nil {
 		handleError(w, getErr, sendTrailer)
 		return
@@ -452,11 +512,62 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// servePropfindFromCache synthesizes a WebDAV multistatus response from
+// cached metadata.  It returns true if the response was served, false if
+// the object is not in the cache and the caller should fall through to
+// proxyPropfind.
+func (pc *PersistentCache) servePropfindFromCache(w http.ResponseWriter, r *http.Request, objectPath string, bearerToken string) bool {
+	meta, err := pc.GetMetadata(objectPath, bearerToken)
+	if err != nil || meta == nil {
+		// Not cached (or auth failure) — let the caller proxy.
+		return false
+	}
+
+	// Format Last-Modified per RFC 7232 §2.2 / HTTP-date.
+	var lastMod string
+	if !meta.LastModified.IsZero() {
+		lastMod = meta.LastModified.UTC().Format(http.TimeFormat)
+	}
+
+	// Build the multistatus XML body.
+	var buf bytes.Buffer
+	buf.WriteString(`<?xml version="1.0" encoding="utf-8"?>`)
+	buf.WriteString("\n")
+	buf.WriteString(`<D:multistatus xmlns:D="DAV:">`)
+	buf.WriteString("\n  <D:response>\n    <D:href>")
+	buf.WriteString(objectPath)
+	buf.WriteString("</D:href>\n    <D:propstat>\n      <D:prop>\n")
+	buf.WriteString("        <D:resourcetype/>\n")
+	if meta.ContentLength > 0 {
+		fmt.Fprintf(&buf, "        <D:getcontentlength>%d</D:getcontentlength>\n", meta.ContentLength)
+	}
+	if lastMod != "" {
+		fmt.Fprintf(&buf, "        <D:getlastmodified>%s</D:getlastmodified>\n", lastMod)
+	}
+	if meta.ContentType != "" {
+		fmt.Fprintf(&buf, "        <D:getcontenttype>%s</D:getcontenttype>\n", meta.ContentType)
+	}
+	if meta.ETag != "" {
+		fmt.Fprintf(&buf, "        <D:getetag>%s</D:getetag>\n", meta.ETag)
+	}
+	buf.WriteString("      </D:prop>\n")
+	buf.WriteString("      <D:status>HTTP/1.1 200 OK</D:status>\n")
+	buf.WriteString("    </D:propstat>\n  </D:response>\n</D:multistatus>\n")
+
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
+	w.WriteHeader(http.StatusMultiStatus)
+	if _, err := w.Write(buf.Bytes()); err != nil {
+		log.Errorln("Failed to write PROPFIND response:", err)
+	}
+	return true
+}
+
 // proxyPropfind forwards a PROPFIND request to the origin server.
 // Directory listings are NOT cached; they always go to the origin.
 func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request, objectPath string, bearerToken string) {
 	// Check authorization
-	if !pc.ac.authorize("storage.read", objectPath, bearerToken) {
+	if !pc.ac.authorize(token_scopes.Wlcg_Storage_Read, objectPath, bearerToken) {
 		w.WriteHeader(http.StatusForbidden)
 		if _, err := w.Write([]byte("Authorization Denied")); err != nil {
 			log.Errorln("Failed to write authorization denied to client")
@@ -556,6 +667,18 @@ func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request,
 // proxyWrite forwards a PUT or DELETE request to the origin server (write-through).
 // On success, any locally-cached copy of the object is invalidated so that
 // subsequent GETs retrieve the new version from the origin.
+//
+// NOTE: this function duplicates boilerplate that the client transfer engine
+// (client.DoStat, client.DoPut, etc.) already handles: director discovery,
+// 307 redirect following with auth header preservation, federation-token
+// injection, and connection-error classification.  Switching to the transfer
+// engine would eliminate ~80 lines of manual HTTP plumbing here and in
+// proxyPropfind.  The trade-off is that proxyWrite needs cache-specific
+// behaviour the engine doesn't (yet) support: scope-aware authorization
+// (storage.create vs storage.modify), streaming the origin's full response
+// back to the caller (status + headers + body), and post-success cache
+// invalidation with ETag-aware instance management.  Until the engine
+// exposes hooks for those, the manual approach is the pragmatic choice.
 func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, objectPath string, bearerToken string) {
 	// Check authorization — PUT requires storage.create, DELETE requires storage.modify
 	var requiredScope token_scopes.TokenScope
@@ -667,8 +790,11 @@ func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, ob
 
 	// On successful write, invalidate any cached version of this object.
 	// This ensures subsequent GETs fetch the new version from the origin.
+	// If the origin responded with an ETag, only the stale instance is
+	// deleted and the ETag mapping is updated to point to the (future)
+	// new instance; otherwise the entire ETag mapping is removed.
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		pc.invalidateCachedObject(objectPath)
+		pc.invalidateCachedObject(objectPath, resp.Header.Get("ETag"))
 	}
 
 	// Copy response headers
@@ -688,9 +814,14 @@ func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, ob
 // invalidateCachedObject removes any locally-cached version of the given
 // object path.  Called after a successful write-through PUT or DELETE so
 // that subsequent GETs retrieve the new version from the origin.
-func (pc *PersistentCache) invalidateCachedObject(objectPath string) {
+//
+// If newETag is non-empty (origin responded with an ETag after PUT), only
+// the stale instance is deleted and the ETag mapping is updated to point
+// at the new version.  If newETag is empty, the entire ETag mapping is
+// removed so the next GET forces a fresh download.
+func (pc *PersistentCache) invalidateCachedObject(objectPath, newETag string) {
 	pelicanURL := pc.normalizePath(objectPath)
-	objectHash := ComputeObjectHash(pelicanURL)
+	objectHash := pc.db.ObjectHash(pelicanURL)
 
 	// If there's an active download for this object, wait for it to finish
 	// so that the ETag and metadata are committed before we try to delete.
@@ -703,18 +834,38 @@ func (pc *PersistentCache) invalidateCachedObject(objectPath string) {
 	}
 
 	// Look up the latest ETag for this object
-	etag, err := pc.db.GetLatestETag(objectHash)
-	if err != nil || etag == "" {
-		// Not in cache — nothing to invalidate
+	oldETag, err := pc.db.GetLatestETag(objectHash)
+	if err != nil || oldETag == "" {
+		// Not in cache — nothing to invalidate.
+		// If the origin gave us a new ETag, record it so the next GET
+		// knows which instance to look for.
+		if newETag != "" {
+			if err := pc.db.SetLatestETag(objectHash, newETag, time.Now()); err != nil {
+				log.Warnf("Failed to record new ETag for %s: %v", objectPath, err)
+			}
+		}
 		return
 	}
 
-	instanceHash := ComputeInstanceHash(etag, objectHash)
-
+	// Delete the stale instance.
+	instanceHash := pc.db.InstanceHash(oldETag, objectHash)
 	if err := pc.storage.Delete(instanceHash); err != nil {
 		log.Warnf("Failed to invalidate cached object %s: %v", objectPath, err)
 	} else {
 		log.Debugf("Invalidated cached object %s after write-through", objectPath)
+	}
+
+	// Update the ETag mapping: if the origin told us the new ETag, record
+	// it so the next GET skips a conditional request.  Otherwise remove the
+	// mapping entirely so the next GET does a fresh download.
+	if newETag != "" {
+		if err := pc.db.SetLatestETag(objectHash, newETag, time.Now()); err != nil {
+			log.Warnf("Failed to update ETag for %s: %v", objectPath, err)
+		}
+	} else {
+		if err := pc.db.DeleteLatestETag(objectHash); err != nil {
+			log.Warnf("Failed to delete ETag for %s: %v", objectPath, err)
+		}
 	}
 }
 
@@ -780,7 +931,14 @@ func (pc *PersistentCache) LaunchListener(ctx context.Context, egrp *errgroup.Gr
 	}
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
-		pc.serveObject(w, r)
+		switch {
+		case r.URL.Path == "/pelican/api/v1.0/prestage":
+			pc.prestageHandler(w, r)
+		case r.URL.Path == "/pelican/api/v1.0/evict":
+			pc.evictHandler(w, r)
+		default:
+			pc.serveObject(w, r)
+		}
 	}
 
 	srv := http.Server{
@@ -913,7 +1071,7 @@ func (pc *PersistentCache) Purge() error {
 func (pc *PersistentCache) MarkPurgeFirst(objectPath string) error {
 	// Compute object hash from URL
 	pelicanURL := pc.normalizePath(objectPath)
-	objectHash := ComputeObjectHash(pelicanURL)
+	objectHash := pc.db.ObjectHash(pelicanURL)
 
 	// Look up latest ETag for this object
 	etag, err := pc.db.GetLatestETag(objectHash)
@@ -922,7 +1080,7 @@ func (pc *PersistentCache) MarkPurgeFirst(objectPath string) error {
 	}
 
 	// Compute file hash
-	instanceHash := ComputeInstanceHash(etag, objectHash)
+	instanceHash := pc.db.InstanceHash(etag, objectHash)
 
 	// Mark in eviction manager
 	return pc.eviction.MarkPurgeFirst(instanceHash)
@@ -935,10 +1093,11 @@ func (pc *PersistentCache) MarkPurgeFirst(objectPath string) error {
 // Unlike LaunchListener (which creates a Unix socket), this registers handlers on the
 // existing Gin web server, allowing it to serve cache requests on the standard HTTP/HTTPS ports.
 //
-// When the director is enabled (directorEnabled=true), handlers are registered under
-// /api/v1.0/cache/data/*path so the director can distinguish between its routing and the
-// cache's file serving. The director will redirect clients to this API endpoint.
-// When running standalone (directorEnabled=false), handlers are registered at the root path.
+// The /api/v1.0/cache/data/:discovery/*path routes are always registered regardless
+// of whether a director is in use.  When running standalone (directorEnabled=false),
+// a NoRoute fallback is also registered so that bare object paths (without the /api
+// prefix) are served.  The /api namespace is always reserved and never served by the
+// NoRoute fallback.
 func (pc *PersistentCache) RegisterCacheHandlers(engine *gin.Engine, directorEnabled bool) error {
 	log.Info("Registering persistent cache HTTP handlers")
 
@@ -947,62 +1106,67 @@ func (pc *PersistentCache) RegisterCacheHandlers(engine *gin.Engine, directorEna
 		pc.serveObject(c.Writer, c.Request)
 	}
 
-	// Register the handler based on whether director is enabled
-	if directorEnabled {
-		// When director is enabled, register under /api/v1.0/cache/data/:discovery/*path
-		// The :discovery parameter is a URL-encoded federation discovery host:port
-		// This allows the cache to serve multiple federations
-
-		// Helper to extract discovery host and set up context
-		setupDiscoveryContext := func(c *gin.Context) bool {
-			encodedDiscovery := c.Param("discovery")
-			pathParam := c.Param("path")
-			discoveryHost, err := decodeDiscoveryHost(encodedDiscovery)
-			if err != nil {
-				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid discovery host encoding"})
-				return false
-			}
-			// Store discovery host in context for use by handlers
-			c.Set("discoveryHost", discoveryHost)
-			// Set the object path (strip the discovery prefix)
-			c.Request.URL.Path = pathParam
-			return true
+	// Helper to extract discovery host and set up context
+	setupDiscoveryContext := func(c *gin.Context) bool {
+		encodedDiscovery := c.Param("discovery")
+		pathParam := c.Param("path")
+		discoveryHost, err := decodeDiscoveryHost(encodedDiscovery)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid discovery host encoding"})
+			return false
 		}
+		// Store discovery host in context for use by handlers
+		c.Set("discoveryHost", discoveryHost)
+		// Set the object path (strip the discovery prefix)
+		c.Request.URL.Path = pathParam
+		return true
+	}
 
-		group := engine.Group("/api/v1.0/cache/data")
-		group.GET("/:discovery/*path", func(c *gin.Context) {
-			if setupDiscoveryContext(c) {
-				handleCacheRequest(c)
+	// Always register the /api/v1.0/cache/data routes regardless of
+	// director state.  The /api namespace is reserved.
+	group := engine.Group("/api/v1.0/cache/data")
+	group.GET("/:discovery/*path", func(c *gin.Context) {
+		if setupDiscoveryContext(c) {
+			handleCacheRequest(c)
+		}
+	})
+	group.HEAD("/:discovery/*path", func(c *gin.Context) {
+		if setupDiscoveryContext(c) {
+			handleCacheRequest(c)
+		}
+	})
+	// Register PROPFIND for directory listings (passthrough to origin)
+	group.Handle("PROPFIND", "/:discovery/*path", func(c *gin.Context) {
+		if setupDiscoveryContext(c) {
+			handleCacheRequest(c)
+		}
+	})
+	// Register PUT for write-through caching (proxy to origin)
+	group.PUT("/:discovery/*path", func(c *gin.Context) {
+		if setupDiscoveryContext(c) {
+			handleCacheRequest(c)
+		}
+	})
+	// Register DELETE for write-through deletion (proxy to origin)
+	group.DELETE("/:discovery/*path", func(c *gin.Context) {
+		if setupDiscoveryContext(c) {
+			handleCacheRequest(c)
+		}
+	})
+	log.Info("Persistent cache HTTP handlers registered at /api/v1.0/cache/data/:discovery/*path")
+
+	if !directorEnabled {
+		// When running standalone, use NoRoute to catch non-API requests
+		// so bare object paths (e.g. /data/foo) are served.
+		// Never intercept the /api namespace — those routes are handled
+		// by explicit registrations above.
+		engine.NoRoute(func(c *gin.Context) {
+			if strings.HasPrefix(c.Request.URL.Path, "/api") {
+				return // let Gin's 404 handle unregistered /api routes
 			}
+			handleCacheRequest(c)
 		})
-		group.HEAD("/:discovery/*path", func(c *gin.Context) {
-			if setupDiscoveryContext(c) {
-				handleCacheRequest(c)
-			}
-		})
-		// Register PROPFIND for directory listings (passthrough to origin)
-		group.Handle("PROPFIND", "/:discovery/*path", func(c *gin.Context) {
-			if setupDiscoveryContext(c) {
-				handleCacheRequest(c)
-			}
-		})
-		// Register PUT for write-through caching (proxy to origin)
-		group.PUT("/:discovery/*path", func(c *gin.Context) {
-			if setupDiscoveryContext(c) {
-				handleCacheRequest(c)
-			}
-		})
-		// Register DELETE for write-through deletion (proxy to origin)
-		group.DELETE("/:discovery/*path", func(c *gin.Context) {
-			if setupDiscoveryContext(c) {
-				handleCacheRequest(c)
-			}
-		})
-		log.Info("Persistent cache HTTP handlers registered at /api/v1.0/cache/data/:discovery/*path")
-	} else {
-		// When running standalone, use NoRoute to catch all requests
-		engine.NoRoute(handleCacheRequest)
-		log.Info("Persistent cache HTTP handlers registered at root path")
+		log.Info("Persistent cache standalone fallback registered for non-API paths")
 	}
 
 	// Register the management/monitoring API endpoints for the cache server.
@@ -1010,6 +1174,23 @@ func (pc *PersistentCache) RegisterCacheHandlers(engine *gin.Engine, directorEna
 	// but the cache server module needs them too. Use NoRoute-safe individual
 	// registrations to avoid conflicts if the local cache module also registers them.
 	engine.GET("/api/v1.0/cache/stats", func(c *gin.Context) { pc.statsCmd(c) })
+
+	// Expose purge routes on TCP behind admin auth.  On the Unix socket
+	// (Register method) the same purge handlers are available with only
+	// Localcache_Purge token scope — no admin check.
+	adminPurge := engine.Group("/api/v1.0/cache", web_ui.AuthHandler, web_ui.AdminAuthHandler)
+	adminPurge.POST("/purge", func(c *gin.Context) { pc.purgeCmd(c) })
+	adminPurge.POST("/purge_first", func(c *gin.Context) { pc.purgeFirstCmd(c) })
+
+	// Prestage and eviction API — compatible with the xrdhttp-pelican
+	// C++ plugin.
+	engine.GET("/pelican/api/v1.0/prestage", func(c *gin.Context) {
+		pc.prestageHandler(c.Writer, c.Request)
+	})
+	engine.GET("/pelican/api/v1.0/evict", func(c *gin.Context) {
+		pc.evictHandler(c.Writer, c.Request)
+	})
+	log.Info("Prestage and eviction API registered at /pelican/api/v1.0/{prestage,evict}")
 
 	return nil
 }

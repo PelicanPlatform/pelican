@@ -202,23 +202,25 @@ func TestCacheControl_NoStore(t *testing.T) {
 	assert.Contains(t, cc, "no-store",
 		"Cache should pass through no-store from origin")
 
-	// Wait so that if the object were incorrectly cached, Age would grow
-	time.Sleep(2 * time.Second)
+	// Poll every 0.5s for several seconds, verifying Age never goes
+	// non-zero.  If the object were incorrectly cached, Age would
+	// increase over time.
+	for i := 0; i < 6; i++ {
+		time.Sleep(500 * time.Millisecond)
 
-	// Second fetch — still succeeds (re-fetched from origin, not from disk)
-	r2 := fetchFromCache(t, ft, cacheURL, nil)
-	require.Equal(t, http.StatusOK, r2.statusCode)
-	require.Equal(t, content, r2.body)
+		r := fetchFromCache(t, ft, cacheURL, nil)
+		require.Equal(t, http.StatusOK, r.statusCode,
+			"poll %d: fetch should succeed", i)
+		require.Equal(t, content, r.body,
+			"poll %d: content should match", i)
 
-	// The response should NOT have an Age header (it's freshly fetched)
-	// or if it does, it should be 0.  If it were served from cache, Age
-	// would be ≥2 after the sleep above.
-	ageStr := r2.headers.Get("Age")
-	if ageStr != "" {
-		age, err := strconv.Atoi(ageStr)
-		if err == nil {
-			assert.LessOrEqual(t, age, 0,
-				"no-store response must not have a positive Age (would indicate caching)")
+		ageStr := r.headers.Get("Age")
+		if ageStr != "" {
+			age, err := strconv.Atoi(ageStr)
+			if err == nil {
+				assert.LessOrEqual(t, age, 0,
+					"poll %d: no-store response must not have a positive Age (would indicate caching)", i)
+			}
 		}
 	}
 }

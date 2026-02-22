@@ -20,6 +20,7 @@ package local_cache
 
 import (
 	"context"
+	"io"
 	"net/url"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,7 @@ import (
 	"github.com/VividCortex/ewma"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/param"
@@ -66,24 +68,27 @@ const (
 // auto-repair) from stealing results off a shared Results() channel.
 type BlockFetcherV2 struct {
 	storage      *StorageManager
-	instanceHash string
+	instanceHash InstanceHash
 	originURL    string
 	token        string
-	fedToken     string // Federation token; sent as access_token query param to origins
+	fedToken     client.TokenProvider // Federation token provider; resolves to access_token query param
 	meta         *CacheMetadata
 	tc           *client.TransferClient
 
 	// Prefetch configuration
 	prefetchTimeout time.Duration
-	prefetchSem     chan struct{} // Semaphore to limit concurrent prefetches
+	prefetchSem     chan struct{} // Shared semaphore to limit concurrent prefetches across all fetchers
 
 	mu sync.Mutex
 
 	// Fetch tracking - one entry per fetch operation
 	activeFetches map[fetchKey]*fetchOperation
 
-	// Client tracking
-	activeClients atomic.Int32
+	// Client activity tracking: stores the UnixNano timestamp of the last
+	// client-initiated fetch operation.  The prefetch timer cancels only
+	// when this timestamp is older than prefetchTimeout, ensuring a brief
+	// gap between sequential reads doesn't kill the prefetch.
+	lastClientActivity atomic.Int64
 }
 
 // fetchKey uniquely identifies a fetch operation
@@ -117,6 +122,7 @@ type fetchOperation struct {
 	// ETA estimation using EWMA
 	bytesDownloaded atomic.Int64
 	totalBytes      int64
+	startByte       int64 // Absolute byte offset where this fetch starts
 	startTime       time.Time
 	rate            ewma.MovingAverage // bytes per second
 	etaUnixNano     atomic.Int64       // Estimated completion time as UnixNano (for atomic access)
@@ -124,8 +130,11 @@ type fetchOperation struct {
 
 // BlockFetcherV2Config holds configuration for the block fetcher
 type BlockFetcherV2Config struct {
-	PrefetchTimeout       time.Duration
-	MaxConcurrentPrefetch int
+	PrefetchTimeout time.Duration
+	// PrefetchSem is a shared semaphore limiting the total number of
+	// concurrent prefetches across all fetchers and downloads.  When
+	// nil, a per-fetcher semaphore is created with capacity 5.
+	PrefetchSem chan struct{}
 }
 
 // NewBlockFetcherV2 creates a new block fetcher using the Pelican transfer client.
@@ -133,7 +142,8 @@ type BlockFetcherV2Config struct {
 // sharing Results() channels with other callers.
 func NewBlockFetcherV2(
 	storage *StorageManager,
-	instanceHash, originURL, token, fedToken string,
+	instanceHash InstanceHash, originURL, token string,
+	fedToken client.TokenProvider,
 	te *client.TransferEngine,
 	cfg BlockFetcherV2Config,
 ) (*BlockFetcherV2, error) {
@@ -152,15 +162,15 @@ func NewBlockFetcherV2(
 		}
 	}
 
-	if cfg.MaxConcurrentPrefetch == 0 {
-		cfg.MaxConcurrentPrefetch = param.LocalCache_MaxConcurrentPrefetch.GetInt()
-		if cfg.MaxConcurrentPrefetch == 0 {
-			cfg.MaxConcurrentPrefetch = 5
+	prefetchSem := cfg.PrefetchSem
+	if prefetchSem == nil {
+		// No shared semaphore provided; create a local one.
+		maxPrefetch := param.LocalCache_MaxConcurrentPrefetch.GetInt()
+		if maxPrefetch == 0 {
+			maxPrefetch = 5
 		}
+		prefetchSem = make(chan struct{}, maxPrefetch)
 	}
-
-	// Create prefetch semaphore
-	prefetchSem := make(chan struct{}, cfg.MaxConcurrentPrefetch)
 
 	// Create a dedicated TransferClient so this fetcher's doFetch goroutines
 	// have their own Results() channel and cannot steal results intended for
@@ -184,13 +194,21 @@ func NewBlockFetcherV2(
 	}, nil
 }
 
-// RegisterClient registers a client as waiting for data from this fetcher.
-// Returns a function to call when the client is done.
-func (bf *BlockFetcherV2) RegisterClient() func() {
-	bf.activeClients.Add(1)
-	return func() {
-		bf.activeClients.Add(-1)
+// touchClientActivity records that a client is actively using this fetcher.
+// The prefetch idle timer uses this timestamp to decide when to cancel.
+func (bf *BlockFetcherV2) touchClientActivity() {
+	bf.lastClientActivity.Store(time.Now().UnixNano())
+}
+
+// idleSince returns how long it has been since the last client-initiated
+// fetch activity.  Returns a very large duration if no activity was ever
+// recorded (i.e. pure prefetch with no client interest).
+func (bf *BlockFetcherV2) idleSince() time.Duration {
+	last := bf.lastClientActivity.Load()
+	if last == 0 {
+		return time.Duration(1<<63 - 1) // max duration
 	}
+	return time.Since(time.Unix(0, last))
 }
 
 // Close shuts down the fetcher's dedicated TransferClient.
@@ -201,14 +219,11 @@ func (bf *BlockFetcherV2) Close() {
 	}
 }
 
-// HasActiveClients returns true if there are clients waiting for data
-func (bf *BlockFetcherV2) HasActiveClients() bool {
-	return bf.activeClients.Load() > 0
-}
-
 // FetchBlocks fetches the specified range of blocks from the origin.
 // Blocks until all requested blocks are available or an error occurs.
+// Implicitly marks this fetcher as having active client interest.
 func (bf *BlockFetcherV2) FetchBlocks(ctx context.Context, startBlock, endBlock uint32) error {
+	bf.touchClientActivity()
 	_, err := bf.FetchBlocksAsync(ctx, startBlock, endBlock)
 	if err != nil {
 		return err
@@ -221,7 +236,9 @@ func (bf *BlockFetcherV2) FetchBlocks(ctx context.Context, startBlock, endBlock 
 // when the fetch completes (either successfully or with error).
 // The returned error is non-nil only if the fetch couldn't be started.
 // Check the fetchOperation for the final error after doneCh is closed.
+// Implicitly marks this fetcher as having active client interest.
 func (bf *BlockFetcherV2) FetchBlocksAsync(ctx context.Context, startBlock, endBlock uint32) (*fetchOperation, error) {
+	bf.touchClientActivity()
 	key := fetchKey{startBlock, endBlock}
 
 	bf.mu.Lock()
@@ -238,23 +255,43 @@ func (bf *BlockFetcherV2) FetchBlocksAsync(ctx context.Context, startBlock, endB
 		}
 	}
 
-	// Check for overlapping fetches and potentially join them
+	// Check for overlapping fetches — use ETA-based coalescing to decide
+	// whether to piggyback on the existing operation or start a new one.
+	// If the existing operation will produce our needed blocks "soon enough"
+	// (within ETAStaleThreshold), we wait on its chunk notification.
+	// Otherwise we start an independent fetch so the reader doesn't stall
+	// behind a slow sequential download.
 	for k, op := range bf.activeFetches {
-		if bf.rangesOverlap(k, key) {
-			bf.mu.Unlock()
-
-			// Wait for the overlapping fetch to complete, then retry for remaining blocks
-			select {
-			case <-op.doneCh:
-				if op.err != nil {
-					return op, op.err
-				}
-				// Retry - some blocks may now be available
-				return bf.FetchBlocksAsync(ctx, startBlock, endBlock)
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
+		if !bf.rangesOverlap(k, key) {
+			continue
 		}
+
+		// Compute the chunk index for the first byte of our requested range.
+		startChunkByte := int64(startBlock) * BlockDataSize
+		chunkIdx := startChunkByte / ChunkSize
+
+		if op.IsChunkETAStale(chunkIdx) {
+			// ETA is already stale — the overlapping operation is too slow
+			// to supply our blocks in time.  Skip it and start our own
+			// fetch below.
+			continue
+		}
+
+		// ETA looks good — wait on the overlapping operation's chunk
+		// channel instead of starting a redundant download.
+		bf.mu.Unlock()
+		completed, err := bf.WaitForChunkWithETA(ctx, op, chunkIdx)
+		if err != nil {
+			return nil, err
+		}
+		if completed {
+			// Chunk arrived.  Retry to pick up any remaining blocks
+			// not covered by the overlapping operation.
+			return bf.FetchBlocksAsync(ctx, startBlock, endBlock)
+		}
+		// ETA went stale while waiting — retry; next iteration will
+		// skip the stale operation and start our own fetch.
+		return bf.FetchBlocksAsync(ctx, startBlock, endBlock)
 	}
 
 	// Calculate total bytes for this fetch
@@ -272,6 +309,7 @@ func (bf *BlockFetcherV2) FetchBlocksAsync(ctx context.Context, startBlock, endB
 		doneCh:        make(chan struct{}),
 		cancelFn:      cancelFn,
 		totalBytes:    totalBytes,
+		startByte:     startOffset,
 		startTime:     time.Now(),
 		rate:          ewma.NewMovingAverage(10), // 10-second moving average
 	}
@@ -327,10 +365,39 @@ func (bf *BlockFetcherV2) GetChunkChannel(op *fetchOperation, chunkIndex int64) 
 	return ch
 }
 
-// GetETA returns the estimated time of completion for the fetch operation.
-// The ETA is updated periodically based on the EWMA of download rates.
+// GetETA returns the estimated time of completion for the entire fetch operation.
+// For per-chunk estimates, use GetChunkETA instead.
 func (op *fetchOperation) GetETA() time.Time {
 	return time.Unix(0, op.etaUnixNano.Load())
+}
+
+// GetChunkETA returns the estimated time when a specific chunk will be
+// available.  If the chunk is already downloaded (chunkIndex <= lastChunk)
+// the returned time is in the past.  The estimate is based on the current
+// download position and the EWMA rate.
+func (op *fetchOperation) GetChunkETA(chunkIndex int64) time.Time {
+	lastDone := op.lastChunk
+	if chunkIndex <= lastDone && lastDone > 0 {
+		return time.Time{} // already available
+	}
+
+	op.mu.Lock()
+	rateValue := op.rate.Value()
+	op.mu.Unlock()
+
+	if rateValue <= 0 {
+		return op.GetETA() // fall back to whole-operation ETA
+	}
+
+	// Bytes from current download position to the end of the requested chunk.
+	chunkEndByte := (chunkIndex + 1) * ChunkSize
+	downloaded := op.bytesDownloaded.Load()
+	bytesUntilChunk := chunkEndByte - (op.startByte + downloaded)
+	if bytesUntilChunk <= 0 {
+		return time.Time{} // already past this chunk
+	}
+
+	return time.Now().Add(time.Duration(float64(bytesUntilChunk) / rateValue * float64(time.Second)))
 }
 
 // GetProgress returns the current download progress (bytes downloaded, total bytes, rate in bytes/sec)
@@ -341,15 +408,21 @@ func (op *fetchOperation) GetProgress() (downloaded int64, total int64, rateByte
 	return op.bytesDownloaded.Load(), op.totalBytes, rateBytes
 }
 
-// IsETAStale returns true if the ETA has passed by more than ETAStaleThreshold
-func (op *fetchOperation) IsETAStale() bool {
-	eta := op.GetETA()
+// IsChunkETAStale returns true if the per-chunk ETA for the given chunk
+// has passed by more than ETAStaleThreshold.
+func (op *fetchOperation) IsChunkETAStale(chunkIndex int64) bool {
+	eta := op.GetChunkETA(chunkIndex)
+	if eta.IsZero() {
+		return false // Chunk already complete
+	}
 	return time.Now().After(eta.Add(ETAStaleThreshold))
 }
 
-// WaitForChunkWithETA waits for a chunk to complete, but gives up if the ETA becomes stale.
-// Returns true if the chunk completed, false if ETA became stale (caller should try direct download).
+// WaitForChunkWithETA waits for a chunk to complete, but gives up if the
+// per-chunk ETA becomes stale.  Returns true if the chunk completed, false
+// if the ETA became stale (caller should try direct download).
 func (bf *BlockFetcherV2) WaitForChunkWithETA(ctx context.Context, op *fetchOperation, chunkIndex int64) (completed bool, err error) {
+	bf.touchClientActivity()
 	ch := bf.GetChunkChannel(op, chunkIndex)
 	if ch == nil {
 		// Already complete
@@ -363,6 +436,7 @@ func (bf *BlockFetcherV2) WaitForChunkWithETA(ctx context.Context, op *fetchOper
 		select {
 		case <-ch:
 			// Chunk completed
+			bf.touchClientActivity()
 			if op.err != nil {
 				return false, op.err
 			}
@@ -371,8 +445,8 @@ func (bf *BlockFetcherV2) WaitForChunkWithETA(ctx context.Context, op *fetchOper
 			// Entire operation completed
 			return op.err == nil, op.err
 		case <-etaCheckTicker.C:
-			// Check if ETA is stale
-			if op.IsETAStale() {
+			// Check if per-chunk ETA is stale
+			if op.IsChunkETAStale(chunkIndex) {
 				return false, nil // Let caller try direct download
 			}
 		case <-ctx.Done():
@@ -402,12 +476,13 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 		endOffset = bf.meta.ContentLength - 1
 	}
 
-	// Check if we have active clients
-	hasClients := bf.HasActiveClients()
+	// Determine whether a client is actively waiting.  If no client
+	// has ever touched this fetcher, this is a prefetch and we limit
+	// concurrency via the shared semaphore.
+	hasRecentActivity := bf.lastClientActivity.Load() > 0
 
-	// If no active clients, this is a prefetch - acquire semaphore
 	var prefetchMode bool
-	if !hasClients {
+	if !hasRecentActivity {
 		prefetchMode = true
 		select {
 		case bf.prefetchSem <- struct{}{}:
@@ -419,23 +494,15 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 		}
 	}
 
-	// Get a snapshot of the current download bitmap so the BlockWriter can
-	// skip already-downloaded blocks (important during auto-repair
-	// re-downloads where most blocks are already present).  We use a
-	// snapshot (Clone) because the skip check is purely an optimization —
-	// writing a block that already exists is harmless but wasteful.
-	sharedState, err := bf.storage.GetSharedBlockState(bf.instanceHash)
-	if err != nil {
-		op.err = errors.Wrap(err, "failed to get block state for fetch")
-		bf.notifyAllChunks(op)
-		return
-	}
-	existingBitmap := sharedState.Clone()
-
+	// The BlockWriter's writeCurrentBlock checks the live shared block
+	// state on every write to skip already-downloaded blocks, so there
+	// is no need to pass a snapshot bitmap.  This avoids cloning a
+	// potentially large bitmap into memory.
+	//
 	// Create a buffered BlockWriter from the storage layer.  It handles
 	// arbitrary write sizes, encrypts at block boundaries, and skips
-	// blocks present in existingBitmap.
-	storageWriter, err := bf.storage.NewBlockWriter(bf.instanceHash, key.startBlock, existingBitmap, nil)
+	// blocks already present according to the shared state.
+	storageWriter, err := bf.storage.NewBlockWriter(bf.instanceHash, key.startBlock, nil, nil)
 	if err != nil {
 		op.err = errors.Wrap(err, "failed to create block writer for fetch")
 		bf.notifyAllChunks(op)
@@ -453,7 +520,7 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 		lastSemRelease: time.Now(),
 		lastRateUpdate: time.Now(),
 	}
-	defer writer.Close()
+	// writer.Close is called by awaitTransfer
 
 	// Parse the origin URL and set up the transfer
 	sourceURL, err := url.Parse(bf.originURL)
@@ -476,7 +543,7 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 	if bf.token != "" {
 		opts = append(opts, client.WithToken(bf.token))
 	}
-	if bf.fedToken != "" {
+	if bf.fedToken != nil {
 		opts = append(opts, client.WithFedToken(bf.fedToken))
 	}
 
@@ -493,10 +560,27 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 		return
 	}
 
-	// Wait for completion with prefetch timeout handling
-	results := bf.tc.Results()
-	prefetchTimer := time.NewTimer(bf.prefetchTimeout)
-	defer prefetchTimer.Stop()
+	bf.awaitTransfer(ctx, op, bf.tc.Results(), tj.ID(), writer, prefetchMode, nil)
+}
+
+// awaitTransfer drives an in-flight transfer to completion.
+// It reads from the results channel, matches the given job ID,
+// applies idle-timeout cancellation (when prefetchMode is true),
+// updates chunk notifications via the blockWriter, and calls
+// onDone on successful completion.
+func (bf *BlockFetcherV2) awaitTransfer(
+	ctx context.Context,
+	op *fetchOperation,
+	results <-chan client.TransferResults,
+	jobID string,
+	writer *blockWriter,
+	prefetchMode bool,
+	onDone func(),
+) {
+	defer writer.Close()
+
+	idleTicker := time.NewTicker(2 * time.Second)
+	defer idleTicker.Stop()
 
 	for {
 		select {
@@ -505,26 +589,26 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 				// Results channel closed
 				return
 			}
-			if result.ID() == tj.ID() {
+			if result.ID() == jobID {
 				if result.Error != nil {
 					op.err = result.Error
+				} else if onDone != nil {
+					onDone()
 				}
 				// Notify all remaining waiters (both success and error)
 				bf.notifyAllChunks(op)
 				return
 			}
 
-		case <-prefetchTimer.C:
-			// Check if we're in prefetch mode and have no active clients
-			if prefetchMode && !bf.HasActiveClients() {
-				log.Debugf("Prefetch timeout for %s - cancelling", bf.instanceHash)
+		case <-idleTicker.C:
+			// In prefetch mode, cancel if no client activity for > prefetchTimeout
+			if prefetchMode && bf.idleSince() > bf.prefetchTimeout {
+				log.Debugf("Prefetch timeout for %s — idle for %v, cancelling", bf.instanceHash, bf.idleSince())
 				op.cancelFn()
-				op.err = errors.New("prefetch cancelled due to no active clients")
+				op.err = errors.New("prefetch cancelled due to idle timeout")
 				bf.notifyAllChunks(op)
 				return
 			}
-			// Reset timer
-			prefetchTimer.Reset(bf.prefetchTimeout)
 
 		case <-ctx.Done():
 			op.err = ctx.Err()
@@ -532,6 +616,136 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 			return
 		}
 	}
+}
+
+// AdoptTransfer takes ownership of an already-in-flight full-object transfer
+// initiated by performDownload and drives it to completion using the fetcher's
+// existing idle-timeout and chunk-notification machinery.
+//
+// Instead of creating a new BlockWriter, AdoptTransfer wraps the
+// decisionWriter's existing BlockWriter with the fetcher's blockWriter adapter
+// via dw.HandoffBlockWriter.  All subsequent data written by the transfer
+// engine flows through the adapter, gaining chunk notification and ETA
+// tracking.  Blocks already written before the handoff are harmlessly skipped
+// (the shared bitmap check in writeCurrentBlock handles this).
+//
+// Parameters:
+//   - ctx:         context for the transfer (cancelled on idle or cache close)
+//   - tc:          the TransferClient that owns the transfer (closed on exit)
+//   - dw:          the decisionWriter whose BlockWriter will be wrapped
+//   - resultChan:  pre-filtered channel delivering the single matching result
+//   - egrp:        errgroup for goroutine lifecycle management (test cleanup)
+//   - wg:          waitgroup to track goroutine completion (decremented on exit)
+//   - onExit:      called when the adopted transfer exits for any reason
+//     (clear downloading flag, close completionDone, etc.)
+//
+// The method starts a goroutine (managed via egrp) and returns the
+// fetchOperation for chunk notification and ETA queries.
+func (bf *BlockFetcherV2) AdoptTransfer(
+	ctx context.Context,
+	tc *client.TransferClient,
+	dw *decisionWriter,
+	resultChan <-chan *client.TransferResults,
+	egrp *errgroup.Group,
+	wg *sync.WaitGroup,
+	onExit func(err error),
+) *fetchOperation {
+	totalBlocks := uint32((bf.meta.ContentLength + BlockDataSize - 1) / BlockDataSize)
+	if totalBlocks == 0 {
+		totalBlocks = 1
+	}
+
+	key := fetchKey{startBlock: 0, endBlock: totalBlocks - 1}
+	totalBytes := bf.meta.ContentLength
+
+	innerCtx, cancelFn := context.WithCancel(ctx)
+	op := &fetchOperation{
+		chunkComplete: make(map[int64]chan struct{}),
+		doneCh:        make(chan struct{}),
+		cancelFn:      cancelFn,
+		totalBytes:    totalBytes,
+		startByte:     0,
+		startTime:     time.Now(),
+		rate:          ewma.NewMovingAverage(10),
+	}
+	op.rate.Set(float64(DefaultInitialRate))
+	estimatedDuration := time.Duration(float64(totalBytes) / float64(DefaultInitialRate) * float64(time.Second))
+	op.etaUnixNano.Store(time.Now().Add(estimatedDuration).UnixNano())
+
+	bf.mu.Lock()
+	bf.activeFetches[key] = op
+	bf.mu.Unlock()
+
+	// Wrap the decisionWriter's BlockWriter with a blockWriter adapter
+	// that provides chunk notification and ETA tracking.  The swap is
+	// atomic with respect to dw.Write.
+	adapter := dw.HandoffBlockWriter(func(bw *BlockWriter, bytesWritten int64) io.WriteCloser {
+		return &blockWriter{
+			inner:          bw,
+			startOffset:    0,
+			currentPos:     bytesWritten,
+			op:             op,
+			bf:             bf,
+			prefetchMode:   false, // adopted transfers always have a client
+			lastSemRelease: time.Now(),
+			lastRateUpdate: time.Now(),
+		}
+	})
+
+	wg.Add(1)
+	egrp.Go(func() error {
+		defer wg.Done()
+		defer func() {
+			bf.mu.Lock()
+			delete(bf.activeFetches, key)
+			bf.mu.Unlock()
+			close(op.doneCh)
+			// Close the adapter → closes the underlying *BlockWriter →
+			// fires onComplete if all blocks are downloaded.
+			adapter.Close()
+			tc.Close()
+			if onExit != nil {
+				onExit(op.err)
+			}
+		}()
+
+		idleTicker := time.NewTicker(2 * time.Second)
+		defer idleTicker.Stop()
+
+		for {
+			select {
+			case result := <-resultChan:
+				if result != nil && result.Error != nil {
+					op.err = result.Error
+					log.Warnf("Adopted transfer failed for %s: %v", bf.instanceHash, result.Error)
+				}
+				// Store checksums from the transfer result on the download
+				// so that onComplete can persist them in metadata.
+				if result != nil {
+					dw.dl.checksums = clientChecksumsToCache(result)
+				}
+				bf.notifyAllChunks(op)
+				return nil
+
+			case <-idleTicker.C:
+				if bf.idleSince() > bf.prefetchTimeout {
+					log.Debugf("Adopted transfer idle timeout for %s — idle for %v, cancelling",
+						bf.instanceHash, bf.idleSince())
+					cancelFn()
+					op.err = errors.New("download cancelled: idle timeout")
+					bf.notifyAllChunks(op)
+					return nil
+				}
+
+			case <-innerCtx.Done():
+				op.err = innerCtx.Err()
+				bf.notifyAllChunks(op)
+				return nil
+			}
+		}
+	})
+
+	return op
 }
 
 // notifyAllChunks closes all chunk notification channels (for both success and error cases)
@@ -621,15 +835,10 @@ func (w *blockWriter) Write(p []byte) (n int, err error) {
 	}
 
 	// In prefetch mode, periodically release and reacquire the semaphore
+	// so other prefetches/downloads can make progress.
 	if w.prefetchMode && time.Since(w.lastSemRelease) > PrefetchSemaphoreReleaseInterval {
-		// Release semaphore
+		// Release semaphore briefly to let others run
 		<-w.bf.prefetchSem
-
-		// Check if we should continue prefetching
-		if !w.bf.HasActiveClients() {
-			// No active clients - check if we've been idle too long
-			// We'll let the main loop handle the timeout
-		}
 
 		// Reacquire semaphore
 		w.bf.prefetchSem <- struct{}{}

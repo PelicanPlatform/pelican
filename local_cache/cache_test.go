@@ -482,6 +482,67 @@ func TestLargeFile(t *testing.T) {
 	})
 }
 
+// Test that Range: bytes=0-0 on a multi-block object downloads ONLY the
+// first block, never completes the full file download, and therefore does
+// NOT return an Age header (which requires Completed != zero).
+func TestRangeZeroZero(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
+
+	// Create a multi-block file.  With BlockDataSize=4080, a 20 000-byte
+	// file spans 5 blocks (well above InlineThreshold=4096), so the cache
+	// will use disk storage.
+	const fileSize = 20_000
+	data := make([]byte, fileSize)
+	for i := range data {
+		data[i] = byte(i % 251) // deterministic, non-zero pattern
+	}
+	err := os.WriteFile(filepath.Join(ft.Exports[0].StoragePrefix, "multiblock.bin"), data, 0644)
+	require.NoError(t, err)
+
+	// Build an HTTP client that talks to the local cache via its unix socket
+	transport := config.GetTransport().Clone()
+	transport.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
+		return net.Dial("unix", param.LocalCache_Socket.GetString())
+	}
+	httpClient := &http.Client{Transport: transport}
+
+	t.Run("FirstRequestNoAge", func(t *testing.T) {
+		req, err := http.NewRequest("GET", "http://localhost/test/multiblock.bin", nil)
+		require.NoError(t, err)
+		req.Header.Set("Range", "bytes=0-0")
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusPartialContent, resp.StatusCode, "expected 206 Partial Content")
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(body), "expected exactly 1 byte")
+		assert.Equal(t, data[0], body[0], "first byte should match source data")
+		assert.Empty(t, resp.Header.Get("Age"), "Age must not be set when download is incomplete")
+	})
+
+	t.Run("SecondRequestStillNoAge", func(t *testing.T) {
+		// This is a cache-hit for block 0, but the remaining blocks
+		// were never fetched so Completed stays zero → no Age.
+		req, err := http.NewRequest("GET", "http://localhost/test/multiblock.bin", nil)
+		require.NoError(t, err)
+		req.Header.Set("Range", "bytes=0-0")
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusPartialContent, resp.StatusCode, "expected 206 Partial Content")
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(body), "expected exactly 1 byte")
+		assert.Equal(t, data[0], body[0], "first byte should match source data")
+		assert.Empty(t, resp.Header.Get("Age"), "Age must not be set on repeat range request for incomplete object")
+	})
+}
+
 // Create a federation then SIGSTOP the origin to prevent it from responding.
 // Ensure the various client timeouts are reported correctly up to the user
 func TestOriginUnresponsive(t *testing.T) {
