@@ -591,42 +591,6 @@ func computeETag(modTime int64, size int64) string {
 	return fmt.Sprintf(`"%x%x"`, modTime, size)
 }
 
-// normalizeETag strips the weak validator prefix (W/) from an ETag for comparison.
-// Per RFC 7232: For If-None-Match, weak comparison is used (ignores W/ prefix).
-func normalizeETag(etag string) string {
-	if strings.HasPrefix(etag, "W/") {
-		return etag[2:]
-	}
-	return etag
-}
-
-// etagsMatch compares two ETags using weak comparison (suitable for If-None-Match).
-// Per RFC 7232 Section 2.3.2: Two ETags are weakly equivalent if their opaque-tags
-// match character-by-character, regardless of the weak indicator.
-func etagsMatch(a, b string) bool {
-	return normalizeETag(a) == normalizeETag(b)
-}
-
-// checkIfModifiedSince returns true if the resource has been modified since
-// the time specified in the If-Modified-Since header.
-// Returns false (304 should be sent) if the resource hasn't been modified.
-func checkIfModifiedSince(r *http.Request, modTime time.Time) bool {
-	ims := r.Header.Get("If-Modified-Since")
-	if ims == "" {
-		return true // No conditional, treat as modified
-	}
-
-	// Per HTTP spec, must use RFC 1123 date format
-	t, err := http.ParseTime(ims)
-	if err != nil {
-		return true // Invalid date, treat as modified
-	}
-
-	// Compare at second precision (HTTP Date header precision)
-	// Return false (not modified) if modTime <= ims
-	return modTime.Truncate(time.Second).After(t.Truncate(time.Second))
-}
-
 // handlePutWithETag handles PUT requests and returns the ETag of the newly
 // written file in the response headers.  The ETag is computed from the file's
 // mtime and size after the WebDAV handler finishes writing, using the same

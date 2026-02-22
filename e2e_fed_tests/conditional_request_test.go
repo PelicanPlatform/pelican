@@ -270,7 +270,7 @@ func TestOrigin_IfModifiedSince_NotModified(t *testing.T) {
 
 	lastModified := resp1.Header.Get("Last-Modified")
 	require.NotEmpty(t, lastModified, "Origin should return Last-Modified header")
-	io.ReadAll(resp1.Body)
+	_, _ = io.ReadAll(resp1.Body)
 
 	// Second request - with If-Modified-Since (using same time - should return 304)
 	resp2 := makeRequest(ft.Ctx, t, originURL, map[string]string{

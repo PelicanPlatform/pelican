@@ -23,6 +23,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -35,6 +36,29 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 )
+
+// removeFileWithRetry removes a file, retrying briefly on Windows if the
+// file is still held open by an asynchronous eviction callback (ttlcache
+// fires OnEviction in a goroutine, so the file descriptor may not be
+// closed by the time we attempt the delete).
+func removeFileWithRetry(name string) error {
+	err := os.Remove(name)
+	if err == nil || os.IsNotExist(err) {
+		return nil
+	}
+	if runtime.GOOS != "windows" {
+		return err
+	}
+	// On Windows, retry a few times to allow the async close to finish.
+	for attempt := 0; attempt < 5; attempt++ {
+		time.Sleep(10 * time.Millisecond)
+		err = os.Remove(name)
+		if err == nil || os.IsNotExist(err) {
+			return nil
+		}
+	}
+	return err
+}
 
 // createFile creates a file at the given path. If the parent directory
 // does not exist, it creates the directory (with 0750 permissions) and
@@ -971,7 +995,7 @@ func (sm *StorageManager) Delete(instanceHash InstanceHash) error {
 	// If stored on disk, delete the file
 	if meta != nil && meta.IsDisk() {
 		objectPath := sm.getObjectPathForDir(meta.StorageID, instanceHash)
-		if err := os.Remove(objectPath); err != nil && !os.IsNotExist(err) {
+		if err := removeFileWithRetry(objectPath); err != nil {
 			log.Warnf("Failed to delete object file %s: %v", objectPath, err)
 		}
 	}
@@ -1002,7 +1026,7 @@ func (sm *StorageManager) EvictByLRU(storageID StorageID, namespaceID NamespaceI
 
 		if obj.storageID != StorageIDInline {
 			objectPath := sm.getObjectPathForDir(obj.storageID, obj.instanceHash)
-			if err := os.Remove(objectPath); err != nil && !os.IsNotExist(err) {
+			if err := removeFileWithRetry(objectPath); err != nil {
 				log.Warnf("Failed to delete evicted object file %s: %v", objectPath, err)
 			}
 		}

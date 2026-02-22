@@ -4052,7 +4052,7 @@ func TestDownloadHTTPETag(t *testing.T) {
 		w.Header().Set("ETag", expectedETag)
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
 		w.WriteHeader(http.StatusOK)
-		w.Write(body)
+		_, _ = w.Write(body)
 	}))
 	defer server.Close()
 
@@ -4089,7 +4089,7 @@ func TestDownloadHTTPETagMissing(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
 		w.WriteHeader(http.StatusOK)
-		w.Write(body)
+		_, _ = w.Write(body)
 	}))
 	defer server.Close()
 
@@ -4126,7 +4126,7 @@ func TestMetadataChannel(t *testing.T) {
 		w.Header().Set("Last-Modified", "Thu, 01 Jan 2025 00:00:00 GMT")
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
 		w.WriteHeader(http.StatusOK)
-		w.Write(body)
+		_, _ = w.Write(body)
 	}))
 	defer server.Close()
 
@@ -4169,7 +4169,7 @@ func TestMetadataChannelNil(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
 		w.WriteHeader(http.StatusOK)
-		w.Write(body)
+		_, _ = w.Write(body)
 	}))
 	defer server.Close()
 
@@ -4206,11 +4206,11 @@ func TestDownloadHTTPByteRange(t *testing.T) {
 			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(partial)))
 			w.Header().Set("Content-Range", fmt.Sprintf("bytes 0-%d/%d", rangeEnd, len(fullBody)))
 			w.WriteHeader(http.StatusPartialContent)
-			w.Write(partial)
+			_, _ = w.Write(partial)
 		} else {
 			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(fullBody)))
 			w.WriteHeader(http.StatusOK)
-			w.Write(fullBody)
+			_, _ = w.Write(fullBody)
 		}
 	}))
 	defer server.Close()
@@ -4254,11 +4254,11 @@ func TestDownloadHTTPResume(t *testing.T) {
 			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(partial)))
 			w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", resumeOffset, int64(len(fullBody))-1, len(fullBody)))
 			w.WriteHeader(http.StatusPartialContent)
-			w.Write(partial)
+			_, _ = w.Write(partial)
 		} else {
 			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(fullBody)))
 			w.WriteHeader(http.StatusOK)
-			w.Write(fullBody)
+			_, _ = w.Write(fullBody)
 		}
 	}))
 	defer server.Close()
@@ -4297,7 +4297,7 @@ func TestUploadETag(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "PUT" {
 			// Drain the body
-			io.Copy(io.Discard, r.Body)
+			_, _ = io.Copy(io.Discard, r.Body)
 			r.Body.Close()
 			w.Header().Set("ETag", expectedETag)
 			w.WriteHeader(http.StatusCreated)

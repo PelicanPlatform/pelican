@@ -287,7 +287,7 @@ func TestCorruption_MissingBlockFile(t *testing.T) {
 	// Verify the file has been recreated on disk
 	info, err := os.Stat(objFile)
 	require.NoError(t, err, "Object file should be recreated on disk after auto-repair")
-	expectedSize := int64(local_cache.CalculateBlockCount(int64(len(content)))) * local_cache.BlockTotalSize
+	expectedSize := local_cache.CalculateFileSize(int64(len(content)))
 	assert.Equal(t, expectedSize, info.Size(),
 		"Recreated file should have the correct size")
 	t.Logf("Verified file was recreated on disk: size=%d bytes", info.Size())
@@ -319,7 +319,7 @@ func TestCorruption_TruncatedFile(t *testing.T) {
 	// Verify the file has been restored to full size on disk
 	restoredInfo, err := os.Stat(objFile)
 	require.NoError(t, err)
-	expectedSize := int64(local_cache.CalculateBlockCount(int64(len(content)))) * local_cache.BlockTotalSize
+	expectedSize := local_cache.CalculateFileSize(int64(len(content)))
 	assert.Equal(t, expectedSize, restoredInfo.Size(),
 		"File should be restored to full size on disk")
 	t.Logf("Verified file restored from %d to %d bytes on disk",

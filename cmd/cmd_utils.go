@@ -167,7 +167,16 @@ func fetchOrGenerateWebAPIAdminToken(serverURLStr, tokenLocation string) (string
 		tc := token.NewWLCGToken()
 		tc.Lifetime = 5 * time.Minute
 		tc.Subject = "admin"
-		tc.Issuer = serverURLStr
+		// Use GetServerIssuerURL to determine the issuer.  When origin and
+		// director are co-located, the local issuer URL is a sub-path
+		// (e.g. .../api/v1.0/origin) that differs from the base server URL.
+		// GetServerIssuerURL checks Server.IssuerUrl first (which may have
+		// been set in the config file) and falls back to Server.ExternalWebUrl.
+		issuerURL, issuerErr := config.GetServerIssuerURL()
+		if issuerErr != nil || issuerURL == "" {
+			issuerURL = serverURLStr
+		}
+		tc.Issuer = issuerURL
 		tc.AddAudienceAny()
 		tc.AddScopes(token_scopes.WebUi_Access)
 		tok, err := tc.CreateToken()

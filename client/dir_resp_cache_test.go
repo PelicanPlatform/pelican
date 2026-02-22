@@ -203,8 +203,8 @@ func TestMatchesPrefix(t *testing.T) {
 		{"/a/b/c", "/", true},
 		{"/abc", "/ab", false},     // partial segment
 		{"/foobar", "/foo", false}, // path-prefix, not string-prefix
-		{"/foo/bar", "/foo", true},  // proper child segment
-		{"/a", "/a/b", false},       // prefix longer than path
+		{"/foo/bar", "/foo", true}, // proper child segment
+		{"/a", "/a/b", false},      // prefix longer than path
 		{"/x/y", "/a/b", false},
 	}
 	for _, tc := range tests {
