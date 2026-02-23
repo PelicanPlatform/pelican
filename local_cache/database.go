@@ -277,27 +277,49 @@ func (cdb *CacheDB) SetMetadata(instanceHash InstanceHash, meta *CacheMetadata) 
 //     from zero-value to a value, but changing a non-zero value to a different
 //     non-zero value returns an error.  ETag is set-once because it is part of
 //     the instance hash; a changed ETag produces a different instance.
+//
+// The method retries on BadgerDB transaction conflicts, which can occur when
+// multiple concurrent callers merge metadata for the same instance (e.g.
+// concurrent range-on-miss initialization via initObjectFromStat).
 func (cdb *CacheDB) MergeMetadata(instanceHash InstanceHash, incoming *CacheMetadata) error {
-	return cdb.db.Update(func(txn *badger.Txn) error {
-		existing, err := getMetadataInTxn(txn, instanceHash)
-		if err != nil {
-			return errors.Wrap(err, "failed to read existing metadata for merge")
-		}
-
-		merged := incoming
-		if existing != nil {
-			if err := mergeMetadataFields(existing, incoming); err != nil {
-				return err
+	const maxRetries = 20
+	backoff := 100 * time.Microsecond
+	for attempt := 0; ; attempt++ {
+		err := cdb.db.Update(func(txn *badger.Txn) error {
+			existing, err := getMetadataInTxn(txn, instanceHash)
+			if err != nil {
+				return errors.Wrap(err, "failed to read existing metadata for merge")
 			}
-			merged = existing // existing was mutated in place
-		}
 
-		data, err := msgpack.Marshal(merged)
-		if err != nil {
-			return errors.Wrap(err, "failed to marshal merged metadata")
+			merged := incoming
+			if existing != nil {
+				if err := mergeMetadataFields(existing, incoming); err != nil {
+					return err
+				}
+				merged = existing // existing was mutated in place
+			}
+
+			data, err := msgpack.Marshal(merged)
+			if err != nil {
+				return errors.Wrap(err, "failed to marshal merged metadata")
+			}
+			return txn.Set(MetaKey(instanceHash), data)
+		})
+		if err == nil {
+			return nil
 		}
-		return txn.Set(MetaKey(instanceHash), data)
-	})
+		if errors.Is(err, badger.ErrConflict) && attempt < maxRetries-1 {
+			n, _ := rand.Int(rand.Reader, big.NewInt(int64(backoff)))
+			jitter := time.Duration(n.Int64())
+			time.Sleep(backoff + jitter)
+			backoff *= 2
+			if backoff > 50*time.Millisecond {
+				backoff = 50 * time.Millisecond
+			}
+			continue
+		}
+		return err
+	}
 }
 
 // mergeMetadataFields applies incoming field values into existing according to

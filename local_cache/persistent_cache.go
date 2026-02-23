@@ -150,6 +150,9 @@ type PersistentCache struct {
 	downloadCtx       context.Context    // Cancelled during Close() to stop in-flight transfers
 	downloadCancel    context.CancelFunc // Cancels downloadCtx
 
+	// Active range-on-miss init deduplication (keyed by objectHash)
+	initGroup singleflight.Group
+
 	// Active revalidations deduplication (keyed by objectHash)
 	revalGroup singleflight.Group
 
@@ -242,6 +245,14 @@ type revalResult struct {
 	noStoreReader io.ReadCloser
 	noStoreMeta   *CacheMetadata
 	stale         bool // true ⇒ revalidation failed, serve stale data
+}
+
+// initResult is the internal result type used by the singleflight group
+// inside initObjectFromStat to deduplicate concurrent range-on-miss
+// initializations for the same objectHash.
+type initResult struct {
+	instanceHash InstanceHash
+	meta         *CacheMetadata
 }
 
 // PersistentCacheConfig holds configuration for the persistent cache
@@ -808,7 +819,7 @@ func (pc *PersistentCache) GetSeekableReader(ctx context.Context, objectPath, be
 	// creation.  The second pass re-resolves the object (triggering a fresh
 	// download) and creates a new reader.
 	const maxAttempts = 2
-	for attempt := 0; attempt < maxAttempts; attempt++ {
+	for attempt := range maxAttempts {
 		res, err := pc.resolveObject(ctx, objectPath, bearerToken, rangeOnly)
 		if err != nil {
 			return nil, nil, err
@@ -1066,6 +1077,10 @@ func (pc *PersistentCache) stat(objectPath, token string, cachedOnly bool) (uint
 // instead of starting a full sequential download, we only need metadata so
 // that BlockFetcherV2 can fetch the requested blocks on demand.
 //
+// Concurrent callers for the same objectHash are deduplicated via a
+// singleflight group so that only one stat + storage init runs; the
+// others reuse the result.
+//
 // Returns ErrInitNoStore if the origin's response headers indicate the
 // object must not be cached — the caller should fall back to downloadObject.
 func (pc *PersistentCache) initObjectFromStat(
@@ -1074,10 +1089,32 @@ func (pc *PersistentCache) initObjectFromStat(
 	namespaceID NamespaceID,
 	token string,
 ) (InstanceHash, *CacheMetadata, error) {
+	v, err, _ := pc.initGroup.Do(string(objectHash), func() (interface{}, error) {
+		result, err := pc.doInitObjectFromStat(ctx, pelicanURL, objectHash, namespaceID, token)
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	result := v.(*initResult)
+	return result.instanceHash, result.meta, nil
+}
+
+// doInitObjectFromStat is the non-deduplicated implementation called by
+// initObjectFromStat via singleflight.
+func (pc *PersistentCache) doInitObjectFromStat(
+	ctx context.Context,
+	pelicanURL string, objectHash ObjectHash,
+	namespaceID NamespaceID,
+	token string,
+) (*initResult, error) {
 	// Build a pelican:// URL routed through the director's origin endpoint
 	dUrl, err := url.Parse(pelicanURL)
 	if err != nil {
-		return "", nil, errors.Wrap(err, "invalid source URL")
+		return nil, errors.Wrap(err, "invalid source URL")
 	}
 	dUrl.Scheme = "pelican"
 
@@ -1087,7 +1124,7 @@ func (pc *PersistentCache) initObjectFromStat(
 	}
 	statInfo, err := client.DoStat(ctx, dUrl.String(), opts...)
 	if err != nil {
-		return "", nil, errors.Wrap(err, "stat failed for range-on-miss")
+		return nil, errors.Wrap(err, "stat failed for range-on-miss")
 	}
 
 	etag := statInfo.ETag
@@ -1096,17 +1133,17 @@ func (pc *PersistentCache) initObjectFromStat(
 	// If storage already exists (e.g. concurrent request created it), reuse it
 	existingMeta, err := pc.storage.GetMetadata(instanceHash)
 	if err != nil {
-		return "", nil, errors.Wrap(err, "failed to check existing storage")
+		return nil, errors.Wrap(err, "failed to check existing storage")
 	}
 	if existingMeta != nil {
-		return instanceHash, existingMeta, nil
+		return &initResult{instanceHash: instanceHash, meta: existingMeta}, nil
 	}
 
 	// Initialize disk storage with empty block bitmap
 	storageID := pc.eviction.ChooseDiskStorage()
 	meta, err := pc.storage.InitDiskStorage(ctx, instanceHash, statInfo.Size, storageID)
 	if err != nil {
-		return "", nil, errors.Wrap(err, "failed to init disk storage for range-on-miss")
+		return nil, errors.Wrap(err, "failed to init disk storage for range-on-miss")
 	}
 
 	meta.ETag = etag
@@ -1123,7 +1160,7 @@ func (pc *PersistentCache) initObjectFromStat(
 	}
 
 	if err := pc.storage.MergeMetadata(instanceHash, meta); err != nil {
-		return "", nil, errors.Wrap(err, "failed to set metadata for range-on-miss")
+		return nil, errors.Wrap(err, "failed to set metadata for range-on-miss")
 	}
 
 	// Map objectHash → ETag so subsequent lookups find this instance
@@ -1133,7 +1170,7 @@ func (pc *PersistentCache) initObjectFromStat(
 
 	log.Debugf("initObjectFromStat: initialized storage for %s (size=%d, etag=%q)",
 		instanceHash, statInfo.Size, etag)
-	return instanceHash, meta, nil
+	return &initResult{instanceHash: instanceHash, meta: meta}, nil
 }
 
 // revalidateObject checks whether a cached object is stale and, if so,
