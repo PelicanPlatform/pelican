@@ -1,4 +1,4 @@
-import { Callout } from 'nextra/components'
+import ExportedImage from "next-image-export-optimizer";
 
 # Globus Storage Backend
 
@@ -14,11 +14,7 @@ This page walks through setup and activation end-to-end, with extra operational 
 
 Before configuring Pelican, ensure you have:
 
-- A working Pelican Origin installation
 - A Globus Collection you can access
-- The Collection UUID
-- A Globus confidential OAuth client (client ID and client secret)
-- A correct callback URL registered in Globus for your Origin web UI
 
 ## 1. Collect Required Information from Globus
 
@@ -27,21 +23,35 @@ Before configuring Pelican, ensure you have:
 Each Globus Collection has a UUID shown on its Collection overview page.
 You will use this value `Origin.GlobusCollectionID` for single-export config.
 
-This can be found by going to the  "File Manager - Collection Search" tab in the Globus web UI (https://app.globus.org/file-manager/collections), searching for your collection, going to the collection overview, and copying the UUID listed at the very bottom.
+This can be found by going to the "File Manager - Collection Search" tab in the Globus web UI (https://app.globus.org/file-manager/collections), searching for your collection, and going to the collection overview by clicking on the three dots to the right:
+
+<ExportedImage width={1980} height={1533} src={"/pelican/federating-your-data/origin-globus-uuid1.png"} alt={"Globus File Manager Collection Search page showing how to locate a collection"} />
+
+After that, scroll to the bottom of the overview and copy the UUID.
+
+<ExportedImage width={1979} height={1532} src={"/pelican/federating-your-data/origin-globus-uuid2.png"} alt={"Globus Collection overview page showing where the collection UUID is displayed"} />
 
 ### OAuth Client ID and Secret
 
 Register a confidential client in Globus:
 
-- https://app.globus.org/settings/developers/registration/confidential_client/select-project
+- Globus web UI (direct link to confidential client registration):
+  - https://app.globus.org/settings/developers/registration/confidential_client/select-project
+- Globus developer documentation (step-by-step app registration guide):
+  - https://docs.globus.org/api/auth/developer-guide/#register-app
 
 When registering the client:
 
 - Choose or create a Globus project
-- Use any app name
-- Add a redirect URL matching your Origin web UI callback path:
-  - `https://<origin-hostname>:<web-port>/view/origin/globus/callback`
-  - Example with defaults: `https://localhost:8444/view/origin/globus/callback`
+- Use a descriptive application name
+- Add a redirect URL matching your Origin web UI callback path.
+  - If you set URL fields from separate host and port settings, use `https://${Server.Hostname}:${Server.WebPort}/view/origin/globus/callback`.
+  - If you set URL fields from one external URL setting, use `https://${Server.ExternalWebUrl}/view/origin/globus/callback`.
+  - Relevant Pelican parameters:
+    - [`Server.Hostname`](https://docs.pelicanplatform.org/parameters#Server-Hostname)
+    - [`Server.WebPort`](https://docs.pelicanplatform.org/parameters#Server-WebPort)
+    - [`Server.ExternalWebUrl`](https://docs.pelicanplatform.org/parameters#Server-ExternalWebUrl)
+  - Example: `https://my-osdf-globus-origin:8444/view/origin/globus/callback`
 
 Then:
 
@@ -55,7 +65,7 @@ Set `Origin.StorageType: "globus"` and configure one export with your collection
 ```yaml filename="pelican.yaml" copy
 Origin:
   StorageType: "globus"
-  GlobusClientIDFile: "/path/to/globus-client-id"
+  GlobusClientIDFile: "/path/to/globus-client-uuid"
   GlobusClientSecretFile: "/path/to/globus-client-secret"
 
   Exports:
@@ -70,15 +80,14 @@ Notes:
 
 - `Origin.GlobusClientIDFile` and `Origin.GlobusClientSecretFile` are the Globus client UUID and the client secret from step 1 respectively
 - The `StoragePrefix` field must match the path in Globus that you wish to expose via Pelican. For example, setting the field to `"/"` exposes the root of the collection, whereas setting it to `"/foo/bar"` limits access to that directory subpath.
-- The `GlobusCollectionName` field need not match the app name you set for the confidential client in step 1, but should be human readable.
+- `GlobusCollectionName` is an arbitrary, human-readable label shown in the Pelican Web UI for this export.
+- `GlobusCollectionName` does not need to match the confidential client application name from step 1.
 
 ## 3. Start the Origin and Activate the Collection
 
-Start your Origin:
-
-```bash
-pelican origin serve
-```
+Unlike other backend types, Globus-backed Origins **require** additional setup through the Web UI because of OAuth2.
+Serve the Origin using your normal deployment flow before continuing.
+For startup and admin website initialization guidance, see [Serving & Administering Your Origin](../origin/page.mdx#serving--administering-your-origin) and [Logging in to the Origin's Admin Page](../origin/page.mdx#logging-in-to-the-origins-admin-page).
 
 Then in the Pelican web UI:
 
@@ -88,11 +97,12 @@ Then in the Pelican web UI:
 4. Complete Globus login and consent.
 5. Return to Pelican and confirm the collection shows as active.
 
-Activation authorizes the Pelican origin's client to access the collection on behalf of whoever is doing the setup.
+Activation authorizes the Pelican Origin's client to access the collection on behalf of whoever is doing the setup.
 
 ## 4. Verify Data Access
 
-Note that it may take a few minutes for the Pelican origin to reboot after activation. After this occurs, test core operations from the exported namespace using a Pelican client:
+Note that it may take a few minutes for the Pelican Origin to reboot after activation.
+After this occurs, test core operations from the exported namespace using a Pelican client:
 
 ```bash
 pelican object get pelican://<federation-url>/<federation-prefix>/<object-path> .
@@ -111,7 +121,7 @@ pelican object ls pelican://<federation-url>/<federation-prefix>/
 For operators troubleshooting production setup, this is the backend flow:
 
 - Pelican authenticates the admin through Globus OAuth and stores tokens for collection access.
-- Pelican persists token material under `Origin.GlobusConfigLocation/tokens`.
+- Pelican persists token material under `${Origin.GlobusConfigLocation}/tokens`.
 - Pelican configures XRootD with the Globus HTTPS endpoint and token files so backend requests carry proper authorization.
 - Pelican keeps access tokens fresh by periodically refreshing via refresh token (currently on an approximately 5 minute interval).
 
@@ -135,7 +145,7 @@ The callback handler exchanges the authorization code for tokens, then:
 ## Troubleshooting Checklist
 
 - Callback mismatch:
-  - Ensure the registered Globus redirect exactly matches `https://<host>:<web-port>/view/origin/globus/callback`.
+  - Ensure the registered Globus redirect exactly matches `https://${Server.Hostname}:${Server.WebPort}/view/origin/globus/callback` or `https://${Server.ExternalWebUrl}/view/origin/globus/callback`.
 - Inactive collection after restart:
   - Verify `Origin.GlobusConfigLocation` is writable and persistent enough for runtime tokens.
 - OAuth credential issues:
