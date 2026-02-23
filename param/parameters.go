@@ -213,6 +213,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"IssuerKeysDirectory": false,
 	"LocalCache.DataLocation": false,
 	"LocalCache.DefaultMaxAge": false,
+	"LocalCache.FDCacheSize": false,
 	"LocalCache.HighWaterMarkPercentage": false,
 	"LocalCache.LowWaterMarkPercentage": false,
 	"LocalCache.MaxConcurrentPrefetch": false,
@@ -929,6 +930,8 @@ func (iP IntParam) GetInt() int {
 			return config.Director.MinStatResponse
 		case "Director.StatConcurrencyLimit":
 			return config.Director.StatConcurrencyLimit
+		case "LocalCache.FDCacheSize":
+			return config.LocalCache.FDCacheSize
 		case "LocalCache.HighWaterMarkPercentage":
 			return config.LocalCache.HighWaterMarkPercentage
 		case "LocalCache.LowWaterMarkPercentage":
@@ -1481,6 +1484,7 @@ var allParameterNames = []string{
 	"IssuerKeysDirectory",
 	"LocalCache.DataLocation",
 	"LocalCache.DefaultMaxAge",
+	"LocalCache.FDCacheSize",
 	"LocalCache.HighWaterMarkPercentage",
 	"LocalCache.LowWaterMarkPercentage",
 	"LocalCache.MaxConcurrentPrefetch",
@@ -1932,6 +1936,7 @@ var (
 	Director_MaxStatResponse = IntParam{"Director.MaxStatResponse"}
 	Director_MinStatResponse = IntParam{"Director.MinStatResponse"}
 	Director_StatConcurrencyLimit = IntParam{"Director.StatConcurrencyLimit"}
+	LocalCache_FDCacheSize = IntParam{"LocalCache.FDCacheSize"}
 	LocalCache_HighWaterMarkPercentage = IntParam{"LocalCache.HighWaterMarkPercentage"}
 	LocalCache_LowWaterMarkPercentage = IntParam{"LocalCache.LowWaterMarkPercentage"}
 	LocalCache_MaxConcurrentPrefetch = IntParam{"LocalCache.MaxConcurrentPrefetch"}

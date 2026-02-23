@@ -35,6 +35,8 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // removeFileWithRetry removes a file, retrying briefly on Windows if the
@@ -175,11 +177,6 @@ const diskCryptoTTL = 5 * time.Minute
 // being closed and evicted.
 const openFileTTL = 2 * time.Minute
 
-// maxOpenFiles is the upper bound on cached file descriptors.  Each idle
-// FD consumes a kernel file descriptor; keeping this bounded prevents FD
-// exhaustion under heavy workloads with many distinct objects.
-const maxOpenFiles = 500
-
 // writeBatchBlocks is the number of contiguous encrypted blocks the
 // BlockWriter accumulates before flushing them to disk with a single
 // WriteAt call.  64 blocks × 4096 bytes = 256 KiB — large enough to
@@ -220,6 +217,11 @@ type StorageManager struct {
 	// but the underlying *os.File is only closed when the last reference
 	// is gone — so in-flight I/O is never interrupted.
 	openFiles *ttlcache.Cache[InstanceHash, *refCountedFile]
+
+	// fdCacheMaxSize is the maximum number of entries in the openFiles
+	// cache.  When 0, the cache is disabled entirely and every getFile
+	// call opens a fresh descriptor.
+	fdCacheMaxSize uint64
 }
 
 // StorageDirInfo describes a configured storage directory at runtime.
@@ -367,17 +369,25 @@ func NewStorageManager(db *CacheDB, dirs []string, inlineMax int, egrp *errgroup
 		inlineMax = InlineThreshold
 	}
 
+	fdCacheSizeParam := param.LocalCache_FDCacheSize.GetInt()
+	var fdCacheSize uint64
+	if fdCacheSizeParam > 0 {
+		fdCacheSize = uint64(fdCacheSizeParam)
+	}
+	// fdCacheSizeParam <= 0 → fdCacheSize stays 0, disabling caching.
+
 	sm := &StorageManager{
 		db:             db,
 		dirs:           objDirs,
 		inlineMaxBytes: inlineMax,
+		fdCacheMaxSize: fdCacheSize,
 		blockStates:    newBlockStateCache(db),
 		diskCrypto: ttlcache.New[InstanceHash, *diskCryptoEntry](
 			ttlcache.WithTTL[InstanceHash, *diskCryptoEntry](diskCryptoTTL),
 		),
 		openFiles: ttlcache.New[InstanceHash, *refCountedFile](
 			ttlcache.WithTTL[InstanceHash, *refCountedFile](openFileTTL),
-			ttlcache.WithCapacity[InstanceHash, *refCountedFile](maxOpenFiles),
+			ttlcache.WithCapacity[InstanceHash, *refCountedFile](fdCacheSize),
 		),
 	}
 
@@ -463,24 +473,29 @@ func (sm *StorageManager) getDiskCrypto(instanceHash InstanceHash) (*diskCryptoE
 // complete.  All I/O must use ReadAt / WriteAt (offset-based,
 // concurrency-safe).
 func (sm *StorageManager) getFile(instanceHash InstanceHash, storageID StorageID) (*refCountedFile, error) {
-	if item := sm.openFiles.Get(instanceHash); item != nil {
-		rc := item.Value()
-		if rc.Acquire() {
-			return rc, nil
+	if sm.fdCacheMaxSize > 0 {
+		if item := sm.openFiles.Get(instanceHash); item != nil {
+			rc := item.Value()
+			if rc.Acquire() {
+				return rc, nil
+			}
+			// Ref count already at zero (being closed) — fall through to open a new one.
 		}
-		// Ref count already at zero (being closed) — fall through to open a new one.
 	}
 
 	objectPath := sm.getObjectPathForDir(storageID, instanceHash)
+
 	file, err := os.OpenFile(objectPath, os.O_RDWR, 0600)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to open object file")
 	}
 
 	rc := newRefCountedFile(file)
-	// The cache takes its own reference.
-	rc.Acquire()
-	sm.openFiles.Set(instanceHash, rc, ttlcache.DefaultTTL)
+	if sm.fdCacheMaxSize > 0 {
+		// The cache takes its own reference.
+		rc.Acquire()
+		sm.openFiles.Set(instanceHash, rc, ttlcache.DefaultTTL)
+	}
 	return rc, nil
 }
 
@@ -656,8 +671,10 @@ func (sm *StorageManager) InitDiskStorage(ctx context.Context, instanceHash Inst
 	// starts with count=1; the cache's Set takes an extra Acquire, and
 	// we Release the creator's ref since we have no further I/O here.
 	rc := newRefCountedFile(file)
-	rc.Acquire() // for the cache
-	sm.openFiles.Set(instanceHash, rc, ttlcache.DefaultTTL)
+	if sm.fdCacheMaxSize > 0 {
+		rc.Acquire() // for the cache
+		sm.openFiles.Set(instanceHash, rc, ttlcache.DefaultTTL)
+	}
 	rc.Release() // creator's ref
 
 	return meta, nil
@@ -1537,8 +1554,10 @@ func (bw *BlockWriter) Close() error {
 	// Donate the file descriptor to the cache.  The cache's own ref was
 	// not yet taken (the BlockWriter owned the sole ref), so Acquire for
 	// the cache and then Release the writer's ref.
-	bw.file.Acquire() // for the cache
-	bw.sm.openFiles.Set(bw.instanceHash, bw.file, ttlcache.DefaultTTL)
+	if bw.sm.fdCacheMaxSize > 0 {
+		bw.file.Acquire() // for the cache
+		bw.sm.openFiles.Set(bw.instanceHash, bw.file, ttlcache.DefaultTTL)
+	}
 	bw.file.Release() // writer's ref
 
 	// Check if download is complete and call callback

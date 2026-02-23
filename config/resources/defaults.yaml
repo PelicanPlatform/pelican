@@ -87,6 +87,7 @@ Lotman:
       MergeLocalWithDiscovered: false
 LocalCache:
   DefaultMaxAge: 24h
+  FDCacheSize: 500
   HighWaterMarkPercentage: 95
   LowWaterMarkPercentage: 85
   MaxConcurrentPrefetch: 5

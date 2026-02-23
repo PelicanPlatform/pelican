@@ -1641,6 +1641,17 @@ type: int
 default: 85
 components: ["localcache"]
 ---
+name: LocalCache.FDCacheSize
+description: |+
+  Maximum number of file descriptors the persistent cache keeps open for
+  disk-backed objects.  Cached descriptors are shared across concurrent
+  readers and avoid repeated open/close syscalls.  Set to 0 to disable
+  the cache entirely (every read opens a fresh descriptor).
+type: int
+default: 500
+hidden: true
+components: ["localcache"]
+---
 name: LocalCache.PrefetchTimeout
 description: |+
   The maximum time to wait for a prefetch operation to complete before giving up.

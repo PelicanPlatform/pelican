@@ -169,6 +169,7 @@ type Config struct {
 	LocalCache struct {
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
 		DefaultMaxAge time.Duration `mapstructure:"defaultmaxage" yaml:"DefaultMaxAge"`
+		FDCacheSize int `mapstructure:"fdcachesize" yaml:"FDCacheSize"`
 		HighWaterMarkPercentage int `mapstructure:"highwatermarkpercentage" yaml:"HighWaterMarkPercentage"`
 		LowWaterMarkPercentage int `mapstructure:"lowwatermarkpercentage" yaml:"LowWaterMarkPercentage"`
 		MaxConcurrentPrefetch int `mapstructure:"maxconcurrentprefetch" yaml:"MaxConcurrentPrefetch"`
@@ -589,6 +590,7 @@ type configWithType struct {
 	LocalCache struct {
 		DataLocation struct { Type string; Value string }
 		DefaultMaxAge struct { Type string; Value time.Duration }
+		FDCacheSize struct { Type string; Value int }
 		HighWaterMarkPercentage struct { Type string; Value int }
 		LowWaterMarkPercentage struct { Type string; Value int }
 		MaxConcurrentPrefetch struct { Type string; Value int }
