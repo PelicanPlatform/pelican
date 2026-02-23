@@ -71,9 +71,22 @@ touch ${PELICAN_CONFIG}
 PELICAN_PID=$!
 
 cleanup() {
+    # Kill the process first, then wait for it to exit before deleting data.
+    # BadgerDB can hang indefinitely if its data directory is removed while
+    # it's still running.
+    kill $PELICAN_PID 2>/dev/null || :
+    # Wait up to 10 seconds for graceful shutdown, then force kill
+    for _i in {1..20}; do
+        if ! kill -0 $PELICAN_PID 2>/dev/null; then
+            break
+        fi
+        sleep 0.5
+    done
+    # Force kill if still running
+    kill -9 $PELICAN_PID 2>/dev/null || :
+    wait $PELICAN_PID 2>/dev/null || :
+    # Now safe to remove the data directory
     rm -rf -- "$SOCKET_DIR"
-    kill $PELICAN_PID
-    wait $PELICAN_PID || :
 }
 trap cleanup EXIT
 
@@ -88,6 +101,25 @@ if [ ! -e "$SOCKET_DIR/socket" ]; then
   exit 1
 fi
 
+# Helper function to check cache status using only-if-cached header.
+# Args: $1 = object_path, $2 = expected_status_code
+# Returns 0 if status code matches expected, 1 otherwise.
+check_cache_status() {
+  local object_path="$1"
+  local expected="$2"
+  local status_code
+  status_code=$(curl -s -o /dev/null -w "%{http_code}" \
+    --unix-socket "$SOCKET_DIR/socket" \
+    -H "Cache-Control: only-if-cached" \
+    -X HEAD "http://localhost${object_path}")
+  [ "$status_code" = "$expected" ]
+}
+
+# Verify object is NOT cached before download (should return 504)
+if ! check_cache_status "/pelicanplatform/test/hello-world.txt" "504"; then
+  echo "Object should return 504 before first download"
+  exit 1
+fi
 
 NEAREST_CACHE="unix://$SOCKET_DIR/socket" ./stash_plugin -d osdf:///pelicanplatform/test/hello-world.txt /dev/null
 exit_status=$?
@@ -97,7 +129,7 @@ if ! [[ "$exit_status" = 0 ]]; then
   exit 1
 fi
 
-if [ ! -e "$SOCKET_DIR/data/pelicanplatform/test/hello-world.txt.DONE" ]; then
+if ! check_cache_status "/pelicanplatform/test/hello-world.txt" "200"; then
   echo "Test file not in local cache"
   exit 1
 fi
@@ -111,7 +143,7 @@ if ! [[ "$exit_status" = 0 ]]; then
   exit 1
 fi
 
-if [ ! -e "$SOCKET_DIR/data/pelicanplatform/test/hello-world.txt.DONE" ]; then
+if ! check_cache_status "/pelicanplatform/test/hello-world.txt" "200"; then
   echo "Test file not in local cache"
   exit 1
 fi
