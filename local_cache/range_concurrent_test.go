@@ -25,11 +25,14 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -460,5 +463,137 @@ func TestRangeHTTPHeaders(t *testing.T) {
 		defer resp.Body.Close()
 
 		assert.Equal(t, http.StatusRequestedRangeNotSatisfiable, resp.StatusCode)
+	})
+}
+
+// TestMultiRangeRequest verifies that the cache correctly handles HTTP requests
+// with multiple ranges (e.g., "Range: bytes=0-99, 500-599").  The Go standard
+// library's http.ServeContent produces a multipart/byteranges response in this
+// case.  The test covers both cache-miss (first request triggers a download)
+// and cache-hit (second request served from cache) scenarios.
+func TestMultiRangeRequest(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+
+	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
+
+	const fileSize = 100 * 1024 // 100 KB
+	originData := make([]byte, fileSize)
+	_, err := rand.Read(originData)
+	require.NoError(t, err)
+
+	originPath := filepath.Join(ft.Exports[0].StoragePrefix, "multi_range.bin")
+	require.NoError(t, os.WriteFile(originPath, originData, 0644))
+
+	transport := config.GetTransport().Clone()
+	transport.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
+		return net.Dial("unix", param.LocalCache_Socket.GetString())
+	}
+	httpClient := &http.Client{Transport: transport}
+
+	// Define ranges to request: three non-contiguous byte ranges.
+	type expectedPart struct {
+		start int64
+		end   int64
+	}
+	wantParts := []expectedPart{
+		{0, 99},
+		{500, 599},
+		{fileSize - 256, fileSize - 1},
+	}
+	rangeHeader := fmt.Sprintf("bytes=%d-%d, %d-%d, %d-%d",
+		wantParts[0].start, wantParts[0].end,
+		wantParts[1].start, wantParts[1].end,
+		wantParts[2].start, wantParts[2].end,
+	)
+
+	// verifyMultiRangeResponse checks that the response is a valid
+	// multipart/byteranges response containing the expected byte ranges.
+	verifyMultiRangeResponse := func(t *testing.T, resp *http.Response) {
+		t.Helper()
+
+		assert.Equal(t, http.StatusPartialContent, resp.StatusCode,
+			"multi-range request should return 206 Partial Content")
+
+		ct := resp.Header.Get("Content-Type")
+		mediaType, params, err := mime.ParseMediaType(ct)
+		require.NoError(t, err, "failed to parse Content-Type %q", ct)
+		assert.Equal(t, "multipart/byteranges", mediaType)
+
+		boundary := params["boundary"]
+		require.NotEmpty(t, boundary, "Content-Type must include a boundary parameter")
+
+		mr := multipart.NewReader(resp.Body, boundary)
+
+		for i, want := range wantParts {
+			part, err := mr.NextPart()
+			require.NoError(t, err, "failed to read part %d", i)
+
+			// Verify the Content-Range header on each part.
+			cr := part.Header.Get("Content-Range")
+			expectedCR := fmt.Sprintf("bytes %d-%d/%d", want.start, want.end, fileSize)
+			assert.Equal(t, expectedCR, cr, "part %d Content-Range mismatch", i)
+
+			// Read and verify the body of each part.
+			partBody, err := io.ReadAll(part)
+			require.NoError(t, err, "failed to read body of part %d", i)
+			expected := originData[want.start : want.end+1]
+			assert.Equal(t, expected, partBody, "part %d body mismatch", i)
+		}
+
+		// There should be no more parts.
+		_, err = mr.NextPart()
+		assert.ErrorIs(t, err, io.EOF, "expected EOF after last part")
+	}
+
+	// --- Cache miss: first request downloads from origin ---
+	t.Run("cache-miss", func(t *testing.T) {
+		req, err := http.NewRequest("GET", "http://localhost/test/multi_range.bin", nil)
+		require.NoError(t, err)
+		req.Header.Set("Range", rangeHeader)
+
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		verifyMultiRangeResponse(t, resp)
+	})
+
+	// --- Cache hit: second request served from cache ---
+	t.Run("cache-hit", func(t *testing.T) {
+		req, err := http.NewRequest("GET", "http://localhost/test/multi_range.bin", nil)
+		require.NoError(t, err)
+		req.Header.Set("Range", rangeHeader)
+
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		verifyMultiRangeResponse(t, resp)
+	})
+
+	// --- Single range still works after multi-range ---
+	t.Run("single-range-after-multi", func(t *testing.T) {
+		req, err := http.NewRequest("GET", "http://localhost/test/multi_range.bin", nil)
+		require.NoError(t, err)
+		req.Header.Set("Range", "bytes=0-99")
+
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusPartialContent, resp.StatusCode)
+
+		// Single range should NOT be multipart — just a direct Content-Range response.
+		ct := resp.Header.Get("Content-Type")
+		assert.False(t, strings.HasPrefix(ct, "multipart/"),
+			"single range should not produce multipart response, got %q", ct)
+		assert.Equal(t,
+			fmt.Sprintf("bytes 0-99/%d", fileSize),
+			resp.Header.Get("Content-Range"))
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Equal(t, originData[:100], body)
 	})
 }
