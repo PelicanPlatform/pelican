@@ -109,6 +109,7 @@ check_cache_status() {
   local expected="$2"
   local status_code
   status_code=$(curl -s -o /dev/null -w "%{http_code}" \
+    --connect-timeout 5 --max-time 10 \
     --unix-socket "$SOCKET_DIR/socket" \
     -H "Cache-Control: only-if-cached" \
     -X HEAD "http://localhost${object_path}")
