@@ -416,7 +416,9 @@ type Config struct {
 		ConfigUpdateFailureTimeout time.Duration `mapstructure:"configupdatefailuretimeout" yaml:"ConfigUpdateFailureTimeout"`
 		DetailedMonitoringHost string `mapstructure:"detailedmonitoringhost" yaml:"DetailedMonitoringHost"`
 		DetailedMonitoringPort int `mapstructure:"detailedmonitoringport" yaml:"DetailedMonitoringPort"`
+		EnableFireflies bool `mapstructure:"enablefireflies" yaml:"EnableFireflies"`
 		EnableLocalMonitoring bool `mapstructure:"enablelocalmonitoring" yaml:"EnableLocalMonitoring"`
+		FirefliesForwardingAddress string `mapstructure:"firefliesforwardingaddress" yaml:"FirefliesForwardingAddress"`
 		HttpMaxDelay time.Duration `mapstructure:"httpmaxdelay" yaml:"HttpMaxDelay"`
 		LocalMonitoringHost string `mapstructure:"localmonitoringhost" yaml:"LocalMonitoringHost"`
 		LocalMonitoringPort int `mapstructure:"localmonitoringport" yaml:"LocalMonitoringPort"`
@@ -829,7 +831,9 @@ type configWithType struct {
 		ConfigUpdateFailureTimeout struct { Type string; Value time.Duration }
 		DetailedMonitoringHost struct { Type string; Value string }
 		DetailedMonitoringPort struct { Type string; Value int }
+		EnableFireflies struct { Type string; Value bool }
 		EnableLocalMonitoring struct { Type string; Value bool }
+		FirefliesForwardingAddress struct { Type string; Value string }
 		HttpMaxDelay struct { Type string; Value time.Duration }
 		LocalMonitoringHost struct { Type string; Value string }
 		LocalMonitoringPort struct { Type string; Value int }

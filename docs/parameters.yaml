@@ -3535,6 +3535,20 @@ type: bool
 default: true
 components: ["origin", "cache"]
 ---
+name: Xrootd.EnableFireflies
+description: |+
+  Enable firefly configuration for network flow analytics.
+type: bool
+default: false
+components: ["origin", "cache"]
+---
+name: Xrootd.FirefliesForwardingAddress
+description: |+
+  The address to forward firefly data to.
+type: url
+default: us.scitags.org:10514
+components: ["origin", "cache"]
+---
 ############################
 # Monitoring-level configs #
 ############################

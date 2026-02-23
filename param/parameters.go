@@ -428,7 +428,9 @@ var runtimeConfigurableMap = map[string]bool{
 	"Xrootd.ConfigUpdateFailureTimeout": false,
 	"Xrootd.DetailedMonitoringHost": false,
 	"Xrootd.DetailedMonitoringPort": false,
+	"Xrootd.EnableFireflies": false,
 	"Xrootd.EnableLocalMonitoring": false,
+	"Xrootd.FirefliesForwardingAddress": false,
 	"Xrootd.HttpMaxDelay": false,
 	"Xrootd.LocalMonitoringHost": false,
 	"Xrootd.LocalMonitoringPort": false,
@@ -780,6 +782,8 @@ func (sP StringParam) GetString() string {
 			return config.Xrootd.ConfigFile
 		case "Xrootd.DetailedMonitoringHost":
 			return config.Xrootd.DetailedMonitoringHost
+		case "Xrootd.FirefliesForwardingAddress":
+			return config.Xrootd.FirefliesForwardingAddress
 		case "Xrootd.LocalMonitoringHost":
 			return config.Xrootd.LocalMonitoringHost
 		case "Xrootd.MacaroonsKeyFile":
@@ -1168,6 +1172,8 @@ func (bP BoolParam) GetBool() bool {
 			return config.Topology.DisableOrigins
 		case "Xrootd.AutoShutdownEnabled":
 			return config.Xrootd.AutoShutdownEnabled
+		case "Xrootd.EnableFireflies":
+			return config.Xrootd.EnableFireflies
 		case "Xrootd.EnableLocalMonitoring":
 			return config.Xrootd.EnableLocalMonitoring
 	}
@@ -1671,7 +1677,9 @@ var allParameterNames = []string{
 	"Xrootd.ConfigUpdateFailureTimeout",
 	"Xrootd.DetailedMonitoringHost",
 	"Xrootd.DetailedMonitoringPort",
+	"Xrootd.EnableFireflies",
 	"Xrootd.EnableLocalMonitoring",
+	"Xrootd.FirefliesForwardingAddress",
 	"Xrootd.HttpMaxDelay",
 	"Xrootd.LocalMonitoringHost",
 	"Xrootd.LocalMonitoringPort",
@@ -1846,6 +1854,7 @@ var (
 	Xrootd_Authfile = StringParam{"Xrootd.Authfile"}
 	Xrootd_ConfigFile = StringParam{"Xrootd.ConfigFile"}
 	Xrootd_DetailedMonitoringHost = StringParam{"Xrootd.DetailedMonitoringHost"}
+	Xrootd_FirefliesForwardingAddress = StringParam{"Xrootd.FirefliesForwardingAddress"}
 	Xrootd_LocalMonitoringHost = StringParam{"Xrootd.LocalMonitoringHost"}
 	Xrootd_MacaroonsKeyFile = StringParam{"Xrootd.MacaroonsKeyFile"}
 	Xrootd_ManagerHost = StringParam{"Xrootd.ManagerHost"}
@@ -2006,6 +2015,7 @@ var (
 	Topology_DisableOriginX509 = BoolParam{"Topology.DisableOriginX509"}
 	Topology_DisableOrigins = BoolParam{"Topology.DisableOrigins"}
 	Xrootd_AutoShutdownEnabled = BoolParam{"Xrootd.AutoShutdownEnabled"}
+	Xrootd_EnableFireflies = BoolParam{"Xrootd.EnableFireflies"}
 	Xrootd_EnableLocalMonitoring = BoolParam{"Xrootd.EnableLocalMonitoring"}
 )
 
