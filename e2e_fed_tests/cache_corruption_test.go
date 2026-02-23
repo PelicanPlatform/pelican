@@ -70,6 +70,10 @@ func setupCorruptEnv(t *testing.T) *corruptEnv {
 	t.Cleanup(server_utils.ResetTestState)
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
+	// Disable the FD cache so that tests that delete on-disk files
+	// (e.g. TestCorruption_MissingBlockFile) see the deletion immediately
+	// instead of reading through a stale cached file descriptor.
+	require.NoError(t, param.LocalCache_FDCacheSize.Set(0))
 	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
 
 	token := getTempTokenForTest(t)

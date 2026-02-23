@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/pelicanplatform/pelican/byte_rate"
-	"github.com/spf13/viper"
 )
 
 type StringParam struct {
@@ -232,6 +231,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"IssuerKeysDirectory": false,
 	"LocalCache.DataLocation": false,
 	"LocalCache.DefaultMaxAge": false,
+	"LocalCache.FDCacheSize": false,
 	"LocalCache.HighWaterMarkPercentage": false,
 	"LocalCache.LowWaterMarkPercentage": false,
 	"LocalCache.MaxConcurrentPrefetch": false,
@@ -807,6 +807,7 @@ var intAccessors = map[string]func(*Config) int{
 	"Director.MaxStatResponse": func(c *Config) int { return c.Director.MaxStatResponse },
 	"Director.MinStatResponse": func(c *Config) int { return c.Director.MinStatResponse },
 	"Director.StatConcurrencyLimit": func(c *Config) int { return c.Director.StatConcurrencyLimit },
+	"LocalCache.FDCacheSize": func(c *Config) int { return c.LocalCache.FDCacheSize },
 	"LocalCache.HighWaterMarkPercentage": func(c *Config) int { return c.LocalCache.HighWaterMarkPercentage },
 	"LocalCache.LowWaterMarkPercentage": func(c *Config) int { return c.LocalCache.LowWaterMarkPercentage },
 	"LocalCache.MaxConcurrentPrefetch": func(c *Config) int { return c.LocalCache.MaxConcurrentPrefetch },
@@ -1307,6 +1308,7 @@ var allParameterNames = []string{
 	"IssuerKeysDirectory",
 	"LocalCache.DataLocation",
 	"LocalCache.DefaultMaxAge",
+	"LocalCache.FDCacheSize",
 	"LocalCache.HighWaterMarkPercentage",
 	"LocalCache.LowWaterMarkPercentage",
 	"LocalCache.MaxConcurrentPrefetch",
@@ -1799,6 +1801,7 @@ var (
 	Director_MaxStatResponse = IntParam{"Director.MaxStatResponse"}
 	Director_MinStatResponse = IntParam{"Director.MinStatResponse"}
 	Director_StatConcurrencyLimit = IntParam{"Director.StatConcurrencyLimit"}
+	LocalCache_FDCacheSize = IntParam{"LocalCache.FDCacheSize"}
 	LocalCache_HighWaterMarkPercentage = IntParam{"LocalCache.HighWaterMarkPercentage"}
 	LocalCache_LowWaterMarkPercentage = IntParam{"LocalCache.LowWaterMarkPercentage"}
 	LocalCache_MaxConcurrentPrefetch = IntParam{"LocalCache.MaxConcurrentPrefetch"}
@@ -2229,6 +2232,7 @@ func init() {
 		"Director.MaxStatResponse": Director_MaxStatResponse,
 		"Director.MinStatResponse": Director_MinStatResponse,
 		"Director.StatConcurrencyLimit": Director_StatConcurrencyLimit,
+		"LocalCache.FDCacheSize": LocalCache_FDCacheSize,
 		"LocalCache.HighWaterMarkPercentage": LocalCache_HighWaterMarkPercentage,
 		"LocalCache.LowWaterMarkPercentage": LocalCache_LowWaterMarkPercentage,
 		"LocalCache.MaxConcurrentPrefetch": LocalCache_MaxConcurrentPrefetch,
