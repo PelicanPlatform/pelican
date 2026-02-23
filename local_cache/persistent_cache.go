@@ -748,33 +748,75 @@ func (pc *PersistentCache) newFetchingRangeReader(
 	startByte, endByte int64,
 ) (*RangeReader, error) {
 	var fetcher *BlockFetcherV2
-	var fetcherOwned bool // true if we created it (must close on error/onClose)
+
+	var fetchCallback func(ctx context.Context, startBlock, endBlock uint32) error
+
+	// Lazy fetcher lifecycle state.  A single sync.Once serializes both
+	// creation (in fetchCallback) and cleanup (in closeLazy).
+	var lazyOnce sync.Once
+	var lazyBf *BlockFetcherV2
+	var lazyErr error
+
+	// closeLazy ensures any lazily-created fetcher is closed.
+	// It leverages lazyOnce to synchronize with fetchCallback:
+	//
+	//   Case 1 — closeLazy runs first: our Do runs its func (setting
+	//   lazyErr), "spending" the Once so fetchCallback's Do is a no-op.
+	//   lazyBf is nil, nothing to close.
+	//
+	//   Case 2 — fetchCallback's Do already ran: our Do is a no-op.
+	//   lazyBf is set (visible via the happens-before edge), close it.
+	//
+	//   Case 3 — fetchCallback's Do is in progress: our Do blocks until
+	//   it finishes, then behaves like Case 2.
+	closeLazy := func() {
+		lazyOnce.Do(func() {
+			lazyErr = errors.New("reader closed before fetcher was needed")
+		})
+		if lazyBf != nil {
+			lazyBf.Close()
+		}
+	}
 
 	if res.dl != nil && res.dl.fetcher != nil {
 		// Reuse the download's fetcher — the sequential download is
 		// already writing blocks and this fetcher can handle on-demand
 		// range fetches for blocks ahead of the download position.
 		fetcher = res.dl.fetcher
-	} else {
-		// No active download or no fetcher — create a per-reader fetcher.
-		var err error
-		var fedTP client.TokenProvider
-		if pc.getFedToken() != "" {
-			fedTP = pc.fedTokenAsProvider()
-		}
-		fetcher, err = NewBlockFetcherV2(
-			pc.storage, res.instanceHash, res.pelicanURL, res.token, fedTP, pc.te,
-			BlockFetcherV2Config{PrefetchSem: pc.prefetchSem},
-		)
-		if err != nil {
-			log.Warnf("Failed to create block fetcher: %v", err)
-		}
-		fetcherOwned = true
-	}
-
-	var fetchCallback func(ctx context.Context, startBlock, endBlock uint32) error
-	if fetcher != nil {
 		fetchCallback = fetcher.CreateFetchCallback()
+	} else {
+		// No active download with a fetcher — use a lazy fetch callback
+		// that defers the expensive NewBlockFetcherV2 → te.NewClient()
+		// call until a block is actually needed (cache miss or corruption
+		// repair).  This avoids overhead on every cache-hit read while
+		// still providing a non-nil fetchBlocks callback so that
+		// auto-repair can work.
+		instanceHash := res.instanceHash
+		pelicanURL := res.pelicanURL
+		token := res.token
+
+		fetchCallback = func(ctx context.Context, startBlock, endBlock uint32) error {
+			lazyOnce.Do(func() {
+				var fedTP client.TokenProvider
+				if pc.getFedToken() != "" {
+					fedTP = pc.fedTokenAsProvider()
+				}
+				log.Debugf("Lazy fetcher: creating BlockFetcherV2 for %s (blocks %d-%d triggered)",
+					instanceHash, startBlock, endBlock)
+				var bf *BlockFetcherV2
+				bf, lazyErr = NewBlockFetcherV2(
+					pc.storage, instanceHash, pelicanURL, token, fedTP, pc.te,
+					BlockFetcherV2Config{PrefetchSem: pc.prefetchSem},
+				)
+				if bf != nil {
+					lazyBf = bf
+				}
+			})
+			if lazyErr != nil {
+				return errors.Wrap(lazyErr, "lazy fetcher creation failed")
+			}
+			return lazyBf.FetchBlocks(ctx, startBlock, endBlock)
+		}
 	}
 
 	var dlClientDone func()
@@ -787,9 +829,7 @@ func (pc *PersistentCache) newFetchingRangeReader(
 		if dlClientDone != nil {
 			dlClientDone()
 		}
-		if fetcherOwned && fetcher != nil {
-			fetcher.Close()
-		}
+		closeLazy()
 		return nil, err
 	}
 
@@ -797,9 +837,10 @@ func (pc *PersistentCache) newFetchingRangeReader(
 		if dlClientDone != nil {
 			dlClientDone()
 		}
-		if fetcherOwned && fetcher != nil {
-			fetcher.Close()
-		}
+		// Close the lazy fetcher if it was ever created.  For the
+		// reused-fetcher path (fetcher != nil), lazyBf is always nil
+		// so closeLazy is a no-op.
+		closeLazy()
 	}
 
 	return rr, nil
@@ -1650,6 +1691,17 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 		}
 		close(dl.completionDone)
 		return nil
+	}
+
+	// Store the ETag mapping eagerly so that concurrent and subsequent
+	// requests can find this object in the cache immediately.  Without
+	// this, there is a race: the HTTP handler can finish serving the
+	// response (all blocks read via the fetcher) before AdoptTransfer's
+	// onComplete callback stores the ETag, causing the next request to
+	// see a cache miss and re-download from origin.  The onComplete
+	// callback still calls SetLatestETag (idempotent), which is fine.
+	if err := pc.db.SetLatestETag(dl.objectHash, dl.etag, dl.etagObserved); err != nil {
+		log.Warnf("Failed to store early ETag mapping for disk download: %v", err)
 	}
 
 	// For disk (large-file) mode, hand off the in-flight transfer to a

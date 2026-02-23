@@ -1,3 +1,5 @@
+//go:build !linux
+
 /***************************************************************
  *
  * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
@@ -15,8 +17,6 @@
  * limitations under the License.
  *
  ***************************************************************/
-
-//go:build !linux
 
 package local_cache
 
