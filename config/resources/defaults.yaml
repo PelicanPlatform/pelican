@@ -124,6 +124,8 @@ Xrootd:
   SummaryMonitoringPort: 9931
   AuthRefreshInterval: 5m
   EnableLocalMonitoring: true
+  EnableFireflies: false
+  FirefliesForwardingAddress: "us.scitags.org:10514"
 Transport:
   DialerTimeout: 10s
   DialerKeepAlive: 30s
