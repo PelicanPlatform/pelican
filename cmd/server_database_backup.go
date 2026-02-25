@@ -126,10 +126,10 @@ If no file is specified, the most recent backup is used.`,
 // use a generic server initialization approach.
 func initServerForBackup(ctx context.Context) error {
 	// Attempt to initialize server config, arbitrarily picking `OriginType`.
-	if err := config.InitServer(ctx, server_structs.OriginType); err == nil {
-		return nil
+	if err := config.InitServer(ctx, server_structs.OriginType); err != nil {
+		return errors.Wrap(err, "failed to initialize server configuration")
 	}
-	return errors.New("failed to initialize server configuration; ensure a valid pelican.yaml is present")
+	return nil
 }
 
 func cliBackupCreate(cmd *cobra.Command, args []string) error {
@@ -146,7 +146,9 @@ func cliBackupCreate(cmd *cobra.Command, args []string) error {
 		return errors.New("Server.DbLocation is not configured")
 	}
 
-	// We need the database open for VACUUM INTO.
+	// We need the database open for VACUUM INTO. Passing 0 as server type
+	// opens the database without running any type-specific migrations,
+	// which is appropriate for backup commands that only need read access.
 	if database.ServerDatabase == nil {
 		if err := database.InitServerDatabase(0); err != nil {
 			return errors.Wrap(err, "failed to initialize database for backup")
