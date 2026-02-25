@@ -30,7 +30,7 @@ import (
 
 // StoreRestartInfo stores the information needed for restarting XRootD
 // Windows stub - restart not implemented on Windows
-func StoreRestartInfo(launchers []daemon.Launcher, pids []int, egrp *errgroup.Group, callback func(int), cache bool, cmsd bool, priv bool) {
+func StoreRestartInfo(launchers []daemon.Launcher, pids []int, egrp *errgroup.Group, callback func(int), ctx context.Context, cache bool, cmsd bool, priv bool) {
 	// No-op on Windows
 }
 

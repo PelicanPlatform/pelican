@@ -41,8 +41,8 @@ func TestStoreRestartInfo(t *testing.T) {
 	egrp := &errgroup.Group{}
 	callback := func(port int) {}
 
-	StoreRestartInfo(launchers, nil, egrp, callback, true, false, true)
-	StoreRestartInfo(launchers, nil, egrp, callback, false, true, false)
+	StoreRestartInfo(launchers, nil, egrp, callback, context.Background(), true, false, true)
+	StoreRestartInfo(launchers, nil, egrp, callback, context.Background(), false, true, false)
 
 	require.Len(t, restartInfos, 2)
 
@@ -76,10 +76,10 @@ func TestStoreRestartInfoReplacesByRole(t *testing.T) {
 	var launchers []daemon.Launcher
 	egrp := &errgroup.Group{}
 
-	StoreRestartInfo(launchers, nil, egrp, func(int) {}, true, false, false)
+	StoreRestartInfo(launchers, nil, egrp, func(int) {}, context.Background(), true, false, false)
 	require.Len(t, restartInfos, 1)
 
-	StoreRestartInfo(launchers, nil, egrp, func(int) {}, true, true, true)
+	StoreRestartInfo(launchers, nil, egrp, func(int) {}, context.Background(), true, true, true)
 
 	require.Len(t, restartInfos, 1)
 	assert.True(t, restartInfos[0].useCMSD)
@@ -96,7 +96,7 @@ func TestRestartXrootd_NoProcesses(t *testing.T) {
 	var launchers []daemon.Launcher
 	egrp := &errgroup.Group{}
 	callback := func(int) {}
-	StoreRestartInfo(launchers, []int{999999, 999998}, egrp, callback, false, false, false)
+	StoreRestartInfo(launchers, []int{999999, 999998}, egrp, callback, context.Background(), false, false, false)
 
 	// Try to restart with empty PID list - should fail since there's no xrootd config
 	_, err := RestartXrootd(ctx, []int{})

@@ -38,6 +38,7 @@ import (
 )
 
 type restartInfo struct {
+	ctx        context.Context
 	launchers  []daemon.Launcher
 	egrp       *errgroup.Group
 	callback   func(int)
@@ -68,8 +69,9 @@ func ResetRestartState() {
 
 // StoreRestartInfo stores the information needed for restarting XRootD
 // This should be called during initial launch after PIDs are known.
-func StoreRestartInfo(launchers []daemon.Launcher, pids []int, egrp *errgroup.Group, callback func(int), cache bool, cmsd bool, priv bool) {
+func StoreRestartInfo(launchers []daemon.Launcher, pids []int, egrp *errgroup.Group, callback func(int), ctx context.Context, cache bool, cmsd bool, priv bool) {
 	info := restartInfo{
+		ctx:        ctx,
 		launchers:  launchers,
 		egrp:       egrp,
 		callback:   callback,
@@ -210,7 +212,7 @@ func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error
 		}
 
 		log.Info("Launching new XRootD daemons")
-		pids, launchErr := LaunchDaemons(ctx, newLaunchers, info.egrp, info.callback)
+		pids, launchErr := LaunchDaemons(info.ctx, newLaunchers, info.egrp, info.callback)
 		if launchErr != nil {
 			return nil, errors.Wrap(launchErr, "Failed to launch XRootD daemons")
 		}
