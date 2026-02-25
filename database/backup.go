@@ -25,6 +25,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
+	"database/sql"
 	"encoding/binary"
 	"encoding/pem"
 	"fmt"
@@ -47,6 +48,7 @@ import (
 	"golang.org/x/crypto/nacl/secretbox"
 	"golang.org/x/sync/errgroup"
 
+	_ "github.com/glebarez/sqlite"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/version"
@@ -120,11 +122,12 @@ type BackupMetadata struct {
 }
 
 // collectBackupMetadata gathers metadata about the current system and
-// database being backed up.
-func collectBackupMetadata(dbPath string) BackupMetadata {
+// database being backed up. The provided timestamp is used so that the
+// metadata and backup filename are consistent.
+func collectBackupMetadata(dbPath string, backupTime time.Time) BackupMetadata {
 	meta := BackupMetadata{
 		FormatVersion:  "1",
-		Timestamp:      time.Now().UTC().Format(time.RFC3339),
+		Timestamp:      backupTime.Format(time.RFC3339),
 		PelicanVersion: version.GetVersion(),
 		DatabasePath:   dbPath,
 		GOOS:           runtime.GOOS,
@@ -377,6 +380,9 @@ func createBackup(ctx context.Context) error {
 		return errors.New("server database is not initialized")
 	}
 
+	// Capture the timestamp once so that the metadata and filename are consistent.
+	backupTime := time.Now().UTC()
+
 	// Get issuer keys for encryption.
 	allKeys := config.GetIssuerPrivateKeys()
 	if len(allKeys) == 0 {
@@ -439,7 +445,7 @@ func createBackup(ctx context.Context) error {
 	}()
 
 	// Write the metadata PEM block first (human-readable, unencrypted).
-	meta := collectBackupMetadata(dbPath)
+	meta := collectBackupMetadata(dbPath, backupTime)
 	if err := writeBackupMetadata(tmpBackupFile, meta); err != nil {
 		return errors.Wrap(err, "failed to write backup metadata block")
 	}
@@ -477,7 +483,8 @@ func createBackup(ctx context.Context) error {
 	}
 
 	// Atomically move the temporary file to the final backup path.
-	timestamp := time.Now().UTC().Format(backupTimestampFormat)
+	// Use the same backupTime captured at the start for the filename.
+	timestamp := backupTime.Format(backupTimestampFormat)
 	backupFileName := fmt.Sprintf("%s%s%s", backupFilePrefix, timestamp, backupFileExt)
 	backupPath := filepath.Join(backupDir, backupFileName)
 
@@ -698,6 +705,13 @@ func restoreFromSingleBackup(dbPath, backupPath string, issuerKeys map[string]jw
 	var baseNonce [24]byte
 	dekDecrypted := false
 
+	// Zero out the DEK when we're done to reduce the window for memory-dump attacks.
+	defer func() {
+		for i := range dek {
+			dek[i] = 0
+		}
+	}()
+
 	// We need to save un-tried key blocks in case we find the matching key later.
 	type keyBlockEntry struct {
 		keyID string
@@ -867,6 +881,11 @@ func restoreFromSingleBackup(dbPath, backupPath string, issuerKeys map[string]jw
 		return false, errors.Wrap(err, "failed to close restored database file")
 	}
 
+	// Verify the restored file is a valid SQLite database before putting it in place.
+	if err := verifySQLiteIntegrity(restoredTmpPath); err != nil {
+		return false, errors.Wrap(err, "restored database failed integrity check")
+	}
+
 	// Set appropriate permissions before rename.
 	if err := os.Chmod(restoredTmpPath, 0600); err != nil {
 		return false, errors.Wrap(err, "failed to set permissions on restored database")
@@ -878,6 +897,26 @@ func restoreFromSingleBackup(dbPath, backupPath string, issuerKeys map[string]jw
 	}
 
 	return true, nil
+}
+
+// verifySQLiteIntegrity opens the file at dbPath as a SQLite database and
+// runs PRAGMA integrity_check to verify it is not corrupted. This prevents
+// restoring a backup that was damaged during storage or decryption.
+func verifySQLiteIntegrity(dbPath string) error {
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return errors.Wrap(err, "failed to open database for integrity check")
+	}
+	defer db.Close()
+
+	var result string
+	if err := db.QueryRow("PRAGMA integrity_check").Scan(&result); err != nil {
+		return errors.Wrap(err, "integrity check query failed")
+	}
+	if result != "ok" {
+		return fmt.Errorf("integrity check failed: %s", result)
+	}
+	return nil
 }
 
 // BackupInfo holds metadata about a backup file, suitable for display in
