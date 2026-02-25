@@ -394,6 +394,12 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 			routePrefix = prefix
 		}
 
+		// Set the Prefix on the WebDAV handler so that:
+		// 1. stripPrefix correctly removes the route prefix to get the filesystem path
+		// 2. PROPFIND responses include the full route prefix in href elements,
+		//    which is required for WebDAV clients like rclone to properly resolve paths
+		handler.Prefix = routePrefix
+
 		// Create a route group for this prefix
 		group := engine.Group(routePrefix)
 		group.Use(httpMetricsMiddleware())
@@ -404,21 +410,17 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 			// Get the path relative to the export (strip the federation prefix)
 			wildcardPath := c.Param("path")
 
-			// The wildcardPath is relative to the federation prefix (e.g., /test)
-			// Pass only the wildcardPath to WebDAV so it writes relative to storage root
-			newPath := wildcardPath
-
-			// Create a shallow copy of the request and modify its URL
-			modifiedReq := c.Request.Clone(c.Request.Context())
-			modifiedURL := *c.Request.URL
-			modifiedURL.Path = newPath
-			modifiedReq.URL = &modifiedURL
-
 			if c.Request.Method == http.MethodHead {
-				// Pass the modified request and file path info to handleHeadWithChecksum
-				handleHeadWithChecksum(c, handler, modifiedReq, wildcardPath, storagePrefix)
+				// For HEAD requests, pass the original request to the WebDAV handler
+				// (it needs the full URL so its Prefix stripping works correctly).
+				// wildcardPath is used only for checksum lookup on the filesystem.
+				handleHeadWithChecksum(c, handler, c.Request, wildcardPath, storagePrefix)
 			} else {
-				handler.ServeHTTP(c.Writer, modifiedReq)
+				// For all other methods (including PROPFIND), pass the original request
+				// to the WebDAV handler. The handler's Prefix field ensures it strips
+				// the route prefix for filesystem access while using it to construct
+				// correct href values in responses.
+				handler.ServeHTTP(c.Writer, c.Request)
 			}
 		}
 
@@ -442,7 +444,7 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 }
 
 // handleHeadWithChecksum handles HEAD requests and adds checksum headers per RFC 3230
-func handleHeadWithChecksum(c *gin.Context, handler *webdav.Handler, modifiedReq *http.Request, relativePath string, storagePrefix string) {
+func handleHeadWithChecksum(c *gin.Context, handler *webdav.Handler, req *http.Request, relativePath string, storagePrefix string) {
 	// Check if client requested checksums via Want-Digest header
 	wantDigest := c.GetHeader("Want-Digest")
 	if wantDigest == "" {
@@ -499,5 +501,5 @@ func handleHeadWithChecksum(c *gin.Context, handler *webdav.Handler, modifiedReq
 	}
 
 	// Now let the WebDAV handler process the HEAD request
-	handler.ServeHTTP(c.Writer, modifiedReq)
+	handler.ServeHTTP(c.Writer, req)
 }

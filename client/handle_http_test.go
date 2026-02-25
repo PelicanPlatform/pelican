@@ -776,7 +776,7 @@ func TestSortAttempts(t *testing.T) {
 
 	defer cancel()
 
-	token := NewTokenGenerator(nil, nil, config.TokenSharedRead, false)
+	token := NewTokenGenerator(nil, nil, config.TokenRead, false)
 	token.SetToken("aaa")
 	size, results := sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt2, attempt3}, token)
 	assert.Equal(t, int64(42), size)
@@ -2324,7 +2324,7 @@ func TestHeadRequestWithDownloadToken(t *testing.T) {
 	svrURL, err := url.Parse(svr.URL)
 	require.NoError(t, err)
 
-	token := NewTokenGenerator(nil, nil, config.TokenSharedRead, false)
+	token := NewTokenGenerator(nil, nil, config.TokenRead, false)
 	token.SetToken("test-token")
 	transfer := &transferFile{
 		xferType: transferTypeDownload,
@@ -2807,7 +2807,7 @@ func TestPutOverwrite(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create a token generator with a test token
-		token := NewTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token := NewTokenGenerator(nil, nil, config.TokenWrite, false)
 		token.SetToken("test-token")
 
 		// Create a test file to upload
@@ -2867,7 +2867,7 @@ func TestPutOverwrite(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create a token generator with a test token
-		token := NewTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token := NewTokenGenerator(nil, nil, config.TokenWrite, false)
 		token.SetToken("test-token")
 
 		// Create a test file to upload
@@ -2928,7 +2928,7 @@ func TestPutOverwrite(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create a token generator with a test token
-		token := NewTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token := NewTokenGenerator(nil, nil, config.TokenWrite, false)
 		token.SetToken("test-token")
 
 		// Create a test file to upload
@@ -3032,7 +3032,7 @@ func TestPutOverwrite(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create a token generator with a test token
-		token := NewTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token := NewTokenGenerator(nil, nil, config.TokenWrite, false)
 		token.SetToken("test-token")
 
 		// Create a test file to upload
@@ -3166,7 +3166,7 @@ func TestPermissionDeniedError(t *testing.T) {
 	}
 	tj := &TransferJob{
 		remoteURL: remoteURL,
-		token:     NewTokenGenerator(remoteURL, nil, config.TokenSharedRead, false),
+		token:     NewTokenGenerator(remoteURL, nil, config.TokenRead, false),
 	}
 	transfer := &transferFile{
 		ctx:       context.Background(),
