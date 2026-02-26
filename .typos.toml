@@ -1,31 +1,38 @@
-# Configure 'typos' to reduce false positives.
-# For more information, see <https://github.com/crate-ci/typos>.
+# ***************************************************************
+#
+#  Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
+#
+#  Licensed under the Apache License, Version 2.0 (the "License"); you
+#  may not use this file except in compliance with the License.  You may
+#  obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+#
+# ***************************************************************
 
+# See https://github.com/crate-ci/typos for more information
 [default]
-extend-ignore-identifiers-re = [
-    ## Ignore TLAs. Two and three letter acronyms are not worth fixing.
-    "^[A-Za-z]{2,3}$",
-    ## Ignore lotman's use of 'ded' for 'dedicated'.
-    "^ded[A-Z]",
-    "^[a-z]+Ded",
-    ## Ignore server_utils's use of 'dne' for 'does not exist'.
-    "_dne$",
+extend-ignore-words-re = [
+    # Two- and three-letter "words" are common in code
+    "^[[:alpha:]]{2,3}$",
 ]
 
 [default.extend-identifiers]
-## The 'cipher' library uses "Encrypter"; 'typos' prefers "Encryptor".
-NewCFBEncrypter = "NewCFBEncrypter"
-## HTCondor's daemon names follow the usual "{word} + 'd'" convention.
-StartdAttrs = "StartdAttrs"
+# HTCondor's daemon names follow the usual "{word} + 'd'" convention
 condor_startd = "condor_startd"
-STARTD = "STARTD"
 Startd = "Startd"
+STARTD = "STARTD"
+StartdAttrs = "StartdAttrs"
 
-[files]
-extend-exclude = [
-    ## Ignore configuration files and the like.
-    "go.mod",
-    "xrootd/resources/osdf-authfile",
-    ## Ignore this script because of its inline certificates.
-    "github_scripts/osx_install.sh",
+[type.xrootd-metrics]
+extend-glob = ["xrootd_metrics.go"]
+extend-ignore-words-re = [
+    # xrootd_metrics.go uses 'toal' as part of XRootD metric field names
+    "toal",
 ]
