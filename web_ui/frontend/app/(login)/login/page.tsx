@@ -182,7 +182,7 @@ export default function Home() {
 
   useEffect(() => {
     const returnUrl = getReturnUrl(window.location.href);
-    if(returnUrl) {
+    if (returnUrl) {
       const encodedReturnUrl = encodeURIComponent(returnUrl);
       setReturnUrl(encodedReturnUrl);
     }
