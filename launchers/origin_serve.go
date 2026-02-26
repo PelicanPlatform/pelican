@@ -162,7 +162,10 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		originServer.SetPids(pids)
 
 		// Store restart information after PIDs are known
-		xrootd.StoreRestartInfo(launchers, pids, egrp, portStartCallback, ctx, false, useCMSD, privileged)
+		preRestartHook := func(hookCtx context.Context) {
+			handleGracefulShutdown(hookCtx, modules, []server_structs.XRootDServer{originServer})
+		}
+		xrootd.StoreRestartInfo(launchers, pids, egrp, portStartCallback, ctx, false, useCMSD, privileged, preRestartHook)
 
 		// Register callback for xrootd logging configuration changes
 		// This must be done after LaunchDaemons so the server has PIDs
