@@ -186,12 +186,9 @@ func GetPassword(newFile bool) ([]byte, error) {
 		return nil, errors.New("Cannot read password; not connected to a terminal")
 	}
 	if newFile {
-		fmt.Fprintln(os.Stderr, "The client is able to save the authorization in a local file.")
-		fmt.Fprintln(os.Stderr, "This prevents the need to reinitialize the authorization for each transfer.")
-		fmt.Fprintln(os.Stderr, "You will be asked for this password whenever a new session is started.")
-		fmt.Fprintln(os.Stderr, "Please provide a new password to encrypt the local OSDF client configuration file: ")
+		fmt.Fprintln(os.Stderr, "Please create a new password to protect your local credentials: ")
 	} else {
-		fmt.Fprintln(os.Stderr, "The OSDF client configuration is encrypted.  Enter your password for the local OSDF client configuration file: ")
+		fmt.Fprintln(os.Stderr, "Please enter the password you created to protect your local credentials: ")
 	}
 
 	stdin := int(os.Stdin.Fd())
