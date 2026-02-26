@@ -1234,6 +1234,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 				ObjectServers: []*url.URL{},
 			}
 			tj.dirResp = dirResp
+			tj.token.DirResp = &dirResp
 			err = nil // Clear the error since we're continuing with explicit caches
 		} else {
 			// No explicit caches, treat this as a fatal error
