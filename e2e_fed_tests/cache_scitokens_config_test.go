@@ -35,7 +35,6 @@ import (
 	"time"
 
 	_ "github.com/glebarez/sqlite"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/client"
