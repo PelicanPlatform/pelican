@@ -70,7 +70,7 @@ func ResetRestartState() {
 
 // StoreRestartInfo stores the information needed for restarting XRootD
 // This should be called during initial launch after PIDs are known.
-func StoreRestartInfo(launchers []daemon.Launcher, pids []int, egrp *errgroup.Group, callback func(int), ctx context.Context, cache bool, cmsd bool, priv bool, preRestartHook func(ctx context.Context)) {
+func StoreRestartInfo(ctx context.Context, launchers []daemon.Launcher, pids []int, egrp *errgroup.Group, callback func(int), cache bool, cmsd bool, priv bool, preRestartHook func(ctx context.Context)) {
 	info := restartInfo{
 		ctx:            ctx,
 		launchers:      launchers,

@@ -179,7 +179,7 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 	preRestartHook := func(hookCtx context.Context) {
 		handleGracefulShutdown(hookCtx, modules, []server_structs.XRootDServer{cacheServer})
 	}
-	xrootd.StoreRestartInfo(launchers, pids, egrp, portStartCallback, ctx, true, useCMSD, privileged, preRestartHook)
+	xrootd.StoreRestartInfo(ctx, launchers, pids, egrp, portStartCallback, true, useCMSD, privileged, preRestartHook)
 
 	// Register callback for xrootd logging configuration changes
 	// This must be done after LaunchDaemons so the server has PIDs
