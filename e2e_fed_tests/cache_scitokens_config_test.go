@@ -247,10 +247,8 @@ default_user = xrootd
 	cacheUrl := param.Cache_Url.GetString()
 	cacheUrlParsed, err := url.Parse(cacheUrl)
 	require.NoError(t, err)
-	testUrl, err := url.Parse(cacheUrlParsed.Scheme + "://" + cacheUrlParsed.Host)
-	require.NoError(t, err)
-	testUrl.Path = filepath.Join("/test", testFileName)
-	_, err = client.DoGet(ctx, testUrl.String(), destPath2, false, client.WithToken(tok))
+	cacheUrlParsed.Path = filepath.Join("/test", testFileName)
+	_, err = client.DoGet(ctx, cacheUrlParsed.String(), destPath2, false, client.WithToken(tok))
 	require.Error(t, err, "Should not be able to access cached data without proper authorization")
 
 	// Step 5: Trigger another cache authz refresh with proper authorization for /test
