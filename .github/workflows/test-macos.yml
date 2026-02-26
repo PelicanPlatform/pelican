@@ -15,6 +15,7 @@ on:
   repository_dispatch:
     types:
       - dispatch-build
+  workflow_call:
   workflow_dispatch:
 
 jobs:
