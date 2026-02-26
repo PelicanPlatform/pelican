@@ -26,6 +26,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
@@ -41,16 +42,20 @@ func RegisterOriginAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.G
 
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusWarning, "Initializing the server, unknown status from the director file transfer test")
 	// start the timer for the director test report timeout
-	server_utils.LaunchPeriodicDirectorTimeout(ctx, egrp, notificationChan)
+	server_utils.LaunchPeriodicDirectorTimeout(ctx, egrp, notificationChan, param.Origin_DirectorTest.GetBool())
 
 	deprecatedGroup := router.Group("/api/v1.0/origin-api")
 	{
-		deprecatedGroup.POST("/directorTest", func(ctx *gin.Context) { server_utils.HandleDirectorTestResponse(ctx, notificationChan) })
+		deprecatedGroup.POST("/directorTest", func(ctx *gin.Context) {
+			server_utils.HandleDirectorTestResponse(ctx, notificationChan, param.Origin_DirectorTest.GetBool())
+		})
 	}
 
 	group := router.Group("/api/v1.0/origin")
 	{
-		group.POST("/directorTest", func(ctx *gin.Context) { server_utils.HandleDirectorTestResponse(ctx, notificationChan) })
+		group.POST("/directorTest", func(ctx *gin.Context) {
+			server_utils.HandleDirectorTestResponse(ctx, notificationChan, param.Origin_DirectorTest.GetBool())
+		})
 	}
 	return nil
 }

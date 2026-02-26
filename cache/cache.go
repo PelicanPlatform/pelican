@@ -40,10 +40,12 @@ func RegisterCacheAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.Gr
 	}
 
 	// start the timer for the director test report timeout
-	server_utils.LaunchPeriodicDirectorTimeout(ctx, egrp, notificationChan)
+	server_utils.LaunchPeriodicDirectorTimeout(ctx, egrp, notificationChan, param.Cache_DirectorTest.GetBool())
 
 	group := router.Group("/api/v1.0/cache")
 	{
-		group.POST("/directorTest", func(ginCtx *gin.Context) { server_utils.HandleDirectorTestResponse(ginCtx, notificationChan) })
+		group.POST("/directorTest", func(ginCtx *gin.Context) {
+			server_utils.HandleDirectorTestResponse(ginCtx, notificationChan, param.Cache_DirectorTest.GetBool())
+		})
 	}
 }
