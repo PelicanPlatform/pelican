@@ -38,15 +38,15 @@ import (
 )
 
 type restartInfo struct {
-	ctx             context.Context
-	launchers       []daemon.Launcher
-	egrp            *errgroup.Group
-	callback        func(int)
-	preRestartHook  func(ctx context.Context)
-	isCache         bool
-	useCMSD         bool
-	privileged      bool
-	pids            []int
+	ctx            context.Context
+	launchers      []daemon.Launcher
+	egrp           *errgroup.Group
+	callback       func(int)
+	preRestartHook func(ctx context.Context)
+	isCache        bool
+	useCMSD        bool
+	privileged     bool
+	pids           []int
 }
 
 var (
