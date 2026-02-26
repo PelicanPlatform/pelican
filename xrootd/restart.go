@@ -38,15 +38,16 @@ import (
 )
 
 type restartInfo struct {
-	ctx            context.Context
-	launchers      []daemon.Launcher
-	egrp           *errgroup.Group
-	callback       func(int)
-	preRestartHook func(ctx context.Context)
-	isCache        bool
-	useCMSD        bool
-	privileged     bool
-	pids           []int
+	ctx             context.Context
+	launchers       []daemon.Launcher
+	egrp            *errgroup.Group
+	callback        func(int)
+	preRestartHook  func(ctx context.Context)
+	postRestartHook func(ctx context.Context)
+	isCache         bool
+	useCMSD         bool
+	privileged      bool
+	pids            []int
 }
 
 var (
@@ -70,17 +71,18 @@ func ResetRestartState() {
 
 // StoreRestartInfo stores the information needed for restarting XRootD
 // This should be called during initial launch after PIDs are known.
-func StoreRestartInfo(ctx context.Context, launchers []daemon.Launcher, pids []int, egrp *errgroup.Group, callback func(int), cache bool, cmsd bool, priv bool, preRestartHook func(ctx context.Context)) {
+func StoreRestartInfo(ctx context.Context, launchers []daemon.Launcher, pids []int, egrp *errgroup.Group, callback func(int), cache bool, cmsd bool, priv bool, preRestartHook func(ctx context.Context), postRestartHook func(ctx context.Context)) {
 	info := restartInfo{
-		ctx:            ctx,
-		launchers:      launchers,
-		egrp:           egrp,
-		callback:       callback,
-		preRestartHook: preRestartHook,
-		isCache:        cache,
-		useCMSD:        cmsd,
-		privileged:     priv,
-		pids:           append([]int(nil), pids...),
+		ctx:             ctx,
+		launchers:       launchers,
+		egrp:            egrp,
+		callback:        callback,
+		preRestartHook:  preRestartHook,
+		postRestartHook: postRestartHook,
+		isCache:         cache,
+		useCMSD:         cmsd,
+		privileged:      priv,
+		pids:            append([]int(nil), pids...),
 	}
 
 	// Replace any existing entry for the same server role; otherwise append.
@@ -242,6 +244,14 @@ func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error
 	restartInfosMu.Unlock()
 
 	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusOK, "XRootD restart complete")
+
+	// Run any post-restart hooks (e.g., re-advertise the server to the Director so
+	// clients can resume routing requests to this server immediately).
+	for _, info := range updatedInfos {
+		if info.postRestartHook != nil {
+			info.postRestartHook(info.ctx)
+		}
+	}
 
 	log.Infof("XRootD restart complete with new PIDs: %v", newPids)
 	return newPids, nil

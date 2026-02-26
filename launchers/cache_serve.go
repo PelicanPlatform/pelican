@@ -179,7 +179,12 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 	preRestartHook := func(hookCtx context.Context) {
 		handleGracefulShutdown(hookCtx, modules, []server_structs.XRootDServer{cacheServer})
 	}
-	xrootd.StoreRestartInfo(ctx, launchers, pids, egrp, portStartCallback, true, useCMSD, privileged, preRestartHook)
+	postRestartHook := func(hookCtx context.Context) {
+		if advErr := launcher_utils.Advertise(hookCtx, []server_structs.XRootDServer{cacheServer}); advErr != nil {
+			log.Errorf("Failed to re-advertise cache to Director after restart: %v", advErr)
+		}
+	}
+	xrootd.StoreRestartInfo(ctx, launchers, pids, egrp, portStartCallback, true, useCMSD, privileged, preRestartHook, postRestartHook)
 
 	// Register callback for xrootd logging configuration changes
 	// This must be done after LaunchDaemons so the server has PIDs
