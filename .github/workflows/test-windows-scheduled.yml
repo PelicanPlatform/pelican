@@ -1,9 +1,5 @@
 ---
-name: Run Tests (Linux) [on schedule]
-
-# On Linux, we run tests in a custom container image. For a scheduled
-# run, we have no choice but to use the most recent container image that
-# was built.
+name: Run Tests (Windows) [on schedule]
 
 on:
   schedule:
@@ -13,9 +9,7 @@ on:
 jobs:
   run-tests:
     name: Test
-    uses: ./.github/workflows/test-linux.yml
-    with:
-      image: hub.opensciencegrid.org/pelican_platform/pelican-test:latest-itb
+    uses: ./.github/workflows/test-windows.yml
 
   analyze-runs:
     name: Analyze Runs
@@ -29,7 +23,7 @@ jobs:
       - name: Download artifacts
         env:
           GH_TOKEN: ${{ github.token }}
-        run: .github/scripts/download_junit_artifacts.sh "Run Tests (Linux) [on schedule]"
+        run: .github/scripts/download_junit_artifacts.sh "Run Tests (Windows) [on schedule]"
 
       - name: Analyze test results
         run: |
