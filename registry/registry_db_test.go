@@ -158,7 +158,7 @@ func mockNamespace(prefix, pubkey, identity string, adminMetadata server_structs
 }
 
 // Some genertic mock data function to be shared with other test
-// functinos in this package. Please treat them as "constants"
+// functions in this package. Please treat them as "constants"
 var (
 	mockNssWithNamespaces []server_structs.Registration = []server_structs.Registration{
 		mockNamespace("/test1", "pubkey1", "", server_structs.AdminMetadata{Status: server_structs.RegApproved}),

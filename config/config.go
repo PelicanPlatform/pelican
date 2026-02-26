@@ -1749,7 +1749,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			if !param.Server_EnableUI.GetBool() {
 				return errors.Errorf("%s must be true when %s is set to globus", param.Server_EnableUI.GetName(), param.Origin_StorageType.GetName())
 			}
-			pvd, err := GetOIDCProdiver()
+			pvd, err := GetOIDCProvider()
 			if err != nil || pvd != Globus {
 				log.Info("Server OIDC provider is not Globus. Use Origin.GlobusClientIDFile instead")
 			} else {
