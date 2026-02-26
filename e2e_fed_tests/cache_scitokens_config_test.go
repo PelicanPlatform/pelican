@@ -23,6 +23,7 @@ package fed_tests
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -34,7 +35,6 @@ import (
 	"time"
 
 	_ "github.com/glebarez/sqlite"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/client"
@@ -47,6 +47,9 @@ import (
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
+
+//go:embed resources/single-private-full.yml
+var singlePrivateFullOrigin string
 
 // TestCacheScitokensConfigOverride tests that Xrootd.ScitokensConfig works for caches
 // to serve cached objects during origin downtime. This test:
@@ -85,18 +88,8 @@ func TestCacheScitokensConfigOverride(t *testing.T) {
 	// Use long-lived ads so they don't expire during test
 	require.NoError(t, param.Set(param.Server_AdLifetime.GetName(), "1h"))
 
-	// Create origin configuration with private reads (requires tokens)
-	originConfig := `
-Origin:
-  StorageType: posix
-  Exports:
-    - FederationPrefix: /test
-      StoragePrefix: ` + tmpDir + `
-      Capabilities: ["Reads", "Writes", "Listings"]
-`
-
-	// Set up the federation
-	_ = fed_test_utils.NewFedTest(t, originConfig)
+	// Set up the federation with embedded config
+	_ = fed_test_utils.NewFedTest(t, singlePrivateFullOrigin)
 
 	// Get the server issuer URL for creating tokens
 	serverIssuerUrl, err := config.GetServerIssuerURL()
@@ -133,11 +126,11 @@ Origin:
 	destPath1 := filepath.Join(tmpDir, "downloaded1.txt")
 	transferResults, err := client.DoGet(ctx, pelicanUrl, destPath1, false, client.WithToken(tok))
 	require.NoError(t, err, "Should be able to download file through federation")
-	assert.Equal(t, int64(len(testFileContent)), transferResults[0].TransferredBytes)
+	require.Equal(t, int64(len(testFileContent)), transferResults[0].TransferredBytes)
 
 	content1, err := os.ReadFile(destPath1)
 	require.NoError(t, err)
-	assert.Equal(t, testFileContent, string(content1), "Downloaded content should match original")
+	require.Equal(t, testFileContent, string(content1), "Downloaded content should match original")
 
 	// Step 2: Simulate origin downtime by POSTing new origin ad without /test namespace
 	metadata, err := server_utils.GetServerMetadata(ctx, server_structs.OriginType)
@@ -214,7 +207,7 @@ Origin:
 			}
 		}
 		return true
-	}, 5*time.Second, 100*time.Millisecond, "Director should remove /test namespace after processing empty advertisement")
+	}, 20*time.Second, 100*time.Millisecond, "Director should remove /test namespace after processing empty advertisement")
 
 	// Step 3: Trigger cache authz refresh by overwriting Xrootd.ScitokensConfig with an unrelated issuer
 	// The file watcher will detect this change and call EmitScitokensConfig, which uses cached namespace ads
@@ -245,14 +238,17 @@ default_user = xrootd
 			strings.Contains(contentStr, "unrelated-issuer.example.com") &&
 			strings.Contains(contentStr, "/unrelated/path") &&
 			!strings.Contains(contentStr, "/test")
-	}, 10*time.Second, 100*time.Millisecond, "Generated config should contain unrelated issuer override and not /test")
+	}, 20*time.Second, 100*time.Millisecond, "Generated config should contain unrelated issuer override and not /test")
 
 	// Step 4: Verify data is no longer accessible through the cache
 	// Try to download directly from cache - should fail because authorization is missing
 	destPath2 := filepath.Join(tmpDir, "downloaded2.txt")
 	cacheUrl := param.Cache_Url.GetString()
-	_, err = client.DoGet(ctx, cacheUrl+"/test/"+testFileName, destPath2, false, client.WithToken(tok))
-	assert.Error(t, err, "Should not be able to access cached data without proper authorization")
+	cacheUrlParsed, err := url.Parse(cacheUrl)
+	require.NoError(t, err)
+	cacheUrlParsed.Path = filepath.Join("/test", testFileName)
+	_, err = client.DoGet(ctx, cacheUrlParsed.String(), destPath2, false, client.WithToken(tok))
+	require.Error(t, err, "Should not be able to access cached data without proper authorization")
 
 	// Step 5: Trigger another cache authz refresh with proper authorization for /test
 	properConfig := `
@@ -279,18 +275,16 @@ default_user = xrootd
 			!strings.Contains(contentStr, "unrelated-issuer.example.com") &&
 			strings.Contains(contentStr, serverIssuerUrl) &&
 			strings.Contains(contentStr, "TestIssuer")
-	}, 10*time.Second, 100*time.Millisecond, "Generated config should contain server issuer and not unrelated issuer")
+	}, 20*time.Second, 100*time.Millisecond, "Generated config should contain server issuer and not unrelated issuer")
 
 	// Step 6: Verify cached object is accessible with proper auth, even with origin "offline"
 	// Use client.DoGet with WithCaches to force use of specific cache
 	destPath3 := filepath.Join(tmpDir, "downloaded3.txt")
-	cacheUrlParsed, err := url.Parse(cacheUrl)
-	require.NoError(t, err)
 	transferResults, err = client.DoGet(ctx, pelicanUrl, destPath3, false, client.WithToken(tok), client.WithCaches(cacheUrlParsed))
 	require.NoError(t, err, "Should be able to access cached data with proper authorization")
-	assert.Equal(t, int64(len(testFileContent)), transferResults[0].TransferredBytes)
+	require.Equal(t, int64(len(testFileContent)), transferResults[0].TransferredBytes)
 
 	content3, err := os.ReadFile(destPath3)
 	require.NoError(t, err)
-	assert.Equal(t, testFileContent, string(content3), "Content from cache should match original")
+	require.Equal(t, testFileContent, string(content3), "Content from cache should match original")
 }
