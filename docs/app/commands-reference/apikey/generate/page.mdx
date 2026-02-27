@@ -1,0 +1,41 @@
+---
+title: pelican apikey generate
+---
+
+## pelican apikey generate
+
+Generate a new API key for the server
+
+### Synopsis
+
+Generate a new API key with specified scopes.
+
+```
+pelican apikey generate [flags]
+```
+
+### Options
+
+```
+      --expiration string   Expiration time in RFC3339 format
+  -h, --help                help for generate
+      --name string         Name for the API key (defaults to cli-generated-{timestamp})
+      --scopes string       Comma-separated list of scopes (e.g., monitoring.query,monitoring.scrape) (required)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+  -s, --server string       Web URL of the Pelican server (e.g. https://my-origin.com:8447)
+  -t, --token string        Path to the admin token file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican apikey](/commands-reference/apikey/)	 - Manage API keys for server operations
