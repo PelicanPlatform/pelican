@@ -1,0 +1,117 @@
+import { Callout } from 'nextra/components'
+
+# Managing Server Downtime
+
+Origin and Cache server administrators can declare **downtime periods** to signal to the federation that their server will be temporarily unavailable. 
+The Pelican Director uses this information to route data requests away from affected servers during the declared period, minimizing disruptions for end users.
+
+<Callout type="info">
+Federation administrators can also create or modify downtime for any server in the federation. 
+If you need a downtime set but lack admin access to your own server, see [Method 3](#method-3-contact-the-federation-administrator) below.
+To see a consolidated view of all active and upcoming downtimes across the federation, visit the **Downtime** page in the **Director** web UI.
+</Callout>
+
+## Method 1: Web UI (Recommended)
+
+The web interface provides the easiest way to manage downtime. 
+Log in to your server's web UI with your administrator credentials, then navigate to **Downtime** (the calendar icon) in the left sidebar.
+
+### Add a Downtime
+
+1. On the **Downtime** page, click the **"CREATE DOWNTIME"** button.
+2. Fill in the form:
+   - **Start Time** and **End Time** — use the date/time pickers. Toggle **Unknown Endtime** if the end time is unknown.
+   - **Description** — briefly explain why the server is going down.
+   - **Severity** — describes the impact level of the downtime. This field is informational only and does not currently affect how the Director routes traffic; leaving it at the default (Outage) is fine.
+3. Click **SUBMIT** to save.
+
+### Edit a Downtime
+
+Click the **pencil icon** on an existing downtime card to open the edit form, make your changes, then click **SUBMIT**.
+
+### Delete a Downtime
+
+Click the **pencil icon** on an existing downtime card to open the edit form, then click the **DELETE DOWNTIME** button to remove it. 
+The Director will stop routing around that downtime on the next advertisement cycle.
+
+---
+
+## Method 2: CLI (`pelican downtime`)
+
+<Callout type="warning">
+The `pelican downtime` CLI commands interact directly with your server's admin API and require either local admin access or a valid admin token.
+</Callout>
+
+All `pelican downtime` subcommands accept the following persistent flags:
+
+| Flag | Required | Description |
+|---|---|---|
+| `-s` / `--server` | Yes | Web URL of your Pelican server (e.g. `https://my-origin.example.com:8444`) |
+| `-t` / `--token` | No | Path to an admin token file. Omit to generate one automatically (requires local access). |
+
+### List Downtimes
+
+```bash copy
+# Show active and future downtimes (default)
+pelican downtime list --server https://my-server.example.com:8444
+
+# Show all downtimes including past ones
+pelican downtime list --server https://my-server.example.com:8444 --status all
+```
+
+### Create a Downtime
+
+The `create` subcommand is **interactive** — it will prompt you for each field:
+
+```bash copy
+pelican downtime create --server https://my-server.example.com:8444
+```
+
+Example session:
+
+```console
+Select downtime Class:
+1. SCHEDULED
+2. UNSCHEDULED
+Enter choice number: 1
+
+Enter downtime Description: Weekly maintenance window
+
+Select downtime Severity:
+1. Outage (completely inaccessible)
+2. Severe (most services down)
+3. Intermittent Outage (may be up for some of the time)
+4. No Significant Outage Expected (you shouldn't notice)
+Enter number to choose: 1
+
+Enter start time in UTC (YYYY-MM-DD HH:MM:SS): 2026-03-10 02:00:00
+Enter end time in UTC (YYYY-MM-DD HH:MM:SS) or '-1' for indefinite: 2026-03-10 06:00:00
+
+Downtime created successfully: ...
+```
+
+### Update a Downtime
+
+The `update` subcommand is also interactive. Press **Enter** without typing anything to leave a field unchanged:
+
+```bash copy
+pelican downtime update <uuid> --server https://my-server.example.com:8444
+```
+
+### Delete a Downtime
+
+```bash copy
+pelican downtime delete <uuid> --server https://my-server.example.com:8444
+```
+
+---
+
+## Method 3: Contact the Federation Administrator
+
+If you do not have admin access to your server's web UI or CLI, you can ask your federation administrator to set a downtime. 
+Federation admins can manage downtime for any registered server in the federation from the **Registry** web interface.
+
+Provide your federation admin with:
+- Your server's **name**
+- The expected **start** and **end** times (UTC)
+- A brief **description**
