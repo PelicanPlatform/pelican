@@ -673,8 +673,12 @@ description: |+
   ```
   should result in trying `cache1`, then `cache2`, and finally any caches discovered by the Director (if needed).
 
-  When set via the `PELICAN_CLIENT_PREFERREDCACHES` environment variable, caches should be space-separated, e.g.:
+  When set via the `PELICAN_CLIENT_PREFERREDCACHES` environment variable, caches can be space-separated or comma-separated, e.g.:
   `PELICAN_CLIENT_PREFERREDCACHES="https://cache1.com:8443 https://cache2.com:8443 +"`
+  or
+  `PELICAN_CLIENT_PREFERREDCACHES="https://cache1.com:8443,https://cache2.com:8443,+"`
+
+  Surrounding quotes (both single and double) are automatically trimmed from the entire value and from individual elements.
 type: stringSlice
 default: none
 components: ["client"]

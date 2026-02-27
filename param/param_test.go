@@ -458,6 +458,106 @@ func TestStringToSliceHookFunc(t *testing.T) {
 			input:    "  a   b  \n  c  ",
 			expected: []string{"a", "b", "c"},
 		},
+		{
+			name:     "comma-separated-with-double-quotes",
+			input:    `"a","b","c"`,
+			expected: []string{"a", "b", "c"},
+		},
+		{
+			name:     "comma-separated-with-single-quotes",
+			input:    `'a','b','c'`,
+			expected: []string{"a", "b", "c"},
+		},
+		{
+			name:     "comma-separated-with-mixed-quotes",
+			input:    `"a",'b',"c"`,
+			expected: []string{"a", "b", "c"},
+		},
+		{
+			name:     "space-separated-with-double-quotes",
+			input:    `"a" "b" "c"`,
+			expected: []string{"a", "b", "c"},
+		},
+		{
+			name:     "space-separated-with-single-quotes",
+			input:    `'a' 'b' 'c'`,
+			expected: []string{"a", "b", "c"},
+		},
+		{
+			name:     "comma-separated-with-quotes-and-spaces",
+			input:    `"a", "b", "c"`,
+			expected: []string{"a", "b", "c"},
+		},
+		{
+			name:     "preferred-caches-with-plus-and-quotes",
+			input:    `"https://cache1.com:8443","https://cache2.com:8443","+"`,
+			expected: []string{"https://cache1.com:8443", "https://cache2.com:8443", "+"},
+		},
+		{
+			name:     "preferred-caches-space-separated-with-quotes",
+			input:    `"https://cache1.com:8443" "https://cache2.com:8443" "+"`,
+			expected: []string{"https://cache1.com:8443", "https://cache2.com:8443", "+"},
+		},
+		{
+			name:     "preferred-caches-comma-separated-with-quotes",
+			input:    `https://cache1.com:8443,https://cache2.com:8443,+`,
+			expected: []string{"https://cache1.com:8443", "https://cache2.com:8443", "+"},
+		},
+		{
+			name:     "quotes-with-spaces-inside",
+			input:    `"a b","c d"`,
+			expected: []string{"a b", "c d"},
+		},
+		{
+			name:     "partial-quotes",
+			input:    `"a",b,"c"`,
+			expected: []string{"a", "b", "c"},
+		},
+		{
+			name:     "entire-string-double-quoted",
+			input:    `"cache1 cache2 +"`,
+			expected: []string{"cache1", "cache2", "+"},
+		},
+		{
+			name:     "entire-string-single-quoted",
+			input:    `'cache1 cache2 +'`,
+			expected: []string{"cache1", "cache2", "+"},
+		},
+		{
+			name:     "entire-string-quoted-with-comma",
+			input:    `"cache1,cache2,+"`,
+			expected: []string{"cache1", "cache2", "+"},
+		},
+		{
+			name:     "nested-quotes-docker-env-style",
+			input:    `'"cache1" "cache2" "+"'`,
+			expected: []string{"cache1", "cache2", "+"},
+		},
+		{
+			name:     "double-quoted-elements-in-quoted-string",
+			input:    `"cache1" "cache2" "+"`,
+			expected: []string{"cache1", "cache2", "+"},
+		},
+		{
+			name:     "single-quoted-elements-in-quoted-string",
+			input:    `'cache1' 'cache2' '+'`,
+			expected: []string{"cache1", "cache2", "+"},
+		},
+		{
+			name:     "mixed-quotes-complex",
+			input:    `'"a"" "b"" "c"'`,
+			expected: []string{"a", "b", "c"},
+		},
+		{
+			name:     "docker-env-file-style-with-spaces",
+			input:    `"https://cache1.com:8443 https://cache2.com:8443 +"`,
+			expected: []string{"https://cache1.com:8443", "https://cache2.com:8443", "+"},
+		},
+		{
+			name:     "docker-env-file-style-with-commas",
+			input:    `"https://cache1.com:8443,https://cache2.com:8443,+"`,
+			expected: []string{"https://cache1.com:8443", "https://cache2.com:8443", "+"},
+		},
 	}
 
 	hook := stringToSliceHookFunc()
