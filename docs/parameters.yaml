@@ -2938,6 +2938,31 @@ root_default: /var/lib/pelican/pelican.sqlite
 default: $ConfigBase/pelican.sqlite
 components: ["cache", "director", "origin", "registry"]
 ---
+name: Server.DatabaseBackup.Location
+description: |+
+  The directory where periodic SQLite database backups are stored.
+  Each backup file is compressed and encrypted using the server's issuer keys.
+type: filename
+root_default: /var/lib/pelican/backups
+default: $ConfigBase/backups
+components: ["cache", "director", "origin", "registry"]
+---
+name: Server.DatabaseBackup.Frequency
+description: |+
+  How often the server creates a backup of its SQLite database.
+  Set to 0 to disable periodic backups.
+type: duration
+default: 24h
+components: ["cache", "director", "origin", "registry"]
+---
+name: Server.DatabaseBackup.MaxCount
+description: |+
+  The maximum number of database backup files to retain.
+  When the number of backups exceeds this count, the oldest backups are removed.
+type: int
+default: 10
+components: ["cache", "director", "origin", "registry"]
+---
 name: Server.EnablePKCS11
 description: |+
   Enable PKCS11 for the server. It allows the server to sign TLS connection without accessing the private key.
