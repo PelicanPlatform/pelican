@@ -15,6 +15,7 @@ export default {
 	"getting-data-with-pelican": "Getting Data with Pelican",
 	"federating-your-data": "Federating Your Data",
 	"operating-a-federation": "Operating a Federation",
+	"managing-your-server": "Managing Your Server",
 	"monitoring-pelican-services": "Monitoring Pelican Services",
 	"advanced-usage": "Advanced Usage",
 	"getting-help": "Getting Help",
