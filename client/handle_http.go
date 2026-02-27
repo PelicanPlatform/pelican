@@ -269,6 +269,8 @@ type (
 		requestedChecksums []ChecksumType
 		requireChecksum    bool
 		recursive          bool
+		rejectCollections  bool        // If true, error when the remote path is a collection (directory)
+		notCollection      atomic.Bool // Set when we've confirmed the remote path is not a collection
 		skipAcquire        bool
 		dryRun             bool       // Enable dry-run mode to display what would be transferred without actually doing it
 		syncLevel          SyncLevel  // Policy for handling synchronization when the destination exists
@@ -328,41 +330,43 @@ type (
 
 	// A client to the transfer engine.
 	TransferClient struct {
-		id             uuid.UUID
-		ctx            context.Context
-		cancel         context.CancelFunc
-		callback       TransferCallbackFunc
-		engine         *TransferEngine
-		skipAcquire    bool      // Enable/disable the token acquisition logic.  Defaults to acquiring a token
-		syncLevel      SyncLevel // Policy for the client to synchronize data
-		tokenLocation  string    // Location of a token file to use for transfers
-		token          string    // Token that should be used for transfers
-		dryRun         bool      // Enable dry-run mode to display what would be transferred without actually doing it
-		work           chan *TransferJob
-		closed         bool
-		prefObjServers []*url.URL // holds any client-requested caches/origins
-		results        chan *TransferResults
-		finalResults   chan TransferResults
-		setupResults   sync.Once
+		id                uuid.UUID
+		ctx               context.Context
+		cancel            context.CancelFunc
+		callback          TransferCallbackFunc
+		engine            *TransferEngine
+		skipAcquire       bool      // Enable/disable the token acquisition logic.  Defaults to acquiring a token
+		syncLevel         SyncLevel // Policy for the client to synchronize data
+		tokenLocation     string    // Location of a token file to use for transfers
+		token             string    // Token that should be used for transfers
+		dryRun            bool      // Enable dry-run mode to display what would be transferred without actually doing it
+		rejectCollections bool      // Reject downloads of collections (directories) when not in recursive mode
+		work              chan *TransferJob
+		closed            bool
+		prefObjServers    []*url.URL // holds any client-requested caches/origins
+		results           chan *TransferResults
+		finalResults      chan TransferResults
+		setupResults      sync.Once
 	}
 
-	TransferOption                      = option.Interface
-	identTransferOptionCaches           struct{}
-	identTransferOptionCallback         struct{}
-	identTransferOptionTokenLocation    struct{}
-	identTransferOptionAcquireToken     struct{}
-	identTransferOptionToken            struct{}
-	identTransferOptionSynchronize      struct{}
-	identTransferOptionCollectionsUrl   struct{}
-	identTransferOptionChecksums        struct{}
-	identTransferOptionRequireChecksum  struct{}
-	identTransferOptionRecursive        struct{}
-	identTransferOptionDepth            struct{}
-	identTransferOptionWriter           struct{}
-	identTransferOptionReader           struct{}
-	identTransferOptionInPlace          struct{}
-	identTransferOptionDryRun           struct{}
-	identTransferOptionForcePrestageAPI struct{}
+	TransferOption                       = option.Interface
+	identTransferOptionCaches            struct{}
+	identTransferOptionCallback          struct{}
+	identTransferOptionTokenLocation     struct{}
+	identTransferOptionAcquireToken      struct{}
+	identTransferOptionToken             struct{}
+	identTransferOptionSynchronize       struct{}
+	identTransferOptionCollectionsUrl    struct{}
+	identTransferOptionChecksums         struct{}
+	identTransferOptionRequireChecksum   struct{}
+	identTransferOptionRecursive         struct{}
+	identTransferOptionDepth             struct{}
+	identTransferOptionWriter            struct{}
+	identTransferOptionReader            struct{}
+	identTransferOptionInPlace           struct{}
+	identTransferOptionDryRun            struct{}
+	identTransferOptionForcePrestageAPI  struct{}
+	identTransferOptionRejectCollections struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -776,6 +780,16 @@ func WithForcePrestageAPI(force bool) TransferOption {
 	return option.New(identTransferOptionForcePrestageAPI{}, force)
 }
 
+// Create an option to reject collections (directories) during download
+//
+// When enabled, the client will perform a PROPFIND (stat) before downloading to verify
+// the remote path is not a collection.  If it is a collection, the transfer will fail
+// with an error.  This is useful for CLI invocations where the user expects to download
+// a single object but the path actually refers to a directory.
+func WithRejectCollections(reject bool) TransferOption {
+	return option.New(identTransferOptionRejectCollections{}, reject)
+}
+
 // Create a new client to work with an engine
 func (te *TransferEngine) NewClient(options ...TransferOption) (client *TransferClient, err error) {
 	log.Debugln("Making new clients")
@@ -808,6 +822,8 @@ func (te *TransferEngine) NewClient(options ...TransferOption) (client *Transfer
 			client.syncLevel = option.Value().(SyncLevel)
 		case identTransferOptionDryRun{}:
 			client.dryRun = option.Value().(bool)
+		case identTransferOptionRejectCollections{}:
+			client.rejectCollections = option.Value().(bool)
 		case identTransferOptionForcePrestageAPI{}:
 			// This option is handled at the job level, not client level
 			// Skip it here; it will be processed in NewTransferJob/NewPrestageJob
@@ -1153,27 +1169,30 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	// See if we have a projectName defined
 	project, _ := searchJobAd(attrProjectName)
 	copyUrl := *pUrl // Make a copy of the input URL to avoid concurrent issues.
+	recursiveFromQuery := false
 	if _, exists := copyUrl.Query()[pelican_url.QueryRecursive]; exists {
 		recursive = true
+		recursiveFromQuery = true
 	}
 	operation := config.TokenSharedRead
 	if upload {
 		operation = config.TokenSharedWrite
 	}
 	tj = &TransferJob{
-		prefObjServers: tc.prefObjServers,
-		recursive:      recursive,
-		localPath:      localPath,
-		remoteURL:      &copyUrl,
-		callback:       tc.callback,
-		skipAcquire:    tc.skipAcquire,
-		dryRun:         tc.dryRun,
-		syncLevel:      tc.syncLevel,
-		xferType:       transferTypeDownload,
-		uuid:           id,
-		project:        project,
-		token:          NewTokenGenerator(&copyUrl, nil, operation, !tc.skipAcquire),
-		inPlace:        false, // Default to using temporary files (rsync-style)
+		prefObjServers:    tc.prefObjServers,
+		recursive:         recursive,
+		rejectCollections: tc.rejectCollections,
+		localPath:         localPath,
+		remoteURL:         &copyUrl,
+		callback:          tc.callback,
+		skipAcquire:       tc.skipAcquire,
+		dryRun:            tc.dryRun,
+		syncLevel:         tc.syncLevel,
+		xferType:          transferTypeDownload,
+		uuid:              id,
+		project:           project,
+		token:             NewTokenGenerator(&copyUrl, nil, operation, !tc.skipAcquire),
+		inPlace:           false, // Default to using temporary files (rsync-style)
 	}
 	if upload {
 		tj.xferType = transferTypeUpload
@@ -1213,7 +1232,15 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			tj.inPlace = option.Value().(bool)
 		case identTransferOptionDryRun{}:
 			tj.dryRun = option.Value().(bool)
+		case identTransferOptionRejectCollections{}:
+			tj.rejectCollections = option.Value().(bool)
 		}
+	}
+
+	// If the URL query forced recursive mode, clear rejectCollections since the user
+	// explicitly indicated they want recursive behavior via the URL.
+	if recursiveFromQuery && tj.rejectCollections {
+		tj.rejectCollections = false
 	}
 
 	httpMethod := http.MethodGet
@@ -2007,6 +2034,52 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	localPath := transfer.localPath
 	transferResults.job = transfer.job
 
+	// Sort (re-order) the transfer attempts by querying each endpoint with a
+	// lightweight GET.  This also discovers the object size and cache age.
+	// We do this early so the cache query results are available for the
+	// collection check below.
+	var size int64 = -1
+	attempts := transfer.attempts
+	if transfer.job != nil && transfer.job.ctx != nil {
+		size, attempts = sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts, transfer.token)
+	}
+
+	// If the job requests rejection of collections, verify the remote path is
+	// not a directory.  We can skip the (expensive) PROPFIND call when:
+	//   - A previous check already confirmed this is not a collection, OR
+	//   - sortAttempts received a non-zero Age header from a cache, which
+	//     proves the object is a regular file (collections are never cached).
+	if transfer.job != nil && transfer.job.rejectCollections && !transfer.job.notCollection.Load() {
+		cacheProof := false
+		for _, att := range attempts {
+			if att.CacheQuery && att.CacheAge > 0 {
+				cacheProof = true
+				break
+			}
+		}
+		if cacheProof {
+			log.Debugln("Skipping PROPFIND collection check; non-zero cache Age proves object is not a collection")
+			transfer.job.notCollection.Store(true)
+		} else {
+			statInfo, statErr := statHttp(transfer.job.remoteURL, transfer.job.dirResp, transfer.job.token)
+			if statErr == nil && statInfo.IsCollection {
+				err = error_codes.NewParameterError(
+					errors.New("remote object is a directory; use recursive mode to download directories"),
+				)
+				return
+			}
+			if statErr == nil {
+				// PROPFIND succeeded and it's not a collection; remember for future attempts.
+				transfer.job.notCollection.Store(true)
+			}
+			// If the stat failed (e.g., 405 Method Not Allowed), we can't determine if it's a collection.
+			// Log a warning and proceed with the download rather than blocking it.
+			if statErr != nil {
+				log.Debugln("Could not determine if remote path is a collection via PROPFIND:", statErr)
+			}
+		}
+	}
+
 	// Create a checksum hash instance for each requested checksum; these will all be
 	// joined together into a single writer interface with the output file
 	hashes := make([]io.Writer, 0, 1)
@@ -2228,12 +2301,6 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	}
 
 	fileWriter = io.MultiWriter(fileWriter, hashesWriter)
-
-	var size int64 = -1
-	attempts := transfer.attempts
-	if transfer.job != nil && transfer.job.ctx != nil {
-		size, attempts = sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts, transfer.token)
-	}
 
 	// Create a new transferResults if we don't already have one
 	// (prestage attempt may have created it previously)
