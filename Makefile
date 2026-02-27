@@ -71,6 +71,7 @@ docs/parameters.json:
 
 .PHONY: generate
 generate: docs/parameters.json web_ui/frontend/public/data/parameters.json swagger/pelican-swagger.yaml
+	@mkdir -p web_ui/frontend/out && touch web_ui/frontend/out/placeholder
 ifeq ($(USE_DOCKER),0)
 	@go generate ./...
 else
