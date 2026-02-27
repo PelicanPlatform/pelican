@@ -6,12 +6,12 @@ test failures to "test-failure-analysis.txt".
 """
 
 import sys
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # nosec B405 -- XML is from our own CI runner, not user input
 from collections import defaultdict
 from pathlib import Path
 
 # Track failures by matrix variant.
-failures_by_matrix = defaultdict(lambda: defaultdict(int))
+failures_by_matrix: defaultdict[str, defaultdict[str, int]] = defaultdict(lambda: defaultdict(int))
 
 # Find all JUnit XML files.
 artifacts_dir = Path("artifacts")
@@ -37,12 +37,14 @@ for run_dir in sorted(artifacts_dir.iterdir()):
         # Find JUnit XML files.
         for xml_file in artifact_dir.glob("*.xml"):
             try:
-                tree = ET.parse(xml_file)
+                # XML is from our own CI runner, not user input.
+                tree = ET.parse(xml_file)  # nosec B314
                 root = tree.getroot()
 
                 # Parse test cases.
                 for testcase in root.iter("testcase"):
-                    test_name = f"{testcase.get('classname').split('/')[-1]}.{testcase.get('name')}"
+                    classname = testcase.get("classname") or ""
+                    test_name = f"{classname.split('/')[-1]}.{testcase.get('name')}"
 
                     # Check if the test failed.
                     if (
@@ -50,7 +52,7 @@ for run_dir in sorted(artifacts_dir.iterdir()):
                         or testcase.find("error") is not None
                     ):
                         failures_by_matrix[matrix_name][test_name] += 1
-            except Exception as e:
+            except (ET.ParseError, OSError) as e:
                 print(f"Error parsing {xml_file}: {e}")
 
 # Write results to file.
