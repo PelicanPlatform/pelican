@@ -18,7 +18,9 @@ export default {
 	"monitoring-pelican-services": "Monitoring Pelican Services",
 	"advanced-usage": "Advanced Usage",
 	"getting-help": "Getting Help",
+	"faq": "FAQs and Troubleshooting",
 	"api-docs": "API Documentation",
+	"commands-reference": "Commands Reference",
 	"versions": {
 		"title": "Versions",
 		"type": "menu",

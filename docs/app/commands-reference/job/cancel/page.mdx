@@ -1,0 +1,37 @@
+---
+title: pelican job cancel
+---
+
+## pelican job cancel
+
+Cancel a transfer job
+
+### Synopsis
+
+Cancel a transfer job and all its incomplete transfers.
+Completed transfers within the job are not affected.
+
+```
+pelican job cancel <job-id> [flags]
+```
+
+### Options
+
+```
+  -h, --help   help for cancel
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican job](/commands-reference/job/)	 - Manage asynchronous transfer jobs

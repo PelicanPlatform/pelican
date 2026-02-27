@@ -44,7 +44,8 @@ jobs:
       # Without that file, the linters will raise an error.
       - name: Generate placeholder files
         run: |
-          go generate ./...
+          mkdir -p web_ui/frontend/out
+          touch web_ui/frontend/out/placeholder
 
       # We run this linter here so that issues are called out inline.
       # (It's also run by pre-commit, below.)
