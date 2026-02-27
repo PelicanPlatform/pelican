@@ -30,6 +30,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/jellydator/ttlcache/v3"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -1036,5 +1038,134 @@ func TestSendHeadReq(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown origin response with status code 500")
 		assert.Nil(t, meta)
+	})
+}
+
+// TestGenerateAvailabilityMaps verifies that the maps returned by generateAvailabilityMaps
+// are keyed by ad.Name rather than ad.URL.String(). This is the key that availabilityWeightFn
+// uses for lookup, so a mismatch would silently disable the availability axis of adaptive sort.
+func TestGenerateAvailabilityMaps(t *testing.T) {
+	setGinTestMode()
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	// Save and restore global serverAds so we don't interfere with other tests.
+	oldAds := serverAds
+	t.Cleanup(func() {
+		cleanupMock()
+		serverAds = oldAds
+	})
+	serverAds = ttlcache.New(ttlcache.WithTTL[string, *server_structs.Advertisement](15 * time.Minute))
+
+	makeCtx := func(method, reqPath string) *gin.Context {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(method, reqPath, nil)
+		return c
+	}
+
+	originAd := server_structs.ServerAd{
+		URL:     url.URL{Scheme: "https", Host: "origin.example.com:8443"},
+		AuthURL: url.URL{Scheme: "https", Host: "origin-auth.example.com:8444"},
+		Caps:    server_structs.Capabilities{PublicReads: true},
+		Type:    server_structs.OriginType.String(),
+	}
+	originAd.Initialize("my-origin")
+
+	cacheAd := server_structs.ServerAd{
+		URL:     url.URL{Scheme: "https", Host: "cache.example.com:8443"},
+		AuthURL: url.URL{Scheme: "https", Host: "cache-auth.example.com:8444"},
+		Caps:    server_structs.Capabilities{PublicReads: true},
+		Type:    server_structs.CacheType.String(),
+	}
+	cacheAd.Initialize("my-cache")
+
+	bestNSAd := server_structs.NamespaceAdV2{
+		Path: "/foo",
+		Caps: server_structs.Capabilities{PublicReads: true},
+	}
+	reqID := uuid.New()
+
+	// When stat is skipped (neither CheckCachePresence nor CheckOriginPresence enabled),
+	// generateAvailabilityMaps assumes all servers are available and must key those maps
+	// by ad.Name — not by ad.URL.String(). Before the fix, the URL-string key meant
+	// availabilityWeightFn could never find a match, causing adaptive sort to treat all
+	// servers as equally available regardless of stat results.
+	t.Run("skip-stat-path-maps-keyed-by-name", func(t *testing.T) {
+		server_utils.ResetTestState()
+		require.NoError(t, param.Set(param.Director_CheckCachePresence.GetName(), false))
+		require.NoError(t, param.Set(param.Director_CheckOriginPresence.GetName(), false))
+
+		// Use an origin-redirect path so both skipped-stat branches execute.
+		ctx := makeCtx(http.MethodGet, "/api/v1.0/director/origin/foo/test.txt")
+		oMap, cMap, err := generateAvailabilityMaps(
+			ctx,
+			[]server_structs.ServerAd{originAd},
+			[]server_structs.ServerAd{cacheAd},
+			bestNSAd, reqID,
+		)
+		require.NoError(t, err)
+
+		// Keys MUST be ad.Name — availabilityWeightFn does availMap[ad.Name].
+		assert.True(t, oMap[originAd.Name],
+			"origin availability map must be keyed by ad.Name %q", originAd.Name)
+		assert.False(t, oMap[originAd.URL.String()],
+			"origin availability map must NOT be keyed by URL.String() %q", originAd.URL.String())
+
+		assert.True(t, cMap[cacheAd.Name],
+			"cache availability map must be keyed by ad.Name %q", cacheAd.Name)
+		assert.False(t, cMap[cacheAd.URL.String()],
+			"cache availability map must NOT be keyed by URL.String() %q", cacheAd.URL.String())
+	})
+
+	// When stat is enabled and a server responds positively, the resulting map entry
+	// must still use ad.Name as the key. Before the fix, a successful stat wrote
+	// URL.String() — again invisible to availabilityWeightFn.
+	t.Run("stat-results-maps-keyed-by-name", func(t *testing.T) {
+		server_utils.ResetTestState()
+		require.NoError(t, param.Set(param.Director_CheckCachePresence.GetName(), true))
+		require.NoError(t, param.Set(param.Director_CheckOriginPresence.GetName(), false))
+		require.NoError(t, param.Set(param.Director_StatTimeout.GetName(), 2*time.Second))
+		require.NoError(t, param.Set(param.Director_MinStatResponse.GetName(), 1))
+		require.NoError(t, param.Set(param.Director_MaxStatResponse.GetName(), 1))
+
+		// Mock HTTP server that returns 200 with Content-Length for every HEAD request.
+		mockSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Length", "10")
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(mockSrv.Close)
+
+		srvURL, err := url.Parse(mockSrv.URL)
+		require.NoError(t, err)
+
+		statCacheAd := server_structs.ServerAd{
+			URL:  *srvURL,
+			Caps: server_structs.Capabilities{PublicReads: true},
+			Type: server_structs.CacheType.String(),
+		}
+		statCacheAd.Initialize("stat-cache")
+
+		// Populate serverAds and statUtils so queryServersForObject can service the request.
+		serverAds.Set(statCacheAd.URL.String(),
+			&server_structs.Advertisement{ServerAd: statCacheAd},
+			ttlcache.DefaultTTL)
+		initMockStatUtils()
+		t.Cleanup(cleanupMock)
+
+		// /api/v1.0/director/object paths are cache requests: shouldStatCaches → true,
+		// shouldStatOrigins → false (isCacheRequest && len(cAds) > 0).
+		ctx := makeCtx(http.MethodGet, "/api/v1.0/director/object/foo/test.txt")
+		_, cMap, err := generateAvailabilityMaps(
+			ctx,
+			[]server_structs.ServerAd{},
+			[]server_structs.ServerAd{statCacheAd},
+			bestNSAd, reqID,
+		)
+		require.NoError(t, err)
+
+		assert.True(t, cMap[statCacheAd.Name],
+			"cache map must be keyed by ad.Name %q after a successful stat", statCacheAd.Name)
+		assert.False(t, cMap[statCacheAd.URL.String()],
+			"cache map must NOT be keyed by URL.String() %q after stat — this broke adaptive sort", statCacheAd.URL.String())
 	})
 }
