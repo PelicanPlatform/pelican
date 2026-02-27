@@ -1,0 +1,410 @@
+# Using Pelican with AI Assistants via MCP
+
+The Pelican Model Context Protocol (MCP) server enables AI assistants like Claude Code, VS Code Copilot, and other MCP-compatible tools to download files, inspect metadata, and list collections from Pelican federations.
+This allows you to use natural language to interact with Pelican data directly from your AI-powered development environment.
+
+## What is MCP?
+
+The [Model Context Protocol](https://modelcontextprotocol.io/) is an open standard that allows AI assistants to connect to external tools and data sources.
+By running a Pelican MCP server, your AI assistant can work with both public and protected namespaces:
+
+- Download objects from Pelican federations using natural language requests
+- Get metadata about objects (size, modification time, checksums)
+- List collection contents
+- Authenticate to protected namespaces using OAuth device flow
+
+## Before Starting
+
+### Assumptions
+
+This guide assumes:
+
+- You have Pelican installed on your system with the `pelican` command accessible in your PATH
+- You're familiar with [Pelican's command line client](../client/page.mdx) and basic concepts
+- You have an MCP-compatible AI assistant installed (Claude Code or VS Code with GitHub Copilot)
+
+### Verify Pelican Installation
+
+Ensure the Pelican MCP server is available:
+
+```bash copy
+pelican mcp --help
+```
+
+You should see output describing the `pelican mcp serve` command.
+If not, refer to the [Pelican installation docs](../../install.mdx) to install or update Pelican.
+
+## Setting Up with Claude Code
+
+Claude Code CLI natively supports MCP servers, making it easy to integrate Pelican.
+
+### 1. Add Pelican MCP Server
+
+Ensure you have Claude Code installed.
+Run the following command to add the Pelican binary to Claude Code as a local stdio server:
+
+```bash copy
+claude mcp add pelican --transport stdio pelican mcp serve
+```
+
+After you see a confirmation, Claude Code will automatically load the Pelican MCP server when you start a new session.
+No restart is required; the MCP server is loaded on-demand.
+
+### 2. Use Claude Code with Pelican
+
+Start a Claude Code session in your terminal.
+You can now ask Claude to download Pelican objects using natural language:
+
+```
+Download the file pelican://osg-htc.org/pelicanplatform/test/hello-world.txt to my Downloads folder
+```
+
+Claude will fetch the file and confirm when it's complete.
+
+## Setting Up with VS Code
+
+VS Code with GitHub Copilot can also use MCP servers to enhance its capabilities.
+
+### 1. Install Required Extensions
+
+Ensure you have:
+- [GitHub Copilot extension](https://marketplace.visualstudio.com/items?itemName=GitHub.copilot)
+- MCP support (available in recent Copilot versions)
+
+### 2. Configure MCP Settings
+
+Open your VS Code settings.json (`Cmd/Ctrl + Shift + P` → "Preferences: Open User Settings (JSON)") and add:
+
+```json copy
+{
+  "github.copilot.mcp.servers": {
+    "pelican": {
+      "command": "pelican",
+      "args": ["mcp", "serve"]
+    }
+  }
+}
+```
+
+### 3. Reload VS Code
+
+After saving the configuration, reload VS Code:
+- Press `Cmd/Ctrl + Shift + P`
+- Type "Developer: Reload Window"
+- Press Enter
+
+### 4. Use Copilot Chat with Pelican
+
+In the Copilot Chat panel, you can now request Pelican operations:
+
+```
+@workspace Download pelican://osg-htc.org/pelicanplatform/test/hello-world.txt to the current workspace
+```
+
+Copilot will use the Pelican MCP server to download the file.
+
+## Available Tools
+
+Once configured, your AI assistant has access to five Pelican tools:
+
+### pelican_download
+
+Downloads objects from Pelican URLs to your local filesystem.
+
+**Example prompts**:
+- "Download pelican://osg-htc.org/pelicanplatform/test/hello-world.txt to /tmp/test.txt"
+- "Get the hello-world.txt file from pelican://osg-htc.org/pelicanplatform/test/ and save it locally"
+- "Download the entire pelican://osg-htc.org/pelicanplatform/test/ collection recursively"
+
+**Parameters**:
+- `source`: The Pelican URL to download from
+- `destination`: Local path where the object should be saved
+- `recursive`: (optional) Set to true to download collections recursively
+
+### pelican_stat
+
+Gets metadata about a Pelican object including size, modification time, and checksums.
+
+**Example prompts**:
+- "What's the size of pelican://osg-htc.org/pelicanplatform/test/hello-world.txt?"
+- "Get information about the hello-world test file"
+- "Show me the metadata for pelican://osg-htc.org/pelicanplatform/test/hello-world.txt"
+
+**Parameters**:
+- `url`: The Pelican URL to inspect
+
+### pelican_list
+
+Lists the contents of a Pelican collection.
+
+**Example prompts**:
+- "List the contents of pelican://osg-htc.org/pelicanplatform/test/"
+- "What files are in the pelicanplatform test collection?"
+- "Show me all objects under pelican://osg-htc.org/pelicanplatform/test/"
+
+**Parameters**:
+- `url`: The Pelican URL of the collection to list
+
+### pelican_auth
+
+Starts authentication to a protected Pelican namespace using OAuth device flow.
+This tool returns a verification URL immediately that you can click to authorize access.
+After authorization, call `pelican_auth_complete` to finish the authentication process.
+
+**Example prompts**:
+- "Authenticate to pelican://osg-htc.org/protected/data/"
+- "I need to access a protected namespace at pelican://federation.example.com/private/, please authenticate"
+- "Get access token for pelican://osg-htc.org/restricted/path"
+
+**Parameters**:
+- `url`: The Pelican URL of the protected resource to authenticate for
+
+### pelican_auth_complete
+
+Completes the OAuth device flow authentication after the user has visited the verification URL.
+Call this after the user confirms they have completed authorization in their browser.
+
+**Parameters**:
+- `url`: The same Pelican URL that was used with `pelican_auth`
+
+**How authentication works (two-step process)**:
+1. Call `pelican_auth` - returns a verification URL immediately
+2. User clicks the URL and completes authorization in their browser
+3. User tells the AI they have completed authorization
+4. AI calls `pelican_auth_complete` to verify and cache the token
+5. The token is now cached for future operations
+
+## Example Workflows
+
+### Accessing Protected Namespaces
+
+```
+User: I need to download data from pelican://osg-htc.org/protected/data/file.txt
+but it requires authentication.
+
+AI: I'll help you authenticate.
+[Uses pelican_auth tool]
+
+🔐 Authentication Required
+
+To access the protected namespace, please:
+1. Click or visit this URL to authenticate:
+   https://cilogon.org/device?user_code=ABCD-EFGH
+2. Complete the authorization in your browser
+
+You have 3 minutes to complete authentication.
+Let me know when you're done!
+
+User: Done, I authorized it.
+
+AI: Great! Let me verify the authorization.
+[Uses pelican_auth_complete tool]
+
+✅ Authorization successful! Token has been cached.
+Now let me download the file.
+[Uses pelican_download tool]
+Successfully downloaded to ./file.txt
+```
+
+### Downloading Test Data
+
+```
+User: I need to download the hello-world test file from
+pelican://osg-htc.org/pelicanplatform/test/hello-world.txt
+to my research directory
+
+AI: I'll download that file for you.
+[Uses pelican_download tool]
+Successfully downloaded to ~/research/hello-world.txt (27 bytes)
+```
+
+### Exploring Available Data
+
+```
+User: What data is available in the pelican://osg-htc.org/pelicanplatform/test/ collection?
+
+AI: Let me check that for you.
+[Uses pelican_list tool]
+
+The collection contains:
+- hello-world.txt (27 bytes)
+- sample-data.csv (1.2 MB)
+- README.md (543 bytes)
+```
+
+### Checking File Metadata Before Download
+
+```
+User: Before I download pelican://osg-htc.org/pelicanplatform/test/hello-world.txt,
+can you tell me how large it is?
+
+AI: [Uses pelican_stat tool]
+
+The file is 27 bytes, last modified on 2024-03-15.
+It has MD5 checksum: a1b2c3d4...
+Since it's very small, would you like me to download it?
+
+User: Yes please, to /tmp/
+
+AI: [Uses pelican_download tool]
+Downloaded to /tmp/hello-world.txt
+```
+
+## Troubleshooting
+
+### MCP Server Not Connecting
+
+If your AI assistant shows the Pelican MCP server as disconnected:
+
+1. **Verify Pelican is in PATH**:
+   ```bash
+   which pelican
+   ```
+   If this returns nothing, add Pelican to your PATH or use the full path in your MCP configuration.
+
+2. **Test MCP server manually**:
+   ```bash
+   pelican mcp serve
+   ```
+   You should see "Pelican MCP server started" in the output.
+   Press Ctrl+C to exit.
+
+3. **Check configuration syntax**:
+   Ensure your JSON configuration is valid.
+   Use a JSON validator if needed.
+
+4. **Restart your AI assistant completely**:
+   Make sure you fully quit (not just close) and relaunch.
+
+### Permission Errors
+
+If you get permission errors:
+
+```bash
+chmod +x $(which pelican)
+```
+
+### Downloads Fail
+
+If downloads fail with authentication errors:
+
+1. For protected namespaces, use the `pelican_auth` tool first to authenticate:
+   - Ask your AI assistant to "authenticate to pelican://..."
+   - Click the verification URL provided
+   - Complete authorization in your browser
+2. Verify the URL is correct using the CLI:
+```bash
+pelican object get pelican://... /tmp/test
+```
+
+### AI Assistant Doesn't Use Pelican Tools
+
+If your AI assistant isn't using the Pelican tools:
+
+1. **Be explicit**: Say "Use Pelican to..."
+2. **Check MCP connection**: Verify the server shows as connected
+3. **Provide complete Pelican URLs**: Include the full `pelican://` URL
+
+## Advanced Configuration
+
+### Custom Pelican Installation Path
+
+If Pelican is not in your system PATH, specify the full path:
+
+```json
+{
+  "mcpServers": {
+    "pelican": {
+      "command": "path/to/your/pelican/binary",
+      "args": ["mcp", "serve"]
+    }
+  }
+}
+```
+
+### Debug Mode
+
+To enable debug logging for troubleshooting:
+
+```json
+{
+  "mcpServers": {
+    "pelican": {
+      "command": "pelican",
+      "args": ["mcp", "serve", "--debug"]
+    }
+  }
+}
+```
+
+Logs will appear in your AI assistant's MCP server logs.
+
+### Environment Variables
+
+You can pass environment variables to configure the MCP server:
+
+```json
+{
+  "mcpServers": {
+    "pelican": {
+      "command": "pelican",
+      "args": ["mcp", "serve"],
+      "env": {
+        "PELICAN_FEDERATION_URL": "https://my-federation.org"
+      }
+    }
+  }
+}
+```
+
+## Best Practices
+
+### Use Descriptive Prompts
+
+Instead of:
+```
+Download the file
+```
+
+Use:
+```
+Download pelican://osg-htc.org/pelicanplatform/test/hello-world.txt to ~/Downloads/hello.txt
+```
+
+### Verify Before Large Downloads
+
+For large files or collections, ask for metadata first:
+
+```
+How large is pelican://osg-htc.org/ospool/data/large-dataset/ recursively?
+```
+
+Then download if appropriate.
+
+### Organize Downloaded Files
+
+Specify organized destination paths:
+
+```
+Download pelican://osg-htc.org/pelicanplatform/test/hello-world.txt
+to ~/pelican-data/hello-world.txt
+```
+
+The MCP server will create directories as needed.
+
+## Learn More
+
+- [Pelican Command Line Client](../client/page.mdx) - Learn the CLI commands that power the MCP server
+- [Model Context Protocol Specification](https://modelcontextprotocol.io/) - Learn about the MCP standard
+- [Claude Code MCP Documentation](https://docs.claude.com/en/docs/claude-code/mcp) - More on using MCP with Claude Code
+- [VS Code MCP Documentation](https://code.visualstudio.com/docs/copilot/customization/mcp-servers) - Integrating MCP with VS Code
+
+## Support
+
+The Pelican MCP server feature just rolled out.
+If you encounter issues, try the following:
+
+1. Check the [Pelican documentation](../../) for general Pelican help
+2. Verify your configuration follows the examples above
+3. Test with the Pelican CLI first to ensure basic functionality works
+4. Report issues on the [Pelican GitHub repository](https://github.com/PelicanPlatform/pelican/issues)
