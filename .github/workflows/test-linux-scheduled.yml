@@ -1,0 +1,37 @@
+---
+name: Run Tests (Linux) [on schedule]
+
+# On Linux, we run tests in a custom container image. For a scheduled
+# run, we have no choice but to use the most recent container image that
+# was built.
+
+on:
+  schedule:
+    - cron: "0 7 * * *"  # at 07:00 every day
+  workflow_dispatch:
+
+jobs:
+  run-tests:
+    name: Test
+    uses: ./.github/workflows/test-linux.yml
+    with:
+      image: hub.opensciencegrid.org/pelican_platform/pelican-test:latest-itb
+
+  analyze-runs:
+    name: Analyze Runs
+    if: always()
+    needs: [run-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Download artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/download_junit_artifacts.sh "Run Tests (Linux) [on schedule]"
+
+      - name: Analyze test results
+        run: |
+          python3 .github/scripts/analyze_junit_results.py
+          cat test-failure-analysis.txt >> $GITHUB_STEP_SUMMARY
