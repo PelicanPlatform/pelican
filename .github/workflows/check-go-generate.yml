@@ -34,7 +34,7 @@ jobs:
       - name: Create placeholder frontend assets
         run: |
           mkdir -p web_ui/frontend/out
-          touch web_ui/frontend/out/index.html
+          touch web_ui/frontend/out/placeholder
 
       - name: Run Go Generate
         run: go generate ./...
