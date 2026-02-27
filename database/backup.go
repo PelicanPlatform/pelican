@@ -39,6 +39,7 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/glebarez/sqlite"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -48,7 +49,6 @@ import (
 	"golang.org/x/crypto/nacl/secretbox"
 	"golang.org/x/sync/errgroup"
 
-	_ "github.com/glebarez/sqlite"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/version"
