@@ -248,3 +248,149 @@ func TestOriginMultiuser(t *testing.T) {
 		}
 	})
 }
+
+// TestMultiuserChecksumFallback verifies that the client gracefully handles
+// checksum algorithm mismatches with a multiuser origin. The XRootD multiuser
+// plugin may not support all checksum algorithms (e.g., crc32c); when the
+// client requests an unsupported algorithm, the origin falls back to one it
+// does support (typically md5). The client should detect this and verify the
+// transfer using the server's preferred algorithm instead of failing.
+//
+// This is a regression test for https://github.com/pelicanplatform/pelican/issues/3146
+func TestMultiuserChecksumFallback(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("Skipping multiuser test: must run as root")
+	}
+
+	_, err := user.Lookup("alice")
+	if err != nil {
+		t.Skip("Skipping multiuser test: user 'alice' does not exist")
+	}
+
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	ft := fed_test_utils.NewFedTest(t, multiuserOriginConfig)
+	require.NotNil(t, ft)
+
+	storagePrefix := ft.Exports[0].StoragePrefix
+	require.NotEmpty(t, storagePrefix)
+
+	err = os.Chmod(storagePrefix, 0777)
+	require.NoError(t, err)
+
+	createScope, err := token_scopes.Wlcg_Storage_Create.Path("/")
+	require.NoError(t, err)
+	modifyScope, err := token_scopes.Wlcg_Storage_Modify.Path("/")
+	require.NoError(t, err)
+	readScope, err := token_scopes.Wlcg_Storage_Read.Path("/")
+	require.NoError(t, err)
+	writeScopes := []token_scopes.TokenScope{createScope, modifyScope, readScope}
+
+	aliceToken := createTokenWithSubject(t, "alice", writeScopes)
+
+	testContent := []byte("Checksum fallback test content for multiuser origin.")
+	localTmpDir := t.TempDir()
+	localFile := filepath.Join(localTmpDir, "checksum_test.txt")
+	require.NoError(t, os.WriteFile(localFile, testContent, 0644))
+
+	remoteURL := fmt.Sprintf("pelican://%s:%d/test/checksum_test.txt",
+		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+
+	// Upload the file first (requesting CRC32C checksum verification).
+	// The multiuser origin may not support CRC32C natively; the client
+	// should fall back to a supported algorithm (e.g., MD5) and still
+	// verify the upload successfully.
+	t.Run("UploadWithCRC32CRequiresChecksum", func(t *testing.T) {
+		transferResults, err := client.DoPut(
+			ft.Ctx,
+			localFile,
+			remoteURL,
+			false,
+			client.WithToken(aliceToken),
+			client.WithRequestChecksums([]client.ChecksumType{client.AlgCRC32C}),
+			client.WithRequireChecksum(),
+		)
+		require.NoError(t, err, "Upload should not fail when origin doesn't support crc32c")
+		require.NotEmpty(t, transferResults)
+		assert.NoError(t, transferResults[0].Error,
+			"Upload should succeed with checksum fallback even when crc32c is required")
+		assert.Greater(t, transferResults[0].TransferredBytes, int64(0))
+	})
+
+	// Download the file requesting CRC32C (which the multiuser origin may
+	// not support). The client should fall back to the server's preferred
+	// algorithm and still verify the download.
+	t.Run("DownloadWithCRC32CRequiresChecksum", func(t *testing.T) {
+		downloadDir := t.TempDir()
+		downloadFile := filepath.Join(downloadDir, "downloaded.txt")
+
+		transferResults, err := client.DoGet(
+			ft.Ctx,
+			remoteURL,
+			downloadFile,
+			false,
+			client.WithToken(aliceToken),
+			client.WithRequestChecksums([]client.ChecksumType{client.AlgCRC32C}),
+			client.WithRequireChecksum(),
+		)
+		require.NoError(t, err, "Download should not fail when origin doesn't support crc32c")
+		require.NotEmpty(t, transferResults)
+		assert.NoError(t, transferResults[0].Error,
+			"Download should succeed with checksum fallback even when crc32c is required")
+
+		content, err := os.ReadFile(downloadFile)
+		require.NoError(t, err)
+		assert.Equal(t, testContent, content, "Downloaded content should match uploaded content")
+	})
+
+	// Download requesting the default checksum (no explicit algorithm).
+	// The default is CRC32C; verify fallback still works.
+	t.Run("DownloadDefaultChecksumRequiresChecksum", func(t *testing.T) {
+		downloadDir := t.TempDir()
+		downloadFile := filepath.Join(downloadDir, "downloaded_default.txt")
+
+		transferResults, err := client.DoGet(
+			ft.Ctx,
+			remoteURL,
+			downloadFile,
+			false,
+			client.WithToken(aliceToken),
+			client.WithRequireChecksum(),
+		)
+		require.NoError(t, err, "Download should not fail with default checksum when origin doesn't support crc32c")
+		require.NotEmpty(t, transferResults)
+		assert.NoError(t, transferResults[0].Error,
+			"Download should succeed with fallback when using default checksum algorithm")
+
+		content, err := os.ReadFile(downloadFile)
+		require.NoError(t, err)
+		assert.Equal(t, testContent, content)
+	})
+
+	// Explicitly request MD5 — which the multiuser origin does support.
+	// This should succeed without any fallback.
+	t.Run("DownloadWithMD5RequiresChecksum", func(t *testing.T) {
+		downloadDir := t.TempDir()
+		downloadFile := filepath.Join(downloadDir, "downloaded_md5.txt")
+
+		transferResults, err := client.DoGet(
+			ft.Ctx,
+			remoteURL,
+			downloadFile,
+			false,
+			client.WithToken(aliceToken),
+			client.WithRequestChecksums([]client.ChecksumType{client.AlgMD5}),
+			client.WithRequireChecksum(),
+		)
+		require.NoError(t, err, "Download should succeed when requesting MD5 (supported by multiuser)")
+		require.NotEmpty(t, transferResults)
+		assert.NoError(t, transferResults[0].Error,
+			"Download with MD5 should succeed without fallback")
+
+		content, err := os.ReadFile(downloadFile)
+		require.NoError(t, err)
+		assert.Equal(t, testContent, content)
+	})
+}

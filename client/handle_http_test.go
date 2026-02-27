@@ -1740,6 +1740,128 @@ func TestChecksumIncorrectWhenNotRequired(t *testing.T) {
 	assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
 }
 
+// Test behavior when server returns a different checksum algorithm than requested.
+// This simulates a multiuser origin that returns MD5 when CRC32C was requested.
+func TestChecksumAlgorithmFallback(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	test_utils.InitClient(t, map[string]any{
+		param.Logging_Level.GetName(): "debug",
+	})
+
+	// MD5 of "test file content" base64-encoded per RFC 3230
+	const correctMD5Base64 = "x4UGDIZnlswqFwjJlxVMjg=="
+
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			w.Header().Set("Content-Length", "17")
+			// Server returns MD5 instead of the requested CRC32C (multiuser scenario)
+			w.Header().Set("Digest", "md5="+correctMD5Base64)
+			w.WriteHeader(http.StatusOK)
+		} else if r.Method == "GET" {
+			w.Header().Set("Content-Length", "17")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte("test file content"))
+			assert.NoError(t, err)
+		} else {
+			t.Fatal("Unexpected method:", r.Method)
+		}
+	}))
+	defer svr.Close()
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		xferType: transferTypeDownload,
+		ctx:      context.Background(),
+		job: &TransferJob{
+			requireChecksum:    true,
+			requestedChecksums: []ChecksumType{AlgCRC32C},
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   svrURL.Host,
+				Path:   svrURL.Path + "/test.txt",
+			},
+		},
+		localPath: os.DevNull,
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+		requireChecksum: true,
+	}
+	transferResult, err := downloadObject(transfer)
+	assert.NoError(t, err)
+	assert.NoError(t, transferResult.Error, "Client should fall back to MD5 verification when CRC32C is unavailable")
+
+	// Server provided MD5
+	assert.Equal(t, 1, len(transferResult.ServerChecksums))
+	info := transferResult.ServerChecksums[0]
+	assert.Equal(t, ChecksumType(AlgMD5), info.Algorithm)
+
+	// ClientChecksums still reports the requested CRC32C
+	assert.Equal(t, 1, len(transferResult.ClientChecksums))
+	info = transferResult.ClientChecksums[0]
+	assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+}
+
+// Test that a mislabeled CRC32C checksum (too long, likely MD5 in hex) is handled gracefully
+func TestChecksumMislabeledCRC32C(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	test_utils.InitClient(t, map[string]any{
+		param.Logging_Level.GetName(): "debug",
+	})
+
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			w.Header().Set("Content-Length", "17")
+			// Simulate XRootD multiuser bug: MD5 hex value labeled as crc32c
+			w.Header().Set("Digest", "crc32c=c785060c866796cc2a1708c997154c8e")
+			w.WriteHeader(http.StatusOK)
+		} else if r.Method == "GET" {
+			w.Header().Set("Content-Length", "17")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte("test file content"))
+			assert.NoError(t, err)
+		} else {
+			t.Fatal("Unexpected method:", r.Method)
+		}
+	}))
+	defer svr.Close()
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		xferType: transferTypeDownload,
+		ctx:      context.Background(),
+		job: &TransferJob{
+			requireChecksum:    false,
+			requestedChecksums: []ChecksumType{AlgCRC32C},
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   svrURL.Host,
+				Path:   svrURL.Path + "/test.txt",
+			},
+		},
+		localPath: os.DevNull,
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+		requireChecksum: false,
+	}
+	transferResult, err := downloadObject(transfer)
+	assert.NoError(t, err)
+	// The mislabeled checksum should be skipped (no panic/crash), and since
+	// requireChecksum is false, the transfer should succeed without error.
+	assert.NoError(t, transferResult.Error, "Mislabeled CRC32C should be gracefully skipped")
+	// No valid server checksums should be parsed from the mislabeled value
+	assert.Equal(t, 0, len(transferResult.ServerChecksums), "Mislabeled checksum should be skipped")
+}
+
 // Test behavior when checksum is missing
 func TestChecksumMissing(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
@@ -1962,8 +2084,9 @@ func TestChecksumPut(t *testing.T) {
 			}
 			if r.Method == "HEAD" {
 				w.Header().Set("Content-Length", "17")
-				// Server returns MD5 checksum but client requested CRC32C
-				w.Header().Set("Digest", "md5=5eb63bbbe01eeed093cb22bb8f5acdc3")
+				// Server returns MD5 checksum (base64 per RFC 3230) but client requested CRC32C.
+				// The client should fall back to verifying using MD5.
+				w.Header().Set("Digest", "md5=x4UGDIZnlswqFwjJlxVMjg==")
 				w.WriteHeader(http.StatusOK)
 			}
 			if r.Method == "PROPFIND" {
@@ -2005,16 +2128,15 @@ func TestChecksumPut(t *testing.T) {
 		}
 		transferResult, err := uploadObject(transfer)
 		assert.NoError(t, err)
-		require.Error(t, transferResult.Error)
-		assert.True(t, errors.Is(transferResult.Error, ErrServerChecksumMissing), "Expected checksum missing error when algorithms don't match")
+		assert.NoError(t, transferResult.Error, "Client should fall back to MD5 verification when CRC32C is not available")
 
-		// Server provided MD5 checksum but client requested CRC32C
+		// Server provided MD5 checksum (client requested CRC32C but server fell back)
 		assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
 		info := transferResult.ServerChecksums[0]
-		assert.Equal(t, "5eb63bbbe01eeed093cb22bb8f5acdc3", checksumValueToHttpDigest(info.Algorithm, info.Value))
+		assert.Equal(t, "x4UGDIZnlswqFwjJlxVMjg==", checksumValueToHttpDigest(info.Algorithm, info.Value))
 		assert.Equal(t, ChecksumType(AlgMD5), info.Algorithm)
 
-		// Client computed CRC32C checksum
+		// Client checksums still report the originally-requested CRC32C
 		assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
 		info = transferResult.ClientChecksums[0]
 		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
@@ -2037,8 +2159,8 @@ func TestChecksumPut(t *testing.T) {
 			}
 			if r.Method == "HEAD" {
 				w.Header().Set("Content-Length", "17")
-				// Server returns different algorithm than requested
-				w.Header().Set("Digest", "md5=5eb63bbbe01eeed093cb22bb8f5acdc3")
+				// Server returns MD5 (base64 per RFC 3230) instead of requested CRC32C
+				w.Header().Set("Digest", "md5=x4UGDIZnlswqFwjJlxVMjg==")
 				w.WriteHeader(http.StatusOK)
 			}
 			if r.Method == "PROPFIND" {
@@ -2080,15 +2202,15 @@ func TestChecksumPut(t *testing.T) {
 		}
 		transferResult, err := uploadObject(transfer)
 		assert.NoError(t, err)
-		assert.NoError(t, transferResult.Error, "Should not error when requireChecksum is false")
+		assert.NoError(t, transferResult.Error, "Should not error when requireChecksum is false and MD5 fallback succeeds")
 
 		// Server provided MD5 checksum
 		assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
 		info := transferResult.ServerChecksums[0]
-		assert.Equal(t, "5eb63bbbe01eeed093cb22bb8f5acdc3", checksumValueToHttpDigest(info.Algorithm, info.Value))
+		assert.Equal(t, "x4UGDIZnlswqFwjJlxVMjg==", checksumValueToHttpDigest(info.Algorithm, info.Value))
 		assert.Equal(t, ChecksumType(AlgMD5), info.Algorithm)
 
-		// Client computed CRC32C checksum
+		// Client checksums still report the originally-requested CRC32C
 		assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
 		info = transferResult.ClientChecksums[0]
 		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
