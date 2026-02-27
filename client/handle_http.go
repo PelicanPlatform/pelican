@@ -495,6 +495,104 @@ func checksumValueToHttpDigest(checksumType ChecksumType, checksumValue []byte) 
 	return "(unknown checksum type)"
 }
 
+// createAllChecksumHashes creates hash writers for all known checksum types.
+// Computing all algorithms during transfer allows the client to verify against
+// whatever algorithm the server actually supports, even if it differs from
+// what was originally requested.
+func createAllChecksumHashes() (writers []io.Writer, types []ChecksumType) {
+	known := KnownChecksumTypes()
+	writers = make([]io.Writer, 0, len(known))
+	types = make([]ChecksumType, 0, len(known))
+	for _, t := range known {
+		var w io.Writer
+		switch t {
+		case AlgCRC32:
+			w = crc32.NewIEEE()
+		case AlgCRC32C:
+			w = crc32.New(crc32cTable)
+		case AlgMD5:
+			w = md5.New()
+		case AlgSHA1:
+			w = sha1.New()
+		default:
+			continue
+		}
+		writers = append(writers, w)
+		types = append(types, t)
+	}
+	return
+}
+
+// verifyTransferChecksums compares server-provided checksums against locally-computed ones.
+//
+// It tries to match any server-provided checksum against the computed values. If the match
+// is for a type the client didn't explicitly request (e.g., the server returned MD5 when
+// CRC32C was requested), a warning is logged about the fallback. Returns whether verification
+// succeeded and any error (e.g., checksum mismatch or missing required checksum).
+func verifyTransferChecksums(
+	allComputed map[ChecksumType][]byte,
+	requestedTypes []ChecksumType,
+	serverChecksums []ChecksumInfo,
+	requireChecksum bool,
+	fields log.Fields,
+) (verified bool, err error) {
+	if len(serverChecksums) == 0 {
+		if requireChecksum {
+			log.WithFields(fields).Errorln(
+				"Client requires checksum verification but server provided no checksums")
+			return false, ErrServerChecksumMissing
+		}
+		log.WithFields(fields).Debugln("Server did not provide any checksum values to compare")
+		return false, nil
+	}
+
+	requestedSet := make(map[ChecksumType]bool, len(requestedTypes))
+	for _, t := range requestedTypes {
+		requestedSet[t] = true
+	}
+
+	for _, serverCk := range serverChecksums {
+		clientVal, ok := allComputed[serverCk.Algorithm]
+		if !ok {
+			continue
+		}
+		if !bytes.Equal(serverCk.Value, clientVal) {
+			mismatchErr := &ChecksumMismatchError{
+				Info: ChecksumInfo{
+					Algorithm: serverCk.Algorithm,
+					Value:     clientVal,
+				},
+				ServerValue: serverCk.Value,
+			}
+			return false, error_codes.NewTransfer_ChecksumMismatchError(mismatchErr)
+		}
+		if !requestedSet[serverCk.Algorithm] {
+			log.WithFields(fields).Warnf(
+				"Requested checksum type(s) not provided by server; verified transfer using %s instead",
+				HttpDigestFromChecksum(serverCk.Algorithm))
+		} else {
+			log.WithFields(fields).Debugf("Checksum %s matches: %s",
+				HttpDigestFromChecksum(serverCk.Algorithm),
+				checksumValueToHttpDigest(serverCk.Algorithm, serverCk.Value))
+		}
+		return true, nil
+	}
+
+	// No server checksum matched any computed algorithm
+	if requireChecksum {
+		log.WithFields(fields).Errorln(
+			"Client requires checksum verification but server returned only unsupported algorithms")
+		return false, ErrServerChecksumMissing
+	}
+	for _, checksumInfo := range serverChecksums {
+		log.WithFields(fields).Debugf(
+			"Server provided checksum %s=%s but algorithm not computable by client",
+			HttpDigestFromChecksum(checksumInfo.Algorithm),
+			checksumValueToHttpDigest(checksumInfo.Algorithm, checksumInfo.Value))
+	}
+	return false, nil
+}
+
 // Reset the memory-cached copy of the HTCondor job ad
 //
 // The client will search through the process's environment to find
@@ -2007,25 +2105,11 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	localPath := transfer.localPath
 	transferResults.job = transfer.job
 
-	// Create a checksum hash instance for each requested checksum; these will all be
-	// joined together into a single writer interface with the output file
-	hashes := make([]io.Writer, 0, 1)
-	for _, requestedChecksum := range transfer.requestedChecksums {
-		switch requestedChecksum {
-		case AlgCRC32:
-			hashes = append(hashes, crc32.NewIEEE())
-		case AlgCRC32C:
-			hashes = append(hashes, crc32.New(crc32cTable))
-		case AlgMD5:
-			hashes = append(hashes, md5.New())
-		case AlgSHA1:
-			hashes = append(hashes, sha1.New())
-		}
-	}
-	if len(hashes) == 0 {
-		hashes = append(hashes, crc32.New(crc32cTable))
-	}
-	hashesWriter := io.MultiWriter(hashes...)
+	// Create hash instances for all known checksum types so we can verify against
+	// whatever algorithm the server actually supports. This handles cases like a multiuser
+	// origin returning MD5 when CRC32C was requested.
+	allHashes, allHashTypes := createAllChecksumHashes()
+	hashesWriter := io.MultiWriter(allHashes...)
 
 	// Prepare the local path for transfer; create the directory (as necessary) and remove
 	// any pre-existing file or failed attempt.
@@ -2342,7 +2426,8 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			if transfer.token != nil {
 				tokenContents, _ = transfer.token.Get()
 			}
-			if checksums, err := fetchChecksum(ctx, transfer.requestedChecksums, url, tokenContents, transfer.project); err == nil {
+			// Request all known checksum types so the server returns whichever it supports
+			if checksums, err := fetchChecksum(ctx, KnownChecksumTypes(), url, tokenContents, transfer.project); err == nil {
 				transferResults.ServerChecksums = checksums
 				gotChecksum = true
 			}
@@ -2351,99 +2436,38 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			transferResults.Error = errors.New("checksum is required but no endpoints were able to provide it")
 		}
 
-		// Compare the checksum values sent by the server versus the computed local values
-		checksumHashes := transfer.requestedChecksums
-		if len(checksumHashes) == 0 {
-			// Added to make sure the list of checksum types are consistent with the logic
-			// when we created the hashes []io.Writer previously.
-			checksumHashes = []ChecksumType{AlgDefault}
+		// Build map of all computed checksums for verification
+		allComputed := make(map[ChecksumType][]byte, len(allHashTypes))
+		for idx, t := range allHashTypes {
+			allComputed[t] = allHashes[idx].(hash.Hash).Sum(nil)
 		}
+
+		// Populate ClientChecksums with the originally-requested types for backward compatibility
+		requestedTypes := transfer.requestedChecksums
+		if len(requestedTypes) == 0 {
+			requestedTypes = []ChecksumType{AlgDefault}
+		}
+		transferResults.ClientChecksums = make([]ChecksumInfo, 0, len(requestedTypes))
+		for _, t := range requestedTypes {
+			if val, ok := allComputed[t]; ok {
+				transferResults.ClientChecksums = append(transferResults.ClientChecksums, ChecksumInfo{
+					Algorithm: t,
+					Value:     val,
+				})
+			}
+		}
+
+		// Verify checksums: match any server-provided checksum against our computed values,
+		// falling back to non-requested algorithms if the requested ones aren't available
 		fields := log.Fields{
 			"url": transfer.remoteURL.String(),
 			"job": transfer.job.ID(),
 		}
-		successCtr := 0
-		transferResults.ClientChecksums = make([]ChecksumInfo, 0, len(checksumHashes))
-		for idx, checksum := range checksumHashes {
-			computedValue := hashes[idx].(hash.Hash).Sum(nil)
-			transferResults.ClientChecksums = append(transferResults.ClientChecksums, ChecksumInfo{
-				Algorithm: checksum,
-				Value:     computedValue,
-			})
-			found := false
-			for _, checksumInfo := range transferResults.ServerChecksums {
-				if checksumInfo.Algorithm == checksum {
-					found = true
-					if !bytes.Equal(checksumInfo.Value, computedValue) {
-						mismatchErr := &ChecksumMismatchError{
-							Info: ChecksumInfo{
-								Algorithm: checksum,
-								Value:     computedValue,
-							},
-							ServerValue: checksumInfo.Value,
-						}
-						// Wrap ChecksumMismatchError as Transfer.ChecksumMismatch (post-transfer validation failure)
-						transferResults.Error = error_codes.NewTransfer_ChecksumMismatchError(mismatchErr)
-						log.WithFields(fields).Errorln(transferResults.Error)
-						break
-					} else {
-						successCtr++
-						log.WithFields(fields).Debugf("Checksum %s matches: %s",
-							HttpDigestFromChecksum(checksumInfo.Algorithm),
-							checksumValueToHttpDigest(checksumInfo.Algorithm, checksumInfo.Value),
-						)
-					}
-					break
-				}
-			}
-			if !found {
-				log.WithFields(fields).Debugf("Client requested checksum %s but server did not provide it",
-					HttpDigestFromChecksum(checksum),
-				)
-			}
-		}
-		// Can happen if all the checksum values we received are not known checksum algorithms
-		// we computed (the server can ignore our requested checksums and send its preferred ones)
-		if successCtr == 0 && transfer.requireChecksum && transferResults.Error == nil {
-			if len(transfer.requestedChecksums) == 0 {
-				log.WithFields(fields).Errorln(
-					"Client requires checksum to succeed and it was not provided by server; client computed crc32c value is",
-					hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)),
-				)
-			} else {
-				log.WithFields(fields).Errorln(
-					"Client requires checksum to succeed and it was not provided by server; client computed",
-					HttpDigestFromChecksum(transfer.requestedChecksums[0]), "value as",
-					checksumValueToHttpDigest(transfer.requestedChecksums[0], hashes[0].(hash.Hash).Sum(nil)),
-				)
-			}
-			transferResults.Error = ErrServerChecksumMissing
-			// Otherwise, it's not an error so we should log what we did
-		} else if successCtr == 0 && len(transferResults.ServerChecksums) == 0 && transferResults.Error == nil {
-			log.WithFields(fields).Debugln(
-				"Client computed crc32c value is", hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)),
-				"(server did not provide any checksum values to compare)",
-			)
-		} else if successCtr == 0 && transferResults.Error == nil {
-			for _, checksumInfo := range transferResults.ServerChecksums {
-				log.WithFields(fields).Debugf(
-					"Server provided checksum not requested by client (cannot compare to local) %s=%x",
-					HttpDigestFromChecksum(checksumInfo.Algorithm),
-					checksumValueToHttpDigest(checksumInfo.Algorithm, checksumInfo.Value),
-				)
-			}
-			if len(transfer.requestedChecksums) == 0 {
-				log.WithFields(fields).Debugln(
-					"Checksum algorithms provided by server were not the requested crc32c; client-computed crc32c value is",
-					hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)),
-				)
-			} else {
-				log.WithFields(fields).Debugln(
-					"Checksum algorithms provided by server were not the requested ones; client computed",
-					HttpDigestFromChecksum(transfer.requestedChecksums[0]), "value as",
-					checksumValueToHttpDigest(transfer.requestedChecksums[0], hashes[0].(hash.Hash).Sum(nil)),
-				)
-			}
+		if _, verifyErr := verifyTransferChecksums(
+			allComputed, requestedTypes, transferResults.ServerChecksums,
+			transfer.requireChecksum, fields,
+		); verifyErr != nil {
+			transferResults.Error = verifyErr
 		}
 	} else {
 		transferResults.Error = xferErrors
@@ -2590,6 +2614,17 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 				}
 				fallthrough
 			case "crc32":
+				// CRC32/CRC32C values are 32 bits, which is at most 8 hex characters.
+				// If the value is longer, the origin likely returned a different algorithm
+				// (e.g., MD5) mislabeled as crc32/crc32c. This can happen with the XRootD
+				// multiuser plugin when it doesn't support the requested algorithm.
+				if len(info[1]) > 8 {
+					log.WithFields(fields).Warnf(
+						"Server returned %s with value '%s' (%d hex chars, expected at most 8 for a 32-bit checksum); "+
+							"the origin may not support %s and returned a different algorithm. Skipping this entry.",
+						info[0], info[1], len(info[1]), info[0])
+					continue
+				}
 				// Parse crc32 and crc32c as hexadecimal values.  Per the IANA registry
 				// (https://www.iana.org/assignments/http-dig-alg/http-dig-alg.xhtml), these
 				// are hex-encoded and should accept leading 0's.  Once parsed, store the
@@ -3299,26 +3334,10 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		}()
 	}
 
-	// Create a checksum hash instance for each requested checksum.
-	// Will all be joined into a single writer
-	hashes := make([]io.Writer, 0, 1)
-	for _, checksum := range transfer.requestedChecksums {
-		switch checksum {
-		case AlgCRC32:
-			hashes = append(hashes, crc32.NewIEEE())
-		case AlgCRC32C:
-			hashes = append(hashes, crc32.New(crc32cTable))
-		case AlgMD5:
-			hashes = append(hashes, md5.New())
-		case AlgSHA1:
-			hashes = append(hashes, sha1.New())
-		}
-	}
-	// If no checksums are requested, use crc32c by default
-	if len(hashes) == 0 {
-		hashes = append(hashes, crc32.New(crc32cTable))
-	}
-	hashesWriter := io.MultiWriter(hashes...)
+	// Create hash instances for all known checksum types so we can verify against
+	// whatever algorithm the server actually supports after upload.
+	allHashes, allHashTypes := createAllChecksumHashes()
+	hashesWriter := io.MultiWriter(allHashes...)
 
 	var attempt TransferResult
 	var ioreader io.ReadCloser
@@ -3617,12 +3636,9 @@ Loop:
 		attempt.Error = lastError
 	} else {
 		log.Debugf("Successful upload of %d bytes", uploaded)
-		// At this point, we have a successful upload.
-		// We now need to fetch the checksums from the server and then test them against the ones we calculated.
-		// If they match, we're good. If they don't, we need to return an error.
 
-		// Fetch the checksums from the server
-		result, err := fetchChecksum(putContext, transfer.requestedChecksums, dest, tokenContents, transfer.job.project)
+		// Fetch the checksums from the server, requesting all known types
+		result, err := fetchChecksum(putContext, KnownChecksumTypes(), dest, tokenContents, transfer.job.project)
 		if err != nil {
 			if transfer.requireChecksum {
 				log.Errorln("Error fetching checksum:", err)
@@ -3635,92 +3651,37 @@ Loop:
 			transferResult.ServerChecksums = result
 		}
 
-		checksumHashes := transfer.requestedChecksums
-		if len(checksumHashes) == 0 {
-			checksumHashes = []ChecksumType{AlgDefault}
+		// Build map of all computed checksums for verification
+		allComputed := make(map[ChecksumType][]byte, len(allHashTypes))
+		for idx, t := range allHashTypes {
+			allComputed[t] = allHashes[idx].(hash.Hash).Sum(nil)
 		}
+
+		// Populate ClientChecksums with the originally-requested types for backward compatibility
+		requestedTypes := transfer.requestedChecksums
+		if len(requestedTypes) == 0 {
+			requestedTypes = []ChecksumType{AlgDefault}
+		}
+		transferResult.ClientChecksums = make([]ChecksumInfo, 0, len(requestedTypes))
+		for _, t := range requestedTypes {
+			if val, ok := allComputed[t]; ok {
+				transferResult.ClientChecksums = append(transferResult.ClientChecksums, ChecksumInfo{
+					Algorithm: t,
+					Value:     val,
+				})
+			}
+		}
+
+		// Verify checksums: match any server-provided checksum against our computed values
 		fields := log.Fields{
 			"url": transfer.remoteURL.String(),
 			"job": transfer.job.ID(),
 		}
-		successCtr := 0
-		transferResult.ClientChecksums = make([]ChecksumInfo, 0, len(checksumHashes))
-		for idx, checksum := range checksumHashes {
-			computedValue := hashes[idx].(hash.Hash).Sum(nil)
-			transferResult.ClientChecksums = append(transferResult.ClientChecksums, ChecksumInfo{
-				Algorithm: checksum,
-				Value:     computedValue,
-			})
-			found := false
-			for _, checksumInfo := range transferResult.ServerChecksums {
-				if checksumInfo.Algorithm == checksum {
-					found = true
-					if !bytes.Equal(checksumInfo.Value, computedValue) {
-						mismatchErr := &ChecksumMismatchError{
-							Info: ChecksumInfo{
-								Algorithm: checksum,
-								Value:     computedValue,
-							},
-							ServerValue: checksumInfo.Value,
-						}
-						// Wrap ChecksumMismatchError as Transfer.ChecksumMismatch (post-transfer validation failure)
-						transferResult.Error = error_codes.NewTransfer_ChecksumMismatchError(mismatchErr)
-						log.WithFields(fields).Errorln(transferResult.Error)
-						break
-					} else {
-						successCtr++
-						log.WithFields(fields).Debugf("Checksum %s matches: %s",
-							HttpDigestFromChecksum(checksumInfo.Algorithm),
-							checksumValueToHttpDigest(checksumInfo.Algorithm, checksumInfo.Value),
-						)
-					}
-					break
-				}
-			}
-			if !found {
-				log.WithFields(fields).Debugf("Client requested checksum %s but server did not provide it",
-					HttpDigestFromChecksum(checksum))
-			}
-		}
-		if successCtr == 0 && transfer.requireChecksum && transferResult.Error == nil {
-			if len(transfer.requestedChecksums) == 0 {
-				log.WithFields(fields).Errorln(
-					"Client requires checksum to succeed and it was not provided by server; client computed crc32c value is",
-					hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)),
-				)
-			} else {
-				log.WithFields(fields).Errorln(
-					"Client requires checksum to succeed and it was not provided by server; client computed",
-					HttpDigestFromChecksum(transfer.requestedChecksums[0]), "value as",
-					checksumValueToHttpDigest(transfer.requestedChecksums[0], hashes[0].(hash.Hash).Sum(nil)),
-				)
-			}
-			transferResult.Error = ErrServerChecksumMissing
-		} else if successCtr == 0 && len(transferResult.ServerChecksums) == 0 && transferResult.Error == nil {
-			log.WithFields(fields).Debugln(
-				"Client computed crc32c value is", hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)),
-				"(server did not provide any checksum values to compare)",
-			)
-		} else if successCtr == 0 && transferResult.Error == nil {
-			for _, checksumInfo := range transferResult.ServerChecksums {
-				log.WithFields(fields).Debugf(
-					"Server provided checksum not requested by client (cannot compare to local) %s=%x",
-					HttpDigestFromChecksum(checksumInfo.Algorithm),
-					checksumValueToHttpDigest(checksumInfo.Algorithm, checksumInfo.Value),
-				)
-			}
-			if len(transfer.requestedChecksums) == 0 {
-				log.WithFields(fields).Debugln(
-					"Checksum algorithms provided by server were not the requested crc32c; client-computed crc32c value is",
-					hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)),
-				)
-			} else {
-				log.WithFields(fields).Debugln(
-					"Checksum algorithms provided by server were not the requested ones; client computed",
-					HttpDigestFromChecksum(transfer.requestedChecksums[0]), "value as",
-					checksumValueToHttpDigest(transfer.requestedChecksums[0], hashes[0].(hash.Hash).Sum(nil)),
-				)
-			}
+		if _, verifyErr := verifyTransferChecksums(
+			allComputed, requestedTypes, transferResult.ServerChecksums,
+			transfer.requireChecksum, fields,
+		); verifyErr != nil {
+			transferResult.Error = verifyErr
 		}
 	}
 	// Add our attempt fields
