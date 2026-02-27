@@ -31,6 +31,11 @@ jobs:
           check-latest: true
           cache: false
 
+      - name: Create placeholder frontend assets
+        run: |
+          mkdir -p web_ui/frontend/out
+          touch web_ui/frontend/out/index.html
+
       - name: Run Go Generate
         run: go generate ./...
 
