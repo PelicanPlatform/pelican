@@ -1,0 +1,38 @@
+---
+title: pelican job status
+---
+
+## pelican job status
+
+Get the status of a transfer job
+
+### Synopsis
+
+Get detailed status information about a transfer job, including
+the status of all transfers within the job and overall progress.
+
+```
+pelican job status <job-id> [flags]
+```
+
+### Options
+
+```
+  -h, --help    help for status
+  -w, --watch   Watch job status until completion
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican job](/commands-reference/job/)	 - Manage asynchronous transfer jobs
