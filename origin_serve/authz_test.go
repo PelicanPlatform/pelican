@@ -36,21 +36,26 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 // Helper function to create a test JWT token
-func createTestToken(t *testing.T, key jwk.Key, issuer string, subject string, groups []string, scopes string) string {
-	tok, err := jwt.NewBuilder().
+func createTestToken(t *testing.T, key jwk.Key, issuer string, subject string, groups []string, scopes string, audiences ...string) string {
+	builder := jwt.NewBuilder().
 		Issuer(issuer).
 		Subject(subject).
 		IssuedAt(time.Now()).
 		Expiration(time.Now().Add(time.Hour)).
 		Claim("scope", scopes).
-		Claim("wlcg.groups", groups).
-		Build()
+		Claim("wlcg.groups", groups)
+	if len(audiences) > 0 {
+		builder = builder.Audience(audiences)
+	}
+	tok, err := builder.Build()
 	require.NoError(t, err)
 
 	// Sign with key - the key ID will be automatically added to the header
@@ -332,8 +337,8 @@ func TestPositiveAuthorizationWithRegisteredKey(t *testing.T) {
 	err = InitAuthConfig(ctx, egrp, exports)
 	require.NoError(t, err)
 
-	// Create a token signed with the private key
-	token := createTestToken(t, key, issuerURL, "alice", []string{"researchers", "admins"}, "storage.read:/file.txt storage.create:/newfile.txt")
+	// Create a token signed with the private key (include WLCG wildcard audience)
+	token := createTestToken(t, key, issuerURL, "alice", []string{"researchers", "admins"}, "storage.read:/file.txt storage.create:/newfile.txt", "https://wlcg.cern.ch/jwt/v1/any")
 
 	// Get the auth config
 	ac := GetAuthConfig()
@@ -444,6 +449,115 @@ func TestPathPrefixBoundaryCheck(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := hasPathPrefix(tt.requestPath, tt.authorizedPrefix)
 			assert.Equal(t, tt.expected, result, tt.description)
+		})
+	}
+}
+
+// TestAudienceValidation tests that the POSIXv2 origin checks the aud claim
+// against its accepted audiences: Origin.TokenAudience, the WLCG wildcard,
+// and the SciTokens wildcard.
+func TestAudienceValidation(t *testing.T) {
+	// We need a JWKS server so the token can be signature-verified
+	key := generateTestKey(t)
+	pubKey, err := key.PublicKey()
+	require.NoError(t, err)
+	require.NoError(t, pubKey.Set(jwk.KeyIDKey, "test-key"))
+	require.NoError(t, pubKey.Set(jwk.AlgorithmKey, jwa.ES256))
+
+	jwks := jwk.NewSet()
+	require.NoError(t, jwks.AddKey(pubKey))
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		data, _ := json.Marshal(jwks)
+		_, _ = w.Write(data)
+	})
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		cfg := map[string]interface{}{
+			"issuer":   "http://" + r.Host,
+			"jwks_uri": "http://" + r.Host + "/jwks",
+		}
+		data, _ := json.Marshal(cfg)
+		_, _ = w.Write(data)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	issuerURL := server.URL
+
+	tests := []struct {
+		name       string
+		audiences  []string
+		originAud  string // value for Origin.TokenAudience
+		authorized bool
+	}{
+		{
+			name:       "WLCGWildcardAccepted",
+			audiences:  []string{"https://wlcg.cern.ch/jwt/v1/any"},
+			originAud:  "",
+			authorized: true,
+		},
+		{
+			name:       "SciTokensWildcardAccepted",
+			audiences:  []string{"ANY"},
+			originAud:  "",
+			authorized: true,
+		},
+		{
+			name:       "OriginTokenAudienceAccepted",
+			audiences:  []string{"https://my-origin.example.com:8443"},
+			originAud:  "https://my-origin.example.com:8443",
+			authorized: true,
+		},
+		{
+			name:       "WrongAudienceRejected",
+			audiences:  []string{"https://wrong-origin.example.com"},
+			originAud:  "https://my-origin.example.com:8443",
+			authorized: false,
+		},
+		{
+			name:       "NoAudienceInTokenAccepted",
+			audiences:  nil,
+			originAud:  "https://my-origin.example.com:8443",
+			authorized: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config.ResetConfig()
+			t.Cleanup(config.ResetConfig)
+
+			if tt.originAud != "" {
+				require.NoError(t, param.Set(param.Origin_TokenAudience.GetName(), tt.originAud))
+			}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			egrp := &errgroup.Group{}
+
+			exports := []server_utils.OriginExport{
+				{
+					FederationPrefix: "/data",
+					StoragePrefix:    "/tmp/data",
+					IssuerUrls:       []string{issuerURL},
+					Capabilities: server_structs.Capabilities{
+						Reads: true,
+					},
+				},
+			}
+
+			require.NoError(t, InitAuthConfig(ctx, egrp, exports))
+			ac := GetAuthConfig()
+
+			token := createTestToken(t, key, issuerURL, "bob",
+				nil, "storage.read:/file.txt", tt.audiences...)
+
+			_, authorized := ac.authorizeWithContext(ctx,
+				token_scopes.Wlcg_Storage_Read, "/data/file.txt", token)
+			assert.Equal(t, tt.authorized, authorized, "audience check should match expected result")
 		})
 	}
 }

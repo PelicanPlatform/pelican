@@ -45,6 +45,7 @@ type (
 	authConfig struct {
 		exports    atomic.Pointer[[]server_utils.OriginExport]
 		issuers    atomic.Pointer[map[string]bool]
+		audiences  []string // accepted audience values (origin URL + wildcards)
 		issuerKeys *ttlcache.Cache[string, authConfigItem]
 		tokenAuthz *ttlcache.Cache[string, cachedTokenInfo]
 		userMapper *UserMapper // Maps JWT claims to local users/groups
@@ -94,6 +95,21 @@ func hasPathPrefix(requestPath, authorizedPrefix string) bool {
 
 func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 	ac = &authConfig{}
+
+	// Build the set of accepted audience values.
+	// The WLCG Common JWT Profile and SciTokens specs each define a
+	// wildcard audience ("https://wlcg.cern.ch/jwt/v1/any" and "ANY"
+	// respectively) that must always be accepted.  In addition, the
+	// origin's own URL (Origin.TokenAudience, which defaults to
+	// Origin.Url) is accepted so that tokens scoped to this specific
+	// origin are honoured.
+	ac.audiences = []string{
+		"https://wlcg.cern.ch/jwt/v1/any", // WLCG wildcard
+		"ANY",                             // SciTokens wildcard
+	}
+	if tokenAud := param.Origin_TokenAudience.GetString(); tokenAud != "" {
+		ac.audiences = append(ac.audiences, tokenAud)
+	}
 
 	// Initialize UserMapper for mapping JWT claims to local users/groups
 	// Read configuration from parameters
@@ -254,6 +270,36 @@ func (ac *authConfig) getResourceScopes(token string) (scopes []token_scopes.Res
 			WithDetails(err.Error())
 		err = tokenErr
 		return
+	}
+
+	// Validate the audience claim.  The WLCG Common JWT Profile and
+	// SciTokens specifications require that the resource server check
+	// the "aud" claim against its own identity (Origin.TokenAudience)
+	// or the recognised wildcard values.
+	tokenAuds := tok.Audience()
+	if len(tokenAuds) > 0 && len(ac.audiences) > 0 {
+		audOK := false
+		for _, ta := range tokenAuds {
+			for _, aa := range ac.audiences {
+				if ta == aa {
+					audOK = true
+					break
+				}
+			}
+			if audOK {
+				break
+			}
+		}
+		if !audOK {
+			tokenErr := NewTokenValidationError("token audience does not match this origin").
+				WithVerified(true).
+				WithIssuer(issuer).
+				WithSubject(tok.Subject()).
+				WithDetails(fmt.Sprintf("token audiences %v, accepted audiences %v", tokenAuds, ac.audiences))
+			log.Warningln(tokenErr.String())
+			err = tokenErr
+			return
+		}
 	}
 
 	scopes = token_scopes.ParseResourceScopeString(tok)

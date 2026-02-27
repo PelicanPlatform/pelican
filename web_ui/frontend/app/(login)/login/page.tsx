@@ -82,10 +82,20 @@ const AdminLogin = () => {
     if (response) {
       await mutate(getUser);
 
-      const url = new URL(window.location.href);
-      let returnUrl = url.searchParams.get('returnURL') || '';
-      returnUrl = returnUrl.replace(`/view`, '');
-      router.push(returnUrl ? returnUrl : '../');
+      let returnUrl = getReturnUrl(window.location.href);
+
+      // If the returnUrl is going to the Pelican web app use the app router
+      if (returnUrl && returnUrl.includes('/view')) {
+        router.push(returnUrl.replace(`/view`, ''));
+
+        // If the returnUrl isn't going to the Pelican app but is relative then use window location to navigate there
+      } else if (returnUrl && returnUrl.startsWith('/')) {
+        window.location.href = returnUrl;
+
+        // Default to going to the home page of the app
+      } else {
+        router.push('../');
+      }
     } else {
       setLoading(false);
     }
@@ -171,10 +181,11 @@ export default function Home() {
   );
 
   useEffect(() => {
-    const url = new URL(window.location.href);
-    const returnUrl = url.searchParams.get('returnURL') || '';
-    const encodedReturnUrl = encodeURIComponent(returnUrl);
-    setReturnUrl(encodedReturnUrl);
+    const returnUrl = getReturnUrl(window.location.href);
+    if (returnUrl) {
+      const encodedReturnUrl = encodeURIComponent(returnUrl);
+      setReturnUrl(encodedReturnUrl);
+    }
   }, []);
 
   const serverIntersect = useMemo(() => {
@@ -235,3 +246,11 @@ export default function Home() {
     </>
   );
 }
+
+const getReturnUrl = (url: string) => {
+  const currentUrl = new URL(url);
+  return (
+    currentUrl.searchParams.get('returnURL') ||
+    currentUrl.searchParams.get('nextUrl')
+  );
+};

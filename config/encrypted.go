@@ -41,6 +41,8 @@ import (
 	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // If we prompted the user for a new password while setting up the file,
@@ -51,6 +53,9 @@ var setEmptyPassword = false
 var ErrIncorrectPassword = errors.New("incorrect password")
 
 func GetEncryptedConfigName() (string, error) {
+	if override := param.Client_CredentialFile.GetString(); override != "" {
+		return override, nil
+	}
 	configDir := viper.GetString("ConfigDir")
 	if GetPreferredPrefix() == PelicanPrefix || IsRootExecution() {
 		return filepath.Join(configDir, "credentials", "client-credentials.pem"), nil
@@ -131,31 +136,32 @@ func GetEncryptedContents() (string, error) {
 	return string(buf), nil
 }
 
-func SaveEncryptedContents(encContents []byte) error {
-	filename, err := GetEncryptedConfigName()
+// saveToFile atomically writes data to filePath, creating parent
+// directories as needed with mode 0700 and setting file mode to 0600.
+func saveToFile(data []byte, filePath string) error {
+	configDir := filepath.Dir(filePath)
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		return err
+	}
+	fp, err := os.CreateTemp(configDir, "credentials.pem")
 	if err != nil {
 		return err
 	}
-
-	configDir := filepath.Dir(filename)
-	err = os.MkdirAll(configDir, 0700)
-	if err != nil {
-		return err
-	}
-	fp, err := os.CreateTemp(configDir, "oauth2-client.pem")
-	if err != nil {
-		return err
-	}
+	tempName := fp.Name()
 	// Ensure that the file is closed before we attempt to rename it.
 	// Otherwise, on Windows, the rename operation will fail.
 	err = func() error {
 		defer fp.Close()
-		if _, err := fp.Write(encContents); err != nil {
-			os.Remove(fp.Name())
+		if _, err := fp.Write(data); err != nil {
+			os.Remove(tempName)
 			return err
 		}
 		if err := fp.Sync(); err != nil {
-			os.Remove(fp.Name())
+			os.Remove(tempName)
+			return err
+		}
+		if err := os.Chmod(tempName, 0600); err != nil {
+			os.Remove(tempName)
 			return err
 		}
 		return nil
@@ -164,11 +170,19 @@ func SaveEncryptedContents(encContents []byte) error {
 		return err
 	}
 
-	if err := os.Rename(fp.Name(), filename); err != nil {
-		os.Remove(fp.Name())
+	if err := os.Rename(tempName, filePath); err != nil {
+		os.Remove(tempName)
 		return err
 	}
 	return nil
+}
+
+func SaveEncryptedContents(encContents []byte) error {
+	filename, err := GetEncryptedConfigName()
+	if err != nil {
+		return err
+	}
+	return saveToFile(encContents, filename)
 }
 
 func ConvertX25519Key(ed25519_sk []byte) [32]byte {
@@ -305,7 +319,7 @@ func ResetPassword() error {
 	if err != nil {
 		return err
 	}
-	err = SaveConfigContents_internal(&input_config, true)
+	err = saveConfigContents(&input_config, true)
 	if err != nil {
 		return err
 	}
@@ -313,10 +327,14 @@ func ResetPassword() error {
 }
 
 func SaveConfigContents(config *OSDFConfig) error {
-	return SaveConfigContents_internal(config, false)
+	return saveConfigContents(config, false)
 }
 
-func SaveConfigContents_internal(config *OSDFConfig, forcePassword bool) error {
+// marshalEncryptedConfig serializes config as YAML, encrypts it with a
+// fresh ed25519/x25519 key pair, and returns the PEM-encoded result.
+// If password is non-empty the private key block is PKCS#8-encrypted;
+// otherwise it is stored in the clear.
+func marshalEncryptedConfig(config *OSDFConfig, password []byte) ([]byte, error) {
 	defaultConfig := OSDFConfig{}
 	if config == nil {
 		config = &defaultConfig
@@ -324,9 +342,55 @@ func SaveConfigContents_internal(config *OSDFConfig, forcePassword bool) error {
 
 	contents, err := yaml.Marshal(config)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
+	_, ed25519_sk, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		return nil, err
+	}
+
+	x25519_sk := ConvertX25519Key(ed25519_sk)
+	x25519_pk_slice, err := curve25519.X25519(x25519_sk[:], curve25519.Basepoint)
+	if err != nil {
+		return nil, err
+	}
+	var x25519_pk [32]byte
+	copy(x25519_pk[:], x25519_pk_slice)
+
+	boxed_bytes, err := box.SealAnonymous(nil, []byte(contents), &x25519_pk, rand.Reader)
+	if err != nil {
+		return nil, errors.New("Failed to seal config")
+	}
+
+	var key_bytes []byte
+	if len(password) == 0 {
+		key_bytes, err = x509.MarshalPKCS8PrivateKey(ed25519.PrivateKey(ed25519_sk[:]))
+	} else {
+		opts := *pkcs8.DefaultOpts
+		if kdfopts, ok := (opts.KDFOpts).(*pkcs8.PBKDF2Opts); ok {
+			kdfopts.IterationCount = 100000
+		}
+		key_bytes, err = pkcs8.MarshalPrivateKey(ed25519.PrivateKey(ed25519_sk[:]), password, &opts)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	pem_block := pem.Block{Type: "ENCRYPTED PRIVATE KEY", Bytes: key_bytes}
+	if len(password) == 0 {
+		pem_block.Type = "PRIVATE KEY"
+	}
+	pem_bytes := append(pem.EncodeToMemory(&pem_block), '\n')
+
+	pem_block.Type = "ENCRYPTED CONFIG"
+	pem_block.Bytes = boxed_bytes
+
+	pem_bytes = append(pem_bytes, pem.EncodeToMemory(&pem_block)...)
+	return pem_bytes, nil
+}
+
+func saveConfigContents(config *OSDFConfig, forcePassword bool) error {
 	password, err := TryGetPassword()
 	if setEmptyPassword {
 		fmt.Fprintln(os.Stderr, "WARNING: empty password provided; the credentials will be saved unencrypted on disk")
@@ -342,57 +406,18 @@ func SaveConfigContents_internal(config *OSDFConfig, forcePassword bool) error {
 		}
 	}
 
-	_, ed25519_sk, err := ed25519.GenerateKey(nil)
+	pemBytes, err := marshalEncryptedConfig(config, password)
 	if err != nil {
 		return err
 	}
-
-	x25519_sk := ConvertX25519Key(ed25519_sk)
-	x25519_pk_slice, err := curve25519.X25519(x25519_sk[:], curve25519.Basepoint)
-	if err != nil {
-		return err
-	}
-	var x25519_pk [32]byte
-	copy(x25519_pk[:], x25519_pk_slice)
-
-	boxed_bytes, err := box.SealAnonymous(nil, []byte(contents), &x25519_pk, rand.Reader)
-	if err != nil {
-		return errors.New("Failed to seal config")
-	}
-
-	var key_bytes []byte
-	if len(password) == 0 {
-		key_bytes, err = x509.MarshalPKCS8PrivateKey(ed25519.PrivateKey(ed25519_sk[:]))
-	} else {
-		opts := *pkcs8.DefaultOpts
-		if kdfopts, ok := (opts.KDFOpts).(*pkcs8.PBKDF2Opts); ok {
-			kdfopts.IterationCount = 100000
-		}
-		key_bytes, err = pkcs8.MarshalPrivateKey(ed25519.PrivateKey(ed25519_sk[:]), password, &opts)
-	}
-	if err != nil {
-		return err
-	}
-
-	pem_block := pem.Block{Type: "ENCRYPTED PRIVATE KEY", Bytes: key_bytes}
-	if len(password) == 0 {
-		pem_block.Type = "PRIVATE KEY"
-	}
-	pem_bytes_memory := append(pem.EncodeToMemory(&pem_block), '\n')
-
-	pem_block.Type = "ENCRYPTED CONFIG"
-	pem_block.Bytes = boxed_bytes
-
-	pem_bytes_memory = append(pem_bytes_memory, pem.EncodeToMemory(&pem_block)...)
 
 	if len(password) > 0 {
-		err = SavePassword(password)
-		if err != nil {
+		if err := SavePassword(password); err != nil {
 			log.Debugln("Failed to save password to session keychain:", err)
 		}
 	}
 
-	return SaveEncryptedContents(pem_bytes_memory)
+	return SaveEncryptedContents(pemBytes)
 }
 
 // Get a 32B secret from current issuer private key
@@ -533,4 +558,57 @@ func DecryptString(encryptedString string) (decryptedString string, keyID string
 	}
 
 	return string(decryptedMsg), keyID, nil
+}
+
+// SaveConfigContentsToFile saves the configuration to a specific file path.
+// If withPassword is false, the credentials are saved without encryption.
+// This is useful for creating credential files that can be used in non-interactive
+// contexts where password prompts would fail.
+func SaveConfigContentsToFile(config *OSDFConfig, filePath string, withPassword bool) error {
+	var password []byte
+	var err error
+	if withPassword {
+		password, _ = TryGetPassword()
+		if len(password) == 0 {
+			password, err = GetPassword(false)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	pemBytes, err := marshalEncryptedConfig(config, password)
+	if err != nil {
+		return err
+	}
+
+	return saveToFile(pemBytes, filePath)
+}
+
+// HasEncryptedPassword returns true if the credential file exists and
+// contains a PEM block of type "ENCRYPTED PRIVATE KEY", indicating the
+// credentials are password-protected.
+func HasEncryptedPassword() (bool, error) {
+	exists, err := EncryptedConfigExists()
+	if err != nil || !exists {
+		return false, err
+	}
+
+	encContents, err := GetEncryptedContents()
+	if err != nil {
+		return false, err
+	}
+
+	rest := []byte(encContents)
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type == "ENCRYPTED PRIVATE KEY" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
