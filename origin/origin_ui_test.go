@@ -97,6 +97,9 @@ func TestCollectionsAPI(t *testing.T) {
 	err = os.WriteFile(filepath.Join(exportDir, "test-origin"), []byte("test"), 0644)
 	require.NoError(t, err)
 
+	exportDir2, err := os.MkdirTemp("", "test-export2")
+	require.NoError(t, err)
+
 	require.NoError(t, param.Set(param.Origin_StorageType.GetName(), "posix"))
 	require.NoError(t, param.Set(param.Origin_Exports.GetName(), []map[string]interface{}{
 		{
@@ -105,7 +108,7 @@ func TestCollectionsAPI(t *testing.T) {
 			"SentinelLocation": "test-origin",
 		},
 		{
-			"StoragePrefix":    "/test2",
+			"StoragePrefix":    exportDir2,
 			"FederationPrefix": "/test2",
 		},
 	}))
