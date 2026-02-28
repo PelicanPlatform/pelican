@@ -29,9 +29,10 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 var (
@@ -189,8 +190,10 @@ func MapToSlice[K comparable, V any](m map[K]V) []V {
 // can validate relative values of different watermarks (e.g. !(low > high)). The returned float64 is only meant
 // to be used for comparing two watermark values, but only if both are either percentages or byte values, as
 // indicated by the isAbsolute return value.
-func ValidateWatermark(paramName string, requireSuffix bool) (wm float64, isAbsolute bool, err error) {
-	wmStr := viper.GetString(paramName)
+func ValidateWatermark(wmParam param.StringParam, requireSuffix bool) (wm float64, isAbsolute bool, err error) {
+	wmStr := wmParam.GetString()
+	paramName := wmParam.GetName()
+
 	if wmStr == "" {
 		return 0, false, errors.Errorf("watermark value for config param '%s' is empty.", paramName)
 	}
