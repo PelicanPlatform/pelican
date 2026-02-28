@@ -86,8 +86,13 @@ Lotman:
       DiscoverPrefixes: true
       MergeLocalWithDiscovered: false
 LocalCache:
+  DefaultMaxAge: 24h
+  FDCacheSize: 500
   HighWaterMarkPercentage: 95
   LowWaterMarkPercentage: 85
+  MaxConcurrentPrefetch: 5
+  PrefetchTimeout: 10s
+  RevalidationJitter: 10
 Origin:
   DirectorTest: true
   Multiuser: false

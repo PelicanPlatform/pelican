@@ -185,20 +185,27 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		}
 	}
 
-	var lc *local_cache.LocalCache
+	var pc *local_cache.PersistentCache
 	if modules.IsEnabled(server_structs.LocalCacheType) {
-		// Create and register the cache routines before the web interface is up
-		lc, err = local_cache.NewLocalCache(ctx, egrp, local_cache.WithDeferConfig(true))
+		// Create and register the persistent cache before the web interface is up
+		pc, err = local_cache.NewPersistentCache(ctx, egrp, local_cache.PersistentCacheConfig{
+			DeferConfig: true,
+		})
 		if err != nil {
 			return
 		}
 		rootGroup := engine.Group("/", web_ui.ServerHeaderMiddleware)
-		lc.Register(ctx, rootGroup)
+		pc.Register(ctx, rootGroup)
 	}
 
 	// Start a routine to periodically refresh the private key directory
 	// This ensures that new or updated private keys are automatically loaded and registered
-	launcher_utils.LaunchIssuerKeysDirRefresh(ctx, egrp, modules)
+	// If local cache is enabled, also update the master key encryption when keys change
+	var keyChangeCallbacks []launcher_utils.KeyChangeCallback
+	if pc != nil {
+		keyChangeCallbacks = append(keyChangeCallbacks, pc.KeyChangeCallback())
+	}
+	launcher_utils.LaunchIssuerKeysDirRefresh(ctx, egrp, modules, keyChangeCallbacks...)
 
 	log.Info("Starting web engine...")
 	lnReference = nil
@@ -385,6 +392,11 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		if err = launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, serversRequireAdvertisement); err != nil {
 			return
 		}
+		// The first doAdvertise has been called synchronously above. For
+		// persistent cache servers whose initial federation token fetch
+		// failed (because the cache was not yet registered), trigger an
+		// immediate retry now that the director knows about us.
+		triggerPersistentCacheFedTokenRetry(cacheServer)
 	}
 
 	// Launch the broker listener.  Needs the federation information to determine the broker endpoint.
@@ -399,12 +411,12 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	}
 
 	if modules.IsEnabled(server_structs.LocalCacheType) {
-		log.Debugln("Starting local cache listener at", param.LocalCache_Socket.GetString())
-		if err := lc.Config(egrp); err != nil {
-			log.Warning("Failure when configuring the local cache; cache may incorrectly generate 403 errors until reconfiguration runs")
+		log.Debugln("Starting persistent cache listener at", param.LocalCache_Socket.GetString())
+		if err := pc.Config(egrp); err != nil {
+			log.Warning("Failure when configuring the persistent cache; cache may incorrectly generate 403 errors until reconfiguration runs")
 		}
-		if err = lc.LaunchListener(ctx, egrp); err != nil {
-			log.Errorln("Failure when starting the local cache listener:", err)
+		if err = pc.LaunchListener(ctx, egrp); err != nil {
+			log.Errorln("Failure when starting the persistent cache listener:", err)
 			return
 		}
 

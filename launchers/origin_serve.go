@@ -103,8 +103,13 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		return nil, err
 	}
 
-	// Director also registers this metadata URL; avoid registering twice.
-	if !modules.IsEnabled(server_structs.DirectorType) {
+	// When the director is co-located, it registers the root-level OIDC
+	// metadata (/.well-known/).  The origin registers its own copy under
+	// /api/v1.0/origin so its issuer URL is distinct from the
+	// federation's.  When the origin runs alone it registers at the root.
+	if modules.IsEnabled(server_structs.DirectorType) {
+		server_utils.RegisterOIDCAPI(engine.Group("/api/v1.0/origin", web_ui.ServerHeaderMiddleware), false)
+	} else {
 		server_utils.RegisterOIDCAPI(engine.Group("/", web_ui.ServerHeaderMiddleware), false)
 	}
 

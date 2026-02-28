@@ -1,0 +1,9 @@
+# POSIXv2 origin with private Reads (not PublicReads) and DisableDirectClients.
+# Requires both a user token AND a federation token for access.
+Origin:
+  StorageType: posixv2
+  DisableDirectClients: true
+  Exports:
+    - StoragePrefix: "/"
+      FederationPrefix: "/test"
+      Capabilities: ["Reads"]

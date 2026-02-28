@@ -21,8 +21,10 @@ package origin_serve
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
 	"path"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -201,12 +203,35 @@ func (ac *authConfig) getResourceScopes(token string) (scopes []token_scopes.Res
 	issuer = tok.Issuer()
 
 	issuers := ac.issuers.Load()
-	if !(*issuers)[issuer] {
+	trusted := (*issuers)[issuer]
+
+	// The federation's discovery endpoint is also a trusted issuer.
+	// We check it dynamically here rather than storing it in ac.issuers
+	// because the discovery URL may not yet be known when updateConfig
+	// runs at startup (the discovery server may start after the origin),
+	// particularly in unit tests.
+	//
+	// We also accept DirectorEndpoint because the director may create
+	// federation tokens before the canonical discovery URL has been
+	// established.  This is safe because the origin's own issuer URL
+	// is now a distinct sub-path when co-located with the director.
+	if !trusted {
+		if fedInfo, fedErr := config.GetFederation(context.Background()); fedErr == nil {
+			if fedInfo.DiscoveryEndpoint != "" && issuer == fedInfo.DiscoveryEndpoint {
+				trusted = true
+			} else if fedInfo.DirectorEndpoint != "" && issuer == fedInfo.DirectorEndpoint {
+				trusted = true
+			}
+		}
+	}
+
+	if !trusted {
 		// Token was parsed without verification (jwt.WithVerify(false)), so issuer is unverified
+		trustedList := slices.Sorted(maps.Keys(*issuers))
 		tokenErr := NewTokenValidationError("token issuer is not one of the trusted issuers").
 			WithIssuer(issuer).
 			WithVerified(false).
-			WithDetails(fmt.Sprintf("trusted issuers: %v", *issuers))
+			WithDetails(fmt.Sprintf("trusted issuers: %s", strings.Join(trustedList, ", ")))
 		log.Warningln(tokenErr.String())
 		err = tokenErr
 		return

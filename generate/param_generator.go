@@ -693,6 +693,12 @@ func (oP ObjectParam) Unmarshal(rawVal any) error {
 	return viper.UnmarshalKey(oP.name, rawVal)
 }
 
+// GetRaw returns the raw value from the configuration store without
+// any type coercion.  Returns nil when the key is unset.
+func (oP ObjectParam) GetRaw() interface{} {
+	return viper.Get(oP.name)
+}
+
 func (oP ObjectParam) GetName() string {
 	return oP.name
 }

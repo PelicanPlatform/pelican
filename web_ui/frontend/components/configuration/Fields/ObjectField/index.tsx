@@ -10,6 +10,7 @@ import LotForm from './LotForm';
 import PathForm from './PathForm';
 import AuthorizationTemplateForm from './AuthorizationTemplateForm';
 import PolicyDefinitionForm from './PolicyDefinitionForm';
+import StorageDirForm from './StorageDirForm';
 
 export {
   AuthorizationTemplateForm,
@@ -23,4 +24,5 @@ export {
   LotForm,
   PathForm,
   PolicyDefinitionForm,
+  StorageDirForm,
 };

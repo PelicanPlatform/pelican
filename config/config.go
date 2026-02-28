@@ -728,6 +728,22 @@ func GetServerIssuerURL() (issuerUrl string, err error) {
 		return issuerUrl, nil
 	}
 
+	// When both the origin and director run in the same process, the
+	// origin's issuer URL must differ from the federation/director issuer
+	// URL.  Otherwise, tokens minted by the origin have the same issuer
+	// as federation tokens minted by the director and the origin cannot
+	// distinguish them.  Default to a sub-path of the web URL so that
+	// the OIDC discovery documents are served at distinct paths.
+	if IsServerEnabled(server_structs.OriginType) && IsServerEnabled(server_structs.DirectorType) {
+		issuerUrl, err = url.JoinPath(param.Server_ExternalWebUrl.GetString(), "/api/v1.0/origin")
+		if err != nil {
+			return "", errors.Wrapf(err, "failed to construct co-located origin issuer URL from %q",
+				param.Server_ExternalWebUrl.GetString())
+		}
+		log.Debugf("Populating server's issuer URL as %q (origin co-located with director)", issuerUrl)
+		return issuerUrl, nil
+	}
+
 	// Finally, fall back to the external web URL
 	issuerUrl = param.Server_ExternalWebUrl.GetString()
 	if _, err := url.Parse(issuerUrl); err != nil {
@@ -736,6 +752,31 @@ func GetServerIssuerURL() (issuerUrl string, err error) {
 	}
 	log.Debugf("Populating server's issuer URL as %q from configured value of %q", issuerUrl, param.Server_ExternalWebUrl.GetName())
 	return issuerUrl, nil
+}
+
+// GetLocalIssuerUrl returns the issuer URL used for tokens that authenticate
+// local server operations (web-UI logins, monitoring queries, local-cache
+// purge commands, etc.).  This is distinct from GetServerIssuerURL(), which
+// returns the issuer for data-namespace tokens minted by an origin.
+//
+// In most deployments the two values are identical, but when an origin and
+// director are co-located in the same process the federation URL
+// (Server.ExternalWebUrl) belongs to the director.  The origin — and any
+// token-verification path that checks "local issuer" — must use a sub-path
+// so that locally-minted tokens are distinguishable from federation tokens.
+// The convention is to append "/api/v1.0/origin", mirroring what
+// GetServerIssuerURL() does for the data-namespace issuer in this scenario.
+func GetLocalIssuerUrl() string {
+	if IsServerEnabled(server_structs.OriginType) && IsServerEnabled(server_structs.DirectorType) {
+		result, err := url.JoinPath(param.Server_ExternalWebUrl.GetString(), "/api/v1.0/origin")
+		if err != nil {
+			log.Warningf("Failed to construct co-located local issuer URL: %v; falling back to %s",
+				err, param.Server_ExternalWebUrl.GetString())
+			return param.Server_ExternalWebUrl.GetString()
+		}
+		return result
+	}
+	return param.Server_ExternalWebUrl.GetString()
 }
 
 // Get singleton global validate method for field validation

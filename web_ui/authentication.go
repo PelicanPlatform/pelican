@@ -142,8 +142,8 @@ func extractUserFromBearerToken(ctx *gin.Context, tokenStr string) (user string,
 	}
 
 	// Verify issuer matches local issuer
-	serverURL := param.Server_ExternalWebUrl.GetString()
-	if parsed.Issuer() != serverURL {
+	localIssuer := config.GetLocalIssuerUrl()
+	if parsed.Issuer() != localIssuer {
 		return "", "", nil, errors.New("token issuer does not match server URL")
 	}
 
@@ -312,8 +312,8 @@ func setLoginCookie(ctx *gin.Context, userRecord *database.User, groups []string
 
 	loginCookieTokenCfg := token.NewWLCGToken()
 	loginCookieTokenCfg.Lifetime = loginLifetime
-	loginCookieTokenCfg.Issuer = param.Server_ExternalWebUrl.GetString()
-	loginCookieTokenCfg.AddAudiences(param.Server_ExternalWebUrl.GetString())
+	loginCookieTokenCfg.Issuer = config.GetLocalIssuerUrl()
+	loginCookieTokenCfg.AddAudiences(config.GetLocalIssuerUrl())
 	loginCookieTokenCfg.Subject = userRecord.Username
 	loginCookieTokenCfg.AddScopes(token_scopes.WebUi_Access)
 	loginCookieTokenCfg.AddGroups(groups...)

@@ -70,8 +70,13 @@ var (
 	fedTestDefaultConfig string
 )
 
-// Start up a new Pelican federation for unit testing
-func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
+// Start up a new Pelican federation for unit testing.
+//
+// Optional originSetup callbacks are invoked for each export's storage
+// directory after the default hello_world.txt is written but before any
+// XRootD/module processes are launched.  This lets tests pre-populate
+// files that XRootD will recognise at startup.
+func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDir string)) (ft *FedTest) {
 	ft = &FedTest{}
 	director.ResetState()
 
@@ -228,6 +233,12 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 			// Start off with a Hello World file we can use for testing in each of our exports
 			err = os.WriteFile(filepath.Join(storageDir, "hello_world.txt"), []byte("Hello, World!"), os.FileMode(0644))
 			require.NoError(t, err)
+
+			// Run any test-supplied setup hooks so that extra files exist
+			// before XRootD starts and are visible in its initial catalog.
+			for _, hook := range originSetup {
+				hook(storageDir)
+			}
 		}
 
 		// Override the test directory from the config file with our temp directory
@@ -277,8 +288,18 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	var discoveryServer *httptest.Server
 	// Set up discovery for federation metadata hosting. This needs to be done AFTER launching
 	// servers, because they populate the param values we use to set the metadata.
+	//
+	// The handler also serves /.well-known/openid-configuration and
+	// /.well-known/issuer.jwks so that the discovery URL can act as an
+	// OIDC-compatible issuer.  In production the Director serves both the
+	// pelican and OIDC discovery documents at the same host:port.  In the
+	// test harness the discovery endpoint is a separate httptest.Server,
+	// so without the OIDC endpoints any federation token whose issuer is
+	// this URL would fail verification (the verifier fetches the issuer's
+	// openid-configuration to locate the JWKS).
 	handler := func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/.well-known/pelican-configuration" {
+		switch r.URL.Path {
+		case "/.well-known/pelican-configuration":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 
@@ -295,7 +316,22 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 			require.NoError(t, err, "Failed to marshal discovery metadata")
 			_, err = w.Write(discoveryJSONBytes)
 			require.NoError(t, err)
-		} else {
+
+		case "/.well-known/openid-configuration":
+			// Minimal OIDC discovery document.  The issuer matches
+			// this discovery server's URL and the JWKS URI points at
+			// the main Pelican server which holds the signing keys.
+			w.Header().Set("Content-Type", "application/json")
+			oidcDoc := server_structs.OpenIdDiscoveryResponse{
+				Issuer:  discoveryServer.URL,
+				JwksUri: param.Server_ExternalWebUrl.GetString() + "/.well-known/issuer.jwks",
+			}
+			oidcBytes, err := json.Marshal(oidcDoc)
+			require.NoError(t, err, "Failed to marshal OIDC discovery response")
+			_, err = w.Write(oidcBytes)
+			require.NoError(t, err)
+
+		default:
 			http.NotFound(w, r)
 		}
 	}

@@ -933,6 +933,20 @@ type: bool
 default: true
 components: ["origin"]
 ---
+name: Origin.CacheControl
+description: |+
+  The value of the Cache-Control HTTP header the origin attaches to every successful response (2xx) and 304 Not Modified.
+  This tells downstream caches (and the Pelican local cache) how long content may be reused before revalidation is required.
+
+  Common values include:
+  - `"no-cache, must-revalidate"` — caches may store the content but must revalidate with the origin via ETags before every use.
+  - `"max-age=3600"` — content is considered fresh for one hour.
+  - `""` (the default) — no Cache-Control header is sent, which gives the downstream cache full discretion over freshness.
+    This matches the behaviour of a plain XRootD origin.
+type: string
+default: ""
+components: ["origin"]
+---
 name: Origin.ExportVolume
 description: |+
   [Deprecated] Origin.ExportVolume is being deprecated and will be removed in a future release. It is replaced by Origin.ExportVolumes.
@@ -1627,6 +1641,98 @@ type: int
 default: 85
 components: ["localcache"]
 ---
+name: LocalCache.FDCacheSize
+description: |+
+  Maximum number of file descriptors the persistent cache keeps open for
+  disk-backed objects.  Cached descriptors are shared across concurrent
+  readers and avoid repeated open/close syscalls.  Set to 0 to disable
+  the cache entirely (every read opens a fresh descriptor).
+type: int
+default: 500
+hidden: true
+components: ["localcache"]
+---
+name: LocalCache.PrefetchTimeout
+description: |+
+  The maximum time to wait for a prefetch operation to complete before giving up.
+  If a prefetch takes longer than this timeout, the operation is abandoned and the
+  client is expected to retry later.
+type: duration
+default: 10s
+hidden: true
+components: ["localcache"]
+---
+name: LocalCache.MaxConcurrentPrefetch
+description: |+
+  The maximum number of concurrent prefetch operations allowed.
+  This limits how many blocks can be prefetched in parallel to avoid overwhelming
+  the upstream server or local resources.
+type: int
+default: 5
+components: ["localcache"]
+---
+name: LocalCache.DefaultMaxAge
+description: |+
+  The default freshness lifetime for cached objects when the origin server does not
+  provide explicit Cache-Control headers. This value determines how long an object
+  can be served from cache before revalidating with the origin.
+  Setting this higher reduces origin load but may serve slightly stale data.
+  Setting this lower ensures fresher data but increases origin requests.
+type: duration
+default: 24h
+components: ["localcache"]
+---
+name: LocalCache.RevalidationJitter
+description: |+
+  A percentage (0-100) of random jitter to apply to revalidation times to prevent
+  thundering herd problems. When multiple clients access the same object, jitter
+  ensures they don't all revalidate simultaneously.
+  For example, with DefaultMaxAge=24h and RevalidationJitter=10, objects will be
+  revalidated between 21.6h and 24h after caching (90% to 100% of max age).
+type: int
+default: 10
+hidden: true
+components: ["localcache"]
+---
+name: LocalCache.StorageDirs
+description: |+
+  A list of storage directory configurations for persistent cache object storage.
+  Each entry describes a directory path and its per-directory size and eviction settings.
+  When not set, the cache stores objects under the LocalCache.DataLocation directory
+  using global size and watermark settings.
+  A UUID file is placed in each directory so that storage IDs remain stable even if
+  paths are reordered or changed.
+
+  Each entry is an object with the following keys:
+
+  - **Path** (string, required): absolute path to the storage directory.
+  - **MaxSize** (string, optional): maximum size for this directory (e.g. "100GB").
+    When omitted or "0", auto-detected from the filesystem.
+  - **HighWaterMarkPercentage** (int, optional): eviction trigger threshold as a
+    percentage of MaxSize.
+    When omitted or 0, the global LocalCache.HighWaterMarkPercentage is used.
+  - **LowWaterMarkPercentage** (int, optional): eviction target threshold as a
+    percentage of MaxSize.
+    When omitted or 0, the global LocalCache.LowWaterMarkPercentage is used.
+
+  Example YAML:
+  ```yaml
+  LocalCache:
+    StorageDirs:
+      - Path: /mnt/nvme/cache
+        MaxSize: 500GB
+        HighWaterMarkPercentage: 95
+        LowWaterMarkPercentage: 85
+      - Path: /mnt/hdd/cache
+        MaxSize: 2TB
+  ```
+
+  For backward compatibility, a plain list of strings (directory paths) is also
+  accepted and treated as entries with only Path set.
+type: object
+default: none
+components: ["localcache"]
+---
 ############################
 #   Cache-level configs    #
 ############################
@@ -1954,6 +2060,17 @@ description: |+
 type: bool
 default: false
 components: ["cache"]
+---
+name: Cache.EnableV2
+description: |+
+  Enable the XRootD-free persistent cache implementation.
+  When enabled, the cache uses a native Go implementation based on BadgerDB instead of XRootD.
+  This is an experimental feature intended for testing and development.
+  Set this to true to use the new implementation.
+type: bool
+default: false
+components: ["cache"]
+hidden: true
 ---
 name: Cache.PermittedNamespaces
 description: |+
