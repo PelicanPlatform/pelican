@@ -331,14 +331,15 @@ func init() {
 	addPrefixSubcommands(prefixCmd)
 
 	// Define the token commands
-	tokenCmd := &cobra.Command{
+	credentialsTokenCmd := &cobra.Command{
 		Use:   "token",
 		Short: "Manage the available tokens",
 		Long:  "Manage the available tokens",
 	}
-	addTokenSubcommands(tokenCmd)
+	addTokenSubcommands(credentialsTokenCmd)
+	addCredentialsTokenSetupCommand(credentialsTokenCmd)
 
 	rootConfigCmd.CompletionOptions.DisableDefaultCmd = true
 	rootConfigCmd.AddCommand(prefixCmd)
-	rootConfigCmd.AddCommand(tokenCmd)
+	rootConfigCmd.AddCommand(credentialsTokenCmd)
 }
