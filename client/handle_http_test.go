@@ -4148,7 +4148,8 @@ func TestMetadataChannel(t *testing.T) {
 	select {
 	case metadata := <-metadataChan:
 		assert.Equal(t, expectedETag, metadata.ETag, "metadata ETag should match response header")
-		assert.Equal(t, int64(expectedSize), metadata.Size, "metadata Size should match Content-Length")
+		assert.Equal(t, int64(expectedSize), metadata.ContentLength, "metadata ContentLength should match response Content-Length")
+		assert.Equal(t, int64(expectedSize), metadata.ObjectSize, "metadata ObjectSize should match full object size for 200 OK")
 		assert.Equal(t, "application/octet-stream", metadata.ContentType)
 		assert.Equal(t, "max-age=3600", metadata.CacheControl)
 		assert.False(t, metadata.LastModified.IsZero(), "Last-Modified should be parsed")
@@ -4344,4 +4345,63 @@ func TestUploadETag(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NoError(t, result.Error)
 	assert.Equal(t, expectedETag, result.ETag, "upload should capture ETag from PUT response")
+}
+
+// TestMetadataChannelByteRange verifies that for a 206 Partial Content response,
+// TransferMetadata.ContentLength reflects the range length (response body size)
+// while ObjectSize reflects the full object size from Content-Range.
+func TestMetadataChannelByteRange(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	test_utils.InitClient(t, map[string]any{})
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	fullBody := []byte("0123456789ABCDEFGHIJ") // 20 bytes
+	rangeStart := int64(5)
+	rangeEnd := int64(14) // bytes 5-14 → 10 bytes
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rangeHeader := r.Header.Get("Range")
+		if rangeHeader != "" {
+			partial := fullBody[rangeStart : rangeEnd+1]
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(partial)))
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", rangeStart, rangeEnd, len(fullBody)))
+			w.Header().Set("ETag", `"range-etag"`)
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write(partial)
+		} else {
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(fullBody)))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(fullBody)
+		}
+	}))
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	// Byte-range downloads are designed for writer-based transfers (e.g., the
+	// embedded cache), so use a buffer instead of a file to avoid the file
+	// size verification check (which expects total object size, not range size).
+	var buf bytes.Buffer
+
+	metadataChan := make(chan TransferMetadata, 1)
+
+	downloaded, _, _, _, _, err := downloadHTTP(ctx, nil, nil,
+		transferAttemptDetails{Url: serverURL, Proxy: false},
+		"", &buf, rangeStart, rangeEnd, -1, "", "", metadataChan,
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, rangeEnd-rangeStart+1, downloaded, "downloaded should be the range length")
+	assert.Equal(t, fullBody[rangeStart:rangeEnd+1], buf.Bytes(), "downloaded content should match the requested range")
+
+	select {
+	case metadata := <-metadataChan:
+		assert.Equal(t, rangeEnd-rangeStart+1, metadata.ContentLength,
+			"ContentLength should be the range length (response body size)")
+		assert.Equal(t, int64(len(fullBody)), metadata.ObjectSize,
+			"ObjectSize should be the full object size from Content-Range")
+		assert.Equal(t, `"range-etag"`, metadata.ETag)
+	default:
+		t.Fatal("expected metadata on channel but none was sent")
+	}
 }

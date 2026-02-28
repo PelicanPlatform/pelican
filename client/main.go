@@ -63,11 +63,12 @@ type FileInfo struct {
 // before the data transfer begins. This allows making decisions (e.g., ETag verification)
 // before committing to the full transfer.
 type TransferMetadata struct {
-	Size         int64     // Content-Length from response
-	ETag         string    // ETag header from response
-	LastModified time.Time // Last-Modified header from response
-	ContentType  string    // Content-Type header from response
-	CacheControl string    // Cache-Control header from response
+	ContentLength int64     // Size of the HTTP response body (range length for 206 Partial Content; full object for 200 OK)
+	ObjectSize    int64     // Full object size (-1 if unknown; parsed from Content-Range for 206, same as ContentLength for 200)
+	ETag          string    // ETag header from response
+	LastModified  time.Time // Last-Modified header from response
+	ContentType   string    // Content-Type header from response
+	CacheControl  string    // Cache-Control header from response
 }
 
 // handleSchemelessIfNeeded is a helper function that updates the input discovery options to use a configured discovery
