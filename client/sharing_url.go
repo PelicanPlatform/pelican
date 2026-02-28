@@ -35,7 +35,7 @@ func CreateSharingUrl(ctx context.Context, objectUrl *url.URL, isWrite bool) (st
 	}
 
 	log.Debugln("Will query director for path", pUrl.Path)
-	dirResp, err := queryDirector(ctx, "GET", pUrl, "")
+	dirResp, err := queryDirector(ctx, "GET", pUrl, "", false)
 	if err != nil {
 		log.Errorln("Error while querying the Director:", err)
 		return "", errors.Wrapf(err, "Error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint)

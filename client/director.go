@@ -26,6 +26,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -58,13 +59,22 @@ func fromPelican(resp *http.Response) bool {
 
 // Make a request to the director for a given verb/resource; return the
 // HTTP response object only if a 307 is returned.
-func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanURL, token string) (resp *http.Response, err error) {
+//
+// When cacheMode is true the request path is routed through the director's
+// origin endpoint (/api/v1.0/director/origin/…) so that the director
+// redirects to origins instead of caches.  This is the correct behaviour
+// when the caller is itself an embedded cache.
+func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanURL, token string, cacheMode bool) (resp *http.Response, err error) {
 	resourceUrl, err := url.Parse(pUrl.FedInfo.DirectorEndpoint)
 	if err != nil {
 		log.Errorln("Failed to parse the director URL:", err)
 		return nil, err
 	}
-	resourceUrl.Path = pUrl.Path
+	if cacheMode {
+		resourceUrl.Path = path.Join("/api/v1.0/director/origin", pUrl.Path)
+	} else {
+		resourceUrl.Path = pUrl.Path
+	}
 	resourceUrl.RawQuery = pUrl.RawQuery
 
 	// Here we use http.Transport to prevent the client from following the director's
@@ -182,7 +192,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		if resp.StatusCode == http.StatusNotFound && verb == http.MethodDelete {
 			if strings.Contains(strings.ToLower(bodyString), "page not found") {
 				log.Warningf("Failed to query the DELETE endpoint; the director appears to be an older version, attempting with the PUT method")
-				return queryDirector(ctx, http.MethodPut, pUrl, token)
+				return queryDirector(ctx, http.MethodPut, pUrl, token, cacheMode)
 			}
 		}
 		if resp.StatusCode == http.StatusNotFound && fromDirector && (errMsg == "All sources report object was not found" || errMsg == "Object not found at any cache") {
@@ -260,7 +270,19 @@ func parseServersFromDirectorResponse(resp *http.Response) (servers []*url.URL, 
 }
 
 // Retrieve federation namespace information for a given URL.
+//
+// This is the public API; it always queries the director's default
+// endpoint.  Internal callers that need embedded cache-mode
+// behaviour should use getDirectorInfoForPath instead.
 func GetDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, httpMethod string, token string) (parsedResponse server_structs.DirectorResponse, err error) {
+	return getDirectorInfoForPath(ctx, pUrl, httpMethod, token, false)
+}
+
+// getDirectorInfoForPath is the internal implementation that accepts a
+// cacheMode flag.  When cacheMode is true the director's origin
+// endpoint is queried so that the response contains origins rather
+// than caches.
+func getDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, httpMethod string, token string, cacheMode bool) (parsedResponse server_structs.DirectorResponse, err error) {
 	if pUrl.FedInfo.DirectorEndpoint == "" {
 		return server_structs.DirectorResponse{},
 			errors.Errorf("unable to retrieve information from a Director for object %s because none was found in pelican URL metadata.", pUrl.Path)
@@ -269,7 +291,7 @@ func GetDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, h
 	log.Debugln("Will query director at", pUrl.FedInfo.DirectorEndpoint, "for object", pUrl.Path)
 
 	var dirResp *http.Response
-	dirResp, err = queryDirector(ctx, httpMethod, pUrl, token)
+	dirResp, err = queryDirector(ctx, httpMethod, pUrl, token, cacheMode)
 	if err != nil {
 		if (httpMethod == http.MethodPut || httpMethod == http.MethodDelete) && dirResp != nil && dirResp.StatusCode == 405 {
 			err = errors.Errorf("the director returned status code 405, indicating it understood the request but could not find an origin that supports PUT/DELETE operations for object: %s.", pUrl.Path)

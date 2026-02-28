@@ -55,7 +55,20 @@ type FileInfo struct {
 	Size         int64
 	ModTime      time.Time
 	IsCollection bool
+	ETag         string            `json:"etag,omitempty"`      // HTTP ETag header value
 	Checksums    map[string]string `json:"checksums,omitempty"` // Checksum type (HTTP digest name) to hex-encoded value
+}
+
+// TransferMetadata contains early metadata about a transfer received from the server
+// before the data transfer begins. This allows making decisions (e.g., ETag verification)
+// before committing to the full transfer.
+type TransferMetadata struct {
+	ContentLength int64     // Size of the HTTP response body (range length for 206 Partial Content; full object for 200 OK)
+	ObjectSize    int64     // Full object size (-1 if unknown; parsed from Content-Range for 206, same as ContentLength for 200)
+	ETag          string    // ETag header from response
+	LastModified  time.Time // Last-Modified header from response
+	ContentType   string    // Content-Type header from response
+	CacheControl  string    // Cache-Control header from response
 }
 
 // handleSchemelessIfNeeded is a helper function that updates the input discovery options to use a configured discovery
@@ -165,14 +178,24 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		}
 	}()
 
-	dirResp, err := GetDirectorInfoForPath(ctx, pUrl, http.MethodGet, "")
+	// Pre-scan options for cacheMode which affects the director query.
+	var cacheMode bool
+	for _, option := range options {
+		if _, ok := option.Ident().(identTransferOptionCacheEmbeddedClientMode); ok {
+			cacheMode = true
+			break
+		}
+	}
+
+	dirResp, err := getDirectorInfoForPath(ctx, pUrl, http.MethodGet, "", cacheMode)
 	if err != nil {
 		return nil, err
 	}
 
 	var requestedChecksums []ChecksumType
 
-	token := NewTokenGenerator(pUrl, &dirResp, config.TokenSharedRead, true)
+	token := newTokenGenerator(pUrl, &dirResp, config.TokenSharedRead, true)
+	var fedToken TokenProvider
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
@@ -181,6 +204,8 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 			token.EnableAcquire = option.Value().(bool)
 		case identTransferOptionToken{}:
 			token.SetToken(option.Value().(string))
+		case identTransferOptionFedToken{}:
+			fedToken = option.Value().(TokenProvider)
 		case identTransferOptionChecksums{}:
 			requestedChecksums = option.Value().([]ChecksumType)
 		}
@@ -196,7 +221,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		token = nil
 	}
 
-	statInfo, err := statHttp(pUrl, dirResp, token)
+	statInfo, err := statHttp(pUrl, dirResp, token, fedToken)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to do the stat")
 	}
@@ -314,7 +339,7 @@ func GetObjectServerHostnames(ctx context.Context, testFile string) (urls []stri
 	if err != nil {
 		return
 	}
-	parsedDirResp, err := GetDirectorInfoForPath(ctx, pUrl, http.MethodGet, "")
+	parsedDirResp, err := getDirectorInfoForPath(ctx, pUrl, http.MethodGet, "", false)
 	if err != nil {
 		return
 	}
@@ -421,13 +446,13 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 		}
 	}()
 
-	dirResp, err := GetDirectorInfoForPath(ctx, pUrl, http.MethodGet, "")
+	dirResp, err := getDirectorInfoForPath(ctx, pUrl, http.MethodGet, "", false)
 	if err != nil {
 		return nil, err
 	}
 
 	// Get our token if needed
-	token := NewTokenGenerator(pUrl, &dirResp, config.TokenSharedRead, true)
+	token := newTokenGenerator(pUrl, &dirResp, config.TokenSharedRead, true)
 	collectionsOverride := ""
 	recursive := false
 	depth := -1
@@ -499,7 +524,7 @@ func DoDelete(ctx context.Context, remoteDestination string, recursive bool, opt
 		recursive = true
 	}
 
-	dirResp, err := GetDirectorInfoForPath(ctx, pUrl, http.MethodDelete, "")
+	dirResp, err := getDirectorInfoForPath(ctx, pUrl, http.MethodDelete, "", false)
 	if err != nil {
 		return err
 	}
@@ -509,7 +534,7 @@ func DoDelete(ctx context.Context, remoteDestination string, recursive bool, opt
 		operation.Set(config.TokenList)
 	}
 
-	token := NewTokenGenerator(pUrl, &dirResp, operation, true)
+	token := newTokenGenerator(pUrl, &dirResp, operation, true)
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
