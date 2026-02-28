@@ -204,7 +204,7 @@ func TestQueryDirector(t *testing.T) {
 				Path: "/foo/bar",
 			}
 
-			actualResp, err := queryDirector(context.Background(), "GET", &pUrl, "")
+			actualResp, err := queryDirector(context.Background(), "GET", &pUrl, "", false)
 			if tc.expectedError {
 				assert.Error(t, err)
 				return

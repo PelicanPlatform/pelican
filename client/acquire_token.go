@@ -61,10 +61,24 @@ type (
 		Expiry   time.Time
 	}
 
+	// TokenProvider returns a token value, refreshing as needed.
+	// Implementations must be safe for concurrent use.
+	// See tokenGenerator for the standard implementation.
+	TokenProvider interface {
+		Get() (string, error)
+	}
+
+	// staticTokenProvider is a TokenProvider that always returns
+	// the same fixed token.  It is used for backward-compatibility
+	// when a caller has a plain string.
+	staticTokenProvider struct {
+		token string
+	}
+
 	// An object that can fetch an appropriate token for a given transfer.
 	//
 	// Thread-safe and will auto-renew the token throughout the lifetime
-	// of the process.
+	// of the process.  Satisfies the TokenProvider interface.
 	tokenGenerator struct {
 		DirResp                 *server_structs.DirectorResponse
 		Destination             *pelican_url.PelicanURL
@@ -89,7 +103,21 @@ type (
 	}
 )
 
-func NewTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.DirectorResponse, operation config.TokenOperation, enableAcquire bool) *tokenGenerator {
+// StaticTokenProvider returns a TokenProvider that always yields the
+// given token string.  Useful when the caller has a fixed token and
+// does not need refresh logic.
+func StaticTokenProvider(token string) TokenProvider {
+	if token == "" {
+		return nil
+	}
+	return &staticTokenProvider{token: token}
+}
+
+func (s *staticTokenProvider) Get() (string, error) {
+	return s.token, nil
+}
+
+func newTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.DirectorResponse, operation config.TokenOperation, enableAcquire bool) *tokenGenerator {
 	return &tokenGenerator{
 		DirResp:       dirResp,
 		Destination:   dest,
@@ -97,6 +125,13 @@ func NewTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.Dir
 		EnableAcquire: enableAcquire,
 		Sync:          new(singleflight.Group),
 	}
+}
+
+// NewTokenGenerator creates a token generator for the given destination and
+// operation.  This is the exported entry point used by cmd/token.go; most
+// internal callers should use the unexported newTokenGenerator.
+func NewTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.DirectorResponse, operation config.TokenOperation, enableAcquire bool) *tokenGenerator {
+	return newTokenGenerator(dest, dirResp, operation, enableAcquire)
 }
 
 func newTokenContentIterator(loc string, name string) *tokenContentIterator {
