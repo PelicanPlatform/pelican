@@ -155,6 +155,15 @@ var (
 	tempRunDir  string
 	cleanupOnce sync.Once
 
+	// Pre-cleanup callbacks are invoked before the temporary runtime
+	// directory is removed.  Components that keep open resources inside
+	// the temp directory (e.g. BadgerDB) register a named callback so
+	// they can flush and close before the directory disappears.
+	// The map key acts as an identity: re-registering the same name
+	// replaces the previous callback (prevents double-registration).
+	preCleanupMu    sync.Mutex
+	preCleanupFuncs map[string]func()
+
 	// Global discovery info.  Using the "once" allows us to delay discovery
 	// until it's first needed, avoiding a web lookup for invoking configuration
 	// Note the 'once' object is a pointer so we can reset the client multiple
@@ -652,25 +661,52 @@ func SetFederation(fd pelican_url.FederationDiscovery) {
 	fedDiscoveryOnce.Do(func() {})
 }
 
-// TODO: It's not clear that this function works correctly.  We should
-// pass an errgroup here and ensure that the cleanup is complete before
-// the main thread shuts down.
+// RegisterPreCleanup adds a named callback that will be invoked before
+// the temporary runtime directory is removed during shutdown.  Use this
+// for components that keep open resources inside the temp directory
+// (e.g. BadgerDB) so they can flush and close cleanly.
+//
+// The name is an identity key: calling RegisterPreCleanup again with the
+// same name silently replaces the previous callback, preventing
+// double-registration.
+func RegisterPreCleanup(name string, fn func()) {
+	preCleanupMu.Lock()
+	defer preCleanupMu.Unlock()
+	if preCleanupFuncs == nil {
+		preCleanupFuncs = make(map[string]func())
+	}
+	preCleanupFuncs[name] = fn
+}
+
+// cleanupDirOnShutdown registers an errgroup goroutine that, on context
+// cancellation, first invokes every registered pre-cleanup callback and
+// then removes the temporary runtime directory.
 func cleanupDirOnShutdown(ctx context.Context, dir string) {
 	tempRunDir = dir
-	egrp, ok := ctx.Value(EgrpKey).(*errgroup.Group)
-	if !ok {
-		egrp = &errgroup.Group{}
-	}
+	egrp := ctx.Value(EgrpKey).(*errgroup.Group)
 	egrp.Go(func() error {
 		<-ctx.Done()
-		err := CleanupTempResources()
-		if err != nil {
-			log.Infoln("Error when cleaning up temporary directories:", err)
+
+		// Run pre-cleanup callbacks so components that use the temp
+		// directory (e.g. BadgerDB) can flush and close first.
+		// Take ownership of the current map and reset it so that
+		// subsequent unit tests start with a clean slate.
+		preCleanupMu.Lock()
+		fns := preCleanupFuncs
+		preCleanupFuncs = nil
+		preCleanupMu.Unlock()
+		for _, fn := range fns {
+			fn()
 		}
-		return err
+
+		CleanupTempResources()
+		return nil
 	})
 }
 
+// CleanupTempResources removes the temporary runtime directory.  It is
+// safe to call from multiple goroutines; only the first call performs
+// the removal.
 func CleanupTempResources() (err error) {
 	cleanupOnce.Do(func() {
 		if tempRunDir != "" {

@@ -167,6 +167,7 @@ type PersistentCache struct {
 	// Configuration
 	wasConfigured bool
 	closed        atomic.Bool
+	closeDone     chan struct{} // closed after Close() finishes its work
 
 	// Shared prefetch semaphore: limits total concurrent prefetch/background
 	// download operations across all BlockFetcherV2 instances and
@@ -472,6 +473,7 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		downloadCtx:     downloadCtx,
 		downloadCancel:  downloadCancel,
 		prefetchSem:     make(chan struct{}, 5),
+		closeDone:       make(chan struct{}),
 	}
 	pc.fedTokenReady = make(chan struct{})
 	pc.prestageManager = NewPrestageManager(pc)
@@ -500,6 +502,12 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		pc.Close()
 		return nil
 	})
+
+	// Register with config's pre-cleanup hook so that the temp-directory
+	// errgroup goroutine waits for BadgerDB to flush before it calls
+	// os.RemoveAll.  pc.Close() is wait-safe: if the errgroup goroutine
+	// above already started the close, this call blocks until it finishes.
+	config.RegisterPreCleanup("persistent-cache", func() { pc.Close() })
 
 	// Configure authorization if not deferred
 	if !cfg.DeferConfig {
@@ -539,8 +547,12 @@ func (pc *PersistentCache) Config(egrp *errgroup.Group) error {
 //  5. Close the database.
 func (pc *PersistentCache) Close() error {
 	if pc.closed.Swap(true) {
+		// Another goroutine is already closing; wait for it to finish
+		// so the caller can be sure all resources are released.
+		<-pc.closeDone
 		return nil
 	}
+	defer close(pc.closeDone)
 
 	// 1. Cancel all in-flight transfers.  This causes transfer workers to
 	//    produce error results, which flow back through the engine to each
