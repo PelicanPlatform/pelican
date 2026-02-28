@@ -1311,6 +1311,11 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 		}
 	}
 
+	// Validate that required plugins are available before generating the config
+	if err := ValidateRequiredPlugins(isOrigin, &xrdConfig); err != nil {
+		return "", err
+	}
+
 	var xrootdCfg string
 	if isOrigin {
 		xrootdCfg = xrootdOriginCfg
