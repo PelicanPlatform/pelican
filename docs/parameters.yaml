@@ -2930,6 +2930,19 @@ default: 1m
 hidden: true
 components: ["cache", "origin", "director"]
 ---
+name: Cache.MinDirectorRefreshInterval
+description: |+
+  The minimum interval between cache refreshes of namespace advertisements from the director.
+
+  When the cache's scitokens configuration file changes, it will automatically refresh its
+  namespace information from the director to ensure the generated scitokens config is current.
+  This parameter prevents excessive director queries by enforcing a minimum time between
+  refreshes. Set to 0 to disable rate limiting (useful for testing).
+type: duration
+default: 15s
+hidden: true
+components: ["cache"]
+---
 name: Server.DbLocation
 description: |+
   A filepath to the intended location of the server's database.

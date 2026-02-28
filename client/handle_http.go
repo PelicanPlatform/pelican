@@ -1223,26 +1223,50 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 
 	tj.directorUrl = copyUrl.FedInfo.DirectorEndpoint
 	dirResp, err := GetDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, "")
+	directorFailed := false
 	if err != nil {
-		var sce *StatusCodeError
-		if errors.As(err, &sce) {
+		// If director query failed but we have explicit caches, create a minimal response and continue
+		if len(tj.prefObjServers) > 0 {
+			log.Debugln("Director query failed but explicit caches provided, continuing with cache list")
+			directorFailed = true
+			// Create minimal director response structure
+			dirResp = server_structs.DirectorResponse{
+				ObjectServers: []*url.URL{},
+			}
+			tj.dirResp = dirResp
+			tj.token.DirResp = &dirResp
+			err = nil // Clear the error since we're continuing with explicit caches
+		} else {
+			// No explicit caches, treat this as a fatal error
+			var sce *StatusCodeError
+			if errors.As(err, &sce) {
+				return
+			}
+			log.Errorln(err)
+			err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", pUrl.String())
 			return
 		}
-		log.Errorln(err)
-		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", pUrl.String())
-		return
+	} else {
+		tj.dirResp = dirResp
+		tj.token.DirResp = &dirResp
 	}
-	tj.dirResp = dirResp
-	tj.token.DirResp = &dirResp
 
-	if upload || dirResp.XPelNsHdr.RequireToken {
+	// For uploads or when director indicates token is required, get a token
+	// If director failed but we have explicit caches, try to get token anyway
+	if upload || (!directorFailed && dirResp.XPelNsHdr.RequireToken) || (directorFailed && len(tj.prefObjServers) > 0) {
 		contents, err := tj.token.Get()
 		if err != nil || contents == "" {
-			return nil, errors.Wrap(err, "failed to get token for transfer")
+			// If director failed, token errors are not fatal - we'll try without token
+			if directorFailed {
+				log.Debugln("Could not acquire token, will attempt transfer without token")
+			} else {
+				return nil, errors.Wrap(err, "failed to get token for transfer")
+			}
 		}
 
 		// The director response may change if it's given a token; let's repeat the query.
-		if contents != "" {
+		// Skip re-query if director already failed
+		if contents != "" && !directorFailed {
 			dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, contents)
 			if err != nil {
 				var sce *StatusCodeError
