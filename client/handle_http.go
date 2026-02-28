@@ -1326,9 +1326,10 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 
 	tj.directorUrl = copyUrl.FedInfo.DirectorEndpoint
 
-	// Use the director response cache with singleflight coalescing.
-	// Concurrent jobs for paths under the same namespace will share
-	// a single director query.
+	// Use the director response cache with singleflight coalescing for
+	// concurrent jobs requesting the same object.  Note we cannot coalesce
+	// at the namespace level because we don't know the namespace an object
+	// is in a-priori.
 	var dirResp server_structs.DirectorResponse
 	if tc.engine != nil && tc.engine.dirRespCache != nil {
 		copyUrlRef := &copyUrl
@@ -2160,10 +2161,14 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 // create the destination directory).
 func downloadObject(transfer *transferFile) (transferResults TransferResults, err error) {
 	log.Debugln("Downloading object from", transfer.remoteURL, "to", transfer.localPath)
+	// 'downloaded' tracks bytes received locally; it starts at 0 even for ranged downloads.
 	var downloaded int64
-	// If a byte range is specified, start from the range start offset
+	// 'rangeStart' is the starting byte offset for the Range header when doing
+	// explicit byte-range requests.  It is kept separate from 'downloaded' so that
+	// TransferredBytes correctly reflects the actual bytes transferred.
+	var rangeStart int64
 	if transfer.byteRange != nil {
-		downloaded = transfer.byteRange.Start
+		rangeStart = transfer.byteRange.Start
 	}
 	localPath := transfer.localPath
 	transferResults.job = transfer.job
@@ -2452,7 +2457,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			byteRangeEnd = transfer.byteRange.End
 		}
 		attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, attemptETag, err := downloadHTTP(
-			ctx, transfer.engine, transfer.callback, transferEndpoint, writeDestination, fileWriter, downloaded, byteRangeEnd, size, tokenContents, transfer.project, transfer.metadataChan,
+			ctx, transfer.engine, transfer.callback, transferEndpoint, writeDestination, fileWriter, rangeStart+downloaded, byteRangeEnd, size, tokenContents, transfer.project, transfer.metadataChan,
 		)
 		// Clear metadata channel after first attempt - we only want to send metadata once
 		transfer.metadataChan = nil
@@ -3087,8 +3092,25 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		log.WithFields(fields).Debugln("Server at", transfer.Url.Host, "had a cache hit with data age", cacheAge.String())
 	}
 
-	// Size of the download
+	// Size of the download.
+	//
+	// responseContentLength captures the raw Content-Length from the HTTP
+	// response (the number of bytes in the response body).  For 206 Partial
+	// Content this is the range length, not the full object.
+	//
+	// objectSize is the full object size: for 200 OK it equals
+	// responseContentLength; for 206 it is parsed from the Content-Range
+	// header (e.g. "bytes 100-199/1000" → 1000).  It is -1 when unknown.
+	//
+	// totalSize is the value used for progress and size-validation checks;
+	// it is adjusted so that (bytesSoFar + downloaded == totalSize) holds
+	// on a successful transfer.
+	responseContentLength := resp.ContentLength
+	objectSize := int64(-1)
 	totalSize = resp.ContentLength
+
+	// For 206 responses, parse the full object size from Content-Range and
+	// adjust totalSize for the size-validation check.
 	if resp.StatusCode == http.StatusPartialContent && (bytesSoFar > 0 || byteRangeEnd >= 0) {
 		// For range responses, Content-Length is the size of the range,
 		// not the full object.  Reconstruct the expected total so the
@@ -3098,27 +3120,32 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		//   - Bounded byte-range (byteRangeEnd >= 0): totalSize is
 		//     byteRangeEnd + 1 so that bytesSoFar + downloaded ==
 		//     totalSize when downloaded == rangeSize.
+
+		// Always try to extract the full object size from Content-Range.
+		if rangeStr := resp.Header.Get("Content-Range"); rangeStr != "" {
+			parts := strings.SplitN(rangeStr, "/", 2)
+			if len(parts) == 2 && parts[1] != "*" {
+				if parsed, parseErr := strconv.ParseInt(parts[1], 10, 64); parseErr == nil {
+					objectSize = parsed
+				}
+			}
+		}
+
 		if byteRangeEnd >= 0 {
 			// Explicit byte-range: the size check will compare
 			// bytesSoFar + downloaded, so set totalSize = end + 1.
 			totalSize = byteRangeEnd + 1
 		} else if totalSize < 0 {
-			rangeStr := resp.Header.Get("Content-Range")
-			if rangeStr != "" {
-				parts := strings.SplitN(rangeStr, "/", 2)
-				if len(parts) == 2 {
-					if size, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
-						totalSize = size
-					}
-				} else {
-					log.WithFields(fields).Debugln("Error parsing Content-Range header:", rangeStr)
-				}
+			if objectSize > 0 {
+				totalSize = objectSize
 			} else {
-				log.WithFields(fields).Debugln("Content-Range header is missing; unable to determine size of object")
+				log.WithFields(fields).Debugln("Content-Range header is missing or unparseable; unable to determine size of object")
 			}
 		} else {
 			totalSize += bytesSoFar
 		}
+	} else if resp.StatusCode == http.StatusOK {
+		objectSize = resp.ContentLength
 	}
 	// Worst case: do a separate HEAD request to get the size
 	if totalSize <= 0 && (resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusPartialContent) {
@@ -3159,10 +3186,11 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	// This allows the caller to make decisions (e.g., verify ETag) before committing to the transfer
 	if metadataChan != nil {
 		metadata := TransferMetadata{
-			Size:         totalSize,
-			ETag:         resp.Header.Get("ETag"),
-			ContentType:  resp.Header.Get("Content-Type"),
-			CacheControl: resp.Header.Get("Cache-Control"),
+			ContentLength: responseContentLength,
+			ObjectSize:    objectSize,
+			ETag:          resp.Header.Get("ETag"),
+			ContentType:   resp.Header.Get("Content-Type"),
+			CacheControl:  resp.Header.Get("Cache-Control"),
 		}
 		// Parse Last-Modified header if present
 		if lmStr := resp.Header.Get("Last-Modified"); lmStr != "" {
