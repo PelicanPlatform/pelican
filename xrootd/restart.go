@@ -38,13 +38,16 @@ import (
 )
 
 type restartInfo struct {
-	launchers  []daemon.Launcher
-	egrp       *errgroup.Group
-	callback   func(int)
-	isCache    bool
-	useCMSD    bool
-	privileged bool
-	pids       []int
+	ctx             context.Context
+	launchers       []daemon.Launcher
+	egrp            *errgroup.Group
+	callback        func(int)
+	preRestartHook  func(ctx context.Context)
+	postRestartHook func(ctx context.Context)
+	isCache         bool
+	useCMSD         bool
+	privileged      bool
+	pids            []int
 }
 
 var (
@@ -68,15 +71,18 @@ func ResetRestartState() {
 
 // StoreRestartInfo stores the information needed for restarting XRootD
 // This should be called during initial launch after PIDs are known.
-func StoreRestartInfo(launchers []daemon.Launcher, pids []int, egrp *errgroup.Group, callback func(int), cache bool, cmsd bool, priv bool) {
+func StoreRestartInfo(ctx context.Context, launchers []daemon.Launcher, pids []int, egrp *errgroup.Group, callback func(int), cache bool, cmsd bool, priv bool, preRestartHook func(ctx context.Context), postRestartHook func(ctx context.Context)) {
 	info := restartInfo{
-		launchers:  launchers,
-		egrp:       egrp,
-		callback:   callback,
-		isCache:    cache,
-		useCMSD:    cmsd,
-		privileged: priv,
-		pids:       append([]int(nil), pids...),
+		ctx:             ctx,
+		launchers:       launchers,
+		egrp:            egrp,
+		callback:        callback,
+		preRestartHook:  preRestartHook,
+		postRestartHook: postRestartHook,
+		isCache:         cache,
+		useCMSD:         cmsd,
+		privileged:      priv,
+		pids:            append([]int(nil), pids...),
 	}
 
 	// Replace any existing entry for the same server role; otherwise append.
@@ -136,6 +142,14 @@ func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error
 	}
 	if len(oldPids) == 0 {
 		return nil, errors.New("restart requested but no tracked PIDs are available")
+	}
+
+	// Run any pre-restart hooks (e.g., advertise shutdown to the Director and
+	// wait for in-flight transfers to drain) before sending signals.
+	for _, info := range storedInfos {
+		if info.preRestartHook != nil {
+			info.preRestartHook(info.ctx)
+		}
 	}
 
 	// Step 1: Gracefully shutdown existing XRootD processes
@@ -210,7 +224,7 @@ func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error
 		}
 
 		log.Info("Launching new XRootD daemons")
-		pids, launchErr := LaunchDaemons(ctx, newLaunchers, info.egrp, info.callback)
+		pids, launchErr := LaunchDaemons(info.ctx, newLaunchers, info.egrp, info.callback)
 		if launchErr != nil {
 			return nil, errors.Wrap(launchErr, "Failed to launch XRootD daemons")
 		}
@@ -230,6 +244,14 @@ func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error
 	restartInfosMu.Unlock()
 
 	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusOK, "XRootD restart complete")
+
+	// Run any post-restart hooks (e.g., re-advertise the server to the Director so
+	// clients can resume routing requests to this server immediately).
+	for _, info := range updatedInfos {
+		if info.postRestartHook != nil {
+			info.postRestartHook(info.ctx)
+		}
+	}
 
 	log.Infof("XRootD restart complete with new PIDs: %v", newPids)
 	return newPids, nil

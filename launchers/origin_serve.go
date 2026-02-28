@@ -162,7 +162,15 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		originServer.SetPids(pids)
 
 		// Store restart information after PIDs are known
-		xrootd.StoreRestartInfo(launchers, pids, egrp, portStartCallback, false, useCMSD, privileged)
+		preRestartHook := func(hookCtx context.Context) {
+			handleGracefulShutdown(hookCtx, modules, []server_structs.XRootDServer{originServer})
+		}
+		postRestartHook := func(hookCtx context.Context) {
+			if advErr := launcher_utils.Advertise(hookCtx, []server_structs.XRootDServer{originServer}); advErr != nil {
+				log.Errorf("Failed to re-advertise origin to Director after restart: %v", advErr)
+			}
+		}
+		xrootd.StoreRestartInfo(ctx, launchers, pids, egrp, portStartCallback, false, useCMSD, privileged, preRestartHook, postRestartHook)
 
 		// Register callback for xrootd logging configuration changes
 		// This must be done after LaunchDaemons so the server has PIDs
