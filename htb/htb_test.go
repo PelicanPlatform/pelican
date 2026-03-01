@@ -262,8 +262,10 @@ func TestHTBWaitWithContext(t *testing.T) {
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	// Should have waited close to the timeout duration
+	// Note: Windows has ~15.6ms timer resolution, so actual elapsed time can overshoot
+	// the 5ms context deadline significantly. Use generous upper bound.
 	assert.Greater(t, elapsed.Milliseconds(), int64(3), "Should have waited at least 3ms")
-	assert.Less(t, elapsed.Milliseconds(), int64(20), "Should have timed out before 20ms")
+	assert.Less(t, elapsed.Milliseconds(), int64(50), "Should have timed out reasonably quickly")
 }
 
 func TestHTBTryTake(t *testing.T) {
