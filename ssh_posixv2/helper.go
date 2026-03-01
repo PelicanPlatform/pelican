@@ -408,10 +408,9 @@ func (c *SSHConnection) StopHelper(ctx context.Context) error {
 		log.Debugf("Failed to send shutdown message: %v", err)
 	}
 
-	// Wait for the errgroup to finish with a short timeout
-	cleanShutdownCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-
+	// Start waiting for the errgroup to finish in the background.
+	// We must wait for all goroutines to exit before niling helperIO,
+	// otherwise goroutines like readHelperStdout will hit a nil pointer.
 	done := make(chan error, 1)
 	go func() {
 		if c.helperErrgroup != nil {
@@ -421,13 +420,17 @@ func (c *SSHConnection) StopHelper(ctx context.Context) error {
 		}
 	}()
 
+	// Wait for clean shutdown with an absolute timeout.
+	// Use time.After instead of context.WithTimeout because the caller's
+	// context may already be expired (e.g., during shutdown), which would
+	// make the derived context immediately expired and skip the grace period.
 	select {
 	case err := <-done:
 		if err != nil && !errors.Is(err, context.Canceled) {
 			log.Debugf("Helper errgroup finished with: %v", err)
 		}
 		log.Info("Helper process stopped cleanly")
-	case <-cleanShutdownCtx.Done():
+	case <-time.After(3 * time.Second):
 		// Clean shutdown timed out, fall back to signals
 		log.Warn("Clean shutdown timed out, sending SIGTERM")
 		if err := c.session.Signal(ssh.SIGTERM); err != nil {
@@ -444,17 +447,31 @@ func (c *SSHConnection) StopHelper(ctx context.Context) error {
 			if err := c.session.Signal(ssh.SIGKILL); err != nil {
 				log.Warnf("Failed to send SIGKILL to helper: %v", err)
 			}
+
+			// Close stdin and session to force goroutines to unblock from
+			// their I/O reads, then wait for the errgroup to finish.
+			if c.helperIO != nil && c.helperIO.stdin != nil {
+				c.helperIO.stdin.Close()
+			}
+			c.session.Close()
+
+			select {
+			case <-done:
+				log.Info("Helper process stopped after SIGKILL")
+			case <-time.After(5 * time.Second):
+				log.Warn("Helper errgroup did not finish after SIGKILL, forcing cleanup")
+			}
 		}
-	case <-ctx.Done():
-		return ctx.Err()
 	}
 
-	// Close stdin to signal EOF to helper
+	// Close stdin and session (may already be closed after SIGKILL path; double-close is safe)
 	if c.helperIO != nil && c.helperIO.stdin != nil {
 		c.helperIO.stdin.Close()
 	}
 
-	c.session.Close()
+	if c.session != nil {
+		c.session.Close()
+	}
 	c.session = nil
 	c.helperIO = nil
 	c.helperErrgroup = nil
