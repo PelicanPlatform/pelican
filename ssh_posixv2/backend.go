@@ -265,14 +265,15 @@ func runConnectionManager(ctx context.Context, backend *SSHBackend, sshConfig *S
 		default:
 		}
 
-		// Create a new connection with a session establishment timeout context
-		sessionCtx, sessionCancel := context.WithTimeout(ctx, sessionEstablishTimeout)
+		// Create a new connection
 		conn := NewSSHConnection(sshConfig)
 		backend.AddConnection(sshConfig.Host, conn)
 
-		// Try to establish the connection
-		err := runConnection(sessionCtx, conn, exports, authCookie)
-		sessionCancel() // Cancel the session context when done
+		// Try to establish a connection and run the helper.
+		// The session establishment timeout bounds only the establishment phase
+		// (connect, detect platform, transfer binary); the helper runs indefinitely
+		// under the parent context.
+		err := runConnection(ctx, sessionEstablishTimeout, conn, exports, authCookie)
 
 		if err != nil {
 			if errors.Is(err, context.Canceled) && ctx.Err() != nil {
@@ -330,10 +331,17 @@ func runConnectionManager(ctx context.Context, backend *SSHBackend, sshConfig *S
 	}
 }
 
-// runConnection establishes a connection and runs the helper process
-func runConnection(ctx context.Context, conn *SSHConnection, exports []ExportConfig, authCookie string) error {
+// runConnection establishes a connection and runs the helper process.
+// The sessionEstablishTimeout bounds only the establishment phase (connect,
+// detect platform, transfer binary). Once the helper is started, it runs
+// under the parent ctx with no timeout.
+func runConnection(ctx context.Context, sessionEstablishTimeout time.Duration, conn *SSHConnection, exports []ExportConfig, authCookie string) error {
+	// Create a timeout context for the establishment phase only
+	establishCtx, establishCancel := context.WithTimeout(ctx, sessionEstablishTimeout)
+	defer establishCancel()
+
 	// Connect to the remote host
-	if err := conn.Connect(ctx); err != nil {
+	if err := conn.Connect(establishCtx); err != nil {
 		return errors.Wrap(err, "failed to connect")
 	}
 
@@ -346,13 +354,13 @@ func runConnection(ctx context.Context, conn *SSHConnection, exports []ExportCon
 	}
 
 	// Detect the remote platform
-	if _, err := conn.DetectRemotePlatform(ctx); err != nil {
+	if _, err := conn.DetectRemotePlatform(establishCtx); err != nil {
 		return errors.Wrap(err, "failed to detect remote platform")
 	}
 
 	// Transfer the binary if needed
 	if conn.NeedsBinaryTransfer() {
-		if err := conn.TransferBinary(ctx); err != nil {
+		if err := conn.TransferBinary(establishCtx); err != nil {
 			return errors.Wrap(err, "failed to transfer binary")
 		}
 	}
@@ -383,10 +391,15 @@ func runConnection(ctx context.Context, conn *SSHConnection, exports []ExportCon
 		return errors.Wrap(err, "failed to create helper config")
 	}
 
-	// Start the helper process
+	// Start the helper process.
+	// Use the parent context (not the establishment timeout) so the helper's
+	// errgroup goroutines are not killed by the establishment timeout expiring.
 	if err := conn.StartHelper(ctx, helperConfig); err != nil {
 		return errors.Wrap(err, "failed to start helper")
 	}
+
+	// Establishment is complete — cancel the timeout so it doesn't linger
+	establishCancel()
 
 	// SSH backend is now fully operational - helper is running and ready to serve requests
 	metrics.SetComponentHealthStatus(metrics.Origin_SSHBackend, metrics.StatusOK,
