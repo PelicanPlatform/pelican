@@ -32,6 +32,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/metrics"
@@ -205,6 +206,19 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 				return errors.Wrap(err, "failed to initialize SSH backend")
 			}
 			log.Info("SSH backend initialized")
+		}
+
+		// Launch the OA4MP token issuer daemon for non-XRootD backends.
+		// For XRootD backends, it is launched alongside XRootD via xrootd.LaunchDaemons.
+		if param.Origin_EnableIssuer.GetBool() {
+			oa4mpLauncher, err := oa4mp.ConfigureOA4MP()
+			if err != nil {
+				return errors.Wrap(err, "failed to configure OA4MP for non-XRootD backend")
+			}
+			if _, err := daemon.LaunchDaemons(ctx, []daemon.Launcher{oa4mpLauncher}, egrp); err != nil {
+				return errors.Wrap(err, "failed to launch OA4MP daemon for non-XRootD backend")
+			}
+			log.Info("OA4MP token issuer daemon launched for non-XRootD backend")
 		}
 
 		if err := origin_serve.InitAuthConfig(ctx, egrp, originExports); err != nil {

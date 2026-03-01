@@ -145,6 +145,11 @@ func getOriginURL() (string, error) {
 func runSSHAuthLogin(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
+	// Initialize Viper so config/param lookups work (ReadAddressFile, Server_ExternalWebUrl, etc.)
+	if err := config.InitClient(); err != nil {
+		return fmt.Errorf("failed to initialize client config: %w", err)
+	}
+
 	originURL, err := getOriginURL()
 	if err != nil {
 		return err
@@ -165,6 +170,11 @@ func runSSHAuthLogin(cmd *cobra.Command, args []string) error {
 
 func runSSHAuthStatus(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
+
+	// Initialize Viper so config/param lookups work (ReadAddressFile, Server_ExternalWebUrl, etc.)
+	if err := config.InitClient(); err != nil {
+		return fmt.Errorf("failed to initialize client config: %w", err)
+	}
 
 	originURL, err := getOriginURL()
 	if err != nil {
