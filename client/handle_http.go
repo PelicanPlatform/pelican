@@ -1445,12 +1445,6 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		}
 	}
 
-	// If the URL query forced recursive mode, clear rejectCollections since the user
-	// explicitly indicated they want recursive behavior via the URL.
-	if recursiveFromQuery && tj.rejectCollections {
-		tj.rejectCollections = false
-	}
-
 	httpMethod := http.MethodGet
 	if upload {
 		httpMethod = http.MethodPut
