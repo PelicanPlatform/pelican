@@ -343,6 +343,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.UserMapfileRefreshInterval": false,
 	"Origin.XRootDPrefix": false,
 	"Origin.XRootServiceUrl": false,
+	"Plugin.DirectorDecisionPercentage": false,
 	"Plugin.Token": false,
 	"Registry.AdminUsers": false,
 	"Registry.CustomRegistrationFields": false,
@@ -956,6 +957,8 @@ func (iP IntParam) GetInt() int {
 			return config.Origin.DiskUsageCalculationRateLimit
 		case "Origin.Port":
 			return config.Origin.Port
+		case "Plugin.DirectorDecisionPercentage":
+			return config.Plugin.DirectorDecisionPercentage
 		case "Server.DatabaseBackup.MaxCount":
 			return config.Server.DatabaseBackup.MaxCount
 		case "Server.IssuerPort":
@@ -1598,6 +1601,7 @@ var allParameterNames = []string{
 	"Origin.UserMapfileRefreshInterval",
 	"Origin.XRootDPrefix",
 	"Origin.XRootServiceUrl",
+	"Plugin.DirectorDecisionPercentage",
 	"Plugin.Token",
 	"Registry.AdminUsers",
 	"Registry.CustomRegistrationFields",
@@ -1931,6 +1935,7 @@ var (
 	Origin_ConcurrencyDegradedThreshold = IntParam{"Origin.ConcurrencyDegradedThreshold"}
 	Origin_DiskUsageCalculationRateLimit = IntParam{"Origin.DiskUsageCalculationRateLimit"}
 	Origin_Port = IntParam{"Origin.Port"}
+	Plugin_DirectorDecisionPercentage = IntParam{"Plugin.DirectorDecisionPercentage"}
 	Server_DatabaseBackup_MaxCount = IntParam{"Server.DatabaseBackup.MaxCount"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
 	Server_UILoginRateLimit = IntParam{"Server.UILoginRateLimit"}

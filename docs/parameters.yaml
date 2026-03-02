@@ -3912,6 +3912,17 @@ components: ["origin", "cache"]
 ############################
 #   Plugin-level configs   #
 ############################
+name: Plugin.DirectorDecisionPercentage
+description: |+
+  The percentage of transfers for which the plugin will request director
+  decision information and include it in the transfer ad's DeveloperData.
+  A value of 0 disables this feature; a value of 100 requests it for every
+  transfer.  The director decision information describes how the director
+  chose and ranked the servers for the transfer.
+type: int
+default: 20
+components: ["plugin"]
+---
 name: Plugin.Token
 description: |+
   The specified token for pelican plugin staging.
