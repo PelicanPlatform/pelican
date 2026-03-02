@@ -204,7 +204,7 @@ func TestQueryDirector(t *testing.T) {
 				Path: "/foo/bar",
 			}
 
-			actualResp, err := queryDirector(context.Background(), "GET", &pUrl, "")
+			actualResp, _, err := queryDirector(context.Background(), "GET", &pUrl, "")
 			if tc.expectedError {
 				assert.Error(t, err)
 				return
@@ -323,6 +323,102 @@ func TestGetDirectorInfoForPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Test that WithDirectorDebug context forces the X-Pelican-Debug header and
+// that the director's redirect body (containing RedirectInfo) is returned and
+// parsed into DirectorResponse.RedirectInfo.
+func TestDirectorDecisionInfo(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	test_utils.InitClient(t, map[string]any{
+		param.Client_DirectorRetries.GetName(): 1,
+		param.Logging_Level.GetName():          "warning", // not debug, so header is not set by default
+	})
+
+	redirectInfoJSON := `{"clientInfo":{"coordinate":{"lat":43.07,"long":-89.41},"ipAddr":"1.2.3.4"},"serversInfo":{"cache1.example.com":{"coordinate":{"lat":40.0,"long":-88.0},"redirectWeights":{"distanceWeight":0.8,"ioLoadWeight":0.1,"statusWeight":0.05,"availabilityWeight":0.05}}},"directorSortMethod":"distance"}`
+
+	directorHeaders := make(map[string]string)
+	directorHeaders["Link"] = "<cache1.example.com:8443>; rel=\"duplicate\"; pri=1"
+	directorHeaders["X-Pelican-Namespace"] = "namespace=/foo, require-token=False"
+	directorHeaders["X-Pelican-Authorization"] = "issuer=https://issuer.example.org"
+	directorHeaders["X-Pelican-Token-Generation"] = "issuer=https://issuer.example.org, base-path=/foo, max-scope-depth=1, strategy=OAuth2"
+
+	var sawDebugHeader bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawDebugHeader = r.Header.Get("X-Pelican-Debug") == "true"
+		for key, value := range directorHeaders {
+			w.Header().Add(key, value)
+		}
+		if sawDebugHeader {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTemporaryRedirect)
+			_, _ = w.Write([]byte(redirectInfoJSON))
+		} else {
+			w.WriteHeader(http.StatusTemporaryRedirect)
+		}
+	}))
+	defer ts.Close()
+
+	t.Run("WithoutDebugContext", func(t *testing.T) {
+		sawDebugHeader = false
+		// Lower the log level so that the debug-level check in queryDirector is false;
+		// this isolates the test to the context-based flag.
+		prevLevel := log.GetLevel()
+		log.SetLevel(log.WarnLevel)
+		defer log.SetLevel(prevLevel)
+
+		pUrl, err := pelican_url.Parse("pelican://foo/bar/baz", nil, nil)
+		require.NoError(t, err)
+		pUrl.FedInfo.DirectorEndpoint = ts.URL
+
+		resp, err := GetDirectorInfoForPath(context.Background(), pUrl, http.MethodGet, "")
+		require.NoError(t, err)
+
+		assert.False(t, sawDebugHeader, "X-Pelican-Debug should not be sent without debug context")
+		assert.Nil(t, resp.RedirectInfo, "RedirectInfo should be nil when debug was not requested")
+	})
+
+	t.Run("WithDebugContext", func(t *testing.T) {
+		sawDebugHeader = false
+		// Keep log level low to prove the header comes from the context, not log level.
+		prevLevel := log.GetLevel()
+		log.SetLevel(log.WarnLevel)
+		defer log.SetLevel(prevLevel)
+
+		pUrl, err := pelican_url.Parse("pelican://foo/bar/baz", nil, nil)
+		require.NoError(t, err)
+		pUrl.FedInfo.DirectorEndpoint = ts.URL
+
+		ctx := WithDirectorDebug(context.Background())
+		resp, err := GetDirectorInfoForPath(ctx, pUrl, http.MethodGet, "")
+		require.NoError(t, err)
+
+		assert.True(t, sawDebugHeader, "X-Pelican-Debug should be sent with debug context")
+		require.NotNil(t, resp.RedirectInfo, "RedirectInfo should be populated when debug body is returned")
+		assert.Equal(t, "distance", resp.RedirectInfo.DirectorSortMethod)
+		assert.Equal(t, "1.2.3.4", resp.RedirectInfo.ClientInfo.IpAddr)
+		assert.InDelta(t, 43.07, resp.RedirectInfo.ClientInfo.Coordinate.Lat, 0.001)
+		require.Contains(t, resp.RedirectInfo.ServersInfo, "cache1.example.com")
+		assert.InDelta(t, 0.8, resp.RedirectInfo.ServersInfo["cache1.example.com"].RedirectWeights.DistanceWeight, 0.001)
+	})
+
+	t.Run("RedirectBodyReturnedByQueryDirector", func(t *testing.T) {
+		sawDebugHeader = false
+		pUrl := &pelican_url.PelicanURL{
+			FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: ts.URL},
+			Path:    "/foo/bar",
+		}
+		ctx := WithDirectorDebug(context.Background())
+		_, body, err := queryDirector(ctx, "GET", pUrl, "")
+		require.NoError(t, err)
+
+		assert.True(t, sawDebugHeader)
+		assert.Contains(t, body, "directorSortMethod")
+		assert.Contains(t, body, "distance")
+	})
 }
 
 func TestDirectorTimeout(t *testing.T) {

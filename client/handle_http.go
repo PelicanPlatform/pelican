@@ -186,6 +186,7 @@ type (
 		Scheme            string           `json:"scheme"`
 		Source            string           `json:"source"`
 		Attempts          []TransferResult `json:"attempts"`
+		DirectorDecision  *server_structs.RedirectInfo `json:"directorDecision,omitempty"`
 	}
 
 	TransferResult struct {
@@ -1899,6 +1900,9 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 				transferResults = newTransferResults(file.file.job)
 				transferResults.Scheme = file.file.remoteURL.Scheme
 				transferResults.Error = err
+			}
+			if file.file.job != nil && file.file.job.dirResp.RedirectInfo != nil {
+				transferResults.DirectorDecision = file.file.job.dirResp.RedirectInfo
 			}
 			select {
 			case <-ctx.Done():
