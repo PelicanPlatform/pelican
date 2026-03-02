@@ -636,12 +636,12 @@ func generateAvailabilityMaps(ctx *gin.Context, origins, caches []server_structs
 	// If stat checks are skipped for both origins and caches, assume all are available
 	if !statOrigins {
 		for _, origin := range origins {
-			originAvailabilityMap[origin.Name] = true
+			originAvailabilityMap[origin.URL.String()] = true
 		}
 	}
 	if !statCaches {
 		for _, cache := range caches {
-			cacheAvailabilityMap[cache.Name] = true
+			cacheAvailabilityMap[cache.URL.String()] = true
 		}
 	}
 	if !statOrigins && !statCaches {
@@ -685,12 +685,12 @@ func generateAvailabilityMaps(ctx *gin.Context, origins, caches []server_structs
 		serverHost := obj.URL.Host
 		for _, origin := range origins {
 			if origin.URL.Host == serverHost || origin.AuthURL.Host == serverHost {
-				originAvailabilityMap[origin.Name] = true
+				originAvailabilityMap[origin.URL.String()] = true
 			}
 		}
 		for _, cache := range caches {
 			if cache.URL.Host == serverHost || cache.AuthURL.Host == serverHost {
-				cacheAvailabilityMap[cache.Name] = true
+				cacheAvailabilityMap[cache.URL.String()] = true
 			}
 		}
 	}
@@ -708,7 +708,7 @@ func generateAvailabilityMaps(ctx *gin.Context, origins, caches []server_structs
 	foundOrigins := false
 	if statOrigins && len(origins) > 0 {
 		for _, origin := range origins {
-			if originAvailabilityMap[origin.Name] {
+			if originAvailabilityMap[origin.URL.String()] {
 				foundOrigins = true
 				break
 			}
@@ -724,13 +724,13 @@ func generateAvailabilityMaps(ctx *gin.Context, origins, caches []server_structs
 			for _, origin := range origins {
 				if origin.AuthURL.String() == ds {
 					foundOrigins = true
-					originAvailabilityMap[origin.Name] = true
+					originAvailabilityMap[origin.URL.String()] = true
 				}
 			}
 		}
 		for _, cache := range caches {
 			if cache.AuthURL.String() == ds {
-				cacheAvailabilityMap[cache.Name] = true
+				cacheAvailabilityMap[cache.URL.String()] = true
 			}
 		}
 	}
@@ -739,7 +739,7 @@ func generateAvailabilityMaps(ctx *gin.Context, origins, caches []server_structs
 			for _, origin := range origins {
 				if origin.AuthURL.String() == es {
 					foundOrigins = true
-					originAvailabilityMap[origin.Name] = true
+					originAvailabilityMap[origin.URL.String()] = true
 				}
 			}
 		}

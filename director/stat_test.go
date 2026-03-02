@@ -1042,7 +1042,7 @@ func TestSendHeadReq(t *testing.T) {
 }
 
 // TestGenerateAvailabilityMaps verifies that the maps returned by generateAvailabilityMaps
-// are keyed by ad.Name rather than ad.URL.String(). This is the key that availabilityWeightFn
+// are keyed by ad.URL.String() rather than ad.Name. This is the key that availabilityWeightFn
 // uses for lookup, so a mismatch would silently disable the availability axis of adaptive sort.
 func TestGenerateAvailabilityMaps(t *testing.T) {
 	setGinTestMode()
@@ -1087,10 +1087,10 @@ func TestGenerateAvailabilityMaps(t *testing.T) {
 
 	// When stat is skipped (neither CheckCachePresence nor CheckOriginPresence enabled),
 	// generateAvailabilityMaps assumes all servers are available and must key those maps
-	// by ad.Name — not by ad.URL.String(). Before the fix, the URL-string key meant
+	// by ad.URL.String() — not by ad.Name. Before the fix, the Name key meant
 	// availabilityWeightFn could never find a match, causing adaptive sort to treat all
 	// servers as equally available regardless of stat results.
-	t.Run("skip-stat-path-maps-keyed-by-name", func(t *testing.T) {
+	t.Run("skip-stat-path-maps-keyed-by-url", func(t *testing.T) {
 		server_utils.ResetTestState()
 		require.NoError(t, param.Set(param.Director_CheckCachePresence.GetName(), false))
 		require.NoError(t, param.Set(param.Director_CheckOriginPresence.GetName(), false))
@@ -1105,22 +1105,22 @@ func TestGenerateAvailabilityMaps(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		// Keys MUST be ad.Name — availabilityWeightFn does availMap[ad.Name].
-		assert.True(t, oMap[originAd.Name],
-			"origin availability map must be keyed by ad.Name %q", originAd.Name)
-		assert.False(t, oMap[originAd.URL.String()],
-			"origin availability map must NOT be keyed by URL.String() %q", originAd.URL.String())
+		// Keys MUST be ad.URL.String() — availabilityWeightFn does availMap[ad.URL.String()].
+		assert.True(t, oMap[originAd.URL.String()],
+			"origin availability map must be keyed by ad.URL.String() %q", originAd.URL.String())
+		assert.False(t, oMap[originAd.Name],
+			"origin availability map must NOT be keyed by ad.Name %q", originAd.Name)
 
-		assert.True(t, cMap[cacheAd.Name],
-			"cache availability map must be keyed by ad.Name %q", cacheAd.Name)
-		assert.False(t, cMap[cacheAd.URL.String()],
-			"cache availability map must NOT be keyed by URL.String() %q", cacheAd.URL.String())
+		assert.True(t, cMap[cacheAd.URL.String()],
+			"cache availability map must be keyed by ad.URL.String() %q", cacheAd.URL.String())
+		assert.False(t, cMap[cacheAd.Name],
+			"cache availability map must NOT be keyed by ad.Name %q", cacheAd.Name)
 	})
 
 	// When stat is enabled and a server responds positively, the resulting map entry
-	// must still use ad.Name as the key. Before the fix, a successful stat wrote
-	// URL.String() — again invisible to availabilityWeightFn.
-	t.Run("stat-results-maps-keyed-by-name", func(t *testing.T) {
+	// must still use ad.URL.String() as the key. Before the fix, a successful stat wrote
+	// ad.Name — again invisible to availabilityWeightFn.
+	t.Run("stat-results-maps-keyed-by-url", func(t *testing.T) {
 		server_utils.ResetTestState()
 		require.NoError(t, param.Set(param.Director_CheckCachePresence.GetName(), true))
 		require.NoError(t, param.Set(param.Director_CheckOriginPresence.GetName(), false))
@@ -1163,9 +1163,9 @@ func TestGenerateAvailabilityMaps(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		assert.True(t, cMap[statCacheAd.Name],
-			"cache map must be keyed by ad.Name %q after a successful stat", statCacheAd.Name)
-		assert.False(t, cMap[statCacheAd.URL.String()],
-			"cache map must NOT be keyed by URL.String() %q after stat — this broke adaptive sort", statCacheAd.URL.String())
+		assert.True(t, cMap[statCacheAd.URL.String()],
+			"cache map must be keyed by ad.URL.String() %q after a successful stat", statCacheAd.URL.String())
+		assert.False(t, cMap[statCacheAd.Name],
+			"cache map must NOT be keyed by ad.Name %q after stat — this broke adaptive sort", statCacheAd.Name)
 	})
 }
