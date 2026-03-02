@@ -24,6 +24,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/fs"
+	"math/rand"
 	"net/url"
 	"os"
 	"path"
@@ -482,7 +483,11 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			}
 
 			urlCopy := *(pUrl.GetRawUrl())
-			tj, err = tc.NewTransferJob(context.Background(), &urlCopy, transfer.localFile, upload, recursive, client.WithAcquireToken(false), client.WithCaches(caches...))
+			jobCtx := context.Background()
+			if pct := param.Plugin_DirectorDecisionPercentage.GetInt(); pct > 0 && rand.Intn(100) < pct {
+				jobCtx = client.WithDirectorDebug(jobCtx)
+			}
+			tj, err = tc.NewTransferJob(jobCtx, &urlCopy, transfer.localFile, upload, recursive, client.WithAcquireToken(false), client.WithCaches(caches...))
 			if err != nil {
 				failTransfer(transfer.url.String(), transfer.localFile, results, upload, err)
 				return errors.Wrap(err, "Failed to create new transfer job")
@@ -1029,6 +1034,13 @@ func addDataToClassAd(resultAd *classad.ClassAd, result *client.TransferResults,
 		adErr = developerData.Set("ServerChecksums", serverChecksumsData)
 		if adErr != nil {
 			log.Errorf("Failed to set ServerChecksums: %s", adErr)
+		}
+	}
+
+	if result != nil && result.DirectorDecision != nil {
+		adErr = developerData.Set("DirectorDecision", result.DirectorDecision)
+		if adErr != nil {
+			log.Errorf("Failed to set DirectorDecision: %s", adErr)
 		}
 	}
 
