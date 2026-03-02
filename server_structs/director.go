@@ -283,6 +283,7 @@ type (
 		XPelAuthHdr   XPelAuth
 		XPelNsHdr     XPelNs
 		XPelTokGenHdr XPelTokGen
+		RedirectInfo  *RedirectInfo // Director's decision information (populated when X-Pelican-Debug is set)
 	}
 
 	AdAfter int // Ternary logic for the `Ad.After` function

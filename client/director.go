@@ -42,6 +42,16 @@ import (
 	"github.com/pelicanplatform/pelican/utils"
 )
 
+// directorDebugCtxKey is used to signal that the director query should include
+// the X-Pelican-Debug header regardless of the current log level.
+type directorDebugCtxKey struct{}
+
+// WithDirectorDebug returns a derived context that causes director queries
+// to include the X-Pelican-Debug header, requesting decision information.
+func WithDirectorDebug(ctx context.Context) context.Context {
+	return context.WithValue(ctx, directorDebugCtxKey{}, true)
+}
+
 // Check whether an HTTP response is actually a response from a Pelican service, as
 // indicated by the "Server" header pointing to a pelican process.
 //
@@ -57,12 +67,14 @@ func fromPelican(resp *http.Response) bool {
 }
 
 // Make a request to the director for a given verb/resource; return the
-// HTTP response object only if a 307 is returned.
-func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanURL, token string) (resp *http.Response, err error) {
+// HTTP response object only if a 307 is returned.  When the X-Pelican-Debug
+// header was sent and the director includes decision information in the
+// response body, redirectBody will contain that JSON payload.
+func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanURL, token string) (resp *http.Response, redirectBody string, err error) {
 	resourceUrl, err := url.Parse(pUrl.FedInfo.DirectorEndpoint)
 	if err != nil {
 		log.Errorln("Failed to parse the director URL:", err)
-		return nil, err
+		return nil, "", err
 	}
 	resourceUrl.Path = pUrl.Path
 	resourceUrl.RawQuery = pUrl.RawQuery
@@ -90,7 +102,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		req, err = http.NewRequestWithContext(ctx, verb, resourceUrl.String(), nil)
 		if err != nil {
 			log.Errorln("Failed to create an HTTP request:", err)
-			return nil, err
+			return nil, "", err
 		}
 
 		// Include the Client's version as a User-Agent header. The Director will decide
@@ -102,7 +114,8 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
 
-		if log.IsLevelEnabled(log.DebugLevel) {
+		forceDebug, _ := ctx.Value(directorDebugCtxKey{}).(bool)
+		if log.IsLevelEnabled(log.DebugLevel) || forceDebug {
 			req.Header.Set("X-Pelican-Debug", "true")
 		}
 
@@ -128,7 +141,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		body, err = io.ReadAll(resp.Body)
 		if err != nil {
 			log.Errorln("Failed to read the body from the director response:", err)
-			return resp, err
+			return resp, "", err
 		}
 		errMsg = string(body)
 
@@ -163,7 +176,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		var respErr server_structs.SimpleApiResp
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
 			log.Errorln("Failed to unmarshal the director's JSON response:", err)
-			return resp, unmarshalErr
+			return resp, "", unmarshalErr
 		}
 		fromDirector = true
 		// In case we have old director returning "error": "message content"
@@ -191,12 +204,13 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		} else {
 			err = errors.Errorf("%d: %s", resp.StatusCode, errMsg)
 		}
-		return resp, err
+		return resp, "", err
 	}
 
 	// A 307 may come with a body that contains the redirect choice information
 	if bodyString != "" {
 		log.Debugf("Director's redirect choice information: %s", bodyString)
+		redirectBody = bodyString
 	}
 
 	return
@@ -269,7 +283,8 @@ func GetDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, h
 	log.Debugln("Will query director at", pUrl.FedInfo.DirectorEndpoint, "for object", pUrl.Path)
 
 	var dirResp *http.Response
-	dirResp, err = queryDirector(ctx, httpMethod, pUrl, token)
+	var redirectBodyStr string
+	dirResp, redirectBodyStr, err = queryDirector(ctx, httpMethod, pUrl, token)
 	if err != nil {
 		if (httpMethod == http.MethodPut || httpMethod == http.MethodDelete) && dirResp != nil && dirResp.StatusCode == 405 {
 			err = errors.Errorf("the director returned status code 405, indicating it understood the request but could not find an origin that supports PUT/DELETE operations for object: %s.", pUrl.Path)
@@ -297,6 +312,15 @@ func GetDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, h
 	if err != nil {
 		err = errors.Wrap(err, "failed to parse director response")
 		return
+	}
+
+	if redirectBodyStr != "" {
+		var redirectInfo server_structs.RedirectInfo
+		if jsonErr := json.Unmarshal([]byte(redirectBodyStr), &redirectInfo); jsonErr == nil {
+			parsedResponse.RedirectInfo = &redirectInfo
+		} else {
+			log.Debugf("Failed to parse director redirect info: %v", jsonErr)
+		}
 	}
 
 	return
