@@ -945,6 +945,140 @@ func TestFailTransfer(t *testing.T) {
 	})
 }
 
+// Test that addDataToClassAd includes DirectorDecision in DeveloperData when
+// the TransferResults carry a non-nil DirectorDecision.
+func TestAddDataToClassAdDirectorDecision(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	redirectInfo := &server_structs.RedirectInfo{
+		ClientInfo: server_structs.ClientRedirectInfo{
+			Coordinate: server_structs.Coordinate{Lat: 43.07, Long: -89.41},
+			IpAddr:     "1.2.3.4",
+		},
+		ServersInfo:        map[string]*server_structs.ServerRedirectInfo{},
+		DirectorSortMethod: "distance",
+	}
+
+	t.Run("WithDirectorDecision", func(t *testing.T) {
+		resultAd := classad.New()
+		result := &client.TransferResults{
+			DirectorDecision: redirectInfo,
+			Attempts:         []client.TransferResult{},
+		}
+		addDataToClassAd(resultAd, result, nil, 0, nil, nil)
+
+		devData, ok := classad.GetAs[*classad.ClassAd](resultAd, "DeveloperData")
+		require.True(t, ok, "DeveloperData should be present")
+
+		decision, ok := classad.GetAs[*classad.ClassAd](devData, "DirectorDecision")
+		require.True(t, ok, "DirectorDecision should be present as a nested ClassAd in DeveloperData")
+
+		sortMethod, ok := classad.GetAs[string](decision, "directorSortMethod")
+		require.True(t, ok)
+		assert.Equal(t, "distance", sortMethod)
+
+		clientInfo, ok := classad.GetAs[*classad.ClassAd](decision, "clientInfo")
+		require.True(t, ok)
+		ipAddr, ok := classad.GetAs[string](clientInfo, "ipAddr")
+		require.True(t, ok)
+		assert.Equal(t, "1.2.3.4", ipAddr)
+	})
+
+	t.Run("WithoutDirectorDecision", func(t *testing.T) {
+		resultAd := classad.New()
+		result := &client.TransferResults{
+			Attempts: []client.TransferResult{},
+		}
+		addDataToClassAd(resultAd, result, nil, 0, nil, nil)
+
+		devData, ok := classad.GetAs[*classad.ClassAd](resultAd, "DeveloperData")
+		require.True(t, ok, "DeveloperData should be present")
+
+		_, ok = classad.GetAs[*classad.ClassAd](devData, "DirectorDecision")
+		assert.False(t, ok, "DirectorDecision should not be present when nil")
+	})
+
+	t.Run("NilResult", func(t *testing.T) {
+		resultAd := classad.New()
+		addDataToClassAd(resultAd, nil, errors.New("some error"), 1, nil, nil)
+
+		devData, ok := classad.GetAs[*classad.ClassAd](resultAd, "DeveloperData")
+		require.True(t, ok, "DeveloperData should be present")
+
+		_, ok = classad.GetAs[*classad.ClassAd](devData, "DirectorDecision")
+		assert.False(t, ok, "DirectorDecision should not be present for nil result")
+	})
+}
+
+// Test that DirectorDecision appears in the transfer ad DeveloperData when
+// Plugin.DirectorDecisionPercentage is set to 100 during an actual transfer.
+func TestPluginDirectorDecision(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	dirName := t.TempDir()
+
+	fed := fed_test_utils.NewFedTest(t, publicTestOrigin)
+	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
+
+	destDir := filepath.Join(fed.Exports[0].StoragePrefix, "test")
+	require.NoError(t, os.MkdirAll(destDir, os.FileMode(0755)))
+	err := os.WriteFile(filepath.Join(destDir, "decision_test.txt"), []byte("decision test content"), fs.FileMode(0644))
+	require.NoError(t, err)
+
+	downloadUrl := url.URL{
+		Scheme: "pelican",
+		Host:   host,
+		Path:   "/test/test/decision_test.txt",
+	}
+	localPath := filepath.Join(dirName, "decision_test.txt")
+
+	require.NoError(t, param.Set(param.Plugin_DirectorDecisionPercentage.GetName(), 100))
+
+	workChan := make(chan PluginTransfer, 1)
+	workChan <- PluginTransfer{url: &downloadUrl, localFile: localPath}
+	close(workChan)
+
+	results := make(chan *classad.ClassAd, 5)
+	fed.Egrp.Go(func() error {
+		return runPluginWorker(fed.Ctx, false, workChan, results)
+	})
+
+	done := false
+	for !done {
+		select {
+		case <-fed.Ctx.Done():
+			done = true
+		case resultAd, ok := <-results:
+			if !ok {
+				done = true
+				break
+			}
+			transferSuccess, ok := classad.GetAs[bool](resultAd, "TransferSuccess")
+			require.True(t, ok)
+			assert.True(t, transferSuccess)
+
+			devData, ok := classad.GetAs[*classad.ClassAd](resultAd, "DeveloperData")
+			require.True(t, ok, "DeveloperData should be present")
+
+			decision, ok := classad.GetAs[*classad.ClassAd](devData, "DirectorDecision")
+			require.True(t, ok, "DirectorDecision should be present as a nested ClassAd when percentage is 100")
+
+			sortMethod, ok := classad.GetAs[string](decision, "directorSortMethod")
+			require.True(t, ok, "directorSortMethod should be present")
+			assert.NotEmpty(t, sortMethod)
+
+			clientInfo, ok := classad.GetAs[*classad.ClassAd](decision, "clientInfo")
+			require.True(t, ok, "clientInfo should be present")
+			_, ok = classad.GetAs[string](clientInfo, "ipAddr")
+			assert.True(t, ok, "clientInfo should contain ipAddr")
+
+			log.Debugln("DirectorDecision:", decision)
+		}
+	}
+}
+
 // Test the createTransferError function for proper error classification
 func TestCreateTransferError(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
