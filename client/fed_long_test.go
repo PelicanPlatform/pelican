@@ -1043,6 +1043,11 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 			expectedMessage := "is a directory"
 			require.Contains(t, getErr.Error(), expectedMessage, "Error message did not match expected text")
 
+			// Verify it's a ParameterError
+			var pe *error_codes.PelicanError
+			require.True(t, errors.As(getErr, &pe), "Error should be wrapped in PelicanError")
+			assert.Equal(t, 1000, pe.Code(), "Should be Parameter error code")
+
 			// Verify that no file or directory was created at the destination
 			_, statErr := os.Stat(destPath)
 			require.True(t, os.IsNotExist(statErr), "Destination file/directory should not have been created")
