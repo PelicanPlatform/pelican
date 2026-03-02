@@ -317,6 +317,7 @@ type Config struct {
 		XRootServiceUrl string `mapstructure:"xrootserviceurl" yaml:"XRootServiceUrl"`
 	} `mapstructure:"origin" yaml:"Origin"`
 	Plugin struct {
+		DirectorDecisionPercentage int `mapstructure:"directordecisionpercentage" yaml:"DirectorDecisionPercentage"`
 		Token string `mapstructure:"token" yaml:"Token"`
 	} `mapstructure:"plugin" yaml:"Plugin"`
 	Registry struct {
@@ -736,6 +737,7 @@ type configWithType struct {
 		XRootServiceUrl struct { Type string; Value string }
 	}
 	Plugin struct {
+		DirectorDecisionPercentage struct { Type string; Value int }
 		Token struct { Type string; Value string }
 	}
 	Registry struct {
