@@ -1,6 +1,6 @@
 {
   "name": "src",
-  "version": "7.23.0",
+  "version": "7.23.0+test.director.stat-pr3171",
   "private": true,
   "scripts": {
     "dev": "next dev --turbo",
