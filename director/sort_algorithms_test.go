@@ -636,7 +636,7 @@ func TestStatusWeightFn(t *testing.T) {
 func TestAvailabilityWeightFn(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 
-	sAd := server_structs.ServerAd{}
+	sAd := server_structs.ServerAd{URL: url.URL{Scheme: "https", Host: "ad1:8443"}}
 	sAd.Initialize("ad1")
 
 	testCases := []struct {
@@ -648,14 +648,14 @@ func TestAvailabilityWeightFn(t *testing.T) {
 	}{
 		{
 			name:           "object available at server",
-			availMap:       map[string]bool{sAd.Name: true},
+			availMap:       map[string]bool{sAd.URL.String(): true},
 			sAd:            sAd,
 			weightValid:    true,
 			expectedWeight: 2.0,
 		},
 		{
 			name:           "object not available at server",
-			availMap:       map[string]bool{sAd.Name: false},
+			availMap:       map[string]bool{sAd.URL.String(): false},
 			sAd:            sAd,
 			weightValid:    true,
 			expectedWeight: 0.5,
