@@ -40,11 +40,11 @@ Scaling this "mesh of trust" across hundreds of institutions is complex and frag
 
 Pelican addresses this by relying on **Federated Authorization**.
 Instead of passing user identities around, we pass **tokens with capabilities**.
-When a user authenticates with their home institution, that institution's identity provider gives information about *who* the user is to a token issuer.
-The token [issuer](#issuers) then decides *what* the user is allowed to do and creates a token explaining those permissions.
+When a user authenticates with their home institution, that institution's identity provider gives information about *who* the user is to an *authorization server*.
+The [authorization server](#issuers) then decides *what* the user is allowed to do and creates a token explaining those permissions.
 Importantly, this token doesn't say "This is User X"; it says "The bearer of this token is allowed to read /data/project-y".
 
-The services in the federation (Origins and Caches) do not need to know *who* the user is; they only need to trust the *Issuer* that signed the token and verify that the token grants the necessary permissions.
+The services in the federation (Origins and Caches) do not need to know *who* the user is; they only need to trust the authorization server identified by the `iss` claim in the token and verify that the token grants the necessary permissions.
 This decouples the identity verification from resource access, allowing Pelican to protect data without ever needing to store or manage sensitive user credentials.
 
 ## Tokens
@@ -74,9 +74,9 @@ A good analogy to understand how tokens work is to think of them like concert ti
 The ticket has a special hologram on it that *only* this printer can create
 </div>
 <div>
-**2.** The identity provider hands various *identifiers* to a token issuer service that uses those identifiers to decide what you're allowed to do.
+**2.** The identity provider hands various *identifiers* to an **authorization server** that uses those identifiers—combined with its own policy—to decide what you're allowed to do.
 It then creates a token that says "whoever presents this token is allowed to read and write anywhere under the `/foo` namespace for the next 20 minutes".
-The token is cryptographically signed with a private key that *only* this issuer has
+The token is cryptographically signed with a private key belonging to the authorization server (or a service it has delegated signing to)
 </div>
 
 <div>
@@ -105,7 +105,7 @@ Importantly, if you tried to use a ticket for a different band or you scribbled 
 These same principles apply to tokens, which is why they work well for guarding protected resources.
 While tokens cannot be revoked the way certificates can be, their short lifetimes minimize the potential for leaking data by building in an automatic expiration.
 
-Ultimately, the security guarantees of tokens come from *public/private key cryptography*, which lets the token issuer *sign* tokens using a secret while the public key is openly available for anyone to *verify* the signature on the token.
+Ultimately, the security guarantees of tokens come from *public/private key cryptography*, which lets the **authorization server** *sign* tokens using a private key while the corresponding public key is openly available for anyone to *verify* the signature on the token.
 In practice, the service that *signs* the token and the service that hosts the public keys for *verification* are often split.
 For more information about this, see the section on ["Issuers"](#issuers).
 
@@ -120,7 +120,7 @@ JWTs consist of three parts:
 
 1.  **Header:** Describes *how* the token was signed (e.g., "We used the RS256 algorithm").
 2.  **Payload:** Contains the "Claims" — the actual data/permissions. This includes:
-    *   `iss`   (Issuer): Who created this token?
+    *   `iss`   (Issuer): An identifier (URL) for the authorization server that issued this token
 	*   `aud`   (Audience): Who do we expect this token to be presented to?
 	*   `exp`   (Expiration): When does this token expire?
 	*   `iat`   (Issued At): When was this token created?
@@ -219,56 +219,50 @@ Be careful using tokens that let you modify object contents after the object has
 
 ## Issuers
 
-While discussing what tokens are and how they work, it's been unavoidable to briefly discuss the concept of *issuers*, but up until now we haven't rigorously explained what issuers are and why it's difficult to precisely describe them.
+In the Pelican and OAuth2 ecosystems, people often refer to **issuers**, and it can be difficult to separate the concept of issuers from **authorization servers**.
+Put simply, the term "issuer" refers to an identifier (i.e. a URL) for an authorization server that is used to indicate where the authorization server's public keys can be obtained.
+It is important to understand that an issuer is just a string: it doesn't perform actions, make decisions, or create tokens on its own.
 
-At its simplest, an **Issuer** is the authority that creates/mints, signs, and provides means to validate tokens.
-It possesses a cryptographic private key that *only* it has, which lets other services verify that tokens are coming from the right source.
-In our concert ticket analogy, the Issuer is a combination of the **ticket booth** and the **clipboard**; it is the only entity trusted to print valid tickets, and it provides a means for others to double check a ticket's validity.
+The entity that actually does things is the **authorization server**.
+It is the service responsible for creating and cryptographically signing tokens.
+When an Origin or Cache receives a token, it reads the `iss` claim as a key to look up the corresponding authorization server's public keys and verify the token's signature.
 
-Part of what makes discussing the term "Issuer" difficult is that it is heavily overloaded.
-In fact, an Issuer may refer to two related-yet-distinct things, as evidenced by the fact that our analogy needed both a ticket booth and a clipboard to describe it:
-1. A service that *creates/mints* tokens when provided with identifiers from a trusted identity provider (ticket booth)
-2. A service that others can use to look up the public keys linked to the token creator's private keys (clipboard)
+Depending on what the authorization server advertises in its metadata, Pelican may also be able to use it to *obtain* tokens (via standard OAuth2 flows) on behalf of a user.
 
-These two functions can live in the same place, but it's often beneficial to split them up.
+### OIDC Metadata Discovery
 
-To distinguish between these two concepts, we'll refer to 1 as the "Mint Issuer" (it mints the tokens you need) and 2 as the "Verify Issuer" (you use it to "verify" that a token is legitimate).
+The issuer URL serves as a *lookup key* for finding public keys — it is **not necessarily the address of the service that signed the token**.
+The signing may have been done by a completely different service (see [Delegated Signing](#how-authorization-servers-sign-tokens) below); the issuer URL is simply where consumers go to discover the keys needed to verify that signature.
 
-### The "Mint" Role (Issuance)
-The "Mint Issuer" is used by clients to fetch any tokens that are needed to perform an action on a resource (e.g. get/put /foo/bar).
+Because Pelican follows the [OpenID Connect (OIDC)](https://openid.net/developers/how-connect-works/) specification, those public keys can be found by:
+1. Appending `/.well-known/openid-configuration` to the issuer URL and fetching the JSON at that address.
+For example, for the issuer `https://osg-htc.org`, fetch `https://osg-htc.org/.well-known/openid-configuration`.
+2. Parsing the resulting metadata document for a `"jwks_uri"` key. Its value is a URL pointing to a JSON Web Key Set (JWKS) containing the public keys trusted for this issuer.
+3. Fetching those keys and using them to verify that a given token's signature is authentic.
 
-This is the private, secure side of the issuer.
-Before a user can get a token, they must prove who they are to an identity provider.
-Once that provider validates the user's identity, it passes *identifiers* to the "Mint Issuer" like which groups the user belongs to.
-Finally, the "Mint Issuer", which is configured to know which tokens can be created for which groups, provides a cryptographically-signed token for the request.
+If the metadata document also contains a `"token_endpoint"`, Pelican can use it to request tokens via an OAuth2 flow.
+
+### How Authorization Servers Sign Tokens
+
+There are two common patterns for how an authorization server handles signing:
+
+1. **Co-located signing:** The signing service runs at (or is proxied through) the issuer URL, so OIDC discovery on the issuer URL directly returns the signing keys.
+   This is how Pelican's built-in authorization works: [OA4MP (OAuth for Many People)](https://oa4mp.org/) performs the signing, but because it is embedded within and proxied through the Pelican Origin process, the `iss` claim is simply set to the Pelican Origin's own URL (e.g. `https://my-origin.com:8443`).
+   Token consumers run OIDC discovery on that URL and find the keys without any indirection.
+
+2. **Decoupled issuer identity:** The signing service runs at a different address than the `iss` URL.
+   The `iss` claim is set to some other URL — for example, a lab or project URL — and the party controlling that URL is responsible for publishing the signer's public keys there via OIDC discovery.
+   Token consumers look up keys at the `iss` URL without needing to know where the signing actually occurred or which service performed it.
+   Services such as HTCondor's [CredMon](https://github.com/htcondor/scitokens-credmon) commonly use this pattern.
+
+The Origin must be configured to trust an authorization server for each exported namespace by providing the issuer URL — the URL where OIDC key discovery will be performed, which in the decoupled case may be entirely different from the address of the service that performed the signing.
 
 <Callout type="warning">
-This is an important distinction: Issuers are *not* the same as Identity Providers.
-Rather, Identity Providers authenticate a user and then pass the user's identifiers along to the issuer.
-The issuer is configured to know which tokens it can create based on those identifiers.
-The actual token that is _does_ create is the intersection of what the issuer is willing to create and what the user is asking for.
+**Issuers are not Identity Providers.**
+An identity provider handles *authentication*, i.e. verifying who a user is.
+It then passes identifiers (like group membership) to an authorization server, which handles *authorization*: deciding what the user is allowed to do and, if appropriate, creating a signed token.
+The token an authorization server creates is the intersection of what it is configured to grant and what the user has requested.
 </Callout>
-
-In Pelican, the "Mint Issuer" is often a service called [OA4MP (OAuth for Many People)](https://oa4mp.org/) built into the Origin.
-Other services can be configured to issue tokens as well, like HTCondor's [CredMon](https://github.com/htcondor/scitokens-credmon).
-
-However the "Mint Issuer" is set up, the Origin must be configured to trust it by providing the source of truth for the public keys that can be used to verify tokens it creates, which leads us to...
-
-### The "Verify" Role (Discovery)
-The "Verify Issuer" is used by Origins and Caches or any service that needs to check the validity tokens.
-It is the public-facing side of an Issuer and must make any public keys associated with the "Mint Issuer's" private keys publicly accessible.
-
-#### OIDC Key Discovery for "Verify Issuers"
-
-The only thing you need to interact with a "Verify Issuer" is its URL and knowledge of its key discovery protocol.
-Because the entire issuer scheme follows the [OpenID Connect (OIDC)](https://openid.net/developers/how-connect-works/) specification, the "Verify Issuer's" public keys can be fetched according to:
-1. Given the "Verify Issuer's" URL, append the path `/.well-known/openid-configuration` and download the JSON hosted here.
-For example, if the URL is `https://osg-htc.org`, you'd fetch `https://osg-htc.org/.well-known/openid-configuration` and parse it as JSON.
-2. This JSON will provide a key named `"jwks_uri"` whose value is another URL. The public keys live as a JSON Web Keyset (JWKS) behind this URL.
-3. By fetching and keys pointed to by the `"jwks_uri"`, you can check whether any given token was in fact signed by the corresponding "Mint Issuer".
-
-Crucially, the "Verify" side does not know or care *who* the user is or who is asking for the keys.
-It simply publishes the mathematical keys required to check the signature of the token ("hologram" on the ticket).
 
 ### Trust Relationships
 
@@ -282,16 +276,16 @@ Because this process involves stringing together multiple services, it's worth t
 	Crucially, because the Storage Provider defines the policies that map a user's identity to their permissions (e.g. "Bob can read /foo"), they must fundamentally trust the Identity Provider to accurately verify that identity.
 	If the Identity Provider cannot be trusted to say "This is Bob", nobody can safely grant "Bob" access.
 
-2. **The "Issuer" Trusts the Identity Provider:**
-	When users authenticate with the Identity Provider, the "Mint Issuer" trusts the identifiers it is handed.
-	This trust is typically established when the Issuer is registered as a client with the Identity Provider.
-	The Issuer trusts that the Identity Provider has rigorously verified the user's credentials (password, MFA) before asserting their identity and attributes.
+2. **The Authorization Server Trusts the Identity Provider:**
+	When users authenticate with the Identity Provider, the authorization server trusts the identifiers it is handed.
+	This trust is typically established when the authorization server is registered as a client with the Identity Provider.
+	The authorization server trusts that the Identity Provider has rigorously verified the user's credentials (password, MFA) before asserting their identity and attributes.
 
-3. **Origins Trust their Issuers (both "Mint" and "Verify") and Federation Central Services (Director/Registry):**
-	The Origin is explicitly configured with which Issuers it trusts for which namespaces.
-	This is done by providing the "Verify Issuer" URL that hosts a set of public keys in the Origin's exports.
-	The Origin trusts that if a token bears the signature of a trusted Issuer, the permissions inside that token are valid.
-	Furthermore, Origins send information about their namespaces Issuers to the Federation's Director, which the Origin also trusts.
+3. **Origins Trust their Authorization Servers and Federation Central Services (Director/Registry):**
+	The Origin is explicitly configured with which authorization servers it trusts for which namespaces.
+	This is done by providing an issuer URL for each namespace in the Origin's exports; Pelican uses OIDC discovery on these URLs to fetch the public keys needed to verify tokens.
+	The Origin trusts that if a token bears the signature of a trusted authorization server, the permissions inside that token are valid.
+	Furthermore, Origins send information about their namespaces and their issuers to the Federation's Director, which the Origin also trusts.
 
 4. **The Director/Registry Can Verify Origins/Caches:**
 	When Origins and Caches join a federation, they register their identities with the Registry and provide a public key corresponding to a private key they possess.
@@ -300,9 +294,9 @@ Because this process involves stringing together multiple services, it's worth t
 	Because Origins trust Central Services and Central Services trust Caches, Origins transitively trust that Caches will respect their access policies.
 
 5. **Caches Trust the Director/Registry:**
-	Because Caches can grant access to copies of namespaced data, they must know which Issuers are trusted for which namespaces.
-	Each Origin/namespace and their Issuers are advertised to the Director by the Origin.
-	Because both the Cache and the Origin trust the Director, the Cache trusts each namespace Issuer it learns about via the Director.
+	Because Caches can grant access to copies of namespaced data, they must know which authorization servers are trusted for which namespaces.
+	Each Origin/namespace and their issuers are advertised to the Director by the Origin.
+	Because both the Cache and the Origin trust the Director, the Cache trusts each namespace authorization server it learns about via the Director.
 
 By chaining these trust relationships together transitively, we create a system where a Cache can serve an object to a user without ever knowing who the user is or directly contacting the user's home institution.
 
