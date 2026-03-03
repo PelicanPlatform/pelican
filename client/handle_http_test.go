@@ -1792,16 +1792,16 @@ func TestChecksumAlgorithmFallback(t *testing.T) {
 		requireChecksum: true,
 	}
 	transferResult, err := downloadObject(transfer)
-	assert.NoError(t, err)
-	assert.NoError(t, transferResult.Error, "Client should fall back to MD5 verification when CRC32C is unavailable")
+	require.NoError(t, err)
+	require.NoError(t, transferResult.Error, "Client should fall back to MD5 verification when CRC32C is unavailable")
 
 	// Server provided MD5
-	assert.Equal(t, 1, len(transferResult.ServerChecksums))
+	require.Equal(t, 1, len(transferResult.ServerChecksums))
 	info := transferResult.ServerChecksums[0]
 	assert.Equal(t, ChecksumType(AlgMD5), info.Algorithm)
 
 	// ClientChecksums still reports the requested CRC32C
-	assert.Equal(t, 1, len(transferResult.ClientChecksums))
+	require.Equal(t, 1, len(transferResult.ClientChecksums))
 	info = transferResult.ClientChecksums[0]
 	assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
 }
@@ -1854,10 +1854,10 @@ func TestChecksumMislabeledCRC32C(t *testing.T) {
 		requireChecksum: false,
 	}
 	transferResult, err := downloadObject(transfer)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	// The mislabeled checksum should be skipped (no panic/crash), and since
 	// requireChecksum is false, the transfer should succeed without error.
-	assert.NoError(t, transferResult.Error, "Mislabeled CRC32C should be gracefully skipped")
+	require.NoError(t, transferResult.Error, "Mislabeled CRC32C should be gracefully skipped")
 	// No valid server checksums should be parsed from the mislabeled value
 	assert.Equal(t, 0, len(transferResult.ServerChecksums), "Mislabeled checksum should be skipped")
 }
@@ -1906,9 +1906,16 @@ func TestChecksumMissing(t *testing.T) {
 		requireChecksum: true,
 	}
 	transferResult, err := downloadObject(transfer)
-	assert.NoError(t, err)
-	assert.Error(t, transferResult.Error)
-	assert.True(t, errors.Is(transferResult.Error, ErrServerChecksumMissing), "Expected checksum missing error")
+	require.NoError(t, err)
+	require.Error(t, transferResult.Error)
+	require.True(t, errors.Is(transferResult.Error, ErrServerChecksumMissing), "Expected checksum missing error")
+
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(transferResult.Error, &pe), "Error should be wrapped as PelicanError")
+	expectedErr := error_codes.NewTransfer_ChecksumMissingError(errors.New("test"))
+	assert.Equal(t, expectedErr.Code(), pe.Code(), "Should map to Transfer.ChecksumMissing error code")
+	assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType(), "Should map to Transfer.ChecksumMissing error type")
+	assert.Equal(t, expectedErr.IsRetryable(), pe.IsRetryable(), "ChecksumMissingError should be retryable")
 }
 
 func TestChecksumPut(t *testing.T) {
@@ -1970,15 +1977,15 @@ func TestChecksumPut(t *testing.T) {
 			},
 		}
 		transferResult, err := uploadObject(transfer)
-		assert.NoError(t, err)
-		assert.NoError(t, transferResult.Error)
+		require.NoError(t, err)
+		require.NoError(t, transferResult.Error)
 
-		assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
+		require.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
 		info := transferResult.ServerChecksums[0]
 		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
 		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
 
-		assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+		require.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
 		info = transferResult.ClientChecksums[0]
 		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
 		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
@@ -2041,7 +2048,7 @@ func TestChecksumPut(t *testing.T) {
 			requireChecksum: true,
 		}
 		transferResult, err := uploadObject(transfer)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		require.Error(t, transferResult.Error)
 
 		// Verify that the error is wrapped as a PelicanError
@@ -2057,12 +2064,12 @@ func TestChecksumPut(t *testing.T) {
 		require.ErrorAs(t, transferResult.Error, &checksumError)
 		assert.Equal(t, "checksum mismatch for crc32c; client computed 977b8112, server reported 977b8111", checksumError.Error())
 
-		assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
+		require.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
 		info := transferResult.ServerChecksums[0]
 		assert.Equal(t, "977b8111", hex.EncodeToString(info.Value))
 		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
 
-		assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+		require.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
 		info = transferResult.ClientChecksums[0]
 		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
 		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
@@ -2127,17 +2134,17 @@ func TestChecksumPut(t *testing.T) {
 			requireChecksum: true,
 		}
 		transferResult, err := uploadObject(transfer)
-		assert.NoError(t, err)
-		assert.NoError(t, transferResult.Error, "Client should fall back to MD5 verification when CRC32C is not available")
+		require.NoError(t, err)
+		require.NoError(t, transferResult.Error, "Client should fall back to MD5 verification when CRC32C is not available")
 
 		// Server provided MD5 checksum (client requested CRC32C but server fell back)
-		assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
+		require.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
 		info := transferResult.ServerChecksums[0]
 		assert.Equal(t, "x4UGDIZnlswqFwjJlxVMjg==", checksumValueToHttpDigest(info.Algorithm, info.Value))
 		assert.Equal(t, ChecksumType(AlgMD5), info.Algorithm)
 
 		// Client checksums still report the originally-requested CRC32C
-		assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+		require.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
 		info = transferResult.ClientChecksums[0]
 		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
 		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
@@ -2201,17 +2208,17 @@ func TestChecksumPut(t *testing.T) {
 			requireChecksum: false,
 		}
 		transferResult, err := uploadObject(transfer)
-		assert.NoError(t, err)
-		assert.NoError(t, transferResult.Error, "Should not error when requireChecksum is false and MD5 fallback succeeds")
+		require.NoError(t, err)
+		require.NoError(t, transferResult.Error, "Should not error when requireChecksum is false and MD5 fallback succeeds")
 
 		// Server provided MD5 checksum
-		assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
+		require.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
 		info := transferResult.ServerChecksums[0]
 		assert.Equal(t, "x4UGDIZnlswqFwjJlxVMjg==", checksumValueToHttpDigest(info.Algorithm, info.Value))
 		assert.Equal(t, ChecksumType(AlgMD5), info.Algorithm)
 
 		// Client checksums still report the originally-requested CRC32C
-		assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+		require.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
 		info = transferResult.ClientChecksums[0]
 		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
 		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
@@ -2274,9 +2281,16 @@ func TestChecksumPut(t *testing.T) {
 			requireChecksum: true,
 		}
 		transferResult, err := uploadObject(transfer)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		require.Error(t, transferResult.Error)
-		assert.True(t, errors.Is(transferResult.Error, ErrServerChecksumMissing), "Expected checksum missing error when server provides no checksum")
+		require.True(t, errors.Is(transferResult.Error, ErrServerChecksumMissing), "Expected checksum missing error when server provides no checksum")
+
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(transferResult.Error, &pe), "Error should be wrapped as PelicanError")
+		expectedErr := error_codes.NewTransfer_ChecksumMissingError(errors.New("test"))
+		assert.Equal(t, expectedErr.Code(), pe.Code(), "Should map to Transfer.ChecksumMissing error code")
+		assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType(), "Should map to Transfer.ChecksumMissing error type")
+		assert.Equal(t, expectedErr.IsRetryable(), pe.IsRetryable(), "ChecksumMissingError should be retryable")
 
 		// No server checksums provided
 		assert.Equal(t, 0, len(transferResult.ServerChecksums), "Checksum count is %d but should be 0", len(transferResult.ServerChecksums))
