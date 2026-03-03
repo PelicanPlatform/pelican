@@ -314,7 +314,7 @@ func TestMultiuserChecksumFallback(t *testing.T) {
 		)
 		require.NoError(t, err, "Upload should not fail when origin doesn't support crc32c")
 		require.NotEmpty(t, transferResults)
-		assert.NoError(t, transferResults[0].Error,
+		require.NoError(t, transferResults[0].Error,
 			"Upload should succeed with checksum fallback even when crc32c is required")
 		assert.Greater(t, transferResults[0].TransferredBytes, int64(0))
 	})
@@ -337,7 +337,7 @@ func TestMultiuserChecksumFallback(t *testing.T) {
 		)
 		require.NoError(t, err, "Download should not fail when origin doesn't support crc32c")
 		require.NotEmpty(t, transferResults)
-		assert.NoError(t, transferResults[0].Error,
+		require.NoError(t, transferResults[0].Error,
 			"Download should succeed with checksum fallback even when crc32c is required")
 
 		content, err := os.ReadFile(downloadFile)
@@ -361,7 +361,7 @@ func TestMultiuserChecksumFallback(t *testing.T) {
 		)
 		require.NoError(t, err, "Download should not fail with default checksum when origin doesn't support crc32c")
 		require.NotEmpty(t, transferResults)
-		assert.NoError(t, transferResults[0].Error,
+		require.NoError(t, transferResults[0].Error,
 			"Download should succeed with fallback when using default checksum algorithm")
 
 		content, err := os.ReadFile(downloadFile)
@@ -386,7 +386,7 @@ func TestMultiuserChecksumFallback(t *testing.T) {
 		)
 		require.NoError(t, err, "Download should succeed when requesting MD5 (supported by multiuser)")
 		require.NotEmpty(t, transferResults)
-		assert.NoError(t, transferResults[0].Error,
+		require.NoError(t, transferResults[0].Error,
 			"Download with MD5 should succeed without fallback")
 
 		content, err := os.ReadFile(downloadFile)
