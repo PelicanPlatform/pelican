@@ -540,7 +540,7 @@ func verifyTransferChecksums(
 		if requireChecksum {
 			log.WithFields(fields).Errorln(
 				"Client requires checksum verification but server provided no checksums")
-			return false, ErrServerChecksumMissing
+			return false, error_codes.NewTransfer_ChecksumMissingError(ErrServerChecksumMissing)
 		}
 		log.WithFields(fields).Debugln("Server did not provide any checksum values to compare")
 		return false, nil
@@ -582,7 +582,7 @@ func verifyTransferChecksums(
 	if requireChecksum {
 		log.WithFields(fields).Errorln(
 			"Client requires checksum verification but server returned only unsupported algorithms")
-		return false, ErrServerChecksumMissing
+		return false, error_codes.NewTransfer_ChecksumMissingError(ErrServerChecksumMissing)
 	}
 	for _, checksumInfo := range serverChecksums {
 		log.WithFields(fields).Debugf(
