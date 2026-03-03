@@ -85,14 +85,14 @@ The guard confirms the hologram is authentic because he **trusts** that whoever 
 </div>
 <div>
 **3.** Within the 20m timeframe, you present the token to an Origin along with a request to download an object called `/foo/picture.jpg`.
-The Origin's XRootD process fetches the issuer's public key (from online or a local cache) and verifies the token's signature is authentic because it **trusts** that the issuer is allowed to speak on behalf of the requested resources
+The Origin fetches the issuer's public key (from online or a local cache) and verifies the token's signature is authentic because it **trusts** that the issuer is allowed to speak on behalf of the requested resources
 </div>
 
 <div>
 **4.** You enter the venue and are escorted by an usher to your seat
 </div>
 <div>
-**4.** Finally, XRootD let's you proceed with the download
+**4.** Finally, the Origin let's you proceed with the download
 </div>
 
 </div>
@@ -160,9 +160,10 @@ eyJhbGciOiJSUzI1NiIsImtpZCI6ImtleS1yczI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJodHRwczo
 ```
 </Callout>
 
-<Callout type="default">
+<Callout type="error">
+You should be ***extremely careful*** about sharing token signatures; treat this like sharing a password!
+
 You can safely share the first two sections (everything **up to but not after** the second period) of your tokens because they don't contain secrets.
-However, you should be ***extremely careful*** about sharing token signatures and you should treat this like sharing a password.
 </Callout>
 
 <Callout type="warning">
@@ -311,10 +312,12 @@ By chaining these trust relationships together transitively, we create a system 
 
 ## Anatomy of an Origin's/Cache's Authorization Configuration
 
-XRootD is the service at Origins and Caches that serves requests for data.
-It's also the service that receives tokens and decides whether the token is sufficient to permit the request.
+While a Pelican Origin or Cache is typically referred to as a single entity, it's actually made up of two separate processes.
+The first is the Pelican process that manages everything else going on in the server, including handling server configuration, interacting with federations, and registering namespaces.
+The second is an [XRootD](https://xrootd.web.cern.ch/xrootd/) process that actually hands out data, receives data access tokens and decides whether the token is sufficient to permit the request.
+This is why Origins and Caches are typically associated with two separate ports; each process binds to its own port.
 
-XRootD does this using two frameworks, the ["Authorization Database File"](https://xrootd.web.cern.ch/doc/dev56/sec_config.htm#_Toc119617472) (often abbreviated as "authfile") and the [XRootD-Scitokens plugin](https://github.com/xrootd/xrootd/tree/master/src/XrdSciTokens).
+XRootD manages data access authorization using two frameworks, the ["Authorization Database File"](https://xrootd.web.cern.ch/doc/dev56/sec_config.htm#_Toc119617472) (often abbreviated as "authfile") and the [XRootD-Scitokens plugin](https://github.com/xrootd/xrootd/tree/master/src/XrdSciTokens).
 <Callout type="info">
 Note that SciTokens plugin works with multiple token formats (WLCG, SciTokens).
 </Callout>
@@ -322,11 +325,10 @@ Note that SciTokens plugin works with multiple token formats (WLCG, SciTokens).
 When Origins/Caches start up, they parse the policies provided in their configuration (Origins) or discovered via the Director (Caches) to generate configuration files for both of these frameworks.
 Because Caches usually serve multiple federation namespaces, a Cache's authfile/SciTokens configuration is a union over the policies of the federation's namespaces as presented by Origins.
 
+<Callout type="error">
 Additionally, these generated configuration files may be merged with admin-supplied files by specifying the [`Xrootd.Authfile`](../parameters#Xrootd-Authfile) and [`Xrootd.ScitokensConfig`](../parameters#Xrootd-ScitokensConfig) config parameters.
 
-<Callout type="warning">
-Any extra information provided in custom authfile or SciTokens configuration ***does not*** propagate through the rest of the federation.
-Moreover, improper configuration can result in ***unintentional data exposure***.
+However, any extra information provided in custom authfile or SciTokens configuration ***does not*** propagate through the rest of the federation and improper configuration can result in ***unintentional data exposure***.
 Use these at your own risk!
 
 If you're setting up an Origin to serve protected data and you can use tokens to download directly via the Origin but not via Caches, double check that you're not relying on admin-supplied authfile/SciTokens configuration!
