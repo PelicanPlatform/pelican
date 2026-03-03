@@ -421,7 +421,7 @@ func GetSecret(issuerKey jwk.Key) (string, error) {
 	return secret, nil
 }
 
-// Get a private-public key pair for encryption/decryption
+// getEncryptionKeyPair returns a private-public key pair for encryption/decryption.
 // The private key is derived from the issuer's private key, and the public key
 // is derived from the private key using Curve25519.
 func getEncryptionKeyPair(issuerKey jwk.Key) (privateKey, publicKey *[32]byte, err error) {
