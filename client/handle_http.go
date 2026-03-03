@@ -178,14 +178,14 @@ type (
 	TransferResults struct {
 		JobId             uuid.UUID `json:"jobId"` // The job ID this result corresponds to
 		job               *TransferJob
-		Error             error            `json:"error"`
-		TransferredBytes  int64            `json:"transferredBytes"`
-		ServerChecksums   []ChecksumInfo   `json:"serverChecksums"` // Checksums returned by the server
-		ClientChecksums   []ChecksumInfo   `json:"clientChecksums"` // Checksums calculated by the client
-		TransferStartTime time.Time        `json:"transferStartTime"`
-		Scheme            string           `json:"scheme"`
-		Source            string           `json:"source"`
-		Attempts          []TransferResult `json:"attempts"`
+		Error             error                        `json:"error"`
+		TransferredBytes  int64                        `json:"transferredBytes"`
+		ServerChecksums   []ChecksumInfo               `json:"serverChecksums"` // Checksums returned by the server
+		ClientChecksums   []ChecksumInfo               `json:"clientChecksums"` // Checksums calculated by the client
+		TransferStartTime time.Time                    `json:"transferStartTime"`
+		Scheme            string                       `json:"scheme"`
+		Source            string                       `json:"source"`
+		Attempts          []TransferResult             `json:"attempts"`
 		DirectorDecision  *server_structs.RedirectInfo `json:"directorDecision,omitempty"`
 	}
 
