@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 
 # Download JUnit artifacts from recent GitHub Actions workflow runs.
 #
@@ -8,19 +8,19 @@
 #   WORKFLOW_NAME  The name of the workflow to download artifacts from.
 #
 # Environment variables (set automatically by GitHub Actions):
-#   GH_TOKEN            GitHub token for authentication.
-#   GITHUB_REPOSITORY   The owner and repository name (e.g., "owner/repo").
-#   GITHUB_RUN_ID       The unique ID of the current workflow run.
-#   GITHUB_STEP_SUMMARY Path to the file for adding content to the job summary.
+#   GH_TOKEN             GitHub token for authentication.
+#   GITHUB_REPOSITORY    The owner and repository name (e.g., "owner/repo").
+#   GITHUB_RUN_ID        The unique ID of the current workflow run.
+#   GITHUB_STEP_SUMMARY  Path to the file for adding content to the job summary.
 
-set -euo pipefail
+set -eu
 
-workflow_name="$1"
+WORKFLOW_NAME="$1"
 
 # Get the last 14 completed workflow runs.
 run_ids=$(gh run list \
   --repo "$GITHUB_REPOSITORY" \
-  --workflow "$workflow_name" \
+  --workflow "$WORKFLOW_NAME" \
   --status completed \
   --limit 14 \
   --json databaseId \

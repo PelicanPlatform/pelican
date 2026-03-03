@@ -13,7 +13,7 @@ jobs:
 
   analyze-runs:
     name: Analyze Runs
-    if: always()
+    if: ${{ !cancelled() }}
     needs: [run-tests]
     runs-on: ubuntu-latest
     steps:
@@ -23,9 +23,10 @@ jobs:
       - name: Download artifacts
         env:
           GH_TOKEN: ${{ github.token }}
-        run: .github/scripts/download_junit_artifacts.sh "Run Tests (macOS) [on schedule]"
+        run: |
+          bash .github/scripts/analyze-junit-results/download_junit_artifacts.sh "Run Tests (macOS) [on schedule]"
 
       - name: Analyze test results
         run: |
-          python3 .github/scripts/analyze_junit_results.py
-          cat test-failure-analysis.txt >> $GITHUB_STEP_SUMMARY
+          python3 .github/scripts/analyze-junit-results/analyze_junit_results.py
+          cat test-failure-analysis.md >> $GITHUB_STEP_SUMMARY
