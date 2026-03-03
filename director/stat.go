@@ -676,7 +676,17 @@ func generateAvailabilityMaps(ctx *gin.Context, origins, caches []server_structs
 
 	if qr.Status == queryFailed {
 		if qr.ErrorType != queryNoSourcesErr && qr.ErrorType != queryInsufficientResErr {
-			return nil, nil, errors.Errorf("stat query failed: %s", qr.Msg)
+			// Stat infrastructure failure — log it but don't propagate to client.
+			// Return "I don't know" (all servers available) so the sort proceeds with
+			// whatever other info is at hand.
+			log.Warningf("Stat query failed; proceeding with neutral availability: %s", qr.Msg)
+			for _, origin := range origins {
+				originAvailabilityMap[origin.URL.String()] = true
+			}
+			for _, cache := range caches {
+				cacheAvailabilityMap[cache.URL.String()] = true
+			}
+			return originAvailabilityMap, cacheAvailabilityMap, nil
 		}
 	}
 
