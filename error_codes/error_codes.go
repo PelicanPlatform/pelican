@@ -307,6 +307,17 @@ func NewTransfer_ChecksumMismatchError(err error) *PelicanError {
 	}
 }
 
+func NewTransfer_ChecksumMissingError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Transfer.ChecksumMissing",
+		exitCode:    9,
+		code:        6007,
+		retryable:   true,
+		description: "The client required checksum verification but the server did not provide any checksum information or only provided unsupported algorithms.",
+		err:         err,
+	}
+}
+
 // function that maps the error to the exit code
 func (e *PelicanError) ExitCode() int {
 	return e.exitCode
