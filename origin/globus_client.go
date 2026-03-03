@@ -142,6 +142,7 @@ func setupGlobusOAuthCfg() {
 			AuthURL:       iss.AuthURL,
 			DeviceAuthURL: iss.DeviceAuthURL,
 			TokenURL:      iss.TokenURL,
+			AuthStyle:     oauth2.AuthStyleInHeader,
 		},
 	}
 
