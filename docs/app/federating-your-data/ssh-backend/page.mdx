@@ -1,0 +1,326 @@
+
+import { Callout } from 'nextra/components'
+
+# SSH Storage Backend
+
+## What is the SSH Backend?
+
+The SSH backend allows a Pelican Origin to serve data from a remote POSIX filesystem over an SSH connection.
+Instead of running Pelican directly on the storage host, you run the Origin on a separate machine (or Kubernetes cluster) and it reaches the data by SSH-ing into the storage server.
+Pelican automatically transfers a helper binary to the remote host, starts it, and forwards the requests to the helper.
+The helper uses a separate connection from the SSH host to the origin (outgoing connectivity, not incoming) to move data by default.
+
+This is useful when:
+- The storage server cannot run Pelican directly (e.g., it is a shared HPC login node or a managed appliance).
+- The storage server has no inbound network connectivity (firewalled, behind NAT) but can accept SSH connections.
+- You want to separate the Origin service from the data host for operational or security reasons.
+
+<Callout type="info">
+The SSH backend does not require any software to be pre-installed on the remote host beyond a standard SSH server.
+Pelican detects the remote platform, transfers a compatible helper binary, and manages its lifecycle automatically.
+</Callout>
+
+## How It Works
+
+When the Origin starts with `Origin.StorageType: ssh`, the following happens:
+
+1. Pelican opens an SSH connection to the configured remote host.
+2. It detects the remote OS and architecture.
+3. It transfers a platform-appropriate Pelican helper binary to the remote host.
+4. It starts the helper process, which translates the origin's HTTP requests into local filesystem operations on the remote host.
+5. Data requests arriving at the Origin are forwarded to the helper over the SSH connection.
+
+The Origin monitors the SSH connection and helper process with keepalives and will automatically reconnect if the connection drops.
+
+### Connection Modes
+
+The SSH backend supports two connection modes:
+
+- **Broker mode** (default): The helper process polls the Origin over HTTPS to pick up pending requests.
+This requires the remote host to be able to reach the Origin's external URL.
+- **Tunnel mode** (`Origin.SSH.TunnelCallback: true`): The Origin opens an SSH tunnel (remote port forward) and the helper communicates through it.
+This works even when the remote host has no outbound connectivity to the Origin but throughput is limited by SSH's performance (typically, less than 1Gbps).
+
+## Before Starting
+
+This guide assumes:
+- You have already [installed Pelican](../install.mdx).
+- You have SSH access to the remote storage host (password, public key, or ssh-agent).
+  SSH does not need to be installed on the origin.
+- The remote host runs Linux or macOS on amd64 or arm64.
+
+## Minimal Configuration
+
+The simplest SSH Origin configuration uses public-key authentication:
+
+```yaml filename="pelican.yaml" copy
+Origin:
+  StorageType: ssh
+  FederationPrefix: /my-data
+  StoragePrefix: /data/exports
+
+  SSH:
+    Host: storage.example.com
+    User: pelican
+    AuthMethods: ["publickey"]
+    PrivateKeyFile: /etc/pelican/ssh/id_ed25519
+```
+
+This exports the directory `/data/exports` on `storage.example.com` under the federation prefix `/my-data`.
+
+<Callout type="warning">
+Make sure the SSH user has read access (and write access, if you enable writes) to the `StoragePrefix` directory on the remote host.
+</Callout>
+
+## Configuration Examples
+
+### Multi-Export with Public Key
+
+```yaml filename="pelican.yaml" copy
+Origin:
+  StorageType: ssh
+
+  Exports:
+    - FederationPrefix: /project-a
+      StoragePrefix: /data/project-a
+      Capabilities: ["PublicReads", "Listings", "DirectReads"]
+    - FederationPrefix: /project-b
+      StoragePrefix: /data/project-b
+      Capabilities: ["Reads", "Writes", "Listings"]
+
+  SSH:
+    Host: hpc-login.example.com
+    User: pelican-svc
+    AuthMethods: ["publickey"]
+    PrivateKeyFile: /etc/pelican/ssh/id_ed25519
+    KnownHostsFile: /etc/pelican/ssh/known_hosts
+```
+
+### SSH Agent Authentication
+
+To use keys managed by an SSH agent (including hardware keys like YubiKeys):
+
+```yaml filename="pelican.yaml" copy
+Origin:
+  StorageType: ssh
+  FederationPrefix: /my-data
+  StoragePrefix: /data/exports
+
+  SSH:
+    Host: storage.example.com
+    User: pelican
+    AuthMethods: ["agent"]
+```
+
+Make sure the `SSH_AUTH_SOCK` environment variable is set in the process that runs Pelican.
+For hardware keys that require a touch confirmation, the Origin will log a message prompting you to touch the key.
+
+## Testing the Connection
+
+Before running a full Origin, you can test SSH connectivity with:
+
+```bash
+pelican origin ssh-auth test storage.example.com
+```
+
+Or with explicit options:
+
+```bash
+pelican origin ssh-auth test pelican@storage.example.com -i ~/.ssh/id_ed25519
+```
+
+This will:
+1. Connect to the remote host via SSH.
+2. Detect the remote platform.
+3. Transfer the helper binary.
+4. Start and stop the helper process.
+5. Clean up the remote binary.
+
+If the test succeeds, your Origin configuration should work.
+
+### Checking Connection Status
+
+Once an Origin is running, check the SSH backend status with:
+
+```bash
+pelican origin ssh-auth status
+```
+
+This shows the current connection state, helper status, last keepalive time, and authentication method.
+
+## Operational Notes
+
+### Host Key Verification
+
+By default, the remote host's SSH key must already be present in the known hosts file (`~/.ssh/known_hosts` or the path specified by `Origin.SSH.KnownHostsFile`).
+If the key is not found, the connection will fail.
+
+For test or development environments, you can set `Origin.SSH.AutoAddHostKey: true` to automatically accept and save unknown host keys.
+
+<Callout type="warning">
+Do not enable `AutoAddHostKey` in production.
+It disables protection against man-in-the-middle attacks.
+</Callout>
+
+### Automatic Reconnection
+
+If the SSH connection drops or the helper process exits, the Origin automatically reconnects with exponential backoff.
+The maximum number of consecutive retries is controlled by `Origin.SSH.MaxRetries` (default: 5).
+After the connection is re-established, the Origin resumes serving data without manual intervention.
+
+### Health Monitoring
+
+The SSH backend reports its health status through Pelican's standard component health system:
+- **OK**: SSH connected, helper running, keepalives succeeding.
+- **Warning**: Initializing, reconnecting, or keepalives degraded.
+- **Critical**: Keepalives have failed beyond the timeout threshold.
+
+### Session Establishment Timeout
+
+The `Origin.SSH.SessionEstablishTimeout` (default 5m) bounds the entire time to establish a working session: connecting, authenticating, detecting the platform, transferring the binary, and starting the helper.
+If this timeout is exceeded, the attempt is aborted and retried.
+This is particularly relevant when using keyboard-interactive authentication, where a human must complete the challenge within this window.
+
+## Advanced Configuration
+
+### Password Authentication
+
+If key-based authentication is not available, you can use a password stored in a file:
+
+```yaml filename="pelican.yaml" copy
+Origin:
+  StorageType: ssh
+  FederationPrefix: /my-data
+  StoragePrefix: /data/exports
+  Capabilities: ["PublicReads", "Listings"]
+
+  SSH:
+    Host: storage.example.com
+    User: pelican
+    AuthMethods: ["password"]
+    PasswordFile: /etc/pelican/ssh/password
+```
+
+The password file should contain only the password and have restricted permissions (`chmod 0600`).
+
+### Keyboard-Interactive Authentication (2FA / OTP)
+
+Some hosts require keyboard-interactive authentication (e.g., for two-factor authentication or one-time passwords).
+In this mode, when the remote host presents an authentication challenge, the Origin logs a message telling you to run the interactive login command:
+
+```yaml filename="pelican.yaml" copy
+Origin:
+  StorageType: ssh
+  FederationPrefix: /my-data
+  StoragePrefix: /data/exports
+
+  SSH:
+    Host: secure-host.example.com
+    User: pelican
+    AuthMethods: ["keyboard-interactive"]
+    ChallengeTimeout: 2m
+```
+
+When the Origin starts, it will wait for you to complete authentication.
+Open a second terminal and run:
+
+```bash
+pelican origin ssh-auth login
+```
+
+This connects to the Origin and presents the SSH authentication prompts in your terminal.
+Once you complete the challenge, the Origin finishes establishing the connection and begins serving data.
+While extremely flexible — this can complete 2FA challenges — be careful with this mode as Pelican will be unable to restart the origin without a human present.
+
+<Callout type="info">
+You can also specify a remote origin URL explicitly:
+```bash
+pelican origin ssh-auth login --origin https://my-origin.example.com
+```
+</Callout>
+
+### Tunnel Mode (No Outbound Connectivity from Remote Host)
+
+If the remote host cannot reach the Origin's HTTPS port (e.g., it is behind a strict firewall), enable tunnel mode:
+
+```yaml filename="pelican.yaml" copy
+Origin:
+  StorageType: ssh
+  FederationPrefix: /my-data
+  StoragePrefix: /data/exports
+
+  SSH:
+    Host: firewalled-host.example.com
+    User: pelican
+    AuthMethods: ["publickey"]
+    PrivateKeyFile: /etc/pelican/ssh/id_ed25519
+    TunnelCallback: true
+```
+
+In tunnel mode, the Origin sets up an SSH tunnel (using Unix domain socket forwarding) so the helper communicates back through the SSH connection itself.
+No additional network ports or firewall rules are needed on the remote host.
+
+### ProxyJump (Bastion Host)
+
+To reach a storage host through a jump host, use `ProxyJump`:
+
+```yaml filename="pelican.yaml" copy
+Origin:
+  StorageType: ssh
+  FederationPrefix: /my-data
+  StoragePrefix: /data/exports
+
+  SSH:
+    Host: internal-storage.local
+    User: pelican
+    AuthMethods: ["publickey"]
+    PrivateKeyFile: /etc/pelican/ssh/id_ed25519
+    ProxyJump: bastion.example.com
+```
+
+Chained jumps are supported with comma-separated hosts: `bastion1.example.com,bastion2.example.com`.
+
+### Pre-Installed Helper Binary
+
+If the remote host already has a compatible Pelican binary (or you want to control which binary is used), you can skip the automatic transfer:
+
+```yaml filename="pelican.yaml" copy
+Origin:
+  StorageType: ssh
+  FederationPrefix: /my-data
+  StoragePrefix: /data/exports
+
+  SSH:
+    Host: storage.example.com
+    User: pelican
+    AuthMethods: ["publickey"]
+    PrivateKeyFile: /etc/pelican/ssh/id_ed25519
+    RemotePelicanBinaryOverrides:
+      - "linux/amd64=/usr/local/bin/pelican"
+      - "linux/arm64=/usr/local/bin/pelican-arm64"
+```
+
+## Configuration Reference
+
+All SSH backend parameters are documented in the [parameter reference](../parameters.mdx#Origin-SSH).
+Key parameters are summarized below:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `Origin.SSH.Host` | string | _(required)_ | Remote SSH hostname or IP |
+| `Origin.SSH.Port` | int | `22` | SSH port |
+| `Origin.SSH.User` | string | current OS user | SSH username |
+| `Origin.SSH.AuthMethods` | string list | `["publickey", "agent", "keyboard-interactive", "password"]` | Authentication methods to try, in order |
+| `Origin.SSH.PrivateKeyFile` | path | — | SSH private key file |
+| `Origin.SSH.PasswordFile` | path | — | File containing the SSH password |
+| `Origin.SSH.KnownHostsFile` | path | `~/.ssh/known_hosts` | SSH known hosts file |
+| `Origin.SSH.AutoAddHostKey` | bool | `false` | Accept unknown host keys automatically |
+| `Origin.SSH.ProxyJump` | string | — | Jump host(s) for SSH ProxyJump |
+| `Origin.SSH.TunnelCallback` | bool | `false` | Use SSH tunnel instead of direct callback |
+| `Origin.SSH.MaxRetries` | int | `5` | Max consecutive reconnection attempts |
+| `Origin.SSH.ConnectTimeout` | duration | `30s` | SSH connection timeout |
+| `Origin.SSH.SessionEstablishTimeout` | duration | `5m` | End-to-end session establishment timeout |
+| `Origin.SSH.KeepaliveInterval` | duration | `5s` | SSH keepalive interval |
+| `Origin.SSH.KeepaliveTimeout` | duration | `20s` | Keepalive failure threshold |
+| `Origin.SSH.ChallengeTimeout` | duration | `1m` | Timeout for a single auth challenge |
+| `Origin.SSH.RemotePelicanBinaryOverrides` | string list | `[]` | Platform-specific binary paths on remote host |
