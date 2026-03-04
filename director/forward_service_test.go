@@ -41,13 +41,13 @@ func TestForwardService(t *testing.T) {
 	directorName = ""
 	directorNameError = nil
 
-	require.NoError(t, param.Set(param.Director_AdvertiseUrl.GetName(), "http://director-ad-url"))
+	require.NoError(t, param.Set(param.Director_AdvertiseUrl, "http://director-ad-url"))
 	t.Cleanup(func() {
-		require.NoError(t, param.Set(param.Director_AdvertiseUrl.GetName(), ""))
+		require.NoError(t, param.Set(param.Director_AdvertiseUrl, ""))
 	})
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://external-url"))
+	require.NoError(t, param.Set(param.Server_ExternalWebUrl, "http://external-url"))
 	t.Cleanup(func() {
-		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), ""))
+		require.NoError(t, param.Set(param.Server_ExternalWebUrl, ""))
 	})
 
 	ctx := context.Background()
@@ -93,9 +93,9 @@ func TestForwardService(t *testing.T) {
 // We have two directors, each with different advertise urls
 // We have a service ad that should be only forwarded to the director that is not itself
 func TestForwardServiceAd(t *testing.T) {
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://director1.com"))
+	require.NoError(t, param.Set(param.Server_ExternalWebUrl, "http://director1.com"))
 	t.Cleanup(func() {
-		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), ""))
+		require.NoError(t, param.Set(param.Server_ExternalWebUrl, ""))
 	})
 
 	// Reset the cache

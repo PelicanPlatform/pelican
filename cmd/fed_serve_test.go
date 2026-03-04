@@ -71,10 +71,10 @@ func TestFedServePosixOrigin(t *testing.T) {
 	err = os.Chmod(tmpPath, permissions)
 	require.NoError(t, err)
 
-	require.NoError(t, param.Set("ConfigDir", tmpPath))
+	require.NoError(t, param.Set(param.ConfigDir, tmpPath))
 	// Set RuntimeDir to avoid race conditions with parallel tests using shared /run/pelican
-	require.NoError(t, param.Set(param.RuntimeDir.GetName(), tmpPath))
-	require.NoError(t, param.Set("Origin.RunLocation", filepath.Join(tmpPath, "xrd")))
+	require.NoError(t, param.Set(param.RuntimeDir, tmpPath))
+	require.NoError(t, param.Set(param.Origin_RunLocation, filepath.Join(tmpPath, "xrd")))
 	t.Cleanup(func() {
 		if err := os.RemoveAll(tmpPath); err != nil {
 			t.Fatal("Failed to clean up temp path")
@@ -82,33 +82,33 @@ func TestFedServePosixOrigin(t *testing.T) {
 	})
 
 	// Increase the log level; otherwise, its difficult to debug failures
-	require.NoError(t, param.Set("Logging.Level", "Debug"))
+	require.NoError(t, param.Set(param.Logging_Level, "Debug"))
 
-	require.NoError(t, param.Set("Origin.StoragePrefix", t.TempDir()))
-	require.NoError(t, param.Set("Origin.FederationPrefix", "/test"))
-	require.NoError(t, param.Set("Origin.StorageType", "posix"))
-	require.NoError(t, param.Set("Origin.Port", 0))
-	require.NoError(t, param.Set("Server.WebPort", 0))
+	require.NoError(t, param.Set(param.Origin_StoragePrefix, t.TempDir()))
+	require.NoError(t, param.Set(param.Origin_FederationPrefix, "/test"))
+	require.NoError(t, param.Set(param.Origin_StorageType, "posix"))
+	require.NoError(t, param.Set(param.Origin_Port, 0))
+	require.NoError(t, param.Set(param.Server_WebPort, 0))
 
 	// Disable functionality we're not using (and is difficult to make work on Mac)
-	require.NoError(t, param.Set("Origin.EnableCmsd", false))
-	require.NoError(t, param.Set("Origin.EnableMacaroons", false))
-	require.NoError(t, param.Set("Origin.EnableVoms", false))
-	require.NoError(t, param.Set("TLSSkipVerify", true))
-	require.NoError(t, param.Set("Server.EnableUI", false))
-	require.NoError(t, param.Set(param.Server_DbLocation.GetName(), filepath.Join(t.TempDir(), "ns-registry.sqlite")))
-	require.NoError(t, param.Set("Registry.RequireOriginApproval", false))
-	require.NoError(t, param.Set("Registry.RequireCacheApproval", false))
-	require.NoError(t, param.Set("Director.DbLocation", filepath.Join(t.TempDir(), "director.sqlite")))
-	require.NoError(t, param.Set(param.Origin_DbLocation.GetName(), filepath.Join(t.TempDir(), "origin.sqlite")))
-	require.NoError(t, param.Set(param.Cache_DbLocation.GetName(), filepath.Join(t.TempDir(), "cache.sqlite")))
+	require.NoError(t, param.Set(param.Origin_EnableCmsd, false))
+	require.NoError(t, param.Set(param.Origin_EnableMacaroons, false))
+	require.NoError(t, param.Set(param.Origin_EnableVoms, false))
+	require.NoError(t, param.Set(param.TLSSkipVerify, true))
+	require.NoError(t, param.Set(param.Server_EnableUI, false))
+	require.NoError(t, param.Set(param.Server_DbLocation, filepath.Join(t.TempDir(), "ns-registry.sqlite")))
+	require.NoError(t, param.Set(param.Registry_RequireOriginApproval, false))
+	require.NoError(t, param.Set(param.Registry_RequireCacheApproval, false))
+	require.NoError(t, param.Set(param.Director_DbLocation, filepath.Join(t.TempDir(), "director.sqlite")))
+	require.NoError(t, param.Set(param.Origin_DbLocation, filepath.Join(t.TempDir(), "origin.sqlite")))
+	require.NoError(t, param.Set(param.Cache_DbLocation, filepath.Join(t.TempDir(), "cache.sqlite")))
 	// Set up OIDC client configuration for registry OAuth functionality
 	oidcClientIDFile := filepath.Join(tmpPath, "oidc-client-id")
 	oidcClientSecretFile := filepath.Join(tmpPath, "oidc-client-secret")
 	require.NoError(t, os.WriteFile(oidcClientIDFile, []byte("test-client-id"), 0644))
 	require.NoError(t, os.WriteFile(oidcClientSecretFile, []byte("test-client-secret"), 0644))
-	require.NoError(t, param.Set(param.OIDC_ClientIDFile.GetName(), oidcClientIDFile))
-	require.NoError(t, param.Set(param.OIDC_ClientSecretFile.GetName(), oidcClientSecretFile))
+	require.NoError(t, param.Set(param.OIDC_ClientIDFile, oidcClientIDFile))
+	require.NoError(t, param.Set(param.OIDC_ClientSecretFile, oidcClientSecretFile))
 
 	defer cancel()
 

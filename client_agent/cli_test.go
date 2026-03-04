@@ -100,7 +100,7 @@ func TestCLIAsyncGet(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create token
-	err := param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	err := param.Set(param.IssuerKeysDirectory, t.TempDir())
 	require.NoError(t, err)
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
@@ -240,7 +240,7 @@ func TestCLIAsyncPut(t *testing.T) {
 
 	// Create token
 	tokenStart := time.Now()
-	err := param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	err := param.Set(param.IssuerKeysDirectory, t.TempDir())
 	require.NoError(t, err)
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
@@ -358,7 +358,7 @@ func TestCLIAsyncPrestage(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create token
-	err := param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	err := param.Set(param.IssuerKeysDirectory, t.TempDir())
 	require.NoError(t, err)
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
@@ -515,7 +515,7 @@ func TestCLIJobCommands(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create token
-	err := param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir())
+	err := param.Set(param.IssuerKeysDirectory, t.TempDir())
 	require.NoError(t, err)
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)

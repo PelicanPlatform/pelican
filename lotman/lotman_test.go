@@ -69,9 +69,9 @@ func findPolicyIndex(policyName string, policies []PurgePolicy) int {
 func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl string, nsAds []server_structs.NamespaceAdV2) (bool, func()) {
 	// Load in our config and handle overriding the SHOULD_OVERRIDE keys with the discUrl
 	// Load in our config
-	param.Set("Cache.HighWaterMark", "100g")
-	param.Set("Cache.LowWaterMark", "50g")
-	param.Set("Logging.Level", "debug")
+	param.Set(param.Cache_HighWaterMark, "100g")
+	param.Set(param.Cache_LowWatermark, "50g")
+	param.Set(param.Logging_Level, "debug")
 	if readConfig {
 		viper.SetConfigType("yaml")
 		err := viper.ReadConfig(strings.NewReader(yamlMockup))
@@ -99,11 +99,11 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 
 		// Update the policy in viper
 		policies[policyIndex] = policy
-		param.Set("Lotman.PolicyDefinitions", policies)
+		param.Set(param.Lotman_PolicyDefinitions, policies)
 	} else {
 		// If we're not reading from the embedded yaml, grab the
 		// default configuration. We need _some_ configuration to work.
-		param.Set("ConfigDir", t.TempDir())
+		param.Set(param.ConfigDir, t.TempDir())
 		config.InitServer(context.Background(), server_structs.CacheType)
 	}
 
@@ -111,7 +111,7 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
 	require.NoError(t, err)
 
-	param.Set("Lotman.LotHome", tmpPath)
+	param.Set(param.Lotman_LotHome, tmpPath)
 	success := InitLotman(nsAds)
 	//reset func
 	return success, func() {
@@ -150,12 +150,12 @@ func TestLotmanInit(t *testing.T) {
 	})
 
 	t.Run("TestGoodInit", func(t *testing.T) {
-		param.Set("Log.Level", "debug")
-		param.Set(param.Cache_DataLocations.GetName(), []string{})
+		param.SetRaw("Log.Level", "debug")
+		param.Set(param.Cache_DataLocations, []string{})
 		server := getMockDiscoveryHost()
 		// Set the Federation.DiscoveryUrl to the test server's URL
 		// Lotman uses the discovered URLs/keys to determine some aspects of lot ownership
-		param.Set("Federation.DiscoveryUrl", server.URL)
+		param.Set(param.Federation_DiscoveryUrl, server.URL)
 
 		success, cleanup := setupLotmanFromConf(t, false, "LotmanGoodInit", server.URL, nil)
 		defer cleanup()
@@ -202,7 +202,7 @@ func TestLotmanInitFromConfig(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
-	param.Set("Federation.DiscoveryUrl", server.URL)
+	param.Set(param.Federation_DiscoveryUrl, server.URL)
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
@@ -291,7 +291,7 @@ func TestGetLotmanLib(t *testing.T) {
 	logOutput := &(bytes.Buffer{})
 	log.SetOutput(logOutput)
 	config.SetLogging(log.DebugLevel)
-	param.Set(param.Lotman_LibLocation.GetName(), "/not/a/pathlibLotMan.so")
+	param.Set(param.Lotman_LibLocation, "/not/a/pathlibLotMan.so")
 	libLoc = getLotmanLib()
 	require.Equal(t, "/usr/lib64/libLotMan.so", libLoc)
 	require.Contains(t, logOutput.String(), "libLotMan.so not found in configured path, attempting to find using known fallbacks")
@@ -301,7 +301,7 @@ func TestGetAuthzCallers(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
-	param.Set("Federation.DiscoveryUrl", server.URL)
+	param.Set(param.Federation_DiscoveryUrl, server.URL)
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanGetAuthzCalleres", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
@@ -323,7 +323,7 @@ func TestGetLot(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
-	param.Set("Federation.DiscoveryUrl", server.URL)
+	param.Set(param.Federation_DiscoveryUrl, server.URL)
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanGetLot", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
@@ -349,7 +349,7 @@ func TestUpdateLot(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
-	param.Set("Federation.DiscoveryUrl", server.URL)
+	param.Set(param.Federation_DiscoveryUrl, server.URL)
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
@@ -390,7 +390,7 @@ func TestAddToLot(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
-	param.Set("Federation.DiscoveryUrl", server.URL)
+	param.Set(param.Federation_DiscoveryUrl, server.URL)
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
@@ -424,7 +424,7 @@ func TestRemoveLotParents(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
-	param.Set("Federation.DiscoveryUrl", server.URL)
+	param.Set(param.Federation_DiscoveryUrl, server.URL)
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
@@ -463,7 +463,7 @@ func TestRemoveLotPaths(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
-	param.Set("Federation.DiscoveryUrl", server.URL)
+	param.Set(param.Federation_DiscoveryUrl, server.URL)
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
@@ -486,7 +486,7 @@ func TestDeleteLotsRec(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
-	param.Set("Federation.DiscoveryUrl", server.URL)
+	param.Set(param.Federation_DiscoveryUrl, server.URL)
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
@@ -828,7 +828,7 @@ func TestLotValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			server_utils.ResetTestState()
 			defer server_utils.ResetTestState()
-			param.Set("Cache.HighWaterMark", tc.hwm)
+			param.Set(param.Cache_HighWaterMark, tc.hwm)
 			err := validateLotsConfig(tc.lots, tc.totalDiskSpaceB)
 			if len(tc.errorStrings) > 0 {
 				require.Error(t, err)
@@ -953,7 +953,7 @@ func TestDivideRemainingSpace(t *testing.T) {
 
 	lotMap := createLotMap()
 	totalDiskSpaceB := uint64(30000000000) // 30GB
-	param.Set("Cache.HighWaterMark", "25g")
+	param.Set(param.Cache_HighWaterMark, "25g")
 	err := divideRemainingSpace(&lotMap, totalDiskSpaceB)
 	require.NoError(t, err)
 	// dedGB divisions should sum to HWM
@@ -968,7 +968,7 @@ func TestDivideRemainingSpace(t *testing.T) {
 	require.Equal(t, 1.5, *lotMap["lot4"].MPA.OpportunisticGB)
 
 	// Now make sure we this allocation fails if sum of dedGB is lower than HWM
-	param.Set("Cache.HighWaterMark", "1g")
+	param.Set(param.Cache_HighWaterMark, "1g")
 	lotMap = createLotMap()
 	err = divideRemainingSpace(&lotMap, totalDiskSpaceB)
 	require.Error(t, err)
@@ -981,8 +981,8 @@ func TestConfigLotTimestamps(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	now := time.Now().UnixMilli()
-	param.Set("Lotman.DefaultLotExpirationLifetime", "24h")
-	param.Set("Lotman.DefaultLotDeletionLifetime", "48h")
+	param.Set(param.Lotman_DefaultLotExpirationLifetime, "24h")
+	param.Set(param.Lotman_DefaultLotDeletionLifetime, "48h")
 
 	defaultExpiration := now + 24*60*60*1000 // 24 hours in milliseconds
 	defaultDeletion := now + 48*60*60*1000   // 48 hours in milliseconds

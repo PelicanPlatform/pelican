@@ -202,7 +202,7 @@ func LaunchShoveler(ctx context.Context, egrp *errgroup.Group) (int, error) {
 
 	shovelerLogger.Infoln("Starting xrootd-monitoring-shoveler...")
 
-	if err := param.Set("queue_directory", param.Shoveler_QueueDirectory.GetString()); err != nil {
+	if err := param.SetRaw("queue_directory", param.Shoveler_QueueDirectory.GetString()); err != nil {
 		return -1, err
 	}
 

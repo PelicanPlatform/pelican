@@ -475,7 +475,7 @@ func TestLaunchMetadataComparisonLoop(t *testing.T) {
 		})
 
 		// Set a short interval for testing
-		require.NoError(t, param.Set("Director.MetadataComparisonInterval", "100ms"))
+		require.NoError(t, param.Set(param.Director_MetadataComparisonInterval, "100ms"))
 
 		ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 		defer func() { require.NoError(t, egrp.Wait()) }()

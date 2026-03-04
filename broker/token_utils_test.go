@@ -36,7 +36,7 @@ func TestGetCacheHostnameFromToken(t *testing.T) {
 	server_utils.ResetTestState()
 	test_utils.InitClient(t, nil)
 
-	require.NoError(t, param.Set("Federation.RegistryUrl", "https://your-registry.com"))
+	require.NoError(t, param.SetRaw("Federation.RegistryUrl", "https://your-registry.com"))
 
 	tok, err := jwt.NewBuilder().
 		Issuer(`https://your-registry.com/api/v1.0/registry/caches/https://cache.com`).

@@ -42,19 +42,19 @@ func TestGetOIDCProvider(t *testing.T) {
 
 	t.Run("auth-endpoint-gives-correct-result", func(t *testing.T) {
 		ResetConfig()
-		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint.GetName(), "https://example.com/authorization"))
+		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint, "https://example.com/authorization"))
 		get, err := GetOIDCProdiver()
 		require.NoError(t, err)
 		assert.Equal(t, UnknownProvider, get)
 
 		// CILogon
-		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint.GetName(), "https://cilogon.org/api/v1.0/authorization"))
+		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint, "https://cilogon.org/api/v1.0/authorization"))
 		get, err = GetOIDCProdiver()
 		require.NoError(t, err)
 		assert.Equal(t, CILogon, get)
 
 		// Globus
-		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint.GetName(), "https://auth.globus.org/api/v1.0/authorization"))
+		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint, "https://auth.globus.org/api/v1.0/authorization"))
 		get, err = GetOIDCProdiver()
 		require.NoError(t, err)
 		assert.Equal(t, Globus, get)
@@ -62,25 +62,25 @@ func TestGetOIDCProvider(t *testing.T) {
 
 	t.Run("issuer-endpoint-gives-correct-result", func(t *testing.T) {
 		ResetConfig()
-		require.NoError(t, param.Set(param.OIDC_Issuer.GetName(), "https://example.com"))
+		require.NoError(t, param.Set(param.OIDC_Issuer, "https://example.com"))
 		get, err := GetOIDCProdiver()
 		require.NoError(t, err)
 		assert.Equal(t, UnknownProvider, get)
 
 		// CILogon
-		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint.GetName(), "https://cilogon.org"))
+		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint, "https://cilogon.org"))
 		get, err = GetOIDCProdiver()
 		require.NoError(t, err)
 		assert.Equal(t, CILogon, get)
 
 		// CILogon no protocol
-		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint.GetName(), "cilogon.org"))
+		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint, "cilogon.org"))
 		get, err = GetOIDCProdiver()
 		require.NoError(t, err)
 		assert.Equal(t, CILogon, get)
 
 		// Globus no protocol
-		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint.GetName(), "auth.globus.org"))
+		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint, "auth.globus.org"))
 		get, err = GetOIDCProdiver()
 		require.NoError(t, err)
 		assert.Equal(t, Globus, get)
@@ -111,14 +111,14 @@ func TestGetMetadataRespectsExplicitEndpoints(t *testing.T) {
 		explicitUserInfoEndpoint := "https://api.github.com/user"
 		explicitDeviceAuthEndpoint := "https://github.com/login/device/code"
 
-		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint.GetName(), explicitAuthEndpoint))
-		require.NoError(t, param.Set(param.OIDC_TokenEndpoint.GetName(), explicitTokenEndpoint))
-		require.NoError(t, param.Set(param.OIDC_UserInfoEndpoint.GetName(), explicitUserInfoEndpoint))
-		require.NoError(t, param.Set(param.OIDC_DeviceAuthEndpoint.GetName(), explicitDeviceAuthEndpoint))
+		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint, explicitAuthEndpoint))
+		require.NoError(t, param.Set(param.OIDC_TokenEndpoint, explicitTokenEndpoint))
+		require.NoError(t, param.Set(param.OIDC_UserInfoEndpoint, explicitUserInfoEndpoint))
+		require.NoError(t, param.Set(param.OIDC_DeviceAuthEndpoint, explicitDeviceAuthEndpoint))
 
 		// Set OIDC.Issuer to CILogon (which has OIDC discovery)
 		// This should NOT override the explicitly set endpoints
-		require.NoError(t, param.Set(param.OIDC_Issuer.GetName(), "https://cilogon.org"))
+		require.NoError(t, param.Set(param.OIDC_Issuer, "https://cilogon.org"))
 
 		// Call the metadata discovery - it will try to fetch from CILogon but should not override
 		onceMetadata.Do(getMetadata)

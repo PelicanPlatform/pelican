@@ -307,8 +307,8 @@ func (m *LogLevelManager) applyChanges() {
 				levelStr = "warn"
 			}
 
-			// Update via param.Set() - existing callbacks will handle updating logrus
-			if err := param.Set(paramName, levelStr); err != nil {
+			// Update via param.SetRaw() - existing callbacks will handle updating logrus
+			if err := param.SetRaw(paramName, levelStr); err != nil {
 				log.WithError(err).WithFields(log.Fields{
 					"parameter": paramName,
 					"new_level": effectiveLevel.String(),
