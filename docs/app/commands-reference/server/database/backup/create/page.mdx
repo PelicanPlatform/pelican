@@ -1,0 +1,39 @@
+---
+title: pelican server database backup create
+---
+
+## pelican server database backup create
+
+Create a database backup now
+
+### Synopsis
+
+Create a compressed and encrypted backup of the server database.
+The backup is written to the configured backup directory
+(Server.DatabaseBackup.Location) and encrypted with all available
+issuer keys.
+
+```
+pelican server database backup create [flags]
+```
+
+### Options
+
+```
+  -h, --help   help for create
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican server database backup](/commands-reference/server/database/backup/)	 - Manage database backups
