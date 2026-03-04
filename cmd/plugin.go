@@ -46,6 +46,7 @@ import (
 	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 var (
@@ -1038,7 +1039,7 @@ func addDataToClassAd(resultAd *classad.ClassAd, result *client.TransferResults,
 	}
 
 	if result != nil && result.DirectorDecision != nil {
-		adErr = developerData.Set("DirectorDecision", result.DirectorDecision)
+		adErr = developerData.Set("DirectorDecision", redirectInfoToClassAd(result.DirectorDecision))
 		if adErr != nil {
 			log.Errorf("Failed to set DirectorDecision: %s", adErr)
 		}
@@ -1054,6 +1055,37 @@ func addDataToClassAd(resultAd *classad.ClassAd, result *client.TransferResults,
 			log.Errorf("Failed to set TransferErrorData: %s", adErr)
 		}
 	}
+}
+
+// redirectInfoToClassAd converts a RedirectInfo into a ClassAd.  The
+// ServersInfo map is represented as a list of ClassAds (each carrying a
+// ServerUrl attribute) because the map keys are URLs which are not valid
+// ClassAd attribute names.
+func redirectInfoToClassAd(ri *server_structs.RedirectInfo) *classad.ClassAd {
+	ad := classad.New()
+	ad.Set("DirectorSortMethod", ri.DirectorSortMethod)
+
+	clientAd := classad.New()
+	clientAd.Set("IpAddr", ri.ClientInfo.IpAddr)
+	clientAd.Set("Lat", ri.ClientInfo.Coordinate.Lat)
+	clientAd.Set("Long", ri.ClientInfo.Coordinate.Long)
+	ad.Set("ClientInfo", clientAd)
+
+	serverAds := make([]*classad.ClassAd, 0, len(ri.ServersInfo))
+	for url, info := range ri.ServersInfo {
+		sAd := classad.New()
+		sAd.Set("ServerUrl", url)
+		sAd.Set("Lat", info.Coordinate.Lat)
+		sAd.Set("Long", info.Coordinate.Long)
+		sAd.Set("DistanceWeight", info.RedirectWeights.DistanceWeight)
+		sAd.Set("IoLoadWeight", info.RedirectWeights.IOLoadWeight)
+		sAd.Set("StatusWeight", info.RedirectWeights.StatusWeight)
+		sAd.Set("AvailabilityWeight", info.RedirectWeights.AvailabilityWeight)
+		serverAds = append(serverAds, sAd)
+	}
+	ad.Set("ServersInfo", serverAds)
+
+	return ad
 }
 
 // This function parses the machine ad present with a condor job to get the site name and the physical hostname if run
