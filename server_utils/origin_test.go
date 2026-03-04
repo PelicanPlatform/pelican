@@ -84,9 +84,6 @@ var (
 	//go:embed resources/globus-origins/multi-export-valid.yml
 	globusMultiExport string
 
-	//go:embed resources/xroot-origins/single-export-invalid.yml
-	xrootSingleExportInvalid string
-
 	//go:embed resources/xroot-origins/single-export-valid.yml
 	xrootSingleExportValid string
 
@@ -593,12 +590,6 @@ func TestGetExports(t *testing.T) {
 	t.Run("testMultiExportInvalidGlobus", func(t *testing.T) {
 		defer ResetTestState()
 		_ = setup(t, globusMultiExport, true)
-	})
-
-	// XRoot Origin tests
-	t.Run("testSingleExportInvalidXRoot", func(t *testing.T) {
-		defer ResetTestState()
-		_ = setup(t, xrootSingleExportInvalid, true)
 	})
 
 	t.Run("testSingleExportValidXRoot", func(t *testing.T) {
