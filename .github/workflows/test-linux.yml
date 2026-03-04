@@ -145,3 +145,5 @@ jobs:
         run: ./github_scripts/version_test.sh
       - name: Run end-to-end test for site-local cache standup
         run: ./github_scripts/site_local_cache_test.sh
+      - name: Run end-to-end test for Cache Availability/Stat weighting
+        run: ./github_scripts/cache_availability_test.sh
