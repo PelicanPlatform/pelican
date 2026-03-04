@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
 )
@@ -87,6 +86,10 @@ type helperIO struct {
 
 	// helperUptime is the last reported uptime from the helper
 	helperUptime atomic.Value // string
+
+	// helperSocketPath is the Unix socket path the helper reported for direct
+	// connections (tunnel/direct-listen mode only).  Empty means not yet reported.
+	helperSocketPath atomic.Value // string
 }
 
 // StartHelper starts the Pelican helper process on the remote host.
@@ -153,7 +156,7 @@ func (c *SSHConnection) StartHelper(ctx context.Context, helperConfig *HelperCon
 	// Build the command
 	cmd := fmt.Sprintf("%s ssh-helper", binaryPath)
 
-	log.Infof("Starting remote helper: %s", cmd)
+	sshLog.Infof("Starting remote helper: %s", cmd)
 
 	// Start the command
 	if err := session.Start(cmd); err != nil {
@@ -201,18 +204,36 @@ func (c *SSHConnection) StartHelper(ctx context.Context, helperConfig *HelperCon
 		return c.runPongMonitor(egrpCtx)
 	})
 
-	// Goroutine: Wait for the process to exit
+	// Goroutine: Wait for the process to exit.
+	// When the process exits, close the session to unblock the
+	// stdout/stderr reader goroutines (whose blocking ReadBytes /
+	// scanner.Scan calls won't notice context cancellation until the
+	// underlying pipe returns EOF or an error).
 	egrp.Go(func() error {
 		err := session.Wait()
+		// Closing the session tears down the SSH channel, which makes
+		// the stdout and stderr pipe reads return immediately.
+		session.Close()
 		if err != nil {
-			log.Errorf("Helper process exited with error: %v", err)
+			sshLog.Errorf("Helper process exited with error: %v", err)
 			return err
 		}
-		log.Info("Helper process exited normally")
+		sshLog.Info("Helper process exited normally")
 		return nil
 	})
 
-	log.Info("Remote helper process started")
+	// Bridge the errgroup to errChan so that runConnection's select loop
+	// can detect helper exit (normal or error) and trigger reconnection.
+	go func() {
+		err := egrp.Wait()
+		if err != nil && !errors.Is(err, context.Canceled) {
+			c.errChan <- err
+		} else {
+			c.errChan <- nil
+		}
+	}()
+
+	sshLog.Info("Remote helper process started")
 	return nil
 }
 
@@ -232,68 +253,144 @@ func (c *SSHConnection) readHelperStdout(ctx context.Context) error {
 
 		if err != nil {
 			if err == io.EOF {
-				log.Debug("Helper stdout closed")
+				sshLog.Debug("Helper stdout closed")
 				return nil
 			}
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			log.Warnf("Error reading helper stdout: %v", err)
+			sshLog.Warnf("Error reading helper stdout: %v", err)
 			return err
 		}
 
 		// Try to parse as JSON message
 		var msg StdoutMessage
 		if err := json.Unmarshal(line, &msg); err != nil {
-			// Not JSON, just log it
-			log.Debugf("Helper stdout: %s", strings.TrimSpace(string(line)))
+			// Not JSON — unexpected output from the helper, log at Info
+			sshLog.Infof("[helper] stdout: %s", strings.TrimSpace(string(line)))
 			continue
 		}
 
 		switch msg.Type {
 		case "ready":
-			log.Info("Helper process is ready")
+			sshLog.Info("Helper process is ready")
 			c.helperIO.helperReady.Store(true)
 			c.helperIO.lastPong.Store(time.Now())
+
+		case "listening":
+			if msg.SocketPath != "" {
+				sshLog.Infof("Helper listening on unix socket %s (direct-listen mode)", msg.SocketPath)
+				c.helperIO.helperSocketPath.Store(msg.SocketPath)
+			}
 
 		case "pong":
 			c.helperIO.lastPong.Store(time.Now())
 			if msg.Uptime != "" {
 				c.helperIO.helperUptime.Store(msg.Uptime)
 			}
-			log.Debugf("Received pong from helper (uptime: %s)", msg.Uptime)
+			sshLog.Debugf("Received pong from helper (uptime: %s)", msg.Uptime)
+
+		case "goodbye":
+			sshLog.Infof("Helper acknowledged shutdown (uptime: %s)", msg.Uptime)
 
 		default:
-			log.Debugf("Unknown helper message type: %s", msg.Type)
+			sshLog.Debugf("Unknown helper message type: %s", msg.Type)
 		}
 	}
 }
 
-// readHelperStderr reads stderr from the helper and logs it
+// readHelperStderr reads stderr from the helper and logs it.
+// The helper uses logrus which writes to stderr, so we parse the log level
+// from each line and relay at the corresponding level on the origin side.
 func (c *SSHConnection) readHelperStderr(ctx context.Context, r io.Reader) {
-	buf := make([]byte, 4096)
-	for {
+	sshLog.Debug("readHelperStderr: started reading helper stderr")
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
+	lines := 0
+	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
+			sshLog.Debugf("readHelperStderr: context done after %d lines", lines)
 			return
 		default:
 		}
 
-		n, err := r.Read(buf)
-		if n > 0 {
-			lines := strings.Split(strings.TrimSpace(string(buf[:n])), "\n")
-			for _, line := range lines {
-				if line != "" {
-					log.Debugf("Helper stderr: %s", line)
-				}
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+		lines++
+
+		// Parse the logrus level from the helper's output and relay at the
+		// corresponding level. Logrus text format (non-TTY) looks like:
+		//   time="..." level=info msg="..."
+		helperLogAtLevel(line)
+	}
+	if err := scanner.Err(); err != nil {
+		if ctx.Err() == nil {
+			sshLog.Warnf("readHelperStderr: scanner error after %d lines: %v", lines, err)
+		}
+	}
+	sshLog.Debugf("readHelperStderr: finished after %d lines", lines)
+}
+
+// helperLogAtLevel parses a log line from the helper and relays it on the
+// origin side at the corresponding level with a structured daemon field.
+// The helper uses JSON log format, so we parse the JSON to extract the
+// level, message, and any extra fields.
+func helperLogAtLevel(line string) {
+	entry := sshLog.WithField("daemon", "ssh-helper")
+
+	// Try to parse as JSON (helper uses JSONFormatter)
+	var fields map[string]interface{}
+	if err := json.Unmarshal([]byte(line), &fields); err == nil {
+		msg, _ := fields["msg"].(string)
+		level, _ := fields["level"].(string)
+
+		// Forward any extra fields the helper attached to the entry
+		for k, v := range fields {
+			switch k {
+			case "msg", "level", "time":
+				// Skip standard logrus fields — we re-emit these naturally
+			default:
+				entry = entry.WithField(k, v)
 			}
 		}
-		if err != nil {
-			if err != io.EOF {
-				log.Debugf("Error reading helper stderr: %v", err)
-			}
-			return
+
+		switch level {
+		case "panic", "fatal":
+			entry.Error(msg)
+		case "error":
+			entry.Error(msg)
+		case "warning", "warn":
+			entry.Warn(msg)
+		case "info":
+			entry.Info(msg)
+		case "debug":
+			entry.Debug(msg)
+		case "trace":
+			entry.Trace(msg)
+		default:
+			entry.Info(msg)
 		}
+		return
+	}
+
+	// Fallback for non-JSON lines (e.g. early startup, panics):
+	// use the text-based level detection.
+	switch {
+	case strings.Contains(line, "level=panic") || strings.Contains(line, "level=fatal"):
+		entry.Error(line)
+	case strings.Contains(line, "level=error"):
+		entry.Error(line)
+	case strings.Contains(line, "level=warning") || strings.Contains(line, "level=warn"):
+		entry.Warn(line)
+	case strings.Contains(line, "level=info"):
+		entry.Info(line)
+	case strings.Contains(line, "level=debug") || strings.Contains(line, "level=trace"):
+		entry.Debug(line)
+	default:
+		entry.Info(line)
 	}
 }
 
@@ -314,7 +411,7 @@ func (c *SSHConnection) runStdinKeepalive(ctx context.Context) error {
 			return ctx.Err()
 		case <-ticker.C:
 			if err := c.sendPing(); err != nil {
-				log.Warnf("Failed to send ping to helper: %v", err)
+				sshLog.Warnf("Failed to send ping to helper: %v", err)
 				// Don't return error - let the pong monitor handle timeouts
 			}
 		}
@@ -362,7 +459,7 @@ func (c *SSHConnection) sendShutdownMessage() error {
 	if _, err := c.helperIO.stdin.Write([]byte("\n")); err != nil {
 		return err
 	}
-	log.Debug("Sent shutdown message to helper")
+	sshLog.Debug("Sent shutdown message to helper")
 	return nil
 }
 
@@ -383,7 +480,7 @@ func (c *SSHConnection) runPongMonitor(ctx context.Context) error {
 		case <-ticker.C:
 			lastPong := c.helperIO.lastPong.Load().(time.Time)
 			if time.Since(lastPong) > timeout {
-				log.Warnf("Helper keepalive timeout exceeded (last pong: %v ago, timeout: %v)",
+				sshLog.Warnf("Helper keepalive timeout exceeded (last pong: %v ago, timeout: %v)",
 					time.Since(lastPong), timeout)
 				return errors.New("helper keepalive timeout")
 			}
@@ -401,11 +498,18 @@ func (c *SSHConnection) StopHelper(ctx context.Context) error {
 		return nil
 	}
 
-	log.Info("Stopping remote helper process")
+	sshLog.Info("Stopping remote helper process")
 
 	// First, try clean shutdown via stdin message
 	if err := c.sendShutdownMessage(); err != nil {
-		log.Debugf("Failed to send shutdown message: %v", err)
+		sshLog.Debugf("Failed to send shutdown message: %v", err)
+	}
+
+	// Close stdin so the helper also sees EOF (belt-and-suspenders with
+	// the "shutdown" message above).  This also causes the origin-side
+	// runStdinKeepalive to fail its next Write and return.
+	if c.helperIO != nil && c.helperIO.stdin != nil {
+		c.helperIO.stdin.Close()
 	}
 
 	// Start waiting for the errgroup to finish in the background.
@@ -424,28 +528,31 @@ func (c *SSHConnection) StopHelper(ctx context.Context) error {
 	// Use time.After instead of context.WithTimeout because the caller's
 	// context may already be expired (e.g., during shutdown), which would
 	// make the derived context immediately expired and skip the grace period.
+	// The 5-second budget matches the helper's internal HTTP server shutdown
+	// timeout; the helper needs time to flush in-flight responses and close
+	// the unix socket listener before exiting.
 	select {
 	case err := <-done:
 		if err != nil && !errors.Is(err, context.Canceled) {
-			log.Debugf("Helper errgroup finished with: %v", err)
+			sshLog.Debugf("Helper errgroup finished with: %v", err)
 		}
-		log.Info("Helper process stopped cleanly")
-	case <-time.After(3 * time.Second):
+		sshLog.Info("Helper process stopped cleanly")
+	case <-time.After(5 * time.Second):
 		// Clean shutdown timed out, fall back to signals
-		log.Warn("Clean shutdown timed out, sending SIGTERM")
+		sshLog.Warn("Clean shutdown timed out, sending SIGTERM")
 		if err := c.session.Signal(ssh.SIGTERM); err != nil {
-			log.Warnf("Failed to send SIGTERM to helper: %v", err)
+			sshLog.Warnf("Failed to send SIGTERM to helper: %v", err)
 		}
 
 		// Wait a bit more for SIGTERM
 		select {
 		case <-done:
-			log.Info("Helper process stopped after SIGTERM")
+			sshLog.Info("Helper process stopped after SIGTERM")
 		case <-time.After(2 * time.Second):
 			// SIGTERM didn't work, try SIGKILL
-			log.Warn("SIGTERM timed out, sending SIGKILL")
+			sshLog.Warn("SIGTERM timed out, sending SIGKILL")
 			if err := c.session.Signal(ssh.SIGKILL); err != nil {
-				log.Warnf("Failed to send SIGKILL to helper: %v", err)
+				sshLog.Warnf("Failed to send SIGKILL to helper: %v", err)
 			}
 
 			// Close stdin and session to force goroutines to unblock from
@@ -457,9 +564,9 @@ func (c *SSHConnection) StopHelper(ctx context.Context) error {
 
 			select {
 			case <-done:
-				log.Info("Helper process stopped after SIGKILL")
+				sshLog.Info("Helper process stopped after SIGKILL")
 			case <-time.After(5 * time.Second):
-				log.Warn("Helper errgroup did not finish after SIGKILL, forcing cleanup")
+				sshLog.Warn("Helper errgroup did not finish after SIGKILL, forcing cleanup")
 			}
 		}
 	}
@@ -485,12 +592,11 @@ func (c *SSHConnection) StopHelper(ctx context.Context) error {
 
 // StartKeepalive starts the SSH-level keepalive mechanism.
 // This is in addition to the process-level stdin/stdout keepalive.
-func (c *SSHConnection) StartKeepalive(ctx context.Context, wg *sync.WaitGroup) {
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+func (c *SSHConnection) StartKeepalive(ctx context.Context, egrp *errgroup.Group) {
+	egrp.Go(func() error {
 		c.runSSHKeepalive(ctx)
-	}()
+		return nil
+	})
 }
 
 // runSSHKeepalive sends periodic SSH keepalive packets at the transport level.
@@ -521,7 +627,7 @@ func (c *SSHConnection) runSSHKeepalive(ctx context.Context) {
 			// Check if we've exceeded the keepalive timeout
 			lastKeepalive := c.GetLastKeepalive()
 			if time.Since(lastKeepalive) > timeout {
-				log.Warnf("SSH keepalive timeout exceeded (last: %v ago, timeout: %v), closing connection",
+				sshLog.Warnf("SSH keepalive timeout exceeded (last: %v ago, timeout: %v), closing connection",
 					time.Since(lastKeepalive), timeout)
 				c.Close()
 				return
@@ -531,13 +637,13 @@ func (c *SSHConnection) runSSHKeepalive(ctx context.Context) {
 			// The "keepalive@openssh.com" request is a standard SSH keepalive
 			_, _, err := c.client.SendRequest("keepalive@openssh.com", true, nil)
 			if err != nil {
-				log.Warnf("SSH keepalive failed: %v", err)
+				sshLog.Warnf("SSH keepalive failed: %v", err)
 				// Don't immediately close - let the timeout handle it
 				continue
 			}
 
 			c.setLastKeepalive(time.Now())
-			log.Debugf("SSH keepalive successful")
+			sshLog.Debugf("SSH keepalive successful")
 		}
 	}
 }
@@ -621,6 +727,32 @@ func (c *SSHConnection) WaitForHelper(ctx context.Context, timeout time.Duration
 	}
 
 	return errors.Errorf("timeout waiting for helper to become ready after %v", timeout)
+}
+
+// WaitForHelperSocket waits for the helper to report the Unix socket path it is
+// listening on (direct-listen mode only).  Returns the socket path once available.
+func (c *SSHConnection) WaitForHelperSocket(ctx context.Context, timeout time.Duration) (string, error) {
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		default:
+		}
+
+		if c.helperIO != nil {
+			if v := c.helperIO.helperSocketPath.Load(); v != nil {
+				if sp, ok := v.(string); ok && sp != "" {
+					return sp, nil
+				}
+			}
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	return "", errors.Errorf("timeout waiting for helper to report socket path after %v", timeout)
 }
 
 // createHelperConfigWithCookie creates the helper configuration with a provided auth cookie

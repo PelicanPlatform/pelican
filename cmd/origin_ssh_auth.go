@@ -23,6 +23,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -79,7 +81,8 @@ Example:
   pelican origin ssh-auth login --origin https://origin.example.com
   pelican origin ssh-auth login --origin https://origin.example.com --host storage.internal
 `,
-	RunE: runSSHAuthLogin,
+	SilenceUsage: true,
+	RunE:         runSSHAuthLogin,
 }
 
 var sshAuthStatusCmd = &cobra.Command{
@@ -143,7 +146,8 @@ func getOriginURL() (string, error) {
 }
 
 func runSSHAuthLogin(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
 
 	// Initialize Viper so config/param lookups work (ReadAddressFile, Server_ExternalWebUrl, etc.)
 	if err := config.InitClient(); err != nil {
@@ -165,7 +169,13 @@ func runSSHAuthLogin(cmd *cobra.Command, args []string) error {
 	fmt.Fprintln(os.Stdout, "Press Ctrl+C to exit.")
 	fmt.Fprintln(os.Stdout, "")
 
-	return ssh_posixv2.RunInteractiveAuth(ctx, originURL, sshAuthHost, tok)
+	err = ssh_posixv2.RunInteractiveAuth(ctx, originURL, sshAuthHost, tok)
+	if err != nil && ctx.Err() != nil {
+		// User pressed Ctrl+C — exit quietly
+		fmt.Fprintln(os.Stderr, "\nInterrupted.")
+		return nil
+	}
+	return err
 }
 
 func runSSHAuthStatus(cmd *cobra.Command, args []string) error {

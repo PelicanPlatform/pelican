@@ -32,17 +32,15 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/webdav"
+
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 // SSHFileSystem implements webdav.FileSystem by proxying requests to the remote
 // helper via reverse connections. This is used by the origin to serve requests
 // for SSH-backed storage.
 type SSHFileSystem struct {
-	// broker is the helper broker for obtaining connections
-	broker *HelperBroker
-
 	// federationPrefix is the federation namespace prefix (e.g., "/test")
 	federationPrefix string
 
@@ -53,16 +51,72 @@ type SSHFileSystem struct {
 	httpClient *http.Client
 }
 
+var (
+	// globalHelperTransport is the http.RoundTripper used by SSHFileSystem
+	// to reach the helper.  In broker mode it wraps HelperTransport; in
+	// tunnel mode it wraps SSHTunnelTransport.
+	globalHelperTransport http.RoundTripper
+	helperTransportMu     sync.Mutex
+)
+
+// SetHelperTransport sets the global helper transport.
+func SetHelperTransport(t http.RoundTripper) {
+	helperTransportMu.Lock()
+	defer helperTransportMu.Unlock()
+	globalHelperTransport = t
+}
+
+// GetHelperTransport returns the global helper transport.
+func GetHelperTransport() http.RoundTripper {
+	helperTransportMu.Lock()
+	defer helperTransportMu.Unlock()
+	return globalHelperTransport
+}
+
+// IsTransportReady returns true when the global helper transport is able
+// to serve requests without blocking.  For SSHTunnelTransport this checks
+// whether the SSH session and helper socket are wired up; for broker-based
+// transports it always returns true (staleness is checked separately via
+// the helper broker's polling timestamps).
+func IsTransportReady() bool {
+	transport := GetHelperTransport()
+	if transport == nil {
+		return false
+	}
+	if tt, ok := transport.(*SSHTunnelTransport); ok {
+		return tt.IsReady()
+	}
+	// Broker transport — readiness is determined by broker polling,
+	// not by this function.
+	return true
+}
+
+// setPelicanHeaders copies the stashed Pelican headers from ctx onto
+// an outgoing HTTP request destined for the helper.  The headers are
+// placed in the context by the generic handler via
+// server_utils.StashPelicanHeaders.
+func setPelicanHeaders(ctx context.Context, req *http.Request) {
+	if h := server_utils.PelicanHeadersFromContext(ctx); h != nil {
+		if h.JobId != "" {
+			req.Header.Set("X-Pelican-JobId", h.JobId)
+		}
+		if h.Timeout != "" {
+			req.Header.Set("X-Pelican-Timeout", h.Timeout)
+		}
+	}
+}
+
 // NewSSHFileSystem creates a new SSH filesystem that proxies to the helper
-func NewSSHFileSystem(broker *HelperBroker, federationPrefix, storagePrefix string) *SSHFileSystem {
-	transport := NewHelperTransport(broker)
+// using the provided transport (either broker-based or SSH-tunnel-based).
+func NewSSHFileSystem(transport http.RoundTripper, federationPrefix, storagePrefix string) *SSHFileSystem {
 	return &SSHFileSystem{
-		broker:           broker,
 		federationPrefix: federationPrefix,
 		storagePrefix:    storagePrefix,
 		httpClient: &http.Client{
 			Transport: transport,
-			Timeout:   60 * time.Second,
+			// No explicit Timeout — each request carries a context with the
+			// client's deadline so the per-request context governs lifetime.
+			// A hardcoded timeout here would prematurely kill large transfers.
 		},
 	}
 }
@@ -88,6 +142,7 @@ func (fs *SSHFileSystem) Mkdir(ctx context.Context, name string, perm os.FileMod
 	if err != nil {
 		return errors.Wrap(err, "failed to create MKCOL request")
 	}
+	setPelicanHeaders(ctx, req)
 
 	resp, err := fs.httpClient.Do(req)
 	if err != nil {
@@ -124,6 +179,7 @@ func (fs *SSHFileSystem) RemoveAll(ctx context.Context, name string) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to create DELETE request")
 	}
+	setPelicanHeaders(ctx, req)
 
 	resp, err := fs.httpClient.Do(req)
 	if err != nil {
@@ -150,6 +206,7 @@ func (fs *SSHFileSystem) Rename(ctx context.Context, oldName, newName string) er
 	destURL := fs.makeHelperURL(newName)
 	req.Header.Set("Destination", destURL)
 	req.Header.Set("Overwrite", "T")
+	setPelicanHeaders(ctx, req)
 
 	resp, err := fs.httpClient.Do(req)
 	if err != nil {
@@ -172,6 +229,7 @@ func (fs *SSHFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, er
 		return nil, errors.Wrap(err, "failed to create PROPFIND request")
 	}
 	req.Header.Set("Depth", "0")
+	setPelicanHeaders(ctx, req)
 
 	resp, err := fs.httpClient.Do(req)
 	if err != nil {
@@ -203,7 +261,7 @@ func (fs *SSHFileSystem) parseStatResponse(body io.Reader, name string) (os.File
 	var multistatus webdavMultistatus
 	if err := xml.Unmarshal(data, &multistatus); err != nil {
 		// If XML parsing fails, try to infer from the name
-		log.Debugf("Failed to parse PROPFIND response for %s: %v", name, err)
+		sshLog.Debugf("Failed to parse PROPFIND response for %s: %v", name, err)
 		// Return a basic file info assuming it exists
 		return &sshFileInfo{
 			name:    path.Base(name),
@@ -357,6 +415,7 @@ func (f *sshFile) Read(p []byte) (n int, err error) {
 		if f.readOffset > 0 {
 			req.Header.Set("Range", fmt.Sprintf("bytes=%d-", f.readOffset))
 		}
+		setPelicanHeaders(f.ctx, req)
 
 		resp, err := f.fs.httpClient.Do(req)
 		if err != nil {
@@ -436,6 +495,7 @@ func (f *sshFile) Write(p []byte) (n int, err error) {
 				return
 			}
 			req.Header.Set("Content-Type", "application/octet-stream")
+			setPelicanHeaders(f.ctx, req)
 
 			resp, err := f.fs.httpClient.Do(req)
 			if err != nil {
@@ -469,6 +529,7 @@ func (f *sshFile) Readdir(count int) ([]os.FileInfo, error) {
 		return nil, errors.Wrap(err, "failed to create PROPFIND request")
 	}
 	req.Header.Set("Depth", "1")
+	setPelicanHeaders(f.ctx, req)
 
 	resp, err := f.fs.httpClient.Do(req)
 	if err != nil {
@@ -563,13 +624,60 @@ func (f *sshFile) Stat() (os.FileInfo, error) {
 	return info, nil
 }
 
-// GetSSHFileSystem returns a webdav.FileSystem for the SSH backend
-// This should be called after the helper broker is initialized
-func GetSSHFileSystem(federationPrefix, storagePrefix string) (webdav.FileSystem, error) {
-	broker := GetHelperBroker()
-	if broker == nil {
-		return nil, errors.New("helper broker not initialized")
+// backendUnavailableError indicates the SSH backend cannot serve requests.
+// It implements the HTTPStatusCoder interface expected by the origin handler
+// (discovered via structural typing — no import of origin_serve needed).
+type backendUnavailableError struct {
+	statusCode int
+	message    string
+}
+
+func (e *backendUnavailableError) Error() string { return e.message }
+
+func (e *backendUnavailableError) HTTPStatusCode() int { return e.statusCode }
+
+// FileSystem returns the webdav.FileSystem for this SSH backend.
+func (fs *SSHFileSystem) FileSystem() webdav.FileSystem { return fs }
+
+// Checksummer returns nil — the SSH backend does not support local
+// checksums (the storage is on a remote host).
+func (fs *SSHFileSystem) Checksummer() server_utils.OriginChecksummer { return nil }
+
+// CheckAvailability returns nil when the SSH helper is reachable, or
+// an error with an appropriate HTTP status code otherwise.
+func (fs *SSHFileSystem) CheckAvailability() error {
+	// Fast-fail: works for both tunnel mode (checks readyCh)
+	// and catches the "transport not set" case.
+	if !IsTransportReady() {
+		return &backendUnavailableError{
+			statusCode: http.StatusServiceUnavailable,
+			message:    "SSH helper is not yet available; the helper may still be starting",
+		}
 	}
 
-	return NewSSHFileSystem(broker, federationPrefix, storagePrefix), nil
+	// Additional staleness check for broker mode: has the
+	// helper polled recently?
+	broker := GetHelperBroker()
+	if broker != nil {
+		lastRetrieve := broker.GetLastRetrieveTime()
+		if !lastRetrieve.IsZero() && time.Since(lastRetrieve) > DefaultBrokerPollTimeout {
+			return &backendUnavailableError{
+				statusCode: http.StatusGatewayTimeout,
+				message:    fmt.Sprintf("SSH helper has not checked in for %v", time.Since(lastRetrieve).Round(time.Second)),
+			}
+		}
+	}
+
+	return nil
+}
+
+// GetSSHBackend returns an OriginBackend for the SSH storage type.
+// This should be called after the helper transport is initialized.
+func GetSSHBackend(federationPrefix, storagePrefix string) (server_utils.OriginBackend, error) {
+	transport := GetHelperTransport()
+	if transport == nil {
+		return nil, errors.New("helper transport not initialized")
+	}
+
+	return NewSSHFileSystem(transport, federationPrefix, storagePrefix), nil
 }

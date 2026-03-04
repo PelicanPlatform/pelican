@@ -25,6 +25,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/pelicanplatform/pelican/logging"
 	"github.com/pelicanplatform/pelican/ssh_posixv2"
 )
 
@@ -68,6 +69,12 @@ func runSSHHelper(cmd *cobra.Command, args []string) {
 			os.Exit(1)
 		}
 	}
+
+	// Flush log memory buffering to stderr now that we've started up.
+	// This is typically done in `config.InitServer` or `config.InitClient`;
+	// for now, we call neither since the helper is a bit of a unique entity.
+	// If we decide to come back and use one of those, we can revisit.
+	logging.FlushLogs(false)
 
 	// Run the helper process
 	ctx := context.Background()

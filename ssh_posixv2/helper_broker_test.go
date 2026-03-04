@@ -33,9 +33,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/webdav"
+
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 func init() {
@@ -490,17 +493,21 @@ func TestReverseConnectionFlowIntegration(t *testing.T) {
 }
 
 // TestSSHFileSystemInterface tests that SSHFileSystem implements webdav.FileSystem
+// and server_utils.OriginBackend.
 func TestSSHFileSystemInterface(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	broker := NewHelperBroker(ctx, "test-cookie-fs")
-	fs := NewSSHFileSystem(broker, "/test", "/data")
+	fs := NewSSHFileSystem(NewHelperTransport(broker), "/test", "/data")
 
 	require.NotNil(t, fs)
 
 	// Verify that SSHFileSystem implements webdav.FileSystem interface
 	var _ webdav.FileSystem = fs
+
+	// Verify that SSHFileSystem implements server_utils.OriginBackend
+	var _ server_utils.OriginBackend = fs
 
 	// Test URL construction
 	url := fs.makeHelperURL("/subdir/file.txt")
@@ -548,7 +555,7 @@ func TestSSHFileMethods(t *testing.T) {
 	defer cancel()
 
 	broker := NewHelperBroker(ctx, "test-cookie-file")
-	fs := NewSSHFileSystem(broker, "/test", "/data")
+	fs := NewSSHFileSystem(NewHelperTransport(broker), "/test", "/data")
 
 	file := &sshFile{
 		fs:   fs,
@@ -614,7 +621,7 @@ func TestWebDAVXMLParsing(t *testing.T) {
 	defer cancel()
 
 	broker := NewHelperBroker(ctx, "test-cookie-xml")
-	fs := NewSSHFileSystem(broker, "/test", "/data")
+	fs := NewSSHFileSystem(NewHelperTransport(broker), "/test", "/data")
 
 	t.Run("parse file response", func(t *testing.T) {
 		xmlResponse := `<?xml version="1.0" encoding="utf-8"?>
@@ -730,7 +737,7 @@ func TestIntegrationWithMockHelper(t *testing.T) {
 		assert.Equal(t, http.StatusMultiStatus, resp.StatusCode)
 
 		// Parse the response
-		fs := NewSSHFileSystem(broker, "/test", "/data")
+		fs := NewSSHFileSystem(NewHelperTransport(broker), "/test", "/data")
 		info, err := fs.parseStatResponse(resp.Body, "/test/file.txt")
 		require.NoError(t, err)
 		assert.Equal(t, "file.txt", info.Name())
@@ -1092,5 +1099,95 @@ func TestHelperCapabilityEnforcementWithWritesEnabled(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.True(t, handlerCalled, "Handler should be called when listings enabled")
+	})
+}
+
+// TestHelperLogAtLevel verifies that helperLogAtLevel correctly parses
+// JSON-formatted log lines from the helper and relays them at the proper
+// level with a "daemon=ssh-helper" structured field.
+func TestHelperLogAtLevel(t *testing.T) {
+	logger := log.StandardLogger()
+	origOut := logger.Out
+	origLevel := logger.Level
+	origFormatter := logger.Formatter
+	defer func() {
+		logger.SetOutput(origOut)
+		logger.SetLevel(origLevel)
+		logger.SetFormatter(origFormatter)
+	}()
+
+	logger.SetLevel(log.TraceLevel)
+	logger.SetFormatter(&log.TextFormatter{DisableTimestamp: true})
+
+	t.Run("json-info-level", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger.SetOutput(&buf)
+		helperLogAtLevel(`{"level":"info","msg":"Helper started","time":"2026-01-01T00:00:00Z"}`)
+		out := buf.String()
+		assert.Contains(t, out, "Helper started")
+		assert.Contains(t, out, "daemon=ssh-helper")
+		assert.Contains(t, out, "level=info")
+	})
+
+	t.Run("json-error-level", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger.SetOutput(&buf)
+		helperLogAtLevel(`{"level":"error","msg":"Connection failed","time":"2026-01-01T00:00:00Z"}`)
+		out := buf.String()
+		assert.Contains(t, out, "Connection failed")
+		assert.Contains(t, out, "daemon=ssh-helper")
+		assert.Contains(t, out, "level=error")
+	})
+
+	t.Run("json-debug-level", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger.SetOutput(&buf)
+		helperLogAtLevel(`{"level":"debug","msg":"Polling retrieve","time":"2026-01-01T00:00:00Z"}`)
+		out := buf.String()
+		assert.Contains(t, out, "Polling retrieve")
+		assert.Contains(t, out, "daemon=ssh-helper")
+		assert.Contains(t, out, "level=debug")
+	})
+
+	t.Run("json-with-extra-fields", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger.SetOutput(&buf)
+		helperLogAtLevel(`{"level":"warn","msg":"Timeout","time":"2026-01-01T00:00:00Z","url":"https://example.com"}`)
+		out := buf.String()
+		assert.Contains(t, out, "Timeout")
+		assert.Contains(t, out, "daemon=ssh-helper")
+		assert.Contains(t, out, "url=") // logrus may quote the value
+		assert.Contains(t, out, "example.com")
+		assert.Contains(t, out, "level=warning")
+	})
+
+	t.Run("non-json-fallback-info", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger.SetOutput(&buf)
+		helperLogAtLevel(`time="2026-01-01T00:00:00Z" level=info msg="Legacy format"`)
+		out := buf.String()
+		assert.Contains(t, out, "Legacy format")
+		assert.Contains(t, out, "daemon=ssh-helper")
+		assert.Contains(t, out, "level=info")
+	})
+
+	t.Run("non-json-fallback-error", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger.SetOutput(&buf)
+		helperLogAtLevel(`time="2026-01-01T00:00:00Z" level=error msg="something broke"`)
+		out := buf.String()
+		assert.Contains(t, out, "something broke")
+		assert.Contains(t, out, "daemon=ssh-helper")
+		assert.Contains(t, out, "level=error")
+	})
+
+	t.Run("plain-text-fallback", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger.SetOutput(&buf)
+		helperLogAtLevel("panic: runtime error: index out of range")
+		out := buf.String()
+		assert.Contains(t, out, "panic: runtime error")
+		assert.Contains(t, out, "daemon=ssh-helper")
+		assert.Contains(t, out, "level=info") // default level for unrecognized lines
 	})
 }
