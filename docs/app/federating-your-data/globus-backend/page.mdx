@@ -1,4 +1,5 @@
 import ExportedImage from "next-image-export-optimizer";
+import { Terminal } from '@/components/Terminal'
 
 # Globus Storage Backend
 
@@ -104,17 +105,17 @@ Activation authorizes the Pelican Origin's client to access the collection on be
 Note that it may take a few minutes for the Pelican Origin to reboot after activation.
 After this occurs, test core operations from the exported namespace using a Pelican client:
 
-```bash
-pelican object get pelican://<federation-url>/<federation-prefix>/<object-path> .
-```
+<Terminal>
+pelican object get pelican://&lt;federation-hostname&gt;/&lt;federation-prefix&gt;/&lt;object-path&gt; .
+</Terminal>
 
-```bash
-pelican object put ./local-file.txt pelican://<federation-url>/<federation-prefix>/local-file.txt
-```
+<Terminal>
+pelican object put ./local-file.txt pelican://&lt;federation-hostname&gt;/&lt;federation-prefix&gt;/local-file.txt
+</Terminal>
 
-```bash
-pelican object ls pelican://<federation-url>/<federation-prefix>/
-```
+<Terminal>
+pelican object ls pelican://&lt;federation-hostname&gt;/&lt;federation-prefix&gt;/
+</Terminal>
 
 ## Operational Details (How It Works)
 
