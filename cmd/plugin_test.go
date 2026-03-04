@@ -970,18 +970,13 @@ func TestAddDataToClassAdDirectorDecision(t *testing.T) {
 		devData, ok := classad.GetAs[*classad.ClassAd](resultAd, "DeveloperData")
 		require.True(t, ok, "DeveloperData should be present")
 
-		decision, ok := classad.GetAs[*classad.ClassAd](devData, "DirectorDecision")
-		require.True(t, ok, "DirectorDecision should be present as a nested ClassAd in DeveloperData")
+		decisionJSON, ok := classad.GetAs[string](devData, "DirectorDecision")
+		require.True(t, ok, "DirectorDecision should be present as a JSON string in DeveloperData")
 
-		sortMethod, ok := classad.GetAs[string](decision, "directorSortMethod")
-		require.True(t, ok)
-		assert.Equal(t, "distance", sortMethod)
-
-		clientInfo, ok := classad.GetAs[*classad.ClassAd](decision, "clientInfo")
-		require.True(t, ok)
-		ipAddr, ok := classad.GetAs[string](clientInfo, "ipAddr")
-		require.True(t, ok)
-		assert.Equal(t, "1.2.3.4", ipAddr)
+		var parsed server_structs.RedirectInfo
+		require.NoError(t, json.Unmarshal([]byte(decisionJSON), &parsed))
+		assert.Equal(t, "distance", parsed.DirectorSortMethod)
+		assert.Equal(t, "1.2.3.4", parsed.ClientInfo.IpAddr)
 	})
 
 	t.Run("WithoutDirectorDecision", func(t *testing.T) {
@@ -994,7 +989,7 @@ func TestAddDataToClassAdDirectorDecision(t *testing.T) {
 		devData, ok := classad.GetAs[*classad.ClassAd](resultAd, "DeveloperData")
 		require.True(t, ok, "DeveloperData should be present")
 
-		_, ok = classad.GetAs[*classad.ClassAd](devData, "DirectorDecision")
+		_, ok = classad.GetAs[string](devData, "DirectorDecision")
 		assert.False(t, ok, "DirectorDecision should not be present when nil")
 	})
 
@@ -1005,7 +1000,7 @@ func TestAddDataToClassAdDirectorDecision(t *testing.T) {
 		devData, ok := classad.GetAs[*classad.ClassAd](resultAd, "DeveloperData")
 		require.True(t, ok, "DeveloperData should be present")
 
-		_, ok = classad.GetAs[*classad.ClassAd](devData, "DirectorDecision")
+		_, ok = classad.GetAs[string](devData, "DirectorDecision")
 		assert.False(t, ok, "DirectorDecision should not be present for nil result")
 	})
 }
@@ -1062,19 +1057,15 @@ func TestPluginDirectorDecision(t *testing.T) {
 			devData, ok := classad.GetAs[*classad.ClassAd](resultAd, "DeveloperData")
 			require.True(t, ok, "DeveloperData should be present")
 
-			decision, ok := classad.GetAs[*classad.ClassAd](devData, "DirectorDecision")
-			require.True(t, ok, "DirectorDecision should be present as a nested ClassAd when percentage is 100")
+			decisionJSON, ok := classad.GetAs[string](devData, "DirectorDecision")
+			require.True(t, ok, "DirectorDecision should be present as a JSON string when percentage is 100")
 
-			sortMethod, ok := classad.GetAs[string](decision, "directorSortMethod")
-			require.True(t, ok, "directorSortMethod should be present")
-			assert.NotEmpty(t, sortMethod)
+			var parsed server_structs.RedirectInfo
+			require.NoError(t, json.Unmarshal([]byte(decisionJSON), &parsed))
+			assert.NotEmpty(t, parsed.DirectorSortMethod, "directorSortMethod should be present")
+			assert.NotEmpty(t, parsed.ClientInfo.IpAddr, "clientInfo should contain ipAddr")
 
-			clientInfo, ok := classad.GetAs[*classad.ClassAd](decision, "clientInfo")
-			require.True(t, ok, "clientInfo should be present")
-			_, ok = classad.GetAs[string](clientInfo, "ipAddr")
-			assert.True(t, ok, "clientInfo should contain ipAddr")
-
-			log.Debugln("DirectorDecision:", decision)
+			log.Debugln("DirectorDecision:", decisionJSON)
 		}
 	}
 }
