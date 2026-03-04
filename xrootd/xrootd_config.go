@@ -1254,7 +1254,7 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 		xrdConfig.Server.TLSKey = pkcs11Info.PKCS11URL
 	} else {
 		if param.Server_EnablePKCS11.GetBool() && !pkcs11Info.Enabled {
-			log.Warn("Server.EnablePKCS11 is true but the PKCS#11 helper is not active; falling back to the local TLS key file for XRootD")
+			log.Warnf("%s is true but the PKCS#11 helper is not active; falling back to the local TLS key file for XRootD", param.Server_EnablePKCS11)
 		}
 		xrdConfig.Server.TLSKey = runtimeCertPath
 	}
