@@ -108,7 +108,7 @@ func getMetadataValue(stringParam param.StringParam) (result string, err error) 
 		if param.OIDC_Issuer.IsSet() {
 			issuerUrl, _ := url.Parse(param.OIDC_Issuer.GetString())
 			if issuerUrl != nil && issuerUrl.Hostname() == "auth.globus.org" && stringParam.GetName() == param.OIDC_DeviceAuthEndpoint.GetName() {
-				log.Warning("You are using Globus as the auth privider. Although it does not support OAuth device flow used by Pelican registry, you may use it for other Pelican servers. OIDC.DeviceAuthEndpoint is set to https://auth.globus.org/")
+				log.Warningf("You are using Globus as the auth privider. Although it does not support OAuth device flow used by Pelican registry, you may use it for other Pelican servers. %s is set to https://auth.globus.org/", param.OIDC_DeviceAuthEndpoint)
 				result = "https://auth.globus.org/"
 				return
 			}
@@ -116,13 +116,14 @@ func getMetadataValue(stringParam param.StringParam) (result string, err error) 
 
 		if metadataError == nil {
 			err = errors.Errorf("Required OIDC endpoint %s is not set and OIDC discovery at %s doesn't have the endpoint in the metadata. Your authentication server may not support OAuth2 authorization flow that is required by Pelican.",
-				stringParam.GetName(),
+				stringParam,
 				param.OIDC_Issuer.GetString(),
 			)
 		} else {
 			err = errors.Wrapf(metadataError,
-				"Required OIDC endpoint %s is not set and OIDC discovery failed to request metadata from OIDC.Issuer",
-				stringParam.GetName(),
+				"Required OIDC endpoint %s is not set and OIDC discovery failed to request metadata from %s",
+				stringParam,
+				param.OIDC_Issuer,
 			)
 		}
 	}

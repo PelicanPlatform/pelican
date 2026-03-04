@@ -110,7 +110,7 @@ func init() {
 		"'storage.read:/ storage.create:/'.")
 	tokenCreateCmd.Flags().StringP("profile", "p", "wlcg", "Create a token with a specific JWT profile. Accepted values are scitokens2 and wlcg.")
 	tokenCreateCmd.Flags().StringP("private-key", "k", "", fmt.Sprintf("Path to the private key used to sign the token. If not provided, Pelican will look for "+
-		"the private key in the default location pointed to by the '%s' config parameter.", param.IssuerKeysDirectory.GetName()))
+		"the private key in the default location pointed to by the '%s' config parameter.", param.IssuerKeysDirectory))
 }
 
 func splitClaim(claim string) (string, string, error) {

@@ -234,7 +234,7 @@ func InitInstConfig(ctx context.Context, egrp *errgroup.Group) error {
 		// Read from Registry.Institutions if Registry.InstitutionsUrl is empty
 		// or Registry.Institutions and Registry.InstitutionsUrl are both set
 		if len(institutions) > 0 {
-			log.Warning("Registry.Institutions and Registry.InstitutionsUrl are both set. Registry.InstitutionsUrl is ignored")
+			log.Warningf("%s and %s are both set. %s is ignored", param.Registry_Institutions, param.Registry_InstitutionsUrl, param.Registry_InstitutionsUrl)
 			if isUnique, err := checkUniqueOptions(institutions); !isUnique {
 				return errors.Wrap(err, "Institution options from the config are not unique")
 			}
