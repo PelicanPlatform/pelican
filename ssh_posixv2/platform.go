@@ -33,7 +33,6 @@ import (
 
 	"github.com/kballard/go-shellquote"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -45,7 +44,7 @@ const signalEscalationTimeout = 3 * time.Second
 func terminateSession(session *ssh.Session, done <-chan error) {
 	// First try SIGTERM for graceful shutdown
 	if err := session.Signal(ssh.SIGTERM); err != nil {
-		log.Debugf("Failed to send SIGTERM: %v", err)
+		sshLog.Debugf("Failed to send SIGTERM: %v", err)
 	}
 
 	// Wait for process to exit or timeout
@@ -55,9 +54,9 @@ func terminateSession(session *ssh.Session, done <-chan error) {
 		return
 	case <-time.After(signalEscalationTimeout):
 		// Escalate to SIGKILL
-		log.Debugf("Process did not exit after SIGTERM, sending SIGKILL")
+		sshLog.Debugf("Process did not exit after SIGTERM, sending SIGKILL")
 		if err := session.Signal(ssh.SIGKILL); err != nil {
-			log.Debugf("Failed to send SIGKILL: %v", err)
+			sshLog.Debugf("Failed to send SIGKILL: %v", err)
 		}
 	}
 }
@@ -124,7 +123,7 @@ func (c *SSHConnection) DetectRemotePlatform(ctx context.Context) (*PlatformInfo
 	}
 
 	c.platformInfo = platformInfo
-	log.Infof("Detected remote platform: %s/%s", platformInfo.OS, platformInfo.Arch)
+	sshLog.Infof("Detected remote platform: %s/%s", platformInfo.OS, platformInfo.Arch)
 
 	return platformInfo, nil
 }
@@ -196,7 +195,7 @@ func (c *SSHConnection) GetRemoteBinaryPath() (string, error) {
 	// Check for pre-configured binary override
 	platformKey := fmt.Sprintf("%s/%s", c.platformInfo.OS, c.platformInfo.Arch)
 	if override, ok := c.config.RemotePelicanBinaryOverrides[platformKey]; ok {
-		log.Debugf("Using pre-configured binary for %s: %s", platformKey, override)
+		sshLog.Debugf("Using pre-configured binary for %s: %s", platformKey, override)
 		return override, nil
 	}
 
@@ -234,7 +233,7 @@ func (c *SSHConnection) setupRemoteBinaryPath(ctx context.Context, checksum stri
 	// Try to determine cache directory following XDG spec
 	cacheDir, err := c.RunCommandArgs(ctx, []string{"sh", "-c", `echo "${XDG_CACHE_HOME:-$HOME/.cache}"`})
 	if err != nil {
-		log.Debugf("Failed to determine cache directory: %v", err)
+		sshLog.Debugf("Failed to determine cache directory: %v", err)
 	} else {
 		cacheDir = strings.TrimSpace(cacheDir)
 		if cacheDir != "" && cacheDir != "/.cache" { // Ensure we got a valid path
@@ -247,10 +246,10 @@ func (c *SSHConnection) setupRemoteBinaryPath(ctx context.Context, checksum stri
 			if err == nil {
 				// Use checksum-based filename for caching
 				binaryPath := filepath.Join(pelicanCacheDir, fmt.Sprintf("pelican-%s", checksum[:16]))
-				log.Debugf("Using XDG cache directory for binary: %s", binaryPath)
+				sshLog.Debugf("Using XDG cache directory for binary: %s", binaryPath)
 				return binaryPath, true, nil
 			}
-			log.Debugf("Failed to create cache directory %s: %v", pelicanCacheDir, err)
+			sshLog.Debugf("Failed to create cache directory %s: %v", pelicanCacheDir, err)
 		}
 	}
 
@@ -264,7 +263,7 @@ func (c *SSHConnection) setupRemoteBinaryPath(ctx context.Context, checksum stri
 	// Set restrictive permissions on the temp directory
 	_, err = c.RunCommandArgs(ctx, []string{"chmod", "700", tmpDir})
 	if err != nil {
-		log.Warnf("Failed to set permissions on temp directory: %v", err)
+		sshLog.Warnf("Failed to set permissions on temp directory: %v", err)
 	}
 
 	c.remoteTempDir = tmpDir
@@ -305,7 +304,7 @@ func (c *SSHConnection) TransferBinary(ctx context.Context) error {
 			}
 			c.remoteBinaryPath = override
 			c.remoteBinaryIsCached = true // Don't clean up configured overrides
-			log.Infof("Using configured binary override: %s", override)
+			sshLog.Infof("Using configured binary override: %s", override)
 			return nil
 		}
 
@@ -327,7 +326,7 @@ func (c *SSHConnection) TransferBinary(ctx context.Context) error {
 				if _, err := os.Stat(candidate); err == nil {
 					localBinaryPath = candidate
 					found = true
-					log.Infof("Found platform-specific binary for %s: %s", platformKey, candidate)
+					sshLog.Infof("Found platform-specific binary for %s: %s", platformKey, candidate)
 					break
 				}
 			}
@@ -345,7 +344,7 @@ func (c *SSHConnection) TransferBinary(ctx context.Context) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to compute binary checksum")
 	}
-	log.Debugf("Local binary checksum: %s", checksum)
+	sshLog.Debugf("Local binary checksum: %s", checksum)
 
 	// Try to use ~/.pelican directory for cached binaries
 	remotePath, isCached, err := c.setupRemoteBinaryPath(ctx, checksum)
@@ -359,7 +358,7 @@ func (c *SSHConnection) TransferBinary(ctx context.Context) error {
 		// Use shellquote.Join for safe quoting of the path
 		existsOutput, err := c.RunCommandArgs(ctx, []string{"sh", "-c", "test -x " + shellquote.Join(remotePath) + " && echo EXISTS || echo MISSING"})
 		if err == nil && strings.TrimSpace(existsOutput) == "EXISTS" {
-			log.Infof("Binary with checksum %s already exists at %s, skipping transfer", checksum[:12], remotePath)
+			sshLog.Infof("Binary with checksum %s already exists at %s, skipping transfer", checksum[:12], remotePath)
 			c.remoteBinaryPath = remotePath
 			c.remoteBinaryIsCached = true
 			return nil
@@ -379,7 +378,7 @@ func (c *SSHConnection) TransferBinary(ctx context.Context) error {
 		return errors.Wrap(err, "failed to stat local binary")
 	}
 
-	log.Infof("Transferring binary %s (%d bytes) to remote host at %s",
+	sshLog.Infof("Transferring binary %s (%d bytes) to remote host at %s",
 		localBinaryPath, fileInfo.Size(), remotePath)
 
 	// Use SCP to transfer the file
@@ -396,7 +395,7 @@ func (c *SSHConnection) TransferBinary(ctx context.Context) error {
 
 	c.remoteBinaryPath = remotePath
 	c.remoteBinaryIsCached = isCached
-	log.Infof("Binary successfully transferred to %s (cached: %v)", remotePath, isCached)
+	sshLog.Infof("Binary successfully transferred to %s (cached: %v)", remotePath, isCached)
 
 	return nil
 }
@@ -489,7 +488,7 @@ func (c *SSHConnection) CleanupRemoteBinary(ctx context.Context) error {
 
 	// Don't clean up cached binaries - they're meant to persist
 	if c.remoteBinaryIsCached {
-		log.Debugf("Leaving cached binary at %s", c.remoteBinaryPath)
+		sshLog.Debugf("Leaving cached binary at %s", c.remoteBinaryPath)
 		c.remoteBinaryPath = ""
 		return nil
 	}
@@ -500,15 +499,15 @@ func (c *SSHConnection) CleanupRemoteBinary(ctx context.Context) error {
 		// Remove the entire temp directory we created
 		_, err := c.RunCommandArgs(ctx, []string{"rm", "-rf", c.remoteTempDir})
 		if err != nil {
-			log.Warnf("Failed to cleanup remote temp directory %s: %v", c.remoteTempDir, err)
+			sshLog.Warnf("Failed to cleanup remote temp directory %s: %v", c.remoteTempDir, err)
 			return err
 		}
-		log.Debugf("Cleaned up temp directory %s", c.remoteTempDir)
+		sshLog.Debugf("Cleaned up temp directory %s", c.remoteTempDir)
 	} else if strings.Contains(dir, "pelican-tmp-") {
 		// Fallback: clean up if it looks like our temp directory pattern
 		_, err := c.RunCommandArgs(ctx, []string{"rm", "-rf", dir})
 		if err != nil {
-			log.Warnf("Failed to cleanup remote binary directory %s: %v", dir, err)
+			sshLog.Warnf("Failed to cleanup remote binary directory %s: %v", dir, err)
 			return err
 		}
 	}

@@ -240,6 +240,41 @@ Director:
 `, storageDir, sshPort, currentUser, privateKeyFile, knownHostsFile, pelicanBinaryPath)
 }
 
+// sshOriginConfigTunnel generates an origin configuration that enables SSH tunnel mode.
+// In tunnel mode, the origin opens an SSH remote port forward to the helper host; the
+// helper connects back to the origin through this tunnel instead of needing direct
+// network access to the origin's HTTPS port.
+func sshOriginConfigTunnel(sshPort int, storageDir, knownHostsFile, privateKeyFile, pelicanBinaryPath string) string {
+	currentUserInfo, err := user.Current()
+	currentUser := "root"
+	if err == nil {
+		currentUser = currentUserInfo.Username
+	}
+
+	return fmt.Sprintf(`
+Origin:
+  StorageType: ssh
+  Exports:
+    - FederationPrefix: /test
+      StoragePrefix: %s
+      Capabilities: ["PublicReads", "Reads", "Writes", "Listings"]
+  SSH:
+    Host: 127.0.0.1
+    Port: %d
+    User: %s
+    AuthMethods: ["publickey"]
+    PrivateKeyFile: %s
+    KnownHostsFile: %s
+    PelicanBinaryPath: %s
+    ConnectTimeout: 30s
+    SessionEstablishTimeout: 60s
+    TunnelCallback: true
+Director:
+  MinStatResponse: 1
+  MaxStatResponse: 1
+`, storageDir, sshPort, currentUser, privateKeyFile, knownHostsFile, pelicanBinaryPath)
+}
+
 // buildPelicanBinary builds the pelican binary on first call and returns its path.
 // The binary is built once and shared across all tests, then cleaned up in TestMain.
 func buildPelicanBinary(t *testing.T) string {
@@ -788,5 +823,155 @@ func TestSSHPosixv2OriginConnectionStress(t *testing.T) {
 				assert.NotEmpty(t, entries)
 			}
 		}
+	})
+}
+
+// TestSSHPosixv2OriginTunnelMode tests the SSH tunnel callback mode where the
+// origin opens an SSH remote port forward to the helper host. The helper
+// connects back through this tunnel rather than needing direct network access
+// to the origin's HTTPS port. This exercises startTunnelProxy, the broker
+// client's TLS negotiation through the tunnel, and the full upload/download
+// data path.
+func TestSSHPosixv2OriginTunnelMode(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	// Skip if sshd is not available
+	if _, err := exec.LookPath("/usr/sbin/sshd"); err != nil {
+		t.Skip("sshd not available, skipping SSH E2E test")
+	}
+
+	// Build the pelican binary (built once and shared across tests)
+	pelicanBinary := buildPelicanBinary(t)
+
+	// Start the test SSH server
+	sshServer, err := startTestSSHD(t)
+	require.NoError(t, err, "Failed to start test SSH server")
+	t.Cleanup(sshServer.stop)
+
+	t.Logf("Started test SSH server on port %d with storage at %s (tunnel mode)", sshServer.port, sshServer.storageDir)
+
+	// Configure origin with SSH storage in tunnel mode
+	originConfig := sshOriginConfigTunnel(sshServer.port, sshServer.storageDir, sshServer.knownHostsFile, sshServer.privateKeyFile, pelicanBinary)
+
+	// Set up the federation test with the SSH tunnel origin config
+	ft := fed_test_utils.NewFedTest(t, originConfig)
+	require.NotNil(t, ft)
+
+	// Wait for SSH backend to be ready - tunnel establishment may take a bit longer
+	waitForSSHBackendReady(t, 90*time.Second)
+
+	testToken := getTempTokenForTest(t)
+	localTmpDir := t.TempDir()
+
+	// Sub-test 1: Basic upload and download through tunnel
+	t.Run("UploadDownload", func(t *testing.T) {
+		testContent := []byte("Hello from SSH tunnel mode E2E test!")
+		localFile := filepath.Join(localTmpDir, "tunnel_test.txt")
+		require.NoError(t, os.WriteFile(localFile, testContent, 0644))
+
+		uploadURL := fmt.Sprintf("pelican://%s:%d/test/tunnel_test.txt",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+
+		_, err = client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
+		require.NoError(t, err, "Upload through tunnel should succeed")
+
+		// Verify file exists in backend storage
+		require.NotEmpty(t, ft.Exports, "Should have at least one export")
+		backendFile := filepath.Join(ft.Exports[0].StoragePrefix, "tunnel_test.txt")
+		backendContent, err := os.ReadFile(backendFile)
+		require.NoError(t, err, "File should exist in backend storage")
+		assert.Equal(t, testContent, backendContent, "Backend file content should match")
+
+		// Download the file
+		downloadFile := filepath.Join(localTmpDir, "tunnel_downloaded.txt")
+		transferResults, err := client.DoGet(ft.Ctx, uploadURL, downloadFile, false, client.WithToken(ft.Token))
+		require.NoError(t, err, "Download through tunnel should succeed")
+		require.NotEmpty(t, transferResults, "Should have transfer results")
+		assert.Equal(t, int64(len(testContent)), transferResults[0].TransferredBytes,
+			"Downloaded bytes should match")
+
+		downloadedContent, err := os.ReadFile(downloadFile)
+		require.NoError(t, err)
+		assert.Equal(t, testContent, downloadedContent, "Downloaded content should match original")
+	})
+
+	// Sub-test 2: Stat through tunnel
+	t.Run("Stat", func(t *testing.T) {
+		testContent := []byte("Stat test content for tunnel mode")
+		localFile := filepath.Join(localTmpDir, "tunnel_stat.txt")
+		require.NoError(t, os.WriteFile(localFile, testContent, 0644))
+
+		uploadURL := fmt.Sprintf("pelican://%s:%d/test/tunnel_stat.txt",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+
+		_, err = client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
+		require.NoError(t, err, "Upload for stat through tunnel should succeed")
+
+		statInfo, err := client.DoStat(ft.Ctx, uploadURL, client.WithToken(testToken))
+		require.NoError(t, err, "Stat through tunnel should succeed")
+		require.NotNil(t, statInfo, "Should have stat info")
+		assert.Equal(t, int64(len(testContent)), statInfo.Size, "Stat size should match content length")
+		assert.False(t, statInfo.IsCollection, "Should not be a collection")
+	})
+
+	// Sub-test 3: Directory listing through tunnel
+	t.Run("DirectoryListing", func(t *testing.T) {
+		require.NotEmpty(t, ft.Exports, "Should have at least one export")
+		actualStorageDir := ft.Exports[0].StoragePrefix
+
+		// Make sure at least one file exists (from earlier sub-tests), add another
+		require.NoError(t, os.WriteFile(filepath.Join(actualStorageDir, "tunnel_list1.txt"), []byte("list1"), 0644))
+		require.NoError(t, os.WriteFile(filepath.Join(actualStorageDir, "tunnel_list2.txt"), []byte("list2"), 0644))
+
+		listURL := fmt.Sprintf("pelican://%s:%d/test/",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+
+		entries, err := client.DoList(ft.Ctx, listURL, client.WithToken(testToken))
+		require.NoError(t, err, "List through tunnel should succeed")
+		require.NotEmpty(t, entries, "Should have entries in root directory")
+
+		var foundList1, foundList2 bool
+		for _, entry := range entries {
+			if strings.Contains(entry.Name, "tunnel_list1.txt") {
+				foundList1 = true
+			} else if strings.Contains(entry.Name, "tunnel_list2.txt") {
+				foundList2 = true
+			}
+		}
+		assert.True(t, foundList1, "Should list tunnel_list1.txt")
+		assert.True(t, foundList2, "Should list tunnel_list2.txt")
+	})
+
+	// Sub-test 4: Larger file transfer through tunnel to exercise sustained tunnel I/O
+	t.Run("LargerFile", func(t *testing.T) {
+		// 256 KB - meaningful but not huge
+		largeContent := make([]byte, 256*1024)
+		for i := range largeContent {
+			largeContent[i] = byte(i % 256)
+		}
+
+		localFile := filepath.Join(localTmpDir, "tunnel_large.bin")
+		require.NoError(t, os.WriteFile(localFile, largeContent, 0644))
+
+		originalHash := fmt.Sprintf("%x", md5.Sum(largeContent))
+
+		uploadURL := fmt.Sprintf("pelican://%s:%d/test/tunnel_large.bin",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+
+		_, err = client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
+		require.NoError(t, err, "Large file upload through tunnel should succeed")
+
+		downloadFile := filepath.Join(localTmpDir, "tunnel_large_downloaded.bin")
+		transferResults, err := client.DoGet(ft.Ctx, uploadURL, downloadFile, false, client.WithToken(ft.Token))
+		require.NoError(t, err, "Large file download through tunnel should succeed")
+		require.NotEmpty(t, transferResults)
+		assert.Equal(t, int64(len(largeContent)), transferResults[0].TransferredBytes)
+
+		downloadedContent, err := os.ReadFile(downloadFile)
+		require.NoError(t, err)
+		downloadedHash := fmt.Sprintf("%x", md5.Sum(downloadedContent))
+		assert.Equal(t, originalHash, downloadedHash, "Large file hash should match through tunnel")
 	})
 }

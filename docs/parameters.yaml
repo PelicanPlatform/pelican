@@ -1755,6 +1755,22 @@ type: duration
 default: 5m
 components: ["origin"]
 ---
+name: Origin.SSH.TunnelCallback
+description: |+
+  When true, use SSH remote port forwarding to tunnel the helper's callback connections
+  back to the origin instead of requiring direct network connectivity from the remote
+  SSH host to the origin.
+  This is useful when the remote SSH host cannot reach the origin's web server directly
+  (e.g., behind a firewall or NAT).
+  When enabled, the origin opens an SSH remote port forward on the remote host (127.0.0.1
+  with a randomly-allocated port) and runs a local TCP proxy that forwards tunneled
+  connections to the origin's web server.
+  The helper is instructed to connect to the forwarded port on localhost instead of the
+  origin's external URL.
+type: bool
+default: false
+components: ["origin"]
+---
 ############################
 #   Local cache configs    #
 ############################

@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -93,12 +92,12 @@ func (c *SSHConnection) buildSSHAuthMethods(ctx context.Context) ([]ssh.AuthMeth
 	}
 
 	for _, method := range c.config.AuthMethods {
-		log.Debugf("Building auth method: %s", method)
+		sshLog.Debugf("Building auth method: %s", method)
 		switch method {
 		case AuthMethodPassword:
 			auth, err := c.buildPasswordAuth(ctx, challengeTimeout)
 			if err != nil {
-				log.Warnf("Failed to build password auth: %v", err)
+				sshLog.Warnf("Failed to build password auth: %v", err)
 				continue
 			}
 			authMethods = append(authMethods, auth)
@@ -106,7 +105,7 @@ func (c *SSHConnection) buildSSHAuthMethods(ctx context.Context) ([]ssh.AuthMeth
 		case AuthMethodPublicKey:
 			auth, err := c.buildPublicKeyAuth()
 			if err != nil {
-				log.Warnf("Failed to build public key auth: %v", err)
+				sshLog.Warnf("Failed to build public key auth: %v", err)
 				continue
 			}
 			authMethods = append(authMethods, auth)
@@ -114,7 +113,7 @@ func (c *SSHConnection) buildSSHAuthMethods(ctx context.Context) ([]ssh.AuthMeth
 		case AuthMethodAgent:
 			auth, err := c.buildAgentAuth(ctx)
 			if err != nil {
-				log.Warnf("Failed to build SSH agent auth: %v", err)
+				sshLog.Warnf("Failed to build SSH agent auth: %v", err)
 				continue
 			}
 			authMethods = append(authMethods, auth)
@@ -124,7 +123,7 @@ func (c *SSHConnection) buildSSHAuthMethods(ctx context.Context) ([]ssh.AuthMeth
 			authMethods = append(authMethods, auth)
 
 		default:
-			log.Warnf("Unknown SSH auth method: %s", method)
+			sshLog.Warnf("Unknown SSH auth method: %s", method)
 		}
 	}
 
@@ -147,7 +146,10 @@ func (c *SSHConnection) buildPasswordAuth(ctx context.Context, challengeTimeout 
 		// Trim any trailing whitespace/newlines
 		passwordStr := strings.TrimSpace(string(password))
 
-		return ssh.Password(passwordStr), nil
+		return ssh.PasswordCallback(func() (string, error) {
+			c.SetAuthStep("password")
+			return passwordStr, nil
+		}), nil
 	}
 
 	// No password file - use WebSocket-based password callback
@@ -160,7 +162,9 @@ func (c *SSHConnection) buildPasswordAuth(ctx context.Context, challengeTimeout 
 // The ctx parameter allows cancellation; challengeTimeout limits each individual challenge.
 func (c *SSHConnection) buildPasswordAuthCallback(ctx context.Context, challengeTimeout time.Duration) ssh.AuthMethod {
 	return ssh.PasswordCallback(func() (string, error) {
-		log.Debugf("Password auth requested via callback")
+		c.SetAuthStep("password")
+		sshLog.Debugf("Password auth requested via callback")
+		NotifyStatus(c.config.Host, "Server requests password authentication...")
 
 		// Check if context is already cancelled
 		select {
@@ -171,7 +175,7 @@ func (c *SSHConnection) buildPasswordAuthCallback(ctx context.Context, challenge
 
 		// Check if WebSocket channels are set up
 		if c.keyboardChan == nil || c.responseChan == nil {
-			log.Debugf("Password auth channels not set up, skipping this auth method")
+			sshLog.Debugf("Password auth channels not set up, skipping this auth method")
 			return "", errors.New("password auth not available (no WebSocket connection)")
 		}
 
@@ -187,8 +191,13 @@ func (c *SSHConnection) buildPasswordAuthCallback(ctx context.Context, challenge
 
 		// Build a challenge that asks for the password
 		// We use the keyboard-interactive infrastructure for this
+		port := c.config.Port
+		if port == 0 {
+			port = 22
+		}
 		challenge := KeyboardInteractiveChallenge{
 			SessionID:   sessionID,
+			Host:        net.JoinHostPort(c.config.Host, strconv.Itoa(port)),
 			User:        c.config.User,
 			Instruction: "Password authentication",
 			Questions: []KeyboardInteractiveQuestion{
@@ -261,7 +270,10 @@ func (c *SSHConnection) buildPublicKeyAuth() (ssh.AuthMethod, error) {
 		}
 	}
 
-	return ssh.PublicKeys(signer), nil
+	return ssh.PublicKeysCallback(func() ([]ssh.Signer, error) {
+		c.SetAuthStep("publickey")
+		return []ssh.Signer{signer}, nil
+	}), nil
 }
 
 // getAgentSocket returns the SSH agent socket path from the SSH_AUTH_SOCK environment variable.
@@ -282,7 +294,7 @@ func (c *SSHConnection) buildAgentAuth(ctx context.Context) (ssh.AuthMethod, err
 		return nil, err
 	}
 
-	log.Debugf("Connecting to SSH agent at %s", socket)
+	sshLog.Debugf("Connecting to SSH agent at %s", socket)
 
 	// Use context-aware dialer
 	var d net.Dialer
@@ -291,7 +303,7 @@ func (c *SSHConnection) buildAgentAuth(ctx context.Context) (ssh.AuthMethod, err
 		return nil, errors.Wrap(err, "failed to connect to SSH agent")
 	}
 
-	log.Debugf("Connected to SSH agent, creating agent client")
+	sshLog.Debugf("Connected to SSH agent, creating agent client")
 	agentClient := agent.NewClient(conn)
 
 	// List keys to verify the agent is responsive
@@ -300,20 +312,22 @@ func (c *SSHConnection) buildAgentAuth(ctx context.Context) (ssh.AuthMethod, err
 		conn.Close()
 		return nil, errors.Wrap(err, "failed to list SSH agent keys")
 	}
-	log.Debugf("SSH agent has %d key(s) available", len(keys))
+	sshLog.Debugf("SSH agent has %d key(s) available", len(keys))
 	for i, key := range keys {
-		log.Debugf("  Key %d: %s %s", i+1, key.Type(), key.Comment)
+		sshLog.Debugf("  Key %d: %s %s", i+1, key.Type(), key.Comment)
 	}
 
-	log.Debugf("SSH agent auth method ready")
+	sshLog.Debugf("SSH agent auth method ready")
 
 	return ssh.PublicKeysCallback(func() ([]ssh.Signer, error) {
+		c.SetAuthStep("agent")
+		NotifyStatus(c.config.Host, fmt.Sprintf("Trying SSH agent authentication (%d key(s))...", len(keys)))
 		signers, err := agentClient.Signers()
 		if err != nil {
-			log.Debugf("Failed to get signers from agent: %v", err)
+			sshLog.Debugf("Failed to get signers from agent: %v", err)
 			return nil, err
 		}
-		log.Debugf("Got %d signer(s) from SSH agent", len(signers))
+		sshLog.Debugf("Got %d signer(s) from SSH agent", len(signers))
 		return signers, nil
 	}), nil
 }
@@ -323,7 +337,11 @@ func (c *SSHConnection) buildAgentAuth(ctx context.Context) (ssh.AuthMethod, err
 // The ctx parameter allows overall cancellation; challengeTimeout limits each individual challenge.
 func (c *SSHConnection) buildKeyboardInteractiveAuth(ctx context.Context, challengeTimeout time.Duration) ssh.AuthMethod {
 	return ssh.KeyboardInteractive(func(user, instruction string, questions []string, echos []bool) ([]string, error) {
-		log.Debugf("Keyboard-interactive auth requested (user=%s, questions=%d)", user, len(questions))
+		c.SetAuthStep("keyboard-interactive")
+		sshLog.Debugf("Keyboard-interactive auth requested (user=%s, questions=%d)", user, len(questions))
+		if len(questions) > 0 {
+			NotifyStatus(c.config.Host, "Server requests keyboard-interactive authentication...")
+		}
 
 		// Check if context is already cancelled
 		select {
@@ -335,14 +353,14 @@ func (c *SSHConnection) buildKeyboardInteractiveAuth(ctx context.Context, challe
 		// If there are no questions, just return empty answers
 		// Some servers send an empty challenge if they can't determine a priori keyboard interactive is unneeded.
 		if len(questions) == 0 {
-			log.Debugf("No questions in keyboard-interactive challenge, returning empty")
+			sshLog.Debugf("No questions in keyboard-interactive challenge, returning empty")
 			return []string{}, nil
 		}
 
 		// Check if WebSocket channels are set up and have readers
 		// In CLI mode without WebSocket, channels exist but have no readers
 		if c.keyboardChan == nil || c.responseChan == nil {
-			log.Debugf("Keyboard-interactive channels not set up, skipping this auth method")
+			sshLog.Debugf("Keyboard-interactive channels not set up, skipping this auth method")
 			return nil, errors.New("keyboard-interactive not available (no WebSocket connection)")
 		}
 
@@ -357,8 +375,13 @@ func (c *SSHConnection) buildKeyboardInteractiveAuth(ctx context.Context, challe
 		}
 
 		// Build the challenge
+		port := c.config.Port
+		if port == 0 {
+			port = 22
+		}
 		challenge := KeyboardInteractiveChallenge{
 			SessionID:   sessionID,
+			Host:        net.JoinHostPort(c.config.Host, strconv.Itoa(port)),
 			User:        user,
 			Instruction: instruction,
 			Questions:   make([]KeyboardInteractiveQuestion, len(questions)),
@@ -484,7 +507,7 @@ func (c *SSHConnection) getHostKeyAlgorithmsForHost(host string, port int) []str
 				if !seenAlgorithms[keyType] {
 					seenAlgorithms[keyType] = true
 					preferredAlgorithms = append(preferredAlgorithms, keyType)
-					log.Debugf("Found known host key algorithm for %s: %s", host, keyType)
+					sshLog.Debugf("Found known host key algorithm for %s: %s", host, keyType)
 				}
 			}
 		}
@@ -502,7 +525,7 @@ func (c *SSHConnection) buildHostKeyCallback() (ssh.HostKeyCallback, error) {
 
 	// Check if the known_hosts file exists
 	if _, err := os.Stat(knownHostsPath); os.IsNotExist(err) {
-		log.Warnf("Known hosts file %s does not exist; creating empty file", knownHostsPath)
+		sshLog.Warnf("Known hosts file %s does not exist; creating empty file", knownHostsPath)
 		// Create the .ssh directory if it doesn't exist
 		dir := filepath.Dir(knownHostsPath)
 		if err := os.MkdirAll(dir, 0700); err != nil {
@@ -522,59 +545,59 @@ func (c *SSHConnection) buildHostKeyCallback() (ssh.HostKeyCallback, error) {
 	// Wrap the callback to provide better error messages and optionally allow
 	// new host key acceptance (with logging)
 	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-		log.Debugf("Verifying host key for %s (key type: %s)", hostname, key.Type())
+		sshLog.Debugf("Verifying host key for %s (key type: %s)", hostname, key.Type())
 		err := callback(hostname, remote, key)
 		if err != nil {
 			// Check if it's a key mismatch error vs a new host
 			if keyErr, ok := err.(*knownhosts.KeyError); ok && len(keyErr.Want) > 0 {
 				// Host key changed - this is a security concern
-				log.Errorf("SSH host key mismatch for %s", hostname)
-				log.Errorf("  Hostname passed to callback: %q", hostname)
-				log.Errorf("  Remote address: %s", remote.String())
-				log.Errorf("  Normalized hostname: %q", knownhosts.Normalize(hostname))
+				sshLog.Errorf("SSH host key mismatch for %s", hostname)
+				sshLog.Errorf("  Hostname passed to callback: %q", hostname)
+				sshLog.Errorf("  Remote address: %s", remote.String())
+				sshLog.Errorf("  Normalized hostname: %q", knownhosts.Normalize(hostname))
 				if remote != nil {
-					log.Errorf("  Normalized remote: %q", knownhosts.Normalize(remote.String()))
+					sshLog.Errorf("  Normalized remote: %q", knownhosts.Normalize(remote.String()))
 				}
-				log.Errorf("  Server offered key type: %s", key.Type())
-				log.Errorf("  Server offered fingerprint: %s", ssh.FingerprintSHA256(key))
-				log.Errorf("  Known hosts file: %s", knownHostsPath)
-				log.Errorf("  Found %d matching entries in known_hosts:", len(keyErr.Want))
+				sshLog.Errorf("  Server offered key type: %s", key.Type())
+				sshLog.Errorf("  Server offered fingerprint: %s", ssh.FingerprintSHA256(key))
+				sshLog.Errorf("  Known hosts file: %s", knownHostsPath)
+				sshLog.Errorf("  Found %d matching entries in known_hosts:", len(keyErr.Want))
 				for i, want := range keyErr.Want {
-					log.Errorf("    #%d: %s:%d type=%s fingerprint=%s",
+					sshLog.Errorf("    #%d: %s:%d type=%s fingerprint=%s",
 						i+1, want.Filename, want.Line, want.Key.Type(), ssh.FingerprintSHA256(want.Key))
 				}
-				log.Errorf("  None of the known_hosts entries match the server's key.")
-				log.Errorf("  This could mean:")
-				log.Errorf("    - The host key has genuinely changed (security concern)")
-				log.Errorf("    - known_hosts has entries for IP address with different keys")
-				log.Errorf("    - There are stale entries that need to be removed")
+				sshLog.Errorf("  None of the known_hosts entries match the server's key.")
+				sshLog.Errorf("  This could mean:")
+				sshLog.Errorf("    - The host key has genuinely changed (security concern)")
+				sshLog.Errorf("    - known_hosts has entries for IP address with different keys")
+				sshLog.Errorf("    - There are stale entries that need to be removed")
 				return errors.Wrapf(err, "SSH host key verification failed for %s: host key has changed", hostname)
 			}
 			// New host - behavior depends on configuration
 			if c.config.AutoAddHostKey {
 				// Allow auto-adding unknown hosts (less secure, mainly for testing)
-				log.Warnf("SSH host %s (%s) is not in known_hosts file but AutoAddHostKey is enabled. Key fingerprint: %s",
+				sshLog.Warnf("SSH host %s (%s) is not in known_hosts file but AutoAddHostKey is enabled. Key fingerprint: %s",
 					hostname, remote.String(), ssh.FingerprintSHA256(key))
-				log.Warnf("Auto-accepting host key. Consider adding this host to known_hosts for better security.")
+				sshLog.Warnf("Auto-accepting host key. Consider adding this host to known_hosts for better security.")
 				// Append to known_hosts file
 				if appendErr := c.appendToKnownHosts(hostname, remote, key); appendErr != nil {
-					log.Errorf("Failed to add host key to known_hosts: %v", appendErr)
+					sshLog.Errorf("Failed to add host key to known_hosts: %v", appendErr)
 					return errors.Wrap(appendErr, "failed to add host key to known_hosts")
 				}
-				log.Infof("Added host key for %s to known_hosts file", hostname)
+				sshLog.Infof("Added host key for %s to known_hosts file", hostname)
 				return nil
 			} else {
 				// Reject unknown hosts for security (default behavior in server mode)
-				log.Errorf("SSH host %s (%s) is not in known_hosts file. Key fingerprint: %s",
+				sshLog.Errorf("SSH host %s (%s) is not in known_hosts file. Key fingerprint: %s",
 					hostname, remote.String(), ssh.FingerprintSHA256(key))
-				log.Errorf("For security, unknown hosts are rejected by default.")
-				log.Errorf("To allow this connection:")
-				log.Errorf("  1. Add the host to known_hosts manually: ssh-keyscan -H %s >> %s", hostname, knownHostsPath)
-				log.Errorf("  2. Or set Origin.SSH.AutoAddHostKey=true (not recommended for production)")
+				sshLog.Errorf("For security, unknown hosts are rejected by default.")
+				sshLog.Errorf("To allow this connection:")
+				sshLog.Errorf("  1. Add the host to known_hosts manually: ssh-keyscan -H %s >> %s", hostname, knownHostsPath)
+				sshLog.Errorf("  2. Or set Origin.SSH.AutoAddHostKey=true (not recommended for production)")
 				return errors.Wrapf(err, "SSH host %s is not in known_hosts file", hostname)
 			}
 		}
-		log.Debugf("Host key verification succeeded for %s", hostname)
+		sshLog.Debugf("Host key verification succeeded for %s", hostname)
 		return nil
 	}, nil
 }
@@ -733,12 +756,12 @@ func (c *SSHConnection) dialViaProxy(ctx context.Context, targetAddr string, tar
 		proxyUser, proxyHost, proxyPort := parseProxyJumpSpec(spec, c.config.User)
 		proxyAddr := net.JoinHostPort(proxyHost, strconv.Itoa(proxyPort))
 
-		log.Debugf("Connecting to proxy hop %d: %s@%s:%d", i+1, proxyUser, proxyHost, proxyPort)
+		sshLog.Debugf("Connecting to proxy hop %d: %s@%s:%d", i+1, proxyUser, proxyHost, proxyPort)
 
 		// Get preferred host key algorithms for this proxy hop
 		preferredAlgorithms := c.getHostKeyAlgorithmsForHost(proxyHost, proxyPort)
 		if len(preferredAlgorithms) > 0 {
-			log.Debugf("Using preferred host key algorithms for %s: %v", proxyHost, preferredAlgorithms)
+			sshLog.Debugf("Using preferred host key algorithms for %s: %v", proxyHost, preferredAlgorithms)
 		}
 
 		// Build auth methods for proxy (reuse same methods as target)
@@ -758,7 +781,7 @@ func (c *SSHConnection) dialViaProxy(ctx context.Context, targetAddr string, tar
 
 		if len(proxyClients) == 0 {
 			// First hop - direct connection with context support
-			log.Debugf("Dialing proxy hop %d directly at %s", i+1, proxyAddr)
+			sshLog.Debugf("Dialing proxy hop %d directly at %s", i+1, proxyAddr)
 			proxyClient, err = sshDialContext(ctx, "tcp", proxyAddr, proxyConfig)
 		} else {
 			// Subsequent hop - tunnel through previous proxy
@@ -781,7 +804,7 @@ func (c *SSHConnection) dialViaProxy(ctx context.Context, targetAddr string, tar
 			return nil, errors.Wrapf(err, "failed to connect to proxy hop %d: %s@%s:%d", i+1, proxyUser, proxyHost, proxyPort)
 		}
 
-		log.Debugf("Proxy hop %d established successfully", i+1)
+		sshLog.Debugf("Proxy hop %d established successfully", i+1)
 		proxyClients = append(proxyClients, proxyClient)
 	}
 
@@ -798,13 +821,13 @@ func (c *SSHConnection) dialViaProxy(ctx context.Context, targetAddr string, tar
 
 	// Now connect to the target through the last proxy
 	lastProxy := proxyClients[len(proxyClients)-1]
-	log.Debugf("Opening TCP connection to target %s through proxy chain...", targetAddr)
+	sshLog.Debugf("Opening TCP connection to target %s through proxy chain...", targetAddr)
 
 	conn, err := dialViaProxyWithContext(ctx, lastProxy, "tcp", targetAddr)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to dial target %s through proxy", targetAddr)
 	}
-	log.Debugf("TCP connection to target established, starting SSH handshake (may require another Yubikey touch)...")
+	sshLog.Debugf("TCP connection to target established, starting SSH handshake (may require another Yubikey touch)...")
 
 	// Final handshake with context support
 	ncc, chans, reqs, err := sshNewClientConnWithContext(ctx, conn, targetAddr, targetConfig)
@@ -831,23 +854,23 @@ func (c *SSHConnection) Connect(ctx context.Context) error {
 
 	c.setState(StateConnecting)
 
-	log.Debugf("Building SSH auth methods...")
+	sshLog.Debugf("Building SSH auth methods...")
 	// Build auth methods
 	authMethods, err := c.buildSSHAuthMethods(ctx)
 	if err != nil {
 		c.setState(StateDisconnected)
 		return errors.Wrap(err, "failed to build SSH auth methods")
 	}
-	log.Debugf("Built %d auth methods", len(authMethods))
+	sshLog.Debugf("Built %d auth methods", len(authMethods))
 
-	log.Debugf("Building host key callback...")
+	sshLog.Debugf("Building host key callback...")
 	// Build host key callback
 	hostKeyCallback, err := c.buildHostKeyCallback()
 	if err != nil {
 		c.setState(StateDisconnected)
 		return errors.Wrap(err, "failed to build host key callback")
 	}
-	log.Debugf("Host key callback built")
+	sshLog.Debugf("Host key callback built")
 
 	// Build SSH client config
 	sshConfig := &ssh.ClientConfig{
@@ -867,27 +890,27 @@ func (c *SSHConnection) Connect(ctx context.Context) error {
 		port = 22
 	}
 
-	log.Debugf("Getting preferred host key algorithms for %s:%d...", c.config.Host, port)
+	sshLog.Debugf("Getting preferred host key algorithms for %s:%d...", c.config.Host, port)
 	// Get preferred host key algorithms for the target host
 	preferredAlgorithms := c.getHostKeyAlgorithmsForHost(c.config.Host, port)
 	if len(preferredAlgorithms) > 0 {
-		log.Debugf("Using preferred host key algorithms for %s: %v", c.config.Host, preferredAlgorithms)
+		sshLog.Debugf("Using preferred host key algorithms for %s: %v", c.config.Host, preferredAlgorithms)
 		sshConfig.HostKeyAlgorithms = preferredAlgorithms
 	} else {
-		log.Debugf("No preferred host key algorithms found for %s", c.config.Host)
+		sshLog.Debugf("No preferred host key algorithms found for %s", c.config.Host)
 	}
 	addr := net.JoinHostPort(c.config.Host, strconv.Itoa(port))
 
 	c.setState(StateAuthenticating)
-	log.Debugf("Starting SSH connection to %s", addr)
+	sshLog.Debugf("Starting SSH connection to %s", addr)
 
 	// Establish the connection (directly or through proxy)
 	var client *ssh.Client
 	if c.config.ProxyJump != "" {
-		log.Infof("Connecting to SSH server %s@%s:%d via ProxyJump %s", c.config.User, c.config.Host, port, c.config.ProxyJump)
+		sshLog.Infof("Connecting to SSH server %s@%s:%d via ProxyJump %s", c.config.User, c.config.Host, port, c.config.ProxyJump)
 		client, err = c.dialViaProxy(ctx, addr, sshConfig)
 	} else {
-		log.Infof("Connecting to SSH server %s@%s:%d", c.config.User, c.config.Host, port)
+		sshLog.Infof("Connecting to SSH server %s@%s:%d", c.config.User, c.config.Host, port)
 		client, err = sshDialContext(ctx, "tcp", addr, sshConfig)
 	}
 	if err != nil {
@@ -899,7 +922,7 @@ func (c *SSHConnection) Connect(ctx context.Context) error {
 	c.setState(StateConnected)
 	c.setLastKeepalive(time.Now())
 
-	log.Infof("SSH connection established to %s@%s:%d", c.config.User, c.config.Host, port)
+	sshLog.Infof("SSH connection established to %s@%s:%d", c.config.User, c.config.Host, port)
 
 	return nil
 }

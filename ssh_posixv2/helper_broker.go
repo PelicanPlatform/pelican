@@ -33,7 +33,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -54,6 +53,11 @@ type HelperBroker struct {
 	// RequestConnection sends the request; handleHelperRetrieve receives it,
 	// adds it to the pendingRequests map, and returns the ID to the helper.
 	pendingCh chan *helperRequest
+
+	// lastRetrieveTime is the time of the last authenticated retrieve poll
+	// from the helper. Used to detect when the helper can no longer reach
+	// the origin's HTTPS endpoints.
+	lastRetrieveTime atomic.Value // time.Time
 
 	// ctx is the context for the broker
 	ctx context.Context
@@ -103,13 +107,16 @@ var (
 
 // NewHelperBroker creates a new helper broker
 func NewHelperBroker(ctx context.Context, authCookie string) *HelperBroker {
-	return &HelperBroker{
+	b := &HelperBroker{
 		pendingRequests: make(map[string]*helperRequest),
 		connectionPool:  make(chan net.Conn, 10), // Buffer for connection reuse
 		pendingCh:       make(chan *helperRequest),
 		ctx:             ctx,
 		authCookie:      authCookie,
 	}
+	// Initialize to zero time so the monitor can detect "never polled"
+	b.lastRetrieveTime.Store(time.Time{})
+	return b
 }
 
 // GetHelperBroker returns the global helper broker instance
@@ -117,6 +124,17 @@ func GetHelperBroker() *HelperBroker {
 	helperBrokerMu.Lock()
 	defer helperBrokerMu.Unlock()
 	return globalHelperBroker
+}
+
+// GetLastRetrieveTime returns the time of the last authenticated retrieve poll
+// from the helper. Returns zero time if the helper has never polled.
+func (b *HelperBroker) GetLastRetrieveTime() time.Time {
+	return b.lastRetrieveTime.Load().(time.Time)
+}
+
+// RecordRetrieve records that the helper has polled the retrieve endpoint.
+func (b *HelperBroker) RecordRetrieve() {
+	b.lastRetrieveTime.Store(time.Now())
 }
 
 // SetHelperBroker sets the global helper broker instance
@@ -147,7 +165,7 @@ func generateRequestID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		// Fallback should never happen, but log if it does
-		log.Warnf("crypto/rand failed: %v", err)
+		sshLog.Warnf("crypto/rand failed: %v", err)
 	}
 	return hex.EncodeToString(b)
 }
@@ -220,7 +238,7 @@ func (b *HelperBroker) hijackConnection(writer http.ResponseWriter, reqID string
 		writer.Header().Set("Content-Type", "application/json")
 		writer.WriteHeader(http.StatusBadRequest)
 		if _, err := writer.Write(respBytes); err != nil {
-			log.Warnf("Failed to write error response: %v", err)
+			sshLog.Warnf("Failed to write error response: %v", err)
 		}
 		return nil, errors.New("HTTP hijacking not supported")
 	}
@@ -253,7 +271,7 @@ func (b *HelperBroker) hijackConnection(writer http.ResponseWriter, reqID string
 		return nil, errors.Wrap(err, "failed to hijack connection")
 	}
 
-	log.Debugf("Helper broker: hijacked TLS connection for request %s", reqID)
+	sshLog.Debugf("Helper broker: hijacked TLS connection for request %s", reqID)
 	return conn, nil
 }
 
@@ -295,6 +313,9 @@ func handleHelperRetrieve(ctx context.Context, c *gin.Context) {
 		})
 		return
 	}
+
+	// Record that the helper has checked in — used for HTTP health monitoring
+	broker.RecordRetrieve()
 
 	// Parse timeout from header
 	timeoutStr := c.GetHeader("X-Pelican-Timeout")
@@ -530,7 +551,7 @@ func (b *HelperBroker) cleanupOldRequests(maxAge time.Duration) {
 			close(req.responseCh)
 			close(req.doneCh)
 			delete(b.pendingRequests, id)
-			log.Debugf("Cleaned up stale request %s (age: %v)", id, now.Sub(req.createdAt))
+			sshLog.Debugf("Cleaned up stale request %s (age: %v)", id, now.Sub(req.createdAt))
 		}
 	}
 }

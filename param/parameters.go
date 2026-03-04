@@ -342,6 +342,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.SSH.RemotePelicanBinaryDir": false,
 	"Origin.SSH.RemotePelicanBinaryOverrides": false,
 	"Origin.SSH.SessionEstablishTimeout": false,
+	"Origin.SSH.TunnelCallback": false,
 	"Origin.SSH.User": false,
 	"Origin.ScitokensDefaultUser": false,
 	"Origin.ScitokensGroupsClaim": false,
@@ -1186,6 +1187,8 @@ func (bP BoolParam) GetBool() bool {
 			return config.Origin.Multiuser
 		case "Origin.SSH.AutoAddHostKey":
 			return config.Origin.SSH.AutoAddHostKey
+		case "Origin.SSH.TunnelCallback":
+			return config.Origin.SSH.TunnelCallback
 		case "Origin.ScitokensMapSubject":
 			return config.Origin.ScitokensMapSubject
 		case "Origin.SelfTest":
@@ -1657,6 +1660,7 @@ var allParameterNames = []string{
 	"Origin.SSH.RemotePelicanBinaryDir",
 	"Origin.SSH.RemotePelicanBinaryOverrides",
 	"Origin.SSH.SessionEstablishTimeout",
+	"Origin.SSH.TunnelCallback",
 	"Origin.SSH.User",
 	"Origin.ScitokensDefaultUser",
 	"Origin.ScitokensGroupsClaim",
@@ -2099,6 +2103,7 @@ var (
 	Origin_EnableWrites = BoolParam{"Origin.EnableWrites"}
 	Origin_Multiuser = BoolParam{"Origin.Multiuser"}
 	Origin_SSH_AutoAddHostKey = BoolParam{"Origin.SSH.AutoAddHostKey"}
+	Origin_SSH_TunnelCallback = BoolParam{"Origin.SSH.TunnelCallback"}
 	Origin_ScitokensMapSubject = BoolParam{"Origin.ScitokensMapSubject"}
 	Origin_SelfTest = BoolParam{"Origin.SelfTest"}
 	Registry_RequireCacheApproval = BoolParam{"Registry.RequireCacheApproval"}

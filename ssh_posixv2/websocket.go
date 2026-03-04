@@ -21,6 +21,7 @@ package ssh_posixv2
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -28,7 +29,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -124,7 +124,7 @@ func handleWebSocket(ctx context.Context) gin.HandlerFunc {
 		// Upgrade the HTTP connection to a WebSocket
 		ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
-			log.Errorf("Failed to upgrade to WebSocket: %v", err)
+			sshLog.Errorf("Failed to upgrade to WebSocket: %v", err)
 			return
 		}
 		defer ws.Close()
@@ -143,7 +143,19 @@ func handleWebSocket(ctx context.Context) gin.HandlerFunc {
 			activeWebSocketsMu.Unlock()
 		}()
 
-		log.Infof("WebSocket connection established for SSH auth to %s", host)
+		sshLog.Infof("WebSocket connection established for SSH auth to %s", host)
+
+		// If authentication has already completed, tell the client immediately
+		// so it doesn't sit waiting for a challenge that will never arrive.
+		state := conn.GetState()
+		if state >= StateConnected {
+			sshLog.Infof("SSH connection to %s is already authenticated (state: %s); notifying client", host, state)
+			msg := map[string]string{"message": fmt.Sprintf("SSH connection to %s is already authenticated (%s). No login action needed.", host, state)}
+			if err := sendWebSocketMessage(ws, WsMsgTypeAuthComplete, msg); err != nil {
+				sshLog.Warnf("Failed to send auth_complete to WebSocket: %v", err)
+			}
+			return
+		}
 
 		// Handle the WebSocket connection
 		handleWebSocketConnection(ctx, ws, conn)
@@ -168,7 +180,7 @@ func handleWebSocketConnection(ctx context.Context, ws *websocket.Conn, conn *SS
 			_, message, err := ws.ReadMessage()
 			if err != nil {
 				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-					log.Errorf("WebSocket read error: %v", err)
+					sshLog.Errorf("WebSocket read error: %v", err)
 				}
 				return
 			}
@@ -176,7 +188,7 @@ func handleWebSocketConnection(ctx context.Context, ws *websocket.Conn, conn *SS
 			// Parse the message
 			var msg WebSocketMessage
 			if err := json.Unmarshal(message, &msg); err != nil {
-				log.Warnf("Failed to parse WebSocket message: %v", err)
+				sshLog.Warnf("Failed to parse WebSocket message: %v", err)
 				sendWebSocketError(ws, "invalid message format")
 				continue
 			}
@@ -187,7 +199,7 @@ func handleWebSocketConnection(ctx context.Context, ws *websocket.Conn, conn *SS
 				// Parse the response payload
 				var response KeyboardInteractiveResponse
 				if err := json.Unmarshal(msg.Payload, &response); err != nil {
-					log.Warnf("Failed to parse keyboard-interactive response: %v", err)
+					sshLog.Warnf("Failed to parse keyboard-interactive response: %v", err)
 					sendWebSocketError(ws, "invalid response format")
 					continue
 				}
@@ -195,20 +207,20 @@ func handleWebSocketConnection(ctx context.Context, ws *websocket.Conn, conn *SS
 				// Send the response to the SSH connection
 				select {
 				case conn.GetResponseChannel() <- response:
-					log.Debug("Forwarded keyboard-interactive response")
+					sshLog.Debug("Forwarded keyboard-interactive response")
 				case <-time.After(5 * time.Second):
-					log.Warn("Timeout sending keyboard-interactive response")
+					sshLog.Warn("Timeout sending keyboard-interactive response")
 					sendWebSocketError(ws, "timeout sending response")
 				}
 
 			case WsMsgTypePing:
 				// Respond with pong
 				if err := sendWebSocketMessage(ws, WsMsgTypePong, nil); err != nil {
-					log.Warnf("Failed to send pong: %v", err)
+					sshLog.Warnf("Failed to send pong: %v", err)
 				}
 
 			default:
-				log.Warnf("Unknown WebSocket message type: %s", msg.Type)
+				sshLog.Warnf("Unknown WebSocket message type: %s", msg.Type)
 			}
 		}
 	}()
@@ -224,10 +236,10 @@ func handleWebSocketConnection(ctx context.Context, ws *websocket.Conn, conn *SS
 		case challenge := <-challengeChan:
 			// Forward the challenge to the WebSocket
 			if err := sendWebSocketMessage(ws, WsMsgTypeChallenge, challenge); err != nil {
-				log.Errorf("Failed to send challenge to WebSocket: %v", err)
+				sshLog.Errorf("Failed to send challenge to WebSocket: %v", err)
 				return
 			}
-			log.Debug("Sent keyboard-interactive challenge to WebSocket")
+			sshLog.Debug("Sent keyboard-interactive challenge to WebSocket")
 		}
 	}
 }
@@ -256,7 +268,7 @@ func sendWebSocketMessage(ws *websocket.Conn, msgType string, payload interface{
 func sendWebSocketError(ws *websocket.Conn, errorMsg string) {
 	err := sendWebSocketMessage(ws, WsMsgTypeError, map[string]string{"error": errorMsg})
 	if err != nil {
-		log.Warnf("Failed to send WebSocket error: %v", err)
+		sshLog.Warnf("Failed to send WebSocket error: %v", err)
 	}
 }
 
@@ -316,6 +328,28 @@ func CloseWebSocket(host string) {
 	}
 }
 
+// NotifyStatus sends a status message to the WebSocket client so the user
+// can see what stage the server-side connection process is at (e.g.,
+// "Trying SSH agent authentication…").  If no WebSocket is connected for
+// the given host the call is a no-op.
+func NotifyStatus(host string, message string) {
+	activeWebSocketsMu.RLock()
+	ws, ok := activeWebSockets[host]
+	activeWebSocketsMu.RUnlock()
+
+	if !ok {
+		return // No WebSocket connected, that's fine
+	}
+
+	payload := map[string]string{
+		"message": message,
+	}
+
+	if err := sendWebSocketMessage(ws, WsMsgTypeStatus, payload); err != nil {
+		sshLog.Debugf("Failed to send status message to WebSocket client for %s: %v", host, err)
+	}
+}
+
 // NotifyAuthComplete sends an auth_complete message to the WebSocket client,
 // indicating that all authentication (including ProxyJump hops) is complete
 // and the SSH connection is fully established. The client can then cleanly
@@ -338,6 +372,6 @@ func NotifyAuthComplete(host string, message string) error {
 		return errors.Wrap(err, "failed to send auth_complete message")
 	}
 
-	log.Infof("Sent auth_complete notification to WebSocket client for %s", host)
+	sshLog.Infof("Sent auth_complete notification to WebSocket client for %s", host)
 	return nil
 }

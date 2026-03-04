@@ -201,7 +201,9 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 			// Register WebSocket handlers for keyboard-interactive auth with admin authentication
 			ssh_posixv2.RegisterWebSocketHandler(engine, ctx, egrp, web_ui.AuthHandler, web_ui.AdminAuthHandler)
 
-			// Initialize the SSH backend (creates helper broker and starts connection manager)
+			// Initialize the SSH backend (creates helper broker and starts connection manager).
+			// In tunnel mode the origin dials the helper through SSH channels;
+			// in broker mode the helper polls and calls back with reversed connections.
 			if err := ssh_posixv2.InitializeBackend(ctx, egrp, originExports); err != nil {
 				return errors.Wrap(err, "failed to initialize SSH backend")
 			}

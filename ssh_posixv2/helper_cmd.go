@@ -31,6 +31,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -79,13 +80,13 @@ type HelperProcess struct {
 	// cancel cancels the helper context
 	cancel context.CancelFunc
 
+	// brokerTransport is the HTTP transport used for broker polling.
+	// Stored here so shutdown can call CloseIdleConnections() to
+	// force-abort stuck TLS handshakes through the tunnel.
+	brokerTransport *http.Transport
+
 	// startTime is when the helper started
 	startTime time.Time
-}
-
-// HelperKeepaliveRequest is sent by the origin to check if the helper is alive
-type HelperKeepaliveRequest struct {
-	Cookie string `json:"cookie"`
 }
 
 // HelperKeepaliveResponse is the helper's response to a keepalive
@@ -102,15 +103,16 @@ type StdinMessage struct {
 
 // StdoutMessage is a message sent over stdout from the helper to the origin
 type StdoutMessage struct {
-	Type      string    `json:"type"` // "pong" or "ready"
-	Timestamp time.Time `json:"timestamp"`
-	Uptime    string    `json:"uptime,omitempty"`
+	Type       string    `json:"type"` // "pong", "ready", "listening", or "goodbye"
+	Timestamp  time.Time `json:"timestamp"`
+	Uptime     string    `json:"uptime,omitempty"`
+	SocketPath string    `json:"socket_path,omitempty"` // direct-listen mode: Unix socket path
 }
 
 // RunHelper is the main entry point for the SSH helper process
 // It reads configuration from stdin and runs the WebDAV server
 func RunHelper(ctx context.Context) error {
-	log.Info("SSH helper process starting")
+	sshLog.Info("SSH helper process starting")
 
 	// Read configuration from stdin
 	config, stdinReader, err := readHelperConfig()
@@ -118,7 +120,21 @@ func RunHelper(ctx context.Context) error {
 		return errors.Wrap(err, "failed to read helper config from stdin")
 	}
 
-	log.Infof("Helper configured with %d exports", len(config.Exports))
+	// Use JSON formatter so the origin can reliably parse our log output
+	// from stderr and relay it with structured fields (daemon=ssh-helper).
+	log.SetFormatter(&log.JSONFormatter{})
+
+	// Apply the log level from the origin, if provided
+	if config.LogLevel != "" {
+		if lvl, err := log.ParseLevel(config.LogLevel); err == nil {
+			log.SetLevel(lvl)
+			sshLog.Debugf("Log level set to %s (from origin)", lvl)
+		} else {
+			sshLog.Warnf("Ignoring unrecognised log level %q from origin: %v", config.LogLevel, err)
+		}
+	}
+
+	sshLog.Infof("Helper configured with %d exports", len(config.Exports))
 
 	// Create the helper process
 	ctx, cancel := context.WithCancel(ctx)
@@ -146,7 +162,7 @@ func RunHelper(ctx context.Context) error {
 		Type:      "ready",
 		Timestamp: time.Now(),
 	}); err != nil {
-		log.Warnf("Failed to send ready message: %v", err)
+		sshLog.Warnf("Failed to send ready message: %v", err)
 	}
 
 	// Use errgroup to track all goroutines
@@ -164,18 +180,28 @@ func RunHelper(ctx context.Context) error {
 	})
 
 	// Start the broker listener
-	egrp.Go(func() error {
-		helper.runBrokerListener(egrpCtx)
-		return nil
-	})
+	if helper.config.DirectListenMode {
+		// Direct-listen mode: start an HTTP server on localhost and report
+		// the port.  The origin dials through SSH, so no TLS brokering needed.
+		egrp.Go(func() error {
+			helper.runDirectListener(egrpCtx)
+			return nil
+		})
+	} else {
+		// Broker mode: poll the origin for reverse-connection requests.
+		egrp.Go(func() error {
+			helper.runBrokerListener(egrpCtx)
+			return nil
+		})
+	}
 
 	// Wait for signal, context cancellation, or errgroup error
 	select {
 	case sig := <-sigChan:
-		log.Infof("Received signal %v, shutting down", sig)
+		sshLog.Infof("Received signal %v, shutting down", sig)
 		cancel()
 	case <-egrpCtx.Done():
-		log.Info("Context cancelled, shutting down")
+		sshLog.Info("Context cancelled, shutting down")
 	}
 
 	// Graceful shutdown
@@ -183,10 +209,19 @@ func RunHelper(ctx context.Context) error {
 
 	// Wait for all goroutines to finish
 	if err := egrp.Wait(); err != nil && !errors.Is(err, context.Canceled) {
-		log.Debugf("Errgroup finished with error: %v", err)
+		sshLog.Debugf("Errgroup finished with error: %v", err)
 	}
 
-	log.Info("SSH helper process exiting")
+	// Send a goodbye message so the origin can log acknowledgment.
+	if err := helper.sendStdoutMessage(StdoutMessage{
+		Type:      "goodbye",
+		Timestamp: time.Now(),
+		Uptime:    time.Since(helper.startTime).String(),
+	}); err != nil {
+		sshLog.Debugf("Failed to send goodbye message: %v", err)
+	}
+
+	sshLog.Info("SSH helper process exiting")
 	return nil
 }
 
@@ -228,7 +263,7 @@ func (h *HelperProcess) initializeHandlers() error {
 		// Create the WebDAV handler
 		logger := func(r *http.Request, err error) {
 			if err != nil {
-				log.Debugf("WebDAV error for %s %s: %v", r.Method, r.URL.Path, err)
+				sshLog.Debugf("WebDAV error for %s %s: %v", r.Method, r.URL.Path, err)
 			}
 		}
 
@@ -242,7 +277,7 @@ func (h *HelperProcess) initializeHandlers() error {
 		}
 
 		h.webdavHandlers[export.FederationPrefix] = handler
-		log.Infof("Initialized WebDAV handler for %s -> %s", export.FederationPrefix, export.StoragePrefix)
+		sshLog.Infof("Initialized WebDAV handler for %s -> %s", export.FederationPrefix, export.StoragePrefix)
 	}
 
 	return nil
@@ -296,18 +331,18 @@ func (h *HelperProcess) runStdinKeepalive(ctx context.Context) error {
 		case result := <-resultChan:
 			if result.err != nil {
 				if result.err == io.EOF {
-					log.Info("Stdin closed, shutting down")
+					sshLog.Info("Stdin closed, shutting down")
 					h.cancel()
 					return nil
 				}
-				log.Warnf("Error reading from stdin: %v", result.err)
+				sshLog.Warnf("Error reading from stdin: %v", result.err)
 				h.cancel()
 				return result.err
 			}
 
 			var msg StdinMessage
 			if err := json.Unmarshal(result.line, &msg); err != nil {
-				log.Debugf("Failed to parse stdin message: %v", err)
+				sshLog.Debugf("Failed to parse stdin message: %v", err)
 				continue
 			}
 
@@ -322,16 +357,16 @@ func (h *HelperProcess) runStdinKeepalive(ctx context.Context) error {
 					Timestamp: time.Now(),
 					Uptime:    time.Since(h.startTime).String(),
 				}); err != nil {
-					log.Warnf("Failed to send pong: %v", err)
+					sshLog.Warnf("Failed to send pong: %v", err)
 				}
 
 			case "shutdown":
-				log.Info("Received shutdown message from origin")
+				sshLog.Info("Received shutdown message from origin")
 				h.cancel()
 				return nil
 
 			default:
-				log.Debugf("Unknown stdin message type: %s", msg.Type)
+				sshLog.Debugf("Unknown stdin message type: %s", msg.Type)
 			}
 		}
 	}
@@ -378,7 +413,7 @@ func (h *HelperProcess) runKeepaliveMonitor(ctx context.Context) {
 			}
 
 			if time.Since(lastKeepalive) > timeout {
-				log.Warnf("Keepalive timeout exceeded (last HTTP: %v ago, last stdin: %v ago, timeout: %v), shutting down",
+				sshLog.Warnf("Keepalive timeout exceeded (last HTTP: %v ago, last stdin: %v ago, timeout: %v), shutting down",
 					time.Since(lastHTTP), time.Since(lastStdin), timeout)
 				h.cancel()
 				return
@@ -387,15 +422,40 @@ func (h *HelperProcess) runKeepaliveMonitor(ctx context.Context) {
 	}
 }
 
-// runBrokerListener listens for incoming broker connections
-func (h *HelperProcess) runBrokerListener(ctx context.Context) {
-	// Register with the broker using the provided callback URL
-	// The helper will poll the broker for reverse connection requests
-	// and serve WebDAV over those connections
+// statusRecorder wraps http.ResponseWriter to capture the status code.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
 
-	log.Infof("Connecting to broker at %s", h.config.OriginCallbackURL)
+func (sr *statusRecorder) WriteHeader(code int) {
+	sr.status = code
+	sr.ResponseWriter.WriteHeader(code)
+}
 
-	// Create the HTTP handler for serving WebDAV
+// loggingMiddleware wraps an http.Handler and logs every request at Debug level.
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip keepalive endpoint — it's high-frequency and uninteresting.
+		if r.URL.Path == "/api/v1.0/ssh-helper/keepalive" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		sshLog.WithFields(log.Fields{
+			"method":      r.Method,
+			"resource":    r.URL.Path,
+			"status":      rec.status,
+			"fields.time": time.Since(start).Round(time.Microsecond).String(),
+		}).Debug("Served Request")
+	})
+}
+
+// createHTTPHandler builds the HTTP handler used by both broker and direct-listen modes.
+func (h *HelperProcess) createHTTPHandler() http.Handler {
 	mux := http.NewServeMux()
 
 	// Add keepalive endpoint
@@ -404,26 +464,126 @@ func (h *HelperProcess) runBrokerListener(ctx context.Context) {
 	// Add WebDAV handlers for each export
 	for prefix, handler := range h.webdavHandlers {
 		mux.Handle(prefix+"/", http.StripPrefix(prefix, h.wrapWithAuth(handler)))
-		log.Debugf("Registered WebDAV handler at %s", prefix)
+		sshLog.Debugf("Registered WebDAV handler at %s", prefix)
 	}
+	return loggingMiddleware(mux)
+}
+
+// runBrokerListener listens for incoming broker connections
+func (h *HelperProcess) runBrokerListener(ctx context.Context) {
+	// Register with the broker using the provided callback URL
+	// The helper will poll the broker for reverse connection requests
+	// and serve WebDAV over those connections
+
+	sshLog.Infof("Connecting to broker at %s", h.config.OriginCallbackURL)
+
+	handler := h.createHTTPHandler()
 
 	// Start serving on a local port and register with the broker
 	// The broker will forward connections to us
-	h.serveWithBroker(ctx, mux)
+	h.serveWithBroker(ctx, handler)
+}
+
+// runDirectListener starts a plain HTTP server on a Unix domain socket and
+// reports the socket path to the origin via stdout.  The origin will connect
+// to this socket through an SSH direct-streamlocal channel, so no TLS or
+// complex brokering is needed — the SSH channel already provides encryption
+// and authentication.
+//
+// The socket is placed in a temporary directory under ~/.cache/pelican/ with
+// 0700 permissions so that other users on the host cannot connect to it.
+// If the resulting path would exceed the platform's sun_path limit (104 on
+// macOS, 108 on Linux), we fall back to /tmp which is always short enough.
+func (h *HelperProcess) runDirectListener(ctx context.Context) {
+	handler := h.createHTTPHandler()
+
+	// Build the base directory: ~/.cache/pelican (same tree as the binary
+	// cache).  os.UserCacheDir returns ~/.cache on Linux and
+	// ~/Library/Caches on macOS.
+	baseDir, err := os.UserCacheDir()
+	if err != nil {
+		sshLog.Errorf("Failed to determine user cache directory: %v", err)
+		return
+	}
+	baseDir = filepath.Join(baseDir, "pelican")
+
+	// Unix domain socket paths are limited to 104 bytes on macOS and 108 on
+	// Linux (the sun_path field of struct sockaddr_un).  Estimate the final
+	// path length: baseDir + "/ssh-helper-XXXXXXXXXX" (21) + "/s" (2) + NUL.
+	// The template used by MkdirTemp appends up to 10 random characters.
+	const maxSocketPath = 104 // use the stricter macOS limit
+	const suffixLen = 21 + 2 + 1
+	if len(baseDir)+suffixLen > maxSocketPath {
+		sshLog.Infof("Cache dir path too long for unix socket (%d + %d > %d); falling back to /tmp",
+			len(baseDir), suffixLen, maxSocketPath)
+		baseDir = "/tmp"
+	}
+
+	if err := os.MkdirAll(baseDir, 0700); err != nil {
+		sshLog.Errorf("Failed to create base directory %s: %v", baseDir, err)
+		return
+	}
+
+	// Create a private temporary directory for the socket.
+	sockDir, err := os.MkdirTemp(baseDir, "ssh-helper-")
+	if err != nil {
+		sshLog.Errorf("Failed to create socket temp directory: %v", err)
+		return
+	}
+	defer os.RemoveAll(sockDir)
+
+	// Ensure 0700 permissions so other users cannot access the socket.
+	if err := os.Chmod(sockDir, 0700); err != nil {
+		sshLog.Errorf("Failed to chmod socket directory: %v", err)
+		return
+	}
+
+	socketPath := filepath.Join(sockDir, "s")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		sshLog.Errorf("Failed to listen on unix socket %s: %v", socketPath, err)
+		return
+	}
+	defer listener.Close()
+
+	// Report the socket path to the origin via stdout so it can dial
+	// through an SSH direct-streamlocal channel.
+	if err := h.sendStdoutMessage(StdoutMessage{
+		Type:       "listening",
+		SocketPath: socketPath,
+		Timestamp:  time.Now(),
+	}); err != nil {
+		sshLog.Errorf("Failed to send listening message: %v", err)
+		return
+	}
+
+	sshLog.Infof("Direct listener started on unix socket %s", socketPath)
+
+	srv := &http.Server{
+		Handler:      handler,
+		ReadTimeout:  60 * time.Second,
+		WriteTimeout: 60 * time.Second,
+	}
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
+
+	if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		sshLog.Errorf("Direct listener error: %v", err)
+	}
 }
 
 // handleKeepalive handles keepalive requests from the origin
 func (h *HelperProcess) handleKeepalive(w http.ResponseWriter, r *http.Request) {
-	// Parse the request
-	var req HelperKeepaliveRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
-		return
-	}
-
-	// Validate the cookie
-	if req.Cookie != h.config.AuthCookie {
-		log.Warn("Keepalive request with invalid cookie")
+	// Validate via the Authorization header, consistent with all other endpoints.
+	authHeader := r.Header.Get("Authorization")
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	if token == "" || token == authHeader || token != h.config.AuthCookie {
+		sshLog.Warn("Keepalive request with invalid or missing authorization")
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -440,7 +600,7 @@ func (h *HelperProcess) handleKeepalive(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Warnf("Failed to encode keepalive response: %v", err)
+		sshLog.Warnf("Failed to encode keepalive response: %v", err)
 	}
 }
 
@@ -525,12 +685,12 @@ func matchesPrefix(path, prefix string) bool {
 // goroutine, and immediately loop back to polling. This keeps the pollers always
 // available while serving happens concurrently.
 func (h *HelperProcess) serveWithBroker(ctx context.Context, handler http.Handler) {
-	log.Info("Starting broker-based reverse connection listener")
+	sshLog.Info("Starting broker-based reverse connection listener")
 
 	// Get the origin callback URL from config
 	callbackURL := h.config.OriginCallbackURL
 	if callbackURL == "" {
-		log.Error("No origin callback URL configured")
+		sshLog.Error("No origin callback URL configured")
 		return
 	}
 
@@ -541,12 +701,23 @@ func (h *HelperProcess) serveWithBroker(ctx context.Context, handler http.Handle
 	// Create HTTP client for polling (with TLS using origin's certificate chain)
 	client, err := h.createBrokerClient()
 	if err != nil {
-		log.Errorf("Failed to create broker client: %v", err)
+		sshLog.Errorf("Failed to create broker client: %v", err)
 		return
 	}
 
 	// Use errgroup for proper goroutine management
 	egrp, egrpCtx := errgroup.WithContext(ctx)
+
+	// When the context is cancelled (shutdown), force-close any in-flight
+	// HTTP connections so TLS handshakes stuck in the tunnel don't block
+	// the pollers from exiting.
+	egrp.Go(func() error {
+		<-egrpCtx.Done()
+		if h.brokerTransport != nil {
+			h.brokerTransport.CloseIdleConnections()
+		}
+		return nil
+	})
 
 	// Fixed number of pollers. Each poller loops continuously, launching
 	// callbackAndServe in a separate goroutine so the poller immediately
@@ -561,9 +732,9 @@ func (h *HelperProcess) serveWithBroker(ctx context.Context, handler http.Handle
 
 	// Wait for all pollers to finish
 	if err := egrp.Wait(); err != nil {
-		log.Debugf("Broker pollers finished with error: %v", err)
+		sshLog.Debugf("Broker pollers finished with error: %v", err)
 	}
-	log.Info("Broker listener shutting down")
+	sshLog.Info("Broker listener shutting down")
 }
 
 // createBrokerClient creates an HTTP client for communicating with the origin.
@@ -579,11 +750,34 @@ func (h *HelperProcess) createBrokerClient() (*http.Client, error) {
 		RootCAs: certPool,
 	}
 
+	// When using SSH tunnel mode, the helper connects to 127.0.0.1 on a
+	// forwarded port, but the origin's TLS certificate is issued for the
+	// origin's actual hostname. Override the ServerName so TLS verification
+	// checks the certificate against the real hostname.
+	if h.config.TLSServerName != "" {
+		tlsConfig.ServerName = h.config.TLSServerName
+		sshLog.Debugf("Using TLS ServerName override: %s", h.config.TLSServerName)
+	}
+
 	transport := &http.Transport{
-		TLSClientConfig: tlsConfig,
+		TLSClientConfig:     tlsConfig,
+		TLSHandshakeTimeout: 10 * time.Second,
 		// Disable HTTP/2 to allow connection hijacking
 		TLSNextProto: make(map[string]func(string, *tls.Conn) http.RoundTripper),
+		// Explicit dial timeout prevents unbounded hangs from the default
+		// zero-timeout dialer when tunnels are in use.
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		// Do not pool connections across requests — each poll/callback
+		// cycle should use a fresh connection so that context-driven
+		// cancellation during shutdown can immediately close it.
+		DisableKeepAlives: true,
 	}
+
+	// Store the transport so serveWithBroker can close it during shutdown.
+	h.brokerTransport = transport
 
 	return &http.Client{
 		Transport: transport,
@@ -606,7 +800,7 @@ func (h *HelperProcess) pollAndServe(ctx context.Context, egrp *errgroup.Group, 
 		reqID, err := h.pollRetrieve(ctx, client, retrieveURL)
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Debugf("Poll retrieve error: %v", err)
+				sshLog.Debugf("Poll retrieve error: %v", err)
 			}
 			// Brief backoff on error
 			select {
@@ -626,9 +820,9 @@ func (h *HelperProcess) pollAndServe(ctx context.Context, egrp *errgroup.Group, 
 		// poller can immediately loop back to polling.
 		serveReqID := reqID
 		egrp.Go(func() error {
-			log.Debugf("Got connection request %s, calling back to origin", serveReqID)
+			sshLog.Debugf("Got connection request %s, calling back to origin", serveReqID)
 			if err := h.callbackAndServe(ctx, client, callbackURL, serveReqID, handler); err != nil {
-				log.Errorf("Failed to handle connection request %s: %v", serveReqID, err)
+				sshLog.Errorf("Failed to handle connection request %s: %v", serveReqID, err)
 			}
 			return nil
 		})
@@ -695,10 +889,17 @@ func (h *HelperProcess) callbackAndServe(ctx context.Context, client *http.Clien
 	// connection and runs background goroutines (readLoop/writeLoop) that interfere
 	// with connection reversal. Instead, we do manual HTTP over the TLS connection
 	// so we retain full control for the reverse-serving step.
+	callbackTLSConfig := &tls.Config{
+		RootCAs: certPool,
+	}
+	// When using SSH tunnel mode, override ServerName for TLS verification
+	// (same reason as in createBrokerClient — connecting to 127.0.0.1 but cert
+	// is for the origin's actual hostname).
+	if h.config.TLSServerName != "" {
+		callbackTLSConfig.ServerName = h.config.TLSServerName
+	}
 	dialer := &tls.Dialer{
-		Config: &tls.Config{
-			RootCAs: certPool,
-		},
+		Config: callbackTLSConfig,
 	}
 	conn, err := dialer.DialContext(ctx, "tcp", parsedURL.Host)
 	if err != nil {
@@ -747,12 +948,22 @@ func (h *HelperProcess) callbackAndServe(ctx context.Context, client *http.Clien
 	// since no Go HTTP transport goroutines are associated with it.
 
 	// Serve a single HTTP request on the TLS-encrypted reversed connection
-	log.Debugf("Serving HTTP on reversed TLS connection for request %s", reqID)
+	sshLog.Debugf("Serving HTTP on reversed TLS connection for request %s", reqID)
 	srv := &http.Server{
 		Handler:      handler,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
+
+	// Shut the single-request server down when the context is cancelled so
+	// the helper can exit promptly during graceful shutdown.
+	go func() {
+		<-ctx.Done()
+		// Use a short timeout — the connection is already being abandoned.
+		shutCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutCtx)
+	}()
 
 	// Create a one-shot listener using the TLS connection
 	listener := newOneShotConnListener(conn)
@@ -798,17 +1009,20 @@ func (l *oneShotConnListener) Addr() net.Addr {
 
 // shutdown gracefully shuts down the helper
 func (h *HelperProcess) shutdown() {
+	sshLog.Info("Helper shutdown initiated")
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	if h.httpServer != nil {
+		sshLog.Debug("Shutting down HTTP server...")
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := h.httpServer.Shutdown(ctx); err != nil {
-			log.Warnf("Failed to shutdown HTTP server: %v", err)
+			sshLog.Warnf("Failed to shutdown HTTP server: %v", err)
 		}
 	}
 
+	sshLog.Debug("Cancelling helper context")
 	h.cancel()
 }
 

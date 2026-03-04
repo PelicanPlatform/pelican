@@ -54,6 +54,16 @@ const (
 	// DefaultSessionEstablishTimeout is the maximum time to establish a working SSH session
 	// (connect, authenticate, detect platform, transfer binary, start helper)
 	DefaultSessionEstablishTimeout = 5 * time.Minute
+
+	// DefaultBrokerPollTimeout is the maximum time between helper broker-retrieve
+	// polls before the origin considers the helper unreachable. The helper polls
+	// every ~5s with 3 concurrent pollers, so 30s is ~6x the expected interval.
+	DefaultBrokerPollTimeout = 30 * time.Second
+
+	// DefaultPingFailureTimeout is the maximum duration of consecutive
+	// origin→helper ping failures before the connection is torn down.
+	// With pings every 15s this is ~8 missed pings.
+	DefaultPingFailureTimeout = 2 * time.Minute
 )
 
 // AuthMethod represents the type of SSH authentication to use
@@ -96,11 +106,29 @@ type HelperConfig struct {
 	// CertificateChain is the PEM-encoded public certificate chain
 	CertificateChain string `json:"certificate_chain"`
 
+	// TLSServerName overrides the TLS server name for certificate verification.
+	// When the helper connects through an SSH tunnel to 127.0.0.1, the origin's
+	// TLS certificate won't match. This field tells the helper's TLS client to
+	// verify the certificate against this hostname instead of the URL's hostname.
+	TLSServerName string `json:"tls_server_name,omitempty"`
+
 	// KeepaliveInterval is how often to send keepalive pings
 	KeepaliveInterval time.Duration `json:"keepalive_interval"`
 
 	// KeepaliveTimeout is the maximum time to wait for keepalive response
 	KeepaliveTimeout time.Duration `json:"keepalive_timeout"`
+
+	// LogLevel is the log level from the origin server, propagated so the
+	// helper logs at the same verbosity.  Accepted values are the standard
+	// logrus levels (trace, debug, info, warn, error, fatal, panic).  If
+	// empty the helper keeps its default level.
+	LogLevel string `json:"log_level,omitempty"`
+
+	// DirectListenMode tells the helper to start a plain HTTP server on a
+	// local port and report that port to the origin, instead of using the
+	// broker-based reverse-connection dance.  The origin dials the helper
+	// through an SSH direct-tcpip channel.
+	DirectListenMode bool `json:"direct_listen_mode,omitempty"`
 }
 
 // ExportConfig represents a single export path configuration
@@ -186,6 +214,11 @@ type SSHConfig struct {
 	// ProxyJump specifies a jump host for the connection (similar to ssh -J)
 	// Format: [user@]host[:port] or [user@]host[:port],[user@]host[:port] for chained jumps
 	ProxyJump string
+
+	// TunnelCallback enables SSH remote port forwarding to tunnel the helper's
+	// callback connections back to the origin. When true, the origin opens a remote
+	// listen port on the SSH server and proxies connections to its own web server.
+	TunnelCallback bool
 }
 
 // Validate validates the SSH configuration
@@ -271,6 +304,9 @@ type KeyboardInteractiveChallenge struct {
 	// SessionID is the unique identifier for this authentication session
 	SessionID string `json:"session_id"`
 
+	// Host is the SSH server host:port being authenticated to
+	Host string `json:"host,omitempty"`
+
 	// User is the username being authenticated
 	User string `json:"user"`
 
@@ -315,6 +351,11 @@ type SSHConnection struct {
 
 	// state is the current connection state
 	state atomic.Int32
+
+	// authStep is a human-readable label for the auth method currently
+	// being attempted (e.g. "publickey", "agent", "keyboard-interactive").
+	// Read/written atomically so the progress logger can display it.
+	authStep atomic.Value // string
 
 	// lastKeepalive is the time of the last successful keepalive
 	lastKeepalive atomic.Value // time.Time
@@ -374,6 +415,20 @@ func (c *SSHConnection) setState(state ConnectionState) {
 	c.state.Store(int32(state))
 }
 
+// SetAuthStep stores the name of the authentication method currently
+// being attempted so the progress logger can display it.
+func (c *SSHConnection) SetAuthStep(step string) {
+	c.authStep.Store(step)
+}
+
+// GetAuthStep returns the current auth method label (or "" if unset).
+func (c *SSHConnection) GetAuthStep() string {
+	if v := c.authStep.Load(); v != nil {
+		return v.(string)
+	}
+	return ""
+}
+
 // GetLastKeepalive returns the time of the last successful keepalive
 func (c *SSHConnection) GetLastKeepalive() time.Time {
 	if v := c.lastKeepalive.Load(); v != nil {
@@ -426,6 +481,10 @@ type SSHBackend struct {
 
 	// helperBroker manages reverse connections to helpers
 	helperBroker *HelperBroker
+
+	// tunnelTransport is the SSH-tunnel-based transport (tunnel mode only).
+	// nil in broker mode.
+	tunnelTransport *SSHTunnelTransport
 }
 
 // generateAuthCookie generates a cryptographically secure random cookie

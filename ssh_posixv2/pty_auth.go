@@ -27,14 +27,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/term"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -123,7 +120,7 @@ func (c *PTYAuthClient) Connect(ctx context.Context) error {
 		u.Path = "/api/v1.0/origin/ssh/auth"
 	}
 
-	log.Infof("Connecting to WebSocket: %s", u.String())
+	sshLog.Infof("Connecting to WebSocket: %s", u.String())
 
 	// Build request headers with auth token if available
 	headers := http.Header{}
@@ -157,11 +154,6 @@ func (c *PTYAuthClient) Run(ctx context.Context) error {
 		return errors.New("not connected")
 	}
 
-	// Set up signal handling for graceful shutdown
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigCh)
-
 	// Set up ping/pong for keepalive
 	c.conn.SetPongHandler(func(appData string) error {
 		return nil
@@ -187,80 +179,89 @@ func (c *PTYAuthClient) Run(ctx context.Context) error {
 	fmt.Fprintln(c.stdout, "Waiting for keyboard-interactive challenge...")
 	fmt.Fprintln(c.stdout, "")
 
-	// Main loop
+	// Read WebSocket messages in a goroutine so that context cancellation
+	// (e.g., Ctrl+C) is not blocked by the synchronous ReadMessage call.
+	type wsResult struct {
+		msg WebSocketMessage
+		err error
+	}
+	msgCh := make(chan wsResult, 1)
+
+	go func() {
+		for {
+			_, message, err := c.conn.ReadMessage()
+			if err != nil {
+				msgCh <- wsResult{err: err}
+				return
+			}
+			var msg WebSocketMessage
+			if err := json.Unmarshal(message, &msg); err != nil {
+				sshLog.Warnf("Failed to parse WebSocket message: %v", err)
+				continue
+			}
+			msgCh <- wsResult{msg: msg}
+		}
+	}()
+
+	// Main loop: select on context, signals, and incoming messages
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case sig := <-sigCh:
-			fmt.Fprintf(c.stderr, "\nReceived %v, disconnecting...\n", sig)
-			return nil
-		default:
-		}
 
-		// Set read deadline
-		if err := c.conn.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
-			log.Warnf("Failed to set read deadline: %v", err)
-		}
-
-		_, message, err := c.conn.ReadMessage()
-		if err != nil {
-			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-				fmt.Fprintln(c.stdout, "Connection closed by server.")
-				return nil
-			}
-			if err, ok := err.(*websocket.CloseError); ok {
-				return errors.Wrapf(err, "WebSocket closed: %d", err.Code)
-			}
-			// Timeout - continue waiting
-			continue
-		}
-
-		// Parse the message
-		var msg WebSocketMessage
-		if err := json.Unmarshal(message, &msg); err != nil {
-			log.Warnf("Failed to parse WebSocket message: %v", err)
-			continue
-		}
-
-		switch msg.Type {
-		case WsMsgTypeChallenge:
-			if err := c.handleChallenge(msg.Payload); err != nil {
-				return errors.Wrap(err, "failed to handle challenge")
+		case result := <-msgCh:
+			if result.err != nil {
+				if websocket.IsCloseError(result.err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+					fmt.Fprintln(c.stdout, "Connection closed by server.")
+					return nil
+				}
+				if closeErr, ok := result.err.(*websocket.CloseError); ok {
+					return errors.Wrapf(closeErr, "WebSocket closed: %d", closeErr.Code)
+				}
+				return errors.Wrap(result.err, "WebSocket read error")
 			}
 
-		case WsMsgTypeAuthComplete:
-			// Server indicates all authentication is complete
-			var payload map[string]string
-			if err := json.Unmarshal(msg.Payload, &payload); err == nil {
-				if message, ok := payload["message"]; ok && message != "" {
-					fmt.Fprintf(c.stdout, "\n%s\n", message)
+			switch result.msg.Type {
+			case WsMsgTypeChallenge:
+				if err := c.handleChallenge(result.msg.Payload); err != nil {
+					return errors.Wrap(err, "failed to handle challenge")
+				}
+
+			case WsMsgTypeAuthComplete:
+				// Server indicates all authentication is complete
+				var payload map[string]string
+				if err := json.Unmarshal(result.msg.Payload, &payload); err == nil {
+					if message, ok := payload["message"]; ok && message != "" {
+						fmt.Fprintf(c.stdout, "\n%s\n", message)
+					} else {
+						fmt.Fprintln(c.stdout, "\nAuthentication complete. SSH connection established.")
+					}
 				} else {
 					fmt.Fprintln(c.stdout, "\nAuthentication complete. SSH connection established.")
 				}
-			} else {
-				fmt.Fprintln(c.stdout, "\nAuthentication complete. SSH connection established.")
+				// Clean exit - auth is done, no more interaction needed
+				return nil
+
+			case WsMsgTypeStatus:
+				var payload map[string]string
+				if err := json.Unmarshal(result.msg.Payload, &payload); err == nil {
+					if msg, ok := payload["message"]; ok {
+						fmt.Fprintf(c.stdout, "  [server] %s\n", msg)
+					}
+				}
+
+			case WsMsgTypeError:
+				var errMsg map[string]string
+				if err := json.Unmarshal(result.msg.Payload, &errMsg); err == nil {
+					fmt.Fprintf(c.stderr, "Error from server: %s\n", errMsg["error"])
+				}
+
+			case WsMsgTypePong:
+				// Ignore pong responses
+
+			default:
+				sshLog.Debugf("Unknown message type: %s", result.msg.Type)
 			}
-			// Clean exit - auth is done, no more interaction needed
-			return nil
-
-		case WsMsgTypeStatus:
-			var status map[string]interface{}
-			if err := json.Unmarshal(msg.Payload, &status); err == nil {
-				fmt.Fprintf(c.stdout, "Status: %v\n", status)
-			}
-
-		case WsMsgTypeError:
-			var errMsg map[string]string
-			if err := json.Unmarshal(msg.Payload, &errMsg); err == nil {
-				fmt.Fprintf(c.stderr, "Error from server: %s\n", errMsg["error"])
-			}
-
-		case WsMsgTypePong:
-			// Ignore pong responses
-
-		default:
-			log.Debugf("Unknown message type: %s", msg.Type)
 		}
 	}
 }
@@ -273,7 +274,11 @@ func (c *PTYAuthClient) handleChallenge(payload json.RawMessage) error {
 	}
 
 	fmt.Fprintln(c.stdout, "")
-	fmt.Fprintln(c.stdout, "=== SSH Authentication ===")
+	if challenge.Host != "" {
+		fmt.Fprintf(c.stdout, "=== SSH Authentication [%s] ===\n", challenge.Host)
+	} else {
+		fmt.Fprintln(c.stdout, "=== SSH Authentication ===")
+	}
 	if challenge.Instruction != "" {
 		fmt.Fprintln(c.stdout, challenge.Instruction)
 		fmt.Fprintln(c.stdout, "")

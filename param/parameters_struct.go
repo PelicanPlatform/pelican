@@ -315,6 +315,7 @@ type Config struct {
 			RemotePelicanBinaryDir string `mapstructure:"remotepelicanbinarydir" yaml:"RemotePelicanBinaryDir"`
 			RemotePelicanBinaryOverrides []string `mapstructure:"remotepelicanbinaryoverrides" yaml:"RemotePelicanBinaryOverrides"`
 			SessionEstablishTimeout time.Duration `mapstructure:"sessionestablishtimeout" yaml:"SessionEstablishTimeout"`
+			TunnelCallback bool `mapstructure:"tunnelcallback" yaml:"TunnelCallback"`
 			User string `mapstructure:"user" yaml:"User"`
 		} `mapstructure:"ssh" yaml:"SSH"`
 		ScitokensDefaultUser string `mapstructure:"scitokensdefaultuser" yaml:"ScitokensDefaultUser"`
@@ -756,6 +757,7 @@ type configWithType struct {
 			RemotePelicanBinaryDir struct { Type string; Value string }
 			RemotePelicanBinaryOverrides struct { Type string; Value []string }
 			SessionEstablishTimeout struct { Type string; Value time.Duration }
+			TunnelCallback struct { Type string; Value bool }
 			User struct { Type string; Value string }
 		}
 		ScitokensDefaultUser struct { Type string; Value string }
