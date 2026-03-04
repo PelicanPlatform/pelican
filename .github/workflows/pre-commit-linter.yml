@@ -36,17 +36,6 @@ jobs:
         with:
           python-version: "3.14"
 
-      # We embed the contents of web_ui/frontend/out/* into Pelican's
-      # binaries. That directory normally contains the output from `npm
-      # run build`. However, to keep this workflow's run time short, we
-      # simply create a dummy, empty file.
-      #
-      # Without that file, the linters will raise an error.
-      - name: Generate placeholder files
-        run: |
-          mkdir -p web_ui/frontend/out
-          touch web_ui/frontend/out/placeholder
-
       # We run this linter here so that issues are called out inline.
       # (It's also run by pre-commit, below.)
       - name: Run golangci-lint
