@@ -839,6 +839,9 @@ description: |+
   - GlobusCollectionID: [REQUIRED] See `Origin.GlobusCollectionID` for details
   - GlobusCollectionName: [OPTIONAL] See `Origin.GlobusCollectionName` for details
 
+  If Origin.StorageType == "xroot", the following additional field is available:
+  - XrootServiceUrl: [REQUIRED] See `Origin.XrootServiceUrl` for details
+
 type: object
 default: none
 components: ["origin"]
