@@ -52,7 +52,7 @@ func TestGetRequiredFeatures(t *testing.T) {
 			defer server_utils.ResetTestState()
 
 			for k, v := range tc.vConfig {
-				require.NoError(t, param.Set(k, v))
+				require.NoError(t, param.SetRaw(k, v))
 			}
 
 			oServer := &OriginServer{}

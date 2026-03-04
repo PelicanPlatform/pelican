@@ -116,7 +116,7 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 
 	siteName := param.Xrootd_Sitename.GetString()
 	if siteName == "" {
-		log.Errorf("Server name isn't set. Please set the name via %s", param.Xrootd_Sitename.GetName())
+		log.Errorf("Server name isn't set. Please set the name via %s", param.Xrootd_Sitename)
 		os.Exit(1)
 	}
 	if withIdentity {

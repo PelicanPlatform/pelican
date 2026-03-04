@@ -173,7 +173,7 @@ func TestValidateWatermark(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.NoError(t, param.Set(tc.name, tc.wm))
+			require.NoError(t, param.SetRaw(tc.name, tc.wm))
 			val, isAbs, err := ValidateWatermark(tc.name, tc.requireSuffix)
 			if tc.expectErr {
 				assert.Equal(t, 0.0, val)

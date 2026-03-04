@@ -469,8 +469,8 @@ func TestOriginUnresponsive(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	server_utils.ResetTestState()
-	require.NoError(t, param.Set("Transport.ResponseHeaderTimeout", "5s"))
-	require.NoError(t, param.Set("Logging.Level", "debug"))
+	require.NoError(t, param.Set(param.Transport_ResponseHeaderTimeout, "5s"))
+	require.NoError(t, param.Set(param.Logging_Level, "debug"))
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
 	cacheUrl := &url.URL{

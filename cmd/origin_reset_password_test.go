@@ -45,9 +45,9 @@ func TestResetPassword(t *testing.T) {
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
 	test_utils.MockFederationRoot(t, nil, nil)
-	require.NoError(t, param.Set("ConfigDir", dirName))
-	require.NoError(t, param.Set(param.Server_WebPort.GetName(), 8444))
-	require.NoError(t, param.Set(param.Origin_Port.GetName(), 8443))
+	require.NoError(t, param.Set(param.ConfigDir, dirName))
+	require.NoError(t, param.Set(param.Server_WebPort, 8444))
+	require.NoError(t, param.Set(param.Origin_Port, 8443))
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 

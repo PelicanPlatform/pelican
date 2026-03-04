@@ -58,7 +58,7 @@ across multiple dataset providers.`,
 				return err
 			}
 			if debugFlag {
-				if err := param.Set(param.Logging_Level.GetName(), "debug"); err != nil {
+				if err := param.Set(param.Logging_Level, "debug"); err != nil {
 					return err
 				}
 			}
