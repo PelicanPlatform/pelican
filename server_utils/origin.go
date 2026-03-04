@@ -525,27 +525,27 @@ func (b *BaseOrigin) mapSingleExportIfNeeded(o Origin) {
 	export := b.Exports[0]
 
 	// Map prefixes
-	if err := param.Set(param.Origin_FederationPrefix.GetName(), export.FederationPrefix); err != nil {
+	if err := param.Set(param.Origin_FederationPrefix, export.FederationPrefix); err != nil {
 		log.Warningf("Failed to set %s: %v", param.Origin_FederationPrefix.GetName(), err)
 	}
-	if err := param.Set(param.Origin_StoragePrefix.GetName(), export.StoragePrefix); err != nil {
+	if err := param.Set(param.Origin_StoragePrefix, export.StoragePrefix); err != nil {
 		log.Warningf("Failed to set %s: %v", param.Origin_StoragePrefix.GetName(), err)
 	}
 
 	// Map capabilities
-	if err := param.Set(param.Origin_EnablePublicReads.GetName(), export.Capabilities.PublicReads); err != nil {
+	if err := param.Set(param.Origin_EnablePublicReads, export.Capabilities.PublicReads); err != nil {
 		log.Warningf("Failed to set %s: %v", param.Origin_EnablePublicReads.GetName(), err)
 	}
-	if err := param.Set(param.Origin_EnableReads.GetName(), export.Capabilities.Reads || export.Capabilities.PublicReads); err != nil {
+	if err := param.Set(param.Origin_EnableReads, export.Capabilities.Reads || export.Capabilities.PublicReads); err != nil {
 		log.Warningf("Failed to set %s: %v", param.Origin_EnableReads.GetName(), err)
 	}
-	if err := param.Set(param.Origin_EnableWrites.GetName(), export.Capabilities.Writes); err != nil {
+	if err := param.Set(param.Origin_EnableWrites, export.Capabilities.Writes); err != nil {
 		log.Warningf("Failed to set %s: %v", param.Origin_EnableWrites.GetName(), err)
 	}
-	if err := param.Set(param.Origin_EnableListings.GetName(), export.Capabilities.Listings); err != nil {
+	if err := param.Set(param.Origin_EnableListings, export.Capabilities.Listings); err != nil {
 		log.Warningf("Failed to set %s: %v", param.Origin_EnableListings.GetName(), err)
 	}
-	if err := param.Set(param.Origin_EnableDirectReads.GetName(), export.Capabilities.DirectReads); err != nil {
+	if err := param.Set(param.Origin_EnableDirectReads, export.Capabilities.DirectReads); err != nil {
 		log.Warningf("Failed to set %s: %v", param.Origin_EnableDirectReads.GetName(), err)
 	}
 

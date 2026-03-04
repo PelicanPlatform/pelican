@@ -265,7 +265,7 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 			}
 		}
 		// Set the mount to our export path now that everything is symlinked
-		if err := param.Set("Xrootd.Mount", exportPath); err != nil {
+		if err := param.Set(param.Xrootd_Mount, exportPath); err != nil {
 			return err
 		}
 
@@ -493,7 +493,7 @@ func ensureCachePSSOrigin(ctx context.Context) (string, error) {
 	discoveryUrl.RawQuery = ""
 	pssOrigin := discoveryUrl.String()
 
-	if err := param.Set("Cache.PSSOrigin", pssOrigin); err != nil {
+	if err := param.Set(param.Cache_PSSOrigin, pssOrigin); err != nil {
 		return "", err
 	}
 
@@ -622,7 +622,7 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 			if _, err := file.WriteString(robotsTxt); err != nil {
 				return errors.Wrap(err, "failed to write out a default robots.txt file")
 			}
-			if err := param.Set("Xrootd.RobotsTxtFile", newPath); err != nil {
+			if err := param.Set(param.Xrootd_RobotsTxtFile, newPath); err != nil {
 				return err
 			}
 		} else {
@@ -1367,7 +1367,7 @@ func SetUpMonitoring(ctx context.Context, egrp *errgroup.Group) error {
 		}
 	}
 
-	if err := param.Set(param.Xrootd_LocalMonitoringPort.GetName(), monitorPort); err != nil {
+	if err := param.Set(param.Xrootd_LocalMonitoringPort, monitorPort); err != nil {
 		return err
 	}
 

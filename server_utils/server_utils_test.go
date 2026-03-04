@@ -55,7 +55,7 @@ func TestWaitUntilWorking(t *testing.T) {
 		ResetTestState()
 	})
 
-	require.NoError(t, param.Set(param.Server_StartupTimeout.GetName(), "10s"))
+	require.NoError(t, param.Set(param.Server_StartupTimeout, "10s"))
 	t.Run("success-with-HTTP-200", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK) // 200
@@ -158,7 +158,7 @@ func TestWaitUntilWorking(t *testing.T) {
 	})
 
 	t.Run("server-short-timeout", func(t *testing.T) {
-		require.NoError(t, param.Set(param.Server_StartupTimeout.GetName(), "1s"))
+		require.NoError(t, param.Set(param.Server_StartupTimeout, "1s"))
 		earlyCancelCtx, earlyCancel := context.WithCancel(ctx)
 		go func() {
 			<-time.After(1500 * time.Millisecond)

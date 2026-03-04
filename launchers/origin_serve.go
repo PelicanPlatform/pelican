@@ -170,12 +170,12 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		}
 
 		portStartCallback := func(port int) {
-			if err := param.Set("Origin.Port", port); err != nil {
+			if err := param.Set(param.Origin_Port, port); err != nil {
 				log.WithError(err).Warnf("Failed to set Origin.Port to %d", port)
 			}
 			if originUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {
 				originUrl.Host = originUrl.Hostname() + ":" + strconv.Itoa(port)
-				if err := param.Set("Origin.Url", originUrl.String()); err != nil {
+				if err := param.Set(param.Origin_Url, originUrl.String()); err != nil {
 					log.WithError(err).Warnf("Failed to set Origin.Url to %s", originUrl.String())
 				}
 				log.Debugln("Resetting Origin.Url to", originUrl.String())
@@ -264,7 +264,7 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 		// For POSIXv2, the origin serves files directly via the web server, not XRootD.
 		// Update Origin.Url to use the external web URL which is now set to the correct port.
 		externalWebUrl := param.Server_ExternalWebUrl.GetString()
-		if err := param.Set("Origin.Url", externalWebUrl); err != nil {
+		if err := param.Set(param.Origin_Url, externalWebUrl); err != nil {
 			log.WithError(err).Warnf("Failed to set Origin.Url to %s", externalWebUrl)
 		}
 		log.Debugf("Set Origin.Url to %s for POSIXv2 origin", externalWebUrl)

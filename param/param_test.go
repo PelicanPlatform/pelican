@@ -39,7 +39,7 @@ func TestSetAndGet(t *testing.T) {
 	defer viper.Reset()
 
 	// Test setting a value
-	err := Set("TestKey", "TestValue")
+	err := SetRaw("TestKey", "TestValue")
 	require.NoError(t, err)
 
 	// Verify the value was set in viper
@@ -107,7 +107,7 @@ func TestConcurrentSetAndGet(t *testing.T) {
 		go func(val int) {
 			defer wg.Done()
 			key := "ConcurrentKey"
-			_ = Set(key, val)
+			_ = SetRaw(key, val)
 		}(i)
 	}
 
@@ -340,7 +340,7 @@ func TestCallbackRegistration(t *testing.T) {
 	})
 
 	// Set a value to trigger callback
-	err := Set("TestKey", "TestValue")
+	err := SetRaw("TestKey", "TestValue")
 	require.NoError(t, err)
 
 	// Wait for callback to be invoked (with timeout)
@@ -371,7 +371,7 @@ func TestCallbackWithConfigChanges(t *testing.T) {
 	})
 
 	// Set initial value
-	err := Set("Logging.Level", "info")
+	err := Set(Logging_Level, "info")
 	require.NoError(t, err)
 
 	// Wait for first callback
@@ -383,7 +383,7 @@ func TestCallbackWithConfigChanges(t *testing.T) {
 	}
 
 	// Change the value
-	err = Set("Logging.Level", "debug")
+	err = Set(Logging_Level, "debug")
 	require.NoError(t, err)
 
 	// Wait for second callback

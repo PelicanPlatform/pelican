@@ -542,6 +542,13 @@ func (sP StringParam) GetName() string {
 	return sP.name
 }
 
+// String returns the parameter name, implementing fmt.Stringer.
+// Use this to reference a parameter by name without using a raw string,
+// e.g. log.Debugf("parameter %s is set", param.Some_Param)
+func (sP StringParam) String() string {
+	return sP.name
+}
+
 func (sP StringParam) IsSet() bool {
 	return viperIsSet(sP.name)
 }
@@ -551,6 +558,11 @@ func (sP StringParam) IsRuntimeConfigurable() bool {
 }
 
 func (sP StringParam) GetEnvVarName() string {
+	return paramNameToEnvVar(sP.name)
+}
+
+// EnvVarName returns the environment variable name for this parameter.
+func (sP StringParam) EnvVarName() string {
 	return paramNameToEnvVar(sP.name)
 }
 
@@ -569,6 +581,13 @@ func (slP StringSliceParam) GetName() string {
 	return slP.name
 }
 
+// String returns the parameter name, implementing fmt.Stringer.
+// Use this to reference a parameter by name without using a raw string,
+// e.g. log.Debugf("parameter %s is set", param.Some_Param)
+func (slP StringSliceParam) String() string {
+	return slP.name
+}
+
 func (slP StringSliceParam) IsSet() bool {
 	return viperIsSet(slP.name)
 }
@@ -578,6 +597,11 @@ func (slP StringSliceParam) IsRuntimeConfigurable() bool {
 }
 
 func (slP StringSliceParam) GetEnvVarName() string {
+	return paramNameToEnvVar(slP.name)
+}
+
+// EnvVarName returns the environment variable name for this parameter.
+func (slP StringSliceParam) EnvVarName() string {
 	return paramNameToEnvVar(slP.name)
 }
 
@@ -596,6 +620,13 @@ func (iP IntParam) GetName() string {
 	return iP.name
 }
 
+// String returns the parameter name, implementing fmt.Stringer.
+// Use this to reference a parameter by name without using a raw string,
+// e.g. log.Debugf("parameter %s is set", param.Some_Param)
+func (iP IntParam) String() string {
+	return iP.name
+}
+
 func (iP IntParam) IsSet() bool {
 	return viperIsSet(iP.name)
 }
@@ -605,6 +636,11 @@ func (iP IntParam) IsRuntimeConfigurable() bool {
 }
 
 func (iP IntParam) GetEnvVarName() string {
+	return paramNameToEnvVar(iP.name)
+}
+
+// EnvVarName returns the environment variable name for this parameter.
+func (iP IntParam) EnvVarName() string {
 	return paramNameToEnvVar(iP.name)
 }
 
@@ -621,6 +657,13 @@ func (bRP ByteRateParam) GetName() string {
 	return bRP.name
 }
 
+// String returns the parameter name, implementing fmt.Stringer.
+// Use this to reference a parameter by name without using a raw string,
+// e.g. log.Debugf("parameter %s is set", param.Some_Param)
+func (bRP ByteRateParam) String() string {
+	return bRP.name
+}
+
 func (bRP ByteRateParam) IsSet() bool {
 	return viperIsSet(bRP.name)
 }
@@ -630,6 +673,11 @@ func (bRP ByteRateParam) IsRuntimeConfigurable() bool {
 }
 
 func (bRP ByteRateParam) GetEnvVarName() string {
+	return paramNameToEnvVar(bRP.name)
+}
+
+// EnvVarName returns the environment variable name for this parameter.
+func (bRP ByteRateParam) EnvVarName() string {
 	return paramNameToEnvVar(bRP.name)
 }
 
@@ -648,6 +696,13 @@ func (bP BoolParam) GetName() string {
 	return bP.name
 }
 
+// String returns the parameter name, implementing fmt.Stringer.
+// Use this to reference a parameter by name without using a raw string,
+// e.g. log.Debugf("parameter %s is set", param.Some_Param)
+func (bP BoolParam) String() string {
+	return bP.name
+}
+
 func (bP BoolParam) IsSet() bool {
 	return viperIsSet(bP.name)
 }
@@ -657,6 +712,11 @@ func (bP BoolParam) IsRuntimeConfigurable() bool {
 }
 
 func (bP BoolParam) GetEnvVarName() string {
+	return paramNameToEnvVar(bP.name)
+}
+
+// EnvVarName returns the environment variable name for this parameter.
+func (bP BoolParam) EnvVarName() string {
 	return paramNameToEnvVar(bP.name)
 }
 
@@ -675,6 +735,13 @@ func (dP DurationParam) GetName() string {
 	return dP.name
 }
 
+// String returns the parameter name, implementing fmt.Stringer.
+// Use this to reference a parameter by name without using a raw string,
+// e.g. log.Debugf("parameter %s is set", param.Some_Param)
+func (dP DurationParam) String() string {
+	return dP.name
+}
+
 func (dP DurationParam) IsSet() bool {
 	return viperIsSet(dP.name)
 }
@@ -687,11 +754,23 @@ func (dP DurationParam) GetEnvVarName() string {
 	return paramNameToEnvVar(dP.name)
 }
 
+// EnvVarName returns the environment variable name for this parameter.
+func (dP DurationParam) EnvVarName() string {
+	return paramNameToEnvVar(dP.name)
+}
+
 func (oP ObjectParam) Unmarshal(rawVal any) error {
 	return viperUnmarshalKey(oP.name, rawVal)
 }
 
 func (oP ObjectParam) GetName() string {
+	return oP.name
+}
+
+// String returns the parameter name, implementing fmt.Stringer.
+// Use this to reference a parameter by name without using a raw string,
+// e.g. log.Debugf("parameter %s is set", param.Some_Param)
+func (oP ObjectParam) String() string {
 	return oP.name
 }
 
@@ -704,6 +783,11 @@ func (oP ObjectParam) IsRuntimeConfigurable() bool {
 }
 
 func (oP ObjectParam) GetEnvVarName() string {
+	return paramNameToEnvVar(oP.name)
+}
+
+// EnvVarName returns the environment variable name for this parameter.
+func (oP ObjectParam) EnvVarName() string {
 	return paramNameToEnvVar(oP.name)
 }
 

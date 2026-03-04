@@ -90,7 +90,7 @@ func init() {
 }
 
 func stashPluginMain(args []string) {
-	if err := param.Set(param.Client_IsPlugin.GetName(), true); err != nil {
+	if err := param.Set(param.Client_IsPlugin, true); err != nil {
 		log.Warningln("Failed to set plugin mode:", err)
 	}
 

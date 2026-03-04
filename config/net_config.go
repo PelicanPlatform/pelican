@@ -37,31 +37,31 @@ func UpdateConfigFromListener(ln net.Listener) {
 		addr := ln.Addr()
 		tcpAddr, ok := addr.(*net.TCPAddr)
 		if ok {
-			if err := param.Set("Server.WebPort", tcpAddr.Port); err != nil {
+			if err := param.Set(param.Server_WebPort, tcpAddr.Port); err != nil {
 				log.WithError(err).Warn("Failed to update Server.WebPort from listener")
 			}
 			serverUrlStr := param.Server_ExternalWebUrl.GetString()
 			serverUrl, err := url.Parse(serverUrlStr)
 			if err == nil {
 				newUrlStr := "https://" + serverUrl.Hostname() + ":" + strconv.Itoa(tcpAddr.Port)
-				if err := param.Set("Server.WebHost", serverUrl.Hostname()); err != nil {
+				if err := param.Set(param.Server_WebHost, serverUrl.Hostname()); err != nil {
 					log.WithError(err).Warn("Failed to update Server.WebHost from listener")
 				}
-				if err := param.Set("Server.ExternalWebUrl", newUrlStr); err != nil {
+				if err := param.Set(param.Server_ExternalWebUrl, newUrlStr); err != nil {
 					log.WithError(err).Warn("Failed to update Server.ExternalWebUrl from listener")
 				}
 				if viper.GetString("Federation.DirectorUrl") == serverUrlStr {
-					if err := param.Set("Federation.DirectorUrl", newUrlStr); err != nil {
+					if err := param.SetRaw("Federation.DirectorUrl", newUrlStr); err != nil {
 						log.WithError(err).Warn("Failed to update Federation.DirectorUrl from listener")
 					}
 				}
 				if viper.GetString("Federation.RegistryUrl") == serverUrlStr {
-					if err := param.Set("Federation.RegistryUrl", newUrlStr); err != nil {
+					if err := param.SetRaw("Federation.RegistryUrl", newUrlStr); err != nil {
 						log.WithError(err).Warn("Failed to update Federation.RegistryUrl from listener")
 					}
 				}
 				if brokerUrlStr := viper.GetString("Federation.BrokerUrl"); brokerUrlStr == serverUrlStr {
-					if err := param.Set("Federation.BrokerUrl", newUrlStr); err != nil {
+					if err := param.SetRaw("Federation.BrokerUrl", newUrlStr); err != nil {
 						log.WithError(err).Warn("Failed to update Federation.BrokerUrl from listener")
 					}
 				}

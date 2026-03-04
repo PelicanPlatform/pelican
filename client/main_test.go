@@ -425,7 +425,7 @@ func TestParseRemoteAsPUrl(t *testing.T) {
 
 	// Unset the global discovery endpoint set by MockFederationRoot so that these
 	// tests can set it as needed
-	require.NoError(t, param.Set(param.Federation_DiscoveryUrl.GetName(), ""))
+	require.NoError(t, param.Set(param.Federation_DiscoveryUrl, ""))
 
 	oldHost, err := pelican_url.SetOsdfDiscoveryHost(discUrl.Host)
 	t.Cleanup(func() {

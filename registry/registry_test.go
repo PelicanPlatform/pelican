@@ -157,8 +157,8 @@ func TestHandleWildcard(t *testing.T) {
 	for _, tc := range mockApprovalTcs {
 		t.Run(tc.Name, func(t *testing.T) {
 			server_utils.ResetTestState()
-			require.NoError(t, param.Set("Registry.RequireCacheApproval", tc.CacheApprovedOnly))
-			require.NoError(t, param.Set("Registry.RequireOriginApproval", tc.OriginApprovedOnly))
+			require.NoError(t, param.Set(param.Registry_RequireCacheApproval, tc.CacheApprovedOnly))
+			require.NoError(t, param.Set(param.Registry_RequireOriginApproval, tc.OriginApprovedOnly))
 
 			mockPrefix := "/testnamespace/foo"
 			if tc.IsCache {

@@ -231,10 +231,10 @@ func TestDirectorFedTokenCacheAPI(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.shouldSetSitename {
-				require.NoError(t, param.Set(param.Xrootd_Sitename.GetName(), "fed-test"))
+				require.NoError(t, param.Set(param.Xrootd_Sitename, "fed-test"))
 			}
 
-			require.NoError(t, param.Set(param.Director_RegistryQueryInterval.GetName(), "1s"))
+			require.NoError(t, param.Set(param.Director_RegistryQueryInterval, "1s"))
 			_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
 
 			// If the sitename is not set, this fetches the server's hostname.
@@ -353,7 +353,7 @@ func TestDirectorMetadataHosting(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			require.NoError(t, param.Set(param.Director_EnableFederationMetadataHosting.GetName(), tt.enableHosting))
+			require.NoError(t, param.Set(param.Director_EnableFederationMetadataHosting, tt.enableHosting))
 			_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
 
 			ctx := context.Background()

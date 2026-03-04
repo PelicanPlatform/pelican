@@ -240,7 +240,7 @@ func TestQueryPrometheus(t *testing.T) {
 		}
 	}
 	server := httptest.NewServer(http.HandlerFunc(handler))
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), server.URL))
+	require.NoError(t, param.Set(param.Server_ExternalWebUrl, server.URL))
 	defer server.Close()
 
 	t.Run("no-token-query-matrix", func(t *testing.T) {

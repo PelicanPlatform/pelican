@@ -59,7 +59,7 @@ func commaFlagsListToViperSlice(cmd *cobra.Command, flags map[string]string) {
 			for _, value := range strings.Split(flagValue, ",") {
 				trimmedValues = append(trimmedValues, strings.TrimSpace(value))
 			}
-			if err := param.Set(viperName, trimmedValues); err != nil {
+			if err := param.SetRaw(viperName, trimmedValues); err != nil {
 				cobra.CheckErr(err)
 			}
 		}

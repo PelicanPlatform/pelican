@@ -74,9 +74,9 @@ func TestQueryServersForObject(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	server_utils.ResetTestState()
-	require.NoError(t, param.Set("Director.MinStatResponse", 1))
-	require.NoError(t, param.Set("Director.MaxStatResponse", 1))
-	require.NoError(t, param.Set("Director.StatTimeout", time.Microsecond*200))
+	require.NoError(t, param.Set(param.Director_MinStatResponse, 1))
+	require.NoError(t, param.Set(param.Director_MaxStatResponse, 1))
+	require.NoError(t, param.Set(param.Director_StatTimeout, time.Microsecond*200))
 
 	// Preserve existing serverAds for other test funcs
 	oldAds := serverAds
@@ -510,9 +510,9 @@ func TestQueryServersForObject(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		require.NoError(t, param.Set("Director.MaxStatResponse", 2))
+		require.NoError(t, param.Set(param.Director_MaxStatResponse, 2))
 		t.Cleanup(func() {
-			require.NoError(t, param.Set("Director.MaxStatResponse", 1))
+			require.NoError(t, param.Set(param.Director_MaxStatResponse, 1))
 		})
 
 		mockTTLCache()
@@ -538,9 +538,9 @@ func TestQueryServersForObject(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		require.NoError(t, param.Set("Director.MaxStatResponse", 3))
+		require.NoError(t, param.Set(param.Director_MaxStatResponse, 3))
 		t.Cleanup(func() {
-			require.NoError(t, param.Set("Director.MaxStatResponse", 1))
+			require.NoError(t, param.Set(param.Director_MaxStatResponse, 1))
 		})
 
 		mockTTLCache()
@@ -567,13 +567,13 @@ func TestQueryServersForObject(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		require.NoError(t, param.Set("Director.MinStatResponse", 3))
-		require.NoError(t, param.Set("Director.MaxStatResponse", 4))
+		require.NoError(t, param.Set(param.Director_MinStatResponse, 3))
+		require.NoError(t, param.Set(param.Director_MaxStatResponse, 4))
 		t.Cleanup(func() {
-			require.NoError(t, param.Set("Director.MinStatResponse", 1))
+			require.NoError(t, param.Set(param.Director_MinStatResponse, 1))
 		})
 		t.Cleanup(func() {
-			require.NoError(t, param.Set("Director.MaxStatResponse", 1))
+			require.NoError(t, param.Set(param.Director_MaxStatResponse, 1))
 		})
 
 		mockTTLCache()
@@ -596,13 +596,13 @@ func TestQueryServersForObject(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		require.NoError(t, param.Set("Director.MinStatResponse", 3))
-		require.NoError(t, param.Set("Director.MaxStatResponse", 4))
+		require.NoError(t, param.Set(param.Director_MinStatResponse, 3))
+		require.NoError(t, param.Set(param.Director_MaxStatResponse, 4))
 		t.Cleanup(func() {
-			require.NoError(t, param.Set("Director.MinStatResponse", 1))
+			require.NoError(t, param.Set(param.Director_MinStatResponse, 1))
 		})
 		t.Cleanup(func() {
-			require.NoError(t, param.Set("Director.MaxStatResponse", 1))
+			require.NoError(t, param.Set(param.Director_MaxStatResponse, 1))
 		})
 
 		mockTTLCache()
@@ -832,8 +832,8 @@ func TestCache(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	require.NoError(t, param.Reset())
-	require.NoError(t, param.Set("Logging.Level", "Debug"))
-	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
+	require.NoError(t, param.Set(param.Logging_Level, "Debug"))
+	require.NoError(t, param.Set(param.ConfigDir, t.TempDir()))
 
 	var reqCounter atomic.Int32
 
@@ -852,8 +852,8 @@ func TestCache(t *testing.T) {
 	}))
 	defer server.Close()
 
-	require.NoError(t, param.Set("Server.ExternalWebUrl", server.URL))
-	require.NoError(t, param.Set("IssuerUrl", server.URL))
+	require.NoError(t, param.Set(param.Server_ExternalWebUrl, server.URL))
+	require.NoError(t, param.SetRaw("IssuerUrl", server.URL))
 	realServerUrl, err := url.Parse(server.URL)
 	require.NoError(t, err)
 
@@ -959,8 +959,8 @@ func TestSendHeadReq(t *testing.T) {
 	}))
 	defer server.Close()
 
-	require.NoError(t, param.Set("Server.ExternalWebUrl", server.URL))
-	require.NoError(t, param.Set("IssuerUrl", server.URL))
+	require.NoError(t, param.Set(param.Server_ExternalWebUrl, server.URL))
+	require.NoError(t, param.SetRaw("IssuerUrl", server.URL))
 	realServerUrl, err := url.Parse(server.URL)
 	require.NoError(t, err)
 
@@ -969,9 +969,9 @@ func TestSendHeadReq(t *testing.T) {
 
 	tDir := t.TempDir()
 	kDir := filepath.Join(tDir, "testKeyDir")
-	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), kDir))
+	require.NoError(t, param.Set(param.IssuerKeysDirectory, kDir))
 
-	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
+	require.NoError(t, param.Set(param.ConfigDir, t.TempDir()))
 
 	err = initServerForTest(t, context.Background(), server_structs.DirectorType)
 	require.NoError(t, err)
@@ -1092,8 +1092,8 @@ func TestGenerateAvailabilityMaps(t *testing.T) {
 	// servers as equally available regardless of stat results.
 	t.Run("skip-stat-path-maps-keyed-by-url", func(t *testing.T) {
 		server_utils.ResetTestState()
-		require.NoError(t, param.Set(param.Director_CheckCachePresence.GetName(), false))
-		require.NoError(t, param.Set(param.Director_CheckOriginPresence.GetName(), false))
+		require.NoError(t, param.Set(param.Director_CheckCachePresence, false))
+		require.NoError(t, param.Set(param.Director_CheckOriginPresence, false))
 
 		// Use an origin-redirect path so both skipped-stat branches execute.
 		ctx := makeCtx(http.MethodGet, "/api/v1.0/director/origin/foo/test.txt")
@@ -1122,11 +1122,11 @@ func TestGenerateAvailabilityMaps(t *testing.T) {
 	// ad.Name — again invisible to availabilityWeightFn.
 	t.Run("stat-results-maps-keyed-by-url", func(t *testing.T) {
 		server_utils.ResetTestState()
-		require.NoError(t, param.Set(param.Director_CheckCachePresence.GetName(), true))
-		require.NoError(t, param.Set(param.Director_CheckOriginPresence.GetName(), false))
-		require.NoError(t, param.Set(param.Director_StatTimeout.GetName(), 2*time.Second))
-		require.NoError(t, param.Set(param.Director_MinStatResponse.GetName(), 1))
-		require.NoError(t, param.Set(param.Director_MaxStatResponse.GetName(), 1))
+		require.NoError(t, param.Set(param.Director_CheckCachePresence, true))
+		require.NoError(t, param.Set(param.Director_CheckOriginPresence, false))
+		require.NoError(t, param.Set(param.Director_StatTimeout, 2*time.Second))
+		require.NoError(t, param.Set(param.Director_MinStatResponse, 1))
+		require.NoError(t, param.Set(param.Director_MaxStatResponse, 1))
 
 		// Mock HTTP server that returns 200 with Content-Length and Age > 0 for every HEAD request.
 		// Age > 0 is required for the Director to consider the object locally cached at this server.

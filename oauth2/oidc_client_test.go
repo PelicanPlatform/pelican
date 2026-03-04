@@ -35,7 +35,7 @@ func TestGetRedirectURL(t *testing.T) {
 	})
 	t.Run("no-redirect-host-no-cb-path-set", func(t *testing.T) {
 		server_utils.ResetTestState()
-		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "https://localhost:8888"))
+		require.NoError(t, param.Set(param.Server_ExternalWebUrl, "https://localhost:8888"))
 		get, err := GetRedirectURL("")
 		require.NoError(t, err)
 		assert.Equal(t, "https://localhost:8888", get)
@@ -43,7 +43,7 @@ func TestGetRedirectURL(t *testing.T) {
 
 	t.Run("no-redirect-host-cp-path-set", func(t *testing.T) {
 		server_utils.ResetTestState()
-		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "https://localhost:8888"))
+		require.NoError(t, param.Set(param.Server_ExternalWebUrl, "https://localhost:8888"))
 		get, err := GetRedirectURL("/new/url")
 		require.NoError(t, err)
 		assert.Equal(t, "https://localhost:8888/new/url", get)
@@ -51,9 +51,9 @@ func TestGetRedirectURL(t *testing.T) {
 
 	t.Run("redirect-host-cp-path-set", func(t *testing.T) {
 		server_utils.ResetTestState()
-		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "https://ea123fsac:8888"))
-		require.NoError(t, param.Set("Server.WebPort", 8888))
-		require.NoError(t, param.Set(param.OIDC_ClientRedirectHostname.GetName(), "localhost"))
+		require.NoError(t, param.Set(param.Server_ExternalWebUrl, "https://ea123fsac:8888"))
+		require.NoError(t, param.Set(param.Server_WebPort, 8888))
+		require.NoError(t, param.Set(param.OIDC_ClientRedirectHostname, "localhost"))
 		get, err := GetRedirectURL("/new/url")
 		require.NoError(t, err)
 		assert.Equal(t, "https://localhost:8888/new/url", get)

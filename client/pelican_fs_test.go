@@ -63,7 +63,7 @@ func TestPelicanFS_Basic(t *testing.T) {
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
 	require.NoError(t, err)
 
-	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
+	require.NoError(t, param.Set(param.Logging_DisableProgressBars, true))
 
 	for _, export := range fed.Exports {
 		fileName := filepath.Base(tempFile.Name())
@@ -128,7 +128,7 @@ func TestPelicanFS_Seek(t *testing.T) {
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
 	require.NoError(t, err)
 
-	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
+	require.NoError(t, param.Set(param.Logging_DisableProgressBars, true))
 
 	for _, export := range fed.Exports {
 		fileName := filepath.Base(tempFile.Name())
@@ -207,7 +207,7 @@ func TestPelicanFS_ReadAt(t *testing.T) {
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
 	require.NoError(t, err)
 
-	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
+	require.NoError(t, param.Set(param.Logging_DisableProgressBars, true))
 
 	for _, export := range fed.Exports {
 		fileName := filepath.Base(tempFile.Name())
@@ -285,7 +285,7 @@ func TestPelicanFS_Interfaces(t *testing.T) {
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
 	require.NoError(t, err)
 
-	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
+	require.NoError(t, param.Set(param.Logging_DisableProgressBars, true))
 
 	for _, export := range fed.Exports {
 		fileName := filepath.Base(tempFile.Name())
@@ -332,7 +332,7 @@ func TestPelicanFS_ReadDir(t *testing.T) {
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
 	require.NoError(t, err)
 
-	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
+	require.NoError(t, param.Set(param.Logging_DisableProgressBars, true))
 
 	for _, export := range fed.Exports {
 		// Upload multiple test files
@@ -404,7 +404,7 @@ func TestPelicanFS_Write(t *testing.T) {
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
 	require.NoError(t, err)
 
-	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
+	require.NoError(t, param.Set(param.Logging_DisableProgressBars, true))
 
 	// Get a token for authenticated operations
 	tempToken, _ := getTempToken(t)
@@ -461,7 +461,7 @@ func TestPelicanFS_NonPublicRead(t *testing.T) {
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
 	require.NoError(t, err)
 
-	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
+	require.NoError(t, param.Set(param.Logging_DisableProgressBars, true))
 
 	// Get a token
 	tempToken, _ := getTempToken(t)
@@ -524,7 +524,7 @@ func TestPelicanFS_InvalidToken(t *testing.T) {
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
 	require.NoError(t, err)
 
-	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
+	require.NoError(t, param.Set(param.Logging_DisableProgressBars, true))
 
 	urlPrefix := fmt.Sprintf("pelican://%s", discoveryUrl.Host)
 	pfs := client.NewPelicanFSWithPrefix(fed.Ctx, urlPrefix, client.WithToken("invalid-token"))

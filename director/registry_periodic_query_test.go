@@ -70,7 +70,7 @@ func TestLaunchRegistryPeriodicQuery(t *testing.T) {
 		RegistryEndpoint: server.URL,
 	}, nil)
 
-	require.NoError(t, param.Set("Director.RegistryQueryInterval", "200ms"))
+	require.NoError(t, param.Set(param.Director_RegistryQueryInterval, "200ms"))
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()

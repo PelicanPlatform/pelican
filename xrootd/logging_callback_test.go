@@ -59,12 +59,12 @@ func TestXrootdLoggingCallbackRestartsAndUpdatesPids(t *testing.T) {
 	}
 	t.Cleanup(func() { restartXrootdFn = RestartXrootd })
 
-	require.NoError(t, param.Set("Logging.Origin.Cms", "info"))
-	require.NoError(t, param.Set("Logging.Cache.Pfc", "info"))
+	require.NoError(t, param.Set(param.Logging_Origin_Cms, "info"))
+	require.NoError(t, param.Set(param.Logging_Cache_Pfc, "info"))
 
 	RegisterXrootdLoggingCallback()
 
-	require.NoError(t, param.Set("Logging.Cache.Pfc", "debug"))
+	require.NoError(t, param.Set(param.Logging_Cache_Pfc, "debug"))
 
 	var seenOld []int
 	require.Eventually(t, func() bool {
@@ -92,10 +92,10 @@ func TestXrootdLoggingCallbackIgnoresNonXrootdLogging(t *testing.T) {
 	}
 	t.Cleanup(func() { restartXrootdFn = RestartXrootd })
 
-	require.NoError(t, param.Set("Logging.Level", "info"))
+	require.NoError(t, param.Set(param.Logging_Level, "info"))
 	RegisterXrootdLoggingCallback()
 
-	require.NoError(t, param.Set("Logging.Level", "debug"))
+	require.NoError(t, param.Set(param.Logging_Level, "debug"))
 
 	time.Sleep(200 * time.Millisecond)
 	select {

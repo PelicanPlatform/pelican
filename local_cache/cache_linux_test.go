@@ -55,7 +55,7 @@ func TestPurge(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	server_utils.ResetTestState()
-	require.NoError(t, param.Set("LocalCache.Size", "5MB"))
+	require.NoError(t, param.Set(param.LocalCache_Size, "5MB"))
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
@@ -119,9 +119,9 @@ func TestForcePurge(t *testing.T) {
 
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
-	require.NoError(t, param.Set("LocalCache.Size", "5MB"))
+	require.NoError(t, param.Set(param.LocalCache_Size, "5MB"))
 	// Decrease the low water mark so invoking purge will result in 3 files in the cache.
-	require.NoError(t, param.Set("LocalCache.LowWaterMarkPercentage", "80"))
+	require.NoError(t, param.Set(param.LocalCache_LowWaterMarkPercentage, "80"))
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
@@ -217,20 +217,20 @@ func TestPurgeFirst(t *testing.T) {
 	server_utils.ResetTestState()
 
 	configDir := t.TempDir()
-	require.NoError(t, param.Set("ConfigDir", configDir))
+	require.NoError(t, param.Set(param.ConfigDir, configDir))
 	// Set RuntimeDir to avoid race conditions with parallel tests using shared /run/pelican
-	require.NoError(t, param.Set(param.RuntimeDir.GetName(), configDir))
+	require.NoError(t, param.Set(param.RuntimeDir, configDir))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
 	dataDir := t.TempDir()
-	require.NoError(t, param.Set(param.Logging_Level.GetName(), "debug"))
-	require.NoError(t, param.Set(param.LocalCache_DataLocation.GetName(), dataDir))
-	require.NoError(t, param.Set(param.LocalCache_Size.GetName(), "10MB"))
-	require.NoError(t, param.Set(param.LocalCache_LowWaterMarkPercentage.GetName(), "50"))
-	require.NoError(t, param.Set(param.Server_StartupTimeout.GetName(), "10s"))
-	require.NoError(t, param.Set(param.Server_AdvertisementInterval.GetName(), "10m"))
-	require.NoError(t, param.Set(param.Server_AdLifetime.GetName(), "10m"))
+	require.NoError(t, param.Set(param.Logging_Level, "debug"))
+	require.NoError(t, param.Set(param.LocalCache_DataLocation, dataDir))
+	require.NoError(t, param.Set(param.LocalCache_Size, "10MB"))
+	require.NoError(t, param.Set(param.LocalCache_LowWaterMarkPercentage, "50"))
+	require.NoError(t, param.Set(param.Server_StartupTimeout, "10s"))
+	require.NoError(t, param.Set(param.Server_AdvertisementInterval, "10m"))
+	require.NoError(t, param.Set(param.Server_AdLifetime, "10m"))
 
 	// Create test files and sentinel files
 	testFiles := []struct {

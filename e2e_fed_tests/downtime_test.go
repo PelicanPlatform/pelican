@@ -68,10 +68,10 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	})
 
 	// Spin up a federation and get the Director's URL
-	require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), "admin-user"))
-	require.NoError(t, param.Set(param.Director_RegistryQueryInterval.GetName(), 1*time.Second))
+	require.NoError(t, param.Set(param.Server_UIAdminUsers, "admin-user"))
+	require.NoError(t, param.Set(param.Director_RegistryQueryInterval, 1*time.Second))
 	customAdvertisementInterval := 100 * time.Millisecond
-	require.NoError(t, param.Set(param.Server_AdvertisementInterval.GetName(), customAdvertisementInterval)) // was 1 minute by default
+	require.NoError(t, param.Set(param.Server_AdvertisementInterval, customAdvertisementInterval)) // was 1 minute by default
 	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
 	fedInfo, err := config.GetFederation(ctx)
 	require.NoError(t, err, "Failed to get federation service info")
