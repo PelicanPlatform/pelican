@@ -29,6 +29,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
@@ -164,12 +165,16 @@ func (fs *SSHFileSystem) Mkdir(ctx context.Context, name string, perm os.FileMod
 
 // OpenFile opens a file for reading or writing
 func (fs *SSHFileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
-	return &sshFile{
+	f := &sshFile{
 		fs:   fs,
 		name: name,
 		flag: flag,
 		ctx:  ctx,
-	}, nil
+	}
+	if flag&(os.O_WRONLY|os.O_RDWR|os.O_CREATE|os.O_TRUNC) != 0 {
+		f.createTime = time.Now()
+	}
+	return f, nil
 }
 
 // RemoveAll removes a file or directory
@@ -371,10 +376,13 @@ type sshFile struct {
 	readOffset int64
 
 	// For writing - uses a pipe to stream data through a single PUT request
-	writeOnce sync.Once // ensures the background PUT starts exactly once
-	writer    *io.PipeWriter
-	writeErr  error         // error from the background PUT goroutine
-	writeDone chan struct{} // closed when the background PUT completes
+	writeOnce  sync.Once // ensures the background PUT starts exactly once
+	writer     *io.PipeWriter
+	writeErr   error         // error from the background PUT goroutine
+	writeDone  chan struct{} // closed when the background PUT completes
+	writeSize  atomic.Int64  // total bytes written (accumulated across Write calls)
+	createTime time.Time     // when the file was opened for writing
+	writeTime  time.Time     // last time a Write call completed
 
 	// Cached stat info
 	info os.FileInfo
@@ -390,13 +398,14 @@ func (f *sshFile) Close() error {
 	if f.writer != nil {
 		f.writer.Close()
 		f.writer = nil
-		// Wait for the background PUT to finish
-		if f.writeDone != nil {
-			<-f.writeDone
-		}
-		if f.writeErr != nil {
-			err = f.writeErr
-		}
+	}
+	// Wait for the background PUT to complete.  This is a no-op if
+	// Stat() already drained the write (writeDone will be closed).
+	if f.writeDone != nil {
+		<-f.writeDone
+	}
+	if f.writeErr != nil {
+		err = f.writeErr
 	}
 	return err
 }
@@ -510,7 +519,10 @@ func (f *sshFile) Write(p []byte) (n int, err error) {
 		}()
 	})
 
-	return f.writer.Write(p)
+	n, err = f.writer.Write(p)
+	f.writeSize.Add(int64(n))
+	f.writeTime = time.Now()
+	return n, err
 }
 
 // Readdir reads directory entries via PROPFIND with Depth: 1
@@ -609,9 +621,34 @@ func (f *sshFile) Readdir(count int) ([]os.FileInfo, error) {
 	return infos, nil
 }
 
-// Stat returns file info
+// Stat returns file info.
+//
+// The Go webdav.Handler calls Stat() between io.Copy() and Close()
+// during PUT handling.  For the SSH filesystem the data is streamed
+// through a background PUT goroutine; a PROPFIND issued here would
+// race with the still-in-flight PUT and might find the file absent.
+//
+// When the file was opened for writing we already know the name and
+// size, so we synthesise the response from local state — no network
+// round-trip required.
 func (f *sshFile) Stat() (os.FileInfo, error) {
 	if f.info != nil {
+		return f.info, nil
+	}
+
+	// If we've been writing we can answer from local knowledge.
+	if f.writeDone != nil {
+		modTime := f.writeTime
+		if modTime.IsZero() {
+			modTime = f.createTime
+		}
+		f.info = &sshFileInfo{
+			name:    path.Base(f.name),
+			size:    f.writeSize.Load(),
+			mode:    0644,
+			modTime: modTime,
+			isDir:   false,
+		}
 		return f.info, nil
 	}
 
