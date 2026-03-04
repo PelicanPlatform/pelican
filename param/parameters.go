@@ -473,337 +473,181 @@ func paramNameToEnvVar(paramName string) string {
 	return "PELICAN_" + envVar
 }
 
+// stringAccessors maps parameter names to individual accessor functions.
+// Using a map of closures instead of a switch statement prevents static analysis
+// tools (e.g., CodeQL) from conflating all parameter accesses into a single
+// data-flow path, which would cause every caller to be flagged whenever any
+// single parameter refers to a sensitive value like a password location.
+var stringAccessors = map[string]func(*Config) string{
+	"Cache.ClientStatisticsLocation": func(c *Config) string { return c.Cache.ClientStatisticsLocation },
+	"Cache.DataLocation": func(c *Config) string { return c.Cache.DataLocation },
+	"Cache.DbLocation": func(c *Config) string { return c.Cache.DbLocation },
+	"Cache.ExportLocation": func(c *Config) string { return c.Cache.ExportLocation },
+	"Cache.FedTokenLocation": func(c *Config) string { return c.Cache.FedTokenLocation },
+	"Cache.FilesBaseSize": func(c *Config) string { return c.Cache.FilesBaseSize },
+	"Cache.FilesMaxSize": func(c *Config) string { return c.Cache.FilesMaxSize },
+	"Cache.FilesNominalSize": func(c *Config) string { return c.Cache.FilesNominalSize },
+	"Cache.HighWaterMark": func(c *Config) string { return c.Cache.HighWaterMark },
+	"Cache.LocalRoot": func(c *Config) string { return c.Cache.LocalRoot },
+	"Cache.LowWatermark": func(c *Config) string { return c.Cache.LowWatermark },
+	"Cache.NamespaceLocation": func(c *Config) string { return c.Cache.NamespaceLocation },
+	"Cache.PSSOrigin": func(c *Config) string { return c.Cache.PSSOrigin },
+	"Cache.RunLocation": func(c *Config) string { return c.Cache.RunLocation },
+	"Cache.SentinelLocation": func(c *Config) string { return c.Cache.SentinelLocation },
+	"Cache.StorageLocation": func(c *Config) string { return c.Cache.StorageLocation },
+	"Cache.Url": func(c *Config) string { return c.Cache.Url },
+	"Cache.XRootDPrefix": func(c *Config) string { return c.Cache.XRootDPrefix },
+	"ClientAgent.DbLocation": func(c *Config) string { return c.ClientAgent.DbLocation },
+	"ClientAgent.PidFile": func(c *Config) string { return c.ClientAgent.PidFile },
+	"ClientAgent.Socket": func(c *Config) string { return c.ClientAgent.Socket },
+	"Director.AdvertiseUrl": func(c *Config) string { return c.Director.AdvertiseUrl },
+	"Director.CacheSortMethod": func(c *Config) string { return c.Director.CacheSortMethod },
+	"Director.DbLocation": func(c *Config) string { return c.Director.DbLocation },
+	"Director.DefaultResponse": func(c *Config) string { return c.Director.DefaultResponse },
+	"Director.GeoIPLocation": func(c *Config) string { return c.Director.GeoIPLocation },
+	"Director.MaxMindKeyFile": func(c *Config) string { return c.Director.MaxMindKeyFile },
+	"Director.SupportContactEmail": func(c *Config) string { return c.Director.SupportContactEmail },
+	"Director.SupportContactUrl": func(c *Config) string { return c.Director.SupportContactUrl },
+	"Federation.DiscoveryUrl": func(c *Config) string { return c.Federation.DiscoveryUrl },
+	"Federation.TopologyDowntimeUrl": func(c *Config) string { return c.Federation.TopologyDowntimeUrl },
+	"Federation.TopologyNamespaceUrl": func(c *Config) string { return c.Federation.TopologyNamespaceUrl },
+	"Federation.TopologyUrl": func(c *Config) string { return c.Federation.TopologyUrl },
+	"IssuerKey": func(c *Config) string { return c.IssuerKey },
+	"IssuerKeysDirectory": func(c *Config) string { return c.IssuerKeysDirectory },
+	"Issuer.AuthenticationSource": func(c *Config) string { return c.Issuer.AuthenticationSource },
+	"Issuer.GroupFile": func(c *Config) string { return c.Issuer.GroupFile },
+	"Issuer.GroupSource": func(c *Config) string { return c.Issuer.GroupSource },
+	"Issuer.IssuerClaimValue": func(c *Config) string { return c.Issuer.IssuerClaimValue },
+	"Issuer.OIDCAuthenticationUserClaim": func(c *Config) string { return c.Issuer.OIDCAuthenticationUserClaim },
+	"Issuer.OIDCGroupClaim": func(c *Config) string { return c.Issuer.OIDCGroupClaim },
+	"Issuer.OIDCIssuerClaim": func(c *Config) string { return c.Issuer.OIDCIssuerClaim },
+	"Issuer.OIDCSubjectClaim": func(c *Config) string { return c.Issuer.OIDCSubjectClaim },
+	"Issuer.QDLLocation": func(c *Config) string { return c.Issuer.QDLLocation },
+	"Issuer.ScitokensServerLocation": func(c *Config) string { return c.Issuer.ScitokensServerLocation },
+	"Issuer.TomcatLocation": func(c *Config) string { return c.Issuer.TomcatLocation },
+	"LocalCache.DataLocation": func(c *Config) string { return c.LocalCache.DataLocation },
+	"LocalCache.RunLocation": func(c *Config) string { return c.LocalCache.RunLocation },
+	"LocalCache.Size": func(c *Config) string { return c.LocalCache.Size },
+	"LocalCache.Socket": func(c *Config) string { return c.LocalCache.Socket },
+	"Logging.Cache.Http": func(c *Config) string { return c.Logging.Cache.Http },
+	"Logging.Cache.Lotman": func(c *Config) string { return c.Logging.Cache.Lotman },
+	"Logging.Cache.Ofs": func(c *Config) string { return c.Logging.Cache.Ofs },
+	"Logging.Cache.Pfc": func(c *Config) string { return c.Logging.Cache.Pfc },
+	"Logging.Cache.Pss": func(c *Config) string { return c.Logging.Cache.Pss },
+	"Logging.Cache.PssSetOpt": func(c *Config) string { return c.Logging.Cache.PssSetOpt },
+	"Logging.Cache.Scitokens": func(c *Config) string { return c.Logging.Cache.Scitokens },
+	"Logging.Cache.Xrd": func(c *Config) string { return c.Logging.Cache.Xrd },
+	"Logging.Cache.Xrootd": func(c *Config) string { return c.Logging.Cache.Xrootd },
+	"Logging.Level": func(c *Config) string { return c.Logging.Level },
+	"Logging.LogLocation": func(c *Config) string { return c.Logging.LogLocation },
+	"Logging.Origin.Cms": func(c *Config) string { return c.Logging.Origin.Cms },
+	"Logging.Origin.Http": func(c *Config) string { return c.Logging.Origin.Http },
+	"Logging.Origin.Ofs": func(c *Config) string { return c.Logging.Origin.Ofs },
+	"Logging.Origin.Oss": func(c *Config) string { return c.Logging.Origin.Oss },
+	"Logging.Origin.Scitokens": func(c *Config) string { return c.Logging.Origin.Scitokens },
+	"Logging.Origin.Xrd": func(c *Config) string { return c.Logging.Origin.Xrd },
+	"Logging.Origin.Xrootd": func(c *Config) string { return c.Logging.Origin.Xrootd },
+	"Lotman.DbLocation": func(c *Config) string { return c.Lotman.DbLocation },
+	"Lotman.EnabledPolicy": func(c *Config) string { return c.Lotman.EnabledPolicy },
+	"Lotman.LibLocation": func(c *Config) string { return c.Lotman.LibLocation },
+	"Lotman.LotHome": func(c *Config) string { return c.Lotman.LotHome },
+	"Monitoring.DataLocation": func(c *Config) string { return c.Monitoring.DataLocation },
+	"Monitoring.DataRetentionSize": func(c *Config) string { return c.Monitoring.DataRetentionSize },
+	"OIDC.AuthorizationEndpoint": func(c *Config) string { return c.OIDC.AuthorizationEndpoint },
+	"OIDC.ClientID": func(c *Config) string { return c.OIDC.ClientID },
+	"OIDC.ClientIDFile": func(c *Config) string { return c.OIDC.ClientIDFile },
+	"OIDC.ClientRedirectHostname": func(c *Config) string { return c.OIDC.ClientRedirectHostname },
+	"OIDC.ClientSecretFile": func(c *Config) string { return c.OIDC.ClientSecretFile },
+	"OIDC.DeviceAuthEndpoint": func(c *Config) string { return c.OIDC.DeviceAuthEndpoint },
+	"OIDC.Issuer": func(c *Config) string { return c.OIDC.Issuer },
+	"OIDC.TokenEndpoint": func(c *Config) string { return c.OIDC.TokenEndpoint },
+	"OIDC.UserInfoEndpoint": func(c *Config) string { return c.OIDC.UserInfoEndpoint },
+	"Origin.DbLocation": func(c *Config) string { return c.Origin.DbLocation },
+	"Origin.ExportVolume": func(c *Config) string { return c.Origin.ExportVolume },
+	"Origin.FedTokenLocation": func(c *Config) string { return c.Origin.FedTokenLocation },
+	"Origin.FederationPrefix": func(c *Config) string { return c.Origin.FederationPrefix },
+	"Origin.GlobusClientIDFile": func(c *Config) string { return c.Origin.GlobusClientIDFile },
+	"Origin.GlobusClientSecretFile": func(c *Config) string { return c.Origin.GlobusClientSecretFile },
+	"Origin.GlobusCollectionID": func(c *Config) string { return c.Origin.GlobusCollectionID },
+	"Origin.GlobusCollectionName": func(c *Config) string { return c.Origin.GlobusCollectionName },
+	"Origin.GlobusConfigLocation": func(c *Config) string { return c.Origin.GlobusConfigLocation },
+	"Origin.GlobusTransferTokenFile": func(c *Config) string { return c.Origin.GlobusTransferTokenFile },
+	"Origin.HttpAuthTokenFile": func(c *Config) string { return c.Origin.HttpAuthTokenFile },
+	"Origin.HttpServiceUrl": func(c *Config) string { return c.Origin.HttpServiceUrl },
+	"Origin.Mode": func(c *Config) string { return c.Origin.Mode },
+	"Origin.NamespacePrefix": func(c *Config) string { return c.Origin.NamespacePrefix },
+	"Origin.RunLocation": func(c *Config) string { return c.Origin.RunLocation },
+	"Origin.S3AccessKeyfile": func(c *Config) string { return c.Origin.S3AccessKeyfile },
+	"Origin.S3Bucket": func(c *Config) string { return c.Origin.S3Bucket },
+	"Origin.S3Region": func(c *Config) string { return c.Origin.S3Region },
+	"Origin.S3SecretKeyfile": func(c *Config) string { return c.Origin.S3SecretKeyfile },
+	"Origin.S3ServiceName": func(c *Config) string { return c.Origin.S3ServiceName },
+	"Origin.S3ServiceUrl": func(c *Config) string { return c.Origin.S3ServiceUrl },
+	"Origin.S3UrlStyle": func(c *Config) string { return c.Origin.S3UrlStyle },
+	"Origin.ScitokensDefaultUser": func(c *Config) string { return c.Origin.ScitokensDefaultUser },
+	"Origin.ScitokensGroupsClaim": func(c *Config) string { return c.Origin.ScitokensGroupsClaim },
+	"Origin.ScitokensNameMapFile": func(c *Config) string { return c.Origin.ScitokensNameMapFile },
+	"Origin.ScitokensUsernameClaim": func(c *Config) string { return c.Origin.ScitokensUsernameClaim },
+	"Origin.StoragePrefix": func(c *Config) string { return c.Origin.StoragePrefix },
+	"Origin.StorageType": func(c *Config) string { return c.Origin.StorageType },
+	"Origin.TokenAudience": func(c *Config) string { return c.Origin.TokenAudience },
+	"Origin.UploadTempLocation": func(c *Config) string { return c.Origin.UploadTempLocation },
+	"Origin.Url": func(c *Config) string { return c.Origin.Url },
+	"Origin.XRootDPrefix": func(c *Config) string { return c.Origin.XRootDPrefix },
+	"Origin.XRootServiceUrl": func(c *Config) string { return c.Origin.XRootServiceUrl },
+	"Plugin.Token": func(c *Config) string { return c.Plugin.Token },
+	"Registry.DbLocation": func(c *Config) string { return c.Registry.DbLocation },
+	"Registry.InstitutionsUrl": func(c *Config) string { return c.Registry.InstitutionsUrl },
+	"RuntimeDir": func(c *Config) string { return c.RuntimeDir },
+	"Server.DatabaseBackup.Location": func(c *Config) string { return c.Server.DatabaseBackup.Location },
+	"Server.DbLocation": func(c *Config) string { return c.Server.DbLocation },
+	"Server.ExternalWebUrl": func(c *Config) string { return c.Server.ExternalWebUrl },
+	"Server.Hostname": func(c *Config) string { return c.Server.Hostname },
+	"Server.IssuerHostname": func(c *Config) string { return c.Server.IssuerHostname },
+	"Server.IssuerJwks": func(c *Config) string { return c.Server.IssuerJwks },
+	"Server.IssuerUrl": func(c *Config) string { return c.Server.IssuerUrl },
+	"Server.SessionSecretFile": func(c *Config) string { return c.Server.SessionSecretFile },
+	"Server.TLSCACertificateDirectory": func(c *Config) string { return c.Server.TLSCACertificateDirectory },
+	"Server.TLSCACertificateFile": func(c *Config) string { return c.Server.TLSCACertificateFile },
+	"Server.TLSCAKey": func(c *Config) string { return c.Server.TLSCAKey },
+	"Server.TLSCertificate": func(c *Config) string { return c.Server.TLSCertificate },
+	"Server.TLSCertificateChain": func(c *Config) string { return c.Server.TLSCertificateChain },
+	"Server.TLSKey": func(c *Config) string { return c.Server.TLSKey },
+	"Server.UIActivationCodeFile": func(c *Config) string { return c.Server.UIActivationCodeFile },
+	"Server.UIPasswordFile": func(c *Config) string { return c.Server.UIPasswordFile },
+	"Server.UnprivilegedUser": func(c *Config) string { return c.Server.UnprivilegedUser },
+	"Server.WebConfigFile": func(c *Config) string { return c.Server.WebConfigFile },
+	"Server.WebHost": func(c *Config) string { return c.Server.WebHost },
+	"Shoveler.AMQPExchange": func(c *Config) string { return c.Shoveler.AMQPExchange },
+	"Shoveler.AMQPTokenLocation": func(c *Config) string { return c.Shoveler.AMQPTokenLocation },
+	"Shoveler.MessageQueueProtocol": func(c *Config) string { return c.Shoveler.MessageQueueProtocol },
+	"Shoveler.PasswordLocation": func(c *Config) string { return c.Shoveler.PasswordLocation },
+	"Shoveler.QueueDirectory": func(c *Config) string { return c.Shoveler.QueueDirectory },
+	"Shoveler.StompCert": func(c *Config) string { return c.Shoveler.StompCert },
+	"Shoveler.StompCertKey": func(c *Config) string { return c.Shoveler.StompCertKey },
+	"Shoveler.StompUsername": func(c *Config) string { return c.Shoveler.StompUsername },
+	"Shoveler.Topic": func(c *Config) string { return c.Shoveler.Topic },
+	"Shoveler.URL": func(c *Config) string { return c.Shoveler.URL },
+	"StagePlugin.MountPrefix": func(c *Config) string { return c.StagePlugin.MountPrefix },
+	"StagePlugin.OriginPrefix": func(c *Config) string { return c.StagePlugin.OriginPrefix },
+	"StagePlugin.ShadowOriginPrefix": func(c *Config) string { return c.StagePlugin.ShadowOriginPrefix },
+	"Xrootd.Authfile": func(c *Config) string { return c.Xrootd.Authfile },
+	"Xrootd.ConfigFile": func(c *Config) string { return c.Xrootd.ConfigFile },
+	"Xrootd.DetailedMonitoringHost": func(c *Config) string { return c.Xrootd.DetailedMonitoringHost },
+	"Xrootd.LocalMonitoringHost": func(c *Config) string { return c.Xrootd.LocalMonitoringHost },
+	"Xrootd.MacaroonsKeyFile": func(c *Config) string { return c.Xrootd.MacaroonsKeyFile },
+	"Xrootd.ManagerHost": func(c *Config) string { return c.Xrootd.ManagerHost },
+	"Xrootd.Mount": func(c *Config) string { return c.Xrootd.Mount },
+	"Xrootd.RobotsTxtFile": func(c *Config) string { return c.Xrootd.RobotsTxtFile },
+	"Xrootd.RunLocation": func(c *Config) string { return c.Xrootd.RunLocation },
+	"Xrootd.ScitokensConfig": func(c *Config) string { return c.Xrootd.ScitokensConfig },
+	"Xrootd.Sitename": func(c *Config) string { return c.Xrootd.Sitename },
+	"Xrootd.SummaryMonitoringHost": func(c *Config) string { return c.Xrootd.SummaryMonitoringHost },
+}
+
 func (sP StringParam) GetString() string {
-	config := getOrCreateConfig()
-	switch sP.name {
-		case "Cache.ClientStatisticsLocation":
-			return config.Cache.ClientStatisticsLocation
-		case "Cache.DataLocation":
-			return config.Cache.DataLocation
-		case "Cache.DbLocation":
-			return config.Cache.DbLocation
-		case "Cache.ExportLocation":
-			return config.Cache.ExportLocation
-		case "Cache.FedTokenLocation":
-			return config.Cache.FedTokenLocation
-		case "Cache.FilesBaseSize":
-			return config.Cache.FilesBaseSize
-		case "Cache.FilesMaxSize":
-			return config.Cache.FilesMaxSize
-		case "Cache.FilesNominalSize":
-			return config.Cache.FilesNominalSize
-		case "Cache.HighWaterMark":
-			return config.Cache.HighWaterMark
-		case "Cache.LocalRoot":
-			return config.Cache.LocalRoot
-		case "Cache.LowWatermark":
-			return config.Cache.LowWatermark
-		case "Cache.NamespaceLocation":
-			return config.Cache.NamespaceLocation
-		case "Cache.PSSOrigin":
-			return config.Cache.PSSOrigin
-		case "Cache.RunLocation":
-			return config.Cache.RunLocation
-		case "Cache.SentinelLocation":
-			return config.Cache.SentinelLocation
-		case "Cache.StorageLocation":
-			return config.Cache.StorageLocation
-		case "Cache.Url":
-			return config.Cache.Url
-		case "Cache.XRootDPrefix":
-			return config.Cache.XRootDPrefix
-		case "ClientAgent.DbLocation":
-			return config.ClientAgent.DbLocation
-		case "ClientAgent.PidFile":
-			return config.ClientAgent.PidFile
-		case "ClientAgent.Socket":
-			return config.ClientAgent.Socket
-		case "Director.AdvertiseUrl":
-			return config.Director.AdvertiseUrl
-		case "Director.CacheSortMethod":
-			return config.Director.CacheSortMethod
-		case "Director.DbLocation":
-			return config.Director.DbLocation
-		case "Director.DefaultResponse":
-			return config.Director.DefaultResponse
-		case "Director.GeoIPLocation":
-			return config.Director.GeoIPLocation
-		case "Director.MaxMindKeyFile":
-			return config.Director.MaxMindKeyFile
-		case "Director.SupportContactEmail":
-			return config.Director.SupportContactEmail
-		case "Director.SupportContactUrl":
-			return config.Director.SupportContactUrl
-		case "Federation.DiscoveryUrl":
-			return config.Federation.DiscoveryUrl
-		case "Federation.TopologyDowntimeUrl":
-			return config.Federation.TopologyDowntimeUrl
-		case "Federation.TopologyNamespaceUrl":
-			return config.Federation.TopologyNamespaceUrl
-		case "Federation.TopologyUrl":
-			return config.Federation.TopologyUrl
-		case "IssuerKey":
-			return config.IssuerKey
-		case "IssuerKeysDirectory":
-			return config.IssuerKeysDirectory
-		case "Issuer.AuthenticationSource":
-			return config.Issuer.AuthenticationSource
-		case "Issuer.GroupFile":
-			return config.Issuer.GroupFile
-		case "Issuer.GroupSource":
-			return config.Issuer.GroupSource
-		case "Issuer.IssuerClaimValue":
-			return config.Issuer.IssuerClaimValue
-		case "Issuer.OIDCAuthenticationUserClaim":
-			return config.Issuer.OIDCAuthenticationUserClaim
-		case "Issuer.OIDCGroupClaim":
-			return config.Issuer.OIDCGroupClaim
-		case "Issuer.OIDCIssuerClaim":
-			return config.Issuer.OIDCIssuerClaim
-		case "Issuer.OIDCSubjectClaim":
-			return config.Issuer.OIDCSubjectClaim
-		case "Issuer.QDLLocation":
-			return config.Issuer.QDLLocation
-		case "Issuer.ScitokensServerLocation":
-			return config.Issuer.ScitokensServerLocation
-		case "Issuer.TomcatLocation":
-			return config.Issuer.TomcatLocation
-		case "LocalCache.DataLocation":
-			return config.LocalCache.DataLocation
-		case "LocalCache.RunLocation":
-			return config.LocalCache.RunLocation
-		case "LocalCache.Size":
-			return config.LocalCache.Size
-		case "LocalCache.Socket":
-			return config.LocalCache.Socket
-		case "Logging.Cache.Http":
-			return config.Logging.Cache.Http
-		case "Logging.Cache.Lotman":
-			return config.Logging.Cache.Lotman
-		case "Logging.Cache.Ofs":
-			return config.Logging.Cache.Ofs
-		case "Logging.Cache.Pfc":
-			return config.Logging.Cache.Pfc
-		case "Logging.Cache.Pss":
-			return config.Logging.Cache.Pss
-		case "Logging.Cache.PssSetOpt":
-			return config.Logging.Cache.PssSetOpt
-		case "Logging.Cache.Scitokens":
-			return config.Logging.Cache.Scitokens
-		case "Logging.Cache.Xrd":
-			return config.Logging.Cache.Xrd
-		case "Logging.Cache.Xrootd":
-			return config.Logging.Cache.Xrootd
-		case "Logging.Level":
-			return config.Logging.Level
-		case "Logging.LogLocation":
-			return config.Logging.LogLocation
-		case "Logging.Origin.Cms":
-			return config.Logging.Origin.Cms
-		case "Logging.Origin.Http":
-			return config.Logging.Origin.Http
-		case "Logging.Origin.Ofs":
-			return config.Logging.Origin.Ofs
-		case "Logging.Origin.Oss":
-			return config.Logging.Origin.Oss
-		case "Logging.Origin.Scitokens":
-			return config.Logging.Origin.Scitokens
-		case "Logging.Origin.Xrd":
-			return config.Logging.Origin.Xrd
-		case "Logging.Origin.Xrootd":
-			return config.Logging.Origin.Xrootd
-		case "Lotman.DbLocation":
-			return config.Lotman.DbLocation
-		case "Lotman.EnabledPolicy":
-			return config.Lotman.EnabledPolicy
-		case "Lotman.LibLocation":
-			return config.Lotman.LibLocation
-		case "Lotman.LotHome":
-			return config.Lotman.LotHome
-		case "Monitoring.DataLocation":
-			return config.Monitoring.DataLocation
-		case "Monitoring.DataRetentionSize":
-			return config.Monitoring.DataRetentionSize
-		case "OIDC.AuthorizationEndpoint":
-			return config.OIDC.AuthorizationEndpoint
-		case "OIDC.ClientID":
-			return config.OIDC.ClientID
-		case "OIDC.ClientIDFile":
-			return config.OIDC.ClientIDFile
-		case "OIDC.ClientRedirectHostname":
-			return config.OIDC.ClientRedirectHostname
-		case "OIDC.ClientSecretFile":
-			return config.OIDC.ClientSecretFile
-		case "OIDC.DeviceAuthEndpoint":
-			return config.OIDC.DeviceAuthEndpoint
-		case "OIDC.Issuer":
-			return config.OIDC.Issuer
-		case "OIDC.TokenEndpoint":
-			return config.OIDC.TokenEndpoint
-		case "OIDC.UserInfoEndpoint":
-			return config.OIDC.UserInfoEndpoint
-		case "Origin.DbLocation":
-			return config.Origin.DbLocation
-		case "Origin.ExportVolume":
-			return config.Origin.ExportVolume
-		case "Origin.FedTokenLocation":
-			return config.Origin.FedTokenLocation
-		case "Origin.FederationPrefix":
-			return config.Origin.FederationPrefix
-		case "Origin.GlobusClientIDFile":
-			return config.Origin.GlobusClientIDFile
-		case "Origin.GlobusClientSecretFile":
-			return config.Origin.GlobusClientSecretFile
-		case "Origin.GlobusCollectionID":
-			return config.Origin.GlobusCollectionID
-		case "Origin.GlobusCollectionName":
-			return config.Origin.GlobusCollectionName
-		case "Origin.GlobusConfigLocation":
-			return config.Origin.GlobusConfigLocation
-		case "Origin.GlobusTransferTokenFile":
-			return config.Origin.GlobusTransferTokenFile
-		case "Origin.HttpAuthTokenFile":
-			return config.Origin.HttpAuthTokenFile
-		case "Origin.HttpServiceUrl":
-			return config.Origin.HttpServiceUrl
-		case "Origin.Mode":
-			return config.Origin.Mode
-		case "Origin.NamespacePrefix":
-			return config.Origin.NamespacePrefix
-		case "Origin.RunLocation":
-			return config.Origin.RunLocation
-		case "Origin.S3AccessKeyfile":
-			return config.Origin.S3AccessKeyfile
-		case "Origin.S3Bucket":
-			return config.Origin.S3Bucket
-		case "Origin.S3Region":
-			return config.Origin.S3Region
-		case "Origin.S3SecretKeyfile":
-			return config.Origin.S3SecretKeyfile
-		case "Origin.S3ServiceName":
-			return config.Origin.S3ServiceName
-		case "Origin.S3ServiceUrl":
-			return config.Origin.S3ServiceUrl
-		case "Origin.S3UrlStyle":
-			return config.Origin.S3UrlStyle
-		case "Origin.ScitokensDefaultUser":
-			return config.Origin.ScitokensDefaultUser
-		case "Origin.ScitokensGroupsClaim":
-			return config.Origin.ScitokensGroupsClaim
-		case "Origin.ScitokensNameMapFile":
-			return config.Origin.ScitokensNameMapFile
-		case "Origin.ScitokensUsernameClaim":
-			return config.Origin.ScitokensUsernameClaim
-		case "Origin.StoragePrefix":
-			return config.Origin.StoragePrefix
-		case "Origin.StorageType":
-			return config.Origin.StorageType
-		case "Origin.TokenAudience":
-			return config.Origin.TokenAudience
-		case "Origin.UploadTempLocation":
-			return config.Origin.UploadTempLocation
-		case "Origin.Url":
-			return config.Origin.Url
-		case "Origin.XRootDPrefix":
-			return config.Origin.XRootDPrefix
-		case "Origin.XRootServiceUrl":
-			return config.Origin.XRootServiceUrl
-		case "Plugin.Token":
-			return config.Plugin.Token
-		case "Registry.DbLocation":
-			return config.Registry.DbLocation
-		case "Registry.InstitutionsUrl":
-			return config.Registry.InstitutionsUrl
-		case "RuntimeDir":
-			return config.RuntimeDir
-		case "Server.DatabaseBackup.Location":
-			return config.Server.DatabaseBackup.Location
-		case "Server.DbLocation":
-			return config.Server.DbLocation
-		case "Server.ExternalWebUrl":
-			return config.Server.ExternalWebUrl
-		case "Server.Hostname":
-			return config.Server.Hostname
-		case "Server.IssuerHostname":
-			return config.Server.IssuerHostname
-		case "Server.IssuerJwks":
-			return config.Server.IssuerJwks
-		case "Server.IssuerUrl":
-			return config.Server.IssuerUrl
-		case "Server.SessionSecretFile":
-			return config.Server.SessionSecretFile
-		case "Server.TLSCACertificateDirectory":
-			return config.Server.TLSCACertificateDirectory
-		case "Server.TLSCACertificateFile":
-			return config.Server.TLSCACertificateFile
-		case "Server.TLSCAKey":
-			return config.Server.TLSCAKey
-		case "Server.TLSCertificate":
-			return config.Server.TLSCertificate
-		case "Server.TLSCertificateChain":
-			return config.Server.TLSCertificateChain
-		case "Server.TLSKey":
-			return config.Server.TLSKey
-		case "Server.UIActivationCodeFile":
-			return config.Server.UIActivationCodeFile
-		case "Server.UIPasswordFile":
-			return config.Server.UIPasswordFile
-		case "Server.UnprivilegedUser":
-			return config.Server.UnprivilegedUser
-		case "Server.WebConfigFile":
-			return config.Server.WebConfigFile
-		case "Server.WebHost":
-			return config.Server.WebHost
-		case "Shoveler.AMQPExchange":
-			return config.Shoveler.AMQPExchange
-		case "Shoveler.AMQPTokenLocation":
-			return config.Shoveler.AMQPTokenLocation
-		case "Shoveler.MessageQueueProtocol":
-			return config.Shoveler.MessageQueueProtocol
-		case "Shoveler.PasswordLocation":
-			return config.Shoveler.PasswordLocation
-		case "Shoveler.QueueDirectory":
-			return config.Shoveler.QueueDirectory
-		case "Shoveler.StompCert":
-			return config.Shoveler.StompCert
-		case "Shoveler.StompCertKey":
-			return config.Shoveler.StompCertKey
-		case "Shoveler.StompUsername":
-			return config.Shoveler.StompUsername
-		case "Shoveler.Topic":
-			return config.Shoveler.Topic
-		case "Shoveler.URL":
-			return config.Shoveler.URL
-		case "StagePlugin.MountPrefix":
-			return config.StagePlugin.MountPrefix
-		case "StagePlugin.OriginPrefix":
-			return config.StagePlugin.OriginPrefix
-		case "StagePlugin.ShadowOriginPrefix":
-			return config.StagePlugin.ShadowOriginPrefix
-		case "Xrootd.Authfile":
-			return config.Xrootd.Authfile
-		case "Xrootd.ConfigFile":
-			return config.Xrootd.ConfigFile
-		case "Xrootd.DetailedMonitoringHost":
-			return config.Xrootd.DetailedMonitoringHost
-		case "Xrootd.LocalMonitoringHost":
-			return config.Xrootd.LocalMonitoringHost
-		case "Xrootd.MacaroonsKeyFile":
-			return config.Xrootd.MacaroonsKeyFile
-		case "Xrootd.ManagerHost":
-			return config.Xrootd.ManagerHost
-		case "Xrootd.Mount":
-			return config.Xrootd.Mount
-		case "Xrootd.RobotsTxtFile":
-			return config.Xrootd.RobotsTxtFile
-		case "Xrootd.RunLocation":
-			return config.Xrootd.RunLocation
-		case "Xrootd.ScitokensConfig":
-			return config.Xrootd.ScitokensConfig
-		case "Xrootd.Sitename":
-			return config.Xrootd.Sitename
-		case "Xrootd.SummaryMonitoringHost":
-			return config.Xrootd.SummaryMonitoringHost
+	if accessor, ok := stringAccessors[sP.name]; ok {
+		return accessor(getOrCreateConfig())
 	}
 	return ""
 }
@@ -824,53 +668,34 @@ func (sP StringParam) GetEnvVarName() string {
 	return paramNameToEnvVar(sP.name)
 }
 
+var stringSliceAccessors = map[string]func(*Config) []string{
+	"Cache.DataLocations": func(c *Config) []string { return c.Cache.DataLocations },
+	"Cache.MetaLocations": func(c *Config) []string { return c.Cache.MetaLocations },
+	"Cache.PermittedNamespaces": func(c *Config) []string { return c.Cache.PermittedNamespaces },
+	"Client.PreferredCaches": func(c *Config) []string { return c.Client.PreferredCaches },
+	"ConfigLocations": func(c *Config) []string { return c.ConfigLocations },
+	"Director.CacheResponseHostnames": func(c *Config) []string { return c.Director.CacheResponseHostnames },
+	"Director.FilteredServers": func(c *Config) []string { return c.Director.FilteredServers },
+	"Director.OriginResponseHostnames": func(c *Config) []string { return c.Director.OriginResponseHostnames },
+	"Issuer.GroupRequirements": func(c *Config) []string { return c.Issuer.GroupRequirements },
+	"Issuer.RedirectUris": func(c *Config) []string { return c.Issuer.RedirectUris },
+	"Monitoring.AggregatePrefixes": func(c *Config) []string { return c.Monitoring.AggregatePrefixes },
+	"OIDC.Scopes": func(c *Config) []string { return c.OIDC.Scopes },
+	"Origin.DefaultChecksumTypes": func(c *Config) []string { return c.Origin.DefaultChecksumTypes },
+	"Origin.ExportVolumes": func(c *Config) []string { return c.Origin.ExportVolumes },
+	"Origin.ScitokensRestrictedPaths": func(c *Config) []string { return c.Origin.ScitokensRestrictedPaths },
+	"Origin.SupportedChecksumTypes": func(c *Config) []string { return c.Origin.SupportedChecksumTypes },
+	"Registry.AdminUsers": func(c *Config) []string { return c.Registry.AdminUsers },
+	"Server.AdminGroups": func(c *Config) []string { return c.Server.AdminGroups },
+	"Server.DirectorUrls": func(c *Config) []string { return c.Server.DirectorUrls },
+	"Server.Modules": func(c *Config) []string { return c.Server.Modules },
+	"Server.UIAdminUsers": func(c *Config) []string { return c.Server.UIAdminUsers },
+	"Shoveler.OutputDestinations": func(c *Config) []string { return c.Shoveler.OutputDestinations },
+}
+
 func (slP StringSliceParam) GetStringSlice() []string {
-	config := getOrCreateConfig()
-	switch slP.name {
-		case "Cache.DataLocations":
-			return config.Cache.DataLocations
-		case "Cache.MetaLocations":
-			return config.Cache.MetaLocations
-		case "Cache.PermittedNamespaces":
-			return config.Cache.PermittedNamespaces
-		case "Client.PreferredCaches":
-			return config.Client.PreferredCaches
-		case "ConfigLocations":
-			return config.ConfigLocations
-		case "Director.CacheResponseHostnames":
-			return config.Director.CacheResponseHostnames
-		case "Director.FilteredServers":
-			return config.Director.FilteredServers
-		case "Director.OriginResponseHostnames":
-			return config.Director.OriginResponseHostnames
-		case "Issuer.GroupRequirements":
-			return config.Issuer.GroupRequirements
-		case "Issuer.RedirectUris":
-			return config.Issuer.RedirectUris
-		case "Monitoring.AggregatePrefixes":
-			return config.Monitoring.AggregatePrefixes
-		case "OIDC.Scopes":
-			return config.OIDC.Scopes
-		case "Origin.DefaultChecksumTypes":
-			return config.Origin.DefaultChecksumTypes
-		case "Origin.ExportVolumes":
-			return config.Origin.ExportVolumes
-		case "Origin.ScitokensRestrictedPaths":
-			return config.Origin.ScitokensRestrictedPaths
-		case "Origin.SupportedChecksumTypes":
-			return config.Origin.SupportedChecksumTypes
-		case "Registry.AdminUsers":
-			return config.Registry.AdminUsers
-		case "Server.AdminGroups":
-			return config.Server.AdminGroups
-		case "Server.DirectorUrls":
-			return config.Server.DirectorUrls
-		case "Server.Modules":
-			return config.Server.Modules
-		case "Server.UIAdminUsers":
-			return config.Server.UIAdminUsers
-		case "Shoveler.OutputDestinations":
-			return config.Shoveler.OutputDestinations
+	if accessor, ok := stringSliceAccessors[slP.name]; ok {
+		return accessor(getOrCreateConfig())
 	}
 	return nil
 }
@@ -891,97 +716,56 @@ func (slP StringSliceParam) GetEnvVarName() string {
 	return paramNameToEnvVar(slP.name)
 }
 
+var intAccessors = map[string]func(*Config) int{
+	"Cache.BlocksToPrefetch": func(c *Config) int { return c.Cache.BlocksToPrefetch },
+	"Cache.Concurrency": func(c *Config) int { return c.Cache.Concurrency },
+	"Cache.ConcurrencyDegradedThreshold": func(c *Config) int { return c.Cache.ConcurrencyDegradedThreshold },
+	"Cache.EvictionMonitoringMaxDepth": func(c *Config) int { return c.Cache.EvictionMonitoringMaxDepth },
+	"Cache.Port": func(c *Config) int { return c.Cache.Port },
+	"ClientAgent.HistoryRetentionDays": func(c *Config) int { return c.ClientAgent.HistoryRetentionDays },
+	"ClientAgent.MaxConcurrentJobs": func(c *Config) int { return c.ClientAgent.MaxConcurrentJobs },
+	"Client.DirectorRetries": func(c *Config) int { return c.Client.DirectorRetries },
+	"Client.MaximumDownloadSpeed": func(c *Config) int { return c.Client.MaximumDownloadSpeed },
+	"Client.MinimumDownloadSpeed": func(c *Config) int { return c.Client.MinimumDownloadSpeed },
+	"Client.WorkerCount": func(c *Config) int { return c.Client.WorkerCount },
+	"Director.AdaptiveSortTruncateConstant": func(c *Config) int { return c.Director.AdaptiveSortTruncateConstant },
+	"Director.CachePresenceCapacity": func(c *Config) int { return c.Director.CachePresenceCapacity },
+	"Director.MaxStatResponse": func(c *Config) int { return c.Director.MaxStatResponse },
+	"Director.MinStatResponse": func(c *Config) int { return c.Director.MinStatResponse },
+	"Director.StatConcurrencyLimit": func(c *Config) int { return c.Director.StatConcurrencyLimit },
+	"LocalCache.HighWaterMarkPercentage": func(c *Config) int { return c.LocalCache.HighWaterMarkPercentage },
+	"LocalCache.LowWaterMarkPercentage": func(c *Config) int { return c.LocalCache.LowWaterMarkPercentage },
+	"MinimumDownloadSpeed": func(c *Config) int { return c.MinimumDownloadSpeed },
+	"Monitoring.LabelLimit": func(c *Config) int { return c.Monitoring.LabelLimit },
+	"Monitoring.LabelNameLengthLimit": func(c *Config) int { return c.Monitoring.LabelNameLengthLimit },
+	"Monitoring.LabelValueLengthLimit": func(c *Config) int { return c.Monitoring.LabelValueLengthLimit },
+	"Monitoring.PortHigher": func(c *Config) int { return c.Monitoring.PortHigher },
+	"Monitoring.PortLower": func(c *Config) int { return c.Monitoring.PortLower },
+	"Monitoring.SampleLimit": func(c *Config) int { return c.Monitoring.SampleLimit },
+	"Monitoring.StorageCriticalThreshold": func(c *Config) int { return c.Monitoring.StorageCriticalThreshold },
+	"Monitoring.StorageWarningThreshold": func(c *Config) int { return c.Monitoring.StorageWarningThreshold },
+	"Origin.Concurrency": func(c *Config) int { return c.Origin.Concurrency },
+	"Origin.ConcurrencyDegradedThreshold": func(c *Config) int { return c.Origin.ConcurrencyDegradedThreshold },
+	"Origin.DiskUsageCalculationRateLimit": func(c *Config) int { return c.Origin.DiskUsageCalculationRateLimit },
+	"Origin.Port": func(c *Config) int { return c.Origin.Port },
+	"Server.DatabaseBackup.MaxCount": func(c *Config) int { return c.Server.DatabaseBackup.MaxCount },
+	"Server.IssuerPort": func(c *Config) int { return c.Server.IssuerPort },
+	"Server.UILoginRateLimit": func(c *Config) int { return c.Server.UILoginRateLimit },
+	"Server.WebPort": func(c *Config) int { return c.Server.WebPort },
+	"Shoveler.PortHigher": func(c *Config) int { return c.Shoveler.PortHigher },
+	"Shoveler.PortLower": func(c *Config) int { return c.Shoveler.PortLower },
+	"Transport.MaxIdleConns": func(c *Config) int { return c.Transport.MaxIdleConns },
+	"Xrootd.DetailedMonitoringPort": func(c *Config) int { return c.Xrootd.DetailedMonitoringPort },
+	"Xrootd.LocalMonitoringPort": func(c *Config) int { return c.Xrootd.LocalMonitoringPort },
+	"Xrootd.ManagerPort": func(c *Config) int { return c.Xrootd.ManagerPort },
+	"Xrootd.MaxThreads": func(c *Config) int { return c.Xrootd.MaxThreads },
+	"Xrootd.Port": func(c *Config) int { return c.Xrootd.Port },
+	"Xrootd.SummaryMonitoringPort": func(c *Config) int { return c.Xrootd.SummaryMonitoringPort },
+}
+
 func (iP IntParam) GetInt() int {
-	config := getOrCreateConfig()
-	switch iP.name {
-		case "Cache.BlocksToPrefetch":
-			return config.Cache.BlocksToPrefetch
-		case "Cache.Concurrency":
-			return config.Cache.Concurrency
-		case "Cache.ConcurrencyDegradedThreshold":
-			return config.Cache.ConcurrencyDegradedThreshold
-		case "Cache.EvictionMonitoringMaxDepth":
-			return config.Cache.EvictionMonitoringMaxDepth
-		case "Cache.Port":
-			return config.Cache.Port
-		case "ClientAgent.HistoryRetentionDays":
-			return config.ClientAgent.HistoryRetentionDays
-		case "ClientAgent.MaxConcurrentJobs":
-			return config.ClientAgent.MaxConcurrentJobs
-		case "Client.DirectorRetries":
-			return config.Client.DirectorRetries
-		case "Client.MaximumDownloadSpeed":
-			return config.Client.MaximumDownloadSpeed
-		case "Client.MinimumDownloadSpeed":
-			return config.Client.MinimumDownloadSpeed
-		case "Client.WorkerCount":
-			return config.Client.WorkerCount
-		case "Director.AdaptiveSortTruncateConstant":
-			return config.Director.AdaptiveSortTruncateConstant
-		case "Director.CachePresenceCapacity":
-			return config.Director.CachePresenceCapacity
-		case "Director.MaxStatResponse":
-			return config.Director.MaxStatResponse
-		case "Director.MinStatResponse":
-			return config.Director.MinStatResponse
-		case "Director.StatConcurrencyLimit":
-			return config.Director.StatConcurrencyLimit
-		case "LocalCache.HighWaterMarkPercentage":
-			return config.LocalCache.HighWaterMarkPercentage
-		case "LocalCache.LowWaterMarkPercentage":
-			return config.LocalCache.LowWaterMarkPercentage
-		case "MinimumDownloadSpeed":
-			return config.MinimumDownloadSpeed
-		case "Monitoring.LabelLimit":
-			return config.Monitoring.LabelLimit
-		case "Monitoring.LabelNameLengthLimit":
-			return config.Monitoring.LabelNameLengthLimit
-		case "Monitoring.LabelValueLengthLimit":
-			return config.Monitoring.LabelValueLengthLimit
-		case "Monitoring.PortHigher":
-			return config.Monitoring.PortHigher
-		case "Monitoring.PortLower":
-			return config.Monitoring.PortLower
-		case "Monitoring.SampleLimit":
-			return config.Monitoring.SampleLimit
-		case "Monitoring.StorageCriticalThreshold":
-			return config.Monitoring.StorageCriticalThreshold
-		case "Monitoring.StorageWarningThreshold":
-			return config.Monitoring.StorageWarningThreshold
-		case "Origin.Concurrency":
-			return config.Origin.Concurrency
-		case "Origin.ConcurrencyDegradedThreshold":
-			return config.Origin.ConcurrencyDegradedThreshold
-		case "Origin.DiskUsageCalculationRateLimit":
-			return config.Origin.DiskUsageCalculationRateLimit
-		case "Origin.Port":
-			return config.Origin.Port
-		case "Server.DatabaseBackup.MaxCount":
-			return config.Server.DatabaseBackup.MaxCount
-		case "Server.IssuerPort":
-			return config.Server.IssuerPort
-		case "Server.UILoginRateLimit":
-			return config.Server.UILoginRateLimit
-		case "Server.WebPort":
-			return config.Server.WebPort
-		case "Shoveler.PortHigher":
-			return config.Shoveler.PortHigher
-		case "Shoveler.PortLower":
-			return config.Shoveler.PortLower
-		case "Transport.MaxIdleConns":
-			return config.Transport.MaxIdleConns
-		case "Xrootd.DetailedMonitoringPort":
-			return config.Xrootd.DetailedMonitoringPort
-		case "Xrootd.LocalMonitoringPort":
-			return config.Xrootd.LocalMonitoringPort
-		case "Xrootd.ManagerPort":
-			return config.Xrootd.ManagerPort
-		case "Xrootd.MaxThreads":
-			return config.Xrootd.MaxThreads
-		case "Xrootd.Port":
-			return config.Xrootd.Port
-		case "Xrootd.SummaryMonitoringPort":
-			return config.Xrootd.SummaryMonitoringPort
+	if accessor, ok := intAccessors[iP.name]; ok {
+		return accessor(getOrCreateConfig())
 	}
 	return 0
 }
@@ -1002,11 +786,13 @@ func (iP IntParam) GetEnvVarName() string {
 	return paramNameToEnvVar(iP.name)
 }
 
+var byteRateAccessors = map[string]func(*Config) byte_rate.ByteRate{
+	"Origin.TransferRateLimit": func(c *Config) byte_rate.ByteRate { return c.Origin.TransferRateLimit },
+}
+
 func (bRP ByteRateParam) GetByteRate() byte_rate.ByteRate {
-	config := getOrCreateConfig()
-	switch bRP.name {
-		case "Origin.TransferRateLimit":
-			return config.Origin.TransferRateLimit
+	if accessor, ok := byteRateAccessors[bRP.name]; ok {
+		return accessor(getOrCreateConfig())
 	}
 	return 0
 }
@@ -1027,157 +813,86 @@ func (bRP ByteRateParam) GetEnvVarName() string {
 	return paramNameToEnvVar(bRP.name)
 }
 
+var boolAccessors = map[string]func(*Config) bool{
+	"Cache.DirectorTest": func(c *Config) bool { return c.Cache.DirectorTest },
+	"Cache.EnableBroker": func(c *Config) bool { return c.Cache.EnableBroker },
+	"Cache.EnableEvictionMonitoring": func(c *Config) bool { return c.Cache.EnableEvictionMonitoring },
+	"Cache.EnableLotman": func(c *Config) bool { return c.Cache.EnableLotman },
+	"Cache.EnableOIDC": func(c *Config) bool { return c.Cache.EnableOIDC },
+	"Cache.EnablePrefetch": func(c *Config) bool { return c.Cache.EnablePrefetch },
+	"Cache.EnableSiteLocalMode": func(c *Config) bool { return c.Cache.EnableSiteLocalMode },
+	"Cache.EnableTLSClientAuth": func(c *Config) bool { return c.Cache.EnableTLSClientAuth },
+	"Cache.EnableVoms": func(c *Config) bool { return c.Cache.EnableVoms },
+	"Cache.SelfTest": func(c *Config) bool { return c.Cache.SelfTest },
+	"Client.AssumeDirectorServerHeader": func(c *Config) bool { return c.Client.AssumeDirectorServerHeader },
+	"Client.DisableHttpProxy": func(c *Config) bool { return c.Client.DisableHttpProxy },
+	"Client.DisableProxyFallback": func(c *Config) bool { return c.Client.DisableProxyFallback },
+	"Client.EnableOverwrites": func(c *Config) bool { return c.Client.EnableOverwrites },
+	"Client.IsPlugin": func(c *Config) bool { return c.Client.IsPlugin },
+	"Debug": func(c *Config) bool { return c.Debug },
+	"Director.AssumePresenceAtSingleOrigin": func(c *Config) bool { return c.Director.AssumePresenceAtSingleOrigin },
+	"Director.CachesPullFromCaches": func(c *Config) bool { return c.Director.CachesPullFromCaches },
+	"Director.CheckCachePresence": func(c *Config) bool { return c.Director.CheckCachePresence },
+	"Director.CheckOriginPresence": func(c *Config) bool { return c.Director.CheckOriginPresence },
+	"Director.EnableBroker": func(c *Config) bool { return c.Director.EnableBroker },
+	"Director.EnableFederationMetadataHosting": func(c *Config) bool { return c.Director.EnableFederationMetadataHosting },
+	"Director.EnableOIDC": func(c *Config) bool { return c.Director.EnableOIDC },
+	"Director.EnableStat": func(c *Config) bool { return c.Director.EnableStat },
+	"Director.FilterCachesInErrorState": func(c *Config) bool { return c.Director.FilterCachesInErrorState },
+	"DisableHttpProxy": func(c *Config) bool { return c.DisableHttpProxy },
+	"DisableProxyFallback": func(c *Config) bool { return c.DisableProxyFallback },
+	"Issuer.OIDCPreferClaimsFromIDToken": func(c *Config) bool { return c.Issuer.OIDCPreferClaimsFromIDToken },
+	"Issuer.UserStripDomain": func(c *Config) bool { return c.Issuer.UserStripDomain },
+	"Logging.DisableProgressBars": func(c *Config) bool { return c.Logging.DisableProgressBars },
+	"Lotman.EnableAPI": func(c *Config) bool { return c.Lotman.EnableAPI },
+	"Monitoring.EnablePrometheus": func(c *Config) bool { return c.Monitoring.EnablePrometheus },
+	"Monitoring.MetricAuthorization": func(c *Config) bool { return c.Monitoring.MetricAuthorization },
+	"Monitoring.PromQLAuthorization": func(c *Config) bool { return c.Monitoring.PromQLAuthorization },
+	"Origin.DirectorTest": func(c *Config) bool { return c.Origin.DirectorTest },
+	"Origin.DisableDirectClients": func(c *Config) bool { return c.Origin.DisableDirectClients },
+	"Origin.EnableAtomicUploads": func(c *Config) bool { return c.Origin.EnableAtomicUploads },
+	"Origin.EnableBroker": func(c *Config) bool { return c.Origin.EnableBroker },
+	"Origin.EnableCmsd": func(c *Config) bool { return c.Origin.EnableCmsd },
+	"Origin.EnableDirListing": func(c *Config) bool { return c.Origin.EnableDirListing },
+	"Origin.EnableDirectReads": func(c *Config) bool { return c.Origin.EnableDirectReads },
+	"Origin.EnableDiskUsageCalculation": func(c *Config) bool { return c.Origin.EnableDiskUsageCalculation },
+	"Origin.EnableFallbackRead": func(c *Config) bool { return c.Origin.EnableFallbackRead },
+	"Origin.EnableIssuer": func(c *Config) bool { return c.Origin.EnableIssuer },
+	"Origin.EnableListings": func(c *Config) bool { return c.Origin.EnableListings },
+	"Origin.EnableMacaroons": func(c *Config) bool { return c.Origin.EnableMacaroons },
+	"Origin.EnableOIDC": func(c *Config) bool { return c.Origin.EnableOIDC },
+	"Origin.EnablePublicReads": func(c *Config) bool { return c.Origin.EnablePublicReads },
+	"Origin.EnableReads": func(c *Config) bool { return c.Origin.EnableReads },
+	"Origin.EnableVoms": func(c *Config) bool { return c.Origin.EnableVoms },
+	"Origin.EnableWrite": func(c *Config) bool { return c.Origin.EnableWrite },
+	"Origin.EnableWrites": func(c *Config) bool { return c.Origin.EnableWrites },
+	"Origin.Multiuser": func(c *Config) bool { return c.Origin.Multiuser },
+	"Origin.ScitokensMapSubject": func(c *Config) bool { return c.Origin.ScitokensMapSubject },
+	"Origin.SelfTest": func(c *Config) bool { return c.Origin.SelfTest },
+	"Registry.RequireCacheApproval": func(c *Config) bool { return c.Registry.RequireCacheApproval },
+	"Registry.RequireKeyChaining": func(c *Config) bool { return c.Registry.RequireKeyChaining },
+	"Registry.RequireOriginApproval": func(c *Config) bool { return c.Registry.RequireOriginApproval },
+	"Server.DropPrivileges": func(c *Config) bool { return c.Server.DropPrivileges },
+	"Server.EnablePKCS11": func(c *Config) bool { return c.Server.EnablePKCS11 },
+	"Server.EnablePprof": func(c *Config) bool { return c.Server.EnablePprof },
+	"Server.EnableUI": func(c *Config) bool { return c.Server.EnableUI },
+	"Server.HealthMonitoringPublic": func(c *Config) bool { return c.Server.HealthMonitoringPublic },
+	"Shoveler.Enable": func(c *Config) bool { return c.Shoveler.Enable },
+	"Shoveler.VerifyHeader": func(c *Config) bool { return c.Shoveler.VerifyHeader },
+	"StagePlugin.Hook": func(c *Config) bool { return c.StagePlugin.Hook },
+	"TLSSkipVerify": func(c *Config) bool { return c.TLSSkipVerify },
+	"Topology.DisableCacheX509": func(c *Config) bool { return c.Topology.DisableCacheX509 },
+	"Topology.DisableCaches": func(c *Config) bool { return c.Topology.DisableCaches },
+	"Topology.DisableDowntime": func(c *Config) bool { return c.Topology.DisableDowntime },
+	"Topology.DisableOriginX509": func(c *Config) bool { return c.Topology.DisableOriginX509 },
+	"Topology.DisableOrigins": func(c *Config) bool { return c.Topology.DisableOrigins },
+	"Xrootd.AutoShutdownEnabled": func(c *Config) bool { return c.Xrootd.AutoShutdownEnabled },
+	"Xrootd.EnableLocalMonitoring": func(c *Config) bool { return c.Xrootd.EnableLocalMonitoring },
+}
+
 func (bP BoolParam) GetBool() bool {
-	config := getOrCreateConfig()
-	switch bP.name {
-		case "Cache.DirectorTest":
-			return config.Cache.DirectorTest
-		case "Cache.EnableBroker":
-			return config.Cache.EnableBroker
-		case "Cache.EnableEvictionMonitoring":
-			return config.Cache.EnableEvictionMonitoring
-		case "Cache.EnableLotman":
-			return config.Cache.EnableLotman
-		case "Cache.EnableOIDC":
-			return config.Cache.EnableOIDC
-		case "Cache.EnablePrefetch":
-			return config.Cache.EnablePrefetch
-		case "Cache.EnableSiteLocalMode":
-			return config.Cache.EnableSiteLocalMode
-		case "Cache.EnableTLSClientAuth":
-			return config.Cache.EnableTLSClientAuth
-		case "Cache.EnableVoms":
-			return config.Cache.EnableVoms
-		case "Cache.SelfTest":
-			return config.Cache.SelfTest
-		case "Client.AssumeDirectorServerHeader":
-			return config.Client.AssumeDirectorServerHeader
-		case "Client.DisableHttpProxy":
-			return config.Client.DisableHttpProxy
-		case "Client.DisableProxyFallback":
-			return config.Client.DisableProxyFallback
-		case "Client.EnableOverwrites":
-			return config.Client.EnableOverwrites
-		case "Client.IsPlugin":
-			return config.Client.IsPlugin
-		case "Debug":
-			return config.Debug
-		case "Director.AssumePresenceAtSingleOrigin":
-			return config.Director.AssumePresenceAtSingleOrigin
-		case "Director.CachesPullFromCaches":
-			return config.Director.CachesPullFromCaches
-		case "Director.CheckCachePresence":
-			return config.Director.CheckCachePresence
-		case "Director.CheckOriginPresence":
-			return config.Director.CheckOriginPresence
-		case "Director.EnableBroker":
-			return config.Director.EnableBroker
-		case "Director.EnableFederationMetadataHosting":
-			return config.Director.EnableFederationMetadataHosting
-		case "Director.EnableOIDC":
-			return config.Director.EnableOIDC
-		case "Director.EnableStat":
-			return config.Director.EnableStat
-		case "Director.FilterCachesInErrorState":
-			return config.Director.FilterCachesInErrorState
-		case "DisableHttpProxy":
-			return config.DisableHttpProxy
-		case "DisableProxyFallback":
-			return config.DisableProxyFallback
-		case "Issuer.OIDCPreferClaimsFromIDToken":
-			return config.Issuer.OIDCPreferClaimsFromIDToken
-		case "Issuer.UserStripDomain":
-			return config.Issuer.UserStripDomain
-		case "Logging.DisableProgressBars":
-			return config.Logging.DisableProgressBars
-		case "Lotman.EnableAPI":
-			return config.Lotman.EnableAPI
-		case "Monitoring.EnablePrometheus":
-			return config.Monitoring.EnablePrometheus
-		case "Monitoring.MetricAuthorization":
-			return config.Monitoring.MetricAuthorization
-		case "Monitoring.PromQLAuthorization":
-			return config.Monitoring.PromQLAuthorization
-		case "Origin.DirectorTest":
-			return config.Origin.DirectorTest
-		case "Origin.DisableDirectClients":
-			return config.Origin.DisableDirectClients
-		case "Origin.EnableAtomicUploads":
-			return config.Origin.EnableAtomicUploads
-		case "Origin.EnableBroker":
-			return config.Origin.EnableBroker
-		case "Origin.EnableCmsd":
-			return config.Origin.EnableCmsd
-		case "Origin.EnableDirListing":
-			return config.Origin.EnableDirListing
-		case "Origin.EnableDirectReads":
-			return config.Origin.EnableDirectReads
-		case "Origin.EnableDiskUsageCalculation":
-			return config.Origin.EnableDiskUsageCalculation
-		case "Origin.EnableFallbackRead":
-			return config.Origin.EnableFallbackRead
-		case "Origin.EnableIssuer":
-			return config.Origin.EnableIssuer
-		case "Origin.EnableListings":
-			return config.Origin.EnableListings
-		case "Origin.EnableMacaroons":
-			return config.Origin.EnableMacaroons
-		case "Origin.EnableOIDC":
-			return config.Origin.EnableOIDC
-		case "Origin.EnablePublicReads":
-			return config.Origin.EnablePublicReads
-		case "Origin.EnableReads":
-			return config.Origin.EnableReads
-		case "Origin.EnableVoms":
-			return config.Origin.EnableVoms
-		case "Origin.EnableWrite":
-			return config.Origin.EnableWrite
-		case "Origin.EnableWrites":
-			return config.Origin.EnableWrites
-		case "Origin.Multiuser":
-			return config.Origin.Multiuser
-		case "Origin.ScitokensMapSubject":
-			return config.Origin.ScitokensMapSubject
-		case "Origin.SelfTest":
-			return config.Origin.SelfTest
-		case "Registry.RequireCacheApproval":
-			return config.Registry.RequireCacheApproval
-		case "Registry.RequireKeyChaining":
-			return config.Registry.RequireKeyChaining
-		case "Registry.RequireOriginApproval":
-			return config.Registry.RequireOriginApproval
-		case "Server.DropPrivileges":
-			return config.Server.DropPrivileges
-		case "Server.EnablePKCS11":
-			return config.Server.EnablePKCS11
-		case "Server.EnablePprof":
-			return config.Server.EnablePprof
-		case "Server.EnableUI":
-			return config.Server.EnableUI
-		case "Server.HealthMonitoringPublic":
-			return config.Server.HealthMonitoringPublic
-		case "Shoveler.Enable":
-			return config.Shoveler.Enable
-		case "Shoveler.VerifyHeader":
-			return config.Shoveler.VerifyHeader
-		case "StagePlugin.Hook":
-			return config.StagePlugin.Hook
-		case "TLSSkipVerify":
-			return config.TLSSkipVerify
-		case "Topology.DisableCacheX509":
-			return config.Topology.DisableCacheX509
-		case "Topology.DisableCaches":
-			return config.Topology.DisableCaches
-		case "Topology.DisableDowntime":
-			return config.Topology.DisableDowntime
-		case "Topology.DisableOriginX509":
-			return config.Topology.DisableOriginX509
-		case "Topology.DisableOrigins":
-			return config.Topology.DisableOrigins
-		case "Xrootd.AutoShutdownEnabled":
-			return config.Xrootd.AutoShutdownEnabled
-		case "Xrootd.EnableLocalMonitoring":
-			return config.Xrootd.EnableLocalMonitoring
+	if accessor, ok := boolAccessors[bP.name]; ok {
+		return accessor(getOrCreateConfig())
 	}
 	return false
 }
@@ -1198,107 +913,61 @@ func (bP BoolParam) GetEnvVarName() string {
 	return paramNameToEnvVar(bP.name)
 }
 
+var durationAccessors = map[string]func(*Config) time.Duration{
+	"Cache.DefaultCacheTimeout": func(c *Config) time.Duration { return c.Cache.DefaultCacheTimeout },
+	"Cache.EvictionMonitoringInterval": func(c *Config) time.Duration { return c.Cache.EvictionMonitoringInterval },
+	"Cache.MinDirectorRefreshInterval": func(c *Config) time.Duration { return c.Cache.MinDirectorRefreshInterval },
+	"Cache.SelfTestInterval": func(c *Config) time.Duration { return c.Cache.SelfTestInterval },
+	"Cache.SelfTestMaxAge": func(c *Config) time.Duration { return c.Cache.SelfTestMaxAge },
+	"ClientAgent.IdleTimeout": func(c *Config) time.Duration { return c.ClientAgent.IdleTimeout },
+	"ClientAgent.ProgressUpdateInterval": func(c *Config) time.Duration { return c.ClientAgent.ProgressUpdateInterval },
+	"Client.SlowTransferRampupTime": func(c *Config) time.Duration { return c.Client.SlowTransferRampupTime },
+	"Client.SlowTransferWindow": func(c *Config) time.Duration { return c.Client.SlowTransferWindow },
+	"Client.StoppedTransferTimeout": func(c *Config) time.Duration { return c.Client.StoppedTransferTimeout },
+	"Director.AdaptiveSortEWMATimeConstant": func(c *Config) time.Duration { return c.Director.AdaptiveSortEWMATimeConstant },
+	"Director.AdvertisementTTL": func(c *Config) time.Duration { return c.Director.AdvertisementTTL },
+	"Director.CachePresenceTTL": func(c *Config) time.Duration { return c.Director.CachePresenceTTL },
+	"Director.FedTokenLifetime": func(c *Config) time.Duration { return c.Director.FedTokenLifetime },
+	"Director.MetadataComparisonInterval": func(c *Config) time.Duration { return c.Director.MetadataComparisonInterval },
+	"Director.OriginCacheHealthTestInterval": func(c *Config) time.Duration { return c.Director.OriginCacheHealthTestInterval },
+	"Director.RegistryQueryInterval": func(c *Config) time.Duration { return c.Director.RegistryQueryInterval },
+	"Director.StatTimeout": func(c *Config) time.Duration { return c.Director.StatTimeout },
+	"Federation.TopologyReloadInterval": func(c *Config) time.Duration { return c.Federation.TopologyReloadInterval },
+	"Logging.Client.ProgressInterval": func(c *Config) time.Duration { return c.Logging.Client.ProgressInterval },
+	"Lotman.DefaultLotDeletionLifetime": func(c *Config) time.Duration { return c.Lotman.DefaultLotDeletionLifetime },
+	"Lotman.DefaultLotExpirationLifetime": func(c *Config) time.Duration { return c.Lotman.DefaultLotExpirationLifetime },
+	"Monitoring.DataRetention": func(c *Config) time.Duration { return c.Monitoring.DataRetention },
+	"Monitoring.StorageHealthCheckInterval": func(c *Config) time.Duration { return c.Monitoring.StorageHealthCheckInterval },
+	"Monitoring.TokenExpiresIn": func(c *Config) time.Duration { return c.Monitoring.TokenExpiresIn },
+	"Monitoring.TokenRefreshInterval": func(c *Config) time.Duration { return c.Monitoring.TokenRefreshInterval },
+	"Origin.DiskUsageCalculationDelay": func(c *Config) time.Duration { return c.Origin.DiskUsageCalculationDelay },
+	"Origin.DiskUsageCalculationInterval": func(c *Config) time.Duration { return c.Origin.DiskUsageCalculationInterval },
+	"Origin.SelfTestInterval": func(c *Config) time.Duration { return c.Origin.SelfTestInterval },
+	"Origin.SelfTestMaxAge": func(c *Config) time.Duration { return c.Origin.SelfTestMaxAge },
+	"Origin.UserMapfileRefreshInterval": func(c *Config) time.Duration { return c.Origin.UserMapfileRefreshInterval },
+	"Registry.InstitutionsUrlReloadMinutes": func(c *Config) time.Duration { return c.Registry.InstitutionsUrlReloadMinutes },
+	"Server.AdLifetime": func(c *Config) time.Duration { return c.Server.AdLifetime },
+	"Server.AdvertisementInterval": func(c *Config) time.Duration { return c.Server.AdvertisementInterval },
+	"Server.DatabaseBackup.Frequency": func(c *Config) time.Duration { return c.Server.DatabaseBackup.Frequency },
+	"Server.RegistrationRetryInterval": func(c *Config) time.Duration { return c.Server.RegistrationRetryInterval },
+	"Server.StartupTimeout": func(c *Config) time.Duration { return c.Server.StartupTimeout },
+	"Transport.BrokerEndpointCacheTTL": func(c *Config) time.Duration { return c.Transport.BrokerEndpointCacheTTL },
+	"Transport.DialerKeepAlive": func(c *Config) time.Duration { return c.Transport.DialerKeepAlive },
+	"Transport.DialerTimeout": func(c *Config) time.Duration { return c.Transport.DialerTimeout },
+	"Transport.ExpectContinueTimeout": func(c *Config) time.Duration { return c.Transport.ExpectContinueTimeout },
+	"Transport.IdleConnTimeout": func(c *Config) time.Duration { return c.Transport.IdleConnTimeout },
+	"Transport.ResponseHeaderTimeout": func(c *Config) time.Duration { return c.Transport.ResponseHeaderTimeout },
+	"Transport.TLSHandshakeTimeout": func(c *Config) time.Duration { return c.Transport.TLSHandshakeTimeout },
+	"Xrootd.AuthRefreshInterval": func(c *Config) time.Duration { return c.Xrootd.AuthRefreshInterval },
+	"Xrootd.ConfigUpdateFailureTimeout": func(c *Config) time.Duration { return c.Xrootd.ConfigUpdateFailureTimeout },
+	"Xrootd.HttpMaxDelay": func(c *Config) time.Duration { return c.Xrootd.HttpMaxDelay },
+	"Xrootd.MaxStartupWait": func(c *Config) time.Duration { return c.Xrootd.MaxStartupWait },
+	"Xrootd.ShutdownTimeout": func(c *Config) time.Duration { return c.Xrootd.ShutdownTimeout },
+}
+
 func (dP DurationParam) GetDuration() time.Duration {
-	config := getOrCreateConfig()
-	switch dP.name {
-		case "Cache.DefaultCacheTimeout":
-			return config.Cache.DefaultCacheTimeout
-		case "Cache.EvictionMonitoringInterval":
-			return config.Cache.EvictionMonitoringInterval
-		case "Cache.MinDirectorRefreshInterval":
-			return config.Cache.MinDirectorRefreshInterval
-		case "Cache.SelfTestInterval":
-			return config.Cache.SelfTestInterval
-		case "Cache.SelfTestMaxAge":
-			return config.Cache.SelfTestMaxAge
-		case "ClientAgent.IdleTimeout":
-			return config.ClientAgent.IdleTimeout
-		case "ClientAgent.ProgressUpdateInterval":
-			return config.ClientAgent.ProgressUpdateInterval
-		case "Client.SlowTransferRampupTime":
-			return config.Client.SlowTransferRampupTime
-		case "Client.SlowTransferWindow":
-			return config.Client.SlowTransferWindow
-		case "Client.StoppedTransferTimeout":
-			return config.Client.StoppedTransferTimeout
-		case "Director.AdaptiveSortEWMATimeConstant":
-			return config.Director.AdaptiveSortEWMATimeConstant
-		case "Director.AdvertisementTTL":
-			return config.Director.AdvertisementTTL
-		case "Director.CachePresenceTTL":
-			return config.Director.CachePresenceTTL
-		case "Director.FedTokenLifetime":
-			return config.Director.FedTokenLifetime
-		case "Director.MetadataComparisonInterval":
-			return config.Director.MetadataComparisonInterval
-		case "Director.OriginCacheHealthTestInterval":
-			return config.Director.OriginCacheHealthTestInterval
-		case "Director.RegistryQueryInterval":
-			return config.Director.RegistryQueryInterval
-		case "Director.StatTimeout":
-			return config.Director.StatTimeout
-		case "Federation.TopologyReloadInterval":
-			return config.Federation.TopologyReloadInterval
-		case "Logging.Client.ProgressInterval":
-			return config.Logging.Client.ProgressInterval
-		case "Lotman.DefaultLotDeletionLifetime":
-			return config.Lotman.DefaultLotDeletionLifetime
-		case "Lotman.DefaultLotExpirationLifetime":
-			return config.Lotman.DefaultLotExpirationLifetime
-		case "Monitoring.DataRetention":
-			return config.Monitoring.DataRetention
-		case "Monitoring.StorageHealthCheckInterval":
-			return config.Monitoring.StorageHealthCheckInterval
-		case "Monitoring.TokenExpiresIn":
-			return config.Monitoring.TokenExpiresIn
-		case "Monitoring.TokenRefreshInterval":
-			return config.Monitoring.TokenRefreshInterval
-		case "Origin.DiskUsageCalculationDelay":
-			return config.Origin.DiskUsageCalculationDelay
-		case "Origin.DiskUsageCalculationInterval":
-			return config.Origin.DiskUsageCalculationInterval
-		case "Origin.SelfTestInterval":
-			return config.Origin.SelfTestInterval
-		case "Origin.SelfTestMaxAge":
-			return config.Origin.SelfTestMaxAge
-		case "Origin.UserMapfileRefreshInterval":
-			return config.Origin.UserMapfileRefreshInterval
-		case "Registry.InstitutionsUrlReloadMinutes":
-			return config.Registry.InstitutionsUrlReloadMinutes
-		case "Server.AdLifetime":
-			return config.Server.AdLifetime
-		case "Server.AdvertisementInterval":
-			return config.Server.AdvertisementInterval
-		case "Server.DatabaseBackup.Frequency":
-			return config.Server.DatabaseBackup.Frequency
-		case "Server.RegistrationRetryInterval":
-			return config.Server.RegistrationRetryInterval
-		case "Server.StartupTimeout":
-			return config.Server.StartupTimeout
-		case "Transport.BrokerEndpointCacheTTL":
-			return config.Transport.BrokerEndpointCacheTTL
-		case "Transport.DialerKeepAlive":
-			return config.Transport.DialerKeepAlive
-		case "Transport.DialerTimeout":
-			return config.Transport.DialerTimeout
-		case "Transport.ExpectContinueTimeout":
-			return config.Transport.ExpectContinueTimeout
-		case "Transport.IdleConnTimeout":
-			return config.Transport.IdleConnTimeout
-		case "Transport.ResponseHeaderTimeout":
-			return config.Transport.ResponseHeaderTimeout
-		case "Transport.TLSHandshakeTimeout":
-			return config.Transport.TLSHandshakeTimeout
-		case "Xrootd.AuthRefreshInterval":
-			return config.Xrootd.AuthRefreshInterval
-		case "Xrootd.ConfigUpdateFailureTimeout":
-			return config.Xrootd.ConfigUpdateFailureTimeout
-		case "Xrootd.HttpMaxDelay":
-			return config.Xrootd.HttpMaxDelay
-		case "Xrootd.MaxStartupWait":
-			return config.Xrootd.MaxStartupWait
-		case "Xrootd.ShutdownTimeout":
-			return config.Xrootd.ShutdownTimeout
+	if accessor, ok := durationAccessors[dP.name]; ok {
+		return accessor(getOrCreateConfig())
 	}
 	return 0
 }
