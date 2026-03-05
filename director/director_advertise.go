@@ -26,6 +26,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"sync"
 	"time"
 
@@ -84,6 +85,7 @@ type (
 		AdType     string                            `json:"ad-type"`
 		Now        time.Time                         `json:"now"`
 		ServiceAd  *server_structs.OriginAdvertiseV2 `json:"service-ad,omitempty"`
+		SeenBy     []string                          `json:"seen-by,omitempty"`
 	}
 )
 
@@ -202,7 +204,7 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 			return
 		}
 
-		forwardServiceAd(appCtx, fAd.ServiceAd, sType, directorAd.Name)
+		forwardServiceAd(appCtx, fAd.ServiceAd, sType, fAd.SeenBy)
 
 	} else {
 		log.Debugln("Received registration of unrecognized type", fAd.AdType)
@@ -219,13 +221,20 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 }
 
 // Given an ad received from a remote service (e.g., a cache or origin),
-// forward it to all to all known directors in the federation.
+// forward it to all known directors in the federation.
 //
-// If we determine this ad is from the currently-running, do not attempt to
-// forward it to 'myself'.
-// The 'originator' is the director that sent this server ad to the current director.
-// It can be nil if the ad comes from the server itself.
-func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.OriginAdvertiseV2, sType server_structs.ServerType, originatorName string) {
+// The seenBy list contains the names of directors that have already processed
+// this ad. The current director is added to seenBy before forwarding, and any
+// director already in seenBy is skipped. This prevents infinite forwarding
+// loops when 3 or more directors are present.
+func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.OriginAdvertiseV2, sType server_structs.ServerType, seenBy []string) {
+	name, err := getMyName(engineCtx)
+	if err != nil {
+		log.Errorln("Local service does not know its own name (cannot forward service ad):", err)
+		return
+	}
+	seenBy = append(slices.Clone(seenBy), name)
+
 	directorAdMutex.RLock()
 	defer directorAdMutex.RUnlock()
 	// Use Items() instead of Range() to avoid race conditions with the cache's internal eviction goroutine
@@ -235,12 +244,11 @@ func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.Origi
 		if dinfo.ad == nil {
 			continue
 		}
-		// Do not forward to the director that sent the ad
-		if originatorName != "" && dinfo.ad.Name == originatorName {
+		if slices.Contains(seenBy, dinfo.ad.Name) {
 			continue
 		}
 		if self, err := server_utils.IsDirectorAdFromSelf(engineCtx, dinfo.ad); err == nil && !self {
-			dinfo.forwardService(engineCtx, serviceAd, sType)
+			dinfo.forwardService(engineCtx, serviceAd, sType, seenBy)
 		}
 	}
 }
@@ -281,7 +289,10 @@ func (dir *directorInfo) forwardDirector(ad *server_structs.DirectorAd) {
 // goroutine will do the sending.  This allows the goroutine to drop duplicate
 // updates if they are received before one update to the upstream director is
 // completed.
-func (dir *directorInfo) forwardService(ctx context.Context, ad *server_structs.OriginAdvertiseV2, sType server_structs.ServerType) {
+//
+// The seenBy list tracks which directors have already processed this ad to
+// prevent forwarding loops.
+func (dir *directorInfo) forwardService(ctx context.Context, ad *server_structs.OriginAdvertiseV2, sType server_structs.ServerType, seenBy []string) {
 	name, err := getMyName(ctx)
 	if err != nil {
 		log.Errorln("Local service does not know its own name (cannot forward service ad):", err)
@@ -300,6 +311,7 @@ func (dir *directorInfo) forwardService(ctx context.Context, ad *server_structs.
 		ServiceAd:  ad,
 		AdType:     sType.String(),
 		Now:        time.Now(),
+		SeenBy:     seenBy,
 	}
 
 	var buf *bytes.Buffer
@@ -440,8 +452,9 @@ func (dir *directorInfo) sendAd(ctx context.Context, directorUrlStr string, ad *
 		log.Errorln("Failed to send advertisement to", directorUrl.String(), ":", err)
 		return
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		log.Errorln("Remote director at", directorUrl.String(), "rejected our forwarded ad:", err)
+		log.Errorln("Remote director at", directorUrl.String(), "rejected our forwarded ad")
 		body := make([]byte, 4096) // Read at most 4KB
 		n, _ := io.ReadFull(resp.Body, body)
 		if n > 0 {
@@ -449,7 +462,6 @@ func (dir *directorInfo) sendAd(ctx context.Context, directorUrlStr string, ad *
 		}
 		return
 	}
-	defer resp.Body.Close()
 	_, err = io.Copy(io.Discard, resp.Body)
 	if err != nil {
 		log.Errorln("Remote director failed to send the response body", err)
