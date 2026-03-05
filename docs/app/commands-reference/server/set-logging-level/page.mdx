@@ -1,0 +1,48 @@
+---
+title: pelican server set logging level
+---
+
+## pelican server set-logging-level
+
+Temporarily change the server's log level
+
+### Synopsis
+
+Temporarily change the server's log level for a specified duration.
+The log level will automatically revert to the configured level after the duration expires.
+
+Valid log levels: debug, info, warn, error, fatal, panic
+Duration should be specified as a Go duration string (e.g., 5m, 1h30m, 300s)
+
+Examples:
+  pelican server set-logging-level debug 5m -s https://my-origin.com:8447
+	pelican server set-logging-level info 30m -s https://my-cache.com:8447 -t /path/to/token
+	pelican server set-logging-level debug 2m -s https://my-origin.com:8447 --param Logging.Origin.Xrootd
+
+```
+pelican server set-logging-level <level> <duration> [flags]
+```
+
+### Options
+
+```
+  -h, --help            help for set-logging-level
+  -p, --param string    Target parameter for the log level (e.g., Logging.Level, Logging.Origin.Xrootd, Logging.Cache.Xrootd) (default "Logging.Level")
+  -s, --server string   Web URL of the Pelican server (e.g. https://my-origin.com:8447)
+  -t, --token string    Path to the admin token file
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican server](/commands-reference/server/)	 - Manage server operations

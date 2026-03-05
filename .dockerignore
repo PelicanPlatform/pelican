@@ -7,7 +7,8 @@
 /dist/
 /web_ui/frontend/.next/
 /web_ui/frontend/node_modules/
-/web_ui/frontend/out/
+/web_ui/frontend/out/*
+!/web_ui/frontend/out/placeholder
 
 # Exclude generated data files. These also should be built from scratch.
 /docs/parameters.json

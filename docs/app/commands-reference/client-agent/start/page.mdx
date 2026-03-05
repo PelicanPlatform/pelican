@@ -1,0 +1,42 @@
+---
+title: pelican client agent start
+---
+
+## pelican client-agent start
+
+Start the client agent server
+
+### Synopsis
+
+Start the client agent server as a daemon process. The server will listen
+on a Unix domain socket and handle job-based transfer requests.
+
+```
+pelican client-agent start [flags]
+```
+
+### Options
+
+```
+      --database string   Path to the SQLite database file for persistence (default: ~/.pelican/client-agent.db)
+      --foreground        Run in foreground instead of daemonizing (default: daemonize)
+  -h, --help              help for start
+      --max-jobs int      Maximum number of concurrent transfer jobs (default: uses ClientAgent.MaxConcurrentJobs parameter, or 5)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --pid-file string     Path to the PID file (default: ~/.pelican/client-agent.pid)
+      --socket string       Path to the Unix domain socket (default: ~/.pelican/client-agent.sock)
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican client-agent](/commands-reference/client-agent/)	 - Manage the Pelican client agent server

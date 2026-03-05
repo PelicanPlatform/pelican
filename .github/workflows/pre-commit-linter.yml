@@ -36,13 +36,6 @@ jobs:
         with:
           python-version: "3.14"
 
-      # The Go linters need _something_ to exist under web_ui/frontend/out
-      # because web_ui/ui.go will not otherwise build (it embeds the entire
-      # directory). However, a full web build is unnecessary.
-      - name: Generate placeholder files
-        run: |
-          go generate ./...
-
       # Run the Go linters here so that issues are called out inline, and
       # because pre-commit (below) isn't configured to run them within the
       # CI actions.

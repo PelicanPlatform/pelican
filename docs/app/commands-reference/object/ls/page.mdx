@@ -1,0 +1,40 @@
+---
+title: pelican object ls
+---
+
+## pelican object ls
+
+List objects in a namespace from a federation
+
+```
+pelican object ls {object} [flags]
+```
+
+### Options
+
+```
+  -C, --collection-only          List collections only
+      --collections-url string   URL to use for collection listing, overriding the director's response
+      --depth int                Maximum depth to recurse (e.g., --depth 2 similar to find . -maxdepth 2). Use -1 for unlimited depth. (default -1)
+  -h, --help                     help for ls
+  -j, --json                     Print results in JSON format
+  -l, --long                     Include extended information
+  -O, --object-only              List objects only
+  -r, --recursive                Recursively list all objects in subdirectories
+  -1, --single-column            Force output to be one entry per line
+  -t, --token string             Token file to use for transfer
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican object](/commands-reference/object/)	 - Interact with objects in the federation

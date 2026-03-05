@@ -19,6 +19,7 @@ export default {
 	"advanced-usage": "Advanced Usage",
 	"getting-help": "Getting Help",
 	"api-docs": "API Documentation",
+	"commands-reference": "Commands Reference",
 	"versions": {
 		"title": "Versions",
 		"type": "menu",

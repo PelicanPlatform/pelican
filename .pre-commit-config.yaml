@@ -74,6 +74,7 @@ repos:
     rev: 1.0.0
     hooks:
       - id: mdformat
+        name: Format markdown files
         additional_dependencies:
           - mdformat-simple-breaks
         args: [--wrap, "no"]
