@@ -1060,10 +1060,10 @@ func TestPluginDirectorDecision(t *testing.T) {
 			devData, ok := classad.GetAs[*classad.ClassAd](resultAd, "DeveloperData")
 			require.True(t, ok, "DeveloperData should be present")
 
-			decisonAd, ok := classad.GetAs[*classad.ClassAd](devData, "DirectorDecision")
+			decisionAd, ok := classad.GetAs[*classad.ClassAd](devData, "DirectorDecision")
 			require.True(t, ok, "DirectorDecision should be present as a JSON string when percentage is 100")
 
-			sortMethod, ok := classad.GetAs[string](decisonAd, "DirectorSortMethod")
+			sortMethod, ok := classad.GetAs[string](decisionAd, "DirectorSortMethod")
 			require.True(t, ok)
 			assert.Equal(t, "distance", sortMethod)
 		}
