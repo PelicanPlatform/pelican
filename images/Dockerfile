@@ -126,6 +126,7 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
 		baseurl=https://repo.goreleaser.com/yum/
 		enabled=1
 		gpgcheck=0
+		exclude=goreleaser-pro
 	EOF
   dnf install -y goreleaser jq make
 
@@ -205,7 +206,7 @@ RUN --mount=type=cache,id=go-cache,target=/root/.cache/go-build,sharing=shared \
   elif [ "$TARGETARCH" = "arm64" ]; then
     VARIANT="v8.0"
   fi
-  for dir in ${PWD}/dist/${TARGETOS}_${TARGETARCH}/*${TARGETOS}_${TARGETARCH}*; do
+  for dir in ${PWD}/dist/*${TARGETOS}_${TARGETARCH}*; do
     ln -s ${dir} ${dir%_${VARIANT}}
   done
 ENDRUN
@@ -664,7 +665,7 @@ ENDRUN
 #################################################################
 FROM pelican-software-base AS central-services-base
 ARG TARGETOS TARGETARCH
-COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
+COPY --from=pelican-build /pelican-build/dist/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
 COPY images/entrypoint.sh /entrypoint.sh
 
 FROM central-services-base AS director
@@ -692,7 +693,7 @@ CMD ["serve"]
 #################################################################
 FROM origin-software-base AS origin
 ARG TARGETOS TARGETARCH
-COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
+COPY --from=pelican-build /pelican-build/dist/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
 COPY images/entrypoint.sh /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh", "pelican-server", "origin"]
 CMD ["serve"]
@@ -720,7 +721,7 @@ CMD ["serve"]
 #################################################################
 FROM xrootd-software-base AS cache
 ARG TARGETOS TARGETARCH
-COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
+COPY --from=pelican-build /pelican-build/dist/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
 COPY images/entrypoint.sh /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh", "pelican-server", "cache"]
 CMD ["serve"]
@@ -799,6 +800,7 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
 		baseurl=https://repo.goreleaser.com/yum/
 		enabled=1
 		gpgcheck=0
+		exclude=goreleaser-pro
 	EOF
   dnf install -y goreleaser jq make
 

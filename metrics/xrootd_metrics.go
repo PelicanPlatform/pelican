@@ -460,15 +460,22 @@ var (
 		Help: "The total number of monitoring UDP packets received",
 	})
 
-	// TODO: Remove this metric (the line directly below)
-	// The renamed metric was added in v7.16
+	// TODO: Remove this metric when we can break backwards compatibility.
+	// The renamed metric ("count" -> "toal") was added in v7.16.
 	TransferReadvSegs = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_readv_segments_count",
 		Help: "Number of segments in readv operations",
 	}, []string{"path", "ap", "dn", "role", "org", "proj", "network"})
 
-	TransferReadvSegsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	// TODO: Remove this metric when we can break backwards compatibility.
+	// The renamed metric ("toal" -> "total") was added in v7.25.
+	TransferReadvSegsTotalDeprecated = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_readv_segments_toal",
+		Help: "Number of segments in readv operations",
+	}, []string{"path", "ap", "dn", "role", "org", "proj", "network"})
+
+	TransferReadvSegsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_transfer_readv_segments_total",
 		Help: "Number of segments in readv operations",
 	}, []string{"path", "ap", "dn", "role", "org", "proj", "network"})
 
@@ -866,7 +873,7 @@ var (
 		Buckets: TimeHistogramBuckets,
 	})
 
-	CPUUtilzation = promauto.NewGauge(prometheus.GaugeOpts{
+	CPUUtilization = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "xrootd_cpu_utilization",
 		Help: "CPU utilization of the XRootD server",
 	})
@@ -1367,6 +1374,10 @@ func handlePacket(packet []byte) error {
 					// TODO: Remove this metric (the 2 lines directly below)
 					// The renamed metric was added in v7.16
 					counter := TransferReadvSegs.With(labels)
+					counter.Add(float64(int64(binary.BigEndian.Uint64(
+						packet[offset+opsOffset+16:offset+opsOffset+24]) -
+						oldReadvSegs)))
+					counter = TransferReadvSegsTotalDeprecated.With(labels)
 					counter.Add(float64(int64(binary.BigEndian.Uint64(
 						packet[offset+opsOffset+16:offset+opsOffset+24]) -
 						oldReadvSegs)))
@@ -1964,8 +1975,8 @@ func HandleSummaryPacket(packet []byte) error {
 
 				if wallDelta > 0 {
 					// represents the average of cores utilized during the interval
-					utlizationRatio := cpuDelta / wallDelta
-					CPUUtilzation.Set(utlizationRatio)
+					utilizationRatio := cpuDelta / wallDelta
+					CPUUtilization.Set(utilizationRatio)
 				}
 			}
 

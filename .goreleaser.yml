@@ -1,6 +1,6 @@
 # ***************************************************************
 #
-#  Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+#  Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 #
 #  Licensed under the Apache License, Version 2.0 (the "License"); you
 #  may not use this file except in compliance with the License.  You may
@@ -19,14 +19,38 @@
 project_name: pelican
 version: 2
 
+#---------------------------------------------------------------------------
+# Configure the release process.
+
 release:
+  # Mark each new release as a pre-release.
   prerelease: true
+checksum:
+  # Use a simpler name for the checksums file, compared to the default.
+  name_template: "checksums.txt"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "Merge branch"
+      - "Merge pull request"
+
+#---------------------------------------------------------------------------
+# Configure the build process.
+
+snapshot:
+  # The container images install snapshot builds.
+  # Override the default template, which includes extra cruft.
+  version_template: "{{ .Version }}"
 
 before:
   hooks:
     - go mod tidy
     - go generate ./...
     - make web-build
+
 builds:
   - &build-pelican
     id: pelican
@@ -37,9 +61,9 @@ builds:
       - windows
       - darwin
     goarch:
-      - "amd64"
-      - "arm64"
-      - "ppc64le"
+      - amd64
+      - arm64
+      - ppc64le
     dir: ./cmd
     binary: pelican
     tags:
@@ -74,8 +98,8 @@ builds:
     goos:
       - linux
     goarch:
-      - "amd64"
-      - "arm64"
+      - amd64
+      - arm64
     dir: ./cmd
     binary: pelican-server
     tags:
@@ -89,7 +113,7 @@ builds:
 # builds into separate archives.
 archives:
   - id: pelican
-    builds:
+    ids:
       - pelican
     name_template: >-
       {{ .ProjectName }}_
@@ -98,10 +122,10 @@ archives:
       {{- else }}{{ .Arch }}{{ end }}
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
     wrap_in_directory: '{{ .ProjectName }}-{{ trimsuffix .Version "-next" }}'
   - id: pelican-server
-    builds:
+    ids:
       - pelican-server
     name_template: >-
       {{ .ProjectName }}-server_
@@ -109,24 +133,12 @@ archives:
       {{- if eq .Arch "amd64" }}x86_64
       {{- else }}{{ .Arch }}{{ end }}
     wrap_in_directory: '{{ .ProjectName }}-server-{{ trimsuffix .Version "-next" }}'
-checksum:
-  name_template: "checksums.txt"
-snapshot:
-  version_template: "{{ .Version }}"
-changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - Merge pull request
-      - Merge branch
 
 nfpms:
   - &package-pelican
     id: pelican
     package_name: pelican
-    builds:
+    ids:
       - pelican
     # Note that git tags like v7.0.0-rc.1 will be modified by goreleaser when building
     # rpms to be v7.0.0~rc.1-1. The tilde is a special character in RPM versioning that
@@ -276,7 +288,7 @@ nfpms:
   - <<: *package-pelican
     id: pelican-debug
     package_name: pelican-debug
-    builds:
+    ids:
       - pelican-debug
     description: Command-line copy tool for the Open Science Data Federation (includes debug symbols)
     formats:
@@ -290,7 +302,7 @@ nfpms:
 
   - id: pelican-osdf-compat
     package_name: pelican-osdf-compat
-    builds: []
+    ids: []
     file_name_template: "{{ .ConventionalFileName }}"
     vendor: OSG Consortium
     homepage: https://pelicanplatform.org
@@ -382,7 +394,7 @@ nfpms:
 
   - id: pelican-server
     package_name: pelican-server
-    builds:
+    ids:
       - pelican-server
     file_name_template: "{{ .ConventionalFileName }}"
     vendor: OSG Consortium

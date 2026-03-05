@@ -24,7 +24,7 @@ set -ex
 brew install minio ninja coreutils
 
 # Attempted fix to install xrootd-s3-http, which relies on a dependency (nlohmann-json)
-# that requres cmake 3.5...4.0. The version pointed at here is the highest 3.X at the time
+# that requires cmake 3.5...4.0. The version pointed at here is the highest 3.X at the time
 # of writing (2025-09-22).
 # Install CMake 3.31.8 manually, since Homebrew does not provide it.
 CMAKE_VERSION=3.31.8

@@ -36,12 +36,13 @@ jobs:
         with:
           python-version: "3.14"
 
-      # We run this linter here so that issues are called out inline.
-      # (It's also run by pre-commit, below.)
+      # Run the Go linters here so that issues are called out inline, and
+      # because pre-commit (below) isn't configured to run them within the
+      # CI actions.
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.7.2
+          version: v2.9.0
           args: --config=.golangci.yaml
 
       - name: Run pre-commit
