@@ -1063,27 +1063,66 @@ func addDataToClassAd(resultAd *classad.ClassAd, result *client.TransferResults,
 // ClassAd attribute names.
 func redirectInfoToClassAd(ri *server_structs.RedirectInfo) *classad.ClassAd {
 	ad := classad.New()
-	ad.Set("DirectorSortMethod", ri.DirectorSortMethod)
+	err := ad.Set("DirectorSortMethod", ri.DirectorSortMethod)
+	if err != nil {
+		return nil
+	}
 
 	clientAd := classad.New()
-	clientAd.Set("IpAddr", ri.ClientInfo.IpAddr)
-	clientAd.Set("Lat", ri.ClientInfo.Coordinate.Lat)
-	clientAd.Set("Long", ri.ClientInfo.Coordinate.Long)
-	ad.Set("ClientInfo", clientAd)
+	err = clientAd.Set("IpAddr", ri.ClientInfo.IpAddr)
+	if err != nil {
+		return nil
+	}
+	err = clientAd.Set("Lat", ri.ClientInfo.Coordinate.Lat)
+	if err != nil {
+		return nil
+	}
+	err = clientAd.Set("Long", ri.ClientInfo.Coordinate.Long)
+	if err != nil {
+		return nil
+	}
+	err = ad.Set("ClientInfo", clientAd)
+	if err != nil {
+		return nil
+	}
 
 	serverAds := make([]*classad.ClassAd, 0, len(ri.ServersInfo))
 	for url, info := range ri.ServersInfo {
 		sAd := classad.New()
-		sAd.Set("ServerUrl", url)
-		sAd.Set("Lat", info.Coordinate.Lat)
-		sAd.Set("Long", info.Coordinate.Long)
-		sAd.Set("DistanceWeight", info.RedirectWeights.DistanceWeight)
-		sAd.Set("IoLoadWeight", info.RedirectWeights.IOLoadWeight)
-		sAd.Set("StatusWeight", info.RedirectWeights.StatusWeight)
-		sAd.Set("AvailabilityWeight", info.RedirectWeights.AvailabilityWeight)
+		err = sAd.Set("ServerUrl", url)
+		if err != nil {
+			return nil
+		}
+		err = sAd.Set("Lat", info.Coordinate.Lat)
+		if err != nil {
+			return nil
+		}
+		err = sAd.Set("Long", info.Coordinate.Long)
+		if err != nil {
+			return nil
+		}
+		err = sAd.Set("DistanceWeight", info.RedirectWeights.DistanceWeight)
+		if err != nil {
+			return nil
+		}
+		err = sAd.Set("IoLoadWeight", info.RedirectWeights.IOLoadWeight)
+		if err != nil {
+			return nil
+		}
+		err = sAd.Set("StatusWeight", info.RedirectWeights.StatusWeight)
+		if err != nil {
+			return nil
+		}
+		err = sAd.Set("AvailabilityWeight", info.RedirectWeights.AvailabilityWeight)
+		if err != nil {
+			return nil
+		}
 		serverAds = append(serverAds, sAd)
 	}
-	ad.Set("ServersInfo", serverAds)
+	err = ad.Set("ServersInfo", serverAds)
+	if err != nil {
+		return nil
+	}
 
 	return ad
 }
