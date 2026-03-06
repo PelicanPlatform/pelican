@@ -132,10 +132,6 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 	if err = os.Chown(tokFdr, puser.Uid, xrootdGid); err != nil {
 		return errors.Wrapf(err, "unable to change the ownership of %s to pelican uid %d and xrootd gid %d for Globus tokens", tokFdr, puser.Uid, xrootdGid)
 	}
-	// Set mode 02750 (setgid) so files created in tokens/ inherit the xrootd group
-	if err = os.Chmod(tokFdr, 02750); err != nil {
-		return errors.Wrapf(err, "unable to change the permissions of %s for Globus tokens", tokFdr)
-	}
 
 	globusAuthCfg, err := GetGlobusOAuthCfg()
 	if err != nil {
