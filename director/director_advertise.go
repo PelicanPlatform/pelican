@@ -26,6 +26,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"sync"
 	"time"
 
@@ -84,6 +85,7 @@ type (
 		AdType     string                            `json:"ad-type"`
 		Now        time.Time                         `json:"now"`
 		ServiceAd  *server_structs.OriginAdvertiseV2 `json:"service-ad,omitempty"`
+		SeenBy     []string                          `json:"seen-by,omitempty"`
 	}
 )
 
@@ -107,7 +109,29 @@ const (
 	// Meant mostly for unit tests; advertising ads is essential
 	// functionality.
 	AdvertiseShutdownKey ContextKey = "advertise_shutdown"
+
+	// SkewThreshold is the minimum clock skew that triggers expiration time correction.
+	// Skews at or below this threshold are considered negligible and do not require adjustment.
+	SkewThreshold = 100 * time.Millisecond
 )
+
+// CorrectTimeSkew adjusts an expiration time to account for clock skew between sender and receiver.
+//
+// When clock skew exceeds SkewThreshold, the expiration is recalculated based on the original
+// ad lifetime (sentExpiry - sentAt) applied to receivedAt. This ensures the ad remains valid
+// for its intended lifetime from the receiver's perspective.
+//
+// Returns the original expiration unchanged if skew is within threshold or lifetime is non-positive.
+func CorrectTimeSkew(sentAt, sentExpiry, receivedAt time.Time) time.Time {
+	skew := receivedAt.Sub(sentAt)
+	if skew > SkewThreshold || skew < -SkewThreshold {
+		lifetime := sentExpiry.Sub(sentAt)
+		if lifetime > 0 {
+			return receivedAt.Add(lifetime)
+		}
+	}
+	return sentExpiry
+}
 
 // List all the directors known to this instance
 func listDirectors(ctx *gin.Context) {
@@ -154,26 +178,13 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 	}
 	directorAd := fAd.DirectorAd
 
-	// Reset the expiration times if we detect significant skew between the claimed time sent
-	// and the current time.
-	//
-	// That is, if the ad claims to have been sent at noon and expiring at 12:15 but the server
-	// received it at 13:00, then assume the expiration time is 13:15 (since the original lifetime
-	// was set to 15 minutes).
+	// Apply time-skew correction to expiration times if sender and receiver clocks differ significantly.
 	now := time.Now()
-	if skew := now.Sub(fAd.Now); skew > 100*time.Millisecond || skew < -100*time.Millisecond {
-		if fAd.DirectorAd != nil {
-			lifetime := fAd.DirectorAd.Expiration.Sub(fAd.Now)
-			if lifetime > 0 {
-				fAd.DirectorAd.Expiration = now.Add(lifetime)
-			}
-		}
-		if fAd.ServiceAd != nil {
-			lifetime := fAd.ServiceAd.Expiration.Sub(fAd.Now)
-			if lifetime > 0 {
-				fAd.ServiceAd.Expiration = now.Add(lifetime)
-			}
-		}
+	if fAd.DirectorAd != nil {
+		fAd.DirectorAd.Expiration = CorrectTimeSkew(fAd.Now, fAd.DirectorAd.Expiration, now)
+	}
+	if fAd.ServiceAd != nil {
+		fAd.ServiceAd.Expiration = CorrectTimeSkew(fAd.Now, fAd.ServiceAd.Expiration, now)
 	}
 
 	if fAd.AdType == server_structs.DirectorType.String() {
@@ -202,7 +213,7 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 			return
 		}
 
-		forwardServiceAd(appCtx, fAd.ServiceAd, sType, directorAd.Name)
+		forwardServiceAd(appCtx, fAd.ServiceAd, sType, fAd.SeenBy)
 
 	} else {
 		log.Debugln("Received registration of unrecognized type", fAd.AdType)
@@ -219,13 +230,20 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 }
 
 // Given an ad received from a remote service (e.g., a cache or origin),
-// forward it to all to all known directors in the federation.
+// forward it to all known directors in the federation.
 //
-// If we determine this ad is from the currently-running, do not attempt to
-// forward it to 'myself'.
-// The 'originator' is the director that sent this server ad to the current director.
-// It can be nil if the ad comes from the server itself.
-func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.OriginAdvertiseV2, sType server_structs.ServerType, originatorName string) {
+// The seenBy list contains the names of directors that have already processed
+// this ad. The current director is added to seenBy before forwarding, and any
+// director already in seenBy is skipped. This prevents infinite forwarding
+// loops when 3 or more directors are present.
+func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.OriginAdvertiseV2, sType server_structs.ServerType, seenBy []string) {
+	name, err := getMyName(engineCtx)
+	if err != nil {
+		log.Errorln("This Director does not know its own name (cannot forward service ad):", err)
+		return
+	}
+	seenBy = append(slices.Clone(seenBy), name)
+
 	directorAdMutex.RLock()
 	defer directorAdMutex.RUnlock()
 	// Use Items() instead of Range() to avoid race conditions with the cache's internal eviction goroutine
@@ -235,12 +253,11 @@ func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.Origi
 		if dinfo.ad == nil {
 			continue
 		}
-		// Do not forward to the director that sent the ad
-		if originatorName != "" && dinfo.ad.Name == originatorName {
+		if slices.Contains(seenBy, dinfo.ad.Name) {
 			continue
 		}
 		if self, err := server_utils.IsDirectorAdFromSelf(engineCtx, dinfo.ad); err == nil && !self {
-			dinfo.forwardService(engineCtx, serviceAd, sType)
+			dinfo.forwardService(engineCtx, serviceAd, sType, seenBy)
 		}
 	}
 }
@@ -281,10 +298,13 @@ func (dir *directorInfo) forwardDirector(ad *server_structs.DirectorAd) {
 // goroutine will do the sending.  This allows the goroutine to drop duplicate
 // updates if they are received before one update to the upstream director is
 // completed.
-func (dir *directorInfo) forwardService(ctx context.Context, ad *server_structs.OriginAdvertiseV2, sType server_structs.ServerType) {
+//
+// The seenBy list tracks which directors have already processed this ad to
+// prevent forwarding loops.
+func (dir *directorInfo) forwardService(ctx context.Context, ad *server_structs.OriginAdvertiseV2, sType server_structs.ServerType, seenBy []string) {
 	name, err := getMyName(ctx)
 	if err != nil {
-		log.Errorln("Local service does not know its own name (cannot forward service ad):", err)
+		log.Errorln("This Director does not know its own name (cannot forward service ad):", err)
 		return
 	}
 	adUrl := param.Director_AdvertiseUrl.GetString()
@@ -300,6 +320,7 @@ func (dir *directorInfo) forwardService(ctx context.Context, ad *server_structs.
 		ServiceAd:  ad,
 		AdType:     sType.String(),
 		Now:        time.Now(),
+		SeenBy:     seenBy,
 	}
 
 	var buf *bytes.Buffer
@@ -440,8 +461,9 @@ func (dir *directorInfo) sendAd(ctx context.Context, directorUrlStr string, ad *
 		log.Errorln("Failed to send advertisement to", directorUrl.String(), ":", err)
 		return
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		log.Errorln("Remote director at", directorUrl.String(), "rejected our forwarded ad:", err)
+		log.Errorln("Remote director at", directorUrl.String(), "rejected our forwarded ad")
 		body := make([]byte, 4096) // Read at most 4KB
 		n, _ := io.ReadFull(resp.Body, body)
 		if n > 0 {
@@ -449,7 +471,6 @@ func (dir *directorInfo) sendAd(ctx context.Context, directorUrlStr string, ad *
 		}
 		return
 	}
-	defer resp.Body.Close()
 	_, err = io.Copy(io.Discard, resp.Body)
 	if err != nil {
 		log.Errorln("Remote director failed to send the response body", err)
@@ -485,7 +506,7 @@ func sendMyAd(ctx context.Context) {
 
 	name, err := getMyName(ctx)
 	if err != nil {
-		log.Errorln("Local service does not know its own name (cannot forward ad to remote directors):", err)
+		log.Errorln("This Director does not know its own name (cannot forward ad to remote directors):", err)
 		return
 	}
 	adUrl := param.Director_AdvertiseUrl.GetString()
