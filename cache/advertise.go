@@ -76,7 +76,7 @@ func (server *CacheServer) CreateAdvertisement(name, id, originUrl, originWebUrl
 	}
 
 	// Set broker URL if enabled
-	if err = server_utils.SetBrokerURL(&ad, server_structs.CacheType, prefixes); err != nil {
+	if err := server_utils.SetBrokerURL(&ad, server_structs.CacheType, prefixes); err != nil {
 		return nil, errors.Wrap(err, "failed to set broker URL")
 	}
 

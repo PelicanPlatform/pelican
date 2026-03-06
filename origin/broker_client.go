@@ -80,7 +80,7 @@ func proxyOrigin(resp http.ResponseWriter, req *http.Request, engine *gin.Engine
 	// Handle /metrics endpoint - route to gin engine for Prometheus metrics
 	if req.URL.Path == "/metrics" {
 		log.Debug("Origin broker proxy: routing /metrics to gin engine")
-		PelicanBrokerApiRequests.WithLabelValues("origin").Inc()
+		metrics.PelicanBrokerApiRequests.WithLabelValues("origin").Inc()
 		engine.ServeHTTP(resp, req)
 		return
 	}
@@ -88,7 +88,7 @@ func proxyOrigin(resp http.ResponseWriter, req *http.Request, engine *gin.Engine
 	// Handle /api endpoints - route to gin engine
 	if strings.HasPrefix(req.URL.Path, "/api") {
 		log.Debugf("Origin broker proxy: routing API request %s to gin engine", req.URL.Path)
-		PelicanBrokerApiRequests.WithLabelValues("origin").Inc()
+		metrics.PelicanBrokerApiRequests.WithLabelValues("origin").Inc()
 		engine.ServeHTTP(resp, req)
 		return
 	}
@@ -172,7 +172,7 @@ func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group, engine *gin
 				srv := http.Server{
 					Handler: http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) { proxyOrigin(resp, req, engine) }),
 				}
-				PelicanBrokerConnections.WithLabelValues("origin").Inc()
+				metrics.PelicanBrokerConnections.WithLabelValues("origin").Inc()
 				go func(fields log.Fields) {
 					// A one-shot listener should do a single "accept" then shutdown.
 					log.WithFields(fields).Debug("Origin starting to serve broker reverse connection")
