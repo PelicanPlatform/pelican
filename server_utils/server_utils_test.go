@@ -232,6 +232,76 @@ func (m *mockServer) GetFedTokLocation() string { return m.tokenLoc }
 func (m *mockServer) GetPids() []int            { return m.pids }
 func (m *mockServer) SetPids(pids []int)        { m.pids = pids }
 
+func TestSetBrokerURL(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	setFederationParams := func(brokerURL string) {
+		require.NoError(t, param.Set(param.Federation_DiscoveryUrl.GetName(), "https://discovery.example.com"))
+		require.NoError(t, param.Set("Federation.DirectorUrl", "https://director.example.com"))
+		require.NoError(t, param.Set("Federation.RegistryUrl", "https://registry.example.com"))
+		require.NoError(t, param.Set("Federation.JwkUrl", "https://jwks.example.com"))
+		require.NoError(t, param.Set("Federation.BrokerUrl", brokerURL))
+	}
+
+	t.Run("multiple-prefixes-broker-url-not-set", func(t *testing.T) {
+		ResetTestState()
+		t.Cleanup(ResetTestState)
+		require.NoError(t, param.Set(param.Server_Hostname.GetName(), "origin.example.com"))
+		require.NoError(t, param.Set(param.Origin_EnableBroker.GetName(), true))
+		setFederationParams("https://broker.example.com")
+
+		ad := &server_structs.OriginAdvertiseV2{}
+		err := SetBrokerURL(ad, server_structs.OriginType, []string{"/prefix1", "/prefix2"})
+		require.NoError(t, err)
+		assert.Empty(t, ad.BrokerURL, "Broker URL should not be set when multiple prefixes are present")
+	})
+
+	t.Run("broker-disabled-broker-url-not-set", func(t *testing.T) {
+		ResetTestState()
+		t.Cleanup(ResetTestState)
+		require.NoError(t, param.Set(param.Server_Hostname.GetName(), "cache.example.com"))
+		require.NoError(t, param.Set(param.Cache_EnableBroker.GetName(), false))
+		setFederationParams("https://broker.example.com")
+
+		ad := &server_structs.OriginAdvertiseV2{}
+		err := SetBrokerURL(ad, server_structs.CacheType, []string{"/single"})
+		require.NoError(t, err)
+		assert.Empty(t, ad.BrokerURL, "Broker URL should not be set when broker is disabled")
+	})
+
+	t.Run("invalid-broker-endpoint-returns-error", func(t *testing.T) {
+		ResetTestState()
+		t.Cleanup(ResetTestState)
+		require.NoError(t, param.Set(param.Server_Hostname.GetName(), "origin.example.com"))
+		require.NoError(t, param.Set(param.Origin_EnableBroker.GetName(), true))
+		// Use a URL with invalid percent-encoding so url.Parse returns an error
+		setFederationParams("https://broker.example.com/%2")
+
+		ad := &server_structs.OriginAdvertiseV2{}
+		err := SetBrokerURL(ad, server_structs.OriginType, []string{"/prefix"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Invalid Broker URL")
+		assert.Empty(t, ad.BrokerURL)
+	})
+
+	t.Run("valid-single-prefix-origin-sets-broker-url", func(t *testing.T) {
+		ResetTestState()
+		t.Cleanup(ResetTestState)
+		require.NoError(t, param.Set(param.Server_Hostname.GetName(), "origin.example.com"))
+		require.NoError(t, param.Set(param.Origin_EnableBroker.GetName(), true))
+		setFederationParams("https://broker.example.com")
+
+		ad := &server_structs.OriginAdvertiseV2{}
+		err := SetBrokerURL(ad, server_structs.OriginType, []string{"/test/prefix"})
+		require.NoError(t, err)
+		require.NotEmpty(t, ad.BrokerURL)
+		assert.Contains(t, ad.BrokerURL, "https://broker.example.com")
+		assert.Contains(t, ad.BrokerURL, "/api/v1.0/broker/reverse")
+		assert.Contains(t, ad.BrokerURL, "origin=origin.example.com")
+		assert.Contains(t, ad.BrokerURL, "prefix=%2Ftest%2Fprefix")
+	})
+}
+
 func TestSetFedTok(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	testCases := []struct {
