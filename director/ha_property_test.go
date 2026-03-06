@@ -291,8 +291,9 @@ func makeTestServiceAd() *server_structs.OriginAdvertiseV2 {
 // The test exercises 100 random configurations: varying numbers of directors
 // (2–8) and varying sizes of the initial seenBy set.
 func TestSeenByExclusionIsExact(t *testing.T) {
+	config.ResetConfig()
+	t.Cleanup(config.ResetConfig)
 	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://test-self.example.com"))
-	t.Cleanup(func() { _ = param.Set(param.Server_ExternalWebUrl.GetName(), "") })
 
 	setupForwardingState(t)
 
@@ -363,8 +364,9 @@ func TestSeenByExclusionIsExact(t *testing.T) {
 // If this invariant breaks—e.g., D forgets to add itself, or adds duplicates—
 // the exclusion check in a downstream director becomes incorrect.
 func TestSeenByGrowsByExactlyOnePerHop(t *testing.T) {
+	config.ResetConfig()
+	t.Cleanup(config.ResetConfig)
 	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://test-self.example.com"))
-	t.Cleanup(func() { _ = param.Set(param.Server_ExternalWebUrl.GetName(), "") })
 
 	setupForwardingState(t)
 
@@ -412,8 +414,9 @@ func TestSeenByGrowsByExactlyOnePerHop(t *testing.T) {
 // entries after repeated forwarding. Duplicates would bloat the payload and
 // could cause bugs in downstream directors that use seenBy for set membership.
 func TestSeenByNoDuplicates(t *testing.T) {
+	config.ResetConfig()
+	t.Cleanup(config.ResetConfig)
 	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://test-self.example.com"))
-	t.Cleanup(func() { _ = param.Set(param.Server_ExternalWebUrl.GetName(), "") })
 
 	setupForwardingState(t)
 
@@ -440,6 +443,8 @@ func TestSeenByNoDuplicates(t *testing.T) {
 		forwardServiceAd(ctx, makeTestServiceAd(), server_structs.OriginType, nil)
 
 		// Collect all payloads and verify no seenBy list has duplicates.
+		// With nil initial seenBy and names[0] as the current director, all
+		// directors in names[1:] should receive exactly one forwarded ad.
 		for _, name := range names[1:] {
 			select {
 			case info := <-channels[name]:
@@ -535,8 +540,9 @@ func TestTimeSkewCorrectionBelowThresholdIsNoop(t *testing.T) {
 // re-processed as if the receiving director were the current one, using the
 // seenBy from the payload.
 func TestForwardingReachesAllDirectors(t *testing.T) {
+	config.ResetConfig()
+	t.Cleanup(config.ResetConfig)
 	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://test-self.example.com"))
-	t.Cleanup(func() { _ = param.Set(param.Server_ExternalWebUrl.GetName(), "") })
 
 	for n := 2; n <= 8; n++ {
 		t.Run(fmt.Sprintf("directors=%d", n), func(t *testing.T) {

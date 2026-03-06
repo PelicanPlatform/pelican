@@ -33,23 +33,20 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 func TestForwardService(t *testing.T) {
+	config.ResetConfig()
+	t.Cleanup(config.ResetConfig)
 	directorNameOnce = sync.Once{}
 	directorName = ""
 	directorNameError = nil
 
 	require.NoError(t, param.Set(param.Director_AdvertiseUrl.GetName(), "http://director-ad-url"))
-	t.Cleanup(func() {
-		require.NoError(t, param.Set(param.Director_AdvertiseUrl.GetName(), ""))
-	})
 	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://external-url"))
-	t.Cleanup(func() {
-		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), ""))
-	})
 
 	ctx := context.Background()
 	ad := &server_structs.OriginAdvertiseV2{
@@ -94,13 +91,14 @@ func TestForwardService(t *testing.T) {
 // We have two directors, each with different advertise urls
 // We have a service ad that should be only forwarded to the director that is not itself
 func TestForwardServiceAd(t *testing.T) {
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://director1.com"))
+	config.ResetConfig()
+	t.Cleanup(config.ResetConfig)
+	directorAds.DeleteAll()
 	t.Cleanup(func() {
-		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), ""))
+		directorAds.DeleteAll()
 	})
 
-	// Reset the cache
-	directorAds.DeleteAll()
+	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://director1.com"))
 
 	ch1 := make(chan *forwardAdInfo, 1)
 	dir1 := &directorInfo{
@@ -169,12 +167,14 @@ func TestForwardServiceAd(t *testing.T) {
 // infinite forwarding loops with 3+ directors. When a service ad has already
 // been seen by directors A and B, it should not be forwarded to either of them.
 func TestForwardServiceAdSeenByPreventsLoop(t *testing.T) {
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://director1.com"))
+	config.ResetConfig()
+	t.Cleanup(config.ResetConfig)
+	directorAds.DeleteAll()
 	t.Cleanup(func() {
-		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), ""))
+		directorAds.DeleteAll()
 	})
 
-	directorAds.DeleteAll()
+	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://director1.com"))
 
 	ch1 := make(chan *forwardAdInfo, 1)
 	dir1 := &directorInfo{
@@ -300,6 +300,8 @@ func TestForwardServiceAdSimulation(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run("directors="+strconv.Itoa(tc.numDirectors), func(t *testing.T) {
+			config.ResetConfig()
+			t.Cleanup(config.ResetConfig)
 			directorNameOnce = sync.Once{}
 			directorNameError = nil
 			directorName = ""
@@ -310,12 +312,12 @@ func TestForwardServiceAdSimulation(t *testing.T) {
 				directorNameError = nil
 			})
 
-			require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://test-self.example.com"))
+			directorAds.DeleteAll()
 			t.Cleanup(func() {
-				require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), ""))
+				directorAds.DeleteAll()
 			})
 
-			directorAds.DeleteAll()
+			require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://test-self.example.com"))
 
 			n := tc.numDirectors
 			names := make([]string, n)
@@ -413,18 +415,14 @@ func TestForwardServiceAdSimulation(t *testing.T) {
 // TestForwardServiceSeenBySerialized verifies that the seenBy list is included
 // in the serialized JSON payload sent to remote directors.
 func TestForwardServiceSeenBySerialized(t *testing.T) {
+	config.ResetConfig()
+	t.Cleanup(config.ResetConfig)
 	directorNameOnce = sync.Once{}
 	directorName = ""
 	directorNameError = nil
 
 	require.NoError(t, param.Set(param.Director_AdvertiseUrl.GetName(), "http://director-ad-url"))
-	t.Cleanup(func() {
-		require.NoError(t, param.Set(param.Director_AdvertiseUrl.GetName(), ""))
-	})
 	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://external-url"))
-	t.Cleanup(func() {
-		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), ""))
-	})
 
 	ctx := context.Background()
 	ad := &server_structs.OriginAdvertiseV2{
