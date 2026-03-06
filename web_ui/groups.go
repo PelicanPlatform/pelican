@@ -200,7 +200,12 @@ func handleUpdateGroup(ctx *gin.Context) {
 		})
 		return
 	}
-	isAdmin, _ := CheckAdmin(user, groups)
+	isAdmin, _ := CheckAdmin(UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+	})
 
 	if err := database.UpdateGroup(database.ServerDatabase, id, req.Name, req.Description, userId, isAdmin); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -610,7 +615,12 @@ func handleUpdateUser(ctx *gin.Context) {
 		})
 		return
 	}
-	isAdmin, _ := CheckAdmin(user, groups)
+	isAdmin, _ := CheckAdmin(UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+	})
 
 	// Verify authorization: only the user themselves or an admin can update
 	if !isAdmin && userId != id {
@@ -689,7 +699,12 @@ func handleDeleteGroup(ctx *gin.Context) {
 		})
 		return
 	}
-	isAdmin, _ := CheckAdmin(user, groups)
+	isAdmin, _ := CheckAdmin(UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+	})
 
 	if err := database.DeleteGroup(database.ServerDatabase, id, userId, isAdmin); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -746,7 +761,12 @@ func handleDeleteUser(ctx *gin.Context) {
 		})
 		return
 	}
-	isAdmin, _ := CheckAdmin(user, groups)
+	isAdmin, _ := CheckAdmin(UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+	})
 
 	if err := database.DeleteUser(database.ServerDatabase, id, userId, isAdmin); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
