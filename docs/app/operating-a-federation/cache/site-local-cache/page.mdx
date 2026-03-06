@@ -1,0 +1,167 @@
+import { Callout } from 'nextra/components'
+
+# Running a Site-Local Cache
+
+A **site-local Cache** is a Pelican Cache that operates independently from a federation's central services.
+When [`Cache.EnableSiteLocalMode`](/parameters#Cache-EnableSiteLocalMode) is set to `true`, the Cache will **not** register with the federation's Registry and will **not** advertise itself to the Director.
+This means the Cache is invisible to the federation, and clients must be explicitly configured to use it.
+
+## Who Is This For?
+
+Site-local mode is intended for organizations that want a local caching layer for Pelican data without making that Cache discoverable by the broader federation.
+Common scenarios include:
+
+- **Campus or lab deployments** where a local Cache improves download speeds for researchers who repeatedly access the same datasets, but where the organization does not want (or need) the Cache to participate in the global federation.
+- **Testing and development** environments where operators want to experiment with Cache behavior without registering infrastructure with a production federation.
+
+## How It Works
+
+When site-local mode is enabled, the following changes take effect compared to a normal federated Cache:
+
+| Behavior | Normal Cache | Site-Local Cache |
+|---|---|---|
+| Registers namespace with the Registry | Yes | **No** |
+| Advertises to the Director | Yes | **No** |
+| Connection broker operations | Yes (if enabled) | **No** |
+| Director health tests | Yes | **No** |
+| Federation token management | Yes | **No** |
+| Discoverable by clients via the Director | Yes | **No** — clients must specify the Cache URL explicitly |
+
+Because the Cache does not advertise to the Director, the Director cannot route client requests to it.
+Clients must instead be configured to use the site-local Cache directly (see [Pointing Clients at a Site-Local Cache](#pointing-clients-at-a-site-local-cache) below).
+
+The Cache still requires a [`Federation.DiscoveryUrl`](/parameters#Federation-DiscoveryUrl) (or a `-f <federation>` argument) so that it can contact the Director and discover which federation-managed Caches hold a requested object on a Cache miss as well as deriving authorization policies for namespaces.
+Note that the site-local Cache attempts to fetch objects from federation Caches — not directly from Origins.
+
+## Configuration
+
+To enable site-local mode, add the following to your Cache's configuration file:
+
+```yaml
+Cache:
+  EnableSiteLocalMode: true
+```
+
+A minimal configuration file for a site-local Cache might look like:
+
+```yaml
+Cache:
+  EnableSiteLocalMode: true
+  Port: 8443
+  StorageLocation: /mnt/pelican/cache
+Federation:
+  DiscoveryUrl: https://osg-htc.org
+```
+
+Where:
+- [`Cache.Port`](/parameters#Cache-Port) is the port your Cache's XRootD file transfer service listens on (default `8442`).
+- [`Cache.StorageLocation`](/parameters#Cache-StorageLocation) is the directory where cached data will be stored.
+- [`Federation.DiscoveryUrl`](/parameters#Federation-DiscoveryUrl) tells the Cache where to discover metadata for the broader federation
+
+Then launch the Cache as usual:
+
+```bash
+pelican cache serve --config /path/to/pelican.yaml
+```
+
+<Callout>
+  Even though the site-local Cache does not join the federation, it still needs to know the federation discovery endpoint so it can discover federation-managed Caches to pull objects from on a Cache miss.
+  Note that site-local Cache attempt to fetch missing objects from federation Caches, not directly from Origins.
+</Callout>
+
+## Pointing Clients at a Site-Local Cache
+
+Because a site-local Cache is not known to the Director, the Director cannot redirect clients to it.
+You must configure clients to send requests to the Cache directly.
+
+To find the URL of your site-local Cache's XRootD service, check the [`Cache.Url`](/parameters#Cache-Url) value in your configuration.
+The URL typically looks like `https://<hostname>:<Cache.Port>`.
+
+### Pelican CLI (Go Client)
+
+Use the `-c` (or `--cache`) flag to direct the Pelican client to your site-local Cache:
+
+```bash
+pelican object get pelican://<federation-url>/namespace/path/to/file ./local-file \
+    --cache https://my-site-local-cache.example.com:8442
+```
+
+For persistent configuration, set [`Client.PreferredCaches`](/parameters#Client-PreferredCaches) in your Pelican configuration file or environment variable:
+
+```yaml
+Client:
+  PreferredCaches:
+    - https://my-site-local-cache.example.com:8443
+```
+
+Or via the environment variable (space-separated):
+
+```bash
+export PELICAN_CLIENT_PREFERREDCACHES="https://my-site-local-cache.example.com:8442"
+```
+
+#### Falling Back to Federation Caches Supplied by the Director
+
+If you want clients to _prefer_ the site-local Cache but still fall back to Director-discovered Caches when it is unavailable, add a `+` as the last element:
+
+```yaml
+Client:
+  PreferredCaches:
+    - https://my-site-local-cache.example.com:8442
+    - "+"
+```
+
+Without the `+`, the client will **only** attempt the listed Caches and fail if none can serve the object.
+
+### PelicanFS (Python FSSpec Client)
+
+When constructing a `PelicanFileSystem`, pass the `preferred_caches` parameter:
+
+```python
+from pelicanfs.core import PelicanFileSystem
+
+pelfs = PelicanFileSystem(
+    "pelican://federation.example.com",
+    preferred_caches=["https://my-site-local-cache.example.com:8442"],
+)
+
+# Open and read a file through the site-local cache
+with pelfs.open("/namespace/path/to/file") as f:
+    data = f.read()
+```
+
+As with the Go client, appending `"+"` to the list enables fallback to Director-discovered Caches:
+
+```python
+pelfs = PelicanFileSystem(
+    "pelican://federation.example.com",
+    preferred_caches=["https://my-site-local-cache.example.com:8442", "+"],
+)
+```
+
+## Important Considerations
+
+### Security and Updates
+
+Because your federation's Director is unaware of the site-local Cache, it cannot monitor the Cache's health or software version.
+As an operator, you are responsible for:
+
+- **Tracking Pelican releases** for Cache-related security patches and applying them promptly.
+- **Monitoring the Cache's health** independently, since the Director will not run health tests against it.
+
+<Callout type="error">
+  **You are responsible for the access security of all data held by your site-local Cache.**
+  Because the site-local Cache operates outside the federation's oversight, no federation service enforces or audits access controls on its behalf.
+  Ensure that your Cache's derived namespace authorization policies remain in sync with the Director and that TLS configuration and network perimeter controls are correctly configured to prevent unauthorized access to cached data.
+</Callout>
+
+### Metrics and Statistics
+
+Usage data that is normally collected by the Director (transfer statistics, availability metrics, etc.) will **not** include this Cache.
+If your organization relies on federation-level reporting, be aware that site-local Cache activity will not appear in those reports.
+
+### No Incoming Connections Required from the Federation
+
+Because the Cache does not register or advertise, no federation service needs to reach the Cache.
+The Cache only makes _outbound_ connections: to the Director to discover which federation-managed Caches hold a requested object, and then to those federation Caches to fetch data.
+This can simplify firewall rules in environments where inbound connections from the federation are restricted.
