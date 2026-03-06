@@ -47,7 +47,7 @@ A minimal configuration file for a site-local Cache might look like:
 ```yaml
 Cache:
   EnableSiteLocalMode: true
-  Port: 8443
+  Port: 8442
   StorageLocation: /mnt/pelican/cache
 Federation:
   DiscoveryUrl: https://osg-htc.org
@@ -91,7 +91,7 @@ For persistent configuration, set [`Client.PreferredCaches`](/parameters#Client-
 ```yaml
 Client:
   PreferredCaches:
-    - https://my-site-local-cache.example.com:8443
+    - https://my-site-local-cache.example.com:8442
 ```
 
 Or via the environment variable (space-separated):
