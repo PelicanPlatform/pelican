@@ -1,6 +1,6 @@
 #!/bin/bash -xe
 
-# Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+# Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you
 # may not use this file except in compliance with the License.  You may
@@ -66,7 +66,6 @@ done
 # ---------------------------------------------------------------------------
 export PELICAN_TLSSKIPVERIFY=true
 export PELICAN_SERVER_ENABLEUI=false
-export PELICAN_ORIGIN_ENABLEDIRECTREADS=true
 export PELICAN_ORIGIN_ENABLEPUBLICREADS=true
 export PELICAN_ORIGIN_ENABLEVOMS=false
 export PELICAN_REGISTRY_REQUIRECACHEAPPROVAL=false
@@ -137,7 +136,7 @@ cleanup() {
 
     rm -rf "${TEST_ROOT}"
 
-    unset PELICAN_TLSSKIPVERIFY PELICAN_SERVER_ENABLEUI PELICAN_ORIGIN_ENABLEDIRECTREADS
+    unset PELICAN_TLSSKIPVERIFY PELICAN_SERVER_ENABLEUI
     unset PELICAN_ORIGIN_ENABLEPUBLICREADS PELICAN_ORIGIN_ENABLEVOMS
     unset PELICAN_REGISTRY_REQUIRECACHEAPPROVAL PELICAN_REGISTRY_REQUIREORIGINAPPROVAL
     unset PELICAN_LOGGING_LEVEL PELICAN_DIRECTOR_STATTIMEOUT PELICAN_DIRECTOR_CACHESORTMETHOD PELICAN_DIRECTOR_FILTERCACHESINERRORSTATE
