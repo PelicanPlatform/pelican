@@ -109,7 +109,29 @@ const (
 	// Meant mostly for unit tests; advertising ads is essential
 	// functionality.
 	AdvertiseShutdownKey ContextKey = "advertise_shutdown"
+
+	// SkewThreshold is the minimum clock skew that triggers expiration time correction.
+	// Skews at or below this threshold are considered negligible and do not require adjustment.
+	SkewThreshold = 100 * time.Millisecond
 )
+
+// CorrectTimeSkew adjusts an expiration time to account for clock skew between sender and receiver.
+//
+// When clock skew exceeds SkewThreshold, the expiration is recalculated based on the original
+// ad lifetime (sentExpiry - sentAt) applied to receivedAt. This ensures the ad remains valid
+// for its intended lifetime from the receiver's perspective.
+//
+// Returns the original expiration unchanged if skew is within threshold or lifetime is non-positive.
+func CorrectTimeSkew(sentAt, sentExpiry, receivedAt time.Time) time.Time {
+	skew := receivedAt.Sub(sentAt)
+	if skew > SkewThreshold || skew < -SkewThreshold {
+		lifetime := sentExpiry.Sub(sentAt)
+		if lifetime > 0 {
+			return receivedAt.Add(lifetime)
+		}
+	}
+	return sentExpiry
+}
 
 // List all the directors known to this instance
 func listDirectors(ctx *gin.Context) {
@@ -156,26 +178,13 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 	}
 	directorAd := fAd.DirectorAd
 
-	// Reset the expiration times if we detect significant skew between the claimed time sent
-	// and the current time.
-	//
-	// That is, if the ad claims to have been sent at noon and expiring at 12:15 but the server
-	// received it at 13:00, then assume the expiration time is 13:15 (since the original lifetime
-	// was set to 15 minutes).
+	// Apply time-skew correction to expiration times if sender and receiver clocks differ significantly.
 	now := time.Now()
-	if skew := now.Sub(fAd.Now); skew > 100*time.Millisecond || skew < -100*time.Millisecond {
-		if fAd.DirectorAd != nil {
-			lifetime := fAd.DirectorAd.Expiration.Sub(fAd.Now)
-			if lifetime > 0 {
-				fAd.DirectorAd.Expiration = now.Add(lifetime)
-			}
-		}
-		if fAd.ServiceAd != nil {
-			lifetime := fAd.ServiceAd.Expiration.Sub(fAd.Now)
-			if lifetime > 0 {
-				fAd.ServiceAd.Expiration = now.Add(lifetime)
-			}
-		}
+	if fAd.DirectorAd != nil {
+		fAd.DirectorAd.Expiration = CorrectTimeSkew(fAd.Now, fAd.DirectorAd.Expiration, now)
+	}
+	if fAd.ServiceAd != nil {
+		fAd.ServiceAd.Expiration = CorrectTimeSkew(fAd.Now, fAd.ServiceAd.Expiration, now)
 	}
 
 	if fAd.AdType == server_structs.DirectorType.String() {
@@ -230,7 +239,7 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.OriginAdvertiseV2, sType server_structs.ServerType, seenBy []string) {
 	name, err := getMyName(engineCtx)
 	if err != nil {
-		log.Errorln("Local service does not know its own name (cannot forward service ad):", err)
+		log.Errorln("This Director does not know its own name (cannot forward service ad):", err)
 		return
 	}
 	seenBy = append(slices.Clone(seenBy), name)
@@ -295,7 +304,7 @@ func (dir *directorInfo) forwardDirector(ad *server_structs.DirectorAd) {
 func (dir *directorInfo) forwardService(ctx context.Context, ad *server_structs.OriginAdvertiseV2, sType server_structs.ServerType, seenBy []string) {
 	name, err := getMyName(ctx)
 	if err != nil {
-		log.Errorln("Local service does not know its own name (cannot forward service ad):", err)
+		log.Errorln("This Director does not know its own name (cannot forward service ad):", err)
 		return
 	}
 	adUrl := param.Director_AdvertiseUrl.GetString()
@@ -497,7 +506,7 @@ func sendMyAd(ctx context.Context) {
 
 	name, err := getMyName(ctx)
 	if err != nil {
-		log.Errorln("Local service does not know its own name (cannot forward ad to remote directors):", err)
+		log.Errorln("This Director does not know its own name (cannot forward ad to remote directors):", err)
 		return
 	}
 	adUrl := param.Director_AdvertiseUrl.GetString()

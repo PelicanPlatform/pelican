@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
@@ -457,14 +458,15 @@ func TestSeenByNoDuplicates(t *testing.T) {
 						trial, entry, count, name)
 				}
 			default:
-				// director might have been skipped due to seenBy; that's fine
+				assert.Fail(t, "director should have received the ad",
+					"trial=%d director=%s (only names[0]=%s is excluded)", trial, name, names[0])
 			}
 		}
 	}
 }
 
 // TestTimeSkewCorrectionPreservesLifetime verifies the invariant of the time-skew
-// correction in registerDirectorAd: when a significant clock skew is detected,
+// correction in CorrectTimeSkew: when a significant clock skew is detected,
 // the corrected expiry must equal receivedAt + originalLifetime.
 //
 // This matters because an ad sent with a 15-minute lifetime should remain valid
@@ -483,28 +485,15 @@ func TestTimeSkewCorrectionPreservesLifetime(t *testing.T) {
 		skew := time.Duration(rng.Intn(10000)+200) * time.Millisecond
 
 		sentAt := time.Now()
-		fAd := forwardAd{
-			Now: sentAt,
-			ServiceAd: &server_structs.OriginAdvertiseV2{
-				ServerBaseAd: server_structs.ServerBaseAd{
-					Expiration: sentAt.Add(lifetime),
-				},
-			},
-		}
-
-		// Apply the skew-correction logic from registerDirectorAd.
+		sentExpiry := sentAt.Add(lifetime)
 		receivedAt := sentAt.Add(skew)
-		if s := receivedAt.Sub(fAd.Now); s > 100*time.Millisecond || s < -100*time.Millisecond {
-			if fAd.ServiceAd != nil {
-				if adLifetime := fAd.ServiceAd.Expiration.Sub(fAd.Now); adLifetime > 0 {
-					fAd.ServiceAd.Expiration = receivedAt.Add(adLifetime)
-				}
-			}
-		}
+
+		// Call the actual CorrectTimeSkew function from the codebase.
+		correctedExpiry := CorrectTimeSkew(sentAt, sentExpiry, receivedAt)
 
 		// Property: corrected expiry ≈ receivedAt + originalLifetime.
 		expectedExpiry := receivedAt.Add(lifetime)
-		diff := fAd.ServiceAd.Expiration.Sub(expectedExpiry)
+		diff := correctedExpiry.Sub(expectedExpiry)
 		if diff < 0 {
 			diff = -diff
 		}
@@ -527,26 +516,12 @@ func TestTimeSkewCorrectionBelowThresholdIsNoop(t *testing.T) {
 
 		sentAt := time.Now()
 		originalExpiry := sentAt.Add(lifetime)
-		fAd := forwardAd{
-			Now: sentAt,
-			ServiceAd: &server_structs.OriginAdvertiseV2{
-				ServerBaseAd: server_structs.ServerBaseAd{
-					Expiration: originalExpiry,
-				},
-			},
-		}
-
-		// Apply skew-correction logic.
 		receivedAt := sentAt.Add(skew)
-		if s := receivedAt.Sub(fAd.Now); s > 100*time.Millisecond || s < -100*time.Millisecond {
-			if fAd.ServiceAd != nil {
-				if adLifetime := fAd.ServiceAd.Expiration.Sub(fAd.Now); adLifetime > 0 {
-					fAd.ServiceAd.Expiration = receivedAt.Add(adLifetime)
-				}
-			}
-		}
 
-		assert.Equal(t, originalExpiry, fAd.ServiceAd.Expiration,
+		// Call the actual CorrectTimeSkew function from the codebase.
+		correctedExpiry := CorrectTimeSkew(sentAt, originalExpiry, receivedAt)
+
+		assert.Equal(t, originalExpiry, correctedExpiry,
 			"trial %d: skew (%v) is within threshold; expiry must not be modified", trial, skew)
 	}
 }
