@@ -22,11 +22,13 @@ package cache_test
 
 import (
 	_ "embed"
+	"net/url"
 	"testing"
+	"time"
 
-	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
@@ -38,7 +40,8 @@ var (
 	brokerConfig string
 )
 
-// Spin up a federation and verifies that the cache broker infrastructure is properly configured.
+// Spin up a federation and verify that the cache advertises with BrokerURL when broker is enabled
+// and the director registers it.
 func TestBrokerApi(t *testing.T) {
 	server_utils.ResetTestState()
 	t.Cleanup(func() {
@@ -47,26 +50,23 @@ func TestBrokerApi(t *testing.T) {
 
 	fed := fed_test_utils.NewFedTest(t, brokerConfig)
 
-	// Verify the broker connection metric collector exists for cache
-	collector, err := metrics.PelicanBrokerConnections.GetMetricWithLabelValues("cache")
-	require.NoError(t, err, "Failed to get metric collector for cache broker connections")
-	startVal := testutil.ToFloat64(collector)
-
 	// Wait for the server to be ready
 	desiredURL := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
-	err = server_utils.WaitUntilWorking(fed.Ctx, "GET", desiredURL, "director", 200, false)
+	err := server_utils.WaitUntilWorking(fed.Ctx, "GET", desiredURL, "director", 200, false)
 	require.NoError(t, err)
 
-	// Verify Cache.EnableBroker is set
 	require.True(t, param.Cache_EnableBroker.GetBool(), "Cache broker should be enabled")
 
-	// Verify the metric collector infrastructure exists
-	require.NotNil(t, collector, "Expected broker connections metric collector to exist for cache")
+	// Verify the broker connection metric collector exists for cache (incremented in broker_client on reverse connection)
+	collector, err := metrics.PelicanBrokerConnections.GetMetricWithLabelValues("cache")
+	require.NoError(t, err, "Failed to get metric collector for cache broker connections")
+	require.NotNil(t, collector)
 
-	// Verify we can increment the metric (infrastructure test)
-	metrics.PelicanBrokerConnections.WithLabelValues("cache").Inc()
-	t.Logf("startVal: %f", startVal)
-	t.Logf("currentVal: %f", testutil.ToFloat64(collector))
-	require.Greater(t, testutil.ToFloat64(collector), startVal,
-		"Expected to be able to increment the broker connections metric")
+	// Wait for the director to register the cache's broker endpoint.
+	// This proves the cache advertised with BrokerURL and the director received it.
+	externalWebUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		return director.HasBrokerForAddr(externalWebUrl.Host)
+	}, 5*time.Second, 50*time.Millisecond, "Director did not register cache broker endpoint for "+externalWebUrl.Host)
 }
