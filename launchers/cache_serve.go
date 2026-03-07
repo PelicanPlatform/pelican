@@ -180,11 +180,12 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 	launch := func(ls []daemon.Launcher) ([]int, error) {
 		return xrootd.LaunchDaemons(ctx, ls, egrp, portStartCallback)
 	}
-	xrootd.StoreRestartInfo(pids, launch, true, useCMSD, privileged)
+	xrootd.SetRestartAdvertiseFn(launcher_utils.Advertise)
+	xrootd.StoreRestartInfo(pids, launch, cacheServer, true, useCMSD, privileged)
 
 	// Register callback for xrootd logging configuration changes
 	// This must be done after LaunchDaemons so the server has PIDs
-	xrootd.RegisterXrootdLoggingCallback()
+	xrootd.RegisterXrootdLoggingCallback(ctx)
 
 	if param.Cache_EnableEvictionMonitoring.GetBool() {
 		metrics.LaunchXrootdCacheEvictionMonitoring(ctx, egrp)

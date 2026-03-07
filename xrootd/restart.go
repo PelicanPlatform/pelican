@@ -41,6 +41,7 @@ type restartInfo struct {
 	// launchers. Its closure should capture the server-lifetime context,
 	// errgroup, and PID callback at registration time.
 	launch     func(launchers []daemon.Launcher) ([]int, error)
+	server     server_structs.XRootDServer
 	isCache    bool
 	useCMSD    bool
 	privileged bool
@@ -57,11 +58,13 @@ var (
 	// Store launcher information for restart; one entry per server role (origin/cache)
 	restartInfos []restartInfo
 
-	// configXrootdFn and configureLaunchersFn are package-level variables
-	// to allow tests to inject stubs
-	// without requiring real XRootD configuration.
+	// These package-level function vars provide test seams for restart orchestration.
+	// Tests can override them to isolate behavior without invoking real XRootD side effects.
 	configXrootdFn       = ConfigXrootd
 	configureLaunchersFn = ConfigureLaunchers
+	preRestartFn         = runGlobalPreRestart
+	postRestartFn        = runGlobalPostRestart
+	advertiseServersFn   = func(_ context.Context, _ []server_structs.XRootDServer) error { return nil }
 )
 
 // ResetRestartState clears restart tracking and callbacks for tests.
@@ -71,17 +74,33 @@ func ResetRestartState() {
 	restartInfos = nil
 	configXrootdFn = ConfigXrootd
 	configureLaunchersFn = ConfigureLaunchers
+	preRestartFn = runGlobalPreRestart
+	postRestartFn = runGlobalPostRestart
+	advertiseServersFn = func(_ context.Context, _ []server_structs.XRootDServer) error { return nil }
 	ClearXrootdDaemons()
+}
+
+// SetRestartAdvertiseFn injects the server advertisement implementation used by
+// restart orchestration during global pre/post restart phases.
+//
+// This keeps xrootd restart logic decoupled from launcher_utils (which owns the
+// concrete Director advertisement behavior) and provides a test seam for stubbing.
+func SetRestartAdvertiseFn(fn func(context.Context, []server_structs.XRootDServer) error) {
+	if fn == nil {
+		advertiseServersFn = func(_ context.Context, _ []server_structs.XRootDServer) error { return nil }
+		return
+	}
+	advertiseServersFn = fn
 }
 
 // StoreRestartInfo stores the information needed for restarting XRootD.
 // Call this during the initial launch, after PIDs are known.
-//
-//   - launch is a closure that starts new XRootD daemons;
-//     it should capture the server-lifetime context, errgroup, and PID callback.
-func StoreRestartInfo(pids []int, launch func(launchers []daemon.Launcher) ([]int, error), cache bool, cmsd bool, priv bool) {
+// The launch closure should start new XRootD daemons
+// and capture the server-lifetime context, errgroup, and PID callback.
+func StoreRestartInfo(pids []int, launch func(launchers []daemon.Launcher) ([]int, error), server server_structs.XRootDServer, cache bool, cmsd bool, priv bool) {
 	info := restartInfo{
 		launch:     launch,
+		server:     server,
 		isCache:    cache,
 		useCMSD:    cmsd,
 		privileged: priv,
@@ -105,9 +124,10 @@ func StoreRestartInfo(pids []int, launch func(launchers []daemon.Launcher) ([]in
 	restartInfosMu.Unlock()
 }
 
-// RestartXrootd gracefully restarts the XRootD server processes
-// This function is thread-safe and will prevent concurrent restart attempts
-func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error) {
+// RestartXrootd gracefully restarts XRootD with explicit operation and
+// server-lifetime contexts.
+// This function is thread-safe and will prevent concurrent restart attempts.
+func RestartXrootd(opCtx context.Context, serverCtx context.Context, oldPids []int) (newPids []int, err error) {
 	// Acquire the restart mutex to prevent concurrent restarts
 	if !restartMutex.TryLock() {
 		return nil, errors.New("XRootD restart already in progress")
@@ -145,6 +165,10 @@ func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error
 	}
 	if len(oldPids) == 0 {
 		return nil, errors.New("restart requested but no tracked PIDs are available")
+	}
+
+	if preErr := preRestartFn(serverCtx, storedInfos); preErr != nil {
+		return nil, preErr
 	}
 
 	// Step 1: Gracefully shutdown existing XRootD processes
@@ -203,7 +227,7 @@ func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error
 	updatedInfos := make([]restartInfo, 0, len(storedInfos))
 
 	for _, info := range storedInfos {
-		configPath, cfgErr := configXrootdFn(ctx, !info.isCache)
+		configPath, cfgErr := configXrootdFn(opCtx, !info.isCache)
 		if cfgErr != nil {
 			return nil, errors.Wrap(cfgErr, "Failed to reconfigure XRootD")
 		}
@@ -239,19 +263,50 @@ func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error
 
 	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusOK, "XRootD restart complete")
 
+	if postErr := postRestartFn(serverCtx, updatedInfos); postErr != nil {
+		return nil, postErr
+	}
+
 	log.Infof("XRootD restart complete with new PIDs: %v", newPids)
 	return newPids, nil
 }
 
-// RestartServer is a helper function that restarts XRootD and updates the server's PIDs
-// This avoids circular dependencies by being in the xrootd package
-func RestartServer(ctx context.Context, server server_structs.XRootDServer) error {
-	oldPids := server.GetPids()
-	newPids, err := RestartXrootd(ctx, oldPids)
-	if err != nil {
-		return err
+func collectTrackedServers(infos []restartInfo) []server_structs.XRootDServer {
+	var servers []server_structs.XRootDServer
+	for _, info := range infos {
+		if info.server != nil {
+			servers = append(servers, info.server)
+		}
 	}
-	server.SetPids(newPids)
+	return servers
+}
+
+func runGlobalPreRestart(serverCtx context.Context, infos []restartInfo) error {
+	servers := collectTrackedServers(infos)
+	if len(servers) == 0 {
+		return nil
+	}
+	// This advertisement assumes RestartXrootd has already set component health
+	// to "shutting down", so Director sees restart-in-progress state immediately.
+	log.Infof("Waiting %s for in-flight transfers before shutting down", param.Xrootd_ShutdownTimeout.GetDuration().String())
+	if advErr := advertiseServersFn(serverCtx, servers); advErr != nil {
+		log.Errorf("Failed to advertise before shutdown: %v", advErr)
+	}
+	time.Sleep(param.Xrootd_ShutdownTimeout.GetDuration())
+	log.Info("Shutdown grace period elapsed; proceeding with shutdown and discarding incomplete transfers")
+	return nil
+}
+
+func runGlobalPostRestart(serverCtx context.Context, infos []restartInfo) error {
+	servers := collectTrackedServers(infos)
+	if len(servers) == 0 {
+		return nil
+	}
+	// This re-advertisement assumes RestartXrootd has restored component health
+	// to "ok", so Director can clear the temporary restart/downtime signal.
+	if advErr := advertiseServersFn(serverCtx, servers); advErr != nil {
+		log.Errorf("Failed to re-advertise after restart: %v", advErr)
+	}
 	return nil
 }
 
