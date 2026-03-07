@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -29,7 +29,6 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/metrics"
@@ -38,9 +37,10 @@ import (
 )
 
 type restartInfo struct {
-	launchers  []daemon.Launcher
-	egrp       *errgroup.Group
-	callback   func(int)
+	// launch should start new XRootD daemons using freshly-configured
+	// launchers. Its closure should capture the server-lifetime context,
+	// errgroup, and PID callback at registration time.
+	launch     func(launchers []daemon.Launcher) ([]int, error)
 	isCache    bool
 	useCMSD    bool
 	privileged bool
@@ -56,6 +56,12 @@ var (
 
 	// Store launcher information for restart; one entry per server role (origin/cache)
 	restartInfos []restartInfo
+
+	// configXrootdFn and configureLaunchersFn are package-level variables
+	// to allow tests to inject stubs
+	// without requiring real XRootD configuration.
+	configXrootdFn       = ConfigXrootd
+	configureLaunchersFn = ConfigureLaunchers
 )
 
 // ResetRestartState clears restart tracking and callbacks for tests.
@@ -63,16 +69,19 @@ func ResetRestartState() {
 	restartMutex = sync.Mutex{}
 	restartInfosMu = sync.RWMutex{}
 	restartInfos = nil
+	configXrootdFn = ConfigXrootd
+	configureLaunchersFn = ConfigureLaunchers
 	ClearXrootdDaemons()
 }
 
-// StoreRestartInfo stores the information needed for restarting XRootD
-// This should be called during initial launch after PIDs are known.
-func StoreRestartInfo(launchers []daemon.Launcher, pids []int, egrp *errgroup.Group, callback func(int), cache bool, cmsd bool, priv bool) {
+// StoreRestartInfo stores the information needed for restarting XRootD.
+// Call this during the initial launch, after PIDs are known.
+//
+//   - launch is a closure that starts new XRootD daemons;
+//     it should capture the server-lifetime context, errgroup, and PID callback.
+func StoreRestartInfo(pids []int, launch func(launchers []daemon.Launcher) ([]int, error), cache bool, cmsd bool, priv bool) {
 	info := restartInfo{
-		launchers:  launchers,
-		egrp:       egrp,
-		callback:   callback,
+		launch:     launch,
 		isCache:    cache,
 		useCMSD:    cmsd,
 		privileged: priv,
@@ -194,7 +203,7 @@ func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error
 	updatedInfos := make([]restartInfo, 0, len(storedInfos))
 
 	for _, info := range storedInfos {
-		configPath, cfgErr := ConfigXrootd(ctx, !info.isCache)
+		configPath, cfgErr := configXrootdFn(ctx, !info.isCache)
 		if cfgErr != nil {
 			return nil, errors.Wrap(cfgErr, "Failed to reconfigure XRootD")
 		}
@@ -204,18 +213,17 @@ func RestartXrootd(ctx context.Context, oldPids []int) (newPids []int, err error
 		}
 
 		log.Debug("Configuring new XRootD launchers")
-		newLaunchers, cfgLaunchErr := ConfigureLaunchers(info.privileged, configPath, info.useCMSD, info.isCache)
+		newLaunchers, cfgLaunchErr := configureLaunchersFn(info.privileged, configPath, info.useCMSD, info.isCache)
 		if cfgLaunchErr != nil {
 			return nil, errors.Wrap(cfgLaunchErr, "Failed to configure XRootD launchers")
 		}
 
 		log.Info("Launching new XRootD daemons")
-		pids, launchErr := LaunchDaemons(ctx, newLaunchers, info.egrp, info.callback)
+		pids, launchErr := info.launch(newLaunchers)
 		if launchErr != nil {
 			return nil, errors.Wrap(launchErr, "Failed to launch XRootD daemons")
 		}
 
-		info.launchers = newLaunchers
 		info.pids = append([]int(nil), pids...)
 		updatedInfos = append(updatedInfos, info)
 		newPids = append(newPids, pids...)
