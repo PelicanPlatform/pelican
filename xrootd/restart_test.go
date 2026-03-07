@@ -38,8 +38,8 @@ func TestStoreRestartInfo(t *testing.T) {
 
 	launch := func(ls []daemon.Launcher) ([]int, error) { return []int{12345}, nil }
 
-	StoreRestartInfo(nil, launch, true, false, true)
-	StoreRestartInfo(nil, launch, false, true, false)
+	StoreRestartInfo(nil, launch, true, false, true, nil, nil)
+	StoreRestartInfo(nil, launch, false, true, false, nil, nil)
 
 	require.Len(t, restartInfos, 2)
 
@@ -72,10 +72,10 @@ func TestStoreRestartInfoReplacesByRole(t *testing.T) {
 
 	launch := func(ls []daemon.Launcher) ([]int, error) { return []int{12345}, nil }
 
-	StoreRestartInfo(nil, launch, true, false, false)
+	StoreRestartInfo(nil, launch, true, false, false, nil, nil)
 	require.Len(t, restartInfos, 1)
 
-	StoreRestartInfo(nil, launch, true, true, true)
+	StoreRestartInfo(nil, launch, true, true, true, nil, nil)
 
 	require.Len(t, restartInfos, 1)
 	assert.True(t, restartInfos[0].useCMSD)
@@ -90,7 +90,7 @@ func TestRestartXrootd_NoProcesses(t *testing.T) {
 	defer cancel()
 
 	launch := func(ls []daemon.Launcher) ([]int, error) { return []int{12345}, nil }
-	StoreRestartInfo([]int{999999, 999998}, launch, false, false, false)
+	StoreRestartInfo([]int{999999, 999998}, launch, false, false, false, nil, nil)
 
 	// Try to restart with empty PID list - should fail since there's no xrootd config
 	_, err := RestartXrootd(ctx, []int{})
