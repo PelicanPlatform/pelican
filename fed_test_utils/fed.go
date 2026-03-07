@@ -175,6 +175,9 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	require.NoError(t, param.Set(param.Cache_EnableEvictionMonitoring.GetName(), false))
 	require.NoError(t, param.Set(param.Cache_StorageLocation.GetName(), filepath.Join(tmpPath, "xcache-data")))
 	require.NoError(t, param.Set(param.Cache_DbLocation.GetName(), filepath.Join(t.TempDir(), "cache.sqlite")))
+	// In tests, skip the drain-wait period before XRootD restarts so tests
+	// don't time out waiting for PIDs to change.
+	require.NoError(t, param.Set(param.Xrootd_ShutdownTimeout.GetName(), 0))
 	require.NoError(t, param.Set(param.Server_EnableUI.GetName(), false))
 	require.NoError(t, param.Set(param.Server_WebPort.GetName(), 0))
 	require.NoError(t, param.Set(param.Server_DbLocation.GetName(), filepath.Join(t.TempDir(), "server.sqlite")))
