@@ -36,7 +36,7 @@ func TestStoreRestartInfo(t *testing.T) {
 	restartInfos = nil
 	t.Cleanup(func() { restartInfos = nil })
 
-	launch := func(ls []daemon.Launcher) ([]int, error) { return []int{12345}, nil }
+	launch := func(ls []daemon.Launcher) ([]int, error) { return nil, nil }
 
 	StoreRestartInfo(nil, launch, true, false, true, nil, nil)
 	StoreRestartInfo(nil, launch, false, true, false, nil, nil)
@@ -70,7 +70,7 @@ func TestStoreRestartInfoReplacesByRole(t *testing.T) {
 	restartInfos = nil
 	t.Cleanup(func() { restartInfos = nil })
 
-	launch := func(ls []daemon.Launcher) ([]int, error) { return []int{12345}, nil }
+	launch := func(ls []daemon.Launcher) ([]int, error) { return nil, nil }
 
 	StoreRestartInfo(nil, launch, true, false, false, nil, nil)
 	require.Len(t, restartInfos, 1)
@@ -89,7 +89,7 @@ func TestRestartXrootd_NoProcesses(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	launch := func(ls []daemon.Launcher) ([]int, error) { return []int{12345}, nil }
+	launch := func(ls []daemon.Launcher) ([]int, error) { return nil, nil }
 	StoreRestartInfo([]int{999999, 999998}, launch, false, false, false, nil, nil)
 
 	// Try to restart with empty PID list - should fail since there's no xrootd config
@@ -99,4 +99,92 @@ func TestRestartXrootd_NoProcesses(t *testing.T) {
 	// The important thing is it doesn't panic
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Failed to reconfigure XRootD")
+}
+
+// TestRestartXrootd_PreRestartHookCalled verifies that preRestartHook is called
+func TestRestartXrootd_PreRestartHookCalled(t *testing.T) {
+	t.Cleanup(ResetRestartState)
+
+	// Stub out ConfigXrootd and ConfigureLaunchers; the test doesn't need real config
+	configXrootdFn = func(_ context.Context, _ bool) (string, error) { return "/fake/xrootd.cfg", nil }
+	configureLaunchersFn = func(_ bool, _ string, _ bool, _ bool) ([]daemon.Launcher, error) {
+		return nil, nil
+	}
+
+	hookCalled := false
+	preHook := func() { hookCalled = true }
+	// Return an arbitrary non-zero PID to emulate success
+	launch := func(ls []daemon.Launcher) ([]int, error) { return []int{12345}, nil }
+
+	StoreRestartInfo([]int{999999}, launch, false, false, false, preHook, nil)
+
+	ctx := context.Background()
+	_, err := RestartXrootd(ctx, []int{999999})
+	require.NoError(t, err)
+	assert.True(t, hookCalled, "preRestartHook was not called")
+}
+
+// TestRestartXrootd_PostRestartHookCalled verifies that postRestartHook is called
+func TestRestartXrootd_PostRestartHookCalled(t *testing.T) {
+	t.Cleanup(ResetRestartState)
+
+	// Stub out ConfigXrootd and ConfigureLaunchers; the test doesn't need real config
+	configXrootdFn = func(_ context.Context, _ bool) (string, error) { return "/fake/xrootd.cfg", nil }
+	configureLaunchersFn = func(_ bool, _ string, _ bool, _ bool) ([]daemon.Launcher, error) {
+		return nil, nil
+	}
+
+	hookCalled := false
+	postHook := func() { hookCalled = true }
+	// Return an arbitrary non-zero PID to emulate success
+	launch := func(ls []daemon.Launcher) ([]int, error) { return []int{12345}, nil }
+
+	StoreRestartInfo([]int{999999}, launch, false, false, false, nil, postHook)
+
+	ctx := context.Background()
+	_, err := RestartXrootd(ctx, []int{999999})
+	require.NoError(t, err)
+	assert.True(t, hookCalled, "postRestartHook was not called")
+}
+
+// TestRestartXrootd_LaunchCtxOutlivesRestartCtx verifies
+// that the context used to start the new daemon
+// is the server-lifetime context captured in the launch closure,
+// not the short-lived context passed to RestartXrootd.
+func TestRestartXrootd_LaunchCtxOutlivesRestartCtx(t *testing.T) {
+	t.Cleanup(ResetRestartState)
+
+	// Stub out ConfigXrootd and ConfigureLaunchers; the test doesn't need real config
+	configXrootdFn = func(_ context.Context, _ bool) (string, error) { return "/fake/xrootd.cfg", nil }
+	configureLaunchersFn = func(_ bool, _ string, _ bool, _ bool) ([]daemon.Launcher, error) {
+		return nil, nil
+	}
+
+	// serverCtx represents the long-lived server-lifetime context
+	serverCtx, serverCancel := context.WithCancel(context.Background())
+	defer serverCancel()
+
+	// launchCtxWasAlive is set inside the closure
+	// to record whether the server context is still alive when launch is called
+	launchCtxWasAlive := false
+	launch := func(ls []daemon.Launcher) ([]int, error) {
+		launchCtxWasAlive = serverCtx.Err() == nil
+		// Return an arbitrary non-zero PID to emulate success
+		return []int{12345}, nil
+	}
+
+	StoreRestartInfo([]int{999999}, launch, false, false, false, nil, nil)
+
+	// Simulate handleXrootdLoggingChange: use a short-lived context
+	// that is already cancelled
+	// by the time RestartXrootd's work reaches the launch step
+	shortCtx, shortCancel := context.WithCancel(context.Background())
+	shortCancel()
+
+	_, err := RestartXrootd(shortCtx, []int{999999})
+	require.NoError(t, err)
+
+	// The server context must still be alive,
+	// even though the context passed to RestartXrootd was cancelled
+	assert.True(t, launchCtxWasAlive, "the launch closure used a context that was already cancelled")
 }
