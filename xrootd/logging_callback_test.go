@@ -44,8 +44,8 @@ func TestXrootdLoggingCallbackRestartsAndUpdatesPids(t *testing.T) {
 	param.ClearCallbacks()
 	ClearXrootdDaemons()
 	restartInfos = []restartInfo{
-		{launchers: []daemon.Launcher{&mockLauncher{}}, isCache: true, pids: []int{10}},
-		{launchers: []daemon.Launcher{&mockLauncher{}}, isCache: false, pids: []int{20}},
+		{launch: func(ls []daemon.Launcher) ([]int, error) { return nil, nil }, isCache: true, pids: []int{10}},
+		{launch: func(ls []daemon.Launcher) ([]int, error) { return nil, nil }, isCache: false, pids: []int{20}},
 	}
 	t.Cleanup(func() { restartInfos = nil })
 
@@ -82,7 +82,7 @@ func TestXrootdLoggingCallbackRestartsAndUpdatesPids(t *testing.T) {
 func TestXrootdLoggingCallbackIgnoresNonXrootdLogging(t *testing.T) {
 	param.ClearCallbacks()
 	ClearXrootdDaemons()
-	restartInfos = []restartInfo{{launchers: []daemon.Launcher{&mockLauncher{}}, isCache: false, pids: []int{30}}}
+	restartInfos = []restartInfo{{launch: func(ls []daemon.Launcher) ([]int, error) { return nil, nil }, isCache: false, pids: []int{30}}}
 	t.Cleanup(func() { restartInfos = nil })
 
 	restartCalled := make(chan struct{}, 1)
