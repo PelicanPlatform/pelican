@@ -168,7 +168,15 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		launch := func(ls []daemon.Launcher) ([]int, error) {
 			return xrootd.LaunchDaemons(ctx, ls, egrp, portStartCallback)
 		}
-		xrootd.StoreRestartInfo(pids, launch, false, useCMSD, privileged)
+		preRestartHook := func() {
+			handleGracefulShutdown(ctx, modules, []server_structs.XRootDServer{originServer})
+		}
+		postRestartHook := func() {
+			if advErr := launcher_utils.Advertise(ctx, []server_structs.XRootDServer{originServer}); advErr != nil {
+				log.Errorf("Failed to re-advertise origin to Director after restart: %v", advErr)
+			}
+		}
+		xrootd.StoreRestartInfo(pids, launch, false, useCMSD, privileged, preRestartHook, postRestartHook)
 
 		// Register callback for xrootd logging configuration changes
 		// This must be done after LaunchDaemons so the server has PIDs
