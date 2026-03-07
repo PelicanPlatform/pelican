@@ -36,6 +36,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/cache"
+	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/lotman"
@@ -176,7 +177,10 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 	cacheServer.SetPids(pids)
 
 	// Store restart information after PIDs are known
-	xrootd.StoreRestartInfo(launchers, pids, egrp, portStartCallback, true, useCMSD, privileged)
+	launch := func(ls []daemon.Launcher) ([]int, error) {
+		return xrootd.LaunchDaemons(ctx, ls, egrp, portStartCallback)
+	}
+	xrootd.StoreRestartInfo(pids, launch, true, useCMSD, privileged)
 
 	// Register callback for xrootd logging configuration changes
 	// This must be done after LaunchDaemons so the server has PIDs

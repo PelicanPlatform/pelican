@@ -27,7 +27,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/daemon"
 )
@@ -37,12 +36,10 @@ func TestStoreRestartInfo(t *testing.T) {
 	restartInfos = nil
 	t.Cleanup(func() { restartInfos = nil })
 
-	var launchers []daemon.Launcher
-	egrp := &errgroup.Group{}
-	callback := func(port int) {}
+	launch := func(ls []daemon.Launcher) ([]int, error) { return []int{12345}, nil }
 
-	StoreRestartInfo(launchers, nil, egrp, callback, true, false, true)
-	StoreRestartInfo(launchers, nil, egrp, callback, false, true, false)
+	StoreRestartInfo(nil, launch, true, false, true)
+	StoreRestartInfo(nil, launch, false, true, false)
 
 	require.Len(t, restartInfos, 2)
 
@@ -65,21 +62,19 @@ func TestStoreRestartInfo(t *testing.T) {
 	assert.False(t, originInfo.isCache)
 	assert.True(t, originInfo.useCMSD)
 	assert.False(t, originInfo.privileged)
-	assert.NotNil(t, originInfo.egrp)
-	assert.NotNil(t, originInfo.callback)
+	assert.NotNil(t, originInfo.launch)
 }
 
 func TestStoreRestartInfoReplacesByRole(t *testing.T) {
 	restartInfos = nil
 	t.Cleanup(func() { restartInfos = nil })
 
-	var launchers []daemon.Launcher
-	egrp := &errgroup.Group{}
+	launch := func(ls []daemon.Launcher) ([]int, error) { return []int{12345}, nil }
 
-	StoreRestartInfo(launchers, nil, egrp, func(int) {}, true, false, false)
+	StoreRestartInfo(nil, launch, true, false, false)
 	require.Len(t, restartInfos, 1)
 
-	StoreRestartInfo(launchers, nil, egrp, func(int) {}, true, true, true)
+	StoreRestartInfo(nil, launch, true, true, true)
 
 	require.Len(t, restartInfos, 1)
 	assert.True(t, restartInfos[0].useCMSD)
@@ -93,10 +88,8 @@ func TestRestartXrootd_NoProcesses(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var launchers []daemon.Launcher
-	egrp := &errgroup.Group{}
-	callback := func(int) {}
-	StoreRestartInfo(launchers, []int{999999, 999998}, egrp, callback, false, false, false)
+	launch := func(ls []daemon.Launcher) ([]int, error) { return []int{12345}, nil }
+	StoreRestartInfo([]int{999999, 999998}, launch, false, false, false)
 
 	// Try to restart with empty PID list - should fail since there's no xrootd config
 	_, err := RestartXrootd(ctx, []int{})
