@@ -87,7 +87,7 @@ func TestSharingUrl(t *testing.T) {
 			_, err := w.Write([]byte(fmt.Sprintf(`{"director_endpoint": "%s"}`, server.URL)))
 			assert.NoError(t, err)
 		} else if r.URL.Path == "/issuer/register" {
-			clientConfig := `{"client_id": "client1", "client_secret": "secret", "client_secret_expires_at": 0}`
+			clientConfig := `{"client_id": "client1", "client_secret": "secret", "client_secret_expires_at": 0, "registration_access_token": "test-rat", "registration_client_uri": "` + issuerLoc + `/oidc-cm/client1"}`
 			w.WriteHeader(http.StatusCreated)
 			_, err := w.Write([]byte(clientConfig))
 			assert.NoError(t, err)

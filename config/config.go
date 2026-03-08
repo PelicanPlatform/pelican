@@ -73,6 +73,10 @@ type (
 		ClientID     string       `yaml:"client_id"`
 		ClientSecret string       `yaml:"client_secret"`
 		Tokens       []TokenEntry `yaml:"tokens,omitempty"`
+
+		// RFC 7592 fields for managing the dynamic client registration
+		RegistrationAccessToken string `yaml:"registration_access_token,omitempty"`
+		RegistrationClientURI   string `yaml:"registration_client_uri,omitempty"`
 	}
 
 	OSDFConfig struct {
