@@ -57,7 +57,7 @@ func newRegistrationRateLimiter(rate float64, burst int) *registrationRateLimite
 func normalizeIP(raw string) string {
 	ip := net.ParseIP(raw)
 	if ip == nil {
-		return raw // unparseable; use the string verbatim
+		return raw // unparsable; use the string verbatim
 	}
 	if ip.To4() != nil {
 		return ip.String() // IPv4 — per-address is fine
