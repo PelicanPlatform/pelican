@@ -999,12 +999,12 @@ func (iP IntParam) GetInt() int {
 			return config.Origin.DiskUsageCalculationRateLimit
 		case "Origin.Port":
 			return config.Origin.Port
-		case "Plugin.DirectorDecisionPercentage":
-			return config.Plugin.DirectorDecisionPercentage
 		case "Origin.SSH.MaxRetries":
 			return config.Origin.SSH.MaxRetries
 		case "Origin.SSH.Port":
 			return config.Origin.SSH.Port
+		case "Plugin.DirectorDecisionPercentage":
+			return config.Plugin.DirectorDecisionPercentage
 		case "Server.DatabaseBackup.MaxCount":
 			return config.Server.DatabaseBackup.MaxCount
 		case "Server.IssuerPort":
@@ -2026,9 +2026,9 @@ var (
 	Origin_ConcurrencyDegradedThreshold = IntParam{"Origin.ConcurrencyDegradedThreshold"}
 	Origin_DiskUsageCalculationRateLimit = IntParam{"Origin.DiskUsageCalculationRateLimit"}
 	Origin_Port = IntParam{"Origin.Port"}
-	Plugin_DirectorDecisionPercentage = IntParam{"Plugin.DirectorDecisionPercentage"}
 	Origin_SSH_MaxRetries = IntParam{"Origin.SSH.MaxRetries"}
 	Origin_SSH_Port = IntParam{"Origin.SSH.Port"}
+	Plugin_DirectorDecisionPercentage = IntParam{"Plugin.DirectorDecisionPercentage"}
 	Server_DatabaseBackup_MaxCount = IntParam{"Server.DatabaseBackup.MaxCount"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
 	Server_UILoginRateLimit = IntParam{"Server.UILoginRateLimit"}
