@@ -79,31 +79,21 @@ func TestCLILoggingLevelChanges(t *testing.T) {
 		require.NoError(t, err, "CLI command failed: %s", string(output))
 	}
 
-	runSetLevelExpectFail := func(paramName string, level string, duration string) string {
-		args := []string{cliPath, "server", "set-logging-level", level, duration}
-		if paramName != "" {
-			args = append(args, "--param", paramName)
-		}
-		cmd := exec.CommandContext(ft.Ctx, args[0], args[1:]...)
-		// Pass config file so CLI can access issuer keys for token generation
-		cmd.Env = append(os.Environ(),
-			"PELICAN_CONFIG="+configFile.Name(),
-		)
-		output, err := cmd.CombinedOutput()
-		require.Error(t, err, "CLI command should have failed")
-		return string(output)
-	}
-
 	// Get initial PIDs for xrootd processes (should be origin and cache)
 	initialPids := xrootd.GetTrackedPIDs()
 	require.NotEmpty(t, initialPids, "Expected xrootd PIDs to be tracked")
 	t.Logf("Initial xrootd PIDs: %v", initialPids)
 
-	// Test 0: Verify invalid parameter names are rejected
+	// Test 0: Verify invalid parameter names are rejected.
 	t.Log("Test 0: Verify invalid parameter names are rejected")
-	output := runSetLevelExpectFail("Logging.Origin.foo", "debug", "10s")
-	require.Contains(t, output, "Unsupported parameter", "Expected error message about unsupported parameter")
-	t.Logf("✓ Invalid parameter correctly rejected: %s", output)
+	args := []string{cliPath, "server", "set-logging-level", "debug", "10s", "--param", "Logging.Origin.foo"}
+	cmd := exec.CommandContext(ft.Ctx, args[0], args[1:]...)
+	cmd.Env = append(os.Environ(), "PELICAN_CONFIG="+configFile.Name())
+	output, err := cmd.CombinedOutput()
+	require.Error(t, err, "Expected error for invalid parameter name")
+	require.Contains(t, string(output), "Unsupported parameter",
+		"Expected error message about unsupported parameter, got: %s", string(output))
+	t.Logf("✓ Invalid parameter correctly rejected: %s", string(output))
 
 	// Capture the INITIAL log level BEFORE making any changes
 	// Query via param, not log.GetLevel() which is unreliable
