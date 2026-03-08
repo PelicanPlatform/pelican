@@ -745,7 +745,6 @@ var stringSliceAccessors = map[string]func(*Config) []string{
 	"Director.OriginResponseHostnames": func(c *Config) []string { return c.Director.OriginResponseHostnames },
 	"Issuer.GroupRequirements": func(c *Config) []string { return c.Issuer.GroupRequirements },
 	"Issuer.RedirectUris": func(c *Config) []string { return c.Issuer.RedirectUris },
-	"LocalCache.StorageDirs": func(c *Config) []string { return c.LocalCache.StorageDirs },
 	"Monitoring.AggregatePrefixes": func(c *Config) []string { return c.Monitoring.AggregatePrefixes },
 	"OIDC.Scopes": func(c *Config) []string { return c.OIDC.Scopes },
 	"Origin.DefaultChecksumTypes": func(c *Config) []string { return c.Origin.DefaultChecksumTypes },
@@ -1122,6 +1121,12 @@ func (dP DurationParam) SetString(value string) error {
 
 func (oP ObjectParam) Unmarshal(rawVal any) error {
 	return viperUnmarshalKey(oP.name, rawVal)
+}
+
+// GetRaw returns the raw value from the configuration store without
+// any type coercion.  Returns nil when the key is unset.
+func (oP ObjectParam) GetRaw() interface{} {
+	return viper.Get(oP.name)
 }
 
 func (oP ObjectParam) GetName() string {
@@ -1760,7 +1765,6 @@ var (
 	Director_OriginResponseHostnames = StringSliceParam{"Director.OriginResponseHostnames"}
 	Issuer_GroupRequirements = StringSliceParam{"Issuer.GroupRequirements"}
 	Issuer_RedirectUris = StringSliceParam{"Issuer.RedirectUris"}
-	LocalCache_StorageDirs = StringSliceParam{"LocalCache.StorageDirs"}
 	Monitoring_AggregatePrefixes = StringSliceParam{"Monitoring.AggregatePrefixes"}
 	OIDC_Scopes = StringSliceParam{"OIDC.Scopes"}
 	Origin_DefaultChecksumTypes = StringSliceParam{"Origin.DefaultChecksumTypes"}
@@ -1981,6 +1985,7 @@ var (
 	GeoIPOverrides = ObjectParam{"GeoIPOverrides"}
 	Issuer_AuthorizationTemplates = ObjectParam{"Issuer.AuthorizationTemplates"}
 	Issuer_OIDCAuthenticationRequirements = ObjectParam{"Issuer.OIDCAuthenticationRequirements"}
+	LocalCache_StorageDirs = ObjectParam{"LocalCache.StorageDirs"}
 	Lotman_PolicyDefinitions = ObjectParam{"Lotman.PolicyDefinitions"}
 	Origin_Exports = ObjectParam{"Origin.Exports"}
 	Registry_CustomRegistrationFields = ObjectParam{"Registry.CustomRegistrationFields"}
@@ -2193,7 +2198,6 @@ func init() {
 		"Director.OriginResponseHostnames": Director_OriginResponseHostnames,
 		"Issuer.GroupRequirements": Issuer_GroupRequirements,
 		"Issuer.RedirectUris": Issuer_RedirectUris,
-		"LocalCache.StorageDirs": LocalCache_StorageDirs,
 		"Monitoring.AggregatePrefixes": Monitoring_AggregatePrefixes,
 		"OIDC.Scopes": OIDC_Scopes,
 		"Origin.DefaultChecksumTypes": Origin_DefaultChecksumTypes,
@@ -2399,6 +2403,7 @@ func init() {
 		"GeoIPOverrides": GeoIPOverrides,
 		"Issuer.AuthorizationTemplates": Issuer_AuthorizationTemplates,
 		"Issuer.OIDCAuthenticationRequirements": Issuer_OIDCAuthenticationRequirements,
+		"LocalCache.StorageDirs": LocalCache_StorageDirs,
 		"Lotman.PolicyDefinitions": Lotman_PolicyDefinitions,
 		"Origin.Exports": Origin_Exports,
 		"Registry.CustomRegistrationFields": Registry_CustomRegistrationFields,

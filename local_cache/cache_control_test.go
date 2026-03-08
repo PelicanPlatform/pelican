@@ -206,3 +206,37 @@ func TestFreshness(t *testing.T) {
 		assert.Equal(t, 3600*time.Second, f)
 	})
 }
+
+// TestParseCacheControl_UnknownDirectives verifies that unknown or
+// extension directives (e.g. "immutable", "stale-while-revalidate")
+// are silently ignored and do not interfere with known directives.
+func TestParseCacheControl_UnknownDirectives(t *testing.T) {
+	tests := []struct {
+		name   string
+		header string
+	}{
+		{"single unknown", "immutable"},
+		{"unknown with value", "stale-while-revalidate=60"},
+		{"multiple unknown", "immutable, proxy-revalidate, stale-if-error=300"},
+		{"mixed known and unknown", "max-age=3600, immutable, proxy-revalidate"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cd := ParseCacheControl(tt.header)
+			// Unknown directives must not cause a panic or set unexpected flags.
+			assert.False(t, cd.NoStore())
+			assert.False(t, cd.NoCache())
+			assert.False(t, cd.Private())
+			assert.False(t, cd.MustRevalidate())
+			assert.True(t, cd.ShouldStore(), "unknown directives should not prevent storing")
+		})
+	}
+
+	t.Run("known directives parsed alongside unknowns", func(t *testing.T) {
+		cd := ParseCacheControl("immutable, max-age=600, proxy-revalidate, no-cache")
+		assert.True(t, cd.MaxAgeSet())
+		assert.Equal(t, 600*time.Second, cd.MaxAge())
+		assert.True(t, cd.NoCache())
+		assert.False(t, cd.NoStore())
+	})
+}

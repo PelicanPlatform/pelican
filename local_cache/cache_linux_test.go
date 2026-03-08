@@ -131,8 +131,7 @@ func TestForcePurge(t *testing.T) {
 	te, err := client.NewTransferEngine(ctx)
 	require.NoError(t, err)
 
-	issuer, err := config.GetServerIssuerURL()
-	require.NoError(t, err)
+	issuer := config.GetLocalIssuerUrl()
 	tokConf := token.NewWLCGToken()
 	tokConf.Lifetime = time.Duration(time.Minute)
 	tokConf.Issuer = issuer
@@ -265,9 +264,7 @@ func TestPurgeFirst(t *testing.T) {
 		assert.True(t, exists, "Expected file %d to exist before purge-first", idx)
 	}
 
-	// Create token with proper scopes
-	issuer, err := config.GetServerIssuerURL()
-	require.NoError(t, err)
+	issuer := config.GetLocalIssuerUrl()
 	tokConf := token.NewWLCGToken()
 	tokConf.Lifetime = time.Minute
 	tokConf.Issuer = issuer

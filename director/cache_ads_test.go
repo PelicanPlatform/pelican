@@ -21,6 +21,7 @@ package director
 import (
 	"context"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 
@@ -263,10 +264,12 @@ func TestRecordAd(t *testing.T) {
 			shutdownStatUtils()
 			serverAds.DeleteAll()
 			geoNetOverrides = nil
+			geoOverridesOnce = sync.Once{}
 		})
 		server_utils.ResetTestState()
 		func() {
 			geoNetOverrides = nil
+			geoOverridesOnce = sync.Once{}
 			resetHealthTests()
 			shutdownStatUtils()
 			serverAds.DeleteAll()
