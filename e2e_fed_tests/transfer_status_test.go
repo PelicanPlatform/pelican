@@ -325,7 +325,7 @@ func TestTransferStatus_Failure_UnrepairableCorruption(t *testing.T) {
 	require.NoError(t, err)
 
 	// Corrupt block 3 (4th block, starting at disk offset 3*BlockTotalSize)
-	corruptOffset := 3 * int(local_cache.BlockTotalSize) + 5
+	corruptOffset := 3*int(local_cache.BlockTotalSize) + 5
 	require.True(t, corruptOffset < len(data),
 		"Corrupt offset %d should be within file size %d", corruptOffset, len(data))
 	data[corruptOffset] ^= 0xFF
