@@ -41,6 +41,15 @@ import (
 // See https://github.com/WLCG-AuthZ-WG/common-jwt-profile/blob/master/profile.md
 const WLCGAudienceAny = "https://wlcg.cern.ch/jwt/v1/any"
 
+const (
+	// maxRedirectURIs is the maximum number of redirect URIs a dynamic client may register.
+	maxRedirectURIs = 10
+	// maxRedirectURILen is the maximum length (in bytes) of a single redirect URI.
+	maxRedirectURILen = 2048
+	// maxClientNameLen is the maximum length (in bytes) of a client_name.
+	maxClientNameLen = 128
+)
+
 // IssuerURL returns the issuer URL for the embedded OIDC provider.
 // It prefers Issuer.IssuerClaimValue when explicitly set, falling back to
 // Server.ExternalWebUrl.  This mirrors the logic in ConfigureOA4MP so that
@@ -69,6 +78,10 @@ func RegisterRoutesWithMiddleware(engine *gin.Engine, provider *OIDCProvider, mi
 		issuerGroup.POST("/revoke", handleRevoke(provider))
 		issuerGroup.POST("/introspect", handleIntrospect(provider))
 		issuerGroup.POST("/oidc-cm", handleDynamicClientRegistration(provider))
+		// RFC 7592: client configuration endpoint (management)
+		issuerGroup.GET("/oidc-cm/:id", handleClientConfigurationRead(provider))
+		issuerGroup.PUT("/oidc-cm/:id", handleClientConfigurationUpdate(provider))
+		issuerGroup.DELETE("/oidc-cm/:id", handleClientConfigurationDelete(provider))
 		// OA4MP serves this under /api/v1.0/issuer/; replicate for compatibility
 		issuerGroup.GET("/.well-known/openid-configuration", handleIssuerDiscovery(provider))
 	}
@@ -147,6 +160,16 @@ func handleToken(provider *OIDCProvider) gin.HandlerFunc {
 			return
 		}
 
+		// Handle client_credentials as a validity check ("ping").
+		// RFC 7592 does not define this, but it is useful for clients to
+		// verify whether their credentials are still valid.
+		// - Unknown client → 401 invalid_client
+		// - Known client   → 400 unauthorized_client (grant not supported)
+		if grantType == "client_credentials" {
+			handleClientCredentialsPing(ctx, provider)
+			return
+		}
+
 		session := DefaultOIDCSession("", IssuerURL(), nil, nil)
 
 		ar, err := provider.Provider().NewAccessRequest(rCtx, r, session)
@@ -172,6 +195,63 @@ func handleToken(provider *OIDCProvider) gin.HandlerFunc {
 
 		provider.Provider().WriteAccessResponse(rCtx, w, ar, response)
 	}
+}
+
+// handleClientCredentialsPing handles the client_credentials grant type as a
+// client validity probe. This issuer does not support client_credentials as a
+// real grant, but the endpoint authenticates the client and returns a
+// distinguishable error:
+//   - 401 invalid_client  → client_id/secret not recognised
+//   - 400 unauthorized_client → client exists but the grant is not supported
+//
+// Clients can use this to test whether their credentials are still valid
+// without needing a user-interactive flow.
+func handleClientCredentialsPing(ctx *gin.Context, provider *OIDCProvider) {
+	r := ctx.Request
+
+	clientID, clientSecret, hasBasic := r.BasicAuth()
+	if !hasBasic {
+		clientID = r.FormValue("client_id")
+		clientSecret = r.FormValue("client_secret")
+	}
+
+	if clientID == "" {
+		ctx.Header("WWW-Authenticate", "Basic")
+		ctx.JSON(http.StatusUnauthorized, gin.H{
+			"error":             "invalid_client",
+			"error_description": "Client authentication failed: no client credentials provided",
+		})
+		return
+	}
+
+	client, err := provider.Storage().GetClient(ctx, clientID)
+	if err != nil {
+		ctx.Header("WWW-Authenticate", "Basic")
+		ctx.JSON(http.StatusUnauthorized, gin.H{
+			"error":             "invalid_client",
+			"error_description": "Client authentication failed: unknown client",
+		})
+		return
+	}
+
+	// Validate the secret (public clients don't need one)
+	if !client.IsPublic() {
+		storedHash := client.GetHashedSecret()
+		if err := bcrypt.CompareHashAndPassword(storedHash, []byte(clientSecret)); err != nil {
+			ctx.Header("WWW-Authenticate", "Basic")
+			ctx.JSON(http.StatusUnauthorized, gin.H{
+				"error":             "invalid_client",
+				"error_description": "Client authentication failed: invalid client secret",
+			})
+			return
+		}
+	}
+
+	// Client is authenticated but the grant type is not supported.
+	ctx.JSON(http.StatusBadRequest, gin.H{
+		"error":             "unauthorized_client",
+		"error_description": "The client_credentials grant type is not supported by this issuer",
+	})
 }
 
 // handleAuthorize handles the /authorize endpoint for the authorization code flow.
@@ -666,6 +746,43 @@ func isLoopbackURI(u *url.URL) bool {
 	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
+// validateDynamicRedirectURIs checks that the supplied redirect URIs comply
+// with the server's policy for dynamically registered clients:
+//   - If Issuer.RedirectUris is configured, every URI must appear in that list.
+//   - Otherwise, only loopback URIs (RFC 8252 §7.3) are allowed.
+//
+// Returns (offendingURI, reason) on failure, or ("", "") on success.
+func validateDynamicRedirectURIs(uris []string) (string, string) {
+	if len(uris) > maxRedirectURIs {
+		return "<too many>", "Too many redirect_uris; maximum is 10"
+	}
+	for _, uri := range uris {
+		if len(uri) > maxRedirectURILen {
+			return uri[:64] + "...", "redirect_uri too long; maximum length is 2048 bytes"
+		}
+	}
+	allowedURIs := param.Issuer_RedirectUris.GetStringSlice()
+	if len(allowedURIs) > 0 {
+		allowedSet := make(map[string]bool, len(allowedURIs))
+		for _, uri := range allowedURIs {
+			allowedSet[uri] = true
+		}
+		for _, uri := range uris {
+			if !allowedSet[uri] {
+				return uri, "Unregistered redirect_uri: " + uri
+			}
+		}
+	} else {
+		for _, uri := range uris {
+			parsed, pErr := url.Parse(uri)
+			if pErr != nil || !isLoopbackURI(parsed) {
+				return uri, "Only loopback redirect URIs are allowed for dynamic clients when Issuer.RedirectUris is not configured"
+			}
+		}
+	}
+	return "", ""
+}
+
 // handleDynamicClientRegistration handles the /oidc-cm endpoint (RFC 7591).
 //
 // This endpoint is intentionally unauthenticated so that command-line tools can
@@ -703,36 +820,21 @@ func handleDynamicClientRegistration(provider *OIDCProvider) gin.HandlerFunc {
 			return
 		}
 
-		// Validate redirect URIs against Issuer.RedirectUris
-		allowedURIs := param.Issuer_RedirectUris.GetStringSlice()
-		if len(allowedURIs) > 0 {
-			allowedSet := make(map[string]bool)
-			for _, uri := range allowedURIs {
-				allowedSet[uri] = true
-			}
-			for _, uri := range req.RedirectURIs {
-				if !allowedSet[uri] {
-					ctx.JSON(http.StatusForbidden, gin.H{
-						"error":             "invalid_redirect_uri",
-						"error_description": "Unregistered redirect_uri: " + uri,
-					})
-					return
-				}
-			}
-		} else if len(req.RedirectURIs) > 0 {
-			// When Issuer.RedirectUris is not configured, only allow
-			// loopback redirect URIs (RFC 8252 §7.3) for dynamic clients
-			// to prevent open-redirect attacks.
-			for _, uri := range req.RedirectURIs {
-				parsed, pErr := url.Parse(uri)
-				if pErr != nil || !isLoopbackURI(parsed) {
-					ctx.JSON(http.StatusForbidden, gin.H{
-						"error":             "invalid_redirect_uri",
-						"error_description": "Only loopback redirect URIs are allowed for dynamic clients when Issuer.RedirectUris is not configured",
-					})
-					return
-				}
-			}
+		if len(req.ClientName) > maxClientNameLen {
+			ctx.JSON(http.StatusBadRequest, gin.H{
+				"error":             "invalid_client_metadata",
+				"error_description": "client_name too long; maximum length is 128 bytes",
+			})
+			return
+		}
+
+		// Validate redirect URIs against server policy.
+		if badURI, reason := validateDynamicRedirectURIs(req.RedirectURIs); badURI != "" {
+			ctx.JSON(http.StatusForbidden, gin.H{
+				"error":             "invalid_redirect_uri",
+				"error_description": reason,
+			})
+			return
 		}
 
 		// Generate client credentials
@@ -748,6 +850,19 @@ func handleDynamicClientRegistration(provider *OIDCProvider) gin.HandlerFunc {
 		}
 
 		hashedSecret, err := bcrypt.GenerateFromPassword([]byte(clientSecret), bcrypt.DefaultCost)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
+			return
+		}
+
+		// Generate a registration access token (RFC 7592) so the client
+		// can manage its own registration after creation.
+		registrationAccessToken, err := generateSecureToken(32)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
+			return
+		}
+		hashedRAT, err := bcrypt.GenerateFromPassword([]byte(registrationAccessToken), bcrypt.DefaultCost)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
 			return
@@ -775,22 +890,205 @@ func handleDynamicClientRegistration(provider *OIDCProvider) gin.HandlerFunc {
 			Public:        false,
 		}
 
-		if err := provider.Storage().CreateDynamicClient(ctx, client, clientIP); err != nil {
+		if err := provider.Storage().CreateDynamicClient(ctx, client, clientIP, hashedRAT, req.ClientName); err != nil {
 			log.WithError(err).Warn("Embedded issuer: failed to register client")
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
 			return
 		}
 
+		// Build the client configuration URI (RFC 7592 §3)
+		registrationClientURI := IssuerURL() + "/api/v1.0/issuer/oidc-cm/" + clientID
+
 		ctx.JSON(http.StatusCreated, gin.H{
+			"client_id":                 clientID,
+			"client_secret":             clientSecret,
+			"client_name":               req.ClientName,
+			"redirect_uris":             req.RedirectURIs,
+			"grant_types":               grantTypes,
+			"response_types":            responseTypes,
+			"scope":                     strings.Join(scopes, " "),
+			"client_secret_expires_at":  0,
+			"registration_access_token": registrationAccessToken,
+			"registration_client_uri":   registrationClientURI,
+		})
+	}
+}
+
+// ---- RFC 7592: Client Configuration Endpoint ----
+
+// extractRegistrationAccessToken extracts the Bearer token from the Authorization header.
+func extractRegistrationAccessToken(ctx *gin.Context) string {
+	auth := ctx.GetHeader("Authorization")
+	if !strings.HasPrefix(auth, "Bearer ") {
+		return ""
+	}
+	return strings.TrimPrefix(auth, "Bearer ")
+}
+
+// handleClientConfigurationRead implements GET on the client configuration
+// endpoint (RFC 7592 §2.1). The client presents its registration access token
+// and receives its current metadata.
+func handleClientConfigurationRead(provider *OIDCProvider) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		clientID := ctx.Param("id")
+		rat := extractRegistrationAccessToken(ctx)
+		if rat == "" {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token", "error_description": "Missing registration access token"})
+			return
+		}
+
+		record, err := provider.Storage().ValidateRegistrationAccessToken(ctx, clientID, rat)
+		if err != nil {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token", "error_description": "Invalid registration access token"})
+			return
+		}
+
+		var redirectURIs []string
+		var grantTypes []string
+		var responseTypes []string
+		var scopes []string
+		_ = json.Unmarshal([]byte(record.RedirectURIs), &redirectURIs)
+		_ = json.Unmarshal([]byte(record.GrantTypes), &grantTypes)
+		_ = json.Unmarshal([]byte(record.ResponseTypes), &responseTypes)
+		_ = json.Unmarshal([]byte(record.Scopes), &scopes)
+
+		ctx.JSON(http.StatusOK, gin.H{
 			"client_id":                clientID,
-			"client_secret":            clientSecret,
-			"client_name":              req.ClientName,
-			"redirect_uris":            req.RedirectURIs,
+			"client_name":              record.ClientName,
+			"redirect_uris":            redirectURIs,
 			"grant_types":              grantTypes,
 			"response_types":           responseTypes,
 			"scope":                    strings.Join(scopes, " "),
 			"client_secret_expires_at": 0,
+			"registration_client_uri":  IssuerURL() + "/api/v1.0/issuer/oidc-cm/" + clientID,
 		})
+	}
+}
+
+// handleClientConfigurationUpdate implements PUT on the client configuration
+// endpoint (RFC 7592 §2.2). Dynamically registered clients can update their
+// redirect_uris and client_name.
+func handleClientConfigurationUpdate(provider *OIDCProvider) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		clientID := ctx.Param("id")
+		rat := extractRegistrationAccessToken(ctx)
+		if rat == "" {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token", "error_description": "Missing registration access token"})
+			return
+		}
+
+		record, err := provider.Storage().ValidateRegistrationAccessToken(ctx, clientID, rat)
+		if err != nil {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token", "error_description": "Invalid registration access token"})
+			return
+		}
+
+		if !record.DynamicallyRegistered {
+			ctx.JSON(http.StatusForbidden, gin.H{"error": "invalid_request", "error_description": "Only dynamically registered clients may be updated via this endpoint"})
+			return
+		}
+
+		var req struct {
+			RedirectURIs *[]string `json:"redirect_uris"`
+			ClientName   *string   `json:"client_name"`
+		}
+		if err := ctx.ShouldBindJSON(&req); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid_client_metadata"})
+			return
+		}
+
+		updates := make(map[string]interface{})
+
+		if req.ClientName != nil && len(*req.ClientName) > maxClientNameLen {
+			ctx.JSON(http.StatusBadRequest, gin.H{
+				"error":             "invalid_client_metadata",
+				"error_description": "client_name too long; maximum length is 128 bytes",
+			})
+			return
+		}
+
+		if req.RedirectURIs != nil {
+			if badURI, reason := validateDynamicRedirectURIs(*req.RedirectURIs); badURI != "" {
+				ctx.JSON(http.StatusBadRequest, gin.H{
+					"error":             "invalid_redirect_uri",
+					"error_description": reason,
+				})
+				return
+			}
+			redirectJSON, _ := json.Marshal(*req.RedirectURIs)
+			updates["redirect_uris"] = string(redirectJSON)
+		}
+		if req.ClientName != nil {
+			updates["client_name"] = *req.ClientName
+		}
+
+		if len(updates) > 0 {
+			if err := provider.Storage().UpdateDynamicClient(ctx, clientID, updates); err != nil {
+				log.WithError(err).Warn("Embedded issuer: failed to update dynamic client")
+				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
+				return
+			}
+		}
+
+		// Re-read and return updated metadata
+		updated, err := provider.Storage().GetClientRecord(ctx, clientID)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
+			return
+		}
+
+		var redirectURIs []string
+		var grantTypes []string
+		var responseTypes []string
+		var scopes []string
+		_ = json.Unmarshal([]byte(updated.RedirectURIs), &redirectURIs)
+		_ = json.Unmarshal([]byte(updated.GrantTypes), &grantTypes)
+		_ = json.Unmarshal([]byte(updated.ResponseTypes), &responseTypes)
+		_ = json.Unmarshal([]byte(updated.Scopes), &scopes)
+
+		ctx.JSON(http.StatusOK, gin.H{
+			"client_id":                clientID,
+			"client_name":              updated.ClientName,
+			"redirect_uris":            redirectURIs,
+			"grant_types":              grantTypes,
+			"response_types":           responseTypes,
+			"scope":                    strings.Join(scopes, " "),
+			"client_secret_expires_at": 0,
+			"registration_client_uri":  IssuerURL() + "/api/v1.0/issuer/oidc-cm/" + clientID,
+		})
+	}
+}
+
+// handleClientConfigurationDelete implements DELETE on the client configuration
+// endpoint (RFC 7592 §2.3). A dynamically registered client can delete itself.
+func handleClientConfigurationDelete(provider *OIDCProvider) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		clientID := ctx.Param("id")
+		rat := extractRegistrationAccessToken(ctx)
+		if rat == "" {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token", "error_description": "Missing registration access token"})
+			return
+		}
+
+		record, err := provider.Storage().ValidateRegistrationAccessToken(ctx, clientID, rat)
+		if err != nil {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token", "error_description": "Invalid registration access token"})
+			return
+		}
+
+		if !record.DynamicallyRegistered {
+			ctx.JSON(http.StatusForbidden, gin.H{"error": "invalid_request", "error_description": "Only dynamically registered clients may be deleted via this endpoint"})
+			return
+		}
+
+		deleted, err := provider.Storage().DeleteClient(ctx, clientID)
+		if err != nil || !deleted {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
+			return
+		}
+
+		log.Infof("Embedded issuer: client %s deleted via RFC 7592", clientID)
+		ctx.Status(http.StatusNoContent)
 	}
 }
 

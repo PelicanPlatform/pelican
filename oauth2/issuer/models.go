@@ -22,18 +22,20 @@ import "time"
 
 // OIDCClientRecord maps to the oidc_clients table.
 type OIDCClientRecord struct {
-	ID                    string `gorm:"primaryKey"`
-	ClientSecret          string
-	RedirectURIs          string
-	GrantTypes            string
-	ResponseTypes         string
-	Scopes                string
-	Public                bool
-	DynamicallyRegistered bool
-	BoundUser             string
-	LastUsedAt            *time.Time
-	RegistrationIP        string
-	CreatedAt             time.Time
+	ID                      string `gorm:"primaryKey"`
+	ClientSecret            string
+	RedirectURIs            string
+	GrantTypes              string
+	ResponseTypes           string
+	Scopes                  string
+	Public                  bool
+	DynamicallyRegistered   bool
+	BoundUser               string
+	LastUsedAt              *time.Time
+	RegistrationIP          string
+	RegistrationAccessToken string
+	ClientName              string
+	CreatedAt               time.Time
 }
 
 func (OIDCClientRecord) TableName() string { return "oidc_clients" }

@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/ory/fosite"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -138,27 +139,64 @@ func (s *OIDCStorage) CreateClient(ctx context.Context, client *fosite.DefaultCl
 }
 
 // CreateDynamicClient stores a new dynamically registered OAuth2 client.
-// Unlike CreateClient, it records the registration as dynamic and stores the
-// registrant's IP address for audit and rate-limiting purposes.
-func (s *OIDCStorage) CreateDynamicClient(ctx context.Context, client *fosite.DefaultClient, registrationIP string) error {
+// Unlike CreateClient, it records the registration as dynamic, stores the
+// registrant's IP address for audit and rate-limiting purposes, and stores
+// a bcrypt-hashed registration access token (RFC 7592) for subsequent
+// management requests.
+func (s *OIDCStorage) CreateDynamicClient(ctx context.Context, client *fosite.DefaultClient, registrationIP string, hashedRAT []byte, clientName string) error {
 	redirectURIs, _ := json.Marshal(client.RedirectURIs)
 	grantTypes, _ := json.Marshal(client.GrantTypes)
 	responseTypes, _ := json.Marshal(client.ResponseTypes)
 	scopes, _ := json.Marshal(client.Scopes)
 
 	record := OIDCClientRecord{
-		ID:                    client.ID,
-		ClientSecret:          string(client.Secret),
-		RedirectURIs:          string(redirectURIs),
-		GrantTypes:            string(grantTypes),
-		ResponseTypes:         string(responseTypes),
-		Scopes:                string(scopes),
-		Public:                client.Public,
-		DynamicallyRegistered: true,
-		RegistrationIP:        registrationIP,
+		ID:                      client.ID,
+		ClientSecret:            string(client.Secret),
+		RedirectURIs:            string(redirectURIs),
+		GrantTypes:              string(grantTypes),
+		ResponseTypes:           string(responseTypes),
+		Scopes:                  string(scopes),
+		Public:                  client.Public,
+		DynamicallyRegistered:   true,
+		RegistrationIP:          registrationIP,
+		RegistrationAccessToken: string(hashedRAT),
+		ClientName:              clientName,
 	}
 
 	return s.db.WithContext(ctx).Create(&record).Error
+}
+
+// ValidateRegistrationAccessToken checks the plaintext RAT against the stored
+// bcrypt hash for the given client. Returns the OIDCClientRecord on success,
+// fosite.ErrNotFound if the client does not exist, or an error if the token
+// does not match.
+func (s *OIDCStorage) ValidateRegistrationAccessToken(_ context.Context, clientID, plainRAT string) (*OIDCClientRecord, error) {
+	var record OIDCClientRecord
+	if err := s.db.First(&record, "id = ?", clientID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fosite.ErrNotFound
+		}
+		return nil, err
+	}
+	if record.RegistrationAccessToken == "" {
+		return nil, fmt.Errorf("client has no registration access token")
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(record.RegistrationAccessToken), []byte(plainRAT)); err != nil {
+		return nil, fmt.Errorf("invalid registration access token")
+	}
+	return &record, nil
+}
+
+// GetClientRecord returns the raw OIDCClientRecord for a client.
+func (s *OIDCStorage) GetClientRecord(_ context.Context, clientID string) (*OIDCClientRecord, error) {
+	var record OIDCClientRecord
+	if err := s.db.First(&record, "id = ?", clientID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fosite.ErrNotFound
+		}
+		return nil, err
+	}
+	return &record, nil
 }
 
 // IsDynamicallyRegistered returns whether the given client was created via
@@ -172,6 +210,11 @@ func (s *OIDCStorage) IsDynamicallyRegistered(_ context.Context, clientID string
 		return false, err
 	}
 	return record.DynamicallyRegistered, nil
+}
+
+// UpdateDynamicClient applies a set of column updates to a dynamically registered client.
+func (s *OIDCStorage) UpdateDynamicClient(ctx context.Context, clientID string, updates map[string]interface{}) error {
+	return s.db.WithContext(ctx).Model(&OIDCClientRecord{}).Where("id = ?", clientID).Updates(updates).Error
 }
 
 // GetBoundUser returns the user bound to a dynamically registered client.
