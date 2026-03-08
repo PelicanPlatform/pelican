@@ -45,8 +45,6 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
-
-
 // waitForSSHBackendReady waits for the SSH backend to report healthy status
 func waitForSSHBackendReady(t *testing.T, timeout time.Duration) {
 	t.Helper()
@@ -58,8 +56,6 @@ func waitForSSHBackendReady(t *testing.T, timeout time.Duration) {
 		return status == metrics.StatusOK.String()
 	}, timeout, 100*time.Millisecond, "SSH backend did not become ready (status OK)")
 }
-
-
 
 // testSSHDServer represents a temporary sshd server for testing
 type testSSHDServer struct {
@@ -258,7 +254,6 @@ Director:
   MaxStatResponse: 1
 `, storageDir, sshPort, currentUser, privateKeyFile, knownHostsFile, pelicanBinaryPath)
 }
-
 
 // TestSSHPosixv2OriginUploadDownload tests basic upload and download operations
 // using the SSH POSIXv2 backend through the federation.
