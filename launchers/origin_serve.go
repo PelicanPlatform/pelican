@@ -322,6 +322,9 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 		ctx.Next()
 	})
 
+	// Register admin client-management endpoints behind full admin auth.
+	issuer.RegisterAdminRoutes(engine, provider, web_ui.AuthHandler, web_ui.AdminAuthHandler)
+
 	// Start background cleanup of dynamically registered clients.
 	unusedTimeout := param.Issuer_DynamicClientUnusedTimeout.GetDuration()
 	if unusedTimeout == 0 {

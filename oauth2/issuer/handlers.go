@@ -74,6 +74,19 @@ func RegisterRoutesWithMiddleware(engine *gin.Engine, provider *OIDCProvider, mi
 	}
 }
 
+// RegisterAdminRoutes registers the admin client-management endpoints.
+// These routes MUST be protected by admin auth middleware by the caller.
+func RegisterAdminRoutes(engine *gin.Engine, provider *OIDCProvider, middleware ...gin.HandlerFunc) {
+	adminGroup := engine.Group("/api/v1.0/issuer/admin", middleware...)
+	{
+		adminGroup.GET("/clients", handleAdminListClients(provider))
+		adminGroup.POST("/clients", handleAdminCreateClient(provider))
+		adminGroup.GET("/clients/:id", handleAdminGetClient(provider))
+		adminGroup.PUT("/clients/:id", handleAdminUpdateClient(provider))
+		adminGroup.DELETE("/clients/:id", handleAdminDeleteClient(provider))
+	}
+}
+
 // handleIssuerDiscovery returns the OIDC discovery document scoped to the issuer
 // prefix so that the health-check in launcher.go works identically for both
 // OA4MP and the embedded issuer.
@@ -96,6 +109,7 @@ func handleIssuerDiscovery(provider *OIDCProvider) gin.HandlerFunc {
 				"authorization_code",
 				"refresh_token",
 				"urn:ietf:params:oauth:grant-type:device_code",
+				"urn:ietf:params:oauth:grant-type:token-exchange",
 			},
 			"scopes_supported": []string{
 				"openid", "offline_access", "wlcg",
@@ -124,6 +138,12 @@ func handleToken(provider *OIDCProvider) gin.HandlerFunc {
 		// Handle device code grant type specially
 		if grantType == "urn:ietf:params:oauth:grant-type:device_code" {
 			handleDeviceTokenExchange(ctx, provider)
+			return
+		}
+
+		// Handle RFC 8693 token exchange
+		if grantType == tokenExchangeGrantType {
+			handleTokenExchange(ctx, provider)
 			return
 		}
 

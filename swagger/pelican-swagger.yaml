@@ -1268,6 +1268,145 @@ definitions:
         format: date-time
         description: Timestamp when this metadata record was last refreshed locally
         example: "2025-02-15T18:22:00Z"
+  IssuerAdminCreateClientRequest:
+    type: object
+    description: Request body for creating a new OIDC client via the admin API.
+    required:
+      - grant_types
+    properties:
+      client_name:
+        type: string
+        description: Optional human-readable label for the client
+        example: "my-token-exchange-client"
+      redirect_uris:
+        type: array
+        description: Redirect URIs accepted by this client
+        items:
+          type: string
+      grant_types:
+        type: array
+        description: >-
+          Grant types this client is allowed to use.
+          Accepted values: authorization_code, refresh_token,
+          urn:ietf:params:oauth:grant-type:device_code,
+          urn:ietf:params:oauth:grant-type:token-exchange.
+        items:
+          type: string
+        example:
+          - "urn:ietf:params:oauth:grant-type:token-exchange"
+          - "refresh_token"
+      response_types:
+        type: array
+        description: Response types supported by this client (e.g. code, token)
+        items:
+          type: string
+      scopes:
+        type: array
+        description: >-
+          Scopes the client is allowed to request.
+          If omitted, a default set of scopes is assigned.
+        items:
+          type: string
+        example:
+          - "openid"
+          - "storage.read:/"
+          - "storage.modify:/"
+      public:
+        type: boolean
+        description: Whether this client is a public (no secret) client
+        default: false
+  IssuerAdminClientResponse:
+    type: object
+    description: OIDC client details as returned by the admin API.
+    properties:
+      client_id:
+        type: string
+        description: The unique client identifier
+        example: "a1b2c3d4e5f6g7h8"
+      redirect_uris:
+        type: array
+        items:
+          type: string
+      grant_types:
+        type: array
+        items:
+          type: string
+        example:
+          - "urn:ietf:params:oauth:grant-type:token-exchange"
+          - "refresh_token"
+      response_types:
+        type: array
+        items:
+          type: string
+      scopes:
+        type: array
+        items:
+          type: string
+      public:
+        type: boolean
+      created_at:
+        type: string
+        description: When this client was created
+        example: "2025-03-01T12:00:00Z"
+  IssuerAdminCreateClientResponse:
+    type: object
+    description: >-
+      Response when creating a new OIDC client.
+      Includes the client_secret which is only shown once at creation time.
+    properties:
+      client_id:
+        type: string
+        example: "a1b2c3d4e5f6g7h8"
+      client_secret:
+        type: string
+        description: The plaintext client secret (only shown at creation time)
+        example: "s3cr3t-v4lu3..."
+      redirect_uris:
+        type: array
+        items:
+          type: string
+      grant_types:
+        type: array
+        items:
+          type: string
+      response_types:
+        type: array
+        items:
+          type: string
+      scopes:
+        type: array
+        items:
+          type: string
+      public:
+        type: boolean
+  IssuerAdminUpdateClientRequest:
+    type: object
+    description: >-
+      Request body for updating an existing OIDC client.
+      All fields are optional; only provided fields are changed.
+    properties:
+      redirect_uris:
+        type: array
+        description: Redirect URIs accepted by this client
+        items:
+          type: string
+      grant_types:
+        type: array
+        description: >-
+          Grant types this client is allowed to use.
+          Must not be empty when provided.
+        items:
+          type: string
+      response_types:
+        type: array
+        description: Response types supported by this client
+        items:
+          type: string
+      scopes:
+        type: array
+        description: Scopes the client is allowed to request
+        items:
+          type: string
 
 tags:
   - name: auth
@@ -1290,6 +1429,8 @@ tags:
     description: APIs for managing collections of objects
   - name: groups
     description: APIs for managing user groups
+  - name: issuer-admin
+    description: Admin APIs for managing the embedded OIDC issuer clients and token exchange
 paths:
   /health:
     get:
@@ -4543,5 +4684,193 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
         "404":
           description: Change ID not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /issuer/admin/clients:
+    get:
+      tags:
+        - issuer-admin
+      summary: List issuer clients
+      description: >-
+        `Admin privilege Required`.
+        Returns all administrator-managed OIDC clients registered with the embedded issuer.
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: List of clients
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/IssuerAdminClientResponse"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Admin privilege required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    post:
+      tags:
+        - issuer-admin
+      summary: Create issuer client
+      description: >-
+        `Admin privilege Required`.
+        Creates a new OIDC client with the specified grant types and scopes.
+        The response includes the client secret which is only shown once at creation time.
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: "#/definitions/IssuerAdminCreateClientRequest"
+      responses:
+        "201":
+          description: Client created
+          schema:
+            $ref: "#/definitions/IssuerAdminCreateClientResponse"
+        "400":
+          description: Invalid request (e.g. unsupported grant type)
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Admin privilege required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /issuer/admin/clients/{id}:
+    get:
+      tags:
+        - issuer-admin
+      summary: Get issuer client
+      description: >-
+        `Admin privilege Required`.
+        Returns details for a single OIDC client by ID.
+      produces:
+        - application/json
+      parameters:
+        - in: path
+          name: id
+          description: The client ID
+          required: true
+          type: string
+      responses:
+        "200":
+          description: Client details
+          schema:
+            $ref: "#/definitions/IssuerAdminClientResponse"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Admin privilege required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Client not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    put:
+      tags:
+        - issuer-admin
+      summary: Update issuer client
+      description: >-
+        `Admin privilege Required`.
+        Updates the configuration of an existing OIDC client.
+        Only fields that are present in the request body are changed; omitted fields are left unchanged.
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: path
+          name: id
+          description: The client ID
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: "#/definitions/IssuerAdminUpdateClientRequest"
+      responses:
+        "200":
+          description: Updated client details
+          schema:
+            $ref: "#/definitions/IssuerAdminClientResponse"
+        "400":
+          description: Invalid request (e.g. unsupported grant type)
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Admin privilege required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Client not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    delete:
+      tags:
+        - issuer-admin
+      summary: Delete issuer client
+      description: >-
+        `Admin privilege Required`.
+        Deletes an OIDC client by ID.
+        This also invalidates any tokens issued to the client.
+      produces:
+        - application/json
+      parameters:
+        - in: path
+          name: id
+          description: The client ID
+          required: true
+          type: string
+      responses:
+        "204":
+          description: Client deleted
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Admin privilege required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Client not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
           schema:
             $ref: "#/definitions/ErrorModelV2"
