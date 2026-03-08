@@ -24,7 +24,6 @@ package issuer
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,9 +34,11 @@ import (
 
 	"github.com/ory/fosite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
-// validTableNames is the whitelist of allowed table names for token session CRUD.
+// validTableNames is the whitelist of allowed table names for token session CRUD
+// helpers that accept a table name parameter.
 var validTableNames = map[string]bool{
 	"oidc_access_tokens":       true,
 	"oidc_refresh_tokens":      true,
@@ -81,47 +82,33 @@ func NewOIDCStorage(db *gorm.DB) *OIDCStorage {
 
 // GetClient retrieves a client by ID.
 func (s *OIDCStorage) GetClient(_ context.Context, clientID string) (fosite.Client, error) {
-	var (
-		secret        string
-		redirectURIs  string
-		grantTypes    string
-		responseTypes string
-		scopes        string
-		public        int
-	)
-
-	result := s.db.Raw(`
-		SELECT client_secret, redirect_uris, grant_types, response_types, scopes, public
-		FROM oidc_clients WHERE id = ?
-	`, clientID).Row()
-
-	err := result.Scan(&secret, &redirectURIs, &grantTypes, &responseTypes, &scopes, &public)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fosite.ErrNotFound
-	}
-	if err != nil {
+	var record OIDCClientRecord
+	if err := s.db.First(&record, "id = ?", clientID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fosite.ErrNotFound
+		}
 		return nil, err
 	}
 
 	client := &fosite.DefaultClient{
-		ID:     clientID,
-		Secret: []byte(secret),
-		Public: public == 1,
+		ID:     record.ID,
+		Secret: []byte(record.ClientSecret),
+		Public: record.Public,
 		// All clients in this WLCG-compliant issuer accept the wildcard
 		// audience so that tokens can be presented to any service.
 		Audience: fosite.Arguments{WLCGAudienceAny},
 	}
 
-	if err := json.Unmarshal([]byte(redirectURIs), &client.RedirectURIs); err != nil {
+	if err := json.Unmarshal([]byte(record.RedirectURIs), &client.RedirectURIs); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal redirect_uris: %w", err)
 	}
-	if err := json.Unmarshal([]byte(grantTypes), &client.GrantTypes); err != nil {
+	if err := json.Unmarshal([]byte(record.GrantTypes), &client.GrantTypes); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal grant_types: %w", err)
 	}
-	if err := json.Unmarshal([]byte(responseTypes), &client.ResponseTypes); err != nil {
+	if err := json.Unmarshal([]byte(record.ResponseTypes), &client.ResponseTypes); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response_types: %w", err)
 	}
-	if err := json.Unmarshal([]byte(scopes), &client.Scopes); err != nil {
+	if err := json.Unmarshal([]byte(record.Scopes), &client.Scopes); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal scopes: %w", err)
 	}
 
@@ -135,16 +122,19 @@ func (s *OIDCStorage) CreateClient(ctx context.Context, client *fosite.DefaultCl
 	responseTypes, _ := json.Marshal(client.ResponseTypes)
 	scopes, _ := json.Marshal(client.Scopes)
 
-	public := 0
-	if client.Public {
-		public = 1
+	record := OIDCClientRecord{
+		ID:            client.ID,
+		ClientSecret:  string(client.Secret),
+		RedirectURIs:  string(redirectURIs),
+		GrantTypes:    string(grantTypes),
+		ResponseTypes: string(responseTypes),
+		Scopes:        string(scopes),
+		Public:        client.Public,
 	}
 
-	return s.db.WithContext(ctx).Exec(`
-		INSERT OR REPLACE INTO oidc_clients (id, client_secret, redirect_uris, grant_types, response_types, scopes, public)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, client.ID, string(client.Secret), string(redirectURIs), string(grantTypes),
-		string(responseTypes), string(scopes), public).Error
+	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
+		UpdateAll: true,
+	}).Create(&record).Error
 }
 
 // CreateDynamicClient stores a new dynamically registered OAuth2 client.
@@ -156,48 +146,45 @@ func (s *OIDCStorage) CreateDynamicClient(ctx context.Context, client *fosite.De
 	responseTypes, _ := json.Marshal(client.ResponseTypes)
 	scopes, _ := json.Marshal(client.Scopes)
 
-	public := 0
-	if client.Public {
-		public = 1
+	record := OIDCClientRecord{
+		ID:                    client.ID,
+		ClientSecret:          string(client.Secret),
+		RedirectURIs:          string(redirectURIs),
+		GrantTypes:            string(grantTypes),
+		ResponseTypes:         string(responseTypes),
+		Scopes:                string(scopes),
+		Public:                client.Public,
+		DynamicallyRegistered: true,
+		RegistrationIP:        registrationIP,
 	}
 
-	return s.db.WithContext(ctx).Exec(`
-		INSERT INTO oidc_clients
-			(id, client_secret, redirect_uris, grant_types, response_types, scopes, public,
-			 dynamically_registered, registration_ip)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
-	`, client.ID, string(client.Secret), string(redirectURIs), string(grantTypes),
-		string(responseTypes), string(scopes), public, registrationIP).Error
+	return s.db.WithContext(ctx).Create(&record).Error
 }
 
 // IsDynamicallyRegistered returns whether the given client was created via
 // dynamic client registration (RFC 7591).
 func (s *OIDCStorage) IsDynamicallyRegistered(_ context.Context, clientID string) (bool, error) {
-	var dynReg int
-	row := s.db.Raw(`SELECT dynamically_registered FROM oidc_clients WHERE id = ?`, clientID).Row()
-	err := row.Scan(&dynReg)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, fosite.ErrNotFound
-	}
-	if err != nil {
+	var record OIDCClientRecord
+	if err := s.db.Select("dynamically_registered").First(&record, "id = ?", clientID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, fosite.ErrNotFound
+		}
 		return false, err
 	}
-	return dynReg == 1, nil
+	return record.DynamicallyRegistered, nil
 }
 
 // GetBoundUser returns the user bound to a dynamically registered client.
 // Returns "" if no user is bound yet.
 func (s *OIDCStorage) GetBoundUser(_ context.Context, clientID string) (string, error) {
-	var boundUser string
-	row := s.db.Raw(`SELECT bound_user FROM oidc_clients WHERE id = ?`, clientID).Row()
-	err := row.Scan(&boundUser)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", fosite.ErrNotFound
-	}
-	if err != nil {
+	var record OIDCClientRecord
+	if err := s.db.Select("bound_user").First(&record, "id = ?", clientID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", fosite.ErrNotFound
+		}
 		return "", err
 	}
-	return boundUser, nil
+	return record.BoundUser, nil
 }
 
 // BindClientToUser atomically binds a dynamically registered client to the
@@ -208,33 +195,31 @@ func (s *OIDCStorage) BindClientToUser(ctx context.Context, clientID, user strin
 	// Single transaction: read the client's registration type and current
 	// binding, then conditionally update — all under one lock.
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var dynReg int
-		var boundUser string
-		row := tx.Raw(`SELECT dynamically_registered, bound_user FROM oidc_clients WHERE id = ?`, clientID).Row()
-		if err := row.Scan(&dynReg, &boundUser); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+		var record OIDCClientRecord
+		if err := tx.Select("dynamically_registered", "bound_user").First(&record, "id = ?", clientID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return fosite.ErrNotFound
 			}
 			return err
 		}
 
 		// Not a dynamically registered client — nothing to enforce.
-		if dynReg != 1 {
+		if !record.DynamicallyRegistered {
 			return nil
 		}
 
 		// Already bound to this user — no-op.
-		if boundUser == user {
+		if record.BoundUser == user {
 			return nil
 		}
 
 		// Bound to a different user — reject.
-		if boundUser != "" {
+		if record.BoundUser != "" {
 			return fmt.Errorf("client %s is already bound to a different user", clientID)
 		}
 
 		// Unbound — bind now.
-		return tx.Exec(`UPDATE oidc_clients SET bound_user = ? WHERE id = ?`, user, clientID).Error
+		return tx.Model(&OIDCClientRecord{}).Where("id = ?", clientID).Update("bound_user", user).Error
 	})
 }
 
@@ -250,10 +235,8 @@ func (s *OIDCStorage) TouchClientLastUsed(ctx context.Context, clientID string) 
 			return nil // debounced — skip write
 		}
 	}
-	err := s.db.WithContext(ctx).Exec(
-		`UPDATE oidc_clients SET last_used_at = ? WHERE id = ?`,
-		now.UTC(), clientID,
-	).Error
+	err := s.db.WithContext(ctx).Model(&OIDCClientRecord{}).Where("id = ?", clientID).
+		Update("last_used_at", now.UTC()).Error
 	if err == nil {
 		s.touchDebounce.Store(clientID, now)
 	}
@@ -264,12 +247,9 @@ func (s *OIDCStorage) TouchClientLastUsed(ctx context.Context, clientID string) 
 // never been used (last_used_at IS NULL) and were created more than maxAge ago.
 func (s *OIDCStorage) DeleteUnusedDynamicClients(ctx context.Context, maxAge time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-maxAge)
-	result := s.db.WithContext(ctx).Exec(`
-		DELETE FROM oidc_clients
-		WHERE dynamically_registered = 1
-		  AND last_used_at IS NULL
-		  AND created_at < ?
-	`, cutoff)
+	result := s.db.WithContext(ctx).
+		Where("dynamically_registered = ? AND last_used_at IS NULL AND created_at < ?", true, cutoff).
+		Delete(&OIDCClientRecord{})
 	return result.RowsAffected, result.Error
 }
 
@@ -277,12 +257,9 @@ func (s *OIDCStorage) DeleteUnusedDynamicClients(ctx context.Context, maxAge tim
 // previously used but have not been used for longer than maxAge.
 func (s *OIDCStorage) DeleteStaleDynamicClients(ctx context.Context, maxAge time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-maxAge)
-	result := s.db.WithContext(ctx).Exec(`
-		DELETE FROM oidc_clients
-		WHERE dynamically_registered = 1
-		  AND last_used_at IS NOT NULL
-		  AND last_used_at < ?
-	`, cutoff)
+	result := s.db.WithContext(ctx).
+		Where("dynamically_registered = ? AND last_used_at IS NOT NULL AND last_used_at < ?", true, cutoff).
+		Delete(&OIDCClientRecord{})
 	return result.RowsAffected, result.Error
 }
 
@@ -299,9 +276,9 @@ func (s *OIDCStorage) DeleteExpiredTokenSessions(ctx context.Context) (int64, er
 	}
 	var total int64
 	for _, table := range tables {
-		result := s.db.WithContext(ctx).Exec(
-			`DELETE FROM `+table+` WHERE expires_at < ?`, now,
-		)
+		result := s.db.WithContext(ctx).Table(table).
+			Where("expires_at < ?", now).
+			Delete(&OIDCTokenSession{})
 		if result.Error != nil {
 			return total, result.Error
 		}
@@ -310,10 +287,10 @@ func (s *OIDCStorage) DeleteExpiredTokenSessions(ctx context.Context) (int64, er
 	// Refresh tokens: expires_at may be NULL (never-expire), so only delete
 	// rows where expires_at is set and in the past, or where the token has
 	// been revoked (active=0) and its grace period is long past.
-	result := s.db.WithContext(ctx).Exec(
-		`DELETE FROM oidc_refresh_tokens WHERE (expires_at IS NOT NULL AND expires_at < ?) OR (active = 0 AND first_used_at IS NOT NULL AND first_used_at < ?)`,
-		now, now.Add(-24*time.Hour),
-	)
+	result := s.db.WithContext(ctx).
+		Where("(expires_at IS NOT NULL AND expires_at < ?) OR (active = ? AND first_used_at IS NOT NULL AND first_used_at < ?)",
+			now, false, now.Add(-24*time.Hour)).
+		Delete(&OIDCRefreshToken{})
 	if result.Error != nil {
 		return total, result.Error
 	}
@@ -325,9 +302,9 @@ func (s *OIDCStorage) DeleteExpiredTokenSessions(ctx context.Context) (int64, er
 // consumed (status = 'used'). Returns the number of rows deleted.
 func (s *OIDCStorage) DeleteExpiredDeviceCodes(ctx context.Context) (int64, error) {
 	now := time.Now().UTC()
-	result := s.db.WithContext(ctx).Exec(
-		`DELETE FROM oidc_device_codes WHERE expires_at < ? OR status = 'used'`, now,
-	)
+	result := s.db.WithContext(ctx).
+		Where("expires_at < ? OR status = ?", now, "used").
+		Delete(&OIDCDeviceCode{})
 	return result.RowsAffected, result.Error
 }
 
@@ -335,9 +312,9 @@ func (s *OIDCStorage) DeleteExpiredDeviceCodes(ctx context.Context) (int64, erro
 // whose expiry has passed. Returns the number of rows deleted.
 func (s *OIDCStorage) DeleteExpiredJWTAssertions(ctx context.Context) (int64, error) {
 	now := time.Now().UTC()
-	result := s.db.WithContext(ctx).Exec(
-		`DELETE FROM oidc_jwt_assertions WHERE expires_at < ?`, now,
-	)
+	result := s.db.WithContext(ctx).
+		Where("expires_at < ?", now).
+		Delete(&OIDCJWTAssertion{})
 	return result.RowsAffected, result.Error
 }
 
@@ -357,87 +334,52 @@ type ClientDetail struct {
 
 // ListClients returns all registered OIDC clients.
 func (s *OIDCStorage) ListClients(ctx context.Context) ([]ClientDetail, error) {
-	rows, err := s.db.WithContext(ctx).Raw(`
-		SELECT id, redirect_uris, grant_types, response_types, scopes, public,
-		       dynamically_registered, created_at
-		FROM oidc_clients ORDER BY created_at
-	`).Rows()
-	if err != nil {
+	var records []OIDCClientRecord
+	if err := s.db.WithContext(ctx).Order("created_at").Find(&records).Error; err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var clients []ClientDetail
-	for rows.Next() {
-		var (
-			id            string
-			redirectURIs  string
-			grantTypes    string
-			responseTypes string
-			scopes        string
-			public        int
-			dynReg        int
-			createdAt     string
-		)
-		if err := rows.Scan(&id, &redirectURIs, &grantTypes, &responseTypes, &scopes, &public, &dynReg, &createdAt); err != nil {
-			return nil, err
-		}
-
+	clients := make([]ClientDetail, 0, len(records))
+	for _, r := range records {
 		cd := ClientDetail{
-			ClientID:              id,
-			Public:                public == 1,
-			DynamicallyRegistered: dynReg == 1,
-			CreatedAt:             createdAt,
+			ClientID:              r.ID,
+			Public:                r.Public,
+			DynamicallyRegistered: r.DynamicallyRegistered,
+			CreatedAt:             r.CreatedAt.Format(time.RFC3339),
 		}
-		_ = json.Unmarshal([]byte(redirectURIs), &cd.RedirectURIs)
-		_ = json.Unmarshal([]byte(grantTypes), &cd.GrantTypes)
-		_ = json.Unmarshal([]byte(responseTypes), &cd.ResponseTypes)
-		_ = json.Unmarshal([]byte(scopes), &cd.Scopes)
+		_ = json.Unmarshal([]byte(r.RedirectURIs), &cd.RedirectURIs)
+		_ = json.Unmarshal([]byte(r.GrantTypes), &cd.GrantTypes)
+		_ = json.Unmarshal([]byte(r.ResponseTypes), &cd.ResponseTypes)
+		_ = json.Unmarshal([]byte(r.Scopes), &cd.Scopes)
 
 		clients = append(clients, cd)
 	}
 	if clients == nil {
 		clients = []ClientDetail{}
 	}
-	return clients, rows.Err()
+	return clients, nil
 }
 
 // GetClientDetail returns a read-only view of a single client.
 func (s *OIDCStorage) GetClientDetail(ctx context.Context, clientID string) (*ClientDetail, error) {
-	var (
-		redirectURIs  string
-		grantTypes    string
-		responseTypes string
-		scopes        string
-		public        int
-		dynReg        int
-		createdAt     string
-	)
-
-	row := s.db.WithContext(ctx).Raw(`
-		SELECT redirect_uris, grant_types, response_types, scopes, public,
-		       dynamically_registered, created_at
-		FROM oidc_clients WHERE id = ?
-	`, clientID).Row()
-
-	err := row.Scan(&redirectURIs, &grantTypes, &responseTypes, &scopes, &public, &dynReg, &createdAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fosite.ErrNotFound
-	}
-	if err != nil {
+	var record OIDCClientRecord
+	if err := s.db.WithContext(ctx).First(&record, "id = ?", clientID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fosite.ErrNotFound
+		}
 		return nil, err
 	}
 
 	cd := &ClientDetail{
-		ClientID:              clientID,
-		Public:                public == 1,
-		DynamicallyRegistered: dynReg == 1,
-		CreatedAt:             createdAt,
+		ClientID:              record.ID,
+		Public:                record.Public,
+		DynamicallyRegistered: record.DynamicallyRegistered,
+		CreatedAt:             record.CreatedAt.Format(time.RFC3339),
 	}
-	_ = json.Unmarshal([]byte(redirectURIs), &cd.RedirectURIs)
-	_ = json.Unmarshal([]byte(grantTypes), &cd.GrantTypes)
-	_ = json.Unmarshal([]byte(responseTypes), &cd.ResponseTypes)
-	_ = json.Unmarshal([]byte(scopes), &cd.Scopes)
+	_ = json.Unmarshal([]byte(record.RedirectURIs), &cd.RedirectURIs)
+	_ = json.Unmarshal([]byte(record.GrantTypes), &cd.GrantTypes)
+	_ = json.Unmarshal([]byte(record.ResponseTypes), &cd.ResponseTypes)
+	_ = json.Unmarshal([]byte(record.Scopes), &cd.Scopes)
 
 	return cd, nil
 }
@@ -476,13 +418,15 @@ func (s *OIDCStorage) UpdateClient(ctx context.Context, clientID string, update 
 	responseJSON, _ := json.Marshal(responseTypes)
 	scopesJSON, _ := json.Marshal(scopes)
 
-	result := s.db.WithContext(ctx).Exec(`
-		UPDATE oidc_clients
-		SET redirect_uris = ?, grant_types = ?, response_types = ?, scopes = ?
-		WHERE id = ?
-	`, string(redirectJSON), string(grantJSON), string(responseJSON), string(scopesJSON), clientID)
-	if result.Error != nil {
-		return nil, result.Error
+	err = s.db.WithContext(ctx).Model(&OIDCClientRecord{}).Where("id = ?", clientID).
+		Updates(map[string]interface{}{
+			"redirect_uris":  string(redirectJSON),
+			"grant_types":    string(grantJSON),
+			"response_types": string(responseJSON),
+			"scopes":         string(scopesJSON),
+		}).Error
+	if err != nil {
+		return nil, err
 	}
 
 	// Re-read to return the authoritative state.
@@ -500,7 +444,7 @@ type ClientUpdate struct {
 
 // DeleteClient removes a client by ID. Returns true if a row was deleted.
 func (s *OIDCStorage) DeleteClient(ctx context.Context, clientID string) (bool, error) {
-	result := s.db.WithContext(ctx).Exec(`DELETE FROM oidc_clients WHERE id = ?`, clientID)
+	result := s.db.WithContext(ctx).Where("id = ?", clientID).Delete(&OIDCClientRecord{})
 	if result.Error != nil {
 		return false, result.Error
 	}
@@ -542,10 +486,9 @@ func (s *OIDCStorage) DeleteRefreshTokenSession(ctx context.Context, signature s
 // It marks the old token with first_used_at for grace period tracking rather
 // than immediately revoking it, allowing brief reuse during network issues.
 func (s *OIDCStorage) RotateRefreshToken(ctx context.Context, requestID string, refreshTokenSignature string) error {
-	return s.db.WithContext(ctx).Exec(
-		`UPDATE oidc_refresh_tokens SET first_used_at = COALESCE(first_used_at, ?) WHERE request_id = ? AND active = 1`,
-		time.Now().UTC(), requestID,
-	).Error
+	return s.db.WithContext(ctx).Model(&OIDCRefreshToken{}).
+		Where("request_id = ? AND active = ?", requestID, true).
+		Update("first_used_at", gorm.Expr("COALESCE(first_used_at, ?)", time.Now().UTC())).Error
 }
 
 // ---- fosite.AuthorizeCodeStorage ----
@@ -559,9 +502,9 @@ func (s *OIDCStorage) GetAuthorizeCodeSession(ctx context.Context, signature str
 }
 
 func (s *OIDCStorage) InvalidateAuthorizeCodeSession(ctx context.Context, signature string) error {
-	return s.db.WithContext(ctx).Exec(
-		`UPDATE oidc_authorization_codes SET active = 0 WHERE signature = ?`, signature,
-	).Error
+	return s.db.WithContext(ctx).Table("oidc_authorization_codes").
+		Where("signature = ?", signature).
+		Update("active", false).Error
 }
 
 // ---- fosite.PKCERequestStorage ----
@@ -595,15 +538,15 @@ func (s *OIDCStorage) DeleteOpenIDConnectSession(ctx context.Context, signature 
 // ---- fosite.TokenRevocationStorage ----
 
 func (s *OIDCStorage) RevokeRefreshToken(ctx context.Context, requestID string) error {
-	return s.db.WithContext(ctx).Exec(
-		`UPDATE oidc_refresh_tokens SET active = 0 WHERE request_id = ?`, requestID,
-	).Error
+	return s.db.WithContext(ctx).Model(&OIDCRefreshToken{}).
+		Where("request_id = ?", requestID).
+		Update("active", false).Error
 }
 
 func (s *OIDCStorage) RevokeAccessToken(ctx context.Context, requestID string) error {
-	return s.db.WithContext(ctx).Exec(
-		`UPDATE oidc_access_tokens SET active = 0 WHERE request_id = ?`, requestID,
-	).Error
+	return s.db.WithContext(ctx).Table("oidc_access_tokens").
+		Where("request_id = ?", requestID).
+		Update("active", false).Error
 }
 
 func (s *OIDCStorage) RevokeRefreshTokenMaybeGracePeriod(ctx context.Context, requestID string, _ string) error {
@@ -615,26 +558,25 @@ func (s *OIDCStorage) RevokeRefreshTokenMaybeGracePeriod(ctx context.Context, re
 // ---- fosite.ClientAssertionJWTValid / SetClientAssertionJWT ----
 
 func (s *OIDCStorage) ClientAssertionJWTValid(_ context.Context, jti string) error {
-	var expiresAt time.Time
-	row := s.db.Raw(`SELECT expires_at FROM oidc_jwt_assertions WHERE jti = ?`, jti).Row()
-	err := row.Scan(&expiresAt)
-	if errors.Is(err, sql.ErrNoRows) {
+	var assertion OIDCJWTAssertion
+	err := s.db.First(&assertion, "jti = ?", jti).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil // JTI not seen before → valid
 	}
 	if err != nil {
 		return err
 	}
-	if time.Now().After(expiresAt) {
+	if time.Now().After(assertion.ExpiresAt) {
 		return nil // Expired entry → valid
 	}
 	return fosite.ErrJTIKnown
 }
 
 func (s *OIDCStorage) SetClientAssertionJWT(ctx context.Context, jti string, exp time.Time) error {
-	return s.db.WithContext(ctx).Exec(
-		`INSERT OR REPLACE INTO oidc_jwt_assertions (jti, expires_at) VALUES (?, ?)`,
-		jti, exp,
-	).Error
+	record := OIDCJWTAssertion{JTI: jti, ExpiresAt: exp}
+	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
+		UpdateAll: true,
+	}).Create(&record).Error
 }
 
 // ---- Device Code Flow ----
@@ -652,29 +594,22 @@ func (s *OIDCStorage) CreateDeviceCodeSession(ctx context.Context, deviceCode, u
 		subject = request.GetSession().GetSubject()
 	}
 
-	return s.db.WithContext(ctx).Exec(`
-		INSERT INTO oidc_device_codes
-			(device_code, user_code, request_id, requested_at, client_id, scopes,
-			 granted_scopes, form_data, session_data, subject, status, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-	`, deviceCode, userCode, request.GetID(), request.GetRequestedAt(),
-		request.GetClient().GetID(), string(scopes), string(grantedScopes),
-		string(formData), string(sessionData),
-		subject, expiresAt).Error
-}
+	record := OIDCDeviceCode{
+		DeviceCode:    deviceCode,
+		UserCode:      userCode,
+		RequestID:     request.GetID(),
+		RequestedAt:   request.GetRequestedAt(),
+		ClientID:      request.GetClient().GetID(),
+		Scopes:        string(scopes),
+		GrantedScopes: string(grantedScopes),
+		FormData:      string(formData),
+		SessionData:   string(sessionData),
+		Subject:       subject,
+		Status:        "pending",
+		ExpiresAt:     expiresAt,
+	}
 
-// DeviceCodeSession holds the scanned columns from oidc_device_codes.
-type DeviceCodeSession struct {
-	RequestID    string
-	RequestedAt  time.Time
-	ClientID     string
-	Scopes       string
-	GrantedScope string
-	FormData     string
-	SessionData  string
-	Subject      string
-	Status       string
-	ExpiresAt    time.Time
+	return s.db.WithContext(ctx).Create(&record).Error
 }
 
 var (
@@ -699,21 +634,11 @@ var (
 )
 
 func (s *OIDCStorage) GetDeviceCodeSession(ctx context.Context, deviceCode string, session fosite.Session) (fosite.Requester, error) {
-	var dc DeviceCodeSession
-	row := s.db.WithContext(ctx).Raw(`
-		SELECT request_id, requested_at, client_id, scopes, granted_scopes,
-			   form_data, session_data, subject, status, expires_at
-		FROM oidc_device_codes WHERE device_code = ?
-	`, deviceCode).Row()
-
-	err := row.Scan(&dc.RequestID, &dc.RequestedAt, &dc.ClientID,
-		&dc.Scopes, &dc.GrantedScope, &dc.FormData, &dc.SessionData,
-		&dc.Subject, &dc.Status, &dc.ExpiresAt)
-
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fosite.ErrNotFound
-	}
-	if err != nil {
+	var dc OIDCDeviceCode
+	if err := s.db.WithContext(ctx).First(&dc, "device_code = ?", deviceCode).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fosite.ErrNotFound
+		}
 		return nil, err
 	}
 
@@ -729,10 +654,9 @@ func (s *OIDCStorage) GetDeviceCodeSession(ctx context.Context, deviceCode strin
 	const pollingInterval = 5 * time.Second
 	now := time.Now().UTC()
 	cutoff := now.Add(-pollingInterval)
-	pollResult := s.db.WithContext(ctx).Exec(
-		`UPDATE oidc_device_codes SET last_polled_at = ? WHERE device_code = ? AND (last_polled_at IS NULL OR last_polled_at <= ?)`,
-		now, deviceCode, cutoff,
-	)
+	pollResult := s.db.WithContext(ctx).Model(&OIDCDeviceCode{}).
+		Where("device_code = ? AND (last_polled_at IS NULL OR last_polled_at <= ?)", deviceCode, cutoff).
+		Update("last_polled_at", now)
 	if pollResult.Error != nil {
 		return nil, pollResult.Error
 	}
@@ -754,25 +678,15 @@ func (s *OIDCStorage) GetDeviceCodeSession(ctx context.Context, deviceCode strin
 	}
 
 	return s.scanToRequest(ctx, dc.RequestID, dc.RequestedAt, dc.ClientID,
-		dc.Scopes, dc.GrantedScope, "", dc.FormData, dc.SessionData, dc.Subject, session)
+		dc.Scopes, dc.GrantedScopes, "", dc.FormData, dc.SessionData, dc.Subject, session)
 }
 
-func (s *OIDCStorage) GetDeviceCodeSessionByUserCode(ctx context.Context, userCode string) (*DeviceCodeSession, error) {
-	var dc DeviceCodeSession
-	row := s.db.WithContext(ctx).Raw(`
-		SELECT request_id, requested_at, client_id, scopes, granted_scopes,
-			   form_data, session_data, subject, status, expires_at
-		FROM oidc_device_codes WHERE user_code = ?
-	`, userCode).Row()
-
-	err := row.Scan(&dc.RequestID, &dc.RequestedAt, &dc.ClientID,
-		&dc.Scopes, &dc.GrantedScope, &dc.FormData, &dc.SessionData,
-		&dc.Subject, &dc.Status, &dc.ExpiresAt)
-
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fosite.ErrNotFound
-	}
-	if err != nil {
+func (s *OIDCStorage) GetDeviceCodeSessionByUserCode(ctx context.Context, userCode string) (*OIDCDeviceCode, error) {
+	var dc OIDCDeviceCode
+	if err := s.db.WithContext(ctx).First(&dc, "user_code = ?", userCode).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fosite.ErrNotFound
+		}
 		return nil, err
 	}
 	return &dc, nil
@@ -780,61 +694,41 @@ func (s *OIDCStorage) GetDeviceCodeSessionByUserCode(ctx context.Context, userCo
 
 func (s *OIDCStorage) ApproveDeviceCodeSession(ctx context.Context, userCode, subject string, grantedScopes []string, sessionData []byte) error {
 	gs, _ := json.Marshal(grantedScopes)
-	return s.db.WithContext(ctx).Exec(`
-		UPDATE oidc_device_codes
-		SET status = 'approved', subject = ?, granted_scopes = ?, session_data = ?
-		WHERE user_code = ? AND status = 'pending'
-	`, subject, string(gs), string(sessionData), userCode).Error
+	return s.db.WithContext(ctx).Model(&OIDCDeviceCode{}).
+		Where("user_code = ? AND status = ?", userCode, "pending").
+		Updates(map[string]interface{}{
+			"status":         "approved",
+			"subject":        subject,
+			"granted_scopes": string(gs),
+			"session_data":   string(sessionData),
+		}).Error
 }
 
 func (s *OIDCStorage) DenyDeviceCodeSession(ctx context.Context, userCode string) error {
-	return s.db.WithContext(ctx).Exec(
-		`UPDATE oidc_device_codes SET status = 'denied' WHERE user_code = ? AND status = 'pending'`,
-		userCode,
-	).Error
+	return s.db.WithContext(ctx).Model(&OIDCDeviceCode{}).
+		Where("user_code = ? AND status = ?", userCode, "pending").
+		Update("status", "denied").Error
 }
 
 func (s *OIDCStorage) InvalidateDeviceCodeSession(ctx context.Context, deviceCode string) error {
-	return s.db.WithContext(ctx).Exec(
-		`UPDATE oidc_device_codes SET status = 'used' WHERE device_code = ?`, deviceCode,
-	).Error
+	return s.db.WithContext(ctx).Model(&OIDCDeviceCode{}).
+		Where("device_code = ?", deviceCode).
+		Update("status", "used").Error
 }
 
 func (s *OIDCStorage) UpdateDeviceCodePolling(ctx context.Context, deviceCode string) error {
-	return s.db.WithContext(ctx).Exec(
-		`UPDATE oidc_device_codes SET last_polled_at = ? WHERE device_code = ?`,
-		time.Now().UTC(), deviceCode,
-	).Error
+	return s.db.WithContext(ctx).Model(&OIDCDeviceCode{}).
+		Where("device_code = ?", deviceCode).
+		Update("last_polled_at", time.Now().UTC()).Error
 }
 
 // ---- Internal helpers ----
 
-func buildInsertQuery(table string) (string, error) {
-	if !validTableNames[table] {
-		return "", fmt.Errorf("invalid table name: %s", table)
-	}
-	return `INSERT INTO ` + table + ` (signature, request_id, requested_at, client_id,
-		scopes, granted_scopes, granted_audience, form_data, session_data, subject, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, nil
-}
-
-func buildSelectQuery(table string) (string, error) {
-	if !validTableNames[table] {
-		return "", fmt.Errorf("invalid table name: %s", table)
-	}
-	return `SELECT request_id, requested_at, client_id, scopes, granted_scopes,
-		granted_audience, form_data, session_data, subject, active
-		FROM ` + table + ` WHERE signature = ?`, nil
-}
-
-func buildDeleteQuery(table string) (string, error) {
-	if !validTableNames[table] {
-		return "", fmt.Errorf("invalid table name: %s", table)
-	}
-	return `DELETE FROM ` + table + ` WHERE signature = ?`, nil
-}
-
 func (s *OIDCStorage) createTokenSession(ctx context.Context, table, signature string, request fosite.Requester) error {
+	if !validTableNames[table] {
+		return fmt.Errorf("invalid table name: %s", table)
+	}
+
 	scopes, _ := json.Marshal(request.GetRequestedScopes())
 	grantedScopes, _ := json.Marshal(request.GetGrantedScopes())
 	grantedAudience, _ := json.Marshal(request.GetGrantedAudience())
@@ -857,113 +751,74 @@ func (s *OIDCStorage) createTokenSession(ctx context.Context, table, signature s
 		expiresAt = time.Now().Add(1 * time.Hour)
 	}
 
-	query, err := buildInsertQuery(table)
-	if err != nil {
-		return err
+	record := OIDCTokenSession{
+		Signature:       signature,
+		RequestID:       request.GetID(),
+		RequestedAt:     request.GetRequestedAt(),
+		ClientID:        request.GetClient().GetID(),
+		Scopes:          string(scopes),
+		GrantedScopes:   string(grantedScopes),
+		GrantedAudience: string(grantedAudience),
+		FormData:        string(formData),
+		SessionData:     string(sessionData),
+		Subject:         request.GetSession().GetSubject(),
+		Active:          true,
+		ExpiresAt:       &expiresAt,
 	}
 
-	return s.db.WithContext(ctx).Exec(query,
-		signature,
-		request.GetID(),
-		request.GetRequestedAt(),
-		request.GetClient().GetID(),
-		string(scopes),
-		string(grantedScopes),
-		string(grantedAudience),
-		string(formData),
-		string(sessionData),
-		request.GetSession().GetSubject(),
-		expiresAt,
-	).Error
+	return s.db.WithContext(ctx).Table(table).Create(&record).Error
 }
 
 func (s *OIDCStorage) getTokenSession(ctx context.Context, table, signature string, session fosite.Session) (fosite.Requester, error) {
-	var (
-		requestID       string
-		requestedAt     time.Time
-		clientID        string
-		scopes          string
-		grantedScopes   string
-		grantedAudience string
-		formData        string
-		sessionData     string
-		subject         string
-		active          int
-	)
+	if !validTableNames[table] {
+		return nil, fmt.Errorf("invalid table name: %s", table)
+	}
 
-	query, err := buildSelectQuery(table)
-	if err != nil {
+	var record OIDCTokenSession
+	if err := s.db.WithContext(ctx).Table(table).First(&record, "signature = ?", signature).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fosite.ErrNotFound
+		}
 		return nil, err
 	}
 
-	row := s.db.WithContext(ctx).Raw(query, signature).Row()
-	err = row.Scan(&requestID, &requestedAt, &clientID, &scopes, &grantedScopes,
-		&grantedAudience, &formData, &sessionData, &subject, &active)
-
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fosite.ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	if active == 0 {
+	if !record.Active {
 		return nil, fosite.ErrInactiveToken
 	}
 
-	return s.scanToRequest(ctx, requestID, requestedAt, clientID,
-		scopes, grantedScopes, grantedAudience, formData, sessionData, subject, session)
+	return s.scanToRequest(ctx, record.RequestID, record.RequestedAt, record.ClientID,
+		record.Scopes, record.GrantedScopes, record.GrantedAudience,
+		record.FormData, record.SessionData, record.Subject, session)
 }
 
 // getRefreshTokenSession is like getTokenSession but implements the grace period
 // for refresh token reuse.
 func (s *OIDCStorage) getRefreshTokenSession(ctx context.Context, signature string, session fosite.Session) (fosite.Requester, error) {
-	var (
-		requestID       string
-		requestedAt     time.Time
-		clientID        string
-		scopes          string
-		grantedScopes   string
-		grantedAudience string
-		formData        string
-		sessionData     string
-		subject         string
-		active          int
-		firstUsedAt     sql.NullTime
-	)
-
-	row := s.db.WithContext(ctx).Raw(`
-		SELECT request_id, requested_at, client_id, scopes, granted_scopes,
-			granted_audience, form_data, session_data, subject, active, first_used_at
-		FROM oidc_refresh_tokens WHERE signature = ?
-	`, signature).Row()
-
-	err := row.Scan(&requestID, &requestedAt, &clientID, &scopes, &grantedScopes,
-		&grantedAudience, &formData, &sessionData, &subject, &active, &firstUsedAt)
-
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fosite.ErrNotFound
-	}
-	if err != nil {
+	var record OIDCRefreshToken
+	if err := s.db.WithContext(ctx).First(&record, "signature = ?", signature).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fosite.ErrNotFound
+		}
 		return nil, err
 	}
 
 	// Build the request first — fosite's handleRefreshTokenReuse expects a
 	// non-nil request even when we return ErrInactiveToken, so it can use the
 	// request ID to revoke all associated tokens.
-	req, err := s.scanToRequest(ctx, requestID, requestedAt, clientID,
-		scopes, grantedScopes, grantedAudience, formData, sessionData, subject, session)
+	req, err := s.scanToRequest(ctx, record.RequestID, record.RequestedAt, record.ClientID,
+		record.Scopes, record.GrantedScopes, record.GrantedAudience,
+		record.FormData, record.SessionData, record.Subject, session)
 	if err != nil {
 		return nil, err
 	}
 
-	if active == 0 {
+	if !record.Active {
 		return req, fosite.ErrInactiveToken
 	}
 
 	// If the token has been used before, check the grace period
-	if firstUsedAt.Valid {
-		if time.Since(firstUsedAt.Time) > s.RefreshTokenGracePeriod {
+	if record.FirstUsedAt != nil {
+		if time.Since(*record.FirstUsedAt) > s.RefreshTokenGracePeriod {
 			return req, fosite.ErrInactiveToken
 		}
 	}
@@ -972,11 +827,10 @@ func (s *OIDCStorage) getRefreshTokenSession(ctx context.Context, signature stri
 }
 
 func (s *OIDCStorage) deleteTokenSession(ctx context.Context, table, signature string) error {
-	query, err := buildDeleteQuery(table)
-	if err != nil {
-		return err
+	if !validTableNames[table] {
+		return fmt.Errorf("invalid table name: %s", table)
 	}
-	return s.db.WithContext(ctx).Exec(query, signature).Error
+	return s.db.WithContext(ctx).Table(table).Where("signature = ?", signature).Delete(&OIDCTokenSession{}).Error
 }
 
 func (s *OIDCStorage) scanToRequest(ctx context.Context,
