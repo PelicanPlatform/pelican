@@ -442,6 +442,21 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		return nil, errors.Wrap(err, "failed to parse director URL")
 	}
 
+	// Derive the default federation identity from the discovery endpoint.
+	// The discovery host is what the director encodes into cache request
+	// URLs, so the isFederationAllowed check compares incoming hosts
+	// against this value.  Prefer the explicit config; fall back to the
+	// discovery endpoint's host:port, or finally the director URL's host.
+	defaultFed := cfg.DefaultFederation
+	if defaultFed == "" && fedInfo.DiscoveryEndpoint != "" {
+		if dURL, err := url.Parse(fedInfo.DiscoveryEndpoint); err == nil && dURL.Host != "" {
+			defaultFed = dURL.Host
+		}
+	}
+	if defaultFed == "" {
+		defaultFed = directorURL.Host
+	}
+
 	// Initialize transfer engine
 	if err := config.InitClient(); err != nil {
 		db.Close()
@@ -466,7 +481,7 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		consistency:     consistency,
 		te:              te,
 		directorURL:     directorURL,
-		defaultFed:      cfg.DefaultFederation,
+		defaultFed:      defaultFed,
 		ac:              newAuthConfig(ctx, egrp),
 		namespaceMap:    make(map[string]NamespaceID),
 		activeDownloads: make(map[ObjectHash]*persistentDownload),
@@ -670,8 +685,8 @@ func (pc *PersistentCache) resolveObject(
 	pelicanURL := pc.normalizePath(objectPath)
 	objectHash := pc.db.ObjectHash(pelicanURL)
 
-	if !pc.ac.authorize(token_scopes.Wlcg_Storage_Read, objectPath, token) {
-		return nil, authorizationDenied
+	if ok, reason := pc.ac.authorize(token_scopes.Wlcg_Storage_Read, objectPath, token); !ok {
+		return nil, newAuthorizationDenied(reason)
 	}
 
 	namespaceID := pc.getNamespaceID(objectPath)
@@ -987,8 +1002,8 @@ func (pc *PersistentCache) GetRange(ctx context.Context, objectPath, token, rang
 // Returns nil, nil if the object is not cached.
 func (pc *PersistentCache) GetMetadata(objectPath, token string) (*CacheMetadata, error) {
 	// Check authorization
-	if !pc.ac.authorize(token_scopes.Wlcg_Storage_Read, objectPath, token) {
-		return nil, authorizationDenied
+	if ok, reason := pc.ac.authorize(token_scopes.Wlcg_Storage_Read, objectPath, token); !ok {
+		return nil, newAuthorizationDenied(reason)
 	}
 
 	// Normalize and compute object hash
@@ -1027,8 +1042,8 @@ type HeadResult struct {
 // If the object is cached, the full CacheMetadata is returned.
 // If not cached, the origin is queried via HEAD (DoStat) for the size.
 func (pc *PersistentCache) HeadObject(objectPath, token string) (*HeadResult, error) {
-	if !pc.ac.authorize(token_scopes.Wlcg_Storage_Read, objectPath, token) {
-		return nil, authorizationDenied
+	if ok, reason := pc.ac.authorize(token_scopes.Wlcg_Storage_Read, objectPath, token); !ok {
+		return nil, newAuthorizationDenied(reason)
 	}
 
 	pelicanURL := pc.normalizePath(objectPath)
@@ -1077,8 +1092,8 @@ var ErrInitNoStore = errors.New("object must not be stored (no-store/no-cache/pr
 // stat returns the size of an object
 func (pc *PersistentCache) stat(objectPath, token string, cachedOnly bool) (uint64, error) {
 	// Check authorization
-	if !pc.ac.authorize(token_scopes.Wlcg_Storage_Read, objectPath, token) {
-		return 0, authorizationDenied
+	if ok, reason := pc.ac.authorize(token_scopes.Wlcg_Storage_Read, objectPath, token); !ok {
+		return 0, newAuthorizationDenied(reason)
 	}
 
 	// Normalize and compute object hash
@@ -1476,6 +1491,11 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 	}
 	if fedTP != nil {
 		transferOpts = append(transferOpts, client.WithFedToken(fedTP))
+	}
+	// Propagate the client's request ID (X-Pelican-JobId) so the origin
+	// can correlate cache-miss fetches with the original client request.
+	if reqId, ok := client.RequestIdFromContext(ctx); ok {
+		transferOpts = append(transferOpts, client.WithRequestId(reqId))
 	}
 	tj, err := tc.NewTransferJob(dlCtx, sourceURL, "", false, false, transferOpts...)
 	if err != nil {

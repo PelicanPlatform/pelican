@@ -197,13 +197,16 @@ func getActionFromMethod(method string) token_scopes.TokenScope {
 // authMiddleware handles token-based authorization
 func authMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Log the incoming request
-		log.WithFields(log.Fields{
-			"component": "origin",
-			"method":    c.Request.Method,
-			"resource":  c.Request.URL.Path,
-			"client":    c.ClientIP(),
-		}).Debug("Received Request")
+		// Log the request, including the request ID if provided
+		reqLog := log.WithFields(log.Fields{
+			"method": c.Request.Method,
+			"path":   c.Request.URL.Path,
+			"client": c.ClientIP(),
+		})
+		if reqId := c.Request.Header.Get("X-Pelican-JobId"); reqId != "" {
+			reqLog = reqLog.WithField("reqId", reqId)
+		}
+		reqLog.Info("Request received")
 
 		tokens := extractTokens(c.Request)
 		action := getActionFromMethod(c.Request.Method)
@@ -216,8 +219,11 @@ func authMiddleware() gin.HandlerFunc {
 		resource = strings.TrimPrefix(resource, apiPrefix)
 		ac := GetAuthConfig()
 		if ac == nil {
-			log.Error("Auth config not initialized")
-			c.AbortWithStatus(http.StatusInternalServerError)
+			reqLog.Error("Auth config not initialized")
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				"error":  "internal_error",
+				"detail": "auth config not initialized",
+			})
 			return
 		}
 
@@ -240,8 +246,11 @@ func authMiddleware() gin.HandlerFunc {
 		if disableDirectClients {
 			fedInfo, err := config.GetFederation(c.Request.Context())
 			if err != nil {
-				log.Errorf("DisableDirectClients enabled but failed to get federation info: %v", err)
-				c.AbortWithStatus(http.StatusInternalServerError)
+				reqLog.Errorf("DisableDirectClients enabled but failed to get federation info: %v", err)
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+					"error":  "internal_error",
+					"detail": "failed to retrieve federation info",
+				})
 				return
 			}
 			fedIssuers = make(map[string]bool)
@@ -256,8 +265,11 @@ func authMiddleware() gin.HandlerFunc {
 				fedIssuers[fedInfo.DirectorEndpoint] = true
 			}
 			if len(fedIssuers) == 0 {
-				log.Error("DisableDirectClients enabled but no federation issuer URLs configured")
-				c.AbortWithStatus(http.StatusInternalServerError)
+				reqLog.Error("DisableDirectClients enabled but no federation issuer URLs configured")
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+					"error":  "internal_error",
+					"detail": "no federation issuer URLs configured",
+				})
 				return
 			}
 		}
@@ -312,16 +324,22 @@ func authMiddleware() gin.HandlerFunc {
 
 		// If DisableDirectClients is enabled, validate federation token requirements
 		if disableDirectClients && federationCtx == nil {
-			log.Debugf("DisableDirectClients requires federation token for %s %s", c.Request.Method, resource)
-			c.AbortWithStatus(http.StatusUnauthorized)
+			reqLog.Debugf("DisableDirectClients requires federation token for %s %s", c.Request.Method, resource)
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error":  "unauthorized",
+				"detail": "request must be routed through a registered cache; direct client access is disabled for this origin",
+			})
 			return
 		}
 
 		// For non-public reads, require an authorized context
 		// For public reads, the authorizedContext may be nil
 		if !isPublicRead && authorizedContext == nil {
-			log.Warningf("Authorization failed for %s %s - tried %d token(s)", c.Request.Method, resource, len(tokens))
-			c.AbortWithStatus(http.StatusUnauthorized)
+			reqLog.Warningf("Authorization failed for %s %s - tried %d token(s)", c.Request.Method, resource, len(tokens))
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error":  "unauthorized",
+				"detail": fmt.Sprintf("authorization failed for %s %s; tried %d token(s)", action, resource, len(tokens)),
+			})
 			return
 		} else if authorizedContext != nil {
 			c.Request = c.Request.WithContext(authorizedContext)

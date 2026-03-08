@@ -93,6 +93,10 @@ type (
 
 	classAdAttr string
 
+	// requestIdCtxKey is the context key for propagating a caller-supplied
+	// request ID (X-Pelican-JobId) through the transfer pipeline.
+	requestIdCtxKey struct{}
+
 	transferType int
 
 	ChecksumType int
@@ -297,6 +301,7 @@ type (
 		forcePrestageAPI   bool                    // If true, force use of prestage API and error if not supported (no fallback)
 		byteRange          *ByteRange              // Optional byte range for partial downloads
 		metadataChan       chan<- TransferMetadata // Optional channel to receive early transfer metadata
+		requestId          string                  // Caller-supplied request ID for end-to-end tracing (X-Pelican-JobId)
 	}
 
 	// A TransferJob associated with a client's request
@@ -387,6 +392,7 @@ type (
 	identTransferOptionMetadataChannel         struct{}
 	identTransferOptionFedToken                struct{}
 	identTransferOptionCacheEmbeddedClientMode struct{}
+	identTransferOptionRequestId               struct{}
 
 	// ByteRange specifies a byte range for partial object transfers
 	// Start and End are inclusive byte offsets (0-indexed)
@@ -963,6 +969,38 @@ func WithCacheEmbeddedClientMode() TransferOption {
 	return option.New(identTransferOptionCacheEmbeddedClientMode{}, true)
 }
 
+// WithRequestId sets a caller-supplied request ID that is propagated as
+// the X-Pelican-JobId header on all HTTP requests made by this transfer.
+// When set, it takes precedence over the HTCondor job-ad lookup.
+// This is used by the cache to thread an incoming client's request ID
+// through to the origin.
+func WithRequestId(id string) TransferOption {
+	return option.New(identTransferOptionRequestId{}, id)
+}
+
+// ContextWithRequestId returns a child context that carries the given
+// request ID.  Downstream code can retrieve it with RequestIdFromContext.
+func ContextWithRequestId(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, requestIdCtxKey{}, id)
+}
+
+// RequestIdFromContext extracts a request ID previously stored with
+// ContextWithRequestId.  Returns ("", false) if none is set.
+func RequestIdFromContext(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(requestIdCtxKey{}).(string)
+	return id, ok && id != ""
+}
+
+// getJobId returns the request/job ID to use for the X-Pelican-JobId
+// header.  It checks the context first (set by the cache when proxying
+// a client request), then falls back to the HTCondor job-ad lookup.
+func getJobId(ctx context.Context) (string, bool) {
+	if id, ok := RequestIdFromContext(ctx); ok {
+		return id, true
+	}
+	return searchJobAd(attrJobId)
+}
+
 // Create a new client to work with an engine
 func (te *TransferEngine) NewClient(options ...TransferOption) (client *TransferClient, err error) {
 	log.Debugln("Making new clients")
@@ -1421,7 +1459,15 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			tj.metadataChan = option.Value().(chan<- TransferMetadata)
 		case identTransferOptionCacheEmbeddedClientMode{}:
 			tj.cacheMode = option.Value().(bool)
+		case identTransferOptionRequestId{}:
+			tj.requestId = option.Value().(string)
 		}
+	}
+
+	// Inject the request ID into the job's context so it propagates
+	// through transferFile → downloadHTTP and friends.
+	if tj.requestId != "" {
+		tj.ctx = ContextWithRequestId(tj.ctx, tj.requestId)
 	}
 
 	httpMethod := http.MethodGet
@@ -2833,7 +2879,7 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
 	request.Header.Set("User-Agent", getUserAgent(project))
-	if val, found := searchJobAd(attrJobId); found {
+	if val, found := getJobId(ctx); found {
 		request.Header.Set("X-Pelican-JobId", val)
 	}
 	if len(types) == 0 {
@@ -3098,7 +3144,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	}
 	// Set the headers
 	userAgent := getUserAgent(project)
-	jobId, found := searchJobAd(attrJobId)
+	jobId, found := getJobId(ctx)
 	if found {
 		req.Header.Set("X-Pelican-JobId", jobId)
 	}
@@ -3163,8 +3209,15 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		log.WithFields(fields).Debugln("Error response body:", bodyStr)
 		serverVersion = resp.Header.Get("Server")
 		if resp.StatusCode == http.StatusForbidden {
-			// We will update the error message in the caller
-			return 0, 0, -1, serverVersion, "", error_codes.NewAuthorizationError(&PermissionDeniedError{})
+			// Preserve the origin's response body so operators can see why
+			// the request was rejected (e.g. scope mismatch, token issue).
+			// The message may be further enriched with token-expiry info in
+			// wrapDownloadError.
+			pde := &PermissionDeniedError{}
+			if trimmed := strings.TrimSpace(bodyStr); trimmed != "" {
+				pde.message = "Permission denied: " + trimmed
+			}
+			return 0, 0, -1, serverVersion, "", error_codes.NewAuthorizationError(pde)
 		}
 		sce := StatusCodeError(resp.StatusCode)
 		// Wrap StatusCodeError with appropriate PelicanError based on status code
@@ -3837,7 +3890,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		}
 	}
 	request.Header.Set("User-Agent", getUserAgent(transfer.project))
-	if result, found := searchJobAd(attrJobId); found {
+	if result, found := getJobId(putContext); found {
 		request.Header.Set("X-Pelican-JobId", result)
 	}
 	var lastKnownWritten int64
@@ -4676,7 +4729,7 @@ func deleteHttp(ctx context.Context, remoteUrl *pelican_url.PelicanURL, recursiv
 			return errors.Wrap(err, "failed to get token for transfer")
 		}
 		req.Header.Set("User-Agent", getUserAgent(project))
-		if jobId, found := searchJobAd(attrJobId); found {
+		if jobId, found := getJobId(ctx); found {
 			req.Header.Set("X-Pelican-JobId", jobId)
 		}
 		req.Header.Set("Authorization", "Bearer "+tokenContents)

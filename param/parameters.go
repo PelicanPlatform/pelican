@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/pelicanplatform/pelican/byte_rate"
+	"github.com/spf13/viper"
 )
 
 type StringParam struct {
@@ -95,6 +96,7 @@ func GetDeprecated() map[string][]string {
 // It is generated from docs/parameters.yaml and indicates whether a parameter can be reloaded
 // at runtime without requiring a server restart.
 var runtimeConfigurableMap = map[string]bool{
+	"Cache.AllowedFederations": false,
 	"Cache.BlocksToPrefetch": false,
 	"Cache.ClientStatisticsLocation": false,
 	"Cache.Concurrency": false,
@@ -736,6 +738,7 @@ func (sP StringParam) Set(value string) error {
 }
 
 var stringSliceAccessors = map[string]func(*Config) []string{
+	"Cache.AllowedFederations": func(c *Config) []string { return c.Cache.AllowedFederations },
 	"Cache.DataLocations": func(c *Config) []string { return c.Cache.DataLocations },
 	"Cache.MetaLocations": func(c *Config) []string { return c.Cache.MetaLocations },
 	"Cache.PermittedNamespaces": func(c *Config) []string { return c.Cache.PermittedNamespaces },
@@ -1172,6 +1175,7 @@ func (oqP OpaqueParam) GetEnvVarName() string {
 // docs/parameters.yaml. It is primarily used to bind environment variables so
 // that env-only overrides are included in viper.AllSettings().
 var allParameterNames = []string{
+	"Cache.AllowedFederations",
 	"Cache.BlocksToPrefetch",
 	"Cache.ClientStatisticsLocation",
 	"Cache.Concurrency",
@@ -1758,6 +1762,7 @@ var (
 )
 
 var (
+	Cache_AllowedFederations = StringSliceParam{"Cache.AllowedFederations"}
 	Cache_DataLocations = StringSliceParam{"Cache.DataLocations"}
 	Cache_MetaLocations = StringSliceParam{"Cache.MetaLocations"}
 	Cache_PermittedNamespaces = StringSliceParam{"Cache.PermittedNamespaces"}
@@ -2192,6 +2197,7 @@ func init() {
 		"Xrootd.ScitokensConfig": Xrootd_ScitokensConfig,
 		"Xrootd.Sitename": Xrootd_Sitename,
 		"Xrootd.SummaryMonitoringHost": Xrootd_SummaryMonitoringHost,
+		"Cache.AllowedFederations": Cache_AllowedFederations,
 		"Cache.DataLocations": Cache_DataLocations,
 		"Cache.MetaLocations": Cache_MetaLocations,
 		"Cache.PermittedNamespaces": Cache_PermittedNamespaces,

@@ -21,6 +21,7 @@ package local_cache
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -48,6 +49,20 @@ import (
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
+
+// requestLogger builds a structured logrus entry for an incoming HTTP
+// request.  It always includes method and path; the request ID
+// (X-Pelican-JobId) is added when present.
+func requestLogger(r *http.Request, objectPath string) *log.Entry {
+	entry := log.WithFields(log.Fields{
+		"method": r.Method,
+		"path":   objectPath,
+	})
+	if reqId := r.Header.Get("X-Pelican-JobId"); reqId != "" {
+		entry = entry.WithField("reqId", reqId)
+	}
+	return entry
+}
 
 // isConnectionError checks if an error is a connection error (reset, refused, etc.)
 // that should be treated as a gateway timeout
@@ -120,53 +135,62 @@ func (etr *errorTrackingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// handleError writes an appropriate HTTP error response based on the error type
-func handleError(w http.ResponseWriter, getErr error, sendTrailer bool) {
-	if errors.Is(getErr, authorizationDenied) {
-		w.WriteHeader(http.StatusForbidden)
-		if _, err := w.Write([]byte("Authorization Denied")); err != nil {
-			log.Errorln("Failed to write authorization denied to client")
+// handleError writes a structured JSON error response based on the error type.
+// The reqLog entry carries request-scoped fields (method, path, reqId) so that
+// every log line emitted here is correlated with the original request.
+func handleError(w http.ResponseWriter, getErr error, sendTrailer bool, reqLog *log.Entry) {
+	// writeJSON is a small helper that sends a JSON object with "error" and
+	// "detail" keys.  It sets Content-Type before WriteHeader so Go does
+	// not fall back to content-sniffing.
+	writeJSON := func(status int, errCode, detail string) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		resp, _ := json.Marshal(map[string]string{
+			"error":  errCode,
+			"detail": detail,
+		})
+		if _, err := w.Write(resp); err != nil {
+			reqLog.Errorln("Failed to write error response to client:", err)
 		}
+	}
+
+	var authErr *AuthorizationError
+	if errors.As(getErr, &authErr) {
+		reqLog.WithField("reason", authErr.Reason).Warn("Authorization denied")
+		writeJSON(http.StatusForbidden, "authorization_denied", authErr.Reason)
+		return
+	} else if errors.Is(getErr, authorizationDenied) {
+		// Fallback for the plain sentinel (shouldn't happen with new code paths).
+		reqLog.Warn("Authorization denied (no detail available)")
+		writeJSON(http.StatusForbidden, "authorization_denied", "authorization denied")
 		return
 	} else if errors.Is(getErr, context.DeadlineExceeded) {
-		w.WriteHeader(http.StatusGatewayTimeout)
-		if _, err := w.Write([]byte("Upstream response timeout")); err != nil {
-			log.Errorln("Failed to write gateway timeout to client")
-		}
+		reqLog.Warn("Upstream response timeout")
+		writeJSON(http.StatusGatewayTimeout, "upstream_timeout", "upstream response timeout")
 		return
 	}
 
-	log.Errorln("Failed to get file from cache:", getErr)
+	reqLog.Errorln("Failed to get file from cache:", getErr)
 	var sce *client.StatusCodeError
 	var pe *error_codes.PelicanError
 	var netErr net.Error
 	if errors.As(getErr, &sce) {
-		w.WriteHeader(int(*sce))
+		code := int(*sce)
+		writeJSON(code, http.StatusText(code), getErr.Error())
 	} else if errors.As(getErr, &pe) {
 		// Map Pelican error codes to HTTP status codes
 		switch pe.Code() {
 		case 5011: // FileNotFound
-			w.WriteHeader(http.StatusNotFound)
+			writeJSON(http.StatusNotFound, "not_found", getErr.Error())
 		default:
-			w.WriteHeader(http.StatusInternalServerError)
+			writeJSON(http.StatusInternalServerError, "internal_error", getErr.Error())
 		}
 	} else if errors.As(getErr, &netErr) && netErr.Timeout() {
-		// Network timeout errors should return 504 Gateway Timeout
-		w.WriteHeader(http.StatusGatewayTimeout)
-		if _, err := w.Write([]byte("Upstream timeout")); err != nil {
-			log.Errorln("Failed to write gateway timeout message to client")
-		}
+		writeJSON(http.StatusGatewayTimeout, "upstream_timeout", "upstream timeout")
 	} else if isConnectionError(getErr) {
-		// Connection errors (reset, refused) should also return 504
-		w.WriteHeader(http.StatusGatewayTimeout)
-		if _, err := w.Write([]byte("Upstream connection error")); err != nil {
-			log.Errorln("Failed to write gateway timeout message to client")
-		}
+		writeJSON(http.StatusGatewayTimeout, "upstream_connection_error", "upstream connection error")
 	} else {
-		w.WriteHeader(http.StatusInternalServerError)
-		if _, err := w.Write([]byte("Unexpected internal error")); err != nil {
-			log.Errorln("Failed to write internal error message to client")
-		}
+		writeJSON(http.StatusInternalServerError, "internal_error", "unexpected internal error")
 	}
 }
 
@@ -215,6 +239,12 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	objectPath := path.Clean(r.URL.Path)
+
+	// Extract client request ID for end-to-end tracing.  The same ID is
+	// forwarded to the origin on cache-miss fetches and proxy requests.
+	requestId := r.Header.Get("X-Pelican-JobId")
+	reqLog := requestLogger(r, objectPath)
+	startTime := time.Now()
 
 	// Handle PROPFIND requests.
 	// Depth: 1 → always proxy to origin (directory listing).
@@ -267,7 +297,7 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 	timeoutStr := r.Header.Get("X-Pelican-Timeout")
 	if timeoutStr != "" {
 		if ht, parseErr := time.ParseDuration(timeoutStr); parseErr != nil {
-			log.Debugln("Invalid X-Pelican-Timeout value:", timeoutStr)
+			reqLog.Debugln("Invalid X-Pelican-Timeout value:", timeoutStr)
 		} else {
 			// Reduce the client's timeout to leave headroom for response
 			// framing.  The cache must finish before the client gives up.
@@ -278,7 +308,9 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	log.Debugln("Setting header timeout:", timeoutStr)
+	if timeoutStr != "" {
+		reqLog.Debugf("Client requested header timeout: %s", timeoutStr)
+	}
 
 	// Handle HEAD requests: never trigger a download.
 	// With only-if-cached: return 504 on cache miss (RFC 7234 §5.2.1.7).
@@ -289,14 +321,8 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 			if errors.Is(statErr, ErrNotCached) {
 				w.WriteHeader(http.StatusGatewayTimeout)
 				return
-			} else if errors.Is(statErr, authorizationDenied) {
-				w.WriteHeader(http.StatusForbidden)
-				if _, err := w.Write([]byte("Authorization Denied")); err != nil {
-					log.Errorln("Failed to write authorization denied to client")
-				}
-				return
 			} else if statErr != nil {
-				handleError(w, statErr, sendTrailer)
+				handleError(w, statErr, sendTrailer, reqLog)
 				return
 			}
 			w.Header().Set("Content-Length", strconv.FormatUint(size, 10))
@@ -307,11 +333,8 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 
 		// Plain HEAD — stat only, no download.
 		result, headErr := pc.HeadObject(objectPath, bearerToken)
-		if errors.Is(headErr, authorizationDenied) {
-			w.WriteHeader(http.StatusForbidden)
-			return
-		} else if headErr != nil {
-			handleError(w, headErr, sendTrailer)
+		if headErr != nil {
+			handleError(w, headErr, sendTrailer, reqLog)
 			return
 		}
 		w.Header().Set("Content-Length", strconv.FormatInt(result.ContentLength, 10))
@@ -341,11 +364,8 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(statErr, ErrNotCached) {
 			w.WriteHeader(http.StatusGatewayTimeout)
 			return
-		} else if errors.Is(statErr, authorizationDenied) {
-			w.WriteHeader(http.StatusForbidden)
-			return
 		} else if statErr != nil {
-			handleError(w, statErr, sendTrailer)
+			handleError(w, statErr, sendTrailer, reqLog)
 			return
 		}
 		// Object is cached — fall through to the normal GET path which will
@@ -369,7 +389,16 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 	}
 	resCh := make(chan readerResult, 1)
 	go func() {
-		rd, md, err := pc.GetSeekableReader(context.Background(), objectPath, bearerToken, r.Header.Get("Range") != "")
+		// Build a context carrying the client's request ID so the
+		// download path can propagate it to the origin via
+		// X-Pelican-JobId.  We deliberately do NOT derive from
+		// r.Context() because the reader outlives the HTTP handler
+		// when the background download continues.
+		dlCtx := context.Background()
+		if requestId != "" {
+			dlCtx = client.ContextWithRequestId(dlCtx, requestId)
+		}
+		rd, md, err := pc.GetSeekableReader(dlCtx, objectPath, bearerToken, r.Header.Get("Range") != "")
 		resCh <- readerResult{rd, md, err}
 	}()
 
@@ -399,7 +428,7 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		reader, meta, getErr = res.reader, res.meta, res.err
 	}
 	if getErr != nil {
-		handleError(w, getErr, sendTrailer)
+		handleError(w, getErr, sendTrailer, reqLog)
 		return
 	}
 	defer reader.Close()
@@ -430,16 +459,16 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 						// ETag matches, return 304 Not Modified
 						w.Header().Set("Cache-Control", meta.ResponseCacheControl())
 						w.WriteHeader(http.StatusNotModified)
+						reqLog.WithFields(log.Fields{
+							"status":   304,
+							"cache":    "hit",
+							"duration": time.Since(startTime).Round(time.Millisecond).String(),
+						}).Info("Request complete")
 						return
 					}
 				}
 			}
 		}
-	}
-
-	// Set Cache-Control header from stored metadata or use sensible default.
-	// This must be set before http.ServeContent since it may return 304 for If-Modified-Since.
-	if meta != nil {
 		w.Header().Set("Cache-Control", meta.ResponseCacheControl())
 	} else {
 		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
@@ -467,6 +496,11 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 			}
 			w.Header().Set("X-Transfer-Status", trailerVal)
 		}
+		reqLog.WithFields(log.Fields{
+			"status":   200,
+			"cache":    "pass-through",
+			"duration": time.Since(startTime).Round(time.Millisecond).String(),
+		}).Info("Request complete")
 		return
 	}
 
@@ -510,6 +544,18 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("X-Transfer-Status", trailerVal)
 	}
+
+	// Determine cache hit/miss from metadata: if the object was already
+	// fully cached before this request started it's a hit; otherwise a miss
+	// (the download was triggered on-demand).
+	cacheStatus := "miss"
+	if meta != nil && !meta.Completed.IsZero() && meta.Completed.Before(startTime) {
+		cacheStatus = "hit"
+	}
+	reqLog.WithFields(log.Fields{
+		"cache":    cacheStatus,
+		"duration": time.Since(startTime).Round(time.Millisecond).String(),
+	}).Info("Request complete")
 }
 
 // servePropfindFromCache synthesizes a WebDAV multistatus response from
@@ -566,11 +612,16 @@ func (pc *PersistentCache) servePropfindFromCache(w http.ResponseWriter, r *http
 // proxyPropfind forwards a PROPFIND request to the origin server.
 // Directory listings are NOT cached; they always go to the origin.
 func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request, objectPath string, bearerToken string) {
+	reqLog := requestLogger(r, objectPath)
+
 	// Check authorization
-	if !pc.ac.authorize(token_scopes.Wlcg_Storage_Read, objectPath, bearerToken) {
+	if ok, reason := pc.ac.authorize(token_scopes.Wlcg_Storage_Read, objectPath, bearerToken); !ok {
+		reqLog.WithField("reason", reason).Warn("PROPFIND authorization denied")
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
-		if _, err := w.Write([]byte("Authorization Denied")); err != nil {
-			log.Errorln("Failed to write authorization denied to client")
+		resp, _ := json.Marshal(map[string]string{"error": "authorization_denied", "reason": reason})
+		if _, err := w.Write(resp); err != nil {
+			reqLog.Errorln("Failed to write authorization denied to client")
 		}
 		return
 	}
@@ -579,7 +630,7 @@ func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request,
 	if pc.directorURL == nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		if _, err := w.Write([]byte("Cache not configured")); err != nil {
-			log.Errorln("Failed to write service unavailable to client")
+			reqLog.Errorln("Failed to write service unavailable to client")
 		}
 		return
 	}
@@ -594,7 +645,7 @@ func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request,
 
 	proxyReq, err := http.NewRequestWithContext(ctx, "PROPFIND", originURL.String(), r.Body)
 	if err != nil {
-		log.Errorln("Failed to create PROPFIND request:", err)
+		reqLog.Errorln("Failed to create PROPFIND request:", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -612,6 +663,9 @@ func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request,
 	if contentType := r.Header.Get("Content-Type"); contentType != "" {
 		proxyReq.Header.Set("Content-Type", contentType)
 	}
+	if jobId := r.Header.Get("X-Pelican-JobId"); jobId != "" {
+		proxyReq.Header.Set("X-Pelican-JobId", jobId)
+	}
 
 	// Make the request.  The director 307-redirects to the origin (a
 	// different host), so Go's default redirect policy strips the
@@ -627,6 +681,9 @@ func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request,
 			if auth := via[0].Header.Get("Authorization"); auth != "" {
 				req.Header.Set("Authorization", auth)
 			}
+			if jid := via[0].Header.Get("X-Pelican-JobId"); jid != "" {
+				req.Header.Set("X-Pelican-JobId", jid)
+			}
 			if fedToken != "" {
 				q := req.URL.Query()
 				q.Set("access_token", fedToken)
@@ -638,7 +695,7 @@ func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request,
 
 	resp, err := httpClient.Do(proxyReq)
 	if err != nil {
-		log.Errorln("Failed to proxy PROPFIND request:", err)
+		reqLog.Errorln("Failed to proxy PROPFIND request:", err)
 		if isConnectionError(err) || errors.Is(err, context.DeadlineExceeded) {
 			w.WriteHeader(http.StatusGatewayTimeout)
 		} else {
@@ -660,7 +717,7 @@ func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request,
 
 	// Copy response body
 	if _, err := io.Copy(w, resp.Body); err != nil {
-		log.Debugln("Error copying PROPFIND response body:", err)
+		reqLog.Debugln("Error copying PROPFIND response body:", err)
 	}
 }
 
@@ -680,6 +737,8 @@ func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request,
 // invalidation with ETag-aware instance management.  Until the engine
 // exposes hooks for those, the manual approach is the pragmatic choice.
 func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, objectPath string, bearerToken string) {
+	reqLog := requestLogger(r, objectPath)
+
 	// Check authorization — PUT requires storage.create, DELETE requires storage.modify
 	var requiredScope token_scopes.TokenScope
 	if r.Method == "DELETE" {
@@ -687,10 +746,13 @@ func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, ob
 	} else {
 		requiredScope = token_scopes.Wlcg_Storage_Create
 	}
-	if !pc.ac.authorize(requiredScope, objectPath, bearerToken) {
+	if ok, reason := pc.ac.authorize(requiredScope, objectPath, bearerToken); !ok {
+		reqLog.WithField("reason", reason).Warn("Write authorization denied")
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
-		if _, err := w.Write([]byte("Authorization Denied")); err != nil {
-			log.Errorln("Failed to write authorization denied to client")
+		resp, _ := json.Marshal(map[string]string{"error": "authorization_denied", "reason": reason})
+		if _, err := w.Write(resp); err != nil {
+			reqLog.Errorln("Failed to write authorization denied to client")
 		}
 		return
 	}
@@ -698,7 +760,7 @@ func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, ob
 	if pc.directorURL == nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		if _, err := w.Write([]byte("Cache not configured")); err != nil {
-			log.Errorln("Failed to write service unavailable to client")
+			reqLog.Errorln("Failed to write service unavailable to client")
 		}
 		return
 	}
@@ -719,7 +781,7 @@ func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, ob
 	if r.Body != nil && r.Body != http.NoBody {
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
-			log.Errorln("Failed to read write-through request body:", err)
+			reqLog.Errorln("Failed to read write-through request body:", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -728,7 +790,7 @@ func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, ob
 
 	proxyReq, err := http.NewRequestWithContext(ctx, r.Method, originURL.String(), bodyReader)
 	if err != nil {
-		log.Errorln("Failed to create write-through request:", err)
+		reqLog.Errorln("Failed to create write-through request:", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -752,6 +814,9 @@ func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, ob
 			proxyReq.Header.Set(hdr, v)
 		}
 	}
+	if jobId := r.Header.Get("X-Pelican-JobId"); jobId != "" {
+		proxyReq.Header.Set("X-Pelican-JobId", jobId)
+	}
 
 	// The director 307-redirects to the origin (a different host), so Go's
 	// default redirect policy strips the Authorization header.  Use a
@@ -767,6 +832,9 @@ func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, ob
 			if auth := via[0].Header.Get("Authorization"); auth != "" {
 				req.Header.Set("Authorization", auth)
 			}
+			if jid := via[0].Header.Get("X-Pelican-JobId"); jid != "" {
+				req.Header.Set("X-Pelican-JobId", jid)
+			}
 			if fedToken != "" {
 				q := req.URL.Query()
 				q.Set("access_token", fedToken)
@@ -778,7 +846,7 @@ func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, ob
 
 	resp, err := httpClient.Do(proxyReq)
 	if err != nil {
-		log.Errorln("Failed to proxy write-through request:", err)
+		reqLog.Errorln("Failed to proxy write-through request:", err)
 		if isConnectionError(err) || errors.Is(err, context.DeadlineExceeded) {
 			w.WriteHeader(http.StatusGatewayTimeout)
 		} else {
@@ -807,7 +875,7 @@ func (pc *PersistentCache) proxyWrite(w http.ResponseWriter, r *http.Request, ob
 	w.WriteHeader(resp.StatusCode)
 
 	if _, err := io.Copy(w, resp.Body); err != nil {
-		log.Debugln("Error copying write-through response body:", err)
+		reqLog.Debugln("Error copying write-through response body:", err)
 	}
 }
 
@@ -975,6 +1043,33 @@ func decodeDiscoveryHost(encoded string) (string, error) {
 	return url.PathUnescape(encoded)
 }
 
+// isFederationAllowed returns true when discoveryHost should be served by this cache.
+//
+// Rules:
+//   - If allowList contains "*", every federation is accepted.
+//   - If allowList is empty (the default), only primaryFed is accepted.
+//   - Otherwise, the discoveryHost must appear in allowList (case-insensitive).
+//
+// The primaryFed is always implicitly allowed regardless of the list contents.
+func isFederationAllowed(discoveryHost, primaryFed string, allowList []string) bool {
+	if strings.EqualFold(discoveryHost, primaryFed) {
+		return true
+	}
+	if len(allowList) == 0 {
+		// Default: only the primary federation is allowed.
+		return false
+	}
+	for _, entry := range allowList {
+		if entry == "*" {
+			return true
+		}
+		if strings.EqualFold(entry, discoveryHost) {
+			return true
+		}
+	}
+	return false
+}
+
 // purgeCmd handles the purge API command
 func (pc *PersistentCache) purgeCmd(ginCtx *gin.Context) {
 	status, verified, err := token.Verify(ginCtx, token.AuthOption{
@@ -1115,6 +1210,23 @@ func (pc *PersistentCache) RegisterCacheHandlers(engine *gin.Engine, directorEna
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid discovery host encoding"})
 			return false
 		}
+
+		// Validate the discovery host against the federation allow-list.
+		// Default (empty list): only the primary federation is allowed.
+		// A list containing "*" means all federations are accepted (open proxy).
+		allowed := param.Cache_AllowedFederations.GetStringSlice()
+		if !isFederationAllowed(discoveryHost, pc.defaultFed, allowed) {
+			log.WithFields(log.Fields{
+				"discovery": discoveryHost,
+				"primary":   pc.defaultFed,
+			}).Warn("Rejected request for non-allowed federation")
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error":  "federation_not_allowed",
+				"reason": fmt.Sprintf("federation %q is not in the cache allow-list; this cache serves federation %q by default", discoveryHost, pc.defaultFed),
+			})
+			return false
+		}
+
 		// Store discovery host in context for use by handlers
 		c.Set("discoveryHost", discoveryHost)
 		// Set the object path (strip the discovery prefix)

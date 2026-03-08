@@ -155,6 +155,27 @@ var (
 	purgeTimeout        error = errors.New("purge attempt has timed out")
 )
 
+// AuthorizationError wraps authorizationDenied with a human-readable reason.
+// errors.Is(err, authorizationDenied) still works for existing checks.
+type AuthorizationError struct {
+	Reason string
+}
+
+func (e *AuthorizationError) Error() string {
+	if e.Reason != "" {
+		return "authorization denied: " + e.Reason
+	}
+	return "authorization denied"
+}
+
+func (e *AuthorizationError) Is(target error) bool {
+	return target == authorizationDenied
+}
+
+func newAuthorizationDenied(reason string) error {
+	return &AuthorizationError{Reason: reason}
+}
+
 const (
 	reqSize = 2 * 1024 * 1024
 )
@@ -770,8 +791,8 @@ func (sc *LocalCache) newCacheReader(ctx context.Context, path, token string) (r
 
 // Get path from the cache
 func (sc *LocalCache) Get(ctx context.Context, path, token string) (io.ReadCloser, error) {
-	if !sc.ac.authorize(token_scopes.Wlcg_Storage_Read, path, token) {
-		return nil, authorizationDenied
+	if ok, reason := sc.ac.authorize(token_scopes.Wlcg_Storage_Read, path, token); !ok {
+		return nil, newAuthorizationDenied(reason)
 	}
 
 	if fp := sc.getFromDisk(path); fp != nil {
@@ -788,8 +809,8 @@ func (sc *LocalCache) Get(ctx context.Context, path, token string) (io.ReadClose
 }
 
 func (lc *LocalCache) Stat(path, token string) (uint64, error) {
-	if !lc.ac.authorize(token_scopes.Wlcg_Storage_Read, path, token) {
-		return 0, authorizationDenied
+	if ok, reason := lc.ac.authorize(token_scopes.Wlcg_Storage_Read, path, token); !ok {
+		return 0, newAuthorizationDenied(reason)
 	}
 
 	if fp := lc.getFromDisk(path); fp != nil {
