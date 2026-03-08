@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"hash"
 	"hash/crc32"
-	"io"
 	"io/fs"
 	"math/rand"
 	"os"
@@ -37,7 +36,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/RoaringBitmap/roaring"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -51,6 +49,8 @@ var (
 	errMaxDeletionsReached = errors.New("max_deletions_reached")
 	errTransactionTimeout  = errors.New("transaction_timeout")
 	errChannelFull         = errors.New("channel_full")
+	errScanDone            = errors.New("scan_done")
+	errChecksumSkipped     = errors.New("checksum_skipped")
 
 	metadataScanInconsistentObjects = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "pelican_cache_metadata_scan_inconsistent_objects_total",
@@ -110,9 +110,10 @@ type ConsistencyChecker struct {
 	storage *StorageManager
 
 	// Rate limiting (using rate.Limiter treating each token as 1ns)
-	metadataScanLimiter *rate.Limiter // Limits metadata scan active time
-	dataScanBytesPerSec int64         // Max bytes per second for data scanning
-	minAgeForCleanup    time.Duration // Minimum age before cleanup to avoid races
+	metadataScanLimiter *rate.Limiter  // Limits metadata scan active time
+	dataScanBytesPerSec int64          // Max bytes per second for data scanning
+	minAgeForCleanup    time.Duration  // Minimum age before cleanup to avoid races
+	checksumTypes       []ChecksumType // Checksum algorithms to calculate/verify
 
 	// Statistics
 	stats   ConsistencyStats
@@ -133,6 +134,9 @@ type ConsistencyConfig struct {
 	DataScanBytesPerSec int64
 	// MinAgeForCleanup is the minimum age before an entry/file can be cleaned up (default: 5 minutes, 0 for tests)
 	MinAgeForCleanup time.Duration
+	// ChecksumTypes specifies which checksums to calculate and verify.
+	// When empty, defaults to []ChecksumType{ChecksumSHA256}.
+	ChecksumTypes []ChecksumType
 }
 
 // ConsistencyStats holds statistics from consistency checks
@@ -161,6 +165,11 @@ func NewConsistencyChecker(db *CacheDB, storage *StorageManager, config Consiste
 		config.MinAgeForCleanup = 5 * time.Minute // Default 5 minutes grace period
 	}
 
+	checksumTypes := config.ChecksumTypes
+	if len(checksumTypes) == 0 {
+		checksumTypes = []ChecksumType{ChecksumSHA256}
+	}
+
 	// Create rate limiter: treat each token as 1ns, allow burst of 100ms
 	activeNsPerSec := config.MetadataScanActiveMs * 1_000_000 // convert ms to ns
 	burstNs := 100 * 1_000_000                                // 100ms burst capacity
@@ -177,6 +186,7 @@ func NewConsistencyChecker(db *CacheDB, storage *StorageManager, config Consiste
 		metadataScanLimiter: limiter,
 		dataScanBytesPerSec: config.DataScanBytesPerSec,
 		minAgeForCleanup:    config.MinAgeForCleanup,
+		checksumTypes:       checksumTypes,
 		stopCh:              make(chan struct{}),
 	}
 }
@@ -212,7 +222,9 @@ func (cc *ConsistencyChecker) GetStats() ConsistencyStats {
 	return cc.stats
 }
 
-// metadataScanLoop runs periodic metadata consistency scans
+// metadataScanLoop runs periodic metadata consistency scans.
+// After each scan completes the timer is reset so there is always a full
+// hour of idle time between the end of one scan and the start of the next.
 func (cc *ConsistencyChecker) metadataScanLoop(ctx context.Context) error {
 	// Initial delay to let the system settle
 	select {
@@ -221,30 +233,27 @@ func (cc *ConsistencyChecker) metadataScanLoop(ctx context.Context) error {
 	case <-time.After(5 * time.Minute):
 	}
 
-	ticker := time.NewTicker(1 * time.Hour)
-	defer ticker.Stop()
+	const scanInterval = 1 * time.Hour
 
 	for {
+		// Run the scan, then wait scanInterval before the next one.
+		if err := cc.RunMetadataScan(ctx); err != nil {
+			log.Warnf("Metadata scan error: %v", err)
+		}
+
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-cc.stopCh:
 			return nil
-		case <-ticker.C:
-			// Enforce minimum interval between scan start times
-			lastScan := time.Unix(cc.lastMetadataScan.Load(), 0)
-			if time.Since(lastScan) < 1*time.Hour {
-				log.Debugf("Skipping metadata scan, only %v since last scan", time.Since(lastScan))
-				continue
-			}
-			if err := cc.RunMetadataScan(ctx); err != nil {
-				log.Warnf("Metadata scan error: %v", err)
-			}
+		case <-time.After(scanInterval):
 		}
 	}
 }
 
-// dataScanLoop runs periodic data integrity scans
+// dataScanLoop runs periodic data integrity scans.
+// After each scan completes the timer is reset so there is always a full
+// 24 hours of idle time between the end of one scan and the start of the next.
 func (cc *ConsistencyChecker) dataScanLoop(ctx context.Context) error {
 	// Initial delay
 	select {
@@ -253,25 +262,19 @@ func (cc *ConsistencyChecker) dataScanLoop(ctx context.Context) error {
 	case <-time.After(30 * time.Minute):
 	}
 
-	ticker := time.NewTicker(24 * time.Hour)
-	defer ticker.Stop()
+	const scanInterval = 24 * time.Hour
 
 	for {
+		if err := cc.RunDataScan(ctx); err != nil {
+			log.Warnf("Data scan error: %v", err)
+		}
+
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-cc.stopCh:
 			return nil
-		case <-ticker.C:
-			// Enforce minimum interval between scan start times
-			lastScan := time.Unix(cc.lastDataScan.Load(), 0)
-			if time.Since(lastScan) < 24*time.Hour {
-				log.Debugf("Skipping data scan, only %v since last scan", time.Since(lastScan))
-				continue
-			}
-			if err := cc.RunDataScan(ctx); err != nil {
-				log.Warnf("Data scan error: %v", err)
-			}
+		case <-time.After(scanInterval):
 		}
 	}
 }
@@ -289,13 +292,18 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 	// combines the per-directory streams into a single globally-sorted
 	// stream on fileChan, which the merge-join algorithm requires.
 	type fileInfo struct {
-		instanceHash string
+		instanceHash InstanceHash
 		path         string
 		modTime      time.Time
 		size         int64
 	}
 	fileChan := make(chan fileInfo, 100)
 	walkErr := make(chan error, 1)
+
+	// hadWalkError is set to true if any directory walk encounters an I/O
+	// error.  When set, no metadata entries may be deleted during this scan
+	// because we cannot be sure the file listing is complete.
+	var hadWalkError atomic.Bool
 
 	// walkOneDir walks a single objects directory, sending valid entries
 	// to the returned channel in lexicographic order.
@@ -305,12 +313,23 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 			defer close(ch)
 			fsys := os.DirFS(objectsDir)
 			_ = fs.WalkDir(fsys, ".", func(relPath string, d fs.DirEntry, err error) error {
-				if err != nil || d.IsDir() {
+				if err != nil {
+					// A missing root directory is benign (e.g. inline-only
+					// storage has no objects/ dir yet).  Only flag actual
+					// mid-walk I/O errors.
+					if relPath == "." && os.IsNotExist(err) {
+						return fs.SkipAll
+					}
+					log.Warnf("Walk error in %s/%s: %v", objectsDir, relPath, err)
+					hadWalkError.Store(true)
+					return nil
+				}
+				if d.IsDir() {
 					return nil
 				}
 
 				// Reconstruct hash from path (remove directory separators)
-				instanceHash := strings.ReplaceAll(relPath, string(filepath.Separator), "")
+				instanceHash := InstanceHash(strings.ReplaceAll(relPath, string(filepath.Separator), ""))
 
 				// Validate instance hash format: must be 64 hex characters (SHA256)
 				if len(instanceHash) != 64 {
@@ -324,6 +343,8 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 
 				info, err := d.Info()
 				if err != nil {
+					log.Warnf("Unable to stat %s/%s: %v", objectsDir, relPath, err)
+					hadWalkError.Store(true)
 					return nil
 				}
 
@@ -398,7 +419,7 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 
 	// Structures to track what to delete (limit to 1k changes per transaction)
 	type deleteAction struct {
-		instanceHash string
+		instanceHash InstanceHash
 		isFile       bool
 		path         string
 		size         int64
@@ -420,8 +441,13 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 		filesScanned++
 	}
 
+	// Accumulate actual byte-level usage per (StorageID, NamespaceID)
+	// as we iterate metadata.  This avoids a second expensive full-table
+	// scan in reconcileUsage.
+	usageDuringScan := make(map[StorageUsageKey]int64)
+
 	// Track where to resume DB scan after each transaction restart
-	lastDBKey := ""
+	lastDBKey := InstanceHash("")
 	transactionStartTime := time.Now()
 	const transactionTimeout = 5 * time.Second
 
@@ -432,7 +458,7 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 		entriesThisTransaction := int64(0)
 		deletions = deletions[:0] // Clear deletions list
 
-		err := cc.db.ScanMetadataFrom(lastDBKey, func(instanceHash string, meta *CacheMetadata) error {
+		err := cc.db.ScanMetadataFrom(lastDBKey, func(instanceHash InstanceHash, meta *CacheMetadata) error {
 			// Check context
 			select {
 			case <-ctx.Done():
@@ -446,6 +472,26 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 				duration := time.Since(opStart)
 				_ = cc.metadataScanLimiter.WaitN(ctx, int(duration.Nanoseconds()))
 			}()
+
+			// Accumulate usage for this entry.  We do this for every
+			// entry (including the too-young ones below) so that the
+			// totals match the real state of the database.
+			if !meta.Completed.IsZero() {
+				// Completed object: usage equals its content length
+				// (no need to consult the block bitmap).
+				if meta.ContentLength > 0 {
+					uk := StorageUsageKey{StorageID: meta.StorageID, NamespaceID: meta.NamespaceID}
+					usageDuringScan[uk] += meta.ContentLength
+				}
+			} else {
+				// In-progress download: compute usage from the block bitmap.
+				if bm, bmErr := cc.db.GetBlockState(instanceHash); bmErr == nil {
+					if card := bm.GetCardinality(); card > 0 {
+						uk := StorageUsageKey{StorageID: meta.StorageID, NamespaceID: meta.NamespaceID}
+						usageDuringScan[uk] += calculateUsageDelta(meta, bm, card)
+					}
+				}
+			}
 
 			// Only process entries old enough to avoid races
 			if cc.minAgeForCleanup > 0 && !meta.Completed.IsZero() && time.Since(meta.Completed) < cc.minAgeForCleanup {
@@ -542,8 +588,10 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 			return errors.Wrap(err, "error scanning metadata")
 		}
 
-		// Process deletions in a new read-write transaction
-		if len(deletions) > 0 {
+		// Process deletions in a new read-write transaction.
+		// If any walk error occurred, we cannot trust the file listing and
+		// must not delete any entries (files or DB rows) in this scan.
+		if len(deletions) > 0 && !hadWalkError.Load() {
 			for _, del := range deletions {
 				// Re-verify before deleting
 				if del.isFile {
@@ -606,16 +654,19 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 		}
 	}
 
-	// Process any remaining files (all are orphaned)
+	// Process any remaining files (all are orphaned).
+	// Like deletions above, skip if a walk error occurred.
 	for fileOk {
-		// Re-check file (might have been created after scan start)
-		if info, err := os.Stat(currentFile.path); err == nil {
-			if !info.ModTime().After(scanStartTime) {
-				log.Warnf("Orphaned file: %s", currentFile.path)
-				orphanedFiles++
-				orphanedBytes += currentFile.size
-				if err := os.Remove(currentFile.path); err != nil {
-					log.Warnf("Failed to remove orphaned file %s: %v", currentFile.path, err)
+		if !hadWalkError.Load() {
+			// Re-check file (might have been created after scan start)
+			if info, err := os.Stat(currentFile.path); err == nil {
+				if !info.ModTime().After(scanStartTime) {
+					log.Warnf("Orphaned file: %s", currentFile.path)
+					orphanedFiles++
+					orphanedBytes += currentFile.size
+					if err := os.Remove(currentFile.path); err != nil {
+						log.Warnf("Failed to remove orphaned file %s: %v", currentFile.path, err)
+					}
 				}
 			}
 		}
@@ -643,12 +694,110 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 	log.Infof("Metadata scan complete in %v: scanned %d DB entries and %d files, found %d orphaned DB entries and %d orphaned files (%d bytes)",
 		scanDuration, dbEntriesScanned, filesScanned, orphanedDBEntries, orphanedFiles, orphanedBytes)
 
+	// Reconcile the stored usage counters against the running totals
+	// accumulated during the metadata scan above.  This avoids a second
+	// full-table scan of the metadata and block-state tables.
+	if err := cc.reconcileUsage(ctx, usageDuringScan); err != nil {
+		log.Warnf("Usage reconciliation failed: %v", err)
+	}
+
 	return nil
+}
+
+// reconcileUsage compares the stored usage counters against the actual
+// usage computed during the metadata scan.  If a counter deviates by more
+// than 5 % from the recomputed value, it is corrected.
+//
+// The caller passes a pre-computed map of actual usage per
+// (StorageID, NamespaceID) so that no second full-table scan is needed.
+//
+// This catches drift that can accumulate from crash recovery, orphan
+// cleanup, or bugs in the incremental usage tracking.
+func (cc *ConsistencyChecker) reconcileUsage(ctx context.Context, actual map[StorageUsageKey]int64) error {
+	stored, err := cc.db.GetAllUsage()
+	if err != nil {
+		return errors.Wrap(err, "failed to read stored usage")
+	}
+
+	corrected := 0
+
+	// Check every key that exists in the actual (recomputed) map.
+	for key, actualBytes := range actual {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		storedBytes := stored[key] // 0 if absent
+
+		if !usageDrifted(storedBytes, actualBytes) {
+			continue
+		}
+
+		log.Warnf("Usage drift for storageID=%d namespaceID=%d: stored=%d actual=%d; correcting",
+			key.StorageID, key.NamespaceID, storedBytes, actualBytes)
+		if err := cc.db.SetUsage(key.StorageID, key.NamespaceID, actualBytes); err != nil {
+			log.Warnf("Failed to correct usage for storageID=%d namespaceID=%d: %v",
+				key.StorageID, key.NamespaceID, err)
+			continue
+		}
+		corrected++
+	}
+
+	// Check keys that exist in stored but not in actual — they should be 0.
+	for key, storedBytes := range stored {
+		if _, exists := actual[key]; exists {
+			continue // Already handled above.
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if !usageDrifted(storedBytes, 0) {
+			continue
+		}
+
+		log.Warnf("Usage drift for storageID=%d namespaceID=%d: stored=%d actual=0; correcting",
+			key.StorageID, key.NamespaceID, storedBytes)
+		if err := cc.db.SetUsage(key.StorageID, key.NamespaceID, 0); err != nil {
+			log.Warnf("Failed to correct usage for storageID=%d namespaceID=%d: %v",
+				key.StorageID, key.NamespaceID, err)
+			continue
+		}
+		corrected++
+	}
+
+	if corrected > 0 {
+		log.Infof("Usage reconciliation corrected %d counter(s)", corrected)
+	} else {
+		log.Debug("Usage reconciliation: all counters are within tolerance")
+	}
+
+	return nil
+}
+
+// usageDrifted returns true if the stored value differs from the actual
+// value by more than 5 %.  When the actual value is zero the stored value
+// must also be zero (any positive stored value is a 100 % drift).
+func usageDrifted(stored, actual int64) bool {
+	if actual == 0 {
+		return stored != 0
+	}
+	diff := stored - actual
+	if diff < 0 {
+		diff = -diff
+	}
+	// diff > actual*5/100, rearranged to avoid overflow:
+	return diff*100 > actual*5
 }
 
 // scanItem represents an object from a database scan
 type scanItem struct {
-	instanceHash string
+	instanceHash InstanceHash
 	meta         *CacheMetadata
 }
 
@@ -672,8 +821,15 @@ func (cc *ConsistencyChecker) RunDataScan(ctx context.Context) error {
 	objectChan := make(chan scanItem, 1000)
 	scanErr := make(chan error, 1)
 
-	// Start DB scan in background goroutine
+	// Start DB scan in background goroutine.  The WaitGroup ensures
+	// we do not return from RunDataScan until this goroutine exits.
+	var scanWg sync.WaitGroup
+	scanWg.Add(1)
 	go func() {
+		defer scanWg.Done()
+		defer close(objectChan)
+		defer close(scanErr)
+
 		const transactionTimeout = 5 * time.Second
 
 		// Generate random 4-byte hex starting point (16 bits = 4 hex chars)
@@ -681,15 +837,26 @@ func (cc *ConsistencyChecker) RunDataScan(ctx context.Context) error {
 		rng := rand.New(rand.NewSource(scanStartTime.UnixNano()))
 		randomStart := fmt.Sprintf("%04x", rng.Intn(1<<16))
 
-		startKey := randomStart
+		startKey := InstanceHash(randomStart)
 		lastKey := startKey
 		wrappedAround := false
 
 		for {
+			// Wait for the channel to have room before opening a new
+			// read transaction.  This avoids holding a transaction open
+			// while the consumer is still processing the previous batch.
+			for len(objectChan) >= cap(objectChan) {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(50 * time.Millisecond):
+				}
+			}
+
 			transactionStart := time.Now()
 			scannedThisTx := 0
 
-			err := cc.db.ScanMetadataFrom(lastKey, func(instanceHash string, meta *CacheMetadata) error {
+			err := cc.db.ScanMetadataFrom(lastKey, func(instanceHash InstanceHash, meta *CacheMetadata) error {
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
@@ -698,15 +865,18 @@ func (cc *ConsistencyChecker) RunDataScan(ctx context.Context) error {
 
 				// If we've wrapped around and reached our starting point, we're done
 				if wrappedAround && instanceHash >= startKey {
-					return errChannelFull // Use as "scan complete" signal
+					return errScanDone
 				}
 
+				// Non-blocking send: if the channel is full, break out of
+				// the scan to release the read transaction rather than
+				// blocking while the consumer catches up.
 				select {
-				case <-ctx.Done():
-					return ctx.Err()
 				case objectChan <- scanItem{instanceHash: instanceHash, meta: meta}:
 					scannedThisTx++
 					lastKey = instanceHash
+				default:
+					return errChannelFull
 				}
 
 				// Restart transaction after timeout
@@ -717,17 +887,13 @@ func (cc *ConsistencyChecker) RunDataScan(ctx context.Context) error {
 				return nil
 			})
 
-			if err != nil && !errors.Is(err, errTransactionTimeout) && !errors.Is(err, errChannelFull) {
+			if err != nil && !errors.Is(err, errTransactionTimeout) && !errors.Is(err, errChannelFull) && !errors.Is(err, errScanDone) {
 				scanErr <- err
-				close(objectChan)
-				close(scanErr)
 				return
 			}
 
 			// Check if scan is complete
-			if errors.Is(err, errChannelFull) {
-				close(objectChan)
-				close(scanErr)
+			if errors.Is(err, errScanDone) {
 				return
 			}
 
@@ -735,8 +901,6 @@ func (cc *ConsistencyChecker) RunDataScan(ctx context.Context) error {
 			if scannedThisTx == 0 {
 				if wrappedAround {
 					// Already wrapped and reached end again - done
-					close(objectChan)
-					close(scanErr)
 					return
 				}
 				// Wrap around to beginning
@@ -780,25 +944,19 @@ func (cc *ConsistencyChecker) RunDataScan(ctx context.Context) error {
 	}
 
 scanComplete:
+	// Wait for the background DB-scan goroutine to finish before
+	// reading from scanErr; this guarantees the goroutine cannot
+	// outlive RunDataScan.
+	scanWg.Wait()
+
 	// Check for scan errors
 	if err := <-scanErr; err != nil && !errors.Is(err, context.Canceled) {
 		log.Warnf("Error during data scan: %v", err)
 	}
 
-	// Update stats and metrics
+	// Final stats update (scan timing / log)
 	scanDuration := time.Since(scanStartTime)
-	cc.statsMu.Lock()
-	cc.stats.LastDataScan = time.Now()
-	cc.stats.ChecksumMismatches += checksumMismatches
-	cc.stats.BytesVerified += bytesVerified
-	cc.stats.ObjectsVerified += objectsVerified
-	cc.statsMu.Unlock()
-
-	dataScanInconsistentObjects.Add(float64(checksumMismatches))
-	dataScanInconsistentBytes.Add(float64(inconsistentBytes))
 	dataScanDurationSeconds.Add(scanDuration.Seconds())
-	dataScanObjectsProcessed.Add(float64(objectsVerified))
-	dataScanBytesProcessed.Add(float64(bytesVerified))
 
 	log.Infof("Data scan complete in %v: verified %d objects (%d bytes), %d checksum mismatches (%d bytes)",
 		scanDuration, objectsVerified, bytesVerified, checksumMismatches, inconsistentBytes)
@@ -806,7 +964,9 @@ scanComplete:
 	return nil
 }
 
-// processBatchForDataScan processes a batch of objects for data integrity verification
+// processBatchForDataScan processes a batch of objects for data integrity verification.
+// Statistics and prometheus metrics are updated after every object so that
+// progress is visible even during multi-day scans.
 func (cc *ConsistencyChecker) processBatchForDataScan(
 	ctx context.Context,
 	batch []scanItem,
@@ -820,30 +980,57 @@ func (cc *ConsistencyChecker) processBatchForDataScan(
 		default:
 		}
 
+		prevMismatches := *checksumMismatches
+		prevInconsistent := *inconsistentBytes
+		prevBytes := *bytesVerified
+		prevObjects := *objectsVerified
+
 		if err := cc.verifyObjectChecksum(ctx, item.instanceHash, item.meta, bytesLimiter, checksumMismatches, inconsistentBytes, bytesVerified, objectsVerified); err != nil {
+			if errors.Is(err, errChecksumSkipped) {
+				continue // Incomplete object — don't count as verified
+			}
 			log.Warnf("Error verifying object %s: %v", item.instanceHash, err)
+		}
+
+		// Update prometheus metrics and stats after every object
+		deltaMismatches := *checksumMismatches - prevMismatches
+		deltaInconsistent := *inconsistentBytes - prevInconsistent
+		deltaBytes := *bytesVerified - prevBytes
+		deltaObjects := *objectsVerified - prevObjects
+
+		if deltaMismatches > 0 || deltaBytes > 0 || deltaObjects > 0 {
+			dataScanInconsistentObjects.Add(float64(deltaMismatches))
+			dataScanInconsistentBytes.Add(float64(deltaInconsistent))
+			dataScanObjectsProcessed.Add(float64(deltaObjects))
+			dataScanBytesProcessed.Add(float64(deltaBytes))
+
+			cc.statsMu.Lock()
+			cc.stats.LastDataScan = time.Now()
+			cc.stats.ChecksumMismatches += deltaMismatches
+			cc.stats.BytesVerified += deltaBytes
+			cc.stats.ObjectsVerified += deltaObjects
+			cc.statsMu.Unlock()
 		}
 	}
 }
 
-// verifyObjectChecksum verifies a single object's checksum block-by-block
+// verifyObjectChecksum verifies a single object's checksum block-by-block.
+// If the object is incomplete, it returns errChecksumSkipped.
 func (cc *ConsistencyChecker) verifyObjectChecksum(
 	ctx context.Context,
-	instanceHash string,
+	instanceHash InstanceHash,
 	meta *CacheMetadata,
 	bytesLimiter *rate.Limiter,
 	checksumMismatches, inconsistentBytes, bytesVerified, objectsVerified *int64,
 ) error {
 	// For disk storage, check if complete before attempting any checksumming
 	if meta.IsDisk() {
-		bitmap, err := cc.db.GetBlockState(instanceHash)
+		complete, err := cc.storage.IsComplete(instanceHash)
 		if err != nil {
-			return errors.Wrap(err, "failed to get block state")
+			return errors.Wrap(err, "failed to check completeness")
 		}
-
-		totalBlocks := CalculateBlockCount(meta.ContentLength)
-		if bitmap.GetCardinality() != uint64(totalBlocks) {
-			return nil // Skip incomplete objects
+		if !complete {
+			return errChecksumSkipped
 		}
 	}
 
@@ -852,168 +1039,33 @@ func (cc *ConsistencyChecker) verifyObjectChecksum(
 		if err := cc.calculateAndStoreChecksums(ctx, instanceHash, meta, bytesLimiter); err != nil {
 			return err
 		}
-		// Just calculated checksum, no need to re-verify
 		*objectsVerified++
 		return nil
 	}
 
-	// For inline storage, verify directly
-	if meta.IsInline() {
-		data, err := cc.storage.ReadInline(instanceHash)
+	// Build hashers for all stored checksums
+	hashers := make([]hash.Hash, len(meta.Checksums))
+	for i, cksum := range meta.Checksums {
+		h, err := cc.createHasher(cksum.Type)
 		if err != nil {
-			return errors.Wrap(err, "failed to read inline data")
-		}
-
-		if err := bytesLimiter.WaitN(ctx, len(data)); err != nil {
 			return err
 		}
-
-		// Verify checksums
-		for _, cksum := range meta.Checksums {
-			computed := computeChecksum(data, cksum.Type)
-			if !bytes.Equal(computed, cksum.Value) {
-				log.Warnf("Checksum mismatch for inline object %s (type %d)", instanceHash, cksum.Type)
-				*checksumMismatches++
-				*inconsistentBytes += meta.ContentLength
-
-				// Mark for re-download
-				if err := cc.storage.Delete(instanceHash); err != nil {
-					log.Warnf("Failed to delete corrupted object %s: %v", instanceHash, err)
-				}
-				return nil
-			}
-		}
-
-		*bytesVerified += int64(len(data))
-		*objectsVerified++
-		return nil
+		hashers[i] = h
 	}
 
-	// For disk storage, verify with 128KB chunk reads
-	bitmap, err := cc.db.GetBlockState(instanceHash)
-	if err != nil {
-		return errors.Wrap(err, "failed to get block state")
-	}
-
-	// Verify using streaming approach with 128KB chunks
-	hasher, err := cc.createHasher(meta.Checksums[0].Type)
+	// Read all data through storage manager and hash in one pass
+	verified, err := cc.hashObjectData(ctx, instanceHash, meta, bytesLimiter, hashers)
 	if err != nil {
 		return err
 	}
 
-	filePath := cc.storage.getObjectPathForDir(meta.StorageID, instanceHash)
-	file, err := os.Open(filePath)
-	if err != nil {
-		return errors.Wrap(err, "failed to open file")
-	}
-	defer file.Close()
-
-	// Get DEK for decryption
-	dek, err := cc.db.GetEncryptionManager().DecryptDataKey(meta.DataKey)
-	if err != nil {
-		return errors.Wrap(err, "failed to decrypt DEK")
-	}
-
-	encryptor, err := NewBlockEncryptor(dek, meta.Nonce)
-	if err != nil {
-		return errors.Wrap(err, "failed to create encryptor")
-	}
-
-	totalBlocks := CalculateBlockCount(meta.ContentLength)
-	var verifiedBytes int64
-
-	// Read and verify in 128KB chunks (multiple blocks at once)
-	const chunkSize = 128 * 1024
-	readBuffer := make([]byte, chunkSize)
-
-	for block := uint32(0); block < totalBlocks; {
-		// Determine how many blocks to read in this chunk
-		blocksInChunk := 0
-		chunkBytes := 0
-
-		for block < totalBlocks && chunkBytes < chunkSize {
-			if !bitmap.Contains(block) {
-				block++
-				continue
-			}
-
-			blockSize := BlockDataSize
-			if block == totalBlocks-1 {
-				lastBlockSize := int(meta.ContentLength % BlockDataSize)
-				if lastBlockSize != 0 {
-					blockSize = lastBlockSize
-				}
-			}
-
-			encBlockSize := blockSize + AuthTagSize
-			if chunkBytes+encBlockSize > len(readBuffer) {
-				break // Would exceed buffer
-			}
-
-			// Read encrypted block into buffer
-			offset := BlockOffset(block)
-			n, err := file.ReadAt(readBuffer[chunkBytes:chunkBytes+encBlockSize], offset)
-			if err != nil && err != io.EOF {
-				log.Warnf("Error reading block %d of %s: %v", block, instanceHash, err)
-				*checksumMismatches++
-				*inconsistentBytes += meta.ContentLength
-				if err := cc.storage.Delete(instanceHash); err != nil {
-					log.Warnf("Failed to delete corrupted object %s: %v", instanceHash, err)
-				}
-				return nil
-			}
-			if n < encBlockSize {
-				log.Warnf("Short read for block %d of %s", block, instanceHash)
-				*checksumMismatches++
-				*inconsistentBytes += meta.ContentLength
-				if err := cc.storage.Delete(instanceHash); err != nil {
-					log.Warnf("Failed to delete corrupted object %s: %v", instanceHash, err)
-				}
-				return nil
-			}
-
-			// Decrypt and verify auth tag
-			plaintext, err := encryptor.DecryptBlock(block, readBuffer[chunkBytes:chunkBytes+encBlockSize])
-			if err != nil {
-				log.Warnf("Block %d authentication failed for %s: %v", block, instanceHash, err)
-				*checksumMismatches++
-				*inconsistentBytes += meta.ContentLength
-				if err := cc.storage.Delete(instanceHash); err != nil {
-					log.Warnf("Failed to delete corrupted object %s: %v", instanceHash, err)
-				}
-				return nil
-			}
-
-			// Update checksum hash
-			hasher.Write(plaintext[:blockSize])
-			verifiedBytes += int64(blockSize)
-
-			chunkBytes += encBlockSize
-			blocksInChunk++
-			block++
-		}
-
-		// Rate limit the entire chunk
-		if chunkBytes > 0 {
-			if err := bytesLimiter.WaitN(ctx, chunkBytes); err != nil {
-				return err
-			}
-		}
-
-		// If no blocks in chunk, advance to next block
-		if blocksInChunk == 0 {
-			block++
-		}
-	}
-
-	// Verify final checksum (we already checked completeness upfront)
-	if true {
-		computed := hasher.Sum(nil)
-		if !bytes.Equal(computed, meta.Checksums[0].Value) {
-			log.Warnf("Final checksum mismatch for %s", instanceHash)
+	// Verify each checksum
+	for i, cksum := range meta.Checksums {
+		computed := hashers[i].Sum(nil)
+		if !bytes.Equal(computed, cksum.Value) {
+			log.Warnf("Checksum mismatch for object %s (type %d)", instanceHash, cksum.Type)
 			*checksumMismatches++
 			*inconsistentBytes += meta.ContentLength
-
 			if err := cc.storage.Delete(instanceHash); err != nil {
 				log.Warnf("Failed to delete corrupted object %s: %v", instanceHash, err)
 			}
@@ -1021,84 +1073,118 @@ func (cc *ConsistencyChecker) verifyObjectChecksum(
 		}
 	}
 
-	*bytesVerified += verifiedBytes
+	*bytesVerified += verified
 	*objectsVerified++
 	return nil
 }
 
-// calculateAndStoreChecksums calculates checksums for an object and stores them
+// hashObjectData reads all object data through the storage manager and
+// writes it to every hasher.  Returns the number of bytes hashed.
+// This is shared between verifyObjectChecksum and calculateAndStoreChecksums
+// so that decryption/inline logic lives in one place.
+func (cc *ConsistencyChecker) hashObjectData(
+	ctx context.Context,
+	instanceHash InstanceHash,
+	meta *CacheMetadata,
+	bytesLimiter *rate.Limiter,
+	hashers []hash.Hash,
+) (int64, error) {
+	if meta.IsInline() {
+		data, err := cc.storage.ReadInline(instanceHash)
+		if err != nil {
+			return 0, errors.Wrap(err, "failed to read inline data")
+		}
+		if err := bytesLimiter.WaitN(ctx, len(data)); err != nil {
+			return 0, err
+		}
+		for _, h := range hashers {
+			h.Write(data)
+		}
+		return int64(len(data)), nil
+	}
+
+	// Disk storage: read block-by-block through storage manager
+	// (handles decryption and auth-tag validation for us).
+	totalBlocks := CalculateBlockCount(meta.ContentLength)
+	var verified int64
+
+	for block := uint32(0); block < totalBlocks; block++ {
+		blockSize := BlockDataSize
+		if block == totalBlocks-1 {
+			lastBlockSize := int(meta.ContentLength % BlockDataSize)
+			if lastBlockSize != 0 {
+				blockSize = lastBlockSize
+			}
+		}
+
+		offset := int64(block) * BlockDataSize
+		blockData, err := cc.storage.ReadBlocks(instanceHash, offset, blockSize)
+		if err != nil {
+			return verified, errors.Wrapf(err, "failed to read block %d", block)
+		}
+
+		for _, h := range hashers {
+			h.Write(blockData)
+		}
+		verified += int64(len(blockData))
+
+		if err := bytesLimiter.WaitN(ctx, len(blockData)); err != nil {
+			return verified, err
+		}
+	}
+
+	return verified, nil
+}
+
+// calculateAndStoreChecksums calculates checksums for an object and stores them.
+// Returns errChecksumSkipped if the object is incomplete.
 func (cc *ConsistencyChecker) calculateAndStoreChecksums(
 	ctx context.Context,
-	instanceHash string,
+	instanceHash InstanceHash,
 	meta *CacheMetadata,
 	bytesLimiter *rate.Limiter,
 ) error {
 	log.Debugf("Calculating checksum for %s", instanceHash)
 
-	var hasher hash.Hash = sha256.New()
-	var data []byte
-	var err error
-
-	if meta.IsInline() {
-		data, err = cc.storage.ReadInline(instanceHash)
+	// For disk storage, verify completeness first
+	if meta.IsDisk() {
+		complete, err := cc.storage.IsComplete(instanceHash)
 		if err != nil {
-			return errors.Wrap(err, "failed to read inline data")
+			return errors.Wrap(err, "failed to check completeness")
 		}
-		hasher.Write(data)
-		if err := bytesLimiter.WaitN(ctx, len(data)); err != nil {
+		if !complete {
+			return errChecksumSkipped
+		}
+	}
+
+	// Create hashers for all configured checksum types
+	hashers := make([]hash.Hash, len(cc.checksumTypes))
+	for i, ct := range cc.checksumTypes {
+		h, err := cc.createHasher(ct)
+		if err != nil {
 			return err
 		}
-	} else {
-		// Read block-by-block for disk storage
-		var bitmap *roaring.Bitmap
-		bitmap, err = cc.db.GetBlockState(instanceHash)
-		if err != nil {
-			return errors.Wrap(err, "failed to get block state")
-		}
+		hashers[i] = h
+	}
 
-		// Only calculate checksum if all blocks are present
-		totalBlocks := CalculateBlockCount(meta.ContentLength)
-		if bitmap.GetCardinality() != uint64(totalBlocks) {
-			return nil // Skip incomplete objects
-		}
+	// Hash all data in one pass through the storage manager
+	if _, err := cc.hashObjectData(ctx, instanceHash, meta, bytesLimiter, hashers); err != nil {
+		return err
+	}
 
-		// Read blocks through storage manager (validates auth tags)
-		for block := uint32(0); block < totalBlocks; block++ {
-			if !bitmap.Contains(block) {
-				continue // Skip non-downloaded blocks
-			}
-
-			blockSize := BlockDataSize
-			if block == totalBlocks-1 {
-				lastBlockSize := int(meta.ContentLength % BlockDataSize)
-				if lastBlockSize != 0 {
-					blockSize = lastBlockSize
-				}
-			}
-
-			offset := int64(block) * BlockDataSize
-			blockData, err := cc.storage.ReadBlocks(instanceHash, offset, blockSize)
-			if err != nil {
-				return errors.Wrapf(err, "failed to read block %d", block)
-			}
-
-			hasher.Write(blockData)
-			if err := bytesLimiter.WaitN(ctx, len(blockData)); err != nil {
-				return err
-			}
+	// Store the calculated checksums
+	checksums := make([]Checksum, len(cc.checksumTypes))
+	for i, ct := range cc.checksumTypes {
+		checksums[i] = Checksum{
+			Type:            ct,
+			Value:           hashers[i].Sum(nil),
+			OriginVerified:  false,
+			VerifyAttempted: false,
 		}
 	}
 
-	// Store the calculated checksum
-	checksum := Checksum{
-		Type:            ChecksumSHA256,
-		Value:           hasher.Sum(nil),
-		OriginVerified:  false,
-		VerifyAttempted: false,
-	}
-
-	meta.Checksums = []Checksum{checksum}
-	if err := cc.db.SetMetadata(instanceHash, meta); err != nil {
+	checksumMeta := &CacheMetadata{Checksums: checksums}
+	if err := cc.db.MergeMetadata(instanceHash, checksumMeta); err != nil {
 		return errors.Wrap(err, "failed to store checksum")
 	}
 
@@ -1122,8 +1208,12 @@ func (cc *ConsistencyChecker) createHasher(checksumType ChecksumType) (hash.Hash
 	}
 }
 
-// VerifyObject verifies a single object's integrity
-func (cc *ConsistencyChecker) VerifyObject(instanceHash string) (bool, error) {
+// VerifyObject verifies a single object's integrity.
+// If checksums are present, it verifies them all in a single pass.
+// If no checksums are present, it still reads all data to verify readability
+// (i.e. that decryption tags are valid and all blocks are accessible).
+// Returns (true, nil) if the object is valid, (false, nil) if corrupt.
+func (cc *ConsistencyChecker) VerifyObject(instanceHash InstanceHash) (bool, error) {
 	meta, err := cc.storage.GetMetadata(instanceHash)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to get metadata")
@@ -1132,72 +1222,49 @@ func (cc *ConsistencyChecker) VerifyObject(instanceHash string) (bool, error) {
 		return false, errors.New("object not found")
 	}
 
-	// Check file exists (for disk storage)
+	// For disk storage, check that the file exists and is complete
 	if meta.IsDisk() {
 		filePath := cc.storage.getObjectPathForDir(meta.StorageID, instanceHash)
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {
 			return false, nil
 		}
-	}
-
-	// Verify checksums if present
-	if len(meta.Checksums) == 0 {
-		return true, nil // No checksums to verify
-	}
-
-	var data []byte
-	if meta.IsInline() {
-		data, err = cc.storage.ReadInline(instanceHash)
-	} else {
-		var complete bool
-		complete, err = cc.storage.IsComplete(instanceHash)
-		if err != nil || !complete {
+		complete, err := cc.storage.IsComplete(instanceHash)
+		if err != nil {
+			return false, errors.Wrap(err, "failed to check completeness")
+		}
+		if !complete {
 			return true, nil // Can't verify incomplete objects
 		}
-		data, err = cc.storage.ReadBlocks(instanceHash, 0, int(meta.ContentLength))
 	}
 
-	if err != nil {
+	// Build hashers for all stored checksums (may be empty)
+	hashers := make([]hash.Hash, len(meta.Checksums))
+	for i, cksum := range meta.Checksums {
+		h, err := cc.createHasher(cksum.Type)
+		if err != nil {
+			return false, err
+		}
+		hashers[i] = h
+	}
+
+	// An unlimited rate limiter so VerifyObject runs at full speed
+	unlimited := rate.NewLimiter(rate.Inf, 0)
+
+	// Read all data through the storage manager.  Even with no checksums
+	// this validates that every block can be decrypted and read.
+	if _, err := cc.hashObjectData(context.Background(), instanceHash, meta, unlimited, hashers); err != nil {
 		return false, errors.Wrap(err, "failed to read object data")
 	}
 
-	for _, cksum := range meta.Checksums {
-		computed := computeChecksum(data, cksum.Type)
+	// Verify each checksum
+	for i, cksum := range meta.Checksums {
+		computed := hashers[i].Sum(nil)
 		if !bytes.Equal(computed, cksum.Value) {
 			return false, nil
 		}
 	}
 
 	return true, nil
-}
-
-// computeChecksum computes a checksum of the given type
-func computeChecksum(data []byte, checksumType ChecksumType) []byte {
-	var h hash.Hash
-
-	switch checksumType {
-	case ChecksumMD5:
-		h = md5.New()
-	case ChecksumSHA1:
-		h = sha1.New()
-	case ChecksumSHA256:
-		h = sha256.New()
-	case ChecksumCRC32:
-		h32 := crc32.NewIEEE()
-		h32.Write(data)
-		result := make([]byte, 4)
-		sum := h32.Sum32()
-		result[0] = byte(sum >> 24)
-		result[1] = byte(sum >> 16)
-		result[2] = byte(sum >> 8)
-		result[3] = byte(sum)
-		return result
-	default:
-		return nil
-	}
-
-	h.Write(data)
-	return h.Sum(nil)
 }
 
 // ParseChecksumHeader parses a checksum from HTTP headers
@@ -1232,8 +1299,10 @@ func ParseChecksumHeader(headerValue string, headerType string) *Checksum {
 	}
 }
 
-// VerifyBlockIntegrity verifies the integrity of individual blocks
-func (cc *ConsistencyChecker) VerifyBlockIntegrity(instanceHash string) ([]uint32, error) {
+// VerifyBlockIntegrity verifies the integrity of individual blocks by
+// delegating to the storage manager's IdentifyCorruptBlocks, which handles
+// crypto setup, file access, and AES-GCM auth-tag verification.
+func (cc *ConsistencyChecker) VerifyBlockIntegrity(instanceHash InstanceHash) ([]uint32, error) {
 	meta, err := cc.storage.GetMetadata(instanceHash)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get metadata")
@@ -1246,72 +1315,10 @@ func (cc *ConsistencyChecker) VerifyBlockIntegrity(instanceHash string) ([]uint3
 		return nil, nil // Only applicable to disk storage
 	}
 
-	// Get encryption keys
-	encMgr := cc.db.GetEncryptionManager()
-	dek, err := encMgr.DecryptDataKey(meta.DataKey)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to decrypt data key")
-	}
-
-	encryptor, err := NewBlockEncryptor(dek, meta.Nonce)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create block encryptor")
-	}
-
-	// Open the file
-	filePath := cc.storage.getObjectPathForDir(meta.StorageID, instanceHash)
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to open object file")
-	}
-	defer file.Close()
-
-	// Check each block
-	bitmap, err := cc.db.GetBlockState(instanceHash)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get block state")
-	}
-
 	totalBlocks := CalculateBlockCount(meta.ContentLength)
-	var corruptedBlocks []uint32
-
-	for block := uint32(0); block < totalBlocks; block++ {
-		if !bitmap.Contains(block) {
-			continue // Skip non-downloaded blocks
-		}
-
-		// Read the encrypted block
-		encryptedBlock := make([]byte, BlockTotalSize)
-		offset := BlockOffset(block)
-
-		// Handle last block size
-		readSize := BlockTotalSize
-		if block == totalBlocks-1 {
-			lastBlockDataSize := int(meta.ContentLength % BlockDataSize)
-			if lastBlockDataSize == 0 {
-				lastBlockDataSize = BlockDataSize
-			}
-			readSize = lastBlockDataSize + AuthTagSize
-		}
-
-		n, err := file.ReadAt(encryptedBlock[:readSize], offset)
-		if err != nil && err != io.EOF {
-			log.Warnf("Error reading block %d: %v", block, err)
-			corruptedBlocks = append(corruptedBlocks, block)
-			continue
-		}
-		if n < readSize {
-			corruptedBlocks = append(corruptedBlocks, block)
-			continue
-		}
-
-		// Try to decrypt (verifies auth tag)
-		_, err = encryptor.DecryptBlock(block, encryptedBlock[:readSize])
-		if err != nil {
-			log.Warnf("Block %d authentication failed: %v", block, err)
-			corruptedBlocks = append(corruptedBlocks, block)
-		}
+	if totalBlocks == 0 {
+		return nil, nil
 	}
 
-	return corruptedBlocks, nil
+	return cc.storage.IdentifyCorruptBlocks(instanceHash, 0, totalBlocks-1)
 }
