@@ -94,7 +94,7 @@ func (a *simpleTokenAuthenticator) Verify(c *http.Client, rs *http.Response, pat
 }
 
 // Helper function to get a token with write permissions for testing
-func getTempTokenForTest(t *testing.T) string {
+func getTempTokenForTest(t testing.TB) string {
 	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir()))
 
 	// Get the server issuer URL (same as FedTest uses)
@@ -732,4 +732,129 @@ Director:
 		require.NoError(t, err, "Should be able to read %s", tc.relativePath)
 		assert.Equal(t, tc.expectedContent, string(content), "Content of %s should match", tc.relativePath)
 	}
+}
+
+// TestPosixv2BrowserDirectoryListing tests that a browser GET request
+// against a directory returns an HTML directory listing with no-store
+// Cache-Control header.
+func TestPosixv2BrowserDirectoryListing(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	tmpDir := t.TempDir()
+	originConfig := fmt.Sprintf(posixv2OriginConfig, tmpDir)
+	ft := fed_test_utils.NewFedTest(t, originConfig)
+	require.NotNil(t, ft)
+
+	// Create test files and directories in the origin storage
+	storagePrefix := ft.Exports[0].StoragePrefix
+	require.NoError(t, os.MkdirAll(filepath.Join(storagePrefix, "subdir"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(storagePrefix, "file1.txt"), []byte("hello"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(storagePrefix, "file2.txt"), []byte("world!"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(storagePrefix, "subdir", "nested.txt"), []byte("nested"), 0644))
+
+	// Build the origin data URL directly (bypasses cache, goes to POSIXv2 handler)
+	originURL := param.Origin_Url.GetString()
+	require.NotEmpty(t, originURL, "Origin URL should be set")
+	dataURL := originURL + "/api/v1.0/origin/data/test/"
+
+	transport := config.GetTransport()
+	httpClient := &http.Client{Transport: transport}
+
+	// Test 1: Browser request (Accept: text/html) should get HTML listing
+	t.Run("BrowserGetsHTMLListing", func(t *testing.T) {
+		req, err := http.NewRequest("GET", dataURL, nil)
+		require.NoError(t, err)
+		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Contains(t, resp.Header.Get("Content-Type"), "text/html")
+		assert.Equal(t, "no-store", resp.Header.Get("Cache-Control"))
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		bodyStr := string(body)
+
+		// Verify HTML structure
+		assert.Contains(t, bodyStr, "<!DOCTYPE html>")
+		assert.Contains(t, bodyStr, "Index of /")
+		assert.Contains(t, bodyStr, "Pelican")
+
+		// Verify directory entries
+		assert.Contains(t, bodyStr, "subdir/")
+		assert.Contains(t, bodyStr, "file1.txt")
+		assert.Contains(t, bodyStr, "file2.txt")
+	})
+
+	// Test 2: Non-browser request (no Accept header or JSON) should get 405
+	t.Run("NonBrowserGets405", func(t *testing.T) {
+		req, err := http.NewRequest("GET", dataURL, nil)
+		require.NoError(t, err)
+		// No Accept header or JSON-only Accept header
+
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		// WebDAV handler returns 405 Method Not Allowed for GET on directories
+		assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+	})
+
+	// Test 3: Subdirectory listing
+	t.Run("SubdirectoryListing", func(t *testing.T) {
+		subURL := originURL + "/api/v1.0/origin/data/test/subdir/"
+
+		req, err := http.NewRequest("GET", subURL, nil)
+		require.NoError(t, err)
+		req.Header.Set("Accept", "text/html")
+
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "no-store", resp.Header.Get("Cache-Control"))
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		bodyStr := string(body)
+
+		// Verify subdirectory content
+		assert.Contains(t, bodyStr, "Index of /subdir/")
+		assert.Contains(t, bodyStr, "nested.txt")
+		// Should have parent link
+		assert.Contains(t, bodyStr, "..")
+	})
+
+	// Test 4: Empty directory listing
+	t.Run("EmptyDirectoryListing", func(t *testing.T) {
+		emptyDir := filepath.Join(storagePrefix, "empty")
+		require.NoError(t, os.MkdirAll(emptyDir, 0755))
+
+		emptyURL := originURL + "/api/v1.0/origin/data/test/empty/"
+
+		req, err := http.NewRequest("GET", emptyURL, nil)
+		require.NoError(t, err)
+		req.Header.Set("Accept", "text/html")
+
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "no-store", resp.Header.Get("Cache-Control"))
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		bodyStr := string(body)
+
+		assert.Contains(t, bodyStr, "Index of /empty/")
+		// Should have table structure even if empty
+		assert.Contains(t, bodyStr, "<tbody>")
+	})
 }

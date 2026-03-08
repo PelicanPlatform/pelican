@@ -125,39 +125,53 @@ func FormatContentRange(start, end, total int64) string {
 	return fmt.Sprintf("bytes %d-%d/%d", start, end, total)
 }
 
-// RangeReader provides a reader for range requests with on-demand fetching
+// RangeReader implements io.ReadSeeker over a byte range of a cached object.
+// It is the primary read-path abstraction that ties the block-level storage
+// layer to HTTP response serving.
+//
+// Callers obtain a RangeReader via PersistentCache.GetRange (for explicit
+// byte-range requests) or via PersistentCache.GetSeekableReader (wrapped in
+// a SeekableReader so that http.ServeContent can handle Range negotiation).
+//
+// For normal (cached / cacheable) responses the RangeReader reads encrypted
+// blocks from the StorageManager, fetching missing blocks on demand via the
+// fetchBlocks callback wired to a BlockFetcherV2 instance.  It also performs
+// a single round of transparent auto-repair when AES-GCM authentication
+// detects on-disk corruption.
+//
+// For responses marked Cache-Control: no-store, the origin's body is piped
+// directly through the noStoreReader field; the block-storage path is
+// bypassed entirely.
 type RangeReader struct {
 	storage      *StorageManager
-	instanceHash string
+	instanceHash InstanceHash
 	meta         *CacheMetadata
 	start        int64
 	end          int64
 	position     int64
-	encryptor    *BlockEncryptor
 	blockState   *ObjectBlockState
 
 	// Fetch callback for missing blocks
 	fetchBlocks func(ctx context.Context, startBlock, endBlock uint32) error
 
-	// Pass-through reader for no-store responses.
-	// When set, all Read/Seek/Close operations delegate to this reader
-	// instead of using the storage-backed block path.
-	reader io.ReadSeeker
-	size   int64
-
 	// noStoreReader is the read end of an io.Pipe for streaming no-store
-	// responses.  Unlike 'reader' (which is seekable), this is a forward-
-	// only stream.  When set, Read delegates here and Seek returns an error.
+	// responses.  When set, Read delegates here and Seek returns an error
+	// because a pipe is forward-only.
 	noStoreReader io.ReadCloser
+
+	// size is the content length of a no-store response.  It is only valid
+	// when noStoreReader is set.
+	size int64
 
 	// onClose is called when the reader is closed (e.g., to deregister
 	// from the BlockFetcherV2 client tracking).
 	onClose func()
 
-	// repairAttempted is set after the first auto-repair attempt. A second
-	// corrupt read returns the error directly instead of triggering another
-	// re-download, preventing an unbounded re-fetch loop on persistent
-	// disk corruption.
+	// repairAttempted is set after a repair cycle completes without fixing
+	// every corrupt block (i.e. the 32 MB cap was exhausted).  It prevents
+	// unbounded re-fetch loops on persistent disk corruption.  After a
+	// successful repair pass the flag is cleared so subsequent reads can
+	// repair further blocks.
 	repairAttempted bool
 
 	mu sync.Mutex
@@ -167,7 +181,7 @@ type RangeReader struct {
 // fetchBlocks is called when blocks need to be fetched from origin
 func NewRangeReader(
 	storage *StorageManager,
-	instanceHash string,
+	instanceHash InstanceHash,
 	start, end int64,
 	fetchBlocks func(ctx context.Context, startBlock, endBlock uint32) error,
 ) (*RangeReader, error) {
@@ -196,21 +210,6 @@ func NewRangeReader(
 		return nil, errors.Wrap(err, "failed to get block state")
 	}
 
-	// Set up decryption if stored on disk
-	var encryptor *BlockEncryptor
-	if meta.IsDisk() {
-		encMgr := storage.db.GetEncryptionManager()
-		dek, err := encMgr.DecryptDataKey(meta.DataKey)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to decrypt data key")
-		}
-
-		encryptor, err = NewBlockEncryptor(dek, meta.Nonce)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to create block encryptor")
-		}
-	}
-
 	return &RangeReader{
 		storage:      storage,
 		instanceHash: instanceHash,
@@ -218,7 +217,6 @@ func NewRangeReader(
 		start:        start,
 		end:          end,
 		position:     start,
-		encryptor:    encryptor,
 		blockState:   blockState,
 		fetchBlocks:  fetchBlocks,
 	}, nil
@@ -237,11 +235,6 @@ func (rr *RangeReader) ReadContext(ctx context.Context, p []byte) (n int, err er
 	// Streaming no-store mode: forward-only pipe from origin
 	if rr.noStoreReader != nil {
 		return rr.noStoreReader.Read(p)
-	}
-
-	// Pass-through mode (seekable no-store responses): delegate to in-memory reader
-	if rr.reader != nil {
-		return rr.reader.Read(p)
 	}
 
 	if rr.position > rr.end {
@@ -351,15 +344,27 @@ func (rr *RangeReader) ensureBlocks(ctx context.Context, startBlock, endBlock ui
 	return nil
 }
 
+// maxRepairBlocks is the maximum number of blocks repaired in a single
+// auto-repair pass (~32 MB of payload data).  For very large objects (e.g.
+// 100 GB) the entire block bitmap could be flagged corrupt when the data
+// file is missing, and re-fetching all of it in one go would be impractical.
+// Instead we cap each pass and clear repairAttempted on success so that
+// subsequent Read calls can repair the next batch.
+const maxRepairBlocks = 32 * 1024 * 1024 / BlockDataSize // ~8 224
+
 // repairAndRetry is called when ReadBlocks returns a decryption/corruption
 // error.  It serializes repair through the shared ObjectBlockState.repairMu
 // so that concurrent readers don't race.  After acquiring the lock, it
 // re-checks whether the blocks are actually corrupt (another goroutine may
 // have already repaired them).
+//
+// Repair is capped at maxRepairBlocks per invocation.  After a successful
+// (partial or full) repair the repairAttempted flag is cleared so later
+// reads can heal additional blocks progressively.
 func (rr *RangeReader) repairAndRetry(ctx context.Context, startBlock, endBlock uint32, toRead int, origErr error) ([]byte, error) {
-	// Circuit breaker: only attempt auto-repair once per reader.  Persistent
-	// disk corruption (e.g. a bad sector) would otherwise cause an unbounded
-	// re-fetch loop since every Read() call triggers a new repair attempt.
+	// Circuit breaker: only attempt auto-repair once per reader between
+	// successful repairs.  Persistent disk corruption (e.g. a bad sector)
+	// would otherwise cause an unbounded re-fetch loop.
 	if rr.repairAttempted {
 		return nil, errors.Wrap(origErr, "auto-repair already attempted for this reader; refusing to retry")
 	}
@@ -381,6 +386,7 @@ func (rr *RangeReader) repairAndRetry(ctx context.Context, startBlock, endBlock 
 	data, retryErr := rr.storage.ReadBlocks(rr.instanceHash, rr.position, toRead)
 	if retryErr == nil {
 		log.Debugf("Auto-repair: blocks %d-%d in %s were fixed by concurrent repair", startBlock, endBlock, rr.instanceHash)
+		rr.repairAttempted = false
 		return data, nil
 	}
 
@@ -400,11 +406,25 @@ func (rr *RangeReader) repairAndRetry(ctx context.Context, startBlock, endBlock 
 		if err != nil {
 			return nil, errors.Wrap(err, "auto-repair: read fails even after corruption check found no issues")
 		}
+		rr.repairAttempted = false
 		return data, nil
 	}
 
-	log.Warnf("Auto-repair: detected %d corrupt block(s) in %s: %v; re-downloading from origin",
-		len(corrupt), rr.instanceHash, corrupt)
+	// Cap the number of blocks we repair in one pass.  When the file is
+	// missing, IdentifyCorruptBlocks returns EVERY block in the bitmap,
+	// which could be millions for a large object.  We limit to ~32 MB so
+	// the re-fetch stays bounded and clear the circuit breaker on success
+	// so the next Read can heal further blocks.
+	capped := false
+	if len(corrupt) > maxRepairBlocks {
+		log.Warnf("Auto-repair: %d corrupt blocks in %s exceeds per-pass limit of %d; repairing first %d",
+			len(corrupt), rr.instanceHash, maxRepairBlocks, maxRepairBlocks)
+		corrupt = corrupt[:maxRepairBlocks]
+		capped = true
+	}
+
+	log.Warnf("Auto-repair: detected %d corrupt block(s) in %s; re-downloading from origin",
+		len(corrupt), rr.instanceHash)
 
 	// Clear corrupt blocks from the persistent bitmap so the fetcher
 	// treats them as missing
@@ -416,13 +436,8 @@ func (rr *RangeReader) repairAndRetry(ctx context.Context, startBlock, endBlock 
 	// Update the shared block state (visible to all readers immediately)
 	rr.blockState.RemoveMany(corrupt)
 
-	// Re-fetch the corrupt blocks.  The corrupt slice may extend beyond the
-	// current read's [startBlock, endBlock] — for example, when the file is
-	// missing, IdentifyCorruptBlocks returns every block in the bitmap.
-	// We must ensure ALL of them are re-fetched now; otherwise the remaining
-	// blocks stay as zeros on the newly pre-allocated file and later Read()
-	// calls will hit AES-GCM decryption failures with the circuit breaker
-	// already tripped.
+	// Re-fetch the corrupt blocks.  Expand [startBlock, endBlock] to cover
+	// all blocks we just cleared so ensureBlocks can find and fetch them.
 	fetchStart := startBlock
 	fetchEnd := endBlock
 	for _, b := range corrupt {
@@ -440,9 +455,17 @@ func (rr *RangeReader) repairAndRetry(ctx context.Context, startBlock, endBlock 
 	// Retry the read
 	data, err := rr.storage.ReadBlocks(rr.instanceHash, rr.position, toRead)
 	if err != nil {
+		if capped {
+			// More corrupt blocks remain beyond the cap.  The next Read()
+			// should be allowed to repair further.
+			rr.repairAttempted = false
+		}
 		return nil, errors.Wrap(err, "auto-repair: read still fails after re-download")
 	}
 
+	// Repair succeeded — allow future reads to repair additional blocks if
+	// the corrupt set was capped.
+	rr.repairAttempted = false
 	return data, nil
 }
 
@@ -451,13 +474,6 @@ func (rr *RangeReader) Close() error {
 	var err error
 	if rr.noStoreReader != nil {
 		err = rr.noStoreReader.Close()
-	}
-	if rr.reader != nil {
-		if closer, ok := rr.reader.(io.Closer); ok {
-			if closeErr := closer.Close(); closeErr != nil && err == nil {
-				err = closeErr
-			}
-		}
 	}
 	if rr.onClose != nil {
 		rr.onClose()
@@ -473,11 +489,6 @@ func (rr *RangeReader) Seek(offset int64, whence int) (int64, error) {
 	// Streaming no-store mode: cannot seek a pipe
 	if rr.noStoreReader != nil {
 		return 0, errors.New("seek not supported on streaming no-store response")
-	}
-
-	// Pass-through mode: delegate to the underlying reader
-	if rr.reader != nil {
-		return rr.reader.Seek(offset, whence)
 	}
 
 	var newPos int64
@@ -505,7 +516,7 @@ func (rr *RangeReader) Seek(offset int64, whence int) (int64, error) {
 
 // ContentLength returns the length of the range
 func (rr *RangeReader) ContentLength() int64 {
-	if rr.noStoreReader != nil || rr.reader != nil {
+	if rr.noStoreReader != nil {
 		return rr.size
 	}
 	return rr.end - rr.start + 1

@@ -84,7 +84,7 @@ func setupCorruptEnv(t *testing.T) *corruptEnv {
 
 // uploadAndPrime uploads content, downloads through the cache so the file
 // is stored on disk, and returns the cache URL.
-func uploadAndPrime(ctx context.Context, t *testing.T, env *corruptEnv, filename string, content []byte) string {
+func uploadAndPrime(ctx context.Context, t *testing.T, ft *fed_test_utils.FedTest, token, filename string, content []byte) string {
 	t.Helper()
 
 	localTmpDir := t.TempDir()
@@ -94,15 +94,15 @@ func uploadAndPrime(ctx context.Context, t *testing.T, env *corruptEnv, filename
 	uploadURL := fmt.Sprintf("pelican://%s:%d/test/%s",
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), filename)
 
-	_, err := client.DoPut(ctx, localFile, uploadURL, false, client.WithToken(env.token))
+	_, err := client.DoPut(ctx, localFile, uploadURL, false, client.WithToken(token))
 	require.NoError(t, err)
 
 	// Download through cache to populate it
 	downloadFile := filepath.Join(localTmpDir, "prime_download")
-	_, err = client.DoGet(ctx, uploadURL, downloadFile, false, client.WithToken(env.ft.Token))
+	_, err = client.DoGet(ctx, uploadURL, downloadFile, false, client.WithToken(ft.Token))
 	require.NoError(t, err)
 
-	cacheURL := getCacheRedirectURL(ctx, t, "/test/"+filename, env.token)
+	cacheURL := getCacheRedirectURL(ctx, t, "/test/"+filename, token)
 	return cacheURL
 }
 
@@ -142,10 +142,10 @@ func TestCorruption_BitFlip_FullRead(t *testing.T) {
 
 	// Use a file larger than InlineThreshold so it's stored on disk
 	content := generateTestData(16384) // 16KB ≈ 4 blocks
-	cacheURL := uploadAndPrime(env.ft.Ctx, t, env, "corrupt_bitflip.bin", content)
+	cacheURL := uploadAndPrime(env.ft.Ctx, t, env.ft, env.token, "corrupt_bitflip.bin", content)
 
 	// Verify a clean read works and the trailer reports success
-	r := doRangeRead(env.ft.Ctx, cacheURL, env.token, "")
+	r := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "")
 	require.NoError(t, r.err)
 	require.Equal(t, http.StatusOK, r.statusCode)
 	require.Equal(t, content, r.body)
@@ -165,7 +165,7 @@ func TestCorruption_BitFlip_FullRead(t *testing.T) {
 	// Now try reading — the auto-repair logic should detect the
 	// AES-GCM authentication failure, re-download the corrupt block
 	// from origin, and return correct data transparently.
-	r2 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "")
+	r2 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "")
 	require.NoError(t, r2.err, "HTTP request itself should succeed")
 
 	// Auto-repair should produce a successful trailer and the full,
@@ -178,7 +178,7 @@ func TestCorruption_BitFlip_FullRead(t *testing.T) {
 
 	// A subsequent read should also succeed — the on-disk data is now
 	// fixed and no re-download is needed.
-	r3 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "")
+	r3 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "")
 	require.NoError(t, r3.err)
 	assert.Equal(t, "200: OK", r3.transferStatus,
 		"Post-repair read should succeed without re-download")
@@ -203,7 +203,7 @@ func TestCorruption_BitFlip_RangeRead(t *testing.T) {
 	env := setupCorruptEnv(t)
 
 	content := generateTestData(20480) // 20KB ≈ 5 blocks
-	cacheURL := uploadAndPrime(env.ft.Ctx, t, env, "corrupt_range.bin", content)
+	cacheURL := uploadAndPrime(env.ft.Ctx, t, env.ft, env.token, "corrupt_range.bin", content)
 
 	// Corrupt the second block (bytes 4096..8191 on disk)
 	objFile := findObjectFileForContent(t, env.objectsDir, len(content))
@@ -218,7 +218,7 @@ func TestCorruption_BitFlip_RangeRead(t *testing.T) {
 
 	// Request a range that spans the corrupted block
 	// Block 1 covers content bytes 4080..8159 (data) so bytes=4080-8159 hits block 1
-	r := doRangeRead(env.ft.Ctx, cacheURL, env.token, "bytes=4080-8159")
+	r := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "bytes=4080-8159")
 	expected := content[4080:8160]
 	require.NoError(t, r.err, "HTTP request itself should succeed")
 
@@ -231,7 +231,7 @@ func TestCorruption_BitFlip_RangeRead(t *testing.T) {
 	t.Logf("Trailer after auto-repair (range): %s (body %d bytes)", r.transferStatus, len(r.body))
 
 	// Subsequent range read should succeed without needing origin
-	r2 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "bytes=4080-8159")
+	r2 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "bytes=4080-8159")
 	require.NoError(t, r2.err)
 	assert.Equal(t, "200: OK", r2.transferStatus,
 		"Post-repair range read should succeed")
@@ -256,10 +256,10 @@ func TestCorruption_MissingBlockFile(t *testing.T) {
 	env := setupCorruptEnv(t)
 
 	content := generateTestData(16384)
-	cacheURL := uploadAndPrime(env.ft.Ctx, t, env, "corrupt_missing.bin", content)
+	cacheURL := uploadAndPrime(env.ft.Ctx, t, env.ft, env.token, "corrupt_missing.bin", content)
 
 	// Verify normal read works
-	r := doRangeRead(env.ft.Ctx, cacheURL, env.token, "")
+	r := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "")
 	require.NoError(t, r.err)
 	require.Equal(t, http.StatusOK, r.statusCode)
 
@@ -269,7 +269,7 @@ func TestCorruption_MissingBlockFile(t *testing.T) {
 
 	// Try to read — auto-repair should detect missing blocks and
 	// re-download them from origin.
-	r2 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "")
+	r2 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "")
 	require.NoError(t, r2.err, "HTTP request itself should succeed")
 
 	// Auto-repair should succeed: trailer reports 200, body matches.
@@ -294,7 +294,7 @@ func TestCorruption_TruncatedFile(t *testing.T) {
 	env := setupCorruptEnv(t)
 
 	content := generateTestData(16384) // 4 blocks
-	cacheURL := uploadAndPrime(env.ft.Ctx, t, env, "corrupt_trunc.bin", content)
+	cacheURL := uploadAndPrime(env.ft.Ctx, t, env.ft, env.token, "corrupt_trunc.bin", content)
 
 	// Truncate the file to half
 	objFile := findObjectFileForContent(t, env.objectsDir, len(content))
@@ -303,7 +303,7 @@ func TestCorruption_TruncatedFile(t *testing.T) {
 	require.NoError(t, os.Truncate(objFile, info.Size()/2))
 
 	// Full read — auto-repair should re-download the truncated blocks
-	r := doRangeRead(env.ft.Ctx, cacheURL, env.token, "")
+	r := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "")
 	require.NoError(t, r.err, "HTTP request itself should succeed")
 	assert.Equal(t, "200: OK", r.transferStatus,
 		"Auto-repaired read (truncated file) should have a successful trailer")
@@ -321,7 +321,7 @@ func TestCorruption_TruncatedFile(t *testing.T) {
 		info.Size()/2, restoredInfo.Size())
 
 	// A range that was in the surviving half should also work
-	r2 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "bytes=0-4079")
+	r2 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "bytes=0-4079")
 	if r2.statusCode == http.StatusPartialContent || r2.statusCode == http.StatusOK {
 		expected := content[0:4080]
 		assert.Equal(t, expected, r2.body, "Surviving range should still be readable")
@@ -336,7 +336,7 @@ func TestCorruption_UncorruptedBlocksOK(t *testing.T) {
 	env := setupCorruptEnv(t)
 
 	content := generateTestData(20480) // 5 blocks
-	cacheURL := uploadAndPrime(env.ft.Ctx, t, env, "corrupt_partial.bin", content)
+	cacheURL := uploadAndPrime(env.ft.Ctx, t, env.ft, env.token, "corrupt_partial.bin", content)
 
 	// Corrupt block 3 (content bytes 12240..16319 i.e. 3*4080..)
 	objFile := findObjectFileForContent(t, env.objectsDir, len(content))
@@ -350,14 +350,14 @@ func TestCorruption_UncorruptedBlocksOK(t *testing.T) {
 	require.NoError(t, os.WriteFile(objFile, data, 0600))
 
 	// Read block 0 only — should succeed because block 0 is intact
-	r := doRangeRead(env.ft.Ctx, cacheURL, env.token, "bytes=0-4079")
+	r := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "bytes=0-4079")
 	require.NoError(t, r.err)
 	assert.Equal(t, content[0:4080], r.body, "Uncorrupted block 0 should read correctly")
 	assert.Equal(t, "200: OK", r.transferStatus,
 		"Trailer for uncorrupted block 0 should report success")
 
 	// Read block 2 — also intact
-	r2 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "bytes=8160-12239")
+	r2 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "bytes=8160-12239")
 	require.NoError(t, r2.err)
 	assert.Equal(t, content[8160:12240], r2.body, "Uncorrupted block 2 should read correctly")
 	assert.Equal(t, "200: OK", r2.transferStatus,
@@ -370,8 +370,28 @@ func TestCorruption_UncorruptedBlocksOK(t *testing.T) {
 	assert.Equal(t, data[block3Start+10], midData[block3Start+10],
 		"Block 3 should still be corrupted on disk after reading only uncorrupted blocks")
 
+	// Re-read the corrupted block via the cache API to confirm that it
+	// is still returning an error or re-downloading (i.e. the previous
+	// reads of blocks 0 and 2 did NOT silently repair block 3).
+	r2b := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "bytes=12240-16319")
+	require.NoError(t, r2b.err)
+	assert.Equal(t, content[12240:16320], r2b.body,
+		"Re-read of corrupted block 3 (before explicit repair read) should still return correct data via auto-repair")
+
+	// But the on-disk corruption should now be repaired because this
+	// read _did_ access the corrupted block directly.
+	postR2bData, err := os.ReadFile(objFile)
+	require.NoError(t, err)
+	assert.NotEqual(t, data[block3Start+10], postR2bData[block3Start+10],
+		"Block 3 should be repaired on disk after directly reading the corrupted block")
+
+	// Re-corrupt block 3 so the remaining part of the test exercises
+	// reading the corrupted block fresh.
+	postR2bData[block3Start+10] ^= 0x42
+	require.NoError(t, os.WriteFile(objFile, postR2bData, 0600))
+
 	// Read the corrupted block 3 — auto-repair should fix it
-	r3 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "bytes=12240-16319")
+	r3 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "bytes=12240-16319")
 	require.NoError(t, r3.err)
 	expected3 := content[12240:16320]
 	assert.Equal(t, expected3, r3.body, "Auto-repaired block 3 should read correctly")
@@ -387,7 +407,7 @@ func TestCorruption_UncorruptedBlocksOK(t *testing.T) {
 		block3Start+10, data[block3Start+10], repairedData[block3Start+10])
 
 	// Re-read block 3 — should succeed from the now-repaired on-disk data
-	r4 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "bytes=12240-16319")
+	r4 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "bytes=12240-16319")
 	require.NoError(t, r4.err)
 	assert.Equal(t, expected3, r4.body, "Re-read of repaired block 3 should return correct data")
 	assert.Equal(t, "200: OK", r4.transferStatus,
@@ -471,7 +491,7 @@ func TestCorruption_HeadAfterCorruption(t *testing.T) {
 	env := setupCorruptEnv(t)
 
 	content := generateTestData(16384)
-	cacheURL := uploadAndPrime(env.ft.Ctx, t, env, "corrupt_head.bin", content)
+	cacheURL := uploadAndPrime(env.ft.Ctx, t, env.ft, env.token, "corrupt_head.bin", content)
 
 	// Corrupt the file
 	objFile := findObjectFileForContent(t, env.objectsDir, len(content))

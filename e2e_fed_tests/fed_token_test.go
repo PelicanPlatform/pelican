@@ -28,10 +28,12 @@
 package fed_tests
 
 import (
+	_ "embed"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	_ "github.com/glebarez/sqlite"
@@ -45,26 +47,17 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
-// disableDirectClientsOriginConfig returns a YAML configuration for a
-// POSIXv2 origin that does NOT have DirectReads (incompatible with
-// DisableDirectClients) but does have PublicReads.
-// Listings is also omitted because the origin validation rejects it
-// when DisableDirectClients is enabled.
-// The Origin.DisableDirectClients flag itself is set via param.Set
-// before calling NewFedTest, because InitializeHandlers validates the
-// combination at startup.
-func disableDirectClientsOriginConfig() string {
-	return `Origin:
-  StorageType: posixv2
-  Exports:
-    - StoragePrefix: "/"
-      FederationPrefix: "/test"
-      Capabilities: ["PublicReads"]
-`
-}
+//go:embed resources/fed_token_posixv2_public.yaml
+var fedTokenPosixv2PublicConfig string
+
+//go:embed resources/fed_token_posix_public.yaml
+var fedTokenPosixPublicConfig string
+
+//go:embed resources/fed_token_posixv2_reads.yaml
+var fedTokenPosixv2ReadsConfig string
 
 // TestFedToken_DisableDirectClients verifies end-to-end that the
-// persistent cache can serve objects from an origin with
+// persistent cache can serve objects from a POSIXv2 origin with
 // Origin.DisableDirectClients enabled.
 //
 // When DisableDirectClients is true the origin's auth middleware
@@ -81,14 +74,10 @@ func TestFedToken_DisableDirectClients(t *testing.T) {
 	server_utils.ResetTestState()
 	t.Cleanup(server_utils.ResetTestState)
 
-	// Enable v2 persistent cache and DisableDirectClients BEFORE NewFedTest
-	// so that InitializeHandlers sees the flag at startup.
 	require.NoError(t, param.Set(param.Cache_EnableV2.GetName(), true))
-	require.NoError(t, param.Set(param.Origin_DisableDirectClients.GetName(), true))
 
-	ft := fed_test_utils.NewFedTest(t, disableDirectClientsOriginConfig())
+	ft := fed_test_utils.NewFedTest(t, fedTokenPosixv2PublicConfig)
 
-	// Write a test file into the origin's storage directory.
 	content := generateTestData(8192)
 	storageDir := ft.Exports[0].StoragePrefix
 	filePath := filepath.Join(storageDir, "fed_token_test.bin")
@@ -101,12 +90,8 @@ func TestFedToken_DisableDirectClients(t *testing.T) {
 	// to the origin.
 	token := getTempTokenForTest(t)
 
-	// Wait until the director starts redirecting to the cache.
 	cacheURL := waitForCacheRedirectURL(t, ft, "/test/fed_token_test.bin", token)
 
-	// Fetch through the cache.  If the federation token is missing or the
-	// routing uses ?directread (which requires DirectReads), the origin
-	// will return 401 and the cache will propagate a non-200 error.
 	resp := fetchFromCache(t, ft, cacheURL, nil)
 	require.Equal(t, http.StatusOK, resp.statusCode,
 		"Cache should successfully fetch from origin with DisableDirectClients; "+
@@ -125,9 +110,8 @@ func TestFedToken_DisableDirectClients_SecondFetch(t *testing.T) {
 	t.Cleanup(server_utils.ResetTestState)
 
 	require.NoError(t, param.Set(param.Cache_EnableV2.GetName(), true))
-	require.NoError(t, param.Set(param.Origin_DisableDirectClients.GetName(), true))
 
-	ft := fed_test_utils.NewFedTest(t, disableDirectClientsOriginConfig())
+	ft := fed_test_utils.NewFedTest(t, fedTokenPosixv2PublicConfig)
 
 	content := generateTestData(16384)
 	storageDir := ft.Exports[0].StoragePrefix
@@ -147,6 +131,15 @@ func TestFedToken_DisableDirectClients_SecondFetch(t *testing.T) {
 	r2 := fetchFromCache(t, ft, cacheURL, nil)
 	require.Equal(t, http.StatusOK, r2.statusCode, "Second fetch (cache hit) should succeed")
 	assert.Equal(t, content, r2.body, "Cached content should match original")
+
+	// Verify this was actually a cache hit by checking the Age header.
+	// On a hit the cache returns the time elapsed since the object was
+	// stored; on a miss the object has just been fetched so Age is 0.
+	ageStr := r2.headers.Get("Age")
+	require.NotEmpty(t, ageStr, "Second fetch should include an Age header (cache hit)")
+	age, err := strconv.Atoi(ageStr)
+	require.NoError(t, err, "Age header should be a valid integer")
+	assert.GreaterOrEqual(t, age, 0, "Age must be non-negative")
 }
 
 // TestFedToken_DirectFetchWithoutFedToken verifies that a direct
@@ -159,9 +152,8 @@ func TestFedToken_DirectFetchWithoutFedToken(t *testing.T) {
 	t.Cleanup(server_utils.ResetTestState)
 
 	require.NoError(t, param.Set(param.Cache_EnableV2.GetName(), true))
-	require.NoError(t, param.Set(param.Origin_DisableDirectClients.GetName(), true))
 
-	ft := fed_test_utils.NewFedTest(t, disableDirectClientsOriginConfig())
+	ft := fed_test_utils.NewFedTest(t, fedTokenPosixv2PublicConfig)
 
 	content := generateTestData(4096)
 	storageDir := ft.Exports[0].StoragePrefix
@@ -188,4 +180,86 @@ func TestFedToken_DirectFetchWithoutFedToken(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode,
 		"Direct request without federation token should be rejected (401)")
+}
+
+// TestFedToken_PosixOrigin verifies that the federation token flow
+// works with a POSIX (XRootD-based) origin, not just the native
+// POSIXv2 handler.  This ensures cross-compatibility between the
+// two storage backends.
+func TestFedToken_PosixOrigin(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
+
+	require.NoError(t, param.Set(param.Cache_EnableV2.GetName(), true))
+
+	ft := fed_test_utils.NewFedTest(t, fedTokenPosixPublicConfig)
+
+	content := generateTestData(8192)
+	storageDir := ft.Exports[0].StoragePrefix
+	filePath := filepath.Join(storageDir, "fed_token_posix.bin")
+	require.NoError(t, os.MkdirAll(filepath.Dir(filePath), 0755))
+	require.NoError(t, os.WriteFile(filePath, content, 0644))
+
+	token := getTempTokenForTest(t)
+	cacheURL := waitForCacheRedirectURL(t, ft, "/test/fed_token_posix.bin", token)
+
+	resp := fetchFromCache(t, ft, cacheURL, nil)
+	require.Equal(t, http.StatusOK, resp.statusCode,
+		"Cache should successfully fetch from XRootD origin with DisableDirectClients")
+	assert.Equal(t, content, resp.body,
+		"Content returned through cache should match what was written to origin")
+}
+
+// TestFedToken_NonPublicReads verifies that DisableDirectClients works
+// with a non-public (Reads-only) namespace, where the origin requires
+// both a user token and a federation token.  This exercises the
+// two-token authorization path in authMiddleware.
+func TestFedToken_NonPublicReads(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
+
+	require.NoError(t, param.Set(param.Cache_EnableV2.GetName(), true))
+
+	ft := fed_test_utils.NewFedTest(t, fedTokenPosixv2ReadsConfig)
+
+	content := generateTestData(8192)
+	storageDir := ft.Exports[0].StoragePrefix
+	filePath := filepath.Join(storageDir, "fed_token_reads.bin")
+	require.NoError(t, os.MkdirAll(filepath.Dir(filePath), 0755))
+	require.NoError(t, os.WriteFile(filePath, content, 0644))
+
+	// For a non-public namespace the cache must present both a user
+	// token (for storage.read authorization) and a federation token
+	// (to satisfy DisableDirectClients).
+	token := getTempTokenForTest(t)
+	cacheURL := waitForCacheRedirectURL(t, ft, "/test/fed_token_reads.bin", token)
+
+	resp := fetchFromCache(t, ft, cacheURL, nil)
+	require.Equal(t, http.StatusOK, resp.statusCode,
+		"Cache should successfully fetch from non-public origin with DisableDirectClients; "+
+			"non-200 indicates the user token or federation token was missing")
+	assert.Equal(t, content, resp.body,
+		"Content returned through cache should match what was written to origin")
+
+	// Negative case: a direct request to the origin with only a user
+	// token (no federation token) should be rejected.  This proves the
+	// DisableDirectClients guard is active for non-public namespaces.
+	originURL := param.Origin_Url.GetString()
+	require.NotEmpty(t, originURL, "Origin URL should be set")
+	directURL := originURL + "/api/v1.0/origin/data/test/fed_token_reads.bin"
+
+	req, err := http.NewRequestWithContext(ft.Ctx, http.MethodGet, directURL, nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	httpClient := &http.Client{Transport: config.GetTransport()}
+	directResp, err := httpClient.Do(req)
+	require.NoError(t, err)
+	defer directResp.Body.Close()
+	_, _ = io.ReadAll(directResp.Body)
+
+	assert.Equal(t, http.StatusUnauthorized, directResp.StatusCode,
+		"Direct request to non-public origin without federation token should be rejected (401)")
 }

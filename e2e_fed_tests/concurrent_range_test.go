@@ -94,11 +94,15 @@ type rangeResult struct {
 	err            error
 }
 
-// doRangeRead performs a single range read request against the given URL.
+// doRangeRead performs a single HTTP request against the given URL.
 // It requests X-Transfer-Status trailers so callers can detect mid-stream
 // errors (e.g. failure from corrupted cache data) and error the transfer.
-func doRangeRead(ctx context.Context, url, token, rangeHeader string) rangeResult {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+// If method is empty it defaults to GET.
+func doRangeRead(ctx context.Context, url, token, method, rangeHeader string) rangeResult {
+	if method == "" {
+		method = http.MethodGet
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if err != nil {
 		return rangeResult{err: err}
 	}
@@ -184,7 +188,7 @@ func TestConcurrent_FullReads_SameObject(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "")
+			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", "")
 		}(i)
 	}
 	wg.Wait()
@@ -249,7 +253,7 @@ func TestConcurrent_RangeReads_DifferentRanges(t *testing.T) {
 			wg.Add(1)
 			go func(i int, spec rangeSpec) {
 				defer wg.Done()
-				results[i] = doRangeRead(ft.Ctx, cacheURL, testToken, spec.header)
+				results[i] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.header)
 			}(idx, rs)
 			idx++
 		}
@@ -315,7 +319,7 @@ func TestConcurrent_RangeReads_BlockBoundaries(t *testing.T) {
 			wg.Add(1)
 			go func(i int, spec rangeSpec) {
 				defer wg.Done()
-				results[i] = doRangeRead(ft.Ctx, cacheURL, testToken, spec.header)
+				results[i] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.header)
 			}(idx, rs)
 			idx++
 		}
@@ -364,7 +368,7 @@ func TestConcurrent_CacheMiss_SameObject(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "")
+			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", "")
 		}(i)
 	}
 	wg.Wait()
@@ -414,7 +418,7 @@ func TestConcurrent_CacheMiss_RangeReads(t *testing.T) {
 		wg.Add(1)
 		go func(idx int, spec rangeSpec) {
 			defer wg.Done()
-			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, spec.header)
+			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.header)
 		}(i, rs)
 	}
 	wg.Wait()
@@ -483,7 +487,7 @@ func TestConcurrent_MultipleObjects(t *testing.T) {
 			wg.Add(1)
 			go func(i, oi int) {
 				defer wg.Done()
-				results[i] = doRangeRead(ft.Ctx, objects[oi].cacheURL, testToken, "")
+				results[i] = doRangeRead(ft.Ctx, objects[oi].cacheURL, testToken, "", "")
 			}(idx, objIdx)
 			idx++
 		}
@@ -546,7 +550,7 @@ func TestConcurrent_MixedFullAndRangeReads(t *testing.T) {
 		wg.Add(1)
 		go func(idx int, spec readSpec) {
 			defer wg.Done()
-			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, spec.rangeHeader)
+			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.rangeHeader)
 		}(i, s)
 	}
 	wg.Wait()
@@ -610,7 +614,7 @@ func TestConcurrent_LargeFile_ManySmallRanges(t *testing.T) {
 		wg.Add(1)
 		go func(idx int, spec rangeSpec) {
 			defer wg.Done()
-			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, spec.header)
+			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.header)
 		}(i, rs)
 	}
 	wg.Wait()
@@ -653,7 +657,7 @@ func TestConcurrent_InlineStorage_Reads(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "")
+			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", "")
 		}(i)
 	}
 	wg.Wait()
@@ -716,7 +720,7 @@ func TestConcurrent_RandomData_Integrity(t *testing.T) {
 		wg.Add(1)
 		go func(idx int, spec readSpec) {
 			defer wg.Done()
-			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, spec.rangeHeader)
+			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.rangeHeader)
 		}(i, s)
 	}
 	wg.Wait()
@@ -776,7 +780,7 @@ func TestConcurrent_SuffixRange(t *testing.T) {
 			wg.Add(1)
 			go func(i int, spec rangeSpec) {
 				defer wg.Done()
-				results[i] = doRangeRead(ft.Ctx, cacheURL, testToken, spec.header)
+				results[i] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.header)
 			}(idx, rs)
 			idx++
 		}
@@ -911,7 +915,7 @@ func TestConcurrent_ConditionalAndFullReads(t *testing.T) {
 	testToken := getTempTokenForTest(t)
 
 	// Get the ETag from an initial request
-	initialResult := doRangeRead(ft.Ctx, cacheURL, testToken, "")
+	initialResult := doRangeRead(ft.Ctx, cacheURL, testToken, "", "")
 	require.NoError(t, initialResult.err)
 
 	// We need to get the ETag from the response headers - do a manual request
@@ -984,5 +988,98 @@ func TestConcurrent_ConditionalAndFullReads(t *testing.T) {
 			assert.Equal(t, content, r.body,
 				"Unconditional request %d content mismatch", i)
 		}
+	}
+}
+
+// ============================================================================
+// Thundering herd tests — same range from many goroutines
+// ============================================================================
+
+// TestConcurrent_ThunderingHerd_SameRange_CacheHit fires many simultaneous
+// requests for the exact same byte range on a fully cached object.  This
+// stresses the SeekableReader's shared state and verifies that no data
+// corruption occurs when many goroutines read the same blocks at once.
+func TestConcurrent_ThunderingHerd_SameRange_CacheHit(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	require.NoError(t, param.Set(param.Cache_EnableV2.GetName(), true))
+	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+
+	content := generateTestData(32768) // 32KB = ~8 blocks
+	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "herd_hit.bin", content)
+	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/herd_hit.bin")
+
+	testToken := getTempTokenForTest(t)
+
+	// All goroutines request the exact same range that spans two blocks.
+	const rangeStart = 4000
+	const rangeEnd = 8200
+	rangeHeader := fmt.Sprintf("bytes=%d-%d", rangeStart, rangeEnd)
+	expected := content[rangeStart : rangeEnd+1]
+
+	const numReaders = 30
+
+	var wg sync.WaitGroup
+	results := make([]rangeResult, numReaders)
+
+	for i := 0; i < numReaders; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", rangeHeader)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, r := range results {
+		requireSuccessfulRead(t, r, http.StatusPartialContent, expected,
+			fmt.Sprintf("Herd hit reader %d", i))
+	}
+}
+
+// TestConcurrent_ThunderingHerd_SameRange_CacheMiss fires many simultaneous
+// requests for the exact same byte range on an object that is NOT yet cached.
+// The first request triggers a download from origin; all others must wait for
+// (or join) that download and return the correct data.  This is the classic
+// "thundering herd" scenario for a cache miss.
+func TestConcurrent_ThunderingHerd_SameRange_CacheMiss(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	require.NoError(t, param.Set(param.Cache_EnableV2.GetName(), true))
+	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+
+	content := generateTestData(32768) // 32KB = ~8 blocks
+	// Upload but do NOT prime the cache — all readers hit a miss.
+	uploadTestFile(ft.Ctx, t, ft, "herd_miss.bin", content)
+
+	testToken := getTempTokenForTest(t)
+	cacheURL := getCacheRedirectURL(ft.Ctx, t, "/test/herd_miss.bin", testToken)
+
+	const rangeStart = 4000
+	const rangeEnd = 8200
+	rangeHeader := fmt.Sprintf("bytes=%d-%d", rangeStart, rangeEnd)
+	expected := content[rangeStart : rangeEnd+1]
+
+	const numReaders = 30
+
+	var wg sync.WaitGroup
+	results := make([]rangeResult, numReaders)
+
+	for i := 0; i < numReaders; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", rangeHeader)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, r := range results {
+		requireSuccessfulRead(t, r, http.StatusPartialContent, expected,
+			fmt.Sprintf("Herd miss reader %d", i))
 	}
 }

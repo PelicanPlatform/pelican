@@ -39,20 +39,20 @@ package fed_tests
 import (
 	"context"
 	_ "embed"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
+	"github.com/pelicanplatform/pelican/local_cache"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -80,64 +80,6 @@ func setupTSEnv(t *testing.T) *tsEnv {
 	token := getTempTokenForTest(t)
 
 	return &tsEnv{ft: ft, token: token}
-}
-
-// uploadAndPrimeTS uploads content through the origin and primes the
-// cache, returning the direct cache URL.
-func uploadAndPrimeTS(ctx context.Context, t *testing.T, env *tsEnv, filename string, content []byte) string {
-	t.Helper()
-
-	localTmpDir := t.TempDir()
-	localFile := filepath.Join(localTmpDir, filename)
-	require.NoError(t, os.WriteFile(localFile, content, 0644))
-
-	uploadURL := fmt.Sprintf("pelican://%s:%d/test/%s",
-		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), filename)
-
-	_, err := client.DoPut(ctx, localFile, uploadURL, false, client.WithToken(env.token))
-	require.NoError(t, err)
-
-	// Prime the cache by downloading once
-	downloadFile := filepath.Join(localTmpDir, "prime_download")
-	_, err = client.DoGet(ctx, uploadURL, downloadFile, false, client.WithToken(env.ft.Token))
-	require.NoError(t, err)
-
-	return getCacheRedirectURL(ctx, t, "/test/"+filename, env.token)
-}
-
-// doRequestWithTrailer sends a GET (or HEAD) request that opts in to
-// X-Transfer-Status trailers.  If method is empty it defaults to GET.
-func doRequestWithTrailer(ctx context.Context, url, token, method, rangeHeader string) rangeResult {
-	if method == "" {
-		method = http.MethodGet
-	}
-	req, err := http.NewRequestWithContext(ctx, method, url, nil)
-	if err != nil {
-		return rangeResult{err: err}
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("X-Transfer-Status", "true")
-	req.Header.Set("TE", "trailers")
-	if rangeHeader != "" {
-		req.Header.Set("Range", rangeHeader)
-	}
-
-	resp, err := (&http.Client{Transport: config.GetTransport()}).Do(req)
-	if err != nil {
-		return rangeResult{err: err}
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return rangeResult{err: err, statusCode: resp.StatusCode}
-	}
-
-	return rangeResult{
-		body:           body,
-		statusCode:     resp.StatusCode,
-		transferStatus: resp.Trailer.Get("X-Transfer-Status"),
-	}
 }
 
 // doRequestWithoutTrailer sends a GET request that does NOT include
@@ -182,9 +124,9 @@ func TestTransferStatus_FullGet_Success(t *testing.T) {
 	env := setupTSEnv(t)
 
 	content := generateTestData(16384) // 16KB — disk storage
-	cacheURL := uploadAndPrimeTS(env.ft.Ctx, t, env, "ts_full.bin", content)
+	cacheURL := uploadAndPrime(env.ft.Ctx, t, env.ft, env.token, "ts_full.bin", content)
 
-	r := doRequestWithTrailer(env.ft.Ctx, cacheURL, env.token, "", "")
+	r := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "")
 	require.NoError(t, r.err)
 	assert.Equal(t, http.StatusOK, r.statusCode)
 	assert.Equal(t, content, r.body, "Body should match original content")
@@ -198,10 +140,10 @@ func TestTransferStatus_RangeGet_Success(t *testing.T) {
 	env := setupTSEnv(t)
 
 	content := generateTestData(16384)
-	cacheURL := uploadAndPrimeTS(env.ft.Ctx, t, env, "ts_range.bin", content)
+	cacheURL := uploadAndPrime(env.ft.Ctx, t, env.ft, env.token, "ts_range.bin", content)
 
 	// Request bytes that span the second and third blocks
-	r := doRequestWithTrailer(env.ft.Ctx, cacheURL, env.token, "", "bytes=4080-12239")
+	r := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "bytes=4080-12239")
 	require.NoError(t, r.err)
 	assert.Equal(t, http.StatusPartialContent, r.statusCode)
 	assert.Equal(t, content[4080:12240], r.body,
@@ -216,9 +158,9 @@ func TestTransferStatus_Head_NoTrailer(t *testing.T) {
 	env := setupTSEnv(t)
 
 	content := generateTestData(16384)
-	cacheURL := uploadAndPrimeTS(env.ft.Ctx, t, env, "ts_head.bin", content)
+	cacheURL := uploadAndPrime(env.ft.Ctx, t, env.ft, env.token, "ts_head.bin", content)
 
-	r := doRequestWithTrailer(env.ft.Ctx, cacheURL, env.token, http.MethodHead, "")
+	r := doRangeRead(env.ft.Ctx, cacheURL, env.token, http.MethodHead, "")
 	require.NoError(t, r.err)
 	assert.Equal(t, http.StatusOK, r.statusCode)
 	assert.Empty(t, r.body, "HEAD should return an empty body")
@@ -235,7 +177,7 @@ func TestTransferStatus_NoOptIn_NoTrailer(t *testing.T) {
 	env := setupTSEnv(t)
 
 	content := generateTestData(16384)
-	cacheURL := uploadAndPrimeTS(env.ft.Ctx, t, env, "ts_nooptin.bin", content)
+	cacheURL := uploadAndPrime(env.ft.Ctx, t, env.ft, env.token, "ts_nooptin.bin", content)
 
 	r := doRequestWithoutTrailer(env.ft.Ctx, cacheURL, env.token, "")
 	require.NoError(t, r.err)
@@ -251,7 +193,7 @@ func TestTransferStatus_NoOptIn_Range_NoTrailer(t *testing.T) {
 	env := setupTSEnv(t)
 
 	content := generateTestData(16384)
-	cacheURL := uploadAndPrimeTS(env.ft.Ctx, t, env, "ts_nooptin_range.bin", content)
+	cacheURL := uploadAndPrime(env.ft.Ctx, t, env.ft, env.token, "ts_nooptin_range.bin", content)
 
 	r := doRequestWithoutTrailer(env.ft.Ctx, cacheURL, env.token, "bytes=0-4079")
 	require.NoError(t, r.err)
@@ -268,10 +210,10 @@ func TestTransferStatus_AutoRepair_StillOK(t *testing.T) {
 	env := setupTSEnv(t)
 
 	content := generateTestData(16384)
-	cacheURL := uploadAndPrimeTS(env.ft.Ctx, t, env, "ts_repair.bin", content)
+	cacheURL := uploadAndPrime(env.ft.Ctx, t, env.ft, env.token, "ts_repair.bin", content)
 
 	// Verify a clean read first
-	r1 := doRequestWithTrailer(env.ft.Ctx, cacheURL, env.token, "", "")
+	r1 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "")
 	require.NoError(t, r1.err)
 	require.Equal(t, http.StatusOK, r1.statusCode)
 	require.Equal(t, "200: OK", r1.transferStatus)
@@ -289,7 +231,7 @@ func TestTransferStatus_AutoRepair_StillOK(t *testing.T) {
 	require.NoError(t, os.WriteFile(objFile, data, 0600))
 
 	// Read again — auto-repair should fix it transparently
-	r2 := doRequestWithTrailer(env.ft.Ctx, cacheURL, env.token, "", "")
+	r2 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "")
 	require.NoError(t, r2.err)
 	assert.Equal(t, http.StatusOK, r2.statusCode)
 	assert.Equal(t, content, r2.body,
@@ -307,9 +249,9 @@ func TestTransferStatus_InlineStorage(t *testing.T) {
 	// Use a file smaller than InlineThreshold (4096 bytes) so it's stored
 	// inline in BadgerDB rather than as encrypted blocks on disk.
 	content := generateTestData(512)
-	cacheURL := uploadAndPrimeTS(env.ft.Ctx, t, env, "ts_inline.bin", content)
+	cacheURL := uploadAndPrime(env.ft.Ctx, t, env.ft, env.token, "ts_inline.bin", content)
 
-	r := doRequestWithTrailer(env.ft.Ctx, cacheURL, env.token, "", "")
+	r := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "")
 	require.NoError(t, r.err)
 	assert.Equal(t, http.StatusOK, r.statusCode)
 	assert.Equal(t, content, r.body)
@@ -323,10 +265,10 @@ func TestTransferStatus_SuffixRange(t *testing.T) {
 	env := setupTSEnv(t)
 
 	content := generateTestData(16384)
-	cacheURL := uploadAndPrimeTS(env.ft.Ctx, t, env, "ts_suffix.bin", content)
+	cacheURL := uploadAndPrime(env.ft.Ctx, t, env.ft, env.token, "ts_suffix.bin", content)
 
 	// Request the last 1000 bytes
-	r := doRequestWithTrailer(env.ft.Ctx, cacheURL, env.token, "", "bytes=-1000")
+	r := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "bytes=-1000")
 	require.NoError(t, r.err)
 	assert.Equal(t, http.StatusPartialContent, r.statusCode)
 	assert.Equal(t, content[len(content)-1000:], r.body,
@@ -341,14 +283,85 @@ func TestTransferStatus_MultipleReads_Consistent(t *testing.T) {
 	env := setupTSEnv(t)
 
 	content := generateTestData(16384)
-	cacheURL := uploadAndPrimeTS(env.ft.Ctx, t, env, "ts_multi.bin", content)
+	cacheURL := uploadAndPrime(env.ft.Ctx, t, env.ft, env.token, "ts_multi.bin", content)
 
 	for i := 0; i < 3; i++ {
-		r := doRequestWithTrailer(env.ft.Ctx, cacheURL, env.token, "", "")
+		r := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "")
 		require.NoError(t, r.err, "read %d should succeed", i)
 		assert.Equal(t, http.StatusOK, r.statusCode, "read %d status", i)
 		assert.Equal(t, content, r.body, "read %d body", i)
 		assert.Equal(t, "200: OK", r.transferStatus,
 			"read %d trailer should be 200: OK", i)
 	}
+}
+
+// ============================================================================
+// Negative / failure tests
+// ============================================================================
+
+// TestTransferStatus_Failure_UnrepairableCorruption verifies that when
+// cached block data is corrupted AND the origin file is deleted (so
+// auto-repair cannot re-download the block), the X-Transfer-Status
+// trailer reports a 500 error.
+func TestTransferStatus_Failure_UnrepairableCorruption(t *testing.T) {
+	env := setupTSEnv(t)
+
+	content := generateTestData(16384) // 16KB → multiple blocks
+	cacheURL := uploadAndPrime(env.ft.Ctx, t, env.ft, env.token, "ts_fail_corrupt.bin", content)
+
+	// Verify a clean read first
+	r1 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "")
+	require.NoError(t, r1.err)
+	require.Equal(t, http.StatusOK, r1.statusCode)
+	require.Equal(t, "200: OK", r1.transferStatus)
+
+	// Find and corrupt a LATER block on disk so that the initial sniff
+	// by http.ServeContent succeeds and the body starts streaming before
+	// the error is hit mid-stream.
+	cacheStorageLocation := param.Cache_StorageLocation.GetString()
+	objectsDir := filepath.Join(cacheStorageLocation, "persistent-cache", "objects")
+	objFile := findObjectFileForContent(t, objectsDir, len(content))
+	data, err := os.ReadFile(objFile)
+	require.NoError(t, err)
+
+	// Corrupt block 3 (4th block, starting at disk offset 3*BlockTotalSize)
+	corruptOffset := 3 * int(local_cache.BlockTotalSize) + 5
+	require.True(t, corruptOffset < len(data),
+		"Corrupt offset %d should be within file size %d", corruptOffset, len(data))
+	data[corruptOffset] ^= 0xFF
+	require.NoError(t, os.WriteFile(objFile, data, 0600))
+
+	// Delete the original file from origin storage so auto-repair cannot
+	// re-download the corrupted block.
+	originFile := filepath.Join(env.ft.Exports[0].StoragePrefix, "ts_fail_corrupt.bin")
+	require.NoError(t, os.Remove(originFile))
+
+	// Read again — should fail mid-stream
+	r2 := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "")
+	require.NoError(t, r2.err, "HTTP transport should succeed even though content is corrupted")
+	// The status code will be 200 because headers are sent before the
+	// body starts streaming.  The actual error is reported in the trailer.
+	assert.NotEqual(t, "200: OK", r2.transferStatus,
+		"Unrepairable corruption should NOT produce a successful trailer")
+	assert.True(t, strings.HasPrefix(r2.transferStatus, "500:"),
+		"Trailer should start with '500:' but got %q", r2.transferStatus)
+	t.Logf("Got expected failure trailer: %s", r2.transferStatus)
+}
+
+// TestTransferStatus_Failure_NonExistent verifies that requesting an
+// object that was never uploaded returns an error status code. Since
+// the error is detected before body streaming starts, no trailer is
+// expected.
+func TestTransferStatus_Failure_NonExistent(t *testing.T) {
+	env := setupTSEnv(t)
+
+	// Get the cache URL for a file that doesn't exist
+	cacheURL := getCacheRedirectURL(env.ft.Ctx, t, "/test/does_not_exist.bin", env.token)
+
+	r := doRangeRead(env.ft.Ctx, cacheURL, env.token, "", "")
+	// The cache should forward the origin's error; no body streaming
+	// means either no trailer or a 500 trailer.
+	assert.True(t, r.statusCode >= 400,
+		"Non-existent object should return error status, got %d", r.statusCode)
+	t.Logf("Non-existent object: status=%d, trailer=%q", r.statusCode, r.transferStatus)
 }
