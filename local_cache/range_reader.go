@@ -198,7 +198,7 @@ func NewRangeReader(
 
 	// Set up decryption if stored on disk
 	var encryptor *BlockEncryptor
-	if meta.StorageMode == StorageModeDisk {
+	if meta.IsDisk() {
 		encMgr := storage.db.GetEncryptionManager()
 		dek, err := encMgr.DecryptDataKey(meta.DataKey)
 		if err != nil {
@@ -256,7 +256,7 @@ func (rr *RangeReader) ReadContext(ctx context.Context, p []byte) (n int, err er
 	}
 
 	// For inline storage, we don't need to check blocks - data is complete
-	if rr.meta.StorageMode == StorageModeInline {
+	if rr.meta.IsInline() {
 		data, err := rr.storage.ReadInline(rr.instanceHash)
 		if err != nil {
 			return 0, err
