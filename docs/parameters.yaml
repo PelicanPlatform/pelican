@@ -2302,6 +2302,16 @@ default: false
 components: ["cache"]
 hidden: true
 ---
+name: Cache.AllowedFederations
+description: |+
+  A list of federation discovery URLs (or host:port values) that this cache is allowed to serve.
+  When unset or empty, the cache only serves its primary federation (the one it registered with).
+  Add a single entry of "*" to allow any federation (open proxy).
+  Each entry is matched against the :discovery parameter in the cache data URL.
+type: stringSlice
+default: []
+components: ["cache"]
+---
 name: Cache.PermittedNamespaces
 description: |+
   A list of namespaces the cache is allowed to pull from. If the list is empty or this option is unset, it's assumed that
