@@ -112,6 +112,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.EnablePrefetch": false,
 	"Cache.EnableSiteLocalMode": false,
 	"Cache.EnableTLSClientAuth": false,
+	"Cache.EnableV2": false,
 	"Cache.EnableVoms": false,
 	"Cache.EvictionMonitoringInterval": false,
 	"Cache.EvictionMonitoringMaxDepth": false,
@@ -229,8 +230,12 @@ var runtimeConfigurableMap = map[string]bool{
 	"IssuerKey": false,
 	"IssuerKeysDirectory": false,
 	"LocalCache.DataLocation": false,
+	"LocalCache.DefaultMaxAge": false,
 	"LocalCache.HighWaterMarkPercentage": false,
 	"LocalCache.LowWaterMarkPercentage": false,
+	"LocalCache.MaxConcurrentPrefetch": false,
+	"LocalCache.PrefetchTimeout": false,
+	"LocalCache.RevalidationJitter": false,
 	"LocalCache.RunLocation": false,
 	"LocalCache.Size": false,
 	"LocalCache.Socket": false,
@@ -291,6 +296,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"OIDC.Scopes": false,
 	"OIDC.TokenEndpoint": false,
 	"OIDC.UserInfoEndpoint": false,
+	"Origin.CacheControl": false,
 	"Origin.Concurrency": false,
 	"Origin.ConcurrencyDegradedThreshold": false,
 	"Origin.DbLocation": false,
@@ -1168,6 +1174,7 @@ var allParameterNames = []string{
 	"Cache.EnablePrefetch",
 	"Cache.EnableSiteLocalMode",
 	"Cache.EnableTLSClientAuth",
+	"Cache.EnableV2",
 	"Cache.EnableVoms",
 	"Cache.EvictionMonitoringInterval",
 	"Cache.EvictionMonitoringMaxDepth",
@@ -1285,8 +1292,12 @@ var allParameterNames = []string{
 	"IssuerKey",
 	"IssuerKeysDirectory",
 	"LocalCache.DataLocation",
+	"LocalCache.DefaultMaxAge",
 	"LocalCache.HighWaterMarkPercentage",
 	"LocalCache.LowWaterMarkPercentage",
+	"LocalCache.MaxConcurrentPrefetch",
+	"LocalCache.PrefetchTimeout",
+	"LocalCache.RevalidationJitter",
 	"LocalCache.RunLocation",
 	"LocalCache.Size",
 	"LocalCache.Socket",
@@ -1347,6 +1358,7 @@ var allParameterNames = []string{
 	"OIDC.Scopes",
 	"OIDC.TokenEndpoint",
 	"OIDC.UserInfoEndpoint",
+	"Origin.CacheControl",
 	"Origin.Concurrency",
 	"Origin.ConcurrencyDegradedThreshold",
 	"Origin.DbLocation",
@@ -1634,6 +1646,7 @@ var (
 	OIDC_Issuer = StringParam{"OIDC.Issuer"}
 	OIDC_TokenEndpoint = StringParam{"OIDC.TokenEndpoint"}
 	OIDC_UserInfoEndpoint = StringParam{"OIDC.UserInfoEndpoint"}
+	Origin_CacheControl = StringParam{"Origin.CacheControl"}
 	Origin_DbLocation = StringParam{"Origin.DbLocation"}
 	Origin_ExportVolume = StringParam{"Origin.ExportVolume"}
 	Origin_FedTokenLocation = StringParam{"Origin.FedTokenLocation"}
@@ -1773,6 +1786,8 @@ var (
 	Director_StatConcurrencyLimit = IntParam{"Director.StatConcurrencyLimit"}
 	LocalCache_HighWaterMarkPercentage = IntParam{"LocalCache.HighWaterMarkPercentage"}
 	LocalCache_LowWaterMarkPercentage = IntParam{"LocalCache.LowWaterMarkPercentage"}
+	LocalCache_MaxConcurrentPrefetch = IntParam{"LocalCache.MaxConcurrentPrefetch"}
+	LocalCache_RevalidationJitter = IntParam{"LocalCache.RevalidationJitter"}
 	MinimumDownloadSpeed = IntParam{"MinimumDownloadSpeed"}
 	Monitoring_LabelLimit = IntParam{"Monitoring.LabelLimit"}
 	Monitoring_LabelNameLengthLimit = IntParam{"Monitoring.LabelNameLengthLimit"}
@@ -1818,6 +1833,7 @@ var (
 	Cache_EnablePrefetch = BoolParam{"Cache.EnablePrefetch"}
 	Cache_EnableSiteLocalMode = BoolParam{"Cache.EnableSiteLocalMode"}
 	Cache_EnableTLSClientAuth = BoolParam{"Cache.EnableTLSClientAuth"}
+	Cache_EnableV2 = BoolParam{"Cache.EnableV2"}
 	Cache_EnableVoms = BoolParam{"Cache.EnableVoms"}
 	Cache_SelfTest = BoolParam{"Cache.SelfTest"}
 	Client_AssumeDirectorServerHeader = BoolParam{"Client.AssumeDirectorServerHeader"}
@@ -1912,6 +1928,8 @@ var (
 	Issuer_DynamicClientStaleTimeout = DurationParam{"Issuer.DynamicClientStaleTimeout"}
 	Issuer_DynamicClientUnusedTimeout = DurationParam{"Issuer.DynamicClientUnusedTimeout"}
 	Issuer_RefreshTokenGracePeriod = DurationParam{"Issuer.RefreshTokenGracePeriod"}
+	LocalCache_DefaultMaxAge = DurationParam{"LocalCache.DefaultMaxAge"}
+	LocalCache_PrefetchTimeout = DurationParam{"LocalCache.PrefetchTimeout"}
 	Logging_Client_ProgressInterval = DurationParam{"Logging.Client.ProgressInterval"}
 	Lotman_DefaultLotDeletionLifetime = DurationParam{"Lotman.DefaultLotDeletionLifetime"}
 	Lotman_DefaultLotExpirationLifetime = DurationParam{"Lotman.DefaultLotExpirationLifetime"}

@@ -962,6 +962,7 @@ func WithMetadataChannel(ch chan<- TransferMetadata) TransferOption {
 func WithCacheEmbeddedClientMode() TransferOption {
 	return option.New(identTransferOptionCacheEmbeddedClientMode{}, true)
 }
+
 // Create a new client to work with an engine
 func (te *TransferEngine) NewClient(options ...TransferOption) (client *TransferClient, err error) {
 	log.Debugln("Making new clients")
