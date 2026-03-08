@@ -42,6 +42,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	local_cache "github.com/pelicanplatform/pelican/local_cache"
 	"github.com/pelicanplatform/pelican/param"
@@ -59,7 +60,7 @@ var (
 	authOriginCfg string
 )
 
-// Setup a federation, invoke "get" through the local cache module
+// Setup a federation, invoke "get" through the persistent cache module
 //
 // The download is done twice -- once to verify functionality and once
 // as a cache hit.
@@ -68,41 +69,54 @@ func TestFedPublicGet(t *testing.T) {
 	server_utils.ResetTestState()
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
-	lc, err := local_cache.NewLocalCache(ft.Ctx, ft.Egrp)
+	// Use a separate temp directory for the test cache to avoid conflict with the one
+	// started by NewFedTest's LaunchModules
+	testCacheDir := t.TempDir()
+	pc, err := local_cache.NewPersistentCache(ft.Ctx, ft.Egrp, local_cache.PersistentCacheConfig{
+		BaseDir: testCacheDir,
+	})
 	require.NoError(t, err)
+	defer pc.Close()
 
-	reader, err := lc.Get(context.Background(), "/test/hello_world.txt", "")
+	reader, err := pc.Get(context.Background(), "/test/hello_world.txt", "")
 	require.NoError(t, err)
 
 	byteBuff, err := io.ReadAll(reader)
 	assert.NoError(t, err)
 	assert.Equal(t, "Hello, World!", string(byteBuff))
+	reader.Close()
 
 	// Query again -- cache hit case
-	reader, err = lc.Get(context.Background(), "/test/hello_world.txt", "")
+	reader, err = pc.Get(context.Background(), "/test/hello_world.txt", "")
 	require.NoError(t, err)
 
-	assert.Equal(t, "*os.File", fmt.Sprintf("%T", reader))
 	byteBuff, err = io.ReadAll(reader)
 	assert.NoError(t, err)
 	assert.Equal(t, "Hello, World!", string(byteBuff))
+	reader.Close()
 }
 
-// Test the local cache library on an authenticated GET.
+// Test the persistent cache library on an authenticated GET.
 func TestFedAuthGet(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	ft := fed_test_utils.NewFedTest(t, authOriginCfg)
 
-	lc, err := local_cache.NewLocalCache(ft.Ctx, ft.Egrp)
+	// Use a separate temp directory for the test cache
+	testCacheDir := t.TempDir()
+	pc, err := local_cache.NewPersistentCache(ft.Ctx, ft.Egrp, local_cache.PersistentCacheConfig{
+		BaseDir: testCacheDir,
+	})
 	require.NoError(t, err)
+	defer pc.Close()
 
-	reader, err := lc.Get(context.Background(), "/test/hello_world.txt", ft.Token)
+	reader, err := pc.Get(context.Background(), "/test/hello_world.txt", ft.Token)
 	require.NoError(t, err)
 
 	byteBuff, err := io.ReadAll(reader)
 	assert.NoError(t, err)
 	assert.Equal(t, "Hello, World!", string(byteBuff))
+	reader.Close()
 
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
@@ -116,7 +130,7 @@ func TestFedAuthGet(t *testing.T) {
 	token, err := tokConf.CreateToken()
 	require.NoError(t, err)
 
-	_, err = lc.Get(context.Background(), "/test/hello_world.txt", token)
+	_, err = pc.Get(context.Background(), "/test/hello_world.txt", token)
 	assert.Error(t, err)
 	assert.Equal(t, "authorization denied", err.Error())
 }
@@ -388,26 +402,32 @@ func TestClient(t *testing.T) {
 	})
 }
 
-// Test that HEAD requests to the local cache return the correct result
+// Test that HEAD requests to the persistent cache return the correct result
 func TestStat(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
-	lc, err := local_cache.NewLocalCache(ft.Ctx, ft.Egrp)
+	// Use a separate temp directory for the test cache
+	testCacheDir := t.TempDir()
+	pc, err := local_cache.NewPersistentCache(ft.Ctx, ft.Egrp, local_cache.PersistentCacheConfig{
+		BaseDir: testCacheDir,
+	})
 	require.NoError(t, err)
+	defer pc.Close()
 
-	size, err := lc.Stat("/test/hello_world.txt", "")
+	size, err := pc.Stat("/test/hello_world.txt", "")
 	require.NoError(t, err)
 	assert.Equal(t, uint64(13), size)
 
-	reader, err := lc.Get(context.Background(), "/test/hello_world.txt", "")
+	reader, err := pc.Get(context.Background(), "/test/hello_world.txt", "")
 	require.NoError(t, err)
 	byteBuff, err := io.ReadAll(reader)
 	assert.NoError(t, err)
 	assert.Equal(t, 13, len(byteBuff))
+	reader.Close()
 
-	size, err = lc.Stat("/test/hello_world.txt", "")
+	size, err = pc.Stat("/test/hello_world.txt", "")
 	assert.NoError(t, err)
 	assert.Equal(t, uint64(13), size)
 }
@@ -494,10 +514,11 @@ func TestOriginUnresponsive(t *testing.T) {
 	tr, err := client.DoGet(ft.Ctx, downloadUrl, filepath.Join(tmpDir, "hello_world.txt"), false,
 		client.WithCaches(cacheUrl))
 	assert.Error(t, err)
-	var sce *client.StatusCodeError
-	assert.True(t, errors.As(err, &sce), "error type does not match expected. Got ", err.Error())
-	if sce != nil {
-		assert.Equal(t, int(*sce), 504)
-	}
+	// Check that it's a timeout error - can be either a PelicanError with timeout code
+	// or a HeaderTimeoutError underneath
+	var pe *error_codes.PelicanError
+	var hte *client.HeaderTimeoutError
+	isTimeout := errors.As(err, &pe) && (pe.Code() == 6004 || pe.Code() == 6003) || errors.As(err, &hte)
+	assert.True(t, isTimeout, "expected a timeout error, got: %v", err)
 	require.Equal(t, 0, len(tr))
 }

@@ -110,9 +110,14 @@ func triggerNamespacesPubKeyUpdate(ctx context.Context) error {
 	return nil
 }
 
+// KeyChangeCallback is a callback function type that is called when issuer keys change.
+// The callback receives the context and should return an error if the operation fails.
+type KeyChangeCallback func(ctx context.Context) error
+
 // Check the directory containing .pem files regularly, load new private key(s)
 // For origin server, if new file(s) are detected, then register the new public key
-func LaunchIssuerKeysDirRefresh(ctx context.Context, egrp *errgroup.Group, modules server_structs.ServerType) {
+// Optional callbacks can be provided to be invoked when keys change.
+func LaunchIssuerKeysDirRefresh(ctx context.Context, egrp *errgroup.Group, modules server_structs.ServerType, callbacks ...KeyChangeCallback) {
 	server_utils.LaunchWatcherMaintenance(
 		ctx,
 		[]string{param.IssuerKeysDirectory.GetString()},
@@ -125,10 +130,19 @@ func LaunchIssuerKeysDirRefresh(ctx context.Context, egrp *errgroup.Group, modul
 				return nil
 			}
 
-			// Update public key registered with namespace in registry db when the private key(s) changed in an origin
-			if modules.IsEnabled(server_structs.OriginType) && keysChanged {
-				if err = triggerNamespacesPubKeyUpdate(ctx); err != nil {
-					return err
+			if keysChanged {
+				// Update public key registered with namespace in registry db when the private key(s) changed in an origin
+				if modules.IsEnabled(server_structs.OriginType) {
+					if err = triggerNamespacesPubKeyUpdate(ctx); err != nil {
+						return err
+					}
+				}
+
+				// Call any registered callbacks when keys change
+				for _, callback := range callbacks {
+					if err := callback(ctx); err != nil {
+						log.Errorf("Key change callback failed: %v", err)
+					}
 				}
 			}
 			return nil
