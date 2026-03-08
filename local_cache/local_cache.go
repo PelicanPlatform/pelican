@@ -253,7 +253,7 @@ func NewLocalCache(ctx context.Context, egrp *errgroup.Group, options ...LocalCa
 		return
 	}
 
-	err = ensureDir(cacheDir)
+	err = os.MkdirAll(cacheDir, 0750)
 	if err != nil {
 		return
 	}
@@ -333,42 +333,6 @@ func NewLocalCache(ctx context.Context, egrp *errgroup.Group, options ...LocalCa
 
 	log.Debugln("Successfully created a new local cache object")
 	return
-}
-
-// ensureDir checks if the directory exists and is accessible (read, write, execute).
-// If it doesn't exist, it creates the directory with appropriate permissions.
-func ensureDir(cacheDir string) error {
-	info, err := os.Stat(cacheDir)
-	if err == nil {
-		// Directory exists, check if it's accessible
-		if info.IsDir() {
-			testFile := filepath.Join(cacheDir, ".perm_test")
-			file, err := os.Create(testFile)
-			if err != nil {
-				err = errors.New("directory is not fully accessible (write permission missing)")
-				log.WithError(err).Error("Directory permission issue")
-				return err
-			}
-			file.Close()
-			os.Remove(testFile)
-			return nil
-		} else {
-			err = errors.New("path exists but is not a directory: " + cacheDir)
-			log.WithError(err).Error("Invalid directory path")
-			return err
-		}
-	} else if !os.IsNotExist(err) {
-		log.WithError(err).Error("Error checking directory")
-		return err
-	}
-
-	// Directory does not exist, create it
-	if err = os.MkdirAll(cacheDir, 0700); err != nil {
-		log.WithError(err).Error("Error creating directory")
-		return err
-	}
-
-	return nil
 }
 
 // Try to configure the local cache and launch the reconfigure goroutine

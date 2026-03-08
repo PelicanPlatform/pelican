@@ -86,8 +86,10 @@ Lotman:
       DiscoverPrefixes: true
       MergeLocalWithDiscovered: false
 LocalCache:
+  DefaultMaxAge: 24h
   HighWaterMarkPercentage: 95
   LowWaterMarkPercentage: 85
+  RevalidationJitter: 10
 Origin:
   DirectorTest: true
   Multiuser: false
