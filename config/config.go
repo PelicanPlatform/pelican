@@ -699,7 +699,7 @@ func cleanupDirOnShutdown(ctx context.Context, dir string) {
 			fn()
 		}
 
-		CleanupTempResources()
+		_ = CleanupTempResources()
 		return nil
 	})
 }

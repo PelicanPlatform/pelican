@@ -468,6 +468,7 @@ import (
 	"time"
 
 	"github.com/pelicanplatform/pelican/byte_rate"
+	"github.com/spf13/viper"
 )
 
 type StringParam struct {

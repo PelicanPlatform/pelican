@@ -373,7 +373,8 @@ func (pc *PersistentCache) prestageHandler(w http.ResponseWriter, r *http.Reques
 	token := extractBearerToken(r)
 
 	// Check authorization (read permission).
-	if !pc.ac.authorize(token_scopes.Wlcg_Storage_Read, decodedPath, token) {
+	if ok, reason := pc.ac.authorize(token_scopes.Wlcg_Storage_Read, decodedPath, token); !ok {
+		log.WithFields(log.Fields{"path": decodedPath, "reason": reason}).Warn("Prestage authorization denied")
 		http.Error(w, "Permission denied to prestage path", http.StatusForbidden)
 		return
 	}
@@ -470,7 +471,8 @@ func (pc *PersistentCache) evictHandler(w http.ResponseWriter, r *http.Request) 
 
 	// Check authorization (read permission — eviction only removes the
 	// local cache copy, so read access to the path is sufficient).
-	if !pc.ac.authorize(token_scopes.Wlcg_Storage_Read, decodedPath, token) {
+	if ok, reason := pc.ac.authorize(token_scopes.Wlcg_Storage_Read, decodedPath, token); !ok {
+		log.WithFields(log.Fields{"path": decodedPath, "reason": reason}).Warn("Evict authorization denied")
 		http.Error(w, "Permission denied to evict path", http.StatusForbidden)
 		return
 	}
@@ -526,8 +528,8 @@ func (pc *PersistentCache) evictHandler(w http.ResponseWriter, r *http.Request) 
 // EvictObject is the programmatic API for evicting an object by path.
 // Returns nil on success, an error if the object is in use or the eviction fails.
 func (pc *PersistentCache) EvictObject(objectPath, token string) error {
-	if !pc.ac.authorize(token_scopes.Wlcg_Storage_Read, objectPath, token) {
-		return authorizationDenied
+	if ok, reason := pc.ac.authorize(token_scopes.Wlcg_Storage_Read, objectPath, token); !ok {
+		return newAuthorizationDenied(reason)
 	}
 
 	pelicanURL := pc.normalizePath(objectPath)
