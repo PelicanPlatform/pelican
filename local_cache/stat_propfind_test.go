@@ -78,7 +78,7 @@ func TestStatAPI(t *testing.T) {
 
 	t.Run("stat-after-download-uses-cache", func(t *testing.T) {
 		// Download the object first
-		reader, err := pc.Get(context.Background(), "/test/hello_world.txt", "")
+		reader, err := pc.Get(ft.Ctx, "/test/hello_world.txt", "")
 		require.NoError(t, err)
 		data, err := io.ReadAll(reader)
 		require.NoError(t, err)

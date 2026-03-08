@@ -140,11 +140,11 @@ func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp
 	}
 
 	// Populate storage directories from config if set.
-	if dirs := param.LocalCache_StorageDirs.GetStringSlice(); len(dirs) > 0 {
-		storageDirs := make([]local_cache.StorageDirConfig, len(dirs))
-		for i, d := range dirs {
-			storageDirs[i] = local_cache.StorageDirConfig{Path: d}
-		}
+	storageDirs, err := local_cache.ParseStorageDirsConfig()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse LocalCache.StorageDirs")
+	}
+	if len(storageDirs) > 0 {
 		cfg.StorageDirs = storageDirs
 	}
 

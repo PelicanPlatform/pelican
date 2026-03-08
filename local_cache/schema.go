@@ -19,6 +19,7 @@
 package local_cache
 
 import (
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -26,7 +27,20 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 )
+
+// ObjectHash is an HMAC-SHA-256 digest that identifies a logical object
+// (URL) regardless of version or ETag.  Using a dedicated type prevents
+// accidental confusion with InstanceHash or arbitrary strings.
+type ObjectHash string
+
+// InstanceHash is an HMAC-SHA-256 digest that identifies a specific
+// version (ETag) of an object.  Using a dedicated type prevents
+// accidental confusion with ObjectHash or arbitrary strings.
+type InstanceHash string
 
 // Key prefixes for BadgerDB
 const (
@@ -48,18 +62,30 @@ const (
 	PrefixETag = "e:"
 	// PrefixNamespace stores namespace prefix -> ID mappings: n:<prefix> -> uint32
 	PrefixNamespace = "n:"
+	// KeySalt is the single DB key that stores the random salt used when
+	// hashing object/instance names.  The salt prevents an attacker with
+	// DB access from correlating hashes with known URLs.
+	KeySalt = "_salt"
 )
 
-// Storage ID constants.
-// The StorageID field in CacheMetadata doubles as the storage-mode indicator:
-// 0 means inline (data lives in BadgerDB), 1–255 mean disk-backed storage in
-// the directory mapped to that ID.
+// StorageID identifies a storage location.  0 means inline (data in BadgerDB),
+// 1–255 mean disk-backed storage in the directory mapped to that ID.
+// Using a dedicated type prevents accidental confusion with NamespaceID or
+// arbitrary uint8 values.
+type StorageID uint8
+
+// NamespaceID identifies a namespace prefix.  Each distinct prefix registered
+// in the cache is assigned a monotonically increasing ID for efficient
+// storage and lookup.  Using a dedicated type prevents accidental confusion
+// with StorageID or arbitrary uint32 values.
+type NamespaceID uint32
+
 const (
 	// StorageIDInline is the storage ID for inline data stored in BadgerDB
-	StorageIDInline uint8 = 0
+	StorageIDInline StorageID = 0
 	// StorageIDFirstDisk is the storage ID for the first configured disk directory.
 	// Additional directories use StorageIDFirstDisk+1, +2, etc.
-	StorageIDFirstDisk uint8 = 1
+	StorageIDFirstDisk StorageID = 1
 )
 
 // StorageDirConfig describes one disk-backed storage directory.
@@ -78,6 +104,168 @@ type StorageDirConfig struct {
 	// LowWaterMarkPercentage overrides the global low-water mark for this
 	// directory.  0 means use the global default.
 	LowWaterMarkPercentage int
+}
+
+// ParseStorageDirsConfig reads the LocalCache.StorageDirs setting from Viper
+// and returns parsed StorageDirConfig values.  It accepts two formats for
+// backward compatibility:
+//
+//  1. A list of strings (paths only):
+//     LocalCache:
+//     StorageDirs:
+//     - /mnt/cache1
+//     - /mnt/cache2
+//
+//  2. A list of objects with per-directory configuration:
+//     LocalCache:
+//     StorageDirs:
+//     - Path: /mnt/cache1
+//     MaxSize: 500GB
+//     HighWaterMarkPercentage: 95
+//     LowWaterMarkPercentage: 85
+//     - Path: /mnt/cache2
+//     MaxSize: 2TB
+//
+// Returns nil (not an error) when the key is unset or empty.
+func ParseStorageDirsConfig() ([]StorageDirConfig, error) {
+	raw := param.LocalCache_StorageDirs.GetRaw()
+	if raw == nil {
+		return nil, nil
+	}
+
+	switch v := raw.(type) {
+	case []interface{}:
+		if len(v) == 0 {
+			return nil, nil
+		}
+		configs := make([]StorageDirConfig, 0, len(v))
+		for i, elem := range v {
+			switch e := elem.(type) {
+			case string:
+				// Plain string path (backward-compat format)
+				if e == "" {
+					return nil, fmt.Errorf("LocalCache.StorageDirs[%d]: empty path", i)
+				}
+				configs = append(configs, StorageDirConfig{Path: e})
+			case map[string]interface{}:
+				// Structured entry
+				cfg, err := parseStorageDirEntry(i, e)
+				if err != nil {
+					return nil, err
+				}
+				configs = append(configs, cfg)
+			case map[interface{}]interface{}:
+				// YAML sometimes produces map[interface{}]interface{}
+				converted := make(map[string]interface{}, len(e))
+				for k, val := range e {
+					converted[fmt.Sprint(k)] = val
+				}
+				cfg, err := parseStorageDirEntry(i, converted)
+				if err != nil {
+					return nil, err
+				}
+				configs = append(configs, cfg)
+			default:
+				return nil, fmt.Errorf("LocalCache.StorageDirs[%d]: unsupported type %T", i, elem)
+			}
+		}
+		return configs, nil
+	case []string:
+		// Viper sometimes resolves stringSlice directly
+		if len(v) == 0 {
+			return nil, nil
+		}
+		configs := make([]StorageDirConfig, len(v))
+		for i, p := range v {
+			if p == "" {
+				return nil, fmt.Errorf("LocalCache.StorageDirs[%d]: empty path", i)
+			}
+			configs[i] = StorageDirConfig{Path: p}
+		}
+		return configs, nil
+	default:
+		return nil, fmt.Errorf("LocalCache.StorageDirs: unsupported type %T; expected list of paths or objects", raw)
+	}
+}
+
+// parseStorageDirEntry converts a map entry into a StorageDirConfig.
+func parseStorageDirEntry(idx int, m map[string]interface{}) (StorageDirConfig, error) {
+	var cfg StorageDirConfig
+
+	// Path (required)
+	switch p := m["Path"].(type) {
+	case string:
+		cfg.Path = p
+	default:
+		// Try lowercase key as fallback
+		if p2, ok := m["path"].(string); ok {
+			cfg.Path = p2
+		}
+	}
+	if cfg.Path == "" {
+		return cfg, fmt.Errorf("LocalCache.StorageDirs[%d]: missing or empty Path", idx)
+	}
+
+	// MaxSize (optional, string like "500GB" or number of bytes)
+	if _, ok := m["MaxSize"]; !ok {
+		if v, ok := m["maxsize"]; ok {
+			m["MaxSize"] = v
+		}
+	}
+	if v, ok := m["MaxSize"]; ok && v != nil {
+		switch s := v.(type) {
+		case string:
+			if s != "" && s != "0" {
+				n, err := utils.ParseBytes(s)
+				if err != nil {
+					return cfg, fmt.Errorf("LocalCache.StorageDirs[%d].MaxSize: %w", idx, err)
+				}
+				cfg.MaxSize = n
+			}
+		case int:
+			cfg.MaxSize = uint64(s)
+		case int64:
+			cfg.MaxSize = uint64(s)
+		case float64:
+			cfg.MaxSize = uint64(s)
+		}
+	}
+
+	// HighWaterMarkPercentage (optional)
+	if _, ok := m["HighWaterMarkPercentage"]; !ok {
+		if v, ok := m["highwatermarkpercentage"]; ok {
+			m["HighWaterMarkPercentage"] = v
+		}
+	}
+	if v, ok := m["HighWaterMarkPercentage"]; ok && v != nil {
+		switch n := v.(type) {
+		case int:
+			cfg.HighWaterMarkPercentage = n
+		case int64:
+			cfg.HighWaterMarkPercentage = int(n)
+		case float64:
+			cfg.HighWaterMarkPercentage = int(n)
+		}
+	}
+
+	// LowWaterMarkPercentage (optional)
+	if _, ok := m["LowWaterMarkPercentage"]; !ok {
+		if v, ok := m["lowwatermarkpercentage"]; ok {
+			m["LowWaterMarkPercentage"] = v
+		}
+	}
+	if v, ok := m["LowWaterMarkPercentage"]; ok && v != nil {
+		switch n := v.(type) {
+		case int:
+			cfg.LowWaterMarkPercentage = n
+		case int64:
+			cfg.LowWaterMarkPercentage = int(n)
+		case float64:
+			cfg.LowWaterMarkPercentage = int(n)
+		}
+	}
+
+	return cfg, nil
 }
 
 // Block size constants for encryption and storage
@@ -114,6 +302,7 @@ const (
 	ChecksumSHA1   ChecksumType = 1
 	ChecksumSHA256 ChecksumType = 2
 	ChecksumCRC32  ChecksumType = 3
+	ChecksumCRC32C ChecksumType = 4
 )
 
 // Checksum holds a checksum type and its value
@@ -126,6 +315,22 @@ type Checksum struct {
 
 // CacheMetadata stores all metadata about a cached object
 // Serialized using MessagePack for efficiency
+//
+// # Merge semantics (see CacheDB.MergeMetadata)
+//
+// Fields are classified into groups that govern how concurrent updates
+// are reconciled:
+//
+//   - Max-time: LastModified, LastValidated, LastAccessTime, Expires,
+//     Completed — only advance forward (keep the later timestamp).
+//   - Additive: Checksums — union by algorithm; prefer OriginVerified.
+//   - Last-writer-wins: ContentType, ContentLength, VaryHeaders,
+//     CCFlags, CCMaxAge — the incoming value always replaces the old one.
+//   - Set-once: ETag, SourceURL, DataKey, StorageID, NamespaceID — may
+//     transition from zero-value to set, but changing a non-zero value
+//     to a different non-zero value is an error.  ETag is set-once
+//     because it is part of the instance hash; a changed ETag produces
+//     a different instance.
 type CacheMetadata struct {
 	// Validation fields
 	ETag          string     `msgpack:"etag"`         // HTTP ETag header
@@ -140,7 +345,6 @@ type CacheMetadata struct {
 	ContentLength int64    `msgpack:"cl"`            // Total object size in bytes
 	VaryHeaders   []string `msgpack:"vh,omitempty"`  // Headers that affect caching
 	SourceURL     string   `msgpack:"url,omitempty"` // Original URL including federation
-	ObjectHash    string   `msgpack:"oh"`            // Hash of the URL (for ETag table cleanup)
 
 	// Cache-Control directives (efficient packed representation)
 	CCFlags  uint8 `msgpack:"ccf,omitempty"`  // Bitset: 0x01=no-store, 0x02=no-cache, 0x04=private, 0x08=must-revalidate
@@ -150,12 +354,11 @@ type CacheMetadata struct {
 	// StorageID encodes both location type and directory identity:
 	//   0         = inline (data stored directly in BadgerDB)
 	//   1 .. 255  = disk-backed (directory identified by this ID)
-	StorageID uint8  `msgpack:"sid"`
-	DataKey   []byte `msgpack:"key"` // Encrypted DEK (Data Encryption Key)
-	Nonce     []byte `msgpack:"iv"`  // Base IV/nonce for file encryption
+	StorageID StorageID `msgpack:"sid"`
+	DataKey   []byte    `msgpack:"key"` // Encrypted DEK (Data Encryption Key)
 
 	// Namespace and storage tracking for fairness-aware eviction
-	NamespaceID uint32 `msgpack:"ns"` // ID of the namespace prefix
+	NamespaceID NamespaceID `msgpack:"ns"` // ID of the namespace prefix
 	// Usage is tracked per (StorageID, NamespaceID) pair for multi-storage fairness
 
 	// LRU tracking
@@ -265,9 +468,9 @@ func (m *CacheMetadata) ResponseCacheControl() string {
 // and UUID.  The UUID file is dropped in the directory root so that
 // directories can be remounted at different paths and re-associated.
 type DiskMapping struct {
-	ID        uint8  `msgpack:"id"`
-	UUID      string `msgpack:"uuid"`
-	Directory string `msgpack:"dir"`
+	ID        StorageID `msgpack:"id"`
+	UUID      string    `msgpack:"uuid"`
+	Directory string    `msgpack:"dir"`
 }
 
 // MasterKeyFile represents the encrypted master key file format
@@ -277,21 +480,33 @@ type MasterKeyFile struct {
 	Keys map[string][]byte `json:"keys"`
 }
 
-// ComputeObjectHash computes the SHA256 hash of a normalized URL.
+const (
+	// SaltSize is the number of random bytes prepended to object/instance
+	// names before hashing.  32 bytes (256 bits) provides a comfortable
+	// security margin.
+	SaltSize = 32
+)
+
+// ComputeObjectHash computes HMAC-SHA-256(salt, normalized URL).
 // This identifies the logical object (URL) regardless of version/ETag.
-func ComputeObjectHash(pelicanURL string) string {
+// The salt is generated once per cache database and prevents offline
+// correlation of hashes with known URLs.
+func ComputeObjectHash(salt []byte, pelicanURL string) ObjectHash {
 	normalized := normalizeURL(pelicanURL)
-	hash := sha256.Sum256([]byte(normalized))
-	return hex.EncodeToString(hash[:])
+	h := hmac.New(sha256.New, salt)
+	h.Write([]byte(normalized))
+	return ObjectHash(hex.EncodeToString(h.Sum(nil)))
 }
 
-// ComputeInstanceHash computes the SHA256 hash combining ETag and objectHash.
+// ComputeInstanceHash computes HMAC-SHA-256(salt, etag + ":" + objectHash).
 // This identifies a specific version of an object.
 // If etag is empty, uses empty string (for objects without ETag support).
-func ComputeInstanceHash(etag, objectHash string) string {
-	combined := etag + ":" + objectHash
-	hash := sha256.Sum256([]byte(combined))
-	return hex.EncodeToString(hash[:])
+func ComputeInstanceHash(salt []byte, etag string, objectHash ObjectHash) InstanceHash {
+	h := hmac.New(sha256.New, salt)
+	h.Write([]byte(etag))
+	h.Write([]byte{':'})
+	h.Write([]byte(objectHash))
+	return InstanceHash(hex.EncodeToString(h.Sum(nil)))
 }
 
 // normalizeURL normalizes a pelican URL for consistent hashing
@@ -310,32 +525,32 @@ func normalizeURL(pelicanURL string) string {
 
 // GetInstanceStoragePath returns the 2-level directory path for storing a file
 // Given hash "42561abfe18be...", returns "42/56/1abfe18be..."
-func GetInstanceStoragePath(hash string) string {
+func GetInstanceStoragePath(hash InstanceHash) string {
 	if len(hash) < 4 {
-		return hash
+		return string(hash)
 	}
 	return fmt.Sprintf("%s/%s/%s", hash[0:2], hash[2:4], hash[4:])
 }
 
 // MetaKey returns the BadgerDB key for metadata
-func MetaKey(instanceHash string) []byte {
-	return []byte(PrefixMeta + instanceHash)
+func MetaKey(instanceHash InstanceHash) []byte {
+	return []byte(PrefixMeta + string(instanceHash))
 }
 
 // StateKey returns the BadgerDB key for block state bitmap
-func StateKey(instanceHash string) []byte {
-	return []byte(PrefixState + instanceHash)
+func StateKey(instanceHash InstanceHash) []byte {
+	return []byte(PrefixState + string(instanceHash))
 }
 
 // InlineKey returns the BadgerDB key for inline data
-func InlineKey(instanceHash string) []byte {
-	return []byte(PrefixInline + instanceHash)
+func InlineKey(instanceHash InstanceHash) []byte {
+	return []byte(PrefixInline + string(instanceHash))
 }
 
 // ETagKey returns the BadgerDB key for ETag lookup
 // Maps objectHash -> latest ETag for that object
-func ETagKey(objectHash string) []byte {
-	return []byte(PrefixETag + objectHash)
+func ETagKey(objectHash ObjectHash) []byte {
+	return []byte(PrefixETag + string(objectHash))
 }
 
 // NamespaceKey returns the BadgerDB key for a namespace prefix mapping
@@ -345,12 +560,12 @@ func NamespaceKey(prefix string) []byte {
 
 // LRUKey returns the BadgerDB key for LRU tracking
 // Format: l:<storage_id>:<namespace_id>:<timestamp_ns>:<instance_hash>
-func LRUKey(storageID uint8, namespaceID uint32, timestamp time.Time, instanceHash string) []byte {
-	return []byte(fmt.Sprintf("%s%d:%d:%019d:%s", PrefixLRU, storageID, namespaceID, timestamp.UnixNano(), instanceHash))
+func LRUKey(storageID StorageID, namespaceID NamespaceID, timestamp time.Time, instanceHash InstanceHash) []byte {
+	return []byte(fmt.Sprintf("%s%d:%d:%019d:%s", PrefixLRU, storageID, namespaceID, timestamp.UnixNano(), string(instanceHash)))
 }
 
 // ParseLRUKey parses an LRU key and returns storageID, namespaceID, timestamp, and instanceHash
-func ParseLRUKey(key []byte) (storageID uint8, namespaceID uint32, timestamp time.Time, instanceHash string, err error) {
+func ParseLRUKey(key []byte) (storageID StorageID, namespaceID NamespaceID, timestamp time.Time, instanceHash InstanceHash, err error) {
 	keyStr := string(key)
 	if !strings.HasPrefix(keyStr, PrefixLRU) {
 		err = fmt.Errorf("invalid LRU key prefix: %s", keyStr)
@@ -370,13 +585,13 @@ func ParseLRUKey(key []byte) (storageID uint8, namespaceID uint32, timestamp tim
 	if err != nil {
 		return
 	}
-	storageID = uint8(sid)
+	storageID = StorageID(sid)
 
 	_, err = fmt.Sscanf(parts[1], "%d", &nid)
 	if err != nil {
 		return
 	}
-	namespaceID = nid
+	namespaceID = NamespaceID(nid)
 
 	var tsNano int64
 	n, err = fmt.Sscanf(parts[2], "%d", &tsNano)
@@ -386,18 +601,18 @@ func ParseLRUKey(key []byte) (storageID uint8, namespaceID uint32, timestamp tim
 	}
 	timestamp = time.Unix(0, tsNano)
 
-	instanceHash = parts[3]
+	instanceHash = InstanceHash(parts[3])
 	return
 }
 
 // UsageKey returns the BadgerDB key for namespace usage counter per storage
 // Format: u:<storage_id>:<namespace_id>
-func UsageKey(storageID uint8, namespaceID uint32) []byte {
+func UsageKey(storageID StorageID, namespaceID NamespaceID) []byte {
 	return []byte(fmt.Sprintf("%s%d:%d", PrefixUsage, storageID, namespaceID))
 }
 
 // ParseUsageKey extracts the storage ID and namespace ID from a usage key
-func ParseUsageKey(key []byte) (storageID uint8, namespaceID uint32, err error) {
+func ParseUsageKey(key []byte) (storageID StorageID, namespaceID NamespaceID, err error) {
 	keyStr := string(key)
 	if !strings.HasPrefix(keyStr, PrefixUsage) {
 		err = fmt.Errorf("invalid usage key prefix: %s", keyStr)
@@ -408,8 +623,8 @@ func ParseUsageKey(key []byte) (storageID uint8, namespaceID uint32, err error) 
 	if err != nil {
 		return
 	}
-	storageID = uint8(sid)
-	namespaceID = nid
+	storageID = StorageID(sid)
+	namespaceID = NamespaceID(nid)
 	return
 }
 
@@ -440,6 +655,6 @@ func ContentOffsetWithinBlock(contentOffset int64) int {
 }
 
 // PurgeFirstKey returns the BadgerDB key for purge first tracking
-func PurgeFirstKey(instanceHash string) []byte {
-	return []byte(PrefixPurgeFirst + instanceHash)
+func PurgeFirstKey(instanceHash InstanceHash) []byte {
+	return []byte(PrefixPurgeFirst + string(instanceHash))
 }

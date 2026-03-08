@@ -23,11 +23,12 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
-	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
 
 // benchEnv holds shared state for benchmarks that need a CacheDB + StorageManager.
@@ -43,9 +44,7 @@ func newBenchEnv(b *testing.B) *benchEnv {
 	b.Helper()
 	InitIssuerKeyForTests(b)
 
-	dir, err := os.MkdirTemp("", "bench_cache_*")
-	require.NoError(b, err)
-	b.Cleanup(func() { os.RemoveAll(dir) })
+	dir := b.TempDir()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	b.Cleanup(cancel)
@@ -54,19 +53,20 @@ func newBenchEnv(b *testing.B) *benchEnv {
 	require.NoError(b, err)
 	b.Cleanup(func() { db.Close() })
 
-	storage, err := NewStorageManager(db, []string{dir}, 0)
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{dir}, 0, egrp)
 	require.NoError(b, err)
 
 	return &benchEnv{dir: dir, db: db, storage: storage}
 }
 
 // storeInlineObject creates and stores a small inline object, returning its instanceHash.
-func storeInlineObject(b *testing.B, env *benchEnv, name string, size int) string {
+func storeInlineObject(b *testing.B, env *benchEnv, name string, size int) InstanceHash {
 	b.Helper()
 
-	objectHash := ComputeObjectHash("pelican://bench.example.com/" + name)
+	objectHash := env.db.ObjectHash("pelican://bench.example.com/" + name)
 	etag := "bench-etag-" + name
-	instanceHash := ComputeInstanceHash(etag, objectHash)
+	instanceHash := env.db.InstanceHash(etag, objectHash)
 
 	data := make([]byte, size)
 	_, _ = rand.Read(data)
@@ -82,19 +82,19 @@ func storeInlineObject(b *testing.B, env *benchEnv, name string, size int) strin
 	err := env.storage.StoreInline(context.Background(), instanceHash, meta, data)
 	require.NoError(b, err)
 
-	err = env.db.SetLatestETag(objectHash, etag)
+	err = env.db.SetLatestETag(objectHash, etag, time.Now())
 	require.NoError(b, err)
 
 	return instanceHash
 }
 
 // storeDiskObject creates and stores a large disk-backed object, returning its instanceHash.
-func storeDiskObject(b *testing.B, env *benchEnv, name string, size int) string {
+func storeDiskObject(b *testing.B, env *benchEnv, name string, size int) InstanceHash {
 	b.Helper()
 
-	objectHash := ComputeObjectHash("pelican://bench.example.com/" + name)
+	objectHash := env.db.ObjectHash("pelican://bench.example.com/" + name)
 	etag := "bench-etag-" + name
-	instanceHash := ComputeInstanceHash(etag, objectHash)
+	instanceHash := env.db.InstanceHash(etag, objectHash)
 
 	// Init disk storage (creates the file, sets up encryption keys)
 	meta, err := env.storage.InitDiskStorage(context.Background(), instanceHash, int64(size), StorageIDFirstDisk)
@@ -108,7 +108,7 @@ func storeDiskObject(b *testing.B, env *benchEnv, name string, size int) string 
 	require.NoError(b, err)
 
 	// Set ETag mapping
-	err = env.db.SetLatestETag(objectHash, etag)
+	err = env.db.SetLatestETag(objectHash, etag, time.Now())
 	require.NoError(b, err)
 
 	// Update metadata with ETag
@@ -128,7 +128,7 @@ func BenchmarkMetadataLookup(b *testing.B) {
 	env := newBenchEnv(b)
 	instanceHash := storeInlineObject(b, env, "meta-lookup", 100)
 
-	objectHash := ComputeObjectHash("pelican://bench.example.com/meta-lookup")
+	objectHash := env.db.ObjectHash("pelican://bench.example.com/meta-lookup")
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -138,7 +138,7 @@ func BenchmarkMetadataLookup(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		ih := ComputeInstanceHash(etag, objectHash)
+		ih := env.db.InstanceHash(etag, objectHash)
 		if ih != instanceHash {
 			b.Fatal("unexpected instanceHash")
 		}
@@ -339,13 +339,13 @@ func BenchmarkRangeRead(b *testing.B) {
 func BenchmarkETagWrite(b *testing.B) {
 	env := newBenchEnv(b)
 
-	objectHash := ComputeObjectHash("pelican://bench.example.com/etag-write")
+	objectHash := env.db.ObjectHash("pelican://bench.example.com/etag-write")
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		err := env.db.SetLatestETag(objectHash, fmt.Sprintf("etag-%d", i))
+		err := env.db.SetLatestETag(objectHash, fmt.Sprintf("etag-%d", i), time.Now())
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -382,13 +382,14 @@ func BenchmarkMetadataWrite(b *testing.B) {
 func BenchmarkHashComputation(b *testing.B) {
 	url := "pelican://director.example.com/namespace/deeply/nested/path/to/file.dat"
 	etag := "W/\"abc123def456\""
+	salt := []byte("benchmark-salt")
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		oh := ComputeObjectHash(url)
-		_ = ComputeInstanceHash(etag, oh)
+		oh := ComputeObjectHash(salt, url)
+		_ = ComputeInstanceHash(salt, etag, oh)
 	}
 }
 

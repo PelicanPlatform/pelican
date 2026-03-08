@@ -43,22 +43,22 @@ type EvictionManager struct {
 
 	// Per-directory size limits, keyed by storageID.  The map is
 	// read-only after construction and requires no synchronisation.
-	dirLimits map[uint8]*dirEvictionLimits
+	dirLimits map[StorageID]*dirEvictionLimits
 
 	// Per-directory usage estimates, keyed by storageID.  The map itself
 	// is read-only after construction; each value is an atomic counter
 	// that can be updated without locks.
-	dirUsage map[uint8]*atomic.Int64
+	dirUsage map[StorageID]*atomic.Int64
 
 	// Sorted list of directory IDs.  Read-only after construction.
-	dirIDs []uint8
+	dirIDs []StorageID
 
 	// Pre-computed shuffled lookup table for ChooseDiskStorage.
 	// The table has rrTableSize entries, each containing a storageID.
 	// Entries are assigned proportional to free space and then
 	// shuffled, so a simple atomic increment through the table
 	// produces a weighted, uniformly-spread distribution.
-	rrTable      atomic.Pointer[[rrTableSize]uint8]
+	rrTable      atomic.Pointer[[rrTableSize]StorageID]
 	rrIndex      atomic.Int64
 	rrLastUpdate atomic.Int64 // UnixMilli of last rebuild
 
@@ -79,7 +79,7 @@ type dirEvictionLimits struct {
 type EvictionConfig struct {
 	// DirConfigs maps storageID to its eviction limits.
 	// Each entry describes one storage directory.
-	DirConfigs map[uint8]EvictionDirConfig
+	DirConfigs map[StorageID]EvictionDirConfig
 }
 
 // EvictionDirConfig holds per-directory eviction configuration.
@@ -91,7 +91,7 @@ type EvictionDirConfig struct {
 
 // NewEvictionManager creates a new eviction manager
 func NewEvictionManager(db *CacheDB, storage *StorageManager, config EvictionConfig) *EvictionManager {
-	dirLimits := make(map[uint8]*dirEvictionLimits, len(config.DirConfigs))
+	dirLimits := make(map[StorageID]*dirEvictionLimits, len(config.DirConfigs))
 
 	for id, dcfg := range config.DirConfigs {
 		hwp := dcfg.HighWaterPercentage
@@ -109,8 +109,8 @@ func NewEvictionManager(db *CacheDB, storage *StorageManager, config EvictionCon
 		}
 	}
 
-	dirUsage := make(map[uint8]*atomic.Int64, len(config.DirConfigs))
-	dirIDs := make([]uint8, 0, len(config.DirConfigs))
+	dirUsage := make(map[StorageID]*atomic.Int64, len(config.DirConfigs))
+	dirIDs := make([]StorageID, 0, len(config.DirConfigs))
 	for id := range config.DirConfigs {
 		dirUsage[id] = &atomic.Int64{}
 		dirIDs = append(dirIDs, id)
@@ -165,33 +165,12 @@ func (em *EvictionManager) TriggerEviction() {
 	}
 }
 
-// AddUsage tracks usage increase for a storage+namespace combination
-func (em *EvictionManager) AddUsage(storageID uint8, namespaceID uint32, bytes int64) error {
-	if err := em.db.AddUsage(storageID, namespaceID, bytes); err != nil {
-		return err
-	}
-
-	counter, ok := em.dirUsage[storageID]
-	if !ok {
-		return nil
-	}
-	newVal := counter.Add(bytes)
-
-	// Check if this directory needs eviction
-	limits, lok := em.dirLimits[storageID]
-	if lok && newVal > int64(limits.highWater) {
-		em.TriggerEviction()
-	}
-
-	return nil
-}
-
 // NoteUsageIncrease updates the in-memory usage estimate and triggers an
 // eviction check if the specified directory's high-water mark appears to
-// be exceeded.  Unlike AddUsage it does NOT write to the persistent
-// database — the caller is responsible for ensuring the DB was already
-// updated (e.g., via MergeBlockStateWithUsage which tracks usage
-// atomically alongside the bitmap merge).  The database usage updates
+// be exceeded.  It does NOT write to the persistent database — the
+// caller is responsible for ensuring the DB was already updated (e.g.,
+// via MergeBlockStateWithUsage which tracks usage atomically alongside
+// the bitmap merge).  The database usage updates
 // handle race conditions where multiple writers may be updating the same
 // blocks simultaneously.  This doesn't - hence the estimated usage is going
 // to be potentially higher than the actual usage.
@@ -201,7 +180,7 @@ func (em *EvictionManager) AddUsage(storageID uint8, namespaceID uint32, bytes i
 // When the counter indicates a possible threshold crossing we consult
 // the database for the authoritative total, correct the counter, and
 // only then decide whether to trigger eviction.
-func (em *EvictionManager) NoteUsageIncrease(storageID uint8, bytes int64) {
+func (em *EvictionManager) NoteUsageIncrease(storageID StorageID, bytes int64) {
 	counter, ok := em.dirUsage[storageID]
 	if !ok {
 		return
@@ -237,7 +216,7 @@ func (em *EvictionManager) GetTotalUsage() uint64 {
 }
 
 // GetNamespaceUsage returns usage for a specific storage+namespace combination
-func (em *EvictionManager) GetNamespaceUsage(storageID uint8, namespaceID uint32) (int64, error) {
+func (em *EvictionManager) GetNamespaceUsage(storageID StorageID, namespaceID NamespaceID) (int64, error) {
 	return em.db.GetUsage(storageID, namespaceID)
 }
 
@@ -256,7 +235,7 @@ func (em *EvictionManager) recalculateDirUsage() {
 	}
 
 	// Accumulate per-directory totals from the DB.
-	perDir := make(map[uint8]int64, len(em.dirUsage))
+	perDir := make(map[StorageID]int64, len(em.dirUsage))
 	var grand int64
 	for key, usage := range allUsage {
 		perDir[key.StorageID] += usage
@@ -274,7 +253,7 @@ func (em *EvictionManager) recalculateDirUsage() {
 
 // getDirUsage returns the total usage for a single storageID by summing
 // all namespace usage counters for that ID.
-func (em *EvictionManager) getDirUsage(storageID uint8) int64 {
+func (em *EvictionManager) getDirUsage(storageID StorageID) int64 {
 	nsUsage, err := em.db.GetDirUsage(storageID)
 	if err != nil {
 		log.Warnf("Failed to get usage for storage %d: %v", storageID, err)
@@ -289,6 +268,8 @@ func (em *EvictionManager) getDirUsage(storageID uint8) int64 {
 
 // checkAndEvict checks each storage directory against its own watermarks
 // and evicts from any directory that exceeds its high-water mark.
+// Directories are processed concurrently because they typically reside
+// on separate physical devices, so parallel I/O carries little penalty.
 func (em *EvictionManager) checkAndEvict() {
 	em.evictMu.Lock()
 	if em.evicting {
@@ -305,68 +286,74 @@ func (em *EvictionManager) checkAndEvict() {
 	}()
 
 	startTime := time.Now()
-	totalEvictedBytes := uint64(0)
-	totalEvictedObjects := 0
+	var totalEvictedBytes atomic.Uint64
+	var totalEvictedObjects atomic.Int64
 
+	var wg sync.WaitGroup
 	for sid, limits := range em.dirLimits {
-		dirUsage := em.getDirUsage(sid)
-		if dirUsage <= int64(limits.highWater) {
-			continue
-		}
-
-		log.Infof("Starting eviction for storage %d: usage %d > high water %d",
-			sid, dirUsage, limits.highWater)
-
-		for dirUsage = em.getDirUsage(sid); dirUsage > int64(limits.lowWater); dirUsage = em.getDirUsage(sid) {
-			// Find the greediest namespace in this directory
-			targetKey, targetUsage, err := em.findGreediestNamespaceInDir(sid)
-			if err != nil {
-				log.Warnf("Failed to find greediest namespace in storage %d: %v", sid, err)
-				break
+		wg.Add(1)
+		go func(sid StorageID, limits *dirEvictionLimits) {
+			defer wg.Done()
+			dirUsage := em.getDirUsage(sid)
+			if dirUsage <= int64(limits.highWater) {
+				return
 			}
 
-			if targetUsage <= 0 {
-				log.Warnf("No namespace with positive usage found in storage %d", sid)
-				break
+			log.Infof("Starting eviction for storage %d: usage %d > high water %d",
+				sid, dirUsage, limits.highWater)
+
+			for dirUsage = em.getDirUsage(sid); dirUsage > int64(limits.lowWater); dirUsage = em.getDirUsage(sid) {
+				// Find the greediest namespace in this directory
+				targetKey, targetUsage, err := em.findGreediestNamespaceInDir(sid)
+				if err != nil {
+					log.Warnf("Failed to find greediest namespace in storage %d: %v", sid, err)
+					break
+				}
+
+				if targetUsage <= 0 {
+					log.Warnf("No namespace with positive usage found in storage %d", sid)
+					break
+				}
+
+				overhead := dirUsage - int64(limits.lowWater)
+				log.Debugf("Evicting from storage %d namespace %d (usage: %d bytes, need to free: %d bytes)",
+					targetKey.StorageID, targetKey.NamespaceID, targetUsage, overhead)
+
+				bytes, count, err := em.evictFromNamespace(targetKey.StorageID, targetKey.NamespaceID, 0, overhead)
+				if err != nil {
+					log.Warnf("Error evicting from storage %d namespace %d: %v",
+						targetKey.StorageID, targetKey.NamespaceID, err)
+					continue
+				}
+
+				totalEvictedBytes.Add(bytes)
+				totalEvictedObjects.Add(int64(count))
+
+				// Safety: don't run for too long
+				if time.Since(startTime) > 30*time.Second {
+					log.Warn("Eviction timeout - will continue next cycle")
+					break
+				}
 			}
-
-			overhead := dirUsage - int64(limits.lowWater)
-			log.Debugf("Evicting from storage %d namespace %d (usage: %d bytes, need to free: %d bytes)",
-				targetKey.StorageID, targetKey.NamespaceID, targetUsage, overhead)
-
-			bytes, count, err := em.evictFromNamespace(targetKey.StorageID, targetKey.NamespaceID, 0, overhead)
-			if err != nil {
-				log.Warnf("Error evicting from storage %d namespace %d: %v",
-					targetKey.StorageID, targetKey.NamespaceID, err)
-				continue
-			}
-
-			totalEvictedBytes += bytes
-			totalEvictedObjects += count
-
-			// Safety: don't run for too long
-			if time.Since(startTime) > 30*time.Second {
-				log.Warn("Eviction timeout - will continue next cycle")
-				break
-			}
-		}
+		}(sid, limits)
 	}
+	wg.Wait()
 
-	if totalEvictedObjects > 0 {
+	if evicted := totalEvictedObjects.Load(); evicted > 0 {
 		log.Infof("Eviction complete: freed %d bytes from %d objects in %v",
-			totalEvictedBytes, totalEvictedObjects, time.Since(startTime))
+			totalEvictedBytes.Load(), evicted, time.Since(startTime))
 	}
 }
 
 // findGreediestNamespaceInDir finds the namespace with highest usage
 // within a specific storage directory.
-func (em *EvictionManager) findGreediestNamespaceInDir(storageID uint8) (StorageUsageKey, int64, error) {
+func (em *EvictionManager) findGreediestNamespaceInDir(storageID StorageID) (StorageUsageKey, int64, error) {
 	nsUsage, err := em.db.GetDirUsage(storageID)
 	if err != nil {
 		return StorageUsageKey{}, 0, errors.Wrap(err, "failed to get namespace usage")
 	}
 
-	var bestNS uint32
+	var bestNS NamespaceID
 	var bestUsage int64
 	for ns, usage := range nsUsage {
 		if usage > bestUsage {
@@ -391,7 +378,7 @@ func (em *EvictionManager) findGreediestNamespaceInDir(storageID uint8) (Storage
 // All DB mutations happen in a single BadgerDB transaction; filesystem
 // deletes follow after the transaction commits.
 // Returns total bytes freed and number of objects evicted.
-func (em *EvictionManager) evictFromNamespace(storageID uint8, namespaceID uint32, maxObjects int, maxBytes int64) (uint64, int, error) {
+func (em *EvictionManager) evictFromNamespace(storageID StorageID, namespaceID NamespaceID, maxObjects int, maxBytes int64) (uint64, int, error) {
 	evicted, totalFreed, err := em.storage.EvictByLRU(storageID, namespaceID, maxObjects, maxBytes)
 	if err != nil {
 		return 0, 0, err
@@ -412,7 +399,7 @@ func (em *EvictionManager) evictFromNamespace(storageID uint8, namespaceID uint3
 // the in-memory estimates in sync.
 func (em *EvictionManager) noteEvicted(evicted []evictedObject) {
 	// Accumulate per-storageID totals to minimise atomic operations.
-	perDir := make(map[uint8]int64, 2)
+	perDir := make(map[StorageID]int64, 2)
 	for _, obj := range evicted {
 		perDir[obj.storageID] += obj.contentLen
 	}
@@ -424,7 +411,7 @@ func (em *EvictionManager) noteEvicted(evicted []evictedObject) {
 }
 
 // RecordAccess records an access to an object, updating LRU
-func (em *EvictionManager) RecordAccess(instanceHash string) error {
+func (em *EvictionManager) RecordAccess(instanceHash InstanceHash) error {
 	// Use 10 minute debounce as specified in design doc
 	return em.db.UpdateLRU(instanceHash, 10*time.Minute)
 }
@@ -433,7 +420,7 @@ func (em *EvictionManager) RecordAccess(instanceHash string) error {
 func (em *EvictionManager) GetStats() EvictionStats {
 	usage, _ := em.db.GetAllUsage()
 
-	dirStats := make(map[uint8]DirEvictionStats, len(em.dirLimits))
+	dirStats := make(map[StorageID]DirEvictionStats, len(em.dirLimits))
 	for id, limits := range em.dirLimits {
 		dirStats[id] = DirEvictionStats{
 			MaxSize:   limits.maxSize,
@@ -452,7 +439,7 @@ func (em *EvictionManager) GetStats() EvictionStats {
 // EvictionStats contains eviction manager statistics
 type EvictionStats struct {
 	TotalUsage     uint64
-	DirStats       map[uint8]DirEvictionStats
+	DirStats       map[StorageID]DirEvictionStats
 	NamespaceUsage map[StorageUsageKey]int64
 }
 
@@ -484,7 +471,7 @@ func (em *EvictionManager) HasSpace(needed uint64) bool {
 // the table is shuffled so that a linear walk produces a uniform
 // spread.
 func (em *EvictionManager) rebuildRRTable() {
-	var table [rrTableSize]uint8
+	var table [rrTableSize]StorageID
 
 	if len(em.dirIDs) == 1 {
 		// Single-directory fast path: fill the entire table.
@@ -498,7 +485,7 @@ func (em *EvictionManager) rebuildRRTable() {
 
 	// Compute raw free-space per directory.
 	type dirWeight struct {
-		id   uint8
+		id   StorageID
 		free int64
 	}
 	raw := make([]dirWeight, 0, len(em.dirIDs))
@@ -581,7 +568,7 @@ func (em *EvictionManager) rebuildRRTable() {
 // from the in-memory atomic usage estimates.  The hot path is a single
 // atomic increment + array index, so many goroutines can call this
 // concurrently with negligible contention.
-func (em *EvictionManager) ChooseDiskStorage() uint8 {
+func (em *EvictionManager) ChooseDiskStorage() StorageID {
 	// Lazily refresh the table at most every 100ms.
 	now := time.Now().UnixMilli()
 	last := em.rrLastUpdate.Load()
@@ -599,7 +586,8 @@ func (em *EvictionManager) ChooseDiskStorage() uint8 {
 	return table[idx%rrTableSize]
 }
 
-// ForcePurge forces an immediate purge down to the low water mark
+// ForcePurge forces an immediate purge down to the low water mark.
+// Directories are processed concurrently (see checkAndEvict).
 func (em *EvictionManager) ForcePurge() error {
 	em.evictMu.Lock()
 	if em.evicting {
@@ -617,49 +605,55 @@ func (em *EvictionManager) ForcePurge() error {
 
 	log.Info("Force purge initiated")
 	startTime := time.Now()
-	evictedBytes := uint64(0)
-	evictedObjects := 0
+	var evictedBytes atomic.Uint64
+	var evictedObjects atomic.Int64
 
 	// Evict until all directories reach their low water marks.
 	// EvictByLRU (called by evictFromNamespace) automatically drains
 	// purge-first items before touching the regular LRU index.
+	var wg sync.WaitGroup
 	for sid, limits := range em.dirLimits {
-		dirUsage := em.getDirUsage(sid)
-		if dirUsage <= int64(limits.lowWater) {
-			continue
-		}
-
-		for dirUsage > int64(limits.lowWater) {
-			targetKey, targetUsage, err := em.findGreediestNamespaceInDir(sid)
-			if err != nil || targetUsage <= 0 {
-				break
+		wg.Add(1)
+		go func(sid StorageID, limits *dirEvictionLimits) {
+			defer wg.Done()
+			dirUsage := em.getDirUsage(sid)
+			if dirUsage <= int64(limits.lowWater) {
+				return
 			}
 
-			overhead := dirUsage - int64(limits.lowWater)
-			bytes, count, err := em.evictFromNamespace(targetKey.StorageID, targetKey.NamespaceID, 0, overhead)
-			if err != nil {
-				log.Warnf("Error evicting from storage %d namespace %d: %v", targetKey.StorageID, targetKey.NamespaceID, err)
-				continue
+			for dirUsage > int64(limits.lowWater) {
+				targetKey, targetUsage, err := em.findGreediestNamespaceInDir(sid)
+				if err != nil || targetUsage <= 0 {
+					break
+				}
+
+				overhead := dirUsage - int64(limits.lowWater)
+				bytes, count, err := em.evictFromNamespace(targetKey.StorageID, targetKey.NamespaceID, 0, overhead)
+				if err != nil {
+					log.Warnf("Error evicting from storage %d namespace %d: %v", targetKey.StorageID, targetKey.NamespaceID, err)
+					continue
+				}
+
+				evictedBytes.Add(bytes)
+				evictedObjects.Add(int64(count))
+
+				if time.Since(startTime) > 60*time.Second {
+					log.Warn("Force purge timeout - will continue next cycle")
+					break
+				}
+
+				dirUsage = em.getDirUsage(sid)
 			}
-
-			evictedBytes += bytes
-			evictedObjects += count
-
-			if time.Since(startTime) > 60*time.Second {
-				log.Warn("Force purge timeout - will continue next cycle")
-				break
-			}
-
-			dirUsage = em.getDirUsage(sid)
-		}
+		}(sid, limits)
 	}
+	wg.Wait()
 
 	log.Infof("Force purge complete: freed %d bytes from %d objects in %v",
-		evictedBytes, evictedObjects, time.Since(startTime))
+		evictedBytes.Load(), evictedObjects.Load(), time.Since(startTime))
 	return nil
 }
 
 // MarkPurgeFirst marks an object to be purged first during next eviction
-func (em *EvictionManager) MarkPurgeFirst(instanceHash string) error {
+func (em *EvictionManager) MarkPurgeFirst(instanceHash InstanceHash) error {
 	return em.db.MarkPurgeFirst(instanceHash)
 }

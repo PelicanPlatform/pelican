@@ -1,0 +1,9 @@
+# POSIXv2 origin with PublicReads and DisableDirectClients.
+# No DirectReads, Writes, or Listings (incompatible with DisableDirectClients).
+Origin:
+  StorageType: posixv2
+  DisableDirectClients: true
+  Exports:
+    - StoragePrefix: "/"
+      FederationPrefix: "/test"
+      Capabilities: ["PublicReads"]

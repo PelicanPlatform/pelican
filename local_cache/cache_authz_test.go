@@ -103,34 +103,3 @@ func TestGetAcls_MixedNamespaces(t *testing.T) {
 		assert.Equal(t, "/public", acls[0].Resource)
 	})
 }
-
-// TestAuthorize_PublicNamespaceWithInvalidToken verifies the full authorize()
-// path grants access to public resources even with invalid tokens.
-func TestAuthorize_PublicNamespaceWithInvalidToken(t *testing.T) {
-	ac := &authConfig{}
-
-	nsAds := []server_structs.NamespaceAdV2{
-		{
-			Path: "/public",
-			Caps: server_structs.Capabilities{PublicReads: true, Reads: true},
-		},
-	}
-	require.NoError(t, ac.updateConfig(nsAds))
-
-	// We can't use the full authorize() path because it requires the ttlcache
-	// infrastructure.  Instead, verify getAcls returns the right ACLs and
-	// manually check containment.
-	acls, _, err := ac.getAcls("garbage-token")
-	require.NoError(t, err)
-	require.Len(t, acls, 1)
-
-	rsScope := token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/public/some/file.txt")
-	found := false
-	for _, a := range acls {
-		if a.Contains(rsScope) {
-			found = true
-			break
-		}
-	}
-	assert.True(t, found, "Public read of /public/some/file.txt should be authorized")
-}
