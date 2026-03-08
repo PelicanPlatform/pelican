@@ -1931,11 +1931,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			   if err != nil {
 				   return errors.Wrap(err, "failed to parse remote URL for recursive download")
 			   }
-			   if job.job.dirResp.XPelNsHdr.CollectionsUrl != nil {
-				   statInfo, statErr = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken, true)
-			   } else {
-				   statInfo, statErr = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken)
-			   }
+			   statInfo, statErr = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken)
 			   if statErr != nil {
 				   return errors.Wrap(statErr, "failed to stat remote path for recursive download")
 			   }
@@ -1953,7 +1949,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			   if err != nil {
 				   return
 			   }
-			   statInfo, err = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken, true)
+			   statInfo, err = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken)
 			   if err != nil {
 				   err = errors.Wrap(err, "failed to stat object to prestage")
 				   return
@@ -4806,22 +4802,17 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
    statHosts := make([]url.URL, 0, 3)
    collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
 
-   useCollectionsOnly := len(preferCollectionsUrlOnly) > 0 && preferCollectionsUrlOnly[0]
-   if useCollectionsOnly {
-	   if collectionsUrl != nil {
-		   statHosts = append(statHosts, *collectionsUrl)
-	   }
-   } else {
-	   if len(dirResp.ObjectServers) > 0 {
-		   for idx, oServer := range dirResp.ObjectServers {
-			   if idx > 2 {
-				   break
-			   }
-			   statHosts = append(statHosts, *oServer)
+   // Prefer cache/origin servers (ObjectServers) for stat.  Only fall
+   // back to the collections URL when no object servers are available.
+   if len(dirResp.ObjectServers) > 0 {
+	   for idx, oServer := range dirResp.ObjectServers {
+		   if idx > 2 {
+			   break
 		   }
-	   } else if collectionsUrl != nil {
-		   statHosts = append(statHosts, *collectionsUrl)
+		   statHosts = append(statHosts, *oServer)
 	   }
+   } else if collectionsUrl != nil {
+	   statHosts = append(statHosts, *collectionsUrl)
    }
 	type statResults struct {
 		info FileInfo
@@ -4957,7 +4948,6 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 		}(&destCopy)
 	}
 	   success := false
-	   notFound := false
 	   for ctr := 0; ctr < len(statHosts); ctr++ {
 		   result := <-resultsChan
 		   if result.err == nil {
@@ -4967,16 +4957,7 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 			   }
 		   } else if err == nil && result.err != context.Canceled {
 			   err = result.err
-			   // Check for not found error
-			   if errors.Is(result.err, ErrObjectNotFound) {
-				   notFound = true
-			   }
 		   }
-	   }
-	   // Fallback: if preferCollectionsUrlOnly, got not found, and object servers exist, try default logic
-	   if useCollectionsOnly && notFound && len(dirResp.ObjectServers) > 0 {
-		   // Recursively call statHttp without preferCollectionsUrlOnly
-		   return statHttp(dest, dirResp, token, fedToken)
 	   }
 	   if success {
 		   err = nil
