@@ -20,6 +20,7 @@ package local_cache
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"path"
 	"slices"
@@ -44,7 +45,7 @@ type (
 		ns         atomic.Pointer[[]server_structs.NamespaceAdV2]
 		issuers    atomic.Pointer[map[string]bool]
 		issuerKeys *ttlcache.Cache[string, authConfigItem]
-		tokenAuthz *ttlcache.Cache[string, acls]
+		tokenAuthz *ttlcache.Cache[string, authzResult]
 	}
 
 	authConfigItem struct {
@@ -53,6 +54,17 @@ type (
 	}
 
 	acls []token_scopes.ResourceScope
+
+	// authzResult is the cached authorization result for a given token.
+	// It contains the computed access-control list (scopes) and an
+	// optional string describing why the token was not fully trusted
+	// (e.g. "token issuer X is not one of the trusted issuers").
+	// When tokenError is non-empty the scopes only contain public
+	// namespace grants.
+	authzResult struct {
+		scopes     acls
+		tokenError string // human-readable reason the token was rejected (empty when OK)
+	}
 )
 
 func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
@@ -90,9 +102,9 @@ func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 		ttlcache.WithLoader[string, authConfigItem](ttlcache.NewSuppressedLoader[string, authConfigItem](loader, nil)),
 	)
 
-	ac.tokenAuthz = ttlcache.New[string, acls](
-		ttlcache.WithTTL[string, acls](5*time.Minute),
-		ttlcache.WithLoader[string, acls](ttlcache.LoaderFunc[string, acls](ac.loader)),
+	ac.tokenAuthz = ttlcache.New[string, authzResult](
+		ttlcache.WithTTL[string, authzResult](5*time.Minute),
+		ttlcache.WithLoader[string, authzResult](ttlcache.LoaderFunc[string, authzResult](ac.loader)),
 	)
 
 	egrp.Go(func() error {
@@ -256,11 +268,19 @@ func (ac *authConfig) getAcls(token string) (newAcls acls, tokenTrusted bool, er
 	return
 }
 
-func (ac *authConfig) loader(cache *ttlcache.Cache[string, acls], token string) *ttlcache.Item[string, acls] {
+func (ac *authConfig) loader(cache *ttlcache.Cache[string, authzResult], token string) *ttlcache.Item[string, authzResult] {
 	newAcls, tokenTrusted, err := ac.getAcls(token)
 	if err != nil {
 		log.Warningln("Failed to compute ACLs:", err)
 		return nil
+	}
+
+	var tokenError string
+	if !tokenTrusted && token != "" {
+		tokenError = "token validation failed"
+	} else if token == "" {
+		// No token provided — public ACLs only.
+		tokenError = "no token provided"
 	}
 
 	// Use a shorter TTL for unrecognized tokens to bound memory usage
@@ -270,15 +290,29 @@ func (ac *authConfig) loader(cache *ttlcache.Cache[string, acls], token string) 
 		ttl = 30 * time.Second
 	}
 
-	item := cache.Set(token, newAcls, ttl)
+	item := cache.Set(token, authzResult{scopes: newAcls, tokenError: tokenError}, ttl)
 	return item
 }
 
-func (ac *authConfig) authorize(action token_scopes.TokenScope, resource, token string) bool {
+// authorize checks whether the given token grants the requested action on
+// the resource.  It returns whether access is granted and a human-readable
+// reason when it is denied.
+func (ac *authConfig) authorize(action token_scopes.TokenScope, resource, token string) (bool, string) {
 	aclsItem := ac.tokenAuthz.Get(token)
 	if aclsItem == nil {
-		return false
+		if token == "" {
+			return false, "no token provided and namespace requires authorization"
+		}
+		return false, "failed to compute authorization for token"
 	}
+	result := aclsItem.Value()
 	rsScope := token_scopes.NewResourceScope(action, resource)
-	return slices.ContainsFunc(aclsItem.Value(), func(rs token_scopes.ResourceScope) bool { return rs.Contains(rsScope) })
+	if slices.ContainsFunc(result.scopes, func(rs token_scopes.ResourceScope) bool { return rs.Contains(rsScope) }) {
+		return true, ""
+	}
+	// Access denied — build a reason.
+	if result.tokenError != "" {
+		return false, result.tokenError
+	}
+	return false, fmt.Sprintf("token scopes insufficient for %s on %s", action, resource)
 }
