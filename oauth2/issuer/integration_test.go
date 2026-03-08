@@ -384,9 +384,10 @@ func TestIntegrationDynamicClientRegistration(t *testing.T) {
 	_, ts := setupIntegration(t)
 	httpClient := ts.Client()
 
-	// Register a new client
+	// Register a new client (use loopback redirect URI as required by
+	// RFC 8252 §7.3 when Issuer.RedirectUris is not configured)
 	regBody := `{
-		"redirect_uris": ["https://newclient.example.com/callback"],
+		"redirect_uris": ["http://127.0.0.1:8080/callback"],
 		"grant_types": ["authorization_code", "refresh_token"],
 		"response_types": ["code"],
 		"client_name": "My Test App"

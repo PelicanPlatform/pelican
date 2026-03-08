@@ -557,6 +557,10 @@ func handleDeviceTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 	// Record that this client was used (prevents unused-client cleanup).
 	_ = provider.storage.TouchClientLastUsed(rCtx, clientID)
 
+	// Mark the device code as used now that token creation has succeeded.
+	// This avoids invalidating the code if token generation had failed above.
+	_ = provider.storage.InvalidateDeviceCodeSession(rCtx, deviceCode)
+
 	// Generate refresh token if offline_access was requested
 	for _, s := range request.GetGrantedScopes() {
 		if s == "offline_access" {
@@ -655,6 +659,13 @@ func handleIntrospect(provider *OIDCProvider) gin.HandlerFunc {
 	}
 }
 
+// isLoopbackURI returns true if the parsed URL points to a loopback address
+// (localhost, 127.0.0.1, or [::1]) per RFC 8252 §7.3.
+func isLoopbackURI(u *url.URL) bool {
+	host := u.Hostname()
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
 // handleDynamicClientRegistration handles the /oidc-cm endpoint (RFC 7591).
 //
 // This endpoint is intentionally unauthenticated so that command-line tools can
@@ -704,6 +715,20 @@ func handleDynamicClientRegistration(provider *OIDCProvider) gin.HandlerFunc {
 					ctx.JSON(http.StatusForbidden, gin.H{
 						"error":             "invalid_redirect_uri",
 						"error_description": "Unregistered redirect_uri: " + uri,
+					})
+					return
+				}
+			}
+		} else if len(req.RedirectURIs) > 0 {
+			// When Issuer.RedirectUris is not configured, only allow
+			// loopback redirect URIs (RFC 8252 §7.3) for dynamic clients
+			// to prevent open-redirect attacks.
+			for _, uri := range req.RedirectURIs {
+				parsed, pErr := url.Parse(uri)
+				if pErr != nil || !isLoopbackURI(parsed) {
+					ctx.JSON(http.StatusForbidden, gin.H{
+						"error":             "invalid_redirect_uri",
+						"error_description": "Only loopback redirect URIs are allowed for dynamic clients when Issuer.RedirectUris is not configured",
 					})
 					return
 				}
