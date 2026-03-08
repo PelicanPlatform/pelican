@@ -886,9 +886,26 @@ func (pc *PersistentCache) GetRange(ctx context.Context, objectPath, token, rang
 			}
 		}
 
-		// Return full object reader.  If a background download is in flight,
-		// register a client so completeDownload doesn't cancel it while we
-		// are reading.
+		// Return full object reader.
+		//
+		// When a background download is in progress (res.dl != nil) we
+		// must use a fetching RangeReader so that blocks which haven't
+		// been written yet can be waited-for or fetched on demand.  The
+		// plain ObjectReader calls ReadBlocks directly and would fail
+		// with "block N not yet downloaded" if the download hasn't
+		// reached a particular block.
+		if res.dl != nil && res.meta.ContentLength > 0 {
+			rr, rrErr := pc.newFetchingRangeReader(res, 0, res.meta.ContentLength-1)
+			if rrErr != nil {
+				if attempt < maxAttempts-1 && isEvictedError(rrErr) {
+					log.Debugf("Object %s was evicted during reader setup; retrying resolution", res.instanceHash)
+					continue
+				}
+				return nil, rrErr
+			}
+			return rr, nil
+		}
+
 		objReader, objErr := pc.storage.NewObjectReader(res.instanceHash)
 		if objErr != nil {
 			if attempt < maxAttempts-1 && isEvictedError(objErr) {
@@ -896,13 +913,6 @@ func (pc *PersistentCache) GetRange(ctx context.Context, objectPath, token, rang
 				continue
 			}
 			return nil, objErr
-		}
-		if res.dl != nil {
-			dlDone := res.dl.RegisterClient()
-			return &readCloserWithCleanup{
-				ReadCloser: objReader,
-				cleanup:    dlDone,
-			}, nil
 		}
 		return objReader, nil
 	}
@@ -1645,19 +1655,6 @@ type multiReadCloser struct {
 
 func (m *multiReadCloser) Close() error {
 	return m.close()
-}
-
-// readCloserWithCleanup wraps an io.ReadCloser and calls a cleanup
-// function when Close is called.  Used to deregister a download client
-// when the reader is closed.
-type readCloserWithCleanup struct {
-	io.ReadCloser
-	cleanup func()
-}
-
-func (rc *readCloserWithCleanup) Close() error {
-	rc.cleanup()
-	return rc.ReadCloser.Close()
 }
 
 // decisionWriter buffers data until a storage decision is made based on response headers.
