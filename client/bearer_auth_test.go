@@ -39,7 +39,7 @@ func TestBearerAuthenticator_Authorize(t *testing.T) {
 	}))
 	defer server.Close()
 
-	token := NewTokenGenerator(nil, nil, config.TokenSharedRead, false)
+	token := newTokenGenerator(nil, nil, config.TokenSharedRead, false)
 	token.SetToken("some_token_1234_abc")
 	authenticator := &bearerAuthenticator{token: token}
 	client := &http.Client{}
@@ -58,7 +58,7 @@ func TestBearerAuthenticator_Authorize(t *testing.T) {
 
 // Test the retry logic for bearer authentication
 func TestBearerAuthenticator_Verify(t *testing.T) {
-	token := NewTokenGenerator(nil, nil, config.TokenSharedRead, false)
+	token := newTokenGenerator(nil, nil, config.TokenSharedRead, false)
 	token.SetToken("some_token_1234_abc")
 	authenticator := &bearerAuthenticator{token: token}
 

@@ -119,12 +119,12 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 		operation = config.TokenSharedWrite
 	}
 
-	dirResp, err := GetDirectorInfoForPath(pfs.ctx, pUrl, httpMethod, "")
+	dirResp, err := getDirectorInfoForPath(pfs.ctx, pUrl, httpMethod, "", false)
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 	}
 
-	token := NewTokenGenerator(pUrl, &dirResp, operation, true)
+	token := newTokenGenerator(pUrl, &dirResp, operation, true)
 	for _, option := range pfs.options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
@@ -148,18 +148,18 @@ func (pfs *PelicanFS) OpenFile(name string, flag int) (fs.File, error) {
 	// For O_RDWR, try to stat first. If file doesn't exist, switch to write-only mode.
 	var fileInfo *FileInfo
 	if readMode {
-		fi, err := statHttp(pUrl, dirResp, token)
+		fi, err := statHttp(pUrl, dirResp, token, nil)
 		if err != nil {
 			if rdwrMode {
 				// File doesn't exist in RDWR mode - switch to write-only
 				readMode = false
 				writeMode = true
 				// Update director info and token for PUT
-				dirResp, err = GetDirectorInfoForPath(pfs.ctx, pUrl, http.MethodPut, "")
+				dirResp, err = getDirectorInfoForPath(pfs.ctx, pUrl, http.MethodPut, "", false)
 				if err != nil {
 					return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 				}
-				token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, true)
+				token = newTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, true)
 				for _, option := range pfs.options {
 					switch option.Ident() {
 					case identTransferOptionTokenLocation{}:
