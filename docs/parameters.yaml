@@ -1216,7 +1216,7 @@ description: |+
   "oa4mp" uses the external Java-based OA4MP issuer (legacy).
   When switching between modes, state is not migrated between the two databases.
 type: string
-default: "embedded"
+default: "oa4mp"
 hidden: true
 components: ["origin"]
 ---

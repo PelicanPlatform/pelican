@@ -523,7 +523,10 @@ func (s *OIDCStorage) DeleteAccessTokenSession(ctx context.Context, signature st
 
 // ---- fosite.RefreshTokenStorage ----
 
-func (s *OIDCStorage) CreateRefreshTokenSession(ctx context.Context, signature string, accessSignature string, request fosite.Requester) error {
+// CreateRefreshTokenSession stores a new refresh token session.
+// The accessSignature parameter is required by fosite's RefreshTokenStorage
+// interface (v0.49+) but is not used by this implementation.
+func (s *OIDCStorage) CreateRefreshTokenSession(ctx context.Context, signature string, _ string, request fosite.Requester) error {
 	return s.createTokenSession(ctx, "oidc_refresh_tokens", signature, request)
 }
 
@@ -604,12 +607,9 @@ func (s *OIDCStorage) RevokeAccessToken(ctx context.Context, requestID string) e
 }
 
 func (s *OIDCStorage) RevokeRefreshTokenMaybeGracePeriod(ctx context.Context, requestID string, _ string) error {
-	// Mark with first_used_at instead of immediately revoking, enabling re-use
-	// within the configured grace period.
-	return s.db.WithContext(ctx).Exec(
-		`UPDATE oidc_refresh_tokens SET first_used_at = COALESCE(first_used_at, ?) WHERE request_id = ? AND active = 1`,
-		time.Now().UTC(), requestID,
-	).Error
+	// Delegate to RotateRefreshToken which implements the same grace-period
+	// logic (set first_used_at instead of immediately revoking).
+	return s.RotateRefreshToken(ctx, requestID, "")
 }
 
 // ---- fosite.ClientAssertionJWTValid / SetClientAssertionJWT ----
@@ -841,7 +841,21 @@ func (s *OIDCStorage) createTokenSession(ctx context.Context, table, signature s
 	formData, _ := json.Marshal(request.GetRequestForm())
 	sessionData, _ := json.Marshal(request.GetSession())
 
-	expiresAt := time.Now().Add(1 * time.Hour) // Default expiration
+	// Derive expiration from the session's token-type-specific expiry when
+	// available, so that refresh tokens honour RefreshTokenLifespan (7d)
+	// instead of always using a 1h default.
+	var expiresAt time.Time
+	switch table {
+	case "oidc_refresh_tokens":
+		expiresAt = request.GetSession().GetExpiresAt(fosite.RefreshToken)
+	case "oidc_access_tokens":
+		expiresAt = request.GetSession().GetExpiresAt(fosite.AccessToken)
+	case "oidc_authorization_codes":
+		expiresAt = request.GetSession().GetExpiresAt(fosite.AuthorizeCode)
+	}
+	if expiresAt.IsZero() {
+		expiresAt = time.Now().Add(1 * time.Hour)
+	}
 
 	query, err := buildInsertQuery(table)
 	if err != nil {

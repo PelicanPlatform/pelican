@@ -50,6 +50,14 @@ import (
 // the password again later.
 var setEmptyPassword = false
 
+// SetEmptyPassword instructs the encrypted config layer to skip password
+// prompts and store credentials without encryption.  Call this before any
+// operation that would trigger a credential save (e.g. AcquireToken) when
+// the user has opted for passwordless storage via --no-password.
+func SetEmptyPassword() {
+	setEmptyPassword = true
+}
+
 var ErrIncorrectPassword = errors.New("incorrect password")
 
 func GetEncryptedConfigName() (string, error) {

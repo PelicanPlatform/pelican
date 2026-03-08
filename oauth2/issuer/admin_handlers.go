@@ -75,7 +75,7 @@ var allowedGrantTypes = map[string]bool{
 	"authorization_code": true,
 	"refresh_token":      true,
 	"urn:ietf:params:oauth:grant-type:device_code":    true,
-	"urn:ietf:params:oauth:grant-type:token-exchange":  true,
+	"urn:ietf:params:oauth:grant-type:token-exchange": true,
 }
 
 // ---- Handlers ----
@@ -517,10 +517,10 @@ func handleTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 
 	// RFC 8693 §2.2.1: the response includes issued_token_type.
 	result := gin.H{
-		"access_token":     accessToken,
+		"access_token":      accessToken,
 		"issued_token_type": "urn:ietf:params:oauth:token-type:access_token",
-		"token_type":       "Bearer",
-		"expires_in":       int(provider.config.AccessTokenLifespan.Seconds()),
+		"token_type":        "Bearer",
+		"expires_in":        int(provider.config.AccessTokenLifespan.Seconds()),
 	}
 
 	// Optionally issue a refresh token if offline_access is among scopes.

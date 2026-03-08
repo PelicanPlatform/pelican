@@ -330,6 +330,11 @@ func (s *WLCGSession) GetExtraClaims() map[string]interface{} {
 
 // DefaultOIDCSession creates a new WLCG-compliant OIDC session with both
 // JWT access token claims and ID token claims.
+//
+// The 1-hour ExpiresAt values here are initial placeholders; fosite overrides
+// them with the actual AccessTokenLifespan / IDTokenLifespan from the provider
+// config when the token is issued.  The device-code path explicitly calls
+// SetExpiresAt before token generation for the same reason.
 func DefaultOIDCSession(subject string, issuer string, groups []string, scopes []string) *WLCGSession {
 	now := time.Now()
 	extra := map[string]interface{}{}
@@ -441,6 +446,9 @@ func (p *OIDCProvider) signingAlgorithm() string {
 }
 
 // PublicJWKS returns the JWKS representation of the signing public key.
+// The kid in the JWKS matches the kid used when signing JWTs so that
+// token verification libraries (e.g. lestrrat-go/jwx) can locate the
+// correct key.
 func (p *OIDCProvider) PublicJWKS() ([]byte, error) {
 	pubKey := p.privateKey.Public()
 	key, err := jwk.FromRaw(pubKey)
@@ -453,8 +461,13 @@ func (p *OIDCProvider) PublicJWKS() ([]byte, error) {
 	if err := key.Set(jwk.KeyUsageKey, "sig"); err != nil {
 		return nil, err
 	}
-	kid := IssuerURL()
-	if err := key.Set(jwk.KeyIDKey, kid); err != nil {
+
+	// Use the same kid that was set on the signing JWK in NewOIDCProvider.
+	privateJWK, err := config.GetIssuerPrivateJWK()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get issuer private JWK for kid: %w", err)
+	}
+	if err := key.Set(jwk.KeyIDKey, privateJWK.KeyID()); err != nil {
 		return nil, err
 	}
 

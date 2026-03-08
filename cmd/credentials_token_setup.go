@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
@@ -137,7 +136,15 @@ func credentialsTokenSetupMain(cmd *cobra.Command, args []string) error {
 	operation.Set(config.TokenList)
 
 	// Acquire a token (this will also register the OAuth2 client and save
-	// credentials to the credential file as a side effect)
+	// credentials to the credential file as a side effect).
+	//
+	// If --no-password was requested, tell the config layer to skip
+	// password prompts *before* token acquisition so the credential file
+	// is saved unencrypted on the write.
+	if tokenSetupNoPassword {
+		config.SetEmptyPassword()
+	}
+
 	opts := config.TokenGenerationOpts{
 		Operation: operation,
 	}
@@ -151,27 +158,9 @@ func credentialsTokenSetupMain(cmd *cobra.Command, args []string) error {
 		return errors.New("acquired token is empty")
 	}
 
-	// Now read the credential config that was just saved and optionally
-	// re-save it as a passwordless file
 	credFilePath, err := config.GetEncryptedConfigName()
 	if err != nil {
 		return errors.Wrap(err, "failed to determine credential file path")
-	}
-
-	if tokenSetupNoPassword {
-		// Read the current config and re-save without password
-		osdfConfig, err := config.GetCredentialConfigContents()
-		if err != nil {
-			return errors.Wrap(err, "failed to read credential configuration")
-		}
-
-		if err := config.SaveConfigContentsToFile(&osdfConfig, credFilePath, false); err != nil {
-			return errors.Wrap(err, "failed to save passwordless credential file")
-		}
-
-		log.Infof("Credential file saved without password protection to %s", credFilePath)
-	} else {
-		log.Infof("Credential file saved to %s", credFilePath)
 	}
 
 	fmt.Fprintf(os.Stderr, "Successfully set up credentials for %s\n", dirResp.XPelNsHdr.Namespace)

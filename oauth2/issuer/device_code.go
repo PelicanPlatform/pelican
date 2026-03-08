@@ -97,6 +97,8 @@ func (h *DeviceCodeHandler) HandleDeviceAuthorizationRequest(ctx context.Context
 }
 
 // HandleDeviceAccessRequest validates and returns the approved device code request.
+// The caller is responsible for invalidating the device code after successful
+// token creation.
 func (h *DeviceCodeHandler) HandleDeviceAccessRequest(ctx context.Context,
 	deviceCode string, session fosite.Session) (fosite.Requester, error) {
 
@@ -104,9 +106,6 @@ func (h *DeviceCodeHandler) HandleDeviceAccessRequest(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-
-	// Mark as used
-	_ = h.storage.InvalidateDeviceCodeSession(ctx, deviceCode)
 
 	return request, nil
 }
