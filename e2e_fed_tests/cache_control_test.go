@@ -67,8 +67,6 @@ func cacheControlOriginConfig(cacheControl string) string {
     - StoragePrefix: "/"
       FederationPrefix: "/test"
       Capabilities: ["PublicReads", "DirectReads", "Listings"]
-Director:
-  CheckCachePresence: false
 `, ccLine)
 }
 
@@ -154,14 +152,13 @@ func TestCacheControl_MaxAgePassthrough(t *testing.T) {
 	require.Equal(t, http.StatusOK, r2.statusCode)
 	require.Equal(t, content, r2.body)
 
-	// Verify Age header is present and reasonable
+	// Verify Age header is present and non-negative on a cache hit
 	ageStr := r2.headers.Get("Age")
-	if ageStr != "" {
-		age, err := strconv.Atoi(ageStr)
-		require.NoError(t, err)
-		assert.GreaterOrEqual(t, age, 0, "Age must be non-negative")
-		assert.Less(t, age, 60, "Age should be small since object was just cached")
-	}
+	require.NotEmpty(t, ageStr, "Cached response must have an Age header")
+	age, err := strconv.Atoi(ageStr)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, age, 0, "Age must be non-negative")
+	assert.Less(t, age, 60, "Age should be small since object was just cached")
 
 	// Verify Cache-Control is still present on the cached response
 	cc2 := r2.headers.Get("Cache-Control")
@@ -196,19 +193,23 @@ func TestCacheControl_NoStore(t *testing.T) {
 	assert.Contains(t, cc, "no-store",
 		"Cache should pass through no-store from origin")
 
+	// Wait so that if the object were incorrectly cached, Age would grow
+	time.Sleep(2 * time.Second)
+
 	// Second fetch — still succeeds (re-fetched from origin, not from disk)
 	r2 := fetchFromCache(t, ft, cacheURL, nil)
 	require.Equal(t, http.StatusOK, r2.statusCode)
 	require.Equal(t, content, r2.body)
 
 	// The response should NOT have an Age header (it's freshly fetched)
-	// or if it does, it should be 0
+	// or if it does, it should be 0.  If it were served from cache, Age
+	// would be ≥2 after the sleep above.
 	ageStr := r2.headers.Get("Age")
 	if ageStr != "" {
 		age, err := strconv.Atoi(ageStr)
 		if err == nil {
-			assert.LessOrEqual(t, age, 1,
-				"no-store response should not have a significant Age")
+			assert.LessOrEqual(t, age, 0,
+				"no-store response must not have a positive Age (would indicate caching)")
 		}
 	}
 }
@@ -329,6 +330,8 @@ func TestCacheControl_AgeHeaderAccuracy(t *testing.T) {
 
 	age, err := strconv.Atoi(ageStr)
 	require.NoError(t, err)
+	require.Greater(t, age, 0,
+		"Age should be non-zero after waiting 2 seconds")
 
 	elapsed := int(time.Since(cacheTime).Seconds())
 	// Age should be approximately elapsed time (±2 seconds tolerance)
@@ -599,20 +602,37 @@ func TestCacheControl_EvictionUnderPressure(t *testing.T) {
 	// Wait for eviction to fire and free space.
 	// The oldest files (0, 1, ...) should be evicted first.
 	// With 100KB total and 50KB low water, at least ~50KB (2-3 files) must be evicted.
-	// We verify by checking the newest file is still accessible (proves eviction
-	// didn't wipe everything) and that the overall cache is functional.
-	require.Eventually(t, func() bool {
-		rLatest := fetchFromCache(t, ft, baseURL+fileNames[4], nil)
-		return rLatest.statusCode == http.StatusOK &&
-			len(rLatest.body) == len(fileContents[4])
-	}, 15*time.Second, 500*time.Millisecond,
-		"Eviction did not complete — newest file should still be accessible")
+	//
+	// We use "only-if-cached" to prevent transparent re-fetching from the origin.
+	// Evicted objects will return 504 Gateway Timeout; surviving objects return 200.
+	onlyCached := map[string]string{"Cache-Control": "only-if-cached"}
 
-	// Verify newest file(s) still return correct content
-	rLatest := fetchFromCache(t, ft, baseURL+fileNames[4], nil)
-	require.Equal(t, http.StatusOK, rLatest.statusCode)
+	// Wait until at least one of the oldest files has actually been evicted.
+	require.Eventually(t, func() bool {
+		r := fetchFromCache(t, ft, baseURL+fileNames[0], onlyCached)
+		return r.statusCode == http.StatusGatewayTimeout
+	}, 15*time.Second, 500*time.Millisecond,
+		"Eviction did not remove the oldest file (file 0) from the cache")
+
+	// Verify the newest file survived eviction (still in cache)
+	rLatest := fetchFromCache(t, ft, baseURL+fileNames[4], onlyCached)
+	require.Equal(t, http.StatusOK, rLatest.statusCode,
+		"Newest file should still be in cache after eviction")
 	assert.Equal(t, fileContents[4], rLatest.body,
-		"Newest file should survive eviction")
+		"Newest file content should be intact")
+
+	// Count how many of the oldest files were actually evicted
+	evictedCount := 0
+	for i := 0; i < 4; i++ {
+		r := fetchFromCache(t, ft, baseURL+fileNames[i], onlyCached)
+		if r.statusCode == http.StatusGatewayTimeout {
+			evictedCount++
+		}
+	}
+	// With 100KB total, 90KB HW, 50KB LW, and 5×20KB files, we expect
+	// at least 2 files (~40KB) to be evicted to get below the low-water mark.
+	assert.GreaterOrEqual(t, evictedCount, 2,
+		"At least 2 of the oldest files should have been evicted (got %d)", evictedCount)
 }
 
 // writeThroughOriginConfig returns a YAML configuration snippet for a
@@ -627,8 +647,6 @@ func writeThroughOriginConfig() string {
     - StoragePrefix: "/"
       FederationPrefix: "/test"
       Capabilities: ["PublicReads", "DirectReads", "Writes", "Listings"]
-Director:
-  CheckCachePresence: false
 `
 }
 
