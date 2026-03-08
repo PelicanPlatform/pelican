@@ -228,6 +228,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"LocalCache.RunLocation": false,
 	"LocalCache.Size": false,
 	"LocalCache.Socket": false,
+	"LocalCache.StorageDirs": false,
 	"Logging.Cache.Http": true,
 	"Logging.Cache.Lotman": true,
 	"Logging.Cache.Ofs": true,
@@ -907,6 +908,8 @@ func (slP StringSliceParam) GetStringSlice() []string {
 			return config.Issuer.GroupRequirements
 		case "Issuer.RedirectUris":
 			return config.Issuer.RedirectUris
+		case "LocalCache.StorageDirs":
+			return config.LocalCache.StorageDirs
 		case "Monitoring.AggregatePrefixes":
 			return config.Monitoring.AggregatePrefixes
 		case "OIDC.Scopes":
@@ -1585,6 +1588,7 @@ var allParameterNames = []string{
 	"LocalCache.RunLocation",
 	"LocalCache.Size",
 	"LocalCache.Socket",
+	"LocalCache.StorageDirs",
 	"Logging.Cache.Http",
 	"Logging.Cache.Lotman",
 	"Logging.Cache.Ofs",
@@ -2034,6 +2038,7 @@ var (
 	Director_OriginResponseHostnames = StringSliceParam{"Director.OriginResponseHostnames"}
 	Issuer_GroupRequirements = StringSliceParam{"Issuer.GroupRequirements"}
 	Issuer_RedirectUris = StringSliceParam{"Issuer.RedirectUris"}
+	LocalCache_StorageDirs = StringSliceParam{"LocalCache.StorageDirs"}
 	Monitoring_AggregatePrefixes = StringSliceParam{"Monitoring.AggregatePrefixes"}
 	OIDC_Scopes = StringSliceParam{"OIDC.Scopes"}
 	Origin_DefaultChecksumTypes = StringSliceParam{"Origin.DefaultChecksumTypes"}

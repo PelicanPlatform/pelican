@@ -18,7 +18,7 @@
  *
  ***************************************************************/
 
-// Package fed_tests contains high-concurrency range read tests for the persistent
+// This file contains high-concurrency range read tests for the persistent
 // cache. These tests stress the block fetcher, bitmap merge operators, seekable
 // reader, and active download deduplication under concurrent load.
 
@@ -96,7 +96,7 @@ type rangeResult struct {
 
 // doRangeRead performs a single range read request against the given URL.
 // It requests X-Transfer-Status trailers so callers can detect mid-stream
-// errors (e.g. AES-GCM authentication failure from corrupted cache data).
+// errors (e.g. failure from corrupted cache data) and error the transfer.
 func doRangeRead(ctx context.Context, url, token, rangeHeader string) rangeResult {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -138,6 +138,22 @@ func generateTestData(size int) []byte {
 	return data
 }
 
+// requireSuccessfulRead asserts that a rangeResult represents a fully
+// successful HTTP response: no transport error, the expected status code,
+// matching body content, and a "200: OK" X-Transfer-Status trailer (when
+// the server sends one).  label is used in failure messages to identify
+// the specific read.
+func requireSuccessfulRead(t *testing.T, r rangeResult, expectedCode int, expectedBody []byte, label string) {
+	t.Helper()
+	require.NoError(t, r.err, "%s: should not error", label)
+	require.Equal(t, expectedCode, r.statusCode, "%s: unexpected status code", label)
+	assert.Equal(t, expectedBody, r.body, "%s: content mismatch", label)
+	if r.transferStatus != "" {
+		assert.Equal(t, "200: OK", r.transferStatus,
+			"%s: X-Transfer-Status trailer indicates a mid-stream failure", label)
+	}
+}
+
 // ============================================================================
 // Concurrent full-read tests
 // ============================================================================
@@ -174,9 +190,7 @@ func TestConcurrent_FullReads_SameObject(t *testing.T) {
 	wg.Wait()
 
 	for i, r := range results {
-		require.NoError(t, r.err, "Reader %d should not error", i)
-		require.Equal(t, http.StatusOK, r.statusCode, "Reader %d should get 200", i)
-		assert.Equal(t, content, r.body, "Reader %d content mismatch", i)
+		requireSuccessfulRead(t, r, http.StatusOK, content, fmt.Sprintf("Reader %d", i))
 	}
 }
 
@@ -244,13 +258,9 @@ func TestConcurrent_RangeReads_DifferentRanges(t *testing.T) {
 
 	for i, r := range results {
 		spec := specs[i]
-		require.NoError(t, r.err, "Range %s (read %d) should not error", spec.header, i)
-		require.Equal(t, http.StatusPartialContent, r.statusCode,
-			"Range %s (read %d) should return 206", spec.header, i)
-
 		expected := content[spec.start : spec.end+1]
-		assert.Equal(t, expected, r.body,
-			"Range %s (read %d) content mismatch", spec.header, i)
+		requireSuccessfulRead(t, r, http.StatusPartialContent, expected,
+			fmt.Sprintf("Range %s (read %d)", spec.header, i))
 	}
 }
 
@@ -314,14 +324,9 @@ func TestConcurrent_RangeReads_BlockBoundaries(t *testing.T) {
 
 	for i, r := range results {
 		spec := specs[i]
-		require.NoError(t, r.err, "Boundary range %s (read %d) should not error", spec.header, i)
-		require.Equal(t, http.StatusPartialContent, r.statusCode,
-			"Boundary range %s (read %d) should return 206", spec.header, i)
-
 		expected := content[spec.start : spec.end+1]
-		assert.Equal(t, expected, r.body,
-			"Boundary range %s (read %d) content mismatch (len expected=%d, got=%d)",
-			spec.header, i, len(expected), len(r.body))
+		requireSuccessfulRead(t, r, http.StatusPartialContent, expected,
+			fmt.Sprintf("Boundary range %s (read %d)", spec.header, i))
 	}
 }
 
@@ -365,11 +370,8 @@ func TestConcurrent_CacheMiss_SameObject(t *testing.T) {
 	wg.Wait()
 
 	for i, r := range results {
-		require.NoError(t, r.err, "Cache-miss reader %d should not error", i)
-		require.Equal(t, http.StatusOK, r.statusCode,
-			"Cache-miss reader %d should get 200", i)
-		assert.Equal(t, content, r.body,
-			"Cache-miss reader %d content mismatch", i)
+		requireSuccessfulRead(t, r, http.StatusOK, content,
+			fmt.Sprintf("Cache-miss reader %d", i))
 	}
 }
 
@@ -419,18 +421,13 @@ func TestConcurrent_CacheMiss_RangeReads(t *testing.T) {
 
 	for i, r := range results {
 		spec := specs[i]
-		require.NoError(t, r.err, "Range %s (read %d) should not error", spec.header, i)
-
 		expected := content[spec.start : spec.end+1]
+		expectedCode := http.StatusPartialContent
 		if spec.header == "" {
-			require.Equal(t, http.StatusOK, r.statusCode,
-				"Full read should get 200")
-		} else {
-			require.Equal(t, http.StatusPartialContent, r.statusCode,
-				"Range %s should return 206", spec.header)
+			expectedCode = http.StatusOK
 		}
-		assert.Equal(t, expected, r.body,
-			"Range %s (read %d) content mismatch", spec.header, i)
+		requireSuccessfulRead(t, r, expectedCode, expected,
+			fmt.Sprintf("Range %s (read %d)", spec.header, i))
 	}
 }
 
@@ -495,11 +492,8 @@ func TestConcurrent_MultipleObjects(t *testing.T) {
 
 	for i, r := range results {
 		oi := objectIndices[i]
-		require.NoError(t, r.err, "Object %d reader %d should not error", oi, i)
-		require.Equal(t, http.StatusOK, r.statusCode,
-			"Object %d reader %d should get 200", oi, i)
-		assert.Equal(t, objects[oi].content, r.body,
-			"Object %d reader %d content mismatch", oi, i)
+		requireSuccessfulRead(t, r, http.StatusOK, objects[oi].content,
+			fmt.Sprintf("Object %d reader %d", oi, i))
 	}
 }
 
@@ -559,14 +553,9 @@ func TestConcurrent_MixedFullAndRangeReads(t *testing.T) {
 
 	for i, r := range results {
 		spec := specs[i]
-		require.NoError(t, r.err, "Mixed read %d (%s) should not error", i, spec.rangeHeader)
-		require.Equal(t, spec.expectCode, r.statusCode,
-			"Mixed read %d (%s) status code mismatch", i, spec.rangeHeader)
-
 		expected := content[spec.start : spec.end+1]
-		assert.Equal(t, expected, r.body,
-			"Mixed read %d (%s) content mismatch (expected len %d, got %d)",
-			i, spec.rangeHeader, len(expected), len(r.body))
+		requireSuccessfulRead(t, r, spec.expectCode, expected,
+			fmt.Sprintf("Mixed read %d (%s)", i, spec.rangeHeader))
 	}
 }
 
@@ -628,13 +617,9 @@ func TestConcurrent_LargeFile_ManySmallRanges(t *testing.T) {
 
 	for i, r := range results {
 		spec := ranges[i]
-		require.NoError(t, r.err, "Large file range %d (%s) should not error", i, spec.header)
-		require.Equal(t, http.StatusPartialContent, r.statusCode,
-			"Large file range %d (%s) should return 206", i, spec.header)
-
 		expected := content[spec.start : spec.end+1]
-		assert.Equal(t, expected, r.body,
-			"Large file range %d (%s) content mismatch", i, spec.header)
+		requireSuccessfulRead(t, r, http.StatusPartialContent, expected,
+			fmt.Sprintf("Large file range %d (%s)", i, spec.header))
 	}
 }
 
@@ -674,9 +659,8 @@ func TestConcurrent_InlineStorage_Reads(t *testing.T) {
 	wg.Wait()
 
 	for i, r := range results {
-		require.NoError(t, r.err, "Inline reader %d should not error", i)
-		require.Equal(t, http.StatusOK, r.statusCode, "Inline reader %d should get 200", i)
-		assert.Equal(t, content, r.body, "Inline reader %d content mismatch", i)
+		requireSuccessfulRead(t, r, http.StatusOK, content,
+			fmt.Sprintf("Inline reader %d", i))
 	}
 }
 
@@ -684,9 +668,8 @@ func TestConcurrent_InlineStorage_Reads(t *testing.T) {
 // Random data integrity test
 // ============================================================================
 
-// TestConcurrent_RandomData_Integrity uses cryptographically random data to
-// ensure encryption/decryption round-trips correctly under concurrent access.
-// This catches any issues with nonce/IV handling, block encryptor state, etc.
+// TestConcurrent_RandomData_Integrity uses random data to ensure
+// round-trips correctly under concurrent access for data without any patterns.
 func TestConcurrent_RandomData_Integrity(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
@@ -695,7 +678,7 @@ func TestConcurrent_RandomData_Integrity(t *testing.T) {
 	require.NoError(t, param.Set(param.Cache_EnableV2.GetName(), true))
 	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
 
-	// 50KB of random data — ensures encryption correctness, not just pattern matching
+	// 50KB of random data — avoid any potential pattern matching in simpler tests
 	const fileSize = 50 * 1024
 	content := make([]byte, fileSize)
 	_, err := rand.Read(content)
@@ -740,14 +723,9 @@ func TestConcurrent_RandomData_Integrity(t *testing.T) {
 
 	for i, r := range results {
 		spec := specs[i]
-		require.NoError(t, r.err, "Random data read %d should not error", i)
-		require.Equal(t, spec.expectCode, r.statusCode,
-			"Random data read %d (%s) status mismatch", i, spec.rangeHeader)
-
 		expected := content[spec.start : spec.end+1]
-		assert.Equal(t, expected, r.body,
-			"Random data read %d (%s) content mismatch (expected len %d, got %d)",
-			i, spec.rangeHeader, len(expected), len(r.body))
+		requireSuccessfulRead(t, r, spec.expectCode, expected,
+			fmt.Sprintf("Random data read %d (%s)", i, spec.rangeHeader))
 	}
 }
 
@@ -807,13 +785,9 @@ func TestConcurrent_SuffixRange(t *testing.T) {
 
 	for i, r := range results {
 		spec := specs[i]
-		require.NoError(t, r.err, "Suffix range %s (read %d) should not error", spec.header, i)
-		require.Equal(t, http.StatusPartialContent, r.statusCode,
-			"Suffix range %s (read %d) should return 206", spec.header, i)
-
 		expected := content[spec.start : spec.end+1]
-		assert.Equal(t, expected, r.body,
-			"Suffix range %s (read %d) content mismatch", spec.header, i)
+		requireSuccessfulRead(t, r, http.StatusPartialContent, expected,
+			fmt.Sprintf("Suffix range %s (read %d)", spec.header, i))
 	}
 }
 
