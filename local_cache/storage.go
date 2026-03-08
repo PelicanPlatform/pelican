@@ -23,10 +23,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/RoaringBitmap/roaring"
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -51,14 +53,26 @@ func createFile(name string) (*os.File, error) {
 
 const (
 	objectsSubDir = "objects"
+	uuidFileName  = ".pelican-cache-id"
 )
 
 // StorageManager handles hybrid storage of cached objects
 // Small objects (< InlineThreshold) are stored inline in BadgerDB
-// Large objects are stored as encrypted files on disk with block tracking
+// Large objects are stored as encrypted files on disk with block tracking.
+// Multiple storage directories can be configured; each directory is identified
+// by a storageID (starting at StorageIDFirstDisk).
 type StorageManager struct {
-	db         *CacheDB
-	objectsDir string
+	db *CacheDB
+
+	// dirs maps storageID → objects directory (e.g. "/data1/objects").
+	// StorageIDFirstDisk is always present; additional dirs have
+	// sequential IDs.
+	dirs map[uint8]string
+
+	// inlineMaxBytes is the maximum size of objects stored inline in
+	// BadgerDB.  Objects at or below this threshold are stored inline;
+	// larger objects go to disk.  Defaults to InlineThreshold (4096).
+	inlineMaxBytes int
 
 	// Shared per-object block availability state.  All RangeReaders for the
 	// same instanceHash share one *ObjectBlockState so that block additions and
@@ -67,26 +81,193 @@ type StorageManager struct {
 	blockStatesMu sync.Mutex
 }
 
-// NewStorageManager creates a new storage manager
-func NewStorageManager(db *CacheDB, baseDir string) (*StorageManager, error) {
-	objectsDir := filepath.Join(baseDir, objectsSubDir)
+// StorageDirInfo describes a configured storage directory at runtime.
+type StorageDirInfo struct {
+	StorageID  uint8
+	ObjectsDir string
+}
+
+// readDirUUID reads the UUID file from a directory root.  Returns the
+// UUID string and true if the file exists and is valid, or ("", false)
+// if missing / unreadable.
+func readDirUUID(dir string) (string, bool) {
+	data, err := os.ReadFile(filepath.Join(dir, uuidFileName))
+	if err != nil {
+		return "", false
+	}
+	id := string(data)
+	// Basic validation: must parse as a UUID.
+	if _, err := uuid.Parse(id); err != nil {
+		return "", false
+	}
+	return id, true
+}
+
+// writeDirUUID writes a UUID file into a directory root.
+func writeDirUUID(dir, id string) error {
+	return os.WriteFile(filepath.Join(dir, uuidFileName), []byte(id), 0600)
+}
+
+// NewStorageManager creates a new storage manager with UUID-based directory
+// identity.  It performs the following steps:
+//
+//  1. Load existing storageID → (UUID, path) mappings from the database.
+//  2. Scan the supplied directory paths for UUID files.
+//  3. Match discovered UUIDs against known mappings, updating paths as needed
+//     (so that sysadmins can remount directories at different locations).
+//  4. Assign new storage IDs to directories that have no UUID yet and drop
+//     a new UUID file in each.
+//  5. Persist updated mappings to the database.
+//
+// dirs is the ordered set of configured directory paths.  inlineMax sets the
+// maximum inline object size (0 = use default InlineThreshold).
+func NewStorageManager(db *CacheDB, dirs []string, inlineMax int) (*StorageManager, error) {
+	if len(dirs) == 0 {
+		return nil, errors.New("at least one storage directory must be configured")
+	}
+	if len(dirs) > 255 {
+		return nil, errors.New("at most 255 storage directories are supported")
+	}
+
+	// Step 1: load persisted mappings keyed by UUID.
+	persisted, err := db.LoadDiskMappings()
+	if err != nil {
+		log.Warnf("Failed to load disk mappings (will reassign): %v", err)
+	}
+	byUUID := make(map[string]DiskMapping, len(persisted))
+	usedIDs := make(map[uint8]bool, len(persisted))
+	for _, dm := range persisted {
+		byUUID[dm.UUID] = dm
+		usedIDs[dm.ID] = true
+	}
+
+	// Step 2–3: scan directories, match UUIDs, build result map.
+	objDirs := make(map[uint8]string, len(dirs))
+
+	// discoveredUUIDs maps discovered UUID → dir path, for all dirs that
+	// already have a UUID file.
+	discoveredUUIDs := make(map[string]string, len(dirs))
+	// newDirs holds paths that don't have a UUID yet.
+	var newDirs []string
+
+	for _, dir := range dirs {
+		id, ok := readDirUUID(dir)
+		if ok {
+			discoveredUUIDs[id] = dir
+		} else {
+			newDirs = append(newDirs, dir)
+		}
+	}
+
+	// Re-associate known UUIDs (possibly with updated paths).
+	for uid, dir := range discoveredUUIDs {
+		dm, known := byUUID[uid]
+		if known {
+			// Existing directory — update path if it moved.
+			if dm.Directory != dir {
+				log.Infof("Storage dir %d (UUID %s) moved: %s → %s", dm.ID, uid, dm.Directory, dir)
+				dm.Directory = dir
+			}
+			objDirs[dm.ID] = filepath.Join(dir, objectsSubDir)
+			if err := db.SaveDiskMapping(dm); err != nil {
+				return nil, errors.Wrapf(err, "failed to update disk mapping for UUID %s", uid)
+			}
+		} else {
+			// UUID file exists but no DB record — treat as new.
+			newDirs = append(newDirs, dir)
+		}
+	}
+
+	// Step 4: assign new IDs to new directories.
+	// Sort for deterministic ordering.
+	sort.Strings(newDirs)
+	nextID := uint8(StorageIDFirstDisk)
+	for _, dir := range newDirs {
+		// Find next unused ID.
+		for usedIDs[nextID] {
+			nextID++
+			if nextID == 0 {
+				// All 255 IDs are taken.  Recycle the unmounted
+				// storageID with the smallest usage — purge its
+				// contents from the database and reuse the ID.
+				recycledID, err := db.FindRecyclableStorageID(objDirs)
+				if err != nil {
+					return nil, errors.Wrap(err, "exhausted storage IDs and no recyclable IDs available")
+				}
+				if err := db.PurgeStorageID(recycledID); err != nil {
+					return nil, errors.Wrapf(err, "failed to purge recycled storage ID %d", recycledID)
+				}
+				nextID = recycledID
+				break
+			}
+		}
+
+		newUUID := uuid.New().String()
+		if err := writeDirUUID(dir, newUUID); err != nil {
+			return nil, errors.Wrapf(err, "failed to write UUID file in %s", dir)
+		}
+
+		dm := DiskMapping{ID: nextID, UUID: newUUID, Directory: dir}
+		if err := db.SaveDiskMapping(dm); err != nil {
+			return nil, errors.Wrapf(err, "failed to save disk mapping for %s", dir)
+		}
+
+		objDirs[nextID] = filepath.Join(dir, objectsSubDir)
+		usedIDs[nextID] = true
+		log.Infof("Assigned storage ID %d (UUID %s) to %s", nextID, newUUID, dir)
+		nextID++
+	}
+
+	if len(objDirs) == 0 {
+		return nil, errors.New("no storage directories after UUID resolution")
+	}
+
+	if inlineMax <= 0 {
+		inlineMax = InlineThreshold
+	}
 
 	return &StorageManager{
-		db:          db,
-		objectsDir:  objectsDir,
-		blockStates: make(map[string]*ObjectBlockState),
+		db:             db,
+		dirs:           objDirs,
+		inlineMaxBytes: inlineMax,
+		blockStates:    make(map[string]*ObjectBlockState),
 	}, nil
 }
 
-// getObjectPath returns the full filesystem path for an object
+// GetDirs returns the configured storage directories (storageID → objects dir).
+func (sm *StorageManager) GetDirs() map[uint8]string {
+	return sm.dirs
+}
+
+// InlineMaxBytes returns the configured maximum inline object size.
+func (sm *StorageManager) InlineMaxBytes() int {
+	return sm.inlineMaxBytes
+}
+
+// getObjectPathForDir returns the full path for an object in a specific directory.
+func (sm *StorageManager) getObjectPathForDir(storageID uint8, instanceHash string) string {
+	dir, ok := sm.dirs[storageID]
+	if !ok {
+		// Fallback to first dir (should not happen in practice)
+		for _, d := range sm.dirs {
+			dir = d
+			break
+		}
+	}
+	return filepath.Join(dir, GetInstanceStoragePath(instanceHash))
+}
+
+// getObjectPath returns the full filesystem path for an object.
+// For objects already stored, use getObjectPathForDir with their StorageID.
+// This legacy helper uses StorageIDFirstDisk for backward compatibility.
 func (sm *StorageManager) getObjectPath(instanceHash string) string {
-	return filepath.Join(sm.objectsDir, GetInstanceStoragePath(instanceHash))
+	return sm.getObjectPathForDir(StorageIDFirstDisk, instanceHash)
 }
 
 // StoreInline stores small data inline in BadgerDB
 func (sm *StorageManager) StoreInline(ctx context.Context, instanceHash string, meta *CacheMetadata, data []byte) error {
-	if len(data) > InlineThreshold {
-		return errors.Errorf("data too large for inline storage: %d > %d", len(data), InlineThreshold)
+	if len(data) > sm.inlineMaxBytes {
+		return errors.Errorf("data too large for inline storage: %d > %d", len(data), sm.inlineMaxBytes)
 	}
 
 	encMgr := sm.db.GetEncryptionManager()
@@ -125,7 +306,6 @@ func (sm *StorageManager) StoreInline(ctx context.Context, instanceHash string, 
 	}
 
 	// Store metadata
-	meta.StorageMode = StorageModeInline
 	meta.StorageID = StorageIDInline
 	meta.ContentLength = int64(len(data))
 	meta.Completed = time.Now()
@@ -152,7 +332,7 @@ func (sm *StorageManager) ReadInline(instanceHash string) ([]byte, error) {
 	if meta == nil {
 		return nil, errors.New("object not found")
 	}
-	if meta.StorageMode != StorageModeInline {
+	if !meta.IsInline() {
 		return nil, errors.New("object is not stored inline")
 	}
 
@@ -176,9 +356,9 @@ func (sm *StorageManager) ReadInline(instanceHash string) ([]byte, error) {
 	return encMgr.DecryptInline(encryptedData, dek, meta.Nonce)
 }
 
-// InitDiskStorage initializes disk storage for a large object
-// Returns the metadata with encryption keys set up
-func (sm *StorageManager) InitDiskStorage(ctx context.Context, instanceHash string, contentLength int64) (*CacheMetadata, error) {
+// InitDiskStorage initializes disk storage for a large object in the specified
+// storage directory.  Returns the metadata with encryption keys set up.
+func (sm *StorageManager) InitDiskStorage(ctx context.Context, instanceHash string, contentLength int64, storageID uint8) (*CacheMetadata, error) {
 	encMgr := sm.db.GetEncryptionManager()
 
 	// Generate encryption keys
@@ -198,15 +378,14 @@ func (sm *StorageManager) InitDiskStorage(ctx context.Context, instanceHash stri
 	}
 
 	meta := &CacheMetadata{
-		StorageMode:   StorageModeDisk,
-		StorageID:     StorageIDPrimaryDisk,
+		StorageID:     storageID,
 		ContentLength: contentLength,
 		DataKey:       encryptedDEK,
 		Nonce:         nonce,
 	}
 
 	// Create the file; createFile lazily creates the parent directory
-	objectPath := sm.getObjectPath(instanceHash)
+	objectPath := sm.getObjectPathForDir(storageID, instanceHash)
 	file, err := createFile(objectPath)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create object file")
@@ -254,7 +433,7 @@ func (sm *StorageManager) WriteBlocks(instanceHash string, startOffset int64, da
 	if meta == nil {
 		return errors.New("object not found")
 	}
-	if meta.StorageMode != StorageModeDisk {
+	if !meta.IsDisk() {
 		return errors.New("object is not stored on disk")
 	}
 
@@ -272,7 +451,7 @@ func (sm *StorageManager) WriteBlocks(instanceHash string, startOffset int64, da
 	}
 
 	// Open file for writing
-	objectPath := sm.getObjectPath(instanceHash)
+	objectPath := sm.getObjectPathForDir(meta.StorageID, instanceHash)
 	file, err := os.OpenFile(objectPath, os.O_WRONLY, 0600)
 	if err != nil {
 		return errors.Wrap(err, "failed to open object file")
@@ -353,7 +532,7 @@ func (sm *StorageManager) ReadBlocks(instanceHash string, startOffset int64, len
 	if meta == nil {
 		return nil, errors.New("object not found")
 	}
-	if meta.StorageMode != StorageModeDisk {
+	if !meta.IsDisk() {
 		return nil, errors.New("object is not stored on disk")
 	}
 
@@ -392,7 +571,7 @@ func (sm *StorageManager) ReadBlocks(instanceHash string, startOffset int64, len
 	}
 
 	// Open file for reading
-	objectPath := sm.getObjectPath(instanceHash)
+	objectPath := sm.getObjectPathForDir(meta.StorageID, instanceHash)
 	file, err := os.Open(objectPath)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to open object file")
@@ -460,7 +639,7 @@ func (sm *StorageManager) IdentifyCorruptBlocks(instanceHash string, startBlock,
 	if meta == nil {
 		return nil, errors.New("object not found")
 	}
-	if meta.StorageMode != StorageModeDisk {
+	if !meta.IsDisk() {
 		return nil, nil
 	}
 
@@ -479,7 +658,7 @@ func (sm *StorageManager) IdentifyCorruptBlocks(instanceHash string, startBlock,
 		return nil, errors.Wrap(err, "failed to get block state")
 	}
 
-	objectPath := sm.getObjectPath(instanceHash)
+	objectPath := sm.getObjectPathForDir(meta.StorageID, instanceHash)
 	file, err := os.Open(objectPath)
 	if err != nil {
 		// File missing entirely — all requested blocks are corrupt
@@ -587,7 +766,7 @@ func (sm *StorageManager) IsComplete(instanceHash string) (bool, error) {
 		return false, nil
 	}
 
-	if meta.StorageMode == StorageModeInline {
+	if meta.IsInline() {
 		return true, nil // Inline data is always complete
 	}
 
@@ -614,14 +793,43 @@ func (sm *StorageManager) Delete(instanceHash string) error {
 	}
 
 	// If stored on disk, delete the file
-	if meta != nil && meta.StorageMode == StorageModeDisk {
-		objectPath := sm.getObjectPath(instanceHash)
+	if meta != nil && meta.IsDisk() {
+		objectPath := sm.getObjectPathForDir(meta.StorageID, instanceHash)
 		if err := os.Remove(objectPath); err != nil && !os.IsNotExist(err) {
 			log.Warnf("Failed to delete object file %s: %v", objectPath, err)
 		}
 	}
 
 	return nil
+}
+
+// EvictByLRU walks the LRU index for a given storage+namespace and evicts
+// the oldest objects until either maxObjects have been removed or maxBytes
+// of content has been freed — whichever comes first.  A value of 0 for
+// either limit means "no limit on that dimension".  The method is allowed
+// to go one object over the byte threshold to prevent starvation.
+//
+// All DB mutations happen atomically; filesystem deletes follow afterward.
+// Returns the evicted objects, total bytes freed, and any error.
+func (sm *StorageManager) EvictByLRU(storageID uint8, namespaceID uint32, maxObjects int, maxBytes int64) ([]evictedObject, uint64, error) {
+	evicted, err := sm.db.EvictByLRU(storageID, namespaceID, maxObjects, maxBytes)
+	if err != nil {
+		return nil, 0, errors.Wrap(err, "failed to evict objects by LRU")
+	}
+
+	var totalFreed uint64
+	for _, obj := range evicted {
+		totalFreed += uint64(obj.contentLen)
+
+		if obj.storageID != StorageIDInline {
+			objectPath := sm.getObjectPathForDir(obj.storageID, obj.instanceHash)
+			if err := os.Remove(objectPath); err != nil && !os.IsNotExist(err) {
+				log.Warnf("Failed to delete evicted object file %s: %v", objectPath, err)
+			}
+		}
+	}
+
+	return evicted, totalFreed, nil
 }
 
 // GetObjectSize returns the content length of a cached object
@@ -685,7 +893,7 @@ func (sm *StorageManager) NewObjectReader(instanceHash string) (*ObjectReader, e
 		length:       meta.ContentLength,
 	}
 
-	if meta.StorageMode == StorageModeInline {
+	if meta.IsInline() {
 		// Read all inline data upfront
 		data, err := sm.ReadInline(instanceHash)
 		if err != nil {
@@ -710,7 +918,7 @@ func (sm *StorageManager) NewObjectReader(instanceHash string) (*ObjectReader, e
 			return nil, errors.Wrap(err, "failed to get block state")
 		}
 
-		reader.file, err = os.Open(sm.getObjectPath(instanceHash))
+		reader.file, err = os.Open(sm.getObjectPathForDir(meta.StorageID, instanceHash))
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to open object file")
 		}
@@ -730,7 +938,7 @@ func (r *ObjectReader) Read(p []byte) (n int, err error) {
 		toRead = int(r.length - r.position)
 	}
 
-	if r.meta.StorageMode == StorageModeInline {
+	if r.meta.IsInline() {
 		n = copy(p[:toRead], r.inlineData[r.position:])
 		r.position += int64(n)
 		if r.position >= r.length {
@@ -802,7 +1010,7 @@ func (r *ObjectReader) ReadAt(p []byte, off int64) (n int, err error) {
 		toRead = int(r.length - off)
 	}
 
-	if r.meta.StorageMode == StorageModeInline {
+	if r.meta.IsInline() {
 		n = copy(p[:toRead], r.inlineData[off:])
 		if off+int64(n) >= r.length {
 			return n, io.EOF
@@ -875,7 +1083,7 @@ func (sm *StorageManager) NewBlockWriter(instanceHash string, startBlock uint32,
 	if meta == nil {
 		return nil, errors.New("object not found in metadata")
 	}
-	if meta.StorageMode != StorageModeDisk {
+	if !meta.IsDisk() {
 		return nil, errors.New("block writer only works with disk storage")
 	}
 
@@ -899,7 +1107,7 @@ func (sm *StorageManager) NewBlockWriter(instanceHash string, startBlock uint32,
 	}
 
 	// Open the file for writing, creating it and its parent directory if necessary.
-	objectPath := sm.getObjectPath(instanceHash)
+	objectPath := sm.getObjectPathForDir(meta.StorageID, instanceHash)
 	file, err := os.OpenFile(objectPath, os.O_WRONLY|os.O_CREATE, 0600)
 	if errors.Is(err, os.ErrNotExist) {
 		if mkdirErr := os.MkdirAll(filepath.Dir(objectPath), 0750); mkdirErr != nil {

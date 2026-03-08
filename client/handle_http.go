@@ -1922,46 +1922,51 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			remotePath := transfers[0].Url.Path
 			transfers[0].Url.Path = strings.TrimSuffix(path.Clean(remotePath), path.Clean(job.job.remoteURL.Path))
 			return te.walkDirUpload(job, transfers, te.files, job.job.localPath)
-		} else if job.job.xferType == transferTypeDownload {
-			// For recursive downloads, stat the remote path.
-			var statInfo FileInfo
-			var statErr error
-			var pelicanUrl *pelican_url.PelicanURL
-			pelicanUrl, err = pelican_url.Parse(remoteUrl.String(), nil, nil)
-			if err != nil {
-				return errors.Wrap(err, "failed to parse remote URL for recursive download")
-			}
-			statInfo, statErr = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken)
-			if statErr != nil {
-				return errors.Wrap(statErr, "failed to stat remote path for recursive download")
-			}
-			if statInfo.IsCollection {
-				return te.walkDirDownload(job, transfers, te.files, remoteUrl)
-			}
-		}
-		log.Debugln("Remote path is not a collection; proceeding with single file transfer")
-	} else if job.job.xferType == transferTypePrestage {
-		// For prestage, from day one we handle internally whether it's recursive
-		// (as opposed to making the user specify explicitly)
-		var statInfo FileInfo
-		var pelicanUrl *pelican_url.PelicanURL
-		pelicanUrl, err = pelican_url.Parse(remoteUrl.String(), nil, nil)
-		if err != nil {
-			return
-		}
-		statInfo, err = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken)
-		if err != nil {
-			err = errors.Wrap(err, "failed to stat object to prestage")
-			return
-		}
-		if statInfo.IsCollection {
-			return te.walkDirDownload(job, transfers, te.files, remoteUrl)
-		}
-	}
+		   } else if job.job.xferType == transferTypeDownload {
+			   // For recursive downloads, stat the remote path.
+			   var statInfo FileInfo
+			   var statErr error
+			   var pelicanUrl *pelican_url.PelicanURL
+			   pelicanUrl, err = pelican_url.Parse(remoteUrl.String(), nil, nil)
+			   if err != nil {
+				   return errors.Wrap(err, "failed to parse remote URL for recursive download")
+			   }
+			   if job.job.dirResp.XPelNsHdr.CollectionsUrl != nil {
+				   statInfo, statErr = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken, true)
+			   } else {
+				   statInfo, statErr = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken)
+			   }
+			   if statErr != nil {
+				   return errors.Wrap(statErr, "failed to stat remote path for recursive download")
+			   }
+			   if statInfo.IsCollection {
+				   return te.walkDirDownload(job, transfers, te.files, remoteUrl)
+			   }
+		   }
+		   log.Debugln("Remote path is not a collection; proceeding with single file transfer")
+	   } else if job.job.xferType == transferTypePrestage {
+		   // For prestage, stat using only the collectionsUrl (origin).
+		   if job.job.dirResp.XPelNsHdr.CollectionsUrl != nil {
+			   var statInfo FileInfo
+			   var pelicanUrl *pelican_url.PelicanURL
+			   pelicanUrl, err = pelican_url.Parse(remoteUrl.String(), nil, nil)
+			   if err != nil {
+				   return
+			   }
+			   statInfo, err = statHttp(pelicanUrl, job.job.dirResp, job.job.token, job.job.fedToken, true)
+			   if err != nil {
+				   err = errors.Wrap(err, "failed to stat object to prestage")
+				   return
+			   }
+			   if statInfo.IsCollection {
+				   return te.walkDirDownload(job, transfers, te.files, remoteUrl)
+			   }
+		   }
+	   }
 
-	log.Debugln("Queuing transfer for object", remoteUrl.String(), "with first transfer URL:", transfers[0].Url.String())
-	job.job.totalXfer += 1
-	job.job.activeXfer.Add(1)
+	   log.Debugln("Queuing transfer for object", remoteUrl.String(), "with first transfer URL:", transfers[0].Url.String())
+	   job.job.totalXfer += 1
+	   job.job.activeXfer.Add(1)
 	select {
 	case <-te.ctx.Done():
 		log.Debugln("Transfer engine has been cancelled, not queuing new transfer file information")
@@ -4782,47 +4787,43 @@ func deleteHttp(ctx context.Context, remoteUrl *pelican_url.PelicanURL, recursiv
 // Invoke a stat request against a remote URL that accepts WebDAV protocol,
 // using the provided namespace information
 //
-// NOTE: Historically this function preferred querying the collectionsUrl
-// (often an origin endpoint) even though, for an end-user stat, a cache
-// with Depth:0 PROPFIND support would suffice. The current implementation
-// prefers the ObjectServers under the assumption that querying caches are
-// more scalable than querying the origin / collections URL. In cache mode
-// (the client is embedded inside a cache server) the ObjectServers already
-// point at origins, so the change is basically a no-op. In the normal /
-// end-user mode, the ObjectServers are typically caches, which
-// support Depth:0 PROPFIND.  Note that if a XRootD cache gets a PROPFIND
-// against a directory, the current version returns a 409; in that case, we
-// fallback to the collections URL.
-func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, fedToken TokenProvider) (info FileInfo, err error) {
-	statHosts := make([]url.URL, 0, 3)
-	collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
+// NOTE: the role of this function is evolving.  Historically it preferred
+// querying the collectionsUrl (often an origin endpoint) even though, for an
+// end-user stat, a cache with Depth:0 PROPFIND support would suffice.
+// The current implementation prefers the ObjectServers returned because their Link-
+// header URLs carry the correct origin-side path for both XRootD and
+// POSIXv2 origins, whereas collectionsUrl requires reconstructing the
+// namespace-relative path.  In cache mode (persistent cache) the
+// ObjectServers already point at origins, so the stat reaches the right
+// place.  In end-user mode the ObjectServers are typically caches, which
+// support Depth:0 PROPFIND.
+//
+// TODO: revisit whether collectionsUrl should be preferred (or used as a
+// fallback) for end-user stat when the ObjectServers are caches.  If
+// there is no collectionsUrl the origin has indicated it does not support
+// PROPFIND, so we must not attempt to stat against it directly.
+// preferCollectionsUrlOnly: if true, only use collectionsUrl (origin) for stat, never caches/ObjectServers.
+func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator, fedToken TokenProvider, preferCollectionsUrlOnly ...bool) (info FileInfo, err error) {
+   statHosts := make([]url.URL, 0, 3)
+   collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
 
-	// Prefer cache/origin servers (ObjectServers) for stat, but always
-	// include the collections URL as a fallback.  XRootD caches return
-	// 409 for PROPFIND on directories, so we need the collections URL
-	// as a fallback for recursive operations.
-	if len(dirResp.ObjectServers) > 0 {
-		for idx, oServer := range dirResp.ObjectServers {
-			if idx > 2 {
-				break
-			}
-			statHosts = append(statHosts, *oServer)
-		}
-	}
-	if collectionsUrl != nil {
-		// Avoid duplicating the collections URL if it was already
-		// added as an ObjectServer.
-		isDup := false
-		for _, h := range statHosts {
-			if h.Host == collectionsUrl.Host && h.Path == collectionsUrl.Path {
-				isDup = true
-				break
-			}
-		}
-		if !isDup {
-			statHosts = append(statHosts, *collectionsUrl)
-		}
-	}
+   useCollectionsOnly := len(preferCollectionsUrlOnly) > 0 && preferCollectionsUrlOnly[0]
+   if useCollectionsOnly {
+	   if collectionsUrl != nil {
+		   statHosts = append(statHosts, *collectionsUrl)
+	   }
+   } else {
+	   if len(dirResp.ObjectServers) > 0 {
+		   for idx, oServer := range dirResp.ObjectServers {
+			   if idx > 2 {
+				   break
+			   }
+			   statHosts = append(statHosts, *oServer)
+		   }
+	   } else if collectionsUrl != nil {
+		   statHosts = append(statHosts, *collectionsUrl)
+	   }
+   }
 	type statResults struct {
 		info FileInfo
 		err  error
@@ -4848,36 +4849,22 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 	auth := &bearerAuth{token: authToken}
 
 	for _, statUrl := range statHosts {
-		isCollections := collectionsUrl != nil && statUrl.Host == collectionsUrl.Host && statUrl.Path == collectionsUrl.Path
+		// Build the gowebdav client root from host:port only; the
+		// object path is passed separately to client.Stat().
+		clientRoot := statUrl
+		clientRoot.Path = ""
+		clientRoot.RawQuery = ""
+		clientRoot.Fragment = ""
+		client := gowebdav.NewAuthClient(clientRoot.String(), auth)
 
-		var client *gowebdav.Client
-		var propfindPath string
-		if isCollections {
-			// For collections URLs the path component is a base prefix
-			// (e.g. "/api/v1.0/origin/data"); the federation object path
-			// (dest.Path, e.g. "/test/") must be appended.  Use the full
-			// collectionsUrl (including its path) as the WebDAV client
-			// root and pass dest.Path to Stat(), matching how listHttp
-			// and walkDirDownload use the collections URL.
-			client = gowebdav.NewAuthClient(statUrl.String(), auth)
-			propfindPath = path.Clean(dest.Path)
-		} else {
-			// ObjectServer URLs already contain the full path to the
-			// object (e.g. "/test/" or "/api/v1.0/origin/data/test/").
-			// Strip the path to form the client root and use the URL
-			// path as the PROPFIND target.
-			clientRoot := statUrl
-			clientRoot.Path = ""
-			clientRoot.RawQuery = ""
-			clientRoot.Fragment = ""
-			client = gowebdav.NewAuthClient(clientRoot.String(), auth)
-
-			propfindPath = statUrl.Path
-			if propfindPath == "" {
-				propfindPath = dest.Path
-			}
-			propfindPath = path.Clean(propfindPath)
+		// Use the path from the statUrl (ObjectServer origin-side
+		// path, or collectionsUrl base path).  Fall back to the
+		// pelican URL path if the statUrl has no path component.
+		propfindPath := statUrl.Path
+		if propfindPath == "" {
+			propfindPath = dest.Path
 		}
+		propfindPath = path.Clean(propfindPath)
 
 		destCopy := statUrl
 		destCopy.Path = propfindPath
@@ -4909,31 +4896,17 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 						info.ETag = webdavFile.ETag()
 					}
 					break
-				} else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
-					err = errors.Wrapf(err, "Stat request not allowed for object at endpoint %s", endpoint.String())
-					resultsChan <- statResults{FileInfo{}, err}
-					return
-				} else if gowebdav.IsErrNotFound(err) {
-					err = errors.Wrapf(ErrObjectNotFound, "object %s not found at endpoint %s", dest.String(), endpoint.String())
-					err = error_codes.NewSpecification_FileNotFoundError(err)
-					resultsChan <- statResults{FileInfo{}, err}
-					return
-				} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
-					// 500 is NOT "not found"; report it as a server error so
-					// callers (e.g. uploadObject) can distinguish a genuine
-					// absence from an error.
-					err = errors.Errorf("stat of %s failed at endpoint %s: server returned 500", dest.String(), endpoint.String())
-					resultsChan <- statResults{FileInfo{}, err}
-					return
-				} else if gowebdav.IsErrCode(err, http.StatusConflict) {
-					// 409 Conflict — XRootD caches return this for PROPFIND
-					// on directories.  Report as an error so the collections
-					// URL fallback can still succeed.
-					log.Debugf("Stat of %s at %s returned 409 (directory on cache?); falling back", dest.String(), endpoint.String())
-					err = errors.Errorf("stat of %s at endpoint %s: server returned 409", dest.String(), endpoint.String())
-					resultsChan <- statResults{FileInfo{}, err}
-					return
-				}
+				   } else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
+					   err = errors.Wrapf(err, "Stat request not allowed for object at endpoint %s", endpoint.String())
+					   resultsChan <- statResults{FileInfo{}, err}
+					   return
+				   } else if gowebdav.IsErrNotFound(err) || gowebdav.IsErrCode(err, http.StatusInternalServerError) {
+					   // Treat 404 (not found) and 500 (internal server error) as not found for fallback logic
+					   err = errors.Wrapf(ErrObjectNotFound, "object %s not found at the endpoint %s", dest.String(), endpoint.String())
+					   err = error_codes.NewSpecification_FileNotFoundError(err)
+					   resultsChan <- statResults{FileInfo{}, err}
+					   return
+				   }
 
 				// If we have a proxy error, we can try again without the proxy
 				if urle, ok := err.(*url.Error); canDisableProxy && !disableProxy && ok && urle.Unwrap() != nil {
@@ -4964,22 +4937,32 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 
 		}(&destCopy)
 	}
-	success := false
-	for ctr := 0; ctr < len(statHosts); ctr++ {
-		result := <-resultsChan
-		if result.err == nil {
-			if !success {
-				success = true
-				info = result.info
-			}
-		} else if err == nil && result.err != context.Canceled {
-			err = result.err
-		}
-	}
-	if success {
-		err = nil
-	}
-	return
+	   success := false
+	   notFound := false
+	   for ctr := 0; ctr < len(statHosts); ctr++ {
+		   result := <-resultsChan
+		   if result.err == nil {
+			   if !success {
+				   success = true
+				   info = result.info
+			   }
+		   } else if err == nil && result.err != context.Canceled {
+			   err = result.err
+			   // Check for not found error
+			   if errors.Is(result.err, ErrObjectNotFound) {
+				   notFound = true
+			   }
+		   }
+	   }
+	   // Fallback: if preferCollectionsUrlOnly, got not found, and object servers exist, try default logic
+	   if useCollectionsOnly && notFound && len(dirResp.ObjectServers) > 0 {
+		   // Recursively call statHttp without preferCollectionsUrlOnly
+		   return statHttp(dest, dirResp, token, fedToken)
+	   }
+	   if success {
+		   err = nil
+	   }
+	   return
 }
 
 // Check if a given URL is present at the first cache in the director response
