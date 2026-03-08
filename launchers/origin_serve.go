@@ -223,7 +223,7 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 
 		// Launch the OA4MP token issuer daemon for non-XRootD backends.
 		// For XRootD backends, it is launched alongside XRootD via xrootd.LaunchDaemons.
-		if param.Origin_EnableIssuer.GetBool() {
+		if param.Origin_EnableIssuer.GetBool() && param.Origin_IssuerMode.GetString() == "oa4mp" {
 			oa4mpLauncher, err := oa4mp.ConfigureOA4MP()
 			if err != nil {
 				return errors.Wrap(err, "failed to configure OA4MP for non-XRootD backend")
