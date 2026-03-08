@@ -132,9 +132,11 @@ func TestSaveConfigContentsToFile(t *testing.T) {
 		testConfig := &OSDFConfig{}
 		testConfig.OSDF.OauthClient = []PrefixEntry{
 			{
-				Prefix:       "/test/roundtrip",
-				ClientID:     "roundtrip-client-id",
-				ClientSecret: "roundtrip-client-secret",
+				Prefix:                  "/test/roundtrip",
+				ClientID:                "roundtrip-client-id",
+				ClientSecret:            "roundtrip-client-secret",
+				RegistrationAccessToken: "roundtrip-rat",
+				RegistrationClientURI:   "https://example.com/oidc-cm/roundtrip-client-id",
 			},
 		}
 
@@ -152,6 +154,8 @@ func TestSaveConfigContentsToFile(t *testing.T) {
 		assert.Equal(t, "/test/roundtrip", readConfig.OSDF.OauthClient[0].Prefix)
 		assert.Equal(t, "roundtrip-client-id", readConfig.OSDF.OauthClient[0].ClientID)
 		assert.Equal(t, "roundtrip-client-secret", readConfig.OSDF.OauthClient[0].ClientSecret)
+		assert.Equal(t, "roundtrip-rat", readConfig.OSDF.OauthClient[0].RegistrationAccessToken)
+		assert.Equal(t, "https://example.com/oidc-cm/roundtrip-client-id", readConfig.OSDF.OauthClient[0].RegistrationClientURI)
 	})
 }
 
