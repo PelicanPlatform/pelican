@@ -22,7 +22,7 @@ import "time"
 
 // OIDCClientRecord maps to the oidc_clients table.
 type OIDCClientRecord struct {
-	ID                    string     `gorm:"primaryKey"`
+	ID                    string `gorm:"primaryKey"`
 	ClientSecret          string
 	RedirectURIs          string
 	GrantTypes            string
@@ -43,7 +43,7 @@ func (OIDCClientRecord) TableName() string { return "oidc_clients" }
 // create rows in oidc_refresh_tokens (which adds a first_used_at column
 // not present in the other four tables).
 type OIDCTokenSession struct {
-	Signature       string     `gorm:"primaryKey"`
+	Signature       string `gorm:"primaryKey"`
 	RequestID       string
 	RequestedAt     time.Time
 	ClientID        string
@@ -69,7 +69,7 @@ func (OIDCRefreshToken) TableName() string { return "oidc_refresh_tokens" }
 
 // OIDCDeviceCode maps to the oidc_device_codes table.
 type OIDCDeviceCode struct {
-	DeviceCode    string     `gorm:"primaryKey"`
+	DeviceCode    string `gorm:"primaryKey"`
 	UserCode      string
 	RequestID     string
 	RequestedAt   time.Time
@@ -89,7 +89,7 @@ func (OIDCDeviceCode) TableName() string { return "oidc_device_codes" }
 
 // OIDCJWTAssertion maps to the oidc_jwt_assertions table.
 type OIDCJWTAssertion struct {
-	JTI       string    `gorm:"column:jti;primaryKey"`
+	JTI       string `gorm:"column:jti;primaryKey"`
 	ExpiresAt time.Time
 	CreatedAt time.Time
 }

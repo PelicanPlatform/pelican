@@ -527,7 +527,9 @@ func (r *testAccessRequest) GetGrantedAudience() fosite.Arguments   { return r.g
 func (r *testAccessRequest) GetSession() fosite.Session             { return r.session }
 func (r *testAccessRequest) SetSession(s fosite.Session)            { r.session = s }
 func (r *testAccessRequest) GetRequestForm() url.Values             { return url.Values{} }
-func (r *testAccessRequest) GetGrantTypes() fosite.Arguments        { return fosite.Arguments{"urn:ietf:params:oauth:grant-type:token-exchange"} }
+func (r *testAccessRequest) GetGrantTypes() fosite.Arguments {
+	return fosite.Arguments{"urn:ietf:params:oauth:grant-type:token-exchange"}
+}
 func (r *testAccessRequest) GrantScope(scope string) {
 	r.grantedScopes = append(r.grantedScopes, scope)
 }
