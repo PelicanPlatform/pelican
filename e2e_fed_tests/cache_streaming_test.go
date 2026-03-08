@@ -23,8 +23,7 @@
 // These verify that the persistent cache starts streaming data back to
 // the client before the entire origin-to-cache transfer has completed.
 // We use a POSIXv2 origin with Origin.TransferRateLimit to simulate a
-// slow backend -- this avoids XRootD's internal buffering which makes
-// streaming tests unreliable.
+// slow backend.
 
 package fed_tests
 
@@ -52,8 +51,6 @@ import (
 
 // slowOriginConfig returns a YAML configuration snippet for a POSIXv2
 // origin with a transfer rate limit to simulate a slow backend.
-// The rate limit is applied at the filesystem level, so there is no
-// intermediate buffering (unlike an XRootD HTTP proxy).
 func slowOriginConfig(rateLimit string) string {
 	return fmt.Sprintf(`Origin:
   StorageType: posixv2

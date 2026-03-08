@@ -302,6 +302,55 @@ func (cdb *CacheDB) LoadNamespaceMappings() (map[string]uint32, uint32, error) {
 	return result, maxID, nil
 }
 
+// --- Disk Mapping Operations ---
+
+// DiskMappingKey returns the BadgerDB key for a disk mapping entry.
+func DiskMappingKey(storageID uint8) []byte {
+	return []byte(fmt.Sprintf("%s%d", PrefixDiskMap, storageID))
+}
+
+// SaveDiskMapping persists a single storageID → (UUID, directory) mapping.
+func (cdb *CacheDB) SaveDiskMapping(dm DiskMapping) error {
+	data, err := msgpack.Marshal(&dm)
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal disk mapping")
+	}
+	return cdb.db.Update(func(txn *badger.Txn) error {
+		return txn.Set(DiskMappingKey(dm.ID), data)
+	})
+}
+
+// LoadDiskMappings loads all persisted disk mappings.
+func (cdb *CacheDB) LoadDiskMappings() ([]DiskMapping, error) {
+	var mappings []DiskMapping
+	err := cdb.db.View(func(txn *badger.Txn) error {
+		prefix := []byte(PrefixDiskMap)
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = prefix
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			err := it.Item().Value(func(val []byte) error {
+				var dm DiskMapping
+				if err := msgpack.Unmarshal(val, &dm); err != nil {
+					return err
+				}
+				mappings = append(mappings, dm)
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to load disk mappings")
+	}
+	return mappings, nil
+}
+
 // --- Block State Operations ---
 
 // GetBlockState retrieves the bitmap of downloaded blocks for a file
@@ -848,34 +897,6 @@ func (cdb *CacheDB) DeleteLRU(instanceHash string) error {
 
 // --- Usage Counter Operations ---
 
-// GetOldestLRUEntries returns the oldest LRU entries for a storage+namespace combination
-func (cdb *CacheDB) GetOldestLRUEntries(storageID uint8, namespaceID uint32, limit int) ([]string, error) {
-	var entries []string
-
-	err := cdb.db.View(func(txn *badger.Txn) error {
-		prefix := []byte(fmt.Sprintf("%s%d:%d:", PrefixLRU, storageID, namespaceID))
-		opts := badger.DefaultIteratorOptions
-		opts.PrefetchValues = false
-
-		it := txn.NewIterator(opts)
-		defer it.Close()
-
-		for it.Seek(prefix); it.ValidForPrefix(prefix) && len(entries) < limit; it.Next() {
-			key := it.Item().Key()
-			sid, nid, _, hash, err := ParseLRUKey(key)
-			if err != nil {
-				continue
-			}
-			if sid == storageID && nid == namespaceID {
-				entries = append(entries, hash)
-			}
-		}
-		return nil
-	})
-
-	return entries, err
-}
-
 // GetUsage retrieves the total bytes used by a storage+namespace combination
 func (cdb *CacheDB) GetUsage(storageID uint8, namespaceID uint32) (int64, error) {
 	var usage int64
@@ -915,10 +936,29 @@ func (cdb *CacheDB) AddUsage(storageID uint8, namespaceID uint32, delta int64) e
 
 // GetAllUsage returns usage for all storage+namespace combinations
 func (cdb *CacheDB) GetAllUsage() (map[StorageUsageKey]int64, error) {
+	return cdb.getUsageByPrefix([]byte(PrefixUsage))
+}
+
+// GetDirUsage returns usage for all namespaces within a single storage directory.
+func (cdb *CacheDB) GetDirUsage(storageID uint8) (map[uint32]int64, error) {
+	prefix := []byte(fmt.Sprintf("%s%d:", PrefixUsage, storageID))
+	full, err := cdb.getUsageByPrefix(prefix)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[uint32]int64, len(full))
+	for key, usage := range full {
+		result[key.NamespaceID] = usage
+	}
+	return result, nil
+}
+
+// getUsageByPrefix scans usage keys matching the given prefix and returns
+// the decoded (storageID, namespaceID) → bytes mapping.
+func (cdb *CacheDB) getUsageByPrefix(prefix []byte) (map[StorageUsageKey]int64, error) {
 	usage := make(map[StorageUsageKey]int64)
 
 	err := cdb.db.View(func(txn *badger.Txn) error {
-		prefix := []byte(PrefixUsage)
 		opts := badger.DefaultIteratorOptions
 
 		it := txn.NewIterator(opts)
@@ -952,84 +992,233 @@ func (cdb *CacheDB) GetAllUsage() (map[StorageUsageKey]int64, error) {
 
 // --- Bulk Operations ---
 
-// DeleteObject removes all data for a cached object
-// Uses metadata to compute exact LRU key for efficient deletion
-// Also cleans up ETag table if this was the latest version
-func (cdb *CacheDB) DeleteObject(instanceHash string) error {
-	return cdb.db.Update(func(txn *badger.Txn) error {
-		// Get metadata first to find LRU key info and objectHash before deleting
-		var meta CacheMetadata
-		var hasMetadata bool
+// deleteObjectInTxn removes all DB keys for a cached object within an
+// existing transaction.  It returns the decoded metadata (if present) so
+// the caller can decide what to do with filesystem files and usage
+// counters.  The caller is responsible for usage adjustments — this
+// function does NOT modify usage counters.
+func deleteObjectInTxn(txn *badger.Txn, instanceHash string) (*CacheMetadata, error) {
+	var meta CacheMetadata
+	var hasMetadata bool
 
-		item, err := txn.Get(MetaKey(instanceHash))
+	item, err := txn.Get(MetaKey(instanceHash))
+	if err == nil {
+		hasMetadata = true
+		err = item.Value(func(val []byte) error {
+			return msgpack.Unmarshal(val, &meta)
+		})
+		if err != nil {
+			log.Warnf("Failed to unmarshal metadata during object deletion: %v", err)
+			hasMetadata = false
+		}
+	} else if !errors.Is(err, badger.ErrKeyNotFound) {
+		return nil, errors.Wrap(err, "failed to get metadata for deletion")
+	}
+
+	// Delete LRU entry using metadata (before deleting metadata)
+	if hasMetadata && !meta.LastAccessTime.IsZero() {
+		lruKey := LRUKey(meta.StorageID, meta.NamespaceID, meta.LastAccessTime, instanceHash)
+		if err := txn.Delete(lruKey); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+			return nil, errors.Wrap(err, "failed to delete LRU key")
+		}
+	}
+
+	// Clean up ETag table if this was the latest version
+	if hasMetadata && meta.ObjectHash != "" {
+		etagItem, err := txn.Get(ETagKey(meta.ObjectHash))
 		if err == nil {
-			hasMetadata = true
-			err = item.Value(func(val []byte) error {
-				return msgpack.Unmarshal(val, &meta)
+			var currentETag string
+			err = etagItem.Value(func(val []byte) error {
+				currentETag = string(val)
+				return nil
 			})
-			if err != nil {
-				// Log but continue with deletion - metadata may be corrupt
-				log.Warnf("Failed to unmarshal metadata during object deletion: %v", err)
-				hasMetadata = false
-			}
-		} else if !errors.Is(err, badger.ErrKeyNotFound) {
-			return errors.Wrap(err, "failed to get metadata for deletion")
-		}
-
-		// Delete LRU entry using metadata (before deleting metadata)
-		if hasMetadata && !meta.LastAccessTime.IsZero() {
-			lruKey := LRUKey(meta.StorageID, meta.NamespaceID, meta.LastAccessTime, instanceHash)
-			if err := txn.Delete(lruKey); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
-				return errors.Wrap(err, "failed to delete LRU key")
-			}
-		}
-
-		// Clean up ETag table if this was the latest version
-		// Only delete if the current ETag entry points to this object's ETag
-		if hasMetadata && meta.ObjectHash != "" {
-			etagItem, err := txn.Get(ETagKey(meta.ObjectHash))
-			if err == nil {
-				var currentETag string
-				err = etagItem.Value(func(val []byte) error {
-					currentETag = string(val)
-					return nil
-				})
-				if err == nil && currentETag == meta.ETag {
-					// This is the latest version, delete the ETag entry
-					if err := txn.Delete(ETagKey(meta.ObjectHash)); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
-						log.Warnf("Failed to delete ETag entry for %s: %v", meta.ObjectHash, err)
-					}
+			if err == nil && currentETag == meta.ETag {
+				if err := txn.Delete(ETagKey(meta.ObjectHash)); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+					log.Warnf("Failed to delete ETag entry for %s: %v", meta.ObjectHash, err)
 				}
 			}
 		}
+	}
 
-		// Decrease usage statistics before deleting
-		if hasMetadata {
-			// Decrease usage by the content length
+	// Delete metadata
+	if err := txn.Delete(MetaKey(instanceHash)); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+		return nil, err
+	}
+
+	// Delete block state
+	if err := txn.Delete(StateKey(instanceHash)); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+		return nil, err
+	}
+
+	// Delete inline data if stored inline
+	if hasMetadata && meta.IsInline() {
+		if err := txn.Delete(InlineKey(instanceHash)); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+			return nil, err
+		}
+	}
+
+	// Delete purge-first marker if present (best-effort, ignore not-found)
+	_ = txn.Delete(PurgeFirstKey(instanceHash))
+
+	if hasMetadata {
+		return &meta, nil
+	}
+	return nil, nil
+}
+
+// DeleteObject removes all data for a cached object.
+// Uses metadata to compute exact LRU key for efficient deletion.
+// Also cleans up ETag table, purge-first marker, and adjusts usage
+// counters — all within a single transaction.
+func (cdb *CacheDB) DeleteObject(instanceHash string) error {
+	return cdb.db.Update(func(txn *badger.Txn) error {
+		meta, err := deleteObjectInTxn(txn, instanceHash)
+		if err != nil {
+			return err
+		}
+		// Decrease usage statistics
+		if meta != nil {
 			if err := addUsageInTxn(txn, meta.StorageID, meta.NamespaceID, -meta.ContentLength); err != nil {
 				log.Warnf("Failed to decrease usage for storage %d namespace %d: %v", meta.StorageID, meta.NamespaceID, err)
 			}
 		}
+		return nil
+	})
+}
 
-		// Delete metadata
-		if err := txn.Delete(MetaKey(instanceHash)); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
-			return err
+// evictedObject holds the information needed to clean up the filesystem
+// after the DB transaction commits.
+type evictedObject struct {
+	instanceHash string
+	storageID    uint8
+	contentLen   int64
+	namespaceID  uint32
+}
+
+// EvictByLRU evicts objects from a storage+namespace combination, draining
+// purge-first items before walking the regular LRU index — all within a
+// single BadgerDB transaction.
+//
+// Eviction stops when either maxObjects have been removed or maxBytes of
+// content has been freed — whichever comes first.  A value of 0 for
+// either limit means "no limit on that dimension".  The method is allowed
+// to go one object over the byte threshold so that progress is always
+// made even when only large objects remain.
+func (cdb *CacheDB) EvictByLRU(storageID uint8, namespaceID uint32, maxObjects int, maxBytes int64) ([]evictedObject, error) {
+	var evicted []evictedObject
+
+	err := cdb.db.Update(func(txn *badger.Txn) error {
+		usageDeltas := make(map[StorageUsageKey]int64)
+		var freedBytes int64
+
+		// --- helper: returns true when we should stop evicting ---
+		limitReached := func() bool {
+			if maxObjects > 0 && len(evicted) >= maxObjects {
+				return true
+			}
+			if maxBytes > 0 && freedBytes >= maxBytes {
+				return true
+			}
+			return false
 		}
 
-		// Delete block state
-		if err := txn.Delete(StateKey(instanceHash)); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
-			return err
+		// --- helper: delete one object by hash, record results ---
+		evictOne := func(hash string) {
+			meta, err := deleteObjectInTxn(txn, hash)
+			if err != nil {
+				log.Warnf("Failed to delete object %s during eviction: %v", hash, err)
+				return
+			}
+			if meta == nil {
+				return
+			}
+			evicted = append(evicted, evictedObject{
+				instanceHash: hash,
+				storageID:    meta.StorageID,
+				contentLen:   meta.ContentLength,
+				namespaceID:  meta.NamespaceID,
+			})
+			key := StorageUsageKey{StorageID: meta.StorageID, NamespaceID: meta.NamespaceID}
+			usageDeltas[key] -= meta.ContentLength
+			freedBytes += meta.ContentLength
 		}
 
-		// Delete inline data only if storage mode is inline (we know from metadata)
-		if hasMetadata && meta.StorageMode == StorageModeInline {
-			if err := txn.Delete(InlineKey(instanceHash)); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
-				return err
+		// Phase 1: drain purge-first items for this storageID.
+		// Walk the pf: prefix; for each item whose metadata matches
+		// the requested storageID, evict it immediately.
+		{
+			pfPrefix := []byte(PrefixPurgeFirst)
+			opts := badger.DefaultIteratorOptions
+			opts.PrefetchValues = false
+
+			it := txn.NewIterator(opts)
+			defer it.Close()
+
+			for it.Seek(pfPrefix); it.ValidForPrefix(pfPrefix); it.Next() {
+				if limitReached() {
+					break
+				}
+				keyStr := string(it.Item().Key())
+				hash := keyStr[len(PrefixPurgeFirst):]
+				if hash == "" {
+					continue
+				}
+
+				// Peek at metadata to check storageID.
+				metaItem, err := txn.Get(MetaKey(hash))
+				if err != nil {
+					// Object already gone — clean up stale marker.
+					_ = txn.Delete(it.Item().KeyCopy(nil))
+					continue
+				}
+				var meta CacheMetadata
+				err = metaItem.Value(func(val []byte) error {
+					return msgpack.Unmarshal(val, &meta)
+				})
+				if err != nil {
+					continue
+				}
+				if meta.StorageID != storageID {
+					continue
+				}
+
+				evictOne(hash)
+			}
+		}
+
+		// Phase 2: walk the LRU index for the requested storage+namespace.
+		if !limitReached() {
+			lruPrefix := []byte(fmt.Sprintf("%s%d:%d:", PrefixLRU, storageID, namespaceID))
+			opts := badger.DefaultIteratorOptions
+			opts.PrefetchValues = false
+
+			it := txn.NewIterator(opts)
+			defer it.Close()
+
+			for it.Seek(lruPrefix); it.ValidForPrefix(lruPrefix); it.Next() {
+				_, _, _, hash, err := ParseLRUKey(it.Item().Key())
+				if err != nil {
+					continue
+				}
+				evictOne(hash)
+				if limitReached() {
+					break
+				}
+			}
+		}
+
+		// Apply accumulated usage decrements.
+		for key, delta := range usageDeltas {
+			if err := addUsageInTxn(txn, key.StorageID, key.NamespaceID, delta); err != nil {
+				log.Warnf("Failed to decrease usage for storage %d namespace %d: %v",
+					key.StorageID, key.NamespaceID, err)
 			}
 		}
 
 		return nil
 	})
+
+	return evicted, err
 }
 
 // NOTE: ListAllObjects was removed - use ScanMetadata or ScanMetadataFrom instead
@@ -1260,26 +1449,169 @@ func (cdb *CacheDB) IsPurgeFirst(instanceHash string) (bool, error) {
 	return isPurgeFirst, err
 }
 
-// GetPurgeFirstItems returns all file hashes marked for priority eviction
-func (cdb *CacheDB) GetPurgeFirstItems() ([]string, error) {
-	var items []string
+// FindRecyclableStorageID searches persisted disk mappings for the
+// unmounted storageID with the least usage.  mountedDirs maps storageID
+// to directory path for IDs currently assigned to live directories —
+// those are excluded.  Returns the storageID and nil on success, or an
+// error if no recyclable ID exists.
+func (cdb *CacheDB) FindRecyclableStorageID(mountedDirs map[uint8]string) (uint8, error) {
+	mappings, err := cdb.LoadDiskMappings()
+	if err != nil {
+		return 0, errors.Wrap(err, "failed to load disk mappings")
+	}
+
+	bestID := uint8(0)
+	bestUsage := int64(-1)
+	found := false
+
+	for _, dm := range mappings {
+		if _, mounted := mountedDirs[dm.ID]; mounted {
+			continue // still in use
+		}
+
+		// Sum usage across all namespaces for this storageID.
+		dirUsage, err := cdb.GetDirUsage(dm.ID)
+		if err != nil {
+			log.Warnf("Failed to read usage for storage %d during recycle scan: %v", dm.ID, err)
+			continue
+		}
+		var total int64
+		for _, u := range dirUsage {
+			total += u
+		}
+
+		if !found || total < bestUsage || (total == bestUsage && dm.ID < bestID) {
+			bestID = dm.ID
+			bestUsage = total
+			found = true
+		}
+	}
+
+	if !found {
+		return 0, errors.New("no recyclable storage IDs available")
+	}
+
+	log.Infof("Selected storage ID %d (usage %d bytes) for recycling", bestID, bestUsage)
+	return bestID, nil
+}
+
+// PurgeStorageID removes all database entries associated with a storageID:
+// object metadata, block state, inline data, LRU entries, purge-first
+// markers, ETag entries, usage counters, and the disk mapping itself.
+//
+// This is used during storage ID recycling to reclaim an ID that was
+// previously assigned to a directory that is no longer mounted.
+//
+// Objects are deleted in batches to avoid exceeding BadgerDB's
+// transaction size limit.
+func (cdb *CacheDB) PurgeStorageID(storageID uint8) error {
+	const batchSize = 500
+
+	// Phase 1: collect instance hashes from LRU entries for this storageID
+	// (the LRU prefix encodes storageID, so this is a fast prefix scan).
+	var hashes []string
+	lruPrefix := []byte(fmt.Sprintf("%s%d:", PrefixLRU, storageID))
 
 	err := cdb.db.View(func(txn *badger.Txn) error {
-		prefix := []byte(PrefixPurgeFirst)
 		opts := badger.DefaultIteratorOptions
 		opts.PrefetchValues = false
-
 		it := txn.NewIterator(opts)
 		defer it.Close()
 
-		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-			key := string(it.Item().Key())
-			if len(key) > len(PrefixPurgeFirst) {
-				items = append(items, key[len(PrefixPurgeFirst):])
+		for it.Seek(lruPrefix); it.ValidForPrefix(lruPrefix); it.Next() {
+			_, _, _, hash, err := ParseLRUKey(it.Item().Key())
+			if err != nil {
+				continue
 			}
+			hashes = append(hashes, hash)
 		}
 		return nil
 	})
+	if err != nil {
+		return errors.Wrap(err, "failed to scan LRU entries for purge")
+	}
 
-	return items, err
+	// Phase 2: catch any objects on this storageID that lack an LRU
+	// entry (e.g. partially-written objects).
+	hashSet := make(map[string]bool, len(hashes))
+	for _, h := range hashes {
+		hashSet[h] = true
+	}
+
+	err = cdb.ScanMetadata(func(instanceHash string, meta *CacheMetadata) error {
+		if meta.StorageID == storageID && !hashSet[instanceHash] {
+			hashes = append(hashes, instanceHash)
+			hashSet[instanceHash] = true
+		}
+		return nil
+	})
+	if err != nil {
+		return errors.Wrap(err, "failed to scan metadata for purge stragglers")
+	}
+
+	// Phase 3: delete objects in batches.
+	for i := 0; i < len(hashes); i += batchSize {
+		end := i + batchSize
+		if end > len(hashes) {
+			end = len(hashes)
+		}
+		batch := hashes[i:end]
+
+		err := cdb.db.Update(func(txn *badger.Txn) error {
+			for _, hash := range batch {
+				if _, err := deleteObjectInTxn(txn, hash); err != nil {
+					log.Warnf("Failed to delete object %s during storage purge: %v", hash, err)
+					// Continue — best-effort cleanup
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return errors.Wrapf(err, "failed to delete object batch during purge of storage %d", storageID)
+		}
+	}
+
+	// Phase 4: delete usage counters and disk mapping for this storageID.
+	err = cdb.db.Update(func(txn *badger.Txn) error {
+		// Delete all usage keys for this storageID.
+		usagePrefix := []byte(fmt.Sprintf("%s%d:", PrefixUsage, storageID))
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		var usageKeys [][]byte
+		for it.Seek(usagePrefix); it.ValidForPrefix(usagePrefix); it.Next() {
+			usageKeys = append(usageKeys, it.Item().KeyCopy(nil))
+		}
+		for _, key := range usageKeys {
+			if err := txn.Delete(key); err != nil {
+				log.Warnf("Failed to delete usage key during purge: %v", err)
+			}
+		}
+
+		// Delete any remaining LRU keys (should already be gone from
+		// object deletions, but clean up in case of inconsistency).
+		lruIt := txn.NewIterator(opts)
+		defer lruIt.Close()
+
+		var lruKeys [][]byte
+		for lruIt.Seek(lruPrefix); lruIt.ValidForPrefix(lruPrefix); lruIt.Next() {
+			lruKeys = append(lruKeys, lruIt.Item().KeyCopy(nil))
+		}
+		for _, key := range lruKeys {
+			if err := txn.Delete(key); err != nil {
+				log.Warnf("Failed to delete LRU key during purge: %v", err)
+			}
+		}
+
+		// Delete the disk mapping entry.
+		return txn.Delete(DiskMappingKey(storageID))
+	})
+	if err != nil {
+		return errors.Wrapf(err, "failed to clean up usage/mapping for storage %d", storageID)
+	}
+
+	log.Infof("Purged storage ID %d: deleted %d objects", storageID, len(hashes))
+	return nil
 }

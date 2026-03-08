@@ -54,7 +54,7 @@ func newBenchEnv(b *testing.B) *benchEnv {
 	require.NoError(b, err)
 	b.Cleanup(func() { db.Close() })
 
-	storage, err := NewStorageManager(db, dir)
+	storage, err := NewStorageManager(db, []string{dir}, 0)
 	require.NoError(b, err)
 
 	return &benchEnv{dir: dir, db: db, storage: storage}
@@ -97,7 +97,7 @@ func storeDiskObject(b *testing.B, env *benchEnv, name string, size int) string 
 	instanceHash := ComputeInstanceHash(etag, objectHash)
 
 	// Init disk storage (creates the file, sets up encryption keys)
-	meta, err := env.storage.InitDiskStorage(context.Background(), instanceHash, int64(size))
+	meta, err := env.storage.InitDiskStorage(context.Background(), instanceHash, int64(size), StorageIDFirstDisk)
 	require.NoError(b, err)
 
 	// Generate random data and write block-aligned
