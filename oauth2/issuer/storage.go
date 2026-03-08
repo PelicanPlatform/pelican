@@ -341,6 +341,172 @@ func (s *OIDCStorage) DeleteExpiredJWTAssertions(ctx context.Context) (int64, er
 	return result.RowsAffected, result.Error
 }
 
+// ---- Admin Client Management ----
+
+// ClientDetail is a read-only view of a stored OIDC client returned by admin APIs.
+type ClientDetail struct {
+	ClientID              string   `json:"client_id"`
+	RedirectURIs          []string `json:"redirect_uris"`
+	GrantTypes            []string `json:"grant_types"`
+	ResponseTypes         []string `json:"response_types"`
+	Scopes                []string `json:"scopes"`
+	Public                bool     `json:"public"`
+	DynamicallyRegistered bool     `json:"dynamically_registered"`
+	CreatedAt             string   `json:"created_at"`
+}
+
+// ListClients returns all registered OIDC clients.
+func (s *OIDCStorage) ListClients(ctx context.Context) ([]ClientDetail, error) {
+	rows, err := s.db.WithContext(ctx).Raw(`
+		SELECT id, redirect_uris, grant_types, response_types, scopes, public,
+		       dynamically_registered, created_at
+		FROM oidc_clients ORDER BY created_at
+	`).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var clients []ClientDetail
+	for rows.Next() {
+		var (
+			id            string
+			redirectURIs  string
+			grantTypes    string
+			responseTypes string
+			scopes        string
+			public        int
+			dynReg        int
+			createdAt     string
+		)
+		if err := rows.Scan(&id, &redirectURIs, &grantTypes, &responseTypes, &scopes, &public, &dynReg, &createdAt); err != nil {
+			return nil, err
+		}
+
+		cd := ClientDetail{
+			ClientID:              id,
+			Public:                public == 1,
+			DynamicallyRegistered: dynReg == 1,
+			CreatedAt:             createdAt,
+		}
+		_ = json.Unmarshal([]byte(redirectURIs), &cd.RedirectURIs)
+		_ = json.Unmarshal([]byte(grantTypes), &cd.GrantTypes)
+		_ = json.Unmarshal([]byte(responseTypes), &cd.ResponseTypes)
+		_ = json.Unmarshal([]byte(scopes), &cd.Scopes)
+
+		clients = append(clients, cd)
+	}
+	if clients == nil {
+		clients = []ClientDetail{}
+	}
+	return clients, rows.Err()
+}
+
+// GetClientDetail returns a read-only view of a single client.
+func (s *OIDCStorage) GetClientDetail(ctx context.Context, clientID string) (*ClientDetail, error) {
+	var (
+		redirectURIs  string
+		grantTypes    string
+		responseTypes string
+		scopes        string
+		public        int
+		dynReg        int
+		createdAt     string
+	)
+
+	row := s.db.WithContext(ctx).Raw(`
+		SELECT redirect_uris, grant_types, response_types, scopes, public,
+		       dynamically_registered, created_at
+		FROM oidc_clients WHERE id = ?
+	`, clientID).Row()
+
+	err := row.Scan(&redirectURIs, &grantTypes, &responseTypes, &scopes, &public, &dynReg, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fosite.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	cd := &ClientDetail{
+		ClientID:              clientID,
+		Public:                public == 1,
+		DynamicallyRegistered: dynReg == 1,
+		CreatedAt:             createdAt,
+	}
+	_ = json.Unmarshal([]byte(redirectURIs), &cd.RedirectURIs)
+	_ = json.Unmarshal([]byte(grantTypes), &cd.GrantTypes)
+	_ = json.Unmarshal([]byte(responseTypes), &cd.ResponseTypes)
+	_ = json.Unmarshal([]byte(scopes), &cd.Scopes)
+
+	return cd, nil
+}
+
+// UpdateClient applies a partial update to an existing client's mutable fields.
+// Only non-nil/non-empty fields in the update are written; omitted fields are
+// left unchanged.  Returns the updated ClientDetail, or fosite.ErrNotFound if
+// the client does not exist.
+func (s *OIDCStorage) UpdateClient(ctx context.Context, clientID string, update ClientUpdate) (*ClientDetail, error) {
+	// Verify the client exists.
+	existing, err := s.GetClientDetail(ctx, clientID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Merge: use updated value when provided, otherwise keep existing.
+	redirectURIs := existing.RedirectURIs
+	if update.RedirectURIs != nil {
+		redirectURIs = *update.RedirectURIs
+	}
+	grantTypes := existing.GrantTypes
+	if update.GrantTypes != nil {
+		grantTypes = *update.GrantTypes
+	}
+	responseTypes := existing.ResponseTypes
+	if update.ResponseTypes != nil {
+		responseTypes = *update.ResponseTypes
+	}
+	scopes := existing.Scopes
+	if update.Scopes != nil {
+		scopes = *update.Scopes
+	}
+
+	redirectJSON, _ := json.Marshal(redirectURIs)
+	grantJSON, _ := json.Marshal(grantTypes)
+	responseJSON, _ := json.Marshal(responseTypes)
+	scopesJSON, _ := json.Marshal(scopes)
+
+	result := s.db.WithContext(ctx).Exec(`
+		UPDATE oidc_clients
+		SET redirect_uris = ?, grant_types = ?, response_types = ?, scopes = ?
+		WHERE id = ?
+	`, string(redirectJSON), string(grantJSON), string(responseJSON), string(scopesJSON), clientID)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	// Re-read to return the authoritative state.
+	return s.GetClientDetail(ctx, clientID)
+}
+
+// ClientUpdate carries the fields that may be changed via the admin update API.
+// Pointer-to-slice fields distinguish "omitted" (nil) from "set to empty" (non-nil, len 0).
+type ClientUpdate struct {
+	RedirectURIs  *[]string
+	GrantTypes    *[]string
+	ResponseTypes *[]string
+	Scopes        *[]string
+}
+
+// DeleteClient removes a client by ID. Returns true if a row was deleted.
+func (s *OIDCStorage) DeleteClient(ctx context.Context, clientID string) (bool, error) {
+	result := s.db.WithContext(ctx).Exec(`DELETE FROM oidc_clients WHERE id = ?`, clientID)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
 // ---- fosite.AccessTokenStorage ----
 
 func (s *OIDCStorage) CreateAccessTokenSession(ctx context.Context, signature string, request fosite.Requester) error {
