@@ -420,13 +420,23 @@ func newTransferAttemptError(service string, proxy string, isProxyErr bool, isUp
 	return
 }
 
-// wrapHttpErrRespInner wraps the inner error of an HttpErrResp
+// wrapHttpErrRespInner wraps the inner error of an HttpErrResp while
+// preserving the human-readable response body captured in HttpErrResp.Str.
+//
+// Before this fix, this function returned only the inner PelicanError,
+// discarding HttpErrResp.Str (which contains the origin's response body).
+// Now the PelicanError is re-wrapped so its inner error carries the full
+// message (e.g. "request failed (HTTP status 404): No such file").
 func wrapHttpErrRespInner(httpErr *HttpErrResp) error {
 	innerErr := httpErr.Unwrap()
 	// Check if inner error is already a PelicanError (wrapped in downloadHTTP)
 	var pe *error_codes.PelicanError
 	if errors.As(innerErr, &pe) {
-		return innerErr
+		// Preserve the origin's response body (httpErr.Str) by re-wrapping
+		// the PelicanError around an error that includes the body text.
+		// This ensures the message survives all the way to the cache API
+		// error handler instead of being reduced to just the status code.
+		return pe.Wrap(fmt.Errorf("%s", httpErr.Str))
 	}
 	if sce, ok := innerErr.(*StatusCodeError); ok {
 		// Unwrapped StatusCodeError (shouldn't happen if downloadHTTP wraps correctly, but handle for safety)
@@ -473,18 +483,25 @@ func wrapDownloadError(err error, transferEndpointURL string, tokenContents stri
 	// Handle permission denied errors
 	var pde *PermissionDeniedError
 	if errors.As(err, &pde) {
-		// If the token is expired we can retry because we will just get a new token
-		// otherwise something is wrong with the token
+		// Enrich with token validity information.  If the origin already
+		// provided a reason (preserved in pde.message from downloadHTTP),
+		// append the token diagnosis; otherwise build a standalone message.
 		expired, expiration, tokenErr := tokenIsExpired(tokenContents)
+		var tokenDetail string
 		if tokenErr != nil {
-			pde.message = "Permission denied: token could not be parsed"
+			tokenDetail = "token could not be parsed"
 			pde.expired = false
 		} else if expired {
-			pde.message = "Permission denied: token expired at " + expiration.Format(time.RFC3339)
+			tokenDetail = "token expired at " + expiration.Format(time.RFC3339)
 			pde.expired = true
 		} else {
-			pde.message = "Permission denied: token appears valid but was rejected by the server"
+			tokenDetail = "token appears valid but was rejected by the server"
 			pde.expired = false
+		}
+		if pde.message != "" {
+			pde.message = pde.message + " (" + tokenDetail + ")"
+		} else {
+			pde.message = "Permission denied: " + tokenDetail
 		}
 		return error_codes.NewAuthorizationError(pde), false, ""
 	}

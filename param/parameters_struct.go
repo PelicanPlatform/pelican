@@ -27,6 +27,7 @@ import (
 
 type Config struct {
 	Cache struct {
+		AllowedFederations []string `mapstructure:"allowedfederations" yaml:"AllowedFederations"`
 		BlocksToPrefetch int `mapstructure:"blockstoprefetch" yaml:"BlocksToPrefetch"`
 		ClientStatisticsLocation string `mapstructure:"clientstatisticslocation" yaml:"ClientStatisticsLocation"`
 		Concurrency int `mapstructure:"concurrency" yaml:"Concurrency"`
@@ -477,6 +478,7 @@ type Config struct {
 
 type configWithType struct {
 	Cache struct {
+		AllowedFederations struct { Type string; Value []string }
 		BlocksToPrefetch struct { Type string; Value int }
 		ClientStatisticsLocation struct { Type string; Value string }
 		Concurrency struct { Type string; Value int }

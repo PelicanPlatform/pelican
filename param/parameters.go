@@ -88,6 +88,7 @@ func GetDeprecated() map[string][]string {
 // It is generated from docs/parameters.yaml and indicates whether a parameter can be reloaded
 // at runtime without requiring a server restart.
 var runtimeConfigurableMap = map[string]bool{
+	"Cache.AllowedFederations": false,
 	"Cache.BlocksToPrefetch": false,
 	"Cache.ClientStatisticsLocation": false,
 	"Cache.Concurrency": false,
@@ -876,6 +877,8 @@ func (sP StringParam) GetEnvVarName() string {
 func (slP StringSliceParam) GetStringSlice() []string {
 	config := getOrCreateConfig()
 	switch slP.name {
+		case "Cache.AllowedFederations":
+			return config.Cache.AllowedFederations
 		case "Cache.DataLocations":
 			return config.Cache.DataLocations
 		case "Cache.MetaLocations":
@@ -1434,6 +1437,7 @@ func (oP ObjectParam) GetEnvVarName() string {
 // docs/parameters.yaml. It is primarily used to bind environment variables so
 // that env-only overrides are included in viper.AllSettings().
 var allParameterNames = []string{
+	"Cache.AllowedFederations",
 	"Cache.BlocksToPrefetch",
 	"Cache.ClientStatisticsLocation",
 	"Cache.Concurrency",
@@ -2005,6 +2009,7 @@ var (
 )
 
 var (
+	Cache_AllowedFederations = StringSliceParam{"Cache.AllowedFederations"}
 	Cache_DataLocations = StringSliceParam{"Cache.DataLocations"}
 	Cache_MetaLocations = StringSliceParam{"Cache.MetaLocations"}
 	Cache_PermittedNamespaces = StringSliceParam{"Cache.PermittedNamespaces"}
