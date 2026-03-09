@@ -1590,6 +1590,19 @@ func (bw *BlockWriter) Close() error {
 	return nil
 }
 
+// Flush writes any accumulated batch of encrypted blocks to disk and
+// updates the shared block state so that concurrent readers can see them
+// immediately.  This is a no-op when the batch is empty.
+//
+// Callers that need low-latency streaming (e.g. the blockWriter adapter
+// in AdoptTransfer) should call Flush periodically instead of waiting
+// for the batch to reach writeBatchBlocks.
+func (bw *BlockWriter) Flush() error {
+	bw.mu.Lock()
+	defer bw.mu.Unlock()
+	return bw.flushWriteBatch()
+}
+
 // BytesWritten returns the total number of bytes written so far
 func (bw *BlockWriter) BytesWritten() int64 {
 	bw.mu.Lock()
