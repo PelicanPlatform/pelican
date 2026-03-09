@@ -1248,6 +1248,14 @@ func (pc *PersistentCache) doInitObjectFromStat(
 	}
 
 	if err := pc.storage.MergeMetadata(instanceHash, meta); err != nil {
+		// A concurrent downloadObject may have initialized storage for the
+		// same instanceHash between our GetMetadata check and now, causing
+		// a set-once DataKey conflict.  Re-read the metadata; if it exists,
+		// the object is being handled by the other path — return it.
+		if existing, getErr := pc.storage.GetMetadata(instanceHash); getErr == nil && existing != nil {
+			log.Debugf("initObjectFromStat: concurrent init detected for %s, reusing existing metadata", instanceHash)
+			return &initResult{instanceHash: instanceHash, meta: existing}, nil
+		}
 		return nil, errors.Wrap(err, "failed to set metadata for range-on-miss")
 	}
 
@@ -2030,10 +2038,29 @@ func (w *decisionWriter) SetDiskMode(ctx context.Context, size int64) error {
 
 	// Update metadata (merge with initial record created by InitDiskStorage)
 	if err := w.pc.storage.MergeMetadata(w.dl.instanceHash, meta); err != nil {
-		w.setupErr = errors.Wrap(err, "failed to set metadata")
-		w.decided = true
-		w.cond.Broadcast()
-		return w.setupErr
+		// A concurrent initObjectFromStat may have already initialized
+		// storage for this instanceHash, causing a set-once DataKey
+		// conflict.  Re-read the existing metadata and adopt it so the
+		// download can proceed with the correct encryption key.
+		existing, getErr := w.pc.storage.GetMetadata(w.dl.instanceHash)
+		if getErr != nil || existing == nil || len(existing.DataKey) == 0 {
+			w.setupErr = errors.Wrap(err, "failed to set metadata")
+			w.decided = true
+			w.cond.Broadcast()
+			return w.setupErr
+		}
+		log.Debugf("SetDiskMode: concurrent init detected for %s, adopting existing metadata", w.dl.instanceHash)
+		// Use the existing metadata's DataKey and StorageID; overlay our fields.
+		meta.DataKey = existing.DataKey
+		meta.StorageID = existing.StorageID
+		w.diskMeta = meta
+		// Retry the merge now that our incoming DataKey matches existing.
+		if retryErr := w.pc.storage.MergeMetadata(w.dl.instanceHash, meta); retryErr != nil {
+			w.setupErr = errors.Wrap(retryErr, "failed to set metadata after adopting existing")
+			w.decided = true
+			w.cond.Broadcast()
+			return w.setupErr
+		}
 	}
 
 	// Create block writer
