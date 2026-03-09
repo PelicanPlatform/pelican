@@ -2525,6 +2525,10 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		if transfer.token != nil {
 			tokenContents, _ = transfer.token.Get()
 		}
+		fedTokenContents := ""
+		if transfer.fedToken != nil {
+			fedTokenContents, _ = transfer.fedToken.Get()
+		}
 		// Determine byte range end (-1 means download to end of file)
 		byteRangeEnd := int64(-1)
 		if transfer.byteRange != nil {
@@ -2576,7 +2580,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			if transferEndpointUrl.Scheme == "unix" {
 				serviceStr = "local-cache"
 			}
-			wrappedErr, isProxyErr, modifiedProxyStr := wrapDownloadError(err, transferEndpoint.Url.String(), tokenContents)
+			wrappedErr, isProxyErr, modifiedProxyStr := wrapDownloadError(err, transferEndpoint.Url.String(), tokenContents, fedTokenContents)
 			if isProxyErr {
 				proxyStr += modifiedProxyStr
 			}
