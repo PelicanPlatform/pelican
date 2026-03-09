@@ -162,3 +162,128 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, dirResp server_st
 	}
 	return &token, nil
 }
+
+// DeviceAuthInfo contains information returned from initiating a device auth flow
+type DeviceAuthInfo struct {
+	// The verification URL the user should visit
+	VerificationURL string
+	// The complete verification URL with user code (if available)
+	VerificationURLComplete string
+	// The user code to enter at the verification URL
+	UserCode string
+	// The device code for polling (internal use)
+	DeviceCode string
+	// How long until the auth expires (in seconds)
+	ExpiresIn int
+	// Recommended polling interval (in seconds)
+	Interval int
+	// Internal state for polling
+	oauth2Config *Config
+}
+
+// InitiateDeviceAuth starts the device authorization flow and returns the verification URL
+// without blocking for user interaction. This is useful for non-terminal environments
+// like MCP servers that need to display the URL to users through other means.
+func InitiateDeviceAuth(ctx context.Context, issuerUrl string, entry *config.PrefixEntry, dirResp server_structs.DirectorResponse, osdfPath string, opts config.TokenGenerationOpts) (*DeviceAuthInfo, error) {
+	issuerInfo, err := config.GetIssuerMetadata(issuerUrl)
+	if err != nil {
+		return nil, err
+	}
+
+	if !deviceCodeSupported(&issuerInfo.GrantTypes) {
+		return nil, fmt.Errorf("issuer at %s for prefix %s does not support device flow", issuerUrl, entry.Prefix)
+	}
+
+	// Determine the path to include in the scope that we request.
+	cleanedPath := path.Clean(osdfPath)
+	if len(cleanedPath) < len(entry.Prefix) {
+		return nil, fmt.Errorf("path %s is shorter than prefix %s", osdfPath, entry.Prefix)
+	}
+	pathCleaned := cleanedPath[len(entry.Prefix):]
+
+	if len(dirResp.XPelTokGenHdr.Issuers) != 0 {
+		if len(dirResp.XPelTokGenHdr.BasePaths) > 0 && len(cleanedPath) >= len(dirResp.XPelTokGenHdr.BasePaths[0]) {
+			pathCleaned = cleanedPath[len(dirResp.XPelTokGenHdr.BasePaths[0]):]
+		}
+	}
+
+	if pathCleaned == "" {
+		pathCleaned = "/"
+	}
+
+	pathCleaned = path.Dir(pathCleaned)
+
+	if !opts.Operation.IsEnabled(config.TokenSharedWrite) && !opts.Operation.IsEnabled(config.TokenSharedRead) && dirResp.XPelTokGenHdr.MaxScopeDepth > 0 {
+		pathCleaned = trimPath(pathCleaned, (int)((dirResp.XPelTokGenHdr.MaxScopeDepth)))
+	}
+
+	storageScopes := []string{}
+	if opts.Operation.IsEnabled(config.TokenWrite) || opts.Operation.IsEnabled(config.TokenSharedWrite) {
+		storageScopes = append(storageScopes, "storage.create:"+pathCleaned)
+	}
+	if opts.Operation.IsEnabled(config.TokenDelete) {
+		storageScopes = append(storageScopes, "storage.modify:"+pathCleaned)
+	}
+	if opts.Operation.IsEnabled(config.TokenRead) || opts.Operation.IsEnabled(config.TokenSharedRead) || opts.Operation.IsEnabled(config.TokenList) {
+		storageScopes = append(storageScopes, "storage.read:"+pathCleaned)
+	}
+	storageScope := strings.Join(storageScopes, " ")
+	log.Debugln("Requesting a credential with the following scope:", storageScope)
+
+	oauth2Config := &Config{
+		ClientID:     entry.ClientID,
+		ClientSecret: entry.ClientSecret,
+		Endpoint: Endpoint{
+			AuthURL:       issuerInfo.AuthURL,
+			TokenURL:      issuerInfo.TokenURL,
+			DeviceAuthURL: issuerInfo.DeviceAuthURL,
+		},
+		Scopes: []string{"wlcg", "offline_access", storageScope},
+	}
+
+	client := &http.Client{Transport: config.GetTransport()}
+	authCtx := context.WithValue(ctx, HTTPClient, client)
+	deviceAuth, err := oauth2Config.AuthDevice(authCtx)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Failed to perform device code flow with URL %s", issuerInfo.DeviceAuthURL)
+	}
+
+	return &DeviceAuthInfo{
+		VerificationURL:         deviceAuth.VerificationURI,
+		VerificationURLComplete: deviceAuth.VerificationURIComplete,
+		UserCode:                deviceAuth.UserCode,
+		DeviceCode:              deviceAuth.DeviceCode,
+		ExpiresIn:               deviceAuth.ExpiresIn,
+		Interval:                deviceAuth.Interval,
+		oauth2Config:            oauth2Config,
+	}, nil
+}
+
+// PollDeviceAuth polls the OAuth2 server to check if the user has completed authorization.
+// This function blocks until the user authorizes or the context is cancelled.
+func PollDeviceAuth(ctx context.Context, authInfo *DeviceAuthInfo) (*config.TokenEntry, error) {
+	if authInfo == nil || authInfo.oauth2Config == nil {
+		return nil, errors.New("invalid device auth info")
+	}
+
+	client := &http.Client{Transport: config.GetTransport()}
+	authCtx := context.WithValue(ctx, HTTPClient, client)
+
+	deviceAuth := &DeviceAuth{
+		DeviceCode: authInfo.DeviceCode,
+		ExpiresIn:  authInfo.ExpiresIn,
+		Interval:   authInfo.Interval,
+	}
+
+	upstreamToken, err := authInfo.oauth2Config.Poll(authCtx, deviceAuth)
+	if err != nil {
+		return nil, err
+	}
+
+	token := config.TokenEntry{
+		Expiration:   upstreamToken.Expiry.Unix(),
+		AccessToken:  upstreamToken.AccessToken,
+		RefreshToken: upstreamToken.RefreshToken,
+	}
+	return &token, nil
+}
