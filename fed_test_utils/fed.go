@@ -146,7 +146,7 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 	require.NoError(t, param.Set(param.Logging_Origin_Ofs.GetName(), "error"))
 	require.NoError(t, param.Set(param.Logging_Origin_Oss.GetName(), "error"))
 	require.NoError(t, param.Set(param.Logging_Origin_Http.GetName(), "error"))
-	require.NoError(t, param.Set(param.Logging_Origin_Scitokens.GetName(), "fatal"))
+	require.NoError(t, param.Set(param.Logging_Origin_Scitokens.GetName(), "debug"))
 	require.NoError(t, param.Set(param.Logging_Origin_Xrootd.GetName(), "info"))
 	require.NoError(t, param.Set(param.Logging_Cache_Ofs.GetName(), "error"))
 	require.NoError(t, param.Set(param.Logging_Cache_Pss.GetName(), "error"))
@@ -154,7 +154,7 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 	require.NoError(t, param.Set(param.Logging_Cache_Http.GetName(), "error"))
 	require.NoError(t, param.Set(param.Logging_Cache_Xrd.GetName(), "error"))
 	require.NoError(t, param.Set(param.Logging_Cache_Xrootd.GetName(), "error"))
-	require.NoError(t, param.Set(param.Logging_Cache_Scitokens.GetName(), "fatal"))
+	require.NoError(t, param.Set(param.Logging_Cache_Scitokens.GetName(), "debug"))
 	require.NoError(t, param.Set(param.Logging_Cache_Pfc.GetName(), "info"))
 
 	// Do NOT skip TLS verification in tests.  This has hidden *real bugs* in the past
