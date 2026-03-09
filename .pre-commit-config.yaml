@@ -26,6 +26,7 @@ repos:
         args: [--maxkb=1024]
       - id: check-case-conflict
       - id: check-executables-have-shebangs
+        types_or: [shell, python, ruby, perl]
       - id: check-illegal-windows-names
       - id: check-merge-conflict
       - id: check-shebang-scripts-are-executable

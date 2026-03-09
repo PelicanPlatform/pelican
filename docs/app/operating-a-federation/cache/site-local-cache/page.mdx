@@ -66,6 +66,22 @@ Then launch the Cache as usual:
 pelican cache serve --config /path/to/pelican.yaml
 ```
 
+### Restricting Namespaces Served By Cache
+
+By default, the site-local Cache will attempt to serve any namespace advertised by the federation's Director.
+You can restrict this to a specific set of namespaces using [`Cache.PermittedNamespaces`](/parameters#Cache-PermittedNamespaces).
+When this list is non-empty, the Cache will only pull from the namespaces you specify and will refuse requests for any others.
+
+```yaml
+Cache:
+  EnableSiteLocalMode: true
+  PermittedNamespaces:
+    - /my-org/dataset-a
+    - /my-org/dataset-b
+```
+
+Restricting namespaces is especially useful in site-local mode because the federation's Director is not monitoring the Cache.
+Limiting the Cache to only the namespaces your users actually need reduces the data surface the Cache holds and simplifies reviewing its authorization configuration.
 
 ## Pointing Clients at a Site-Local Cache
 
@@ -151,6 +167,15 @@ As an operator, you are responsible for:
   **You are responsible for the access security of all data held by your site-local Cache.**
   Because the site-local Cache operates outside the federation's oversight, no federation service enforces or audits access controls on its behalf.
   Ensure that your Cache's derived namespace authorization policies remain in sync with the Director and that TLS configuration and network perimeter controls are correctly configured to prevent unauthorized access to cached data.
+</Callout>
+
+Determining whether your site-local Cache's authorization configuration is in sync with the broader federation is a two-step process:
+1. For each namespace your Cache supports, check your federation's Director for namespace capability information using the "Namespaces" search box. For example, a namespace might support "Reads" and "Listings", but not "PublicReads", "DirectReads" or "Writes".
+1. Inspect your Cache's SciTokens and Authfile configurations to verify that these policies are implemented correctly. For more information on how to read SciTokens and Authfile configurations, see "[Anatomy of an Origin's/Cache's Authorization Configuration](/advanced-concepts/auth#anatomy-of-an-originscaches-authorization-configuration)."
+
+<Callout type="info">
+Because analyzing your Cache's authorization configuration for each namespace can be a difficult and tedious task, consider [restricting the namespaces your Cache is willing to serve](#restricting-namespaces-served-by-cache) to only those you or your users intend to access.
+This lets you limit the amount of authorization policy you need to maintain to only the namespaces you care about.
 </Callout>
 
 ### Metrics and Statistics
