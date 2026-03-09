@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -19,6 +19,7 @@
 package utils
 
 import (
+	"slices"
 	"context"
 	"crypto/x509"
 	"encoding/pem"
@@ -237,4 +238,38 @@ func isSameDirSymlink(f fs.DirEntry, dir string) bool {
 	}
 	target, err := os.Readlink(filepath.Join(dir, f.Name()))
 	return err == nil && !strings.Contains(target, "/")
+}
+
+// CheckClientAuthEKU parses pemBytes and returns an error if the first
+// certificate in the chain does not include the TLS clientAuth Extended Key
+// Usage (EKU). This is called when Cache.DisableClientX509 is false so that
+// a missing EKU causes a fatal startup error.
+// Only the leaf certificate is inspected because that is the one sent to the peer.
+func CheckClientAuthEKU(certFile string, pemBytes []byte) error {
+	for len(pemBytes) > 0 {
+		var block *pem.Block
+		block, pemBytes = pem.Decode(pemBytes)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			break
+		}
+		if slices.Contains(cert.ExtKeyUsage, x509.ExtKeyUsageClientAuth) {
+				return nil // cert is fine
+			}
+		return errors.Errorf(
+			"%s is false, but the TLS certificate at %s does not "+
+				"include the clientAuth Extended Key Usage"+
+				"Popular CAs such as Let's Encrypt no longer issue certificates with clientAuth, "+
+				"which will cause SSL errors when the Cache fetches objects from Origins. "+
+				"Set %s to true (the default) or provide a certificate "+
+				"that explicitly includes the clientAuth EKU.",
+			param.Cache_DisableClientX509.GetName(), certFile, param.Cache_DisableClientX509.GetName())
+	}
+	return nil
 }
