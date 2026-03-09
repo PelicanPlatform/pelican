@@ -100,18 +100,18 @@ pelican object get pelican://<federation-url>/namespace/path/to/file ./local-fil
     --cache https://my-site-local-cache.example.com:8442
 ```
 
+Or via the environment variable (space-separated):
+
+```bash
+export PELICAN_CLIENT_PREFERREDCACHES="https://my-site-local-cache.example.com:8442"
+```
+
 For persistent configuration, set [`Client.PreferredCaches`](/parameters#Client-PreferredCaches) in your Pelican configuration file or environment variable:
 
 ```yaml
 Client:
   PreferredCaches:
     - https://my-site-local-cache.example.com:8442
-```
-
-Or via the environment variable (space-separated):
-
-```bash
-export PELICAN_CLIENT_PREFERREDCACHES="https://my-site-local-cache.example.com:8442"
 ```
 
 #### Falling Back to Federation Caches Supplied by the Director
