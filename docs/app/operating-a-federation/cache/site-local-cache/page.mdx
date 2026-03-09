@@ -30,8 +30,10 @@ When site-local mode is enabled, the following changes take effect compared to a
 Because the Cache does not advertise to the Director, the Director cannot route client requests to it.
 Clients must instead be configured to use the site-local Cache directly (see [Pointing Clients at a Site-Local Cache](#pointing-clients-at-a-site-local-cache) below).
 
-The Cache still requires a [`Federation.DiscoveryUrl`](/parameters#Federation-DiscoveryUrl) (or a `-f <federation>` argument) so that it can contact the Director and discover which federation-managed Caches hold a requested object on a Cache miss as well as deriving authorization policies for namespaces.
-Note that the site-local Cache attempts to fetch objects from federation Caches — not directly from Origins.
+<Callout>
+  Even though the site-local Cache does not join the federation, it still requires a [`Federation.DiscoveryUrl`](/parameters#Federation-DiscoveryUrl) (or a `-f <federation>` argument) so it can discover federation-managed Caches to pull objects from on a Cache miss.
+  Note that site-local Cache attempt to fetch missing objects from federation Caches, not directly from Origins.
+</Callout>
 
 ## Configuration
 
@@ -55,7 +57,7 @@ Federation:
 
 Where:
 - [`Cache.Port`](/parameters#Cache-Port) is the port your Cache's XRootD file transfer service listens on (default `8442`).
-- [`Cache.StorageLocation`](/parameters#Cache-StorageLocation) is the directory where cached data will be stored.
+- [`Cache.StorageLocation`](/parameters#Cache-StorageLocation) is the directory where cached data and metadata will be stored.
 - [`Federation.DiscoveryUrl`](/parameters#Federation-DiscoveryUrl) tells the Cache where to discover metadata for the broader federation
 
 Then launch the Cache as usual:
@@ -64,10 +66,6 @@ Then launch the Cache as usual:
 pelican cache serve --config /path/to/pelican.yaml
 ```
 
-<Callout>
-  Even though the site-local Cache does not join the federation, it still needs to know the federation discovery endpoint so it can discover federation-managed Caches to pull objects from on a Cache miss.
-  Note that site-local Cache attempt to fetch missing objects from federation Caches, not directly from Origins.
-</Callout>
 
 ## Pointing Clients at a Site-Local Cache
 
