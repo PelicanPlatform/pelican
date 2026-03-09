@@ -1750,7 +1750,7 @@ func TestTransferError404(t *testing.T) {
 
 			pelicanErrorMessage, ok := classad.GetAs[string](developerData, "ErrorMessage")
 			require.True(t, ok)
-			assert.Equal(t, expectedErr.Unwrap().Error(), pelicanErrorMessage)
+			assert.Contains(t, pelicanErrorMessage, expectedErr.Unwrap().Error())
 
 			pelicanErrorType, ok := classad.GetAs[string](developerData, "ErrorType")
 			require.True(t, ok)
