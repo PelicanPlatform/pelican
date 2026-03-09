@@ -471,7 +471,7 @@ func wrapConnectionSetupErrorInner(cse *ConnectionSetupError, originalErr error)
 // wrapDownloadError wraps an error from downloadHTTP with the appropriate PelicanError type.
 // It returns the wrapped error and a boolean indicating if this is a proxy error.
 // The proxyStr may be modified if the error is a proxy connection error.
-func wrapDownloadError(err error, transferEndpointURL string, tokenContents string) (wrappedErr error, isProxyErr bool, modifiedProxyStr string) {
+func wrapDownloadError(err error, transferEndpointURL string, tokenContents string, fedTokenContents string) (wrappedErr error, isProxyErr bool, modifiedProxyStr string) {
 	// Handle proxy connection errors
 	var ope *net.OpError
 	if errors.As(err, &ope) && ope.Op == "proxyconnect" {
@@ -485,26 +485,42 @@ func wrapDownloadError(err error, transferEndpointURL string, tokenContents stri
 	// Handle permission denied errors
 	var pde *PermissionDeniedError
 	if errors.As(err, &pde) {
-		var tokenDetail string
-		if tokenContents == "" {
-			// No token was sent (e.g., public namespace accessed via a cache that doesn't know about it yet).
-			// Mark as retryable so the client can attempt at a different cache that isn't stale.
-			tokenDetail = "no token was sent"
-			pde.expired = false
-			pde.noToken = true
-		} else {
-			// Enrich with token validity information.
+		// Enrich with token validity information.  If the origin already
+		// provided a reason (preserved in pde.message from downloadHTTP),
+		// append the token diagnosis; otherwise build a standalone message.
+		var parts []string
+		if tokenContents != "" {
 			expired, expiration, tokenErr := tokenIsExpired(tokenContents)
 			if tokenErr != nil {
-				tokenDetail = "token could not be parsed"
-				pde.expired = false
+				parts = append(parts, "token could not be parsed")
 			} else if expired {
-				tokenDetail = "token expired at " + expiration.Format(time.RFC3339)
+				parts = append(parts, "token expired at "+expiration.Format(time.RFC3339))
 				pde.expired = true
 			} else {
-				tokenDetail = "token appears valid but was rejected by the server"
-				pde.expired = false
+				parts = append(parts, "token appears valid but was rejected by the server")
 			}
+		}
+		if fedTokenContents != "" {
+			expired, expiration, tokenErr := tokenIsExpired(fedTokenContents)
+			if tokenErr != nil {
+				parts = append(parts, "federation token could not be parsed")
+			} else if expired {
+				parts = append(parts, "federation token expired at "+expiration.Format(time.RFC3339))
+				if !pde.expired {
+					pde.expired = true
+				}
+			} else {
+				parts = append(parts, "federation token appears valid but was rejected by the server")
+			}
+		}
+		var tokenDetail string
+		if len(parts) == 0 {
+			// No token was sent (e.g., public namespace accessed via a cache that doesn't know about it yet).
+			// Mark as retryable so the client can attempt at a different cache that isn't stale.
+			tokenDetail = "no token was provided"
+			pde.noToken = true
+		} else {
+			tokenDetail = strings.Join(parts, "; ")
 		}
 		if pde.message != "" {
 			pde.message = pde.message + " (" + tokenDetail + ")"

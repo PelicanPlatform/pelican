@@ -179,9 +179,11 @@ func handleError(w http.ResponseWriter, getErr error, sendTrailer bool, reqLog *
 		writeJSON(code, http.StatusText(code), getErr.Error())
 	} else if errors.As(getErr, &pe) {
 		// Map Pelican error codes to HTTP status codes
-		switch pe.Code() {
-		case 5011: // FileNotFound
+		switch {
+		case pe.Code() == 5011: // FileNotFound
 			writeJSON(http.StatusNotFound, "not_found", getErr.Error())
+		case pe.Code()/1000 == 4: // Authorization family (4000, 4010, ...)
+			writeJSON(http.StatusForbidden, "authorization_denied", getErr.Error())
 		default:
 			writeJSON(http.StatusInternalServerError, "internal_error", getErr.Error())
 		}
