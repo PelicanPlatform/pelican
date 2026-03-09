@@ -615,6 +615,13 @@ func (sm *StorageManager) ReadInline(instanceHash InstanceHash) ([]byte, error) 
 // InitDiskStorage initializes disk storage for a large object in the specified
 // storage directory.  Returns the metadata with encryption keys set up.
 func (sm *StorageManager) InitDiskStorage(ctx context.Context, instanceHash InstanceHash, contentLength int64, storageID StorageID) (*CacheMetadata, error) {
+	// If another goroutine already initialized storage for this instance,
+	// return the existing metadata rather than generating a second DataKey
+	// (which would cause a set-once conflict in MergeMetadata).
+	if existing, err := sm.GetMetadata(instanceHash); err == nil && existing != nil && len(existing.DataKey) > 0 {
+		return existing, nil
+	}
+
 	encMgr := sm.db.GetEncryptionManager()
 
 	// Generate encryption keys
