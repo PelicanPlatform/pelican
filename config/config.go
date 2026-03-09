@@ -662,7 +662,10 @@ func RegisterPreCleanup(name string, fn func()) {
 // then removes the temporary runtime directory.
 func cleanupDirOnShutdown(ctx context.Context, dir string) {
 	tempRunDir = dir
-	egrp := ctx.Value(EgrpKey).(*errgroup.Group)
+	egrp, ok := ctx.Value(EgrpKey).(*errgroup.Group)
+	if !ok {
+		egrp = &errgroup.Group{}
+	}
 	egrp.Go(func() error {
 		<-ctx.Done()
 
@@ -2313,6 +2316,7 @@ func ResetConfig() {
 	warnDebugOnce = sync.Once{}
 
 	setServerOnce = sync.Once{}
+	enabledServers.Clear()
 
 	ResetIssuerPrivateKeys()
 
