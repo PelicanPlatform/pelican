@@ -731,6 +731,26 @@ func (pc *PersistentCache) resolveObject(
 			if err != nil || meta == nil {
 				return nil, errors.New("download completed but metadata not found")
 			}
+
+			// For unknown-size (chunked encoding) downloads the
+			// metadata is stored with ContentLength=-1 and updated
+			// only when BlockWriter.Close() runs (after the full
+			// transfer finishes).  Wait for the download to complete
+			// so callers see the real ContentLength.
+			if meta.ContentLength < 0 && dl != nil {
+				select {
+				case <-dl.completionDone:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+				if stored, ok := dl.completionErr.Load().(error); ok && stored != nil {
+					return nil, stored
+				}
+				meta, err = pc.storage.GetMetadata(instanceHash)
+				if err != nil || meta == nil {
+					return nil, errors.New("download completed but metadata not found")
+				}
+			}
 		}
 	} else {
 		var rv *revalidation
@@ -2018,11 +2038,16 @@ func (w *decisionWriter) SetDiskMode(ctx context.Context, size int64) error {
 
 	// Create block writer
 	onComplete := func() {
-		// At this point the BlockWriter has finalized — if the original
-		// content length was unknown (Size == -1 / chunked encoding),
-		// BlockWriter.Close() will have updated meta.ContentLength to
-		// the actual number of bytes received.
+		// For unknown-size (chunked) downloads, BlockWriter.Close()
+		// persists the actual ContentLength to the database but
+		// updates its own copy of meta — not the pointer captured
+		// here.  Read the real size from the database.
 		actualSize := meta.ContentLength
+		if actualSize < 0 {
+			if updated, err := w.pc.storage.GetMetadata(w.dl.instanceHash); err == nil && updated != nil {
+				actualSize = updated.ContentLength
+			}
+		}
 
 		// Persist any checksums the transfer client collected.
 		if len(w.dl.checksums) > 0 {

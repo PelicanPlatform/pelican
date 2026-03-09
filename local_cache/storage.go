@@ -1521,6 +1521,9 @@ func (bw *BlockWriter) Close() error {
 		if err := bw.sm.db.MergeMetadata(bw.instanceHash, sizeMeta); err != nil {
 			log.Warnf("Failed to update content length for unknown-size download: %v", err)
 		}
+		// Invalidate the diskCrypto cache so that subsequent ReadBlocks
+		// calls see the updated ContentLength instead of -1.
+		bw.sm.diskCrypto.Delete(bw.instanceHash)
 	}
 
 	// Write any remaining partial block (last block of file).

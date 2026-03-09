@@ -678,8 +678,11 @@ func cleanupDirOnShutdown(ctx context.Context, dir string) {
 			fn()
 		}
 
-		CleanupTempResources()
-		return nil
+		err := CleanupTempResources()
+		if err != nil {
+			log.Infoln("Error when cleaning up temporary directories:", err)
+		}
+		return err
 	})
 }
 
