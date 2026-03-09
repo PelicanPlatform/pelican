@@ -132,7 +132,7 @@ func TestFedAuthGet(t *testing.T) {
 
 	_, err = pc.Get(context.Background(), "/test/hello_world.txt", token)
 	assert.Error(t, err)
-	assert.Equal(t, "authorization denied", err.Error())
+	assert.Contains(t, err.Error(), "authorization denied")
 }
 
 // Test a raw HTTP request (no Pelican client) works with the local cache

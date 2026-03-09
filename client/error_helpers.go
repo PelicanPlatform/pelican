@@ -436,7 +436,9 @@ func wrapHttpErrRespInner(httpErr *HttpErrResp) error {
 		// the PelicanError around an error that includes the body text.
 		// This ensures the message survives all the way to the cache API
 		// error handler instead of being reduced to just the status code.
-		return pe.Wrap(fmt.Errorf("%s", httpErr.Str))
+		// Use %w to keep the original inner error (e.g. *StatusCodeError)
+		// reachable via errors.As.
+		return pe.Wrap(fmt.Errorf("%s: %w", httpErr.Str, pe.Unwrap()))
 	}
 	if sce, ok := innerErr.(*StatusCodeError); ok {
 		// Unwrapped StatusCodeError (shouldn't happen if downloadHTTP wraps correctly, but handle for safety)

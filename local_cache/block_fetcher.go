@@ -650,6 +650,11 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 	wg *sync.WaitGroup,
 	onExit func(err error),
 ) *fetchOperation {
+	// Record initial client activity so the idle timer does not
+	// immediately cancel the newly adopted transfer.  A client
+	// triggered this download; it will register via FetchBlocks or
+	// CreateFetchCallback shortly.
+	bf.touchClientActivity()
 	totalBlocks := uint32((bf.meta.ContentLength + BlockDataSize - 1) / BlockDataSize)
 	if totalBlocks == 0 {
 		totalBlocks = 1
