@@ -519,6 +519,7 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 		prefetchMode:   prefetchMode,
 		lastSemRelease: time.Now(),
 		lastRateUpdate: time.Now(),
+		lastFlush:      time.Now(),
 	}
 	// writer.Close is called by awaitTransfer
 
@@ -694,6 +695,7 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 			prefetchMode:   false, // adopted transfers always have a client
 			lastSemRelease: time.Now(),
 			lastRateUpdate: time.Now(),
+			lastFlush:      time.Now(),
 		}
 	})
 
@@ -783,6 +785,7 @@ type blockWriter struct {
 	prefetchMode    bool
 	lastSemRelease  time.Time
 	lastRateUpdate  time.Time
+	lastFlush       time.Time
 	bytesThisPeriod int64
 }
 
@@ -819,6 +822,16 @@ func (w *blockWriter) Write(p []byte) (n int, err error) {
 		}
 		w.bytesThisPeriod = 0
 		w.lastRateUpdate = time.Now()
+	}
+
+	// Periodically flush the underlying BlockWriter so that blocks
+	// become visible to concurrent streaming readers without waiting
+	// for the full writeBatchBlocks batch to accumulate.
+	if time.Since(w.lastFlush) >= ETAUpdateInterval {
+		if err := w.inner.Flush(); err != nil {
+			return 0, errors.Wrap(err, "failed to flush blocks")
+		}
+		w.lastFlush = time.Now()
 	}
 
 	// Calculate which chunks this write completes
