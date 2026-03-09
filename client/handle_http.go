@@ -295,7 +295,7 @@ type (
 		forcePrestageAPI   bool                    // If true, force use of prestage API and error if not supported (no fallback)
 		byteRange          *ByteRange              // Optional byte range for partial downloads
 		metadataChan       chan<- TransferMetadata // Optional channel to receive early transfer metadata
-		requestId          string                 // Caller-supplied request ID for end-to-end tracing (X-Pelican-JobId)
+		requestId          string                  // Caller-supplied request ID for end-to-end tracing (X-Pelican-JobId)
 	}
 
 	// A TransferJob associated with a client's request
