@@ -77,9 +77,9 @@ func TestMakeUnprivilegedXrootdLauncher_DisableClientX509(t *testing.T) {
 		disableClientX509 bool
 		// certEKUs is the EKU set written into the temp cert.  When nil and
 		// disableClientX509 is false, no cert path is configured.
-		certEKUs   []x509.ExtKeyUsage
-		wantEnvVar bool   // expect XRD_CURLDISABLEX509=1 in ExtraEnv
-		wantErr    bool   // expect makeUnprivilegedXrootdLauncher to return an error
+		certEKUs    []x509.ExtKeyUsage
+		wantEnvVar  bool   // expect XRD_CURLDISABLEX509=1 in ExtraEnv
+		wantErr     bool   // expect makeUnprivilegedXrootdLauncher to return an error
 		errContains string // substring the error message should contain
 	}{
 		{

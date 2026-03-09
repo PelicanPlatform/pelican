@@ -19,7 +19,6 @@
 package utils
 
 import (
-	"slices"
 	"context"
 	"crypto/x509"
 	"encoding/pem"
@@ -27,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -260,8 +260,8 @@ func CheckClientAuthEKU(certFile string, pemBytes []byte) error {
 			break
 		}
 		if slices.Contains(cert.ExtKeyUsage, x509.ExtKeyUsageClientAuth) {
-				return nil // cert is fine
-			}
+			return nil // cert is fine
+		}
 		return errors.Errorf(
 			"%s is false, but the TLS certificate at %s does not "+
 				"include the clientAuth Extended Key Usage"+
