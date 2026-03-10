@@ -217,11 +217,22 @@ type: filename
 default: none
 components: ["*"]
 ---
-name: Logging.DisableProgressBars
+name: Logging.Client.DisableProgressBars
 description: |+
   A bool defining if progress bars should be enabled or not.
 type: bool
 default: false
+components: ["client"]
+---
+name: Logging.DisableProgressBars
+description: |+
+  [Deprecated] Use Logging.Client.DisableProgressBars instead.
+
+  A bool defining if progress bars should be enabled or not.
+type: bool
+default: false
+deprecated: true
+replacedby: "Logging.Client.DisableProgressBars"
 components: ["client"]
 ---
 name: Logging.Client.ProgressInterval
