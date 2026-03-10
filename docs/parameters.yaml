@@ -3013,6 +3013,12 @@ default: $ConfigBase/session-secret
   The default content of the file is the hash of the concatenation of "pelican" and the DER form of ${IssuerKey}
 components: ["cache", "director", "origin", "registry"]
 ---
+name: Server.ReadOnly
+description: "When enabled, the server will reject all non-GET requests"
+type: bool
+default: false
+components: ["*"]
+---
 name: Server.RegistrationRetryInterval
 description: |+
   The duration of delay in origin/cache registration retry attempts if the initial registration call to registry

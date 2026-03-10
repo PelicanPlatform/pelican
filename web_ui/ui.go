@@ -69,10 +69,6 @@ var (
 
 const notFoundFilePath = "frontend/out/404/index.html"
 
-func ServerHeaderMiddleware(ctx *gin.Context) {
-	ctx.Writer.Header().Add("Server", "pelican/"+config.GetVersion())
-}
-
 type CreateApiTokenReq struct {
 	Name       string   `json:"name"`
 	Expiration string   `json:"expiration"` // RFC3339 format, if not provided or "never" or "", token will not expire
@@ -839,7 +835,19 @@ func GetEngine() (*gin.Engine, error) {
 		).Info("Served Request")
 	})
 	engine.HandleMethodNotAllowed = true
+
+	// Attach general middleware to the engine, such as read-only mode middleware that is needed for both origin and cache server
+	AttachMiddleware(engine)
+
 	return engine, nil
+}
+
+func AttachMiddleware(engine *gin.Engine) {
+	// If the server is in read-only mode, attach the read-only middleware to prevent any state changing operations
+	// Only needed for origin and cache
+	if param.Server_ReadOnly.GetBool() {
+		engine.Use(ReadOnlyMiddleware)
+	}
 }
 
 // Run the gin engine in the current goroutine.

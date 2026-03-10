@@ -92,6 +92,9 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		}
 	}
 
+	// Attach general middleware to the engine
+	web_ui.AttachMiddleware(engine)
+
 	// Set up necessary APIs to support Web UI, including auth and metrics
 	if err = web_ui.ConfigureServerWebAPI(ctx, engine, egrp); err != nil {
 		return
