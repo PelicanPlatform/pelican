@@ -599,12 +599,20 @@ func GetFederation(ctx context.Context) (pelican_url.FederationDiscovery, error)
 		fedDiscoveryOnce = &sync.Once{}
 	}
 	fedDiscoveryOnce.Do(func() {
+		log.Debugln("GetFederation: performing one-time federation discovery")
 		var fedInfo pelican_url.FederationDiscovery
 		fedInfo, globalFedErr = discoverFederationImpl(ctx)
+		if globalFedErr != nil {
+			log.Debugf("GetFederation: discovery failed: %v", globalFedErr)
+		} else {
+			log.Debugf("GetFederation: discovery succeeded: DiscoveryEndpoint=%q, DirectorEndpoint=%q, RegistryEndpoint=%q, JwksUri=%q, BrokerEndpoint=%q",
+				fedInfo.DiscoveryEndpoint, fedInfo.DirectorEndpoint, fedInfo.RegistryEndpoint, fedInfo.JwksUri, fedInfo.BrokerEndpoint)
+		}
 		globalFedInfo.Store(&fedInfo)
 	})
 	loadedInfo := globalFedInfo.Load()
 	if loadedInfo == nil {
+		log.Debugf("GetFederation: returning nil info with err=%v", globalFedErr)
 		return pelican_url.FederationDiscovery{}, globalFedErr
 	}
 	return *loadedInfo, globalFedErr

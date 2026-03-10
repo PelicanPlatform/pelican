@@ -116,12 +116,16 @@ func resolveRegisteredServerJWKS(ctx *gin.Context, serverID string) (jwk.Set, bo
 
 // Checks that the given token was signed by the federation jwk and also checks that the token has the expected scope
 func (a AuthCheckImpl) checkFederationIssuer(c *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
+	log.Debugln("checkFederationIssuer: entering")
 	dirFallback := false
 
 	fedInfo, err := config.GetFederation(c)
 	if err != nil {
+		log.Debugf("checkFederationIssuer: GetFederation failed: %v", err)
 		return err
 	}
+	log.Debugf("checkFederationIssuer: fedInfo.DiscoveryEndpoint=%q, fedInfo.DirectorEndpoint=%q, fedInfo.RegistryEndpoint=%q, fedInfo.JwksUri=%q",
+		fedInfo.DiscoveryEndpoint, fedInfo.DirectorEndpoint, fedInfo.RegistryEndpoint, fedInfo.JwksUri)
 
 	fedURL := fedInfo.DiscoveryEndpoint
 	if fedURL == "" {
@@ -136,42 +140,65 @@ func (a AuthCheckImpl) checkFederationIssuer(c *gin.Context, strToken string, ex
 
 	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 	if err != nil {
+		log.Debugf("checkFederationIssuer: failed to parse JWT (unverified): %v", err)
 		return err
+	}
+	log.Debugf("checkFederationIssuer: token.Issuer()=%q, token.Subject()=%q, token.Expiration()=%v, token.IssuedAt()=%v",
+		token.Issuer(), token.Subject(), token.Expiration(), token.IssuedAt())
+	if scopeAny, present := token.Get("scope"); present {
+		log.Debugf("checkFederationIssuer: token scope=%v", scopeAny)
+	} else {
+		log.Debugln("checkFederationIssuer: token has no 'scope' claim")
 	}
 
 	if fedURL != token.Issuer() {
+		log.Debugf("checkFederationIssuer: ISSUER MISMATCH: fedURL=%q vs token.Issuer()=%q (dirFallback=%v)", fedURL, token.Issuer(), dirFallback)
 		if dirFallback {
 			return errors.New(fmt.Sprintf("Token issuer %s does not match the issuer from the federation. Expecting the issuer to be %s (Federation issuer falls back to Federation.DirectorUrl due to the empty Federation.DiscoveryUrl)", token.Issuer(), fedURL))
 		} else {
 			return errors.New(fmt.Sprintf("Token issuer %s does not match the issuer from the federation. Expecting the issuer to be %s", token.Issuer(), fedURL))
 		}
 	}
+	log.Debugf("checkFederationIssuer: issuer matches: %q", fedURL)
 
 	fedURIFile := fedInfo.JwksUri
+	log.Debugf("checkFederationIssuer: will verify signature using JWKS from %q", fedURIFile)
 	ctx := context.Background()
 	if federationJWK == nil {
+		log.Debugf("checkFederationIssuer: initializing federation JWKS cache for %q", fedURIFile)
 		client := &http.Client{Transport: config.GetTransport()}
 		federationJWK = jwk.NewCache(ctx)
 		if err := federationJWK.Register(fedURIFile, jwk.WithRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
+			log.Debugf("checkFederationIssuer: failed to register JWKS cache: %v", err)
 			return errors.Wrap(err, "Failed to register cache for federation's public JWKS")
 		}
 	}
 
 	jwks, err := federationJWK.Get(ctx, fedURIFile)
 	if err != nil {
+		log.Debugf("checkFederationIssuer: failed to fetch federation JWKS from %q: %v", fedURIFile, err)
 		return errors.Wrap(err, "Failed to get federation's public JWKS")
+	}
+	log.Debugf("checkFederationIssuer: fetched JWKS successfully, key count=%d", jwks.Len())
+	for i := 0; i < jwks.Len(); i++ {
+		key, _ := jwks.Key(i)
+		log.Debugf("checkFederationIssuer: JWKS key[%d]: kid=%q, alg=%q, kty=%q", i, key.KeyID(), key.Algorithm().String(), key.KeyType().String())
 	}
 
 	parsed, err := jwt.Parse([]byte(strToken), jwt.WithKeySet(jwks))
 
 	if err != nil {
+		log.Debugf("checkFederationIssuer: JWT signature verification FAILED: %v", err)
 		return errors.Wrap(err, "Failed to verify JWT by federation's key")
 	}
+	log.Debugln("checkFederationIssuer: JWT signature verification succeeded")
 
 	scopeValidator := token_scopes.CreateScopeValidator(expectedScopes, allScopes)
 	if err = jwt.Validate(parsed, jwt.WithValidator(scopeValidator)); err != nil {
+		log.Debugf("checkFederationIssuer: scope validation FAILED: required=%v, allScopes=%v, err=%v", expectedScopes, allScopes, err)
 		return errors.Wrap(err, fmt.Sprintf("Failed to verify the scope of the token. Require %v", expectedScopes))
 	}
+	log.Debugln("checkFederationIssuer: scope validation succeeded")
 
 	c.Set("User", parsed.Subject())
 
@@ -365,17 +392,21 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 	}
 
 	if token == "" {
-		log.Debugf("Unauthorized. No token is present from the list of potential token positions: %v", authOption.Sources)
+		log.Debugf("Verify: No token found from sources: %v", authOption.Sources)
 		return http.StatusForbidden, false, errors.New("Authentication is required but no token is present.")
 	}
+	log.Debugf("Verify: token found (length=%d), will check against issuers: %v, required scopes: %v", len(token), authOption.Issuers, authOption.Scopes)
 
 	compoundErr := make([]error, 0, 1)
 	for _, iss := range authOption.Issuers {
 		switch iss {
 		case FederationIssuer:
+			log.Debugln("Verify: trying FederationIssuer")
 			if err := authChecker.checkFederationIssuer(ctx, token, authOption.Scopes, authOption.AllScopes); err != nil {
+				log.Debugf("Verify: FederationIssuer check failed: %v", err)
 				compoundErr = append(compoundErr, errors.Wrap(err, "cannot verify token with federation issuer"))
 			} else {
+				log.Debugln("Verify: FederationIssuer check succeeded")
 				return http.StatusOK, true, nil
 			}
 		case LocalIssuer:

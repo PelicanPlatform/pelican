@@ -89,11 +89,20 @@ func LaunchPeriodicDirectorTimeout(ctx context.Context, egrp *errgroup.Group, nC
 // origins for testing. It sends a request reporting the status of the test result to this endpoint,
 // and we will update origin internal health status metric by what director returns.
 func HandleDirectorTestResponse(ctx *gin.Context, nChan chan bool) {
+	log.Debugf("HandleDirectorTestResponse: received request from %s, method=%s, path=%s", ctx.Request.RemoteAddr, ctx.Request.Method, ctx.Request.URL.Path)
+	if authHeader := ctx.Request.Header.Get("Authorization"); authHeader != "" {
+		// Log presence and length, not the token itself
+		log.Debugf("HandleDirectorTestResponse: Authorization header present, length=%d", len(authHeader))
+	} else {
+		log.Debugf("HandleDirectorTestResponse: No Authorization header present")
+	}
+
 	status, ok, err := token.Verify(ctx, token.AuthOption{
 		Sources: []token.TokenSource{token.Header},
 		Issuers: []token.TokenIssuer{token.FederationIssuer},
 		Scopes:  []token_scopes.TokenScope{token_scopes.Pelican_DirectorTestReport},
 	})
+	log.Debugf("HandleDirectorTestResponse: token.Verify returned status=%d, ok=%v, err=%v", status, ok, err)
 	if !ok || err != nil {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -103,7 +112,11 @@ func HandleDirectorTestResponse(ctx *gin.Context, nChan chan bool) {
 	}
 
 	// Check if director tests are enabled based on server type
-	if !param.Origin_DirectorTest.GetBool() && !param.Cache_DirectorTest.GetBool() {
+	originTestEnabled := param.Origin_DirectorTest.GetBool()
+	cacheTestEnabled := param.Cache_DirectorTest.GetBool()
+	log.Debugf("HandleDirectorTestResponse: Origin.DirectorTest=%v, Cache.DirectorTest=%v", originTestEnabled, cacheTestEnabled)
+	if !originTestEnabled && !cacheTestEnabled {
+		log.Debugf("HandleDirectorTestResponse: rejecting because both Origin.DirectorTest and Cache.DirectorTest are false")
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Origin.DirectorTest and Cache.DirectorTest are set to false. Reject the test result.",
@@ -112,8 +125,13 @@ func HandleDirectorTestResponse(ctx *gin.Context, nChan chan bool) {
 	}
 
 	dt := server_structs.DirectorTestResult{}
+	if ctx.Request.ContentLength > 0 {
+		log.Debugf("HandleDirectorTestResponse: request Content-Length=%d, Content-Type=%q", ctx.Request.ContentLength, ctx.Request.Header.Get("Content-Type"))
+	} else {
+		log.Debugf("HandleDirectorTestResponse: request Content-Length not set or 0, Content-Type=%q", ctx.Request.Header.Get("Content-Type"))
+	}
 	if err := ctx.ShouldBind(&dt); err != nil {
-		log.Errorf("Invalid director test response: %v", err)
+		log.Errorf("HandleDirectorTestResponse: failed to bind request body: %v", err)
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Invalid director test response: " + err.Error(),
@@ -121,22 +139,26 @@ func HandleDirectorTestResponse(ctx *gin.Context, nChan chan bool) {
 		return
 	}
 	updateTime := time.Unix(dt.Timestamp, 0)
+	log.Debugf("HandleDirectorTestResponse: parsed result: status=%q, message=%q, timestamp=%v (%s)", dt.Status, dt.Message, dt.Timestamp, updateTime.Format(time.RFC3339))
+
 	// We will let the timer go timeout if director didn't send a valid json request
 	notifyNewDirectorResponse(ctx, nChan)
 	if dt.Status == "ok" {
+		log.Debugf("HandleDirectorTestResponse: director test passed, updating health to OK")
 		metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusOK, fmt.Sprintf("Director object transfer test succeeded at: %s", updateTime.Format("2006-01-02 15:04:05")))
 		ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
 			Status: server_structs.RespOK,
 			Msg:    "Success",
 		})
 	} else if dt.Status == "error" {
+		log.Debugf("HandleDirectorTestResponse: director test FAILED, message=%q, updating health to Critical", dt.Message)
 		metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusCritical, fmt.Sprint("Director object transfer test failed: ", dt.Message))
 		ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
 			Status: server_structs.RespOK,
 			Msg:    "Success",
 		})
 	} else {
-		log.Errorf("Invalid director test response, status: %s", dt.Status)
+		log.Errorf("HandleDirectorTestResponse: invalid status value %q in director test response", dt.Status)
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("Invalid director test response status: %s", dt.Status),
