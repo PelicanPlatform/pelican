@@ -75,6 +75,7 @@ func GetDeprecated() map[string][]string {
         "DisableHttpProxy": {"Client.DisableHttpProxy"},
         "DisableProxyFallback": {"Client.DisableProxyFallback"},
         "IssuerKey": {"none"},
+        "Logging.DisableProgressBars": {"Logging.Client.DisableProgressBars"},
         "Lotman.DbLocation": {"Lotman.LotHome"},
         "MinimumDownloadSpeed": {"Client.MinimumDownloadSpeed"},
         "Origin.EnableDirListing": {"Origin.EnableListings"},
@@ -255,6 +256,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Logging.Cache.Scitokens": true,
 	"Logging.Cache.Xrd": true,
 	"Logging.Cache.Xrootd": true,
+	"Logging.Client.DisableProgressBars": false,
 	"Logging.Client.ProgressInterval": false,
 	"Logging.DisableProgressBars": false,
 	"Logging.Level": true,
@@ -963,6 +965,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"DisableProxyFallback": func(c *Config) bool { return c.DisableProxyFallback },
 	"Issuer.OIDCPreferClaimsFromIDToken": func(c *Config) bool { return c.Issuer.OIDCPreferClaimsFromIDToken },
 	"Issuer.UserStripDomain": func(c *Config) bool { return c.Issuer.UserStripDomain },
+	"Logging.Client.DisableProgressBars": func(c *Config) bool { return c.Logging.Client.DisableProgressBars },
 	"Logging.DisableProgressBars": func(c *Config) bool { return c.Logging.DisableProgressBars },
 	"Lotman.EnableAPI": func(c *Config) bool { return c.Lotman.EnableAPI },
 	"Monitoring.EnablePrometheus": func(c *Config) bool { return c.Monitoring.EnablePrometheus },
@@ -1350,6 +1353,7 @@ var allParameterNames = []string{
 	"Logging.Cache.Scitokens",
 	"Logging.Cache.Xrd",
 	"Logging.Cache.Xrootd",
+	"Logging.Client.DisableProgressBars",
 	"Logging.Client.ProgressInterval",
 	"Logging.DisableProgressBars",
 	"Logging.Level",
@@ -1910,6 +1914,7 @@ var (
 	DisableProxyFallback = BoolParam{"DisableProxyFallback"}
 	Issuer_OIDCPreferClaimsFromIDToken = BoolParam{"Issuer.OIDCPreferClaimsFromIDToken"}
 	Issuer_UserStripDomain = BoolParam{"Issuer.UserStripDomain"}
+	Logging_Client_DisableProgressBars = BoolParam{"Logging.Client.DisableProgressBars"}
 	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}
 	Lotman_EnableAPI = BoolParam{"Lotman.EnableAPI"}
 	Monitoring_EnablePrometheus = BoolParam{"Monitoring.EnablePrometheus"}
@@ -2344,6 +2349,7 @@ func init() {
 		"DisableProxyFallback": DisableProxyFallback,
 		"Issuer.OIDCPreferClaimsFromIDToken": Issuer_OIDCPreferClaimsFromIDToken,
 		"Issuer.UserStripDomain": Issuer_UserStripDomain,
+		"Logging.Client.DisableProgressBars": Logging_Client_DisableProgressBars,
 		"Logging.DisableProgressBars": Logging_DisableProgressBars,
 		"Lotman.EnableAPI": Lotman_EnableAPI,
 		"Monitoring.EnablePrometheus": Monitoring_EnablePrometheus,

@@ -204,6 +204,7 @@ type Config struct {
 			Xrootd string `mapstructure:"xrootd" yaml:"Xrootd"`
 		} `mapstructure:"cache" yaml:"Cache"`
 		Client struct {
+			DisableProgressBars bool `mapstructure:"disableprogressbars" yaml:"DisableProgressBars"`
 			ProgressInterval time.Duration `mapstructure:"progressinterval" yaml:"ProgressInterval"`
 		} `mapstructure:"client" yaml:"Client"`
 		DisableProgressBars bool `mapstructure:"disableprogressbars" yaml:"DisableProgressBars"`
@@ -671,6 +672,7 @@ type configWithType struct {
 			Xrootd struct { Type string; Value string }
 		}
 		Client struct {
+			DisableProgressBars struct { Type string; Value bool }
 			ProgressInterval struct { Type string; Value time.Duration }
 		}
 		DisableProgressBars struct { Type string; Value bool }
