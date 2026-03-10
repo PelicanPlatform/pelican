@@ -3062,6 +3062,25 @@ default: $ConfigBase/session-secret
   The default content of the file is the hash of the concatenation of "pelican" and the DER form of ${IssuerKey}
 components: ["cache", "director", "origin", "registry"]
 ---
+name: Server.ReadOnly
+description: |+
+  When enabled, web UI routes that employ the read-only middleware will reject state changing HTTP
+  methods such as, POST, PUT, PATCH, and DELETE.
+
+  Read only methods such as GET, HEAD, and OPTIONS remain allowed as well as the following
+  system critical routes:
+  - /origin-api/directorTest
+  - /origin/directorTest
+  - /api/v1.0/auth/login
+  - /api/v1.0/auth/logout
+
+  If the issuer is enabled:
+  - /api/v1.0/issuer/oidc-cm
+  - /api/v1.0/issuer/token
+type: bool
+default: false
+components: ["cache", "director", "origin", "registry"]
+---
 name: Server.RegistrationRetryInterval
 description: |+
   The duration of delay in origin/cache registration retry attempts if the initial registration call to registry

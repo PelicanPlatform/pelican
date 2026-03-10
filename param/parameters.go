@@ -400,6 +400,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Server.IssuerPort": false,
 	"Server.IssuerUrl": false,
 	"Server.Modules": false,
+	"Server.ReadOnly": false,
 	"Server.RegistrationRetryInterval": false,
 	"Server.SessionSecretFile": false,
 	"Server.StartupTimeout": false,
@@ -1222,6 +1223,8 @@ func (bP BoolParam) GetBool() bool {
 			return config.Server.EnableUI
 		case "Server.HealthMonitoringPublic":
 			return config.Server.HealthMonitoringPublic
+		case "Server.ReadOnly":
+			return config.Server.ReadOnly
 		case "Shoveler.Enable":
 			return config.Shoveler.Enable
 		case "Shoveler.VerifyHeader":
@@ -1739,6 +1742,7 @@ var allParameterNames = []string{
 	"Server.IssuerPort",
 	"Server.IssuerUrl",
 	"Server.Modules",
+	"Server.ReadOnly",
 	"Server.RegistrationRetryInterval",
 	"Server.SessionSecretFile",
 	"Server.StartupTimeout",
@@ -2144,6 +2148,7 @@ var (
 	Server_EnablePprof = BoolParam{"Server.EnablePprof"}
 	Server_EnableUI = BoolParam{"Server.EnableUI"}
 	Server_HealthMonitoringPublic = BoolParam{"Server.HealthMonitoringPublic"}
+	Server_ReadOnly = BoolParam{"Server.ReadOnly"}
 	Shoveler_Enable = BoolParam{"Shoveler.Enable"}
 	Shoveler_VerifyHeader = BoolParam{"Shoveler.VerifyHeader"}
 	StagePlugin_Hook = BoolParam{"StagePlugin.Hook"}
