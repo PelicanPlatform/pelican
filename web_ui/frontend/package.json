@@ -1,6 +1,6 @@
 {
   "name": "src",
-  "version": "7.23.0-director.test.debug-52a29",
+  "version": "7.23.0+director.test.debug-52a29",
   "private": true,
   "scripts": {
     "dev": "next dev --turbo",
