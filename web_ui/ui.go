@@ -798,7 +798,7 @@ func ConfigureServerWebAPI(ctx context.Context, engine *gin.Engine, egrp *errgro
 		return nil
 	})
 
-	commonAPIGroup := engine.Group("/api/v1.0")
+	commonAPIGroup := engine.Group("/api/v1.0", ReadOnlyMiddleware)
 	if err := registerCommonEndpoints(commonAPIGroup); err != nil {
 		return err
 	}

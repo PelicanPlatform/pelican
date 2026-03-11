@@ -18,14 +18,14 @@ func ServerHeaderMiddleware(ctx *gin.Context) {
 	ctx.Writer.Header().Add("Server", "pelican/"+config.GetVersion())
 }
 
-// ReadOnlyMiddleware blocks unsafe ( non-state changing ) requests when the server is in read-only mode
-var safeMethods = []string{http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace}
+// ReadOnlyMiddleware blocks unsafe ( state changing ) requests when the server is in read-only mode
+var safeMethods = []string{http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace, "PROPFIND"}
 
 func ReadOnlyMiddleware(ctx *gin.Context) {
 	if param.Server_ReadOnly.GetBool() && !slices.Contains(safeMethods, ctx.Request.Method) {
-		ctx.JSON(http.StatusServiceUnavailable, server_structs.SimpleApiResp{
+		ctx.JSON(http.StatusMethodNotAllowed, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "The server is in read-only mode and will reject HTTP requests outside of GET, HEAD, OPTIONS, and TRACE",
+			Msg:    "The server is in read-only mode and will reject HTTP requests outside of GET, HEAD, OPTIONS, TRACE, and PROPFIND",
 		})
 		ctx.Abort()
 		return

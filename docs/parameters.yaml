@@ -3014,10 +3014,10 @@ default: $ConfigBase/session-secret
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.ReadOnly
-description: "When enabled, the server will reject all non-GET requests"
+description: "When enabled, the server will reject all unsafe ( state changing ) requests"
 type: bool
 default: false
-components: ["*"]
+components: ["origin", "cache"]
 ---
 name: Server.RegistrationRetryInterval
 description: |+

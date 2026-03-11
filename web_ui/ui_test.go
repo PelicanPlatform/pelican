@@ -555,7 +555,7 @@ func TestApiToken(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	route := gin.New()
-	err := registerCommonEndpoints(route)
+	err := registerCommonEndpoints(&route.RouterGroup)
 	require.NoError(t, err)
 	route.GET("/privilegedRoute", func(ctx *gin.Context) {
 		authOption := token.AuthOption{
@@ -828,7 +828,7 @@ func TestApiToken(t *testing.T) {
 func TestGroupManagementAPI(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	route := gin.New()
-	err := registerCommonEndpoints(route)
+	err := registerCommonEndpoints(&route.RouterGroup)
 	require.NoError(t, err)
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
@@ -1181,5 +1181,63 @@ func TestGroupManagementAPI(t *testing.T) {
 
 		require.NoError(t, database.ServerDatabase.Model(&database.CollectionACL{}).Where("group_id = ?", personalGroup).Count(&aclCount).Error)
 		require.EqualValues(t, 0, aclCount)
+	})
+}
+
+func TestReadOnlyMiddleware(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	route := gin.New()
+	// Apply the ReadOnly middleware to a test route group
+	readOnlyGroup := route.Group("/api/v1.0")
+	readOnlyGroup.Use(ReadOnlyMiddleware) // your middleware name here
+	// Set the app to have Read Only mode enabled
+	require.NoError(t, param.Set(param.Server_ReadOnly.GetName(), true))
+	{
+		readOnlyGroup.POST("/resource", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
+		readOnlyGroup.PUT("/resource", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
+		readOnlyGroup.PATCH("/resource", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
+		readOnlyGroup.DELETE("/resource/:id", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
+		readOnlyGroup.GET("/resource", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
+	}
+
+	t.Run("blocks-POST-in-readonly-mode", func(t *testing.T) {
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest(http.MethodPost, "/api/v1.0/resource", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, r.Result().StatusCode)
+	})
+
+	t.Run("blocks-PUT-in-readonly-mode", func(t *testing.T) {
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest(http.MethodPut, "/api/v1.0/resource", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, r.Result().StatusCode)
+	})
+
+	t.Run("blocks-PATCH-in-readonly-mode", func(t *testing.T) {
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest(http.MethodPatch, "/api/v1.0/resource", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, r.Result().StatusCode)
+	})
+
+	t.Run("blocks-DELETE-in-readonly-mode", func(t *testing.T) {
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest(http.MethodDelete, "/api/v1.0/resource/123", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, r.Result().StatusCode)
+	})
+
+	t.Run("allows-GET-in-readonly-mode", func(t *testing.T) {
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest(http.MethodGet, "/api/v1.0/resource", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
 	})
 }
