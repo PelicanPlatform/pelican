@@ -1186,11 +1186,12 @@ func TestGroupManagementAPI(t *testing.T) {
 
 func TestReadOnlyMiddleware(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
+	defer server_utils.ResetTestState()
 
 	route := gin.New()
 	// Apply the ReadOnly middleware to a test route group
 	readOnlyGroup := route.Group("/api/v1.0")
-	readOnlyGroup.Use(ReadOnlyMiddleware) // your middleware name here
+	readOnlyGroup.Use(ReadOnlyMiddleware)
 	// Set the app to have Read Only mode enabled
 	require.NoError(t, param.Set(param.Server_ReadOnly.GetName(), true))
 	{

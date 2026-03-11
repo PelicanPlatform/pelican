@@ -612,9 +612,9 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 	// Token management endpoints
 	tokenAPIGroup := routerGroup.Group("/tokens", AuthHandler, AdminAuthHandler)
 	{
-		tokenAPIGroup.POST("/tokens", createApiToken)
-		tokenAPIGroup.DELETE("/tokens/:id", deleteApiToken)
-		tokenAPIGroup.GET("/tokens", listApiTokens)
+		tokenAPIGroup.POST("", createApiToken)
+		tokenAPIGroup.DELETE("/:id", deleteApiToken)
+		tokenAPIGroup.GET("", listApiTokens)
 	}
 
 	// Logging level management API

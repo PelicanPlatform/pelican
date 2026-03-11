@@ -40,6 +40,7 @@ func handleExports(ctx *gin.Context) {
 	if err != nil {
 		log.Errorf("Failed to parse origin storage type: %v", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server encountered error when parsing the storage type of the origin: " + err.Error()})
+		return
 	}
 
 	res := exportsRes{Type: string(storageType)}
@@ -94,6 +95,7 @@ func handleExports(ctx *gin.Context) {
 			Status: server_structs.RespFailed,
 			Msg:    "Server error when getting federation information: " + err.Error(),
 		})
+		return
 	}
 	tc := token.NewWLCGToken()
 	tc.Issuer = issuerUrl

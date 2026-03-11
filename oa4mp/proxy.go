@@ -508,7 +508,7 @@ func rejectUnregisteredRedirects(ctx *gin.Context) {
 }
 func RegisterOA4MPProxy(routerGroup *gin.RouterGroup) error {
 	if routerGroup == nil {
-		return errors.New("Origin configuration passed a nil pointer")
+		return errors.New("Registration of the OA4MP Proxy endpoints was passed a nil pointer")
 	}
 
 	// Add a middleware to handle CORS headers

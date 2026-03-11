@@ -100,7 +100,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	baseAPIGroup := engine.Group("/api/v1.0")
 
 	// Set up the APIs unrelated to UI, which only contains director-based health test reporting endpoint for now
-	originAPIGroup := baseAPIGroup.Group("", web_ui.ServerHeaderMiddleware, web_ui.ReadOnlyMiddleware)
+	originAPIGroup := baseAPIGroup.Group("", web_ui.ServerHeaderMiddleware)
 	if err = origin.RegisterOriginAPI(originAPIGroup, ctx, egrp); err != nil {
 		return nil, err
 	}

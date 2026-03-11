@@ -12,6 +12,7 @@ export default {
     "namespace": "pelican namespace",
     "object": "pelican object",
     "origin": "pelican origin",
+    "pelican": "pelican pelican",
     "plugin": "pelican plugin",
     "registry": "pelican registry",
     "server": "pelican server",
