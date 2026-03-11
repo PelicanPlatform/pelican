@@ -790,12 +790,8 @@ func RegisterAuthEndpoints(ctx context.Context, routerGroup *gin.RouterGroup, eg
 		return err
 	}
 
-	// Configure login rate limit middleware with the specified limit, ensuring it's at least 1 to prevent misconfiguration that could block all login attempts
+	// Configure login rate limit middleware with the specified limit
 	limit := param.Server_UILoginRateLimit.GetInt()
-	if limit <= 0 {
-		log.Warning("Invalid Server.UILoginRateLimit. Value is less than 1. Fallback to 1")
-		limit = 1
-	}
 	loginRateMiddleware := loginRateLimitMiddleware(limit)
 
 	routerGroup.POST("/login", loginRateMiddleware, loginHandler)

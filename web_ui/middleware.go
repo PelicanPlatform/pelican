@@ -36,7 +36,7 @@ func ReadOnlyMiddleware(ctx *gin.Context) {
 
 func loginRateLimitMiddleware(limit int) gin.HandlerFunc {
 	if limit <= 0 {
-		log.Warning("Invalid Server.UILoginRateLimit. Value is less than 1. Fallback to 1")
+		log.Warning("Invalid rate limit. Value is less than 1. Fallback to 1")
 		limit = 1
 	}
 
