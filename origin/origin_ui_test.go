@@ -120,7 +120,8 @@ func TestCollectionsAPI(t *testing.T) {
 	err = web_ui.ConfigureServerWebAPI(ctx, router, egrp)
 	require.NoError(t, err, "Failed to configure server web API")
 
-	err = RegisterOriginWebAPI(router)
+	routerGroup := router.Group("/api/v1.0/origin_ui")
+	err = RegisterOriginWebAPI(routerGroup)
 	require.NoError(t, err)
 
 	// set up database
