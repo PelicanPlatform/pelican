@@ -3014,10 +3014,14 @@ default: $ConfigBase/session-secret
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.ReadOnly
-description: "When enabled, the server will reject all unsafe ( state changing ) requests"
+description: |+
+  When enabled, web UI routes that install the read-only middleware will reject non-safe HTTP
+  methods (for example, POST, PUT, PATCH, and DELETE) to prevent state-changing operations.
+  Safe methods such as GET, HEAD, and OPTIONS remain allowed, and some explicitly whitelisted
+  endpoints (for example, certain authentication/login flows) may still accept non-safe methods.
 type: bool
 default: false
-components: ["origin", "cache"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.RegistrationRetryInterval
 description: |+
