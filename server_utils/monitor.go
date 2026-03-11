@@ -97,9 +97,9 @@ func LaunchPeriodicDirectorTimeout(ctx context.Context, egrp *errgroup.Group, nC
 func HandleDirectorTestResponse(ctx *gin.Context, nChan chan bool) {
 
 	if !directorTestEnabled() {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+		ctx.JSON(http.StatusNotImplemented, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Director tests are disabled. Reject the test result.",
+			Msg:    "Director tests are disabled; test results will be ignored.",
 		})
 		return
 	}
