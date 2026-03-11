@@ -2243,6 +2243,20 @@ type: filename
 default: $ConfigBase/cache-fed-token
 components: ["cache"]
 ---
+name: Cache.DisableClientX509
+description: |+
+  When true (default), prevents the Cache from sending its host TLS certificate to Origins when
+  acting as a client (e.g., on Cache misses). This is necessary because certificates from popular
+  CAs such as Let's Encrypt no longer include the TLS clientAuth Extended Key Usage (EKU), which
+  causes SSL errors when the certificate is presented to an origin.
+
+  Setting this to false restores the old behavior of sending the host certificate. Only do this if
+  your host certificate explicitly includes the clientAuth EKU. Pelican will refuse to start if
+  this is false and the configured certificate does not include clientAuth.
+type: bool
+default: true
+components: ["cache"]
+---
 name: Cache.EnableEvictionMonitoring
 description: |+
   Enable cache eviction monitoring.

@@ -97,6 +97,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.DbLocation": false,
 	"Cache.DefaultCacheTimeout": false,
 	"Cache.DirectorTest": false,
+	"Cache.DisableClientX509": false,
 	"Cache.EnableBroker": false,
 	"Cache.EnableEvictionMonitoring": false,
 	"Cache.EnableLotman": false,
@@ -1081,6 +1082,8 @@ func (bP BoolParam) GetBool() bool {
 	switch bP.name {
 		case "Cache.DirectorTest":
 			return config.Cache.DirectorTest
+		case "Cache.DisableClientX509":
+			return config.Cache.DisableClientX509
 		case "Cache.EnableBroker":
 			return config.Cache.EnableBroker
 		case "Cache.EnableEvictionMonitoring":
@@ -1415,6 +1418,7 @@ var allParameterNames = []string{
 	"Cache.DbLocation",
 	"Cache.DefaultCacheTimeout",
 	"Cache.DirectorTest",
+	"Cache.DisableClientX509",
 	"Cache.EnableBroker",
 	"Cache.EnableEvictionMonitoring",
 	"Cache.EnableLotman",
@@ -2050,6 +2054,7 @@ var (
 
 var (
 	Cache_DirectorTest = BoolParam{"Cache.DirectorTest"}
+	Cache_DisableClientX509 = BoolParam{"Cache.DisableClientX509"}
 	Cache_EnableBroker = BoolParam{"Cache.EnableBroker"}
 	Cache_EnableEvictionMonitoring = BoolParam{"Cache.EnableEvictionMonitoring"}
 	Cache_EnableLotman = BoolParam{"Cache.EnableLotman"}
