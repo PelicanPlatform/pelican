@@ -4,16 +4,18 @@ package web_ui
 import (
 	"net/http"
 	"slices"
+	"time"
 
+	ratelimit "github.com/JGLTechnologies/gin-rate-limit"
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	log "github.com/sirupsen/logrus"
 )
 
 func ServerHeaderMiddleware(ctx *gin.Context) {
 	ctx.Writer.Header().Add("Server", "pelican/"+config.GetVersion())
-	ctx.Next()
 }
 
 // ReadOnlyMiddleware blocks unsafe ( non-state changing ) requests when the server is in read-only mode
@@ -29,4 +31,27 @@ func ReadOnlyMiddleware(ctx *gin.Context) {
 		return
 	}
 	ctx.Next()
+}
+
+func loginRateLimitMiddleware(limit int) gin.HandlerFunc {
+	if limit <= 0 {
+		log.Warning("Invalid Server.UILoginRateLimit. Value is less than 1. Fallback to 1")
+		limit = 1
+	}
+
+	store := ratelimit.InMemoryStore(&ratelimit.InMemoryOptions{
+		Rate:  time.Second,
+		Limit: uint(limit),
+	})
+
+	return ratelimit.RateLimiter(store, &ratelimit.Options{
+		ErrorHandler: func(ctx *gin.Context, info ratelimit.Info) {
+			ctx.JSON(http.StatusTooManyRequests,
+				server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "Too many requests. Try again in " + time.Until(info.ResetTime).String(),
+				})
+		},
+		KeyFunc: func(ctx *gin.Context) string { return ctx.ClientIP() },
+	})
 }

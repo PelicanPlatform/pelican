@@ -29,7 +29,6 @@ import (
 	"strings"
 	"time"
 
-	ratelimit "github.com/JGLTechnologies/gin-rate-limit"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/csrf"
 	"github.com/lestrrat-go/jwx/v2/jwt"
@@ -777,8 +776,8 @@ func listOIDCEnabledServersHandler(ctx *gin.Context) {
 }
 
 // Configure the authentication endpoints for the server web UI
-func configureAuthEndpoints(ctx context.Context, router *gin.Engine, egrp *errgroup.Group) error {
-	if router == nil {
+func RegisterAuthEndpoints(ctx context.Context, routerGroup *gin.RouterGroup, egrp *errgroup.Group) error {
+	if routerGroup == nil {
 		return errors.New("Web engine configuration passed a nil pointer")
 	}
 
@@ -790,36 +789,23 @@ func configureAuthEndpoints(ctx context.Context, router *gin.Engine, egrp *errgr
 	if err != nil {
 		return err
 	}
+
+	// Configure login rate limit middleware with the specified limit, ensuring it's at least 1 to prevent misconfiguration that could block all login attempts
 	limit := param.Server_UILoginRateLimit.GetInt()
 	if limit <= 0 {
 		log.Warning("Invalid Server.UILoginRateLimit. Value is less than 1. Fallback to 1")
 		limit = 1
 	}
+	loginRateMiddleware := loginRateLimitMiddleware(limit)
 
-	store := ratelimit.InMemoryStore(&ratelimit.InMemoryOptions{
-		Rate:  time.Second,
-		Limit: uint(limit),
-	})
-	mw := ratelimit.RateLimiter(store, &ratelimit.Options{
-		ErrorHandler: func(ctx *gin.Context, info ratelimit.Info) {
-			ctx.JSON(http.StatusTooManyRequests,
-				server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    "Too many requests. Try again in " + time.Until(info.ResetTime).String(),
-				})
-		},
-		KeyFunc: func(ctx *gin.Context) string { return ctx.ClientIP() },
-	})
-
-	group := router.Group("/api/v1.0/auth")
-	group.POST("/login", mw, loginHandler)
-	group.POST("/logout", AuthHandler, logoutHandler)
-	group.POST("/initLogin", initLoginHandler)
-	group.POST("/resetLogin", AuthHandler, AdminAuthHandler, resetLoginHandler)
+	routerGroup.POST("/login", loginRateMiddleware, loginHandler)
+	routerGroup.POST("/logout", AuthHandler, logoutHandler)
+	routerGroup.POST("/initLogin", initLoginHandler)
+	routerGroup.POST("/resetLogin", AuthHandler, AdminAuthHandler, ReadOnlyMiddleware, resetLoginHandler)
 	// Pass csrfhanlder only to the whoami route to generate CSRF token
 	// while leaving other routes free of CSRF check (we might want to do it some time in the future)
-	group.GET("/whoami", csrfHandler, whoamiHandler)
-	group.GET("/loginInitialized", func(ctx *gin.Context) {
+	routerGroup.GET("/whoami", csrfHandler, whoamiHandler)
+	routerGroup.GET("/loginInitialized", func(ctx *gin.Context) {
 		db := authDB.Load()
 		if db == nil {
 			ctx.JSON(200, gin.H{"initialized": false})
@@ -827,7 +813,7 @@ func configureAuthEndpoints(ctx context.Context, router *gin.Engine, egrp *errgr
 			ctx.JSON(200, gin.H{"initialized": true})
 		}
 	})
-	group.GET("/oauth", listOIDCEnabledServersHandler)
+	routerGroup.GET("/oauth", listOIDCEnabledServersHandler)
 
 	egrp.Go(func() error { return periodicAuthDBReload(ctx) })
 

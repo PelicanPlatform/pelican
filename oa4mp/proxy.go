@@ -506,16 +506,16 @@ func rejectUnregisteredRedirects(ctx *gin.Context) {
 	// If all redirect_uris are valid, proceed to the next handler
 	ctx.Next()
 }
-func ConfigureOA4MPProxy(router *gin.Engine) error {
-	if router == nil {
+func RegisterOA4MPProxy(routerGroup *gin.RouterGroup) error {
+	if routerGroup == nil {
 		return errors.New("Origin configuration passed a nil pointer")
 	}
 
 	// Add a middleware to handle CORS headers
-	router.Use(addCORSHeadersMiddleware)
+	routerGroup.Use(addCORSHeadersMiddleware)
 
-	router.Any("/api/v1.0/issuer", oa4mpProxy)
-	router.Any("/api/v1.0/issuer/*path", rejectUnregisteredRedirects, oa4mpProxy)
+	routerGroup.Any("", oa4mpProxy)
+	routerGroup.Any("/*path", rejectUnregisteredRedirects, oa4mpProxy)
 
 	return nil
 }

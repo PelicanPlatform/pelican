@@ -19,195 +19,21 @@
 package origin
 
 import (
-	"net/http"
-	"net/url"
-	"time"
-
 	"github.com/gin-gonic/gin"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
-
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/server_utils"
-	"github.com/pelicanplatform/pelican/token"
-	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
 
-type (
-	exportsRes struct {
-		Type              string        `json:"type"`              // "posix" | "s3" | "https" | "globus" | "xroot"
-		Status            regStatusEnum `json:"status"`            // Origin registration status
-		StatusDescription string        `json:"statusDescription"` // Description of the status
-		EditUrl           string        `json:"editUrl"`           // URL to edit the origin registration
+func RegisterOriginWebAPI(routerGroup *gin.RouterGroup) error {
 
-		// For S3 backend
-		S3Region     string `json:"s3Region,omitempty"`
-		S3ServiceUrl string `json:"s3ServiceUrl,omitempty"`
-		S3UrlStyle   string `json:"s3UrlStyle,omitempty"`
+	routerGroup.GET("/exports", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleExports)
 
-		// For https backend
-		HttpServiceUrl string `json:"httpServiceUrl,omitempty"`
+	collectionAPIGroup := routerGroup.Group("/collections") // Path is /api/v1.0/origin_ui/collections
+	RegisterCollectionsAPI(collectionAPIGroup)
 
-		Exports []exportWithStatus `json:"exports"`
-	}
-)
-
-func handleExports(ctx *gin.Context) {
-	st := param.Origin_StorageType.GetString()
-	storageType, err := server_structs.ParseOriginStorageType(st)
-	if err != nil {
-		log.Errorf("Failed to parse origin storage type: %v", err)
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server encountered error when parsing the storage type of the origin: " + err.Error()})
-	}
-
-	res := exportsRes{Type: string(storageType)}
-
-	extUrlStr := param.Server_ExternalWebUrl.GetString()
-	extUrl, _ := url.Parse(extUrlStr)
-	// Only use hostname:port
-	originPrefix := server_structs.GetOriginNs(extUrl.Host)
-	if !registrationsStatus.Has(originPrefix) {
-		if err := FetchAndSetRegStatus(originPrefix); err != nil {
-			log.Errorf("Failed to fetch registration status from the registry: %v", err)
-			ctx.JSON(http.StatusInternalServerError,
-				server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to fetch registration status from the registry"})
-			return
-		}
-	}
-	if rs := registrationsStatus.Get(originPrefix); rs == nil {
-		log.Error("Failed to fetch registration status from the registry: can't find registration status after querying registry")
-		ctx.JSON(http.StatusInternalServerError,
-			server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to fetch registration status from the registry"})
-		return
-	} else {
-		// rs is not nil
-		res.Status = rs.Value().Status
-		res.StatusDescription = rs.Value().Msg
-		res.EditUrl = rs.Value().EditUrl
-	}
-
-	exports, err := server_utils.GetOriginExports()
-	if err != nil {
-		log.Errorf("Failed to get the origin exports: %v", err)
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server encountered error when getting the origin exports: " + err.Error()})
-		return
-	}
-	wrappedExports, err := wrapExportsByStatus(exports)
-	if err != nil {
-		log.Errorf("Failed to get the registration status of the exported prefixes: %v", err)
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server encountered error when getting the registration status for the exported prefixes: " + err.Error()})
-		return
-	}
-	// Create token for accessing registry edit page
-	issuerUrl, err := config.GetServerIssuerURL()
-	if err != nil {
-		log.Errorf("Failed to get server issuer url %v", err)
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server encountered error when getting server issuer url " + err.Error()})
-		return
-	}
-	fed, err := config.GetFederation(ctx)
-	if err != nil {
-		log.Error("handleExports: failed to get federaion:", err)
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Server error when getting federation information: " + err.Error(),
-		})
-	}
-	tc := token.NewWLCGToken()
-	tc.Issuer = issuerUrl
-	tc.Lifetime = 15 * time.Minute
-	tc.Subject = issuerUrl
-	tc.AddScopes(token_scopes.Registry_EditRegistration)
-	tc.AddAudiences(fed.RegistryEndpoint)
-	token, err := tc.CreateToken()
-	if err != nil {
-		log.Errorf("Failed to create access token for editing registration %v", err)
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server encountered error when creating token for access registry edit page " + err.Error()})
-		return
-	}
-
-	if res.EditUrl != "" {
-		res.EditUrl += "&access_token=" + token
-	}
-
-	for idx, export := range wrappedExports {
-		if export.EditUrl != "" {
-			parsed, err := url.Parse(export.EditUrl)
-			if err != nil {
-				// current editUrl ends with "/?id=<x>"
-				wrappedExports[idx].EditUrl += "&access_token=" + token
-				continue
-			}
-			exQuery := parsed.Query()
-			exQuery.Add("access_token", token)
-			parsed.RawQuery = exQuery.Encode()
-			wrappedExports[idx].EditUrl = parsed.String()
-		}
-	}
-
-	res.Exports = wrappedExports
-
-	switch storageType {
-	case server_structs.OriginStorageS3:
-		res.S3Region = param.Origin_S3Region.GetString()
-		res.S3ServiceUrl = param.Origin_S3ServiceUrl.GetString()
-		res.S3UrlStyle = param.Origin_S3UrlStyle.GetString()
-	case server_structs.OriginStorageHTTPS:
-		res.HttpServiceUrl = param.Origin_HttpServiceUrl.GetString()
-	}
-	ctx.JSON(http.StatusOK, res)
-}
-
-func RegisterOriginWebAPI(engine *gin.Engine) error {
-	originWebAPI := engine.Group("/api/v1.0/origin_ui", web_ui.ServerHeaderMiddleware)
-	{
-		originWebAPI.GET("/exports", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleExports)
-
-		// Collections API
-		originWebAPI.GET("/collections", web_ui.AuthHandler, handleListCollections)
-		originWebAPI.POST("/collections", web_ui.AuthHandler, handleCreateCollection)
-		originWebAPI.PATCH("/collections/:id", web_ui.AuthHandler, handleUpdateCollection)
-		originWebAPI.DELETE("/collections/:id", web_ui.AuthHandler, handleDeleteCollection)
-		originWebAPI.GET("/collections/:id", web_ui.AuthHandler, handleGetCollection)
-		// TODO: More collections work in the future, the notion of members is up in the air
-		// originWebAPI.POST("/collections/:id/members", web_ui.AuthHandler, handleAddCollectionMembers)
-		// originWebAPI.DELETE("/collections/:id/members", web_ui.AuthHandler, handleRemoveCollectionMembers)
-		// originWebAPI.DELETE("/collections/:id/members/:encoded_object_url", web_ui.AuthHandler, handleRemoveCollectionMember)
-		// originWebAPI.GET("/collections/:id/members", web_ui.AuthHandler, handleListCollectionMembers)
-		originWebAPI.GET("/collections/:id/metadata", web_ui.AuthHandler, handleGetCollectionMetadata)
-		originWebAPI.PUT("/collections/:id/metadata/:key", web_ui.AuthHandler, handlePutCollectionMetadata)
-		originWebAPI.DELETE("/collections/:id/metadata/:key", web_ui.AuthHandler, handleDeleteCollectionMetadata)
-		originWebAPI.GET("/collections/:id/acl", web_ui.AuthHandler, handleGetCollectionAcls)
-		originWebAPI.POST("/collections/:id/acl", web_ui.AuthHandler, handleGrantCollectionAcl)
-		originWebAPI.DELETE("/collections/:id/acl", web_ui.AuthHandler, handleRevokeCollectionAcl)
-	}
-
-	// Globus backend specific. Config other origin routes above this line
-	if server_structs.OriginStorageType(param.Origin_StorageType.GetString()) !=
-		server_structs.OriginStorageGlobus {
-		return nil
-	}
-
-	_, err := GetGlobusOAuthCfg()
-	if err != nil {
-		return errors.Wrapf(err, "failed to initialize Globus OAuth client")
-	}
-
-	seHandler, err := web_ui.GetSessionHandler()
-	if err != nil {
+	globusAPIGroup := routerGroup.Group("/globus") // Path is /api/v1.0/origin_ui/globus
+	if err := RegisterGlobusAPI(globusAPIGroup); err != nil {
 		return err
 	}
 
-	originGlobusAPI := originWebAPI.Group("/globus")
-	{
-		originGlobusAPI.GET("/exports", web_ui.AuthHandler, web_ui.AdminAuthHandler, listGlobusExports)
-
-		globusAuthAPI := originGlobusAPI.Group("/auth", seHandler)
-		globusAuthAPI.GET("/login/:id", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleGlobusAuth)
-		globusAuthAPI.GET("/callback", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleGlobusCallback)
-	}
 	return nil
 }
