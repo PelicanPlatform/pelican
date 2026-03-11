@@ -1099,6 +1099,27 @@ root_default: true
 default: false
 components: ["origin"]
 ---
+name: Origin.MultiuserMinID
+description: |+
+  The minimum UID/GID the multiuser origin will switch to when performing filesystem operations on behalf of a user.
+  Any resolved user or group ID below this threshold is rejected, preventing accidental operations as root or other system accounts.
+  Set to 0 to disable the guard entirely (not recommended).
+type: int
+default: 1000
+components: ["origin"]
+---
+name: Origin.MultiuserUmask
+description: |+
+  The file-creation mask (umask) applied during filesystem operations.
+  When the origin switches to a user's credentials to perform a filesystem operation, this umask controls which permission bits are masked off from the requested mode.
+  This is commonly used to control the default permissions for created directories or files.
+  A value of 0 means the exact permissions requested by the caller are applied (no bits masked).
+  Specify the value in octal notation (e.g. 0022 removes group-write and other-write).
+  Common values: 0 (no masking), 0022 (standard), 0077 (restrictive).
+type: int
+default: 0
+components: ["origin"]
+---
 name: Origin.EnableCmsd
 description: |+
   A bool indicating whether the origin should enable the `cmsd` daemon.

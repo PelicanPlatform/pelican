@@ -2009,7 +2009,7 @@ func updateCounterWithUnified[T int | uint | float32 | float64](new T, old T, co
 	}
 	if incBy > 0 {
 		counter.Add(incBy)
-		unifiedCounter.WithLabelValues(BackendXRootD).Add(incBy)
+		unifiedCounter.WithLabelValues(BackendXRootD, "").Add(incBy)
 	}
 	return new
 }
@@ -2023,7 +2023,7 @@ func updateHistogramWithUnified(newTotalTime, oldTotalTime float64, newCount, ol
 		// Update both histograms for each operation that occurred
 		for i := 0; i < deltaCount; i++ {
 			histogram.Observe(avgLatency)
-			unifiedHistogram.WithLabelValues(BackendXRootD).Observe(avgLatency)
+			unifiedHistogram.WithLabelValues(BackendXRootD, "").Observe(avgLatency)
 		}
 	}
 }
