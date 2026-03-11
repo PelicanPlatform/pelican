@@ -66,6 +66,7 @@ require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
+	github.com/bbockelm/gosssd v0.0.1 // indirect
 	github.com/charmbracelet/lipgloss v0.12.1 // indirect
 	github.com/charmbracelet/x/ansi v0.1.4 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.6 // indirect

@@ -778,6 +778,11 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   for name in alice bob carol dave; do
     useradd -m -s /bin/bash -c "Someone who would like to test Pelican" ${name}
   done
+
+  # A shared group for testing secondary-group access.
+  # alice is a member; bob is intentionally not.
+  groupadd pelican_shared
+  usermod -aG pelican_shared alice
 ENDRUN
 
 #################################################################

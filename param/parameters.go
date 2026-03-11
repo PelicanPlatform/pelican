@@ -332,6 +332,8 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.IssuerMode": false,
 	"Origin.Mode": false,
 	"Origin.Multiuser": false,
+	"Origin.MultiuserMinID": false,
+	"Origin.MultiuserUmask": false,
 	"Origin.NamespacePrefix": false,
 	"Origin.Port": false,
 	"Origin.RunLocation": false,
@@ -812,6 +814,8 @@ var intAccessors = map[string]func(*Config) int{
 	"Origin.Concurrency": func(c *Config) int { return c.Origin.Concurrency },
 	"Origin.ConcurrencyDegradedThreshold": func(c *Config) int { return c.Origin.ConcurrencyDegradedThreshold },
 	"Origin.DiskUsageCalculationRateLimit": func(c *Config) int { return c.Origin.DiskUsageCalculationRateLimit },
+	"Origin.MultiuserMinID": func(c *Config) int { return c.Origin.MultiuserMinID },
+	"Origin.MultiuserUmask": func(c *Config) int { return c.Origin.MultiuserUmask },
 	"Origin.Port": func(c *Config) int { return c.Origin.Port },
 	"Origin.SSH.MaxRetries": func(c *Config) int { return c.Origin.SSH.MaxRetries },
 	"Origin.SSH.Port": func(c *Config) int { return c.Origin.SSH.Port },
@@ -1388,6 +1392,8 @@ var allParameterNames = []string{
 	"Origin.IssuerMode",
 	"Origin.Mode",
 	"Origin.Multiuser",
+	"Origin.MultiuserMinID",
+	"Origin.MultiuserUmask",
 	"Origin.NamespacePrefix",
 	"Origin.Port",
 	"Origin.RunLocation",
@@ -1785,6 +1791,8 @@ var (
 	Origin_Concurrency = IntParam{"Origin.Concurrency"}
 	Origin_ConcurrencyDegradedThreshold = IntParam{"Origin.ConcurrencyDegradedThreshold"}
 	Origin_DiskUsageCalculationRateLimit = IntParam{"Origin.DiskUsageCalculationRateLimit"}
+	Origin_MultiuserMinID = IntParam{"Origin.MultiuserMinID"}
+	Origin_MultiuserUmask = IntParam{"Origin.MultiuserUmask"}
 	Origin_Port = IntParam{"Origin.Port"}
 	Origin_SSH_MaxRetries = IntParam{"Origin.SSH.MaxRetries"}
 	Origin_SSH_Port = IntParam{"Origin.SSH.Port"}
@@ -2208,6 +2216,8 @@ func init() {
 		"Origin.Concurrency": Origin_Concurrency,
 		"Origin.ConcurrencyDegradedThreshold": Origin_ConcurrencyDegradedThreshold,
 		"Origin.DiskUsageCalculationRateLimit": Origin_DiskUsageCalculationRateLimit,
+		"Origin.MultiuserMinID": Origin_MultiuserMinID,
+		"Origin.MultiuserUmask": Origin_MultiuserUmask,
 		"Origin.Port": Origin_Port,
 		"Origin.SSH.MaxRetries": Origin_SSH_MaxRetries,
 		"Origin.SSH.Port": Origin_SSH_Port,

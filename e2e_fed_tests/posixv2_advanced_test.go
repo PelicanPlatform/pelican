@@ -169,7 +169,7 @@ func TestPosixv2OriginListingHTTP(t *testing.T) {
 		},
 	}
 
-	err := origin_serve.InitializeHandlers(exports)
+	err := origin_serve.InitializeHandlers(t.Context(), exports)
 	require.NoError(t, err)
 
 	// Initialize auth config (required by auth middleware)
