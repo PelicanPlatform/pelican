@@ -555,7 +555,8 @@ func TestApiToken(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	route := gin.New()
-	err := registerCommonEndpoints(&route.RouterGroup)
+	routeGroup := route.Group("/api/v1.0")
+	err := registerCommonEndpoints(routeGroup)
 	require.NoError(t, err)
 	route.GET("/privilegedRoute", func(ctx *gin.Context) {
 		authOption := token.AuthOption{
@@ -828,7 +829,8 @@ func TestApiToken(t *testing.T) {
 func TestGroupManagementAPI(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	route := gin.New()
-	err := registerCommonEndpoints(&route.RouterGroup)
+	routeGroup := route.Group("/api/v1.0")
+	err := registerCommonEndpoints(routeGroup)
 	require.NoError(t, err)
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
