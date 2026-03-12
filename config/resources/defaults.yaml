@@ -74,6 +74,7 @@ Cache:
   HighWaterMark: 95
   BlocksToPrefetch: 0
   EnableTLSClientAuth: false
+  DisableClientX509: true
   EnableEvictionMonitoring: true
 Lotman:
   EnabledPolicy: "fairshare"
