@@ -14,7 +14,7 @@ import {
 } from '@/helpers/api';
 import { alertOnError } from '@/helpers/util';
 import ConfirmButton from '@chtc/web-components/ConfirmButton';
-import NamespaceTitle from "@/components/Namespace/NamespaceTitle";
+import NamespaceTitle from '@/components/Namespace/NamespaceTitle';
 
 export interface DeniedCardProps {
   namespace: RegistryNamespace;

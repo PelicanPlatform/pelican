@@ -19,7 +19,7 @@ import { alertOnError } from '@/helpers/util';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { approveNamespace, denyNamespace } from '@/helpers/api';
 import { Theme } from '@mui/system';
-import NamespaceTitle from "@/components/Namespace/NamespaceTitle";
+import NamespaceTitle from '@/components/Namespace/NamespaceTitle';
 
 export interface PendingCardProps {
   namespace: RegistryNamespace;

@@ -22,7 +22,7 @@ import Link from 'next/link';
 import ConfirmButton from '@chtc/web-components/ConfirmButton';
 
 import InformationDropdown from './InformationDropdown';
-import NamespaceTitle from "@/components/Namespace/NamespaceTitle";
+import NamespaceTitle from '@/components/Namespace/NamespaceTitle';
 import { deleteNamespace, NAMESPACE_KEY } from '@/helpers/api';
 import { useSWRConfig } from 'swr';
 import { AlertDispatchContext } from '@/components/AlertProvider';
