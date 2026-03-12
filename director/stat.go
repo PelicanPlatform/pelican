@@ -271,7 +271,7 @@ func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, data
 		cacheAge := -1
 		if ageStr := res.Header.Get("Age"); ageStr != "" {
 			if ageParsed, err := strconv.Atoi(ageStr); err != nil {
-				log.Debugf("Ignoring unparseable Age header value %q from %s: %v", ageStr, dataUrl.String(), err)
+				log.Debugf("Ignoring unparsable Age header value %q from %s: %v", ageStr, dataUrl.String(), err)
 			} else {
 				cacheAge = ageParsed
 			}
