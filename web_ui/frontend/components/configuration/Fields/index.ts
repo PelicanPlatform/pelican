@@ -36,6 +36,7 @@ export interface ParameterMetadata {
     | 'stringSlice';
   default: string;
   components: string[];
+  hidden?: boolean;
 }
 
 export type ParameterValue =
