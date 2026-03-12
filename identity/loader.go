@@ -1,5 +1,3 @@
-//go:build !linux
-
 /***************************************************************
  *
  * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -18,20 +16,19 @@
  *
  ***************************************************************/
 
-package origin_serve
+package identity
 
 import (
-	"context"
-	"fmt"
-	"runtime"
-
-	"golang.org/x/net/webdav"
-
-	"github.com/pelicanplatform/pelican/identity"
+	log "github.com/sirupsen/logrus"
 )
 
-// newMultiuserFileSystem is not supported on non-Linux platforms.
-// The setfsuid/setfsgid syscalls are Linux-specific.
-func newMultiuserFileSystem(_ context.Context, _ webdav.FileSystem, _ identity.Lookup, _ int) (webdav.FileSystem, error) {
-	return nil, fmt.Errorf("multiuser filesystem is not supported on %s", runtime.GOOS)
+// NewLookup returns the preferred Lookup implementation wrapped in a
+// TTL cache.  The underlying strategy is chosen automatically based
+// on the platform and available services (see selectBestStrategy).
+// Optional CachedLookupOption values (e.g. WithMinID) are forwarded
+// to the cache layer.
+func NewLookup(opts ...CachedLookupOption) Lookup {
+	strategy := selectBestStrategy()
+	log.Infof("Selected UID/GID lookup strategy: %s", strategy.Name())
+	return NewCachedLookup(strategy, opts...)
 }

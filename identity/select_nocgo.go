@@ -1,4 +1,4 @@
-//go:build !linux
+//go:build !cgo
 
 /***************************************************************
  *
@@ -18,20 +18,24 @@
  *
  ***************************************************************/
 
-package origin_serve
+package identity
 
-import (
-	"context"
-	"fmt"
-	"runtime"
+// selectBestStrategy chooses the best available lookup strategy.
+// Without CGO, Go's os/user only parses /etc/passwd directly,
+// so we try specialized strategies first.
+func selectBestStrategy() LookupStrategy {
+	strategies := []func() (LookupStrategy, error){
+		trySystemdUserDB, // systemd-userdbd via varlink
+		tryNSSStrategy,   // NSS chain per nsswitch.conf
+		tryGoFallback,    // Go's os/user (parses /etc/passwd)
+	}
 
-	"golang.org/x/net/webdav"
+	for _, tryStrategy := range strategies {
+		if strategy, err := tryStrategy(); err == nil && strategy != nil {
+			return strategy
+		}
+	}
 
-	"github.com/pelicanplatform/pelican/identity"
-)
-
-// newMultiuserFileSystem is not supported on non-Linux platforms.
-// The setfsuid/setfsgid syscalls are Linux-specific.
-func newMultiuserFileSystem(_ context.Context, _ webdav.FileSystem, _ identity.Lookup, _ int) (webdav.FileSystem, error) {
-	return nil, fmt.Errorf("multiuser filesystem is not supported on %s", runtime.GOOS)
+	// Should not happen — tryGoFallback always succeeds
+	panic("no UID/GID lookup strategy available")
 }
