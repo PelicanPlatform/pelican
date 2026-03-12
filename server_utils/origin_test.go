@@ -124,7 +124,7 @@ func setup(t *testing.T, config string, shouldError bool) []OriginExport {
 			// For POSIX origins, replace the storage prefix with a temp directory
 			// so the permission validation can succeed
 			tmpDir := test_utils.GetTmpStoragePrefixDir(t)
-			viper.Set(key, tmpDir)
+			require.NoError(t, param.Set(key, tmpDir))
 		} else if key == "origin.exportvolumes" && isPosix {
 			// For POSIX origins, replace export volumes paths with temp directories
 			volumes := viper.GetStringSlice(key)
@@ -292,17 +292,17 @@ func TestGetExports(t *testing.T) {
 		assert.True(t, exports[0].Capabilities.Reads)
 		assert.False(t, exports[0].Capabilities.DirectReads)
 
-		// Now check that we properly set the other viper vars we should have
-		viperSP := viper.GetString("Origin.StoragePrefix")
-		info, err = os.Stat(viperSP)
-		assert.NoError(t, err, "viper storage prefix should exist")
-		assert.True(t, info.IsDir(), "viper storage prefix should be a directory")
-		assert.Equal(t, "/first/namespace", viper.GetString("Origin.FederationPrefix"))
-		assert.True(t, viper.GetBool("Origin.EnableReads"))
-		assert.True(t, viper.GetBool("Origin.EnableWrites"))
-		assert.True(t, viper.GetBool("Origin.EnablePublicReads"))
-		assert.False(t, viper.GetBool("Origin.EnableListings"))
-		assert.False(t, viper.GetBool("Origin.EnableDirectReads"))
+		// Now check that we properly set the other param vars we should have
+		storagePrefixStr := param.Origin_StoragePrefix.GetString()
+		info, err = os.Stat(storagePrefixStr)
+		assert.NoError(t, err, "param storage prefix should exist")
+		assert.True(t, info.IsDir(), "param storage prefix should be a directory")
+		assert.Equal(t, "/first/namespace", param.Origin_FederationPrefix.GetString())
+		assert.True(t, param.Origin_EnableReads.GetBool())
+		assert.True(t, param.Origin_EnableWrites.GetBool())
+		assert.True(t, param.Origin_EnablePublicReads.GetBool())
+		assert.False(t, param.Origin_EnableListings.GetBool())
+		assert.False(t, param.Origin_EnableDirectReads.GetBool())
 	})
 
 	t.Run("testSingleExportBlock", func(t *testing.T) {
@@ -324,17 +324,17 @@ func TestGetExports(t *testing.T) {
 		assert.True(t, exports[0].Capabilities.Reads)
 		assert.True(t, exports[0].Capabilities.DirectReads)
 
-		// Now check that we properly set the other viper vars we should have
-		viperSP := viper.GetString("Origin.StoragePrefix")
-		info, err = os.Stat(viperSP)
-		assert.NoError(t, err, "viper storage prefix should exist")
-		assert.True(t, info.IsDir(), "viper storage prefix should be a directory")
-		assert.Equal(t, "/first/namespace", viper.GetString("Origin.FederationPrefix"))
-		assert.True(t, viper.GetBool("Origin.EnableReads"))
-		assert.False(t, viper.GetBool("Origin.EnableWrites"))
-		assert.True(t, viper.GetBool("Origin.EnablePublicReads"))
-		assert.False(t, viper.GetBool("Origin.EnableListings"))
-		assert.True(t, viper.GetBool("Origin.EnableDirectReads"))
+		// Now check that we properly set the other param vars we should have
+		storagePrefixStr := param.Origin_StoragePrefix.GetString()
+		info, err = os.Stat(storagePrefixStr)
+		assert.NoError(t, err, "param storage prefix should exist")
+		assert.True(t, info.IsDir(), "param storage prefix should be a directory")
+		assert.Equal(t, "/first/namespace", param.Origin_FederationPrefix.GetString())
+		assert.True(t, param.Origin_EnableReads.GetBool())
+		assert.False(t, param.Origin_EnableWrites.GetBool())
+		assert.True(t, param.Origin_EnablePublicReads.GetBool())
+		assert.False(t, param.Origin_EnableListings.GetBool())
+		assert.True(t, param.Origin_EnableDirectReads.GetBool())
 	})
 
 	t.Run("testInvalidExport", func(t *testing.T) {
