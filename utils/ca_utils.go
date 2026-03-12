@@ -257,7 +257,7 @@ func CheckClientAuthEKU(certFile string, pemBytes []byte) error {
 		}
 		cert, err := x509.ParseCertificate(block.Bytes)
 		if err != nil {
-			break
+			return errors.Wrap(err, "failed to parse certificate for EKU check")
 		}
 		if slices.Contains(cert.ExtKeyUsage, x509.ExtKeyUsageClientAuth) {
 			return nil // cert is fine
