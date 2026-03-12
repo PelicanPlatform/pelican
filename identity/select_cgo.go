@@ -1,4 +1,4 @@
-//go:build !linux
+//go:build cgo
 
 /***************************************************************
  *
@@ -18,20 +18,13 @@
  *
  ***************************************************************/
 
-package origin_serve
+package identity
 
-import (
-	"context"
-	"fmt"
-	"runtime"
-
-	"golang.org/x/net/webdav"
-
-	"github.com/pelicanplatform/pelican/identity"
-)
-
-// newMultiuserFileSystem is not supported on non-Linux platforms.
-// The setfsuid/setfsgid syscalls are Linux-specific.
-func newMultiuserFileSystem(_ context.Context, _ webdav.FileSystem, _ identity.Lookup, _ int) (webdav.FileSystem, error) {
-	return nil, fmt.Errorf("multiuser filesystem is not supported on %s", runtime.GOOS)
+// selectBestStrategy chooses the best available lookup strategy.
+// When CGO is enabled, Go's built-in user.Lookup() already uses
+// getpwnam_r via libc, which respects NSS fully. No specialized
+// strategies are needed.
+func selectBestStrategy() LookupStrategy {
+	strategy, _ := tryGoFallback()
+	return strategy
 }

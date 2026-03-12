@@ -414,6 +414,99 @@ type sharedGroupInfo struct {
 	GID  uint32
 }
 
+// TestPrivileged_Umask exercises the umask configuration parameter by
+// creating directories and files with different umask values and verifying
+// the resulting permissions.
+func TestPrivileged_Umask(t *testing.T) {
+	skipUnlessPrivileged(t)
+	skipUnlessTestUsers(t, "alice")
+
+	t.Run("UmaskZeroPreservesPermissions", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "pelican-umask-zero-*")
+		require.NoError(t, err)
+		t.Cleanup(func() { os.RemoveAll(tmpDir) })
+		require.NoError(t, os.Chmod(tmpDir, 0777))
+
+		mfs := buildMultiuserFS(t, tmpDir) // umask=0
+		ctxAlice := ctxForUser("alice", "alice")
+
+		// Mkdir with 0770 should produce exactly 0770
+		require.NoError(t, mfs.Mkdir(ctxAlice, "/dir-0770", 0770))
+		info, err := os.Stat(filepath.Join(tmpDir, "dir-0770"))
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0770), info.Mode().Perm(),
+			"umask=0 should preserve directory permissions 0770 exactly")
+
+		// File with 0664 should produce exactly 0664
+		f, err := mfs.OpenFile(ctxAlice, "/file-0664", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0664)
+		require.NoError(t, err)
+		require.NoError(t, f.Close())
+		info, err = os.Stat(filepath.Join(tmpDir, "file-0664"))
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0664), info.Mode().Perm(),
+			"umask=0 should preserve file permissions 0664 exactly")
+	})
+
+	t.Run("UmaskMasksPermissions", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "pelican-umask-0022-*")
+		require.NoError(t, err)
+		t.Cleanup(func() { os.RemoveAll(tmpDir) })
+		require.NoError(t, os.Chmod(tmpDir, 0777))
+
+		// Build with umask=0022 (standard: removes group-write + other-write)
+		osFs := afero.NewOsFs()
+		baseFs := afero.NewBasePathFs(osFs, tmpDir)
+		inner := newAferoFileSystem(baseFs, "", nil)
+		lookup := identity.NewLookup()
+		fs, err := newMultiuserFileSystem(context.Background(), inner, lookup, 0022)
+		require.NoError(t, err)
+		mfs := fs.(*multiuserFileSystem)
+
+		ctxAlice := ctxForUser("alice", "alice")
+
+		// Mkdir with 0770: umask 0022 should mask to 0750
+		require.NoError(t, mfs.Mkdir(ctxAlice, "/dir-masked", 0770))
+		info, err := os.Stat(filepath.Join(tmpDir, "dir-masked"))
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0750), info.Mode().Perm(),
+			"umask=0022 should mask 0770 to 0750")
+
+		// File with 0666: umask 0022 should mask to 0644
+		f, err := mfs.OpenFile(ctxAlice, "/file-masked", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
+		require.NoError(t, err)
+		require.NoError(t, f.Close())
+		info, err = os.Stat(filepath.Join(tmpDir, "file-masked"))
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0644), info.Mode().Perm(),
+			"umask=0022 should mask 0666 to 0644")
+	})
+
+	t.Run("RestrictiveUmask", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "pelican-umask-0077-*")
+		require.NoError(t, err)
+		t.Cleanup(func() { os.RemoveAll(tmpDir) })
+		require.NoError(t, os.Chmod(tmpDir, 0777))
+
+		// Build with umask=0077 (removes all group + other bits)
+		osFs := afero.NewOsFs()
+		baseFs := afero.NewBasePathFs(osFs, tmpDir)
+		inner := newAferoFileSystem(baseFs, "", nil)
+		lookup := identity.NewLookup()
+		fs, err := newMultiuserFileSystem(context.Background(), inner, lookup, 0077)
+		require.NoError(t, err)
+		mfs := fs.(*multiuserFileSystem)
+
+		ctxAlice := ctxForUser("alice", "alice")
+
+		// Mkdir with 0777: umask 0077 should mask to 0700
+		require.NoError(t, mfs.Mkdir(ctxAlice, "/dir-private", 0777))
+		info, err := os.Stat(filepath.Join(tmpDir, "dir-private"))
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0700), info.Mode().Perm(),
+			"umask=0077 should mask 0777 to 0700")
+	})
+}
+
 // requireSharedGroup checks that the named group exists and that member
 // belongs to it.  It skips the test if either condition is not met.
 // Group setup is expected to happen in the Dockerfile, not at test time.
