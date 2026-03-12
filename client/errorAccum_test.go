@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, University of Nebraska-Lincoln
+ * Copyright (C) 2026, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -74,6 +74,12 @@ func TestErrorsRetryableFalse(t *testing.T) {
 	assert.False(t, te.AllErrorsRetryable(), "PermissionDeniedError with valid but rejected token should not be retryable")
 	te.resetErrors()
 
+	// Test PermissionDeniedError with no token sent (not retryable via this path - noToken=false, expired=false)
+	pdeNoTokenFalse := &PermissionDeniedError{noToken: false}
+	te.AddError(error_codes.NewAuthorizationError(pdeNoTokenFalse))
+	assert.False(t, te.AllErrorsRetryable(), "PermissionDeniedError with noToken=false should not be retryable")
+	te.resetErrors()
+
 }
 
 // TestErrorsRetryableTrue tests that errors are retryable
@@ -101,6 +107,12 @@ func TestErrorsRetryableTrue(t *testing.T) {
 	pdeExpired := &PermissionDeniedError{expired: true}
 	te.AddError(error_codes.NewAuthorizationError(pdeExpired))
 	assert.True(t, te.AllErrorsRetryable(), "PermissionDeniedError with expired token should be retryable")
+	te.resetErrors()
+
+	// Test PermissionDeniedError with no token sent (retryable)
+	pdeNoToken := &PermissionDeniedError{noToken: true}
+	te.AddError(error_codes.NewAuthorizationError(pdeNoToken))
+	assert.True(t, te.AllErrorsRetryable(), "PermissionDeniedError with no token sent should be retryable")
 	te.resetErrors()
 
 	// Test wrapped ConnectionSetupError (all ConnectionSetupErrors are wrapped in production)
