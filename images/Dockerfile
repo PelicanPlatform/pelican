@@ -83,7 +83,7 @@ ARG XROOTD_S3_HTTP_SRC_BUILD=true
 ARG XROOTD_S3_HTTP_VER=0.6.4
 # Installed from Koji if not building it from source.
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
-ARG XRDHTTP_PELICAN_VER=0.0.10
+ARG XRDHTTP_PELICAN_VER=0.0.11
 ARG XRDHTTP_PELICAN_RELEASE="1.osg${OSG_SERIES}.${BASE_OS}"
 
 # For controlling the version of OA4MP that is installed.

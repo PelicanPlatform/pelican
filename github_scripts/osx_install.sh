@@ -79,7 +79,7 @@ popd
 
 git clone https://github.com/PelicanPlatform/xrdhttp-pelican.git
 pushd xrdhttp-pelican
-git checkout v0.0.10
+git checkout v0.0.11
 mkdir build
 cd build
 cmake .. -GNinja -DCMAKE_INSTALL_PREFIX="$PWD/release_dir"
