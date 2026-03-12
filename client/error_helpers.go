@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -473,18 +473,26 @@ func wrapDownloadError(err error, transferEndpointURL string, tokenContents stri
 	// Handle permission denied errors
 	var pde *PermissionDeniedError
 	if errors.As(err, &pde) {
-		// If the token is expired we can retry because we will just get a new token
-		// otherwise something is wrong with the token
-		expired, expiration, tokenErr := tokenIsExpired(tokenContents)
-		if tokenErr != nil {
-			pde.message = "Permission denied: token could not be parsed"
+		if tokenContents == "" {
+			// No token was sent (e.g., public namespace accessed via a cache that doesn't know about it yet).
+			// Mark as retryable so the client can attempt at a different cache that isn't stale.
+			pde.message = "Permission denied: no token was sent"
 			pde.expired = false
-		} else if expired {
-			pde.message = "Permission denied: token expired at " + expiration.Format(time.RFC3339)
-			pde.expired = true
+			pde.noToken = true
 		} else {
-			pde.message = "Permission denied: token appears valid but was rejected by the server"
-			pde.expired = false
+			// If the token is expired we can retry because we will just get a new token
+			// otherwise something is wrong with the token
+			expired, expiration, tokenErr := tokenIsExpired(tokenContents)
+			if tokenErr != nil {
+				pde.message = "Permission denied: token could not be parsed"
+				pde.expired = false
+			} else if expired {
+				pde.message = "Permission denied: token expired at " + expiration.Format(time.RFC3339)
+				pde.expired = true
+			} else {
+				pde.message = "Permission denied: token appears valid but was rejected by the server"
+				pde.expired = false
+			}
 		}
 		return error_codes.NewAuthorizationError(pde), false, ""
 	}
