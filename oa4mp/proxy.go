@@ -320,7 +320,9 @@ func getUserCollectionScopes(db *gorm.DB, user string, groupsList []string) (sco
 	return scopes, matchedGroups, nil
 }
 
-// Checks if the request came from a login attempt based on the presence of the `fromLogin` query parameter.
+// Determines whether OA4MP should force a re-login by interpreting the `fromLogin` query parameter as a boolean.
+// Only when `fromLogin` is present and parses as boolean true will this return false (i.e., not force a re-login);
+// missing, invalid, or false values will cause a re-login.
 func shouldForceOA4MPReLogin(requestURL *url.URL) bool {
 	loginAttempt, err := strconv.ParseBool(requestURL.Query().Get(web_ui.LoginAttemptQueryParam))
 	return err != nil || !loginAttempt
