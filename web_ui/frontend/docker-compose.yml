@@ -5,7 +5,7 @@ services:
     working_dir: /app
     volumes:
       - ../../:/app
-    command: --clean --snapshot --config .goreleaser.dev.yml
+    command: --clean --snapshot --config .goreleaser.yml
 
   # Run pelican server with all modules
   pelican-server:
@@ -14,7 +14,7 @@ services:
       - '8444:8444'
     working_dir: /app
     volumes:
-      - ../../dist/pelican_linux_arm64_v8.0/:/app
+      - ../../dist/pelican_linux_arm64_v8.0/:/app # Replace with the correct path to the built binary
       - ../../local/:/etc/pelican/
     command: ./pelican serve --module director,registry,origin,cache
 
@@ -28,6 +28,6 @@ services:
     ports:
       - '8443:8443'
     env_file:
-      - ./dev/.env.local
+      - ./dev/.env.local # You can comment this out if you don't have a .env.local file
     stdin_open: true
     tty: true
