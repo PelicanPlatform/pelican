@@ -41,6 +41,7 @@ import (
 	"github.com/pelicanplatform/pelican/p11proxy"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -172,6 +173,29 @@ func makeUnprivilegedXrootdLauncher(daemonName string, xrootdRun string, configP
 		// query the Director for other Caches, not Origins.
 		if param.Cache_EnableSiteLocalMode.GetBool() {
 			result.ExtraEnv = append(result.ExtraEnv, "XRD_PELICANDIRECTORYQUERYMODE=cache")
+		}
+
+		// When Cache.DisableClientX509 is true (default), instruct xrdcl-pelican not to
+		// send the host certificate to Origins as a TLS client certificate. This is
+		// required because modern CAs (e.g. Let's Encrypt) no longer issue certs
+		// with the clientAuth Extended Key Usage, causing SSL errors when the Cache
+		// acts as a client against an Origin on Cache misses.
+		if param.Cache_DisableClientX509.GetBool() {
+			result.ExtraEnv = append(result.ExtraEnv, "XRD_CURLDISABLEX509=1")
+		} else {
+			// The operator has explicitly opted into sending the host cert. Validate
+			// that the configured TLS certificate actually includes clientAuth EKU;
+			// if it doesn't, the Cache will likely fail to communicate with Origins.
+			if certFile := param.Server_TLSCertificateChain.GetString(); certFile != "" {
+				if pemBytes, readErr := os.ReadFile(certFile); readErr == nil {
+					if err = utils.CheckClientAuthEKU(certFile, pemBytes); err != nil {
+						return
+					}
+				} else {
+					err = errors.Wrapf(readErr, "Failed to read TLS certificate file %s to check for clientAuth EKU", certFile)
+					return
+				}
+			}
 		}
 
 		// Pass through the advanced Pelican cache control features; meant for unit tests of xrdcl-pelican
