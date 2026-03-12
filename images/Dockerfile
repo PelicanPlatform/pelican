@@ -70,7 +70,7 @@ ARG LOTMAN_VER=0.0.4
 # Until the two places are programmatically synchronized, please double-check by hand
 # when doing version changes.
 ARG XRDCL_PELICAN_SRC_BUILD=false
-ARG XRDCL_PELICAN_VER=1.5.6
+ARG XRDCL_PELICAN_VER=1.6.2
 ARG XROOTD_LOTMAN_SRC_BUILD=false
 ARG XROOTD_LOTMAN_VER=0.0.5
 ARG XROOTD_S3_HTTP_SRC_BUILD=true
