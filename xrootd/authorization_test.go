@@ -1309,7 +1309,7 @@ func TestGenerateOriginIssuer(t *testing.T) {
 			require.NoError(t, err, "error reading config")
 
 			// Replace storage prefixes with temp directories that have proper permissions
-			if exports, ok := viper.Get("origin.exports").([]interface{}); ok {
+			if exports, ok := viper.Get(param.Origin_Exports.GetName()).([]interface{}); ok {
 				for _, export := range exports {
 					exportMap := export.(map[string]interface{})
 					for k, v := range exportMap {
@@ -1319,7 +1319,7 @@ func TestGenerateOriginIssuer(t *testing.T) {
 						}
 					}
 				}
-				viper.Set("origin.exports", exports)
+				require.NoError(t, param.Set(param.Origin_Exports.GetName(), exports))
 			}
 
 			err = config.InitServer(ctx, server_structs.OriginType)

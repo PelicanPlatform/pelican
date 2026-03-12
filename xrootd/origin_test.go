@@ -193,9 +193,9 @@ func TestOrigin(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	// Create temp dir with 0777 permissions so XRootD daemon user can write
-	viper.Set(param.Origin_StoragePrefix.GetName(), test_utils.GetTmpStoragePrefixDir(t))
-	viper.Set(param.Origin_FederationPrefix.GetName(), "/test")
-	viper.Set(param.Origin_StorageType.GetName(), "posix")
+	require.NoError(t, param.Set(param.Origin_StoragePrefix.GetName(), test_utils.GetTmpStoragePrefixDir(t)))
+	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/test"))
+	require.NoError(t, param.Set(param.Origin_StorageType.GetName(), "posix"))
 	// Disable functionality we're not using (and is difficult to make work on Mac)
 	require.NoError(t, param.Set(param.Origin_EnableCmsd.GetName(), false))
 	require.NoError(t, param.Set(param.Origin_EnableMacaroons.GetName(), false))
@@ -238,7 +238,7 @@ func TestMultiExportOrigin(t *testing.T) {
 
 	// Replace storage prefixes with temp directories that have proper permissions
 	// for the daemon user (xrootd) before calling GetOriginExports()
-	exports := viper.Get("origin.exports").([]interface{})
+	exports := viper.Get(param.Origin_Exports.GetName()).([]interface{})
 	for _, export := range exports {
 		exportMap := export.(map[string]interface{})
 		for k, v := range exportMap {
@@ -247,7 +247,7 @@ func TestMultiExportOrigin(t *testing.T) {
 			}
 		}
 	}
-	viper.Set("origin.exports", exports)
+	require.NoError(t, param.Set(param.Origin_Exports.GetName(), exports))
 
 	// Get available, unique ports and pre-allocate for xrootd startup.
 	ports, err := test_utils.GetUniqueAvailablePorts(2)
