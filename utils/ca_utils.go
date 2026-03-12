@@ -264,7 +264,7 @@ func CheckClientAuthEKU(certFile string, pemBytes []byte) error {
 		}
 		return errors.Errorf(
 			"%s is false, but the TLS certificate at %s does not "+
-				"include the clientAuth Extended Key Usage"+
+				"include the clientAuth Extended Key Usage "+
 				"Popular CAs such as Let's Encrypt no longer issue certificates with clientAuth, "+
 				"which will cause SSL errors when the Cache fetches objects from Origins. "+
 				"Set %s to true (the default) or provide a certificate "+

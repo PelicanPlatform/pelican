@@ -34,7 +34,7 @@ import (
 )
 
 // makeSelfSignedCert creates a minimal self-signed PEM certificate with the
-// supplied extended key usages.
+// supplied extended key usages (if provided).
 func makeSelfSignedCert(t *testing.T, ekus []x509.ExtKeyUsage) []byte {
 	t.Helper()
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
