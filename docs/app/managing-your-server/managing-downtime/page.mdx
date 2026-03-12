@@ -2,18 +2,40 @@ import { Callout } from 'nextra/components'
 
 # Managing Server Downtime
 
-Origin and Cache server administrators can declare **downtime periods** to signal to the federation that their server will be temporarily unavailable. 
+Origin and Cache server administrators can declare **downtime periods** to signal to the federation that their server will be temporarily unavailable.
 The Pelican Director uses this information to route data requests away from affected servers during the declared period, minimizing disruptions for end users.
+Pelican can also set downtime automatically during a graceful shutdown.
 
 <Callout type="info">
-Federation administrators can also create or modify downtime for any server in the federation. 
+Federation administrators can also create or modify downtime for any server in the federation.
 If you need a downtime set but lack admin access to your own server, see [Method 3](#method-3-contact-the-federation-administrator) below.
 To see a consolidated view of all active and upcoming downtimes across the federation, visit the **Downtime** page in the **Director** web UI.
 </Callout>
 
+## Graceful Shutdown (Automatic Downtime)
+
+Typically, server administrators set a downtime just before shutting down or restarting a server.
+Instead of doing this manually, you can rely on Pelican's "graceful shutdown" feature.
+It automatically establishes a downtime window under the hood to gracefully drain traffic,
+minimizing disruption to users' ongoing transfers.
+
+When Pelican process receives a `SIGTERM` signal (e.g. via `kill -TERM <pid>`),
+or when the "Restart Server" button on web UI is clicked:
+
+1. Pelican immediately marks the server as being in downtime.
+2. The Director stops redirecting new clients to this Origin/Cache.
+3. Existing in-flight transfers are allowed to continue.
+4. The downtime remains in effect until `Xrootd.ShutdownTimeout` (default: 1m) expires and Pelican fully exits.
+
+<Callout type="info">
+If you need to schedule downtime for the future,
+or require a downtime window while the server remains running,
+use the methods below.
+</Callout>
+
 ## Method 1: Web UI (Recommended)
 
-The web interface provides the easiest way to manage downtime. 
+The web interface provides the easiest way to manage downtime.
 Log in to your server's web UI with your administrator credentials, then navigate to **Downtime** (the calendar icon) in the left sidebar.
 
 ### Add a Downtime
@@ -31,7 +53,7 @@ Click the **pencil icon** on an existing downtime card to open the edit form, ma
 
 ### Delete a Downtime
 
-Click the **pencil icon** on an existing downtime card to open the edit form, then click the **DELETE DOWNTIME** button to remove it. 
+Click the **pencil icon** on an existing downtime card to open the edit form, then click the **DELETE DOWNTIME** button to remove it.
 The Director will stop routing around that downtime on the next advertisement cycle.
 
 ---
@@ -108,7 +130,7 @@ pelican downtime delete <uuid> --server https://my-server.example.com:8444
 
 ## Method 3: Contact the Federation Administrator
 
-If you do not have admin access to your server's web UI or CLI, you can ask your federation administrator to set a downtime. 
+If you do not have admin access to your server's web UI or CLI, you can ask your federation administrator to set a downtime.
 Federation admins can manage downtime for any registered server in the federation from the **Registry** web interface.
 
 Provide your federation admin with:
