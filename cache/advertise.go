@@ -56,6 +56,7 @@ func (server *CacheServer) CreateAdvertisement(name, id, originUrl, originWebUrl
 	// Get the overall health status as reported by the cache.
 	status := metrics.GetHealthStatus().OverallStatus
 
+	nsAds := server.GetNamespaceAds()
 	ad := server_structs.OriginAdvertiseV2{
 		ServerID:            id,
 		RegistryPrefix:      registryPrefix,
@@ -67,6 +68,17 @@ func (server *CacheServer) CreateAdvertisement(name, id, originUrl, originWebUrl
 		Downtimes:           downtimes,
 	}
 	ad.Initialize(name)
+
+	// Extract prefixes from namespace ads for broker configuration
+	var prefixes []string
+	for _, nsAd := range nsAds {
+		prefixes = append(prefixes, nsAd.Path)
+	}
+
+	// Set broker URL if enabled
+	if err := server_utils.SetBrokerURL(&ad, server_structs.CacheType, prefixes); err != nil {
+		return nil, errors.Wrap(err, "failed to set broker URL")
+	}
 
 	return &ad, nil
 }

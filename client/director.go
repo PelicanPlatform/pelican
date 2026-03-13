@@ -26,6 +26,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,6 +43,16 @@ import (
 	"github.com/pelicanplatform/pelican/utils"
 )
 
+// directorDebugCtxKey is used to signal that the director query should include
+// the X-Pelican-Debug header regardless of the current log level.
+type directorDebugCtxKey struct{}
+
+// WithDirectorDebug returns a derived context that causes director queries
+// to include the X-Pelican-Debug header, requesting decision information.
+func WithDirectorDebug(ctx context.Context) context.Context {
+	return context.WithValue(ctx, directorDebugCtxKey{}, true)
+}
+
 // Check whether an HTTP response is actually a response from a Pelican service, as
 // indicated by the "Server" header pointing to a pelican process.
 //
@@ -57,14 +68,25 @@ func fromPelican(resp *http.Response) bool {
 }
 
 // Make a request to the director for a given verb/resource; return the
-// HTTP response object only if a 307 is returned.
-func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanURL, token string) (resp *http.Response, err error) {
+// HTTP response object only if a 307 is returned.  When the X-Pelican-Debug
+// header was sent and the director includes decision information in the
+// response body, redirectBody will contain that JSON payload.
+//
+// When cacheMode is true the request path is routed through the director's
+// origin endpoint (/api/v1.0/director/origin/…) so that the director
+// redirects to origins instead of caches.  This is the correct behaviour
+// when the caller is itself an embedded cache.
+func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanURL, token string, cacheMode bool) (resp *http.Response, redirectBody string, err error) {
 	resourceUrl, err := url.Parse(pUrl.FedInfo.DirectorEndpoint)
 	if err != nil {
 		log.Errorln("Failed to parse the director URL:", err)
-		return nil, err
+		return nil, "", err
 	}
-	resourceUrl.Path = pUrl.Path
+	if cacheMode {
+		resourceUrl.Path = path.Join("/api/v1.0/director/origin", pUrl.Path)
+	} else {
+		resourceUrl.Path = pUrl.Path
+	}
 	resourceUrl.RawQuery = pUrl.RawQuery
 
 	// Here we use http.Transport to prevent the client from following the director's
@@ -90,7 +112,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		req, err = http.NewRequestWithContext(ctx, verb, resourceUrl.String(), nil)
 		if err != nil {
 			log.Errorln("Failed to create an HTTP request:", err)
-			return nil, err
+			return nil, "", err
 		}
 
 		// Include the Client's version as a User-Agent header. The Director will decide
@@ -102,7 +124,8 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
 
-		if log.IsLevelEnabled(log.DebugLevel) {
+		forceDebug, _ := ctx.Value(directorDebugCtxKey{}).(bool)
+		if log.IsLevelEnabled(log.DebugLevel) || forceDebug {
 			req.Header.Set("X-Pelican-Debug", "true")
 		}
 
@@ -128,7 +151,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		body, err = io.ReadAll(resp.Body)
 		if err != nil {
 			log.Errorln("Failed to read the body from the director response:", err)
-			return resp, err
+			return resp, "", err
 		}
 		errMsg = string(body)
 
@@ -163,7 +186,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		var respErr server_structs.SimpleApiResp
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
 			log.Errorln("Failed to unmarshal the director's JSON response:", err)
-			return resp, unmarshalErr
+			return resp, "", unmarshalErr
 		}
 		fromDirector = true
 		// In case we have old director returning "error": "message content"
@@ -182,7 +205,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		if resp.StatusCode == http.StatusNotFound && verb == http.MethodDelete {
 			if strings.Contains(strings.ToLower(bodyString), "page not found") {
 				log.Warningf("Failed to query the DELETE endpoint; the director appears to be an older version, attempting with the PUT method")
-				return queryDirector(ctx, http.MethodPut, pUrl, token)
+				return queryDirector(ctx, http.MethodPut, pUrl, token, cacheMode)
 			}
 		}
 		if resp.StatusCode == http.StatusNotFound && fromDirector && (errMsg == "All sources report object was not found" || errMsg == "Object not found at any cache") {
@@ -191,12 +214,13 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		} else {
 			err = errors.Errorf("%d: %s", resp.StatusCode, errMsg)
 		}
-		return resp, err
+		return resp, "", err
 	}
 
 	// A 307 may come with a body that contains the redirect choice information
 	if bodyString != "" {
 		log.Debugf("Director's redirect choice information: %s", bodyString)
+		redirectBody = bodyString
 	}
 
 	return
@@ -260,7 +284,19 @@ func parseServersFromDirectorResponse(resp *http.Response) (servers []*url.URL, 
 }
 
 // Retrieve federation namespace information for a given URL.
+//
+// This is the public API; it always queries the director's default
+// endpoint.  Internal callers that need embedded cache-mode
+// behaviour should use getDirectorInfoForPath instead.
 func GetDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, httpMethod string, token string) (parsedResponse server_structs.DirectorResponse, err error) {
+	return getDirectorInfoForPath(ctx, pUrl, httpMethod, token, false)
+}
+
+// getDirectorInfoForPath is the internal implementation that accepts a
+// cacheMode flag.  When cacheMode is true the director's origin
+// endpoint is queried so that the response contains origins rather
+// than caches.
+func getDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, httpMethod string, token string, cacheMode bool) (parsedResponse server_structs.DirectorResponse, err error) {
 	if pUrl.FedInfo.DirectorEndpoint == "" {
 		return server_structs.DirectorResponse{},
 			errors.Errorf("unable to retrieve information from a Director for object %s because none was found in pelican URL metadata.", pUrl.Path)
@@ -269,7 +305,8 @@ func GetDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, h
 	log.Debugln("Will query director at", pUrl.FedInfo.DirectorEndpoint, "for object", pUrl.Path)
 
 	var dirResp *http.Response
-	dirResp, err = queryDirector(ctx, httpMethod, pUrl, token)
+	var redirectBodyStr string
+	dirResp, redirectBodyStr, err = queryDirector(ctx, httpMethod, pUrl, token, cacheMode)
 	if err != nil {
 		if (httpMethod == http.MethodPut || httpMethod == http.MethodDelete) && dirResp != nil && dirResp.StatusCode == 405 {
 			err = errors.Errorf("the director returned status code 405, indicating it understood the request but could not find an origin that supports PUT/DELETE operations for object: %s.", pUrl.Path)
@@ -297,6 +334,15 @@ func GetDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, h
 	if err != nil {
 		err = errors.Wrap(err, "failed to parse director response")
 		return
+	}
+
+	if redirectBodyStr != "" {
+		var redirectInfo server_structs.RedirectInfo
+		if jsonErr := json.Unmarshal([]byte(redirectBodyStr), &redirectInfo); jsonErr == nil {
+			parsedResponse.RedirectInfo = &redirectInfo
+		} else {
+			log.Debugf("Failed to parse director redirect info: %v", jsonErr)
+		}
 	}
 
 	return

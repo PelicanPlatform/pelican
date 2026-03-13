@@ -1,0 +1,8 @@
+# Origin export configuration for private namespace testing
+
+Origin:
+  StorageType: "posix"
+  Exports:
+    - StoragePrefix: /<SHOULD BE OVERRIDDEN>
+      FederationPrefix: /test
+      Capabilities: ["Reads", "Writes", "Listings"]

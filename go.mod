@@ -19,11 +19,13 @@ require (
 	github.com/go-kit/log v0.2.1
 	github.com/google/go-p11-kit v0.4.0
 	github.com/gorilla/csrf v1.7.3
+	github.com/gorilla/websocket v1.5.0
 	github.com/grafana/regexp v0.0.0-20221122212121-6b5c0a4cb7fd
 	github.com/gwatts/gin-adapter v1.0.0
 	github.com/hashicorp/go-version v1.7.0
 	github.com/jellydator/ttlcache/v3 v3.3.0
 	github.com/jsipprell/keyctl v1.0.4-0.20211208153515-36ca02672b6c
+	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
 	github.com/lestrrat-go/jwx/v2 v2.0.21
 	github.com/mwitkow/go-conntrack v0.0.0-20190716064945-2f068394615f
 	github.com/oklog/run v1.1.0
@@ -62,6 +64,7 @@ require (
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/charmbracelet/lipgloss v0.12.1 // indirect
 	github.com/charmbracelet/x/ansi v0.1.4 // indirect
+	github.com/cpuguy83/go-md2man/v2 v2.0.6 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dlclark/regexp2 v1.11.0 // indirect
 	github.com/glebarez/go-sqlite v1.21.2 // indirect
@@ -85,6 +88,7 @@ require (
 	github.com/muesli/termenv v0.15.3-0.20240618155329-98d742f6907a // indirect
 	github.com/oschwald/maxminddb-golang/v2 v2.0.0-beta.9 // indirect
 	github.com/redis/go-redis/v9 v9.0.2 // indirect
+	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/sagikazarmark/locafero v0.6.0 // indirect
 	github.com/sethvargo/go-retry v0.2.4 // indirect
 	github.com/sourcegraph/conc v0.3.0 // indirect

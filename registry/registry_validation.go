@@ -202,7 +202,7 @@ func validateInstitution(instID string) (bool, error) {
 		} else {
 			insts, err := getCachedOptions(instUrl, instUrlTTL)
 			if err != nil {
-				return false, errors.Wrap(err, "Error fetching instituions from TTL cache")
+				return false, errors.Wrap(err, "Error fetching institutions from TTL cache")
 			}
 			for _, availableInst := range insts {
 				// We required full equality, as we expect the value is from the institution API

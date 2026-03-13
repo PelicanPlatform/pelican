@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -37,10 +36,12 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/ssh_posixv2"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 var (
+	backends           map[string]server_utils.OriginBackend
 	webdavHandlers     map[string]*webdav.Handler
 	exportPrefixMap    map[string]string // Maps federation prefix to storage prefix
 	handlersRegistered bool              // Tracks whether handlers have been registered
@@ -87,10 +88,10 @@ func init() {
 
 // ResetHandlers resets the handler state (for testing)
 func ResetHandlers() {
+	backends = nil
 	webdavHandlers = nil
 	exportPrefixMap = nil
 	handlersRegistered = false
-	globalChecksummer = nil
 }
 
 // extractTokens extracts bearer tokens from the request
@@ -154,8 +155,13 @@ func getActionFromMethod(method string) token_scopes.TokenScope {
 // authMiddleware handles token-based authorization
 func authMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Log the request
-		log.Infof("Request: %s %s from %s", c.Request.Method, c.Request.URL.Path, c.ClientIP())
+		// Log the incoming request
+		log.WithFields(log.Fields{
+			"component": "origin",
+			"method":    c.Request.Method,
+			"resource":  c.Request.URL.Path,
+			"client":    c.ClientIP(),
+		}).Debug("Received Request")
 
 		tokens := extractTokens(c.Request)
 		action := getActionFromMethod(c.Request.Method)
@@ -315,6 +321,7 @@ func InitializeHandlers(exports []server_utils.OriginExport) error {
 		}
 	}
 
+	backends = make(map[string]server_utils.OriginBackend)
 	webdavHandlers = make(map[string]*webdav.Handler)
 	exportPrefixMap = make(map[string]string) // Initialize the global map
 
@@ -324,22 +331,11 @@ func InitializeHandlers(exports []server_utils.OriginExport) error {
 		log.Infof("Applying read rate limit: %s", readRateLimit.String())
 	}
 
+	// Determine storage type for filesystem creation
+	storageType := server_structs.OriginStorageType(param.Origin_StorageType.GetString())
+
 	for _, export := range exports {
-		// Create a filesystem for this export with auto-directory creation
-		// Use OsRootFs to prevent symlink traversal attacks
-		// OsRootFs is already rooted at StoragePrefix, so we don't need BasePathFs
-		osRootFs, err := NewOsRootFs(export.StoragePrefix)
-		if err != nil {
-			return fmt.Errorf("failed to create OsRootFs for %s: %w", export.StoragePrefix, err)
-		}
-
-		// Apply rate limiting if configured (for testing)
-		var fs afero.Fs = osRootFs
-		if readRateLimit > 0 {
-			fs = newRateLimitedFs(fs, readRateLimit)
-		}
-
-		fs = newAutoCreateDirFs(fs)
+		var backend server_utils.OriginBackend
 
 		// Create logger function
 		logger := func(r *http.Request, err error) {
@@ -348,18 +344,46 @@ func InitializeHandlers(exports []server_utils.OriginExport) error {
 			}
 		}
 
-		afs := newAferoFileSystem(fs, "", logger)
+		switch storageType {
+		case server_structs.OriginStorageSSH:
+			// Use SSH filesystem that proxies to the remote helper
+			sshBackend, err := ssh_posixv2.GetSSHBackend(export.FederationPrefix, export.StoragePrefix)
+			if err != nil {
+				return fmt.Errorf("failed to create SSH backend for %s: %w", export.FederationPrefix, err)
+			}
+			backend = sshBackend
+		default:
+			// Use local filesystem (POSIXv2)
+			// Create a filesystem for this export with auto-directory creation
+			// Use OsRootFs to prevent symlink traversal attacks
+			// OsRootFs is already rooted at StoragePrefix, so we don't need BasePathFs
+			osRootFs, err := server_utils.NewOsRootFs(export.StoragePrefix)
+			if err != nil {
+				return fmt.Errorf("failed to create OsRootFs for %s: %w", export.StoragePrefix, err)
+			}
+
+			// Apply rate limiting if configured (for testing)
+			var localFs afero.Fs = osRootFs
+			if readRateLimit > 0 {
+				localFs = newRateLimitedFs(localFs, readRateLimit)
+			}
+
+			autoFs := newAutoCreateDirFs(localFs)
+			fs := newAferoFileSystem(autoFs, "", logger)
+			backend = newLocalBackend(fs, export.StoragePrefix)
+		}
 
 		// Create a WebDAV handler
 		handler := &webdav.Handler{
-			FileSystem: afs,
+			FileSystem: backend.FileSystem(),
 			LockSystem: webdav.NewMemLS(),
 			Logger:     logger,
 		}
 
+		backends[export.FederationPrefix] = backend
 		webdavHandlers[export.FederationPrefix] = handler
 		exportPrefixMap[export.FederationPrefix] = export.StoragePrefix
-		log.Infof("Initialized WebDAV handler for %s -> %s", export.FederationPrefix, export.StoragePrefix)
+		log.Infof("Initialized WebDAV handler for %s -> %s (storage: %s)", export.FederationPrefix, export.StoragePrefix, storageType)
 	}
 
 	return nil
@@ -377,13 +401,9 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 		return nil
 	}
 
-	// Initialize checksummer
-	InitializeChecksummer()
-
 	// Register handlers for each export
 	for prefix, handler := range webdavHandlers {
-		// Get the storage prefix for this federation prefix
-		storagePrefix := exportPrefixMap[prefix]
+		backend := backends[prefix]
 
 		// When director is enabled, register under /api/v1.0/origin/data/<prefix>
 		// This allows the director to distinguish between routing requests and origin file serving
@@ -401,6 +421,16 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 
 		// Create a handler function for all requests
 		handleRequest := func(c *gin.Context) {
+			// Ask the backend whether it can serve requests right now.
+			if err := backend.CheckAvailability(); err != nil {
+				statusCode := http.StatusServiceUnavailable
+				if sc, ok := err.(server_utils.HTTPStatusCoder); ok {
+					statusCode = sc.HTTPStatusCode()
+				}
+				c.AbortWithStatusJSON(statusCode, gin.H{"error": err.Error()})
+				return
+			}
+
 			// Get the path relative to the export (strip the federation prefix)
 			wildcardPath := c.Param("path")
 
@@ -414,9 +444,13 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 			modifiedURL.Path = newPath
 			modifiedReq.URL = &modifiedURL
 
+			// Stash client tracing headers (X-Pelican-JobId,
+			// X-Pelican-Timeout) in the request context so backends
+			// that forward requests can propagate them.
+			modifiedReq = server_utils.StashPelicanHeaders(modifiedReq)
+
 			if c.Request.Method == http.MethodHead {
-				// Pass the modified request and file path info to handleHeadWithChecksum
-				handleHeadWithChecksum(c, handler, modifiedReq, wildcardPath, storagePrefix)
+				handleHeadWithChecksum(c, handler, modifiedReq, wildcardPath, backend)
 			} else {
 				handler.ServeHTTP(c.Writer, modifiedReq)
 			}
@@ -442,7 +476,7 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 }
 
 // handleHeadWithChecksum handles HEAD requests and adds checksum headers per RFC 3230
-func handleHeadWithChecksum(c *gin.Context, handler *webdav.Handler, modifiedReq *http.Request, relativePath string, storagePrefix string) {
+func handleHeadWithChecksum(c *gin.Context, handler *webdav.Handler, modifiedReq *http.Request, relativePath string, backend server_utils.OriginBackend) {
 	// Check if client requested checksums via Want-Digest header
 	wantDigest := c.GetHeader("Want-Digest")
 	if wantDigest == "" {
@@ -450,52 +484,15 @@ func handleHeadWithChecksum(c *gin.Context, handler *webdav.Handler, modifiedReq
 		wantDigest = "md5"
 	}
 
-	checksummer := GetChecksummer()
-	digestValues := []string{}
-
-	// Parse Want-Digest header into types and compute in bulk
-	var types []ChecksumType
-	for _, alg := range strings.Split(wantDigest, ",") {
-		alg = strings.TrimSpace(strings.ToLower(alg))
-
-		switch alg {
-		case "md5":
-			types = append(types, ChecksumTypeMD5)
-		case "sha", "sha-1", "sha1":
-			types = append(types, ChecksumTypeSHA1)
-		case "crc32":
-			types = append(types, ChecksumTypeCRC32)
-		case "crc32c":
-			types = append(types, ChecksumTypeCRC32C)
-		default:
-			continue
+	// Ask the backend for digest values.  Backends that do not support
+	// checksums (e.g. SSH) return a nil Checksummer.
+	if cs := backend.Checksummer(); cs != nil {
+		digests, err := cs.GetDigests(relativePath, wantDigest)
+		if err != nil {
+			log.Debugf("Failed to compute checksums for %s: %v", relativePath, err)
+		} else if len(digests) > 0 {
+			c.Header("Digest", strings.Join(digests, ","))
 		}
-	}
-
-	// Use os.Root to prevent symlink attacks when accessing checksums
-	// Open the storage root directory
-	root, err := os.OpenRoot(storagePrefix)
-	if err != nil {
-		log.Debugf("Failed to open storage root for checksum: %v", err)
-	} else {
-		defer root.Close()
-
-		if xc, ok := checksummer.(*XattrChecksummer); ok {
-			// Normalize the path for os.Root (remove leading slash)
-			normalizedPath := relativePath
-			if len(normalizedPath) > 0 && normalizedPath[0] == '/' {
-				normalizedPath = normalizedPath[1:]
-			}
-
-			if digests, err := xc.GetChecksumsRFC3230(root, normalizedPath, types); err == nil {
-				digestValues = append(digestValues, digests...)
-			}
-		}
-	}
-
-	// Set Digest header BEFORE calling WebDAV handler
-	if len(digestValues) > 0 {
-		c.Header("Digest", strings.Join(digestValues, ","))
 	}
 
 	// Now let the WebDAV handler process the HEAD request

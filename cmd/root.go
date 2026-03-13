@@ -165,8 +165,10 @@ func init() {
 	rootCmd.AddCommand(apiKeyCmd)
 	rootCmd.AddCommand(serverCmd)
 	rootCmd.AddCommand(config_printer.ConfigCmd)
+	rootCmd.AddCommand(sshHelperCmd) // Hidden command for SSH POSIXv2 helper
 	preferredPrefix := config.GetPreferredPrefix()
 	rootCmd.Use = strings.ToLower(preferredPrefix.String())
+	rootCmd.DisableAutoGenTag = true
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/pelican/pelican.yaml)")
 

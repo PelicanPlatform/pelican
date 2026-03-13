@@ -57,6 +57,7 @@ import (
 
 var xrootdReset func()
 var posixv2Reset func()
+var sshBackendReset func()
 var brokerReset func()
 var pelicanUrlReset func()
 
@@ -68,6 +69,11 @@ func RegisterXrootdReset(fn func()) {
 // RegisterPOSIXv2Reset allows the origin_serve package to provide a reset hook without introducing import cycles.
 func RegisterPOSIXv2Reset(fn func()) {
 	posixv2Reset = fn
+}
+
+// RegisterSSHBackendReset allows the ssh_posixv2 package to provide a reset hook without introducing import cycles.
+func RegisterSSHBackendReset(fn func()) {
+	sshBackendReset = fn
 }
 
 // RegisterBrokerReset allows the broker package to provide a reset hook without introducing import cycles.
@@ -348,6 +354,9 @@ func ResetTestState() {
 	if posixv2Reset != nil {
 		posixv2Reset()
 	}
+	if sshBackendReset != nil {
+		sshBackendReset()
+	}
 	if brokerReset != nil {
 		brokerReset()
 	}
@@ -405,6 +414,53 @@ func FilterTopLevelPrefixes(nsAds []server_structs.NamespaceAdV2) []server_struc
 		uniquePrefixes = append(uniquePrefixes, nsAd)
 	}
 	return uniquePrefixes
+}
+
+// SetBrokerURL sets the broker URL in the advertisement for servers that have broker support enabled.
+// Returns the broker URL string if successful, or an empty string if not applicable.
+func SetBrokerURL(ad *server_structs.OriginAdvertiseV2, serverType server_structs.ServerType, prefixes []string) error {
+	// Only set broker URL if there's exactly one prefix (this rule is inherited from the initial Broker implementation)
+	if len(prefixes) != 1 {
+		if len(prefixes) > 1 {
+			log.Warningf("Multiple prefixes are not yet supported with the broker. Skipping broker configuration")
+		}
+		return nil
+	}
+
+	// Check if broker is enabled for this server type
+	var brokerEnabled bool
+	switch serverType {
+	case server_structs.OriginType:
+		brokerEnabled = param.Origin_EnableBroker.GetBool()
+	case server_structs.CacheType:
+		brokerEnabled = param.Cache_EnableBroker.GetBool()
+	default:
+		return nil
+	}
+
+	if !brokerEnabled {
+		return nil
+	}
+
+	// Get federation info for broker endpoint
+	fedInfo, err := config.GetFederation(context.Background())
+	if err != nil {
+		return err
+	}
+
+	brokerUrl, err := url.Parse(fedInfo.BrokerEndpoint)
+	if err != nil {
+		return errors.Wrap(err, "Invalid Broker URL")
+	}
+
+	brokerUrl.Path = "/api/v1.0/broker/reverse"
+	values := brokerUrl.Query()
+	values.Set("origin", param.Server_Hostname.GetString())
+	values.Set("prefix", prefixes[0])
+	brokerUrl.RawQuery = values.Encode()
+	ad.BrokerURL = brokerUrl.String()
+
+	return nil
 }
 
 // Get an advertisement token for the given server. Advertisement tokens are signed by the server

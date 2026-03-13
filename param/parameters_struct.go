@@ -36,6 +36,7 @@ type Config struct {
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DefaultCacheTimeout time.Duration `mapstructure:"defaultcachetimeout" yaml:"DefaultCacheTimeout"`
 		DirectorTest bool `mapstructure:"directortest" yaml:"DirectorTest"`
+		DisableClientX509 bool `mapstructure:"disableclientx509" yaml:"DisableClientX509"`
 		EnableBroker bool `mapstructure:"enablebroker" yaml:"EnableBroker"`
 		EnableEvictionMonitoring bool `mapstructure:"enableevictionmonitoring" yaml:"EnableEvictionMonitoring"`
 		EnableLotman bool `mapstructure:"enablelotman" yaml:"EnableLotman"`
@@ -55,6 +56,7 @@ type Config struct {
 		LocalRoot string `mapstructure:"localroot" yaml:"LocalRoot"`
 		LowWatermark string `mapstructure:"lowwatermark" yaml:"LowWatermark"`
 		MetaLocations []string `mapstructure:"metalocations" yaml:"MetaLocations"`
+		MinDirectorRefreshInterval time.Duration `mapstructure:"mindirectorrefreshinterval" yaml:"MinDirectorRefreshInterval"`
 		NamespaceLocation string `mapstructure:"namespacelocation" yaml:"NamespaceLocation"`
 		PSSOrigin string `mapstructure:"pssorigin" yaml:"PSSOrigin"`
 		PermittedNamespaces []string `mapstructure:"permittednamespaces" yaml:"PermittedNamespaces"`
@@ -295,6 +297,28 @@ type Config struct {
 		S3ServiceName string `mapstructure:"s3servicename" yaml:"S3ServiceName"`
 		S3ServiceUrl string `mapstructure:"s3serviceurl" yaml:"S3ServiceUrl"`
 		S3UrlStyle string `mapstructure:"s3urlstyle" yaml:"S3UrlStyle"`
+		SSH struct {
+			AuthMethods []string `mapstructure:"authmethods" yaml:"AuthMethods"`
+			AutoAddHostKey bool `mapstructure:"autoaddhostkey" yaml:"AutoAddHostKey"`
+			ChallengeTimeout time.Duration `mapstructure:"challengetimeout" yaml:"ChallengeTimeout"`
+			ConnectTimeout time.Duration `mapstructure:"connecttimeout" yaml:"ConnectTimeout"`
+			Host string `mapstructure:"host" yaml:"Host"`
+			KeepaliveInterval time.Duration `mapstructure:"keepaliveinterval" yaml:"KeepaliveInterval"`
+			KeepaliveTimeout time.Duration `mapstructure:"keepalivetimeout" yaml:"KeepaliveTimeout"`
+			KnownHostsFile string `mapstructure:"knownhostsfile" yaml:"KnownHostsFile"`
+			MaxRetries int `mapstructure:"maxretries" yaml:"MaxRetries"`
+			PasswordFile string `mapstructure:"passwordfile" yaml:"PasswordFile"`
+			PelicanBinaryPath string `mapstructure:"pelicanbinarypath" yaml:"PelicanBinaryPath"`
+			Port int `mapstructure:"port" yaml:"Port"`
+			PrivateKeyFile string `mapstructure:"privatekeyfile" yaml:"PrivateKeyFile"`
+			PrivateKeyPassphraseFile string `mapstructure:"privatekeypassphrasefile" yaml:"PrivateKeyPassphraseFile"`
+			ProxyJump string `mapstructure:"proxyjump" yaml:"ProxyJump"`
+			RemotePelicanBinaryDir string `mapstructure:"remotepelicanbinarydir" yaml:"RemotePelicanBinaryDir"`
+			RemotePelicanBinaryOverrides []string `mapstructure:"remotepelicanbinaryoverrides" yaml:"RemotePelicanBinaryOverrides"`
+			SessionEstablishTimeout time.Duration `mapstructure:"sessionestablishtimeout" yaml:"SessionEstablishTimeout"`
+			TunnelCallback bool `mapstructure:"tunnelcallback" yaml:"TunnelCallback"`
+			User string `mapstructure:"user" yaml:"User"`
+		} `mapstructure:"ssh" yaml:"SSH"`
 		ScitokensDefaultUser string `mapstructure:"scitokensdefaultuser" yaml:"ScitokensDefaultUser"`
 		ScitokensGroupsClaim string `mapstructure:"scitokensgroupsclaim" yaml:"ScitokensGroupsClaim"`
 		ScitokensMapSubject bool `mapstructure:"scitokensmapsubject" yaml:"ScitokensMapSubject"`
@@ -316,6 +340,7 @@ type Config struct {
 		XRootServiceUrl string `mapstructure:"xrootserviceurl" yaml:"XRootServiceUrl"`
 	} `mapstructure:"origin" yaml:"Origin"`
 	Plugin struct {
+		DirectorDecisionPercentage int `mapstructure:"directordecisionpercentage" yaml:"DirectorDecisionPercentage"`
 		Token string `mapstructure:"token" yaml:"Token"`
 	} `mapstructure:"plugin" yaml:"Plugin"`
 	Registry struct {
@@ -334,6 +359,11 @@ type Config struct {
 		AdLifetime time.Duration `mapstructure:"adlifetime" yaml:"AdLifetime"`
 		AdminGroups []string `mapstructure:"admingroups" yaml:"AdminGroups"`
 		AdvertisementInterval time.Duration `mapstructure:"advertisementinterval" yaml:"AdvertisementInterval"`
+		DatabaseBackup struct {
+			Frequency time.Duration `mapstructure:"frequency" yaml:"Frequency"`
+			Location string `mapstructure:"location" yaml:"Location"`
+			MaxCount int `mapstructure:"maxcount" yaml:"MaxCount"`
+		} `mapstructure:"databasebackup" yaml:"DatabaseBackup"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DirectorUrls []string `mapstructure:"directorurls" yaml:"DirectorUrls"`
 		DropPrivileges bool `mapstructure:"dropprivileges" yaml:"DropPrivileges"`
@@ -449,6 +479,7 @@ type configWithType struct {
 		DbLocation struct { Type string; Value string }
 		DefaultCacheTimeout struct { Type string; Value time.Duration }
 		DirectorTest struct { Type string; Value bool }
+		DisableClientX509 struct { Type string; Value bool }
 		EnableBroker struct { Type string; Value bool }
 		EnableEvictionMonitoring struct { Type string; Value bool }
 		EnableLotman struct { Type string; Value bool }
@@ -468,6 +499,7 @@ type configWithType struct {
 		LocalRoot struct { Type string; Value string }
 		LowWatermark struct { Type string; Value string }
 		MetaLocations struct { Type string; Value []string }
+		MinDirectorRefreshInterval struct { Type string; Value time.Duration }
 		NamespaceLocation struct { Type string; Value string }
 		PSSOrigin struct { Type string; Value string }
 		PermittedNamespaces struct { Type string; Value []string }
@@ -708,6 +740,28 @@ type configWithType struct {
 		S3ServiceName struct { Type string; Value string }
 		S3ServiceUrl struct { Type string; Value string }
 		S3UrlStyle struct { Type string; Value string }
+		SSH struct {
+			AuthMethods struct { Type string; Value []string }
+			AutoAddHostKey struct { Type string; Value bool }
+			ChallengeTimeout struct { Type string; Value time.Duration }
+			ConnectTimeout struct { Type string; Value time.Duration }
+			Host struct { Type string; Value string }
+			KeepaliveInterval struct { Type string; Value time.Duration }
+			KeepaliveTimeout struct { Type string; Value time.Duration }
+			KnownHostsFile struct { Type string; Value string }
+			MaxRetries struct { Type string; Value int }
+			PasswordFile struct { Type string; Value string }
+			PelicanBinaryPath struct { Type string; Value string }
+			Port struct { Type string; Value int }
+			PrivateKeyFile struct { Type string; Value string }
+			PrivateKeyPassphraseFile struct { Type string; Value string }
+			ProxyJump struct { Type string; Value string }
+			RemotePelicanBinaryDir struct { Type string; Value string }
+			RemotePelicanBinaryOverrides struct { Type string; Value []string }
+			SessionEstablishTimeout struct { Type string; Value time.Duration }
+			TunnelCallback struct { Type string; Value bool }
+			User struct { Type string; Value string }
+		}
 		ScitokensDefaultUser struct { Type string; Value string }
 		ScitokensGroupsClaim struct { Type string; Value string }
 		ScitokensMapSubject struct { Type string; Value bool }
@@ -729,6 +783,7 @@ type configWithType struct {
 		XRootServiceUrl struct { Type string; Value string }
 	}
 	Plugin struct {
+		DirectorDecisionPercentage struct { Type string; Value int }
 		Token struct { Type string; Value string }
 	}
 	Registry struct {
@@ -747,6 +802,11 @@ type configWithType struct {
 		AdLifetime struct { Type string; Value time.Duration }
 		AdminGroups struct { Type string; Value []string }
 		AdvertisementInterval struct { Type string; Value time.Duration }
+		DatabaseBackup struct {
+			Frequency struct { Type string; Value time.Duration }
+			Location struct { Type string; Value string }
+			MaxCount struct { Type string; Value int }
+		}
 		DbLocation struct { Type string; Value string }
 		DirectorUrls struct { Type string; Value []string }
 		DropPrivileges struct { Type string; Value bool }

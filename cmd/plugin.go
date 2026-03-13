@@ -24,6 +24,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/fs"
+	"math/rand"
 	"net/url"
 	"os"
 	"path"
@@ -45,6 +46,7 @@ import (
 	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 var (
@@ -482,7 +484,11 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			}
 
 			urlCopy := *(pUrl.GetRawUrl())
-			tj, err = tc.NewTransferJob(context.Background(), &urlCopy, transfer.localFile, upload, recursive, client.WithAcquireToken(false), client.WithCaches(caches...))
+			jobCtx := context.Background()
+			if pct := param.Plugin_DirectorDecisionPercentage.GetInt(); pct > 0 && rand.Intn(100) < pct {
+				jobCtx = client.WithDirectorDebug(jobCtx)
+			}
+			tj, err = tc.NewTransferJob(jobCtx, &urlCopy, transfer.localFile, upload, recursive, client.WithAcquireToken(false), client.WithCaches(caches...))
 			if err != nil {
 				failTransfer(transfer.url.String(), transfer.localFile, results, upload, err)
 				return errors.Wrap(err, "Failed to create new transfer job")
@@ -1032,6 +1038,13 @@ func addDataToClassAd(resultAd *classad.ClassAd, result *client.TransferResults,
 		}
 	}
 
+	if result != nil && result.DirectorDecision != nil {
+		adErr = developerData.Set("DirectorDecision", redirectInfoToClassAd(result.DirectorDecision))
+		if adErr != nil {
+			log.Errorf("Failed to set DirectorDecision: %s", adErr)
+		}
+	}
+
 	adErr = resultAd.Set("DeveloperData", developerData)
 	if adErr != nil {
 		log.Errorf("Failed to set DeveloperData: %s", adErr)
@@ -1042,6 +1055,76 @@ func addDataToClassAd(resultAd *classad.ClassAd, result *client.TransferResults,
 			log.Errorf("Failed to set TransferErrorData: %s", adErr)
 		}
 	}
+}
+
+// redirectInfoToClassAd converts a RedirectInfo into a ClassAd.  The
+// ServersInfo map is represented as a list of ClassAds (each carrying a
+// ServerUrl attribute) because the map keys are URLs which are not valid
+// ClassAd attribute names.
+func redirectInfoToClassAd(ri *server_structs.RedirectInfo) *classad.ClassAd {
+	ad := classad.New()
+	err := ad.Set("DirectorSortMethod", ri.DirectorSortMethod)
+	if err != nil {
+		return nil
+	}
+
+	clientAd := classad.New()
+	err = clientAd.Set("IpAddr", ri.ClientInfo.IpAddr)
+	if err != nil {
+		return nil
+	}
+	err = clientAd.Set("Lat", ri.ClientInfo.Coordinate.Lat)
+	if err != nil {
+		return nil
+	}
+	err = clientAd.Set("Long", ri.ClientInfo.Coordinate.Long)
+	if err != nil {
+		return nil
+	}
+	err = ad.Set("ClientInfo", clientAd)
+	if err != nil {
+		return nil
+	}
+
+	serverAds := make([]*classad.ClassAd, 0, len(ri.ServersInfo))
+	for url, info := range ri.ServersInfo {
+		sAd := classad.New()
+		err = sAd.Set("ServerUrl", url)
+		if err != nil {
+			return nil
+		}
+		err = sAd.Set("Lat", info.Coordinate.Lat)
+		if err != nil {
+			return nil
+		}
+		err = sAd.Set("Long", info.Coordinate.Long)
+		if err != nil {
+			return nil
+		}
+		err = sAd.Set("DistanceWeight", info.RedirectWeights.DistanceWeight)
+		if err != nil {
+			return nil
+		}
+		err = sAd.Set("IoLoadWeight", info.RedirectWeights.IOLoadWeight)
+		if err != nil {
+			return nil
+		}
+		err = sAd.Set("StatusWeight", info.RedirectWeights.StatusWeight)
+		if err != nil {
+			return nil
+		}
+		err = sAd.Set("AvailabilityWeight", info.RedirectWeights.AvailabilityWeight)
+		if err != nil {
+			return nil
+		}
+		serverAds = append(serverAds, sAd)
+	}
+	err = ad.Set("ServersInfo", serverAds)
+	if err != nil {
+		return nil
+	}
+
+	return ad
 }
 
 // This function parses the machine ad present with a condor job to get the site name and the physical hostname if run

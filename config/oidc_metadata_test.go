@@ -34,7 +34,7 @@ func TestGetOIDCProvider(t *testing.T) {
 	})
 	t.Run("empty-endpoints-gives-error", func(t *testing.T) {
 		ResetConfig()
-		get, err := GetOIDCProdiver()
+		get, err := GetOIDCProvider()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "nothing set for config parameter OIDC.IssuerUrl or OIDC.AuthorizationEndpoint")
 		assert.Empty(t, get)
@@ -43,19 +43,19 @@ func TestGetOIDCProvider(t *testing.T) {
 	t.Run("auth-endpoint-gives-correct-result", func(t *testing.T) {
 		ResetConfig()
 		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint.GetName(), "https://example.com/authorization"))
-		get, err := GetOIDCProdiver()
+		get, err := GetOIDCProvider()
 		require.NoError(t, err)
 		assert.Equal(t, UnknownProvider, get)
 
 		// CILogon
 		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint.GetName(), "https://cilogon.org/api/v1.0/authorization"))
-		get, err = GetOIDCProdiver()
+		get, err = GetOIDCProvider()
 		require.NoError(t, err)
 		assert.Equal(t, CILogon, get)
 
 		// Globus
 		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint.GetName(), "https://auth.globus.org/api/v1.0/authorization"))
-		get, err = GetOIDCProdiver()
+		get, err = GetOIDCProvider()
 		require.NoError(t, err)
 		assert.Equal(t, Globus, get)
 	})
@@ -63,25 +63,25 @@ func TestGetOIDCProvider(t *testing.T) {
 	t.Run("issuer-endpoint-gives-correct-result", func(t *testing.T) {
 		ResetConfig()
 		require.NoError(t, param.Set(param.OIDC_Issuer.GetName(), "https://example.com"))
-		get, err := GetOIDCProdiver()
+		get, err := GetOIDCProvider()
 		require.NoError(t, err)
 		assert.Equal(t, UnknownProvider, get)
 
 		// CILogon
 		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint.GetName(), "https://cilogon.org"))
-		get, err = GetOIDCProdiver()
+		get, err = GetOIDCProvider()
 		require.NoError(t, err)
 		assert.Equal(t, CILogon, get)
 
 		// CILogon no protocol
 		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint.GetName(), "cilogon.org"))
-		get, err = GetOIDCProdiver()
+		get, err = GetOIDCProvider()
 		require.NoError(t, err)
 		assert.Equal(t, CILogon, get)
 
 		// Globus no protocol
 		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint.GetName(), "auth.globus.org"))
-		get, err = GetOIDCProdiver()
+		get, err = GetOIDCProvider()
 		require.NoError(t, err)
 		assert.Equal(t, Globus, get)
 	})

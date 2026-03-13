@@ -27,7 +27,6 @@ package main
 func main() {
 	GenParamEnum()
 	GenParamStruct()
-	GenPlaceholderPathForNext()
 	GenSwaggerDoc()
 	GenTokenScope()
 	GenErrorCodes()

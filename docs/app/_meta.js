@@ -15,10 +15,12 @@ export default {
 	"getting-data-with-pelican": "Getting Data with Pelican",
 	"federating-your-data": "Federating Your Data",
 	"operating-a-federation": "Operating a Federation",
+	"managing-your-server": "Managing Your Server",
 	"monitoring-pelican-services": "Monitoring Pelican Services",
-	"advanced-usage": "Advanced Usage",
+	"advanced-concepts": "Advanced Concepts",
 	"getting-help": "Getting Help",
 	"api-docs": "API Documentation",
+	"commands-reference": "Commands Reference",
 	"versions": {
 		"title": "Versions",
 		"type": "menu",

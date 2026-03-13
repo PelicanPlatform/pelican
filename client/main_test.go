@@ -20,9 +20,6 @@ package client
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"fmt"
 	"net"
 	"net/url"
@@ -31,10 +28,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -46,8 +40,6 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
-	"github.com/pelicanplatform/pelican/token"
-	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 // TestGetIps calls main.get_ips with a hostname, checking
@@ -168,7 +160,7 @@ func TestGetToken(t *testing.T) {
 
 	// ENVs to test: BEARER_TOKEN, BEARER_TOKEN_FILE, XDG_RUNTIME_DIR/bt_u<uid>, TOKEN, _CONDOR_CREDS/scitoken.use, .condor_creds/scitokens.use
 	os.Setenv("BEARER_TOKEN", "bearer_token_contents")
-	token := NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
+	token := newTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
 	tokenContents, err := token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, "bearer_token_contents", tokenContents)
@@ -182,7 +174,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("BEARER_TOKEN_FILE", bearer_token_file)
-	token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
+	token = newTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -195,7 +187,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("XDG_RUNTIME_DIR", tmpDir)
-	token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
+	token = newTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -208,7 +200,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("TOKEN", bearer_token_file)
-	token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
+	token = newTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -221,7 +213,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("_CONDOR_CREDS", tmpDir)
-	token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
+	token = newTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -242,7 +234,7 @@ func TestGetToken(t *testing.T) {
 			Namespace: "/user/ligo/frames",
 		},
 	}
-	token = NewTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false)
+	token = newTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -258,7 +250,7 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	pUrl, err = pelican_url.Parse("renamed.handle1+osdf:///user/ligo/frames", nil, nil)
 	assert.NoError(t, err)
-	token = NewTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false)
+	token = newTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -274,7 +266,7 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	pUrl.RawScheme = "renamed.handle2+osdf"
 	assert.NoError(t, err)
-	token = NewTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false)
+	token = newTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -290,7 +282,7 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	pUrl.RawScheme = "renamed.handle3+osdf"
 	assert.NoError(t, err)
-	token = NewTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false)
+	token = newTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -306,7 +298,7 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	pUrl, err = pelican_url.Parse("osdf:///user/ligo/frames", nil, nil)
 	assert.NoError(t, err)
-	token = NewTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false)
+	token = newTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false)
 	token.SetTokenName("renamed")
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
@@ -325,7 +317,7 @@ func TestGetToken(t *testing.T) {
 	assert.NoError(t, err)
 	err = os.Chdir(tmpDir)
 	assert.NoError(t, err)
-	token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
+	token = newTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -333,7 +325,7 @@ func TestGetToken(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Check that we haven't regressed on our error messages
-	token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
+	token = newTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
 	_, err = token.Get()
 	var pe *error_codes.PelicanError
 	require.ErrorAs(t, err, &pe)
@@ -511,74 +503,4 @@ func TestParseRemoteAsPUrl(t *testing.T) {
 			assertPelicanURLEqual(t, test.expected, pUrl)
 		})
 	}
-}
-
-// Verify if a scitoken‐profile JWT is acceptable for a given namespace
-func TestTokenIsAcceptableForSciTokens(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	issuerURL, err := url.Parse("https://issuer.example")
-	require.NoError(t, err)
-
-	// 1) Build a minimal DirectorResponse whose namespace is "/foo"
-	dirResp := server_structs.DirectorResponse{
-		XPelNsHdr: server_structs.XPelNs{
-			Namespace: "/foo",
-		},
-		XPelTokGenHdr: server_structs.XPelTokGen{
-			Issuers:   []*url.URL{issuerURL},
-			BasePaths: []string{"/foo"},
-		},
-	}
-
-	opts := config.TokenGenerationOpts{
-		Operation: config.TokenSharedRead,
-	}
-
-	// 2) Construct a SciToken JWT with ver="scitokens:2.0" and scope "storage.read:/bar"
-	tc, err := token.NewTokenConfig(token.Scitokens2Profile{})
-	require.NoError(t, err)
-	tc.Lifetime = time.Hour
-	tc.Issuer = "https://issuer.example"
-	tc.AddAudienceAny()
-	tc.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/bar"))
-
-	// Generate an ECDSA P‑256 key so that ES256 signing works
-	privEC, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
-
-	jwkKey, err := jwk.FromRaw(privEC)
-	require.NoError(t, err)
-	require.NoError(t, jwkKey.Set(jwk.KeyIDKey, "test-ec-key"))
-	require.NoError(t, jwkKey.Set(jwk.AlgorithmKey, jwa.ES256))
-
-	// Inject the SciTokens version claim
-	require.NoError(t, jwkKey.Set("ver", "scitokens:2.0"))
-
-	// Create the serialized token
-	sciTokBytes, err := tc.CreateTokenWithKey(jwkKey)
-	require.NoError(t, err)
-	sciTok := string(sciTokBytes)
-
-	// 3a) Positive case: resource "/foo/bar/baz" is inside namespace and matches scope
-	accepted := tokenIsAcceptable(sciTok, "/foo/bar/baz", dirResp, opts)
-	assert.True(t, accepted, "expected SciToken to be acceptable for /foo/bar/baz")
-
-	// 3b) Negative case: resource "/other/bar" lies outside the declared namespace
-	accepted = tokenIsAcceptable(sciTok, "/other/bar", dirResp, opts)
-	assert.False(t, accepted, "expected SciToken for /other/bar to be rejected")
-
-	// 3c) Test with TokenDelete operation and storage.modify scope
-	opts.Operation = config.TokenDelete
-	// Create a new token config to ensure we don't have the "storage.read" scope from the previous test
-	tc, err = token.NewTokenConfig(token.Scitokens2Profile{})
-	require.NoError(t, err)
-	tc.Lifetime = time.Hour
-	tc.Issuer = "https://issuer.example"
-	tc.AddAudienceAny()
-	tc.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Modify, "/bar"))
-	sciTokBytes, err = tc.CreateTokenWithKey(jwkKey)
-	require.NoError(t, err)
-	sciTok = string(sciTokBytes)
-	accepted = tokenIsAcceptable(sciTok, "/foo/bar/baz", dirResp, opts)
-	assert.True(t, accepted, "expected SciToken with storage.modify scope to be acceptable for TokenDelete operation")
 }

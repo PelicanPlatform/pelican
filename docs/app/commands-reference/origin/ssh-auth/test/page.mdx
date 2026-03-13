@@ -1,0 +1,94 @@
+---
+title: pelican origin ssh auth test
+---
+
+## pelican origin ssh-auth test
+
+Test SSH POSIXv2 connection and helper lifecycle
+
+### Synopsis
+
+Test an SSH connection to a remote server, upload the Pelican binary,
+start the helper process, verify keepalives work, and demonstrate clean shutdown.
+
+This command allows testing the SSH POSIXv2 backend without running a full origin.
+It's useful for verifying SSH connectivity and authentication before deploying.
+
+The destination can be specified as [user@]host, similar to the ssh command.
+If user is not specified, it defaults to the current OS username.
+The known_hosts file defaults to ~/.ssh/known_hosts.
+
+Example:
+  # Test with default settings (uses SSH agent or default keys)
+  pelican origin ssh-auth test storage.example.com
+
+  # Test with explicit username
+  pelican origin ssh-auth test pelican@storage.example.com
+
+  # Test with specific private key
+  pelican origin ssh-auth test pelican@storage.example.com --private-key ~/.ssh/id_rsa
+
+  # Test with password authentication
+  pelican origin ssh-auth test pelican@storage.example.com \
+      --password-file /path/to/password.txt
+
+  # Test with keyboard-interactive authentication only (disable agent/keys)
+  pelican origin ssh-auth test pelican@storage.example.com \
+      --auth-methods keyboard-interactive
+
+  # Test with specific auth methods in order
+  pelican origin ssh-auth test pelican@storage.example.com \
+      --auth-methods agent,keyboard-interactive
+
+  # Connect through a jump host (ProxyJump)
+  pelican origin ssh-auth test internal-server -J bastion.example.com
+
+  # Connect through a jump host with explicit user
+  pelican origin ssh-auth test pelican@internal-server -J admin@bastion.example.com
+
+  # Chained jump hosts
+  pelican origin ssh-auth test pelican@internal-server -J jump1.example.com,jump2.example.com
+
+  # Quick connectivity test without starting the helper
+  pelican origin ssh-auth test pelican@storage.example.com --connect-only
+
+
+```
+pelican origin ssh-auth test [user@]host [flags]
+```
+
+### Options
+
+```
+      --auth-method string                   Single authentication method (deprecated, use --auth-methods)
+      --auth-methods string                  Comma-separated list of auth methods to try: agent,publickey,password,keyboard-interactive
+      --connect-only                         Only test connectivity, don't start the helper
+  -h, --help                                 help for test
+  -J, --jump string                          Jump host(s) for ProxyJump ([user@]host[:port], comma-separated for chaining)
+      --keepalive-count int                  Number of keepalive cycles to verify before shutdown (default 3)
+      --keepalive-interval duration          Keepalive interval for testing (default 5s)
+  -o, --known-hosts string                   Path to known_hosts file (default: ~/.ssh/known_hosts)
+      --password-file string                 Path to file containing SSH password
+      --pelican-binary string                Path to local Pelican binary to upload (defaults to current binary)
+  -p, --port int                             SSH port (default 22)
+  -i, --private-key string                   Path to SSH private key
+      --private-key-passphrase-file string   Path to file containing private key passphrase
+      --remote-binary string                 Path to pre-built binary for remote platform (os/arch=/path or just /path for auto-detect)
+      --remote-dir string                    Remote directory for Pelican binary (default "/tmp/pelican-test")
+  -l, --user string                          SSH username (overrides user@host)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican origin ssh-auth](/commands-reference/origin/ssh-auth/)	 - SSH authentication tools for the SSH backend

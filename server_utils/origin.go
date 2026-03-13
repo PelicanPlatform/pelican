@@ -421,6 +421,13 @@ func (b *BaseOrigin) validateExports(o Origin) (err error) {
 		return errors.New("no exports configured")
 	}
 
+	// The XRootD Globus backend currently generates a single backend stanza.
+	// Rejecting multiple exports here avoids silently configuring only the
+	// first export in the list.
+	if o.Type(o) == server_structs.OriginStorageGlobus && len(b.Exports) > 1 {
+		return errors.Errorf("globus backend does not yet support multiple exports, but %d were provided", len(b.Exports))
+	}
+
 	if err = handleIssuersIfNeeded(b.Exports); err != nil {
 		return errors.Wrap(err, "failed to validate export issuer URLs")
 	}
@@ -578,6 +585,8 @@ func GetOriginExports() ([]OriginExport, error) {
 		origin = &PosixOrigin{}
 	case server_structs.OriginStoragePosixv2:
 		origin = &Posixv2Origin{}
+	case server_structs.OriginStorageSSH:
+		origin = &SSHOrigin{}
 	case server_structs.OriginStorageHTTPS:
 		origin = &HTTPSOrigin{}
 	case server_structs.OriginStorageS3:

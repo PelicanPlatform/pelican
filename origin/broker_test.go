@@ -33,7 +33,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
-	"github.com/pelicanplatform/pelican/origin"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -52,7 +52,7 @@ func TestBrokerApi(t *testing.T) {
 
 	fed := fed_test_utils.NewFedTest(t, brokerConfig)
 
-	collector, err := origin.PelicanBrokerConnections.GetMetricWithLabelValues("origin")
+	collector, err := metrics.PelicanBrokerConnections.GetMetricWithLabelValues("origin")
 	require.NoError(t, err, "Failed to get metric collector")
 
 	startVal := testutil.ToFloat64(collector)

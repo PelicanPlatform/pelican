@@ -42,16 +42,12 @@ func (o *XRootOrigin) validateStoragePrefix(prefix string) error {
 }
 
 func (o *XRootOrigin) validateExtra(e *OriginExport, numExports int) (err error) {
-	if e.FederationPrefix != e.StoragePrefix {
-		return errors.Errorf("FederationPrefix and StoragePrefix must be the same for XRoot origins, but you configured '%s' and '%s'", e.FederationPrefix, e.StoragePrefix)
-	}
-
 	xRootServiceUrl := param.Origin_XRootServiceUrl.GetString()
 	if xRootServiceUrl == "" {
-		return errors.New("Origin.XRootServiceUrl is required for XRoot origins")
+		return errors.Errorf("%s is required for XRoot origins", param.Origin_XRootServiceUrl.GetName())
 	}
 	if _, err = url.Parse(xRootServiceUrl); err != nil {
-		return errors.Wrapf(err, "unable to parse Origin.XRootServiceUrl '%s'", xRootServiceUrl)
+		return errors.Wrapf(err, "unable to parse %s value '%s'", param.Origin_XRootServiceUrl.GetName(), xRootServiceUrl)
 	}
 	return
 }

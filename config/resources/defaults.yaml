@@ -74,6 +74,7 @@ Cache:
   HighWaterMark: 95
   BlocksToPrefetch: 0
   EnableTLSClientAuth: false
+  DisableClientX509: true
   EnableEvictionMonitoring: true
 Lotman:
   EnabledPolicy: "fairshare"
@@ -90,10 +91,21 @@ LocalCache:
   LowWaterMarkPercentage: 85
 Origin:
   DirectorTest: true
+  DiskUsageCalculationDelay: 5m
+  DiskUsageCalculationInterval: 24h
+  DiskUsageCalculationRateLimit: 1000
   Multiuser: false
   EnableMacaroons: false
   EnableVoms: true
   SelfTestInterval: 15s
+  SSH:
+    AuthMethods: ["publickey", "agent", "keyboard-interactive", "password"]
+    ChallengeTimeout: 1m
+    ConnectTimeout: 30s
+    KeepaliveInterval: 5s
+    KeepaliveTimeout: 20s
+    Port: 22
+    SessionEstablishTimeout: 5m
 Registry:
   InstitutionsUrlReloadMinutes: 15m
   RequireCacheApproval: false

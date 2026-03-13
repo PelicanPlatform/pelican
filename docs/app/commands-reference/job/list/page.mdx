@@ -1,0 +1,40 @@
+---
+title: pelican job list
+---
+
+## pelican job list
+
+List all transfer jobs
+
+### Synopsis
+
+List all transfer jobs, with optional filtering by status.
+Shows a summary of each job including completion status and transfer counts.
+
+```
+pelican job list [flags]
+```
+
+### Options
+
+```
+  -h, --help            help for list
+  -l, --limit int       Maximum number of jobs to return (default 10)
+  -o, --offset int      Offset for pagination
+  -s, --status string   Filter by status (pending, running, completed, failed, cancelled)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican job](/commands-reference/job/)	 - Manage asynchronous transfer jobs
