@@ -116,6 +116,9 @@ Monitoring:
   LabelNameLengthLimit: 128
   LabelValueLengthLimit: 2048
   SampleLimit: 200
+  StorageHealthCheckInterval: 5m
+  StorageWarningThreshold: 80
+  StorageCriticalThreshold: 90
 Shoveler:
   MessageQueueProtocol: amqp
   PortLower: 9930
