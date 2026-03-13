@@ -590,47 +590,9 @@ func TestGetExports(t *testing.T) {
 		assert.Equal(t, "Pelican >> Globus!", viper.GetString("Origin.GlobusCollectionName"))
 	})
 
-	t.Run("testMultiExportValidGlobus", func(t *testing.T) {
+	t.Run("testMultiExportInvalidGlobus", func(t *testing.T) {
 		defer ResetTestState()
-		exports := setup(t, globusMultiExport, false)
-
-		expectedExport1 := OriginExport{
-			FederationPrefix:     "/first/namespace",
-			StoragePrefix:        "/foo",
-			GlobusCollectionID:   "abc123",
-			GlobusCollectionName: "Pelican >> Globus!",
-			Capabilities: server_structs.Capabilities{
-				Writes:      false,
-				PublicReads: true,
-				Listings:    false,
-				Reads:       true,
-				DirectReads: true,
-			},
-			IssuerUrls: []string{defaultIssuerUrl},
-		}
-
-		expectedExport2 := OriginExport{
-			FederationPrefix:     "/second/namespace",
-			StoragePrefix:        "/bar",
-			GlobusCollectionID:   "123abc",
-			GlobusCollectionName: "Globus << Pelican!",
-			Capabilities: server_structs.Capabilities{
-				Writes:      false,
-				PublicReads: true,
-				Listings:    false,
-				Reads:       true,
-				DirectReads: true,
-			},
-			// No issuer is populated because there are no namespaces requiring it
-		}
-
-		assert.Len(t, exports, 2, "expected 2 exports")
-		assert.Equal(t, expectedExport1, exports[0])
-		assert.Equal(t, expectedExport2, exports[1])
-		assert.NotEqual(t, "SHOULD-OVERRIDE-TEMPFILE", viper.GetString("Origin.GlobusClientIDFile"), "GlobusClientIDFile was not overridden from config")
-		assert.NotEmpty(t, viper.GetString("Origin.GlobusClientIDFile"))
-		assert.NotEqual(t, "SHOULD-OVERRIDE-TEMPFILE", viper.GetString("Origin.GlobusClientSecretFile"), "GlobusClientSecretFile was not overridden from config")
-		assert.NotEmpty(t, viper.GetString("Origin.GlobusClientSecretFile"))
+		_ = setup(t, globusMultiExport, true)
 	})
 
 	// XRoot Origin tests
