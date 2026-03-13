@@ -593,7 +593,7 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.POST("/api/v1.0/restart", AuthHandler, AdminAuthHandler, hotRestartServer)
 	engine.GET("/api/v1.0/servers", getEnabledServers)
 	if config.ValidateServerType([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType}) {
-		engine.GET("/api/v1.0/server", AuthHandler, AdminAuthHandler, HandleGetServerLocalMetadataHistory)
+		engine.GET("/api/v1.0/server/localMetadata/history", AuthHandler, AdminAuthHandler, HandleGetServerLocalMetadataHistory)
 	}
 	// Health check endpoint for web engine
 	engine.GET("/api/v1.0/health", func(ctx *gin.Context) {
