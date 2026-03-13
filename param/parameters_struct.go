@@ -120,6 +120,7 @@ type Config struct {
 		FilterCachesInErrorState bool `mapstructure:"filtercachesinerrorstate" yaml:"FilterCachesInErrorState"`
 		FilteredServers []string `mapstructure:"filteredservers" yaml:"FilteredServers"`
 		GeoIPLocation string `mapstructure:"geoiplocation" yaml:"GeoIPLocation"`
+		MaxMindKey string `mapstructure:"maxmindkey" yaml:"MaxMindKey"`
 		MaxMindKeyFile string `mapstructure:"maxmindkeyfile" yaml:"MaxMindKeyFile"`
 		MaxStatResponse int `mapstructure:"maxstatresponse" yaml:"MaxStatResponse"`
 		MetadataComparisonInterval time.Duration `mapstructure:"metadatacomparisoninterval" yaml:"MetadataComparisonInterval"`
@@ -563,6 +564,7 @@ type configWithType struct {
 		FilterCachesInErrorState struct { Type string; Value bool }
 		FilteredServers struct { Type string; Value []string }
 		GeoIPLocation struct { Type string; Value string }
+		MaxMindKey struct { Type string; Value string }
 		MaxMindKeyFile struct { Type string; Value string }
 		MaxStatResponse struct { Type string; Value int }
 		MetadataComparisonInterval struct { Type string; Value time.Duration }
