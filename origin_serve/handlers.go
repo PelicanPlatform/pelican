@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -31,6 +32,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 	"golang.org/x/net/webdav"
+	"golang.org/x/oauth2"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/identity"
@@ -48,6 +50,9 @@ var (
 	webdavHandlers     map[string]*webdav.Handler
 	exportPrefixMap    map[string]string // Maps federation prefix to storage prefix
 	handlersRegistered bool              // Tracks whether handlers have been registered
+
+	// globusBackends stores Globus v2 backends for token refresh management.
+	globusBackends map[string]*globusBackend
 )
 
 const (
@@ -145,6 +150,7 @@ func ResetHandlers() {
 	webdavHandlers = nil
 	exportPrefixMap = nil
 	handlersRegistered = false
+	globusBackends = nil
 }
 
 // extractTokens extracts bearer tokens from the request
@@ -312,6 +318,14 @@ func authMiddleware() gin.HandlerFunc {
 		} else if authorizedContext != nil {
 			c.Request = c.Request.WithContext(authorizedContext)
 		}
+
+		// For HTTPS passthrough backends, stash the client token in context
+		// so the backend filesystem can forward it to the upstream server.
+		if len(tokens) > 0 {
+			ctx := WithClientToken(c.Request.Context(), tokens[0])
+			c.Request = c.Request.WithContext(ctx)
+		}
+
 		c.Next()
 	}
 }
@@ -464,6 +478,7 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 	backends = make(map[string]server_utils.OriginBackend)
 	webdavHandlers = make(map[string]*webdav.Handler)
 	exportPrefixMap = make(map[string]string) // Initialize the global map
+	globusBackends = make(map[string]*globusBackend)
 
 	// Get optional rate limit for testing
 	readRateLimit := param.Origin_TransferRateLimit.GetByteRate()
@@ -492,6 +507,121 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 				return fmt.Errorf("failed to create SSH backend for %s: %w", export.FederationPrefix, err)
 			}
 			backend = sshBackend
+
+		case server_structs.OriginStorageS3v2:
+			// Native blob backend (S3, GCS, Azure) via gocloud.dev/blob
+			blobURL := param.Origin_ObjectProviderURL.GetString()
+
+			var blobOpts BlobBackendOptions
+			if blobURL != "" {
+				blobOpts = BlobBackendOptions{
+					BlobURL:       blobURL,
+					StoragePrefix: export.StoragePrefix,
+				}
+			} else {
+				accessKey, secretKey, err := loadS3Credentials(export.S3AccessKeyfile, export.S3SecretKeyfile)
+				if err != nil {
+					return fmt.Errorf("failed to load S3 credentials for %s: %w", export.FederationPrefix, err)
+				}
+				s3ServiceURL := param.Origin_S3ServiceUrl.GetString()
+				s3Region := param.Origin_S3Region.GetString()
+				s3UrlStyle := param.Origin_S3UrlStyle.GetString()
+				if s3UrlStyle == "" {
+					s3UrlStyle = "path"
+				}
+				blobOpts = BlobBackendOptions{
+					ServiceURL:    s3ServiceURL,
+					Region:        s3Region,
+					Bucket:        export.S3Bucket,
+					AccessKey:     accessKey,
+					SecretKey:     secretKey,
+					URLStyle:      s3UrlStyle,
+					StoragePrefix: export.StoragePrefix,
+				}
+			}
+			blobBe, blobErr := newBlobBackend(blobOpts)
+			if blobErr != nil {
+				return fmt.Errorf("failed to create blob backend for %s: %w", export.FederationPrefix, blobErr)
+			}
+			backend = blobBe
+			if blobURL != "" {
+				log.Infof("Initialized blob backend for %s (url: %s)", export.FederationPrefix, blobURL)
+			} else {
+				log.Infof("Initialized native S3 backend for %s (bucket: %s, region: %s)", export.FederationPrefix, export.S3Bucket, param.Origin_S3Region.GetString())
+			}
+
+		case server_structs.OriginStorageHTTPSv2:
+			// Native HTTPS/WebDAV backend (no XRootD)
+			httpServiceURL := param.Origin_HttpServiceUrl.GetString()
+			tokenMode := HTTPSTokenNone
+			staticTokenFile := ""
+			var oauth2Cfg *oauth2.Config
+			var oauth2Tok *oauth2.Token
+
+			// Determine token mode
+			if param.Origin_HttpAuthTokenPassthrough.GetBool() {
+				tokenMode = HTTPSTokenPassthrough
+			} else if param.Origin_HttpAuthOAuth2ClientID.GetString() != "" {
+				tokenMode = HTTPSTokenOAuth2
+
+				secretFile := param.Origin_HttpAuthOAuth2ClientSecretFile.GetString()
+				if secretFile == "" {
+					return fmt.Errorf("Origin.HttpAuthOAuth2ClientSecretFile must be set when Origin.HttpAuthOAuth2ClientID is configured")
+				}
+				secretBytes, rErr := os.ReadFile(secretFile)
+				if rErr != nil {
+					return fmt.Errorf("failed to read OAuth2 client secret file %s: %w", secretFile, rErr)
+				}
+
+				issuerUrl := param.Origin_HttpAuthOAuth2Issuer.GetString()
+				if issuerUrl == "" {
+					return fmt.Errorf("Origin.HttpAuthOAuth2Issuer must be set when Origin.HttpAuthOAuth2ClientID is configured")
+				}
+				issuerMeta, dErr := config.GetIssuerMetadata(issuerUrl)
+				if dErr != nil {
+					return fmt.Errorf("failed to discover OAuth2 metadata from issuer %s: %w", issuerUrl, dErr)
+				}
+				if issuerMeta.TokenURL == "" {
+					return fmt.Errorf("OAuth2 issuer %s did not advertise a token_endpoint", issuerUrl)
+				}
+
+				oauth2Cfg = &oauth2.Config{
+					ClientID:     param.Origin_HttpAuthOAuth2ClientID.GetString(),
+					ClientSecret: strings.TrimSpace(string(secretBytes)),
+					Endpoint: oauth2.Endpoint{
+						TokenURL: issuerMeta.TokenURL,
+					},
+				}
+				// For client_credentials flow, create an initial token that will be refreshed
+				oauth2Tok = &oauth2.Token{}
+			} else if param.Origin_HttpAuthTokenFile.GetString() != "" {
+				tokenMode = HTTPSTokenStatic
+				staticTokenFile = param.Origin_HttpAuthTokenFile.GetString()
+			}
+
+			backend = newHTTPSBackend(HTTPSBackendOptions{
+				ServiceURL:      httpServiceURL,
+				StoragePrefix:   export.StoragePrefix,
+				TokenMode:       tokenMode,
+				StaticTokenFile: staticTokenFile,
+				OAuth2Config:    oauth2Cfg,
+				OAuth2Token:     oauth2Tok,
+			})
+			log.Infof("Initialized native HTTPS backend for %s (upstream: %s, token mode: %d)", export.FederationPrefix, httpServiceURL, tokenMode)
+
+		case server_structs.OriginStorageGlobusv2:
+			// Native Globus backend (no XRootD)
+			// The Globus backend is initialized in two phases:
+			// 1. Here we create the backend structure
+			// 2. In OriginServe, Globus tokens are loaded and the backend is activated
+			gb := NewGlobusBackend(GlobusBackendConfig{
+				CollectionID:  export.GlobusCollectionID,
+				StoragePrefix: export.StoragePrefix,
+			})
+			backend = gb
+			globusBackends[export.GlobusCollectionID] = gb
+			log.Infof("Initialized native Globus backend for %s (collection: %s)", export.FederationPrefix, export.GlobusCollectionID)
+
 		default:
 			// Use local filesystem (POSIXv2)
 			// Create a filesystem for this export with auto-directory creation
