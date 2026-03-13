@@ -249,3 +249,11 @@ description: >-
   The client successfully transferred the file but the checksum computed by the client
   did not match the checksum reported by the server.
 retryable: true
+---
+type: Transfer.ChecksumMissing
+code: 6007
+clientExitCode: 9
+description: >-
+  The client required checksum verification but the server did not provide any
+  checksum information or only provided unsupported algorithms.
+retryable: true
