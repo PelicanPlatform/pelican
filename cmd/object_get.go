@@ -69,6 +69,9 @@ the client should fallback to discovered caches if all preferred caches fail.`)
 func getMain(cmd *cobra.Command, args []string) {
 	ctx := cmd.Context()
 
+	// Set up signal handlers to flush logs on SIGTERM
+	client.SetupSignalHandlers()
+
 	err := config.InitClient()
 	if err != nil {
 		log.Errorln(err)
