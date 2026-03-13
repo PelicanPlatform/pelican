@@ -1,0 +1,10 @@
+# POSIX (XRootD) origin with PublicReads and DisableDirectClients.
+# Verifies cross-compatibility of federation token handling between
+# the XRootD-based (posix) and native HTTP (posixv2) origin backends.
+Origin:
+  StorageType: posix
+  DisableDirectClients: true
+  Exports:
+    - StoragePrefix: "/"
+      FederationPrefix: "/test"
+      Capabilities: ["PublicReads"]

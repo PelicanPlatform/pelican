@@ -38,6 +38,7 @@ VERIFIED_OBJECT_STRUCTURES = [
     "GeoIPOverrides",
     "Issuer.AuthorizationTemplates",
     "Issuer.OIDCAuthenticationRequirements",
+    "LocalCache.StorageDirs",
     "Lotman.PolicyDefinitions",
     "Origin.Exports",
     "Registry.CustomRegistrationFields",
