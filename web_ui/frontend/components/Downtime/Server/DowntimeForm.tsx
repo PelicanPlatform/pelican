@@ -7,7 +7,8 @@ import {
   FormControlLabel,
   MenuItem,
   Select,
-  TextField, Typography,
+  TextField,
+  Typography,
 } from '@mui/material';
 import { DateTimePicker } from '@mui/x-date-pickers';
 import { mutate } from 'swr';
@@ -91,7 +92,7 @@ const DowntimeForm = ({
       startTimeChanged &&
       downtime.endTime !== -1 &&
       DateTime.fromMillis(downtime.endTime) <=
-      DateTime.fromMillis(downtime.startTime)
+        DateTime.fromMillis(downtime.startTime)
     ) {
       setDowntime({
         ...downtime,
@@ -124,12 +125,11 @@ const DowntimeForm = ({
         />
         {downtime.endTime !== -1 &&
           DateTime.fromMillis(downtime.endTime) <=
-          DateTime.fromMillis(downtime.startTime) && (
+            DateTime.fromMillis(downtime.startTime) && (
             <Typography variant={'caption'} color={'error'}>
               End time must be after start time
             </Typography>
-          )
-        }
+          )}
       </Box>
       <Box>
         <FormControlLabel
