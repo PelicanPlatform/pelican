@@ -24,6 +24,26 @@ import (
 	"github.com/pelicanplatform/pelican/web_ui"
 )
 
+func RegisterCollectionsAPI(group *gin.RouterGroup) {
+	// Collections API
+	group.GET("", web_ui.AuthHandler, handleListCollections)
+	group.POST("", web_ui.AuthHandler, handleCreateCollection)
+	group.PATCH("/:id", web_ui.AuthHandler, handleUpdateCollection)
+	group.DELETE("/:id", web_ui.AuthHandler, handleDeleteCollection)
+	group.GET("/:id", web_ui.AuthHandler, handleGetCollection)
+	// TODO: More collections work in the future, the notion of members is up in the air
+	// group.POST("/:id/members", web_ui.AuthHandler, handleAddCollectionMembers)
+	// group.DELETE("/:id/members", web_ui.AuthHandler, handleRemoveCollectionMembers)
+	// group.DELETE("/:id/members/:encoded_object_url", web_ui.AuthHandler, handleRemoveCollectionMember)
+	// group.GET("/:id/members", web_ui.AuthHandler, handleListCollectionMembers)
+	group.GET("/:id/metadata", web_ui.AuthHandler, handleGetCollectionMetadata)
+	group.PUT("/:id/metadata/:key", web_ui.AuthHandler, handlePutCollectionMetadata)
+	group.DELETE("/:id/metadata/:key", web_ui.AuthHandler, handleDeleteCollectionMetadata)
+	group.GET("/:id/acl", web_ui.AuthHandler, handleGetCollectionAcls)
+	group.POST("/:id/acl", web_ui.AuthHandler, handleGrantCollectionAcl)
+	group.DELETE("/:id/acl", web_ui.AuthHandler, handleRevokeCollectionAcl)
+}
+
 // verifyTokenWithCollectionScope verifies a token with standard verification first,
 // and falls back to manual collection scope verification if standard verification fails.
 // This handles cases where OA4MP adds collection IDs to scopes (e.g., "collection.read:test_collection").
