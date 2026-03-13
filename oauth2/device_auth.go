@@ -129,17 +129,20 @@ func retrieveDeviceAuth(ctx context.Context, c *Config, v url.Values) (*DeviceAu
 		return nil, fmt.Errorf("oauth2: cannot auth device: %v", err)
 	}
 	if code := r.StatusCode; code < 200 || code > 299 {
-		if code == 400 {
-			contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-			if err != nil {
-				contentType = ""
-			}
-			if contentType == "application/json" {
-				var errMsg oauth2Err
-				if err := json.Unmarshal(body, &errMsg); err == nil {
-					if errMsg.Error == "unauthorized_client" && errMsg.Description == "unknown client" {
-						return nil, ErrUnknownClient
-					}
+		contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if err != nil {
+			contentType = ""
+		}
+		if contentType == "application/json" {
+			var errMsg oauth2Err
+			if err := json.Unmarshal(body, &errMsg); err == nil {
+				// OA4MP returns 400 unauthorized_client / "unknown client"
+				if code == 400 && errMsg.Error == "unauthorized_client" && errMsg.Description == "unknown client" {
+					return nil, ErrUnknownClient
+				}
+				// Embedded issuer (and RFC-compliant servers) return 401 invalid_client
+				if code == 401 && errMsg.Error == "invalid_client" {
+					return nil, ErrUnknownClient
 				}
 			}
 		}

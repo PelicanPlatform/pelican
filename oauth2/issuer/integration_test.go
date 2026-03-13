@@ -1220,3 +1220,66 @@ func refreshTokens(t *testing.T, ts *httptest.Server, client *http.Client, refre
 	require.NoError(t, json.Unmarshal(body, &result))
 	return result
 }
+
+func TestRefreshTokenUpdatesLastUsedAt(t *testing.T) {
+	provider, ts := setupIntegration(t)
+	httpClient := ts.Client()
+	httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
+	// Disable debounce so every TouchClientLastUsed call writes to DB.
+	provider.Storage().TouchDebouncePeriod = 0
+
+	// Verify the static test client has no last_used_at initially.
+	record, err := provider.Storage().GetClientRecord(context.Background(), testClientID)
+	require.NoError(t, err)
+	assert.Nil(t, record.LastUsedAt, "last_used_at should be nil before any usage")
+
+	// Auth code flow to obtain a refresh token.
+	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	codeChallenge := generateCodeChallenge(codeVerifier)
+
+	authURL := ts.URL + "/api/v1.0/issuer/authorize?" + url.Values{
+		"response_type":         {"code"},
+		"client_id":             {testClientID},
+		"redirect_uri":          {testRedirect},
+		"scope":                 {"openid offline_access storage.read:/data/analysis"},
+		"state":                 {"last-used-test"},
+		"code_challenge":        {codeChallenge},
+		"code_challenge_method": {"S256"},
+	}.Encode()
+
+	resp2, err := httpClient.Get(authURL)
+	require.NoError(t, err)
+	resp2.Body.Close()
+	require.True(t, resp2.StatusCode == http.StatusSeeOther || resp2.StatusCode == http.StatusFound)
+
+	location := resp2.Header.Get("Location")
+	redirectURL, err := url.Parse(location)
+	require.NoError(t, err)
+	code := redirectURL.Query().Get("code")
+	require.NotEmpty(t, code)
+
+	tokenResp := exchangeCodeForTokens(t, ts, httpClient, code, codeVerifier)
+	refreshToken := tokenResp["refresh_token"].(string)
+	require.NotEmpty(t, refreshToken)
+
+	// The auth code exchange itself doesn't go through the refresh_token
+	// branch, so last_used_at should still be nil.
+	record, err = provider.Storage().GetClientRecord(context.Background(), testClientID)
+	require.NoError(t, err)
+	assert.Nil(t, record.LastUsedAt, "last_used_at should still be nil after auth code exchange")
+
+	beforeRefresh := time.Now().Add(-time.Second)
+
+	// Refresh the token — this should update last_used_at.
+	refreshResp := refreshTokens(t, ts, httpClient, refreshToken)
+	require.NotEmpty(t, refreshResp["access_token"])
+
+	record, err = provider.Storage().GetClientRecord(context.Background(), testClientID)
+	require.NoError(t, err)
+	require.NotNil(t, record.LastUsedAt, "last_used_at should be set after refresh")
+	assert.True(t, record.LastUsedAt.After(beforeRefresh),
+		"last_used_at (%v) should be after the refresh started (%v)", record.LastUsedAt, beforeRefresh)
+}
