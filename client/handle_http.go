@@ -588,13 +588,15 @@ func mergeCancel(ctx1, ctx2 context.Context) (context.Context, context.CancelFun
 
 // Determines whether or not we can interact with the site HTTP proxy
 func isProxyEnabled() bool {
-	if _, isSet := os.LookupEnv("http_proxy"); !isSet {
-		return false
-	}
 	if param.Client_DisableHttpProxy.GetBool() {
 		return false
 	}
-	return true
+	for _, envVar := range []string{"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY"} {
+		if _, isSet := os.LookupEnv(envVar); isSet {
+			return true
+		}
+	}
+	return false
 }
 
 // Determine whether we are allowed to skip the proxy as a fallback
