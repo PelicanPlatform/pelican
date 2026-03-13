@@ -208,6 +208,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Issuer.OIDCIssuerClaim": false,
 	"Issuer.OIDCPreferClaimsFromIDToken": false,
 	"Issuer.OIDCSubjectClaim": false,
+	"Issuer.PublicClientID": false,
 	"Issuer.QDLLocation": false,
 	"Issuer.RedirectUris": false,
 	"Issuer.RefreshTokenGracePeriod": false,
@@ -591,6 +592,8 @@ func (sP StringParam) GetString() string {
 			return config.Issuer.OIDCIssuerClaim
 		case "Issuer.OIDCSubjectClaim":
 			return config.Issuer.OIDCSubjectClaim
+		case "Issuer.PublicClientID":
+			return config.Issuer.PublicClientID
 		case "Issuer.QDLLocation":
 			return config.Issuer.QDLLocation
 		case "Issuer.ScitokensServerLocation":
@@ -1544,6 +1547,7 @@ var allParameterNames = []string{
 	"Issuer.OIDCIssuerClaim",
 	"Issuer.OIDCPreferClaimsFromIDToken",
 	"Issuer.OIDCSubjectClaim",
+	"Issuer.PublicClientID",
 	"Issuer.QDLLocation",
 	"Issuer.RedirectUris",
 	"Issuer.RefreshTokenGracePeriod",
@@ -1860,6 +1864,7 @@ var (
 	Issuer_OIDCGroupClaim = StringParam{"Issuer.OIDCGroupClaim"}
 	Issuer_OIDCIssuerClaim = StringParam{"Issuer.OIDCIssuerClaim"}
 	Issuer_OIDCSubjectClaim = StringParam{"Issuer.OIDCSubjectClaim"}
+	Issuer_PublicClientID = StringParam{"Issuer.PublicClientID"}
 	Issuer_QDLLocation = StringParam{"Issuer.QDLLocation"}
 	Issuer_ScitokensServerLocation = StringParam{"Issuer.ScitokensServerLocation"}
 	Issuer_TomcatLocation = StringParam{"Issuer.TomcatLocation"}

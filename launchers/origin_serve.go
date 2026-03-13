@@ -283,24 +283,71 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 
 // configureEmbeddedIssuer initializes the fosite-based embedded OIDC issuer,
 // compiles authorization rules, and registers routes on the Gin engine.
+//
+// A separate OIDCProvider is created for each origin export that requires
+// authentication (non-public reads or writes).  Each provider uses the
+// export's FederationPrefix as the namespace so that clients and tokens are
+// scoped per-namespace.
 func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *gin.Engine) error {
 	// Compile Issuer.AuthorizationTemplates so scope mapping works
 	if err := oa4mp.InitAuthzRules(); err != nil {
 		return errors.Wrap(err, "failed to compile issuer authorization templates")
 	}
 
-	// Prefer Issuer.IssuerClaimValue over Server.ExternalWebUrl, matching
-	// the logic in ConfigureOA4MP so both issuer modes produce consistent
-	// token claims.
-	issuerURL := issuer.IssuerURL()
+	originExports, err := server_utils.GetOriginExports()
+	if err != nil {
+		return errors.Wrap(err, "failed to get origin exports for embedded issuer")
+	}
+
 	gracePeriod := param.Issuer_RefreshTokenGracePeriod.GetDuration()
 	if gracePeriod == 0 {
 		gracePeriod = 5 * time.Minute
 	}
 
-	provider, err := issuer.NewOIDCProvider(database.ServerDatabase, issuerURL, gracePeriod)
-	if err != nil {
-		return errors.Wrap(err, "failed to create embedded OIDC provider")
+	registry := issuer.NewProviderRegistry()
+
+	for _, export := range originExports {
+		// Only create an issuer for exports that need authentication
+		if export.Capabilities.PublicReads && !export.Capabilities.Writes {
+			continue
+		}
+
+		namespace := export.FederationPrefix
+		issuerURL := issuer.IssuerURLForNamespace(namespace)
+
+		provider, err := issuer.NewOIDCProvider(database.ServerDatabase, issuerURL, gracePeriod, namespace)
+		if err != nil {
+			return errors.Wrapf(err, "failed to create embedded OIDC provider for namespace %s", namespace)
+		}
+
+		registry.Register(namespace, provider)
+
+		// Seed the pre-allocated public client for browser-based flows (PKCE).
+		publicClientID := param.Issuer_PublicClientID.GetString()
+		if publicClientID != "" {
+			redirectURIs := param.Issuer_RedirectUris.GetStringSlice()
+			if err := provider.EnsurePublicClient(ctx, publicClientID, redirectURIs); err != nil {
+				return errors.Wrapf(err, "failed to seed public client %q for namespace %s", publicClientID, namespace)
+			}
+		}
+
+		// Start background cleanup for each provider
+		unusedTimeout := param.Issuer_DynamicClientUnusedTimeout.GetDuration()
+		if unusedTimeout == 0 {
+			unusedTimeout = 1 * time.Hour
+		}
+		staleTimeout := param.Issuer_DynamicClientStaleTimeout.GetDuration()
+		if staleTimeout == 0 {
+			staleTimeout = 336 * time.Hour // 2 weeks
+		}
+		provider.StartCleanup(ctx, egrp, unusedTimeout, staleTimeout)
+
+		log.Infof("Embedded OIDC issuer configured for namespace %s", namespace)
+	}
+
+	if registry.First() == nil {
+		log.Info("Embedded OIDC issuer: no exports require authentication; no issuers registered")
+		return nil
 	}
 
 	// Apply a non-aborting middleware to the issuer route group so that
@@ -308,7 +355,7 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 	// will see the identity extracted from the login cookie.  Unlike
 	// AuthHandler, this middleware never aborts—it lets the handler decide
 	// how to react to an unauthenticated request.
-	issuer.RegisterRoutesWithMiddleware(engine, provider, func(ctx *gin.Context) {
+	issuer.RegisterRoutesWithMiddleware(engine, registry, func(ctx *gin.Context) {
 		user, userId, groups, _ := web_ui.GetUserGroups(ctx)
 		if user != "" {
 			ctx.Set("User", user)
@@ -323,18 +370,8 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 	})
 
 	// Register admin client-management endpoints behind full admin auth.
-	issuer.RegisterAdminRoutes(engine, provider, web_ui.AuthHandler, web_ui.AdminAuthHandler)
-
-	// Start background cleanup of dynamically registered clients.
-	unusedTimeout := param.Issuer_DynamicClientUnusedTimeout.GetDuration()
-	if unusedTimeout == 0 {
-		unusedTimeout = 1 * time.Hour
-	}
-	staleTimeout := param.Issuer_DynamicClientStaleTimeout.GetDuration()
-	if staleTimeout == 0 {
-		staleTimeout = 336 * time.Hour // 2 weeks
-	}
-	provider.StartCleanup(ctx, egrp, unusedTimeout, staleTimeout)
+	// Admin routes are handled by the same namespace-dispatched routes.
+	issuer.RegisterAdminRoutes(engine, registry, web_ui.AuthHandler, web_ui.AdminAuthHandler)
 
 	log.Info("Embedded OIDC issuer configured successfully")
 	return nil

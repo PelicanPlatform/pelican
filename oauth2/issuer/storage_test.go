@@ -54,7 +54,7 @@ func createTestDB(t *testing.T) *OIDCStorage {
 	require.NoError(t, dbutils.MigrateDB(sqlDB, database.EmbedUniversalMigrations, "universal_migrations"))
 	require.NoError(t, dbutils.MigrateServerSpecificDB(sqlDB, database.EmbedOriginMigrations, "origin_migrations", "origin"))
 
-	storage := NewOIDCStorage(db)
+	storage := NewOIDCStorage(db, "/test/ns")
 	return storage
 }
 

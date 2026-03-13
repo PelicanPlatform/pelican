@@ -53,6 +53,12 @@ var validTableNames = map[string]bool{
 type OIDCStorage struct {
 	db *gorm.DB
 
+	// Namespace is the federation prefix (e.g. "/data/analysis") that this
+	// storage instance is scoped to. All client and token operations are
+	// filtered to this namespace so that multiple issuers sharing the same
+	// database stay isolated.
+	Namespace string
+
 	// RefreshTokenGracePeriod controls how long a used refresh token remains
 	// valid for reuse after first being exchanged.
 	// Default: 5 minutes.
@@ -70,10 +76,12 @@ type OIDCStorage struct {
 	TouchDebouncePeriod time.Duration
 }
 
-// NewOIDCStorage creates a new OIDC storage backed by the existing GORM database.
-func NewOIDCStorage(db *gorm.DB) *OIDCStorage {
+// NewOIDCStorage creates a new OIDC storage scoped to the given namespace and
+// backed by the existing GORM database.
+func NewOIDCStorage(db *gorm.DB, namespace string) *OIDCStorage {
 	return &OIDCStorage{
 		db:                      db,
+		Namespace:               namespace,
 		RefreshTokenGracePeriod: 5 * time.Minute,
 		TouchDebouncePeriod:     5 * time.Minute,
 	}
@@ -84,7 +92,7 @@ func NewOIDCStorage(db *gorm.DB) *OIDCStorage {
 // GetClient retrieves a client by ID.
 func (s *OIDCStorage) GetClient(_ context.Context, clientID string) (fosite.Client, error) {
 	var record OIDCClientRecord
-	if err := s.db.First(&record, "id = ?", clientID).Error; err != nil {
+	if err := s.db.First(&record, "id = ? AND namespace = ?", clientID, s.Namespace).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fosite.ErrNotFound
 		}
@@ -131,6 +139,7 @@ func (s *OIDCStorage) CreateClient(ctx context.Context, client *fosite.DefaultCl
 		ResponseTypes: string(responseTypes),
 		Scopes:        string(scopes),
 		Public:        client.Public,
+		Namespace:     s.Namespace,
 	}
 
 	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
@@ -161,6 +170,7 @@ func (s *OIDCStorage) CreateDynamicClient(ctx context.Context, client *fosite.De
 		RegistrationIP:          registrationIP,
 		RegistrationAccessToken: string(hashedRAT),
 		ClientName:              clientName,
+		Namespace:               s.Namespace,
 	}
 
 	return s.db.WithContext(ctx).Create(&record).Error
@@ -172,7 +182,7 @@ func (s *OIDCStorage) CreateDynamicClient(ctx context.Context, client *fosite.De
 // does not match.
 func (s *OIDCStorage) ValidateRegistrationAccessToken(_ context.Context, clientID, plainRAT string) (*OIDCClientRecord, error) {
 	var record OIDCClientRecord
-	if err := s.db.First(&record, "id = ?", clientID).Error; err != nil {
+	if err := s.db.First(&record, "id = ? AND namespace = ?", clientID, s.Namespace).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fosite.ErrNotFound
 		}
@@ -190,7 +200,7 @@ func (s *OIDCStorage) ValidateRegistrationAccessToken(_ context.Context, clientI
 // GetClientRecord returns the raw OIDCClientRecord for a client.
 func (s *OIDCStorage) GetClientRecord(_ context.Context, clientID string) (*OIDCClientRecord, error) {
 	var record OIDCClientRecord
-	if err := s.db.First(&record, "id = ?", clientID).Error; err != nil {
+	if err := s.db.First(&record, "id = ? AND namespace = ?", clientID, s.Namespace).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fosite.ErrNotFound
 		}
@@ -203,7 +213,7 @@ func (s *OIDCStorage) GetClientRecord(_ context.Context, clientID string) (*OIDC
 // dynamic client registration (RFC 7591).
 func (s *OIDCStorage) IsDynamicallyRegistered(_ context.Context, clientID string) (bool, error) {
 	var record OIDCClientRecord
-	if err := s.db.Select("dynamically_registered").First(&record, "id = ?", clientID).Error; err != nil {
+	if err := s.db.Select("dynamically_registered").First(&record, "id = ? AND namespace = ?", clientID, s.Namespace).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return false, fosite.ErrNotFound
 		}
@@ -214,14 +224,14 @@ func (s *OIDCStorage) IsDynamicallyRegistered(_ context.Context, clientID string
 
 // UpdateDynamicClient applies a set of column updates to a dynamically registered client.
 func (s *OIDCStorage) UpdateDynamicClient(ctx context.Context, clientID string, updates map[string]interface{}) error {
-	return s.db.WithContext(ctx).Model(&OIDCClientRecord{}).Where("id = ?", clientID).Updates(updates).Error
+	return s.db.WithContext(ctx).Model(&OIDCClientRecord{}).Where("id = ? AND namespace = ?", clientID, s.Namespace).Updates(updates).Error
 }
 
 // GetBoundUser returns the user bound to a dynamically registered client.
 // Returns "" if no user is bound yet.
 func (s *OIDCStorage) GetBoundUser(_ context.Context, clientID string) (string, error) {
 	var record OIDCClientRecord
-	if err := s.db.Select("bound_user").First(&record, "id = ?", clientID).Error; err != nil {
+	if err := s.db.Select("bound_user").First(&record, "id = ? AND namespace = ?", clientID, s.Namespace).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "", fosite.ErrNotFound
 		}
@@ -239,7 +249,7 @@ func (s *OIDCStorage) BindClientToUser(ctx context.Context, clientID, user strin
 	// binding, then conditionally update — all under one lock.
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var record OIDCClientRecord
-		if err := tx.Select("dynamically_registered", "bound_user").First(&record, "id = ?", clientID).Error; err != nil {
+		if err := tx.Select("dynamically_registered", "bound_user").First(&record, "id = ? AND namespace = ?", clientID, s.Namespace).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return fosite.ErrNotFound
 			}
@@ -278,7 +288,7 @@ func (s *OIDCStorage) TouchClientLastUsed(ctx context.Context, clientID string) 
 			return nil // debounced — skip write
 		}
 	}
-	err := s.db.WithContext(ctx).Model(&OIDCClientRecord{}).Where("id = ?", clientID).
+	err := s.db.WithContext(ctx).Model(&OIDCClientRecord{}).Where("id = ? AND namespace = ?", clientID, s.Namespace).
 		Update("last_used_at", now.UTC()).Error
 	if err == nil {
 		s.touchDebounce.Store(clientID, now)
@@ -291,7 +301,7 @@ func (s *OIDCStorage) TouchClientLastUsed(ctx context.Context, clientID string) 
 func (s *OIDCStorage) DeleteUnusedDynamicClients(ctx context.Context, maxAge time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-maxAge)
 	result := s.db.WithContext(ctx).
-		Where("dynamically_registered = ? AND last_used_at IS NULL AND created_at < ?", true, cutoff).
+		Where("dynamically_registered = ? AND last_used_at IS NULL AND created_at < ? AND namespace = ?", true, cutoff, s.Namespace).
 		Delete(&OIDCClientRecord{})
 	return result.RowsAffected, result.Error
 }
@@ -301,7 +311,7 @@ func (s *OIDCStorage) DeleteUnusedDynamicClients(ctx context.Context, maxAge tim
 func (s *OIDCStorage) DeleteStaleDynamicClients(ctx context.Context, maxAge time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-maxAge)
 	result := s.db.WithContext(ctx).
-		Where("dynamically_registered = ? AND last_used_at IS NOT NULL AND last_used_at < ?", true, cutoff).
+		Where("dynamically_registered = ? AND last_used_at IS NOT NULL AND last_used_at < ? AND namespace = ?", true, cutoff, s.Namespace).
 		Delete(&OIDCClientRecord{})
 	return result.RowsAffected, result.Error
 }
@@ -375,10 +385,10 @@ type ClientDetail struct {
 	CreatedAt             string   `json:"created_at"`
 }
 
-// ListClients returns all registered OIDC clients.
+// ListClients returns all registered OIDC clients for this namespace.
 func (s *OIDCStorage) ListClients(ctx context.Context) ([]ClientDetail, error) {
 	var records []OIDCClientRecord
-	if err := s.db.WithContext(ctx).Order("created_at").Find(&records).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("namespace = ?", s.Namespace).Order("created_at").Find(&records).Error; err != nil {
 		return nil, err
 	}
 
@@ -406,7 +416,7 @@ func (s *OIDCStorage) ListClients(ctx context.Context) ([]ClientDetail, error) {
 // GetClientDetail returns a read-only view of a single client.
 func (s *OIDCStorage) GetClientDetail(ctx context.Context, clientID string) (*ClientDetail, error) {
 	var record OIDCClientRecord
-	if err := s.db.WithContext(ctx).First(&record, "id = ?", clientID).Error; err != nil {
+	if err := s.db.WithContext(ctx).First(&record, "id = ? AND namespace = ?", clientID, s.Namespace).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fosite.ErrNotFound
 		}
@@ -461,7 +471,7 @@ func (s *OIDCStorage) UpdateClient(ctx context.Context, clientID string, update 
 	responseJSON, _ := json.Marshal(responseTypes)
 	scopesJSON, _ := json.Marshal(scopes)
 
-	err = s.db.WithContext(ctx).Model(&OIDCClientRecord{}).Where("id = ?", clientID).
+	err = s.db.WithContext(ctx).Model(&OIDCClientRecord{}).Where("id = ? AND namespace = ?", clientID, s.Namespace).
 		Updates(map[string]interface{}{
 			"redirect_uris":  string(redirectJSON),
 			"grant_types":    string(grantJSON),
@@ -487,7 +497,7 @@ type ClientUpdate struct {
 
 // DeleteClient removes a client by ID. Returns true if a row was deleted.
 func (s *OIDCStorage) DeleteClient(ctx context.Context, clientID string) (bool, error) {
-	result := s.db.WithContext(ctx).Where("id = ?", clientID).Delete(&OIDCClientRecord{})
+	result := s.db.WithContext(ctx).Where("id = ? AND namespace = ?", clientID, s.Namespace).Delete(&OIDCClientRecord{})
 	if result.Error != nil {
 		return false, result.Error
 	}
@@ -650,6 +660,7 @@ func (s *OIDCStorage) CreateDeviceCodeSession(ctx context.Context, deviceCode, u
 		Subject:       subject,
 		Status:        "pending",
 		ExpiresAt:     expiresAt,
+		Namespace:     s.Namespace,
 	}
 
 	return s.db.WithContext(ctx).Create(&record).Error
@@ -678,7 +689,7 @@ var (
 
 func (s *OIDCStorage) GetDeviceCodeSession(ctx context.Context, deviceCode string, session fosite.Session) (fosite.Requester, error) {
 	var dc OIDCDeviceCode
-	if err := s.db.WithContext(ctx).First(&dc, "device_code = ?", deviceCode).Error; err != nil {
+	if err := s.db.WithContext(ctx).First(&dc, "device_code = ? AND namespace = ?", deviceCode, s.Namespace).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fosite.ErrNotFound
 		}
@@ -698,7 +709,7 @@ func (s *OIDCStorage) GetDeviceCodeSession(ctx context.Context, deviceCode strin
 	now := time.Now().UTC()
 	cutoff := now.Add(-pollingInterval)
 	pollResult := s.db.WithContext(ctx).Model(&OIDCDeviceCode{}).
-		Where("device_code = ? AND (last_polled_at IS NULL OR last_polled_at <= ?)", deviceCode, cutoff).
+		Where("device_code = ? AND namespace = ? AND (last_polled_at IS NULL OR last_polled_at <= ?)", deviceCode, s.Namespace, cutoff).
 		Update("last_polled_at", now)
 	if pollResult.Error != nil {
 		return nil, pollResult.Error
@@ -726,7 +737,7 @@ func (s *OIDCStorage) GetDeviceCodeSession(ctx context.Context, deviceCode strin
 
 func (s *OIDCStorage) GetDeviceCodeSessionByUserCode(ctx context.Context, userCode string) (*OIDCDeviceCode, error) {
 	var dc OIDCDeviceCode
-	if err := s.db.WithContext(ctx).First(&dc, "user_code = ?", userCode).Error; err != nil {
+	if err := s.db.WithContext(ctx).First(&dc, "user_code = ? AND namespace = ?", userCode, s.Namespace).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fosite.ErrNotFound
 		}
@@ -738,7 +749,7 @@ func (s *OIDCStorage) GetDeviceCodeSessionByUserCode(ctx context.Context, userCo
 func (s *OIDCStorage) ApproveDeviceCodeSession(ctx context.Context, userCode, subject string, grantedScopes []string, sessionData []byte) error {
 	gs, _ := json.Marshal(grantedScopes)
 	return s.db.WithContext(ctx).Model(&OIDCDeviceCode{}).
-		Where("user_code = ? AND status = ?", userCode, "pending").
+		Where("user_code = ? AND namespace = ? AND status = ?", userCode, s.Namespace, "pending").
 		Updates(map[string]interface{}{
 			"status":         "approved",
 			"subject":        subject,
@@ -749,19 +760,19 @@ func (s *OIDCStorage) ApproveDeviceCodeSession(ctx context.Context, userCode, su
 
 func (s *OIDCStorage) DenyDeviceCodeSession(ctx context.Context, userCode string) error {
 	return s.db.WithContext(ctx).Model(&OIDCDeviceCode{}).
-		Where("user_code = ? AND status = ?", userCode, "pending").
+		Where("user_code = ? AND namespace = ? AND status = ?", userCode, s.Namespace, "pending").
 		Update("status", "denied").Error
 }
 
 func (s *OIDCStorage) InvalidateDeviceCodeSession(ctx context.Context, deviceCode string) error {
 	return s.db.WithContext(ctx).Model(&OIDCDeviceCode{}).
-		Where("device_code = ?", deviceCode).
+		Where("device_code = ? AND namespace = ?", deviceCode, s.Namespace).
 		Update("status", "used").Error
 }
 
 func (s *OIDCStorage) UpdateDeviceCodePolling(ctx context.Context, deviceCode string) error {
 	return s.db.WithContext(ctx).Model(&OIDCDeviceCode{}).
-		Where("device_code = ?", deviceCode).
+		Where("device_code = ? AND namespace = ?", deviceCode, s.Namespace).
 		Update("last_polled_at", time.Now().UTC()).Error
 }
 
@@ -807,6 +818,7 @@ func (s *OIDCStorage) createTokenSession(ctx context.Context, table, signature s
 		Subject:         request.GetSession().GetSubject(),
 		Active:          true,
 		ExpiresAt:       &expiresAt,
+		Namespace:       s.Namespace,
 	}
 
 	return s.db.WithContext(ctx).Table(table).Create(&record).Error

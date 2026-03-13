@@ -84,7 +84,7 @@ func (h *DeviceCodeHandler) HandleDeviceAuthorizationRequest(ctx context.Context
 		return nil, fosite.ErrServerError.WithWrap(err).WithDebug("Failed to store device code")
 	}
 
-	verificationURI := h.config.AccessTokenIssuer + "/api/v1.0/issuer/device"
+	verificationURI := h.config.AccessTokenIssuer + "/device"
 
 	return &DeviceAuthorizationResponse{
 		DeviceCode:              deviceCode,

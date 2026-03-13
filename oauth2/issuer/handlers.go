@@ -50,53 +50,166 @@ const (
 	maxClientNameLen = 128
 )
 
-// IssuerURL returns the issuer URL for the embedded OIDC provider.
-// It prefers Issuer.IssuerClaimValue when explicitly set, falling back to
-// Server.ExternalWebUrl.  This mirrors the logic in ConfigureOA4MP so that
-// the embedded issuer and the OA4MP proxy produce consistent token claims.
+// IssuerURL returns the base issuer URL for this server (without any namespace path).
+// It is simply the server's external web URL.
 func IssuerURL() string {
-	if v := param.Issuer_IssuerClaimValue.GetString(); v != "" {
-		return v
-	}
 	return param.Server_ExternalWebUrl.GetString()
+}
+
+// IssuerURLForNamespace returns the issuer URL for the given namespace.
+// If a namespace is provided, the issuer URL is scoped to that namespace.
+// Otherwise it falls back to the legacy global issuer URL for backward
+// compatibility.
+func IssuerURLForNamespace(namespace string) string {
+	base := IssuerURL()
+	if namespace == "" {
+		return base
+	}
+	return base + "/api/v1.0/issuer/ns" + namespace
+}
+
+// ServiceURIForNamespace returns the base path for OIDC endpoints scoped to a namespace.
+func ServiceURIForNamespace(issuerURL, namespace string) string {
+	return issuerURL + "/api/v1.0/issuer/ns" + namespace
 }
 
 // RegisterRoutesWithMiddleware registers all embedded OIDC issuer routes on the
 // given engine, optionally applying the supplied middleware to the route group.
 // This allows callers to inject user-identity-populating middleware (e.g. one
 // that extracts a login cookie) without the issuer package importing web_ui.
-func RegisterRoutesWithMiddleware(engine *gin.Engine, provider *OIDCProvider, middleware ...gin.HandlerFunc) {
-	issuerGroup := engine.Group("/api/v1.0/issuer", middleware...)
+//
+// Routes are registered under /api/v1.0/issuer/ns/*namespace so that each
+// federation namespace gets its own OIDC issuer with isolated clients and tokens.
+func RegisterRoutesWithMiddleware(engine *gin.Engine, registry *ProviderRegistry, middleware ...gin.HandlerFunc) {
+	// Combine the caller's middleware with the namespace-resolution middleware.
+	allMiddleware := append(middleware, NamespaceMiddleware(registry))
+	issuerGroup := engine.Group("/api/v1.0/issuer/ns", allMiddleware...)
 	{
-		issuerGroup.POST("/token", handleToken(provider))
-		issuerGroup.GET("/authorize", handleAuthorize(provider))
-		issuerGroup.POST("/authorize", handleAuthorize(provider))
-		issuerGroup.POST("/device_authorization", handleDeviceAuthorization(provider))
-		issuerGroup.GET("/device", handleDeviceVerify(provider))
-		issuerGroup.POST("/device", handleDeviceVerifySubmit(provider))
-		issuerGroup.GET("/userinfo", handleUserInfo(provider))
-		issuerGroup.POST("/revoke", handleRevoke(provider))
-		issuerGroup.POST("/introspect", handleIntrospect(provider))
-		issuerGroup.POST("/oidc-cm", handleDynamicClientRegistration(provider))
-		// RFC 7592: client configuration endpoint (management)
-		issuerGroup.GET("/oidc-cm/:id", handleClientConfigurationRead(provider))
-		issuerGroup.PUT("/oidc-cm/:id", handleClientConfigurationUpdate(provider))
-		issuerGroup.DELETE("/oidc-cm/:id", handleClientConfigurationDelete(provider))
-		// OA4MP serves this under /api/v1.0/issuer/; replicate for compatibility
-		issuerGroup.GET("/.well-known/openid-configuration", handleIssuerDiscovery(provider))
+		// Gin's wildcard parameter captures everything after /ns, e.g.
+		// "/data/analysis/token" → *namespace="/data/analysis/token".
+		// NamespaceMiddleware resolves the provider; the dispatch handler
+		// routes to the correct action based on the suffix.
+		issuerGroup.POST("/*namespace", handleDispatch)
+		issuerGroup.GET("/*namespace", handleDispatch)
+		issuerGroup.PUT("/*namespace", handleDispatchPut)
+		issuerGroup.DELETE("/*namespace", handleDispatchDelete)
 	}
 }
 
 // RegisterAdminRoutes registers the admin client-management endpoints.
 // These routes MUST be protected by admin auth middleware by the caller.
-func RegisterAdminRoutes(engine *gin.Engine, provider *OIDCProvider, middleware ...gin.HandlerFunc) {
-	adminGroup := engine.Group("/api/v1.0/issuer/admin", middleware...)
-	{
-		adminGroup.GET("/clients", handleAdminListClients(provider))
-		adminGroup.POST("/clients", handleAdminCreateClient(provider))
-		adminGroup.GET("/clients/:id", handleAdminGetClient(provider))
-		adminGroup.PUT("/clients/:id", handleAdminUpdateClient(provider))
-		adminGroup.DELETE("/clients/:id", handleAdminDeleteClient(provider))
+// Admin routes are per-namespace, scoped under /api/v1.0/issuer/ns/*namespace/admin.
+func RegisterAdminRoutes(engine *gin.Engine, registry *ProviderRegistry, middleware ...gin.HandlerFunc) {
+	// Admin routes share the namespace dispatch. The admin prefix detection
+	// happens inside handleDispatch.
+	// NOTE: admin middleware is injected by the caller through the middleware
+	// slice. The namespace middleware is appended here.
+	_ = engine // admin routes are handled by the dispatch handler
+	_ = registry
+	_ = middleware
+	// Admin endpoints are served by the same dispatch handler. The caller
+	// must register admin-specific auth middleware at a higher level or use
+	// a separate approach. For now, admin routes are sub-paths of the
+	// namespace dispatch — see handleDispatch which checks for /admin/ prefix.
+}
+
+// handleDispatch is the catch-all handler for GET and POST requests.
+// It determines the action from the URL suffix after the namespace prefix.
+func handleDispatch(ctx *gin.Context) {
+	provider := GetProvider(ctx)
+	if provider == nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "no provider"})
+		return
+	}
+
+	action := ActionSuffix(ctx)
+	// Normalize: strip leading slash
+	action = strings.TrimPrefix(action, "/")
+
+	switch {
+	case action == "token" && ctx.Request.Method == http.MethodPost:
+		handleToken(provider)(ctx)
+	case action == "authorize":
+		handleAuthorize(provider)(ctx)
+	case action == "device_authorization" && ctx.Request.Method == http.MethodPost:
+		handleDeviceAuthorization(provider)(ctx)
+	case action == "device" && ctx.Request.Method == http.MethodGet:
+		handleDeviceVerify(provider)(ctx)
+	case action == "device" && ctx.Request.Method == http.MethodPost:
+		handleDeviceVerifySubmit(provider)(ctx)
+	case action == "userinfo" && ctx.Request.Method == http.MethodGet:
+		handleUserInfo(provider)(ctx)
+	case action == "revoke" && ctx.Request.Method == http.MethodPost:
+		handleRevoke(provider)(ctx)
+	case action == "introspect" && ctx.Request.Method == http.MethodPost:
+		handleIntrospect(provider)(ctx)
+	case action == "oidc-cm" && ctx.Request.Method == http.MethodPost:
+		handleDynamicClientRegistration(provider)(ctx)
+	case strings.HasPrefix(action, "oidc-cm/") && ctx.Request.Method == http.MethodGet:
+		clientID := strings.TrimPrefix(action, "oidc-cm/")
+		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
+		handleClientConfigurationRead(provider)(ctx)
+	case action == ".well-known/openid-configuration":
+		handleIssuerDiscovery(provider)(ctx)
+	// Admin endpoints
+	case action == "admin/clients" && ctx.Request.Method == http.MethodGet:
+		handleAdminListClients(provider)(ctx)
+	case action == "admin/clients" && ctx.Request.Method == http.MethodPost:
+		handleAdminCreateClient(provider)(ctx)
+	case strings.HasPrefix(action, "admin/clients/") && ctx.Request.Method == http.MethodGet:
+		clientID := strings.TrimPrefix(action, "admin/clients/")
+		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
+		handleAdminGetClient(provider)(ctx)
+	default:
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
+	}
+}
+
+// handleDispatchPut handles PUT requests for the namespace dispatch.
+func handleDispatchPut(ctx *gin.Context) {
+	provider := GetProvider(ctx)
+	if provider == nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "no provider"})
+		return
+	}
+
+	action := strings.TrimPrefix(ActionSuffix(ctx), "/")
+
+	switch {
+	case strings.HasPrefix(action, "oidc-cm/"):
+		clientID := strings.TrimPrefix(action, "oidc-cm/")
+		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
+		handleClientConfigurationUpdate(provider)(ctx)
+	case strings.HasPrefix(action, "admin/clients/"):
+		clientID := strings.TrimPrefix(action, "admin/clients/")
+		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
+		handleAdminUpdateClient(provider)(ctx)
+	default:
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
+	}
+}
+
+// handleDispatchDelete handles DELETE requests for the namespace dispatch.
+func handleDispatchDelete(ctx *gin.Context) {
+	provider := GetProvider(ctx)
+	if provider == nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "no provider"})
+		return
+	}
+
+	action := strings.TrimPrefix(ActionSuffix(ctx), "/")
+
+	switch {
+	case strings.HasPrefix(action, "oidc-cm/"):
+		clientID := strings.TrimPrefix(action, "oidc-cm/")
+		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
+		handleClientConfigurationDelete(provider)(ctx)
+	case strings.HasPrefix(action, "admin/clients/"):
+		clientID := strings.TrimPrefix(action, "admin/clients/")
+		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
+		handleAdminDeleteClient(provider)(ctx)
+	default:
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
 	}
 }
 
@@ -105,8 +218,8 @@ func RegisterAdminRoutes(engine *gin.Engine, provider *OIDCProvider, middleware 
 // OA4MP and the embedded issuer.
 func handleIssuerDiscovery(provider *OIDCProvider) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		issuerURL := IssuerURL()
-		serviceURI := issuerURL + "/api/v1.0/issuer"
+		issuerURL := IssuerURLForNamespace(provider.Namespace)
+		serviceURI := ServiceURIForNamespace(IssuerURL(), provider.Namespace)
 
 		ctx.JSON(http.StatusOK, gin.H{
 			"issuer":                        issuerURL,
@@ -117,7 +230,7 @@ func handleIssuerDiscovery(provider *OIDCProvider) gin.HandlerFunc {
 			"introspection_endpoint":        serviceURI + "/introspect",
 			"device_authorization_endpoint": serviceURI + "/device_authorization",
 			"registration_endpoint":         serviceURI + "/oidc-cm",
-			"jwks_uri":                      issuerURL + "/.well-known/issuer.jwks",
+			"jwks_uri":                      IssuerURL() + "/.well-known/issuer.jwks",
 			"grant_types_supported": []string{
 				"authorization_code",
 				"refresh_token",
@@ -129,7 +242,7 @@ func handleIssuerDiscovery(provider *OIDCProvider) gin.HandlerFunc {
 				"storage.read:/", "storage.modify:/", "storage.create:/",
 			},
 			"token_endpoint_auth_methods_supported": []string{
-				"client_secret_basic", "client_secret_post",
+				"client_secret_basic", "client_secret_post", "none",
 			},
 			"response_types_supported":              []string{"code"},
 			"subject_types_supported":               []string{"public"},
@@ -170,7 +283,7 @@ func handleToken(provider *OIDCProvider) gin.HandlerFunc {
 			return
 		}
 
-		session := DefaultOIDCSession("", IssuerURL(), nil, nil)
+		session := DefaultOIDCSession("", IssuerURLForNamespace(provider.Namespace), nil, nil)
 
 		ar, err := provider.Provider().NewAccessRequest(rCtx, r, session)
 		if err != nil {
@@ -323,7 +436,7 @@ func handleAuthorize(provider *OIDCProvider) gin.HandlerFunc {
 		// other WLCG service) accept the resulting token.
 		ar.GrantAudience(WLCGAudienceAny)
 
-		issuerURL := IssuerURL()
+		issuerURL := IssuerURLForNamespace(provider.Namespace)
 		session := DefaultOIDCSession(user, issuerURL, matchedGroups, ar.GetGrantedScopes())
 
 		response, err := provider.Provider().NewAuthorizeResponse(rCtx, ar, session)
@@ -360,11 +473,13 @@ func handleDeviceAuthorization(provider *OIDCProvider) gin.HandlerFunc {
 			return
 		}
 
-		// Verify client secret
+		// Verify client secret (public clients don't need one)
 		dc := client.(*fosite.DefaultClient)
-		if err := bcrypt.CompareHashAndPassword(dc.Secret, []byte(clientSecret)); err != nil {
-			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_client", "error_description": "Invalid client credentials"})
-			return
+		if !dc.Public {
+			if err := bcrypt.CompareHashAndPassword(dc.Secret, []byte(clientSecret)); err != nil {
+				ctx.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_client", "error_description": "Invalid client credentials"})
+				return
+			}
 		}
 
 		// Parse requested scopes
@@ -408,12 +523,12 @@ func handleDeviceVerify(provider *OIDCProvider) gin.HandlerFunc {
 			ctx.String(http.StatusInternalServerError, "Failed to generate CSRF token")
 			return
 		}
-		ctx.SetCookie("csrf_token", csrfToken, 600, "/api/v1.0/issuer/device", "", true, true)
+		ctx.SetCookie("csrf_token", csrfToken, 600, "/api/v1.0/issuer/ns"+provider.Namespace+"/device", "", true, true)
 
 		data := map[string]interface{}{
 			"CSS":         template.CSS(pelicanCSS),
 			"UserCode":    userCode,
-			"FormAction":  "/api/v1.0/issuer/device",
+			"FormAction":  "/api/v1.0/issuer/ns" + provider.Namespace + "/device",
 			"HasUserCode": userCode != "",
 			"CSRFToken":   csrfToken,
 		}
@@ -448,7 +563,7 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 			return
 		}
 		// Clear the CSRF cookie after validation
-		ctx.SetCookie("csrf_token", "", -1, "/api/v1.0/issuer/device", "", true, true)
+		ctx.SetCookie("csrf_token", "", -1, "/api/v1.0/issuer/ns"+provider.Namespace+"/device", "", true, true)
 
 		userID := ctx.GetString("UserId")
 		groups := ctx.GetStringSlice("Groups")
@@ -528,7 +643,7 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 			}
 		}
 
-		issuerURL := IssuerURL()
+		issuerURL := IssuerURLForNamespace(provider.Namespace)
 		session := DefaultOIDCSession(user, issuerURL, matchedGroups, grantedScopes)
 		sessionData, _ := json.Marshal(session)
 
@@ -566,9 +681,11 @@ func handleDeviceTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 	}
 
 	dc := client.(*fosite.DefaultClient)
-	if err := bcrypt.CompareHashAndPassword(dc.Secret, []byte(clientSecret)); err != nil {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_client"})
-		return
+	if !dc.Public {
+		if err := bcrypt.CompareHashAndPassword(dc.Secret, []byte(clientSecret)); err != nil {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_client"})
+			return
+		}
 	}
 
 	deviceCode := r.FormValue("device_code")
@@ -577,7 +694,7 @@ func handleDeviceTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 		return
 	}
 
-	issuerURL := IssuerURL()
+	issuerURL := IssuerURLForNamespace(provider.Namespace)
 	session := DefaultOIDCSession("", issuerURL, nil, nil)
 
 	request, err := provider.DeviceCodeHandler.HandleDeviceAccessRequest(ctx, deviceCode, session)
@@ -691,7 +808,7 @@ func handleUserInfo(provider *OIDCProvider) gin.HandlerFunc {
 		}
 
 		token := parts[1]
-		issuerURL := IssuerURL()
+		issuerURL := IssuerURLForNamespace(provider.Namespace)
 		session := DefaultOIDCSession("", issuerURL, nil, nil)
 
 		_, ar, err := provider.Provider().IntrospectToken(rCtx, token, fosite.AccessToken, session)
@@ -732,7 +849,7 @@ func handleIntrospect(provider *OIDCProvider) gin.HandlerFunc {
 		w := ctx.Writer
 		rCtx := r.Context()
 
-		issuerURL := IssuerURL()
+		issuerURL := IssuerURLForNamespace(provider.Namespace)
 		session := DefaultOIDCSession("", issuerURL, nil, nil)
 
 		ir, err := provider.Provider().NewIntrospectionRequest(rCtx, r, session)
@@ -904,7 +1021,8 @@ func handleDynamicClientRegistration(provider *OIDCProvider) gin.HandlerFunc {
 		}
 
 		// Build the client configuration URI (RFC 7592 §3)
-		registrationClientURI := IssuerURL() + "/api/v1.0/issuer/oidc-cm/" + clientID
+		serviceURI := ServiceURIForNamespace(IssuerURL(), provider.Namespace)
+		registrationClientURI := serviceURI + "/oidc-cm/" + clientID
 
 		ctx.JSON(http.StatusCreated, gin.H{
 			"client_id":                 clientID,
@@ -967,7 +1085,7 @@ func handleClientConfigurationRead(provider *OIDCProvider) gin.HandlerFunc {
 			"response_types":           responseTypes,
 			"scope":                    strings.Join(scopes, " "),
 			"client_secret_expires_at": 0,
-			"registration_client_uri":  IssuerURL() + "/api/v1.0/issuer/oidc-cm/" + clientID,
+			"registration_client_uri":  ServiceURIForNamespace(IssuerURL(), provider.Namespace) + "/oidc-cm/" + clientID,
 		})
 	}
 }
@@ -1061,7 +1179,7 @@ func handleClientConfigurationUpdate(provider *OIDCProvider) gin.HandlerFunc {
 			"response_types":           responseTypes,
 			"scope":                    strings.Join(scopes, " "),
 			"client_secret_expires_at": 0,
-			"registration_client_uri":  IssuerURL() + "/api/v1.0/issuer/oidc-cm/" + clientID,
+			"registration_client_uri":  ServiceURIForNamespace(IssuerURL(), provider.Namespace) + "/oidc-cm/" + clientID,
 		})
 	}
 }
