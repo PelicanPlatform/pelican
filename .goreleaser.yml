@@ -404,7 +404,6 @@ nfpms:
     license: ASL 2.0
     meta: false
     formats:
-      - deb
       - rpm
     bindir: /usr/bin
     release: 1
@@ -480,16 +479,4 @@ nfpms:
           - "xrootd-scitokens"
           - "xrootd-voms"
           - "xrdhttp-pelican >= 0.0.11"
-      deb:
-        provides:
-          - "pelican-origin (= 7)"
-          - "pelican-cache (= 7)"
-          - "pelican-registry (= 7)"
-          - "pelican-director (= 7)"
-        dependencies:
-          - "pelican (>= 7.11.0)"
-          # Minimum XRootD version 5.8.2 is also enforced in xrootd/version.go - keep these in sync
-          - "xrootd-server (>= 5.8.2)"
-          - "xrootd-scitokens-plugins"
-          - "xrootd-voms-plugins"
   # end package pelican-server
