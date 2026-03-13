@@ -118,16 +118,18 @@ func GetEncryptedContents() (string, error) {
 	if err != nil {
 		if _, ok := err.(*os.PathError); ok {
 
-			password, err := GetPassword(true)
-			if err != nil {
-				return "", err
-			}
-			if len(password) > 0 {
-				if err := SavePassword(password); err != nil {
-					log.Debugln("Failed to save password:", err)
+			if !setEmptyPassword {
+				password, err := GetPassword(true)
+				if err != nil {
+					return "", err
 				}
-			} else {
-				setEmptyPassword = true
+				if len(password) > 0 {
+					if err := SavePassword(password); err != nil {
+						log.Debugln("Failed to save password:", err)
+					}
+				} else {
+					setEmptyPassword = true
+				}
 			}
 
 			err = os.MkdirAll(filepath.Dir(filename), 0700)

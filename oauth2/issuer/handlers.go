@@ -193,6 +193,12 @@ func handleToken(provider *OIDCProvider) gin.HandlerFunc {
 			return
 		}
 
+		// Update last_used_at on refresh so the client doesn't age out
+		// while it is actively refreshing tokens.
+		if grantType == "refresh_token" {
+			_ = provider.storage.TouchClientLastUsed(rCtx, ar.GetClient().GetID())
+		}
+
 		provider.Provider().WriteAccessResponse(rCtx, w, ar, response)
 	}
 }
@@ -637,10 +643,6 @@ func handleDeviceTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 	// Record that this client was used (prevents unused-client cleanup).
 	_ = provider.storage.TouchClientLastUsed(rCtx, clientID)
 
-	// Mark the device code as used now that token creation has succeeded.
-	// This avoids invalidating the code if token generation had failed above.
-	_ = provider.storage.InvalidateDeviceCodeSession(rCtx, deviceCode)
-
 	// Generate refresh token if offline_access was requested
 	for _, s := range request.GetGrantedScopes() {
 		if s == "offline_access" {
@@ -657,6 +659,11 @@ func handleDeviceTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 			break
 		}
 	}
+
+	// Mark the device code as used after both access and refresh tokens
+	// have been generated successfully. This prevents burning the code
+	// if refresh token generation had failed above.
+	_ = provider.storage.InvalidateDeviceCodeSession(rCtx, deviceCode)
 
 	w.Header().Set("Content-Type", "application/json;charset=UTF-8")
 	w.Header().Set("Cache-Control", "no-store")

@@ -20,8 +20,11 @@ package oauth2
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"strings"
@@ -161,4 +164,42 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, dirResp server_st
 		RefreshToken: upstream_token.RefreshToken,
 	}
 	return &token, nil
+}
+
+// PingClient performs a lightweight client_credentials grant against the token
+// endpoint to check whether the given client credentials are still recognised
+// by the issuer.
+//
+// Returns ErrUnknownClient if the server responds with 401 invalid_client,
+// nil if the client is known (the expected 400 unauthorized_client response),
+// or nil for any other error (best-effort; servers that don't implement the
+// ping pattern are silently ignored).
+func PingClient(tokenURL, clientID, clientSecret string, transport http.RoundTripper) error {
+	form := url.Values{
+		"grant_type": {"client_credentials"},
+	}
+	req, err := http.NewRequest("POST", tokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil // best-effort
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth(url.QueryEscape(clientID), url.QueryEscape(clientSecret))
+
+	httpClient := &http.Client{Transport: transport}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil // network error — best-effort
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 401 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(body, &errResp) == nil && errResp.Error == "invalid_client" {
+			return ErrUnknownClient
+		}
+	}
+	return nil
 }
