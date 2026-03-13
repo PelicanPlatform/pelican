@@ -22,10 +22,12 @@ minimizing disruption to users' ongoing transfers.
 When Pelican process receives a `SIGTERM` signal (e.g. via `kill -TERM <pid>`),
 or when the "Restart Server" button on web UI is clicked:
 
-1. Pelican immediately marks the server as being in downtime.
-2. The Director stops redirecting new clients to this Origin/Cache.
-3. Existing in-flight transfers are allowed to continue.
-4. The downtime remains in effect until `Xrootd.ShutdownTimeout` (default: 1m) expires and Pelican fully exits.
+1. Pelican immediately sends a shutdown advertisement to the Director indicating that it is shutting down.
+2. The Director applies an indefinite downtime window to the server, stopping it from redirecting new clients to this Origin/Cache.
+3. Existing in-flight transfers are allowed to continue until `Xrootd.ShutdownTimeout` (default: 1m) expires and Pelican fully exits.
+4. The downtime remains in effect indefinitely to prevent routing to offline servers,
+and is automatically cleared whenever the server restarts and sends a regular server ad.
+This automatic process does not affect any manually configured downtimes set by server or federation administrators.
 
 <Callout type="info">
 If you need to schedule downtime for the future,
@@ -69,7 +71,7 @@ All `pelican downtime` subcommands accept the following persistent flags:
 | Flag | Required | Description |
 |---|---|---|
 | `-s` / `--server` | Yes | Web URL of your Pelican server (e.g. `https://my-origin.example.com:8444`) |
-| `-t` / `--token` | No | Path to an admin token file. Omit to generate one automatically (requires local access). |
+| `-t` / `--token` | No | Path to a token file with downtime scopes (`pelican.downtime_create`, `pelican.downtime_modify`, `pelican.downtime_delete`). Omit to generate automatically (requires access to the server's issuer key). |
 
 ### List Downtimes
 
