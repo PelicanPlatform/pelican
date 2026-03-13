@@ -41,10 +41,6 @@ func getTokenAuthString(id uint32, user UserRecord) string {
 	return fmt.Sprintf("&Uc=%d&s=%s&n=%s&o=%s&r=%s&g=%s", id, user.DN, user.User, user.Org, user.Role, strings.Join(user.Groups, " "))
 }
 
-func getUserIdString(userId XrdUserId) string {
-	return fmt.Sprintf("%s/%s.%d:%d@%s", userId.Prot, userId.User, userId.Pid, userId.Sid, userId.Host)
-}
-
 func mockFileOpenPacket(pseq int, fileId, userId uint32, SID int64, path string) ([]byte, error) {
 	// f-stream file open event
 	mockMonHeader := XrdXrootdMonHeader{ // 8B
