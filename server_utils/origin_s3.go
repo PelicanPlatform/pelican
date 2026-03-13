@@ -53,6 +53,26 @@ func (o *S3Origin) handleVolumeMountsExtra() error {
 	return nil
 }
 
+func (o *S3Origin) handleExportsExtra() error {
+	bucket := param.Origin_S3Bucket.GetString()
+	akf := param.Origin_S3AccessKeyfile.GetString()
+	skf := param.Origin_S3SecretKeyfile.GetString()
+
+	for i := range o.Exports {
+		if o.Exports[i].S3Bucket == "" {
+			o.Exports[i].S3Bucket = bucket
+		}
+		if o.Exports[i].S3AccessKeyfile == "" {
+			o.Exports[i].S3AccessKeyfile = akf
+		}
+		if o.Exports[i].S3SecretKeyfile == "" {
+			o.Exports[i].S3SecretKeyfile = skf
+		}
+	}
+
+	return nil
+}
+
 func (o *S3Origin) handleTopLevelExtra() error {
 	if o.Exports == nil {
 		return errors.New("internal error -- discovered nil origin exports while processing top-level Origin.XXX configuration")
