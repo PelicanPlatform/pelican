@@ -172,6 +172,18 @@ func isValidLoggingParameter(paramName string) bool {
 	return true
 }
 
+// IsXrootdLoggingParam reports whether changing the named logging parameter requires an XRootD
+// restart. Parameters under Logging.Origin.* and Logging.Cache.* configure XRootD's internal
+// log levels, which can only be changed by rewriting the XRootD configuration file and
+// restarting the daemon.
+//
+// Callers must ensure that name has already been validated by isValidLoggingParameter (or
+// HasParameter). That function enforces exact capitalization for the first two path segments
+// ("Logging", "Origin"/"Cache"), which is what makes the HasPrefix checks here correct.
+func IsXrootdLoggingParam(name string) bool {
+	return strings.HasPrefix(name, "Logging.Origin.") || strings.HasPrefix(name, "Logging.Cache.")
+}
+
 // findFieldByName searches for a struct field by name, matching against both
 // the field name and yaml/mapstructure tags (case-insensitive)
 func findFieldByName(structType reflect.Type, name string) (reflect.StructField, bool) {

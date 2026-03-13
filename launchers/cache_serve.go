@@ -36,6 +36,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/cache"
+	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/lotman"
@@ -176,7 +177,18 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 	cacheServer.SetPids(pids)
 
 	// Store restart information after PIDs are known
-	xrootd.StoreRestartInfo(launchers, pids, egrp, portStartCallback, true, useCMSD, privileged)
+	launch := func(ls []daemon.Launcher) ([]int, error) {
+		return xrootd.LaunchDaemons(ctx, ls, egrp, portStartCallback)
+	}
+	preRestartHook := func() {
+		handleGracefulShutdown(ctx, modules, []server_structs.XRootDServer{cacheServer})
+	}
+	postRestartHook := func() {
+		if advErr := launcher_utils.Advertise(ctx, []server_structs.XRootDServer{cacheServer}); advErr != nil {
+			log.Errorf("Failed to re-advertise cache to Director after restart: %v", advErr)
+		}
+	}
+	xrootd.StoreRestartInfo(pids, launch, true, useCMSD, privileged, preRestartHook, postRestartHook)
 
 	// Register callback for xrootd logging configuration changes
 	// This must be done after LaunchDaemons so the server has PIDs
