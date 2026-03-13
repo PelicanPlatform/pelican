@@ -91,6 +91,9 @@ LocalCache:
   LowWaterMarkPercentage: 85
 Origin:
   DirectorTest: true
+  DiskUsageCalculationDelay: 5m
+  DiskUsageCalculationInterval: 24h
+  DiskUsageCalculationRateLimit: 1000
   Multiuser: false
   EnableMacaroons: false
   EnableVoms: true
