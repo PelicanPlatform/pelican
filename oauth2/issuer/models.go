@@ -35,6 +35,7 @@ type OIDCClientRecord struct {
 	RegistrationIP          string
 	RegistrationAccessToken string
 	ClientName              string
+	Namespace               string
 	CreatedAt               time.Time
 }
 
@@ -57,6 +58,7 @@ type OIDCTokenSession struct {
 	Subject         string
 	Active          bool
 	ExpiresAt       *time.Time
+	Namespace       string
 	CreatedAt       time.Time
 }
 
@@ -84,6 +86,7 @@ type OIDCDeviceCode struct {
 	Status        string
 	ExpiresAt     time.Time
 	LastPolledAt  *time.Time
+	Namespace     string
 	CreatedAt     time.Time
 }
 

@@ -36,7 +36,7 @@ func registerDynamicClient(t *testing.T, httpClient *http.Client, baseURL, clien
 	t.Helper()
 
 	body := `{"redirect_uris": [], "client_name": "` + clientName + `"}`
-	resp, err := httpClient.Post(baseURL+"/api/v1.0/issuer/oidc-cm",
+	resp, err := httpClient.Post(baseURL+"/api/v1.0/issuer/ns/test/ns/oidc-cm",
 		"application/json", strings.NewReader(body))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
@@ -60,7 +60,7 @@ func TestDCRReturnsRegistrationAccessToken(t *testing.T) {
 
 	uri := result["registration_client_uri"].(string)
 	clientID := result["client_id"].(string)
-	assert.Contains(t, uri, "/api/v1.0/issuer/oidc-cm/"+clientID,
+	assert.Contains(t, uri, "/api/v1.0/issuer/ns/test/ns/oidc-cm/"+clientID,
 		"registration_client_uri should point to the client config endpoint")
 }
 
@@ -73,7 +73,7 @@ func TestClientConfigurationRead(t *testing.T) {
 	reg := registerDynamicClient(t, httpClient, ts.URL, "read-test")
 	clientID := reg["client_id"].(string)
 	rat := reg["registration_access_token"].(string)
-	configURI := ts.URL + "/api/v1.0/issuer/oidc-cm/" + clientID
+	configURI := ts.URL + "/api/v1.0/issuer/ns/test/ns/oidc-cm/" + clientID
 
 	t.Run("Success", func(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodGet, configURI, nil)
@@ -113,7 +113,7 @@ func TestClientConfigurationRead(t *testing.T) {
 	})
 
 	t.Run("NonexistentClient", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1.0/issuer/oidc-cm/nonexistent", nil)
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1.0/issuer/ns/test/ns/oidc-cm/nonexistent", nil)
 		req.Header.Set("Authorization", "Bearer "+rat)
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
@@ -131,7 +131,7 @@ func TestClientConfigurationUpdate(t *testing.T) {
 	reg := registerDynamicClient(t, httpClient, ts.URL, "update-test")
 	clientID := reg["client_id"].(string)
 	rat := reg["registration_access_token"].(string)
-	configURI := ts.URL + "/api/v1.0/issuer/oidc-cm/" + clientID
+	configURI := ts.URL + "/api/v1.0/issuer/ns/test/ns/oidc-cm/" + clientID
 
 	t.Run("UpdateClientName", func(t *testing.T) {
 		updateBody := `{"client_name": "updated-name"}`
@@ -211,7 +211,7 @@ func TestClientConfigurationDelete(t *testing.T) {
 	reg := registerDynamicClient(t, httpClient, ts.URL, "delete-test")
 	clientID := reg["client_id"].(string)
 	rat := reg["registration_access_token"].(string)
-	configURI := ts.URL + "/api/v1.0/issuer/oidc-cm/" + clientID
+	configURI := ts.URL + "/api/v1.0/issuer/ns/test/ns/oidc-cm/" + clientID
 
 	t.Run("MissingToken", func(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodDelete, configURI, nil)
@@ -261,7 +261,7 @@ func TestClientValidityPing(t *testing.T) {
 
 	t.Run("ValidClient-BasicAuth", func(t *testing.T) {
 		form := url.Values{"grant_type": {"client_credentials"}}
-		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1.0/issuer/token",
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1.0/issuer/ns/test/ns/token",
 			strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.SetBasicAuth(clientID, clientSecret)
@@ -284,7 +284,7 @@ func TestClientValidityPing(t *testing.T) {
 			"client_id":     {clientID},
 			"client_secret": {clientSecret},
 		}
-		resp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/token", form)
+		resp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/ns/test/ns/token", form)
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
@@ -297,7 +297,7 @@ func TestClientValidityPing(t *testing.T) {
 
 	t.Run("UnknownClient", func(t *testing.T) {
 		form := url.Values{"grant_type": {"client_credentials"}}
-		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1.0/issuer/token",
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1.0/issuer/ns/test/ns/token",
 			strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.SetBasicAuth("nonexistent-client", "some-secret")
@@ -316,7 +316,7 @@ func TestClientValidityPing(t *testing.T) {
 
 	t.Run("WrongSecret", func(t *testing.T) {
 		form := url.Values{"grant_type": {"client_credentials"}}
-		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1.0/issuer/token",
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1.0/issuer/ns/test/ns/token",
 			strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.SetBasicAuth(clientID, "wrong-secret")
@@ -335,7 +335,7 @@ func TestClientValidityPing(t *testing.T) {
 
 	t.Run("NoCredentials", func(t *testing.T) {
 		form := url.Values{"grant_type": {"client_credentials"}}
-		resp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/token", form)
+		resp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/ns/test/ns/token", form)
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
@@ -349,7 +349,7 @@ func TestClientValidityPing(t *testing.T) {
 	t.Run("StaticClient-BasicAuth", func(t *testing.T) {
 		// The integration setup creates a static client with known credentials
 		form := url.Values{"grant_type": {"client_credentials"}}
-		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1.0/issuer/token",
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1.0/issuer/ns/test/ns/token",
 			strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.SetBasicAuth(testClientID, testSecret)
@@ -375,7 +375,7 @@ func TestClientValidityPing(t *testing.T) {
 
 		// Delete via RFC 7592
 		delReq, _ := http.NewRequest(http.MethodDelete,
-			ts.URL+"/api/v1.0/issuer/oidc-cm/"+id2, nil)
+			ts.URL+"/api/v1.0/issuer/ns/test/ns/oidc-cm/"+id2, nil)
 		delReq.Header.Set("Authorization", "Bearer "+rat2)
 		delResp, err := httpClient.Do(delReq)
 		require.NoError(t, err)
@@ -384,7 +384,7 @@ func TestClientValidityPing(t *testing.T) {
 
 		// Ping the deleted client
 		form := url.Values{"grant_type": {"client_credentials"}}
-		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1.0/issuer/token",
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1.0/issuer/ns/test/ns/token",
 			strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.SetBasicAuth(id2, secret2)
@@ -407,7 +407,7 @@ func TestClientValidityPing(t *testing.T) {
 func TestDCRRejectsOversizedMetadata(t *testing.T) {
 	_, ts := setupIntegration(t)
 	httpClient := ts.Client()
-	baseURL := ts.URL + "/api/v1.0/issuer/oidc-cm"
+	baseURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/oidc-cm"
 
 	t.Run("ClientNameTooLong", func(t *testing.T) {
 		longName := strings.Repeat("a", maxClientNameLen+1) // 129 bytes
@@ -470,7 +470,7 @@ func TestClientConfigurationUpdateRejectsOversizedMetadata(t *testing.T) {
 	reg := registerDynamicClient(t, httpClient, ts.URL, "limit-update-test")
 	clientID := reg["client_id"].(string)
 	rat := reg["registration_access_token"].(string)
-	configURI := ts.URL + "/api/v1.0/issuer/oidc-cm/" + clientID
+	configURI := ts.URL + "/api/v1.0/issuer/ns/test/ns/oidc-cm/" + clientID
 
 	t.Run("UpdateClientNameTooLong", func(t *testing.T) {
 		longName := strings.Repeat("c", maxClientNameLen+1)

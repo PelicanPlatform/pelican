@@ -48,13 +48,17 @@ import (
 // signing key for fosite's opaque token strategy from the master key.
 const hkdfPurposeIDPHMAC = "pelican-idp-hmac-v1"
 
-// OIDCProvider manages the embedded OAuth2/OIDC issuer.
+// OIDCProvider manages the embedded OAuth2/OIDC issuer for a single namespace.
 type OIDCProvider struct {
 	oauth2     fosite.OAuth2Provider
 	storage    *OIDCStorage
 	config     *fosite.Config
 	strategy   *compose.CommonStrategy
 	privateKey crypto.Signer
+
+	// Namespace is the federation prefix (e.g. "/data/analysis") that this
+	// provider is scoped to.
+	Namespace string
 
 	// DeviceCodeHandler handles RFC 8628 device authorization grant.
 	DeviceCodeHandler *DeviceCodeHandler
@@ -64,10 +68,10 @@ type OIDCProvider struct {
 	RegistrationLimiter *registrationRateLimiter
 }
 
-// NewOIDCProvider creates a new embedded OIDC provider.
+// NewOIDCProvider creates a new embedded OIDC provider for the given namespace.
 // It reuses the Pelican server's signing key from config.GetIssuerPrivateJWK().
-func NewOIDCProvider(db *gorm.DB, issuerURL string, refreshGracePeriod time.Duration) (*OIDCProvider, error) {
-	storage := NewOIDCStorage(db)
+func NewOIDCProvider(db *gorm.DB, issuerURL string, refreshGracePeriod time.Duration, namespace string) (*OIDCProvider, error) {
+	storage := NewOIDCStorage(db, namespace)
 	storage.RefreshTokenGracePeriod = refreshGracePeriod
 
 	// Use Pelican's existing private signing key
@@ -76,7 +80,7 @@ func NewOIDCProvider(db *gorm.DB, issuerURL string, refreshGracePeriod time.Dura
 		return nil, fmt.Errorf("failed to get signing key: %w", err)
 	}
 
-	tokenURL := issuerURL + "/api/v1.0/issuer/token"
+	tokenURL := issuerURL + "/token"
 
 	fositeConfig := &fosite.Config{
 		AccessTokenLifespan:      time.Hour,
@@ -149,6 +153,7 @@ func NewOIDCProvider(db *gorm.DB, issuerURL string, refreshGracePeriod time.Dura
 		config:              fositeConfig,
 		strategy:            strategy,
 		privateKey:          privateKey,
+		Namespace:           namespace,
 		DeviceCodeHandler:   deviceHandler,
 		RegistrationLimiter: regLimiter,
 	}, nil
@@ -395,6 +400,31 @@ func (p *OIDCProvider) EnsureClient(ctx context.Context, clientID, secret string
 	}
 
 	log.Infof("Registering default OIDC client: %s", clientID)
+	return p.storage.CreateClient(ctx, client)
+}
+
+// EnsurePublicClient registers a public OAuth2 client (no secret) if absent.
+// Public clients rely on PKCE for security and use token_endpoint_auth_method "none".
+func (p *OIDCProvider) EnsurePublicClient(ctx context.Context, clientID string, redirectURIs []string) error {
+	_, err := p.storage.GetClient(ctx, clientID)
+	if err == nil {
+		return nil // already exists
+	}
+	if !errors.Is(err, fosite.ErrNotFound) {
+		return err
+	}
+
+	client := &fosite.DefaultClient{
+		ID:            clientID,
+		RedirectURIs:  redirectURIs,
+		GrantTypes:    fosite.Arguments{"authorization_code", "urn:ietf:params:oauth:grant-type:device_code"},
+		ResponseTypes: fosite.Arguments{"code"},
+		Scopes:        fosite.Arguments{"openid", "wlcg", "storage.read:/", "storage.modify:/", "storage.create:/"},
+		Audience:      fosite.Arguments{WLCGAudienceAny},
+		Public:        true,
+	}
+
+	log.Infof("Registering public OIDC client: %s", clientID)
 	return p.storage.CreateClient(ctx, client)
 }
 

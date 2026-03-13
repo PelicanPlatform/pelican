@@ -162,6 +162,7 @@ type Config struct {
 		OIDCIssuerClaim string `mapstructure:"oidcissuerclaim" yaml:"OIDCIssuerClaim"`
 		OIDCPreferClaimsFromIDToken bool `mapstructure:"oidcpreferclaimsfromidtoken" yaml:"OIDCPreferClaimsFromIDToken"`
 		OIDCSubjectClaim string `mapstructure:"oidcsubjectclaim" yaml:"OIDCSubjectClaim"`
+		PublicClientID string `mapstructure:"publicclientid" yaml:"PublicClientID"`
 		QDLLocation string `mapstructure:"qdllocation" yaml:"QDLLocation"`
 		RedirectUris []string `mapstructure:"redirecturis" yaml:"RedirectUris"`
 		RefreshTokenGracePeriod time.Duration `mapstructure:"refreshtokengraceperiod" yaml:"RefreshTokenGracePeriod"`
@@ -610,6 +611,7 @@ type configWithType struct {
 		OIDCIssuerClaim struct { Type string; Value string }
 		OIDCPreferClaimsFromIDToken struct { Type string; Value bool }
 		OIDCSubjectClaim struct { Type string; Value string }
+		PublicClientID struct { Type string; Value string }
 		QDLLocation struct { Type string; Value string }
 		RedirectUris struct { Type string; Value []string }
 		RefreshTokenGracePeriod struct { Type string; Value time.Duration }

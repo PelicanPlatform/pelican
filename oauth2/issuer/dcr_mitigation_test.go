@@ -125,7 +125,7 @@ func TestDCRRateLimitIntegration(t *testing.T) {
 
 	// First 2 should succeed
 	for i := 0; i < 2; i++ {
-		resp, err := httpClient.Post(ts.URL+"/api/v1.0/issuer/oidc-cm",
+		resp, err := httpClient.Post(ts.URL+"/api/v1.0/issuer/ns/test/ns/oidc-cm",
 			"application/json", strings.NewReader(regBody))
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusCreated, resp.StatusCode, "registration %d should succeed", i+1)
@@ -133,7 +133,7 @@ func TestDCRRateLimitIntegration(t *testing.T) {
 	}
 
 	// 3rd should be rate-limited
-	resp, err := httpClient.Post(ts.URL+"/api/v1.0/issuer/oidc-cm",
+	resp, err := httpClient.Post(ts.URL+"/api/v1.0/issuer/ns/test/ns/oidc-cm",
 		"application/json", strings.NewReader(regBody))
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusTooManyRequests, resp.StatusCode,
@@ -157,7 +157,7 @@ func TestDCRGrantTypeRestriction(t *testing.T) {
 		"client_name": "grant-test"
 	}`
 
-	resp, err := httpClient.Post(ts.URL+"/api/v1.0/issuer/oidc-cm",
+	resp, err := httpClient.Post(ts.URL+"/api/v1.0/issuer/ns/test/ns/oidc-cm",
 		"application/json", strings.NewReader(regBody))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
@@ -197,7 +197,7 @@ func TestDCRDynamicallyRegisteredFlag(t *testing.T) {
 
 	// Register a dynamic client via the API
 	regBody := `{"redirect_uris": [], "client_name": "dynamic-flag-test"}`
-	resp, err := httpClient.Post(ts.URL+"/api/v1.0/issuer/oidc-cm",
+	resp, err := httpClient.Post(ts.URL+"/api/v1.0/issuer/ns/test/ns/oidc-cm",
 		"application/json", strings.NewReader(regBody))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
@@ -223,7 +223,7 @@ func TestSingleUserClientBinding(t *testing.T) {
 
 	// Register a dynamic client
 	regBody := `{"redirect_uris": [], "client_name": "binding-test"}`
-	resp, err := httpClient.Post(ts.URL+"/api/v1.0/issuer/oidc-cm",
+	resp, err := httpClient.Post(ts.URL+"/api/v1.0/issuer/ns/test/ns/oidc-cm",
 		"application/json", strings.NewReader(regBody))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
@@ -237,7 +237,7 @@ func TestSingleUserClientBinding(t *testing.T) {
 	dynamicSecret := regResult["client_secret"].(string)
 
 	// Step 1: Initiate device code flow
-	deviceResp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/device_authorization",
+	deviceResp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/ns/test/ns/device_authorization",
 		map[string][]string{
 			"client_id":     {dynamicClientID},
 			"client_secret": {dynamicSecret},
@@ -265,7 +265,7 @@ func TestSingleUserClientBinding(t *testing.T) {
 
 	// Step 4: A different user should not be able to approve a device code for
 	// this client.  Set up a second device code.
-	deviceResp2, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/device_authorization",
+	deviceResp2, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/ns/test/ns/device_authorization",
 		map[string][]string{
 			"client_id":     {dynamicClientID},
 			"client_secret": {dynamicSecret},
@@ -303,7 +303,7 @@ func TestUnusedDynamicClientCleanup(t *testing.T) {
 	// Register two dynamic clients
 	var clientIDs []string
 	for i := 0; i < 2; i++ {
-		resp, err := httpClient.Post(ts.URL+"/api/v1.0/issuer/oidc-cm",
+		resp, err := httpClient.Post(ts.URL+"/api/v1.0/issuer/ns/test/ns/oidc-cm",
 			"application/json",
 			bytes.NewReader([]byte(`{"redirect_uris": [], "client_name": "cleanup-test"}`)))
 		require.NoError(t, err)
@@ -360,7 +360,7 @@ func TestStaleDynamicClientCleanup(t *testing.T) {
 	// Register three dynamic clients
 	var clientIDs []string
 	for i := 0; i < 3; i++ {
-		resp, err := httpClient.Post(ts.URL+"/api/v1.0/issuer/oidc-cm",
+		resp, err := httpClient.Post(ts.URL+"/api/v1.0/issuer/ns/test/ns/oidc-cm",
 			"application/json",
 			bytes.NewReader([]byte(`{"redirect_uris": [], "client_name": "stale-test"}`)))
 		require.NoError(t, err)
@@ -418,7 +418,9 @@ func setupTestServerWithUser(user, userID string, groups []string, provider *OID
 		c.Set("Groups", groups)
 		c.Next()
 	})
-	RegisterRoutesWithMiddleware(engine, provider)
+	registry := NewProviderRegistry()
+	registry.Register(testNamespace, provider)
+	RegisterRoutesWithMiddleware(engine, registry)
 	return httptest.NewTLSServer(engine)
 }
 
@@ -433,7 +435,7 @@ func TestDeviceVerifyCSRF(t *testing.T) {
 		"client_secret": {testSecret},
 		"scope":         {"openid"},
 	}
-	resp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/device_authorization", form)
+	resp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/ns/test/ns/device_authorization", form)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	body, _ := io.ReadAll(resp.Body)
@@ -448,7 +450,7 @@ func TestDeviceVerifyCSRF(t *testing.T) {
 		// POST directly without ever doing a GET (no CSRF cookie)
 		client := ts.Client()
 		approveForm := strings.NewReader("user_code=" + userCode + "&action=approve")
-		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/device", approveForm)
+		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/device", approveForm)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		resp, err := client.Do(req)
 		require.NoError(t, err)
@@ -462,13 +464,13 @@ func TestDeviceVerifyCSRF(t *testing.T) {
 	t.Run("WrongCSRFToken", func(t *testing.T) {
 		// GET the page to get a valid CSRF cookie, then POST with wrong form value
 		client := newTestClientWithJar(t, ts)
-		getResp, err := client.Get(ts.URL + "/api/v1.0/issuer/device?user_code=" + userCode)
+		getResp, err := client.Get(ts.URL + "/api/v1.0/issuer/ns/test/ns/device?user_code=" + userCode)
 		require.NoError(t, err)
 		getResp.Body.Close()
 
 		// POST with deliberately wrong csrf_token form field
 		wrongForm := strings.NewReader("user_code=" + userCode + "&action=approve&csrf_token=wrong-token")
-		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/device", wrongForm)
+		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/device", wrongForm)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		resp, err := client.Do(req)
 		require.NoError(t, err)
@@ -480,7 +482,7 @@ func TestDeviceVerifyCSRF(t *testing.T) {
 	t.Run("CorrectCSRFToken", func(t *testing.T) {
 		// Normal flow via approveDeviceCode helper should succeed.
 		// Need a fresh device code since we may have consumed the first one.
-		resp2, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/device_authorization", form)
+		resp2, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/ns/test/ns/device_authorization", form)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, resp2.StatusCode)
 		body2, _ := io.ReadAll(resp2.Body)
@@ -514,7 +516,7 @@ func TestDCRRedirectURIValidation(t *testing.T) {
 			"redirect_uris": ["https://evil.example.com/steal-tokens"],
 			"client_name": "evil-client"
 		}`
-		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/oidc-cm",
+		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/oidc-cm",
 			bytes.NewReader([]byte(regBody)))
 		req.Header.Set("Content-Type", "application/json")
 
@@ -537,7 +539,7 @@ func TestDCRRedirectURIValidation(t *testing.T) {
 			"redirect_uris": ["https://allowed.example.com/callback"],
 			"client_name": "good-client"
 		}`
-		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/oidc-cm",
+		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/oidc-cm",
 			bytes.NewReader([]byte(regBody)))
 		req.Header.Set("Content-Type", "application/json")
 
@@ -558,7 +560,7 @@ func TestDCRRedirectURIValidation(t *testing.T) {
 			],
 			"client_name": "mixed-client"
 		}`
-		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/oidc-cm",
+		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/oidc-cm",
 			bytes.NewReader([]byte(regBody)))
 		req.Header.Set("Content-Type", "application/json")
 

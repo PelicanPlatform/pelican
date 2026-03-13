@@ -108,8 +108,10 @@ func setupAdminTestServer(t *testing.T) (*OIDCProvider, *httptest.Server) {
 		c.Next()
 	})
 
-	RegisterRoutesWithMiddleware(engine, provider)
-	RegisterAdminRoutes(engine, provider)
+	registry := NewProviderRegistry()
+	registry.Register(testNamespace, provider)
+	RegisterRoutesWithMiddleware(engine, registry)
+	RegisterAdminRoutes(engine, registry)
 
 	newTS := httptest.NewTLSServer(engine)
 	t.Cleanup(newTS.Close)
@@ -121,7 +123,7 @@ func TestAdminListClientsAPI(t *testing.T) {
 	_, ts := setupAdminTestServer(t)
 	client := ts.Client()
 
-	resp, err := client.Get(ts.URL + "/api/v1.0/issuer/admin/clients")
+	resp, err := client.Get(ts.URL + "/api/v1.0/issuer/ns/test/ns/admin/clients")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -143,7 +145,7 @@ func TestAdminCreateClientAPI(t *testing.T) {
 			"scopes": ["openid", "storage.read:/", "storage.modify:/"]
 		}`
 		resp, err := httpClient.Post(
-			ts.URL+"/api/v1.0/issuer/admin/clients",
+			ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients",
 			"application/json",
 			strings.NewReader(body),
 		)
@@ -166,7 +168,7 @@ func TestAdminCreateClientAPI(t *testing.T) {
 	t.Run("create-with-invalid-grant-type", func(t *testing.T) {
 		body := `{"grant_types": ["bogus_grant"]}`
 		resp, err := httpClient.Post(
-			ts.URL+"/api/v1.0/issuer/admin/clients",
+			ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients",
 			"application/json",
 			strings.NewReader(body),
 		)
@@ -179,7 +181,7 @@ func TestAdminCreateClientAPI(t *testing.T) {
 	t.Run("create-empty-grant-types", func(t *testing.T) {
 		body := `{"grant_types": []}`
 		resp, err := httpClient.Post(
-			ts.URL+"/api/v1.0/issuer/admin/clients",
+			ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients",
 			"application/json",
 			strings.NewReader(body),
 		)
@@ -197,7 +199,7 @@ func TestAdminDeleteClientAPI(t *testing.T) {
 	// Create a client first
 	body := `{"grant_types": ["refresh_token"]}`
 	createResp, err := httpClient.Post(
-		ts.URL+"/api/v1.0/issuer/admin/clients",
+		ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients",
 		"application/json",
 		strings.NewReader(body),
 	)
@@ -210,7 +212,7 @@ func TestAdminDeleteClientAPI(t *testing.T) {
 	clientID := created["client_id"].(string)
 
 	t.Run("delete-existing", func(t *testing.T) {
-		req, _ := http.NewRequest("DELETE", ts.URL+"/api/v1.0/issuer/admin/clients/"+clientID, nil)
+		req, _ := http.NewRequest("DELETE", ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients/"+clientID, nil)
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
 		defer resp.Body.Close()
@@ -218,7 +220,7 @@ func TestAdminDeleteClientAPI(t *testing.T) {
 	})
 
 	t.Run("delete-nonexistent", func(t *testing.T) {
-		req, _ := http.NewRequest("DELETE", ts.URL+"/api/v1.0/issuer/admin/clients/"+clientID, nil)
+		req, _ := http.NewRequest("DELETE", ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients/"+clientID, nil)
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
 		defer resp.Body.Close()
@@ -236,7 +238,7 @@ func TestAdminUpdateClientAPI(t *testing.T) {
 		"scopes": ["openid", "storage.read:/"]
 	}`
 	createResp, err := httpClient.Post(
-		ts.URL+"/api/v1.0/issuer/admin/clients",
+		ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients",
 		"application/json",
 		strings.NewReader(body),
 	)
@@ -250,7 +252,7 @@ func TestAdminUpdateClientAPI(t *testing.T) {
 
 	t.Run("update-grant-types", func(t *testing.T) {
 		updateBody := `{"grant_types": ["refresh_token", "urn:ietf:params:oauth:grant-type:token-exchange"]}`
-		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1.0/issuer/admin/clients/"+clientID, strings.NewReader(updateBody))
+		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients/"+clientID, strings.NewReader(updateBody))
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
@@ -274,7 +276,7 @@ func TestAdminUpdateClientAPI(t *testing.T) {
 
 	t.Run("update-scopes-only", func(t *testing.T) {
 		updateBody := `{"scopes": ["openid", "storage.read:/", "storage.modify:/"]}`
-		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1.0/issuer/admin/clients/"+clientID, strings.NewReader(updateBody))
+		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients/"+clientID, strings.NewReader(updateBody))
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
@@ -296,7 +298,7 @@ func TestAdminUpdateClientAPI(t *testing.T) {
 
 	t.Run("update-invalid-grant-type", func(t *testing.T) {
 		updateBody := `{"grant_types": ["bogus_grant"]}`
-		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1.0/issuer/admin/clients/"+clientID, strings.NewReader(updateBody))
+		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients/"+clientID, strings.NewReader(updateBody))
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
@@ -307,7 +309,7 @@ func TestAdminUpdateClientAPI(t *testing.T) {
 
 	t.Run("update-empty-grant-types", func(t *testing.T) {
 		updateBody := `{"grant_types": []}`
-		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1.0/issuer/admin/clients/"+clientID, strings.NewReader(updateBody))
+		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients/"+clientID, strings.NewReader(updateBody))
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
@@ -318,7 +320,7 @@ func TestAdminUpdateClientAPI(t *testing.T) {
 
 	t.Run("update-nonexistent", func(t *testing.T) {
 		updateBody := `{"scopes": ["openid"]}`
-		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1.0/issuer/admin/clients/nonexistent-id", strings.NewReader(updateBody))
+		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients/nonexistent-id", strings.NewReader(updateBody))
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
@@ -340,7 +342,7 @@ func TestTokenExchange(t *testing.T) {
 		"scopes": ["openid", "offline_access", "storage.read:/", "storage.modify:/"]
 	}`
 	createResp, err := httpClient.Post(
-		ts.URL+"/api/v1.0/issuer/admin/clients",
+		ts.URL+"/api/v1.0/issuer/ns/test/ns/admin/clients",
 		"application/json",
 		strings.NewReader(body),
 	)
@@ -363,7 +365,7 @@ func TestTokenExchange(t *testing.T) {
 			"subject_token_type": {"urn:ietf:params:oauth:token-type:access_token"},
 			"scope":              {"storage.read:/"},
 		}
-		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/token", strings.NewReader(form.Encode()))
+		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/token", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.SetBasicAuth(teClientID, teClientSecret)
 
@@ -387,7 +389,7 @@ func TestTokenExchange(t *testing.T) {
 			"subject_token":      {subjectToken},
 			"subject_token_type": {"urn:ietf:params:oauth:token-type:access_token"},
 		}
-		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/token", strings.NewReader(form.Encode()))
+		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/token", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.SetBasicAuth(teClientID, teClientSecret)
 
@@ -402,7 +404,7 @@ func TestTokenExchange(t *testing.T) {
 		form := url.Values{
 			"grant_type": {"urn:ietf:params:oauth:grant-type:token-exchange"},
 		}
-		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/token", strings.NewReader(form.Encode()))
+		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/token", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.SetBasicAuth(teClientID, teClientSecret)
 
@@ -419,7 +421,7 @@ func TestTokenExchange(t *testing.T) {
 			"subject_token":      {"not.a.valid.jwt"},
 			"subject_token_type": {"urn:ietf:params:oauth:token-type:access_token"},
 		}
-		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/token", strings.NewReader(form.Encode()))
+		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/token", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.SetBasicAuth(teClientID, teClientSecret)
 
@@ -437,7 +439,7 @@ func TestTokenExchange(t *testing.T) {
 			"subject_token":      {subjectToken},
 			"subject_token_type": {"urn:ietf:params:oauth:token-type:access_token"},
 		}
-		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/token", strings.NewReader(form.Encode()))
+		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/token", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.SetBasicAuth(testClientID, testSecret)
 
@@ -458,7 +460,7 @@ func TestTokenExchange(t *testing.T) {
 			"subject_token":      {subjectToken},
 			"subject_token_type": {"urn:ietf:params:oauth:token-type:refresh_token"},
 		}
-		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/token", strings.NewReader(form.Encode()))
+		req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/token", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.SetBasicAuth(teClientID, teClientSecret)
 
@@ -476,7 +478,7 @@ func mintTestAccessToken(t *testing.T, provider *OIDCProvider, baseURL string) s
 	t.Helper()
 
 	ctx := context.Background()
-	issuerURL := "https://test-origin.example.com"
+	issuerURL := IssuerURLForNamespace(testNamespace)
 
 	session := DefaultOIDCSession(testUser, issuerURL, testGroups,
 		[]string{"openid", "storage.read:/", "storage.modify:/"})
@@ -554,7 +556,7 @@ func TestDiscoveryIncludesTokenExchange(t *testing.T) {
 	_, ts := setupAdminTestServer(t)
 	httpClient := ts.Client()
 
-	resp, err := httpClient.Get(ts.URL + "/api/v1.0/issuer/.well-known/openid-configuration")
+	resp, err := httpClient.Get(ts.URL + "/api/v1.0/issuer/ns/test/ns/.well-known/openid-configuration")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 

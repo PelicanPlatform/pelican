@@ -3478,6 +3478,17 @@ root_default: []
 default: []
 components: ["origin"]
 ---
+name: Issuer.PublicClientID
+description: |+
+  The client ID used for the pre-seeded public OAuth2 client.
+  This client uses PKCE for security and does not require a client secret
+  (token_endpoint_auth_method is "none").
+  It is intended for browser-based applications such as the Pelican web viewer.
+type: string
+default: "pelican-public-client"
+hidden: true
+components: ["origin"]
+---
 ###################################
 #   Server's OIDC Configuration   #
 ###################################

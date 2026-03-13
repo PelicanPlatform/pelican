@@ -48,11 +48,12 @@ import (
 )
 
 const (
-	testUser     = "testuser"
-	testUserID   = "testuser"
-	testClientID = "test-integration-client"
-	testSecret   = "test-client-secret"
-	testRedirect = "https://localhost/callback"
+	testUser      = "testuser"
+	testUserID    = "testuser"
+	testClientID  = "test-integration-client"
+	testSecret    = "test-client-secret"
+	testRedirect  = "https://localhost/callback"
+	testNamespace = "/test/ns"
 )
 
 var testGroups = []string{"/collab/analysis", "/collab/production"}
@@ -99,7 +100,8 @@ func setupIntegration(t *testing.T) (*OIDCProvider, *httptest.Server) {
 	require.NoError(t, dbutils.MigrateServerSpecificDB(sqlDB, database.EmbedOriginMigrations, "origin_migrations", "origin"))
 
 	gracePeriod := 5 * time.Minute
-	provider, err := NewOIDCProvider(db, "https://test-origin.example.com", gracePeriod)
+	issuerURL := IssuerURLForNamespace(testNamespace)
+	provider, err := NewOIDCProvider(db, issuerURL, gracePeriod, testNamespace)
 	require.NoError(t, err)
 
 	// Register a test client with known secret
@@ -118,7 +120,9 @@ func setupIntegration(t *testing.T) (*OIDCProvider, *httptest.Server) {
 		c.Next()
 	})
 
-	RegisterRoutesWithMiddleware(engine, provider)
+	registry := NewProviderRegistry()
+	registry.Register(testNamespace, provider)
+	RegisterRoutesWithMiddleware(engine, registry)
 
 	ts := httptest.NewTLSServer(engine)
 	t.Cleanup(ts.Close)
@@ -145,13 +149,13 @@ func approveDeviceCode(t *testing.T, httpClient *http.Client, baseURL, userCode 
 	t.Helper()
 
 	// GET the device page to receive the CSRF cookie
-	verifyURL := baseURL + "/api/v1.0/issuer/device?user_code=" + url.QueryEscape(userCode)
+	verifyURL := baseURL + "/api/v1.0/issuer/ns/test/ns/device?user_code=" + url.QueryEscape(userCode)
 	getResp, err := httpClient.Get(verifyURL)
 	require.NoError(t, err)
 	getResp.Body.Close()
 
 	// Extract the CSRF token from the cookie jar (must use the cookie's path)
-	cookieURL, err := url.Parse(baseURL + "/api/v1.0/issuer/device")
+	cookieURL, err := url.Parse(baseURL + "/api/v1.0/issuer/ns/test/ns/device")
 	require.NoError(t, err)
 	var csrfToken string
 	for _, c := range httpClient.Jar.Cookies(cookieURL) {
@@ -168,7 +172,7 @@ func approveDeviceCode(t *testing.T, httpClient *http.Client, baseURL, userCode 
 		"action":     {"approve"},
 		"csrf_token": {csrfToken},
 	}
-	approveResp, err := httpClient.PostForm(baseURL+"/api/v1.0/issuer/device", approveForm)
+	approveResp, err := httpClient.PostForm(baseURL+"/api/v1.0/issuer/ns/test/ns/device", approveForm)
 	require.NoError(t, err)
 	return approveResp
 }
@@ -195,7 +199,7 @@ func validateWLCGToken(t *testing.T, tokenStr string, provider *OIDCProvider) jw
 
 	// Basic JWT claims
 	assert.NotEmpty(t, tok.Issuer(), "iss claim should be present")
-	assert.Equal(t, "https://test-origin.example.com", tok.Issuer(), "iss should match provider issuer")
+	assert.Equal(t, IssuerURLForNamespace(testNamespace), tok.Issuer(), "iss should match provider issuer")
 	assert.NotEmpty(t, tok.Subject(), "sub claim should be present")
 	assert.False(t, tok.IssuedAt().IsZero(), "iat claim should be present")
 	assert.False(t, tok.Expiration().IsZero(), "exp claim should be present")
@@ -223,7 +227,7 @@ func TestIntegrationAuthorizationCodeGrant(t *testing.T) {
 	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	codeChallenge := generateCodeChallenge(codeVerifier)
 
-	authURL := ts.URL + "/api/v1.0/issuer/authorize?" + url.Values{
+	authURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/authorize?" + url.Values{
 		"response_type":         {"code"},
 		"client_id":             {testClientID},
 		"redirect_uri":          {testRedirect},
@@ -313,7 +317,7 @@ func TestIntegrationDeviceCodeGrant(t *testing.T) {
 		"client_secret": {testSecret},
 		"scope":         {"openid offline_access storage.read:/data/analysis"},
 	}
-	resp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/device_authorization", form)
+	resp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/ns/test/ns/device_authorization", form)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -326,7 +330,7 @@ func TestIntegrationDeviceCodeGrant(t *testing.T) {
 	assert.NotEmpty(t, deviceResp.DeviceCode, "should return device_code")
 	assert.NotEmpty(t, deviceResp.UserCode, "should return user_code")
 	assert.True(t, deviceResp.ExpiresIn > 0, "should have positive expires_in")
-	assert.Contains(t, deviceResp.VerificationURI, "/api/v1.0/issuer/device")
+	assert.Contains(t, deviceResp.VerificationURI, "/api/v1.0/issuer/ns/test/ns/device")
 
 	// Step 2: Before approval, polling should return authorization_pending
 	tokenForm := url.Values{
@@ -335,7 +339,7 @@ func TestIntegrationDeviceCodeGrant(t *testing.T) {
 		"client_id":     {testClientID},
 		"client_secret": {testSecret},
 	}
-	tokenResp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/token", tokenForm)
+	tokenResp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/ns/test/ns/token", tokenForm)
 	require.NoError(t, err)
 
 	tokenBody, _ := io.ReadAll(tokenResp.Body)
@@ -359,7 +363,7 @@ func TestIntegrationDeviceCodeGrant(t *testing.T) {
 	).Error)
 
 	// Step 4: Poll again - should now succeed
-	tokenResp2, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/token", tokenForm)
+	tokenResp2, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/ns/test/ns/token", tokenForm)
 	require.NoError(t, err)
 
 	tokenBody2, _ := io.ReadAll(tokenResp2.Body)
@@ -394,7 +398,7 @@ func TestIntegrationDynamicClientRegistration(t *testing.T) {
 	}`
 
 	resp, err := httpClient.Post(
-		ts.URL+"/api/v1.0/issuer/oidc-cm",
+		ts.URL+"/api/v1.0/issuer/ns/test/ns/oidc-cm",
 		"application/json",
 		strings.NewReader(regBody),
 	)
@@ -416,7 +420,7 @@ func TestIntegrationIssuerDiscovery(t *testing.T) {
 	_, ts := setupIntegration(t)
 	httpClient := ts.Client()
 
-	resp, err := httpClient.Get(ts.URL + "/api/v1.0/issuer/.well-known/openid-configuration")
+	resp, err := httpClient.Get(ts.URL + "/api/v1.0/issuer/ns/test/ns/.well-known/openid-configuration")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -426,7 +430,7 @@ func TestIntegrationIssuerDiscovery(t *testing.T) {
 	var discovery map[string]interface{}
 	require.NoError(t, json.Unmarshal(body, &discovery))
 
-	assert.Equal(t, "https://test-origin.example.com", discovery["issuer"])
+	assert.Equal(t, IssuerURLForNamespace(testNamespace), discovery["issuer"])
 	assert.NotEmpty(t, discovery["token_endpoint"])
 	assert.NotEmpty(t, discovery["authorization_endpoint"])
 	assert.NotEmpty(t, discovery["device_authorization_endpoint"])
@@ -452,7 +456,7 @@ func TestIntegrationTokenIntrospection(t *testing.T) {
 	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	codeChallenge := generateCodeChallenge(codeVerifier)
 
-	authURL := ts.URL + "/api/v1.0/issuer/authorize?" + url.Values{
+	authURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/authorize?" + url.Values{
 		"response_type":         {"code"},
 		"client_id":             {testClientID},
 		"redirect_uri":          {testRedirect},
@@ -474,7 +478,7 @@ func TestIntegrationTokenIntrospection(t *testing.T) {
 	accessToken := tokenResult["access_token"].(string)
 
 	// Introspect the token via userinfo
-	req, _ := http.NewRequest("GET", ts.URL+"/api/v1.0/issuer/userinfo", nil)
+	req, _ := http.NewRequest("GET", ts.URL+"/api/v1.0/issuer/ns/test/ns/userinfo", nil)
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	uiResp, err := httpClient.Do(req)
 	require.NoError(t, err)
@@ -503,7 +507,7 @@ func TestStateParameterValidation(t *testing.T) {
 		codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 		codeChallenge := generateCodeChallenge(codeVerifier)
 
-		authURL := ts.URL + "/api/v1.0/issuer/authorize?" + url.Values{
+		authURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/authorize?" + url.Values{
 			"response_type":         {"code"},
 			"client_id":             {testClientID},
 			"redirect_uri":          {testRedirect},
@@ -534,7 +538,7 @@ func TestStateParameterValidation(t *testing.T) {
 		codeChallenge := generateCodeChallenge(codeVerifier)
 
 		// No state parameter
-		authURL := ts.URL + "/api/v1.0/issuer/authorize?" + url.Values{
+		authURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/authorize?" + url.Values{
 			"response_type":         {"code"},
 			"client_id":             {testClientID},
 			"redirect_uri":          {testRedirect},
@@ -568,7 +572,7 @@ func TestPKCEWrongVerifier(t *testing.T) {
 	correctVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	codeChallenge := generateCodeChallenge(correctVerifier)
 
-	authURL := ts.URL + "/api/v1.0/issuer/authorize?" + url.Values{
+	authURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/authorize?" + url.Values{
 		"response_type":         {"code"},
 		"client_id":             {testClientID},
 		"redirect_uri":          {testRedirect},
@@ -597,7 +601,7 @@ func TestPKCEWrongVerifier(t *testing.T) {
 		"code_verifier": {"completely-wrong-verifier-that-does-not-match"},
 	}
 
-	req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/token",
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/token",
 		strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetBasicAuth(testClientID, testSecret)
@@ -630,7 +634,7 @@ func TestInvalidClientCredentials(t *testing.T) {
 	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	codeChallenge := generateCodeChallenge(codeVerifier)
 
-	authURL := ts.URL + "/api/v1.0/issuer/authorize?" + url.Values{
+	authURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/authorize?" + url.Values{
 		"response_type":         {"code"},
 		"client_id":             {testClientID},
 		"redirect_uri":          {testRedirect},
@@ -659,7 +663,7 @@ func TestInvalidClientCredentials(t *testing.T) {
 		"code_verifier": {codeVerifier},
 	}
 
-	req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/token",
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/token",
 		strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetBasicAuth(testClientID, "totally-wrong-secret")
@@ -686,7 +690,7 @@ func TestAuthCodeReplay(t *testing.T) {
 	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	codeChallenge := generateCodeChallenge(codeVerifier)
 
-	authURL := ts.URL + "/api/v1.0/issuer/authorize?" + url.Values{
+	authURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/authorize?" + url.Values{
 		"response_type":         {"code"},
 		"client_id":             {testClientID},
 		"redirect_uri":          {testRedirect},
@@ -718,7 +722,7 @@ func TestAuthCodeReplay(t *testing.T) {
 		"code_verifier": {codeVerifier},
 	}
 
-	req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/token",
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/token",
 		strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetBasicAuth(testClientID, testSecret)
@@ -745,7 +749,7 @@ func TestRefreshTokenPostGracePeriod(t *testing.T) {
 	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	codeChallenge := generateCodeChallenge(codeVerifier)
 
-	authURL := ts.URL + "/api/v1.0/issuer/authorize?" + url.Values{
+	authURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/authorize?" + url.Values{
 		"response_type":         {"code"},
 		"client_id":             {testClientID},
 		"redirect_uri":          {testRedirect},
@@ -785,7 +789,7 @@ func TestRefreshTokenPostGracePeriod(t *testing.T) {
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {originalRefresh},
 	}
-	req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/token",
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/token",
 		strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetBasicAuth(testClientID, testSecret)
@@ -814,7 +818,7 @@ func TestScopeDownscoping(t *testing.T) {
 	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	codeChallenge := generateCodeChallenge(codeVerifier)
 
-	authURL := ts.URL + "/api/v1.0/issuer/authorize?" + url.Values{
+	authURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/authorize?" + url.Values{
 		"response_type":         {"code"},
 		"client_id":             {testClientID},
 		"redirect_uri":          {testRedirect},
@@ -882,7 +886,7 @@ func TestDeviceCodeDenyFlow(t *testing.T) {
 		"client_secret": {testSecret},
 		"scope":         {"openid"},
 	}
-	resp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/device_authorization", form)
+	resp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/ns/test/ns/device_authorization", form)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -893,13 +897,13 @@ func TestDeviceCodeDenyFlow(t *testing.T) {
 	require.NoError(t, json.Unmarshal(body, &deviceResp))
 
 	// Deny the device code via the verification page (CSRF-protected)
-	verifyURL := ts.URL + "/api/v1.0/issuer/device?user_code=" + url.QueryEscape(deviceResp.UserCode)
+	verifyURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/device?user_code=" + url.QueryEscape(deviceResp.UserCode)
 	getResp, err := httpClient.Get(verifyURL)
 	require.NoError(t, err)
 	getResp.Body.Close()
 
 	// Extract CSRF token from cookie jar
-	cookieURL, _ := url.Parse(ts.URL + "/api/v1.0/issuer/device")
+	cookieURL, _ := url.Parse(ts.URL + "/api/v1.0/issuer/ns/test/ns/device")
 	var csrfToken string
 	for _, c := range httpClient.Jar.Cookies(cookieURL) {
 		if c.Name == "csrf_token" {
@@ -915,7 +919,7 @@ func TestDeviceCodeDenyFlow(t *testing.T) {
 		"action":     {"deny"},
 		"csrf_token": {csrfToken},
 	}
-	denyResp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/device", denyForm)
+	denyResp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/ns/test/ns/device", denyForm)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, denyResp.StatusCode)
 	denyResp.Body.Close()
@@ -930,7 +934,7 @@ func TestDeviceCodeDenyFlow(t *testing.T) {
 		"client_id":     {testClientID},
 		"client_secret": {testSecret},
 	}
-	tokenResp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/token", tokenForm)
+	tokenResp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/ns/test/ns/token", tokenForm)
 	require.NoError(t, err)
 	tokenBody, _ := io.ReadAll(tokenResp.Body)
 	tokenResp.Body.Close()
@@ -953,7 +957,7 @@ func TestTokenRevocationFlow(t *testing.T) {
 	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	codeChallenge := generateCodeChallenge(codeVerifier)
 
-	authURL := ts.URL + "/api/v1.0/issuer/authorize?" + url.Values{
+	authURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/authorize?" + url.Values{
 		"response_type":         {"code"},
 		"client_id":             {testClientID},
 		"redirect_uri":          {testRedirect},
@@ -976,7 +980,7 @@ func TestTokenRevocationFlow(t *testing.T) {
 	accessToken := tokenResult["access_token"].(string)
 
 	// Verify the token works first
-	req, _ := http.NewRequest("GET", ts.URL+"/api/v1.0/issuer/userinfo", nil)
+	req, _ := http.NewRequest("GET", ts.URL+"/api/v1.0/issuer/ns/test/ns/userinfo", nil)
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	uiResp, err := httpClient.Do(req)
 	require.NoError(t, err)
@@ -988,7 +992,7 @@ func TestTokenRevocationFlow(t *testing.T) {
 		"token":           {accessToken},
 		"token_type_hint": {"access_token"},
 	}
-	revokeReq, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/revoke",
+	revokeReq, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/revoke",
 		strings.NewReader(revokeForm.Encode()))
 	revokeReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	revokeReq.SetBasicAuth(testClientID, testSecret)
@@ -1000,7 +1004,7 @@ func TestTokenRevocationFlow(t *testing.T) {
 		"revocation should succeed")
 
 	// Verify the token no longer works at userinfo
-	req2, _ := http.NewRequest("GET", ts.URL+"/api/v1.0/issuer/userinfo", nil)
+	req2, _ := http.NewRequest("GET", ts.URL+"/api/v1.0/issuer/ns/test/ns/userinfo", nil)
 	req2.Header.Set("Authorization", "Bearer "+accessToken)
 	uiResp2, err := httpClient.Do(req2)
 	require.NoError(t, err)
@@ -1015,7 +1019,7 @@ func TestUserInfoWithInvalidToken(t *testing.T) {
 	httpClient := ts.Client()
 
 	t.Run("GarbageToken", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", ts.URL+"/api/v1.0/issuer/userinfo", nil)
+		req, _ := http.NewRequest("GET", ts.URL+"/api/v1.0/issuer/ns/test/ns/userinfo", nil)
 		req.Header.Set("Authorization", "Bearer not-a-real-token-at-all")
 
 		resp, err := httpClient.Do(req)
@@ -1027,7 +1031,7 @@ func TestUserInfoWithInvalidToken(t *testing.T) {
 	})
 
 	t.Run("MissingAuthHeader", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", ts.URL+"/api/v1.0/issuer/userinfo", nil)
+		req, _ := http.NewRequest("GET", ts.URL+"/api/v1.0/issuer/ns/test/ns/userinfo", nil)
 
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
@@ -1049,7 +1053,7 @@ func TestDeviceCodeExpiry(t *testing.T) {
 		"client_secret": {testSecret},
 		"scope":         {"openid"},
 	}
-	resp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/device_authorization", form)
+	resp, err := httpClient.PostForm(ts.URL+"/api/v1.0/issuer/ns/test/ns/device_authorization", form)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -1076,7 +1080,7 @@ func TestDeviceCodeExpiry(t *testing.T) {
 		"device_code": {deviceCode},
 		"client_id":   {testClientID},
 	}
-	tokenReq, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/token",
+	tokenReq, _ := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/token",
 		strings.NewReader(tokenForm.Encode()))
 	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	tokenReq.SetBasicAuth(testClientID, testSecret)
@@ -1103,7 +1107,7 @@ func TestDiscoveryEndpointsReachable(t *testing.T) {
 	httpClient := ts.Client()
 
 	// Fetch discovery document
-	resp, err := httpClient.Get(ts.URL + "/api/v1.0/issuer/.well-known/openid-configuration")
+	resp, err := httpClient.Get(ts.URL + "/api/v1.0/issuer/ns/test/ns/.well-known/openid-configuration")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -1174,7 +1178,7 @@ func exchangeCodeForTokens(t *testing.T, ts *httptest.Server, client *http.Clien
 		"code_verifier": {codeVerifier},
 	}
 
-	req, err := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/token", strings.NewReader(form.Encode()))
+	req, err := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/token", strings.NewReader(form.Encode()))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetBasicAuth(testClientID, testSecret)
@@ -1201,7 +1205,7 @@ func refreshTokens(t *testing.T, ts *httptest.Server, client *http.Client, refre
 		"refresh_token": {refreshToken},
 	}
 
-	req, err := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/token",
+	req, err := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/token",
 		strings.NewReader(form.Encode()))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -1240,7 +1244,7 @@ func TestRefreshTokenUpdatesLastUsedAt(t *testing.T) {
 	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	codeChallenge := generateCodeChallenge(codeVerifier)
 
-	authURL := ts.URL + "/api/v1.0/issuer/authorize?" + url.Values{
+	authURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/authorize?" + url.Values{
 		"response_type":         {"code"},
 		"client_id":             {testClientID},
 		"redirect_uri":          {testRedirect},
@@ -1282,4 +1286,112 @@ func TestRefreshTokenUpdatesLastUsedAt(t *testing.T) {
 	require.NotNil(t, record.LastUsedAt, "last_used_at should be set after refresh")
 	assert.True(t, record.LastUsedAt.After(beforeRefresh),
 		"last_used_at (%v) should be after the refresh started (%v)", record.LastUsedAt, beforeRefresh)
+}
+
+// TestPublicClientPKCE verifies the full authorization code flow with a public
+// client (no secret, token_endpoint_auth_method "none") using PKCE (S256).
+// This exercises the pre-seeded public client intended for browser-based viewers.
+// Public clients do not get refresh tokens (no offline_access scope).
+func TestPublicClientPKCE(t *testing.T) {
+	const publicClientID = "pelican-public-client"
+	const publicRedirect = "https://localhost/viewer/callback"
+
+	provider, ts := setupIntegration(t)
+
+	// Seed the public client
+	err := provider.EnsurePublicClient(context.Background(), publicClientID, []string{publicRedirect})
+	require.NoError(t, err)
+
+	httpClient := ts.Client()
+	httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
+	// Step 1: Authorization request with PKCE (no offline_access)
+	codeVerifier := "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+	codeChallenge := generateCodeChallenge(codeVerifier)
+
+	authURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/authorize?" + url.Values{
+		"response_type":         {"code"},
+		"client_id":             {publicClientID},
+		"redirect_uri":          {publicRedirect},
+		"scope":                 {"openid storage.read:/data/analysis"},
+		"state":                 {"public-state"},
+		"code_challenge":        {codeChallenge},
+		"code_challenge_method": {"S256"},
+	}.Encode()
+
+	resp, err := httpClient.Get(authURL)
+	require.NoError(t, err)
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	require.True(t, resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusFound,
+		"authorize should redirect, got %d: %s", resp.StatusCode, string(bodyBytes))
+
+	location := resp.Header.Get("Location")
+	require.NotEmpty(t, location)
+	redirectURL, err := url.Parse(location)
+	require.NoError(t, err)
+	code := redirectURL.Query().Get("code")
+	require.NotEmpty(t, code, "redirect should contain authorization code")
+	assert.Equal(t, "public-state", redirectURL.Query().Get("state"))
+
+	// Step 2: Exchange code for tokens — NO client secret, just client_id + code_verifier
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"redirect_uri":  {publicRedirect},
+		"client_id":     {publicClientID},
+		"code_verifier": {codeVerifier},
+	}
+	req, err := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/token",
+		strings.NewReader(form.Encode()))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// Deliberately NO BasicAuth — public client
+
+	tokenHTTPResp, err := httpClient.Do(req)
+	require.NoError(t, err)
+	tokenBody, _ := io.ReadAll(tokenHTTPResp.Body)
+	tokenHTTPResp.Body.Close()
+	require.Equal(t, http.StatusOK, tokenHTTPResp.StatusCode,
+		"public client token exchange should succeed, body: %s", string(tokenBody))
+
+	var tokenResp map[string]interface{}
+	require.NoError(t, json.Unmarshal(tokenBody, &tokenResp))
+
+	accessToken, ok := tokenResp["access_token"].(string)
+	require.True(t, ok && accessToken != "", "should receive access_token")
+
+	// Public clients should NOT receive a refresh token
+	_, hasRefresh := tokenResp["refresh_token"]
+	assert.False(t, hasRefresh, "public client should not receive refresh_token")
+
+	// Step 3: Validate WLCG token
+	tok := validateWLCGToken(t, accessToken, provider)
+	assert.Equal(t, testUser, tok.Subject())
+
+	scopeClaim, _ := tok.Get("scope")
+	if scopeStr, ok := scopeClaim.(string); ok {
+		assert.Contains(t, scopeStr, "storage.read:/data/analysis")
+	}
+
+	// Step 4: Token exchange without PKCE verifier should fail
+	badForm := url.Values{
+		"grant_type":   {"authorization_code"},
+		"code":         {code},
+		"redirect_uri": {publicRedirect},
+		"client_id":    {publicClientID},
+		// Missing code_verifier — must fail
+	}
+	badReq, err := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/token",
+		strings.NewReader(badForm.Encode()))
+	require.NoError(t, err)
+	badReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	badResp, err := httpClient.Do(badReq)
+	require.NoError(t, err)
+	badResp.Body.Close()
+	assert.NotEqual(t, http.StatusOK, badResp.StatusCode,
+		"token exchange without code_verifier should fail for public client")
 }

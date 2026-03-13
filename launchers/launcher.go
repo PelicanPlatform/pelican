@@ -234,8 +234,26 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	}
 
 	if param.Origin_EnableIssuer.GetBool() {
-		oa4mpHealthCheckUrl := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/issuer/.well-known/openid-configuration"
-		if err = server_utils.WaitUntilWorking(ctx, "GET", oa4mpHealthCheckUrl, "Issuer", http.StatusOK, true); err != nil {
+		issuerMode := param.Origin_IssuerMode.GetString()
+		var issuerHealthCheckUrl string
+		if issuerMode == "embedded" || issuerMode == "" {
+			// For the embedded issuer, use the first auth-requiring export's namespace.
+			originExports, exErr := server_utils.GetOriginExports()
+			if exErr == nil {
+				for _, oe := range originExports {
+					if (oe.Capabilities.Reads && !oe.Capabilities.PublicReads) || oe.Capabilities.Writes {
+						issuerHealthCheckUrl = param.Server_ExternalWebUrl.GetString() +
+							"/api/v1.0/issuer/ns" + oe.FederationPrefix + "/.well-known/openid-configuration"
+						break
+					}
+				}
+			}
+		}
+		if issuerHealthCheckUrl == "" {
+			// Fallback for OA4MP mode or if no auth-requiring export found
+			issuerHealthCheckUrl = param.Server_ExternalWebUrl.GetString() + "/api/v1.0/issuer/.well-known/openid-configuration"
+		}
+		if err = server_utils.WaitUntilWorking(ctx, "GET", issuerHealthCheckUrl, "Issuer", http.StatusOK, true); err != nil {
 			log.Errorln("Failed to startup issuer component: ", err)
 			return
 		}

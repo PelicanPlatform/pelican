@@ -104,19 +104,48 @@ func createOidcConfigExporter(isDirector bool) func(ctx *gin.Context) {
 			Issuer:  issuerStr,
 			JwksUri: jwskUrl,
 		}
-		// If we have the built-in issuer enabled, fill in the URLs for OA4MP
+		// If we have the built-in issuer enabled, fill in the URLs.
+		// For the embedded issuer, endpoints are scoped per-namespace.
+		// The server-level discovery uses the first auth-requiring export's
+		// namespace for backward compatibility; clients should use the
+		// per-namespace discovery endpoints at /api/v1.0/issuer/ns/<prefix>/.well-known/openid-configuration.
 		if param.Origin_EnableIssuer.GetBool() {
-			serviceUri := issuerStr + "/api/v1.0/issuer"
-			cfg.TokenEndpoint = serviceUri + "/token"
-			cfg.UserInfoEndpoint = serviceUri + "/userinfo"
-			cfg.RevocationEndpoint = serviceUri + "/revoke"
-			cfg.GrantTypesSupported = []string{"refresh_token", "urn:ietf:params:oauth:grant-type:device_code", "authorization_code"}
-			cfg.ScopesSupported = []string{"openid", "offline_access", "wlcg", "storage.read:/",
-				"storage.modify:/", "storage.create:/"}
-			cfg.TokenAuthMethods = []string{"client_secret_basic", "client_secret_post"}
-			cfg.RegistrationEndpoint = serviceUri + "/oidc-cm"
-			cfg.DeviceEndpoint = serviceUri + "/device_authorization"
-			cfg.AuthorizationEndpoint = serviceUri + "/authorize"
+			issuerMode := param.Origin_IssuerMode.GetString()
+			if issuerMode == "embedded" || issuerMode == "" {
+				originExports, exErr := GetOriginExports()
+				if exErr == nil {
+					for _, oe := range originExports {
+						if (oe.Capabilities.Reads && !oe.Capabilities.PublicReads) || oe.Capabilities.Writes {
+							serviceUri := issuerStr + "/api/v1.0/issuer/ns" + oe.FederationPrefix
+							cfg.Issuer = serviceUri
+							cfg.TokenEndpoint = serviceUri + "/token"
+							cfg.UserInfoEndpoint = serviceUri + "/userinfo"
+							cfg.RevocationEndpoint = serviceUri + "/revoke"
+							cfg.GrantTypesSupported = []string{"refresh_token", "urn:ietf:params:oauth:grant-type:device_code", "authorization_code"}
+							cfg.ScopesSupported = []string{"openid", "offline_access", "wlcg", "storage.read:/",
+								"storage.modify:/", "storage.create:/"}
+							cfg.TokenAuthMethods = []string{"client_secret_basic", "client_secret_post"}
+							cfg.RegistrationEndpoint = serviceUri + "/oidc-cm"
+							cfg.DeviceEndpoint = serviceUri + "/device_authorization"
+							cfg.AuthorizationEndpoint = serviceUri + "/authorize"
+							break
+						}
+					}
+				}
+			} else {
+				// OA4MP mode — legacy single-issuer endpoints
+				serviceUri := issuerStr + "/api/v1.0/issuer"
+				cfg.TokenEndpoint = serviceUri + "/token"
+				cfg.UserInfoEndpoint = serviceUri + "/userinfo"
+				cfg.RevocationEndpoint = serviceUri + "/revoke"
+				cfg.GrantTypesSupported = []string{"refresh_token", "urn:ietf:params:oauth:grant-type:device_code", "authorization_code"}
+				cfg.ScopesSupported = []string{"openid", "offline_access", "wlcg", "storage.read:/",
+					"storage.modify:/", "storage.create:/"}
+				cfg.TokenAuthMethods = []string{"client_secret_basic", "client_secret_post"}
+				cfg.RegistrationEndpoint = serviceUri + "/oidc-cm"
+				cfg.DeviceEndpoint = serviceUri + "/device_authorization"
+				cfg.AuthorizationEndpoint = serviceUri + "/authorize"
+			}
 		}
 
 		ctx.Header("Content-Disposition", "attachment; filename=pelican-oidc-configuration.json")

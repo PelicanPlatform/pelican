@@ -36,8 +36,9 @@ import (
 )
 
 const (
-	// issuerAdminClientsAPIPath is the API path for admin client management.
-	issuerAdminClientsAPIPath = "/api/v1.0/issuer/admin/clients"
+	// issuerAdminClientsAPISuffix is the API path suffix for admin client management,
+	// appended after the per-namespace issuer prefix.
+	issuerAdminClientsAPISuffix = "/admin/clients"
 )
 
 var (
@@ -54,6 +55,7 @@ var (
 
 	issuerClientServerURL  string
 	issuerClientTokenPath  string
+	issuerClientNamespace  string
 	issuerClientGrantTypes string
 	issuerClientScopes     string
 
@@ -112,6 +114,10 @@ func init() {
 
 	originIssuerClientCmd.PersistentFlags().StringVar(&issuerClientServerURL, "server", "", "Web URL of the Pelican origin server (e.g. https://my-origin:8447)")
 	originIssuerClientCmd.PersistentFlags().StringVar(&issuerClientTokenPath, "token", "", "Path to a file containing an admin token (optional; generated automatically if omitted)")
+	originIssuerClientCmd.PersistentFlags().StringVar(&issuerClientNamespace, "namespace", "", "Federation namespace prefix for the issuer (e.g. /data/analysis) (required)")
+	if err := originIssuerClientCmd.MarkPersistentFlagRequired("namespace"); err != nil {
+		log.Errorln("Failed to mark namespace flag as required:", err)
+	}
 
 	// Create sub-command
 	originIssuerClientCmd.AddCommand(originIssuerClientCreateCmd)
@@ -139,6 +145,12 @@ func init() {
 	if err := originIssuerClientDeleteCmd.MarkFlagRequired("id"); err != nil {
 		log.Errorln("Failed to mark id flag as required:", err)
 	}
+}
+
+// issuerAdminClientsAPIPath returns the full admin clients API path
+// for the configured namespace.
+func issuerAdminClientsAPIPath() string {
+	return "/api/v1.0/issuer/ns" + issuerClientNamespace + issuerAdminClientsAPISuffix
 }
 
 // constructIssuerAdminURL validates the server URL and returns the full admin API endpoint.
@@ -185,7 +197,7 @@ func issuerClientCreateRun(cmd *cobra.Command, args []string) error {
 		scopes = splitAndTrim(issuerClientScopes)
 	}
 
-	targetURL, err := constructIssuerAdminURL(issuerClientServerURL, issuerAdminClientsAPIPath)
+	targetURL, err := constructIssuerAdminURL(issuerClientServerURL, issuerAdminClientsAPIPath())
 	if err != nil {
 		return err
 	}
@@ -263,7 +275,7 @@ func issuerClientListRun(cmd *cobra.Command, args []string) error {
 		log.Errorln("Failed to initialize client:", err)
 	}
 
-	targetURL, err := constructIssuerAdminURL(issuerClientServerURL, issuerAdminClientsAPIPath)
+	targetURL, err := constructIssuerAdminURL(issuerClientServerURL, issuerAdminClientsAPIPath())
 	if err != nil {
 		return err
 	}
@@ -350,7 +362,7 @@ func issuerClientUpdateRun(cmd *cobra.Command, args []string) error {
 		return errors.New("At least one of --grant-types or --scopes must be provided")
 	}
 
-	targetURL, err := constructIssuerAdminURL(issuerClientServerURL, issuerAdminClientsAPIPath+"/"+url.PathEscape(issuerClientUpdateID))
+	targetURL, err := constructIssuerAdminURL(issuerClientServerURL, issuerAdminClientsAPIPath()+"/"+url.PathEscape(issuerClientUpdateID))
 	if err != nil {
 		return err
 	}
@@ -425,7 +437,7 @@ func issuerClientDeleteRun(cmd *cobra.Command, args []string) error {
 		return errors.New("--id flag is required")
 	}
 
-	targetURL, err := constructIssuerAdminURL(issuerClientServerURL, issuerAdminClientsAPIPath+"/"+url.PathEscape(issuerClientDeleteID))
+	targetURL, err := constructIssuerAdminURL(issuerClientServerURL, issuerAdminClientsAPIPath()+"/"+url.PathEscape(issuerClientDeleteID))
 	if err != nil {
 		return err
 	}

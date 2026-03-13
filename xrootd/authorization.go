@@ -1334,18 +1334,49 @@ func EmitIssuerMetadata(exportPath string, xServeUrl string) error {
 		JwksUri: jwksUrl.String(),
 	}
 
-	// If we have the built-in issuer enabled, fill in the URLs for OA4MP
+	// If we have the built-in issuer enabled, fill in the URLs.
+	// For the embedded issuer, endpoints are scoped per-namespace under
+	// /api/v1.0/issuer/ns/<prefix>/*. The XRootD-level discovery document
+	// uses the first non-public export's namespace for backward compatibility;
+	// clients should use the per-namespace discovery endpoints directly.
 	if param.Origin_EnableIssuer.GetBool() {
-		serviceUri := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/issuer"
-		cfg.TokenEndpoint = serviceUri + "/token"
-		cfg.UserInfoEndpoint = serviceUri + "/userinfo"
-		cfg.RevocationEndpoint = serviceUri + "/revoke"
-		cfg.GrantTypesSupported = []string{"refresh_token", "urn:ietf:params:oauth:grant-type:device_code", "authorization_code"}
-		cfg.ScopesSupported = []string{"openid", "offline_access", "wlcg", "storage.read:/",
-			"storage.modify:/", "storage.create:/"}
-		cfg.TokenAuthMethods = []string{"client_secret_basic", "client_secret_post"}
-		cfg.RegistrationEndpoint = serviceUri + "/oidc-cm"
-		cfg.DeviceEndpoint = serviceUri + "/device_authorization"
+		issuerMode := param.Origin_IssuerMode.GetString()
+		if issuerMode == "embedded" || issuerMode == "" {
+			// Find the first export that needs auth to determine the namespace
+			originExports, _ := server_utils.GetOriginExports()
+			var nsPrefix string
+			for _, oe := range originExports {
+				if (oe.Capabilities.Reads && !oe.Capabilities.PublicReads) || oe.Capabilities.Writes {
+					nsPrefix = oe.FederationPrefix
+					break
+				}
+			}
+			if nsPrefix != "" {
+				serviceUri := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/issuer/ns" + nsPrefix
+				cfg.Issuer = param.Server_ExternalWebUrl.GetString() + "/api/v1.0/issuer/ns" + nsPrefix
+				cfg.TokenEndpoint = serviceUri + "/token"
+				cfg.UserInfoEndpoint = serviceUri + "/userinfo"
+				cfg.RevocationEndpoint = serviceUri + "/revoke"
+				cfg.GrantTypesSupported = []string{"refresh_token", "urn:ietf:params:oauth:grant-type:device_code", "authorization_code"}
+				cfg.ScopesSupported = []string{"openid", "offline_access", "wlcg", "storage.read:/",
+					"storage.modify:/", "storage.create:/"}
+				cfg.TokenAuthMethods = []string{"client_secret_basic", "client_secret_post"}
+				cfg.RegistrationEndpoint = serviceUri + "/oidc-cm"
+				cfg.DeviceEndpoint = serviceUri + "/device_authorization"
+			}
+		} else {
+			// OA4MP mode — legacy single-issuer endpoints
+			serviceUri := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/issuer"
+			cfg.TokenEndpoint = serviceUri + "/token"
+			cfg.UserInfoEndpoint = serviceUri + "/userinfo"
+			cfg.RevocationEndpoint = serviceUri + "/revoke"
+			cfg.GrantTypesSupported = []string{"refresh_token", "urn:ietf:params:oauth:grant-type:device_code", "authorization_code"}
+			cfg.ScopesSupported = []string{"openid", "offline_access", "wlcg", "storage.read:/",
+				"storage.modify:/", "storage.create:/"}
+			cfg.TokenAuthMethods = []string{"client_secret_basic", "client_secret_post"}
+			cfg.RegistrationEndpoint = serviceUri + "/oidc-cm"
+			cfg.DeviceEndpoint = serviceUri + "/device_authorization"
+		}
 	}
 
 	buf, err = json.MarshalIndent(cfg, "", " ")

@@ -314,7 +314,17 @@ func validateFederationPrefix(prefix string) error {
 // configure one using the server's issuer URL (which may also be the server's external web URL -- see
 // config.GetServerIssuerURL()). Not all exports require an issuer, so we skip configuration if the
 // origin doesn't require one (e.g. public reads or no writes).
+//
+// When the embedded OIDC issuer is enabled (Origin.EnableIssuer=true, IssuerMode=embedded),
+// each export receives a per-namespace issuer URL of the form:
+//
+//	<externalWebUrl>/api/v1.0/issuer/ns/<federationPrefix>
+//
+// This ensures that each namespace has its own OIDC issuer with isolated clients and tokens.
 func handleIssuersIfNeeded(exports []OriginExport) error {
+	embeddedIssuer := param.Origin_EnableIssuer.GetBool() &&
+		(param.Origin_IssuerMode.GetString() == "embedded" || param.Origin_IssuerMode.GetString() == "")
+
 	for i, export := range exports {
 		// If the export doesn't have any issuers in its list, attempt to configure one using the default
 		// server issuer. Generally we shouldn't _require_ an issuer as some exports may be truly public
@@ -328,9 +338,17 @@ func handleIssuersIfNeeded(exports []OriginExport) error {
 				return errors.Errorf("failed to deduce server's issuer URL while assigning default issuer URL to exports. Is '%s' set?", param.Server_IssuerUrl.GetName())
 			}
 
-			log.Warningf("The export for '%s' has no configured Issuer URLs. Using the server's issuer URL '%s' as the default.",
-				export.FederationPrefix, serverIssuerUrl)
-			exports[i].IssuerUrls = append(exports[i].IssuerUrls, serverIssuerUrl)
+			if embeddedIssuer {
+				// Per-namespace issuer URL: the issuer "iss" claim value
+				nsIssuerUrl := serverIssuerUrl + "/api/v1.0/issuer/ns" + export.FederationPrefix
+				log.Infof("The export for '%s' has no configured Issuer URLs. Using per-namespace issuer URL '%s'.",
+					export.FederationPrefix, nsIssuerUrl)
+				exports[i].IssuerUrls = append(exports[i].IssuerUrls, nsIssuerUrl)
+			} else {
+				log.Warningf("The export for '%s' has no configured Issuer URLs. Using the server's issuer URL '%s' as the default.",
+					export.FederationPrefix, serverIssuerUrl)
+				exports[i].IssuerUrls = append(exports[i].IssuerUrls, serverIssuerUrl)
+			}
 		}
 	}
 
