@@ -844,6 +844,8 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
         gcc-c++ \
         graphviz \
         nano \
+        python3.13 \
+        python3.13-pip \
         systemd \
         valgrind \
         vim \
@@ -853,7 +855,7 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
         libcap-devel \
         libuuid-devel \
         openssl-devel \
-        python3-devel \
+        python3.13-devel \
         sqlite-devel \
         tinyxml2-devel \
         zlib-devel \
@@ -868,7 +870,7 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 # Suppress Git's "dubious ownership" warning.
 ENV GOFLAGS="-buildvcs=false"
 
-RUN python3 -m pip --no-cache-dir install pre-commit
+RUN python3.13 -m pip --no-cache-dir install pre-commit
 COPY images/dev-config.yaml /etc/pelican/pelican.yaml
 WORKDIR /app
 COPY ./images/dev-container-entrypoint.sh /dev-container-entrypoint.sh
