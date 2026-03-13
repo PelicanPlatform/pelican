@@ -1459,6 +1459,24 @@ type: string
 default: path
 components: ["origin"]
 ---
+name: Origin.ObjectProviderURL
+description: |+
+  A gocloud.dev/blob-compatible URL that specifies the object store provider and bucket/container to use for the s3v2 storage type.
+  When set, this takes precedence over Origin.S3ServiceUrl, Origin.S3Region, and Origin.S3UrlStyle, allowing a single parameter to
+  configure S3, GCS, or Azure Object Storage.
+
+  Examples:
+    - S3: "s3://my-bucket?region=us-east-1&endpoint=https://s3.us-east-1.amazonaws.com"
+    - GCS: "gs://my-bucket"
+    - Azure: "azblob://my-container"
+
+  The Origin.StoragePrefix is still applied on top of this URL.
+  S3 credentials are still read from Origin.S3AccessKeyfile/S3SecretKeyfile when using s3:// URLs.
+  GCS and Azure use application default credentials from the environment.
+type: string
+default: none
+components: ["origin"]
+---
 name: Origin.HttpServiceUrl
 description: |+
   If Origin.StorageType is set to `https`, the service URL is used as the base for requests to the backend.  To generate the
@@ -1477,6 +1495,40 @@ description: |+
   If the origin backend is configured with the `globus` storage type, any value set here will be overridden with the filepath to
   the file ending in `.tok` found in the $(Origin.GlobusConfigLocation)/tokens directory
 type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.HttpAuthTokenPassthrough
+description: |+
+  When set to true for httpsv2 backends, the client's bearer token is forwarded to the upstream HTTP server
+  instead of using a static token.
+  This is mutually exclusive with Origin.HttpAuthTokenFile.
+type: bool
+default: false
+components: ["origin"]
+---
+name: Origin.HttpAuthOAuth2ClientID
+description: |+
+  When set for httpsv2 backends, configures OAuth2 client credentials for automatic token management
+  to the upstream HTTP server.
+  Requires Origin.HttpAuthOAuth2ClientSecretFile and Origin.HttpAuthOAuth2Issuer to also be set.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.HttpAuthOAuth2ClientSecretFile
+description: |+
+  Path to a file containing the OAuth2 client secret for automatic token management to the upstream HTTP server.
+  The file should contain the secret as plain text (leading/trailing whitespace is trimmed).
+type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.HttpAuthOAuth2Issuer
+description: |+
+  The OAuth2/OIDC issuer URL for automatic token management to the upstream HTTP server.
+  The token endpoint is discovered automatically via the issuer's `/.well-known/openid-configuration` metadata.
+type: string
 default: none
 components: ["origin"]
 ---

@@ -344,6 +344,43 @@ func GetGlobusExportsValues(activeOnly bool) []globusExport {
 	return exps
 }
 
+// GlobusCollectionInfo holds exported Globus collection data for use by
+// native (non-XRootD) backends.
+type GlobusCollectionInfo struct {
+	CollectionID    string
+	HTTPSServer     string
+	CollectionToken *oauth2.Token
+	TransferToken   *oauth2.Token
+	OAuth2Config    *oauth2.Config
+}
+
+// GetActivatedGlobusCollections returns info about all activated Globus collections,
+// suitable for initializing native Globus v2 backends.
+func GetActivatedGlobusCollections() ([]GlobusCollectionInfo, error) {
+	globusExportsMutex.RLock()
+	defer globusExportsMutex.RUnlock()
+
+	authCfg, err := GetGlobusOAuthCfg()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Globus OAuth config: %w", err)
+	}
+
+	var result []GlobusCollectionInfo
+	for cid, exp := range globusExports {
+		if exp.Status != GlobusActivated {
+			continue
+		}
+		result = append(result, GlobusCollectionInfo{
+			CollectionID:    cid,
+			HTTPSServer:     exp.HttpsServer,
+			CollectionToken: exp.Token,
+			TransferToken:   exp.TransferToken,
+			OAuth2Config:    authCfg,
+		})
+	}
+	return result, nil
+}
+
 // Parse the OriginExport to add Globus status for each export for frontend RESTful API
 func originExportToGlobusExport(exps []server_utils.OriginExport) ([]globusExportUI, error) {
 	globusExportsMutex.RLock()
