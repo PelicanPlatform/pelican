@@ -57,7 +57,7 @@ func TestObjectGetDirectFlag(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	require.NoError(t, param.Set(param.Origin_EnableDirectReads.GetName(), true))
-	require.NoError(t, param.Set(param.Logging_DisableProgressBars.GetName(), true))
+	require.NoError(t, param.Set(param.Logging_Client_DisableProgressBars.GetName(), true))
 
 	// Create a test federation with cache and origin
 	fed := fed_test_utils.NewFedTest(t, "")
