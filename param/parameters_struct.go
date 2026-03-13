@@ -288,12 +288,17 @@ type Config struct {
 		GlobusCollectionName string `mapstructure:"globuscollectionname" yaml:"GlobusCollectionName"`
 		GlobusConfigLocation string `mapstructure:"globusconfiglocation" yaml:"GlobusConfigLocation"`
 		GlobusTransferTokenFile string `mapstructure:"globustransfertokenfile" yaml:"GlobusTransferTokenFile"`
+		HttpAuthOAuth2ClientID string `mapstructure:"httpauthoauth2clientid" yaml:"HttpAuthOAuth2ClientID"`
+		HttpAuthOAuth2ClientSecretFile string `mapstructure:"httpauthoauth2clientsecretfile" yaml:"HttpAuthOAuth2ClientSecretFile"`
+		HttpAuthOAuth2Issuer string `mapstructure:"httpauthoauth2issuer" yaml:"HttpAuthOAuth2Issuer"`
 		HttpAuthTokenFile string `mapstructure:"httpauthtokenfile" yaml:"HttpAuthTokenFile"`
+		HttpAuthTokenPassthrough bool `mapstructure:"httpauthtokenpassthrough" yaml:"HttpAuthTokenPassthrough"`
 		HttpServiceUrl string `mapstructure:"httpserviceurl" yaml:"HttpServiceUrl"`
 		IssuerMode string `mapstructure:"issuermode" yaml:"IssuerMode"`
 		Mode string `mapstructure:"mode" yaml:"Mode"`
 		Multiuser bool `mapstructure:"multiuser" yaml:"Multiuser"`
 		NamespacePrefix string `mapstructure:"namespaceprefix" yaml:"NamespacePrefix"`
+		ObjectProviderURL string `mapstructure:"objectproviderurl" yaml:"ObjectProviderURL"`
 		Port int `mapstructure:"port" yaml:"Port"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
 		S3AccessKeyfile string `mapstructure:"s3accesskeyfile" yaml:"S3AccessKeyfile"`
@@ -737,12 +742,17 @@ type configWithType struct {
 		GlobusCollectionName struct { Type string; Value string }
 		GlobusConfigLocation struct { Type string; Value string }
 		GlobusTransferTokenFile struct { Type string; Value string }
+		HttpAuthOAuth2ClientID struct { Type string; Value string }
+		HttpAuthOAuth2ClientSecretFile struct { Type string; Value string }
+		HttpAuthOAuth2Issuer struct { Type string; Value string }
 		HttpAuthTokenFile struct { Type string; Value string }
+		HttpAuthTokenPassthrough struct { Type string; Value bool }
 		HttpServiceUrl struct { Type string; Value string }
 		IssuerMode struct { Type string; Value string }
 		Mode struct { Type string; Value string }
 		Multiuser struct { Type string; Value bool }
 		NamespacePrefix struct { Type string; Value string }
+		ObjectProviderURL struct { Type string; Value string }
 		Port struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
 		S3AccessKeyfile struct { Type string; Value string }
