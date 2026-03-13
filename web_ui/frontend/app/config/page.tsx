@@ -6,8 +6,11 @@ import { ParameterMetadataList } from '@/components/configuration';
 
 const getMetadata = async () => {
   const metadataList = _metadata as unknown as ParameterMetadataList;
+  const visibleMetadataList = metadataList.filter(
+    (metadata) => !Object.values(metadata)[0].hidden
+  );
   // @ts-ignore
-  return merge(...metadataList);
+  return merge(...visibleMetadataList);
 };
 
 const Page = async () => {
