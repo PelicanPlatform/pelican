@@ -192,9 +192,10 @@ func TestOrigin(t *testing.T) {
 
 	defer server_utils.ResetTestState()
 
-	require.NoError(t, param.Set(param.Origin_StoragePrefix.GetName(), t.TempDir()))
-	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/test"))
-	require.NoError(t, param.Set(param.Origin_StorageType.GetName(), "posix"))
+	// Create temp dir with 0777 permissions so XRootD daemon user can write
+	viper.Set(param.Origin_StoragePrefix.GetName(), test_utils.GetTmpStoragePrefixDir(t))
+	viper.Set(param.Origin_FederationPrefix.GetName(), "/test")
+	viper.Set(param.Origin_StorageType.GetName(), "posix")
 	// Disable functionality we're not using (and is difficult to make work on Mac)
 	require.NoError(t, param.Set(param.Origin_EnableCmsd.GetName(), false))
 	require.NoError(t, param.Set(param.Origin_EnableMacaroons.GetName(), false))
@@ -235,6 +236,24 @@ func TestMultiExportOrigin(t *testing.T) {
 	err := viper.ReadConfig(strings.NewReader(multiExportOriginConfig))
 	require.NoError(t, err, "error reading config")
 
+	// Replace storage prefixes with temp directories that have proper permissions
+	// for the daemon user (xrootd) before calling GetOriginExports()
+	exports := viper.Get("origin.exports").([]interface{})
+	for _, export := range exports {
+		exportMap := export.(map[string]interface{})
+		for k, v := range exportMap {
+			if v == "/<WILL BE REPLACED IN TEST>" {
+				exportMap[k] = test_utils.GetTmpStoragePrefixDir(t)
+			}
+		}
+	}
+	viper.Set("origin.exports", exports)
+
+	// Get available, unique ports and pre-allocate for xrootd startup.
+	ports, err := test_utils.GetUniqueAvailablePorts(2)
+	require.NoError(t, err)
+	require.Len(t, ports, 2)
+
 	// Disable functionality we're not using for the tests
 	require.NoError(t, param.Set(param.Origin_EnableCmsd.GetName(), false))
 	require.NoError(t, param.Set(param.Origin_EnableVoms.GetName(), false))
@@ -250,14 +269,11 @@ func TestMultiExportOrigin(t *testing.T) {
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
-	exports, err := server_utils.GetOriginExports()
+	originExports, err := server_utils.GetOriginExports()
 	require.NoError(t, err)
-	require.Len(t, exports, 2)
+	require.Len(t, originExports, 2)
 
-	// Override the object store prefix to a temp directory
-	for i := range exports {
-		exports[i].StoragePrefix = t.TempDir()
-	}
+	// No need to override StoragePrefix directly; object store prefix was set via exportMap update above
 
 	mockupCancel := originMockup(ctx, egrp, t)
 	defer mockupCancel()
@@ -428,11 +444,11 @@ func TestPosixOriginWithSentinel(t *testing.T) {
 
 	defer server_utils.ResetTestState()
 
-	// Create a test temp dir, ensure it's readable by XRootD
+	// Create a test temp dir, ensure it's readable and writable by XRootD daemon user
 	tmpPathPattern := "XRD-Tst_Orgn*"
 	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
 	require.NoError(t, err)
-	err = os.Chmod(tmpPath, 0755)
+	err = os.Chmod(tmpPath, 0777) // 0777 to allow XRootD daemon user access
 	require.NoError(t, err)
 
 	require.NoError(t, param.Set(param.Origin_StoragePrefix.GetName(), tmpPath))

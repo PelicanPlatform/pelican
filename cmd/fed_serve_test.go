@@ -84,7 +84,7 @@ func TestFedServePosixOrigin(t *testing.T) {
 	// Increase the log level; otherwise, its difficult to debug failures
 	require.NoError(t, param.Set("Logging.Level", "Debug"))
 
-	require.NoError(t, param.Set("Origin.StoragePrefix", t.TempDir()))
+	require.NoError(t, param.Set("Origin.StoragePrefix", test_utils.GetTmpStoragePrefixDir(t)))
 	require.NoError(t, param.Set("Origin.FederationPrefix", "/test"))
 	require.NoError(t, param.Set("Origin.StorageType", "posix"))
 	require.NoError(t, param.Set("Origin.Port", 0))

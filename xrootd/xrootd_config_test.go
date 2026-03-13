@@ -52,15 +52,13 @@ import (
 
 func setupXrootd(t *testing.T, ctx context.Context, server server_structs.ServerType, egrp *errgroup.Group) {
 	tmpDir := t.TempDir()
-	storageDir := filepath.Join(tmpDir, "storage")
-	require.NoError(t, os.MkdirAll(storageDir, 0755))
 	server_utils.ResetTestState()
 
 	require.NoError(t, param.Set("ConfigDir", tmpDir))
 	require.NoError(t, param.Set(param.Xrootd_RunLocation.GetName(), tmpDir))
 	require.NoError(t, param.Set(param.Cache_RunLocation.GetName(), tmpDir))
 	require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), tmpDir))
-	require.NoError(t, param.Set(param.Origin_StoragePrefix.GetName(), storageDir))
+	require.NoError(t, param.Set(param.Origin_StoragePrefix.GetName(), test_utils.GetTmpStoragePrefixDir(t)))
 	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/"))
 	require.NoError(t, param.Set(param.Server_IssuerUrl.GetName(), "https://my-xrootd.com:8444"))
 
@@ -382,10 +380,8 @@ func TestUpdateAuth(t *testing.T) {
 	require.NoError(t, param.Set(param.Xrootd_Authfile.GetName(), authfileName))
 	scitokensName := filepath.Join(configDirname, "scitokens.cfg")
 	require.NoError(t, param.Set(param.Xrootd_ScitokensConfig.GetName(), scitokensName))
-	storageDir := filepath.Join(runDirname, "storage")
-	require.NoError(t, os.MkdirAll(storageDir, 0755))
 	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/test"))
-	require.NoError(t, param.Set(param.Origin_StoragePrefix.GetName(), storageDir))
+	require.NoError(t, param.Set(param.Origin_StoragePrefix.GetName(), test_utils.GetTmpStoragePrefixDir(t)))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 

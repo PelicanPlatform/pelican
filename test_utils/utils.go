@@ -32,6 +32,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -571,4 +572,25 @@ func formatEntry(entry *logrus.Entry) string {
 	}
 
 	return fmt.Sprintf("%s %s%s %s", entry.Time.Format(time.RFC3339Nano), loc, entry.Level, msg)
+}
+
+// Helper function for other tests who call server_utils.GetOriginExports() internally.
+// This function gets a temp dir for export StoragePrefixes, whose existence is validated
+// by server_utils.GetOriginExports(). The directory is created with 0777 permissions so
+// the XRootD daemon user (which is "others" relative to the test process owner) has the
+// read, write, and execute permissions needed for all origin capabilities.
+func GetTmpStoragePrefixDir(t *testing.T) string {
+	tmpDir := t.TempDir() + "/tmpdir"
+
+	err := os.MkdirAll(tmpDir, 0777)
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+
+	err = os.Chmod(tmpDir, 0777)
+	if err != nil {
+		t.Fatalf("Failed to set directory permissions: %v", err)
+	}
+
+	return tmpDir
 }
