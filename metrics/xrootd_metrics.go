@@ -1115,7 +1115,10 @@ func computePrefix(inputPath string, monitorPaths []PathList) string {
 
 func GetSIDRest(info []byte) (xrdUserId XrdUserId, rest string, err error) {
 	log.Debugln("GetSIDRest inputs:", string(info))
-	infoSplit := strings.SplitN(string(info), "\n", 2)
+	// Trim trailing null bytes from the info before parsing; XRootD
+	// monitoring packets are null-terminated C strings.
+	infoStr := strings.TrimRight(string(info), "\x00")
+	infoSplit := strings.SplitN(infoStr, "\n", 2)
 	if len(infoSplit) == 1 {
 		err = errors.New("Unable to parse SID")
 		return
