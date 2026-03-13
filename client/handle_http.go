@@ -2679,38 +2679,38 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				transferResults.Error = errors.New("checksum is required but no endpoints were able to provide it")
 			}
 
-  		// Build map of all computed checksums for verification
-	  	allComputed := make(map[ChecksumType][]byte, len(allHashTypes))
-		  for idx, t := range allHashTypes {
-			  allComputed[t] = allHashes[idx].(hash.Hash).Sum(nil)
-		  }
+			// Build map of all computed checksums for verification
+			allComputed := make(map[ChecksumType][]byte, len(allHashTypes))
+			for idx, t := range allHashTypes {
+				allComputed[t] = allHashes[idx].(hash.Hash).Sum(nil)
+			}
 
-  		// Populate ClientChecksums with the originally-requested types for backward compatibility
-	  	requestedTypes := transfer.requestedChecksums
-		  if len(requestedTypes) == 0 {
-			  requestedTypes = []ChecksumType{AlgDefault}
-		  }
-  		transferResults.ClientChecksums = make([]ChecksumInfo, 0, len(requestedTypes))
-	  	for _, t := range requestedTypes {
-		  	if val, ok := allComputed[t]; ok {
-			  	transferResults.ClientChecksums = append(transferResults.ClientChecksums, ChecksumInfo{
-				  	Algorithm: t,
-					  Value:     val,
-  				})
-	  		}
-		  }
+			// Populate ClientChecksums with the originally-requested types for backward compatibility
+			requestedTypes := transfer.requestedChecksums
+			if len(requestedTypes) == 0 {
+				requestedTypes = []ChecksumType{AlgDefault}
+			}
+			transferResults.ClientChecksums = make([]ChecksumInfo, 0, len(requestedTypes))
+			for _, t := range requestedTypes {
+				if val, ok := allComputed[t]; ok {
+					transferResults.ClientChecksums = append(transferResults.ClientChecksums, ChecksumInfo{
+						Algorithm: t,
+						Value:     val,
+					})
+				}
+			}
 
-  		// Verify checksums: match any server-provided checksum against our computed values,
-	  	// falling back to non-requested algorithms if the requested ones aren't available
-		  fields := log.Fields{
-			  "url": transfer.remoteURL.String(),
-  			"job": transfer.job.ID(),
-	  	}
-		  if _, verifyErr := verifyTransferChecksums(
-			  allComputed, requestedTypes, transferResults.ServerChecksums,
-  			transfer.requireChecksum, fields,
-	  	); verifyErr != nil {
-		  	transferResults.Error = verifyErr
+			// Verify checksums: match any server-provided checksum against our computed values,
+			// falling back to non-requested algorithms if the requested ones aren't available
+			fields := log.Fields{
+				"url": transfer.remoteURL.String(),
+				"job": transfer.job.ID(),
+			}
+			if _, verifyErr := verifyTransferChecksums(
+				allComputed, requestedTypes, transferResults.ServerChecksums,
+				transfer.requireChecksum, fields,
+			); verifyErr != nil {
+				transferResults.Error = verifyErr
 			}
 		}
 	} else {
