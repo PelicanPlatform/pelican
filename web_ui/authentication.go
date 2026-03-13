@@ -80,8 +80,10 @@ var (
 )
 
 const (
-	AdminRole    UserRole = "admin"
-	NonAdminRole UserRole = "user"
+	AdminRole              UserRole = "admin"
+	NonAdminRole           UserRole = "user"
+	LoginAttemptQueryParam          = "fromLogin"
+	loginAttemptQueryParam          = LoginAttemptQueryParam
 )
 
 // Periodically re-read the htpasswd file used for password-based authentication
@@ -382,13 +384,7 @@ func AuthHandler(ctx *gin.Context) {
 func RequireAuthMiddleware(ctx *gin.Context) {
 	user, userId, groups, err := GetUserGroups(ctx)
 	if user == "" || err != nil {
-		origPath := ctx.Request.URL.RequestURI()
-		redirUrl := url.URL{
-			Path:     oauthLoginPath,
-			RawQuery: "nextUrl=" + url.QueryEscape(origPath),
-		}
-		ctx.Redirect(http.StatusTemporaryRedirect, redirUrl.String())
-		ctx.Abort()
+		redirectToLogin(ctx, ctx.Request.URL.RequestURI())
 	} else {
 		ctx.Set("User", user)
 		ctx.Set("UserId", userId)
@@ -722,9 +718,31 @@ func resetLoginHandler(ctx *gin.Context) {
 	}
 }
 
-func logoutHandler(ctx *gin.Context) {
+func redirectToLogin(ctx *gin.Context, requestURI string) {
+	origPath := addLoginAttemptToNextURL(requestURI)
+	redirUrl := url.URL{
+		Path:     oauthLoginPath,
+		RawQuery: "nextUrl=" + url.QueryEscape(origPath),
+	}
+	ctx.Redirect(http.StatusTemporaryRedirect, redirUrl.String())
+	ctx.Abort()
+}
+
+func LogoutAndRedirectToLogin(ctx *gin.Context) {
+	clearLoginCookie(ctx)
+	ctx.Set("User", "")
+	ctx.Set("UserId", "")
+	ctx.Set("Groups", []string{})
+	redirectToLogin(ctx, ctx.Request.URL.RequestURI())
+}
+
+func clearLoginCookie(ctx *gin.Context) {
 	ctx.SetCookie("login", "", -1, "/", ctx.Request.URL.Host, true, true)
 	ctx.SetSameSite(http.SameSiteStrictMode)
+}
+
+func logoutHandler(ctx *gin.Context) {
+	clearLoginCookie(ctx)
 	ctx.Set("User", "")
 	ctx.JSON(http.StatusOK,
 		server_structs.SimpleApiResp{
@@ -832,4 +850,17 @@ func configureAuthEndpoints(ctx context.Context, router *gin.Engine, egrp *errgr
 	egrp.Go(func() error { return periodicAuthDBReload(ctx) })
 
 	return nil
+}
+
+func addLoginAttemptToNextURL(requestURI string) string {
+	parsedURL, err := url.ParseRequestURI(requestURI)
+	if err != nil {
+		return requestURI
+	}
+
+	query := parsedURL.Query()
+	query.Set(loginAttemptQueryParam, "true")
+	parsedURL.RawQuery = query.Encode()
+
+	return parsedURL.RequestURI()
 }
