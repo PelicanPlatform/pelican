@@ -55,7 +55,11 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 
 	// Determine if we should use XRootD or native HTTP server
 	storageType := param.Origin_StorageType.GetString()
-	useXRootD := storageType != string(server_structs.OriginStoragePosixv2) && storageType != string(server_structs.OriginStorageSSH)
+	useXRootD := storageType != string(server_structs.OriginStoragePosixv2) &&
+		storageType != string(server_structs.OriginStorageSSH) &&
+		storageType != string(server_structs.OriginStorageS3v2) &&
+		storageType != string(server_structs.OriginStorageHTTPSv2) &&
+		storageType != string(server_structs.OriginStorageGlobusv2)
 
 	if useXRootD {
 		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusWarning, "XRootD is initializing")
@@ -87,6 +91,13 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	if param.Origin_StorageType.GetString() == string(server_structs.OriginStorageGlobus) {
 		if err := origin.InitGlobusBackend(originExports); err != nil {
 			return nil, errors.Wrap(err, "failed to initialize Globus backend")
+		}
+		origin.LaunchGlobusTokenRefresh(ctx, egrp)
+	} else if param.Origin_StorageType.GetString() == string(server_structs.OriginStorageGlobusv2) {
+		// For native Globus v2, we still use the existing Globus init for OAuth
+		// and DB management, but we don't persist tokens to disk.
+		if err := origin.InitGlobusBackend(originExports); err != nil {
+			return nil, errors.Wrap(err, "failed to initialize Globus v2 backend")
 		}
 		origin.LaunchGlobusTokenRefresh(ctx, egrp)
 	}
@@ -194,7 +205,11 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 
 	// Handle POSIXv2 and SSH-specific initialization now that the web server is running
 	storageType := param.Origin_StorageType.GetString()
-	useXRootD := storageType != string(server_structs.OriginStoragePosixv2) && storageType != string(server_structs.OriginStorageSSH)
+	useXRootD := storageType != string(server_structs.OriginStoragePosixv2) &&
+		storageType != string(server_structs.OriginStorageSSH) &&
+		storageType != string(server_structs.OriginStorageS3v2) &&
+		storageType != string(server_structs.OriginStorageHTTPSv2) &&
+		storageType != string(server_structs.OriginStorageGlobusv2)
 	if !useXRootD {
 		// For SSH backend, initialize the SSH connection before setting up handlers
 		if storageType == string(server_structs.OriginStorageSSH) {
@@ -229,6 +244,23 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 
 		if err := origin_serve.InitializeHandlers(originExports); err != nil {
 			return errors.Wrap(err, "failed to initialize origin_serve handlers")
+		}
+
+		// For Globus v2, activate backends with tokens from the Globus init
+		if storageType == string(server_structs.OriginStorageGlobusv2) {
+			collections, err := origin.GetActivatedGlobusCollections()
+			if err != nil {
+				log.Warningf("Failed to get activated Globus collections: %v", err)
+			} else {
+				gBackends := origin_serve.GetGlobusBackends()
+				for _, col := range collections {
+					if gb, ok := gBackends[col.CollectionID]; ok {
+						gb.Activate(col.CollectionToken, col.TransferToken, col.HTTPSServer)
+						log.Infof("Activated Globus v2 backend for collection %s", col.CollectionID)
+					}
+				}
+			}
+			origin_serve.LaunchGlobusv2TokenRefresh(ctx, egrp)
 		}
 
 		directorEnabled := modules.IsEnabled(server_structs.DirectorType)

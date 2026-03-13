@@ -310,11 +310,16 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.GlobusCollectionName": false,
 	"Origin.GlobusConfigLocation": false,
 	"Origin.GlobusTransferTokenFile": false,
+	"Origin.HttpAuthOAuth2ClientID": false,
+	"Origin.HttpAuthOAuth2ClientSecretFile": false,
+	"Origin.HttpAuthOAuth2Issuer": false,
 	"Origin.HttpAuthTokenFile": false,
+	"Origin.HttpAuthTokenPassthrough": false,
 	"Origin.HttpServiceUrl": false,
 	"Origin.Mode": false,
 	"Origin.Multiuser": false,
 	"Origin.NamespacePrefix": false,
+	"Origin.ObjectProviderURL": false,
 	"Origin.Port": false,
 	"Origin.RunLocation": false,
 	"Origin.S3AccessKeyfile": false,
@@ -683,6 +688,12 @@ func (sP StringParam) GetString() string {
 			return config.Origin.GlobusConfigLocation
 		case "Origin.GlobusTransferTokenFile":
 			return config.Origin.GlobusTransferTokenFile
+		case "Origin.HttpAuthOAuth2ClientID":
+			return config.Origin.HttpAuthOAuth2ClientID
+		case "Origin.HttpAuthOAuth2ClientSecretFile":
+			return config.Origin.HttpAuthOAuth2ClientSecretFile
+		case "Origin.HttpAuthOAuth2Issuer":
+			return config.Origin.HttpAuthOAuth2Issuer
 		case "Origin.HttpAuthTokenFile":
 			return config.Origin.HttpAuthTokenFile
 		case "Origin.HttpServiceUrl":
@@ -691,6 +702,8 @@ func (sP StringParam) GetString() string {
 			return config.Origin.Mode
 		case "Origin.NamespacePrefix":
 			return config.Origin.NamespacePrefix
+		case "Origin.ObjectProviderURL":
+			return config.Origin.ObjectProviderURL
 		case "Origin.RunLocation":
 			return config.Origin.RunLocation
 		case "Origin.S3AccessKeyfile":
@@ -1183,6 +1196,8 @@ func (bP BoolParam) GetBool() bool {
 			return config.Origin.EnableWrite
 		case "Origin.EnableWrites":
 			return config.Origin.EnableWrites
+		case "Origin.HttpAuthTokenPassthrough":
+			return config.Origin.HttpAuthTokenPassthrough
 		case "Origin.Multiuser":
 			return config.Origin.Multiuser
 		case "Origin.SSH.AutoAddHostKey":
@@ -1628,11 +1643,16 @@ var allParameterNames = []string{
 	"Origin.GlobusCollectionName",
 	"Origin.GlobusConfigLocation",
 	"Origin.GlobusTransferTokenFile",
+	"Origin.HttpAuthOAuth2ClientID",
+	"Origin.HttpAuthOAuth2ClientSecretFile",
+	"Origin.HttpAuthOAuth2Issuer",
 	"Origin.HttpAuthTokenFile",
+	"Origin.HttpAuthTokenPassthrough",
 	"Origin.HttpServiceUrl",
 	"Origin.Mode",
 	"Origin.Multiuser",
 	"Origin.NamespacePrefix",
+	"Origin.ObjectProviderURL",
 	"Origin.Port",
 	"Origin.RunLocation",
 	"Origin.S3AccessKeyfile",
@@ -1885,10 +1905,14 @@ var (
 	Origin_GlobusCollectionName = StringParam{"Origin.GlobusCollectionName"}
 	Origin_GlobusConfigLocation = StringParam{"Origin.GlobusConfigLocation"}
 	Origin_GlobusTransferTokenFile = StringParam{"Origin.GlobusTransferTokenFile"}
+	Origin_HttpAuthOAuth2ClientID = StringParam{"Origin.HttpAuthOAuth2ClientID"}
+	Origin_HttpAuthOAuth2ClientSecretFile = StringParam{"Origin.HttpAuthOAuth2ClientSecretFile"}
+	Origin_HttpAuthOAuth2Issuer = StringParam{"Origin.HttpAuthOAuth2Issuer"}
 	Origin_HttpAuthTokenFile = StringParam{"Origin.HttpAuthTokenFile"}
 	Origin_HttpServiceUrl = StringParam{"Origin.HttpServiceUrl"}
 	Origin_Mode = StringParam{"Origin.Mode"}
 	Origin_NamespacePrefix = StringParam{"Origin.NamespacePrefix"}
+	Origin_ObjectProviderURL = StringParam{"Origin.ObjectProviderURL"}
 	Origin_RunLocation = StringParam{"Origin.RunLocation"}
 	Origin_S3AccessKeyfile = StringParam{"Origin.S3AccessKeyfile"}
 	Origin_S3Bucket = StringParam{"Origin.S3Bucket"}
@@ -2101,6 +2125,7 @@ var (
 	Origin_EnableVoms = BoolParam{"Origin.EnableVoms"}
 	Origin_EnableWrite = BoolParam{"Origin.EnableWrite"}
 	Origin_EnableWrites = BoolParam{"Origin.EnableWrites"}
+	Origin_HttpAuthTokenPassthrough = BoolParam{"Origin.HttpAuthTokenPassthrough"}
 	Origin_Multiuser = BoolParam{"Origin.Multiuser"}
 	Origin_SSH_AutoAddHostKey = BoolParam{"Origin.SSH.AutoAddHostKey"}
 	Origin_SSH_TunnelCallback = BoolParam{"Origin.SSH.TunnelCallback"}
