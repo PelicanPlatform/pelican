@@ -13,7 +13,7 @@ Pelican should be thought of as a tool that works with federated *objects* as op
 connotation of a filesystem. File systems have extra features such as owners, permissions, etc., which Pelican does not implement. In addition, a *file* gives the connotation
 that the file is mutable, i.e., its contents can change without requiring a new name. Objects in a Pelican federation, however, should be treated as **immutable**, especially
 in any case where objects are pulled through a cache (which will be the case for almost all files in the [Open Science Data Federation](https://osg-htc.org/services/osdf),
-or OSDF). This is because the underlying cache mechanism, powered by [XRootD](https://xrootd.slac.stanford.edu/), will deliver whatever object it already has access to; if
+or OSDF). This is because the underlying cache mechanism, powered by [XRootD](https://xrootd.org/), will deliver whatever object it already has access to; if
 an object's contents change at the origin, the cache will remain unaware and continue to deliver the old object. In the worst case, when the cache only has a partial object,
 it may attempt to combine its stale version with whatever exists at the origin. Use object names wisely!
 
@@ -148,7 +148,7 @@ for translating the Repository's data access policies into something the federat
 their federation.
 
 Pelican Origins work by making their underlying Repository accessible under some namespace path via HTTPs, which is accomplished by building on top of
-[XRootD](https://xrootd.slac.stanford.edu/). The namespace path, also called the *federation prefix*, is the path at which data from the Origin can be accessed in the
+[XRootD](https://xrootd.org). The namespace path, also called the *federation prefix*, is the path at which data from the Origin can be accessed in the
 federation. For example, an Origin that exports the namespace path `/foo` might provide access to an object `bar` in the underlying Data Repository. The full path for this
 object in the federation would be `/foo/bar`.
 
@@ -164,7 +164,7 @@ is to facilitate data access *from* the Repository, which may not coincide on th
 Pelican *Caches* are responsible for storing copies of data inside the federation with the goal of providing more efficient access to reusable data. By default, requests to
 a Pelican federation for an object are proxied through a Cache, resulting in the federation storing a temporary copy of the object. Currently, objects are cleared from Caches
 based on a "least recently used" algorithm whenever the server begins running out of storage space, but more robust forms of cache management are in active development. Like
-Origins, Caches build on top of [XRootD's "Proxy Storage Services."](https://xrootd.slac.stanford.edu/doc/dev56/pss_config.pdf)
+Origins, Caches build on top of [XRootD's "Proxy Storage Services."](https://xrootd.web.cern.ch/doc/dev6/pss_config.htm)
 
 Because Caches store copies of data for re-distribution in the federation, they must also respect the Origin's data access policies. That is, the Origin should trust Caches
 to protect any data that isn't marked as publicly accessible. Caches in a Pelican federation accomplish this by aggregating access policies from the Origins they support and
