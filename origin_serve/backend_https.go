@@ -196,6 +196,8 @@ func (fs *httpsFileSystem) probeBackendMode() error {
 // davPath constructs the path that the gowebdav client expects (relative to the
 // service URL root). It prepends the configured storagePrefix.
 func (fs *httpsFileSystem) davPath(name string) string {
+	// Clean the path as defense-in-depth against traversal attacks.
+	name = path.Clean("/" + name)
 	name = strings.TrimPrefix(name, "/")
 	prefix := strings.TrimPrefix(fs.storagePrefix, "/")
 	if prefix != "" {
@@ -220,6 +222,8 @@ func (fs *httpsFileSystem) getDavClient(ctx context.Context) *gowebdav.Client {
 
 // upstreamURL returns the full URL for the given path on the upstream server.
 func (fs *httpsFileSystem) upstreamURL(name string) string {
+	// Clean the path as defense-in-depth against traversal attacks.
+	name = path.Clean("/" + name)
 	name = strings.TrimPrefix(name, "/")
 	prefix := strings.TrimPrefix(fs.storagePrefix, "/")
 	if prefix != "" {
