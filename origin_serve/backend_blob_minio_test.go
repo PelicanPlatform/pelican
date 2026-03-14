@@ -99,10 +99,11 @@ func startMinio(t *testing.T) (endpoint, accessKey, secretKey string) {
 	})
 
 	// Minio prints a line like:
-	//   S3-API: http://127.0.0.1:43219
+	//   S3-API: http://127.0.0.1:43219   (older versions)
+	//   API: http://127.0.0.1:43219       (newer versions)
 	// Poll the log file until we find it (with a 30-second deadline).
 	// Use assert (not require) so we can print minio's log on failure.
-	apiRe := regexp.MustCompile(`S3-API:\s+(https?://\S+)`)
+	apiRe := regexp.MustCompile(`(?:S3-)?API:\s+(https?://\S+)`)
 	ok := assert.Eventually(t, func() bool {
 		if minioDone.Load() {
 			return false
@@ -122,7 +123,7 @@ func startMinio(t *testing.T) (endpoint, accessKey, secretKey string) {
 		if minioDone.Load() {
 			t.Fatalf("minio exited early (err=%v); log output:\n%s", minioErr, logData)
 		}
-		t.Fatalf("minio never printed an S3-API endpoint; log output:\n%s", logData)
+		t.Fatalf("minio never printed an API endpoint; log output:\n%s", logData)
 	}
 
 	// Pre-create the bucket directory on disk so it's available immediately.

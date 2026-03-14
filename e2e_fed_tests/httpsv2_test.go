@@ -21,7 +21,9 @@
 package fed_tests
 
 import (
+	"crypto/tls"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -388,6 +390,181 @@ func TestHTTPSv2WebDAVOrigin(t *testing.T) {
 			}
 			assert.True(t, found, "listing should contain %s", name)
 		}
+	})
+
+	t.Run("RangeRead", func(t *testing.T) {
+		// Upload a file with deterministic content large enough to exercise
+		// multi-range behaviour. Each byte position is predictable so we can
+		// verify any sub-range independently:
+		//   content[i] = byte(i % 251)   (251 is prime → avoids alignment artifacts)
+		const fileSize = 256 * 1024 // 256 KiB — spans two 128 KiB PFC blocks
+		content := make([]byte, fileSize)
+		for i := range content {
+			content[i] = byte(i % 251)
+		}
+		localFile := filepath.Join(localTmpDir, "range_test.bin")
+		require.NoError(t, os.WriteFile(localFile, content, 0644))
+
+		uploadURL := fmt.Sprintf("pelican://%s:%d/test/range_test.bin",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+		_, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
+		require.NoError(t, err, "upload for range test should succeed")
+
+		// Build a direct HTTPS URL to the origin's data endpoint so we
+		// bypass the cache and can send arbitrary Range headers.
+		originDataURL := fmt.Sprintf("https://%s:%d/api/v1.0/origin/data/test/range_test.bin",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+
+		httpClient := &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+			},
+		}
+
+		type rangeCase struct {
+			name       string
+			rangeHdr   string
+			wantStatus int
+			wantBytes  []byte // expected body (nil → skip body check)
+		}
+
+		cases := []rangeCase{
+			{
+				name:       "FirstByte",
+				rangeHdr:   "bytes=0-0",
+				wantStatus: http.StatusPartialContent,
+				wantBytes:  content[0:1],
+			},
+			{
+				name:       "LastByte",
+				rangeHdr:   fmt.Sprintf("bytes=%d-%d", fileSize-1, fileSize-1),
+				wantStatus: http.StatusPartialContent,
+				wantBytes:  content[fileSize-1 : fileSize],
+			},
+			{
+				name:       "First128KiB",
+				rangeHdr:   "bytes=0-131071",
+				wantStatus: http.StatusPartialContent,
+				wantBytes:  content[0:131072],
+			},
+			{
+				name:       "Second128KiB",
+				rangeHdr:   "bytes=131072-262143",
+				wantStatus: http.StatusPartialContent,
+				wantBytes:  content[131072:262144],
+			},
+			{
+				name:       "MidRange",
+				rangeHdr:   "bytes=1000-1999",
+				wantStatus: http.StatusPartialContent,
+				wantBytes:  content[1000:2000],
+			},
+			{
+				name:       "OffsetNotAligned",
+				rangeHdr:   "bytes=100000-100099",
+				wantStatus: http.StatusPartialContent,
+				wantBytes:  content[100000:100100],
+			},
+			{
+				name:       "SuffixRange",
+				rangeHdr:   "bytes=-100",
+				wantStatus: http.StatusPartialContent,
+				wantBytes:  content[fileSize-100 : fileSize],
+			},
+			{
+				name:       "NoRangeHeader",
+				rangeHdr:   "",
+				wantStatus: http.StatusOK,
+				wantBytes:  content,
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				req, err := http.NewRequest("GET", originDataURL, nil)
+				require.NoError(t, err)
+				req.Header.Set("Authorization", "Bearer "+testToken)
+				if tc.rangeHdr != "" {
+					req.Header.Set("Range", tc.rangeHdr)
+				}
+
+				resp, err := httpClient.Do(req)
+				require.NoError(t, err)
+				defer resp.Body.Close()
+
+				assert.Equal(t, tc.wantStatus, resp.StatusCode,
+					"unexpected status for Range: %s", tc.rangeHdr)
+
+				if tc.wantBytes != nil {
+					got, err := io.ReadAll(resp.Body)
+					require.NoError(t, err)
+					assert.Equal(t, len(tc.wantBytes), len(got),
+						"body length mismatch for Range: %s", tc.rangeHdr)
+					assert.Equal(t, tc.wantBytes, got,
+						"body content mismatch for Range: %s", tc.rangeHdr)
+				}
+			})
+		}
+	})
+
+	t.Run("ETagPassthrough", func(t *testing.T) {
+		// Upload a small file and verify the origin's response includes an
+		// ETag header that matches what the upstream WebDAV server provides.
+		testContent := "etag-passthrough-test-content"
+		localFile := filepath.Join(localTmpDir, "etag_test.txt")
+		require.NoError(t, os.WriteFile(localFile, []byte(testContent), 0644))
+
+		uploadURL := fmt.Sprintf("pelican://%s:%d/test/etag_test.txt",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+		_, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
+		require.NoError(t, err)
+
+		originDataURL := fmt.Sprintf("https://%s:%d/api/v1.0/origin/data/test/etag_test.txt",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+
+		httpClient := &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+			},
+		}
+
+		// GET the file from the origin — expect an ETag header.
+		req, err := http.NewRequest("GET", originDataURL, nil)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer "+testToken)
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		etag := resp.Header.Get("ETag")
+		assert.NotEmpty(t, etag, "origin response should include an ETag header")
+
+		// Query the upstream WebDAV server directly and compare ETags.
+		upstreamURL := webdavURL + storagePrefix + "/etag_test.txt"
+		upReq, err := http.NewRequest("HEAD", upstreamURL, nil)
+		require.NoError(t, err)
+		upResp, err := http.DefaultClient.Do(upReq)
+		require.NoError(t, err)
+		upResp.Body.Close()
+		upstreamETag := upResp.Header.Get("ETag")
+
+		if upstreamETag != "" {
+			// The upstream WebDAV server provides an ETag — verify passthrough.
+			assert.Equal(t, upstreamETag, etag,
+				"origin ETag should match the upstream WebDAV server's ETag")
+		}
+
+		// Verify conditional GET: If-None-Match with the ETag should return 304.
+		condReq, err := http.NewRequest("GET", originDataURL, nil)
+		require.NoError(t, err)
+		condReq.Header.Set("Authorization", "Bearer "+testToken)
+		condReq.Header.Set("If-None-Match", etag)
+		condResp, err := httpClient.Do(condReq)
+		require.NoError(t, err)
+		condResp.Body.Close()
+		assert.Equal(t, http.StatusNotModified, condResp.StatusCode,
+			"conditional GET with matching ETag should return 304")
 	})
 }
 
