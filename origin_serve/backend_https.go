@@ -135,6 +135,17 @@ func (b *httpsBackend) SetOAuth2Token(tok *oauth2.Token) {
 	}
 }
 
+// SetServiceURL updates the upstream service URL at runtime.
+// This is used by the Globus backend which discovers the collection
+// HTTPS endpoint after initial construction.
+func (b *httpsBackend) SetServiceURL(u string) {
+	if b.fs != nil {
+		b.fs.serviceURL = strings.TrimSuffix(u, "/")
+		// Reset detected mode so it will be re-probed on next request
+		b.fs.backendMode = BackendModeUnknown
+	}
+}
+
 // BackendMode returns the detected mode (WebDAV or HTTP).
 func (b *httpsBackend) BackendMode() BackendMode {
 	return b.fs.backendMode
