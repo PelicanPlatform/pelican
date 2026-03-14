@@ -705,6 +705,7 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 				StaticTokenFile: staticTokenFile,
 				OAuth2Config:    oauth2Cfg,
 				OAuth2Token:     oauth2Tok,
+				EnableAutoMkdir: true,
 			})
 			log.Infof("Initialized native HTTPS backend for %s (upstream: %s, token mode: %d)", export.FederationPrefix, httpServiceURL, tokenMode)
 
@@ -841,6 +842,13 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 			// X-Pelican-Timeout) in the request context so backends
 			// that forward requests can propagate them.
 			req := server_utils.StashPelicanHeaders(c.Request)
+
+			// For PUT requests, pass the Content-Length as a size hint
+			// so the blob backend can optimize upload part sizes.
+			if c.Request.Method == http.MethodPut && c.Request.ContentLength > 0 {
+				ctx := ContextWithContentLength(req.Context(), c.Request.ContentLength)
+				req = req.WithContext(ctx)
+			}
 
 			if isTPCRequest(c.Request) {
 				handleCopyTPC(c, backend, prefix)

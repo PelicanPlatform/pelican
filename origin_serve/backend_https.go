@@ -20,6 +20,7 @@ package origin_serve
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -35,6 +36,7 @@ import (
 	"golang.org/x/net/webdav"
 	"golang.org/x/oauth2"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
@@ -86,7 +88,15 @@ type HTTPSBackendOptions struct {
 	// For OAuth2 tokens:
 	OAuth2Config *oauth2.Config
 	OAuth2Token  *oauth2.Token // initial token (with refresh_token)
+	// EnableAutoMkdir, when true, causes PUT operations to automatically
+	// create missing parent directories via WebDAV MKCOL before retrying.
+	EnableAutoMkdir bool
 }
+
+// ErrNotSupported is returned when an operation is not supported by the
+// backend (e.g. Mkdir on a plain HTTP server).  Callers can test for this
+// with errors.Is(err, ErrNotSupported).
+var ErrNotSupported = errors.New("operation not supported by backend")
 
 func newHTTPSBackend(opts HTTPSBackendOptions) *httpsBackend {
 	fs := &httpsFileSystem{
@@ -94,7 +104,8 @@ func newHTTPSBackend(opts HTTPSBackendOptions) *httpsBackend {
 		storagePrefix:   opts.StoragePrefix,
 		tokenMode:       opts.TokenMode,
 		staticTokenFile: opts.StaticTokenFile,
-		httpClient:      &http.Client{Timeout: 60 * time.Second},
+		httpClient:      &http.Client{Transport: config.GetTransport()},
+		enableAutoMkdir: opts.EnableAutoMkdir,
 	}
 	if opts.OAuth2Config != nil && opts.OAuth2Token != nil {
 		fs.oauth2Cfg = opts.OAuth2Config
@@ -142,12 +153,16 @@ type httpsFileSystem struct {
 	staticTokenFile string
 	backendMode     BackendMode
 
-	// OAuth2 token management (in-memory only — no disk persistence)
+	// OAuth2 token management
 	oauth2Cfg *oauth2.Config
 	oauth2Tok *oauth2.Token
 	oauthMu   sync.Mutex // protects oauth2Tok
 
 	httpClient *http.Client
+
+	// enableAutoMkdir, when true, causes PUT operations to automatically
+	// create missing parent directories on the upstream server.
+	enableAutoMkdir bool
 }
 
 // probeBackendMode issues an OPTIONS request against the upstream root and
@@ -190,17 +205,13 @@ func (fs *httpsFileSystem) davPath(name string) string {
 }
 
 // getDavClient returns a gowebdav.Client configured with the appropriate bearer
-// token for the current request context.  A fresh client is created per call so
-// that the passthrough token is always correct even under concurrent requests.
+// token for the current request context.  The simpleBearerAuth captures a
+// reference to the httpsFileSystem so that every HTTP request made through
+// this client calls getToken() afresh — this ensures tokens that expire
+// mid-transfer are transparently renewed for long-lived clients.
 func (fs *httpsFileSystem) getDavClient(ctx context.Context) *gowebdav.Client {
-	token := fs.getToken(ctx)
-	var client *gowebdav.Client
-	if token != "" {
-		auth := &simpleBearerAuth{token: token}
-		client = gowebdav.NewAuthClient(fs.serviceURL, auth)
-	} else {
-		client = gowebdav.NewClient(fs.serviceURL, "", "")
-	}
+	auth := &simpleBearerAuth{tokenFunc: func() string { return fs.getToken(ctx) }}
+	client := gowebdav.NewAuthClient(fs.serviceURL, auth)
 	if fs.httpClient.Transport != nil {
 		client.SetTransport(fs.httpClient.Transport)
 	}
@@ -294,7 +305,67 @@ func (fs *httpsFileSystem) Mkdir(ctx context.Context, name string, perm os.FileM
 		client := fs.getDavClient(ctx)
 		return client.Mkdir(fs.davPath(name), perm)
 	}
-	return fmt.Errorf("mkdir not supported on HTTP-only backend")
+	return fmt.Errorf("mkdir: %w", ErrNotSupported)
+}
+
+// ensureParentDirs recursively creates parent directories for the given file
+// path.  It walks up from the deepest parent toward the root until it finds an
+// existing directory, then creates the missing directories back down the path.
+//
+// This mirrors the approach used by the xrootd-s3-http Globus plugin: probe
+// from deepest parent upward (via Stat) until we find one that exists, then
+// mkdir each missing component going back down.  EEXIST is tolerated to
+// handle concurrent writers that may create the same directory between our
+// Stat and Mkdir calls.
+func (fs *httpsFileSystem) ensureParentDirs(ctx context.Context, name string) error {
+	if fs.backendMode != BackendModeWebDAV {
+		return fmt.Errorf("auto-mkdir requires WebDAV backend")
+	}
+
+	// Build all parent prefixes.  For "/a/b/c/file.txt" we get ["/a", "/a/b", "/a/b/c"].
+	dir := path.Dir(name)
+	if dir == "." || dir == "/" || dir == "" {
+		return nil // no parent directories to create
+	}
+
+	var prefixes []string
+	for cur := dir; cur != "." && cur != "/" && cur != ""; cur = path.Dir(cur) {
+		prefixes = append(prefixes, cur)
+	}
+	if len(prefixes) == 0 {
+		return nil
+	}
+
+	// prefixes is deepest-first: ["/a/b/c", "/a/b", "/a"].
+	// Walk from deepest toward root to find the first existing directory.
+	firstMissingIdx := 0
+	for i := 0; i < len(prefixes); i++ {
+		_, err := fs.Stat(ctx, prefixes[i])
+		if err == nil {
+			// This prefix exists; everything deeper needs to be created.
+			firstMissingIdx = i
+			break
+		}
+		if i == len(prefixes)-1 {
+			// Even the shallowest prefix doesn't exist; create everything.
+			firstMissingIdx = len(prefixes)
+		}
+	}
+
+	// Create from shallowest missing toward deepest.
+	for i := firstMissingIdx - 1; i >= 0; i-- {
+		err := fs.Mkdir(ctx, prefixes[i], 0755)
+		if err != nil {
+			// Tolerate "already exists" (405 Method Not Allowed in WebDAV) in
+			// case a concurrent writer created the directory between our Stat
+			// and Mkdir calls.
+			if !gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
+				return fmt.Errorf("failed to create directory %q: %w", prefixes[i], err)
+			}
+		}
+	}
+
+	return nil
 }
 
 // OpenFile implements webdav.FileSystem.
@@ -371,7 +442,7 @@ func (fs *httpsFileSystem) Rename(ctx context.Context, oldName, newName string) 
 		client := fs.getDavClient(ctx)
 		return client.Rename(fs.davPath(oldName), fs.davPath(newName), true)
 	}
-	return fmt.Errorf("rename not supported on HTTP-only backend")
+	return fmt.Errorf("rename: %w", ErrNotSupported)
 }
 
 // Stat implements webdav.FileSystem.
@@ -408,6 +479,7 @@ func (fs *httpsFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, 
 		size:    resp.ContentLength,
 		modTime: parseHTTPDate(resp.Header.Get("Last-Modified")),
 		isDir:   false,
+		etag:    resp.Header.Get("ETag"),
 	}, nil
 }
 
@@ -431,27 +503,28 @@ func tokenFromContext(ctx context.Context) string {
 }
 
 // ---------------------------------------------------------------------------
-// simpleBearerAuth — implements gowebdav.Authorizer for a fixed bearer token.
-// A fresh instance is created per request via getDavClient.
+// simpleBearerAuth — implements gowebdav.Authorizer using a token-getter
+// function.  The function is called for every HTTP request so that expired
+// tokens are transparently refreshed without recreating the gowebdav.Client.
 // ---------------------------------------------------------------------------
 
 type simpleBearerAuth struct {
-	token string
+	tokenFunc func() string
 }
 
 type simpleBearerAuthenticator struct {
-	token string
+	tokenFunc func() string
 }
 
 func (a *simpleBearerAuth) NewAuthenticator(body io.Reader) (gowebdav.Authenticator, io.Reader) {
-	return &simpleBearerAuthenticator{token: a.token}, body
+	return &simpleBearerAuthenticator{tokenFunc: a.tokenFunc}, body
 }
 
 func (a *simpleBearerAuth) AddAuthenticator(_ string, _ gowebdav.AuthFactory) {}
 
 func (auth *simpleBearerAuthenticator) Authorize(_ *http.Client, rq *http.Request, _ string) error {
-	if auth.token != "" {
-		rq.Header.Set("Authorization", "Bearer "+auth.token)
+	if tok := auth.tokenFunc(); tok != "" {
+		rq.Header.Set("Authorization", "Bearer "+tok)
 	}
 	return nil
 }
@@ -463,7 +536,7 @@ func (auth *simpleBearerAuthenticator) Verify(_ *http.Client, _ *http.Response, 
 func (auth *simpleBearerAuthenticator) Close() error { return nil }
 
 func (auth *simpleBearerAuthenticator) Clone() gowebdav.Authenticator {
-	return &simpleBearerAuthenticator{token: auth.token}
+	return &simpleBearerAuthenticator{tokenFunc: auth.tokenFunc}
 }
 
 // ---------------------------------------------------------------------------
@@ -471,11 +544,18 @@ func (auth *simpleBearerAuthenticator) Clone() gowebdav.Authenticator {
 // In WebDAV mode the gowebdav library returns its own FileInfo.
 // ---------------------------------------------------------------------------
 
+// HTTPSFileSysInfo carries optional metadata (e.g. ETag) from an upstream
+// HTTPS/WebDAV server.  Returned by httpsFileInfo.Sys() when populated.
+type HTTPSFileSysInfo struct {
+	ETag string
+}
+
 type httpsFileInfo struct {
 	name    string
 	size    int64
 	modTime time.Time
 	isDir   bool
+	etag    string
 }
 
 func (fi *httpsFileInfo) Name() string      { return fi.name }
@@ -487,8 +567,13 @@ func (fi *httpsFileInfo) ModTime() time.Time {
 	}
 	return fi.modTime
 }
-func (fi *httpsFileInfo) IsDir() bool      { return fi.isDir }
-func (fi *httpsFileInfo) Sys() interface{} { return nil }
+func (fi *httpsFileInfo) IsDir() bool { return fi.isDir }
+func (fi *httpsFileInfo) Sys() interface{} {
+	if fi.etag != "" {
+		return &HTTPSFileSysInfo{ETag: fi.etag}
+	}
+	return nil
+}
 
 // ---------------------------------------------------------------------------
 // httpsReadFile — read-only file backed by an HTTPS GET response.
@@ -548,11 +633,12 @@ func (f *httpsReadFile) Stat() (os.FileInfo, error) {
 // ---------------------------------------------------------------------------
 
 type httpsWriteFile struct {
-	ctx  context.Context
-	fs   *httpsFileSystem
-	name string
-	mu   sync.Mutex
-	buf  []byte
+	ctx    context.Context
+	fs     *httpsFileSystem
+	name   string
+	mu     sync.Mutex
+	buf    []byte
+	offset int64
 }
 
 func newHTTPSWriteFile(ctx context.Context, fs *httpsFileSystem, name string) *httpsWriteFile {
@@ -563,6 +649,7 @@ func (f *httpsWriteFile) Write(p []byte) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.buf = append(f.buf, p...)
+	f.offset += int64(len(p))
 	return len(p), nil
 }
 
@@ -573,11 +660,11 @@ func (f *httpsWriteFile) Close() error {
 	f.mu.Unlock()
 
 	urlStr := f.fs.upstreamURL(f.name)
-	body := strings.NewReader(string(data))
-
-	resp, err := f.fs.doRequest(f.ctx, http.MethodPut, urlStr, body, map[string]string{
+	headers := map[string]string{
 		"Content-Length": fmt.Sprintf("%d", len(data)),
-	})
+	}
+
+	resp, err := f.fs.doRequest(f.ctx, http.MethodPut, urlStr, strings.NewReader(string(data)), headers)
 	if err != nil {
 		return err
 	}
@@ -586,7 +673,36 @@ func (f *httpsWriteFile) Close() error {
 	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusNoContent {
 		return nil
 	}
+
 	respBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	// If auto-mkdir is enabled and the server indicates a missing parent
+	// directory (409 Conflict in WebDAV, or 404 Not Found), create the
+	// directory tree and retry the PUT.
+	if f.fs.enableAutoMkdir && (resp.StatusCode == http.StatusConflict || resp.StatusCode == http.StatusNotFound) {
+		log.Debugf("HTTPS PUT to %s returned %d; attempting auto-mkdir for parent directories", urlStr, resp.StatusCode)
+
+		if mkdirErr := f.fs.ensureParentDirs(f.ctx, f.name); mkdirErr != nil {
+			log.Warningf("Auto-mkdir failed for %s: %v", f.name, mkdirErr)
+			return fmt.Errorf("https put failed with status %d (auto-mkdir also failed: %v)", resp.StatusCode, mkdirErr)
+		}
+
+		// Retry the PUT after creating parent directories.
+		retryResp, retryErr := f.fs.doRequest(f.ctx, http.MethodPut, urlStr, strings.NewReader(string(data)), headers)
+		if retryErr != nil {
+			return retryErr
+		}
+		defer retryResp.Body.Close()
+
+		if retryResp.StatusCode == http.StatusOK || retryResp.StatusCode == http.StatusCreated || retryResp.StatusCode == http.StatusNoContent {
+			return nil
+		}
+		retryBody, _ := io.ReadAll(retryResp.Body)
+		log.Debugf("HTTPS PUT retry response (%d): %s", retryResp.StatusCode, string(retryBody))
+		return fmt.Errorf("https put failed with status %d after auto-mkdir", retryResp.StatusCode)
+	}
+
 	log.Debugf("HTTPS PUT response (%d): %s", resp.StatusCode, string(respBody))
 	return fmt.Errorf("https put failed with status %d", resp.StatusCode)
 }
@@ -595,8 +711,28 @@ func (f *httpsWriteFile) Read(_ []byte) (int, error) {
 	return 0, fmt.Errorf("read not supported on write file")
 }
 
-func (f *httpsWriteFile) Seek(_ int64, _ int) (int64, error) {
-	return 0, fmt.Errorf("seek not supported on write file")
+// Seek supports only no-op seeks (seeking to the current offset).
+// This satisfies callers like the WebDAV handler that seek to the
+// current position to determine the write offset.
+func (f *httpsWriteFile) Seek(offset int64, whence int) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var target int64
+	switch whence {
+	case io.SeekStart:
+		target = offset
+	case io.SeekCurrent:
+		target = f.offset + offset
+	case io.SeekEnd:
+		// For a write file, "end" is the current write position.
+		target = f.offset + offset
+	default:
+		return 0, fmt.Errorf("httpsWriteFile.Seek: invalid whence %d", whence)
+	}
+	if target != f.offset {
+		return 0, fmt.Errorf("httpsWriteFile.Seek: non-sequential seek not supported")
+	}
+	return f.offset, nil
 }
 
 func (f *httpsWriteFile) Readdir(_ int) ([]os.FileInfo, error) {

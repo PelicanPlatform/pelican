@@ -20,6 +20,7 @@ package origin_serve
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -66,13 +67,12 @@ func TestWithClientToken(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSimpleBearerAuth(t *testing.T) {
-	auth := &simpleBearerAuth{token: "tok123"}
+	auth := &simpleBearerAuth{tokenFunc: func() string { return "tok123" }}
 	authenticator, body := auth.NewAuthenticator(nil)
 	assert.Nil(t, body)
 	assert.NotNil(t, authenticator)
 
 	sba := authenticator.(*simpleBearerAuthenticator)
-	assert.Equal(t, "tok123", sba.token)
 
 	// Authorize should set the header
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
@@ -83,7 +83,6 @@ func TestSimpleBearerAuth(t *testing.T) {
 	// Clone should return an equivalent authenticator
 	cloned := sba.Clone()
 	assert.IsType(t, &simpleBearerAuthenticator{}, cloned)
-	assert.Equal(t, "tok123", cloned.(*simpleBearerAuthenticator).token)
 
 	// Close should succeed
 	assert.NoError(t, sba.Close())
@@ -95,7 +94,7 @@ func TestSimpleBearerAuth(t *testing.T) {
 }
 
 func TestSimpleBearerAuth_EmptyToken(t *testing.T) {
-	auth := &simpleBearerAuth{token: ""}
+	auth := &simpleBearerAuth{tokenFunc: func() string { return "" }}
 	authenticator, _ := auth.NewAuthenticator(nil)
 	sba := authenticator.(*simpleBearerAuthenticator)
 
@@ -104,6 +103,26 @@ func TestSimpleBearerAuth_EmptyToken(t *testing.T) {
 	require.NoError(t, err)
 	// Should not set Authorization header with empty token
 	assert.Empty(t, req.Header.Get("Authorization"))
+}
+
+func TestSimpleBearerAuth_TokenRefresh(t *testing.T) {
+	// Verify that the tokenFunc is called on each Authorize, so
+	// a refreshed token is used for subsequent requests.
+	callCount := 0
+	auth := &simpleBearerAuth{tokenFunc: func() string {
+		callCount++
+		return fmt.Sprintf("tok-%d", callCount)
+	}}
+	authenticator, _ := auth.NewAuthenticator(nil)
+	sba := authenticator.(*simpleBearerAuthenticator)
+
+	req1 := httptest.NewRequest(http.MethodGet, "/a", nil)
+	require.NoError(t, sba.Authorize(nil, req1, ""))
+	assert.Equal(t, "Bearer tok-1", req1.Header.Get("Authorization"))
+
+	req2 := httptest.NewRequest(http.MethodGet, "/b", nil)
+	require.NoError(t, sba.Authorize(nil, req2, ""))
+	assert.Equal(t, "Bearer tok-2", req2.Header.Get("Authorization"))
 }
 
 // ---------------------------------------------------------------------------
@@ -121,6 +140,13 @@ func TestHTTPSFileInfo(t *testing.T) {
 
 	fiDir := &httpsFileInfo{name: "dir", isDir: true}
 	assert.True(t, fiDir.IsDir())
+
+	fiEtag := &httpsFileInfo{name: "e.txt", etag: `"abc123"`}
+	sys := fiEtag.Sys()
+	require.NotNil(t, sys)
+	info, ok := sys.(*HTTPSFileSysInfo)
+	require.True(t, ok)
+	assert.Equal(t, `"abc123"`, info.ETag)
 }
 
 // ---------------------------------------------------------------------------
@@ -180,10 +206,42 @@ func TestHTTPSWriteFile_UnsupportedOps(t *testing.T) {
 	wf := &httpsWriteFile{name: "/test"}
 	_, err := wf.Read(nil)
 	assert.Error(t, err)
-	_, err = wf.Seek(0, 0)
-	assert.Error(t, err)
 	_, err = wf.Readdir(-1)
 	assert.Error(t, err)
+}
+
+func TestHTTPSWriteFile_NoOpSeek(t *testing.T) {
+	wf := &httpsWriteFile{name: "/test"}
+
+	// Seek to current offset (0) should succeed
+	pos, err := wf.Seek(0, io.SeekStart)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), pos)
+
+	pos, err = wf.Seek(0, io.SeekCurrent)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), pos)
+
+	// Write some data
+	_, _ = wf.Write([]byte("hello"))
+
+	// Seeking to current offset (5) should succeed
+	pos, err = wf.Seek(5, io.SeekStart)
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), pos)
+
+	pos, err = wf.Seek(0, io.SeekCurrent)
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), pos)
+
+	pos, err = wf.Seek(0, io.SeekEnd)
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), pos)
+
+	// Non-current seek should fail
+	_, err = wf.Seek(0, io.SeekStart)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "non-sequential")
 }
 
 func TestHTTPSWriteFile_Stat(t *testing.T) {
@@ -481,6 +539,41 @@ func TestHTTPSBackend_NoChecksummer(t *testing.T) {
 	assert.Nil(t, backend.Checksummer())
 }
 
+func TestHTTPSBackend_StatETag(t *testing.T) {
+	// Verify that ETag from HEAD responses is surfaced through Sys().
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions {
+			w.Header().Set("Allow", "GET, HEAD, OPTIONS")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.Method == http.MethodHead {
+			w.Header().Set("ETag", `"abc-etag"`)
+			w.Header().Set("Content-Length", "42")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	backend := newHTTPSBackend(HTTPSBackendOptions{
+		ServiceURL: server.URL,
+		TokenMode:  HTTPSTokenNone,
+	})
+	require.NoError(t, backend.CheckAvailability())
+
+	info, err := backend.FileSystem().Stat(context.Background(), "/file.txt")
+	require.NoError(t, err)
+	assert.Equal(t, int64(42), info.Size())
+
+	sys := info.Sys()
+	require.NotNil(t, sys)
+	hsi, ok := sys.(*HTTPSFileSysInfo)
+	require.True(t, ok)
+	assert.Equal(t, `"abc-etag"`, hsi.ETag)
+}
+
 // ---------------------------------------------------------------------------
 // davPath and upstreamURL tests
 // ---------------------------------------------------------------------------
@@ -553,9 +646,262 @@ func TestHTTPSBackend_HTTPOnly_UnsupportedOps(t *testing.T) {
 	ctx := context.Background()
 	err := backend.FileSystem().Mkdir(ctx, "/newdir", 0755)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "mkdir not supported")
+	assert.True(t, errors.Is(err, ErrNotSupported))
 
 	err = backend.FileSystem().Rename(ctx, "/a", "/b")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "rename not supported")
+	assert.True(t, errors.Is(err, ErrNotSupported))
+}
+
+// ---------------------------------------------------------------------------
+// Auto-mkdir tests
+// ---------------------------------------------------------------------------
+
+// mockWebDAVServer creates an httptest.Server that simulates a WebDAV-capable
+// server with in-memory storage.  It supports MKCOL, PUT, PROPFIND (stat), and
+// OPTIONS.  PUT to paths whose parent directory hasn't been created via MKCOL
+// returns 409 Conflict, matching standard WebDAV semantics.
+func mockWebDAVServer() (*httptest.Server, map[string][]byte) {
+	files := map[string][]byte{}
+	dirs := map[string]bool{"/": true}
+
+	// normalize strips trailing slashes (except for root "/")
+	normalize := func(p string) string {
+		for len(p) > 1 && p[len(p)-1] == '/' {
+			p = p[:len(p)-1]
+		}
+		return p
+	}
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := normalize(r.URL.Path)
+		switch r.Method {
+		case http.MethodOptions:
+			w.Header().Set("Allow", "GET, PUT, DELETE, HEAD, OPTIONS, PROPFIND, MKCOL, MOVE, COPY")
+			w.Header().Set("DAV", "1, 2")
+			w.WriteHeader(http.StatusOK)
+
+		case "MKCOL":
+			if dirs[p] {
+				// Already exists
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+			// Check parent exists
+			parent := p
+			if idx := strings.LastIndex(parent, "/"); idx >= 0 {
+				parent = parent[:idx]
+				if parent == "" {
+					parent = "/"
+				}
+			}
+			if !dirs[parent] {
+				w.WriteHeader(http.StatusConflict)
+				return
+			}
+			dirs[p] = true
+			w.WriteHeader(http.StatusCreated)
+
+		case http.MethodPut:
+			// Check that parent directory exists
+			parent := p
+			if idx := strings.LastIndex(parent, "/"); idx >= 0 {
+				parent = parent[:idx]
+				if parent == "" {
+					parent = "/"
+				}
+			}
+			if !dirs[parent] {
+				w.WriteHeader(http.StatusConflict)
+				return
+			}
+			body, _ := io.ReadAll(r.Body)
+			files[p] = body
+			w.WriteHeader(http.StatusCreated)
+
+		case "PROPFIND":
+			if dirs[p] {
+				// Return a minimal multistatus response indicating a directory
+				w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+				w.WriteHeader(207) // Multi-Status
+				fmt.Fprintf(w, `<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>%s</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:resourcetype><D:collection/></D:resourcetype>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>`, p)
+				return
+			}
+			if _, ok := files[p]; ok {
+				w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+				w.WriteHeader(207)
+				fmt.Fprintf(w, `<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>%s</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:resourcetype />
+        <D:getcontentlength>%d</D:getcontentlength>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>`, p, len(files[p]))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+
+		case http.MethodHead:
+			if _, ok := files[p]; ok {
+				w.Header().Set("Content-Length", fmt.Sprintf("%d", len(files[p])))
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+
+		case http.MethodGet:
+			if data, ok := files[p]; ok {
+				w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+				w.Write(data)
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})), files
+}
+
+func TestHTTPSBackend_AutoMkdir_CreatesParentDirs(t *testing.T) {
+	server, files := mockWebDAVServer()
+	defer server.Close()
+
+	backend := newHTTPSBackend(HTTPSBackendOptions{
+		ServiceURL:      server.URL,
+		TokenMode:       HTTPSTokenNone,
+		EnableAutoMkdir: true,
+	})
+	require.NoError(t, backend.CheckAvailability())
+	assert.Equal(t, BackendModeWebDAV, backend.BackendMode())
+
+	ctx := context.Background()
+	fs := backend.FileSystem()
+
+	// PUT a file into a deeply nested path that doesn't exist yet.
+	// Without auto-mkdir this would fail with 409 Conflict.
+	wf, err := fs.OpenFile(ctx, "/a/b/c/file.txt", os.O_CREATE|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	_, err = wf.Write([]byte("deep content"))
+	require.NoError(t, err)
+	require.NoError(t, wf.Close())
+
+	// Verify the file was stored
+	assert.Equal(t, []byte("deep content"), files["/a/b/c/file.txt"])
+}
+
+func TestHTTPSBackend_AutoMkdir_Disabled(t *testing.T) {
+	server, _ := mockWebDAVServer()
+	defer server.Close()
+
+	backend := newHTTPSBackend(HTTPSBackendOptions{
+		ServiceURL:      server.URL,
+		TokenMode:       HTTPSTokenNone,
+		EnableAutoMkdir: false,
+	})
+	require.NoError(t, backend.CheckAvailability())
+
+	ctx := context.Background()
+	fs := backend.FileSystem()
+
+	// Without auto-mkdir, PUT into a missing directory should fail.
+	wf, err := fs.OpenFile(ctx, "/x/y/file.txt", os.O_CREATE|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	_, err = wf.Write([]byte("data"))
+	require.NoError(t, err)
+	err = wf.Close()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "409")
+}
+
+func TestHTTPSBackend_AutoMkdir_ExistingParent(t *testing.T) {
+	server, files := mockWebDAVServer()
+	defer server.Close()
+
+	backend := newHTTPSBackend(HTTPSBackendOptions{
+		ServiceURL:      server.URL,
+		TokenMode:       HTTPSTokenNone,
+		EnableAutoMkdir: true,
+	})
+	require.NoError(t, backend.CheckAvailability())
+
+	ctx := context.Background()
+	fs := backend.FileSystem()
+
+	// First create /existing via MKCOL
+	require.NoError(t, fs.Mkdir(ctx, "/existing", 0755))
+
+	// Now PUT under /existing/sub/file.txt — only "sub" needs to be created
+	wf, err := fs.OpenFile(ctx, "/existing/sub/file.txt", os.O_CREATE|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	_, err = wf.Write([]byte("hello"))
+	require.NoError(t, err)
+	require.NoError(t, wf.Close())
+
+	assert.Equal(t, []byte("hello"), files["/existing/sub/file.txt"])
+}
+
+func TestHTTPSBackend_AutoMkdir_TopLevelFile(t *testing.T) {
+	server, files := mockWebDAVServer()
+	defer server.Close()
+
+	backend := newHTTPSBackend(HTTPSBackendOptions{
+		ServiceURL:      server.URL,
+		TokenMode:       HTTPSTokenNone,
+		EnableAutoMkdir: true,
+	})
+	require.NoError(t, backend.CheckAvailability())
+
+	ctx := context.Background()
+	fs := backend.FileSystem()
+
+	// PUT at root level should work directly without needing auto-mkdir
+	wf, err := fs.OpenFile(ctx, "/root-file.txt", os.O_CREATE|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	_, err = wf.Write([]byte("top level"))
+	require.NoError(t, err)
+	require.NoError(t, wf.Close())
+
+	assert.Equal(t, []byte("top level"), files["/root-file.txt"])
+}
+
+func TestEnsureParentDirs_NoParent(t *testing.T) {
+	// When the file is at the root, ensureParentDirs should be a no-op.
+	fs := &httpsFileSystem{
+		backendMode:     BackendModeWebDAV,
+		enableAutoMkdir: true,
+	}
+
+	ctx := context.Background()
+	assert.NoError(t, fs.ensureParentDirs(ctx, "/file.txt"))
+	assert.NoError(t, fs.ensureParentDirs(ctx, "file.txt"))
+}
+
+func TestEnsureParentDirs_RequiresWebDAV(t *testing.T) {
+	fs := &httpsFileSystem{
+		backendMode:     BackendModeHTTP,
+		enableAutoMkdir: true,
+	}
+
+	ctx := context.Background()
+	err := fs.ensureParentDirs(ctx, "/a/b/file.txt")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "auto-mkdir requires WebDAV")
 }
