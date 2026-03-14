@@ -199,7 +199,7 @@ func validateWLCGToken(t *testing.T, tokenStr string, provider *OIDCProvider) jw
 
 	// Basic JWT claims
 	assert.NotEmpty(t, tok.Issuer(), "iss claim should be present")
-	assert.Equal(t, IssuerURLForNamespace(testNamespace), tok.Issuer(), "iss should match provider issuer")
+	assert.Equal(t, IssuerURLForNamespace(provider.Namespace), tok.Issuer(), "iss should match provider issuer")
 	assert.NotEmpty(t, tok.Subject(), "sub claim should be present")
 	assert.False(t, tok.IssuedAt().IsZero(), "iat claim should be present")
 	assert.False(t, tok.Expiration().IsZero(), "exp claim should be present")
@@ -1394,4 +1394,183 @@ func TestPublicClientPKCE(t *testing.T) {
 	badResp.Body.Close()
 	assert.NotEqual(t, http.StatusOK, badResp.StatusCode,
 		"token exchange without code_verifier should fail for public client")
+}
+
+// TestPerNamespaceAuthzRules verifies that two namespaces can have independent
+// authorization templates.  A user with group /collab/analysis should receive
+// storage.read:/data/analysis from namespace /ns/alpha (which grants read for
+// that group) but should NOT receive that scope from namespace /ns/beta (which
+// only grants storage.modify:/data/production for /collab/production).
+func TestPerNamespaceAuthzRules(t *testing.T) {
+	config.ResetConfig()
+	t.Cleanup(func() { config.ResetConfig() })
+
+	tmpDir := t.TempDir()
+	require.NoError(t, param.Set("IssuerKey", filepath.Join(tmpDir, "issuer.jwk")))
+	require.NoError(t, param.Set("Server.ExternalWebUrl", "https://test-origin.example.com"))
+
+	// Do NOT set global Issuer.AuthorizationTemplates — each namespace gets
+	// its own rules compiled directly.
+
+	// Create shared SQLite database
+	dbPath := filepath.Join(tmpDir, "test-per-ns.sqlite")
+	db, err := dbutils.InitSQLiteDB(dbPath)
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { sqlDB.Close() })
+	require.NoError(t, dbutils.MigrateDB(sqlDB, database.EmbedUniversalMigrations, "universal_migrations"))
+	require.NoError(t, dbutils.MigrateServerSpecificDB(sqlDB, database.EmbedOriginMigrations, "origin_migrations", "origin"))
+
+	gracePeriod := 5 * time.Minute
+	const nsAlpha = "/ns/alpha"
+	const nsBeta = "/ns/beta"
+	const clientIDAlpha = "alpha-client"
+	const clientIDBeta = "beta-client"
+	const clientSecret = "shared-secret"
+	const redirect = "https://localhost/callback"
+
+	// ---- Build providers with per-namespace rules ----
+
+	providerAlpha, err := NewOIDCProvider(db, IssuerURLForNamespace(nsAlpha), gracePeriod, nsAlpha)
+	require.NoError(t, err)
+	require.NoError(t, providerAlpha.EnsureClient(context.Background(), clientIDAlpha, clientSecret, []string{redirect}))
+
+	// Alpha rules: /collab/analysis → read /data/analysis
+	rulesAlpha, err := oa4mp.CompileAuthzTemplates([]map[string]interface{}{
+		{"actions": []string{"read"}, "prefix": "/data/analysis", "groups": []string{"/collab/analysis"}},
+	})
+	require.NoError(t, err)
+	providerAlpha.SetAuthzRules(rulesAlpha)
+
+	providerBeta, err := NewOIDCProvider(db, IssuerURLForNamespace(nsBeta), gracePeriod, nsBeta)
+	require.NoError(t, err)
+	require.NoError(t, providerBeta.EnsureClient(context.Background(), clientIDBeta, clientSecret, []string{redirect}))
+
+	// Beta rules: /collab/production → modify /data/production
+	rulesBeta, err := oa4mp.CompileAuthzTemplates([]map[string]interface{}{
+		{"actions": []string{"modify"}, "prefix": "/data/production", "groups": []string{"/collab/production"}},
+	})
+	require.NoError(t, err)
+	providerBeta.SetAuthzRules(rulesBeta)
+
+	// ---- Wire up Gin + registry ----
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		c.Set("User", testUser)
+		c.Set("UserId", testUserID)
+		// User belongs to BOTH groups so the difference must come from rules
+		c.Set("Groups", []string{"/collab/analysis", "/collab/production"})
+		c.Next()
+	})
+
+	registry := NewProviderRegistry()
+	registry.Register(nsAlpha, providerAlpha)
+	registry.Register(nsBeta, providerBeta)
+	RegisterRoutesWithMiddleware(engine, registry)
+
+	ts := httptest.NewTLSServer(engine)
+	t.Cleanup(ts.Close)
+
+	httpClient := ts.Client()
+	httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
+	// Helper: do auth code flow and return granted scopes + issuer from the access token
+	getGrantedScopes := func(t *testing.T, ns, clientID string, requestedScope string) (string, string) {
+		t.Helper()
+		codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+		codeChallenge := generateCodeChallenge(codeVerifier)
+		nsPath := strings.ReplaceAll(ns, "/", "/")
+
+		authURL := ts.URL + "/api/v1.0/issuer/ns" + nsPath + "/authorize?" + url.Values{
+			"response_type":         {"code"},
+			"client_id":             {clientID},
+			"redirect_uri":          {redirect},
+			"scope":                 {requestedScope},
+			"state":                 {"ns-test-state"},
+			"code_challenge":        {codeChallenge},
+			"code_challenge_method": {"S256"},
+		}.Encode()
+
+		resp, err := httpClient.Get(authURL)
+		require.NoError(t, err)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		require.True(t, resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusFound,
+			"authorize should redirect, got %d: %s", resp.StatusCode, string(body))
+
+		location := resp.Header.Get("Location")
+		redirectURL, err := url.Parse(location)
+		require.NoError(t, err)
+		code := redirectURL.Query().Get("code")
+		require.NotEmpty(t, code, "redirect should contain authorization code, location: %s", location)
+
+		// Exchange code for tokens
+		form := url.Values{
+			"grant_type":    {"authorization_code"},
+			"code":          {code},
+			"redirect_uri":  {redirect},
+			"client_id":     {clientID},
+			"code_verifier": {codeVerifier},
+		}
+		req, err := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns"+nsPath+"/token",
+			strings.NewReader(form.Encode()))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth(clientID, clientSecret)
+
+		tokenResp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		tokenBody, _ := io.ReadAll(tokenResp.Body)
+		tokenResp.Body.Close()
+		require.Equal(t, http.StatusOK, tokenResp.StatusCode,
+			"token exchange should succeed, body: %s", string(tokenBody))
+
+		var result map[string]interface{}
+		require.NoError(t, json.Unmarshal(tokenBody, &result))
+		at := result["access_token"].(string)
+
+		// Parse the access token to extract the scope claim
+		var provider *OIDCProvider
+		if ns == nsAlpha {
+			provider = providerAlpha
+		} else {
+			provider = providerBeta
+		}
+		tok := validateWLCGToken(t, at, provider)
+		scopeClaim, _ := tok.Get("scope")
+		scopeStr, _ := scopeClaim.(string)
+		return scopeStr, tok.Issuer()
+	}
+
+	// ---- Test: alpha namespace grants read on /data/analysis ----
+	t.Run("alpha_grants_read_analysis", func(t *testing.T) {
+		scopes, iss := getGrantedScopes(t, nsAlpha, clientIDAlpha,
+			"openid storage.read:/data/analysis storage.modify:/data/production")
+		assert.Contains(t, scopes, "storage.read:/data/analysis",
+			"alpha namespace should grant storage.read:/data/analysis")
+		assert.NotContains(t, scopes, "storage.modify:/data/production",
+			"alpha namespace should NOT grant storage.modify:/data/production (not in its rules)")
+		assert.Equal(t, IssuerURLForNamespace(nsAlpha), iss,
+			"alpha token iss must reflect the alpha namespace")
+		assert.NotEqual(t, IssuerURLForNamespace(nsBeta), iss,
+			"alpha token iss must differ from beta namespace")
+	})
+
+	// ---- Test: beta namespace grants modify on /data/production ----
+	t.Run("beta_grants_modify_production", func(t *testing.T) {
+		scopes, iss := getGrantedScopes(t, nsBeta, clientIDBeta,
+			"openid storage.read:/data/analysis storage.modify:/data/production")
+		assert.Contains(t, scopes, "storage.modify:/data/production",
+			"beta namespace should grant storage.modify:/data/production")
+		assert.NotContains(t, scopes, "storage.read:/data/analysis",
+			"beta namespace should NOT grant storage.read:/data/analysis (not in its rules)")
+		assert.Equal(t, IssuerURLForNamespace(nsBeta), iss,
+			"beta token iss must reflect the beta namespace")
+		assert.NotEqual(t, IssuerURLForNamespace(nsAlpha), iss,
+			"beta token iss must differ from alpha namespace")
+	})
 }

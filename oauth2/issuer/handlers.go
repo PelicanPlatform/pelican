@@ -403,8 +403,15 @@ func handleAuthorize(provider *OIDCProvider) gin.HandlerFunc {
 			return
 		}
 
-		// Calculate allowed scopes for this user
-		allowedScopes, matchedGroups := oa4mp.CalculateAllowedScopes(user, userID, groups)
+		// Calculate allowed scopes for this user using per-namespace rules
+		// when available, falling back to the global rules.
+		var allowedScopes []string
+		var matchedGroups []string
+		if len(provider.AuthzRules) > 0 {
+			allowedScopes, matchedGroups = oa4mp.CalculateAllowedScopesWithRules(provider.AuthzRules, user, userID, groups)
+		} else {
+			allowedScopes, matchedGroups = oa4mp.CalculateAllowedScopes(user, userID, groups)
+		}
 		serverDB := database.ServerDatabase
 		if serverDB == nil {
 			serverDB = provider.storage.db
@@ -614,8 +621,14 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 			return
 		}
 
-		// Calculate allowed scopes
-		allowedScopes, matchedGroups := oa4mp.CalculateAllowedScopes(user, userID, groups)
+		// Calculate allowed scopes using per-namespace rules when available
+		var allowedScopes []string
+		var matchedGroups []string
+		if len(provider.AuthzRules) > 0 {
+			allowedScopes, matchedGroups = oa4mp.CalculateAllowedScopesWithRules(provider.AuthzRules, user, userID, groups)
+		} else {
+			allowedScopes, matchedGroups = oa4mp.CalculateAllowedScopes(user, userID, groups)
+		}
 		serverDB := database.ServerDatabase
 		if serverDB == nil {
 			serverDB = provider.storage.db

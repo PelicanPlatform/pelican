@@ -103,16 +103,24 @@ func MergeGroups(groups1, groups2 []string) []string {
 //
 // Returns the allowed scopes and the groups that matched authorization rules.
 func CalculateAllowedScopes(user string, userId string, groupsList []string) ([]string, []string) {
-	if len(compiledAuthzRules) == 0 {
+	return CalculateAllowedScopesWithRules(compiledAuthzRules, user, userId, groupsList)
+}
+
+// CalculateAllowedScopesWithRules determines which scopes the user is allowed
+// based on the given set of compiled authorization rules.  This is the
+// per-namespace variant; CalculateAllowedScopes delegates here using the
+// global compiledAuthzRules.
+func CalculateAllowedScopesWithRules(rules []*CompiledAuthz, user string, userId string, groupsList []string) ([]string, []string) {
+	if len(rules) == 0 {
 		log.Debugf("calculateAllowedScopes: compiledAuthzRules is empty")
 		return []string{}, []string{}
 	}
 
-	log.Debugf("calculateAllowedScopes: user=%s, userId=%s, groupsList=%v, numRules=%d", user, userId, groupsList, len(compiledAuthzRules))
+	log.Debugf("calculateAllowedScopes: user=%s, userId=%s, groupsList=%v, numRules=%d", user, userId, groupsList, len(rules))
 	scopeSet := make(map[string]struct{})
 	groupSet := make(map[string]struct{})
 	userEscaped := url.PathEscape(user)
-	for idx, rule := range compiledAuthzRules {
+	for idx, rule := range rules {
 		log.Debugf("calculateAllowedScopes: Processing rule %d: prefix=%s, actions=%v, groupLiterals=%v, groupRegexes=%d, userSet=%v",
 			idx, rule.Prefix, rule.Actions, rule.GroupLiterals, len(rule.GroupRegexes), rule.UserSet)
 		// First, check if the user is allowed by this rule.
