@@ -679,6 +679,16 @@ type: stringSlice
 default: none
 components: ["client"]
 ---
+name: Client.CredentialFile
+description: |+
+  Override the default path to the client credential file used for token generation.
+  When set, the client will use this file instead of the default credential file location.
+  This is useful for non-interactive contexts where the default credential file may be
+  password-protected and prompts would fail.
+type: filename
+default: none
+components: ["client"]
+---
 ############################
 #  ClientAgent-level Configs #
 ############################
@@ -817,6 +827,11 @@ description: |+
       You need to manually create a file under path to `StoragePrefix` with the same name as `SentinelLocation`.
 
       Note that this parameter is only available for POSIX and S3 backends.
+  - AuthorizationTemplates: [OPTIONAL] Per-export authorization templates that override the global
+      `Issuer.AuthorizationTemplates` for this export's namespace.
+      When set, only these templates are used for scope calculation in this namespace;
+      the global templates are ignored entirely (no merging).
+      The template format is the same as `Issuer.AuthorizationTemplates`.
 
     Example:
 
@@ -828,6 +843,12 @@ description: |+
           Capabilities: ["Reads", "PublicReads", "Writes", "Listings", "DirectReads"]
           SentinelLocation: demoproject_origin_A
           IssuerUrls: ["https://issuer1.example.com", "https://issuer2.example.com"]
+          AuthorizationTemplates:
+            - actions: ["read", "modify"]
+              prefix: /home/$USER
+            - actions: ["read"]
+              prefix: /data/$GROUP
+              groups: ["/physics"]
     ```
 
   If Origin.StorageType == "s3", the following additional fields are available:
@@ -1196,6 +1217,18 @@ description: |+
   Enable the built-in issuer daemon for the origin.
 type: bool
 default: false
+components: ["origin"]
+---
+name: Origin.IssuerMode
+description: |+
+  Select the issuer implementation to use when Origin.EnableIssuer is true.
+  "embedded" uses the built-in fosite-based OIDC provider which requires
+  no external processes (default).
+  "oa4mp" uses the external Java-based OA4MP issuer (legacy).
+  When switching between modes, state is not migrated between the two databases.
+type: string
+default: "oa4mp"
+hidden: true
 components: ["origin"]
 ---
 name: Origin.ScitokensRestrictedPaths
@@ -3198,6 +3231,28 @@ hidden: true
 ################################
 #   Issuer's Configurations    #
 ################################
+name: Issuer.DynamicClientStaleTimeout
+description: |+
+  Maximum duration of inactivity before a dynamically registered client
+  that was previously used is automatically deleted.
+  This timeout is longer than DynamicClientUnusedTimeout because the
+  client has demonstrated legitimate use.
+type: duration
+default: 336h
+hidden: true
+components: ["origin"]
+---
+name: Issuer.DynamicClientUnusedTimeout
+description: |+
+  Maximum age before a dynamically registered client that has never been
+  used is automatically deleted.
+  This timeout is intentionally short so that abandoned registrations are
+  cleaned up quickly.
+type: duration
+default: 1h
+hidden: true
+components: ["origin"]
+---
 name: Issuer.TomcatLocation
 description: |+
   Location where [Apache Tomcat](https://tomcat.apache.org/) is installed.
@@ -3298,6 +3353,16 @@ type: string
 default: iss
 components: ["origin", "registry", "cache", "director"]
 ---
+name: Issuer.RefreshTokenGracePeriod
+description: |+
+  Duration during which a used refresh token may still be reused.
+  When a refresh token is exchanged, it is not invalidated immediately;
+  instead it remains valid for this grace period.
+type: duration
+default: 5m
+hidden: true
+components: ["origin"]
+---
 name: Issuer.UserStripDomain
 description: |+
   Some OIDC issuers generate a username of the form user@domain (such as `john.doe@gmail.com`); when
@@ -3353,8 +3418,12 @@ components: ["origin"]
 ---
 name: Issuer.AuthorizationTemplates
 description: |+
-  The authorizations that may be generated for an authenticated request,
+  The global authorizations that may be generated for an authenticated request,
   specified via a list of templates.
+  These rules apply to every namespace served by the issuer unless a specific
+  export overrides them with its own `AuthorizationTemplates` (see `Origin.Exports`).
+  When an export defines per-namespace templates, only those templates are used
+  for that namespace; the global templates are ignored entirely (no merging).
 
   Each template defines a set of authorizations that can depend on the
   authenticated username and groups. An authorization is an action and
@@ -3422,6 +3491,17 @@ description: |+
 type: stringSlice
 root_default: []
 default: []
+components: ["origin"]
+---
+name: Issuer.PublicClientID
+description: |+
+  The client ID used for the pre-seeded public OAuth2 client.
+  This client uses PKCE for security and does not require a client secret
+  (token_endpoint_auth_method is "none").
+  It is intended for browser-based applications such as the Pelican web viewer.
+type: string
+default: "pelican-public-client"
+hidden: true
 components: ["origin"]
 ---
 ###################################

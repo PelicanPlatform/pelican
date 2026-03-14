@@ -131,6 +131,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.Url": false,
 	"Cache.XRootDPrefix": false,
 	"Client.AssumeDirectorServerHeader": false,
+	"Client.CredentialFile": false,
 	"Client.DirectorRetries": false,
 	"Client.DisableHttpProxy": false,
 	"Client.DisableProxyFallback": false,
@@ -195,6 +196,8 @@ var runtimeConfigurableMap = map[string]bool{
 	"GeoIPOverrides": false,
 	"Issuer.AuthenticationSource": false,
 	"Issuer.AuthorizationTemplates": false,
+	"Issuer.DynamicClientStaleTimeout": false,
+	"Issuer.DynamicClientUnusedTimeout": false,
 	"Issuer.GroupFile": false,
 	"Issuer.GroupRequirements": false,
 	"Issuer.GroupSource": false,
@@ -205,8 +208,10 @@ var runtimeConfigurableMap = map[string]bool{
 	"Issuer.OIDCIssuerClaim": false,
 	"Issuer.OIDCPreferClaimsFromIDToken": false,
 	"Issuer.OIDCSubjectClaim": false,
+	"Issuer.PublicClientID": false,
 	"Issuer.QDLLocation": false,
 	"Issuer.RedirectUris": false,
+	"Issuer.RefreshTokenGracePeriod": false,
 	"Issuer.ScitokensServerLocation": false,
 	"Issuer.TomcatLocation": false,
 	"Issuer.UserStripDomain": false,
@@ -313,6 +318,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.GlobusTransferTokenFile": false,
 	"Origin.HttpAuthTokenFile": false,
 	"Origin.HttpServiceUrl": false,
+	"Origin.IssuerMode": false,
 	"Origin.Mode": false,
 	"Origin.Multiuser": false,
 	"Origin.NamespacePrefix": false,
@@ -540,6 +546,8 @@ func (sP StringParam) GetString() string {
 			return config.ClientAgent.PidFile
 		case "ClientAgent.Socket":
 			return config.ClientAgent.Socket
+		case "Client.CredentialFile":
+			return config.Client.CredentialFile
 		case "Director.AdvertiseUrl":
 			return config.Director.AdvertiseUrl
 		case "Director.CacheSortMethod":
@@ -584,6 +592,8 @@ func (sP StringParam) GetString() string {
 			return config.Issuer.OIDCIssuerClaim
 		case "Issuer.OIDCSubjectClaim":
 			return config.Issuer.OIDCSubjectClaim
+		case "Issuer.PublicClientID":
+			return config.Issuer.PublicClientID
 		case "Issuer.QDLLocation":
 			return config.Issuer.QDLLocation
 		case "Issuer.ScitokensServerLocation":
@@ -688,6 +698,8 @@ func (sP StringParam) GetString() string {
 			return config.Origin.HttpAuthTokenFile
 		case "Origin.HttpServiceUrl":
 			return config.Origin.HttpServiceUrl
+		case "Origin.IssuerMode":
+			return config.Origin.IssuerMode
 		case "Origin.Mode":
 			return config.Origin.Mode
 		case "Origin.NamespacePrefix":
@@ -1295,6 +1307,12 @@ func (dP DurationParam) GetDuration() time.Duration {
 			return config.Director.StatTimeout
 		case "Federation.TopologyReloadInterval":
 			return config.Federation.TopologyReloadInterval
+		case "Issuer.DynamicClientStaleTimeout":
+			return config.Issuer.DynamicClientStaleTimeout
+		case "Issuer.DynamicClientUnusedTimeout":
+			return config.Issuer.DynamicClientUnusedTimeout
+		case "Issuer.RefreshTokenGracePeriod":
+			return config.Issuer.RefreshTokenGracePeriod
 		case "Logging.Client.ProgressInterval":
 			return config.Logging.Client.ProgressInterval
 		case "Lotman.DefaultLotDeletionLifetime":
@@ -1452,6 +1470,7 @@ var allParameterNames = []string{
 	"Cache.Url",
 	"Cache.XRootDPrefix",
 	"Client.AssumeDirectorServerHeader",
+	"Client.CredentialFile",
 	"Client.DirectorRetries",
 	"Client.DisableHttpProxy",
 	"Client.DisableProxyFallback",
@@ -1516,6 +1535,8 @@ var allParameterNames = []string{
 	"GeoIPOverrides",
 	"Issuer.AuthenticationSource",
 	"Issuer.AuthorizationTemplates",
+	"Issuer.DynamicClientStaleTimeout",
+	"Issuer.DynamicClientUnusedTimeout",
 	"Issuer.GroupFile",
 	"Issuer.GroupRequirements",
 	"Issuer.GroupSource",
@@ -1526,8 +1547,10 @@ var allParameterNames = []string{
 	"Issuer.OIDCIssuerClaim",
 	"Issuer.OIDCPreferClaimsFromIDToken",
 	"Issuer.OIDCSubjectClaim",
+	"Issuer.PublicClientID",
 	"Issuer.QDLLocation",
 	"Issuer.RedirectUris",
+	"Issuer.RefreshTokenGracePeriod",
 	"Issuer.ScitokensServerLocation",
 	"Issuer.TomcatLocation",
 	"Issuer.UserStripDomain",
@@ -1634,6 +1657,7 @@ var allParameterNames = []string{
 	"Origin.GlobusTransferTokenFile",
 	"Origin.HttpAuthTokenFile",
 	"Origin.HttpServiceUrl",
+	"Origin.IssuerMode",
 	"Origin.Mode",
 	"Origin.Multiuser",
 	"Origin.NamespacePrefix",
@@ -1817,6 +1841,7 @@ var (
 	ClientAgent_DbLocation = StringParam{"ClientAgent.DbLocation"}
 	ClientAgent_PidFile = StringParam{"ClientAgent.PidFile"}
 	ClientAgent_Socket = StringParam{"ClientAgent.Socket"}
+	Client_CredentialFile = StringParam{"Client.CredentialFile"}
 	Director_AdvertiseUrl = StringParam{"Director.AdvertiseUrl"}
 	Director_CacheSortMethod = StringParam{"Director.CacheSortMethod"}
 	Director_DbLocation = StringParam{"Director.DbLocation"}
@@ -1839,6 +1864,7 @@ var (
 	Issuer_OIDCGroupClaim = StringParam{"Issuer.OIDCGroupClaim"}
 	Issuer_OIDCIssuerClaim = StringParam{"Issuer.OIDCIssuerClaim"}
 	Issuer_OIDCSubjectClaim = StringParam{"Issuer.OIDCSubjectClaim"}
+	Issuer_PublicClientID = StringParam{"Issuer.PublicClientID"}
 	Issuer_QDLLocation = StringParam{"Issuer.QDLLocation"}
 	Issuer_ScitokensServerLocation = StringParam{"Issuer.ScitokensServerLocation"}
 	Issuer_TomcatLocation = StringParam{"Issuer.TomcatLocation"}
@@ -1891,6 +1917,7 @@ var (
 	Origin_GlobusTransferTokenFile = StringParam{"Origin.GlobusTransferTokenFile"}
 	Origin_HttpAuthTokenFile = StringParam{"Origin.HttpAuthTokenFile"}
 	Origin_HttpServiceUrl = StringParam{"Origin.HttpServiceUrl"}
+	Origin_IssuerMode = StringParam{"Origin.IssuerMode"}
 	Origin_Mode = StringParam{"Origin.Mode"}
 	Origin_NamespacePrefix = StringParam{"Origin.NamespacePrefix"}
 	Origin_RunLocation = StringParam{"Origin.RunLocation"}
@@ -2152,6 +2179,9 @@ var (
 	Director_RegistryQueryInterval = DurationParam{"Director.RegistryQueryInterval"}
 	Director_StatTimeout = DurationParam{"Director.StatTimeout"}
 	Federation_TopologyReloadInterval = DurationParam{"Federation.TopologyReloadInterval"}
+	Issuer_DynamicClientStaleTimeout = DurationParam{"Issuer.DynamicClientStaleTimeout"}
+	Issuer_DynamicClientUnusedTimeout = DurationParam{"Issuer.DynamicClientUnusedTimeout"}
+	Issuer_RefreshTokenGracePeriod = DurationParam{"Issuer.RefreshTokenGracePeriod"}
 	Logging_Client_ProgressInterval = DurationParam{"Logging.Client.ProgressInterval"}
 	Lotman_DefaultLotDeletionLifetime = DurationParam{"Lotman.DefaultLotDeletionLifetime"}
 	Lotman_DefaultLotExpirationLifetime = DurationParam{"Lotman.DefaultLotExpirationLifetime"}

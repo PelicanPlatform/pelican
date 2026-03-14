@@ -711,9 +711,11 @@ func registerClient(dirResp server_structs.DirectorResponse) (*config.PrefixEntr
 		return nil, err
 	}
 	newEntry := config.PrefixEntry{
-		Prefix:       dirResp.XPelNsHdr.Namespace,
-		ClientID:     resp.ClientID,
-		ClientSecret: resp.ClientSecret,
+		Prefix:                  dirResp.XPelNsHdr.Namespace,
+		ClientID:                resp.ClientID,
+		ClientSecret:            resp.ClientSecret,
+		RegistrationAccessToken: resp.RegistrationAccessToken,
+		RegistrationClientURI:   resp.RegistrationClientURI,
 	}
 	return &newEntry, nil
 }

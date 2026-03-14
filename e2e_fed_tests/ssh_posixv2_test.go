@@ -45,14 +45,6 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
-var (
-	buildOnce         sync.Once
-	pelicanBinPath    string
-	binaryTempDir     string
-	binaryBuildErr    error
-	binaryBuildOutput []byte
-)
-
 // waitForSSHBackendReady waits for the SSH backend to report healthy status
 func waitForSSHBackendReady(t *testing.T, timeout time.Duration) {
 	t.Helper()
@@ -63,18 +55,6 @@ func waitForSSHBackendReady(t *testing.T, timeout time.Duration) {
 		}
 		return status == metrics.StatusOK.String()
 	}, timeout, 100*time.Millisecond, "SSH backend did not become ready (status OK)")
-}
-
-// TestMain sets up fixtures that persist across all tests
-func TestMain(m *testing.M) {
-	// Run all tests
-	code := m.Run()
-
-	// Cleanup binary temp directory if it was created
-	if binaryTempDir != "" {
-		os.RemoveAll(binaryTempDir)
-	}
-	os.Exit(code)
 }
 
 // testSSHDServer represents a temporary sshd server for testing
@@ -275,33 +255,6 @@ Director:
 `, storageDir, sshPort, currentUser, privateKeyFile, knownHostsFile, pelicanBinaryPath)
 }
 
-// buildPelicanBinary builds the pelican binary on first call and returns its path.
-// The binary is built once and shared across all tests, then cleaned up in TestMain.
-func buildPelicanBinary(t *testing.T) string {
-	buildOnce.Do(func() {
-		var err error
-		binaryTempDir, err = os.MkdirTemp("", "pelican-ssh-e2e-test-*")
-		if err != nil {
-			binaryBuildErr = fmt.Errorf("failed to create temp directory: %w", err)
-			return
-		}
-
-		pelicanBinPath = filepath.Join(binaryTempDir, "pelican")
-		cmd := exec.Command("go", "build", "-buildvcs=false", "-o", pelicanBinPath, "../cmd")
-		binaryBuildOutput, binaryBuildErr = cmd.CombinedOutput()
-		if binaryBuildErr != nil {
-			os.RemoveAll(binaryTempDir)
-			binaryTempDir = ""
-		}
-	})
-
-	if binaryBuildErr != nil {
-		t.Fatalf("Failed to build pelican binary: %v\nOutput: %s", binaryBuildErr, binaryBuildOutput)
-	}
-
-	return pelicanBinPath
-}
-
 // TestSSHPosixv2OriginUploadDownload tests basic upload and download operations
 // using the SSH POSIXv2 backend through the federation.
 func TestSSHPosixv2OriginUploadDownload(t *testing.T) {
@@ -315,7 +268,7 @@ func TestSSHPosixv2OriginUploadDownload(t *testing.T) {
 	}
 
 	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := buildPelicanBinary(t)
+	pelicanBinary := getPelicanBinary(t)
 
 	// Start the test SSH server
 	sshServer, err := startTestSSHD(t)
@@ -382,7 +335,7 @@ func TestSSHPosixv2OriginStat(t *testing.T) {
 	}
 
 	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := buildPelicanBinary(t)
+	pelicanBinary := getPelicanBinary(t)
 
 	sshServer, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test SSH server")
@@ -439,7 +392,7 @@ func TestSSHPosixv2OriginLargeFile(t *testing.T) {
 	}
 
 	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := buildPelicanBinary(t)
+	pelicanBinary := getPelicanBinary(t)
 
 	sshServer, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test SSH server")
@@ -500,7 +453,7 @@ func TestSSHPosixv2OriginDirectoryListing(t *testing.T) {
 	}
 
 	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := buildPelicanBinary(t)
+	pelicanBinary := getPelicanBinary(t)
 
 	sshServer, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test SSH server")
@@ -579,7 +532,7 @@ func TestSSHPosixv2OriginMultipleFiles(t *testing.T) {
 	}
 
 	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := buildPelicanBinary(t)
+	pelicanBinary := getPelicanBinary(t)
 
 	sshServer, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test SSH server")
@@ -645,7 +598,7 @@ func TestSSHPosixv2OriginConnectionStress(t *testing.T) {
 	}
 
 	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := buildPelicanBinary(t)
+	pelicanBinary := getPelicanBinary(t)
 
 	sshServer, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test SSH server")
@@ -843,7 +796,7 @@ func TestSSHPosixv2OriginTunnelMode(t *testing.T) {
 	}
 
 	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := buildPelicanBinary(t)
+	pelicanBinary := getPelicanBinary(t)
 
 	// Start the test SSH server
 	sshServer, err := startTestSSHD(t)

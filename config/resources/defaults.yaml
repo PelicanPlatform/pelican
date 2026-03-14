@@ -97,6 +97,7 @@ Origin:
   Multiuser: false
   EnableMacaroons: false
   EnableVoms: true
+  IssuerMode: oa4mp
   SelfTestInterval: 15s
   SSH:
     AuthMethods: ["publickey", "agent", "keyboard-interactive", "password"]

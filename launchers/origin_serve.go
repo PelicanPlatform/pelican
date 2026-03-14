@@ -37,6 +37,7 @@ import (
 	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/oa4mp"
+	issuer "github.com/pelicanplatform/pelican/oauth2/issuer"
 	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/origin_serve"
 	"github.com/pelicanplatform/pelican/param"
@@ -111,10 +112,20 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		server_utils.RegisterOIDCAPI(engine.Group("/", web_ui.ServerHeaderMiddleware), false)
 	}
 
-	// OA4MP is not XRootD specific - configure if enabled
+	// Configure the issuer (OA4MP proxy or embedded fosite) if enabled
 	if param.Origin_EnableIssuer.GetBool() {
-		if err = oa4mp.ConfigureOA4MPProxy(engine); err != nil {
-			return nil, err
+		issuerMode := param.Origin_IssuerMode.GetString()
+		switch issuerMode {
+		case "embedded", "":
+			if err := configureEmbeddedIssuer(ctx, egrp, engine); err != nil {
+				return nil, errors.Wrap(err, "failed to configure embedded OIDC issuer")
+			}
+		case "oa4mp":
+			if err = oa4mp.ConfigureOA4MPProxy(engine); err != nil {
+				return nil, err
+			}
+		default:
+			return nil, errors.Errorf("unsupported Origin.IssuerMode %q; valid values are \"embedded\" and \"oa4mp\"", issuerMode)
 		}
 	}
 
@@ -136,7 +147,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 			return nil, err
 		}
 
-		if param.Origin_EnableIssuer.GetBool() {
+		if param.Origin_EnableIssuer.GetBool() && param.Origin_IssuerMode.GetString() == "oa4mp" {
 			oa4mp_launcher, err := oa4mp.ConfigureOA4MP()
 			if err != nil {
 				return nil, err
@@ -212,7 +223,7 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 
 		// Launch the OA4MP token issuer daemon for non-XRootD backends.
 		// For XRootD backends, it is launched alongside XRootD via xrootd.LaunchDaemons.
-		if param.Origin_EnableIssuer.GetBool() {
+		if param.Origin_EnableIssuer.GetBool() && param.Origin_IssuerMode.GetString() == "oa4mp" {
 			oa4mpLauncher, err := oa4mp.ConfigureOA4MP()
 			if err != nil {
 				return errors.Wrap(err, "failed to configure OA4MP for non-XRootD backend")
@@ -267,5 +278,113 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 		return database.ShutdownDB()
 	})
 
+	return nil
+}
+
+// configureEmbeddedIssuer initializes the fosite-based embedded OIDC issuer,
+// compiles authorization rules, and registers routes on the Gin engine.
+//
+// A separate OIDCProvider is created for each origin export that requires
+// authentication (non-public reads or writes).  Each provider uses the
+// export's FederationPrefix as the namespace so that clients and tokens are
+// scoped per-namespace.
+func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *gin.Engine) error {
+	// Compile Issuer.AuthorizationTemplates as the global fallback for
+	// any namespace that does not have per-namespace rules.
+	if err := oa4mp.InitAuthzRules(); err != nil {
+		return errors.Wrap(err, "failed to compile issuer authorization templates")
+	}
+
+	originExports, err := server_utils.GetOriginExports()
+	if err != nil {
+		return errors.Wrap(err, "failed to get origin exports for embedded issuer")
+	}
+
+	gracePeriod := param.Issuer_RefreshTokenGracePeriod.GetDuration()
+	if gracePeriod == 0 {
+		gracePeriod = 5 * time.Minute
+	}
+
+	registry := issuer.NewProviderRegistry()
+
+	for _, export := range originExports {
+		// Only create an issuer for exports that need authentication
+		if export.Capabilities.PublicReads && !export.Capabilities.Writes {
+			continue
+		}
+
+		namespace := export.FederationPrefix
+		issuerURL := issuer.IssuerURLForNamespace(namespace)
+
+		provider, err := issuer.NewOIDCProvider(database.ServerDatabase, issuerURL, gracePeriod, namespace)
+		if err != nil {
+			return errors.Wrapf(err, "failed to create embedded OIDC provider for namespace %s", namespace)
+		}
+
+		registry.Register(namespace, provider)
+
+		// If the export defines its own AuthorizationTemplates, compile
+		// them and attach to this provider so they override the global
+		// rules for this namespace.
+		if len(export.AuthorizationTemplates) > 0 {
+			rules, err := oa4mp.CompileAuthzTemplates(export.AuthorizationTemplates)
+			if err != nil {
+				return errors.Wrapf(err, "failed to compile per-export authorization templates for namespace %s", namespace)
+			}
+			provider.SetAuthzRules(rules)
+		}
+
+		// Seed the pre-allocated public client for browser-based flows (PKCE).
+		publicClientID := param.Issuer_PublicClientID.GetString()
+		if publicClientID != "" {
+			redirectURIs := param.Issuer_RedirectUris.GetStringSlice()
+			if err := provider.EnsurePublicClient(ctx, publicClientID, redirectURIs); err != nil {
+				return errors.Wrapf(err, "failed to seed public client %q for namespace %s", publicClientID, namespace)
+			}
+		}
+
+		// Start background cleanup for each provider
+		unusedTimeout := param.Issuer_DynamicClientUnusedTimeout.GetDuration()
+		if unusedTimeout == 0 {
+			unusedTimeout = 1 * time.Hour
+		}
+		staleTimeout := param.Issuer_DynamicClientStaleTimeout.GetDuration()
+		if staleTimeout == 0 {
+			staleTimeout = 336 * time.Hour // 2 weeks
+		}
+		provider.StartCleanup(ctx, egrp, unusedTimeout, staleTimeout)
+
+		log.Infof("Embedded OIDC issuer configured for namespace %s", namespace)
+	}
+
+	if registry.First() == nil {
+		log.Info("Embedded OIDC issuer: no exports require authentication; no issuers registered")
+		return nil
+	}
+
+	// Apply a non-aborting middleware to the issuer route group so that
+	// handlers which inspect ctx.GetString("User") (e.g., device-verify)
+	// will see the identity extracted from the login cookie.  Unlike
+	// AuthHandler, this middleware never aborts—it lets the handler decide
+	// how to react to an unauthenticated request.
+	issuer.RegisterRoutesWithMiddleware(engine, registry, func(ctx *gin.Context) {
+		user, userId, groups, _ := web_ui.GetUserGroups(ctx)
+		if user != "" {
+			ctx.Set("User", user)
+			if userId != "" {
+				ctx.Set("UserId", userId)
+			}
+			if len(groups) > 0 {
+				ctx.Set("Groups", groups)
+			}
+		}
+		ctx.Next()
+	})
+
+	// Register admin client-management endpoints behind full admin auth.
+	// Admin routes are handled by the same namespace-dispatched routes.
+	issuer.RegisterAdminRoutes(engine, registry, web_ui.AuthHandler, web_ui.AdminAuthHandler)
+
+	log.Info("Embedded OIDC issuer configured successfully")
 	return nil
 }

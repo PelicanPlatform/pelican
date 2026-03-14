@@ -32,6 +32,7 @@ import (
 	"text/template"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
@@ -92,7 +93,9 @@ var (
 	idTokenPoliciesQdlTmpl string
 )
 
-type compiledAuthz struct {
+// CompiledAuthz is a pre-compiled authorization template rule.
+// Exported so that per-namespace issuers can hold their own rule sets.
+type CompiledAuthz struct {
 	Actions       []string
 	Prefix        string
 	UserSet       map[string]struct{}
@@ -100,10 +103,10 @@ type compiledAuthz struct {
 	GroupRegexes  []*regexp.Regexp
 }
 
-var compiledAuthzRules []*compiledAuthz
+var compiledAuthzRules []*CompiledAuthz
 
-func compileAuthzRules(raw authzTemplate) (*compiledAuthz, error) {
-	compiled := &compiledAuthz{
+func compileAuthzRules(raw authzTemplate) (*CompiledAuthz, error) {
+	compiled := &CompiledAuthz{
 		Actions:       raw.Actions,
 		Prefix:        raw.Prefix,
 		UserSet:       make(map[string]struct{}),
@@ -128,6 +131,53 @@ func compileAuthzRules(raw authzTemplate) (*compiledAuthz, error) {
 	}
 
 	return compiled, nil
+}
+
+// InitAuthzRules compiles the Issuer.AuthorizationTemplates into the
+// compiledAuthzRules slice.  This can be called independently of
+// ConfigureOA4MP for the embedded OIDC issuer to use.
+func InitAuthzRules() error {
+	authzTemplates := []authzTemplate{}
+	if err := param.Issuer_AuthorizationTemplates.Unmarshal(&authzTemplates); err != nil {
+		return errors.Wrap(err, "Failed to parse the Issuer.AuthorizationTemplates config")
+	}
+
+	compiled, err := CompileAuthzTemplates(authzTemplates)
+	if err != nil {
+		return err
+	}
+	compiledAuthzRules = compiled
+	return nil
+}
+
+// CompileAuthzTemplates compiles a list of raw authorization template maps
+// into CompiledAuthz rules.  Each map should have the same keys as the
+// Issuer.AuthorizationTemplates config entries (actions, prefix, groups, etc.).
+func CompileAuthzTemplates(raw interface{}) ([]*CompiledAuthz, error) {
+	// Decode via mapstructure to support both []authzTemplate and
+	// []map[string]interface{} (the form viper/param returns).
+	var templates []authzTemplate
+	cfg := &mapstructure.DecoderConfig{
+		Result:  &templates,
+		TagName: "mapstructure",
+	}
+	decoder, err := mapstructure.NewDecoder(cfg)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create decoder for authorization templates")
+	}
+	if err := decoder.Decode(raw); err != nil {
+		return nil, errors.Wrap(err, "failed to decode authorization templates")
+	}
+
+	var rules []*CompiledAuthz
+	for _, tmpl := range templates {
+		compiled, err := compileAuthzRules(tmpl)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to compile authorization template: %v", tmpl)
+		}
+		rules = append(rules, compiled)
+	}
+	return rules, nil
 }
 
 func writeOA4MPFile(fname string, data []byte, perm os.FileMode) error {

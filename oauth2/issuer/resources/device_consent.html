@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Pelican Device Authorization</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:ital@0;1&display=swap" rel="stylesheet">
+  <style>{{.CSS}}</style>
+</head>
+<body>
+<div class="background-effect"></div>
+<main>
+  <div class="content-container">
+    <h2>Pelican Device Authorization</h2>
+    <p>Enter the code displayed on your device to authorize access.</p>
+    <form method="POST" action="{{.FormAction}}">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <div class="client-info">
+        <p>Enter the user code from your CLI:</p>
+        <div style="text-align: center; margin: 20px 0;">
+          <input type="text" id="user_code" name="user_code" value="{{.UserCode}}"
+                 placeholder="XXXX-XXXX" required autofocus maxlength="9"
+                 pattern="[A-Za-z0-9]{4}-?[A-Za-z0-9]{4}">
+        </div>
+      </div>
+      <div class="button-container">
+        <input type="submit" name="action" value="approve" class="pelican-button"/>
+        <input type="submit" name="action" value="deny" class="pelican-button"/>
+      </div>
+    </form>
+  </div>
+</main>
+<div class="footer-logo">
+  <img height="80" src="https://pelicanplatform.org/static/images/PelicanPlatformLogo_Icon.png" alt="Pelican Logo">
+</div>
+</body>
+</html>

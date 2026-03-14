@@ -153,6 +153,14 @@ type Response struct {
 	// or 0 if it will not expire. REQUIRED if "client_secret" is issued.
 	ClientSecretExpiresAt time.Time `json:"client_secret_expires_at"`
 
+	// RegistrationAccessToken is the token used to access the client
+	// configuration endpoint (RFC 7592). OPTIONAL.
+	RegistrationAccessToken string `json:"registration_access_token,omitempty"`
+
+	// RegistrationClientURI is the URL of the client configuration
+	// endpoint for this client (RFC 7592). OPTIONAL.
+	RegistrationClientURI string `json:"registration_client_uri,omitempty"`
+
 	// Additionally, the authorization server MUST return all registered metadata about this client
 	Metadata `json:",inline"`
 }

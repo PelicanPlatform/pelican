@@ -23,7 +23,6 @@ package fed_tests
 import (
 	"os"
 	"os/exec"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -46,7 +45,7 @@ func TestCLILoggingLevelChanges(t *testing.T) {
 
 	ft := fed_test_utils.NewFedTest(t, bothPubNamespaces)
 
-	cliPath := buildPelicanCLI(t)
+	cliPath := getPelicanBinary(t)
 	srvURL := param.Server_ExternalWebUrl.GetString()
 
 	// Write current config to a temporary file so the subprocess can access issuer keys
@@ -208,18 +207,4 @@ func TestCLILoggingLevelChanges(t *testing.T) {
 	require.True(t, pidChanged, "Expected at least one xrootd process to restart on restoration")
 
 	t.Log("✓ All tests passed: log output verification and xrootd restart detection working")
-}
-
-func buildPelicanCLI(t *testing.T) string {
-	t.Helper()
-	tmpDir := t.TempDir()
-	cliPath := filepath.Join(tmpDir, "pelican-cli")
-
-	// Build from the parent directory
-	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", cliPath, "../cmd")
-	cmd.Env = os.Environ()
-	output, err := cmd.CombinedOutput()
-	require.NoError(t, err, "Failed to build CLI: %s", string(output))
-
-	return cliPath
 }
