@@ -93,18 +93,11 @@ var (
 func getTmpFile(t *testing.T) string {
 	tmpFile := t.TempDir() + "/tmpfile"
 
-	// Create the file
 	file, err := os.Create(tmpFile)
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
 	file.Close()
-
-	// Set file permissions to 777
-	err = os.Chmod(tmpFile, 0777)
-	if err != nil {
-		t.Fatalf("Failed to set file permissions: %v", err)
-	}
 
 	return tmpFile
 }
