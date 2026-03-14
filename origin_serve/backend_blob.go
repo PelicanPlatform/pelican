@@ -20,6 +20,7 @@ package origin_serve
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/url"
@@ -168,12 +169,66 @@ func (b *blobBackend) CheckAvailability() error {
 
 func (b *blobBackend) FileSystem() webdav.FileSystem { return b.fs }
 func (b *blobBackend) Checksummer() server_utils.OriginChecksummer {
-	return nil // Cloud blob backends don't support xattr-based checksums
+	return &blobChecksummer{bucket: b.bucket}
 }
 
 // Close cleans up the underlying bucket handle.
 func (b *blobBackend) Close() error {
 	return b.bucket.Close()
+}
+
+// ---------------------------------------------------------------------------
+// blobChecksummer — implements OriginChecksummer using blob Attributes.
+// Returns MD5 digests (RFC 3230) when the provider supplies them.
+// ---------------------------------------------------------------------------
+
+type blobChecksummer struct {
+	bucket *blob.Bucket
+}
+
+func (c *blobChecksummer) GetDigests(relativePath, wantDigest string) ([]string, error) {
+	key := blobKey(relativePath)
+	attrs, err := c.bucket.Attributes(context.Background(), key)
+	if err != nil {
+		// Best-effort: if we can't get attributes, return nothing.
+		return nil, nil
+	}
+
+	var digests []string
+	for _, alg := range strings.Split(wantDigest, ",") {
+		alg = strings.TrimSpace(strings.ToLower(alg))
+		switch alg {
+		case "md5":
+			if len(attrs.MD5) > 0 {
+				digests = append(digests, "md5="+base64.StdEncoding.EncodeToString(attrs.MD5))
+			}
+		}
+	}
+	return digests, nil
+}
+
+// ---------------------------------------------------------------------------
+// Content-length hint — allows callers (e.g. HTTP handlers) to pass the
+// expected upload size to the blob writer via context.  This mirrors
+// xrootd-s3-http's "oss.asize" mechanism.
+// ---------------------------------------------------------------------------
+
+type blobCtxKey int
+
+const blobContentLengthKey blobCtxKey = iota
+
+// ContextWithContentLength returns a child context carrying the expected
+// upload size.  The blob filesystem's OpenFile will use this to hint the
+// underlying writer, enabling single-PUT uploads for small objects.
+func ContextWithContentLength(ctx context.Context, size int64) context.Context {
+	return context.WithValue(ctx, blobContentLengthKey, size)
+}
+
+func contentLengthFromCtx(ctx context.Context) int64 {
+	if v, ok := ctx.Value(blobContentLengthKey).(int64); ok {
+		return v
+	}
+	return -1
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +248,9 @@ func blobKey(name string) string {
 // Blob stores don't have real directories; we create a zero-byte marker.
 func (fs *blobFileSystem) Mkdir(ctx context.Context, name string, _ os.FileMode) error {
 	key := blobKey(name)
+	if key == "" {
+		return nil // Root always exists.
+	}
 	if !strings.HasSuffix(key, "/") {
 		key += "/"
 	}
@@ -203,19 +261,26 @@ func (fs *blobFileSystem) Mkdir(ctx context.Context, name string, _ os.FileMode)
 func (fs *blobFileSystem) OpenFile(ctx context.Context, name string, flag int, _ os.FileMode) (webdav.File, error) {
 	key := blobKey(name)
 
-	// Write mode — return a writer that uploads on Close.
+	// Write mode — open a streaming writer immediately so permission
+	// or connectivity errors surface now, not on the first Write call.
 	if flag&(os.O_WRONLY|os.O_RDWR|os.O_CREATE|os.O_TRUNC) != 0 {
-		return newBlobWriteFile(ctx, fs.bucket, key, name), nil
+		wf, err := newBlobWriteFile(ctx, fs.bucket, key, name)
+		if err != nil {
+			return nil, err
+		}
+		return wf, nil
 	}
 
-	// Check if this is a "directory" by listing with prefix.
+	// Check if this is a "directory" by peeking at a prefix listing.
 	dirPrefix := key
 	if dirPrefix != "" && !strings.HasSuffix(dirPrefix, "/") {
 		dirPrefix += "/"
 	}
-	entries, err := fs.listDir(ctx, dirPrefix)
-	if err == nil && len(entries) > 0 {
-		return &blobDirFile{name: name, entries: entries}, nil
+	peekIter := fs.bucket.List(&blob.ListOptions{Prefix: dirPrefix, Delimiter: "/"})
+	if _, peekErr := peekIter.Next(ctx); peekErr == nil {
+		// It is a directory — return a lazy dir handle (a fresh iterator
+		// will be created when Readdir is called).
+		return &blobDirFile{name: name, bucket: fs.bucket, prefix: dirPrefix}, nil
 	}
 
 	// Read mode — open via blob.NewReader (supports seek).
@@ -271,6 +336,7 @@ func (fs *blobFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, e
 			name: path.Base(name),
 			size: attrs.Size,
 			mod:  attrs.ModTime,
+			etag: attrs.ETag,
 		}, nil
 	}
 
@@ -291,32 +357,7 @@ func (fs *blobFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, e
 	return nil, err
 }
 
-// listDir lists immediate children under prefix (with "/" delimiter).
-func (fs *blobFileSystem) listDir(ctx context.Context, prefix string) ([]os.FileInfo, error) {
-	iter := fs.bucket.List(&blob.ListOptions{Prefix: prefix, Delimiter: "/"})
-	var entries []os.FileInfo
-	for {
-		obj, err := iter.Next(ctx)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-		baseName := strings.TrimPrefix(obj.Key, prefix)
-		baseName = strings.TrimSuffix(baseName, "/")
-		if baseName == "" {
-			continue
-		}
-		entries = append(entries, &blobFileInfo{
-			name:  baseName,
-			size:  obj.Size,
-			mod:   obj.ModTime,
-			isDir: obj.IsDir,
-		})
-	}
-	return entries, nil
-}
+
 
 // isNotFound returns true if the error represents a "not found" condition.
 func isNotFound(err error) bool {
@@ -335,6 +376,12 @@ type blobFileInfo struct {
 	size  int64
 	mod   time.Time
 	isDir bool
+	etag  string
+}
+
+// BlobFileSysInfo is returned by blobFileInfo.Sys() when metadata is available.
+type BlobFileSysInfo struct {
+	ETag string
 }
 
 func (fi *blobFileInfo) Name() string      { return fi.name }
@@ -346,8 +393,13 @@ func (fi *blobFileInfo) ModTime() time.Time {
 	}
 	return fi.mod
 }
-func (fi *blobFileInfo) IsDir() bool      { return fi.isDir }
-func (fi *blobFileInfo) Sys() interface{} { return nil }
+func (fi *blobFileInfo) IsDir() bool { return fi.isDir }
+func (fi *blobFileInfo) Sys() interface{} {
+	if fi.etag != "" {
+		return &BlobFileSysInfo{ETag: fi.etag}
+	}
+	return nil
+}
 
 // ---------------------------------------------------------------------------
 // blobReadFile — read-only file backed by a blob.Reader.
@@ -397,38 +449,40 @@ func (f *blobReadFile) Stat() (os.FileInfo, error) {
 
 // ---------------------------------------------------------------------------
 // blobWriteFile — write file backed by blob.Writer.
-// Streams writes directly through to the underlying blob store.
+// The writer is opened eagerly so that permission and connectivity
+// errors are reported at OpenFile time, not deferred to the first Write.
+// Data is streamed directly through to the underlying blob store;
+// nothing is buffered beyond the driver's internal upload-part buffer.
 // Uses a mutex to protect concurrent writes.
 // ---------------------------------------------------------------------------
 
 type blobWriteFile struct {
-	ctx    context.Context
-	bucket *blob.Bucket
-	key    string
 	name   string
-
 	mu     sync.Mutex
 	writer *blob.Writer
-	opened bool
 	closed bool
 }
 
-func newBlobWriteFile(ctx context.Context, bucket *blob.Bucket, key, name string) *blobWriteFile {
-	return &blobWriteFile{ctx: ctx, bucket: bucket, key: key, name: name}
-}
-
-// ensureWriter lazily opens the blob.Writer on first Write.
-func (f *blobWriteFile) ensureWriter() error {
-	if f.opened {
-		return nil
+// newBlobWriteFile opens a blob.Writer immediately.  If the context
+// carries a content-length hint (see ContextWithContentLength), it is
+// used to size the driver's upload buffer — small objects that fit in
+// a single part avoid multipart overhead entirely.
+func newBlobWriteFile(ctx context.Context, bucket *blob.Bucket, key, name string) (*blobWriteFile, error) {
+	var opts blob.WriterOptions
+	if hint := contentLengthFromCtx(ctx); hint > 0 {
+		// Set the buffer to the exact object size when it is small
+		// enough for a single-part upload. The S3 driver will issue
+		// a simple PutObject instead of a multipart sequence.
+		const maxSinglePart = 5 * 1024 * 1024 * 1024 // 5 GiB S3 single-part limit
+		if hint <= maxSinglePart {
+			opts.BufferSize = int(hint)
+		}
 	}
-	w, err := f.bucket.NewWriter(f.ctx, f.key, nil)
+	w, err := bucket.NewWriter(ctx, key, &opts)
 	if err != nil {
-		return fmt.Errorf("blob new writer %q: %w", f.key, err)
+		return nil, fmt.Errorf("blob open for write %q: %w", key, err)
 	}
-	f.writer = w
-	f.opened = true
-	return nil
+	return &blobWriteFile{name: name, writer: w}, nil
 }
 
 func (f *blobWriteFile) Write(p []byte) (int, error) {
@@ -436,9 +490,6 @@ func (f *blobWriteFile) Write(p []byte) (int, error) {
 	defer f.mu.Unlock()
 	if f.closed {
 		return 0, fmt.Errorf("write to closed file")
-	}
-	if err := f.ensureWriter(); err != nil {
-		return 0, err
 	}
 	return f.writer.Write(p)
 }
@@ -450,10 +501,8 @@ func (f *blobWriteFile) Close() error {
 		return nil
 	}
 	f.closed = true
-	if !f.opened {
-		// Nothing was written; create an empty object.
-		return f.bucket.WriteAll(f.ctx, f.key, nil, nil)
-	}
+	// Close flushes buffered data and finalises the upload.
+	// If nothing was written the driver creates a zero-byte object.
 	return f.writer.Close()
 }
 
@@ -476,12 +525,19 @@ func (f *blobWriteFile) Stat() (os.FileInfo, error) {
 }
 
 // ---------------------------------------------------------------------------
-// blobDirFile — directory representation for blob listings.
+// blobDirFile — lazy directory representation for blob listings.
+// Entries are fetched on demand from the blob iterator, avoiding
+// pre-buffering an unbounded number of objects.
 // ---------------------------------------------------------------------------
 
 type blobDirFile struct {
-	name    string
-	entries []os.FileInfo
+	name   string
+	bucket *blob.Bucket
+	prefix string
+
+	mu   sync.Mutex
+	iter *blob.ListIterator
+	done bool
 }
 
 func (f *blobDirFile) Read(_ []byte) (int, error) {
@@ -498,15 +554,57 @@ func (f *blobDirFile) Write(_ []byte) (int, error) {
 	return 0, fmt.Errorf("write not supported on directory")
 }
 
+// Readdir returns directory entries lazily from the underlying blob
+// listing iterator.  When count <= 0 it returns all remaining entries;
+// otherwise it returns up to count entries per call.
+// Internally the iterator pages through the provider's native page size
+// (typically 1 000 objects for S3) so memory stays bounded even for
+// very large directories.
 func (f *blobDirFile) Readdir(count int) ([]os.FileInfo, error) {
-	if count <= 0 || count > len(f.entries) {
-		result := f.entries
-		f.entries = nil
-		return result, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.iter == nil {
+		f.iter = f.bucket.List(&blob.ListOptions{Prefix: f.prefix, Delimiter: "/"})
 	}
-	result := f.entries[:count]
-	f.entries = f.entries[count:]
-	return result, nil
+
+	if f.done {
+		return nil, io.EOF
+	}
+
+	var entries []os.FileInfo
+	for {
+		if count > 0 && len(entries) >= count {
+			break
+		}
+
+		obj, err := f.iter.Next(context.Background())
+		if err == io.EOF {
+			f.done = true
+			break
+		}
+		if err != nil {
+			return entries, err
+		}
+
+		baseName := strings.TrimPrefix(obj.Key, f.prefix)
+		baseName = strings.TrimSuffix(baseName, "/")
+		if baseName == "" {
+			continue
+		}
+
+		entries = append(entries, &blobFileInfo{
+			name:  baseName,
+			size:  obj.Size,
+			mod:   obj.ModTime,
+			isDir: obj.IsDir,
+		})
+	}
+
+	if len(entries) == 0 && f.done {
+		return nil, io.EOF
+	}
+	return entries, nil
 }
 
 func (f *blobDirFile) Stat() (os.FileInfo, error) {
@@ -517,7 +615,7 @@ func (f *blobDirFile) Stat() (os.FileInfo, error) {
 }
 
 // ---------------------------------------------------------------------------
-// S3 credential loading (unchanged — reads key files from disk)
+// S3 credential loading (reads key files from disk)
 // ---------------------------------------------------------------------------
 
 func loadS3Credentials(accessKeyFile, secretKeyFile string) (accessKey, secretKey string, err error) {

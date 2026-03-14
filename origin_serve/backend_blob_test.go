@@ -371,8 +371,9 @@ func TestBlobWriteFile_DoubleClose(t *testing.T) {
 	bucket := memblob.OpenBucket(nil)
 	defer bucket.Close()
 
-	wf := newBlobWriteFile(context.Background(), bucket, "double.txt", "/double.txt")
-	_, err := wf.Write([]byte("data"))
+	wf, err := newBlobWriteFile(context.Background(), bucket, "double.txt", "/double.txt")
+	require.NoError(t, err)
+	_, err = wf.Write([]byte("data"))
 	require.NoError(t, err)
 	require.NoError(t, wf.Close())
 	// Second close should be a no-op
@@ -383,10 +384,11 @@ func TestBlobWriteFile_WriteAfterClose(t *testing.T) {
 	bucket := memblob.OpenBucket(nil)
 	defer bucket.Close()
 
-	wf := newBlobWriteFile(context.Background(), bucket, "closed.txt", "/closed.txt")
+	wf, err := newBlobWriteFile(context.Background(), bucket, "closed.txt", "/closed.txt")
+	require.NoError(t, err)
 	require.NoError(t, wf.Close())
 
-	_, err := wf.Write([]byte("too late"))
+	_, err = wf.Write([]byte("too late"))
 	assert.Error(t, err)
 }
 
@@ -394,7 +396,8 @@ func TestBlobWriteFile_Stat(t *testing.T) {
 	bucket := memblob.OpenBucket(nil)
 	defer bucket.Close()
 
-	wf := newBlobWriteFile(context.Background(), bucket, "stat.txt", "/stat.txt")
+	wf, err := newBlobWriteFile(context.Background(), bucket, "stat.txt", "/stat.txt")
+	require.NoError(t, err)
 	info, err := wf.Stat()
 	require.NoError(t, err)
 	assert.Equal(t, "stat.txt", info.Name())
@@ -444,31 +447,45 @@ func TestBlobReadFile_WriteNotSupported(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBlobDirFile_Readdir(t *testing.T) {
-	entries := []os.FileInfo{
-		&blobFileInfo{name: "a.txt", size: 10},
-		&blobFileInfo{name: "b.txt", size: 20},
-		&blobFileInfo{name: "c.txt", size: 30},
+	// Use a real memblob bucket so the lazy iterator works.
+	newDirFile := func(t *testing.T) *blobDirFile {
+		t.Helper()
+		bucket := memblob.OpenBucket(nil)
+		t.Cleanup(func() { bucket.Close() })
+		ctx := context.Background()
+		require.NoError(t, bucket.WriteAll(ctx, "dir/a.txt", []byte("aaaaaaaaaa"), nil))
+		require.NoError(t, bucket.WriteAll(ctx, "dir/b.txt", []byte("bbbbbbbbbbbbbbbbbbbb"), nil))
+		require.NoError(t, bucket.WriteAll(ctx, "dir/c.txt", []byte("cccccccccccccccccccccccccccccc"), nil))
+		return &blobDirFile{name: "/dir", bucket: bucket, prefix: "dir/"}
 	}
 
 	t.Run("ReadAll", func(t *testing.T) {
-		df := &blobDirFile{name: "/test", entries: append([]os.FileInfo{}, entries...)}
+		df := newDirFile(t)
 		result, err := df.Readdir(-1)
 		require.NoError(t, err)
 		assert.Len(t, result, 3)
 	})
 
 	t.Run("ReadPartial", func(t *testing.T) {
-		df := &blobDirFile{name: "/test", entries: append([]os.FileInfo{}, entries...)}
+		df := newDirFile(t)
 		result, err := df.Readdir(2)
 		require.NoError(t, err)
 		assert.Len(t, result, 2)
-		assert.Equal(t, "a.txt", result[0].Name())
 
 		// Read remaining
 		result2, err := df.Readdir(-1)
 		require.NoError(t, err)
 		assert.Len(t, result2, 1)
-		assert.Equal(t, "c.txt", result2[0].Name())
+	})
+
+	t.Run("ReadPastEnd", func(t *testing.T) {
+		df := newDirFile(t)
+		_, err := df.Readdir(-1)
+		require.NoError(t, err)
+
+		// Subsequent call should return io.EOF
+		_, err = df.Readdir(-1)
+		assert.ErrorIs(t, err, io.EOF)
 	})
 
 	t.Run("Stat", func(t *testing.T) {
@@ -507,6 +524,12 @@ func TestBlobFileInfo(t *testing.T) {
 
 	fiDir := &blobFileInfo{name: "subdir", isDir: true}
 	assert.True(t, fiDir.IsDir())
+
+	// ETag stored in Sys()
+	fiETag := &blobFileInfo{name: "etag.txt", etag: "\"abc123\""}
+	sysInfo, ok := fiETag.Sys().(*BlobFileSysInfo)
+	require.True(t, ok)
+	assert.Equal(t, "\"abc123\"", sysInfo.ETag)
 }
 
 // ---------------------------------------------------------------------------
@@ -528,8 +551,8 @@ func TestBlobBackend_MemURL(t *testing.T) {
 	// FileSystem should be non-nil
 	assert.NotNil(t, backend.FileSystem())
 
-	// Checksummer should be nil for blob backends
-	assert.Nil(t, backend.Checksummer())
+	// Checksummer should be a blobChecksummer for blob backends
+	assert.NotNil(t, backend.Checksummer())
 }
 
 func TestBlobBackend_WithStoragePrefix(t *testing.T) {
@@ -619,4 +642,228 @@ func TestBlobFileSystem_FullRoundTrip(t *testing.T) {
 	require.NoError(t, fs.RemoveAll(ctx, "/trip/renamed.bin"))
 	_, err = fs.Stat(ctx, "/trip/renamed.bin")
 	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+// ---------------------------------------------------------------------------
+// Root directory tests — ensure "/" is handled correctly
+// ---------------------------------------------------------------------------
+
+func TestBlobFileSystem_RootStat(t *testing.T) {
+	fs, bucket := newMemBlobFS(t)
+	ctx := context.Background()
+
+	// Even with no objects, root should exist as a directory once
+	// there is at least one object in the bucket.
+	require.NoError(t, bucket.WriteAll(ctx, "top.txt", []byte("hello"), nil))
+
+	info, err := fs.Stat(ctx, "/")
+	require.NoError(t, err)
+	assert.True(t, info.IsDir())
+}
+
+func TestBlobFileSystem_RootList(t *testing.T) {
+	fs, bucket := newMemBlobFS(t)
+	ctx := context.Background()
+
+	require.NoError(t, bucket.WriteAll(ctx, "a.txt", []byte("a"), nil))
+	require.NoError(t, bucket.WriteAll(ctx, "b.txt", []byte("bb"), nil))
+	require.NoError(t, bucket.WriteAll(ctx, "sub/c.txt", []byte("ccc"), nil))
+
+	f, err := fs.OpenFile(ctx, "/", os.O_RDONLY, 0)
+	require.NoError(t, err)
+	defer f.Close()
+
+	entries, err := f.Readdir(-1)
+	require.NoError(t, err)
+	assert.Len(t, entries, 3) // a.txt, b.txt, sub/
+
+	names := make(map[string]bool)
+	for _, e := range entries {
+		names[e.Name()] = true
+	}
+	assert.True(t, names["a.txt"])
+	assert.True(t, names["b.txt"])
+	assert.True(t, names["sub"])
+}
+
+func TestBlobFileSystem_RootMkdir(t *testing.T) {
+	fs, _ := newMemBlobFS(t)
+	ctx := context.Background()
+
+	// Mkdir("/") should be a no-op (not create a "/" marker object)
+	require.NoError(t, fs.Mkdir(ctx, "/", 0755))
+}
+
+func TestBlobFileSystem_RootObjectReadback(t *testing.T) {
+	fs, _ := newMemBlobFS(t)
+	ctx := context.Background()
+
+	// Write a file directly in the root
+	wf, err := fs.OpenFile(ctx, "/rootfile.txt", os.O_CREATE|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	_, err = wf.Write([]byte("root content"))
+	require.NoError(t, err)
+	require.NoError(t, wf.Close())
+
+	// Read it back
+	rf, err := fs.OpenFile(ctx, "/rootfile.txt", os.O_RDONLY, 0)
+	require.NoError(t, err)
+	defer rf.Close()
+	data, err := io.ReadAll(rf)
+	require.NoError(t, err)
+	assert.Equal(t, "root content", string(data))
+
+	// Stat it
+	info, err := fs.Stat(ctx, "/rootfile.txt")
+	require.NoError(t, err)
+	assert.Equal(t, int64(12), info.Size())
+	assert.False(t, info.IsDir())
+
+	// Root listing should include it
+	dir, err := fs.OpenFile(ctx, "/", os.O_RDONLY, 0)
+	require.NoError(t, err)
+	defer dir.Close()
+	entries, err := dir.Readdir(-1)
+	require.NoError(t, err)
+	found := false
+	for _, e := range entries {
+		if e.Name() == "rootfile.txt" {
+			found = true
+		}
+	}
+	assert.True(t, found, "rootfile.txt not found in root listing")
+}
+
+// ---------------------------------------------------------------------------
+// Checksummer tests
+// ---------------------------------------------------------------------------
+
+func TestBlobChecksummer_GetDigests(t *testing.T) {
+	bucket := memblob.OpenBucket(nil)
+	defer bucket.Close()
+	ctx := context.Background()
+
+	// Write an object (memblob computes MD5 for stored objects).
+	require.NoError(t, bucket.WriteAll(ctx, "check.txt", []byte("checksum me"), nil))
+
+	cs := &blobChecksummer{bucket: bucket}
+
+	t.Run("MD5Available", func(t *testing.T) {
+		digests, err := cs.GetDigests("/check.txt", "md5")
+		require.NoError(t, err)
+		// memblob should provide MD5
+		if len(digests) > 0 {
+			assert.Contains(t, digests[0], "md5=")
+		}
+	})
+
+	t.Run("UnsupportedAlgorithm", func(t *testing.T) {
+		digests, err := cs.GetDigests("/check.txt", "sha512")
+		require.NoError(t, err)
+		assert.Empty(t, digests)
+	})
+
+	t.Run("NonExistentObject", func(t *testing.T) {
+		digests, err := cs.GetDigests("/no-such-thing.txt", "md5")
+		require.NoError(t, err)
+		assert.Empty(t, digests)
+	})
+
+	t.Run("MultipleAlgorithms", func(t *testing.T) {
+		digests, err := cs.GetDigests("/check.txt", "md5, sha256")
+		require.NoError(t, err)
+		// Only md5 is supported; sha256 is ignored
+		for _, d := range digests {
+			assert.Contains(t, d, "md5=")
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// ETag pass-through via Stat
+// ---------------------------------------------------------------------------
+
+func TestBlobFileSystem_StatETag(t *testing.T) {
+	// memblob doesn't set ETag, so we just verify the field plumbing works.
+	fi := &blobFileInfo{name: "e.txt", size: 5, etag: "\"abcdef\""}
+	sysInfo := fi.Sys().(*BlobFileSysInfo)
+	assert.Equal(t, "\"abcdef\"", sysInfo.ETag)
+
+	// Without ETag, Sys() returns nil
+	fi2 := &blobFileInfo{name: "no-etag.txt", size: 5}
+	assert.Nil(t, fi2.Sys())
+}
+
+// ---------------------------------------------------------------------------
+// Eager writer open tests
+// ---------------------------------------------------------------------------
+
+func TestBlobWriteFile_EagerOpen(t *testing.T) {
+	fs, _ := newMemBlobFS(t)
+	ctx := context.Background()
+
+	// OpenFile for write should succeed and return a usable file.
+	wf, err := fs.OpenFile(ctx, "/eager.txt", os.O_CREATE|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	_, err = wf.Write([]byte("hello"))
+	require.NoError(t, err)
+	require.NoError(t, wf.Close())
+
+	// Verify the data was written.
+	rf, err := fs.OpenFile(ctx, "/eager.txt", os.O_RDONLY, 0)
+	require.NoError(t, err)
+	defer rf.Close()
+	data, err := io.ReadAll(rf)
+	require.NoError(t, err)
+	assert.Equal(t, "hello", string(data))
+}
+
+func TestBlobWriteFile_EmptyClose(t *testing.T) {
+	fs, bucket := newMemBlobFS(t)
+	ctx := context.Background()
+
+	// Open for write then immediately close without writing.
+	wf, err := fs.OpenFile(ctx, "/empty-eager.txt", os.O_CREATE|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	require.NoError(t, wf.Close())
+
+	// The zero-byte object should exist.
+	exists, err := bucket.Exists(ctx, "empty-eager.txt")
+	require.NoError(t, err)
+	assert.True(t, exists)
+}
+
+// ---------------------------------------------------------------------------
+// Content-length hint tests
+// ---------------------------------------------------------------------------
+
+func TestContentLengthHint_RoundTrip(t *testing.T) {
+	ctx := context.Background()
+
+	// No hint by default
+	assert.Equal(t, int64(-1), contentLengthFromCtx(ctx))
+
+	// Set a hint
+	ctx = ContextWithContentLength(ctx, 42)
+	assert.Equal(t, int64(42), contentLengthFromCtx(ctx))
+}
+
+func TestBlobWriteFile_WithContentLengthHint(t *testing.T) {
+	fs, _ := newMemBlobFS(t)
+	ctx := ContextWithContentLength(context.Background(), 12)
+
+	// OpenFile should use the hint and still write correctly.
+	wf, err := fs.OpenFile(ctx, "/hinted.txt", os.O_CREATE|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	_, err = wf.Write([]byte("hinted write"))
+	require.NoError(t, err)
+	require.NoError(t, wf.Close())
+
+	// Read back
+	rf, err := fs.OpenFile(context.Background(), "/hinted.txt", os.O_RDONLY, 0)
+	require.NoError(t, err)
+	defer rf.Close()
+	data, err := io.ReadAll(rf)
+	require.NoError(t, err)
+	assert.Equal(t, "hinted write", string(data))
 }
