@@ -116,7 +116,7 @@ func TestGlobusBackend_Activate(t *testing.T) {
 		Expiry:      time.Now().Add(1 * time.Hour),
 	}
 
-	gb.Activate(collTok, transTok, "https://g-new.data.globus.org")
+	gb.Activate(collTok, transTok, "https://g-new.data.globus.org", nil)
 	assert.True(t, gb.IsActivated())
 	require.NoError(t, gb.CheckAvailability())
 }

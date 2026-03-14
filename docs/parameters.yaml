@@ -1575,6 +1575,34 @@ type: filename
 default: none
 components: ["origin"]
 ---
+name: Origin.GlobusIssuerURL
+description: |+
+  The OIDC issuer URL for Globus authentication.
+  This is used for OIDC discovery and constructing OAuth2 endpoints.
+  Only override this for testing with a mock Globus server.
+type: url
+default: https://auth.globus.org/
+hidden: true
+components: ["origin"]
+---
+name: Origin.GlobusTransferAPIBaseUrl
+description: |+
+  The base URL for the Globus Transfer API, used to look up collection endpoint information.
+  Only override this for testing with a mock Globus server.
+type: url
+default: https://transfer.api.globusonline.org/v0.10/
+hidden: true
+components: ["origin"]
+---
+name: Origin.Globusv2TokenRefreshInterval
+description: |+
+  The interval between periodic token refreshes for native Globus v2 backends.
+  Only override this for testing.
+type: duration
+default: 5m
+hidden: true
+components: ["origin"]
+---
 name: Origin.FedTokenLocation
 description: |+
   A path to the file containing a token issued by the federation's issuer. This token may be consumed by other federation services

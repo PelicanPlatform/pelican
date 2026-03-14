@@ -255,7 +255,7 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 				gBackends := origin_serve.GetGlobusBackends()
 				for _, col := range collections {
 					if gb, ok := gBackends[col.CollectionID]; ok {
-						gb.Activate(col.CollectionToken, col.TransferToken, col.HTTPSServer)
+						gb.Activate(col.CollectionToken, col.TransferToken, col.HTTPSServer, col.OAuth2Config)
 						log.Infof("Activated Globus v2 backend for collection %s", col.CollectionID)
 					}
 				}
