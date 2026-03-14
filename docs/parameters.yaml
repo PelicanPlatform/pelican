@@ -827,6 +827,11 @@ description: |+
       You need to manually create a file under path to `StoragePrefix` with the same name as `SentinelLocation`.
 
       Note that this parameter is only available for POSIX and S3 backends.
+  - AuthorizationTemplates: [OPTIONAL] Per-export authorization templates that override the global
+      `Issuer.AuthorizationTemplates` for this export's namespace.
+      When set, only these templates are used for scope calculation in this namespace;
+      the global templates are ignored entirely (no merging).
+      The template format is the same as `Issuer.AuthorizationTemplates`.
 
     Example:
 
@@ -838,6 +843,12 @@ description: |+
           Capabilities: ["Reads", "PublicReads", "Writes", "Listings", "DirectReads"]
           SentinelLocation: demoproject_origin_A
           IssuerUrls: ["https://issuer1.example.com", "https://issuer2.example.com"]
+          AuthorizationTemplates:
+            - actions: ["read", "modify"]
+              prefix: /home/$USER
+            - actions: ["read"]
+              prefix: /data/$GROUP
+              groups: ["/physics"]
     ```
 
   If Origin.StorageType == "s3", the following additional fields are available:
@@ -3407,8 +3418,12 @@ components: ["origin"]
 ---
 name: Issuer.AuthorizationTemplates
 description: |+
-  The authorizations that may be generated for an authenticated request,
+  The global authorizations that may be generated for an authenticated request,
   specified via a list of templates.
+  These rules apply to every namespace served by the issuer unless a specific
+  export overrides them with its own `AuthorizationTemplates` (see `Origin.Exports`).
+  When an export defines per-namespace templates, only those templates are used
+  for that namespace; the global templates are ignored entirely (no merging).
 
   Each template defines a set of authorizations that can depend on the
   authenticated username and groups. An authorization is an action and

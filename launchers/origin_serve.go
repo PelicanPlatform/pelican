@@ -289,7 +289,8 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 // export's FederationPrefix as the namespace so that clients and tokens are
 // scoped per-namespace.
 func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *gin.Engine) error {
-	// Compile Issuer.AuthorizationTemplates so scope mapping works
+	// Compile Issuer.AuthorizationTemplates as the global fallback for
+	// any namespace that does not have per-namespace rules.
 	if err := oa4mp.InitAuthzRules(); err != nil {
 		return errors.Wrap(err, "failed to compile issuer authorization templates")
 	}
@@ -321,6 +322,17 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 		}
 
 		registry.Register(namespace, provider)
+
+		// If the export defines its own AuthorizationTemplates, compile
+		// them and attach to this provider so they override the global
+		// rules for this namespace.
+		if len(export.AuthorizationTemplates) > 0 {
+			rules, err := oa4mp.CompileAuthzTemplates(export.AuthorizationTemplates)
+			if err != nil {
+				return errors.Wrapf(err, "failed to compile per-export authorization templates for namespace %s", namespace)
+			}
+			provider.SetAuthzRules(rules)
+		}
 
 		// Seed the pre-allocated public client for browser-based flows (PKCE).
 		publicClientID := param.Issuer_PublicClientID.GetString()

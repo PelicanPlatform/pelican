@@ -62,6 +62,11 @@ type (
 		// Capabilities for the export
 		Capabilities     server_structs.Capabilities `json:"capabilities"`
 		SentinelLocation string                      `json:"sentinelLocation"`
+
+		// AuthorizationTemplates are per-export authorization rules.
+		// When set, these override the global Issuer.AuthorizationTemplates
+		// for this export's namespace.
+		AuthorizationTemplates []interface{} `json:"authorizationTemplates,omitempty" mapstructure:"authorizationtemplates" yaml:"AuthorizationTemplates"`
 	}
 )
 
