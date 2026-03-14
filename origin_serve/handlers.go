@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 	"time"
 
@@ -171,7 +172,10 @@ func authMiddleware() gin.HandlerFunc {
 
 		tokens := extractTokens(c.Request)
 		action := getActionFromMethod(c.Request.Method)
-		resource := c.Request.URL.Path
+		// Clean the request path to prevent path-traversal attacks
+		// via URL-encoded dot segments (e.g., %2e%2e). Gin and Go's
+		// net/http do NOT normalize these before reaching handlers.
+		resource := path.Clean(c.Request.URL.Path)
 		// Strip the /api/v1.0/origin/data prefix if present
 		// This happens when the director is co-located with the origin
 		// Token scopes are always for the federation prefix (e.g., /test/...),
@@ -565,9 +569,12 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 			// Get the path relative to the export (strip the federation prefix)
 			wildcardPath := c.Param("path")
 
-			// The wildcardPath is relative to the federation prefix (e.g., /test)
-			// Pass only the wildcardPath to WebDAV so it writes relative to storage root
-			newPath := wildcardPath
+			// Clean the path to prevent traversal attacks via
+			// URL-encoded dot-dot sequences (%2e%2e). Without
+			// this, a request like /prefix/%2e%2e/secret reaches
+			// the backend with ".." intact, potentially escaping
+			// the storage root.
+			newPath := path.Clean(wildcardPath)
 
 			// Create a shallow copy of the request and modify its URL
 			modifiedReq := c.Request.Clone(c.Request.Context())
