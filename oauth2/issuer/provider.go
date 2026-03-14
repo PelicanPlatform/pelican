@@ -408,12 +408,14 @@ func (p *OIDCProvider) EnsureClient(ctx context.Context, clientID, secret string
 	log.Infof("Registering default OIDC client: %s", clientID)
 	return p.storage.CreateClient(ctx, client)
 }
+
 // SetAuthzRules stores compiled per-namespace authorization rules on the
 // provider.  When set, these rules are used instead of the global rules
 // compiled by oa4mp.InitAuthzRules().
 func (p *OIDCProvider) SetAuthzRules(rules []*oa4mp.CompiledAuthz) {
 	p.AuthzRules = rules
 }
+
 // EnsurePublicClient registers a public OAuth2 client (no secret) if absent.
 // Public clients rely on PKCE for security and use token_endpoint_auth_method "none".
 func (p *OIDCProvider) EnsurePublicClient(ctx context.Context, clientID string, redirectURIs []string) error {
