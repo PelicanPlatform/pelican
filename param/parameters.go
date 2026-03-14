@@ -315,6 +315,8 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.HttpServiceUrl": false,
 	"Origin.Mode": false,
 	"Origin.Multiuser": false,
+	"Origin.MultiuserMinID": false,
+	"Origin.MultiuserUmask": false,
 	"Origin.NamespacePrefix": false,
 	"Origin.Port": false,
 	"Origin.RunLocation": false,
@@ -998,6 +1000,10 @@ func (iP IntParam) GetInt() int {
 			return config.Origin.ConcurrencyDegradedThreshold
 		case "Origin.DiskUsageCalculationRateLimit":
 			return config.Origin.DiskUsageCalculationRateLimit
+		case "Origin.MultiuserMinID":
+			return config.Origin.MultiuserMinID
+		case "Origin.MultiuserUmask":
+			return config.Origin.MultiuserUmask
 		case "Origin.Port":
 			return config.Origin.Port
 		case "Origin.SSH.MaxRetries":
@@ -1636,6 +1642,8 @@ var allParameterNames = []string{
 	"Origin.HttpServiceUrl",
 	"Origin.Mode",
 	"Origin.Multiuser",
+	"Origin.MultiuserMinID",
+	"Origin.MultiuserUmask",
 	"Origin.NamespacePrefix",
 	"Origin.Port",
 	"Origin.RunLocation",
@@ -2029,6 +2037,8 @@ var (
 	Origin_Concurrency = IntParam{"Origin.Concurrency"}
 	Origin_ConcurrencyDegradedThreshold = IntParam{"Origin.ConcurrencyDegradedThreshold"}
 	Origin_DiskUsageCalculationRateLimit = IntParam{"Origin.DiskUsageCalculationRateLimit"}
+	Origin_MultiuserMinID = IntParam{"Origin.MultiuserMinID"}
+	Origin_MultiuserUmask = IntParam{"Origin.MultiuserUmask"}
 	Origin_Port = IntParam{"Origin.Port"}
 	Origin_SSH_MaxRetries = IntParam{"Origin.SSH.MaxRetries"}
 	Origin_SSH_Port = IntParam{"Origin.SSH.Port"}

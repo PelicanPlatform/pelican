@@ -95,6 +95,15 @@ func getUserInfo(ctx context.Context) *userInfo {
 	return ui
 }
 
+// usernameFromContext extracts the authenticated username from the context.
+// Returns an empty string when no user information is present.
+func usernameFromContext(ctx context.Context) string {
+	if ui := getUserInfo(ctx); ui != nil && ui.User != "" {
+		return ui.User
+	}
+	return ""
+}
+
 // operationMetrics holds the unified metrics for tracking a filesystem operation.
 type operationMetrics struct {
 	total         *prometheus.CounterVec
@@ -110,12 +119,12 @@ type operationMetrics struct {
 // Usage:
 //
 //	defer trackOperation(opMetrics)()
-func trackOperation(om operationMetrics) func() {
+func trackOperation(om operationMetrics, username string) func() {
 	start := time.Now()
 
 	// Increment operation counter
 	if om.total != nil {
-		om.total.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+		om.total.WithLabelValues(metrics.BackendPOSIXv2, username).Inc()
 	}
 
 	return func() {
@@ -124,16 +133,16 @@ func trackOperation(om operationMetrics) func() {
 
 		// Record operation timing
 		if om.timeHistogram != nil {
-			om.timeHistogram.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsedSec)
+			om.timeHistogram.WithLabelValues(metrics.BackendPOSIXv2, username).Observe(elapsedSec)
 		}
 
 		// Track slow operations (>2s)
 		if elapsed >= metrics.SlowOperationThreshold {
 			if om.slowTotal != nil {
-				om.slowTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+				om.slowTotal.WithLabelValues(metrics.BackendPOSIXv2, username).Inc()
 			}
 			if om.slowHistogram != nil {
-				om.slowHistogram.WithLabelValues(metrics.BackendPOSIXv2).Observe(elapsedSec)
+				om.slowHistogram.WithLabelValues(metrics.BackendPOSIXv2, username).Observe(elapsedSec)
 			}
 		}
 	}
@@ -173,7 +182,7 @@ func (afs *aferoFileSystem) Mkdir(ctx context.Context, name string, perm os.File
 		timeHistogram: metrics.StorageMkdirTime,
 		slowTotal:     metrics.StorageSlowMkdirsTotal,
 		slowHistogram: metrics.StorageSlowMkdirTime,
-	})()
+	}, usernameFromContext(ctx))()
 
 	fullPath := afs.fullPath(name)
 	// Use webdav logger if available
@@ -183,6 +192,7 @@ func (afs *aferoFileSystem) Mkdir(ctx context.Context, name string, perm os.File
 // OpenFile implements webdav.FileSystem
 func (afs *aferoFileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
 	fullPath := afs.fullPath(name)
+	username := usernameFromContext(ctx)
 	if afs.logger != nil {
 		afs.logger(nil, nil) // Use the logger provided by webdav
 	}
@@ -218,7 +228,7 @@ func (afs *aferoFileSystem) OpenFile(ctx context.Context, name string, flag int,
 	file, err := afs.fs.OpenFile(fullPath, flag, perm)
 	if err != nil {
 		if flag&(os.O_WRONLY|os.O_RDWR|os.O_CREATE|os.O_TRUNC) != 0 {
-			metrics.StorageOpenErrorsTotal.WithLabelValues(metrics.BackendPOSIXv2).Inc()
+			metrics.StorageOpenErrorsTotal.WithLabelValues(metrics.BackendPOSIXv2, username).Inc()
 		}
 		return nil, err
 	}
@@ -229,7 +239,7 @@ func (afs *aferoFileSystem) OpenFile(ctx context.Context, name string, flag int,
 		timeHistogram: metrics.StorageOpenTime,
 		slowTotal:     metrics.StorageSlowOpensTotal,
 		slowHistogram: metrics.StorageSlowOpenTime,
-	})()
+	}, username)()
 
 	// Extract username from context for rate limiting
 	userID := "unauthenticated"
@@ -245,7 +255,7 @@ func (afs *aferoFileSystem) OpenFile(ctx context.Context, name string, flag int,
 	}
 
 	// Wrap the file with metrics tracking
-	metricsWrappedFile := newMetricsFile(file, afs.rateLimiter, userID, ctx)
+	metricsWrappedFile := newMetricsFile(file, afs.rateLimiter, userID, username, ctx)
 
 	return &aferoFile{
 		File:        metricsWrappedFile,
@@ -265,7 +275,7 @@ func (afs *aferoFileSystem) RemoveAll(ctx context.Context, name string) error {
 		timeHistogram: metrics.StorageUnlinkTime,
 		slowTotal:     metrics.StorageSlowUnlinksTotal,
 		slowHistogram: metrics.StorageSlowUnlinkTime,
-	})()
+	}, usernameFromContext(ctx))()
 
 	fullPath := afs.fullPath(name)
 	return afs.fs.RemoveAll(fullPath)
@@ -278,7 +288,7 @@ func (afs *aferoFileSystem) Rename(ctx context.Context, oldName, newName string)
 		timeHistogram: metrics.StorageRenameTime,
 		slowTotal:     metrics.StorageSlowRenamesTotal,
 		slowHistogram: metrics.StorageSlowRenameTime,
-	})()
+	}, usernameFromContext(ctx))()
 
 	oldPath := afs.fullPath(oldName)
 	newPath := afs.fullPath(newName)
@@ -292,7 +302,7 @@ func (afs *aferoFileSystem) Stat(ctx context.Context, name string) (os.FileInfo,
 		timeHistogram: metrics.StorageStatTime,
 		slowTotal:     metrics.StorageSlowStatsTotal,
 		slowHistogram: metrics.StorageSlowStatTime,
-	})()
+	}, usernameFromContext(ctx))()
 
 	fullPath := afs.fullPath(name)
 	return afs.fs.Stat(fullPath)
