@@ -28,7 +28,6 @@ import (
 	"path"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -405,30 +404,50 @@ func (fs *httpsFileSystem) OpenFile(ctx context.Context, name string, flag int, 
 		if err != nil && gowebdav.IsErrNotFound(err) {
 			return nil, os.ErrNotExist
 		}
-		// Either it's a regular file or Stat failed for a non-404 reason — fall
-		// through to GET.
+		// Regular file — we already have size & mod-time from the Stat above,
+		// so skip the HEAD request and return a lazy-read file directly.
+		if err == nil {
+			var etag string
+			if gf, ok := info.(interface{ ETag() string }); ok {
+				etag = gf.ETag()
+			}
+			return &httpsReadFile{
+				name:          name,
+				fs:            fs,
+				ctx:           ctx,
+				contentLength: info.Size(),
+				lastModified:  info.ModTime(),
+				etag:          etag,
+			}, nil
+		}
+		// Stat failed for a non-404 reason — fall through to HEAD.
 	}
 
 	urlStr := fs.upstreamURL(name)
-	resp, err := fs.doRequest(ctx, http.MethodGet, urlStr, nil, nil)
+
+	// Use HEAD to discover the file's size and last-modified time without
+	// downloading the body.  The actual bytes are fetched lazily (possibly
+	// with a Range header) on the first Read call.
+	resp, err := fs.doRequest(ctx, http.MethodHead, urlStr, nil, nil)
 	if err != nil {
 		return nil, err
 	}
+	resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		resp.Body.Close()
 		return nil, os.ErrNotExist
 	}
 	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
-		return nil, fmt.Errorf("https get failed with status %d", resp.StatusCode)
+		return nil, fmt.Errorf("https head failed with status %d", resp.StatusCode)
 	}
 
 	return &httpsReadFile{
 		name:          name,
-		body:          resp.Body,
+		fs:            fs,
+		ctx:           ctx,
 		contentLength: resp.ContentLength,
 		lastModified:  parseHTTPDate(resp.Header.Get("Last-Modified")),
+		etag:          resp.Header.Get("ETag"),
 	}, nil
 }
 
@@ -590,22 +609,56 @@ func (fi *httpsFileInfo) Sys() interface{} {
 	return nil
 }
 
+// ETag implements the webdav.ETager interface so that the webdav handler
+// can set the ETag response header from the upstream server's value.
+func (fi *httpsFileInfo) ETag(_ context.Context) (string, error) {
+	if fi.etag != "" {
+		return fi.etag, nil
+	}
+	// Return ErrNotImplemented so the webdav handler falls back to its
+	// default ETag computation (modtime + size).
+	return "", webdav.ErrNotImplemented
+}
+
 // ---------------------------------------------------------------------------
-// httpsReadFile — read-only file backed by an HTTPS GET response.
-// Uses atomic offset for concurrent safety.
+// httpsReadFile — read-only file backed by an HTTPS upstream.
+// Seek is real: it records the desired offset and lazily opens a Range GET
+// on the next Read call.  This means only the requested byte range is fetched
+// from the upstream server, which is critical for multi-gigabyte files.
 // ---------------------------------------------------------------------------
 
 type httpsReadFile struct {
 	name          string
-	body          io.ReadCloser
+	fs            *httpsFileSystem
+	ctx           context.Context
 	contentLength int64
 	lastModified  time.Time
-	offset        atomic.Int64
+	etag          string
+
+	offset int64         // logical cursor position
+	body   io.ReadCloser // current upstream body (nil until first Read after Seek)
 }
 
 func (f *httpsReadFile) Read(p []byte) (int, error) {
+	if f.body == nil {
+		// Open a GET with a Range header starting at the current offset.
+		urlStr := f.fs.upstreamURL(f.name)
+		headers := map[string]string{
+			"Range": fmt.Sprintf("bytes=%d-", f.offset),
+		}
+		resp, err := f.fs.doRequest(f.ctx, http.MethodGet, urlStr, nil, headers)
+		if err != nil {
+			return 0, err
+		}
+		// Accept both 200 (server ignores Range) and 206 (partial content).
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+			resp.Body.Close()
+			return 0, fmt.Errorf("https range get failed with status %d", resp.StatusCode)
+		}
+		f.body = resp.Body
+	}
 	n, err := f.body.Read(p)
-	f.offset.Add(int64(n))
+	f.offset += int64(n)
 	return n, err
 }
 
@@ -615,15 +668,33 @@ func (f *httpsReadFile) Seek(offset int64, whence int) (int64, error) {
 	case io.SeekStart:
 		newOff = offset
 	case io.SeekCurrent:
-		newOff = f.offset.Load() + offset
+		newOff = f.offset + offset
 	case io.SeekEnd:
 		newOff = f.contentLength + offset
+	default:
+		return 0, fmt.Errorf("httpsReadFile.Seek: invalid whence %d", whence)
 	}
-	f.offset.Store(newOff)
+	if newOff < 0 {
+		return 0, fmt.Errorf("httpsReadFile.Seek: negative position %d", newOff)
+	}
+	// If the position changed, discard the existing body so the next Read
+	// opens a fresh Range GET at the new offset.
+	if newOff != f.offset || f.body == nil {
+		if f.body != nil {
+			f.body.Close()
+			f.body = nil
+		}
+	}
+	f.offset = newOff
 	return newOff, nil
 }
 
-func (f *httpsReadFile) Close() error { return f.body.Close() }
+func (f *httpsReadFile) Close() error {
+	if f.body != nil {
+		return f.body.Close()
+	}
+	return nil
+}
 
 func (f *httpsReadFile) Write(_ []byte) (int, error) {
 	return 0, fmt.Errorf("write not supported on read file")
@@ -639,6 +710,7 @@ func (f *httpsReadFile) Stat() (os.FileInfo, error) {
 		size:    f.contentLength,
 		modTime: f.lastModified,
 		isDir:   false,
+		etag:    f.etag,
 	}, nil
 }
 
