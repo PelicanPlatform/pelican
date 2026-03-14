@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -234,7 +235,10 @@ func authMiddleware() gin.HandlerFunc {
 
 		tokens := extractTokens(c.Request)
 		action := getActionFromMethod(c.Request.Method)
-		resource := c.Request.URL.Path
+		// Clean the request path to prevent path-traversal attacks
+		// via URL-encoded dot segments (e.g., %2e%2e). Gin and Go's
+		// net/http do NOT normalize these before reaching handlers.
+		resource := path.Clean(c.Request.URL.Path)
 		// Strip the /api/v1.0/origin/data prefix if present
 		// This happens when the director is co-located with the origin
 		// Token scopes are always for the federation prefix (e.g., /test/...),
@@ -736,10 +740,23 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 			// Get the path relative to the export (strip the federation prefix)
 			wildcardPath := c.Param("path")
 
+			// Clean the path to prevent traversal attacks via
+			// URL-encoded dot-dot sequences (%2e%2e). Without
+			// this, a request like /prefix/%2e%2e/secret reaches
+			// the backend with ".." intact, potentially escaping
+			// the storage root.
+			newPath := path.Clean(wildcardPath)
+
+			// Create a shallow copy of the request and modify its URL
+			modifiedReq := c.Request.Clone(c.Request.Context())
+			modifiedURL := *c.Request.URL
+			modifiedURL.Path = newPath
+			modifiedReq.URL = &modifiedURL
+
 			// Stash client tracing headers (X-Pelican-JobId,
 			// X-Pelican-Timeout) in the request context so backends
 			// that forward requests can propagate them.
-			req := server_utils.StashPelicanHeaders(c.Request)
+			modifiedReq = server_utils.StashPelicanHeaders(modifiedReq)
 
 			// For PUT requests, pass the Content-Length as a size hint
 			// so the blob backend can optimize upload part sizes.
@@ -752,13 +769,13 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 				// For HEAD requests, pass the original request to the WebDAV handler
 				// (it needs the full URL so its Prefix stripping works correctly).
 				// wildcardPath is used only for checksum lookup on the filesystem.
-				handleHeadWithChecksum(c, handler, req, wildcardPath, backend)
+				handleHeadWithChecksum(c, handler, modifiedReq, wildcardPath, backend)
 			} else {
 				// For all other methods (including PROPFIND), pass the original request
 				// to the WebDAV handler. The handler's Prefix field ensures it strips
 				// the route prefix for filesystem access while using it to construct
 				// correct href values in responses.
-				handler.ServeHTTP(c.Writer, req)
+				handler.ServeHTTP(c.Writer, modifiedReq)
 			}
 		}
 

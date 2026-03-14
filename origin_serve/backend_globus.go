@@ -60,8 +60,8 @@ type globusBackend struct {
 	inner *httpsBackend
 
 	// Globus-specific token management
-	collectionID string
-	mu           sync.RWMutex
+	collectionID    string
+	mu              sync.RWMutex
 	collectionToken *oauth2.Token
 	transferToken   *oauth2.Token
 	oauth2Cfg       *oauth2.Config
