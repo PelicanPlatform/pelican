@@ -326,7 +326,10 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.GlobusCollectionID": false,
 	"Origin.GlobusCollectionName": false,
 	"Origin.GlobusConfigLocation": false,
+	"Origin.GlobusIssuerURL": false,
+	"Origin.GlobusTransferAPIBaseUrl": false,
 	"Origin.GlobusTransferTokenFile": false,
+	"Origin.Globusv2TokenRefreshInterval": false,
 	"Origin.HttpAuthOAuth2ClientID": false,
 	"Origin.HttpAuthOAuth2ClientSecretFile": false,
 	"Origin.HttpAuthOAuth2Issuer": false,
@@ -624,6 +627,8 @@ var stringAccessors = map[string]func(*Config) string{
 	"Origin.GlobusCollectionID": func(c *Config) string { return c.Origin.GlobusCollectionID },
 	"Origin.GlobusCollectionName": func(c *Config) string { return c.Origin.GlobusCollectionName },
 	"Origin.GlobusConfigLocation": func(c *Config) string { return c.Origin.GlobusConfigLocation },
+	"Origin.GlobusIssuerURL": func(c *Config) string { return c.Origin.GlobusIssuerURL },
+	"Origin.GlobusTransferAPIBaseUrl": func(c *Config) string { return c.Origin.GlobusTransferAPIBaseUrl },
 	"Origin.GlobusTransferTokenFile": func(c *Config) string { return c.Origin.GlobusTransferTokenFile },
 	"Origin.HttpAuthOAuth2ClientID": func(c *Config) string { return c.Origin.HttpAuthOAuth2ClientID },
 	"Origin.HttpAuthOAuth2ClientSecretFile": func(c *Config) string { return c.Origin.HttpAuthOAuth2ClientSecretFile },
@@ -1061,6 +1066,7 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Monitoring.TokenRefreshInterval": func(c *Config) time.Duration { return c.Monitoring.TokenRefreshInterval },
 	"Origin.DiskUsageCalculationDelay": func(c *Config) time.Duration { return c.Origin.DiskUsageCalculationDelay },
 	"Origin.DiskUsageCalculationInterval": func(c *Config) time.Duration { return c.Origin.DiskUsageCalculationInterval },
+	"Origin.Globusv2TokenRefreshInterval": func(c *Config) time.Duration { return c.Origin.Globusv2TokenRefreshInterval },
 	"Origin.SSH.ChallengeTimeout": func(c *Config) time.Duration { return c.Origin.SSH.ChallengeTimeout },
 	"Origin.SSH.ConnectTimeout": func(c *Config) time.Duration { return c.Origin.SSH.ConnectTimeout },
 	"Origin.SSH.KeepaliveInterval": func(c *Config) time.Duration { return c.Origin.SSH.KeepaliveInterval },
@@ -1402,7 +1408,10 @@ var allParameterNames = []string{
 	"Origin.GlobusCollectionID",
 	"Origin.GlobusCollectionName",
 	"Origin.GlobusConfigLocation",
+	"Origin.GlobusIssuerURL",
+	"Origin.GlobusTransferAPIBaseUrl",
 	"Origin.GlobusTransferTokenFile",
+	"Origin.Globusv2TokenRefreshInterval",
 	"Origin.HttpAuthOAuth2ClientID",
 	"Origin.HttpAuthOAuth2ClientSecretFile",
 	"Origin.HttpAuthOAuth2Issuer",
@@ -1673,6 +1682,8 @@ var (
 	Origin_GlobusCollectionID = StringParam{"Origin.GlobusCollectionID"}
 	Origin_GlobusCollectionName = StringParam{"Origin.GlobusCollectionName"}
 	Origin_GlobusConfigLocation = StringParam{"Origin.GlobusConfigLocation"}
+	Origin_GlobusIssuerURL = StringParam{"Origin.GlobusIssuerURL"}
+	Origin_GlobusTransferAPIBaseUrl = StringParam{"Origin.GlobusTransferAPIBaseUrl"}
 	Origin_GlobusTransferTokenFile = StringParam{"Origin.GlobusTransferTokenFile"}
 	Origin_HttpAuthOAuth2ClientID = StringParam{"Origin.HttpAuthOAuth2ClientID"}
 	Origin_HttpAuthOAuth2ClientSecretFile = StringParam{"Origin.HttpAuthOAuth2ClientSecretFile"}
@@ -1961,6 +1972,7 @@ var (
 	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
 	Origin_DiskUsageCalculationDelay = DurationParam{"Origin.DiskUsageCalculationDelay"}
 	Origin_DiskUsageCalculationInterval = DurationParam{"Origin.DiskUsageCalculationInterval"}
+	Origin_Globusv2TokenRefreshInterval = DurationParam{"Origin.Globusv2TokenRefreshInterval"}
 	Origin_SSH_ChallengeTimeout = DurationParam{"Origin.SSH.ChallengeTimeout"}
 	Origin_SSH_ConnectTimeout = DurationParam{"Origin.SSH.ConnectTimeout"}
 	Origin_SSH_KeepaliveInterval = DurationParam{"Origin.SSH.KeepaliveInterval"}
@@ -2112,6 +2124,8 @@ func init() {
 		"Origin.GlobusCollectionID": Origin_GlobusCollectionID,
 		"Origin.GlobusCollectionName": Origin_GlobusCollectionName,
 		"Origin.GlobusConfigLocation": Origin_GlobusConfigLocation,
+		"Origin.GlobusIssuerURL": Origin_GlobusIssuerURL,
+		"Origin.GlobusTransferAPIBaseUrl": Origin_GlobusTransferAPIBaseUrl,
 		"Origin.GlobusTransferTokenFile": Origin_GlobusTransferTokenFile,
 		"Origin.HttpAuthOAuth2ClientID": Origin_HttpAuthOAuth2ClientID,
 		"Origin.HttpAuthOAuth2ClientSecretFile": Origin_HttpAuthOAuth2ClientSecretFile,
@@ -2385,6 +2399,7 @@ func init() {
 		"Monitoring.TokenRefreshInterval": Monitoring_TokenRefreshInterval,
 		"Origin.DiskUsageCalculationDelay": Origin_DiskUsageCalculationDelay,
 		"Origin.DiskUsageCalculationInterval": Origin_DiskUsageCalculationInterval,
+		"Origin.Globusv2TokenRefreshInterval": Origin_Globusv2TokenRefreshInterval,
 		"Origin.SSH.ChallengeTimeout": Origin_SSH_ChallengeTimeout,
 		"Origin.SSH.ConnectTimeout": Origin_SSH_ConnectTimeout,
 		"Origin.SSH.KeepaliveInterval": Origin_SSH_KeepaliveInterval,

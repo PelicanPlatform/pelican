@@ -56,9 +56,9 @@ func (s *spyFileSystem) Stat(_ context.Context, name string) (os.FileInfo, error
 	return nil, os.ErrNotExist
 }
 
-func (s *spyFileSystem) Mkdir(context.Context, string, os.FileMode) error  { return os.ErrPermission }
-func (s *spyFileSystem) RemoveAll(context.Context, string) error           { return os.ErrPermission }
-func (s *spyFileSystem) Rename(context.Context, string, string) error      { return os.ErrPermission }
+func (s *spyFileSystem) Mkdir(context.Context, string, os.FileMode) error { return os.ErrPermission }
+func (s *spyFileSystem) RemoveAll(context.Context, string) error          { return os.ErrPermission }
+func (s *spyFileSystem) Rename(context.Context, string, string) error     { return os.ErrPermission }
 
 // spyBackend implements server_utils.OriginBackend backed by a spyFileSystem.
 type spyBackend struct {
