@@ -57,6 +57,7 @@ type blobBackend struct {
 // There are two ways to open a bucket:
 //  1. Set BlobURL to a gocloud.dev URL (e.g. "s3://bucket", "gs://bucket", "azblob://container").
 //  2. Set the S3-specific fields (ServiceURL, Region, Bucket, etc.) for backwards-compatible S3 config.
+//
 // If BlobURL is set it takes precedence.
 type BlobBackendOptions struct {
 	// Generic gocloud.dev/blob URL — takes precedence over the S3-specific fields.
@@ -240,8 +241,9 @@ type blobFileSystem struct {
 }
 
 // blobKey normalises a webdav path ("/foo/bar") to a blob key ("foo/bar").
+// Also cleans path traversal sequences as defense-in-depth.
 func blobKey(name string) string {
-	return strings.TrimPrefix(name, "/")
+	return strings.TrimPrefix(path.Clean("/"+name), "/")
 }
 
 // Mkdir implements webdav.FileSystem.
@@ -356,8 +358,6 @@ func (fs *blobFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, e
 	}
 	return nil, err
 }
-
-
 
 // isNotFound returns true if the error represents a "not found" condition.
 func isNotFound(err error) bool {

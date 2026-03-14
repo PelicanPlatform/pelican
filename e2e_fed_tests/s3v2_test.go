@@ -372,8 +372,8 @@ func startMinioServer(t *testing.T) (endpoint string) {
 
 	require.NoError(t, cmd.Start(), "failed to start minio")
 	t.Cleanup(func() {
-		cmd.Process.Kill()
-		cmd.Wait() //nolint:errcheck
+		cmd.Process.Kill() //nolint:errcheck
+		cmd.Wait()         //nolint:errcheck
 	})
 
 	// Minio prints a line like:  S3-API: http://127.0.0.1:43219
