@@ -88,11 +88,12 @@ type GlobusBackendConfig struct {
 // NewGlobusBackend creates a new native Globus backend.
 func NewGlobusBackend(cfg GlobusBackendConfig) *globusBackend {
 	inner := newHTTPSBackend(HTTPSBackendOptions{
-		ServiceURL:    cfg.HTTPSServer,
-		StoragePrefix: cfg.StoragePrefix,
-		TokenMode:     HTTPSTokenOAuth2,
-		OAuth2Config:  cfg.OAuth2Config,
-		OAuth2Token:   cfg.CollectionToken,
+		ServiceURL:      cfg.HTTPSServer,
+		StoragePrefix:   cfg.StoragePrefix,
+		TokenMode:       HTTPSTokenOAuth2,
+		OAuth2Config:    cfg.OAuth2Config,
+		OAuth2Token:     cfg.CollectionToken,
+		EnableAutoMkdir: true,
 	})
 
 	return &globusBackend{
@@ -121,7 +122,10 @@ func (b *globusBackend) CheckAvailability() error {
 func (b *globusBackend) FileSystem() webdav.FileSystem { return b.inner.FileSystem() }
 
 func (b *globusBackend) Checksummer() server_utils.OriginChecksummer {
-	return nil // Globus doesn't support local checksums
+	// TODO: Globus collections may provide checksums via the Transfer API
+	// (GET /endpoint/<id>/ls with checksum fields).  Investigate whether
+	// we can surface those through the OriginChecksummer interface.
+	return nil
 }
 
 // IsActivated returns whether the Globus collection has been activated.
@@ -211,7 +215,6 @@ func GetGlobusBackends() map[string]GlobusBackendActivator {
 
 // LaunchGlobusv2TokenRefresh starts a periodic goroutine (every 5 min) that
 // refreshes the OAuth2 tokens for all activated Globus v2 backends.
-// Unlike the XRootD Globus backend, tokens are kept in memory only.
 func LaunchGlobusv2TokenRefresh(ctx context.Context, egrp *errgroup.Group) {
 	if len(globusBackends) == 0 {
 		return
