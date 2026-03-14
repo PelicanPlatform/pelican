@@ -175,7 +175,7 @@ func TestCachedLookup_MinID_RejectsSystemAccounts(t *testing.T) {
 			"regular": {UID: 1000, GID: 1000, Username: "regular"},
 		},
 		gidMap: map[string]uint32{
-			"daemon": 1,
+			"daemon":  1,
 			"nogroup": 65534,
 		},
 	}
