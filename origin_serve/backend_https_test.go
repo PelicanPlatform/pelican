@@ -364,7 +364,7 @@ func TestHTTPSBackend_PlainHTTP_Integration(t *testing.T) {
 				return
 			}
 			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
-			w.Write(data)
+			_, _ = w.Write(data)
 		case http.MethodPut:
 			body, _ := io.ReadAll(r.Body)
 			store[r.URL.Path] = body
@@ -437,7 +437,7 @@ func TestHTTPSBackend_TokenPassthrough(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Length", "5")
-		w.Write([]byte("hello"))
+		_, _ = w.Write([]byte("hello"))
 	}))
 	defer server.Close()
 
@@ -469,7 +469,7 @@ func TestHTTPSBackend_StaticToken(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Length", "2")
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	}))
 	defer server.Close()
 
@@ -769,7 +769,7 @@ func mockWebDAVServer() (*httptest.Server, map[string][]byte) {
 		case http.MethodGet:
 			if data, ok := files[p]; ok {
 				w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
-				w.Write(data)
+				_, _ = w.Write(data)
 				return
 			}
 			w.WriteHeader(http.StatusNotFound)
