@@ -144,7 +144,7 @@ func (s *SSSDLookup) Name() string {
 }
 
 // trySSSD attempts to create an SSSD lookup strategy.
-func trySSSD(ctx context.Context) (LookupStrategy, error) {
+func trySSSD(ctx context.Context) (LookupStrategy, error) { //nolint:unused // called from nss_linux.go
 	s := NewSSSDLookup()
 	// Verify connectivity
 	client, err := s.connect(ctx)

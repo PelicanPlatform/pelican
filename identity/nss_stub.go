@@ -23,6 +23,6 @@ package identity
 // tryNSSStrategy is a no-op on non-Linux or CGO-enabled builds.
 // When CGO is enabled, the Go standard library already uses libc NSS
 // for user lookup, so the manual NSS chain is unnecessary.
-func tryNSSStrategy() (LookupStrategy, error) {
+func tryNSSStrategy() (LookupStrategy, error) { //nolint:unused // called from select_nocgo.go
 	return nil, ErrStrategyNotAvailable
 }

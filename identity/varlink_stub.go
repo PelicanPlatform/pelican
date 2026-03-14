@@ -21,6 +21,6 @@
 package identity
 
 // trySystemdUserDB is a no-op on non-Linux systems.
-func trySystemdUserDB() (LookupStrategy, error) {
+func trySystemdUserDB() (LookupStrategy, error) { //nolint:unused // called from select_nocgo.go
 	return nil, ErrStrategyNotAvailable
 }

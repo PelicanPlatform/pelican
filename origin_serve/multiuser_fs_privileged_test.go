@@ -519,7 +519,8 @@ func requireSharedGroup(t *testing.T, groupname, member string) sharedGroupInfo 
 	}
 
 	var gid uint32
-	fmt.Sscanf(grp.Gid, "%d", &gid)
+	_, err = fmt.Sscanf(grp.Gid, "%d", &gid)
+	require.NoError(t, err)
 
 	// Verify the member is actually in the group.
 	u, err := user.Lookup(member)

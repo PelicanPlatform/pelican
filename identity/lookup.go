@@ -96,7 +96,7 @@ var ErrStrategyNotAvailable = fmt.Errorf("strategy not available")
 // prevent accidental operations as root or other system accounts.
 const DefaultMinID uint32 = 1000
 
-// ErrBelowMinID is returned when a resolved UID or GID is below 
+// ErrBelowMinID is returned when a resolved UID or GID is below
 // the configured minimum threshold.
 type ErrBelowMinID struct {
 	Name  string // username or groupname
