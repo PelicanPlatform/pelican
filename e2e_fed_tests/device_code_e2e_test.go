@@ -150,7 +150,9 @@ func TestDeviceCodeE2E(t *testing.T) {
 	require.GreaterOrEqual(t, len(ft.Exports), 3, "Federation should have at least three exports")
 
 	serverURL := param.Server_ExternalWebUrl.GetString()
-	issuerURL := serverURL // embedded issuer URL == server URL
+	// The embedded issuer scopes URLs per-namespace under /api/v1.0/issuer/ns/<prefix>.
+	// Use the first auth-requiring export (/users) as the namespace.
+	nsBase := serverURL + "/api/v1.0/issuer/ns/users"
 	t.Logf("Federation started. Server URL: %s", serverURL)
 
 	// Build an HTTP client that trusts the federation CA and stores cookies.
@@ -166,7 +168,7 @@ func TestDeviceCodeE2E(t *testing.T) {
 	}
 
 	// ----- Step 2: Dynamic Client Registration -----
-	dcrURL := issuerURL + "/api/v1.0/issuer/oidc-cm"
+	dcrURL := nsBase + "/oidc-cm"
 	dcrPayload := `{
 		"grant_types": ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"],
 		"token_endpoint_auth_method": "client_secret_post",
@@ -187,7 +189,7 @@ func TestDeviceCodeE2E(t *testing.T) {
 	t.Logf("DCR succeeded. client_id=%s", dcrResp.ClientID)
 
 	// ----- Step 3: Device Authorization Request -----
-	deviceAuthURL := issuerURL + "/api/v1.0/issuer/device_authorization"
+	deviceAuthURL := nsBase + "/device_authorization"
 	formData := url.Values{
 		"client_id":     {dcrResp.ClientID},
 		"client_secret": {dcrResp.ClientSecret},
@@ -213,7 +215,7 @@ func TestDeviceCodeE2E(t *testing.T) {
 	t.Logf("Device auth started. user_code=%s device_code=%s", deviceResp.UserCode, deviceResp.DeviceCode)
 
 	// Confirm polling initially returns "authorization_pending".
-	tokenURL := issuerURL + "/api/v1.0/issuer/token"
+	tokenURL := nsBase + "/token"
 	pollForm := url.Values{
 		"grant_type":    {"urn:ietf:params:oauth:grant-type:device_code"},
 		"device_code":   {deviceResp.DeviceCode},
@@ -254,7 +256,7 @@ func TestDeviceCodeE2E(t *testing.T) {
 
 	// ----- Step 5: Approve the device code -----
 	// GET the device verification page to obtain the CSRF cookie.
-	verifyPageURL := fmt.Sprintf("%s/api/v1.0/issuer/device?user_code=%s", issuerURL, deviceResp.UserCode)
+	verifyPageURL := fmt.Sprintf("%s/device?user_code=%s", nsBase, deviceResp.UserCode)
 	resp, err = httpClient.Get(verifyPageURL)
 	require.NoError(t, err)
 	pageBody, _ := io.ReadAll(resp.Body)
@@ -265,8 +267,7 @@ func TestDeviceCodeE2E(t *testing.T) {
 		"Device-verify page should return 200 when logged in (got redirect or error); body: %s", string(pageBody))
 
 	// Extract the CSRF cookie from the jar.
-	// The CSRF cookie is scoped to /api/v1.0/issuer/device, so use a path-specific URL.
-	csrfURL, _ := url.Parse(issuerURL + "/api/v1.0/issuer/device")
+	csrfURL, _ := url.Parse(nsBase + "/device")
 	var csrfCookie *http.Cookie
 	for _, c := range jar.Cookies(csrfURL) {
 		if c.Name == "csrf_token" {
@@ -286,7 +287,7 @@ func TestDeviceCodeE2E(t *testing.T) {
 		"action":     {"approve"},
 		"csrf_token": {csrfFromPage},
 	}
-	resp, err = httpClient.PostForm(issuerURL+"/api/v1.0/issuer/device", approveForm)
+	resp, err = httpClient.PostForm(nsBase+"/device", approveForm)
 	require.NoError(t, err)
 	approveBody, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -325,7 +326,7 @@ func TestDeviceCodeE2E(t *testing.T) {
 		tokenRespData.TokenType, tokenRespData.ExpiresIn, tokenRespData.Scope)
 
 	// ----- Step 7: Validate WLCG token profile and $USER-scoped claims -----
-	claims := validateWLCGToken(t, tokenRespData.AccessToken, issuerURL)
+	claims := validateWLCGToken(t, tokenRespData.AccessToken, nsBase)
 
 	// Verify the subject is "testuser", not "admin".
 	assert.Equal(t, "testuser", claims["sub"],
@@ -486,7 +487,7 @@ func TestDeviceCodeE2E(t *testing.T) {
 		refreshRespData.TokenType, refreshRespData.ExpiresIn)
 
 	// Validate the refreshed token also conforms to WLCG profile.
-	refreshClaims := validateWLCGToken(t, refreshRespData.AccessToken, issuerURL)
+	refreshClaims := validateWLCGToken(t, refreshRespData.AccessToken, nsBase)
 	assert.Equal(t, "testuser", refreshClaims["sub"],
 		"Refreshed token subject should still be testuser")
 

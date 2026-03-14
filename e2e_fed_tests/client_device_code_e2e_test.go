@@ -150,7 +150,7 @@ func TestClientDeviceCodeE2E(t *testing.T) {
 		deviceAuth.UserCode, deviceAuth.DeviceCode, deviceAuth.ExpiresIn)
 
 	// ---- Step 5: Simulate user login + approval ----
-	simulateUserApproval(t, serverURL, deviceAuth.UserCode, testUserPassword)
+	simulateUserApproval(t, serverURL, "/data", deviceAuth.UserCode, testUserPassword)
 
 	// ---- Step 6: Token exchange via oauth2.RetrieveToken ----
 	// This is the exact same call the client's Poll() loop makes.
@@ -176,8 +176,10 @@ func TestClientDeviceCodeE2E(t *testing.T) {
 	require.NotEmpty(t, refreshToken, "Refresh token must be present (offline_access requested)")
 	t.Logf("Token OK: access_token length=%d", len(accessToken))
 
-	// Validate the token has WLCG claims and correct subject
-	claims := validateWLCGToken(t, accessToken, serverURL)
+	// Validate the token has WLCG claims and correct subject.
+	// The embedded issuer's iss claim is scoped to the namespace.
+	nsIssuer := serverURL + "/api/v1.0/issuer/ns/data"
+	claims := validateWLCGToken(t, accessToken, nsIssuer)
 	assert.Equal(t, "testuser", claims["sub"], "Token subject should be testuser")
 	scopeStr := extractScopeString(claims)
 	assert.Contains(t, scopeStr, "storage.read:/testuser",
@@ -297,13 +299,15 @@ func setupFedAndUsers(t *testing.T) (ft *fed_test_utils.FedTest, testUserPasswor
 }
 
 // simulateUserApproval logs in as testuser and approves the given device user_code.
+// namespace is the federation prefix (e.g. "/data" or "/users") and is used to
+// construct the per-namespace issuer URLs under /api/v1.0/issuer/ns/<prefix>.
 //
 // This simulates the real browser flow:
 //  1. GET the device verification page (unauthenticated) — expect redirect to login with nextUrl
 //  2. POST login with nextUrl — verify the response echoes nextUrl back
 //  3. Follow nextUrl to reach the verification page
 //  4. Extract CSRF token and POST approval
-func simulateUserApproval(t *testing.T, serverURL, userCode, password string) {
+func simulateUserApproval(t *testing.T, serverURL, namespace, userCode, password string) {
 	t.Helper()
 
 	jar, err := cookiejar.New(nil)
@@ -319,7 +323,8 @@ func simulateUserApproval(t *testing.T, serverURL, userCode, password string) {
 	// Step 1: GET the device verification page while unauthenticated.
 	// The server should redirect us to the login page with nextUrl pointing
 	// back at the device verification page.
-	verifyPageURL := fmt.Sprintf("%s/api/v1.0/issuer/device?user_code=%s", serverURL, userCode)
+	nsBase := serverURL + "/api/v1.0/issuer/ns" + namespace
+	verifyPageURL := fmt.Sprintf("%s/device?user_code=%s", nsBase, userCode)
 	resp, err := browserClient.Get(verifyPageURL)
 	require.NoError(t, err)
 	_, _ = io.ReadAll(resp.Body)
@@ -365,7 +370,7 @@ func simulateUserApproval(t *testing.T, serverURL, userCode, password string) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, "Verification page should return 200 after login")
 
 	// Step 4: Extract CSRF and submit approval.
-	csrfURL, _ := url.Parse(serverURL + "/api/v1.0/issuer/device")
+	csrfURL, _ := url.Parse(nsBase + "/device")
 	var csrfCookie *http.Cookie
 	for _, c := range jar.Cookies(csrfURL) {
 		if c.Name == "csrf_token" {
@@ -382,7 +387,7 @@ func simulateUserApproval(t *testing.T, serverURL, userCode, password string) {
 		"action":     {"approve"},
 		"csrf_token": {csrfFromPage},
 	}
-	resp, err = browserClient.PostForm(serverURL+"/api/v1.0/issuer/device", approveForm)
+	resp, err = browserClient.PostForm(nsBase+"/device", approveForm)
 	require.NoError(t, err)
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -481,7 +486,7 @@ func TestClientAcquireTokenE2E(t *testing.T) {
 			}
 			approvedCount++
 			t.Logf("Intercepted user_code #%d from CLI stderr: %s", approvedCount, userCode)
-			simulateUserApproval(t, serverURL, userCode, testUserPassword)
+			simulateUserApproval(t, serverURL, "/data", userCode, testUserPassword)
 		case err = <-cmdDone:
 			goto done
 		case <-approvalTimeout:
@@ -574,7 +579,7 @@ func TestClientAcquireTokenScopeE2E(t *testing.T) {
 	t.Logf("AuthDevice with joined scopes OK: user_code=%s", deviceAuth.UserCode)
 
 	// Approve
-	simulateUserApproval(t, serverURL, deviceAuth.UserCode, testUserPassword)
+	simulateUserApproval(t, serverURL, "/data", deviceAuth.UserCode, testUserPassword)
 
 	// Poll for token
 	pollValues := url.Values{
@@ -597,7 +602,8 @@ func TestClientAcquireTokenScopeE2E(t *testing.T) {
 	require.NotEmpty(t, accessToken)
 
 	// Validate scopes
-	claims := validateWLCGToken(t, accessToken, serverURL)
+	nsIssuer := serverURL + "/api/v1.0/issuer/ns/data"
+	claims := validateWLCGToken(t, accessToken, nsIssuer)
 	assert.Equal(t, "testuser", claims["sub"])
 	scopeStr := extractScopeString(claims)
 	assert.Contains(t, scopeStr, "storage.create:/testuser",
