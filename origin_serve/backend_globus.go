@@ -30,6 +30,7 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
@@ -41,8 +42,8 @@ import (
 // a Globus v2 backend. It is the exported interface that external packages
 // (e.g. launchers) use to manage Globus backends.
 type GlobusBackendActivator interface {
-	// Activate marks the collection as activated with the given tokens.
-	Activate(collectionToken, transferToken *oauth2.Token, httpsServer string)
+	// Activate marks the collection as activated with the given tokens and OAuth2 config.
+	Activate(collectionToken, transferToken *oauth2.Token, httpsServer string, oauth2Cfg *oauth2.Config)
 	// RefreshTokens refreshes both the collection and transfer tokens.
 	RefreshTokens() error
 	// IsActivated returns whether the Globus collection has been activated.
@@ -136,16 +137,26 @@ func (b *globusBackend) IsActivated() bool {
 }
 
 // Activate marks the collection as activated with the given tokens.
-func (b *globusBackend) Activate(collectionToken, transferToken *oauth2.Token, httpsServer string) {
+func (b *globusBackend) Activate(collectionToken, transferToken *oauth2.Token, httpsServer string, oauth2Cfg *oauth2.Config) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.collectionToken = collectionToken
 	b.transferToken = transferToken
 	b.httpsServer = httpsServer
 	b.activated = true
+	if oauth2Cfg != nil {
+		b.oauth2Cfg = oauth2Cfg
+	}
 
-	// Update the inner HTTPS backend's OAuth2 token
+	// Update the inner HTTPS backend's service URL and OAuth2 token
+	b.inner.SetServiceURL(httpsServer)
 	b.inner.SetOAuth2Token(collectionToken)
+
+	// Re-probe backend mode (WebDAV vs plain HTTP) since SetServiceURL
+	// resets it to Unknown.
+	if err := b.inner.CheckAvailability(); err != nil {
+		log.Warningf("Globus collection %s: failed to probe backend mode: %v", b.collectionID, err)
+	}
 }
 
 // RefreshTokens refreshes both the collection and transfer tokens.
@@ -157,9 +168,15 @@ func (b *globusBackend) RefreshTokens() error {
 		return nil
 	}
 
-	// Refresh collection token
+	// Refresh collection token.
+	// We present an already-expired copy to oauth2.TokenSource so it always
+	// performs a refresh_token grant instead of silently reusing the cached token.
 	if b.collectionToken != nil && b.collectionToken.Expiry.Before(time.Now().Add(10*time.Minute)) {
-		ts := b.oauth2Cfg.TokenSource(nil, b.collectionToken)
+		expiredCopy := &oauth2.Token{
+			RefreshToken: b.collectionToken.RefreshToken,
+			Expiry:       time.Now().Add(-time.Minute),
+		}
+		ts := b.oauth2Cfg.TokenSource(context.Background(), expiredCopy)
 		newTok, err := ts.Token()
 		if err != nil {
 			log.Warningf("Failed to refresh Globus collection token for %s: %v", b.collectionID, err)
@@ -171,9 +188,13 @@ func (b *globusBackend) RefreshTokens() error {
 		log.Debugf("Refreshed Globus collection token for %s", b.collectionID)
 	}
 
-	// Refresh transfer token
+	// Refresh transfer token (same expired-copy trick).
 	if b.transferToken != nil && b.transferToken.Expiry.Before(time.Now().Add(10*time.Minute)) {
-		ts := b.oauth2Cfg.TokenSource(nil, b.transferToken)
+		expiredCopy := &oauth2.Token{
+			RefreshToken: b.transferToken.RefreshToken,
+			Expiry:       time.Now().Add(-time.Minute),
+		}
+		ts := b.oauth2Cfg.TokenSource(context.Background(), expiredCopy)
 		newTok, err := ts.Token()
 		if err != nil {
 			log.Warningf("Failed to refresh Globus transfer token for %s: %v", b.collectionID, err)
@@ -213,15 +234,20 @@ func GetGlobusBackends() map[string]GlobusBackendActivator {
 	return result
 }
 
-// LaunchGlobusv2TokenRefresh starts a periodic goroutine (every 5 min) that
-// refreshes the OAuth2 tokens for all activated Globus v2 backends.
+// LaunchGlobusv2TokenRefresh starts a periodic goroutine that refreshes the
+// OAuth2 tokens for all activated Globus v2 backends.  The refresh interval
+// defaults to 5 min but can be overridden via Origin.Globusv2TokenRefreshInterval.
 func LaunchGlobusv2TokenRefresh(ctx context.Context, egrp *errgroup.Group) {
 	if len(globusBackends) == 0 {
 		return
 	}
-	log.Info("Launching periodic Globus v2 token refresh")
+	interval := param.Origin_Globusv2TokenRefreshInterval.GetDuration()
+	if interval <= 0 {
+		interval = 5 * time.Minute
+	}
+	log.Infof("Launching periodic Globus v2 token refresh (interval=%s)", interval)
 	egrp.Go(func() error {
-		ticker := time.NewTicker(5 * time.Minute)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
