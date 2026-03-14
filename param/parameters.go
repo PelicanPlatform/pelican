@@ -315,7 +315,10 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.GlobusCollectionID": false,
 	"Origin.GlobusCollectionName": false,
 	"Origin.GlobusConfigLocation": false,
+	"Origin.GlobusIssuerURL": false,
+	"Origin.GlobusTransferAPIBaseUrl": false,
 	"Origin.GlobusTransferTokenFile": false,
+	"Origin.Globusv2TokenRefreshInterval": false,
 	"Origin.HttpAuthOAuth2ClientID": false,
 	"Origin.HttpAuthOAuth2ClientSecretFile": false,
 	"Origin.HttpAuthOAuth2Issuer": false,
@@ -697,6 +700,10 @@ func (sP StringParam) GetString() string {
 			return config.Origin.GlobusCollectionName
 		case "Origin.GlobusConfigLocation":
 			return config.Origin.GlobusConfigLocation
+		case "Origin.GlobusIssuerURL":
+			return config.Origin.GlobusIssuerURL
+		case "Origin.GlobusTransferAPIBaseUrl":
+			return config.Origin.GlobusTransferAPIBaseUrl
 		case "Origin.GlobusTransferTokenFile":
 			return config.Origin.GlobusTransferTokenFile
 		case "Origin.HttpAuthOAuth2ClientID":
@@ -1346,6 +1353,8 @@ func (dP DurationParam) GetDuration() time.Duration {
 			return config.Origin.DiskUsageCalculationDelay
 		case "Origin.DiskUsageCalculationInterval":
 			return config.Origin.DiskUsageCalculationInterval
+		case "Origin.Globusv2TokenRefreshInterval":
+			return config.Origin.Globusv2TokenRefreshInterval
 		case "Origin.SSH.ChallengeTimeout":
 			return config.Origin.SSH.ChallengeTimeout
 		case "Origin.SSH.ConnectTimeout":
@@ -1669,7 +1678,10 @@ var allParameterNames = []string{
 	"Origin.GlobusCollectionID",
 	"Origin.GlobusCollectionName",
 	"Origin.GlobusConfigLocation",
+	"Origin.GlobusIssuerURL",
+	"Origin.GlobusTransferAPIBaseUrl",
 	"Origin.GlobusTransferTokenFile",
+	"Origin.Globusv2TokenRefreshInterval",
 	"Origin.HttpAuthOAuth2ClientID",
 	"Origin.HttpAuthOAuth2ClientSecretFile",
 	"Origin.HttpAuthOAuth2Issuer",
@@ -1934,6 +1946,8 @@ var (
 	Origin_GlobusCollectionID = StringParam{"Origin.GlobusCollectionID"}
 	Origin_GlobusCollectionName = StringParam{"Origin.GlobusCollectionName"}
 	Origin_GlobusConfigLocation = StringParam{"Origin.GlobusConfigLocation"}
+	Origin_GlobusIssuerURL = StringParam{"Origin.GlobusIssuerURL"}
+	Origin_GlobusTransferAPIBaseUrl = StringParam{"Origin.GlobusTransferAPIBaseUrl"}
 	Origin_GlobusTransferTokenFile = StringParam{"Origin.GlobusTransferTokenFile"}
 	Origin_HttpAuthOAuth2ClientID = StringParam{"Origin.HttpAuthOAuth2ClientID"}
 	Origin_HttpAuthOAuth2ClientSecretFile = StringParam{"Origin.HttpAuthOAuth2ClientSecretFile"}
@@ -2216,6 +2230,7 @@ var (
 	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
 	Origin_DiskUsageCalculationDelay = DurationParam{"Origin.DiskUsageCalculationDelay"}
 	Origin_DiskUsageCalculationInterval = DurationParam{"Origin.DiskUsageCalculationInterval"}
+	Origin_Globusv2TokenRefreshInterval = DurationParam{"Origin.Globusv2TokenRefreshInterval"}
 	Origin_SSH_ChallengeTimeout = DurationParam{"Origin.SSH.ChallengeTimeout"}
 	Origin_SSH_ConnectTimeout = DurationParam{"Origin.SSH.ConnectTimeout"}
 	Origin_SSH_KeepaliveInterval = DurationParam{"Origin.SSH.KeepaliveInterval"}
