@@ -298,3 +298,127 @@ func TestFilterRequestedScopes(t *testing.T) {
 		assert.Equal(t, 1, count, "storage.read:/data should appear exactly once")
 	})
 }
+
+func TestCleanScopePath(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"Plain scope unchanged", "openid", "openid"},
+		{"No traversal unchanged", "storage.read:/data/foo", "storage.read:/data/foo"},
+		{"DotDot resolved", "storage.read:/data/bar/../baz", "storage.read:/data/baz"},
+		{"Multiple DotDot", "storage.read:/a/b/c/../../d", "storage.read:/a/d"},
+		{"Trailing slash cleaned", "storage.read:/data/foo/", "storage.read:/data/foo"},
+		{"Dot cleaned", "storage.read:/data/./foo", "storage.read:/data/foo"},
+		{"Root stays root", "storage.read:/", "storage.read:/"},
+		{"Empty path component", "storage.read:", "storage.read:"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, cleanScopePath(tt.input))
+		})
+	}
+}
+
+func TestPathTraversalPrevention(t *testing.T) {
+	// Regression tests for path traversal via ".." in scope paths.
+	// Before the fix, "storage.read:/foo/bar/../baz" would pass an
+	// authorization check for "storage.read:/foo/bar" because the raw
+	// string starts with "/foo/bar", but the path resolves to "/foo/baz".
+
+	t.Run("TraversalBlockedInFilter", func(t *testing.T) {
+		setupAuthzTemplates(t, []map[string]interface{}{
+			{
+				"actions": []string{"read"},
+				"prefix":  "/data/private",
+				"groups":  []string{"/readers"},
+			},
+		})
+
+		// This path resolves to /data/secret, which is NOT under /data/private
+		filtered := FilterRequestedScopes(
+			[]string{"storage.read:/data/private/../secret"},
+			"alice", "alice", []string{"/readers"},
+		)
+		assert.NotContains(t, filtered, "storage.read:/data/private/../secret",
+			"raw traversal scope must not be granted")
+		assert.NotContains(t, filtered, "storage.read:/data/secret",
+			"resolved traversal scope must not be granted (outside allowed path)")
+	})
+
+	t.Run("TraversalResolvingToAllowedPath", func(t *testing.T) {
+		setupAuthzTemplates(t, []map[string]interface{}{
+			{
+				"actions": []string{"read"},
+				"prefix":  "/data",
+				"groups":  []string{"/readers"},
+			},
+		})
+
+		// /data/sub/../file resolves to /data/file which IS under /data
+		filtered := FilterRequestedScopes(
+			[]string{"storage.read:/data/sub/../file"},
+			"alice", "alice", []string{"/readers"},
+		)
+		// The traversal should be cleaned and the scope should be granted
+		// as storage.read:/data/file (not the raw ".." form)
+		assert.Contains(t, filtered, "storage.read:/data/file",
+			"traversal resolving within allowed path should be granted in clean form")
+		assert.NotContains(t, filtered, "storage.read:/data/sub/../file",
+			"raw traversal form must never appear in granted scopes")
+	})
+
+	t.Run("URLEncodedTraversal", func(t *testing.T) {
+		setupAuthzTemplates(t, []map[string]interface{}{
+			{
+				"actions": []string{"read"},
+				"prefix":  "/data/private",
+				"groups":  []string{"/readers"},
+			},
+		})
+
+		// URL-encoded ".." (%2e%2e) should also be caught
+		filtered := FilterRequestedScopes(
+			[]string{"storage.read:/data/private/%2e%2e/secret"},
+			"alice", "alice", []string{"/readers"},
+		)
+		assert.NotContains(t, filtered, "storage.read:/data/private/%2e%2e/secret",
+			"URL-encoded traversal must not bypass checks")
+		assert.NotContains(t, filtered, "storage.read:/data/secret",
+			"resolved URL-encoded traversal must not be granted outside allowed path")
+	})
+
+	t.Run("MatchHierarchicalRejectsTraversal", func(t *testing.T) {
+		allowed := []string{"storage.read:/foo/bar"}
+
+		// /foo/bar/../baz resolves to /foo/baz — NOT under /foo/bar
+		assert.False(t, matchHierarchical("storage.read:/foo/bar/../baz", allowed),
+			"traversal escaping allowed path must be rejected")
+
+		// /foo/bar/../bar/file resolves to /foo/bar/file — IS under /foo/bar
+		assert.True(t, matchHierarchical("storage.read:/foo/bar/../bar/file", allowed),
+			"traversal resolving within allowed path should match")
+	})
+
+	t.Run("CollectNarrowerRejectsTraversal", func(t *testing.T) {
+		// Ensure that requesting a broad scope with ".." doesn't collect
+		// scopes outside the resolved path.
+		allowed := []string{
+			"storage.read:/data/public",
+			"storage.read:/secret",
+		}
+
+		// storage.read:/data/public/../../ resolves to storage.read:/
+		// which would be broader than /secret — but /secret should NOT
+		// be returned because the request's resolved path is /, and
+		// collectNarrowerScopes is only called when the request is
+		// broader. The allowed scopes themselves are clean.
+		result := collectNarrowerScopes("storage.read:/data/public/../../", allowed)
+		// Resolves to storage.read:/ which is broader than both,
+		// so both should appear (this is correct behavior — the user
+		// asked for / which covers everything, and we return what they're allowed)
+		assert.Contains(t, result, "storage.read:/data/public")
+		assert.Contains(t, result, "storage.read:/secret")
+	})
+}

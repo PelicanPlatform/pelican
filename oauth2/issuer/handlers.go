@@ -428,6 +428,7 @@ func handleAuthorize(provider *OIDCProvider) gin.HandlerFunc {
 		// When a requested scope is broader than what's permitted,
 		// substitute in all narrower allowed scopes that fall under it.
 		for _, scope := range ar.GetRequestedScopes() {
+			scope = cleanScopePath(scope)
 			if isStandardScope(scope) {
 				ar.GrantScope(scope)
 			} else if scopeAllowed(scope, allowedScopes) {
@@ -649,6 +650,7 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 		// permitted, substitute in all narrower allowed scopes.
 		grantedScopes := make([]string, 0)
 		for _, scope := range requestedScopes {
+			scope = cleanScopePath(scope)
 			if isStandardScope(scope) || scopeAllowed(scope, allowedScopes) {
 				grantedScopes = append(grantedScopes, scope)
 			} else {

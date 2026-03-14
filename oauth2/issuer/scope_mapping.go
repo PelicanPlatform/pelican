@@ -20,6 +20,7 @@ package issuer
 
 import (
 	"net/url"
+	"path"
 	"strings"
 
 	"github.com/ory/fosite"
@@ -109,6 +110,10 @@ func FilterRequestedScopes(requestedScopes []string, user, userID string, groups
 	}
 
 	for _, scope := range requestedScopes {
+		// Normalize path component to prevent traversal attacks.
+		// This ensures the token never contains ".." segments.
+		scope = cleanScopePath(scope)
+
 		if _, ok := alwaysAllowed[scope]; ok {
 			addUnique(scope)
 			continue
@@ -140,6 +145,19 @@ func FilterRequestedScopes(requestedScopes []string, user, userID string, groups
 	return result
 }
 
+// cleanScopePath normalizes a WLCG-style scope by applying path.Clean to its
+// path component. This prevents path traversal attacks where a scope like
+// "storage.read:/foo/bar/../baz" would bypass prefix-based authorization checks
+// (the raw string starts with "/foo/bar" but resolves to "/foo/baz").
+func cleanScopePath(scope string) string {
+	parts := strings.SplitN(scope, ":", 2)
+	if len(parts) != 2 || parts[1] == "" {
+		return scope
+	}
+	parts[1] = path.Clean(parts[1])
+	return parts[0] + ":" + parts[1]
+}
+
 // matchHierarchical checks whether requestedScope is covered by any scope in allowed.
 // For example, storage.read:/foo is covered by storage.read:/ because / is a prefix of /foo.
 func matchHierarchical(requestedScope string, allowed []string) bool {
@@ -155,6 +173,7 @@ func matchHierarchical(requestedScope string, allowed []string) bool {
 	if err != nil {
 		reqPathDecoded = reqPath
 	}
+	reqPathDecoded = path.Clean(reqPathDecoded)
 
 	for _, scope := range allowed {
 		parts := strings.SplitN(scope, ":", 2)
@@ -168,6 +187,7 @@ func matchHierarchical(requestedScope string, allowed []string) bool {
 		if err != nil {
 			allowedPath = parts[1]
 		}
+		allowedPath = path.Clean(allowedPath)
 		if isHierarchicalChild(reqPathDecoded, allowedPath) {
 			return true
 		}
@@ -190,6 +210,7 @@ func collectNarrowerScopes(requestedScope string, allowed []string) []string {
 	if err != nil {
 		reqPath = reqParts[1]
 	}
+	reqPath = path.Clean(reqPath)
 
 	var result []string
 	for _, scope := range allowed {
@@ -204,6 +225,7 @@ func collectNarrowerScopes(requestedScope string, allowed []string) []string {
 		if err != nil {
 			allowedPath = parts[1]
 		}
+		allowedPath = path.Clean(allowedPath)
 		// Check if the allowed scope's path is a child of the requested path
 		// (i.e. the requested scope is broader)
 		if isHierarchicalChild(allowedPath, reqPath) {
