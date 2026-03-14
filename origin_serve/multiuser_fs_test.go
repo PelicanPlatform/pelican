@@ -189,7 +189,8 @@ func TestRunAsUser_RestoresIdentity(t *testing.T) {
 	// Get current fsuid (should be 0 = root)
 	origUid, _, _ := syscall.Syscall(syscall.SYS_SETFSUID, 0, 0, 0)
 	// Restore it
-	syscall.Syscall(syscall.SYS_SETFSUID, origUid, 0, 0)
+	_, _, errno := syscall.Syscall(syscall.SYS_SETFSUID, origUid, 0, 0)
+	require.Equal(t, syscall.Errno(0), errno, "failed to restore fsuid")
 
 	result, err := runAsUser(uint32(0), uint32(0), nil, 0, func() (string, error) {
 		return "ok", nil
@@ -199,7 +200,8 @@ func TestRunAsUser_RestoresIdentity(t *testing.T) {
 
 	// Verify UID is restored
 	curUid, _, _ := syscall.Syscall(syscall.SYS_SETFSUID, 0, 0, 0)
-	syscall.Syscall(syscall.SYS_SETFSUID, curUid, 0, 0)
+	_, _, errno = syscall.Syscall(syscall.SYS_SETFSUID, curUid, 0, 0)
+	require.Equal(t, syscall.Errno(0), errno, "failed to restore fsuid")
 	assert.Equal(t, origUid, curUid, "FS UID should be restored after runAsUser")
 }
 

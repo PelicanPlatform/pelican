@@ -377,9 +377,14 @@ func runAsUser[T any](uid, gid uint32, secondaryGIDs []uint32, umask int, fn fun
 	// Set FS UID
 	prevUid, _, errno := syscall.Syscall(syscall.SYS_SETFSUID, uintptr(uid), 0, 0)
 	if errno != 0 {
-		// Restore GID and groups before returning
-		syscall.Syscall(syscall.SYS_SETFSGID, uintptr(prevGid), 0, 0) //nolint:errcheck // best-effort restore
-		threadSetgroups(prevGroups)                                   //nolint:errcheck
+		// Restore GID and groups before returning.  Panic on failure:
+		// a thread with wrong credentials must not be returned to the pool.
+		if _, _, e := syscall.Syscall(syscall.SYS_SETFSGID, uintptr(prevGid), 0, 0); e != 0 {
+			panic(fmt.Sprintf("critical: failed to restore fsgid to %d: %v", prevGid, e))
+		}
+		if e := threadSetgroups(prevGroups); e != nil {
+			panic(fmt.Sprintf("critical: failed to restore supplementary groups: %v", e))
+		}
 		var zero T
 		return zero, fmt.Errorf("setfsuid(%d): %w", uid, errno)
 	}
@@ -390,11 +395,19 @@ func runAsUser[T any](uid, gid uint32, secondaryGIDs []uint32, umask int, fn fun
 	prevUmask := syscall.Umask(umask)
 
 	defer func() {
-		// Restore umask, then UID (to regain root privileges), then GID, then groups
+		// Restore umask, then UID (to regain root privileges), then GID, then groups.
+		// Panic on failure: a thread with wrong credentials must not be
+		// returned to the Go runtime's thread pool.
 		syscall.Umask(prevUmask)
-		syscall.Syscall(syscall.SYS_SETFSUID, uintptr(prevUid), 0, 0) //nolint:errcheck // best-effort restore
-		syscall.Syscall(syscall.SYS_SETFSGID, uintptr(prevGid), 0, 0) //nolint:errcheck // best-effort restore
-		threadSetgroups(prevGroups)                                   //nolint:errcheck
+		if _, _, e := syscall.Syscall(syscall.SYS_SETFSUID, uintptr(prevUid), 0, 0); e != 0 {
+			panic(fmt.Sprintf("critical: failed to restore fsuid to %d: %v", prevUid, e))
+		}
+		if _, _, e := syscall.Syscall(syscall.SYS_SETFSGID, uintptr(prevGid), 0, 0); e != 0 {
+			panic(fmt.Sprintf("critical: failed to restore fsgid to %d: %v", prevGid, e))
+		}
+		if e := threadSetgroups(prevGroups); e != nil {
+			panic(fmt.Sprintf("critical: failed to restore supplementary groups: %v", e))
+		}
 	}()
 
 	return fn()
