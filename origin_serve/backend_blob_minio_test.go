@@ -92,7 +92,7 @@ func startMinio(t *testing.T) (endpoint, accessKey, secretKey string) {
 		minioDone.Store(true)
 	}()
 	t.Cleanup(func() {
-		cmd.Process.Kill()
+		cmd.Process.Kill() //nolint:errcheck
 		for !minioDone.Load() {
 			time.Sleep(10 * time.Millisecond)
 		}
