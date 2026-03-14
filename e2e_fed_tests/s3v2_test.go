@@ -24,9 +24,7 @@ import (
 	"crypto/md5"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -336,84 +334,24 @@ func TestS3v2MemOriginOverwrite(t *testing.T) {
 // Minio-backed federation tests
 // ---------------------------------------------------------------------------
 
-// skipIfNoMinio skips the test if the minio binary is not available on PATH.
-func skipIfNoMinio(t *testing.T) {
-	t.Helper()
-	if _, err := exec.LookPath("minio"); err != nil {
-		t.Skip("minio not found on PATH; skipping minio-backed test")
-	}
-}
-
-// startMinioServer launches a minio server bound to 127.0.0.1:0 (OS-assigned port),
-// parses the actual listening port from minio's log output, and returns the
-// endpoint URL. The server is killed when the test completes.
-func startMinioServer(t *testing.T) (endpoint string) {
-	t.Helper()
-	skipIfNoMinio(t)
-
-	dataDir := t.TempDir()
-
-	cmd := exec.Command("minio", "server",
-		"--address", "127.0.0.1:0",
-		"--console-address", "127.0.0.2:0",
-		dataDir,
-	)
-	cmd.Env = append(os.Environ(),
-		"MINIO_ROOT_USER=minioadmin",
-		"MINIO_ROOT_PASSWORD=minioadmin",
-	)
-
-	logPath := filepath.Join(t.TempDir(), "minio.log")
-	logFile, err := os.Create(logPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { logFile.Close() })
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-
-	require.NoError(t, cmd.Start(), "failed to start minio")
-	t.Cleanup(func() {
-		cmd.Process.Kill() //nolint:errcheck
-		cmd.Wait()         //nolint:errcheck
-	})
-
-	// Minio prints a line like:  S3-API: http://127.0.0.1:43219
-	apiRe := regexp.MustCompile(`S3-API:\s+(https?://\S+)`)
-	require.Eventually(t, func() bool {
-		data, err := os.ReadFile(logPath)
-		if err != nil {
-			return false
-		}
-		if m := apiRe.FindSubmatch(data); m != nil {
-			endpoint = string(m[1])
-			return true
-		}
-		return false
-	}, 30*time.Second, 200*time.Millisecond, "minio never printed an S3-API endpoint")
-
-	// Pre-create the bucket directory on disk.
-	require.NoError(t, os.Mkdir(filepath.Join(dataDir, "test-bucket"), 0755))
-
-	return endpoint
-}
-
 // TestS3v2MinioOriginUploadDownload runs a full Pelican federation backed by
 // a real MinIO server. It exercises the complete S3v2 data path: director
 // redirect → origin HTTP handler → gocloud.dev/blob/s3blob → MinIO. Skipped
 // if minio is not installed.
 func TestS3v2MinioOriginUploadDownload(t *testing.T) {
-	skipIfNoMinio(t)
+	test_utils.SkipIfNoMinio(t)
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	minioEndpoint := startMinioServer(t)
+	minioEndpoint, accessKey, secretKey := test_utils.StartMinio(t, "test-bucket")
 
 	// Write credential files for the origin to read.
 	credDir := t.TempDir()
 	akFile := filepath.Join(credDir, "access-key")
 	skFile := filepath.Join(credDir, "secret-key")
-	require.NoError(t, os.WriteFile(akFile, []byte("minioadmin"), 0600))
-	require.NoError(t, os.WriteFile(skFile, []byte("minioadmin"), 0600))
+	require.NoError(t, os.WriteFile(akFile, []byte(accessKey), 0600))
+	require.NoError(t, os.WriteFile(skFile, []byte(secretKey), 0600))
 
 	// S3 params must be in the YAML config so they survive NewFedTest's
 	// config.InitServer → viper.MergeConfig flow and are available when
