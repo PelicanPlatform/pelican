@@ -371,6 +371,109 @@ func TestPositiveAuthorizationWithRegisteredKey(t *testing.T) {
 	assert.Equal(t, 1, jwksFetchCount, "JWKS should still not be fetched again even for failed authorization")
 }
 
+// TestAuthorizationWithDirtyPaths verifies that authorizeWithContext succeeds
+// even when the requested resource contains un-cleaned path traversal sequences
+// (e.g. "..", ".", double slashes).  This works because NewResourceScope calls
+// path.Clean on the resource.  If that call were removed, these tests would fail
+// because Contains does a raw string prefix comparison.
+func TestAuthorizationWithDirtyPaths(t *testing.T) {
+	// --- set up a JWKS server so tokens can be fully validated ----------
+	key := generateTestKey(t)
+	pubKey, err := key.PublicKey()
+	require.NoError(t, err)
+	require.NoError(t, pubKey.Set(jwk.KeyIDKey, "test-key"))
+	require.NoError(t, pubKey.Set(jwk.AlgorithmKey, jwa.ES256))
+
+	jwks := jwk.NewSet()
+	require.NoError(t, jwks.AddKey(pubKey))
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		data, _ := json.Marshal(jwks)
+		_, _ = w.Write(data)
+	})
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		cfg := map[string]interface{}{
+			"issuer":   "http://" + r.Host,
+			"jwks_uri": "http://" + r.Host + "/jwks",
+		}
+		data, _ := json.Marshal(cfg)
+		_, _ = w.Write(data)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	issuerURL := server.URL
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	egrp := &errgroup.Group{}
+
+	exports := []server_utils.OriginExport{{
+		FederationPrefix: "/data",
+		StoragePrefix:    "/tmp/data",
+		IssuerUrls:       []string{issuerURL},
+		Capabilities:     server_structs.Capabilities{Reads: true},
+	}}
+	require.NoError(t, InitAuthConfig(ctx, egrp, exports))
+
+	// Token grants storage.read:/  (covers everything under /data)
+	tok := createTestToken(t, key, issuerURL, "alice", nil, "storage.read:/")
+	ac := GetAuthConfig()
+	require.NotNil(t, ac)
+
+	// Sanity: clean path works
+	_, ok := ac.authorizeWithContext(ctx, token_scopes.Wlcg_Storage_Read, "/data/file.txt", tok)
+	require.True(t, ok, "clean path must be authorized (sanity check)")
+
+	// Dirty paths that should still resolve to an authorized resource
+	dirtyPaths := []struct {
+		name     string
+		resource string
+	}{
+		{"DotDotPartial", "/data/sub/../file.txt"},
+		{"DotDotDeep", "/data/a/b/../../file.txt"},
+		{"DotCurrent", "/data/./file.txt"},
+		{"DoubleSlash", "/data//file.txt"},
+		{"TrailingDotDot", "/data/sub/.."},
+	}
+	for _, dp := range dirtyPaths {
+		t.Run(dp.name, func(t *testing.T) {
+			_, authorized := ac.authorizeWithContext(ctx, token_scopes.Wlcg_Storage_Read, dp.resource, tok)
+			assert.True(t, authorized,
+				"dirty path %q should be authorized after path.Clean normalisation", dp.resource)
+		})
+	}
+
+	// --- negative tests: path.Clean must prevent auth bypass ---------------
+	// Use a narrowly-scoped token that only grants access to /subdir.
+	// Without path.Clean, a request containing ".." could trick the prefix
+	// match into granting access outside the token's scope.
+	narrowTok := createTestToken(t, key, issuerURL, "alice", nil, "storage.read:/subdir")
+
+	// Sanity: the narrow token works for its intended path
+	_, ok = ac.authorizeWithContext(ctx, token_scopes.Wlcg_Storage_Read, "/data/subdir/file.txt", narrowTok)
+	require.True(t, ok, "narrow token must authorize its own subdir")
+
+	bypassPaths := []struct {
+		name     string
+		resource string
+	}{
+		// After path.Clean these all resolve outside /data/subdir
+		{"EscapeViaRelative", "/data/subdir/../secret/file.txt"},
+		{"EscapeViaDeepRelative", "/data/subdir/a/../../secret/file.txt"},
+		{"EscapeToRoot", "/data/subdir/../../etc/passwd"},
+	}
+	for _, bp := range bypassPaths {
+		t.Run(bp.name, func(t *testing.T) {
+			_, authorized := ac.authorizeWithContext(ctx, token_scopes.Wlcg_Storage_Read, bp.resource, narrowTok)
+			assert.False(t, authorized,
+				"dirty path %q must NOT be authorized — it escapes the token scope after cleaning", bp.resource)
+		})
+	}
+}
+
 // TestAuthorizationFailureWithoutUserInfo tests that failed authorization doesn't provide user info
 func TestAuthorizationFailureWithoutUserInfo(t *testing.T) {
 	// When authorization fails, user info should not be added to context
