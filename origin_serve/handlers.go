@@ -384,10 +384,11 @@ func httpMetricsMiddleware() gin.HandlerFunc {
 			var readBytes, writeBytes int64
 			var readOps, writeOps int32
 			if status >= 200 && status < 300 {
-				if method == "GET" {
+				switch method {
+				case "GET":
 					readBytes = mrw.bytesWritten
 					readOps = 1
-				} else if method == "PUT" {
+				case "PUT":
 					writeBytes = mrr.bytesRead
 					writeOps = 1
 				}
