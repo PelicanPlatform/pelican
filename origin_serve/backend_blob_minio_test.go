@@ -27,6 +27,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -60,12 +61,16 @@ func startMinio(t *testing.T) (endpoint, accessKey, secretKey string) {
 
 	cmd := exec.Command("minio", "server",
 		"--address", "127.0.0.1:0",
-		"--console-address", "127.0.0.2:0",
 		dataDir,
 	)
 	cmd.Env = append(os.Environ(),
 		"MINIO_ROOT_USER="+accessKey,
 		"MINIO_ROOT_PASSWORD="+secretKey,
+		// Disable the web console so we don't need --console-address.
+		// Using 127.0.0.2 for the console fails on macOS (only 127.0.0.1
+		// is configured), and using 127.0.0.1:0 is rejected by minio
+		// because it matches --address.
+		"MINIO_BROWSER=off",
 	)
 
 	// Capture stdout so we can parse the "S3-API:" line for the real port.
@@ -78,16 +83,30 @@ func startMinio(t *testing.T) (endpoint, accessKey, secretKey string) {
 	cmd.Stderr = logFile
 
 	require.NoError(t, cmd.Start(), "failed to start minio")
+
+	// Monitor for early exit so we fail fast with diagnostics.
+	var minioDone atomic.Bool
+	var minioErr error
+	go func() {
+		minioErr = cmd.Wait()
+		minioDone.Store(true)
+	}()
 	t.Cleanup(func() {
 		cmd.Process.Kill()
-		cmd.Wait() //nolint:errcheck
+		for !minioDone.Load() {
+			time.Sleep(10 * time.Millisecond)
+		}
 	})
 
 	// Minio prints a line like:
 	//   S3-API: http://127.0.0.1:43219
 	// Poll the log file until we find it (with a 30-second deadline).
+	// Use assert (not require) so we can print minio's log on failure.
 	apiRe := regexp.MustCompile(`S3-API:\s+(https?://\S+)`)
-	require.Eventually(t, func() bool {
+	ok := assert.Eventually(t, func() bool {
+		if minioDone.Load() {
+			return false
+		}
 		data, err := os.ReadFile(logPath)
 		if err != nil {
 			return false
@@ -97,7 +116,14 @@ func startMinio(t *testing.T) (endpoint, accessKey, secretKey string) {
 			return true
 		}
 		return false
-	}, 30*time.Second, 200*time.Millisecond, "minio never printed an S3-API endpoint")
+	}, 30*time.Second, 200*time.Millisecond)
+	if !ok {
+		logData, _ := os.ReadFile(logPath)
+		if minioDone.Load() {
+			t.Fatalf("minio exited early (err=%v); log output:\n%s", minioErr, logData)
+		}
+		t.Fatalf("minio never printed an S3-API endpoint; log output:\n%s", logData)
+	}
 
 	// Pre-create the bucket directory on disk so it's available immediately.
 	bucketDir := filepath.Join(dataDir, "test-bucket")
