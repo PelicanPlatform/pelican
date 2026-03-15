@@ -20,7 +20,6 @@ package issuer
 
 import (
 	"encoding/json"
-	"html/template"
 	"net/http"
 	"net/url"
 	"strings"
@@ -504,70 +503,104 @@ func handleDeviceAuthorization(provider *OIDCProvider) gin.HandlerFunc {
 			return
 		}
 
+		// Override the verification URIs to point to the Next.js UI page
+		// instead of the API endpoint.
+		baseURL := param.Server_ExternalWebUrl.GetString()
+		viewBase := baseURL + "/view/issuer/device?namespace=" + url.QueryEscape(provider.Namespace)
+		resp.VerificationURI = viewBase
+		resp.VerificationURIComplete = viewBase + "&user_code=" + url.QueryEscape(resp.UserCode)
+
 		ctx.JSON(http.StatusOK, resp)
 	}
 }
 
-// handleDeviceVerify serves the device code verification page (GET)
+// handleDeviceVerify redirects the browser to the Next.js device verification page.
+// The actual UI is served by the frontend; this API endpoint only generates a
+// CSRF token and redirects.
 func handleDeviceVerify(provider *OIDCProvider) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		user := ctx.GetString("User")
 		if user == "" {
-			origPath := ctx.Request.URL.RequestURI()
+			// Redirect to login, but point nextUrl at the Next.js page.
+			viewURL := deviceViewURL(provider.Namespace, ctx.Query("user_code"))
 			redirUrl := url.URL{
 				Path:     "/view/login",
-				RawQuery: "nextUrl=" + url.QueryEscape(origPath),
+				RawQuery: "returnURL=" + url.QueryEscape(viewURL),
 			}
 			ctx.Redirect(http.StatusTemporaryRedirect, redirUrl.String())
 			ctx.Abort()
 			return
 		}
 
-		userCode := ctx.Query("user_code")
-
-		// Generate CSRF token and set it in a cookie
+		// Generate CSRF token and set it in a cookie scoped to the API path.
 		csrfToken, err := generateSecureToken(32)
 		if err != nil {
-			ctx.String(http.StatusInternalServerError, "Failed to generate CSRF token")
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate CSRF token"})
 			return
 		}
 		ctx.SetCookie("csrf_token", csrfToken, 600, "/api/v1.0/issuer/ns"+provider.Namespace+"/device", "", true, true)
 
-		data := map[string]interface{}{
-			"CSS":         template.CSS(pelicanCSS),
-			"UserCode":    userCode,
-			"FormAction":  "/api/v1.0/issuer/ns" + provider.Namespace + "/device",
-			"HasUserCode": userCode != "",
-			"CSRFToken":   csrfToken,
+		resp := gin.H{
+			"csrf_token": csrfToken,
+			"namespace":  provider.Namespace,
 		}
 
-		ctx.Header("Content-Type", "text/html; charset=utf-8")
-		if err := deviceConsentTmpl.Execute(ctx.Writer, data); err != nil {
-			log.WithError(err).Warn("Embedded issuer: failed to render device consent template")
+		// If user_code is provided, look up the device code session so we
+		// can show the requested scopes and client info on the consent page.
+		if userCode := ctx.Query("user_code"); userCode != "" {
+			userCode = strings.ToUpper(strings.TrimSpace(userCode))
+			if dc, err := provider.Storage().GetDeviceCodeSessionByUserCode(ctx, userCode); err == nil {
+				var scopes []string
+				if jsonErr := json.Unmarshal([]byte(dc.Scopes), &scopes); jsonErr == nil {
+					resp["scopes"] = scopes
+				}
+				resp["client_id"] = dc.ClientID
+				if rec, err := provider.Storage().GetClientRecord(ctx, dc.ClientID); err == nil && rec.ClientName != "" {
+					resp["client_name"] = rec.ClientName
+				}
+			}
 		}
+
+		ctx.JSON(http.StatusOK, resp)
 	}
 }
 
-// handleDeviceVerifySubmit processes the device code verification form submission (POST)
+// handleDeviceVerifySubmit processes the device code verification submission (POST).
+// It accepts either form-encoded or JSON request bodies and always returns JSON.
 func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		user := ctx.GetString("User")
 		if user == "" {
-			origPath := ctx.Request.URL.RequestURI()
-			redirUrl := url.URL{
-				Path:     "/view/login",
-				RawQuery: "nextUrl=" + url.QueryEscape(origPath),
-			}
-			ctx.Redirect(http.StatusTemporaryRedirect, redirUrl.String())
+			ctx.JSON(http.StatusUnauthorized, gin.H{"status": "error", "error": "Not authenticated"})
 			ctx.Abort()
 			return
 		}
 
+		// Accept CSRF token from form data or JSON body
+		var userCode, action, csrfForm string
+		if strings.Contains(ctx.GetHeader("Content-Type"), "application/json") {
+			var body struct {
+				UserCode  string `json:"user_code"`
+				Action    string `json:"action"`
+				CSRFToken string `json:"csrf_token"`
+			}
+			if err := ctx.ShouldBindJSON(&body); err != nil {
+				ctx.JSON(http.StatusBadRequest, gin.H{"status": "error", "error": "Invalid request body"})
+				return
+			}
+			userCode = body.UserCode
+			action = body.Action
+			csrfForm = body.CSRFToken
+		} else {
+			userCode = ctx.PostForm("user_code")
+			action = ctx.PostForm("action")
+			csrfForm = ctx.PostForm("csrf_token")
+		}
+
 		// Validate CSRF token
 		csrfCookie, err := ctx.Cookie("csrf_token")
-		csrfForm := ctx.PostForm("csrf_token")
 		if err != nil || csrfCookie == "" || csrfForm == "" || csrfCookie != csrfForm {
-			ctx.String(http.StatusForbidden, "CSRF validation failed")
+			ctx.JSON(http.StatusForbidden, gin.H{"status": "error", "error": "CSRF validation failed"})
 			return
 		}
 		// Clear the CSRF cookie after validation
@@ -576,11 +609,8 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 		userID := ctx.GetString("UserId")
 		groups := ctx.GetStringSlice("Groups")
 
-		userCode := ctx.PostForm("user_code")
-		action := ctx.PostForm("action")
-
 		if userCode == "" {
-			renderDeviceResult(ctx, "error", "No user code provided")
+			ctx.JSON(http.StatusBadRequest, gin.H{"status": "error", "error": "No user code provided"})
 			return
 		}
 
@@ -591,24 +621,24 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 			if err := provider.Storage().DenyDeviceCodeSession(ctx, userCode); err != nil {
 				log.WithError(err).Warn("Embedded issuer: failed to deny device code")
 			}
-			renderDeviceResult(ctx, "denied", "")
+			ctx.JSON(http.StatusOK, gin.H{"status": "denied"})
 			return
 		}
 
 		// Look up the device code
 		dc, err := provider.Storage().GetDeviceCodeSessionByUserCode(ctx, userCode)
 		if err != nil {
-			renderDeviceResult(ctx, "error", "Invalid or expired user code")
+			ctx.JSON(http.StatusBadRequest, gin.H{"status": "error", "error": "Invalid or expired user code"})
 			return
 		}
 
 		if dc.Status != "pending" {
-			renderDeviceResult(ctx, "error", "This code has already been used")
+			ctx.JSON(http.StatusBadRequest, gin.H{"status": "error", "error": "This code has already been used"})
 			return
 		}
 
 		if time.Now().After(dc.ExpiresAt) {
-			renderDeviceResult(ctx, "error", "This code has expired")
+			ctx.JSON(http.StatusBadRequest, gin.H{"status": "error", "error": "This code has expired"})
 			return
 		}
 
@@ -618,7 +648,7 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 		// BindClientToUser is a no-op.
 		if err := provider.Storage().BindClientToUser(ctx, dc.ClientID, user); err != nil {
 			log.WithError(err).Warnf("Embedded issuer: user %s cannot use client %s (bound to different user)", user, dc.ClientID)
-			renderDeviceResult(ctx, "error", "This client is registered to a different user")
+			ctx.JSON(http.StatusForbidden, gin.H{"status": "error", "error": "This client is registered to a different user"})
 			return
 		}
 
@@ -664,11 +694,11 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 
 		if err := provider.Storage().ApproveDeviceCodeSession(ctx, userCode, user, grantedScopes, sessionData); err != nil {
 			log.WithError(err).Warn("Embedded issuer: failed to approve device code")
-			renderDeviceResult(ctx, "error", "Failed to approve device code")
+			ctx.JSON(http.StatusInternalServerError, gin.H{"status": "error", "error": "Failed to approve device code"})
 			return
 		}
 
-		renderDeviceResult(ctx, "approved", "")
+		ctx.JSON(http.StatusOK, gin.H{"status": "approved"})
 	}
 }
 
@@ -1233,27 +1263,13 @@ func handleClientConfigurationDelete(provider *OIDCProvider) gin.HandlerFunc {
 }
 
 // renderDeviceResult renders the appropriate device flow result page.
-func renderDeviceResult(ctx *gin.Context, status, errorMsg string) {
-	var tmpl *template.Template
-	switch status {
-	case "approved":
-		tmpl = deviceOkTmpl
-	case "denied":
-		tmpl = deviceFailTmpl
-	default:
-		tmpl = deviceFailTmpl
+// deviceViewURL returns the Next.js device verification page URL for the given namespace.
+func deviceViewURL(namespace, userCode string) string {
+	u := "/view/issuer/device?namespace=" + url.QueryEscape(namespace)
+	if userCode != "" {
+		u += "&user_code=" + url.QueryEscape(userCode)
 	}
-
-	data := map[string]interface{}{
-		"CSS":          template.CSS(pelicanCSS),
-		"ErrorMessage": errorMsg,
-		"Status":       status,
-	}
-
-	ctx.Header("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.Execute(ctx.Writer, data); err != nil {
-		log.WithError(err).Warn("Embedded issuer: failed to render device result template")
-	}
+	return u
 }
 
 // Helpers

@@ -330,7 +330,7 @@ func TestIntegrationDeviceCodeGrant(t *testing.T) {
 	assert.NotEmpty(t, deviceResp.DeviceCode, "should return device_code")
 	assert.NotEmpty(t, deviceResp.UserCode, "should return user_code")
 	assert.True(t, deviceResp.ExpiresIn > 0, "should have positive expires_in")
-	assert.Contains(t, deviceResp.VerificationURI, "/api/v1.0/issuer/ns/test/ns/device")
+	assert.Contains(t, deviceResp.VerificationURI, "/view/issuer/device")
 
 	// Step 2: Before approval, polling should return authorization_pending
 	tokenForm := url.Values{
