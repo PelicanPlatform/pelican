@@ -729,7 +729,7 @@ func generateRedirectResponse(ctx *gin.Context, chosenAds []server_structs.Serve
 //
 // Returns (http.StatusOK, nil) if no token is present or the token is not expired.
 // Returns (http.StatusUnauthorized, err) if a token is present but expired.
-func validateClientToken(ctx *gin.Context, nsAd server_structs.NamespaceAdV2, requestId uuid.UUID) (int, error) {
+func validateClientToken(ctx *gin.Context, requestId uuid.UUID) (int, error) {
 	// Extract a bearer token from Authorization header or authz query parameter.
 	// If none is present, pass through — the Director does not require tokens.
 	var rawToken string
@@ -762,6 +762,14 @@ func validateClientToken(ctx *gin.Context, nsAd server_structs.NamespaceAdV2, re
 		grace := 10 * time.Second
 		if !iat.IsZero() {
 			lifetime := exp.Sub(iat)
+			if lifetime <= 0 {
+				// Malformed token: expiration is at or before issued-at.
+				// Treat as expired.
+				reqPath := getObjectPathFromRequest(ctx)
+				log.Debugf("Client token for path %s has non-positive lifetime (iat=%s, exp=%s) (Request ID: %s)", reqPath, iat.String(), exp.String(), requestId.String())
+				ctx.Header("WWW-Authenticate", `Bearer error="invalid_token", error_description="token has expired"`)
+				return http.StatusUnauthorized, errors.New("bearer token has expired")
+			}
 			if halfLife := lifetime / 2; halfLife < grace {
 				grace = halfLife
 			}
@@ -905,7 +913,7 @@ func redirectToCache(ginCtx *gin.Context) {
 	}
 
 	// Validate client token if required for this namespace
-	if status, err := validateClientToken(ginCtx, oAds[0].NamespaceAd, requestId); err != nil {
+	if status, err := validateClientToken(ginCtx, requestId); err != nil {
 		ginCtx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("%v: Request ID: %s", err, requestId.String()),
@@ -982,7 +990,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	}
 
 	// Validate client token if required for this namespace
-	if status, err := validateClientToken(ginCtx, oAds[0].NamespaceAd, requestId); err != nil {
+	if status, err := validateClientToken(ginCtx, requestId); err != nil {
 		ginCtx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("%v: Request ID: %s", err, requestId.String()),
