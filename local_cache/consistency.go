@@ -296,6 +296,8 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 		path         string
 		modTime      time.Time
 		size         int64
+		chunkIndex   int       // 0 for base file, 1+ for chunk suffix files (-2, -3, etc.)
+		storageID    StorageID // Which storage directory this file is in
 	}
 	fileChan := make(chan fileInfo, 100)
 	walkErr := make(chan error, 1)
@@ -307,7 +309,7 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 
 	// walkOneDir walks a single objects directory, sending valid entries
 	// to the returned channel in lexicographic order.
-	walkOneDir := func(objectsDir string) <-chan fileInfo {
+	walkOneDir := func(storageID StorageID, objectsDir string) <-chan fileInfo {
 		ch := make(chan fileInfo, 64)
 		go func() {
 			defer close(ch)
@@ -333,7 +335,14 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 				// handle backslashes for robustness on Windows.
 				hash := strings.ReplaceAll(relPath, "/", "")
 				hash = strings.ReplaceAll(hash, "\\", "")
-				instanceHash := InstanceHash(hash)
+
+				// Parse the filename to extract base hash and any chunk index
+				// Files can be: <64-hex-hash> (chunk 0) or <64-hex-hash>-N (chunk N-1)
+				baseHash, chunkIndex, ok := ParseChunkFilename(hash)
+				if !ok {
+					return nil
+				}
+				instanceHash := baseHash
 
 				// Validate instance hash format: must be 64 hex characters (SHA256)
 				if len(instanceHash) != 64 {
@@ -366,6 +375,8 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 					path:         filepath.Join(objectsDir, relPath),
 					modTime:      info.ModTime(),
 					size:         info.Size(),
+					chunkIndex:   chunkIndex,
+					storageID:    storageID,
 				}:
 				case <-ctx.Done():
 					return ctx.Err()
@@ -379,8 +390,8 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 	// Launch one walker per directory.
 	objectsDirs := cc.storage.GetDirs()
 	dirChans := make([]<-chan fileInfo, 0, len(objectsDirs))
-	for _, objectsDir := range objectsDirs {
-		dirChans = append(dirChans, walkOneDir(objectsDir))
+	for storageID, objectsDir := range objectsDirs {
+		dirChans = append(dirChans, walkOneDir(storageID, objectsDir))
 	}
 
 	// k-way merge: read from all per-directory channels, always
@@ -427,6 +438,7 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 		isFile       bool
 		path         string
 		size         int64
+		chunkIndex   int // For file deletions: which chunk (0 = base file, 1+ = chunk suffix)
 	}
 	var deletions []deleteAction
 	const maxDeletionsPerTx = 1000
@@ -514,6 +526,7 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 						isFile:       true,
 						path:         currentFile.path,
 						size:         currentFile.size,
+						chunkIndex:   currentFile.chunkIndex,
 					})
 				}
 				filesScanned++
@@ -521,32 +534,111 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 				currentFile, fileOk = <-fileChan
 			}
 
-			// Check if current file matches DB entry
-			if fileOk && currentFile.instanceHash == instanceHash {
-				// Match - both exist
+			// Process all files that match current DB entry (could be multiple chunks)
+			for fileOk && currentFile.instanceHash == instanceHash {
+				filesScanned++
+
 				if meta.IsDisk() {
-					// Expected: file exists for disk storage
-					filesScanned++
-					// Get next file
-					currentFile, fileOk = <-fileChan
+					// DB entry expects disk storage - verify chunk validity
+					if meta.IsChunked() {
+						// For chunked objects, verify chunk index is within range
+						expectedChunks := meta.ChunkCount()
+						if currentFile.chunkIndex >= expectedChunks {
+							// Chunk index out of range - orphaned chunk file
+							if len(deletions) < maxDeletionsPerTx {
+								deletions = append(deletions, deleteAction{
+									instanceHash: currentFile.instanceHash,
+									isFile:       true,
+									path:         currentFile.path,
+									size:         currentFile.size,
+									chunkIndex:   currentFile.chunkIndex,
+								})
+							}
+						} else {
+							// Verify chunk is in the correct storage directory
+							// With lazy allocation, unallocated chunks (StorageID 0) shouldn't have files
+							if !meta.IsChunkAllocated(currentFile.chunkIndex) {
+								// File exists for an unallocated chunk - orphaned
+								if len(deletions) < maxDeletionsPerTx {
+									deletions = append(deletions, deleteAction{
+										instanceHash: currentFile.instanceHash,
+										isFile:       true,
+										path:         currentFile.path,
+										size:         currentFile.size,
+										chunkIndex:   currentFile.chunkIndex,
+									})
+								}
+							} else {
+								// Check chunk is in correct storage directory
+								expectedStorageID := meta.GetChunkStorageID(currentFile.chunkIndex)
+								if currentFile.storageID != expectedStorageID {
+									// File is in wrong storage directory - orphaned
+									// (The correct file should exist in expectedStorageID)
+									if len(deletions) < maxDeletionsPerTx {
+										deletions = append(deletions, deleteAction{
+											instanceHash: currentFile.instanceHash,
+											isFile:       true,
+											path:         currentFile.path,
+											size:         currentFile.size,
+											chunkIndex:   currentFile.chunkIndex,
+										})
+									}
+								}
+							}
+						}
+						// Valid chunk file - no action needed
+					} else {
+						// Non-chunked object should only have chunk 0 (base file)
+						if currentFile.chunkIndex != 0 {
+							// Orphaned chunk suffix file for non-chunked object
+							if len(deletions) < maxDeletionsPerTx {
+								deletions = append(deletions, deleteAction{
+									instanceHash: currentFile.instanceHash,
+									isFile:       true,
+									path:         currentFile.path,
+									size:         currentFile.size,
+									chunkIndex:   currentFile.chunkIndex,
+								})
+							}
+						} else {
+							// Verify non-chunked file is in correct storage directory
+							if currentFile.storageID != meta.StorageID {
+								if len(deletions) < maxDeletionsPerTx {
+									deletions = append(deletions, deleteAction{
+										instanceHash: currentFile.instanceHash,
+										isFile:       true,
+										path:         currentFile.path,
+										size:         currentFile.size,
+										chunkIndex:   currentFile.chunkIndex,
+									})
+								}
+							}
+						}
+						// Valid base file - no action needed
+					}
 				} else {
-					// Unexpected: file exists but storage is inline
+					// DB entry is inline but file exists - orphaned file
 					if len(deletions) < maxDeletionsPerTx {
 						deletions = append(deletions, deleteAction{
 							instanceHash: currentFile.instanceHash,
 							isFile:       true,
 							path:         currentFile.path,
 							size:         currentFile.size,
+							chunkIndex:   currentFile.chunkIndex,
 						})
 					}
-					filesScanned++
-					// Get next file
-					currentFile, fileOk = <-fileChan
 				}
-			} else {
-				// No matching file for this DB entry
-				if meta.IsDisk() {
-					// Orphaned DB entry - file should exist but doesn't
+
+				// Get next file
+				currentFile, fileOk = <-fileChan
+			}
+
+			// For completed disk objects, verify all required chunk files exist.
+			// In-progress objects may have partial chunks (from byte-range downloads),
+			// so we only check completed objects.
+			if meta.IsDisk() && !meta.Completed.IsZero() {
+				if !cc.allChunkFilesExist(meta, instanceHash) {
+					// Some chunk files are missing - queue DB entry for deletion
 					if len(deletions) < maxDeletionsPerTx {
 						deletions = append(deletions, deleteAction{
 							instanceHash: instanceHash,
@@ -554,17 +646,19 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 							size:         meta.ContentLength,
 						})
 					}
-				} else if meta.IsInline() {
-					// Verify inline data exists
-					data, err := cc.db.GetInlineData(instanceHash)
-					if err != nil || data == nil {
-						if len(deletions) < maxDeletionsPerTx {
-							deletions = append(deletions, deleteAction{
-								instanceHash: instanceHash,
-								isFile:       false,
-								size:         meta.ContentLength,
-							})
-						}
+				}
+			}
+
+			if meta.IsInline() {
+				// Verify inline data exists
+				data, err := cc.db.GetInlineData(instanceHash)
+				if err != nil || data == nil {
+					if len(deletions) < maxDeletionsPerTx {
+						deletions = append(deletions, deleteAction{
+							instanceHash: instanceHash,
+							isFile:       false,
+							size:         meta.ContentLength,
+						})
 					}
 				}
 			}
@@ -607,6 +701,12 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 						if err := os.Remove(del.path); err != nil {
 							log.Warnf("Failed to remove orphaned file %s: %v", del.path, err)
 						}
+						// For base files (chunk 0), also remove any associated chunk files (chunks 1+)
+						// Chunk suffix files are detected and removed independently, so only
+						// clean up chunk suffix files when we delete a base file.
+						if del.chunkIndex == 0 {
+							cc.removeOrphanedChunkFiles(del.path, &orphanedFiles, &orphanedBytes)
+						}
 					}
 				} else {
 					// Re-check DB entry still exists and is inconsistent
@@ -614,10 +714,8 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 					if err == nil && meta != nil {
 						stillInconsistent := false
 						if meta.IsDisk() {
-							filePath := cc.storage.getObjectPathForDir(meta.StorageID, del.instanceHash)
-							if _, err := os.Stat(filePath); os.IsNotExist(err) {
-								stillInconsistent = true
-							}
+							// Verify all chunk files exist
+							stillInconsistent = !cc.allChunkFilesExist(meta, del.instanceHash)
 						} else if meta.IsInline() {
 							data, err := cc.db.GetInlineData(del.instanceHash)
 							if err != nil || data == nil {
@@ -1226,11 +1324,19 @@ func (cc *ConsistencyChecker) VerifyObject(instanceHash InstanceHash) (bool, err
 		return false, errors.New("object not found")
 	}
 
-	// For disk storage, check that the file exists and is complete
+	// For disk storage, check that all ALLOCATED chunk files exist and object is complete
 	if meta.IsDisk() {
-		filePath := cc.storage.getObjectPathForDir(meta.StorageID, instanceHash)
-		if _, err := os.Stat(filePath); os.IsNotExist(err) {
-			return false, nil
+		chunkCount := CalculateChunkCount(meta.ContentLength, meta.ChunkSizeCode)
+		for chunkIdx := 0; chunkIdx < chunkCount; chunkIdx++ {
+			// Skip unallocated chunks (they're not expected to exist)
+			if !meta.IsChunkAllocated(chunkIdx) {
+				continue
+			}
+			storageID := meta.GetChunkStorageID(chunkIdx)
+			chunkPath := cc.storage.getChunkPath(storageID, instanceHash, chunkIdx)
+			if _, err := os.Stat(chunkPath); os.IsNotExist(err) {
+				return false, nil
+			}
 		}
 		complete, err := cc.storage.IsComplete(instanceHash)
 		if err != nil {
@@ -1325,4 +1431,59 @@ func (cc *ConsistencyChecker) VerifyBlockIntegrity(instanceHash InstanceHash) ([
 	}
 
 	return cc.storage.IdentifyCorruptBlocks(instanceHash, 0, totalBlocks-1)
+}
+
+// allChunkFilesExist checks if all ALLOCATED chunk files for a chunked object exist.
+// With lazy allocation, chunks with StorageID = 0 are unallocated and not expected to exist.
+func (cc *ConsistencyChecker) allChunkFilesExist(meta *CacheMetadata, instanceHash InstanceHash) bool {
+	chunkCount := CalculateChunkCount(meta.ContentLength, meta.ChunkSizeCode)
+	for chunkIdx := 0; chunkIdx < chunkCount; chunkIdx++ {
+		// Skip unallocated chunks (StorageID = 0)
+		if !meta.IsChunkAllocated(chunkIdx) {
+			continue
+		}
+		storageID := meta.GetChunkStorageID(chunkIdx)
+		chunkPath := cc.storage.getChunkPath(storageID, instanceHash, chunkIdx)
+		if _, err := os.Stat(chunkPath); os.IsNotExist(err) {
+			return false
+		}
+	}
+	return true
+}
+
+// removeOrphanedChunkFiles removes chunk files (chunks 1+) associated with a base file.
+// This is called when an orphaned base file (chunk 0) is being deleted.
+// Because chunks may be lazily allocated (non-sequential), we list the parent
+// directory and match by prefix rather than probing sequential indices.
+func (cc *ConsistencyChecker) removeOrphanedChunkFiles(basePath string, orphanedFiles *int64, orphanedBytes *int64) {
+	dir := filepath.Dir(basePath)
+	base := filepath.Base(basePath)
+	prefix := base + "-"
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		log.Warnf("Failed to list directory %s for orphaned chunk cleanup: %v", dir, err)
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		chunkPath := filepath.Join(dir, name)
+		info, err := entry.Info()
+		if err != nil {
+			log.Warnf("Error getting info for chunk file %s: %v", chunkPath, err)
+			continue
+		}
+		log.Warnf("Orphaned chunk file: %s", chunkPath)
+		(*orphanedFiles)++
+		(*orphanedBytes) += info.Size()
+		if err := os.Remove(chunkPath); err != nil {
+			log.Warnf("Failed to remove orphaned chunk file %s: %v", chunkPath, err)
+		}
+	}
 }
