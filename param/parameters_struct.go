@@ -175,12 +175,14 @@ type Config struct {
 	IssuerKey string `mapstructure:"issuerkey" yaml:"IssuerKey"`
 	IssuerKeysDirectory string `mapstructure:"issuerkeysdirectory" yaml:"IssuerKeysDirectory"`
 	LocalCache struct {
+		ChunkSize string `mapstructure:"chunksize" yaml:"ChunkSize"`
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
 		DefaultMaxAge time.Duration `mapstructure:"defaultmaxage" yaml:"DefaultMaxAge"`
 		FDCacheSize int `mapstructure:"fdcachesize" yaml:"FDCacheSize"`
 		HighWaterMarkPercentage int `mapstructure:"highwatermarkpercentage" yaml:"HighWaterMarkPercentage"`
 		LowWaterMarkPercentage int `mapstructure:"lowwatermarkpercentage" yaml:"LowWaterMarkPercentage"`
 		MaxConcurrentPrefetch int `mapstructure:"maxconcurrentprefetch" yaml:"MaxConcurrentPrefetch"`
+		MemoryCacheSize int `mapstructure:"memorycachesize" yaml:"MemoryCacheSize"`
 		PrefetchTimeout time.Duration `mapstructure:"prefetchtimeout" yaml:"PrefetchTimeout"`
 		RevalidationJitter int `mapstructure:"revalidationjitter" yaml:"RevalidationJitter"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
@@ -633,12 +635,14 @@ type configWithType struct {
 	IssuerKey struct { Type string; Value string }
 	IssuerKeysDirectory struct { Type string; Value string }
 	LocalCache struct {
+		ChunkSize struct { Type string; Value string }
 		DataLocation struct { Type string; Value string }
 		DefaultMaxAge struct { Type string; Value time.Duration }
 		FDCacheSize struct { Type string; Value int }
 		HighWaterMarkPercentage struct { Type string; Value int }
 		LowWaterMarkPercentage struct { Type string; Value int }
 		MaxConcurrentPrefetch struct { Type string; Value int }
+		MemoryCacheSize struct { Type string; Value int }
 		PrefetchTimeout struct { Type string; Value time.Duration }
 		RevalidationJitter struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
