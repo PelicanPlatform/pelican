@@ -21,6 +21,7 @@
 package fed_tests
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -31,7 +32,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -266,35 +266,37 @@ func TestDeviceCodeE2E(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode,
 		"Device-verify page should return 200 when logged in (got redirect or error); body: %s", string(pageBody))
 
-	// Extract the CSRF cookie from the jar.
-	csrfURL, _ := url.Parse(nsBase + "/device")
-	var csrfCookie *http.Cookie
-	for _, c := range jar.Cookies(csrfURL) {
-		if c.Name == "csrf_token" {
-			csrfCookie = c
-			break
-		}
+	// The GET endpoint now returns JSON with a csrf_token field.
+	var verifyResp struct {
+		CSRFToken  string   `json:"csrf_token"`
+		Namespace  string   `json:"namespace"`
+		Scopes     []string `json:"scopes"`
+		ClientID   string   `json:"client_id"`
+		ClientName string   `json:"client_name"`
 	}
-	require.NotNil(t, csrfCookie, "CSRF cookie should be set on device-verify page")
+	require.NoError(t, json.Unmarshal(pageBody, &verifyResp), "GET /device should return valid JSON")
+	require.NotEmpty(t, verifyResp.CSRFToken, "CSRF token should be returned in JSON response")
+	assert.NotEmpty(t, verifyResp.Scopes, "Requested scopes should be returned so consent page can display them")
+	assert.NotEmpty(t, verifyResp.ClientID, "Client ID should be returned for the consent page")
 
-	// Extract CSRF token from the HTML form (hidden field).
-	csrfFromPage := extractCSRFFromHTML(t, string(pageBody))
-	require.NotEmpty(t, csrfFromPage, "Should find CSRF token in HTML form")
-
-	// POST approval.
-	approveForm := url.Values{
-		"user_code":  {deviceResp.UserCode},
-		"action":     {"approve"},
-		"csrf_token": {csrfFromPage},
-	}
-	resp, err = httpClient.PostForm(nsBase+"/device", approveForm)
+	// POST approval using JSON body.
+	approvePayload, _ := json.Marshal(map[string]string{
+		"user_code":  deviceResp.UserCode,
+		"action":     "approve",
+		"csrf_token": verifyResp.CSRFToken,
+	})
+	resp, err = httpClient.Post(nsBase+"/device", "application/json", bytes.NewReader(approvePayload))
 	require.NoError(t, err)
 	approveBody, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode,
 		"Device approval should return 200: %s", string(approveBody))
-	assert.Contains(t, string(approveBody), "User Code Accepted",
-		"Approval page should confirm approval: %s", string(approveBody))
+
+	var approveResp struct {
+		Status string `json:"status"`
+	}
+	require.NoError(t, json.Unmarshal(approveBody, &approveResp), "POST /device should return valid JSON")
+	assert.Equal(t, "approved", approveResp.Status, "Approval response should have status=approved")
 	t.Log("Device code approved by testuser")
 
 	// ----- Step 6: Poll for the access token -----
@@ -526,24 +528,6 @@ func randomString(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)[:n]
-}
-
-// extractCSRFFromHTML pulls the CSRF token out of a hidden form field in the
-// device-consent HTML page.  Looks for: <input ... name="csrf_token" value="...">
-func extractCSRFFromHTML(t *testing.T, html string) string {
-	t.Helper()
-	re := regexp.MustCompile(`name="csrf_token"\s+value="([^"]+)"`)
-	matches := re.FindStringSubmatch(html)
-	if len(matches) >= 2 {
-		return matches[1]
-	}
-	// Also try the alternate attribute order
-	re2 := regexp.MustCompile(`value="([^"]+)"\s+name="csrf_token"`)
-	matches = re2.FindStringSubmatch(html)
-	if len(matches) >= 2 {
-		return matches[1]
-	}
-	return ""
 }
 
 // extractScopeString extracts the scope claim from JWT claims as a single

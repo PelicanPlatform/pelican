@@ -22,6 +22,7 @@ package fed_tests
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -303,10 +304,10 @@ func setupFedAndUsers(t *testing.T) (ft *fed_test_utils.FedTest, testUserPasswor
 // construct the per-namespace issuer URLs under /api/v1.0/issuer/ns/<prefix>.
 //
 // This simulates the real browser flow:
-//  1. GET the device verification page (unauthenticated) — expect redirect to login with nextUrl
-//  2. POST login with nextUrl — verify the response echoes nextUrl back
-//  3. Follow nextUrl to reach the verification page
-//  4. Extract CSRF token and POST approval
+//  1. GET the device verification API (unauthenticated) — expect redirect to login with returnURL
+//  2. POST login to get the login cookie
+//  3. GET the device verification API (authenticated) — get JSON with CSRF token
+//  4. POST approval as JSON and verify JSON response
 func simulateUserApproval(t *testing.T, serverURL, namespace, userCode, password string) {
 	t.Helper()
 
@@ -320,9 +321,9 @@ func simulateUserApproval(t *testing.T, serverURL, namespace, userCode, password
 		},
 	}
 
-	// Step 1: GET the device verification page while unauthenticated.
-	// The server should redirect us to the login page with nextUrl pointing
-	// back at the device verification page.
+	// Step 1: GET the device verification API while unauthenticated.
+	// The server should redirect us to the login page with returnURL pointing
+	// at the Next.js device verification page.
 	nsBase := serverURL + "/api/v1.0/issuer/ns" + namespace
 	verifyPageURL := fmt.Sprintf("%s/device?user_code=%s", nsBase, userCode)
 	resp, err := browserClient.Get(verifyPageURL)
@@ -336,63 +337,53 @@ func simulateUserApproval(t *testing.T, serverURL, namespace, userCode, password
 	require.NotEmpty(t, redirectLoc, "Redirect should include a Location header")
 	redirectURL, err := url.Parse(redirectLoc)
 	require.NoError(t, err)
-	nextUrl := redirectURL.Query().Get("nextUrl")
-	require.NotEmpty(t, nextUrl, "Login redirect should include nextUrl query parameter")
-	assert.Contains(t, nextUrl, "user_code="+userCode,
-		"nextUrl should point back to the device verification page with the user_code")
-	t.Logf("Unauthenticated redirect OK: nextUrl=%s", nextUrl)
+	returnURL := redirectURL.Query().Get("returnURL")
+	require.NotEmpty(t, returnURL, "Login redirect should include returnURL query parameter")
+	assert.Contains(t, returnURL, "user_code="+userCode,
+		"returnURL should reference the device verification page with the user_code")
+	t.Logf("Unauthenticated redirect OK: returnURL=%s", returnURL)
 
-	// Step 2: POST login with nextUrl — verify the response echoes it back.
-	loginURL := fmt.Sprintf("%s/api/v1.0/auth/login?nextUrl=%s", serverURL, url.QueryEscape(nextUrl))
+	// Step 2: POST login to get the login cookie.
+	loginURL := serverURL + "/api/v1.0/auth/login"
 	loginForm := url.Values{"user": {"testuser"}, "password": {password}}
 	resp, err = browserClient.PostForm(loginURL, loginForm)
 	require.NoError(t, err)
-	loginBody, _ := io.ReadAll(resp.Body)
+	_, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode, "Login should succeed")
+	t.Log("Login OK as testuser")
 
-	// Verify that the login response includes the nextUrl so the frontend
-	// can redirect the user back to the device verification page.
-	var loginResp map[string]interface{}
-	require.NoError(t, json.Unmarshal(loginBody, &loginResp), "Login response should be valid JSON")
-	respNextUrl, ok := loginResp["nextUrl"].(string)
-	require.True(t, ok, "Login response must include nextUrl field")
-	assert.Contains(t, respNextUrl, "user_code="+userCode,
-		"nextUrl in login response should contain the user_code")
-	t.Logf("Login OK with nextUrl echoed back: %s", respNextUrl)
-
-	// Step 3: Follow nextUrl to reach the verification page (now authenticated).
-	followURL := serverURL + respNextUrl
-	resp, err = browserClient.Get(followURL)
+	// Step 3: GET the device verification API (now authenticated) to get JSON CSRF token.
+	resp, err = browserClient.Get(verifyPageURL)
 	require.NoError(t, err)
 	pageBody, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode, "Verification page should return 200 after login")
+	require.Equal(t, http.StatusOK, resp.StatusCode, "Device verify API should return 200 after login")
 
-	// Step 4: Extract CSRF and submit approval.
-	csrfURL, _ := url.Parse(nsBase + "/device")
-	var csrfCookie *http.Cookie
-	for _, c := range jar.Cookies(csrfURL) {
-		if c.Name == "csrf_token" {
-			csrfCookie = c
-			break
-		}
+	var verifyResp struct {
+		CSRFToken string `json:"csrf_token"`
+		Namespace string `json:"namespace"`
 	}
-	require.NotNil(t, csrfCookie, "CSRF cookie should be set")
-	csrfFromPage := extractCSRFFromHTML(t, string(pageBody))
-	require.NotEmpty(t, csrfFromPage, "CSRF token should be in HTML form")
+	require.NoError(t, json.Unmarshal(pageBody, &verifyResp), "GET /device should return valid JSON")
+	require.NotEmpty(t, verifyResp.CSRFToken, "CSRF token should be returned in JSON response")
 
-	approveForm := url.Values{
-		"user_code":  {userCode},
-		"action":     {"approve"},
-		"csrf_token": {csrfFromPage},
-	}
-	resp, err = browserClient.PostForm(nsBase+"/device", approveForm)
+	// Step 4: POST approval as JSON.
+	approvePayload, _ := json.Marshal(map[string]string{
+		"user_code":  userCode,
+		"action":     "approve",
+		"csrf_token": verifyResp.CSRFToken,
+	})
+	resp, err = browserClient.Post(nsBase+"/device", "application/json", bytes.NewReader(approvePayload))
 	require.NoError(t, err)
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode, "Approval should return 200: %s", string(body))
-	assert.Contains(t, string(body), "User Code Accepted")
+
+	var approveResp struct {
+		Status string `json:"status"`
+	}
+	require.NoError(t, json.Unmarshal(body, &approveResp), "POST /device should return valid JSON")
+	assert.Equal(t, "approved", approveResp.Status, "Approval response should have status=approved")
 }
 
 // TestClientAcquireTokenE2E exercises the full CLI `pelican object put` path
