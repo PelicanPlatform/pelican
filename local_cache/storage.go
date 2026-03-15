@@ -1123,7 +1123,24 @@ func (sm *StorageManager) writeBlocks(instanceHash InstanceHash, meta *CacheMeta
 		}
 		rc, err := sm.getChunkFile(instanceHash, meta, chunkIdx)
 		if err != nil {
-			return nil, err
+			if !errors.Is(err, os.ErrNotExist) {
+				return nil, err
+			}
+			// File was removed from disk (e.g. corruption auto-repair).
+			// Recreate it so the write can proceed.
+			storageID := meta.GetChunkStorageID(chunkIdx)
+			chunkPath := sm.getChunkPath(storageID, instanceHash, chunkIdx)
+			chunkContentLen := ChunkContentLength(meta.ContentLength, meta.ChunkSizeCode, chunkIdx)
+			fileSize := CalculateFileSize(chunkContentLen)
+			f, createErr := createFile(chunkPath)
+			if createErr != nil {
+				return nil, errors.Wrapf(createErr, "failed to recreate missing chunk %d file", chunkIdx)
+			}
+			if truncErr := f.Truncate(fileSize); truncErr != nil {
+				f.Close()
+				return nil, errors.Wrapf(truncErr, "failed to pre-allocate recreated chunk %d file", chunkIdx)
+			}
+			rc = newRefCountedFile(f)
 		}
 		openChunks.set(chunkIdx, rc)
 		return rc.File(), nil
