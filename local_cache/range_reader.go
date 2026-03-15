@@ -151,6 +151,10 @@ type RangeReader struct {
 	position     int64
 	blockState   *ObjectBlockState
 
+	// Cached at construction so Read calls bypass TTL cache lookups.
+	encryptor *BlockEncryptor // nil for inline objects
+	file      *refCountedFile // chunk 0 / non-chunked FD; nil for inline
+
 	// Fetch callback for missing blocks
 	fetchBlocks func(ctx context.Context, startBlock, endBlock uint32) error
 
@@ -210,7 +214,7 @@ func NewRangeReader(
 		return nil, errors.Wrap(err, "failed to get block state")
 	}
 
-	return &RangeReader{
+	rr := &RangeReader{
 		storage:      storage,
 		instanceHash: instanceHash,
 		meta:         meta,
@@ -219,7 +223,27 @@ func NewRangeReader(
 		position:     start,
 		blockState:   blockState,
 		fetchBlocks:  fetchBlocks,
-	}, nil
+	}
+
+	// Cache crypto + FD for disk-backed objects so that Read calls
+	// bypass the TTL cache lookups performed by ReadBlocksInto.
+	if meta.IsDisk() {
+		dc, err := storage.getDiskCrypto(instanceHash)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get disk crypto")
+		}
+		rr.encryptor = dc.encryptor
+
+		if !meta.IsChunked() {
+			rc, err := storage.getFile(instanceHash, meta.StorageID)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to open object file")
+			}
+			rr.file = rc
+		}
+	}
+
+	return rr, nil
 }
 
 // Read implements io.Reader with on-demand block fetching
@@ -246,6 +270,16 @@ func (rr *RangeReader) ReadContext(ctx context.Context, p []byte) (n int, err er
 	remaining := rr.end - rr.position + 1
 	if toRead > remaining {
 		toRead = remaining
+	}
+
+	// Align to block boundaries for zero-copy decryption (short reads
+	// are legal per io.Reader).
+	if toRead > BlockDataSize {
+		if off := int64(ContentOffsetWithinBlock(rr.position)); off == 0 {
+			toRead = (toRead / BlockDataSize) * BlockDataSize
+		} else {
+			toRead = BlockDataSize - off
+		}
 	}
 
 	// For inline storage, we don't need to check blocks - data is complete
@@ -280,17 +314,16 @@ func (rr *RangeReader) ReadContext(ctx context.Context, p []byte) (n int, err er
 		return 0, err
 	}
 
-	// Read data from disk
-	data, err := rr.storage.ReadBlocks(rr.instanceHash, rr.position, int(toRead))
+	// Read data from disk directly into p (avoids TTL cache lookups)
+	n, err = rr.readDiskDirect(p[:toRead], rr.position)
 	if err != nil {
 		// Attempt auto-repair: identify corrupt blocks, re-download, retry once
-		data, err = rr.repairAndRetry(ctx, startBlock, endBlock, int(toRead), err)
+		n, err = rr.repairAndRetryInto(ctx, p[:toRead], startBlock, endBlock, err)
 		if err != nil {
 			return 0, err
 		}
 	}
 
-	n = copy(p, data)
 	rr.position += int64(n)
 
 	if rr.position > rr.end {
@@ -469,8 +502,58 @@ func (rr *RangeReader) repairAndRetry(ctx context.Context, startBlock, endBlock 
 	return data, nil
 }
 
+// repairAndRetryInto is like repairAndRetry but copies the re-read data
+// into dst instead of returning a fresh allocation.  The repair path is
+// cold so the extra copy from the internal ReadBlocks is acceptable.
+func (rr *RangeReader) repairAndRetryInto(ctx context.Context, dst []byte, startBlock, endBlock uint32, origErr error) (int, error) {
+	data, err := rr.repairAndRetry(ctx, startBlock, endBlock, len(dst), origErr)
+	if err != nil {
+		return 0, err
+	}
+	return copy(dst, data), nil
+}
+
+// readDiskDirect reads and decrypts blocks directly into dst using the
+// RangeReader's cached encryptor, blockState, and (for non-chunked objects)
+// file handle.  This bypasses the per-call TTL cache lookups that
+// ReadBlocksInto performs (getDiskCrypto, GetSharedBlockState, getFile).
+func (rr *RangeReader) readDiskDirect(dst []byte, off int64) (int, error) {
+	meta := rr.meta
+	encryptor := rr.encryptor
+
+	endOffset := off + int64(len(dst))
+	if endOffset > meta.ContentLength {
+		endOffset = meta.ContentLength
+	}
+	actualLen := int(endOffset - off)
+	if actualLen <= 0 {
+		return 0, nil
+	}
+
+	startBlock := ContentOffsetToBlock(off)
+	endBlock := ContentOffsetToBlock(endOffset - 1)
+
+	if !rr.blockState.ContainsRange(startBlock, endBlock) {
+		missing := rr.blockState.MissingInRange(startBlock, endBlock)
+		if len(missing) > 0 {
+			return 0, errors.Errorf("block %d not yet downloaded", missing[0])
+		}
+		return 0, errors.New("blocks not yet downloaded")
+	}
+
+	if meta.IsChunked() {
+		return rr.storage.readBlocksChunkedInto(rr.instanceHash, meta, encryptor, dst[:actualLen], off)
+	}
+
+	return decryptBlocksFromFile(rr.file.File(), meta.ContentLength, encryptor, dst[:actualLen], off, rr.storage.ptCache, rr.instanceHash, 0)
+}
+
 // Close closes the range reader
 func (rr *RangeReader) Close() error {
+	if rr.file != nil {
+		rr.file.Release()
+		rr.file = nil
+	}
 	var err error
 	if rr.noStoreReader != nil {
 		err = rr.noStoreReader.Close()

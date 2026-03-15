@@ -231,12 +231,14 @@ var runtimeConfigurableMap = map[string]bool{
 	"Issuer.UserStripDomain": false,
 	"IssuerKey": false,
 	"IssuerKeysDirectory": false,
+	"LocalCache.ChunkSize": false,
 	"LocalCache.DataLocation": false,
 	"LocalCache.DefaultMaxAge": false,
 	"LocalCache.FDCacheSize": false,
 	"LocalCache.HighWaterMarkPercentage": false,
 	"LocalCache.LowWaterMarkPercentage": false,
 	"LocalCache.MaxConcurrentPrefetch": false,
+	"LocalCache.MemoryCacheSize": false,
 	"LocalCache.PrefetchTimeout": false,
 	"LocalCache.RevalidationJitter": false,
 	"LocalCache.RunLocation": false,
@@ -578,6 +580,7 @@ var stringAccessors = map[string]func(*Config) string{
 	"Issuer.QDLLocation": func(c *Config) string { return c.Issuer.QDLLocation },
 	"Issuer.ScitokensServerLocation": func(c *Config) string { return c.Issuer.ScitokensServerLocation },
 	"Issuer.TomcatLocation": func(c *Config) string { return c.Issuer.TomcatLocation },
+	"LocalCache.ChunkSize": func(c *Config) string { return c.LocalCache.ChunkSize },
 	"LocalCache.DataLocation": func(c *Config) string { return c.LocalCache.DataLocation },
 	"LocalCache.RunLocation": func(c *Config) string { return c.LocalCache.RunLocation },
 	"LocalCache.Size": func(c *Config) string { return c.LocalCache.Size },
@@ -814,6 +817,7 @@ var intAccessors = map[string]func(*Config) int{
 	"LocalCache.HighWaterMarkPercentage": func(c *Config) int { return c.LocalCache.HighWaterMarkPercentage },
 	"LocalCache.LowWaterMarkPercentage": func(c *Config) int { return c.LocalCache.LowWaterMarkPercentage },
 	"LocalCache.MaxConcurrentPrefetch": func(c *Config) int { return c.LocalCache.MaxConcurrentPrefetch },
+	"LocalCache.MemoryCacheSize": func(c *Config) int { return c.LocalCache.MemoryCacheSize },
 	"LocalCache.RevalidationJitter": func(c *Config) int { return c.LocalCache.RevalidationJitter },
 	"MinimumDownloadSpeed": func(c *Config) int { return c.MinimumDownloadSpeed },
 	"Monitoring.LabelLimit": func(c *Config) int { return c.Monitoring.LabelLimit },
@@ -1310,12 +1314,14 @@ var allParameterNames = []string{
 	"Issuer.UserStripDomain",
 	"IssuerKey",
 	"IssuerKeysDirectory",
+	"LocalCache.ChunkSize",
 	"LocalCache.DataLocation",
 	"LocalCache.DefaultMaxAge",
 	"LocalCache.FDCacheSize",
 	"LocalCache.HighWaterMarkPercentage",
 	"LocalCache.LowWaterMarkPercentage",
 	"LocalCache.MaxConcurrentPrefetch",
+	"LocalCache.MemoryCacheSize",
 	"LocalCache.PrefetchTimeout",
 	"LocalCache.RevalidationJitter",
 	"LocalCache.RunLocation",
@@ -1630,6 +1636,7 @@ var (
 	Issuer_QDLLocation = StringParam{"Issuer.QDLLocation"}
 	Issuer_ScitokensServerLocation = StringParam{"Issuer.ScitokensServerLocation"}
 	Issuer_TomcatLocation = StringParam{"Issuer.TomcatLocation"}
+	LocalCache_ChunkSize = StringParam{"LocalCache.ChunkSize"}
 	LocalCache_DataLocation = StringParam{"LocalCache.DataLocation"}
 	LocalCache_RunLocation = StringParam{"LocalCache.RunLocation"}
 	LocalCache_Size = StringParam{"LocalCache.Size"}
@@ -1810,6 +1817,7 @@ var (
 	LocalCache_HighWaterMarkPercentage = IntParam{"LocalCache.HighWaterMarkPercentage"}
 	LocalCache_LowWaterMarkPercentage = IntParam{"LocalCache.LowWaterMarkPercentage"}
 	LocalCache_MaxConcurrentPrefetch = IntParam{"LocalCache.MaxConcurrentPrefetch"}
+	LocalCache_MemoryCacheSize = IntParam{"LocalCache.MemoryCacheSize"}
 	LocalCache_RevalidationJitter = IntParam{"LocalCache.RevalidationJitter"}
 	MinimumDownloadSpeed = IntParam{"MinimumDownloadSpeed"}
 	Monitoring_LabelLimit = IntParam{"Monitoring.LabelLimit"}
@@ -2068,6 +2076,7 @@ func init() {
 		"Issuer.QDLLocation": Issuer_QDLLocation,
 		"Issuer.ScitokensServerLocation": Issuer_ScitokensServerLocation,
 		"Issuer.TomcatLocation": Issuer_TomcatLocation,
+		"LocalCache.ChunkSize": LocalCache_ChunkSize,
 		"LocalCache.DataLocation": LocalCache_DataLocation,
 		"LocalCache.RunLocation": LocalCache_RunLocation,
 		"LocalCache.Size": LocalCache_Size,
@@ -2242,6 +2251,7 @@ func init() {
 		"LocalCache.HighWaterMarkPercentage": LocalCache_HighWaterMarkPercentage,
 		"LocalCache.LowWaterMarkPercentage": LocalCache_LowWaterMarkPercentage,
 		"LocalCache.MaxConcurrentPrefetch": LocalCache_MaxConcurrentPrefetch,
+		"LocalCache.MemoryCacheSize": LocalCache_MemoryCacheSize,
 		"LocalCache.RevalidationJitter": LocalCache_RevalidationJitter,
 		"MinimumDownloadSpeed": MinimumDownloadSpeed,
 		"Monitoring.LabelLimit": Monitoring_LabelLimit,

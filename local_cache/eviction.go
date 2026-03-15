@@ -401,7 +401,17 @@ func (em *EvictionManager) noteEvicted(evicted []evictedObject) {
 	// Accumulate per-storageID totals to minimise atomic operations.
 	perDir := make(map[StorageID]int64, 2)
 	for _, obj := range evicted {
-		perDir[obj.storageID] += obj.contentLen
+		// For chunked objects, attribute bytes to each directory
+		// proportional to the chunks stored there.
+		meta := &CacheMetadata{
+			StorageID:      obj.storageID,
+			ContentLength:  obj.contentLen,
+			ChunkSizeCode:  obj.chunkSizeCode,
+			ChunkLocations: obj.chunkLocations,
+		}
+		for sid, bytes := range meta.PerDirectoryBytes() {
+			perDir[sid] += bytes
+		}
 	}
 	for sid, freed := range perDir {
 		if counter, ok := em.dirUsage[sid]; ok {

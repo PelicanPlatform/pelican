@@ -1894,6 +1894,19 @@ default: 500
 hidden: true
 components: ["localcache"]
 ---
+name: LocalCache.MemoryCacheSize
+description: |+
+  Size in bytes of the in-memory block cache.
+  When enabled, objects are cached in memory in addition to on disk,
+  which can significantly improve performance for frequently accessed objects
+  because disk objects are encrypted and require decryption on each access,
+  while memory cache pages are stored decrypted, avoiding repeated decryption.
+  Set to 0 to disable the memory cache (default).
+type: int
+default: 0
+hidden: true
+components: ["localcache"]
+---
 name: LocalCache.PrefetchTimeout
 description: |+
   The maximum time to wait for a prefetch operation to complete before giving up.
@@ -1973,6 +1986,27 @@ description: |+
   accepted and treated as entries with only Path set.
 type: object
 default: none
+components: ["localcache"]
+---
+name: LocalCache.ChunkSize
+description: |+
+  The target chunk size for splitting large objects across multiple storage directories.
+  When multiple storage directories are configured (via LocalCache.StorageDirs), objects
+  larger than the chunk size will be split into multiple chunk files distributed across
+  the directories to improve I/O parallelism and load balance storage utilization.
+
+  Chunking is automatically disabled when only one storage directory is configured,
+  as there would be no benefit to splitting files.
+
+  The value can be specified with units (e.g., "64MB", "256MB", "1GB").
+  Set to "0" or "disabled" to disable chunking entirely.
+
+  Reducing the maximum chunk size causes large objects to go across more directories and,
+  ideally, increase overall throughput for a single object.  Going below 64MB is discouraged.
+
+  Objects smaller than the chunk size are stored in a single file.
+type: string
+default: 512MB
 components: ["localcache"]
 ---
 ############################
