@@ -326,11 +326,13 @@ type Checksum struct {
 //   - Additive: Checksums — union by algorithm; prefer OriginVerified.
 //   - Last-writer-wins: ContentType, ContentLength, VaryHeaders,
 //     CCFlags, CCMaxAge — the incoming value always replaces the old one.
-//   - Set-once: ETag, SourceURL, DataKey, StorageID, NamespaceID — may
-//     transition from zero-value to set, but changing a non-zero value
-//     to a different non-zero value is an error.  ETag is set-once
-//     because it is part of the instance hash; a changed ETag produces
-//     a different instance.
+//   - Set-once: ETag, SourceURL, DataKey, StorageID, NamespaceID,
+//     ChunkSizeCode, ChunkLocations — may transition from zero-value to
+//     set, but changing a non-zero value to a different non-zero value
+//     is an error.  ETag is set-once because it is part of the instance
+//     hash; a changed ETag produces a different instance.  Chunking
+//     fields are set-once because changing them would invalidate
+//     existing chunk files.
 type CacheMetadata struct {
 	// Validation fields
 	ETag          string     `msgpack:"etag"`         // HTTP ETag header
@@ -354,8 +356,15 @@ type CacheMetadata struct {
 	// StorageID encodes both location type and directory identity:
 	//   0         = inline (data stored directly in BadgerDB)
 	//   1 .. 255  = disk-backed (directory identified by this ID)
+	// For chunked objects, this is the location of chunk 0.
 	StorageID StorageID `msgpack:"sid"`
 	DataKey   []byte    `msgpack:"key"` // Encrypted DEK (Data Encryption Key)
+
+	// Chunking fields for large objects spread across multiple storage directories.
+	// ChunkSizeCode encodes the chunk size (0 = chunking disabled, see chunking.go).
+	// ChunkLocations stores the StorageID for chunks 1, 2, ... (chunk 0 uses StorageID above).
+	ChunkSizeCode  ChunkSizeCode   `msgpack:"csc,omitempty"` // 0 = disabled, see ChunkSizeCodeToBytes()
+	ChunkLocations []ChunkLocation `msgpack:"chl,omitempty"` // Locations for chunks after chunk 0
 
 	// Namespace and storage tracking for fairness-aware eviction
 	NamespaceID NamespaceID `msgpack:"ns"` // ID of the namespace prefix
@@ -366,10 +375,127 @@ type CacheMetadata struct {
 }
 
 // IsInline returns true when the object data is stored directly in BadgerDB.
-func (m *CacheMetadata) IsInline() bool { return m.StorageID == StorageIDInline }
+// A chunked object is never inline, even if its base StorageID is still 0 (unallocated).
+func (m *CacheMetadata) IsInline() bool {
+	return m.StorageID == StorageIDInline && m.ChunkSizeCode == ChunkingDisabled
+}
 
-// IsDisk returns true when the object data is stored on disk.
-func (m *CacheMetadata) IsDisk() bool { return m.StorageID != StorageIDInline }
+// IsDisk returns true when the object data is (or will be) stored on disk.
+// Chunked objects are always disk-based, even when chunk 0 has not yet been allocated.
+func (m *CacheMetadata) IsDisk() bool {
+	return m.StorageID != StorageIDInline || m.ChunkSizeCode != ChunkingDisabled
+}
+
+// IsChunked returns true when the object is stored across multiple chunk files.
+func (m *CacheMetadata) IsChunked() bool {
+	return m.ChunkSizeCode != ChunkingDisabled
+}
+
+// ChunkCount returns the number of chunks for this object.
+// Returns 1 for non-chunked objects.
+func (m *CacheMetadata) ChunkCount() int {
+	return CalculateChunkCount(m.ContentLength, m.ChunkSizeCode)
+}
+
+// GetChunkStorageID returns the StorageID for a specific chunk (0-indexed).
+// Chunk 0 uses the base StorageID, chunks 1+ use ChunkLocations.
+// Returns StorageIDInline (0) for unallocated chunks (lazy allocation).
+func (m *CacheMetadata) GetChunkStorageID(chunkIndex int) StorageID {
+	if chunkIndex <= 0 || m.ChunkSizeCode == ChunkingDisabled {
+		return m.StorageID
+	}
+	if chunkIndex-1 < len(m.ChunkLocations) {
+		return m.ChunkLocations[chunkIndex-1].StorageID
+	}
+	// Return 0 (unallocated) if ChunkLocations is incomplete
+	return StorageIDInline
+}
+
+// IsChunkAllocated returns true if the specified chunk has a storage ID assigned.
+// For chunked objects, StorageIDInline (0) means the chunk is not yet allocated.
+// For non-chunked objects, always returns true (single storage).
+func (m *CacheMetadata) IsChunkAllocated(chunkIndex int) bool {
+	if m.ChunkSizeCode == ChunkingDisabled {
+		// Non-chunked always uses base StorageID
+		return true
+	}
+	if chunkIndex == 0 {
+		// Chunk 0 is allocated if base StorageID is non-zero
+		// (0 = inline or unallocated; chunked objects can't be inline, so 0 = unallocated)
+		return m.StorageID != StorageIDInline
+	}
+	if chunkIndex-1 < len(m.ChunkLocations) {
+		return m.ChunkLocations[chunkIndex-1].StorageID != StorageIDInline
+	}
+	return false
+}
+
+// SetChunkStorageID sets the StorageID for a specific chunk (0-indexed).
+// For chunk 0, sets the base StorageID. For chunks 1+, sets ChunkLocations.
+// The ChunkLocations slice must be pre-allocated to the correct size.
+func (m *CacheMetadata) SetChunkStorageID(chunkIndex int, storageID StorageID) {
+	if chunkIndex <= 0 {
+		m.StorageID = storageID
+		return
+	}
+	if chunkIndex-1 < len(m.ChunkLocations) {
+		m.ChunkLocations[chunkIndex-1].StorageID = storageID
+	}
+}
+
+// GetChunkInfo returns information about all chunks for this object.
+func (m *CacheMetadata) GetChunkInfo() []ChunkInfo {
+	return GetChunkInfo(m.ContentLength, m.ChunkSizeCode, m.ChunkLocations, m.StorageID)
+}
+
+// AllStorageIDs returns a deduplicated list of all StorageIDs used by this object.
+// For non-chunked objects, returns just the base StorageID.
+func (m *CacheMetadata) AllStorageIDs() []StorageID {
+	if !m.IsChunked() {
+		return []StorageID{m.StorageID}
+	}
+
+	seen := make(map[StorageID]bool)
+	var result []StorageID
+
+	// Include base StorageID if allocated (non-zero)
+	if m.StorageID != StorageIDInline {
+		result = append(result, m.StorageID)
+		seen[m.StorageID] = true
+	}
+
+	for _, loc := range m.ChunkLocations {
+		// Skip unallocated chunks (StorageID 0)
+		if loc.StorageID != StorageIDInline && !seen[loc.StorageID] {
+			result = append(result, loc.StorageID)
+			seen[loc.StorageID] = true
+		}
+	}
+
+	return result
+}
+
+// PerDirectoryBytes returns a map from StorageID to the number of content
+// bytes that live in each storage directory.  For non-chunked objects the
+// entire ContentLength is attributed to the base StorageID.  For chunked
+// objects the byte count is split according to each chunk's assigned
+// directory.  Unallocated chunks (StorageID 0) are skipped.
+func (m *CacheMetadata) PerDirectoryBytes() map[StorageID]int64 {
+	result := make(map[StorageID]int64)
+	if !m.IsChunked() {
+		if m.ContentLength > 0 {
+			result[m.StorageID] = m.ContentLength
+		}
+		return result
+	}
+	for _, ci := range m.GetChunkInfo() {
+		if ci.StorageID == StorageIDInline {
+			continue // unallocated
+		}
+		result[ci.StorageID] += ci.Size
+	}
+	return result
+}
 
 // SetCacheControl parses a Cache-Control header and stores the directives efficiently
 func (m *CacheMetadata) SetCacheControl(header string) {

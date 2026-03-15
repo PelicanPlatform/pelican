@@ -1450,10 +1450,12 @@ func (cdb *CacheDB) DeleteObject(instanceHash InstanceHash) error {
 // evictedObject holds the information needed to clean up the filesystem
 // after the DB transaction commits.
 type evictedObject struct {
-	instanceHash InstanceHash
-	storageID    StorageID
-	contentLen   int64
-	namespaceID  NamespaceID
+	instanceHash   InstanceHash
+	storageID      StorageID
+	contentLen     int64
+	namespaceID    NamespaceID
+	chunkSizeCode  ChunkSizeCode   // For chunked objects
+	chunkLocations []ChunkLocation // Locations of chunks 1, 2, ...
 }
 
 // EvictByLRU evicts objects from a storage+namespace combination, draining
@@ -1494,19 +1496,41 @@ func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, max
 				return
 			}
 			evicted = append(evicted, evictedObject{
-				instanceHash: hash,
-				storageID:    meta.StorageID,
-				contentLen:   meta.ContentLength,
-				namespaceID:  meta.NamespaceID,
+				instanceHash:   hash,
+				storageID:      meta.StorageID,
+				contentLen:     meta.ContentLength,
+				namespaceID:    meta.NamespaceID,
+				chunkSizeCode:  meta.ChunkSizeCode,
+				chunkLocations: meta.ChunkLocations,
 			})
-			key := StorageUsageKey{StorageID: meta.StorageID, NamespaceID: meta.NamespaceID}
-			usageDeltas[key] -= meta.ContentLength
+			// For chunked objects, decrement usage from each storage
+			// directory proportional to the bytes it holds.  For
+			// non-chunked objects this returns a single entry for the
+			// base StorageID with the full ContentLength.
+			for sid, bytes := range meta.PerDirectoryBytes() {
+				key := StorageUsageKey{StorageID: sid, NamespaceID: meta.NamespaceID}
+				usageDeltas[key] -= bytes
+			}
 			freedBytes += meta.ContentLength
+		}
+
+		// objectUsesDir reports whether an object touches the given
+		// storage directory — either as its base or via any chunk.
+		objectUsesDir := func(meta *CacheMetadata, sid StorageID) bool {
+			if meta.StorageID == sid {
+				return true
+			}
+			for _, loc := range meta.ChunkLocations {
+				if loc.StorageID == sid {
+					return true
+				}
+			}
+			return false
 		}
 
 		// Phase 1: drain purge-first items for this storageID.
 		// Walk the pf: prefix; for each item whose metadata matches
-		// the requested storageID, evict it immediately.
+		// the requested storageID (base or chunk), evict it immediately.
 		{
 			pfPrefix := []byte(PrefixPurgeFirst)
 			opts := badger.DefaultIteratorOptions
@@ -1539,7 +1563,7 @@ func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, max
 				if err != nil {
 					continue
 				}
-				if meta.StorageID != storageID {
+				if !objectUsesDir(&meta, storageID) {
 					continue
 				}
 
@@ -1548,6 +1572,7 @@ func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, max
 		}
 
 		// Phase 2: walk the LRU index for the requested storage+namespace.
+		// This finds objects whose base (chunk 0) is in storageID.
 		if !limitReached() {
 			lruPrefix := []byte(fmt.Sprintf("%s%d:%d:", PrefixLRU, storageID, namespaceID))
 			opts := badger.DefaultIteratorOptions
@@ -1565,6 +1590,59 @@ func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, max
 				if limitReached() {
 					break
 				}
+			}
+		}
+
+		// Phase 3: cross-directory scan for chunked objects.
+		// If Phase 2 was not sufficient, scan ALL LRU entries for
+		// the requested namespace.  For each candidate whose base
+		// lives in another directory, check whether any of its chunk
+		// locations reference storageID.  Skip entries that were
+		// already evicted in Phase 2 (their metadata will be gone).
+		if !limitReached() {
+			nsLRUPrefix := []byte(fmt.Sprintf("%s", PrefixLRU))
+			opts := badger.DefaultIteratorOptions
+			opts.PrefetchValues = false
+
+			it := txn.NewIterator(opts)
+			defer it.Close()
+
+			for it.Seek(nsLRUPrefix); it.ValidForPrefix(nsLRUPrefix); it.Next() {
+				if limitReached() {
+					break
+				}
+				lruSID, lruNS, _, hash, err := ParseLRUKey(it.Item().Key())
+				if err != nil {
+					continue
+				}
+				// Skip the namespace we already scanned in Phase 2,
+				// or different namespaces.
+				if lruNS != namespaceID {
+					continue
+				}
+				if lruSID == storageID {
+					continue // already covered by Phase 2
+				}
+
+				// Peek at metadata to check chunk locations.
+				metaItem, err := txn.Get(MetaKey(hash))
+				if err != nil {
+					continue
+				}
+				var meta CacheMetadata
+				err = metaItem.Value(func(val []byte) error {
+					return msgpack.Unmarshal(val, &meta)
+				})
+				if err != nil {
+					continue
+				}
+				if !meta.IsChunked() {
+					continue
+				}
+				if !objectUsesDir(&meta, storageID) {
+					continue
+				}
+				evictOne(hash)
 			}
 		}
 

@@ -25,7 +25,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/json"
 	"io"
 	"math/big"
@@ -335,20 +334,18 @@ func NewBlockEncryptor(dek, baseNonce []byte) (*BlockEncryptor, error) {
 	}, nil
 }
 
-// blockNonce derives a unique nonce for a specific block
-// We XOR the block number into the base nonce to get unique per-block nonces
-func (be *BlockEncryptor) blockNonce(blockNum uint32) []byte {
-	nonce := make([]byte, NonceSize)
-	copy(nonce, be.baseNonce)
+// blockNonce derives a unique nonce for a specific block by XOR-ing
+// the block number into the base nonce.  The result is written into
+// the caller-provided array so the nonce lives on the stack and no
+// heap allocation is needed.
+func (be *BlockEncryptor) blockNonce(nonce *[NonceSize]byte, blockNum uint32) {
+	copy(nonce[:], be.baseNonce)
 
 	// XOR block number into the last 4 bytes of the nonce
-	blockBytes := make([]byte, 4)
-	binary.BigEndian.PutUint32(blockBytes, blockNum)
-	for i := 0; i < 4; i++ {
-		nonce[NonceSize-4+i] ^= blockBytes[i]
-	}
-
-	return nonce
+	nonce[NonceSize-4] ^= byte(blockNum >> 24)
+	nonce[NonceSize-3] ^= byte(blockNum >> 16)
+	nonce[NonceSize-2] ^= byte(blockNum >> 8)
+	nonce[NonceSize-1] ^= byte(blockNum)
 }
 
 // EncryptBlock encrypts a block of data and returns data + auth tag
@@ -359,20 +356,49 @@ func (be *BlockEncryptor) EncryptBlock(blockNum uint32, data []byte) ([]byte, er
 		return nil, errors.Errorf("block data too large: %d > %d", len(data), BlockDataSize)
 	}
 
-	nonce := be.blockNonce(blockNum)
+	var nonce [NonceSize]byte
+	be.blockNonce(&nonce, blockNum)
 
 	// Encrypt and append auth tag
 	// The result is ciphertext || tag
-	return be.gcm.Seal(nil, nonce, data, nil), nil
+	return be.gcm.Seal(nil, nonce[:], data, nil), nil
+}
+
+// EncryptBlockTo encrypts a block of data directly into the provided destination buffer.
+// dst must have sufficient capacity (at least len(data) + AuthTagSize).
+// The encrypted data is appended to dst and the resulting slice is returned.
+// This avoids allocation when dst has enough capacity.
+func (be *BlockEncryptor) EncryptBlockTo(dst []byte, blockNum uint32, data []byte) ([]byte, error) {
+	if len(data) > BlockDataSize {
+		return nil, errors.Errorf("block data too large: %d > %d", len(data), BlockDataSize)
+	}
+
+	var nonce [NonceSize]byte
+	be.blockNonce(&nonce, blockNum)
+
+	// Encrypt and append auth tag directly into dst
+	return be.gcm.Seal(dst, nonce[:], data, nil), nil
 }
 
 // DecryptBlock decrypts a block and verifies its authentication tag
 // Input is BlockTotalSize bytes (ciphertext + auth tag)
 // Returns the decrypted data (up to BlockDataSize bytes)
 func (be *BlockEncryptor) DecryptBlock(blockNum uint32, encryptedBlock []byte) ([]byte, error) {
-	nonce := be.blockNonce(blockNum)
+	var nonce [NonceSize]byte
+	be.blockNonce(&nonce, blockNum)
 
-	return be.gcm.Open(nil, nonce, encryptedBlock, nil)
+	return be.gcm.Open(nil, nonce[:], encryptedBlock, nil)
+}
+
+// DecryptBlockTo decrypts a block directly into the provided destination buffer.
+// dst must have sufficient capacity (at least len(encryptedBlock) - AuthTagSize).
+// The decrypted data is appended to dst and the resulting slice is returned.
+// This avoids allocation when dst has enough capacity.
+func (be *BlockEncryptor) DecryptBlockTo(dst []byte, blockNum uint32, encryptedBlock []byte) ([]byte, error) {
+	var nonce [NonceSize]byte
+	be.blockNonce(&nonce, blockNum)
+
+	return be.gcm.Open(dst, nonce[:], encryptedBlock, nil)
 }
 
 // EncryptInline encrypts data for inline storage (small objects)

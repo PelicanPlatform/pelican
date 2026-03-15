@@ -1285,6 +1285,7 @@ func TestConsistencyChecker_OrphanCleanup(t *testing.T) {
 		meta := &CacheMetadata{
 			ContentLength: 100,
 			NamespaceID:   1,
+			StorageID:     StorageIDFirstDisk, // Disk-backed storage
 			Completed:     time.Now().Add(-10 * time.Minute),
 		}
 		err = db.SetMetadata(hash, meta)
@@ -1298,7 +1299,7 @@ func TestConsistencyChecker_OrphanCleanup(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Add a few orphaned entries
+	// Add a few orphaned entries (disk-backed but no file exists)
 	orphanedHashes := []InstanceHash{
 		"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
@@ -1307,6 +1308,7 @@ func TestConsistencyChecker_OrphanCleanup(t *testing.T) {
 		meta := &CacheMetadata{
 			ContentLength: 100,
 			NamespaceID:   1,
+			StorageID:     StorageIDFirstDisk, // Disk-backed but no file
 			Completed:     time.Now().Add(-10 * time.Minute),
 		}
 		err = db.SetMetadata(hash, meta)

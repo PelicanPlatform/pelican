@@ -20,6 +20,7 @@ package local_cache
 
 import (
 	"context"
+	"encoding/binary"
 	"io"
 	"os"
 	"path/filepath"
@@ -30,6 +31,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring"
+	ristretto "github.com/dgraph-io/ristretto/v2"
 	"github.com/google/uuid"
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
@@ -184,6 +186,121 @@ const openFileTTL = 2 * time.Minute
 // block sizes.
 const writeBatchBlocks uint32 = 64
 
+// DefaultReadBatchBlocks is the default number of blocks to read from disk
+// in a single ReadAt syscall before decrypting block-by-block.
+// 16 blocks × 4096 bytes = 64 KiB.
+const DefaultReadBatchBlocks = 16
+
+// OptimalReadSize is the ideal number of plaintext bytes to request per
+// read call.  It equals DefaultReadBatchBlocks × BlockDataSize (16 × 4080
+// = 65 280 B).  When callers align their buffer sizes to a multiple of
+// BlockDataSize (4080), every block decrypts directly into the
+// destination buffer (zero-copy).  Misaligned sizes cause the last
+// partial block in each batch to be decrypted into a temporary buffer
+// and copied, adding overhead.
+const OptimalReadSize = DefaultReadBatchBlocks * BlockDataSize
+
+// readBufPool pools reusable read buffers for batch disk reads.
+// Each buffer is DefaultReadBatchBlocks × BlockTotalSize = 64 KiB.
+// Storing *[]byte avoids an interface-boxing allocation on Get/Put.
+var readBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, DefaultReadBatchBlocks*BlockTotalSize)
+		return &b
+	},
+}
+
+// writeBufPool pools reusable write buffers for batched disk writes.
+// Each buffer is writeBatchBlocks × BlockTotalSize = 256 KiB.
+var writeBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 0, int(writeBatchBlocks)*BlockTotalSize)
+		return &b
+	},
+}
+
+// writeToOutBufPool pools the plaintext output buffers used by WriteTo.
+// Each buffer is writeToReadBatchBlocks × BlockDataSize ≈ 255 KiB.
+var writeToOutBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, writeToReadBatchBlocks*BlockDataSize)
+		return &b
+	},
+}
+
+// ptCacheKey builds a uint64 cache key for the plaintext block cache.
+// Since instanceHash is already a cryptographic hash, its first 8 bytes
+// are uniformly distributed; XOR-ing with the block number produces a
+// collision probability of ~1/2^64 per pair — effectively zero.
+func ptCacheKey(h InstanceHash, block uint32) uint64 {
+	return binary.LittleEndian.Uint64([]byte(h)[:8]) ^ uint64(block)
+}
+
+// chunkFileKey identifies a specific chunk file in the FD cache.
+type chunkFileKey struct {
+	instanceHash InstanceHash
+	chunkIndex   int
+}
+
+// smallChunkLimit is the threshold below which chunk file tracking uses
+// a fixed-size array instead of a heap-allocated map.  Almost all real
+// objects have fewer chunks than this.
+const smallChunkLimit = 20
+
+// chunkTracker tracks open refCountedFile handles for chunk files during
+// a single read or write operation.  For chunk counts ≤ smallChunkLimit
+// it uses a stack-allocated array; otherwise it falls back to a map.
+type chunkTracker struct {
+	smallKeys  [smallChunkLimit]int
+	smallVals  [smallChunkLimit]*refCountedFile
+	smallCount int
+	bigMap     map[int]*refCountedFile
+}
+
+func (ct *chunkTracker) get(chunkIdx int) (*refCountedFile, bool) {
+	if ct.bigMap != nil {
+		rc, ok := ct.bigMap[chunkIdx]
+		return rc, ok
+	}
+	for i := 0; i < ct.smallCount; i++ {
+		if ct.smallKeys[i] == chunkIdx {
+			return ct.smallVals[i], true
+		}
+	}
+	return nil, false
+}
+
+func (ct *chunkTracker) set(chunkIdx int, rc *refCountedFile) {
+	if ct.bigMap != nil {
+		ct.bigMap[chunkIdx] = rc
+		return
+	}
+	if ct.smallCount < smallChunkLimit {
+		ct.smallKeys[ct.smallCount] = chunkIdx
+		ct.smallVals[ct.smallCount] = rc
+		ct.smallCount++
+		return
+	}
+	// Spill to map.
+	ct.bigMap = make(map[int]*refCountedFile, ct.smallCount+1)
+	for i := 0; i < ct.smallCount; i++ {
+		ct.bigMap[ct.smallKeys[i]] = ct.smallVals[i]
+	}
+	ct.bigMap[chunkIdx] = rc
+}
+
+func (ct *chunkTracker) releaseAll() {
+	if ct.bigMap != nil {
+		for _, rc := range ct.bigMap {
+			rc.Release()
+		}
+		return
+	}
+	for i := 0; i < ct.smallCount; i++ {
+		ct.smallVals[i].Release()
+	}
+}
+
 type StorageManager struct {
 	db *CacheDB
 
@@ -209,19 +326,34 @@ type StorageManager struct {
 	// lookup and DEK decryption on hot paths.
 	diskCrypto *ttlcache.Cache[InstanceHash, *diskCryptoEntry]
 
-	// openFiles caches reference-counted file descriptors for disk-backed
-	// objects.  Multiple goroutines can share a single FD via ReadAt /
-	// WriteAt (offset-based, concurrency-safe).  Each cache hit calls
-	// Acquire() on the refCountedFile; callers must call Release() when
-	// they are done with I/O.  On eviction the cache also calls Release(),
-	// but the underlying *os.File is only closed when the last reference
-	// is gone — so in-flight I/O is never interrupted.
-	openFiles *ttlcache.Cache[InstanceHash, *refCountedFile]
+	// openFiles caches reference-counted file descriptors for all disk-
+	// backed files — both non-chunked objects and individual chunk files.
+	// Keyed by (instanceHash, chunkIndex); non-chunked objects and chunk 0
+	// use chunkIndex 0.  Multiple goroutines can share a single FD via
+	// ReadAt / WriteAt (offset-based, concurrency-safe).  Each cache hit
+	// calls Acquire() on the refCountedFile; callers must call Release()
+	// when they are done with I/O.  On eviction the cache also calls
+	// Release(), but the underlying *os.File is only closed when the last
+	// reference is gone — so in-flight I/O is never interrupted.
+	openFiles *ttlcache.Cache[chunkFileKey, *refCountedFile]
 
 	// fdCacheMaxSize is the maximum number of entries in the openFiles
 	// cache.  When 0, the cache is disabled entirely and every getFile
 	// call opens a fresh descriptor.
 	fdCacheMaxSize uint64
+
+	// ptCache is an optional in-memory plaintext block cache backed by
+	// ristretto.  When non-nil, decrypted 4080-byte blocks are cached
+	// so that repeated reads bypass AES-GCM decryption.  Keyed by
+	// (InstanceHash, blockNumber); cost = BlockDataSize per entry.
+	// Nil when disabled (MemoryCacheSize == 0).
+	ptCache *ristretto.Cache[uint64, []byte]
+
+	// chooseDir selects a storage directory for new chunk files.
+	// Defaults to simple round-robin.  In production, NewPersistentCache
+	// overwrites this with EvictionManager.ChooseDiskStorage (weighted
+	// by free space) before any concurrent access begins.
+	chooseDir func() StorageID
 }
 
 // StorageDirInfo describes a configured storage directory at runtime.
@@ -376,25 +508,64 @@ func NewStorageManager(db *CacheDB, dirs []string, inlineMax int, egrp *errgroup
 	}
 	// fdCacheSizeParam <= 0 → fdCacheSize stays 0, disabling caching.
 
+	// Plaintext block cache: when MemoryCacheSize > 0, create a
+	// ristretto cache that stores decrypted 4080-byte blocks keyed by
+	// (instanceHash, blockNum).  MaxCost = configured size in bytes;
+	// each entry costs BlockDataSize (4080) bytes.
+	var ptCache *ristretto.Cache[uint64, []byte]
+	ptCacheSize := param.LocalCache_MemoryCacheSize.GetInt()
+	if ptCacheSize > 0 {
+		// NumCounters should be ~10× the expected max number of entries.
+		numEntries := int64(ptCacheSize) / BlockDataSize
+		numCounters := numEntries * 10
+		if numCounters < 1000 {
+			numCounters = 1000
+		}
+		var err error
+		ptCache, err = ristretto.NewCache(&ristretto.Config[uint64, []byte]{
+			NumCounters: numCounters,
+			MaxCost:     int64(ptCacheSize),
+			BufferItems: 64,
+		})
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create plaintext block cache")
+		}
+	}
+
+	// Build sorted directory ID list for default round-robin.
+	dirIDs := make([]StorageID, 0, len(objDirs))
+	for id := range objDirs {
+		dirIDs = append(dirIDs, id)
+	}
+	sort.Slice(dirIDs, func(i, j int) bool { return dirIDs[i] < dirIDs[j] })
+
+	var rrCounter atomic.Uint64
+	defaultChooseDir := func() StorageID {
+		idx := int(rrCounter.Add(1)) % len(dirIDs)
+		return dirIDs[idx]
+	}
+
 	sm := &StorageManager{
 		db:             db,
 		dirs:           objDirs,
 		inlineMaxBytes: inlineMax,
 		fdCacheMaxSize: fdCacheSize,
+		ptCache:        ptCache,
+		chooseDir:      defaultChooseDir,
 		blockStates:    newBlockStateCache(db),
 		diskCrypto: ttlcache.New[InstanceHash, *diskCryptoEntry](
 			ttlcache.WithTTL[InstanceHash, *diskCryptoEntry](diskCryptoTTL),
 		),
-		openFiles: ttlcache.New[InstanceHash, *refCountedFile](
-			ttlcache.WithTTL[InstanceHash, *refCountedFile](openFileTTL),
-			ttlcache.WithCapacity[InstanceHash, *refCountedFile](fdCacheSize),
+		openFiles: ttlcache.New[chunkFileKey, *refCountedFile](
+			ttlcache.WithTTL[chunkFileKey, *refCountedFile](openFileTTL),
+			ttlcache.WithCapacity[chunkFileKey, *refCountedFile](fdCacheSize),
 		),
 	}
 
 	// Release the cache's reference when an entry is evicted.  The
 	// underlying file is closed only when the last reference is gone
 	// (i.e. no in-flight I/O holds a reference).
-	sm.openFiles.OnEviction(func(_ context.Context, _ ttlcache.EvictionReason, item *ttlcache.Item[InstanceHash, *refCountedFile]) {
+	sm.openFiles.OnEviction(func(_ context.Context, _ ttlcache.EvictionReason, item *ttlcache.Item[chunkFileKey, *refCountedFile]) {
 		if rc := item.Value(); rc != nil {
 			rc.Release()
 		}
@@ -420,9 +591,12 @@ func (sm *StorageManager) Close() {
 	sm.blockStates.Stop()
 	sm.diskCrypto.Stop()
 	sm.openFiles.Stop()
-	// Closing openFiles evicts all entries, triggering OnEviction which
+	// Closing caches evicts all entries, triggering OnEviction which
 	// closes each file descriptor.
 	sm.openFiles.DeleteAll()
+	if sm.ptCache != nil {
+		sm.ptCache.Close()
+	}
 }
 
 // InlineMaxBytes returns the configured maximum inline object size.
@@ -473,8 +647,9 @@ func (sm *StorageManager) getDiskCrypto(instanceHash InstanceHash) (*diskCryptoE
 // complete.  All I/O must use ReadAt / WriteAt (offset-based,
 // concurrency-safe).
 func (sm *StorageManager) getFile(instanceHash InstanceHash, storageID StorageID) (*refCountedFile, error) {
+	key := chunkFileKey{instanceHash: instanceHash, chunkIndex: 0}
 	if sm.fdCacheMaxSize > 0 {
-		if item := sm.openFiles.Get(instanceHash); item != nil {
+		if item := sm.openFiles.Get(key); item != nil {
 			rc := item.Value()
 			if rc.Acquire() {
 				return rc, nil
@@ -494,18 +669,21 @@ func (sm *StorageManager) getFile(instanceHash InstanceHash, storageID StorageID
 	if sm.fdCacheMaxSize > 0 {
 		// The cache takes its own reference.
 		rc.Acquire()
-		sm.openFiles.Set(instanceHash, rc, ttlcache.DefaultTTL)
+		sm.openFiles.Set(key, rc, ttlcache.DefaultTTL)
 	}
 	return rc, nil
 }
 
 // invalidateObjectCaches removes all in-memory cached state for an object:
-// block state, disk crypto, and read file descriptor.  Call this when an
-// object is deleted or evicted.
-func (sm *StorageManager) invalidateObjectCaches(instanceHash InstanceHash) {
+// block state, disk crypto, and file descriptors.  chunkCount is the number
+// of chunk files (1 for non-chunked objects).  Call this when an object is
+// deleted or evicted.
+func (sm *StorageManager) invalidateObjectCaches(instanceHash InstanceHash, chunkCount int) {
 	sm.InvalidateSharedBlockState(instanceHash)
 	sm.diskCrypto.Delete(instanceHash)
-	sm.openFiles.Delete(instanceHash) // triggers OnEviction → file.Close()
+	for i := 0; i < chunkCount; i++ {
+		sm.openFiles.Delete(chunkFileKey{instanceHash: instanceHash, chunkIndex: i})
+	}
 }
 
 // getObjectPathForDir returns the full path for an object in a specific directory.
@@ -526,6 +704,78 @@ func (sm *StorageManager) getObjectPathForDir(storageID StorageID, instanceHash 
 // This legacy helper uses StorageIDFirstDisk for backward compatibility.
 func (sm *StorageManager) getObjectPath(instanceHash InstanceHash) string {
 	return sm.getObjectPathForDir(StorageIDFirstDisk, instanceHash)
+}
+
+// getChunkPath returns the filesystem path for a specific chunk of an object.
+// For chunk 0, this is the same as getObjectPathForDir.
+// For chunks 1+, a suffix like "-2", "-3" is appended.
+func (sm *StorageManager) getChunkPath(storageID StorageID, instanceHash InstanceHash, chunkIndex int) string {
+	basePath := sm.getObjectPathForDir(storageID, instanceHash)
+	return GetChunkPath(basePath, chunkIndex)
+}
+
+// getChunkFile returns a reference-counted file descriptor for a specific chunk.
+// chunkIndex is 0-based.  The caller MUST call Release() when done.
+// Returns an error if the chunk is not allocated (StorageID = 0).
+func (sm *StorageManager) getChunkFile(instanceHash InstanceHash, meta *CacheMetadata, chunkIndex int) (*refCountedFile, error) {
+	if !meta.IsChunked() || chunkIndex == 0 {
+		// Non-chunked objects or chunk 0 use the base file path
+		storageID := meta.StorageID
+		if storageID == StorageIDInline {
+			if meta.IsChunked() {
+				return nil, errors.New("chunk 0 is not yet allocated")
+			}
+			return nil, errors.New("cannot get file for inline storage")
+		}
+		return sm.getFile(instanceHash, storageID)
+	}
+
+	// For chunks > 0, check if allocated
+	if !meta.IsChunkAllocated(chunkIndex) {
+		return nil, errors.Errorf("chunk %d is not allocated", chunkIndex)
+	}
+
+	// Look up in the unified FD cache.
+	key := chunkFileKey{instanceHash: instanceHash, chunkIndex: chunkIndex}
+	if sm.fdCacheMaxSize > 0 {
+		if item := sm.openFiles.Get(key); item != nil {
+			rc := item.Value()
+			if rc.Acquire() {
+				return rc, nil
+			}
+		}
+	}
+
+	storageID := meta.GetChunkStorageID(chunkIndex)
+	chunkPath := sm.getChunkPath(storageID, instanceHash, chunkIndex)
+
+	file, err := os.OpenFile(chunkPath, os.O_RDWR, 0600)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to open chunk %d file", chunkIndex)
+	}
+
+	rc := newRefCountedFile(file)
+	if sm.fdCacheMaxSize > 0 {
+		rc.Acquire()
+		sm.openFiles.Set(key, rc, ttlcache.DefaultTTL)
+	}
+	return rc, nil
+}
+
+// DirCount returns the number of configured storage directories.
+// This is used to determine if chunking should be enabled.
+func (sm *StorageManager) DirCount() int {
+	return len(sm.dirs)
+}
+
+// DirIDs returns the list of configured storage directory IDs in sorted order.
+func (sm *StorageManager) DirIDs() []StorageID {
+	ids := make([]StorageID, 0, len(sm.dirs))
+	for id := range sm.dirs {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
 }
 
 // StoreInline stores small data inline in BadgerDB
@@ -680,9 +930,141 @@ func (sm *StorageManager) InitDiskStorage(ctx context.Context, instanceHash Inst
 	rc := newRefCountedFile(file)
 	if sm.fdCacheMaxSize > 0 {
 		rc.Acquire() // for the cache
-		sm.openFiles.Set(instanceHash, rc, ttlcache.DefaultTTL)
+		sm.openFiles.Set(chunkFileKey{instanceHash: instanceHash, chunkIndex: 0}, rc, ttlcache.DefaultTTL)
 	}
 	rc.Release() // creator's ref
+
+	return meta, nil
+}
+
+// InitLazyChunkedStorage initializes metadata for a chunked object WITHOUT creating
+// chunk files. Files are created lazily when AllocateChunk is called (typically on
+// first write to each chunk). This supports byte-range downloads where chunks may
+// be written out of order.
+//
+// All chunk StorageIDs are initialized to 0 (unallocated). Use AllocateChunk to
+// assign a storage directory and create the file for each chunk before writing.
+//
+// Parameters:
+//   - instanceHash: unique identifier for this object version
+//   - contentLength: total object size in bytes
+//   - chunkSizeCode: chunk size encoding (must be non-zero for chunked storage)
+func (sm *StorageManager) InitLazyChunkedStorage(
+	ctx context.Context,
+	instanceHash InstanceHash,
+	contentLength int64,
+	chunkSizeCode ChunkSizeCode,
+) (*CacheMetadata, error) {
+	// If another goroutine already initialized storage for this instance,
+	// return the existing metadata rather than generating a second DataKey.
+	if existing, err := sm.GetMetadata(instanceHash); err == nil && existing != nil && len(existing.DataKey) > 0 {
+		return existing, nil
+	}
+
+	if chunkSizeCode == ChunkingDisabled {
+		return nil, errors.New("InitLazyChunkedStorage requires chunking enabled (chunkSizeCode > 0)")
+	}
+
+	encMgr := sm.db.GetEncryptionManager()
+
+	// Generate encryption keys (shared across all chunks)
+	dek, err := encMgr.GenerateDataKey()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to generate data key")
+	}
+
+	encryptedDEK, err := encMgr.EncryptDataKey(dek)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to encrypt data key")
+	}
+
+	// Pre-allocate ChunkLocations with all StorageID = 0 (unallocated)
+	chunkCount := CalculateChunkCount(contentLength, chunkSizeCode)
+	var chunkLocations []ChunkLocation
+	if chunkCount > 1 {
+		chunkLocations = make([]ChunkLocation, chunkCount-1)
+		// All ChunkLocation.StorageID are zero-valued (unallocated)
+	}
+
+	meta := &CacheMetadata{
+		StorageID:      StorageIDInline, // Chunk 0 also unallocated (0 = unallocated for chunked)
+		ContentLength:  contentLength,
+		DataKey:        encryptedDEK,
+		ChunkSizeCode:  chunkSizeCode,
+		ChunkLocations: chunkLocations,
+	}
+
+	// Store metadata (no files created yet)
+	if err := sm.db.SetMetadata(instanceHash, meta); err != nil {
+		return nil, errors.Wrap(err, "failed to store metadata")
+	}
+
+	// Initialize block state as empty bitmap
+	if err := sm.db.SetBlockState(instanceHash, roaring.New()); err != nil {
+		if delErr := sm.db.DeleteMetadata(instanceHash); delErr != nil {
+			log.Warnf("Failed to clean up metadata for %s: %v", instanceHash, delErr)
+		}
+		return nil, errors.Wrap(err, "failed to initialize block state")
+	}
+
+	return meta, nil
+}
+
+// AllocateChunk allocates a storage directory for a chunk and creates the chunk file.
+// This must be called before writing to a chunk that has StorageID = 0 (unallocated).
+//
+// The storage directory is chosen via the pluggable chooseDir function, which
+// defaults to simple round-robin but is replaced in production with
+// EvictionManager.ChooseDiskStorage (weighted by free space).
+//
+// Returns the updated CacheMetadata (which should be used for subsequent operations).
+func (sm *StorageManager) AllocateChunk(
+	ctx context.Context,
+	instanceHash InstanceHash,
+	meta *CacheMetadata,
+	chunkIndex int,
+) (*CacheMetadata, error) {
+	// Check if already allocated
+	if meta.IsChunkAllocated(chunkIndex) {
+		return meta, nil
+	}
+
+	// Choose storage directory.
+	storageID := sm.chooseDir()
+
+	// Create the chunk file
+	chunkPath := sm.getChunkPath(storageID, instanceHash, chunkIndex)
+	file, err := createFile(chunkPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to create chunk %d file", chunkIndex)
+	}
+
+	// Calculate chunk content length and encrypted file size
+	chunkContentLen := ChunkContentLength(meta.ContentLength, meta.ChunkSizeCode, chunkIndex)
+	fileSize := CalculateFileSize(chunkContentLen)
+
+	if err := file.Truncate(fileSize); err != nil {
+		file.Close()
+		_ = removeFileWithRetry(chunkPath)
+		return nil, errors.Wrapf(err, "failed to pre-allocate chunk %d file", chunkIndex)
+	}
+
+	// Cache the freshly-created file descriptor.
+	rc := newRefCountedFile(file)
+	if sm.fdCacheMaxSize > 0 {
+		rc.Acquire()
+		sm.openFiles.Set(chunkFileKey{instanceHash: instanceHash, chunkIndex: chunkIndex}, rc, ttlcache.DefaultTTL)
+	}
+	rc.Release()
+
+	// Update metadata with the new storage ID
+	meta.SetChunkStorageID(chunkIndex, storageID)
+
+	// Persist the updated metadata
+	if err := sm.db.SetMetadata(instanceHash, meta); err != nil {
+		_ = removeFileWithRetry(chunkPath)
+		return nil, errors.Wrap(err, "failed to update metadata with chunk storage")
+	}
 
 	return meta, nil
 }
@@ -698,17 +1080,7 @@ func (sm *StorageManager) WriteBlocks(instanceHash InstanceHash, startOffset int
 	meta := dc.meta
 	encryptor := dc.encryptor
 
-	// Use the cached R/W file descriptor.  WriteAt is concurrency-safe
-	// (it uses pwrite underneath) so sharing the FD is fine.
-	rc, err := sm.getFile(instanceHash, meta.StorageID)
-	if err != nil {
-		return err
-	}
-	defer rc.Release()
-	file := rc.File()
-
-	// Calculate starting block
-	startBlock := ContentOffsetToBlock(startOffset)
+	// Calculate starting block offset to validate alignment
 	offsetWithinBlock := ContentOffsetWithinBlock(startOffset)
 
 	// If starting in the middle of a block, we need to read-modify-write
@@ -716,58 +1088,184 @@ func (sm *StorageManager) WriteBlocks(instanceHash InstanceHash, startOffset int
 		return errors.New("writing to middle of block not supported; use block-aligned writes")
 	}
 
-	// Write blocks
-	blocksWritten := uint32(0)
+	return sm.writeBlocks(instanceHash, meta, encryptor, startOffset, data)
+}
+
+// writeBlocks encrypts and writes a contiguous range of blocks to disk.
+// It handles both chunked and non-chunked objects: for non-chunked objects
+// every block maps to chunk 0 and the single object file, so the chunk
+// bookkeeping collapses to a no-op.
+func (sm *StorageManager) writeBlocks(instanceHash InstanceHash, meta *CacheMetadata, encryptor *BlockEncryptor, startOffset int64, data []byte) error {
+	// Make a local copy of metadata so we never mutate the cached
+	// diskCryptoEntry (which is shared/read-only).
+	localMeta := *meta
+	meta = &localMeta
+
+	startBlock := ContentOffsetToBlock(startOffset)
+
+	// Track which files we have open (by chunk index).
+	var openChunks chunkTracker
+	defer openChunks.releaseAll()
+
+	// Helper to get or open a chunk file, allocating on demand.
+	getChunkFile := func(chunkIdx int) (*os.File, error) {
+		if rc, ok := openChunks.get(chunkIdx); ok {
+			return rc.File(), nil
+		}
+		if !meta.IsChunkAllocated(chunkIdx) {
+			updatedMeta, err := sm.AllocateChunk(context.Background(), instanceHash, meta, chunkIdx)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to allocate chunk %d", chunkIdx)
+			}
+			*meta = *updatedMeta
+			// Invalidate the diskCrypto cache so future callers see updated metadata
+			sm.diskCrypto.Delete(instanceHash)
+		}
+		rc, err := sm.getChunkFile(instanceHash, meta, chunkIdx)
+		if err != nil {
+			return nil, err
+		}
+		openChunks.set(chunkIdx, rc)
+		return rc.File(), nil
+	}
+
+	// Pooled write buffer for batching.
+	writeBufSize := int(writeBatchBlocks) * BlockTotalSize
+	wbp := writeBufPool.Get().(*[]byte)
+	writeBuf := (*wbp)[:0]
+	defer writeBufPool.Put(wbp)
+
+	// Flush helper
+	flushBatch := func(file *os.File, batchStartChunkBlock uint32) error {
+		if len(writeBuf) == 0 {
+			return nil
+		}
+		fileOffset := BlockOffset(batchStartChunkBlock)
+		if _, err := file.WriteAt(writeBuf, fileOffset); err != nil {
+			return err
+		}
+		writeBuf = writeBuf[:0]
+		return nil
+	}
+
+	// Track block ranges per chunk for usage accounting
+	type chunkBlockRange struct {
+		startBlock uint32
+		endBlock   uint32
+		storageID  StorageID
+	}
+	var chunkRanges []chunkBlockRange
+
 	dataOffset := 0
 	currentBlock := startBlock
+	currentContentOffset := startOffset
+	currentChunkIdx := -1
+	var currentFile *os.File
+	var batchStartChunkBlock uint32
+	var rangeStartBlock uint32
 
 	for dataOffset < len(data) {
-		// Calculate how much data for this block
-		remaining := len(data) - dataOffset
-		blockData := BlockDataSize
-		if remaining < blockData {
-			blockData = remaining
+		// Determine which chunk this block belongs to
+		chunkIdx := ContentOffsetToChunk(currentContentOffset, meta.ChunkSizeCode)
+		chunkStart, _ := GetChunkRange(meta.ContentLength, meta.ChunkSizeCode, chunkIdx)
+		offsetInChunk := currentContentOffset - chunkStart
+		chunkBlockNum := ContentOffsetToBlock(offsetInChunk)
+
+		// If chunk changed, flush previous batch and record range
+		if chunkIdx != currentChunkIdx {
+			if currentFile != nil {
+				if err := flushBatch(currentFile, batchStartChunkBlock); err != nil {
+					return errors.Wrapf(err, "failed to flush batch to chunk %d", currentChunkIdx)
+				}
+			}
+			if currentChunkIdx >= 0 {
+				chunkRanges = append(chunkRanges, chunkBlockRange{
+					startBlock: rangeStartBlock,
+					endBlock:   currentBlock - 1,
+					storageID:  meta.GetChunkStorageID(currentChunkIdx),
+				})
+			}
+			var err error
+			currentFile, err = getChunkFile(chunkIdx)
+			if err != nil {
+				return errors.Wrapf(err, "failed to open chunk %d", chunkIdx)
+			}
+			currentChunkIdx = chunkIdx
+			batchStartChunkBlock = chunkBlockNum
+			rangeStartBlock = currentBlock
 		}
 
-		// Extract block data
-		block := data[dataOffset : dataOffset+blockData]
+		// Check if we need to flush current batch (buffer full)
+		if len(writeBuf) >= writeBufSize {
+			if err := flushBatch(currentFile, batchStartChunkBlock); err != nil {
+				return errors.Wrapf(err, "failed to flush batch to chunk %d", chunkIdx)
+			}
+			batchStartChunkBlock = chunkBlockNum
+		}
 
-		// Encrypt the block
-		encryptedBlock, err := encryptor.EncryptBlock(currentBlock, block)
+		remaining := len(data) - dataOffset
+		blockDataLen := BlockDataSize
+		if remaining < blockDataLen {
+			blockDataLen = remaining
+		}
+
+		blockData := data[dataOffset : dataOffset+blockDataLen]
+
+		// Encrypt directly into write buffer (zero-copy)
+		var err error
+		writeBuf, err = encryptor.EncryptBlockTo(writeBuf, currentBlock, blockData)
 		if err != nil {
 			return errors.Wrapf(err, "failed to encrypt block %d", currentBlock)
 		}
 
-		// Write to file
-		fileOffset := BlockOffset(currentBlock)
-		if _, err := file.WriteAt(encryptedBlock, fileOffset); err != nil {
-			return errors.Wrapf(err, "failed to write block %d", currentBlock)
-		}
-
-		dataOffset += blockData
+		dataOffset += blockDataLen
+		currentContentOffset += int64(blockDataLen)
 		currentBlock++
-		blocksWritten++
 	}
 
-	// Update block state
-	if err := sm.db.MarkBlocksDownloaded(instanceHash, startBlock, startBlock+blocksWritten-1, meta.StorageID, meta.NamespaceID, meta.ContentLength); err != nil {
-		return errors.Wrap(err, "failed to update block state")
+	// Flush remaining batch
+	if currentFile != nil && len(writeBuf) > 0 {
+		if err := flushBatch(currentFile, batchStartChunkBlock); err != nil {
+			return errors.Wrapf(err, "failed to flush final batch to chunk %d", currentChunkIdx)
+		}
+	}
+
+	// Record final chunk range
+	if currentChunkIdx >= 0 {
+		chunkRanges = append(chunkRanges, chunkBlockRange{
+			startBlock: rangeStartBlock,
+			endBlock:   currentBlock - 1,
+			storageID:  meta.GetChunkStorageID(currentChunkIdx),
+		})
+	}
+
+	// Update block state with per-chunk storage IDs for correct usage accounting
+	for _, cr := range chunkRanges {
+		if err := sm.db.MarkBlocksDownloaded(instanceHash, cr.startBlock, cr.endBlock, cr.storageID, meta.NamespaceID, meta.ContentLength); err != nil {
+			return errors.Wrap(err, "failed to update block state")
+		}
 	}
 
 	// Check if download is complete
+	sm.checkAndMarkComplete(instanceHash, meta)
+
+	return nil
+}
+
+// checkAndMarkComplete checks if all blocks are downloaded and marks the object as complete
+func (sm *StorageManager) checkAndMarkComplete(instanceHash InstanceHash, meta *CacheMetadata) {
 	totalBlocks := CalculateBlockCount(meta.ContentLength)
 	downloadedCount, err := sm.db.GetDownloadedBlockCount(instanceHash)
 	if err != nil {
 		log.Warnf("Failed to check download completion: %v", err)
-	} else if uint32(downloadedCount) == totalBlocks {
-		// Mark as completed via merge to avoid overwriting concurrent changes.
+		return
+	}
+	if uint32(downloadedCount) == totalBlocks {
 		completionMeta := &CacheMetadata{Completed: time.Now()}
 		if err := sm.db.MergeMetadata(instanceHash, completionMeta); err != nil {
 			log.Warnf("Failed to update completion time: %v", err)
 		}
 	}
-
-	return nil
 }
 
 // ReadBlocks reads and decrypts blocks from disk storage.
@@ -789,74 +1287,281 @@ func (sm *StorageManager) ReadBlocks(instanceHash InstanceHash, startOffset int6
 
 	// Calculate block range
 	startBlock := ContentOffsetToBlock(startOffset)
+	endOffset := min(startOffset+int64(length), meta.ContentLength)
+	endBlock := ContentOffsetToBlock(endOffset - 1)
+
+	// Check all needed blocks are downloaded (single lock acquisition)
+	if !blockState.ContainsRange(startBlock, endBlock) {
+		// Get missing blocks for error message
+		missing := blockState.MissingInRange(startBlock, endBlock)
+		if len(missing) > 0 {
+			return nil, errors.Errorf("block %d not yet downloaded", missing[0])
+		}
+		return nil, errors.New("blocks not yet downloaded")
+	}
+
+	return sm.readBlocksChunked(instanceHash, meta, encryptor, startOffset, length)
+}
+
+// ReadBlocksInto reads and decrypts blocks from disk storage directly into
+// the caller-provided dst buffer.  It returns the number of bytes written
+// to dst.  This avoids the result allocation and copy that ReadBlocks
+// performs.  dst must be large enough to hold the requested data.
+func (sm *StorageManager) ReadBlocksInto(dst []byte, instanceHash InstanceHash, startOffset int64) (int, error) {
+	dc, err := sm.getDiskCrypto(instanceHash)
+	if err != nil {
+		return 0, err
+	}
+	meta := dc.meta
+	encryptor := dc.encryptor
+
+	length := len(dst)
+	endOffset := min(startOffset+int64(length), meta.ContentLength)
+	actualLen := int(endOffset - startOffset)
+	if actualLen <= 0 {
+		return 0, nil
+	}
+
+	blockState, err := sm.GetSharedBlockState(instanceHash)
+	if err != nil {
+		return 0, errors.Wrap(err, "failed to get block state")
+	}
+
+	startBlock := ContentOffsetToBlock(startOffset)
+	endBlock := ContentOffsetToBlock(endOffset - 1)
+
+	if !blockState.ContainsRange(startBlock, endBlock) {
+		missing := blockState.MissingInRange(startBlock, endBlock)
+		if len(missing) > 0 {
+			return 0, errors.Errorf("block %d not yet downloaded", missing[0])
+		}
+		return 0, errors.New("blocks not yet downloaded")
+	}
+
+	return sm.readBlocksChunkedInto(instanceHash, meta, encryptor, dst[:actualLen], startOffset)
+}
+
+// decryptBlocksFromFile reads and decrypts blocks from a single file
+// directly into dst.  It uses a pooled read buffer for the encrypted
+// disk I/O.  globalBlockNum0 is the global block number corresponding to
+// file-local block 0; pass 0 for non-chunked files (where local == global).
+// For chunk files, pass ContentOffsetToBlock(chunkStart).
+func decryptBlocksFromFile(file *os.File, contentLength int64, encryptor *BlockEncryptor, dst []byte, startOffset int64, ptCache *ristretto.Cache[uint64, []byte], instanceHash InstanceHash, globalBlockNum0 uint32) (int, error) {
+	endOffset := startOffset + int64(len(dst))
+	if endOffset > contentLength {
+		endOffset = contentLength
+	}
+
+	startBlock := ContentOffsetToBlock(startOffset)
+	endBlock := ContentOffsetToBlock(endOffset - 1)
+	lastObjectBlock := CalculateBlockCount(contentLength) - 1
+	offsetWithinFirstBlock := ContentOffsetWithinBlock(startOffset)
+
+	resultLen := int(endOffset - startOffset)
+	resultPos := 0
+
+	// Use pooled read buffer.
+	bp := readBufPool.Get().(*[]byte)
+	readBuf := *bp
+	defer readBufPool.Put(bp)
+
+	for batchStart := startBlock; batchStart <= endBlock; batchStart += uint32(DefaultReadBatchBlocks) {
+		batchEnd := batchStart + uint32(DefaultReadBatchBlocks) - 1
+		if batchEnd > endBlock {
+			batchEnd = endBlock
+		}
+		batchBlockCount := int(batchEnd - batchStart + 1)
+
+		// Calculate read size — last block of file may be smaller.
+		var readSize int
+		if batchEnd == lastObjectBlock {
+			lastBlockDataSize := int(contentLength % BlockDataSize)
+			if lastBlockDataSize == 0 {
+				lastBlockDataSize = BlockDataSize
+			}
+			readSize = (batchBlockCount-1)*BlockTotalSize + lastBlockDataSize + AuthTagSize
+		} else {
+			readSize = batchBlockCount * BlockTotalSize
+		}
+
+		fileOffset := BlockOffset(batchStart)
+		n, err := file.ReadAt(readBuf[:readSize], fileOffset)
+		if err != nil && err != io.EOF {
+			return 0, errors.Wrapf(err, "failed to read blocks %d-%d", batchStart, batchEnd)
+		}
+
+		readPos := 0
+		for i := 0; i < batchBlockCount; i++ {
+			block := batchStart + uint32(i)
+			globalBlock := globalBlockNum0 + block
+
+			var encBlockSize int
+			if block == lastObjectBlock {
+				lastBlockDataSize := int(contentLength % BlockDataSize)
+				if lastBlockDataSize == 0 {
+					lastBlockDataSize = BlockDataSize
+				}
+				encBlockSize = lastBlockDataSize + AuthTagSize
+			} else {
+				encBlockSize = BlockTotalSize
+			}
+
+			if readPos+encBlockSize > n {
+				return 0, errors.Errorf("short read on block %d: got %d bytes in batch, expected at least %d", globalBlock, n, readPos+encBlockSize)
+			}
+
+			encryptedSlice := readBuf[readPos : readPos+encBlockSize]
+			readPos += encBlockSize
+
+			blockDataSize := encBlockSize - AuthTagSize
+
+			isPartialFirst := block == startBlock && offsetWithinFirstBlock > 0
+			isPartialLast := block == endBlock && resultLen-resultPos < blockDataSize
+
+			// Check plaintext cache first.
+			if ptCache != nil {
+				if cached, ok := ptCache.Get(ptCacheKey(instanceHash, globalBlock)); ok {
+					if !isPartialFirst && !isPartialLast {
+						copy(dst[resultPos:], cached[:blockDataSize])
+						resultPos += blockDataSize
+					} else {
+						dataStart := 0
+						dataEnd := len(cached)
+						if isPartialFirst {
+							dataStart = int(offsetWithinFirstBlock)
+						}
+						if isPartialLast {
+							remaining := resultLen - resultPos
+							if dataEnd-dataStart > remaining {
+								dataEnd = dataStart + remaining
+							}
+						}
+						copy(dst[resultPos:], cached[dataStart:dataEnd])
+						resultPos += dataEnd - dataStart
+					}
+					continue
+				}
+			}
+
+			if !isPartialFirst && !isPartialLast {
+				// Full block: decrypt directly into dst (zero-copy).
+				_, err := encryptor.DecryptBlockTo(dst[resultPos:resultPos:resultPos+blockDataSize], globalBlock, encryptedSlice)
+				if err != nil {
+					return 0, errors.Wrapf(err, "failed to decrypt block %d", globalBlock)
+				}
+				if ptCache != nil {
+					entry := make([]byte, blockDataSize)
+					copy(entry, dst[resultPos:resultPos+blockDataSize])
+					ptCache.Set(ptCacheKey(instanceHash, globalBlock), entry, int64(BlockDataSize))
+				}
+				resultPos += blockDataSize
+			} else {
+				// Partial block: decrypt to temp buffer, copy needed portion.
+				decrypted, err := encryptor.DecryptBlock(globalBlock, encryptedSlice)
+				if err != nil {
+					return 0, errors.Wrapf(err, "failed to decrypt block %d", globalBlock)
+				}
+
+				if ptCache != nil {
+					entry := make([]byte, len(decrypted))
+					copy(entry, decrypted)
+					ptCache.Set(ptCacheKey(instanceHash, globalBlock), entry, int64(BlockDataSize))
+				}
+
+				dataStart := 0
+				dataEnd := len(decrypted)
+
+				if isPartialFirst {
+					dataStart = int(offsetWithinFirstBlock)
+				}
+				if isPartialLast {
+					remaining := resultLen - resultPos
+					if dataEnd-dataStart > remaining {
+						dataEnd = dataStart + remaining
+					}
+				}
+
+				copy(dst[resultPos:], decrypted[dataStart:dataEnd])
+				resultPos += dataEnd - dataStart
+			}
+		}
+	}
+
+	return resultPos, nil
+}
+
+// readBlocksChunked reads blocks from a chunked object, handling reads that
+// span chunk boundaries.  It allocates a result buffer and delegates to
+// readBlocksChunkedInto.
+func (sm *StorageManager) readBlocksChunked(instanceHash InstanceHash, meta *CacheMetadata, encryptor *BlockEncryptor, startOffset int64, length int) ([]byte, error) {
 	endOffset := startOffset + int64(length)
 	if endOffset > meta.ContentLength {
 		endOffset = meta.ContentLength
 	}
-	endBlock := ContentOffsetToBlock(endOffset - 1)
+	resultLen := int(endOffset - startOffset)
+	result := make([]byte, resultLen)
 
-	// Check all needed blocks are downloaded
-	for block := startBlock; block <= endBlock; block++ {
-		if !blockState.Contains(block) {
-			return nil, errors.Errorf("block %d not yet downloaded", block)
-		}
-	}
-
-	// Get a cached file descriptor (ref-counted).
-	rc, err := sm.getFile(instanceHash, meta.StorageID)
+	n, err := sm.readBlocksChunkedInto(instanceHash, meta, encryptor, result, startOffset)
 	if err != nil {
 		return nil, err
 	}
-	defer rc.Release()
-	file := rc.File()
+	return result[:n], nil
+}
 
-	// Read and decrypt blocks
-	result := make([]byte, 0, length)
-	offsetWithinFirstBlock := ContentOffsetWithinBlock(startOffset)
-
-	for block := startBlock; block <= endBlock; block++ {
-		// Read encrypted block
-		encryptedBlock := make([]byte, BlockTotalSize)
-		fileOffset := BlockOffset(block)
-		n, err := file.ReadAt(encryptedBlock, fileOffset)
-		if err != nil && err != io.EOF {
-			return nil, errors.Wrapf(err, "failed to read block %d", block)
-		}
-
-		// Handle last block which may be smaller
-		if block == CalculateBlockCount(meta.ContentLength)-1 {
-			lastBlockDataSize := int(meta.ContentLength % BlockDataSize)
-			if lastBlockDataSize == 0 {
-				lastBlockDataSize = BlockDataSize
-			}
-			encryptedBlock = encryptedBlock[:lastBlockDataSize+AuthTagSize]
-		} else if n < BlockTotalSize {
-			return nil, errors.Errorf("short read on block %d: got %d, expected %d", block, n, BlockTotalSize)
-		}
-
-		// Decrypt the block
-		decryptedBlock, err := encryptor.DecryptBlock(block, encryptedBlock)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to decrypt block %d", block)
-		}
-
-		// Handle partial first block
-		if block == startBlock && offsetWithinFirstBlock > 0 {
-			decryptedBlock = decryptedBlock[offsetWithinFirstBlock:]
-		}
-
-		// Handle partial last block
-		if block == endBlock {
-			remaining := int64(length) - int64(len(result))
-			if int64(len(decryptedBlock)) > remaining {
-				decryptedBlock = decryptedBlock[:remaining]
-			}
-		}
-
-		result = append(result, decryptedBlock...)
+// readBlocksChunkedInto reads blocks from a chunked object directly into dst.
+// It iterates over the chunks that overlap the requested range and delegates
+// each chunk's I/O to decryptBlocksFromFile.
+func (sm *StorageManager) readBlocksChunkedInto(instanceHash InstanceHash, meta *CacheMetadata, encryptor *BlockEncryptor, dst []byte, startOffset int64) (int, error) {
+	endOffset := startOffset + int64(len(dst))
+	if endOffset > meta.ContentLength {
+		endOffset = meta.ContentLength
 	}
 
-	return result, nil
+	// Track which files we have open (by chunk index).
+	var openChunks chunkTracker
+	defer openChunks.releaseAll()
+
+	resultPos := 0
+	currentOffset := startOffset
+
+	for currentOffset < endOffset {
+		// Determine which chunk this offset falls in.
+		chunkIdx := ContentOffsetToChunk(currentOffset, meta.ChunkSizeCode)
+		chunkStart, chunkEnd := GetChunkRange(meta.ContentLength, meta.ChunkSizeCode, chunkIdx)
+		chunkContentLen := chunkEnd - chunkStart + 1
+
+		// Get (or open) the file for this chunk.
+		var file *os.File
+		if rc, ok := openChunks.get(chunkIdx); ok {
+			file = rc.File()
+		} else {
+			rc, err := sm.getChunkFile(instanceHash, meta, chunkIdx)
+			if err != nil {
+				return 0, errors.Wrapf(err, "failed to open chunk %d", chunkIdx)
+			}
+			openChunks.set(chunkIdx, rc)
+			file = rc.File()
+		}
+
+		// How many bytes to read from this chunk.
+		chunkLocalOffset := currentOffset - chunkStart
+		readLen := min(chunkContentLen-chunkLocalOffset, endOffset-currentOffset)
+
+		// Global block number of local block 0 in this chunk file.
+		globalBlockNum0 := ContentOffsetToBlock(chunkStart)
+
+		n, err := decryptBlocksFromFile(file, chunkContentLen, encryptor,
+			dst[resultPos:resultPos+int(readLen)], chunkLocalOffset,
+			sm.ptCache, instanceHash, globalBlockNum0)
+		if err != nil {
+			return 0, err
+		}
+
+		resultPos += n
+		currentOffset += int64(n)
+	}
+
+	return resultPos, nil
 }
 
 // IdentifyCorruptBlocks probes each block in [startBlock, endBlock] on disk and
@@ -1014,17 +1719,43 @@ func (sm *StorageManager) Delete(instanceHash InstanceHash) error {
 	}
 
 	// Remove all in-memory cached state for this object.
-	sm.invalidateObjectCaches(instanceHash)
+	chunkCount := 1
+	if meta != nil {
+		chunkCount = meta.ChunkCount()
+	}
+	sm.invalidateObjectCaches(instanceHash, chunkCount)
 
-	// If stored on disk, delete the file
+	// If stored on disk, delete all chunk files
 	if meta != nil && meta.IsDisk() {
-		objectPath := sm.getObjectPathForDir(meta.StorageID, instanceHash)
-		if err := removeFileWithRetry(objectPath); err != nil {
-			log.Warnf("Failed to delete object file %s: %v", objectPath, err)
-		}
+		sm.deleteChunkFiles(instanceHash, meta.ContentLength, meta.StorageID, meta.ChunkSizeCode, meta.ChunkLocations)
 	}
 
 	return nil
+}
+
+// deleteChunkFiles removes all chunk files for an object from disk.
+func (sm *StorageManager) deleteChunkFiles(instanceHash InstanceHash, contentLen int64, baseStorageID StorageID, chunkSizeCode ChunkSizeCode, chunkLocations []ChunkLocation) {
+	chunkCount := CalculateChunkCount(contentLen, chunkSizeCode)
+	for chunkIdx := 0; chunkIdx < chunkCount; chunkIdx++ {
+		var storageID StorageID
+		if chunkIdx == 0 {
+			storageID = baseStorageID
+		} else if chunkIdx-1 < len(chunkLocations) {
+			storageID = chunkLocations[chunkIdx-1].StorageID
+		} else {
+			storageID = baseStorageID // fallback
+		}
+
+		// Skip unallocated chunks (lazy allocation: StorageID 0 means no file was created)
+		if storageID == StorageIDInline {
+			continue
+		}
+
+		chunkPath := sm.getChunkPath(storageID, instanceHash, chunkIdx)
+		if err := removeFileWithRetry(chunkPath); err != nil && !os.IsNotExist(err) {
+			log.Warnf("Failed to delete chunk %d file %s: %v", chunkIdx, chunkPath, err)
+		}
+	}
 }
 
 // EvictByLRU walks the LRU index for a given storage+namespace and evicts
@@ -1046,13 +1777,11 @@ func (sm *StorageManager) EvictByLRU(storageID StorageID, namespaceID NamespaceI
 		totalFreed += uint64(obj.contentLen)
 
 		// Remove all in-memory cached state for this object.
-		sm.invalidateObjectCaches(obj.instanceHash)
+		sm.invalidateObjectCaches(obj.instanceHash, CalculateChunkCount(obj.contentLen, obj.chunkSizeCode))
 
+		// Delete all chunk files from disk
 		if obj.storageID != StorageIDInline {
-			objectPath := sm.getObjectPathForDir(obj.storageID, obj.instanceHash)
-			if err := removeFileWithRetry(objectPath); err != nil {
-				log.Warnf("Failed to delete evicted object file %s: %v", objectPath, err)
-			}
+			sm.deleteChunkFiles(obj.instanceHash, obj.contentLen, obj.storageID, obj.chunkSizeCode, obj.chunkLocations)
 		}
 	}
 
@@ -1094,7 +1823,10 @@ func (sm *StorageManager) HasObject(instanceHash InstanceHash) (bool, error) {
 	return sm.db.HasMetadata(instanceHash)
 }
 
-// ObjectReader provides a reader interface for cached objects
+// ObjectReader provides a reader interface for cached objects.
+// For disk-backed objects, it caches the BlockEncryptor and ObjectBlockState
+// at construction time so that Read/ReadAt calls do not need to look them up
+// through the TTL caches on every call.
 type ObjectReader struct {
 	sm           *StorageManager
 	instanceHash InstanceHash
@@ -1103,6 +1835,8 @@ type ObjectReader struct {
 	length       int64
 	file         *refCountedFile // ref-counted handle from the TTL cache; nil for inline objects
 	inlineData   []byte
+	encryptor    *BlockEncryptor   // cached from getDiskCrypto; nil for inline
+	blockState   *ObjectBlockState // cached from GetSharedBlockState; nil for inline
 }
 
 // NewObjectReader creates a reader for a cached object
@@ -1131,6 +1865,20 @@ func (sm *StorageManager) NewObjectReader(instanceHash InstanceHash) (*ObjectRea
 		}
 		reader.inlineData = data
 	} else {
+		// Cache the encryptor so Read/ReadAt skip the getDiskCrypto TTL lookup.
+		dc, err := sm.getDiskCrypto(instanceHash)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get disk crypto")
+		}
+		reader.encryptor = dc.encryptor
+
+		// Cache the block state so Read/ReadAt skip the GetSharedBlockState TTL lookup.
+		bs, err := sm.GetSharedBlockState(instanceHash)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get block state")
+		}
+		reader.blockState = bs
+
 		// Acquire a ref-counted handle from the TTL cache.  This keeps the
 		// underlying FD alive for the lifetime of the reader (even if the
 		// cache evicts the entry) and shares the handle with concurrent
@@ -1145,6 +1893,58 @@ func (sm *StorageManager) NewObjectReader(instanceHash InstanceHash) (*ObjectRea
 	return reader, nil
 }
 
+// readDiskDirect reads and decrypts blocks directly into dst using the
+// ObjectReader's cached encryptor, blockState, and file handle.  This avoids
+// the per-call TTL cache lookups that ReadBlocks performs (getDiskCrypto,
+// GetSharedBlockState, getFile) and eliminates the intermediate buffer
+// allocation + copy.
+//
+// For chunked objects the method falls back to sm.readBlocksChunked (which
+// still benefits from the cached encryptor/blockState) because those reads
+// need to open multiple chunk files.
+func (r *ObjectReader) readDiskDirect(dst []byte, off int64) (int, error) {
+	meta := r.meta
+	encryptor := r.encryptor
+	length := len(dst)
+
+	endOffset := off + int64(length)
+	if endOffset > meta.ContentLength {
+		endOffset = meta.ContentLength
+	}
+	actualLen := int(endOffset - off)
+	if actualLen <= 0 {
+		return 0, nil
+	}
+
+	startBlock := ContentOffsetToBlock(off)
+	endBlock := ContentOffsetToBlock(endOffset - 1)
+
+	// Verify blocks are downloaded.
+	if !r.blockState.ContainsRange(startBlock, endBlock) {
+		missing := r.blockState.MissingInRange(startBlock, endBlock)
+		if len(missing) > 0 {
+			return 0, errors.Errorf("block %d not yet downloaded", missing[0])
+		}
+		return 0, errors.New("blocks not yet downloaded")
+	}
+
+	if meta.IsChunked() {
+		// Chunked objects need to open multiple chunk files; use the
+		// "into" variant that writes directly into dst with pooled readBuf.
+		return r.sm.readBlocksChunkedInto(r.instanceHash, meta, encryptor, dst[:actualLen], off)
+	}
+
+	// Non-chunked fast path: read directly into dst using r.file.
+	return r.readSimpleInto(dst[:actualLen], off)
+}
+
+// readSimpleInto reads and decrypts blocks from a non-chunked object directly
+// into dst.  It delegates to decryptBlocksFromFile which uses a pooled read
+// buffer.
+func (r *ObjectReader) readSimpleInto(dst []byte, off int64) (int, error) {
+	return decryptBlocksFromFile(r.file.File(), r.meta.ContentLength, r.encryptor, dst, off, r.sm.ptCache, r.instanceHash, 0)
+}
+
 // Read implements io.Reader
 func (r *ObjectReader) Read(p []byte) (n int, err error) {
 	if r.position >= r.length {
@@ -1156,6 +1956,19 @@ func (r *ObjectReader) Read(p []byte) (n int, err error) {
 		toRead = int(r.length - r.position)
 	}
 
+	// Align to block boundaries so every block hits the zero-copy
+	// DecryptBlockTo path inside decryptBlocksFromFile.  Returning fewer
+	// bytes than len(p) (a "short read") is legal per io.Reader and
+	// causes io.Copy / io.CopyN to simply call Read again.
+	if toRead > BlockDataSize {
+		if off := ContentOffsetWithinBlock(r.position); off == 0 {
+			toRead = (toRead / BlockDataSize) * BlockDataSize
+		} else {
+			// Mid-block: finish the current block to re-align.
+			toRead = BlockDataSize - off
+		}
+	}
+
 	if r.meta.IsInline() {
 		n = copy(p[:toRead], r.inlineData[r.position:])
 		r.position += int64(n)
@@ -1165,13 +1978,11 @@ func (r *ObjectReader) Read(p []byte) (n int, err error) {
 		return n, nil
 	}
 
-	// Disk-based reading
-	data, err := r.sm.ReadBlocks(r.instanceHash, r.position, toRead)
+	// Fast path: read directly into p using cached encryptor, blockState, and file handle.
+	n, err = r.readDiskDirect(p[:toRead], r.position)
 	if err != nil {
 		return 0, err
 	}
-
-	n = copy(p, data)
 	r.position += int64(n)
 
 	if r.position >= r.length {
@@ -1239,17 +2050,64 @@ func (r *ObjectReader) ReadAt(p []byte, off int64) (n int, err error) {
 		return n, nil
 	}
 
-	data, err := r.sm.ReadBlocks(r.instanceHash, off, toRead)
+	// Fast path: read directly into p using cached state.
+	n, err = r.readDiskDirect(p[:toRead], off)
 	if err != nil {
 		return 0, err
 	}
-
-	n = copy(p, data)
 	if off+int64(n) >= r.length {
 		return n, io.EOF
 	}
 
 	return n, nil
+}
+
+// writeToReadBatchBlocks is the number of blocks to read per disk I/O
+// when streaming via WriteTo.  64 blocks × 4080 B ≈ 255 KB of plaintext
+// per write — much larger than the 32 KB buffer io.Copy uses by default.
+const writeToReadBatchBlocks = 64
+
+// WriteTo implements io.WriterTo.  When io.Copy detects this interface it
+// calls WriteTo directly instead of issuing many small Read calls with a
+// 32 KB default buffer.  This lets the ObjectReader control the batch
+// size, reading and decrypting many blocks at once and writing the
+// plaintext to w in large chunks.
+func (r *ObjectReader) WriteTo(w io.Writer) (int64, error) {
+	if r.position >= r.length {
+		return 0, nil
+	}
+
+	if r.meta.IsInline() {
+		n, err := w.Write(r.inlineData[r.position:r.length])
+		r.position += int64(n)
+		return int64(n), err
+	}
+
+	bufSize := writeToReadBatchBlocks * BlockDataSize
+	obp := writeToOutBufPool.Get().(*[]byte)
+	buf := *obp
+	defer writeToOutBufPool.Put(obp)
+
+	var total int64
+	for r.position < r.length {
+		toRead := min(int(r.length-r.position), bufSize)
+
+		n, err := r.readDiskDirect(buf[:toRead], r.position)
+		if err != nil {
+			return total, err
+		}
+
+		written, werr := w.Write(buf[:n])
+		total += int64(written)
+		r.position += int64(written)
+		if werr != nil {
+			return total, werr
+		}
+		if written != n {
+			return total, io.ErrShortWrite
+		}
+	}
+	return total, nil
 }
 
 // Size returns the total size of the object
@@ -1566,7 +2424,7 @@ func (bw *BlockWriter) Close() error {
 	// the cache and then Release the writer's ref.
 	if bw.sm.fdCacheMaxSize > 0 {
 		bw.file.Acquire() // for the cache
-		bw.sm.openFiles.Set(bw.instanceHash, bw.file, ttlcache.DefaultTTL)
+		bw.sm.openFiles.Set(chunkFileKey{instanceHash: bw.instanceHash, chunkIndex: 0}, bw.file, ttlcache.DefaultTTL)
 	}
 	bw.file.Release() // writer's ref
 

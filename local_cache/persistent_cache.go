@@ -424,6 +424,11 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		DirConfigs: evictionDirCfgs,
 	})
 
+	// Wire chunk allocation to use the eviction manager's weighted
+	// directory selection (proportional to free space per directory).
+	// Safe: this runs during single-threaded init, before any downloads.
+	storage.chooseDir = eviction.ChooseDiskStorage
+
 	// Initialize consistency checker
 	consistency := NewConsistencyChecker(db, storage, ConsistencyConfig{
 		MinAgeForCleanup: -1, // Use default grace period
