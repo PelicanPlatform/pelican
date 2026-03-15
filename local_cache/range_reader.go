@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -237,9 +238,14 @@ func NewRangeReader(
 		if !meta.IsChunked() {
 			rc, err := storage.getFile(instanceHash, meta.StorageID)
 			if err != nil {
-				return nil, errors.Wrap(err, "failed to open object file")
+				if !errors.Is(err, os.ErrNotExist) {
+					return nil, errors.Wrap(err, "failed to open object file")
+				}
+				// File was removed from disk — leave rr.file nil so the
+				// first read triggers auto-repair instead of failing here.
+			} else {
+				rr.file = rc
 			}
-			rr.file = rc
 		}
 	}
 
@@ -499,6 +505,14 @@ func (rr *RangeReader) repairAndRetry(ctx context.Context, startBlock, endBlock 
 	// Repair succeeded — allow future reads to repair additional blocks if
 	// the corrupt set was capped.
 	rr.repairAttempted = false
+
+	// Re-open the file handle if it was nil (file was recreated on disk).
+	if rr.file == nil && !rr.meta.IsChunked() {
+		if rc, err := rr.storage.getFile(rr.instanceHash, rr.meta.StorageID); err == nil {
+			rr.file = rc
+		}
+	}
+
 	return data, nil
 }
 
@@ -543,6 +557,10 @@ func (rr *RangeReader) readDiskDirect(dst []byte, off int64) (int, error) {
 
 	if meta.IsChunked() {
 		return rr.storage.readBlocksChunkedInto(rr.instanceHash, meta, encryptor, dst[:actualLen], off)
+	}
+
+	if rr.file == nil {
+		return 0, errors.New("object file is missing from disk")
 	}
 
 	return decryptBlocksFromFile(rr.file.File(), meta.ContentLength, encryptor, dst[:actualLen], off, rr.storage.ptCache, rr.instanceHash, 0)
