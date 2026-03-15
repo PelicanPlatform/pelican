@@ -1730,9 +1730,18 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 		}
 	}
 
-	// Resolve the destination director information
+	// Resolve the destination director information, using the cache when available.
 	tj.directorUrl = copyDestUrl.FedInfo.DirectorEndpoint
-	dirResp, err := GetDirectorInfoForPath(tj.ctx, &copyDestUrl, http.MethodPut, "")
+	var dirResp server_structs.DirectorResponse
+	if tc.engine != nil && tc.engine.dirRespCache != nil {
+		copyDestUrlRef := &copyDestUrl
+		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyDestUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+			resp, qErr := getDirectorInfoForPath(ctx, copyDestUrlRef, http.MethodPut, "", false)
+			return resp, resp.XPelNsHdr.Namespace, qErr
+		})
+	} else {
+		dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyDestUrl, http.MethodPut, "")
+	}
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for destination URL %s", dest.String())
@@ -1757,11 +1766,23 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 			}
 			tj.dirResp = dirResp
 			tj.token.DirResp = &dirResp
+			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
+				tc.engine.dirRespCache.Store(dirResp.XPelNsHdr.Namespace, copyDestUrl.Path, dirResp)
+			}
 		}
 	}
 
-	// Resolve the source director information
-	srcDirResp, err := GetDirectorInfoForPath(tj.ctx, &copySrcUrl, http.MethodGet, "")
+	// Resolve the source director information, using the cache when available.
+	var srcDirResp server_structs.DirectorResponse
+	if tc.engine != nil && tc.engine.dirRespCache != nil {
+		copySrcUrlRef := &copySrcUrl
+		srcDirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copySrcUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+			resp, qErr := getDirectorInfoForPath(ctx, copySrcUrlRef, http.MethodGet, "", false)
+			return resp, resp.XPelNsHdr.Namespace, qErr
+		})
+	} else {
+		srcDirResp, err = GetDirectorInfoForPath(tj.ctx, &copySrcUrl, http.MethodGet, "")
+	}
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for source URL %s", src.String())
@@ -1785,6 +1806,9 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 			}
 			tj.srcDirResp = srcDirResp
 			tj.srcToken.DirResp = &srcDirResp
+			if tc.engine != nil && tc.engine.dirRespCache != nil && srcDirResp.XPelNsHdr.Namespace != "" {
+				tc.engine.dirRespCache.Store(srcDirResp.XPelNsHdr.Namespace, copySrcUrl.Path, srcDirResp)
+			}
 		}
 	} else {
 		tj.srcToken = nil
