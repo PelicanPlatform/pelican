@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -37,3 +39,7 @@ The 'install' command downloads and installs rclone if it is not
 already available on the system.`,
 	}
 )
+
+func init() {
+	rootCmd.AddCommand(rcloneCmd)
+}

@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
@@ -2703,4 +2704,162 @@ func TestNilOrEmptyServerDowntimes(t *testing.T) {
 	_, exists = filteredServers[serverName]
 	filteredServersMutex.RUnlock()
 	assert.False(t, exists, "serverFiltered should be cleared when downtimes is an empty array []")
+}
+
+// TestValidateClientToken exercises the Director's expired-token detection logic.
+func TestValidateClientToken(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	// Generate a signing key for creating test JWTs.
+	privEC, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	jwkKey, err := jwk.FromRaw(privEC)
+	require.NoError(t, err)
+	require.NoError(t, jwkKey.Set(jwk.KeyIDKey, "test-key"))
+	require.NoError(t, jwkKey.Set(jwk.AlgorithmKey, jwa.ES256))
+
+	// Helper to create a signed JWT with the given iat and exp.
+	makeToken := func(t *testing.T, iat, exp time.Time) string {
+		t.Helper()
+		builder := jwt.NewBuilder().
+			Issuer("https://test-issuer.example").
+			Subject("test-user").
+			Claim("scope", "storage.read:/")
+		if !iat.IsZero() {
+			builder = builder.IssuedAt(iat)
+		}
+		if !exp.IsZero() {
+			builder = builder.Expiration(exp)
+		}
+		tok, err := builder.Build()
+		require.NoError(t, err)
+		signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, jwkKey))
+		require.NoError(t, err)
+		return string(signed)
+	}
+
+	requestId := uuid.New()
+
+	t.Run("no-token-passes", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/test/file", nil)
+
+		status, err := validateClientToken(c, requestId)
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusOK, status)
+	})
+
+	t.Run("valid-token-passes", func(t *testing.T) {
+		now := time.Now()
+		tok := makeToken(t, now.Add(-1*time.Minute), now.Add(10*time.Minute))
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/test/file", nil)
+		c.Request.Header.Set("Authorization", "Bearer "+tok)
+
+		status, err := validateClientToken(c, requestId)
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusOK, status)
+	})
+
+	t.Run("expired-token-returns-401", func(t *testing.T) {
+		now := time.Now()
+		tok := makeToken(t, now.Add(-10*time.Minute), now.Add(-5*time.Minute))
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/test/file", nil)
+		c.Request.Header.Set("Authorization", "Bearer "+tok)
+
+		status, err := validateClientToken(c, requestId)
+		assert.Error(t, err)
+		assert.Equal(t, http.StatusUnauthorized, status)
+		assert.Contains(t, w.Header().Get("WWW-Authenticate"), "Bearer")
+	})
+
+	t.Run("nearly-expired-within-grace-returns-401", func(t *testing.T) {
+		now := time.Now()
+		// Token expires in 3 seconds — well within the 10-second default grace
+		tok := makeToken(t, now.Add(-5*time.Minute), now.Add(3*time.Second))
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/test/file", nil)
+		c.Request.Header.Set("Authorization", "Bearer "+tok)
+
+		status, err := validateClientToken(c, requestId)
+		assert.Error(t, err)
+		assert.Equal(t, http.StatusUnauthorized, status)
+	})
+
+	t.Run("short-lived-token-half-lifetime-grace", func(t *testing.T) {
+		now := time.Now()
+		// 4-second lifetime, 3 seconds elapsed → 1 second left, grace = 2s → rejected
+		tok := makeToken(t, now.Add(-3*time.Second), now.Add(1*time.Second))
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/test/file", nil)
+		c.Request.Header.Set("Authorization", "Bearer "+tok)
+
+		status, err := validateClientToken(c, requestId)
+		assert.Error(t, err)
+		assert.Equal(t, http.StatusUnauthorized, status)
+	})
+
+	t.Run("negative-lifetime-exp-before-iat-returns-401", func(t *testing.T) {
+		now := time.Now()
+		// Malformed: exp is before iat
+		tok := makeToken(t, now.Add(-1*time.Minute), now.Add(-2*time.Minute))
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/test/file", nil)
+		c.Request.Header.Set("Authorization", "Bearer "+tok)
+
+		status, err := validateClientToken(c, requestId)
+		assert.Error(t, err)
+		assert.Equal(t, http.StatusUnauthorized, status)
+	})
+
+	t.Run("authz-query-param-expired-returns-401", func(t *testing.T) {
+		now := time.Now()
+		tok := makeToken(t, now.Add(-10*time.Minute), now.Add(-5*time.Minute))
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/test/file?authz="+tok, nil)
+
+		status, err := validateClientToken(c, requestId)
+		assert.Error(t, err)
+		assert.Equal(t, http.StatusUnauthorized, status)
+	})
+
+	t.Run("non-jwt-opaque-token-passes", func(t *testing.T) {
+		// Opaque tokens can't be parsed as JWT — should be allowed through
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/test/file", nil)
+		c.Request.Header.Set("Authorization", "Bearer not-a-jwt-token")
+
+		status, err := validateClientToken(c, requestId)
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusOK, status)
+	})
+
+	t.Run("token-without-exp-passes", func(t *testing.T) {
+		// A token with no expiration claim should pass
+		tok := makeToken(t, time.Now(), time.Time{})
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/test/file", nil)
+		c.Request.Header.Set("Authorization", "Bearer "+tok)
+
+		status, err := validateClientToken(c, requestId)
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusOK, status)
+	})
 }
