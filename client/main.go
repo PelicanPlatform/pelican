@@ -868,7 +868,7 @@ func doThirdPartyCopy(ctx context.Context, sourceURL *url.URL, destURL *url.URL,
 		return
 	}
 
-	tj, err := tc.NewCopyJob(ctx, sourceURL, destURL, options...)
+	tj, err := tc.NewCopyJob(ctx, sourceURL, destURL, recursive, options...)
 	if err != nil {
 		return
 	}
