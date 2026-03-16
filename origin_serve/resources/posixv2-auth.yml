@@ -1,0 +1,8 @@
+# POSIXv2 origin with authenticated reads and writes for TPC testing
+Origin:
+  StorageType: "posixv2"
+  EnableDirectReads: true
+  Exports:
+    - StoragePrefix: /<SHOULD BE OVERRIDDEN>
+      FederationPrefix: /test/tpc
+      Capabilities: ["Reads", "Writes", "DirectReads", "Listings"]
