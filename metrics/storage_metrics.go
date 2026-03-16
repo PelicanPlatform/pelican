@@ -35,108 +35,108 @@ var (
 	StorageReadsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_reads_total",
 		Help: "Total number of read operations on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageWritesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_writes_total",
 		Help: "Total number of write operations on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageStatsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_stats_total",
 		Help: "Total number of stat operations on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageMkdirsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_mkdirs_total",
 		Help: "Total number of mkdir operations on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageRenamesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_renames_total",
 		Help: "Total number of rename operations on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageUnlinksTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_unlinks_total",
 		Help: "Total number of unlink operations on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageTruncatesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_truncates_total",
 		Help: "Total number of truncate operations on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageOpensTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_opens_total",
 		Help: "Total number of open operations on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageClosesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_closes_total",
 		Help: "Total number of close operations on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageReaddirTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_readdir_total",
 		Help: "Total number of readdir operations on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageChmodsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_chmods_total",
 		Help: "Total number of chmod operations on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	// Slow operation counters (>2s)
 	StorageSlowReadsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_slow_reads_total",
 		Help: "Total number of slow read operations (>2s) on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageSlowWritesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_slow_writes_total",
 		Help: "Total number of slow write operations (>2s) on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageSlowStatsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_slow_stats_total",
 		Help: "Total number of slow stat operations (>2s) on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageSlowMkdirsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_slow_mkdirs_total",
 		Help: "Total number of slow mkdir operations (>2s) on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageSlowRenamesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_slow_renames_total",
 		Help: "Total number of slow rename operations (>2s) on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageSlowUnlinksTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_slow_unlinks_total",
 		Help: "Total number of slow unlink operations (>2s) on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageSlowTruncatesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_slow_truncates_total",
 		Help: "Total number of slow truncate operations (>2s) on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageSlowOpensTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_slow_opens_total",
 		Help: "Total number of slow open operations (>2s) on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageSlowReaddirTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_slow_readdir_total",
 		Help: "Total number of slow readdir operations (>2s) on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageSlowChmodsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_slow_chmods_total",
 		Help: "Total number of slow chmod operations (>2s) on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	// Timing histograms
 	StorageHistogramBuckets = prometheus.ExponentialBuckets(0.00001, 2, 20) // 10µs to ~10s
@@ -145,67 +145,67 @@ var (
 		Name:    "pelican_storage_read_time_seconds",
 		Help:    "Time taken for read operations on the storage layer",
 		Buckets: StorageHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageWriteTime = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_write_time_seconds",
 		Help:    "Time taken for write operations on the storage layer",
 		Buckets: StorageHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageStatTime = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_stat_time_seconds",
 		Help:    "Time taken for stat operations on the storage layer",
 		Buckets: StorageHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageMkdirTime = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_mkdir_time_seconds",
 		Help:    "Time taken for mkdir operations on the storage layer",
 		Buckets: StorageHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageRenameTime = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_rename_time_seconds",
 		Help:    "Time taken for rename operations on the storage layer",
 		Buckets: StorageHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageUnlinkTime = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_unlink_time_seconds",
 		Help:    "Time taken for unlink operations on the storage layer",
 		Buckets: StorageHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageTruncateTime = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_truncate_time_seconds",
 		Help:    "Time taken for truncate operations on the storage layer",
 		Buckets: StorageHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageOpenTime = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_open_time_seconds",
 		Help:    "Time taken for open operations on the storage layer",
 		Buckets: StorageHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageCloseTime = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_close_time_seconds",
 		Help:    "Time taken for close operations on the storage layer",
 		Buckets: StorageHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageReaddirTime = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_readdir_time_seconds",
 		Help:    "Time taken for readdir operations on the storage layer",
 		Buckets: StorageHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageChmodTime = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_chmod_time_seconds",
 		Help:    "Time taken for chmod operations on the storage layer",
 		Buckets: StorageHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	// Slow operation timing histograms (>2s)
 	StorageSlowHistogramBuckets = prometheus.ExponentialBuckets(2.0, 2, 15) // 2s to ~32768s
@@ -214,144 +214,144 @@ var (
 		Name:    "pelican_storage_slow_read_time_seconds",
 		Help:    "Time taken for slow read operations (>2s) on the storage layer",
 		Buckets: StorageSlowHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageSlowWriteTime = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_slow_write_time_seconds",
 		Help:    "Time taken for slow write operations (>2s) on the storage layer",
 		Buckets: StorageSlowHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageSlowStatTime = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_slow_stat_time_seconds",
 		Help:    "Time taken for slow stat operations (>2s) on the storage layer",
 		Buckets: StorageSlowHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageSlowMkdirTime = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_slow_mkdir_time_seconds",
 		Help:    "Time taken for slow mkdir operations (>2s) on the storage layer",
 		Buckets: StorageSlowHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageSlowRenameTime = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_slow_rename_time_seconds",
 		Help:    "Time taken for slow rename operations (>2s) on the storage layer",
 		Buckets: StorageSlowHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageSlowUnlinkTime = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_slow_unlink_time_seconds",
 		Help:    "Time taken for slow unlink operations (>2s) on the storage layer",
 		Buckets: StorageSlowHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageSlowTruncateTime = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_slow_truncate_time_seconds",
 		Help:    "Time taken for slow truncate operations (>2s) on the storage layer",
 		Buckets: StorageSlowHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageSlowOpenTime = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_slow_open_time_seconds",
 		Help:    "Time taken for slow open operations (>2s) on the storage layer",
 		Buckets: StorageSlowHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageSlowReaddirTime = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_slow_readdir_time_seconds",
 		Help:    "Time taken for slow readdir operations (>2s) on the storage layer",
 		Buckets: StorageSlowHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageSlowChmodTime = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_slow_chmod_time_seconds",
 		Help:    "Time taken for slow chmod operations (>2s) on the storage layer",
 		Buckets: StorageSlowHistogramBuckets,
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	// Byte counters
 	StorageBytesRead = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_bytes_read_total",
 		Help: "Total bytes read from the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageBytesWritten = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_bytes_written_total",
 		Help: "Total bytes written to the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	// Active operation gauges
 	StorageActiveReads = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pelican_storage_active_reads",
 		Help: "Number of currently active read operations",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageActiveWrites = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pelican_storage_active_writes",
 		Help: "Number of currently active write operations",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageActiveIO = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pelican_storage_active_io",
 		Help: "Total number of currently active I/O operations",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	// Cumulative time counters
 	StorageReadTimeTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_read_time_seconds_total",
 		Help: "Cumulative time spent in read operations on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageWriteTimeTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_write_time_seconds_total",
 		Help: "Cumulative time spent in write operations on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageIOTimeTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_io_time_seconds_total",
 		Help: "Cumulative time spent in all I/O operations on the storage layer",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	// Error counters
 	StorageReadErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_read_errors_total",
 		Help: "Total number of failed read operations",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageWriteErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_write_errors_total",
 		Help: "Total number of failed write operations",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageOpenErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_open_errors_total",
 		Help: "Total number of failed open operations",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	// Size histograms
 	StorageReadSizes = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_read_bytes",
 		Help:    "Distribution of read operation sizes in bytes",
 		Buckets: prometheus.ExponentialBuckets(1024, 4, 12), // 1KB to ~16MB
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageWriteSizes = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pelican_storage_write_bytes",
 		Help:    "Distribution of write operation sizes in bytes",
 		Buckets: prometheus.ExponentialBuckets(1024, 4, 12), // 1KB to ~16MB
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	// Rate limiter metrics (POSIXv2 only, but using same structure for consistency)
 	StorageRateLimitWaitsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_rate_limit_waits_total",
 		Help: "Total number of times operations had to wait for rate limiter tokens",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 
 	StorageRateLimitWaitTime = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_storage_rate_limit_wait_seconds_total",
 		Help: "Cumulative time spent waiting for rate limiter tokens",
-	}, []string{"backend"})
+	}, []string{"backend", "username"})
 )
 
 // Backend label values

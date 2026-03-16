@@ -265,7 +265,7 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 			return errors.Wrap(err, "failed to initialize origin_serve auth config")
 		}
 
-		if err := origin_serve.InitializeHandlers(originExports); err != nil {
+		if err := origin_serve.InitializeHandlers(ctx, originExports); err != nil {
 			return errors.Wrap(err, "failed to initialize origin_serve handlers")
 		}
 

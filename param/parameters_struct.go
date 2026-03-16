@@ -311,6 +311,8 @@ type Config struct {
 		IssuerMode string `mapstructure:"issuermode" yaml:"IssuerMode"`
 		Mode string `mapstructure:"mode" yaml:"Mode"`
 		Multiuser bool `mapstructure:"multiuser" yaml:"Multiuser"`
+		MultiuserMinID int `mapstructure:"multiuserminid" yaml:"MultiuserMinID"`
+		MultiuserUmask int `mapstructure:"multiuserumask" yaml:"MultiuserUmask"`
 		NamespacePrefix string `mapstructure:"namespaceprefix" yaml:"NamespacePrefix"`
 		ObjectProviderURL string `mapstructure:"objectproviderurl" yaml:"ObjectProviderURL"`
 		Port int `mapstructure:"port" yaml:"Port"`
@@ -779,6 +781,8 @@ type configWithType struct {
 		IssuerMode struct { Type string; Value string }
 		Mode struct { Type string; Value string }
 		Multiuser struct { Type string; Value bool }
+		MultiuserMinID struct { Type string; Value int }
+		MultiuserUmask struct { Type string; Value int }
 		NamespacePrefix struct { Type string; Value string }
 		ObjectProviderURL struct { Type string; Value string }
 		Port struct { Type string; Value int }

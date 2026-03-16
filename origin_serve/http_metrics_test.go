@@ -76,7 +76,7 @@ func TestHTTPMetricsMiddlewareBasic(t *testing.T) {
 	router := setupTestServer()
 
 	// Get initial metric values
-	initialRequests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, "GET", "200"))
+	initialRequests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, "GET", "200", ""))
 
 	// Make a GET request
 	req := httptest.NewRequest("GET", "/test", nil)
@@ -88,7 +88,7 @@ func TestHTTPMetricsMiddlewareBasic(t *testing.T) {
 	assert.Equal(t, "Hello World", w.Body.String())
 
 	// Verify request metric incremented
-	requests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, "GET", "200"))
+	requests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, "GET", "200", ""))
 	assert.Greater(t, requests, initialRequests, "Request count should increment for GET/200")
 }
 
@@ -101,7 +101,7 @@ func TestHTTPMetricsMiddlewareErrorTracking(t *testing.T) {
 	router := setupTestServer()
 
 	// Get initial error count
-	initialErrors := promtest.ToFloat64(metrics.HttpErrorsTotal.WithLabelValues(originServerType, "GET", "500"))
+	initialErrors := promtest.ToFloat64(metrics.HttpErrorsTotal.WithLabelValues(originServerType, "GET", "500", ""))
 
 	// Make a request that returns 500
 	req := httptest.NewRequest("GET", "/error", nil)
@@ -112,11 +112,11 @@ func TestHTTPMetricsMiddlewareErrorTracking(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 
 	// Verify error metric incremented
-	errors := promtest.ToFloat64(metrics.HttpErrorsTotal.WithLabelValues(originServerType, "GET", "500"))
+	errors := promtest.ToFloat64(metrics.HttpErrorsTotal.WithLabelValues(originServerType, "GET", "500", ""))
 	assert.Greater(t, errors, initialErrors, "Error count should increment for 5xx responses")
 
 	// Verify request metric also incremented
-	requests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, "GET", "500"))
+	requests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, "GET", "500", ""))
 	assert.Greater(t, requests, float64(0), "Request count should track 5xx responses")
 }
 
@@ -128,8 +128,8 @@ func TestHTTPMetricsByteTracking(t *testing.T) {
 	router := setupTestServer()
 
 	// Get initial byte counts
-	initialBytesIn := promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(originServerType, metrics.DirectionIn, "PUT"))
-	initialBytesOut := promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(originServerType, metrics.DirectionOut, "PUT"))
+	initialBytesIn := promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(originServerType, metrics.DirectionIn, "PUT", ""))
+	initialBytesOut := promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(originServerType, metrics.DirectionOut, "PUT", ""))
 
 	// Upload data
 	testData := []byte(strings.Repeat("A", 1000)) // 1000 bytes
@@ -142,11 +142,11 @@ func TestHTTPMetricsByteTracking(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	// Verify bytes in tracked
-	bytesIn := promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(originServerType, metrics.DirectionIn, "PUT"))
+	bytesIn := promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(originServerType, metrics.DirectionIn, "PUT", ""))
 	assert.GreaterOrEqual(t, bytesIn-initialBytesIn, float64(1000), "Should track bytes sent in request")
 
 	// Verify bytes out tracked
-	bytesOut := promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(originServerType, metrics.DirectionOut, "PUT"))
+	bytesOut := promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(originServerType, metrics.DirectionOut, "PUT", ""))
 	assert.Greater(t, bytesOut, initialBytesOut, "Should track bytes sent in response")
 }
 
@@ -159,8 +159,8 @@ func TestHTTPMetricsLargeTransfers(t *testing.T) {
 	router := setupTestServer()
 
 	// Get initial large transfer counts
-	initialLargeTransfers := promtest.ToFloat64(metrics.HttpLargeTransfersTotal.WithLabelValues(originServerType, "PUT"))
-	initialLargeBytes := promtest.ToFloat64(metrics.HttpLargeTransferBytes.WithLabelValues(originServerType, metrics.DirectionIn, "PUT"))
+	initialLargeTransfers := promtest.ToFloat64(metrics.HttpLargeTransfersTotal.WithLabelValues(originServerType, "PUT", ""))
+	initialLargeBytes := promtest.ToFloat64(metrics.HttpLargeTransferBytes.WithLabelValues(originServerType, metrics.DirectionIn, "PUT", ""))
 
 	// Create a large upload (>100MB) using a zero reader
 	largeSize := int64(150 * 1024 * 1024) // 150MB
@@ -172,11 +172,11 @@ func TestHTTPMetricsLargeTransfers(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	// Verify large transfer metric incremented
-	largeTransfers := promtest.ToFloat64(metrics.HttpLargeTransfersTotal.WithLabelValues(originServerType, "PUT"))
+	largeTransfers := promtest.ToFloat64(metrics.HttpLargeTransfersTotal.WithLabelValues(originServerType, "PUT", ""))
 	assert.Greater(t, largeTransfers, initialLargeTransfers, "Should track large transfers >100MB")
 
 	// Verify large transfer bytes tracked
-	largeBytes := promtest.ToFloat64(metrics.HttpLargeTransferBytes.WithLabelValues(originServerType, metrics.DirectionIn, "PUT"))
+	largeBytes := promtest.ToFloat64(metrics.HttpLargeTransferBytes.WithLabelValues(originServerType, metrics.DirectionIn, "PUT", ""))
 	assert.GreaterOrEqual(t, largeBytes-initialLargeBytes, float64(largeSize), "Should track bytes for large transfers")
 }
 
@@ -202,7 +202,7 @@ func TestHTTPMetricsRequestDuration(t *testing.T) {
 	// Verify duration histogram was updated
 	// We can't easily check the exact duration, but we can verify the metric exists
 	// by checking the count (which is part of the histogram)
-	metric := metrics.HttpRequestDuration.WithLabelValues(originServerType, "GET", "200")
+	metric := metrics.HttpRequestDuration.WithLabelValues(originServerType, "GET", "200", "")
 	observer, ok := metric.(prometheus.Observer)
 	require.True(t, ok, "HttpRequestDuration should be an Observer")
 	require.NotNil(t, observer, "HttpRequestDuration should not be nil")
@@ -221,7 +221,7 @@ func TestHTTPMetricsMultipleMethods(t *testing.T) {
 	expectedCodes := []int{200, 200, 204}
 
 	for i, method := range methods {
-		initialRequests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, method, http.StatusText(expectedCodes[i])))
+		initialRequests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, method, http.StatusText(expectedCodes[i]), ""))
 
 		req := httptest.NewRequest(method, paths[i], nil)
 		w := httptest.NewRecorder()
@@ -230,7 +230,7 @@ func TestHTTPMetricsMultipleMethods(t *testing.T) {
 		// Convert status code to string for metric label
 		statusStr := fmt.Sprintf("%d", expectedCodes[i])
 
-		requests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, method, statusStr))
+		requests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, method, statusStr, ""))
 		assert.Greater(t, requests, initialRequests, "Should track %s requests", method)
 	}
 }
@@ -295,8 +295,8 @@ func TestHTTPMetricsLabels(t *testing.T) {
 	// Verify metrics can be queried with server_type="origin" label
 	// This will panic if labels are incorrect
 
-	_ = promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, "GET", "200"))
-	_ = promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(originServerType, metrics.DirectionIn, "GET"))
-	_ = promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(originServerType, metrics.DirectionOut, "GET"))
+	_ = promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, "GET", "200", ""))
+	_ = promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(originServerType, metrics.DirectionIn, "GET", ""))
+	_ = promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(originServerType, metrics.DirectionOut, "GET", ""))
 	_ = promtest.ToFloat64(metrics.HttpActiveRequests.WithLabelValues(originServerType, "GET"))
 }

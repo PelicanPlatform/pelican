@@ -38,6 +38,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/identity"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -460,33 +461,39 @@ func httpMetricsMiddleware() gin.HandlerFunc {
 		status := c.Writer.Status()
 		statusStr := fmt.Sprintf("%d", status)
 
+		// Extract username from context (set by authMiddleware)
+		username := ""
+		if ui := getUserInfo(c.Request.Context()); ui != nil {
+			username = ui.User
+		}
+
 		// Track request completion
-		metrics.HttpRequestsTotal.WithLabelValues(serverTypeOrigin, method, statusStr).Inc()
-		metrics.HttpRequestDuration.WithLabelValues(serverTypeOrigin, method, statusStr).Observe(duration)
+		metrics.HttpRequestsTotal.WithLabelValues(serverTypeOrigin, method, statusStr, username).Inc()
+		metrics.HttpRequestDuration.WithLabelValues(serverTypeOrigin, method, statusStr, username).Observe(duration)
 
 		// Track bytes in (actual bytes read from request body)
 		if mrr.bytesRead > 0 {
-			metrics.HttpBytesTotal.WithLabelValues(serverTypeOrigin, metrics.DirectionIn, method).Add(float64(mrr.bytesRead))
+			metrics.HttpBytesTotal.WithLabelValues(serverTypeOrigin, metrics.DirectionIn, method, username).Add(float64(mrr.bytesRead))
 		}
 
 		// Track bytes out
 		if mrw.bytesWritten > 0 {
-			metrics.HttpBytesTotal.WithLabelValues(serverTypeOrigin, metrics.DirectionOut, method).Add(float64(mrw.bytesWritten))
+			metrics.HttpBytesTotal.WithLabelValues(serverTypeOrigin, metrics.DirectionOut, method, username).Add(float64(mrw.bytesWritten))
 		}
 
 		// Track large transfers (>100MB)
 		if mrr.bytesRead >= metrics.LargeTransferThreshold {
-			metrics.HttpLargeTransfersTotal.WithLabelValues(serverTypeOrigin, method).Inc()
-			metrics.HttpLargeTransferBytes.WithLabelValues(serverTypeOrigin, metrics.DirectionIn, method).Add(float64(mrr.bytesRead))
+			metrics.HttpLargeTransfersTotal.WithLabelValues(serverTypeOrigin, method, username).Inc()
+			metrics.HttpLargeTransferBytes.WithLabelValues(serverTypeOrigin, metrics.DirectionIn, method, username).Add(float64(mrr.bytesRead))
 		}
 		if mrw.bytesWritten >= metrics.LargeTransferThreshold {
-			metrics.HttpLargeTransfersTotal.WithLabelValues(serverTypeOrigin, method).Inc()
-			metrics.HttpLargeTransferBytes.WithLabelValues(serverTypeOrigin, metrics.DirectionOut, method).Add(float64(mrw.bytesWritten))
+			metrics.HttpLargeTransfersTotal.WithLabelValues(serverTypeOrigin, method, username).Inc()
+			metrics.HttpLargeTransferBytes.WithLabelValues(serverTypeOrigin, metrics.DirectionOut, method, username).Add(float64(mrw.bytesWritten))
 		}
 
 		// Track errors (5xx status codes)
 		if status >= 500 && status < 600 {
-			metrics.HttpErrorsTotal.WithLabelValues(serverTypeOrigin, method, statusStr).Inc()
+			metrics.HttpErrorsTotal.WithLabelValues(serverTypeOrigin, method, statusStr, username).Inc()
 		}
 
 		// Close the transfer monitor. On success, emit the final isClose
@@ -511,7 +518,7 @@ func httpMetricsMiddleware() gin.HandlerFunc {
 }
 
 // InitializeHandlers initializes the WebDAV handlers for each export
-func InitializeHandlers(exports []server_utils.OriginExport) error {
+func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport) error {
 	// Validate that if DisableDirectClients is enabled, no exports have DirectReads
 	if param.Origin_DisableDirectClients.GetBool() {
 		for _, export := range exports {
@@ -686,7 +693,20 @@ func InitializeHandlers(exports []server_utils.OriginExport) error {
 			}
 
 			autoFs := newAutoCreateDirFs(localFs)
-			fs := newAferoFileSystem(autoFs, "", logger)
+			var fs webdav.FileSystem = newAferoFileSystem(autoFs, "", logger)
+
+			// Wrap with multiuser filesystem if configured
+			if param.Origin_Multiuser.GetBool() {
+				minID := uint32(param.Origin_MultiuserMinID.GetInt())
+				umask := param.Origin_MultiuserUmask.GetInt()
+				lookup := identity.NewLookup(identity.WithMinID(minID))
+				fs, err = newMultiuserFileSystem(ctx, fs, lookup, umask)
+				if err != nil {
+					return fmt.Errorf("failed to create multiuser filesystem for %s: %w", export.FederationPrefix, err)
+				}
+				log.Infof("Multiuser filesystem enabled for %s (minID=%d, umask=%04o)", export.FederationPrefix, minID, umask)
+			}
+
 			backend = newLocalBackend(fs, export.StoragePrefix)
 		}
 
