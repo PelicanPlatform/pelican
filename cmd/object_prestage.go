@@ -202,7 +202,7 @@ func prestageMain(cmd *cobra.Command, args []string) {
 	pb := newProgressBar()
 	defer pb.shutdown()
 
-	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode()&os.ModeCharDevice) != 0 && param.Logging_LogLocation.GetString() == "" && !param.Logging_DisableProgressBars.GetBool() {
+	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode()&os.ModeCharDevice) != 0 && param.Logging_LogLocation.GetString() == "" && !param.Logging_Client_DisableProgressBars.GetBool() {
 		pb.launchDisplay(ctx)
 	}
 
