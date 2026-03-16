@@ -4341,7 +4341,7 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 		return
 	}
 	resolvedDestUrl := *xfer.job.dirResp.ObjectServers[0]
-	resolvedDestUrl.Path = path.Clean(xfer.remoteURL.Path)
+	resolvedDestUrl.Path = computeUploadDestPath(xfer.remoteURL.Path, resolvedDestUrl.Path)
 	resolvedDestUrl.RawQuery = xfer.remoteURL.RawQuery
 
 	log.Debugln("Copying object from", xfer.attempts[0].Url.String(), "to", resolvedDestUrl.String())
