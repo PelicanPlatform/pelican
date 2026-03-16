@@ -172,9 +172,9 @@ func TestSchemeUnderstood(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.scheme, func(t *testing.T) {
-			ok := schemeUnderstood(tt.scheme)
+			ok := IsPelicanScheme(tt.scheme)
 			if ok != tt.understood {
-				t.Errorf("schemeUnderstood(%v) = %v; want %v", tt.scheme, ok, tt.understood)
+				t.Errorf("IsPelicanScheme(%v) = %v; want %v", tt.scheme, ok, tt.understood)
 			}
 		})
 	}
