@@ -19,6 +19,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -128,6 +130,45 @@ func GenErrorCodes() {
 
 	if err != nil {
 		panic(fmt.Sprintf("%v: failed to execute template for error_codes.go", err))
+	}
+
+	writeErrorCodesJSON(values)
+}
+
+func writeErrorCodesJSON(values []interface{}) {
+	fullJSONBytes, err := json.Marshal(values)
+	if err != nil {
+		panic(fmt.Sprintf("%v: failed to marshal error_codes yaml to json", err))
+	}
+
+	var prettyJSON bytes.Buffer
+	if err := json.Indent(&prettyJSON, fullJSONBytes, "", "\t"); err != nil {
+		panic(fmt.Sprintf("%v: failed to format generated error_codes json", err))
+	}
+
+	outputPaths := []string{
+		"../web_ui/frontend/public/data/error_codes.json",
+		"../docs/error_codes.json",
+	}
+
+	for _, outputPath := range outputPaths {
+		if _, err := os.Stat(outputPath); err == nil {
+			existingJSONBytes, err := os.ReadFile(outputPath)
+			if err != nil {
+				panic(fmt.Sprintf("%v: failed to read existing error_codes json", err))
+			}
+			if bytes.Equal(existingJSONBytes, prettyJSON.Bytes()) {
+				continue
+			}
+		}
+
+		if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+			panic(fmt.Sprintf("%v: failed to ensure output directory for error_codes json", err))
+		}
+
+		if err := os.WriteFile(outputPath, prettyJSON.Bytes(), 0644); err != nil {
+			panic(fmt.Sprintf("%v: failed to write error_codes json", err))
+		}
 	}
 }
 
