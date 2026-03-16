@@ -36,6 +36,7 @@ type Config struct {
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DefaultCacheTimeout time.Duration `mapstructure:"defaultcachetimeout" yaml:"DefaultCacheTimeout"`
 		DirectorTest bool `mapstructure:"directortest" yaml:"DirectorTest"`
+		DisableClientX509 bool `mapstructure:"disableclientx509" yaml:"DisableClientX509"`
 		EnableBroker bool `mapstructure:"enablebroker" yaml:"EnableBroker"`
 		EnableEvictionMonitoring bool `mapstructure:"enableevictionmonitoring" yaml:"EnableEvictionMonitoring"`
 		EnableLotman bool `mapstructure:"enablelotman" yaml:"EnableLotman"`
@@ -449,6 +450,7 @@ type configWithType struct {
 		DbLocation struct { Type string; Value string }
 		DefaultCacheTimeout struct { Type string; Value time.Duration }
 		DirectorTest struct { Type string; Value bool }
+		DisableClientX509 struct { Type string; Value bool }
 		EnableBroker struct { Type string; Value bool }
 		EnableEvictionMonitoring struct { Type string; Value bool }
 		EnableLotman struct { Type string; Value bool }

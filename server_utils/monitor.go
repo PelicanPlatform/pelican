@@ -28,6 +28,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -51,11 +52,16 @@ func notifyNewDirectorResponse(ctx context.Context, nChan chan bool) {
 	}
 }
 
+func directorTestEnabled() bool {
+	return (config.IsServerEnabled(server_structs.OriginType) && param.Origin_DirectorTest.GetBool()) ||
+		(config.IsServerEnabled(server_structs.CacheType) && param.Cache_DirectorTest.GetBool())
+}
+
 // Launch a go routine in errorgroup to report timeout if director-based health test
 // response was not sent within the defined time limit
 func LaunchPeriodicDirectorTimeout(ctx context.Context, egrp *errgroup.Group, nChan chan bool) {
-	if !param.Cache_DirectorTest.GetBool() && !param.Origin_DirectorTest.GetBool() {
-		metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusOK, "Origin.DirectorTest and Cache.DirectorTest are set to false. No director tests expected.")
+	if !directorTestEnabled() {
+		metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusOK, "Director tests are disabled. No director tests expected.")
 		return
 	}
 	directorTimeoutTicker := time.NewTicker(directorTimeoutDuration)
@@ -89,6 +95,15 @@ func LaunchPeriodicDirectorTimeout(ctx context.Context, egrp *errgroup.Group, nC
 // origins for testing. It sends a request reporting the status of the test result to this endpoint,
 // and we will update origin internal health status metric by what director returns.
 func HandleDirectorTestResponse(ctx *gin.Context, nChan chan bool) {
+
+	if !directorTestEnabled() {
+		ctx.JSON(http.StatusNotImplemented, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Director tests are disabled; test results will be ignored.",
+		})
+		return
+	}
+
 	status, ok, err := token.Verify(ctx, token.AuthOption{
 		Sources: []token.TokenSource{token.Header},
 		Issuers: []token.TokenIssuer{token.FederationIssuer},
@@ -98,15 +113,6 @@ func HandleDirectorTestResponse(ctx *gin.Context, nChan chan bool) {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprint("Failed to verify the token: ", err),
-		})
-		return
-	}
-
-	// Check if director tests are enabled based on server type
-	if !param.Origin_DirectorTest.GetBool() && !param.Cache_DirectorTest.GetBool() {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Origin.DirectorTest and Cache.DirectorTest are set to false. Reject the test result.",
 		})
 		return
 	}

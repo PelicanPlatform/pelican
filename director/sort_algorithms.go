@@ -289,7 +289,7 @@ func availabilityWeightFn(ad server_structs.ServerAd, availMap map[string]bool, 
 		return 1.0, true
 	}
 
-	avail, ok := availMap[ad.Name]
+	avail, ok := availMap[ad.URL.String()]
 	if !ok {
 		return 0, false
 	}

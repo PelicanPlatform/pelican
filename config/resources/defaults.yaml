@@ -74,6 +74,7 @@ Cache:
   HighWaterMark: 95
   BlocksToPrefetch: 0
   EnableTLSClientAuth: false
+  DisableClientX509: true
   EnableEvictionMonitoring: true
 Lotman:
   EnabledPolicy: "fairshare"
@@ -90,6 +91,9 @@ LocalCache:
   LowWaterMarkPercentage: 85
 Origin:
   DirectorTest: true
+  DiskUsageCalculationDelay: 5m
+  DiskUsageCalculationInterval: 24h
+  DiskUsageCalculationRateLimit: 1000
   Multiuser: false
   EnableMacaroons: false
   EnableVoms: true
@@ -112,6 +116,9 @@ Monitoring:
   LabelNameLengthLimit: 128
   LabelValueLengthLimit: 2048
   SampleLimit: 200
+  StorageHealthCheckInterval: 5m
+  StorageWarningThreshold: 80
+  StorageCriticalThreshold: 90
 Shoveler:
   MessageQueueProtocol: amqp
   PortLower: 9930
