@@ -368,14 +368,35 @@ func (fs *httpsFileSystem) ensureParentDirs(ctx context.Context, name string) er
 
 	// Create from shallowest missing toward deepest.
 	for i := firstMissingIdx - 1; i >= 0; i-- {
-		err := fs.Mkdir(ctx, prefixes[i], 0755)
-		if err != nil {
+		var lastErr error
+		for attempt := 0; attempt < 5; attempt++ {
+			lastErr = fs.Mkdir(ctx, prefixes[i], 0755)
+			if lastErr == nil {
+				break
+			}
 			// Tolerate "already exists" (405 Method Not Allowed in WebDAV) in
 			// case a concurrent writer created the directory between our Stat
 			// and Mkdir calls.
-			if !gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
-				return fmt.Errorf("failed to create directory %q: %w", prefixes[i], err)
+			if gowebdav.IsErrCode(lastErr, http.StatusMethodNotAllowed) {
+				lastErr = nil
+				break
 			}
+			// A 423 Locked response means a concurrent MKCOL is in progress
+			// on the same resource.  Retry after a short backoff; the lock
+			// will be released once the other writer finishes.
+			if gowebdav.IsErrCode(lastErr, http.StatusLocked) {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(100 * time.Millisecond * time.Duration(attempt+1)):
+				}
+				continue
+			}
+			// Any other error is fatal.
+			return fmt.Errorf("failed to create directory %q: %w", prefixes[i], lastErr)
+		}
+		if lastErr != nil {
+			return fmt.Errorf("failed to create directory %q after retries: %w", prefixes[i], lastErr)
 		}
 	}
 
