@@ -192,19 +192,21 @@ func (a AuthCheckImpl) checkFederationIssuer(c *gin.Context, strToken string, ex
 	return nil
 }
 
-// Checks that the given token was signed by the local issuer on the server
+// Checks that the given token was signed by the local issuer on the server.
+// The expected issuer comes from config.GetLocalIssuerUrl() which accounts
+// for the co-located origin+director case.
 func (a AuthCheckImpl) checkLocalIssuer(c *gin.Context, strToken string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
 	token, err := jwt.Parse([]byte(strToken), jwt.WithVerify(false))
 	if err != nil {
 		return errors.Wrap(err, "Invalid JWT")
 	}
 
-	serverURL := param.Server_ExternalWebUrl.GetString()
-	if serverURL != token.Issuer() {
+	localIssuer := config.GetLocalIssuerUrl()
+	if localIssuer != token.Issuer() {
 		if param.Origin_Url.GetString() == token.Issuer() {
 			return errors.New(fmt.Sprintf("Wrong issuer %s; expect the issuer to be the server's web address but got Origin.URL", token.Issuer()))
 		} else {
-			return errors.New(fmt.Sprintf("Token issuer %s does not match the local issuer on the current server. Expecting %s", token.Issuer(), serverURL))
+			return errors.New(fmt.Sprintf("Token issuer %s does not match the local issuer on the current server. Expecting %s", token.Issuer(), localIssuer))
 		}
 	}
 

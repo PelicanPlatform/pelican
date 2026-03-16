@@ -133,7 +133,7 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 		URL: &url.URL{},
 	}
 
-	issuerUrl := param.Server_ExternalWebUrl.GetString()
+	issuerUrl := config.GetLocalIssuerUrl()
 	promTokenCfg := token.NewWLCGToken()
 
 	promTokenCfg.Lifetime = 10 * time.Minute
@@ -193,7 +193,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
-	issuerUrl := param.Server_ExternalWebUrl.GetString()
+	issuerUrl := config.GetLocalIssuerUrl()
 
 	// Shared function to create a token
 	createToken := func(scope, aud string) string {

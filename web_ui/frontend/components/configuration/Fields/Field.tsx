@@ -23,6 +23,8 @@ import {
   ParameterInputProps,
   PolicyDefinition,
   PolicyDefinitionForm,
+  StorageDir,
+  StorageDirForm,
   StringField,
   StringSliceField,
 } from '@/components/configuration';
@@ -207,6 +209,17 @@ const Field = ({
               value={value as PolicyDefinition[]}
               Form={PolicyDefinitionForm}
               keyGetter={(v) => v.policyname}
+            />
+          );
+        case 'StorageDirs':
+          return (
+            <ObjectField
+              focused={focused}
+              onChange={handleChange<StorageDir[]>}
+              name={name}
+              value={value as StorageDir[]}
+              Form={StorageDirForm}
+              keyGetter={(v) => v.path}
             />
           );
         default:

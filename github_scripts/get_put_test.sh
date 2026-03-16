@@ -176,7 +176,7 @@ do
 done
 
 # Make a token to be used (now that federation is running)
-./pelican token create "pelican://$DISCOVERY_HOSTPORT/test" --read --write --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "$SERVER_EXTERNAL_WEB_URL" --subject "origin"  --profile "wlcg" --lifetime 60 > "$GET_PUT_TOKEN"
+./pelican token create "pelican://$DISCOVERY_HOSTPORT/test" --read --write --audience "https://wlcg.cern.ch/jwt/v1/any" --subject "origin"  --profile "wlcg" --lifetime 60 > "$GET_PUT_TOKEN"
 
 echo "Token created"
 cat "$GET_PUT_TOKEN"
