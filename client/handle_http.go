@@ -1698,12 +1698,15 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 		remoteURL:      &copyDestUrl,
 		callback:       tc.callback,
 		skipAcquire:    tc.skipAcquire,
+		dryRun:         tc.dryRun,
 		syncLevel:      tc.syncLevel,
 		xferType:       transferTypeCopy,
 		uuid:           id,
 		project:        project,
 		token:          NewTokenGenerator(&copyDestUrl, nil, config.TokenSharedWrite, !tc.skipAcquire),
 	}
+	tj.fedToken = tc.fedToken
+	tj.cacheMode = tc.cacheMode
 	tj.srcURL = src
 	tj.srcToken = NewTokenGenerator(&copySrcUrl, nil, config.TokenSharedRead, !tc.skipAcquire)
 	if tc.token != "" {
@@ -1729,12 +1732,24 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 			tj.token.EnableAcquire = option.Value().(bool)
 		case identTransferOptionToken{}:
 			tj.token.SetToken(option.Value().(string))
+		case identTransferOptionFedToken{}:
+			tj.fedToken = option.Value().(TokenProvider)
 		case identTransferOptionSourceToken{}:
 			tj.srcToken.SetToken(option.Value().(string))
 		case identTransferOptionSourceTokenLocation{}:
 			tj.srcToken.SetTokenLocation(option.Value().(string))
 		case identTransferOptionSynchronize{}:
 			tj.syncLevel = option.Value().(SyncLevel)
+		case identTransferOptionChecksums{}:
+			tj.requestedChecksums = option.Value().([]ChecksumType)
+		case identTransferOptionRequireChecksum{}:
+			tj.requireChecksum = option.Value().(bool)
+		case identTransferOptionDryRun{}:
+			tj.dryRun = option.Value().(bool)
+		case identTransferOptionMetadataChannel{}:
+			tj.metadataChan = option.Value().(chan<- TransferMetadata)
+		case identTransferOptionCacheEmbeddedClientMode{}:
+			tj.cacheMode = option.Value().(bool)
 		}
 	}
 
@@ -3098,11 +3113,23 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 		err = &sce
 		return
 	}
-	ctr := 0
-	var val string
-	for _, val = range response.Header.Values("Digest") {
+	result = parseDigestHeader(response.Header, fields)
+	if len(result) == 0 {
+		log.WithFields(fields).Debugln("Server returned no checksum information")
+	}
+	return
+}
+
+// parseDigestHeader parses RFC 3230 Digest response headers and returns
+// the parsed checksum values.  It accepts multiple Digest header values
+// and comma-separated entries within a single value.
+// The optional fields parameter provides structured logging context.
+func parseDigestHeader(header http.Header, fields log.Fields) (result []ChecksumInfo) {
+	if fields == nil {
+		fields = log.Fields{}
+	}
+	for _, val := range header.Values("Digest") {
 		for _, entry := range strings.Split(val, ",") {
-			ctr++
 			info := strings.SplitN(entry, "=", 2)
 			if len(info) != 2 {
 				continue
@@ -3113,7 +3140,7 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 				log.WithFields(fields).Warningln("Unknown checksum algorithm:", info[0])
 				continue
 			}
-			val := make([]byte, 32)
+			buf := make([]byte, 32)
 			switch info[0] {
 			case "crc32c":
 				// XRootD has a bug where crc32c is base64 encoded instead (per the spec)
@@ -3122,8 +3149,8 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 				// See: https://github.com/xrootd/xrootd/issues/2456
 				if len(info[1]) == 8 && info[1][6] == 0x3d && info[1][7] == 0x3d {
 					decoder := base64.NewDecoder(base64.StdEncoding, bytes.NewReader([]byte(info[1])))
-					if _, err := decoder.Read(val); err == nil {
-						checksumInfo.Value = val[:4]
+					if _, err := decoder.Read(buf); err == nil {
+						checksumInfo.Value = buf[:4]
 						break
 					} else {
 						log.WithFields(fields).Errorf("Failed to parse base64-encoded checksum value (%s): %s", info[1], err)
@@ -3147,11 +3174,11 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 				// are hex-encoded and should accept leading 0's.  Once parsed, store the
 				// corresponding bytes in network order (big-endian) in our byte array.
 				if intVal, err := strconv.ParseInt(info[1], 16, 64); err == nil {
-					val[0] = byte((intVal >> 24) & 0xff)
-					val[1] = byte((intVal >> 16) & 0xff)
-					val[2] = byte((intVal >> 8) & 0xff)
-					val[3] = byte(intVal & 0xff)
-					checksumInfo.Value = val[:4]
+					buf[0] = byte((intVal >> 24) & 0xff)
+					buf[1] = byte((intVal >> 16) & 0xff)
+					buf[2] = byte((intVal >> 8) & 0xff)
+					buf[3] = byte(intVal & 0xff)
+					checksumInfo.Value = buf[:4]
 				} else {
 					log.WithFields(fields).Errorf("Failed to parse %s checksum value (%s): %s", info[0], info[1], err)
 					continue
@@ -3160,22 +3187,19 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 				fallthrough
 			case "sha":
 				decoder := base64.NewDecoder(base64.StdEncoding, bytes.NewReader([]byte(info[1])))
-				if count, err := decoder.Read(val); err != nil {
+				if count, err := decoder.Read(buf); err != nil {
 					log.WithFields(fields).Errorf("Failed to parse %s checksum value (%s): %s", info[0], info[1], err)
 					continue
 				} else {
-					val = val[:count]
+					buf = buf[:count]
 				}
-				checksumInfo.Value = val
+				checksumInfo.Value = buf
 			default:
 				log.WithFields(fields).Warningf("Unknown checksum algorithm: %s", info[0])
 				continue
 			}
 			result = append(result, checksumInfo)
 		}
-	}
-	if ctr == 0 {
-		log.WithFields(fields).Debugln("Server returned no checksum information")
 	}
 	return
 }
@@ -4316,6 +4340,12 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 	log.Debugln("Copying object from", xfer.attempts[0].Url.String(), "to", resolvedDestUrl.String())
 	transferResults = newTransferResults(xfer.job)
 
+	// In dry-run mode, log what would be copied and return success
+	if xfer.job != nil && xfer.job.dryRun {
+		fmt.Printf("COPY: %s -> %s\n", xfer.attempts[0].Url.String(), resolvedDestUrl.String())
+		return transferResults, nil
+	}
+
 	lastUpdate := time.Now()
 	if xfer.callback != nil {
 		xfer.callback(xfer.remoteURL.String(), 0, 0, false)
@@ -4370,6 +4400,17 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 		}
 	}
 	req.Header.Set("User-Agent", getUserAgent(xfer.project))
+	// If checksums were requested, add Want-Digest to the HEAD so we can compare after the COPY
+	if len(xfer.requestedChecksums) > 0 {
+		val := ""
+		for i, cksum := range xfer.requestedChecksums {
+			if i > 0 {
+				val += ","
+			}
+			val += HttpDigestFromChecksum(cksum)
+		}
+		req.Header.Set("Want-Digest", val)
+	}
 	log.Debugln("Starting the HEAD request to the HTTP Third Party Copy source...")
 	resp, err := client.Do(req)
 	if err != nil {
@@ -4387,6 +4428,39 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 		log.Warningln("Third-party-copy source", xfer.attempts[0].Url.String(), "is of unknown size; download statistics may be incorrect")
 	}
 	attempt.ServerVersion = resp.Header.Get("Server")
+
+	// Parse source checksums from the HEAD response Digest header
+	var sourceChecksums []ChecksumInfo
+	if len(xfer.requestedChecksums) > 0 {
+		sourceChecksums = parseDigestHeader(resp.Header, nil)
+		if len(sourceChecksums) > 0 {
+			transferResults.ServerChecksums = sourceChecksums
+			log.Debugln("Source checksums retrieved for TPC verification:", len(sourceChecksums), "checksum(s)")
+		} else {
+			log.Debugln("Source did not return any Digest headers for TPC checksum verification")
+		}
+	}
+
+	// Send early metadata from the HEAD response if a channel was provided
+	if xfer.metadataChan != nil {
+		metadata := TransferMetadata{
+			ContentLength: totalSize,
+			ObjectSize:    totalSize,
+			ETag:          resp.Header.Get("ETag"),
+			ContentType:   resp.Header.Get("Content-Type"),
+			CacheControl:  resp.Header.Get("Cache-Control"),
+		}
+		if lmStr := resp.Header.Get("Last-Modified"); lmStr != "" {
+			if lm, parseErr := http.ParseTime(lmStr); parseErr == nil {
+				metadata.LastModified = lm
+			}
+		}
+		select {
+		case xfer.metadataChan <- metadata:
+		default:
+			log.Debugln("Metadata channel full, skipping early metadata send for TPC")
+		}
+	}
 
 	// COPY request to the destination
 	req, err = http.NewRequestWithContext(ctx, "COPY", resolvedDestUrl.String(), nil)
@@ -4481,6 +4555,41 @@ MessageHandler:
 
 	if err == nil && totalSize >= 0 {
 		transferResults.TransferredBytes = totalSize
+	}
+
+	// After a successful TPC, verify checksums if requested
+	if err == nil && len(sourceChecksums) > 0 {
+		destTkn := ""
+		if tkn, tErr := xfer.token.Get(); tErr == nil {
+			destTkn = tkn
+		}
+		destChecksums, cErr := fetchChecksum(ctx, xfer.requestedChecksums, &resolvedDestUrl, destTkn, xfer.project)
+		if cErr != nil {
+			log.Warningln("Could not retrieve destination checksums for TPC verification:", cErr)
+		} else {
+			transferResults.ClientChecksums = destChecksums
+			// Compare: for each source checksum, see if the destination has a matching algorithm+value
+			for _, srcCksum := range sourceChecksums {
+				for _, destCksum := range destChecksums {
+					if srcCksum.Algorithm == destCksum.Algorithm {
+						if !bytes.Equal(srcCksum.Value, destCksum.Value) {
+							log.Errorf("TPC checksum mismatch for %s: source %x != destination %x",
+								HttpDigestFromChecksum(srcCksum.Algorithm), srcCksum.Value, destCksum.Value)
+							if xfer.requireChecksum {
+								err = &ChecksumMismatchError{
+									Info:        srcCksum,
+									ServerValue: destCksum.Value,
+								}
+								return
+							}
+						} else {
+							log.Debugln("TPC checksum verified for", HttpDigestFromChecksum(srcCksum.Algorithm))
+						}
+						break
+					}
+				}
+			}
+		}
 	}
 
 	return
