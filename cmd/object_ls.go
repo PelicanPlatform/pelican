@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"sort"
 	"strconv"
 	"text/tabwriter"
 
@@ -155,6 +156,11 @@ func listMain(cmd *cobra.Command, args []string) error {
 		}
 		filteredInfos = append(filteredInfos, info)
 	}
+
+	// Sort entries lexicographically by base name, matching standard ls behavior.
+	sort.Slice(filteredInfos, func(i, j int) bool {
+		return path.Base(filteredInfos[i].Name) < path.Base(filteredInfos[j].Name)
+	})
 
 	// Take our fileInfos and print them in a nice way
 	// if the -l flag was set, we print more information
