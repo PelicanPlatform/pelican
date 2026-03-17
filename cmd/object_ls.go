@@ -21,8 +21,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path"
+	"sort"
 	"strconv"
 	"text/tabwriter"
 
@@ -156,6 +158,11 @@ func listMain(cmd *cobra.Command, args []string) error {
 		filteredInfos = append(filteredInfos, info)
 	}
 
+	// Sort entries lexicographically by base name, matching standard ls behavior.
+	sort.Slice(filteredInfos, func(i, j int) bool {
+		return path.Base(filteredInfos[i].Name) < path.Base(filteredInfos[j].Name)
+	})
+
 	// Take our fileInfos and print them in a nice way
 	// if the -l flag was set, we print more information
 	if long {
@@ -170,8 +177,7 @@ func listMain(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 		for _, info := range filteredInfos {
-			// If not json formats, just print out the information in a clean way
-			fmt.Fprintln(w, info.Name+"\t"+strconv.FormatInt(info.Size, 10)+"\t"+info.ModTime.Format("2006-01-02 15:04:05"))
+			fmt.Fprintln(w, formatLongEntry(info))
 		}
 		w.Flush()
 	} else if asJSON {
@@ -194,30 +200,63 @@ func listMain(cmd *cobra.Command, args []string) error {
 			}
 			return nil
 		}
-		// We print using a tabwriter to enhance readability of the listed files and to make things look nicer
-		totalColumns := 4
-		// column is a counter letting us know what item/column we are on
-		var column int
-		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
-		var line string
-		for _, info := range filteredInfos {
-			line += path.Base(info.Name)
-			//increase our counter
-			column++
+		// Determine terminal width; fall back to 80 if unavailable.
+		termWidth := 80
+		if width, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && width > 0 {
+			termWidth = width
+		}
 
-			// This section just checks if we go thru <numColumns> times, we print a newline. Otherwise, add the object to the current line with a tab after
-			if column%totalColumns == 0 {
-				fmt.Fprintln(w, line)
-				line = ""
-			} else {
-				line += "\t"
-			}
+		names := make([]string, len(filteredInfos))
+		for i, info := range filteredInfos {
+			names[i] = path.Base(info.Name)
 		}
-		// If we have anything remaining in line, print it
-		if line != "" {
-			fmt.Fprintln(w, line)
-		}
-		w.Flush()
+		printColumns(os.Stdout, names, termWidth)
 	}
 	return nil
+}
+
+// formatLongEntry formats a single FileInfo as a tab-separated row for the
+// long listing (-l) output.  The row has four tab-delimited fields:
+//
+// <name>  <size>  <mod-time>
+//
+// <size> is the decimal byte count for objects; "DIR" for directory/prefix,
+// whose sizes are backend-dependent and not meaningful to the user.
+func formatLongEntry(info client.FileInfo) string {
+	sizeField := strconv.FormatInt(info.Size, 10)
+	if info.IsCollection {
+		sizeField = "DIR"
+	}
+	return info.Name + "\t" + sizeField + "\t" + info.ModTime.Format("2006-01-02 15:04:05")
+}
+
+// printColumns writes names to w in a multi-column layout that fits within
+// termWidth characters.  Each column is sized to the longest name plus two
+// spaces of padding.  Falls back to one entry per line when there is only one
+// column or the list is empty.
+func printColumns(w io.Writer, names []string, termWidth int) {
+	if len(names) == 0 {
+		return
+	}
+
+	const minPadding = 2
+	maxNameLen := 0
+	for _, name := range names {
+		if n := len(name); n > maxNameLen {
+			maxNameLen = n
+		}
+	}
+	colWidth := maxNameLen + minPadding
+	numCols := termWidth / colWidth
+	if numCols < 1 {
+		numCols = 1
+	}
+
+	for i, name := range names {
+		if (i+1)%numCols == 0 || i == len(names)-1 {
+			fmt.Fprintln(w, name)
+		} else {
+			fmt.Fprintf(w, "%-*s", colWidth, name)
+		}
+	}
 }
