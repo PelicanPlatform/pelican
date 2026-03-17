@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, University of Nebraska-Lincoln
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -36,6 +36,7 @@ import (
 type PermissionDeniedError struct {
 	message string
 	expired bool
+	noToken bool // true when no token was sent (e.g., public namespace via stale cache)
 }
 
 func (e *PermissionDeniedError) Error() string {
@@ -151,12 +152,12 @@ func (te *TransferErrors) UserError() string {
 
 // IsRetryable will return true if the error is retryable
 func IsRetryable(err error) bool {
-	// Special case: PermissionDeniedError has dynamic retryability based on token expiration
-	// Check this before the general PelicanError check since it's always wrapped but needs special handling
-	// If the token is expired, we can retry because we'll get a new token
+	// Special case: PermissionDeniedError has dynamic retryability based on token state.
+	// Check this before the general PelicanError check since it's always wrapped but needs special handling.
+	// Retryable if: token was expired (we'll get a new one) or no token was sent (we may try with one).
 	var pde *PermissionDeniedError
 	if errors.As(err, &pde) {
-		return pde.expired
+		return pde.expired || pde.noToken
 	}
 
 	// Check if it contains a TLS AlertError, which should always be retryable

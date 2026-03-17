@@ -3347,17 +3347,18 @@ func TestWrapDownloadError(t *testing.T) {
 		assert.Contains(t, wrappedPde.message, "token expired", "Message should indicate token expired")
 	})
 
-	t.Run("permission_denied_error_invalid_token", func(t *testing.T) {
-		emptyToken := ""
+	t.Run("permission_denied_error_no_token", func(t *testing.T) {
+		// When no token was sent (e.g., public namespace accessed via a cache that doesn't know about it),
+		// the error message should accurately reflect that no token was sent rather than claiming a parse error.
 		pde := &PermissionDeniedError{}
-		wrappedErr, _, _ := wrapDownloadError(pde, transferEndpointURL, emptyToken)
+		wrappedErr, _, _ := wrapDownloadError(pde, transferEndpointURL, "")
 
 		var wrappedPde *PermissionDeniedError
 		require.True(t, errors.As(wrappedErr, &wrappedPde), "Should contain PermissionDeniedError")
-		// With empty/invalid token, it should say "token could not be parsed"
-		assert.Contains(t, wrappedPde.message, "token could not be parsed", "Message should indicate parsing error")
-		assert.False(t, wrappedPde.expired, "Token should not be marked as expired when parsing fails")
-		// Note: The "valid but rejected" case is tested in TestPermissionDeniedError integration test
+		assert.Contains(t, wrappedPde.message, "no token was sent", "Message should indicate no token was sent")
+		assert.False(t, wrappedPde.expired, "Token should not be marked as expired when no token was sent")
+		assert.True(t, wrappedPde.noToken, "noToken should be set when no token was sent")
+		assert.True(t, IsRetryable(wrappedErr), "Should be retryable so client can attempt token acquisition")
 	})
 
 	t.Run("permission_denied_error_invalid_token", func(t *testing.T) {
@@ -3367,6 +3368,8 @@ func TestWrapDownloadError(t *testing.T) {
 		var wrappedPde *PermissionDeniedError
 		require.True(t, errors.As(wrappedErr, &wrappedPde), "Should contain PermissionDeniedError")
 		assert.Contains(t, wrappedPde.message, "token could not be parsed", "Message should indicate parsing error")
+		assert.False(t, wrappedPde.expired, "Token should not be marked as expired when parsing fails")
+		// Note: The "valid but rejected" case is tested in TestPermissionDeniedError integration test
 	})
 
 	t.Run("connection_reset_error", func(t *testing.T) {
