@@ -520,6 +520,13 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
   rm -f /etc/xrootd/client.plugins.d/xrdcl-http-plugin.conf
 ENDRUN
 
+# Install PKCS#11 dependencies required by XRootD when Server.EnablePKCS11 is
+# enabled. These packages provide the OpenSSL 3.x provider and the p11-kit
+# Unix-socket server that Pelican's p11proxy communicates with.
+# Installed here so both the origin and cache images include them.
+RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
+    dnf install -y p11-kit-server pkcs11-provider
+
 #################################################################
 # Origin Software Base
 #
