@@ -22,9 +22,12 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/client"
 )
 
 func TestPrintColumns_Empty(t *testing.T) {
@@ -93,6 +96,64 @@ func TestPrintColumns_ColumnWidthDrivenByLongestName(t *testing.T) {
 	for _, name := range names {
 		assert.Contains(t, output, name)
 	}
+}
+
+func TestFormatLongEntry_RegularFile(t *testing.T) {
+	modTime := time.Date(2025, 5, 5, 19, 4, 2, 0, time.UTC)
+	info := client.FileInfo{
+		Name:         "/ns/empty.txt",
+		Size:         0,
+		ModTime:      modTime,
+		IsCollection: false,
+	}
+	row := formatLongEntry(info)
+	fields := strings.Split(row, "\t")
+	require.Len(t, fields, 3)
+	assert.Equal(t, "/ns/empty.txt", fields[0])
+	assert.Equal(t, "0", fields[1], "size must be '0' for a zero-byte file, not 'DIR'")
+	assert.Equal(t, "2025-05-05 19:04:02", fields[2])
+}
+
+func TestFormatLongEntry_NonEmptyFile(t *testing.T) {
+	modTime := time.Date(2025, 3, 14, 13, 39, 34, 0, time.UTC)
+	info := client.FileInfo{
+		Name:         "/ns/README.txt",
+		Size:         43,
+		ModTime:      modTime,
+		IsCollection: false,
+	}
+	row := formatLongEntry(info)
+	fields := strings.Split(row, "\t")
+	require.Len(t, fields, 3)
+	assert.Equal(t, "/ns/README.txt", fields[0])
+	assert.Equal(t, "43", fields[1])
+}
+
+func TestFormatLongEntry_Collection(t *testing.T) {
+	modTime := time.Date(2025, 5, 5, 19, 6, 26, 0, time.UTC)
+	info := client.FileInfo{
+		Name:         "/ns/sub-directory",
+		Size:         0,
+		ModTime:      modTime,
+		IsCollection: true,
+	}
+	row := formatLongEntry(info)
+	fields := strings.Split(row, "\t")
+	require.Len(t, fields, 3)
+	assert.Equal(t, "/ns/sub-directory", fields[0])
+	assert.Equal(t, "DIR", fields[1], "size must be 'DIR' for a collection, not '0'")
+	assert.Equal(t, "2025-05-05 19:06:26", fields[2])
+}
+
+func TestFormatLongEntry_CollectionVsZeroByteFile_AreDistinguishable(t *testing.T) {
+	ts := time.Date(2025, 5, 5, 0, 0, 0, 0, time.UTC)
+	dir := formatLongEntry(client.FileInfo{Name: "/ns/prefix", Size: 0, ModTime: ts, IsCollection: true})
+	file := formatLongEntry(client.FileInfo{Name: "/ns/empty.txt", Size: 0, ModTime: ts, IsCollection: false})
+	assert.NotEqual(t, dir, file, "a zero-byte file and a collection must produce different output")
+	dirFields := strings.Split(dir, "\t")
+	fileFields := strings.Split(file, "\t")
+	assert.Equal(t, "DIR", dirFields[1], "collection size field must be 'DIR'")
+	assert.Equal(t, "0", fileFields[1], "zero-byte file size field must be '0'")
 }
 
 // nonBlankLines returns non-empty, non-whitespace-only lines from s.

@@ -177,8 +177,7 @@ func listMain(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 		for _, info := range filteredInfos {
-			// If not json formats, just print out the information in a clean way
-			fmt.Fprintln(w, info.Name+"\t"+strconv.FormatInt(info.Size, 10)+"\t"+info.ModTime.Format("2006-01-02 15:04:05"))
+			fmt.Fprintln(w, formatLongEntry(info))
 		}
 		w.Flush()
 	} else if asJSON {
@@ -214,6 +213,21 @@ func listMain(cmd *cobra.Command, args []string) error {
 		printColumns(os.Stdout, names, termWidth)
 	}
 	return nil
+}
+
+// formatLongEntry formats a single FileInfo as a tab-separated row for the
+// long listing (-l) output.  The row has four tab-delimited fields:
+//
+// <name>  <size>  <mod-time>
+//
+// <size> is the decimal byte count for objects; "DIR" for directory/prefix,
+// whose sizes are backend-dependent and not meaningful to the user.
+func formatLongEntry(info client.FileInfo) string {
+	sizeField := strconv.FormatInt(info.Size, 10)
+	if info.IsCollection {
+		sizeField = "DIR"
+	}
+	return info.Name + "\t" + sizeField + "\t" + info.ModTime.Format("2006-01-02 15:04:05")
 }
 
 // printColumns writes names to w in a multi-column layout that fits within
