@@ -709,15 +709,21 @@ func (pc *PersistentCache) resolveObject(
 
 	var dl *persistentDownload
 
-	if meta == nil {
-		if tryRangeInit {
+	// Treat metadata with ContentLength < 0 the same as a cache miss.
+	// An in-progress chunked-encoding download stores metadata early
+	// with ContentLength=-1 (updated only when the download finishes).
+	// Without this check, concurrent requests see the partial metadata,
+	// skip the download path, and fail with "invalid range" because the
+	// content length is negative.
+	if meta == nil || meta.ContentLength < 0 {
+		if meta == nil && tryRangeInit {
 			instanceHash, meta, err = pc.initObjectFromStat(ctx, pelicanURL, objectHash, namespaceID, token)
 			if err != nil {
 				log.Debugf("initObjectFromStat failed, falling back to full download: %v", err)
 				meta = nil
 			}
 		}
-		if meta == nil {
+		if meta == nil || meta.ContentLength < 0 {
 			instanceHash, dl, err = pc.downloadObject(ctx, pelicanURL, objectHash, namespaceID, token)
 			if errors.Is(err, ErrNoStore) && dl != nil && dl.noStoreReader != nil {
 				return &objectResolution{
@@ -737,11 +743,11 @@ func (pc *PersistentCache) resolveObject(
 				return nil, errors.New("download completed but metadata not found")
 			}
 
-			// For unknown-size (chunked encoding) downloads the
-			// metadata is stored with ContentLength=-1 and updated
-			// only when BlockWriter.Close() runs (after the full
-			// transfer finishes).  Wait for the download to complete
-			// so callers see the real ContentLength.
+			// For unknown-size (chunked encoding) downloads, performDownload
+			// issues a HEAD stat to learn the real Content-Length.  If the
+			// HEAD succeeded, metadata already has the correct size and we
+			// skip this block.  If it failed, ContentLength is still -1;
+			// wait for the full download to finish so callers see the real size.
 			if meta.ContentLength < 0 && dl != nil {
 				select {
 				case <-dl.completionDone:
@@ -1566,7 +1572,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 	select {
 	case metadata = <-metadataChan:
 		metadataReceived = true
-		log.Debugf("performDownload: Received early metadata - ContentLength: %d, ETag: %q", metadata.ContentLength, metadata.ETag)
+		log.Debugf("performDownload: Received early metadata - ObjectSize: %d, ETag: %q", metadata.ObjectSize, metadata.ETag)
 	case result := <-resultChan:
 		// Transfer completed before we got metadata (shouldn't happen for successful transfers)
 		if result != nil && result.Error != nil {
@@ -1637,7 +1643,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 				ETag:          dl.etag,
 				LastModified:  dl.lastModified,
 				ContentType:   "application/octet-stream",
-				ContentLength: metadata.ContentLength,
+				ContentLength: metadata.ObjectSize,
 				SourceURL:     dl.sourceURL,
 				NamespaceID:   dl.namespaceID,
 			}
@@ -1664,11 +1670,11 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 		}
 
 		// Make storage decision based on size.
-		// metadata.ContentLength == -1 means the origin used chunked encoding
+		// metadata.ObjectSize == -1 means the origin used chunked encoding
 		// (no Content-Length).  In that case we defer the decision:
 		// block until enough data has been buffered to decide, or
 		// the transfer finishes (whichever comes first).
-		if metadata.ContentLength < 0 {
+		if metadata.ObjectSize < 0 {
 			select {
 			case <-dw.ThresholdReady():
 				// Buffer reached InlineMaxBytes while transfer is still
@@ -1680,6 +1686,39 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 				sharedState, err := pc.storage.GetSharedBlockState(dl.instanceHash)
 				if err == nil {
 					sharedState.SetDownloading()
+				}
+
+				// The origin used chunked encoding (no Content-Length header),
+				// so the real size is unknown.  Issue a HEAD (stat) request to
+				// learn the Content-Length before creating the block fetcher.
+				// This lets concurrent readers proceed immediately with a known
+				// size instead of blocking for the entire download.
+				statOpts := []client.TransferOption{
+					client.WithToken(userToken),
+					client.WithCacheEmbeddedClientMode(),
+				}
+				if fedTP != nil {
+					statOpts = append(statOpts, client.WithFedToken(fedTP))
+				}
+				if statInfo, statErr := client.DoStat(ctx, sourceURL.String(), statOpts...); statErr == nil && statInfo.Size > 0 {
+					// Verify that the HEAD and GET responses refer to the
+					// same object version before trusting the reported size.
+					if statInfo.ETag != "" && dl.etag != "" && statInfo.ETag != dl.etag {
+						log.Warnf("performDownload: ETag mismatch between GET (%s) and HEAD (%s) for %s; ignoring HEAD size", dl.etag, statInfo.ETag, dl.objectHash)
+					} else {
+						log.Debugf("performDownload: HEAD stat returned size %d for %s", statInfo.Size, dl.objectHash)
+						sizeMeta := &CacheMetadata{ContentLength: statInfo.Size}
+						if mergeErr := pc.storage.MergeMetadata(dl.instanceHash, sizeMeta); mergeErr != nil {
+							log.Warnf("Failed to update content length from HEAD: %v", mergeErr)
+						} else {
+							// Invalidate the diskCrypto cache so that the
+							// block fetcher and concurrent readers see the
+							// updated ContentLength instead of -1.
+							pc.storage.diskCrypto.Delete(dl.instanceHash)
+						}
+					}
+				} else if statErr != nil {
+					log.Debugf("performDownload: HEAD stat failed for %s (proceeding with unknown size): %v", dl.objectHash, statErr)
 				}
 			case result := <-resultChan:
 				// Transfer finished before reaching the threshold.
@@ -1702,14 +1741,14 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 			case <-pc.downloadCtx.Done():
 				return pc.downloadCtx.Err()
 			}
-		} else if metadata.ContentLength < int64(pc.storage.InlineMaxBytes()) {
+		} else if metadata.ObjectSize < int64(pc.storage.InlineMaxBytes()) {
 			// Small file - use inline storage
-			if err := dw.SetInlineMode(ctx, metadata.ContentLength); err != nil {
+			if err := dw.SetInlineMode(ctx, metadata.ObjectSize); err != nil {
 				return errors.Wrap(err, "failed to set inline mode")
 			}
 		} else {
 			// Large file - use disk storage
-			if err := dw.SetDiskMode(ctx, metadata.ContentLength); err != nil {
+			if err := dw.SetDiskMode(ctx, metadata.ObjectSize); err != nil {
 				return errors.Wrap(err, "failed to set disk mode")
 			}
 			// Mark the shared block state as having an active download so
