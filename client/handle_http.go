@@ -3284,14 +3284,41 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 			log.Warningln("Failed to read out response body:", err)
 		}
 		headResponse.Body.Close()
-		contentLengthStr := headResponse.Header.Get("Content-Length")
-		if contentLengthStr != "" {
-			totalSize, err = strconv.ParseInt(contentLengthStr, 10, 64)
-			if err != nil {
-				log.WithFields(fields).Errorln("problem converting content-length to an int:", err)
-				totalSize = 0
+
+		// Verify that the HEAD and GET responses refer to the same object
+		// version.  If both provide an ETag and they differ, the object
+		// changed between the two requests and the reported size may not
+		// match the body being streamed.
+		headETag := headResponse.Header.Get("ETag")
+		getETag := resp.Header.Get("ETag")
+		if headETag != "" && getETag != "" && headETag != getETag {
+			log.WithFields(fields).Warnf("ETag mismatch between GET (%s) and HEAD (%s); ignoring HEAD size", getETag, headETag)
+		} else {
+			contentLengthStr := headResponse.Header.Get("Content-Length")
+			if contentLengthStr != "" {
+				totalSize, err = strconv.ParseInt(contentLengthStr, 10, 64)
+				if err != nil {
+					log.WithFields(fields).Errorln("problem converting content-length to an int:", err)
+					totalSize = -1
+				}
 			}
 		}
+	}
+	// When the response uses chunked transfer-encoding, the HTTP layer
+	// reports Content-Length as -1 even though the actual body size is
+	// known from either a byte-range request or the HEAD fallback above.
+	// Reconstruct responseContentLength so the metadata channel reports
+	// the real number of bytes to expect.
+	if responseContentLength < 0 {
+		if byteRangeEnd >= 0 {
+			// Byte-range request: body is exactly (end - start + 1) bytes
+			responseContentLength = byteRangeEnd - bytesSoFar + 1
+		} else if totalSize > 0 {
+			responseContentLength = totalSize - bytesSoFar
+		}
+	}
+	if objectSize < 0 && totalSize > 0 {
+		objectSize = totalSize
 	}
 	if callback != nil {
 		callback(dest, bytesSoFar, totalSize, false)
