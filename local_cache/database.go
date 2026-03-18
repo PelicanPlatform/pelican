@@ -96,7 +96,7 @@ func NewCacheDB(ctx context.Context, baseDir string) (*CacheDB, error) {
 	opts.ValueThreshold = 4096
 
 	// Reduce logging noise
-	opts.Logger = &badgerLogger{}
+	opts.Logger = newBadgerLogger()
 
 	// Encrypt BadgerDB at rest so that metadata (ETags, URLs, timestamps)
 	// stored in LSM tree and WAL files is not readable without the key.
@@ -143,6 +143,68 @@ func (cdb *CacheDB) Close() error {
 		closeErr = cdb.db.Close()
 	})
 	return closeErr
+}
+
+// OpenCacheDBReadOnly opens an existing cache database in read-only mode.
+// This is suitable for CLI introspection tools that need to inspect cache
+// contents without modifying anything.
+//
+// Like NewCacheDB, this requires issuer keys to be available for decrypting
+// the database encryption key.
+func OpenCacheDBReadOnly(baseDir string) (*CacheDB, error) {
+	dbPath := filepath.Join(baseDir, dbSubDir)
+
+	// Initialize encryption manager to get the database key
+	encMgr, err := NewEncryptionManager(baseDir)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to initialize encryption manager")
+	}
+
+	// Configure BadgerDB for read-only access
+	opts := badger.DefaultOptions(dbPath)
+	opts.ReadOnly = true
+	opts.Logger = newBadgerLogger()
+
+	// Derive the database encryption key
+	dbKey, err := encMgr.DeriveDBKey()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to derive database encryption key")
+	}
+	opts.EncryptionKey = dbKey
+	opts.EncryptionKeyRotationDuration = 0
+	opts.IndexCacheSize = 64 << 20 // 64 MB
+
+	// Open the database in read-only mode
+	db, err := badger.Open(opts)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to open BadgerDB in read-only mode")
+	}
+
+	cdb := &CacheDB{
+		db:      db,
+		encMgr:  encMgr,
+		baseDir: baseDir,
+	}
+
+	// Load the hash salt (must exist for read operations to make sense)
+	err = db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte(KeySalt))
+		if err != nil {
+			return err
+		}
+		return item.Value(func(val []byte) error {
+			cdb.salt = make([]byte, len(val))
+			copy(cdb.salt, val)
+			return nil
+		})
+	})
+	if err != nil {
+		db.Close()
+		return nil, errors.Wrap(err, "failed to load hash salt")
+	}
+
+	log.Debugf("Cache database opened in read-only mode at %s", dbPath)
+	return cdb, nil
 }
 
 // StartGC starts the background garbage collection goroutine
@@ -1600,7 +1662,7 @@ func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, max
 		// locations reference storageID.  Skip entries that were
 		// already evicted in Phase 2 (their metadata will be gone).
 		if !limitReached() {
-			nsLRUPrefix := []byte(fmt.Sprintf("%s", PrefixLRU))
+			nsLRUPrefix := fmt.Appendf(nil, "%s", PrefixLRU)
 			opts := badger.DefaultIteratorOptions
 			opts.PrefetchValues = false
 
@@ -1661,22 +1723,28 @@ func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, max
 }
 
 // badgerLogger adapts Pelican's logrus to BadgerDB's logger interface
-type badgerLogger struct{}
+type badgerLogger struct {
+	log *log.Entry
+}
+
+func newBadgerLogger() *badgerLogger {
+	return &badgerLogger{log: log.WithField("component", "BadgerDB")}
+}
 
 func (l *badgerLogger) Errorf(format string, args ...interface{}) {
-	log.Errorf("[BadgerDB] "+format, args...)
+	l.log.Errorf(format, args...)
 }
 
 func (l *badgerLogger) Warningf(format string, args ...interface{}) {
-	log.Warnf("[BadgerDB] "+format, args...)
+	l.log.Warnf(format, args...)
 }
 
 func (l *badgerLogger) Infof(format string, args ...interface{}) {
-	log.Debugf("[BadgerDB] "+format, args...)
+	l.log.Debugf(format, args...)
 }
 
 func (l *badgerLogger) Debugf(format string, args ...interface{}) {
-	log.Tracef("[BadgerDB] "+format, args...)
+	l.log.Tracef(format, args...)
 }
 
 // Verify badgerLogger satisfies the interface

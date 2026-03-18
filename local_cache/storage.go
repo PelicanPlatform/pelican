@@ -599,6 +599,46 @@ func (sm *StorageManager) Close() {
 	}
 }
 
+// NewStorageManagerReadOnly creates a storage manager for read-only introspection.
+// This is a lightweight variant suitable for CLI tools that only need to read
+// metadata and block states, not perform downloads or writes.
+func NewStorageManagerReadOnly(baseDir string, db *CacheDB) (*StorageManager, error) {
+	// Load disk mappings to discover storage directories
+	mappings, err := db.LoadDiskMappings()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to load disk mappings")
+	}
+
+	objDirs := make(map[StorageID]string, len(mappings))
+	for _, dm := range mappings {
+		objDirs[dm.ID] = filepath.Join(dm.Directory, objectsSubDir)
+	}
+
+	// Create minimal caches with no goroutine management
+	sm := &StorageManager{
+		db:             db,
+		dirs:           objDirs,
+		inlineMaxBytes: InlineThreshold,
+		blockStates:    newBlockStateCache(db),
+		diskCrypto: ttlcache.New[InstanceHash, *diskCryptoEntry](
+			ttlcache.WithTTL[InstanceHash, *diskCryptoEntry](diskCryptoTTL),
+		),
+		openFiles: ttlcache.New[chunkFileKey, *refCountedFile](
+			ttlcache.WithTTL[chunkFileKey, *refCountedFile](openFileTTL),
+		),
+	}
+
+	// Set up eviction callback for openFiles
+	sm.openFiles.OnEviction(func(_ context.Context, _ ttlcache.EvictionReason, item *ttlcache.Item[chunkFileKey, *refCountedFile]) {
+		if rc := item.Value(); rc != nil {
+			rc.Release()
+		}
+	})
+
+	log.Debugf("Storage manager opened in read-only mode with %d directories", len(objDirs))
+	return sm, nil
+}
+
 // InlineMaxBytes returns the configured maximum inline object size.
 func (sm *StorageManager) InlineMaxBytes() int {
 	return sm.inlineMaxBytes
