@@ -1407,6 +1407,174 @@ definitions:
         description: Scopes the client is allowed to request
         items:
           type: string
+  CacheObjectInstance:
+    type: object
+    description: A cached instance of an object with a specific ETag
+    properties:
+      instance_hash:
+        type: string
+        description: The unique hash identifying this cached instance
+        example: "a1b2c3d4e5f6"
+      etag:
+        type: string
+        description: The ETag of the object from the origin
+        example: '"abc123"'
+      source_url:
+        type: string
+        description: The URL from which the object was fetched
+        example: "pelican://origin.example.com/data/file.dat"
+      content_length:
+        type: integer
+        format: int64
+        description: Size of the object in bytes
+        example: 1048576
+      content_type:
+        type: string
+        description: MIME type of the object
+        example: "application/octet-stream"
+      last_modified:
+        type: string
+        format: date-time
+        description: When the object was last modified at the origin
+      completed:
+        type: string
+        format: date-time
+        description: When the download of this instance completed
+      last_accessed:
+        type: string
+        format: date-time
+        description: When this instance was last accessed
+      is_latest:
+        type: boolean
+        description: Whether this is the latest ETag version for the object
+      is_inline:
+        type: boolean
+        description: Whether the object is stored inline in the database (small objects)
+  CacheBlockSummary:
+    type: object
+    description: Summary of download block status for a cached object
+    properties:
+      total_blocks:
+        type: integer
+        format: int32
+        description: Total number of blocks in the object
+      downloaded_blocks:
+        type: integer
+        format: int32
+        description: Number of blocks downloaded so far
+      missing_blocks:
+        type: array
+        description: Indices of the first 100 missing blocks
+        items:
+          type: integer
+          format: int32
+      is_complete:
+        type: boolean
+        description: Whether all blocks have been downloaded
+      percent_complete:
+        type: number
+        format: double
+        description: Percentage of blocks downloaded (0-100)
+  CacheChecksumInfo:
+    type: object
+    description: A stored checksum for a cached object
+    properties:
+      type:
+        type: string
+        description: The type of checksum (e.g. sha256, md5, sha1)
+        example: "sha256"
+      value:
+        type: string
+        description: Hex-encoded checksum value
+        example: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      origin_verified:
+        type: boolean
+        description: Whether this checksum was provided by the origin server
+  CacheChunkInfoSummary:
+    type: object
+    description: Chunking configuration for large objects split across storage backends
+    properties:
+      chunk_size_bytes:
+        type: integer
+        format: int64
+        description: Size of each chunk in bytes
+      chunk_count:
+        type: integer
+        description: Number of chunks
+      chunk_locations:
+        type: array
+        description: Storage ID for each chunk
+        items:
+          type: integer
+  CacheObjectDetails:
+    type: object
+    description: Detailed metadata for a cached object instance
+    allOf:
+      - $ref: "#/definitions/CacheObjectInstance"
+      - type: object
+        properties:
+          namespace_id:
+            type: integer
+            description: Internal namespace identifier
+          storage_id:
+            type: integer
+            description: Storage backend identifier
+          last_validated:
+            type: string
+            format: date-time
+            description: When the object was last revalidated with the origin
+          expires:
+            type: string
+            format: date-time
+            description: When the cached object expires
+          cache_control:
+            type: string
+            description: Formatted cache control directives
+            example: "max-age=3600, public"
+          checksums:
+            type: array
+            description: Known checksums for this object
+            items:
+              $ref: "#/definitions/CacheChecksumInfo"
+          block_summary:
+            $ref: "#/definitions/CacheBlockSummary"
+          chunk_info:
+            $ref: "#/definitions/CacheChunkInfoSummary"
+  CacheChecksumStatus:
+    type: object
+    description: Verification status of a single checksum
+    properties:
+      type:
+        type: string
+        description: The type of checksum
+        example: "sha256"
+      expected:
+        type: string
+        description: Hex-encoded expected checksum value
+      computed:
+        type: string
+        description: Hex-encoded computed checksum value (only if verification ran)
+      match:
+        type: boolean
+        description: Whether the expected and computed values match
+  CacheVerificationResult:
+    type: object
+    description: Result of checksum verification for a cached object
+    properties:
+      instance_hash:
+        type: string
+        description: The hash identifying the verified instance
+      valid:
+        type: boolean
+        description: Whether the object passed verification
+      error:
+        type: string
+        description: Error message if verification could not be completed
+      checksum_status:
+        type: array
+        description: Per-checksum verification results
+        items:
+          $ref: "#/definitions/CacheChecksumStatus"
 
 tags:
   - name: auth
@@ -4868,6 +5036,188 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
         "404":
           description: Client not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /cache/introspect/list:
+    get:
+      tags:
+        - cache_ui
+      summary: List all cached objects
+      description: >-
+        `Authentication Required` `Admin privilege Required`
+
+
+        Returns a list of all cached object instances with basic metadata.
+      produces:
+        - application/json
+      parameters:
+        - in: query
+          name: limit
+          type: integer
+          description: Maximum number of objects to return (default 100)
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/CacheObjectInstance"
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /cache/introspect/etags:
+    get:
+      tags:
+        - cache_ui
+      summary: List cached versions (ETags) for an object URL
+      description: >-
+        `Authentication Required` `Admin privilege Required`
+
+
+        Returns all cached instances for a given object URL, including different ETag versions.
+      produces:
+        - application/json
+      parameters:
+        - in: query
+          name: url
+          type: string
+          required: true
+          description: The object URL to look up (e.g. pelican://origin.example.com/data/file.dat)
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/CacheObjectInstance"
+        "400":
+          description: Invalid or missing url parameter
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /cache/introspect/metadata:
+    get:
+      tags:
+        - cache_ui
+      summary: Get detailed metadata for a cached object instance
+      description: >-
+        `Authentication Required` `Admin privilege Required`
+
+
+        Returns detailed metadata including checksums, block status, and chunk info.
+        Identify the instance by `instance` hash directly, or by `url` and optional `etag`.
+        If `etag` is omitted when using `url`, the latest version is returned.
+      produces:
+        - application/json
+      parameters:
+        - in: query
+          name: instance
+          type: string
+          description: Instance hash (if provided, url and etag are ignored)
+        - in: query
+          name: url
+          type: string
+          description: Object URL (required if instance is not provided)
+        - in: query
+          name: etag
+          type: string
+          description: ETag of the desired version (optional, defaults to latest)
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/CacheObjectDetails"
+        "400":
+          description: Invalid query parameters
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Object instance not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /cache/introspect/verify:
+    post:
+      tags:
+        - cache_ui
+      summary: Verify checksum integrity of a cached object
+      description: >-
+        `Authentication Required` `Admin privilege Required`
+
+
+        Triggers checksum verification for a cached object instance.
+        Identify the instance by `instance` hash directly, or by `url` and optional `etag`.
+        If `etag` is omitted when using `url`, the latest version is verified.
+        Returns the verification result including per-checksum status.
+      produces:
+        - application/json
+      parameters:
+        - in: query
+          name: instance
+          type: string
+          description: Instance hash (if provided, url and etag are ignored)
+        - in: query
+          name: url
+          type: string
+          description: Object URL (required if instance is not provided)
+        - in: query
+          name: etag
+          type: string
+          description: ETag of the desired version (optional, defaults to latest)
+      responses:
+        "200":
+          description: Verification completed (check the valid and error fields for result)
+          schema:
+            $ref: "#/definitions/CacheVerificationResult"
+        "400":
+          description: Invalid query parameters
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Object instance not found
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "500":

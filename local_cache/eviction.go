@@ -20,12 +20,14 @@ package local_cache
 
 import (
 	"context"
+	fmt "fmt"
 	rand "math/rand/v2"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	badger "github.com/dgraph-io/badger/v4"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -63,9 +65,10 @@ type EvictionManager struct {
 	rrLastUpdate atomic.Int64 // UnixMilli of last rebuild
 
 	// Eviction control
-	evictMu   sync.Mutex
-	evicting  bool
-	evictChan chan struct{}
+	evictMu         sync.Mutex
+	evicting        bool
+	evictChan       chan struct{}
+	evictRunCounter atomic.Uint64
 }
 
 // dirEvictionLimits holds the size limits for a single storage directory.
@@ -285,9 +288,13 @@ func (em *EvictionManager) checkAndEvict() {
 		em.evictMu.Unlock()
 	}()
 
+	runID := em.evictRunCounter.Add(1)
+	rl := log.WithField("evictRun", runID)
+
 	startTime := time.Now()
 	var totalEvictedBytes atomic.Uint64
 	var totalEvictedObjects atomic.Int64
+	var totalConflicts atomic.Int64
 
 	var wg sync.WaitGroup
 	for sid, limits := range em.dirLimits {
@@ -299,30 +306,40 @@ func (em *EvictionManager) checkAndEvict() {
 				return
 			}
 
-			log.Infof("Starting eviction for storage %d: usage %d > high water %d",
-				sid, dirUsage, limits.highWater)
+			rl.WithFields(log.Fields{
+				"storageID": sid,
+				"usage":     dirUsage,
+				"highWater": limits.highWater,
+			}).Info("Starting eviction")
 
 			for dirUsage = em.getDirUsage(sid); dirUsage > int64(limits.lowWater); dirUsage = em.getDirUsage(sid) {
 				// Find the greediest namespace in this directory
 				targetKey, targetUsage, err := em.findGreediestNamespaceInDir(sid)
 				if err != nil {
-					log.Warnf("Failed to find greediest namespace in storage %d: %v", sid, err)
+					rl.WithFields(log.Fields{"storageID": sid}).Warn("Failed to find greediest namespace")
 					break
 				}
 
 				if targetUsage <= 0 {
-					log.Warnf("No namespace with positive usage found in storage %d", sid)
+					rl.WithFields(log.Fields{"storageID": sid}).Warn("No namespace with positive usage found")
 					break
 				}
 
 				overhead := dirUsage - int64(limits.lowWater)
-				log.Debugf("Evicting from storage %d namespace %d (usage: %d bytes, need to free: %d bytes)",
-					targetKey.StorageID, targetKey.NamespaceID, targetUsage, overhead)
+				rl.WithFields(log.Fields{
+					"storageID":   targetKey.StorageID,
+					"namespaceID": targetKey.NamespaceID,
+					"nsUsage":     targetUsage,
+					"needToFree":  overhead,
+				}).Debug("Evicting from namespace")
 
-				bytes, count, err := em.evictFromNamespace(targetKey.StorageID, targetKey.NamespaceID, 0, overhead)
+				bytes, count, conflicts, err := em.evictFromNamespace(rl, targetKey.StorageID, targetKey.NamespaceID, 0, overhead)
+				totalConflicts.Add(int64(conflicts))
 				if err != nil {
-					log.Warnf("Error evicting from storage %d namespace %d: %v",
-						targetKey.StorageID, targetKey.NamespaceID, err)
+					rl.WithFields(log.Fields{
+						"storageID":   targetKey.StorageID,
+						"namespaceID": targetKey.NamespaceID,
+					}).WithError(err).Warn("Error evicting from namespace")
 					continue
 				}
 
@@ -331,7 +348,7 @@ func (em *EvictionManager) checkAndEvict() {
 
 				// Safety: don't run for too long
 				if time.Since(startTime) > 30*time.Second {
-					log.Warn("Eviction timeout - will continue next cycle")
+					rl.Warn("Eviction timeout - will continue next cycle")
 					break
 				}
 			}
@@ -339,9 +356,15 @@ func (em *EvictionManager) checkAndEvict() {
 	}
 	wg.Wait()
 
-	if evicted := totalEvictedObjects.Load(); evicted > 0 {
-		log.Infof("Eviction complete: freed %d bytes from %d objects in %v",
-			totalEvictedBytes.Load(), evicted, time.Since(startTime))
+	evicted := totalEvictedObjects.Load()
+	conflicts := totalConflicts.Load()
+	if evicted > 0 || conflicts > 0 {
+		rl.WithFields(log.Fields{
+			"freedBytes":     totalEvictedBytes.Load(),
+			"evictedObjects": evicted,
+			"conflicts":      conflicts,
+			"elapsed":        time.Since(startTime).String(),
+		}).Info("Eviction pass complete")
 	}
 }
 
@@ -375,22 +398,66 @@ func (em *EvictionManager) findGreediestNamespaceInDir(storageID StorageID) (Sto
 // leave it unconstrained.  The eviction is allowed to go one object over the
 // byte threshold to prevent starvation when only large objects remain.
 //
-// All DB mutations happen in a single BadgerDB transaction; filesystem
-// deletes follow after the transaction commits.
-// Returns total bytes freed and number of objects evicted.
-func (em *EvictionManager) evictFromNamespace(storageID StorageID, namespaceID NamespaceID, maxObjects int, maxBytes int64) (uint64, int, error) {
-	evicted, totalFreed, err := em.storage.EvictByLRU(storageID, namespaceID, maxObjects, maxBytes)
-	if err != nil {
-		return 0, 0, err
+// On a BadgerDB transaction conflict the method retries with progressively
+// smaller batch sizes (50, then 10 objects) before giving up.
+// Returns total bytes freed, number of objects evicted, number of conflicts, and any
+// non-retryable error.
+func (em *EvictionManager) evictFromNamespace(rl *log.Entry, storageID StorageID, namespaceID NamespaceID, maxObjects int, maxBytes int64) (totalFreed uint64, totalCount int, conflicts int, err error) {
+	// batchCaps defines the decreasing batch sizes used on successive
+	// conflict retries.  The first attempt uses the caller's original
+	// limits; subsequent retries cap maxObjects to reduce the transaction
+	// footprint and lower the probability of another conflict.
+	batchCaps := []int{0, 50, 10} // 0 means "use caller's value"
+
+	for attempt, cap := range batchCaps {
+		effMaxObjects := maxObjects
+		if cap > 0 && (effMaxObjects == 0 || effMaxObjects > cap) {
+			effMaxObjects = cap
+		}
+
+		var evicted []evictedObject
+		var freed uint64
+		evicted, freed, err = em.storage.EvictByLRU(storageID, namespaceID, effMaxObjects, maxBytes)
+
+		if err != nil && errors.Is(err, badger.ErrConflict) {
+			conflicts++
+			fields := log.Fields{
+				"storageID":   storageID,
+				"namespaceID": namespaceID,
+				"attempt":     attempt + 1,
+				"batchCap":    fmt.Sprintf("%d", effMaxObjects),
+			}
+			// On conflict the DB returns the objects it attempted (but did not commit).
+			// Log the first one to aid debugging.
+			if len(evicted) > 0 {
+				fields["conflictObject"] = string(evicted[0].instanceHash)
+				fields["attemptedObjects"] = len(evicted)
+			}
+			rl.WithFields(fields).Warn("Transaction conflict during eviction, retrying with smaller batch")
+
+			// Brief jitter before retry
+			time.Sleep(time.Duration(1+rand.IntN(5)) * time.Millisecond)
+			continue
+		}
+		if err != nil {
+			return 0, 0, conflicts, err
+		}
+
+		em.noteEvicted(evicted)
+
+		for _, obj := range evicted {
+			rl.WithFields(log.Fields{
+				"object":      string(obj.instanceHash),
+				"bytes":       obj.contentLen,
+				"namespaceID": obj.namespaceID,
+			}).Debug("Evicted object")
+		}
+
+		return freed, len(evicted), conflicts, nil
 	}
 
-	em.noteEvicted(evicted)
-
-	for _, obj := range evicted {
-		log.Debugf("Evicted object %s (%d bytes) from namespace %d", obj.instanceHash, obj.contentLen, obj.namespaceID)
-	}
-
-	return totalFreed, len(evicted), nil
+	// All retries exhausted
+	return 0, 0, conflicts, err
 }
 
 // noteEvicted adjusts the per-directory in-memory atomic counters after
@@ -613,7 +680,10 @@ func (em *EvictionManager) ForcePurge() error {
 		em.evictMu.Unlock()
 	}()
 
-	log.Info("Force purge initiated")
+	runID := em.evictRunCounter.Add(1)
+	rl := log.WithField("evictRun", runID)
+
+	rl.Info("Force purge initiated")
 	startTime := time.Now()
 	var evictedBytes atomic.Uint64
 	var evictedObjects atomic.Int64
@@ -638,9 +708,12 @@ func (em *EvictionManager) ForcePurge() error {
 				}
 
 				overhead := dirUsage - int64(limits.lowWater)
-				bytes, count, err := em.evictFromNamespace(targetKey.StorageID, targetKey.NamespaceID, 0, overhead)
+				bytes, count, _, err := em.evictFromNamespace(rl, targetKey.StorageID, targetKey.NamespaceID, 0, overhead)
 				if err != nil {
-					log.Warnf("Error evicting from storage %d namespace %d: %v", targetKey.StorageID, targetKey.NamespaceID, err)
+					rl.WithFields(log.Fields{
+						"storageID":   targetKey.StorageID,
+						"namespaceID": targetKey.NamespaceID,
+					}).WithError(err).Warn("Error evicting during force purge")
 					continue
 				}
 
@@ -648,7 +721,7 @@ func (em *EvictionManager) ForcePurge() error {
 				evictedObjects.Add(int64(count))
 
 				if time.Since(startTime) > 60*time.Second {
-					log.Warn("Force purge timeout - will continue next cycle")
+					rl.Warn("Force purge timeout - will continue next cycle")
 					break
 				}
 
@@ -658,8 +731,11 @@ func (em *EvictionManager) ForcePurge() error {
 	}
 	wg.Wait()
 
-	log.Infof("Force purge complete: freed %d bytes from %d objects in %v",
-		evictedBytes.Load(), evictedObjects.Load(), time.Since(startTime))
+	rl.WithFields(log.Fields{
+		"freedBytes":     evictedBytes.Load(),
+		"evictedObjects": evictedObjects.Load(),
+		"elapsed":        time.Since(startTime).String(),
+	}).Info("Force purge complete")
 	return nil
 }
 
