@@ -301,6 +301,7 @@ func TestHandleDeleteLogLevel(t *testing.T) {
 
 func TestLogLevelIntegration(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
+	config.RegisterLoggingCallback()
 
 	// Save original level
 	origLevel := config.GetEffectiveLogLevel()

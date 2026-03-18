@@ -707,10 +707,17 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 			delete(bf.activeFetches, key)
 			bf.mu.Unlock()
 			close(op.doneCh)
-			// Close the adapter → closes the underlying *BlockWriter →
-			// fires onComplete if all blocks are downloaded.
-			adapter.Close()
+			// Close the transfer client first to ensure no more writes
+			// flow through the adapter.  Without this ordering, an
+			// idle-timeout cancel can close the adapter while the HTTP
+			// body reader is still calling dw.Write → adapter.Write →
+			// BlockWriter.Write, producing spurious "writer is closed"
+			// errors.
 			tc.Close()
+			// Now safe to close the adapter → closes the underlying
+			// *BlockWriter → fires onComplete if all blocks are
+			// downloaded.
+			adapter.Close()
 			if onExit != nil {
 				onExit(op.err)
 			}
@@ -741,12 +748,19 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 					cancelFn()
 					op.err = errors.New("download cancelled: idle timeout")
 					bf.notifyAllChunks(op)
+					// Drain the result channel so the transfer engine
+					// finishes before defer closes the adapter/tc.
+					// Without this, the HTTP body reader may still be
+					// calling Write when the BlockWriter is closed.
+					<-resultChan
 					return nil
 				}
 
 			case <-innerCtx.Done():
 				op.err = innerCtx.Err()
 				bf.notifyAllChunks(op)
+				// Drain the result channel (see idle-timeout comment).
+				<-resultChan
 				return nil
 			}
 		}
