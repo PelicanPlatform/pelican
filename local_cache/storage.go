@@ -1826,7 +1826,9 @@ func (sm *StorageManager) deleteChunkFiles(instanceHash InstanceHash, contentLen
 func (sm *StorageManager) EvictByLRU(storageID StorageID, namespaceID NamespaceID, maxObjects int, maxBytes int64) ([]evictedObject, uint64, error) {
 	evicted, err := sm.db.EvictByLRU(storageID, namespaceID, maxObjects, maxBytes)
 	if err != nil {
-		return nil, 0, errors.Wrap(err, "failed to evict objects by LRU")
+		// Return the attempted (uncommitted) objects alongside the error
+		// so the caller can log which objects were involved in a conflict.
+		return evicted, 0, errors.Wrap(err, "failed to evict objects by LRU")
 	}
 
 	var totalFreed uint64

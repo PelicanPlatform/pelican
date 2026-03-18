@@ -22,11 +22,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"text/tabwriter"
 	"time"
 
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -112,6 +116,8 @@ Example:
 	introspectJSON     bool
 	introspectLimit    int
 	introspectCacheDir string
+	introspectOffline  bool
+	introspectToken    string
 )
 
 func init() {
@@ -127,6 +133,8 @@ func init() {
 	// Common flags
 	cacheIntrospectCmd.PersistentFlags().BoolVar(&introspectJSON, "json", false, "Output in JSON format")
 	cacheIntrospectCmd.PersistentFlags().StringVar(&introspectCacheDir, "cache-dir", "", "Override cache directory (default: from config)")
+	cacheIntrospectCmd.PersistentFlags().BoolVar(&introspectOffline, "offline", false, "Force offline mode (direct database access). By default, if the cache is running, queries go to the live service.")
+	cacheIntrospectCmd.PersistentFlags().StringVarP(&introspectToken, "token", "t", "", "Path to admin token file (online mode only; auto-generated if not provided)")
 
 	// Metadata/verify specific flags
 	cacheIntrospectMetadataCmd.Flags().StringVar(&introspectEtag, "etag", "", "Specify ETag of the version to inspect")
@@ -157,7 +165,116 @@ func getCacheDir() (string, error) {
 	return cacheDir, nil
 }
 
-// openIntrospectAPI opens the cache database for introspection
+// discoverServerURL attempts to find the running cache's web URL from the
+// address file.  Returns empty string if the cache is not running or the
+// address file cannot be read.
+func discoverServerURL() string {
+	addrFile, err := config.ReadAddressFile()
+	if err != nil {
+		return ""
+	}
+	return addrFile.ServerExternalWebURL
+}
+
+// getIntrospectToken returns a bearer token for the introspection API.
+// If --token was provided it reads from that file; otherwise it generates
+// a short-lived admin token using the local issuer private key.
+func getIntrospectToken(serverURL string) (string, error) {
+	return fetchOrGenerateWebAPIAdminToken(serverURL, introspectToken)
+}
+
+// introspectHTTPGet does an authenticated GET against the running service.
+func introspectHTTPGet(serverURL, apiPath string, query url.Values) ([]byte, error) {
+	tok, err := getIntrospectToken(serverURL)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to obtain admin token")
+	}
+
+	targetURL, err := url.Parse(serverURL)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid server URL")
+	}
+	targetURL.Path = apiPath
+	targetURL.RawQuery = query.Encode()
+
+	req, err := http.NewRequest("GET", targetURL.String(), nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create request")
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "pelican-client/"+config.GetVersion())
+
+	httpClient := &http.Client{Transport: config.GetTransport()}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+
+	return handleAdminApiResponse(resp)
+}
+
+// introspectHTTPPost does an authenticated POST against the running service.
+func introspectHTTPPost(serverURL, apiPath string, query url.Values) ([]byte, error) {
+	tok, err := getIntrospectToken(serverURL)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to obtain admin token")
+	}
+
+	targetURL, err := url.Parse(serverURL)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid server URL")
+	}
+	targetURL.Path = apiPath
+	targetURL.RawQuery = query.Encode()
+
+	req, err := http.NewRequest("POST", targetURL.String(), nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create request")
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "pelican-client/"+config.GetVersion())
+
+	httpClient := &http.Client{Transport: config.GetTransport()}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to read response")
+	}
+	if resp.StatusCode >= 300 {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(body, &errResp) == nil && errResp.Error != "" {
+			return nil, errors.Errorf("server error (%d): %s", resp.StatusCode, errResp.Error)
+		}
+		return nil, errors.Errorf("server error: %s", resp.Status)
+	}
+	return body, nil
+}
+
+// useOnlineMode returns the server URL if the cache is running and we should
+// use online mode, or empty string if we should use offline/direct mode.
+func useOnlineMode() string {
+	if introspectOffline {
+		return ""
+	}
+	// InitClient populates the runtime dir / config needed for ReadAddressFile
+	if err := config.InitClient(); err != nil {
+		log.Debugln("config.InitClient failed, falling back to offline:", err)
+		return ""
+	}
+	return discoverServerURL()
+}
+
+// openIntrospectAPI opens the cache database for introspection (offline mode)
 func openIntrospectAPI() (*local_cache.IntrospectAPIOpen, error) {
 	cacheDir, err := getCacheDir()
 	if err != nil {
@@ -182,6 +299,21 @@ func openIntrospectAPI() (*local_cache.IntrospectAPIOpen, error) {
 func runCacheIntrospectEtags(cmd *cobra.Command, args []string) error {
 	objectURL := args[0]
 
+	// Try online mode first
+	if serverURL := useOnlineMode(); serverURL != "" {
+		query := url.Values{"url": {objectURL}}
+		body, err := introspectHTTPGet(serverURL, "/api/v1.0/cache/introspect/etags", query)
+		if err != nil {
+			return errors.Wrap(err, "online introspection failed")
+		}
+		var instances []local_cache.ObjectInstance
+		if err := json.Unmarshal(body, &instances); err != nil {
+			return errors.Wrap(err, "failed to parse response")
+		}
+		return printEtags(instances)
+	}
+
+	// Offline mode
 	api, err := openIntrospectAPI()
 	if err != nil {
 		return err
@@ -193,6 +325,10 @@ func runCacheIntrospectEtags(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to list object instances")
 	}
 
+	return printEtags(instances)
+}
+
+func printEtags(instances []local_cache.ObjectInstance) error {
 	if len(instances) == 0 {
 		fmt.Println("No cached versions found for this object.")
 		return nil
@@ -233,6 +369,31 @@ func runCacheIntrospectEtags(cmd *cobra.Command, args []string) error {
 }
 
 func runCacheIntrospectMetadata(cmd *cobra.Command, args []string) error {
+	// Try online mode first
+	if serverURL := useOnlineMode(); serverURL != "" {
+		query := url.Values{}
+		if introspectInstance != "" {
+			query.Set("instance", introspectInstance)
+		} else if len(args) > 0 {
+			query.Set("url", args[0])
+			if introspectEtag != "" {
+				query.Set("etag", introspectEtag)
+			}
+		} else {
+			return errors.New("either <object-url> or --instance is required")
+		}
+		body, err := introspectHTTPGet(serverURL, "/api/v1.0/cache/introspect/metadata", query)
+		if err != nil {
+			return errors.Wrap(err, "online introspection failed")
+		}
+		var details local_cache.ObjectDetails
+		if err := json.Unmarshal(body, &details); err != nil {
+			return errors.Wrap(err, "failed to parse response")
+		}
+		return printMetadata(&details)
+	}
+
+	// Offline mode
 	api, err := openIntrospectAPI()
 	if err != nil {
 		return err
@@ -242,10 +403,8 @@ func runCacheIntrospectMetadata(cmd *cobra.Command, args []string) error {
 	var details *local_cache.ObjectDetails
 
 	if introspectInstance != "" {
-		// Look up by instance hash
 		details, err = api.GetObjectDetails(introspectInstance)
 	} else if len(args) > 0 {
-		// Look up by URL (and optional ETag)
 		details, err = api.GetObjectDetailsByURL(args[0], introspectEtag)
 	} else {
 		return errors.New("either <object-url> or --instance is required")
@@ -255,6 +414,10 @@ func runCacheIntrospectMetadata(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to get object details")
 	}
 
+	return printMetadata(details)
+}
+
+func printMetadata(details *local_cache.ObjectDetails) error {
 	if introspectJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -331,6 +494,31 @@ func runCacheIntrospectMetadata(cmd *cobra.Command, args []string) error {
 }
 
 func runCacheIntrospectVerify(cmd *cobra.Command, args []string) error {
+	// Try online mode first
+	if serverURL := useOnlineMode(); serverURL != "" {
+		query := url.Values{}
+		if introspectInstance != "" {
+			query.Set("instance", introspectInstance)
+		} else if len(args) > 0 {
+			query.Set("url", args[0])
+			if introspectEtag != "" {
+				query.Set("etag", introspectEtag)
+			}
+		} else {
+			return errors.New("either <object-url> or --instance is required")
+		}
+		body, err := introspectHTTPPost(serverURL, "/api/v1.0/cache/introspect/verify", query)
+		if err != nil {
+			return errors.Wrap(err, "online verification failed")
+		}
+		var result local_cache.VerificationResult
+		if err := json.Unmarshal(body, &result); err != nil {
+			return errors.Wrap(err, "failed to parse response")
+		}
+		return printVerification(&result)
+	}
+
+	// Offline mode
 	api, err := openIntrospectAPI()
 	if err != nil {
 		return err
@@ -351,6 +539,10 @@ func runCacheIntrospectVerify(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to verify checksum")
 	}
 
+	return printVerification(result)
+}
+
+func printVerification(result *local_cache.VerificationResult) error {
 	if introspectJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -389,6 +581,21 @@ func runCacheIntrospectVerify(cmd *cobra.Command, args []string) error {
 }
 
 func runCacheIntrospectList(cmd *cobra.Command, args []string) error {
+	// Try online mode first
+	if serverURL := useOnlineMode(); serverURL != "" {
+		query := url.Values{"limit": {fmt.Sprintf("%d", introspectLimit)}}
+		body, err := introspectHTTPGet(serverURL, "/api/v1.0/cache/introspect/list", query)
+		if err != nil {
+			return errors.Wrap(err, "online introspection failed")
+		}
+		var instances []local_cache.ObjectInstance
+		if err := json.Unmarshal(body, &instances); err != nil {
+			return errors.Wrap(err, "failed to parse response")
+		}
+		return printList(instances)
+	}
+
+	// Offline mode
 	api, err := openIntrospectAPI()
 	if err != nil {
 		return err
@@ -400,6 +607,10 @@ func runCacheIntrospectList(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to list cached objects")
 	}
 
+	return printList(instances)
+}
+
+func printList(instances []local_cache.ObjectInstance) error {
 	if len(instances) == 0 {
 		fmt.Println("Cache is empty.")
 		return nil
