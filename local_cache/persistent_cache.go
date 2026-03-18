@@ -1496,8 +1496,25 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 		fedTP = pc.fedTokenAsProvider()
 	}
 
+	// Build a per-download progress callback that includes the source URL
+	// and the client's request ID (X-Pelican-JobId) for structured logging.
+	progressFields := log.Fields{
+		"url": sourceURL.String(),
+	}
+	if reqId, ok := client.RequestIdFromContext(ctx); ok {
+		progressFields["reqId"] = reqId
+	}
+	progressCallback := func(path string, downloaded int64, size int64, completed bool) {
+		log.WithFields(progressFields).WithFields(log.Fields{
+			"path":       path,
+			"downloaded": downloaded,
+			"size":       size,
+			"completed":  completed,
+		}).Debug("Transfer progress")
+	}
+
 	// Create per-request transfer client
-	tc, err := pc.te.NewClient(client.WithAcquireToken(false), client.WithCallback(pc.transferCallback), client.WithCacheEmbeddedClientMode())
+	tc, err := pc.te.NewClient(client.WithAcquireToken(false), client.WithCallback(progressCallback), client.WithCacheEmbeddedClientMode())
 	if err != nil {
 		return errors.Wrap(err, "failed to create transfer client")
 	}
@@ -1572,7 +1589,15 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 	select {
 	case metadata = <-metadataChan:
 		metadataReceived = true
-		log.Debugf("performDownload: Received early metadata - ObjectSize: %d, ETag: %q", metadata.ObjectSize, metadata.ETag)
+		etag := metadata.ETag
+		if etag == "" {
+			etag = "(none)"
+		}
+		log.WithFields(log.Fields{
+			"objectSize": metadata.ObjectSize,
+			"etag":       etag,
+			"url":        sourceURL.String(),
+		}).Debug("Received early metadata")
 	case result := <-resultChan:
 		// Transfer completed before we got metadata (shouldn't happen for successful transfers)
 		if result != nil && result.Error != nil {
@@ -2215,15 +2240,7 @@ func (w *decisionWriter) Finalize(dl *persistentDownload) error {
 	return errors.New("decisionWriter: finalize called without mode set")
 }
 
-// transferCallback handles transfer progress updates
-func (pc *PersistentCache) transferCallback(path string, downloaded int64, size int64, completed bool) {
-	log.WithFields(log.Fields{
-		"path":       path,
-		"downloaded": downloaded,
-		"size":       size,
-		"completed":  completed,
-	}).Debug("Transfer progress")
-}
+
 
 // SetFedToken stores the federation token in memory.  It is called by
 // cache.LaunchFedTokManager (via the onTokenUpdate callback) whenever the

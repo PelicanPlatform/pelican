@@ -341,15 +341,15 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		} else {
 			// Reduce the client's timeout to leave headroom for response
 			// framing.  The cache must finish before the client gives up.
-			if ht < 500*time.Millisecond {
+			if ht < 1000*time.Millisecond {
 				headerTimeout = ht / 2
 			} else {
-				headerTimeout = ht - 500*time.Millisecond
+				headerTimeout = ht - 1000*time.Millisecond
 			}
 		}
 	}
-	if timeoutStr != "" {
-		reqLog.Debugf("Client requested header timeout: %s", timeoutStr)
+	if headerTimeout > 0 {
+		reqLog.WithField("headerTimeout", headerTimeout.String()).Debug("Applying client header timeout")
 	}
 
 	// Handle HEAD requests: never trigger a download.
@@ -1349,5 +1349,306 @@ func (pc *PersistentCache) RegisterCacheHandlers(engine *gin.Engine, directorEna
 	})
 	log.Info("Prestage and eviction API registered at /pelican/api/v1.0/{prestage,evict}")
 
+	// Register introspection endpoints behind admin auth.
+	adminIntrospect := engine.Group("/api/v1.0/cache/introspect", web_ui.AuthHandler, web_ui.AdminAuthHandler)
+	adminIntrospect.GET("/list", pc.introspectListHandler)
+	adminIntrospect.GET("/etags", pc.introspectEtagsHandler)
+	adminIntrospect.GET("/metadata", pc.introspectMetadataHandler)
+	adminIntrospect.POST("/verify", pc.introspectVerifyHandler)
+	log.Info("Cache introspection API registered at /api/v1.0/cache/introspect/")
+
 	return nil
+}
+
+// introspectListHandler returns a list of all cached objects.
+//
+// GET /api/v1.0/cache/introspect/list?limit=100
+func (pc *PersistentCache) introspectListHandler(c *gin.Context) {
+	limitStr := c.DefaultQuery("limit", "100")
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 {
+		limit = 100
+	}
+
+	var instances []ObjectInstance
+	scanErr := pc.db.ScanMetadata(func(instanceHash InstanceHash, meta *CacheMetadata) error {
+		if len(instances) >= limit {
+			return errors.New("limit reached")
+		}
+		instances = append(instances, ObjectInstance{
+			InstanceHash:  string(instanceHash),
+			ETag:          meta.ETag,
+			SourceURL:     meta.SourceURL,
+			ContentLength: meta.ContentLength,
+			ContentType:   meta.ContentType,
+			LastModified:  meta.LastModified,
+			Completed:     meta.Completed,
+			LastAccessed:  meta.LastAccessTime,
+			IsInline:      meta.IsInline(),
+		})
+		return nil
+	})
+	if scanErr != nil && scanErr.Error() != "limit reached" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": scanErr.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, instances)
+}
+
+// introspectEtagsHandler returns all cached instances for an object URL.
+//
+// GET /api/v1.0/cache/introspect/etags?url=pelican://...
+func (pc *PersistentCache) introspectEtagsHandler(c *gin.Context) {
+	objectURL := c.Query("url")
+	if objectURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "url query parameter is required"})
+		return
+	}
+
+	normalized := NormalizePelicanURL(objectURL)
+	if normalized == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid object URL"})
+		return
+	}
+
+	objectHash := pc.db.ObjectHash(normalized)
+	latestETag, _ := pc.db.GetLatestETag(objectHash)
+
+	var instances []ObjectInstance
+	scanErr := pc.db.ScanMetadata(func(instanceHash InstanceHash, meta *CacheMetadata) error {
+		if meta.SourceURL != normalized && meta.SourceURL != objectURL {
+			if NormalizePelicanURL(meta.SourceURL) != normalized {
+				return nil
+			}
+		}
+		instances = append(instances, ObjectInstance{
+			InstanceHash:  string(instanceHash),
+			ETag:          meta.ETag,
+			SourceURL:     meta.SourceURL,
+			ContentLength: meta.ContentLength,
+			ContentType:   meta.ContentType,
+			LastModified:  meta.LastModified,
+			Completed:     meta.Completed,
+			LastAccessed:  meta.LastAccessTime,
+			IsLatest:      meta.ETag == latestETag,
+			IsInline:      meta.IsInline(),
+		})
+		return nil
+	})
+	if scanErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": scanErr.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, instances)
+}
+
+// introspectMetadataHandler returns detailed metadata for a cached object.
+//
+// GET /api/v1.0/cache/introspect/metadata?url=pelican://...&etag=abc&instance=hash
+func (pc *PersistentCache) introspectMetadataHandler(c *gin.Context) {
+	instanceHashStr := c.Query("instance")
+
+	if instanceHashStr == "" {
+		objectURL := c.Query("url")
+		if objectURL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "url or instance query parameter is required"})
+			return
+		}
+
+		normalized := NormalizePelicanURL(objectURL)
+		if normalized == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid object URL"})
+			return
+		}
+
+		objectHash := pc.db.ObjectHash(normalized)
+		etag := c.Query("etag")
+		if etag == "" {
+			var err error
+			etag, err = pc.db.GetLatestETag(objectHash)
+			if err != nil || etag == "" {
+				c.JSON(http.StatusNotFound, gin.H{"error": "no cached version found for this object"})
+				return
+			}
+		}
+		instanceHashStr = string(pc.db.InstanceHash(etag, objectHash))
+	}
+
+	hash := InstanceHash(instanceHashStr)
+	meta, err := pc.storage.GetMetadata(hash)
+	if err != nil || meta == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "object instance not found"})
+		return
+	}
+
+	details := &ObjectDetails{
+		ObjectInstance: ObjectInstance{
+			InstanceHash:  instanceHashStr,
+			ETag:          meta.ETag,
+			SourceURL:     meta.SourceURL,
+			ContentLength: meta.ContentLength,
+			ContentType:   meta.ContentType,
+			LastModified:  meta.LastModified,
+			Completed:     meta.Completed,
+			LastAccessed:  meta.LastAccessTime,
+			IsInline:      meta.IsInline(),
+		},
+		NamespaceID:   uint16(meta.NamespaceID),
+		StorageID:     uint8(meta.StorageID),
+		LastValidated: meta.LastValidated,
+		Expires:       meta.Expires,
+	}
+
+	cc := meta.GetCacheDirectives()
+	if cc.HasDirectives() {
+		details.CacheControl = formatCacheDirectives(cc)
+	}
+
+	for _, cksum := range meta.Checksums {
+		details.Checksums = append(details.Checksums, ChecksumInfo{
+			Type:           checksumTypeString(cksum.Type),
+			Value:          hex.EncodeToString(cksum.Value),
+			OriginVerified: cksum.OriginVerified,
+		})
+	}
+
+	if !meta.IsInline() {
+		summary, bsErr := pc.getBlockSummaryLive(hash, meta.ContentLength)
+		if bsErr != nil {
+			summary = &BlockSummary{TotalBlocks: uint32(CalculateBlockCount(meta.ContentLength))}
+		}
+		details.BlockSummary = summary
+	}
+
+	if meta.IsChunked() {
+		chunkSize := ChunkSizeCodeToBytes(meta.ChunkSizeCode)
+		chunkCount := meta.ChunkCount()
+		locations := make([]uint8, chunkCount)
+		locations[0] = uint8(meta.StorageID)
+		for i := 1; i < chunkCount && i-1 < len(meta.ChunkLocations); i++ {
+			locations[i] = uint8(meta.ChunkLocations[i-1].StorageID)
+		}
+		details.ChunkSummary = &ChunkInfoSummary{
+			ChunkSizeBytes: int64(chunkSize),
+			ChunkCount:     chunkCount,
+			ChunkLocations: locations,
+		}
+	}
+
+	objectHash := pc.db.ObjectHash(meta.SourceURL)
+	latestETag, _ := pc.db.GetLatestETag(objectHash)
+	details.IsLatest = meta.ETag == latestETag
+
+	c.JSON(http.StatusOK, details)
+}
+
+// introspectVerifyHandler triggers checksum verification for a cached object.
+//
+// POST /api/v1.0/cache/introspect/verify?url=pelican://...&etag=abc&instance=hash
+func (pc *PersistentCache) introspectVerifyHandler(c *gin.Context) {
+	instanceHashStr := c.Query("instance")
+
+	if instanceHashStr == "" {
+		objectURL := c.Query("url")
+		if objectURL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "url or instance query parameter is required"})
+			return
+		}
+
+		normalized := NormalizePelicanURL(objectURL)
+		if normalized == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid object URL"})
+			return
+		}
+
+		objectHash := pc.db.ObjectHash(normalized)
+		etag := c.Query("etag")
+		if etag == "" {
+			var err error
+			etag, err = pc.db.GetLatestETag(objectHash)
+			if err != nil || etag == "" {
+				c.JSON(http.StatusNotFound, gin.H{"error": "no cached version found for this object"})
+				return
+			}
+		}
+		instanceHashStr = string(pc.db.InstanceHash(etag, objectHash))
+	}
+
+	hash := InstanceHash(instanceHashStr)
+	meta, err := pc.storage.GetMetadata(hash)
+	if err != nil || meta == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "object instance not found"})
+		return
+	}
+
+	result := &VerificationResult{InstanceHash: instanceHashStr}
+
+	if !meta.IsInline() {
+		complete, completeErr := pc.storage.IsComplete(hash)
+		if completeErr != nil {
+			result.Error = fmt.Sprintf("failed to check completeness: %v", completeErr)
+			c.JSON(http.StatusOK, result)
+			return
+		}
+		if !complete {
+			result.Error = "object download is not complete, cannot verify"
+			c.JSON(http.StatusOK, result)
+			return
+		}
+	}
+
+	valid, verifyErr := pc.consistency.VerifyObject(hash)
+	if verifyErr != nil {
+		result.Error = fmt.Sprintf("verification failed: %v", verifyErr)
+		c.JSON(http.StatusOK, result)
+		return
+	}
+
+	result.Valid = valid
+	if len(meta.Checksums) > 0 {
+		for _, cksum := range meta.Checksums {
+			result.ChecksumStatus = append(result.ChecksumStatus, ChecksumStatus{
+				Type:     checksumTypeString(cksum.Type),
+				Expected: hex.EncodeToString(cksum.Value),
+				Match:    valid,
+			})
+		}
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// getBlockSummaryLive computes block status using the live database.
+func (pc *PersistentCache) getBlockSummaryLive(instanceHash InstanceHash, contentLength int64) (*BlockSummary, error) {
+	if contentLength <= 0 {
+		return &BlockSummary{IsComplete: true, PercentComplete: 100.0}, nil
+	}
+
+	totalBlocks := uint32(CalculateBlockCount(contentLength))
+	bitmap, err := pc.db.GetBlockState(instanceHash)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get block state")
+	}
+
+	downloadedBlocks := uint32(bitmap.GetCardinality())
+	isComplete := downloadedBlocks >= totalBlocks
+
+	summary := &BlockSummary{
+		TotalBlocks:      totalBlocks,
+		DownloadedBlocks: downloadedBlocks,
+		IsComplete:       isComplete,
+		PercentComplete:  float64(downloadedBlocks) / float64(totalBlocks) * 100.0,
+	}
+
+	if !isComplete {
+		for blockNum := uint32(0); blockNum < totalBlocks && len(summary.MissingBlocks) < 100; blockNum++ {
+			if !bitmap.Contains(blockNum) {
+				summary.MissingBlocks = append(summary.MissingBlocks, blockNum)
+			}
+		}
+	}
+
+	return summary, nil
 }
