@@ -2571,7 +2571,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		downloaded += attemptDownloaded
 
 		if err != nil {
-			log.WithFields(fields).Debugln("Failed to download from", transferEndpoint.Url, ":", err)
+			log.WithFields(fields).Debugln("Failed to download from", transferEndpoint.Url.String(), ":", err)
 			proxyStr, _ := os.LookupEnv("http_proxy")
 			if !transferEndpoint.Proxy {
 				proxyStr = ""
