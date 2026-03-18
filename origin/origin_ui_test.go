@@ -68,8 +68,7 @@ func TestCollectionsAPI(t *testing.T) {
 	}()
 	defer cancel()
 
-	testCfgDir, err := os.MkdirTemp("", "tmpDir")
-	require.NoError(t, err, "Failed to create temp config dir")
+	testCfgDir := t.TempDir()
 	require.NoError(t, param.Set("ConfigDir", testCfgDir))
 
 	// set a temporary password file:
@@ -81,8 +80,7 @@ func TestCollectionsAPI(t *testing.T) {
 	require.NoError(t, param.Set(param.Server_UIPasswordFile.GetName(), tempPasswdFile.Name()))
 
 	// Make a testing issuer.jwk file to get a cookie
-	tempJWKDir, err := os.MkdirTemp("", "tempDir")
-	require.NoError(t, err, "Failed to create temp jwk dir")
+	tempJWKDir := t.TempDir()
 
 	// Override viper default for testing
 	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), filepath.Join(tempJWKDir, "issuer-keys")))
@@ -90,12 +88,11 @@ func TestCollectionsAPI(t *testing.T) {
 	require.NoError(t, param.Set(param.Server_UILoginRateLimit.GetName(), 100))
 
 	// Set up origin exports
-	exportDir, err := os.MkdirTemp("", "test-export")
-	require.NoError(t, err)
-	// The defer call to remove the directory and its contents is commented out because it was causing a race condition with the file watcher.
-	// defer os.RemoveAll(exportDir)
+	exportDir := t.TempDir()
 	err = os.WriteFile(filepath.Join(exportDir, "test-origin"), []byte("test"), 0644)
 	require.NoError(t, err)
+
+	exportDir2 := t.TempDir()
 
 	require.NoError(t, param.Set(param.Origin_StorageType.GetName(), "posix"))
 	require.NoError(t, param.Set(param.Origin_Exports.GetName(), []map[string]interface{}{
@@ -105,7 +102,7 @@ func TestCollectionsAPI(t *testing.T) {
 			"SentinelLocation": "test-origin",
 		},
 		{
-			"StoragePrefix":    "/test2",
+			"StoragePrefix":    exportDir2,
 			"FederationPrefix": "/test2",
 		},
 	}))
