@@ -170,6 +170,14 @@ func (rt *regexpTransformHook) Fire(entry *log.Entry) (err error) {
 	regex := rt.regex.Load()
 	if regex != nil {
 		entry.Message = regex.ReplaceAllString(entry.Message, rt.template)
+		for key, value := range entry.Data {
+			if key != "url" {
+				continue
+			}
+			if s, ok := value.(string); ok {
+				entry.Data[key] = regex.ReplaceAllString(s, rt.template)
+			}
+		}
 	}
 	return hook.Fire(entry)
 }
