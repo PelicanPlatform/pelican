@@ -8,11 +8,19 @@ import {
   MenuItem,
   Select,
   TextField,
+  Typography,
 } from '@mui/material';
 import { DateTimePicker } from '@mui/x-date-pickers';
 import { mutate } from 'swr';
 import { DateTime } from 'luxon';
-import { Dispatch, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  Dispatch,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   DowntimeGet,
   DowntimePost,
@@ -75,8 +83,13 @@ const DowntimeForm = ({
   }, [downtime, setDowntime]);
 
   // If the starttime is updated, before the endtime, adjust the endtime to be 1 day after the starttime
+  const prevStartTimeRef = useRef(downtime.startTime);
   useEffect(() => {
+    const startTimeChanged = prevStartTimeRef.current !== downtime.startTime;
+    prevStartTimeRef.current = downtime.startTime;
+
     if (
+      startTimeChanged &&
       downtime.endTime !== -1 &&
       DateTime.fromMillis(downtime.endTime) <=
         DateTime.fromMillis(downtime.startTime)
@@ -101,7 +114,7 @@ const DowntimeForm = ({
           }
         />
       </Box>
-      <Box mt={2}>
+      <Box mt={2} display={'flex'} flexDirection={'column'}>
         <DateTimePicker
           label={`End Time (${getUtcOffsetString()})`}
           disabled={endless}
@@ -110,6 +123,13 @@ const DowntimeForm = ({
             setDowntime({ ...downtime, endTime: v?.toMillis() || 0 })
           }
         />
+        {downtime.endTime !== -1 &&
+          DateTime.fromMillis(downtime.endTime) <=
+            DateTime.fromMillis(downtime.startTime) && (
+            <Typography variant={'caption'} color={'error'}>
+              End time must be after start time
+            </Typography>
+          )}
       </Box>
       <Box>
         <FormControlLabel
