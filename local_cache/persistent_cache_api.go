@@ -21,6 +21,8 @@ package local_cache
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -53,6 +55,7 @@ import (
 // requestLogger builds a structured logrus entry for an incoming HTTP
 // request.  It always includes method and path; the request ID
 // (X-Pelican-JobId) is added when present.
+
 func requestLogger(r *http.Request, objectPath string) *log.Entry {
 	entry := log.WithFields(log.Fields{
 		"method": r.Method,
@@ -62,6 +65,41 @@ func requestLogger(r *http.Request, objectPath string) *log.Entry {
 		entry = entry.WithField("reqId", reqId)
 	}
 	return entry
+}
+
+// formatDigestHeader formats a slice of Checksum values as an RFC 3230
+// Digest header value.  If there are no checksums, it returns an empty string.
+// Example output: "md5=rL0Y20zC+Fzt72VPzMSk2A==, crc32c=abcd1234"
+func formatDigestHeader(checksums []Checksum) string {
+	if len(checksums) == 0 {
+		return ""
+	}
+
+	var parts []string
+	for _, ck := range checksums {
+		var algName, encodedVal string
+		switch ck.Type {
+		case ChecksumMD5:
+			algName = "md5"
+			encodedVal = base64.StdEncoding.EncodeToString(ck.Value)
+		case ChecksumSHA1:
+			algName = "sha"
+			encodedVal = base64.StdEncoding.EncodeToString(ck.Value)
+		case ChecksumSHA256:
+			algName = "sha-256"
+			encodedVal = base64.StdEncoding.EncodeToString(ck.Value)
+		case ChecksumCRC32:
+			algName = "crc32"
+			encodedVal = hex.EncodeToString(ck.Value)
+		case ChecksumCRC32C:
+			algName = "crc32c"
+			encodedVal = hex.EncodeToString(ck.Value)
+		default:
+			continue // skip unknown checksum types
+		}
+		parts = append(parts, algName+"="+encodedVal)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // isConnectionError checks if an error is a connection error (reset, refused, etc.)
@@ -448,6 +486,11 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		// Set ETag header if available
 		if meta.ETag != "" {
 			w.Header().Set("ETag", meta.ETag)
+		}
+
+		// Set Digest header with checksums if available (RFC 3230)
+		if digest := formatDigestHeader(meta.Checksums); digest != "" {
+			w.Header().Set("Digest", digest)
 		}
 
 		// Handle If-None-Match conditional request (http.ServeContent doesn't handle this)
