@@ -28,24 +28,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/param"
 )
-
-type mockLauncher struct{}
-
-func (m *mockLauncher) Name() string                                             { return "mock" }
-func (m *mockLauncher) Launch(ctx context.Context) (context.Context, int, error) { return ctx, 0, nil }
-func (m *mockLauncher) KillFunc() func(pid int, sig int) error {
-	return func(pid int, sig int) error { return nil }
-}
 
 func TestXrootdLoggingCallbackRestartsAndUpdatesPids(t *testing.T) {
 	param.ClearCallbacks()
 	ClearXrootdDaemons()
 	restartInfos = []restartInfo{
-		{launchers: []daemon.Launcher{&mockLauncher{}}, isCache: true, pids: []int{10}},
-		{launchers: []daemon.Launcher{&mockLauncher{}}, isCache: false, pids: []int{20}},
+		{isCache: true, pids: []int{10}},
+		{isCache: false, pids: []int{20}},
 	}
 	t.Cleanup(func() { restartInfos = nil })
 
@@ -82,7 +73,7 @@ func TestXrootdLoggingCallbackRestartsAndUpdatesPids(t *testing.T) {
 func TestXrootdLoggingCallbackIgnoresNonXrootdLogging(t *testing.T) {
 	param.ClearCallbacks()
 	ClearXrootdDaemons()
-	restartInfos = []restartInfo{{launchers: []daemon.Launcher{&mockLauncher{}}, isCache: false, pids: []int{30}}}
+	restartInfos = []restartInfo{{isCache: false, pids: []int{30}}}
 	t.Cleanup(func() { restartInfos = nil })
 
 	restartCalled := make(chan struct{}, 1)

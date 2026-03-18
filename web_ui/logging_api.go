@@ -19,6 +19,7 @@
 package web_ui
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -42,11 +43,14 @@ type (
 
 	// LogLevelChangeResponse represents a log level change with its metadata
 	LogLevelChangeResponse struct {
-		ChangeID      string    `json:"changeId"`
-		Level         string    `json:"level"`
-		ParameterName string    `json:"parameterName,omitempty"`
-		EndTime       time.Time `json:"endTime"`
-		Remaining     int       `json:"remainingSeconds"`
+		ChangeID              string     `json:"changeId"`
+		Level                 string     `json:"level"`
+		ParameterName         string     `json:"parameterName,omitempty"`
+		EndTime               time.Time  `json:"endTime"`
+		Remaining             int        `json:"remainingSeconds"`
+		RequiresRestart       bool       `json:"requiresRestart,omitempty"`
+		EffectiveAt           *time.Time `json:"effectiveAt,omitempty"`
+		EffectiveDurationSecs *int       `json:"effectiveDurationSeconds,omitempty"`
 	}
 
 	// LogLevelStatusResponse represents the current log level status
@@ -114,6 +118,26 @@ func HandleSetLogLevel(ctx *gin.Context) {
 		})
 		return
 	}
+
+	// XRootD logging parameters require a full daemon restart, which includes a graceful
+	// drain period. If the requested duration is shorter than or equal to the drain period,
+	// the param would revert before XRootD finishes restarting and the change would never
+	// take effect.
+	if logging.IsXrootdLoggingParam(parameterName) {
+		drainPeriod := param.Xrootd_ShutdownTimeout.GetDuration()
+		if duration <= drainPeriod {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg: fmt.Sprintf(
+					"XRootD logging parameters require a restart with a %s drain period. "+
+						"The requested duration (%s) must be longer than %s. "+
+						"Use a longer duration, or reduce Xrootd.ShutdownTimeout.",
+					drainPeriod, duration, drainPeriod),
+			})
+			return
+		}
+	}
+
 	if err := manager.AddChange(changeID, parameterName, level, duration); err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -129,6 +153,15 @@ func HandleSetLogLevel(ctx *gin.Context) {
 		ParameterName: parameterName,
 		EndTime:       endTime,
 		Remaining:     req.Duration,
+	}
+
+	if logging.IsXrootdLoggingParam(parameterName) {
+		drainPeriod := param.Xrootd_ShutdownTimeout.GetDuration()
+		effectiveAt := time.Now().Add(drainPeriod)
+		effectiveSecs := int((duration - drainPeriod).Seconds())
+		response.RequiresRestart = true
+		response.EffectiveAt = &effectiveAt
+		response.EffectiveDurationSecs = &effectiveSecs
 	}
 
 	log.WithFields(log.Fields{
