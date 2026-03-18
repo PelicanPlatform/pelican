@@ -353,9 +353,13 @@ func getDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, h
 func ParseDirectorInfo(dirResp *http.Response) (server_structs.DirectorResponse, error) {
 	var xPelNs server_structs.XPelNs
 	if err := (&xPelNs).ParseRawResponse(dirResp); err != nil {
-		return server_structs.DirectorResponse{}, errors.Wrapf(err, "failed to parse %s header", xPelNs.GetName())
+		// Some director redirects (e.g. health-test monitoring paths) omit
+		// the X-Pelican-Namespace header.  Treat this as non-fatal: default
+		// to an empty namespace with no token requirement.
+		log.Debugf("Director response missing %s header (non-fatal): %v", xPelNs.GetName(), err)
+	} else {
+		log.Debugln("Namespace path constructed from Director:", xPelNs.Namespace)
 	}
-	log.Debugln("Namespace path constructed from Director:", xPelNs.Namespace)
 
 	var xPelAuth server_structs.XPelAuth
 	if err := (&xPelAuth).ParseRawResponse(dirResp); err != nil {
@@ -370,6 +374,19 @@ func ParseDirectorInfo(dirResp *http.Response) (server_structs.DirectorResponse,
 	sortedObjectServers, err := parseServersFromDirectorResponse(dirResp)
 	if err != nil {
 		return server_structs.DirectorResponse{}, errors.Wrap(err, "failed to determine object servers from Director's response")
+	}
+
+	// If no Link headers were present but the response has a Location
+	// header (bare 307 redirect), use the Location URL as the sole
+	// object server.  This handles director health-test redirects that
+	// send a plain redirect without the standard X-Pelican-* headers.
+	if len(sortedObjectServers) == 0 {
+		if location := dirResp.Header.Get("Location"); location != "" {
+			if locUrl, parseErr := url.Parse(location); parseErr == nil {
+				sortedObjectServers = []*url.URL{locUrl}
+				log.Debugf("No Link headers in director response; using Location as object server: %s", location)
+			}
+		}
 	}
 
 	return server_structs.DirectorResponse{

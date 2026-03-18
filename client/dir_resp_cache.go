@@ -138,6 +138,10 @@ func reconstitutePaths(resp server_structs.DirectorResponse, objectPath string) 
 // only the server-side base path.  Pass "" if no stripping is needed.
 func (c *DirRespCache) Store(prefix string, objectPath string, resp server_structs.DirectorResponse) {
 	prefix = path.Clean(prefix)
+	if !strings.HasPrefix(prefix, "/") {
+		log.Debugf("DirRespCache: skipping non-absolute prefix %q", prefix)
+		return
+	}
 	resp = stripFederationPaths(resp, objectPath)
 	c.mu.Lock()
 	defer c.mu.Unlock()
