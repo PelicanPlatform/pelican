@@ -1305,6 +1305,8 @@ func (cc *ConsistencyChecker) createHasher(checksumType ChecksumType) (hash.Hash
 		return sha256.New(), nil
 	case ChecksumCRC32:
 		return crc32.NewIEEE(), nil
+	case ChecksumCRC32C:
+		return crc32.New(crc32.MakeTable(crc32.Castagnoli)), nil
 	default:
 		return nil, errors.Errorf("unknown checksum type: %d", checksumType)
 	}
