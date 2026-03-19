@@ -57,8 +57,8 @@ func newBenchEnv(b *testing.B) *benchEnv {
 	b.Cleanup(func() { db.Close() })
 
 	// Enable FD cache so benchmarks reflect production behavior.
-	require.NoError(b, param.Set(param.LocalCache_FDCacheSize.GetName(), 1024))
-	b.Cleanup(func() { _ = param.Set(param.LocalCache_FDCacheSize.GetName(), 0) })
+	require.NoError(b, param.LocalCache_FDCacheSize.Set(1024))
+	b.Cleanup(func() { _ = param.LocalCache_FDCacheSize.Set(0) })
 
 	egrp, _ := errgroup.WithContext(ctx)
 	storage, err := NewStorageManager(db, []string{dir}, 0, egrp)
@@ -808,8 +808,8 @@ func BenchmarkBlockWriterStreaming(b *testing.B) {
 func newBenchEnvWithPtCache(b *testing.B, ptCacheBytes int) *benchEnv {
 	b.Helper()
 
-	require.NoError(b, param.Set(param.Cache_MemoryCacheSize.GetName(), fmt.Sprintf("%d", ptCacheBytes)))
-	b.Cleanup(func() { _ = param.Set(param.Cache_MemoryCacheSize.GetName(), "0") })
+	require.NoError(b, param.Cache_MemoryCacheSize.Set(fmt.Sprintf("%d", ptCacheBytes)))
+	b.Cleanup(func() { _ = param.Cache_MemoryCacheSize.Set("0") })
 
 	return newBenchEnv(b)
 }
