@@ -26,7 +26,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -131,12 +130,11 @@ func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp
 
 	log.Info("Initializing persistent cache")
 
-	// Create the persistent cache instance
-	// For cache servers, use Cache.StorageLocation instead of LocalCache.DataLocation
-	// to avoid conflicts when both LocalCache and Cache modules are running
-	cacheStorageLocation := param.Cache_StorageLocation.GetString()
+	// Create the persistent cache instance in server mode.
+	// CacheModeServer tells NewPersistentCache to read Cache.StorageLocation,
+	// Cache.HighWaterMark, etc. instead of LocalCache.* params.
 	cfg := local_cache.PersistentCacheConfig{
-		BaseDir: filepath.Join(cacheStorageLocation, "persistent-cache"),
+		Mode: local_cache.CacheModeServer,
 	}
 
 	// Populate storage directories from config if set.

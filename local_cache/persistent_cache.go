@@ -293,8 +293,27 @@ func parseCacheWaterMark(s string) (percentage int, absoluteBytes uint64, ok boo
 	return
 }
 
+// CacheMode distinguishes whether the persistent cache is running as a
+// full cache server (CacheType) or as a client-side local cache
+// (LocalCacheType).  The mode determines which configuration namespace
+// is consulted for defaults (Cache.* vs LocalCache.*).
+type CacheMode int
+
+const (
+	// CacheModeLocal is the default: use LocalCache.* params.
+	CacheModeLocal CacheMode = iota
+	// CacheModeServer uses Cache.* params (cache server).
+	CacheModeServer
+)
+
 // PersistentCacheConfig holds configuration for the persistent cache
 type PersistentCacheConfig struct {
+	// Mode selects which configuration namespace to use for defaults.
+	// CacheModeServer reads Cache.StorageLocation, Cache.HighWaterMark, etc.
+	// CacheModeLocal (the zero value) reads LocalCache.DataLocation,
+	// LocalCache.HighWaterMarkPercentage, etc.
+	Mode CacheMode
+
 	// BaseDir is the root directory for the cache.  The BadgerDB database
 	// lives directly under BaseDir.  If StorageDirs is empty, a single
 	// storage directory is created under BaseDir/objects.
@@ -328,19 +347,19 @@ type PersistentCacheConfig struct {
 
 // NewPersistentCache creates a new persistent cache instance
 func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg PersistentCacheConfig) (*PersistentCache, error) {
-	// Use defaults from param if not specified.  Prefer Cache.StorageLocation
-	// (used by cache servers) over LocalCache.DataLocation (used by client-side
-	// local cache).
+	// Resolve BaseDir from the appropriate config namespace.
 	if cfg.BaseDir == "" {
-		if loc := param.Cache_StorageLocation.GetString(); loc != "" {
-			cfg.BaseDir = filepath.Join(loc, "persistent-cache")
+		switch cfg.Mode {
+		case CacheModeServer:
+			if loc := param.Cache_StorageLocation.GetString(); loc != "" {
+				cfg.BaseDir = filepath.Join(loc, "persistent-cache")
+			}
+		default: // CacheModeLocal
+			cfg.BaseDir = param.LocalCache_DataLocation.GetString()
 		}
 	}
 	if cfg.BaseDir == "" {
-		cfg.BaseDir = param.LocalCache_DataLocation.GetString()
-	}
-	if cfg.BaseDir == "" {
-		return nil, errors.New("neither Cache.StorageLocation nor LocalCache.DataLocation is set; cannot determine where to place cache data")
+		return nil, errors.New("cache base directory is not set; configure Cache.StorageLocation or LocalCache.DataLocation")
 	}
 
 	// Ensure base directory exists (needed before getCacheSize)
@@ -349,25 +368,25 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	}
 
 	// Resolve default watermark settings from config/params.
-	// Priority chain (Cache.* is preferred over LocalCache.*):
-	//   1. Explicit PersistentCacheConfig struct fields
-	//   2. Cache.HighWaterMark / Cache.LowWaterMark params (may be percentage or absolute bytes)
-	//   3. LocalCache.HighWaterMarkPercentage / LowWaterMarkPercentage params
-	//   4. Hardcoded defaults (90% / 80%)
+	// The mode determines which namespace is checked:
+	//   CacheModeServer: struct fields → Cache.HighWaterMark/LowWaterMark → defaults
+	//   CacheModeLocal:  struct fields → LocalCache.*Percentage → defaults
 	defaultHWP := cfg.HighWaterMarkPercentage
 	var defaultHWBytes uint64
 	if defaultHWP == 0 {
-		pct, abs, ok := parseCacheWaterMark(param.Cache_HighWaterMark.GetString())
-		if ok {
-			if pct > 0 {
-				defaultHWP = pct
-			} else {
-				defaultHWBytes = abs
+		switch cfg.Mode {
+		case CacheModeServer:
+			pct, abs, ok := parseCacheWaterMark(param.Cache_HighWaterMark.GetString())
+			if ok {
+				if pct > 0 {
+					defaultHWP = pct
+				} else {
+					defaultHWBytes = abs
+				}
 			}
+		default:
+			defaultHWP = param.LocalCache_HighWaterMarkPercentage.GetInt()
 		}
-	}
-	if defaultHWP == 0 {
-		defaultHWP = param.LocalCache_HighWaterMarkPercentage.GetInt()
 	}
 	if defaultHWP == 0 && defaultHWBytes == 0 {
 		defaultHWP = 90
@@ -376,17 +395,19 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	defaultLWP := cfg.LowWaterMarkPercentage
 	var defaultLWBytes uint64
 	if defaultLWP == 0 {
-		pct, abs, ok := parseCacheWaterMark(param.Cache_LowWatermark.GetString())
-		if ok {
-			if pct > 0 {
-				defaultLWP = pct
-			} else {
-				defaultLWBytes = abs
+		switch cfg.Mode {
+		case CacheModeServer:
+			pct, abs, ok := parseCacheWaterMark(param.Cache_LowWatermark.GetString())
+			if ok {
+				if pct > 0 {
+					defaultLWP = pct
+				} else {
+					defaultLWBytes = abs
+				}
 			}
+		default:
+			defaultLWP = param.LocalCache_LowWaterMarkPercentage.GetInt()
 		}
-	}
-	if defaultLWP == 0 {
-		defaultLWP = param.LocalCache_LowWaterMarkPercentage.GetInt()
 	}
 	if defaultLWP == 0 && defaultLWBytes == 0 {
 		defaultLWP = 80
