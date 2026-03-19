@@ -888,10 +888,31 @@ func getMetadataInTxn(txn *badger.Txn, instanceHash InstanceHash) (*CacheMetadat
 // counter for the given storage directory and namespace.  Call this at
 // file-creation time to "reserve" the full ContentLength so that the
 // eviction watermarks agree with the filesystem's actual allocation.
+//
+// The method retries on BadgerDB transaction conflicts, which can occur when
+// multiple concurrent downloads charge usage for the same namespace.
 func (cdb *CacheDB) ChargeUsage(storageID StorageID, namespaceID NamespaceID, delta int64) error {
-	return cdb.db.Update(func(txn *badger.Txn) error {
-		return addUsageInTxn(txn, storageID, namespaceID, delta)
-	})
+	const maxRetries = 20
+	backoff := 100 * time.Microsecond
+	for attempt := 0; ; attempt++ {
+		err := cdb.db.Update(func(txn *badger.Txn) error {
+			return addUsageInTxn(txn, storageID, namespaceID, delta)
+		})
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, badger.ErrConflict) && attempt < maxRetries-1 {
+			n, _ := rand.Int(rand.Reader, big.NewInt(int64(backoff)))
+			jitter := time.Duration(n.Int64())
+			time.Sleep(backoff + jitter)
+			backoff *= 2
+			if backoff > 50*time.Millisecond {
+				backoff = 50 * time.Millisecond
+			}
+			continue
+		}
+		return err
+	}
 }
 
 // addUsageInTxn performs the usage counter merge within an existing transaction
