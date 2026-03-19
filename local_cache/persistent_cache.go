@@ -2245,8 +2245,6 @@ func (w *decisionWriter) Finalize(dl *persistentDownload) error {
 	return errors.New("decisionWriter: finalize called without mode set")
 }
 
-
-
 // SetFedToken stores the federation token in memory.  It is called by
 // cache.LaunchFedTokManager (via the onTokenUpdate callback) whenever the
 // token is created or refreshed, eliminating the need to read the token

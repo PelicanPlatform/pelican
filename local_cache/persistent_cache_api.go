@@ -1355,6 +1355,9 @@ func (pc *PersistentCache) RegisterCacheHandlers(engine *gin.Engine, directorEna
 	adminIntrospect.GET("/etags", pc.introspectEtagsHandler)
 	adminIntrospect.GET("/metadata", pc.introspectMetadataHandler)
 	adminIntrospect.POST("/verify", pc.introspectVerifyHandler)
+	adminIntrospect.GET("/stats", pc.introspectStatsHandler)
+	adminIntrospect.POST("/disk-usage", pc.introspectDiskUsageHandler)
+	adminIntrospect.POST("/consistency", pc.introspectConsistencyHandler)
 	log.Info("Cache introspection API registered at /api/v1.0/cache/introspect/")
 
 	return nil
@@ -1651,4 +1654,152 @@ func (pc *PersistentCache) getBlockSummaryLive(instanceHash InstanceHash, conten
 	}
 
 	return summary, nil
+}
+
+// introspectStatsHandler returns aggregate cache size statistics.
+//
+// GET /api/v1.0/cache/introspect/stats
+func (pc *PersistentCache) introspectStatsHandler(c *gin.Context) {
+	stats := &CacheStats{
+		StorageBreakdown: make(map[string]*StorageDirStats),
+	}
+
+	// Scan metadata for counts and byte totals
+	scanErr := pc.db.ScanMetadata(func(instanceHash InstanceHash, meta *CacheMetadata) error {
+		stats.TotalMetadataEntries++
+		stats.TotalBytesMetadata += meta.ContentLength
+
+		dirKey := fmt.Sprintf("storage-%d", meta.StorageID)
+		ds, ok := stats.StorageBreakdown[dirKey]
+		if !ok {
+			ds = &StorageDirStats{StorageID: uint8(meta.StorageID)}
+			stats.StorageBreakdown[dirKey] = ds
+		}
+		ds.ObjectCount++
+		ds.TotalBytes += meta.ContentLength
+
+		if meta.IsInline() {
+			ds.InlineCount++
+			ds.InlineBytes += meta.ContentLength
+		} else {
+			ds.OnDiskCount++
+			ds.OnDiskBytes += meta.ContentLength
+		}
+		return nil
+	})
+	if scanErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": scanErr.Error()})
+		return
+	}
+
+	// Inline data size
+	inlineBytes, inlineErr := pc.db.ComputeInlineDataSize()
+	if inlineErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": inlineErr.Error()})
+		return
+	}
+	stats.TotalInlineBytes = inlineBytes
+
+	// Usage counters
+	usage, usageErr := pc.db.GetAllUsage()
+	if usageErr == nil && len(usage) > 0 {
+		stats.UsageCounters = make(map[string]int64, len(usage))
+		for k, v := range usage {
+			key := fmt.Sprintf("s%d:ns%d", k.StorageID, k.NamespaceID)
+			stats.UsageCounters[key] = v
+		}
+	}
+
+	c.JSON(http.StatusOK, stats)
+}
+
+// introspectDiskUsageHandler walks storage directories to compute actual disk usage.
+//
+// POST /api/v1.0/cache/introspect/disk-usage
+func (pc *PersistentCache) introspectDiskUsageHandler(c *gin.Context) {
+	start := time.Now()
+	result := &DiskUsageResult{
+		Directories: make(map[string]*DirDiskStat),
+	}
+
+	dirs := pc.storage.GetDirs()
+	for storageID, objectsDir := range dirs {
+		dirKey := fmt.Sprintf("storage-%d", storageID)
+		ds := &DirDiskStat{
+			StorageID: uint8(storageID),
+			Path:      objectsDir,
+		}
+
+		walkErr := filepath.WalkDir(objectsDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() {
+				return nil
+			}
+			info, infoErr := d.Info()
+			if infoErr != nil {
+				return nil
+			}
+			ds.FileCount++
+			ds.BytesUsed += info.Size()
+			return nil
+		})
+		if walkErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": walkErr.Error()})
+			return
+		}
+
+		result.Directories[dirKey] = ds
+		result.TotalBytesOnDisk += ds.BytesUsed
+		result.TotalFiles += ds.FileCount
+	}
+
+	result.Duration = time.Since(start).String()
+	c.JSON(http.StatusOK, result)
+}
+
+// introspectConsistencyHandler triggers a consistency check and returns results.
+//
+// POST /api/v1.0/cache/introspect/consistency?metadata=true&data=true
+func (pc *PersistentCache) introspectConsistencyHandler(c *gin.Context) {
+	metadataScan := c.DefaultQuery("metadata", "true") == "true"
+	dataScan := c.DefaultQuery("data", "true") == "true"
+
+	if !metadataScan && !dataScan {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "at least one of metadata or data scan must be enabled"})
+		return
+	}
+
+	start := time.Now()
+	result := &ConsistencyCheckResult{}
+
+	if metadataScan {
+		if err := pc.consistency.RunMetadataScan(c.Request.Context()); err != nil {
+			result.Error = fmt.Sprintf("metadata scan failed: %v", err)
+		}
+		result.MetadataScanRan = true
+	}
+
+	if dataScan {
+		if err := pc.consistency.RunDataScan(c.Request.Context()); err != nil {
+			if result.Error != "" {
+				result.Error += "; "
+			}
+			result.Error += fmt.Sprintf("data scan failed: %v", err)
+		}
+		result.DataScanRan = true
+	}
+
+	stats := pc.consistency.GetStats()
+	result.OrphanedFiles = stats.OrphanedFiles
+	result.OrphanedDBEntries = stats.OrphanedDBEntries
+	result.ChecksumMismatches = stats.ChecksumMismatches
+	result.BytesVerified = stats.BytesVerified
+	result.ObjectsVerified = stats.ObjectsVerified
+	result.MetadataScanErrors = stats.MetadataScanErrors
+	result.DataScanErrors = stats.DataScanErrors
+	result.Duration = time.Since(start).String()
+
+	c.JSON(http.StatusOK, result)
 }
