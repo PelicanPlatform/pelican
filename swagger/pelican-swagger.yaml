@@ -1575,6 +1575,146 @@ definitions:
         description: Per-checksum verification results
         items:
           $ref: "#/definitions/CacheChecksumStatus"
+  CacheStorageDirStats:
+    type: object
+    description: Per-storage-directory size statistics
+    properties:
+      storage_id:
+        type: integer
+        description: Storage directory identifier
+      object_count:
+        type: integer
+        format: int64
+        description: Total number of objects in this directory
+      total_bytes:
+        type: integer
+        format: int64
+        description: Sum of ContentLength for all objects
+      inline_count:
+        type: integer
+        format: int64
+        description: Number of inline objects
+      inline_bytes:
+        type: integer
+        format: int64
+        description: Sum of ContentLength for inline objects
+      on_disk_count:
+        type: integer
+        format: int64
+        description: Number of on-disk objects
+      on_disk_bytes:
+        type: integer
+        format: int64
+        description: Sum of ContentLength for on-disk objects
+  CacheStats:
+    type: object
+    description: Aggregate cache size statistics
+    properties:
+      total_inline_bytes:
+        type: integer
+        format: int64
+        description: Total bytes of inline data stored in BadgerDB
+      total_metadata_entries:
+        type: integer
+        format: int64
+        description: Total number of metadata entries
+      total_bytes_metadata:
+        type: integer
+        format: int64
+        description: Sum of ContentLength across all metadata entries
+      usage_counters:
+        type: object
+        description: Pre-computed usage counters keyed by "s{storageID}:ns{namespaceID}"
+        additionalProperties:
+          type: integer
+          format: int64
+      storage_breakdown:
+        type: object
+        description: Per-storage-directory breakdown
+        additionalProperties:
+          $ref: "#/definitions/CacheStorageDirStats"
+  CacheDirDiskStat:
+    type: object
+    description: Disk usage for a single storage directory
+    properties:
+      storage_id:
+        type: integer
+        description: Storage directory identifier
+      path:
+        type: string
+        description: Filesystem path
+      bytes_used:
+        type: integer
+        format: int64
+        description: Actual bytes used on disk
+      file_count:
+        type: integer
+        format: int64
+        description: Number of files
+  CacheDiskUsageResult:
+    type: object
+    description: Result of an expensive disk walk computing actual usage
+    properties:
+      total_bytes_on_disk:
+        type: integer
+        format: int64
+        description: Total bytes across all storage directories
+      total_files:
+        type: integer
+        format: int64
+        description: Total number of files
+      directories:
+        type: object
+        description: Per-directory disk usage
+        additionalProperties:
+          $ref: "#/definitions/CacheDirDiskStat"
+      duration:
+        type: string
+        description: How long the filesystem walk took
+  CacheConsistencyCheckResult:
+    type: object
+    description: Result of a cache consistency check
+    properties:
+      metadata_scan_ran:
+        type: boolean
+        description: Whether a metadata scan was performed
+      data_scan_ran:
+        type: boolean
+        description: Whether a data scan was performed
+      orphaned_files:
+        type: integer
+        format: int64
+        description: Files on disk with no corresponding DB entry
+      orphaned_db_entries:
+        type: integer
+        format: int64
+        description: DB entries with no corresponding disk file
+      checksum_mismatches:
+        type: integer
+        format: int64
+        description: Number of objects with checksum mismatches
+      bytes_verified:
+        type: integer
+        format: int64
+        description: Total bytes read and verified
+      objects_verified:
+        type: integer
+        format: int64
+        description: Total objects verified
+      metadata_scan_errors:
+        type: integer
+        format: int64
+        description: Errors during metadata scan
+      data_scan_errors:
+        type: integer
+        format: int64
+        description: Errors during data scan
+      duration:
+        type: string
+        description: Total duration of the consistency check
+      error:
+        type: string
+        description: Error messages if any scan failed
 
 tags:
   - name: auth
@@ -5218,6 +5358,116 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
         "404":
           description: Object instance not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /cache/introspect/stats:
+    get:
+      tags:
+        - cache_ui
+      summary: Get aggregate cache size statistics
+      description: >-
+        `Authentication Required` `Admin privilege Required`
+
+
+        Returns aggregate size statistics about the cache including total inline
+        bytes, metadata entry count, total bytes per metadata, and per-storage-directory
+        breakdown. This is a relatively cheap operation that only scans metadata.
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: Cache statistics
+          schema:
+            $ref: "#/definitions/CacheStats"
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /cache/introspect/disk-usage:
+    post:
+      tags:
+        - cache_ui
+      summary: Compute actual disk usage by walking storage directories
+      description: >-
+        `Authentication Required` `Admin privilege Required`
+
+
+        Walks all storage directories and sums the actual file sizes on disk.
+        This is an EXPENSIVE operation that stats every file. For large caches
+        this may take significant time. Uses POST because it triggers a potentially
+        long-running computation.
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: Disk usage computed successfully
+          schema:
+            $ref: "#/definitions/CacheDiskUsageResult"
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /cache/introspect/consistency:
+    post:
+      tags:
+        - cache_ui
+      summary: Trigger a cache consistency check
+      description: >-
+        `Authentication Required` `Admin privilege Required`
+
+
+        Triggers a consistency check between the database and disk. By default runs
+        both a metadata scan (finds orphaned files and DB entries) and a data scan
+        (reads and verifies checksums). Use query parameters to run only one scan type.
+        The data scan is expensive as it reads every cached file.
+      produces:
+        - application/json
+      parameters:
+        - in: query
+          name: metadata
+          type: string
+          description: Whether to run the metadata scan (default "true")
+          default: "true"
+        - in: query
+          name: data
+          type: string
+          description: Whether to run the data scan (default "true")
+          default: "true"
+      responses:
+        "200":
+          description: Consistency check completed
+          schema:
+            $ref: "#/definitions/CacheConsistencyCheckResult"
+        "400":
+          description: Invalid query parameters
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "500":

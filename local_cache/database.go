@@ -1219,6 +1219,25 @@ func (cdb *CacheDB) GetAllUsage() (map[StorageUsageKey]int64, error) {
 	return cdb.getUsageByPrefix([]byte(PrefixUsage))
 }
 
+// ComputeInlineDataSize scans all inline data entries (d: prefix) and sums
+// the stored value sizes.  This gives the actual bytes consumed in BadgerDB
+// for inline object data (excluding metadata overhead).
+func (cdb *CacheDB) ComputeInlineDataSize() (int64, error) {
+	var total int64
+	err := cdb.db.View(func(txn *badger.Txn) error {
+		prefix := []byte(PrefixInline)
+		opts := badger.DefaultIteratorOptions
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			total += int64(it.Item().ValueSize())
+		}
+		return nil
+	})
+	return total, err
+}
+
 // GetDirUsage returns usage for all namespaces within a single storage directory.
 func (cdb *CacheDB) GetDirUsage(storageID StorageID) (map[NamespaceID]int64, error) {
 	prefix := []byte(fmt.Sprintf("%s%d:", PrefixUsage, storageID))
