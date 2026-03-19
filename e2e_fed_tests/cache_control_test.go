@@ -579,7 +579,11 @@ func TestCacheControl_EvictionUnderPressure(t *testing.T) {
 
 	require.NoError(t, param.Set(param.Cache_EnableV2.GetName(), true))
 	// Constrain cache size: 100KB, high water 90% (90KB), low water 50% (50KB)
+	// Set both Cache.* (used by CacheModeServer) and LocalCache.* (used by CacheModeLocal)
+	// so the constraints apply regardless of which mode the federation test uses.
 	require.NoError(t, param.Set(param.LocalCache_Size.GetName(), "100KB"))
+	require.NoError(t, param.Set(param.Cache_HighWaterMark.GetName(), "90"))
+	require.NoError(t, param.Set(param.Cache_LowWatermark.GetName(), "50"))
 	require.NoError(t, param.Set(param.LocalCache_HighWaterMarkPercentage.GetName(), 90))
 	require.NoError(t, param.Set(param.LocalCache_LowWaterMarkPercentage.GetName(), 50))
 
