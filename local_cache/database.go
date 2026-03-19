@@ -809,33 +809,14 @@ func (cdb *CacheDB) MergeBlockStateWithUsage(instanceHash InstanceHash, newBlock
 }
 
 func (cdb *CacheDB) mergeBlockStateWithUsageTxn(txn *badger.Txn, instanceHash InstanceHash, newData []byte, newBlocks *roaring.Bitmap, storageID StorageID, namespaceID NamespaceID, contentLength int64) error {
-	newBitCount, err := mergeBlockStateInTxn(txn, instanceHash, newData)
-	if err != nil {
-		return err
-	}
-	if newBitCount == 0 {
-		return nil // No new blocks added; nothing to track
-	}
-
-	if contentLength < 0 {
-		// Caller didn't supply the size — look up metadata.
-		meta, err := getMetadataInTxn(txn, instanceHash)
-		if err != nil || meta == nil {
-			// Metadata may not exist yet (e.g., blocks written before metadata).
-			// Skip usage tracking rather than failing the bitmap merge.
-			return nil
-		}
-		contentLength = meta.ContentLength
-		storageID = meta.StorageID
-		namespaceID = meta.NamespaceID
-	}
-
-	meta := &CacheMetadata{ContentLength: contentLength}
-	delta := calculateUsageDelta(meta, newBlocks, newBitCount)
-	if delta > 0 {
-		return addUsageInTxn(txn, storageID, namespaceID, delta)
-	}
-	return nil
+	// Only merge the block bitmap.  Usage is now charged upfront at
+	// file-creation time (InitDiskStorage / AllocateChunk / StoreInline)
+	// to match the filesystem's pre-allocation.
+	//
+	// The function is kept separate from mergeBlocKStateInTxn in case we
+	// ever want to do some interesting usage accounting.
+	_, err := mergeBlockStateInTxn(txn, instanceHash, newData)
+	return err
 }
 
 // mergeBlockStateInTxn performs the bitmap merge within an existing transaction.
@@ -903,42 +884,14 @@ func getMetadataInTxn(txn *badger.Txn, instanceHash InstanceHash) (*CacheMetadat
 	return &meta, nil
 }
 
-// calculateUsageDelta returns the byte-level usage increase for newBitCount
-// newly-enabled blocks. Every full block contributes BlockDataSize bytes;
-// the last block of the object may be smaller.
-//
-// When ContentLength is unknown (<= 0), each block is treated as full-sized.
-// For chunked (unknown-size) downloads, BlockWriter.Close sets ContentLength
-// before marking the final block so that the last partial block is correctly
-// sized.
-func calculateUsageDelta(meta *CacheMetadata, newBlocks *roaring.Bitmap, newBitCount uint64) int64 {
-	if newBitCount == 0 {
-		return 0
-	}
-
-	if meta.ContentLength <= 0 {
-		// Unknown content length: treat every block as full-sized.
-		return int64(newBitCount) * int64(BlockDataSize)
-	}
-
-	totalBlocks := CalculateBlockCount(meta.ContentLength)
-	lastBlock := totalBlocks - 1
-
-	// Start by assuming all new blocks are full-sized
-	delta := int64(newBitCount) * int64(BlockDataSize)
-
-	// If the last block is among the newly-added blocks, adjust for its
-	// potentially smaller size.
-	if newBlocks.Contains(lastBlock) {
-		remainder := meta.ContentLength % int64(BlockDataSize)
-		if remainder > 0 {
-			// Last block is partial: subtract the over-count
-			delta -= int64(BlockDataSize) - remainder
-		}
-		// If remainder == 0 the last block is exactly full, no adjustment needed
-	}
-
-	return delta
+// ChargeUsage atomically adds (or subtracts) delta bytes from the usage
+// counter for the given storage directory and namespace.  Call this at
+// file-creation time to "reserve" the full ContentLength so that the
+// eviction watermarks agree with the filesystem's actual allocation.
+func (cdb *CacheDB) ChargeUsage(storageID StorageID, namespaceID NamespaceID, delta int64) error {
+	return cdb.db.Update(func(txn *badger.Txn) error {
+		return addUsageInTxn(txn, storageID, namespaceID, delta)
+	})
 }
 
 // addUsageInTxn performs the usage counter merge within an existing transaction
@@ -1266,6 +1219,25 @@ func (cdb *CacheDB) GetAllUsage() (map[StorageUsageKey]int64, error) {
 	return cdb.getUsageByPrefix([]byte(PrefixUsage))
 }
 
+// ComputeInlineDataSize scans all inline data entries (d: prefix) and sums
+// the stored value sizes.  This gives the actual bytes consumed in BadgerDB
+// for inline object data (excluding metadata overhead).
+func (cdb *CacheDB) ComputeInlineDataSize() (int64, error) {
+	var total int64
+	err := cdb.db.View(func(txn *badger.Txn) error {
+		prefix := []byte(PrefixInline)
+		opts := badger.DefaultIteratorOptions
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			total += int64(it.Item().ValueSize())
+		}
+		return nil
+	})
+	return total, err
+}
+
 // GetDirUsage returns usage for all namespaces within a single storage directory.
 func (cdb *CacheDB) GetDirUsage(storageID StorageID) (map[NamespaceID]int64, error) {
 	prefix := []byte(fmt.Sprintf("%s%d:", PrefixUsage, storageID))
@@ -1364,42 +1336,12 @@ func (cdb *CacheDB) ComputeActualUsage() (map[StorageUsageKey]int64, error) {
 
 			key := StorageUsageKey{StorageID: meta.StorageID, NamespaceID: meta.NamespaceID}
 
-			// Completed objects: usage == ContentLength (bitmap is deleted on completion).
-			if !meta.Completed.IsZero() {
-				if meta.ContentLength > 0 {
-					actual[key] += meta.ContentLength
-				}
-				continue
+			// Both completed and in-progress objects are charged at their
+			// full ContentLength, matching the upfront-charge model where
+			// usage is reserved at file-creation time.
+			if meta.ContentLength > 0 {
+				actual[key] += meta.ContentLength
 			}
-
-			// In-progress: compute from the block bitmap.
-			stateItem, err := txn.Get(StateKey(instanceHash))
-			if err != nil {
-				if errors.Is(err, badger.ErrKeyNotFound) {
-					continue // No blocks downloaded — contributes 0 bytes
-				}
-				return errors.Wrapf(err, "failed to read block state for %s", instanceHash)
-			}
-
-			var objectUsage int64
-			err = stateItem.Value(func(val []byte) error {
-				bm := roaring.New()
-				if _, err := bm.FromBuffer(val); err != nil {
-					return errors.Wrapf(err, "failed to deserialize bitmap for %s", instanceHash)
-				}
-				cardinality := bm.GetCardinality()
-				if cardinality == 0 {
-					return nil
-				}
-				objectUsage = calculateUsageDelta(&meta, bm, cardinality)
-				return nil
-			})
-			if err != nil {
-				log.Warnf("ComputeActualUsage: %v", err)
-				continue
-			}
-
-			actual[key] += objectUsage
 		}
 		return nil
 	})

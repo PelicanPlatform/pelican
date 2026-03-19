@@ -1240,10 +1240,14 @@ func (pc *PersistentCache) doInitObjectFromStat(
 
 	// Initialize disk storage with empty block bitmap
 	storageID := pc.eviction.ChooseDiskStorage()
-	meta, err := pc.storage.InitDiskStorage(ctx, instanceHash, statInfo.Size, storageID)
+	meta, err := pc.storage.InitDiskStorage(ctx, instanceHash, statInfo.Size, storageID, namespaceID)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to init disk storage for range-on-miss")
 	}
+
+	// Usage was charged in InitDiskStorage; bump the in-memory counter
+	// so the eviction manager can trigger if needed.
+	pc.eviction.NoteUsageIncrease(storageID, statInfo.Size)
 
 	meta.ETag = etag
 	meta.LastModified = statInfo.ModTime
@@ -2088,13 +2092,17 @@ func (w *decisionWriter) SetDiskMode(ctx context.Context, size int64) error {
 
 	// Initialize disk storage
 	storageID := w.pc.eviction.ChooseDiskStorage()
-	meta, err := w.pc.storage.InitDiskStorage(ctx, w.dl.instanceHash, size, storageID)
+	meta, err := w.pc.storage.InitDiskStorage(ctx, w.dl.instanceHash, size, storageID, w.dl.namespaceID)
 	if err != nil {
 		w.setupErr = errors.Wrap(err, "failed to initialize disk storage")
 		w.decided = true
 		w.cond.Broadcast()
 		return w.setupErr
 	}
+
+	// Usage was charged in InitDiskStorage; bump the in-memory counter
+	// so the eviction manager can trigger if needed.
+	w.pc.eviction.NoteUsageIncrease(storageID, size)
 
 	meta.ETag = w.dl.etag
 	meta.LastModified = w.dl.lastModified
@@ -2153,10 +2161,7 @@ func (w *decisionWriter) SetDiskMode(ctx context.Context, size int64) error {
 			}
 		}
 
-		// Usage was already tracked per-block atomically in MarkBlocksDownloaded.
-		// Notify the eviction manager so its in-memory counter stays current and
-		// an eviction check is triggered if needed.
-		w.pc.eviction.NoteUsageIncrease(storageID, actualSize)
+		// Usage was already charged upfront via InitDiskStorage.
 		if err := w.pc.db.SetLatestETag(w.dl.objectHash, w.dl.etag, w.dl.etagObserved); err != nil {
 			log.Warnf("Failed to update ETag table: %v", err)
 		}
@@ -2222,8 +2227,8 @@ func (w *decisionWriter) Finalize(dl *persistentDownload) error {
 			log.Warnf("Failed to update ETag table: %v", err)
 		}
 
-		// StoreInline's SetInlineData already tracked usage in the DB;
-		// just bump the in-memory estimate so eviction can trigger.
+		// StoreInline charged usage in the DB; bump the in-memory
+		// estimate so eviction can trigger.
 		w.pc.eviction.NoteUsageIncrease(StorageIDInline, int64(len(w.buffer)))
 		log.Debugf("Completed inline download of %s (%d bytes)", dl.instanceHash, len(w.buffer))
 		return nil
@@ -2239,8 +2244,6 @@ func (w *decisionWriter) Finalize(dl *persistentDownload) error {
 
 	return errors.New("decisionWriter: finalize called without mode set")
 }
-
-
 
 // SetFedToken stores the federation token in memory.  It is called by
 // cache.LaunchFedTokManager (via the onTokenUpdate callback) whenever the

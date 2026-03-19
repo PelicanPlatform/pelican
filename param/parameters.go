@@ -118,6 +118,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.HighWaterMark": false,
 	"Cache.LocalRoot": false,
 	"Cache.LowWatermark": false,
+	"Cache.MemoryCacheSize": false,
 	"Cache.MetaLocations": false,
 	"Cache.MinDirectorRefreshInterval": false,
 	"Cache.NamespaceLocation": false,
@@ -547,6 +548,8 @@ func (sP StringParam) GetString() string {
 			return config.Cache.LocalRoot
 		case "Cache.LowWatermark":
 			return config.Cache.LowWatermark
+		case "Cache.MemoryCacheSize":
+			return config.Cache.MemoryCacheSize
 		case "Cache.NamespaceLocation":
 			return config.Cache.NamespaceLocation
 		case "Cache.PSSOrigin":
@@ -625,6 +628,8 @@ func (sP StringParam) GetString() string {
 			return config.LocalCache.ChunkSize
 		case "LocalCache.DataLocation":
 			return config.LocalCache.DataLocation
+		case "LocalCache.MemoryCacheSize":
+			return config.LocalCache.MemoryCacheSize
 		case "LocalCache.RunLocation":
 			return config.LocalCache.RunLocation
 		case "LocalCache.Size":
@@ -1029,8 +1034,6 @@ func (iP IntParam) GetInt() int {
 			return config.LocalCache.LowWaterMarkPercentage
 		case "LocalCache.MaxConcurrentPrefetch":
 			return config.LocalCache.MaxConcurrentPrefetch
-		case "LocalCache.MemoryCacheSize":
-			return config.LocalCache.MemoryCacheSize
 		case "LocalCache.RevalidationJitter":
 			return config.LocalCache.RevalidationJitter
 		case "MinimumDownloadSpeed":
@@ -1524,6 +1527,7 @@ var allParameterNames = []string{
 	"Cache.HighWaterMark",
 	"Cache.LocalRoot",
 	"Cache.LowWatermark",
+	"Cache.MemoryCacheSize",
 	"Cache.MetaLocations",
 	"Cache.MinDirectorRefreshInterval",
 	"Cache.NamespaceLocation",
@@ -1919,6 +1923,7 @@ var (
 	Cache_HighWaterMark = StringParam{"Cache.HighWaterMark"}
 	Cache_LocalRoot = StringParam{"Cache.LocalRoot"}
 	Cache_LowWatermark = StringParam{"Cache.LowWatermark"}
+	Cache_MemoryCacheSize = StringParam{"Cache.MemoryCacheSize"}
 	Cache_NamespaceLocation = StringParam{"Cache.NamespaceLocation"}
 	Cache_PSSOrigin = StringParam{"Cache.PSSOrigin"}
 	Cache_RunLocation = StringParam{"Cache.RunLocation"}
@@ -1958,6 +1963,7 @@ var (
 	Issuer_TomcatLocation = StringParam{"Issuer.TomcatLocation"}
 	LocalCache_ChunkSize = StringParam{"LocalCache.ChunkSize"}
 	LocalCache_DataLocation = StringParam{"LocalCache.DataLocation"}
+	LocalCache_MemoryCacheSize = StringParam{"LocalCache.MemoryCacheSize"}
 	LocalCache_RunLocation = StringParam{"LocalCache.RunLocation"}
 	LocalCache_Size = StringParam{"LocalCache.Size"}
 	LocalCache_Socket = StringParam{"LocalCache.Socket"}
@@ -2143,7 +2149,6 @@ var (
 	LocalCache_HighWaterMarkPercentage = IntParam{"LocalCache.HighWaterMarkPercentage"}
 	LocalCache_LowWaterMarkPercentage = IntParam{"LocalCache.LowWaterMarkPercentage"}
 	LocalCache_MaxConcurrentPrefetch = IntParam{"LocalCache.MaxConcurrentPrefetch"}
-	LocalCache_MemoryCacheSize = IntParam{"LocalCache.MemoryCacheSize"}
 	LocalCache_RevalidationJitter = IntParam{"LocalCache.RevalidationJitter"}
 	MinimumDownloadSpeed = IntParam{"MinimumDownloadSpeed"}
 	Monitoring_LabelLimit = IntParam{"Monitoring.LabelLimit"}

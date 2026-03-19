@@ -31,6 +31,8 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 const rrTableSize = 1024
@@ -330,7 +332,7 @@ func (em *EvictionManager) checkAndEvict() {
 					"storageID":   targetKey.StorageID,
 					"namespaceID": targetKey.NamespaceID,
 					"nsUsage":     targetUsage,
-					"needToFree":  overhead,
+					"needToFree":  utils.HumanBytes(overhead),
 				}).Debug("Evicting from namespace")
 
 				bytes, count, conflicts, err := em.evictFromNamespace(rl, targetKey.StorageID, targetKey.NamespaceID, 0, overhead)
@@ -360,7 +362,7 @@ func (em *EvictionManager) checkAndEvict() {
 	conflicts := totalConflicts.Load()
 	if evicted > 0 || conflicts > 0 {
 		rl.WithFields(log.Fields{
-			"freedBytes":     totalEvictedBytes.Load(),
+			"freedBytes":     utils.HumanBytes(totalEvictedBytes.Load()),
 			"evictedObjects": evicted,
 			"conflicts":      conflicts,
 			"elapsed":        time.Since(startTime).String(),
@@ -732,7 +734,7 @@ func (em *EvictionManager) ForcePurge() error {
 	wg.Wait()
 
 	rl.WithFields(log.Fields{
-		"freedBytes":     evictedBytes.Load(),
+		"freedBytes":     utils.HumanBytes(evictedBytes.Load()),
 		"evictedObjects": evictedObjects.Load(),
 		"elapsed":        time.Since(startTime).String(),
 	}).Info("Force purge complete")

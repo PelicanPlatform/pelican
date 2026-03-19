@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"text/tabwriter"
 	"time"
 
@@ -37,18 +38,21 @@ import (
 	"github.com/pelicanplatform/pelican/local_cache"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
 	cacheIntrospectCmd = &cobra.Command{
 		Use:   "introspect",
-		Short: "Introspect the local cache database",
-		Long: `Inspect the contents of the local persistent cache.
+		Short: "Introspect the cache's persistent database",
+		Long: `Inspect the contents of the cache server's persistent cache.
 
 These commands allow administrators to examine cached objects, their metadata,
-and verify data integrity without starting the full cache server.
+and verify data integrity. If the cache server is running, commands connect
+to its API automatically; otherwise they fall back to direct database access.
 
-The cache directory is read from LocalCache.BaseDir configuration.`,
+The cache directory is derived from Cache.StorageLocation configuration.`,
+		SilenceUsage: true,
 	}
 
 	cacheIntrospectEtagsCmd = &cobra.Command{
@@ -62,8 +66,9 @@ if the federation context is known.
 Example:
   pelican cache introspect etags pelican://my-federation/data/file.dat
   pelican cache introspect etags /data/file.dat`,
-		Args: cobra.ExactArgs(1),
-		RunE: runCacheIntrospectEtags,
+		Args:         cobra.ExactArgs(1),
+		RunE:         runCacheIntrospectEtags,
+		SilenceUsage: true,
 	}
 
 	cacheIntrospectMetadataCmd = &cobra.Command{
@@ -78,8 +83,9 @@ Example:
   pelican cache introspect metadata pelican://my-federation/data/file.dat
   pelican cache introspect metadata /data/file.dat --etag="abc123"
   pelican cache introspect metadata --instance=<hash>`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: runCacheIntrospectMetadata,
+		Args:         cobra.MaximumNArgs(1),
+		RunE:         runCacheIntrospectMetadata,
+		SilenceUsage: true,
 	}
 
 	cacheIntrospectVerifyCmd = &cobra.Command{
@@ -93,8 +99,9 @@ that stored checksums (if any) match the actual data.
 Example:
   pelican cache introspect verify pelican://my-federation/data/file.dat
   pelican cache introspect verify /data/file.dat --etag="abc123"`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: runCacheIntrospectVerify,
+		Args:         cobra.MaximumNArgs(1),
+		RunE:         runCacheIntrospectVerify,
+		SilenceUsage: true,
 	}
 
 	cacheIntrospectListCmd = &cobra.Command{
@@ -107,17 +114,71 @@ to restrict the number of entries returned.
 
 Example:
   pelican cache introspect list --limit=100`,
-		RunE: runCacheIntrospectList,
+		RunE:         runCacheIntrospectList,
+		SilenceUsage: true,
+	}
+
+	cacheIntrospectStatsCmd = &cobra.Command{
+		Use:   "stats",
+		Short: "Show cache size statistics",
+		Long: `Display aggregate size statistics about the cache.
+
+Shows total inline bytes stored in BadgerDB, total number of metadata
+entries, total bytes claimed by metadata, and per-storage-directory
+breakdown. This is a cheap operation that only scans metadata.
+
+Example:
+  pelican cache introspect stats
+  pelican cache introspect stats --json`,
+		RunE:         runCacheIntrospectStats,
+		SilenceUsage: true,
+	}
+
+	cacheIntrospectDiskUsageCmd = &cobra.Command{
+		Use:   "disk-usage",
+		Short: "Compute actual disk usage by walking storage directories",
+		Long: `Walk all storage directories and sum the actual file sizes on disk.
+
+This is an EXPENSIVE operation that stats every file in the cache's
+storage directories. For large caches this may take significant time.
+
+Example:
+  pelican cache introspect disk-usage
+  pelican cache introspect disk-usage --json`,
+		RunE:         runCacheIntrospectDiskUsage,
+		SilenceUsage: true,
+	}
+
+	cacheIntrospectConsistencyCmd = &cobra.Command{
+		Use:   "consistency",
+		Short: "Run a cache consistency check",
+		Long: `Trigger a consistency check between the database and disk.
+
+By default runs both a metadata scan (cross-references DB entries with
+disk files to find orphans) and a data scan (reads and verifies checksums).
+Use --metadata-only or --data-only to run only one scan type.
+
+The data scan is expensive as it reads and checksums every cached file.
+
+Example:
+  pelican cache introspect consistency
+  pelican cache introspect consistency --metadata-only
+  pelican cache introspect consistency --data-only
+  pelican cache introspect consistency --json`,
+		RunE:         runCacheIntrospectConsistency,
+		SilenceUsage: true,
 	}
 
 	// Flags
-	introspectEtag     string
-	introspectInstance string
-	introspectJSON     bool
-	introspectLimit    int
-	introspectCacheDir string
-	introspectOffline  bool
-	introspectToken    string
+	introspectEtag         string
+	introspectInstance     string
+	introspectJSON         bool
+	introspectLimit        int
+	introspectCacheDir     string
+	introspectOffline      bool
+	introspectToken        string
+	introspectMetadataOnly bool
+	introspectDataOnly     bool
 )
 
 func init() {
@@ -129,6 +190,9 @@ func init() {
 	cacheIntrospectCmd.AddCommand(cacheIntrospectMetadataCmd)
 	cacheIntrospectCmd.AddCommand(cacheIntrospectVerifyCmd)
 	cacheIntrospectCmd.AddCommand(cacheIntrospectListCmd)
+	cacheIntrospectCmd.AddCommand(cacheIntrospectStatsCmd)
+	cacheIntrospectCmd.AddCommand(cacheIntrospectDiskUsageCmd)
+	cacheIntrospectCmd.AddCommand(cacheIntrospectConsistencyCmd)
 
 	// Common flags
 	cacheIntrospectCmd.PersistentFlags().BoolVar(&introspectJSON, "json", false, "Output in JSON format")
@@ -144,25 +208,50 @@ func init() {
 
 	// List specific flags
 	cacheIntrospectListCmd.Flags().IntVar(&introspectLimit, "limit", 100, "Maximum number of objects to list")
+
+	// Consistency specific flags
+	cacheIntrospectConsistencyCmd.Flags().BoolVar(&introspectMetadataOnly, "metadata-only", false, "Run only the metadata scan (skip data scan)")
+	cacheIntrospectConsistencyCmd.Flags().BoolVar(&introspectDataOnly, "data-only", false, "Run only the data scan (skip metadata scan)")
 }
 
-// getCacheDir returns the cache directory, either from flag or config
+// initIntrospectConfig initializes server configuration needed by both
+// online and offline introspection modes.  It is safe to call multiple
+// times (idempotent via config internals).
+var introspectConfigDone bool
+
+func initIntrospectConfig() error {
+	if introspectConfigDone {
+		return nil
+	}
+	ctx := context.Background()
+	if err := config.InitServer(ctx, server_structs.CacheType); err != nil {
+		return errors.Wrap(err, "failed to initialize cache server config")
+	}
+	introspectConfigDone = true
+	return nil
+}
+
+// getCacheDir returns the persistent-cache base directory.
+// The cache server stores its persistent cache under
+//
+//	<Cache.StorageLocation>/persistent-cache
+//
+// which is where the BadgerDB "db" subdirectory lives.
 func getCacheDir() (string, error) {
 	if introspectCacheDir != "" {
 		return introspectCacheDir, nil
 	}
 
-	// Initialize config to read LocalCache.DataLocation
-	if err := config.InitClient(); err != nil {
-		return "", errors.Wrap(err, "failed to initialize config")
+	if err := initIntrospectConfig(); err != nil {
+		return "", err
 	}
 
-	cacheDir := param.LocalCache_DataLocation.GetString()
-	if cacheDir == "" {
-		return "", errors.New("LocalCache.DataLocation is not configured. Use --cache-dir to specify the cache directory")
+	storageLocation := param.Cache_StorageLocation.GetString()
+	if storageLocation == "" {
+		return "", errors.New("Cache.StorageLocation is not configured. Use --cache-dir to specify the cache directory")
 	}
 
-	return cacheDir, nil
+	return filepath.Join(storageLocation, "persistent-cache"), nil
 }
 
 // discoverServerURL attempts to find the running cache's web URL from the
@@ -171,9 +260,14 @@ func getCacheDir() (string, error) {
 func discoverServerURL() string {
 	addrFile, err := config.ReadAddressFile()
 	if err != nil {
+		log.Debugln("Could not read address file:", err)
 		return ""
 	}
-	return addrFile.ServerExternalWebURL
+	serverURL := addrFile.ServerExternalWebURL
+	if serverURL == "" {
+		log.Debugln("Address file found but ServerExternalWebURL is empty")
+	}
+	return serverURL
 }
 
 // getIntrospectToken returns a bearer token for the introspection API.
@@ -264,11 +358,14 @@ func introspectHTTPPost(serverURL, apiPath string, query url.Values) ([]byte, er
 // use online mode, or empty string if we should use offline/direct mode.
 func useOnlineMode() string {
 	if introspectOffline {
+		log.Debugln("Online mode disabled by --offline flag")
 		return ""
 	}
-	// InitClient populates the runtime dir / config needed for ReadAddressFile
-	if err := config.InitClient(); err != nil {
-		log.Debugln("config.InitClient failed, falling back to offline:", err)
+	// InitServer populates the runtime dir and server config needed for
+	// ReadAddressFile.  This is the same config offline mode needs, so
+	// we initialize it once.
+	if err := initIntrospectConfig(); err != nil {
+		log.Debugln("Server config init failed, falling back to offline:", err)
 		return ""
 	}
 	return discoverServerURL()
@@ -286,13 +383,7 @@ func openIntrospectAPI() (*local_cache.IntrospectAPIOpen, error) {
 		return nil, errors.Errorf("cache directory does not exist: %s", cacheDir)
 	}
 
-	// Initialize issuer keys for database decryption
-	// The cache's encryption keys are derived from issuer keys
-	ctx := context.Background()
-	if err := config.InitServer(ctx, server_structs.CacheType); err != nil {
-		return nil, errors.Wrap(err, "failed to initialize server config (needed for encryption keys)")
-	}
-
+	log.Debugln("Opening cache database at", cacheDir)
 	return local_cache.NewIntrospectAPI(cacheDir)
 }
 
@@ -637,6 +728,206 @@ func printList(instances []local_cache.ObjectInstance) error {
 
 	if len(instances) == introspectLimit {
 		fmt.Printf("\n(Showing first %d entries. Use --limit to see more.)\n", introspectLimit)
+	}
+
+	return nil
+}
+
+func runCacheIntrospectStats(cmd *cobra.Command, args []string) error {
+	// Try online mode first
+	if serverURL := useOnlineMode(); serverURL != "" {
+		body, err := introspectHTTPGet(serverURL, "/api/v1.0/cache/introspect/stats", nil)
+		if err != nil {
+			return errors.Wrap(err, "online introspection failed")
+		}
+		var stats local_cache.CacheStats
+		if err := json.Unmarshal(body, &stats); err != nil {
+			return errors.Wrap(err, "failed to parse response")
+		}
+		return printStats(&stats)
+	}
+
+	// Offline mode
+	api, err := openIntrospectAPI()
+	if err != nil {
+		return err
+	}
+	defer api.Close()
+
+	stats, err := api.GetCacheStats()
+	if err != nil {
+		return errors.Wrap(err, "failed to get cache stats")
+	}
+
+	return printStats(stats)
+}
+
+func printStats(stats *local_cache.CacheStats) error {
+	if introspectJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(stats)
+	}
+
+	fmt.Printf("Cache Size Statistics\n")
+	fmt.Printf("=====================\n\n")
+	fmt.Printf("Total metadata entries:  %d\n", stats.TotalMetadataEntries)
+	fmt.Printf("Total bytes (metadata):  %s (%d bytes)\n", utils.HumanBytes(stats.TotalBytesMetadata), stats.TotalBytesMetadata)
+	fmt.Printf("Total inline data:       %s (%d bytes)\n", utils.HumanBytes(stats.TotalInlineBytes), stats.TotalInlineBytes)
+
+	if len(stats.StorageBreakdown) > 0 {
+		fmt.Printf("\nPer-Storage Directory:\n")
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintf(w, "  DIRECTORY\tOBJECTS\tTOTAL BYTES\tINLINE\tON DISK\n")
+		for name, ds := range stats.StorageBreakdown {
+			fmt.Fprintf(w, "  %s\t%d\t%s\t%d (%s)\t%d (%s)\n",
+				name, ds.ObjectCount, utils.HumanBytes(ds.TotalBytes),
+				ds.InlineCount, utils.HumanBytes(ds.InlineBytes),
+				ds.OnDiskCount, utils.HumanBytes(ds.OnDiskBytes))
+		}
+		w.Flush()
+	}
+
+	if len(stats.UsageCounters) > 0 {
+		fmt.Printf("\nUsage Counters (pre-computed):\n")
+		for key, val := range stats.UsageCounters {
+			fmt.Printf("  %s: %s (%d bytes)\n", key, utils.HumanBytes(val), val)
+		}
+	}
+
+	return nil
+}
+
+func runCacheIntrospectDiskUsage(cmd *cobra.Command, args []string) error {
+	// Try online mode first
+	if serverURL := useOnlineMode(); serverURL != "" {
+		body, err := introspectHTTPPost(serverURL, "/api/v1.0/cache/introspect/disk-usage", nil)
+		if err != nil {
+			return errors.Wrap(err, "online introspection failed")
+		}
+		var result local_cache.DiskUsageResult
+		if err := json.Unmarshal(body, &result); err != nil {
+			return errors.Wrap(err, "failed to parse response")
+		}
+		return printDiskUsage(&result)
+	}
+
+	// Offline mode
+	api, err := openIntrospectAPI()
+	if err != nil {
+		return err
+	}
+	defer api.Close()
+
+	fmt.Println("Walking storage directories (this may take a while)...")
+	result, err := api.GetDiskUsage()
+	if err != nil {
+		return errors.Wrap(err, "failed to compute disk usage")
+	}
+
+	return printDiskUsage(result)
+}
+
+func printDiskUsage(result *local_cache.DiskUsageResult) error {
+	if introspectJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	}
+
+	fmt.Printf("Disk Usage (via filesystem walk)\n")
+	fmt.Printf("================================\n\n")
+	fmt.Printf("Total bytes on disk: %s (%d bytes)\n", utils.HumanBytes(result.TotalBytesOnDisk), result.TotalBytesOnDisk)
+	fmt.Printf("Total files:         %d\n", result.TotalFiles)
+	fmt.Printf("Scan duration:       %s\n", result.Duration)
+
+	if len(result.Directories) > 0 {
+		fmt.Printf("\nPer-Directory:\n")
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintf(w, "  DIRECTORY\tFILES\tBYTES USED\tPATH\n")
+		for name, ds := range result.Directories {
+			fmt.Fprintf(w, "  %s\t%d\t%s\t%s\n",
+				name, ds.FileCount, utils.HumanBytes(ds.BytesUsed), ds.Path)
+		}
+		w.Flush()
+	}
+
+	return nil
+}
+
+func runCacheIntrospectConsistency(cmd *cobra.Command, args []string) error {
+	metadataScan := !introspectDataOnly
+	dataScan := !introspectMetadataOnly
+
+	if introspectMetadataOnly && introspectDataOnly {
+		return errors.New("--metadata-only and --data-only are mutually exclusive")
+	}
+
+	// Try online mode first
+	if serverURL := useOnlineMode(); serverURL != "" {
+		query := url.Values{}
+		query.Set("metadata", fmt.Sprintf("%t", metadataScan))
+		query.Set("data", fmt.Sprintf("%t", dataScan))
+		body, err := introspectHTTPPost(serverURL, "/api/v1.0/cache/introspect/consistency", query)
+		if err != nil {
+			return errors.Wrap(err, "online consistency check failed")
+		}
+		var result local_cache.ConsistencyCheckResult
+		if err := json.Unmarshal(body, &result); err != nil {
+			return errors.Wrap(err, "failed to parse response")
+		}
+		return printConsistencyResult(&result)
+	}
+
+	// Offline mode
+	api, err := openIntrospectAPI()
+	if err != nil {
+		return err
+	}
+	defer api.Close()
+
+	fmt.Println("Running consistency check (this may take a while)...")
+	ctx := context.Background()
+	result, err := api.RunConsistencyCheck(ctx, metadataScan, dataScan)
+	if err != nil {
+		return errors.Wrap(err, "consistency check failed")
+	}
+
+	return printConsistencyResult(result)
+}
+
+func printConsistencyResult(result *local_cache.ConsistencyCheckResult) error {
+	if introspectJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	}
+
+	fmt.Printf("Consistency Check Results\n")
+	fmt.Printf("=========================\n\n")
+	fmt.Printf("Duration: %s\n\n", result.Duration)
+
+	if result.MetadataScanRan {
+		fmt.Printf("Metadata Scan:\n")
+		fmt.Printf("  Orphaned files (on disk but not in DB):  %d\n", result.OrphanedFiles)
+		fmt.Printf("  Orphaned DB entries (in DB but not on disk): %d\n", result.OrphanedDBEntries)
+		fmt.Printf("  Errors: %d\n", result.MetadataScanErrors)
+	} else {
+		fmt.Printf("Metadata Scan: skipped\n")
+	}
+
+	if result.DataScanRan {
+		fmt.Printf("\nData Scan:\n")
+		fmt.Printf("  Objects verified:     %d\n", result.ObjectsVerified)
+		fmt.Printf("  Bytes verified:       %s (%d bytes)\n", utils.HumanBytes(result.BytesVerified), result.BytesVerified)
+		fmt.Printf("  Checksum mismatches:  %d\n", result.ChecksumMismatches)
+		fmt.Printf("  Errors: %d\n", result.DataScanErrors)
+	} else {
+		fmt.Printf("\nData Scan: skipped\n")
+	}
+
+	if result.Error != "" {
+		fmt.Printf("\nErrors encountered: %s\n", result.Error)
 	}
 
 	return nil

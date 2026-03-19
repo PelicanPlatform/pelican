@@ -27,6 +27,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -102,7 +103,7 @@ func jobListMain(cmd *cobra.Command, args []string) error {
 		if job.TransfersTotal > 0 {
 			progress = fmt.Sprintf("%d/%d transfers", job.TransfersCompleted, job.TransfersTotal)
 			if job.TotalBytes > 0 {
-				progress += fmt.Sprintf(", %s", formatBytes(job.BytesTransferred))
+				progress += fmt.Sprintf(", %s", utils.HumanBytes(job.BytesTransferred))
 			}
 		}
 

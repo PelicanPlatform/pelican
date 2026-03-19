@@ -20,6 +20,7 @@ package utils
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"slices"
@@ -259,6 +260,22 @@ func GetTokenFromFile(tokenLocation string) (string, error) {
 		return tokenParsed.AccessKey, nil
 	}
 	return tokenStr, nil
+}
+
+// HumanBytes formats a byte count as a human-readable string using binary
+// (1024-based) units, e.g. "1.5 GiB", "320 MiB".  This is the inverse of
+// ParseBytes.
+func HumanBytes[T int64 | uint64](b T) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := T(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 // ParseBytes parses a human-readable byte-size string (e.g. "10GB",

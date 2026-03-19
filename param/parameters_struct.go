@@ -57,6 +57,7 @@ type Config struct {
 		HighWaterMark string `mapstructure:"highwatermark" yaml:"HighWaterMark"`
 		LocalRoot string `mapstructure:"localroot" yaml:"LocalRoot"`
 		LowWatermark string `mapstructure:"lowwatermark" yaml:"LowWatermark"`
+		MemoryCacheSize string `mapstructure:"memorycachesize" yaml:"MemoryCacheSize"`
 		MetaLocations []string `mapstructure:"metalocations" yaml:"MetaLocations"`
 		MinDirectorRefreshInterval time.Duration `mapstructure:"mindirectorrefreshinterval" yaml:"MinDirectorRefreshInterval"`
 		NamespaceLocation string `mapstructure:"namespacelocation" yaml:"NamespaceLocation"`
@@ -182,7 +183,7 @@ type Config struct {
 		HighWaterMarkPercentage int `mapstructure:"highwatermarkpercentage" yaml:"HighWaterMarkPercentage"`
 		LowWaterMarkPercentage int `mapstructure:"lowwatermarkpercentage" yaml:"LowWaterMarkPercentage"`
 		MaxConcurrentPrefetch int `mapstructure:"maxconcurrentprefetch" yaml:"MaxConcurrentPrefetch"`
-		MemoryCacheSize int `mapstructure:"memorycachesize" yaml:"MemoryCacheSize"`
+		MemoryCacheSize string `mapstructure:"memorycachesize" yaml:"MemoryCacheSize"`
 		PrefetchTimeout time.Duration `mapstructure:"prefetchtimeout" yaml:"PrefetchTimeout"`
 		RevalidationJitter int `mapstructure:"revalidationjitter" yaml:"RevalidationJitter"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
@@ -527,6 +528,7 @@ type configWithType struct {
 		HighWaterMark struct { Type string; Value string }
 		LocalRoot struct { Type string; Value string }
 		LowWatermark struct { Type string; Value string }
+		MemoryCacheSize struct { Type string; Value string }
 		MetaLocations struct { Type string; Value []string }
 		MinDirectorRefreshInterval struct { Type string; Value time.Duration }
 		NamespaceLocation struct { Type string; Value string }
@@ -652,7 +654,7 @@ type configWithType struct {
 		HighWaterMarkPercentage struct { Type string; Value int }
 		LowWaterMarkPercentage struct { Type string; Value int }
 		MaxConcurrentPrefetch struct { Type string; Value int }
-		MemoryCacheSize struct { Type string; Value int }
+		MemoryCacheSize struct { Type string; Value string }
 		PrefetchTimeout struct { Type string; Value time.Duration }
 		RevalidationJitter struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
