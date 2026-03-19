@@ -696,7 +696,9 @@ func TestCacheDBAtomicBlockUsage_NoMetadata(t *testing.T) {
 }
 
 func TestCacheDBUsageCounter(t *testing.T) {
-	// Test that usage counters work correctly through the MarkBlocksDownloaded path
+	// Test that usage counters work correctly through ChargeUsage (upfront
+	// reservation) and that MarkBlocksDownloaded only updates the bitmap
+	// without double-counting.
 	InitIssuerKeyForTests(t)
 
 	tmpDir := t.TempDir()
@@ -716,7 +718,7 @@ func TestCacheDBUsageCounter(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), usage)
 
-	// Set up metadata for an instance so MarkBlocksDownloaded can track usage
+	// Set up metadata for an instance so MarkBlocksDownloaded can track blocks
 	instanceHash := InstanceHash("usage_counter_test_hash")
 	contentLength := int64(3 * BlockDataSize) // 3 full blocks
 	meta := &CacheMetadata{
@@ -728,23 +730,31 @@ func TestCacheDBUsageCounter(t *testing.T) {
 	err = db.SetMetadata(instanceHash, meta)
 	require.NoError(t, err)
 
-	// Mark 2 blocks — usage should increase by 2*BlockDataSize
+	// Charge the full content length upfront (mirrors real init path)
+	err = db.ChargeUsage(storageID, namespaceID, contentLength)
+	require.NoError(t, err)
+
+	usage, err = db.GetUsage(storageID, namespaceID)
+	require.NoError(t, err)
+	assert.Equal(t, contentLength, usage)
+
+	// Mark 2 blocks — usage should NOT change (already charged upfront)
 	err = db.MarkBlocksDownloaded(instanceHash, 0, 1, storageID, namespaceID, contentLength)
 	require.NoError(t, err)
 
 	usage, err = db.GetUsage(storageID, namespaceID)
 	require.NoError(t, err)
-	assert.Equal(t, int64(2*BlockDataSize), usage)
+	assert.Equal(t, contentLength, usage)
 
-	// Mark the same blocks again — idempotent, usage should NOT increase
+	// Mark the same blocks again — idempotent, usage still unchanged
 	err = db.MarkBlocksDownloaded(instanceHash, 0, 1, storageID, namespaceID, contentLength)
 	require.NoError(t, err)
 
 	usage, err = db.GetUsage(storageID, namespaceID)
 	require.NoError(t, err)
-	assert.Equal(t, int64(2*BlockDataSize), usage)
+	assert.Equal(t, contentLength, usage)
 
-	// Mark third block — usage should increase by 1*BlockDataSize
+	// Mark third block — usage still the same (charged upfront)
 	err = db.MarkBlocksDownloaded(instanceHash, 2, 2, storageID, namespaceID, contentLength)
 	require.NoError(t, err)
 
