@@ -1884,15 +1884,19 @@ components: ["localcache"]
 ---
 name: LocalCache.MemoryCacheSize
 description: |+
-  Size in bytes of the in-memory block cache.
+  Size of the in-memory block cache for the local cache module.
   When enabled, objects are cached in memory in addition to on disk,
   which can significantly improve performance for frequently accessed objects
   because disk objects are encrypted and require decryption on each access,
   while memory cache pages are stored decrypted, avoiding repeated decryption.
-  Set to 0 to disable the memory cache (default).
-type: int
-default: 0
-hidden: true
+  Set to "0" to disable the memory cache (default).
+  Accepts a plain number of bytes or a human-readable value with suffix
+  (e.g. "8GB", "512MB", "1TB").
+  This parameter is used when running in local cache mode.
+  For a full cache server, use Cache.MemoryCacheSize instead.
+type: string
+default: "0"
+hidden: false
 components: ["localcache"]
 ---
 name: LocalCache.PrefetchTimeout
@@ -2522,6 +2526,21 @@ description: |+
   their systems remain secure.
 type: bool
 default: false
+components: ["cache"]
+---
+name: Cache.MemoryCacheSize
+description: |+
+  Size of the in-memory block cache.
+  When enabled, objects are cached in memory in addition to on disk,
+  which can significantly improve performance for frequently accessed objects
+  because disk objects are encrypted and require decryption on each access,
+  while memory cache pages are stored decrypted, avoiding repeated decryption.
+  Set to "0" to disable the memory cache (default).
+  Accepts a plain number of bytes or a human-readable value with suffix
+  (e.g. "8GB", "512MB", "1TB").
+type: string
+default: "0"
+hidden: false
 components: ["cache"]
 ---
 ############################

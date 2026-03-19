@@ -39,6 +39,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // removeFileWithRetry removes a file, retrying briefly on Windows if the
@@ -512,8 +513,22 @@ func NewStorageManager(db *CacheDB, dirs []string, inlineMax int, egrp *errgroup
 	// ristretto cache that stores decrypted 4080-byte blocks keyed by
 	// (instanceHash, blockNum).  MaxCost = configured size in bytes;
 	// each entry costs BlockDataSize (4080) bytes.
+	//
+	// Check Cache.MemoryCacheSize (cache server) first, then fall back
+	// to LocalCache.MemoryCacheSize (local cache module).
 	var ptCache *ristretto.Cache[uint64, []byte]
-	ptCacheSize := param.LocalCache_MemoryCacheSize.GetInt()
+	ptCacheSizeStr := param.Cache_MemoryCacheSize.GetString()
+	if ptCacheSizeStr == "" || ptCacheSizeStr == "0" {
+		ptCacheSizeStr = param.LocalCache_MemoryCacheSize.GetString()
+	}
+	var ptCacheSize uint64
+	if ptCacheSizeStr != "" && ptCacheSizeStr != "0" {
+		var parseErr error
+		ptCacheSize, parseErr = utils.ParseBytes(ptCacheSizeStr)
+		if parseErr != nil {
+			return nil, errors.Wrapf(parseErr, "failed to parse MemoryCacheSize value %q", ptCacheSizeStr)
+		}
+	}
 	if ptCacheSize > 0 {
 		// NumCounters should be ~10× the expected max number of entries.
 		numEntries := int64(ptCacheSize) / BlockDataSize
@@ -865,6 +880,13 @@ func (sm *StorageManager) StoreInline(ctx context.Context, instanceHash Instance
 		return errors.Wrap(err, "failed to store inline data")
 	}
 
+	// Charge usage for the inline object so eviction watermarks stay current.
+	if meta.ContentLength > 0 {
+		if err := sm.db.ChargeUsage(StorageIDInline, meta.NamespaceID, meta.ContentLength); err != nil {
+			return errors.Wrap(err, "failed to charge inline usage")
+		}
+	}
+
 	return nil
 }
 
@@ -903,8 +925,10 @@ func (sm *StorageManager) ReadInline(instanceHash InstanceHash) ([]byte, error) 
 }
 
 // InitDiskStorage initializes disk storage for a large object in the specified
-// storage directory.  Returns the metadata with encryption keys set up.
-func (sm *StorageManager) InitDiskStorage(ctx context.Context, instanceHash InstanceHash, contentLength int64, storageID StorageID) (*CacheMetadata, error) {
+// storage directory.  The full contentLength is charged to the usage counter
+// at creation time so that the accounting matches the filesystem's
+// pre-allocation (Truncate).  Returns the metadata with encryption keys set up.
+func (sm *StorageManager) InitDiskStorage(ctx context.Context, instanceHash InstanceHash, contentLength int64, storageID StorageID, namespaceID NamespaceID) (*CacheMetadata, error) {
 	// If another goroutine already initialized storage for this instance,
 	// return the existing metadata rather than generating a second DataKey
 	// (which would cause a set-once conflict in MergeMetadata).
@@ -927,6 +951,7 @@ func (sm *StorageManager) InitDiskStorage(ctx context.Context, instanceHash Inst
 
 	meta := &CacheMetadata{
 		StorageID:     storageID,
+		NamespaceID:   namespaceID,
 		ContentLength: contentLength,
 		DataKey:       encryptedDEK,
 	}
@@ -961,6 +986,20 @@ func (sm *StorageManager) InitDiskStorage(ctx context.Context, instanceHash Inst
 			log.Warnf("Failed to clean up metadata for %s: %v", instanceHash, delErr)
 		}
 		return nil, errors.Wrap(err, "failed to initialize block state")
+	}
+
+	// Charge the full content length to the usage counter now — before the
+	// file descriptor is cached — so that eviction watermarks see the space
+	// consumed by the Truncate call above.
+	if contentLength > 0 {
+		if err := sm.db.ChargeUsage(storageID, namespaceID, contentLength); err != nil {
+			file.Close()
+			os.Remove(objectPath)
+			if delErr := sm.db.DeleteMetadata(instanceHash); delErr != nil {
+				log.Warnf("Failed to clean up metadata for %s: %v", instanceHash, delErr)
+			}
+			return nil, errors.Wrap(err, "failed to charge usage")
+		}
 	}
 
 	// Cache the freshly-created R/W file descriptor so that subsequent
@@ -1087,6 +1126,16 @@ func (sm *StorageManager) AllocateChunk(
 		file.Close()
 		_ = removeFileWithRetry(chunkPath)
 		return nil, errors.Wrapf(err, "failed to pre-allocate chunk %d file", chunkIndex)
+	}
+
+	// Charge usage for this chunk's content immediately so the
+	// eviction watermarks account for the Truncate pre-allocation.
+	if chunkContentLen > 0 {
+		if err := sm.db.ChargeUsage(storageID, meta.NamespaceID, chunkContentLen); err != nil {
+			file.Close()
+			_ = removeFileWithRetry(chunkPath)
+			return nil, errors.Wrapf(err, "failed to charge usage for chunk %d", chunkIndex)
+		}
 	}
 
 	// Cache the freshly-created file descriptor.
@@ -2431,11 +2480,10 @@ func (bw *BlockWriter) Close() error {
 	bw.closed = true
 
 	// For unknown-size transfers (chunked encoding), set ContentLength
-	// BEFORE writing the last block so that calculateUsageDelta
-	// correctly sizes the final (possibly partial) block.  During the
-	// streaming write each full block added BlockDataSize to usage;
-	// only the last block needs the real ContentLength to compute
-	// its potentially smaller contribution.
+	// BEFORE writing the last block so the block bitmap records the
+	// correct total.  Usage is charged upfront for known-size downloads;
+	// for unknown-size downloads the full ContentLength is charged when
+	// it becomes known here.
 	if bw.meta.ContentLength < 0 {
 		bw.meta.ContentLength = bw.bytesWritten
 		bw.totalBlocks = CalculateBlockCount(bw.bytesWritten)
