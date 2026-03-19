@@ -460,7 +460,7 @@ func TestCorruption_VerifyBlockIntegrity(t *testing.T) {
 		storageID = id
 	}
 
-	_, err = storage.InitDiskStorage(ctx, fileHash, int64(contentLen), storageID)
+	_, err = storage.InitDiskStorage(ctx, fileHash, int64(contentLen), storageID, 1)
 	require.NoError(t, err)
 
 	err = storage.WriteBlocks(fileHash, 0, content)

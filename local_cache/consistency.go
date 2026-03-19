@@ -492,21 +492,14 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 			// Accumulate usage for this entry.  We do this for every
 			// entry (including the too-young ones below) so that the
 			// totals match the real state of the database.
-			if !meta.Completed.IsZero() {
-				// Completed object: usage equals its content length
-				// (no need to consult the block bitmap).
-				if meta.ContentLength > 0 {
-					uk := StorageUsageKey{StorageID: meta.StorageID, NamespaceID: meta.NamespaceID}
-					usageDuringScan[uk] += meta.ContentLength
-				}
-			} else {
-				// In-progress download: compute usage from the block bitmap.
-				if bm, bmErr := cc.db.GetBlockState(instanceHash); bmErr == nil {
-					if card := bm.GetCardinality(); card > 0 {
-						uk := StorageUsageKey{StorageID: meta.StorageID, NamespaceID: meta.NamespaceID}
-						usageDuringScan[uk] += calculateUsageDelta(meta, bm, card)
-					}
-				}
+			//
+			// Both completed and in-progress objects are charged at
+			// their full ContentLength.  The file is pre-allocated
+			// (Truncate) at creation time; some filesystems will pre-allocate
+			// blocks as well, even if they haven't been written to yet.
+			if meta.ContentLength > 0 {
+				uk := StorageUsageKey{StorageID: meta.StorageID, NamespaceID: meta.NamespaceID}
+				usageDuringScan[uk] += meta.ContentLength
 			}
 
 			// Only process entries old enough to avoid races

@@ -104,7 +104,7 @@ func storeDiskObject(b *testing.B, env *benchEnv, name string, size int) Instanc
 	instanceHash := env.db.InstanceHash(etag, objectHash)
 
 	// Init disk storage (creates the file, sets up encryption keys)
-	meta, err := env.storage.InitDiskStorage(context.Background(), instanceHash, int64(size), StorageIDFirstDisk)
+	meta, err := env.storage.InitDiskStorage(context.Background(), instanceHash, int64(size), StorageIDFirstDisk, 1)
 	require.NoError(b, err)
 
 	// Generate random data and write block-aligned
@@ -506,7 +506,7 @@ func BenchmarkDiskWriteSequential(b *testing.B) {
 				etag := "bench-etag-" + name
 				instanceHash := env.db.InstanceHash(etag, objectHash)
 
-				_, err := env.storage.InitDiskStorage(context.Background(), instanceHash, int64(size), StorageIDFirstDisk)
+				_, err := env.storage.InitDiskStorage(context.Background(), instanceHash, int64(size), StorageIDFirstDisk, 1)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -545,7 +545,7 @@ func BenchmarkDiskWriteReadRoundTrip(b *testing.B) {
 				etag := "bench-etag-" + name
 				instanceHash := env.db.InstanceHash(etag, objectHash)
 
-				_, err := env.storage.InitDiskStorage(context.Background(), instanceHash, int64(size), StorageIDFirstDisk)
+				_, err := env.storage.InitDiskStorage(context.Background(), instanceHash, int64(size), StorageIDFirstDisk, 1)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -775,7 +775,7 @@ func BenchmarkBlockWriterStreaming(b *testing.B) {
 				etag := "bench-etag-" + name
 				instanceHash := env.db.InstanceHash(etag, objectHash)
 
-				_, err := env.storage.InitDiskStorage(context.Background(), instanceHash, int64(size), StorageIDFirstDisk)
+				_, err := env.storage.InitDiskStorage(context.Background(), instanceHash, int64(size), StorageIDFirstDisk, 1)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -808,8 +808,8 @@ func BenchmarkBlockWriterStreaming(b *testing.B) {
 func newBenchEnvWithPtCache(b *testing.B, ptCacheBytes int) *benchEnv {
 	b.Helper()
 
-	require.NoError(b, param.Set(param.LocalCache_MemoryCacheSize.GetName(), ptCacheBytes))
-	b.Cleanup(func() { _ = param.Set(param.LocalCache_MemoryCacheSize.GetName(), 0) })
+	require.NoError(b, param.Set(param.Cache_MemoryCacheSize.GetName(), fmt.Sprintf("%d", ptCacheBytes)))
+	b.Cleanup(func() { _ = param.Set(param.Cache_MemoryCacheSize.GetName(), "0") })
 
 	return newBenchEnv(b)
 }

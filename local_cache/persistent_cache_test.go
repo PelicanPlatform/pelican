@@ -1469,9 +1469,8 @@ func storeTestObject(
 	t.Helper()
 	contentLength := int64(len(data))
 
-	meta, err := storage.InitDiskStorage(ctx, instanceHash, contentLength, storageID)
+	meta, err := storage.InitDiskStorage(ctx, instanceHash, contentLength, storageID, namespaceID)
 	require.NoError(t, err)
-	meta.NamespaceID = namespaceID
 	meta.Completed = time.Now().Add(-10 * time.Minute)
 	require.NoError(t, storage.SetMetadata(instanceHash, meta))
 
@@ -1851,14 +1850,13 @@ func TestMultiDirStoragePlacement(t *testing.T) {
 		instanceHash := InstanceHash(fmt.Sprintf("%064x", i+0x10))
 		sid := eviction.ChooseDiskStorage()
 
-		meta, err := storage.InitDiskStorage(ctx, instanceHash, objectSize, sid)
+		meta, err := storage.InitDiskStorage(ctx, instanceHash, objectSize, sid, 1)
 		require.NoError(t, err)
 
 		// Set metadata fields (NamespaceID, ETag, etc.) BEFORE WriteBlocks so
 		// that MergeBlockStateWithUsage can track usage under the correct
 		// namespace+storageID key.
 		meta.ETag = fmt.Sprintf("etag-%d", i)
-		meta.NamespaceID = 1
 		meta.ContentType = "application/octet-stream"
 		require.NoError(t, storage.SetMetadata(instanceHash, meta))
 
@@ -2005,10 +2003,9 @@ func TestPurgeStorageID(t *testing.T) {
 	// Helper: create one object on a given storageID.
 	createObject := func(i int, sid StorageID) InstanceHash {
 		instanceHash := InstanceHash(fmt.Sprintf("%064x", i))
-		meta, err := storage.InitDiskStorage(ctx, instanceHash, objSize, sid)
+		meta, err := storage.InitDiskStorage(ctx, instanceHash, objSize, sid, 1)
 		require.NoError(t, err)
 		meta.ETag = fmt.Sprintf("etag-%d", i)
-		meta.NamespaceID = 1
 		meta.ContentType = "application/octet-stream"
 		meta.SourceURL = fmt.Sprintf("pelican://example.com/obj-%d", i)
 		require.NoError(t, storage.SetMetadata(instanceHash, meta))
