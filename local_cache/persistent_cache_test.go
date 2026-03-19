@@ -591,8 +591,9 @@ func TestCacheDBBlockState(t *testing.T) {
 }
 
 func TestCacheDBAtomicBlockUsage(t *testing.T) {
-	// Verifies that MarkBlocksDownloaded atomically updates both the block
-	// bitmap and the usage counter in a single BadgerDB transaction.
+	// Verifies that usage is charged upfront via ChargeUsage and that
+	// MarkBlocksDownloaded only updates the block bitmap without
+	// double-counting.
 	InitIssuerKeyForTests(t)
 
 	tmpDir := t.TempDir()
@@ -625,43 +626,54 @@ func TestCacheDBAtomicBlockUsage(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), usage)
 
-	// Mark first 3 full blocks (0, 1, 2) — each is BlockDataSize bytes
+	// Charge usage upfront (mirrors real init path)
+	err = db.ChargeUsage(storageID, namespaceID, contentLength)
+	require.NoError(t, err)
+
+	usage, err = db.GetUsage(storageID, namespaceID)
+	require.NoError(t, err)
+	assert.Equal(t, contentLength, usage, "usage should equal content length after upfront charge")
+
+	// Mark first 3 full blocks — usage should NOT change (already charged)
 	err = db.MarkBlocksDownloaded(instanceHash, 0, 2, storageID, namespaceID, contentLength)
 	require.NoError(t, err)
 
 	usage, err = db.GetUsage(storageID, namespaceID)
 	require.NoError(t, err)
-	assert.Equal(t, int64(3*BlockDataSize), usage, "3 full blocks should add 3*BlockDataSize bytes")
+	assert.Equal(t, contentLength, usage, "marking blocks should not change usage")
 
-	// Re-mark the same blocks — usage should NOT increase (idempotent)
+	// Re-mark the same blocks — still idempotent
 	err = db.MarkBlocksDownloaded(instanceHash, 0, 2, storageID, namespaceID, contentLength)
 	require.NoError(t, err)
 
 	usage, err = db.GetUsage(storageID, namespaceID)
 	require.NoError(t, err)
-	assert.Equal(t, int64(3*BlockDataSize), usage, "re-marking same blocks should not change usage")
+	assert.Equal(t, contentLength, usage, "re-marking same blocks should not change usage")
 
-	// Mark the last block (partial: 40000 - 9*4080 = 3280 bytes)
+	// Mark the last block (partial)
 	lastBlock := totalBlocks - 1
 	err = db.MarkBlocksDownloaded(instanceHash, lastBlock, lastBlock, storageID, namespaceID, contentLength)
 	require.NoError(t, err)
 
-	lastBlockSize := contentLength - int64(lastBlock)*int64(BlockDataSize) // 40000 - 36720 = 3280
-	expectedUsage := int64(3*BlockDataSize) + lastBlockSize
 	usage, err = db.GetUsage(storageID, namespaceID)
 	require.NoError(t, err)
-	assert.Equal(t, expectedUsage, usage, "last partial block should add only its actual size")
+	assert.Equal(t, contentLength, usage, "usage unchanged after marking last block")
 
-	// Mark remaining middle blocks (3 through lastBlock-1, all full)
+	// Mark remaining middle blocks
 	if lastBlock > 3 {
 		err = db.MarkBlocksDownloaded(instanceHash, 3, lastBlock-1, storageID, namespaceID, contentLength)
 		require.NoError(t, err)
 	}
 
-	// Now all blocks are marked — total usage should equal contentLength
+	// All blocks marked — usage still equals the upfront charge
 	usage, err = db.GetUsage(storageID, namespaceID)
 	require.NoError(t, err)
-	assert.Equal(t, contentLength, usage, "total usage should equal content length when all blocks are present")
+	assert.Equal(t, contentLength, usage, "total usage should equal content length")
+
+	// Verify all blocks are actually recorded in the bitmap
+	bitmap, err := db.GetBlockState(instanceHash)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(totalBlocks), bitmap.GetCardinality(), "all blocks should be in the bitmap")
 }
 
 func TestCacheDBAtomicBlockUsage_NoMetadata(t *testing.T) {
