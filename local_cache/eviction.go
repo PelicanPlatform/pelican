@@ -31,24 +31,11 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 const rrTableSize = 1024
-
-// humanBytes formats a byte count as a human-readable string using SI units
-// (e.g. "1.5 GB", "320 MB").
-func humanBytes[T int64 | uint64](b T) string {
-	const unit = 1000
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := T(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
-}
 
 // EvictionManager handles fairness-aware cache eviction.
 // Each storage directory has independent watermarks; eviction is triggered
@@ -345,7 +332,7 @@ func (em *EvictionManager) checkAndEvict() {
 					"storageID":   targetKey.StorageID,
 					"namespaceID": targetKey.NamespaceID,
 					"nsUsage":     targetUsage,
-					"needToFree":  humanBytes(overhead),
+					"needToFree":  utils.HumanBytes(overhead),
 				}).Debug("Evicting from namespace")
 
 				bytes, count, conflicts, err := em.evictFromNamespace(rl, targetKey.StorageID, targetKey.NamespaceID, 0, overhead)
@@ -375,7 +362,7 @@ func (em *EvictionManager) checkAndEvict() {
 	conflicts := totalConflicts.Load()
 	if evicted > 0 || conflicts > 0 {
 		rl.WithFields(log.Fields{
-			"freedBytes":     humanBytes(totalEvictedBytes.Load()),
+			"freedBytes":     utils.HumanBytes(totalEvictedBytes.Load()),
 			"evictedObjects": evicted,
 			"conflicts":      conflicts,
 			"elapsed":        time.Since(startTime).String(),
@@ -747,7 +734,7 @@ func (em *EvictionManager) ForcePurge() error {
 	wg.Wait()
 
 	rl.WithFields(log.Fields{
-		"freedBytes":     humanBytes(evictedBytes.Load()),
+		"freedBytes":     utils.HumanBytes(evictedBytes.Load()),
 		"evictedObjects": evictedObjects.Load(),
 		"elapsed":        time.Since(startTime).String(),
 	}).Info("Force purge complete")

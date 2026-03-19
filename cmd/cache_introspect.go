@@ -38,6 +38,7 @@ import (
 	"github.com/pelicanplatform/pelican/local_cache"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -117,14 +118,67 @@ Example:
 		SilenceUsage: true,
 	}
 
+	cacheIntrospectStatsCmd = &cobra.Command{
+		Use:   "stats",
+		Short: "Show cache size statistics",
+		Long: `Display aggregate size statistics about the cache.
+
+Shows total inline bytes stored in BadgerDB, total number of metadata
+entries, total bytes claimed by metadata, and per-storage-directory
+breakdown. This is a cheap operation that only scans metadata.
+
+Example:
+  pelican cache introspect stats
+  pelican cache introspect stats --json`,
+		RunE:         runCacheIntrospectStats,
+		SilenceUsage: true,
+	}
+
+	cacheIntrospectDiskUsageCmd = &cobra.Command{
+		Use:   "disk-usage",
+		Short: "Compute actual disk usage by walking storage directories",
+		Long: `Walk all storage directories and sum the actual file sizes on disk.
+
+This is an EXPENSIVE operation that stats every file in the cache's
+storage directories. For large caches this may take significant time.
+
+Example:
+  pelican cache introspect disk-usage
+  pelican cache introspect disk-usage --json`,
+		RunE:         runCacheIntrospectDiskUsage,
+		SilenceUsage: true,
+	}
+
+	cacheIntrospectConsistencyCmd = &cobra.Command{
+		Use:   "consistency",
+		Short: "Run a cache consistency check",
+		Long: `Trigger a consistency check between the database and disk.
+
+By default runs both a metadata scan (cross-references DB entries with
+disk files to find orphans) and a data scan (reads and verifies checksums).
+Use --metadata-only or --data-only to run only one scan type.
+
+The data scan is expensive as it reads and checksums every cached file.
+
+Example:
+  pelican cache introspect consistency
+  pelican cache introspect consistency --metadata-only
+  pelican cache introspect consistency --data-only
+  pelican cache introspect consistency --json`,
+		RunE:         runCacheIntrospectConsistency,
+		SilenceUsage: true,
+	}
+
 	// Flags
-	introspectEtag     string
-	introspectInstance string
-	introspectJSON     bool
-	introspectLimit    int
-	introspectCacheDir string
-	introspectOffline  bool
-	introspectToken    string
+	introspectEtag         string
+	introspectInstance     string
+	introspectJSON         bool
+	introspectLimit        int
+	introspectCacheDir     string
+	introspectOffline      bool
+	introspectToken        string
+	introspectMetadataOnly bool
+	introspectDataOnly     bool
 )
 
 func init() {
@@ -136,6 +190,9 @@ func init() {
 	cacheIntrospectCmd.AddCommand(cacheIntrospectMetadataCmd)
 	cacheIntrospectCmd.AddCommand(cacheIntrospectVerifyCmd)
 	cacheIntrospectCmd.AddCommand(cacheIntrospectListCmd)
+	cacheIntrospectCmd.AddCommand(cacheIntrospectStatsCmd)
+	cacheIntrospectCmd.AddCommand(cacheIntrospectDiskUsageCmd)
+	cacheIntrospectCmd.AddCommand(cacheIntrospectConsistencyCmd)
 
 	// Common flags
 	cacheIntrospectCmd.PersistentFlags().BoolVar(&introspectJSON, "json", false, "Output in JSON format")
@@ -151,6 +208,10 @@ func init() {
 
 	// List specific flags
 	cacheIntrospectListCmd.Flags().IntVar(&introspectLimit, "limit", 100, "Maximum number of objects to list")
+
+	// Consistency specific flags
+	cacheIntrospectConsistencyCmd.Flags().BoolVar(&introspectMetadataOnly, "metadata-only", false, "Run only the metadata scan (skip data scan)")
+	cacheIntrospectConsistencyCmd.Flags().BoolVar(&introspectDataOnly, "data-only", false, "Run only the data scan (skip metadata scan)")
 }
 
 // initIntrospectConfig initializes server configuration needed by both
@@ -172,7 +233,9 @@ func initIntrospectConfig() error {
 
 // getCacheDir returns the persistent-cache base directory.
 // The cache server stores its persistent cache under
-//    <Cache.StorageLocation>/persistent-cache
+//
+//	<Cache.StorageLocation>/persistent-cache
+//
 // which is where the BadgerDB "db" subdirectory lives.
 func getCacheDir() (string, error) {
 	if introspectCacheDir != "" {
@@ -665,6 +728,206 @@ func printList(instances []local_cache.ObjectInstance) error {
 
 	if len(instances) == introspectLimit {
 		fmt.Printf("\n(Showing first %d entries. Use --limit to see more.)\n", introspectLimit)
+	}
+
+	return nil
+}
+
+func runCacheIntrospectStats(cmd *cobra.Command, args []string) error {
+	// Try online mode first
+	if serverURL := useOnlineMode(); serverURL != "" {
+		body, err := introspectHTTPGet(serverURL, "/api/v1.0/cache/introspect/stats", nil)
+		if err != nil {
+			return errors.Wrap(err, "online introspection failed")
+		}
+		var stats local_cache.CacheStats
+		if err := json.Unmarshal(body, &stats); err != nil {
+			return errors.Wrap(err, "failed to parse response")
+		}
+		return printStats(&stats)
+	}
+
+	// Offline mode
+	api, err := openIntrospectAPI()
+	if err != nil {
+		return err
+	}
+	defer api.Close()
+
+	stats, err := api.GetCacheStats()
+	if err != nil {
+		return errors.Wrap(err, "failed to get cache stats")
+	}
+
+	return printStats(stats)
+}
+
+func printStats(stats *local_cache.CacheStats) error {
+	if introspectJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(stats)
+	}
+
+	fmt.Printf("Cache Size Statistics\n")
+	fmt.Printf("=====================\n\n")
+	fmt.Printf("Total metadata entries:  %d\n", stats.TotalMetadataEntries)
+	fmt.Printf("Total bytes (metadata):  %s (%d bytes)\n", utils.HumanBytes(stats.TotalBytesMetadata), stats.TotalBytesMetadata)
+	fmt.Printf("Total inline data:       %s (%d bytes)\n", utils.HumanBytes(stats.TotalInlineBytes), stats.TotalInlineBytes)
+
+	if len(stats.StorageBreakdown) > 0 {
+		fmt.Printf("\nPer-Storage Directory:\n")
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintf(w, "  DIRECTORY\tOBJECTS\tTOTAL BYTES\tINLINE\tON DISK\n")
+		for name, ds := range stats.StorageBreakdown {
+			fmt.Fprintf(w, "  %s\t%d\t%s\t%d (%s)\t%d (%s)\n",
+				name, ds.ObjectCount, utils.HumanBytes(ds.TotalBytes),
+				ds.InlineCount, utils.HumanBytes(ds.InlineBytes),
+				ds.OnDiskCount, utils.HumanBytes(ds.OnDiskBytes))
+		}
+		w.Flush()
+	}
+
+	if len(stats.UsageCounters) > 0 {
+		fmt.Printf("\nUsage Counters (pre-computed):\n")
+		for key, val := range stats.UsageCounters {
+			fmt.Printf("  %s: %s (%d bytes)\n", key, utils.HumanBytes(val), val)
+		}
+	}
+
+	return nil
+}
+
+func runCacheIntrospectDiskUsage(cmd *cobra.Command, args []string) error {
+	// Try online mode first
+	if serverURL := useOnlineMode(); serverURL != "" {
+		body, err := introspectHTTPPost(serverURL, "/api/v1.0/cache/introspect/disk-usage", nil)
+		if err != nil {
+			return errors.Wrap(err, "online introspection failed")
+		}
+		var result local_cache.DiskUsageResult
+		if err := json.Unmarshal(body, &result); err != nil {
+			return errors.Wrap(err, "failed to parse response")
+		}
+		return printDiskUsage(&result)
+	}
+
+	// Offline mode
+	api, err := openIntrospectAPI()
+	if err != nil {
+		return err
+	}
+	defer api.Close()
+
+	fmt.Println("Walking storage directories (this may take a while)...")
+	result, err := api.GetDiskUsage()
+	if err != nil {
+		return errors.Wrap(err, "failed to compute disk usage")
+	}
+
+	return printDiskUsage(result)
+}
+
+func printDiskUsage(result *local_cache.DiskUsageResult) error {
+	if introspectJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	}
+
+	fmt.Printf("Disk Usage (via filesystem walk)\n")
+	fmt.Printf("================================\n\n")
+	fmt.Printf("Total bytes on disk: %s (%d bytes)\n", utils.HumanBytes(result.TotalBytesOnDisk), result.TotalBytesOnDisk)
+	fmt.Printf("Total files:         %d\n", result.TotalFiles)
+	fmt.Printf("Scan duration:       %s\n", result.Duration)
+
+	if len(result.Directories) > 0 {
+		fmt.Printf("\nPer-Directory:\n")
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintf(w, "  DIRECTORY\tFILES\tBYTES USED\tPATH\n")
+		for name, ds := range result.Directories {
+			fmt.Fprintf(w, "  %s\t%d\t%s\t%s\n",
+				name, ds.FileCount, utils.HumanBytes(ds.BytesUsed), ds.Path)
+		}
+		w.Flush()
+	}
+
+	return nil
+}
+
+func runCacheIntrospectConsistency(cmd *cobra.Command, args []string) error {
+	metadataScan := !introspectDataOnly
+	dataScan := !introspectMetadataOnly
+
+	if introspectMetadataOnly && introspectDataOnly {
+		return errors.New("--metadata-only and --data-only are mutually exclusive")
+	}
+
+	// Try online mode first
+	if serverURL := useOnlineMode(); serverURL != "" {
+		query := url.Values{}
+		query.Set("metadata", fmt.Sprintf("%t", metadataScan))
+		query.Set("data", fmt.Sprintf("%t", dataScan))
+		body, err := introspectHTTPPost(serverURL, "/api/v1.0/cache/introspect/consistency", query)
+		if err != nil {
+			return errors.Wrap(err, "online consistency check failed")
+		}
+		var result local_cache.ConsistencyCheckResult
+		if err := json.Unmarshal(body, &result); err != nil {
+			return errors.Wrap(err, "failed to parse response")
+		}
+		return printConsistencyResult(&result)
+	}
+
+	// Offline mode
+	api, err := openIntrospectAPI()
+	if err != nil {
+		return err
+	}
+	defer api.Close()
+
+	fmt.Println("Running consistency check (this may take a while)...")
+	ctx := context.Background()
+	result, err := api.RunConsistencyCheck(ctx, metadataScan, dataScan)
+	if err != nil {
+		return errors.Wrap(err, "consistency check failed")
+	}
+
+	return printConsistencyResult(result)
+}
+
+func printConsistencyResult(result *local_cache.ConsistencyCheckResult) error {
+	if introspectJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	}
+
+	fmt.Printf("Consistency Check Results\n")
+	fmt.Printf("=========================\n\n")
+	fmt.Printf("Duration: %s\n\n", result.Duration)
+
+	if result.MetadataScanRan {
+		fmt.Printf("Metadata Scan:\n")
+		fmt.Printf("  Orphaned files (on disk but not in DB):  %d\n", result.OrphanedFiles)
+		fmt.Printf("  Orphaned DB entries (in DB but not on disk): %d\n", result.OrphanedDBEntries)
+		fmt.Printf("  Errors: %d\n", result.MetadataScanErrors)
+	} else {
+		fmt.Printf("Metadata Scan: skipped\n")
+	}
+
+	if result.DataScanRan {
+		fmt.Printf("\nData Scan:\n")
+		fmt.Printf("  Objects verified:     %d\n", result.ObjectsVerified)
+		fmt.Printf("  Bytes verified:       %s (%d bytes)\n", utils.HumanBytes(result.BytesVerified), result.BytesVerified)
+		fmt.Printf("  Checksum mismatches:  %d\n", result.ChecksumMismatches)
+		fmt.Printf("  Errors: %d\n", result.DataScanErrors)
+	} else {
+		fmt.Printf("\nData Scan: skipped\n")
+	}
+
+	if result.Error != "" {
+		fmt.Printf("\nErrors encountered: %s\n", result.Error)
 	}
 
 	return nil
