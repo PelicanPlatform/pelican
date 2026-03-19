@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"text/tabwriter"
 	"time"
 
@@ -42,13 +43,15 @@ import (
 var (
 	cacheIntrospectCmd = &cobra.Command{
 		Use:   "introspect",
-		Short: "Introspect the local cache database",
-		Long: `Inspect the contents of the local persistent cache.
+		Short: "Introspect the cache's persistent database",
+		Long: `Inspect the contents of the cache server's persistent cache.
 
 These commands allow administrators to examine cached objects, their metadata,
-and verify data integrity without starting the full cache server.
+and verify data integrity. If the cache server is running, commands connect
+to its API automatically; otherwise they fall back to direct database access.
 
-The cache directory is read from LocalCache.BaseDir configuration.`,
+The cache directory is derived from Cache.StorageLocation configuration.`,
+		SilenceUsage: true,
 	}
 
 	cacheIntrospectEtagsCmd = &cobra.Command{
@@ -62,8 +65,9 @@ if the federation context is known.
 Example:
   pelican cache introspect etags pelican://my-federation/data/file.dat
   pelican cache introspect etags /data/file.dat`,
-		Args: cobra.ExactArgs(1),
-		RunE: runCacheIntrospectEtags,
+		Args:         cobra.ExactArgs(1),
+		RunE:         runCacheIntrospectEtags,
+		SilenceUsage: true,
 	}
 
 	cacheIntrospectMetadataCmd = &cobra.Command{
@@ -78,8 +82,9 @@ Example:
   pelican cache introspect metadata pelican://my-federation/data/file.dat
   pelican cache introspect metadata /data/file.dat --etag="abc123"
   pelican cache introspect metadata --instance=<hash>`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: runCacheIntrospectMetadata,
+		Args:         cobra.MaximumNArgs(1),
+		RunE:         runCacheIntrospectMetadata,
+		SilenceUsage: true,
 	}
 
 	cacheIntrospectVerifyCmd = &cobra.Command{
@@ -93,8 +98,9 @@ that stored checksums (if any) match the actual data.
 Example:
   pelican cache introspect verify pelican://my-federation/data/file.dat
   pelican cache introspect verify /data/file.dat --etag="abc123"`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: runCacheIntrospectVerify,
+		Args:         cobra.MaximumNArgs(1),
+		RunE:         runCacheIntrospectVerify,
+		SilenceUsage: true,
 	}
 
 	cacheIntrospectListCmd = &cobra.Command{
@@ -107,7 +113,8 @@ to restrict the number of entries returned.
 
 Example:
   pelican cache introspect list --limit=100`,
-		RunE: runCacheIntrospectList,
+		RunE:         runCacheIntrospectList,
+		SilenceUsage: true,
 	}
 
 	// Flags
@@ -146,23 +153,42 @@ func init() {
 	cacheIntrospectListCmd.Flags().IntVar(&introspectLimit, "limit", 100, "Maximum number of objects to list")
 }
 
-// getCacheDir returns the cache directory, either from flag or config
+// initIntrospectConfig initializes server configuration needed by both
+// online and offline introspection modes.  It is safe to call multiple
+// times (idempotent via config internals).
+var introspectConfigDone bool
+
+func initIntrospectConfig() error {
+	if introspectConfigDone {
+		return nil
+	}
+	ctx := context.Background()
+	if err := config.InitServer(ctx, server_structs.CacheType); err != nil {
+		return errors.Wrap(err, "failed to initialize cache server config")
+	}
+	introspectConfigDone = true
+	return nil
+}
+
+// getCacheDir returns the persistent-cache base directory.
+// The cache server stores its persistent cache under
+//    <Cache.StorageLocation>/persistent-cache
+// which is where the BadgerDB "db" subdirectory lives.
 func getCacheDir() (string, error) {
 	if introspectCacheDir != "" {
 		return introspectCacheDir, nil
 	}
 
-	// Initialize config to read LocalCache.DataLocation
-	if err := config.InitClient(); err != nil {
-		return "", errors.Wrap(err, "failed to initialize config")
+	if err := initIntrospectConfig(); err != nil {
+		return "", err
 	}
 
-	cacheDir := param.LocalCache_DataLocation.GetString()
-	if cacheDir == "" {
-		return "", errors.New("LocalCache.DataLocation is not configured. Use --cache-dir to specify the cache directory")
+	storageLocation := param.Cache_StorageLocation.GetString()
+	if storageLocation == "" {
+		return "", errors.New("Cache.StorageLocation is not configured. Use --cache-dir to specify the cache directory")
 	}
 
-	return cacheDir, nil
+	return filepath.Join(storageLocation, "persistent-cache"), nil
 }
 
 // discoverServerURL attempts to find the running cache's web URL from the
@@ -171,9 +197,14 @@ func getCacheDir() (string, error) {
 func discoverServerURL() string {
 	addrFile, err := config.ReadAddressFile()
 	if err != nil {
+		log.Debugln("Could not read address file:", err)
 		return ""
 	}
-	return addrFile.ServerExternalWebURL
+	serverURL := addrFile.ServerExternalWebURL
+	if serverURL == "" {
+		log.Debugln("Address file found but ServerExternalWebURL is empty")
+	}
+	return serverURL
 }
 
 // getIntrospectToken returns a bearer token for the introspection API.
@@ -264,11 +295,14 @@ func introspectHTTPPost(serverURL, apiPath string, query url.Values) ([]byte, er
 // use online mode, or empty string if we should use offline/direct mode.
 func useOnlineMode() string {
 	if introspectOffline {
+		log.Debugln("Online mode disabled by --offline flag")
 		return ""
 	}
-	// InitClient populates the runtime dir / config needed for ReadAddressFile
-	if err := config.InitClient(); err != nil {
-		log.Debugln("config.InitClient failed, falling back to offline:", err)
+	// InitServer populates the runtime dir and server config needed for
+	// ReadAddressFile.  This is the same config offline mode needs, so
+	// we initialize it once.
+	if err := initIntrospectConfig(); err != nil {
+		log.Debugln("Server config init failed, falling back to offline:", err)
 		return ""
 	}
 	return discoverServerURL()
@@ -286,13 +320,7 @@ func openIntrospectAPI() (*local_cache.IntrospectAPIOpen, error) {
 		return nil, errors.Errorf("cache directory does not exist: %s", cacheDir)
 	}
 
-	// Initialize issuer keys for database decryption
-	// The cache's encryption keys are derived from issuer keys
-	ctx := context.Background()
-	if err := config.InitServer(ctx, server_structs.CacheType); err != nil {
-		return nil, errors.Wrap(err, "failed to initialize server config (needed for encryption keys)")
-	}
-
+	log.Debugln("Opening cache database at", cacheDir)
 	return local_cache.NewIntrospectAPI(cacheDir)
 }
 
