@@ -45,6 +45,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -256,6 +257,42 @@ type initResult struct {
 	meta         *CacheMetadata
 }
 
+// parseCacheWaterMark parses a Cache.HighWaterMark or Cache.LowWaterMark
+// string value.  These values can be:
+//   - An integer percentage: "95" → percentage=95
+//   - A decimal fraction:    "0.95" → percentage=95
+//   - An absolute byte size: "4.5g", "500MB" → absoluteBytes=N
+//
+// Returns (percentage, absoluteBytes, ok).  Exactly one of percentage or
+// absoluteBytes will be non-zero when ok is true.
+func parseCacheWaterMark(s string) (percentage int, absoluteBytes uint64, ok bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return
+	}
+
+	// Try as integer (1-100 → percentage).
+	if num, err := strconv.Atoi(s); err == nil {
+		if num > 0 && num <= 100 {
+			return num, 0, true
+		}
+	}
+
+	// Try as decimal fraction (0.01-1.0 → percentage).
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		if f > 0 && f <= 1.0 {
+			return int(f * 100), 0, true
+		}
+	}
+
+	// Try as absolute byte size (e.g., "4.5g", "500MB").
+	if b, err := utils.ParseBytes(s); err == nil && b > 0 {
+		return 0, b, true
+	}
+
+	return
+}
+
 // PersistentCacheConfig holds configuration for the persistent cache
 type PersistentCacheConfig struct {
 	// BaseDir is the root directory for the cache.  The BadgerDB database
@@ -291,12 +328,19 @@ type PersistentCacheConfig struct {
 
 // NewPersistentCache creates a new persistent cache instance
 func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg PersistentCacheConfig) (*PersistentCache, error) {
-	// Use defaults from param if not specified
+	// Use defaults from param if not specified.  Prefer Cache.StorageLocation
+	// (used by cache servers) over LocalCache.DataLocation (used by client-side
+	// local cache).
+	if cfg.BaseDir == "" {
+		if loc := param.Cache_StorageLocation.GetString(); loc != "" {
+			cfg.BaseDir = filepath.Join(loc, "persistent-cache")
+		}
+	}
 	if cfg.BaseDir == "" {
 		cfg.BaseDir = param.LocalCache_DataLocation.GetString()
 	}
 	if cfg.BaseDir == "" {
-		return nil, errors.New("LocalCache.DataLocation is not set; cannot determine where to place cache data")
+		return nil, errors.New("neither Cache.StorageLocation nor LocalCache.DataLocation is set; cannot determine where to place cache data")
 	}
 
 	// Ensure base directory exists (needed before getCacheSize)
@@ -304,20 +348,48 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		return nil, errors.Wrap(err, "failed to create cache directory")
 	}
 
-	// Resolve default watermark percentages from config/params.
+	// Resolve default watermark settings from config/params.
+	// Priority chain (Cache.* is preferred over LocalCache.*):
+	//   1. Explicit PersistentCacheConfig struct fields
+	//   2. Cache.HighWaterMark / Cache.LowWaterMark params (may be percentage or absolute bytes)
+	//   3. LocalCache.HighWaterMarkPercentage / LowWaterMarkPercentage params
+	//   4. Hardcoded defaults (90% / 80%)
 	defaultHWP := cfg.HighWaterMarkPercentage
+	var defaultHWBytes uint64
 	if defaultHWP == 0 {
-		defaultHWP = param.LocalCache_HighWaterMarkPercentage.GetInt()
-		if defaultHWP == 0 {
-			defaultHWP = 90
+		pct, abs, ok := parseCacheWaterMark(param.Cache_HighWaterMark.GetString())
+		if ok {
+			if pct > 0 {
+				defaultHWP = pct
+			} else {
+				defaultHWBytes = abs
+			}
 		}
 	}
+	if defaultHWP == 0 {
+		defaultHWP = param.LocalCache_HighWaterMarkPercentage.GetInt()
+	}
+	if defaultHWP == 0 && defaultHWBytes == 0 {
+		defaultHWP = 90
+	}
+
 	defaultLWP := cfg.LowWaterMarkPercentage
+	var defaultLWBytes uint64
+	if defaultLWP == 0 {
+		pct, abs, ok := parseCacheWaterMark(param.Cache_LowWatermark.GetString())
+		if ok {
+			if pct > 0 {
+				defaultLWP = pct
+			} else {
+				defaultLWBytes = abs
+			}
+		}
+	}
 	if defaultLWP == 0 {
 		defaultLWP = param.LocalCache_LowWaterMarkPercentage.GetInt()
-		if defaultLWP == 0 {
-			defaultLWP = 80
-		}
+	}
+	if defaultLWP == 0 && defaultLWBytes == 0 {
+		defaultLWP = 80
 	}
 
 	// Build storage dirs and eviction dir configs.
@@ -325,7 +397,11 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	// legacy single-dir config (BaseDir + MaxSize).
 	storageDirs := cfg.StorageDirs
 	if len(storageDirs) == 0 {
-		// Legacy single-directory mode
+		// Legacy single-directory mode.  If an explicit size was
+		// provided (via config struct or LocalCache.Size param), use
+		// it now.  Otherwise leave MaxSize as 0 so it is auto-detected
+		// from the filesystem after the database is open (the auto-
+		// detect adds back the cache's own tracked usage from the db).
 		maxSz := cfg.MaxSize
 		if maxSz == 0 {
 			sizeStr := param.LocalCache_Size.GetString()
@@ -335,13 +411,8 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 				if err != nil {
 					return nil, errors.Wrap(err, "failed to parse LocalCache.Size")
 				}
-			} else {
-				cacheSize, err := getCacheSize(cfg.BaseDir)
-				if err != nil {
-					return nil, errors.Wrap(err, "failed to determine cache size")
-				}
-				maxSz = cacheSize
 			}
+			// else: leave maxSz == 0 for post-db auto-detect
 		}
 		storageDirs = []StorageDirConfig{{
 			Path:                    cfg.BaseDir,
@@ -393,9 +464,12 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		}
 
 		// Resolve per-dir size.  0 means auto-detect from filesystem.
+		// Pass the database so auto-detect can add back the cache's own
+		// tracked usage (prevents Bavail from shrinking the limit as
+		// the cache fills).
 		maxSz := sd.MaxSize
 		if maxSz == 0 {
-			cs, err := getCacheSize(sd.Path)
+			cs, err := getCacheSize(sd.Path, db, id)
 			if err != nil {
 				db.Close()
 				return nil, errors.Wrapf(err, "failed to determine size for storage dir %q", sd.Path)
@@ -416,6 +490,8 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 			MaxSize:             maxSz,
 			HighWaterPercentage: hwp,
 			LowWaterPercentage:  lwp,
+			HighWaterBytes:      defaultHWBytes,
+			LowWaterBytes:       defaultLWBytes,
 		}
 	}
 
