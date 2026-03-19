@@ -362,7 +362,11 @@ func getUserAgent(project string) (agent string) {
 // may be passed in from the command line. This should handle the special '+' logic -- if the user provides a list of servers
 // and no +, it means they ONLY want to use the provided servers. Otherwise, we prefer those servers, but also incorporate the
 // servers provided by the Director.
-func generateSortedObjServers(dirResp server_structs.DirectorResponse, preferredCaches []*url.URL) (objectServers []*url.URL, err error) {
+//
+// nPreferred is the number of servers at the front of objectServers that originated from the user's PreferredCaches
+// configuration.  The remaining servers (objectServers[nPreferred:]) came from the Director.  Callers should ensure
+// that no director-provided server is ever tried before all preferred servers have been attempted first.
+func generateSortedObjServers(dirResp server_structs.DirectorResponse, preferredCaches []*url.URL) (objectServers []*url.URL, nPreferred int, err error) {
 	var appendCaches bool
 	// The global cache override is set
 	if len(preferredCaches) > 0 {
@@ -389,6 +393,7 @@ func generateSortedObjServers(dirResp server_structs.DirectorResponse, preferred
 			}
 		}
 		objectServers = preferredObjectServers
+		nPreferred = len(preferredObjectServers)
 		// No +, no mo problems -- err, I mean, no more object servers
 		if !appendCaches {
 			return
