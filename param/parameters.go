@@ -126,6 +126,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.HighWaterMark": false,
 	"Cache.LocalRoot": false,
 	"Cache.LowWatermark": false,
+	"Cache.MemoryCacheSize": false,
 	"Cache.MetaLocations": false,
 	"Cache.MinDirectorRefreshInterval": false,
 	"Cache.NamespaceLocation": false,
@@ -543,6 +544,7 @@ var stringAccessors = map[string]func(*Config) string{
 	"Cache.HighWaterMark": func(c *Config) string { return c.Cache.HighWaterMark },
 	"Cache.LocalRoot": func(c *Config) string { return c.Cache.LocalRoot },
 	"Cache.LowWatermark": func(c *Config) string { return c.Cache.LowWatermark },
+	"Cache.MemoryCacheSize": func(c *Config) string { return c.Cache.MemoryCacheSize },
 	"Cache.NamespaceLocation": func(c *Config) string { return c.Cache.NamespaceLocation },
 	"Cache.PSSOrigin": func(c *Config) string { return c.Cache.PSSOrigin },
 	"Cache.RunLocation": func(c *Config) string { return c.Cache.RunLocation },
@@ -582,6 +584,7 @@ var stringAccessors = map[string]func(*Config) string{
 	"Issuer.TomcatLocation": func(c *Config) string { return c.Issuer.TomcatLocation },
 	"LocalCache.ChunkSize": func(c *Config) string { return c.LocalCache.ChunkSize },
 	"LocalCache.DataLocation": func(c *Config) string { return c.LocalCache.DataLocation },
+	"LocalCache.MemoryCacheSize": func(c *Config) string { return c.LocalCache.MemoryCacheSize },
 	"LocalCache.RunLocation": func(c *Config) string { return c.LocalCache.RunLocation },
 	"LocalCache.Size": func(c *Config) string { return c.LocalCache.Size },
 	"LocalCache.Socket": func(c *Config) string { return c.LocalCache.Socket },
@@ -817,7 +820,6 @@ var intAccessors = map[string]func(*Config) int{
 	"LocalCache.HighWaterMarkPercentage": func(c *Config) int { return c.LocalCache.HighWaterMarkPercentage },
 	"LocalCache.LowWaterMarkPercentage": func(c *Config) int { return c.LocalCache.LowWaterMarkPercentage },
 	"LocalCache.MaxConcurrentPrefetch": func(c *Config) int { return c.LocalCache.MaxConcurrentPrefetch },
-	"LocalCache.MemoryCacheSize": func(c *Config) int { return c.LocalCache.MemoryCacheSize },
 	"LocalCache.RevalidationJitter": func(c *Config) int { return c.LocalCache.RevalidationJitter },
 	"MinimumDownloadSpeed": func(c *Config) int { return c.MinimumDownloadSpeed },
 	"Monitoring.LabelLimit": func(c *Config) int { return c.Monitoring.LabelLimit },
@@ -1209,6 +1211,7 @@ var allParameterNames = []string{
 	"Cache.HighWaterMark",
 	"Cache.LocalRoot",
 	"Cache.LowWatermark",
+	"Cache.MemoryCacheSize",
 	"Cache.MetaLocations",
 	"Cache.MinDirectorRefreshInterval",
 	"Cache.NamespaceLocation",
@@ -1599,6 +1602,7 @@ var (
 	Cache_HighWaterMark = StringParam{"Cache.HighWaterMark"}
 	Cache_LocalRoot = StringParam{"Cache.LocalRoot"}
 	Cache_LowWatermark = StringParam{"Cache.LowWatermark"}
+	Cache_MemoryCacheSize = StringParam{"Cache.MemoryCacheSize"}
 	Cache_NamespaceLocation = StringParam{"Cache.NamespaceLocation"}
 	Cache_PSSOrigin = StringParam{"Cache.PSSOrigin"}
 	Cache_RunLocation = StringParam{"Cache.RunLocation"}
@@ -1638,6 +1642,7 @@ var (
 	Issuer_TomcatLocation = StringParam{"Issuer.TomcatLocation"}
 	LocalCache_ChunkSize = StringParam{"LocalCache.ChunkSize"}
 	LocalCache_DataLocation = StringParam{"LocalCache.DataLocation"}
+	LocalCache_MemoryCacheSize = StringParam{"LocalCache.MemoryCacheSize"}
 	LocalCache_RunLocation = StringParam{"LocalCache.RunLocation"}
 	LocalCache_Size = StringParam{"LocalCache.Size"}
 	LocalCache_Socket = StringParam{"LocalCache.Socket"}
@@ -1817,7 +1822,6 @@ var (
 	LocalCache_HighWaterMarkPercentage = IntParam{"LocalCache.HighWaterMarkPercentage"}
 	LocalCache_LowWaterMarkPercentage = IntParam{"LocalCache.LowWaterMarkPercentage"}
 	LocalCache_MaxConcurrentPrefetch = IntParam{"LocalCache.MaxConcurrentPrefetch"}
-	LocalCache_MemoryCacheSize = IntParam{"LocalCache.MemoryCacheSize"}
 	LocalCache_RevalidationJitter = IntParam{"LocalCache.RevalidationJitter"}
 	MinimumDownloadSpeed = IntParam{"MinimumDownloadSpeed"}
 	Monitoring_LabelLimit = IntParam{"Monitoring.LabelLimit"}
@@ -2039,6 +2043,7 @@ func init() {
 		"Cache.HighWaterMark": Cache_HighWaterMark,
 		"Cache.LocalRoot": Cache_LocalRoot,
 		"Cache.LowWatermark": Cache_LowWatermark,
+		"Cache.MemoryCacheSize": Cache_MemoryCacheSize,
 		"Cache.NamespaceLocation": Cache_NamespaceLocation,
 		"Cache.PSSOrigin": Cache_PSSOrigin,
 		"Cache.RunLocation": Cache_RunLocation,
@@ -2078,6 +2083,7 @@ func init() {
 		"Issuer.TomcatLocation": Issuer_TomcatLocation,
 		"LocalCache.ChunkSize": LocalCache_ChunkSize,
 		"LocalCache.DataLocation": LocalCache_DataLocation,
+		"LocalCache.MemoryCacheSize": LocalCache_MemoryCacheSize,
 		"LocalCache.RunLocation": LocalCache_RunLocation,
 		"LocalCache.Size": LocalCache_Size,
 		"LocalCache.Socket": LocalCache_Socket,
@@ -2251,7 +2257,6 @@ func init() {
 		"LocalCache.HighWaterMarkPercentage": LocalCache_HighWaterMarkPercentage,
 		"LocalCache.LowWaterMarkPercentage": LocalCache_LowWaterMarkPercentage,
 		"LocalCache.MaxConcurrentPrefetch": LocalCache_MaxConcurrentPrefetch,
-		"LocalCache.MemoryCacheSize": LocalCache_MemoryCacheSize,
 		"LocalCache.RevalidationJitter": LocalCache_RevalidationJitter,
 		"MinimumDownloadSpeed": MinimumDownloadSpeed,
 		"Monitoring.LabelLimit": Monitoring_LabelLimit,
