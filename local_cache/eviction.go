@@ -92,6 +92,8 @@ type EvictionDirConfig struct {
 	MaxSize             uint64 // Maximum cache size in bytes for this directory
 	HighWaterPercentage int    // Percentage at which eviction starts (0 = default 90)
 	LowWaterPercentage  int    // Percentage at which eviction stops  (0 = default 80)
+	HighWaterBytes      uint64 // Absolute byte threshold (overrides percentage when > 0)
+	LowWaterBytes       uint64 // Absolute byte threshold (overrides percentage when > 0)
 }
 
 // NewEvictionManager creates a new eviction manager
@@ -99,18 +101,40 @@ func NewEvictionManager(db *CacheDB, storage *StorageManager, config EvictionCon
 	dirLimits := make(map[StorageID]*dirEvictionLimits, len(config.DirConfigs))
 
 	for id, dcfg := range config.DirConfigs {
-		hwp := dcfg.HighWaterPercentage
-		if hwp <= 0 {
-			hwp = 90
+		var highWater, lowWater uint64
+
+		if dcfg.HighWaterBytes > 0 {
+			highWater = dcfg.HighWaterBytes
+		} else {
+			hwp := dcfg.HighWaterPercentage
+			if hwp <= 0 {
+				hwp = 90
+			}
+			highWater = (dcfg.MaxSize * uint64(hwp)) / 100
 		}
-		lwp := dcfg.LowWaterPercentage
-		if lwp <= 0 {
-			lwp = 80
+
+		if dcfg.LowWaterBytes > 0 {
+			lowWater = dcfg.LowWaterBytes
+		} else {
+			lwp := dcfg.LowWaterPercentage
+			if lwp <= 0 {
+				lwp = 80
+			}
+			lowWater = (dcfg.MaxSize * uint64(lwp)) / 100
 		}
+
+		// Sanity: clamp watermarks to MaxSize and ensure high >= low.
+		if highWater > dcfg.MaxSize {
+			highWater = dcfg.MaxSize
+		}
+		if lowWater > highWater {
+			lowWater = highWater
+		}
+
 		dirLimits[id] = &dirEvictionLimits{
 			maxSize:   dcfg.MaxSize,
-			highWater: (dcfg.MaxSize * uint64(hwp)) / 100,
-			lowWater:  (dcfg.MaxSize * uint64(lwp)) / 100,
+			highWater: highWater,
+			lowWater:  lowWater,
 		}
 	}
 
