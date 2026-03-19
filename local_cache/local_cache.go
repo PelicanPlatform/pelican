@@ -279,7 +279,7 @@ func NewLocalCache(ctx context.Context, egrp *errgroup.Group, options ...LocalCa
 		return
 	}
 
-	cacheSize, err := getCacheSize(cacheDir)
+	cacheSize, err := getCacheSize(cacheDir, nil, 0)
 	if err != nil {
 		return
 	}
