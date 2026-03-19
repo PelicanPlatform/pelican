@@ -19,8 +19,11 @@
 package local_cache
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -94,6 +97,57 @@ type ChecksumStatus struct {
 	Expected string `json:"expected"` // Hex-encoded
 	Computed string `json:"computed"` // Hex-encoded (only if verification ran)
 	Match    bool   `json:"match"`
+}
+
+// CacheStats contains aggregate size statistics about the cache.
+type CacheStats struct {
+	TotalInlineBytes     int64                       `json:"total_inline_bytes"`
+	TotalMetadataEntries int64                       `json:"total_metadata_entries"`
+	TotalBytesMetadata   int64                       `json:"total_bytes_metadata"`     // Sum of ContentLength from metadata entries
+	UsageCounters        map[string]int64            `json:"usage_counters,omitempty"` // Pre-computed usage from u: prefix keys
+	StorageBreakdown     map[string]*StorageDirStats `json:"storage_breakdown,omitempty"`
+}
+
+// StorageDirStats holds per-storage-directory statistics.
+type StorageDirStats struct {
+	StorageID   uint8 `json:"storage_id"`
+	ObjectCount int64 `json:"object_count"`
+	TotalBytes  int64 `json:"total_bytes"`   // Sum of ContentLength for objects in this dir
+	InlineCount int64 `json:"inline_count"`  // Number of inline objects
+	InlineBytes int64 `json:"inline_bytes"`  // Sum of ContentLength for inline objects
+	OnDiskCount int64 `json:"on_disk_count"` // Number of on-disk objects
+	OnDiskBytes int64 `json:"on_disk_bytes"` // Sum of ContentLength for on-disk objects
+}
+
+// DiskUsageResult contains the result of an expensive disk walk.
+type DiskUsageResult struct {
+	TotalBytesOnDisk int64                   `json:"total_bytes_on_disk"`
+	TotalFiles       int64                   `json:"total_files"`
+	Directories      map[string]*DirDiskStat `json:"directories,omitempty"`
+	Duration         string                  `json:"duration"` // How long the walk took
+}
+
+// DirDiskStat holds per-directory disk usage from walking the filesystem.
+type DirDiskStat struct {
+	StorageID uint8  `json:"storage_id"`
+	Path      string `json:"path"`
+	BytesUsed int64  `json:"bytes_used"`
+	FileCount int64  `json:"file_count"`
+}
+
+// ConsistencyCheckResult contains the result of a consistency check run.
+type ConsistencyCheckResult struct {
+	MetadataScanRan    bool   `json:"metadata_scan_ran"`
+	DataScanRan        bool   `json:"data_scan_ran"`
+	OrphanedFiles      int64  `json:"orphaned_files"`
+	OrphanedDBEntries  int64  `json:"orphaned_db_entries"`
+	ChecksumMismatches int64  `json:"checksum_mismatches"`
+	BytesVerified      int64  `json:"bytes_verified"`
+	ObjectsVerified    int64  `json:"objects_verified"`
+	MetadataScanErrors int64  `json:"metadata_scan_errors"`
+	DataScanErrors     int64  `json:"data_scan_errors"`
+	Duration           string `json:"duration"`
+	Error              string `json:"error,omitempty"`
 }
 
 // IntrospectAPIOpen provides read-only introspection access to the cache database.
@@ -459,6 +513,149 @@ func (api *IntrospectAPIOpen) ListAllObjects(limit int) ([]ObjectInstance, error
 	}
 
 	return instances, nil
+}
+
+// GetCacheStats returns aggregate cache size statistics by scanning metadata.
+// This scans all metadata entries and the inline data prefix, but does NOT
+// walk the disk (use GetDiskUsage for that).
+func (api *IntrospectAPIOpen) GetCacheStats() (*CacheStats, error) {
+	stats := &CacheStats{
+		StorageBreakdown: make(map[string]*StorageDirStats),
+	}
+
+	// Scan all metadata entries to compute counts + total bytes
+	err := api.db.ScanMetadata(func(instanceHash InstanceHash, meta *CacheMetadata) error {
+		stats.TotalMetadataEntries++
+		stats.TotalBytesMetadata += meta.ContentLength
+
+		dirKey := fmt.Sprintf("storage-%d", meta.StorageID)
+		ds, ok := stats.StorageBreakdown[dirKey]
+		if !ok {
+			ds = &StorageDirStats{StorageID: uint8(meta.StorageID)}
+			stats.StorageBreakdown[dirKey] = ds
+		}
+		ds.ObjectCount++
+		ds.TotalBytes += meta.ContentLength
+
+		if meta.IsInline() {
+			ds.InlineCount++
+			ds.InlineBytes += meta.ContentLength
+		} else {
+			ds.OnDiskCount++
+			ds.OnDiskBytes += meta.ContentLength
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to scan metadata")
+	}
+
+	// Compute total inline bytes by scanning the inline data prefix
+	inlineBytes, inlineErr := api.db.ComputeInlineDataSize()
+	if inlineErr != nil {
+		return nil, errors.Wrap(inlineErr, "failed to compute inline data size")
+	}
+	stats.TotalInlineBytes = inlineBytes
+
+	// Read pre-computed usage counters
+	usage, usageErr := api.db.GetAllUsage()
+	if usageErr == nil && len(usage) > 0 {
+		stats.UsageCounters = make(map[string]int64, len(usage))
+		for k, v := range usage {
+			key := fmt.Sprintf("s%d:ns%d", k.StorageID, k.NamespaceID)
+			stats.UsageCounters[key] = v
+		}
+	}
+
+	return stats, nil
+}
+
+// GetDiskUsage walks the storage directories to compute actual disk usage.
+// This is an expensive operation that reads every file's size on disk.
+func (api *IntrospectAPIOpen) GetDiskUsage() (*DiskUsageResult, error) {
+	start := time.Now()
+	result := &DiskUsageResult{
+		Directories: make(map[string]*DirDiskStat),
+	}
+
+	dirs := api.storage.GetDirs()
+	for storageID, objectsDir := range dirs {
+		dirKey := fmt.Sprintf("storage-%d", storageID)
+		ds := &DirDiskStat{
+			StorageID: uint8(storageID),
+			Path:      objectsDir,
+		}
+
+		err := filepath.WalkDir(objectsDir, func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return nil // skip entries we can't stat
+			}
+			if d.IsDir() {
+				return nil
+			}
+			info, err := d.Info()
+			if err != nil {
+				return nil // skip
+			}
+			ds.FileCount++
+			ds.BytesUsed += info.Size()
+			return nil
+		})
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to walk storage directory %s", objectsDir)
+		}
+
+		result.Directories[dirKey] = ds
+		result.TotalBytesOnDisk += ds.BytesUsed
+		result.TotalFiles += ds.FileCount
+	}
+
+	result.Duration = time.Since(start).String()
+	return result, nil
+}
+
+// RunConsistencyCheck runs a full consistency check (metadata scan + data scan)
+// and returns statistics. This creates a temporary ConsistencyChecker with
+// unlimited rate limiting for the ad-hoc run.
+func (api *IntrospectAPIOpen) RunConsistencyCheck(ctx context.Context, metadataScan, dataScan bool) (*ConsistencyCheckResult, error) {
+	start := time.Now()
+	result := &ConsistencyCheckResult{}
+
+	// Create a checker with no rate limiting for ad-hoc run
+	checker := NewConsistencyChecker(api.db, api.storage, ConsistencyConfig{
+		MetadataScanActiveMs: 1000,                    // Use full second of active time per second (no throttling)
+		DataScanBytesPerSec:  10 * 1024 * 1024 * 1024, // 10 GB/s (effectively unlimited)
+		MinAgeForCleanup:     0,                       // No grace period for offline check
+	})
+
+	if metadataScan {
+		if err := checker.RunMetadataScan(ctx); err != nil {
+			result.Error = fmt.Sprintf("metadata scan failed: %v", err)
+		}
+		result.MetadataScanRan = true
+	}
+
+	if dataScan {
+		if err := checker.RunDataScan(ctx); err != nil {
+			if result.Error != "" {
+				result.Error += "; "
+			}
+			result.Error += fmt.Sprintf("data scan failed: %v", err)
+		}
+		result.DataScanRan = true
+	}
+
+	stats := checker.GetStats()
+	result.OrphanedFiles = stats.OrphanedFiles
+	result.OrphanedDBEntries = stats.OrphanedDBEntries
+	result.ChecksumMismatches = stats.ChecksumMismatches
+	result.BytesVerified = stats.BytesVerified
+	result.ObjectsVerified = stats.ObjectsVerified
+	result.MetadataScanErrors = stats.MetadataScanErrors
+	result.DataScanErrors = stats.DataScanErrors
+	result.Duration = time.Since(start).String()
+
+	return result, nil
 }
 
 // NormalizePelicanURL normalizes a Pelican URL for consistent hashing.
