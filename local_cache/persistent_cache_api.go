@@ -1413,6 +1413,10 @@ func (pc *PersistentCache) introspectEtagsHandler(c *gin.Context) {
 				return nil
 			}
 		}
+		expires := meta.Expires
+		if expires.IsZero() {
+			expires = meta.ComputeExpires()
+		}
 		instances = append(instances, ObjectInstance{
 			InstanceHash:  string(instanceHash),
 			ETag:          meta.ETag,
@@ -1422,6 +1426,7 @@ func (pc *PersistentCache) introspectEtagsHandler(c *gin.Context) {
 			LastModified:  meta.LastModified,
 			Completed:     meta.Completed,
 			LastAccessed:  meta.LastAccessTime,
+			Expires:       expires,
 			IsLatest:      meta.ETag == latestETag,
 			IsInline:      meta.IsInline(),
 		})
@@ -1475,6 +1480,11 @@ func (pc *PersistentCache) introspectMetadataHandler(c *gin.Context) {
 		return
 	}
 
+	expires := meta.Expires
+	if expires.IsZero() {
+		expires = meta.ComputeExpires()
+	}
+
 	details := &ObjectDetails{
 		ObjectInstance: ObjectInstance{
 			InstanceHash:  instanceHashStr,
@@ -1485,7 +1495,7 @@ func (pc *PersistentCache) introspectMetadataHandler(c *gin.Context) {
 			LastModified:  meta.LastModified,
 			Completed:     meta.Completed,
 			LastAccessed:  meta.LastAccessTime,
-			Expires:       meta.Expires,
+			Expires:       expires,
 			IsInline:      meta.IsInline(),
 		},
 		NamespaceID:   uint16(meta.NamespaceID),
@@ -1697,6 +1707,20 @@ func (pc *PersistentCache) introspectStatsHandler(c *gin.Context) {
 		for k, v := range usage {
 			key := fmt.Sprintf("s%d:ns%d", k.StorageID, k.NamespaceID)
 			stats.UsageCounters[key] = v
+		}
+	}
+
+	// Populate human-readable mappings for storage directories and namespaces.
+	if mappings, err := pc.db.LoadDiskMappings(); err == nil && len(mappings) > 0 {
+		stats.DirPaths = make(map[uint8]string, len(mappings))
+		for _, dm := range mappings {
+			stats.DirPaths[uint8(dm.ID)] = dm.Directory
+		}
+	}
+	if nsMappings, _, err := pc.db.LoadNamespaceMappings(); err == nil && len(nsMappings) > 0 {
+		stats.NamespaceNames = make(map[uint32]string, len(nsMappings))
+		for prefix, id := range nsMappings {
+			stats.NamespaceNames[uint32(id)] = prefix
 		}
 	}
 

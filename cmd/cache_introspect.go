@@ -195,6 +195,7 @@ Example:
 	introspectToken        string
 	introspectMetadataOnly bool
 	introspectDataOnly     bool
+	introspectWide         bool
 )
 
 func init() {
@@ -224,6 +225,7 @@ func init() {
 
 	// List specific flags
 	cacheIntrospectListCmd.Flags().IntVar(&introspectLimit, "limit", 100, "Maximum number of objects to list")
+	cacheIntrospectListCmd.Flags().BoolVarP(&introspectWide, "wide", "w", false, "Never truncate URLs or ETags in table output")
 
 	// Consistency specific flags
 	cacheIntrospectConsistencyCmd.Flags().BoolVar(&introspectMetadataOnly, "metadata-only", false, "Run only the metadata scan (skip data scan)")
@@ -403,8 +405,62 @@ func openIntrospectAPI() (*local_cache.IntrospectAPIOpen, error) {
 	return local_cache.NewIntrospectAPI(cacheDir)
 }
 
+// resolveObjectURL resolves a glob or partial URL to a full cached object URL.
+// If the argument looks like a full pelican:// or osdf:// URL, it is returned
+// unchanged.  Otherwise it is treated as a pattern (glob or substring) and the
+// first matching cached object's SourceURL is returned.
+func resolveObjectURL(arg string) (string, error) {
+	// Full URL — no resolution needed.
+	if strings.HasPrefix(arg, "pelican://") || strings.HasPrefix(arg, "osdf://") {
+		return arg, nil
+	}
+	// Bare absolute path (e.g. /data/file.dat) without glob chars — treat as
+	// a literal URL that the caller already knows.
+	if strings.HasPrefix(arg, "/") && !strings.ContainsAny(arg, "*?[") {
+		return arg, nil
+	}
+
+	// Glob or partial string — resolve via listing with limit=1.
+	if serverURL := useOnlineMode(); serverURL != "" {
+		query := url.Values{"limit": {"1"}, "pattern": {arg}}
+		body, err := introspectHTTPGet(serverURL, "/api/v1.0/cache/introspect/list", query)
+		if err != nil {
+			return "", errors.Wrap(err, "failed to resolve pattern via online list")
+		}
+		var instances []local_cache.ObjectInstance
+		if err := json.Unmarshal(body, &instances); err != nil {
+			return "", errors.Wrap(err, "failed to parse list response")
+		}
+		if len(instances) == 0 {
+			return "", errors.Errorf("no cached objects match %q", arg)
+		}
+		fmt.Fprintf(os.Stderr, "Matched: %s\n", instances[0].SourceURL)
+		return instances[0].SourceURL, nil
+	}
+
+	// Offline mode.
+	api, err := openIntrospectAPI()
+	if err != nil {
+		return "", err
+	}
+	defer api.Close()
+
+	instances, err := api.ListAllObjects(1, arg)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to resolve pattern via offline list")
+	}
+	if len(instances) == 0 {
+		return "", errors.Errorf("no cached objects match %q", arg)
+	}
+	fmt.Fprintf(os.Stderr, "Matched: %s\n", instances[0].SourceURL)
+	return instances[0].SourceURL, nil
+}
+
 func runCacheIntrospectEtags(cmd *cobra.Command, args []string) error {
-	objectURL := args[0]
+	objectURL, err := resolveObjectURL(args[0])
+	if err != nil {
+		return err
+	}
 
 	// Try online mode first
 	if serverURL := useOnlineMode(); serverURL != "" {
@@ -480,13 +536,23 @@ func printEtags(instances []local_cache.ObjectInstance) error {
 }
 
 func runCacheIntrospectMetadata(cmd *cobra.Command, args []string) error {
+	// Resolve glob/partial URLs before choosing online vs offline.
+	var resolvedURL string
+	if introspectInstance == "" && len(args) > 0 {
+		var err error
+		resolvedURL, err = resolveObjectURL(args[0])
+		if err != nil {
+			return err
+		}
+	}
+
 	// Try online mode first
 	if serverURL := useOnlineMode(); serverURL != "" {
 		query := url.Values{}
 		if introspectInstance != "" {
 			query.Set("instance", introspectInstance)
-		} else if len(args) > 0 {
-			query.Set("url", args[0])
+		} else if resolvedURL != "" {
+			query.Set("url", resolvedURL)
 			if introspectEtag != "" {
 				query.Set("etag", introspectEtag)
 			}
@@ -515,8 +581,8 @@ func runCacheIntrospectMetadata(cmd *cobra.Command, args []string) error {
 
 	if introspectInstance != "" {
 		details, err = api.GetObjectDetails(introspectInstance)
-	} else if len(args) > 0 {
-		details, err = api.GetObjectDetailsByURL(args[0], introspectEtag)
+	} else if resolvedURL != "" {
+		details, err = api.GetObjectDetailsByURL(resolvedURL, introspectEtag)
 	} else {
 		return errors.New("either <object-url> or --instance is required")
 	}
@@ -549,19 +615,19 @@ func printMetadata(details *local_cache.ObjectDetails) error {
 	fmt.Printf("Namespace ID:  %d\n", details.NamespaceID)
 
 	if !details.LastModified.IsZero() {
-		fmt.Printf("Last-Modified: %s\n", details.LastModified.Format(time.RFC3339))
+		fmt.Printf("Last-Modified: %s\n", formatTimestamp(details.LastModified))
 	}
 	if !details.LastValidated.IsZero() {
-		fmt.Printf("Last Validated: %s\n", details.LastValidated.Format(time.RFC3339))
+		fmt.Printf("Last Validated: %s\n", formatTimestamp(details.LastValidated))
 	}
 	if !details.Completed.IsZero() {
-		fmt.Printf("Completed:     %s\n", details.Completed.Format(time.RFC3339))
+		fmt.Printf("Completed:     %s\n", formatTimestamp(details.Completed))
 	}
 	if !details.LastAccessed.IsZero() {
-		fmt.Printf("Last Accessed: %s\n", details.LastAccessed.Format(time.RFC3339))
+		fmt.Printf("Last Accessed: %s\n", formatTimestamp(details.LastAccessed))
 	}
 	if !details.Expires.IsZero() {
-		fmt.Printf("Expires:       %s\n", details.Expires.Format(time.RFC3339))
+		fmt.Printf("Expires:       %s\n", formatTimestamp(details.Expires))
 	}
 	if details.CacheControl != "" {
 		fmt.Printf("Cache-Control: %s\n", details.CacheControl)
@@ -609,13 +675,23 @@ func printMetadata(details *local_cache.ObjectDetails) error {
 }
 
 func runCacheIntrospectVerify(cmd *cobra.Command, args []string) error {
+	// Resolve glob/partial URLs before choosing online vs offline.
+	var resolvedURL string
+	if introspectInstance == "" && len(args) > 0 {
+		var err error
+		resolvedURL, err = resolveObjectURL(args[0])
+		if err != nil {
+			return err
+		}
+	}
+
 	// Try online mode first
 	if serverURL := useOnlineMode(); serverURL != "" {
 		query := url.Values{}
 		if introspectInstance != "" {
 			query.Set("instance", introspectInstance)
-		} else if len(args) > 0 {
-			query.Set("url", args[0])
+		} else if resolvedURL != "" {
+			query.Set("url", resolvedURL)
 			if introspectEtag != "" {
 				query.Set("etag", introspectEtag)
 			}
@@ -644,8 +720,8 @@ func runCacheIntrospectVerify(cmd *cobra.Command, args []string) error {
 
 	if introspectInstance != "" {
 		result, err = api.VerifyChecksum(introspectInstance)
-	} else if len(args) > 0 {
-		result, err = api.VerifyChecksumByURL(args[0], introspectEtag)
+	} else if resolvedURL != "" {
+		result, err = api.VerifyChecksumByURL(resolvedURL, introspectEtag)
 	} else {
 		return errors.New("either <object-url> or --instance is required")
 	}
@@ -753,8 +829,18 @@ func printList(instances []local_cache.ObjectInstance) error {
 		if inst.IsInline {
 			storage = "inline"
 		}
+		sourceURL := truncateURL(inst.SourceURL, 60)
+		etag := truncateETag(inst.ETag, 12)
+		if introspectWide {
+			sourceURL = inst.SourceURL
+			if inst.ETag == "" {
+				etag = "(none)"
+			} else {
+				etag = inst.ETag
+			}
+		}
 		fmt.Fprintf(w, "%s\t%d\t%s\t%s\n",
-			truncateURL(inst.SourceURL, 60), inst.ContentLength, truncateETag(inst.ETag, 12), storage)
+			sourceURL, inst.ContentLength, etag, storage)
 	}
 	w.Flush()
 
@@ -1184,4 +1270,20 @@ func storageType(isInline bool) string {
 		return "inline (BadgerDB)"
 	}
 	return "disk (encrypted files)"
+}
+
+// formatTimestamp formats a time as RFC3339 with a parenthetical relative
+// duration, e.g. "2026-03-19T15:31:37Z (21h22m37s ago)" or
+// "2026-03-20T15:00:00Z (1h8m0s from now)".
+func formatTimestamp(t time.Time) string {
+	d := time.Until(t)
+	rel := d.Abs().Truncate(time.Second).String()
+
+	if d < 0 {
+		rel += " ago"
+	} else {
+		rel += " from now"
+	}
+
+	return fmt.Sprintf("%s (%s)", t.Format(time.RFC3339), rel)
 }
