@@ -947,8 +947,8 @@ func (pc *PersistentCache) invalidateCachedObject(objectPath, newETag string) {
 	}
 
 	// Look up the latest ETag for this object
-	oldETag, err := pc.db.GetLatestETag(objectHash)
-	if err != nil || oldETag == "" {
+	oldETag, found, err := pc.db.GetLatestETag(objectHash)
+	if err != nil || !found {
 		// Not in cache — nothing to invalidate.
 		// If the origin gave us a new ETag, record it so the next GET
 		// knows which instance to look for.
@@ -1214,9 +1214,12 @@ func (pc *PersistentCache) MarkPurgeFirst(objectPath string) error {
 	objectHash := pc.db.ObjectHash(pelicanURL)
 
 	// Look up latest ETag for this object
-	etag, err := pc.db.GetLatestETag(objectHash)
+	etag, found, err := pc.db.GetLatestETag(objectHash)
 	if err != nil {
 		return errors.Wrap(err, "failed to look up ETag")
+	}
+	if !found {
+		return errors.New("object not in cache")
 	}
 
 	// Compute file hash
@@ -1363,36 +1366,21 @@ func (pc *PersistentCache) RegisterCacheHandlers(engine *gin.Engine, directorEna
 	return nil
 }
 
-// introspectListHandler returns a list of all cached objects.
+// introspectListHandler returns a list of cached objects, optionally filtered.
 //
-// GET /api/v1.0/cache/introspect/list?limit=100
+// GET /api/v1.0/cache/introspect/list?limit=100&pattern=*.bin
 func (pc *PersistentCache) introspectListHandler(c *gin.Context) {
 	limitStr := c.DefaultQuery("limit", "100")
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil || limit <= 0 {
 		limit = 100
 	}
+	pattern := c.Query("pattern")
 
-	var instances []ObjectInstance
-	scanErr := pc.db.ScanMetadata(func(instanceHash InstanceHash, meta *CacheMetadata) error {
-		if len(instances) >= limit {
-			return errors.New("limit reached")
-		}
-		instances = append(instances, ObjectInstance{
-			InstanceHash:  string(instanceHash),
-			ETag:          meta.ETag,
-			SourceURL:     meta.SourceURL,
-			ContentLength: meta.ContentLength,
-			ContentType:   meta.ContentType,
-			LastModified:  meta.LastModified,
-			Completed:     meta.Completed,
-			LastAccessed:  meta.LastAccessTime,
-			IsInline:      meta.IsInline(),
-		})
-		return nil
-	})
-	if scanErr != nil && scanErr.Error() != "limit reached" {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": scanErr.Error()})
+	api := &IntrospectAPIOpen{db: pc.db, storage: pc.storage}
+	instances, listErr := api.ListAllObjects(limit, pattern)
+	if listErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": listErr.Error()})
 		return
 	}
 
@@ -1416,7 +1404,7 @@ func (pc *PersistentCache) introspectEtagsHandler(c *gin.Context) {
 	}
 
 	objectHash := pc.db.ObjectHash(normalized)
-	latestETag, _ := pc.db.GetLatestETag(objectHash)
+	latestETag, _, _ := pc.db.GetLatestETag(objectHash)
 
 	var instances []ObjectInstance
 	scanErr := pc.db.ScanMetadata(func(instanceHash InstanceHash, meta *CacheMetadata) error {
@@ -1469,9 +1457,10 @@ func (pc *PersistentCache) introspectMetadataHandler(c *gin.Context) {
 		objectHash := pc.db.ObjectHash(normalized)
 		etag := c.Query("etag")
 		if etag == "" {
+			var found bool
 			var err error
-			etag, err = pc.db.GetLatestETag(objectHash)
-			if err != nil || etag == "" {
+			etag, found, err = pc.db.GetLatestETag(objectHash)
+			if err != nil || !found {
 				c.JSON(http.StatusNotFound, gin.H{"error": "no cached version found for this object"})
 				return
 			}
@@ -1496,12 +1485,12 @@ func (pc *PersistentCache) introspectMetadataHandler(c *gin.Context) {
 			LastModified:  meta.LastModified,
 			Completed:     meta.Completed,
 			LastAccessed:  meta.LastAccessTime,
+			Expires:       meta.Expires,
 			IsInline:      meta.IsInline(),
 		},
 		NamespaceID:   uint16(meta.NamespaceID),
 		StorageID:     uint8(meta.StorageID),
 		LastValidated: meta.LastValidated,
-		Expires:       meta.Expires,
 	}
 
 	cc := meta.GetCacheDirectives()
@@ -1541,7 +1530,7 @@ func (pc *PersistentCache) introspectMetadataHandler(c *gin.Context) {
 	}
 
 	objectHash := pc.db.ObjectHash(meta.SourceURL)
-	latestETag, _ := pc.db.GetLatestETag(objectHash)
+	latestETag, _, _ := pc.db.GetLatestETag(objectHash)
 	details.IsLatest = meta.ETag == latestETag
 
 	c.JSON(http.StatusOK, details)
@@ -1569,9 +1558,10 @@ func (pc *PersistentCache) introspectVerifyHandler(c *gin.Context) {
 		objectHash := pc.db.ObjectHash(normalized)
 		etag := c.Query("etag")
 		if etag == "" {
+			var found bool
 			var err error
-			etag, err = pc.db.GetLatestETag(objectHash)
-			if err != nil || etag == "" {
+			etag, found, err = pc.db.GetLatestETag(objectHash)
+			if err != nil || !found {
 				c.JSON(http.StatusNotFound, gin.H{"error": "no cached version found for this object"})
 				return
 			}
@@ -1759,9 +1749,24 @@ func (pc *PersistentCache) introspectDiskUsageHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
-// introspectConsistencyHandler triggers a consistency check and returns results.
+// introspectConsistencyHandler triggers a consistency check and streams
+// progress via Server-Sent Events (SSE).
 //
 // POST /api/v1.0/cache/introspect/consistency?metadata=true&data=true
+//
+// The response is a stream of SSE events:
+//
+//	event: metadata_progress / data_progress
+//	data: {"phase":"metadata","percent_complete":42.5,...}
+//
+//	event: metadata_done / data_done
+//	data: {"phase":"metadata","percent_complete":100,...}
+//
+//	event: done
+//	data: {"metadata_scan_ran":true,...}   (ConsistencyCheckResult JSON)
+//
+//	event: error
+//	data: {"message":"..."}
 func (pc *PersistentCache) introspectConsistencyHandler(c *gin.Context) {
 	metadataScan := c.DefaultQuery("metadata", "true") == "true"
 	dataScan := c.DefaultQuery("data", "true") == "true"
@@ -1771,35 +1776,93 @@ func (pc *PersistentCache) introspectConsistencyHandler(c *gin.Context) {
 		return
 	}
 
+	// Set SSE headers before writing any data.
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no") // Disable nginx buffering
+	c.Writer.WriteHeader(http.StatusOK)
+
+	// Progress channel — scans write updates here; we stream them below.
+	progressCh := make(chan ScanProgressEvent, 16)
+
 	start := time.Now()
 	result := &ConsistencyCheckResult{}
 
-	if metadataScan {
-		if err := pc.consistency.RunMetadataScan(c.Request.Context()); err != nil {
-			result.Error = fmt.Sprintf("metadata scan failed: %v", err)
-		}
-		result.MetadataScanRan = true
-	}
+	// Run scans on a background goroutine so we can stream progress to
+	// the client without blocking.
+	go func() {
+		defer close(progressCh)
 
-	if dataScan {
-		if err := pc.consistency.RunDataScan(c.Request.Context()); err != nil {
-			if result.Error != "" {
-				result.Error += "; "
+		if metadataScan {
+			if err := pc.consistency.RunMetadataScan(c.Request.Context(), progressCh); err != nil {
+				result.Error = fmt.Sprintf("metadata scan failed: %v", err)
 			}
-			result.Error += fmt.Sprintf("data scan failed: %v", err)
+			result.MetadataScanRan = true
+			// Send the "phase done" event.
+			select {
+			case progressCh <- ScanProgressEvent{Phase: "metadata", PercentComplete: 100, Message: "metadata scan complete"}:
+			case <-c.Request.Context().Done():
+				return
+			}
 		}
-		result.DataScanRan = true
+
+		if dataScan {
+			if err := pc.consistency.RunDataScan(c.Request.Context(), progressCh); err != nil {
+				if result.Error != "" {
+					result.Error += "; "
+				}
+				result.Error += fmt.Sprintf("data scan failed: %v", err)
+			}
+			result.DataScanRan = true
+			select {
+			case progressCh <- ScanProgressEvent{Phase: "data", PercentComplete: 100, Message: "data scan complete"}:
+			case <-c.Request.Context().Done():
+				return
+			}
+		}
+	}()
+
+	ctx := c.Request.Context()
+	flusher, canFlush := c.Writer.(http.Flusher)
+
+	// Stream events as they arrive.
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case evt, ok := <-progressCh:
+			if !ok {
+				// Channel closed — scans finished. Send final result.
+				stats := pc.consistency.GetStats()
+				result.OrphanedFiles = stats.OrphanedFiles
+				result.OrphanedDBEntries = stats.OrphanedDBEntries
+				result.ChecksumMismatches = stats.ChecksumMismatches
+				result.BytesVerified = stats.BytesVerified
+				result.ObjectsVerified = stats.ObjectsVerified
+				result.MetadataScanErrors = stats.MetadataScanErrors
+				result.DataScanErrors = stats.DataScanErrors
+				result.Duration = time.Since(start).String()
+
+				data, _ := json.Marshal(result)
+				fmt.Fprintf(c.Writer, "event: done\ndata: %s\n\n", data)
+				if canFlush {
+					flusher.Flush()
+				}
+				return
+			}
+
+			// Determine SSE event name from progress phase.
+			eventName := evt.Phase + "_progress"
+			if evt.PercentComplete >= 100 {
+				eventName = evt.Phase + "_done"
+			}
+
+			data, _ := json.Marshal(evt)
+			fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", eventName, data)
+			if canFlush {
+				flusher.Flush()
+			}
+		}
 	}
-
-	stats := pc.consistency.GetStats()
-	result.OrphanedFiles = stats.OrphanedFiles
-	result.OrphanedDBEntries = stats.OrphanedDBEntries
-	result.ChecksumMismatches = stats.ChecksumMismatches
-	result.BytesVerified = stats.BytesVerified
-	result.ObjectsVerified = stats.ObjectsVerified
-	result.MetadataScanErrors = stats.MetadataScanErrors
-	result.DataScanErrors = stats.DataScanErrors
-	result.Duration = time.Since(start).String()
-
-	c.JSON(http.StatusOK, result)
 }

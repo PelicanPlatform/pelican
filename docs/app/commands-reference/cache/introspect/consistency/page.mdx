@@ -1,40 +1,37 @@
 ---
-title: pelican cache introspect list
+title: pelican cache introspect consistency
 ---
 
-## pelican cache introspect list
+## pelican cache introspect consistency
 
-List cached objects
+Run a cache consistency check
 
 ### Synopsis
 
-List objects currently in the cache, optionally filtered by a glob pattern.
+Trigger a consistency check between the database and disk.
 
-The pattern is matched against the source URL of each cached object.
-Standard glob syntax is supported: * matches any sequence of non-/
-characters, ** matches everything including slashes, and ? matches
-a single character.
+By default runs both a metadata scan (cross-references DB entries with
+disk files to find orphans) and a data scan (reads and verifies checksums).
+Use --metadata-only or --data-only to run only one scan type.
 
-If no pattern is given, all objects are listed.
+The data scan is expensive as it reads and checksums every cached file.
 
-Warning: For large caches, this may return many results. Use --limit
-to restrict the number of entries returned.
-
-Examples:
-  pelican cache introspect list
-  pelican cache introspect list '/chtc/staging/**'
-  pelican cache introspect list '*.bin'
-  pelican cache introspect list --limit=50 'pelican://origin.example.com/data/*'
+Example:
+  pelican cache introspect consistency
+  pelican cache introspect consistency --metadata-only
+  pelican cache introspect consistency --data-only
+  pelican cache introspect consistency --json
 
 ```
-pelican cache introspect list [pattern] [flags]
+pelican cache introspect consistency [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help        help for list
-      --limit int   Maximum number of objects to list (default 100)
+      --data-only       Run only the data scan (skip metadata scan)
+  -h, --help            help for consistency
+      --metadata-only   Run only the metadata scan (skip data scan)
 ```
 
 ### Options inherited from parent commands

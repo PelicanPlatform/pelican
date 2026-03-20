@@ -41,6 +41,7 @@ type ObjectInstance struct {
 	LastModified  time.Time `json:"last_modified,omitempty"`
 	Completed     time.Time `json:"completed,omitempty"`
 	LastAccessed  time.Time `json:"last_accessed,omitempty"`
+	Expires       time.Time `json:"expires,omitempty"`
 	IsLatest      bool      `json:"is_latest"` // True if this is the latest ETag
 	IsInline      bool      `json:"is_inline"` // True if stored inline in database
 }
@@ -62,7 +63,6 @@ type ObjectDetails struct {
 	NamespaceID   uint16            `json:"namespace_id"`
 	StorageID     uint8             `json:"storage_id"`
 	LastValidated time.Time         `json:"last_validated,omitempty"`
-	Expires       time.Time         `json:"expires,omitempty"`
 	CacheControl  string            `json:"cache_control,omitempty"`
 	Checksums     []ChecksumInfo    `json:"checksums,omitempty"`
 	BlockSummary  *BlockSummary     `json:"block_summary,omitempty"` // nil for inline storage
@@ -106,6 +106,8 @@ type CacheStats struct {
 	TotalBytesMetadata   int64                       `json:"total_bytes_metadata"`     // Sum of ContentLength from metadata entries
 	UsageCounters        map[string]int64            `json:"usage_counters,omitempty"` // Pre-computed usage from u: prefix keys
 	StorageBreakdown     map[string]*StorageDirStats `json:"storage_breakdown,omitempty"`
+	DirPaths             map[uint8]string            `json:"dir_paths,omitempty"`       // StorageID → directory path
+	NamespaceNames       map[uint32]string           `json:"namespace_names,omitempty"` // NamespaceID → prefix string
 }
 
 // StorageDirStats holds per-storage-directory statistics.
@@ -148,6 +150,37 @@ type ConsistencyCheckResult struct {
 	DataScanErrors     int64  `json:"data_scan_errors"`
 	Duration           string `json:"duration"`
 	Error              string `json:"error,omitempty"`
+}
+
+// ScanProgressEvent is sent as an SSE event to report scan progress.
+// The Event field (used as SSE event type) is one of:
+//   - "metadata_progress": periodic update during the metadata scan
+//   - "metadata_done": the metadata scan has finished
+//   - "data_progress": periodic update during the data scan
+//   - "data_done": the data scan has finished
+//   - "error": an error occurred
+//   - "done": all scans complete; the Data field is a ConsistencyCheckResult
+type ScanProgressEvent struct {
+	// Phase is the scan phase: "metadata" or "data".
+	Phase string `json:"phase"`
+
+	// PercentComplete is the estimated completion (0–100).
+	PercentComplete float64 `json:"percent_complete"`
+
+	// DBEntriesScanned is the number of DB entries processed so far (metadata only).
+	DBEntriesScanned int64 `json:"db_entries_scanned,omitempty"`
+
+	// FilesScanned is the number of filesystem entries processed (metadata only).
+	FilesScanned int64 `json:"files_scanned,omitempty"`
+
+	// ObjectsVerified is the number of objects checksummed so far (data only).
+	ObjectsVerified int64 `json:"objects_verified,omitempty"`
+
+	// BytesVerified is the total bytes read for checksumming (data only).
+	BytesVerified int64 `json:"bytes_verified,omitempty"`
+
+	// Message is a human-readable status line.
+	Message string `json:"message,omitempty"`
 }
 
 // IntrospectAPIOpen provides read-only introspection access to the cache database.
@@ -210,7 +243,7 @@ func (api *IntrospectAPIOpen) ListObjectInstances(objectURL string) ([]ObjectIns
 	objectHash := api.db.ObjectHash(normalized)
 
 	// Get the latest ETag for this object
-	latestETag, err := api.db.GetLatestETag(objectHash)
+	latestETag, _, err := api.db.GetLatestETag(objectHash)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get latest ETag")
 	}
@@ -236,6 +269,7 @@ func (api *IntrospectAPIOpen) ListObjectInstances(objectURL string) ([]ObjectIns
 			LastModified:  meta.LastModified,
 			Completed:     meta.Completed,
 			LastAccessed:  meta.LastAccessTime,
+			Expires:       meta.Expires,
 			IsLatest:      meta.ETag == latestETag,
 			IsInline:      meta.IsInline(),
 		}
@@ -278,12 +312,12 @@ func (api *IntrospectAPIOpen) GetObjectDetails(instanceHash string) (*ObjectDeta
 			LastModified:  meta.LastModified,
 			Completed:     meta.Completed,
 			LastAccessed:  meta.LastAccessTime,
+			Expires:       meta.Expires,
 			IsInline:      meta.IsInline(),
 		},
 		NamespaceID:   uint16(meta.NamespaceID),
 		StorageID:     uint8(meta.StorageID),
 		LastValidated: meta.LastValidated,
-		Expires:       meta.Expires,
 	}
 
 	// Extract cache-control as string
@@ -331,7 +365,7 @@ func (api *IntrospectAPIOpen) GetObjectDetails(instanceHash string) (*ObjectDeta
 
 	// Check if this is the latest version
 	objectHash := api.db.ObjectHash(meta.SourceURL)
-	latestETag, _ := api.db.GetLatestETag(objectHash)
+	latestETag, _, _ := api.db.GetLatestETag(objectHash)
 	details.IsLatest = meta.ETag == latestETag
 
 	return details, nil
@@ -349,12 +383,13 @@ func (api *IntrospectAPIOpen) GetObjectDetailsByURL(objectURL, etag string) (*Ob
 
 	// If no ETag specified, get the latest
 	if etag == "" {
+		var found bool
 		var err error
-		etag, err = api.db.GetLatestETag(objectHash)
+		etag, found, err = api.db.GetLatestETag(objectHash)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to get latest ETag")
 		}
-		if etag == "" {
+		if !found {
 			return nil, errors.New("no cached version found for this object")
 		}
 	}
@@ -433,12 +468,13 @@ func (api *IntrospectAPIOpen) VerifyChecksumByURL(objectURL, etag string) (*Veri
 	objectHash := api.db.ObjectHash(normalized)
 
 	if etag == "" {
+		var found bool
 		var err error
-		etag, err = api.db.GetLatestETag(objectHash)
+		etag, found, err = api.db.GetLatestETag(objectHash)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to get latest ETag")
 		}
-		if etag == "" {
+		if !found {
 			return nil, errors.New("no cached version found for this object")
 		}
 	}
@@ -483,15 +519,65 @@ func (api *IntrospectAPIOpen) getBlockSummary(instanceHash InstanceHash, content
 
 // ListAllObjects returns a summary of all cached objects.
 // This can be slow for large caches; consider using pagination in production.
-func (api *IntrospectAPIOpen) ListAllObjects(limit int) ([]ObjectInstance, error) {
+func (api *IntrospectAPIOpen) ListAllObjects(limit int, pattern string) ([]ObjectInstance, error) {
 	if limit <= 0 {
 		limit = 1000 // Default limit
 	}
+
+	// If pattern contains no glob metacharacters, treat it as a substring
+	// match (simpler and faster for plain URL fragments).  Otherwise use
+	// filepath.Match-style glob matching.  Double-star ("**") is expanded
+	// to match across path separators.
+	isGlob := strings.ContainsAny(pattern, "*?[")
 
 	var instances []ObjectInstance
 	err := api.db.ScanMetadata(func(instanceHash InstanceHash, meta *CacheMetadata) error {
 		if len(instances) >= limit {
 			return errors.New("limit reached") // Stop scanning
+		}
+
+		if pattern != "" {
+			if isGlob {
+				// Replace ** with a sentinel, match each path segment with *,
+				// and restore.  filepath.Match does not support **.
+				p := strings.ReplaceAll(pattern, "**", "\x00")
+				// If the pattern has no \x00 (no **), use filepath.Match directly.
+				if !strings.Contains(p, "\x00") {
+					matched, _ := filepath.Match(pattern, meta.SourceURL)
+					if !matched {
+						return nil
+					}
+				} else {
+					// Simple ** support: split on \x00 and check that all
+					// literal parts appear in order in the URL.
+					parts := strings.Split(p, "\x00")
+					remaining := meta.SourceURL
+					ok := true
+					for i, part := range parts {
+						if part == "" {
+							continue
+						}
+						idx := strings.Index(remaining, part)
+						if idx < 0 {
+							ok = false
+							break
+						}
+						if i == 0 && !strings.HasPrefix(pattern, "**") && idx != 0 {
+							ok = false
+							break
+						}
+						remaining = remaining[idx+len(part):]
+					}
+					if !ok {
+						return nil
+					}
+					if !strings.HasSuffix(pattern, "**") && remaining != "" {
+						return nil
+					}
+				}
+			} else if !strings.Contains(meta.SourceURL, pattern) {
+				return nil
+			}
 		}
 
 		instance := ObjectInstance{
@@ -503,6 +589,7 @@ func (api *IntrospectAPIOpen) ListAllObjects(limit int) ([]ObjectInstance, error
 			LastModified:  meta.LastModified,
 			Completed:     meta.Completed,
 			LastAccessed:  meta.LastAccessTime,
+			Expires:       meta.Expires,
 			IsInline:      meta.IsInline(),
 		}
 		instances = append(instances, instance)
@@ -564,6 +651,20 @@ func (api *IntrospectAPIOpen) GetCacheStats() (*CacheStats, error) {
 		for k, v := range usage {
 			key := fmt.Sprintf("s%d:ns%d", k.StorageID, k.NamespaceID)
 			stats.UsageCounters[key] = v
+		}
+	}
+
+	// Populate human-readable mappings for storage dirs and namespaces.
+	if mappings, err := api.db.LoadDiskMappings(); err == nil && len(mappings) > 0 {
+		stats.DirPaths = make(map[uint8]string, len(mappings))
+		for _, dm := range mappings {
+			stats.DirPaths[uint8(dm.ID)] = dm.Directory
+		}
+	}
+	if nsMappings, _, err := api.db.LoadNamespaceMappings(); err == nil && len(nsMappings) > 0 {
+		stats.NamespaceNames = make(map[uint32]string, len(nsMappings))
+		for prefix, id := range nsMappings {
+			stats.NamespaceNames[uint32(id)] = prefix
 		}
 	}
 
@@ -629,14 +730,14 @@ func (api *IntrospectAPIOpen) RunConsistencyCheck(ctx context.Context, metadataS
 	})
 
 	if metadataScan {
-		if err := checker.RunMetadataScan(ctx); err != nil {
+		if err := checker.RunMetadataScan(ctx, nil); err != nil {
 			result.Error = fmt.Sprintf("metadata scan failed: %v", err)
 		}
 		result.MetadataScanRan = true
 	}
 
 	if dataScan {
-		if err := checker.RunDataScan(ctx); err != nil {
+		if err := checker.RunDataScan(ctx, nil); err != nil {
 			if result.Error != "" {
 				result.Error += "; "
 			}
