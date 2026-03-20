@@ -1,0 +1,47 @@
+---
+title: pelican cache introspect stats
+---
+
+## pelican cache introspect stats
+
+Show cache size statistics
+
+### Synopsis
+
+Display aggregate size statistics about the cache.
+
+Shows total inline bytes stored in BadgerDB, total number of metadata
+entries, total bytes claimed by metadata, and per-storage-directory
+breakdown. This is a cheap operation that only scans metadata.
+
+Example:
+  pelican cache introspect stats
+  pelican cache introspect stats --json
+
+```
+pelican cache introspect stats [flags]
+```
+
+### Options
+
+```
+  -h, --help   help for stats
+```
+
+### Options inherited from parent commands
+
+```
+      --cache-dir string    Override cache directory (default: from config)
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                Output in JSON format
+  -L, --log string          Specified log output file
+      --offline             Force offline mode (direct database access). By default, if the cache is running, queries go to the live service.
+  -t, --token string        Path to admin token file (online mode only; auto-generated if not provided)
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican cache introspect](/commands-reference/cache/introspect/)	 - Introspect the cache's persistent database

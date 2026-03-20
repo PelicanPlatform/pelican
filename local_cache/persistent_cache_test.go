@@ -32,17 +32,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
-
-	"github.com/dgraph-io/badger/v4"
 )
 
-// seedUsage is a test helper to directly write a usage delta to the DB
-// without going through the production AddUsage API (which was removed
-// to prevent double-counting).
+// seedUsage is a test helper to directly set a usage value in the DB
+// via the MergeOperator-backed AddUsage API.
 func seedUsage(db *CacheDB, storageID StorageID, namespaceID NamespaceID, delta int64) error {
-	return db.db.Update(func(txn *badger.Txn) error {
-		return addUsageInTxn(txn, storageID, namespaceID, delta)
-	})
+	return db.AddUsage(storageID, namespaceID, delta)
 }
 
 func TestComputeInstanceHash(t *testing.T) {
@@ -1028,7 +1023,7 @@ func TestEvictionManager(t *testing.T) {
 	require.NoError(t, eviction.RecordAccess("instance_hash_1"))
 	require.NoError(t, eviction.RecordAccess("instance_hash_2"))
 
-	// Test adding usage — seed via addUsageInTxn (the DB-level helper)
+	// Test adding usage via AddUsage (MergeOperator-backed)
 	require.NoError(t, seedUsage(db, StorageIDFirstDisk, 1, 100000))
 	require.NoError(t, seedUsage(db, StorageIDFirstDisk, 2, 200000))
 
@@ -1163,7 +1158,7 @@ func TestConsistencyChecker_MetadataScan(t *testing.T) {
 	require.NoError(t, err)
 
 	// Run metadata scan
-	err = checker.RunMetadataScan(ctx)
+	err = checker.RunMetadataScan(ctx, nil)
 	require.NoError(t, err)
 
 	// Check stats
@@ -1245,7 +1240,7 @@ func TestConsistencyChecker_InlineStorage(t *testing.T) {
 	// Note: not storing inline data, so it's orphaned
 
 	// Run metadata scan
-	err = checker.RunMetadataScan(ctx)
+	err = checker.RunMetadataScan(ctx, nil)
 	require.NoError(t, err)
 
 	// Check stats
@@ -1341,7 +1336,7 @@ func TestConsistencyChecker_OrphanCleanup(t *testing.T) {
 	// Run metadata scan
 	// Note: With only 100 entries, it likely won't restart transactions,
 	// but the code path is exercised and tested
-	err = checker.RunMetadataScan(ctx)
+	err = checker.RunMetadataScan(ctx, nil)
 	require.NoError(t, err)
 
 	// Verify results
@@ -1443,7 +1438,7 @@ func TestConsistencyChecker_UsageReconciliation(t *testing.T) {
 		DataScanBytesPerSec:  100 * 1024 * 1024,
 		MinAgeForCleanup:     0,
 	})
-	require.NoError(t, checker.RunMetadataScan(ctx))
+	require.NoError(t, checker.RunMetadataScan(ctx, nil))
 
 	corrected, err := db.GetUsage(diskID, nsID)
 	require.NoError(t, err)
@@ -1453,7 +1448,7 @@ func TestConsistencyChecker_UsageReconciliation(t *testing.T) {
 	deflated := expectedUsage / 2 // 50 % under, far beyond 5 %
 	require.NoError(t, db.SetUsage(diskID, nsID, deflated))
 
-	require.NoError(t, checker.RunMetadataScan(ctx))
+	require.NoError(t, checker.RunMetadataScan(ctx, nil))
 
 	corrected, err = db.GetUsage(diskID, nsID)
 	require.NoError(t, err)
@@ -1463,7 +1458,7 @@ func TestConsistencyChecker_UsageReconciliation(t *testing.T) {
 	withinTolerance := expectedUsage + (expectedUsage * 4 / 100) // 4 % over, under 5 %
 	require.NoError(t, db.SetUsage(diskID, nsID, withinTolerance))
 
-	require.NoError(t, checker.RunMetadataScan(ctx))
+	require.NoError(t, checker.RunMetadataScan(ctx, nil))
 
 	// Should remain unchanged (within tolerance).
 	unchanged, err := db.GetUsage(diskID, nsID)
@@ -1666,7 +1661,7 @@ func TestDataScan_CorrectChecksum(t *testing.T) {
 		ChecksumTypes:        []ChecksumType{ChecksumSHA256},
 	})
 
-	require.NoError(t, checker.RunDataScan(ctx))
+	require.NoError(t, checker.RunDataScan(ctx, nil))
 
 	stats := checker.GetStats()
 	assert.Equal(t, int64(0), stats.ChecksumMismatches, "no mismatches expected")
@@ -1742,7 +1737,7 @@ func TestDataScan_WrongChecksum(t *testing.T) {
 		ChecksumTypes:        []ChecksumType{ChecksumSHA256},
 	})
 
-	require.NoError(t, checker.RunDataScan(ctx))
+	require.NoError(t, checker.RunDataScan(ctx, nil))
 
 	stats := checker.GetStats()
 	assert.Equal(t, int64(1), stats.ChecksumMismatches, "one mismatch expected")
@@ -1800,7 +1795,7 @@ func TestDataScan_MissingChecksum(t *testing.T) {
 		ChecksumTypes:        []ChecksumType{ChecksumSHA256},
 	})
 
-	require.NoError(t, checker.RunDataScan(ctx))
+	require.NoError(t, checker.RunDataScan(ctx, nil))
 
 	// After the scan, checksum should be calculated and stored.
 	meta, err = storage.GetMetadata(hash)
@@ -1976,7 +1971,7 @@ func TestMultiDirStoragePlacement(t *testing.T) {
 		MinAgeForCleanup:     0,
 	})
 
-	require.NoError(t, checker.RunMetadataScan(ctx))
+	require.NoError(t, checker.RunMetadataScan(ctx, nil))
 	checkStats := checker.GetStats()
 
 	// No orphans should be found.
