@@ -1361,6 +1361,7 @@ func (pc *PersistentCache) doInitObjectFromStat(
 	meta.NamespaceID = namespaceID
 	meta.ContentType = "application/octet-stream"
 	meta.LastValidated = time.Now()
+	meta.EnsureExpires()
 
 	// A zero-byte file has zero blocks — it is "fully downloaded"
 	// immediately.  Mark it complete so Age is returned right away.
@@ -2216,6 +2217,7 @@ func (w *decisionWriter) SetDiskMode(ctx context.Context, size int64) error {
 	meta.NamespaceID = w.dl.namespaceID
 	meta.ContentType = "application/octet-stream"
 	meta.LastValidated = time.Now()
+	meta.EnsureExpires()
 	w.diskMeta = meta
 
 	// Update metadata (merge with initial record created by InitDiskStorage)
@@ -2323,6 +2325,7 @@ func (w *decisionWriter) Finalize(dl *persistentDownload) error {
 			Checksums:     dl.checksums,
 		}
 		meta.SetCacheControl(dl.cacheControl)
+		meta.EnsureExpires()
 
 		if err := w.pc.storage.StoreInline(w.ctx, dl.instanceHash, meta, w.buffer); err != nil {
 			return errors.Wrap(err, "failed to store inline")
