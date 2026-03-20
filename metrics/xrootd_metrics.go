@@ -177,7 +177,7 @@ type (
 		SID  int64 // Provider identification
 	}
 
-	// Cache g-stream: https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm#_Toc138968526
+	// Cache g-stream: https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968524
 	CacheGS struct {
 		AccessCnt    uint32 `json:"access_cnt"`
 		AttachT      int64  `json:"attach_t"`
@@ -434,10 +434,10 @@ const (
 
 // Summary data types
 const (
-	LinkStat  SummaryStatType = "link"  // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653739
-	SchedStat SummaryStatType = "sched" // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653745
-	OssStat   SummaryStatType = "oss"   // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653741
-	CacheStat SummaryStatType = "cache" // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653733
+	LinkStat  SummaryStatType = "link"  // https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968503
+	SchedStat SummaryStatType = "sched" // https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968509
+	OssStat   SummaryStatType = "oss"   // https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968505
+	CacheStat SummaryStatType = "cache" // https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968497
 	ProcStat  SummaryStatType = "proc"  // https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968507
 )
 
