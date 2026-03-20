@@ -590,6 +590,32 @@ func (m *CacheMetadata) ResponseCacheControl() string {
 	return fmt.Sprintf("max-age=%d", seconds)
 }
 
+// ComputeExpires returns the absolute time at which this object expires.
+// It uses the origin-supplied max-age when available, otherwise the
+// configured default freshness policy.  The result is based on
+// LastValidated (or Completed if LastValidated is zero).
+func (m *CacheMetadata) ComputeExpires() time.Time {
+	base := m.LastValidated
+	if base.IsZero() {
+		base = m.Completed
+	}
+	if base.IsZero() {
+		return time.Time{}
+	}
+	if m.CCMaxAge > 0 {
+		return base.Add(time.Duration(m.CCMaxAge) * time.Second)
+	}
+	return base.Add(DefaultFreshness(base))
+}
+
+// EnsureExpires sets the Expires field if it is currently zero.
+// Call this after SetCacheControl and after LastValidated is set.
+func (m *CacheMetadata) EnsureExpires() {
+	if m.Expires.IsZero() {
+		m.Expires = m.ComputeExpires()
+	}
+}
+
 // DiskMapping stores the mapping of a storage ID to its directory path
 // and UUID.  The UUID file is dropped in the directory root so that
 // directories can be remounted at different paths and re-associated.

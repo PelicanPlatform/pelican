@@ -260,6 +260,11 @@ func (api *IntrospectAPIOpen) ListObjectInstances(objectURL string) ([]ObjectIns
 			}
 		}
 
+		expires := meta.Expires
+		if expires.IsZero() {
+			expires = meta.ComputeExpires()
+		}
+
 		instance := ObjectInstance{
 			InstanceHash:  string(instanceHash),
 			ETag:          meta.ETag,
@@ -269,7 +274,7 @@ func (api *IntrospectAPIOpen) ListObjectInstances(objectURL string) ([]ObjectIns
 			LastModified:  meta.LastModified,
 			Completed:     meta.Completed,
 			LastAccessed:  meta.LastAccessTime,
-			Expires:       meta.Expires,
+			Expires:       expires,
 			IsLatest:      meta.ETag == latestETag,
 			IsInline:      meta.IsInline(),
 		}
@@ -302,6 +307,11 @@ func (api *IntrospectAPIOpen) GetObjectDetails(instanceHash string) (*ObjectDeta
 		return nil, errors.New("object instance not found")
 	}
 
+	expires := meta.Expires
+	if expires.IsZero() {
+		expires = meta.ComputeExpires()
+	}
+
 	details := &ObjectDetails{
 		ObjectInstance: ObjectInstance{
 			InstanceHash:  instanceHash,
@@ -312,7 +322,7 @@ func (api *IntrospectAPIOpen) GetObjectDetails(instanceHash string) (*ObjectDeta
 			LastModified:  meta.LastModified,
 			Completed:     meta.Completed,
 			LastAccessed:  meta.LastAccessTime,
-			Expires:       meta.Expires,
+			Expires:       expires,
 			IsInline:      meta.IsInline(),
 		},
 		NamespaceID:   uint16(meta.NamespaceID),
@@ -580,6 +590,11 @@ func (api *IntrospectAPIOpen) ListAllObjects(limit int, pattern string) ([]Objec
 			}
 		}
 
+		expires := meta.Expires
+		if expires.IsZero() {
+			expires = meta.ComputeExpires()
+		}
+
 		instance := ObjectInstance{
 			InstanceHash:  string(instanceHash),
 			ETag:          meta.ETag,
@@ -589,7 +604,7 @@ func (api *IntrospectAPIOpen) ListAllObjects(limit int, pattern string) ([]Objec
 			LastModified:  meta.LastModified,
 			Completed:     meta.Completed,
 			LastAccessed:  meta.LastAccessTime,
-			Expires:       meta.Expires,
+			Expires:       expires,
 			IsInline:      meta.IsInline(),
 		}
 		instances = append(instances, instance)

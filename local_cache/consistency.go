@@ -1097,6 +1097,7 @@ func (cc *ConsistencyChecker) RunDataScan(ctx context.Context, progressCh chan<-
 
 	// Main goroutine: process objects from channel
 	var lastProcessedHash InstanceHash
+	var consumerWrappedAround bool
 	lastProgressLog := scanStartTime
 	batch := make([]scanItem, 0, 1000)
 	for {
@@ -1127,13 +1128,19 @@ func (cc *ConsistencyChecker) RunDataScan(ctx context.Context, progressCh chan<-
 		if len(batch) > 0 {
 			cc.processBatchForDataScan(ctx, sl, batch, bytesLimiter, &checksumMismatches, &inconsistentBytes, &bytesVerified, &objectsVerified)
 			lastProcessedHash = batch[len(batch)-1].instanceHash
+			// Detect when the consumer crosses the wrap point.  Before
+			// wrapping, all hashes have bucket >= startBucket.  Once we
+			// see a bucket < startBucket we have wrapped around.
+			if !consumerWrappedAround && hashBucket(lastProcessedHash) < startBucket {
+				consumerWrappedAround = true
+			}
 		}
 
 		// Periodic progress logging and SSE updates
 		now := time.Now()
 		currentBucket := hashBucket(lastProcessedHash)
 		var distance int
-		if !wrappedAround.Load() {
+		if !consumerWrappedAround {
 			distance = currentBucket - startBucket
 			if distance < 0 {
 				distance = 0
