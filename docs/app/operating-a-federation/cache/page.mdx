@@ -21,44 +21,18 @@ If you prefer to install Pelican as a standalone binary, you need to follow [add
 
 For _macOS_ and _Windows_ users who want to serve a Pelican cache, please use [Pelican Docker image](../install/docker.mdx).
 
+### Enable Time Synchronization
+
+Pelican servers rely on time-sensitive tokens for authorization.
+If your server's clock is not synchronized, tokens may be rejected and your Cache may fail to join the federation.
+Please ensure NTP is enabled on your server.
+See [Server Prerequisites](../install.mdx#enable-time-synchronization) for setup instructions.
+
 ### Open Firewall Port for Pelican Cache
 
 The Pelican cache listens to two TCP ports for file transfers and Web UI. By default, the file transfer port is at `8442` and the Web UI and APIs port is at `8444`. If your server has firewall policy in place, please open the two ports for both incoming the outgoing TCP requests to allow the Pelican cache to function as expected.
 
 You may change the port numbers through the [configuration file](../parameters.mdx) with parameter [`Cache.Port`](../parameters.mdx#Cache-Port) and [`Server.WebPort`](../parameters.mdx#Server-WebPort) respectively.
-
-### Enable Time Synchronization
-
-Pelican servers use tokens for authorization, and these tokens contain time-sensitive claims (such as `iat`, the "issued at" time).
-If your server's clock is significantly out of sync with the federation's other services, tokens may be rejected and your server may fail to join the federation.
-
-Ensure that Network Time Protocol (NTP) is enabled and actively synchronizing your server's clock.
-If your site has a firewall, make sure outgoing UDP traffic on port 123 (NTP) is permitted.
-
-To check whether your system clock is synchronized, run:
-
-```bash
-timedatectl status
-```
-
-Look for `System clock synchronized: yes` and `NTP service: active` in the output.
-If NTP is not active, you can enable it with:
-
-```bash
-timedatectl set-ntp true
-```
-
-If your system uses `chrony`, you can also check synchronization status with:
-
-```bash
-chronyc tracking
-```
-
-If your system uses `ntpd`, you can check synchronization status with:
-
-```bash
-ntpq -p
-```
 
 ### Find a federation to join
 
