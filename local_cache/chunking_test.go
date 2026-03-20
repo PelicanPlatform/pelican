@@ -525,7 +525,7 @@ func TestChunkedObjectConsistencyVerification(t *testing.T) {
 
 	t.Run("MetadataScanDetectsMissingChunks", func(t *testing.T) {
 		// Run a metadata scan - it should detect the orphaned DB entry
-		err := checker.RunMetadataScan(egCtx)
+		err := checker.RunMetadataScan(egCtx, nil)
 		require.NoError(t, err)
 
 		// The object should have been cleaned up (DB entry deleted)
@@ -648,7 +648,7 @@ func TestOrphanedChunkFileCleanup(t *testing.T) {
 	})
 
 	// Run metadata scan
-	err = checker.RunMetadataScan(egCtx)
+	err = checker.RunMetadataScan(egCtx, nil)
 	require.NoError(t, err)
 
 	// Verify all chunk files are removed
@@ -708,7 +708,7 @@ func TestOrphanedChunkFilesWithoutBaseFile(t *testing.T) {
 	})
 
 	// Run metadata scan
-	err = checker.RunMetadataScan(egCtx)
+	err = checker.RunMetadataScan(egCtx, nil)
 	require.NoError(t, err)
 
 	// Verify orphaned chunk files are removed even without base file
@@ -763,7 +763,7 @@ func TestOrphanedNonSequentialChunkFiles(t *testing.T) {
 		MinAgeForCleanup: 0,
 	})
 
-	err = checker.RunMetadataScan(egCtx)
+	err = checker.RunMetadataScan(egCtx, nil)
 	require.NoError(t, err)
 
 	// All orphaned chunk files should be removed, including the ones after the gap

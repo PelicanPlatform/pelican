@@ -1,0 +1,53 @@
+---
+title: pelican cache introspect consistency
+---
+
+## pelican cache introspect consistency
+
+Run a cache consistency check
+
+### Synopsis
+
+Trigger a consistency check between the database and disk.
+
+By default runs both a metadata scan (cross-references DB entries with
+disk files to find orphans) and a data scan (reads and verifies checksums).
+Use --metadata-only or --data-only to run only one scan type.
+
+The data scan is expensive as it reads and checksums every cached file.
+
+Example:
+  pelican cache introspect consistency
+  pelican cache introspect consistency --metadata-only
+  pelican cache introspect consistency --data-only
+  pelican cache introspect consistency --json
+
+```
+pelican cache introspect consistency [flags]
+```
+
+### Options
+
+```
+      --data-only       Run only the data scan (skip metadata scan)
+  -h, --help            help for consistency
+      --metadata-only   Run only the metadata scan (skip data scan)
+```
+
+### Options inherited from parent commands
+
+```
+      --cache-dir string    Override cache directory (default: from config)
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                Output in JSON format
+  -L, --log string          Specified log output file
+      --offline             Force offline mode (direct database access). By default, if the cache is running, queries go to the live service.
+  -t, --token string        Path to admin token file (online mode only; auto-generated if not provided)
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican cache introspect](/commands-reference/cache/introspect/)	 - Introspect the cache's persistent database

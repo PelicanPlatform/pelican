@@ -491,9 +491,15 @@ func (pc *PersistentCache) evictHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	etag, err := pc.db.GetLatestETag(objectHash)
+	etag, found, err := pc.db.GetLatestETag(objectHash)
 	if err != nil {
 		http.Error(w, "Eviction operation failed", http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		// Object not in cache — treat as success (idempotent).
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "Cache eviction successful")
 		return
 	}
 
@@ -542,9 +548,12 @@ func (pc *PersistentCache) EvictObject(objectPath, token string) error {
 		return errors.New("object is in use")
 	}
 
-	etag, err := pc.db.GetLatestETag(objectHash)
+	etag, found, err := pc.db.GetLatestETag(objectHash)
 	if err != nil {
 		return errors.Wrap(err, "failed to look up ETag")
+	}
+	if !found {
+		return nil // not in cache, nothing to evict
 	}
 
 	instanceHash := pc.db.InstanceHash(etag, objectHash)

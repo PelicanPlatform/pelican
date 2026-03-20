@@ -793,15 +793,19 @@ func (pc *PersistentCache) resolveObject(
 
 	namespaceID := pc.getNamespaceID(objectPath)
 
-	etag, err := pc.db.GetLatestETag(objectHash)
+	etag, found, err := pc.db.GetLatestETag(objectHash)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to check ETag cache")
 	}
 
 	instanceHash := pc.db.InstanceHash(etag, objectHash)
-	meta, err := pc.storage.GetMetadata(instanceHash)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to check cache")
+
+	var meta *CacheMetadata
+	if found {
+		meta, err = pc.storage.GetMetadata(instanceHash)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to check cache")
+		}
 	}
 
 	var dl *persistentDownload
@@ -1139,9 +1143,12 @@ func (pc *PersistentCache) GetMetadata(objectPath, token string) (*CacheMetadata
 	objectHash := pc.db.ObjectHash(pelicanURL)
 
 	// Look up latest ETag for this object
-	etag, err := pc.db.GetLatestETag(objectHash)
+	etag, found, err := pc.db.GetLatestETag(objectHash)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to check ETag cache")
+	}
+	if !found {
+		return nil, nil
 	}
 
 	// Compute file hash and check cache
@@ -1177,19 +1184,20 @@ func (pc *PersistentCache) HeadObject(objectPath, token string) (*HeadResult, er
 	pelicanURL := pc.normalizePath(objectPath)
 	objectHash := pc.db.ObjectHash(pelicanURL)
 
-	etag, err := pc.db.GetLatestETag(objectHash)
+	etag, found, err := pc.db.GetLatestETag(objectHash)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to check ETag cache")
 	}
 
-	instanceHash := pc.db.InstanceHash(etag, objectHash)
-	meta, err := pc.storage.GetMetadata(instanceHash)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to check cache")
-	}
-
-	if meta != nil {
-		return &HeadResult{ContentLength: meta.ContentLength, Meta: meta}, nil
+	if found {
+		instanceHash := pc.db.InstanceHash(etag, objectHash)
+		meta, mErr := pc.storage.GetMetadata(instanceHash)
+		if mErr != nil {
+			return nil, errors.Wrap(mErr, "failed to check cache")
+		}
+		if meta != nil {
+			return &HeadResult{ContentLength: meta.ContentLength, Meta: meta}, nil
+		}
 	}
 
 	// Not cached — query the origin for size only.
@@ -1229,20 +1237,21 @@ func (pc *PersistentCache) stat(objectPath, token string, cachedOnly bool) (uint
 	objectHash := pc.db.ObjectHash(pelicanURL)
 
 	// Look up latest ETag for this object
-	etag, err := pc.db.GetLatestETag(objectHash)
+	etag, found, err := pc.db.GetLatestETag(objectHash)
 	if err != nil {
 		return 0, errors.Wrap(err, "failed to check ETag cache")
 	}
 
-	// Compute file hash and check cache
-	instanceHash := pc.db.InstanceHash(etag, objectHash)
-	meta, err := pc.storage.GetMetadata(instanceHash)
-	if err != nil {
-		return 0, errors.Wrap(err, "failed to check cache")
-	}
-
-	if meta != nil {
-		return uint64(meta.ContentLength), nil
+	if found {
+		// Compute file hash and check cache
+		instanceHash := pc.db.InstanceHash(etag, objectHash)
+		meta, mErr := pc.storage.GetMetadata(instanceHash)
+		if mErr != nil {
+			return 0, errors.Wrap(mErr, "failed to check cache")
+		}
+		if meta != nil {
+			return uint64(meta.ContentLength), nil
+		}
 	}
 
 	// Not in cache
@@ -2027,9 +2036,8 @@ func (w *decisionWriter) Write(p []byte) (n int, err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// Wait for decision if not yet made
-	for !w.decided {
-		// Buffer data while waiting
+	// Buffer data while decision is pending
+	if !w.decided {
 		w.buffer = append(w.buffer, p...)
 		// If the buffer reached the inline threshold, signal
 		// performDownload so it can make the deferred storage

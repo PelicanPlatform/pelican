@@ -1444,6 +1444,10 @@ definitions:
         type: string
         format: date-time
         description: When this instance was last accessed
+      expires:
+        type: string
+        format: date-time
+        description: When the cached object expires (from HTTP Expires header)
       is_latest:
         type: boolean
         description: Whether this is the latest ETag version for the object
@@ -1523,10 +1527,6 @@ definitions:
             type: string
             format: date-time
             description: When the object was last revalidated with the origin
-          expires:
-            type: string
-            format: date-time
-            description: When the cached object expires
           cache_control:
             type: string
             description: Formatted cache control directives
@@ -1715,6 +1715,42 @@ definitions:
       error:
         type: string
         description: Error messages if any scan failed
+  CacheScanProgressEvent:
+    type: object
+    description: >-
+      A progress update sent as an SSE event during a consistency scan.
+      Used as the `data:` payload for metadata_progress, metadata_done,
+      data_progress, data_done, and error event types.
+    properties:
+      phase:
+        type: string
+        description: The scan phase, either "metadata" or "data"
+        enum:
+          - metadata
+          - data
+      percent_complete:
+        type: number
+        format: double
+        description: Estimated completion percentage (0-100)
+      db_entries_scanned:
+        type: integer
+        format: int64
+        description: Number of DB entries processed so far (metadata scan only)
+      files_scanned:
+        type: integer
+        format: int64
+        description: Number of filesystem entries processed (metadata scan only)
+      objects_verified:
+        type: integer
+        format: int64
+        description: Number of objects whose data has been read and verified (data scan only)
+      bytes_verified:
+        type: integer
+        format: int64
+        description: Total bytes read and verified so far (data scan only)
+      message:
+        type: string
+        description: Human-readable status message or error description
 
 tags:
   - name: auth
@@ -5431,7 +5467,7 @@ paths:
     post:
       tags:
         - cache_ui
-      summary: Trigger a cache consistency check
+      summary: Trigger a cache consistency check (SSE stream)
       description: >-
         `Authentication Required` `Admin privilege Required`
 
@@ -5440,8 +5476,28 @@ paths:
         both a metadata scan (finds orphaned files and DB entries) and a data scan
         (reads and verifies checksums). Use query parameters to run only one scan type.
         The data scan is expensive as it reads every cached file.
+
+
+        The response is a Server-Sent Events (SSE) stream. The client should set
+        `Accept: text/event-stream` and read the response as a stream of events.
+        Each event has a type (the `event:` field) and a JSON payload (the `data:` field).
+
+
+        Event types:
+
+        - `metadata_progress` / `data_progress` — periodic progress updates during the scan
+          (payload: CacheScanProgressEvent)
+
+        - `metadata_done` / `data_done` — a scan phase has finished
+          (payload: CacheScanProgressEvent with percent_complete=100)
+
+        - `done` — all scans are complete
+          (payload: CacheConsistencyCheckResult)
+
+        - `error` — an error occurred during scanning
+          (payload: CacheScanProgressEvent with a message field)
       produces:
-        - application/json
+        - text/event-stream
       parameters:
         - in: query
           name: metadata
@@ -5455,7 +5511,10 @@ paths:
           default: "true"
       responses:
         "200":
-          description: Consistency check completed
+          description: >-
+            SSE event stream. The final event (type `done`) contains a
+            CacheConsistencyCheckResult JSON payload. Progress events use
+            CacheScanProgressEvent payloads.
           schema:
             $ref: "#/definitions/CacheConsistencyCheckResult"
         "400":

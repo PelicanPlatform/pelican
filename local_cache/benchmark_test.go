@@ -141,7 +141,7 @@ func BenchmarkMetadataLookup(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		etag, err := env.db.GetLatestETag(objectHash)
+		etag, _, err := env.db.GetLatestETag(objectHash)
 		if err != nil {
 			b.Fatal(err)
 		}

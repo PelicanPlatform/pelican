@@ -19,6 +19,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -27,12 +28,16 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"text/tabwriter"
 	"time"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"github.com/vbauerster/mpb/v8"
+	"github.com/vbauerster/mpb/v8/decor"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/local_cache"
@@ -105,15 +110,26 @@ Example:
 	}
 
 	cacheIntrospectListCmd = &cobra.Command{
-		Use:   "list",
-		Short: "List all cached objects",
-		Long: `List all objects currently in the cache.
+		Use:   "list [pattern]",
+		Short: "List cached objects",
+		Long: `List objects currently in the cache, optionally filtered by a glob pattern.
+
+The pattern is matched against the source URL of each cached object.
+Standard glob syntax is supported: * matches any sequence of non-/
+characters, ** matches everything including slashes, and ? matches
+a single character.
+
+If no pattern is given, all objects are listed.
 
 Warning: For large caches, this may return many results. Use --limit
 to restrict the number of entries returned.
 
-Example:
-  pelican cache introspect list --limit=100`,
+Examples:
+  pelican cache introspect list
+  pelican cache introspect list '/chtc/staging/**'
+  pelican cache introspect list '*.bin'
+  pelican cache introspect list --limit=50 'pelican://origin.example.com/data/*'`,
+		Args:         cobra.MaximumNArgs(1),
 		RunE:         runCacheIntrospectList,
 		SilenceUsage: true,
 	}
@@ -433,7 +449,7 @@ func printEtags(instances []local_cache.ObjectInstance) error {
 
 	// Table output
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "ETAG\tSIZE\tLAST ACCESSED\tCOMPLETED\tLATEST\tSTORAGE\n")
+	fmt.Fprintf(w, "ETAG\tSIZE\tLAST ACCESSED\tEXPIRES\tCOMPLETED\tLATEST\tSTORAGE\n")
 	for _, inst := range instances {
 		storage := "disk"
 		if inst.IsInline {
@@ -451,8 +467,12 @@ func printEtags(instances []local_cache.ObjectInstance) error {
 		if !inst.LastAccessed.IsZero() {
 			lastAccessed = inst.LastAccessed.Format(time.RFC3339)
 		}
-		fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%s\n",
-			truncateETag(inst.ETag, 20), inst.ContentLength, lastAccessed, completed, latest, storage)
+		expires := ""
+		if !inst.Expires.IsZero() {
+			expires = inst.Expires.Format(time.RFC3339)
+		}
+		fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%s\t%s\n",
+			truncateETag(inst.ETag, 20), inst.ContentLength, lastAccessed, expires, completed, latest, storage)
 	}
 	w.Flush()
 
@@ -518,7 +538,11 @@ func printMetadata(details *local_cache.ObjectDetails) error {
 	// Human-readable output
 	fmt.Printf("Instance Hash: %s\n", details.InstanceHash)
 	fmt.Printf("Source URL:    %s\n", details.SourceURL)
-	fmt.Printf("ETag:          %s\n", details.ETag)
+	if details.ETag != "" {
+		fmt.Printf("ETag:          %s\n", details.ETag)
+	} else {
+		fmt.Printf("ETag:          (none)\n")
+	}
 	fmt.Printf("Content-Length: %d bytes\n", details.ContentLength)
 	fmt.Printf("Content-Type:  %s\n", details.ContentType)
 	fmt.Printf("Storage:       %s (ID: %d)\n", storageType(details.IsInline), details.StorageID)
@@ -672,9 +696,17 @@ func printVerification(result *local_cache.VerificationResult) error {
 }
 
 func runCacheIntrospectList(cmd *cobra.Command, args []string) error {
+	pattern := ""
+	if len(args) > 0 {
+		pattern = args[0]
+	}
+
 	// Try online mode first
 	if serverURL := useOnlineMode(); serverURL != "" {
 		query := url.Values{"limit": {fmt.Sprintf("%d", introspectLimit)}}
+		if pattern != "" {
+			query.Set("pattern", pattern)
+		}
 		body, err := introspectHTTPGet(serverURL, "/api/v1.0/cache/introspect/list", query)
 		if err != nil {
 			return errors.Wrap(err, "online introspection failed")
@@ -693,7 +725,7 @@ func runCacheIntrospectList(cmd *cobra.Command, args []string) error {
 	}
 	defer api.Close()
 
-	instances, err := api.ListAllObjects(introspectLimit)
+	instances, err := api.ListAllObjects(introspectLimit, pattern)
 	if err != nil {
 		return errors.Wrap(err, "failed to list cached objects")
 	}
@@ -780,6 +812,9 @@ func printStats(stats *local_cache.CacheStats) error {
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintf(w, "  DIRECTORY\tOBJECTS\tTOTAL BYTES\tINLINE\tON DISK\n")
 		for name, ds := range stats.StorageBreakdown {
+			if p, ok := stats.DirPaths[ds.StorageID]; ok {
+				name = p
+			}
 			fmt.Fprintf(w, "  %s\t%d\t%s\t%d (%s)\t%d (%s)\n",
 				name, ds.ObjectCount, utils.HumanBytes(ds.TotalBytes),
 				ds.InlineCount, utils.HumanBytes(ds.InlineBytes),
@@ -789,9 +824,50 @@ func printStats(stats *local_cache.CacheStats) error {
 	}
 
 	if len(stats.UsageCounters) > 0 {
-		fmt.Printf("\nUsage Counters (pre-computed):\n")
+		// Build reverse lookups for human-readable labels.
+		dirName := func(sid uint8) string {
+			if p, ok := stats.DirPaths[sid]; ok {
+				return p
+			}
+			return fmt.Sprintf("storage-%d", sid)
+		}
+		nsName := func(nid uint32) string {
+			if n, ok := stats.NamespaceNames[nid]; ok {
+				return n
+			}
+			return fmt.Sprintf("ns%d", nid)
+		}
+
+		// Collect lines and find the widest human-bytes string for alignment.
+		type usageLine struct {
+			label string
+			human string
+			raw   int64
+		}
+		lines := make([]usageLine, 0, len(stats.UsageCounters))
+		maxHuman := 0
+		maxRaw := 0
 		for key, val := range stats.UsageCounters {
-			fmt.Printf("  %s: %s (%d bytes)\n", key, utils.HumanBytes(val), val)
+			// Parse "s<sid>:ns<nid>" back to IDs.
+			var sid uint8
+			var nid uint32
+			if _, err := fmt.Sscanf(key, "s%d:ns%d", &sid, &nid); err == nil {
+				key = dirName(sid) + " : " + nsName(nid)
+			}
+			h := utils.HumanBytes(val)
+			r := fmt.Sprintf("%d", val)
+			lines = append(lines, usageLine{label: key, human: h, raw: val})
+			if len(h) > maxHuman {
+				maxHuman = len(h)
+			}
+			if len(r) > maxRaw {
+				maxRaw = len(r)
+			}
+		}
+
+		fmt.Printf("\nUsage Counters (pre-computed):\n")
+		for _, l := range lines {
+			fmt.Printf("  %s: %*s (%*d bytes)\n", l.label, maxHuman, l.human, maxRaw, l.raw)
 		}
 	}
 
@@ -855,6 +931,161 @@ func printDiskUsage(result *local_cache.DiskUsageResult) error {
 	return nil
 }
 
+func runOnlineConsistencyCheck(serverURL string, query url.Values) (*local_cache.ConsistencyCheckResult, error) {
+	tok, err := getIntrospectToken(serverURL)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to obtain admin token")
+	}
+
+	targetURL, err := url.Parse(serverURL)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid server URL")
+	}
+	targetURL.Path = "/api/v1.0/cache/introspect/consistency"
+	targetURL.RawQuery = query.Encode()
+
+	req, err := http.NewRequest("POST", targetURL.String(), nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create request")
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("User-Agent", "pelican-client/"+config.GetVersion())
+
+	httpClient := &http.Client{
+		Transport: config.GetTransport(),
+		// No timeout — the SSE stream keeps the connection alive.
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, errors.Errorf("server responded with %s (body: %s)", resp.Status, strings.TrimSpace(string(body)))
+	}
+
+	// Shared state for decorator closures (updated atomically by SSE loop).
+	var metaDBEntries, metaFiles atomic.Int64
+	var dataObjects, dataBytes atomic.Int64
+
+	// Set up mpb progress container.
+	progress := mpb.New(mpb.WithWidth(64))
+
+	// Bars are created lazily on first matching event.
+	var metaBar, dataBar *mpb.Bar
+
+	var result *local_cache.ConsistencyCheckResult
+
+	// Parse SSE stream.
+	scanner := bufio.NewScanner(resp.Body)
+	var currentEvent string
+	var dataLines []string
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if strings.HasPrefix(line, "event: ") {
+			currentEvent = strings.TrimPrefix(line, "event: ")
+			continue
+		}
+
+		if strings.HasPrefix(line, "data: ") {
+			dataLines = append(dataLines, strings.TrimPrefix(line, "data: "))
+			continue
+		}
+
+		// Empty line = end of SSE event.
+		if line == "" && currentEvent != "" && len(dataLines) > 0 {
+			payload := strings.Join(dataLines, "\n")
+			dataLines = dataLines[:0]
+
+			switch {
+			case currentEvent == "metadata_progress" || currentEvent == "metadata_done":
+				var evt local_cache.ScanProgressEvent
+				if json.Unmarshal([]byte(payload), &evt) == nil {
+					if metaBar == nil {
+						metaBar = progress.AddBar(100,
+							mpb.PrependDecorators(
+								decor.Name("Metadata scan ", decor.WCSyncSpaceR),
+								decor.Percentage(decor.WCSyncSpace),
+							),
+							mpb.AppendDecorators(
+								decor.Any(func(s decor.Statistics) string {
+									return fmt.Sprintf("  %d entries, %d files",
+										metaDBEntries.Load(), metaFiles.Load())
+								}),
+							),
+						)
+					}
+					metaDBEntries.Store(evt.DBEntriesScanned)
+					metaFiles.Store(evt.FilesScanned)
+					metaBar.SetCurrent(int64(evt.PercentComplete))
+					if currentEvent == "metadata_done" {
+						metaBar.SetCurrent(100)
+						metaBar.Abort(true)
+					}
+				}
+
+			case currentEvent == "data_progress" || currentEvent == "data_done":
+				var evt local_cache.ScanProgressEvent
+				if json.Unmarshal([]byte(payload), &evt) == nil {
+					if dataBar == nil {
+						dataBar = progress.AddBar(100,
+							mpb.PrependDecorators(
+								decor.Name("Data scan     ", decor.WCSyncSpaceR),
+								decor.Percentage(decor.WCSyncSpace),
+							),
+							mpb.AppendDecorators(
+								decor.Any(func(s decor.Statistics) string {
+									return fmt.Sprintf("  %d objects, %s verified",
+										dataObjects.Load(), utils.HumanBytes(dataBytes.Load()))
+								}),
+							),
+						)
+					}
+					dataObjects.Store(evt.ObjectsVerified)
+					dataBytes.Store(evt.BytesVerified)
+					dataBar.SetCurrent(int64(evt.PercentComplete))
+					if currentEvent == "data_done" {
+						dataBar.SetCurrent(100)
+						dataBar.Abort(true)
+					}
+				}
+
+			case currentEvent == "done":
+				var res local_cache.ConsistencyCheckResult
+				if json.Unmarshal([]byte(payload), &res) == nil {
+					result = &res
+				}
+
+			case currentEvent == "error":
+				var evt local_cache.ScanProgressEvent
+				if json.Unmarshal([]byte(payload), &evt) == nil {
+					log.Warnf("Scan error: %s", evt.Message)
+				}
+			}
+
+			currentEvent = ""
+		}
+	}
+
+	// Shut down progress bars cleanly.
+	progress.Shutdown()
+
+	if err := scanner.Err(); err != nil {
+		return nil, errors.Wrap(err, "error reading SSE stream")
+	}
+
+	if result == nil {
+		return nil, errors.New("server closed connection without sending final result")
+	}
+
+	return result, nil
+}
+
 func runCacheIntrospectConsistency(cmd *cobra.Command, args []string) error {
 	metadataScan := !introspectDataOnly
 	dataScan := !introspectMetadataOnly
@@ -868,15 +1099,11 @@ func runCacheIntrospectConsistency(cmd *cobra.Command, args []string) error {
 		query := url.Values{}
 		query.Set("metadata", fmt.Sprintf("%t", metadataScan))
 		query.Set("data", fmt.Sprintf("%t", dataScan))
-		body, err := introspectHTTPPost(serverURL, "/api/v1.0/cache/introspect/consistency", query)
+		result, err := runOnlineConsistencyCheck(serverURL, query)
 		if err != nil {
 			return errors.Wrap(err, "online consistency check failed")
 		}
-		var result local_cache.ConsistencyCheckResult
-		if err := json.Unmarshal(body, &result); err != nil {
-			return errors.Wrap(err, "failed to parse response")
-		}
-		return printConsistencyResult(&result)
+		return printConsistencyResult(result)
 	}
 
 	// Offline mode
@@ -936,6 +1163,9 @@ func printConsistencyResult(result *local_cache.ConsistencyCheckResult) error {
 // Helper functions
 
 func truncateETag(etag string, maxLen int) string {
+	if etag == "" {
+		return "(none)"
+	}
 	if len(etag) <= maxLen {
 		return etag
 	}
