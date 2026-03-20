@@ -24,6 +24,7 @@ import (
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"hash"
 	"hash/crc32"
@@ -42,6 +43,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
+
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -122,8 +125,10 @@ type ConsistencyChecker struct {
 	// Control
 	running          atomic.Bool
 	stopCh           chan struct{}
-	lastMetadataScan atomic.Int64 // Unix timestamp of last metadata scan start
-	lastDataScan     atomic.Int64 // Unix timestamp of last data scan start
+	lastMetadataScan atomic.Int64  // Unix timestamp of last metadata scan start
+	lastDataScan     atomic.Int64  // Unix timestamp of last data scan start
+	metaScanCounter  atomic.Uint64 // monotonic ID for metadata scan instances
+	dataScanCounter  atomic.Uint64 // monotonic ID for data scan instances
 }
 
 // ConsistencyConfig holds configuration for the consistency checker
@@ -237,7 +242,7 @@ func (cc *ConsistencyChecker) metadataScanLoop(ctx context.Context) error {
 
 	for {
 		// Run the scan, then wait scanInterval before the next one.
-		if err := cc.RunMetadataScan(ctx); err != nil {
+		if err := cc.RunMetadataScan(ctx, nil); err != nil {
 			log.Warnf("Metadata scan error: %v", err)
 		}
 
@@ -265,7 +270,7 @@ func (cc *ConsistencyChecker) dataScanLoop(ctx context.Context) error {
 	const scanInterval = 24 * time.Hour
 
 	for {
-		if err := cc.RunDataScan(ctx); err != nil {
+		if err := cc.RunDataScan(ctx, nil); err != nil {
 			log.Warnf("Data scan error: %v", err)
 		}
 
@@ -279,11 +284,32 @@ func (cc *ConsistencyChecker) dataScanLoop(ctx context.Context) error {
 	}
 }
 
+// hashBucket returns the zero-based position (0–255) of the first byte
+// of a hex-encoded hash.  Used to estimate scan progress: bucket 0x00
+// means 1/256 complete, 0xff means 256/256 complete.
+func hashBucket(h InstanceHash) int {
+	if len(h) < 2 {
+		return 0
+	}
+	b, err := hex.DecodeString(string(h[:2]))
+	if err != nil || len(b) == 0 {
+		return 0
+	}
+	return int(b[0])
+}
+
 // RunMetadataScan performs a metadata consistency scan.
 // It verifies that database entries match files on disk and vice versa.
-func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
-	log.Info("Starting metadata consistency scan")
+func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh chan<- ScanProgressEvent) error {
+	scanID := cc.metaScanCounter.Add(1)
+	sl := log.WithFields(log.Fields{
+		"scan":   "metadata",
+		"scanID": scanID,
+	})
+	sl.Info("Starting metadata consistency scan")
 	scanStartTime := time.Now()
+	lastProgressLog := scanStartTime
+	lastProgressSend := scanStartTime
 	cc.lastMetadataScan.Store(scanStartTime.Unix())
 	metadataScanLastStartTime.Set(float64(scanStartTime.Unix()))
 
@@ -322,7 +348,7 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 					if relPath == "." && os.IsNotExist(err) {
 						return fs.SkipAll
 					}
-					log.Warnf("Walk error in %s/%s: %v", objectsDir, relPath, err)
+					sl.WithError(err).WithField("path", objectsDir+"/"+relPath).Warn("Walk error")
 					hadWalkError.Store(true)
 					return nil
 				}
@@ -356,7 +382,7 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 
 				info, err := d.Info()
 				if err != nil {
-					log.Warnf("Unable to stat %s/%s: %v", objectsDir, relPath, err)
+					sl.WithError(err).WithField("path", objectsDir+"/"+relPath).Warn("Unable to stat file")
 					hadWalkError.Store(true)
 					return nil
 				}
@@ -659,6 +685,44 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 			// Update last processed key
 			lastDBKey = instanceHash
 
+			// Periodic progress logging and SSE updates
+			now := time.Now()
+			bucket := hashBucket(instanceHash)
+			pctDone := float64(bucket+1) / 256.0 * 100.0
+
+			if now.Sub(lastProgressLog) > time.Minute {
+				lastProgressLog = now
+				elapsed := now.Sub(scanStartTime)
+				var eta time.Duration
+				if pctDone > 0 {
+					eta = time.Duration(float64(elapsed) * (100.0 - pctDone) / pctDone)
+				}
+				sl.WithFields(log.Fields{
+					"progress":      fmt.Sprintf("%.1f%%", pctDone),
+					"dbEntries":     dbEntriesScanned,
+					"filesScanned":  filesScanned,
+					"orphanedDB":    orphanedDBEntries,
+					"orphanedFiles": orphanedFiles,
+					"orphanedBytes": utils.HumanBytes(orphanedBytes),
+					"elapsed":       elapsed.Truncate(time.Second),
+					"eta":           eta.Truncate(time.Second),
+				}).Info("Metadata scan progress")
+			}
+
+			// Send progress to SSE channel (more frequently than logs)
+			if progressCh != nil && now.Sub(lastProgressSend) > 2*time.Second {
+				lastProgressSend = now
+				select {
+				case progressCh <- ScanProgressEvent{
+					Phase:            "metadata",
+					PercentComplete:  pctDone,
+					DBEntriesScanned: dbEntriesScanned,
+					FilesScanned:     filesScanned,
+				}:
+				default:
+				}
+			}
+
 			// Stop if we have enough deletions to process
 			if len(deletions) >= maxDeletionsPerTx {
 				return errMaxDeletionsReached
@@ -666,8 +730,11 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 
 			// Check if we should restart the transaction (every 5 seconds)
 			if time.Since(transactionStartTime) > transactionTimeout {
-				log.Debugf("Restarting metadata scan transaction after %v (processed %d entries, last key: %.8s...)",
-					time.Since(transactionStartTime), entriesThisTransaction, lastDBKey)
+				sl.WithFields(log.Fields{
+					"duration": time.Since(transactionStartTime).Truncate(time.Millisecond),
+					"entries":  entriesThisTransaction,
+					"lastKey":  fmt.Sprintf("%.8s...", lastDBKey),
+				}).Debug("Restarting metadata scan transaction")
 				return errTransactionTimeout
 			}
 
@@ -688,17 +755,17 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 				if del.isFile {
 					// Re-check file still exists
 					if _, err := os.Stat(del.path); err == nil {
-						log.Warnf("Orphaned file: %s", del.path)
+						sl.WithField("path", del.path).Warn("Orphaned file")
 						orphanedFiles++
 						orphanedBytes += del.size
 						if err := os.Remove(del.path); err != nil {
-							log.Warnf("Failed to remove orphaned file %s: %v", del.path, err)
+							sl.WithError(err).WithField("path", del.path).Warn("Failed to remove orphaned file")
 						}
 						// For base files (chunk 0), also remove any associated chunk files (chunks 1+)
 						// Chunk suffix files are detected and removed independently, so only
 						// clean up chunk suffix files when we delete a base file.
 						if del.chunkIndex == 0 {
-							cc.removeOrphanedChunkFiles(del.path, &orphanedFiles, &orphanedBytes)
+							cc.removeOrphanedChunkFiles(sl, del.path, &orphanedFiles, &orphanedBytes)
 						}
 					}
 				} else {
@@ -717,11 +784,11 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 						}
 
 						if stillInconsistent {
-							log.Warnf("Orphaned DB entry: %s", del.instanceHash)
+							sl.WithField("instanceHash", del.instanceHash).Warn("Orphaned DB entry")
 							orphanedDBEntries++
 							orphanedBytes += del.size
 							if err := cc.db.DeleteObject(del.instanceHash); err != nil {
-								log.Warnf("Failed to clean up orphaned DB entry %s: %v", del.instanceHash, err)
+								sl.WithError(err).WithField("instanceHash", del.instanceHash).Warn("Failed to clean up orphaned DB entry")
 							}
 						}
 					}
@@ -756,11 +823,11 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 			// Re-check file (might have been created after scan start)
 			if info, err := os.Stat(currentFile.path); err == nil {
 				if !info.ModTime().After(scanStartTime) {
-					log.Warnf("Orphaned file: %s", currentFile.path)
+					sl.WithField("path", currentFile.path).Warn("Orphaned file")
 					orphanedFiles++
 					orphanedBytes += currentFile.size
 					if err := os.Remove(currentFile.path); err != nil {
-						log.Warnf("Failed to remove orphaned file %s: %v", currentFile.path, err)
+						sl.WithError(err).WithField("path", currentFile.path).Warn("Failed to remove orphaned file")
 					}
 				}
 			}
@@ -771,7 +838,7 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 
 	// Check for walk errors
 	if walkError := <-walkErr; walkError != nil {
-		log.Warnf("Error during filesystem walk: %v", walkError)
+		sl.WithError(walkError).Warn("Error during filesystem walk")
 	}
 
 	// Update stats and metrics
@@ -786,14 +853,14 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 	metadataScanFilesProcessed.Add(float64(filesScanned))
 	metadataScanDBEntriesProcessed.Add(float64(dbEntriesScanned))
 
-	log.Infof("Metadata scan complete in %v: scanned %d DB entries and %d files, found %d orphaned DB entries and %d orphaned files (%d bytes)",
-		scanDuration, dbEntriesScanned, filesScanned, orphanedDBEntries, orphanedFiles, orphanedBytes)
+	log.Infof("Metadata scan complete in %v: scanned %d DB entries and %d files, found %d orphaned DB entries and %d orphaned files (%s)",
+		scanDuration, dbEntriesScanned, filesScanned, orphanedDBEntries, orphanedFiles, utils.HumanBytes(orphanedBytes))
 
 	// Reconcile the stored usage counters against the running totals
 	// accumulated during the metadata scan above.  This avoids a second
 	// full-table scan of the metadata and block-state tables.
-	if err := cc.reconcileUsage(ctx, usageDuringScan); err != nil {
-		log.Warnf("Usage reconciliation failed: %v", err)
+	if err := cc.reconcileUsage(ctx, sl, usageDuringScan); err != nil {
+		sl.WithError(err).Warn("Usage reconciliation failed")
 	}
 
 	return nil
@@ -808,7 +875,7 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context) error {
 //
 // This catches drift that can accumulate from crash recovery, orphan
 // cleanup, or bugs in the incremental usage tracking.
-func (cc *ConsistencyChecker) reconcileUsage(ctx context.Context, actual map[StorageUsageKey]int64) error {
+func (cc *ConsistencyChecker) reconcileUsage(ctx context.Context, sl *log.Entry, actual map[StorageUsageKey]int64) error {
 	stored, err := cc.db.GetAllUsage()
 	if err != nil {
 		return errors.Wrap(err, "failed to read stored usage")
@@ -830,11 +897,17 @@ func (cc *ConsistencyChecker) reconcileUsage(ctx context.Context, actual map[Sto
 			continue
 		}
 
-		log.Warnf("Usage drift for storageID=%d namespaceID=%d: stored=%d actual=%d; correcting",
-			key.StorageID, key.NamespaceID, storedBytes, actualBytes)
+		sl.WithFields(log.Fields{
+			"storageID":   key.StorageID,
+			"namespaceID": key.NamespaceID,
+			"stored":      storedBytes,
+			"actual":      actualBytes,
+		}).Warn("Usage drift; correcting")
 		if err := cc.db.SetUsage(key.StorageID, key.NamespaceID, actualBytes); err != nil {
-			log.Warnf("Failed to correct usage for storageID=%d namespaceID=%d: %v",
-				key.StorageID, key.NamespaceID, err)
+			sl.WithError(err).WithFields(log.Fields{
+				"storageID":   key.StorageID,
+				"namespaceID": key.NamespaceID,
+			}).Warn("Failed to correct usage")
 			continue
 		}
 		corrected++
@@ -856,20 +929,25 @@ func (cc *ConsistencyChecker) reconcileUsage(ctx context.Context, actual map[Sto
 			continue
 		}
 
-		log.Warnf("Usage drift for storageID=%d namespaceID=%d: stored=%d actual=0; correcting",
-			key.StorageID, key.NamespaceID, storedBytes)
+		sl.WithFields(log.Fields{
+			"storageID":   key.StorageID,
+			"namespaceID": key.NamespaceID,
+			"stored":      storedBytes,
+		}).Warn("Usage drift (actual=0); correcting")
 		if err := cc.db.SetUsage(key.StorageID, key.NamespaceID, 0); err != nil {
-			log.Warnf("Failed to correct usage for storageID=%d namespaceID=%d: %v",
-				key.StorageID, key.NamespaceID, err)
+			sl.WithError(err).WithFields(log.Fields{
+				"storageID":   key.StorageID,
+				"namespaceID": key.NamespaceID,
+			}).Warn("Failed to correct usage")
 			continue
 		}
 		corrected++
 	}
 
 	if corrected > 0 {
-		log.Infof("Usage reconciliation corrected %d counter(s)", corrected)
+		sl.WithField("corrected", corrected).Info("Usage reconciliation corrected counters")
 	} else {
-		log.Debug("Usage reconciliation: all counters are within tolerance")
+		sl.Debug("Usage reconciliation: all counters within tolerance")
 	}
 
 	return nil
@@ -898,8 +976,13 @@ type scanItem struct {
 
 // RunDataScan performs a full data integrity scan
 // It verifies checksums of stored objects using block-by-block reading
-func (cc *ConsistencyChecker) RunDataScan(ctx context.Context) error {
-	log.Info("Starting data integrity scan")
+func (cc *ConsistencyChecker) RunDataScan(ctx context.Context, progressCh chan<- ScanProgressEvent) error {
+	scanID := cc.dataScanCounter.Add(1)
+	sl := log.WithFields(log.Fields{
+		"scan":   "data",
+		"scanID": scanID,
+	})
+	sl.Info("Starting data integrity scan")
 	scanStartTime := time.Now()
 	cc.lastDataScan.Store(scanStartTime.Unix())
 	dataScanLastStartTime.Set(float64(scanStartTime.Unix()))
@@ -911,10 +994,22 @@ func (cc *ConsistencyChecker) RunDataScan(ctx context.Context) error {
 	inconsistentBytes := int64(0)
 	bytesVerified := int64(0)
 	objectsVerified := int64(0)
+	lastProgressSend := scanStartTime
+
+	// Generate random 4-byte hex starting point (16 bits = 4 hex chars)
+	// This randomizes where we start scanning through the database
+	rng := rand.New(rand.NewSource(scanStartTime.UnixNano()))
+	randomStart := fmt.Sprintf("%04x", rng.Intn(1<<16))
+	startBucket := hashBucket(InstanceHash(randomStart))
 
 	// Channel for streaming objects from DB scan
 	objectChan := make(chan scanItem, 1000)
 	scanErr := make(chan error, 1)
+
+	// wrappedAround is set by the producer goroutine when it reaches the end
+	// of the keyspace and wraps to the beginning.  The consumer reads it
+	// to compute progress.
+	var wrappedAround atomic.Bool
 
 	// Start DB scan in background goroutine.  The WaitGroup ensures
 	// we do not return from RunDataScan until this goroutine exits.
@@ -927,14 +1022,8 @@ func (cc *ConsistencyChecker) RunDataScan(ctx context.Context) error {
 
 		const transactionTimeout = 5 * time.Second
 
-		// Generate random 4-byte hex starting point (16 bits = 4 hex chars)
-		// This randomizes where we start scanning through the database
-		rng := rand.New(rand.NewSource(scanStartTime.UnixNano()))
-		randomStart := fmt.Sprintf("%04x", rng.Intn(1<<16))
-
 		startKey := InstanceHash(randomStart)
 		lastKey := startKey
-		wrappedAround := false
 
 		for {
 			// Wait for the channel to have room before opening a new
@@ -959,7 +1048,7 @@ func (cc *ConsistencyChecker) RunDataScan(ctx context.Context) error {
 				}
 
 				// If we've wrapped around and reached our starting point, we're done
-				if wrappedAround && instanceHash >= startKey {
+				if wrappedAround.Load() && instanceHash >= startKey {
 					return errScanDone
 				}
 
@@ -994,19 +1083,21 @@ func (cc *ConsistencyChecker) RunDataScan(ctx context.Context) error {
 
 			// If no items scanned, we've reached the end of the database
 			if scannedThisTx == 0 {
-				if wrappedAround {
+				if wrappedAround.Load() {
 					// Already wrapped and reached end again - done
 					return
 				}
 				// Wrap around to beginning
-				wrappedAround = true
+				wrappedAround.Store(true)
 				lastKey = ""
-				log.Debugf("Data scan wrapping around from end to beginning (started at %s)", startKey)
+				sl.WithField("startKey", string(startKey)).Debug("Data scan wrapping around from end to beginning")
 			}
 		}
 	}()
 
 	// Main goroutine: process objects from channel
+	var lastProcessedHash InstanceHash
+	lastProgressLog := scanStartTime
 	batch := make([]scanItem, 0, 1000)
 	for {
 		// Read up to 1k objects or until channel blocks
@@ -1017,7 +1108,7 @@ func (cc *ConsistencyChecker) RunDataScan(ctx context.Context) error {
 				if !ok {
 					// Channel closed, process final batch
 					if len(batch) > 0 {
-						cc.processBatchForDataScan(ctx, batch, bytesLimiter, &checksumMismatches, &inconsistentBytes, &bytesVerified, &objectsVerified)
+						cc.processBatchForDataScan(ctx, sl, batch, bytesLimiter, &checksumMismatches, &inconsistentBytes, &bytesVerified, &objectsVerified)
 					}
 					goto scanComplete
 				}
@@ -1034,7 +1125,53 @@ func (cc *ConsistencyChecker) RunDataScan(ctx context.Context) error {
 
 	processBatch:
 		if len(batch) > 0 {
-			cc.processBatchForDataScan(ctx, batch, bytesLimiter, &checksumMismatches, &inconsistentBytes, &bytesVerified, &objectsVerified)
+			cc.processBatchForDataScan(ctx, sl, batch, bytesLimiter, &checksumMismatches, &inconsistentBytes, &bytesVerified, &objectsVerified)
+			lastProcessedHash = batch[len(batch)-1].instanceHash
+		}
+
+		// Periodic progress logging and SSE updates
+		now := time.Now()
+		currentBucket := hashBucket(lastProcessedHash)
+		var distance int
+		if !wrappedAround.Load() {
+			distance = currentBucket - startBucket
+			if distance < 0 {
+				distance = 0
+			}
+		} else {
+			distance = (256 - startBucket) + currentBucket
+		}
+		pctDone := float64(distance) / 256.0 * 100.0
+
+		if now.Sub(lastProgressLog) > time.Minute {
+			lastProgressLog = now
+			elapsed := now.Sub(scanStartTime)
+			var eta time.Duration
+			if pctDone > 0 {
+				eta = time.Duration(float64(elapsed) * (100.0 - pctDone) / pctDone)
+			}
+			sl.WithFields(log.Fields{
+				"progress":           fmt.Sprintf("%.1f%%", pctDone),
+				"objectsVerified":    objectsVerified,
+				"bytesVerified":      utils.HumanBytes(bytesVerified),
+				"checksumMismatches": checksumMismatches,
+				"elapsed":            elapsed.Truncate(time.Second),
+				"eta":                eta.Truncate(time.Second),
+			}).Info("Data scan progress")
+		}
+
+		// Send progress to SSE channel (more frequently than logs)
+		if progressCh != nil && now.Sub(lastProgressSend) > 2*time.Second {
+			lastProgressSend = now
+			select {
+			case progressCh <- ScanProgressEvent{
+				Phase:           "data",
+				PercentComplete: pctDone,
+				ObjectsVerified: objectsVerified,
+				BytesVerified:   bytesVerified,
+			}:
+			default:
+			}
 		}
 	}
 
@@ -1046,15 +1183,20 @@ scanComplete:
 
 	// Check for scan errors
 	if err := <-scanErr; err != nil && !errors.Is(err, context.Canceled) {
-		log.Warnf("Error during data scan: %v", err)
+		sl.WithError(err).Warn("Error during data scan")
 	}
 
 	// Final stats update (scan timing / log)
 	scanDuration := time.Since(scanStartTime)
 	dataScanDurationSeconds.Add(scanDuration.Seconds())
 
-	log.Infof("Data scan complete in %v: verified %d objects (%d bytes), %d checksum mismatches (%d bytes)",
-		scanDuration, objectsVerified, bytesVerified, checksumMismatches, inconsistentBytes)
+	sl.WithFields(log.Fields{
+		"elapsed":            scanDuration.Truncate(time.Second),
+		"objectsVerified":    objectsVerified,
+		"bytesVerified":      utils.HumanBytes(bytesVerified),
+		"checksumMismatches": checksumMismatches,
+		"inconsistentBytes":  utils.HumanBytes(inconsistentBytes),
+	}).Info("Data scan complete")
 
 	return nil
 }
@@ -1064,6 +1206,7 @@ scanComplete:
 // progress is visible even during multi-day scans.
 func (cc *ConsistencyChecker) processBatchForDataScan(
 	ctx context.Context,
+	sl *log.Entry,
 	batch []scanItem,
 	bytesLimiter *rate.Limiter,
 	checksumMismatches, inconsistentBytes, bytesVerified, objectsVerified *int64,
@@ -1084,7 +1227,7 @@ func (cc *ConsistencyChecker) processBatchForDataScan(
 			if errors.Is(err, errChecksumSkipped) {
 				continue // Incomplete object — don't count as verified
 			}
-			log.Warnf("Error verifying object %s: %v", item.instanceHash, err)
+			sl.WithError(err).WithField("instanceHash", item.instanceHash).Warn("Error verifying object")
 		}
 
 		// Update prometheus metrics and stats after every object
@@ -1450,14 +1593,14 @@ func (cc *ConsistencyChecker) allChunkFilesExist(meta *CacheMetadata, instanceHa
 // This is called when an orphaned base file (chunk 0) is being deleted.
 // Because chunks may be lazily allocated (non-sequential), we list the parent
 // directory and match by prefix rather than probing sequential indices.
-func (cc *ConsistencyChecker) removeOrphanedChunkFiles(basePath string, orphanedFiles *int64, orphanedBytes *int64) {
+func (cc *ConsistencyChecker) removeOrphanedChunkFiles(sl *log.Entry, basePath string, orphanedFiles *int64, orphanedBytes *int64) {
 	dir := filepath.Dir(basePath)
 	base := filepath.Base(basePath)
 	prefix := base + "-"
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		log.Warnf("Failed to list directory %s for orphaned chunk cleanup: %v", dir, err)
+		sl.WithError(err).WithField("dir", dir).Warn("Failed to list directory for orphaned chunk cleanup")
 		return
 	}
 	for _, entry := range entries {
@@ -1471,14 +1614,14 @@ func (cc *ConsistencyChecker) removeOrphanedChunkFiles(basePath string, orphaned
 		chunkPath := filepath.Join(dir, name)
 		info, err := entry.Info()
 		if err != nil {
-			log.Warnf("Error getting info for chunk file %s: %v", chunkPath, err)
+			sl.WithError(err).WithField("path", chunkPath).Warn("Error getting info for chunk file")
 			continue
 		}
-		log.Warnf("Orphaned chunk file: %s", chunkPath)
+		sl.WithField("path", chunkPath).Warn("Orphaned chunk file")
 		(*orphanedFiles)++
 		(*orphanedBytes) += info.Size()
 		if err := os.Remove(chunkPath); err != nil {
-			log.Warnf("Failed to remove orphaned chunk file %s: %v", chunkPath, err)
+			sl.WithError(err).WithField("path", chunkPath).Warn("Failed to remove orphaned chunk file")
 		}
 	}
 }
