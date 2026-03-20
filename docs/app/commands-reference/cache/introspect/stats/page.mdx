@@ -1,40 +1,31 @@
 ---
-title: pelican cache introspect list
+title: pelican cache introspect stats
 ---
 
-## pelican cache introspect list
+## pelican cache introspect stats
 
-List cached objects
+Show cache size statistics
 
 ### Synopsis
 
-List objects currently in the cache, optionally filtered by a glob pattern.
+Display aggregate size statistics about the cache.
 
-The pattern is matched against the source URL of each cached object.
-Standard glob syntax is supported: * matches any sequence of non-/
-characters, ** matches everything including slashes, and ? matches
-a single character.
+Shows total inline bytes stored in BadgerDB, total number of metadata
+entries, total bytes claimed by metadata, and per-storage-directory
+breakdown. This is a cheap operation that only scans metadata.
 
-If no pattern is given, all objects are listed.
-
-Warning: For large caches, this may return many results. Use --limit
-to restrict the number of entries returned.
-
-Examples:
-  pelican cache introspect list
-  pelican cache introspect list '/chtc/staging/**'
-  pelican cache introspect list '*.bin'
-  pelican cache introspect list --limit=50 'pelican://origin.example.com/data/*'
+Example:
+  pelican cache introspect stats
+  pelican cache introspect stats --json
 
 ```
-pelican cache introspect list [pattern] [flags]
+pelican cache introspect stats [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help        help for list
-      --limit int   Maximum number of objects to list (default 100)
+  -h, --help   help for stats
 ```
 
 ### Options inherited from parent commands

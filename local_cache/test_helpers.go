@@ -41,7 +41,7 @@ func (pc *PersistentCache) BackdateObject(objectPath string, age time.Duration) 
 	pelicanURL := pc.normalizePath(objectPath)
 	objectHash := pc.db.ObjectHash(pelicanURL)
 
-	etag, err := pc.db.GetLatestETag(objectHash)
+	etag, _, err := pc.db.GetLatestETag(objectHash)
 	if err != nil {
 		return fmt.Errorf("BackdateObject: lookup ETag: %w", err)
 	}
