@@ -142,7 +142,7 @@ func writeErrorCodesJSON(values []interface{}) {
 	}
 
 	var prettyJSON bytes.Buffer
-	if err := json.Indent(&prettyJSON, fullJSONBytes, "", "\t"); err != nil {
+	if err := json.Indent(&prettyJSON, fullJSONBytes, "", "  "); err != nil {
 		panic(fmt.Sprintf("%v: failed to format generated error_codes json", err))
 	}
 

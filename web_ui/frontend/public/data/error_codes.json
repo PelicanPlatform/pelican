@@ -1,184 +1,184 @@
 [
-	{
-		"clientExitCode": 4,
-		"code": 1000,
-		"description": "If the client failed to start, or was started with invalid parameters, or otherwise believes what it was asked to do is impossible or the request itself is malformed.",
-		"retryable": false,
-		"type": "Parameter"
-	},
-	{
-		"clientExitCode": 4,
-		"code": 1011,
-		"description": "If the client was started with a file that does not exist.",
-		"retryable": false,
-		"type": "Parameter.FileNotFound"
-	},
-	{
-		"clientExitCode": 5,
-		"code": 2000,
-		"description": "Indicates that the client failed to even attempt to contact the server.",
-		"retryable": false,
-		"type": "Resolution"
-	},
-	{
-		"clientExitCode": 5,
-		"code": 2001,
-		"description": "The client timed out while querying for federation metadata during discovery. This could be a DNS timeout, a dial timeout, or a header timeout. This is often a transient network error that can be resolved by retrying.",
-		"retryable": true,
-		"type": "Resolution.Timeout"
-	},
-	{
-		"clientExitCode": 5,
-		"code": 2002,
-		"description": "The client failed to connect while querying for federation metadata during discovery. This could be a network unreachable error, no route to host, proxy connection refused, or DNS connection refused. This is often a transient network error that can be resolved by retrying.",
-		"retryable": true,
-		"type": "Resolution.ConnectionFailure"
-	},
-	{
-		"clientExitCode": 6,
-		"code": 3000,
-		"description": "The client attempted to contact the server at its resolved address and failed to do so.",
-		"retryable": false,
-		"type": "Contact"
-	},
-	{
-		"clientExitCode": 6,
-		"code": 3001,
-		"description": "The client attempted to contact the director at its found address but failed to do so.",
-		"retryable": false,
-		"type": "Contact.Director"
-	},
-	{
-		"clientExitCode": 11,
-		"code": 3002,
-		"description": "The client attempted to contact the cache but failed to do so.",
-		"retryable": true,
-		"type": "Contact.Cache"
-	},
-	{
-		"clientExitCode": 6,
-		"code": 3003,
-		"description": "The client attempted to contact the origin but failed to do so.",
-		"retryable": false,
-		"type": "Contact.Origin"
-	},
-	{
-		"clientExitCode": 6,
-		"code": 3004,
-		"description": "The client attempted to contact the registry (usually through the director) but failed to do so.",
-		"retryable": false,
-		"type": "Contact.Registry"
-	},
-	{
-		"clientExitCode": 6,
-		"code": 3005,
-		"description": "The client attempted to contact a server but the connection was reset by the remote peer. This is often a transient network error that can be resolved by retrying.",
-		"retryable": true,
-		"type": "Contact.ConnectionReset"
-	},
-	{
-		"clientExitCode": 6,
-		"code": 3006,
-		"description": "The client attempted to establish a connection to the server but failed before the request could be completed.",
-		"retryable": true,
-		"type": "Contact.ConnectionSetup"
-	},
-	{
-		"clientExitCode": 7,
-		"code": 4000,
-		"description": "The client contacted the server but failed to authenticate, or failed to authorize, or if the server replied with an authorization error when the file was requested or sent.",
-		"retryable": false,
-		"type": "Authorization"
-	},
-	{
-		"clientExitCode": 7,
-		"code": 4010,
-		"description": "The client requires a credential or token for the transfer but none was discovered or could be generated. The user may need to provide credentials or configure token acquisition.",
-		"retryable": false,
-		"type": "Authorization.TokenNotFound"
-	},
-	{
-		"clientExitCode": 8,
-		"code": 5000,
-		"description": "If the client successfully contacted the server and received a definitive response that the desired file was not present or could not be created. Usually the submitters fault.",
-		"retryable": false,
-		"type": "Specification"
-	},
-	{
-		"clientExitCode": 8,
-		"code": 5011,
-		"description": "If the client successfully contacted the server but the desired file does not exist for download. The user might have entered the wrong URL or the file might not yet be at the specified origin.",
-		"retryable": false,
-		"type": "Specification.FileNotFound"
-	},
-	{
-		"clientExitCode": 8,
-		"code": 5002,
-		"description": "If the client successfully contacted the server but the desired file for upload could not be created.",
-		"retryable": false,
-		"type": "Specification.FileNotCreated"
-	},
-	{
-		"clientExitCode": 8,
-		"code": 5012,
-		"description": "If the client attempted to upload a file but the remote object already exists at the destination and overwrites are not enabled.",
-		"retryable": false,
-		"type": "Specification.FileAlreadyExists"
-	},
-	{
-		"clientExitCode": 9,
-		"code": 6000,
-		"description": "The client started transferring the file but did not complete it for some reason, or if the file failed post-transfer validation.",
-		"retryable": true,
-		"type": "Transfer"
-	},
-	{
-		"clientExitCode": 9,
-		"code": 6001,
-		"description": "The client started transferring file(s) but it got cancelled by Pelican as stopped transferring data.",
-		"retryable": true,
-		"type": "Transfer.StoppedTransfer"
-	},
-	{
-		"clientExitCode": 9,
-		"code": 6002,
-		"description": "The client started transferring data but the transfer was slower than the minimum configured timeout rate.",
-		"retryable": true,
-		"type": "Transfer.SlowTransfer"
-	},
-	{
-		"clientExitCode": 9,
-		"code": 6003,
-		"description": "The client started transferring data but the transfer timed out.",
-		"retryable": true,
-		"type": "Transfer.TimedOut"
-	},
-	{
-		"clientExitCode": 9,
-		"code": 6004,
-		"description": "The client attempted to contact the server but timed out waiting for response headers. This indicates the server did not respond before the header timeout threshold.",
-		"retryable": true,
-		"type": "Transfer.HeaderTimeout"
-	},
-	{
-		"clientExitCode": 9,
-		"code": 6005,
-		"description": "The client timed out while querying the director for namespace information. This indicates the director did not respond before the timeout threshold.",
-		"retryable": true,
-		"type": "Transfer.DirectorTimeout"
-	},
-	{
-		"clientExitCode": 9,
-		"code": 6006,
-		"description": "The client successfully transferred the file but the checksum computed by the client did not match the checksum reported by the server.",
-		"retryable": true,
-		"type": "Transfer.ChecksumMismatch"
-	},
-	{
-		"clientExitCode": 9,
-		"code": 6007,
-		"description": "The client required checksum verification but the server did not provide any checksum information or only provided unsupported algorithms.",
-		"retryable": true,
-		"type": "Transfer.ChecksumMissing"
-	}
+  {
+    "clientExitCode": 4,
+    "code": 1000,
+    "description": "If the client failed to start, or was started with invalid parameters, or otherwise believes what it was asked to do is impossible or the request itself is malformed.",
+    "retryable": false,
+    "type": "Parameter"
+  },
+  {
+    "clientExitCode": 4,
+    "code": 1011,
+    "description": "If the client was started with a file that does not exist.",
+    "retryable": false,
+    "type": "Parameter.FileNotFound"
+  },
+  {
+    "clientExitCode": 5,
+    "code": 2000,
+    "description": "Indicates that the client failed to even attempt to contact the server.",
+    "retryable": false,
+    "type": "Resolution"
+  },
+  {
+    "clientExitCode": 5,
+    "code": 2001,
+    "description": "The client timed out while querying for federation metadata during discovery. This could be a DNS timeout, a dial timeout, or a header timeout. This is often a transient network error that can be resolved by retrying.",
+    "retryable": true,
+    "type": "Resolution.Timeout"
+  },
+  {
+    "clientExitCode": 5,
+    "code": 2002,
+    "description": "The client failed to connect while querying for federation metadata during discovery. This could be a network unreachable error, no route to host, proxy connection refused, or DNS connection refused. This is often a transient network error that can be resolved by retrying.",
+    "retryable": true,
+    "type": "Resolution.ConnectionFailure"
+  },
+  {
+    "clientExitCode": 6,
+    "code": 3000,
+    "description": "The client attempted to contact the server at its resolved address and failed to do so.",
+    "retryable": false,
+    "type": "Contact"
+  },
+  {
+    "clientExitCode": 6,
+    "code": 3001,
+    "description": "The client attempted to contact the director at its found address but failed to do so.",
+    "retryable": false,
+    "type": "Contact.Director"
+  },
+  {
+    "clientExitCode": 11,
+    "code": 3002,
+    "description": "The client attempted to contact the cache but failed to do so.",
+    "retryable": true,
+    "type": "Contact.Cache"
+  },
+  {
+    "clientExitCode": 6,
+    "code": 3003,
+    "description": "The client attempted to contact the origin but failed to do so.",
+    "retryable": false,
+    "type": "Contact.Origin"
+  },
+  {
+    "clientExitCode": 6,
+    "code": 3004,
+    "description": "The client attempted to contact the registry (usually through the director) but failed to do so.",
+    "retryable": false,
+    "type": "Contact.Registry"
+  },
+  {
+    "clientExitCode": 6,
+    "code": 3005,
+    "description": "The client attempted to contact a server but the connection was reset by the remote peer. This is often a transient network error that can be resolved by retrying.",
+    "retryable": true,
+    "type": "Contact.ConnectionReset"
+  },
+  {
+    "clientExitCode": 6,
+    "code": 3006,
+    "description": "The client attempted to establish a connection to the server but failed before the request could be completed.",
+    "retryable": true,
+    "type": "Contact.ConnectionSetup"
+  },
+  {
+    "clientExitCode": 7,
+    "code": 4000,
+    "description": "The client contacted the server but failed to authenticate, or failed to authorize, or if the server replied with an authorization error when the file was requested or sent.",
+    "retryable": false,
+    "type": "Authorization"
+  },
+  {
+    "clientExitCode": 7,
+    "code": 4010,
+    "description": "The client requires a credential or token for the transfer but none was discovered or could be generated. The user may need to provide credentials or configure token acquisition.",
+    "retryable": false,
+    "type": "Authorization.TokenNotFound"
+  },
+  {
+    "clientExitCode": 8,
+    "code": 5000,
+    "description": "If the client successfully contacted the server and received a definitive response that the desired file was not present or could not be created. Usually the submitters fault.",
+    "retryable": false,
+    "type": "Specification"
+  },
+  {
+    "clientExitCode": 8,
+    "code": 5011,
+    "description": "If the client successfully contacted the server but the desired file does not exist for download. The user might have entered the wrong URL or the file might not yet be at the specified origin.",
+    "retryable": false,
+    "type": "Specification.FileNotFound"
+  },
+  {
+    "clientExitCode": 8,
+    "code": 5002,
+    "description": "If the client successfully contacted the server but the desired file for upload could not be created.",
+    "retryable": false,
+    "type": "Specification.FileNotCreated"
+  },
+  {
+    "clientExitCode": 8,
+    "code": 5012,
+    "description": "If the client attempted to upload a file but the remote object already exists at the destination and overwrites are not enabled.",
+    "retryable": false,
+    "type": "Specification.FileAlreadyExists"
+  },
+  {
+    "clientExitCode": 9,
+    "code": 6000,
+    "description": "The client started transferring the file but did not complete it for some reason, or if the file failed post-transfer validation.",
+    "retryable": true,
+    "type": "Transfer"
+  },
+  {
+    "clientExitCode": 9,
+    "code": 6001,
+    "description": "The client started transferring file(s) but it got cancelled by Pelican as stopped transferring data.",
+    "retryable": true,
+    "type": "Transfer.StoppedTransfer"
+  },
+  {
+    "clientExitCode": 9,
+    "code": 6002,
+    "description": "The client started transferring data but the transfer was slower than the minimum configured timeout rate.",
+    "retryable": true,
+    "type": "Transfer.SlowTransfer"
+  },
+  {
+    "clientExitCode": 9,
+    "code": 6003,
+    "description": "The client started transferring data but the transfer timed out.",
+    "retryable": true,
+    "type": "Transfer.TimedOut"
+  },
+  {
+    "clientExitCode": 9,
+    "code": 6004,
+    "description": "The client attempted to contact the server but timed out waiting for response headers. This indicates the server did not respond before the header timeout threshold.",
+    "retryable": true,
+    "type": "Transfer.HeaderTimeout"
+  },
+  {
+    "clientExitCode": 9,
+    "code": 6005,
+    "description": "The client timed out while querying the director for namespace information. This indicates the director did not respond before the timeout threshold.",
+    "retryable": true,
+    "type": "Transfer.DirectorTimeout"
+  },
+  {
+    "clientExitCode": 9,
+    "code": 6006,
+    "description": "The client successfully transferred the file but the checksum computed by the client did not match the checksum reported by the server.",
+    "retryable": true,
+    "type": "Transfer.ChecksumMismatch"
+  },
+  {
+    "clientExitCode": 9,
+    "code": 6007,
+    "description": "The client required checksum verification but the server did not provide any checksum information or only provided unsupported algorithms.",
+    "retryable": true,
+    "type": "Transfer.ChecksumMissing"
+  }
 ]
