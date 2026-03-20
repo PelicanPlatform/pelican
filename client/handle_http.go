@@ -231,7 +231,7 @@ type (
 		// Preferred indicates this server came from the user's PreferredCaches
 		// configuration rather than being discovered via the Director.  When true,
 		// the server must not be sorted after any non-preferred (director-provided)
-		// server, even if the director server responds more quickly.
+		// server, even if the origin/cache service responds more quickly.
 		Preferred bool
 	}
 
@@ -2286,7 +2286,7 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 	}
 	results = make([]transferAttemptDetails, len(attempts))
 	slices.SortStableFunc(tmpResults, func(left sorter, right sorter) int {
-		// Preferred servers always sort before director-provided (non-preferred) servers.
+		// Preferred servers always sort before director-provided (fallback) servers.
 		if left.attempt.Preferred != right.attempt.Preferred {
 			if left.attempt.Preferred {
 				return -1

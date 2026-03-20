@@ -804,7 +804,7 @@ func TestSortAttempts(t *testing.T) {
 // TestSortAttemptsPreferredCachesRespected verifies that a non-responsive preferred
 // (user-configured) cache is never sorted after a working director-provided cache.
 // This is the regression test for the bug where sortAttempts could reorder director
-// caches before user-configured PreferredCaches when the director caches responded
+// caches before user-configured PreferredCaches when the director-provided caches responded
 // more quickly.
 func TestSortAttemptsPreferredCachesRespected(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
