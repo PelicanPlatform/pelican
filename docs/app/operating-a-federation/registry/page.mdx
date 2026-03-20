@@ -6,6 +6,39 @@ The Pelican [*Registry*](../about-pelican/core-concepts.mdx#registry-service) ma
 
 ## Before Starting
 
+### Enable Time Synchronization
+
+Pelican servers use tokens for authorization, and these tokens contain time-sensitive claims (such as `iat`, the "issued at" time).
+If your server's clock is significantly out of sync with the federation's other services, tokens may be rejected and your server may fail to join the federation.
+
+Ensure that Network Time Protocol (NTP) is enabled and actively synchronizing your server's clock.
+If your site has a firewall, make sure outgoing UDP traffic on port 123 (NTP) is permitted.
+
+To check whether your system clock is synchronized, run:
+
+```bash
+timedatectl status
+```
+
+Look for `System clock synchronized: yes` and `NTP service: active` in the output.
+If NTP is not active, you can enable it with:
+
+```bash
+timedatectl set-ntp true
+```
+
+If your system uses `chrony`, you can also check synchronization status with:
+
+```bash
+chronyc tracking
+```
+
+If your system uses `ntpd`, you can check synchronization status with:
+
+```bash
+ntpq -p
+```
+
 ### Get OIDC Credential (Required)
 
 The Pelican registry follows [OIDC](https://openid.net/developers/how-connect-works/) for user authentication, and [CILogon](https://www.cilogon.org/) is our OpenID Provider by default, which enables single sign-on for users with an account associated with an institution that joins CILogon. (Check out [this page](https://cilogon.org) for institutions in CILogon)

@@ -27,6 +27,39 @@ The Pelican cache listens to two TCP ports for file transfers and Web UI. By def
 
 You may change the port numbers through the [configuration file](../parameters.mdx) with parameter [`Cache.Port`](../parameters.mdx#Cache-Port) and [`Server.WebPort`](../parameters.mdx#Server-WebPort) respectively.
 
+### Enable Time Synchronization
+
+Pelican servers use tokens for authorization, and these tokens contain time-sensitive claims (such as `iat`, the "issued at" time).
+If your server's clock is significantly out of sync with the federation's other services, tokens may be rejected and your server may fail to join the federation.
+
+Ensure that Network Time Protocol (NTP) is enabled and actively synchronizing your server's clock.
+If your site has a firewall, make sure outgoing UDP traffic on port 123 (NTP) is permitted.
+
+To check whether your system clock is synchronized, run:
+
+```bash
+timedatectl status
+```
+
+Look for `System clock synchronized: yes` and `NTP service: active` in the output.
+If NTP is not active, you can enable it with:
+
+```bash
+timedatectl set-ntp true
+```
+
+If your system uses `chrony`, you can also check synchronization status with:
+
+```bash
+chronyc tracking
+```
+
+If your system uses `ntpd`, you can check synchronization status with:
+
+```bash
+ntpq -p
+```
+
 ### Find a federation to join
 
 Before serving a cache, you need to find a Pelican federation to join in. If you are unfamiliar with the term **federation**, refer to [Core Concepts and Terminology](../about-pelican/core-concepts.mdx#federations) before proceeding.
