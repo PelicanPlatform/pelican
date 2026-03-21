@@ -107,8 +107,9 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 		return errors.Wrap(err, "failed to initialize Globus backend: failed to get xrootd gid")
 	}
 
-	if server_structs.OriginStorageType(param.Origin_StorageType.GetString()) != server_structs.OriginStorageGlobus {
-		return errors.Errorf("failed to initialize Globus backend: Origin.StorageType is not Globus: %s",
+	ost := server_structs.OriginStorageType(param.Origin_StorageType.GetString())
+	if ost != server_structs.OriginStorageGlobus && ost != server_structs.OriginStorageGlobusv2 {
+		return errors.Errorf("failed to initialize Globus backend: Origin.StorageType is not Globus or Globusv2: %s",
 			param.Origin_StorageType.GetString())
 	}
 	// Init map
@@ -342,6 +343,43 @@ func GetGlobusExportsValues(activeOnly bool) []globusExport {
 	})
 
 	return exps
+}
+
+// GlobusCollectionInfo holds exported Globus collection data for use by
+// native (non-XRootD) backends.
+type GlobusCollectionInfo struct {
+	CollectionID    string
+	HTTPSServer     string
+	CollectionToken *oauth2.Token
+	TransferToken   *oauth2.Token
+	OAuth2Config    *oauth2.Config
+}
+
+// GetActivatedGlobusCollections returns info about all activated Globus collections,
+// suitable for initializing native Globus v2 backends.
+func GetActivatedGlobusCollections() ([]GlobusCollectionInfo, error) {
+	globusExportsMutex.RLock()
+	defer globusExportsMutex.RUnlock()
+
+	authCfg, err := GetGlobusOAuthCfg()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Globus OAuth config: %w", err)
+	}
+
+	var result []GlobusCollectionInfo
+	for cid, exp := range globusExports {
+		if exp.Status != GlobusActivated {
+			continue
+		}
+		result = append(result, GlobusCollectionInfo{
+			CollectionID:    cid,
+			HTTPSServer:     exp.HttpsServer,
+			CollectionToken: exp.Token,
+			TransferToken:   exp.TransferToken,
+			OAuth2Config:    authCfg,
+		})
+	}
+	return result, nil
 }
 
 // Parse the OriginExport to add Globus status for each export for frontend RESTful API
