@@ -15,6 +15,7 @@ pelican object sync {source ...} {destination} [flags]
 ```
   -c, --cache string   A comma-separated list of preferred caches to try for the transfer, where a "+" in the list indicates
                        the client should fallback to discovered caches if all preferred caches fail.
+      --direct         Read directly from an origin, bypassing any caches (same as '?directread' query)
       --dry-run        Show what would be synchronized without actually modifying the destination
   -h, --help           help for sync
       --inplace        Write files directly to destination (default: use temporary files)

@@ -190,7 +190,7 @@ func getActionFromMethod(method string) token_scopes.TokenScope {
 	switch method {
 	case http.MethodGet, http.MethodHead:
 		return token_scopes.Wlcg_Storage_Read
-	case http.MethodPut, http.MethodPost:
+	case http.MethodPut, http.MethodPost, "COPY":
 		return token_scopes.Wlcg_Storage_Create
 	case http.MethodDelete:
 		return token_scopes.Wlcg_Storage_Modify
@@ -553,7 +553,9 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 			// that forward requests can propagate them.
 			req := server_utils.StashPelicanHeaders(c.Request)
 
-			if c.Request.Method == http.MethodHead {
+			if isTPCRequest(c.Request) {
+				handleCopyTPC(c, backend)
+			} else if c.Request.Method == http.MethodHead {
 				// For HEAD requests, pass the original request to the WebDAV handler
 				// (it needs the full URL so its Prefix stripping works correctly).
 				// wildcardPath is used only for checksum lookup on the filesystem.
