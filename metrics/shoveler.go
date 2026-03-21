@@ -32,7 +32,6 @@ import (
 	shoveler "github.com/opensciencegrid/xrootd-monitoring-shoveler"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -88,7 +87,8 @@ func configShoveler(c *shoveler.Config) error {
 			return fmt.Errorf("Token content is empty. Reading from Shoveler.AMQPTokenLocation at %s", c.AmqpToken)
 		}
 	} else { // Stomp
-		viper.SetDefault("Shoveler.Topic", "xrootd.shoveler")
+		c.StompUser = param.Shoveler_StompUsername.GetString()
+		log.Debugln("STOMP User:", c.StompUser)
 
 		passwordLocation := param.Shoveler_PasswordLocation.GetString()
 		if passwordLocation != "" {
