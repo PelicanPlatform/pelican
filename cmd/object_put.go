@@ -28,7 +28,10 @@ import (
 	"hash"
 	"hash/crc32"
 	"io"
+	"net/url"
 	"os"
+	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -368,9 +371,52 @@ func putMain(cmd *cobra.Command, args []string) {
 
 	finalResults := make([][]client.TransferResults, 0)
 
+	isRecursive, _ := cmd.Flags().GetBool("recursive")
+	multipleObjects := len(source) > 1
+
+	// Check once if destination is a directory
+	// This avoids redundant stat calls and handles the multi-upload case
+	destIsDir := false
+	statInfo, err := client.DoStat(ctx, dest, options...)
+	if err != nil {
+		// Only assume destination is a directory for multiple objects if it doesn't exist yet
+		if errors.Is(err, client.ErrObjectNotFound) {
+			if multipleObjects {
+				log.Debugln("Destination does not exist with multiple objects, will create as directory")
+				destIsDir = true
+			} else {
+				// Single object upload - destination may not exist yet, proceed normally
+				log.Debugln("Destination does not exist, will be created on upload")
+			}
+		} else {
+			// Other errors should fail the attempt
+			log.Errorln("Failed to stat destination:", err)
+			result = err
+			os.Exit(1)
+		}
+	} else if statInfo.IsCollection {
+		destIsDir = true
+	}
+
 	for _, src := range source {
-		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		transferResults, err := client.DoPut(ctx, src, dest, isRecursive, options...)
+		// If destination is a directory, infer the filename from the source
+		actualDest := dest
+		if destIsDir {
+			sourceFilename := filepath.Base(src)
+			destURL, err := url.Parse(dest)
+			if err != nil {
+				log.Errorln("Failed to parse destination URL:", err)
+				result = errors.Wrap(err, "failed to parse destination URL for filename inference")
+				lastSrc = src
+				break
+			}
+			newPath := path.Join(destURL.Path, sourceFilename)
+			destURL.Path = newPath
+			actualDest = destURL.String()
+			log.Debugln("Inferred destination:", actualDest)
+		}
+
+		transferResults, err := client.DoPut(ctx, src, actualDest, isRecursive, options...)
 		result = err
 		if result != nil {
 			lastSrc = src
