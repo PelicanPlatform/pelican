@@ -801,6 +801,136 @@ func TestSortAttempts(t *testing.T) {
 	assert.Equal(t, svr3.URL, results[1].Url.String())
 }
 
+// TestSortAttemptsPreferredCachesRespected verifies that a non-responsive preferred
+// (user-configured) cache is never sorted after a working director-provided cache.
+// This is the regression test for the bug where sortAttempts could reorder director
+// caches before user-configured PreferredCaches when the director-provided caches responded
+// more quickly.
+func TestSortAttemptsPreferredCachesRespected(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
+
+	// neverRespond simulates a non-functioning preferred cache (e.g., the user's
+	// configured cache that is down or very slow).
+	neverRespond := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-ctx.Done()
+	})
+
+	// alwaysRespond simulates a healthy director-provided cache.
+	alwaysRespond := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			w.Header().Set("Content-Length", "1")
+			w.Header().Set("Content-Range", "bytes 0-0/42")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte("A"))
+			require.NoError(t, err)
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+
+	// preferredCache is the user's configured cache (slow/non-responsive).
+	preferredSvr := httptest.NewServer(neverRespond)
+	preferredURL, err := url.Parse(preferredSvr.URL)
+	require.NoError(t, err)
+
+	// directorCache is a healthy cache discovered via the Director.
+	directorSvr := httptest.NewServer(alwaysRespond)
+	directorURL, err := url.Parse(directorSvr.URL)
+	require.NoError(t, err)
+
+	// cancel must be deferred AFTER the test servers are created so that it runs
+	// FIRST in LIFO order, cancelling neverRespond handlers before the servers'
+	// Close() calls wait for active connections.
+	defer preferredSvr.Close()
+	defer directorSvr.Close()
+	defer cancel()
+
+	token := newTokenGenerator(nil, nil, config.TokenSharedRead, false)
+	token.SetToken("aaa")
+
+	// Build the attempt list as it would be constructed by getObjectServersToTry:
+	// the preferred cache comes first (Preferred=true), followed by the director
+	// cache (Preferred=false).
+	preferredAttempt := transferAttemptDetails{Url: preferredURL, Preferred: true}
+	directorAttempt := transferAttemptDetails{Url: directorURL, Preferred: false}
+
+	// sortAttempts must keep the preferred (non-responsive) cache before the
+	// working director cache, even though the director cache responds immediately.
+	_, results := sortAttempts(ctx, "/path", []transferAttemptDetails{preferredAttempt, directorAttempt}, token)
+
+	require.Len(t, results, 2)
+	assert.Equal(t, preferredSvr.URL, results[0].Url.String(),
+		"preferred cache must remain first even when director cache responds faster")
+	assert.Equal(t, directorSvr.URL, results[1].Url.String(),
+		"director cache must remain after all preferred caches")
+
+	// Verify the same ordering is preserved when the preferred cache is listed
+	// after the director cache in the input slice (i.e., the Preferred flag, not
+	// input position, drives the sort).
+	_, results = sortAttempts(ctx, "/path", []transferAttemptDetails{directorAttempt, preferredAttempt}, token)
+
+	require.Len(t, results, 2)
+	assert.Equal(t, preferredSvr.URL, results[0].Url.String(),
+		"preferred cache must be sorted to first position regardless of input order")
+	assert.Equal(t, directorSvr.URL, results[1].Url.String())
+}
+
+// TestCompareAttempts directly tests the compareAttempts comparator to ensure
+// it returns correct values for all combinations of responsiveness and preference.
+// This is the regression test for the bug where the comparator only checked
+// left.good > right.good (returning -1) but never returned 1 when left.good < right.good,
+// violating the comparison function contract.
+func TestCompareAttempts(t *testing.T) {
+	// Within the same preference tier, a failed cache (good=-1 or 0) compared
+	// against a working cache (good=1) must return positive (failed sorts after good).
+	// Before the fix, this returned 0 ("equal"), relying on Go's sort internals
+	// to handle the asymmetry — technically undefined behavior.
+	t.Run("FailedVsGoodSameTier", func(t *testing.T) {
+		failed := attemptSorter{good: -1, attempt: transferAttemptDetails{Preferred: false}}
+		good := attemptSorter{good: 1, attempt: transferAttemptDetails{Preferred: false}}
+
+		assert.Equal(t, 1, compareAttempts(failed, good),
+			"failed cache on left vs good cache on right must return positive (sort failed after good)")
+		assert.Equal(t, -1, compareAttempts(good, failed),
+			"good cache on left vs failed cache on right must return negative (sort good before failed)")
+	})
+
+	// A pending cache (good=0, timed out without hard error) should also sort
+	// after a working cache.
+	t.Run("PendingVsGoodSameTier", func(t *testing.T) {
+		pending := attemptSorter{good: 0, attempt: transferAttemptDetails{Preferred: false}}
+		good := attemptSorter{good: 1, attempt: transferAttemptDetails{Preferred: false}}
+
+		assert.Equal(t, 1, compareAttempts(pending, good),
+			"pending cache on left vs good cache on right must return positive")
+		assert.Equal(t, -1, compareAttempts(good, pending),
+			"good cache on left vs pending cache on right must return negative")
+	})
+
+	// Equal values must return 0.
+	t.Run("EqualValues", func(t *testing.T) {
+		a := attemptSorter{good: 1, attempt: transferAttemptDetails{Preferred: false}}
+		b := attemptSorter{good: 1, attempt: transferAttemptDetails{Preferred: false}}
+		assert.Equal(t, 0, compareAttempts(a, b))
+
+		c := attemptSorter{good: -1, attempt: transferAttemptDetails{Preferred: true}}
+		d := attemptSorter{good: -1, attempt: transferAttemptDetails{Preferred: true}}
+		assert.Equal(t, 0, compareAttempts(c, d))
+	})
+
+	// Preferred always beats non-preferred, regardless of responsiveness.
+	t.Run("PreferredBeatsDirector", func(t *testing.T) {
+		preferred := attemptSorter{good: -1, attempt: transferAttemptDetails{Preferred: true}}
+		director := attemptSorter{good: 1, attempt: transferAttemptDetails{Preferred: false}}
+
+		assert.Equal(t, -1, compareAttempts(preferred, director),
+			"preferred cache must sort before director cache even when preferred is failed")
+		assert.Equal(t, 1, compareAttempts(director, preferred),
+			"director cache must sort after preferred cache even when director is good")
+	})
+}
+
 func TestTimeoutHeaderSetForDownload(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
@@ -951,7 +1081,7 @@ func TestGetObjectServersToTry(t *testing.T) {
 		job := &TransferJob{
 			dirResp: directorResponse,
 		}
-		transfers := getObjectServersToTry(sortedServers, job, 3, "")
+		transfers := getObjectServersToTry(sortedServers, job, 3, "", 0)
 
 		// Check that there are no duplicates in the result
 		cacheSet := make(map[string]bool)
@@ -977,7 +1107,7 @@ func TestGetObjectServersToTry(t *testing.T) {
 		job := &TransferJob{
 			dirResp: directorResponse,
 		}
-		transfers := getObjectServersToTry(sortedServers, job, 3, "")
+		transfers := getObjectServersToTry(sortedServers, job, 3, "", 0)
 
 		cacheSet := make(map[string]bool)
 		for _, transfer := range transfers {
@@ -991,6 +1121,26 @@ func TestGetObjectServersToTry(t *testing.T) {
 		assert.Equal(t, "http://cache-1.com", transfers[0].Url.String())
 		assert.Equal(t, "https://cache-2.com", transfers[1].Url.String())
 		assert.Equal(t, "https://cache-3.com", transfers[2].Url.String())
+	})
+
+	// Test that the Preferred flag is set correctly based on nPreferred.
+	t.Run("PreferredFlagSetCorrectly", func(t *testing.T) {
+		// sortedServers has 5 unique entries; the first 2 are "preferred"
+		// (user-configured) and the remaining 3 come from the Director.
+		directorResponse := server_structs.DirectorResponse{
+			XPelNsHdr: server_structs.XPelNs{
+				RequireToken: true,
+			},
+		}
+		job := &TransferJob{
+			dirResp: directorResponse,
+		}
+		// nPreferred=2: cache-1 and cache-2 are preferred; cache-3 is director.
+		transfers := getObjectServersToTry(sortedServers, job, 3, "", 2)
+		require.Len(t, transfers, 3)
+		assert.True(t, transfers[0].Preferred, "cache-1 (idx 0) should be marked preferred")
+		assert.True(t, transfers[1].Preferred, "cache-2 (idx 1) should be marked preferred")
+		assert.False(t, transfers[2].Preferred, "cache-3 (idx 2) should not be marked preferred (director-provided)")
 	})
 }
 

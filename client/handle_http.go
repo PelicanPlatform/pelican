@@ -227,6 +227,12 @@ type (
 
 		// Whether or not the cache has been queried
 		CacheQuery bool
+
+		// Preferred indicates this server came from the user's PreferredCaches
+		// configuration rather than being discovered via the Director.  When true,
+		// the server must not be sorted after any non-preferred (director-provided)
+		// server, even if the origin/cache service responds more quickly.
+		Preferred bool
 	}
 
 	// A structure representing a single file to transfer.
@@ -1731,7 +1737,7 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 	}
 
 	var sortedServers []*url.URL
-	sortedServers, err = generateSortedObjServers(dirResp, prefObjServers)
+	sortedServers, _, err = generateSortedObjServers(dirResp, prefObjServers)
 	if err != nil {
 		log.Errorln("Failed to get namespace caches (treated as non-fatal):", err)
 		return
@@ -1916,13 +1922,15 @@ func generateTransferDetails(remoteOServer string, opts transferDetailsOptions) 
 }
 
 // Generate the unique list of object servers (caches or origins) that will be attempted for a single transfer job and populate this info
-// in the slice of transferAttemptDetails structs
-func getObjectServersToTry(sortedObjectServers []string, job *TransferJob, oServersToTry int, packOption string) (transfers []transferAttemptDetails) {
+// in the slice of transferAttemptDetails structs.
+// nPreferred indicates how many entries at the start of sortedObjectServers came from the user's PreferredCaches
+// configuration; those entries will have Preferred=true in the returned details.
+func getObjectServersToTry(sortedObjectServers []string, job *TransferJob, oServersToTry int, packOption string, nPreferred int) (transfers []transferAttemptDetails) {
 	oServersListed := 0
 	oServerList := make(map[string]bool)
 	oServers := make([]string, 0)
 
-	for _, oServer := range sortedObjectServers {
+	for idx, oServer := range sortedObjectServers {
 		if oServersListed == oServersToTry {
 			break
 		}
@@ -1937,7 +1945,12 @@ func getObjectServersToTry(sortedObjectServers []string, job *TransferJob, oServ
 				NeedsToken: job.dirResp.XPelNsHdr.RequireToken,
 				PackOption: packOption,
 			}
-			transfers = append(transfers, generateTransferDetails(oServer, td)...)
+			isPreferred := idx < nPreferred
+			newTransfers := generateTransferDetails(oServer, td)
+			for i := range newTransfers {
+				newTransfers[i].Preferred = isPreferred
+			}
+			transfers = append(transfers, newTransfers...)
 		}
 	}
 	log.Debugln("Trying the object servers:", oServers)
@@ -1976,7 +1989,8 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 		})
 	} else {
 		var sortedServers []*url.URL
-		sortedServers, err = generateSortedObjServers(job.job.dirResp, job.job.prefObjServers)
+		var nPreferred int
+		sortedServers, nPreferred, err = generateSortedObjServers(job.job.dirResp, job.job.prefObjServers)
 		if err != nil {
 			log.Errorln("Failed to get namespaced caches (treated as non-fatal):", err)
 		}
@@ -1991,7 +2005,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			objectServersToTry = len(sortedServers)
 		}
 		log.Debugf("Trying the first %d object servers", objectServersToTry)
-		transfers = getObjectServersToTry(sortedServerStrings, job.job, objectServersToTry, packOption)
+		transfers = getObjectServersToTry(sortedServerStrings, job.job, objectServersToTry, packOption, nPreferred)
 
 		if len(transfers) > 0 {
 			log.Traceln("First transfer in list:", transfers[0].Url)
@@ -2169,6 +2183,33 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 	}
 }
 
+// attemptSorter pairs a responsiveness score with a transfer attempt for sorting.
+type attemptSorter struct {
+	good    int
+	attempt transferAttemptDetails
+}
+
+// compareAttempts is the comparison function used by sortAttempts.
+// Preferred (user-configured) servers always sort before director-provided servers.
+// Within the same preference tier, servers are sorted by responsiveness (good values).
+func compareAttempts(left attemptSorter, right attemptSorter) int {
+	// Preferred servers always sort before director-provided (fallback) servers.
+	if left.attempt.Preferred != right.attempt.Preferred {
+		if left.attempt.Preferred {
+			return -1
+		}
+		return 1
+	}
+	// Within the same preference tier, sort by responsiveness.
+	if left.good > right.good {
+		return -1
+	}
+	if left.good < right.good {
+		return 1
+	}
+	return 0
+}
+
 // If there are multiple potential attempts, try to see if we can quickly eliminate some of them
 //
 // Attempts a HEAD against all the endpoints simultaneously.  Put any that don't respond within
@@ -2259,21 +2300,15 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 	}
 	// Sort all the successful attempts first; use stable sort so the original ordering
 	// is preserved if the two entries are both successful or both unsuccessful.
-	type sorter struct {
-		good    int
-		attempt transferAttemptDetails
-	}
-	tmpResults := make([]sorter, len(attempts))
+	// Preferred (user-configured) servers are never sorted after director-provided
+	// servers, ensuring all preferred caches are tried before falling back to the
+	// Director's choices.
+	tmpResults := make([]attemptSorter, len(attempts))
 	for idx, attempt := range attempts {
-		tmpResults[idx] = sorter{finished[idx], attempt}
+		tmpResults[idx] = attemptSorter{finished[idx], attempt}
 	}
 	results = make([]transferAttemptDetails, len(attempts))
-	slices.SortStableFunc(tmpResults, func(left sorter, right sorter) int {
-		if left.good > right.good {
-			return -1
-		}
-		return 0
-	})
+	slices.SortStableFunc(tmpResults, compareAttempts)
 	for idx, val := range tmpResults {
 		results[idx] = val.attempt
 	}

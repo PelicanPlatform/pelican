@@ -84,8 +84,9 @@ func TestGenerateSortedObjectServers(t *testing.T) {
 	}
 
 	t.Run("testNoPreferredServers", func(t *testing.T) {
-		oServers, err := generateSortedObjServers(dirResp, []*url.URL{})
+		oServers, nPreferred, err := generateSortedObjServers(dirResp, []*url.URL{})
 		assert.NoError(t, err)
+		assert.Equal(t, 0, nPreferred)
 		require.Len(t, oServers, 3)
 		assert.Equal(t, "https://server1.com/foo", oServers[0].String())
 		assert.Equal(t, "https://server2.com/foo", oServers[1].String())
@@ -96,7 +97,7 @@ func TestGenerateSortedObjectServers(t *testing.T) {
 	t.Run("testPreferredCacheEmpty", func(t *testing.T) {
 		preferredUrl, _ := url.Parse("")
 		someEmptyUrlList := []*url.URL{preferredUrl}
-		_, err := generateSortedObjServers(dirResp, someEmptyUrlList)
+		_, _, err := generateSortedObjServers(dirResp, someEmptyUrlList)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "Preferred server was specified as an empty string")
 	})
@@ -107,8 +108,9 @@ func TestGenerateSortedObjectServers(t *testing.T) {
 			{Scheme: "https", Host: "preferred1.com", Path: "/foo"},
 			{Scheme: "https", Host: "preferred2.com", Path: "/foo"},
 		}
-		oServers, err := generateSortedObjServers(dirResp, preferredOServers)
+		oServers, nPreferred, err := generateSortedObjServers(dirResp, preferredOServers)
 		assert.NoError(t, err)
+		assert.Equal(t, 2, nPreferred)
 		require.Len(t, oServers, 2)
 		assert.Equal(t, "https://preferred1.com/foo", oServers[0].String())
 		assert.Equal(t, "https://preferred2.com/foo", oServers[1].String())
@@ -121,8 +123,9 @@ func TestGenerateSortedObjectServers(t *testing.T) {
 			{Scheme: "https", Host: "preferred2.com", Path: "/foo"},
 			{Scheme: "", Host: "", Path: "+"},
 		}
-		oServers, err := generateSortedObjServers(dirResp, preferredOServers)
+		oServers, nPreferred, err := generateSortedObjServers(dirResp, preferredOServers)
 		assert.NoError(t, err)
+		assert.Equal(t, 2, nPreferred)
 		require.Len(t, oServers, 5)
 		assert.Equal(t, "https://preferred1.com/foo", oServers[0].String())
 		assert.Equal(t, "https://preferred2.com/foo", oServers[1].String())
@@ -138,7 +141,7 @@ func TestGenerateSortedObjectServers(t *testing.T) {
 			{Scheme: "", Host: "", Path: "+"},
 			{Scheme: "https", Host: "preferred2.com", Path: "/foo"},
 		}
-		_, err := generateSortedObjServers(dirResp, preferredOServers)
+		_, _, err := generateSortedObjServers(dirResp, preferredOServers)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "The special character '+' must be the last item in the list of preferred servers")
 	})
