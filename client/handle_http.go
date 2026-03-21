@@ -2183,6 +2183,33 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 	}
 }
 
+// attemptSorter pairs a responsiveness score with a transfer attempt for sorting.
+type attemptSorter struct {
+	good    int
+	attempt transferAttemptDetails
+}
+
+// compareAttempts is the comparison function used by sortAttempts.
+// Preferred (user-configured) servers always sort before director-provided servers.
+// Within the same preference tier, servers are sorted by responsiveness (good values).
+func compareAttempts(left attemptSorter, right attemptSorter) int {
+	// Preferred servers always sort before director-provided (fallback) servers.
+	if left.attempt.Preferred != right.attempt.Preferred {
+		if left.attempt.Preferred {
+			return -1
+		}
+		return 1
+	}
+	// Within the same preference tier, sort by responsiveness.
+	if left.good > right.good {
+		return -1
+	}
+	if left.good < right.good {
+		return 1
+	}
+	return 0
+}
+
 // If there are multiple potential attempts, try to see if we can quickly eliminate some of them
 //
 // Attempts a HEAD against all the endpoints simultaneously.  Put any that don't respond within
@@ -2276,29 +2303,12 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 	// Preferred (user-configured) servers are never sorted after director-provided
 	// servers, ensuring all preferred caches are tried before falling back to the
 	// Director's choices.
-	type sorter struct {
-		good    int
-		attempt transferAttemptDetails
-	}
-	tmpResults := make([]sorter, len(attempts))
+	tmpResults := make([]attemptSorter, len(attempts))
 	for idx, attempt := range attempts {
-		tmpResults[idx] = sorter{finished[idx], attempt}
+		tmpResults[idx] = attemptSorter{finished[idx], attempt}
 	}
 	results = make([]transferAttemptDetails, len(attempts))
-	slices.SortStableFunc(tmpResults, func(left sorter, right sorter) int {
-		// Preferred servers always sort before director-provided (fallback) servers.
-		if left.attempt.Preferred != right.attempt.Preferred {
-			if left.attempt.Preferred {
-				return -1
-			}
-			return 1
-		}
-		// Within the same preference tier, sort by responsiveness.
-		if left.good > right.good {
-			return -1
-		}
-		return 0
-	})
+	slices.SortStableFunc(tmpResults, compareAttempts)
 	for idx, val := range tmpResults {
 		results[idx] = val.attempt
 	}

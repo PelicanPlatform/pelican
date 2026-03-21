@@ -876,6 +876,61 @@ func TestSortAttemptsPreferredCachesRespected(t *testing.T) {
 	assert.Equal(t, directorSvr.URL, results[1].Url.String())
 }
 
+// TestCompareAttempts directly tests the compareAttempts comparator to ensure
+// it returns correct values for all combinations of responsiveness and preference.
+// This is the regression test for the bug where the comparator only checked
+// left.good > right.good (returning -1) but never returned 1 when left.good < right.good,
+// violating the comparison function contract.
+func TestCompareAttempts(t *testing.T) {
+	// Within the same preference tier, a failed cache (good=-1 or 0) compared
+	// against a working cache (good=1) must return positive (failed sorts after good).
+	// Before the fix, this returned 0 ("equal"), relying on Go's sort internals
+	// to handle the asymmetry — technically undefined behavior.
+	t.Run("FailedVsGoodSameTier", func(t *testing.T) {
+		failed := attemptSorter{good: -1, attempt: transferAttemptDetails{Preferred: false}}
+		good := attemptSorter{good: 1, attempt: transferAttemptDetails{Preferred: false}}
+
+		assert.Equal(t, 1, compareAttempts(failed, good),
+			"failed cache on left vs good cache on right must return positive (sort failed after good)")
+		assert.Equal(t, -1, compareAttempts(good, failed),
+			"good cache on left vs failed cache on right must return negative (sort good before failed)")
+	})
+
+	// A pending cache (good=0, timed out without hard error) should also sort
+	// after a working cache.
+	t.Run("PendingVsGoodSameTier", func(t *testing.T) {
+		pending := attemptSorter{good: 0, attempt: transferAttemptDetails{Preferred: false}}
+		good := attemptSorter{good: 1, attempt: transferAttemptDetails{Preferred: false}}
+
+		assert.Equal(t, 1, compareAttempts(pending, good),
+			"pending cache on left vs good cache on right must return positive")
+		assert.Equal(t, -1, compareAttempts(good, pending),
+			"good cache on left vs pending cache on right must return negative")
+	})
+
+	// Equal values must return 0.
+	t.Run("EqualValues", func(t *testing.T) {
+		a := attemptSorter{good: 1, attempt: transferAttemptDetails{Preferred: false}}
+		b := attemptSorter{good: 1, attempt: transferAttemptDetails{Preferred: false}}
+		assert.Equal(t, 0, compareAttempts(a, b))
+
+		c := attemptSorter{good: -1, attempt: transferAttemptDetails{Preferred: true}}
+		d := attemptSorter{good: -1, attempt: transferAttemptDetails{Preferred: true}}
+		assert.Equal(t, 0, compareAttempts(c, d))
+	})
+
+	// Preferred always beats non-preferred, regardless of responsiveness.
+	t.Run("PreferredBeatsDirector", func(t *testing.T) {
+		preferred := attemptSorter{good: -1, attempt: transferAttemptDetails{Preferred: true}}
+		director := attemptSorter{good: 1, attempt: transferAttemptDetails{Preferred: false}}
+
+		assert.Equal(t, -1, compareAttempts(preferred, director),
+			"preferred cache must sort before director cache even when preferred is failed")
+		assert.Equal(t, 1, compareAttempts(director, preferred),
+			"director cache must sort after preferred cache even when director is good")
+	})
+}
+
 func TestTimeoutHeaderSetForDownload(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	test_utils.InitClient(t, map[string]any{
