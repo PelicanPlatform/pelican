@@ -21,6 +21,7 @@ package local_cache
 import (
 	"context"
 	fmt "fmt"
+	"math"
 	rand "math/rand/v2"
 	"sort"
 	"sync"
@@ -123,12 +124,19 @@ func NewEvictionManager(db *CacheDB, storage *StorageManager, config EvictionCon
 			lowWater = (dcfg.MaxSize * uint64(lwp)) / 100
 		}
 
-		// Sanity: clamp watermarks to MaxSize and ensure high >= low.
+		// Sanity: clamp watermarks to MaxSize, ensure high >= low,
+		// and cap at MaxInt64 so uint64→int64 conversions are safe.
 		if highWater > dcfg.MaxSize {
 			highWater = dcfg.MaxSize
 		}
 		if lowWater > highWater {
 			lowWater = highWater
+		}
+		if highWater > uint64(math.MaxInt64) {
+			highWater = uint64(math.MaxInt64)
+		}
+		if lowWater > uint64(math.MaxInt64) {
+			lowWater = uint64(math.MaxInt64)
 		}
 
 		dirLimits[id] = &dirEvictionLimits{
@@ -328,7 +336,7 @@ func (em *EvictionManager) checkAndEvict() {
 		go func(sid StorageID, limits *dirEvictionLimits) {
 			defer wg.Done()
 			dirUsage := em.getDirUsage(sid)
-			if dirUsage <= int64(limits.highWater) {
+			if dirUsage <= 0 || uint64(dirUsage) <= limits.highWater {
 				return
 			}
 
@@ -338,7 +346,7 @@ func (em *EvictionManager) checkAndEvict() {
 				"highWater": limits.highWater,
 			}).Info("Starting eviction")
 
-			for dirUsage = em.getDirUsage(sid); dirUsage > int64(limits.lowWater); dirUsage = em.getDirUsage(sid) {
+			for dirUsage = em.getDirUsage(sid); dirUsage > 0 && uint64(dirUsage) > limits.lowWater; dirUsage = em.getDirUsage(sid) {
 				// Find the greediest namespace in this directory
 				targetKey, targetUsage, err := em.findGreediestNamespaceInDir(sid)
 				if err != nil {
