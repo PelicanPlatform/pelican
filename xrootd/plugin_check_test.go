@@ -403,23 +403,146 @@ func TestValidateRequiredPlugins(t *testing.T) {
 		}
 	})
 
-	t.Run("CacheWithDropPrivileges", func(t *testing.T) {
+	t.Run("OriginWithHttpsStorage", func(t *testing.T) {
+		xrdConfig := &XrootdConfig{
+			Origin: OriginConfig{
+				StorageType: "https",
+			},
+		}
+
+		err := ValidateRequiredPlugins(true, xrdConfig)
+		if err != nil {
+			assert.Contains(t, err.Error(), "libXrdHTTPServer.so")
+		}
+	})
+
+	t.Run("OriginWithGlobusStorage", func(t *testing.T) {
+		xrdConfig := &XrootdConfig{
+			Origin: OriginConfig{
+				StorageType: "globus",
+			},
+		}
+
+		err := ValidateRequiredPlugins(true, xrdConfig)
+		if err != nil {
+			assert.Contains(t, err.Error(), "libXrdHTTPServer.so")
+			assert.Contains(t, err.Error(), "libXrdOssGlobus.so")
+		}
+	})
+
+	t.Run("OriginWithMacaroons", func(t *testing.T) {
+		xrdConfig := &XrootdConfig{
+			Origin: OriginConfig{
+				StorageType:      "posix",
+				EnableMacaroons:  true,
+			},
+		}
+
+		err := ValidateRequiredPlugins(true, xrdConfig)
+		if err != nil {
+			assert.Contains(t, err.Error(), "libXrdMacaroons.so")
+		}
+	})
+
+	t.Run("OriginWithConcurrency", func(t *testing.T) {
+		xrdConfig := &XrootdConfig{
+			Origin: OriginConfig{
+				StorageType: "posix",
+				Concurrency: 4,
+			},
+		}
+
+		err := ValidateRequiredPlugins(true, xrdConfig)
+		if err != nil {
+			assert.Contains(t, err.Error(), "libXrdThrottle.so")
+		}
+	})
+
+	t.Run("OriginWithMultiuser", func(t *testing.T) {
+		xrdConfig := &XrootdConfig{
+			Origin: OriginConfig{
+				StorageType: "posix",
+				Multiuser:   true,
+			},
+		}
+
+		err := ValidateRequiredPlugins(true, xrdConfig)
+		if err != nil {
+			assert.Contains(t, err.Error(), "libXrdMultiuser.so")
+		}
+	})
+
+	t.Run("OriginWithAtomicUploads", func(t *testing.T) {
+		xrdConfig := &XrootdConfig{
+			Origin: OriginConfig{
+				StorageType:         "posix",
+				EnableAtomicUploads: true,
+			},
+		}
+
+		err := ValidateRequiredPlugins(true, xrdConfig)
+		if err != nil {
+			assert.Contains(t, err.Error(), "libXrdOssPosc.so")
+		}
+	})
+
+	t.Run("CacheAlwaysRequiresHttpPelican", func(t *testing.T) {
+		// libXrdHttpPelican should always be checked for caches,
+		// regardless of DropPrivileges setting
 		xrdConfig := &XrootdConfig{
 			Server: ServerConfig{
-				DropPrivileges: true,
+				DropPrivileges: false,
 			},
 			Cache: CacheConfig{},
 		}
 
 		err := ValidateRequiredPlugins(false, xrdConfig)
-		// This may fail if plugins are not installed, which is expected
 		if err != nil {
 			assert.Contains(t, err.Error(), "Required XRootD plugin(s) not found")
-			// Should check for both libXrdHttpPelican and libXrdClPelican
-			assert.True(t,
-				strings.Contains(err.Error(), "libXrdHttpPelican.so") ||
-					strings.Contains(err.Error(), "libXrdClPelican.so"),
-			)
+			assert.Contains(t, err.Error(), "libXrdHttpPelican.so")
+		}
+	})
+
+	t.Run("CacheWithLotman", func(t *testing.T) {
+		xrdConfig := &XrootdConfig{
+			Cache: CacheConfig{
+				LotmanCfg: LotmanCfg{
+					Enabled: true,
+				},
+			},
+		}
+
+		err := ValidateRequiredPlugins(false, xrdConfig)
+		if err != nil {
+			assert.Contains(t, err.Error(), "libXrdPurgeLotMan.so")
+		}
+	})
+
+	t.Run("CacheWithConcurrency", func(t *testing.T) {
+		xrdConfig := &XrootdConfig{
+			Cache: CacheConfig{
+				Concurrency: 4,
+			},
+		}
+
+		err := ValidateRequiredPlugins(false, xrdConfig)
+		if err != nil {
+			assert.Contains(t, err.Error(), "libXrdThrottle.so")
+		}
+	})
+
+	t.Run("ErrorMessageFormat", func(t *testing.T) {
+		xrdConfig := &XrootdConfig{
+			Cache: CacheConfig{},
+		}
+
+		err := ValidateRequiredPlugins(false, xrdConfig)
+		if err != nil {
+			errMsg := err.Error()
+			// Should mention the specific packages that provide the plugins
+			assert.Contains(t, errMsg, "xrdhttp-pelican")
+			assert.Contains(t, errMsg, "xrdcl-pelican")
+			assert.NotContains(t, errMsg, "Note:")
 		}
 	})
 }
