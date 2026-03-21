@@ -387,41 +387,93 @@ func checkPluginExists(pluginName string, includeClientPaths bool) bool {
 	return false
 }
 
+// pluginPackageMap maps plugin base names (without extension) to the RPM package that provides them.
+// These were determined from an OSG EL9 environment; names may differ in other distros but
+// should be correct for the primary Pelican deployment targets.
+var pluginPackageMap = map[string]string{
+	"libXrdHttpPelican": "xrdhttp-pelican",
+	"libXrdS3":          "xrootd-s3-http",
+	"libXrdClPelican":   "xrdcl-pelican",
+	"libXrdThrottle":    "xrootd-server-libs",
+	"libXrdMacaroons":   "xrootd-server-libs",
+	"libXrdMultiuser":   "xrootd-multiuser",
+	"libXrdOssPosc":     "xrootd-s3-http",
+	"libXrdHTTPServer":  "xrootd-s3-http",
+	"libXrdOssGlobus":   "xrootd-s3-http",
+	"libXrdPurgeLotMan": "xrootd-lotman",
+}
+
+// pluginBaseName strips the extension from a plugin filename (e.g. "libXrdS3.so" -> "libXrdS3").
+func pluginBaseName(name string) string {
+	for _, ext := range []string{".so", ".dylib"} {
+		name = strings.TrimSuffix(name, ext)
+	}
+	return name
+}
+
+// checkAndAppendMissing checks if a plugin exists and appends it to the missing list if not found.
+func checkAndAppendMissing(missingPlugins *[]string, pluginName string, includeClientPaths bool) {
+	if !checkPluginExists(pluginName, includeClientPaths) {
+		*missingPlugins = append(*missingPlugins, pluginName)
+	}
+}
+
 // ValidateRequiredPlugins checks for the existence of required XRootD plugins based on the configuration.
 // It returns an error with a detailed message if any required plugin is missing.
 func ValidateRequiredPlugins(isOrigin bool, xrdConfig *XrootdConfig) error {
 	missingPlugins := []string{}
 
 	if isOrigin {
-		// Check for libXrdHttpPelican if drop privileges is enabled
+		// libXrdHttpPelican is required when drop privileges is enabled
 		if xrdConfig.Server.DropPrivileges {
-			if !checkPluginExists("libXrdHttpPelican.so", false) {
-				missingPlugins = append(missingPlugins, "libXrdHttpPelican.so")
-			}
+			checkAndAppendMissing(&missingPlugins, "libXrdHttpPelican.so", false)
 		}
 
-		// Check for libXrdS3 if using S3 storage type
-		if xrdConfig.Origin.StorageType == "s3" {
-			if !checkPluginExists("libXrdS3.so", false) {
-				missingPlugins = append(missingPlugins, "libXrdS3.so")
+		// libXrdMacaroons is needed when macaroons are enabled
+		if xrdConfig.Origin.EnableMacaroons {
+			checkAndAppendMissing(&missingPlugins, "libXrdMacaroons.so", false)
+		}
+
+		// libXrdThrottle is needed when concurrency is configured
+		if xrdConfig.Origin.Concurrency > 0 {
+			checkAndAppendMissing(&missingPlugins, "libXrdThrottle.so", false)
+		}
+
+		switch xrdConfig.Origin.StorageType {
+		case "posix":
+			// libXrdMultiuser is needed for multiuser mode
+			if xrdConfig.Origin.Multiuser {
+				checkAndAppendMissing(&missingPlugins, "libXrdMultiuser.so", false)
 			}
+			// libXrdOssPosc is needed for atomic uploads
+			if xrdConfig.Origin.EnableAtomicUploads {
+				checkAndAppendMissing(&missingPlugins, "libXrdOssPosc.so", false)
+			}
+		case "s3":
+			checkAndAppendMissing(&missingPlugins, "libXrdS3.so", false)
+		case "https":
+			checkAndAppendMissing(&missingPlugins, "libXrdHTTPServer.so", false)
+		case "globus":
+			checkAndAppendMissing(&missingPlugins, "libXrdHTTPServer.so", false)
+			checkAndAppendMissing(&missingPlugins, "libXrdOssGlobus.so", false)
 		}
 	} else {
 		// Cache-specific checks
-		// Check for libXrdHttpPelican if drop privileges is enabled
-		if xrdConfig.Server.DropPrivileges {
-			if !checkPluginExists("libXrdHttpPelican.so", false) {
-				missingPlugins = append(missingPlugins, "libXrdHttpPelican.so")
-			}
+		// libXrdHttpPelican is always required for caches (unconditional in cache template)
+		checkAndAppendMissing(&missingPlugins, "libXrdHttpPelican.so", false)
+
+		// libXrdClPelican is needed for cache servers to support pelican:// URLs.
+		// Include client plugin configuration paths for this check.
+		checkAndAppendMissing(&missingPlugins, "libXrdClPelican.so", true)
+
+		// libXrdPurgeLotMan is needed when Lotman is enabled
+		if xrdConfig.Cache.LotmanCfg.Enabled {
+			checkAndAppendMissing(&missingPlugins, "libXrdPurgeLotMan.so", false)
 		}
 
-		// Check for client plugin - this is needed for cache servers to support pelican:// URLs.
-		// The cache configuration writes client plugin settings to the cache-client.plugins.d directory
-		// (see CheckCacheEnv in xrootd_config.go), which configures XRootD to use libXrdClPelican.so
-		// for handling pelican:// protocol requests.
-		// Include client plugin configuration paths for this check.
-		if !checkPluginExists("libXrdClPelican.so", true) {
-			missingPlugins = append(missingPlugins, "libXrdClPelican.so")
+		// libXrdThrottle is needed when concurrency is configured
+		if xrdConfig.Cache.Concurrency > 0 {
+			checkAndAppendMissing(&missingPlugins, "libXrdThrottle.so", false)
 		}
 	}
 
@@ -431,14 +483,34 @@ func ValidateRequiredPlugins(isOrigin bool, xrdConfig *XrootdConfig) error {
 		if runtime.GOOS == "darwin" {
 			envVars = "DYLD_LIBRARY_PATH, or DYLD_FALLBACK_LIBRARY_PATH"
 		}
+
+		// Build per-plugin install advice, deduplicating packages
+		seenPkgs := make(map[string]bool)
+		var pkgAdvice []string
+		for _, plugin := range missingPlugins {
+			base := pluginBaseName(plugin)
+			if pkg, ok := pluginPackageMap[base]; ok && !seenPkgs[pkg] {
+				seenPkgs[pkg] = true
+				pkgAdvice = append(pkgAdvice, pkg)
+			}
+		}
+
+		var installHint string
+		if len(pkgAdvice) > 0 {
+			installHint = "\nThe missing plugin(s) are provided by the following package(s): " +
+				strings.Join(pkgAdvice, ", ")
+		}
+
 		return errors.Errorf(
 			"Required XRootD plugin(s) not found: %s\n"+
 				"Please install the missing plugin(s) in one of the following directories:\n  %s\n"+
-				"Or set the %s environment variable to include the plugin location.\n"+
-				"Note: XRootD may add a version suffix to plugin names (e.g., libXrdHttpPelican-5.so for XRootD 5.x)",
+				"Or set the %s environment variable to include the plugin location.%s\n"+
+				"When searching on disk, XRootD version suffixes are automatically added to the filename\n"+
+				"(e.g., libXrdHttpPelican.so in config is expected to be libXrdHttpPelican-5.so on disk)",
 			strings.Join(missingPlugins, ", "),
 			strings.Join(searchPaths, "\n  "),
 			envVars,
+			installHint,
 		)
 	}
 
