@@ -1657,6 +1657,74 @@ func (pc *PersistentCache) getBlockSummaryLive(instanceHash InstanceHash, conten
 }
 
 // introspectStatsHandler returns aggregate cache size statistics.
+// GetCacheStats returns aggregate cache size statistics by scanning metadata
+// and reading usage counters.  This is the same data returned by the
+// introspect/stats HTTP endpoint.
+func (pc *PersistentCache) GetCacheStats() (*CacheStats, error) {
+	stats := &CacheStats{
+		StorageBreakdown: make(map[string]*StorageDirStats),
+	}
+
+	// Scan metadata for counts and byte totals
+	if err := pc.db.ScanMetadata(func(instanceHash InstanceHash, meta *CacheMetadata) error {
+		stats.TotalMetadataEntries++
+		stats.TotalBytesMetadata += meta.ContentLength
+
+		dirKey := fmt.Sprintf("storage-%d", meta.StorageID)
+		ds, ok := stats.StorageBreakdown[dirKey]
+		if !ok {
+			ds = &StorageDirStats{StorageID: uint8(meta.StorageID)}
+			stats.StorageBreakdown[dirKey] = ds
+		}
+		ds.ObjectCount++
+		ds.TotalBytes += meta.ContentLength
+
+		if meta.IsInline() {
+			ds.InlineCount++
+			ds.InlineBytes += meta.ContentLength
+		} else {
+			ds.OnDiskCount++
+			ds.OnDiskBytes += meta.ContentLength
+		}
+		return nil
+	}); err != nil {
+		return nil, errors.Wrap(err, "failed to scan metadata")
+	}
+
+	// Inline data size
+	inlineBytes, err := pc.db.ComputeInlineDataSize()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to compute inline data size")
+	}
+	stats.TotalInlineBytes = inlineBytes
+
+	// Usage counters
+	usage, usageErr := pc.db.GetAllUsage()
+	if usageErr == nil && len(usage) > 0 {
+		stats.UsageCounters = make(map[string]int64, len(usage))
+		for k, v := range usage {
+			key := fmt.Sprintf("s%d:ns%d", k.StorageID, k.NamespaceID)
+			stats.UsageCounters[key] = v
+		}
+	}
+
+	// Populate human-readable mappings for storage directories and namespaces.
+	if mappings, err := pc.db.LoadDiskMappings(); err == nil && len(mappings) > 0 {
+		stats.DirPaths = make(map[uint8]string, len(mappings))
+		for _, dm := range mappings {
+			stats.DirPaths[uint8(dm.ID)] = dm.Directory
+		}
+	}
+	if nsMappings, _, err := pc.db.LoadNamespaceMappings(); err == nil && len(nsMappings) > 0 {
+		stats.NamespaceNames = make(map[uint32]string, len(nsMappings))
+		for prefix, id := range nsMappings {
+			stats.NamespaceNames[uint32(id)] = prefix
+		}
+	}
+
+	return stats, nil
+}
+
 //
 // GET /api/v1.0/cache/introspect/stats
 func (pc *PersistentCache) introspectStatsHandler(c *gin.Context) {

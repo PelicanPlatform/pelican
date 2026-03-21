@@ -900,21 +900,43 @@ func getMetadataInTxn(txn *badger.Txn, instanceHash InstanceHash) (*CacheMetadat
 	return &meta, nil
 }
 
+// encodeUsage serializes an int64 usage value into 8 little-endian bytes.
+func encodeUsage(v int64) []byte {
+	buf := make([]byte, 8)
+	binary.LittleEndian.PutUint64(buf, uint64(v))
+	return buf
+}
+
+// decodeUsage deserializes 8 little-endian bytes into an int64 usage value,
+// clamping negative values to zero.  Returns 0 if the slice is too short.
+func decodeUsage(b []byte) int64 {
+	if len(b) < 8 {
+		return 0
+	}
+	v := int64(binary.LittleEndian.Uint64(b))
+	if v < 0 {
+		return 0
+	}
+	return v
+}
+
+// decodeUsageRaw is like decodeUsage but does not clamp negative values.
+// It is used by usageMergeFunc where intermediate negative totals must
+// be preserved so that out-of-order deltas eventually converge.
+func decodeUsageRaw(b []byte) int64 {
+	if len(b) < 8 {
+		return 0
+	}
+	return int64(binary.LittleEndian.Uint64(b))
+}
+
 // usageMergeFunc is the merge function for BadgerDB MergeOperators.
 // Both existingVal and newVal are 8-byte little-endian int64 values.
-// The result is their sum.  No clamping is done here; that happens at
-// read time so that intermediate negative totals do not lose information.
+// The result is their sum.  Intermediate negative totals are allowed
+// (e.g. when deletion deltas arrive before the corresponding charge)
+// and are clamped to zero at read time.
 func usageMergeFunc(existingVal, newVal []byte) []byte {
-	var existing, delta int64
-	if len(existingVal) >= 8 {
-		existing = int64(binary.LittleEndian.Uint64(existingVal))
-	}
-	if len(newVal) >= 8 {
-		delta = int64(binary.LittleEndian.Uint64(newVal))
-	}
-	buf := make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf, uint64(existing+delta))
-	return buf
+	return encodeUsage(decodeUsageRaw(existingVal) + decodeUsageRaw(newVal))
 }
 
 // usageCompactionInterval controls how often the MergeOperator background
@@ -952,9 +974,7 @@ func (cdb *CacheDB) AddUsage(storageID StorageID, namespaceID NamespaceID, delta
 	if delta == 0 {
 		return nil
 	}
-	buf := make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf, uint64(delta))
-	return cdb.getUsageMergeOp(storageID, namespaceID).Add(buf)
+	return cdb.getUsageMergeOp(storageID, namespaceID).Add(encodeUsage(delta))
 }
 
 // ChargeUsage is an alias for AddUsage for backward compatibility.
@@ -1070,133 +1090,12 @@ func (cdb *CacheDB) GetInlineData(instanceHash InstanceHash) ([]byte, error) {
 }
 
 // SetInlineData stores encrypted inline data for a small file.
-// Usage statistics are updated via a MergeOperator after the transaction
-// commits, so that the write cannot conflict with concurrent operations.
+// The caller (StoreInline) is responsible for usage accounting via
+// ChargeUsage; this function does NOT adjust usage counters.
 func (cdb *CacheDB) SetInlineData(instanceHash InstanceHash, encryptedData []byte) error {
-	var usageDelta int64
-	var usageStorageID StorageID
-	var usageNamespaceID NamespaceID
-	var hasUsage bool
-
-	err := cdb.db.Update(func(txn *badger.Txn) error {
-		// Check if inline data already exists to avoid double-counting
-		var oldSize int64
-		item, err := txn.Get(InlineKey(instanceHash))
-		if err == nil {
-			err = item.Value(func(val []byte) error {
-				oldSize = int64(len(val))
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-		} else if !errors.Is(err, badger.ErrKeyNotFound) {
-			return err
-		}
-
-		// Set the new inline data
-		if err := txn.Set(InlineKey(instanceHash), encryptedData); err != nil {
-			return err
-		}
-
-		// Get metadata to find namespace ID for usage tracking
-		var meta CacheMetadata
-		item, err = txn.Get(MetaKey(instanceHash))
-		if err == nil {
-			err = item.Value(func(val []byte) error {
-				return msgpack.Unmarshal(val, &meta)
-			})
-			if err != nil {
-				return errors.Wrap(err, "failed to unmarshal metadata")
-			}
-
-			delta := int64(len(encryptedData)) - oldSize
-			if delta != 0 {
-				usageDelta = delta
-				usageStorageID = meta.StorageID
-				usageNamespaceID = meta.NamespaceID
-				hasUsage = true
-			}
-		}
-		// If metadata doesn't exist yet, usage will be tracked when metadata is set
-
-		return nil
+	return cdb.db.Update(func(txn *badger.Txn) error {
+		return txn.Set(InlineKey(instanceHash), encryptedData)
 	})
-	if err != nil {
-		return err
-	}
-
-	if hasUsage {
-		if err := cdb.AddUsage(usageStorageID, usageNamespaceID, usageDelta); err != nil {
-			log.Warnf("Failed to update usage for storage %d namespace %d: %v",
-				usageStorageID, usageNamespaceID, err)
-		}
-	}
-	return nil
-}
-
-// DeleteInlineData removes inline data for a file.
-// Usage statistics are decreased via a MergeOperator after the transaction.
-func (cdb *CacheDB) DeleteInlineData(instanceHash InstanceHash) error {
-	var usageDelta int64
-	var usageStorageID StorageID
-	var usageNamespaceID NamespaceID
-	var hasUsage bool
-
-	err := cdb.db.Update(func(txn *badger.Txn) error {
-		// Get the size of the data being deleted
-		var dataSize int64
-		item, err := txn.Get(InlineKey(instanceHash))
-		if err == nil {
-			err = item.Value(func(val []byte) error {
-				dataSize = int64(len(val))
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-		} else if errors.Is(err, badger.ErrKeyNotFound) {
-			return nil // Already deleted
-		} else {
-			return err
-		}
-
-		// Delete the inline data
-		if err := txn.Delete(InlineKey(instanceHash)); err != nil {
-			return err
-		}
-
-		// Get metadata to find namespace ID for usage tracking
-		var meta CacheMetadata
-		item, err = txn.Get(MetaKey(instanceHash))
-		if err == nil {
-			err = item.Value(func(val []byte) error {
-				return msgpack.Unmarshal(val, &meta)
-			})
-			if err != nil {
-				return errors.Wrap(err, "failed to unmarshal metadata")
-			}
-
-			usageDelta = -dataSize
-			usageStorageID = meta.StorageID
-			usageNamespaceID = meta.NamespaceID
-			hasUsage = true
-		}
-		// If metadata doesn't exist, can't track usage decrease (orphaned inline data)
-
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
-	if hasUsage {
-		if err := cdb.AddUsage(usageStorageID, usageNamespaceID, usageDelta); err != nil {
-			log.Warnf("Failed to decrease usage for storage %d namespace %d: %v",
-				usageStorageID, usageNamespaceID, err)
-		}
-	}
-	return nil
 }
 
 // --- LRU Operations ---
@@ -1274,14 +1173,7 @@ func (cdb *CacheDB) GetUsage(storageID StorageID, namespaceID NamespaceID) (int6
 			}
 			return 0, errors.Wrap(err, "failed to get usage")
 		}
-		if len(val) < 8 {
-			return 0, nil
-		}
-		usage := int64(binary.LittleEndian.Uint64(val))
-		if usage < 0 {
-			usage = 0
-		}
-		return usage, nil
+		return decodeUsage(val), nil
 	}
 
 	// No active merge operator — raw read (dormant key from prior run).
@@ -1295,7 +1187,7 @@ func (cdb *CacheDB) GetUsage(storageID StorageID, namespaceID NamespaceID) (int6
 			if len(val) < 8 {
 				return errors.New("invalid usage value")
 			}
-			usage = int64(binary.LittleEndian.Uint64(val))
+			usage = decodeUsage(val)
 			return nil
 		})
 	})
@@ -1369,11 +1261,7 @@ func (cdb *CacheDB) getUsageByPrefix(prefix []byte) (map[StorageUsageKey]int64, 
 			return nil, errors.Wrap(err, "failed to get usage from merge operator")
 		}
 		if len(val) >= 8 {
-			v := int64(binary.LittleEndian.Uint64(val))
-			if v < 0 {
-				v = 0
-			}
-			usage[suk] = v
+			usage[suk] = decodeUsage(val)
 		}
 		activeKeys[string(dbKey)] = true
 	}
@@ -1401,7 +1289,7 @@ func (cdb *CacheDB) getUsageByPrefix(prefix []byte) (map[StorageUsageKey]int64, 
 			err = item.Value(func(val []byte) error {
 				if len(val) >= 8 {
 					usageKey := StorageUsageKey{StorageID: storageID, NamespaceID: namespaceID}
-					usage[usageKey] = int64(binary.LittleEndian.Uint64(val))
+					usage[usageKey] = decodeUsage(val)
 				}
 				return nil
 			})
@@ -1417,7 +1305,16 @@ func (cdb *CacheDB) getUsageByPrefix(prefix []byte) (map[StorageUsageKey]int64, 
 
 // SetUsage sets the absolute usage counter for a (storageID, namespaceID)
 // pair.  Any active MergeOperator for the key is stopped first (flushing
-// pending deltas) and then the value is overwritten with a plain Set.
+// pending deltas) and then the value is overwritten.
+//
+// The entry is written with WithDiscard() so that BadgerDB marks all
+// earlier versions of the key as eligible for garbage collection.
+// Without this flag, the MergeOperator's iterateAndMerge would still
+// see the old compacted entry (which carries bitDiscardEarlierVersions)
+// and sum it into the total, causing the counter to include both the
+// new baseline and the old accumulated value — a compounding overcount
+// that grows with every reconciliation cycle.
+//
 // The next AddUsage call will lazily create a fresh MergeOperator.
 func (cdb *CacheDB) SetUsage(storageID StorageID, namespaceID NamespaceID, value int64) error {
 	suk := StorageUsageKey{StorageID: storageID, NamespaceID: namespaceID}
@@ -1429,11 +1326,11 @@ func (cdb *CacheDB) SetUsage(storageID StorageID, namespaceID NamespaceID, value
 	}
 	cdb.usageMu.Unlock()
 
+	if value < 0 {
+		value = 0
+	}
 	return cdb.db.Update(func(txn *badger.Txn) error {
-		key := UsageKey(storageID, namespaceID)
-		data := make([]byte, 8)
-		binary.LittleEndian.PutUint64(data, uint64(value))
-		return txn.Set(key, data)
+		return txn.SetEntry(badger.NewEntry(UsageKey(storageID, namespaceID), encodeUsage(value)).WithDiscard())
 	})
 }
 
