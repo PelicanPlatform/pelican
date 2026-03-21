@@ -582,18 +582,19 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 			// this, a request like /prefix/%2e%2e/secret reaches
 			// the backend with ".." intact, potentially escaping
 			// the storage root.
-			newPath := path.Clean(wildcardPath)
+			cleanedPath := path.Clean(wildcardPath)
 
-			// Create a shallow copy of the request and modify its URL
-			modifiedReq := c.Request.Clone(c.Request.Context())
-			modifiedURL := *c.Request.URL
-			modifiedURL.Path = newPath
-			modifiedReq.URL = &modifiedURL
-
-			// Stash client tracing headers (X-Pelican-JobId,
-			// X-Pelican-Timeout) in the request context so backends
-			// that forward requests can propagate them.
+			// Build a modified request with the cleaned URL path and
+			// stashed tracing headers.  The full path must include
+			// routePrefix so that the WebDAV handler's Prefix
+			// stripping produces the correct filesystem path.
 			req := server_utils.StashPelicanHeaders(c.Request)
+			modifiedURL := *req.URL
+			modifiedURL.Path = routePrefix + cleanedPath
+			modifiedURL.RawPath = "" // force use of cleaned Path
+			modifiedReq := new(http.Request)
+			*modifiedReq = *req
+			modifiedReq.URL = &modifiedURL
 
 			// For PUT requests, pass the Content-Length as a size hint
 			// so the blob backend can optimize upload part sizes.
@@ -603,16 +604,9 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 			}
 
 			if c.Request.Method == http.MethodHead {
-				// For HEAD requests, pass the original request to the WebDAV handler
-				// (it needs the full URL so its Prefix stripping works correctly).
-				// wildcardPath is used only for checksum lookup on the filesystem.
-				handleHeadWithChecksum(c, handler, req, wildcardPath, backend)
+				handleHeadWithChecksum(c, handler, modifiedReq, cleanedPath, backend)
 			} else {
-				// For all other methods (including PROPFIND), pass the original request
-				// to the WebDAV handler. The handler's Prefix field ensures it strips
-				// the route prefix for filesystem access while using it to construct
-				// correct href values in responses.
-				handler.ServeHTTP(c.Writer, req)
+				handler.ServeHTTP(c.Writer, modifiedReq)
 			}
 		}
 
