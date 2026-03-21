@@ -1,0 +1,9 @@
+# Origin export configuration for persistent cache tests
+
+Origin:
+  StorageType: "posixv2"
+  EnableDirectReads: true
+  Exports:
+    - StoragePrefix: /<SHOULD BE OVERRIDDEN>
+      FederationPrefix: /test
+      Capabilities: ["PublicReads", "Writes", "DirectReads", "Listings"]

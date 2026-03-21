@@ -1,0 +1,48 @@
+---
+title: pelican cache introspect
+---
+
+## pelican cache introspect
+
+Introspect the cache's persistent database
+
+### Synopsis
+
+Inspect the contents of the cache server's persistent cache.
+
+These commands allow administrators to examine cached objects, their metadata,
+and verify data integrity. If the cache server is running, commands connect
+to its API automatically; otherwise they fall back to direct database access.
+
+The cache directory is derived from Cache.StorageLocation configuration.
+
+### Options
+
+```
+      --cache-dir string   Override cache directory (default: from config)
+  -h, --help               help for introspect
+      --json               Output in JSON format
+      --offline            Force offline mode (direct database access). By default, if the cache is running, queries go to the live service.
+  -t, --token string       Path to admin token file (online mode only; auto-generated if not provided)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican cache](/commands-reference/cache/)	 - Operate a Pelican cache service
+* [pelican cache introspect consistency](/commands-reference/cache/introspect/consistency/)	 - Run a cache consistency check
+* [pelican cache introspect disk-usage](/commands-reference/cache/introspect/disk-usage/)	 - Compute actual disk usage by walking storage directories
+* [pelican cache introspect etags](/commands-reference/cache/introspect/etags/)	 - List all cached ETags for an object
+* [pelican cache introspect list](/commands-reference/cache/introspect/list/)	 - List cached objects
+* [pelican cache introspect metadata](/commands-reference/cache/introspect/metadata/)	 - Show detailed metadata for a cached object
+* [pelican cache introspect stats](/commands-reference/cache/introspect/stats/)	 - Show cache size statistics
+* [pelican cache introspect verify](/commands-reference/cache/introspect/verify/)	 - Verify checksum of a cached object

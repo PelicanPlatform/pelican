@@ -88,6 +88,7 @@ func GetDeprecated() map[string][]string {
 // It is generated from docs/parameters.yaml and indicates whether a parameter can be reloaded
 // at runtime without requiring a server restart.
 var runtimeConfigurableMap = map[string]bool{
+	"Cache.AllowedFederations": false,
 	"Cache.BlocksToPrefetch": false,
 	"Cache.ClientStatisticsLocation": false,
 	"Cache.Concurrency": false,
@@ -105,6 +106,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.EnablePrefetch": false,
 	"Cache.EnableSiteLocalMode": false,
 	"Cache.EnableTLSClientAuth": false,
+	"Cache.EnableV2": false,
 	"Cache.EnableVoms": false,
 	"Cache.EvictionMonitoringInterval": false,
 	"Cache.EvictionMonitoringMaxDepth": false,
@@ -116,6 +118,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.HighWaterMark": false,
 	"Cache.LocalRoot": false,
 	"Cache.LowWatermark": false,
+	"Cache.MemoryCacheSize": false,
 	"Cache.MetaLocations": false,
 	"Cache.MinDirectorRefreshInterval": false,
 	"Cache.NamespaceLocation": false,
@@ -217,12 +220,20 @@ var runtimeConfigurableMap = map[string]bool{
 	"Issuer.UserStripDomain": false,
 	"IssuerKey": false,
 	"IssuerKeysDirectory": false,
+	"LocalCache.ChunkSize": false,
 	"LocalCache.DataLocation": false,
+	"LocalCache.DefaultMaxAge": false,
+	"LocalCache.FDCacheSize": false,
 	"LocalCache.HighWaterMarkPercentage": false,
 	"LocalCache.LowWaterMarkPercentage": false,
+	"LocalCache.MaxConcurrentPrefetch": false,
+	"LocalCache.MemoryCacheSize": false,
+	"LocalCache.PrefetchTimeout": false,
+	"LocalCache.RevalidationJitter": false,
 	"LocalCache.RunLocation": false,
 	"LocalCache.Size": false,
 	"LocalCache.Socket": false,
+	"LocalCache.StorageDirs": false,
 	"Logging.Cache.Http": true,
 	"Logging.Cache.Lotman": true,
 	"Logging.Cache.Ofs": true,
@@ -280,6 +291,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"OIDC.Scopes": false,
 	"OIDC.TokenEndpoint": false,
 	"OIDC.UserInfoEndpoint": false,
+	"Origin.CacheControl": false,
 	"Origin.Concurrency": false,
 	"Origin.ConcurrencyDegradedThreshold": false,
 	"Origin.DbLocation": false,
@@ -526,6 +538,8 @@ func (sP StringParam) GetString() string {
 			return config.Cache.LocalRoot
 		case "Cache.LowWatermark":
 			return config.Cache.LowWatermark
+		case "Cache.MemoryCacheSize":
+			return config.Cache.MemoryCacheSize
 		case "Cache.NamespaceLocation":
 			return config.Cache.NamespaceLocation
 		case "Cache.PSSOrigin":
@@ -600,8 +614,12 @@ func (sP StringParam) GetString() string {
 			return config.Issuer.ScitokensServerLocation
 		case "Issuer.TomcatLocation":
 			return config.Issuer.TomcatLocation
+		case "LocalCache.ChunkSize":
+			return config.LocalCache.ChunkSize
 		case "LocalCache.DataLocation":
 			return config.LocalCache.DataLocation
+		case "LocalCache.MemoryCacheSize":
+			return config.LocalCache.MemoryCacheSize
 		case "LocalCache.RunLocation":
 			return config.LocalCache.RunLocation
 		case "LocalCache.Size":
@@ -674,6 +692,8 @@ func (sP StringParam) GetString() string {
 			return config.OIDC.TokenEndpoint
 		case "OIDC.UserInfoEndpoint":
 			return config.OIDC.UserInfoEndpoint
+		case "Origin.CacheControl":
+			return config.Origin.CacheControl
 		case "Origin.DbLocation":
 			return config.Origin.DbLocation
 		case "Origin.ExportVolume":
@@ -879,6 +899,8 @@ func (sP StringParam) GetEnvVarName() string {
 func (slP StringSliceParam) GetStringSlice() []string {
 	config := getOrCreateConfig()
 	switch slP.name {
+		case "Cache.AllowedFederations":
+			return config.Cache.AllowedFederations
 		case "Cache.DataLocations":
 			return config.Cache.DataLocations
 		case "Cache.MetaLocations":
@@ -982,10 +1004,16 @@ func (iP IntParam) GetInt() int {
 			return config.Director.MinStatResponse
 		case "Director.StatConcurrencyLimit":
 			return config.Director.StatConcurrencyLimit
+		case "LocalCache.FDCacheSize":
+			return config.LocalCache.FDCacheSize
 		case "LocalCache.HighWaterMarkPercentage":
 			return config.LocalCache.HighWaterMarkPercentage
 		case "LocalCache.LowWaterMarkPercentage":
 			return config.LocalCache.LowWaterMarkPercentage
+		case "LocalCache.MaxConcurrentPrefetch":
+			return config.LocalCache.MaxConcurrentPrefetch
+		case "LocalCache.RevalidationJitter":
+			return config.LocalCache.RevalidationJitter
 		case "MinimumDownloadSpeed":
 			return config.MinimumDownloadSpeed
 		case "Monitoring.LabelLimit":
@@ -1110,6 +1138,8 @@ func (bP BoolParam) GetBool() bool {
 			return config.Cache.EnableSiteLocalMode
 		case "Cache.EnableTLSClientAuth":
 			return config.Cache.EnableTLSClientAuth
+		case "Cache.EnableV2":
+			return config.Cache.EnableV2
 		case "Cache.EnableVoms":
 			return config.Cache.EnableVoms
 		case "Cache.SelfTest":
@@ -1313,6 +1343,10 @@ func (dP DurationParam) GetDuration() time.Duration {
 			return config.Issuer.DynamicClientUnusedTimeout
 		case "Issuer.RefreshTokenGracePeriod":
 			return config.Issuer.RefreshTokenGracePeriod
+		case "LocalCache.DefaultMaxAge":
+			return config.LocalCache.DefaultMaxAge
+		case "LocalCache.PrefetchTimeout":
+			return config.LocalCache.PrefetchTimeout
 		case "Logging.Client.ProgressInterval":
 			return config.Logging.Client.ProgressInterval
 		case "Lotman.DefaultLotDeletionLifetime":
@@ -1407,6 +1441,12 @@ func (oP ObjectParam) Unmarshal(rawVal any) error {
 	return viper.UnmarshalKey(oP.name, rawVal)
 }
 
+// GetRaw returns the raw value from the configuration store without
+// any type coercion.  Returns nil when the key is unset.
+func (oP ObjectParam) GetRaw() interface{} {
+	return viper.Get(oP.name)
+}
+
 func (oP ObjectParam) GetName() string {
 	return oP.name
 }
@@ -1427,6 +1467,7 @@ func (oP ObjectParam) GetEnvVarName() string {
 // docs/parameters.yaml. It is primarily used to bind environment variables so
 // that env-only overrides are included in viper.AllSettings().
 var allParameterNames = []string{
+	"Cache.AllowedFederations",
 	"Cache.BlocksToPrefetch",
 	"Cache.ClientStatisticsLocation",
 	"Cache.Concurrency",
@@ -1444,6 +1485,7 @@ var allParameterNames = []string{
 	"Cache.EnablePrefetch",
 	"Cache.EnableSiteLocalMode",
 	"Cache.EnableTLSClientAuth",
+	"Cache.EnableV2",
 	"Cache.EnableVoms",
 	"Cache.EvictionMonitoringInterval",
 	"Cache.EvictionMonitoringMaxDepth",
@@ -1455,6 +1497,7 @@ var allParameterNames = []string{
 	"Cache.HighWaterMark",
 	"Cache.LocalRoot",
 	"Cache.LowWatermark",
+	"Cache.MemoryCacheSize",
 	"Cache.MetaLocations",
 	"Cache.MinDirectorRefreshInterval",
 	"Cache.NamespaceLocation",
@@ -1556,12 +1599,20 @@ var allParameterNames = []string{
 	"Issuer.UserStripDomain",
 	"IssuerKey",
 	"IssuerKeysDirectory",
+	"LocalCache.ChunkSize",
 	"LocalCache.DataLocation",
+	"LocalCache.DefaultMaxAge",
+	"LocalCache.FDCacheSize",
 	"LocalCache.HighWaterMarkPercentage",
 	"LocalCache.LowWaterMarkPercentage",
+	"LocalCache.MaxConcurrentPrefetch",
+	"LocalCache.MemoryCacheSize",
+	"LocalCache.PrefetchTimeout",
+	"LocalCache.RevalidationJitter",
 	"LocalCache.RunLocation",
 	"LocalCache.Size",
 	"LocalCache.Socket",
+	"LocalCache.StorageDirs",
 	"Logging.Cache.Http",
 	"Logging.Cache.Lotman",
 	"Logging.Cache.Ofs",
@@ -1619,6 +1670,7 @@ var allParameterNames = []string{
 	"OIDC.Scopes",
 	"OIDC.TokenEndpoint",
 	"OIDC.UserInfoEndpoint",
+	"Origin.CacheControl",
 	"Origin.Concurrency",
 	"Origin.ConcurrencyDegradedThreshold",
 	"Origin.DbLocation",
@@ -1831,6 +1883,7 @@ var (
 	Cache_HighWaterMark = StringParam{"Cache.HighWaterMark"}
 	Cache_LocalRoot = StringParam{"Cache.LocalRoot"}
 	Cache_LowWatermark = StringParam{"Cache.LowWatermark"}
+	Cache_MemoryCacheSize = StringParam{"Cache.MemoryCacheSize"}
 	Cache_NamespaceLocation = StringParam{"Cache.NamespaceLocation"}
 	Cache_PSSOrigin = StringParam{"Cache.PSSOrigin"}
 	Cache_RunLocation = StringParam{"Cache.RunLocation"}
@@ -1868,7 +1921,9 @@ var (
 	Issuer_QDLLocation = StringParam{"Issuer.QDLLocation"}
 	Issuer_ScitokensServerLocation = StringParam{"Issuer.ScitokensServerLocation"}
 	Issuer_TomcatLocation = StringParam{"Issuer.TomcatLocation"}
+	LocalCache_ChunkSize = StringParam{"LocalCache.ChunkSize"}
 	LocalCache_DataLocation = StringParam{"LocalCache.DataLocation"}
+	LocalCache_MemoryCacheSize = StringParam{"LocalCache.MemoryCacheSize"}
 	LocalCache_RunLocation = StringParam{"LocalCache.RunLocation"}
 	LocalCache_Size = StringParam{"LocalCache.Size"}
 	LocalCache_Socket = StringParam{"LocalCache.Socket"}
@@ -1905,6 +1960,7 @@ var (
 	OIDC_Issuer = StringParam{"OIDC.Issuer"}
 	OIDC_TokenEndpoint = StringParam{"OIDC.TokenEndpoint"}
 	OIDC_UserInfoEndpoint = StringParam{"OIDC.UserInfoEndpoint"}
+	Origin_CacheControl = StringParam{"Origin.CacheControl"}
 	Origin_DbLocation = StringParam{"Origin.DbLocation"}
 	Origin_ExportVolume = StringParam{"Origin.ExportVolume"}
 	Origin_FedTokenLocation = StringParam{"Origin.FedTokenLocation"}
@@ -1999,6 +2055,7 @@ var (
 )
 
 var (
+	Cache_AllowedFederations = StringSliceParam{"Cache.AllowedFederations"}
 	Cache_DataLocations = StringSliceParam{"Cache.DataLocations"}
 	Cache_MetaLocations = StringSliceParam{"Cache.MetaLocations"}
 	Cache_PermittedNamespaces = StringSliceParam{"Cache.PermittedNamespaces"}
@@ -2042,8 +2099,11 @@ var (
 	Director_MaxStatResponse = IntParam{"Director.MaxStatResponse"}
 	Director_MinStatResponse = IntParam{"Director.MinStatResponse"}
 	Director_StatConcurrencyLimit = IntParam{"Director.StatConcurrencyLimit"}
+	LocalCache_FDCacheSize = IntParam{"LocalCache.FDCacheSize"}
 	LocalCache_HighWaterMarkPercentage = IntParam{"LocalCache.HighWaterMarkPercentage"}
 	LocalCache_LowWaterMarkPercentage = IntParam{"LocalCache.LowWaterMarkPercentage"}
+	LocalCache_MaxConcurrentPrefetch = IntParam{"LocalCache.MaxConcurrentPrefetch"}
+	LocalCache_RevalidationJitter = IntParam{"LocalCache.RevalidationJitter"}
 	MinimumDownloadSpeed = IntParam{"MinimumDownloadSpeed"}
 	Monitoring_LabelLimit = IntParam{"Monitoring.LabelLimit"}
 	Monitoring_LabelNameLengthLimit = IntParam{"Monitoring.LabelNameLengthLimit"}
@@ -2089,6 +2149,7 @@ var (
 	Cache_EnablePrefetch = BoolParam{"Cache.EnablePrefetch"}
 	Cache_EnableSiteLocalMode = BoolParam{"Cache.EnableSiteLocalMode"}
 	Cache_EnableTLSClientAuth = BoolParam{"Cache.EnableTLSClientAuth"}
+	Cache_EnableV2 = BoolParam{"Cache.EnableV2"}
 	Cache_EnableVoms = BoolParam{"Cache.EnableVoms"}
 	Cache_SelfTest = BoolParam{"Cache.SelfTest"}
 	Client_AssumeDirectorServerHeader = BoolParam{"Client.AssumeDirectorServerHeader"}
@@ -2182,6 +2243,8 @@ var (
 	Issuer_DynamicClientStaleTimeout = DurationParam{"Issuer.DynamicClientStaleTimeout"}
 	Issuer_DynamicClientUnusedTimeout = DurationParam{"Issuer.DynamicClientUnusedTimeout"}
 	Issuer_RefreshTokenGracePeriod = DurationParam{"Issuer.RefreshTokenGracePeriod"}
+	LocalCache_DefaultMaxAge = DurationParam{"LocalCache.DefaultMaxAge"}
+	LocalCache_PrefetchTimeout = DurationParam{"LocalCache.PrefetchTimeout"}
 	Logging_Client_ProgressInterval = DurationParam{"Logging.Client.ProgressInterval"}
 	Lotman_DefaultLotDeletionLifetime = DurationParam{"Lotman.DefaultLotDeletionLifetime"}
 	Lotman_DefaultLotExpirationLifetime = DurationParam{"Lotman.DefaultLotExpirationLifetime"}
@@ -2223,6 +2286,7 @@ var (
 	GeoIPOverrides = ObjectParam{"GeoIPOverrides"}
 	Issuer_AuthorizationTemplates = ObjectParam{"Issuer.AuthorizationTemplates"}
 	Issuer_OIDCAuthenticationRequirements = ObjectParam{"Issuer.OIDCAuthenticationRequirements"}
+	LocalCache_StorageDirs = ObjectParam{"LocalCache.StorageDirs"}
 	Lotman_PolicyDefinitions = ObjectParam{"Lotman.PolicyDefinitions"}
 	Origin_Exports = ObjectParam{"Origin.Exports"}
 	Registry_CustomRegistrationFields = ObjectParam{"Registry.CustomRegistrationFields"}
