@@ -31,6 +31,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	log "github.com/sirupsen/logrus"
 	"gocloud.dev/blob"
 	_ "gocloud.dev/blob/azureblob" // register azblob:// URL opener
@@ -76,15 +78,20 @@ type BlobBackendOptions struct {
 }
 
 // buildS3BlobURL constructs an s3:// gocloud URL from the backward-compatible
-// S3-specific fields in BlobBackendOptions.
-func buildS3BlobURL(opts BlobBackendOptions) (string, error) {
-	if opts.Bucket == "" {
+// S3-specific fields in BlobBackendOptions.  When bucket is non-empty it
+// overrides opts.Bucket (used by the multi-bucket backend).
+func buildS3BlobURL(opts BlobBackendOptions, bucket ...string) (string, error) {
+	bucketName := opts.Bucket
+	if len(bucket) > 0 && bucket[0] != "" {
+		bucketName = bucket[0]
+	}
+	if bucketName == "" {
 		return "", fmt.Errorf("S3 bucket name is required when BlobURL is not set")
 	}
 
 	u := &url.URL{
 		Scheme: "s3",
-		Host:   opts.Bucket,
+		Host:   bucketName,
 	}
 	q := u.Query()
 
@@ -106,8 +113,18 @@ func buildS3BlobURL(opts BlobBackendOptions) (string, error) {
 }
 
 // newBlobBackend opens a gocloud.dev/blob bucket according to opts and returns
-// a blobBackend.
-func newBlobBackend(opts BlobBackendOptions) (*blobBackend, error) {
+// an OriginBackend.
+//
+// When opts.Bucket is empty and opts.BlobURL is also empty the backend
+// operates in "multi-bucket" mode: the first path component of every
+// request is treated as the S3 bucket name and the remainder as the
+// object key.  Bucket connections are opened lazily and cached.
+func newBlobBackend(opts BlobBackendOptions) (server_utils.OriginBackend, error) {
+	// Multi-bucket mode: no fixed bucket configured.
+	if opts.Bucket == "" && opts.BlobURL == "" {
+		return newMultiBucketBlobBackend(opts), nil
+	}
+
 	var (
 		bucket *blob.Bucket
 		err    error
@@ -640,4 +657,235 @@ func parseHTTPDate(s string) time.Time {
 		return time.Time{}
 	}
 	return t
+}
+
+// ---------------------------------------------------------------------------
+// multiBucketBlobBackend — dynamic bucket backend for S3
+//
+// When S3Bucket is not configured, the first path component of each
+// request is used as the bucket name.  For example, a request for
+// "/foo/bar" resolves to bucket "foo", object key "bar".
+//
+// Bucket connections are opened lazily and cached for reuse.
+// ---------------------------------------------------------------------------
+
+type multiBucketBlobBackend struct {
+	opts BlobBackendOptions
+
+	mu      sync.RWMutex
+	buckets map[string]*blob.Bucket
+	group   singleflight.Group
+}
+
+func newMultiBucketBlobBackend(opts BlobBackendOptions) *multiBucketBlobBackend {
+	// Set credentials in the environment so the gocloud AWS credential
+	// chain picks them up for all buckets opened by this backend.
+	if opts.AccessKey != "" && opts.SecretKey != "" {
+		os.Setenv("AWS_ACCESS_KEY_ID", opts.AccessKey)
+		os.Setenv("AWS_SECRET_ACCESS_KEY", opts.SecretKey)
+	}
+	return &multiBucketBlobBackend{
+		opts:    opts,
+		buckets: make(map[string]*blob.Bucket),
+	}
+}
+
+// openBucket returns a cached bucket handle, opening one if necessary.
+// Concurrent callers requesting the same bucket are coalesced via
+// singleflight so that only one connection is established while other
+// buckets can be opened in parallel.
+func (mb *multiBucketBlobBackend) openBucket(bucketName string) (*blob.Bucket, error) {
+	mb.mu.RLock()
+	b, ok := mb.buckets[bucketName]
+	mb.mu.RUnlock()
+	if ok {
+		return b, nil
+	}
+
+	// singleflight.Do deduplicates concurrent opens of the same bucket
+	// while allowing different buckets to be opened in parallel.
+	v, err, _ := mb.group.Do(bucketName, func() (interface{}, error) {
+		// Re-check the cache inside the singleflight func — another
+		// goroutine may have populated it before we were scheduled.
+		mb.mu.RLock()
+		if b, ok := mb.buckets[bucketName]; ok {
+			mb.mu.RUnlock()
+			return b, nil
+		}
+		mb.mu.RUnlock()
+
+		blobURL, err := buildS3BlobURL(mb.opts, bucketName)
+		if err != nil {
+			return nil, err
+		}
+
+		// Anonymous access when no credentials are configured.
+		if mb.opts.AccessKey == "" && mb.opts.SecretKey == "" {
+			if os.Getenv("AWS_ACCESS_KEY_ID") == "" {
+				if strings.Contains(blobURL, "?") {
+					blobURL += "&anonymous=true"
+				} else {
+					blobURL += "?anonymous=true"
+				}
+			}
+		}
+
+		log.Infof("Opening blob bucket via URL: %s", blobURL)
+		bucket, err := blob.OpenBucket(context.Background(), blobURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open blob bucket from URL %q: %w", blobURL, err)
+		}
+
+		mb.mu.Lock()
+		mb.buckets[bucketName] = bucket
+		mb.mu.Unlock()
+
+		return bucket, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*blob.Bucket), nil
+}
+
+// splitBucketPath splits a path like "/foo/bar/baz" into bucket name "foo"
+// and remainder "/bar/baz".  Returns an error if the path has no bucket
+// component.
+func splitBucketPath(name string) (bucket, remainder string, err error) {
+	clean := strings.TrimPrefix(path.Clean("/"+name), "/")
+	if clean == "" {
+		return "", "", fmt.Errorf("path %q does not contain a bucket component", name)
+	}
+	parts := strings.SplitN(clean, "/", 2)
+	bucket = parts[0]
+	if len(parts) > 1 {
+		remainder = "/" + parts[1]
+	} else {
+		remainder = "/"
+	}
+	return bucket, remainder, nil
+}
+
+func (mb *multiBucketBlobBackend) CheckAvailability() error { return nil }
+
+func (mb *multiBucketBlobBackend) FileSystem() webdav.FileSystem {
+	return &multiBucketBlobFileSystem{backend: mb}
+}
+
+func (mb *multiBucketBlobBackend) Checksummer() server_utils.OriginChecksummer {
+	return &multiBucketBlobChecksummer{backend: mb}
+}
+
+func (mb *multiBucketBlobBackend) Close() error {
+	mb.mu.Lock()
+	defer mb.mu.Unlock()
+	for name, b := range mb.buckets {
+		if err := b.Close(); err != nil {
+			log.Warnf("Error closing bucket %s: %v", name, err)
+		}
+	}
+	mb.buckets = nil
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// multiBucketBlobFileSystem — webdav.FileSystem that dispatches to the
+// correct bucket based on the first path component.
+// ---------------------------------------------------------------------------
+
+type multiBucketBlobFileSystem struct {
+	backend *multiBucketBlobBackend
+}
+
+func (fs *multiBucketBlobFileSystem) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
+	bucketName, remainder, err := splitBucketPath(name)
+	if err != nil {
+		return err
+	}
+	bucket, err := fs.backend.openBucket(bucketName)
+	if err != nil {
+		return err
+	}
+	bfs := &blobFileSystem{bucket: bucket}
+	return bfs.Mkdir(ctx, remainder, perm)
+}
+
+func (fs *multiBucketBlobFileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
+	bucketName, remainder, err := splitBucketPath(name)
+	if err != nil {
+		return nil, err
+	}
+	bucket, err := fs.backend.openBucket(bucketName)
+	if err != nil {
+		return nil, err
+	}
+	bfs := &blobFileSystem{bucket: bucket}
+	return bfs.OpenFile(ctx, remainder, flag, perm)
+}
+
+func (fs *multiBucketBlobFileSystem) RemoveAll(ctx context.Context, name string) error {
+	bucketName, remainder, err := splitBucketPath(name)
+	if err != nil {
+		return err
+	}
+	bucket, err := fs.backend.openBucket(bucketName)
+	if err != nil {
+		return err
+	}
+	bfs := &blobFileSystem{bucket: bucket}
+	return bfs.RemoveAll(ctx, remainder)
+}
+
+func (fs *multiBucketBlobFileSystem) Rename(ctx context.Context, oldName, newName string) error {
+	oldBucket, oldRemainder, err := splitBucketPath(oldName)
+	if err != nil {
+		return err
+	}
+	newBucket, newRemainder, err := splitBucketPath(newName)
+	if err != nil {
+		return err
+	}
+	if oldBucket != newBucket {
+		return fmt.Errorf("cannot rename across buckets (%s -> %s)", oldBucket, newBucket)
+	}
+	bucket, err := fs.backend.openBucket(oldBucket)
+	if err != nil {
+		return err
+	}
+	bfs := &blobFileSystem{bucket: bucket}
+	return bfs.Rename(ctx, oldRemainder, newRemainder)
+}
+
+func (fs *multiBucketBlobFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, error) {
+	bucketName, remainder, err := splitBucketPath(name)
+	if err != nil {
+		return nil, err
+	}
+	bucket, err := fs.backend.openBucket(bucketName)
+	if err != nil {
+		return nil, err
+	}
+	bfs := &blobFileSystem{bucket: bucket}
+	return bfs.Stat(ctx, remainder)
+}
+
+// ---------------------------------------------------------------------------
+// multiBucketBlobChecksummer
+// ---------------------------------------------------------------------------
+
+type multiBucketBlobChecksummer struct {
+	backend *multiBucketBlobBackend
+}
+
+func (c *multiBucketBlobChecksummer) GetDigests(relativePath, wantDigest string) ([]string, error) {
+	bucketName, remainder, err := splitBucketPath(relativePath)
+	if err != nil {
+		return nil, nil
+	}
+	bucket, err := c.backend.openBucket(bucketName)
+	if err != nil {
+		return nil, nil
+	}
+	cs := &blobChecksummer{bucket: bucket}
+	return cs.GetDigests(remainder, wantDigest)
 }

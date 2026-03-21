@@ -410,8 +410,10 @@ func InitializeHandlers(exports []server_utils.OriginExport) error {
 			backend = blobBe
 			if blobURL != "" {
 				log.Infof("Initialized blob backend for %s (url: %s)", export.FederationPrefix, blobURL)
-			} else {
+			} else if export.S3Bucket != "" {
 				log.Infof("Initialized native S3 backend for %s (bucket: %s, region: %s)", export.FederationPrefix, export.S3Bucket, param.Origin_S3Region.GetString())
+			} else {
+				log.Infof("Initialized native S3 multi-bucket backend for %s (region: %s)", export.FederationPrefix, param.Origin_S3Region.GetString())
 			}
 
 		case server_structs.OriginStorageHTTPSv2:

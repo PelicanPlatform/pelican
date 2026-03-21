@@ -543,7 +543,7 @@ func TestBlobBackend_MemURL(t *testing.T) {
 		BlobURL: "mem://",
 	})
 	require.NoError(t, err)
-	defer backend.Close()
+	defer backend.(*blobBackend).Close()
 
 	// Accessibility
 	require.NoError(t, backend.CheckAvailability())
@@ -561,7 +561,7 @@ func TestBlobBackend_WithStoragePrefix(t *testing.T) {
 		StoragePrefix: "/myprefix",
 	})
 	require.NoError(t, err)
-	defer backend.Close()
+	defer backend.(*blobBackend).Close()
 
 	ctx := context.Background()
 
@@ -866,4 +866,64 @@ func TestBlobWriteFile_WithContentLengthHint(t *testing.T) {
 	data, err := io.ReadAll(rf)
 	require.NoError(t, err)
 	assert.Equal(t, "hinted write", string(data))
+}
+
+// ---------------------------------------------------------------------------
+// splitBucketPath unit tests
+// ---------------------------------------------------------------------------
+
+func TestSplitBucketPath(t *testing.T) {
+	tests := []struct {
+		name      string
+		path      string
+		bucket    string
+		remainder string
+		wantErr   bool
+	}{
+		{"BucketAndKey", "/foo/bar", "foo", "/bar", false},
+		{"BucketAndDeepKey", "/foo/bar/baz/qux", "foo", "/bar/baz/qux", false},
+		{"BucketOnly", "/foo", "foo", "/", false},
+		{"TrailingSlash", "/foo/", "foo", "/", false},
+		{"RootOnly", "/", "", "", true},
+		{"Empty", "", "", "", true},
+		{"DotDot", "/foo/../bar/baz", "bar", "/baz", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bucket, remainder, err := splitBucketPath(tt.path)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.bucket, bucket)
+				assert.Equal(t, tt.remainder, remainder)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// multiBucketBlobBackend — test the dynamic bucket behavior using memblob.
+//
+// We can't use the multi-bucket backend with memblob (it builds s3:// URLs),
+// so we test the splitBucketPath logic exhaustively above, and test the
+// multi-bucket backend constructor behavior here.
+// ---------------------------------------------------------------------------
+
+func TestMultiBucketBlobBackend_NoBucketNoBlobURL(t *testing.T) {
+	// When both Bucket and BlobURL are empty, newBlobBackend should
+	// return a multiBucketBlobBackend (no error).
+	backend, err := newBlobBackend(BlobBackendOptions{
+		ServiceURL: "https://s3.us-east-1.amazonaws.com",
+		Region:     "us-east-1",
+	})
+	require.NoError(t, err)
+
+	_, ok := backend.(*multiBucketBlobBackend)
+	assert.True(t, ok, "expected multiBucketBlobBackend when Bucket is empty")
+
+	// It should implement OriginBackend fully.
+	assert.NotNil(t, backend.FileSystem())
+	assert.NotNil(t, backend.Checksummer())
+	assert.NoError(t, backend.CheckAvailability())
 }

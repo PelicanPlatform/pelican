@@ -24,11 +24,14 @@ import (
 	"context"
 	"io"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -40,22 +43,51 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestBlobBackend_MinioS3(t *testing.T) {
+	var wf io.WriteCloser
+	var rf io.ReadCloser
+	var info os.FileInfo
+	var entries []os.FileInfo
+	var n int
+	var got []byte
+	var ctx context.Context
 	test_utils.SkipIfNoMinio(t)
 
-	endpoint, accessKey, secretKey := test_utils.StartMinio(t, "test-bucket")
+	var endpoint, accessKey, secretKey string
+
+	endpoint, accessKey, secretKey = test_utils.StartMinio(t, "bucket1")
+
+	var err error
+
+	// Create the second bucket using the S3 API
+	minioEndpoint := strings.TrimPrefix(endpoint, "http://")
+	minioEndpoint = strings.TrimPrefix(minioEndpoint, "https://")
+	minioClient, err := minio.New(minioEndpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure: false,
+	})
+	require.NoError(t, err)
+	ctx = context.Background()
+	for _, bucket := range []string{"bucket1", "bucket2"} {
+		exists, err := minioClient.BucketExists(ctx, bucket)
+		require.NoError(t, err)
+		if !exists {
+			err = minioClient.MakeBucket(ctx, bucket, minio.MakeBucketOptions{})
+			require.NoError(t, err)
+		}
+	}
 
 	backend, err := newBlobBackend(BlobBackendOptions{
 		ServiceURL: endpoint,
 		Region:     "us-east-1",
-		Bucket:     "test-bucket",
+		Bucket:     "bucket1",
 		AccessKey:  accessKey,
 		SecretKey:  secretKey,
 		URLStyle:   "path",
 	})
 	require.NoError(t, err)
-	defer backend.Close()
+	defer backend.(*blobBackend).Close()
 
-	ctx := context.Background()
+	ctx = context.Background()
 
 	t.Run("CheckAvailability", func(t *testing.T) {
 		require.NoError(t, backend.CheckAvailability())
@@ -64,16 +96,16 @@ func TestBlobBackend_MinioS3(t *testing.T) {
 	t.Run("WriteAndRead", func(t *testing.T) {
 		content := []byte("Hello from MinIO integration test!")
 
-		wf, err := backend.FileSystem().OpenFile(ctx, "/greeting.txt", os.O_CREATE|os.O_WRONLY, 0644)
+		wf, err = backend.FileSystem().OpenFile(ctx, "/greeting.txt", os.O_CREATE|os.O_WRONLY, 0644)
 		require.NoError(t, err)
-		n, err := wf.Write(content)
+		n, err = wf.Write(content)
 		require.NoError(t, err)
 		assert.Equal(t, len(content), n)
 		require.NoError(t, wf.Close())
 
-		rf, err := backend.FileSystem().OpenFile(ctx, "/greeting.txt", os.O_RDONLY, 0)
+		rf, err = backend.FileSystem().OpenFile(ctx, "/greeting.txt", os.O_RDONLY, 0)
 		require.NoError(t, err)
-		got, err := io.ReadAll(rf)
+		got, err = io.ReadAll(rf)
 		require.NoError(t, err)
 		assert.Equal(t, content, got)
 		rf.Close()
@@ -81,13 +113,13 @@ func TestBlobBackend_MinioS3(t *testing.T) {
 
 	t.Run("Stat", func(t *testing.T) {
 		// Write an object directly
-		wf, err := backend.FileSystem().OpenFile(ctx, "/statfile.bin", os.O_CREATE|os.O_WRONLY, 0644)
+		wf, err = backend.FileSystem().OpenFile(ctx, "/statfile.bin", os.O_CREATE|os.O_WRONLY, 0644)
 		require.NoError(t, err)
 		_, err = wf.Write([]byte("0123456789"))
 		require.NoError(t, err)
 		require.NoError(t, wf.Close())
 
-		info, err := backend.FileSystem().Stat(ctx, "/statfile.bin")
+		info, err = backend.FileSystem().Stat(ctx, "/statfile.bin")
 		require.NoError(t, err)
 		assert.Equal(t, int64(10), info.Size())
 		assert.Equal(t, "statfile.bin", info.Name())
@@ -105,7 +137,7 @@ func TestBlobBackend_MinioS3(t *testing.T) {
 	})
 
 	t.Run("Rename", func(t *testing.T) {
-		wf, err := backend.FileSystem().OpenFile(ctx, "/rename-src.txt", os.O_CREATE|os.O_WRONLY, 0644)
+		wf, err = backend.FileSystem().OpenFile(ctx, "/rename-src.txt", os.O_CREATE|os.O_WRONLY, 0644)
 		require.NoError(t, err)
 		_, err = wf.Write([]byte("rename me"))
 		require.NoError(t, err)
@@ -116,13 +148,13 @@ func TestBlobBackend_MinioS3(t *testing.T) {
 		_, err = backend.FileSystem().Stat(ctx, "/rename-src.txt")
 		assert.ErrorIs(t, err, os.ErrNotExist)
 
-		info, err := backend.FileSystem().Stat(ctx, "/rename-dst.txt")
+		info, err = backend.FileSystem().Stat(ctx, "/rename-dst.txt")
 		require.NoError(t, err)
 		assert.Equal(t, int64(9), info.Size())
 	})
 
 	t.Run("RemoveAll", func(t *testing.T) {
-		wf, err := backend.FileSystem().OpenFile(ctx, "/delete-me.txt", os.O_CREATE|os.O_WRONLY, 0644)
+		wf, err = backend.FileSystem().OpenFile(ctx, "/delete-me.txt", os.O_CREATE|os.O_WRONLY, 0644)
 		require.NoError(t, err)
 		_, err = wf.Write([]byte("gone"))
 		require.NoError(t, err)
@@ -137,18 +169,18 @@ func TestBlobBackend_MinioS3(t *testing.T) {
 	t.Run("DirectoryListing", func(t *testing.T) {
 		// Write multiple objects under a "directory"
 		for _, name := range []string{"/listing/a.txt", "/listing/b.txt", "/listing/c.txt"} {
-			wf, err := backend.FileSystem().OpenFile(ctx, name, os.O_CREATE|os.O_WRONLY, 0644)
+			wf, err = backend.FileSystem().OpenFile(ctx, name, os.O_CREATE|os.O_WRONLY, 0644)
 			require.NoError(t, err)
 			_, err = wf.Write([]byte(name))
 			require.NoError(t, err)
 			require.NoError(t, wf.Close())
 		}
 
-		f, err := backend.FileSystem().OpenFile(ctx, "/listing", os.O_RDONLY, 0)
+		dir, err := backend.FileSystem().OpenFile(ctx, "/listing", os.O_RDONLY, 0)
 		require.NoError(t, err)
-		defer f.Close()
+		defer dir.Close()
 
-		entries, err := f.Readdir(-1)
+		entries, err = dir.Readdir(-1)
 		require.NoError(t, err)
 		assert.Len(t, entries, 3)
 
@@ -201,14 +233,14 @@ func TestBlobBackend_MinioS3(t *testing.T) {
 		prefixedBackend, err := newBlobBackend(BlobBackendOptions{
 			ServiceURL:    endpoint,
 			Region:        "us-east-1",
-			Bucket:        "test-bucket",
+			Bucket:        "bucket1",
 			AccessKey:     accessKey,
 			SecretKey:     secretKey,
 			URLStyle:      "path",
 			StoragePrefix: "/prefixed",
 		})
 		require.NoError(t, err)
-		defer prefixedBackend.Close()
+		defer prefixedBackend.(*blobBackend).Close()
 
 		wf, err := prefixedBackend.FileSystem().OpenFile(ctx, "/scoped.txt", os.O_CREATE|os.O_WRONLY, 0644)
 		require.NoError(t, err)
@@ -232,4 +264,97 @@ func TestBlobBackend_MinioS3(t *testing.T) {
 		assert.Equal(t, "scoped content", string(got2))
 		rf2.Close()
 	})
+}
+
+// ---------------------------------------------------------------------------
+// TestBlobBackend_MinioS3_MultiBucket — integration test for dynamic bucket backend
+// ---------------------------------------------------------------------------
+
+func TestBlobBackend_MinioS3_MultiBucket(t *testing.T) {
+	test_utils.SkipIfNoMinio(t)
+
+	// Start minio with one bucket (bucket1) and create bucket2 via the S3 API
+	endpoint, accessKey, secretKey := test_utils.StartMinio(t, "bucket1")
+
+	// minio-go wants "host:port" without the scheme
+	minioEndpoint := strings.TrimPrefix(endpoint, "http://")
+	minioEndpoint = strings.TrimPrefix(minioEndpoint, "https://")
+	minioClient, err := minio.New(minioEndpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure: false,
+	})
+	require.NoError(t, err)
+	err = minioClient.MakeBucket(context.Background(), "bucket2", minio.MakeBucketOptions{})
+	require.NoError(t, err)
+	require.NoError(t, err)
+
+	// Use dynamic multi-bucket backend (no Bucket specified)
+	backend, err := newBlobBackend(BlobBackendOptions{
+		ServiceURL: endpoint,
+		Region:     "us-east-1",
+		AccessKey:  accessKey,
+		SecretKey:  secretKey,
+		URLStyle:   "path",
+	})
+	require.NoError(t, err)
+	defer backend.(*multiBucketBlobBackend).Close()
+
+	ctx := context.Background()
+
+	content1 := []byte("hello from bucket1")
+	content2 := []byte("hello from bucket2")
+
+	// Write to bucket1
+	wf1, err := backend.FileSystem().OpenFile(ctx, "/bucket1/foo.txt", os.O_CREATE|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	_, err = wf1.Write(content1)
+	require.NoError(t, err)
+	require.NoError(t, wf1.Close())
+
+	// Write to bucket2
+	wf2, err := backend.FileSystem().OpenFile(ctx, "/bucket2/bar.txt", os.O_CREATE|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	_, err = wf2.Write(content2)
+	require.NoError(t, err)
+	require.NoError(t, wf2.Close())
+
+	// Read back from bucket1
+	rf1, err := backend.FileSystem().OpenFile(ctx, "/bucket1/foo.txt", os.O_RDONLY, 0)
+	require.NoError(t, err)
+	got1, err := io.ReadAll(rf1)
+	require.NoError(t, err)
+	assert.Equal(t, content1, got1)
+	rf1.Close()
+
+	// Read back from bucket2
+	rf2, err := backend.FileSystem().OpenFile(ctx, "/bucket2/bar.txt", os.O_RDONLY, 0)
+	require.NoError(t, err)
+	got2, err := io.ReadAll(rf2)
+	require.NoError(t, err)
+	assert.Equal(t, content2, got2)
+	rf2.Close()
+
+	// Stat should work for both
+	info1, err := backend.FileSystem().Stat(ctx, "/bucket1/foo.txt")
+	require.NoError(t, err)
+	assert.Equal(t, int64(len(content1)), info1.Size())
+	info2, err := backend.FileSystem().Stat(ctx, "/bucket2/bar.txt")
+	require.NoError(t, err)
+	assert.Equal(t, int64(len(content2)), info2.Size())
+
+	// Directory listing for bucket1
+	dir1, err := backend.FileSystem().OpenFile(ctx, "/bucket1", os.O_RDONLY, 0)
+	require.NoError(t, err)
+	entries1, err := dir1.Readdir(-1)
+	require.NoError(t, err)
+	assert.True(t, len(entries1) > 0)
+	dir1.Close()
+
+	// Directory listing for bucket2
+	dir2, err := backend.FileSystem().OpenFile(ctx, "/bucket2", os.O_RDONLY, 0)
+	require.NoError(t, err)
+	entries2, err := dir2.Readdir(-1)
+	require.NoError(t, err)
+	assert.True(t, len(entries2) > 0)
+	dir2.Close()
 }
