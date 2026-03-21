@@ -78,8 +78,9 @@ func openVirtualBucket(t *testing.T) *blobBackend {
 		URLStyle:   "virtual",
 	})
 	require.NoError(t, err, "failed to open genome-browser bucket (virtual style)")
-	t.Cleanup(func() { backend.Close() })
-	return backend
+	bb := backend.(*blobBackend)
+	t.Cleanup(func() { bb.Close() })
+	return bb
 }
 
 // --------------------------------------------------------------------------
@@ -96,8 +97,9 @@ func openPathBucket(t *testing.T) *blobBackend {
 		URLStyle:   "path",
 	})
 	require.NoError(t, err, "failed to open genome-browser bucket (path style)")
-	t.Cleanup(func() { backend.Close() })
-	return backend
+	bb := backend.(*blobBackend)
+	t.Cleanup(func() { bb.Close() })
+	return bb
 }
 
 // --------------------------------------------------------------------------
@@ -114,8 +116,9 @@ func openPathBucketSlash(t *testing.T) *blobBackend {
 		URLStyle:   "path",
 	})
 	require.NoError(t, err, "failed to open genome-browser bucket (path+slash)")
-	t.Cleanup(func() { backend.Close() })
-	return backend
+	bb := backend.(*blobBackend)
+	t.Cleanup(func() { bb.Close() })
+	return bb
 }
 
 // --------------------------------------------------------------------------
@@ -145,8 +148,9 @@ func openVirtualBucketWithPrefix(t *testing.T) *blobBackend {
 		StoragePrefix: "/cells/tabula-sapiens",
 	})
 	require.NoError(t, err, "failed to open genome-browser bucket (virtual+prefix)")
-	t.Cleanup(func() { backend.Close() })
-	return backend
+	bb := backend.(*blobBackend)
+	t.Cleanup(func() { bb.Close() })
+	return bb
 }
 
 // ==========================================================================
