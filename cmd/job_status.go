@@ -30,6 +30,7 @@ import (
 	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/client_agent/apiclient"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -142,8 +143,8 @@ func printJobStatus(status *client_agent.JobStatus) {
 
 		if status.Progress.TotalBytes > 0 {
 			fmt.Printf("  Data: %s / %s (%.1f%%)\n",
-				formatBytes(status.Progress.BytesTransferred),
-				formatBytes(status.Progress.TotalBytes),
+				utils.HumanBytes(status.Progress.BytesTransferred),
+				utils.HumanBytes(status.Progress.TotalBytes),
 				status.Progress.Percentage)
 			fmt.Printf("  Rate: %.2f Mbps\n", status.Progress.TransferRateMbps)
 		}
@@ -167,17 +168,4 @@ func printJobStatus(status *client_agent.JobStatus) {
 	if status.Error != "" {
 		fmt.Printf("\nError: %s\n", status.Error)
 	}
-}
-
-func formatBytes(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }

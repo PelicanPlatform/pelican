@@ -170,6 +170,14 @@ func (rt *regexpTransformHook) Fire(entry *log.Entry) (err error) {
 	regex := rt.regex.Load()
 	if regex != nil {
 		entry.Message = regex.ReplaceAllString(entry.Message, rt.template)
+		for key, value := range entry.Data {
+			if key != "url" {
+				continue
+			}
+			if s, ok := value.(string); ok {
+				entry.Data[key] = regex.ReplaceAllString(s, rt.template)
+			}
+		}
 	}
 	return hook.Fire(entry)
 }
@@ -305,9 +313,13 @@ func SetLogging(logLevel log.Level) {
 		}
 		globalTransform.hook.Store(newHook)
 
-		// Add our hooks back
+		// Add globalFilters at ALL levels so it can see every message for regex-based filtering
 		for _, lvl := range log.AllLevels {
 			newHooks[lvl] = append(newHooks[lvl], &globalFilters)
+		}
+		// Add globalTransform only at hookLevel — writer.Hook.Fire() writes unconditionally,
+		// so registering at all levels would leak trace/debug messages to the output.
+		for _, lvl := range hookLevel {
 			newHooks[lvl] = append(newHooks[lvl], globalTransform)
 		}
 		globalTransformMu.Unlock()

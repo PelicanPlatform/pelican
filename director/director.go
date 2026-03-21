@@ -950,8 +950,34 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// where we have /director/healthTest API to mock a test object for caches to pull (as if it's from an origin)
 	reqPath := getObjectPathFromRequest(ginCtx)
 	if strings.HasPrefix(reqPath, server_utils.MonitoringBaseNs+"/") {
+		// Build a synthetic server ad pointing at the director's
+		// healthTest endpoint so the redirect carries the full set of
+		// X-Pelican-* and Link headers that clients/caches expect.
+		extURL, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+		if err != nil {
+			log.Errorf("Failed to parse Server_ExternalWebUrl for health-test redirect: %v", err)
+			ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Internal configuration error",
+			})
+			return
+		}
+		healthAd := server_structs.ServerAd{
+			URL: url.URL{
+				Scheme: extURL.Scheme,
+				Host:   extURL.Host,
+				Path:   "/api/v1.0/director/healthTest",
+			},
+		}
+		monitoringNs := server_structs.NamespaceAdV2{
+			Path: server_utils.MonitoringBaseNs,
+			Caps: server_structs.Capabilities{
+				PublicReads: true,
+				Reads:       true,
+			},
+		}
 		redirectSucceeded = true
-		ginCtx.Redirect(http.StatusTemporaryRedirect, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/director/healthTest"+reqPath)
+		generateRedirectResponse(ginCtx, []server_structs.ServerAd{healthAd}, []server_structs.ServerAd{healthAd}, monitoringNs, requestId)
 		return
 	}
 
