@@ -155,6 +155,15 @@ var (
 	tempRunDir  string
 	cleanupOnce sync.Once
 
+	// Pre-cleanup callbacks are invoked before the temporary runtime
+	// directory is removed.  Components that keep open resources inside
+	// the temp directory (e.g. BadgerDB) register a named callback so
+	// they can flush and close before the directory disappears.
+	// The map key acts as an identity: re-registering the same name
+	// replaces the previous callback (prevents double-registration).
+	preCleanupMu    sync.Mutex
+	preCleanupFuncs map[string]func()
+
 	// Global discovery info.  Using the "once" allows us to delay discovery
 	// until it's first needed, avoiding a web lookup for invoking configuration
 	// Note the 'once' object is a pointer so we can reset the client multiple
@@ -631,9 +640,26 @@ func SetFederation(fd pelican_url.FederationDiscovery) {
 	globalFedInfo.Store(&fd)
 }
 
-// TODO: It's not clear that this function works correctly.  We should
-// pass an errgroup here and ensure that the cleanup is complete before
-// the main thread shuts down.
+// RegisterPreCleanup adds a named callback that will be invoked before
+// the temporary runtime directory is removed during shutdown.  Use this
+// for components that keep open resources inside the temp directory
+// (e.g. BadgerDB) so they can flush and close cleanly.
+//
+// The name is an identity key: calling RegisterPreCleanup again with the
+// same name silently replaces the previous callback, preventing
+// double-registration.
+func RegisterPreCleanup(name string, fn func()) {
+	preCleanupMu.Lock()
+	defer preCleanupMu.Unlock()
+	if preCleanupFuncs == nil {
+		preCleanupFuncs = make(map[string]func())
+	}
+	preCleanupFuncs[name] = fn
+}
+
+// cleanupDirOnShutdown registers an errgroup goroutine that, on context
+// cancellation, first invokes every registered pre-cleanup callback and
+// then removes the temporary runtime directory.
 func cleanupDirOnShutdown(ctx context.Context, dir string) {
 	tempRunDir = dir
 	egrp, ok := ctx.Value(EgrpKey).(*errgroup.Group)
@@ -642,6 +668,19 @@ func cleanupDirOnShutdown(ctx context.Context, dir string) {
 	}
 	egrp.Go(func() error {
 		<-ctx.Done()
+
+		// Run pre-cleanup callbacks so components that use the temp
+		// directory (e.g. BadgerDB) can flush and close first.
+		// Take ownership of the current map and reset it so that
+		// subsequent unit tests start with a clean slate.
+		preCleanupMu.Lock()
+		fns := preCleanupFuncs
+		preCleanupFuncs = nil
+		preCleanupMu.Unlock()
+		for _, fn := range fns {
+			fn()
+		}
+
 		err := CleanupTempResources()
 		if err != nil {
 			log.Infoln("Error when cleaning up temporary directories:", err)
@@ -650,6 +689,9 @@ func cleanupDirOnShutdown(ctx context.Context, dir string) {
 	})
 }
 
+// CleanupTempResources removes the temporary runtime directory.  It is
+// safe to call from multiple goroutines; only the first call performs
+// the removal.
 func CleanupTempResources() (err error) {
 	cleanupOnce.Do(func() {
 		if tempRunDir != "" {
@@ -732,6 +774,22 @@ func GetServerIssuerURL() (issuerUrl string, err error) {
 		return issuerUrl, nil
 	}
 
+	// When both the origin and director run in the same process, the
+	// origin's issuer URL must differ from the federation/director issuer
+	// URL.  Otherwise, tokens minted by the origin have the same issuer
+	// as federation tokens minted by the director and the origin cannot
+	// distinguish them.  Default to a sub-path of the web URL so that
+	// the OIDC discovery documents are served at distinct paths.
+	if IsServerEnabled(server_structs.OriginType) && IsServerEnabled(server_structs.DirectorType) {
+		issuerUrl, err = url.JoinPath(param.Server_ExternalWebUrl.GetString(), "/api/v1.0/origin")
+		if err != nil {
+			return "", errors.Wrapf(err, "failed to construct co-located origin issuer URL from %q",
+				param.Server_ExternalWebUrl.GetString())
+		}
+		log.Debugf("Populating server's issuer URL as %q (origin co-located with director)", issuerUrl)
+		return issuerUrl, nil
+	}
+
 	// Finally, fall back to the external web URL
 	issuerUrl = param.Server_ExternalWebUrl.GetString()
 	if _, err := url.Parse(issuerUrl); err != nil {
@@ -740,6 +798,31 @@ func GetServerIssuerURL() (issuerUrl string, err error) {
 	}
 	log.Debugf("Populating server's issuer URL as %q from configured value of %q", issuerUrl, param.Server_ExternalWebUrl.GetName())
 	return issuerUrl, nil
+}
+
+// GetLocalIssuerUrl returns the issuer URL used for tokens that authenticate
+// local server operations (web-UI logins, monitoring queries, local-cache
+// purge commands, etc.).  This is distinct from GetServerIssuerURL(), which
+// returns the issuer for data-namespace tokens minted by an origin.
+//
+// In most deployments the two values are identical, but when an origin and
+// director are co-located in the same process the federation URL
+// (Server.ExternalWebUrl) belongs to the director.  The origin — and any
+// token-verification path that checks "local issuer" — must use a sub-path
+// so that locally-minted tokens are distinguishable from federation tokens.
+// The convention is to append "/api/v1.0/origin", mirroring what
+// GetServerIssuerURL() does for the data-namespace issuer in this scenario.
+func GetLocalIssuerUrl() string {
+	if IsServerEnabled(server_structs.OriginType) && IsServerEnabled(server_structs.DirectorType) {
+		result, err := url.JoinPath(param.Server_ExternalWebUrl.GetString(), "/api/v1.0/origin")
+		if err != nil {
+			log.Warningf("Failed to construct co-located local issuer URL: %v; falling back to %s",
+				err, param.Server_ExternalWebUrl.GetString())
+			return param.Server_ExternalWebUrl.GetString()
+		}
+		return result
+	}
+	return param.Server_ExternalWebUrl.GetString()
 }
 
 // Get singleton global validate method for field validation
@@ -2233,6 +2316,7 @@ func ResetConfig() {
 	warnDebugOnce = sync.Once{}
 
 	setServerOnce = sync.Once{}
+	enabledServers.Clear()
 
 	ResetIssuerPrivateKeys()
 

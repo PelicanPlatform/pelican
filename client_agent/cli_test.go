@@ -45,6 +45,7 @@ import (
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -90,6 +91,10 @@ func buildPelicanBinary(t *testing.T) string {
 
 // TestCLIAsyncGet tests the pelican object get --async command
 func TestCLIAsyncGet(t *testing.T) {
+	// Capture all in-process logs (federation servers, agent) via t.Log;
+	// output is shown automatically on test failure.
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
 	// Reset test state
 	server_utils.ResetTestState()
 
@@ -159,9 +164,44 @@ func TestCLIAsyncGet(t *testing.T) {
 	uploadURL := fmt.Sprintf("pelican://%s%s/async-get-test.txt", discoveryUrl.Host, federationPrefix)
 
 	// Upload with async + wait to ensure file is present before testing downloads
-	uploadCmd := exec.Command(pelicanBin, "object", "put", "--async", "--wait", uploadFile, uploadURL, "--token", tokenFile)
+	t.Logf("Uploading to %s (discovery: %s)", uploadURL, discoveryUrl.String())
+	uploadCmd := exec.Command(pelicanBin, "object", "put", "--async", "--wait", "--debug", uploadFile, uploadURL, "--token", tokenFile)
 	uploadCmd.Env = append(os.Environ(), fmt.Sprintf("PELICAN_CLIENTAGENT_SOCKET=%s", serverConfig.SocketPath))
 	output, err := uploadCmd.CombinedOutput()
+	if err != nil {
+		t.Logf("Upload command output:\n%s", output)
+		// Extract job ID and query the daemon for detailed transfer errors
+		re := regexp.MustCompile(`Job created: ([a-f0-9-]+)`)
+		if matches := re.FindStringSubmatch(string(output)); len(matches) >= 2 {
+			jobID := matches[1]
+			apiClient, apiErr := apiclient.NewAPIClient(serverConfig.SocketPath)
+			if apiErr == nil {
+				if jobStatus, statusErr := apiClient.GetJobStatus(context.Background(), jobID); statusErr == nil {
+					t.Logf("Job %s status: %s, error: %s", jobID, jobStatus.Status, jobStatus.Error)
+					for i, tr := range jobStatus.Transfers {
+						t.Logf("  Transfer %d: op=%s status=%s src=%s err=%s",
+							i, tr.Operation, tr.Status, tr.Source, tr.Error)
+					}
+				}
+			}
+		}
+		// Dump origin/cache run location directory listings for log file discovery
+		for label, runLoc := range map[string]string{
+			"origin": param.Origin_RunLocation.GetString(),
+			"cache":  param.Cache_RunLocation.GetString(),
+		} {
+			entries, dirErr := os.ReadDir(runLoc)
+			if dirErr != nil {
+				t.Logf("%s run location %s: %v", label, runLoc, dirErr)
+				continue
+			}
+			var names []string
+			for _, e := range entries {
+				names = append(names, e.Name())
+			}
+			t.Logf("%s run location files: %v", label, names)
+		}
+	}
 	require.NoError(t, err, "Failed to upload file: %s", output)
 
 	// Test async get without --wait
