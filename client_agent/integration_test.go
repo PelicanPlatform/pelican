@@ -386,7 +386,149 @@ func TestClientAPIIntegration(t *testing.T) {
 		t.Logf("File verification successful - Original hash: %s, Downloaded hash: %s", originalHash, downloadedHash)
 	})
 
-	// Test 8: List jobs
+	// Test 8: Third-party copy — copy the uploaded file to a new remote path
+	copyDestURL := fmt.Sprintf("pelican://%s%s/%s", discoveryUrl.Host, federationPrefix, "test-copy-dest.txt")
+	var copyJobID string
+
+	t.Run("CreateCopyJob", func(t *testing.T) {
+		jobReq := client_agent.JobRequest{
+			Transfers: []client_agent.TransferRequest{
+				{
+					Operation:   "copy",
+					Source:      uploadURL,
+					Destination: copyDestURL,
+					Recursive:   false,
+				},
+			},
+			Options: client_agent.TransferOptions{
+				Token: tokenFile,
+			},
+		}
+
+		body, err := json.Marshal(jobReq)
+		require.NoError(t, err)
+
+		resp, err := httpClient.Post(baseURL+"/jobs", "application/json", bytes.NewBuffer(body))
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+		var jobResp client_agent.JobResponse
+		err = json.NewDecoder(resp.Body).Decode(&jobResp)
+		require.NoError(t, err)
+
+		assert.NotEmpty(t, jobResp.JobID)
+		assert.Len(t, jobResp.Transfers, 1)
+		assert.Equal(t, "copy", jobResp.Transfers[0].Operation)
+
+		copyJobID = jobResp.JobID
+		t.Logf("Created copy job: %s", copyJobID)
+	})
+
+	// Test 9: Wait for the copy to complete
+	t.Run("WaitForCopyCompletion", func(t *testing.T) {
+		require.NotEmpty(t, copyJobID, "Copy job ID not set from previous test")
+
+		timeout := time.After(30 * time.Second)
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-timeout:
+				t.Fatal("Copy job did not complete within timeout")
+			case <-ticker.C:
+				resp, err := httpClient.Get(fmt.Sprintf("%s/jobs/%s", baseURL, copyJobID))
+				require.NoError(t, err)
+
+				var status client_agent.JobStatus
+				err = json.NewDecoder(resp.Body).Decode(&status)
+				resp.Body.Close()
+				require.NoError(t, err)
+
+				t.Logf("Copy job status: %s, Progress: %.1f%%", status.Status, status.Progress.Percentage)
+
+				if status.Status == "completed" {
+					assert.Equal(t, 1, status.Progress.TransfersCompleted)
+					assert.Equal(t, 0, status.Progress.TransfersFailed)
+					return
+				} else if status.Status == "failed" {
+					t.Fatalf("Copy job failed: %s", status.Error)
+				}
+			}
+		}
+	})
+
+	// Test 10: Download the copied file and verify content matches the original
+	copiedFile := filepath.Join(tempDir, "copied.txt")
+	t.Run("VerifyCopiedFile", func(t *testing.T) {
+		jobReq := client_agent.JobRequest{
+			Transfers: []client_agent.TransferRequest{
+				{
+					Operation:   "get",
+					Source:      copyDestURL,
+					Destination: copiedFile,
+					Recursive:   false,
+				},
+			},
+			Options: client_agent.TransferOptions{
+				Token: tokenFile,
+			},
+		}
+
+		body, err := json.Marshal(jobReq)
+		require.NoError(t, err)
+
+		resp, err := httpClient.Post(baseURL+"/jobs", "application/json", bytes.NewBuffer(body))
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+		var jobResp client_agent.JobResponse
+		err = json.NewDecoder(resp.Body).Decode(&jobResp)
+		require.NoError(t, err)
+
+		dlJobID := jobResp.JobID
+
+		// Wait for download of the copy to complete
+		timeout := time.After(30 * time.Second)
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-timeout:
+				t.Fatal("Download of copied file did not complete within timeout")
+			case <-ticker.C:
+				resp, err := httpClient.Get(fmt.Sprintf("%s/jobs/%s", baseURL, dlJobID))
+				require.NoError(t, err)
+
+				var status client_agent.JobStatus
+				err = json.NewDecoder(resp.Body).Decode(&status)
+				resp.Body.Close()
+				require.NoError(t, err)
+
+				if status.Status == "completed" {
+					// Verify the content matches
+					copiedContent, err := os.ReadFile(copiedFile)
+					require.NoError(t, err)
+					assert.Equal(t, testContent, copiedContent, "Copied file content does not match original")
+
+					copiedHash, err := computeFileSHA256(copiedFile)
+					require.NoError(t, err)
+					assert.Equal(t, originalHash, copiedHash, "SHA256 hash mismatch between original and copied file")
+					t.Logf("Copy verification successful — hash: %s", copiedHash)
+					return
+				} else if status.Status == "failed" {
+					t.Fatalf("Download of copied file failed: %s", status.Error)
+				}
+			}
+		}
+	})
+
+	// Test 11: List jobs
 	t.Run("ListJobs", func(t *testing.T) {
 		resp, err := httpClient.Get(baseURL + "/jobs?limit=10")
 		require.NoError(t, err)
@@ -398,13 +540,13 @@ func TestClientAPIIntegration(t *testing.T) {
 		err = json.NewDecoder(resp.Body).Decode(&listResp)
 		require.NoError(t, err)
 
-		assert.GreaterOrEqual(t, listResp.Total, 2, "Expected at least 2 jobs (upload and download)")
+		assert.GreaterOrEqual(t, listResp.Total, 4, "Expected at least 4 jobs (upload, download, copy, copy-download)")
 		assert.NotEmpty(t, listResp.Jobs)
 
 		t.Logf("Found %d total jobs", listResp.Total)
 	})
 
-	// Test 9: Test job cancellation
+	// Test 12: Test job cancellation
 	t.Run("CancelJob", func(t *testing.T) {
 		// Create a job to cancel
 		jobReq := client_agent.JobRequest{
