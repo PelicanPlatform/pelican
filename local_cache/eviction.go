@@ -328,7 +328,7 @@ func (em *EvictionManager) checkAndEvict() {
 		go func(sid StorageID, limits *dirEvictionLimits) {
 			defer wg.Done()
 			dirUsage := em.getDirUsage(sid)
-			if dirUsage <= int64(limits.highWater) {
+			if dirUsage <= 0 || uint64(dirUsage) <= limits.highWater {
 				return
 			}
 
@@ -338,7 +338,7 @@ func (em *EvictionManager) checkAndEvict() {
 				"highWater": limits.highWater,
 			}).Info("Starting eviction")
 
-			for dirUsage = em.getDirUsage(sid); dirUsage > int64(limits.lowWater); dirUsage = em.getDirUsage(sid) {
+			for dirUsage = em.getDirUsage(sid); dirUsage > 0 && uint64(dirUsage) > limits.lowWater; dirUsage = em.getDirUsage(sid) {
 				// Find the greediest namespace in this directory
 				targetKey, targetUsage, err := em.findGreediestNamespaceInDir(sid)
 				if err != nil {
@@ -351,7 +351,7 @@ func (em *EvictionManager) checkAndEvict() {
 					break
 				}
 
-				overhead := dirUsage - int64(limits.lowWater)
+				overhead := dirUsage - int64(limits.lowWater) //nolint:gosec // lowWater < dirUsage (uint64 fits) verified by loop condition
 				rl.WithFields(log.Fields{
 					"storageID":   targetKey.StorageID,
 					"namespaceID": targetKey.NamespaceID,
