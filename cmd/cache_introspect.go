@@ -933,6 +933,7 @@ func printStats(stats *local_cache.CacheStats) error {
 		lines := make([]usageLine, 0, len(stats.UsageCounters))
 		maxHuman := 0
 		maxRaw := 0
+		maxLabel := 0
 		for key, val := range stats.UsageCounters {
 			// Parse "s<sid>:ns<nid>" back to IDs.
 			var sid uint8
@@ -943,6 +944,9 @@ func printStats(stats *local_cache.CacheStats) error {
 			h := utils.HumanBytes(val)
 			r := fmt.Sprintf("%d", val)
 			lines = append(lines, usageLine{label: key, human: h, raw: val})
+			if len(key) > maxLabel {
+				maxLabel = len(key)
+			}
 			if len(h) > maxHuman {
 				maxHuman = len(h)
 			}
@@ -953,7 +957,7 @@ func printStats(stats *local_cache.CacheStats) error {
 
 		fmt.Printf("\nUsage Counters (pre-computed):\n")
 		for _, l := range lines {
-			fmt.Printf("  %s: %*s (%*d bytes)\n", l.label, maxHuman, l.human, maxRaw, l.raw)
+			fmt.Printf("  %-*s  %*s (%*d bytes)\n", maxLabel, l.label, maxHuman, l.human, maxRaw, l.raw)
 		}
 	}
 

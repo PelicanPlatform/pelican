@@ -543,6 +543,105 @@ func TestRangeZeroZero(t *testing.T) {
 	})
 }
 
+// TestFedDiskUsageAccuracy downloads a 2MB+ file through the cache using a
+// POSIX origin (xrootd, which always uses chunked encoding) and then verifies
+// that the introspection API reports the correct on-disk size.  This catches
+// bugs where usage counters drift (e.g. the SetUsage/AddUsage compounding
+// issue) and ensures chunked-encoding downloads are tracked correctly.
+func TestFedDiskUsageAccuracy(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+
+	const testFileSize = 2*1024*1024 + 37 // 2 MiB + 37 bytes (odd size to exercise partial last block)
+	const testFileName = "large_test_data.bin"
+
+	// Create a 2MB+ file in the origin's storage directory before xrootd starts.
+	ft := fed_test_utils.NewFedTest(t, pubOriginCfg, func(storageDir string) {
+		f, err := os.Create(filepath.Join(storageDir, testFileName))
+		require.NoError(t, err)
+		defer f.Close()
+
+		// Write deterministic data: repeating byte pattern
+		buf := make([]byte, 32*1024)
+		for i := range buf {
+			buf[i] = byte(i % 251)
+		}
+		written := 0
+		for written < testFileSize {
+			toWrite := len(buf)
+			if written+toWrite > testFileSize {
+				toWrite = testFileSize - written
+			}
+			n, err := f.Write(buf[:toWrite])
+			require.NoError(t, err)
+			written += n
+		}
+	})
+
+	// Use a separate temp directory for the test cache
+	testCacheDir := t.TempDir()
+	pc, err := local_cache.NewPersistentCache(ft.Ctx, ft.Egrp, local_cache.PersistentCacheConfig{
+		BaseDir: testCacheDir,
+	})
+	require.NoError(t, err)
+	// Close before t.TempDir's cleanup removes the directory (defer runs
+	// before t.Cleanup, so BadgerDB can flush while the dir still exists).
+	defer pc.Close()
+
+	// Download the file through the persistent cache
+	reader, err := pc.Get(context.Background(), "/test/"+testFileName, "")
+	require.NoError(t, err)
+
+	// Read the full body to trigger all blocks to be downloaded and stored
+	byteBuff, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	reader.Close()
+	require.Equal(t, testFileSize, len(byteBuff), "downloaded file size must match source")
+
+	// Verify content integrity (spot-check first few bytes)
+	for i := 0; i < 251 && i < len(byteBuff); i++ {
+		require.Equal(t, byte(i%251), byteBuff[i], "content mismatch at byte %d", i)
+	}
+
+	// Query cache stats while the cache is still open
+	stats, err := pc.GetCacheStats()
+	require.NoError(t, err)
+
+	// --- Verify metadata-based stats ---
+	assert.Equal(t, int64(1), stats.TotalMetadataEntries, "should have exactly 1 cached object")
+	assert.Equal(t, int64(testFileSize), stats.TotalBytesMetadata,
+		"total bytes from metadata should equal the source file size")
+
+	// The object is >4KB so it should be stored on disk, not inline
+	assert.Equal(t, int64(0), stats.TotalInlineBytes, "no data should be inline for a 2MB object")
+
+	// Check storage breakdown: should have exactly one storage dir with 1 on-disk object
+	require.NotEmpty(t, stats.StorageBreakdown, "storage breakdown should not be empty")
+	var foundDisk bool
+	for _, ds := range stats.StorageBreakdown {
+		if ds.OnDiskCount > 0 {
+			foundDisk = true
+			assert.Equal(t, int64(1), ds.OnDiskCount, "should have exactly 1 on-disk object")
+			assert.Equal(t, int64(testFileSize), ds.OnDiskBytes,
+				"on-disk bytes should match the source file size")
+			assert.Equal(t, int64(0), ds.InlineCount, "no inline objects expected")
+			assert.Equal(t, int64(0), ds.InlineBytes, "no inline bytes expected")
+		}
+	}
+	assert.True(t, foundDisk, "should have at least one storage dir with on-disk data")
+
+	// --- Verify usage counters ---
+	// The usage counter for this storage+namespace should match the file size,
+	// NOT be inflated to terabytes (which was the bug these fixes address).
+	require.NotEmpty(t, stats.UsageCounters, "usage counters should not be empty")
+	var totalUsage int64
+	for _, v := range stats.UsageCounters {
+		totalUsage += v
+	}
+	assert.Equal(t, int64(testFileSize), totalUsage,
+		"usage counter total should equal the source file size")
+}
+
 // Create a federation then SIGSTOP the origin to prevent it from responding.
 // Ensure the various client timeouts are reported correctly up to the user
 func TestOriginUnresponsive(t *testing.T) {

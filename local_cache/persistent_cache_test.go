@@ -770,6 +770,52 @@ func TestCacheDBUsageCounter(t *testing.T) {
 	assert.Equal(t, contentLength, usage)
 }
 
+// TestSetUsageFollowedByAddUsage verifies that SetUsage (used by the
+// consistency checker) followed by AddUsage (normal download) does not
+// duplicate the old compacted value.  A naïve SetUsage that writes with
+// txn.Set leaves the old MergeOperator compacted entry visible to
+// BadgerDB's iterateAndMerge, causing the counter to include both the
+// new baseline AND the old compacted total.
+func TestSetUsageFollowedByAddUsage(t *testing.T) {
+	InitIssuerKeyForTests(t)
+
+	tmpDir := t.TempDir()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db, err := NewCacheDB(ctx, tmpDir)
+	require.NoError(t, err)
+	defer db.Close()
+
+	namespaceID := NamespaceID(1)
+	storageID := StorageIDFirstDisk
+
+	// Simulate normal download charging: add 1000 bytes
+	require.NoError(t, db.AddUsage(storageID, namespaceID, 1000))
+
+	// Force the MergeOperator to compact so the value is flushed to DB
+	// with bitDiscardEarlierVersions.
+	time.Sleep(2 * usageCompactionInterval)
+
+	// Verify current value
+	usage, err := db.GetUsage(storageID, namespaceID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1000), usage)
+
+	// Simulate consistency check: SetUsage overwrites the counter
+	require.NoError(t, db.SetUsage(storageID, namespaceID, 1000))
+
+	// Simulate a new download after consistency check
+	require.NoError(t, db.AddUsage(storageID, namespaceID, 500))
+
+	// The correct value should be 1000 (baseline) + 500 (new delta) = 1500
+	// NOT 1000 (old compacted) + 1000 (SetUsage) + 500 (delta) = 2500
+	usage, err = db.GetUsage(storageID, namespaceID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1500), usage, "SetUsage followed by AddUsage should not duplicate old compacted value")
+}
+
 func TestEncryptionManager(t *testing.T) {
 	// Initialize issuer keys for encryption
 	InitIssuerKeyForTests(t)
