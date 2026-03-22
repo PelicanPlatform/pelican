@@ -700,10 +700,48 @@ func (em *EvictionManager) ChooseDiskStorage() StorageID {
 // ForcePurge forces an immediate purge down to the low water mark.
 // Directories are processed concurrently (see checkAndEvict).
 func (em *EvictionManager) ForcePurge() error {
+	targets := make(map[StorageID]int64, len(em.dirLimits))
+	for sid, limits := range em.dirLimits {
+		targets[sid] = int64(limits.lowWater)
+	}
+	_, _, err := em.forcePurgeToTargets("Force purge", targets)
+	return err
+}
+
+// MarkPurgeFirst marks an object to be purged first during next eviction
+func (em *EvictionManager) MarkPurgeFirst(instanceHash InstanceHash) error {
+	return em.db.MarkPurgeFirst(instanceHash)
+}
+
+// ForcePurgeToBytes forces an immediate purge across all directories until
+// total cache usage drops to targetBytes or below.  Unlike ForcePurge, which
+// uses the configured low-water mark, this method accepts an explicit target.
+// Returns (bytes freed, objects evicted, error).
+func (em *EvictionManager) ForcePurgeToBytes(targetBytes uint64) (uint64, int64, error) {
+	var totalMax uint64
+	for _, limits := range em.dirLimits {
+		totalMax += limits.maxSize
+	}
+	if totalMax == 0 {
+		return 0, 0, errors.New("no storage directories configured")
+	}
+
+	targets := make(map[StorageID]int64, len(em.dirLimits))
+	for sid, limits := range em.dirLimits {
+		targets[sid] = int64((targetBytes * limits.maxSize) / totalMax)
+	}
+	return em.forcePurgeToTargets("Purge-to-target", targets)
+}
+
+// forcePurgeToTargets is the shared implementation behind ForcePurge and
+// ForcePurgeToBytes.  Each entry in targets maps a storageID to the byte
+// threshold that directory should be at when the purge completes.
+// Directories are processed concurrently.
+func (em *EvictionManager) forcePurgeToTargets(label string, targets map[StorageID]int64) (uint64, int64, error) {
 	em.evictMu.Lock()
 	if em.evicting {
 		em.evictMu.Unlock()
-		return errors.New("eviction already in progress")
+		return 0, 0, errors.New("eviction already in progress")
 	}
 	em.evicting = true
 	em.evictMu.Unlock()
@@ -716,38 +754,38 @@ func (em *EvictionManager) ForcePurge() error {
 
 	runID := em.evictRunCounter.Add(1)
 	rl := log.WithField("evictRun", runID)
-
-	rl.Info("Force purge initiated")
+	rl.Info(label + " initiated")
 	startTime := time.Now()
 	var evictedBytes atomic.Uint64
 	var evictedObjects atomic.Int64
 
-	// Evict until all directories reach their low water marks.
-	// EvictByLRU (called by evictFromNamespace) automatically drains
-	// purge-first items before touching the regular LRU index.
 	var wg sync.WaitGroup
-	for sid, limits := range em.dirLimits {
+	for sid := range em.dirLimits {
+		dirTarget, ok := targets[sid]
+		if !ok {
+			continue
+		}
 		wg.Add(1)
-		go func(sid StorageID, limits *dirEvictionLimits) {
+		go func(sid StorageID, dirTarget int64) {
 			defer wg.Done()
 			dirUsage := em.getDirUsage(sid)
-			if dirUsage <= int64(limits.lowWater) {
+			if dirUsage <= dirTarget {
 				return
 			}
 
-			for dirUsage > int64(limits.lowWater) {
+			for dirUsage > dirTarget {
 				targetKey, targetUsage, err := em.findGreediestNamespaceInDir(sid)
 				if err != nil || targetUsage <= 0 {
 					break
 				}
 
-				overhead := dirUsage - int64(limits.lowWater)
+				overhead := dirUsage - dirTarget
 				bytes, count, _, err := em.evictFromNamespace(rl, targetKey.StorageID, targetKey.NamespaceID, 0, overhead)
 				if err != nil {
 					rl.WithFields(log.Fields{
 						"storageID":   targetKey.StorageID,
 						"namespaceID": targetKey.NamespaceID,
-					}).WithError(err).Warn("Error evicting during force purge")
+					}).WithError(err).Warn("Error evicting during " + label)
 					continue
 				}
 
@@ -755,25 +793,22 @@ func (em *EvictionManager) ForcePurge() error {
 				evictedObjects.Add(int64(count))
 
 				if time.Since(startTime) > 60*time.Second {
-					rl.Warn("Force purge timeout - will continue next cycle")
+					rl.Warn(label + " timeout - will continue next cycle")
 					break
 				}
 
 				dirUsage = em.getDirUsage(sid)
 			}
-		}(sid, limits)
+		}(sid, dirTarget)
 	}
 	wg.Wait()
 
+	freed := evictedBytes.Load()
+	objects := evictedObjects.Load()
 	rl.WithFields(log.Fields{
-		"freedBytes":     utils.HumanBytes(evictedBytes.Load()),
-		"evictedObjects": evictedObjects.Load(),
+		"freedBytes":     utils.HumanBytes(freed),
+		"evictedObjects": objects,
 		"elapsed":        time.Since(startTime).String(),
-	}).Info("Force purge complete")
-	return nil
-}
-
-// MarkPurgeFirst marks an object to be purged first during next eviction
-func (em *EvictionManager) MarkPurgeFirst(instanceHash InstanceHash) error {
-	return em.db.MarkPurgeFirst(instanceHash)
+	}).Info(label + " complete")
+	return freed, objects, nil
 }

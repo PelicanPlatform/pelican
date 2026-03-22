@@ -25,6 +25,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -1202,4 +1203,96 @@ func TestPrestageWithAPI(t *testing.T) {
 		require.NoError(t, result.results[0].Error, "Prestage with forced API failed: %v", result.results[0].Error)
 		t.Logf("Prestage with forced API succeeded")
 	}
+}
+
+// checkCacheObject sends a HEAD request with only-if-cached to the cache's
+// Unix socket.  Returns true if the object is cached (200), false if not (504).
+func checkCacheObject(ctx context.Context, objectPath string) (bool, error) {
+	socketPath := param.LocalCache_Socket.GetString()
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return net.Dial("unix", socketPath)
+		},
+	}
+	reqURL := &url.URL{Scheme: "http", Host: "localhost", Path: objectPath}
+	req, err := http.NewRequestWithContext(ctx, "HEAD", reqURL.String(), nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Cache-Control", "only-if-cached")
+	resp, err := (&http.Client{Transport: transport}).Do(req)
+	if err != nil {
+		return false, err
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK, nil
+}
+
+// TestDoEvict tests the client.DoEvict function, which uses the same
+// token bootstrapping as DoGet to evict objects from the local cache.
+func TestDoEvict(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
+
+	testFileContent := "evict-me-content"
+	tempFile, err := os.CreateTemp(t.TempDir(), "test")
+	require.NoError(t, err)
+	_, err = tempFile.WriteString(testFileContent)
+	require.NoError(t, err)
+	tempFile.Close()
+
+	tempToken, _ := getTempToken(t)
+	defer tempToken.Close()
+	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
+
+	export := fed.Exports[0]
+	fileName := filepath.Base(tempFile.Name())
+	objectURL := fmt.Sprintf("pelican://%s:%s%s/evict_test/%s",
+		param.Server_Hostname.GetString(),
+		strconv.Itoa(param.Server_WebPort.GetInt()),
+		export.FederationPrefix, fileName)
+
+	// Upload the file.
+	_, err = client.DoCopy(fed.Ctx, tempFile.Name(), objectURL, false, client.WithTokenLocation(tempToken.Name()))
+	require.NoError(t, err)
+
+	// Prestage the object into the cache.
+	_, err = client.DoPrestage(fed.Ctx, objectURL, client.WithTokenLocation(tempToken.Name()))
+	require.NoError(t, err)
+
+	t.Run("immediate-eviction", func(t *testing.T) {
+		// Verify it's cached by downloading.
+		tmpDest := filepath.Join(t.TempDir(), "downloaded")
+		_, err := client.DoGet(fed.Ctx, objectURL, tmpDest, false, client.WithTokenLocation(tempToken.Name()))
+		require.NoError(t, err)
+		data, err := os.ReadFile(tmpDest)
+		require.NoError(t, err)
+		assert.Equal(t, testFileContent, string(data))
+
+		// Evict immediately.
+		msg, err := client.DoEvict(fed.Ctx, objectURL, true, client.WithTokenLocation(tempToken.Name()))
+		require.NoError(t, err)
+		// The cache's XRootD layer responds with "Cache eviction successful".
+		assert.Contains(t, msg, "eviction successful")
+
+		// Verify the object is no longer in cache by sending a HEAD with
+		// only-if-cached to the cache's Unix socket.
+		cached, checkErr := checkCacheObject(fed.Ctx, export.FederationPrefix+"/evict_test/"+fileName)
+		require.NoError(t, checkErr)
+		assert.False(t, cached, "object should no longer be cached after immediate eviction")
+	})
+
+	t.Run("default-eviction", func(t *testing.T) {
+		// Re-prestage so there's something to evict.
+		_, err := client.DoPrestage(fed.Ctx, objectURL, client.WithTokenLocation(tempToken.Name()))
+		require.NoError(t, err)
+
+		// Default (non-immediate) eviction.
+		msg, err := client.DoEvict(fed.Ctx, objectURL, false, client.WithTokenLocation(tempToken.Name()))
+		require.NoError(t, err)
+		assert.Contains(t, msg, "eviction successful")
+	})
 }

@@ -1220,6 +1220,59 @@ func (pc *PersistentCache) HeadObject(objectPath, token string) (*HeadResult, er
 // ErrNotCached is returned when an object is not in the cache
 var ErrNotCached = errors.New("object not cached")
 
+// IsFullyCached returns true if the object at the given path is fully
+// downloaded and present in the cache (metadata exists, ContentLength >= 0,
+// and the download has been marked complete).
+//
+// When the cached entry carries Cache-Control directives and is stale,
+// a revalidation request is made to the origin.  If revalidation confirms
+// the same ETag (or fails gracefully, serving stale), the object is still
+// considered fully cached.  If the origin provides a new version or
+// responds with no-store, the method returns false so the caller falls
+// through to a full download.
+func (pc *PersistentCache) IsFullyCached(ctx context.Context, objectPath, token string) bool {
+	pelicanURL := pc.normalizePath(objectPath)
+	objectHash := pc.db.ObjectHash(pelicanURL)
+
+	etag, found, err := pc.db.GetLatestETag(objectHash)
+	if err != nil || !found {
+		return false
+	}
+
+	instanceHash := pc.db.InstanceHash(etag, objectHash)
+	meta, err := pc.storage.GetMetadata(instanceHash)
+	if err != nil || meta == nil {
+		return false
+	}
+
+	if meta.ContentLength < 0 || meta.Completed.IsZero() {
+		return false
+	}
+
+	// Check whether the cached entry is stale.  IsStale handles both
+	// explicit Cache-Control directives (max-age, no-cache, etc.) and
+	// objects without directives (uses DefaultFreshness / Expires).
+	ccDirectives := meta.GetCacheDirectives()
+	if ccDirectives.IsStale(meta.LastValidated) {
+		namespaceID := pc.getNamespaceID(objectPath)
+		newHash, _, rv, rErr := pc.revalidateObject(ctx, instanceHash, objectHash, pelicanURL, namespaceID, token, meta)
+		if rErr != nil {
+			return false
+		}
+		if rv != nil && rv.noStoreReader != nil {
+			// Origin now says no-store; discard the stream.
+			rv.noStoreReader.Close()
+			return false
+		}
+		// A new ETag means a new version is being downloaded — not
+		// yet fully cached.  Same hash (including stale fallback)
+		// means the existing data is still valid.
+		return newHash == instanceHash
+	}
+
+	return true
+}
+
 // ErrInitNoStore is a sentinel error returned by initObjectFromStat when
 // the origin's Cache-Control indicates the response must not be stored.
 // The caller should fall back to a full streaming download via downloadObject.
@@ -1413,11 +1466,10 @@ func (pc *PersistentCache) revalidateObject(
 	token string,
 	meta *CacheMetadata,
 ) (InstanceHash, *CacheMetadata, *revalidation, error) {
-	// Check whether staleness revalidation is needed at all
+	// Check whether staleness revalidation is needed at all.
+	// IsStale handles both explicit Cache-Control directives (max-age,
+	// no-cache, etc.) and objects without directives (via DefaultFreshness).
 	ccDirectives := meta.GetCacheDirectives()
-	if !ccDirectives.HasDirectives() {
-		return instanceHash, meta, nil, nil
-	}
 	if !ccDirectives.IsStale(meta.LastValidated) {
 		return instanceHash, meta, nil, nil
 	}

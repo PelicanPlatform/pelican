@@ -229,6 +229,14 @@ func (q *prestageQueue) prestage(req *prestageRequest) {
 
 	log.Debugf("Prestage worker handling request for %s", req.path)
 
+	// Fast path: if the object is already fully cached, skip the
+	// expensive Get+drain cycle entirely.
+	if q.pc.IsFullyCached(context.Background(), req.path, req.token) {
+		log.Debugf("Prestage: object already fully cached, skipping download: %s", req.path)
+		req.SetDone(200, "Prestage successful")
+		return
+	}
+
 	reader, err := q.pc.Get(context.Background(), req.path, req.token)
 	if err != nil {
 		status := 500
@@ -448,6 +456,10 @@ func (pc *PersistentCache) prestageHandler(w http.ResponseWriter, r *http.Reques
 }
 
 // evictHandler handles GET /pelican/api/v1.0/evict
+//
+// By default, matching objects are marked for priority eviction (purge-first)
+// so they will be removed during the next eviction cycle.  Pass
+// immediate=true to delete them right away.
 func (pc *PersistentCache) evictHandler(w http.ResponseWriter, r *http.Request) {
 	pathParam := r.URL.Query().Get("path")
 	if pathParam == "" {
@@ -467,74 +479,37 @@ func (pc *PersistentCache) evictHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	immediate := r.URL.Query().Get("immediate") == "true"
+
 	token := extractBearerToken(r)
 
-	// Check authorization (read permission — eviction only removes the
-	// local cache copy, so read access to the path is sufficient).
-	if ok, reason := pc.ac.authorize(token_scopes.Wlcg_Storage_Read, decodedPath, token); !ok {
+	// Check authorization — eviction is a destructive operation so we
+	// require storage.modify scope for the target path.
+	if ok, reason := pc.ac.authorize(token_scopes.Wlcg_Storage_Modify, decodedPath, token); !ok {
 		log.WithFields(log.Fields{"path": decodedPath, "reason": reason}).Warn("Evict authorization denied")
 		http.Error(w, "Permission denied to evict path", http.StatusForbidden)
 		return
 	}
 
-	// Resolve the path to an instanceHash so we can delete it.
-	pelicanURL := pc.normalizePath(decodedPath)
-	objectHash := pc.db.ObjectHash(pelicanURL)
-
-	// Check if the object is currently being downloaded (in-use / locked).
-	pc.activeDownloadsMu.RLock()
-	_, inUse := pc.activeDownloads[objectHash]
-	pc.activeDownloadsMu.RUnlock()
-	if inUse {
-		w.Header().Set("Retry-After", "30")
-		http.Error(w, "Cannot evict file that is in-use by the cache", http.StatusLocked)
-		return
-	}
-
-	etag, found, err := pc.db.GetLatestETag(objectHash)
-	if err != nil {
-		http.Error(w, "Eviction operation failed", http.StatusInternalServerError)
-		return
-	}
-	if !found {
-		// Object not in cache — treat as success (idempotent).
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "Cache eviction successful")
-		return
-	}
-
-	instanceHash := pc.db.InstanceHash(etag, objectHash)
-
-	// Check if the object actually exists in the cache.
-	meta, err := pc.storage.GetMetadata(instanceHash)
-	if err != nil || meta == nil {
-		// Object not in cache — treat as success (idempotent).
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "Cache eviction successful")
-		return
-	}
-
-	// Delete the object from storage and database.
-	if err := pc.storage.Delete(instanceHash); err != nil {
-		log.Warnf("Failed to evict object %s (path: %s): %v", instanceHash, decodedPath, err)
+	count, evictErr := pc.EvictPrefix(decodedPath, token, immediate)
+	if evictErr != nil {
+		log.Warnf("Failed to evict prefix %s: %v", decodedPath, evictErr)
 		http.Error(w, "Eviction operation failed", http.StatusInternalServerError)
 		return
 	}
 
-	// Also remove the ETag mapping so future lookups don't find a stale reference.
-	if delErr := pc.db.DeleteLatestETag(objectHash); delErr != nil {
-		log.Warnf("Failed to delete ETag mapping for %s: %v", decodedPath, delErr)
-	}
-
-	log.Infof("Evicted cached object %s (path: %s)", instanceHash, decodedPath)
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, "Cache eviction successful")
+	if immediate {
+		fmt.Fprintf(w, "Evicted %d objects under %s", count, decodedPath)
+	} else {
+		fmt.Fprintf(w, "Marked %d objects for priority eviction under %s", count, decodedPath)
+	}
 }
 
 // EvictObject is the programmatic API for evicting an object by path.
 // Returns nil on success, an error if the object is in use or the eviction fails.
 func (pc *PersistentCache) EvictObject(objectPath, token string) error {
-	if ok, reason := pc.ac.authorize(token_scopes.Wlcg_Storage_Read, objectPath, token); !ok {
+	if ok, reason := pc.ac.authorize(token_scopes.Wlcg_Storage_Modify, objectPath, token); !ok {
 		return newAuthorizationDenied(reason)
 	}
 
@@ -566,4 +541,74 @@ func (pc *PersistentCache) EvictObject(objectPath, token string) error {
 	}
 
 	return nil
+}
+
+// EvictPrefix evicts all cached objects whose source URL starts with the
+// given path prefix (or matches it exactly).  It iterates every metadata
+// entry, selects those with a matching SourceURL, and either deletes them
+// immediately or marks them for priority eviction (purge-first) depending
+// on the immediate flag.  Objects that are currently being downloaded are
+// skipped.  The returned count reflects objects that were acted on.
+func (pc *PersistentCache) EvictPrefix(prefix, token string, immediate bool) (int, error) {
+	normalizedPrefix := pc.normalizePath(prefix)
+	// Ensure prefix matching uses a directory boundary.
+	if !strings.HasSuffix(normalizedPrefix, "/") {
+		normalizedPrefix += "/"
+	}
+
+	var affected int
+	var firstErr error
+
+	err := pc.db.ScanMetadata(func(instanceHash InstanceHash, meta *CacheMetadata) error {
+		// Check if the SourceURL starts with the normalized prefix, or
+		// matches the prefix exactly (without trailing slash).
+		if !strings.HasPrefix(meta.SourceURL, normalizedPrefix) &&
+			meta.SourceURL != strings.TrimSuffix(normalizedPrefix, "/") {
+			return nil
+		}
+
+		// Skip objects being actively downloaded.
+		objectHash := pc.db.ObjectHash(meta.SourceURL)
+		pc.activeDownloadsMu.RLock()
+		_, inUse := pc.activeDownloads[objectHash]
+		pc.activeDownloadsMu.RUnlock()
+		if inUse {
+			log.Debugf("Skipping in-use object during prefix eviction: %s", meta.SourceURL)
+			return nil
+		}
+
+		if immediate {
+			if delErr := pc.storage.Delete(instanceHash); delErr != nil {
+				log.Warnf("Failed to evict %s during prefix eviction: %v", meta.SourceURL, delErr)
+				if firstErr == nil {
+					firstErr = delErr
+				}
+				return nil // continue with other objects
+			}
+			if delErr := pc.db.DeleteLatestETag(objectHash); delErr != nil {
+				log.Warnf("Failed to delete ETag mapping for %s: %v", meta.SourceURL, delErr)
+			}
+			log.Debugf("Evicted cached object (prefix eviction): %s", meta.SourceURL)
+		} else {
+			if markErr := pc.eviction.MarkPurgeFirst(instanceHash); markErr != nil {
+				log.Warnf("Failed to mark %s for priority eviction: %v", meta.SourceURL, markErr)
+				if firstErr == nil {
+					firstErr = markErr
+				}
+				return nil
+			}
+			log.Debugf("Marked for priority eviction (prefix): %s", meta.SourceURL)
+		}
+
+		affected++
+		return nil
+	})
+
+	if err != nil {
+		return affected, errors.Wrap(err, "metadata scan failed during prefix eviction")
+	}
+	if firstErr != nil {
+		return affected, errors.Wrapf(firstErr, "processed %d objects but some failed", affected)
+	}
+	return affected, nil
 }

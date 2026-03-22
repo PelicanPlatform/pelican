@@ -1,0 +1,48 @@
+---
+title: pelican cache purge
+---
+
+## pelican cache purge
+
+Trigger LRU eviction on the running cache
+
+### Synopsis
+
+Trigger an immediate LRU eviction cycle on the running cache.
+
+Without --target, evicts down to the configured low water mark.
+With --target, evicts down to the specified total cache size.
+
+The --target value accepts human-readable sizes: 100GB, 500MB, 1TB, etc.
+
+Examples:
+  pelican cache purge
+  pelican cache purge --target 100GB
+  pelican cache purge --token /path/to/token
+
+```
+pelican cache purge [flags]
+```
+
+### Options
+
+```
+  -h, --help            help for purge
+      --target string   Target cache size (e.g. 100GB, 500MB); default: configured low water mark
+  -t, --token string    Path to token file (auto-generated if not provided)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican cache](/commands-reference/cache/)	 - Operate a Pelican cache service
