@@ -484,7 +484,11 @@ func (m *CacheMetadata) PerDirectoryBytes() map[StorageID]int64 {
 	result := make(map[StorageID]int64)
 	if !m.IsChunked() {
 		if m.ContentLength > 0 {
-			result[m.StorageID] = m.ContentLength
+			if m.StorageID == StorageIDInline {
+				result[m.StorageID] = m.ContentLength
+			} else {
+				result[m.StorageID] = CalculateFileSize(m.ContentLength)
+			}
 		}
 		return result
 	}
@@ -492,7 +496,7 @@ func (m *CacheMetadata) PerDirectoryBytes() map[StorageID]int64 {
 		if ci.StorageID == StorageIDInline {
 			continue // unallocated
 		}
-		result[ci.StorageID] += ci.Size
+		result[ci.StorageID] += CalculateFileSize(ci.Size)
 	}
 	return result
 }

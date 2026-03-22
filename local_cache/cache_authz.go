@@ -134,9 +134,63 @@ func (ac *authConfig) updateConfig(nsAds []server_structs.NamespaceAdV2) error {
 			issuers[issuer.IssuerUrl.String()] = true
 		}
 	}
+
+	// Only invalidate the cached token ACLs when the namespace list
+	// actually changed.  The periodic poll runs every minute and
+	// almost always returns the same list; invalidating every time
+	// would flush the cache needlessly.
+	oldNs := ac.ns.Load()
+	changed := oldNs == nil || !nsAdsAuthzEqual(*oldNs, nsAds)
+
 	ac.issuers.Store(&issuers)
 	ac.ns.Store(&nsAds)
+
+	if changed && ac.tokenAuthz != nil {
+		ac.tokenAuthz.DeleteAll()
+	}
 	return nil
+}
+
+// nsAdsAuthzEqual reports whether two namespace-ad slices are semantically
+// identical for authorization purposes (paths, capabilities, and issuer
+// configuration).
+func nsAdsAuthzEqual(old, new []server_structs.NamespaceAdV2) bool {
+	if len(old) != len(new) {
+		return false
+	}
+	// Build map keyed by path for O(n) comparison.
+	oldByPath := make(map[string]int, len(old))
+	for i := range old {
+		oldByPath[old[i].Path] = i
+	}
+	for i := range new {
+		oi, ok := oldByPath[new[i].Path]
+		if !ok {
+			return false
+		}
+		o := &old[oi]
+		n := &new[i]
+		if o.Caps.PublicReads != n.Caps.PublicReads ||
+			o.Caps.Reads != n.Caps.Reads ||
+			o.Caps.Writes != n.Caps.Writes {
+			return false
+		}
+		if len(o.Issuer) != len(n.Issuer) {
+			return false
+		}
+		for j := range o.Issuer {
+			if o.Issuer[j].IssuerUrl.String() != n.Issuer[j].IssuerUrl.String() {
+				return false
+			}
+			if !slices.Equal(o.Issuer[j].BasePaths, n.Issuer[j].BasePaths) {
+				return false
+			}
+			if !slices.Equal(o.Issuer[j].RestrictedPaths, n.Issuer[j].RestrictedPaths) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (ac *authConfig) getResourceScopes(token string) (scopes []token_scopes.ResourceScope, issuer string, err error) {
