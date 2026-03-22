@@ -1480,9 +1480,14 @@ func (cdb *CacheDB) DeleteObject(instanceHash InstanceHash) error {
 		return err
 	}
 	if meta != nil {
-		if err := cdb.AddUsage(meta.StorageID, meta.NamespaceID, -meta.ContentLength); err != nil {
-			log.Warnf("Failed to decrease usage for storage %d namespace %d: %v",
-				meta.StorageID, meta.NamespaceID, err)
+		// Deduct the on-disk size (content + per-block MAC overhead)
+		// to match what was charged in InitDiskStorage / AllocateChunk.
+		// Inline objects have no MAC overhead.
+		for sid, bytes := range meta.PerDirectoryBytes() {
+			if err := cdb.AddUsage(sid, meta.NamespaceID, -bytes); err != nil {
+				log.Warnf("Failed to decrease usage for storage %d namespace %d: %v",
+					sid, meta.NamespaceID, err)
+			}
 		}
 	}
 	return nil
@@ -1545,14 +1550,18 @@ func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, max
 				chunkLocations: meta.ChunkLocations,
 			})
 			// For chunked objects, decrement usage from each storage
-			// directory proportional to the bytes it holds.  For
+			// based on the on-disk bytes it holds.  For
 			// non-chunked objects this returns a single entry for the
-			// base StorageID with the full ContentLength.
+			// base StorageID with CalculateFileSize(ContentLength).
 			for sid, bytes := range meta.PerDirectoryBytes() {
 				key := StorageUsageKey{StorageID: sid, NamespaceID: meta.NamespaceID}
 				usageDeltas[key] -= bytes
 			}
-			freedBytes += meta.ContentLength
+			if meta.StorageID == StorageIDInline {
+				freedBytes += meta.ContentLength
+			} else {
+				freedBytes += CalculateFileSize(meta.ContentLength)
+			}
 		}
 
 		// objectUsesDir reports whether an object touches the given
