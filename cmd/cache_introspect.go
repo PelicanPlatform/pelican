@@ -28,6 +28,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"text/tabwriter"
@@ -926,24 +927,29 @@ func printStats(stats *local_cache.CacheStats) error {
 
 		// Collect lines and find the widest human-bytes string for alignment.
 		type usageLine struct {
-			label string
-			human string
-			raw   int64
+			sid      uint8
+			nid      uint32
+			label    string
+			human    string
+			raw      int64
+			storeTot int64 // total usage for this storage directory
 		}
 		lines := make([]usageLine, 0, len(stats.UsageCounters))
 		maxHuman := 0
 		maxRaw := 0
 		maxLabel := 0
+		storeTotals := make(map[uint8]int64)
 		for key, val := range stats.UsageCounters {
 			// Parse "s<sid>:ns<nid>" back to IDs.
 			var sid uint8
 			var nid uint32
 			if _, err := fmt.Sscanf(key, "s%d:ns%d", &sid, &nid); err == nil {
 				key = dirName(sid) + " : " + nsName(nid)
+				storeTotals[sid] += val
 			}
 			h := utils.HumanBytes(val)
 			r := fmt.Sprintf("%d", val)
-			lines = append(lines, usageLine{label: key, human: h, raw: val})
+			lines = append(lines, usageLine{sid: sid, nid: nid, label: key, human: h, raw: val})
 			if len(key) > maxLabel {
 				maxLabel = len(key)
 			}
@@ -954,6 +960,17 @@ func printStats(stats *local_cache.CacheStats) error {
 				maxRaw = len(r)
 			}
 		}
+		// Back-fill per-storage totals so the sort can use them.
+		for i := range lines {
+			lines[i].storeTot = storeTotals[lines[i].sid]
+		}
+		// Sort: decreasing storage total, then decreasing namespace usage.
+		sort.Slice(lines, func(i, j int) bool {
+			if lines[i].storeTot != lines[j].storeTot {
+				return lines[i].storeTot > lines[j].storeTot
+			}
+			return lines[i].raw > lines[j].raw
+		})
 
 		fmt.Printf("\nUsage Counters (pre-computed):\n")
 		for _, l := range lines {
