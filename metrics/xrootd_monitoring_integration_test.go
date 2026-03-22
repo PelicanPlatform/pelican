@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -163,6 +164,29 @@ func extractProjectFromPackets(t *testing.T, packets [][]byte) string {
 	return ""
 }
 
+// extractDNFromPackets finds 'u' (user login) packets and extracts the DN
+// from the auth info string (the &n= field).
+func extractDNFromPackets(t *testing.T, packets [][]byte) string {
+	t.Helper()
+	for _, pkt := range packets {
+		if len(pkt) < 12 || pkt[0] != 'u' {
+			continue
+		}
+		plen := binary.BigEndian.Uint16(pkt[2:4])
+		infoSize := int(plen) - 12
+		require.GreaterOrEqual(t, len(pkt), 12+infoSize)
+		_, rest, err := metrics.GetSIDRest(pkt[12 : 12+infoSize])
+		require.NoError(t, err)
+		// rest is the auth info string like "&p=https&n=myDN&o=issuer&r=role"
+		for _, part := range strings.Split(rest, "&") {
+			if strings.HasPrefix(part, "n=") {
+				return strings.TrimPrefix(part, "n=")
+			}
+		}
+	}
+	return ""
+}
+
 // getMonitoringTestToken generates a WLCG bearer token for the test federation.
 func getMonitoringTestToken(t *testing.T) string {
 	t.Helper()
@@ -224,6 +248,12 @@ Monitoring:
 	// Drain any packets produced during federation startup
 	drainMonitorChan(t, 2*time.Second)
 
+	// Enable the shoveler flag so that BeginTransferMonitor generates packets.
+	// We do this after federation startup to avoid actually launching the shoveler
+	// (which requires a real message queue), but the flag must be set so that
+	// BeginTransferMonitor does not short-circuit.
+	require.NoError(t, param.Set(param.Shoveler_Enable.GetName(), true))
+
 	testToken := getMonitoringTestToken(t)
 	export := ft.Exports[0]
 	pelicanHost := fmt.Sprintf("%s:%d", param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
@@ -266,6 +296,10 @@ Monitoring:
 
 		project := extractProjectFromPackets(t, packets)
 		assert.Equal(t, "MonitoringTestProj", project, "Project name should appear in 'i' packet")
+
+		// Verify the 'u' packet carries the DN from the token
+		dn := extractDNFromPackets(t, packets)
+		assert.Equal(t, "origin", dn, "DN in 'u' packet should match the token subject")
 	})
 
 	t.Run("GET-directread-authenticated", func(t *testing.T) {
@@ -296,6 +330,12 @@ Monitoring:
 
 		project := extractProjectFromPackets(t, packets)
 		assert.Equal(t, "MonitoringTestProj", project, "Project name should appear in 'i' packet")
+
+		// Note: even though WithToken is used, the Pelican client drops the
+		// token for public-read namespaces because the director returns
+		// require-token=false. So the DN in the 'u' packet will be empty.
+		dn := extractDNFromPackets(t, packets)
+		assert.Empty(t, dn, "DN should be empty because the client drops the token for public-read namespaces")
 	})
 
 	t.Run("GET-directread-public", func(t *testing.T) {
@@ -326,5 +366,9 @@ Monitoring:
 
 		project := extractProjectFromPackets(t, packets)
 		assert.Equal(t, "MonitoringTestProj", project, "Project name should appear in 'i' packet")
+
+		// Public access should have an empty DN
+		dn := extractDNFromPackets(t, packets)
+		assert.Empty(t, dn, "DN in 'u' packet should be empty for public access")
 	})
 }

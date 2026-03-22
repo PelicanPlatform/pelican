@@ -510,8 +510,8 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 
 		// Create a route group for this prefix
 		group := engine.Group(routePrefix)
-		group.Use(httpMetricsMiddleware())
 		group.Use(authMiddleware())
+		group.Use(httpMetricsMiddleware())
 
 		// Create a handler function for all requests
 		handleRequest := func(c *gin.Context) {
