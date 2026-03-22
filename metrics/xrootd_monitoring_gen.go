@@ -28,6 +28,8 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // TransferEvent describes a completed file transfer from the internal HTTP backend.
@@ -126,8 +128,12 @@ func EmitTransferEvent(event TransferEvent) {
 // BeginTransferMonitor starts monitoring a transfer. It emits a 'u' (user login)
 // packet and an 'f' (f-stream) packet with isOpen, then returns a TransferMonitor
 // that can emit periodic isXfr records and a final isClose.
-// Returns nil if the packets could not be built.
+// Returns nil if the shoveler is disabled or if the packets could not be built.
 func BeginTransferMonitor(event TransferEvent) *TransferMonitor {
+	if !param.Shoveler_Enable.GetBool() {
+		return nil
+	}
+
 	ch := GetInternalMonitorChan()
 
 	userId := nextUserId.Add(1)
@@ -539,128 +545,6 @@ func buildFStreamClosePacket(pseq byte, fileId uint32, readBytes, writeBytes int
 	}
 	buf.Write(todBytes)
 
-	clsBytes, err := cls.Serialize()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to serialize f-stream close")
-	}
-	buf.Write(clsBytes)
-
-	return buf.Bytes(), nil
-}
-
-// buildFStreamPacket creates an 'f' (f-stream) packet containing a file open and close.
-// This is used by EmitTransferEvent for backward compatibility.
-func buildFStreamPacket(pseq byte, fileId, userId uint32, event TransferEvent) ([]byte, error) {
-	now := int32(time.Now().Unix())
-	startTime := int32(event.StartTime.Unix())
-	if startTime == 0 {
-		startTime = now
-	}
-
-	// Build TOD record
-	tod := XrdXrootdMonFileTOD{
-		Hdr: XrdXrootdMonFileHdr{
-			RecType: isTime,
-			RecFlag: 0x01, // hasSID
-			RecSize: 24,
-			NRecs0:  0, // isXfr records count
-			NRecs1:  2, // total records (open + close)
-		},
-		TBeg: startTime,
-		TEnd: now,
-		SID:  serverSID,
-	}
-
-	// Build file open record with LFN
-	pathBytes := []byte(event.Path)
-	pathBytes = append(pathBytes, 0) // null terminate
-	// Pad to 4-byte boundary
-	for len(pathBytes)%4 != 0 {
-		pathBytes = append(pathBytes, 0)
-	}
-
-	opnRecSize := int16(16 + 4 + len(pathBytes)) // header(8) + fsz(8) + userId(4) + lfn
-	opnHdr := XrdXrootdMonFileHdr{
-		RecType: isOpen,
-		RecFlag: 0x01, // hasLFN
-		RecSize: opnRecSize,
-		FileId:  fileId,
-	}
-
-	// Build the close record with OPS
-	clsHdr := XrdXrootdMonFileHdr{
-		RecType: isClose,
-		RecFlag: 0x02, // hasOPS
-		RecSize: 80,   // 8 (hdr) + 24 (xfr) + 48 (ops) = 80
-		FileId:  fileId,
-	}
-
-	xfr := XrdXrootdMonStatXFR{
-		Read:  event.ReadBytes,
-		Readv: 0,
-		Write: event.WriteBytes,
-	}
-
-	ops := XrdXrootdMonStatOPS{
-		Read:  event.ReadOps,
-		Readv: 0,
-		Write: event.WriteOps,
-	}
-
-	// Calculate total packet length
-	totalLen := 8 + // MonHeader
-		int(tod.Hdr.RecSize) +
-		int(opnRecSize) +
-		int(clsHdr.RecSize)
-
-	header := XrdXrootdMonHeader{
-		Code: 'f',
-		Pseq: pseq,
-		Plen: uint16(totalLen),
-		Stod: serverStartTime,
-	}
-
-	// Serialize everything
-	var buf bytes.Buffer
-
-	headerBytes, err := header.Serialize()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to serialize f-stream header")
-	}
-	buf.Write(headerBytes)
-
-	todBytes, err := tod.Serialize()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to serialize f-stream TOD")
-	}
-	buf.Write(todBytes)
-
-	// Serialize the open record manually since the LFN is variable length
-	opnHdrBytes, err := opnHdr.Serialize()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to serialize f-stream open header")
-	}
-	buf.Write(opnHdrBytes)
-
-	// Write Fsz (file size, 8 bytes)
-	if err := binary.Write(&buf, binary.BigEndian, int64(0)); err != nil {
-		return nil, errors.Wrap(err, "failed to serialize Fsz")
-	}
-
-	// Write UserId (4 bytes)
-	if err := binary.Write(&buf, binary.BigEndian, userId); err != nil {
-		return nil, errors.Wrap(err, "failed to serialize open UserId")
-	}
-
-	// Write the LFN path
-	buf.Write(pathBytes)
-
-	// Serialize the close record
-	cls := XrdXrootdMonFileCLS{
-		Hdr: clsHdr,
-		Xfr: xfr,
-		Ops: ops,
-	}
 	clsBytes, err := cls.Serialize()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to serialize f-stream close")
