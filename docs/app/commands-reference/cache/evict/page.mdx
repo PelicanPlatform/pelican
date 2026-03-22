@@ -1,0 +1,55 @@
+---
+title: pelican cache evict
+---
+
+## pelican cache evict
+
+Evict cached objects by path or prefix
+
+### Synopsis
+
+Evict one or more objects from the running cache.
+
+All objects whose path starts with (or exactly matches) the given
+path are selected.  By default the selected objects are marked for
+priority eviction (purge-first) so they will be removed during the
+next eviction cycle.  Use --immediate to delete them right away.
+
+The path should be an absolute namespace path (e.g. /data/file.dat or
+/data/ for prefix eviction).
+
+The command auto-generates an admin token when running on the same
+host as the cache server.  Use --token to provide a token file instead.
+
+Examples:
+  pelican cache evict /data/file.dat
+  pelican cache evict /data/project/
+  pelican cache evict --immediate /data/project/
+  pelican cache evict /data/project/ --token /path/to/token
+
+```
+pelican cache evict <path> [flags]
+```
+
+### Options
+
+```
+  -h, --help           help for evict
+      --immediate      Delete objects immediately instead of marking them for priority eviction
+  -t, --token string   Path to token file (auto-generated if not provided)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican cache](/commands-reference/cache/)	 - Operate a Pelican cache service
