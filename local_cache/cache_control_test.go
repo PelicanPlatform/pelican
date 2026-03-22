@@ -23,6 +23,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 func TestParseCacheControl_Empty(t *testing.T) {
@@ -182,6 +185,34 @@ func TestIsStale(t *testing.T) {
 	t.Run("max-age=0 is immediately stale", func(t *testing.T) {
 		cd := ParseCacheControl("max-age=0")
 		assert.True(t, cd.IsStale(time.Now().Add(-1*time.Millisecond)))
+	})
+
+	t.Run("no directives becomes stale after DefaultFreshness", func(t *testing.T) {
+		// Set a very short default max-age and disable jitter so
+		// we don't have to fabricate a LastValidated 24 hours in the past.
+		require.NoError(t, param.Set("LocalCache.DefaultMaxAge", "1s"))
+		require.NoError(t, param.Set("LocalCache.RevalidationJitter", 0))
+		defer func() { _ = param.Set("LocalCache.DefaultMaxAge", "24h") }()
+		defer func() { _ = param.Set("LocalCache.RevalidationJitter", 10) }()
+
+		cd := ParseCacheControl("")
+		assert.False(t, cd.HasDirectives(), "empty Cache-Control should have no directives")
+
+		// Validated 5 seconds ago — well past the 1s default freshness.
+		assert.True(t, cd.IsStale(time.Now().Add(-5*time.Second)),
+			"object without Cache-Control should be stale after DefaultMaxAge elapses")
+	})
+
+	t.Run("no directives is fresh within DefaultFreshness", func(t *testing.T) {
+		require.NoError(t, param.Set("LocalCache.DefaultMaxAge", "1h"))
+		defer func() { _ = param.Set("LocalCache.DefaultMaxAge", "24h") }()
+
+		cd := ParseCacheControl("")
+		assert.False(t, cd.HasDirectives())
+
+		// Validated just now — well within 1h default freshness.
+		assert.False(t, cd.IsStale(time.Now()),
+			"object without Cache-Control should be fresh within DefaultMaxAge")
 	})
 }
 

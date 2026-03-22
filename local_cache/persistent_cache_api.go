@@ -1207,6 +1207,55 @@ func (pc *PersistentCache) Purge() error {
 	return pc.eviction.ForcePurge()
 }
 
+// PurgeToBytes triggers the eviction manager to purge down to the specified
+// total usage target.  Returns (bytes freed, objects evicted, error).
+func (pc *PersistentCache) PurgeToBytes(targetBytes uint64) (uint64, int64, error) {
+	return pc.eviction.ForcePurgeToBytes(targetBytes)
+}
+
+// purgeToTargetCmd handles POST /api/v1.0/cache/purge_to_target
+func (pc *PersistentCache) purgeToTargetCmd(ginCtx *gin.Context) {
+	status, verified, err := token.Verify(ginCtx, token.AuthOption{
+		Sources: []token.TokenSource{token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.Localcache_Purge},
+	})
+	if err != nil {
+		if status == http.StatusOK {
+			status = http.StatusInternalServerError
+		}
+		ginCtx.AbortWithStatusJSON(status,
+			server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: err.Error()})
+		return
+	} else if !verified {
+		ginCtx.AbortWithStatusJSON(http.StatusInternalServerError,
+			server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Unknown verification error"})
+		return
+	}
+
+	var req struct {
+		TargetBytes uint64 `json:"target_bytes"`
+	}
+	if err := ginCtx.ShouldBindJSON(&req); err != nil || req.TargetBytes == 0 {
+		ginCtx.AbortWithStatusJSON(http.StatusBadRequest,
+			server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Request must include a non-zero target_bytes field"})
+		return
+	}
+
+	freedBytes, freedObjects, purgeErr := pc.PurgeToBytes(req.TargetBytes)
+	if purgeErr != nil {
+		ginCtx.AbortWithStatusJSON(http.StatusInternalServerError,
+			server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: purgeErr.Error()})
+		return
+	}
+
+	ginCtx.JSON(http.StatusOK, gin.H{
+		"status":          "ok",
+		"freed_bytes":     freedBytes,
+		"evicted_objects": freedObjects,
+	})
+}
+
 // MarkPurgeFirst marks an object to be purged first during next eviction
 func (pc *PersistentCache) MarkPurgeFirst(objectPath string) error {
 	// Compute object hash from URL
@@ -1341,6 +1390,7 @@ func (pc *PersistentCache) RegisterCacheHandlers(engine *gin.Engine, directorEna
 	adminPurge := engine.Group("/api/v1.0/cache", web_ui.AuthHandler, web_ui.AdminAuthHandler)
 	adminPurge.POST("/purge", func(c *gin.Context) { pc.purgeCmd(c) })
 	adminPurge.POST("/purge_first", func(c *gin.Context) { pc.purgeFirstCmd(c) })
+	adminPurge.POST("/purge_to_target", func(c *gin.Context) { pc.purgeToTargetCmd(c) })
 
 	// Prestage and eviction API — compatible with the xrdhttp-pelican
 	// C++ plugin.
