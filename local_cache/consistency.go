@@ -520,12 +520,16 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 			// totals match the real state of the database.
 			//
 			// Both completed and in-progress objects are charged at
-			// their full ContentLength.  The file is pre-allocated
-			// (Truncate) at creation time; some filesystems will pre-allocate
-			// blocks as well, even if they haven't been written to yet.
+			// their actual on-disk size: CalculateFileSize(ContentLength)
+			// for disk objects (which accounts for the 16-byte MAC per
+			// 4080-byte block), or ContentLength for inline objects.
 			if meta.ContentLength > 0 {
 				uk := StorageUsageKey{StorageID: meta.StorageID, NamespaceID: meta.NamespaceID}
-				usageDuringScan[uk] += meta.ContentLength
+				if meta.StorageID == StorageIDInline {
+					usageDuringScan[uk] += meta.ContentLength
+				} else {
+					usageDuringScan[uk] += CalculateFileSize(meta.ContentLength)
+				}
 			}
 
 			// Only process entries old enough to avoid races

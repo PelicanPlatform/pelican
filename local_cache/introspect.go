@@ -118,7 +118,7 @@ type StorageDirStats struct {
 	InlineCount int64 `json:"inline_count"`  // Number of inline objects
 	InlineBytes int64 `json:"inline_bytes"`  // Sum of ContentLength for inline objects
 	OnDiskCount int64 `json:"on_disk_count"` // Number of on-disk objects
-	OnDiskBytes int64 `json:"on_disk_bytes"` // Sum of ContentLength for on-disk objects
+	OnDiskBytes int64 `json:"on_disk_bytes"` // Actual bytes on disk (content + per-block MAC overhead)
 }
 
 // DiskUsageResult contains the result of an expensive disk walk.
@@ -644,7 +644,7 @@ func (api *IntrospectAPIOpen) GetCacheStats() (*CacheStats, error) {
 			ds.InlineBytes += meta.ContentLength
 		} else {
 			ds.OnDiskCount++
-			ds.OnDiskBytes += meta.ContentLength
+			ds.OnDiskBytes += CalculateFileSize(meta.ContentLength)
 		}
 		return nil
 	})

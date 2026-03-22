@@ -1684,7 +1684,7 @@ func (pc *PersistentCache) GetCacheStats() (*CacheStats, error) {
 			ds.InlineBytes += meta.ContentLength
 		} else {
 			ds.OnDiskCount++
-			ds.OnDiskBytes += meta.ContentLength
+			ds.OnDiskBytes += CalculateFileSize(meta.ContentLength)
 		}
 		return nil
 	}); err != nil {
@@ -1750,7 +1750,7 @@ func (pc *PersistentCache) introspectStatsHandler(c *gin.Context) {
 			ds.InlineBytes += meta.ContentLength
 		} else {
 			ds.OnDiskCount++
-			ds.OnDiskBytes += meta.ContentLength
+			ds.OnDiskBytes += CalculateFileSize(meta.ContentLength)
 		}
 		return nil
 	})
