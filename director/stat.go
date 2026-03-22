@@ -580,6 +580,7 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 func shouldStatCaches(ctx *gin.Context, cAds, oAds []server_structs.ServerAd, bestNSAd server_structs.NamespaceAdV2) bool {
 	reqParams := getRequestParameters(ctx.Request)
 	if reqParams.Has(pelican_url.QuerySkipStat) || // The client indicates they want to avoid stats
+		reqParams.Has(pelican_url.QueryDirectRead) || // The client explicitly asked for a direct read from origin; no need to stat caches
 		!param.Director_CheckCachePresence.GetBool() || // The Director is configured to not to stat caches
 		len(cAds) == 0 || // There are no caches to stat
 		ctx.Request.Method == http.MethodPut || ctx.Request.Method == http.MethodDelete || ctx.Request.Method == "PROPFIND" || // The request is of a type where stats are irrelevant

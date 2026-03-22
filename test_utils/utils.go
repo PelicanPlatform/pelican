@@ -53,9 +53,16 @@ import (
 	"github.com/pelicanplatform/pelican/pelican_url"
 )
 
-func TestContext(ictx context.Context, t *testing.T) (ctx context.Context, cancel context.CancelFunc, egrp *errgroup.Group) {
-	if deadline, ok := t.Deadline(); ok {
-		ctx, cancel = context.WithDeadline(ictx, deadline)
+func TestContext(ictx context.Context, t testing.TB) (ctx context.Context, cancel context.CancelFunc, egrp *errgroup.Group) {
+	type deadliner interface {
+		Deadline() (time.Time, bool)
+	}
+	if d, ok := t.(deadliner); ok {
+		if deadline, ok := d.Deadline(); ok {
+			ctx, cancel = context.WithDeadline(ictx, deadline)
+		} else {
+			ctx, cancel = context.WithCancel(ictx)
+		}
 	} else {
 		ctx, cancel = context.WithCancel(ictx)
 	}
@@ -421,7 +428,7 @@ func MockIssuer(t *testing.T, kSet *jwk.Set) string {
 // TestLogHook forwards log entries to the test log buffer so they appear under the
 // test's output (visible with -v or on failure) and never hit stdout/stderr directly.
 type TestLogHook struct {
-	t *testing.T
+	t testing.TB
 }
 
 var (
@@ -451,8 +458,8 @@ func (h *globalBufferHook) Fire(entry *logrus.Entry) error {
 	return nil
 }
 
-// NewTestLogHook creates a new TestLogHook that writes to testing.T's log buffer
-func NewTestLogHook(t *testing.T) *TestLogHook {
+// NewTestLogHook creates a new TestLogHook that writes to testing.TB's log buffer
+func NewTestLogHook(t testing.TB) *TestLogHook {
 	return &TestLogHook{t: t}
 }
 
@@ -497,7 +504,7 @@ func SetupGlobalTestLogging() func() {
 // SetupTestLogging configures logrus to write to the test's log buffer.
 // This should be called at the beginning of tests to ensure clean output.
 // Returns a cleanup function that should be called with defer.
-func SetupTestLogging(t *testing.T) func() {
+func SetupTestLogging(t testing.TB) func() {
 	previousGlobalHookState := globalHookEnabled.Swap(false)
 	// Save the original logger configuration
 	originalOut := logrus.StandardLogger().Out

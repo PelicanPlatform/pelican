@@ -1407,6 +1407,350 @@ definitions:
         description: Scopes the client is allowed to request
         items:
           type: string
+  CacheObjectInstance:
+    type: object
+    description: A cached instance of an object with a specific ETag
+    properties:
+      instance_hash:
+        type: string
+        description: The unique hash identifying this cached instance
+        example: "a1b2c3d4e5f6"
+      etag:
+        type: string
+        description: The ETag of the object from the origin
+        example: '"abc123"'
+      source_url:
+        type: string
+        description: The URL from which the object was fetched
+        example: "pelican://origin.example.com/data/file.dat"
+      content_length:
+        type: integer
+        format: int64
+        description: Size of the object in bytes
+        example: 1048576
+      content_type:
+        type: string
+        description: MIME type of the object
+        example: "application/octet-stream"
+      last_modified:
+        type: string
+        format: date-time
+        description: When the object was last modified at the origin
+      completed:
+        type: string
+        format: date-time
+        description: When the download of this instance completed
+      last_accessed:
+        type: string
+        format: date-time
+        description: When this instance was last accessed
+      expires:
+        type: string
+        format: date-time
+        description: When the cached object expires (from HTTP Expires header)
+      is_latest:
+        type: boolean
+        description: Whether this is the latest ETag version for the object
+      is_inline:
+        type: boolean
+        description: Whether the object is stored inline in the database (small objects)
+  CacheBlockSummary:
+    type: object
+    description: Summary of download block status for a cached object
+    properties:
+      total_blocks:
+        type: integer
+        format: int32
+        description: Total number of blocks in the object
+      downloaded_blocks:
+        type: integer
+        format: int32
+        description: Number of blocks downloaded so far
+      missing_blocks:
+        type: array
+        description: Indices of the first 100 missing blocks
+        items:
+          type: integer
+          format: int32
+      is_complete:
+        type: boolean
+        description: Whether all blocks have been downloaded
+      percent_complete:
+        type: number
+        format: double
+        description: Percentage of blocks downloaded (0-100)
+  CacheChecksumInfo:
+    type: object
+    description: A stored checksum for a cached object
+    properties:
+      type:
+        type: string
+        description: The type of checksum (e.g. sha256, md5, sha1)
+        example: "sha256"
+      value:
+        type: string
+        description: Hex-encoded checksum value
+        example: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      origin_verified:
+        type: boolean
+        description: Whether this checksum was provided by the origin server
+  CacheChunkInfoSummary:
+    type: object
+    description: Chunking configuration for large objects split across storage backends
+    properties:
+      chunk_size_bytes:
+        type: integer
+        format: int64
+        description: Size of each chunk in bytes
+      chunk_count:
+        type: integer
+        description: Number of chunks
+      chunk_locations:
+        type: array
+        description: Storage ID for each chunk
+        items:
+          type: integer
+  CacheObjectDetails:
+    type: object
+    description: Detailed metadata for a cached object instance
+    allOf:
+      - $ref: "#/definitions/CacheObjectInstance"
+      - type: object
+        properties:
+          namespace_id:
+            type: integer
+            description: Internal namespace identifier
+          storage_id:
+            type: integer
+            description: Storage backend identifier
+          last_validated:
+            type: string
+            format: date-time
+            description: When the object was last revalidated with the origin
+          cache_control:
+            type: string
+            description: Formatted cache control directives
+            example: "max-age=3600, public"
+          checksums:
+            type: array
+            description: Known checksums for this object
+            items:
+              $ref: "#/definitions/CacheChecksumInfo"
+          block_summary:
+            $ref: "#/definitions/CacheBlockSummary"
+          chunk_info:
+            $ref: "#/definitions/CacheChunkInfoSummary"
+  CacheChecksumStatus:
+    type: object
+    description: Verification status of a single checksum
+    properties:
+      type:
+        type: string
+        description: The type of checksum
+        example: "sha256"
+      expected:
+        type: string
+        description: Hex-encoded expected checksum value
+      computed:
+        type: string
+        description: Hex-encoded computed checksum value (only if verification ran)
+      match:
+        type: boolean
+        description: Whether the expected and computed values match
+  CacheVerificationResult:
+    type: object
+    description: Result of checksum verification for a cached object
+    properties:
+      instance_hash:
+        type: string
+        description: The hash identifying the verified instance
+      valid:
+        type: boolean
+        description: Whether the object passed verification
+      error:
+        type: string
+        description: Error message if verification could not be completed
+      checksum_status:
+        type: array
+        description: Per-checksum verification results
+        items:
+          $ref: "#/definitions/CacheChecksumStatus"
+  CacheStorageDirStats:
+    type: object
+    description: Per-storage-directory size statistics
+    properties:
+      storage_id:
+        type: integer
+        description: Storage directory identifier
+      object_count:
+        type: integer
+        format: int64
+        description: Total number of objects in this directory
+      total_bytes:
+        type: integer
+        format: int64
+        description: Sum of ContentLength for all objects
+      inline_count:
+        type: integer
+        format: int64
+        description: Number of inline objects
+      inline_bytes:
+        type: integer
+        format: int64
+        description: Sum of ContentLength for inline objects
+      on_disk_count:
+        type: integer
+        format: int64
+        description: Number of on-disk objects
+      on_disk_bytes:
+        type: integer
+        format: int64
+        description: Sum of ContentLength for on-disk objects
+  CacheStats:
+    type: object
+    description: Aggregate cache size statistics
+    properties:
+      total_inline_bytes:
+        type: integer
+        format: int64
+        description: Total bytes of inline data stored in BadgerDB
+      total_metadata_entries:
+        type: integer
+        format: int64
+        description: Total number of metadata entries
+      total_bytes_metadata:
+        type: integer
+        format: int64
+        description: Sum of ContentLength across all metadata entries
+      usage_counters:
+        type: object
+        description: Pre-computed usage counters keyed by "s{storageID}:ns{namespaceID}"
+        additionalProperties:
+          type: integer
+          format: int64
+      storage_breakdown:
+        type: object
+        description: Per-storage-directory breakdown
+        additionalProperties:
+          $ref: "#/definitions/CacheStorageDirStats"
+  CacheDirDiskStat:
+    type: object
+    description: Disk usage for a single storage directory
+    properties:
+      storage_id:
+        type: integer
+        description: Storage directory identifier
+      path:
+        type: string
+        description: Filesystem path
+      bytes_used:
+        type: integer
+        format: int64
+        description: Actual bytes used on disk
+      file_count:
+        type: integer
+        format: int64
+        description: Number of files
+  CacheDiskUsageResult:
+    type: object
+    description: Result of an expensive disk walk computing actual usage
+    properties:
+      total_bytes_on_disk:
+        type: integer
+        format: int64
+        description: Total bytes across all storage directories
+      total_files:
+        type: integer
+        format: int64
+        description: Total number of files
+      directories:
+        type: object
+        description: Per-directory disk usage
+        additionalProperties:
+          $ref: "#/definitions/CacheDirDiskStat"
+      duration:
+        type: string
+        description: How long the filesystem walk took
+  CacheConsistencyCheckResult:
+    type: object
+    description: Result of a cache consistency check
+    properties:
+      metadata_scan_ran:
+        type: boolean
+        description: Whether a metadata scan was performed
+      data_scan_ran:
+        type: boolean
+        description: Whether a data scan was performed
+      orphaned_files:
+        type: integer
+        format: int64
+        description: Files on disk with no corresponding DB entry
+      orphaned_db_entries:
+        type: integer
+        format: int64
+        description: DB entries with no corresponding disk file
+      checksum_mismatches:
+        type: integer
+        format: int64
+        description: Number of objects with checksum mismatches
+      bytes_verified:
+        type: integer
+        format: int64
+        description: Total bytes read and verified
+      objects_verified:
+        type: integer
+        format: int64
+        description: Total objects verified
+      metadata_scan_errors:
+        type: integer
+        format: int64
+        description: Errors during metadata scan
+      data_scan_errors:
+        type: integer
+        format: int64
+        description: Errors during data scan
+      duration:
+        type: string
+        description: Total duration of the consistency check
+      error:
+        type: string
+        description: Error messages if any scan failed
+  CacheScanProgressEvent:
+    type: object
+    description: >-
+      A progress update sent as an SSE event during a consistency scan.
+      Used as the `data:` payload for metadata_progress, metadata_done,
+      data_progress, data_done, and error event types.
+    properties:
+      phase:
+        type: string
+        description: The scan phase, either "metadata" or "data"
+        enum:
+          - metadata
+          - data
+      percent_complete:
+        type: number
+        format: double
+        description: Estimated completion percentage (0-100)
+      db_entries_scanned:
+        type: integer
+        format: int64
+        description: Number of DB entries processed so far (metadata scan only)
+      files_scanned:
+        type: integer
+        format: int64
+        description: Number of filesystem entries processed (metadata scan only)
+      objects_verified:
+        type: integer
+        format: int64
+        description: Number of objects whose data has been read and verified (data scan only)
+      bytes_verified:
+        type: integer
+        format: int64
+        description: Total bytes read and verified so far (data scan only)
+      message:
+        type: string
+        description: Human-readable status message or error description
 
 tags:
   - name: auth
@@ -4872,5 +5216,476 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
         "500":
           description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /cache/introspect/list:
+    get:
+      tags:
+        - cache_ui
+      summary: List all cached objects
+      description: >-
+        `Authentication Required` `Admin privilege Required`
+
+
+        Returns a list of all cached object instances with basic metadata.
+      produces:
+        - application/json
+      parameters:
+        - in: query
+          name: limit
+          type: integer
+          description: Maximum number of objects to return (default 100)
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/CacheObjectInstance"
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /cache/introspect/etags:
+    get:
+      tags:
+        - cache_ui
+      summary: List cached versions (ETags) for an object URL
+      description: >-
+        `Authentication Required` `Admin privilege Required`
+
+
+        Returns all cached instances for a given object URL, including different ETag versions.
+      produces:
+        - application/json
+      parameters:
+        - in: query
+          name: url
+          type: string
+          required: true
+          description: The object URL to look up (e.g. pelican://origin.example.com/data/file.dat)
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/CacheObjectInstance"
+        "400":
+          description: Invalid or missing url parameter
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /cache/introspect/metadata:
+    get:
+      tags:
+        - cache_ui
+      summary: Get detailed metadata for a cached object instance
+      description: >-
+        `Authentication Required` `Admin privilege Required`
+
+
+        Returns detailed metadata including checksums, block status, and chunk info.
+        Identify the instance by `instance` hash directly, or by `url` and optional `etag`.
+        If `etag` is omitted when using `url`, the latest version is returned.
+      produces:
+        - application/json
+      parameters:
+        - in: query
+          name: instance
+          type: string
+          description: Instance hash (if provided, url and etag are ignored)
+        - in: query
+          name: url
+          type: string
+          description: Object URL (required if instance is not provided)
+        - in: query
+          name: etag
+          type: string
+          description: ETag of the desired version (optional, defaults to latest)
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/CacheObjectDetails"
+        "400":
+          description: Invalid query parameters
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Object instance not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /cache/introspect/verify:
+    post:
+      tags:
+        - cache_ui
+      summary: Verify checksum integrity of a cached object
+      description: >-
+        `Authentication Required` `Admin privilege Required`
+
+
+        Triggers checksum verification for a cached object instance.
+        Identify the instance by `instance` hash directly, or by `url` and optional `etag`.
+        If `etag` is omitted when using `url`, the latest version is verified.
+        Returns the verification result including per-checksum status.
+      produces:
+        - application/json
+      parameters:
+        - in: query
+          name: instance
+          type: string
+          description: Instance hash (if provided, url and etag are ignored)
+        - in: query
+          name: url
+          type: string
+          description: Object URL (required if instance is not provided)
+        - in: query
+          name: etag
+          type: string
+          description: ETag of the desired version (optional, defaults to latest)
+      responses:
+        "200":
+          description: Verification completed (check the valid and error fields for result)
+          schema:
+            $ref: "#/definitions/CacheVerificationResult"
+        "400":
+          description: Invalid query parameters
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Object instance not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /cache/introspect/stats:
+    get:
+      tags:
+        - cache_ui
+      summary: Get aggregate cache size statistics
+      description: >-
+        `Authentication Required` `Admin privilege Required`
+
+
+        Returns aggregate size statistics about the cache including total inline
+        bytes, metadata entry count, total bytes per metadata, and per-storage-directory
+        breakdown. This is a relatively cheap operation that only scans metadata.
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: Cache statistics
+          schema:
+            $ref: "#/definitions/CacheStats"
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /cache/introspect/disk-usage:
+    post:
+      tags:
+        - cache_ui
+      summary: Compute actual disk usage by walking storage directories
+      description: >-
+        `Authentication Required` `Admin privilege Required`
+
+
+        Walks all storage directories and sums the actual file sizes on disk.
+        This is an EXPENSIVE operation that stats every file. For large caches
+        this may take significant time. Uses POST because it triggers a potentially
+        long-running computation.
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: Disk usage computed successfully
+          schema:
+            $ref: "#/definitions/CacheDiskUsageResult"
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /cache/introspect/consistency:
+    post:
+      tags:
+        - cache_ui
+      summary: Trigger a cache consistency check (SSE stream)
+      description: >-
+        `Authentication Required` `Admin privilege Required`
+
+
+        Triggers a consistency check between the database and disk. By default runs
+        both a metadata scan (finds orphaned files and DB entries) and a data scan
+        (reads and verifies checksums). Use query parameters to run only one scan type.
+        The data scan is expensive as it reads every cached file.
+
+
+        The response is a Server-Sent Events (SSE) stream. The client should set
+        `Accept: text/event-stream` and read the response as a stream of events.
+        Each event has a type (the `event:` field) and a JSON payload (the `data:` field).
+
+
+        Event types:
+
+        - `metadata_progress` / `data_progress` — periodic progress updates during the scan
+          (payload: CacheScanProgressEvent)
+
+        - `metadata_done` / `data_done` — a scan phase has finished
+          (payload: CacheScanProgressEvent with percent_complete=100)
+
+        - `done` — all scans are complete
+          (payload: CacheConsistencyCheckResult)
+
+        - `error` — an error occurred during scanning
+          (payload: CacheScanProgressEvent with a message field)
+      produces:
+        - text/event-stream
+      parameters:
+        - in: query
+          name: metadata
+          type: string
+          description: Whether to run the metadata scan (default "true")
+          default: "true"
+        - in: query
+          name: data
+          type: string
+          description: Whether to run the data scan (default "true")
+          default: "true"
+      responses:
+        "200":
+          description: >-
+            SSE event stream. The final event (type `done`) contains a
+            CacheConsistencyCheckResult JSON payload. Progress events use
+            CacheScanProgressEvent payloads.
+          schema:
+            $ref: "#/definitions/CacheConsistencyCheckResult"
+        "400":
+          description: Invalid query parameters
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /cache/evict:
+    get:
+      tags:
+        - cache_ui
+      summary: Evict cached objects by path or prefix
+      description: >-
+        **Note**: The actual endpoint URL is `/pelican/api/v1.0/evict` (not under
+        the standard `/api/v1.0/` base path).  It is documented here for
+        discoverability.
+
+
+        Evicts all cached objects whose path matches or starts with the given
+        path.  By default, matching objects are marked for priority eviction
+        (purge-first) so they will be removed during the next eviction cycle.
+        Pass `immediate=true` to delete them right away.  Authorization is
+        checked via a bearer token with `storage.modify` scope for the target path.
+
+
+        Objects that are currently being downloaded (in-use) are silently
+        skipped.
+      security:
+        - Bearer: []
+      parameters:
+        - in: query
+          name: path
+          type: string
+          required: true
+          description: >-
+            Absolute namespace path of the object to evict (e.g. /data/file.dat)
+            or a prefix (e.g. /data/project/).  All objects whose path matches
+            or starts with this value are selected.
+        - in: query
+          name: immediate
+          type: string
+          description: >-
+            When "true", deletes matching objects immediately instead of
+            marking them for priority eviction (purge-first).
+          default: "false"
+      produces:
+        - text/plain
+      responses:
+        "200":
+          description: >-
+            Eviction successful.  For immediate eviction: "Evicted N objects
+            under /path".  For purge-first (default): "Marked N objects for
+            priority eviction under /path".
+          schema:
+            type: string
+        "400":
+          description: Missing or invalid path parameter
+          schema:
+            type: string
+        "403":
+          description: Authorization denied — token lacks storage.modify scope for path
+          schema:
+            type: string
+        "500":
+          description: Internal server error during eviction
+          schema:
+            type: string
+  /cache/purge:
+    post:
+      tags:
+        - cache_ui
+      summary: Trigger LRU eviction to configured low water mark
+      description: >-
+        `Authentication Required` `Admin privilege Required`
+
+
+        Triggers an immediate LRU eviction cycle, evicting objects until the
+        cache usage drops below the configured low water mark.  Requires a
+        token with the `localcache.purge` scope.
+      security:
+        - Bearer: []
+      responses:
+        "200":
+          description: Purge completed successfully
+          schema:
+            $ref: "#/definitions/SuccessModelV2"
+        "401":
+          description: Unauthorized — missing or invalid token
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied — token lacks localcache.purge scope
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /cache/purge_to_target:
+    post:
+      tags:
+        - cache_ui
+      summary: Trigger LRU eviction to a specified target size
+      description: >-
+        `Authentication Required` `Admin privilege Required`
+
+
+        Triggers an immediate LRU eviction cycle, evicting objects until the
+        total cache usage drops to or below the specified target size in bytes.
+        Unlike `/cache/purge`, this overrides the configured low water mark with
+        the caller-provided target.  Requires a token with the `localcache.purge`
+        scope.
+      security:
+        - Bearer: []
+      consumes:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            required:
+              - target_bytes
+            properties:
+              target_bytes:
+                type: integer
+                format: int64
+                description: Target total cache usage in bytes
+                example: 107374182400
+      responses:
+        "200":
+          description: Purge completed successfully
+          schema:
+            type: object
+            properties:
+              status:
+                type: string
+                example: ok
+              freed_bytes:
+                type: integer
+                format: int64
+                description: Total bytes freed during the purge cycle
+              evicted_objects:
+                type: integer
+                format: int64
+                description: Number of objects evicted
+        "400":
+          description: Invalid request — target_bytes must be a non-zero integer
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Unauthorized — missing or invalid token
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied — token lacks localcache.purge scope
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error — purge failed
           schema:
             $ref: "#/definitions/ErrorModelV2"
