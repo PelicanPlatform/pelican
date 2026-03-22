@@ -5533,3 +5533,159 @@ paths:
           description: Internal server error
           schema:
             $ref: "#/definitions/ErrorModelV2"
+  /cache/evict:
+    get:
+      tags:
+        - cache_ui
+      summary: Evict cached objects by path or prefix
+      description: >-
+        **Note**: The actual endpoint URL is `/pelican/api/v1.0/evict` (not under
+        the standard `/api/v1.0/` base path).  It is documented here for
+        discoverability.
+
+
+        Evicts all cached objects whose path matches or starts with the given
+        path.  By default, matching objects are marked for priority eviction
+        (purge-first) so they will be removed during the next eviction cycle.
+        Pass `immediate=true` to delete them right away.  Authorization is
+        checked via a bearer token with `storage.modify` scope for the target path.
+
+
+        Objects that are currently being downloaded (in-use) are silently
+        skipped.
+      security:
+        - Bearer: []
+      parameters:
+        - in: query
+          name: path
+          type: string
+          required: true
+          description: >-
+            Absolute namespace path of the object to evict (e.g. /data/file.dat)
+            or a prefix (e.g. /data/project/).  All objects whose path matches
+            or starts with this value are selected.
+        - in: query
+          name: immediate
+          type: string
+          description: >-
+            When "true", deletes matching objects immediately instead of
+            marking them for priority eviction (purge-first).
+          default: "false"
+      produces:
+        - text/plain
+      responses:
+        "200":
+          description: >-
+            Eviction successful.  For immediate eviction: "Evicted N objects
+            under /path".  For purge-first (default): "Marked N objects for
+            priority eviction under /path".
+          schema:
+            type: string
+        "400":
+          description: Missing or invalid path parameter
+          schema:
+            type: string
+        "403":
+          description: Authorization denied — token lacks storage.modify scope for path
+          schema:
+            type: string
+        "500":
+          description: Internal server error during eviction
+          schema:
+            type: string
+  /cache/purge:
+    post:
+      tags:
+        - cache_ui
+      summary: Trigger LRU eviction to configured low water mark
+      description: >-
+        `Authentication Required` `Admin privilege Required`
+
+
+        Triggers an immediate LRU eviction cycle, evicting objects until the
+        cache usage drops below the configured low water mark.  Requires a
+        token with the `localcache.purge` scope.
+      security:
+        - Bearer: []
+      responses:
+        "200":
+          description: Purge completed successfully
+          schema:
+            $ref: "#/definitions/SuccessModelV2"
+        "401":
+          description: Unauthorized — missing or invalid token
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied — token lacks localcache.purge scope
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /cache/purge_to_target:
+    post:
+      tags:
+        - cache_ui
+      summary: Trigger LRU eviction to a specified target size
+      description: >-
+        `Authentication Required` `Admin privilege Required`
+
+
+        Triggers an immediate LRU eviction cycle, evicting objects until the
+        total cache usage drops to or below the specified target size in bytes.
+        Unlike `/cache/purge`, this overrides the configured low water mark with
+        the caller-provided target.  Requires a token with the `localcache.purge`
+        scope.
+      security:
+        - Bearer: []
+      consumes:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            required:
+              - target_bytes
+            properties:
+              target_bytes:
+                type: integer
+                format: int64
+                description: Target total cache usage in bytes
+                example: 107374182400
+      responses:
+        "200":
+          description: Purge completed successfully
+          schema:
+            type: object
+            properties:
+              status:
+                type: string
+                example: ok
+              freed_bytes:
+                type: integer
+                format: int64
+                description: Total bytes freed during the purge cycle
+              evicted_objects:
+                type: integer
+                format: int64
+                description: Number of objects evicted
+        "400":
+          description: Invalid request — target_bytes must be a non-zero integer
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Unauthorized — missing or invalid token
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied — token lacks localcache.purge scope
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error — purge failed
+          schema:
+            $ref: "#/definitions/ErrorModelV2"

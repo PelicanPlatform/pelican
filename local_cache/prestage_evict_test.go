@@ -42,7 +42,26 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
+
+// makeEvictToken creates a short-lived WLCG token with storage.modify:/
+// scope, suitable for the eviction API tests.
+func makeEvictToken(t *testing.T) string {
+	t.Helper()
+	issuer, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+	tc := token.NewWLCGToken()
+	tc.Lifetime = time.Minute
+	tc.Issuer = issuer
+	tc.Subject = "test"
+	tc.AddAudienceAny()
+	tc.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Modify, "/"))
+	tok, err := tc.CreateToken()
+	require.NoError(t, err)
+	return tok
+}
 
 // TestPrestageAPI tests the prestage HTTP endpoint.
 func TestPrestageAPI(t *testing.T) {
@@ -185,6 +204,7 @@ func TestEvictAPI(t *testing.T) {
 	}
 	httpClient := &http.Client{Transport: transport}
 	socketPath := param.LocalCache_Socket.GetString()
+	evictTok := makeEvictToken(t)
 
 	t.Run("missing-path-returns-400", func(t *testing.T) {
 		req, err := http.NewRequest("GET", "http://localhost/pelican/api/v1.0/evict", nil)
@@ -199,15 +219,16 @@ func TestEvictAPI(t *testing.T) {
 
 	t.Run("evict-not-cached-idempotent", func(t *testing.T) {
 		// Evicting a file that isn't cached should succeed (idempotent).
-		u := "http://localhost/pelican/api/v1.0/evict?path=/test/never_downloaded.txt"
+		u := "http://localhost/pelican/api/v1.0/evict?path=/test/never_downloaded.txt&immediate=true"
 		req, err := http.NewRequest("GET", u, nil)
 		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer "+evictTok)
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
 		defer resp.Body.Close()
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 		body, _ := io.ReadAll(resp.Body)
-		assert.Contains(t, string(body), "eviction successful")
+		assert.Contains(t, string(body), "Evicted 0 objects")
 	})
 
 	t.Run("evict-after-download", func(t *testing.T) {
@@ -227,16 +248,17 @@ func TestEvictAPI(t *testing.T) {
 		require.NoError(t, checkErr)
 		require.True(t, exists, "object should be cached after prestage")
 
-		// Evict via API.
-		u := "http://localhost/pelican/api/v1.0/evict?path=/test/hello_world.txt"
+		// Evict via API (immediate).
+		u := "http://localhost/pelican/api/v1.0/evict?path=/test/hello_world.txt&immediate=true"
 		req, err = http.NewRequest("GET", u, nil)
 		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer "+evictTok)
 		resp, err = httpClient.Do(req)
 		require.NoError(t, err)
 		defer resp.Body.Close()
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 		body, _ = io.ReadAll(resp.Body)
-		assert.Contains(t, string(body), "eviction successful")
+		assert.Contains(t, string(body), "Evicted 1 objects")
 
 		// Verify the object is no longer cached.
 		exists, checkErr = local_cache.CheckCacheObjectIsCached(ft.Ctx, socketPath, "/test/hello_world.txt")
@@ -261,6 +283,26 @@ func TestEvictAPI(t *testing.T) {
 		require.NoError(t, checkErr)
 		assert.True(t, exists, "object should be cached after re-prestage")
 	})
+
+	t.Run("evict-default-marks-purge-first", func(t *testing.T) {
+		// Default eviction (no immediate flag) should mark the object
+		// for priority eviction but leave it in the cache.
+		u := "http://localhost/pelican/api/v1.0/evict?path=/test/hello_world.txt"
+		req, err := http.NewRequest("GET", u, nil)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer "+evictTok)
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		assert.Contains(t, string(body), "Marked 1 objects for priority eviction")
+
+		// The object should still be in the cache (not immediately deleted).
+		exists, checkErr := local_cache.CheckCacheObjectIsCached(ft.Ctx, socketPath, "/test/hello_world.txt")
+		require.NoError(t, checkErr)
+		assert.True(t, exists, "object should still be cached after purge-first marking")
+	})
 }
 
 // TestEvictObject tests the programmatic EvictObject API.
@@ -269,6 +311,7 @@ func TestEvictObject(t *testing.T) {
 	server_utils.ResetTestState()
 
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
+	evictTok := makeEvictToken(t)
 
 	testCacheDir := t.TempDir()
 	pc, err := local_cache.NewPersistentCache(ft.Ctx, ft.Egrp, local_cache.PersistentCacheConfig{
@@ -290,7 +333,7 @@ func TestEvictObject(t *testing.T) {
 		require.NoError(t, statErr)
 
 		// Evict programmatically.
-		err = pc.EvictObject("/test/hello_world.txt", "")
+		err = pc.EvictObject("/test/hello_world.txt", evictTok)
 		require.NoError(t, err)
 
 		// Should no longer be cached.
@@ -300,7 +343,7 @@ func TestEvictObject(t *testing.T) {
 
 	t.Run("evict-uncached-object", func(t *testing.T) {
 		// Evicting something that was never cached should silently succeed.
-		err := pc.EvictObject("/test/never_ever_downloaded_xyz.txt", "")
+		err := pc.EvictObject("/test/never_ever_downloaded_xyz.txt", evictTok)
 		// This may return nil (nothing to delete) or an error about missing metadata.
 		// The exact behavior depends on the storage layer, but it should not panic.
 		_ = err
@@ -316,7 +359,7 @@ func TestEvictObject(t *testing.T) {
 		assert.Equal(t, "Hello, World!", string(data))
 
 		// Evict.
-		err = pc.EvictObject("/test/hello_world.txt", "")
+		err = pc.EvictObject("/test/hello_world.txt", evictTok)
 		require.NoError(t, err)
 
 		// Re-download — should succeed from origin.
@@ -397,4 +440,212 @@ func TestPrestageAPIViaHTTP(t *testing.T) {
 		_ = body
 		// No assertion on status — the encoding path is correct either way.
 	})
+}
+
+// TestPrestageSkipsCachedFile verifies that prestaging a file that is already
+// fully cached returns "success: ok" immediately without any intermediate
+// "status: active,offset=..." progress lines (the expensive Get+drain cycle
+// is skipped).
+func TestPrestageSkipsCachedFile(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+
+	// Use a 256 KB file so a non-fast-path prestage would produce at
+	// least one progress update within the 2-second poll interval.
+	ft := fed_test_utils.NewFedTest(t, pubOriginCfg, func(storageDir string) {
+		data := make([]byte, 256*1024)
+		for i := range data {
+			data[i] = byte(i % 251)
+		}
+		require.NoError(t, os.WriteFile(filepath.Join(storageDir, "skip_cached.bin"), data, 0644))
+	})
+
+	transport := config.GetTransport().Clone()
+	transport.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
+		return net.Dial("unix", param.LocalCache_Socket.GetString())
+	}
+	httpClient := &http.Client{Transport: transport, Timeout: 60 * time.Second}
+	socketPath := param.LocalCache_Socket.GetString()
+
+	// Step 1: prestage to fill the cache (may produce progress lines).
+	u := "http://localhost/pelican/api/v1.0/prestage?path=/test/skip_cached.bin"
+	req, err := http.NewRequest("GET", u, nil)
+	require.NoError(t, err)
+	resp, err := httpClient.Do(req)
+	require.NoError(t, err)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode, "initial prestage: %s", string(body))
+	require.Contains(t, string(body), "success: ok")
+
+	// Confirm the object is cached.
+	exists, statErr := local_cache.CheckCacheObjectIsCached(ft.Ctx, socketPath, "/test/skip_cached.bin")
+	require.NoError(t, statErr)
+	require.True(t, exists, "object should be cached after initial prestage")
+
+	// Step 2: prestage again — should hit the fast path.
+	req, err = http.NewRequest("GET", u, nil)
+	require.NoError(t, err)
+	resp, err = httpClient.Do(req)
+	require.NoError(t, err)
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode, "second prestage: %s", string(body))
+
+	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+	// The fast path should produce exactly one line: "success: ok".
+	// No progress updates should appear.
+	assert.Equal(t, 1, len(lines), "expected a single 'success: ok' line with no progress, got: %v", lines)
+	assert.Equal(t, "success: ok", lines[0])
+}
+
+// TestPrestageSkipsCachedObject tests the programmatic IsFullyCached +
+// prestage fast path using new PersistentCache directly.
+func TestPrestageSkipsCachedObject(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+
+	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
+
+	testCacheDir := t.TempDir()
+	pc, err := local_cache.NewPersistentCache(ft.Ctx, ft.Egrp, local_cache.PersistentCacheConfig{
+		BaseDir: testCacheDir,
+	})
+	require.NoError(t, err)
+	defer pc.Close()
+
+	// Not cached yet — IsFullyCached should be false.
+	assert.False(t, pc.IsFullyCached(ft.Ctx, "/test/hello_world.txt", ""))
+
+	// Download the file to populate the cache.
+	reader, err := pc.Get(ft.Ctx, "/test/hello_world.txt", "")
+	require.NoError(t, err)
+	data, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	reader.Close()
+	assert.Equal(t, "Hello, World!", string(data))
+
+	// Now the file should be fully cached.
+	assert.True(t, pc.IsFullyCached(ft.Ctx, "/test/hello_world.txt", ""))
+
+	// Evict the file — IsFullyCached should become false again.
+	evictTok := makeEvictToken(t)
+	err = pc.EvictObject("/test/hello_world.txt", evictTok)
+	require.NoError(t, err)
+	assert.False(t, pc.IsFullyCached(ft.Ctx, "/test/hello_world.txt", ""))
+}
+
+// TestEvictPrefixAPI tests the recursive (prefix) eviction via the HTTP API.
+func TestEvictPrefixAPI(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+
+	// Create a federation with multiple files under /test/subdir/
+	ft := fed_test_utils.NewFedTest(t, pubOriginCfg, func(storageDir string) {
+		subdir := filepath.Join(storageDir, "subdir")
+		require.NoError(t, os.MkdirAll(subdir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(subdir, "a.txt"), []byte("file a"), 0644))
+		require.NoError(t, os.WriteFile(filepath.Join(subdir, "b.txt"), []byte("file b"), 0644))
+		// Also create a file outside the subdir to verify it's NOT evicted.
+		require.NoError(t, os.WriteFile(filepath.Join(storageDir, "outside.txt"), []byte("outside"), 0644))
+	})
+
+	transport := config.GetTransport().Clone()
+	transport.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
+		return net.Dial("unix", param.LocalCache_Socket.GetString())
+	}
+	httpClient := &http.Client{Transport: transport, Timeout: 30 * time.Second}
+	socketPath := param.LocalCache_Socket.GetString()
+	_ = ft
+
+	// Prestage all three files into the cache.
+	for _, p := range []string{"/test/subdir/a.txt", "/test/subdir/b.txt", "/test/outside.txt"} {
+		u := "http://localhost/pelican/api/v1.0/prestage?path=" + url.QueryEscape(p)
+		req, err := http.NewRequest("GET", u, nil)
+		require.NoError(t, err)
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode, "prestage %s: %s", p, string(body))
+	}
+
+	// Verify all three are cached.
+	for _, p := range []string{"/test/subdir/a.txt", "/test/subdir/b.txt", "/test/outside.txt"} {
+		exists, err := local_cache.CheckCacheObjectIsCached(ft.Ctx, socketPath, p)
+		require.NoError(t, err)
+		require.True(t, exists, "expected %s to be cached", p)
+	}
+
+	// Evict everything under /test/subdir/ (immediate).
+	evictTok := makeEvictToken(t)
+	u := "http://localhost/pelican/api/v1.0/evict?path=" + url.QueryEscape("/test/subdir/") + "&immediate=true"
+	req, err := http.NewRequest("GET", u, nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+evictTok)
+	resp, err := httpClient.Do(req)
+	require.NoError(t, err)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "evict prefix: %s", string(body))
+	assert.Contains(t, string(body), "Evicted 2 objects")
+
+	// Verify /test/subdir/ files are gone.
+	for _, p := range []string{"/test/subdir/a.txt", "/test/subdir/b.txt"} {
+		exists, err := local_cache.CheckCacheObjectIsCached(ft.Ctx, socketPath, p)
+		require.NoError(t, err)
+		assert.False(t, exists, "expected %s to be evicted", p)
+	}
+
+	// Verify /test/outside.txt is still cached.
+	exists, err := local_cache.CheckCacheObjectIsCached(ft.Ctx, socketPath, "/test/outside.txt")
+	require.NoError(t, err)
+	assert.True(t, exists, "expected /test/outside.txt to still be cached")
+}
+
+// TestEvictPrefixObject tests the programmatic EvictPrefix method.
+func TestEvictPrefixObject(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+
+	ft := fed_test_utils.NewFedTest(t, pubOriginCfg, func(storageDir string) {
+		subdir := filepath.Join(storageDir, "prefix_test")
+		require.NoError(t, os.MkdirAll(subdir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(subdir, "file1.dat"), []byte("data one"), 0644))
+		require.NoError(t, os.WriteFile(filepath.Join(subdir, "file2.dat"), []byte("data two"), 0644))
+	})
+
+	testCacheDir := t.TempDir()
+	pc, err := local_cache.NewPersistentCache(ft.Ctx, ft.Egrp, local_cache.PersistentCacheConfig{
+		BaseDir: testCacheDir,
+	})
+	require.NoError(t, err)
+	defer pc.Close()
+
+	// Download both files.
+	for _, p := range []string{"/test/prefix_test/file1.dat", "/test/prefix_test/file2.dat"} {
+		reader, err := pc.Get(ft.Ctx, p, "")
+		require.NoError(t, err)
+		_, err = io.ReadAll(reader)
+		require.NoError(t, err)
+		reader.Close()
+	}
+
+	// Verify both are cached.
+	for _, p := range []string{"/test/prefix_test/file1.dat", "/test/prefix_test/file2.dat"} {
+		_, statErr := pc.StatCachedOnly(p, "")
+		require.NoError(t, statErr, "expected %s to be cached", p)
+	}
+
+	// Evict by prefix (immediate).
+	evictTok := makeEvictToken(t)
+	count, err := pc.EvictPrefix("/test/prefix_test/", evictTok, true)
+	require.NoError(t, err)
+	assert.Equal(t, 2, count)
+
+	// Verify both are gone.
+	for _, p := range []string{"/test/prefix_test/file1.dat", "/test/prefix_test/file2.dat"} {
+		_, statErr := pc.StatCachedOnly(p, "")
+		assert.ErrorIs(t, statErr, local_cache.ErrNotCached, "expected %s to be evicted", p)
+	}
 }

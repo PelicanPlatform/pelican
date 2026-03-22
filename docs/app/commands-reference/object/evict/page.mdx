@@ -1,0 +1,57 @@
+---
+title: pelican object evict
+---
+
+## pelican object evict
+
+Evict cached objects by path or prefix from the local cache
+
+### Synopsis
+
+Evict one or more objects from the local Pelican cache.
+
+All objects whose path starts with (or exactly matches) the given
+path are selected.  By default the selected objects are marked for
+priority eviction (purge-first) so they will be removed during the
+next eviction cycle.  Use --immediate to delete them right away.
+
+The path should be a pelican:// or osdf:// URL (or a schemeless
+namespace path if federation discovery is configured).
+
+Token bootstrapping follows the same logic as "pelican object get":
+tokens are discovered from the environment, credential files, or
+negotiated via OAuth when needed.  Use --token to provide a token
+file explicitly.
+
+Examples:
+  pelican object evict pelican://fed.example.com/data/file.dat
+  pelican object evict pelican://fed.example.com/data/project/
+  pelican object evict --immediate pelican://fed.example.com/data/project/
+  pelican object evict --token /path/to/token pelican://fed.example.com/data/file.dat
+
+```
+pelican object evict {path} [flags]
+```
+
+### Options
+
+```
+  -h, --help           help for evict
+  -i, --immediate      Delete objects immediately instead of marking them for priority eviction
+  -t, --token string   Token file to use for authorization
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican object](/commands-reference/object/)	 - Interact with objects in the federation
