@@ -23,6 +23,7 @@ package local_cache_test
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -543,6 +544,128 @@ func TestRangeZeroZero(t *testing.T) {
 	})
 }
 
+// TestFedConcurrentDownloadUsage starts 10 simultaneous downloads of 10
+// different objects through the persistent cache v2 (Cache.EnableV2=true)
+// using the pelican TransferClient API and verifies that the usage counters
+// reflect the actual bytes stored — not an inflated value.
+//
+// This reproduces the production bug where concurrent downloads could
+// inflate the usage counter to ~4.2 TB.
+func TestFedConcurrentDownloadUsage(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+
+	const numObjects = 10
+	const objectSize = 2*1024*1024 + 37 // 2 MiB + 37 bytes (odd size)
+
+	// Enable the persistent cache v2 so the cache module uses the new
+	// Go implementation (BadgerDB) instead of XRootD.
+	require.NoError(t, param.Set(param.Cache_EnableV2.GetName(), true))
+
+	// Pre-populate the origin with numObjects files before XRootD starts.
+	names := make([]string, numObjects)
+	for i := range names {
+		names[i] = fmt.Sprintf("concurrent_%02d.bin", i)
+	}
+	ft := fed_test_utils.NewFedTest(t, pubOriginCfg, func(storageDir string) {
+		for _, name := range names {
+			f, err := os.Create(filepath.Join(storageDir, name))
+			require.NoError(t, err)
+			buf := make([]byte, 128*1024)
+			for j := range buf {
+				buf[j] = byte(j % 251)
+			}
+			written := 0
+			for written < objectSize {
+				toWrite := len(buf)
+				if written+toWrite > objectSize {
+					toWrite = objectSize - written
+				}
+				n, err := f.Write(buf[:toWrite])
+				require.NoError(t, err)
+				written += n
+			}
+			require.NoError(t, f.Close())
+		}
+	})
+
+	ctx := ft.Ctx
+
+	// Create a single TransferEngine + TransferClient and submit all
+	// jobs through it, matching how production submits concurrent work.
+	te, err := client.NewTransferEngine(ctx)
+	require.NoError(t, err)
+	defer func() {
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+	}()
+
+	tc, err := te.NewClient(client.WithAcquireToken(false))
+	require.NoError(t, err)
+
+	// Create and submit all transfer jobs before waiting for any results.
+	// The director routes these to the persistent cache v2 automatically.
+	tmpDir := t.TempDir()
+	for _, name := range names {
+		downloadUrl, err := url.Parse("pelican://" + param.Server_Hostname.GetString() + ":" +
+			strconv.Itoa(param.Server_WebPort.GetInt()) + "/test/" + name)
+		require.NoError(t, err)
+		tj, err := tc.NewTransferJob(ctx, downloadUrl, filepath.Join(tmpDir, name), false, false)
+		require.NoError(t, err)
+		err = tc.Submit(tj)
+		require.NoError(t, err)
+	}
+
+	// Wait for all jobs to complete
+	results, err := tc.Shutdown()
+	require.NoError(t, err)
+	require.Equal(t, numObjects, len(results), "expected %d transfer results", numObjects)
+	for _, r := range results {
+		require.NoError(t, r.Error, "transfer failed")
+		require.Equal(t, int64(objectSize), r.TransferredBytes, "wrong transferred size")
+	}
+
+	// Query cache stats via the HTTP API
+	statsUrl := fmt.Sprintf("https://%s:%d/api/v1.0/cache/stats",
+		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+	transport := config.GetTransport().Clone()
+	httpClient := &http.Client{Transport: transport}
+	resp, err := httpClient.Get(statsUrl)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var stats local_cache.PersistentCacheStats
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	err = json.Unmarshal(body, &stats)
+	require.NoError(t, err)
+
+	// Verify usage counters are NOT inflated.
+	// Usage tracks actual on-disk bytes: content + 16-byte AES-GCM
+	// authentication tag per 4080-byte payload block.
+	expectedPerObject := local_cache.CalculateFileSize(int64(objectSize))
+	expectedTotal := int64(numObjects) * expectedPerObject
+
+	require.NotEmpty(t, stats.NamespaceUsage, "usage counters should not be empty")
+
+	// Find the namespace entry for our test objects.  The director may
+	// also cache a small health-test file under /pelican/monitoring,
+	// which lives in a different namespace.  Select the entry whose
+	// value matches the expected total for the /test namespace.
+	var testNSUsage int64
+	for _, v := range stats.NamespaceUsage {
+		if v == expectedTotal {
+			testNSUsage = v
+			break
+		}
+	}
+	assert.Equal(t, expectedTotal, testNSUsage,
+		"usage for /test namespace should equal %d (got %d; ratio %.3fx)",
+		expectedTotal, testNSUsage, float64(testNSUsage)/float64(expectedTotal))
+}
+
 // TestFedDiskUsageAccuracy downloads a 2MB+ file through the cache using a
 // POSIX origin (xrootd, which always uses chunked encoding) and then verifies
 // that the introspection API reports the correct on-disk size.  This catches
@@ -622,8 +745,8 @@ func TestFedDiskUsageAccuracy(t *testing.T) {
 		if ds.OnDiskCount > 0 {
 			foundDisk = true
 			assert.Equal(t, int64(1), ds.OnDiskCount, "should have exactly 1 on-disk object")
-			assert.Equal(t, int64(testFileSize), ds.OnDiskBytes,
-				"on-disk bytes should match the source file size")
+			assert.Equal(t, local_cache.CalculateFileSize(int64(testFileSize)), ds.OnDiskBytes,
+				"on-disk bytes should match the actual file size (content + MAC overhead)")
 			assert.Equal(t, int64(0), ds.InlineCount, "no inline objects expected")
 			assert.Equal(t, int64(0), ds.InlineBytes, "no inline bytes expected")
 		}
@@ -631,15 +754,16 @@ func TestFedDiskUsageAccuracy(t *testing.T) {
 	assert.True(t, foundDisk, "should have at least one storage dir with on-disk data")
 
 	// --- Verify usage counters ---
-	// The usage counter for this storage+namespace should match the file size,
-	// NOT be inflated to terabytes (which was the bug these fixes address).
+	// The usage counter for this storage+namespace should match the
+	// actual on-disk size (content + per-block MAC overhead), NOT be
+	// inflated to terabytes (which was the bug these fixes address).
 	require.NotEmpty(t, stats.UsageCounters, "usage counters should not be empty")
 	var totalUsage int64
 	for _, v := range stats.UsageCounters {
 		totalUsage += v
 	}
-	assert.Equal(t, int64(testFileSize), totalUsage,
-		"usage counter total should equal the source file size")
+	assert.Equal(t, local_cache.CalculateFileSize(int64(testFileSize)), totalUsage,
+		"usage counter total should equal the on-disk file size")
 }
 
 // Create a federation then SIGSTOP the origin to prevent it from responding.

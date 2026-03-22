@@ -1472,8 +1472,9 @@ func TestConsistencyChecker_UsageReconciliation(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(filePath2), 0755))
 	require.NoError(t, os.WriteFile(filePath2, make([]byte, contentLen2), 0644))
 
-	// The actual total usage should be 5*BlockDataSize.
-	expectedUsage := int64(5 * BlockDataSize)
+	// The actual total usage should be the sum of on-disk file sizes
+	// (content + 16-byte MAC per 4080-byte block).
+	expectedUsage := CalculateFileSize(contentLen1) + CalculateFileSize(contentLen2)
 
 	// --- Case 1: stored counter is too high (>5 % drift) ---
 	inflated := expectedUsage * 2 // 100 % over, far beyond 5 %
@@ -1940,7 +1941,7 @@ func TestMultiDirStoragePlacement(t *testing.T) {
 		// this happens via PersistentCache.NoteUsageIncrease; here we
 		// call the EvictionManager directly since we're testing
 		// subsystems in isolation.
-		eviction.NoteUsageIncrease(sid, int64(objectSize))
+		eviction.NoteUsageIncrease(sid, CalculateFileSize(int64(objectSize)))
 
 		objects = append(objects, objectInfo{
 			instanceHash: instanceHash,
@@ -1976,7 +1977,7 @@ func TestMultiDirStoragePlacement(t *testing.T) {
 
 	expectedUsage := map[StorageID]int64{storageID1: 0, storageID2: 0}
 	for _, obj := range objects {
-		expectedUsage[obj.storageID] += obj.size
+		expectedUsage[obj.storageID] += CalculateFileSize(obj.size)
 	}
 
 	allUsage, err := db.GetAllUsage()

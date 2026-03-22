@@ -981,11 +981,13 @@ func TestLazyChunkedEviction(t *testing.T) {
 	require.NoError(t, storage.SetMetadata(instanceHash, meta))
 	require.NoError(t, db.UpdateLRU(instanceHash, 0))
 
-	// Evict the object
+	// Evict the object.  Only chunks 0 and 2 are allocated, so
+	// totalFreed should be the sum of their on-disk file sizes.
 	evicted, totalFreed, err := storage.EvictByLRU(meta.GetChunkStorageID(0), 1, 1, objectSize)
 	require.NoError(t, err)
 	assert.Len(t, evicted, 1)
-	assert.Equal(t, uint64(objectSize), totalFreed)
+	expectedFreed := uint64(CalculateFileSize(chunkSize)) * 2 // 2 allocated chunks
+	assert.Equal(t, expectedFreed, totalFreed)
 
 	// Verify allocated chunk files are deleted
 	_, err = os.Stat(chunk0Path)

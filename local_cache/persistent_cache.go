@@ -1353,7 +1353,7 @@ func (pc *PersistentCache) doInitObjectFromStat(
 
 	// Usage was charged in InitDiskStorage; bump the in-memory counter
 	// so the eviction manager can trigger if needed.
-	pc.eviction.NoteUsageIncrease(storageID, statInfo.Size)
+	pc.eviction.NoteUsageIncrease(storageID, CalculateFileSize(statInfo.Size))
 
 	meta.ETag = etag
 	meta.LastModified = statInfo.ModTime
@@ -2208,7 +2208,7 @@ func (w *decisionWriter) SetDiskMode(ctx context.Context, size int64) error {
 
 	// Usage was charged in InitDiskStorage; bump the in-memory counter
 	// so the eviction manager can trigger if needed.
-	w.pc.eviction.NoteUsageIncrease(storageID, size)
+	w.pc.eviction.NoteUsageIncrease(storageID, CalculateFileSize(size))
 
 	meta.ETag = w.dl.etag
 	meta.LastModified = w.dl.lastModified

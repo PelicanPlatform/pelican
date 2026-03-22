@@ -988,11 +988,11 @@ func (sm *StorageManager) InitDiskStorage(ctx context.Context, instanceHash Inst
 		return nil, errors.Wrap(err, "failed to initialize block state")
 	}
 
-	// Charge the full content length to the usage counter now — before the
-	// file descriptor is cached — so that eviction watermarks see the space
-	// consumed by the Truncate call above.
+	// Charge the actual on-disk size (content + per-block MAC overhead)
+	// to the usage counter now — before the file descriptor is cached — so
+	// that eviction watermarks see the space consumed by the Truncate above.
 	if contentLength > 0 {
-		if err := sm.db.ChargeUsage(storageID, namespaceID, contentLength); err != nil {
+		if err := sm.db.ChargeUsage(storageID, namespaceID, fileSize); err != nil {
 			file.Close()
 			os.Remove(objectPath)
 			if delErr := sm.db.DeleteMetadata(instanceHash); delErr != nil {
@@ -1128,10 +1128,10 @@ func (sm *StorageManager) AllocateChunk(
 		return nil, errors.Wrapf(err, "failed to pre-allocate chunk %d file", chunkIndex)
 	}
 
-	// Charge usage for this chunk's content immediately so the
-	// eviction watermarks account for the Truncate pre-allocation.
+	// Charge the actual on-disk size (content + per-block MAC overhead)
+	// so the eviction watermarks account for the Truncate pre-allocation.
 	if chunkContentLen > 0 {
-		if err := sm.db.ChargeUsage(storageID, meta.NamespaceID, chunkContentLen); err != nil {
+		if err := sm.db.ChargeUsage(storageID, meta.NamespaceID, fileSize); err != nil {
 			file.Close()
 			_ = removeFileWithRetry(chunkPath)
 			return nil, errors.Wrapf(err, "failed to charge usage for chunk %d", chunkIndex)
@@ -1882,7 +1882,18 @@ func (sm *StorageManager) EvictByLRU(storageID StorageID, namespaceID NamespaceI
 
 	var totalFreed uint64
 	for _, obj := range evicted {
-		totalFreed += uint64(obj.contentLen)
+		// Use PerDirectoryBytes to compute the actual on-disk size
+		// freed — this correctly handles lazily-allocated chunked
+		// objects where not all chunks may be allocated.
+		meta := &CacheMetadata{
+			StorageID:      obj.storageID,
+			ContentLength:  obj.contentLen,
+			ChunkSizeCode:  obj.chunkSizeCode,
+			ChunkLocations: obj.chunkLocations,
+		}
+		for _, bytes := range meta.PerDirectoryBytes() {
+			totalFreed += uint64(bytes)
+		}
 
 		// Remove all in-memory cached state for this object.
 		sm.invalidateObjectCaches(obj.instanceHash, CalculateChunkCount(obj.contentLen, obj.chunkSizeCode))
