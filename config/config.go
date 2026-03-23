@@ -484,6 +484,15 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 		for i, advUrl := range fedInfo.DirectorAdvertiseEndpoints {
 			fedInfo.DirectorAdvertiseEndpoints[i] = stripPort443(wrapWithHttpsIfNeeded(advUrl))
 		}
+
+		// Enforce the invariant that a successful return always has a populated DiscoveryEndpoint.
+		// The discovery endpoint doubles as the federation issuer and must be known by all services.
+		if err == nil && fedInfo.DiscoveryEndpoint == "" {
+			err = errors.New("federation discovery completed but no discovery endpoint was resolved; " +
+				"ensure Federation.DiscoveryUrl or Federation.DirectorUrl is configured and that the " +
+				"director hosts federation metadata at /.well-known/pelican-configuration " +
+				"(see Director.EnableFederationMetadataHosting for more details).")
+		}
 	}()
 
 	// Set each of the fed values to anything we got from config.
