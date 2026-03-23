@@ -22,7 +22,7 @@ func TestAdiosIntegrationEndToEnd(t *testing.T) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(sampleData)))
 		w.WriteHeader(http.StatusOK)
-		w.Write(sampleData)
+		_, _ = w.Write(sampleData)
 	}))
 	defer upstreamServer.Close()
 
@@ -63,7 +63,7 @@ func TestAdiosBatchTransfer(t *testing.T) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(batchData)))
 		w.WriteHeader(http.StatusOK)
-		w.Write(batchData)
+		_, _ = w.Write(batchData)
 	}))
 	defer upstreamServer.Close()
 
@@ -127,7 +127,7 @@ func TestAdiosPathVariations(t *testing.T) {
 
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("data"))
+		_, _ = w.Write([]byte("data"))
 	}))
 	defer upstreamServer.Close()
 
