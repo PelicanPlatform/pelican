@@ -623,7 +623,11 @@ func GetFederation(ctx context.Context) (pelican_url.FederationDiscovery, error)
 	return *loadedInfo, globalFedErr
 }
 
-// Set the current global federation metadata
+// Set the current global federation metadata.
+//
+// This is authoritative: once called, GetFederation will return the provided
+// values without re-running discovery. Callers are responsible for providing
+// correct and complete federation info.
 func SetFederation(fd pelican_url.FederationDiscovery) {
 	// Best-effort update of config state; this should not fail under normal circumstances
 	if err := param.MultiSet(map[string]interface{}{
@@ -638,6 +642,14 @@ func SetFederation(fd pelican_url.FederationDiscovery) {
 	}
 
 	globalFedInfo.Store(&fd)
+	globalFedErr = nil
+
+	// Consume the sync.Once so that subsequent GetFederation calls return the
+	// stored value directly instead of re-running discovery.
+	if fedDiscoveryOnce == nil {
+		fedDiscoveryOnce = &sync.Once{}
+	}
+	fedDiscoveryOnce.Do(func() {})
 }
 
 // TODO: It's not clear that this function works correctly.  We should
