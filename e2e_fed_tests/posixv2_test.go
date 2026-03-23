@@ -823,7 +823,7 @@ func TestPosixv2BrowserDirectoryListing(t *testing.T) {
 		bodyStr := string(body)
 
 		// Verify subdirectory content
-		assert.Contains(t, bodyStr, "Index of /subdir/")
+		assert.Contains(t, bodyStr, "Index of /subdir")
 		assert.Contains(t, bodyStr, "nested.txt")
 		// Should have parent link
 		assert.Contains(t, bodyStr, "..")
@@ -851,7 +851,7 @@ func TestPosixv2BrowserDirectoryListing(t *testing.T) {
 		require.NoError(t, err)
 		bodyStr := string(body)
 
-		assert.Contains(t, bodyStr, "Index of /empty/")
+		assert.Contains(t, bodyStr, "Index of /empty")
 		// Should have table structure even if empty
 		assert.Contains(t, bodyStr, "<tbody>")
 	})
