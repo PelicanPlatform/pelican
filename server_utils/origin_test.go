@@ -669,5 +669,48 @@ func TestFederationPrefixValidation(t *testing.T) {
 	runFedPrefixTest(t, "/origins/example.org", false)
 	runFedPrefixTest(t, "/caches/foo/bar", false) // Test prefix for caches
 	runFedPrefixTest(t, "/caches/example.org", false)
-	runFedPrefixTest(t, "/valid/prefix", true) // Test valid prefix
+	runFedPrefixTest(t, "/pelican", false)         // Test reserved /pelican prefix
+	runFedPrefixTest(t, "/pelican/foo", false)     // Test reserved /pelican sub-path
+	runFedPrefixTest(t, "/view", false)            // Test reserved /view prefix
+	runFedPrefixTest(t, "/view/foo", false)        // Test reserved /view sub-path
+	runFedPrefixTest(t, "/api", false)             // Test reserved /api prefix
+	runFedPrefixTest(t, "/api/v1.0/test", false)   // Test reserved /api sub-path
+	runFedPrefixTest(t, "/.well-known", false)     // Test reserved /.well-known prefix
+	runFedPrefixTest(t, "/.well-known/openid-configuration", false) // Test reserved /.well-known sub-path
+	runFedPrefixTest(t, "/valid/prefix", true)     // Test valid prefix
+}
+
+func runPathLikePrefixTest(t *testing.T, name string, valid bool) {
+	t.Run(fmt.Sprintf("testPathLikePrefixValidation-%s", name), func(t *testing.T) {
+		err := validatePathLikePrefix(name)
+		if valid {
+			assert.NoError(t, err)
+		} else {
+			assert.Error(t, err)
+		}
+	})
+}
+func TestPathLikePrefixValidation(t *testing.T) {
+	// Basic structural checks should still fail
+	runPathLikePrefixTest(t, "", false)                 // Test empty prefix
+	runPathLikePrefixTest(t, "noSlashPrefix", false)    // Test prefix without leading '/'
+	runPathLikePrefixTest(t, "/double//slash", false)   // Test prefix with '//'
+	runPathLikePrefixTest(t, "/dotSlash./test", false)  // Test prefix with './'
+	runPathLikePrefixTest(t, "/dotDot..test", false)    // Test prefix with '..'
+	runPathLikePrefixTest(t, "~tilde/test", false)      // Test prefix with leading '~'
+	runPathLikePrefixTest(t, "/dollar$test", false)     // Test prefix with '$'
+	runPathLikePrefixTest(t, "/star*test", false)       // Test prefix with '*'
+	runPathLikePrefixTest(t, "/backslash\\test", false) // Test prefix with '\'
+
+	// Federation-reserved prefixes should be VALID for storage prefixes
+	runPathLikePrefixTest(t, "/pelican", true)          // /pelican is only reserved in the federation
+	runPathLikePrefixTest(t, "/pelican/foo", true)      // sub-paths of /pelican are valid storage prefixes
+	runPathLikePrefixTest(t, "/view", true)             // /view is only reserved in the federation
+	runPathLikePrefixTest(t, "/view/foo", true)         // sub-paths of /view are valid storage prefixes
+	runPathLikePrefixTest(t, "/origins/foo/bar", true)  // /origins is only reserved in the federation
+	runPathLikePrefixTest(t, "/caches/foo/bar", true)   // /caches is only reserved in the federation
+	runPathLikePrefixTest(t, "/api", true)              // /api is only reserved in the federation
+	runPathLikePrefixTest(t, "/api/v1.0/test", true)    // sub-paths of /api are valid storage prefixes
+	runPathLikePrefixTest(t, "/.well-known", true)      // /.well-known is only reserved in the federation
+	runPathLikePrefixTest(t, "/valid/prefix", true)     // Test valid prefix
 }

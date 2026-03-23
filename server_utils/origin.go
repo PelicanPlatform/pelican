@@ -280,11 +280,11 @@ func RemoveTrailingSlash(prefix string) string {
 	return result
 }
 
-// Since Federation Prefixes get treated like POSIX filepaths by XRootD and other services, we need to
-// validate them to ensure funky things don't ensue.
-// Note that this isn't a part of the origin interface because it's not meant to be overridden -- _every_ origin
-// should validate federation prefixes the same way because this is a property of the federation.
-func validateFederationPrefix(prefix string) error {
+// validatePathLikePrefix validates basic structural requirements for any prefix that gets treated
+// like a POSIX filepath -- it must be non-empty, start with '/', and not contain characters that
+// carry special meaning in POSIX filepaths or URLs. This is shared between federation prefix and
+// storage prefix validation.
+func validatePathLikePrefix(prefix string) error {
 	if len(prefix) == 0 {
 		return errors.Errorf("prefix '%s' is empty", prefix)
 	}
@@ -301,11 +301,23 @@ func validateFederationPrefix(prefix string) error {
 		}
 	}
 
+	return nil
+}
+
+// Since Federation Prefixes get treated like POSIX filepaths by XRootD and other services, we need to
+// validate them to ensure funky things don't ensue.
+// Note that this isn't a part of the origin interface because it's not meant to be overridden -- _every_ origin
+// should validate federation prefixes the same way because this is a property of the federation.
+func validateFederationPrefix(prefix string) error {
+	if err := validatePathLikePrefix(prefix); err != nil {
+		return err
+	}
+
 	if server_structs.IsCacheNS(prefix) || server_structs.IsOriginNS(prefix) {
 		return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s is a reserved prefix for cache/origin server registration", prefix)
 	}
 
-	illegalPrefixes := []string{"/pelican", "/view"}
+	illegalPrefixes := []string{"/pelican", "/view", "/api", "/.well-known"}
 	for _, illegalPrefix := range illegalPrefixes {
 		if prefix == illegalPrefix || strings.HasPrefix(prefix, illegalPrefix+"/") {
 			return errors.Wrapf(ErrInvalidOriginConfig, "prefix '%s' is a reserved prefix and cannot be registered to your Origin", prefix)
