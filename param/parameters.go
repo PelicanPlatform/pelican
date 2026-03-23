@@ -23,8 +23,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/viper"
-
 	"github.com/pelicanplatform/pelican/byte_rate"
 )
 
@@ -865,7 +863,7 @@ func (sP StringParam) GetName() string {
 }
 
 func (sP StringParam) IsSet() bool {
-	return viper.IsSet(sP.name)
+	return viperIsSet(sP.name)
 }
 
 func (sP StringParam) IsRuntimeConfigurable() bool {
@@ -936,7 +934,7 @@ func (slP StringSliceParam) GetName() string {
 }
 
 func (slP StringSliceParam) IsSet() bool {
-	return viper.IsSet(slP.name)
+	return viperIsSet(slP.name)
 }
 
 func (slP StringSliceParam) IsRuntimeConfigurable() bool {
@@ -1053,7 +1051,7 @@ func (iP IntParam) GetName() string {
 }
 
 func (iP IntParam) IsSet() bool {
-	return viper.IsSet(iP.name)
+	return viperIsSet(iP.name)
 }
 
 func (iP IntParam) IsRuntimeConfigurable() bool {
@@ -1078,7 +1076,7 @@ func (bRP ByteRateParam) GetName() string {
 }
 
 func (bRP ByteRateParam) IsSet() bool {
-	return viper.IsSet(bRP.name)
+	return viperIsSet(bRP.name)
 }
 
 func (bRP ByteRateParam) IsRuntimeConfigurable() bool {
@@ -1255,7 +1253,7 @@ func (bP BoolParam) GetName() string {
 }
 
 func (bP BoolParam) IsSet() bool {
-	return viper.IsSet(bP.name)
+	return viperIsSet(bP.name)
 }
 
 func (bP BoolParam) IsRuntimeConfigurable() bool {
@@ -1392,7 +1390,7 @@ func (dP DurationParam) GetName() string {
 }
 
 func (dP DurationParam) IsSet() bool {
-	return viper.IsSet(dP.name)
+	return viperIsSet(dP.name)
 }
 
 func (dP DurationParam) IsRuntimeConfigurable() bool {
@@ -1404,7 +1402,7 @@ func (dP DurationParam) GetEnvVarName() string {
 }
 
 func (oP ObjectParam) Unmarshal(rawVal any) error {
-	return viper.UnmarshalKey(oP.name, rawVal)
+	return viperUnmarshalKey(oP.name, rawVal)
 }
 
 func (oP ObjectParam) GetName() string {
@@ -1412,7 +1410,7 @@ func (oP ObjectParam) GetName() string {
 }
 
 func (oP ObjectParam) IsSet() bool {
-	return viper.IsSet(oP.name)
+	return viperIsSet(oP.name)
 }
 
 func (oP ObjectParam) IsRuntimeConfigurable() bool {
