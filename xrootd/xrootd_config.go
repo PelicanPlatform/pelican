@@ -480,44 +480,18 @@ func ensureCachePSSOrigin(ctx context.Context) (string, error) {
 		return "", errors.Wrap(err, "Failed to pull information from the federation")
 	}
 
-	pssOrigin := ""
-
-	if discoveryUrlStr := fedInfo.DiscoveryEndpoint; discoveryUrlStr != "" {
-		discoveryUrl, err := url.Parse(discoveryUrlStr)
-		if err == nil {
-			log.Debugln("Parsing discovery URL for 'pss.origin' setting:", discoveryUrlStr)
-			if len(discoveryUrl.Path) > 0 && len(discoveryUrl.Host) == 0 {
-				discoveryUrl.Host = discoveryUrl.Path
-				discoveryUrl.Path = ""
-			} else if discoveryUrl.Path != "" && discoveryUrl.Path != "/" {
-				return "", errors.New("The Federation.DiscoveryUrl's path is non-empty, ensure the Federation.DiscoveryUrl has the format <host>:<port>")
-			}
-			discoveryUrl.Scheme = "pelican"
-			discoveryUrl.Path = ""
-			discoveryUrl.RawQuery = ""
-			pssOrigin = discoveryUrl.String()
-		} else {
-			return "", errors.Wrapf(err, "Failed to parse discovery URL %s", discoveryUrlStr)
-		}
+	// After a successful GetFederation call, DiscoveryEndpoint is guaranteed to be
+	// populated and normalized. It's the canonical federation hostname for pss.origin.
+	discoveryUrl, err := url.Parse(fedInfo.DiscoveryEndpoint)
+	if err != nil {
+		return "", errors.Wrapf(err, "Failed to parse federation discovery URL %s", fedInfo.DiscoveryEndpoint)
 	}
 
-	if directorUrlStr := fedInfo.DirectorEndpoint; directorUrlStr != "" {
-		directorUrl, err := url.Parse(directorUrlStr)
-		if err == nil {
-			log.Debugln("Parsing director URL for 'pss.origin' setting:", directorUrlStr)
-			if directorUrl.Path != "" && directorUrl.Path != "/" {
-				return "", errors.New("The Federation.DirectorUrl's path is non-empty, ensure the Federation.DirectorUrl has the format <host>:<port>")
-			}
-			directorUrl.Scheme = "pelican"
-			pssOrigin = directorUrl.String()
-		} else {
-			return "", errors.Wrapf(err, "Failed to parse director URL %s", directorUrlStr)
-		}
-	}
-
-	if pssOrigin == "" {
-		return "", errors.New("One of Federation.DiscoveryUrl or Federation.DirectorUrl must be set to configure a cache")
-	}
+	log.Debugln("Parsing discovery URL for 'pss.origin' setting:", fedInfo.DiscoveryEndpoint)
+	discoveryUrl.Scheme = "pelican"
+	discoveryUrl.Path = ""
+	discoveryUrl.RawQuery = ""
+	pssOrigin := discoveryUrl.String()
 
 	if err := param.Set("Cache.PSSOrigin", pssOrigin); err != nil {
 		return "", err
