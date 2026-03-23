@@ -871,7 +871,7 @@ components: ["origin"]
 ---
 name: Origin.StorageType
 description: |+
-  The type of storage underpinning the origin. Currently supported types are "posix", "https", "s3", "globus", and "xroot".
+  The type of storage underpinning the origin. Currently supported types are "posix", "https", "s3", "globus", "adios", and "xroot".
 type: string
 default: "posix"
 components: ["origin"]
@@ -1519,6 +1519,28 @@ description: |+
   For example, if one sets `Origin.HTTPServiceUrl=https://example.com`, `Origin.StoragePrefix=/testfiles` and `Origin.FederationPrefix=/foo`,
   then a request for an object named `/foo/bar` will generate a request to https://example.com/testfiles/bar.
 type: string
+default: none
+components: ["origin"]
+---
+name: Origin.AdiosServiceUrl
+description: |+
+  If Origin.StorageType is set to `adios`, the service URL is used as the base for requests to the backend.
+  The origin appends `Origin.StoragePrefix` and the requested `.bp` path before issuing ADIOS `get` or
+  `batchget` query operations.
+
+  This URL should include the ADIOS route prefix, for example: `https://example.org:443/adios`.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.AdiosAuthTokenFile
+description: |+
+  When set, requests from the origin to an ADIOS backend include the contents of this file as a bearer
+  token in the Authorization header.
+
+  This is optional and intended for deployments where the upstream ADIOS service requires explicit
+  bearer-token authentication.
+type: filename
 default: none
 components: ["origin"]
 ---
