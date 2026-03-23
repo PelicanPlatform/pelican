@@ -28,6 +28,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/utils"
+
 	"github.com/pelicanplatform/pelican/param"
 )
 
@@ -72,7 +74,7 @@ func TestValidateAtomicUploadFilesystem(t *testing.T) {
 		require.NoError(t, os.MkdirAll(shmDir, 0750))
 		t.Cleanup(func() { os.RemoveAll(shmDir) })
 
-		same, err := sameFilesystem(storageDir, shmDir)
+		same, err := utils.SameFilesystem(storageDir, shmDir)
 		require.NoError(t, err)
 		if same {
 			t.Skip("/dev/shm is on the same filesystem as /tmp; cannot test cross-filesystem")
