@@ -1740,9 +1740,12 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	}
 
 	if currentServers.IsEnabled(server_structs.OriginType) {
-		ost := param.Origin_StorageType.GetString()
+		ost, err := server_structs.ParseOriginStorageType(param.Origin_StorageType.GetString())
+		if err != nil {
+			return errors.Wrapf(err, "failed to parse %s", param.Origin_StorageType.GetName())
+		}
 		switch ost {
-		case "https":
+		case server_structs.OriginStorageHTTPS:
 			httpSvcUrl := param.Origin_HttpServiceUrl.GetString()
 			if httpSvcUrl == "" {
 				return errors.New("Origin.HTTPServiceUrl may not be empty when the origin is configured with an https backend")
@@ -1751,7 +1754,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			if err != nil {
 				return errors.Wrap(err, "unable to parse Origin.HTTPServiceUrl as a URL")
 			}
-		case "globus":
+		case server_structs.OriginStorageGlobus:
 			if !param.Server_EnableUI.GetBool() {
 				return errors.Errorf("%s must be true when %s is set to globus", param.Server_EnableUI.GetName(), param.Origin_StorageType.GetName())
 			}
@@ -1779,7 +1782,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			if err != nil {
 				return errors.Wrap(err, "Origin.GlobusClientSecretFile is not a valid filepath")
 			}
-		case "xroot":
+		case server_structs.OriginStorageXRoot:
 			xrootSvcUrl := param.Origin_XRootServiceUrl.GetString()
 			if xrootSvcUrl == "" {
 				return errors.New("Origin.XRootServiceUrl may not be empty when the origin is configured with an xroot backend")
@@ -1788,7 +1791,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			if err != nil {
 				return errors.Wrap(err, "unable to parse Origin.XrootServiceUrl as a URL")
 			}
-		case "s3":
+		case server_structs.OriginStorageS3:
 			s3SvcUrl := param.Origin_S3ServiceUrl.GetString()
 			if s3SvcUrl == "" {
 				return errors.New("Origin.S3ServiceUrl may not be empty when the origin is configured with an s3 backend")
@@ -1796,6 +1799,21 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			_, err := url.Parse(s3SvcUrl)
 			if err != nil {
 				return errors.Wrap(err, "unable to parse Origin.S3ServiceUrl as a URL")
+			}
+		}
+
+		// Atomic uploads (POSC) are only supported for posix backends. Reject the
+		// configuration early so operators don't get a confusing XRootD error at runtime.
+		if param.Origin_EnableAtomicUploads.GetBool() {
+			if ost != server_structs.OriginStoragePosix {
+				return errors.Errorf("%s is enabled, but the origin storage type is '%s'. "+
+					"Atomic uploads are only supported for the 'posix' storage backend",
+					param.Origin_EnableAtomicUploads.GetName(), ost)
+			}
+			if param.Origin_UploadTempLocation.GetString() == "" {
+				return errors.Errorf("%s is enabled but %s is empty. "+
+					"A temporary upload location is required for atomic uploads",
+					param.Origin_EnableAtomicUploads.GetName(), param.Origin_UploadTempLocation.GetName())
 			}
 		}
 	}

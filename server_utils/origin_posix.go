@@ -19,10 +19,14 @@
 package server_utils
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -104,11 +108,98 @@ func (o *PosixOrigin) validateTempUploadLocation(e *OriginExport) error {
 	return nil
 }
 
+// sameFilesystem returns true if both paths reside on the same filesystem
+// (i.e. share the same device ID). This is important because rename(2) cannot
+// move files across filesystem boundaries (returns EXDEV).
+//
+// On Windows, where syscall.Stat_t is unavailable, this check is skipped and
+// the function optimistically returns true. POSIX Origins are not meaningfully
+// supported on Windows, so this is acceptable.
+func sameFilesystem(pathA, pathB string) (bool, error) {
+	if runtime.GOOS == "windows" {
+		log.Debugln("Skipping same-filesystem check on Windows")
+		return true, nil
+	}
+
+	infoA, err := os.Stat(pathA)
+	if err != nil {
+		return false, errors.Wrapf(err, "unable to stat '%s'", pathA)
+	}
+	infoB, err := os.Stat(pathB)
+	if err != nil {
+		return false, errors.Wrapf(err, "unable to stat '%s'", pathB)
+	}
+
+	statA, ok := infoA.Sys().(*syscall.Stat_t)
+	if !ok {
+		return false, errors.Errorf("unable to get device info for '%s'", pathA)
+	}
+	statB, ok := infoB.Sys().(*syscall.Stat_t)
+	if !ok {
+		return false, errors.Errorf("unable to get device info for '%s'", pathB)
+	}
+
+	return statA.Dev == statB.Dev, nil
+}
+
+// validateAtomicUploadFilesystem checks that, when atomic uploads are enabled,
+// the UploadTempLocation resides on the same filesystem as the export's StoragePrefix.
+// The POSC plugin relies on rename(2) to atomically move completed uploads into place,
+// and rename(2) returns EXDEV when source and destination are on different filesystems.
+func (o *PosixOrigin) validateAtomicUploadFilesystem(e *OriginExport) error {
+	if !param.Origin_EnableAtomicUploads.GetBool() {
+		return nil
+	}
+
+	uploadTempLocation := param.Origin_UploadTempLocation.GetString()
+	if uploadTempLocation == "" {
+		return errors.Errorf("%s is enabled but %s is empty",
+			param.Origin_EnableAtomicUploads.GetName(), param.Origin_UploadTempLocation.GetName())
+	}
+
+	uploadTempAbs, err := filepath.Abs(uploadTempLocation)
+	if err != nil {
+		return errors.Wrapf(err, "unable to resolve absolute path for %s '%s'",
+			param.Origin_UploadTempLocation.GetName(), uploadTempLocation)
+	}
+
+	storageAbs, err := filepath.Abs(e.StoragePrefix)
+	if err != nil {
+		return errors.Wrapf(err, "unable to resolve absolute path for StoragePrefix '%s'", e.StoragePrefix)
+	}
+
+	// Ensure the upload temp directory exists before comparing device IDs.
+	if err := os.MkdirAll(uploadTempAbs, 0750); err != nil {
+		return errors.Wrapf(err, "unable to create %s directory '%s'",
+			param.Origin_UploadTempLocation.GetName(), uploadTempAbs)
+	}
+
+	same, err := sameFilesystem(uploadTempAbs, storageAbs)
+	if err != nil {
+		return errors.Wrapf(err, "unable to determine whether %s '%s' and StoragePrefix '%s' are on the same filesystem",
+			param.Origin_UploadTempLocation.GetName(), uploadTempAbs, storageAbs)
+	}
+
+	if !same {
+		return errors.Errorf("%s '%s' and StoragePrefix '%s' (export for federation prefix '%s') are on different filesystems. "+
+			"The atomic upload feature (POSC plugin) relies on rename(2) to move completed uploads into place, "+
+			"which cannot work across filesystem boundaries. Please configure %s to be on the same filesystem "+
+			"as the export's StoragePrefix, or disable atomic uploads by setting Origin.EnableAtomicUploads to false.",
+			param.Origin_UploadTempLocation.GetName(), uploadTempAbs, storageAbs, e.FederationPrefix,
+			param.Origin_UploadTempLocation.GetName())
+	}
+
+	return nil
+}
+
 func (o *PosixOrigin) validateExtra(e *OriginExport, _ int) error {
 	if err := o.validateStoragePrefixNotRoot(e); err != nil {
 		return err
 	}
 	if err := o.validateTempUploadLocation(e); err != nil {
+		return err
+	}
+	if err := o.validateAtomicUploadFilesystem(e); err != nil {
 		return err
 	}
 

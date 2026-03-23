@@ -888,6 +888,42 @@ func TestInitServerGlobusBackendRequiresUI(t *testing.T) {
 	require.ErrorContains(t, err, "globus")
 }
 
+func TestInitServerAtomicUploadsRequiresPosix(t *testing.T) {
+	ResetConfig()
+	t.Cleanup(func() {
+		ResetConfig()
+	})
+
+	mockFederationRoot(t)
+	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
+	require.NoError(t, param.Set(param.Origin_StorageType.GetName(), "s3"))
+	require.NoError(t, param.Set(param.Origin_EnableAtomicUploads.GetName(), true))
+	require.NoError(t, param.Set(param.Origin_S3ServiceUrl.GetName(), "https://s3.example.com"))
+
+	err := InitServer(context.Background(), server_structs.OriginType)
+	require.Error(t, err)
+	require.ErrorContains(t, err, param.Origin_EnableAtomicUploads.GetName())
+	require.ErrorContains(t, err, "posix")
+}
+
+func TestInitServerAtomicUploadsRequiresTempLocation(t *testing.T) {
+	ResetConfig()
+	t.Cleanup(func() {
+		ResetConfig()
+	})
+
+	mockFederationRoot(t)
+	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
+	require.NoError(t, param.Set(param.Origin_StorageType.GetName(), "posix"))
+	require.NoError(t, param.Set(param.Origin_EnableAtomicUploads.GetName(), true))
+	require.NoError(t, param.Set(param.Origin_UploadTempLocation.GetName(), ""))
+
+	err := InitServer(context.Background(), server_structs.OriginType)
+	require.Error(t, err)
+	require.ErrorContains(t, err, param.Origin_EnableAtomicUploads.GetName())
+	require.ErrorContains(t, err, param.Origin_UploadTempLocation.GetName())
+}
+
 func TestDiscoverFederationImpl(t *testing.T) {
 	testCases := []struct {
 		name                  string
