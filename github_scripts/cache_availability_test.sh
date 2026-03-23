@@ -119,6 +119,7 @@ kill_tree() {
     kill -9 ${all_pids} 2>/dev/null || true
 }
 
+# shellcheck disable=SC2329  # invoked indirectly via trap
 cleanup() {
     echo "============================================"
     echo "Cleaning up..."
@@ -173,7 +174,6 @@ wait_for_address_file() {
             exit 1
         fi
     done
-    ADDRESS_CONTENTS="$(cat "${file}")"
 }
 
 # ---------------------------------------------------------------------------
