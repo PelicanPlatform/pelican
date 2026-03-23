@@ -16,6 +16,7 @@ jobs:
     uses: ./.github/workflows/test-linux.yml
     with:
       image: hub.opensciencegrid.org/pelican_platform/pelican-test:latest-itb
+      race_detection: true
 
   analyze-runs:
     name: Analyze Runs
