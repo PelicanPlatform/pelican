@@ -613,6 +613,8 @@ func GetOriginExports() ([]OriginExport, error) {
 		origin = &Posixv2Origin{}
 	case server_structs.OriginStorageSSH:
 		origin = &SSHOrigin{}
+	case server_structs.OriginStorageAdios:
+		origin = &ADIOSOrigin{}
 	case server_structs.OriginStorageHTTPS:
 		origin = &HTTPSOrigin{}
 	case server_structs.OriginStorageS3:
