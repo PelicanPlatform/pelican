@@ -663,6 +663,16 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 			})
 			log.Infof("Initialized native HTTPS backend for %s (upstream: %s, token mode: %d)", export.FederationPrefix, httpServiceURL, tokenMode)
 
+		case server_structs.OriginStorageAdios:
+			adiosServiceURL := param.Origin_AdiosServiceUrl.GetString()
+			adiosAuthTokenFile := param.Origin_AdiosAuthTokenFile.GetString()
+			backend = newAdiosBackend(AdiosBackendOptions{
+				ServiceURL:    adiosServiceURL,
+				StoragePrefix: export.StoragePrefix,
+				AuthTokenFile: adiosAuthTokenFile,
+			})
+			log.Infof("Initialized ADIOS backend for %s (upstream: %s)", export.FederationPrefix, adiosServiceURL)
+
 		case server_structs.OriginStorageGlobusv2:
 			// Native Globus backend (no XRootD)
 			// The Globus backend is initialized in two phases:

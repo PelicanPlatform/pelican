@@ -60,7 +60,8 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		storageType != string(server_structs.OriginStorageSSH) &&
 		storageType != string(server_structs.OriginStorageS3v2) &&
 		storageType != string(server_structs.OriginStorageHTTPSv2) &&
-		storageType != string(server_structs.OriginStorageGlobusv2)
+		storageType != string(server_structs.OriginStorageGlobusv2) &&
+		storageType != string(server_structs.OriginStorageAdios)
 
 	if useXRootD {
 		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusWarning, "XRootD is initializing")
@@ -232,7 +233,8 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 		storageType != string(server_structs.OriginStorageSSH) &&
 		storageType != string(server_structs.OriginStorageS3v2) &&
 		storageType != string(server_structs.OriginStorageHTTPSv2) &&
-		storageType != string(server_structs.OriginStorageGlobusv2)
+		storageType != string(server_structs.OriginStorageGlobusv2) &&
+		storageType != string(server_structs.OriginStorageAdios)
 	if !useXRootD {
 		// For SSH backend, initialize the SSH connection before setting up handlers
 		if storageType == string(server_structs.OriginStorageSSH) {
