@@ -8,6 +8,12 @@
   <img alt="Go Report" src="https://img.shields.io/badge/go%20report-A+-brightgreen.svg?style=for-the-badge">
 </p>
 
+<p align="center">
+  <a href="https://github.com/PelicanPlatform/pelican/actions/workflows/test-linux-scheduled.yml"><img alt="Nightly Tests (Linux)" src="https://img.shields.io/github/actions/workflow/status/PelicanPlatform/pelican/test-linux-scheduled.yml?style=for-the-badge&label=Nightly%20(Linux)"></a>
+  <a href="https://github.com/PelicanPlatform/pelican/actions/workflows/test-macos-scheduled.yml"><img alt="Nightly Tests (macOS)" src="https://img.shields.io/github/actions/workflow/status/PelicanPlatform/pelican/test-macos-scheduled.yml?style=for-the-badge&label=Nightly%20(macOS)"></a>
+  <a href="https://github.com/PelicanPlatform/pelican/actions/workflows/test-windows-scheduled.yml"><img alt="Nightly Tests (Windows)" src="https://img.shields.io/github/actions/workflow/status/PelicanPlatform/pelican/test-windows-scheduled.yml?style=for-the-badge&label=Nightly%20(Windows)"></a>
+</p>
+
 The Pelican command line tool allows one to use a Pelican federation as a client and serve datasets through running a Pelican origin service.
 
 For more information on Pelican, see the [Pelican Platform page](https://pelicanplatform.org/).
