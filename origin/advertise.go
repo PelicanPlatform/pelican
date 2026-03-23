@@ -186,7 +186,8 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 	dataUrlToAdvertise := originUrlStr
 	if (ost == server_structs.OriginStoragePosixv2 || ost == server_structs.OriginStorageSSH ||
 		ost == server_structs.OriginStorageS3v2 || ost == server_structs.OriginStorageHTTPSv2 ||
-		ost == server_structs.OriginStorageGlobusv2) && config.IsServerEnabled(server_structs.DirectorType) {
+		ost == server_structs.OriginStorageGlobusv2 || ost == server_structs.OriginStorageAdios) &&
+		config.IsServerEnabled(server_structs.DirectorType) {
 		if parsedUrl, err := url.Parse(originUrlStr); err == nil {
 			parsedUrl.Path = "/api/v1.0/origin/data"
 			dataUrlToAdvertise = parsedUrl.String()

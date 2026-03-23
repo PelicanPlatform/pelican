@@ -163,6 +163,19 @@ Alternatively, specify Origin.Exports in the parameters.yaml file:
 		  FederationPrefix: /bar
 		  Capabilities: ["PublicReads", "Writes"]
 `)
+			case server_structs.OriginStorageAdios:
+				fmt.Fprintf(os.Stderr, `
+Export information was not correct.
+ADIOS exports must be specified via configuration file. Example:
+
+Origin:
+	StorageType: adios
+	StoragePrefix: /path/to/bp
+	AdiosServiceUrl: "https://adios-service.example.com"
+	Exports:
+	- FederationPrefix: /data
+	  Capabilities: ["PublicReads"]
+`)
 			default:
 				fmt.Fprintf(os.Stderr, "Currently-supported origin modes include posix, https, and s3, but you provided %s.", mode)
 			}
