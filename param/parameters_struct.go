@@ -263,6 +263,8 @@ type Config struct {
 		UserInfoEndpoint string `mapstructure:"userinfoendpoint" yaml:"UserInfoEndpoint"`
 	} `mapstructure:"oidc" yaml:"OIDC"`
 	Origin struct {
+		AdiosAuthTokenFile string `mapstructure:"adiosauthtokenfile" yaml:"AdiosAuthTokenFile"`
+		AdiosServiceUrl string `mapstructure:"adiosserviceurl" yaml:"AdiosServiceUrl"`
 		CacheControl string `mapstructure:"cachecontrol" yaml:"CacheControl"`
 		Concurrency int `mapstructure:"concurrency" yaml:"Concurrency"`
 		ConcurrencyDegradedThreshold int `mapstructure:"concurrencydegradedthreshold" yaml:"ConcurrencyDegradedThreshold"`
@@ -734,6 +736,8 @@ type configWithType struct {
 		UserInfoEndpoint struct { Type string; Value string }
 	}
 	Origin struct {
+		AdiosAuthTokenFile struct { Type string; Value string }
+		AdiosServiceUrl struct { Type string; Value string }
 		CacheControl struct { Type string; Value string }
 		Concurrency struct { Type string; Value int }
 		ConcurrencyDegradedThreshold struct { Type string; Value int }

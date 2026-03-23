@@ -291,6 +291,8 @@ var runtimeConfigurableMap = map[string]bool{
 	"OIDC.Scopes": false,
 	"OIDC.TokenEndpoint": false,
 	"OIDC.UserInfoEndpoint": false,
+	"Origin.AdiosAuthTokenFile": false,
+	"Origin.AdiosServiceUrl": false,
 	"Origin.CacheControl": false,
 	"Origin.Concurrency": false,
 	"Origin.ConcurrencyDegradedThreshold": false,
@@ -702,6 +704,10 @@ func (sP StringParam) GetString() string {
 			return config.OIDC.TokenEndpoint
 		case "OIDC.UserInfoEndpoint":
 			return config.OIDC.UserInfoEndpoint
+		case "Origin.AdiosAuthTokenFile":
+			return config.Origin.AdiosAuthTokenFile
+		case "Origin.AdiosServiceUrl":
+			return config.Origin.AdiosServiceUrl
 		case "Origin.CacheControl":
 			return config.Origin.CacheControl
 		case "Origin.DbLocation":
@@ -1700,6 +1706,8 @@ var allParameterNames = []string{
 	"OIDC.Scopes",
 	"OIDC.TokenEndpoint",
 	"OIDC.UserInfoEndpoint",
+	"Origin.AdiosAuthTokenFile",
+	"Origin.AdiosServiceUrl",
 	"Origin.CacheControl",
 	"Origin.Concurrency",
 	"Origin.ConcurrencyDegradedThreshold",
@@ -2000,6 +2008,8 @@ var (
 	OIDC_Issuer = StringParam{"OIDC.Issuer"}
 	OIDC_TokenEndpoint = StringParam{"OIDC.TokenEndpoint"}
 	OIDC_UserInfoEndpoint = StringParam{"OIDC.UserInfoEndpoint"}
+	Origin_AdiosAuthTokenFile = StringParam{"Origin.AdiosAuthTokenFile"}
+	Origin_AdiosServiceUrl = StringParam{"Origin.AdiosServiceUrl"}
 	Origin_CacheControl = StringParam{"Origin.CacheControl"}
 	Origin_DbLocation = StringParam{"Origin.DbLocation"}
 	Origin_ExportVolume = StringParam{"Origin.ExportVolume"}
