@@ -875,3 +875,112 @@ func TestByteRateDecoding(t *testing.T) {
 		assert.Equal(t, expected, config.Origin.TransferRateLimit)
 	})
 }
+
+// TestConcurrentIsSetAndUnmarshalConfig verifies that concurrent IsSet() calls
+// do not race with UnmarshalConfig() / Set(). Before the fix, this would panic
+// with "concurrent map read and map write" inside viper because IsSet() called
+// viper.IsSet() without holding configMutex while UnmarshalConfig() called
+// viper.AllSettings() which mutates viper's internal path-index cache.
+//
+// Run with: go test -race -run TestConcurrentIsSetAndUnmarshalConfig ./param/
+func TestConcurrentIsSetAndUnmarshalConfig(t *testing.T) {
+	require.NoError(t, Reset())
+	ClearCallbacks()
+	defer func() {
+		ClearCallbacks()
+		require.NoError(t, Reset())
+	}()
+
+	// Seed some config values so viper has internal state to race on
+	require.NoError(t, Set(Server_UIAdminUsers.GetName(), []string{"admin"}))
+	require.NoError(t, Set(Server_AdminGroups.GetName(), []string{"admins"}))
+	require.NoError(t, Set(Cache_Port.GetName(), 8443))
+	require.NoError(t, Set(Logging_Level.GetName(), "debug"))
+
+	var wg sync.WaitGroup
+
+	// Goroutines calling IsSet (the read path that was unprotected)
+	for range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 20 {
+				_ = Server_UIAdminUsers.IsSet()
+				_ = Server_AdminGroups.IsSet()
+				_ = Cache_Port.IsSet()
+				_ = Logging_Level.IsSet()
+			}
+		}()
+	}
+
+	// Goroutines calling UnmarshalConfig (the write path via AllSettings)
+	for range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 5 {
+				_, _ = UnmarshalConfig()
+			}
+		}()
+	}
+
+	// Goroutines calling Set (another write path)
+	for i := range 3 {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for range 10 {
+				_ = Set(Logging_Level.GetName(), "info")
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// If we get here without a panic or race detector complaint, the fix works
+	config, err := GetUnmarshaledConfig()
+	require.NoError(t, err)
+	assert.NotNil(t, config)
+}
+
+// TestConcurrentObjectParamUnmarshal verifies that ObjectParam.Unmarshal()
+// doesn't race with concurrent viper writes.
+func TestConcurrentObjectParamUnmarshal(t *testing.T) {
+	require.NoError(t, Reset())
+	ClearCallbacks()
+	defer func() {
+		ClearCallbacks()
+		require.NoError(t, Reset())
+	}()
+
+	require.NoError(t, Set(Registry_Institutions.GetName(), []map[string]interface{}{
+		{"name": "TestInst", "id": "test-001"},
+	}))
+
+	var wg sync.WaitGroup
+
+	// Concurrent Unmarshal calls
+	for range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 10 {
+				var result any
+				_ = Registry_Institutions.Unmarshal(&result)
+			}
+		}()
+	}
+
+	// Concurrent Set calls to create contention
+	for range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 10 {
+				_ = Set(Logging_Level.GetName(), "warn")
+			}
+		}()
+	}
+
+	wg.Wait()
+}
