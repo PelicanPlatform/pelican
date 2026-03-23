@@ -592,6 +592,17 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 				return fmt.Errorf("failed to create SSH backend for %s: %w", export.FederationPrefix, err)
 			}
 			backend = sshBackend
+
+		case server_structs.OriginStorageAdios:
+			adiosServiceURL := param.Origin_AdiosServiceUrl.GetString()
+			adiosAuthTokenFile := param.Origin_AdiosAuthTokenFile.GetString()
+			backend = newAdiosBackend(AdiosBackendOptions{
+				ServiceURL:    adiosServiceURL,
+				StoragePrefix: export.StoragePrefix,
+				AuthTokenFile: adiosAuthTokenFile,
+			})
+			log.Infof("Initialized ADIOS backend for %s (upstream: %s)", export.FederationPrefix, adiosServiceURL)
+
 		default:
 			// Use local filesystem (POSIXv2)
 			// Create a filesystem for this export with auto-directory creation

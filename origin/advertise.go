@@ -186,7 +186,8 @@ func (server *OriginServer) CreateAdvertisement(name, id, originUrlStr, originWe
 	// non-empty resource paths, so we advertise the base URL.
 	// WebURL stays as the base server URL for web browser access.
 	dataUrlToAdvertise := originUrlStr
-	if (ost == server_structs.OriginStoragePosixv2 || ost == server_structs.OriginStorageSSH) && config.IsServerEnabled(server_structs.DirectorType) {
+	if (ost == server_structs.OriginStoragePosixv2 || ost == server_structs.OriginStorageSSH ||
+		ost == server_structs.OriginStorageAdios) && config.IsServerEnabled(server_structs.DirectorType) {
 		if parsedUrl, err := url.Parse(originUrlStr); err == nil {
 			parsedUrl.Path = "/api/v1.0/origin/data"
 			dataUrlToAdvertise = parsedUrl.String()
