@@ -113,7 +113,7 @@ builds:
 # builds into separate archives.
 archives:
   - id: pelican
-    ids:
+    builds:
       - pelican
     name_template: >-
       {{ .ProjectName }}_
@@ -122,10 +122,10 @@ archives:
       {{- else }}{{ .Arch }}{{ end }}
     format_overrides:
       - goos: windows
-        formats: [zip]
+        format: zip
     wrap_in_directory: '{{ .ProjectName }}-{{ trimsuffix .Version "-next" }}'
   - id: pelican-server
-    ids:
+    builds:
       - pelican-server
     name_template: >-
       {{ .ProjectName }}-server_
@@ -138,7 +138,7 @@ nfpms:
   - &package-pelican
     id: pelican
     package_name: pelican
-    ids:
+    builds:
       - pelican
     # Note that git tags like v7.0.0-rc.1 will be modified by goreleaser when building
     # rpms to be v7.0.0~rc.1-1. The tilde is a special character in RPM versioning that
@@ -288,7 +288,7 @@ nfpms:
   - <<: *package-pelican
     id: pelican-debug
     package_name: pelican-debug
-    ids:
+    builds:
       - pelican-debug
     description: Command-line copy tool for the Open Science Data Federation (includes debug symbols)
     formats:
@@ -302,7 +302,7 @@ nfpms:
 
   - id: pelican-osdf-compat
     package_name: pelican-osdf-compat
-    ids: []
+    builds: []
     file_name_template: "{{ .ConventionalFileName }}"
     vendor: OSG Consortium
     homepage: https://pelicanplatform.org
@@ -394,7 +394,7 @@ nfpms:
 
   - id: pelican-server
     package_name: pelican-server
-    ids:
+    builds:
       - pelican-server
     file_name_template: "{{ .ConventionalFileName }}"
     vendor: OSG Consortium
