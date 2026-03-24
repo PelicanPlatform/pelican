@@ -103,6 +103,17 @@ const DowntimeForm = ({
     }
   }, [downtime, setDowntime]);
 
+  // Check that the downtime is valid for submission: start time must be before end time (if not endless), and severity must be set
+  const canSubmit = useMemo(() => {
+    if (!endless && downtime.endTime <= downtime.startTime) {
+      return false;
+    }
+    if (!downtime.severity) {
+      return false;
+    }
+    return true;
+  }, [downtime, endless]);
+
   return (
     <Box>
       <Box mt={2}>
@@ -194,6 +205,7 @@ const DowntimeForm = ({
       >
         <Button
           variant={'contained'}
+          disabled={!canSubmit}
           onClick={async () => {
             const r = await submitDowntime(downtime, dispatch, id);
 
