@@ -4,24 +4,25 @@ import useApiSWR from '@/hooks/useApiSWR';
 import { Skeleton, Typography } from '@mui/material';
 import { ServerLocalMetadata } from '@/types';
 
-const ServerName = () => {
+interface ServerNameProps {
+  defaultName: string;
+}
+
+const ServerName = ({ defaultName }: ServerNameProps) => {
   const {
-    data: serverName,
+    data: metadataHistory,
     error,
     isLoading,
   } = useApiSWR<ServerLocalMetadata[]>(
     'Failed to fetch server name',
     '/api/server-name',
-    async () => await fetch('/api/v1.0/server/localMetadata/history')
+    async () => await fetch('/api/v1.0/server/localMetadata/history'),
+    { fallbackData: defaultName }
   );
-
-  const mostRecentlyUpdatedMetadata = serverName?.sort(
-    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-  )?.[0];
 
   return (
     <Typography variant='h6' component='div' sx={{ flexGrow: 1 }} gutterBottom>
-      {isLoading ? <Skeleton /> : mostRecentlyUpdatedMetadata?.name || 'Origin'}
+      {isLoading ? <Skeleton /> : metadataHistory?.[0]?.name || defaultName}
     </Typography>
   );
 };

@@ -188,7 +188,7 @@ export interface MetadataDiscrepancy {
 export interface ServerLocalMetadata {
   id: string;
   name: string;
-  type: 'origin' | 'cache' | 'origin_cache';
+  type: 'origin' | 'cache' | 'origin_cache' | 'unknown';
   createdAt: string;
   updatedAt: string;
 }

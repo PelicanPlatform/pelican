@@ -35,7 +35,7 @@ export default function RootLayout({
     <Navigation config={NavigationConfiguration['cache']}>
       <Main>
         <PaddedContent>
-          <ServerName />
+          <ServerName defaultName={'Cache'} />
           {children}
         </PaddedContent>
       </Main>

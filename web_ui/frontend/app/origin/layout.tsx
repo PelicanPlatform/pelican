@@ -35,7 +35,7 @@ export default function RootLayout({
     <Navigation config={NavigationConfiguration['origin']}>
       <Main>
         <PaddedContent>
-          <ServerName />
+          <ServerName defaultName={'Origin'} />
           {children}
         </PaddedContent>
       </Main>
