@@ -41,7 +41,7 @@ import (
 func TestCLILoggingLevelChanges(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	ft := fed_test_utils.NewFedTest(t, bothPubNamespaces)
 

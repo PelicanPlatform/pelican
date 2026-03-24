@@ -260,7 +260,7 @@ Director:
 func TestSSHPosixv2OriginUploadDownload(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Skip if sshd is not available
 	if _, err := exec.LookPath("/usr/sbin/sshd"); err != nil {
@@ -327,7 +327,7 @@ func TestSSHPosixv2OriginUploadDownload(t *testing.T) {
 func TestSSHPosixv2OriginStat(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Skip if sshd is not available
 	if _, err := exec.LookPath("/usr/sbin/sshd"); err != nil {
@@ -384,7 +384,7 @@ func TestSSHPosixv2OriginStat(t *testing.T) {
 func TestSSHPosixv2OriginLargeFile(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Skip if sshd is not available
 	if _, err := exec.LookPath("/usr/sbin/sshd"); err != nil {
@@ -445,7 +445,7 @@ func TestSSHPosixv2OriginLargeFile(t *testing.T) {
 func TestSSHPosixv2OriginDirectoryListing(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Skip if sshd is not available
 	if _, err := exec.LookPath("/usr/sbin/sshd"); err != nil {
@@ -524,7 +524,7 @@ func TestSSHPosixv2OriginDirectoryListing(t *testing.T) {
 func TestSSHPosixv2OriginMultipleFiles(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Skip if sshd is not available
 	if _, err := exec.LookPath("/usr/sbin/sshd"); err != nil {
@@ -590,7 +590,7 @@ func TestSSHPosixv2OriginMultipleFiles(t *testing.T) {
 func TestSSHPosixv2OriginConnectionStress(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Skip if sshd is not available
 	if _, err := exec.LookPath("/usr/sbin/sshd"); err != nil {
@@ -788,7 +788,7 @@ func TestSSHPosixv2OriginConnectionStress(t *testing.T) {
 func TestSSHPosixv2OriginTunnelMode(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Skip if sshd is not available
 	if _, err := exec.LookPath("/usr/sbin/sshd"); err != nil {

@@ -171,7 +171,7 @@ func updateAllowedPrefixesForCache(t *testing.T, dbPath string, cacheHost string
 func TestDirectorFedTokenCacheAPI(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	testCases := []struct {
 		name               string

@@ -45,7 +45,7 @@ import (
 func TestCacheFedTokMaint(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Spin up the full fed so that our cache server can get the token from the director
 	require.NoError(t, param.Set(param.Director_FedTokenLifetime.GetName(), "12s"))
@@ -91,7 +91,7 @@ func TestCacheFedTokMaint(t *testing.T) {
 func TestCacheServe_PreservesExistingPort(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Set Cache.Url to include an existing port
 	require.NoError(t, param.Set(param.Cache_Url.GetName(), "https://example.com:8442"))
@@ -111,7 +111,7 @@ func TestCacheServe_PreservesExistingPort(t *testing.T) {
 func TestCacheServe_AddsPortWhenMissing(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Ensure Cache.Url has no explicit port
 	require.NoError(t, param.Set(param.Cache_Url.GetName(), "https://example.com"))
