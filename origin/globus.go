@@ -34,6 +34,8 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/web_ui"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -79,6 +81,31 @@ var (
 	globusExports      map[string]*globusExport
 	globusExportsMutex = sync.RWMutex{}
 )
+
+func RegisterGlobusAPI(routerGroup *gin.RouterGroup) error {
+	if server_structs.OriginStorageType(param.Origin_StorageType.GetString()) !=
+		server_structs.OriginStorageGlobus {
+		return nil
+	}
+
+	_, err := GetGlobusOAuthCfg()
+	if err != nil {
+		return errors.Wrapf(err, "failed to initialize Globus OAuth client")
+	}
+
+	seHandler, err := web_ui.GetSessionHandler()
+	if err != nil {
+		return err
+	}
+
+	routerGroup.GET("/exports", web_ui.AuthHandler, web_ui.AdminAuthHandler, listGlobusExports)
+
+	globusAuthAPI := routerGroup.Group("/auth", seHandler)
+	globusAuthAPI.GET("/login/:id", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleGlobusAuth)
+	globusAuthAPI.GET("/callback", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleGlobusCallback)
+
+	return nil
+}
 
 // loadTokenFromDB loads and refreshes a token from the database for a specific token type
 func loadTokenFromDB(cid string, refreshToken string, tokenType GlobusTokenType, globusAuthCfg *oauth2.Config) (*oauth2.Token, error) {
