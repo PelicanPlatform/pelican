@@ -26,7 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -36,7 +36,9 @@ func TestGetCacheHostnameFromToken(t *testing.T) {
 	server_utils.ResetTestState()
 	test_utils.InitClient(t, nil)
 
-	require.NoError(t, param.Set("Federation.RegistryUrl", "https://your-registry.com"))
+	test_utils.MockFederationRoot(t, &pelican_url.FederationDiscovery{
+		RegistryEndpoint: "https://your-registry.com",
+	}, nil)
 
 	tok, err := jwt.NewBuilder().
 		Issuer(`https://your-registry.com/api/v1.0/registry/caches/https://cache.com`).

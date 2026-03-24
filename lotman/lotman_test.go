@@ -1157,16 +1157,16 @@ func TestConfigLotsFromFedPrefixes(t *testing.T) {
 			expectedError: "",
 		},
 		{
-			name: "Fallback to Director URL for discovery of fed issuer",
+			name: "Discovery endpoint used as federation issuer",
 			nsAds: []server_structs.NamespaceAdV2{
 				{
 					Path: "/namespace1",
 				},
 			},
-			federationIssuer: "",
-			// Discovery will happen via the Director, but we'll still discover
-			// the federation root there.
-			directorUrl: discUrl,
+			// In production, the discovery endpoint is always populated (even when
+			// bootstrapped via the Director URL). Verify it's used as the lot owner.
+			federationIssuer: discUrl,
+			directorUrl:      "https://dne-director.com",
 			expectedLotMap: map[string]Lot{
 				"/namespace1": {
 					LotName: "/namespace1",

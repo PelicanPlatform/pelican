@@ -191,12 +191,12 @@ func TestDirectorRegistration(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	require.NoError(t, param.Set("Federation.RegistryUrl", ts.URL))
 	require.NoError(t, param.Set("Director.CacheSortMethod", "distance"))
 	require.NoError(t, param.Set("Director.StatTimeout", 300*time.Millisecond))
 	require.NoError(t, param.Set("Director.StatConcurrencyLimit", 1))
-	// Force federation discovery to run with the new config to avoid race condition
-	_, _ = config.GetFederation(ctx)
+	test_utils.MockFederationRoot(t, &pelican_url.FederationDiscovery{
+		RegistryEndpoint: ts.URL,
+	}, nil)
 
 	setupContext := func() (*gin.Context, *gin.Engine, *httptest.ResponseRecorder) {
 		// Setup httptest recorder and context for the the unit test
