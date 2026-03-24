@@ -1179,17 +1179,17 @@ func ParseTokenAuth(tokenauth string) (userId UserId, record UserRecord, err err
 		}
 		switch keyVal[0] {
 		case "Uc":
-			var id int
-			id, err = strconv.Atoi(keyVal[1])
+			var id int64
+			id, err = strconv.ParseInt(keyVal[1], 10, 64)
 			if err != nil {
 				err = errors.Wrap(err, "Unable to parse user ID to integer")
 				return
 			}
-			if id < 0 || id > math.MaxUint32 {
+			if id > math.MaxInt32 || id < math.MinInt32 {
 				err = errors.Errorf("Provided ID, %d, is not a valid uint32", id)
 				return
 			}
-			userId.Id = uint32(id)
+			userId.Id = uint32(int32(id))
 			foundUc = true
 		case "s":
 			record.DN = keyVal[1]
