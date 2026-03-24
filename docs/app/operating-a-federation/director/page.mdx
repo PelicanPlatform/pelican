@@ -6,6 +6,13 @@ The Pelican [*Director*](../about-pelican/core-concepts.mdx#director-service) ha
 
 ## Before Starting
 
+### Enable Time Synchronization
+
+Pelican servers rely on time-sensitive tokens for authorization.
+If your server's clock is not synchronized, tokens may be rejected and your Director may fail to operate correctly.
+Please ensure NTP is enabled on your server.
+See [Server Prerequisites](../install.mdx#enable-time-synchronization) for setup instructions.
+
 ### Get MaxMind License key (required)
 
 A Pelican director uses the [MaxMind GeoLite City database](https://dev.maxmind.com/geoip/docs/databases/city-and-country)
