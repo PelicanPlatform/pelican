@@ -47,6 +47,23 @@ func init() {
 	callbacks = make(map[string]ConfigCallback)
 }
 
+// viperIsSet wraps viper.IsSet with configMutex to prevent concurrent map
+// read/write panics inside viper's internal path-index cache. All generated
+// param IsSet() methods delegate here instead of calling viper directly.
+func viperIsSet(key string) bool {
+	configMutex.Lock()
+	defer configMutex.Unlock()
+	return viper.IsSet(key)
+}
+
+// viperUnmarshalKey wraps viper.UnmarshalKey with configMutex to prevent
+// concurrent map access panics for the same reason as viperIsSet.
+func viperUnmarshalKey(key string, rawVal any) error {
+	configMutex.Lock()
+	defer configMutex.Unlock()
+	return viper.UnmarshalKey(key, rawVal)
+}
+
 // Refresh reloads the atomic cached configuration from viper's *global* instance.
 //
 // The param accessors read from an atomic cached `Config` struct for performance.
