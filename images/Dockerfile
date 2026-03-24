@@ -354,6 +354,12 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   # prevent other packages from changing them via dependencies.
 
   dnf versionlock "xrootd*"
+
+  # Install PKCS#11 dependencies required by XRootD when Server.EnablePKCS11 is
+  # enabled. These packages provide the OpenSSL 3.x provider and the p11-kit
+  # Unix-socket server that Pelican's p11proxy communicates with.
+
+  dnf install -y p11-kit-server pkcs11-provider
 ENDRUN
 
 #################################################################
