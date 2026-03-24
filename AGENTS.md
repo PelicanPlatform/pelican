@@ -66,16 +66,22 @@ Pelican is a data federation platform that allows users to serve and access data
 
 ### Build Commands
 
+First, generate the GoReleaser config:
+
+```bash
+make generate-goreleaser
+```
+
 **Full build with GoReleaser:**
 
 ```bash
-goreleaser build --clean --snapshot
+goreleaser build --clean --snapshot --config .goreleaser.generated.yml
 ```
 
 **Faster build for testing (single architecture):**
 
 ```bash
-goreleaser build --clean --snapshot --single-target
+goreleaser build --clean --snapshot --single-target --config .goreleaser.generated.yml
 ```
 
 **Development build (faster):**

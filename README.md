@@ -59,7 +59,8 @@ and it shares the same defaults and behavior as stashcp.
 Building is performed with the [goreleaser](https://goreleaser.com/) tool. To build a snapshot (not release):
 
 ```
-$ goreleaser --clean --snapshot
+$ make generate-goreleaser
+$ goreleaser --clean --snapshot --config .goreleaser.generated.yml
 ```
 
 The binaries will be located in `./dist` directory.
