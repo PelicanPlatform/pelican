@@ -28,6 +28,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
@@ -43,10 +44,18 @@ type (
 	// Holds all the stuff, minus a few globals, needed to perform a given sort
 	// alg that aren't a part of the server ads themselves.
 	SortContext struct {
-		Ctx             context.Context
-		ClientAddr      netip.Addr
+		Ctx        context.Context
+		ClientAddr netip.Addr
+		// AvailabilityMap is an optional override for the availability map. In production,
+		// this is left nil and AdaptiveSort generates the map internally after truncating to
+		// the working set. Set this in tests to inject a pre-built map without stat queries.
 		AvailabilityMap map[string]bool
 		RedirectInfo    *server_structs.RedirectInfo
+		// Fields used by AdaptiveSort to generate the availability map after truncation.
+		GinCtx       *gin.Context
+		NamespaceAd  server_structs.NamespaceAdV2
+		RequestId    uuid.UUID
+		IsOriginSort bool
 	}
 
 	// A function type for filtering ads -- given a request and an ad, it should
@@ -75,7 +84,7 @@ const (
 // coordinate is randomly assigned within the contiguous US and cached for re-use. This means that distance-based sorts
 // will be effectively random the first time, but subsequent requests within a short time period will still likely
 // generate cache hits.
-func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_structs.ServerAd, availabilityMap map[string]bool, redirectInfo *server_structs.RedirectInfo) ([]server_structs.ServerAd, error) {
+func sortServerAds(ctx context.Context, ginCtx *gin.Context, clientAddr netip.Addr, ads []server_structs.ServerAd, nsAd server_structs.NamespaceAdV2, requestId uuid.UUID, isOriginSort bool, precomputedAvailMap map[string]bool, redirectInfo *server_structs.RedirectInfo) ([]server_structs.ServerAd, error) {
 	sortMethod := server_structs.SortType(param.Director_CacheSortMethod.GetString())
 	redirectInfo.DirectorSortMethod = sortMethod.String()
 	redirectInfo.ClientInfo.IpAddr = clientAddr.String()
@@ -83,8 +92,12 @@ func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_stru
 	sortContext := SortContext{
 		Ctx:             ctx,
 		ClientAddr:      clientAddr,
-		AvailabilityMap: availabilityMap,
+		AvailabilityMap: precomputedAvailMap,
 		RedirectInfo:    redirectInfo,
+		GinCtx:          ginCtx,
+		NamespaceAd:     nsAd,
+		RequestId:       requestId,
+		IsOriginSort:    isOriginSort,
 	}
 	var sortAlg SortAlgorithm
 	switch sortMethod {
@@ -178,11 +191,12 @@ func getAdsForPath(reqPath string) (oAds []copyAd, cAds []copyAd) {
 	// paths like /foo and /foobar with basic prefix matching because without the trailing /, these
 	// two would match.
 	reqPath = path.Clean(reqPath) + "/"
-	ads := make([]*server_structs.Advertisement, 0, len(serverAds.Items()))
+	ads := make([]*server_structs.Advertisement, 0, serverAds.Len())
 
-	for _, serverAd := range serverAds.Items() {
-		ads = append(ads, serverAd.Value())
-	}
+	serverAds.Range(func(item *ttlcache.Item[string, *server_structs.Advertisement]) bool {
+		ads = append(ads, item.Value())
+		return true
+	})
 
 	// Move topo sorted ads to the end of our slice
 	sortServerAdsByTopo(ads)
@@ -514,14 +528,55 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 		shouldSortCaches = true
 	}
 
-	// Generate availability maps for origins and caches by performing stat queries
-	originAvailabilityMap, cacheAvailabilityMap, err := generateAvailabilityMaps(ctx, oServAds, cServAds, sortedOrigins[0].NamespaceAd, requestId)
+	// All sorted Origins share the same namespace prefix by definition; grab it once.
+	nsAd := sortedOrigins[0].NamespaceAd
+
+	// Generate availability maps for Origins eagerly (before sorting). This is needed because:
+	//  1. For read requests, Origins that don't have the object must be filtered out entirely.
+	//     Unlike caches, Origins won't acquire objects they don't already possess.
+	//  2. Origin counts are typically small (often 1-3 for a namespace), so statting all of them
+	//     is cheap — no distance-based truncation needed.
+	//
+	// Cache availability maps are generated lazily inside AdaptiveSort.Sort AFTER the distance-based
+	// truncation to the working set, so stat requests only go to the N closest caches.
+	originAvailabilityMap, _, err := generateAvailabilityMaps(ctx, oServAds, nil, nsAd, requestId)
 	if err != nil {
 		if _, ok := err.(objectNotFoundErr); ok {
 			return nil, nil, err
 		}
+		// Non-objectNotFound stat errors should not be surfaced to the client.
+		// Log the error and proceed with a neutral (all-available) map so the sort
+		// uses whatever other information it has.
+		log.Warningf("Request %s: Origin stat failed, proceeding with neutral availability: %v", requestId.String(), err)
+		originAvailabilityMap = make(map[string]bool, len(oServAds))
+		for _, ad := range oServAds {
+			originAvailabilityMap[ad.URL.String()] = true
+		}
+	}
 
-		return nil, nil, errors.Wrap(err, "failed to generate stat availability maps")
+	// For read requests (GET, HEAD), filter out Origins that stat determined do NOT have the object
+	// because the Director must not redirect clients to Origins that definitively
+	// lack the requested object. We only do this for read verbs because:
+	//  - PUT/DELETE: the Origin doesn't need to already have the object
+	//  - PROPFIND: handled separately and stats are skipped (shouldStatOrigins returns false)
+	if reqVerb == http.MethodGet || reqVerb == http.MethodHead {
+		filteredOrigins := make([]copyAd, 0, len(sortedOrigins))
+		filteredOServAds := make([]server_structs.ServerAd, 0, len(oServAds))
+		for i, o := range sortedOrigins {
+			if originAvailabilityMap[o.ServerAd.URL.String()] {
+				filteredOrigins = append(filteredOrigins, o)
+				filteredOServAds = append(filteredOServAds, oServAds[i])
+			}
+		}
+		if len(filteredOrigins) > 0 {
+			sortedOrigins = filteredOrigins
+			oServAds = filteredOServAds
+		} else {
+			// If stat ran and filtered everything out, generateAvailabilityMaps would have
+			// already returned an objectNotFoundErr. But defensively, if we get here with no
+			// origins, keep the original set (stat may have been skipped or inconclusive).
+			log.Debugf("Request %s: Origin availability filtering removed all origins; keeping original set", requestId.String())
+		}
 	}
 
 	// Finally, sort everything as needed
@@ -536,7 +591,7 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 		go func() {
 			defer wg.Done()
 
-			sortedServerAds, err := sortServerAds(pCtx, utils.ClientIPAddr(ctx), oServAds, originAvailabilityMap, redirectInfo)
+			sortedServerAds, err := sortServerAds(pCtx, ctx, utils.ClientIPAddr(ctx), oServAds, nsAd, requestId, true, originAvailabilityMap, redirectInfo)
 			if err != nil {
 				lastError = errors.Wrap(err, "failed to sort origins")
 				return
@@ -564,7 +619,7 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 		go func() {
 			defer wg.Done()
 
-			sortedServerAds, err := sortServerAds(pCtx, utils.ClientIPAddr(ctx), cServAds, cacheAvailabilityMap, redirectInfo)
+			sortedServerAds, err := sortServerAds(pCtx, ctx, utils.ClientIPAddr(ctx), cServAds, nsAd, requestId, false, nil, redirectInfo)
 			if err != nil {
 				lastError = errors.Wrap(err, "failed to sort caches")
 				return

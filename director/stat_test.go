@@ -1128,9 +1128,11 @@ func TestGenerateAvailabilityMaps(t *testing.T) {
 		require.NoError(t, param.Set(param.Director_MinStatResponse.GetName(), 1))
 		require.NoError(t, param.Set(param.Director_MaxStatResponse.GetName(), 1))
 
-		// Mock HTTP server that returns 200 with Content-Length for every HEAD request.
+		// Mock HTTP server that returns 200 with Content-Length and Age > 0 for every HEAD request.
+		// Age > 0 is required for the Director to consider the object locally cached at this server.
 		mockSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Length", "10")
+			w.Header().Set("Age", "42")
 			w.WriteHeader(http.StatusOK)
 		}))
 		t.Cleanup(mockSrv.Close)
