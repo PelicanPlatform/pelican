@@ -130,7 +130,7 @@ func getMetadataValue(stringParam param.StringParam) (result string, err error) 
 }
 
 // Get from the config parameters the OIDC provider
-func GetOIDCProdiver() (pvd OIDCProvider, err error) {
+func GetOIDCProvider() (pvd OIDCProvider, err error) {
 	authURLStr := param.OIDC_AuthorizationEndpoint.GetString()
 	if authURLStr == "" {
 		authURLStr = param.OIDC_Issuer.GetString()
