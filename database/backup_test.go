@@ -55,7 +55,7 @@ func setupTestDBAndKeys(t *testing.T) (dbPath, backupDir, keysDir string) {
 	require.NoError(t, os.MkdirAll(keysDir, 0750))
 
 	// Configure keys directory and generate an issuer key
-	require.NoError(t, param.Set(param.IssuerKeysDirectory, keysDir))
+	require.NoError(t, param.IssuerKeysDirectory.Set(keysDir))
 	config.ResetIssuerPrivateKeys()
 	_, err := config.GeneratePEM(keysDir)
 	require.NoError(t, err)
@@ -106,7 +106,7 @@ func TestDeriveBackupKeyPair(t *testing.T) {
 
 	keysDir := filepath.Join(t.TempDir(), "keys")
 	require.NoError(t, os.MkdirAll(keysDir, 0750))
-	require.NoError(t, param.Set(param.IssuerKeysDirectory, keysDir))
+	require.NoError(t, param.IssuerKeysDirectory.Set(keysDir))
 	config.ResetIssuerPrivateKeys()
 
 	key, err := config.GeneratePEM(keysDir)
@@ -215,7 +215,7 @@ func TestWriteEncryptedKeys(t *testing.T) {
 
 	keysDir := filepath.Join(t.TempDir(), "keys")
 	require.NoError(t, os.MkdirAll(keysDir, 0750))
-	require.NoError(t, param.Set(param.IssuerKeysDirectory, keysDir))
+	require.NoError(t, param.IssuerKeysDirectory.Set(keysDir))
 	config.ResetIssuerPrivateKeys()
 
 	key1, err := config.GeneratePEM(keysDir)
@@ -408,7 +408,7 @@ func TestRotateBackups(t *testing.T) {
 	backupDir := filepath.Join(t.TempDir(), "backups")
 	require.NoError(t, os.MkdirAll(backupDir, 0750))
 
-	require.NoError(t, param.Set(param.Server_DatabaseBackup_MaxCount, 3))
+	require.NoError(t, param.Server_DatabaseBackup_MaxCount.Set(3))
 
 	// Create 5 backup files with different timestamps
 	for i := 0; i < 5; i++ {
@@ -439,7 +439,7 @@ func TestRotateBackupsCleansTempFiles(t *testing.T) {
 
 	backupDir := filepath.Join(t.TempDir(), "backups")
 	require.NoError(t, os.MkdirAll(backupDir, 0750))
-	require.NoError(t, param.Set(param.Server_DatabaseBackup_MaxCount, 10))
+	require.NoError(t, param.Server_DatabaseBackup_MaxCount.Set(10))
 
 	// Create a stale temp file (pretend it's old)
 	staleTmpPath := filepath.Join(backupDir, backupTempPrefix+"stale.tmp")
@@ -524,27 +524,27 @@ func TestRestoreFromBackup(t *testing.T) {
 
 	t.Run("no-restore-when-no-backup-dir", func(t *testing.T) {
 		nonExistentDB := filepath.Join(t.TempDir(), "nonexistent.sqlite")
-		require.NoError(t, param.Set(param.Server_DatabaseBackup_Location, filepath.Join(t.TempDir(), "no-such-dir")))
+		require.NoError(t, param.Server_DatabaseBackup_Location.Set(filepath.Join(t.TempDir(), "no-such-dir")))
 
 		restored, err := restoreFromBackup(nonExistentDB)
 		require.NoError(t, err)
 		assert.False(t, restored)
 
 		// Restore config
-		require.NoError(t, param.Set(param.Server_DatabaseBackup_Location, backupDir))
+		require.NoError(t, param.Server_DatabaseBackup_Location.Set(backupDir))
 	})
 
 	t.Run("no-restore-when-no-backups", func(t *testing.T) {
 		emptyBackupDir := filepath.Join(t.TempDir(), "empty-backups")
 		require.NoError(t, os.MkdirAll(emptyBackupDir, 0750))
-		require.NoError(t, param.Set(param.Server_DatabaseBackup_Location, emptyBackupDir))
+		require.NoError(t, param.Server_DatabaseBackup_Location.Set(emptyBackupDir))
 
 		nonExistentDB := filepath.Join(t.TempDir(), "nonexistent.sqlite")
 		restored, err := restoreFromBackup(nonExistentDB)
 		require.NoError(t, err)
 		assert.False(t, restored)
 
-		require.NoError(t, param.Set(param.Server_DatabaseBackup_Location, backupDir))
+		require.NoError(t, param.Server_DatabaseBackup_Location.Set(backupDir))
 	})
 }
 
@@ -557,7 +557,7 @@ func TestLaunchPeriodicBackup(t *testing.T) {
 	_, backupDir, _ := setupTestDBAndKeys(t)
 
 	// Set a very short frequency for testing
-	require.NoError(t, param.Set(param.Server_DatabaseBackup_Frequency, "200ms"))
+	require.NoError(t, param.Server_DatabaseBackup_Frequency.SetString("200ms"))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	egrp, ctx := errgroup.WithContext(ctx)

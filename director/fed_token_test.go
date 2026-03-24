@@ -242,8 +242,8 @@ func TestCreateFedTok(t *testing.T) {
 
 			confDir := t.TempDir()
 			kDir := filepath.Join(confDir, "keys")
-			require.NoError(t, param.Set(param.IssuerKeysDirectory, kDir))
-			require.NoError(t, param.Set(param.ConfigDir, confDir))
+			require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
+			require.NoError(t, param.ConfigDir.Set(confDir))
 
 			config.ResetFederationForTest()
 			fed := pelican_url.FederationDiscovery{

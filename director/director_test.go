@@ -191,9 +191,9 @@ func TestDirectorRegistration(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	require.NoError(t, param.Set(param.Director_CacheSortMethod, "distance"))
-	require.NoError(t, param.Set(param.Director_StatTimeout, 300*time.Millisecond))
-	require.NoError(t, param.Set(param.Director_StatConcurrencyLimit, 1))
+	require.NoError(t, param.Director_CacheSortMethod.Set("distance"))
+	require.NoError(t, param.Director_StatTimeout.Set(300*time.Millisecond))
+	require.NoError(t, param.Director_StatConcurrencyLimit.Set(1))
 	test_utils.MockFederationRoot(t, &pelican_url.FederationDiscovery{
 		RegistryEndpoint: ts.URL,
 	}, nil)
@@ -1594,7 +1594,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	}
 
 	// Generate the keys we need for the test
-	require.NoError(t, param.Set(param.IssuerKeysDirectory, filepath.Join(t.TempDir(), "testKeyDir")))
+	require.NoError(t, param.IssuerKeysDirectory.Set(filepath.Join(t.TempDir(), "testKeyDir")))
 
 	pKeySet, err := config.GetIssuerPublicJWKS()
 	assert.NoError(t, err, "Error fetching public key for test")
@@ -1602,7 +1602,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	privateKey, err := config.GetIssuerPrivateJWK()
 	assert.NoError(t, err, "Error fetching private key for test")
 
-	require.NoError(t, param.Set(param.TLSSkipVerify, true))
+	require.NoError(t, param.TLSSkipVerify.Set(true))
 
 	// Set up the mock federation, which must exist for the auth handler to fetch federation keys
 	test_utils.MockFederationRoot(t, nil, &pKeySet)
@@ -1611,7 +1611,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	defer cancel()
 
 	// Isolate the test so it doesn't use system config
-	require.NoError(t, param.Set(param.ConfigDir, t.TempDir()))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 	err = initServerForTest(t, ctx, server_structs.DirectorType)
 	require.NoError(t, err)
 
@@ -1622,7 +1622,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	// the API token issuer or the federation issuer. Configure the URL to be used for local
 	// issuer scenarios. To be as realistic as possible, make the local issuer URL look like
 	// this mock federation's Director.
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl, fedInfo.DirectorEndpoint))
+	require.NoError(t, param.Server_ExternalWebUrl.Set(fedInfo.DirectorEndpoint))
 
 	// Batch set up different tokens
 	setupToken := func(issuer string) []byte {
@@ -1854,8 +1854,8 @@ func TestRedirectCheckHostnames(t *testing.T) {
 	// Use ads generated via mock topology for generating list of caches
 	topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
 	defer topoServer.Close()
-	require.NoError(t, param.Set(param.Federation_TopologyNamespaceUrl, topoServer.URL))
-	// param.Set(param.Director_CacheSortMethod, "random")
+	require.NoError(t, param.Federation_TopologyNamespaceUrl.Set(topoServer.URL))
+	// param.Director_CacheSortMethod.Set("random")
 	// Populate ads for redirectToCache to use
 	err := AdvertiseOSDF(ctx)
 	require.NoError(t, err)
@@ -1869,8 +1869,8 @@ func TestRedirectCheckHostnames(t *testing.T) {
 	// Check that the checkHostnameRedirects uses the pre-configured hostnames to redirect
 	// requests that come in at the default paths, but not if the request is made
 	// specifically for an object or a cache via the API.
-	require.NoError(t, param.Set(param.Director_OriginResponseHostnames, []string{"origin-hostname.com"}))
-	require.NoError(t, param.Set(param.Director_CacheResponseHostnames, []string{"cache-hostname.com"}))
+	require.NoError(t, param.Director_OriginResponseHostnames.Set([]string{"origin-hostname.com"}))
+	require.NoError(t, param.Director_CacheResponseHostnames.Set([]string{"cache-hostname.com"}))
 
 	type redirectHostNames struct {
 		desc         string
@@ -1929,7 +1929,7 @@ func TestRedirectMiddleware(t *testing.T) {
 	// Use ads generated via mock topology for generating list of caches
 	topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
 	defer topoServer.Close()
-	require.NoError(t, param.Set(param.Federation_TopologyNamespaceUrl, topoServer.URL))
+	require.NoError(t, param.Federation_TopologyNamespaceUrl.Set(topoServer.URL))
 	err := AdvertiseOSDF(ctx)
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -1995,7 +1995,7 @@ func TestRedirectMiddleware(t *testing.T) {
 	}
 
 	// Set the necessary viper configuration for host-aware tests
-	require.NoError(t, param.Set(param.Director_OriginResponseHostnames, []string{"origin-hostname.com"}))
+	require.NoError(t, param.Director_OriginResponseHostnames.Set([]string{"origin-hostname.com"}))
 	require.NoError(t, param.SetRaw("Director.HostAwareRedirects", true))
 
 	// Run all test cases
@@ -2033,8 +2033,8 @@ func TestRedirects(t *testing.T) {
 	// Use ads generated via mock topology for generating list of caches
 	topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
 	defer topoServer.Close()
-	require.NoError(t, param.Set(param.Federation_TopologyNamespaceUrl, topoServer.URL))
-	require.NoError(t, param.Set(param.Director_CacheSortMethod, "random"))
+	require.NoError(t, param.Federation_TopologyNamespaceUrl.Set(topoServer.URL))
+	require.NoError(t, param.Director_CacheSortMethod.Set("random"))
 	err := AdvertiseOSDF(ctx)
 	require.NoError(t, err)
 
@@ -2042,7 +2042,7 @@ func TestRedirects(t *testing.T) {
 	router.GET("/api/v1.0/director/origin/*any", redirectToOrigin)
 
 	t.Run("cache-test-file-redirect", func(t *testing.T) {
-		require.NoError(t, param.Set(param.Server_ExternalWebUrl, "https://example.com"))
+		require.NoError(t, param.Server_ExternalWebUrl.Set("https://example.com"))
 		// Create a request to the endpoint
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/api/v1.0/director/origin/pelican/monitoring/test.txt", nil)

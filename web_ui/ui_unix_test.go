@@ -48,7 +48,7 @@ func TestDoReload(t *testing.T) {
 
 	tempDir := t.TempDir()
 	passwordFile := path.Join(tempDir, "/authdb")
-	require.NoError(t, param.Set(param.Server_UIPasswordFile, passwordFile))
+	require.NoError(t, param.Server_UIPasswordFile.Set(passwordFile))
 	hook := test.NewGlobal()
 
 	// Without a authdb set up, it should return nil with log message

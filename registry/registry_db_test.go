@@ -886,9 +886,9 @@ func TestRegistryTopology(t *testing.T) {
 	defer svr.Close()
 
 	registryDB := t.TempDir()
-	require.NoError(t, param.Set(param.Server_DbLocation, filepath.Join(registryDB, "test.sqlite")))
+	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(registryDB, "test.sqlite")))
 	require.NoError(t, param.SetRaw("Federation.TopologyNamespaceURL", svr.URL))
-	require.NoError(t, param.Set(param.ConfigDir, t.TempDir()))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 
 	err := database.InitServerDatabase(server_structs.RegistryType)
 	require.NoError(t, err)

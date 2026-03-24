@@ -69,7 +69,7 @@ func setupMockOriginDB(t *testing.T) {
 	// Setup encryption
 	tmp := t.TempDir()
 	keyDir := filepath.Join(tmp, "issuer-keys")
-	require.NoError(t, param.Set(param.IssuerKeysDirectory, keyDir))
+	require.NoError(t, param.IssuerKeysDirectory.Set(keyDir))
 
 	// Also update the refresh token to be encrypted
 	for idx := range mockGC {

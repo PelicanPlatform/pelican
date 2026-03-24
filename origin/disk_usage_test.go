@@ -67,7 +67,7 @@ func TestCalculateDiskUsageForExport(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	// Set storage type to POSIX
-	require.NoError(t, param.Set(param.Origin_StorageType, "posix"))
+	require.NoError(t, param.Origin_StorageType.Set("posix"))
 
 	// Create a temporary directory with test files
 	tmpDir := t.TempDir()

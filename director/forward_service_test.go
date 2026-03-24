@@ -174,7 +174,7 @@ func TestForwardServiceAdSeenByPreventsLoop(t *testing.T) {
 		directorAds.DeleteAll()
 	})
 
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://director1.com"))
+	require.NoError(t, param.Server_ExternalWebUrl.Set("http://director1.com"))
 
 	ch1 := make(chan *forwardAdInfo, 1)
 	dir1 := &directorInfo{
@@ -317,7 +317,7 @@ func TestForwardServiceAdSimulation(t *testing.T) {
 				directorAds.DeleteAll()
 			})
 
-			require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://test-self.example.com"))
+			require.NoError(t, param.Server_ExternalWebUrl.Set("http://test-self.example.com"))
 
 			n := tc.numDirectors
 			names := make([]string, n)
@@ -421,8 +421,8 @@ func TestForwardServiceSeenBySerialized(t *testing.T) {
 	directorName = ""
 	directorNameError = nil
 
-	require.NoError(t, param.Set(param.Director_AdvertiseUrl.GetName(), "http://director-ad-url"))
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://external-url"))
+	require.NoError(t, param.Director_AdvertiseUrl.Set("http://director-ad-url"))
+	require.NoError(t, param.Server_ExternalWebUrl.Set("http://external-url"))
 
 	ctx := context.Background()
 	ad := &server_structs.OriginAdvertiseV2{

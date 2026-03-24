@@ -165,15 +165,15 @@ func (f *FedTest) Spinup() {
 	err = os.Chmod(tmpPath, permissions)
 	require.NoError(f.T, err)
 
-	require.NoError(f.T, param.Set(param.ConfigDir, tmpPath))
+	require.NoError(f.T, param.ConfigDir.Set(tmpPath))
 	// Set RuntimeDir to avoid race conditions with parallel tests using shared /run/pelican
-	require.NoError(f.T, param.Set(param.RuntimeDir, tmpPath))
+	require.NoError(f.T, param.RuntimeDir.Set(tmpPath))
 
 	// Create a file to capture output from commands
 	output, err := os.CreateTemp(f.T.TempDir(), "output")
 	assert.NoError(f.T, err)
 	f.Output = output
-	require.NoError(f.T, param.Set(param.Logging_LogLocation, output.Name()))
+	require.NoError(f.T, param.Logging_LogLocation.Set(output.Name()))
 
 	originDir, err := os.MkdirTemp("", "Origin")
 	assert.NoError(f.T, err)
@@ -184,37 +184,37 @@ func (f *FedTest) Spinup() {
 	err = os.Chmod(originDir, permissions)
 	require.NoError(f.T, err)
 
-	require.NoError(f.T, param.Set(param.Origin_FederationPrefix, "/test"))
-	require.NoError(f.T, param.Set(param.Origin_StoragePrefix, originDir))
-	require.NoError(f.T, param.Set(param.Origin_StorageType, "posix"))
-	require.NoError(f.T, param.Set(param.Origin_EnableDirectReads, true))
+	require.NoError(f.T, param.Origin_FederationPrefix.Set("/test"))
+	require.NoError(f.T, param.Origin_StoragePrefix.Set(originDir))
+	require.NoError(f.T, param.Origin_StorageType.Set("posix"))
+	require.NoError(f.T, param.Origin_EnableDirectReads.Set(true))
 	// Disable functionality we're not using (and is difficult to make work on Mac)
-	require.NoError(f.T, param.Set(param.Origin_EnableCmsd, false))
-	require.NoError(f.T, param.Set(param.Origin_EnableMacaroons, false))
-	require.NoError(f.T, param.Set(param.Origin_EnableVoms, false))
-	require.NoError(f.T, param.Set(param.Origin_EnableWrites, true))
-	require.NoError(f.T, param.Set(param.TLSSkipVerify, true))
-	require.NoError(f.T, param.Set(param.Server_EnableUI, false))
-	require.NoError(f.T, param.Set(param.Server_DbLocation, filepath.Join(f.T.TempDir(), "ns-registry.sqlite")))
-	require.NoError(f.T, param.Set(param.Origin_Port, 0))
-	require.NoError(f.T, param.Set(param.Server_WebPort, 0))
-	require.NoError(f.T, param.Set(param.Origin_RunLocation, tmpPath))
-	require.NoError(f.T, param.Set(param.Director_DbLocation, filepath.Join(f.T.TempDir(), "director.sqlite")))
-	require.NoError(f.T, param.Set(param.Origin_DbLocation, filepath.Join(f.T.TempDir(), "origin.sqlite")))
-	require.NoError(f.T, param.Set(param.Cache_DbLocation, filepath.Join(f.T.TempDir(), "cache.sqlite")))
+	require.NoError(f.T, param.Origin_EnableCmsd.Set(false))
+	require.NoError(f.T, param.Origin_EnableMacaroons.Set(false))
+	require.NoError(f.T, param.Origin_EnableVoms.Set(false))
+	require.NoError(f.T, param.Origin_EnableWrites.Set(true))
+	require.NoError(f.T, param.TLSSkipVerify.Set(true))
+	require.NoError(f.T, param.Server_EnableUI.Set(false))
+	require.NoError(f.T, param.Server_DbLocation.Set(filepath.Join(f.T.TempDir(), "ns-registry.sqlite")))
+	require.NoError(f.T, param.Origin_Port.Set(0))
+	require.NoError(f.T, param.Server_WebPort.Set(0))
+	require.NoError(f.T, param.Origin_RunLocation.Set(tmpPath))
+	require.NoError(f.T, param.Director_DbLocation.Set(filepath.Join(f.T.TempDir(), "director.sqlite")))
+	require.NoError(f.T, param.Origin_DbLocation.Set(filepath.Join(f.T.TempDir(), "origin.sqlite")))
+	require.NoError(f.T, param.Cache_DbLocation.Set(filepath.Join(f.T.TempDir(), "cache.sqlite")))
 	// Set up OIDC client configuration for registry OAuth functionality
 	oidcClientIDFile := filepath.Join(tmpPath, "oidc-client-id")
 	oidcClientSecretFile := filepath.Join(tmpPath, "oidc-client-secret")
 	require.NoError(f.T, os.WriteFile(oidcClientIDFile, []byte("test-client-id"), 0644))
 	require.NoError(f.T, os.WriteFile(oidcClientSecretFile, []byte("test-client-secret"), 0644))
-	require.NoError(f.T, param.Set(param.OIDC_ClientIDFile, oidcClientIDFile))
-	require.NoError(f.T, param.Set(param.OIDC_ClientSecretFile, oidcClientSecretFile))
+	require.NoError(f.T, param.OIDC_ClientIDFile.Set(oidcClientIDFile))
+	require.NoError(f.T, param.OIDC_ClientSecretFile.Set(oidcClientSecretFile))
 
 	err = config.InitServer(ctx, modules)
 	require.NoError(f.T, err)
 
-	require.NoError(f.T, param.Set(param.Registry_RequireOriginApproval, false))
-	require.NoError(f.T, param.Set(param.Registry_RequireCacheApproval, false))
+	require.NoError(f.T, param.Registry_RequireOriginApproval.Set(false))
+	require.NoError(f.T, param.Registry_RequireCacheApproval.Set(false))
 
 	_, f.FedCancel, err = launchers.LaunchModules(ctx, modules)
 	if err != nil {
@@ -277,13 +277,13 @@ func TestStashPluginMain(t *testing.T) {
 	// Basically, we need to run the test like this since StashPluginMain calls os.Exit() which is not good for our tests
 	// and leaves xrootd running. To work with this, we wrap the test in its own command and parse the output for successful run
 	if os.Getenv("RUN_STASHPLUGIN") == "1" {
-		require.NoError(t, param.Set(param.Origin_EnablePublicReads, true))
+		require.NoError(t, param.Origin_EnablePublicReads.Set(true))
 		// Since we have the prefix as STASH, we need to unset various osg-htc.org URLs to
 		// avoid real web lookups.
-		require.NoError(t, param.Set(param.Federation_DiscoveryUrl, ""))
-		require.NoError(t, param.Set(param.Xrootd_SummaryMonitoringHost, ""))
-		require.NoError(t, param.Set(param.Xrootd_DetailedMonitoringHost, ""))
-		require.NoError(t, param.Set(param.Logging_Level, "debug"))
+		require.NoError(t, param.Federation_DiscoveryUrl.Set(""))
+		require.NoError(t, param.Xrootd_SummaryMonitoringHost.Set(""))
+		require.NoError(t, param.Xrootd_DetailedMonitoringHost.Set(""))
+		require.NoError(t, param.Logging_Level.Set("debug"))
 		fed := FedTest{T: t}
 		fed.Spinup()
 		defer fed.Teardown()
@@ -296,7 +296,7 @@ func TestStashPluginMain(t *testing.T) {
 		assert.NoError(t, err, "Error writing to temp file")
 		defer tempFile.Close()
 
-		require.NoError(t, param.Set(param.Logging_DisableProgressBars, true))
+		require.NoError(t, param.Logging_DisableProgressBars.Set(true))
 
 		// Set path for object to upload/download
 		tempPath := tempFile.Name()
@@ -351,8 +351,8 @@ func TestInfileUploadWithDirAndFiles(t *testing.T) {
 	})
 
 	if os.Getenv("RUN_STASHPLUGIN") == "1" {
-		require.NoError(t, param.Set(param.Logging_Level, "debug"))
-		require.NoError(t, param.Set(param.TLSSkipVerify, true))
+		require.NoError(t, param.Logging_Level.Set("debug"))
+		require.NoError(t, param.TLSSkipVerify.Set(true))
 
 		if err := config.PrintConfig(); err != nil {
 			return
@@ -392,14 +392,14 @@ func TestInfileUploadWithDirAndFiles(t *testing.T) {
 	assert.NoError(t, err, "Error writing to temp file")
 	defer tempObject2.Close()
 
-	require.NoError(t, param.Set(param.Origin_EnablePublicReads, true))
-	require.NoError(t, param.Set(param.TLSSkipVerify, true))
+	require.NoError(t, param.Origin_EnablePublicReads.Set(true))
+	require.NoError(t, param.TLSSkipVerify.Set(true))
 	// Since we have the prefix as STASH, we need to unset various osg-htc.org URLs to
 	// avoid real web lookups.
-	require.NoError(t, param.Set(param.Federation_DiscoveryUrl, ""))
-	require.NoError(t, param.Set(param.Xrootd_SummaryMonitoringHost, ""))
-	require.NoError(t, param.Set(param.Xrootd_DetailedMonitoringHost, ""))
-	require.NoError(t, param.Set(param.Logging_Level, "debug"))
+	require.NoError(t, param.Federation_DiscoveryUrl.Set(""))
+	require.NoError(t, param.Xrootd_SummaryMonitoringHost.Set(""))
+	require.NoError(t, param.Xrootd_DetailedMonitoringHost.Set(""))
+	require.NoError(t, param.Logging_Level.Set("debug"))
 	fed := FedTest{T: t}
 	fed.Spinup()
 	defer fed.Teardown()
@@ -423,7 +423,7 @@ func TestInfileUploadWithDirAndFiles(t *testing.T) {
 	require.NoError(t, err, "Error writing to temp token file")
 	tempToken.Close()
 
-	require.NoError(t, param.Set(param.Logging_DisableProgressBars, true))
+	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
 	tempDir, err := os.MkdirTemp("", "TempDir")
 	require.NoError(t, err, "Error creating temp dir")
 	defer os.RemoveAll(tempDir)
@@ -677,7 +677,7 @@ func TestPluginCorrectStartAndEndTime(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
-	require.NoError(t, param.Set(param.Origin_HttpServiceUrl, srv.URL))
+	require.NoError(t, param.Origin_HttpServiceUrl.Set(srv.URL))
 
 	fed := fed_test_utils.NewFedTest(t, httpsOriginConfig)
 	storageName = fed.Exports[0].StoragePrefix + "/hello_world"
@@ -1032,7 +1032,7 @@ func TestPluginDirectorDecision(t *testing.T) {
 	}
 	localPath := filepath.Join(dirName, "decision_test.txt")
 
-	require.NoError(t, param.Set(param.Plugin_DirectorDecisionPercentage.GetName(), 100))
+	require.NoError(t, param.Plugin_DirectorDecisionPercentage.Set(100))
 
 	workChan := make(chan PluginTransfer, 1)
 	workChan <- PluginTransfer{url: &downloadUrl, localFile: localPath}
@@ -1669,7 +1669,7 @@ func TestTransferError404(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	// Isolate the test so it doesn't use system config
-	require.NoError(t, param.Set(param.ConfigDir, t.TempDir()))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 	err := config.InitClient()
 	require.NoError(t, err)
 
@@ -1693,7 +1693,7 @@ func TestTransferError404(t *testing.T) {
 		DirectorEndpoint: directorServer.URL,
 	}
 
-	require.NoError(t, param.Set(param.TLSSkipVerify, true))
+	require.NoError(t, param.TLSSkipVerify.Set(true))
 
 	test_utils.MockFederationRoot(t, &fInfo, nil)
 	ctx, _, egrp := test_utils.TestContext(context.Background(), t)
@@ -1769,7 +1769,7 @@ func TestTransferErrorSlowTransfer(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	// Isolate the test so it doesn't use system config
-	require.NoError(t, param.Set(param.ConfigDir, t.TempDir()))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 	err := config.InitClient()
 	require.NoError(t, err)
 
@@ -1815,11 +1815,11 @@ func TestTransferErrorSlowTransfer(t *testing.T) {
 		DirectorEndpoint: directorServer.URL,
 	}
 
-	require.NoError(t, param.Set(param.TLSSkipVerify, true))
-	require.NoError(t, param.Set(param.Client_StoppedTransferTimeout, 1*time.Second))
-	require.NoError(t, param.Set(param.Client_MinimumDownloadSpeed, 10000))                  // 10KB/s minimum speed
-	require.NoError(t, param.Set(param.Client_SlowTransferWindow, 500*time.Millisecond))     // Short window to detect slow transfer quickly
-	require.NoError(t, param.Set(param.Client_SlowTransferRampupTime, 100*time.Millisecond)) // Short rampup time
+	require.NoError(t, param.TLSSkipVerify.Set(true))
+	require.NoError(t, param.Client_StoppedTransferTimeout.Set(1*time.Second))
+	require.NoError(t, param.Client_MinimumDownloadSpeed.Set(10000))                  // 10KB/s minimum speed
+	require.NoError(t, param.Client_SlowTransferWindow.Set(500*time.Millisecond))     // Short window to detect slow transfer quickly
+	require.NoError(t, param.Client_SlowTransferRampupTime.Set(100*time.Millisecond)) // Short rampup time
 
 	test_utils.MockFederationRoot(t, &fInfo, nil)
 	ctx, _, egrp := test_utils.TestContext(context.Background(), t)
@@ -1948,7 +1948,7 @@ func TestTransferErrorHeaderTimeout(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	// Isolate the test so it doesn't use system config
-	require.NoError(t, param.Set(param.ConfigDir, t.TempDir()))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 	err := config.InitClient()
 	require.NoError(t, err)
 
@@ -1985,15 +1985,15 @@ func TestTransferErrorHeaderTimeout(t *testing.T) {
 		DirectorEndpoint: directorServer.URL,
 	}
 
-	require.NoError(t, param.Set(param.TLSSkipVerify, true))
+	require.NoError(t, param.TLSSkipVerify.Set(true))
 	// Set a very short response header timeout to ensure we hit it first
-	require.NoError(t, param.Set(param.Transport_ResponseHeaderTimeout, "100ms"))
+	require.NoError(t, param.Transport_ResponseHeaderTimeout.SetString("100ms"))
 	// Set a longer stopped transfer timeout to ensure we don't hit it first
-	require.NoError(t, param.Set(param.Client_StoppedTransferTimeout, "30s"))
+	require.NoError(t, param.Client_StoppedTransferTimeout.SetString("30s"))
 	// Set a longer idle timeout to ensure we don't hit it first
-	require.NoError(t, param.Set(param.Transport_IdleConnTimeout, "30s"))
+	require.NoError(t, param.Transport_IdleConnTimeout.SetString("30s"))
 	// Set a longer TLS handshake timeout to ensure we don't hit it first
-	require.NoError(t, param.Set(param.Transport_TLSHandshakeTimeout, "30s"))
+	require.NoError(t, param.Transport_TLSHandshakeTimeout.SetString("30s"))
 
 	test_utils.MockFederationRoot(t, &fInfo, nil)
 	ctx, _, egrp := test_utils.TestContext(context.Background(), t)

@@ -86,7 +86,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	tempToken.Close()
 
 	// Disable progress bars to not reuse the same mpb instance
-	require.NoError(t, param.Set(param.Logging_DisableProgressBars, true))
+	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
 
 	// Make our test directories and files
 	tempDir, err := os.MkdirTemp("", "UploadDir")
@@ -320,7 +320,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 	tempToken.Close()
 
 	// Disable progress bars to not reuse the same mpb instance
-	require.NoError(t, param.Set(param.Logging_DisableProgressBars, true))
+	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
 
 	// Make our test directories and files
 	tempDir, err := os.MkdirTemp("", "UploadDir")
@@ -535,7 +535,7 @@ func TestSyncUpload(t *testing.T) {
 	tempToken.Close()
 
 	// Disable progress bars to not reuse the same mpb instance
-	require.NoError(t, param.Set(param.Logging_DisableProgressBars, true))
+	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
 
 	// Make our test directories and files
 	tempDir := t.TempDir()
@@ -737,7 +737,7 @@ func TestSyncDownload(t *testing.T) {
 	tempToken.Close()
 
 	// Disable progress bars to not reuse the same mpb instance
-	require.NoError(t, param.Set(param.Logging_DisableProgressBars, true))
+	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
 
 	// Make our test directories and files
 	tempDir := t.TempDir()
@@ -956,7 +956,7 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 	tempToken.Close()
 
 	// Disable progress bars to not reuse the same mpb instance
-	require.NoError(t, param.Set(param.Logging_DisableProgressBars, true))
+	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
 
 	tempDir, err := os.MkdirTemp("", "UploadDir")
 	require.NoError(t, err)
@@ -1042,7 +1042,7 @@ func TestObjectDelete(t *testing.T) {
 	require.NoError(t, err)
 	tempToken.Close()
 
-	require.NoError(t, param.Set(param.Logging_DisableProgressBars, true))
+	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
 
 	storagePrefix := fed.Exports[0].StoragePrefix
 

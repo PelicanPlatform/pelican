@@ -272,7 +272,7 @@ func TestRecordAd(t *testing.T) {
 			serverAds.DeleteAll()
 		}()
 
-		require.NoError(t, param.Set(param.GeoIPOverrides, []map[string]interface{}{{"IP": "192.168.100.100", "Coordinate": map[string]float64{"lat": 43.567, "long": -65.322}}}))
+		require.NoError(t, param.GeoIPOverrides.Set([]map[string]interface{}{{"IP": "192.168.100.100", "Coordinate": map[string]float64{"lat": 43.567, "long": -65.322}}}))
 		mockUrl := url.URL{Scheme: "https", Host: "192.168.100.100"}
 		serverAd := server_structs.ServerAd{URL: mockUrl, WebURL: mockUrl, FromTopology: false}
 		serverAd.Initialize("TEST_ORIGIN")

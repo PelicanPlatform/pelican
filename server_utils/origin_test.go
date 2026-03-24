@@ -132,7 +132,7 @@ func setup(t *testing.T, config string, shouldError bool) []OriginExport {
 	}
 
 	// Provide an issuer URL that exports will use as a fallback
-	require.NoError(t, param.Set(param.Server_IssuerUrl, defaultIssuerUrl))
+	require.NoError(t, param.Server_IssuerUrl.Set(defaultIssuerUrl))
 
 	// Now call GetOriginExports and check the struct
 	exports, err := GetOriginExports()
@@ -310,21 +310,21 @@ func TestGetExports(t *testing.T) {
 	t.Run("testInvalidExport", func(t *testing.T) {
 		defer ResetTestState()
 
-		require.NoError(t, param.Set(param.Origin_StorageType, "posix"))
-		require.NoError(t, param.Set(param.Origin_ExportVolumes, ""))
+		require.NoError(t, param.Origin_StorageType.Set("posix"))
+		require.NoError(t, param.Origin_ExportVolumes.Set([]string{}))
 		_, err := GetOriginExports()
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
 
 		ResetTestState()
-		require.NoError(t, param.Set(param.Origin_StorageType, "posix"))
-		require.NoError(t, param.Set(param.Origin_ExportVolumes, "foo"))
+		require.NoError(t, param.Origin_StorageType.Set("posix"))
+		require.NoError(t, param.Origin_ExportVolumes.Set([]string{"foo"}))
 		_, err = GetOriginExports()
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
 
 		ResetTestState()
-		require.NoError(t, param.Set(param.Origin_StorageType, "blah"))
+		require.NoError(t, param.Origin_StorageType.Set("blah"))
 		_, err = GetOriginExports()
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, server_structs.ErrUnknownOriginStorageType)
@@ -608,7 +608,7 @@ func TestGetExports(t *testing.T) {
 
 	t.Run("disabledDirectClientsPreventsDirectReads", func(t *testing.T) {
 		defer ResetTestState()
-		require.NoError(t, param.Set(param.Origin_DisableDirectClients, true))
+		require.NoError(t, param.Origin_DisableDirectClients.Set(true))
 		// This export has DirectReads set to true, so expect failure
 		_ = setup(t, singleExportBlockConfig, true)
 	})

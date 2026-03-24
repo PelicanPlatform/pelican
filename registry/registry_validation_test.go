@@ -248,7 +248,7 @@ func TestValidateKeyChaining(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("off-param-no-check", func(t *testing.T) {
-		require.NoError(t, param.Set(param.Registry_RequireKeyChaining, false))
+		require.NoError(t, param.Registry_RequireKeyChaining.Set(false))
 		superspaces, subspaces, _, _, err := namespaceSupSubChecks("/foo/barz")
 		assert.NoError(t, err)
 		assert.Len(t, superspaces, 1)
@@ -260,7 +260,7 @@ func TestValidateKeyChaining(t *testing.T) {
 	})
 
 	t.Run("on-param-does-check", func(t *testing.T) {
-		require.NoError(t, param.Set(param.Registry_RequireKeyChaining, true))
+		require.NoError(t, param.Registry_RequireKeyChaining.Set(true))
 		_, _, validErr, serverErr := validateKeyChaining("/foo/barz", jwkFoo)
 		// Same public key as /foo shouldn't give error
 		assert.NoError(t, serverErr)
@@ -274,7 +274,7 @@ func TestValidateKeyChaining(t *testing.T) {
 	})
 
 	t.Run("on-param-ignore-cache", func(t *testing.T) {
-		require.NoError(t, param.Set(param.Registry_RequireKeyChaining, true))
+		require.NoError(t, param.Registry_RequireKeyChaining.Set(true))
 		superspaces, subspaces, _, _, err := namespaceSupSubChecks("/cache/newCache")
 		assert.NoError(t, err)
 		assert.Empty(t, superspaces)

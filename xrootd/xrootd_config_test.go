@@ -56,13 +56,13 @@ func setupXrootd(t *testing.T, ctx context.Context, server server_structs.Server
 	require.NoError(t, os.MkdirAll(storageDir, 0755))
 	server_utils.ResetTestState()
 
-	require.NoError(t, param.Set(param.ConfigDir, tmpDir))
-	require.NoError(t, param.Set(param.Xrootd_RunLocation, tmpDir))
-	require.NoError(t, param.Set(param.Cache_RunLocation, tmpDir))
-	require.NoError(t, param.Set(param.Origin_RunLocation, tmpDir))
-	require.NoError(t, param.Set(param.Origin_StoragePrefix, storageDir))
-	require.NoError(t, param.Set(param.Origin_FederationPrefix, "/"))
-	require.NoError(t, param.Set(param.Server_IssuerUrl, "https://my-xrootd.com:8444"))
+	require.NoError(t, param.ConfigDir.Set(tmpDir))
+	require.NoError(t, param.Xrootd_RunLocation.Set(tmpDir))
+	require.NoError(t, param.Cache_RunLocation.Set(tmpDir))
+	require.NoError(t, param.Origin_RunLocation.Set(tmpDir))
+	require.NoError(t, param.Origin_StoragePrefix.Set(storageDir))
+	require.NoError(t, param.Origin_FederationPrefix.Set("/"))
+	require.NoError(t, param.Server_IssuerUrl.Set("https://my-xrootd.com:8444"))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
@@ -140,7 +140,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 
 		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		require.NoError(t, err, "Failed to set preferred prefix to OSDF")
-		require.NoError(t, param.Set(param.Server_ExternalWebUrl, "https://my-xrootd.com:8443"))
+		require.NoError(t, param.Server_ExternalWebUrl.Set("https://my-xrootd.com:8443"))
 
 		configPath, err := ConfigXrootd(ctx, true)
 		require.NoError(t, err)
@@ -156,7 +156,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 
 		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		require.NoError(t, err, "Failed to set preferred prefix to OSDF")
-		require.NoError(t, param.Set(param.Server_ExternalWebUrl, "https://my-xrootd.com"))
+		require.NoError(t, param.Server_ExternalWebUrl.Set("https://my-xrootd.com"))
 
 		configPath, err := ConfigXrootd(ctx, true)
 		require.NoError(t, err)
@@ -174,7 +174,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 
 		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		require.NoError(t, err, "Failed to set preferred prefix to Pelican")
-		require.NoError(t, param.Set(param.Server_ExternalWebUrl, "https://my-xrootd.com:8443"))
+		require.NoError(t, param.Server_ExternalWebUrl.Set("https://my-xrootd.com:8443"))
 
 		configPath, err := ConfigXrootd(ctx, true)
 		require.NoError(t, err)
@@ -201,8 +201,8 @@ func TestXrootDCacheConfig(t *testing.T) {
 	})
 	server_utils.ResetTestState()
 
-	require.NoError(t, param.Set(param.Cache_RunLocation, dirname))
-	require.NoError(t, param.Set(param.ConfigDir, dirname))
+	require.NoError(t, param.Cache_RunLocation.Set(dirname))
+	require.NoError(t, param.ConfigDir.Set(dirname))
 	test_utils.MockFederationRoot(t, nil, nil)
 
 	err = config.InitServer(ctx, server_structs.CacheType)
@@ -268,9 +268,9 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 	t.Run("TestNestedDataMetaNamespace", func(t *testing.T) {
 		testDir := t.TempDir()
-		require.NoError(t, param.Set(param.Cache_StorageLocation, testDir))
+		require.NoError(t, param.Cache_StorageLocation.Set(testDir))
 		namespaceLocation := filepath.Join(testDir, "namespace")
-		require.NoError(t, param.Set(param.Cache_NamespaceLocation, namespaceLocation))
+		require.NoError(t, param.Cache_NamespaceLocation.Set(namespaceLocation))
 
 		cache := &cache.CacheServer{}
 		uid := os.Getuid()
@@ -278,16 +278,16 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 		// Data location test
 		nestedDataLocation := filepath.Join(namespaceLocation, "data")
-		require.NoError(t, param.Set(param.Cache_DataLocations, []string{nestedDataLocation}))
+		require.NoError(t, param.Cache_DataLocations.Set([]string{nestedDataLocation}))
 		err := CheckCacheXrootdEnv(cache, uid, gid)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "Please ensure these directories are not nested.")
 		// Now set to a valid location so we can hit the meta error in the next part of the test
-		require.NoError(t, param.Set(param.Cache_DataLocations, []string{filepath.Join(testDir, "data")}))
+		require.NoError(t, param.Cache_DataLocations.Set([]string{filepath.Join(testDir, "data")}))
 
 		// Meta location test
 		nestedMetaLocation := filepath.Join(namespaceLocation, "meta")
-		require.NoError(t, param.Set(param.Cache_MetaLocations, []string{nestedMetaLocation}))
+		require.NoError(t, param.Cache_MetaLocations.Set([]string{nestedMetaLocation}))
 		err = CheckCacheXrootdEnv(cache, uid, gid)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "Please ensure these directories are not nested.")
@@ -375,17 +375,17 @@ func TestUpdateAuth(t *testing.T) {
 
 	server_utils.ResetTestState()
 
-	require.NoError(t, param.Set(param.Logging_Level, "Debug"))
-	require.NoError(t, param.Set(param.Origin_RunLocation, runDirname))
-	require.NoError(t, param.Set(param.ConfigDir, configDirname))
+	require.NoError(t, param.Logging_Level.Set("Debug"))
+	require.NoError(t, param.Origin_RunLocation.Set(runDirname))
+	require.NoError(t, param.ConfigDir.Set(configDirname))
 	authfileName := filepath.Join(configDirname, "authfile")
-	require.NoError(t, param.Set(param.Xrootd_Authfile, authfileName))
+	require.NoError(t, param.Xrootd_Authfile.Set(authfileName))
 	scitokensName := filepath.Join(configDirname, "scitokens.cfg")
-	require.NoError(t, param.Set(param.Xrootd_ScitokensConfig, scitokensName))
+	require.NoError(t, param.Xrootd_ScitokensConfig.Set(scitokensName))
 	storageDir := filepath.Join(runDirname, "storage")
 	require.NoError(t, os.MkdirAll(storageDir, 0755))
-	require.NoError(t, param.Set(param.Origin_FederationPrefix, "/test"))
-	require.NoError(t, param.Set(param.Origin_StoragePrefix, storageDir))
+	require.NoError(t, param.Origin_FederationPrefix.Set("/test"))
+	require.NoError(t, param.Origin_StoragePrefix.Set(storageDir))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
@@ -480,9 +480,9 @@ func TestCopyCertificates(t *testing.T) {
 	})
 
 	server_utils.ResetTestState()
-	require.NoError(t, param.Set(param.Logging_Level, "Debug"))
-	require.NoError(t, param.Set(param.Origin_RunLocation, runDirname))
-	require.NoError(t, param.Set(param.ConfigDir, configDirname))
+	require.NoError(t, param.Logging_Level.Set("Debug"))
+	require.NoError(t, param.Origin_RunLocation.Set(runDirname))
+	require.NoError(t, param.ConfigDir.Set(configDirname))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
@@ -575,18 +575,18 @@ func TestCopyCertificatesWithPKCS11(t *testing.T) {
 	t.Cleanup(server_utils.ResetTestState)
 	runDir := t.TempDir()
 	configDir := t.TempDir()
-	require.NoError(t, param.Set(param.Origin_RunLocation, runDir))
-	require.NoError(t, param.Set(param.ConfigDir, configDir))
+	require.NoError(t, param.Origin_RunLocation.Set(runDir))
+	require.NoError(t, param.ConfigDir.Set(configDir))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
-	require.NoError(t, param.Set(param.Server_EnablePKCS11, true))
+	require.NoError(t, param.Server_EnablePKCS11.Set(true))
 	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
 
 	p11proxy.SetCurrentInfoForTest(p11proxy.Info{Enabled: true, PKCS11URL: "pkcs11:test"})
 	t.Cleanup(func() {
 		p11proxy.SetCurrentInfoForTest(p11proxy.Info{})
-		require.NoError(t, param.Set(param.Server_EnablePKCS11, false))
+		require.NoError(t, param.Server_EnablePKCS11.Set(false))
 	})
 
 	require.NoError(t, copyXrootdCertificates(&origin.OriginServer{}))
@@ -607,7 +607,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 	t.Run("test-minutes-to-seconds", func(t *testing.T) {
 		server_utils.ResetTestState()
 		var xrdConfig XrootdConfig
-		require.NoError(t, param.Set(param.Xrootd_AuthRefreshInterval, "5m"))
+		require.NoError(t, param.Xrootd_AuthRefreshInterval.SetString("5m"))
 		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(xrootdDecodeHook()))
 		assert.NoError(t, err)
 		assert.Equal(t, 300, xrdConfig.Xrootd.AuthRefreshInterval)
@@ -616,7 +616,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 	t.Run("test-hours-to-seconds", func(t *testing.T) {
 		server_utils.ResetTestState()
 		var xrdConfig XrootdConfig
-		require.NoError(t, param.Set(param.Xrootd_AuthRefreshInterval, "24h"))
+		require.NoError(t, param.Xrootd_AuthRefreshInterval.SetString("24h"))
 		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(xrootdDecodeHook()))
 		assert.NoError(t, err)
 		assert.Equal(t, 86400, xrdConfig.Xrootd.AuthRefreshInterval)
@@ -625,7 +625,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 	t.Run("test-seconds-to-seconds", func(t *testing.T) {
 		server_utils.ResetTestState()
 		var xrdConfig XrootdConfig
-		require.NoError(t, param.Set(param.Xrootd_AuthRefreshInterval, "100s"))
+		require.NoError(t, param.Xrootd_AuthRefreshInterval.SetString("100s"))
 		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(xrootdDecodeHook()))
 		assert.NoError(t, err)
 		assert.Equal(t, 100, xrdConfig.Xrootd.AuthRefreshInterval)
@@ -634,7 +634,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 	t.Run("test-less-than-60s", func(t *testing.T) {
 		server_utils.ResetTestState()
 		var xrdConfig XrootdConfig
-		require.NoError(t, param.Set(param.Xrootd_AuthRefreshInterval, "10s"))
+		require.NoError(t, param.Xrootd_AuthRefreshInterval.SetString("10s"))
 		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(xrootdDecodeHook()))
 		assert.NoError(t, err)
 		// Should fall back to 5m, or 300s
@@ -644,7 +644,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 	t.Run("test-no-suffix-to-seconds", func(t *testing.T) {
 		server_utils.ResetTestState()
 		var xrdConfig XrootdConfig
-		require.NoError(t, param.Set(param.Xrootd_AuthRefreshInterval, "99s"))
+		require.NoError(t, param.Xrootd_AuthRefreshInterval.SetString("99s"))
 		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(xrootdDecodeHook()))
 		assert.NoError(t, err)
 		assert.Equal(t, 99, xrdConfig.Xrootd.AuthRefreshInterval)
@@ -653,7 +653,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 	t.Run("test-less-than-second", func(t *testing.T) {
 		server_utils.ResetTestState()
 		var xrdConfig XrootdConfig
-		require.NoError(t, param.Set(param.Xrootd_AuthRefreshInterval, "0.5s"))
+		require.NoError(t, param.Xrootd_AuthRefreshInterval.SetString("0.5s"))
 		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(xrootdDecodeHook()))
 		assert.NoError(t, err)
 		assert.Equal(t, 300, xrdConfig.Xrootd.AuthRefreshInterval)
@@ -747,7 +747,7 @@ func TestGenLoggingConfig(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			server_utils.ResetTestState()
-			require.NoError(t, param.Set(param.Logging_Level, tc.pelLogLevel))
+			require.NoError(t, param.Logging_Level.Set(tc.pelLogLevel))
 
 			output, err := genLoggingConfig(tc.input, tc.logMap)
 			if tc.wantErr {
@@ -776,18 +776,18 @@ func TestAutoShutdownOnStaleAuthfile(t *testing.T) {
 		server_utils.ResetTestState()
 	})
 
-	require.NoError(t, param.Set(param.Logging_Level, "Debug"))
-	require.NoError(t, param.Set(param.ConfigDir, dir))
-	require.NoError(t, param.Set(param.Cache_RunLocation, dir))
+	require.NoError(t, param.Logging_Level.Set("Debug"))
+	require.NoError(t, param.ConfigDir.Set(dir))
+	require.NoError(t, param.Cache_RunLocation.Set(dir))
 
 	// Start with a valid authfile and scitokens so the first cycles succeed
 	validAuthfilePath := filepath.Join(dir, "authfile")
 	require.NoError(t, os.WriteFile(validAuthfilePath, []byte("u * /.well-known lr\n"), 0600))
-	require.NoError(t, param.Set(param.Xrootd_Authfile, validAuthfilePath))
+	require.NoError(t, param.Xrootd_Authfile.Set(validAuthfilePath))
 
 	scitokensPath := filepath.Join(dir, "scitokens.cfg")
 	require.NoError(t, os.WriteFile(scitokensPath, []byte(""), 0600))
-	require.NoError(t, param.Set(param.Xrootd_ScitokensConfig, scitokensPath))
+	require.NoError(t, param.Xrootd_ScitokensConfig.Set(scitokensPath))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
@@ -795,8 +795,8 @@ func TestAutoShutdownOnStaleAuthfile(t *testing.T) {
 	require.NoError(t, config.InitServer(ctx, server_structs.CacheType))
 
 	// Set timeout AFTER InitServer as a string to ensure correct parsing
-	require.NoError(t, param.Set(param.Xrootd_ConfigUpdateFailureTimeout, "50ms"))
-	require.NoError(t, param.Set(param.Xrootd_AutoShutdownEnabled, true))
+	require.NoError(t, param.Xrootd_ConfigUpdateFailureTimeout.SetString("50ms"))
+	require.NoError(t, param.Xrootd_AutoShutdownEnabled.Set(true))
 
 	cacheServer := &cache.CacheServer{}
 
@@ -818,7 +818,7 @@ func TestAutoShutdownOnStaleAuthfile(t *testing.T) {
 
 	// Now flip to INVALID authfile path to force failures and staleness
 	missingAuthfilePath := filepath.Join(dir, "missing-authfile")
-	require.NoError(t, param.Set(param.Xrootd_Authfile, missingAuthfilePath))
+	require.NoError(t, param.Xrootd_Authfile.Set(missingAuthfilePath))
 
 	// Wait to exceed timeout and then trigger maintenance immediately by touching scitokens
 	time.Sleep(100 * time.Millisecond)
@@ -847,19 +847,19 @@ func TestConfigUpdatesHealthOKWhenFresh(t *testing.T) {
 		server_utils.ResetTestState()
 	})
 
-	require.NoError(t, param.Set(param.Logging_Level, "Debug"))
-	require.NoError(t, param.Set(param.ConfigDir, dir))
-	require.NoError(t, param.Set(param.Cache_RunLocation, dir))
-	require.NoError(t, param.Set(param.Xrootd_AutoShutdownEnabled, true))
-	require.NoError(t, param.Set(param.Xrootd_ConfigUpdateFailureTimeout, 1*time.Second))
+	require.NoError(t, param.Logging_Level.Set("Debug"))
+	require.NoError(t, param.ConfigDir.Set(dir))
+	require.NoError(t, param.Cache_RunLocation.Set(dir))
+	require.NoError(t, param.Xrootd_AutoShutdownEnabled.Set(true))
+	require.NoError(t, param.Xrootd_ConfigUpdateFailureTimeout.Set(1*time.Second))
 
 	// Valid authfile and scitokens inputs so both emissions succeed
 	authfilePath := filepath.Join(dir, "authfile")
 	require.NoError(t, os.WriteFile(authfilePath, []byte("u * /.well-known lr\n"), 0600))
-	require.NoError(t, param.Set(param.Xrootd_Authfile, authfilePath))
+	require.NoError(t, param.Xrootd_Authfile.Set(authfilePath))
 	scitokensPath := filepath.Join(dir, "scitokens.cfg")
 	require.NoError(t, os.WriteFile(scitokensPath, []byte(""), 0600))
-	require.NoError(t, param.Set(param.Xrootd_ScitokensConfig, scitokensPath))
+	require.NoError(t, param.Xrootd_ScitokensConfig.Set(scitokensPath))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	require.NoError(t, config.InitServer(ctx, server_structs.CacheType))

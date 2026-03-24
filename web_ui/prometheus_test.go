@@ -66,8 +66,8 @@ func TestPrometheusUnprotected(t *testing.T) {
 	tDir := t.TempDir()
 	kDir := filepath.Join(tDir, "testKeyDir")
 	//Setup a private key
-	require.NoError(t, param.Set(param.IssuerKeysDirectory, kDir))
-	require.NoError(t, param.Set(param.ConfigDir, t.TempDir()))
+	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
@@ -76,10 +76,10 @@ func TestPrometheusUnprotected(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, r := gin.CreateTestContext(w)
 
-	require.NoError(t, param.Set(param.Monitoring_PromQLAuthorization, false))
+	require.NoError(t, param.Monitoring_PromQLAuthorization.Set(false))
 
 	// Set ExternalWebUrl so that IssuerCheck can pass
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl, "https://test-origin.org:8444"))
+	require.NoError(t, param.Server_ExternalWebUrl.Set("https://test-origin.org:8444"))
 
 	c.Request = &http.Request{
 		URL: &url.URL{},
@@ -114,8 +114,8 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	tDir := t.TempDir()
 	kDir := filepath.Join(tDir, "testKeyDir")
 	// Setup a private key directory
-	require.NoError(t, param.Set(param.IssuerKeysDirectory, kDir))
-	require.NoError(t, param.Set(param.ConfigDir, t.TempDir()))
+	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
@@ -124,10 +124,10 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, r := gin.CreateTestContext(w)
 
-	require.NoError(t, param.Set(param.Monitoring_PromQLAuthorization, true))
+	require.NoError(t, param.Monitoring_PromQLAuthorization.Set(true))
 
 	// Set ExternalWebUrl so that IssuerCheck can pass
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl, "https://test-origin.org:8444"))
+	require.NoError(t, param.Server_ExternalWebUrl.Set("https://test-origin.org:8444"))
 
 	c.Request = &http.Request{
 		URL: &url.URL{},
@@ -168,8 +168,8 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	defer cancel()
 
 	server_utils.ResetTestState()
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl, "https://test-origin.org:8444"))
-	require.NoError(t, param.Set(param.Monitoring_PromQLAuthorization, true))
+	require.NoError(t, param.Server_ExternalWebUrl.Set("https://test-origin.org:8444"))
+	require.NoError(t, param.Monitoring_PromQLAuthorization.Set(true))
 
 	av1 := route.New().WithPrefix("/api/v1.0/prometheus")
 
@@ -178,7 +178,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	keysDir := filepath.Join(tDir, "testKeys")
 
 	//Setup a private key and a token
-	require.NoError(t, param.Set(param.IssuerKeysDirectory, keysDir))
+	require.NoError(t, param.IssuerKeysDirectory.Set(keysDir))
 
 	// Setting the ConfigDir to t.TempDir() causes issues with this test on Windows because
 	// the process tries to clean up the directory before the test is done with it.
@@ -187,7 +187,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	t.Cleanup(func() {
 		os.RemoveAll(configDir)
 	})
-	require.NoError(t, param.Set(param.ConfigDir, configDir))
+	require.NoError(t, param.ConfigDir.Set(configDir))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err = config.InitServer(ctx, server_structs.OriginType)
@@ -244,7 +244,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 		// Create a new private key by re-initializing config to point at a new temp dir
 		k2dir := filepath.Join(tDir, "whatever", "testDir2")
-		require.NoError(t, param.Set(param.IssuerKeysDirectory, k2dir))
+		require.NoError(t, param.IssuerKeysDirectory.Set(k2dir))
 		err = config.InitServer(ctx, server_structs.OriginType)
 		require.NoError(t, err)
 
@@ -252,7 +252,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 		// Re-init the config again, this time pointing at the original key
 		config.ResetIssuerPrivateKeys()
-		require.NoError(t, param.Set(param.IssuerKeysDirectory, keysDir))
+		require.NoError(t, param.IssuerKeysDirectory.Set(keysDir))
 		err = config.InitServer(ctx, server_structs.OriginType)
 		require.NoError(t, err)
 
@@ -325,8 +325,8 @@ func TestPrometheusRulesEndpoint(t *testing.T) {
 	// Create temp dir for the origin key file
 	tDir := t.TempDir()
 	kDir := filepath.Join(tDir, "testKeyDir")
-	require.NoError(t, param.Set(param.IssuerKeysDirectory, kDir))
-	require.NoError(t, param.Set(param.ConfigDir, t.TempDir()))
+	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
@@ -335,8 +335,8 @@ func TestPrometheusRulesEndpoint(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, r := gin.CreateTestContext(w)
 
-	require.NoError(t, param.Set(param.Monitoring_PromQLAuthorization, false))
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl, "https://test-origin.org:8444"))
+	require.NoError(t, param.Monitoring_PromQLAuthorization.Set(false))
+	require.NoError(t, param.Server_ExternalWebUrl.Set("https://test-origin.org:8444"))
 
 	c.Request = &http.Request{
 		URL: &url.URL{},
@@ -409,15 +409,15 @@ func TestPrometheusAlertsEndpoint(t *testing.T) {
 	// Create temp dir for the origin key file
 	tDir := t.TempDir()
 	kDir := filepath.Join(tDir, "testKeyDir")
-	require.NoError(t, param.Set(param.IssuerKeysDirectory, kDir))
-	require.NoError(t, param.Set(param.ConfigDir, t.TempDir()))
+	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
-	require.NoError(t, param.Set(param.Monitoring_PromQLAuthorization, false))
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl, "https://test-origin.org:8444"))
+	require.NoError(t, param.Monitoring_PromQLAuthorization.Set(false))
+	require.NoError(t, param.Server_ExternalWebUrl.Set("https://test-origin.org:8444"))
 
 	t.Run("alertmanagers-endpoint", func(t *testing.T) {
 		w := httptest.NewRecorder()

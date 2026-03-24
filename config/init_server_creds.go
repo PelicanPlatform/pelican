@@ -353,7 +353,7 @@ func GenerateCACert() error {
 		return errors.Errorf("unsupported private key type: %T", key)
 	}
 
-	log.Debugf("%s does not exist. Will generate a new CA certificate for the server", param.Server_TLSCACertificateFile)
+	log.Debugf("%s does not exist. Will generate a new CA certificate for the server", param.Server_TLSCACertificateFile.GetName())
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
 	if err != nil {
@@ -562,7 +562,7 @@ func GenerateCert() error {
 		return errors.Errorf("unsupported private key type: %T", key)
 	}
 
-	log.Debugf("%s and/or %s do not exist. Will generate a new host certificate and its private key for the server", param.Server_TLSCertificateChain, param.Server_TLSKey)
+	log.Debugf("%s and/or %s do not exist. Will generate a new host certificate and its private key for the server", param.Server_TLSCertificateChain.GetName(), param.Server_TLSKey.GetName())
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
 	if err != nil {
@@ -677,13 +677,13 @@ func GenerateCert() error {
 // This logic is implemented by x509.Certificate.VerifyHostname.
 func ValidateHostCertificateHostname(hostname string) error {
 	if param.TLSSkipVerify.GetBool() {
-		log.Warnf("Skipping TLS certificate hostname verification for %s because %s is set to true", hostname, param.TLSSkipVerify)
+		log.Warnf("Skipping TLS certificate hostname verification for %s because %s is set to true", hostname, param.TLSSkipVerify.GetName())
 		return nil
 	}
 
 	tlsCert := param.Server_TLSCertificateChain.GetString()
 	if tlsCert == "" {
-		return errors.Errorf("TLS certificate file is not set. See documentation for %s", param.Server_TLSCertificateChain)
+		return errors.Errorf("TLS certificate file is not set. See documentation for %s", param.Server_TLSCertificateChain.GetName())
 	}
 
 	// Load the TLS certificate -- the server cert will be the first cert in the chain

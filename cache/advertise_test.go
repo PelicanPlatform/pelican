@@ -136,7 +136,7 @@ func TestFilterNsAdsForCache(t *testing.T) {
 			test_utils.MockFederationRoot(t, nil, nil)
 			require.NoError(t, param.SetRaw("Federation.DirectorURL", ts.URL))
 			if testInput.permittedNS != nil {
-				require.NoError(t, param.Set(param.Cache_PermittedNamespaces, testInput.permittedNS))
+				require.NoError(t, param.Cache_PermittedNamespaces.Set(testInput.permittedNS))
 			}
 			defer server_utils.ResetTestState()
 

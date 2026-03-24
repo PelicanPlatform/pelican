@@ -81,12 +81,12 @@ func (o *GlobusOrigin) mapSingleExtra() {
 
 	e := o.Exports[0]
 	if e.GlobusCollectionID != "" {
-		if err := param.Set(param.Origin_GlobusCollectionID, e.GlobusCollectionID); err != nil {
+		if err := param.Origin_GlobusCollectionID.Set(e.GlobusCollectionID); err != nil {
 			log.Warningf("Failed to set %s: %v", param.Origin_GlobusCollectionID.GetName(), err)
 		}
 	}
 	if e.GlobusCollectionName != "" {
-		if err := param.Set(param.Origin_GlobusCollectionName, e.GlobusCollectionName); err != nil {
+		if err := param.Origin_GlobusCollectionName.Set(e.GlobusCollectionName); err != nil {
 			log.Warningf("Failed to set %s: %v", param.Origin_GlobusCollectionName.GetName(), err)
 		}
 	}

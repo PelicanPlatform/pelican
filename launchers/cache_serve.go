@@ -148,7 +148,7 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 	}
 
 	portStartCallback := func(port int) {
-		if err := param.Set(param.Cache_Port, port); err != nil {
+		if err := param.Cache_Port.Set(port); err != nil {
 			log.WithError(err).Warnf("Failed to set %s to %d", param.Cache_Port.GetName(), port)
 		}
 		if cacheUrl, err := url.Parse(param.Cache_Url.GetString()); err == nil {
@@ -159,7 +159,7 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 			currentPort := cacheUrl.Port()
 			if currentPort == "" || currentPort == "0" {
 				cacheUrl.Host = net.JoinHostPort(host, strconv.Itoa(port))
-				if err := param.Set(param.Cache_Url, cacheUrl.String()); err != nil {
+				if err := param.Cache_Url.Set(cacheUrl.String()); err != nil {
 					log.WithError(err).Warnf("Failed to set %s to %s", param.Cache_Url.GetName(), cacheUrl.String())
 				} else {
 					log.Debugf("Resetting %s to %s", param.Cache_Url.GetName(), cacheUrl.String())

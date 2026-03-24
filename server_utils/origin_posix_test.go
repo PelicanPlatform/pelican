@@ -45,8 +45,8 @@ func TestValidateAtomicUploadFilesystem(t *testing.T) {
 		require.NoError(t, os.MkdirAll(storageDir, 0750))
 		require.NoError(t, os.MkdirAll(uploadDir, 0750))
 
-		require.NoError(t, param.Set(param.Origin_EnableAtomicUploads.GetName(), true))
-		require.NoError(t, param.Set(param.Origin_UploadTempLocation.GetName(), uploadDir))
+		require.NoError(t, param.Origin_EnableAtomicUploads.Set(true))
+		require.NoError(t, param.Origin_UploadTempLocation.Set(uploadDir))
 
 		o := &PosixOrigin{}
 		e := &OriginExport{
@@ -80,8 +80,8 @@ func TestValidateAtomicUploadFilesystem(t *testing.T) {
 			t.Skip("/dev/shm is on the same filesystem as /tmp; cannot test cross-filesystem")
 		}
 
-		require.NoError(t, param.Set(param.Origin_EnableAtomicUploads.GetName(), true))
-		require.NoError(t, param.Set(param.Origin_UploadTempLocation.GetName(), shmDir))
+		require.NoError(t, param.Origin_EnableAtomicUploads.Set(true))
+		require.NoError(t, param.Origin_UploadTempLocation.Set(shmDir))
 
 		o := &PosixOrigin{}
 		e := &OriginExport{
@@ -97,8 +97,8 @@ func TestValidateAtomicUploadFilesystem(t *testing.T) {
 	t.Run("atomic-uploads-disabled-skips-check", func(t *testing.T) {
 		defer ResetTestState()
 
-		require.NoError(t, param.Set(param.Origin_EnableAtomicUploads.GetName(), false))
-		require.NoError(t, param.Set(param.Origin_UploadTempLocation.GetName(), "/some/nonexistent/path"))
+		require.NoError(t, param.Origin_EnableAtomicUploads.Set(false))
+		require.NoError(t, param.Origin_UploadTempLocation.Set("/some/nonexistent/path"))
 
 		o := &PosixOrigin{}
 		e := &OriginExport{
@@ -112,8 +112,8 @@ func TestValidateAtomicUploadFilesystem(t *testing.T) {
 	t.Run("empty-upload-temp-location-returns-error", func(t *testing.T) {
 		defer ResetTestState()
 
-		require.NoError(t, param.Set(param.Origin_EnableAtomicUploads.GetName(), true))
-		require.NoError(t, param.Set(param.Origin_UploadTempLocation.GetName(), ""))
+		require.NoError(t, param.Origin_EnableAtomicUploads.Set(true))
+		require.NoError(t, param.Origin_UploadTempLocation.Set(""))
 
 		o := &PosixOrigin{}
 		e := &OriginExport{

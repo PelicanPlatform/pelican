@@ -70,13 +70,13 @@ func TestListNamespaces(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
-	require.NoError(t, param.Set(param.Server_WebPort, 0))
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl, "https://mock-server.com"))
+	require.NoError(t, param.Server_WebPort.Set(0))
+	require.NoError(t, param.Server_ExternalWebUrl.Set("https://mock-server.com"))
 
 	dirName := t.TempDir()
-	require.NoError(t, param.Set(param.ConfigDir, dirName))
-	require.NoError(t, param.Set(param.Logging_Level, "debug"))
-	require.NoError(t, param.Set(param.Origin_Port, 0))
+	require.NoError(t, param.ConfigDir.Set(dirName))
+	require.NoError(t, param.Logging_Level.Set("debug"))
+	require.NoError(t, param.Origin_Port.Set(0))
 	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
@@ -817,7 +817,7 @@ func TestCreateNamespace(t *testing.T) {
 	})
 
 	t.Run("missing-institution-returns-400", func(t *testing.T) {
-		require.NoError(t, param.Set(param.Registry_Institutions, []map[string]string{{"name": "Mock School", "id": "123"}}))
+		require.NoError(t, param.Registry_Institutions.Set([]map[string]string{{"name": "Mock School", "id": "123"}}))
 		resetMockRegistryDB(t)
 		jwks, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
@@ -925,7 +925,7 @@ func TestCreateNamespace(t *testing.T) {
 	})
 
 	t.Run("key-chaining-failure-returns-400", func(t *testing.T) {
-		require.NoError(t, param.Set(param.Registry_RequireKeyChaining, true))
+		require.NoError(t, param.Registry_RequireKeyChaining.Set(true))
 		resetMockRegistryDB(t)
 
 		pubKeyStr, err := test_utils.GenerateJWKS()
@@ -957,7 +957,7 @@ func TestCreateNamespace(t *testing.T) {
 	t.Run("inst-failure-returns-400", func(t *testing.T) {
 		resetMockRegistryDB(t)
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
-		require.NoError(t, param.Set(param.Registry_Institutions, mockInsts))
+		require.NoError(t, param.Registry_Institutions.Set(mockInsts))
 
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
@@ -980,7 +980,7 @@ func TestCreateNamespace(t *testing.T) {
 	t.Run("valid-request-gives-200", func(t *testing.T) {
 		resetMockRegistryDB(t)
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
-		require.NoError(t, param.Set(param.Registry_Institutions, mockInsts))
+		require.NoError(t, param.Registry_Institutions.Set(mockInsts))
 
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
@@ -1020,8 +1020,8 @@ func TestCreateNamespace(t *testing.T) {
 			{"name": "string_field", "type": "string", "required": true},
 			{"name": "datetime_field", "type": "datetime", "required": true},
 		}
-		require.NoError(t, param.Set(param.Registry_Institutions, mockInsts))
-		require.NoError(t, param.Set(param.Registry_CustomRegistrationFields, customFieldsConf))
+		require.NoError(t, param.Registry_Institutions.Set(mockInsts))
+		require.NoError(t, param.Registry_CustomRegistrationFields.Set(customFieldsConf))
 		err := InitCustomRegistrationFields()
 		require.NoError(t, err)
 		defer func() {
@@ -1078,7 +1078,7 @@ func TestCreateNamespace(t *testing.T) {
 		require.NoError(t, err)
 
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
-		require.NoError(t, param.Set(param.Registry_Institutions, mockInsts))
+		require.NoError(t, param.Registry_Institutions.Set(mockInsts))
 
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
@@ -1120,7 +1120,7 @@ func TestCreateNamespace(t *testing.T) {
 		require.NoError(t, err)
 
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
-		require.NoError(t, param.Set(param.Registry_Institutions, mockInsts))
+		require.NoError(t, param.Registry_Institutions.Set(mockInsts))
 
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
@@ -1214,7 +1214,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 	t.Run("valid-request-but-ns-dne-returns-404", func(t *testing.T) {
 		resetMockRegistryDB(t)
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
-		require.NoError(t, param.Set(param.Registry_Institutions, mockInsts))
+		require.NoError(t, param.Registry_Institutions.Set(mockInsts))
 
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
@@ -1237,7 +1237,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 	t.Run("valid-request-not-owner-gives-403", func(t *testing.T) {
 		resetMockRegistryDB(t)
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
-		require.NoError(t, param.Set(param.Registry_Institutions, mockInsts))
+		require.NoError(t, param.Registry_Institutions.Set(mockInsts))
 
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
@@ -1267,7 +1267,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 	t.Run("reg-user-cant-change-after-approv", func(t *testing.T) {
 		resetMockRegistryDB(t)
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
-		require.NoError(t, param.Set(param.Registry_Institutions, mockInsts))
+		require.NoError(t, param.Registry_Institutions.Set(mockInsts))
 
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
@@ -1306,7 +1306,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 	t.Run("reg-user-success-change", func(t *testing.T) {
 		resetMockRegistryDB(t)
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
-		require.NoError(t, param.Set(param.Registry_Institutions, mockInsts))
+		require.NoError(t, param.Registry_Institutions.Set(mockInsts))
 
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
@@ -1352,7 +1352,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 	t.Run("admin-can-change-anybody", func(t *testing.T) {
 		resetMockRegistryDB(t)
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
-		require.NoError(t, param.Set(param.Registry_Institutions, mockInsts))
+		require.NoError(t, param.Registry_Institutions.Set(mockInsts))
 
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
@@ -1430,7 +1430,7 @@ func TestListInstitutions(t *testing.T) {
 	t.Run("cache-hit-returns", func(t *testing.T) {
 		server_utils.ResetTestState()
 		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
-		require.NoError(t, param.Set(param.Registry_InstitutionsUrl, mockUrl.String()))
+		require.NoError(t, param.Registry_InstitutionsUrl.Set(mockUrl.String()))
 		mockInsts := []registrationFieldOption{{Name: "Foo", ID: "001"}}
 		// Expired but never evicted, so Has() still returns true
 		optionsCache.Set(mockUrl.String(), mockInsts, time.Second)
@@ -1456,7 +1456,7 @@ func TestListInstitutions(t *testing.T) {
 		optionsCache.DeleteAll()
 
 		mockInstsConfig := []registrationFieldOption{{Name: "foo", ID: "bar"}}
-		require.NoError(t, param.Set(param.Registry_Institutions, mockInstsConfig))
+		require.NoError(t, param.Registry_Institutions.Set(mockInstsConfig))
 
 		// Create a request to the endpoint
 		w := httptest.NewRecorder()
@@ -1478,13 +1478,13 @@ func TestListInstitutions(t *testing.T) {
 	t.Run("non-nil-cache-with-nonnil-config-return-config", func(t *testing.T) {
 		server_utils.ResetTestState()
 		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
-		require.NoError(t, param.Set(param.Registry_InstitutionsUrl, mockUrl.String()))
+		require.NoError(t, param.Registry_InstitutionsUrl.Set(mockUrl.String()))
 		mockInsts := []registrationFieldOption{{Name: "Foo", ID: "001"}}
 		// Expired but never evicted, so Has() still returns true
 		optionsCache.Set(mockUrl.String(), mockInsts, time.Second)
 
 		mockInstsConfig := []registrationFieldOption{{Name: "foo", ID: "bar"}}
-		require.NoError(t, param.Set(param.Registry_Institutions, mockInstsConfig))
+		require.NoError(t, param.Registry_Institutions.Set(mockInstsConfig))
 
 		// Create a request to the endpoint
 		w := httptest.NewRecorder()

@@ -111,14 +111,14 @@ func TestGetMetadataRespectsExplicitEndpoints(t *testing.T) {
 		explicitUserInfoEndpoint := "https://api.github.com/user"
 		explicitDeviceAuthEndpoint := "https://github.com/login/device/code"
 
-		require.NoError(t, param.Set(param.OIDC_AuthorizationEndpoint, explicitAuthEndpoint))
-		require.NoError(t, param.Set(param.OIDC_TokenEndpoint, explicitTokenEndpoint))
-		require.NoError(t, param.Set(param.OIDC_UserInfoEndpoint, explicitUserInfoEndpoint))
-		require.NoError(t, param.Set(param.OIDC_DeviceAuthEndpoint, explicitDeviceAuthEndpoint))
+		require.NoError(t, param.OIDC_AuthorizationEndpoint.Set(explicitAuthEndpoint))
+		require.NoError(t, param.OIDC_TokenEndpoint.Set(explicitTokenEndpoint))
+		require.NoError(t, param.OIDC_UserInfoEndpoint.Set(explicitUserInfoEndpoint))
+		require.NoError(t, param.OIDC_DeviceAuthEndpoint.Set(explicitDeviceAuthEndpoint))
 
 		// Set OIDC.Issuer to CILogon (which has OIDC discovery)
 		// This should NOT override the explicitly set endpoints
-		require.NoError(t, param.Set(param.OIDC_Issuer, "https://cilogon.org"))
+		require.NoError(t, param.OIDC_Issuer.Set("https://cilogon.org"))
 
 		// Call the metadata discovery - it will try to fetch from CILogon but should not override
 		onceMetadata.Do(getMetadata)

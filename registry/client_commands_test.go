@@ -56,10 +56,10 @@ func registryMockup(ctx context.Context, t *testing.T, testName string) *httptes
 
 	issuerTempDir := filepath.Join(tDir, testName)
 	ikeyDir := filepath.Join(issuerTempDir, "issuer-keys")
-	require.NoError(t, param.Set(param.IssuerKeysDirectory, ikeyDir))
-	require.NoError(t, param.Set(param.Server_DbLocation, filepath.Join(issuerTempDir, "test.sql")))
-	require.NoError(t, param.Set(param.Server_WebPort, 8444))
-	require.NoError(t, param.Set(param.ConfigDir, tDir))
+	require.NoError(t, param.IssuerKeysDirectory.Set(ikeyDir))
+	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(issuerTempDir, "test.sql")))
+	require.NoError(t, param.Server_WebPort.Set(8444))
+	require.NoError(t, param.ConfigDir.Set(tDir))
 
 	err := config.InitServer(ctx, server_structs.RegistryType)
 	require.NoError(t, err)
@@ -384,7 +384,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	assert.NoError(t, err)
 
 	// On by default, but just to make things explicit
-	require.NoError(t, param.Set(param.Registry_RequireKeyChaining, true))
+	require.NoError(t, param.Registry_RequireKeyChaining.Set(true))
 
 	registrySvr := registryMockup(ctx, t, "OSDFkeychaining")
 	topoSvr := topologyMockup(t, []string{"/topo/foo"})
@@ -429,8 +429,8 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	// Now we create a new key and try to use it to register a super/sub space. These shouldn't succeed
 	config.ResetIssuerPrivateKeys()
 	tDir2 := t.TempDir()
-	require.NoError(t, param.Set(param.IssuerKeysDirectory, tDir2+"/keychaining2"))
-	require.NoError(t, param.Set(param.ConfigDir, tDir2))
+	require.NoError(t, param.IssuerKeysDirectory.Set(tDir2+"/keychaining2"))
+	require.NoError(t, param.ConfigDir.Set(tDir2))
 	err = config.InitServer(ctx, server_structs.RegistryType)
 	require.NoError(t, err)
 
@@ -452,7 +452,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	require.NoError(t, err)
 
 	// Now turn off token chaining and retry -- no errors should occur
-	require.NoError(t, param.Set(param.Registry_RequireKeyChaining, false))
+	require.NoError(t, param.Registry_RequireKeyChaining.Set(false))
 	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo/bar/baz", "test-site-name")
 	require.NoError(t, err)
 
@@ -485,7 +485,7 @@ func TestRegistryKeyChaining(t *testing.T) {
 	})
 
 	// On by default, but just to make things explicit
-	require.NoError(t, param.Set(param.Registry_RequireKeyChaining, true))
+	require.NoError(t, param.Registry_RequireKeyChaining.Set(true))
 
 	registrySvr := registryMockup(ctx, t, "keychaining")
 	defer func() {
@@ -509,8 +509,8 @@ func TestRegistryKeyChaining(t *testing.T) {
 	require.NoError(t, err)
 
 	// Now we create a new key and try to use it to register a super/sub space. These shouldn't succeed
-	require.NoError(t, param.Set(param.IssuerKeysDirectory, t.TempDir()+"/keychaining2"))
-	require.NoError(t, param.Set(param.ConfigDir, t.TempDir()))
+	require.NoError(t, param.IssuerKeysDirectory.Set(t.TempDir()+"/keychaining2"))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 	err = config.InitServer(ctx, server_structs.RegistryType)
 	require.NoError(t, err)
 
@@ -526,7 +526,7 @@ func TestRegistryKeyChaining(t *testing.T) {
 	require.ErrorContains(t, err, "Cannot register a namespace that is suffixed or prefixed")
 
 	// Now turn off token chaining and retry -- no errors should occur
-	require.NoError(t, param.Set(param.Registry_RequireKeyChaining, false))
+	require.NoError(t, param.Registry_RequireKeyChaining.Set(false))
 	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo/bar/baz", "test-site-name")
 	require.NoError(t, err)
 

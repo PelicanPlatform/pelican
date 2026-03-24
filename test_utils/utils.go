@@ -205,7 +205,7 @@ func RegistryMockup(t *testing.T, prefix string) *httptest.Server {
 func InitClient(t *testing.T, initCfg map[string]any) {
 	config.ResetConfig()
 	t.Cleanup(config.ResetConfig)
-	require.NoError(t, param.Set(param.ConfigDir, t.TempDir()))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 	for key, val := range initCfg {
 		require.NoError(t, param.SetRaw(key, val))
 	}
@@ -264,7 +264,7 @@ func MockFederationRoot(t *testing.T, fInfo *pelican_url.FederationDiscovery, kS
 	var err error
 	if kSet == nil {
 		keysDir := filepath.Join(t.TempDir(), "testKeyDir")
-		require.NoError(t, param.Set(param.IssuerKeysDirectory, keysDir))
+		require.NoError(t, param.IssuerKeysDirectory.Set(keysDir))
 		pKeySetInternal, err = config.GetIssuerPublicJWKS()
 		require.NoError(t, err, "Failed to load public JWKS while creating mock federation root")
 	} else {
@@ -355,9 +355,9 @@ func MockFederationRoot(t *testing.T, fInfo *pelican_url.FederationDiscovery, kS
 
 	// Finally, set this as the federation discovery URL so tests
 	// can "discover" the info
-	require.NoError(t, param.Set(param.Federation_DiscoveryUrl, serverUrl))
+	require.NoError(t, param.Federation_DiscoveryUrl.Set(serverUrl))
 	// Set to skip TLS verification for the test server
-	require.NoError(t, param.Set(param.TLSSkipVerify, true))
+	require.NoError(t, param.TLSSkipVerify.Set(true))
 }
 
 // Create a mock issuer that responds to request for /.well-known/openid-configuration
@@ -368,7 +368,7 @@ func MockIssuer(t *testing.T, kSet *jwk.Set) string {
 	var err error
 	if kSet == nil {
 		keysDir := filepath.Join(t.TempDir(), "testKeyDir")
-		require.NoError(t, param.Set(param.IssuerKeysDirectory, keysDir))
+		require.NoError(t, param.IssuerKeysDirectory.Set(keysDir))
 		pKeySetInternal, err = config.GetIssuerPublicJWKS()
 		require.NoError(t, err, "Failed to load public JWKS while creating mock federation root")
 	} else {

@@ -20,6 +20,7 @@
 package param
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -863,13 +864,6 @@ func (sP StringParam) GetName() string {
 	return sP.name
 }
 
-// String returns the parameter name, implementing fmt.Stringer.
-// Use this to reference a parameter by name without using a raw string,
-// e.g. log.Debugf("parameter %s is set", param.Some_Param)
-func (sP StringParam) String() string {
-	return sP.name
-}
-
 func (sP StringParam) IsSet() bool {
 	return viperIsSet(sP.name)
 }
@@ -885,6 +879,11 @@ func (sP StringParam) GetEnvVarName() string {
 // EnvVarName returns the environment variable name for this parameter.
 func (sP StringParam) EnvVarName() string {
 	return paramNameToEnvVar(sP.name)
+}
+
+// Set sets this string parameter's value.
+func (sP StringParam) Set(value string) error {
+	return MultiSet(map[string]any{sP.name: value})
 }
 
 func (slP StringSliceParam) GetStringSlice() []string {
@@ -946,13 +945,6 @@ func (slP StringSliceParam) GetName() string {
 	return slP.name
 }
 
-// String returns the parameter name, implementing fmt.Stringer.
-// Use this to reference a parameter by name without using a raw string,
-// e.g. log.Debugf("parameter %s is set", param.Some_Param)
-func (slP StringSliceParam) String() string {
-	return slP.name
-}
-
 func (slP StringSliceParam) IsSet() bool {
 	return viperIsSet(slP.name)
 }
@@ -968,6 +960,11 @@ func (slP StringSliceParam) GetEnvVarName() string {
 // EnvVarName returns the environment variable name for this parameter.
 func (slP StringSliceParam) EnvVarName() string {
 	return paramNameToEnvVar(slP.name)
+}
+
+// Set sets this string slice parameter's value.
+func (slP StringSliceParam) Set(value []string) error {
+	return MultiSet(map[string]any{slP.name: value})
 }
 
 func (iP IntParam) GetInt() int {
@@ -1075,13 +1072,6 @@ func (iP IntParam) GetName() string {
 	return iP.name
 }
 
-// String returns the parameter name, implementing fmt.Stringer.
-// Use this to reference a parameter by name without using a raw string,
-// e.g. log.Debugf("parameter %s is set", param.Some_Param)
-func (iP IntParam) String() string {
-	return iP.name
-}
-
 func (iP IntParam) IsSet() bool {
 	return viperIsSet(iP.name)
 }
@@ -1099,6 +1089,11 @@ func (iP IntParam) EnvVarName() string {
 	return paramNameToEnvVar(iP.name)
 }
 
+// Set sets this integer parameter's value.
+func (iP IntParam) Set(value int) error {
+	return MultiSet(map[string]any{iP.name: value})
+}
+
 func (bRP ByteRateParam) GetByteRate() byte_rate.ByteRate {
 	config := getOrCreateConfig()
 	switch bRP.name {
@@ -1109,13 +1104,6 @@ func (bRP ByteRateParam) GetByteRate() byte_rate.ByteRate {
 }
 
 func (bRP ByteRateParam) GetName() string {
-	return bRP.name
-}
-
-// String returns the parameter name, implementing fmt.Stringer.
-// Use this to reference a parameter by name without using a raw string,
-// e.g. log.Debugf("parameter %s is set", param.Some_Param)
-func (bRP ByteRateParam) String() string {
 	return bRP.name
 }
 
@@ -1134,6 +1122,20 @@ func (bRP ByteRateParam) GetEnvVarName() string {
 // EnvVarName returns the environment variable name for this parameter.
 func (bRP ByteRateParam) EnvVarName() string {
 	return paramNameToEnvVar(bRP.name)
+}
+
+// Set sets this byte rate parameter's value.
+func (bRP ByteRateParam) Set(value byte_rate.ByteRate) error {
+	return MultiSet(map[string]any{bRP.name: value})
+}
+
+// SetString parses a string (e.g. "10MB/s") and sets this byte rate parameter.
+func (bRP ByteRateParam) SetString(value string) error {
+	parsed, err := byte_rate.ParseRate(value)
+	if err != nil {
+		return fmt.Errorf("invalid byte rate %q for parameter %s: %w", value, bRP.name, err)
+	}
+	return MultiSet(map[string]any{bRP.name: parsed})
 }
 
 func (bP BoolParam) GetBool() bool {
@@ -1303,13 +1305,6 @@ func (bP BoolParam) GetName() string {
 	return bP.name
 }
 
-// String returns the parameter name, implementing fmt.Stringer.
-// Use this to reference a parameter by name without using a raw string,
-// e.g. log.Debugf("parameter %s is set", param.Some_Param)
-func (bP BoolParam) String() string {
-	return bP.name
-}
-
 func (bP BoolParam) IsSet() bool {
 	return viperIsSet(bP.name)
 }
@@ -1325,6 +1320,11 @@ func (bP BoolParam) GetEnvVarName() string {
 // EnvVarName returns the environment variable name for this parameter.
 func (bP BoolParam) EnvVarName() string {
 	return paramNameToEnvVar(bP.name)
+}
+
+// Set sets this boolean parameter's value.
+func (bP BoolParam) Set(value bool) error {
+	return MultiSet(map[string]any{bP.name: value})
 }
 
 func (dP DurationParam) GetDuration() time.Duration {
@@ -1452,13 +1452,6 @@ func (dP DurationParam) GetName() string {
 	return dP.name
 }
 
-// String returns the parameter name, implementing fmt.Stringer.
-// Use this to reference a parameter by name without using a raw string,
-// e.g. log.Debugf("parameter %s is set", param.Some_Param)
-func (dP DurationParam) String() string {
-	return dP.name
-}
-
 func (dP DurationParam) IsSet() bool {
 	return viperIsSet(dP.name)
 }
@@ -1476,18 +1469,25 @@ func (dP DurationParam) EnvVarName() string {
 	return paramNameToEnvVar(dP.name)
 }
 
+// Set sets this duration parameter's value.
+func (dP DurationParam) Set(value time.Duration) error {
+	return MultiSet(map[string]any{dP.name: value})
+}
+
+// SetString parses a duration string (e.g. "1m", "30s") and sets this parameter.
+func (dP DurationParam) SetString(value string) error {
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return fmt.Errorf("invalid duration %q for parameter %s: %w", value, dP.name, err)
+	}
+	return MultiSet(map[string]any{dP.name: parsed})
+}
+
 func (oP ObjectParam) Unmarshal(rawVal any) error {
 	return viperUnmarshalKey(oP.name, rawVal)
 }
 
 func (oP ObjectParam) GetName() string {
-	return oP.name
-}
-
-// String returns the parameter name, implementing fmt.Stringer.
-// Use this to reference a parameter by name without using a raw string,
-// e.g. log.Debugf("parameter %s is set", param.Some_Param)
-func (oP ObjectParam) String() string {
 	return oP.name
 }
 
@@ -1506,6 +1506,11 @@ func (oP ObjectParam) GetEnvVarName() string {
 // EnvVarName returns the environment variable name for this parameter.
 func (oP ObjectParam) EnvVarName() string {
 	return paramNameToEnvVar(oP.name)
+}
+
+// Set sets this object parameter's value.
+func (oP ObjectParam) Set(value any) error {
+	return MultiSet(map[string]any{oP.name: value})
 }
 
 // allParameterNames is the list of all config keys generated from

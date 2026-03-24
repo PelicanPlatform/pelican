@@ -46,13 +46,13 @@ func TestBadConfigKeys(t *testing.T) {
 
 	setupFunc := func() *test.Hook {
 		ResetConfig()
-		require.NoError(t, param.Set(param.ConfigDir, t.TempDir()))
+		require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 		hook := test.NewLocal(logrus.StandardLogger())
 		return hook
 	}
 	t.Run("testRecognizedViperKey", func(t *testing.T) {
 		hook := setupFunc()
-		require.NoError(t, param.Set(param.Origin_FederationPrefix, "/a/prefix"))
+		require.NoError(t, param.Origin_FederationPrefix.Set("/a/prefix"))
 		InitConfigInternal(logrus.DebugLevel)
 
 		assertNoUnknownKeyLogs(t, hook.AllEntries())

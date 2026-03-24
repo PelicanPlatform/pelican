@@ -49,10 +49,10 @@ import (
 func setupPingEngine(t *testing.T, ctx context.Context, egrp *errgroup.Group) (chan bool, context.CancelFunc, string) {
 	dirname := t.TempDir()
 	server_utils.ResetTestState()
-	require.NoError(t, param.Set(param.Logging_Level, "Debug"))
-	require.NoError(t, param.Set(param.ConfigDir, dirname))
-	require.NoError(t, param.Set(param.Server_WebPort, 8444))
-	require.NoError(t, param.Set(param.Origin_Port, 8443))
+	require.NoError(t, param.Logging_Level.Set("Debug"))
+	require.NoError(t, param.ConfigDir.Set(dirname))
+	require.NoError(t, param.Server_WebPort.Set(8444))
+	require.NoError(t, param.Origin_Port.Set(8443))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)

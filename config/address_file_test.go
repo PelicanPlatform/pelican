@@ -43,14 +43,14 @@ func TestWriteAddressFile(t *testing.T) {
 	}
 
 	// Set up ConfigDir
-	require.NoError(t, param.Set(param.ConfigDir, tmpDir))
+	require.NoError(t, param.ConfigDir.Set(tmpDir))
 	setRuntimeDir(t)
 
 	t.Run("WriteAddressFileWithAllModules", func(t *testing.T) {
 		// Set up test parameters
-		require.NoError(t, param.Set(param.Server_ExternalWebUrl, "https://test.example.com:8443"))
-		require.NoError(t, param.Set(param.Origin_Url, "https://test.example.com:8444"))
-		require.NoError(t, param.Set(param.Cache_Url, "https://test.example.com:8445"))
+		require.NoError(t, param.Server_ExternalWebUrl.Set("https://test.example.com:8443"))
+		require.NoError(t, param.Origin_Url.Set("https://test.example.com:8444"))
+		require.NoError(t, param.Cache_Url.Set("https://test.example.com:8445"))
 
 		// Create modules with all types enabled
 		modules := server_structs.OriginType | server_structs.CacheType | server_structs.DirectorType
@@ -75,10 +75,10 @@ func TestWriteAddressFile(t *testing.T) {
 	})
 
 	t.Run("WriteAddressFileOriginOnly", func(t *testing.T) {
-		require.NoError(t, param.Set(param.ConfigDir, tmpDir))
+		require.NoError(t, param.ConfigDir.Set(tmpDir))
 		setRuntimeDir(t)
-		require.NoError(t, param.Set(param.Server_ExternalWebUrl, "https://origin.example.com:9443"))
-		require.NoError(t, param.Set(param.Origin_Url, "https://origin.example.com:9444"))
+		require.NoError(t, param.Server_ExternalWebUrl.Set("https://origin.example.com:9443"))
+		require.NoError(t, param.Origin_Url.Set("https://origin.example.com:9444"))
 
 		// Create modules with only origin enabled
 		modules := server_structs.OriginType
@@ -104,7 +104,7 @@ func TestWriteAddressFile(t *testing.T) {
 		viper.Reset()
 		viper.Set("ConfigDir", tmpDir)
 		setRuntimeDir(t)
-		require.NoError(t, param.Set(param.Server_ExternalWebUrl, "https://director.example.com:8443"))
+		require.NoError(t, param.Server_ExternalWebUrl.Set("https://director.example.com:8443"))
 
 		// Create modules with only director enabled
 		modules := server_structs.DirectorType
@@ -142,7 +142,7 @@ func TestWriteAddressFile(t *testing.T) {
 		viper.Reset()
 		viper.Set("ConfigDir", tmpDir)
 		setRuntimeDir(t)
-		require.NoError(t, param.Set(param.Server_ExternalWebUrl, "https://atomic.example.com:8443"))
+		require.NoError(t, param.Server_ExternalWebUrl.Set("https://atomic.example.com:8443"))
 
 		modules := server_structs.DirectorType
 
@@ -166,8 +166,8 @@ func TestWriteAddressFile(t *testing.T) {
 		viper.Reset()
 		viper.Set("ConfigDir", tmpDir)
 		setRuntimeDir(t)
-		require.NoError(t, param.Set(param.Server_ExternalWebUrl, "https://parseable.example.com:8443"))
-		require.NoError(t, param.Set(param.Origin_Url, "https://parseable.example.com:8444"))
+		require.NoError(t, param.Server_ExternalWebUrl.Set("https://parseable.example.com:8443"))
+		require.NoError(t, param.Origin_Url.Set("https://parseable.example.com:8444"))
 
 		modules := server_structs.OriginType
 
@@ -202,9 +202,9 @@ func TestWriteAddressFile(t *testing.T) {
 		viper.Reset()
 		viper.Set("ConfigDir", tmpDir)
 		setRuntimeDir(t)
-		require.NoError(t, param.Set("Server.ExternalWebUrl", "https://read.example.com:8443"))
-		require.NoError(t, param.Set("Origin.Url", "https://read.example.com:8444"))
-		require.NoError(t, param.Set("Cache.Url", "https://read.example.com:8445"))
+		require.NoError(t, param.Server_ExternalWebUrl.Set("https://read.example.com:8443"))
+		require.NoError(t, param.Origin_Url.Set("https://read.example.com:8444"))
+		require.NoError(t, param.Cache_Url.Set("https://read.example.com:8445"))
 
 		modules := server_structs.OriginType | server_structs.CacheType
 

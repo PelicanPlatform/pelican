@@ -134,17 +134,17 @@ func TestStatMemory(t *testing.T) {
 	}
 	snapshotHeap := os.Getenv("PELICAN_STRESS_SNAPSHOT_HEAP") == "1"
 
-	require.NoError(t, param.Set(param.Xrootd_EnableLocalMonitoring, false))
+	require.NoError(t, param.Xrootd_EnableLocalMonitoring.Set(false))
 	// Under testing on a laptop, we saw up to 1 second long delays happen deep in the
 	// go HTTP server framework (GC?  Lock contention?  Unclear...).  By bumping the ad
 	// lifetime to 2 seconds, we get repeated ad updates through the lifetime of the
 	// test - useful for checking propagation of changes - but don't get the spurious
 	// failures if there's a short blip in availability.
-	require.NoError(t, param.Set(param.Server_AdLifetime, "2000ms"))
-	require.NoError(t, param.Set(param.Cache_SelfTest, false))
-	require.NoError(t, param.Set(param.Origin_DirectorTest, false))
-	require.NoError(t, param.Set(param.Origin_SelfTest, false))
-	require.NoError(t, param.Set(param.Director_CachePresenceCapacity, 500))
+	require.NoError(t, param.Server_AdLifetime.SetString("2000ms"))
+	require.NoError(t, param.Cache_SelfTest.Set(false))
+	require.NoError(t, param.Origin_DirectorTest.Set(false))
+	require.NoError(t, param.Origin_SelfTest.Set(false))
+	require.NoError(t, param.Director_CachePresenceCapacity.Set(500))
 	fed := fed_test_utils.NewFedTest(t, directorPublicCfg)
 	config.DisableLoggingCensor()
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())

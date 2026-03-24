@@ -33,7 +33,7 @@ import (
 func TestGetNSIssuerURL(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	ResetTestState()
-	require.NoError(t, param.Set(param.ConfigDir, t.TempDir()))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 	require.NoError(t, config.InitClient())
 
 	require.NoError(t, param.SetRaw("Federation.RegistryUrl", "https://registry.com:8446"))
@@ -46,7 +46,7 @@ func TestGetNSIssuerURL(t *testing.T) {
 func TestGetJWKSURLFromIssuerURL(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	ResetTestState()
-	require.NoError(t, param.Set(param.ConfigDir, t.TempDir()))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 	require.NoError(t, config.InitClient())
 
 	registry := test_utils.RegistryMockup(t, "/test-prefix")

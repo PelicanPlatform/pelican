@@ -892,10 +892,10 @@ func TestConcurrentIsSetAndUnmarshalConfig(t *testing.T) {
 	}()
 
 	// Seed some config values so viper has internal state to race on
-	require.NoError(t, Set(Server_UIAdminUsers.GetName(), []string{"admin"}))
-	require.NoError(t, Set(Server_AdminGroups.GetName(), []string{"admins"}))
-	require.NoError(t, Set(Cache_Port.GetName(), 8443))
-	require.NoError(t, Set(Logging_Level.GetName(), "debug"))
+	require.NoError(t, Server_UIAdminUsers.Set([]string{"admin"}))
+	require.NoError(t, Server_AdminGroups.Set([]string{"admins"}))
+	require.NoError(t, Cache_Port.Set(8443))
+	require.NoError(t, Logging_Level.Set("debug"))
 
 	var wg sync.WaitGroup
 
@@ -930,7 +930,7 @@ func TestConcurrentIsSetAndUnmarshalConfig(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			for range 10 {
-				_ = Set(Logging_Level.GetName(), "info")
+				_ = Logging_Level.Set("info")
 			}
 		}(i)
 	}
@@ -953,7 +953,7 @@ func TestConcurrentObjectParamUnmarshal(t *testing.T) {
 		require.NoError(t, Reset())
 	}()
 
-	require.NoError(t, Set(Registry_Institutions.GetName(), []map[string]interface{}{
+	require.NoError(t, Registry_Institutions.Set([]map[string]interface{}{
 		{"name": "TestInst", "id": "test-001"},
 	}))
 
@@ -977,7 +977,7 @@ func TestConcurrentObjectParamUnmarshal(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for range 10 {
-				_ = Set(Logging_Level.GetName(), "warn")
+				_ = Logging_Level.Set("warn")
 			}
 		}()
 	}

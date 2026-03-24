@@ -57,7 +57,7 @@ func (o *HTTPSOrigin) validateExtra(e *OriginExport, numExports int) (err error)
 	// trailing / isn't handled by the origin, so fix that here
 	if strings.HasSuffix(httpServiceUrl, "/") {
 		log.Warningln("Removing trailing '/' from http service URL")
-		if err := param.Set(param.Origin_HttpServiceUrl, strings.TrimSuffix(httpServiceUrl, "/")); err != nil {
+		if err := param.Origin_HttpServiceUrl.Set(strings.TrimSuffix(httpServiceUrl, "/")); err != nil {
 			return err
 		}
 	}

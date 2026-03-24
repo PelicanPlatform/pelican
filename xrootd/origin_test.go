@@ -99,8 +99,8 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	err = os.Chmod(tmpPath, permissions)
 	require.NoError(t, err)
 
-	require.NoError(t, param.Set(param.ConfigDir, tmpPath))
-	require.NoError(t, param.Set(param.Origin_RunLocation, filepath.Join(tmpPath, "xorigin")))
+	require.NoError(t, param.ConfigDir.Set(tmpPath))
+	require.NoError(t, param.Origin_RunLocation.Set(filepath.Join(tmpPath, "xorigin")))
 	t.Cleanup(func() {
 		os.RemoveAll(tmpPath)
 	})
@@ -108,7 +108,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	test_utils.MockFederationRoot(t, nil, nil)
 
 	// Increase the log level; otherwise, its difficult to debug failures
-	require.NoError(t, param.Set(param.Logging_Level, "Debug"))
+	require.NoError(t, param.Logging_Level.Set("Debug"))
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
@@ -140,7 +140,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	}()
 	config.UpdateConfigFromListener(ln)
 	// Clear cached issuer URL so it gets recalculated with the actual port
-	require.NoError(t, param.Set(param.Server_IssuerUrl, ""))
+	require.NoError(t, param.Server_IssuerUrl.Set(""))
 
 	err = CheckXrootdEnv(originServer)
 	require.NoError(t, err)
@@ -155,10 +155,10 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	require.NoError(t, err)
 
 	portStartCallback := func(port int) {
-		require.NoError(t, param.Set(param.Origin_Port, port))
+		require.NoError(t, param.Origin_Port.Set(port))
 		if originUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {
 			originUrl.Host = originUrl.Hostname() + ":" + strconv.Itoa(port)
-			require.NoError(t, param.Set(param.Origin_Url, originUrl.String()))
+			require.NoError(t, param.Origin_Url.Set(originUrl.String()))
 			log.Debugln("Resetting Origin.Url to", originUrl.String())
 		}
 		log.Infoln("Origin startup complete on port", port)
@@ -192,17 +192,17 @@ func TestOrigin(t *testing.T) {
 
 	defer server_utils.ResetTestState()
 
-	require.NoError(t, param.Set(param.Origin_StoragePrefix, t.TempDir()))
-	require.NoError(t, param.Set(param.Origin_FederationPrefix, "/test"))
-	require.NoError(t, param.Set(param.Origin_StorageType, "posix"))
+	require.NoError(t, param.Origin_StoragePrefix.Set(t.TempDir()))
+	require.NoError(t, param.Origin_FederationPrefix.Set("/test"))
+	require.NoError(t, param.Origin_StorageType.Set("posix"))
 	// Disable functionality we're not using (and is difficult to make work on Mac)
-	require.NoError(t, param.Set(param.Origin_EnableCmsd, false))
-	require.NoError(t, param.Set(param.Origin_EnableMacaroons, false))
-	require.NoError(t, param.Set(param.Origin_EnableVoms, false))
-	require.NoError(t, param.Set(param.Origin_Port, 0))
-	require.NoError(t, param.Set(param.Server_WebPort, 0))
-	require.NoError(t, param.Set(param.TLSSkipVerify, true))
-	require.NoError(t, param.Set(param.Logging_Origin_Scitokens, "debug"))
+	require.NoError(t, param.Origin_EnableCmsd.Set(false))
+	require.NoError(t, param.Origin_EnableMacaroons.Set(false))
+	require.NoError(t, param.Origin_EnableVoms.Set(false))
+	require.NoError(t, param.Origin_Port.Set(0))
+	require.NoError(t, param.Server_WebPort.Set(0))
+	require.NoError(t, param.TLSSkipVerify.Set(true))
+	require.NoError(t, param.Logging_Origin_Scitokens.Set("debug"))
 
 	mockupCancel := originMockup(ctx, egrp, t)
 	defer mockupCancel()
@@ -236,17 +236,17 @@ func TestMultiExportOrigin(t *testing.T) {
 	require.NoError(t, err, "error reading config")
 
 	// Disable functionality we're not using for the tests
-	require.NoError(t, param.Set(param.Origin_EnableCmsd, false))
-	require.NoError(t, param.Set(param.Origin_EnableVoms, false))
-	require.NoError(t, param.Set(param.Origin_Port, 0))
-	require.NoError(t, param.Set(param.Server_WebPort, 0))
-	require.NoError(t, param.Set(param.TLSSkipVerify, true))
-	require.NoError(t, param.Set(param.Logging_Origin_Scitokens, "debug"))
+	require.NoError(t, param.Origin_EnableCmsd.Set(false))
+	require.NoError(t, param.Origin_EnableVoms.Set(false))
+	require.NoError(t, param.Origin_Port.Set(0))
+	require.NoError(t, param.Server_WebPort.Set(0))
+	require.NoError(t, param.TLSSkipVerify.Set(true))
+	require.NoError(t, param.Logging_Origin_Scitokens.Set("debug"))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
 	// Initialize the origin before getting origin exports
-	require.NoError(t, param.Set(param.ConfigDir, t.TempDir()))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
@@ -279,22 +279,22 @@ func TestMultiExportOrigin(t *testing.T) {
 func mockupS3Origin(ctx context.Context, egrp *errgroup.Group, t *testing.T, federationPrefix, bucketName, urlStyle string) context.CancelFunc {
 	regionName := "us-east-1"
 	serviceUrl := "https://s3.amazonaws.com"
-	require.NoError(t, param.Set(param.Origin_FederationPrefix, federationPrefix))
-	require.NoError(t, param.Set(param.Origin_S3Bucket, bucketName))
-	require.NoError(t, param.Set(param.Origin_S3Region, regionName))
-	require.NoError(t, param.Set(param.Origin_S3ServiceUrl, serviceUrl))
-	require.NoError(t, param.Set(param.Origin_S3UrlStyle, urlStyle))
-	require.NoError(t, param.Set(param.Origin_StorageType, "s3"))
-	require.NoError(t, param.Set(param.Origin_EnablePublicReads, true))
+	require.NoError(t, param.Origin_FederationPrefix.Set(federationPrefix))
+	require.NoError(t, param.Origin_S3Bucket.Set(bucketName))
+	require.NoError(t, param.Origin_S3Region.Set(regionName))
+	require.NoError(t, param.Origin_S3ServiceUrl.Set(serviceUrl))
+	require.NoError(t, param.Origin_S3UrlStyle.Set(urlStyle))
+	require.NoError(t, param.Origin_StorageType.Set("s3"))
+	require.NoError(t, param.Origin_EnablePublicReads.Set(true))
 
 	// Disable functionality we're not using (and is difficult to make work on Mac)
-	require.NoError(t, param.Set(param.Origin_EnableCmsd, false))
-	require.NoError(t, param.Set(param.Origin_EnableMacaroons, false))
-	require.NoError(t, param.Set(param.Origin_EnableVoms, false))
-	require.NoError(t, param.Set(param.Origin_SelfTest, false))
-	require.NoError(t, param.Set(param.Origin_Port, 0))
-	require.NoError(t, param.Set(param.Server_WebPort, 0))
-	require.NoError(t, param.Set(param.TLSSkipVerify, true))
+	require.NoError(t, param.Origin_EnableCmsd.Set(false))
+	require.NoError(t, param.Origin_EnableMacaroons.Set(false))
+	require.NoError(t, param.Origin_EnableVoms.Set(false))
+	require.NoError(t, param.Origin_SelfTest.Set(false))
+	require.NoError(t, param.Origin_Port.Set(0))
+	require.NoError(t, param.Server_WebPort.Set(0))
+	require.NoError(t, param.TLSSkipVerify.Set(true))
 
 	return originMockup(ctx, egrp, t)
 }
@@ -435,17 +435,17 @@ func TestPosixOriginWithSentinel(t *testing.T) {
 	err = os.Chmod(tmpPath, 0755)
 	require.NoError(t, err)
 
-	require.NoError(t, param.Set(param.Origin_StoragePrefix, tmpPath))
-	require.NoError(t, param.Set(param.Origin_FederationPrefix, "/test"))
-	require.NoError(t, param.Set(param.Origin_StorageType, "posix"))
+	require.NoError(t, param.Origin_StoragePrefix.Set(tmpPath))
+	require.NoError(t, param.Origin_FederationPrefix.Set("/test"))
+	require.NoError(t, param.Origin_StorageType.Set("posix"))
 	// Disable functionality we're not using (and is difficult to make work on Mac)
-	require.NoError(t, param.Set(param.Origin_EnableCmsd, false))
-	require.NoError(t, param.Set(param.Origin_EnableMacaroons, false))
-	require.NoError(t, param.Set(param.Origin_EnableVoms, false))
-	require.NoError(t, param.Set(param.Origin_Port, 0))
-	require.NoError(t, param.Set(param.Server_WebPort, 0))
-	require.NoError(t, param.Set(param.TLSSkipVerify, true))
-	require.NoError(t, param.Set(param.Logging_Origin_Scitokens, "trace"))
+	require.NoError(t, param.Origin_EnableCmsd.Set(false))
+	require.NoError(t, param.Origin_EnableMacaroons.Set(false))
+	require.NoError(t, param.Origin_EnableVoms.Set(false))
+	require.NoError(t, param.Origin_Port.Set(0))
+	require.NoError(t, param.Server_WebPort.Set(0))
+	require.NoError(t, param.TLSSkipVerify.Set(true))
+	require.NoError(t, param.Logging_Origin_Scitokens.Set("trace"))
 
 	mockupCancel := originMockup(ctx, egrp, t)
 	defer mockupCancel()

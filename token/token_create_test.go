@@ -214,8 +214,8 @@ func TestCreateToken(t *testing.T) {
 	require.NoError(t, param.SetRaw("IssuerUrl", "https://my-issuer.com"))
 	tDir := t.TempDir()
 	kDir := filepath.Join(tDir, "testKeyDir")
-	require.NoError(t, param.Set(param.IssuerKeysDirectory, kDir))
-	require.NoError(t, param.Set(param.ConfigDir, t.TempDir()))
+	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 	err := config.InitServer(ctx, server_structs.DirectorType)
 	require.NoError(t, err)
 

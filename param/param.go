@@ -116,7 +116,7 @@ func BindAllParameters(v *viper.Viper) {
 // element after splitting.
 // Empty strings after splitting are filtered out.
 func stringToSliceHookFunc() mapstructure.DecodeHookFunc {
-	return func(f reflect.Kind, t reflect.Kind, data interface{}) (interface{}, error) {
+	return func(f reflect.Kind, t reflect.Kind, data any) (any, error) {
 		if f != reflect.String || t != reflect.Slice {
 			return data, nil
 		}
@@ -168,7 +168,7 @@ func stringToSliceHookFunc() mapstructure.DecodeHookFunc {
 // For strings that don't look like byte rates (don't contain rate units), returns data unchanged
 // so other hooks or default conversions can handle them.
 func stringToByteRateHookFunc() mapstructure.DecodeHookFunc {
-	return func(f reflect.Type, t reflect.Type, data interface{}) (interface{}, error) {
+	return func(f reflect.Type, t reflect.Type, data any) (any, error) {
 		// Only convert string to int or ByteRate
 		byteRateType := reflect.TypeOf(byte_rate.ByteRate(0))
 		if f.Kind() != reflect.String || (t.Kind() != reflect.Int && t != byteRateType) {
@@ -329,9 +329,9 @@ func GetUnmarshaledConfig() (*Config, error) {
 }
 
 // Helper function to set a parameter field entry in configWithType
-func setField(fieldType reflect.Type, value interface{}) reflect.Value {
+func setField(fieldType reflect.Type, value any) reflect.Value {
 	field := reflect.New(fieldType).Elem()
-	sliceInterfaceType := reflect.TypeOf([]interface{}(nil))
+	sliceInterfaceType := reflect.TypeOf([]any(nil))
 
 	// Check if the type of the value is nil
 	if reflect.TypeOf(value) == nil {
@@ -456,8 +456,8 @@ type Param interface {
 // Set sets a typed parameter value in both viper and the config struct.
 // Prefer this over SetRaw to benefit from compile-time key safety.
 // This function is thread-safe and will update the atomic config pointer.
-func Set(p Param, value interface{}) error {
-	return MultiSet(map[string]interface{}{p.GetName(): value})
+func Set(p Param, value any) error {
+	return MultiSet(map[string]any{p.GetName(): value})
 }
 
 // SetRaw sets a parameter value by its raw string key in both viper and the
@@ -465,15 +465,15 @@ func Set(p Param, value interface{}) error {
 // is not available (e.g. dynamic keys or internal viper keys like "config").
 // Prefer Set() with a typed Param when possible.
 // This function is thread-safe and will update the atomic config pointer.
-func SetRaw(key string, value interface{}) error {
-	return MultiSet(map[string]interface{}{key: value})
+func SetRaw(key string, value any) error {
+	return MultiSet(map[string]any{key: value})
 }
 
 // MultiSet sets multiple parameter values in both viper and the config struct.
 // This function is thread-safe and will update the atomic config pointer.
 // It is more efficient than calling Set multiple times as it only updates
 // the config object once.
-func MultiSet(keyValues map[string]interface{}) error {
+func MultiSet(keyValues map[string]any) error {
 	configMutex.Lock()
 	defer configMutex.Unlock()
 

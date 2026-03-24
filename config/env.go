@@ -129,12 +129,12 @@ func bindLegacyClientEnv() {
 
 	// Handle legacy config for (PELICAN_)NEAREST_CACHE
 	if configuredCaches, isSet := os.LookupEnv("NEAREST_CACHE"); isSet {
-		log.Warningf("You are using a legacy/deprecated parameter 'NEAREST_CACHE' to indicate preferred caches. Please use %s instead", param.Client_PreferredCaches)
+		log.Warningf("You are using a legacy/deprecated parameter 'NEAREST_CACHE' to indicate preferred caches. Please use %s instead", param.Client_PreferredCaches.GetName())
 		viper.Set(param.Client_PreferredCaches.GetName(), strings.Split(configuredCaches, ","))
 	} else {
 		for _, prefix := range prefixes {
 			if val, isSet := os.LookupEnv(prefix.String() + "_NEAREST_CACHE"); isSet {
-				log.Warningf("You are using a legacy/deprecated parameter '%s_NEAREST_CACHE' to indicate preferred caches. Please use %s instead", prefix.String(), param.Client_PreferredCaches)
+				log.Warningf("You are using a legacy/deprecated parameter '%s_NEAREST_CACHE' to indicate preferred caches. Please use %s instead", prefix.String(), param.Client_PreferredCaches.GetName())
 				viper.Set(param.Client_PreferredCaches.GetName(), strings.Split(val, ","))
 				break
 			}

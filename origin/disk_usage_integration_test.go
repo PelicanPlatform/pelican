@@ -54,11 +54,11 @@ func TestDiskUsageIntegration(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(exportDir, "file2.txt"), []byte("world"), 0644))
 
 	// Configure parameters
-	require.NoError(t, param.Set(param.Origin_StorageType, "posix"))
-	require.NoError(t, param.Set(param.Origin_EnableDiskUsageCalculation, true))
-	require.NoError(t, param.Set(param.Origin_DiskUsageCalculationInterval, "100ms"))
-	require.NoError(t, param.Set(param.Origin_DiskUsageCalculationRateLimit, 1000))
-	require.NoError(t, param.Set(param.Origin_ExportVolumes, []string{exportDir + ":/test"}))
+	require.NoError(t, param.Origin_StorageType.Set("posix"))
+	require.NoError(t, param.Origin_EnableDiskUsageCalculation.Set(true))
+	require.NoError(t, param.Origin_DiskUsageCalculationInterval.SetString("100ms"))
+	require.NoError(t, param.Origin_DiskUsageCalculationRateLimit.Set(1000))
+	require.NoError(t, param.Origin_ExportVolumes.Set([]string{exportDir + ":/test"}))
 
 	// Reset the origin exports cache to pick up new configuration
 	server_utils.ResetOriginExports()
@@ -112,7 +112,7 @@ func TestDiskUsageDisabled(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	// Disable disk usage calculation
-	require.NoError(t, param.Set(param.Origin_EnableDiskUsageCalculation, false))
+	require.NoError(t, param.Origin_EnableDiskUsageCalculation.Set(false))
 
 	// Create context and errgroup
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)

@@ -77,22 +77,22 @@ func getMetadata() {
 	// Only set endpoints from metadata if they were not explicitly configured by the user.
 	// This allows users to override discovery with explicit endpoint URLs (e.g., for GitHub OAuth2)
 	if !param.OIDC_DeviceAuthEndpoint.IsSet() {
-		if err := param.Set(param.OIDC_DeviceAuthEndpoint, metadata.DeviceAuthURL); err != nil {
+		if err := param.OIDC_DeviceAuthEndpoint.Set(metadata.DeviceAuthURL); err != nil {
 			log.WithError(err).Warn("Failed to set OIDC.DeviceAuthEndpoint from issuer metadata")
 		}
 	}
 	if !param.OIDC_TokenEndpoint.IsSet() {
-		if err := param.Set(param.OIDC_TokenEndpoint, metadata.TokenURL); err != nil {
+		if err := param.OIDC_TokenEndpoint.Set(metadata.TokenURL); err != nil {
 			log.WithError(err).Warn("Failed to set OIDC.TokenEndpoint from issuer metadata")
 		}
 	}
 	if !param.OIDC_UserInfoEndpoint.IsSet() {
-		if err := param.Set(param.OIDC_UserInfoEndpoint, metadata.UserInfoURL); err != nil {
+		if err := param.OIDC_UserInfoEndpoint.Set(metadata.UserInfoURL); err != nil {
 			log.WithError(err).Warn("Failed to set OIDC.UserInfoEndpoint from issuer metadata")
 		}
 	}
 	if !param.OIDC_AuthorizationEndpoint.IsSet() {
-		if err := param.Set(param.OIDC_AuthorizationEndpoint, metadata.AuthURL); err != nil {
+		if err := param.OIDC_AuthorizationEndpoint.Set(metadata.AuthURL); err != nil {
 			log.WithError(err).Warn("Failed to set OIDC.AuthorizationEndpoint from issuer metadata")
 		}
 	}

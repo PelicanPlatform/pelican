@@ -63,7 +63,7 @@ func TestLoggingCallback(t *testing.T) {
 	testLogger.SetFormatter(&log.TextFormatter{DisableColors: true})
 
 	// Set initial log level to INFO
-	require.NoError(t, param.Set(param.Logging_Level, "info"))
+	require.NoError(t, param.Logging_Level.Set("info"))
 	testLogger.SetLevel(log.InfoLevel)
 
 	// Register the logging callback - note this affects the global logger,
@@ -79,7 +79,7 @@ func TestLoggingCallback(t *testing.T) {
 	assert.NotContains(t, infoOutput, "test debug message", "DEBUG message should not be logged at INFO level")
 
 	// Change log level via param to DEBUG
-	require.NoError(t, param.Set(param.Logging_Level, "debug"))
+	require.NoError(t, param.Logging_Level.Set("debug"))
 
 	// Poll briefly for the callback to apply the new level
 	for i := 0; i < 5; i++ {

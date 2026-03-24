@@ -138,11 +138,11 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 	dirpath := t.TempDir()
 
 	server_utils.ResetTestState()
-	require.NoError(t, param.Set(param.Logging_Level, "Debug"))
-	require.NoError(t, param.Set(param.ConfigDir, filepath.Join(dirpath, "config")))
-	require.NoError(t, param.Set(param.Server_WebPort, "0"))
-	require.NoError(t, param.Set(param.Server_DbLocation, filepath.Join(dirpath, "ns-registry.sqlite")))
-	require.NoError(t, param.Set(param.Origin_FederationPrefix, "/foo"))
+	require.NoError(t, param.Logging_Level.Set("Debug"))
+	require.NoError(t, param.ConfigDir.Set(filepath.Join(dirpath, "config")))
+	require.NoError(t, param.Server_WebPort.Set(0))
+	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(dirpath, "ns-registry.sqlite")))
+	require.NoError(t, param.Origin_FederationPrefix.Set("/foo"))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
