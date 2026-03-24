@@ -17,6 +17,13 @@ If you prefer to install Pelican as a standalone binary, you need to follow [add
 
 For _macOS_ and _Windows_ users who want to serve a Pelican cache, please use [Pelican Docker image](../install/docker.mdx).
 
+### Enable Time Synchronization
+
+Pelican servers rely on time-sensitive tokens for authorization.
+If your server's clock is not synchronized, tokens may be rejected and your Cache may fail to join the federation.
+Please ensure NTP is enabled on your server.
+See [Server Prerequisites](../install.mdx#enable-time-synchronization) for setup instructions.
+
 ### Open Firewall Port for Pelican Cache
 
 The Pelican cache listens to two TCP ports for file transfers and Web UI. By default, the file transfer port is at `8442` and the Web UI and APIs port is at `8444`. If your server has firewall policy in place, please open the two ports for both incoming the outgoing TCP requests to allow the Pelican cache to function as expected.
