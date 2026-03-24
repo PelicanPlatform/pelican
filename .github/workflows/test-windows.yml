@@ -87,9 +87,16 @@ jobs:
         with:
           paths: junit-${{ matrix.binary_name }}.xml
 
+      - name: Generate GoReleaser config
+        # Use bash (from Git for Windows) so we can run the shell script
+        # directly. WSL is not available on GitHub Actions Windows runners,
+        # so `make generate-goreleaser` (which invokes a .sh script) fails.
+        shell: bash
+        run: ./scripts/generate_goreleaser.sh .goreleaser.in.yml .goreleaser.generated.yml
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: latest
-          args: build --single-target --clean --snapshot
+          args: build --single-target --clean --snapshot --config .goreleaser.generated.yml

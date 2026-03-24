@@ -114,15 +114,15 @@ pelican-clean:
 .PHONY: generate-goreleaser
 generate-goreleaser:
 	@echo GENERATE GORELEASER FILE
-	$(PWD)/scripts/generate_goreleaser.sh
+	./scripts/generate_goreleaser.sh .goreleaser.in.yml .goreleaser.generated.yml
 
 .PHONY: pelican-build
-pelican-build:
+pelican-build: generate-goreleaser
 	@echo PELICAN BUILD
 ifeq ($(USE_DOCKER),0)
-	@goreleaser --clean --snapshot
+	@goreleaser --clean --snapshot --config .goreleaser.generated.yml
 else
-	@$(CONTAINER_TOOL) run -w /app -v $(PWD):/app goreleaser/goreleaser --clean --snapshot
+	@$(CONTAINER_TOOL) run -w /app -v $(PWD):/app goreleaser/goreleaser --clean --snapshot --config .goreleaser.generated.yml
 endif
 
 .PHONY: pelican-dev-build
