@@ -1058,6 +1058,12 @@ description: |+
   origin will automatically remove the partial file from the temporary location. Without
   atomic writes, the 500 MiB fragment would remain at the intended path and be served to
   any client that requests it.
+
+  The atomic upload mechanism uses `rename(2)` to move completed files from Origin.UploadTempLocation
+  into the export's StoragePrefix. Because POSIX filesystems do not support renaming files across
+  filesystem boundaries, Origin.UploadTempLocation must reside on the same filesystem as every
+  configured export's StoragePrefix. Pelican will reject the configuration at startup if a
+  cross-filesystem mismatch is detected.
 type: bool
 default: false
 components: ["origin"]
@@ -1073,6 +1079,10 @@ description: |+
   This is only available for origins that have a StorageType of "posix". The configured
   location must not be equal to or under any export's StoragePrefix, as that would make
   temporary upload files accessible via the federation namespace.
+
+  This location must also reside on the same filesystem as every configured export's
+  StoragePrefix, because POSIX filesystems do not support renaming files across filesystem
+  boundaries. If a mismatch is detected, Pelican will reject the configuration at startup.
 type: filename
 default: $Origin.RunLocation/in-progress
 components: ["origin"]
