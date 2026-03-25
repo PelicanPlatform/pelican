@@ -43,7 +43,7 @@ changelog:
 snapshot:
   # The container images install snapshot builds.
   # Override the default template, which includes extra cruft.
-  version_template: "{{ .Version }}"
+  version_template: "%VERSION%"
 
 before:
   hooks:
@@ -70,7 +70,7 @@ builds:
       - forceposix
     ldflags:
       - &ldflags-metadata
-        -X github.com/pelicanplatform/pelican/version.commit={{.Commit}} -X github.com/pelicanplatform/pelican/version.date={{.Date}} -X github.com/pelicanplatform/pelican/version.builtBy=goreleaser -X github.com/pelicanplatform/pelican/version.version={{.Version}}
+        -X github.com/pelicanplatform/pelican/version.commit={{.Commit}} -X github.com/pelicanplatform/pelican/version.date={{.Date}} -X github.com/pelicanplatform/pelican/version.builtBy=goreleaser -X github.com/pelicanplatform/pelican/version.version=%VERSION%
       - &ldflags-strip-symbols
         -s -w
     ignore:
@@ -294,10 +294,7 @@ nfpms:
     formats:
       - rpm
     provides:
-      # brianaydemir 2025-05-15: Because some software, e.g., HTCSS, has
-      # a version constraint on `pelican`, we need to include some version
-      # here. However, I have found no way to refer to {{ .Version }}.
-      - pelican = 7.16.1
+      - pelican = %VERSION%
   # end package pelican-debug
 
   - id: pelican-osdf-compat
@@ -323,14 +320,10 @@ nfpms:
     dependencies:
       - pelican
     provides:
-      ## does not work: {{ .Version }} doesn't get substituted in this list
-      # - osdf-client = {{ .Version }}
-      # - stashcp = {{ .Version }}
-      # - condor-stash-plugin = {{ .Version }}
-      - "stashcache-client = 7"
-      - "osdf-client = 7"
-      - "stashcp = 7"
-      - "condor-stash-plugin = 7"
+      - "stashcache-client = %RPMVERSION%"
+      - "osdf-client = %RPMVERSION%"
+      - "stashcp = %RPMVERSION%"
+      - "condor-stash-plugin = %RPMVERSION%"
     overrides:
       apk:
         contents:
@@ -359,12 +352,6 @@ nfpms:
           - "osdf-client < 7"
           - "stashcp < 7"
           - "condor-stash-plugin < 7"
-        ## rpm specific syntax:
-        ## also does not work: %{version} doesn't get expanded
-        # provides:
-        #   - "osdf-client = %{version}"
-        #   - "stashcp = %{version}"
-        #   - "condor-stash-plugin = %{version}"
       deb:
         contents:
           - src: "./pelican"
@@ -381,10 +368,10 @@ nfpms:
             type: config|noreplace
         # deb has different syntax
         provides:
-          - "stashcache-client (= 7)"
-          - "osdf-client (= 7)"
-          - "stashcp (= 7)"
-          - "condor-stash-plugin (= 7)"
+          - "stashcache-client (= %RPMVERSION%)"
+          - "osdf-client (= %RPMVERSION%)"
+          - "stashcp (= %RPMVERSION%)"
+          - "condor-stash-plugin (= %RPMVERSION%)"
         replaces:
           - "stashcache-client (<< 7)"
           - "osdf-client (<< 7)"
@@ -467,11 +454,10 @@ nfpms:
     overrides:
       rpm:
         provides:
-          ## {{ .Version }} substitutions do not work in this list
-          - "pelican-origin = 7"
-          - "pelican-cache = 7"
-          - "pelican-registry = 7"
-          - "pelican-director = 7"
+          - "pelican-origin = %RPMVERSION%"
+          - "pelican-cache = %RPMVERSION%"
+          - "pelican-registry = %RPMVERSION%"
+          - "pelican-director = %RPMVERSION%"
         dependencies:
           - "pelican >= 7.11.0"
           # Minimum XRootD version 5.8.2 is also enforced in xrootd/version.go - keep these in sync

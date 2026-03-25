@@ -187,10 +187,12 @@ RUN --mount=type=cache,id=go-cache,target=/root/.cache/go-build,sharing=shared \
   set -eux
   set -o pipefail
 
+  make generate-goreleaser
+
   if ${IS_NONRELEASE_BUILD}; then
-    goreleaser build --id pelican-server --clean --single-target --snapshot
+    goreleaser build --id pelican-server --clean --single-target --snapshot --config .goreleaser.generated.yml
   else
-    goreleaser build --id pelican-server --clean --single-target
+    goreleaser build --id pelican-server --clean --single-target --config .goreleaser.generated.yml
   fi
 
   # NOTE (brianaydemir): GoReleaser creates a dist directory whose path
