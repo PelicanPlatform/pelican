@@ -421,9 +421,9 @@ func TestLargeFile(t *testing.T) {
 
 	server_utils.ResetTestState()
 
-	clientConfig := map[string]interface{}{
-		"Client.MaximumDownloadSpeed":     40 * 1024 * 1024,
-		"Transport.ResponseHeaderTimeout": "60s",
+	clientConfig := map[param.Param]any{
+		param.Client_MaximumDownloadSpeed:     40 * 1024 * 1024,
+		param.Transport_ResponseHeaderTimeout: "60s",
 	}
 	test_utils.InitClient(t, clientConfig)
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)

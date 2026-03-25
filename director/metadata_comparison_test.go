@@ -227,12 +227,12 @@ func TestCompareMetadata(t *testing.T) {
 			RegistryEndpoint: "https://registry.example.com",
 		}
 		test_utils.MockFederationRoot(t, &fedInfo, nil)
-		test_utils.InitClient(t, map[string]any{
-			param.Federation_DiscoveryUrl.GetName(): "https://director.example.com",
-			"Federation.DirectorUrl":                "https://director.example.com",
-			"Federation.RegistryUrl":                "https://registry.example.com",
-			"Server.ExternalWebUrl":                 "https://director.example.com",
-			param.TLSSkipVerify.GetName():           true,
+		test_utils.InitClient(t, map[param.Param]any{
+			param.Federation_DiscoveryUrl: "https://director.example.com",
+			param.Federation_DirectorUrl:                "https://director.example.com",
+			param.Federation_RegistryUrl:                "https://registry.example.com",
+			param.Server_ExternalWebUrl:                 "https://director.example.com",
+			param.TLSSkipVerify:           true,
 		})
 
 		ctx := context.Background()
@@ -255,11 +255,11 @@ func TestCompareMetadata(t *testing.T) {
 			RegistryEndpoint: "https://registry.example.com",
 		}
 		test_utils.MockFederationRoot(t, &fedInfo, nil)
-		test_utils.InitClient(t, map[string]any{
-			"Federation.DirectorUrl":      "https://director.example.com",
-			"Federation.RegistryUrl":      "https://registry.example.com",
-			"Server.ExternalWebUrl":       "https://director.example.com",
-			param.TLSSkipVerify.GetName(): true,
+		test_utils.InitClient(t, map[param.Param]any{
+			param.Federation_DirectorUrl:      "https://director.example.com",
+			param.Federation_RegistryUrl:      "https://registry.example.com",
+			param.Server_ExternalWebUrl:       "https://director.example.com",
+			param.TLSSkipVerify: true,
 		})
 
 		ctx := context.Background()
@@ -300,12 +300,12 @@ func TestCompareMetadata(t *testing.T) {
 			DiscoveryEndpoint: discoveryServer.URL,
 		}
 		test_utils.MockFederationRoot(t, &localFedInfo, nil)
-		test_utils.InitClient(t, map[string]any{
-			param.Federation_DiscoveryUrl.GetName(): discoveryServer.URL,
-			"Federation.DirectorUrl":                "https://director.example.com",
-			"Federation.RegistryUrl":                "https://registry.example.com",
-			"Server.ExternalWebUrl":                 "https://my-director.example.com",
-			param.TLSSkipVerify.GetName():           true,
+		test_utils.InitClient(t, map[param.Param]any{
+			param.Federation_DiscoveryUrl: discoveryServer.URL,
+			param.Federation_DirectorUrl:                "https://director.example.com",
+			param.Federation_RegistryUrl:                "https://registry.example.com",
+			param.Server_ExternalWebUrl:                 "https://my-director.example.com",
+			param.TLSSkipVerify:           true,
 		})
 
 		ctx := context.Background()
@@ -350,12 +350,12 @@ func TestCompareMetadata(t *testing.T) {
 			DiscoveryEndpoint: discoveryServer.URL,
 		}
 		test_utils.MockFederationRoot(t, &localFedInfo, nil)
-		test_utils.InitClient(t, map[string]any{
-			param.Federation_DiscoveryUrl.GetName(): discoveryServer.URL,
-			"Federation.DirectorUrl":                "https://director.example.com",
-			"Federation.RegistryUrl":                "https://registry.example.com",
-			"Server.ExternalWebUrl":                 "https://my-director.example.com",
-			param.TLSSkipVerify.GetName():           true,
+		test_utils.InitClient(t, map[param.Param]any{
+			param.Federation_DiscoveryUrl: discoveryServer.URL,
+			param.Federation_DirectorUrl:                "https://director.example.com",
+			param.Federation_RegistryUrl:                "https://registry.example.com",
+			param.Server_ExternalWebUrl:                 "https://my-director.example.com",
+			param.TLSSkipVerify:           true,
 		})
 
 		ctx := context.Background()
@@ -399,12 +399,12 @@ func TestCompareMetadata(t *testing.T) {
 			DiscoveryEndpoint: discoveryServer.URL,
 		}
 		test_utils.MockFederationRoot(t, &localFedInfo, nil)
-		test_utils.InitClient(t, map[string]any{
-			param.Federation_DiscoveryUrl.GetName(): discoveryServer.URL,
-			"Federation.DirectorUrl":                "https://director.example.com",
-			"Federation.RegistryUrl":                "https://registry.example.com",
-			"Server.ExternalWebUrl":                 "https://my-director.example.com",
-			param.TLSSkipVerify.GetName():           true,
+		test_utils.InitClient(t, map[param.Param]any{
+			param.Federation_DiscoveryUrl: discoveryServer.URL,
+			param.Federation_DirectorUrl:                "https://director.example.com",
+			param.Federation_RegistryUrl:                "https://registry.example.com",
+			param.Server_ExternalWebUrl:                 "https://my-director.example.com",
+			param.TLSSkipVerify:           true,
 		})
 
 		ctx := context.Background()
@@ -433,12 +433,12 @@ func TestCompareAndStoreMetadataDiscrepancy(t *testing.T) {
 			RegistryEndpoint: "https://registry.example.com",
 		}
 		test_utils.MockFederationRoot(t, &fedInfo, nil)
-		test_utils.InitClient(t, map[string]any{
-			param.Federation_DiscoveryUrl.GetName(): "https://director.example.com",
-			"Federation.DirectorUrl":                "https://director.example.com",
-			"Federation.RegistryUrl":                "https://registry.example.com",
-			"Server.ExternalWebUrl":                 "https://director.example.com",
-			param.TLSSkipVerify.GetName():           true,
+		test_utils.InitClient(t, map[param.Param]any{
+			param.Federation_DiscoveryUrl: "https://director.example.com",
+			param.Federation_DirectorUrl:                "https://director.example.com",
+			param.Federation_RegistryUrl:                "https://registry.example.com",
+			param.Server_ExternalWebUrl:                 "https://director.example.com",
+			param.TLSSkipVerify:           true,
 		})
 
 		ctx := context.Background()
@@ -466,12 +466,12 @@ func TestLaunchMetadataComparisonLoop(t *testing.T) {
 			RegistryEndpoint: "https://registry.example.com",
 		}
 		test_utils.MockFederationRoot(t, &fedInfo, nil)
-		test_utils.InitClient(t, map[string]any{
-			param.Federation_DiscoveryUrl.GetName(): "https://director.example.com",
-			"Federation.DirectorUrl":                "https://director.example.com",
-			"Federation.RegistryUrl":                "https://registry.example.com",
-			"Server.ExternalWebUrl":                 "https://director.example.com",
-			param.TLSSkipVerify.GetName():           true,
+		test_utils.InitClient(t, map[param.Param]any{
+			param.Federation_DiscoveryUrl: "https://director.example.com",
+			param.Federation_DirectorUrl:                "https://director.example.com",
+			param.Federation_RegistryUrl:                "https://registry.example.com",
+			param.Server_ExternalWebUrl:                 "https://director.example.com",
+			param.TLSSkipVerify:           true,
 		})
 
 		// Set a short interval for testing

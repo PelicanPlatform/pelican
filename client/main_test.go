@@ -494,12 +494,12 @@ func TestParseRemoteAsPUrl(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			// Set up global metadata if we have it. We do this because the function may
 			// fall back to configured discovery/director URLs if it can't find them in the URL
-			configOpts := map[string]any{"TLSSkipVerify": true}
+			configOpts := map[param.Param]any{param.TLSSkipVerify: true}
 			if test.discEP != "" {
-				configOpts[param.Federation_DiscoveryUrl.GetName()] = test.discEP
+				configOpts[param.Federation_DiscoveryUrl] = test.discEP
 			}
 			if test.dirEP != "" {
-				configOpts["Federation.DirectorUrl"] = test.dirEP
+				configOpts[param.Federation_DirectorUrl] = test.dirEP
 			}
 
 			test_utils.InitClient(t, configOpts)

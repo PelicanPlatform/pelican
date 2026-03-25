@@ -128,11 +128,11 @@ func TestFederationDiscoveryHandler(t *testing.T) {
 			server_utils.ResetTestState()
 			fedInfo := pelican_url.FederationDiscovery{DirectorEndpoint: tc.dirUrl, RegistryEndpoint: tc.regUrl}
 			test_utils.MockFederationRoot(t, &fedInfo, nil)
-			test_utils.InitClient(t, map[string]any{
-				param.Federation_DiscoveryUrl.GetName(): param.Federation_DiscoveryUrl.GetString(),
-				"Federation.DirectorUrl":                tc.dirUrl,
-				"Federation.RegistryUrl":                tc.regUrl,
-				param.TLSSkipVerify.GetName():           true,
+			test_utils.InitClient(t, map[param.Param]any{
+				param.Federation_DiscoveryUrl: param.Federation_DiscoveryUrl.GetString(),
+				param.Federation_DirectorUrl:                tc.dirUrl,
+				param.Federation_RegistryUrl:                tc.regUrl,
+				param.TLSSkipVerify:           true,
 			})
 
 			// Enable federation metadata hosting for the test -- must be done _after_
@@ -202,10 +202,10 @@ func TestOidcDiscoveryHandler(t *testing.T) {
 			server_utils.ResetTestState()
 			fedInfo := pelican_url.FederationDiscovery{DirectorEndpoint: tc.dirUrl}
 			test_utils.MockFederationRoot(t, &fedInfo, nil)
-			test_utils.InitClient(t, map[string]any{
-				param.Federation_DiscoveryUrl.GetName(): param.Federation_DiscoveryUrl.GetString(),
-				"Federation.DirectorUrl":                tc.dirUrl,
-				param.TLSSkipVerify.GetName():           true,
+			test_utils.InitClient(t, map[param.Param]any{
+				param.Federation_DiscoveryUrl: param.Federation_DiscoveryUrl.GetString(),
+				param.Federation_DirectorUrl:                tc.dirUrl,
+				param.TLSSkipVerify:           true,
 			})
 
 			w := httptest.NewRecorder()
