@@ -228,7 +228,14 @@ func InitClient(t *testing.T, initCfg map[param.Param]any) {
 			case param.StringSliceParam:
 				err = tp.Set(val.([]string))
 			case param.DurationParam:
-				err = tp.SetString(val.(string))
+				switch v := val.(type) {
+				case string:
+					err = tp.SetString(v)
+				case time.Duration:
+					err = tp.SetString(v.String())
+				default:
+					t.Fatalf("InitClient: unsupported value type %T for DurationParam %q", val, p.GetName())
+				}
 			default:
 				err = param.Set(p, val)
 			}
