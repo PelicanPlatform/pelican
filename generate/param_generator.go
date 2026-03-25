@@ -87,6 +87,7 @@ func GenParamEnum() {
 	boolParamMap := make(map[string]string)
 	durationParamMap := make(map[string]string)
 	objectParamMap := make(map[string]string)
+	opaqueParamMap := make(map[string]string)
 	allParamNames := make([]string, 0, 512)
 
 	// Skip the first parameter (ConfigBase is special)
@@ -109,13 +110,14 @@ func GenParamEnum() {
 			}
 		}
 
-		// If `direct_access` is set to false, then we are not allowed to access the value via the
-		// param module.  Typically, this indicates there's some other mechanism in the config module
-		// that should be used instead (such as when there's a computed value).
+		// If `direct_access` is set to false, then we generate an OpaqueParam instead of the
+		// normal typed param. OpaqueParam provides metadata methods (GetName, EnvVarName, etc.)
+		// but no getters or setters, because the value is typically computed via some other
+		// mechanism in the config module.
+		isOpaque := false
 		if entryDirectAccess, ok := entry["direct_access"]; ok {
 			if entryVal, ok := entryDirectAccess.(bool); ok && !entryVal {
-				// direct_access = false; do not generate parameter
-				continue
+				isOpaque = true
 			} else if !ok {
 				panic(fmt.Sprintf("Parameter entry '%s' has direct_access set to non-boolean", entryName))
 			}
@@ -165,6 +167,11 @@ func GenParamEnum() {
 		}
 
 		name := strings.ReplaceAll(rawName, ".", "_")
+		if isOpaque {
+			opaqueParamMap[name] = rawName
+			allParamNames = append(allParamNames, rawName)
+			continue
+		}
 		pType := entry["type"].(string)
 		switch pType {
 		case "url":
@@ -211,10 +218,11 @@ func GenParamEnum() {
 		BoolMap                map[string]string
 		DurationMap            map[string]string
 		ObjectMap              map[string]string
+		OpaqueMap              map[string]string
 		DeprecatedMap          map[string][]string
 		RuntimeConfigurableMap map[string]bool
 		AllParamNames          []string
-	}{StringMap: stringParamMap, StringSliceMap: stringSliceParamMap, IntMap: intParamMap, ByteRateMap: byteRateParamMap, BoolMap: boolParamMap, DurationMap: durationParamMap, ObjectMap: objectParamMap, DeprecatedMap: deprecatedMap, RuntimeConfigurableMap: runtimeConfigurableMap, AllParamNames: allParamNames})
+	}{StringMap: stringParamMap, StringSliceMap: stringSliceParamMap, IntMap: intParamMap, ByteRateMap: byteRateParamMap, BoolMap: boolParamMap, DurationMap: durationParamMap, ObjectMap: objectParamMap, OpaqueMap: opaqueParamMap, DeprecatedMap: deprecatedMap, RuntimeConfigurableMap: runtimeConfigurableMap, AllParamNames: allParamNames})
 
 	if err != nil {
 		panic(err)
@@ -487,6 +495,14 @@ type DurationParam struct {
 }
 
 type ObjectParam struct {
+	name string
+}
+
+// OpaqueParam represents a parameter whose value is not directly accessible
+// via the param package. It provides metadata methods (GetName, EnvVarName,
+// IsSet, IsRuntimeConfigurable) but no getters or setters, because the value
+// is typically computed via some other mechanism in the config module.
+type OpaqueParam struct {
 	name string
 }
 
@@ -796,6 +812,27 @@ func (oP ObjectParam) Set(value any) error {
 	return MultiSet(map[string]any{oP.name: value})
 }
 
+func (oqP OpaqueParam) GetName() string {
+	return oqP.name
+}
+
+func (oqP OpaqueParam) IsSet() bool {
+	return viperIsSet(oqP.name)
+}
+
+func (oqP OpaqueParam) IsRuntimeConfigurable() bool {
+	return IsRuntimeConfigurable(oqP.name)
+}
+
+func (oqP OpaqueParam) GetEnvVarName() string {
+	return paramNameToEnvVar(oqP.name)
+}
+
+// EnvVarName returns the environment variable name for this parameter.
+func (oqP OpaqueParam) EnvVarName() string {
+	return paramNameToEnvVar(oqP.name)
+}
+
 // allParameterNames is the list of all config keys generated from
 // docs/parameters.yaml. It is primarily used to bind environment variables so
 // that env-only overrides are included in viper.AllSettings().
@@ -839,6 +876,67 @@ var ({{range $key, $value := .ObjectMap}}
 	{{$key}} = ObjectParam{{"{"}}{{printf "%q" $value}}{{"}"}}
 	{{- end}}
 )
+
+var ({{range $key, $value := .OpaqueMap}}
+	{{$key}} = OpaqueParam{{"{"}}{{printf "%q" $value}}{{"}"}}
+	{{- end}}
+)
+
+// paramByName maps canonical config key names (e.g. "Logging.Level") to their
+// typed Param constant.  It is populated once at init time and never mutated,
+// so concurrent reads are safe without a lock.
+var paramByName map[string]Param
+
+// paramByEnvVar maps environment variable names (e.g. "PELICAN_LOGGING_LEVEL")
+// to the same typed Param constants.
+var paramByEnvVar map[string]Param
+
+func init() {
+	paramByName = map[string]Param{
+		{{- range $key, $value := .StringMap}}
+		{{printf "%q" $value}}: {{$key}},
+		{{- end}}
+		{{- range $key, $value := .StringSliceMap}}
+		{{printf "%q" $value}}: {{$key}},
+		{{- end}}
+		{{- range $key, $value := .IntMap}}
+		{{printf "%q" $value}}: {{$key}},
+		{{- end}}
+		{{- range $key, $value := .ByteRateMap}}
+		{{printf "%q" $value}}: {{$key}},
+		{{- end}}
+		{{- range $key, $value := .BoolMap}}
+		{{printf "%q" $value}}: {{$key}},
+		{{- end}}
+		{{- range $key, $value := .DurationMap}}
+		{{printf "%q" $value}}: {{$key}},
+		{{- end}}
+		{{- range $key, $value := .ObjectMap}}
+		{{printf "%q" $value}}: {{$key}},
+		{{- end}}
+		{{- range $key, $value := .OpaqueMap}}
+		{{printf "%q" $value}}: {{$key}},
+		{{- end}}
+	}
+	paramByEnvVar = make(map[string]Param, len(paramByName))
+	for name, p := range paramByName {
+		paramByEnvVar[paramNameToEnvVar(name)] = p
+	}
+}
+
+// LookupParam returns the typed Param constant for a given configuration key
+// name (e.g. "Logging.Level") or environment variable name
+// (e.g. "PELICAN_LOGGING_LEVEL").  The second return value is false when
+// the name does not correspond to any known parameter.
+func LookupParam(name string) (Param, bool) {
+	if p, ok := paramByName[name]; ok {
+		return p, true
+	}
+	if p, ok := paramByEnvVar[name]; ok {
+		return p, true
+	}
+	return nil, false
+}
 `))
 
 var structTemplate = template.Must(template.New("").Parse(`// Code generated by go generate; DO NOT EDIT.
