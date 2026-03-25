@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -55,6 +55,9 @@ func handleXrootdLoggingChange(oldConfig, newConfig *param.Config) {
 		return
 	}
 
+	// Assume that restarting XRootD will require a graceful shutdown
+	// and a correspondingly graceful startup.
+	// For the timeout, make a best-guess as to how long that will take.
 	ctx, cancel := context.WithTimeout(context.Background(), param.Xrootd_ShutdownTimeout.GetDuration()+time.Minute)
 	defer cancel()
 
