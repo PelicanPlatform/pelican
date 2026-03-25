@@ -1073,7 +1073,7 @@ func TestCreateNamespace(t *testing.T) {
 		topoNamespaces := []string{"/topo/foo", "/topo/bar"}
 		svr := topologyMockup(t, topoNamespaces)
 		defer svr.Close()
-		require.NoError(t, param.SetRaw("Federation.TopologyNamespaceURL", svr.URL))
+		require.NoError(t, param.Federation_TopologyNamespaceUrl.Set(svr.URL))
 		err = PopulateTopology(context.Background())
 		require.NoError(t, err)
 
@@ -1115,7 +1115,7 @@ func TestCreateNamespace(t *testing.T) {
 		topoNamespaces := []string{"/topo/foo", "/topo/bar"}
 		svr := topologyMockup(t, topoNamespaces)
 		defer svr.Close()
-		require.NoError(t, param.SetRaw("Federation.TopologyNamespaceURL", svr.URL))
+		require.NoError(t, param.Federation_TopologyNamespaceUrl.Set(svr.URL))
 		err = PopulateTopology(context.Background())
 		require.NoError(t, err)
 

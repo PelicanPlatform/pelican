@@ -887,7 +887,7 @@ func TestRegistryTopology(t *testing.T) {
 
 	registryDB := t.TempDir()
 	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(registryDB, "test.sqlite")))
-	require.NoError(t, param.SetRaw("Federation.TopologyNamespaceURL", svr.URL))
+	require.NoError(t, param.Federation_TopologyNamespaceUrl.Set(svr.URL))
 	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 
 	err := database.InitServerDatabase(server_structs.RegistryType)
@@ -946,7 +946,7 @@ func TestRegistryTopology(t *testing.T) {
 
 	topoNamespaces = []string{"/topo/foo", "/topo/baz"}
 	svr = topologyMockup(t, topoNamespaces)
-	require.NoError(t, param.SetRaw("Federation.TopologyNamespaceURL", svr.URL))
+	require.NoError(t, param.Federation_TopologyNamespaceUrl.Set(svr.URL))
 	defer svr.Close()
 
 	// Re-populate topo

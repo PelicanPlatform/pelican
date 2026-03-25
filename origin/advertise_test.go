@@ -32,7 +32,7 @@ func TestGetRequiredFeatures(t *testing.T) {
 	testCases := []struct {
 		name          string
 		expectedNames []string
-		vConfig       map[string]any
+		params       map[param.BoolParam]bool
 	}{
 		{
 			name: "No Features",
@@ -40,8 +40,8 @@ func TestGetRequiredFeatures(t *testing.T) {
 		{
 			name:          "CacheAuthz Feature",
 			expectedNames: []string{"CacheAuthz"},
-			vConfig: map[string]any{
-				param.Origin_DisableDirectClients.GetName(): true,
+			params: map[param.BoolParam]bool{
+				param.Origin_DisableDirectClients: true,
 			},
 		},
 	}
@@ -51,8 +51,8 @@ func TestGetRequiredFeatures(t *testing.T) {
 			server_utils.ResetTestState()
 			defer server_utils.ResetTestState()
 
-			for k, v := range tc.vConfig {
-				require.NoError(t, param.SetRaw(k, v))
+			for k, v := range tc.params {
+				require.NoError(t, k.Set(v))
 			}
 
 			oServer := &OriginServer{}

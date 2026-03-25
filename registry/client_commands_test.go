@@ -388,7 +388,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 
 	registrySvr := registryMockup(ctx, t, "OSDFkeychaining")
 	topoSvr := topologyMockup(t, []string{"/topo/foo"})
-	require.NoError(t, param.SetRaw("Federation.TopologyNamespaceURL", topoSvr.URL))
+	require.NoError(t, param.Federation_TopologyNamespaceUrl.Set(topoSvr.URL))
 	err = migrateTopologyTestTable()
 	require.NoError(t, err)
 	err = PopulateTopology(ctx)

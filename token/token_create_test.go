@@ -211,7 +211,7 @@ func TestCreateToken(t *testing.T) {
 
 	// Some viper pre-requisites
 	config.ResetConfig()
-	require.NoError(t, param.SetRaw("IssuerUrl", "https://my-issuer.com"))
+	require.NoError(t, param.Server_IssuerUrl.Set("https://my-issuer.com"))
 	tDir := t.TempDir()
 	kDir := filepath.Join(tDir, "testKeyDir")
 	require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
@@ -255,7 +255,7 @@ func TestCreateToken(t *testing.T) {
 	assert.Equal(t, "bar", val)
 
 	// Test providing issuer via claim
-	require.NoError(t, param.SetRaw("IssuerUrl", ""))
+	require.NoError(t, param.Server_IssuerUrl.Set(""))
 	tokenConfig = TokenConfig{tokenProfile: WlcgProfile{}, audience: []string{"foo"}, Subject: "bar", Issuer: "https://localhost:9999", Lifetime: time.Minute * 10}
 	_, err = tokenConfig.CreateToken()
 	assert.NoError(t, err)

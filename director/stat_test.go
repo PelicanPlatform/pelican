@@ -853,7 +853,7 @@ func TestCache(t *testing.T) {
 	defer server.Close()
 
 	require.NoError(t, param.Server_ExternalWebUrl.Set(server.URL))
-	require.NoError(t, param.SetRaw("IssuerUrl", server.URL))
+	require.NoError(t, param.Server_IssuerUrl.Set(server.URL))
 	realServerUrl, err := url.Parse(server.URL)
 	require.NoError(t, err)
 
@@ -960,7 +960,7 @@ func TestSendHeadReq(t *testing.T) {
 	defer server.Close()
 
 	require.NoError(t, param.Server_ExternalWebUrl.Set(server.URL))
-	require.NoError(t, param.SetRaw("IssuerUrl", server.URL))
+	require.NoError(t, param.Server_IssuerUrl.Set(server.URL))
 	realServerUrl, err := url.Parse(server.URL)
 	require.NoError(t, err)
 
