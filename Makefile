@@ -111,6 +111,11 @@ pelican-clean:
 	@echo CLEAN $(PELICAN_DIST_PATH)
 	@rm -rf $(PELICAN_DIST_PATH)
 
+.PHONY: generate-goreleaser
+generate-goreleaser:
+	@echo GENERATE GORELEASER FILE
+	$(PWD)/scripts/generate_goreleaser.sh
+
 .PHONY: pelican-build
 pelican-build:
 	@echo PELICAN BUILD
