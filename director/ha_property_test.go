@@ -293,7 +293,7 @@ func makeTestServiceAd() *server_structs.OriginAdvertiseV2 {
 func TestSeenByExclusionIsExact(t *testing.T) {
 	config.ResetConfig()
 	t.Cleanup(config.ResetConfig)
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://test-self.example.com"))
+	require.NoError(t, param.Server_ExternalWebUrl.Set("http://test-self.example.com"))
 
 	setupForwardingState(t)
 
@@ -366,7 +366,7 @@ func TestSeenByExclusionIsExact(t *testing.T) {
 func TestSeenByGrowsByExactlyOnePerHop(t *testing.T) {
 	config.ResetConfig()
 	t.Cleanup(config.ResetConfig)
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://test-self.example.com"))
+	require.NoError(t, param.Server_ExternalWebUrl.Set("http://test-self.example.com"))
 
 	setupForwardingState(t)
 
@@ -416,7 +416,7 @@ func TestSeenByGrowsByExactlyOnePerHop(t *testing.T) {
 func TestSeenByNoDuplicates(t *testing.T) {
 	config.ResetConfig()
 	t.Cleanup(config.ResetConfig)
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://test-self.example.com"))
+	require.NoError(t, param.Server_ExternalWebUrl.Set("http://test-self.example.com"))
 
 	setupForwardingState(t)
 
@@ -542,7 +542,7 @@ func TestTimeSkewCorrectionBelowThresholdIsNoop(t *testing.T) {
 func TestForwardingReachesAllDirectors(t *testing.T) {
 	config.ResetConfig()
 	t.Cleanup(config.ResetConfig)
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "http://test-self.example.com"))
+	require.NoError(t, param.Server_ExternalWebUrl.Set("http://test-self.example.com"))
 
 	for n := 2; n <= 8; n++ {
 		t.Run(fmt.Sprintf("directors=%d", n), func(t *testing.T) {

@@ -68,11 +68,11 @@ func setupIntegration(t *testing.T) (*OIDCProvider, *httptest.Server) {
 	t.Cleanup(func() { config.ResetConfig() })
 
 	tmpDir := t.TempDir()
-	require.NoError(t, param.Set("IssuerKey", filepath.Join(tmpDir, "issuer.jwk")))
-	require.NoError(t, param.Set("Server.ExternalWebUrl", "https://test-origin.example.com"))
+	require.NoError(t, param.IssuerKey.Set(filepath.Join(tmpDir, "issuer.jwk")))
+	require.NoError(t, param.Server_ExternalWebUrl.Set("https://test-origin.example.com"))
 
 	// Set up authorization templates so scope mapping works
-	require.NoError(t, param.Set("Issuer.AuthorizationTemplates", []map[string]interface{}{
+	require.NoError(t, param.Issuer_AuthorizationTemplates.Set([]map[string]interface{}{
 		{
 			"actions": []string{"read"},
 			"prefix":  "/data/analysis",
@@ -1406,8 +1406,8 @@ func TestPerNamespaceAuthzRules(t *testing.T) {
 	t.Cleanup(func() { config.ResetConfig() })
 
 	tmpDir := t.TempDir()
-	require.NoError(t, param.Set("IssuerKey", filepath.Join(tmpDir, "issuer.jwk")))
-	require.NoError(t, param.Set("Server.ExternalWebUrl", "https://test-origin.example.com"))
+	require.NoError(t, param.IssuerKey.Set(filepath.Join(tmpDir, "issuer.jwk")))
+	require.NoError(t, param.Server_ExternalWebUrl.Set("https://test-origin.example.com"))
 
 	// Do NOT set global Issuer.AuthorizationTemplates — each namespace gets
 	// its own rules compiled directly.

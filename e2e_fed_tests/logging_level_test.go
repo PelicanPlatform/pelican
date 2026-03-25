@@ -57,9 +57,9 @@ func TestCLILoggingLevelChanges(t *testing.T) {
 
 	// Ensure critical paths are set so they get written to the config file
 	// The subprocess needs these to generate admin tokens
-	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), param.IssuerKeysDirectory.GetString()))
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), srvURL))
-	require.NoError(t, param.Set(param.Federation_DiscoveryUrl.GetName(), param.Federation_DiscoveryUrl.GetString()))
+	require.NoError(t, param.IssuerKeysDirectory.Set(param.IssuerKeysDirectory.GetString()))
+	require.NoError(t, param.Server_ExternalWebUrl.Set(srvURL))
+	require.NoError(t, param.Federation_DiscoveryUrl.Set(param.Federation_DiscoveryUrl.GetString()))
 
 	err = viper.WriteConfigAs(configFile.Name())
 	require.NoError(t, err, "Failed to write config file for subprocess")

@@ -506,7 +506,7 @@ func TestDCRRedirectURIValidation(t *testing.T) {
 	httpClient := ts.Client()
 
 	// Configure an explicit allowed redirect_uris list
-	require.NoError(t, param.Set("Issuer.RedirectUris", []string{
+	require.NoError(t, param.Issuer_RedirectUris.Set([]string{
 		"https://allowed.example.com/callback",
 		"https://also-allowed.example.com/callback",
 	}))

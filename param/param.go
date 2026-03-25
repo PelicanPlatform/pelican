@@ -39,6 +39,12 @@ var (
 	callbackMux sync.RWMutex
 )
 
+// ConfigDir is the typed parameter for the "ConfigDir" configuration key.
+// ConfigDir is not defined in parameters.yaml (it is a special internal key
+// injected directly into the Config struct), so its typed constant lives here
+// rather than in the generated parameters.go.
+var ConfigDir = StringParam{"ConfigDir"}
+
 // ConfigCallback is a function that is called when configuration changes.
 // It receives the old and new configuration.
 type ConfigCallback func(oldConfig, newConfig *Config)
@@ -110,7 +116,7 @@ func BindAllParameters(v *viper.Viper) {
 // element after splitting.
 // Empty strings after splitting are filtered out.
 func stringToSliceHookFunc() mapstructure.DecodeHookFunc {
-	return func(f reflect.Kind, t reflect.Kind, data interface{}) (interface{}, error) {
+	return func(f reflect.Kind, t reflect.Kind, data any) (any, error) {
 		if f != reflect.String || t != reflect.Slice {
 			return data, nil
 		}
@@ -162,7 +168,7 @@ func stringToSliceHookFunc() mapstructure.DecodeHookFunc {
 // For strings that don't look like byte rates (don't contain rate units), returns data unchanged
 // so other hooks or default conversions can handle them.
 func stringToByteRateHookFunc() mapstructure.DecodeHookFunc {
-	return func(f reflect.Type, t reflect.Type, data interface{}) (interface{}, error) {
+	return func(f reflect.Type, t reflect.Type, data any) (any, error) {
 		// Only convert string to int or ByteRate
 		byteRateType := reflect.TypeOf(byte_rate.ByteRate(0))
 		if f.Kind() != reflect.String || (t.Kind() != reflect.Int && t != byteRateType) {
@@ -323,9 +329,9 @@ func GetUnmarshaledConfig() (*Config, error) {
 }
 
 // Helper function to set a parameter field entry in configWithType
-func setField(fieldType reflect.Type, value interface{}) reflect.Value {
+func setField(fieldType reflect.Type, value any) reflect.Value {
 	field := reflect.New(fieldType).Elem()
-	sliceInterfaceType := reflect.TypeOf([]interface{}(nil))
+	sliceInterfaceType := reflect.TypeOf([]any(nil))
 
 	// Check if the type of the value is nil
 	if reflect.TypeOf(value) == nil {
@@ -438,17 +444,36 @@ func getOrCreateConfig() *Config {
 	return newConfig
 }
 
-// Set sets a parameter value in both viper and the config struct.
+// Param is the interface satisfied by all typed parameter types (StringParam,
+// BoolParam, IntParam, etc.).  It can be used to accept any parameter type in
+// function signatures, avoiding the need for raw config-key strings.
+type Param interface {
+	// GetName returns the viper configuration key for this parameter
+	// (e.g. "Origin.EnablePublicReads").
+	GetName() string
+}
+
+// Set sets a typed parameter value in both viper and the config struct.
+// Prefer this over SetRaw to benefit from compile-time key safety.
 // This function is thread-safe and will update the atomic config pointer.
-func Set(key string, value interface{}) error {
-	return MultiSet(map[string]interface{}{key: value})
+func Set(p Param, value any) error {
+	return MultiSet(map[string]any{p.GetName(): value})
+}
+
+// SetRaw sets a parameter value by its raw string key in both viper and the
+// config struct.  Use this only for special cases where a typed Param constant
+// is not available (e.g. dynamic keys or internal viper keys like "config").
+// Prefer Set() with a typed Param when possible.
+// This function is thread-safe and will update the atomic config pointer.
+func SetRaw(key string, value any) error {
+	return MultiSet(map[string]any{key: value})
 }
 
 // MultiSet sets multiple parameter values in both viper and the config struct.
 // This function is thread-safe and will update the atomic config pointer.
 // It is more efficient than calling Set multiple times as it only updates
 // the config object once.
-func MultiSet(keyValues map[string]interface{}) error {
+func MultiSet(keyValues map[string]any) error {
 	configMutex.Lock()
 	defer configMutex.Unlock()
 

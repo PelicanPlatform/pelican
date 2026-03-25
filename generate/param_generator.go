@@ -58,7 +58,7 @@ func GenParamEnum() {
 	 */
 	filename, _ := filepath.Abs("../docs/parameters.yaml")
 	yamlFile, err := os.Open(filename)
-	fullJsonInt := []interface{}{}
+	fullJsonInt := []any{}
 
 	if err != nil {
 		panic(err)
@@ -67,10 +67,10 @@ func GenParamEnum() {
 	// This decoder and for loop is needed because the yaml file has multiple '---' delineated docs
 	decoder := yaml.NewDecoder(yamlFile)
 
-	var values []interface{}
+	var values []any
 
 	for {
-		var value map[string]interface{}
+		var value map[string]any
 		if err := decoder.Decode(&value); err != nil {
 			if err == io.EOF {
 				break
@@ -87,6 +87,7 @@ func GenParamEnum() {
 	boolParamMap := make(map[string]string)
 	durationParamMap := make(map[string]string)
 	objectParamMap := make(map[string]string)
+	opaqueParamMap := make(map[string]string)
 	allParamNames := make([]string, 0, 512)
 
 	// Skip the first parameter (ConfigBase is special)
@@ -94,7 +95,7 @@ func GenParamEnum() {
 
 	// Parse and check the values of each parameter against the required Keys
 	for idx, value := range values {
-		entry := value.(map[string]interface{})
+		entry := value.(map[string]any)
 		entryName, ok := entry["name"]
 		if !ok {
 			panic(fmt.Sprintf("Parameter entry at position %d is missing the name attribute", idx))
@@ -109,13 +110,14 @@ func GenParamEnum() {
 			}
 		}
 
-		// If `direct_access` is set to false, then we are not allowed to access the value via the
-		// param module.  Typically, this indicates there's some other mechanism in the config module
-		// that should be used instead (such as when there's a computed value).
+		// If `direct_access` is set to false, then we generate an OpaqueParam instead of the
+		// normal typed param. OpaqueParam provides metadata methods (GetName, GetEnvVarName, etc.)
+		// but no getters or setters, because the value is typically computed via some other
+		// mechanism in the config module.
+		isOpaque := false
 		if entryDirectAccess, ok := entry["direct_access"]; ok {
 			if entryVal, ok := entryDirectAccess.(bool); ok && !entryVal {
-				// direct_access = false; do not generate parameter
-				continue
+				isOpaque = true
 			} else if !ok {
 				panic(fmt.Sprintf("Parameter entry '%s' has direct_access set to non-boolean", entryName))
 			}
@@ -124,12 +126,12 @@ func GenParamEnum() {
 		// Each document must be converted to json on it's own and then the name
 		// must be used as a key
 		jsonBytes, _ := json.Marshal(entry)
-		var j map[string]interface{}
+		var j map[string]any
 		err = json.Unmarshal(jsonBytes, &j)
 		if err != nil {
 			panic(err)
 		}
-		j2 := map[string]interface{}{entry["name"].(string): j}
+		j2 := map[string]any{entry["name"].(string): j}
 		fullJsonInt = append(fullJsonInt, j2)
 
 		// Handle deprecated parameters
@@ -141,7 +143,7 @@ func GenParamEnum() {
 			// If the replaced by entry is a string, convert it to a slice
 			if replacedBy, ok := entry["replacedby"].(string); ok {
 				replacedBySlice = []string{replacedBy}
-			} else if replacedBy, ok := entry["replacedby"].([]interface{}); ok {
+			} else if replacedBy, ok := entry["replacedby"].([]any); ok {
 				// Convert each element to a string
 				for _, v := range replacedBy {
 					if vStr, ok := v.(string); ok {
@@ -165,6 +167,11 @@ func GenParamEnum() {
 		}
 
 		name := strings.ReplaceAll(rawName, ".", "_")
+		if isOpaque {
+			opaqueParamMap[name] = rawName
+			allParamNames = append(allParamNames, rawName)
+			continue
+		}
 		pType := entry["type"].(string)
 		switch pType {
 		case "url":
@@ -211,10 +218,11 @@ func GenParamEnum() {
 		BoolMap                map[string]string
 		DurationMap            map[string]string
 		ObjectMap              map[string]string
+		OpaqueMap              map[string]string
 		DeprecatedMap          map[string][]string
 		RuntimeConfigurableMap map[string]bool
 		AllParamNames          []string
-	}{StringMap: stringParamMap, StringSliceMap: stringSliceParamMap, IntMap: intParamMap, ByteRateMap: byteRateParamMap, BoolMap: boolParamMap, DurationMap: durationParamMap, ObjectMap: objectParamMap, DeprecatedMap: deprecatedMap, RuntimeConfigurableMap: runtimeConfigurableMap, AllParamNames: allParamNames})
+	}{StringMap: stringParamMap, StringSliceMap: stringSliceParamMap, IntMap: intParamMap, ByteRateMap: byteRateParamMap, BoolMap: boolParamMap, DurationMap: durationParamMap, ObjectMap: objectParamMap, OpaqueMap: opaqueParamMap, DeprecatedMap: deprecatedMap, RuntimeConfigurableMap: runtimeConfigurableMap, AllParamNames: allParamNames})
 
 	if err != nil {
 		panic(err)
@@ -331,10 +339,10 @@ func GenParamStruct() {
 
 	decoder := yaml.NewDecoder(yamlFile)
 
-	var values []interface{}
+	var values []any
 
 	for {
-		var value map[string]interface{}
+		var value map[string]any
 		if err := decoder.Decode(&value); err != nil {
 			if err == io.EOF {
 				break
@@ -352,7 +360,7 @@ func GenParamStruct() {
 	// the first entry, i.e. ConfigBase as it's only a verbose parameter
 	// for user to read but not being set in the code
 	for i := 1; i < len(values); i++ {
-		entry := values[i].(map[string]interface{})
+		entry := values[i].(map[string]any)
 
 		// Skip required YAML field check as has been done in GenParamEnum
 		pName := entry["name"].(string)
@@ -377,7 +385,7 @@ func GenParamStruct() {
 		case "duration":
 			goType = "time.Duration"
 		case "object":
-			goType = "interface{}"
+			goType = "any"
 		default:
 			errMsg := fmt.Sprintf("UnknownType '%s': add a new struct and return method to the generator, or "+
 				"change the type in parameters.yaml to be an already-handled type", pType)
@@ -455,6 +463,7 @@ var packageTemplate = template.Must(template.New("").Parse(`// Code generated by
 package param
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -486,6 +495,14 @@ type DurationParam struct {
 }
 
 type ObjectParam struct {
+	name string
+}
+
+// OpaqueParam represents a parameter whose value is not directly accessible
+// via the param package. It provides metadata methods (GetName, GetEnvVarName,
+// IsSet, IsRuntimeConfigurable) but no getters or setters, because the value
+// is typically computed via some other mechanism in the config module.
+type OpaqueParam struct {
 	name string
 }
 
@@ -554,6 +571,11 @@ func (sP StringParam) GetEnvVarName() string {
 	return paramNameToEnvVar(sP.name)
 }
 
+// Set sets this string parameter's value.
+func (sP StringParam) Set(value string) error {
+	return MultiSet(map[string]any{sP.name: value})
+}
+
 func (slP StringSliceParam) GetStringSlice() []string {
 	config := getOrCreateConfig()
 	switch slP.name {
@@ -579,6 +601,11 @@ func (slP StringSliceParam) IsRuntimeConfigurable() bool {
 
 func (slP StringSliceParam) GetEnvVarName() string {
 	return paramNameToEnvVar(slP.name)
+}
+
+// Set sets this string slice parameter's value.
+func (slP StringSliceParam) Set(value []string) error {
+	return MultiSet(map[string]any{slP.name: value})
 }
 
 func (iP IntParam) GetInt() int {
@@ -608,6 +635,11 @@ func (iP IntParam) GetEnvVarName() string {
 	return paramNameToEnvVar(iP.name)
 }
 
+// Set sets this integer parameter's value.
+func (iP IntParam) Set(value int) error {
+	return MultiSet(map[string]any{iP.name: value})
+}
+
 func (bRP ByteRateParam) GetByteRate() byte_rate.ByteRate {
 	config := getOrCreateConfig()
 	switch bRP.name {
@@ -631,6 +663,20 @@ func (bRP ByteRateParam) IsRuntimeConfigurable() bool {
 
 func (bRP ByteRateParam) GetEnvVarName() string {
 	return paramNameToEnvVar(bRP.name)
+}
+
+// Set sets this byte rate parameter's value.
+func (bRP ByteRateParam) Set(value byte_rate.ByteRate) error {
+	return MultiSet(map[string]any{bRP.name: value})
+}
+
+// SetString parses a string (e.g. "10MB/s") and sets this byte rate parameter.
+func (bRP ByteRateParam) SetString(value string) error {
+	parsed, err := byte_rate.ParseRate(value)
+	if err != nil {
+		return fmt.Errorf("invalid byte rate %q for parameter %s: %w", value, bRP.name, err)
+	}
+	return MultiSet(map[string]any{bRP.name: parsed})
 }
 
 func (bP BoolParam) GetBool() bool {
@@ -660,6 +706,11 @@ func (bP BoolParam) GetEnvVarName() string {
 	return paramNameToEnvVar(bP.name)
 }
 
+// Set sets this boolean parameter's value.
+func (bP BoolParam) Set(value bool) error {
+	return MultiSet(map[string]any{bP.name: value})
+}
+
 func (dP DurationParam) GetDuration() time.Duration {
 	config := getOrCreateConfig()
 	switch dP.name {
@@ -687,6 +738,20 @@ func (dP DurationParam) GetEnvVarName() string {
 	return paramNameToEnvVar(dP.name)
 }
 
+// Set sets this duration parameter's value.
+func (dP DurationParam) Set(value time.Duration) error {
+	return MultiSet(map[string]any{dP.name: value})
+}
+
+// SetString parses a duration string (e.g. "1m", "30s") and sets this parameter.
+func (dP DurationParam) SetString(value string) error {
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return fmt.Errorf("invalid duration %q for parameter %s: %w", value, dP.name, err)
+	}
+	return MultiSet(map[string]any{dP.name: parsed})
+}
+
 func (oP ObjectParam) Unmarshal(rawVal any) error {
 	return viperUnmarshalKey(oP.name, rawVal)
 }
@@ -705,6 +770,27 @@ func (oP ObjectParam) IsRuntimeConfigurable() bool {
 
 func (oP ObjectParam) GetEnvVarName() string {
 	return paramNameToEnvVar(oP.name)
+}
+
+// Set sets this object parameter's value.
+func (oP ObjectParam) Set(value any) error {
+	return MultiSet(map[string]any{oP.name: value})
+}
+
+func (oqP OpaqueParam) GetName() string {
+	return oqP.name
+}
+
+func (oqP OpaqueParam) IsSet() bool {
+	return viperIsSet(oqP.name)
+}
+
+func (oqP OpaqueParam) IsRuntimeConfigurable() bool {
+	return IsRuntimeConfigurable(oqP.name)
+}
+
+func (oqP OpaqueParam) GetEnvVarName() string {
+	return paramNameToEnvVar(oqP.name)
 }
 
 // allParameterNames is the list of all config keys generated from
@@ -750,6 +836,67 @@ var ({{range $key, $value := .ObjectMap}}
 	{{$key}} = ObjectParam{{"{"}}{{printf "%q" $value}}{{"}"}}
 	{{- end}}
 )
+
+var ({{range $key, $value := .OpaqueMap}}
+	{{$key}} = OpaqueParam{{"{"}}{{printf "%q" $value}}{{"}"}}
+	{{- end}}
+)
+
+// paramByName maps canonical config key names (e.g. "Logging.Level") to their
+// typed Param constant.  It is populated once at init time and never mutated,
+// so concurrent reads are safe without a lock.
+var paramByName map[string]Param
+
+// paramByEnvVar maps environment variable names (e.g. "PELICAN_LOGGING_LEVEL")
+// to the same typed Param constants.
+var paramByEnvVar map[string]Param
+
+func init() {
+	paramByName = map[string]Param{
+		{{- range $key, $value := .StringMap}}
+		{{printf "%q" $value}}: {{$key}},
+		{{- end}}
+		{{- range $key, $value := .StringSliceMap}}
+		{{printf "%q" $value}}: {{$key}},
+		{{- end}}
+		{{- range $key, $value := .IntMap}}
+		{{printf "%q" $value}}: {{$key}},
+		{{- end}}
+		{{- range $key, $value := .ByteRateMap}}
+		{{printf "%q" $value}}: {{$key}},
+		{{- end}}
+		{{- range $key, $value := .BoolMap}}
+		{{printf "%q" $value}}: {{$key}},
+		{{- end}}
+		{{- range $key, $value := .DurationMap}}
+		{{printf "%q" $value}}: {{$key}},
+		{{- end}}
+		{{- range $key, $value := .ObjectMap}}
+		{{printf "%q" $value}}: {{$key}},
+		{{- end}}
+		{{- range $key, $value := .OpaqueMap}}
+		{{printf "%q" $value}}: {{$key}},
+		{{- end}}
+	}
+	paramByEnvVar = make(map[string]Param, len(paramByName))
+	for name, p := range paramByName {
+		paramByEnvVar[paramNameToEnvVar(name)] = p
+	}
+}
+
+// LookupParam returns the typed Param constant for a given configuration key
+// name (e.g. "Logging.Level") or environment variable name
+// (e.g. "PELICAN_LOGGING_LEVEL").  The second return value is false when
+// the name does not correspond to any known parameter.
+func LookupParam(name string) (Param, bool) {
+	if p, ok := paramByName[name]; ok {
+		return p, true
+	}
+	if p, ok := paramByEnvVar[name]; ok {
+		return p, true
+	}
+	return nil, false
+}
 `))
 
 var structTemplate = template.Must(template.New("").Parse(`// Code generated by go generate; DO NOT EDIT.

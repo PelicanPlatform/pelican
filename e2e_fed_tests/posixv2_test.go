@@ -95,7 +95,7 @@ func (a *simpleTokenAuthenticator) Verify(c *http.Client, rs *http.Response, pat
 
 // Helper function to get a token with write permissions for testing
 func getTempTokenForTest(t *testing.T) string {
-	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir()))
+	require.NoError(t, param.IssuerKeysDirectory.Set(t.TempDir()))
 
 	// Get the server issuer URL (same as FedTest uses)
 	issuer, err := config.GetServerIssuerURL()

@@ -531,7 +531,7 @@ func TestAudienceValidation(t *testing.T) {
 			t.Cleanup(config.ResetConfig)
 
 			if tt.originAud != "" {
-				require.NoError(t, param.Set(param.Origin_TokenAudience.GetName(), tt.originAud))
+				require.NoError(t, param.Origin_TokenAudience.Set(tt.originAud))
 			}
 
 			ctx, cancel := context.WithCancel(context.Background())

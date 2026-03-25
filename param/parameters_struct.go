@@ -146,17 +146,17 @@ type Config struct {
 		TopologyReloadInterval time.Duration `mapstructure:"topologyreloadinterval" yaml:"TopologyReloadInterval"`
 		TopologyUrl string `mapstructure:"topologyurl" yaml:"TopologyUrl"`
 	} `mapstructure:"federation" yaml:"Federation"`
-	GeoIPOverrides interface{} `mapstructure:"geoipoverrides" yaml:"GeoIPOverrides"`
+	GeoIPOverrides any `mapstructure:"geoipoverrides" yaml:"GeoIPOverrides"`
 	Issuer struct {
 		AuthenticationSource string `mapstructure:"authenticationsource" yaml:"AuthenticationSource"`
-		AuthorizationTemplates interface{} `mapstructure:"authorizationtemplates" yaml:"AuthorizationTemplates"`
+		AuthorizationTemplates any `mapstructure:"authorizationtemplates" yaml:"AuthorizationTemplates"`
 		DynamicClientStaleTimeout time.Duration `mapstructure:"dynamicclientstaletimeout" yaml:"DynamicClientStaleTimeout"`
 		DynamicClientUnusedTimeout time.Duration `mapstructure:"dynamicclientunusedtimeout" yaml:"DynamicClientUnusedTimeout"`
 		GroupFile string `mapstructure:"groupfile" yaml:"GroupFile"`
 		GroupRequirements []string `mapstructure:"grouprequirements" yaml:"GroupRequirements"`
 		GroupSource string `mapstructure:"groupsource" yaml:"GroupSource"`
 		IssuerClaimValue string `mapstructure:"issuerclaimvalue" yaml:"IssuerClaimValue"`
-		OIDCAuthenticationRequirements interface{} `mapstructure:"oidcauthenticationrequirements" yaml:"OIDCAuthenticationRequirements"`
+		OIDCAuthenticationRequirements any `mapstructure:"oidcauthenticationrequirements" yaml:"OIDCAuthenticationRequirements"`
 		OIDCAuthenticationUserClaim string `mapstructure:"oidcauthenticationuserclaim" yaml:"OIDCAuthenticationUserClaim"`
 		OIDCGroupClaim string `mapstructure:"oidcgroupclaim" yaml:"OIDCGroupClaim"`
 		OIDCIssuerClaim string `mapstructure:"oidcissuerclaim" yaml:"OIDCIssuerClaim"`
@@ -216,7 +216,7 @@ type Config struct {
 		EnabledPolicy string `mapstructure:"enabledpolicy" yaml:"EnabledPolicy"`
 		LibLocation string `mapstructure:"liblocation" yaml:"LibLocation"`
 		LotHome string `mapstructure:"lothome" yaml:"LotHome"`
-		PolicyDefinitions interface{} `mapstructure:"policydefinitions" yaml:"PolicyDefinitions"`
+		PolicyDefinitions any `mapstructure:"policydefinitions" yaml:"PolicyDefinitions"`
 	} `mapstructure:"lotman" yaml:"Lotman"`
 	MinimumDownloadSpeed int `mapstructure:"minimumdownloadspeed" yaml:"MinimumDownloadSpeed"`
 	Monitoring struct {
@@ -279,7 +279,7 @@ type Config struct {
 		EnableWrites bool `mapstructure:"enablewrites" yaml:"EnableWrites"`
 		ExportVolume string `mapstructure:"exportvolume" yaml:"ExportVolume"`
 		ExportVolumes []string `mapstructure:"exportvolumes" yaml:"ExportVolumes"`
-		Exports interface{} `mapstructure:"exports" yaml:"Exports"`
+		Exports any `mapstructure:"exports" yaml:"Exports"`
 		FedTokenLocation string `mapstructure:"fedtokenlocation" yaml:"FedTokenLocation"`
 		FederationPrefix string `mapstructure:"federationprefix" yaml:"FederationPrefix"`
 		GlobusClientIDFile string `mapstructure:"globusclientidfile" yaml:"GlobusClientIDFile"`
@@ -351,9 +351,9 @@ type Config struct {
 	} `mapstructure:"plugin" yaml:"Plugin"`
 	Registry struct {
 		AdminUsers []string `mapstructure:"adminusers" yaml:"AdminUsers"`
-		CustomRegistrationFields interface{} `mapstructure:"customregistrationfields" yaml:"CustomRegistrationFields"`
+		CustomRegistrationFields any `mapstructure:"customregistrationfields" yaml:"CustomRegistrationFields"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
-		Institutions interface{} `mapstructure:"institutions" yaml:"Institutions"`
+		Institutions any `mapstructure:"institutions" yaml:"Institutions"`
 		InstitutionsUrl string `mapstructure:"institutionsurl" yaml:"InstitutionsUrl"`
 		InstitutionsUrlReloadMinutes time.Duration `mapstructure:"institutionsurlreloadminutes" yaml:"InstitutionsUrlReloadMinutes"`
 		RequireCacheApproval bool `mapstructure:"requirecacheapproval" yaml:"RequireCacheApproval"`
@@ -407,7 +407,7 @@ type Config struct {
 		AMQPExchange string `mapstructure:"amqpexchange" yaml:"AMQPExchange"`
 		AMQPTokenLocation string `mapstructure:"amqptokenlocation" yaml:"AMQPTokenLocation"`
 		Enable bool `mapstructure:"enable" yaml:"Enable"`
-		IPMapping interface{} `mapstructure:"ipmapping" yaml:"IPMapping"`
+		IPMapping any `mapstructure:"ipmapping" yaml:"IPMapping"`
 		MessageQueueProtocol string `mapstructure:"messagequeueprotocol" yaml:"MessageQueueProtocol"`
 		OutputDestinations []string `mapstructure:"outputdestinations" yaml:"OutputDestinations"`
 		PasswordLocation string `mapstructure:"passwordlocation" yaml:"PasswordLocation"`
@@ -596,17 +596,17 @@ type configWithType struct {
 		TopologyReloadInterval struct { Type string; Value time.Duration }
 		TopologyUrl struct { Type string; Value string }
 	}
-	GeoIPOverrides struct { Type string; Value interface{} }
+	GeoIPOverrides struct { Type string; Value any }
 	Issuer struct {
 		AuthenticationSource struct { Type string; Value string }
-		AuthorizationTemplates struct { Type string; Value interface{} }
+		AuthorizationTemplates struct { Type string; Value any }
 		DynamicClientStaleTimeout struct { Type string; Value time.Duration }
 		DynamicClientUnusedTimeout struct { Type string; Value time.Duration }
 		GroupFile struct { Type string; Value string }
 		GroupRequirements struct { Type string; Value []string }
 		GroupSource struct { Type string; Value string }
 		IssuerClaimValue struct { Type string; Value string }
-		OIDCAuthenticationRequirements struct { Type string; Value interface{} }
+		OIDCAuthenticationRequirements struct { Type string; Value any }
 		OIDCAuthenticationUserClaim struct { Type string; Value string }
 		OIDCGroupClaim struct { Type string; Value string }
 		OIDCIssuerClaim struct { Type string; Value string }
@@ -666,7 +666,7 @@ type configWithType struct {
 		EnabledPolicy struct { Type string; Value string }
 		LibLocation struct { Type string; Value string }
 		LotHome struct { Type string; Value string }
-		PolicyDefinitions struct { Type string; Value interface{} }
+		PolicyDefinitions struct { Type string; Value any }
 	}
 	MinimumDownloadSpeed struct { Type string; Value int }
 	Monitoring struct {
@@ -729,7 +729,7 @@ type configWithType struct {
 		EnableWrites struct { Type string; Value bool }
 		ExportVolume struct { Type string; Value string }
 		ExportVolumes struct { Type string; Value []string }
-		Exports struct { Type string; Value interface{} }
+		Exports struct { Type string; Value any }
 		FedTokenLocation struct { Type string; Value string }
 		FederationPrefix struct { Type string; Value string }
 		GlobusClientIDFile struct { Type string; Value string }
@@ -801,9 +801,9 @@ type configWithType struct {
 	}
 	Registry struct {
 		AdminUsers struct { Type string; Value []string }
-		CustomRegistrationFields struct { Type string; Value interface{} }
+		CustomRegistrationFields struct { Type string; Value any }
 		DbLocation struct { Type string; Value string }
-		Institutions struct { Type string; Value interface{} }
+		Institutions struct { Type string; Value any }
 		InstitutionsUrl struct { Type string; Value string }
 		InstitutionsUrlReloadMinutes struct { Type string; Value time.Duration }
 		RequireCacheApproval struct { Type string; Value bool }
@@ -857,7 +857,7 @@ type configWithType struct {
 		AMQPExchange struct { Type string; Value string }
 		AMQPTokenLocation struct { Type string; Value string }
 		Enable struct { Type string; Value bool }
-		IPMapping struct { Type string; Value interface{} }
+		IPMapping struct { Type string; Value any }
 		MessageQueueProtocol struct { Type string; Value string }
 		OutputDestinations struct { Type string; Value []string }
 		PasswordLocation struct { Type string; Value string }

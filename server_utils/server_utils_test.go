@@ -55,7 +55,7 @@ func TestWaitUntilWorking(t *testing.T) {
 		ResetTestState()
 	})
 
-	require.NoError(t, param.Set(param.Server_StartupTimeout.GetName(), "10s"))
+	require.NoError(t, param.Server_StartupTimeout.SetString("10s"))
 	t.Run("success-with-HTTP-200", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK) // 200
@@ -158,7 +158,7 @@ func TestWaitUntilWorking(t *testing.T) {
 	})
 
 	t.Run("server-short-timeout", func(t *testing.T) {
-		require.NoError(t, param.Set(param.Server_StartupTimeout.GetName(), "1s"))
+		require.NoError(t, param.Server_StartupTimeout.SetString("1s"))
 		earlyCancelCtx, earlyCancel := context.WithCancel(ctx)
 		go func() {
 			<-time.After(1500 * time.Millisecond)
@@ -236,18 +236,18 @@ func TestSetBrokerURL(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	setFederationParams := func(brokerURL string) {
-		require.NoError(t, param.Set(param.Federation_DiscoveryUrl.GetName(), "https://discovery.example.com"))
-		require.NoError(t, param.Set("Federation.DirectorUrl", "https://director.example.com"))
-		require.NoError(t, param.Set("Federation.RegistryUrl", "https://registry.example.com"))
-		require.NoError(t, param.Set("Federation.JwkUrl", "https://jwks.example.com"))
-		require.NoError(t, param.Set("Federation.BrokerUrl", brokerURL))
+		require.NoError(t, param.Federation_DiscoveryUrl.Set("https://discovery.example.com"))
+		require.NoError(t, param.Set(param.Federation_DirectorUrl, "https://director.example.com"))
+		require.NoError(t, param.Set(param.Federation_RegistryUrl, "https://registry.example.com"))
+		require.NoError(t, param.Set(param.Federation_JwkUrl, "https://jwks.example.com"))
+		require.NoError(t, param.Set(param.Federation_BrokerUrl, brokerURL))
 	}
 
 	t.Run("multiple-prefixes-broker-url-not-set", func(t *testing.T) {
 		ResetTestState()
 		t.Cleanup(ResetTestState)
-		require.NoError(t, param.Set(param.Server_Hostname.GetName(), "origin.example.com"))
-		require.NoError(t, param.Set(param.Origin_EnableBroker.GetName(), true))
+		require.NoError(t, param.Server_Hostname.Set("origin.example.com"))
+		require.NoError(t, param.Origin_EnableBroker.Set(true))
 		setFederationParams("https://broker.example.com")
 
 		ad := &server_structs.OriginAdvertiseV2{}
@@ -259,8 +259,8 @@ func TestSetBrokerURL(t *testing.T) {
 	t.Run("broker-disabled-broker-url-not-set", func(t *testing.T) {
 		ResetTestState()
 		t.Cleanup(ResetTestState)
-		require.NoError(t, param.Set(param.Server_Hostname.GetName(), "cache.example.com"))
-		require.NoError(t, param.Set(param.Cache_EnableBroker.GetName(), false))
+		require.NoError(t, param.Server_Hostname.Set("cache.example.com"))
+		require.NoError(t, param.Cache_EnableBroker.Set(false))
 		setFederationParams("https://broker.example.com")
 
 		ad := &server_structs.OriginAdvertiseV2{}
@@ -272,8 +272,8 @@ func TestSetBrokerURL(t *testing.T) {
 	t.Run("invalid-broker-endpoint-returns-error", func(t *testing.T) {
 		ResetTestState()
 		t.Cleanup(ResetTestState)
-		require.NoError(t, param.Set(param.Server_Hostname.GetName(), "origin.example.com"))
-		require.NoError(t, param.Set(param.Origin_EnableBroker.GetName(), true))
+		require.NoError(t, param.Server_Hostname.Set("origin.example.com"))
+		require.NoError(t, param.Origin_EnableBroker.Set(true))
 		// Use a URL with invalid percent-encoding so url.Parse returns an error
 		setFederationParams("https://broker.example.com/%2")
 
@@ -287,8 +287,8 @@ func TestSetBrokerURL(t *testing.T) {
 	t.Run("valid-single-prefix-origin-sets-broker-url", func(t *testing.T) {
 		ResetTestState()
 		t.Cleanup(ResetTestState)
-		require.NoError(t, param.Set(param.Server_Hostname.GetName(), "origin.example.com"))
-		require.NoError(t, param.Set(param.Origin_EnableBroker.GetName(), true))
+		require.NoError(t, param.Server_Hostname.Set("origin.example.com"))
+		require.NoError(t, param.Origin_EnableBroker.Set(true))
 		setFederationParams("https://broker.example.com")
 
 		ad := &server_structs.OriginAdvertiseV2{}

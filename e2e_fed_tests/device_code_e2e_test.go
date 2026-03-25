@@ -116,7 +116,7 @@ func TestDeviceCodeE2E(t *testing.T) {
 
 	htpasswdContent := fmt.Sprintf("admin:%s\ntestuser:%s\n", string(adminHash), string(testUserHash))
 	require.NoError(t, os.WriteFile(htpasswdFile, []byte(htpasswdContent), 0600))
-	require.NoError(t, param.Set(param.Server_UIPasswordFile.GetName(), htpasswdFile))
+	require.NoError(t, param.Server_UIPasswordFile.Set(htpasswdFile))
 
 	// Create a JSON group file mapping testuser to groups.
 	// This exercises the file-based group source (Issuer.GroupSource = "file").
@@ -124,8 +124,8 @@ func TestDeviceCodeE2E(t *testing.T) {
 	groupFilePath := filepath.Join(groupFileDir, "groups.json")
 	groupData := `{"testuser": ["physics", "computing"], "admin": []}`
 	require.NoError(t, os.WriteFile(groupFilePath, []byte(groupData), 0600))
-	require.NoError(t, param.Set("Issuer.GroupSource", "file"))
-	require.NoError(t, param.Set("Issuer.GroupFile", groupFilePath))
+	require.NoError(t, param.Issuer_GroupSource.Set("file"))
+	require.NoError(t, param.Issuer_GroupFile.Set(groupFilePath))
 
 	// ----- Step 1: Start the federation -----
 	tmpDir := t.TempDir()

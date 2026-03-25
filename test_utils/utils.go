@@ -201,13 +201,46 @@ func RegistryMockup(t *testing.T, prefix string) *httptest.Server {
 //
 // Will set the configuration to a temporary directory (to
 // avoid pulling in global configuration) and set some arbitrary
-// viper configurations
-func InitClient(t *testing.T, initCfg map[string]any) {
+// param configurations. The initCfg map uses typed param constants
+// as keys; each value is set via the param's typed Set method where
+// possible (StringParam, BoolParam, etc.), falling back to param.Set
+// for OpaqueParam or unknown types. Panics from type mismatches are
+// caught and reported as test failures.
+func InitClient(t *testing.T, initCfg map[param.Param]any) {
 	config.ResetConfig()
 	t.Cleanup(config.ResetConfig)
-	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
-	for key, val := range initCfg {
-		require.NoError(t, param.Set(key, val))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	for p, val := range initCfg {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("InitClient: panic setting param %q to %v (%T): %v", p.GetName(), val, val, r)
+				}
+			}()
+			var err error
+			switch tp := p.(type) {
+			case param.StringParam:
+				err = tp.Set(val.(string))
+			case param.BoolParam:
+				err = tp.Set(val.(bool))
+			case param.IntParam:
+				err = tp.Set(val.(int))
+			case param.StringSliceParam:
+				err = tp.Set(val.([]string))
+			case param.DurationParam:
+				switch v := val.(type) {
+				case string:
+					err = tp.SetString(v)
+				case time.Duration:
+					err = tp.SetString(v.String())
+				default:
+					t.Fatalf("InitClient: unsupported value type %T for DurationParam %q", val, p.GetName())
+				}
+			default:
+				err = param.Set(p, val)
+			}
+			require.NoError(t, err, "InitClient: failed to set param %q", p.GetName())
+		}()
 	}
 
 	require.NoError(t, config.InitClient())
@@ -264,7 +297,7 @@ func MockFederationRoot(t *testing.T, fInfo *pelican_url.FederationDiscovery, kS
 	var err error
 	if kSet == nil {
 		keysDir := filepath.Join(t.TempDir(), "testKeyDir")
-		require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), keysDir))
+		require.NoError(t, param.IssuerKeysDirectory.Set(keysDir))
 		pKeySetInternal, err = config.GetIssuerPublicJWKS()
 		require.NoError(t, err, "Failed to load public JWKS while creating mock federation root")
 	} else {
@@ -355,9 +388,9 @@ func MockFederationRoot(t *testing.T, fInfo *pelican_url.FederationDiscovery, kS
 
 	// Finally, set this as the federation discovery URL so tests
 	// can "discover" the info
-	require.NoError(t, param.Set(param.Federation_DiscoveryUrl.GetName(), serverUrl))
+	require.NoError(t, param.Federation_DiscoveryUrl.Set(serverUrl))
 	// Set to skip TLS verification for the test server
-	require.NoError(t, param.Set(param.TLSSkipVerify.GetName(), true))
+	require.NoError(t, param.TLSSkipVerify.Set(true))
 }
 
 // Create a mock issuer that responds to request for /.well-known/openid-configuration
@@ -368,7 +401,7 @@ func MockIssuer(t *testing.T, kSet *jwk.Set) string {
 	var err error
 	if kSet == nil {
 		keysDir := filepath.Join(t.TempDir(), "testKeyDir")
-		require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), keysDir))
+		require.NoError(t, param.IssuerKeysDirectory.Set(keysDir))
 		pKeySetInternal, err = config.GetIssuerPublicJWKS()
 		require.NoError(t, err, "Failed to load public JWKS while creating mock federation root")
 	} else {

@@ -131,8 +131,8 @@ func TestOSDFAuthRetrieval(t *testing.T) {
 	})
 
 	server_utils.ResetTestState()
-	require.NoError(t, param.Set(param.Federation_TopologyUrl.GetName(), "https://topology.opensciencegrid.org/"))
-	require.NoError(t, param.Set(param.Server_Hostname.GetName(), "sc-origin.chtc.wisc.edu"))
+	require.NoError(t, param.Federation_TopologyUrl.Set("https://topology.opensciencegrid.org/"))
+	require.NoError(t, param.Server_Hostname.Set("sc-origin.chtc.wisc.edu"))
 
 	originServer := &origin.OriginServer{}
 	_, err := getOSDFAuthFiles(originServer)
@@ -416,7 +416,7 @@ func setupExports(t *testing.T, config string) {
 	for _, key := range viper.AllKeys() {
 		if strings.Contains(viper.GetString(key), "<WILL BE REPLACED IN TEST>") {
 			tmpFile := getTmpFile(t)
-			require.NoError(t, param.Set(key, tmpFile))
+			require.NoError(t, param.SetRaw(key, tmpFile))
 		} else if key == "origin.exports" { // keys will be lowercased
 			// We also need to override paths for any exports that define "SHOULD-OVERRIDE-TEMPFILE"
 			exports := viper.Get(key).([]interface{})
@@ -430,12 +430,12 @@ func setupExports(t *testing.T, config string) {
 				}
 			}
 			// Set the modified exports back to viper after all overrides
-			require.NoError(t, param.Set(key, exports))
+			require.NoError(t, param.SetRaw(key, exports))
 		}
 	}
 
 	// Provide an issuer URL so setup doesn't fail
-	require.NoError(t, param.Set(param.Server_IssuerUrl.GetName(), "https://foo.bar.com"))
+	require.NoError(t, param.Server_IssuerUrl.Set("https://foo.bar.com"))
 
 	// Now call GetOriginExports and check the struct
 	_, err = server_utils.GetOriginExports()
@@ -913,14 +913,14 @@ u * /second/namespace -lr /first/namespace lr /.well-known lr /valid/path r
 			server_utils.ResetTestState()
 			defer server_utils.ResetTestState()
 
-			require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), filepath.Join(dirname, "origin")))
-			require.NoError(t, param.Set(param.Cache_RunLocation.GetName(), filepath.Join(dirname, "cache")))
+			require.NoError(t, param.Origin_RunLocation.Set(filepath.Join(dirname, "origin")))
+			require.NoError(t, param.Cache_RunLocation.Set(filepath.Join(dirname, "cache")))
 			if tc.inputAuthfile != "" {
-				require.NoError(t, param.Set(param.Xrootd_Authfile.GetName(), filepath.Join(dirname, "input-authfile")))
+				require.NoError(t, param.Xrootd_Authfile.Set(filepath.Join(dirname, "input-authfile")))
 			}
-			require.NoError(t, param.Set(param.Federation_TopologyUrl.GetName(), ts.URL))
+			require.NoError(t, param.Federation_TopologyUrl.Set(ts.URL))
 
-			require.NoError(t, param.Set(param.Server_DropPrivileges.GetName(), tc.dropPrivileges))
+			require.NoError(t, param.Server_DropPrivileges.Set(tc.dropPrivileges))
 
 			// Toggle whether the OSDF Authfile discovery should be triggered
 			if tc.discoverOSDFAuthfile {
@@ -930,11 +930,11 @@ u * /second/namespace -lr /first/namespace lr /.well-known lr /valid/path r
 					_, _ = config.SetPreferredPrefix(oldPrefix)
 				})
 
-				require.NoError(t, param.Set(param.Topology_DisableCacheX509.GetName(), false))
-				require.NoError(t, param.Set(param.Topology_DisableOriginX509.GetName(), false))
+				require.NoError(t, param.Topology_DisableCacheX509.Set(false))
+				require.NoError(t, param.Topology_DisableOriginX509.Set(false))
 			} else {
-				require.NoError(t, param.Set(param.Topology_DisableCacheX509.GetName(), true))
-				require.NoError(t, param.Set(param.Topology_DisableOriginX509.GetName(), true))
+				require.NoError(t, param.Topology_DisableCacheX509.Set(true))
+				require.NoError(t, param.Topology_DisableOriginX509.Set(true))
 			}
 
 			// Write the input authfile if provided
@@ -982,7 +982,7 @@ func TestEmitCfg(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	test_utils.InitClient(t, nil)
-	require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), dirname))
+	require.NoError(t, param.Origin_RunLocation.Set(dirname))
 
 	configTester := func(cfg *ScitokensCfg, configResult string) func(t *testing.T) {
 		return func(t *testing.T) {
@@ -1064,7 +1064,7 @@ func TestLoadScitokensConfig(t *testing.T) {
 
 	test_utils.InitClient(t, nil)
 
-	require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), dirname))
+	require.NoError(t, param.Origin_RunLocation.Set(dirname))
 
 	configTester := func(configResult string) func(t *testing.T) {
 		return func(t *testing.T) {
@@ -1101,17 +1101,17 @@ func TestMergeConfig(t *testing.T) {
 
 	storageDir := filepath.Join(dirname, "storage")
 	require.NoError(t, os.MkdirAll(storageDir, 0755))
-	require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), dirname))
-	require.NoError(t, param.Set(param.Origin_Port.GetName(), 8443))
-	require.NoError(t, param.Set(param.Origin_StoragePrefix.GetName(), storageDir))
-	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/"))
-	require.NoError(t, param.Set("ConfigDir", dirname))
+	require.NoError(t, param.Origin_RunLocation.Set(dirname))
+	require.NoError(t, param.Origin_Port.Set(8443))
+	require.NoError(t, param.Origin_StoragePrefix.Set(storageDir))
+	require.NoError(t, param.Origin_FederationPrefix.Set("/"))
+	require.NoError(t, param.ConfigDir.Set(dirname))
 	// We don't inherit any defaults at this level of code -- in order to recognize
 	// that this is an authorized prefix, we must set either EnableReads && !EnablePublicReads
 	// or EnableWrites
-	require.NoError(t, param.Set(param.Origin_EnableReads.GetName(), true))
+	require.NoError(t, param.Origin_EnableReads.Set(true))
 	scitokensConfigFile := filepath.Join(dirname, "scitokens-input.cfg")
-	require.NoError(t, param.Set(param.Xrootd_ScitokensConfig.GetName(), scitokensConfigFile))
+	require.NoError(t, param.Xrootd_ScitokensConfig.Set(scitokensConfigFile))
 
 	configTester := func(configInput string, postProcess func(*testing.T, ScitokensCfg)) func(t *testing.T) {
 		return func(t *testing.T) {
@@ -1182,8 +1182,8 @@ func TestGenerateMonitoringIssuer(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.NoError(t, param.Set(param.Origin_SelfTest.GetName(), tc.selfTestEnabled))
-			require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), tc.externalWebUrl))
+			require.NoError(t, param.Origin_SelfTest.Set(tc.selfTestEnabled))
+			require.NoError(t, param.Server_ExternalWebUrl.Set(tc.externalWebUrl))
 			issuer, err := GenerateMonitoringIssuer()
 			if tc.expectError {
 				require.Error(t, err)
@@ -1202,17 +1202,17 @@ func TestGenerateOriginIssuer(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	testCases := []struct {
-		name               string
-		yamlConfig         string
-		extraViperSettings map[string]string
-		expectError        bool
-		expectedIssuers    []Issuer
+		name            string
+		yamlConfig      string
+		extraParams     map[param.Param]any
+		expectError     bool
+		expectedIssuers []Issuer
 	}{
 		{
 			name:       "single export default issuer",
 			yamlConfig: singleExportNoIssuers,
-			extraViperSettings: map[string]string{
-				param.Server_IssuerUrl.GetName(): "https://foo.com",
+			extraParams: map[param.Param]any{
+				param.Server_IssuerUrl: "https://foo.com",
 			},
 			expectError: false,
 			expectedIssuers: []Issuer{
@@ -1246,8 +1246,8 @@ func TestGenerateOriginIssuer(t *testing.T) {
 		{
 			name:       "multiple exports multiple issuers",
 			yamlConfig: multiExportIssuers,
-			extraViperSettings: map[string]string{
-				param.Server_IssuerUrl.GetName(): "https://foo99.com",
+			extraParams: map[param.Param]any{
+				param.Server_IssuerUrl: "https://foo99.com",
 			},
 			expectError: false,
 			expectedIssuers: []Issuer{
@@ -1292,11 +1292,11 @@ func TestGenerateOriginIssuer(t *testing.T) {
 		{
 			name:       "single export one issuer with all parameters",
 			yamlConfig: singleExportOneIssuer,
-			extraViperSettings: map[string]string{
-				param.Origin_ScitokensRestrictedPaths.GetName(): "/restricted/path",
-				param.Origin_ScitokensMapSubject.GetName():      "true",
-				param.Origin_ScitokensDefaultUser.GetName():     "defaultUser",
-				param.Origin_ScitokensUsernameClaim.GetName():   "usernameClaim",
+			extraParams: map[param.Param]any{
+				param.Origin_ScitokensRestrictedPaths: []string{"/restricted/path"},
+				param.Origin_ScitokensMapSubject:      true,
+				param.Origin_ScitokensDefaultUser:     "defaultUser",
+				param.Origin_ScitokensUsernameClaim:   "usernameClaim",
 			},
 			expectError: false,
 			expectedIssuers: []Issuer{
@@ -1317,8 +1317,8 @@ func TestGenerateOriginIssuer(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			defer server_utils.ResetTestState()
 			ctx, _, _ := test_utils.TestContext(context.Background(), t)
-			require.NoError(t, param.Set("ConfigDir", t.TempDir()))
-			require.NoError(t, param.Set(param.Logging_Level.GetName(), "debug"))
+			require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+			require.NoError(t, param.Logging_Level.Set("debug"))
 
 			test_utils.MockFederationRoot(t, nil, nil)
 
@@ -1329,9 +1329,19 @@ func TestGenerateOriginIssuer(t *testing.T) {
 			err = config.InitServer(ctx, server_structs.OriginType)
 			require.NoError(t, err)
 
-			// Set extra Viper settings if provided
-			for key, value := range tc.extraViperSettings {
-				require.NoError(t, param.Set(key, value))
+			// Set extra params if provided
+			for p, val := range tc.extraParams {
+				switch pType := p.(type) {
+				case param.StringParam:
+					err = pType.Set(val.(string))
+				case param.BoolParam:
+					err = pType.Set(val.(bool))
+				case param.StringSliceParam:
+					err = pType.Set(val.([]string))
+				default:
+					t.Fatalf("broken test -- unsupported param type for param %s", p.GetName())
+				}
+				require.NoError(t, err, "error setting extra param %s", p.GetName())
 			}
 
 			issuers, err := GenerateOriginIssuers()
@@ -1579,20 +1589,20 @@ func TestGenerateFederationIssuer(t *testing.T) {
 			ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 			tmpDir := t.TempDir()
-			require.NoError(t, param.Set("ConfigDir", tmpDir))
-			require.NoError(t, param.Set(param.Logging_Level.GetName(), "debug"))
-			require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), tmpDir))
-			require.NoError(t, param.Set(param.Origin_SelfTest.GetName(), true))
-			require.NoError(t, param.Set(param.Server_Hostname.GetName(), "origin.example.com"))
-			require.NoError(t, param.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix)))
-			require.NoError(t, param.Set(param.Origin_DisableDirectClients.GetName(), true))
-			require.NoError(t, param.Set(param.Origin_EnableDirectReads.GetName(), false))
-			require.NoError(t, param.Set(param.Origin_EnablePublicReads.GetName(), tc.PublicReads))
-			require.NoError(t, param.Set(param.Origin_EnableListings.GetName(), false))
-			require.NoError(t, param.Set(param.Origin_EnableWrites.GetName(), false))
-			require.NoError(t, param.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter"))
-			require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar"))
-			require.NoError(t, param.Set(param.TLSSkipVerify.GetName(), true))
+			require.NoError(t, param.ConfigDir.Set(tmpDir))
+			require.NoError(t, param.Logging_Level.Set("debug"))
+			require.NoError(t, param.Origin_RunLocation.Set(tmpDir))
+			require.NoError(t, param.Origin_SelfTest.Set(true))
+			require.NoError(t, param.Server_Hostname.Set("origin.example.com"))
+			require.NoError(t, param.Origin_StorageType.Set(string(server_structs.OriginStoragePosix)))
+			require.NoError(t, param.Origin_DisableDirectClients.Set(true))
+			require.NoError(t, param.Origin_EnableDirectReads.Set(false))
+			require.NoError(t, param.Origin_EnablePublicReads.Set(tc.PublicReads))
+			require.NoError(t, param.Origin_EnableListings.Set(false))
+			require.NoError(t, param.Origin_EnableWrites.Set(false))
+			require.NoError(t, param.Origin_StoragePrefix.Set("/does/not/matter"))
+			require.NoError(t, param.Origin_FederationPrefix.Set("/foo/bar"))
+			require.NoError(t, param.TLSSkipVerify.Set(true))
 
 			test_utils.MockFederationRoot(t, nil, nil)
 
@@ -1620,14 +1630,14 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	tmpDir := t.TempDir()
-	require.NoError(t, param.Set("ConfigDir", tmpDir))
-	require.NoError(t, param.Set(param.Logging_Level.GetName(), "debug"))
-	require.NoError(t, param.Set(param.Origin_RunLocation.GetName(), tmpDir))
-	require.NoError(t, param.Set(param.Origin_SelfTest.GetName(), true))
-	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar"))
-	require.NoError(t, param.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter"))
-	require.NoError(t, param.Set(param.Server_Hostname.GetName(), "origin.example.com"))
-	require.NoError(t, param.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix)))
+	require.NoError(t, param.ConfigDir.Set(tmpDir))
+	require.NoError(t, param.Logging_Level.Set("debug"))
+	require.NoError(t, param.Origin_RunLocation.Set(tmpDir))
+	require.NoError(t, param.Origin_SelfTest.Set(true))
+	require.NoError(t, param.Origin_FederationPrefix.Set("/foo/bar"))
+	require.NoError(t, param.Origin_StoragePrefix.Set("/does/not/matter"))
+	require.NoError(t, param.Server_Hostname.Set("origin.example.com"))
+	require.NoError(t, param.Origin_StorageType.Set(string(server_structs.OriginStoragePosix)))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
@@ -1666,10 +1676,10 @@ func TestConfigFilesUpdateDuringRuntime(t *testing.T) {
 	dirName := t.TempDir()
 
 	// Set up basic configuration for cache
-	require.NoError(t, param.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile")))
-	require.NoError(t, param.Set("Xrootd.ScitokensConfig", filepath.Join(dirName, "scitokens.cfg")))
-	require.NoError(t, param.Set("Cache.RunLocation", dirName))
-	require.NoError(t, param.Set("Server.DropPrivileges", false)) // Not testing drop privileges mode
+	require.NoError(t, param.Xrootd_Authfile.Set(filepath.Join(dirName, "authfile")))
+	require.NoError(t, param.Xrootd_ScitokensConfig.Set(filepath.Join(dirName, "scitokens.cfg")))
+	require.NoError(t, param.Cache_RunLocation.Set(dirName))
+	require.NoError(t, param.Server_DropPrivileges.Set(false)) // Not testing drop privileges mode
 
 	// Create minimal input files
 	err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(""), fs.FileMode(0600))

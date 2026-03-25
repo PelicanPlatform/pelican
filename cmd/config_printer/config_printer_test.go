@@ -46,13 +46,13 @@ func stripAnsiCodes(input string) string {
 // Mock configuration setup
 func setupMockConfig(t *testing.T) error {
 	// Setting Non-default values, mimics what we'd get from config file
-	require.NoError(t, param.Set("Logging.Level", "trace"))
-	require.NoError(t, param.Set("Logging.Cache.Http", "info"))
-	require.NoError(t, param.Set("Logging.Cache.Xrootd", "info"))
-	require.NoError(t, param.Set("Logging.Origin.Http", "info"))
+	require.NoError(t, param.Logging_Level.Set("trace"))
+	require.NoError(t, param.Logging_Cache_Http.Set("info"))
+	require.NoError(t, param.Logging_Cache_Xrootd.Set("info"))
+	require.NoError(t, param.Logging_Origin_Http.Set("info"))
 
 	// Set default config
-	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 
 	config.InitConfigInternal(log.InfoLevel)
 	if err := config.SetServerDefaults(viper.GetViper()); err != nil {

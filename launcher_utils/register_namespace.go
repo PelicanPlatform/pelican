@@ -268,7 +268,7 @@ func registerNamespaceImpl(key jwk.Key, prefix string, siteName string, registra
 func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefix string) error {
 	retryInterval := param.Server_RegistrationRetryInterval.GetDuration()
 	if retryInterval == 0 {
-		log.Warning("Server.RegistrationRetryInterval is 0. Fall back to 10s")
+		log.Warningf("%s is 0. Fall back to 10s", param.Server_RegistrationRetryInterval.GetName())
 		retryInterval = 10 * time.Second
 	}
 	siteName := param.Xrootd_Sitename.GetString()

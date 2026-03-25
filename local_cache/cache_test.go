@@ -421,9 +421,9 @@ func TestLargeFile(t *testing.T) {
 
 	server_utils.ResetTestState()
 
-	clientConfig := map[string]interface{}{
-		"Client.MaximumDownloadSpeed":     40 * 1024 * 1024,
-		"Transport.ResponseHeaderTimeout": "60s",
+	clientConfig := map[param.Param]any{
+		param.Client_MaximumDownloadSpeed:     40 * 1024 * 1024,
+		param.Transport_ResponseHeaderTimeout: "60s",
 	}
 	test_utils.InitClient(t, clientConfig)
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
@@ -469,8 +469,8 @@ func TestOriginUnresponsive(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	server_utils.ResetTestState()
-	require.NoError(t, param.Set("Transport.ResponseHeaderTimeout", "5s"))
-	require.NoError(t, param.Set("Logging.Level", "debug"))
+	require.NoError(t, param.Transport_ResponseHeaderTimeout.SetString("5s"))
+	require.NoError(t, param.Logging_Level.Set("debug"))
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
 	cacheUrl := &url.URL{

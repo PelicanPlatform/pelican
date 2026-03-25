@@ -37,7 +37,7 @@ func setupAuthzTemplates(t *testing.T, templates []map[string]interface{}) {
 	t.Cleanup(func() {
 		config.ResetConfig()
 	})
-	require.NoError(t, param.Set("Issuer.AuthorizationTemplates", templates))
+	require.NoError(t, param.Issuer_AuthorizationTemplates.Set(templates))
 	require.NoError(t, oa4mp.InitAuthzRules())
 }
 

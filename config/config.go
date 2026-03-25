@@ -719,7 +719,7 @@ func GetServerIssuerURL() (issuerUrl string, err error) {
 	// based on whatever we determine here.
 	defer func() {
 		if err == nil && param.Server_IssuerUrl.GetString() == "" {
-			if setErr := param.Set(param.Server_IssuerUrl.GetName(), issuerUrl); setErr != nil {
+			if setErr := param.Server_IssuerUrl.Set(issuerUrl); setErr != nil {
 				log.WithError(setErr).Debugf("Failed to cache %s", param.Server_IssuerUrl.GetName())
 			}
 		}
@@ -739,17 +739,17 @@ func GetServerIssuerURL() (issuerUrl string, err error) {
 	if param.Server_IssuerHostname.GetString() != "" {
 		if param.Server_IssuerPort.GetInt() == 0 {
 			return "", errors.Errorf("if %q is configured, you must also configure a valid port via %q",
-				param.Server_IssuerHostname.GetName(), param.Server_IssuerPort.GetName())
+				param.Server_IssuerHostname, param.Server_IssuerPort)
 		}
 
 		// We assume any issuer is running https
 		issuerUrl := fmt.Sprintf("https://%s:%d", param.Server_IssuerHostname.GetString(), param.Server_IssuerPort.GetInt())
 		if _, err := url.Parse(issuerUrl); err != nil {
 			return "", errors.Wrapf(err, "failed to parse %q as issuer URL from config params %q and %q",
-				issuerUrl, param.Server_IssuerHostname.GetName(), param.Server_IssuerPort.GetName())
+				issuerUrl, param.Server_IssuerHostname, param.Server_IssuerPort)
 		}
 		log.Debugf("Populating server's issuer URL as %q from configured values of %q and %q",
-			issuerUrl, param.Server_IssuerHostname.GetName(), param.Server_IssuerPort.GetName())
+			issuerUrl, param.Server_IssuerHostname, param.Server_IssuerPort)
 		return issuerUrl, nil
 	}
 
@@ -793,7 +793,7 @@ func handleDeprecatedConfig() {
 						} else {
 							log.Warningf("The configuration key %q is deprecated. Please use %q instead. Will use the value of deprecated config key %q for the new config key %q.", deprecated, rep, deprecated, rep)
 							value := viper.Get(deprecated)
-							if err := param.Set(rep, value); err != nil {
+							if err := param.SetRaw(rep, value); err != nil {
 								log.WithError(err).Warnf("Failed to set replacement config key %q from deprecated key %q", rep, deprecated)
 							}
 						}
@@ -949,7 +949,7 @@ func setLoggingInternal() error {
 		warnDebugOnce.Do(func() {
 			log.Warnf("The config param %q is set in your configuration, which will override any values set for %q ", param.Debug.GetName(), param.Logging_Level.GetName())
 		})
-		if err := param.Set(param.Logging_Level.GetName(), "debug"); err != nil {
+		if err := param.Logging_Level.Set("debug"); err != nil {
 			return err
 		}
 	}
@@ -1637,11 +1637,11 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	if currentServers.IsEnabled(server_structs.OriginType) && param.Origin_StorageType.GetString() != "posix" {
 		updates := make(map[string]interface{})
 		if param.Origin_SelfTest.GetBool() {
-			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+			log.Warningf("%s may not be enabled when the origin is configured with non-posix backends. Turning off...", param.Origin_SelfTest.GetName())
 			updates[param.Origin_SelfTest.GetName()] = false
 		}
 		if param.Origin_DirectorTest.GetBool() {
-			log.Warning("Origin.DirectorTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+			log.Warningf("%s may not be enabled when the origin is configured with non-posix backends. Turning off...", param.Origin_DirectorTest.GetName())
 			updates[param.Origin_DirectorTest.GetName()] = false
 		}
 		if len(updates) > 0 {
@@ -1851,11 +1851,11 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	}
 
 	if param.Cache_LowWatermark.IsSet() || param.Cache_HighWaterMark.IsSet() {
-		lowWm, lwmIsAbs, err := utils.ValidateWatermark(param.Cache_LowWatermark.GetName(), false)
+		lowWm, lwmIsAbs, err := utils.ValidateWatermark(param.Cache_LowWatermark.GetString(), param.Cache_LowWatermark.GetName(), false)
 		if err != nil {
 			return err
 		}
-		highWm, hwmIsAbs, err := utils.ValidateWatermark(param.Cache_HighWaterMark.GetName(), false)
+		highWm, hwmIsAbs, err := utils.ValidateWatermark(param.Cache_HighWaterMark.GetString(), param.Cache_HighWaterMark.GetName(), false)
 		if err != nil {
 			return err
 		}
@@ -1881,13 +1881,13 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		var base, nominal, max float64
 		var err error
 		// Watermark validation will error if these parameters are not absolute, so we can ignore that output
-		if base, _, err = utils.ValidateWatermark(param.Cache_FilesBaseSize.GetName(), true); err != nil {
+		if base, _, err = utils.ValidateWatermark(param.Cache_FilesBaseSize.GetString(), param.Cache_FilesBaseSize.GetName(), true); err != nil {
 			return err
 		}
-		if nominal, _, err = utils.ValidateWatermark(param.Cache_FilesNominalSize.GetName(), true); err != nil {
+		if nominal, _, err = utils.ValidateWatermark(param.Cache_FilesNominalSize.GetString(), param.Cache_FilesNominalSize.GetName(), true); err != nil {
 			return err
 		}
-		if max, _, err = utils.ValidateWatermark(param.Cache_FilesMaxSize.GetName(), true); err != nil {
+		if max, _, err = utils.ValidateWatermark(param.Cache_FilesMaxSize.GetString(), param.Cache_FilesMaxSize.GetName(), true); err != nil {
 			return err
 		}
 		if base >= nominal || nominal >= max {
@@ -1914,8 +1914,8 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	if currentServers.IsEnabled(server_structs.DirectorType) {
 		refreshInterval := param.Director_RegistryQueryInterval.GetDuration()
 		if refreshInterval < 1*time.Second {
-			log.Warnf("Director.RegistryQueryInterval is set to: %v, which is too low. Falling back to default: 1m", refreshInterval)
-			if err := param.Set(param.Director_RegistryQueryInterval.GetName(), "1m"); err != nil {
+			log.Warnf("%s is set to: %v, which is too low. Falling back to default: 1m", param.Director_RegistryQueryInterval.GetName(), refreshInterval)
+			if err := param.Director_RegistryQueryInterval.SetString("1m"); err != nil {
 				return err
 			}
 		}
@@ -1923,7 +1923,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		if adTTL := param.Director_AdvertisementTTL.GetDuration(); adTTL <= 0 {
 			log.Warningf("Invalid value of %q for config param %s; must be greater than 0, falling back to default of 15 minutes",
 				adTTL, param.Director_AdvertisementTTL.GetName())
-			if err := param.Set(param.Director_AdvertisementTTL.GetName(), "15m"); err != nil {
+			if err := param.Director_AdvertisementTTL.SetString("15m"); err != nil {
 				return err
 			}
 		}
@@ -1942,7 +1942,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		case server_structs.DistanceType, server_structs.DistanceAndLoadType, server_structs.RandomType, server_structs.AdaptiveType:
 			break
 		case server_structs.SortType(""):
-			if err := param.Set(param.Director_CacheSortMethod.GetName(), server_structs.DistanceType); err != nil {
+			if err := param.Director_CacheSortMethod.Set(string(server_structs.DistanceType)); err != nil {
 				return err
 			}
 		default:
@@ -1990,7 +1990,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	// Fallback `SelfTestInterval` to 15 seconds, if user sets a very small value
 	if currentServers.IsEnabled(server_structs.OriginType) {
 		if param.Origin_SelfTestInterval.GetDuration() < 1*time.Second {
-			if err := param.Set(param.Origin_SelfTestInterval.GetName(), "15s"); err != nil {
+			if err := param.Origin_SelfTestInterval.SetString("15s"); err != nil {
 				return err
 			}
 			log.Warningf("Invalid %s value of %s. Falling back to 15s", param.Origin_SelfTestInterval.GetName(), param.Origin_SelfTestInterval.GetDuration().String())
@@ -1998,7 +1998,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	}
 	if currentServers.IsEnabled(server_structs.CacheType) {
 		if param.Cache_SelfTestInterval.GetDuration() < 1*time.Second {
-			if err := param.Set(param.Cache_SelfTestInterval.GetName(), "15s"); err != nil {
+			if err := param.Cache_SelfTestInterval.SetString("15s"); err != nil {
 				return err
 			}
 			log.Warningf("Invalid %s value of %s. Falling back to 15s", param.Cache_SelfTestInterval.GetName(), param.Cache_SelfTestInterval.GetDuration().String())
@@ -2169,7 +2169,7 @@ func SetClientDefaults(v *viper.Viper) error {
 	}
 
 	if v.GetInt(param.Client_DirectorRetries.GetName()) < 1 {
-		log.Warningf("Client.DirectorRetries was set to %d, but it must be at least 1. Falling back to default of 5.", param.Client_DirectorRetries.GetInt())
+		log.Warningf("%s was set to %d, but it must be at least 1. Falling back to default of 5.", param.Client_DirectorRetries, param.Client_DirectorRetries.GetInt())
 		v.Set(param.Client_DirectorRetries.GetName(), 5)
 	}
 

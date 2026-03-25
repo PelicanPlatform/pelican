@@ -144,7 +144,7 @@ func TestSaveConfigContentsToFile(t *testing.T) {
 		require.NoError(t, err)
 
 		// Now use the Client.CredentialFile param to read it back
-		require.NoError(t, param.Set(param.Client_CredentialFile.GetName(), filePath))
+		require.NoError(t, param.Client_CredentialFile.Set(filePath))
 		viper.Set("ConfigDir", tmpDir)
 
 		readConfig, err := GetCredentialConfigContents()
@@ -168,7 +168,7 @@ func TestHasEncryptedPassword(t *testing.T) {
 
 		tmpDir := t.TempDir()
 		filePath := filepath.Join(tmpDir, "nonexistent.pem")
-		require.NoError(t, param.Set(param.Client_CredentialFile.GetName(), filePath))
+		require.NoError(t, param.Client_CredentialFile.Set(filePath))
 
 		hasPassword, err := HasEncryptedPassword()
 		require.NoError(t, err)
@@ -189,7 +189,7 @@ func TestHasEncryptedPassword(t *testing.T) {
 		err := SaveConfigContentsToFile(testConfig, filePath, false)
 		require.NoError(t, err)
 
-		require.NoError(t, param.Set(param.Client_CredentialFile.GetName(), filePath))
+		require.NoError(t, param.Client_CredentialFile.Set(filePath))
 
 		hasPassword, err := HasEncryptedPassword()
 		require.NoError(t, err)
@@ -205,7 +205,7 @@ func TestGetEncryptedConfigNameOverride(t *testing.T) {
 		})
 
 		expectedPath := "/custom/path/to/creds.pem"
-		require.NoError(t, param.Set(param.Client_CredentialFile.GetName(), expectedPath))
+		require.NoError(t, param.Client_CredentialFile.Set(expectedPath))
 
 		result, err := GetEncryptedConfigName()
 		require.NoError(t, err)
