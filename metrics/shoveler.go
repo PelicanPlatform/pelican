@@ -202,6 +202,9 @@ func LaunchShoveler(ctx context.Context, egrp *errgroup.Group) (int, error) {
 
 	shovelerLogger.Infoln("Starting xrootd-monitoring-shoveler...")
 
+	// Note that this param setting is a total HACK. It relies on the fact that the shoveler library
+	// itself uses viper and shares a global viper instance with Pelican. We should find a way to
+	// get away from this in the future...
 	if err := param.SetRaw("queue_directory", param.Shoveler_QueueDirectory.GetString()); err != nil {
 		return -1, err
 	}

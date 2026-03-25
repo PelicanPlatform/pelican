@@ -453,7 +453,7 @@ type: url
 osdf_default: Default is determined dynamically through metadata at <Federation.DiscoveryUrl>/.well-known/pelican-configuration
 default: none
 direct_access: false
-components: ["client", "origin", "cache"]
+components: ["client", "origin", "cache", "registry"]
 ---
 name: Federation.RegistryUrl
 description: |+
