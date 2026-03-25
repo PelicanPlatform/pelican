@@ -111,7 +111,7 @@ func GenParamEnum() {
 		}
 
 		// If `direct_access` is set to false, then we generate an OpaqueParam instead of the
-		// normal typed param. OpaqueParam provides metadata methods (GetName, EnvVarName, etc.)
+		// normal typed param. OpaqueParam provides metadata methods (GetName, GetEnvVarName, etc.)
 		// but no getters or setters, because the value is typically computed via some other
 		// mechanism in the config module.
 		isOpaque := false
@@ -499,7 +499,7 @@ type ObjectParam struct {
 }
 
 // OpaqueParam represents a parameter whose value is not directly accessible
-// via the param package. It provides metadata methods (GetName, EnvVarName,
+// via the param package. It provides metadata methods (GetName, GetEnvVarName,
 // IsSet, IsRuntimeConfigurable) but no getters or setters, because the value
 // is typically computed via some other mechanism in the config module.
 type OpaqueParam struct {
@@ -571,11 +571,6 @@ func (sP StringParam) GetEnvVarName() string {
 	return paramNameToEnvVar(sP.name)
 }
 
-// EnvVarName returns the environment variable name for this parameter.
-func (sP StringParam) EnvVarName() string {
-	return paramNameToEnvVar(sP.name)
-}
-
 // Set sets this string parameter's value.
 func (sP StringParam) Set(value string) error {
 	return MultiSet(map[string]any{sP.name: value})
@@ -605,11 +600,6 @@ func (slP StringSliceParam) IsRuntimeConfigurable() bool {
 }
 
 func (slP StringSliceParam) GetEnvVarName() string {
-	return paramNameToEnvVar(slP.name)
-}
-
-// EnvVarName returns the environment variable name for this parameter.
-func (slP StringSliceParam) EnvVarName() string {
 	return paramNameToEnvVar(slP.name)
 }
 
@@ -645,11 +635,6 @@ func (iP IntParam) GetEnvVarName() string {
 	return paramNameToEnvVar(iP.name)
 }
 
-// EnvVarName returns the environment variable name for this parameter.
-func (iP IntParam) EnvVarName() string {
-	return paramNameToEnvVar(iP.name)
-}
-
 // Set sets this integer parameter's value.
 func (iP IntParam) Set(value int) error {
 	return MultiSet(map[string]any{iP.name: value})
@@ -677,11 +662,6 @@ func (bRP ByteRateParam) IsRuntimeConfigurable() bool {
 }
 
 func (bRP ByteRateParam) GetEnvVarName() string {
-	return paramNameToEnvVar(bRP.name)
-}
-
-// EnvVarName returns the environment variable name for this parameter.
-func (bRP ByteRateParam) EnvVarName() string {
 	return paramNameToEnvVar(bRP.name)
 }
 
@@ -726,11 +706,6 @@ func (bP BoolParam) GetEnvVarName() string {
 	return paramNameToEnvVar(bP.name)
 }
 
-// EnvVarName returns the environment variable name for this parameter.
-func (bP BoolParam) EnvVarName() string {
-	return paramNameToEnvVar(bP.name)
-}
-
 // Set sets this boolean parameter's value.
 func (bP BoolParam) Set(value bool) error {
 	return MultiSet(map[string]any{bP.name: value})
@@ -760,11 +735,6 @@ func (dP DurationParam) IsRuntimeConfigurable() bool {
 }
 
 func (dP DurationParam) GetEnvVarName() string {
-	return paramNameToEnvVar(dP.name)
-}
-
-// EnvVarName returns the environment variable name for this parameter.
-func (dP DurationParam) EnvVarName() string {
 	return paramNameToEnvVar(dP.name)
 }
 
@@ -802,11 +772,6 @@ func (oP ObjectParam) GetEnvVarName() string {
 	return paramNameToEnvVar(oP.name)
 }
 
-// EnvVarName returns the environment variable name for this parameter.
-func (oP ObjectParam) EnvVarName() string {
-	return paramNameToEnvVar(oP.name)
-}
-
 // Set sets this object parameter's value.
 func (oP ObjectParam) Set(value any) error {
 	return MultiSet(map[string]any{oP.name: value})
@@ -825,11 +790,6 @@ func (oqP OpaqueParam) IsRuntimeConfigurable() bool {
 }
 
 func (oqP OpaqueParam) GetEnvVarName() string {
-	return paramNameToEnvVar(oqP.name)
-}
-
-// EnvVarName returns the environment variable name for this parameter.
-func (oqP OpaqueParam) EnvVarName() string {
 	return paramNameToEnvVar(oqP.name)
 }
 

@@ -390,7 +390,7 @@ func (m *LogLevelManager) SetBaseLevel(level log.Level) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.baseLevels["Logging.Level"] = level
+	m.baseLevels[param.Logging_Level.GetName()] = level
 	m.applyChanges()
 }
 
