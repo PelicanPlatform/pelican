@@ -134,7 +134,7 @@ func TestFilterNsAdsForCache(t *testing.T) {
 			// We don't bother passing info to the federation mock server
 			// because we only need it to be queryable (not to be correct)
 			test_utils.MockFederationRoot(t, nil, nil)
-			require.NoError(t, param.SetRaw("Federation.DirectorURL", ts.URL))
+			require.NoError(t, param.Set(param.Federation_DirectorUrl, ts.URL))
 			if testInput.permittedNS != nil {
 				require.NoError(t, param.Cache_PermittedNamespaces.Set(testInput.permittedNS))
 			}

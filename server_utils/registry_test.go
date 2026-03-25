@@ -36,7 +36,7 @@ func TestGetNSIssuerURL(t *testing.T) {
 	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 	require.NoError(t, config.InitClient())
 
-	require.NoError(t, param.SetRaw("Federation.RegistryUrl", "https://registry.com:8446"))
+	require.NoError(t, param.Set(param.Federation_RegistryUrl, "https://registry.com:8446"))
 	url, err := GetNSIssuerURL("/test-prefix")
 	assert.Equal(t, nil, err)
 	assert.Equal(t, "https://registry.com:8446/api/v1.0/registry/test-prefix", url)
@@ -51,7 +51,7 @@ func TestGetJWKSURLFromIssuerURL(t *testing.T) {
 
 	registry := test_utils.RegistryMockup(t, "/test-prefix")
 	defer registry.Close()
-	require.NoError(t, param.SetRaw("Federation.RegistryUrl", registry.URL))
+	require.NoError(t, param.Set(param.Federation_RegistryUrl, registry.URL))
 	expectedIssuerUrl := registry.URL + "/api/v1.0/registry/test-prefix"
 	url, err := GetNSIssuerURL("/test-prefix")
 	assert.Equal(t, nil, err)

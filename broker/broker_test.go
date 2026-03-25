@@ -270,8 +270,8 @@ func TestBroker(t *testing.T) {
 	}
 
 	// Launch the origin-side monitoring of requests.
-	require.NoError(t, param.SetRaw("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString()))
-	require.NoError(t, param.SetRaw("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString()))
+	require.NoError(t, param.Set(param.Federation_BrokerUrl, param.Server_ExternalWebUrl.GetString()))
+	require.NoError(t, param.Set(param.Federation_RegistryUrl, param.Server_ExternalWebUrl.GetString()))
 	listenerChan := make(chan any)
 	ctxQuick, deadlineCancel := context.WithTimeout(ctx, 5*time.Second) // Have shorter timeout for this handshake
 	defer deadlineCancel()
@@ -390,8 +390,8 @@ func TestRetrieveTimeout(t *testing.T) {
 	err = server_utils.WaitUntilWorking(ctx, "GET", param.Server_ExternalWebUrl.GetString()+"/", "Web UI", http.StatusNotFound, false)
 	require.NoError(t, err)
 
-	require.NoError(t, param.SetRaw("Federation.BrokerUrl", param.Server_ExternalWebUrl.GetString()))
-	require.NoError(t, param.SetRaw("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString()))
+	require.NoError(t, param.Set(param.Federation_BrokerUrl, param.Server_ExternalWebUrl.GetString()))
+	require.NoError(t, param.Set(param.Federation_RegistryUrl, param.Server_ExternalWebUrl.GetString()))
 
 	resp, err := doRetrieveRequest(t, ctx, time.Millisecond)
 	require.NoError(t, err)

@@ -51,17 +51,17 @@ func UpdateConfigFromListener(ln net.Listener) {
 					log.WithError(err).Warn("Failed to update Server.ExternalWebUrl from listener")
 				}
 				if viper.GetString("Federation.DirectorUrl") == serverUrlStr {
-					if err := param.SetRaw("Federation.DirectorUrl", newUrlStr); err != nil {
+					if err := param.Set(param.Federation_DirectorUrl, newUrlStr); err != nil {
 						log.WithError(err).Warn("Failed to update Federation.DirectorUrl from listener")
 					}
 				}
 				if viper.GetString("Federation.RegistryUrl") == serverUrlStr {
-					if err := param.SetRaw("Federation.RegistryUrl", newUrlStr); err != nil {
+					if err := param.Set(param.Federation_RegistryUrl, newUrlStr); err != nil {
 						log.WithError(err).Warn("Failed to update Federation.RegistryUrl from listener")
 					}
 				}
 				if brokerUrlStr := viper.GetString("Federation.BrokerUrl"); brokerUrlStr == serverUrlStr {
-					if err := param.SetRaw("Federation.BrokerUrl", newUrlStr); err != nil {
+					if err := param.Set(param.Federation_BrokerUrl, newUrlStr); err != nil {
 						log.WithError(err).Warn("Failed to update Federation.BrokerUrl from listener")
 					}
 				}

@@ -761,7 +761,7 @@ func TestInitServerUrl(t *testing.T) {
 
 		initDirectoryConfig()
 		require.NoError(t, param.Server_ExternalWebUrl.Set(mockWebUrlWoPort))
-		require.NoError(t, param.SetRaw("Federation.DirectorUrl", "https://example-director.com"))
+		require.NoError(t, param.Set(param.Federation_DirectorUrl, "https://example-director.com"))
 		err = InitServer(ctx, server_structs.DirectorType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
@@ -794,7 +794,7 @@ func TestInitServerUrl(t *testing.T) {
 
 		initConfig()
 		require.NoError(t, param.Server_ExternalWebUrl.Set(mockWebUrlWoPort))
-		require.NoError(t, param.SetRaw("Federation.RegistryUrl", "https://example-registry.com"))
+		require.NoError(t, param.Set(param.Federation_RegistryUrl, "https://example-registry.com"))
 		err = InitServer(ctx, server_structs.RegistryType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
@@ -827,7 +827,7 @@ func TestInitServerUrl(t *testing.T) {
 
 		initConfig()
 		require.NoError(t, param.Server_ExternalWebUrl.Set(mockWebUrlWoPort))
-		require.NoError(t, param.SetRaw("Federation.BrokerUrl", "https://example-registry.com"))
+		require.NoError(t, param.Set(param.Federation_BrokerUrl, "https://example-registry.com"))
 		err = InitServer(ctx, server_structs.BrokerType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
@@ -895,7 +895,7 @@ func TestInitServerAtomicUploadsRequiresPosix(t *testing.T) {
 	})
 
 	mockFederationRoot(t)
-	require.NoError(t, param.SetRaw("ConfigDir", t.TempDir()))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 	require.NoError(t, param.Origin_StorageType.Set("s3"))
 	require.NoError(t, param.Origin_EnableAtomicUploads.Set(true))
 	require.NoError(t, param.Origin_S3ServiceUrl.Set("https://s3.example.com"))
@@ -1018,7 +1018,7 @@ func TestDiscoverFederationImpl(t *testing.T) {
 				tc.expectedFed.DiscoveryEndpoint = serverUrl
 			} else {
 				require.NoError(t, param.Federation_DiscoveryUrl.Set(""))
-				require.NoError(t, param.SetRaw("Federation.DirectorUrl", serverUrl))
+				require.NoError(t, param.Set(param.Federation_DirectorUrl, serverUrl))
 				tc.expectedFed.DirectorEndpoint = serverUrl
 			}
 
@@ -1029,16 +1029,16 @@ func TestDiscoverFederationImpl(t *testing.T) {
 				require.NoError(t, param.Federation_DiscoveryUrl.Set(tc.inputFed.DiscoveryEndpoint))
 			}
 			if tc.inputFed.RegistryEndpoint != "" {
-				require.NoError(t, param.SetRaw("Federation.RegistryUrl", tc.inputFed.RegistryEndpoint))
+				require.NoError(t, param.Set(param.Federation_RegistryUrl, tc.inputFed.RegistryEndpoint))
 			}
 			if tc.inputFed.DirectorEndpoint != "" {
-				require.NoError(t, param.SetRaw("Federation.DirectorUrl", tc.inputFed.DirectorEndpoint))
+				require.NoError(t, param.Set(param.Federation_DirectorUrl, tc.inputFed.DirectorEndpoint))
 			}
 			if tc.inputFed.BrokerEndpoint != "" {
-				require.NoError(t, param.SetRaw("Federation.BrokerUrl", tc.inputFed.BrokerEndpoint))
+				require.NoError(t, param.Set(param.Federation_BrokerUrl, tc.inputFed.BrokerEndpoint))
 			}
 			if tc.inputFed.JwksUri != "" {
-				require.NoError(t, param.SetRaw("Federation.JwksUrl", tc.inputFed.JwksUri))
+				require.NoError(t, param.Set(param.Federation_JwkUrl, tc.inputFed.JwksUri))
 			}
 
 			require.NoError(t, param.Server_ExternalWebUrl.Set(tc.extWebUrl))

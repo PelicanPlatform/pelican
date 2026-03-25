@@ -97,7 +97,7 @@ func TestRegistration(t *testing.T) {
 	defer svr.CloseClientConnections()
 	defer svr.Close()
 
-	require.NoError(t, param.SetRaw("Federation.RegistryUrl", svr.URL))
+	require.NoError(t, param.Set(param.Federation_RegistryUrl, svr.URL))
 	require.NoError(t, param.Origin_FederationPrefix.Set("/test123"))
 
 	// Re-run the InitServer to reflect the new RegistryUrl set above
@@ -256,7 +256,7 @@ func TestMultiKeysRegistration(t *testing.T) {
 	defer svr.CloseClientConnections()
 	defer svr.Close()
 
-	require.NoError(t, param.SetRaw("Federation.RegistryUrl", svr.URL))
+	require.NoError(t, param.Set(param.Federation_RegistryUrl, svr.URL))
 	require.NoError(t, param.Origin_FederationPrefix.Set("/test123"))
 
 	// Remove the original key, forcing us to register with the new one

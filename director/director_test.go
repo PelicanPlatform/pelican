@@ -1996,7 +1996,6 @@ func TestRedirectMiddleware(t *testing.T) {
 
 	// Set the necessary viper configuration for host-aware tests
 	require.NoError(t, param.Director_OriginResponseHostnames.Set([]string{"origin-hostname.com"}))
-	require.NoError(t, param.SetRaw("Director.HostAwareRedirects", true))
 
 	// Run all test cases
 	for _, tc := range testCases {
@@ -2006,6 +2005,7 @@ func TestRedirectMiddleware(t *testing.T) {
 	server_utils.ResetTestState()
 
 }
+
 func TestRedirects(t *testing.T) {
 	setGinTestMode()
 	t.Cleanup(test_utils.SetupTestLogging(t))

@@ -237,10 +237,10 @@ func TestSetBrokerURL(t *testing.T) {
 
 	setFederationParams := func(brokerURL string) {
 		require.NoError(t, param.Federation_DiscoveryUrl.Set("https://discovery.example.com"))
-		require.NoError(t, param.SetRaw("Federation.DirectorUrl", "https://director.example.com"))
-		require.NoError(t, param.SetRaw("Federation.RegistryUrl", "https://registry.example.com"))
-		require.NoError(t, param.SetRaw("Federation.JwkUrl", "https://jwks.example.com"))
-		require.NoError(t, param.SetRaw("Federation.BrokerUrl", brokerURL))
+		require.NoError(t, param.Set(param.Federation_DirectorUrl, "https://director.example.com"))
+		require.NoError(t, param.Set(param.Federation_RegistryUrl, "https://registry.example.com"))
+		require.NoError(t, param.Set(param.Federation_JwkUrl, "https://jwks.example.com"))
+		require.NoError(t, param.Set(param.Federation_BrokerUrl, brokerURL))
 	}
 
 	t.Run("multiple-prefixes-broker-url-not-set", func(t *testing.T) {
