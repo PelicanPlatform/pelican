@@ -1202,17 +1202,17 @@ func TestGenerateOriginIssuer(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	testCases := []struct {
-		name               string
-		yamlConfig         string
-		extraViperSettings map[string]string
-		expectError        bool
-		expectedIssuers    []Issuer
+		name            string
+		yamlConfig      string
+		extraParams     map[param.Param]any
+		expectError     bool
+		expectedIssuers []Issuer
 	}{
 		{
 			name:       "single export default issuer",
 			yamlConfig: singleExportNoIssuers,
-			extraViperSettings: map[string]string{
-				param.Server_IssuerUrl.GetName(): "https://foo.com",
+			extraParams: map[param.Param]any{
+				param.Server_IssuerUrl: "https://foo.com",
 			},
 			expectError: false,
 			expectedIssuers: []Issuer{
@@ -1246,8 +1246,8 @@ func TestGenerateOriginIssuer(t *testing.T) {
 		{
 			name:       "multiple exports multiple issuers",
 			yamlConfig: multiExportIssuers,
-			extraViperSettings: map[string]string{
-				param.Server_IssuerUrl.GetName(): "https://foo99.com",
+			extraParams: map[param.Param]any{
+				param.Server_IssuerUrl: "https://foo99.com",
 			},
 			expectError: false,
 			expectedIssuers: []Issuer{
@@ -1292,11 +1292,11 @@ func TestGenerateOriginIssuer(t *testing.T) {
 		{
 			name:       "single export one issuer with all parameters",
 			yamlConfig: singleExportOneIssuer,
-			extraViperSettings: map[string]string{
-				param.Origin_ScitokensRestrictedPaths.GetName(): "/restricted/path",
-				param.Origin_ScitokensMapSubject.GetName():      "true",
-				param.Origin_ScitokensDefaultUser.GetName():     "defaultUser",
-				param.Origin_ScitokensUsernameClaim.GetName():   "usernameClaim",
+			extraParams: map[param.Param]any{
+				param.Origin_ScitokensRestrictedPaths: []string{"/restricted/path"},
+				param.Origin_ScitokensMapSubject:      true,
+				param.Origin_ScitokensDefaultUser:     "defaultUser",
+				param.Origin_ScitokensUsernameClaim:   "usernameClaim",
 			},
 			expectError: false,
 			expectedIssuers: []Issuer{
@@ -1329,9 +1329,19 @@ func TestGenerateOriginIssuer(t *testing.T) {
 			err = config.InitServer(ctx, server_structs.OriginType)
 			require.NoError(t, err)
 
-			// Set extra Viper settings if provided
-			for key, value := range tc.extraViperSettings {
-				require.NoError(t, param.SetRaw(key, value))
+			// Set extra params if provided
+			for p, val := range tc.extraParams {
+				switch pType := p.(type) {
+				case param.StringParam:
+					err = pType.Set(val.(string))
+				case param.BoolParam:
+					err = pType.Set(val.(bool))
+				case param.StringSliceParam:
+					err = pType.Set(val.([]string))
+				default:
+					t.Fatalf("broken test -- unsupported param type for param %s", p.GetName())
+				}
+				require.NoError(t, err, "error setting extra param %s", p.GetName())
 			}
 
 			issuers, err := GenerateOriginIssuers()

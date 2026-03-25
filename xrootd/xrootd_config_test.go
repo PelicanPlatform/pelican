@@ -87,19 +87,19 @@ func TestXrootDOriginConfig(t *testing.T) {
 
 	tests := []struct {
 		name            string
-		configKey       string
+		configKey       param.StringParam
 		configValue     string
 		shouldError     bool
 		expectedContent string
 	}{
-		{"TestOriginCmsCorrectConfig", "Logging.Origin.Cms", "debug", false, "cms.trace debug"},
-		{"TestOriginCmsIncorrectConfig", "Logging.Origin.Cms", "degub", true, ""},
-		{"TestOriginScitokensCorrectConfig", "Logging.Origin.Scitokens", "debug", false, "scitokens.trace debug"},
-		{"TestOriginScitokensIncorrectConfig", "Logging.Origin.Scitokens", "degub", true, ""},
-		{"TestOriginXrdCorrectConfig", "Logging.Origin.Xrd", "debug", false, "xrd.trace debug"},
-		{"TestOriginXrdIncorrectConfig", "Logging.Origin.Xrd", "degub", true, ""},
-		{"TestOriginXrootdCorrectConfig", "Logging.Origin.Xrootd", "debug", false, "xrootd.trace debug"},
-		{"TestOriginXrootdIncorrectConfig", "Logging.Origin.Xrootd", "degub", true, ""},
+		{"TestOriginCmsCorrectConfig", param.Logging_Origin_Cms, "debug", false, "cms.trace debug"},
+		{"TestOriginCmsIncorrectConfig", param.Logging_Origin_Cms, "degub", true, ""},
+		{"TestOriginScitokensCorrectConfig", param.Logging_Origin_Scitokens, "debug", false, "scitokens.trace debug"},
+		{"TestOriginScitokensIncorrectConfig", param.Logging_Origin_Scitokens, "degub", true, ""},
+		{"TestOriginXrdCorrectConfig", param.Logging_Origin_Xrd, "debug", false, "xrd.trace debug"},
+		{"TestOriginXrdIncorrectConfig", param.Logging_Origin_Xrd, "degub", true, ""},
+		{"TestOriginXrootdCorrectConfig", param.Logging_Origin_Xrootd, "debug", false, "xrootd.trace debug"},
+		{"TestOriginXrootdIncorrectConfig", param.Logging_Origin_Xrootd, "degub", true, ""},
 	}
 
 	for _, tt := range tests {
@@ -107,9 +107,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 			defer server_utils.ResetTestState()
 			setupXrootd(t, ctx, server_structs.OriginType, egrp)
 
-			if tt.configKey != "" {
-				require.NoError(t, param.SetRaw(tt.configKey, tt.configValue))
-			}
+			require.NoError(t, tt.configKey.Set(tt.configValue))
 
 			configPath, err := ConfigXrootd(ctx, true)
 			if tt.shouldError {
