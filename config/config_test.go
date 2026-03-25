@@ -913,7 +913,7 @@ func TestInitServerAtomicUploadsRequiresTempLocation(t *testing.T) {
 	})
 
 	mockFederationRoot(t)
-	require.NoError(t, param.SetRaw("ConfigDir", t.TempDir()))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 	require.NoError(t, param.Origin_StorageType.Set("posix"))
 	require.NoError(t, param.Origin_EnableAtomicUploads.Set(true))
 	require.NoError(t, param.Origin_UploadTempLocation.Set(""))
