@@ -108,7 +108,7 @@ func getMetadataValue(stringParam param.StringParam) (result string, err error) 
 		if param.OIDC_Issuer.IsSet() {
 			issuerUrl, _ := url.Parse(param.OIDC_Issuer.GetString())
 			if issuerUrl != nil && issuerUrl.Hostname() == "auth.globus.org" && stringParam.GetName() == param.OIDC_DeviceAuthEndpoint.GetName() {
-				log.Warningf("You are using Globus as the auth privider. Although it does not support OAuth device flow used by Pelican registry, you may use it for other Pelican servers. %s is set to https://auth.globus.org/", param.OIDC_DeviceAuthEndpoint.GetName())
+				log.Warningf("You are using Globus as the auth provider. Although it does not support OAuth device flow used by Pelican registry, you may use it for other Pelican servers. %s is set to https://auth.globus.org/", param.OIDC_DeviceAuthEndpoint.GetName())
 				result = "https://auth.globus.org/"
 				return
 			}

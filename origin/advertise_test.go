@@ -32,7 +32,7 @@ func TestGetRequiredFeatures(t *testing.T) {
 	testCases := []struct {
 		name          string
 		expectedNames []string
-		params       map[param.BoolParam]bool
+		params        map[param.BoolParam]bool
 	}{
 		{
 			name: "No Features",
