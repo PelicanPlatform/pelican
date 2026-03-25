@@ -62,7 +62,6 @@ var singlePrivateFullOrigin string
 func TestCacheScitokensConfigOverride(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
 		cancel()

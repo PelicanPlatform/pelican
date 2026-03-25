@@ -129,7 +129,7 @@ func getTempTokenForTest(t *testing.T) string {
 func TestPosixv2OriginUploadDownload(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()
@@ -186,7 +186,7 @@ func TestPosixv2OriginUploadDownload(t *testing.T) {
 func TestPosixv2OriginStat(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()
@@ -233,7 +233,7 @@ func TestPosixv2OriginStat(t *testing.T) {
 func TestPosixv2OriginMultipleFiles(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()
@@ -294,7 +294,7 @@ func TestPosixv2OriginMultipleFiles(t *testing.T) {
 func TestPosixv2OriginLargeFile(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()
@@ -355,7 +355,7 @@ func TestPosixv2OriginLargeFile(t *testing.T) {
 func TestPosixv2OriginListingWithDirector(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Configure origin to use POSIXv2 (without specifying storage, NewFedTest will create it)
 	originConfig := `
@@ -433,7 +433,7 @@ Director:
 func TestCacheProxyDirectoryListing(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Configure origin to use POSIXv2
 	originConfig := `
@@ -554,7 +554,7 @@ Director:
 func TestGoWebDAVCompatibility(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Configure origin to use POSIXv2
 	originConfig := `
@@ -653,7 +653,7 @@ Director:
 func TestRecursiveDownload(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Configure origin to use POSIXv2
 	originConfig := `

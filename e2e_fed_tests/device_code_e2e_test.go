@@ -98,7 +98,7 @@ Issuer:
 func TestDeviceCodeE2E(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// ----- Step 0: Create htpasswd file BEFORE federation starts -----
 	// The auth subsystem requires an "admin" user in the htpasswd file for

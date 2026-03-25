@@ -53,7 +53,7 @@ import (
 func TestPosixv2OriginXattrStorage(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()
@@ -142,7 +142,7 @@ Director:
 func TestPosixv2OriginListingHTTP(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()
@@ -234,7 +234,7 @@ func TestPosixv2OriginListingHTTP(t *testing.T) {
 func TestPosixv2MultipleExports(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Configure origin to use POSIXv2 with multiple exports
 	originConfig := `
@@ -316,7 +316,7 @@ Director:
 func TestPosixv2MultipleDefaultChecksums(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()
@@ -399,7 +399,7 @@ Director:
 func TestPosixv2HeadRequestDefaultChecksum(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()
@@ -493,7 +493,7 @@ Director:
 func TestPosixv2DigestHeaderRFC3230Format(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()

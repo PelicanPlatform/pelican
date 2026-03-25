@@ -126,7 +126,7 @@ func TestRcloneDownload(t *testing.T) {
 
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()
@@ -211,7 +211,7 @@ func TestRcloneUpload(t *testing.T) {
 
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()
@@ -291,7 +291,7 @@ func TestRcloneSync(t *testing.T) {
 
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()
@@ -366,7 +366,7 @@ func TestRcloneTokenRefresh(t *testing.T) {
 
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()
@@ -465,7 +465,7 @@ cat %s
 func TestDirectorTokenValidation(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()

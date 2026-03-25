@@ -484,6 +484,15 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 		for i, advUrl := range fedInfo.DirectorAdvertiseEndpoints {
 			fedInfo.DirectorAdvertiseEndpoints[i] = stripPort443(wrapWithHttpsIfNeeded(advUrl))
 		}
+
+		// Enforce the invariant that a successful return always has a populated DiscoveryEndpoint.
+		// The discovery endpoint doubles as the federation issuer and must be known by all services.
+		if err == nil && fedInfo.DiscoveryEndpoint == "" {
+			err = errors.New("federation discovery completed but no discovery endpoint was resolved; " +
+				"ensure Federation.DiscoveryUrl or Federation.DirectorUrl is configured and that the " +
+				"director hosts federation metadata at /.well-known/pelican-configuration " +
+				"(see Director.EnableFederationMetadataHosting for more details).")
+		}
 	}()
 
 	// Set each of the fed values to anything we got from config.
@@ -614,7 +623,11 @@ func GetFederation(ctx context.Context) (pelican_url.FederationDiscovery, error)
 	return *loadedInfo, globalFedErr
 }
 
-// Set the current global federation metadata
+// Set the current global federation metadata.
+//
+// This is authoritative: once called, GetFederation will return the provided
+// values without re-running discovery. Callers are responsible for providing
+// correct and complete federation info.
 func SetFederation(fd pelican_url.FederationDiscovery) {
 	// Best-effort update of config state; this should not fail under normal circumstances
 	if err := param.MultiSet(map[string]interface{}{
@@ -629,6 +642,14 @@ func SetFederation(fd pelican_url.FederationDiscovery) {
 	}
 
 	globalFedInfo.Store(&fd)
+	globalFedErr = nil
+
+	// Consume the sync.Once so that subsequent GetFederation calls return the
+	// stored value directly instead of re-running discovery.
+	if fedDiscoveryOnce == nil {
+		fedDiscoveryOnce = &sync.Once{}
+	}
+	fedDiscoveryOnce.Do(func() {})
 }
 
 // TODO: It's not clear that this function works correctly.  We should
