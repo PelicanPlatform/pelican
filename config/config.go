@@ -1851,11 +1851,11 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	}
 
 	if param.Cache_LowWatermark.IsSet() || param.Cache_HighWaterMark.IsSet() {
-		lowWm, lwmIsAbs, err := utils.ValidateWatermark(param.Cache_LowWatermark.GetName(), false)
+		lowWm, lwmIsAbs, err := utils.ValidateWatermark(param.Cache_LowWatermark.GetString(), param.Cache_LowWatermark.GetName(), false)
 		if err != nil {
 			return err
 		}
-		highWm, hwmIsAbs, err := utils.ValidateWatermark(param.Cache_HighWaterMark.GetName(), false)
+		highWm, hwmIsAbs, err := utils.ValidateWatermark(param.Cache_HighWaterMark.GetString(), param.Cache_HighWaterMark.GetName(), false)
 		if err != nil {
 			return err
 		}
@@ -1881,13 +1881,13 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		var base, nominal, max float64
 		var err error
 		// Watermark validation will error if these parameters are not absolute, so we can ignore that output
-		if base, _, err = utils.ValidateWatermark(param.Cache_FilesBaseSize.GetName(), true); err != nil {
+		if base, _, err = utils.ValidateWatermark(param.Cache_FilesBaseSize.GetString(), param.Cache_FilesBaseSize.GetName(), true); err != nil {
 			return err
 		}
-		if nominal, _, err = utils.ValidateWatermark(param.Cache_FilesNominalSize.GetName(), true); err != nil {
+		if nominal, _, err = utils.ValidateWatermark(param.Cache_FilesNominalSize.GetString(), param.Cache_FilesNominalSize.GetName(), true); err != nil {
 			return err
 		}
-		if max, _, err = utils.ValidateWatermark(param.Cache_FilesMaxSize.GetName(), true); err != nil {
+		if max, _, err = utils.ValidateWatermark(param.Cache_FilesMaxSize.GetString(), param.Cache_FilesMaxSize.GetName(), true); err != nil {
 			return err
 		}
 		if base >= nominal || nominal >= max {
