@@ -90,7 +90,7 @@ jobs:
       - name: Generate GoReleaser config
         # Use bash (from Git for Windows) so we can run the shell script
         # directly. WSL is not available on GitHub Actions Windows runners,
-        # so `make generate-goreleaser` (which invokes a .sh script) fails.
+        # so `make goreleaser-config` (which invokes a .sh script) fails.
         shell: bash
         run: ./scripts/generate_goreleaser.sh .goreleaser.in.yml .goreleaser.generated.yml
 

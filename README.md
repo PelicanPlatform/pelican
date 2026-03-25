@@ -59,7 +59,7 @@ and it shares the same defaults and behavior as stashcp.
 Building is performed with the [goreleaser](https://goreleaser.com/) tool. To build a snapshot (not release):
 
 ```
-$ make generate-goreleaser
+$ make goreleaser-config
 $ goreleaser --clean --snapshot --config .goreleaser.generated.yml
 ```
 

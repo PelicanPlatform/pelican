@@ -187,7 +187,7 @@ RUN --mount=type=cache,id=go-cache,target=/root/.cache/go-build,sharing=shared \
   set -eux
   set -o pipefail
 
-  make generate-goreleaser
+  make goreleaser-config
 
   if ${IS_NONRELEASE_BUILD}; then
     goreleaser build --id pelican-server --clean --single-target --snapshot --config .goreleaser.generated.yml

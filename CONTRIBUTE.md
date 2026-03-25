@@ -201,7 +201,7 @@ We use [GoReleaser](https://goreleaser.com/) to manage compiling and distributin
 Navigate to the repository root in the terminal (if not already there) and run the following commands:
 
 ```bash
-$ make generate-goreleaser
+$ make goreleaser-config
 $ goreleaser build --single-target --clean --snapshot --config .goreleaser.generated.yml
 ```
 
