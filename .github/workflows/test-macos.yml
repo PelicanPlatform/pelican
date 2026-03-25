@@ -105,7 +105,7 @@ jobs:
 
       - name: Generate GoReleaser config
         run: |
-          make generate-goreleaser
+          make goreleaser-config
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
