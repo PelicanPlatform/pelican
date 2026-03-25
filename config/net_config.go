@@ -44,10 +44,10 @@ func UpdateConfigFromListener(ln net.Listener) {
 			serverUrl, err := url.Parse(serverUrlStr)
 			if err == nil {
 				newUrlStr := "https://" + serverUrl.Hostname() + ":" + strconv.Itoa(tcpAddr.Port)
-					if err := param.Server_WebHost.Set(serverUrl.Hostname()); err != nil {
+				if err := param.Server_WebHost.Set(serverUrl.Hostname()); err != nil {
 					log.WithError(err).Warn("Failed to update Server.WebHost from listener")
 				}
-					if err := param.Server_ExternalWebUrl.Set(newUrlStr); err != nil {
+				if err := param.Server_ExternalWebUrl.Set(newUrlStr); err != nil {
 					log.WithError(err).Warn("Failed to update Server.ExternalWebUrl from listener")
 				}
 				if viper.GetString("Federation.DirectorUrl") == serverUrlStr {
