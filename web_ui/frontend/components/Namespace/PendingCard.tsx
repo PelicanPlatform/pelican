@@ -19,6 +19,7 @@ import { alertOnError } from '@/helpers/util';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { approveNamespace, denyNamespace } from '@/helpers/api';
 import { Theme } from '@mui/system';
+import NamespaceTitle from '@/components/Namespace/NamespaceTitle';
 
 export interface PendingCardProps {
   namespace: RegistryNamespace;
@@ -59,25 +60,7 @@ export const PendingCard = ({
         bgcolor={'secondary'}
         onClick={() => setTransition(!transition)}
       >
-        <Box
-          my={'auto'}
-          ml={1}
-          display={'flex'}
-          flexDirection={'row'}
-          minWidth={0}
-        >
-          <NamespaceIcon serverType={namespace.type} />
-          <Typography
-            sx={{
-              pt: '2px',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {namespace.prefix}
-          </Typography>
-        </Box>
+        <NamespaceTitle namespace={namespace} />
         <Box display={'flex'}>
           <Box my={'auto'} display={'flex'} flexDirection={'row'}>
             {authenticated !== undefined &&

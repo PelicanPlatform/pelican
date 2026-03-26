@@ -1,4 +1,4 @@
-import { Avatar, Box, Tooltip } from '@mui/material';
+import { Avatar, Box, Tooltip, Typography } from '@mui/material';
 import { FolderOpen, Storage, TripOrigin } from '@mui/icons-material';
 import React, { useMemo } from 'react';
 
