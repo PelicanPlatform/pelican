@@ -283,7 +283,7 @@ func RemoveTrailingSlash(prefix string) string {
 // validatePathLikePrefix validates basic structural requirements for any prefix that gets treated
 // like a POSIX filepath -- it must be non-empty, start with '/', and not contain characters that
 // carry special meaning in POSIX filepaths or URLs. This is shared between federation prefix and
-// storage prefix validation.
+// storage prefix validation, while the former adds reserved-namespace restrictions on top of it.
 func validatePathLikePrefix(prefix string) error {
 	if len(prefix) == 0 {
 		return errors.Errorf("prefix '%s' is empty", prefix)
