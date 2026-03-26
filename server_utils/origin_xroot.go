@@ -37,8 +37,9 @@ func (o *XRootOrigin) Type(_ Origin) server_structs.OriginStorageType {
 }
 
 func (o *XRootOrigin) validateStoragePrefix(prefix string) error {
-	// XRoot Origins will have posix-like storage prefixes
-	return validateFederationPrefix(prefix)
+	// XRoot Origins will have posix-like storage prefixes.
+	// Use path-like validation without federation-specific reserved prefix checks.
+	return validatePathLikePrefix(prefix)
 }
 
 func (o *XRootOrigin) validateExtra(e *OriginExport, numExports int) (err error) {

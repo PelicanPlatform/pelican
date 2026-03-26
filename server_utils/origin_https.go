@@ -41,8 +41,8 @@ func (o *HTTPSOrigin) Type(_ Origin) server_structs.OriginStorageType {
 
 func (o *HTTPSOrigin) validateStoragePrefix(prefix string) error {
 	// HTTPS Origins will have posix-like storage prefixes, owing to their prefixes being valid
-	// URL paths.
-	return validateFederationPrefix(prefix)
+	// URL paths. Use path-like validation without federation-specific reserved prefix checks.
+	return validatePathLikePrefix(prefix)
 }
 
 func (o *HTTPSOrigin) validateExtra(e *OriginExport, numExports int) (err error) {

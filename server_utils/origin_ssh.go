@@ -32,7 +32,7 @@ func (o *SSHOrigin) Type(_ Origin) server_structs.OriginStorageType {
 }
 
 func (o *SSHOrigin) validateStoragePrefix(prefix string) error {
-	// For SSH origins, the storage prefix is validated the same way we validate
-	// the federation prefix (it's a remote path on the SSH host).
-	return validateFederationPrefix(prefix)
+	// For SSH origins, the storage prefix is a remote path on the SSH host.
+	// Use path-like validation without federation-specific reserved prefix checks.
+	return validatePathLikePrefix(prefix)
 }
