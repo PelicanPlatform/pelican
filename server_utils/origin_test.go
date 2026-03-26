@@ -667,8 +667,8 @@ func TestFederationPrefixValidation(t *testing.T) {
 	runFedPrefixTest(t, "/star*test", false)       // Test prefix with '*'
 	runFedPrefixTest(t, "/backslash\\test", false) // Test prefix with '\'
 	runFedPrefixTest(t, "/question?test", false)   // Test prefix with '?'
-	runFedPrefixTest(t, "/hash#test", false)        // Test prefix with '#'
-	runFedPrefixTest(t, "/percent%test", false)     // Test prefix with '%'
+	runFedPrefixTest(t, "/hash#test", false)       // Test prefix with '#'
+	runFedPrefixTest(t, "/percent%test", false)    // Test prefix with '%'
 	runFedPrefixTest(t, "/origins/foo/bar", false) // Test prefix for origins
 	runFedPrefixTest(t, "/origins/example.org", false)
 	runFedPrefixTest(t, "/caches/foo/bar", false) // Test prefix for caches
@@ -707,8 +707,8 @@ func TestPathLikePrefixValidation(t *testing.T) {
 	runPathLikePrefixTest(t, "/star*test", false)       // Test prefix with '*'
 	runPathLikePrefixTest(t, "/backslash\\test", false) // Test prefix with '\'
 	runPathLikePrefixTest(t, "/question?test", false)   // Test prefix with '?'
-	runPathLikePrefixTest(t, "/hash#test", false)        // Test prefix with '#'
-	runPathLikePrefixTest(t, "/percent%test", false)     // Test prefix with '%'
+	runPathLikePrefixTest(t, "/hash#test", false)       // Test prefix with '#'
+	runPathLikePrefixTest(t, "/percent%test", false)    // Test prefix with '%'
 
 	// Federation-reserved prefixes should be VALID for storage prefixes
 	runPathLikePrefixTest(t, "/pelican", true)         // /pelican is only reserved in the federation
