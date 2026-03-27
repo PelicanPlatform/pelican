@@ -3072,7 +3072,7 @@ default: $ConfigBase/session-secret
   The default content of the file is the hash of the concatenation of "pelican" and the DER form of ${IssuerKey}
 components: ["cache", "director", "origin", "registry"]
 ---
-name: Server.ReadOnly
+name: Server.WebReadOnly
 description: |+
   When enabled, web UI routes that employ the read-only middleware will reject state changing HTTP
   methods such as, POST, PUT, PATCH, and DELETE.

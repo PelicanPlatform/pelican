@@ -112,12 +112,6 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		return nil, err
 	}
 
-	// OA4MP is not XRootD specific - configure if enabled
-	// Director also registers this metadata URL; avoid registering twice.
-	if !modules.IsEnabled(server_structs.DirectorType) {
-		server_utils.RegisterOIDCAPI(engine.Group("/", web_ui.ServerHeaderMiddleware), false)
-	}
-
 	// Configure the issuer (OA4MP proxy or embedded fosite) if enabled
 	if param.Origin_EnableIssuer.GetBool() {
 		issuerMode := param.Origin_IssuerMode.GetString()
