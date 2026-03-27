@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -38,6 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/ssh_posixv2"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -47,21 +49,62 @@ var (
 	handlersRegistered bool              // Tracks whether handlers have been registered
 )
 
+const (
+	// xfrReportInterval is the minimum number of bytes that must be
+	// transferred between intermediate isXfr monitoring reports.
+	xfrReportInterval int64 = 100 * 1024 * 1024 // 100 MB
+)
+
+// monitoringTracker is shared between the request reader and response writer
+// for a single HTTP request. It periodically emits isXfr monitoring records
+// as bytes flow through the I/O wrappers.
+type monitoringTracker struct {
+	mon             *metrics.TransferMonitor
+	bytesAtLastXfr  atomic.Int64
+	totalReadBytes  atomic.Int64
+	totalWriteBytes atomic.Int64
+}
+
+// maybeEmitXfr checks whether enough new bytes have been transferred since
+// the last isXfr record and emits one if so.
+func (mt *monitoringTracker) maybeEmitXfr() {
+	if mt == nil || mt.mon == nil {
+		return
+	}
+	totalBytes := mt.totalReadBytes.Load() + mt.totalWriteBytes.Load()
+	lastReport := mt.bytesAtLastXfr.Load()
+	if totalBytes-lastReport >= xfrReportInterval {
+		// CAS to avoid duplicate reports from concurrent Read/Write
+		if mt.bytesAtLastXfr.CompareAndSwap(lastReport, totalBytes) {
+			mt.mon.EmitXfr(mt.totalReadBytes.Load(), mt.totalWriteBytes.Load())
+		}
+	}
+}
+
 // metricsResponseWriter wraps gin.ResponseWriter to track bytes written
 type metricsResponseWriter struct {
 	gin.ResponseWriter
 	bytesWritten int64
+	tracker      *monitoringTracker
 }
 
 func (mrw *metricsResponseWriter) Write(data []byte) (int, error) {
 	n, err := mrw.ResponseWriter.Write(data)
 	mrw.bytesWritten += int64(n)
+	if mrw.tracker != nil {
+		mrw.tracker.totalReadBytes.Add(int64(n))
+		mrw.tracker.maybeEmitXfr()
+	}
 	return n, err
 }
 
 func (mrw *metricsResponseWriter) WriteString(s string) (int, error) {
 	n, err := mrw.ResponseWriter.WriteString(s)
 	mrw.bytesWritten += int64(n)
+	if mrw.tracker != nil {
+		mrw.tracker.totalReadBytes.Add(int64(n))
+		mrw.tracker.maybeEmitXfr()
+	}
 	return n, err
 }
 
@@ -69,11 +112,16 @@ func (mrw *metricsResponseWriter) WriteString(s string) (int, error) {
 type metricsRequestReader struct {
 	reader    io.ReadCloser
 	bytesRead int64
+	tracker   *monitoringTracker
 }
 
 func (mrr *metricsRequestReader) Read(p []byte) (int, error) {
 	n, err := mrr.reader.Read(p)
 	mrr.bytesRead += int64(n)
+	if mrr.tracker != nil {
+		mrr.tracker.totalWriteBytes.Add(int64(n))
+		mrr.tracker.maybeEmitXfr()
+	}
 	return n, err
 }
 
@@ -263,12 +311,33 @@ func httpMetricsMiddleware() gin.HandlerFunc {
 		metrics.HttpActiveRequests.WithLabelValues(serverTypeOrigin, method).Inc()
 		defer metrics.HttpActiveRequests.WithLabelValues(serverTypeOrigin, method).Dec()
 
+		// For data transfer methods (GET/PUT), start an XRootD-compatible
+		// transfer monitor that will emit periodic isXfr records during
+		// long-running transfers and a final isClose when complete.
+		var tracker *monitoringTracker
+		var mon *metrics.TransferMonitor
+		if method == "GET" || method == "PUT" {
+			event := buildTransferEvent(c, method, start)
+			mon = metrics.BeginTransferMonitor(event)
+			if mon != nil {
+				// Only create the tracker (which wires atomic byte
+				// counters into every Read/Write call) when the
+				// transfer could be large enough to trigger an
+				// intermediate isXfr report. For small, known-size
+				// requests the overhead is unnecessary.
+				knownSize := c.Request.ContentLength // PUT size; -1 if unknown
+				if knownSize < 0 || knownSize >= xfrReportInterval {
+					tracker = &monitoringTracker{mon: mon}
+				}
+			}
+		}
+
 		// Wrap request body to track bytes read
-		mrr := &metricsRequestReader{reader: c.Request.Body}
+		mrr := &metricsRequestReader{reader: c.Request.Body, tracker: tracker}
 		c.Request.Body = mrr
 
 		// Wrap response writer to track bytes out
-		mrw := &metricsResponseWriter{ResponseWriter: c.Writer}
+		mrw := &metricsResponseWriter{ResponseWriter: c.Writer, tracker: tracker}
 		c.Writer = mrw
 
 		// Process request
@@ -306,6 +375,25 @@ func httpMetricsMiddleware() gin.HandlerFunc {
 		// Track errors (5xx status codes)
 		if status >= 500 && status < 600 {
 			metrics.HttpErrorsTotal.WithLabelValues(serverTypeOrigin, method, statusStr).Inc()
+		}
+
+		// Close the transfer monitor. On success, emit the final isClose
+		// record with accurate byte counts. On failure, still close it so
+		// downstream sees the file close rather than an orphaned open.
+		if mon != nil {
+			var readBytes, writeBytes int64
+			var readOps, writeOps int32
+			if status >= 200 && status < 300 {
+				switch method {
+				case "GET":
+					readBytes = mrw.bytesWritten
+					readOps = 1
+				case "PUT":
+					writeBytes = mrr.bytesRead
+					writeOps = 1
+				}
+			}
+			mon.Close(readBytes, writeBytes, readOps, writeOps)
 		}
 	}
 }
@@ -422,8 +510,8 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 
 		// Create a route group for this prefix
 		group := engine.Group(routePrefix)
-		group.Use(httpMetricsMiddleware())
 		group.Use(authMiddleware())
+		group.Use(httpMetricsMiddleware())
 
 		// Create a handler function for all requests
 		handleRequest := func(c *gin.Context) {
@@ -500,4 +588,46 @@ func handleHeadWithChecksum(c *gin.Context, handler *webdav.Handler, modifiedReq
 
 	// Now let the WebDAV handler process the HEAD request
 	handler.ServeHTTP(c.Writer, modifiedReq)
+}
+
+// buildTransferEvent constructs a TransferEvent from the current request context.
+// It extracts user/auth information, project name, and path. Byte counts and ops
+// are left at zero; the caller fills them in when the transfer completes.
+func buildTransferEvent(c *gin.Context, method string, start time.Time) metrics.TransferEvent {
+	// Determine the federation path from the request URL
+	requestPath := c.Request.URL.Path
+
+	// Strip the /api/v1.0/origin/data prefix if present (director co-located mode)
+	const apiPrefix = "/api/v1.0/origin/data"
+	requestPath = strings.TrimPrefix(requestPath, apiPrefix)
+
+	event := metrics.TransferEvent{
+		Path:      requestPath,
+		ClientIP:  c.ClientIP(),
+		StartTime: start,
+		EndTime:   time.Now(),
+	}
+
+	// Extract auth info from context (populated by authMiddleware)
+	ctx := c.Request.Context()
+	if ui := getUserInfo(ctx); ui != nil {
+		event.UserDN = ui.User
+	}
+	if issuer, ok := ctx.Value(issuerContextKey{}).(string); ok {
+		event.Issuer = issuer
+		event.AuthProtocol = "https"
+	}
+	if event.AuthProtocol == "" && event.UserDN == "" {
+		// Public/unauthenticated access
+		event.AuthProtocol = "https"
+		event.UserDN = ""
+	}
+
+	// Extract project from User-Agent (e.g. "�project/myproject ...")
+	event.Project = utils.ExtractProjectFromUserAgent(c.Request.Header.Values("User-Agent"))
+
+	// Preserve the full User-Agent for the 'i' (appinfo) monitoring packet
+	event.UserAgent = c.Request.UserAgent()
+
+	return event
 }

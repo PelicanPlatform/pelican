@@ -273,13 +273,13 @@ func LaunchShoveler(ctx context.Context, egrp *errgroup.Group) (int, error) {
 		return nil
 	})
 
-	go func() {
+	egrp.Go(func() error {
 		var buf [65536]byte
 		for {
 			rlen, remote, err := conn.ReadFromUDP(buf[:])
 
 			if errors.Is(err, net.ErrClosed) {
-				return
+				return nil
 			} else if err != nil {
 				// output errors
 				shovelerLogger.Errorln("Failed to read from UDP connection while aggregating monitoring packet from XRootD:", err)
@@ -319,7 +319,42 @@ func LaunchShoveler(ctx context.Context, egrp *errgroup.Group) (int, error) {
 			}
 
 		}
-	}()
+	})
+
+	// Launch a goroutine that reads internally-generated monitoring packets
+	// from the internal channel (produced by the POSIXv2/HTTP backend) and
+	// enqueues them for the shoveler. These packets are NOT passed through
+	// handlePacket() because Prometheus metrics are already collected at the
+	// HTTP layer, avoiding double-counting.
+	internalCh := GetInternalMonitorChan()
+	egrp.Go(func() error {
+		// Use the shoveler's listening address as the synthetic remote for
+		// packaging. This identifies the origin of internally-generated packets.
+		syntheticRemote := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: addr.Port}
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case packet, ok := <-internalCh:
+				if !ok {
+					return nil
+				}
+				msg, err := packageUdp(packet, syntheticRemote)
+				if err != nil {
+					shovelerLogger.Error("Failed to package internal monitoring packet:", err)
+					continue
+				}
+				cq.Enqueue(msg)
+
+				// Forward to UDP destinations as well
+				for _, udpConn := range udpDestinations {
+					if _, err := udpConn.Write(msg); err != nil {
+						shovelerLogger.Errorln("Failed to send internal monitoring packet to UDP destination "+udpConn.RemoteAddr().String()+":", err)
+					}
+				}
+			}
+		}
+	})
 
 	return addr.Port, nil
 }
