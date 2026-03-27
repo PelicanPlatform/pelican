@@ -184,3 +184,11 @@ export interface MetadataDiscrepancy {
   discoveryUrl: string;
   enabled: boolean;
 }
+
+export interface ServerLocalMetadata {
+  id: string;
+  name: string;
+  type: 'origin' | 'cache' | 'origin_cache' | 'unknown';
+  createdAt: string;
+  updatedAt: string;
+}

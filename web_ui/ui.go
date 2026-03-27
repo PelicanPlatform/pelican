@@ -591,7 +591,7 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 
 	// TODO: Move this to the Origin or Cache specific API group
 	if config.ValidateServerType([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType}) {
-		routerGroup.GET("/server", AuthHandler, AdminAuthHandler, HandleGetServerLocalMetadataHistory)
+		routerGroup.GET("/server/localMetadata/history", AuthHandler, AdminAuthHandler, HandleGetServerLocalMetadataHistory)
 	}
 
 	// Health check endpoint for web routerGroup
