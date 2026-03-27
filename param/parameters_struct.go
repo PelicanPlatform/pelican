@@ -384,7 +384,6 @@ type Config struct {
 		IssuerPort int `mapstructure:"issuerport" yaml:"IssuerPort"`
 		IssuerUrl string `mapstructure:"issuerurl" yaml:"IssuerUrl"`
 		Modules []string `mapstructure:"modules" yaml:"Modules"`
-		ReadOnly bool `mapstructure:"readonly" yaml:"ReadOnly"`
 		RegistrationRetryInterval time.Duration `mapstructure:"registrationretryinterval" yaml:"RegistrationRetryInterval"`
 		SessionSecretFile string `mapstructure:"sessionsecretfile" yaml:"SessionSecretFile"`
 		StartupTimeout time.Duration `mapstructure:"startuptimeout" yaml:"StartupTimeout"`
@@ -402,6 +401,7 @@ type Config struct {
 		WebConfigFile string `mapstructure:"webconfigfile" yaml:"WebConfigFile"`
 		WebHost string `mapstructure:"webhost" yaml:"WebHost"`
 		WebPort int `mapstructure:"webport" yaml:"WebPort"`
+		WebReadOnly bool `mapstructure:"webreadonly" yaml:"WebReadOnly"`
 	} `mapstructure:"server" yaml:"Server"`
 	Shoveler struct {
 		AMQPExchange string `mapstructure:"amqpexchange" yaml:"AMQPExchange"`
@@ -834,7 +834,6 @@ type configWithType struct {
 		IssuerPort struct { Type string; Value int }
 		IssuerUrl struct { Type string; Value string }
 		Modules struct { Type string; Value []string }
-		ReadOnly struct { Type string; Value bool }
 		RegistrationRetryInterval struct { Type string; Value time.Duration }
 		SessionSecretFile struct { Type string; Value string }
 		StartupTimeout struct { Type string; Value time.Duration }
@@ -852,6 +851,7 @@ type configWithType struct {
 		WebConfigFile struct { Type string; Value string }
 		WebHost struct { Type string; Value string }
 		WebPort struct { Type string; Value int }
+		WebReadOnly struct { Type string; Value bool }
 	}
 	Shoveler struct {
 		AMQPExchange struct { Type string; Value string }

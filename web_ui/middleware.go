@@ -23,7 +23,7 @@ func ServerHeaderMiddleware(ctx *gin.Context) {
 var safeMethods = []string{http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace, "PROPFIND"}
 
 func ReadOnlyMiddleware(ctx *gin.Context) {
-	if param.Server_ReadOnly.GetBool() && !slices.Contains(safeMethods, ctx.Request.Method) {
+	if param.Server_WebReadOnly.GetBool() && !slices.Contains(safeMethods, ctx.Request.Method) {
 		ctx.JSON(http.StatusMethodNotAllowed, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "The server is in read-only mode and will reject HTTP requests outside of GET, HEAD, OPTIONS, TRACE, and PROPFIND",

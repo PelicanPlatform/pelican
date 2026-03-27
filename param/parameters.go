@@ -413,7 +413,6 @@ var runtimeConfigurableMap = map[string]bool{
 	"Server.IssuerPort": false,
 	"Server.IssuerUrl": false,
 	"Server.Modules": false,
-	"Server.ReadOnly": false,
 	"Server.RegistrationRetryInterval": false,
 	"Server.SessionSecretFile": false,
 	"Server.StartupTimeout": false,
@@ -431,6 +430,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Server.WebConfigFile": false,
 	"Server.WebHost": false,
 	"Server.WebPort": false,
+	"Server.WebReadOnly": false,
 	"Shoveler.AMQPExchange": false,
 	"Shoveler.AMQPTokenLocation": false,
 	"Shoveler.Enable": false,
@@ -1265,8 +1265,8 @@ func (bP BoolParam) GetBool() bool {
 			return config.Server.EnableUI
 		case "Server.HealthMonitoringPublic":
 			return config.Server.HealthMonitoringPublic
-		case "Server.ReadOnly":
-			return config.Server.ReadOnly
+		case "Server.WebReadOnly":
+			return config.Server.WebReadOnly
 		case "Shoveler.Enable":
 			return config.Shoveler.Enable
 		case "Shoveler.VerifyHeader":
@@ -1828,7 +1828,6 @@ var allParameterNames = []string{
 	"Server.IssuerPort",
 	"Server.IssuerUrl",
 	"Server.Modules",
-	"Server.ReadOnly",
 	"Server.RegistrationRetryInterval",
 	"Server.SessionSecretFile",
 	"Server.StartupTimeout",
@@ -1846,6 +1845,7 @@ var allParameterNames = []string{
 	"Server.WebConfigFile",
 	"Server.WebHost",
 	"Server.WebPort",
+	"Server.WebReadOnly",
 	"Shoveler.AMQPExchange",
 	"Shoveler.AMQPTokenLocation",
 	"Shoveler.Enable",
@@ -2234,7 +2234,7 @@ var (
 	Server_EnablePprof = BoolParam{"Server.EnablePprof"}
 	Server_EnableUI = BoolParam{"Server.EnableUI"}
 	Server_HealthMonitoringPublic = BoolParam{"Server.HealthMonitoringPublic"}
-	Server_ReadOnly = BoolParam{"Server.ReadOnly"}
+	Server_WebReadOnly = BoolParam{"Server.WebReadOnly"}
 	Shoveler_Enable = BoolParam{"Shoveler.Enable"}
 	Shoveler_VerifyHeader = BoolParam{"Shoveler.VerifyHeader"}
 	StagePlugin_Hook = BoolParam{"StagePlugin.Hook"}
@@ -2651,7 +2651,7 @@ func init() {
 		"Server.EnablePprof": Server_EnablePprof,
 		"Server.EnableUI": Server_EnableUI,
 		"Server.HealthMonitoringPublic": Server_HealthMonitoringPublic,
-		"Server.ReadOnly": Server_ReadOnly,
+		"Server.WebReadOnly": Server_WebReadOnly,
 		"Shoveler.Enable": Shoveler_Enable,
 		"Shoveler.VerifyHeader": Shoveler_VerifyHeader,
 		"StagePlugin.Hook": StagePlugin_Hook,
