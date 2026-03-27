@@ -15,14 +15,14 @@ const ServerName = ({ defaultName }: ServerNameProps) => {
     isLoading,
   } = useApiSWR<ServerLocalMetadata[]>(
     'Failed to fetch server name',
-    '/api/server-name',
+    '/api/v1.0/server/localMetadata/history',
     async () => await fetch('/api/v1.0/server/localMetadata/history'),
     { fallbackData: defaultName }
   );
 
   return (
     <Typography variant='h6' component='div' sx={{ flexGrow: 1 }} gutterBottom>
-      {isLoading ? <Skeleton /> : metadataHistory?.[0]?.name || defaultName}
+      {isLoading ? <Skeleton /> : metadataHistory?.[0]?.name}
     </Typography>
   );
 };
