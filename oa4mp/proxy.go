@@ -29,6 +29,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -50,21 +51,22 @@ import (
 var (
 	// We have a custom transport object based on the common code in `config`;
 	// this is because we need a custom dialer to talk to OA4MP over a socket.
-	transport *http.Transport
+	transport http.RoundTripper
 
 	onceTransport sync.Once
 )
 
-func getTransport() *http.Transport {
+func getTransport() http.RoundTripper {
 	onceTransport.Do(func() {
 		socketName := filepath.Join(param.Issuer_ScitokensServerLocation.GetString(),
 			"var", "http.sock")
-		transport = config.GetTransport().Clone()
+		transportConfig := config.GetTransport().Clone()
 		// When creating a new socket out to the remote server, ignore the actual
 		// requested address and return a Unix socket instead.
-		transport.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
+		transportConfig.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
 			return net.Dial("unix", socketName)
 		}
+		transport = transportConfig
 	})
 	return transport
 }
@@ -330,6 +332,20 @@ func GetUserCollectionScopes(db *gorm.DB, user string, groupsList []string) (sco
 	return scopes, matchedGroups, nil
 }
 
+// Determines whether OA4MP should force a re-login by interpreting the `fromLogin` query parameter as a boolean.
+// Only when `fromLogin` is present and parses as boolean true will this return false (i.e., not force a re-login);
+// missing, invalid, or false values will cause a re-login.
+func shouldForceOA4MPReLogin(requestURL *url.URL) bool {
+	loginAttempt, err := strconv.ParseBool(requestURL.Query().Get(web_ui.LoginAttemptQueryParam))
+	return err != nil || !loginAttempt
+}
+
+func stripLoginAttemptQueryParam(requestURL *url.URL) {
+	query := requestURL.Query()
+	query.Del(web_ui.LoginAttemptQueryParam)
+	requestURL.RawQuery = query.Encode()
+}
+
 // Proxy a HTTP request from the Pelican server to the OA4MP server
 //
 // Maps a request to /api/v1.0/issuer/foo to /scitokens-server/foo.  Most
@@ -343,10 +359,15 @@ func oa4mpProxy(ctx *gin.Context) {
 	var groupsList []string
 	var allMatchedGroups []string
 	if ctx.Request.URL.Path == "/api/v1.0/issuer/device" || ctx.Request.URL.Path == "/api/v1.0/issuer/authorize" {
+		if shouldForceOA4MPReLogin(ctx.Request.URL) {
+			web_ui.LogoutAndRedirectToLogin(ctx)
+			return
+		}
 		web_ui.RequireAuthMiddleware(ctx)
 		if ctx.IsAborted() {
 			return
 		}
+		stripLoginAttemptQueryParam(ctx.Request.URL)
 		user = ctx.GetString("User")
 		if user == "" {
 			// Should be impossible; proxy ought to be called via a middleware which always
