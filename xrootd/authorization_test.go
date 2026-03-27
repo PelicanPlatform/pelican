@@ -1319,7 +1319,7 @@ func TestGenerateOriginIssuer(t *testing.T) {
 						}
 					}
 				}
-				require.NoError(t, param.Set(param.Origin_Exports.GetName(), exports))
+				require.NoError(t, param.SetRaw(param.Origin_Exports.GetName(), exports))
 			}
 
 			err = config.InitServer(ctx, server_structs.OriginType)

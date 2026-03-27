@@ -247,7 +247,7 @@ func TestMultiExportOrigin(t *testing.T) {
 			}
 		}
 	}
-	require.NoError(t, param.Set(param.Origin_Exports.GetName(), exports))
+	require.NoError(t, param.SetRaw(param.Origin_Exports.GetName(), exports))
 
 	// Get available, unique ports and pre-allocate for xrootd startup.
 	ports, err := test_utils.GetUniqueAvailablePorts(2)
