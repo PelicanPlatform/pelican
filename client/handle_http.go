@@ -696,7 +696,7 @@ func isProxyEnabled() bool {
 		return false
 	}
 	for _, envVar := range []string{"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY"} {
-		if _, isSet := os.LookupEnv(envVar); isSet {
+		if val, isSet := os.LookupEnv(envVar); isSet && val != "" {
 			return true
 		}
 	}

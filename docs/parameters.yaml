@@ -542,7 +542,10 @@ components: ["client"]
 ---
 name: Client.DisableHttpProxy
 description: |+
-  A bool indicating whether the client's HTTP proxy should be disabled.
+  A bool indicating whether the client's HTTP proxy should be disabled. When false (the default),
+  the client uses an HTTP proxy if any of the standard proxy environment variables are set to a
+  non-empty value: `http_proxy`, `HTTP_PROXY`, `https_proxy`, or `HTTPS_PROXY`. Setting this
+  parameter to true disables proxy usage regardless of those environment variables.
 type: bool
 default: false
 components: ["client"]
