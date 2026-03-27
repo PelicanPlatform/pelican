@@ -158,6 +158,36 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 	assert.Nil(t, err)
 }
 
+// TestIsProxyEnabled checks that isProxyEnabled respects all standard proxy
+// environment variables and the Client.DisableHttpProxy config parameter.
+func TestIsProxyEnabled(t *testing.T) {
+	proxyVars := []string{"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY"}
+
+	for _, envVar := range proxyVars {
+		t.Run("ProxyEnabledVia_"+envVar, func(t *testing.T) {
+			t.Setenv(envVar, "http://proxy.edu:3128")
+			test_utils.InitClient(t, map[param.Param]any{})
+			assert.True(t, isProxyEnabled(), "proxy should be enabled when %s is set", envVar)
+		})
+	}
+
+	t.Run("NoneSet", func(t *testing.T) {
+		for _, envVar := range proxyVars {
+			t.Setenv(envVar, "")
+		}
+		test_utils.InitClient(t, map[param.Param]any{})
+		assert.False(t, isProxyEnabled(), "proxy should be disabled when no proxy env vars are set")
+	})
+
+	t.Run("DisableHttpProxyOverridesEnvVar", func(t *testing.T) {
+		t.Setenv("http_proxy", "http://proxy.edu:3128")
+		test_utils.InitClient(t, map[param.Param]any{
+			param.Client_DisableHttpProxy: true,
+		})
+		assert.False(t, isProxyEnabled(), "proxy should be disabled when Client.DisableHttpProxy is true, even if proxy env var is set")
+	})
+}
+
 func TestSlowTransfers(t *testing.T) {
 	t.Cleanup(func() {
 		goleak.VerifyNone(t,
