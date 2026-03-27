@@ -19,6 +19,7 @@
 package client
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/md5"
@@ -242,6 +243,8 @@ type (
 		job                *TransferJob
 		callback           TransferCallbackFunc
 		remoteURL          *url.URL
+		srcURL             *url.URL        // When a copy job, this is the source URL to use
+		srcToken           *tokenGenerator // When a copy job, the source token to use
 		localPath          string
 		token              *tokenGenerator
 		fedToken           TokenProvider // Federation token; added as access_token query param on origin URLs
@@ -282,9 +285,12 @@ type (
 		requireChecksum    bool
 		recursive          bool
 		skipAcquire        bool
-		dryRun             bool       // Enable dry-run mode to display what would be transferred without actually doing it
-		syncLevel          SyncLevel  // Policy for handling synchronization when the destination exists
-		prefObjServers     []*url.URL // holds any client-requested caches/origins
+		dryRun             bool                            // Enable dry-run mode to display what would be transferred without actually doing it
+		srcURL             *url.URL                        // When a copy job, this is the source URL
+		srcDirResp         server_structs.DirectorResponse // When a copy job, this represents the source directory information
+		srcToken           *tokenGenerator                 // When a copy job, this represents the source token
+		syncLevel          SyncLevel                       // Policy for handling synchronization when the destination exists
+		prefObjServers     []*url.URL                      // holds any client-requested caches/origins
 		dirResp            server_structs.DirectorResponse
 		directorUrl        string
 		token              *tokenGenerator
@@ -372,6 +378,8 @@ type (
 	identTransferOptionTokenLocation           struct{}
 	identTransferOptionAcquireToken            struct{}
 	identTransferOptionToken                   struct{}
+	identTransferOptionSourceTokenLocation     struct{}
+	identTransferOptionSourceToken             struct{}
 	identTransferOptionSynchronize             struct{}
 	identTransferOptionCollectionsUrl          struct{}
 	identTransferOptionChecksums               struct{}
@@ -448,6 +456,7 @@ const (
 	transferTypeDownload transferType = iota // Transfer is downloading from the federation
 	transferTypeUpload                       // Transfer is uploading to the federation
 	transferTypePrestage                     // Transfer is staging at a federation cache
+	transferTypeCopy                         // Transfer copies objects between origins
 )
 
 var (
@@ -834,6 +843,16 @@ func WithToken(token string) TransferOption {
 // expire during long downloads.
 func WithFedToken(provider TokenProvider) TransferOption {
 	return option.New(identTransferOptionFedToken{}, provider)
+}
+
+// Create an option to provide a source token for a third-party-copy transfer
+func WithSourceToken(token string) TransferOption {
+	return option.New(identTransferOptionSourceToken{}, token)
+}
+
+// Create an option to provide a source token location for a third-party-copy transfer
+func WithSourceTokenLocation(location string) TransferOption {
+	return option.New(identTransferOptionSourceTokenLocation{}, location)
 }
 
 // Create an option to specify the checksums to request for a given
@@ -1635,6 +1654,191 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 	return
 }
 
+// Create a new third-party copy job for the client.
+//
+// This creates a transfer that uses the HTTP COPY verb to instruct the
+// destination server to pull data directly from the source, without the
+// client acting as an intermediary.
+//
+// The returned object can be further customized as desired.
+// This function does not "submit" the job for execution.
+func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *url.URL, recursive bool, options ...TransferOption) (tj *TransferJob, err error) {
+
+	id, err := uuid.NewV7()
+	if err != nil {
+		return
+	}
+
+	destPUrl, err := ParseRemoteAsPUrl(ctx, dest.String())
+	if err != nil {
+		return
+	}
+
+	srcPUrl, err := ParseRemoteAsPUrl(ctx, src.String())
+	if err != nil {
+		return
+	}
+
+	// Check for recursive query parameter in source or destination URLs
+	if _, exists := srcPUrl.Query()[pelican_url.QueryRecursive]; exists {
+		recursive = true
+	}
+	if _, exists := destPUrl.Query()[pelican_url.QueryRecursive]; exists {
+		recursive = true
+	}
+
+	project, _ := searchJobAd(attrProjectName)
+	copyDestUrl := *destPUrl
+	copySrcUrl := *srcPUrl
+	tj = &TransferJob{
+		prefObjServers: tc.prefObjServers,
+		recursive:      recursive,
+		remoteURL:      &copyDestUrl,
+		callback:       tc.callback,
+		skipAcquire:    tc.skipAcquire,
+		dryRun:         tc.dryRun,
+		syncLevel:      tc.syncLevel,
+		xferType:       transferTypeCopy,
+		uuid:           id,
+		project:        project,
+		token:          NewTokenGenerator(&copyDestUrl, nil, config.TokenSharedWrite, !tc.skipAcquire),
+	}
+	tj.fedToken = tc.fedToken
+	tj.cacheMode = tc.cacheMode
+	tj.srcURL = src
+	tj.srcToken = NewTokenGenerator(&copySrcUrl, nil, config.TokenSharedRead, !tc.skipAcquire)
+	if tc.token != "" {
+		tj.token.SetToken(tc.token)
+		tj.srcToken.SetToken(tc.token)
+	}
+	if tc.tokenLocation != "" {
+		tj.token.SetTokenLocation(tc.tokenLocation)
+		tj.srcToken.SetTokenLocation(tc.tokenLocation)
+	}
+
+	tj.ctx, tj.cancel = mergeCancel(ctx, tc.ctx)
+
+	for _, option := range options {
+		switch option.Ident() {
+		case identTransferOptionCaches{}:
+			tj.prefObjServers = option.Value().([]*url.URL)
+		case identTransferOptionCallback{}:
+			tj.callback = option.Value().(TransferCallbackFunc)
+		case identTransferOptionTokenLocation{}:
+			tj.token.SetTokenLocation(option.Value().(string))
+		case identTransferOptionAcquireToken{}:
+			tj.token.EnableAcquire = option.Value().(bool)
+		case identTransferOptionToken{}:
+			tj.token.SetToken(option.Value().(string))
+		case identTransferOptionFedToken{}:
+			tj.fedToken = option.Value().(TokenProvider)
+		case identTransferOptionSourceToken{}:
+			tj.srcToken.SetToken(option.Value().(string))
+		case identTransferOptionSourceTokenLocation{}:
+			tj.srcToken.SetTokenLocation(option.Value().(string))
+		case identTransferOptionSynchronize{}:
+			tj.syncLevel = option.Value().(SyncLevel)
+		case identTransferOptionChecksums{}:
+			tj.requestedChecksums = option.Value().([]ChecksumType)
+		case identTransferOptionRequireChecksum{}:
+			tj.requireChecksum = option.Value().(bool)
+		case identTransferOptionDryRun{}:
+			tj.dryRun = option.Value().(bool)
+		case identTransferOptionMetadataChannel{}:
+			tj.metadataChan = option.Value().(chan<- TransferMetadata)
+		case identTransferOptionCacheEmbeddedClientMode{}:
+			tj.cacheMode = option.Value().(bool)
+		}
+	}
+
+	// Resolve the destination director information, using the cache when available.
+	tj.directorUrl = copyDestUrl.FedInfo.DirectorEndpoint
+	var dirResp server_structs.DirectorResponse
+	if tc.engine != nil && tc.engine.dirRespCache != nil {
+		copyDestUrlRef := &copyDestUrl
+		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyDestUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+			resp, qErr := getDirectorInfoForPath(ctx, copyDestUrlRef, http.MethodPut, "", false)
+			return resp, resp.XPelNsHdr.Namespace, qErr
+		})
+	} else {
+		dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyDestUrl, http.MethodPut, "")
+	}
+	if err != nil {
+		log.Errorln(err)
+		err = errors.Wrapf(err, "failed to get namespace information for destination URL %s", dest.String())
+		return
+	}
+	tj.dirResp = dirResp
+	tj.token.DirResp = &dirResp
+
+	// Acquire token for the destination if needed
+	if dirResp.XPelNsHdr.RequireToken {
+		contents, tErr := tj.token.Get()
+		if tErr != nil || contents == "" {
+			err = errors.Wrap(tErr, "failed to get token for copy destination")
+			return nil, err
+		}
+		if contents != "" {
+			dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyDestUrl, http.MethodPut, contents)
+			if err != nil {
+				log.Errorln(err)
+				err = errors.Wrapf(err, "failed to get namespace information for destination URL %s", dest.String())
+				return nil, err
+			}
+			tj.dirResp = dirResp
+			tj.token.DirResp = &dirResp
+			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
+				tc.engine.dirRespCache.Store(dirResp.XPelNsHdr.Namespace, copyDestUrl.Path, dirResp)
+			}
+		}
+	}
+
+	// Resolve the source director information, using the cache when available.
+	var srcDirResp server_structs.DirectorResponse
+	if tc.engine != nil && tc.engine.dirRespCache != nil {
+		copySrcUrlRef := &copySrcUrl
+		srcDirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copySrcUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+			resp, qErr := getDirectorInfoForPath(ctx, copySrcUrlRef, http.MethodGet, "", false)
+			return resp, resp.XPelNsHdr.Namespace, qErr
+		})
+	} else {
+		srcDirResp, err = GetDirectorInfoForPath(tj.ctx, &copySrcUrl, http.MethodGet, "")
+	}
+	if err != nil {
+		log.Errorln(err)
+		err = errors.Wrapf(err, "failed to get namespace information for source URL %s", src.String())
+		return
+	}
+	tj.srcDirResp = srcDirResp
+	tj.srcToken.DirResp = &srcDirResp
+
+	if srcDirResp.XPelNsHdr.RequireToken {
+		contents, tErr := tj.srcToken.Get()
+		if tErr != nil || contents == "" {
+			err = errors.Wrap(tErr, "failed to get token for copy source")
+			return nil, err
+		}
+		if contents != "" {
+			srcDirResp, err = GetDirectorInfoForPath(tj.ctx, &copySrcUrl, http.MethodGet, contents)
+			if err != nil {
+				log.Errorln(err)
+				err = errors.Wrapf(err, "failed to get namespace information for source URL %s", src.String())
+				return nil, err
+			}
+			tj.srcDirResp = srcDirResp
+			tj.srcToken.DirResp = &srcDirResp
+			if tc.engine != nil && tc.engine.dirRespCache != nil && srcDirResp.XPelNsHdr.Namespace != "" {
+				tc.engine.dirRespCache.Store(srcDirResp.XPelNsHdr.Namespace, copySrcUrl.Path, srcDirResp)
+			}
+		}
+	} else {
+		tj.srcToken = nil
+	}
+
+	log.Debugf("Created new copy job, ID %s client %s, from %s to %s", tj.uuid.String(), tc.id.String(), src.String(), dest.String())
+	return
+}
+
 // Returns the status of the transfer job-to-file(s) lookup
 //
 // ok is true if the lookup has completed.
@@ -1977,6 +2181,12 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 	}
 	remoteUrl := &url.URL{Path: job.job.remoteURL.Path, Scheme: job.job.remoteURL.Scheme, Host: job.job.remoteURL.Host}
 
+	// For copy jobs, also build the source URL
+	var srcUrl *url.URL
+	if job.job.xferType == transferTypeCopy {
+		srcUrl = &url.URL{Path: job.job.srcURL.Path, Scheme: job.job.srcURL.Scheme}
+	}
+
 	var transfers []transferAttemptDetails
 	if job.job.xferType == transferTypeUpload { // Uploads use the redirected endpoint
 		if len(job.job.dirResp.ObjectServers) == 0 {
@@ -1987,6 +2197,26 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			Url:        job.job.dirResp.ObjectServers[0],
 			PackOption: packOption,
 		})
+	} else if job.job.xferType == transferTypeCopy {
+		// For copy, the "attempts" represent the source servers the destination will pull from
+		var sortedSrcServers []*url.URL
+		sortedSrcServers, err = generateSortedObjServers(job.job.srcDirResp, nil)
+		if err != nil {
+			log.Errorln("Failed to get source servers for copy:", err)
+			return
+		}
+		for _, srcServer := range sortedSrcServers {
+			srcServerUrl := *srcServer
+			srcServerUrl.Path = path.Clean(job.job.srcURL.Path)
+			copiedUrl := srcServerUrl
+			transfers = append(transfers, transferAttemptDetails{
+				Url: &copiedUrl,
+			})
+		}
+		if len(transfers) == 0 {
+			err = errors.New("No source servers found for copy")
+			return
+		}
 	} else {
 		var sortedServers []*url.URL
 		var nPreferred int
@@ -2051,6 +2281,23 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			if statInfo.IsCollection {
 				return te.walkDirDownload(job, transfers, te.files, remoteUrl)
 			}
+		} else if job.job.xferType == transferTypeCopy {
+			// For copy, stat the SOURCE to see if it's a collection.
+			// If it is, walk the source directory listing and emit individual TPC copy jobs.
+			srcUrl := &url.URL{Path: job.job.srcURL.Path, Scheme: job.job.srcURL.Scheme, Host: job.job.srcURL.Host}
+			var srcPelicanUrl *pelican_url.PelicanURL
+			srcPelicanUrl, err = pelican_url.Parse(srcUrl.String(), nil, nil)
+			if err != nil {
+				return errors.Wrap(err, "failed to parse source URL for recursive copy")
+			}
+			var statInfo FileInfo
+			if statInfo, err = statHttp(srcPelicanUrl, job.job.srcDirResp, job.job.srcToken, nil); err != nil {
+				return errors.Wrap(err, "failed to stat source path for recursive copy")
+			}
+
+			if statInfo.IsCollection {
+				return te.walkDirCopy(job, transfers, te.files, srcUrl)
+			}
 		}
 		log.Debugln("Remote path is not a collection; proceeding with single file transfer")
 	} else if job.job.xferType == transferTypePrestage {
@@ -2087,6 +2334,8 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			job:                job.job,
 			engine:             te,
 			remoteURL:          remoteUrl,
+			srcURL:             srcUrl,
+			srcToken:           job.job.srcToken,
 			requestedChecksums: job.job.requestedChecksums,
 			requireChecksum:    job.job.requireChecksum,
 			packOption:         packOption,
@@ -2160,6 +2409,8 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 			var transferResults TransferResults
 			if file.file.xferType == transferTypeUpload {
 				transferResults, err = uploadObject(file.file)
+			} else if file.file.xferType == transferTypeCopy {
+				transferResults, err = copyHTTP(file.file)
 			} else {
 				transferResults, err = downloadObject(file.file)
 			}
@@ -2860,11 +3111,23 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 		err = &sce
 		return
 	}
-	ctr := 0
-	var val string
-	for _, val = range response.Header.Values("Digest") {
+	result = parseDigestHeader(response.Header, fields)
+	if len(result) == 0 {
+		log.WithFields(fields).Debugln("Server returned no checksum information")
+	}
+	return
+}
+
+// parseDigestHeader parses RFC 3230 Digest response headers and returns
+// the parsed checksum values.  It accepts multiple Digest header values
+// and comma-separated entries within a single value.
+// The optional fields parameter provides structured logging context.
+func parseDigestHeader(header http.Header, fields log.Fields) (result []ChecksumInfo) {
+	if fields == nil {
+		fields = log.Fields{}
+	}
+	for _, val := range header.Values("Digest") {
 		for _, entry := range strings.Split(val, ",") {
-			ctr++
 			info := strings.SplitN(entry, "=", 2)
 			if len(info) != 2 {
 				continue
@@ -2875,7 +3138,7 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 				log.WithFields(fields).Warningln("Unknown checksum algorithm:", info[0])
 				continue
 			}
-			val := make([]byte, 32)
+			buf := make([]byte, 32)
 			switch info[0] {
 			case "crc32c":
 				// XRootD has a bug where crc32c is base64 encoded instead (per the spec)
@@ -2884,8 +3147,8 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 				// See: https://github.com/xrootd/xrootd/issues/2456
 				if len(info[1]) == 8 && info[1][6] == 0x3d && info[1][7] == 0x3d {
 					decoder := base64.NewDecoder(base64.StdEncoding, bytes.NewReader([]byte(info[1])))
-					if _, err := decoder.Read(val); err == nil {
-						checksumInfo.Value = val[:4]
+					if _, err := decoder.Read(buf); err == nil {
+						checksumInfo.Value = buf[:4]
 						break
 					} else {
 						log.WithFields(fields).Errorf("Failed to parse base64-encoded checksum value (%s): %s", info[1], err)
@@ -2909,11 +3172,11 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 				// are hex-encoded and should accept leading 0's.  Once parsed, store the
 				// corresponding bytes in network order (big-endian) in our byte array.
 				if intVal, err := strconv.ParseInt(info[1], 16, 64); err == nil {
-					val[0] = byte((intVal >> 24) & 0xff)
-					val[1] = byte((intVal >> 16) & 0xff)
-					val[2] = byte((intVal >> 8) & 0xff)
-					val[3] = byte(intVal & 0xff)
-					checksumInfo.Value = val[:4]
+					buf[0] = byte((intVal >> 24) & 0xff)
+					buf[1] = byte((intVal >> 16) & 0xff)
+					buf[2] = byte((intVal >> 8) & 0xff)
+					buf[3] = byte(intVal & 0xff)
+					checksumInfo.Value = buf[:4]
 				} else {
 					log.WithFields(fields).Errorf("Failed to parse %s checksum value (%s): %s", info[0], info[1], err)
 					continue
@@ -2922,22 +3185,19 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 				fallthrough
 			case "sha":
 				decoder := base64.NewDecoder(base64.StdEncoding, bytes.NewReader([]byte(info[1])))
-				if count, err := decoder.Read(val); err != nil {
+				if count, err := decoder.Read(buf); err != nil {
 					log.WithFields(fields).Errorf("Failed to parse %s checksum value (%s): %s", info[0], info[1], err)
 					continue
 				} else {
-					val = val[:count]
+					buf = buf[:count]
 				}
-				checksumInfo.Value = val
+				checksumInfo.Value = buf
 			default:
 				log.WithFields(fields).Warningf("Unknown checksum algorithm: %s", info[0])
 				continue
 			}
 			result = append(result, checksumInfo)
 		}
-	}
-	if ctr == 0 {
-		log.WithFields(fields).Debugln("Server returned no checksum information")
 	}
 	return
 }
@@ -4044,6 +4304,375 @@ Loop:
 	return transferResult, nil
 }
 
+// tpcStatus represents a status update from a third-party-copy transfer
+type tpcStatus struct {
+	err     error
+	done    bool
+	xferred uint64
+}
+
+// copyHTTP uses the WebDAV COPY verb to perform a third-party-copy transfer.
+// Only implements the "push" mode where the destination side is the active
+// side performing the transfer.
+func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorln("Panic occurred in HTTP copy code:", r)
+			err = errors.Errorf("Unrecoverable error (panic) occurred in copyHTTP: %v", r)
+		}
+	}()
+	if len(xfer.attempts) == 0 {
+		log.Errorln("No source URLs specified; cannot copy")
+		err = errors.New("No source URLs specified")
+		return
+	}
+	if len(xfer.job.dirResp.ObjectServers) == 0 {
+		log.Errorln("No destination servers specified; cannot copy")
+		err = errors.New("No destination servers specified")
+		return
+	}
+	resolvedDestUrl := *xfer.job.dirResp.ObjectServers[0]
+	resolvedDestUrl.Path = computeUploadDestPath(xfer.remoteURL.Path, resolvedDestUrl.Path)
+	resolvedDestUrl.RawQuery = xfer.remoteURL.RawQuery
+
+	log.Debugln("Copying object from", xfer.attempts[0].Url.String(), "to", resolvedDestUrl.String())
+	transferResults = newTransferResults(xfer.job)
+
+	// In dry-run mode, log what would be copied and return success
+	if xfer.job != nil && xfer.job.dryRun {
+		fmt.Printf("COPY: %s -> %s\n", xfer.attempts[0].Url.String(), resolvedDestUrl.String())
+		return transferResults, nil
+	}
+
+	lastUpdate := time.Now()
+	if xfer.callback != nil {
+		xfer.callback(xfer.remoteURL.String(), 0, 0, false)
+	}
+	downloaded := int64(-1)
+	totalSize := int64(-1)
+	transferStartTime := time.Now()
+	transferResults.TransferStartTime = transferStartTime
+	attempt := TransferResult{
+		CacheAge: -1,
+		Number:   0,
+		Endpoint: xfer.remoteURL.String(),
+	}
+
+	defer func() {
+		endTime := time.Now()
+		attempt.TransferEndTime = endTime
+		attempt.TransferTime = endTime.Sub(transferStartTime)
+		attempt.TransferFileBytes = totalSize
+		transferResults.Attempts = []TransferResult{attempt}
+
+		if xfer.callback != nil {
+			finalSize := int64(0)
+			if totalSize >= 0 {
+				finalSize = totalSize
+			}
+			xfer.callback(xfer.remoteURL.String(), downloaded, finalSize, true)
+		}
+		if xfer.engine != nil {
+			xfer.engine.ewmaCtr.Add(int64(time.Since(lastUpdate)))
+		}
+	}()
+
+	client := http.Client{
+		Transport: config.GetTransport(),
+	}
+
+	ctx, cancel := context.WithCancel(xfer.ctx)
+	defer cancel()
+
+	// HEAD request to get source size
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, xfer.attempts[0].Url.String(), nil)
+	if err != nil {
+		err = errors.Wrapf(err, "Failed to get size of the source object %s", xfer.attempts[0].Url.String())
+		return
+	}
+
+	if xfer.srcToken != nil {
+		srcTkn, tErr := xfer.srcToken.Get()
+		if tErr == nil && srcTkn != "" {
+			req.Header.Set("Authorization", "Bearer "+srcTkn)
+		}
+	}
+	req.Header.Set("User-Agent", getUserAgent(xfer.project))
+	// If checksums were requested, add Want-Digest to the HEAD so we can compare after the COPY
+	if len(xfer.requestedChecksums) > 0 {
+		val := ""
+		for i, cksum := range xfer.requestedChecksums {
+			if i > 0 {
+				val += ","
+			}
+			val += HttpDigestFromChecksum(cksum)
+		}
+		req.Header.Set("Want-Digest", val)
+	}
+	log.Debugln("Starting the HEAD request to the HTTP Third Party Copy source...")
+	resp, err := client.Do(req)
+	if err != nil {
+		err = errors.Wrapf(err, "failed to execute the HEAD request to third-party-copy source %s", xfer.attempts[0].Url.String())
+		log.Errorln(err)
+		return
+	}
+	resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		err = &HttpErrResp{resp.StatusCode, fmt.Sprintf("HEAD request to source failed (HTTP status %d)", resp.StatusCode), nil}
+		return
+	}
+	totalSize = resp.ContentLength
+	if resp.ContentLength < 0 {
+		log.Warningln("Third-party-copy source", xfer.attempts[0].Url.String(), "is of unknown size; download statistics may be incorrect")
+	}
+	attempt.ServerVersion = resp.Header.Get("Server")
+
+	// Parse source checksums from the HEAD response Digest header
+	var sourceChecksums []ChecksumInfo
+	if len(xfer.requestedChecksums) > 0 {
+		sourceChecksums = parseDigestHeader(resp.Header, nil)
+		if len(sourceChecksums) > 0 {
+			transferResults.ServerChecksums = sourceChecksums
+			log.Debugln("Source checksums retrieved for TPC verification:", len(sourceChecksums), "checksum(s)")
+		} else {
+			log.Debugln("Source did not return any Digest headers for TPC checksum verification")
+		}
+	}
+
+	// Send early metadata from the HEAD response if a channel was provided
+	if xfer.metadataChan != nil {
+		metadata := TransferMetadata{
+			ContentLength: totalSize,
+			ObjectSize:    totalSize,
+			ETag:          resp.Header.Get("ETag"),
+			ContentType:   resp.Header.Get("Content-Type"),
+			CacheControl:  resp.Header.Get("Cache-Control"),
+		}
+		if lmStr := resp.Header.Get("Last-Modified"); lmStr != "" {
+			if lm, parseErr := http.ParseTime(lmStr); parseErr == nil {
+				metadata.LastModified = lm
+			}
+		}
+		select {
+		case xfer.metadataChan <- metadata:
+		default:
+			log.Debugln("Metadata channel full, skipping early metadata send for TPC")
+		}
+	}
+
+	// COPY request to the destination
+	req, err = http.NewRequestWithContext(ctx, "COPY", resolvedDestUrl.String(), nil)
+	if err != nil {
+		err = errors.Wrapf(err, "Unable to create request for third-party-copy to %s", xfer.remoteURL.String())
+		return
+	}
+
+	if tkn, tErr := xfer.token.Get(); tErr == nil && tkn != "" {
+		req.Header.Set("Authorization", "Bearer "+tkn)
+	}
+	if xfer.srcToken != nil {
+		if srcTkn, tErr := xfer.srcToken.Get(); tErr == nil && srcTkn != "" {
+			req.Header.Set("TransferHeaderAuthorization", "Bearer "+srcTkn)
+		}
+	}
+	req.Header.Set("User-Agent", getUserAgent(xfer.project))
+	req.Header.Set("Source", xfer.attempts[0].Url.String())
+
+	log.Debugln("Starting the HTTP Third Party Copy transfer...")
+	resp, err = client.Do(req)
+
+	if err != nil {
+		log.Errorf("Failed to execute the third-party-copy to %s: %s", xfer.remoteURL.String(), err.Error())
+		err = errors.Wrapf(err, "Failed to execute the third-party-copy to %s", xfer.remoteURL.String())
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		var respBytes []byte
+		respBytes, err = io.ReadAll(resp.Body)
+		if err != nil {
+			log.Errorf("TPC COPY to %s failed (HTTP status %d); additionally, reading the response body failed: %s", resolvedDestUrl.String(), resp.StatusCode, err.Error())
+		} else {
+			if resp.StatusCode == http.StatusOK {
+				log.Errorf("TPC COPY to %s returned HTTP 200 instead of 201 Created; the destination server does not have the TPC module loaded: %s",
+					resolvedDestUrl.String(), string(respBytes))
+				err = &HttpErrResp{Code: resp.StatusCode, Str: fmt.Sprintf("TPC COPY to %s failed: the destination server does not have the TPC module loaded",
+					resolvedDestUrl.String())}
+			} else if resp.StatusCode > 200 && resp.StatusCode < 300 {
+				log.Errorf("TPC COPY to %s returned HTTP %d instead of 201 Created; the destination server may not support HTTP third-party-copy (ensure the TPC module is loaded): %s",
+					resolvedDestUrl.String(), resp.StatusCode, string(respBytes))
+				err = &HttpErrResp{Code: resp.StatusCode, Str: fmt.Sprintf("TPC COPY failed (HTTP status %d)",
+					resp.StatusCode)}
+			} else {
+				log.Errorf("TPC COPY to %s failed (HTTP status %d): %s", resolvedDestUrl.String(), resp.StatusCode, string(respBytes))
+				err = &HttpErrResp{Code: resp.StatusCode, Str: fmt.Sprintf("TPC COPY failed (HTTP status %d)",
+					resp.StatusCode)}
+			}
+		}
+		return
+	}
+
+	serverMessages := make(chan tpcStatus, 1)
+
+	xfer.engine.egrp.Go(func() error { return monitorTPC(serverMessages, resp.Body) })
+
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	gotFirstByte := false
+MessageHandler:
+	for {
+		select {
+		case msg, ok := <-serverMessages:
+			if !ok {
+				break MessageHandler
+			}
+			if msg.err != nil || msg.done {
+				err = msg.err
+				break MessageHandler
+			}
+			downloaded = int64(msg.xferred)
+			if !gotFirstByte && downloaded > 0 {
+				gotFirstByte = true
+				attempt.TimeToFirstByte = time.Since(transferStartTime)
+			}
+		case <-ticker.C:
+			if totalSize < downloaded {
+				totalSize = downloaded
+				attempt.TransferFileBytes = totalSize
+			}
+			if xfer.callback != nil {
+				log.Infof("Transfer %s->%s has downloaded %d bytes", xfer.attempts[0].Url.String(), xfer.remoteURL.String(), downloaded)
+				xfer.callback(xfer.remoteURL.String(), downloaded, totalSize, false)
+			}
+		case <-ctx.Done():
+			err = ctx.Err()
+			break MessageHandler
+		}
+	}
+
+	if err == nil && totalSize >= 0 {
+		transferResults.TransferredBytes = totalSize
+	}
+
+	// After a successful TPC, verify checksums if requested
+	if err == nil && len(sourceChecksums) > 0 {
+		destTkn := ""
+		if tkn, tErr := xfer.token.Get(); tErr == nil {
+			destTkn = tkn
+		}
+		destChecksums, cErr := fetchChecksum(ctx, xfer.requestedChecksums, &resolvedDestUrl, destTkn, xfer.project)
+		if cErr != nil {
+			log.Warningln("Could not retrieve destination checksums for TPC verification:", cErr)
+		} else {
+			transferResults.ClientChecksums = destChecksums
+			// Compare: for each source checksum, see if the destination has a matching algorithm+value
+			for _, srcCksum := range sourceChecksums {
+				for _, destCksum := range destChecksums {
+					if srcCksum.Algorithm == destCksum.Algorithm {
+						if !bytes.Equal(srcCksum.Value, destCksum.Value) {
+							log.Errorf("TPC checksum mismatch for %s: source %x != destination %x",
+								HttpDigestFromChecksum(srcCksum.Algorithm), srcCksum.Value, destCksum.Value)
+							if xfer.requireChecksum {
+								err = &ChecksumMismatchError{
+									Info:        srcCksum,
+									ServerValue: destCksum.Value,
+								}
+								return
+							}
+						} else {
+							log.Debugln("TPC checksum verified for", HttpDigestFromChecksum(srcCksum.Algorithm))
+						}
+						break
+					}
+				}
+			}
+		}
+	}
+
+	return
+}
+
+// monitorTPC reads periodic updates from the HTTP TPC response body,
+// parses performance markers, and writes them to the channel.
+//
+// This is guaranteed to close the channel before exiting.
+func monitorTPC(messages chan tpcStatus, body io.Reader) error {
+	defer close(messages)
+	scanner := bufio.NewScanner(body)
+	perfMarker := false
+	stripes := make(map[int]uint64)
+	xferred := uint64(0)
+	curStripe := 0
+	curStripeBytes := uint64(0)
+	var err error
+Listener:
+	for scanner.Scan() {
+		text := scanner.Text()
+		if text == "Perf Marker" {
+			perfMarker = true
+		} else if text == "End" {
+			if !perfMarker {
+				log.Warning("Client received an end-of-performance marker but no beginning")
+			}
+			stripes[curStripe] = curStripeBytes
+			perfMarker = false
+			sum := uint64(0)
+			for _, val := range stripes {
+				sum += val
+			}
+			messages <- tpcStatus{
+				xferred: sum,
+			}
+			xferred = sum
+		} else { // All other messages have the format "key: value"
+			info := strings.SplitN(text, ":", 2)
+			if len(info) != 2 {
+				log.Warningln("Invalid line in the TPC update:", text)
+				continue
+			}
+			key := strings.TrimSpace(info[0])
+			value := strings.TrimSpace(info[1])
+			switch key {
+			case "failure":
+				err = errors.Errorf("TPC copy failed: %s", value)
+				break Listener
+			case "success":
+				break Listener
+			case "Stripe Index":
+				idx, pErr := strconv.Atoi(value)
+				if pErr == nil {
+					curStripe = idx
+				} else {
+					log.Warningf("Invalid integer in performance marker's 'Stripe Index': %s (%s)", pErr.Error(), value)
+				}
+			case "Stripe Bytes Transferred":
+				bytes, pErr := strconv.Atoi(value)
+				if pErr == nil {
+					curStripeBytes = uint64(bytes)
+				} else {
+					log.Warningf("Invalid integer in performance marker's 'Stripe Bytes Transferred': %s (%s)", pErr.Error(), value)
+				}
+			case "Total Stripe Count":
+				// Ignored
+			case "RemoteConnections":
+				// Ignored
+			default:
+				log.Debugln("Received performance marker with unknown key:", key)
+			}
+		}
+	}
+	if err == nil {
+		err = scanner.Err()
+	}
+	messages <- tpcStatus{
+		err:     err,
+		done:    true,
+		xferred: xferred,
+	}
+	return nil
+}
+
 // Actually perform the HTTP PUT request to the server.
 //
 // This is executed in a separate goroutine to allow periodic progress callbacks
@@ -4161,6 +4790,37 @@ func skipUpload(job *TransferJob, localPath string, remoteUrl *pelican_url.Pelic
 		return true
 	case SyncSize:
 		return localInfo.Size() == remoteInfo.Size
+	}
+	return false
+}
+
+// Depending on the synchronization policy, decide if a TPC copy should be skipped.
+// This stats the destination remote path using the destination's collections URL
+// to check if the object already exists.
+// sourceInfo is the fs.FileInfo from the source WebDAV listing.
+// destCollClient is a WebDAV client pointed at the destination's collections URL.
+func skipCopy(syncLevel SyncLevel, sourceInfo fs.FileInfo, destPath string, destCollClient *gowebdav.Client) bool {
+	if syncLevel == SyncNone {
+		return false
+	}
+
+	// Stat the destination to see if it already exists
+	var destInfo fs.FileInfo
+	err := retryWebDavOperation("Stat", func() error {
+		var statErr error
+		destInfo, statErr = destCollClient.Stat(destPath)
+		return statErr
+	})
+	if err != nil {
+		// If stat fails (e.g., 404), the destination doesn't exist; don't skip
+		return false
+	}
+
+	switch syncLevel {
+	case SyncExist:
+		return true
+	case SyncSize:
+		return sourceInfo.Size() == destInfo.Size()
 	}
 	return false
 }
@@ -4352,6 +5012,159 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 				job.job.totalXfer += 1
 			}
 		}
+	}
+	return nil
+}
+
+// walkDirCopy walks the remote source directory and emits individual TPC copy jobs
+// for each file found. This is used for recursive third-party-copy operations.
+func (te *TransferEngine) walkDirCopy(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, srcUrl *url.URL) error {
+	// Use the source director response to get the collections URL for listing
+	collUrl := job.job.srcDirResp.XPelNsHdr.CollectionsUrl
+	if collUrl == nil {
+		return errors.New("Collections URL not found in source director response for recursive copy")
+	}
+	log.Debugln("Trying source collections URL for TPC walk: ", collUrl.String())
+
+	srcClient := createWebDavClient(collUrl, job.job.srcToken, job.job.project)
+
+	// Create a destination WebDAV client for sync skip checks (stat destination)
+	var destClient *gowebdav.Client
+	if job.job.syncLevel != SyncNone {
+		destCollUrl := job.job.dirResp.XPelNsHdr.CollectionsUrl
+		if destCollUrl == nil {
+			log.Warnln("Destination collections URL not found; sync skip checks will be disabled for TPC copy")
+		} else {
+			log.Debugln("Trying destination collections URL for TPC sync skip: ", destCollUrl.String())
+			destClient = createWebDavClient(destCollUrl, job.job.token, job.job.project)
+		}
+	}
+
+	return te.walkDirCopyHelper(job, transfers, files, srcUrl.Path, srcClient, destClient)
+}
+
+// walkDirCopyHelper recursively walks the remote source directory and emits individual
+// TPC copy transfer files. For each file found, it creates a copy job where the source
+// server URLs point to the individual file and the destination (via dirResp.ObjectServers)
+// is also adjusted to the corresponding destination path.
+// destWebDavClient may be nil if sync skip is disabled; used to stat destination files.
+func (te *TransferEngine) walkDirCopyHelper(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, remotePath string, webdavClient *gowebdav.Client, destWebDavClient *gowebdav.Client) error {
+	// Check for cancellation
+	if err := job.job.ctx.Err(); err != nil {
+		return err
+	}
+
+	var infos []fs.FileInfo
+	err := retryWebDavOperation("ReadDir", func() error {
+		var err error
+		infos, err = webdavClient.ReadDir(remotePath)
+		return err
+	})
+	if err != nil {
+		if gowebdav.IsErrNotFound(err) {
+			return error_codes.NewSpecification_FileNotFoundError(errors.New("404: source object not found"))
+		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
+			// XRootD workaround: a directory listing on a file path returns 500.
+			// Stat the path; if it is a file, emit a single copy job.
+			var info fs.FileInfo
+			err := retryWebDavOperation("Stat", func() error {
+				var err error
+				info, err = webdavClient.Stat(remotePath)
+				return err
+			})
+			if err != nil {
+				return errors.Wrap(err, "failed to stat source path for copy")
+			}
+			if !info.IsDir() {
+				return te.emitCopyJob(job, transfers, files, remotePath, info, destWebDavClient)
+			}
+			return nil
+		}
+		return errors.Wrap(err, "failed to read source collection for copy")
+	}
+
+	for _, info := range infos {
+		newPath := path.Join(remotePath, info.Name())
+		if info.IsDir() {
+			err := te.walkDirCopyHelper(job, transfers, files, newPath, webdavClient, destWebDavClient)
+			if err != nil {
+				return err
+			}
+		} else {
+			if err := te.emitCopyJob(job, transfers, files, newPath, info, destWebDavClient); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// emitCopyJob creates and emits a single TPC copy job for a file at the given source path.
+// It adjusts the source server URLs (in transfers/attempts) and the destination remote URL
+// to point at the individual file, computing the relative path within the source directory.
+// sourceInfo is the fs.FileInfo for the source file, used for sync skip checks.
+// destCollClient may be nil if sync skip is disabled; used to stat the destination file.
+func (te *TransferEngine) emitCopyJob(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, srcFilePath string, sourceInfo fs.FileInfo, destCollClient *gowebdav.Client) error {
+	// Compute relative path of this file within the source directory
+	relPath := strings.TrimPrefix(srcFilePath, job.job.srcURL.Path)
+	relPath = strings.TrimPrefix(relPath, "/")
+
+	// Build the destination path: the base destination + the relative path from source
+	destPath := path.Join(job.job.remoteURL.Path, relPath)
+
+	// Check if this copy should be skipped based on sync policy
+	if destCollClient != nil && skipCopy(job.job.syncLevel, sourceInfo, destPath, destCollClient) {
+		log.Infoln("Skipping copy of object", srcFilePath, "as it already exists at destination", destPath)
+		return nil
+	}
+
+	// Build source server attempts for this individual file.
+	// Each attempt in `transfers` has the source server URL with the source directory path;
+	// we need to replace that path with the individual file path.
+	srcAttempts := make([]transferAttemptDetails, len(transfers))
+	for i, attempt := range transfers {
+		srcAttempts[i] = attempt
+		// The attempt URL path is currently set to the source directory path.
+		// Compute the base by stripping the original source path, then append the file path.
+		attemptPath := attempt.Url.Path
+		if attemptPath != "" && !strings.HasSuffix(attemptPath, "/") {
+			attemptPath += "/"
+		}
+		srcBasePath := job.job.srcURL.Path
+		if srcBasePath != "" && !strings.HasSuffix(srcBasePath, "/") {
+			srcBasePath += "/"
+		}
+		transferBase := strings.TrimSuffix(attemptPath, srcBasePath)
+		fileURL := &url.URL{
+			Scheme:   attempt.Url.Scheme,
+			Host:     attempt.Url.Host,
+			Path:     path.Join(transferBase, srcFilePath),
+			RawQuery: attempt.Url.RawQuery,
+		}
+		srcAttempts[i].Url = fileURL
+		log.Debugln("Constructed source attempt URL for TPC copy:", fileURL.String(), "file:", srcFilePath)
+	}
+
+	job.job.activeXfer.Add(1)
+	select {
+	case <-job.job.ctx.Done():
+		return job.job.ctx.Err()
+	case files <- &clientTransferFile{
+		uuid:  job.uuid,
+		jobId: job.job.uuid,
+		file: &transferFile{
+			ctx:       job.job.ctx,
+			callback:  job.job.callback,
+			job:       job.job,
+			engine:    te,
+			remoteURL: &url.URL{Path: destPath},
+			xferType:  job.job.xferType,
+			token:     job.job.token,
+			srcToken:  job.job.srcToken,
+			attempts:  srcAttempts,
+		},
+	}:
+		job.job.totalXfer += 1
 	}
 	return nil
 }

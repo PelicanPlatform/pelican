@@ -21,6 +21,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,6 +83,7 @@ the client should fallback to discovered caches if all preferred caches fail.`)
 	} else {
 		flagSet.String("caches", "", "A JSON file containing the list of caches")
 		flagSet.String("methods", "http", "Comma separated list of methods to try, in order")
+		flagSet.Bool("direct", false, "Read directly from an origin, bypassing any caches (same as '?directread' query)")
 		flagSet.Bool("async", false, "Run the transfer asynchronously through the client API server and return a job ID")
 		flagSet.Bool("wait", false, "When used with --async, wait for the job to complete before returning")
 		objectCmd.AddCommand(copyCmd)
@@ -267,6 +269,30 @@ func copyMain(cmd *cobra.Command, args []string) {
 	}
 	source := args[:len(args)-1]
 	dest := args[len(args)-1]
+
+	// Handle --direct flag by appending the directread query parameter to each source URL
+	directRead, _ := cmd.Flags().GetBool("direct")
+	if directRead {
+		for i, src := range source {
+			// Check for conflicting prefercached parameter
+			u, pErr := url.Parse(src)
+			if pErr != nil {
+				log.Errorln("Failed to parse URL:", pErr)
+				os.Exit(1)
+			}
+			if u.Query().Has("prefercached") {
+				log.Errorln("Cannot use --direct flag with URLs that have '?prefercached' query parameter")
+				os.Exit(1)
+			}
+
+			newSrc, pErr := addQueryParam(src, "directread", "")
+			if pErr != nil {
+				log.Errorln("Failed to process --direct option:", pErr)
+				os.Exit(1)
+			}
+			source[i] = newSrc
+		}
+	}
 
 	log.Debugln("Sources:", source)
 	log.Debugln("Destination:", dest)
