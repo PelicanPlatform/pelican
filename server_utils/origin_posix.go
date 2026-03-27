@@ -1,5 +1,3 @@
-//go:build !windows
-
 /***************************************************************
 *
 * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
@@ -24,7 +22,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/pkg/errors"
 
@@ -168,7 +165,10 @@ func (o *PosixOrigin) validateExtra(e *OriginExport, _ int) error {
 	if err := o.validateTempUploadLocation(e); err != nil {
 		return err
 	}
-	if err := validatePosixPermissions(e.StoragePrefix, e.Capabilities, e.FederationPrefix); err != nil {
+	if err := o.validateAtomicUploadFilesystem(e); err != nil {
+		return err
+	}
+	if err := o.validatePosixPermissions(e.StoragePrefix, e.Capabilities, e.FederationPrefix); err != nil {
 		return err
 	}
 
@@ -177,7 +177,7 @@ func (o *PosixOrigin) validateExtra(e *OriginExport, _ int) error {
 
 // validatePosixPermissions checks if the daemon user has the required filesystem permissions
 // on the given path to support the specified capabilities.
-func validatePosixPermissions(storagePath string, caps server_structs.Capabilities, federationPrefix string) error {
+func (o *PosixOrigin) validatePosixPermissions(storagePath string, caps server_structs.Capabilities, federationPrefix string) error {
 	// Get XRootD daemon user info
 	uid, err := config.GetDaemonUID()
 	if err != nil {
@@ -212,12 +212,10 @@ func validatePosixPermissions(storagePath string, caps server_structs.Capabiliti
 	}
 
 	// Get the directory's owner and group
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return errors.Errorf("failed to get system stat info for %q", storagePath)
+	dirUID, dirGID, err := utils.FileOwnerIDs(info)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get owner info for %q", storagePath)
 	}
-	dirUID := int(stat.Uid)
-	dirGID := int(stat.Gid)
 	mode := info.Mode()
 
 	// Determine which permission bits apply to XRootD daemon user

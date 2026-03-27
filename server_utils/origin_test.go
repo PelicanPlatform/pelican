@@ -759,8 +759,9 @@ func TestPathLikePrefixValidation(t *testing.T) {
 func TestValidatePosixPermissions(t *testing.T) {
 	// Test with non-existent path
 	t.Run("NonExistentPath", func(t *testing.T) {
+		o := &PosixOrigin{}
 		caps := server_structs.Capabilities{Reads: true}
-		err := validatePosixPermissions("/nonexistent/path/that/does/not/exist", caps, "/test")
+		err := o.validatePosixPermissions("/nonexistent/path/that/does/not/exist", caps, "/test")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
 		assert.Contains(t, err.Error(), "does not exist")
@@ -768,13 +769,14 @@ func TestValidatePosixPermissions(t *testing.T) {
 
 	// Test with a file instead of directory
 	t.Run("FileInsteadOfDirectory", func(t *testing.T) {
+		o := &PosixOrigin{}
 		tmpFile := t.TempDir() + "/testfile"
 		file, err := os.Create(tmpFile)
 		require.NoError(t, err)
 		file.Close()
 
 		caps := server_structs.Capabilities{Reads: true}
-		err = validatePosixPermissions(tmpFile, caps, "/test")
+		err = o.validatePosixPermissions(tmpFile, caps, "/test")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
 		assert.Contains(t, err.Error(), "is not a directory")
@@ -784,28 +786,29 @@ func TestValidatePosixPermissions(t *testing.T) {
 	// Note: We use 0777 because tests run as root but the daemon user (xrootd) is different,
 	// so we need "others" permissions to be rwx for the xrootd user to have access.
 	t.Run("FullPermissions", func(t *testing.T) {
+		o := &PosixOrigin{}
 		tmpDir := t.TempDir()
 		err := os.Chmod(tmpDir, 0777) // rwx for everyone including "others" (daemon user)
 		require.NoError(t, err)
 
 		// Test reads capability
 		caps := server_structs.Capabilities{Reads: true}
-		err = validatePosixPermissions(tmpDir, caps, "/test")
+		err = o.validatePosixPermissions(tmpDir, caps, "/test")
 		assert.NoError(t, err)
 
 		// Test public reads capability
 		caps = server_structs.Capabilities{PublicReads: true}
-		err = validatePosixPermissions(tmpDir, caps, "/test")
+		err = o.validatePosixPermissions(tmpDir, caps, "/test")
 		assert.NoError(t, err)
 
 		// Test writes capability
 		caps = server_structs.Capabilities{Writes: true}
-		err = validatePosixPermissions(tmpDir, caps, "/test")
+		err = o.validatePosixPermissions(tmpDir, caps, "/test")
 		assert.NoError(t, err)
 
 		// Test listings capability
 		caps = server_structs.Capabilities{Listings: true}
-		err = validatePosixPermissions(tmpDir, caps, "/test")
+		err = o.validatePosixPermissions(tmpDir, caps, "/test")
 		assert.NoError(t, err)
 
 		// Test all capabilities together
@@ -815,12 +818,13 @@ func TestValidatePosixPermissions(t *testing.T) {
 			Writes:      true,
 			Listings:    true,
 		}
-		err = validatePosixPermissions(tmpDir, caps, "/test")
+		err = o.validatePosixPermissions(tmpDir, caps, "/test")
 		assert.NoError(t, err)
 	})
 
 	// Test with no capabilities - should always pass (nothing to validate)
 	t.Run("NoCapabilities", func(t *testing.T) {
+		o := &PosixOrigin{}
 		tmpDir := t.TempDir()
 		// Even with restrictive permissions, no capabilities means no validation needed
 		err := os.Chmod(tmpDir, 0000)
@@ -832,12 +836,13 @@ func TestValidatePosixPermissions(t *testing.T) {
 		}()
 
 		caps := server_structs.Capabilities{}
-		err = validatePosixPermissions(tmpDir, caps, "/test")
+		err = o.validatePosixPermissions(tmpDir, caps, "/test")
 		assert.NoError(t, err)
 	})
 
 	// Test with read-only permissions (r-x) - writes should fail
 	t.Run("ReadOnlyPermissions", func(t *testing.T) {
+		o := &PosixOrigin{}
 		tmpDir := t.TempDir()
 		err := os.Chmod(tmpDir, 0555) // r-x r-x r-x
 		require.NoError(t, err)
@@ -848,17 +853,17 @@ func TestValidatePosixPermissions(t *testing.T) {
 
 		// Reads should pass
 		caps := server_structs.Capabilities{Reads: true}
-		err = validatePosixPermissions(tmpDir, caps, "/test")
+		err = o.validatePosixPermissions(tmpDir, caps, "/test")
 		assert.NoError(t, err)
 
 		// Listings should pass
 		caps = server_structs.Capabilities{Listings: true}
-		err = validatePosixPermissions(tmpDir, caps, "/test")
+		err = o.validatePosixPermissions(tmpDir, caps, "/test")
 		assert.NoError(t, err)
 
 		// Writes should fail
 		caps = server_structs.Capabilities{Writes: true}
-		err = validatePosixPermissions(tmpDir, caps, "/test")
+		err = o.validatePosixPermissions(tmpDir, caps, "/test")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
 		assert.Contains(t, err.Error(), "Writes")
@@ -867,6 +872,7 @@ func TestValidatePosixPermissions(t *testing.T) {
 
 	// Test with write-only permissions (-wx) - reads and listings should fail
 	t.Run("WriteOnlyPermissions", func(t *testing.T) {
+		o := &PosixOrigin{}
 		tmpDir := t.TempDir()
 		err := os.Chmod(tmpDir, 0333) // -wx -wx -wx
 		require.NoError(t, err)
@@ -877,19 +883,19 @@ func TestValidatePosixPermissions(t *testing.T) {
 
 		// Writes should pass
 		caps := server_structs.Capabilities{Writes: true}
-		err = validatePosixPermissions(tmpDir, caps, "/test")
+		err = o.validatePosixPermissions(tmpDir, caps, "/test")
 		assert.NoError(t, err)
 
 		// Reads should fail
 		caps = server_structs.Capabilities{Reads: true}
-		err = validatePosixPermissions(tmpDir, caps, "/test")
+		err = o.validatePosixPermissions(tmpDir, caps, "/test")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
 		assert.Contains(t, err.Error(), "Reads")
 
 		// Listings should fail
 		caps = server_structs.Capabilities{Listings: true}
-		err = validatePosixPermissions(tmpDir, caps, "/test")
+		err = o.validatePosixPermissions(tmpDir, caps, "/test")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
 		assert.Contains(t, err.Error(), "Listings")
@@ -897,6 +903,7 @@ func TestValidatePosixPermissions(t *testing.T) {
 
 	// Test with no execute permission - all capabilities requiring traversal should fail
 	t.Run("NoExecutePermission", func(t *testing.T) {
+		o := &PosixOrigin{}
 		tmpDir := t.TempDir()
 		err := os.Chmod(tmpDir, 0666) // rw- rw- rw-
 		require.NoError(t, err)
@@ -907,25 +914,26 @@ func TestValidatePosixPermissions(t *testing.T) {
 
 		// Reads should fail (needs execute for directory traversal)
 		caps := server_structs.Capabilities{Reads: true}
-		err = validatePosixPermissions(tmpDir, caps, "/test")
+		err = o.validatePosixPermissions(tmpDir, caps, "/test")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
 
 		// Writes should fail (needs execute for directory traversal)
 		caps = server_structs.Capabilities{Writes: true}
-		err = validatePosixPermissions(tmpDir, caps, "/test")
+		err = o.validatePosixPermissions(tmpDir, caps, "/test")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
 
 		// Listings should fail (needs execute for directory traversal)
 		caps = server_structs.Capabilities{Listings: true}
-		err = validatePosixPermissions(tmpDir, caps, "/test")
+		err = o.validatePosixPermissions(tmpDir, caps, "/test")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
 	})
 
 	// Test error message contains useful information
 	t.Run("ErrorMessageContent", func(t *testing.T) {
+		o := &PosixOrigin{}
 		tmpDir := t.TempDir()
 		err := os.Chmod(tmpDir, 0000) // --- --- ---
 		require.NoError(t, err)
@@ -935,7 +943,7 @@ func TestValidatePosixPermissions(t *testing.T) {
 		}()
 
 		caps := server_structs.Capabilities{Reads: true}
-		err = validatePosixPermissions(tmpDir, caps, "/my/federation/prefix")
+		err = o.validatePosixPermissions(tmpDir, caps, "/my/federation/prefix")
 		require.Error(t, err)
 
 		errStr := err.Error()
