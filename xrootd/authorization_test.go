@@ -382,28 +382,6 @@ func TestAuthPoliciesFromLine(t *testing.T) {
 }
 
 // Helper function for other tests here who call server_utils.GetOriginExports() internally.
-// This function gets a temp dir for export StoragePrefixes, whose existence is validated
-// by server_utils.GetOriginExports().
-func getTmpFile(t *testing.T) string {
-	tmpFile := t.TempDir() + "/tmpfile"
-
-	// Create the file
-	file, err := os.Create(tmpFile)
-	if err != nil {
-		t.Fatalf("Failed to create temp file: %v", err)
-	}
-	file.Close()
-
-	// Set file permissions to 777
-	err = os.Chmod(tmpFile, 0777)
-	if err != nil {
-		t.Fatalf("Failed to set file permissions: %v", err)
-	}
-
-	return tmpFile
-}
-
-// Helper function for other tests here who call server_utils.GetOriginExports() internally.
 // This function populates the values so that call doesn't fail.
 func setupExports(t *testing.T, config string) {
 	viper.SetConfigType("yaml")
@@ -411,21 +389,23 @@ func setupExports(t *testing.T, config string) {
 	err := viper.ReadConfig(strings.NewReader(config))
 	require.NoError(t, err, "error reading config")
 	// Some keys need to be overridden because GetOriginExports validates things like filepaths by making
-	// sure the file exists and is readable by the process.
+	// sure the file exists and is readable by the process. For POSIX origins, we also need directories
+	// with proper permissions for the XRootD daemon user.
 	// Iterate through Origin.XXX keys and check for "<WILL BE REPLACED IN TEST>" in the value
 	for _, key := range viper.AllKeys() {
 		if strings.Contains(viper.GetString(key), "<WILL BE REPLACED IN TEST>") {
-			tmpFile := getTmpFile(t)
-			require.NoError(t, param.SetRaw(key, tmpFile))
+			tmpDir := test_utils.GetTmpStoragePrefixDir(t)
+			require.NoError(t, param.SetRaw(key, tmpDir))
 		} else if key == "origin.exports" { // keys will be lowercased
-			// We also need to override paths for any exports that define "SHOULD-OVERRIDE-TEMPFILE"
+			// We also need to override paths for any exports that define "<WILL BE REPLACED IN TEST>"
 			exports := viper.Get(key).([]interface{})
 			for _, export := range exports {
 				exportMap := export.(map[string]interface{})
 				for k, v := range exportMap {
-					if v == "<WILL BE REPLACED IN TEST>" {
-						tmpFile := getTmpFile(t)
-						exportMap[k] = tmpFile
+					// Use strings.Contains because the value might have a leading "/" like "/<WILL BE REPLACED IN TEST>"
+					if vStr, ok := v.(string); ok && strings.Contains(vStr, "<WILL BE REPLACED IN TEST>") {
+						tmpDir := test_utils.GetTmpStoragePrefixDir(t)
+						exportMap[k] = tmpDir
 					}
 				}
 			}
@@ -1100,7 +1080,8 @@ func TestMergeConfig(t *testing.T) {
 	test_utils.MockFederationRoot(t, nil, nil)
 
 	storageDir := filepath.Join(dirname, "storage")
-	require.NoError(t, os.MkdirAll(storageDir, 0755))
+	require.NoError(t, os.MkdirAll(storageDir, 0777))
+	require.NoError(t, os.Chmod(storageDir, 0777))
 	require.NoError(t, param.Origin_RunLocation.Set(dirname))
 	require.NoError(t, param.Origin_Port.Set(8443))
 	require.NoError(t, param.Origin_StoragePrefix.Set(storageDir))
@@ -1326,6 +1307,21 @@ func TestGenerateOriginIssuer(t *testing.T) {
 			viper.SetConfigType("yaml")
 			err := viper.MergeConfig(strings.NewReader(tc.yamlConfig))
 			require.NoError(t, err, "error reading config")
+
+			// Replace storage prefixes with temp directories that have proper permissions
+			if exports, ok := viper.Get(param.Origin_Exports.GetName()).([]interface{}); ok {
+				for _, export := range exports {
+					exportMap := export.(map[string]interface{})
+					for k, v := range exportMap {
+						if vStr, ok := v.(string); ok && strings.Contains(vStr, "<WILL BE REPLACED IN TEST>") {
+							tmpDir := test_utils.GetTmpStoragePrefixDir(t)
+							exportMap[k] = tmpDir
+						}
+					}
+				}
+				require.NoError(t, param.SetRaw(param.Origin_Exports.GetName(), exports))
+			}
+
 			err = config.InitServer(ctx, server_structs.OriginType)
 			require.NoError(t, err)
 
@@ -1600,7 +1596,8 @@ func TestGenerateFederationIssuer(t *testing.T) {
 			require.NoError(t, param.Origin_EnablePublicReads.Set(tc.PublicReads))
 			require.NoError(t, param.Origin_EnableListings.Set(false))
 			require.NoError(t, param.Origin_EnableWrites.Set(false))
-			require.NoError(t, param.Origin_StoragePrefix.Set("/does/not/matter"))
+			storageDir := test_utils.GetTmpStoragePrefixDir(t) // Create storage dir with permissions for XRootD daemon user
+			require.NoError(t, param.Origin_StoragePrefix.Set(storageDir))
 			require.NoError(t, param.Origin_FederationPrefix.Set("/foo/bar"))
 			require.NoError(t, param.TLSSkipVerify.Set(true))
 
@@ -1635,7 +1632,10 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	require.NoError(t, param.Origin_RunLocation.Set(tmpDir))
 	require.NoError(t, param.Origin_SelfTest.Set(true))
 	require.NoError(t, param.Origin_FederationPrefix.Set("/foo/bar"))
-	require.NoError(t, param.Origin_StoragePrefix.Set("/does/not/matter"))
+	storageDir := filepath.Join(tmpDir, "storage")
+	require.NoError(t, os.MkdirAll(storageDir, 0777))
+	require.NoError(t, os.Chmod(storageDir, 0777))
+	require.NoError(t, param.Origin_StoragePrefix.Set(storageDir))
 	require.NoError(t, param.Server_Hostname.Set("origin.example.com"))
 	require.NoError(t, param.Origin_StorageType.Set(string(server_structs.OriginStoragePosix)))
 

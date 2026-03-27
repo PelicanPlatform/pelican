@@ -27,6 +27,15 @@ import (
 	"github.com/pkg/errors"
 )
 
+// FileOwnerIDs extracts the uid and gid from a FileInfo's underlying syscall.Stat_t.
+func FileOwnerIDs(info os.FileInfo) (uid, gid int, err error) {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, 0, errors.Errorf("unable to extract system stat info from file info for %q", info.Name())
+	}
+	return int(stat.Uid), int(stat.Gid), nil
+}
+
 // SameFilesystem returns true if both paths reside on the same filesystem
 // (i.e. share the same device ID). This is important because rename(2) cannot
 // move files across filesystem boundaries (returns EXDEV).

@@ -1,5 +1,3 @@
-//go:build !windows
-
 /***************************************************************
 *
 * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
