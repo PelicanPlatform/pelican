@@ -378,10 +378,8 @@ func TestUpdateAuth(t *testing.T) {
 	require.NoError(t, param.Xrootd_Authfile.Set(authfileName))
 	scitokensName := filepath.Join(configDirname, "scitokens.cfg")
 	require.NoError(t, param.Xrootd_ScitokensConfig.Set(scitokensName))
-	storageDir := filepath.Join(runDirname, "storage")
-	require.NoError(t, os.MkdirAll(storageDir, 0755))
 	require.NoError(t, param.Origin_FederationPrefix.Set("/test"))
-	require.NoError(t, param.Origin_StoragePrefix.Set(storageDir))
+	require.NoError(t, param.Origin_StoragePrefix.Set(test_utils.GetTmpStoragePrefixDir(t)))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
