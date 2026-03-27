@@ -67,3 +67,12 @@ func TestParseOAuthState(t *testing.T) {
 		assert.Nil(t, get)
 	})
 }
+
+func TestOAuthStatePreservesNextURLWithLoginAttemptMarker(t *testing.T) {
+	nextURL := "/view/origin/globus/?foo=bar&" + loginAttemptQueryParam + "=true"
+
+	state := GenerateOAuthState(map[string]string{"nextUrl": nextURL})
+	parsed, err := ParseOAuthState(state)
+	require.NoError(t, err)
+	assert.Equal(t, nextURL, parsed["nextUrl"])
+}
