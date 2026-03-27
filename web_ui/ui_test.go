@@ -1195,7 +1195,7 @@ func TestReadOnlyMiddleware(t *testing.T) {
 	readOnlyGroup := route.Group("/api/v1.0")
 	readOnlyGroup.Use(ReadOnlyMiddleware)
 	// Set the app to have Read Only mode enabled
-	require.NoError(t, param.Server_ReadOnly.Set(true))
+	require.NoError(t, param.Server_WebReadOnly.Set(true))
 	{
 		readOnlyGroup.POST("/resource", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
 		readOnlyGroup.PUT("/resource", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
