@@ -57,6 +57,10 @@ var (
 )
 
 func getTransport() http.RoundTripper {
+	// If a test has set a custom transport, use it
+	if transport != nil {
+		return transport
+	}
 	onceTransport.Do(func() {
 		socketName := filepath.Join(param.Issuer_ScitokensServerLocation.GetString(),
 			"var", "http.sock")
