@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -175,6 +175,9 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	require.NoError(t, param.Cache_EnableEvictionMonitoring.Set(false))
 	require.NoError(t, param.Cache_StorageLocation.Set(filepath.Join(tmpPath, "xcache-data")))
 	require.NoError(t, param.Cache_DbLocation.Set(filepath.Join(t.TempDir(), "cache.sqlite")))
+	// In tests, skip the drain-wait period before XRootD restarts
+	// so tests don't time out waiting for PIDs to change.
+	require.NoError(t, param.Xrootd_ShutdownTimeout.Set(0))
 	require.NoError(t, param.Server_EnableUI.Set(false))
 	require.NoError(t, param.Server_WebPort.Set(0))
 	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(t.TempDir(), "server.sqlite")))

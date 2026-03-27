@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -184,7 +184,18 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		originServer.SetPids(pids)
 
 		// Store restart information after PIDs are known
-		xrootd.StoreRestartInfo(launchers, pids, egrp, portStartCallback, false, useCMSD, privileged)
+		launch := func(ls []daemon.Launcher) ([]int, error) {
+			return xrootd.LaunchDaemons(ctx, ls, egrp, portStartCallback)
+		}
+		preRestartHook := func() {
+			handleGracefulShutdown(ctx, modules, []server_structs.XRootDServer{originServer})
+		}
+		postRestartHook := func() {
+			if advErr := launcher_utils.Advertise(ctx, []server_structs.XRootDServer{originServer}); advErr != nil {
+				log.Errorf("Failed to re-advertise origin to Director after restart: %v", advErr)
+			}
+		}
+		xrootd.StoreRestartInfo(pids, launch, false, useCMSD, privileged, preRestartHook, postRestartHook)
 
 		// Register callback for xrootd logging configuration changes
 		// This must be done after LaunchDaemons so the server has PIDs
