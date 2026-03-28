@@ -74,6 +74,7 @@ func GetDeprecated() map[string][]string {
         "DisableHttpProxy": {"Client.DisableHttpProxy"},
         "DisableProxyFallback": {"Client.DisableProxyFallback"},
         "IssuerKey": {"none"},
+        "Logging.DisableProgressBars": {"Logging.Client.DisableProgressBars"},
         "Lotman.DbLocation": {"Lotman.LotHome"},
         "MinimumDownloadSpeed": {"Client.MinimumDownloadSpeed"},
         "Origin.EnableDirListing": {"Origin.EnableListings"},
@@ -243,6 +244,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Logging.Cache.Scitokens": true,
 	"Logging.Cache.Xrd": true,
 	"Logging.Cache.Xrootd": true,
+	"Logging.Client.DisableProgressBars": false,
 	"Logging.Client.ProgressInterval": false,
 	"Logging.DisableProgressBars": false,
 	"Logging.Level": true,
@@ -1193,6 +1195,8 @@ func (bP BoolParam) GetBool() bool {
 			return config.Issuer.OIDCPreferClaimsFromIDToken
 		case "Issuer.UserStripDomain":
 			return config.Issuer.UserStripDomain
+		case "Logging.Client.DisableProgressBars":
+			return config.Logging.Client.DisableProgressBars
 		case "Logging.DisableProgressBars":
 			return config.Logging.DisableProgressBars
 		case "Lotman.EnableAPI":
@@ -1658,6 +1662,7 @@ var allParameterNames = []string{
 	"Logging.Cache.Scitokens",
 	"Logging.Cache.Xrd",
 	"Logging.Cache.Xrootd",
+	"Logging.Client.DisableProgressBars",
 	"Logging.Client.ProgressInterval",
 	"Logging.DisableProgressBars",
 	"Logging.Level",
@@ -2198,6 +2203,7 @@ var (
 	DisableProxyFallback = BoolParam{"DisableProxyFallback"}
 	Issuer_OIDCPreferClaimsFromIDToken = BoolParam{"Issuer.OIDCPreferClaimsFromIDToken"}
 	Issuer_UserStripDomain = BoolParam{"Issuer.UserStripDomain"}
+	Logging_Client_DisableProgressBars = BoolParam{"Logging.Client.DisableProgressBars"}
 	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}
 	Lotman_EnableAPI = BoolParam{"Lotman.EnableAPI"}
 	Monitoring_EnablePrometheus = BoolParam{"Monitoring.EnablePrometheus"}
