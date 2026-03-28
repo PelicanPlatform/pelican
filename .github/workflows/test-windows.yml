@@ -16,6 +16,11 @@ on:
     types:
       - dispatch-build
   workflow_call:
+    inputs:
+      race_detection:
+        required: false
+        type: boolean
+        default: false
   workflow_dispatch:
 
 jobs:
@@ -71,7 +76,7 @@ jobs:
           echo "::group::Building web UI"
           make web-build
           echo "::endgroup::"
-          gotestsum --format pkgname-and-test-fails --hide-summary=output --junitfile "$env:JUNIT_FILE" -- -p=4 -timeout=15m -coverpkg=./... -covermode=count -coverprofile=${{ matrix.coverprofile }} -tags=${{ matrix.tags }} ./...
+          gotestsum --format pkgname-and-test-fails --hide-summary=output --junitfile "$env:JUNIT_FILE" -- -p=4 -timeout=${{ inputs.race_detection && '30m' || '15m' }} ${{ inputs.race_detection && '-race' || '' }} ${{ !inputs.race_detection && format('-coverpkg=./... -covermode=count -coverprofile={0}', matrix.coverprofile) || '' }} -tags=${{ matrix.tags }} ./...
 
       - name: Upload JUnit report
         if: always()
