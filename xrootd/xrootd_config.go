@@ -157,24 +157,26 @@ type (
 	}
 
 	XrootdOptions struct {
-		Port                   int
-		ManagerHost            string
-		ManagerPort            string
-		ConfigFile             string
-		MacaroonsKeyFile       string
-		RobotsTxtFile          string
-		Sitename               string
-		SummaryMonitoringHost  string
-		SummaryMonitoringPort  int
-		DetailedMonitoringHost string
-		DetailedMonitoringPort int
-		Authfile               string
-		AuthRefreshInterval    int // In the raw config we use a duration, but Xrootd needs this as a seconds integer. Conversion happens during the unmarshal
-		ScitokensConfig        string
-		Mount                  string
-		LocalMonitoringPort    int
-		HttpMaxDelay           int
-		MaxThreads             int
+		Port                       int
+		ManagerHost                string
+		ManagerPort                string
+		ConfigFile                 string
+		MacaroonsKeyFile           string
+		RobotsTxtFile              string
+		Sitename                   string
+		SummaryMonitoringHost      string
+		SummaryMonitoringPort      int
+		DetailedMonitoringHost     string
+		DetailedMonitoringPort     int
+		Authfile                   string
+		AuthRefreshInterval        int // In the raw config we use a duration, but Xrootd needs this as a seconds integer. Conversion happens during the unmarshal
+		ScitokensConfig            string
+		Mount                      string
+		LocalMonitoringPort        int
+		HttpMaxDelay               int
+		MaxThreads                 int
+		EnableFireflies            bool
+		FirefliesForwardingAddress string
 	}
 
 	ServerConfig struct {
