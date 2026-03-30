@@ -37,6 +37,7 @@ var (
 	configMutex sync.Mutex
 	callbacks   map[string]ConfigCallback
 	callbackMux sync.RWMutex
+	callbackWg  sync.WaitGroup // tracks in-flight callback goroutines
 )
 
 // ConfigDir is the typed parameter for the "ConfigDir" configuration key.
@@ -513,7 +514,11 @@ func MultiSet(keyValues map[string]any) error {
 
 // Reset resets the viper configuration and creates a new config struct.
 // This function is thread-safe and will update the atomic config pointer.
+// It waits for all in-flight callback goroutines to finish before returning.
 func Reset() error {
+	callbackWg.Wait()
+	ClearCallbacks()
+
 	configMutex.Lock()
 	defer configMutex.Unlock()
 
@@ -552,7 +557,12 @@ func invokeCallbacks(oldConfig, newConfig *Config) {
 
 	for _, cb := range callbacks {
 		// Call each callback in a goroutine to avoid blocking config updates
-		// if a callback takes time to execute
-		go cb(oldConfig, newConfig)
+		// if a callback takes time to execute.
+		// The WaitGroup lets Reset() drain all in-flight callbacks.
+		callbackWg.Add(1)
+		go func(fn ConfigCallback) {
+			defer callbackWg.Done()
+			fn(oldConfig, newConfig)
+		}(cb)
 	}
 }
