@@ -1040,6 +1040,7 @@ description: |+
   cross-filesystem mismatch is detected.
 type: bool
 default: false
+hidden: true
 components: ["origin"]
 ---
 name: Origin.UploadTempLocation
