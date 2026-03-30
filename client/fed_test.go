@@ -1234,7 +1234,7 @@ func TestTPCPublicRead(t *testing.T) {
 		require.NoError(t, err)
 		chownToDaemon(t, srcDir, filepath.Join(srcDir, "source.txt"))
 
-		require.NoError(t, param.Set("Logging.DisableProgressBars", true))
+		require.NoError(t, param.Logging_DisableProgressBars.Set(true))
 
 		sourceURL := fmt.Sprintf("pelican://%s:%s%s/tpc_test/source.txt", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
 			export.FederationPrefix)
@@ -1280,7 +1280,7 @@ func TestTPCAuth(t *testing.T) {
 	defer tempToken.Close()
 	defer os.Remove(tempToken.Name())
 
-	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
+	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
 
 	for _, export := range fed.Exports {
 		testFileContent := "authenticated TPC test content"
@@ -1328,7 +1328,7 @@ func TestTPCDirectRead(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	require.NoError(t, param.Set("Origin.EnableDirectReads", true))
+	require.NoError(t, param.Origin_EnableDirectReads.Set(true))
 	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
 
 	export := fed.Exports[0]
@@ -1340,7 +1340,7 @@ func TestTPCDirectRead(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "src.txt"), []byte(testFileContent), 0644))
 	chownToDaemon(t, srcDir, filepath.Join(srcDir, "src.txt"))
 
-	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
+	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
 
 	host := fmt.Sprintf("%s:%s", param.Server_Hostname.GetString(),
 		strconv.Itoa(param.Server_WebPort.GetInt()))
@@ -1380,11 +1380,11 @@ func TestTPCSyncSkip(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	require.NoError(t, param.Set("Origin.EnableDirectReads", true))
+	require.NoError(t, param.Origin_EnableDirectReads.Set(true))
 	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
 
 	export := fed.Exports[0]
-	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
+	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
 
 	tempToken, tkn := getTempToken(t)
 	defer tempToken.Close()

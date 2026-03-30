@@ -2202,7 +2202,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 	} else if job.job.xferType == transferTypeCopy {
 		// For copy, the "attempts" represent the source servers the destination will pull from
 		var sortedSrcServers []*url.URL
-		sortedSrcServers, err = generateSortedObjServers(job.job.srcDirResp, nil)
+		sortedSrcServers, _, err = generateSortedObjServers(job.job.srcDirResp, nil)
 		if err != nil {
 			log.Errorln("Failed to get source servers for copy:", err)
 			return

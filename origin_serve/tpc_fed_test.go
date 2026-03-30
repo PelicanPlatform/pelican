@@ -52,7 +52,7 @@ var (
 // the file handle and the raw token string.
 func getTestToken(t *testing.T) (tokenFile *os.File, tkn string) {
 	t.Helper()
-	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir()))
+	require.NoError(t, param.IssuerKeysDirectory.Set(t.TempDir()))
 
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
@@ -126,7 +126,7 @@ func TestTPCWithPOSIXv2(t *testing.T) {
 	tokenFile, tkn := getTestToken(t)
 	defer os.Remove(tokenFile.Name())
 
-	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
+	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
 
 	host := param.Server_Hostname.GetString()
 	port := strconv.Itoa(param.Server_WebPort.GetInt())
