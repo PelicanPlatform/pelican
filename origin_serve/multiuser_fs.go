@@ -60,12 +60,12 @@ type resolvedID struct {
 
 // userOpCounts tracks per-operation counts for a single user.
 type userOpCounts struct {
-	Mkdir    int64
-	Open     int64
-	Remove   int64
-	Rename   int64
-	Stat     int64
-	Errors   int64
+	Mkdir  int64
+	Open   int64
+	Remove int64
+	Rename int64
+	Stat   int64
+	Errors int64
 }
 
 // opStats tracks operation statistics for the periodic summary.
@@ -378,8 +378,8 @@ func runAsUser[T any](uid, gid uint32, secondaryGIDs []uint32, umask int, fn fun
 	prevUid, _, errno := syscall.Syscall(syscall.SYS_SETFSUID, uintptr(uid), 0, 0)
 	if errno != 0 {
 		// Restore GID and groups before returning
-		syscall.Syscall(syscall.SYS_SETFSGID, uintptr(prevGid), 0, 0)
-		threadSetgroups(prevGroups) //nolint:errcheck
+		syscall.Syscall(syscall.SYS_SETFSGID, uintptr(prevGid), 0, 0) //nolint:errcheck // best-effort restore
+		threadSetgroups(prevGroups)                                   //nolint:errcheck
 		var zero T
 		return zero, fmt.Errorf("setfsuid(%d): %w", uid, errno)
 	}
@@ -392,9 +392,9 @@ func runAsUser[T any](uid, gid uint32, secondaryGIDs []uint32, umask int, fn fun
 	defer func() {
 		// Restore umask, then UID (to regain root privileges), then GID, then groups
 		syscall.Umask(prevUmask)
-		syscall.Syscall(syscall.SYS_SETFSUID, uintptr(prevUid), 0, 0)
-		syscall.Syscall(syscall.SYS_SETFSGID, uintptr(prevGid), 0, 0)
-		threadSetgroups(prevGroups) //nolint:errcheck
+		syscall.Syscall(syscall.SYS_SETFSUID, uintptr(prevUid), 0, 0) //nolint:errcheck // best-effort restore
+		syscall.Syscall(syscall.SYS_SETFSGID, uintptr(prevGid), 0, 0) //nolint:errcheck // best-effort restore
+		threadSetgroups(prevGroups)                                   //nolint:errcheck
 	}()
 
 	return fn()

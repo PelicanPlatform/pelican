@@ -170,8 +170,8 @@ func TestMetricsEndToEnd(t *testing.T) {
 	// Get initial metric values
 	initialHTTPRequests := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, "GET", "200", ""))
 	initialHTTPBytesOut := promtest.ToFloat64(metrics.HttpBytesTotal.WithLabelValues(originServerType, metrics.DirectionOut, "GET", ""))
-	initialStorageReads := promtest.ToFloat64(metrics.StorageReadsTotal.WithLabelValues("posixv2"))
-	initialStorageBytes := promtest.ToFloat64(metrics.StorageBytesRead.WithLabelValues("posixv2"))
+	initialStorageReads := promtest.ToFloat64(metrics.StorageReadsTotal.WithLabelValues("posixv2", ""))
+	initialStorageBytes := promtest.ToFloat64(metrics.StorageBytesRead.WithLabelValues("posixv2", ""))
 
 	// Make GET request to download file
 	resp, err := http.Get(server.URL + "/test/test.txt")
@@ -192,10 +192,10 @@ func TestMetricsEndToEnd(t *testing.T) {
 	assert.Greater(t, httpBytesOut, initialHTTPBytesOut, "HTTP bytes out metric should increment")
 
 	// Verify storage metrics were updated
-	storageReads := promtest.ToFloat64(metrics.StorageReadsTotal.WithLabelValues("posixv2"))
+	storageReads := promtest.ToFloat64(metrics.StorageReadsTotal.WithLabelValues("posixv2", ""))
 	assert.Greater(t, storageReads, initialStorageReads, "Storage read metric should increment for backend=posixv2")
 
-	storageBytes := promtest.ToFloat64(metrics.StorageBytesRead.WithLabelValues("posixv2"))
+	storageBytes := promtest.ToFloat64(metrics.StorageBytesRead.WithLabelValues("posixv2", ""))
 	assert.GreaterOrEqual(t, storageBytes, initialStorageBytes+float64(len(body)), "Storage read bytes should track actual bytes read")
 
 	// Verify metrics are scrapable from /metrics endpoint

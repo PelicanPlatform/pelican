@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -22,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"os/user"
+	"runtime"
 	"strconv"
 	"testing"
 
@@ -65,7 +68,12 @@ func TestGoNativeLookup_LookupGroup(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("RootGroup", func(t *testing.T) {
-		gid, err := lookup.LookupGroup(ctx, "root")
+		// On macOS, GID 0 is "wheel"; on Linux it is "root".
+		groupName := "root"
+		if runtime.GOOS == "darwin" {
+			groupName = "wheel"
+		}
+		gid, err := lookup.LookupGroup(ctx, groupName)
 		require.NoError(t, err)
 		assert.Equal(t, uint32(0), gid)
 	})

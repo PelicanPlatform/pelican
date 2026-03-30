@@ -316,6 +316,6 @@ func (s *SystemdUserDBLookupStrategy) Name() string {
 }
 
 // trySystemdUserDB attempts to create a systemd-userdbd lookup strategy.
-func trySystemdUserDB() (LookupStrategy, error) {
+func trySystemdUserDB() (LookupStrategy, error) { //nolint:unused // called from select_nocgo.go
 	return NewSystemdUserDBLookup()
 }
