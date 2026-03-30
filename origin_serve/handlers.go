@@ -53,6 +53,10 @@ const (
 	// xfrReportInterval is the minimum number of bytes that must be
 	// transferred between intermediate isXfr monitoring reports.
 	xfrReportInterval int64 = 100 * 1024 * 1024 // 100 MB
+
+	// Gin context keys for sharing I/O wrappers between middlewares.
+	ctxKeyRequestReader  = "origin_serve.metricsRequestReader"
+	ctxKeyResponseWriter = "origin_serve.metricsResponseWriter"
 )
 
 // monitoringTracker is shared between the request reader and response writer
@@ -300,7 +304,9 @@ func authMiddleware() gin.HandlerFunc {
 	}
 }
 
-// httpMetricsMiddleware tracks HTTP-level metrics for WebDAV requests
+// httpMetricsMiddleware tracks Prometheus HTTP metrics for WebDAV requests.
+// It runs before authMiddleware so that rejected requests are still counted
+// in the Prometheus dashboard (total requests, duration, errors, bytes).
 func httpMetricsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
@@ -311,36 +317,19 @@ func httpMetricsMiddleware() gin.HandlerFunc {
 		metrics.HttpActiveRequests.WithLabelValues(serverTypeOrigin, method).Inc()
 		defer metrics.HttpActiveRequests.WithLabelValues(serverTypeOrigin, method).Dec()
 
-		// For data transfer methods (GET/PUT), start an XRootD-compatible
-		// transfer monitor that will emit periodic isXfr records during
-		// long-running transfers and a final isClose when complete.
-		var tracker *monitoringTracker
-		var mon *metrics.TransferMonitor
-		if method == "GET" || method == "PUT" {
-			event := buildTransferEvent(c, method, start)
-			mon = metrics.BeginTransferMonitor(event)
-			if mon != nil {
-				// Only create the tracker (which wires atomic byte
-				// counters into every Read/Write call) when the
-				// transfer could be large enough to trigger an
-				// intermediate isXfr report. For small, known-size
-				// requests the overhead is unnecessary.
-				knownSize := c.Request.ContentLength // PUT size; -1 if unknown
-				if knownSize < 0 || knownSize >= xfrReportInterval {
-					tracker = &monitoringTracker{mon: mon}
-				}
-			}
-		}
-
-		// Wrap request body to track bytes read
-		mrr := &metricsRequestReader{reader: c.Request.Body, tracker: tracker}
+		// Wrap request body and response writer to track bytes.
+		// Store the wrappers in the gin context so that
+		// xrdMonitoringMiddleware (which runs later, after auth)
+		// can attach its monitoringTracker.
+		mrr := &metricsRequestReader{reader: c.Request.Body}
 		c.Request.Body = mrr
+		c.Set(ctxKeyRequestReader, mrr)
 
-		// Wrap response writer to track bytes out
-		mrw := &metricsResponseWriter{ResponseWriter: c.Writer, tracker: tracker}
+		mrw := &metricsResponseWriter{ResponseWriter: c.Writer}
 		c.Writer = mrw
+		c.Set(ctxKeyResponseWriter, mrw)
 
-		// Process request
+		// Process request (auth + xrd monitoring + handler all run inside)
 		c.Next()
 
 		// Calculate duration
@@ -376,25 +365,70 @@ func httpMetricsMiddleware() gin.HandlerFunc {
 		if status >= 500 && status < 600 {
 			metrics.HttpErrorsTotal.WithLabelValues(serverTypeOrigin, method, statusStr).Inc()
 		}
+	}
+}
 
-		// Close the transfer monitor. On success, emit the final isClose
-		// record with accurate byte counts. On failure, still close it so
-		// downstream sees the file close rather than an orphaned open.
-		if mon != nil {
-			var readBytes, writeBytes int64
-			var readOps, writeOps int32
-			if status >= 200 && status < 300 {
-				switch method {
-				case "GET":
-					readBytes = mrw.bytesWritten
-					readOps = 1
-				case "PUT":
-					writeBytes = mrr.bytesRead
-					writeOps = 1
-				}
-			}
-			mon.Close(readBytes, writeBytes, readOps, writeOps)
+// xrdMonitoringMiddleware emits XRootD-compatible monitoring packets for
+// data transfer requests (GET/PUT). It runs after authMiddleware so that
+// the authenticated user's DN and issuer are available for the 'u' packet.
+func xrdMonitoringMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		method := c.Request.Method
+		if method != "GET" && method != "PUT" {
+			c.Next()
+			return
 		}
+
+		start := time.Now()
+		event := buildTransferEvent(c, method, start)
+		mon := metrics.BeginTransferMonitor(event)
+		if mon == nil {
+			c.Next()
+			return
+		}
+
+		// Attach a monitoringTracker to the I/O wrappers (already
+		// installed by httpMetricsMiddleware) so that periodic isXfr
+		// records are emitted during long-running transfers.
+		var tracker *monitoringTracker
+		knownSize := c.Request.ContentLength // PUT size; -1 if unknown
+		if knownSize < 0 || knownSize >= xfrReportInterval {
+			tracker = &monitoringTracker{mon: mon}
+			if v, ok := c.Get(ctxKeyRequestReader); ok {
+				v.(*metricsRequestReader).tracker = tracker
+			}
+			if v, ok := c.Get(ctxKeyResponseWriter); ok {
+				v.(*metricsResponseWriter).tracker = tracker
+			}
+		}
+
+		c.Next()
+
+		// Read final byte counts from the I/O wrappers. These are the
+		// same wrappers that httpMetricsMiddleware created; they have been
+		// accumulating bytes throughout the entire handler chain.
+		var bytesIn, bytesOut int64
+		if v, ok := c.Get(ctxKeyRequestReader); ok {
+			bytesIn = v.(*metricsRequestReader).bytesRead
+		}
+		if v, ok := c.Get(ctxKeyResponseWriter); ok {
+			bytesOut = v.(*metricsResponseWriter).bytesWritten
+		}
+
+		status := c.Writer.Status()
+		var readBytes, writeBytes int64
+		var readOps, writeOps int32
+		if status >= 200 && status < 300 {
+			switch method {
+			case "GET":
+				readBytes = bytesOut
+				readOps = 1
+			case "PUT":
+				writeBytes = bytesIn
+				writeOps = 1
+			}
+		}
+		mon.Close(readBytes, writeBytes, readOps, writeOps)
 	}
 }
 
@@ -510,8 +544,9 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 
 		// Create a route group for this prefix
 		group := engine.Group(routePrefix)
-		group.Use(authMiddleware())
 		group.Use(httpMetricsMiddleware())
+		group.Use(authMiddleware())
+		group.Use(xrdMonitoringMiddleware())
 
 		// Create a handler function for all requests
 		handleRequest := func(c *gin.Context) {
