@@ -2,23 +2,19 @@
 
 import React, { useState } from 'react';
 
-import { CardList } from '@/components';
-import UserCard from './components/UserCard';
-import useApiSWR from '@/hooks/useApiSWR';
-import { Group, User } from '@/types';
+import useServiceSWR from "@/hooks/useServiceSWR";
+import {UserService, User} from '@/helpers/api';
 import SettingHeader from '@/app/settings/components/SettingHeader';
 import { Box, Button, TextField } from '@mui/material';
 import Link from 'next/link';
 import useFuse from '@/helpers/useFuse';
 import { DateTime } from 'luxon';
+import UserTable from './components/UserTable';
 
 const Page = () => {
-  const { data } = useApiSWR<User[]>(
-    'Could no fetch users',
-    '/api/v1.0/users',
-    async () => {
-      return await fetch('/api/v1.0/users', { method: 'GET' });
-    }
+  const { data, mutate } = useServiceSWR(
+    'Could not fetch users.',
+    UserService.getAll
   );
 
   const [search, setSearch] = useState<string>('');
@@ -49,13 +45,7 @@ const Page = () => {
           </Button>
         </Link>
       </Box>
-      <CardList<{ user: User }>
-        data={(sortedData || []).map((u) => {
-          return { user: u };
-        })}
-        Card={UserCard}
-        keyGetter={(u) => u.user.id}
-      />
+      <UserTable users={sortedData} mutate={mutate} />
     </>
   );
 };

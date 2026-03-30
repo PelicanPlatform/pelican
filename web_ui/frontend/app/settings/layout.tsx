@@ -24,7 +24,8 @@ import SubNavigation from '@/app/settings/components/SubNavigation';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 
 export const metadata = {
-  title: 'Settings',
+  template: '%s | Settings',
+  default: 'Settings',
   description: 'Server Settings',
 };
 

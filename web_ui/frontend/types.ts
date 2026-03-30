@@ -122,17 +122,7 @@ export interface GetToken extends BaseToken {
 
 /** Groups and Authorization Types */
 
-export interface User {
-  id: string;
-  username: string;
-  sub: string;
-  issuer: string;
-  createdAt: string;
-}
 
-export type UserPost = Omit<User, 'id' | 'createdAt'>;
-
-export type UserPatch = Partial<Omit<User, 'createdAt'>>;
 
 export interface Group {
   id: string;
@@ -184,3 +174,5 @@ export interface MetadataDiscrepancy {
   discoveryUrl: string;
   enabled: boolean;
 }
+
+export type JsonPrimitive = string | number | boolean | null;
