@@ -190,7 +190,7 @@ func extractDNFromPackets(t *testing.T, packets [][]byte) string {
 // getMonitoringTestToken generates a WLCG bearer token for the test federation.
 func getMonitoringTestToken(t *testing.T) string {
 	t.Helper()
-	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir()))
+	require.NoError(t, param.IssuerKeysDirectory.Set(t.TempDir()))
 
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
@@ -252,7 +252,7 @@ Monitoring:
 	// We do this after federation startup to avoid actually launching the shoveler
 	// (which requires a real message queue), but the flag must be set so that
 	// BeginTransferMonitor does not short-circuit.
-	require.NoError(t, param.Set(param.Shoveler_Enable.GetName(), true))
+	require.NoError(t, param.Shoveler_Enable.Set(true))
 
 	testToken := getMonitoringTestToken(t)
 	export := ft.Exports[0]

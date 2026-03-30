@@ -48,7 +48,7 @@ func resetTestCaches(t *testing.T) {
 func enableShoveler(t *testing.T) {
 	t.Helper()
 	require.NoError(t, param.Reset())
-	require.NoError(t, param.Set(param.Shoveler_Enable.GetName(), true))
+	require.NoError(t, param.Shoveler_Enable.Set(true))
 	t.Cleanup(func() { require.NoError(t, param.Reset()) })
 }
 
