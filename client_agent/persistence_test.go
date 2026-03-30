@@ -159,15 +159,15 @@ func TestJobRecovery(t *testing.T) {
 	// Reopen the store and create a new transfer manager (simulating restart)
 	testStore, err = store.NewStore(dbPath)
 	require.NoError(t, err, "Failed to reopen store")
-	defer testStore.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	tm := NewTransferManager(ctx, 5, testStore)
-	defer func() {
-		_ = tm.Shutdown()
-	}()
+	t.Cleanup(func() {
+		cancel()          // signal goroutines to stop
+		_ = tm.Shutdown() // wait for them to finish
+		testStore.Close() // close DB cleanly after goroutines exit
+	})
 
 	// Poll for recovery to complete (up to 2 seconds)
 	// The job should be recreated with the same ID but incremented retry count

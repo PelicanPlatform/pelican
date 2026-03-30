@@ -21,8 +21,16 @@
 package utils
 
 import (
+	"os"
+
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
+
+// FileOwnerIDs is not supported on Windows; POSIX uid/gid are not available.
+func FileOwnerIDs(_ os.FileInfo) (uid, gid int, err error) {
+	return 0, 0, errors.New("POSIX file ownership (uid/gid) is not available on Windows")
+}
 
 // SameFilesystem on Windows optimistically returns true. POSIX Origins are not
 // meaningfully supported on Windows, so the cross-filesystem check is skipped.
