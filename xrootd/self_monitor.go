@@ -45,7 +45,7 @@ import (
 
 const (
 	selfTestBody   string = "This object was created by the Pelican self-test functionality"
-	selfTestDir    string = "/pelican/monitoring/selfTest"
+	selfTestDir    string = server_utils.MonitoringBaseNs + "/selfTest"
 	selfTestPrefix string = "self-test-"
 )
 
@@ -289,7 +289,7 @@ func generateFileTestScitoken() (string, error) {
 	fTestTokenCfg.Lifetime = time.Minute
 	fTestTokenCfg.Issuer = issuerUrl
 	fTestTokenCfg.Subject = "cache"
-	fTestTokenCfg.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/pelican/monitoring/selfTest"))
+	fTestTokenCfg.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, selfTestDir))
 	// For self-tests, the audience is the server itself
 	fTestTokenCfg.AddAudienceAny()
 
