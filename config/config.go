@@ -21,6 +21,7 @@ package config
 import (
 	"context"
 	_ "embed"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -58,6 +59,10 @@ import (
 )
 
 // Structs holding the OAuth2 state (and any other OSDF config needed)
+// ErrNoDiscoveryEndpoint is returned when federation discovery completes
+// but no discovery endpoint could be resolved.
+var ErrNoDiscoveryEndpoint = stderrors.New("no discovery endpoint was resolved")
+
 type (
 	ConfigPrefix string
 
@@ -497,10 +502,11 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 		// Enforce the invariant that a successful return always has a populated DiscoveryEndpoint.
 		// The discovery endpoint doubles as the federation issuer and must be known by all services.
 		if err == nil && fedInfo.DiscoveryEndpoint == "" {
-			err = errors.New("federation discovery completed but no discovery endpoint was resolved; " +
-				"ensure Federation.DiscoveryUrl or Federation.DirectorUrl is configured and that the " +
-				"director hosts federation metadata at /.well-known/pelican-configuration " +
-				"(see Director.EnableFederationMetadataHosting for more details).")
+			err = fmt.Errorf("%w; ensure Federation.DiscoveryUrl or Federation.DirectorUrl is "+
+				"configured and that the director hosts federation metadata at "+
+				"/.well-known/pelican-configuration "+
+				"(see Director.EnableFederationMetadataHosting for more details)",
+				ErrNoDiscoveryEndpoint)
 		}
 	}()
 
