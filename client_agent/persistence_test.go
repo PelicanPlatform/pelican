@@ -26,9 +26,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/client_agent/store"
 	"github.com/pelicanplatform/pelican/client_agent/types"
+	"github.com/pelicanplatform/pelican/config"
 )
 
 // setupTestStore creates a temporary database for testing
@@ -409,12 +411,17 @@ func TestFullLifecycleWithRestart(t *testing.T) {
 // TestInMemoryMode verifies that TransferManager works without a store
 func TestInMemoryMode(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+
+	// Create errgroup and pass via context so we can wait for goroutines
+	egrp, egrpCtx := errgroup.WithContext(ctx)
+	ctx = context.WithValue(egrpCtx, config.EgrpKey, egrp)
 
 	// Create transfer manager without a store
 	tm := NewTransferManager(ctx, 5, nil)
 	defer func() {
+		cancel()
 		_ = tm.Shutdown()
+		_ = egrp.Wait()
 	}()
 
 	// Create a job
@@ -502,6 +509,10 @@ func TestConcurrentJobPersistence(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Create errgroup and pass via context so we can wait for goroutines
+	egrp, egrpCtx := errgroup.WithContext(ctx)
+	ctx = context.WithValue(egrpCtx, config.EgrpKey, egrp)
+
 	tm := NewTransferManager(ctx, 10, testStore)
 
 	// Create multiple jobs concurrently
@@ -570,6 +581,8 @@ func TestConcurrentJobPersistence(t *testing.T) {
 	// Cancel context before shutdown to force jobs to stop
 	cancel()
 	_ = tm.Shutdown()
+	// Wait for all goroutines to finish before closing the store
+	_ = egrp.Wait()
 }
 
 // TestDeleteJobHistory verifies individual job deletion from history
