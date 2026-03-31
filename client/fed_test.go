@@ -1246,7 +1246,7 @@ func TestDoEvict(t *testing.T) {
 
 	tempToken, _ := getTempToken(t)
 	defer tempToken.Close()
-	require.NoError(t, param.Set("Logging.DisableProgressBars", true))
+	require.NoError(t, param.Logging_DisableProgressBars.Set(true))
 
 	export := fed.Exports[0]
 	fileName := filepath.Base(tempFile.Name())

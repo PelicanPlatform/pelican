@@ -190,10 +190,10 @@ func TestIsStale(t *testing.T) {
 	t.Run("no directives becomes stale after DefaultFreshness", func(t *testing.T) {
 		// Set a very short default max-age and disable jitter so
 		// we don't have to fabricate a LastValidated 24 hours in the past.
-		require.NoError(t, param.Set("LocalCache.DefaultMaxAge", "1s"))
-		require.NoError(t, param.Set("LocalCache.RevalidationJitter", 0))
-		defer func() { _ = param.Set("LocalCache.DefaultMaxAge", "24h") }()
-		defer func() { _ = param.Set("LocalCache.RevalidationJitter", 10) }()
+		require.NoError(t, param.LocalCache_DefaultMaxAge.SetString("1s"))
+		require.NoError(t, param.LocalCache_RevalidationJitter.Set(0))
+		defer func() { _ = param.LocalCache_DefaultMaxAge.SetString("24h") }()
+		defer func() { _ = param.LocalCache_RevalidationJitter.Set(10) }()
 
 		cd := ParseCacheControl("")
 		assert.False(t, cd.HasDirectives(), "empty Cache-Control should have no directives")
@@ -204,8 +204,8 @@ func TestIsStale(t *testing.T) {
 	})
 
 	t.Run("no directives is fresh within DefaultFreshness", func(t *testing.T) {
-		require.NoError(t, param.Set("LocalCache.DefaultMaxAge", "1h"))
-		defer func() { _ = param.Set("LocalCache.DefaultMaxAge", "24h") }()
+		require.NoError(t, param.LocalCache_DefaultMaxAge.SetString("1h"))
+		defer func() { _ = param.LocalCache_DefaultMaxAge.SetString("24h") }()
 
 		cd := ParseCacheControl("")
 		assert.False(t, cd.HasDirectives())
