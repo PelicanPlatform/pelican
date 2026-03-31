@@ -435,7 +435,9 @@ func TestInMemoryMode(t *testing.T) {
 	retrievedJob, err := tm.GetJob(job.ID)
 	require.NoError(t, err)
 	assert.Equal(t, job.ID, retrievedJob.ID)
-	assert.Equal(t, StatusPending, retrievedJob.Status)
+	// Job may already be running by the time we check (goroutine executes immediately)
+	assert.Contains(t, []string{StatusPending, StatusRunning, StatusFailed}, retrievedJob.Status,
+		"Job status should be pending, running, or failed (transfer will fail without real federation)")
 
 	// With nil store, jobs remain in memory only - no database operations
 }
