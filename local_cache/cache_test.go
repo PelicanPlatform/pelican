@@ -560,7 +560,7 @@ func TestFedConcurrentDownloadUsage(t *testing.T) {
 
 	// Enable the persistent cache v2 so the cache module uses the new
 	// Go implementation (BadgerDB) instead of XRootD.
-	require.NoError(t, param.Set(param.Cache_EnableV2.GetName(), true))
+	require.NoError(t, param.Cache_EnableV2.Set(true))
 
 	// Pre-populate the origin with numObjects files before XRootD starts.
 	names := make([]string, numObjects)
