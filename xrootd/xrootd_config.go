@@ -104,6 +104,7 @@ type (
 		EnableListings      bool
 		EnableAtomicUploads bool
 		SelfTest            bool
+		MonitoringPrefix    string
 		Concurrency         int
 		Port                int
 		FederationPrefix    string
@@ -1174,6 +1175,7 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 			return "", errors.Wrap(err, "failed to generate Origin export list for xrootd config")
 		}
 		xrdConfig.Origin.Exports = originExports
+		xrdConfig.Origin.MonitoringPrefix = server_utils.MonitoringBaseNs
 
 		switch xrdConfig.Origin.StorageType {
 		case "https":
