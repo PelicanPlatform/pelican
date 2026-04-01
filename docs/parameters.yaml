@@ -3304,6 +3304,23 @@ default: false
 components: ["cache", "origin"]
 hidden: true
 ---
+name: Server.GroupInviteLinkExpirationHours
+description: |+
+  The default number of hours before a group invite link expires.
+  This value is used when no explicit expiration is specified when creating an invite link.
+type: int
+default: 168
+components: ["origin", "registry"]
+---
+name: Server.AUPFile
+description: |+
+  Path to a Markdown-formatted Acceptable Use Policy (AUP) file.
+  When set, users must agree to this AUP before their account is activated.
+  The file's content hash is used as the AUP version for tracking.
+type: filename
+default: none
+components: ["origin", "registry"]
+---
 ################################
 #   Issuer's Configurations    #
 ################################

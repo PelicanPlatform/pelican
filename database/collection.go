@@ -82,19 +82,41 @@ type CollectionMetadata struct {
 	Value        string `gorm:"not null" json:"value"`
 }
 
+type UserStatus string
+
+const (
+	UserStatusActive   UserStatus = "active"
+	UserStatusInactive UserStatus = "inactive"
+)
+
 type User struct {
-	ID        string    `gorm:"primaryKey" json:"id"`
-	Username  string    `gorm:"not null;uniqueIndex:idx_user_issuer" json:"username"`
-	Sub       string    `gorm:"not null;uniqueIndex:idx_user_sub_issuer" json:"sub"`
-	Issuer    string    `gorm:"not null;uniqueIndex:idx_user_issuer;uniqueIndex:idx_user_sub_issuer" json:"issuer"`
-	CreatedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	ID          string     `gorm:"primaryKey" json:"id"`
+	Username    string     `gorm:"not null;uniqueIndex:idx_user_issuer" json:"username"`
+	Sub         string     `gorm:"not null;uniqueIndex:idx_user_sub_issuer" json:"sub"`
+	Issuer      string     `gorm:"not null;uniqueIndex:idx_user_issuer;uniqueIndex:idx_user_sub_issuer" json:"issuer"`
+	Status      UserStatus `gorm:"not null;default:active" json:"status"`
+	LastLoginAt *time.Time `json:"lastLoginAt"`
+	DisplayName string     `gorm:"not null;default:''" json:"displayName"`
+	AUPVersion  string     `gorm:"not null;default:''" json:"aupVersion"`
+	AUPAgreedAt *time.Time `json:"aupAgreedAt"`
+	CreatedAt   time.Time  `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
 }
+
+type AdminType string
+
+const (
+	AdminTypeUser  AdminType = "user"
+	AdminTypeGroup AdminType = "group"
+)
 
 type Group struct {
 	ID          string        `gorm:"primaryKey" json:"id"`
 	Name        string        `gorm:"not null;unique" json:"name"`
 	Description string        `json:"description"`
 	CreatedBy   string        `gorm:"not null" json:"createdBy"`
+	OwnerID     string        `gorm:"not null;default:''" json:"ownerId"`
+	AdminID     string        `gorm:"not null;default:''" json:"adminId"`
+	AdminType   AdminType     `gorm:"not null;default:''" json:"adminType"`
 	CreatedAt   time.Time     `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
 	Members     []GroupMember `gorm:"foreignKey:GroupID" json:"members"`
 }
@@ -105,6 +127,27 @@ type GroupMember struct {
 	User    User      `gorm:"foreignKey:UserID" json:"user"`
 	AddedBy string    `gorm:"not null" json:"createdBy"`
 	AddedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
+}
+
+type GroupInviteLink struct {
+	ID          string     `gorm:"primaryKey" json:"id"`
+	GroupID     string     `gorm:"not null" json:"groupId"`
+	InviteToken string     `gorm:"not null;unique" json:"inviteToken"`
+	CreatedBy   string     `gorm:"not null" json:"createdBy"`
+	CreatedAt   time.Time  `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	ExpiresAt   time.Time  `gorm:"not null" json:"expiresAt"`
+	IsSingleUse bool       `gorm:"not null;default:false" json:"isSingleUse"`
+	RedeemedBy  string     `gorm:"not null;default:''" json:"redeemedBy"`
+	RedeemedAt  *time.Time `json:"redeemedAt"`
+	Revoked     bool       `gorm:"not null;default:false" json:"revoked"`
+}
+
+type UserIdentity struct {
+	ID        string    `gorm:"primaryKey" json:"id"`
+	UserID    string    `gorm:"not null" json:"userId"`
+	Sub       string    `gorm:"not null;uniqueIndex:idx_identity_sub_issuer" json:"sub"`
+	Issuer    string    `gorm:"not null;uniqueIndex:idx_identity_sub_issuer" json:"issuer"`
+	CreatedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
 }
 
 func generateSlug() (string, error) {
@@ -696,6 +739,7 @@ func CreateGroup(db *gorm.DB, name, description, createdByUserID string, groups 
 		Name:        name,
 		Description: description,
 		CreatedBy:   createdByUserID,
+		OwnerID:     createdByUserID,
 	}
 
 	if result := db.Create(group); result.Error != nil {
@@ -721,6 +765,54 @@ func ListGroups(db *gorm.DB) ([]Group, error) {
 	return groups, nil
 }
 
+// isGroupOwnerOrAdmin checks whether the given userID is the group's owner,
+// admin (when admin_type is 'user'), or a member of the admin group (when
+// admin_type is 'group'). System admins bypass this check.
+func isGroupOwnerOrAdmin(db *gorm.DB, group *Group, userID string, isSystemAdmin bool) bool {
+	if isSystemAdmin {
+		return true
+	}
+	// Owner can always manage
+	if group.OwnerID == userID {
+		return true
+	}
+	// Fallback to legacy CreatedBy for groups that predate the owner_id column
+	if group.OwnerID == "" && group.CreatedBy == userID {
+		return true
+	}
+	// Check admin
+	if group.AdminID != "" {
+		if group.AdminType == AdminTypeUser && group.AdminID == userID {
+			return true
+		}
+		if group.AdminType == AdminTypeGroup {
+			// Check if the user is a member of the admin group
+			var count int64
+			db.Model(&GroupMember{}).Where("group_id = ? AND user_id = ?", group.AdminID, userID).Count(&count)
+			if count > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isGroupOwnerOnly checks whether the given userID is the group's owner.
+// Only owners can change the owner or admin settings.
+func isGroupOwnerOnly(group *Group, userID string, isSystemAdmin bool) bool {
+	if isSystemAdmin {
+		return true
+	}
+	if group.OwnerID == userID {
+		return true
+	}
+	// Fallback to legacy CreatedBy for groups that predate the owner_id column
+	if group.OwnerID == "" && group.CreatedBy == userID {
+		return true
+	}
+	return false
+}
+
 func UpdateGroup(db *gorm.DB, id string, name, description *string, requestorUserID string, isAdmin bool) error {
 	updates := make(map[string]interface{})
 	if name != nil {
@@ -744,8 +836,48 @@ func UpdateGroup(db *gorm.DB, id string, name, description *string, requestorUse
 			return err
 		}
 
-		if !isAdmin && group.CreatedBy != requestorUserID {
+		if !isGroupOwnerOrAdmin(tx, &group, requestorUserID, isAdmin) {
 			return ErrForbidden
+		}
+
+		return tx.Model(&Group{}).Where("id = ?", id).Updates(updates).Error
+	})
+}
+
+// UpdateGroupOwnership updates the owner and/or admin settings of a group.
+// Only the group owner (or system admin) may change these settings.
+func UpdateGroupOwnership(db *gorm.DB, id string, ownerID, adminID *string, adminType *AdminType, requestorUserID string, isSystemAdmin bool) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		var group Group
+		if err := tx.First(&group, "id = ?", id).Error; err != nil {
+			return err
+		}
+
+		if !isGroupOwnerOnly(&group, requestorUserID, isSystemAdmin) {
+			return ErrForbidden
+		}
+
+		updates := make(map[string]interface{})
+		if ownerID != nil {
+			// Verify the new owner exists
+			var user User
+			if err := tx.First(&user, "id = ?", *ownerID).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return errors.New("new owner user does not exist")
+				}
+				return err
+			}
+			updates["owner_id"] = *ownerID
+		}
+		if adminID != nil {
+			updates["admin_id"] = *adminID
+		}
+		if adminType != nil {
+			updates["admin_type"] = *adminType
+		}
+
+		if len(updates) == 0 {
+			return nil
 		}
 
 		return tx.Model(&Group{}).Where("id = ?", id).Updates(updates).Error
@@ -758,7 +890,7 @@ func AddGroupMember(db *gorm.DB, groupId, userId, addedByUserId string, isAdmin 
 		return err
 	}
 
-	if !isAdmin && group.CreatedBy != addedByUserId {
+	if !isGroupOwnerOrAdmin(db, &group, addedByUserId, isAdmin) {
 		return ErrForbidden
 	}
 
@@ -792,8 +924,8 @@ func RemoveGroupMember(db *gorm.DB, groupId, userId, removedByUserId string, isA
 		return err
 	}
 
-	// Allow removal if user is admin or is the group creator
-	if !isAdmin && group.CreatedBy != removedByUserId {
+	// Allow removal if user is owner, admin, or system admin
+	if !isGroupOwnerOrAdmin(db, &group, removedByUserId, isAdmin) {
 		return ErrForbidden
 	}
 
@@ -836,7 +968,7 @@ func GetAllCollections(db *gorm.DB) ([]Collection, error) {
 // DeleteGroup deletes a group and cleans up any collection ACL entries that reference the
 // group's name (ACLs store group names, not group slugs).
 //
-// If isAdmin is false, only the group creator (CreatedBy) may delete the group.
+// Only the group owner or a system admin may delete the group.
 func DeleteGroup(db *gorm.DB, groupID, requestorUserID string, isAdmin bool) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		// Fetch group inside transaction to avoid race conditions
@@ -845,8 +977,13 @@ func DeleteGroup(db *gorm.DB, groupID, requestorUserID string, isAdmin bool) err
 			return err
 		}
 
-		if !isAdmin && group.CreatedBy != requestorUserID {
+		if !isGroupOwnerOnly(&group, requestorUserID, isAdmin) {
 			return ErrForbidden
+		}
+
+		// Remove any invite links referencing the group.
+		if err := tx.Where("group_id = ?", group.ID).Delete(&GroupInviteLink{}).Error; err != nil {
+			return err
 		}
 
 		// Remove any ACL entries referencing the group name.
@@ -903,4 +1040,245 @@ func DeleteUser(db *gorm.DB, userID, requestorUserID string, isAdmin bool) error
 
 		return nil
 	})
+}
+
+// --- Group Invite Link CRUD ---
+
+// generateInviteToken creates a cryptographically random token for invite links.
+func generateInviteToken() (string, error) {
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(tokenBytes), nil
+}
+
+// CreateGroupInviteLink creates a new invite link for a group. Only the group owner or admin
+// (or a system admin) may create invite links.
+func CreateGroupInviteLink(db *gorm.DB, groupID, createdByUserID string, expiresAt time.Time, isSingleUse bool, isSystemAdmin bool) (*GroupInviteLink, error) {
+	var group Group
+	if err := db.First(&group, "id = ?", groupID).Error; err != nil {
+		return nil, err
+	}
+
+	if !isGroupOwnerOrAdmin(db, &group, createdByUserID, isSystemAdmin) {
+		return nil, ErrForbidden
+	}
+
+	slug, err := generateSlug()
+	if err != nil {
+		return nil, err
+	}
+
+	invToken, err := generateInviteToken()
+	if err != nil {
+		return nil, err
+	}
+
+	link := &GroupInviteLink{
+		ID:          slug,
+		GroupID:     groupID,
+		InviteToken: invToken,
+		CreatedBy:   createdByUserID,
+		ExpiresAt:   expiresAt,
+		IsSingleUse: isSingleUse,
+	}
+
+	if result := db.Create(link); result.Error != nil {
+		return nil, result.Error
+	}
+
+	return link, nil
+}
+
+// ListGroupInviteLinks returns all invite links for a given group.
+func ListGroupInviteLinks(db *gorm.DB, groupID string) ([]GroupInviteLink, error) {
+	var links []GroupInviteLink
+	if err := db.Where("group_id = ?", groupID).Find(&links).Error; err != nil {
+		return nil, err
+	}
+	return links, nil
+}
+
+// GetGroupInviteLinkByToken looks up an invite link by its token.
+func GetGroupInviteLinkByToken(db *gorm.DB, invToken string) (*GroupInviteLink, error) {
+	link := &GroupInviteLink{}
+	if err := db.Where("invite_token = ?", invToken).First(link).Error; err != nil {
+		return nil, err
+	}
+	return link, nil
+}
+
+// RedeemGroupInviteLink redeems an invite link, adding the user to the group.
+// It validates the link is not expired, not revoked, and (if single-use) not already redeemed.
+func RedeemGroupInviteLink(db *gorm.DB, invToken string, userID string) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		var link GroupInviteLink
+		if err := tx.Where("invite_token = ?", invToken).First(&link).Error; err != nil {
+			return err
+		}
+
+		if link.Revoked {
+			return errors.New("invite link has been revoked")
+		}
+
+		if time.Now().After(link.ExpiresAt) {
+			return errors.New("invite link has expired")
+		}
+
+		if link.IsSingleUse && link.RedeemedBy != "" {
+			return errors.New("invite link has already been redeemed")
+		}
+
+		// Verify the user exists
+		var user User
+		if err := tx.First(&user, "id = ?", userID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("user does not exist")
+			}
+			return err
+		}
+
+		// Add user to the group (ignore if already a member)
+		groupMember := &GroupMember{
+			GroupID: link.GroupID,
+			UserID:  userID,
+			AddedBy: link.CreatedBy,
+		}
+		if result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(groupMember); result.Error != nil {
+			return result.Error
+		}
+
+		// Mark the link as redeemed
+		now := time.Now()
+		if err := tx.Model(&link).Updates(map[string]interface{}{
+			"redeemed_by": userID,
+			"redeemed_at": now,
+		}).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+}
+
+// RevokeGroupInviteLink revokes an invite link. Only the group owner or admin
+// (or a system admin) may revoke invite links.
+func RevokeGroupInviteLink(db *gorm.DB, linkID, requestorUserID string, isSystemAdmin bool) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		var link GroupInviteLink
+		if err := tx.First(&link, "id = ?", linkID).Error; err != nil {
+			return err
+		}
+
+		var group Group
+		if err := tx.First(&group, "id = ?", link.GroupID).Error; err != nil {
+			return err
+		}
+
+		if !isGroupOwnerOrAdmin(tx, &group, requestorUserID, isSystemAdmin) {
+			return ErrForbidden
+		}
+
+		return tx.Model(&link).Update("revoked", true).Error
+	})
+}
+
+// --- User Status and AUP ---
+
+// UpdateUserStatus updates the status (active/inactive) of a user.
+func UpdateUserStatus(db *gorm.DB, userID string, status UserStatus) error {
+	return db.Model(&User{}).Where("id = ?", userID).Update("status", status).Error
+}
+
+// UpdateUserLastLogin updates the last login timestamp of a user.
+func UpdateUserLastLogin(db *gorm.DB, userID string) error {
+	return db.Model(&User{}).Where("id = ?", userID).Update("last_login_at", time.Now()).Error
+}
+
+// UpdateUserDisplayName updates the display name of a user.
+func UpdateUserDisplayName(db *gorm.DB, userID string, displayName string) error {
+	return db.Model(&User{}).Where("id = ?", userID).Update("display_name", displayName).Error
+}
+
+// RecordAUPAgreement records that a user agreed to a specific version of the AUP.
+func RecordAUPAgreement(db *gorm.DB, userID string, version string) error {
+	now := time.Now()
+	return db.Model(&User{}).Where("id = ?", userID).Updates(map[string]interface{}{
+		"aup_version":  version,
+		"aup_agreed_at": now,
+	}).Error
+}
+
+// --- User Identity CRUD ---
+
+// CreateUserIdentity associates a new identity (sub + issuer) with an existing user.
+func CreateUserIdentity(db *gorm.DB, userID, sub, issuer string) (*UserIdentity, error) {
+	slug, err := generateSlug()
+	if err != nil {
+		return nil, err
+	}
+
+	identity := &UserIdentity{
+		ID:     slug,
+		UserID: userID,
+		Sub:    sub,
+		Issuer: issuer,
+	}
+
+	if result := db.Create(identity); result.Error != nil {
+		if strings.Contains(result.Error.Error(), "UNIQUE constraint failed") {
+			return nil, errors.New("identity (sub, issuer) is already associated with a user")
+		}
+		return nil, result.Error
+	}
+
+	return identity, nil
+}
+
+// ListUserIdentities returns all identities for a given user.
+func ListUserIdentities(db *gorm.DB, userID string) ([]UserIdentity, error) {
+	var identities []UserIdentity
+	if err := db.Where("user_id = ?", userID).Find(&identities).Error; err != nil {
+		return nil, err
+	}
+	return identities, nil
+}
+
+// DeleteUserIdentity removes a specific identity from a user.
+func DeleteUserIdentity(db *gorm.DB, identityID, userID string) error {
+	result := db.Where("id = ? AND user_id = ?", identityID, userID).Delete(&UserIdentity{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("identity not found or does not belong to the user")
+	}
+	return nil
+}
+
+// GetUserByIdentity looks up a user by an identity (sub + issuer), checking both
+// the primary user table and the user_identities table.
+func GetUserByIdentity(db *gorm.DB, sub, issuer string) (*User, error) {
+	// First check the primary user table
+	user := &User{}
+	err := db.Where("sub = ? AND issuer = ?", sub, issuer).First(user).Error
+	if err == nil {
+		return user, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	// Check the user_identities table
+	var identity UserIdentity
+	if err := db.Where("sub = ? AND issuer = ?", sub, issuer).First(&identity).Error; err != nil {
+		return nil, err
+	}
+
+	// Found via identity, look up the user
+	if err := db.First(user, "id = ?", identity.UserID).Error; err != nil {
+		return nil, err
+	}
+	return user, nil
 }

@@ -643,18 +643,29 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 		groupRouterGroup.GET("/:id", handleGetGroup)
 		groupRouterGroup.PATCH("/:id", handleUpdateGroup)
 		groupRouterGroup.DELETE("/:id", handleDeleteGroup)
+		groupRouterGroup.PUT("/:id/ownership", handleUpdateGroupOwnership)
 		groupRouterGroup.GET("/:id/members", handleListGroupMembers)
 		groupRouterGroup.POST("/:id/members", handleAddGroupMember)
 		groupRouterGroup.DELETE("/:id/members/:userId", handleRemoveGroupMember)
+		groupRouterGroup.GET("/:id/invites", handleListGroupInviteLinks)
+		groupRouterGroup.POST("/:id/invites", handleCreateGroupInviteLink)
+		groupRouterGroup.DELETE("/:id/invites/:linkId", handleRevokeGroupInviteLink)
 	}
 
-	userRouterGroup := routerGroup.Group("/users", AuthHandler, AdminAuthHandler)
+	routerGroup.POST("/invites/redeem", AuthHandler, handleRedeemGroupInviteLink)
+
+	userRouterGroup := routerGroup.Group("/users", AuthHandler)
 	{
 		userRouterGroup.GET("", handleListUsers)
 		userRouterGroup.POST("", handleAddUser)
 		userRouterGroup.GET("/:id", handleGetUser)
 		userRouterGroup.PATCH("/:id", handleUpdateUser)
-		userRouterGroup.DELETE("/:id", handleDeleteUser)
+		userRouterGroup.DELETE("/:id", AdminAuthHandler, handleDeleteUser)
+		userRouterGroup.PUT("/:id/status", handleUpdateUserStatus)
+		userRouterGroup.POST("/:id/aup", handleRecordAUPAgreement)
+		userRouterGroup.GET("/:id/identities", handleListUserIdentities)
+		userRouterGroup.POST("/:id/identities", handleAddUserIdentity)
+		userRouterGroup.DELETE("/:id/identities/:identityId", handleDeleteUserIdentity)
 	}
 
 	return nil

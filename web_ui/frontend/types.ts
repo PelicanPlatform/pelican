@@ -120,7 +120,89 @@ export interface GetToken extends BaseToken {
   createdBy: string;
 }
 
-/** Authorization Types */
+/** Groups and Authorization Types */
+
+export type UserStatus = 'active' | 'inactive';
+
+export interface User {
+  id: string;
+  username: string;
+  sub: string;
+  issuer: string;
+  status: UserStatus;
+  lastLoginAt: string | null;
+  displayName: string;
+  aupVersion: string;
+  aupAgreedAt: string | null;
+  createdAt: string;
+}
+
+export type UserPost = Omit<
+  User,
+  'id' | 'createdAt' | 'status' | 'lastLoginAt' | 'displayName' | 'aupVersion' | 'aupAgreedAt'
+>;
+
+export type UserPatch = Partial<Omit<User, 'createdAt'>>;
+
+export type AdminType = 'user' | 'group';
+
+export interface Group {
+  id: string;
+  name: string;
+  description: string;
+  members: User[];
+  createdBy: string;
+  ownerId: string;
+  adminId: string;
+  adminType: AdminType;
+  createdAt: string;
+}
+
+export type GroupPost = Omit<
+  Group,
+  'members' | 'createdBy' | 'createdAt' | 'ownerId' | 'adminId' | 'adminType'
+>;
+
+export interface GroupMember {
+  groupId: string;
+  userId: string;
+  user: User;
+  createdBy: string;
+  createdAt: string;
+}
+
+export type GroupMemberPost = Omit<
+  GroupMember,
+  'user' | 'addedBy' | 'addedAt' | 'groupId'
+>;
+
+export interface GroupInviteLink {
+  id: string;
+  groupId: string;
+  inviteToken: string;
+  createdBy: string;
+  createdAt: string;
+  expiresAt: string;
+  isSingleUse: boolean;
+  redeemedBy: string;
+  redeemedAt: string | null;
+  revoked: boolean;
+}
+
+export interface GroupInviteLinkPost {
+  isSingleUse: boolean;
+  expiresInHours: number;
+}
+
+export interface UserIdentity {
+  id: string;
+  userId: string;
+  sub: string;
+  issuer: string;
+  createdAt: string;
+}
+
+export type UserIdentityPost = Omit<UserIdentity, 'id' | 'userId' | 'createdAt'>;
 
 export interface WellKnownConfiguration {
   director_endpoint: string;
