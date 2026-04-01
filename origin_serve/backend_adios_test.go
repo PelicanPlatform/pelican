@@ -116,6 +116,107 @@ func TestAdiosOpenFileSingle(t *testing.T) {
 	assert.Equal(t, "payload", string(data))
 }
 
+// TestCheckAvailability verifies that CheckAvailability probes HEAD on the
+// storagePrefix path — not GET on the bare service root.
+//
+// This test exists to prevent regression of the bug where CheckAvailability
+// did GET / on the serviceURL root.  On the production NERSC ADIOS service
+// (and similar servers) the bare root returns 5xx, which caused every
+// cache-routed request to be rejected with "bad address" (xrootd error 3012).
+// The existing integration tests missed this because their single
+// http.HandlerFunc returned 200 for all URLs — including GET / — so the
+// broken probe silently succeeded in test but failed against the real service.
+func TestCheckAvailability(t *testing.T) {
+	// Track which requests the mock receives so we can assert below.
+	type requestRecord struct {
+		method string
+		path   string
+	}
+	var requests []requestRecord
+
+	tests := []struct {
+		name          string
+		storagePrefix string
+		// rootStatus is what the mock returns for GET / (the OLD broken probe).
+		// If the production server returns 5xx here, the old code would fail.
+		rootGetStatus int
+		// probeStatus is what the mock returns for HEAD /storagePrefix (the NEW probe).
+		probeStatus int
+		wantErr     bool
+	}{
+		{
+			name:          "root returns 5xx but storagePrefix HEAD returns 200",
+			storagePrefix: "/adios",
+			rootGetStatus: http.StatusServiceUnavailable, // 503 — old code would fail here
+			probeStatus:   http.StatusOK,
+			wantErr:       false,
+		},
+		{
+			name:          "storagePrefix HEAD returns 404 (service up, path absent)",
+			storagePrefix: "/adios",
+			rootGetStatus: http.StatusServiceUnavailable,
+			probeStatus:   http.StatusNotFound, // 4xx → service is reachable
+			wantErr:       false,
+		},
+		{
+			name:          "storagePrefix HEAD returns 503 (service truly down)",
+			storagePrefix: "/adios",
+			rootGetStatus: http.StatusServiceUnavailable,
+			probeStatus:   http.StatusServiceUnavailable,
+			wantErr:       true,
+		},
+		{
+			name:          "no storagePrefix — falls back to service root HEAD",
+			storagePrefix: "",
+			rootGetStatus: http.StatusServiceUnavailable, // old code: GET root, would fail
+			probeStatus:   http.StatusOK,                 // new code: HEAD root, succeeds
+			wantErr:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requests = requests[:0]
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests = append(requests, requestRecord{method: r.Method, path: r.URL.Path})
+
+				// Old broken probe: GET /
+				if r.Method == http.MethodGet && r.URL.Path == "/" {
+					w.WriteHeader(tt.rootGetStatus)
+					return
+				}
+
+				// New correct probe: HEAD /storagePrefix (or HEAD / when no prefix)
+				if r.Method == http.MethodHead {
+					w.WriteHeader(tt.probeStatus)
+					return
+				}
+
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer srv.Close()
+
+			backend := newAdiosBackend(AdiosBackendOptions{
+				ServiceURL:    srv.URL,
+				StoragePrefix: tt.storagePrefix,
+			})
+
+			err := backend.CheckAvailability()
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+
+			// Assert that the probe was HEAD (not GET) — the regression guard.
+			require.NotEmpty(t, requests, "expected at least one request to mock server")
+			assert.Equal(t, http.MethodHead, requests[0].method,
+				"CheckAvailability must probe with HEAD, not GET (GET / returns 5xx on real ADIOS servers)")
+		})
+	}
+}
+
 func TestAdiosOpenFileBatch(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "batchget", r.URL.RawQuery[:8])

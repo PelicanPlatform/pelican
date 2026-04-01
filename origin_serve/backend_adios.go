@@ -76,7 +76,15 @@ func (b *adiosBackend) CheckAvailability() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.fs.serviceURL, nil)
+	// Probe the service URL with a HEAD request. The bare root path may
+	// return an error on some ADIOS servers, so we treat any response
+	// (even 4xx) as "the service is up". Only network errors or 5xx
+	// indicate the backend is unavailable.
+	probeURL := b.fs.serviceURL
+	if b.fs.storagePrefix != "" {
+		probeURL = b.fs.serviceURL + "/" + strings.TrimPrefix(b.fs.storagePrefix, "/")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, probeURL, nil)
 	if err != nil {
 		return err
 	}
