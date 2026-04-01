@@ -366,6 +366,7 @@ type Config struct {
 	} `mapstructure:"registry" yaml:"Registry"`
 	RuntimeDir string `mapstructure:"runtimedir" yaml:"RuntimeDir"`
 	Server struct {
+		AUPFile string `mapstructure:"aupfile" yaml:"AUPFile"`
 		AdLifetime time.Duration `mapstructure:"adlifetime" yaml:"AdLifetime"`
 		AdminGroups []string `mapstructure:"admingroups" yaml:"AdminGroups"`
 		AdvertisementInterval time.Duration `mapstructure:"advertisementinterval" yaml:"AdvertisementInterval"`
@@ -381,6 +382,7 @@ type Config struct {
 		EnablePprof bool `mapstructure:"enablepprof" yaml:"EnablePprof"`
 		EnableUI bool `mapstructure:"enableui" yaml:"EnableUI"`
 		ExternalWebUrl string `mapstructure:"externalweburl" yaml:"ExternalWebUrl"`
+		GroupInviteLinkExpirationHours int `mapstructure:"groupinvitelinkexpirationhours" yaml:"GroupInviteLinkExpirationHours"`
 		HealthMonitoringPublic bool `mapstructure:"healthmonitoringpublic" yaml:"HealthMonitoringPublic"`
 		Hostname string `mapstructure:"hostname" yaml:"Hostname"`
 		IssuerHostname string `mapstructure:"issuerhostname" yaml:"IssuerHostname"`
@@ -821,6 +823,7 @@ type configWithType struct {
 	}
 	RuntimeDir struct { Type string; Value string }
 	Server struct {
+		AUPFile struct { Type string; Value string }
 		AdLifetime struct { Type string; Value time.Duration }
 		AdminGroups struct { Type string; Value []string }
 		AdvertisementInterval struct { Type string; Value time.Duration }
@@ -836,6 +839,7 @@ type configWithType struct {
 		EnablePprof struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
 		ExternalWebUrl struct { Type string; Value string }
+		GroupInviteLinkExpirationHours struct { Type string; Value int }
 		HealthMonitoringPublic struct { Type string; Value bool }
 		Hostname struct { Type string; Value string }
 		IssuerHostname struct { Type string; Value string }

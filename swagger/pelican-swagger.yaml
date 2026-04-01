@@ -935,6 +935,21 @@ definitions:
         type: string
         description: User who created the group
         example: "admin@example.com"
+      ownerId:
+        type: string
+        description: User ID of the group owner (can change owner, admin, and members)
+        example: "abc12345"
+      adminId:
+        type: string
+        description: User or group ID of the group administrator (can manage members)
+        example: "def67890"
+      adminType:
+        type: string
+        description: Whether adminId refers to a 'user' or a 'group'
+        enum:
+          - user
+          - group
+        example: "user"
       createdAt:
         type: string
         format: date-time
@@ -960,6 +975,28 @@ definitions:
       issuer:
         type: string
         description: The 'iss' claim from the user's OIDC token
+      status:
+        type: string
+        description: User account status
+        enum:
+          - active
+          - inactive
+        example: "active"
+      lastLoginAt:
+        type: string
+        format: date-time
+        description: Timestamp of the user's last login
+      displayName:
+        type: string
+        description: Human-readable display name
+        example: "John Doe"
+      aupVersion:
+        type: string
+        description: Version of the AUP the user agreed to
+      aupAgreedAt:
+        type: string
+        format: date-time
+        description: Timestamp when the user agreed to the AUP
       createdAt:
         type: string
         format: date-time
@@ -985,6 +1022,61 @@ definitions:
         format: date-time
         description: When the member was added
         example: "2024-01-15T10:30:00Z"
+  GroupInviteLink:
+    type: object
+    properties:
+      id:
+        type: string
+        description: Unique identifier for the invite link
+      groupId:
+        type: string
+        description: ID of the group this invite link belongs to
+      inviteToken:
+        type: string
+        description: The random token used to redeem the invite
+      createdBy:
+        type: string
+        description: User who created the invite link
+      createdAt:
+        type: string
+        format: date-time
+        description: When the invite link was created
+      expiresAt:
+        type: string
+        format: date-time
+        description: When the invite link expires
+      isSingleUse:
+        type: boolean
+        description: Whether the invite link can only be used once
+      redeemedBy:
+        type: string
+        description: User who redeemed the invite link (if single-use)
+      redeemedAt:
+        type: string
+        format: date-time
+        description: When the invite link was redeemed
+      revoked:
+        type: boolean
+        description: Whether the invite link has been revoked
+  UserIdentity:
+    type: object
+    properties:
+      id:
+        type: string
+        description: Unique identifier for the identity record
+      userId:
+        type: string
+        description: ID of the user this identity belongs to
+      sub:
+        type: string
+        description: The 'sub' claim from the identity provider
+      issuer:
+        type: string
+        description: The 'iss' claim from the identity provider
+      createdAt:
+        type: string
+        format: date-time
+        description: When the identity was associated
   CreateCollectionRequest:
     type: object
     required:
@@ -4342,6 +4434,225 @@ paths:
           description: Internal server error
           schema:
             $ref: "#/definitions/ErrorModelV2"
+  /groups/{id}/ownership:
+    put:
+      tags:
+        - groups
+      summary: Update group ownership settings
+      description: "`Authentication Required`. Only the group owner or system admin can change ownership settings."
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the group
+          required: true
+          type: string
+        - in: body
+          name: body
+          description: Ownership settings to update
+          required: true
+          schema:
+            type: object
+            properties:
+              ownerId:
+                type: string
+                description: New owner user ID
+              adminId:
+                type: string
+                description: Admin user or group ID
+              adminType:
+                type: string
+                description: Whether adminId refers to a user or group
+                enum:
+                  - user
+                  - group
+      responses:
+        "204":
+          description: Ownership updated successfully
+        "400":
+          description: Bad request
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Forbidden - only group owner can change ownership
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Group not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /groups/{id}/invites:
+    get:
+      tags:
+        - groups
+      summary: List invite links for a group
+      description: "`Authentication Required`"
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the group
+          required: true
+          type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/GroupInviteLink"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    post:
+      tags:
+        - groups
+      summary: Create an invite link for a group
+      description: "`Authentication Required`. Only the group owner or admin can create invite links."
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the group
+          required: true
+          type: string
+        - in: body
+          name: body
+          description: Invite link settings
+          required: true
+          schema:
+            type: object
+            properties:
+              isSingleUse:
+                type: boolean
+                description: Whether the invite link can only be used once
+                default: false
+              expiresInHours:
+                type: integer
+                description: Number of hours before the link expires (default 168 = 7 days)
+      responses:
+        "201":
+          description: Invite link created successfully
+          schema:
+            $ref: "#/definitions/GroupInviteLink"
+        "400":
+          description: Bad request
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Forbidden - only group owner or admin can create invite links
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Group not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /groups/{id}/invites/{linkId}:
+    delete:
+      tags:
+        - groups
+      summary: Revoke an invite link
+      description: "`Authentication Required`. Only the group owner or admin can revoke invite links."
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the group
+          required: true
+          type: string
+        - name: linkId
+          in: path
+          description: ID of the invite link to revoke
+          required: true
+          type: string
+      responses:
+        "204":
+          description: Invite link revoked successfully
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Forbidden - only group owner or admin can revoke invite links
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Invite link not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /invites/redeem:
+    post:
+      tags:
+        - groups
+      summary: Redeem an invite link to join a group
+      description: "`Authentication Required`. Uses an invite token to add the authenticated user to the group."
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          description: The invite token to redeem
+          required: true
+          schema:
+            type: object
+            required:
+              - token
+            properties:
+              token:
+                type: string
+                description: The invite token string
+      responses:
+        "200":
+          description: Successfully joined the group
+          schema:
+            $ref: "#/definitions/SimpleApiResp"
+        "400":
+          description: Bad request (expired, revoked, or already redeemed)
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Invite link not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
   /users:
     get:
       tags:
@@ -4527,6 +4838,209 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
         "404":
           description: User not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /users/{id}/status:
+    put:
+      tags:
+        - groups
+      summary: Update user status and display name
+      description: "`Authentication Required`. Update a user's status (active/inactive) and display name."
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the user
+          required: true
+          type: string
+        - in: body
+          name: body
+          description: Status and display name fields to update
+          required: true
+          schema:
+            type: object
+            properties:
+              status:
+                type: string
+                enum:
+                  - active
+                  - inactive
+              displayName:
+                type: string
+      responses:
+        "204":
+          description: User status updated successfully
+        "400":
+          description: Bad request
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /users/{id}/aup:
+    post:
+      tags:
+        - groups
+      summary: Record AUP agreement
+      description: "`Authentication Required`. Record that a user agreed to a specific version of the Acceptable Use Policy."
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the user
+          required: true
+          type: string
+        - in: body
+          name: body
+          description: AUP agreement details
+          required: true
+          schema:
+            type: object
+            required:
+              - version
+            properties:
+              version:
+                type: string
+                description: Version string of the AUP the user is agreeing to
+      responses:
+        "204":
+          description: AUP agreement recorded successfully
+        "400":
+          description: Bad request (missing version)
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /users/{id}/identities:
+    get:
+      tags:
+        - groups
+      summary: List user identities
+      description: "`Authentication Required`. List all OAuth2/OIDC identities associated with a user."
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the user
+          required: true
+          type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/UserIdentity"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    post:
+      tags:
+        - groups
+      summary: Add an identity to a user
+      description: "`Authentication Required`. Associate a new OAuth2/OIDC identity with a user."
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the user
+          required: true
+          type: string
+        - in: body
+          name: body
+          description: Identity to associate
+          required: true
+          schema:
+            type: object
+            required:
+              - sub
+              - issuer
+            properties:
+              sub:
+                type: string
+                description: The 'sub' claim from the identity provider
+              issuer:
+                type: string
+                description: The 'iss' claim from the identity provider
+      responses:
+        "201":
+          description: Identity added successfully
+          schema:
+            $ref: "#/definitions/UserIdentity"
+        "400":
+          description: Bad request (missing fields)
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "409":
+          description: Identity already associated with a user
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /users/{id}/identities/{identityId}:
+    delete:
+      tags:
+        - groups
+      summary: Remove an identity from a user
+      description: "`Authentication Required`. Disassociate an OAuth2/OIDC identity from a user."
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the user
+          required: true
+          type: string
+        - name: identityId
+          in: path
+          description: ID of the identity to remove
+          required: true
+          type: string
+      responses:
+        "204":
+          description: Identity removed successfully
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Identity not found
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "500":

@@ -397,6 +397,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Registry.RequireKeyChaining": false,
 	"Registry.RequireOriginApproval": false,
 	"RuntimeDir": false,
+	"Server.AUPFile": false,
 	"Server.AdLifetime": false,
 	"Server.AdminGroups": false,
 	"Server.AdvertisementInterval": false,
@@ -410,6 +411,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Server.EnablePprof": false,
 	"Server.EnableUI": false,
 	"Server.ExternalWebUrl": false,
+	"Server.GroupInviteLinkExpirationHours": false,
 	"Server.HealthMonitoringPublic": false,
 	"Server.Hostname": false,
 	"Server.IssuerHostname": false,
@@ -659,6 +661,7 @@ var stringAccessors = map[string]func(*Config) string{
 	"Registry.DbLocation": func(c *Config) string { return c.Registry.DbLocation },
 	"Registry.InstitutionsUrl": func(c *Config) string { return c.Registry.InstitutionsUrl },
 	"RuntimeDir": func(c *Config) string { return c.RuntimeDir },
+	"Server.AUPFile": func(c *Config) string { return c.Server.AUPFile },
 	"Server.DatabaseBackup.Location": func(c *Config) string { return c.Server.DatabaseBackup.Location },
 	"Server.DbLocation": func(c *Config) string { return c.Server.DbLocation },
 	"Server.ExternalWebUrl": func(c *Config) string { return c.Server.ExternalWebUrl },
@@ -827,6 +830,7 @@ var intAccessors = map[string]func(*Config) int{
 	"Origin.SSH.Port": func(c *Config) int { return c.Origin.SSH.Port },
 	"Plugin.DirectorDecisionPercentage": func(c *Config) int { return c.Plugin.DirectorDecisionPercentage },
 	"Server.DatabaseBackup.MaxCount": func(c *Config) int { return c.Server.DatabaseBackup.MaxCount },
+	"Server.GroupInviteLinkExpirationHours": func(c *Config) int { return c.Server.GroupInviteLinkExpirationHours },
 	"Server.IssuerPort": func(c *Config) int { return c.Server.IssuerPort },
 	"Server.UILoginRateLimit": func(c *Config) int { return c.Server.UILoginRateLimit },
 	"Server.WebPort": func(c *Config) int { return c.Server.WebPort },
@@ -1463,6 +1467,7 @@ var allParameterNames = []string{
 	"Registry.RequireKeyChaining",
 	"Registry.RequireOriginApproval",
 	"RuntimeDir",
+	"Server.AUPFile",
 	"Server.AdLifetime",
 	"Server.AdminGroups",
 	"Server.AdvertisementInterval",
@@ -1476,6 +1481,7 @@ var allParameterNames = []string{
 	"Server.EnablePprof",
 	"Server.EnableUI",
 	"Server.ExternalWebUrl",
+	"Server.GroupInviteLinkExpirationHours",
 	"Server.HealthMonitoringPublic",
 	"Server.Hostname",
 	"Server.IssuerHostname",
@@ -1698,6 +1704,7 @@ var (
 	Registry_DbLocation = StringParam{"Registry.DbLocation"}
 	Registry_InstitutionsUrl = StringParam{"Registry.InstitutionsUrl"}
 	RuntimeDir = StringParam{"RuntimeDir"}
+	Server_AUPFile = StringParam{"Server.AUPFile"}
 	Server_DatabaseBackup_Location = StringParam{"Server.DatabaseBackup.Location"}
 	Server_DbLocation = StringParam{"Server.DbLocation"}
 	Server_ExternalWebUrl = StringParam{"Server.ExternalWebUrl"}
@@ -1810,6 +1817,7 @@ var (
 	Origin_SSH_Port = IntParam{"Origin.SSH.Port"}
 	Plugin_DirectorDecisionPercentage = IntParam{"Plugin.DirectorDecisionPercentage"}
 	Server_DatabaseBackup_MaxCount = IntParam{"Server.DatabaseBackup.MaxCount"}
+	Server_GroupInviteLinkExpirationHours = IntParam{"Server.GroupInviteLinkExpirationHours"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
 	Server_UILoginRateLimit = IntParam{"Server.UILoginRateLimit"}
 	Server_WebPort = IntParam{"Server.WebPort"}
@@ -2132,6 +2140,7 @@ func init() {
 		"Registry.DbLocation": Registry_DbLocation,
 		"Registry.InstitutionsUrl": Registry_InstitutionsUrl,
 		"RuntimeDir": RuntimeDir,
+		"Server.AUPFile": Server_AUPFile,
 		"Server.DatabaseBackup.Location": Server_DatabaseBackup_Location,
 		"Server.DbLocation": Server_DbLocation,
 		"Server.ExternalWebUrl": Server_ExternalWebUrl,
@@ -2238,6 +2247,7 @@ func init() {
 		"Origin.SSH.Port": Origin_SSH_Port,
 		"Plugin.DirectorDecisionPercentage": Plugin_DirectorDecisionPercentage,
 		"Server.DatabaseBackup.MaxCount": Server_DatabaseBackup_MaxCount,
+		"Server.GroupInviteLinkExpirationHours": Server_GroupInviteLinkExpirationHours,
 		"Server.IssuerPort": Server_IssuerPort,
 		"Server.UILoginRateLimit": Server_UILoginRateLimit,
 		"Server.WebPort": Server_WebPort,

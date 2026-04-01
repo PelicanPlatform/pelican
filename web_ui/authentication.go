@@ -352,6 +352,13 @@ func setLoginCookie(ctx *gin.Context, userRecord *database.User, groups []string
 	// One cookie should be used for all path
 	ctx.SetCookie("login", tok, int(loginLifetime.Seconds()), "/", ctx.Request.URL.Host, true, true)
 	ctx.SetSameSite(http.SameSiteStrictMode)
+
+	// Track last login time
+	if userRecord.ID != "" {
+		if err := database.UpdateUserLastLogin(database.ServerDatabase, userRecord.ID); err != nil {
+			log.Warnf("Failed to update last login time for user %s: %v", userRecord.ID, err)
+		}
+	}
 }
 
 // Check if user is authenticated by checking if the "login" cookie is present and set the user identity to ctx
