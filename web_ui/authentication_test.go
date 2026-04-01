@@ -64,6 +64,10 @@ func migrateTestDB(t *testing.T) {
 	require.NoError(t, err, "Failed to migrate DB for group members table")
 	err = database.ServerDatabase.AutoMigrate(&database.User{})
 	require.NoError(t, err, "Failed to migrate DB for users table")
+	err = database.ServerDatabase.AutoMigrate(&database.GroupInviteLink{})
+	require.NoError(t, err, "Failed to migrate DB for group invite links table")
+	err = database.ServerDatabase.AutoMigrate(&database.UserIdentity{})
+	require.NoError(t, err, "Failed to migrate DB for user identities table")
 }
 
 func TestWaitUntilLogin(t *testing.T) {

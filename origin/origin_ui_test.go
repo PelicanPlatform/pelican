@@ -143,6 +143,10 @@ func TestCollectionsAPI(t *testing.T) {
 	require.NoError(t, err, "Failed to migrate DB for group members table")
 	err = database.ServerDatabase.AutoMigrate(&database.User{})
 	require.NoError(t, err, "Failed to migrate DB for users table")
+	err = database.ServerDatabase.AutoMigrate(&database.GroupInviteLink{})
+	require.NoError(t, err, "Failed to migrate DB for group invite links table")
+	err = database.ServerDatabase.AutoMigrate(&database.UserIdentity{})
+	require.NoError(t, err, "Failed to migrate DB for user identities table")
 
 	t.Run("create-delete-collection", func(t *testing.T) {
 		createReq := CreateCollectionReq{
