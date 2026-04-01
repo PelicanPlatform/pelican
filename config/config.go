@@ -1630,13 +1630,13 @@ func SetServerDefaults(v *viper.Viper) error {
 // values show up as IsSet()=true even when the user never wrote them. We use these
 // constants to distinguish "came from defaults.yaml" from "user explicitly set".
 var cilogonOIDCDefaults = struct {
-	issuer              string
-	authorizationEndpt  string
-	tokenEndpt          string
-	userInfoEndpt       string
-	deviceAuthEndpt     string
-	scopes              []string
-	authUserClaim       string
+	issuer             string
+	authorizationEndpt string
+	tokenEndpt         string
+	userInfoEndpt      string
+	deviceAuthEndpt    string
+	scopes             []string
+	authUserClaim      string
 }{
 	issuer:             "https://cilogon.org",
 	authorizationEndpt: "https://cilogon.org/authorize",
