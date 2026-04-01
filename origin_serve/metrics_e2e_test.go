@@ -258,3 +258,51 @@ func TestMetricsPrometheusIntegration(t *testing.T) {
 	// Verify gauge metrics are present
 	assert.Contains(t, metricsText, "pelican_http_active_requests", "Should have active requests gauge")
 }
+
+// TestMetricsRecordedForAuthRejection is a regression test for the middleware
+// ordering in RegisterHandlers. httpMetricsMiddleware must run before
+// authMiddleware so that auth-rejected requests (401/403) are still counted
+// in Prometheus. If the ordering were reversed, httpMetricsMiddleware would
+// never execute for rejected requests and the dashboard would undercount.
+func TestMetricsRecordedForAuthRejection(t *testing.T) {
+	metrics.HttpRequestsTotal.Reset()
+
+	storageDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(storageDir, "secret.txt"), []byte("secret"), 0644))
+
+	ResetHandlers()
+	t.Cleanup(ResetHandlers)
+
+	// Export without PublicReads — every GET requires a valid token
+	exports := []server_utils.OriginExport{
+		{
+			FederationPrefix: "/protected",
+			StoragePrefix:    storageDir,
+			Capabilities:     server_structs.Capabilities{PublicReads: false},
+		},
+	}
+
+	require.NoError(t, InitializeHandlers(exports))
+
+	ac := &authConfig{}
+	ac.exports.Store(&exports)
+	oldAC := globalAuthConfig
+	globalAuthConfig = ac
+	t.Cleanup(func() { globalAuthConfig = oldAC })
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	require.NoError(t, RegisterHandlers(router, false))
+
+	// Request without a token — authMiddleware will abort with 401
+	req := httptest.NewRequest("GET", "/protected/secret.txt", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code, "Request without token should be rejected")
+
+	// The key assertion: Prometheus must have recorded this rejected request.
+	count := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, "GET", "401"))
+	assert.Equal(t, float64(1), count,
+		"Auth-rejected requests must be counted in Prometheus metrics")
+}

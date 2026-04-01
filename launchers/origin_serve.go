@@ -68,6 +68,13 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		}
 	} else {
 		log.Info("Initializing POSIXv2 origin backend")
+		// For non-XRootD backends, start the shoveler if enabled so that
+		// internally-generated monitoring packets reach the message queue.
+		if param.Shoveler_Enable.GetBool() {
+			if _, err = metrics.LaunchShoveler(ctx, egrp); err != nil {
+				return nil, errors.Wrap(err, "failed to launch shoveler for POSIXv2 backend")
+			}
+		}
 	}
 
 	originServer := &origin.OriginServer{}
