@@ -92,7 +92,6 @@ func TestApplyGitHubOAuthDefaults(t *testing.T) {
 	})
 }
 
-
 func TestGetOIDCProvider(t *testing.T) {
 	t.Cleanup(func() {
 		ResetConfig()
