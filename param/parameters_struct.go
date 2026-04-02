@@ -370,6 +370,7 @@ type Config struct {
 		AdLifetime time.Duration `mapstructure:"adlifetime" yaml:"AdLifetime"`
 		AdminGroups []string `mapstructure:"admingroups" yaml:"AdminGroups"`
 		AdvertisementInterval time.Duration `mapstructure:"advertisementinterval" yaml:"AdvertisementInterval"`
+		AutoEnrollUsernameClaims []string `mapstructure:"autoenrollusernameclaims" yaml:"AutoEnrollUsernameClaims"`
 		CollectionAdminGroups []string `mapstructure:"collectionadmingroups" yaml:"CollectionAdminGroups"`
 		CollectionAdminUsers []string `mapstructure:"collectionadminusers" yaml:"CollectionAdminUsers"`
 		DatabaseBackup struct {
@@ -830,6 +831,7 @@ type configWithType struct {
 		AdLifetime struct { Type string; Value time.Duration }
 		AdminGroups struct { Type string; Value []string }
 		AdvertisementInterval struct { Type string; Value time.Duration }
+		AutoEnrollUsernameClaims struct { Type string; Value []string }
 		CollectionAdminGroups struct { Type string; Value []string }
 		CollectionAdminUsers struct { Type string; Value []string }
 		DatabaseBackup struct {

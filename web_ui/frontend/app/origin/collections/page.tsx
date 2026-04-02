@@ -74,7 +74,7 @@ const Page = () => {
   };
 
   return (
-    <AuthenticatedContent redirect={true} allowedRoles={['admin']}>
+    <AuthenticatedContent redirect={true} allowedRoles={['admin', 'user']}>
       <Box width={'100%'}>
         <Box
           mb={2}

@@ -656,13 +656,16 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 	// User-onboarding invite link (no group; requires user admin privileges)
 	routerGroup.POST("/invites/onboarding", AuthHandler, handleCreateUserOnboardingInvite)
 
+	// AUP endpoint (public read, no auth required)
+	routerGroup.GET("/aup", handleGetAUP)
+
 	userRouterGroup := routerGroup.Group("/users", AuthHandler)
 	{
 		userRouterGroup.GET("", handleListUsers)
 		userRouterGroup.POST("", handleAddUser)
 		userRouterGroup.GET("/:id", handleGetUser)
 		userRouterGroup.PATCH("/:id", handleUpdateUser)
-		userRouterGroup.DELETE("/:id", AdminAuthHandler, handleDeleteUser)
+		userRouterGroup.DELETE("/:id", handleDeleteUser)
 		userRouterGroup.PUT("/:id/status", handleUpdateUserStatus)
 		userRouterGroup.POST("/:id/aup", handleRecordAUPAgreement)
 		userRouterGroup.GET("/:id/identities", handleListUserIdentities)

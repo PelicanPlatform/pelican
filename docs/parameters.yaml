@@ -3354,6 +3354,15 @@ type: filename
 default: none
 components: ["origin", "registry"]
 ---
+name: Server.AutoEnrollUsernameClaims
+description: |+
+  An ordered list of JWT or user_info claims to use when auto-enrolling users via invite links.
+  When a user redeems an invite link and does not have an existing account, the system will try each claim in order and use the first non-empty value that is not already taken as the username.
+  Common claims include "preferred_username", "email", "name", and "sub".
+type: stringSlice
+default: ["preferred_username", "email", "sub"]
+components: ["origin", "registry"]
+---
 ################################
 #   Issuer's Configurations    #
 ################################
