@@ -647,13 +647,13 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 		groupRouterGroup.DELETE("/:id/members/:userId", handleRemoveGroupMember)
 	}
 
-	userRouterGroup := routerGroup.Group("/users", AuthHandler)
+	userRouterGroup := routerGroup.Group("/users", AuthHandler, AdminAuthHandler)
 	{
 		userRouterGroup.GET("", handleListUsers)
 		userRouterGroup.POST("", handleAddUser)
 		userRouterGroup.GET("/:id", handleGetUser)
 		userRouterGroup.PATCH("/:id", handleUpdateUser)
-		userRouterGroup.DELETE("/:id", AdminAuthHandler, handleDeleteUser)
+		userRouterGroup.DELETE("/:id", handleDeleteUser)
 	}
 
 	return nil
