@@ -1391,3 +1391,91 @@ func handleDeleteUserIdentity(ctx *gin.Context) {
 
 	ctx.Status(http.StatusNoContent)
 }
+
+// handleCreateUserOnboardingInvite creates an invite link for onboarding users
+// without adding them to a specific group. Only user admins or system admins can use this.
+func handleCreateUserOnboardingInvite(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie, token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access},
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	user, userId, groups, verifyErr := GetUserGroups(ctx)
+	if verifyErr != nil || userId == "" {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to identify user",
+		})
+		return
+	}
+
+	identity := UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+	}
+	isUserAdmin, msg := CheckUserAdmin(identity)
+	if !isUserAdmin {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    msg,
+		})
+		return
+	}
+
+	var req CreateInviteLinkReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid request body",
+		})
+		return
+	}
+
+	var expDuration time.Duration
+	if req.ExpiresIn != "" {
+		parsed, parseErr := time.ParseDuration(req.ExpiresIn)
+		if parseErr != nil {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Invalid expiresIn duration format (e.g. '168h', '24h')",
+			})
+			return
+		}
+		expDuration = parsed
+	} else {
+		expDuration = param.Server_GroupInviteLinkExpiration.GetDuration()
+		if expDuration <= 0 {
+			expDuration = 168 * time.Hour
+		}
+	}
+	expiresAt := time.Now().Add(expDuration)
+
+	link, plainToken, createErr := database.CreateUserOnboardingInviteLink(database.ServerDatabase, userId, expiresAt, req.IsSingleUse)
+	if createErr != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to create invite link: %v", createErr),
+		})
+		return
+	}
+
+	type InviteLinkResponse struct {
+		database.GroupInviteLink
+		InviteToken string `json:"inviteToken"`
+	}
+	ctx.JSON(http.StatusCreated, InviteLinkResponse{
+		GroupInviteLink: *link,
+		InviteToken:     plainToken,
+	})
+}
