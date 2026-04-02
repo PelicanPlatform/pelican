@@ -653,6 +653,8 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 	}
 
 	routerGroup.POST("/invites/redeem", AuthHandler, handleRedeemGroupInviteLink)
+	// User-onboarding invite link (no group; requires user admin privileges)
+	routerGroup.POST("/invites/onboarding", AuthHandler, handleCreateUserOnboardingInvite)
 
 	userRouterGroup := routerGroup.Group("/users", AuthHandler)
 	{

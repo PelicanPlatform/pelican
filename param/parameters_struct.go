@@ -370,6 +370,8 @@ type Config struct {
 		AdLifetime time.Duration `mapstructure:"adlifetime" yaml:"AdLifetime"`
 		AdminGroups []string `mapstructure:"admingroups" yaml:"AdminGroups"`
 		AdvertisementInterval time.Duration `mapstructure:"advertisementinterval" yaml:"AdvertisementInterval"`
+		CollectionAdminGroups []string `mapstructure:"collectionadmingroups" yaml:"CollectionAdminGroups"`
+		CollectionAdminUsers []string `mapstructure:"collectionadminusers" yaml:"CollectionAdminUsers"`
 		DatabaseBackup struct {
 			Frequency time.Duration `mapstructure:"frequency" yaml:"Frequency"`
 			Location string `mapstructure:"location" yaml:"Location"`
@@ -404,6 +406,8 @@ type Config struct {
 		UILoginRateLimit int `mapstructure:"uiloginratelimit" yaml:"UILoginRateLimit"`
 		UIPasswordFile string `mapstructure:"uipasswordfile" yaml:"UIPasswordFile"`
 		UnprivilegedUser string `mapstructure:"unprivilegeduser" yaml:"UnprivilegedUser"`
+		UserAdminGroups []string `mapstructure:"useradmingroups" yaml:"UserAdminGroups"`
+		UserAdminUsers []string `mapstructure:"useradminusers" yaml:"UserAdminUsers"`
 		WebConfigFile string `mapstructure:"webconfigfile" yaml:"WebConfigFile"`
 		WebHost string `mapstructure:"webhost" yaml:"WebHost"`
 		WebPort int `mapstructure:"webport" yaml:"WebPort"`
@@ -826,6 +830,8 @@ type configWithType struct {
 		AdLifetime struct { Type string; Value time.Duration }
 		AdminGroups struct { Type string; Value []string }
 		AdvertisementInterval struct { Type string; Value time.Duration }
+		CollectionAdminGroups struct { Type string; Value []string }
+		CollectionAdminUsers struct { Type string; Value []string }
 		DatabaseBackup struct {
 			Frequency struct { Type string; Value time.Duration }
 			Location struct { Type string; Value string }
@@ -860,6 +866,8 @@ type configWithType struct {
 		UILoginRateLimit struct { Type string; Value int }
 		UIPasswordFile struct { Type string; Value string }
 		UnprivilegedUser struct { Type string; Value string }
+		UserAdminGroups struct { Type string; Value []string }
+		UserAdminUsers struct { Type string; Value []string }
 		WebConfigFile struct { Type string; Value string }
 		WebHost struct { Type string; Value string }
 		WebPort struct { Type string; Value int }
