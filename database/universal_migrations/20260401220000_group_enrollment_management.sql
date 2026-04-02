@@ -25,9 +25,10 @@ ALTER TABLE users ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMEST
 
 -- Create group_invite_links table for invite link management.
 -- invite_token stores the bcrypt hash of the token; the plaintext is returned only once at creation.
+-- group_id may be empty for user-onboarding invites (no group addition).
 CREATE TABLE group_invite_links (
     id TEXT PRIMARY KEY,
-    group_id TEXT NOT NULL,
+    group_id TEXT NOT NULL DEFAULT '',
     invite_token TEXT NOT NULL UNIQUE,
     created_by TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
