@@ -21,6 +21,8 @@ package web_ui
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -37,6 +39,7 @@ import (
 	"github.com/tg123/go-htpasswd"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
+	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
@@ -65,6 +68,8 @@ type (
 		Authenticated bool     `json:"authenticated"`
 		Role          UserRole `json:"role"`
 		User          string   `json:"user"`
+		RequiresAUP   bool     `json:"requires_aup,omitempty"`
+		AUPVersion    string   `json:"aup_version,omitempty"`
 	}
 
 	OIDCEnabledServerRes struct {
@@ -286,6 +291,13 @@ func GetUserGroups(ctx *gin.Context) (user string, userId string, groups []strin
 	if oidcSubIface, ok := parsed.Get("oidc_sub"); ok {
 		if oidcSub, ok := oidcSubIface.(string); ok && oidcSub != "" {
 			ctx.Set("OIDCSub", oidcSub)
+		}
+	}
+
+	// Extract oidc_iss claim (the OIDC issuer that authenticated this user)
+	if oidcIssIface, ok := parsed.Get("oidc_iss"); ok {
+		if oidcIss, ok := oidcIssIface.(string); ok && oidcIss != "" {
+			ctx.Set("OIDCIss", oidcIss)
 		}
 	}
 
@@ -539,6 +551,22 @@ func CheckCollectionAdmin(identity UserIdentity) (bool, string) {
 	}
 
 	return false, "You don't have collection administrator permission"
+}
+
+// IsSystemAdminUserID checks whether the given user ID belongs to a system admin.
+// This is used to prevent user administrators from modifying system admin accounts.
+func IsSystemAdminUserID(db *gorm.DB, userID string) bool {
+	user, err := database.GetUserByID(db, userID)
+	if err != nil {
+		return false
+	}
+	identity := UserIdentity{
+		Username: user.Username,
+		ID:       user.ID,
+		Sub:      user.Sub,
+	}
+	isAdmin, _ := CheckAdmin(identity)
+	return isAdmin
 }
 
 // AdminAuthHandler checks the admin status of a logged-in user. This middleware
@@ -849,6 +877,23 @@ func whoamiHandler(ctx *gin.Context) {
 		} else {
 			res.Role = NonAdminRole
 		}
+
+		// Check AUP compliance
+		aupFile := param.Server_AUPFile.GetString()
+		if aupFile != "" && aupFile != "none" {
+			if content, readErr := os.ReadFile(aupFile); readErr == nil {
+				hash := sha256.Sum256(content)
+				currentVersion := hex.EncodeToString(hash[:])[:16]
+				// Look up the user's AUP agreement
+				if userRecord, dbErr := database.GetUserByID(database.ServerDatabase, userId); dbErr == nil {
+					if userRecord.AUPVersion != currentVersion {
+						res.RequiresAUP = true
+						res.AUPVersion = currentVersion
+					}
+				}
+			}
+		}
+
 		ctx.JSON(http.StatusOK, res)
 	}
 }

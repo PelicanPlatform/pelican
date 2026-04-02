@@ -1,13 +1,17 @@
 package web_ui
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/database"
@@ -32,9 +36,9 @@ type UpdateGroupReq struct {
 }
 
 type UpdateGroupOwnershipReq struct {
-	OwnerID   *string              `json:"ownerId"`
-	AdminID   *string              `json:"adminId"`
-	AdminType *database.AdminType  `json:"adminType"`
+	OwnerID   *string             `json:"ownerId"`
+	AdminID   *string             `json:"adminId"`
+	AdminType *database.AdminType `json:"adminType"`
 }
 
 type CreateInviteLinkReq struct {
@@ -792,12 +796,32 @@ func handleDeleteUser(ctx *gin.Context) {
 		})
 		return
 	}
-	isAdmin, _ := CheckAdmin(UserIdentity{
+	identity := UserIdentity{
 		Username: user,
 		ID:       userId,
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
-	})
+	}
+
+	// Allow system admins or user admins
+	isAdmin, _ := CheckAdmin(identity)
+	isUserAdmin, _ := CheckUserAdmin(identity)
+	if !isAdmin && !isUserAdmin {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "you do not have permission to delete users",
+		})
+		return
+	}
+
+	// User admins cannot delete system admin users
+	if !isAdmin && IsSystemAdminUserID(database.ServerDatabase, id) {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "user administrators cannot delete system admin accounts",
+		})
+		return
+	}
 
 	if err := database.DeleteUser(database.ServerDatabase, id, userId, isAdmin); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1120,7 +1144,7 @@ func handleRedeemGroupInviteLink(ctx *gin.Context) {
 	}
 
 	_, userId, _, err := GetUserGroups(ctx)
-	if err != nil || userId == "" {
+	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Failed to identify user",
@@ -1128,16 +1152,37 @@ func handleRedeemGroupInviteLink(ctx *gin.Context) {
 		return
 	}
 
-	if err := database.RedeemGroupInviteLink(database.ServerDatabase, req.Token, userId); err != nil {
+	// Extract OIDC identity from context for auto-creation
+	var sub, issuer, username string
+	if v, exists := ctx.Get("OIDCSub"); exists {
+		sub, _ = v.(string)
+	}
+	if v, exists := ctx.Get("OIDCIss"); exists {
+		issuer, _ = v.(string)
+	}
+
+	// Use the authenticated user's display name as the username for auto-creation
+	if user, exists := ctx.Get("User"); exists {
+		if userStr, ok := user.(string); ok && userStr != "" {
+			username = userStr
+		}
+	}
+	// If username is still empty, derive from sub
+	if username == "" && sub != "" {
+		username = sub
+	}
+
+	if err := database.RedeemGroupInviteLink(database.ServerDatabase, req.Token, userId, sub, issuer, username); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "invite link not found",
 			})
 		} else {
+			log.Warningf("Failed to redeem invite link: %v", err)
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    err.Error(),
+				Msg:    "Failed to redeem invite link",
 			})
 		}
 		return
@@ -1175,6 +1220,40 @@ func handleUpdateUserStatus(ctx *gin.Context) {
 		return
 	}
 
+	// Require user admin or system admin privileges
+	user, userId, groups, verifyErr := GetUserGroups(ctx)
+	if verifyErr != nil || userId == "" {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to identify user",
+		})
+		return
+	}
+	identity := UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+	}
+	isUserAdmin, msg := CheckUserAdmin(identity)
+	if !isUserAdmin {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    msg,
+		})
+		return
+	}
+
+	// User admins cannot modify system admin users (only system admins can)
+	isSystemAdmin, _ := CheckAdmin(identity)
+	if !isSystemAdmin && IsSystemAdminUserID(database.ServerDatabase, id) {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "user administrators cannot modify system admin accounts",
+		})
+		return
+	}
+
 	var req UpdateUserStatusReq
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
@@ -1185,6 +1264,13 @@ func handleUpdateUserStatus(ctx *gin.Context) {
 	}
 
 	if req.Status != nil {
+		if *req.Status != database.UserStatusActive && *req.Status != database.UserStatusInactive {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "status must be 'active' or 'inactive'",
+			})
+			return
+		}
 		if err := database.UpdateUserStatus(database.ServerDatabase, id, *req.Status); err != nil {
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
@@ -1477,5 +1563,34 @@ func handleCreateUserOnboardingInvite(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, InviteLinkResponse{
 		GroupInviteLink: *link,
 		InviteToken:     plainToken,
+	})
+}
+
+// handleGetAUP serves the Acceptable Use Policy content and its version hash.
+func handleGetAUP(ctx *gin.Context) {
+	aupFile := param.Server_AUPFile.GetString()
+	if aupFile == "" || aupFile == "none" {
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "No AUP file configured",
+		})
+		return
+	}
+
+	content, err := os.ReadFile(aupFile)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to read AUP file",
+		})
+		return
+	}
+
+	hash := sha256.Sum256(content)
+	version := hex.EncodeToString(hash[:])[:16]
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"content": string(content),
+		"version": version,
 	})
 }

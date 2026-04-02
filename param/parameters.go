@@ -401,6 +401,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Server.AdLifetime": false,
 	"Server.AdminGroups": false,
 	"Server.AdvertisementInterval": false,
+	"Server.AutoEnrollUsernameClaims": false,
 	"Server.CollectionAdminGroups": false,
 	"Server.CollectionAdminUsers": false,
 	"Server.DatabaseBackup.Frequency": false,
@@ -761,6 +762,7 @@ var stringSliceAccessors = map[string]func(*Config) []string{
 	"Origin.SupportedChecksumTypes": func(c *Config) []string { return c.Origin.SupportedChecksumTypes },
 	"Registry.AdminUsers": func(c *Config) []string { return c.Registry.AdminUsers },
 	"Server.AdminGroups": func(c *Config) []string { return c.Server.AdminGroups },
+	"Server.AutoEnrollUsernameClaims": func(c *Config) []string { return c.Server.AutoEnrollUsernameClaims },
 	"Server.CollectionAdminGroups": func(c *Config) []string { return c.Server.CollectionAdminGroups },
 	"Server.CollectionAdminUsers": func(c *Config) []string { return c.Server.CollectionAdminUsers },
 	"Server.DirectorUrls": func(c *Config) []string { return c.Server.DirectorUrls },
@@ -1479,6 +1481,7 @@ var allParameterNames = []string{
 	"Server.AdLifetime",
 	"Server.AdminGroups",
 	"Server.AdvertisementInterval",
+	"Server.AutoEnrollUsernameClaims",
 	"Server.CollectionAdminGroups",
 	"Server.CollectionAdminUsers",
 	"Server.DatabaseBackup.Frequency",
@@ -1784,6 +1787,7 @@ var (
 	Origin_SupportedChecksumTypes = StringSliceParam{"Origin.SupportedChecksumTypes"}
 	Registry_AdminUsers = StringSliceParam{"Registry.AdminUsers"}
 	Server_AdminGroups = StringSliceParam{"Server.AdminGroups"}
+	Server_AutoEnrollUsernameClaims = StringSliceParam{"Server.AutoEnrollUsernameClaims"}
 	Server_CollectionAdminGroups = StringSliceParam{"Server.CollectionAdminGroups"}
 	Server_CollectionAdminUsers = StringSliceParam{"Server.CollectionAdminUsers"}
 	Server_DirectorUrls = StringSliceParam{"Server.DirectorUrls"}
@@ -2221,6 +2225,7 @@ func init() {
 		"Origin.SupportedChecksumTypes": Origin_SupportedChecksumTypes,
 		"Registry.AdminUsers": Registry_AdminUsers,
 		"Server.AdminGroups": Server_AdminGroups,
+		"Server.AutoEnrollUsernameClaims": Server_AutoEnrollUsernameClaims,
 		"Server.CollectionAdminGroups": Server_CollectionAdminGroups,
 		"Server.CollectionAdminUsers": Server_CollectionAdminUsers,
 		"Server.DirectorUrls": Server_DirectorUrls,

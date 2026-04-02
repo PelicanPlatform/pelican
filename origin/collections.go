@@ -504,7 +504,7 @@ func handleUpdateCollection(ctx *gin.Context) {
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
 	}
-	isAdmin, _ := web_ui.CheckAdmin(identity)
+	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
 	var visibility database.Visibility
 	if req.Visibility != nil {
@@ -931,7 +931,7 @@ func handlePutCollectionMetadata(ctx *gin.Context) {
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
 	}
-	isAdmin, _ := web_ui.CheckAdmin(identity)
+	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
 	err = database.UpsertCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, groups, key, value, isAdmin)
 	if err != nil {
@@ -993,7 +993,7 @@ func handleDeleteCollectionMetadata(ctx *gin.Context) {
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
 	}
-	isAdmin, _ := web_ui.CheckAdmin(identity)
+	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
 	err = database.DeleteCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, groups, key, isAdmin)
 	if err != nil {
@@ -1114,7 +1114,7 @@ func handleDeleteCollection(ctx *gin.Context) {
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
 	}
-	isAdmin, _ := web_ui.CheckAdmin(identity)
+	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
 	err = database.DeleteCollection(database.ServerDatabase, ctx.Param("id"), user, groups, isAdmin)
 	if err != nil {
@@ -1239,7 +1239,7 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
 	}
-	isAdmin, _ := web_ui.CheckAdmin(identity)
+	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
 	err = database.GrantCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, groups, req.GroupID, role, req.ExpiresAt, isAdmin)
 	if err != nil {
@@ -1318,7 +1318,7 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
 	}
-	isAdmin, _ := web_ui.CheckAdmin(identity)
+	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
 	err = database.RevokeCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, groups, req.GroupID, role, isAdmin)
 	if err != nil {
