@@ -488,7 +488,7 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
   set -eux
   set -o pipefail
 
-  dnf install -y xrootd-multiuser
+  dnf install -y --enablerepo=osg-testing xrootd-multiuser
 
   if [ "$TARGETARCH" = "amd64" ]; then
       PKG_ARCH=x86_64
