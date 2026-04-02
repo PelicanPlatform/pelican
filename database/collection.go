@@ -2,6 +2,7 @@ package database
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -100,6 +102,7 @@ type User struct {
 	AUPVersion  string     `gorm:"not null;default:''" json:"aupVersion"`
 	AUPAgreedAt *time.Time `json:"aupAgreedAt"`
 	CreatedAt   time.Time  `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	UpdatedAt   time.Time  `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updatedAt"`
 }
 
 type AdminType string
@@ -118,6 +121,7 @@ type Group struct {
 	AdminID     string        `gorm:"not null;default:''" json:"adminId"`
 	AdminType   AdminType     `gorm:"not null;default:''" json:"adminType"`
 	CreatedAt   time.Time     `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	UpdatedAt   time.Time     `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updatedAt"`
 	Members     []GroupMember `gorm:"foreignKey:GroupID" json:"members"`
 }
 
@@ -131,10 +135,11 @@ type GroupMember struct {
 
 type GroupInviteLink struct {
 	ID          string     `gorm:"primaryKey" json:"id"`
-	GroupID     string     `gorm:"not null" json:"groupId"`
-	InviteToken string     `gorm:"not null;unique" json:"inviteToken"`
+	GroupID     string     `gorm:"not null;default:''" json:"groupId"`
+	HashedToken string     `gorm:"column:invite_token;not null;unique" json:"-"`
 	CreatedBy   string     `gorm:"not null" json:"createdBy"`
 	CreatedAt   time.Time  `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	UpdatedAt   time.Time  `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updatedAt"`
 	ExpiresAt   time.Time  `gorm:"not null" json:"expiresAt"`
 	IsSingleUse bool       `gorm:"not null;default:false" json:"isSingleUse"`
 	RedeemedBy  string     `gorm:"not null;default:''" json:"redeemedBy"`
@@ -148,6 +153,7 @@ type UserIdentity struct {
 	Sub       string    `gorm:"not null;uniqueIndex:idx_identity_sub_issuer" json:"sub"`
 	Issuer    string    `gorm:"not null;uniqueIndex:idx_identity_sub_issuer" json:"issuer"`
 	CreatedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	UpdatedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updatedAt"`
 }
 
 func generateSlug() (string, error) {
@@ -1045,50 +1051,105 @@ func DeleteUser(db *gorm.DB, userID, requestorUserID string, isAdmin bool) error
 // --- Group Invite Link CRUD ---
 
 // generateInviteToken creates a cryptographically random token for invite links.
-func generateInviteToken() (string, error) {
+// Returns (plaintext_token, token_id_prefix, error).
+func generateInviteToken() (string, string, error) {
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
+		return "", "", err
+	}
+	plaintext := hex.EncodeToString(tokenBytes)
+	// Use first 8 chars of SHA256 as a short identifier
+	hash := sha256.Sum256(tokenBytes)
+	prefix := hex.EncodeToString(hash[:])[:8]
+	return plaintext, prefix, nil
+}
+
+// hashInviteToken returns a bcrypt hash of the plaintext token for secure storage.
+func hashInviteToken(plaintext string) (string, error) {
+	hashed, err := bcrypt.GenerateFromPassword([]byte(plaintext), bcrypt.DefaultCost)
+	if err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(tokenBytes), nil
+	return string(hashed), nil
 }
 
 // CreateGroupInviteLink creates a new invite link for a group. Only the group owner or admin
 // (or a system admin) may create invite links.
-func CreateGroupInviteLink(db *gorm.DB, groupID, createdByUserID string, expiresAt time.Time, isSingleUse bool, isSystemAdmin bool) (*GroupInviteLink, error) {
+// Returns (inviteLink, plaintextToken, error). The plaintext token is returned only once and not stored.
+func CreateGroupInviteLink(db *gorm.DB, groupID, createdByUserID string, expiresAt time.Time, isSingleUse bool, isSystemAdmin bool) (*GroupInviteLink, string, error) {
 	var group Group
 	if err := db.First(&group, "id = ?", groupID).Error; err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	if !isGroupOwnerOrAdmin(db, &group, createdByUserID, isSystemAdmin) {
-		return nil, ErrForbidden
+		return nil, "", ErrForbidden
 	}
 
 	slug, err := generateSlug()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
-	invToken, err := generateInviteToken()
+	plaintext, _, err := generateInviteToken()
 	if err != nil {
-		return nil, err
+		return nil, "", err
+	}
+
+	hashed, err := hashInviteToken(plaintext)
+	if err != nil {
+		return nil, "", err
 	}
 
 	link := &GroupInviteLink{
 		ID:          slug,
 		GroupID:     groupID,
-		InviteToken: invToken,
+		HashedToken: hashed,
 		CreatedBy:   createdByUserID,
 		ExpiresAt:   expiresAt,
 		IsSingleUse: isSingleUse,
 	}
 
 	if result := db.Create(link); result.Error != nil {
-		return nil, result.Error
+		return nil, "", result.Error
 	}
 
-	return link, nil
+	return link, plaintext, nil
+}
+
+// CreateUserOnboardingInviteLink creates an invite link that onboards users
+// without adding them to a group. Only system admins or user administrators can create these.
+// Returns (inviteLink, plaintextToken, error).
+func CreateUserOnboardingInviteLink(db *gorm.DB, createdByUserID string, expiresAt time.Time, isSingleUse bool) (*GroupInviteLink, string, error) {
+	slug, err := generateSlug()
+	if err != nil {
+		return nil, "", err
+	}
+
+	plaintext, _, err := generateInviteToken()
+	if err != nil {
+		return nil, "", err
+	}
+
+	hashed, err := hashInviteToken(plaintext)
+	if err != nil {
+		return nil, "", err
+	}
+
+	link := &GroupInviteLink{
+		ID:          slug,
+		GroupID:     "", // empty = user-onboarding only, no group
+		HashedToken: hashed,
+		CreatedBy:   createdByUserID,
+		ExpiresAt:   expiresAt,
+		IsSingleUse: isSingleUse,
+	}
+
+	if result := db.Create(link); result.Error != nil {
+		return nil, "", result.Error
+	}
+
+	return link, plaintext, nil
 }
 
 // ListGroupInviteLinks returns all invite links for a given group.
@@ -1100,22 +1161,39 @@ func ListGroupInviteLinks(db *gorm.DB, groupID string) ([]GroupInviteLink, error
 	return links, nil
 }
 
-// GetGroupInviteLinkByToken looks up an invite link by its token.
-func GetGroupInviteLinkByToken(db *gorm.DB, invToken string) (*GroupInviteLink, error) {
-	link := &GroupInviteLink{}
-	if err := db.Where("invite_token = ?", invToken).First(link).Error; err != nil {
+// GetGroupInviteLinkByToken looks up an invite link by scanning all non-revoked,
+// non-expired links and comparing the bcrypt hash. Returns nil if not found.
+func GetGroupInviteLinkByToken(db *gorm.DB, plaintext string) (*GroupInviteLink, error) {
+	var links []GroupInviteLink
+	if err := db.Where("revoked = 0").Find(&links).Error; err != nil {
 		return nil, err
 	}
-	return link, nil
+	for i := range links {
+		if err := bcrypt.CompareHashAndPassword([]byte(links[i].HashedToken), []byte(plaintext)); err == nil {
+			return &links[i], nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
 }
 
 // RedeemGroupInviteLink redeems an invite link, adding the user to the group.
 // It validates the link is not expired, not revoked, and (if single-use) not already redeemed.
-func RedeemGroupInviteLink(db *gorm.DB, invToken string, userID string) error {
+func RedeemGroupInviteLink(db *gorm.DB, plaintext string, userID string) error {
 	return db.Transaction(func(tx *gorm.DB) error {
-		var link GroupInviteLink
-		if err := tx.Where("invite_token = ?", invToken).First(&link).Error; err != nil {
+		// Scan non-revoked links and bcrypt-compare
+		var links []GroupInviteLink
+		if err := tx.Where("revoked = 0").Find(&links).Error; err != nil {
 			return err
+		}
+		var link *GroupInviteLink
+		for i := range links {
+			if err := bcrypt.CompareHashAndPassword([]byte(links[i].HashedToken), []byte(plaintext)); err == nil {
+				link = &links[i]
+				break
+			}
+		}
+		if link == nil {
+			return gorm.ErrRecordNotFound
 		}
 
 		if link.Revoked {
@@ -1139,15 +1217,18 @@ func RedeemGroupInviteLink(db *gorm.DB, invToken string, userID string) error {
 			return err
 		}
 
-		// Add user to the group (ignore if already a member)
-		groupMember := &GroupMember{
-			GroupID: link.GroupID,
-			UserID:  userID,
-			AddedBy: link.CreatedBy,
+		// If the link has a group, add the user to that group
+		if link.GroupID != "" {
+			groupMember := &GroupMember{
+				GroupID: link.GroupID,
+				UserID:  userID,
+				AddedBy: link.CreatedBy,
+			}
+			if result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(groupMember); result.Error != nil {
+				return result.Error
+			}
 		}
-		if result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(groupMember); result.Error != nil {
-			return result.Error
-		}
+		// If GroupID is empty, this is a user-onboarding invite; no group addition needed.
 
 		// Mark the link as redeemed
 		now := time.Now()

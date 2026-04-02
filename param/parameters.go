@@ -411,7 +411,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Server.EnablePprof": false,
 	"Server.EnableUI": false,
 	"Server.ExternalWebUrl": false,
-	"Server.GroupInviteLinkExpirationHours": false,
+	"Server.GroupInviteLinkExpiration": false,
 	"Server.HealthMonitoringPublic": false,
 	"Server.Hostname": false,
 	"Server.IssuerHostname": false,
@@ -830,7 +830,6 @@ var intAccessors = map[string]func(*Config) int{
 	"Origin.SSH.Port": func(c *Config) int { return c.Origin.SSH.Port },
 	"Plugin.DirectorDecisionPercentage": func(c *Config) int { return c.Plugin.DirectorDecisionPercentage },
 	"Server.DatabaseBackup.MaxCount": func(c *Config) int { return c.Server.DatabaseBackup.MaxCount },
-	"Server.GroupInviteLinkExpirationHours": func(c *Config) int { return c.Server.GroupInviteLinkExpirationHours },
 	"Server.IssuerPort": func(c *Config) int { return c.Server.IssuerPort },
 	"Server.UILoginRateLimit": func(c *Config) int { return c.Server.UILoginRateLimit },
 	"Server.WebPort": func(c *Config) int { return c.Server.WebPort },
@@ -1067,6 +1066,7 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Server.AdLifetime": func(c *Config) time.Duration { return c.Server.AdLifetime },
 	"Server.AdvertisementInterval": func(c *Config) time.Duration { return c.Server.AdvertisementInterval },
 	"Server.DatabaseBackup.Frequency": func(c *Config) time.Duration { return c.Server.DatabaseBackup.Frequency },
+	"Server.GroupInviteLinkExpiration": func(c *Config) time.Duration { return c.Server.GroupInviteLinkExpiration },
 	"Server.RegistrationRetryInterval": func(c *Config) time.Duration { return c.Server.RegistrationRetryInterval },
 	"Server.StartupTimeout": func(c *Config) time.Duration { return c.Server.StartupTimeout },
 	"Transport.BrokerEndpointCacheTTL": func(c *Config) time.Duration { return c.Transport.BrokerEndpointCacheTTL },
@@ -1481,7 +1481,7 @@ var allParameterNames = []string{
 	"Server.EnablePprof",
 	"Server.EnableUI",
 	"Server.ExternalWebUrl",
-	"Server.GroupInviteLinkExpirationHours",
+	"Server.GroupInviteLinkExpiration",
 	"Server.HealthMonitoringPublic",
 	"Server.Hostname",
 	"Server.IssuerHostname",
@@ -1817,7 +1817,6 @@ var (
 	Origin_SSH_Port = IntParam{"Origin.SSH.Port"}
 	Plugin_DirectorDecisionPercentage = IntParam{"Plugin.DirectorDecisionPercentage"}
 	Server_DatabaseBackup_MaxCount = IntParam{"Server.DatabaseBackup.MaxCount"}
-	Server_GroupInviteLinkExpirationHours = IntParam{"Server.GroupInviteLinkExpirationHours"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
 	Server_UILoginRateLimit = IntParam{"Server.UILoginRateLimit"}
 	Server_WebPort = IntParam{"Server.WebPort"}
@@ -1961,6 +1960,7 @@ var (
 	Server_AdLifetime = DurationParam{"Server.AdLifetime"}
 	Server_AdvertisementInterval = DurationParam{"Server.AdvertisementInterval"}
 	Server_DatabaseBackup_Frequency = DurationParam{"Server.DatabaseBackup.Frequency"}
+	Server_GroupInviteLinkExpiration = DurationParam{"Server.GroupInviteLinkExpiration"}
 	Server_RegistrationRetryInterval = DurationParam{"Server.RegistrationRetryInterval"}
 	Server_StartupTimeout = DurationParam{"Server.StartupTimeout"}
 	Transport_BrokerEndpointCacheTTL = DurationParam{"Transport.BrokerEndpointCacheTTL"}
@@ -2247,7 +2247,6 @@ func init() {
 		"Origin.SSH.Port": Origin_SSH_Port,
 		"Plugin.DirectorDecisionPercentage": Plugin_DirectorDecisionPercentage,
 		"Server.DatabaseBackup.MaxCount": Server_DatabaseBackup_MaxCount,
-		"Server.GroupInviteLinkExpirationHours": Server_GroupInviteLinkExpirationHours,
 		"Server.IssuerPort": Server_IssuerPort,
 		"Server.UILoginRateLimit": Server_UILoginRateLimit,
 		"Server.WebPort": Server_WebPort,
@@ -2382,6 +2381,7 @@ func init() {
 		"Server.AdLifetime": Server_AdLifetime,
 		"Server.AdvertisementInterval": Server_AdvertisementInterval,
 		"Server.DatabaseBackup.Frequency": Server_DatabaseBackup_Frequency,
+		"Server.GroupInviteLinkExpiration": Server_GroupInviteLinkExpiration,
 		"Server.RegistrationRetryInterval": Server_RegistrationRetryInterval,
 		"Server.StartupTimeout": Server_StartupTimeout,
 		"Transport.BrokerEndpointCacheTTL": Transport_BrokerEndpointCacheTTL,

@@ -3335,12 +3335,12 @@ default: false
 components: ["cache", "origin"]
 hidden: true
 ---
-name: Server.GroupInviteLinkExpirationHours
+name: Server.GroupInviteLinkExpiration
 description: |+
-  The default number of hours before a group invite link expires.
+  The default duration before a group invite link expires.
   This value is used when no explicit expiration is specified when creating an invite link.
-type: int
-default: 168
+type: duration
+default: 168h
 components: ["origin", "registry"]
 ---
 name: Server.AUPFile

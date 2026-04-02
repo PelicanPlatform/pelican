@@ -382,7 +382,7 @@ type Config struct {
 		EnablePprof bool `mapstructure:"enablepprof" yaml:"EnablePprof"`
 		EnableUI bool `mapstructure:"enableui" yaml:"EnableUI"`
 		ExternalWebUrl string `mapstructure:"externalweburl" yaml:"ExternalWebUrl"`
-		GroupInviteLinkExpirationHours int `mapstructure:"groupinvitelinkexpirationhours" yaml:"GroupInviteLinkExpirationHours"`
+		GroupInviteLinkExpiration time.Duration `mapstructure:"groupinvitelinkexpiration" yaml:"GroupInviteLinkExpiration"`
 		HealthMonitoringPublic bool `mapstructure:"healthmonitoringpublic" yaml:"HealthMonitoringPublic"`
 		Hostname string `mapstructure:"hostname" yaml:"Hostname"`
 		IssuerHostname string `mapstructure:"issuerhostname" yaml:"IssuerHostname"`
@@ -839,7 +839,7 @@ type configWithType struct {
 		EnablePprof struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
 		ExternalWebUrl struct { Type string; Value string }
-		GroupInviteLinkExpirationHours struct { Type string; Value int }
+		GroupInviteLinkExpiration struct { Type string; Value time.Duration }
 		HealthMonitoringPublic struct { Type string; Value bool }
 		Hostname struct { Type string; Value string }
 		IssuerHostname struct { Type string; Value string }
