@@ -1165,7 +1165,7 @@ func ListGroupInviteLinks(db *gorm.DB, groupID string) ([]GroupInviteLink, error
 // non-expired links and comparing the bcrypt hash. Returns nil if not found.
 func GetGroupInviteLinkByToken(db *gorm.DB, plaintext string) (*GroupInviteLink, error) {
 	var links []GroupInviteLink
-	if err := db.Where("revoked = 0").Find(&links).Error; err != nil {
+	if err := db.Where("revoked = 0 AND expires_at > ?", time.Now()).Find(&links).Error; err != nil {
 		return nil, err
 	}
 	for i := range links {
@@ -1180,9 +1180,9 @@ func GetGroupInviteLinkByToken(db *gorm.DB, plaintext string) (*GroupInviteLink,
 // It validates the link is not expired, not revoked, and (if single-use) not already redeemed.
 func RedeemGroupInviteLink(db *gorm.DB, plaintext string, userID string) error {
 	return db.Transaction(func(tx *gorm.DB) error {
-		// Scan non-revoked links and bcrypt-compare
+		// Scan non-revoked, non-expired links and bcrypt-compare
 		var links []GroupInviteLink
-		if err := tx.Where("revoked = 0").Find(&links).Error; err != nil {
+		if err := tx.Where("revoked = 0 AND expires_at > ?", time.Now()).Find(&links).Error; err != nil {
 			return err
 		}
 		var link *GroupInviteLink

@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -547,9 +546,6 @@ var originUserIdentityRemoveCmd = &cobra.Command{
 }
 
 func init() {
-	// Suppress unused import errors - time is used for formatting output
-	_ = time.Now
-
 	// Group commands
 	originGroupCreateCmd.Flags().String("name", "", "Name of the group (required)")
 	originGroupCreateCmd.Flags().String("description", "", "Description of the group")
