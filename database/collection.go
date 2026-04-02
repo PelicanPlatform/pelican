@@ -1178,7 +1178,9 @@ func GetGroupInviteLinkByToken(db *gorm.DB, plaintext string) (*GroupInviteLink,
 
 // RedeemGroupInviteLink redeems an invite link, adding the user to the group.
 // It validates the link is not expired, not revoked, and (if single-use) not already redeemed.
-func RedeemGroupInviteLink(db *gorm.DB, plaintext string, userID string) error {
+// If the user does not exist and sub+issuer are provided, the user is auto-created.
+// If username is empty, a username is derived from the sub.
+func RedeemGroupInviteLink(db *gorm.DB, plaintext string, userID string, sub string, issuer string, username string) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		// Scan non-revoked, non-expired links and bcrypt-compare
 		var links []GroupInviteLink
@@ -1208,20 +1210,50 @@ func RedeemGroupInviteLink(db *gorm.DB, plaintext string, userID string) error {
 			return errors.New("invite link has already been redeemed")
 		}
 
-		// Verify the user exists
-		var user User
-		if err := tx.First(&user, "id = ?", userID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errors.New("user does not exist")
+		// Resolve or auto-create the user
+		var resolvedUserID string
+		if userID != "" {
+			// Try to find existing user by ID
+			var user User
+			if err := tx.First(&user, "id = ?", userID).Error; err != nil {
+				if !errors.Is(err, gorm.ErrRecordNotFound) {
+					return err
+				}
+				// User ID not found; fall through to auto-create
+			} else {
+				resolvedUserID = user.ID
 			}
-			return err
+		}
+
+		if resolvedUserID == "" && sub != "" && issuer != "" {
+			// Try to find by identity (primary or secondary)
+			existingUser, err := GetUserByIdentity(tx, sub, issuer)
+			if err == nil {
+				resolvedUserID = existingUser.ID
+			} else if errors.Is(err, gorm.ErrRecordNotFound) {
+				// Auto-create the user
+				if username == "" {
+					username = sub
+				}
+				newUser, createErr := CreateUser(tx, username, sub, issuer)
+				if createErr != nil {
+					return fmt.Errorf("failed to auto-create user: %w", createErr)
+				}
+				resolvedUserID = newUser.ID
+			} else {
+				return err
+			}
+		}
+
+		if resolvedUserID == "" {
+			return errors.New("user does not exist and cannot be auto-created (missing identity)")
 		}
 
 		// If the link has a group, add the user to that group
 		if link.GroupID != "" {
 			groupMember := &GroupMember{
 				GroupID: link.GroupID,
-				UserID:  userID,
+				UserID:  resolvedUserID,
 				AddedBy: link.CreatedBy,
 			}
 			if result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(groupMember); result.Error != nil {
@@ -1233,7 +1265,7 @@ func RedeemGroupInviteLink(db *gorm.DB, plaintext string, userID string) error {
 		// Mark the link as redeemed
 		now := time.Now()
 		if err := tx.Model(&link).Updates(map[string]interface{}{
-			"redeemed_by": userID,
+			"redeemed_by": resolvedUserID,
 			"redeemed_at": now,
 		}).Error; err != nil {
 			return err
@@ -1286,7 +1318,7 @@ func UpdateUserDisplayName(db *gorm.DB, userID string, displayName string) error
 func RecordAUPAgreement(db *gorm.DB, userID string, version string) error {
 	now := time.Now()
 	return db.Model(&User{}).Where("id = ?", userID).Updates(map[string]interface{}{
-		"aup_version":  version,
+		"aup_version":   version,
 		"aup_agreed_at": now,
 	}).Error
 }

@@ -25,6 +25,10 @@ import {
   Box,
   Breadcrumbs,
   Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControl,
   InputLabel,
   MenuItem,
@@ -58,13 +62,84 @@ const Page = () => {
   const [writeGroupId, setWriteGroupId] = useState('');
   const [ownerGroupId, setOwnerGroupId] = useState('');
 
-  const { data: groups } = useApiSWR<Group[]>(
+  // Inline group creation dialog
+  const [createGroupOpen, setCreateGroupOpen] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupDescription, setNewGroupDescription] = useState('');
+  const [creatingGroup, setCreatingGroup] = useState(false);
+
+  // Invite link generation state (shown after collection creation)
+  const [inviteLink, setInviteLink] = useState('');
+  const [showInviteDialog, setShowInviteDialog] = useState(false);
+
+  const {
+    data: groups,
+    mutate: mutateGroups,
+  } = useApiSWR<Group[]>(
     'Could not fetch groups',
     '/api/v1.0/groups',
     async () => {
       return await fetch('/api/v1.0/groups', { method: 'GET' });
     }
   );
+
+  const handleCreateGroup = async () => {
+    if (!newGroupName) return;
+    setCreatingGroup(true);
+    try {
+      const response = await alertOnError(
+        async () =>
+          fetchApi(async () =>
+            fetch('/api/v1.0/groups', {
+              method: 'POST',
+              body: JSON.stringify({
+                id: '',
+                name: newGroupName,
+                description: newGroupDescription,
+              }),
+            })
+          ),
+        'Error Creating Group',
+        dispatch
+      );
+      if (response?.ok) {
+        const created = await response.json();
+        await mutateGroups();
+        setOwnerGroupId(created.id);
+        setNewGroupName('');
+        setNewGroupDescription('');
+        setCreateGroupOpen(false);
+      }
+    } finally {
+      setCreatingGroup(false);
+    }
+  };
+
+  const handleGenerateInviteLink = async (groupId: string) => {
+    try {
+      const response = await alertOnError(
+        async () =>
+          fetchApi(async () =>
+            fetch(`/api/v1.0/groups/${groupId}/invite-links`, {
+              method: 'POST',
+              body: JSON.stringify({
+                isSingleUse: false,
+                expiresInHours: 168, // 7 days
+              }),
+            })
+          ),
+        'Error Generating Invite Link',
+        dispatch
+      );
+      if (response?.ok) {
+        const data = await response.json();
+        setInviteLink(data.inviteToken || '');
+        setShowInviteDialog(true);
+      }
+    } catch {
+      // Error already dispatched
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,7 +191,12 @@ const Page = () => {
       }
       await Promise.all(aclPromises);
 
-      router.push('/origin/collections');
+      // If an owner group was selected, offer to generate an invite link
+      if (ownerGroupId) {
+        await handleGenerateInviteLink(ownerGroupId);
+      } else {
+        router.push('/origin/collections');
+      }
     } catch {
       // Error already dispatched
     } finally {
@@ -130,7 +210,7 @@ const Page = () => {
   }));
 
   return (
-    <AuthenticatedContent redirect={true} allowedRoles={['admin']}>
+    <AuthenticatedContent redirect={true} allowedRoles={['admin', 'user']}>
       <Box width={'100%'} maxWidth={600}>
         <Breadcrumbs aria-label={'breadcrumb'} sx={{ mb: 2 }}>
           <Link href='/origin/collections'>Collections</Link>
@@ -190,6 +270,16 @@ const Page = () => {
             set these later.
           </Typography>
 
+          <Box display='flex' justifyContent='flex-end' mb={2}>
+            <Button
+              variant='outlined'
+              size='small'
+              onClick={() => setCreateGroupOpen(true)}
+            >
+              Create New Group
+            </Button>
+          </Box>
+
           <Autocomplete
             options={groupOptions}
             renderInput={(params) => (
@@ -210,6 +300,9 @@ const Page = () => {
           />
           <Autocomplete
             options={groupOptions}
+            value={
+              groupOptions.find((o) => o.id === ownerGroupId) || null
+            }
             renderInput={(params) => (
               <TextField {...params} label='Owner Group' />
             )}
@@ -233,6 +326,90 @@ const Page = () => {
           </Box>
         </form>
       </Box>
+
+      {/* Inline Group Creation Dialog */}
+      <Dialog
+        open={createGroupOpen}
+        onClose={() => setCreateGroupOpen(false)}
+        maxWidth='sm'
+        fullWidth
+      >
+        <DialogTitle>Create New Group</DialogTitle>
+        <DialogContent>
+          <TextField
+            label='Group Name'
+            value={newGroupName}
+            onChange={(e) => setNewGroupName(e.target.value)}
+            required
+            fullWidth
+            sx={{ mt: 1, mb: 2 }}
+          />
+          <TextField
+            label='Description'
+            value={newGroupDescription}
+            onChange={(e) => setNewGroupDescription(e.target.value)}
+            fullWidth
+            multiline
+            rows={2}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCreateGroupOpen(false)}>Cancel</Button>
+          <Button
+            variant='contained'
+            onClick={handleCreateGroup}
+            disabled={creatingGroup || !newGroupName}
+          >
+            {creatingGroup ? 'Creating...' : 'Create'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Invite Link Dialog (shown after collection creation with owner group) */}
+      <Dialog
+        open={showInviteDialog}
+        onClose={() => {
+          setShowInviteDialog(false);
+          router.push('/origin/collections');
+        }}
+        maxWidth='sm'
+        fullWidth
+      >
+        <DialogTitle>Collection Created</DialogTitle>
+        <DialogContent>
+          <Typography mb={2}>
+            Your collection has been created. Share this invite link with group
+            members so they can join the owner group:
+          </Typography>
+          <TextField
+            value={inviteLink}
+            fullWidth
+            slotProps={{
+              input: {
+                readOnly: true,
+              },
+            }}
+            sx={{ mb: 1 }}
+          />
+          <Button
+            size='small'
+            onClick={() => navigator.clipboard.writeText(inviteLink)}
+          >
+            Copy to Clipboard
+          </Button>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            variant='contained'
+            onClick={() => {
+              setShowInviteDialog(false);
+              router.push('/origin/collections');
+            }}
+          >
+            Done
+          </Button>
+        </DialogActions>
+      </Dialog>
     </AuthenticatedContent>
   );
 };

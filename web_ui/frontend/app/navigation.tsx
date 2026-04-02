@@ -95,6 +95,8 @@ const NavigationConfig: NavigationConfiguration = {
   ],
   origin: [
     { title: 'Dashboard', href: '/origin/', icon: <Dashboard /> },
+    { title: 'Collections', href: '/origin/collections/', icon: <FolderOpen /> },
+    { title: 'Groups', href: '/origin/groups/', icon: <Groups /> },
     { title: 'Metrics', href: '/origin/metrics/', icon: <Equalizer /> },
     { title: 'Downtime', href: '/origin/downtime/', icon: <CalendarMonth /> },
     {
