@@ -463,6 +463,84 @@ func CheckAdmin(identity UserIdentity) (isAdmin bool, message string) {
 	return false, "You don't have permission to perform this action"
 }
 
+// CheckUserAdmin checks whether the given identity has user administrator privileges.
+// User administrators can manage non-admin users and unprivileged groups.
+// System admins also have user admin privileges.
+func CheckUserAdmin(identity UserIdentity) (bool, string) {
+	// System admins always have user admin privileges
+	if isAdmin, _ := CheckAdmin(identity); isAdmin {
+		return true, ""
+	}
+
+	// Check user admin groups
+	if len(identity.Groups) > 0 {
+		adminGroups := param.Server_UserAdminGroups.GetStringSlice()
+		if len(adminGroups) > 0 {
+			for _, userGroup := range identity.Groups {
+				for _, adminGroup := range adminGroups {
+					if userGroup == adminGroup {
+						return true, ""
+					}
+				}
+			}
+		}
+	}
+
+	// Check user admin users
+	adminList := param.Server_UserAdminUsers.GetStringSlice()
+	if len(adminList) > 0 {
+		identifiers := []string{identity.Username, identity.ID, identity.Sub}
+		for _, admin := range adminList {
+			for _, identifier := range identifiers {
+				if identifier != "" && identifier == admin {
+					return true, ""
+				}
+			}
+		}
+	}
+
+	return false, "You don't have user administrator permission"
+}
+
+// CheckCollectionAdmin checks whether the given identity has collection administrator privileges.
+// Collection administrators can create, modify, and delete collections and manage ACLs.
+// System admins also have collection admin privileges.
+func CheckCollectionAdmin(identity UserIdentity) (bool, string) {
+	// System admins always have collection admin privileges
+	if isAdmin, _ := CheckAdmin(identity); isAdmin {
+		return true, ""
+	}
+
+	// Check collection admin groups
+	if len(identity.Groups) > 0 {
+		adminGroups := param.Server_CollectionAdminGroups.GetStringSlice()
+		if len(adminGroups) > 0 {
+			for _, userGroup := range identity.Groups {
+				for _, adminGroup := range adminGroups {
+					if userGroup == adminGroup {
+						return true, ""
+					}
+				}
+			}
+		}
+	}
+
+	// Check collection admin users
+	adminList := param.Server_CollectionAdminUsers.GetStringSlice()
+	if len(adminList) > 0 {
+		identifiers := []string{identity.Username, identity.ID, identity.Sub}
+		for _, admin := range adminList {
+			for _, identifier := range identifiers {
+				if identifier != "" && identifier == admin {
+					return true, ""
+				}
+			}
+		}
+	}
+
+	return false, "You don't have collection administrator permission"
+}
+
 // AdminAuthHandler checks the admin status of a logged-in user. This middleware
 // should be cascaded behind the [web_ui.AuthHandler]
 func AdminAuthHandler(ctx *gin.Context) {

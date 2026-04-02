@@ -3217,6 +3217,39 @@ type: stringSlice
 default: []
 components: ["cache", "director", "origin", "registry"]
 ---
+name: Server.UserAdminUsers
+description: |+
+  A list of user identifiers (username, OIDC subject, or user ID) that are granted user administrator privileges.
+  User administrators can create, modify, and delete non-admin users and unprivileged groups.
+  They cannot modify the system admin user or system admin groups.
+type: stringSlice
+default: []
+components: ["origin", "registry"]
+---
+name: Server.UserAdminGroups
+description: |+
+  A list of group names whose members are granted user administrator privileges.
+  User administrators can create, modify, and delete non-admin users and unprivileged groups.
+type: stringSlice
+default: []
+components: ["origin", "registry"]
+---
+name: Server.CollectionAdminUsers
+description: |+
+  A list of user identifiers (username, OIDC subject, or user ID) that are granted collection administrator privileges.
+  Collection administrators can create, modify, and delete collections and manage collection ACLs.
+type: stringSlice
+default: []
+components: ["origin"]
+---
+name: Server.CollectionAdminGroups
+description: |+
+  A list of group names whose members are granted collection administrator privileges.
+  Collection administrators can create, modify, and delete collections and manage collection ACLs.
+type: stringSlice
+default: []
+components: ["origin"]
+---
 name: Server.StartupTimeout
 description: |+
   The amount of time the pelican server will wait for its components and services to startup.

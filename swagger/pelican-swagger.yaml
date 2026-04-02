@@ -4653,6 +4653,48 @@ paths:
           description: Invite link not found
           schema:
             $ref: "#/definitions/ErrorModelV2"
+  /invites/onboarding:
+    post:
+      tags:
+        - groups
+      summary: Create a user-onboarding invite link
+      description: "`User Admin Required`. Creates an invite link that onboards users without adding them to a group."
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          description: Invite link settings
+          required: true
+          schema:
+            type: object
+            properties:
+              isSingleUse:
+                type: boolean
+                description: Whether the invite link can only be used once
+                default: false
+              expiresIn:
+                type: string
+                description: Expiration duration (e.g. '168h', '24h')
+      responses:
+        "201":
+          description: Invite link created successfully. The inviteToken field is shown only once.
+          schema:
+            $ref: "#/definitions/GroupInviteLink"
+        "400":
+          description: Bad request
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Forbidden - requires user admin privileges
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
   /users:
     get:
       tags:
