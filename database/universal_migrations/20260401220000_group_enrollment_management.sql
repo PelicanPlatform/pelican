@@ -8,31 +8,30 @@
 ALTER TABLE groups ADD COLUMN owner_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE groups ADD COLUMN admin_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE groups ADD COLUMN admin_type TEXT NOT NULL DEFAULT '';
+ALTER TABLE groups ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP;
 
 -- Backfill owner_id from created_by for existing groups.
 UPDATE groups SET owner_id = created_by WHERE owner_id = '';
 
 -- Add user status tracking fields.
--- status: 'active' or 'inactive'.
--- last_login_at: timestamp of the last login.
--- display_name: human-readable display name.
 ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
 ALTER TABLE users ADD COLUMN last_login_at DATETIME;
 ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT '';
 
 -- Add AUP (Acceptable Use Policy) tracking fields.
--- aup_version: version string of the AUP the user agreed to.
--- aup_agreed_at: timestamp when the user agreed to the AUP.
 ALTER TABLE users ADD COLUMN aup_version TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN aup_agreed_at DATETIME;
+ALTER TABLE users ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP;
 
 -- Create group_invite_links table for invite link management.
+-- invite_token stores the bcrypt hash of the token; the plaintext is returned only once at creation.
 CREATE TABLE group_invite_links (
     id TEXT PRIMARY KEY,
     group_id TEXT NOT NULL,
     invite_token TEXT NOT NULL UNIQUE,
     created_by TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     expires_at DATETIME NOT NULL,
     is_single_use INTEGER NOT NULL DEFAULT 0,
     redeemed_by TEXT NOT NULL DEFAULT '',
@@ -42,13 +41,13 @@ CREATE TABLE group_invite_links (
 );
 
 -- Create user_identities table for multiple identities per user.
--- This allows associating multiple OAuth2/OIDC identities with a single user.
 CREATE TABLE user_identities (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
     sub TEXT NOT NULL,
     issuer TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 

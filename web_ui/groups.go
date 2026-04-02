@@ -38,8 +38,8 @@ type UpdateGroupOwnershipReq struct {
 }
 
 type CreateInviteLinkReq struct {
-	IsSingleUse    bool   `json:"isSingleUse"`
-	ExpiresInHours int    `json:"expiresInHours"`
+	IsSingleUse bool   `json:"isSingleUse"`
+	ExpiresIn   string `json:"expiresIn"` // Duration string, e.g. "168h", "7d"
 }
 
 type RedeemInviteLinkReq struct {
@@ -930,16 +930,25 @@ func handleCreateGroupInviteLink(ctx *gin.Context) {
 		return
 	}
 
-	// Default expiration is 7 days (168 hours)
-	expiresInHours := req.ExpiresInHours
-	if expiresInHours <= 0 {
-		defaultHours := param.Server_GroupInviteLinkExpirationHours.GetInt()
-		if defaultHours <= 0 {
-			defaultHours = 168 // 7 days
+	// Default expiration from config (duration string)
+	var expDuration time.Duration
+	if req.ExpiresIn != "" {
+		parsed, parseErr := time.ParseDuration(req.ExpiresIn)
+		if parseErr != nil {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Invalid expiresIn duration format (e.g. '168h', '24h')",
+			})
+			return
 		}
-		expiresInHours = defaultHours
+		expDuration = parsed
+	} else {
+		expDuration = param.Server_GroupInviteLinkExpiration.GetDuration()
+		if expDuration <= 0 {
+			expDuration = 168 * time.Hour // 7 days
+		}
 	}
-	expiresAt := time.Now().Add(time.Duration(expiresInHours) * time.Hour)
+	expiresAt := time.Now().Add(expDuration)
 
 	user, userId, groups, err := GetUserGroups(ctx)
 	if err != nil || userId == "" {
@@ -956,7 +965,7 @@ func handleCreateGroupInviteLink(ctx *gin.Context) {
 		Sub:      ctx.GetString("OIDCSub"),
 	})
 
-	link, err := database.CreateGroupInviteLink(database.ServerDatabase, groupID, userId, expiresAt, req.IsSingleUse, isAdmin)
+	link, plainToken, err := database.CreateGroupInviteLink(database.ServerDatabase, groupID, userId, expiresAt, req.IsSingleUse, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -977,7 +986,15 @@ func handleCreateGroupInviteLink(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusCreated, link)
+	// Return the link metadata along with the plaintext token (shown only once)
+	type InviteLinkResponse struct {
+		database.GroupInviteLink
+		InviteToken string `json:"inviteToken"`
+	}
+	ctx.JSON(http.StatusCreated, InviteLinkResponse{
+		GroupInviteLink: *link,
+		InviteToken:     plainToken,
+	})
 }
 
 func handleListGroupInviteLinks(ctx *gin.Context) {

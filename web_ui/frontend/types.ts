@@ -135,11 +135,12 @@ export interface User {
   aupVersion: string;
   aupAgreedAt: string | null;
   createdAt: string;
+  updatedAt: string;
 }
 
 export type UserPost = Omit<
   User,
-  'id' | 'createdAt' | 'status' | 'lastLoginAt' | 'displayName' | 'aupVersion' | 'aupAgreedAt'
+  'id' | 'createdAt' | 'updatedAt' | 'status' | 'lastLoginAt' | 'displayName' | 'aupVersion' | 'aupAgreedAt'
 >;
 
 export type UserPatch = Partial<Omit<User, 'createdAt'>>;
@@ -156,11 +157,12 @@ export interface Group {
   adminId: string;
   adminType: AdminType;
   createdAt: string;
+  updatedAt: string;
 }
 
 export type GroupPost = Omit<
   Group,
-  'members' | 'createdBy' | 'createdAt' | 'ownerId' | 'adminId' | 'adminType'
+  'members' | 'createdBy' | 'createdAt' | 'updatedAt' | 'ownerId' | 'adminId' | 'adminType'
 >;
 
 export interface GroupMember {
@@ -179,9 +181,9 @@ export type GroupMemberPost = Omit<
 export interface GroupInviteLink {
   id: string;
   groupId: string;
-  inviteToken: string;
   createdBy: string;
   createdAt: string;
+  updatedAt: string;
   expiresAt: string;
   isSingleUse: boolean;
   redeemedBy: string;
@@ -189,9 +191,14 @@ export interface GroupInviteLink {
   revoked: boolean;
 }
 
+export interface GroupInviteLinkCreated extends GroupInviteLink {
+  /** The plaintext invite token, shown only once at creation */
+  inviteToken: string;
+}
+
 export interface GroupInviteLinkPost {
   isSingleUse: boolean;
-  expiresInHours: number;
+  expiresIn: string; // Duration string, e.g. "168h"
 }
 
 export interface UserIdentity {
@@ -200,6 +207,7 @@ export interface UserIdentity {
   sub: string;
   issuer: string;
   createdAt: string;
+  updatedAt: string;
 }
 
 export type UserIdentityPost = Omit<UserIdentity, 'id' | 'userId' | 'createdAt'>;
