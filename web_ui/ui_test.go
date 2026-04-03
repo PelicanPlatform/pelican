@@ -1046,9 +1046,10 @@ func TestGroupManagementAPI(t *testing.T) {
 		require.NoError(t, err)
 
 		// Pre-create the user before adding them to the group
+		adminToken := generateTestAdminUserToken(t)
 		req, err = http.NewRequest("POST", "/api/v1.0/users", bytes.NewReader(body))
 		require.NoError(t, err)
-		req.AddCookie(&http.Cookie{Name: "login", Value: regularUserToken})
+		req.AddCookie(&http.Cookie{Name: "login", Value: adminToken})
 		req.Header.Set("Content-Type", "application/json")
 		recorder = httptest.NewRecorder()
 		route.ServeHTTP(recorder, req)
