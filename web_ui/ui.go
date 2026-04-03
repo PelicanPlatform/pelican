@@ -635,7 +635,7 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 		downtimeAPI.DELETE("/:uuid", DowntimeAuthHandler, HandleDeleteDowntime)
 	}
 
-	groupRouterGroup := routerGroup.Group("/groups", AuthHandler)
+	groupRouterGroup := routerGroup.Group("/groups", AuthHandler, AdminAuthHandler)
 	{
 		groupRouterGroup.GET("", handleListGroups)
 		groupRouterGroup.POST("", handleCreateGroup)
