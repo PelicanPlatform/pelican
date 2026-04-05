@@ -95,21 +95,15 @@ func RegisterRoutesWithMiddleware(engine *gin.Engine, registry *ProviderRegistry
 	}
 }
 
-// RegisterAdminRoutes registers the admin client-management endpoints.
-// These routes MUST be protected by admin auth middleware by the caller.
-// Admin routes are per-namespace, scoped under /api/v1.0/issuer/ns/*namespace/admin.
-func RegisterAdminRoutes(engine *gin.Engine, registry *ProviderRegistry, middleware ...gin.HandlerFunc) {
-	// Admin routes share the namespace dispatch. The admin prefix detection
-	// happens inside handleDispatch.
-	// NOTE: admin middleware is injected by the caller through the middleware
-	// slice. The namespace middleware is appended here.
-	_ = engine // admin routes are handled by the dispatch handler
-	_ = registry
-	_ = middleware
-	// Admin endpoints are served by the same dispatch handler. The caller
-	// must register admin-specific auth middleware at a higher level or use
-	// a separate approach. For now, admin routes are sub-paths of the
-	// namespace dispatch — see handleDispatch which checks for /admin/ prefix.
+// RegisterAdminRoutes registers admin middleware for admin client-management endpoints.
+// The middleware is stored on each provider and enforced in the dispatch handler
+// whenever an admin/* action is requested.
+func RegisterAdminRoutes(registry *ProviderRegistry, middleware ...gin.HandlerFunc) {
+	for _, ns := range registry.Namespaces() {
+		if p := registry.Get(ns); p != nil {
+			p.SetAdminMiddleware(middleware...)
+		}
+	}
 }
 
 // handleDispatch is the catch-all handler for GET and POST requests.
@@ -150,15 +144,23 @@ func handleDispatch(ctx *gin.Context) {
 		handleClientConfigurationRead(provider)(ctx)
 	case action == ".well-known/openid-configuration":
 		handleIssuerDiscovery(provider)(ctx)
-	// Admin endpoints
-	case action == "admin/clients" && ctx.Request.Method == http.MethodGet:
-		handleAdminListClients(provider)(ctx)
-	case action == "admin/clients" && ctx.Request.Method == http.MethodPost:
-		handleAdminCreateClient(provider)(ctx)
-	case strings.HasPrefix(action, "admin/clients/") && ctx.Request.Method == http.MethodGet:
-		clientID := strings.TrimPrefix(action, "admin/clients/")
-		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
-		handleAdminGetClient(provider)(ctx)
+	// Admin endpoints — enforce admin middleware before dispatching.
+	case strings.HasPrefix(action, "admin/"):
+		if !runAdminMiddleware(ctx, provider) {
+			return
+		}
+		switch {
+		case action == "admin/clients" && ctx.Request.Method == http.MethodGet:
+			handleAdminListClients(provider)(ctx)
+		case action == "admin/clients" && ctx.Request.Method == http.MethodPost:
+			handleAdminCreateClient(provider)(ctx)
+		case strings.HasPrefix(action, "admin/clients/") && ctx.Request.Method == http.MethodGet:
+			clientID := strings.TrimPrefix(action, "admin/clients/")
+			ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
+			handleAdminGetClient(provider)(ctx)
+		default:
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
+		}
 	default:
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
 	}
@@ -180,6 +182,9 @@ func handleDispatchPut(ctx *gin.Context) {
 		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
 		handleClientConfigurationUpdate(provider)(ctx)
 	case strings.HasPrefix(action, "admin/clients/"):
+		if !runAdminMiddleware(ctx, provider) {
+			return
+		}
 		clientID := strings.TrimPrefix(action, "admin/clients/")
 		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
 		handleAdminUpdateClient(provider)(ctx)
@@ -204,6 +209,9 @@ func handleDispatchDelete(ctx *gin.Context) {
 		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
 		handleClientConfigurationDelete(provider)(ctx)
 	case strings.HasPrefix(action, "admin/clients/"):
+		if !runAdminMiddleware(ctx, provider) {
+			return
+		}
 		clientID := strings.TrimPrefix(action, "admin/clients/")
 		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
 		handleAdminDeleteClient(provider)(ctx)
@@ -489,6 +497,22 @@ func handleDeviceAuthorization(provider *OIDCProvider) gin.HandlerFunc {
 			}
 		}
 
+		// Verify client is authorized for the device_code grant type
+		hasDeviceGrant := false
+		for _, gt := range dc.GrantTypes {
+			if gt == "urn:ietf:params:oauth:grant-type:device_code" {
+				hasDeviceGrant = true
+				break
+			}
+		}
+		if !hasDeviceGrant {
+			ctx.JSON(http.StatusBadRequest, gin.H{
+				"error":             "unauthorized_client",
+				"error_description": "This client is not authorized for the device_code grant type",
+			})
+			return
+		}
+
 		// Parse requested scopes
 		scopeStr := r.FormValue("scope")
 		var scopes []string
@@ -688,6 +712,24 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 			}
 		}
 
+		// Also enforce the client's configured scope allow-list: a device
+		// client limited to certain scopes must not obtain broader scopes
+		// even if the user's authorization rules would permit them.
+		clientObj, clientErr := provider.Storage().GetClient(ctx, dc.ClientID)
+		if clientErr != nil {
+			log.WithError(clientErr).Warn("Embedded issuer: failed to load client for scope filtering")
+			ctx.JSON(http.StatusInternalServerError, gin.H{"status": "error", "error": "Failed to load client"})
+			return
+		}
+		clientScopes := clientObj.GetScopes()
+		filteredScopes := make([]string, 0, len(grantedScopes))
+		for _, scope := range grantedScopes {
+			if scopeAllowed(scope, clientScopes) {
+				filteredScopes = append(filteredScopes, scope)
+			}
+		}
+		grantedScopes = filteredScopes
+
 		issuerURL := IssuerURLForNamespace(provider.Namespace)
 		session := DefaultOIDCSession(user, issuerURL, matchedGroups, grantedScopes)
 		sessionData, _ := json.Marshal(session)
@@ -733,6 +775,22 @@ func handleDeviceTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 		}
 	}
 
+	// Verify client is authorized for the device_code grant type
+	hasDeviceGrant := false
+	for _, gt := range dc.GrantTypes {
+		if gt == "urn:ietf:params:oauth:grant-type:device_code" {
+			hasDeviceGrant = true
+			break
+		}
+	}
+	if !hasDeviceGrant {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error":             "unauthorized_client",
+			"error_description": "This client is not authorized for the device_code grant type",
+		})
+		return
+	}
+
 	deviceCode := r.FormValue("device_code")
 	if deviceCode == "" {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request", "error_description": "device_code required"})
@@ -754,6 +812,17 @@ func handleDeviceTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 			return
 		}
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid_grant", "error_description": err.Error()})
+		return
+	}
+
+	// Verify the device code was issued to the requesting client.
+	// This prevents cross-client device code redemption where a different
+	// client learns the device_code and redeems it.
+	if request.GetClient().GetID() != clientID {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error":             "invalid_grant",
+			"error_description": "The device code was issued to a different client",
+		})
 		return
 	}
 
@@ -805,20 +874,32 @@ func handleDeviceTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 	// Record that this client was used (prevents unused-client cleanup).
 	_ = provider.storage.TouchClientLastUsed(rCtx, clientID)
 
-	// Generate refresh token if offline_access was requested
-	for _, s := range request.GetGrantedScopes() {
-		if s == "offline_access" {
-			refreshToken, refreshSignature, rtErr := provider.strategy.CoreStrategy.GenerateRefreshToken(rCtx, ar)
-			if rtErr != nil {
-				log.WithError(rtErr).Warn("Embedded issuer: failed to generate device code refresh token")
-				break
-			}
-			if rtErr = provider.storage.CreateRefreshTokenSession(rCtx, refreshSignature, accessSignature, ar); rtErr != nil {
-				log.WithError(rtErr).Warn("Embedded issuer: failed to store device code refresh token")
-				break
-			}
-			result["refresh_token"] = refreshToken
+	// Generate refresh token if offline_access was requested AND the client
+	// is authorized for the refresh_token grant type. Without this check,
+	// operators who omit "refresh_token" from grant_types cannot prevent
+	// long-lived sessions.
+	hasRefreshGrant := false
+	for _, gt := range dc.GrantTypes {
+		if gt == "refresh_token" {
+			hasRefreshGrant = true
 			break
+		}
+	}
+	if hasRefreshGrant {
+		for _, s := range request.GetGrantedScopes() {
+			if s == "offline_access" {
+				refreshToken, refreshSignature, rtErr := provider.strategy.CoreStrategy.GenerateRefreshToken(rCtx, ar)
+				if rtErr != nil {
+					log.WithError(rtErr).Warn("Embedded issuer: failed to generate device code refresh token")
+					break
+				}
+				if rtErr = provider.storage.CreateRefreshTokenSession(rCtx, refreshSignature, accessSignature, ar); rtErr != nil {
+					log.WithError(rtErr).Warn("Embedded issuer: failed to store device code refresh token")
+					break
+				}
+				result["refresh_token"] = refreshToken
+				break
+			}
 		}
 	}
 
@@ -967,8 +1048,18 @@ func validateDynamicRedirectURIs(uris []string) (string, string) {
 func handleDynamicClientRegistration(provider *OIDCProvider) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		// ---- Rate limit ----
+		// Use the shared registry-level rate limiter to prevent attackers
+		// from multiplying the per-IP limit by cycling through namespaces.
 		clientIP := ctx.ClientIP()
-		if !provider.RegistrationLimiter.Allow(clientIP) {
+		registry := GetRegistry(ctx)
+		if registry != nil && !registry.RegistrationLimiter.Allow(clientIP) {
+			ctx.JSON(http.StatusTooManyRequests, gin.H{
+				"error":             "rate_limit_exceeded",
+				"error_description": "Too many client registrations from this address; try again later",
+			})
+			return
+		} else if registry == nil && !provider.RegistrationLimiter.Allow(clientIP) {
+			// Fallback to per-provider limiter if registry is not in context
 			ctx.JSON(http.StatusTooManyRequests, gin.H{
 				"error":             "rate_limit_exceeded",
 				"error_description": "Too many client registrations from this address; try again later",
@@ -1273,6 +1364,25 @@ func deviceViewURL(namespace, userCode string) string {
 }
 
 // Helpers
+
+// runAdminMiddleware executes the provider's admin middleware chain.
+// Returns true if the request should proceed, false if middleware aborted it.
+func runAdminMiddleware(ctx *gin.Context, provider *OIDCProvider) bool {
+	if len(provider.adminMiddleware) == 0 {
+		ctx.JSON(http.StatusForbidden, gin.H{
+			"error":             "access_denied",
+			"error_description": "Admin endpoints are not available (no admin middleware configured)",
+		})
+		return false
+	}
+	for _, mw := range provider.adminMiddleware {
+		mw(ctx)
+		if ctx.IsAborted() {
+			return false
+		}
+	}
+	return true
+}
 
 func isStandardScope(scope string) bool {
 	switch scope {

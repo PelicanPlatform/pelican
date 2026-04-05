@@ -417,7 +417,7 @@ func handleTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 	}
 
 	// Introspect the subject token — this validates signature, expiry, etc.
-	issuerURL := IssuerURL()
+	issuerURL := IssuerURLForNamespace(provider.Namespace)
 	introSession := DefaultOIDCSession("", issuerURL, nil, nil)
 	_, subjectAR, err := provider.Provider().IntrospectToken(rCtx, subjectToken, fosite.AccessToken, introSession)
 	if err != nil {
@@ -445,14 +445,17 @@ func handleTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 	// The exchanged token's scopes must be a subset of both:
 	// (a) what the subject token grants
 	// (b) what the client is allowed to request
+	// No scopes are auto-allowed — including standard ones like
+	// offline_access — so that operators who omit a scope from a client's
+	// configuration can enforce that restriction.
 	grantedScopes := make([]string, 0, len(requestedScopes))
 	for _, scope := range requestedScopes {
 		// Check the scope is within the subject token's grants.
-		if !scopeAllowed(scope, subjectGrantedScopes) && !isStandardScope(scope) {
+		if !scopeAllowed(scope, subjectGrantedScopes) {
 			continue
 		}
 		// Check the scope is within the client's allowed scopes.
-		if !scopeAllowed(scope, dc.Scopes) && !isStandardScope(scope) {
+		if !scopeAllowed(scope, dc.Scopes) {
 			continue
 		}
 		grantedScopes = append(grantedScopes, scope)
@@ -461,9 +464,25 @@ func handleTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 	// ---- Determine audience ----
 	requestedAudience := r.FormValue("audience")
 	// We always grant the WLCG wildcard; if the caller requests a specific
-	// audience it is added in addition.
+	// audience it must already be present in the subject token's granted
+	// audiences to prevent arbitrary audience injection.
 	audiences := []string{WLCGAudienceAny}
 	if requestedAudience != "" && requestedAudience != WLCGAudienceAny {
+		subjectAudiences := subjectAR.GetGrantedAudience()
+		audienceAllowed := false
+		for _, aud := range subjectAudiences {
+			if aud == requestedAudience {
+				audienceAllowed = true
+				break
+			}
+		}
+		if !audienceAllowed {
+			ctx.JSON(http.StatusBadRequest, gin.H{
+				"error":             "invalid_target",
+				"error_description": "The requested audience is not present in the subject token",
+			})
+			return
+		}
 		audiences = append(audiences, requestedAudience)
 	}
 
@@ -488,7 +507,6 @@ func handleTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 
 	session := DefaultOIDCSession(subject, issuerURL, groups, grantedScopes)
 	session.SetExpiresAt(fosite.AccessToken, session.JWTClaims.ExpiresAt)
-
 	ar := fosite.NewAccessRequest(session)
 	ar.Client = client
 	ar.GrantedScope = grantedScopes
@@ -523,20 +541,30 @@ func handleTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 		"expires_in":        int(provider.config.AccessTokenLifespan.Seconds()),
 	}
 
-	// Optionally issue a refresh token if offline_access is among scopes.
-	for _, s := range grantedScopes {
-		if s == "offline_access" {
-			rt, rtSig, rtErr := provider.strategy.CoreStrategy.GenerateRefreshToken(rCtx, ar)
-			if rtErr != nil {
-				log.WithError(rtErr).Warn("Embedded issuer: failed to generate token-exchange refresh token")
-				break
-			}
-			if rtErr = provider.storage.CreateRefreshTokenSession(rCtx, rtSig, accessSignature, ar); rtErr != nil {
-				log.WithError(rtErr).Warn("Embedded issuer: failed to store token-exchange refresh token")
-				break
-			}
-			result["refresh_token"] = rt
+	// Optionally issue a refresh token if offline_access is among scopes
+	// AND the client is authorized for the refresh_token grant type.
+	hasRefreshGrant := false
+	for _, gt := range dc.GrantTypes {
+		if gt == "refresh_token" {
+			hasRefreshGrant = true
 			break
+		}
+	}
+	if hasRefreshGrant {
+		for _, s := range grantedScopes {
+			if s == "offline_access" {
+				rt, rtSig, rtErr := provider.strategy.CoreStrategy.GenerateRefreshToken(rCtx, ar)
+				if rtErr != nil {
+					log.WithError(rtErr).Warn("Embedded issuer: failed to generate token-exchange refresh token")
+					break
+				}
+				if rtErr = provider.storage.CreateRefreshTokenSession(rCtx, rtSig, accessSignature, ar); rtErr != nil {
+					log.WithError(rtErr).Warn("Embedded issuer: failed to store token-exchange refresh token")
+					break
+				}
+				result["refresh_token"] = rt
+				break
+			}
 		}
 	}
 

@@ -102,16 +102,22 @@ func setupAdminTestServer(t *testing.T) (*OIDCProvider, *httptest.Server) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 
-	// Fake admin auth middleware
+	// Fake user auth middleware (applied globally)
 	engine.Use(func(c *gin.Context) {
 		c.Set("User", "admin")
 		c.Next()
 	})
 
+	// Fake admin auth middleware (passed to RegisterAdminRoutes so it is
+	// enforced by the dispatch handler for admin/* actions).
+	adminMiddleware := func(c *gin.Context) {
+		c.Next()
+	}
+
 	registry := NewProviderRegistry()
 	registry.Register(testNamespace, provider)
 	RegisterRoutesWithMiddleware(engine, registry)
-	RegisterAdminRoutes(engine, registry)
+	RegisterAdminRoutes(registry, adminMiddleware)
 
 	newTS := httptest.NewTLSServer(engine)
 	t.Cleanup(newTS.Close)

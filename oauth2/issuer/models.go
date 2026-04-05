@@ -21,8 +21,11 @@ package issuer
 import "time"
 
 // OIDCClientRecord maps to the oidc_clients table.
+// The composite primary key (ID, Namespace) ensures that client IDs are unique
+// per namespace rather than globally, preventing cross-namespace collisions.
 type OIDCClientRecord struct {
 	ID                      string `gorm:"primaryKey"`
+	Namespace               string `gorm:"primaryKey"`
 	ClientSecret            string
 	RedirectURIs            string
 	GrantTypes              string
@@ -35,7 +38,6 @@ type OIDCClientRecord struct {
 	RegistrationIP          string
 	RegistrationAccessToken string
 	ClientName              string
-	Namespace               string
 	CreatedAt               time.Time
 }
 

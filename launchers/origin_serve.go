@@ -398,7 +398,7 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 
 	// Register admin client-management endpoints behind full admin auth.
 	// Admin routes are handled by the same namespace-dispatched routes.
-	issuer.RegisterAdminRoutes(engine, registry, web_ui.AuthHandler, web_ui.AdminAuthHandler)
+	issuer.RegisterAdminRoutes(registry, web_ui.AuthHandler, web_ui.AdminAuthHandler)
 
 	log.Info("Embedded OIDC issuer configured successfully")
 	return nil

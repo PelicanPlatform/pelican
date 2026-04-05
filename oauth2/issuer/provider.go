@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/go-jose/go-jose/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/mohae/deepcopy"
@@ -72,6 +73,10 @@ type OIDCProvider struct {
 	// RegistrationLimiter enforces per-IP rate limiting on the dynamic
 	// client registration endpoint.
 	RegistrationLimiter *registrationRateLimiter
+
+	// adminMiddleware holds the authentication/authorization middleware
+	// that must be applied to admin endpoints. Set via SetAdminMiddleware.
+	adminMiddleware []gin.HandlerFunc
 }
 
 // NewOIDCProvider creates a new embedded OIDC provider for the given namespace.
@@ -89,15 +94,16 @@ func NewOIDCProvider(db *gorm.DB, issuerURL string, refreshGracePeriod time.Dura
 	tokenURL := issuerURL + "/token"
 
 	fositeConfig := &fosite.Config{
-		AccessTokenLifespan:      time.Hour,
-		RefreshTokenLifespan:     7 * 24 * time.Hour,
-		AuthorizeCodeLifespan:    10 * time.Minute,
-		IDTokenLifespan:          time.Hour,
-		TokenURL:                 tokenURL,
-		AccessTokenIssuer:        issuerURL,
-		ScopeStrategy:            sciTokensScopeStrategy,
-		AudienceMatchingStrategy: fosite.DefaultAudienceMatchingStrategy,
-		JWTScopeClaimKey:         jwt.JWTScopeFieldString,
+		AccessTokenLifespan:         time.Hour,
+		RefreshTokenLifespan:        7 * 24 * time.Hour,
+		AuthorizeCodeLifespan:       10 * time.Minute,
+		IDTokenLifespan:             time.Hour,
+		TokenURL:                    tokenURL,
+		AccessTokenIssuer:           issuerURL,
+		ScopeStrategy:               sciTokensScopeStrategy,
+		AudienceMatchingStrategy:    fosite.DefaultAudienceMatchingStrategy,
+		JWTScopeClaimKey:            jwt.JWTScopeFieldString,
+		EnforcePKCEForPublicClients: true,
 	}
 
 	// Load (or generate) the encrypted master key and derive the HMAC
@@ -414,6 +420,12 @@ func (p *OIDCProvider) EnsureClient(ctx context.Context, clientID, secret string
 // compiled by oa4mp.InitAuthzRules().
 func (p *OIDCProvider) SetAuthzRules(rules []*oa4mp.CompiledAuthz) {
 	p.AuthzRules = rules
+}
+
+// SetAdminMiddleware stores the admin authentication/authorization middleware
+// that will be enforced on admin endpoints (e.g. /admin/clients).
+func (p *OIDCProvider) SetAdminMiddleware(middleware ...gin.HandlerFunc) {
+	p.adminMiddleware = middleware
 }
 
 // EnsurePublicClient registers a public OAuth2 client (no secret) if absent.

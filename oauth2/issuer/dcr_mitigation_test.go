@@ -115,11 +115,11 @@ func TestRegistrationRateLimiter(t *testing.T) {
 // TestDCRRateLimitIntegration tests that the HTTP endpoint returns 429 when the
 // rate limit is exceeded.
 func TestDCRRateLimitIntegration(t *testing.T) {
-	provider, ts := setupIntegration(t)
+	_, registry, ts := setupIntegrationWithRegistry(t)
 	httpClient := ts.Client()
 
-	// Override the limiter with a tight burst of 2
-	provider.RegistrationLimiter = newRegistrationRateLimiter(0, 2)
+	// Override the shared registry-level limiter with a tight burst of 2
+	registry.RegistrationLimiter = newRegistrationRateLimiter(0, 2)
 
 	regBody := `{"redirect_uris": [], "client_name": "rate-test"}`
 
