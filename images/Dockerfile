@@ -35,7 +35,6 @@ ARG OSG_SERIES=24
 ARG OSG_REPO=release
 
 # For compiling Pelican.
-ARG GO_VER=1.24.7
 ARG GORELEASER_CURRENT_TAG
 ARG NODEJS_VER=20
 
@@ -84,7 +83,6 @@ FROM --platform=${BUILDPLATFORM} almalinux:9 AS pelican-build-base
 ARG BUILDPLATFORM
 ARG BUILDOS
 ARG BUILDARCH
-ARG GO_VER
 ARG NODEJS_VER
 
 WORKDIR /pelican-build
@@ -98,13 +96,21 @@ gpgcheck=0
 ENDCOPY
 RUN --mount=type=cache,id=dnf-${BUILDPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
-  dnf install -y goreleaser make
+  dnf install -y goreleaser jq make
 ENDRUN
 
-RUN curl -O https://dl.google.com/go/go${GO_VER}.${BUILDOS}-${BUILDARCH}.tar.gz \
-    && rm -rf /usr/local/go \
-    && tar -C /usr/local -xzf go${GO_VER}.${BUILDOS}-${BUILDARCH}.tar.gz \
-    && rm -rf go${GO_VER}.${BUILDOS}-${BUILDARCH}.tar.gz
+RUN --mount=type=bind,source=go.mod,target=/context/go.mod <<ENDRUN
+  set -eux
+  set -o pipefail
+  # Use go.mod and the go.dev API to determine the most recent patch version.
+  # References:
+  #   - https://pkg.go.dev/golang.org/x/website/internal/dl
+  #   - https://github.com/golang/go/issues/34864
+  GO_LANG_VER=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' /context/go.mod | grep -oE '[0-9]+\.[0-9]+')
+  GO_TOOLCHAIN_VER=$(curl https://go.dev/dl/?mode=json | jq -r ".[].version | select(startswith(\"go${GO_LANG_VER}\"))" | sort -rV | head -n 1)
+  rm -rf /usr/local/go
+  curl -fSL https://dl.google.com/go/${GO_TOOLCHAIN_VER}.${BUILDOS}-${BUILDARCH}.tar.gz | tar -xz -f - -C /usr/local
+ENDRUN
 ENV PATH="/usr/local/go/bin:${PATH}"
 
 # We use npm to bootstrap the installation of the required Node.js version
@@ -599,17 +605,24 @@ FROM origin-base AS pelican-test
 ARG TARGETPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
-ARG GO_VER
 
 # Install select development packages.
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
-  dnf install -y git make
+  dnf install -y git jq make
 
-# Install Go using the same commands as the pelican-build-init stage.
-RUN curl -O https://dl.google.com/go/go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz \
-    && rm -rf /usr/local/go \
-    && tar -C /usr/local -xzf go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz \
-    && rm -rf go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz
+# Install Go.
+# Use go.mod and the go.dev API to determine the most recent patch version.
+# References:
+#   - https://pkg.go.dev/golang.org/x/website/internal/dl
+#   - https://github.com/golang/go/issues/34864
+RUN --mount=type=bind,source=go.mod,target=/context/go.mod <<ENDRUN
+  set -eux
+  set -o pipefail
+  GO_LANG_VER=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' /context/go.mod | grep -oE '[0-9]+\.[0-9]+')
+  GO_TOOLCHAIN_VER=$(curl https://go.dev/dl/?mode=json | jq -r ".[].version | select(startswith(\"go${GO_LANG_VER}\"))" | sort -rV | head -n 1)
+  rm -rf /usr/local/go
+  curl -fSL https://dl.google.com/go/${GO_TOOLCHAIN_VER}.${TARGETOS}-${TARGETARCH}.tar.gz | tar -xz -f - -C /usr/local
+ENDRUN
 ENV PATH="/usr/local/go/bin:${PATH}"
 
 # Install the MinIO server and client for S3 tests.
