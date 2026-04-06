@@ -919,17 +919,21 @@ func deleteRegistrationByPrefix(prefix string) error {
 }
 
 func deleteServerByID(id string) error {
+	// Fetch registrations before opening the transaction. getServerByID uses the
+	// global database.ServerDatabase rather than a tx-scoped connection; calling it
+	// inside the Transaction callback would require a second connection from the pool,
+	// which deadlocks on a single-connection SQLite pool (common in tests).
+	serverRegistration, err := getServerByID(id)
+	if err != nil {
+		return errors.Wrap(err, "failed to get server by ID")
+	}
+
 	// Wrap all database operations in a transaction
 	// If any operation fails, all changes are reverted. No partial records left.
 	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
-		serverRegistration, err := getServerByID(id)
-		if err != nil {
-			return errors.Wrap(err, "failed to get server by ID")
-		}
 		// Because of the foreign key constraints applied on the DB,
-		// All entries with matching server_id in "services", "endpoints", "contacts" tables will be deleted automatically
-		err = tx.Delete(&server_structs.Server{}, id).Error
-		if err != nil {
+		// All entries with matching server_id in "services", "endpoints", "contacts" tables will be deleted automatically.
+		if err := tx.Where("id = ?", id).Delete(&server_structs.Server{}).Error; err != nil {
 			return errors.Wrap(err, "failed to delete server")
 		}
 		// Delete all registrations corresponding to the server separately
