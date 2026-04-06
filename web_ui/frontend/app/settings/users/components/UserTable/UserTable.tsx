@@ -1,27 +1,46 @@
-import { ClientTable, ColumnConfig, stringSort, dateSort } from '@/components/Table';
-import {ClientTableProps} from "@/components/Table/ClientTable";
+import {
+  ClientTable,
+  stringSort,
+  dateSort,
+  ClientTableImplementationProps,
+} from '@/components/Table';
+import { ClientTableProps } from '@/components/Table/ClientTable';
 import { UserService, User, fetchApi } from '@/helpers/api';
-import makeDeleteUserCell from './makeDeleteUserCell';
-import EditUserCell from './EditUserCell';
+import makeDeleteCell from '@/components/Table/DeleteCell/makeDeleteCell';
+import makeEditCell from '@/components/Table/EditCell/makeEditCell';
 
-interface UserTableProps {
-  users: User[],
-  mutate: () => void
-}
-
-const userTableConfigGenerator = (mutate: () => void) => {
+const tableConfigGenerator = (mutate: () => void) => {
   return {
     username: { id: 'username', name: 'Username', sort: stringSort },
     sub: { id: 'sub', name: 'Sub', sort: stringSort },
     issuer: { id: 'issuer', name: 'Issuer', sort: stringSort },
     createdAt: { id: 'createdAt', name: 'Created At', sort: dateSort },
-    delete: { id: 'delete', name: 'Delete', CellComponent: makeDeleteUserCell(mutate) },
-    edit: { id: 'edit', name: 'Edit', CellComponent: EditUserCell }
+    delete: {
+      id: 'delete',
+      name: 'Delete',
+      CellComponent: makeDeleteCell<User>({
+        mutate,
+        handleDelete: (user: User) => UserService.delete(user.id),
+      }),
+    },
+    edit: {
+      id: 'edit',
+      name: 'Edit',
+      CellComponent: makeEditCell<User>({
+        href: (row) => `./edit?id=${row.id}`,
+      }),
+    },
   } as ClientTableProps<User>['columns'];
 };
 
-const UserTable = ({users, mutate}: UserTableProps) => {
-  return <ClientTable data={users} columns={userTableConfigGenerator(mutate)} defaultSort={{columnId: "createdAt", direction: "desc"}} />;
-}
+const UserTable = ({ data, mutate }: ClientTableImplementationProps<User>) => {
+  return (
+    <ClientTable
+      data={data}
+      columns={tableConfigGenerator(mutate)}
+      defaultSort={{ columnId: 'createdAt', direction: 'desc' }}
+    />
+  );
+};
 
 export default UserTable;

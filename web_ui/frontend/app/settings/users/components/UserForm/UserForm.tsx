@@ -2,8 +2,7 @@
 
 import React, { useState } from 'react';
 import { TextField, Button, Box, Alert, Stack } from '@mui/material';
-
-import { User, UserPatch, UserPost } from '@/types';
+import { UserPatch, UserPost, User } from '@/helpers/api';
 
 type CreateUserFormProps = {
   user?: undefined;
@@ -19,7 +18,7 @@ type UpdateUserFormProps = {
 
 type UserFormProps = CreateUserFormProps | UpdateUserFormProps;
 
-const UserForm: React.FC<UserFormProps> = ({
+const UserPostForm: React.FC<UserFormProps> = ({
   user,
   onSubmit,
   isSubmitting = false,
@@ -99,4 +98,4 @@ const UserForm: React.FC<UserFormProps> = ({
   );
 };
 
-export default UserForm;
+export default UserPostForm;

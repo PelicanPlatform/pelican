@@ -1,20 +1,22 @@
-
-
 import { Skeleton } from '@mui/material';
-import { Suspense } from 'react';
+import React, { Suspense } from 'react';
 
-import
+import View from './view';
 
 export const metadata = {
-  title: 'Edit User'
+  title: 'Edit User',
 };
 
 const Page = () => {
   return (
-    <Suspense fallback={<Skeleton />}>
-      <
+    <Suspense
+      fallback={
+        <Skeleton variant='rectangular' width={'100%'} height={'600px'} />
+      }
+    >
+      <View />
     </Suspense>
-  )
-}
+  );
+};
 
 export default Page;

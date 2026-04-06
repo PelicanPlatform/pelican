@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { TextField, Button, Box, Stack } from '@mui/material';
-import { Group, GroupPost } from '@/types';
+import { GroupPost, GroupPatch, Group } from '@/helpers/api';
 
 type CreateGroupFormProps = {
   group?: undefined;

@@ -2,12 +2,12 @@ import React, { useState, useMemo } from 'react';
 import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
 import CircularProgress from '@mui/material/CircularProgress';
-import { fetchApi } from '@/helpers/api';
-import { User, GroupMember } from '@/types';
-import useApiSWR from '@/hooks/useApiSWR';
+import { fetchApi, makeGroupMemberService, UserService } from '@/helpers/api';
 import { Box } from '@mui/material';
 import { Add } from '@mui/icons-material';
 import { secureFetch } from '@/helpers/login';
+import useServiceSWR from '@/hooks/useServiceSWR';
+import { User } from '@/helpers/api/types';
 
 interface AddMemberAutocompleteProps {
   groupId: string;
@@ -18,19 +18,24 @@ const AddMemberAutocomplete = ({ groupId }: AddMemberAutocompleteProps) => {
   const [value, setValue] = useState<User | null>(null);
   const [addingMember, setAddingMember] = useState(false);
 
+  const groupMemberService = makeGroupMemberService(groupId);
   const {
     data: members,
     isLoading: membersIsLoading,
     mutate,
-  } = useApiSWR<GroupMember[]>(
-    'Could not fetch group members',
-    `/api/v1.0/groups/${groupId}/members`,
-    async () => fetch(`/api/v1.0/groups/${groupId}/members`, { method: 'GET' })
+  } = useServiceSWR(
+    'Could not fetch group members.',
+    groupMemberService,
+    'getAll',
+    [],
+    { suspense: true }
   );
-  const { data: users, isLoading: usersIsLoading } = useApiSWR<User[]>(
-    'Could not fetch group members',
-    `/api/v1.0/users`,
-    async () => fetch(`/api/v1.0/users`, { method: 'GET' })
+  const { data: users, isLoading: usersIsLoading } = useServiceSWR(
+    'Could not fetch users.',
+    UserService,
+    'getAll',
+    [],
+    { suspense: true }
   );
 
   const potentialMembers = useMemo(() => {

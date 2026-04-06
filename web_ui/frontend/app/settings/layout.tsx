@@ -39,6 +39,7 @@ export default function RootLayout({
       <Main>
         <AuthenticatedContent
           redirect
+          trustThenValidate
           allowedRoles={['admin']}
           boxProps={{ width: '100%' }}
         >

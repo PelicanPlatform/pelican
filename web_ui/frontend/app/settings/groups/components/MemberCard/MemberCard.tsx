@@ -4,7 +4,7 @@ import { Delete } from '@mui/icons-material';
 
 import { ConfirmButton } from '@chtc/web-components';
 
-import { GroupMember } from '@/types';
+import { GroupMember } from '@/helpers/api';
 import ListCard from '@/components/ListCard';
 import { alertOnError } from '@/helpers/util';
 import { fetchApi } from '@/helpers/api';

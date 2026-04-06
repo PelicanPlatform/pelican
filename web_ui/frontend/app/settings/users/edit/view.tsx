@@ -9,55 +9,63 @@ import SettingHeader from '@/app/settings/components/SettingHeader';
 import { Breadcrumbs, Typography } from '@mui/material';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { UserService } from '@/helpers/api';
-import type { User, UserPost } from '@/helpers/api';
-import useServiceSWR from "@/hooks/useServiceSWR";
+import { UserPatch, UserService } from '@/helpers/api';
+import useServiceSWR from '@/hooks/useServiceSWR';
 
 const Page = () => {
+  const router = useRouter();
   const dispatch = useContext(AlertDispatchContext);
+
+  const searchParams = useSearchParams();
+  const userId = searchParams.get('id');
+
+  const { data: user } = useServiceSWR(
+    'Could not fetch user.',
+    UserService,
+    'getOne',
+    [userId ? userId : ''],
+    { suspense: true }
+  );
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const searchParams = useSearchParams()
-  const userId = searchParams.get('id')
-
-  const {data: user} = useServiceSWR(
-    'Could not fetch user.',
-    UserService.getOne,
-    userId
-  )
-
   // Ensure userId is present before rendering form
-  if (!userId) return <Typography>Form must be opened with a defined id.</Typography>
+  if (!userId)
+    return <Typography>Form must be opened with a defined id.</Typography>;
 
   return (
     <>
       <Breadcrumbs aria-label={'breadcrumb'} sx={{ mb: 2 }}>
         <Link href={'../'}>Users</Link>
-        <Typography sx={{ color: 'text.primary' }}>Add</Typography>
+        <Typography sx={{ color: 'text.primary' }}>Edit</Typography>
       </Breadcrumbs>
-      <SettingHeader title={'Add User'} />
+      <SettingHeader title={'Edit User'} />
       <UserForm
-        onSubmit={async (user: UserPost) => {
+        user={user}
+        onSubmit={async (user: UserPatch) => {
           setIsSubmitting(true);
-          const response = await alertOnError(
-            async () => UserService.patch(userId, user),
-            'Error Creating New User',
-            dispatch
-          );
-          if (response) {
+          try {
+            await alertOnError(
+              async () => UserService.patch(userId, user),
+              'Error Creating New User',
+              dispatch,
+              true
+            );
             dispatch({
               type: 'openAlert',
               payload: {
                 onClose: () => dispatch({ type: 'closeAlert' }),
                 message: `Updated User`,
+                autoHideDuration: 3000,
                 alertProps: {
                   severity: 'success',
                 },
               },
             });
+            router.push('../');
+          } catch (error) {
+            setIsSubmitting(false);
           }
-          setIsSubmitting(false);
         }}
         isSubmitting={isSubmitting}
       />

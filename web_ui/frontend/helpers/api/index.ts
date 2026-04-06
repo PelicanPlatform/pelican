@@ -2,7 +2,9 @@
  * API Exports
  */
 
-export {UserService} from './User';
+export { UserService } from './User';
+export { GroupService } from './Group';
+export { makeGroupMemberService } from './GroupMember';
 export * from './types';
 
 /**
@@ -14,7 +16,7 @@ export * from './types';
 import { secureFetch } from '@/helpers/login';
 import { getErrorMessage } from '@/helpers/util';
 import { RegistryNamespace } from '@/index';
-import { API_V1_BASE_URL } from "@/helpers/api/constants";
+import { API_V1_BASE_URL } from '@/helpers/api/constants';
 import { DowntimePost, DowntimeRegistryPost } from '@/types';
 
 /**
@@ -63,7 +65,8 @@ export const secureApiFetch = async (
  */
 export const restartServer = async (): Promise<Response> => {
   return fetchApi(
-    async () => await secureFetch(`${API_V1_BASE_URL}/restart`, { method: 'POST' })
+    async () =>
+      await secureFetch(`${API_V1_BASE_URL}/restart`, { method: 'POST' })
   );
 };
 
@@ -94,9 +97,12 @@ export const deleteNamespace = async (id: number) => {
 export const approveNamespace = async (id: number): Promise<Response> => {
   return fetchApi(
     async () =>
-      await secureFetch(`${API_V1_BASE_URL}/registry_ui/namespaces/${id}/approve`, {
-        method: 'PATCH',
-      })
+      await secureFetch(
+        `${API_V1_BASE_URL}/registry_ui/namespaces/${id}/approve`,
+        {
+          method: 'PATCH',
+        }
+      )
   );
 };
 
@@ -107,9 +113,12 @@ export const approveNamespace = async (id: number): Promise<Response> => {
 export const denyNamespace = async (id: number): Promise<Response> => {
   return fetchApi(
     async () =>
-      await secureFetch(`${API_V1_BASE_URL}/registry_ui/namespaces/${id}/deny`, {
-        method: 'PATCH',
-      })
+      await secureFetch(
+        `${API_V1_BASE_URL}/registry_ui/namespaces/${id}/deny`,
+        {
+          method: 'PATCH',
+        }
+      )
   );
 };
 
@@ -120,9 +129,12 @@ export const denyNamespace = async (id: number): Promise<Response> => {
 export const allowServer = async (name: string): Promise<Response> => {
   return fetchApi(
     async () =>
-      await secureFetch(`${API_V1_BASE_URL}/director_ui/servers/allow/${name}`, {
-        method: 'PATCH',
-      })
+      await secureFetch(
+        `${API_V1_BASE_URL}/director_ui/servers/allow/${name}`,
+        {
+          method: 'PATCH',
+        }
+      )
   );
 };
 
@@ -133,9 +145,12 @@ export const allowServer = async (name: string): Promise<Response> => {
 export const filterServer = async (name: string): Promise<Response> => {
   return fetchApi(
     async () =>
-      await secureFetch(`${API_V1_BASE_URL}/director_ui/servers/filter/${name}`, {
-        method: 'PATCH',
-      })
+      await secureFetch(
+        `${API_V1_BASE_URL}/director_ui/servers/filter/${name}`,
+        {
+          method: 'PATCH',
+        }
+      )
   );
 };
 
@@ -144,7 +159,10 @@ export const filterServer = async (name: string): Promise<Response> => {
  *
  */
 export const getDirectorServers = async () => {
-  const url = new URL(`${API_V1_BASE_URL}/director_ui/servers`, window.location.origin);
+  const url = new URL(
+    `${API_V1_BASE_URL}/director_ui/servers`,
+    window.location.origin
+  );
 
   return await fetchApi(async () => await fetch(url));
 };

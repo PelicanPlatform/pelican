@@ -2,7 +2,7 @@ import React, { FC, useState } from 'react';
 import { Box, Button, TextField, Typography } from '@mui/material';
 
 import MemberCard from '../MemberCard';
-import { GroupMember, User } from '@/types';
+import { GroupMember, User } from '@/helpers/api';
 import { CardList } from '@/components';
 import useApiSWR from '@/hooks/useApiSWR';
 import AddMemberAutocomplete from '../AddMemberAutocomplete';

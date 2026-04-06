@@ -120,33 +120,7 @@ export interface GetToken extends BaseToken {
   createdBy: string;
 }
 
-/** Groups and Authorization Types */
-
-
-
-export interface Group {
-  id: string;
-  name: string;
-  description: string;
-  members: User[];
-  createdBy: string;
-  createdAt: string;
-}
-
-export type GroupPost = Omit<Group, 'members' | 'createdBy' | 'createdAt'>;
-
-export interface GroupMember {
-  groupId: string;
-  userId: string;
-  user: User;
-  createdBy: string;
-  createdAt: string;
-}
-
-export type GroupMemberPost = Omit<
-  GroupMember,
-  'user' | 'addedBy' | 'addedAt' | 'groupId'
->;
+/** Authorization Types */
 
 export interface WellKnownConfiguration {
   director_endpoint: string;

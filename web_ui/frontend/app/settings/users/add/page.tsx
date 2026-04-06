@@ -38,6 +38,7 @@ const Page = () => {
               payload: {
                 onClose: () => dispatch({ type: 'closeAlert' }),
                 message: `Created User`,
+                autoHideDuration: 3000,
                 alertProps: {
                   severity: 'success',
                 },

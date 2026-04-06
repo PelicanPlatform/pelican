@@ -5,7 +5,7 @@ import React, { useContext, useState } from 'react';
 import { alertOnError } from '@/helpers/util';
 import GroupForm from '../components/GroupAddForm';
 import { AlertDispatchContext } from '@/components/AlertProvider';
-import { GroupPost } from '@/types';
+import { GroupPost } from '@/helpers/api';
 import SettingHeader from '@/app/settings/components/SettingHeader';
 import { Breadcrumbs, Typography } from '@mui/material';
 import Link from 'next/link';
