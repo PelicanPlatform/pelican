@@ -110,7 +110,7 @@ func TestCollectionsAPI(t *testing.T) {
 		},
 	})
 
-	require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), "admin-user"))
+	viper.Set(param.Server_UIAdminUsers.GetName(), "admin-user")
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err = config.InitServer(ctx, server_structs.OriginType)
