@@ -32,6 +32,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -40,6 +41,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
@@ -446,6 +448,25 @@ const (
 	OssStatsEvent    = "oss_stats"
 	S3FileStatsEvent = "s3file_stats"
 )
+
+var (
+	maskIPWarningRL         = rate.Sometimes{First: 1, Interval: time.Minute}
+	maskIPWarningSuppressed atomic.Int64
+)
+
+// warnRateLimitedMaskIP logs a "Failed to mask IP address" warning at most once per minute.
+// It tracks the number of suppressed warnings and includes the count in the next emitted message.
+func warnRateLimitedMaskIP(addr string) {
+	maskIPWarningSuppressed.Add(1)
+	maskIPWarningRL.Do(func() {
+		suppressed := maskIPWarningSuppressed.Swap(0)
+		if suppressed > 1 {
+			log.Warningf("Failed to mask IP address: %s (suppressed %d similar warnings since last report)", addr, suppressed-1)
+		} else {
+			log.Warningf("Failed to mask IP address: %s", addr)
+		}
+	})
+}
 
 var (
 	// TODO: Remove this metric (the line directly below)
@@ -1353,7 +1374,7 @@ func handlePacket(packet []byte) error {
 					if userRecord != nil {
 						maskedIP, ok := utils.ExtractAndMaskIP(userRecord.Value().XrdUserId.Host)
 						if !ok {
-							log.Warning(fmt.Sprintf("Failed to mask IP address: %s", maskedIP))
+							warnRateLimitedMaskIP(maskedIP)
 						} else {
 							labels["network"] = maskedIP
 						}
@@ -1488,7 +1509,7 @@ func handlePacket(packet []byte) error {
 				if userRecord != nil {
 					maskedIP, ok := utils.ExtractAndMaskIP(userRecord.Value().XrdUserId.Host)
 					if !ok {
-						log.Warning(fmt.Sprintf("Failed to mask IP address: %s", maskedIP))
+						warnRateLimitedMaskIP(maskedIP)
 					} else {
 						logFields["network"] = maskedIP
 					}
@@ -1543,7 +1564,7 @@ func handlePacket(packet []byte) error {
 					if userRecord != nil {
 						maskedIP, ok := utils.ExtractAndMaskIP(userRecord.Value().XrdUserId.Host)
 						if !ok {
-							log.Warning(fmt.Sprintf("Failed to mask IP address: %s", maskedIP))
+							warnRateLimitedMaskIP(maskedIP)
 						} else {
 							labels["network"] = maskedIP
 						}

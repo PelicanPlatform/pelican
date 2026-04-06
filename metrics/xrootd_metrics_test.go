@@ -29,8 +29,11 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	log "github.com/sirupsen/logrus"
+	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 )
 
 func getAuthInfoString(user UserRecord) string {
@@ -1250,5 +1253,88 @@ xrootd_xrdcl_http_requests_total{status="200",type="finished",verb="GET"} 15
 		if err := testutil.CollectAndCompare(XrdclHTTPRequests, strings.NewReader(expected), "xrootd_xrdcl_http_requests_total"); err != nil {
 			require.NoError(t, err, "Delta computation metric mismatch")
 		}
+	})
+}
+
+func TestWarnRateLimitedMaskIP(t *testing.T) {
+	t.Run("first-call-logs-immediately", func(t *testing.T) {
+		// Reset state for this test
+		maskIPWarningRL = rate.Sometimes{First: 1, Interval: time.Minute}
+		maskIPWarningSuppressed.Store(0)
+
+		originalHooks := log.StandardLogger().Hooks
+		hook := logrustest.NewLocal(log.StandardLogger())
+		defer func() {
+			hook.Reset()
+			log.StandardLogger().ReplaceHooks(originalHooks)
+		}()
+
+		warnRateLimitedMaskIP("192.168.1.1")
+
+		require.Len(t, hook.AllEntries(), 1)
+		assert.Equal(t, log.WarnLevel, hook.LastEntry().Level)
+		assert.Contains(t, hook.LastEntry().Message, "Failed to mask IP address: 192.168.1.1")
+		assert.NotContains(t, hook.LastEntry().Message, "suppressed")
+	})
+
+	t.Run("subsequent-calls-are-suppressed", func(t *testing.T) {
+		// Reset state for this test
+		maskIPWarningRL = rate.Sometimes{First: 1, Interval: time.Minute}
+		maskIPWarningSuppressed.Store(0)
+
+		originalHooks := log.StandardLogger().Hooks
+		hook := logrustest.NewLocal(log.StandardLogger())
+		defer func() {
+			hook.Reset()
+			log.StandardLogger().ReplaceHooks(originalHooks)
+		}()
+
+		// First call should log
+		warnRateLimitedMaskIP("10.0.0.1")
+		require.Len(t, hook.AllEntries(), 1)
+
+		// Subsequent calls within the same minute should be suppressed
+		for i := 0; i < 100; i++ {
+			warnRateLimitedMaskIP("10.0.0.1")
+		}
+
+		// Still only 1 log entry
+		assert.Len(t, hook.AllEntries(), 1)
+
+		// But the suppressed counter should have accumulated
+		assert.Equal(t, int64(100), maskIPWarningSuppressed.Load())
+	})
+
+	t.Run("suppressed-count-reported-on-next-emission", func(t *testing.T) {
+		// Reset state for this test with a very short interval for testing
+		maskIPWarningRL = rate.Sometimes{First: 1, Interval: time.Millisecond}
+		maskIPWarningSuppressed.Store(0)
+
+		originalHooks := log.StandardLogger().Hooks
+		hook := logrustest.NewLocal(log.StandardLogger())
+		defer func() {
+			hook.Reset()
+			log.StandardLogger().ReplaceHooks(originalHooks)
+		}()
+
+		// First call logs immediately
+		warnRateLimitedMaskIP("10.0.0.1")
+		require.Len(t, hook.AllEntries(), 1)
+		assert.NotContains(t, hook.AllEntries()[0].Message, "suppressed")
+
+		// Accumulate some suppressed warnings
+		for i := 0; i < 5; i++ {
+			warnRateLimitedMaskIP("10.0.0.1")
+		}
+
+		// Wait for the interval to pass
+		time.Sleep(5 * time.Millisecond)
+
+		// Next call after the interval should log with the suppressed count
+		warnRateLimitedMaskIP("10.0.0.1")
+		require.Len(t, hook.AllEntries(), 2)
+		assert.Contains(t, hook.AllEntries()[1].Message, "Failed to mask IP address: 10.0.0.1")
+		assert.Contains(t, hook.AllEntries()[1].Message, "suppressed")
+		assert.Contains(t, hook.AllEntries()[1].Message, "similar warnings since last report")
 	})
 }
