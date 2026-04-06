@@ -940,22 +940,35 @@ func TestGroupManagementAPI(t *testing.T) {
 		assert.Equal(t, http.StatusNoContent, recorder.Code, fmt.Sprintf("unexpected status %d on DELETE, body: %s", recorder.Code, recorder.Body.String()))
 	})
 
-	t.Run("test-regular-user-can-create-group", func(t *testing.T) {
-		// Test that a regular (non-admin) user can create a group
-		groupName := "test-regular-user-group"
-		createGroupReq := map[string]string{"name": groupName, "description": "test group by regular user"}
+	t.Run("test-only-admin-can-create-group", func(t *testing.T) {
+		// Test that a regular (non-admin) user cannot create a group
+		groupName := "test-admin-only-group"
+		createGroupReq := map[string]string{"name": groupName, "description": "test group"}
 		body, err := json.Marshal(createGroupReq)
 		require.NoError(t, err)
 
 		req, err := http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
 		require.NoError(t, err)
 
-		// Use a regular user token (not admin)
+		// Regular (non-admin) user should be rejected
 		regularUserToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "regular-user")
 		req.AddCookie(&http.Cookie{Name: "login", Value: regularUserToken})
 		req.Header.Set("Content-Type", "application/json")
 
 		recorder := httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		assert.Equal(t, http.StatusForbidden, recorder.Code, fmt.Sprintf("expected 403 for non-admin, got %d: %s", recorder.Code, recorder.Body.String()))
+
+		// Admin user should succeed
+		adminToken := generateTestAdminUserToken(t)
+		body, err = json.Marshal(createGroupReq)
+		require.NoError(t, err)
+		req, err = http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: adminToken})
+		req.Header.Set("Content-Type", "application/json")
+
+		recorder = httptest.NewRecorder()
 		route.ServeHTTP(recorder, req)
 		assert.Equal(t, http.StatusCreated, recorder.Code, fmt.Sprintf("unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String()))
 
@@ -965,15 +978,14 @@ func TestGroupManagementAPI(t *testing.T) {
 		groupID := createGroupResp["id"]
 		require.NotEmpty(t, groupID)
 
-		// Verify the regular user can manage their own group
+		// Verify the admin can manage the group members
 		createUserReq := map[string]string{"username": "new-member2", "sub": "new-member-sub2", "issuer": "https://test-issuer.org"}
 		body, err = json.Marshal(createUserReq)
 		require.NoError(t, err)
 
-		// Pre-create the user before adding them to the group
 		req, err = http.NewRequest("POST", "/api/v1.0/users", bytes.NewReader(body))
 		require.NoError(t, err)
-		req.AddCookie(&http.Cookie{Name: "login", Value: regularUserToken})
+		req.AddCookie(&http.Cookie{Name: "login", Value: adminToken})
 		req.Header.Set("Content-Type", "application/json")
 		recorder = httptest.NewRecorder()
 		route.ServeHTTP(recorder, req)
@@ -991,7 +1003,7 @@ func TestGroupManagementAPI(t *testing.T) {
 
 		req, err = http.NewRequest("POST", "/api/v1.0/groups/"+groupID+"/members", bytes.NewReader(body))
 		require.NoError(t, err)
-		req.AddCookie(&http.Cookie{Name: "login", Value: regularUserToken})
+		req.AddCookie(&http.Cookie{Name: "login", Value: adminToken})
 		req.Header.Set("Content-Type", "application/json")
 
 		recorder = httptest.NewRecorder()

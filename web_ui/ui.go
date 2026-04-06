@@ -616,14 +616,14 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 		downtimeAPI.DELETE("/:uuid", DowntimeAuthHandler, HandleDeleteDowntime)
 	}
 
-	engine.GET("/api/v1.0/groups", AuthHandler, handleListGroups)
-	engine.POST("/api/v1.0/groups", AuthHandler, handleCreateGroup)
-	engine.GET("/api/v1.0/groups/:id/members", AuthHandler, handleListGroupMembers)
-	engine.POST("/api/v1.0/groups/:id/members", AuthHandler, handleAddGroupMember)
-	engine.DELETE("/api/v1.0/groups/:id/members/:userId", AuthHandler, handleRemoveGroupMember)
+	engine.GET("/api/v1.0/groups", AuthHandler, AdminAuthHandler, handleListGroups)
+	engine.POST("/api/v1.0/groups", AuthHandler, AdminAuthHandler, handleCreateGroup)
+	engine.GET("/api/v1.0/groups/:id/members", AuthHandler, AdminAuthHandler, handleListGroupMembers)
+	engine.POST("/api/v1.0/groups/:id/members", AuthHandler, AdminAuthHandler, handleAddGroupMember)
+	engine.DELETE("/api/v1.0/groups/:id/members/:userId", AuthHandler, AdminAuthHandler, handleRemoveGroupMember)
 
-	engine.GET("/api/v1.0/users", AuthHandler, handleListUsers)
-	engine.POST("/api/v1.0/users", AuthHandler, handleAddUser)
+	engine.GET("/api/v1.0/users", AuthHandler, AdminAuthHandler, handleListUsers)
+	engine.POST("/api/v1.0/users", AuthHandler, AdminAuthHandler, handleAddUser)
 
 	return nil
 }
