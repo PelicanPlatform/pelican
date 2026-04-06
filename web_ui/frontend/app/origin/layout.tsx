@@ -20,6 +20,7 @@ import Main from '@/components/layout/Main';
 import { PaddedContent } from '@/components/layout';
 import { Navigation } from '@/components/layout/Navigation';
 import NavigationConfiguration from '@/app/navigation';
+import ServerName from '@/components/ServerName';
 
 export const metadata = {
   title: 'Origin',
@@ -33,7 +34,10 @@ export default function RootLayout({
   return (
     <Navigation config={NavigationConfiguration['origin']}>
       <Main>
-        <PaddedContent>{children}</PaddedContent>
+        <PaddedContent>
+          <ServerName defaultName={'Origin'} />
+          {children}
+        </PaddedContent>
       </Main>
     </Navigation>
   );

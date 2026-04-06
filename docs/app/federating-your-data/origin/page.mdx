@@ -29,6 +29,13 @@ There are three important prerequisites to adding your data to a federation thro
 If it is not possible for you to expose any ports through the firewall (e.g. you're on a local network or behind a NAT) or you can't get a domain name, Pelican has a special feature called a _Connection Broker_ that allows you to serve Origins without publicly-accessible ports or TLS credentials. However, this is an experimental feature and requires the Pelican federation you are joining to be compatible. If you are interested in learning more about the Connection Broker, please contact help@pelicanplatform.org for further instructions.
 </Callout>
 
+### Enable Time Synchronization
+
+Pelican servers rely on time-sensitive tokens for authorization.
+If your server's clock is not synchronized, tokens may be rejected and your Origin may fail to join the federation.
+Please ensure NTP is enabled on your server.
+See [Server Prerequisites](../install.mdx#enable-time-synchronization) for setup instructions.
+
 ### Origin Port Requirements
 
 Pelican Origins have two major components -- one is a data transfer endpoint powered by [XRootD](https://xrootd.org/), and the other is a browser interface that lets you configure, monitor, and troubleshoot your Origin and its interactions with a federation.

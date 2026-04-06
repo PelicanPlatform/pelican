@@ -48,7 +48,7 @@ Pelican is developed based on the following tech stack:
 
 In addition, Pelican services rely on the following software dependencies:
 
-- [XRootD](https://xrootd.slac.stanford.edu/): Underlying storage management software for Pelican Origin and Caches
+- [XRootD](https://xrootd.org/): Underlying storage management software for Pelican Origin and Caches
 - [Prometheus](https://prometheus.io/): Server observability and monitoring
 - [OA4MP](https://github.com/ncsa/oa4mp): OAuth Server
 
@@ -198,10 +198,11 @@ We use [GoReleaser](https://goreleaser.com/) to manage compiling and distributin
 
 > **Note**: the VSCode terminal you opened is connected to the *development container*, not your host machine. We will work inside the container for the rest of the instructions. The Dev Container automatically mounts your repository to the container and syncs any changes. In Codespaces, the repository is mounted at `/workspaces/pelican`. In local Dev Containers, the path depends on where you cloned the repository.
 
-Navigate to the repository root in the terminal (if not already there) and run the following command:
+Navigate to the repository root in the terminal (if not already there) and run the following commands:
 
 ```bash
-$ goreleaser build --single-target --clean --snapshot
+$ make goreleaser-config
+$ goreleaser build --single-target --clean --snapshot --config .goreleaser.generated.yml
 ```
 
 Where:
@@ -210,6 +211,7 @@ Where:
 - `--single-target` is the argument to only build one binary that fits to your machine. By default, GoReleaser will build binaries for Linux, macOS, Windows, etc. For development purpose, you should only need one binary.
 - `--clean` is the argument to remove existing build directory before building
 - `--snapshot` is the argument to only build for development and testing, not for releasing
+- `--config .goreleaser.generated.yml` tells GoReleaser to use the generated Pelican config file
 
 The build takes around 1-3 minutes to finish. It usually takes longer if this is your first time build Pelican. The following output means the build is successful:
 

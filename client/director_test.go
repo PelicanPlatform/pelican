@@ -111,9 +111,9 @@ func TestQueryDirector(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	// This test assumes the debugging level is at debug or higher
-	test_utils.InitClient(t, map[string]any{
-		param.Client_DirectorRetries.GetName(): 3,
-		param.Logging_Level.GetName():          "debug",
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Client_DirectorRetries: 3,
+		param.Logging_Level:          "debug",
 	})
 
 	type testCase struct {
@@ -229,7 +229,7 @@ func TestGetDirectorInfoForPath(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
-	require.NoError(t, param.Set(param.Client_DirectorRetries.GetName(), 3))
+	require.NoError(t, param.Client_DirectorRetries.Set(3))
 
 	// Craft the Director's response
 	directorHeaders := make(map[string]string)
@@ -333,9 +333,9 @@ func TestDirectorDecisionInfo(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	test_utils.InitClient(t, map[string]any{
-		param.Client_DirectorRetries.GetName(): 1,
-		param.Logging_Level.GetName():          "warning", // not debug, so header is not set by default
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Client_DirectorRetries: 1,
+		param.Logging_Level:          "warning", // not debug, so header is not set by default
 	})
 
 	redirectInfoJSON := `{"clientInfo":{"coordinate":{"lat":43.07,"long":-89.41},"ipAddr":"1.2.3.4"},"serversInfo":{"cache1.example.com":{"coordinate":{"lat":40.0,"long":-88.0},"redirectWeights":{"distanceWeight":0.8,"ioLoadWeight":0.1,"statusWeight":0.05,"availabilityWeight":0.05}}},"directorSortMethod":"distance"}`
@@ -426,9 +426,9 @@ func TestDirectorTimeout(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	test_utils.InitClient(t, map[string]any{
-		param.Client_DirectorRetries.GetName(): 1, // Only try once to avoid long waits
-		param.Debug.GetName():                  true,
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Client_DirectorRetries: 1, // Only try once to avoid long waits
+		param.Debug:                  true,
 	})
 
 	// Use a non-routable IP address that will cause a dial timeout

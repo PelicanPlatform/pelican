@@ -86,7 +86,7 @@ func setupWebUIEnv(t *testing.T) {
 
 	testCfgDir := t.TempDir()
 	server_utils.ResetTestState()
-	require.NoError(t, param.Set("ConfigDir", testCfgDir))
+	require.NoError(t, param.ConfigDir.Set(testCfgDir))
 
 	//set a temporary password file:
 	tempFile, err := os.CreateTemp("", "web-ui-passwd")
@@ -98,7 +98,7 @@ func setupWebUIEnv(t *testing.T) {
 	})
 	tempPasswdFile = tempFile
 	//Override viper default for testing
-	require.NoError(t, param.Set(param.Server_UIPasswordFile.GetName(), tempPasswdFile.Name()))
+	require.NoError(t, param.Server_UIPasswordFile.Set(tempPasswdFile.Name()))
 
 	//Make a testing issuer.jwk file to get a cookie
 	tempJWKDir, err := os.MkdirTemp("", "tempDir")
@@ -110,15 +110,15 @@ func setupWebUIEnv(t *testing.T) {
 	})
 
 	//Override viper default for testing
-	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), filepath.Join(tempJWKDir, "issuer-keys")))
+	require.NoError(t, param.IssuerKeysDirectory.Set(filepath.Join(tempJWKDir, "issuer-keys")))
 
 	// Ensure we load up the default configs.
 	dirname, err := os.MkdirTemp("", "tmpDir")
 	if err != nil {
 		t.Fatal("Error making temp config dir:", err)
 	}
-	require.NoError(t, param.Set("ConfigDir", dirname))
-	require.NoError(t, param.Set(param.Server_UILoginRateLimit.GetName(), 100))
+	require.NoError(t, param.ConfigDir.Set(dirname))
+	require.NoError(t, param.Server_UILoginRateLimit.Set(100))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	if err := config.InitServer(ctx, server_structs.OriginType); err != nil {
@@ -223,8 +223,8 @@ func TestHandleWebUIAuth(t *testing.T) {
 
 		tmpDir := t.TempDir()
 		issuerDirectory := filepath.Join(tmpDir, "issuer-keys")
-		require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), issuerDirectory))
-		require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "https://example.com"))
+		require.NoError(t, param.IssuerKeysDirectory.Set(issuerDirectory))
+		require.NoError(t, param.Server_ExternalWebUrl.Set("https://example.com"))
 
 		_, err := config.GetIssuerPrivateJWK()
 		require.NoError(t, err)
@@ -410,7 +410,7 @@ func TestServerHostRestart(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	route := gin.New()
 	route.POST("/api/v1.0/restart", AuthHandler, AdminAuthHandler, hotRestartServer)
-	require.NoError(t, param.Set(param.IssuerKey.GetName(), filepath.Join(t.TempDir(), "issuer.jwk")))
+	require.NoError(t, param.IssuerKey.Set(filepath.Join(t.TempDir(), "issuer.jwk")))
 
 	t.Run("unauthorized-no-token", func(t *testing.T) {
 		r := httptest.NewRecorder()
@@ -456,7 +456,7 @@ func TestServerHostRestart(t *testing.T) {
 		require.NoError(t, err)
 
 		r := httptest.NewRecorder()
-		require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2"}))
+		require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin1", "admin2"}))
 		c := gin.CreateTestContextOnly(r, route)
 		c.Set("User", "admin1")
 		req := httptest.NewRequest(http.MethodPost, "/api/v1.0/restart", nil)
@@ -555,7 +555,8 @@ func TestApiToken(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	route := gin.New()
-	err := configureCommonEndpoints(route)
+	routeGroup := route.Group("/api/v1.0")
+	err := registerCommonEndpoints(routeGroup)
 	require.NoError(t, err)
 	route.GET("/privilegedRoute", func(ctx *gin.Context) {
 		authOption := token.AuthOption{
@@ -585,8 +586,8 @@ func TestApiToken(t *testing.T) {
 	defer cancel()
 
 	dirName := t.TempDir()
-	require.NoError(t, param.Set("ConfigDir", dirName))
-	require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), "admin-user"))
+	require.NoError(t, param.ConfigDir.Set(dirName))
+	require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin-user"}))
 	test_utils.MockFederationRoot(t, nil, nil)
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
@@ -828,7 +829,8 @@ func TestApiToken(t *testing.T) {
 func TestGroupManagementAPI(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	route := gin.New()
-	err := configureCommonEndpoints(route)
+	routeGroup := route.Group("/api/v1.0")
+	err := registerCommonEndpoints(routeGroup)
 	require.NoError(t, err)
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
@@ -837,8 +839,8 @@ func TestGroupManagementAPI(t *testing.T) {
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
-	require.NoError(t, param.Set("ConfigDir", dirName))
-	require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), "admin-user"))
+	require.NoError(t, param.ConfigDir.Set(dirName))
+	require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin-user"}))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err = config.InitServer(ctx, server_structs.OriginType)
@@ -1181,5 +1183,64 @@ func TestGroupManagementAPI(t *testing.T) {
 
 		require.NoError(t, database.ServerDatabase.Model(&database.CollectionACL{}).Where("group_id = ?", personalGroup).Count(&aclCount).Error)
 		require.EqualValues(t, 0, aclCount)
+	})
+}
+
+func TestReadOnlyMiddleware(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	defer server_utils.ResetTestState()
+
+	route := gin.New()
+	// Apply the ReadOnly middleware to a test route group
+	readOnlyGroup := route.Group("/api/v1.0")
+	readOnlyGroup.Use(ReadOnlyMiddleware)
+	// Set the app to have Read Only mode enabled
+	require.NoError(t, param.Server_WebReadOnly.Set(true))
+	{
+		readOnlyGroup.POST("/resource", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
+		readOnlyGroup.PUT("/resource", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
+		readOnlyGroup.PATCH("/resource", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
+		readOnlyGroup.DELETE("/resource/:id", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
+		readOnlyGroup.GET("/resource", func(ctx *gin.Context) { ctx.Status(http.StatusOK) })
+	}
+
+	t.Run("blocks-POST-in-readonly-mode", func(t *testing.T) {
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest(http.MethodPost, "/api/v1.0/resource", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, r.Result().StatusCode)
+	})
+
+	t.Run("blocks-PUT-in-readonly-mode", func(t *testing.T) {
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest(http.MethodPut, "/api/v1.0/resource", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, r.Result().StatusCode)
+	})
+
+	t.Run("blocks-PATCH-in-readonly-mode", func(t *testing.T) {
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest(http.MethodPatch, "/api/v1.0/resource", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, r.Result().StatusCode)
+	})
+
+	t.Run("blocks-DELETE-in-readonly-mode", func(t *testing.T) {
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest(http.MethodDelete, "/api/v1.0/resource/123", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, r.Result().StatusCode)
+	})
+
+	t.Run("allows-GET-in-readonly-mode", func(t *testing.T) {
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest(http.MethodGet, "/api/v1.0/resource", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
 	})
 }

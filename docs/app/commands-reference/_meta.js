@@ -13,6 +13,7 @@ export default {
     "object": "pelican object",
     "origin": "pelican origin",
     "plugin": "pelican plugin",
+    "rclone": "pelican rclone",
     "registry": "pelican registry",
     "server": "pelican server",
     "token": "pelican token",

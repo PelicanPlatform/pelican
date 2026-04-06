@@ -280,13 +280,13 @@ func setupFedAndUsers(t *testing.T) (ft *fed_test_utils.FedTest, testUserPasswor
 
 	htpasswdContent := fmt.Sprintf("admin:%s\ntestuser:%s\n", string(adminHash), string(testUserHash))
 	require.NoError(t, os.WriteFile(htpasswdFile, []byte(htpasswdContent), 0600))
-	require.NoError(t, param.Set(param.Server_UIPasswordFile.GetName(), htpasswdFile))
+	require.NoError(t, param.Server_UIPasswordFile.Set(htpasswdFile))
 
 	groupFileDir := t.TempDir()
 	groupFilePath := filepath.Join(groupFileDir, "groups.json")
 	require.NoError(t, os.WriteFile(groupFilePath, []byte(`{"testuser": [], "admin": []}`), 0600))
-	require.NoError(t, param.Set("Issuer.GroupSource", "file"))
-	require.NoError(t, param.Set("Issuer.GroupFile", groupFilePath))
+	require.NoError(t, param.Issuer_GroupSource.Set("file"))
+	require.NoError(t, param.Issuer_GroupFile.Set(groupFilePath))
 
 	tmpDir := t.TempDir()
 	dataDir = filepath.Join(tmpDir, "data-store")

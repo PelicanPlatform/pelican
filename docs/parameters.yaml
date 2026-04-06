@@ -453,7 +453,7 @@ type: url
 osdf_default: Default is determined dynamically through metadata at <Federation.DiscoveryUrl>/.well-known/pelican-configuration
 default: none
 direct_access: false
-components: ["client", "origin", "cache"]
+components: ["client", "origin", "cache", "registry"]
 ---
 name: Federation.RegistryUrl
 description: |+
@@ -542,7 +542,10 @@ components: ["client"]
 ---
 name: Client.DisableHttpProxy
 description: |+
-  A bool indicating whether the client's HTTP proxy should be disabled.
+  A bool indicating whether the client's HTTP proxy should be disabled. When false (the default),
+  the client uses an HTTP proxy if any of the standard proxy environment variables are set to a
+  non-empty value: `http_proxy`, `HTTP_PROXY`, `https_proxy`, or `HTTPS_PROXY`. Setting this
+  parameter to true disables proxy usage regardless of those environment variables.
 type: bool
 default: false
 components: ["client"]
@@ -651,6 +654,14 @@ default: false
 components: ["client"]
 hidden: true
 ---
+name: Client.CredentialFile
+description: |+
+  Override the default path to the client credential file used for token generation.
+  When set, the client uses this file instead of the default credential location.
+type: filename
+default: none
+components: ["client"]
+---
 name: Client.PreferredCaches
 description: |+
   A list of preferred cache hostname/ports the Pelican client/plugin should use when interacting with a remote object. There are two configuration options:
@@ -680,16 +691,6 @@ description: |+
 
   Surrounding quotes (both single and double) are automatically trimmed from the entire value and from individual elements.
 type: stringSlice
-default: none
-components: ["client"]
----
-name: Client.CredentialFile
-description: |+
-  Override the default path to the client credential file used for token generation.
-  When set, the client will use this file instead of the default credential file location.
-  This is useful for non-interactive contexts where the default credential file may be
-  password-protected and prompts would fail.
-type: filename
 default: none
 components: ["client"]
 ---
@@ -1060,6 +1061,12 @@ description: |+
   origin will automatically remove the partial file from the temporary location. Without
   atomic writes, the 500 MiB fragment would remain at the intended path and be served to
   any client that requests it.
+
+  The atomic upload mechanism uses `rename(2)` to move completed files from Origin.UploadTempLocation
+  into the export's StoragePrefix. Because POSIX filesystems do not support renaming files across
+  filesystem boundaries, Origin.UploadTempLocation must reside on the same filesystem as every
+  configured export's StoragePrefix. Pelican will reject the configuration at startup if a
+  cross-filesystem mismatch is detected.
 type: bool
 default: false
 components: ["origin"]
@@ -1075,6 +1082,10 @@ description: |+
   This is only available for origins that have a StorageType of "posix". The configured
   location must not be equal to or under any export's StoragePrefix, as that would make
   temporary upload files accessible via the federation namespace.
+
+  This location must also reside on the same filesystem as every configured export's
+  StoragePrefix, because POSIX filesystems do not support renaming files across filesystem
+  boundaries. If a mismatch is detected, Pelican will reject the configuration at startup.
 type: filename
 default: $Origin.RunLocation/in-progress
 components: ["origin"]
@@ -1928,8 +1939,8 @@ description: |+
   For example, setting `Cache.DataLocations=["/mnt/cache1", "/mnt/cache2"]` will result in splitting cache data between two mounted drives,
   `/mnt/cache1` and `/mnt/cache2`. As such, these drives should be fast storage devices, such as SSDs.
 
-  For more information, see the [xrootd oss documentation](https://xrootd.slac.stanford.edu/doc/dev56/ofs_config.pdf) for the `oss.space` directive
-  as well as the [xrootd pfc documentation](https://xrootd.slac.stanford.edu/doc/dev56/pss_config.pdf) for the `pfc.spaces` directive.
+  For more information, see the [XRootD oss documentation](https://xrootd.web.cern.ch/doc/dev56/ofs_config.htm) for the `oss.space` directive
+  as well as the [XRootD pfc documentation](https://xrootd.web.cern.ch/doc/dev6/pss_config.htm) for the `pfc.spaces` directive.
 
   If this directory does not already exist, it will be created by Pelican.
 
@@ -1945,8 +1956,8 @@ description: |+
   as they're accessible by the cache service. For example, setting `Cache.MetaLocations=["/mnt/meta1", "/mnt/meta2"]` will result in
   splitting cache metadata between two the mounted drives. As such, these drives should be fast storage devices, such as SSDs.
 
-  For more information, see the [xrootd oss documentation](https://xrootd.slac.stanford.edu/doc/dev56/ofs_config.pdf) for the `oss.space` directive
-  as well as the [xrootd pfc documentation](https://xrootd.slac.stanford.edu/doc/dev56/pss_config.pdf) for the `pfc.spaces` directive.
+  For more information, see the [XRootD oss documentation](https://xrootd.web.cern.ch/doc/dev56/ofs_config.htm) for the `oss.space` directive
+  as well as the [XRootD pfc documentation](https://xrootd.web.cern.ch/doc/dev6/pss_config.htm) for the `pfc.spaces` directive.
 
   If this directory does not already exist, it will be created by Pelican.
 
@@ -3064,6 +3075,25 @@ default: $ConfigBase/session-secret
   The default content of the file is the hash of the concatenation of "pelican" and the DER form of ${IssuerKey}
 components: ["cache", "director", "origin", "registry"]
 ---
+name: Server.WebReadOnly
+description: |+
+  When enabled, web UI routes that employ the read-only middleware will reject state changing HTTP
+  methods such as, POST, PUT, PATCH, and DELETE.
+
+  Read only methods such as GET, HEAD, and OPTIONS remain allowed as well as the following
+  system critical routes:
+  - /origin-api/directorTest
+  - /origin/directorTest
+  - /api/v1.0/auth/login
+  - /api/v1.0/auth/logout
+
+  If the issuer is enabled:
+  - /api/v1.0/issuer/oidc-cm
+  - /api/v1.0/issuer/token
+type: bool
+default: false
+components: ["cache", "director", "origin", "registry"]
+---
 name: Server.RegistrationRetryInterval
 description: |+
   The duration of delay in origin/cache registration retry attempts if the initial registration call to registry
@@ -3666,7 +3696,7 @@ description: |+
   `Xrootd.ConfigFile` will be used as the continuation of the Pelican generated XRootD configuration, via the `continue` directive.
   Existing configuration values may be overwritten or appended.
 
-  Refer to [Configuration File Continuation](https://xrootd.slac.stanford.edu/doc/dev55/Syntax_config.htm#_Toc520499864)
+  Refer to [Configuration File Continuation](https://xrootd.web.cern.ch/doc/dev55/Syntax_config.htm#_Toc520499864)
   for details
 type: filename
 default: none

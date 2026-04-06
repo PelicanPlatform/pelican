@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -38,6 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/ssh_posixv2"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -47,21 +49,66 @@ var (
 	handlersRegistered bool              // Tracks whether handlers have been registered
 )
 
+const (
+	// xfrReportInterval is the minimum number of bytes that must be
+	// transferred between intermediate isXfr monitoring reports.
+	xfrReportInterval int64 = 100 * 1024 * 1024 // 100 MB
+
+	// Gin context keys for sharing I/O wrappers between middlewares.
+	ctxKeyRequestReader  = "origin_serve.metricsRequestReader"
+	ctxKeyResponseWriter = "origin_serve.metricsResponseWriter"
+)
+
+// monitoringTracker is shared between the request reader and response writer
+// for a single HTTP request. It periodically emits isXfr monitoring records
+// as bytes flow through the I/O wrappers.
+type monitoringTracker struct {
+	mon             *metrics.TransferMonitor
+	bytesAtLastXfr  atomic.Int64
+	totalReadBytes  atomic.Int64
+	totalWriteBytes atomic.Int64
+}
+
+// maybeEmitXfr checks whether enough new bytes have been transferred since
+// the last isXfr record and emits one if so.
+func (mt *monitoringTracker) maybeEmitXfr() {
+	if mt == nil || mt.mon == nil {
+		return
+	}
+	totalBytes := mt.totalReadBytes.Load() + mt.totalWriteBytes.Load()
+	lastReport := mt.bytesAtLastXfr.Load()
+	if totalBytes-lastReport >= xfrReportInterval {
+		// CAS to avoid duplicate reports from concurrent Read/Write
+		if mt.bytesAtLastXfr.CompareAndSwap(lastReport, totalBytes) {
+			mt.mon.EmitXfr(mt.totalReadBytes.Load(), mt.totalWriteBytes.Load())
+		}
+	}
+}
+
 // metricsResponseWriter wraps gin.ResponseWriter to track bytes written
 type metricsResponseWriter struct {
 	gin.ResponseWriter
 	bytesWritten int64
+	tracker      *monitoringTracker
 }
 
 func (mrw *metricsResponseWriter) Write(data []byte) (int, error) {
 	n, err := mrw.ResponseWriter.Write(data)
 	mrw.bytesWritten += int64(n)
+	if mrw.tracker != nil {
+		mrw.tracker.totalReadBytes.Add(int64(n))
+		mrw.tracker.maybeEmitXfr()
+	}
 	return n, err
 }
 
 func (mrw *metricsResponseWriter) WriteString(s string) (int, error) {
 	n, err := mrw.ResponseWriter.WriteString(s)
 	mrw.bytesWritten += int64(n)
+	if mrw.tracker != nil {
+		mrw.tracker.totalReadBytes.Add(int64(n))
+		mrw.tracker.maybeEmitXfr()
+	}
 	return n, err
 }
 
@@ -69,11 +116,16 @@ func (mrw *metricsResponseWriter) WriteString(s string) (int, error) {
 type metricsRequestReader struct {
 	reader    io.ReadCloser
 	bytesRead int64
+	tracker   *monitoringTracker
 }
 
 func (mrr *metricsRequestReader) Read(p []byte) (int, error) {
 	n, err := mrr.reader.Read(p)
 	mrr.bytesRead += int64(n)
+	if mrr.tracker != nil {
+		mrr.tracker.totalWriteBytes.Add(int64(n))
+		mrr.tracker.maybeEmitXfr()
+	}
 	return n, err
 }
 
@@ -252,7 +304,9 @@ func authMiddleware() gin.HandlerFunc {
 	}
 }
 
-// httpMetricsMiddleware tracks HTTP-level metrics for WebDAV requests
+// httpMetricsMiddleware tracks Prometheus HTTP metrics for WebDAV requests.
+// It runs before authMiddleware so that rejected requests are still counted
+// in the Prometheus dashboard (total requests, duration, errors, bytes).
 func httpMetricsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
@@ -263,15 +317,19 @@ func httpMetricsMiddleware() gin.HandlerFunc {
 		metrics.HttpActiveRequests.WithLabelValues(serverTypeOrigin, method).Inc()
 		defer metrics.HttpActiveRequests.WithLabelValues(serverTypeOrigin, method).Dec()
 
-		// Wrap request body to track bytes read
+		// Wrap request body and response writer to track bytes.
+		// Store the wrappers in the gin context so that
+		// xrdMonitoringMiddleware (which runs later, after auth)
+		// can attach its monitoringTracker.
 		mrr := &metricsRequestReader{reader: c.Request.Body}
 		c.Request.Body = mrr
+		c.Set(ctxKeyRequestReader, mrr)
 
-		// Wrap response writer to track bytes out
 		mrw := &metricsResponseWriter{ResponseWriter: c.Writer}
 		c.Writer = mrw
+		c.Set(ctxKeyResponseWriter, mrw)
 
-		// Process request
+		// Process request (auth + xrd monitoring + handler all run inside)
 		c.Next()
 
 		// Calculate duration
@@ -307,6 +365,70 @@ func httpMetricsMiddleware() gin.HandlerFunc {
 		if status >= 500 && status < 600 {
 			metrics.HttpErrorsTotal.WithLabelValues(serverTypeOrigin, method, statusStr).Inc()
 		}
+	}
+}
+
+// xrdMonitoringMiddleware emits XRootD-compatible monitoring packets for
+// data transfer requests (GET/PUT). It runs after authMiddleware so that
+// the authenticated user's DN and issuer are available for the 'u' packet.
+func xrdMonitoringMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		method := c.Request.Method
+		if method != "GET" && method != "PUT" {
+			c.Next()
+			return
+		}
+
+		start := time.Now()
+		event := buildTransferEvent(c, method, start)
+		mon := metrics.BeginTransferMonitor(event)
+		if mon == nil {
+			c.Next()
+			return
+		}
+
+		// Attach a monitoringTracker to the I/O wrappers (already
+		// installed by httpMetricsMiddleware) so that periodic isXfr
+		// records are emitted during long-running transfers.
+		var tracker *monitoringTracker
+		knownSize := c.Request.ContentLength // PUT size; -1 if unknown
+		if knownSize < 0 || knownSize >= xfrReportInterval {
+			tracker = &monitoringTracker{mon: mon}
+			if v, ok := c.Get(ctxKeyRequestReader); ok {
+				v.(*metricsRequestReader).tracker = tracker
+			}
+			if v, ok := c.Get(ctxKeyResponseWriter); ok {
+				v.(*metricsResponseWriter).tracker = tracker
+			}
+		}
+
+		c.Next()
+
+		// Read final byte counts from the I/O wrappers. These are the
+		// same wrappers that httpMetricsMiddleware created; they have been
+		// accumulating bytes throughout the entire handler chain.
+		var bytesIn, bytesOut int64
+		if v, ok := c.Get(ctxKeyRequestReader); ok {
+			bytesIn = v.(*metricsRequestReader).bytesRead
+		}
+		if v, ok := c.Get(ctxKeyResponseWriter); ok {
+			bytesOut = v.(*metricsResponseWriter).bytesWritten
+		}
+
+		status := c.Writer.Status()
+		var readBytes, writeBytes int64
+		var readOps, writeOps int32
+		if status >= 200 && status < 300 {
+			switch method {
+			case "GET":
+				readBytes = bytesOut
+				readOps = 1
+			case "PUT":
+				writeBytes = bytesIn
+				writeOps = 1
+			}
+		}
+		mon.Close(readBytes, writeBytes, readOps, writeOps)
 	}
 }
 
@@ -414,10 +536,17 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 			routePrefix = prefix
 		}
 
+		// Set the Prefix on the WebDAV handler so that:
+		// 1. stripPrefix correctly removes the route prefix to get the filesystem path
+		// 2. PROPFIND responses include the full route prefix in href elements,
+		//    which is required for WebDAV clients like rclone to properly resolve paths
+		handler.Prefix = routePrefix
+
 		// Create a route group for this prefix
 		group := engine.Group(routePrefix)
 		group.Use(httpMetricsMiddleware())
 		group.Use(authMiddleware())
+		group.Use(xrdMonitoringMiddleware())
 
 		// Create a handler function for all requests
 		handleRequest := func(c *gin.Context) {
@@ -434,25 +563,22 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 			// Get the path relative to the export (strip the federation prefix)
 			wildcardPath := c.Param("path")
 
-			// The wildcardPath is relative to the federation prefix (e.g., /test)
-			// Pass only the wildcardPath to WebDAV so it writes relative to storage root
-			newPath := wildcardPath
-
-			// Create a shallow copy of the request and modify its URL
-			modifiedReq := c.Request.Clone(c.Request.Context())
-			modifiedURL := *c.Request.URL
-			modifiedURL.Path = newPath
-			modifiedReq.URL = &modifiedURL
-
 			// Stash client tracing headers (X-Pelican-JobId,
 			// X-Pelican-Timeout) in the request context so backends
 			// that forward requests can propagate them.
-			modifiedReq = server_utils.StashPelicanHeaders(modifiedReq)
+			req := server_utils.StashPelicanHeaders(c.Request)
 
 			if c.Request.Method == http.MethodHead {
-				handleHeadWithChecksum(c, handler, modifiedReq, wildcardPath, backend)
+				// For HEAD requests, pass the original request to the WebDAV handler
+				// (it needs the full URL so its Prefix stripping works correctly).
+				// wildcardPath is used only for checksum lookup on the filesystem.
+				handleHeadWithChecksum(c, handler, req, wildcardPath, backend)
 			} else {
-				handler.ServeHTTP(c.Writer, modifiedReq)
+				// For all other methods (including PROPFIND), pass the original request
+				// to the WebDAV handler. The handler's Prefix field ensures it strips
+				// the route prefix for filesystem access while using it to construct
+				// correct href values in responses.
+				handler.ServeHTTP(c.Writer, req)
 			}
 		}
 
@@ -497,4 +623,46 @@ func handleHeadWithChecksum(c *gin.Context, handler *webdav.Handler, modifiedReq
 
 	// Now let the WebDAV handler process the HEAD request
 	handler.ServeHTTP(c.Writer, modifiedReq)
+}
+
+// buildTransferEvent constructs a TransferEvent from the current request context.
+// It extracts user/auth information, project name, and path. Byte counts and ops
+// are left at zero; the caller fills them in when the transfer completes.
+func buildTransferEvent(c *gin.Context, method string, start time.Time) metrics.TransferEvent {
+	// Determine the federation path from the request URL
+	requestPath := c.Request.URL.Path
+
+	// Strip the /api/v1.0/origin/data prefix if present (director co-located mode)
+	const apiPrefix = "/api/v1.0/origin/data"
+	requestPath = strings.TrimPrefix(requestPath, apiPrefix)
+
+	event := metrics.TransferEvent{
+		Path:      requestPath,
+		ClientIP:  c.ClientIP(),
+		StartTime: start,
+		EndTime:   time.Now(),
+	}
+
+	// Extract auth info from context (populated by authMiddleware)
+	ctx := c.Request.Context()
+	if ui := getUserInfo(ctx); ui != nil {
+		event.UserDN = ui.User
+	}
+	if issuer, ok := ctx.Value(issuerContextKey{}).(string); ok {
+		event.Issuer = issuer
+		event.AuthProtocol = "https"
+	}
+	if event.AuthProtocol == "" && event.UserDN == "" {
+		// Public/unauthenticated access
+		event.AuthProtocol = "https"
+		event.UserDN = ""
+	}
+
+	// Extract project from User-Agent (e.g. "�project/myproject ...")
+	event.Project = utils.ExtractProjectFromUserAgent(c.Request.Header.Values("User-Agent"))
+
+	// Preserve the full User-Agent for the 'i' (appinfo) monitoring packet
+	event.UserAgent = c.Request.UserAgent()
+
+	return event
 }

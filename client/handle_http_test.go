@@ -140,7 +140,7 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 	testCache := "http://cache.edu:8000"
 
 	os.Setenv("OSG_DISABLE_PROXY_FALLBACK", "")
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, map[param.Param]any{})
 
 	transfers := generateTransferDetails(testCache, transferDetailsOptions{})
 	assert.Equal(t, 1, len(transfers))
@@ -158,6 +158,36 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 	assert.Nil(t, err)
 }
 
+// TestIsProxyEnabled checks that isProxyEnabled respects all standard proxy
+// environment variables and the Client.DisableHttpProxy config parameter.
+func TestIsProxyEnabled(t *testing.T) {
+	proxyVars := []string{"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY"}
+
+	for _, envVar := range proxyVars {
+		t.Run("ProxyEnabledVia_"+envVar, func(t *testing.T) {
+			t.Setenv(envVar, "http://proxy.edu:3128")
+			test_utils.InitClient(t, map[param.Param]any{})
+			assert.True(t, isProxyEnabled(), "proxy should be enabled when %s is set", envVar)
+		})
+	}
+
+	t.Run("NoneSet", func(t *testing.T) {
+		for _, envVar := range proxyVars {
+			t.Setenv(envVar, "")
+		}
+		test_utils.InitClient(t, map[param.Param]any{})
+		assert.False(t, isProxyEnabled(), "proxy should be disabled when no proxy env vars are set")
+	})
+
+	t.Run("DisableHttpProxyOverridesEnvVar", func(t *testing.T) {
+		t.Setenv("http_proxy", "http://proxy.edu:3128")
+		test_utils.InitClient(t, map[param.Param]any{
+			param.Client_DisableHttpProxy: true,
+		})
+		assert.False(t, isProxyEnabled(), "proxy should be disabled when Client.DisableHttpProxy is true, even if proxy env var is set")
+	})
+}
+
 func TestSlowTransfers(t *testing.T) {
 	t.Cleanup(func() {
 		goleak.VerifyNone(t,
@@ -170,9 +200,9 @@ func TestSlowTransfers(t *testing.T) {
 
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 	// Adjust down some timeouts to speed up the test
-	test_utils.InitClient(t, map[string]any{
-		"Client.SlowTransferWindow":     "2s",
-		"Client.SlowTransferRampupTime": "1s",
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Client_SlowTransferWindow:     "2s",
+		param.Client_SlowTransferRampupTime: "1s",
 	})
 
 	channel := make(chan bool)
@@ -264,9 +294,9 @@ func TestStoppedTransfer(t *testing.T) {
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// Adjust down the timeouts
-	test_utils.InitClient(t, map[string]any{
-		"Client.StoppedTransferTimeout": "2s",
-		"Client.SlowTransferRampupTime": "100s",
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Client_StoppedTransferTimeout: "2s",
+		param.Client_SlowTransferRampupTime: "100s",
 	})
 
 	channel := make(chan bool)
@@ -677,7 +707,7 @@ func TestFailedUpload(t *testing.T) {
 
 func TestUploadLocalFileNotFound(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, map[param.Param]any{})
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Return 404 for PROPFIND (stat) requests so upload doesn't think file exists
@@ -776,7 +806,7 @@ func TestSortAttempts(t *testing.T) {
 
 	defer cancel()
 
-	token := newTokenGenerator(nil, nil, config.TokenSharedRead, false)
+	token := NewTokenGenerator(nil, nil, config.TokenRead, false)
 	token.SetToken("aaa")
 	size, results := sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt2, attempt3}, token)
 	assert.Equal(t, int64(42), size)
@@ -801,10 +831,140 @@ func TestSortAttempts(t *testing.T) {
 	assert.Equal(t, svr3.URL, results[1].Url.String())
 }
 
+// TestSortAttemptsPreferredCachesRespected verifies that a non-responsive preferred
+// (user-configured) cache is never sorted after a working director-provided cache.
+// This is the regression test for the bug where sortAttempts could reorder director
+// caches before user-configured PreferredCaches when the director-provided caches responded
+// more quickly.
+func TestSortAttemptsPreferredCachesRespected(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
+
+	// neverRespond simulates a non-functioning preferred cache (e.g., the user's
+	// configured cache that is down or very slow).
+	neverRespond := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-ctx.Done()
+	})
+
+	// alwaysRespond simulates a healthy director-provided cache.
+	alwaysRespond := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			w.Header().Set("Content-Length", "1")
+			w.Header().Set("Content-Range", "bytes 0-0/42")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte("A"))
+			require.NoError(t, err)
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+
+	// preferredCache is the user's configured cache (slow/non-responsive).
+	preferredSvr := httptest.NewServer(neverRespond)
+	preferredURL, err := url.Parse(preferredSvr.URL)
+	require.NoError(t, err)
+
+	// directorCache is a healthy cache discovered via the Director.
+	directorSvr := httptest.NewServer(alwaysRespond)
+	directorURL, err := url.Parse(directorSvr.URL)
+	require.NoError(t, err)
+
+	// cancel must be deferred AFTER the test servers are created so that it runs
+	// FIRST in LIFO order, cancelling neverRespond handlers before the servers'
+	// Close() calls wait for active connections.
+	defer preferredSvr.Close()
+	defer directorSvr.Close()
+	defer cancel()
+
+	token := newTokenGenerator(nil, nil, config.TokenSharedRead, false)
+	token.SetToken("aaa")
+
+	// Build the attempt list as it would be constructed by getObjectServersToTry:
+	// the preferred cache comes first (Preferred=true), followed by the director
+	// cache (Preferred=false).
+	preferredAttempt := transferAttemptDetails{Url: preferredURL, Preferred: true}
+	directorAttempt := transferAttemptDetails{Url: directorURL, Preferred: false}
+
+	// sortAttempts must keep the preferred (non-responsive) cache before the
+	// working director cache, even though the director cache responds immediately.
+	_, results := sortAttempts(ctx, "/path", []transferAttemptDetails{preferredAttempt, directorAttempt}, token)
+
+	require.Len(t, results, 2)
+	assert.Equal(t, preferredSvr.URL, results[0].Url.String(),
+		"preferred cache must remain first even when director cache responds faster")
+	assert.Equal(t, directorSvr.URL, results[1].Url.String(),
+		"director cache must remain after all preferred caches")
+
+	// Verify the same ordering is preserved when the preferred cache is listed
+	// after the director cache in the input slice (i.e., the Preferred flag, not
+	// input position, drives the sort).
+	_, results = sortAttempts(ctx, "/path", []transferAttemptDetails{directorAttempt, preferredAttempt}, token)
+
+	require.Len(t, results, 2)
+	assert.Equal(t, preferredSvr.URL, results[0].Url.String(),
+		"preferred cache must be sorted to first position regardless of input order")
+	assert.Equal(t, directorSvr.URL, results[1].Url.String())
+}
+
+// TestCompareAttempts directly tests the compareAttempts comparator to ensure
+// it returns correct values for all combinations of responsiveness and preference.
+// This is the regression test for the bug where the comparator only checked
+// left.good > right.good (returning -1) but never returned 1 when left.good < right.good,
+// violating the comparison function contract.
+func TestCompareAttempts(t *testing.T) {
+	// Within the same preference tier, a failed cache (good=-1 or 0) compared
+	// against a working cache (good=1) must return positive (failed sorts after good).
+	// Before the fix, this returned 0 ("equal"), relying on Go's sort internals
+	// to handle the asymmetry — technically undefined behavior.
+	t.Run("FailedVsGoodSameTier", func(t *testing.T) {
+		failed := attemptSorter{good: -1, attempt: transferAttemptDetails{Preferred: false}}
+		good := attemptSorter{good: 1, attempt: transferAttemptDetails{Preferred: false}}
+
+		assert.Equal(t, 1, compareAttempts(failed, good),
+			"failed cache on left vs good cache on right must return positive (sort failed after good)")
+		assert.Equal(t, -1, compareAttempts(good, failed),
+			"good cache on left vs failed cache on right must return negative (sort good before failed)")
+	})
+
+	// A pending cache (good=0, timed out without hard error) should also sort
+	// after a working cache.
+	t.Run("PendingVsGoodSameTier", func(t *testing.T) {
+		pending := attemptSorter{good: 0, attempt: transferAttemptDetails{Preferred: false}}
+		good := attemptSorter{good: 1, attempt: transferAttemptDetails{Preferred: false}}
+
+		assert.Equal(t, 1, compareAttempts(pending, good),
+			"pending cache on left vs good cache on right must return positive")
+		assert.Equal(t, -1, compareAttempts(good, pending),
+			"good cache on left vs pending cache on right must return negative")
+	})
+
+	// Equal values must return 0.
+	t.Run("EqualValues", func(t *testing.T) {
+		a := attemptSorter{good: 1, attempt: transferAttemptDetails{Preferred: false}}
+		b := attemptSorter{good: 1, attempt: transferAttemptDetails{Preferred: false}}
+		assert.Equal(t, 0, compareAttempts(a, b))
+
+		c := attemptSorter{good: -1, attempt: transferAttemptDetails{Preferred: true}}
+		d := attemptSorter{good: -1, attempt: transferAttemptDetails{Preferred: true}}
+		assert.Equal(t, 0, compareAttempts(c, d))
+	})
+
+	// Preferred always beats non-preferred, regardless of responsiveness.
+	t.Run("PreferredBeatsDirector", func(t *testing.T) {
+		preferred := attemptSorter{good: -1, attempt: transferAttemptDetails{Preferred: true}}
+		director := attemptSorter{good: 1, attempt: transferAttemptDetails{Preferred: false}}
+
+		assert.Equal(t, -1, compareAttempts(preferred, director),
+			"preferred cache must sort before director cache even when preferred is failed")
+		assert.Equal(t, 1, compareAttempts(director, preferred),
+			"director cache must sort after preferred cache even when director is good")
+	})
+}
+
 func TestTimeoutHeaderSetForDownload(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{
-		"Transport.ResponseHeaderTimeout": 10 * time.Second,
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Transport_ResponseHeaderTimeout: 10 * time.Second,
 	})
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
@@ -840,7 +1000,7 @@ func TestTimeoutHeaderSetForDownload(t *testing.T) {
 
 func TestJobIdHeaderSetForDownload(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, map[param.Param]any{})
 
 	// Create a test .job.ad file
 	jobAdFile, err := os.CreateTemp("", ".job.ad")
@@ -951,7 +1111,7 @@ func TestGetObjectServersToTry(t *testing.T) {
 		job := &TransferJob{
 			dirResp: directorResponse,
 		}
-		transfers := getObjectServersToTry(sortedServers, job, 3, "")
+		transfers := getObjectServersToTry(sortedServers, job, 3, "", 0)
 
 		// Check that there are no duplicates in the result
 		cacheSet := make(map[string]bool)
@@ -977,7 +1137,7 @@ func TestGetObjectServersToTry(t *testing.T) {
 		job := &TransferJob{
 			dirResp: directorResponse,
 		}
-		transfers := getObjectServersToTry(sortedServers, job, 3, "")
+		transfers := getObjectServersToTry(sortedServers, job, 3, "", 0)
 
 		cacheSet := make(map[string]bool)
 		for _, transfer := range transfers {
@@ -991,6 +1151,26 @@ func TestGetObjectServersToTry(t *testing.T) {
 		assert.Equal(t, "http://cache-1.com", transfers[0].Url.String())
 		assert.Equal(t, "https://cache-2.com", transfers[1].Url.String())
 		assert.Equal(t, "https://cache-3.com", transfers[2].Url.String())
+	})
+
+	// Test that the Preferred flag is set correctly based on nPreferred.
+	t.Run("PreferredFlagSetCorrectly", func(t *testing.T) {
+		// sortedServers has 5 unique entries; the first 2 are "preferred"
+		// (user-configured) and the remaining 3 come from the Director.
+		directorResponse := server_structs.DirectorResponse{
+			XPelNsHdr: server_structs.XPelNs{
+				RequireToken: true,
+			},
+		}
+		job := &TransferJob{
+			dirResp: directorResponse,
+		}
+		// nPreferred=2: cache-1 and cache-2 are preferred; cache-3 is director.
+		transfers := getObjectServersToTry(sortedServers, job, 3, "", 2)
+		require.Len(t, transfers, 3)
+		assert.True(t, transfers[0].Preferred, "cache-1 (idx 0) should be marked preferred")
+		assert.True(t, transfers[1].Preferred, "cache-2 (idx 1) should be marked preferred")
+		assert.False(t, transfers[2].Preferred, "cache-3 (idx 2) should not be marked preferred (director-provided)")
 	})
 }
 
@@ -1044,8 +1224,8 @@ func TestSearchJobAd(t *testing.T) {
 // Test error messages when a 504 Gateway Timeout occurs
 func TestGatewayTimeout(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{
-		"Logging.Level": "debug",
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Logging_Level: "debug",
 	})
 
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1097,8 +1277,8 @@ func TestGatewayTimeout(t *testing.T) {
 // TestStatusCodeErrorWrapping tests that different HTTP status codes are wrapped correctly
 func TestStatusCodeErrorWrapping(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{
-		"Logging.Level": "debug",
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Logging_Level: "debug",
 	})
 
 	testCases := []struct {
@@ -1238,9 +1418,9 @@ func TestStatusCodeErrorWrapping(t *testing.T) {
 // TestStatusCodeErrorWrappingUpload tests that different HTTP status codes are wrapped correctly during uploads
 func TestStatusCodeErrorWrappingUpload(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{
-		"Logging.Level": "debug",
-		"TLSSkipVerify": true,
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Logging_Level: "debug",
+		param.TLSSkipVerify: true,
 	})
 
 	testCases := []struct {
@@ -1406,8 +1586,8 @@ func TestStatusCodeErrorWrappingUpload(t *testing.T) {
 // is wrapped correctly based on HTTP status code using wrapErrorByStatusCode
 func TestHttpErrRespWithNonStatusCodeError(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{
-		"Logging.Level": "debug",
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Logging_Level: "debug",
 	})
 
 	testCases := []struct {
@@ -1465,8 +1645,8 @@ func TestHttpErrRespWithNonStatusCodeError(t *testing.T) {
 // TestCatchAllErrorWrapping tests that unknown error types are wrapped as generic TransferError
 func TestCatchAllErrorWrapping(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{
-		"Logging.Level": "debug",
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Logging_Level: "debug",
 	})
 
 	// Create a generic error that doesn't match any specific error type checks
@@ -1551,8 +1731,8 @@ func TestInvalidByteInChunkLengthError(t *testing.T) {
 // Test checksum calculation and validation
 func TestChecksum(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{
-		param.Logging_Level.GetName(): "debug",
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Logging_Level: "debug",
 	})
 
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1609,8 +1789,8 @@ func TestChecksum(t *testing.T) {
 // Test behavior when checksum is incorrect
 func TestChecksumIncorrectWhenRequired(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{
-		param.Logging_Level.GetName(): "debug",
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Logging_Level: "debug",
 	})
 
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1681,8 +1861,8 @@ func TestChecksumIncorrectWhenRequired(t *testing.T) {
 
 func TestChecksumIncorrectWhenNotRequired(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{
-		param.Logging_Level.GetName(): "debug",
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Logging_Level: "debug",
 	})
 
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1740,11 +1920,133 @@ func TestChecksumIncorrectWhenNotRequired(t *testing.T) {
 	assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
 }
 
+// Test behavior when server returns a different checksum algorithm than requested.
+// This simulates a multiuser origin that returns MD5 when CRC32C was requested.
+func TestChecksumAlgorithmFallback(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Logging_Level: "debug",
+	})
+
+	// MD5 of "test file content" base64-encoded per RFC 3230
+	const correctMD5Base64 = "x4UGDIZnlswqFwjJlxVMjg=="
+
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			w.Header().Set("Content-Length", "17")
+			// Server returns MD5 instead of the requested CRC32C (multiuser scenario)
+			w.Header().Set("Digest", "md5="+correctMD5Base64)
+			w.WriteHeader(http.StatusOK)
+		} else if r.Method == "GET" {
+			w.Header().Set("Content-Length", "17")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte("test file content"))
+			assert.NoError(t, err)
+		} else {
+			t.Fatal("Unexpected method:", r.Method)
+		}
+	}))
+	defer svr.Close()
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		xferType: transferTypeDownload,
+		ctx:      context.Background(),
+		job: &TransferJob{
+			requireChecksum:    true,
+			requestedChecksums: []ChecksumType{AlgCRC32C},
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   svrURL.Host,
+				Path:   svrURL.Path + "/test.txt",
+			},
+		},
+		localPath: os.DevNull,
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+		requireChecksum: true,
+	}
+	transferResult, err := downloadObject(transfer)
+	require.NoError(t, err)
+	require.NoError(t, transferResult.Error, "Client should fall back to MD5 verification when CRC32C is unavailable")
+
+	// Server provided MD5
+	require.Equal(t, 1, len(transferResult.ServerChecksums))
+	info := transferResult.ServerChecksums[0]
+	assert.Equal(t, ChecksumType(AlgMD5), info.Algorithm)
+
+	// ClientChecksums still reports the requested CRC32C
+	require.Equal(t, 1, len(transferResult.ClientChecksums))
+	info = transferResult.ClientChecksums[0]
+	assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+}
+
+// Test that a mislabeled CRC32C checksum (too long, likely MD5 in hex) is handled gracefully
+func TestChecksumMislabeledCRC32C(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Logging_Level: "debug",
+	})
+
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			w.Header().Set("Content-Length", "17")
+			// Simulate XRootD multiuser bug: MD5 hex value labeled as crc32c
+			w.Header().Set("Digest", "crc32c=c785060c866796cc2a1708c997154c8e")
+			w.WriteHeader(http.StatusOK)
+		} else if r.Method == "GET" {
+			w.Header().Set("Content-Length", "17")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte("test file content"))
+			assert.NoError(t, err)
+		} else {
+			t.Fatal("Unexpected method:", r.Method)
+		}
+	}))
+	defer svr.Close()
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		xferType: transferTypeDownload,
+		ctx:      context.Background(),
+		job: &TransferJob{
+			requireChecksum:    false,
+			requestedChecksums: []ChecksumType{AlgCRC32C},
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   svrURL.Host,
+				Path:   svrURL.Path + "/test.txt",
+			},
+		},
+		localPath: os.DevNull,
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+		requireChecksum: false,
+	}
+	transferResult, err := downloadObject(transfer)
+	require.NoError(t, err)
+	// The mislabeled checksum should be skipped (no panic/crash), and since
+	// requireChecksum is false, the transfer should succeed without error.
+	require.NoError(t, transferResult.Error, "Mislabeled CRC32C should be gracefully skipped")
+	// No valid server checksums should be parsed from the mislabeled value
+	assert.Equal(t, 0, len(transferResult.ServerChecksums), "Mislabeled checksum should be skipped")
+}
+
 // Test behavior when checksum is missing
 func TestChecksumMissing(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{
-		param.Logging_Level.GetName(): "debug",
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Logging_Level: "debug",
 	})
 
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1784,17 +2086,24 @@ func TestChecksumMissing(t *testing.T) {
 		requireChecksum: true,
 	}
 	transferResult, err := downloadObject(transfer)
-	assert.NoError(t, err)
-	assert.Error(t, transferResult.Error)
-	assert.True(t, errors.Is(transferResult.Error, ErrServerChecksumMissing), "Expected checksum missing error")
+	require.NoError(t, err)
+	require.Error(t, transferResult.Error)
+	require.True(t, errors.Is(transferResult.Error, ErrServerChecksumMissing), "Expected checksum missing error")
+
+	var pe *error_codes.PelicanError
+	require.True(t, errors.As(transferResult.Error, &pe), "Error should be wrapped as PelicanError")
+	expectedErr := error_codes.NewTransfer_ChecksumMissingError(errors.New("test"))
+	assert.Equal(t, expectedErr.Code(), pe.Code(), "Should map to Transfer.ChecksumMissing error code")
+	assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType(), "Should map to Transfer.ChecksumMissing error type")
+	assert.Equal(t, expectedErr.IsRetryable(), pe.IsRetryable(), "ChecksumMissingError should be retryable")
 }
 
 func TestChecksumPut(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	t.Run("test-good-checksum", func(t *testing.T) {
-		test_utils.InitClient(t, map[string]any{
-			param.Logging_Level.GetName(): "debug",
-			param.TLSSkipVerify.GetName(): true,
+		test_utils.InitClient(t, map[param.Param]any{
+			param.Logging_Level: "debug",
+			param.TLSSkipVerify: true,
 		})
 
 		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1848,24 +2157,24 @@ func TestChecksumPut(t *testing.T) {
 			},
 		}
 		transferResult, err := uploadObject(transfer)
-		assert.NoError(t, err)
-		assert.NoError(t, transferResult.Error)
+		require.NoError(t, err)
+		require.NoError(t, transferResult.Error)
 
-		assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
+		require.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
 		info := transferResult.ServerChecksums[0]
 		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
 		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
 
-		assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+		require.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
 		info = transferResult.ClientChecksums[0]
 		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
 		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
 	})
 
 	t.Run("test-bad-checksum", func(t *testing.T) {
-		test_utils.InitClient(t, map[string]any{
-			param.Logging_Level.GetName(): "debug",
-			param.TLSSkipVerify.GetName(): true,
+		test_utils.InitClient(t, map[param.Param]any{
+			param.Logging_Level: "debug",
+			param.TLSSkipVerify: true,
 		})
 
 		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1919,7 +2228,7 @@ func TestChecksumPut(t *testing.T) {
 			requireChecksum: true,
 		}
 		transferResult, err := uploadObject(transfer)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		require.Error(t, transferResult.Error)
 
 		// Verify that the error is wrapped as a PelicanError
@@ -1935,21 +2244,21 @@ func TestChecksumPut(t *testing.T) {
 		require.ErrorAs(t, transferResult.Error, &checksumError)
 		assert.Equal(t, "checksum mismatch for crc32c; client computed 977b8112, server reported 977b8111", checksumError.Error())
 
-		assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
+		require.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
 		info := transferResult.ServerChecksums[0]
 		assert.Equal(t, "977b8111", hex.EncodeToString(info.Value))
 		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
 
-		assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+		require.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
 		info = transferResult.ClientChecksums[0]
 		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
 		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
 	})
 
 	t.Run("test-algorithm-mismatch", func(t *testing.T) {
-		test_utils.InitClient(t, map[string]any{
-			param.Logging_Level.GetName(): "debug",
-			param.TLSSkipVerify.GetName(): true,
+		test_utils.InitClient(t, map[param.Param]any{
+			param.Logging_Level: "debug",
+			param.TLSSkipVerify: true,
 		})
 
 		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1962,8 +2271,9 @@ func TestChecksumPut(t *testing.T) {
 			}
 			if r.Method == "HEAD" {
 				w.Header().Set("Content-Length", "17")
-				// Server returns MD5 checksum but client requested CRC32C
-				w.Header().Set("Digest", "md5=5eb63bbbe01eeed093cb22bb8f5acdc3")
+				// Server returns MD5 checksum (base64 per RFC 3230) but client requested CRC32C.
+				// The client should fall back to verifying using MD5.
+				w.Header().Set("Digest", "md5=x4UGDIZnlswqFwjJlxVMjg==")
 				w.WriteHeader(http.StatusOK)
 			}
 			if r.Method == "PROPFIND" {
@@ -2004,27 +2314,26 @@ func TestChecksumPut(t *testing.T) {
 			requireChecksum: true,
 		}
 		transferResult, err := uploadObject(transfer)
-		assert.NoError(t, err)
-		require.Error(t, transferResult.Error)
-		assert.True(t, errors.Is(transferResult.Error, ErrServerChecksumMissing), "Expected checksum missing error when algorithms don't match")
+		require.NoError(t, err)
+		require.NoError(t, transferResult.Error, "Client should fall back to MD5 verification when CRC32C is not available")
 
-		// Server provided MD5 checksum but client requested CRC32C
-		assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
+		// Server provided MD5 checksum (client requested CRC32C but server fell back)
+		require.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
 		info := transferResult.ServerChecksums[0]
-		assert.Equal(t, "5eb63bbbe01eeed093cb22bb8f5acdc3", checksumValueToHttpDigest(info.Algorithm, info.Value))
+		assert.Equal(t, "x4UGDIZnlswqFwjJlxVMjg==", checksumValueToHttpDigest(info.Algorithm, info.Value))
 		assert.Equal(t, ChecksumType(AlgMD5), info.Algorithm)
 
-		// Client computed CRC32C checksum
-		assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+		// Client checksums still report the originally-requested CRC32C
+		require.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
 		info = transferResult.ClientChecksums[0]
 		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
 		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
 	})
 
 	t.Run("test-no-error-when-requireChecksum-false", func(t *testing.T) {
-		test_utils.InitClient(t, map[string]any{
-			param.Logging_Level.GetName(): "debug",
-			param.TLSSkipVerify.GetName(): true,
+		test_utils.InitClient(t, map[param.Param]any{
+			param.Logging_Level: "debug",
+			param.TLSSkipVerify: true,
 		})
 
 		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2037,8 +2346,8 @@ func TestChecksumPut(t *testing.T) {
 			}
 			if r.Method == "HEAD" {
 				w.Header().Set("Content-Length", "17")
-				// Server returns different algorithm than requested
-				w.Header().Set("Digest", "md5=5eb63bbbe01eeed093cb22bb8f5acdc3")
+				// Server returns MD5 (base64 per RFC 3230) instead of requested CRC32C
+				w.Header().Set("Digest", "md5=x4UGDIZnlswqFwjJlxVMjg==")
 				w.WriteHeader(http.StatusOK)
 			}
 			if r.Method == "PROPFIND" {
@@ -2079,26 +2388,26 @@ func TestChecksumPut(t *testing.T) {
 			requireChecksum: false,
 		}
 		transferResult, err := uploadObject(transfer)
-		assert.NoError(t, err)
-		assert.NoError(t, transferResult.Error, "Should not error when requireChecksum is false")
+		require.NoError(t, err)
+		require.NoError(t, transferResult.Error, "Should not error when requireChecksum is false and MD5 fallback succeeds")
 
 		// Server provided MD5 checksum
-		assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
+		require.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
 		info := transferResult.ServerChecksums[0]
-		assert.Equal(t, "5eb63bbbe01eeed093cb22bb8f5acdc3", checksumValueToHttpDigest(info.Algorithm, info.Value))
+		assert.Equal(t, "x4UGDIZnlswqFwjJlxVMjg==", checksumValueToHttpDigest(info.Algorithm, info.Value))
 		assert.Equal(t, ChecksumType(AlgMD5), info.Algorithm)
 
-		// Client computed CRC32C checksum
-		assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+		// Client checksums still report the originally-requested CRC32C
+		require.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
 		info = transferResult.ClientChecksums[0]
 		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
 		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
 	})
 
 	t.Run("test-missing-checksum-when-required", func(t *testing.T) {
-		test_utils.InitClient(t, map[string]any{
-			param.Logging_Level.GetName(): "debug",
-			param.TLSSkipVerify.GetName(): true,
+		test_utils.InitClient(t, map[param.Param]any{
+			param.Logging_Level: "debug",
+			param.TLSSkipVerify: true,
 		})
 
 		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2152,9 +2461,16 @@ func TestChecksumPut(t *testing.T) {
 			requireChecksum: true,
 		}
 		transferResult, err := uploadObject(transfer)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		require.Error(t, transferResult.Error)
-		assert.True(t, errors.Is(transferResult.Error, ErrServerChecksumMissing), "Expected checksum missing error when server provides no checksum")
+		require.True(t, errors.Is(transferResult.Error, ErrServerChecksumMissing), "Expected checksum missing error when server provides no checksum")
+
+		var pe *error_codes.PelicanError
+		require.True(t, errors.As(transferResult.Error, &pe), "Error should be wrapped as PelicanError")
+		expectedErr := error_codes.NewTransfer_ChecksumMissingError(errors.New("test"))
+		assert.Equal(t, expectedErr.Code(), pe.Code(), "Should map to Transfer.ChecksumMissing error code")
+		assert.Equal(t, expectedErr.ErrorType(), pe.ErrorType(), "Should map to Transfer.ChecksumMissing error type")
+		assert.Equal(t, expectedErr.IsRetryable(), pe.IsRetryable(), "ChecksumMissingError should be retryable")
 
 		// No server checksums provided
 		assert.Equal(t, 0, len(transferResult.ServerChecksums), "Checksum count is %d but should be 0", len(transferResult.ServerChecksums))
@@ -2174,8 +2490,8 @@ func TestChecksumPut(t *testing.T) {
 // after the first attempt and that the checksums are calculated and validated properly.
 func TestResume(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{
-		"Logging.Level": "debug",
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Logging_Level: "debug",
 	})
 
 	svr1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2265,9 +2581,9 @@ func TestResume(t *testing.T) {
 // Test failed connection setup error message for downloads
 func TestFailedConnectionSetupError(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{
-		"Transport.ResponseHeaderTimeout": "500ms",
-		"Logging.Level":                   "debug",
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Transport_ResponseHeaderTimeout: "500ms",
+		param.Logging_Level:                   "debug",
 	})
 
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2324,7 +2640,7 @@ func TestHeadRequestWithDownloadToken(t *testing.T) {
 	svrURL, err := url.Parse(svr.URL)
 	require.NoError(t, err)
 
-	token := newTokenGenerator(nil, nil, config.TokenSharedRead, false)
+	token := NewTokenGenerator(nil, nil, config.TokenRead, false)
 	token.SetToken("test-token")
 	transfer := &transferFile{
 		xferType: transferTypeDownload,
@@ -2356,10 +2672,10 @@ func TestFailedUploadError(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	configDir := t.TempDir()
-	test_utils.InitClient(t, map[string]any{
-		"Transport.ResponseHeaderTimeout": "500ms",
-		"TLSSkipVerify":                   true,
-		"Logging.Level":                   "debug",
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Transport_ResponseHeaderTimeout: "500ms",
+		param.TLSSkipVerify:                   true,
+		param.Logging_Level:                   "debug",
 	})
 
 	testfileLocation := filepath.Join(configDir, "testfile.txt")
@@ -2428,11 +2744,11 @@ func TestFailedUploadError(t *testing.T) {
 // corresponding error message out to the user.
 func TestFailedLargeUploadError(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{
-		"Transport.ResponseHeaderTimeout": "500ms",
-		"TLSSkipVerify":                   true,
-		"Logging.Level":                   "debug",
-		"Client.StoppedTransferTimeout":   "1s",
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Transport_ResponseHeaderTimeout: "500ms",
+		param.TLSSkipVerify:                   true,
+		param.Logging_Level:                   "debug",
+		param.Client_StoppedTransferTimeout:   "1s",
 	})
 
 	testfileLocation := filepath.Join(t.TempDir(), "testfile.txt")
@@ -2766,8 +3082,8 @@ func TestTLSCertificateError(t *testing.T) {
 
 func TestPutOverwrite(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{
-		"TLSSkipVerify": true,
+	test_utils.InitClient(t, map[param.Param]any{
+		param.TLSSkipVerify: true,
 	})
 
 	t.Run("ObjectExists", func(t *testing.T) {
@@ -2807,7 +3123,7 @@ func TestPutOverwrite(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create a token generator with a test token
-		token := newTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token := NewTokenGenerator(nil, nil, config.TokenWrite, false)
 		token.SetToken("test-token")
 
 		// Create a test file to upload
@@ -2867,7 +3183,7 @@ func TestPutOverwrite(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create a token generator with a test token
-		token := newTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token := NewTokenGenerator(nil, nil, config.TokenWrite, false)
 		token.SetToken("test-token")
 
 		// Create a test file to upload
@@ -2928,7 +3244,7 @@ func TestPutOverwrite(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create a token generator with a test token
-		token := newTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token := NewTokenGenerator(nil, nil, config.TokenWrite, false)
 		token.SetToken("test-token")
 
 		// Create a test file to upload
@@ -3023,16 +3339,16 @@ func TestPutOverwrite(t *testing.T) {
 		require.NoError(t, os.WriteFile(certFile, certPEM, 0o644))
 
 		// Test that overwrite protection is skipped when Client.EnableOverwrites is enabled
-		test_utils.InitClient(t, map[string]any{
-			param.Server_TLSCACertificateFile.GetName(): certFile,
-			param.Client_EnableOverwrites.GetName():     true,
+		test_utils.InitClient(t, map[param.Param]any{
+			param.Server_TLSCACertificateFile: certFile,
+			param.Client_EnableOverwrites:     true,
 		})
 
 		svrURL, err := url.Parse(svr.URL)
 		require.NoError(t, err)
 
 		// Create a token generator with a test token
-		token := newTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token := NewTokenGenerator(nil, nil, config.TokenWrite, false)
 		token.SetToken("test-token")
 
 		// Create a test file to upload
@@ -3077,8 +3393,8 @@ func TestPutOverwrite(t *testing.T) {
 
 func TestPackAutoSegfaultRegression(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{
-		param.Logging_Level.GetName(): "debug",
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Logging_Level: "debug",
 	})
 
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -3166,7 +3482,7 @@ func TestPermissionDeniedError(t *testing.T) {
 	}
 	tj := &TransferJob{
 		remoteURL: remoteURL,
-		token:     newTokenGenerator(remoteURL, nil, config.TokenSharedRead, false),
+		token:     NewTokenGenerator(remoteURL, nil, config.TokenRead, false),
 	}
 	transfer := &transferFile{
 		ctx:       context.Background(),
@@ -3201,8 +3517,8 @@ func TestPermissionDeniedError(t *testing.T) {
 // Test recursive listings and depth handling using a minimal WebDAV-like server
 func TestListHttpRecursiveAndDepth(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{
-		param.Logging_Level.GetName(): "debug",
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Logging_Level: "debug",
 	})
 
 	// Real WebDAV server using in-memory FS
@@ -3290,8 +3606,8 @@ func TestListHttpRecursiveAndDepth(t *testing.T) {
 // refactored function behaves exactly like the original inline error handling code.
 func TestWrapDownloadError(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{
-		"Logging.Level": "debug",
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Logging_Level: "debug",
 	})
 
 	transferEndpointURL := "http://example.com/test"
@@ -3347,17 +3663,18 @@ func TestWrapDownloadError(t *testing.T) {
 		assert.Contains(t, wrappedPde.message, "token expired", "Message should indicate token expired")
 	})
 
-	t.Run("permission_denied_error_invalid_token", func(t *testing.T) {
-		emptyToken := ""
+	t.Run("permission_denied_error_no_token", func(t *testing.T) {
+		// When no token was sent (e.g., public namespace accessed via a cache that doesn't know about it),
+		// the error message should accurately reflect that no token was sent rather than claiming a parse error.
 		pde := &PermissionDeniedError{}
-		wrappedErr, _, _ := wrapDownloadError(pde, transferEndpointURL, emptyToken)
+		wrappedErr, _, _ := wrapDownloadError(pde, transferEndpointURL, "")
 
 		var wrappedPde *PermissionDeniedError
 		require.True(t, errors.As(wrappedErr, &wrappedPde), "Should contain PermissionDeniedError")
-		// With empty/invalid token, it should say "token could not be parsed"
-		assert.Contains(t, wrappedPde.message, "token could not be parsed", "Message should indicate parsing error")
-		assert.False(t, wrappedPde.expired, "Token should not be marked as expired when parsing fails")
-		// Note: The "valid but rejected" case is tested in TestPermissionDeniedError integration test
+		assert.Contains(t, wrappedPde.message, "no token was sent", "Message should indicate no token was sent")
+		assert.False(t, wrappedPde.expired, "Token should not be marked as expired when no token was sent")
+		assert.True(t, wrappedPde.noToken, "noToken should be set when no token was sent")
+		assert.True(t, IsRetryable(wrappedErr), "Should be retryable so client can attempt token acquisition")
 	})
 
 	t.Run("permission_denied_error_invalid_token", func(t *testing.T) {
@@ -3367,6 +3684,8 @@ func TestWrapDownloadError(t *testing.T) {
 		var wrappedPde *PermissionDeniedError
 		require.True(t, errors.As(wrappedErr, &wrappedPde), "Should contain PermissionDeniedError")
 		assert.Contains(t, wrappedPde.message, "token could not be parsed", "Message should indicate parsing error")
+		assert.False(t, wrappedPde.expired, "Token should not be marked as expired when parsing fails")
+		// Note: The "valid but rejected" case is tested in TestPermissionDeniedError integration test
 	})
 
 	t.Run("connection_reset_error", func(t *testing.T) {
@@ -3628,7 +3947,7 @@ func TestIsRetryableWebDavError(t *testing.T) {
 // TestDirectoryPermissionsRespectUmask tests that directories created during
 // downloads respect different umask values
 func TestDirectoryPermissionsRespectUmask(t *testing.T) {
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, map[param.Param]any{})
 
 	// Save original umask
 	oldUmask := syscall.Umask(0)
@@ -3734,8 +4053,8 @@ func TestDirectoryPermissionsRespectUmask(t *testing.T) {
 // TestUpload403WithSyncEnabled verifies that when sync is enabled, a 403 response
 // during upload is treated as "file already exists" and doesn't cause an error
 func TestUpload403WithSyncEnabled(t *testing.T) {
-	test_utils.InitClient(t, map[string]any{
-		param.TLSSkipVerify.GetName(): true,
+	test_utils.InitClient(t, map[param.Param]any{
+		param.TLSSkipVerify: true,
 	})
 
 	// Create a temporary file to upload
@@ -3807,8 +4126,8 @@ func TestUpload403WithSyncEnabled(t *testing.T) {
 // TestUpload403WithSyncDisabled verifies that when sync is disabled, a 403 response
 // during upload is still treated as an error
 func TestUpload403WithSyncDisabled(t *testing.T) {
-	test_utils.InitClient(t, map[string]any{
-		param.TLSSkipVerify.GetName(): true,
+	test_utils.InitClient(t, map[param.Param]any{
+		param.TLSSkipVerify: true,
 	})
 
 	// Create a temporary file to upload
@@ -3892,8 +4211,8 @@ func TestUpload403WithSyncDisabled(t *testing.T) {
 // TestRecursiveUpload403WithSync verifies that recursive directory uploads properly handle 403 errors
 // This tests the walkDirUpload -> uploadObject flow
 func TestRecursiveUpload403WithSync(t *testing.T) {
-	test_utils.InitClient(t, map[string]any{
-		param.TLSSkipVerify.GetName(): true,
+	test_utils.InitClient(t, map[param.Param]any{
+		param.TLSSkipVerify: true,
 	})
 
 	// Create a temporary directory with multiple files
@@ -4042,7 +4361,7 @@ func TestRecursiveUpload403WithSync(t *testing.T) {
 // ETag from the HTTP response and returns it to the caller.
 func TestDownloadHTTPETag(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, map[param.Param]any{})
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	expectedETag := `"abc123def456"`
@@ -4081,7 +4400,7 @@ func TestDownloadHTTPETag(t *testing.T) {
 // provide an ETag header, downloadHTTP returns an empty string.
 func TestDownloadHTTPETagMissing(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, map[param.Param]any{})
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	body := []byte("No ETag here")
@@ -4112,7 +4431,7 @@ func TestDownloadHTTPETagMissing(t *testing.T) {
 // on the provided channel before starting the data transfer.
 func TestMetadataChannel(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, map[param.Param]any{})
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	expectedETag := `"meta-etag-789"`
@@ -4162,7 +4481,7 @@ func TestMetadataChannel(t *testing.T) {
 // the metadata channel is nil.
 func TestMetadataChannelNil(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, map[param.Param]any{})
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	body := []byte("no channel")
@@ -4192,7 +4511,7 @@ func TestMetadataChannelNil(t *testing.T) {
 // and receives a byte range from the server.
 func TestDownloadHTTPByteRange(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, map[param.Param]any{})
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	fullBody := []byte("0123456789ABCDEFGHIJ") // 20 bytes
@@ -4240,7 +4559,7 @@ func TestDownloadHTTPByteRange(t *testing.T) {
 // when bytesSoFar > 0 for resume functionality.
 func TestDownloadHTTPResume(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, map[param.Param]any{})
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	fullBody := []byte("Hello, resume world! This is a test of resume functionality.")
@@ -4289,8 +4608,8 @@ func TestDownloadHTTPResume(t *testing.T) {
 // successful PUT response.
 func TestUploadETag(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{
-		"Client.EnableOverwrites": true,
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Client_EnableOverwrites: true,
 	})
 
 	expectedETag := `"upload-etag-xyz"`
@@ -4352,7 +4671,7 @@ func TestUploadETag(t *testing.T) {
 // while ObjectSize reflects the full object size from Content-Range.
 func TestMetadataChannelByteRange(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, map[param.Param]any{})
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	fullBody := []byte("0123456789ABCDEFGHIJ") // 20 bytes

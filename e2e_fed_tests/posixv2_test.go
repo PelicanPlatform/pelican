@@ -95,7 +95,7 @@ func (a *simpleTokenAuthenticator) Verify(c *http.Client, rs *http.Response, pat
 
 // Helper function to get a token with write permissions for testing
 func getTempTokenForTest(t *testing.T) string {
-	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), t.TempDir()))
+	require.NoError(t, param.IssuerKeysDirectory.Set(t.TempDir()))
 
 	// Get the server issuer URL (same as FedTest uses)
 	issuer, err := config.GetServerIssuerURL()
@@ -129,7 +129,7 @@ func getTempTokenForTest(t *testing.T) string {
 func TestPosixv2OriginUploadDownload(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()
@@ -186,7 +186,7 @@ func TestPosixv2OriginUploadDownload(t *testing.T) {
 func TestPosixv2OriginStat(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()
@@ -233,7 +233,7 @@ func TestPosixv2OriginStat(t *testing.T) {
 func TestPosixv2OriginMultipleFiles(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()
@@ -294,7 +294,7 @@ func TestPosixv2OriginMultipleFiles(t *testing.T) {
 func TestPosixv2OriginLargeFile(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Create a temporary directory for the origin storage
 	tmpDir := t.TempDir()
@@ -355,7 +355,7 @@ func TestPosixv2OriginLargeFile(t *testing.T) {
 func TestPosixv2OriginListingWithDirector(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Configure origin to use POSIXv2 (without specifying storage, NewFedTest will create it)
 	originConfig := `
@@ -431,11 +431,9 @@ Director:
 
 // Test cache proxying of directory listings
 func TestCacheProxyDirectoryListing(t *testing.T) {
-	t.Skip("This test exposed bugs in xrdcl-pelican; see https://github.com/PelicanPlatform/xrdcl-pelican/pull/103.  Skip can be removed for the 1.6.2 release.")
-
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Configure origin to use POSIXv2
 	originConfig := `
@@ -556,7 +554,7 @@ Director:
 func TestGoWebDAVCompatibility(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Configure origin to use POSIXv2
 	originConfig := `
@@ -655,7 +653,7 @@ Director:
 func TestRecursiveDownload(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Configure origin to use POSIXv2
 	originConfig := `

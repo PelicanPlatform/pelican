@@ -46,12 +46,16 @@ jobs:
           go-version: "${{ steps.go-version.outputs.version }}"
           check-latest: true
 
+      - name: Generate GoReleaser config
+        run: |
+          make goreleaser-config
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean
+          args: release --clean --config .goreleaser.generated.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

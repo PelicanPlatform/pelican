@@ -84,8 +84,8 @@ func TestDiscoveryEmbeddedIssuerNamespace(t *testing.T) {
 				}
 			}
 		}
-		require.NoError(t, param.Set("origin.exports", exports))
-		require.NoError(t, param.Set(param.Server_IssuerUrl.GetName(), "https://origin.example.com:8444"))
+		require.NoError(t, param.Origin_Exports.Set(exports))
+		require.NoError(t, param.Server_IssuerUrl.Set("https://origin.example.com:8444"))
 
 		_, err := GetOriginExports()
 		require.NoError(t, err)
@@ -169,8 +169,8 @@ Server:
 		defer ResetTestState()
 		defer ResetOriginExports()
 
-		require.NoError(t, param.Set("Server.ExternalWebUrl", "https://origin.example.com:8444"))
-		require.NoError(t, param.Set("Origin.EnableIssuer", false))
+		require.NoError(t, param.Server_ExternalWebUrl.Set("https://origin.example.com:8444"))
+		require.NoError(t, param.Origin_EnableIssuer.Set(false))
 
 		resp := callDiscovery(t)
 
@@ -185,9 +185,9 @@ Server:
 		defer ResetTestState()
 		defer ResetOriginExports()
 
-		require.NoError(t, param.Set("Server.ExternalWebUrl", "https://origin.example.com:8444"))
-		require.NoError(t, param.Set("Origin.EnableIssuer", true))
-		require.NoError(t, param.Set("Origin.IssuerMode", "oa4mp"))
+		require.NoError(t, param.Server_ExternalWebUrl.Set("https://origin.example.com:8444"))
+		require.NoError(t, param.Origin_EnableIssuer.Set(true))
+		require.NoError(t, param.Origin_IssuerMode.Set("oa4mp"))
 
 		resp := callDiscovery(t)
 

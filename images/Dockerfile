@@ -76,11 +76,11 @@ ARG LOTMAN_VER=0.0.4
 # Until the two places are programmatically synchronized, please double-check by hand
 # when doing version changes.
 ARG XRDCL_PELICAN_SRC_BUILD=false
-ARG XRDCL_PELICAN_VER=1.5.6
+ARG XRDCL_PELICAN_VER=1.6.2
 ARG XROOTD_LOTMAN_SRC_BUILD=false
 ARG XROOTD_LOTMAN_VER=0.0.5
 ARG XROOTD_S3_HTTP_SRC_BUILD=true
-ARG XROOTD_S3_HTTP_VER=0.6.4
+ARG XROOTD_S3_HTTP_VER=0.6.6
 # Installed from Koji if not building it from source.
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
 ARG XRDHTTP_PELICAN_VER=0.0.11
@@ -187,10 +187,12 @@ RUN --mount=type=cache,id=go-cache,target=/root/.cache/go-build,sharing=shared \
   set -eux
   set -o pipefail
 
+  make goreleaser-config
+
   if ${IS_NONRELEASE_BUILD}; then
-    goreleaser build --id pelican-server --clean --single-target --snapshot
+    goreleaser build --id pelican-server --clean --single-target --snapshot --config .goreleaser.generated.yml
   else
-    goreleaser build --id pelican-server --clean --single-target
+    goreleaser build --id pelican-server --clean --single-target --config .goreleaser.generated.yml
   fi
 
   # NOTE (brianaydemir): GoReleaser creates a dist directory whose path
@@ -296,7 +298,7 @@ ARG XROOTD_GID
 # NOTE: If you update this version, you must also update the version in
 # github_scripts/osx_install.sh.
 ARG XROOTD_VER="5.9.1"
-ARG XROOTD_RELEASE="1.3.osg${OSG_SERIES}.${BASE_OS}"
+ARG XROOTD_RELEASE="1.4.osg${OSG_SERIES}.${BASE_OS}"
 ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VER}/${XROOTD_RELEASE}"
 
 # The packages from Koji need to be installed in a single dnf command in
@@ -354,6 +356,12 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   # prevent other packages from changing them via dependencies.
 
   dnf versionlock "xrootd*"
+
+  # Install PKCS#11 dependencies required by XRootD when Server.EnablePKCS11 is
+  # enabled. These packages provide the OpenSSL 3.x provider and the p11-kit
+  # Unix-socket server that Pelican's p11proxy communicates with.
+
+  dnf install -y p11-kit-server pkcs11-provider
 ENDRUN
 
 #################################################################

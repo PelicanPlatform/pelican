@@ -74,7 +74,7 @@ func TestWaitUntilLogin(t *testing.T) {
 
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
-	require.NoError(t, param.Set("ConfigDir", dirName))
+	require.NoError(t, param.ConfigDir.Set(dirName))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 	err := config.InitServer(ctx, server_structs.OriginType)
@@ -741,13 +741,13 @@ func TestCheckAdmin(t *testing.T) {
 			// Setup admin users config
 			// Only set if explicitly provided (nil means not set, empty slice means set but empty)
 			if tc.adminUsers != nil {
-				require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), tc.adminUsers))
+				require.NoError(t, param.Server_UIAdminUsers.Set(tc.adminUsers))
 			}
 
 			// Setup admin groups config
 			// Only set if explicitly provided (nil means not set, empty slice means set but empty)
 			if tc.adminGroups != nil {
-				require.NoError(t, param.Set(param.Server_AdminGroups.GetName(), tc.adminGroups))
+				require.NoError(t, param.Server_AdminGroups.Set(tc.adminGroups))
 			}
 
 			// Call CheckAdmin
@@ -782,7 +782,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "user-not-logged-in",
 			setupUserFunc: func(ctx *gin.Context) {
-				require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2"}))
+				require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin1", "admin2"}))
 				ctx.Set("User", "")
 			},
 			expectedCode:  http.StatusUnauthorized,
@@ -791,7 +791,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "general-admin-access",
 			setupUserFunc: func(ctx *gin.Context) {
-				require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), []string{}))
+				require.NoError(t, param.Server_UIAdminUsers.Set([]string{}))
 				ctx.Set("User", "admin")
 			},
 			expectedCode: http.StatusOK,
@@ -799,7 +799,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "specific-admin-user-access",
 			setupUserFunc: func(ctx *gin.Context) {
-				require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2"}))
+				require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin1", "admin2"}))
 				ctx.Set("User", "admin1")
 			},
 			expectedCode: http.StatusOK,
@@ -807,7 +807,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "non-admin-user-access",
 			setupUserFunc: func(ctx *gin.Context) {
-				require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2"}))
+				require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin1", "admin2"}))
 				ctx.Set("User", "user")
 			},
 			expectedCode:  http.StatusForbidden,
@@ -816,7 +816,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "admin-list-empty",
 			setupUserFunc: func(ctx *gin.Context) {
-				require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), []string{}))
+				require.NoError(t, param.Server_UIAdminUsers.Set([]string{}))
 				ctx.Set("User", "user")
 			},
 			expectedCode:  http.StatusForbidden,
@@ -825,7 +825,7 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "admin-list-multiple-users",
 			setupUserFunc: func(ctx *gin.Context) {
-				require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), []string{"admin1", "admin2", "admin3"}))
+				require.NoError(t, param.Server_UIAdminUsers.Set([]string{"admin1", "admin2", "admin3"}))
 				ctx.Set("User", "admin2")
 			},
 			expectedCode: http.StatusOK,
@@ -833,8 +833,8 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "admin-group-access",
 			setupUserFunc: func(ctx *gin.Context) {
-				require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), []string{}))
-				require.NoError(t, param.Set(param.Server_AdminGroups.GetName(), []string{"pelican-admins"}))
+				require.NoError(t, param.Server_UIAdminUsers.Set([]string{}))
+				require.NoError(t, param.Server_AdminGroups.Set([]string{"pelican-admins"}))
 				ctx.Set("User", "user1")
 				ctx.Set("Groups", []string{"pelican-admins"})
 			},
@@ -843,8 +843,8 @@ func TestAdminAuthHandler(t *testing.T) {
 		{
 			name: "non-admin-group-access",
 			setupUserFunc: func(ctx *gin.Context) {
-				require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), []string{}))
-				require.NoError(t, param.Set(param.Server_AdminGroups.GetName(), []string{"pelican-admins"}))
+				require.NoError(t, param.Server_UIAdminUsers.Set([]string{}))
+				require.NoError(t, param.Server_AdminGroups.Set([]string{"pelican-admins"}))
 				ctx.Set("User", "user1")
 				ctx.Set("Groups", []string{"pelican-users"})
 			},
@@ -988,7 +988,7 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 
 	t.Run("origin-included-if-flag-is-on", func(t *testing.T) {
 		server_utils.ResetTestState()
-		require.NoError(t, param.Set(param.Origin_EnableOIDC.GetName(), true))
+		require.NoError(t, param.Origin_EnableOIDC.Set(true))
 		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "origin"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
 		assert.NoError(t, err)
@@ -1010,7 +1010,7 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 
 	t.Run("cache-included-if-flag-is-on", func(t *testing.T) {
 		server_utils.ResetTestState()
-		require.NoError(t, param.Set(param.Cache_EnableOIDC.GetName(), true))
+		require.NoError(t, param.Cache_EnableOIDC.Set(true))
 		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "cache"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
 		assert.NoError(t, err)
@@ -1032,7 +1032,7 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 
 	t.Run("director-included-if-flag-is-on", func(t *testing.T) {
 		server_utils.ResetTestState()
-		require.NoError(t, param.Set(param.Director_EnableOIDC.GetName(), true))
+		require.NoError(t, param.Director_EnableOIDC.Set(true))
 		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "director"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
 		assert.NoError(t, err)
@@ -1054,9 +1054,9 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 
 	t.Run("origin-cache-both-included-if-flags-are-on", func(t *testing.T) {
 		server_utils.ResetTestState()
-		require.NoError(t, param.Set(param.Origin_EnableOIDC.GetName(), true))
-		require.NoError(t, param.Set(param.Cache_EnableOIDC.GetName(), true))
-		require.NoError(t, param.Set(param.Director_EnableOIDC.GetName(), true))
+		require.NoError(t, param.Origin_EnableOIDC.Set(true))
+		require.NoError(t, param.Cache_EnableOIDC.Set(true))
+		require.NoError(t, param.Director_EnableOIDC.Set(true))
 		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "origin", "cache", "director"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
 		assert.NoError(t, err)

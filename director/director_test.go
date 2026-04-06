@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
@@ -190,12 +191,12 @@ func TestDirectorRegistration(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	require.NoError(t, param.Set("Federation.RegistryUrl", ts.URL))
-	require.NoError(t, param.Set("Director.CacheSortMethod", "distance"))
-	require.NoError(t, param.Set("Director.StatTimeout", 300*time.Millisecond))
-	require.NoError(t, param.Set("Director.StatConcurrencyLimit", 1))
-	// Force federation discovery to run with the new config to avoid race condition
-	_, _ = config.GetFederation(ctx)
+	require.NoError(t, param.Director_CacheSortMethod.Set("distance"))
+	require.NoError(t, param.Director_StatTimeout.Set(300*time.Millisecond))
+	require.NoError(t, param.Director_StatConcurrencyLimit.Set(1))
+	test_utils.MockFederationRoot(t, &pelican_url.FederationDiscovery{
+		RegistryEndpoint: ts.URL,
+	}, nil)
 
 	setupContext := func() (*gin.Context, *gin.Engine, *httptest.ResponseRecorder) {
 		// Setup httptest recorder and context for the the unit test
@@ -1593,7 +1594,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	}
 
 	// Generate the keys we need for the test
-	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), filepath.Join(t.TempDir(), "testKeyDir")))
+	require.NoError(t, param.IssuerKeysDirectory.Set(filepath.Join(t.TempDir(), "testKeyDir")))
 
 	pKeySet, err := config.GetIssuerPublicJWKS()
 	assert.NoError(t, err, "Error fetching public key for test")
@@ -1601,7 +1602,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	privateKey, err := config.GetIssuerPrivateJWK()
 	assert.NoError(t, err, "Error fetching private key for test")
 
-	require.NoError(t, param.Set(param.TLSSkipVerify.GetName(), true))
+	require.NoError(t, param.TLSSkipVerify.Set(true))
 
 	// Set up the mock federation, which must exist for the auth handler to fetch federation keys
 	test_utils.MockFederationRoot(t, nil, &pKeySet)
@@ -1610,7 +1611,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	defer cancel()
 
 	// Isolate the test so it doesn't use system config
-	require.NoError(t, param.Set("ConfigDir", t.TempDir()))
+	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
 	err = initServerForTest(t, ctx, server_structs.DirectorType)
 	require.NoError(t, err)
 
@@ -1621,7 +1622,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	// the API token issuer or the federation issuer. Configure the URL to be used for local
 	// issuer scenarios. To be as realistic as possible, make the local issuer URL look like
 	// this mock federation's Director.
-	require.NoError(t, param.Set("Server.ExternalWebUrl", fedInfo.DirectorEndpoint))
+	require.NoError(t, param.Server_ExternalWebUrl.Set(fedInfo.DirectorEndpoint))
 
 	// Batch set up different tokens
 	setupToken := func(issuer string) []byte {
@@ -1671,7 +1672,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	r := gin.Default()
 	r.GET("/test", discoverOriginCache)
 
-	t.Run("no-token-should-give-401", func(t *testing.T) {
+	t.Run("no-token-should-give-403", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "/test", nil)
 		if err != nil {
 			t.Fatalf("Could not make a GET request: %v", err)
@@ -1853,8 +1854,8 @@ func TestRedirectCheckHostnames(t *testing.T) {
 	// Use ads generated via mock topology for generating list of caches
 	topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
 	defer topoServer.Close()
-	require.NoError(t, param.Set("Federation.TopologyNamespaceUrl", topoServer.URL))
-	// param.Set("Director.CacheSortMethod", "random")
+	require.NoError(t, param.Federation_TopologyNamespaceUrl.Set(topoServer.URL))
+	// param.Director_CacheSortMethod.Set("random")
 	// Populate ads for redirectToCache to use
 	err := AdvertiseOSDF(ctx)
 	require.NoError(t, err)
@@ -1868,8 +1869,8 @@ func TestRedirectCheckHostnames(t *testing.T) {
 	// Check that the checkHostnameRedirects uses the pre-configured hostnames to redirect
 	// requests that come in at the default paths, but not if the request is made
 	// specifically for an object or a cache via the API.
-	require.NoError(t, param.Set("Director.OriginResponseHostnames", []string{"origin-hostname.com"}))
-	require.NoError(t, param.Set("Director.CacheResponseHostnames", []string{"cache-hostname.com"}))
+	require.NoError(t, param.Director_OriginResponseHostnames.Set([]string{"origin-hostname.com"}))
+	require.NoError(t, param.Director_CacheResponseHostnames.Set([]string{"cache-hostname.com"}))
 
 	type redirectHostNames struct {
 		desc         string
@@ -1928,7 +1929,7 @@ func TestRedirectMiddleware(t *testing.T) {
 	// Use ads generated via mock topology for generating list of caches
 	topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
 	defer topoServer.Close()
-	require.NoError(t, param.Set("Federation.TopologyNamespaceUrl", topoServer.URL))
+	require.NoError(t, param.Federation_TopologyNamespaceUrl.Set(topoServer.URL))
 	err := AdvertiseOSDF(ctx)
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -1994,8 +1995,7 @@ func TestRedirectMiddleware(t *testing.T) {
 	}
 
 	// Set the necessary viper configuration for host-aware tests
-	require.NoError(t, param.Set("Director.OriginResponseHostnames", []string{"origin-hostname.com"}))
-	require.NoError(t, param.Set("Director.HostAwareRedirects", true))
+	require.NoError(t, param.Director_OriginResponseHostnames.Set([]string{"origin-hostname.com"}))
 
 	// Run all test cases
 	for _, tc := range testCases {
@@ -2005,6 +2005,7 @@ func TestRedirectMiddleware(t *testing.T) {
 	server_utils.ResetTestState()
 
 }
+
 func TestRedirects(t *testing.T) {
 	setGinTestMode()
 	t.Cleanup(test_utils.SetupTestLogging(t))
@@ -2032,8 +2033,8 @@ func TestRedirects(t *testing.T) {
 	// Use ads generated via mock topology for generating list of caches
 	topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
 	defer topoServer.Close()
-	require.NoError(t, param.Set("Federation.TopologyNamespaceUrl", topoServer.URL))
-	require.NoError(t, param.Set("Director.CacheSortMethod", "random"))
+	require.NoError(t, param.Federation_TopologyNamespaceUrl.Set(topoServer.URL))
+	require.NoError(t, param.Director_CacheSortMethod.Set("random"))
 	err := AdvertiseOSDF(ctx)
 	require.NoError(t, err)
 
@@ -2041,7 +2042,7 @@ func TestRedirects(t *testing.T) {
 	router.GET("/api/v1.0/director/origin/*any", redirectToOrigin)
 
 	t.Run("cache-test-file-redirect", func(t *testing.T) {
-		require.NoError(t, param.Set("Server.ExternalWebUrl", "https://example.com"))
+		require.NoError(t, param.Server_ExternalWebUrl.Set("https://example.com"))
 		// Create a request to the endpoint
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/api/v1.0/director/origin/pelican/monitoring/test.txt", nil)
@@ -2703,4 +2704,162 @@ func TestNilOrEmptyServerDowntimes(t *testing.T) {
 	_, exists = filteredServers[serverName]
 	filteredServersMutex.RUnlock()
 	assert.False(t, exists, "serverFiltered should be cleared when downtimes is an empty array []")
+}
+
+// TestValidateClientToken exercises the Director's expired-token detection logic.
+func TestValidateClientToken(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	// Generate a signing key for creating test JWTs.
+	privEC, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	jwkKey, err := jwk.FromRaw(privEC)
+	require.NoError(t, err)
+	require.NoError(t, jwkKey.Set(jwk.KeyIDKey, "test-key"))
+	require.NoError(t, jwkKey.Set(jwk.AlgorithmKey, jwa.ES256))
+
+	// Helper to create a signed JWT with the given iat and exp.
+	makeToken := func(t *testing.T, iat, exp time.Time) string {
+		t.Helper()
+		builder := jwt.NewBuilder().
+			Issuer("https://test-issuer.example").
+			Subject("test-user").
+			Claim("scope", "storage.read:/")
+		if !iat.IsZero() {
+			builder = builder.IssuedAt(iat)
+		}
+		if !exp.IsZero() {
+			builder = builder.Expiration(exp)
+		}
+		tok, err := builder.Build()
+		require.NoError(t, err)
+		signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, jwkKey))
+		require.NoError(t, err)
+		return string(signed)
+	}
+
+	requestId := uuid.New()
+
+	t.Run("no-token-passes", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/test/file", nil)
+
+		status, err := validateClientToken(c, requestId)
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusOK, status)
+	})
+
+	t.Run("valid-token-passes", func(t *testing.T) {
+		now := time.Now()
+		tok := makeToken(t, now.Add(-1*time.Minute), now.Add(10*time.Minute))
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/test/file", nil)
+		c.Request.Header.Set("Authorization", "Bearer "+tok)
+
+		status, err := validateClientToken(c, requestId)
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusOK, status)
+	})
+
+	t.Run("expired-token-returns-401", func(t *testing.T) {
+		now := time.Now()
+		tok := makeToken(t, now.Add(-10*time.Minute), now.Add(-5*time.Minute))
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/test/file", nil)
+		c.Request.Header.Set("Authorization", "Bearer "+tok)
+
+		status, err := validateClientToken(c, requestId)
+		assert.Error(t, err)
+		assert.Equal(t, http.StatusUnauthorized, status)
+		assert.Contains(t, w.Header().Get("WWW-Authenticate"), "Bearer")
+	})
+
+	t.Run("nearly-expired-within-grace-returns-401", func(t *testing.T) {
+		now := time.Now()
+		// Token expires in 3 seconds — well within the 10-second default grace
+		tok := makeToken(t, now.Add(-5*time.Minute), now.Add(3*time.Second))
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/test/file", nil)
+		c.Request.Header.Set("Authorization", "Bearer "+tok)
+
+		status, err := validateClientToken(c, requestId)
+		assert.Error(t, err)
+		assert.Equal(t, http.StatusUnauthorized, status)
+	})
+
+	t.Run("short-lived-token-half-lifetime-grace", func(t *testing.T) {
+		now := time.Now()
+		// 4-second lifetime, 3 seconds elapsed → 1 second left, grace = 2s → rejected
+		tok := makeToken(t, now.Add(-3*time.Second), now.Add(1*time.Second))
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/test/file", nil)
+		c.Request.Header.Set("Authorization", "Bearer "+tok)
+
+		status, err := validateClientToken(c, requestId)
+		assert.Error(t, err)
+		assert.Equal(t, http.StatusUnauthorized, status)
+	})
+
+	t.Run("negative-lifetime-exp-before-iat-returns-401", func(t *testing.T) {
+		now := time.Now()
+		// Malformed: exp is before iat
+		tok := makeToken(t, now.Add(-1*time.Minute), now.Add(-2*time.Minute))
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/test/file", nil)
+		c.Request.Header.Set("Authorization", "Bearer "+tok)
+
+		status, err := validateClientToken(c, requestId)
+		assert.Error(t, err)
+		assert.Equal(t, http.StatusUnauthorized, status)
+	})
+
+	t.Run("authz-query-param-expired-returns-401", func(t *testing.T) {
+		now := time.Now()
+		tok := makeToken(t, now.Add(-10*time.Minute), now.Add(-5*time.Minute))
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/test/file?authz="+tok, nil)
+
+		status, err := validateClientToken(c, requestId)
+		assert.Error(t, err)
+		assert.Equal(t, http.StatusUnauthorized, status)
+	})
+
+	t.Run("non-jwt-opaque-token-passes", func(t *testing.T) {
+		// Opaque tokens can't be parsed as JWT — should be allowed through
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/test/file", nil)
+		c.Request.Header.Set("Authorization", "Bearer not-a-jwt-token")
+
+		status, err := validateClientToken(c, requestId)
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusOK, status)
+	})
+
+	t.Run("token-without-exp-passes", func(t *testing.T) {
+		// A token with no expiration claim should pass
+		tok := makeToken(t, time.Now(), time.Time{})
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/test/file", nil)
+		c.Request.Header.Set("Authorization", "Bearer "+tok)
+
+		status, err := validateClientToken(c, requestId)
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusOK, status)
+	})
 }

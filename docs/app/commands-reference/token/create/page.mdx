@@ -24,7 +24,7 @@ To create a read/write token for /some/namespace/path in OSDF: pelican token cre
   -i, --issuer string           Set the token's 'issuer/iss' claim. If not provided, the issuer will be discovered via the Director.
   -l, --lifetime int            Set the token's lifetime in seconds. (default 1200)
   -m, --modify                  Indicate the requested token should provide the ability to modify/delete the specified resource.
-  -k, --private-key string      Path to the private key used to sign the token. If not provided, Pelican will look for the private key in the default location pointed to by the 'IssuerKeysDirectory' config parameter.
+  -k, --private-key string      Path to the private key used to sign the token. If not provided, Pelican will look for the private key in the default location pointed to by the '{IssuerKeysDirectory}' config parameter.
   -p, --profile string          Create a token with a specific JWT profile. Accepted values are scitokens2 and wlcg. (default "wlcg")
       --raw-claim stringArray   Set claims to be added to the token. Format: <claim_key>=<claim_value>.
       --raw-scope stringArray   Set non-typical values for the token's 'scope' claim. Scopes should be space-separated, e.g. 'storage.read:/ storage.create:/'.

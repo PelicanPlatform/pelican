@@ -67,7 +67,7 @@ func TestHttpOriginConfig(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
-	require.NoError(t, param.Set("Origin.HttpServiceUrl", srv.URL))
+	require.NoError(t, param.Origin_HttpServiceUrl.Set(srv.URL))
 
 	fed := fed_test_utils.NewFedTest(t, httpsOriginConfig)
 	storageName = fed.Exports[0].StoragePrefix + "/hello_world"

@@ -19,13 +19,16 @@
 package server_utils
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/pkg/errors"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // Inherit from the base origin
@@ -38,9 +41,10 @@ func (o *PosixOrigin) Type(_ Origin) server_structs.OriginStorageType {
 }
 
 func (o *PosixOrigin) validateStoragePrefix(prefix string) error {
-	// For posix origins, the storage prefix is validated the same we we validate
-	// the federation prefix.
-	return validateFederationPrefix(prefix)
+	// Storage prefixes need basic path validation but not the federation-specific
+	// reserved prefix checks (e.g. /pelican is reserved in the federation namespace
+	// but is a valid local storage path).
+	return validatePathLikePrefix(prefix)
 }
 
 // validateStoragePrefixNotRoot rejects StoragePrefix values that resolve to "/".
@@ -104,12 +108,166 @@ func (o *PosixOrigin) validateTempUploadLocation(e *OriginExport) error {
 	return nil
 }
 
+// validateAtomicUploadFilesystem checks that, when atomic uploads are enabled,
+// the UploadTempLocation resides on the same filesystem as the export's StoragePrefix.
+// The POSC plugin relies on rename(2) to atomically move completed uploads into place,
+// and rename(2) returns EXDEV when source and destination are on different filesystems.
+func (o *PosixOrigin) validateAtomicUploadFilesystem(e *OriginExport) error {
+	if !param.Origin_EnableAtomicUploads.GetBool() {
+		return nil
+	}
+
+	uploadTempLocation := param.Origin_UploadTempLocation.GetString()
+	if uploadTempLocation == "" {
+		return errors.Errorf("%s is enabled but %s is empty",
+			param.Origin_EnableAtomicUploads.GetName(), param.Origin_UploadTempLocation.GetName())
+	}
+
+	uploadTempAbs, err := filepath.Abs(uploadTempLocation)
+	if err != nil {
+		return errors.Wrapf(err, "unable to resolve absolute path for %s '%s'",
+			param.Origin_UploadTempLocation.GetName(), uploadTempLocation)
+	}
+
+	storageAbs, err := filepath.Abs(e.StoragePrefix)
+	if err != nil {
+		return errors.Wrapf(err, "unable to resolve absolute path for StoragePrefix '%s'", e.StoragePrefix)
+	}
+
+	// Ensure the upload temp directory exists before comparing device IDs.
+	if err := os.MkdirAll(uploadTempAbs, 0750); err != nil {
+		return errors.Wrapf(err, "unable to create %s directory '%s'",
+			param.Origin_UploadTempLocation.GetName(), uploadTempAbs)
+	}
+
+	same, err := utils.SameFilesystem(uploadTempAbs, storageAbs)
+	if err != nil {
+		return errors.Wrapf(err, "unable to determine whether %s '%s' and StoragePrefix '%s' are on the same filesystem",
+			param.Origin_UploadTempLocation.GetName(), uploadTempAbs, storageAbs)
+	}
+
+	if !same {
+		return errors.Errorf("%s '%s' and StoragePrefix '%s' (export for federation prefix '%s') are on different filesystems. "+
+			"The atomic upload feature (POSC plugin) relies on rename(2) to move completed uploads into place, "+
+			"which cannot work across filesystem boundaries. Please configure %s to be on the same filesystem "+
+			"as the export's StoragePrefix, or disable atomic uploads by setting Origin.EnableAtomicUploads to false.",
+			param.Origin_UploadTempLocation.GetName(), uploadTempAbs, storageAbs, e.FederationPrefix,
+			param.Origin_UploadTempLocation.GetName())
+	}
+
+	return nil
+}
+
 func (o *PosixOrigin) validateExtra(e *OriginExport, _ int) error {
 	if err := o.validateStoragePrefixNotRoot(e); err != nil {
 		return err
 	}
 	if err := o.validateTempUploadLocation(e); err != nil {
 		return err
+	}
+	if err := o.validateAtomicUploadFilesystem(e); err != nil {
+		return err
+	}
+	if err := o.validatePosixPermissions(e.StoragePrefix, e.Capabilities, e.FederationPrefix); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validatePosixPermissions checks if the daemon user has the required filesystem permissions
+// on the given path to support the specified capabilities.
+func (o *PosixOrigin) validatePosixPermissions(storagePath string, caps server_structs.Capabilities, federationPrefix string) error {
+	// Get XRootD daemon user info
+	uid, err := config.GetDaemonUID()
+	if err != nil {
+		return errors.Wrap(err, "failed to get XRootD daemon UID for permission validation")
+	}
+	gid, err := config.GetDaemonGID()
+	if err != nil {
+		return errors.Wrap(err, "failed to get XRootD daemon GID for permission validation")
+	}
+	username, err := config.GetDaemonUser()
+	if err != nil {
+		username = "username-unknown"
+	}
+
+	// Check if the storage prefix exists
+	info, err := os.Stat(storagePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return errors.Wrapf(ErrInvalidOriginConfig,
+				"storage prefix %q for export %q does not exist",
+				storagePath, federationPrefix)
+		}
+		return errors.Wrapf(err, "failed to stat storage prefix %q for export %q",
+			storagePath, federationPrefix)
+	}
+
+	// The storage prefix should be a directory
+	if !info.IsDir() {
+		return errors.Wrapf(ErrInvalidOriginConfig,
+			"storage prefix %q for export %q is not a directory",
+			storagePath, federationPrefix)
+	}
+
+	// Get the directory's owner and group
+	dirUID, dirGID, err := utils.FileOwnerIDs(info)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get owner info for %q", storagePath)
+	}
+	mode := info.Mode()
+
+	// Determine which permission bits apply to XRootD daemon user
+	var canRead, canWrite, canExecute bool
+	if uid == dirUID {
+		// User is owner - check owner bits
+		canRead = mode&0400 != 0
+		canWrite = mode&0200 != 0
+		canExecute = mode&0100 != 0
+	} else if gid == dirGID {
+		// User is in group - check group bits
+		canRead = mode&0040 != 0
+		canWrite = mode&0020 != 0
+		canExecute = mode&0010 != 0
+	} else {
+		// User is neither owner nor in group - check others bits
+		canRead = mode&0004 != 0
+		canWrite = mode&0002 != 0
+		canExecute = mode&0001 != 0
+	}
+
+	// Helper to format permission error message
+	formatPermError := func(capability, requiredPerms string) error {
+		return errors.Wrapf(ErrInvalidOriginConfig,
+			"storage prefix %q for export %q requires %q permissions for the %q user (uid=%d, gid=%d) "+
+				"to support the %q capability, but the current permissions are %q (owner uid=%d, gid=%d). "+
+				"Please adjust the ownership or permissions of the directory",
+			storagePath, federationPrefix, requiredPerms, username, uid, gid,
+			capability, mode.Perm().String(), dirUID, dirGID)
+	}
+
+	// Check permissions based on capabilities
+
+	// Check reads (PublicReads or Reads) - needs read and execute
+	if caps.Reads || caps.PublicReads {
+		if !canRead || !canExecute {
+			return formatPermError("Reads/PublicReads", "read and execute (r-x)")
+		}
+	}
+
+	// Check writes - needs write and execute
+	if caps.Writes {
+		if !canWrite || !canExecute {
+			return formatPermError("Writes", "write and execute (-wx)")
+		}
+	}
+
+	// Check listings - needs read and execute
+	if caps.Listings {
+		if !canRead || !canExecute {
+			return formatPermError("Listings", "read and execute (r-x)")
+		}
 	}
 
 	return nil

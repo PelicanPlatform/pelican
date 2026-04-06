@@ -177,7 +177,7 @@ type (
 		SID  int64 // Provider identification
 	}
 
-	// Cache g-stream: https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm#_Toc138968526
+	// Cache g-stream: https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968524
 	CacheGS struct {
 		AccessCnt    uint32 `json:"access_cnt"`
 		AttachT      int64  `json:"attach_t"`
@@ -434,10 +434,10 @@ const (
 
 // Summary data types
 const (
-	LinkStat  SummaryStatType = "link"  // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653739
-	SchedStat SummaryStatType = "sched" // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653745
-	OssStat   SummaryStatType = "oss"   // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653741
-	CacheStat SummaryStatType = "cache" // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653733
+	LinkStat  SummaryStatType = "link"  // https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968503
+	SchedStat SummaryStatType = "sched" // https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968509
+	OssStat   SummaryStatType = "oss"   // https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968505
+	CacheStat SummaryStatType = "cache" // https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968497
 	ProcStat  SummaryStatType = "proc"  // https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968507
 )
 
@@ -1115,7 +1115,10 @@ func computePrefix(inputPath string, monitorPaths []PathList) string {
 
 func GetSIDRest(info []byte) (xrdUserId XrdUserId, rest string, err error) {
 	log.Debugln("GetSIDRest inputs:", string(info))
-	infoSplit := strings.SplitN(string(info), "\n", 2)
+	// Trim trailing null bytes from the info before parsing; XRootD
+	// monitoring packets are null-terminated C strings.
+	infoStr := strings.TrimRight(string(info), "\x00")
+	infoSplit := strings.SplitN(infoStr, "\n", 2)
 	if len(infoSplit) == 1 {
 		err = errors.New("Unable to parse SID")
 		return
@@ -1186,17 +1189,17 @@ func ParseTokenAuth(tokenauth string) (userId UserId, record UserRecord, err err
 		}
 		switch keyVal[0] {
 		case "Uc":
-			var id int
-			id, err = strconv.Atoi(keyVal[1])
+			var id int64
+			id, err = strconv.ParseInt(keyVal[1], 10, 64)
 			if err != nil {
 				err = errors.Wrap(err, "Unable to parse user ID to integer")
 				return
 			}
-			if id < 0 || id > math.MaxUint32 {
+			if id > math.MaxInt32 || id < math.MinInt32 {
 				err = errors.Errorf("Provided ID, %d, is not a valid uint32", id)
 				return
 			}
-			userId.Id = uint32(id)
+			userId.Id = uint32(int32(id))
 			foundUc = true
 		case "s":
 			record.DN = keyVal[1]

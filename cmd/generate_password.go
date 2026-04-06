@@ -115,7 +115,7 @@ func passwordMain(cmd *cobra.Command, args []string) error {
 		return errors.Wrapf(err, "failed to create directory for the password file at %s", filepath.Dir(outPasswordPath))
 	}
 
-	if err := param.Set(param.Server_UIPasswordFile.GetName(), outPasswordPath); err != nil {
+	if err := param.Server_UIPasswordFile.Set(outPasswordPath); err != nil {
 		return err
 	}
 	file, err := os.OpenFile(outPasswordPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)

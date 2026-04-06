@@ -67,7 +67,7 @@ ninja
 ninja install
 popd
 
-git clone --branch v1.5.6 https://github.com/PelicanPlatform/xrdcl-pelican.git
+git clone --branch v1.6.2 https://github.com/PelicanPlatform/xrdcl-pelican.git
 pushd xrdcl-pelican
 mkdir build
 cd build
@@ -90,7 +90,7 @@ sudo mkdir -p "$xrootd_libdir"
 sudo ln -s "$PWD/release_dir/lib/libXrdHttpPelican-5.so" "$xrootd_libdir"
 popd
 
-git clone --recurse-submodules --branch v0.6.4 https://github.com/PelicanPlatform/xrootd-s3-http.git
+git clone --recurse-submodules --branch v0.6.6 https://github.com/PelicanPlatform/xrootd-s3-http.git
 pushd xrootd-s3-http
 mkdir build
 cd build

@@ -45,10 +45,10 @@ import (
 func TestCacheFedTokMaint(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Spin up the full fed so that our cache server can get the token from the director
-	require.NoError(t, param.Set(param.Director_FedTokenLifetime.GetName(), "12s"))
+	require.NoError(t, param.Director_FedTokenLifetime.SetString("12s"))
 	oldMinTokRate := cache.MinFedTokenTickerRate
 	defer func() {
 		cache.MinFedTokenTickerRate = oldMinTokRate
@@ -64,7 +64,7 @@ func TestCacheFedTokMaint(t *testing.T) {
 	cacheServer := cache.CacheServer{}
 
 	// Give this "cache" instance a unique location so it doesn't compete with the fed test cache token
-	require.NoError(t, param.Set(param.Cache_FedTokenLocation.GetName(), filepath.Join(t.TempDir(), t.Name()+"_fedtok")))
+	require.NoError(t, param.Cache_FedTokenLocation.Set(filepath.Join(t.TempDir(), t.Name()+"_fedtok")))
 	cache.LaunchFedTokManager(ctx, egrp, &cacheServer, nil)
 	tokFile := cacheServer.GetFedTokLocation()
 
@@ -91,10 +91,10 @@ func TestCacheFedTokMaint(t *testing.T) {
 func TestCacheServe_PreservesExistingPort(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Set Cache.Url to include an existing port
-	require.NoError(t, param.Set(param.Cache_Url.GetName(), "https://example.com:8442"))
+	require.NoError(t, param.Cache_Url.Set("https://example.com:8442"))
 
 	// Launch the federation (starts CacheServe among others)
 	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
@@ -111,10 +111,10 @@ func TestCacheServe_PreservesExistingPort(t *testing.T) {
 func TestCacheServe_AddsPortWhenMissing(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Ensure Cache.Url has no explicit port
-	require.NoError(t, param.Set(param.Cache_Url.GetName(), "https://example.com"))
+	require.NoError(t, param.Cache_Url.Set("https://example.com"))
 
 	// Launch the federation (starts CacheServe among others)
 	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)

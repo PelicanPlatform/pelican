@@ -62,13 +62,13 @@ func TestRegistration(t *testing.T) {
 	defer cancel()
 
 	server_utils.ResetTestState()
-	require.NoError(t, param.Set("ConfigDir", tempConfigDir))
+	require.NoError(t, param.ConfigDir.Set(tempConfigDir))
 	keysDir := filepath.Join(tempConfigDir, "issuer-keys")
-	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), keysDir))
+	require.NoError(t, param.IssuerKeysDirectory.Set(keysDir))
 
 	test_utils.MockFederationRoot(t, nil, nil)
-	require.NoError(t, param.Set(param.Registry_DbLocation.GetName(), ""))
-	require.NoError(t, param.Set(param.Server_DbLocation.GetName(), filepath.Join(tempConfigDir, "test.sql")))
+	require.NoError(t, param.Registry_DbLocation.Set(""))
+	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(tempConfigDir, "test.sql")))
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
@@ -97,8 +97,8 @@ func TestRegistration(t *testing.T) {
 	defer svr.CloseClientConnections()
 	defer svr.Close()
 
-	require.NoError(t, param.Set("Federation.RegistryUrl", svr.URL))
-	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/test123"))
+	require.NoError(t, param.Set(param.Federation_RegistryUrl, svr.URL))
+	require.NoError(t, param.Origin_FederationPrefix.Set("/test123"))
 
 	// Re-run the InitServer to reflect the new RegistryUrl set above
 	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
@@ -187,7 +187,7 @@ func TestMultiKeysRegistration(t *testing.T) {
 	defer cancel()
 
 	server_utils.ResetTestState()
-	require.NoError(t, param.Set("ConfigDir", tempConfigDir))
+	require.NoError(t, param.ConfigDir.Set(tempConfigDir))
 
 	// MockFederationRoot must be called before setting IssuerKeysDirectory because that
 	// function overrides the IssuerKeysDirectory value if not already set. Since we don't
@@ -196,10 +196,10 @@ func TestMultiKeysRegistration(t *testing.T) {
 	test_utils.MockFederationRoot(t, nil, nil)
 
 	keysDir := filepath.Join(tempConfigDir, "issuer-keys")
-	require.NoError(t, param.Set(param.IssuerKeysDirectory.GetName(), keysDir))
+	require.NoError(t, param.IssuerKeysDirectory.Set(keysDir))
 
-	require.NoError(t, param.Set(param.Registry_DbLocation.GetName(), ""))
-	require.NoError(t, param.Set(param.Server_DbLocation.GetName(), filepath.Join(tempConfigDir, "test.sql")))
+	require.NoError(t, param.Registry_DbLocation.Set(""))
+	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(tempConfigDir, "test.sql")))
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
@@ -256,8 +256,8 @@ func TestMultiKeysRegistration(t *testing.T) {
 	defer svr.CloseClientConnections()
 	defer svr.Close()
 
-	require.NoError(t, param.Set("Federation.RegistryUrl", svr.URL))
-	require.NoError(t, param.Set(param.Origin_FederationPrefix.GetName(), "/test123"))
+	require.NoError(t, param.Set(param.Federation_RegistryUrl, svr.URL))
+	require.NoError(t, param.Origin_FederationPrefix.Set("/test123"))
 
 	// Remove the original key, forcing us to register with the new one
 	require.NoError(t, os.Remove(filepath.Join(keysDir, dirEntries[0].Name())))

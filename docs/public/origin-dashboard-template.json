@@ -761,7 +761,7 @@
         "type": "prometheus",
         "uid": "<YOUR-DATA-SOURCE-UID>"
       },
-      "description": "The total number of bytes XRootD sent/received. Ref: https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm#_Toc138968503 (See link.in and link.out)",
+      "description": "The total number of bytes XRootD sent/received. Ref: https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968503 (See link.in and link.out)",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1003,7 +1003,7 @@
         "type": "prometheus",
         "uid": "<YOUR-DATA-SOURCE-UID>"
       },
-      "description": "The bytes of transfers for individual object. Ref: https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm#_Toc138968522 (See XrdXrootdMonStatXFR)",
+      "description": "The bytes of transfers for individual object. Ref: https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968523  (See XrdXrootdMonStatXFR)",
       "fieldConfig": {
         "defaults": {
           "mappings": [],

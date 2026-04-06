@@ -64,7 +64,7 @@ var (
 	//go:embed resources/robots.txt
 	robotsTxt string
 
-	errBadKeyPair error = errors.New("Bad X509 keypair")
+	errBadKeyPair error = errors.New("bad X509 keypair")
 )
 
 const (
@@ -104,6 +104,7 @@ type (
 		EnableListings      bool
 		EnableAtomicUploads bool
 		SelfTest            bool
+		MonitoringPrefix    string
 		Concurrency         int
 		Port                int
 		FederationPrefix    string
@@ -255,17 +256,17 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 			destPath := path.Clean(filepath.Join(exportPath, export.FederationPrefix))
 			err := config.MkdirAll(filepath.Dir(destPath), 0755, uid, gid)
 			if err != nil {
-				return errors.Wrapf(err, "Unable to create export directory %v",
+				return errors.Wrapf(err, "unable to create export directory %v",
 					filepath.Dir(destPath))
 			}
 
 			err = os.Symlink(export.StoragePrefix, destPath)
 			if err != nil {
-				return errors.Wrapf(err, "Failed to create export symlink of %v to %v", export.StoragePrefix, destPath)
+				return errors.Wrapf(err, "failed to create export symlink of %v to %v", export.StoragePrefix, destPath)
 			}
 		}
 		// Set the mount to our export path now that everything is symlinked
-		if err := param.Set("Xrootd.Mount", exportPath); err != nil {
+		if err := param.Xrootd_Mount.Set(exportPath); err != nil {
 			return err
 		}
 
@@ -336,7 +337,7 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 
 		err = os.Symlink(uploadTempDir, filepath.Join(exportPath, "in-progress"))
 		if err != nil {
-			return errors.Wrapf(err, "Failed to create in-progress symlink from %v to %v", uploadTempDir, filepath.Join(exportPath, "in-progress"))
+			return errors.Wrapf(err, "failed to create in-progress symlink from %v to %v", uploadTempDir, filepath.Join(exportPath, "in-progress"))
 		}
 	}
 
@@ -351,12 +352,12 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 		if errors.Is(err, os.ErrNotExist) {
 			err = config.MkdirAll(path.Dir(macaroonsSecret), 0755, -1, gid)
 			if err != nil {
-				return errors.Wrapf(err, "Unable to create directory %v",
+				return errors.Wrapf(err, "unable to create directory %v",
 					path.Dir(macaroonsSecret))
 			}
 			file, err := os.OpenFile(macaroonsSecret, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0640)
 			if err != nil {
-				return errors.Wrap(err, "Failed to create a new macaroons key")
+				return errors.Wrap(err, "failed to create a new macaroons key")
 			}
 			defer file.Close()
 			buf := make([]byte, 64)
@@ -366,14 +367,14 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 			}
 			encoded := base64.StdEncoding.EncodeToString(buf) + "\n"
 			if _, err = file.WriteString(encoded); err != nil {
-				return errors.Wrap(err, "Failed to write out a macaroons key")
+				return errors.Wrap(err, "failed to write out a macaroons key")
 			}
 		} else {
 			return err
 		}
 	}
 	if err := os.Chown(macaroonsSecret, -1, gid); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of macaroons secret %v"+
+		return errors.Wrapf(err, "unable to change ownership of macaroons secret %v"+
 			" to desired daemon group %v", macaroonsSecret, groupname)
 	}
 	// If the scitokens.cfg does not exist, create one
@@ -394,7 +395,7 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 func CheckCacheXrootdEnv(server server_structs.XRootDServer, uid int, gid int) error {
 	storageLocation := param.Cache_StorageLocation.GetString()
 	if err := config.MkdirAll(storageLocation, 0775, uid, gid); err != nil {
-		return errors.Wrapf(err, "Unable to create the cache's storage directory '%s'", storageLocation)
+		return errors.Wrapf(err, "unable to create the cache's storage directory '%s'", storageLocation)
 	}
 	// Setting Cache.StorageLocation to /run/pelican/cache is a default we use for testing, but it shouldn't ever be used
 	// in a production setting. If the user hasn't overridden the default, log a warning.
@@ -404,7 +405,7 @@ func CheckCacheXrootdEnv(server server_structs.XRootDServer, uid int, gid int) e
 
 	namespaceLocation := param.Cache_NamespaceLocation.GetString()
 	if err := config.MkdirAll(namespaceLocation, 0775, uid, gid); err != nil {
-		return errors.Wrapf(err, "Unable to create the cache's storage directory '%s'", storageLocation)
+		return errors.Wrapf(err, "unable to create the cache's storage directory '%s'", storageLocation)
 	}
 
 	// Validate configured data and meta locations. In particular, make sure we don't export
@@ -422,10 +423,10 @@ func CheckCacheXrootdEnv(server server_structs.XRootDServer, uid int, gid int) e
 			if i != j {
 				relPath, err := filepath.Rel(dPath1, dPath2)
 				if err != nil {
-					return errors.Wrapf(err, "Unable to determine relative path between %s and %s", dPath1, dPath2)
+					return errors.Wrapf(err, "unable to determine relative path between %s and %s", dPath1, dPath2)
 				}
 				if relPath == "." || !strings.HasPrefix(relPath, "..") {
-					return errors.Errorf("Data location '%s' is a subdirectory or parent directory of '%s'. Please ensure these directories are not nested.", dPath1, dPath2)
+					return errors.Errorf("data location '%s' is a subdirectory or parent directory of '%s'. Please ensure these directories are not nested.", dPath1, dPath2)
 				}
 			}
 		}
@@ -434,11 +435,11 @@ func CheckCacheXrootdEnv(server server_structs.XRootDServer, uid int, gid int) e
 	// Check for subdirectory relationships with namespaceLocation
 	for _, dPath := range cleanedDataPaths {
 		if strings.HasPrefix(dPath, namespaceLocation) {
-			return errors.Errorf("A configured data location '%s' is a subdirectory of the namespace location '%s'. Please ensure these directories are not nested.", dPath, namespaceLocation)
+			return errors.Errorf("a configured data location '%s' is a subdirectory of the namespace location '%s'. Please ensure these directories are not nested.", dPath, namespaceLocation)
 		}
 
 		if err := config.MkdirAll(dPath, 0775, uid, gid); err != nil {
-			return errors.Wrapf(err, "Unable to create data directory %v", filepath.Dir(dPath))
+			return errors.Wrapf(err, "unable to create data directory %v", filepath.Dir(dPath))
 		}
 	}
 
@@ -447,11 +448,11 @@ func CheckCacheXrootdEnv(server server_structs.XRootDServer, uid int, gid int) e
 		metaPath := filepath.Clean(mPath)
 		// Similar to data locations, meta locations should never be below the namespace location
 		if strings.HasPrefix(mPath, namespaceLocation) {
-			return errors.Errorf("The configured meta location '%s' is a subdirectory of the namespace location '%s'. Please ensure these directories are not nested.", mPath, namespaceLocation)
+			return errors.Errorf("the configured meta location '%s' is a subdirectory of the namespace location '%s'. Please ensure these directories are not nested.", mPath, namespaceLocation)
 		}
 
 		if err := config.MkdirAll(metaPath, 0775, uid, gid); err != nil {
-			return errors.Wrapf(err, "Unable to create meta directory %v",
+			return errors.Wrapf(err, "unable to create meta directory %v",
 				filepath.Dir(metaPath))
 		}
 	}
@@ -463,7 +464,7 @@ func CheckCacheXrootdEnv(server server_structs.XRootDServer, uid int, gid int) e
 	if cacheServer, ok := server.(*cache.CacheServer); ok {
 		err := WriteCacheScitokensConfig(cacheServer.GetNamespaceAds(), true)
 		if err != nil {
-			return errors.Wrap(err, "Failed to create scitokens configuration for the cache")
+			return errors.Wrap(err, "failed to create scitokens configuration for the cache")
 		}
 	}
 
@@ -477,49 +478,23 @@ func ensureCachePSSOrigin(ctx context.Context) (string, error) {
 
 	fedInfo, err := config.GetFederation(ctx)
 	if err != nil {
-		return "", errors.Wrap(err, "Failed to pull information from the federation")
+		return "", errors.Wrap(err, "failed to pull information from the federation")
 	}
 
-	pssOrigin := ""
-
-	if discoveryUrlStr := fedInfo.DiscoveryEndpoint; discoveryUrlStr != "" {
-		discoveryUrl, err := url.Parse(discoveryUrlStr)
-		if err == nil {
-			log.Debugln("Parsing discovery URL for 'pss.origin' setting:", discoveryUrlStr)
-			if len(discoveryUrl.Path) > 0 && len(discoveryUrl.Host) == 0 {
-				discoveryUrl.Host = discoveryUrl.Path
-				discoveryUrl.Path = ""
-			} else if discoveryUrl.Path != "" && discoveryUrl.Path != "/" {
-				return "", errors.New("The Federation.DiscoveryUrl's path is non-empty, ensure the Federation.DiscoveryUrl has the format <host>:<port>")
-			}
-			discoveryUrl.Scheme = "pelican"
-			discoveryUrl.Path = ""
-			discoveryUrl.RawQuery = ""
-			pssOrigin = discoveryUrl.String()
-		} else {
-			return "", errors.Wrapf(err, "Failed to parse discovery URL %s", discoveryUrlStr)
-		}
+	// After a successful GetFederation call, DiscoveryEndpoint is guaranteed to be
+	// populated and normalized. It's the canonical federation hostname for pss.origin.
+	discoveryUrl, err := url.Parse(fedInfo.DiscoveryEndpoint)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to parse federation discovery URL %s", fedInfo.DiscoveryEndpoint)
 	}
 
-	if directorUrlStr := fedInfo.DirectorEndpoint; directorUrlStr != "" {
-		directorUrl, err := url.Parse(directorUrlStr)
-		if err == nil {
-			log.Debugln("Parsing director URL for 'pss.origin' setting:", directorUrlStr)
-			if directorUrl.Path != "" && directorUrl.Path != "/" {
-				return "", errors.New("The Federation.DirectorUrl's path is non-empty, ensure the Federation.DirectorUrl has the format <host>:<port>")
-			}
-			directorUrl.Scheme = "pelican"
-			pssOrigin = directorUrl.String()
-		} else {
-			return "", errors.Wrapf(err, "Failed to parse director URL %s", directorUrlStr)
-		}
-	}
+	log.Debugln("Parsing discovery URL for 'pss.origin' setting:", fedInfo.DiscoveryEndpoint)
+	discoveryUrl.Scheme = "pelican"
+	discoveryUrl.Path = ""
+	discoveryUrl.RawQuery = ""
+	pssOrigin := discoveryUrl.String()
 
-	if pssOrigin == "" {
-		return "", errors.New("One of Federation.DiscoveryUrl or Federation.DirectorUrl must be set to configure a cache")
-	}
-
-	if err := param.Set("Cache.PSSOrigin", pssOrigin); err != nil {
+	if err := param.Cache_PSSOrigin.Set(pssOrigin); err != nil {
 		return "", err
 	}
 
@@ -557,10 +532,10 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 
 	err = config.MkdirAll(runtimeDir, 0755, uid, gid)
 	if err != nil {
-		return errors.Wrapf(err, "Unable to create runtime directory %v", runtimeDir)
+		return errors.Wrapf(err, "unable to create runtime directory %v", runtimeDir)
 	}
 	if err = os.Chown(runtimeDir, uid, -1); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of runtime directory %v"+
+		return errors.Wrapf(err, "unable to change ownership of runtime directory %v"+
 			" to desired daemon user %v", runtimeDir, username)
 	}
 
@@ -571,20 +546,20 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 	// or sharing JWKS caches between test runs
 	cacheDir := filepath.Join(runtimeDir, "jwksCache")
 	if err = config.MkdirAll(cacheDir, 0700, uid, gid); err != nil {
-		return errors.Wrapf(err, "Unable to create cache directory %v", cacheDir)
+		return errors.Wrapf(err, "unable to create cache directory %v", cacheDir)
 	}
 	if err = os.Chown(cacheDir, uid, -1); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of the cache directory %v"+
+		return errors.Wrapf(err, "unable to change ownership of the cache directory %v"+
 			" to desired daemon user %v", cacheDir, username)
 	}
 	if err = os.Setenv("XDG_CACHE_HOME", cacheDir); err != nil {
-		return errors.Wrap(err, "Unable to set $XDG_CACHE_HOME for scitokens library")
+		return errors.Wrap(err, "unable to set $XDG_CACHE_HOME for scitokens library")
 	}
 
 	if server.GetServerType().IsEnabled(server_structs.CacheType) {
 		clientPluginsDir := filepath.Join(runtimeDir, "cache-client.plugins.d")
 		if err = os.MkdirAll(clientPluginsDir, os.FileMode(0755)); err != nil {
-			return errors.Wrap(err, "Unable to create cache client plugins directory")
+			return errors.Wrap(err, "unable to create cache client plugins directory")
 		}
 		if runtime.GOOS == "darwin" {
 			err = os.WriteFile(filepath.Join(clientPluginsDir, "pelican-plugin.conf"), []byte(clientPluginMac), os.FileMode(0644))
@@ -598,14 +573,14 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 			}
 		}
 		if err != nil {
-			return errors.Wrap(err, "Unable to configure cache client plugin")
+			return errors.Wrap(err, "unable to configure cache client plugin")
 		}
 	}
 
 	exportPath := filepath.Join(runtimeDir, "export")
 	if _, err := os.Stat(exportPath); err == nil {
 		if err = os.RemoveAll(exportPath); err != nil {
-			return errors.Wrap(err, "Failure when cleaning up temporary export tree")
+			return errors.Wrap(err, "failure when cleaning up temporary export tree")
 		}
 	}
 
@@ -637,18 +612,18 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 			newPath := filepath.Join(runtimeDir, "robots.txt")
 			err = config.MkdirAll(path.Dir(newPath), 0755, -1, gid)
 			if err != nil {
-				return errors.Wrapf(err, "Unable to create directory %v",
+				return errors.Wrapf(err, "unable to create directory %v",
 					path.Dir(newPath))
 			}
 			file, err := os.OpenFile(newPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 			if err != nil {
-				return errors.Wrap(err, "Failed to create a default robots.txt file")
+				return errors.Wrap(err, "failed to create a default robots.txt file")
 			}
 			defer file.Close()
 			if _, err := file.WriteString(robotsTxt); err != nil {
-				return errors.Wrap(err, "Failed to write out a default robots.txt file")
+				return errors.Wrap(err, "failed to write out a default robots.txt file")
 			}
-			if err := param.Set("Xrootd.RobotsTxtFile", newPath); err != nil {
+			if err := param.Xrootd_RobotsTxtFile.Set(newPath); err != nil {
 				return err
 			}
 		} else {
@@ -660,7 +635,7 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 	authfile := param.Xrootd_Authfile.GetString()
 	err = config.MkdirAll(path.Dir(authfile), 0755, -1, gid)
 	if err != nil {
-		return errors.Wrapf(err, "Unable to create directory %v",
+		return errors.Wrapf(err, "unable to create directory %v",
 			path.Dir(authfile))
 	}
 	// For user-provided authfile, we don't chmod to daemon group as EmitAuthfile will
@@ -696,12 +671,12 @@ func runtimeTLSCertPath(isCache bool) string {
 func writeX509Credentials(fp *os.File, includeKey bool) error {
 	srcFile, err := os.Open(param.Server_TLSCertificateChain.GetString())
 	if err != nil {
-		return errors.Wrap(err, "Failure when opening source certificate for xrootd")
+		return errors.Wrap(err, "failure when opening source certificate for xrootd")
 	}
 	defer srcFile.Close()
 
 	if _, err = io.Copy(fp, srcFile); err != nil {
-		return errors.Wrapf(err, "Failure when copying source certificate for xrootd")
+		return errors.Wrapf(err, "failure when copying source certificate for xrootd")
 	}
 
 	if !includeKey {
@@ -709,17 +684,17 @@ func writeX509Credentials(fp *os.File, includeKey bool) error {
 	}
 
 	if _, err = fp.Write([]byte{'\n', '\n'}); err != nil {
-		return errors.Wrap(err, "Failure when writing into copied key pair for xrootd")
+		return errors.Wrap(err, "failure when writing into copied key pair for xrootd")
 	}
 
 	srcKeyFile, err := os.Open(param.Server_TLSKey.GetString())
 	if err != nil {
-		return errors.Wrap(err, "Failure when opening source key for xrootd")
+		return errors.Wrap(err, "failure when opening source key for xrootd")
 	}
 	defer srcKeyFile.Close()
 
 	if _, err = io.Copy(fp, srcKeyFile); err != nil {
-		return errors.Wrapf(err, "Failure when copying source key for xrootd")
+		return errors.Wrapf(err, "failure when copying source key for xrootd")
 	}
 
 	return nil
@@ -733,7 +708,7 @@ func writeX509Credentials(fp *os.File, includeKey bool) error {
 func copyXrootdCertificates(server server_structs.XRootDServer) error {
 	user, err := config.GetDaemonUserInfo()
 	if err != nil {
-		return errors.Wrap(err, "Unable to copy certificates to xrootd runtime directory; failed xrootd user lookup")
+		return errors.Wrap(err, "unable to copy certificates to xrootd runtime directory; failed xrootd user lookup")
 	}
 
 	certFile := param.Server_TLSCertificateChain.GetString()
@@ -749,12 +724,12 @@ func copyXrootdCertificates(server server_structs.XRootDServer) error {
 	tmpName := destination + ".tmp"
 	destFile, err := os.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fs.FileMode(0400))
 	if err != nil {
-		return errors.Wrap(err, "Failure when opening temporary certificate key pair file for xrootd")
+		return errors.Wrap(err, "failure when opening temporary certificate key pair file for xrootd")
 	}
 	defer destFile.Close()
 
 	if err = os.Chown(tmpName, user.Uid, user.Gid); err != nil {
-		return errors.Wrap(err, "Failure when chown'ing certificate key pair file for xrootd")
+		return errors.Wrap(err, "failure when chown'ing certificate key pair file for xrootd")
 	}
 
 	pkcs11Info := p11proxy.CurrentInfo()
@@ -764,7 +739,7 @@ func copyXrootdCertificates(server server_structs.XRootDServer) error {
 	}
 
 	if err = os.Rename(tmpName, destination); err != nil {
-		return errors.Wrapf(err, "Failure when moving key pair for xrootd")
+		return errors.Wrapf(err, "failure when moving key pair for xrootd")
 	}
 
 	return nil
@@ -773,7 +748,7 @@ func copyXrootdCertificates(server server_structs.XRootDServer) error {
 func FileCopyToXrootdDir(isOrigin bool, cmd int, file *os.File) error {
 	log.Debugf("Transplanting file %s to a directory owned by the xrootd process", file.Name())
 	if err := sendChildFD(isOrigin, cmd, file); err != nil {
-		return errors.Wrapf(err, "Failed to copy the file %s via FD", file.Name())
+		return errors.Wrapf(err, "failed to copy the file %s via FD", file.Name())
 	}
 	return nil
 }
@@ -795,12 +770,12 @@ func dropPrivilegeCopy(server server_structs.XRootDServer) error {
 	// Because this intermediate file is read-only (0400), user cannot update it (os.O_TRUNC will hit an permission denied error).
 	err := os.Remove(intermediatePath)
 	if err != nil && !os.IsNotExist(err) {
-		return errors.Wrapf(err, "Failure when removing existing certificate key pair file for xrootd")
+		return errors.Wrapf(err, "failure when removing existing certificate key pair file for xrootd")
 	}
 
 	destFile, err := os.OpenFile(intermediatePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fs.FileMode(0400))
 	if err != nil {
-		return errors.Wrap(err, "Failure when opening certificate key pair file to pass to xrootd")
+		return errors.Wrap(err, "failure when opening certificate key pair file to pass to xrootd")
 	}
 	defer destFile.Close()
 
@@ -813,14 +788,14 @@ func dropPrivilegeCopy(server server_structs.XRootDServer) error {
 	for idx := 0; idx < 2; idx++ {
 		rdDestFile, err := os.OpenFile(intermediatePath, os.O_RDONLY, fs.FileMode(0400))
 		if err != nil {
-			return errors.Wrap(err, "Failed to re-open the copied certificate key pair file as read-only")
+			return errors.Wrap(err, "failed to re-open the copied certificate key pair file as read-only")
 		}
 		isOrigin := true
 		if idx == 1 {
 			isOrigin = false
 		}
 		if err = sendChildFD(isOrigin, 2, rdDestFile); err != nil {
-			return errors.Wrap(err, "Failed to send the copied certificate key pair file to xrootd")
+			return errors.Wrap(err, "failed to send the copied certificate key pair file to xrootd")
 		}
 	}
 
@@ -1200,6 +1175,7 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 			return "", errors.Wrap(err, "failed to generate Origin export list for xrootd config")
 		}
 		xrdConfig.Origin.Exports = originExports
+		xrdConfig.Origin.MonitoringPrefix = server_utils.MonitoringBaseNs
 
 		switch xrdConfig.Origin.StorageType {
 		case "https":
@@ -1257,14 +1233,14 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 			return "", err
 		}
 		if err = config.MkdirAll(runtimeCAs, 0755, puser.Uid, puser.Gid); err != nil {
-			return "", errors.Wrapf(err, "Unable to create runtime directory %v", runtimeCAs)
+			return "", errors.Wrapf(err, "unable to create runtime directory %v", runtimeCAs)
 		}
 	}
 	runtimeCAs = filepath.Join(runtimeCAs, "ca-bundle.crt")
 	egrpKey := string(config.EgrpKey)
 	caCount, err := utils.LaunchPeriodicWriteCABundle(ctx, egrpKey, runtimeCAs, 2*time.Minute)
 	if err != nil {
-		return "", errors.Wrap(err, "Failed to setup the runtime CA bundle")
+		return "", errors.Wrap(err, "failed to setup the runtime CA bundle")
 	}
 	log.Debugf("A total of %d CA certificates were written", caCount)
 	if caCount > 0 {
@@ -1280,7 +1256,7 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 		xrdConfig.Server.TLSKey = pkcs11Info.PKCS11URL
 	} else {
 		if param.Server_EnablePKCS11.GetBool() && !pkcs11Info.Enabled {
-			log.Warn("Server.EnablePKCS11 is true but the PKCS#11 helper is not active; falling back to the local TLS key file for XRootD")
+			log.Warnf("%s is true but the PKCS#11 helper is not active; falling back to the local TLS key file for XRootD", param.Server_EnablePKCS11.GetName())
 		}
 		xrdConfig.Server.TLSKey = runtimeCertPath
 	}
@@ -1292,7 +1268,7 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 				return "", errors.Wrap(err, "failed to determine if the origin can run in multiuser mode")
 			}
 			if !ok {
-				return "", errors.New("Origin.Multiuser is set to `true` but the command was run without sufficient privilege; was it launched as root?")
+				return "", errors.New("origin.Multiuser is set to `true` but the command was run without sufficient privilege; was it launched as root?")
 			}
 		}
 
@@ -1303,7 +1279,7 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 		if config.GetPreferredPrefix() == config.OsdfPrefix {
 			externalWebUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 			if err != nil {
-				return "", errors.Wrapf(err, "Failed to parse external web URL: %s", externalWebUrl)
+				return "", errors.Wrapf(err, "failed to parse external web URL: %s", externalWebUrl)
 			}
 
 			// Strip the scheme and port number from the URL and use to set XRDHOST
@@ -1316,7 +1292,7 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 		// XRootD crashes.
 		urlParsed, err := url.Parse(xrdConfig.Cache.PSSOrigin)
 		if err != nil {
-			return "", errors.Errorf("Director URL (%s) does not parse as a URL", xrdConfig.Cache.PSSOrigin)
+			return "", errors.Errorf("director URL (%s) does not parse as a URL", xrdConfig.Cache.PSSOrigin)
 		}
 		if !strings.Contains(urlParsed.Host, ":") {
 			switch urlParsed.Scheme {
@@ -1351,7 +1327,7 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 		return "", err
 	}
 	if err = os.Chown(configPath, -1, gid); err != nil {
-		return "", errors.Wrapf(err, "Unable to change ownership of configuration file %v"+
+		return "", errors.Wrapf(err, "unable to change ownership of configuration file %v"+
 			" to desired daemon gid %v", configPath, gid)
 	}
 
@@ -1393,7 +1369,7 @@ func SetUpMonitoring(ctx context.Context, egrp *errgroup.Group) error {
 		}
 	}
 
-	if err := param.Set(param.Xrootd_LocalMonitoringPort.GetName(), monitorPort); err != nil {
+	if err := param.Xrootd_LocalMonitoringPort.Set(monitorPort); err != nil {
 		return err
 	}
 
@@ -1493,7 +1469,7 @@ func genLoggingConfig(input string, logMap loggingMap) (string, error) {
 func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	/////////////////////////ORIGIN/////////////////////////////
 	// Origin Cms
-	// https://xrootd.slac.stanford.edu/doc/dev54/cms_config.htm
+	// https://xrootd.web.cern.ch/doc/dev6/cms_config.htm
 	var err error
 	if xrdConfig.Logging.OriginCms, err = genLoggingConfig(param.Logging_Origin_Cms.GetString(), loggingMap{
 		Trace: "debug",
@@ -1518,7 +1494,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	}
 
 	// Origin Xrd
-	// https://xrootd.slac.stanford.edu/doc/dev56/xrd_config.htm
+	// https://xrootd.web.cern.ch/doc/dev6/xrd_config.htm
 	if xrdConfig.Logging.OriginXrd, err = genLoggingConfig(param.Logging_Origin_Xrd.GetString(), loggingMap{
 		Trace: "all",
 		Debug: "debug",
@@ -1528,7 +1504,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	}
 
 	// Origin Xrootd
-	// https://xrootd.slac.stanford.edu/doc/dev56/xrd_config.htm
+	// https://xrootd.web.cern.ch/doc/dev6/xrd_config.htm
 	if xrdConfig.Logging.OriginXrootd, err = genLoggingConfig(param.Logging_Origin_Xrootd.GetString(), loggingMap{
 		Trace: "all",
 		Debug: "debug emsg login stall redirect request stall",
@@ -1540,7 +1516,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	}
 
 	// Origin Ofs
-	// https://xrootd.slac.stanford.edu/doc/dev56/ofs_config.htm
+	// https://xrootd.web.cern.ch/doc/dev56/ofs_config.htm
 	if xrdConfig.Logging.OriginOfs, err = genLoggingConfig(param.Logging_Origin_Ofs.GetString(), loggingMap{
 		Trace: "all",
 		Debug: "debug",
@@ -1573,7 +1549,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 
 	//////////////////////////CACHE/////////////////////////////
 	// Cache Ofs
-	// https://xrootd.slac.stanford.edu/doc/dev56/ofs_config.htm
+	// https://xrootd.web.cern.ch/doc/dev56/ofs_config.htm
 	if xrdConfig.Logging.CacheOfs, err = genLoggingConfig(param.Logging_Cache_Ofs.GetString(), loggingMap{
 		Trace: "all",
 		Debug: "debug",
@@ -1585,7 +1561,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	}
 
 	// Cache Pfc
-	// https://xrootd.slac.stanford.edu/doc/dev56/pss_config.htm
+	// https://xrootd.web.cern.ch/doc/dev6/pss_config.htm
 	if xrdConfig.Logging.CachePfc, err = genLoggingConfig(param.Logging_Cache_Pfc.GetString(), loggingMap{
 		Trace: "dump",
 		Debug: "debug",
@@ -1598,7 +1574,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	}
 
 	// Cache PssSetOptCache and Cache Pss
-	// https://xrootd.slac.stanford.edu/doc/dev56/pss_config.htm
+	// https://xrootd.web.cern.ch/doc/dev6/pss_config.htm
 	// Note: pss has interesting config options:
 	// all     informational events.
 	// on      warning events.
@@ -1661,7 +1637,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	}
 
 	// Cache Xrd
-	// https://xrootd.slac.stanford.edu/doc/dev56/xrd_config.htm
+	// https://xrootd.web.cern.ch/doc/dev6/xrd_config.htm
 	if xrdConfig.Logging.CacheXrd, err = genLoggingConfig(param.Logging_Cache_Xrd.GetString(), loggingMap{
 		Trace: "all",
 		Debug: "debug",
@@ -1671,7 +1647,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	}
 
 	// Cache Xrootd
-	// https://xrootd.slac.stanford.edu/doc/dev56/xrd_config.htm
+	// https://xrootd.web.cern.ch/doc/dev6/xrd_config.htm
 	if xrdConfig.Logging.CacheXrootd, err = genLoggingConfig(param.Logging_Cache_Xrootd.GetString(), loggingMap{
 		Trace: "all",
 		Debug: "debug emsg login stall redirect request stall",

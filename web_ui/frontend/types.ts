@@ -150,3 +150,11 @@ export interface MetadataDiscrepancy {
 }
 
 export type JsonPrimitive = string | number | boolean | null;
+
+export interface ServerLocalMetadata {
+  id: string;
+  name: string;
+  type: 'origin' | 'cache' | 'origin_cache' | 'unknown';
+  createdAt: string;
+  updatedAt: string;
+}

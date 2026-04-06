@@ -125,12 +125,16 @@ jobs:
           # definitions, but '$GITHUB_WORKSPACE' in scripts.
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      - name: Generate GoReleaser config
+        run: |
+          make goreleaser-config
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: latest
-          args: build --single-target --clean --snapshot
+          args: build --single-target --clean --snapshot --config .goreleaser.generated.yml
 
       - name: Copy the pelican binary for the end-to-end tests
         run: |
@@ -145,3 +149,5 @@ jobs:
         run: ./github_scripts/version_test.sh
       - name: Run end-to-end test for site-local cache standup
         run: ./github_scripts/site_local_cache_test.sh
+      - name: Run end-to-end test for Cache Availability/Stat weighting
+        run: ./github_scripts/cache_availability_test.sh

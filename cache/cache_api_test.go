@@ -39,7 +39,7 @@ func TestCheckCacheSentinelLocation(t *testing.T) {
 
 	t.Run("sentinel-contains-dir", func(t *testing.T) {
 		server_utils.ResetTestState()
-		require.NoError(t, param.Set(param.Cache_SentinelLocation.GetName(), "/test.txt"))
+		require.NoError(t, param.Cache_SentinelLocation.Set("/test.txt"))
 		err := CheckCacheSentinelLocation()
 		require.Error(t, err)
 		assert.Equal(t, "invalid Cache.SentinelLocation path. File must not contain a directory. Got /test.txt", err.Error())
@@ -48,8 +48,8 @@ func TestCheckCacheSentinelLocation(t *testing.T) {
 	t.Run("sentinel-dne", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		server_utils.ResetTestState()
-		require.NoError(t, param.Set(param.Cache_SentinelLocation.GetName(), "test.txt"))
-		require.NoError(t, param.Set(param.Cache_NamespaceLocation.GetName(), tmpDir))
+		require.NoError(t, param.Cache_SentinelLocation.Set("test.txt"))
+		require.NoError(t, param.Cache_NamespaceLocation.Set(tmpDir))
 		err := CheckCacheSentinelLocation()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to open Cache.SentinelLocation")
@@ -59,8 +59,8 @@ func TestCheckCacheSentinelLocation(t *testing.T) {
 		tmpDir := t.TempDir()
 		server_utils.ResetTestState()
 
-		require.NoError(t, param.Set(param.Cache_SentinelLocation.GetName(), "test.txt"))
-		require.NoError(t, param.Set(param.Cache_NamespaceLocation.GetName(), tmpDir))
+		require.NoError(t, param.Cache_SentinelLocation.Set("test.txt"))
+		require.NoError(t, param.Cache_NamespaceLocation.Set(tmpDir))
 
 		file, err := os.Create(filepath.Join(tmpDir, "test.txt"))
 		require.NoError(t, err)

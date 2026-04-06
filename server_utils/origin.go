@@ -280,11 +280,11 @@ func RemoveTrailingSlash(prefix string) string {
 	return result
 }
 
-// Since Federation Prefixes get treated like POSIX filepaths by XRootD and other services, we need to
-// validate them to ensure funky things don't ensue.
-// Note that this isn't a part of the origin interface because it's not meant to be overridden -- _every_ origin
-// should validate federation prefixes the same way because this is a property of the federation.
-func validateFederationPrefix(prefix string) error {
+// validatePathLikePrefix validates basic structural requirements for any prefix that gets treated
+// like a POSIX filepath -- it must be non-empty, start with '/', and not contain characters that
+// carry special meaning in POSIX filepaths or URLs. This is shared between federation prefix and
+// storage prefix validation, while the former adds reserved-namespace restrictions on top of it.
+func validatePathLikePrefix(prefix string) error {
 	if len(prefix) == 0 {
 		return errors.Errorf("prefix '%s' is empty", prefix)
 	}
@@ -301,11 +301,23 @@ func validateFederationPrefix(prefix string) error {
 		}
 	}
 
+	return nil
+}
+
+// Since Federation Prefixes get treated like POSIX filepaths by XRootD and other services, we need to
+// validate them to ensure funky things don't ensue.
+// Note that this isn't a part of the origin interface because it's not meant to be overridden -- _every_ origin
+// should validate federation prefixes the same way because this is a property of the federation.
+func validateFederationPrefix(prefix string) error {
+	if err := validatePathLikePrefix(prefix); err != nil {
+		return err
+	}
+
 	if server_structs.IsCacheNS(prefix) || server_structs.IsOriginNS(prefix) {
 		return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s is a reserved prefix for cache/origin server registration", prefix)
 	}
 
-	illegalPrefixes := []string{"/pelican", "/view"}
+	illegalPrefixes := []string{"/pelican", "/view", "/api", "/.well-known"}
 	for _, illegalPrefix := range illegalPrefixes {
 		if prefix == illegalPrefix || strings.HasPrefix(prefix, illegalPrefix+"/") {
 			return errors.Wrapf(ErrInvalidOriginConfig, "prefix '%s' is a reserved prefix and cannot be registered to your Origin", prefix)
@@ -525,27 +537,27 @@ func (b *BaseOrigin) mapSingleExportIfNeeded(o Origin) {
 	export := b.Exports[0]
 
 	// Map prefixes
-	if err := param.Set(param.Origin_FederationPrefix.GetName(), export.FederationPrefix); err != nil {
+	if err := param.Origin_FederationPrefix.Set(export.FederationPrefix); err != nil {
 		log.Warningf("Failed to set %s: %v", param.Origin_FederationPrefix.GetName(), err)
 	}
-	if err := param.Set(param.Origin_StoragePrefix.GetName(), export.StoragePrefix); err != nil {
+	if err := param.Origin_StoragePrefix.Set(export.StoragePrefix); err != nil {
 		log.Warningf("Failed to set %s: %v", param.Origin_StoragePrefix.GetName(), err)
 	}
 
 	// Map capabilities
-	if err := param.Set(param.Origin_EnablePublicReads.GetName(), export.Capabilities.PublicReads); err != nil {
+	if err := param.Origin_EnablePublicReads.Set(export.Capabilities.PublicReads); err != nil {
 		log.Warningf("Failed to set %s: %v", param.Origin_EnablePublicReads.GetName(), err)
 	}
-	if err := param.Set(param.Origin_EnableReads.GetName(), export.Capabilities.Reads || export.Capabilities.PublicReads); err != nil {
+	if err := param.Origin_EnableReads.Set(export.Capabilities.Reads || export.Capabilities.PublicReads); err != nil {
 		log.Warningf("Failed to set %s: %v", param.Origin_EnableReads.GetName(), err)
 	}
-	if err := param.Set(param.Origin_EnableWrites.GetName(), export.Capabilities.Writes); err != nil {
+	if err := param.Origin_EnableWrites.Set(export.Capabilities.Writes); err != nil {
 		log.Warningf("Failed to set %s: %v", param.Origin_EnableWrites.GetName(), err)
 	}
-	if err := param.Set(param.Origin_EnableListings.GetName(), export.Capabilities.Listings); err != nil {
+	if err := param.Origin_EnableListings.Set(export.Capabilities.Listings); err != nil {
 		log.Warningf("Failed to set %s: %v", param.Origin_EnableListings.GetName(), err)
 	}
-	if err := param.Set(param.Origin_EnableDirectReads.GetName(), export.Capabilities.DirectReads); err != nil {
+	if err := param.Origin_EnableDirectReads.Set(export.Capabilities.DirectReads); err != nil {
 		log.Warningf("Failed to set %s: %v", param.Origin_EnableDirectReads.GetName(), err)
 	}
 

@@ -68,6 +68,13 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		}
 	} else {
 		log.Info("Initializing POSIXv2 origin backend")
+		// For non-XRootD backends, start the shoveler if enabled so that
+		// internally-generated monitoring packets reach the message queue.
+		if param.Shoveler_Enable.GetBool() {
+			if _, err = metrics.LaunchShoveler(ctx, egrp); err != nil {
+				return nil, errors.Wrap(err, "failed to launch shoveler for POSIXv2 backend")
+			}
+		}
 	}
 
 	originServer := &origin.OriginServer{}
@@ -97,19 +104,19 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		server_utils.LaunchConcurrencyMonitoring(ctx, egrp, originServer.GetServerType())
 	}
 
+	// Register Origin APIs
+	baseAPIGroup := engine.Group("/api/v1.0")
+
 	// Set up the APIs unrelated to UI, which only contains director-based health test reporting endpoint for now
-	if err = origin.RegisterOriginAPI(engine, ctx, egrp); err != nil {
+	originAPIGroup := baseAPIGroup.Group("", web_ui.ServerHeaderMiddleware)
+	if err = origin.RegisterOriginAPI(originAPIGroup, ctx, egrp); err != nil {
 		return nil, err
 	}
 
 	// Set up the APIs for the origin UI
-	if err = origin.RegisterOriginWebAPI(engine); err != nil {
+	webUIRouterGroup := baseAPIGroup.Group("/origin_ui", web_ui.ServerHeaderMiddleware, web_ui.ReadOnlyMiddleware)
+	if err = origin.RegisterOriginWebAPI(webUIRouterGroup); err != nil {
 		return nil, err
-	}
-
-	// Director also registers this metadata URL; avoid registering twice.
-	if !modules.IsEnabled(server_structs.DirectorType) {
-		server_utils.RegisterOIDCAPI(engine.Group("/", web_ui.ServerHeaderMiddleware), false)
 	}
 
 	// Configure the issuer (OA4MP proxy or embedded fosite) if enabled
@@ -121,12 +128,20 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 				return nil, errors.Wrap(err, "failed to configure embedded OIDC issuer")
 			}
 		case "oa4mp":
-			if err = oa4mp.ConfigureOA4MPProxy(engine); err != nil {
+			oa4mpRouterGroup := baseAPIGroup.Group("/issuer")
+			if err = oa4mp.RegisterOA4MPProxy(oa4mpRouterGroup); err != nil {
 				return nil, err
 			}
 		default:
 			return nil, errors.Errorf("unsupported Origin.IssuerMode %q; valid values are \"embedded\" and \"oa4mp\"", issuerMode)
 		}
+	}
+
+	// Register OIDC metadata endpoints
+	// Director also registers this metadata URL; avoid registering twice.
+	if !modules.IsEnabled(server_structs.DirectorType) {
+		OIDCAPIGroup := engine.Group("/", web_ui.ServerHeaderMiddleware, web_ui.ReadOnlyMiddleware)
+		server_utils.RegisterOIDCAPI(OIDCAPIGroup, false)
 	}
 
 	// Handle XRootD-specific initialization
@@ -156,12 +171,12 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		}
 
 		portStartCallback := func(port int) {
-			if err := param.Set("Origin.Port", port); err != nil {
+			if err := param.Origin_Port.Set(port); err != nil {
 				log.WithError(err).Warnf("Failed to set Origin.Port to %d", port)
 			}
 			if originUrl, err := url.Parse(param.Origin_Url.GetString()); err == nil {
 				originUrl.Host = originUrl.Hostname() + ":" + strconv.Itoa(port)
-				if err := param.Set("Origin.Url", originUrl.String()); err != nil {
+				if err := param.Origin_Url.Set(originUrl.String()); err != nil {
 					log.WithError(err).Warnf("Failed to set Origin.Url to %s", originUrl.String())
 				}
 				log.Debugln("Resetting Origin.Url to", originUrl.String())
@@ -250,7 +265,7 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group, engine *gin.En
 		// For POSIXv2, the origin serves files directly via the web server, not XRootD.
 		// Update Origin.Url to use the external web URL which is now set to the correct port.
 		externalWebUrl := param.Server_ExternalWebUrl.GetString()
-		if err := param.Set("Origin.Url", externalWebUrl); err != nil {
+		if err := param.Origin_Url.Set(externalWebUrl); err != nil {
 			log.WithError(err).Warnf("Failed to set Origin.Url to %s", externalWebUrl)
 		}
 		log.Debugf("Set Origin.Url to %s for POSIXv2 origin", externalWebUrl)

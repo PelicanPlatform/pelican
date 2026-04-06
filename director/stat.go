@@ -58,6 +58,11 @@ type (
 		URL           url.URL `json:"url"` // The URL to the object
 		Checksum      string  `json:"checksum"`
 		ContentLength int     `json:"contentLength"`
+		// CacheAge is the value of the HTTP Age response header in seconds.
+		// A value >= 0 means the object is already stored locally at the cache.
+		// A value of -1 means no Age header was returned (i.e., object not locally cached,
+		// or the server does not report Age on HEAD responses).
+		CacheAge int `json:"cacheAge"`
 	}
 
 	queryStatus    string
@@ -263,7 +268,15 @@ func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, data
 		if err != nil {
 			return nil, errors.New(fmt.Sprintf("error parsing content-length header from response. Header was: %s", cLenStr))
 		}
-		return &objectMetadata{ContentLength: cLen, Checksum: checksumStr, URL: *dataUrl.JoinPath(objectName)}, nil
+		cacheAge := -1
+		if ageStr := res.Header.Get("Age"); ageStr != "" {
+			if ageParsed, err := strconv.Atoi(ageStr); err != nil {
+				log.Debugf("Ignoring unparsable Age header value %q from %s: %v", ageStr, dataUrl.String(), err)
+			} else {
+				cacheAge = ageParsed
+			}
+		}
+		return &objectMetadata{ContentLength: cLen, Checksum: checksumStr, URL: *dataUrl.JoinPath(objectName), CacheAge: cacheAge}, nil
 	}
 }
 
@@ -676,11 +689,26 @@ func generateAvailabilityMaps(ctx *gin.Context, origins, caches []server_structs
 
 	if qr.Status == queryFailed {
 		if qr.ErrorType != queryNoSourcesErr && qr.ErrorType != queryInsufficientResErr {
-			return nil, nil, errors.Errorf("stat query failed: %s", qr.Msg)
+			// Stat infrastructure failure — log it but don't propagate to client.
+			// Return "I don't know" (all servers available) so the sort proceeds with
+			// whatever other info is at hand.
+			log.Warningf("Stat query failed; proceeding with neutral availability: %s", qr.Msg)
+			for _, origin := range origins {
+				originAvailabilityMap[origin.URL.String()] = true
+			}
+			for _, cache := range caches {
+				cacheAvailabilityMap[cache.URL.String()] = true
+			}
+			return originAvailabilityMap, cacheAvailabilityMap, nil
 		}
 	}
 
-	// Populate availability maps based on stat results
+	// Populate availability maps based on stat results.
+	// For origins, a 200 response is sufficient — the origin is the source of truth.
+	// For caches, we additionally require Age > 0 to confirm the object is already
+	// stored locally. A cache will return 200 on a HEAD even for objects it doesn't
+	// yet have (it proxies the request upstream), but only locally-held objects get
+	// a non-zero Age header.
 	for _, obj := range qr.Objects {
 		serverHost := obj.URL.Host
 		for _, origin := range origins {
@@ -690,7 +718,13 @@ func generateAvailabilityMaps(ctx *gin.Context, origins, caches []server_structs
 		}
 		for _, cache := range caches {
 			if cache.URL.Host == serverHost || cache.AuthURL.Host == serverHost {
-				cacheAvailabilityMap[cache.URL.String()] = true
+				if obj.CacheAge > 0 {
+					cacheAvailabilityMap[cache.URL.String()] = true
+				} else {
+					log.Debugf("Cache %s returned Age=%d for %s; object not yet locally stored",
+						cache.URL.String(), obj.CacheAge, reqPath)
+					cacheAvailabilityMap[cache.URL.String()] = false
+				}
 			}
 		}
 	}

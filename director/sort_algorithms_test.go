@@ -953,10 +953,12 @@ func TestAdaptiveSortAlg(t *testing.T) {
 				ClientAddr:   netip.MustParseAddr("192.168.1.4"),
 				RedirectInfo: &server_structs.RedirectInfo{},
 				AvailabilityMap: map[string]bool{
-					"s1": true,  // avail weight 2.0
-					"s2": false, // avail weight 0.5
-					"s3": true,
-					"s4": false,
+					// Note that the keys in the availability map are expected to be server URLs,
+					// which in this test are just the ad names due to how getAdBase initializes the URL.Host field.
+					"//s1": true,  // avail weight 2.0
+					"//s2": false, // avail weight 0.5
+					"//s3": true,
+					"//s4": false,
 				},
 			},
 			sAds: []server_structs.ServerAd{

@@ -40,8 +40,8 @@ func (o *GlobusOrigin) Type(_ Origin) server_structs.OriginStorageType {
 
 func (o *GlobusOrigin) validateStoragePrefix(prefix string) error {
 	// Globus Origins will have posix-like storage prefixes, owing to their prefixes being valid
-	// URL paths.
-	return validateFederationPrefix(prefix)
+	// URL paths. Use path-like validation without federation-specific reserved prefix checks.
+	return validatePathLikePrefix(prefix)
 }
 
 func (o *GlobusOrigin) validateExtra(e *OriginExport, numExports int) (err error) {
@@ -81,12 +81,12 @@ func (o *GlobusOrigin) mapSingleExtra() {
 
 	e := o.Exports[0]
 	if e.GlobusCollectionID != "" {
-		if err := param.Set(param.Origin_GlobusCollectionID.GetName(), e.GlobusCollectionID); err != nil {
+		if err := param.Origin_GlobusCollectionID.Set(e.GlobusCollectionID); err != nil {
 			log.Warningf("Failed to set %s: %v", param.Origin_GlobusCollectionID.GetName(), err)
 		}
 	}
 	if e.GlobusCollectionName != "" {
-		if err := param.Set(param.Origin_GlobusCollectionName.GetName(), e.GlobusCollectionName); err != nil {
+		if err := param.Origin_GlobusCollectionName.Set(e.GlobusCollectionName); err != nil {
 			log.Warningf("Failed to set %s: %v", param.Origin_GlobusCollectionName.GetName(), err)
 		}
 	}

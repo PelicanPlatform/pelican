@@ -39,7 +39,7 @@ func TestSetAndGet(t *testing.T) {
 	defer viper.Reset()
 
 	// Test setting a value
-	err := Set("TestKey", "TestValue")
+	err := SetRaw("TestKey", "TestValue")
 	require.NoError(t, err)
 
 	// Verify the value was set in viper
@@ -107,7 +107,7 @@ func TestConcurrentSetAndGet(t *testing.T) {
 		go func(val int) {
 			defer wg.Done()
 			key := "ConcurrentKey"
-			_ = Set(key, val)
+			_ = SetRaw(key, val)
 		}(i)
 	}
 
@@ -340,7 +340,7 @@ func TestCallbackRegistration(t *testing.T) {
 	})
 
 	// Set a value to trigger callback
-	err := Set("TestKey", "TestValue")
+	err := SetRaw("TestKey", "TestValue")
 	require.NoError(t, err)
 
 	// Wait for callback to be invoked (with timeout)
@@ -371,7 +371,7 @@ func TestCallbackWithConfigChanges(t *testing.T) {
 	})
 
 	// Set initial value
-	err := Set("Logging.Level", "info")
+	err := Set(Logging_Level, "info")
 	require.NoError(t, err)
 
 	// Wait for first callback
@@ -383,7 +383,7 @@ func TestCallbackWithConfigChanges(t *testing.T) {
 	}
 
 	// Change the value
-	err = Set("Logging.Level", "debug")
+	err = Set(Logging_Level, "debug")
 	require.NoError(t, err)
 
 	// Wait for second callback
@@ -874,4 +874,113 @@ func TestByteRateDecoding(t *testing.T) {
 		require.NotNil(t, config)
 		assert.Equal(t, expected, config.Origin.TransferRateLimit)
 	})
+}
+
+// TestConcurrentIsSetAndUnmarshalConfig verifies that concurrent IsSet() calls
+// do not race with UnmarshalConfig() / Set(). Before the fix, this would panic
+// with "concurrent map read and map write" inside viper because IsSet() called
+// viper.IsSet() without holding configMutex while UnmarshalConfig() called
+// viper.AllSettings() which mutates viper's internal path-index cache.
+//
+// Run with: go test -race -run TestConcurrentIsSetAndUnmarshalConfig ./param/
+func TestConcurrentIsSetAndUnmarshalConfig(t *testing.T) {
+	require.NoError(t, Reset())
+	ClearCallbacks()
+	defer func() {
+		ClearCallbacks()
+		require.NoError(t, Reset())
+	}()
+
+	// Seed some config values so viper has internal state to race on
+	require.NoError(t, Server_UIAdminUsers.Set([]string{"admin"}))
+	require.NoError(t, Server_AdminGroups.Set([]string{"admins"}))
+	require.NoError(t, Cache_Port.Set(8443))
+	require.NoError(t, Logging_Level.Set("debug"))
+
+	var wg sync.WaitGroup
+
+	// Goroutines calling IsSet (the read path that was unprotected)
+	for range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 20 {
+				_ = Server_UIAdminUsers.IsSet()
+				_ = Server_AdminGroups.IsSet()
+				_ = Cache_Port.IsSet()
+				_ = Logging_Level.IsSet()
+			}
+		}()
+	}
+
+	// Goroutines calling UnmarshalConfig (the write path via AllSettings)
+	for range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 5 {
+				_, _ = UnmarshalConfig()
+			}
+		}()
+	}
+
+	// Goroutines calling Set (another write path)
+	for i := range 3 {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for range 10 {
+				_ = Logging_Level.Set("info")
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// If we get here without a panic or race detector complaint, the fix works
+	config, err := GetUnmarshaledConfig()
+	require.NoError(t, err)
+	assert.NotNil(t, config)
+}
+
+// TestConcurrentObjectParamUnmarshal verifies that ObjectParam.Unmarshal()
+// doesn't race with concurrent viper writes.
+func TestConcurrentObjectParamUnmarshal(t *testing.T) {
+	require.NoError(t, Reset())
+	ClearCallbacks()
+	defer func() {
+		ClearCallbacks()
+		require.NoError(t, Reset())
+	}()
+
+	require.NoError(t, Registry_Institutions.Set([]map[string]interface{}{
+		{"name": "TestInst", "id": "test-001"},
+	}))
+
+	var wg sync.WaitGroup
+
+	// Concurrent Unmarshal calls
+	for range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 10 {
+				var result any
+				_ = Registry_Institutions.Unmarshal(&result)
+			}
+		}()
+	}
+
+	// Concurrent Set calls to create contention
+	for range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 10 {
+				_ = Logging_Level.Set("warn")
+			}
+		}()
+	}
+
+	wg.Wait()
 }

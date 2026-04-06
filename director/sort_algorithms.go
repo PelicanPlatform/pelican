@@ -444,6 +444,33 @@ func (as *AdaptiveSort) Sort(sAds []server_structs.ServerAd, sCtx SortContext) (
 	dWeights = dWeights[:shrinkTo]
 	workingSet := dWeights.GetSortedAds(sAds, smSortDescending)
 
+	// Generate the availability map for just the working set. This is the key optimization:
+	// stat requests only go to the N closest servers after the distance-based truncation,
+	// rather than all servers that match the namespace.
+	var workingAvailMap map[string]bool
+	if sCtx.AvailabilityMap != nil {
+		// Override provided (e.g., in tests) — use directly without issuing stat queries.
+		workingAvailMap = sCtx.AvailabilityMap
+	} else if sCtx.GinCtx != nil {
+		var genErr error
+		if sCtx.IsOriginSort {
+			workingAvailMap, _, genErr = generateAvailabilityMaps(sCtx.GinCtx, workingSet, nil, sCtx.NamespaceAd, sCtx.RequestId)
+		} else {
+			_, workingAvailMap, genErr = generateAvailabilityMaps(sCtx.GinCtx, nil, workingSet, sCtx.NamespaceAd, sCtx.RequestId)
+		}
+		if genErr != nil {
+			if _, ok := genErr.(objectNotFoundErr); ok {
+				return nil, genErr
+			}
+			// Non-objectNotFound stat errors should not propagate to the client.
+			// Log and fall through with nil workingAvailMap (neutral weights).
+			log.Warningf("Request %s: Stat failed during sort, proceeding with neutral availability: %v",
+				sCtx.RequestId.String(), genErr)
+			workingAvailMap = nil
+		}
+	}
+	// workingAvailMap == nil means no availability info; neutral weights will be used.
+
 	// build aligned weights slice
 	serverWeights := make([]*server_structs.RedirectWeights, len(workingSet))
 	for i := range workingSet {
@@ -475,7 +502,7 @@ func (as *AdaptiveSort) Sort(sAds []server_structs.ServerAd, sCtx SortContext) (
 	// availability weights
 	if err := applyWeights("availability", workingSet, serverWeights,
 		func(_ int, ad server_structs.ServerAd) (float64, bool) {
-			return availabilityWeightFn(ad, sCtx.AvailabilityMap, objAvailabilityFactor)
+			return availabilityWeightFn(ad, workingAvailMap, objAvailabilityFactor)
 		},
 		func(sw *server_structs.RedirectWeights, w float64) { sw.AvailabilityWeight = w },
 	); err != nil {

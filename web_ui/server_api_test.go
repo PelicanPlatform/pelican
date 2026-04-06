@@ -74,14 +74,14 @@ func TestDowntime(t *testing.T) {
 	database.SetupMockDowntimeDB(t)
 	defer database.TeardownMockDowntimeDB(t)
 
-	require.NoError(t, param.Set(param.Server_WebPort.GetName(), 0))
-	require.NoError(t, param.Set(param.Server_ExternalWebUrl.GetName(), "https://mock-server.com"))
-	require.NoError(t, param.Set(param.Xrootd_Sitename.GetName(), "mock-sitename"))
+	require.NoError(t, param.Server_WebPort.Set(0))
+	require.NoError(t, param.Server_ExternalWebUrl.Set("https://mock-server.com"))
+	require.NoError(t, param.Xrootd_Sitename.Set("mock-sitename"))
 
 	dirName := t.TempDir()
-	require.NoError(t, param.Set("ConfigDir", dirName))
-	require.NoError(t, param.Set(param.Logging_Level.GetName(), "debug"))
-	require.NoError(t, param.Set(param.Origin_Port.GetName(), 0))
+	require.NoError(t, param.ConfigDir.Set(dirName))
+	require.NoError(t, param.Logging_Level.Set("debug"))
+	require.NoError(t, param.Origin_Port.Set(0))
 
 	// This mock registry handles the downtime mirror operations for the test
 	mockRegistry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

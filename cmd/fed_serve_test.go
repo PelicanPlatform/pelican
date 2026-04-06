@@ -71,10 +71,10 @@ func TestFedServePosixOrigin(t *testing.T) {
 	err = os.Chmod(tmpPath, permissions)
 	require.NoError(t, err)
 
-	require.NoError(t, param.Set("ConfigDir", tmpPath))
+	require.NoError(t, param.ConfigDir.Set(tmpPath))
 	// Set RuntimeDir to avoid race conditions with parallel tests using shared /run/pelican
-	require.NoError(t, param.Set(param.RuntimeDir.GetName(), tmpPath))
-	require.NoError(t, param.Set("Origin.RunLocation", filepath.Join(tmpPath, "xrd")))
+	require.NoError(t, param.RuntimeDir.Set(tmpPath))
+	require.NoError(t, param.Origin_RunLocation.Set(filepath.Join(tmpPath, "xrd")))
 	t.Cleanup(func() {
 		if err := os.RemoveAll(tmpPath); err != nil {
 			t.Fatal("Failed to clean up temp path")
@@ -82,33 +82,33 @@ func TestFedServePosixOrigin(t *testing.T) {
 	})
 
 	// Increase the log level; otherwise, its difficult to debug failures
-	require.NoError(t, param.Set("Logging.Level", "Debug"))
+	require.NoError(t, param.Logging_Level.Set("Debug"))
 
-	require.NoError(t, param.Set("Origin.StoragePrefix", t.TempDir()))
-	require.NoError(t, param.Set("Origin.FederationPrefix", "/test"))
-	require.NoError(t, param.Set("Origin.StorageType", "posix"))
-	require.NoError(t, param.Set("Origin.Port", 0))
-	require.NoError(t, param.Set("Server.WebPort", 0))
+	require.NoError(t, param.Origin_StoragePrefix.Set(test_utils.GetTmpStoragePrefixDir(t)))
+	require.NoError(t, param.Origin_FederationPrefix.Set("/test"))
+	require.NoError(t, param.Origin_StorageType.Set("posix"))
+	require.NoError(t, param.Origin_Port.Set(0))
+	require.NoError(t, param.Server_WebPort.Set(0))
 
 	// Disable functionality we're not using (and is difficult to make work on Mac)
-	require.NoError(t, param.Set("Origin.EnableCmsd", false))
-	require.NoError(t, param.Set("Origin.EnableMacaroons", false))
-	require.NoError(t, param.Set("Origin.EnableVoms", false))
-	require.NoError(t, param.Set("TLSSkipVerify", true))
-	require.NoError(t, param.Set("Server.EnableUI", false))
-	require.NoError(t, param.Set(param.Server_DbLocation.GetName(), filepath.Join(t.TempDir(), "ns-registry.sqlite")))
-	require.NoError(t, param.Set("Registry.RequireOriginApproval", false))
-	require.NoError(t, param.Set("Registry.RequireCacheApproval", false))
-	require.NoError(t, param.Set("Director.DbLocation", filepath.Join(t.TempDir(), "director.sqlite")))
-	require.NoError(t, param.Set(param.Origin_DbLocation.GetName(), filepath.Join(t.TempDir(), "origin.sqlite")))
-	require.NoError(t, param.Set(param.Cache_DbLocation.GetName(), filepath.Join(t.TempDir(), "cache.sqlite")))
+	require.NoError(t, param.Origin_EnableCmsd.Set(false))
+	require.NoError(t, param.Origin_EnableMacaroons.Set(false))
+	require.NoError(t, param.Origin_EnableVoms.Set(false))
+	require.NoError(t, param.TLSSkipVerify.Set(true))
+	require.NoError(t, param.Server_EnableUI.Set(false))
+	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(t.TempDir(), "ns-registry.sqlite")))
+	require.NoError(t, param.Registry_RequireOriginApproval.Set(false))
+	require.NoError(t, param.Registry_RequireCacheApproval.Set(false))
+	require.NoError(t, param.Director_DbLocation.Set(filepath.Join(t.TempDir(), "director.sqlite")))
+	require.NoError(t, param.Origin_DbLocation.Set(filepath.Join(t.TempDir(), "origin.sqlite")))
+	require.NoError(t, param.Cache_DbLocation.Set(filepath.Join(t.TempDir(), "cache.sqlite")))
 	// Set up OIDC client configuration for registry OAuth functionality
 	oidcClientIDFile := filepath.Join(tmpPath, "oidc-client-id")
 	oidcClientSecretFile := filepath.Join(tmpPath, "oidc-client-secret")
 	require.NoError(t, os.WriteFile(oidcClientIDFile, []byte("test-client-id"), 0644))
 	require.NoError(t, os.WriteFile(oidcClientSecretFile, []byte("test-client-secret"), 0644))
-	require.NoError(t, param.Set(param.OIDC_ClientIDFile.GetName(), oidcClientIDFile))
-	require.NoError(t, param.Set(param.OIDC_ClientSecretFile.GetName(), oidcClientSecretFile))
+	require.NoError(t, param.OIDC_ClientIDFile.Set(oidcClientIDFile))
+	require.NoError(t, param.OIDC_ClientSecretFile.Set(oidcClientSecretFile))
 
 	defer cancel()
 

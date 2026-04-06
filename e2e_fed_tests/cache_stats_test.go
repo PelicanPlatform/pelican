@@ -43,7 +43,7 @@ import (
 func TestCacheStatsE2E(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	// Shorten the interval for the test to make it faster
 	oldInterval := metrics.XrdCurlStatsInterval
