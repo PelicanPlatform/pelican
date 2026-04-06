@@ -828,6 +828,10 @@ func deleteRegistrationByID(id int) error {
 				if err := tx.Where("id = ? AND NOT EXISTS (?)", svc.ServerID, subq).Delete(&server_structs.Server{}).Error; err != nil {
 					return err
 				}
+				// Delete all downtimes associated with this server (no FK constraint, so must be done explicitly)
+				if err := tx.Where("server_id = ?", svc.ServerID).Delete(&server_structs.Downtime{}).Error; err != nil {
+					return errors.Wrapf(err, "failed to delete downtimes for server %s", svc.ServerID)
+				}
 			} else {
 				// Update server flags to reflect remaining service types
 				var hasOrigin, hasCache bool
@@ -888,9 +892,12 @@ func deleteServerByID(id string) error {
 				return errors.Wrapf(err, "failed to delete the registration corresponding to the server: %s", registration.Prefix)
 			}
 		}
+		// Delete all downtimes associated with this server
+		if err := tx.Where("server_id = ?", id).Delete(&server_structs.Downtime{}).Error; err != nil {
+			return errors.Wrapf(err, "failed to delete downtimes for server %s", id)
+		}
 		return nil
 	})
-
 }
 
 func getAllRegistrations() ([]*server_structs.Registration, error) {
