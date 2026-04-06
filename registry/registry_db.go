@@ -672,7 +672,9 @@ func AddRegistration(ns *server_structs.Registration) error {
 				if isCache {
 					existingServer.IsCache = true
 				}
-				existingServer.UpdatedAt = time.Now()
+				now := time.Now().UTC()
+				existingServer.UpdatedAt = now
+				existingServer.LastSeen = now
 
 				if err := tx.Save(&existingServer).Error; err != nil {
 					return errors.Wrapf(err, "failed to update server service(s): %s", ns.AdminMetadata.SiteName)
@@ -690,6 +692,21 @@ func AddRegistration(ns *server_structs.Registration) error {
 
 		return nil
 	})
+}
+
+// updateServerLastSeen sets servers.last_seen = now (UTC). Called from getServerByPrefixHandler
+// when a server polls its metadata (e.g. each advertisement cycle).
+func updateServerLastSeen(serverID string) error {
+	if serverID == "" {
+		return errors.New("server ID is required to update last_seen")
+	}
+	result := database.ServerDatabase.Model(&server_structs.Server{}).
+		Where("id = ?", serverID).
+		Update("last_seen", time.Now().UTC())
+	if result.Error != nil {
+		return errors.Wrapf(result.Error, "failed to update last_seen for server %q", serverID)
+	}
+	return nil
 }
 
 func updateRegistration(ns *server_structs.Registration) error {
