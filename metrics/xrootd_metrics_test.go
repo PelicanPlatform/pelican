@@ -1327,14 +1327,15 @@ func TestWarnRateLimitedMaskIP(t *testing.T) {
 			warnRateLimitedMaskIP("10.0.0.1")
 		}
 
-		// Wait for the interval to pass
-		time.Sleep(5 * time.Millisecond)
+		// Keep calling until the rate limiter allows another emission
+		require.Eventually(t, func() bool {
+			warnRateLimitedMaskIP("10.0.0.1")
+			return len(hook.AllEntries()) >= 2
+		}, time.Second, time.Millisecond)
 
-		// Next call after the interval should log with the suppressed count
-		warnRateLimitedMaskIP("10.0.0.1")
-		require.Len(t, hook.AllEntries(), 2)
-		assert.Contains(t, hook.AllEntries()[1].Message, "Failed to mask IP address: 10.0.0.1")
-		assert.Contains(t, hook.AllEntries()[1].Message, "suppressed")
-		assert.Contains(t, hook.AllEntries()[1].Message, "similar warnings since last report")
+		lastEntry := hook.AllEntries()[1]
+		assert.Contains(t, lastEntry.Message, "Failed to mask IP address: 10.0.0.1")
+		assert.Contains(t, lastEntry.Message, "suppressed")
+		assert.Contains(t, lastEntry.Message, "similar warnings since last report")
 	})
 }
