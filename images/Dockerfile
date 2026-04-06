@@ -36,7 +36,6 @@ ARG OSG_SERIES=24
 ARG OSG_REPO=release
 
 # For compiling Pelican.
-ARG GO_VER=1.24.7
 ARG GORELEASER_CURRENT_TAG
 ARG NODEJS_VER=20
 
@@ -95,11 +94,12 @@ FROM --platform=${BUILDPLATFORM} almalinux:${ALMALINUX_TAG} AS pelican-build-bas
 ARG BUILDPLATFORM
 ARG BUILDOS
 ARG BUILDARCH
-ARG GO_VER
 ARG NODEJS_VER
 
 WORKDIR /pelican-build
-RUN --mount=type=cache,id=dnf-${BUILDPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
+RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
+    --mount=type=cache,id=dnf-${BUILDPLATFORM},target=/var/cache/dnf,sharing=locked \
+    <<ENDRUN
   set -eux
   set -o pipefail
 
@@ -112,12 +112,18 @@ RUN --mount=type=cache,id=dnf-${BUILDPLATFORM},target=/var/cache/dnf,sharing=loc
 		enabled=1
 		gpgcheck=0
 	EOF
-  dnf install -y goreleaser make
+  dnf install -y goreleaser jq make
 
   # Install Go.
+  # Use go.mod and the go.dev API to determine the most recent version.
+  # References:
+  #   - https://pkg.go.dev/golang.org/x/website/internal/dl
+  #   - https://github.com/golang/go/issues/34864
 
+  GO_LANG_VER=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' /context/go.mod | grep -oE '[0-9]+\.[0-9]+')
+  GO_TOOLCHAIN_VER=$(curl https://go.dev/dl/?mode=json | jq -r ".[].version | select(startswith(\"go${GO_LANG_VER}\"))" | sort -rV | head -n 1)
   rm -rf /usr/local/go
-  curl -fSL https://dl.google.com/go/go${GO_VER}.${BUILDOS}-${BUILDARCH}.tar.gz | tar -xz -f - -C /usr/local
+  curl -fSL https://dl.google.com/go/${GO_TOOLCHAIN_VER}.${BUILDOS}-${BUILDARCH}.tar.gz | tar -xz -f - -C /usr/local
 
   # Install Node.js.
   #
@@ -646,7 +652,6 @@ FROM origin-base AS pelican-test
 ARG TARGETPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
-ARG GO_VER
 
 # Install select development packages.
 # We need to work around a bug with ARM64 emulation and `tar`:
@@ -658,13 +663,24 @@ ARG GO_VER
 # and are necessary for `bsdtar` to be able to extract the Go distribution.
 ENV LANG=C.utf8 LC_ALL=C.utf8
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
-  dnf install -y git make bsdtar && ln -sf /usr/bin/bsdtar /usr/bin/tar
+  dnf install -y git jq make bsdtar && ln -sf /usr/bin/bsdtar /usr/bin/tar
 
-# Install Go using the same commands as the pelican-build-init stage.
-RUN curl -O https://dl.google.com/go/go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz \
-    && rm -rf /usr/local/go \
-    && tar -C /usr/local -xzf go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz \
-    && rm -rf go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz
+# Install Go using the same approach as the pelican-build-base stage.
+RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
+    <<ENDRUN
+  set -eux
+  set -o pipefail
+
+  # Use go.mod and the go.dev API to determine the most recent version.
+  # References:
+  #   - https://pkg.go.dev/golang.org/x/website/internal/dl
+  #   - https://github.com/golang/go/issues/34864
+
+  GO_LANG_VER=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' /context/go.mod | grep -oE '[0-9]+\.[0-9]+')
+  GO_TOOLCHAIN_VER=$(curl https://go.dev/dl/?mode=json | jq -r ".[].version | select(startswith(\"go${GO_LANG_VER}\"))" | sort -rV | head -n 1)
+  rm -rf /usr/local/go
+  curl -fSL https://dl.google.com/go/${GO_TOOLCHAIN_VER}.${TARGETOS}-${TARGETARCH}.tar.gz | tar -xz -f - -C /usr/local
+ENDRUN
 ENV PATH="/usr/local/go/bin:${PATH}"
 
 # Install the MinIO server and client for S3 tests.

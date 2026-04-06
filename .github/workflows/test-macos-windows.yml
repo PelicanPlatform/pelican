@@ -22,7 +22,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go-version: [1.24.x]
         os: [macos-latest, windows-latest]
     steps:
     - name: Checkout code
@@ -47,11 +46,20 @@ jobs:
         # If source files changed but packages didn't, rebuild from a prior cache.
         restore-keys: |
           ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-
+    - name: Set Go version
+      # Determine the string to use in setup-go's "go-version" input.
+      id: go-version
+      # Use `bash` instead of PowerShell.
+      shell: bash
+      run: |
+        version=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' go.mod | grep -oE '[0-9]+\.[0-9]+')
+        echo "version=${version}.x" >> $GITHUB_OUTPUT
     - name: Install Go
       if: runner.os != 'Windows'
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ matrix.go-version }}
+        go-version: "${{ steps.go-version.outputs.version }}"
+        check-latest: true
     - name: Create Go temporary directories (Windows workaround)
       if: runner.os == 'Windows'
       shell: pwsh
@@ -65,7 +73,8 @@ jobs:
         GOTMPDIR: D:\gotmp
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ matrix.go-version }}
+        go-version: "${{ steps.go-version.outputs.version }}"
+        check-latest: true
     - name: Install macOS Dependencies
       run: ./github_scripts/osx_install.sh
       if: runner.os == 'macOS'
