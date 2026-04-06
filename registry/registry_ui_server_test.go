@@ -23,14 +23,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func createTestServerData(t *testing.T) []server_structs.Registration {
@@ -439,4 +442,63 @@ func TestServerIntegrationWithNamespaceOperations(t *testing.T) {
 		require.Len(t, updatedServer.Registration, 1, "Expected exactly one registration")
 		assert.Equal(t, "Updated description", updatedServer.Registration[0].AdminMetadata.Description)
 	})
+}
+
+// TestDeleteServerHandler_RemovesDowntimes verifies that deleting a server via the
+// HTTP handler also removes its orphaned downtime entries (no FK constraint exists
+// between the downtimes and servers tables).
+func TestDeleteServerHandler_RemovesDowntimes(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	ns := server_structs.Registration{
+		Prefix: "/origins/downtime-server-delete.edu",
+		Pubkey: "test-pubkey",
+		AdminMetadata: server_structs.AdminMetadata{
+			SiteName:    "downtime-server-delete.edu",
+			Institution: "Test University",
+			Status:      server_structs.RegApproved,
+		},
+	}
+	require.NoError(t, AddRegistration(&ns))
+
+	server, err := getServerByRegistrationID(ns.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, server.ID)
+
+	now := time.Now().UnixMilli()
+	dt := server_structs.Downtime{
+		UUID:        uuid.NewString(),
+		ServerID:    server.ID,
+		ServerName:  server.Name,
+		CreatedBy:   "test-user",
+		UpdatedBy:   "test-user",
+		Source:      "registry",
+		Class:       server_structs.SCHEDULED,
+		Description: "unit test downtime",
+		Severity:    server_structs.NoSignificantOutageExpected,
+		StartTime:   now,
+		EndTime:     now + 3600000,
+	}
+	require.NoError(t, database.ServerDatabase.Create(&dt).Error)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.DELETE("/servers/:id", deleteServerHandler)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("DELETE", "/servers/"+server.ID, nil)
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var downtimeCount int64
+	require.NoError(t, database.ServerDatabase.Model(&server_structs.Downtime{}).
+		Where("server_id = ?", server.ID).Count(&downtimeCount).Error)
+	assert.Equal(t, int64(0), downtimeCount, "downtimes should be removed with the server")
+
+	var regCount int64
+	require.NoError(t, database.ServerDatabase.Model(&server_structs.Registration{}).
+		Where("id = ?", ns.ID).Count(&regCount).Error)
+	assert.Equal(t, int64(0), regCount, "registration should be removed with the server")
 }
