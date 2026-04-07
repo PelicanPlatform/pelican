@@ -8,6 +8,8 @@
   <img alt="Go Report" src="https://img.shields.io/badge/go%20report-A+-brightgreen.svg?style=for-the-badge">
 </p>
 
+TEST CI
+
 The Pelican command line tool allows one to use a Pelican federation as a client and serve datasets through running a Pelican origin service.
 
 For more information on Pelican, see the [Pelican Platform page](https://pelicanplatform.org/).
