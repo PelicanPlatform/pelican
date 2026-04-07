@@ -27,7 +27,7 @@ export const metadata: Metadata = {
     template: '%s | Pelican Platform',
     default: 'Pelican Platform',
   },
-  description: 'Software designed to make data distribution easy',
+  description: 'Software that is designed to make data distribution easy',
 };
 
 export default function RootLayout({
