@@ -219,6 +219,7 @@ type ServerRegistration struct {
 	Note      string    `json:"note"`
 	CreatedAt time.Time `json:"-" post:"exclude"`
 	UpdatedAt time.Time `json:"-" post:"exclude"`
+	LastSeen  time.Time `json:"-" post:"exclude"`
 
 	// Registration list
 	Registration []Registration `json:"registration"`
