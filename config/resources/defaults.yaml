@@ -111,6 +111,8 @@ Registry:
   InstitutionsUrlReloadMinutes: 15m
   RequireCacheApproval: false
   RequireOriginApproval: false
+  InactiveRegistrationTimeout: 20m
+  InactiveRegistrationCleanupInterval: 5m
 Monitoring:
   PortLower: 9930
   PortHigher: 9999

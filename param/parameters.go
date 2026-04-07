@@ -386,6 +386,8 @@ var runtimeConfigurableMap = map[string]bool{
 	"Registry.AdminUsers": false,
 	"Registry.CustomRegistrationFields": false,
 	"Registry.DbLocation": false,
+	"Registry.InactiveRegistrationCleanupInterval": false,
+	"Registry.InactiveRegistrationTimeout": false,
 	"Registry.Institutions": false,
 	"Registry.InstitutionsUrl": false,
 	"Registry.InstitutionsUrlReloadMinutes": false,
@@ -1049,6 +1051,8 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Origin.SelfTestInterval": func(c *Config) time.Duration { return c.Origin.SelfTestInterval },
 	"Origin.SelfTestMaxAge": func(c *Config) time.Duration { return c.Origin.SelfTestMaxAge },
 	"Origin.UserMapfileRefreshInterval": func(c *Config) time.Duration { return c.Origin.UserMapfileRefreshInterval },
+	"Registry.InactiveRegistrationCleanupInterval": func(c *Config) time.Duration { return c.Registry.InactiveRegistrationCleanupInterval },
+	"Registry.InactiveRegistrationTimeout": func(c *Config) time.Duration { return c.Registry.InactiveRegistrationTimeout },
 	"Registry.InstitutionsUrlReloadMinutes": func(c *Config) time.Duration { return c.Registry.InstitutionsUrlReloadMinutes },
 	"Server.AdLifetime": func(c *Config) time.Duration { return c.Server.AdLifetime },
 	"Server.AdvertisementInterval": func(c *Config) time.Duration { return c.Server.AdvertisementInterval },
@@ -1442,6 +1446,8 @@ var allParameterNames = []string{
 	"Registry.AdminUsers",
 	"Registry.CustomRegistrationFields",
 	"Registry.DbLocation",
+	"Registry.InactiveRegistrationCleanupInterval",
+	"Registry.InactiveRegistrationTimeout",
 	"Registry.Institutions",
 	"Registry.InstitutionsUrl",
 	"Registry.InstitutionsUrlReloadMinutes",
@@ -1929,6 +1935,8 @@ var (
 	Origin_SelfTestInterval = DurationParam{"Origin.SelfTestInterval"}
 	Origin_SelfTestMaxAge = DurationParam{"Origin.SelfTestMaxAge"}
 	Origin_UserMapfileRefreshInterval = DurationParam{"Origin.UserMapfileRefreshInterval"}
+	Registry_InactiveRegistrationCleanupInterval = DurationParam{"Registry.InactiveRegistrationCleanupInterval"}
+	Registry_InactiveRegistrationTimeout = DurationParam{"Registry.InactiveRegistrationTimeout"}
 	Registry_InstitutionsUrlReloadMinutes = DurationParam{"Registry.InstitutionsUrlReloadMinutes"}
 	Server_AdLifetime = DurationParam{"Server.AdLifetime"}
 	Server_AdvertisementInterval = DurationParam{"Server.AdvertisementInterval"}
@@ -2343,6 +2351,8 @@ func init() {
 		"Origin.SelfTestInterval": Origin_SelfTestInterval,
 		"Origin.SelfTestMaxAge": Origin_SelfTestMaxAge,
 		"Origin.UserMapfileRefreshInterval": Origin_UserMapfileRefreshInterval,
+		"Registry.InactiveRegistrationCleanupInterval": Registry_InactiveRegistrationCleanupInterval,
+		"Registry.InactiveRegistrationTimeout": Registry_InactiveRegistrationTimeout,
 		"Registry.InstitutionsUrlReloadMinutes": Registry_InstitutionsUrlReloadMinutes,
 		"Server.AdLifetime": Server_AdLifetime,
 		"Server.AdvertisementInterval": Server_AdvertisementInterval,
