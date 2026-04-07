@@ -24,7 +24,10 @@ import SubNavigation from '@/app/settings/components/SubNavigation';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 
 export const metadata = {
-  title: 'Settings',
+  title: {
+    template: '%s | Settings',
+    default: 'Settings',
+  },
   description: 'Server Settings',
 };
 
@@ -38,6 +41,7 @@ export default function RootLayout({
       <Main>
         <AuthenticatedContent
           redirect
+          trustThenValidate
           allowedRoles={['admin']}
           boxProps={{ width: '100%' }}
         >

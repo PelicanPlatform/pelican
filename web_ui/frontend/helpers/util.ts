@@ -92,13 +92,13 @@ export const average = (arr: number[]) => {
   return arr.reduce((a, b) => a + b, 0) / arr.length;
 };
 
-type ErrorWithCause = Error & { cause?: Error };
+export type ErrorWithCause = Error & { cause?: Error };
 
 /**
  * If an error is caught from f then display the error via an alert UI
  */
 export async function alertOnError<T = any>(
-  f: () => Promise<T> | T | undefined,
+  f: () => Promise<T> | T,
   title: string = 'Error',
   dispatch: Dispatch<AlertReducerAction>,
   passError: boolean = false

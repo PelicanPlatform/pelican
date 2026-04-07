@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Box, Badge } from '@mui/material';
 
-import { User } from '@/types';
+import { User } from '@/helpers/api';
 import ListCard from '@/components/ListCard';
 import createdRecently from '@/helpers/createdRecently';
 

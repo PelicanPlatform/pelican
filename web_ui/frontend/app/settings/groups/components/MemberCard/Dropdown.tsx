@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box } from '@mui/material';
 import { Dropdown, InformationSpan } from '@/components';
-import { GroupMember } from '@/types';
+import { GroupMember } from '@/helpers/api';
 
 interface InformationDropdownProps {
   member: GroupMember;

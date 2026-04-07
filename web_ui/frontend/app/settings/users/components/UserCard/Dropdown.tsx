@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box } from '@mui/material';
 import { Dropdown, InformationSpan } from '@/components';
-import { User } from '@/types';
+import { User } from '@/helpers/api';
 
 interface InformationDropdownProps {
   user: User;

@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { Box, IconButton } from '@mui/material';
 import { InfoOutline } from '@mui/icons-material';
 
-import { Group } from '@/types';
+import { Group } from '@/helpers/api';
 import ListCard from '@/components/ListCard';
 import CardTitle from '@/components/CardTitle';
 
