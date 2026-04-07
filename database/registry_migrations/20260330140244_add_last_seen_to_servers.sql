@@ -3,7 +3,7 @@
 
 ALTER TABLE servers ADD COLUMN last_seen DATETIME DEFAULT NULL;
 
--- Backfill existing servers from their own timestamps 
+-- Backfill existing servers from their own timestamps
 -- so they have a meaningful last_seen rather than NULL.
 UPDATE servers
 SET last_seen = COALESCE(updated_at, created_at)
