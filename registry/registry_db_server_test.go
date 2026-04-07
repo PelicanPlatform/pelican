@@ -19,13 +19,16 @@
 package registry
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/database"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -686,5 +689,528 @@ func TestServerWithMultipleServices(t *testing.T) {
 
 		assert.False(t, server2.IsOrigin, "Server2 should not be marked as origin")
 		assert.True(t, server2.IsCache, "Server2 should be marked as cache")
+	})
+}
+
+// createPendingServerReg creates a Registration with RegPending status and returns it.
+// The AddRegistration call creates the server row automatically for /origins/ and /caches/ prefixes.
+func createPendingServerReg(t *testing.T, prefix, siteName, pubkey string) server_structs.Registration {
+	t.Helper()
+	reg := server_structs.Registration{
+		Prefix: prefix,
+		Pubkey: pubkey,
+		AdminMetadata: server_structs.AdminMetadata{
+			SiteName:    siteName,
+			Institution: "Test University",
+			Status:      server_structs.RegPending,
+		},
+	}
+	err := AddRegistration(&reg)
+	require.NoError(t, err)
+	return reg
+}
+
+// setServerLastSeenDirect directly updates the last_seen column in the DB.
+func setServerLastSeenDirect(t *testing.T, serverID string, ts time.Time) {
+	t.Helper()
+	err := database.ServerDatabase.Model(&server_structs.Server{}).
+		Where("id = ?", serverID).
+		Update("last_seen", ts).Error
+	require.NoError(t, err)
+}
+
+func TestUpdateServerLastSeen(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	t.Run("ErrorOnEmptyID", func(t *testing.T) {
+		err := updateServerLastSeen("")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "server ID is required")
+	})
+
+	t.Run("NoErrorOnNonExistentServerID", func(t *testing.T) {
+		// The function updates 0 rows but does not return an error (GORM doesn't
+		// treat zero-row updates as errors by default).
+		err := updateServerLastSeen("doesnotexist")
+		assert.NoError(t, err)
+	})
+
+	t.Run("UpdatesTimestampForExistingServer", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		pubkey, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		reg := createPendingServerReg(t, "/origins/ts-update.edu", "ts-update.edu", pubkey)
+
+		srv, err := getServerByRegistrationID(reg.ID)
+		require.NoError(t, err)
+		require.NotEmpty(t, srv.ID)
+
+		// Push last_seen far into the past so we can detect a change.
+		past := time.Now().UTC().Add(-1 * time.Hour)
+		setServerLastSeenDirect(t, srv.ID, past)
+
+		before := time.Now().UTC()
+		err = updateServerLastSeen(srv.ID)
+		require.NoError(t, err)
+
+		var updated server_structs.Server
+		err = database.ServerDatabase.Where("id = ?", srv.ID).First(&updated).Error
+		require.NoError(t, err)
+
+		assert.True(t, updated.LastSeen.After(before) || updated.LastSeen.Equal(before),
+			"last_seen should be updated to now, got %v", updated.LastSeen)
+	})
+
+	t.Run("TimestampIncreasesWithRepeatedCalls", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		pubkey, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		reg := createPendingServerReg(t, "/origins/ts-progress.edu", "ts-progress.edu", pubkey)
+
+		srv, err := getServerByRegistrationID(reg.ID)
+		require.NoError(t, err)
+
+		err = updateServerLastSeen(srv.ID)
+		require.NoError(t, err)
+
+		var first server_structs.Server
+		err = database.ServerDatabase.Where("id = ?", srv.ID).First(&first).Error
+		require.NoError(t, err)
+
+		// Small sleep so clock advances.
+		time.Sleep(10 * time.Millisecond)
+
+		err = updateServerLastSeen(srv.ID)
+		require.NoError(t, err)
+
+		var second server_structs.Server
+		err = database.ServerDatabase.Where("id = ?", srv.ID).First(&second).Error
+		require.NoError(t, err)
+
+		assert.True(t, second.LastSeen.After(first.LastSeen),
+			"second last_seen (%v) should be after first (%v)", second.LastSeen, first.LastSeen)
+	})
+}
+
+func TestDeleteServerByID(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	t.Run("DeletesServerAndCascadedRecords", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		pubkey, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		reg := createPendingServerReg(t, "/origins/del-cascade.edu", "del-cascade.edu", pubkey)
+
+		srv, err := getServerByRegistrationID(reg.ID)
+		require.NoError(t, err)
+		require.NotEmpty(t, srv.ID)
+
+		// Add an endpoint and contact so cascade deletes can be verified.
+		ep := server_structs.Endpoint{ServerID: srv.ID, Endpoint: "https://del-cascade.edu:8443"}
+		err = database.ServerDatabase.Create(&ep).Error
+		require.NoError(t, err)
+
+		ct := server_structs.Contact{ServerID: srv.ID, FullName: "Admin", ContactInfo: "admin@del-cascade.edu"}
+		err = database.ServerDatabase.Create(&ct).Error
+		require.NoError(t, err)
+
+		err = deleteServerByID(srv.ID)
+		require.NoError(t, err)
+
+		// Server row gone.
+		var serverCount int64
+		err = database.ServerDatabase.Model(&server_structs.Server{}).Where("id = ?", srv.ID).Count(&serverCount).Error
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), serverCount)
+
+		// Registration row gone.
+		var regCount int64
+		err = database.ServerDatabase.Model(&server_structs.Registration{}).Where("id = ?", reg.ID).Count(&regCount).Error
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), regCount)
+
+		// Cascaded records gone.
+		var epCount, ctCount int64
+		err = database.ServerDatabase.Model(&server_structs.Endpoint{}).Where("server_id = ?", srv.ID).Count(&epCount).Error
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), epCount)
+		err = database.ServerDatabase.Model(&server_structs.Contact{}).Where("server_id = ?", srv.ID).Count(&ctCount).Error
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), ctCount)
+	})
+
+	t.Run("DeletesDualServiceServer", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		jwks, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		originReg := createPendingServerReg(t, "/origins/dual-del.edu", "dual-del.edu", jwks)
+		cacheReg := createPendingServerReg(t, "/caches/dual-del.edu", "dual-del.edu", jwks)
+
+		srv, err := getServerByRegistrationID(originReg.ID)
+		require.NoError(t, err)
+
+		err = deleteServerByID(srv.ID)
+		require.NoError(t, err)
+
+		// Both registrations should be gone.
+		var regCount int64
+		err = database.ServerDatabase.Model(&server_structs.Registration{}).
+			Where("id IN ?", []int{originReg.ID, cacheReg.ID}).Count(&regCount).Error
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), regCount)
+
+		// Services should be gone.
+		var svcCount int64
+		err = database.ServerDatabase.Model(&server_structs.Service{}).Where("server_id = ?", srv.ID).Count(&svcCount).Error
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), svcCount)
+	})
+}
+
+func TestDeleteStaleServerRegistrations(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	t.Run("EmptyDatabase", func(t *testing.T) {
+		regs, servers, err := deleteStaleServerRegistrations(time.Now().UTC())
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), regs)
+		assert.Equal(t, int64(0), servers)
+	})
+
+	t.Run("DeletesPendingStaleServer", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		pubkey, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		reg := createPendingServerReg(t, "/origins/stale-pending.edu", "stale-pending.edu", pubkey)
+
+		srv, err := getServerByRegistrationID(reg.ID)
+		require.NoError(t, err)
+
+		// Set last_seen well in the past.
+		setServerLastSeenDirect(t, srv.ID, time.Now().UTC().Add(-2*time.Hour))
+
+		cutoff := time.Now().UTC().Add(-1 * time.Hour) // older than 1h is stale
+		regsDeleted, serversDeleted, err := deleteStaleServerRegistrations(cutoff)
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), regsDeleted)
+		assert.Equal(t, int64(1), serversDeleted)
+
+		// Verify removal.
+		var count int64
+		err = database.ServerDatabase.Model(&server_structs.Server{}).Where("id = ?", srv.ID).Count(&count).Error
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), count)
+	})
+
+	t.Run("PreservesApprovedServer", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		pubkey, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		reg := server_structs.Registration{
+			Prefix: "/origins/approved-server.edu",
+			Pubkey: pubkey,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName:    "approved-server.edu",
+				Institution: "Test University",
+				Status:      server_structs.RegApproved,
+			},
+		}
+		err = AddRegistration(&reg)
+		require.NoError(t, err)
+
+		srv, err := getServerByRegistrationID(reg.ID)
+		require.NoError(t, err)
+
+		// Make it look stale.
+		setServerLastSeenDirect(t, srv.ID, time.Now().UTC().Add(-2*time.Hour))
+
+		cutoff := time.Now().UTC().Add(-1 * time.Hour)
+		regsDeleted, serversDeleted, err := deleteStaleServerRegistrations(cutoff)
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), regsDeleted, "approved server should not be deleted")
+		assert.Equal(t, int64(0), serversDeleted)
+
+		var count int64
+		err = database.ServerDatabase.Model(&server_structs.Server{}).Where("id = ?", srv.ID).Count(&count).Error
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), count)
+	})
+
+	t.Run("PreservesDeniedServer", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		pubkey, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		reg := server_structs.Registration{
+			Prefix: "/origins/denied-server.edu",
+			Pubkey: pubkey,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName:    "denied-server.edu",
+				Institution: "Test University",
+				Status:      server_structs.RegDenied,
+			},
+		}
+		err = AddRegistration(&reg)
+		require.NoError(t, err)
+
+		srv, err := getServerByRegistrationID(reg.ID)
+		require.NoError(t, err)
+		setServerLastSeenDirect(t, srv.ID, time.Now().UTC().Add(-2*time.Hour))
+
+		_, serversDeleted, err := deleteStaleServerRegistrations(time.Now().UTC().Add(-1 * time.Hour))
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), serversDeleted, "denied server should not be deleted")
+	})
+
+	t.Run("PreservesRecentPendingServer", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		pubkey, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		reg := createPendingServerReg(t, "/origins/recent-pending.edu", "recent-pending.edu", pubkey)
+
+		srv, err := getServerByRegistrationID(reg.ID)
+		require.NoError(t, err)
+
+		// last_seen is recent (5 minutes ago), cutoff is 1 hour ago.
+		setServerLastSeenDirect(t, srv.ID, time.Now().UTC().Add(-5*time.Minute))
+
+		_, serversDeleted, err := deleteStaleServerRegistrations(time.Now().UTC().Add(-1 * time.Hour))
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), serversDeleted, "recently active pending server should not be deleted")
+	})
+
+	t.Run("SkipsServerWithZeroLastSeen", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		pubkey, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		reg := createPendingServerReg(t, "/origins/zero-lastseen.edu", "zero-lastseen.edu", pubkey)
+
+		srv, err := getServerByRegistrationID(reg.ID)
+		require.NoError(t, err)
+
+		// Explicitly zero out last_seen.
+		err = database.ServerDatabase.Model(&server_structs.Server{}).
+			Where("id = ?", srv.ID).
+			Update("last_seen", time.Time{}).Error
+		require.NoError(t, err)
+
+		_, serversDeleted, err := deleteStaleServerRegistrations(time.Now().UTC())
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), serversDeleted, "server with zero last_seen should be skipped")
+	})
+
+	t.Run("MixedStatusPreservesServerWithAnyNonPending", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		jwks, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		// Register origin as pending, then cache as approved (same server name → same server row).
+		pendingReg := createPendingServerReg(t, "/origins/mixed-status.edu", "mixed-status.edu", jwks)
+
+		approvedReg := server_structs.Registration{
+			Prefix: "/caches/mixed-status.edu",
+			Pubkey: jwks,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName:    "mixed-status.edu",
+				Institution: "Test University",
+				Status:      server_structs.RegApproved,
+			},
+		}
+		err = AddRegistration(&approvedReg)
+		require.NoError(t, err)
+
+		srv, err := getServerByRegistrationID(pendingReg.ID)
+		require.NoError(t, err)
+		setServerLastSeenDirect(t, srv.ID, time.Now().UTC().Add(-2*time.Hour))
+
+		_, serversDeleted, err := deleteStaleServerRegistrations(time.Now().UTC().Add(-1 * time.Hour))
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), serversDeleted,
+			"server with at least one approved registration must not be deleted")
+	})
+
+	t.Run("DeletesMultipleStaleServers", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		jwks1, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		jwks2, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		reg1 := createPendingServerReg(t, "/origins/stale1.edu", "stale1.edu", jwks1)
+		reg2 := createPendingServerReg(t, "/origins/stale2.edu", "stale2.edu", jwks2)
+
+		srv1, err := getServerByRegistrationID(reg1.ID)
+		require.NoError(t, err)
+		srv2, err := getServerByRegistrationID(reg2.ID)
+		require.NoError(t, err)
+
+		setServerLastSeenDirect(t, srv1.ID, time.Now().UTC().Add(-3*time.Hour))
+		setServerLastSeenDirect(t, srv2.ID, time.Now().UTC().Add(-3*time.Hour))
+
+		cutoff := time.Now().UTC().Add(-1 * time.Hour)
+		regsDeleted, serversDeleted, err := deleteStaleServerRegistrations(cutoff)
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), regsDeleted)
+		assert.Equal(t, int64(2), serversDeleted)
+	})
+
+	t.Run("ReturnCountsForDualServiceStaleServer", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		jwks, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		// Same server, two registrations (both pending).
+		reg1 := createPendingServerReg(t, "/origins/dual-stale.edu", "dual-stale.edu", jwks)
+		createPendingServerReg(t, "/caches/dual-stale.edu", "dual-stale.edu", jwks)
+
+		srv, err := getServerByRegistrationID(reg1.ID)
+		require.NoError(t, err)
+		setServerLastSeenDirect(t, srv.ID, time.Now().UTC().Add(-2*time.Hour))
+
+		cutoff := time.Now().UTC().Add(-1 * time.Hour)
+		regsDeleted, serversDeleted, err := deleteStaleServerRegistrations(cutoff)
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), serversDeleted)
+		assert.Equal(t, int64(2), regsDeleted, "both registrations for the dual server should be counted")
+	})
+}
+
+func TestLaunchInactiveRegistrationCleanup(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	t.Run("StopsCleanlyOnContextCancellation", func(t *testing.T) {
+		// Use a long interval so the ticker never fires during this subtest.
+		require.NoError(t, param.Registry_InactiveRegistrationCleanupInterval.Set(time.Minute))
+		require.NoError(t, param.Registry_InactiveRegistrationTimeout.Set(20*time.Minute))
+
+		ctx, cancel := context.WithCancel(context.Background())
+		egrp, _ := errgroup.WithContext(ctx)
+
+		LaunchInactiveRegistrationCleanup(ctx, egrp)
+
+		cancel()
+		assert.NoError(t, egrp.Wait())
+	})
+
+	t.Run("RemovesStaleRegistrationsOnTick", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		// Fire the ticker every 10 ms; consider servers inactive after 1 ms so
+		// any server whose last_seen is in the past qualifies immediately.
+		require.NoError(t, param.Registry_InactiveRegistrationCleanupInterval.Set(10*time.Millisecond))
+		require.NoError(t, param.Registry_InactiveRegistrationTimeout.Set(time.Millisecond))
+
+		pubkey, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		reg := createPendingServerReg(t, "/origins/cleanup-goroutine.edu", "cleanup-goroutine.edu", pubkey)
+
+		srv, err := getServerByRegistrationID(reg.ID)
+		require.NoError(t, err)
+		setServerLastSeenDirect(t, srv.ID, time.Now().UTC().Add(-time.Hour))
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		egrp, _ := errgroup.WithContext(ctx)
+
+		LaunchInactiveRegistrationCleanup(ctx, egrp)
+
+		// Poll until the server row disappears, or fail after 5 s.
+		require.Eventually(t, func() bool {
+			var count int64
+			err := database.ServerDatabase.Model(&server_structs.Server{}).
+				Where("id = ?", srv.ID).Count(&count).Error
+			return err == nil && count == 0
+		}, 5*time.Second, 20*time.Millisecond, "stale pending server was not removed")
+
+		// Registration row must be gone too.
+		var regCount int64
+		err = database.ServerDatabase.Model(&server_structs.Registration{}).
+			Where("id = ?", reg.ID).Count(&regCount).Error
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), regCount, "registration linked to deleted server must be removed")
+
+		cancel()
+		assert.NoError(t, egrp.Wait())
+	})
+
+	t.Run("PreservesApprovedRegistrationOnTick", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		require.NoError(t, param.Registry_InactiveRegistrationCleanupInterval.Set(10*time.Millisecond))
+		require.NoError(t, param.Registry_InactiveRegistrationTimeout.Set(time.Millisecond))
+
+		approvedKey, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		pendingKey, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		// Approved server — must survive.
+		approvedReg := server_structs.Registration{
+			Prefix: "/origins/approved-goroutine.edu",
+			Pubkey: approvedKey,
+			AdminMetadata: server_structs.AdminMetadata{
+				SiteName:    "approved-goroutine.edu",
+				Institution: "Test University",
+				Status:      server_structs.RegApproved,
+			},
+		}
+		err = AddRegistration(&approvedReg)
+		require.NoError(t, err)
+		approvedSrv, err := getServerByRegistrationID(approvedReg.ID)
+		require.NoError(t, err)
+		setServerLastSeenDirect(t, approvedSrv.ID, time.Now().UTC().Add(-time.Hour))
+
+		// Witness pending server — used to confirm the cleanup goroutine has
+		// fired at least once before we assert the approved server is still present.
+		witnessReg := createPendingServerReg(t, "/origins/witness-goroutine.edu", "witness-goroutine.edu", pendingKey)
+		witnessSrv, err := getServerByRegistrationID(witnessReg.ID)
+		require.NoError(t, err)
+		setServerLastSeenDirect(t, witnessSrv.ID, time.Now().UTC().Add(-time.Hour))
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		egrp, _ := errgroup.WithContext(ctx)
+
+		LaunchInactiveRegistrationCleanup(ctx, egrp)
+
+		// Wait until the witness is gone — this proves cleanup ran at least once.
+		require.Eventually(t, func() bool {
+			var count int64
+			err := database.ServerDatabase.Model(&server_structs.Server{}).
+				Where("id = ?", witnessSrv.ID).Count(&count).Error
+			return err == nil && count == 0
+		}, 5*time.Second, 20*time.Millisecond, "witness pending server was not removed")
+
+		// Approved server must still be present.
+		var count int64
+		err = database.ServerDatabase.Model(&server_structs.Server{}).
+			Where("id = ?", approvedSrv.ID).Count(&count).Error
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), count, "approved server must not be removed by cleanup")
+
+		cancel()
+		assert.NoError(t, egrp.Wait())
 	})
 }
