@@ -76,7 +76,7 @@ func LaunchInactiveRegistrationCleanup(ctx context.Context, egrp *errgroup.Group
 					continue
 				}
 				if nRegs > 0 || nServers > 0 {
-					log.Infof("Cleaned up %d registration(s) and %d server(s) with last_seen older than %s", nRegs, nServers, timeout)
+					log.Infof("Inactive registration cleanup: removed %d pending registration(s) across %d server(s) that had no activity for more than %s", nRegs, nServers, timeout)
 				}
 			}
 		}

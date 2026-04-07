@@ -239,6 +239,7 @@ func buildServerRegistration(server server_structs.Server, services []server_str
 		Note:      server.Note,
 		CreatedAt: server.CreatedAt,
 		UpdatedAt: server.UpdatedAt,
+		LastSeen:  server.LastSeen,
 	}
 
 	for _, service := range services {
@@ -303,6 +304,7 @@ func getServerByRegistrationID(registrationID int) (*server_structs.ServerRegist
 		Note:      service.Server.Note,
 		CreatedAt: service.Server.CreatedAt,
 		UpdatedAt: service.Server.UpdatedAt,
+		LastSeen:  service.Server.LastSeen,
 	}
 
 	for _, svc := range allServices {
@@ -707,6 +709,42 @@ func updateServerLastSeen(serverID string) error {
 		return errors.Wrapf(result.Error, "failed to update last_seen for server %q", serverID)
 	}
 	return nil
+}
+
+// deleteStaleServerRegistrations uses listServers to find servers whose last_seen
+// is older than cutoff and whose every registration is still Pending, then removes
+// each one via deleteServerByID. Servers with any non-Pending registration are
+// skipped; standalone namespace registrations (no servers row) are untouched.
+func deleteStaleServerRegistrations(cutoff time.Time) (regsDeleted, serversDeleted int64, err error) {
+	servers, err := listServers()
+	if err != nil {
+		return 0, 0, errors.Wrap(err, "failed to list servers for stale cleanup")
+	}
+
+	for _, srv := range servers {
+		if srv.LastSeen.IsZero() || !srv.LastSeen.Before(cutoff) {
+			continue
+		}
+
+		allPending := true
+		for _, reg := range srv.Registration {
+			if reg.AdminMetadata.Status != server_structs.RegPending {
+				allPending = false
+				break
+			}
+		}
+		if !allPending {
+			continue
+		}
+
+		if err := deleteServerByID(srv.ID); err != nil {
+			log.Warningf("Failed to delete stale server %s (%s): %v", srv.ID, srv.Name, err)
+			continue
+		}
+		regsDeleted += int64(len(srv.Registration))
+		serversDeleted++
+	}
+	return regsDeleted, serversDeleted, nil
 }
 
 func updateRegistration(ns *server_structs.Registration) error {
