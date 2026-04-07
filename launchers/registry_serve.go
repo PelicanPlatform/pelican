@@ -75,6 +75,9 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	// Launch registry prometheus metrics
 	registry.LaunchRegistryMetrics(ctx, egrp)
 
+	// Launch cleanup goroutine for inactive pending registrations
+	registry.LaunchInactiveRegistrationCleanup(ctx, egrp)
+
 	egrp.Go(func() error {
 		<-ctx.Done()
 		return database.ShutdownDB()
