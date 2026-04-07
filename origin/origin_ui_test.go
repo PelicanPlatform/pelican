@@ -110,6 +110,8 @@ func TestCollectionsAPI(t *testing.T) {
 		},
 	}))
 
+	require.NoError(t, param.Set(param.Server_UIAdminUsers.GetName(), "admin-user"))
+
 	test_utils.MockFederationRoot(t, nil, nil)
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err, "failed to init server config")
@@ -359,8 +361,8 @@ func TestCollectionsAPI(t *testing.T) {
 		req, err := http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
 		require.NoError(t, err)
 
-		regularUserToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "regular-user")
-		req.AddCookie(&http.Cookie{Name: "login", Value: regularUserToken})
+		adminToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "admin-user")
+		req.AddCookie(&http.Cookie{Name: "login", Value: adminToken})
 		req.Header.Set("Content-Type", "application/json")
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
