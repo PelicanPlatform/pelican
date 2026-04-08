@@ -331,7 +331,6 @@ jobs:
 
           # Configure the build cache.
           cache-from: |
-            type=registry,ref=${{ needs.params.outputs.registry-cache }}-${{ matrix.arch }}
             type=local,src=${{ runner.temp }}/.base-buildx-cache
 
           # Save Docker's build cache to the file/directory we set up
@@ -416,13 +415,7 @@ jobs:
 
           # Configure the build cache.
           cache-from: |
-            type=registry,ref=${{ needs.params.outputs.registry-cache }}-${{ matrix.arch }}
             type=local,src=${{ runner.temp }}/.base-buildx-cache
-
-          # Upload the dev image as a build cache because, in theory,
-          # it contains layers that change relatively infrequently and
-          # thus could be used to reduce future build times.
-          cache-to: ${{ contains(fromJson(needs.params.outputs.images-to-push), matrix.image) && matrix.image == 'pelican-dev' && format('{0}{1}-{2}{3}', 'type=registry,ref=', needs.params.outputs.registry-cache, matrix.arch, ',mode=max,ignore-error=true,image-manifest=true,oci-mediatypes=true') || null }}
 
       - name: Export digest
         if: ${{ contains(fromJson(needs.params.outputs.images-to-push), matrix.image) }}
