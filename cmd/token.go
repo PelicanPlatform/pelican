@@ -52,10 +52,57 @@ var (
 	tokenCreateCmd = &cobra.Command{
 		Use:   "create <pelican-url>",
 		Short: "Create a token",
-		RunE:  createToken,
-		Args:  cobra.ExactArgs(1),
-		Example: "To create a read/write token for /some/namespace/path in OSDF: " +
-			"pelican token create --read --write pelican://osg-htc.org/some/namespace/path",
+		Long: `Create a signed JWT for accessing Pelican resources.
+
+The generated token is a Bearer token. To authorize requests with it, pass it to
+other Pelican CLI commands via the --token flag or in the HTTP Authorization header.
+
+SCOPES
+
+Scopes control what the token permits. Use the flags below to set them, or
+pass arbitrary values with --raw-scope.
+
+  Flag        WLCG profile (default)    SciTokens2 profile (--profile scitokens2)
+  ----        ----------------------    -----------------------------------------
+  --read      storage.read:<path>       read:<path>
+  --write     storage.create:<path>     write:<path>
+  --modify    storage.modify:<path>     write:<path>
+  --stage     storage.stage:<path>      write:<path>
+
+The <path> in each scope is the object path with the namespace prefix stripped.
+Use --scope-path to override it, or --raw-scope to supply scopes verbatim, e.g.:
+
+    --raw-scope "storage.read:/ storage.create:/uploads"
+
+ISSUER
+
+The issuer (--issuer) is auto-discovered from the Director using the supplied
+pelican URL. Provide --issuer manually when:
+  - Director discovery is unavailable
+  - The namespace has multiple issuers and you need a specific one
+
+EXPIRATION
+
+Set the token lifetime with --lifetime (seconds, default 1200) or with
+--expiration (an absolute RFC3339 timestamp, e.g. 2026-12-31T23:59:59Z).
+These two flags are mutually exclusive.`,
+		Example: `  # Read/write token for a path in OSDF (issuer auto-discovered):
+  pelican token create --read --write pelican://osg-htc.org/some/namespace/path
+
+  # Token expiring at a specific time (RFC3339: YYYY-MM-DDTHH:MM:SSZ):
+  pelican token create --read --expiration 2026-06-30T00:00:00Z \
+    pelican://osg-htc.org/some/namespace/path
+
+  # One-hour token with an explicit issuer:
+  pelican token create --read --lifetime 3600 \
+    --issuer https://my-origin.com:8443 \
+    pelican://osg-htc.org/some/namespace/path
+
+  # Token with custom raw scopes:
+  pelican token create --raw-scope "storage.read:/ storage.create:/uploads" \
+  pelican://osg-htc.org/some/namespace/path`,
+		RunE:         createToken,
+		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 	}
 
@@ -104,6 +151,8 @@ func init() {
 	tokenCreateCmd.Flags().StringP("audience", "a", "", "Specify the token's 'audience/aud' claim. If not provided, the equivalent 'any' audience "+
 		"for the selected profile will be used (e.g. 'https://wlcg.cern.ch/jwt/v1/any' for the 'wlcg' profile).")
 	tokenCreateCmd.Flags().IntP("lifetime", "l", 1200, "Set the token's lifetime in seconds.")
+	tokenCreateCmd.Flags().String("expiration", "", "Set the token's expiration as an absolute RFC3339 timestamp (e.g., 2026-12-31T23:59:59Z). Mutually exclusive with --lifetime.")
+	tokenCreateCmd.MarkFlagsMutuallyExclusive("lifetime", "expiration")
 	tokenCreateCmd.Flags().String("subject", "", "Set token's 'subject/sub' claim. If not provided, the current user will be used as the default subject.")
 	tokenCreateCmd.Flags().StringP("issuer", "i", "", "Set the token's 'issuer/iss' claim. If not provided, the issuer will be discovered via the Director.")
 	tokenCreateCmd.Flags().StringArray("raw-claim", []string{}, "Set claims to be added to the token. Format: <claim_key>=<claim_value>. ")
@@ -207,6 +256,23 @@ func createToken(cmd *cobra.Command, args []string) error {
 	tokenConfig, err := token.NewTokenConfig(rawProfile)
 	if err != nil {
 		return errors.Wrap(err, "unable to create token config")
+	}
+
+	// Validate --expiration early so the user gets fast feedback before any network calls.
+	// --lifetime and --expiration are mutually exclusive (enforced by cobra), so only one
+	// can be set. The actual tokenConfig.Lifetime assignment is done later after scope setup.
+	expirationStr, err := cmd.Flags().GetString("expiration")
+	if err != nil {
+		return errors.Wrap(err, "unable to get expiration flag")
+	}
+	if expirationStr != "" {
+		expirationTime, err := time.Parse(time.RFC3339, expirationStr)
+		if err != nil {
+			return errors.Errorf("--expiration must be in RFC3339 format (e.g., 2026-12-31T23:59:59Z); got: %q", expirationStr)
+		}
+		if time.Until(expirationTime) <= 0 {
+			return errors.Errorf("--expiration %q is already in the past", expirationStr)
+		}
 	}
 
 	// First arg contains the pelican URL of the resource
@@ -342,14 +408,20 @@ func createToken(cmd *cobra.Command, args []string) error {
 		log.Warningf("Detected creation of a token without any capabilities. Use flags like --read, --write, --modify, or --stage to add capabilities to the token.")
 	}
 
-	// Set token lifetime
-	lifetime, err := cmd.Flags().GetInt("lifetime")
-	if err != nil {
-		return errors.Wrap(err, "unable to get token lifetime")
-	} else if lifetime < 0 {
-		return errors.Errorf("token lifetime must be a positive integer but you provided %d", lifetime)
+	// Set token lifetime — either via --expiration (RFC3339) or --lifetime (seconds).
+	// expirationStr was already validated above; here we just compute the duration.
+	if expirationStr != "" {
+		expirationTime, _ := time.Parse(time.RFC3339, expirationStr)
+		tokenConfig.Lifetime = time.Until(expirationTime)
+	} else {
+		lifetime, err := cmd.Flags().GetInt("lifetime")
+		if err != nil {
+			return errors.Wrap(err, "unable to get token lifetime")
+		} else if lifetime < 0 {
+			return errors.Errorf("token lifetime must be a positive integer but you provided %d", lifetime)
+		}
+		tokenConfig.Lifetime = time.Duration(lifetime) * time.Second
 	}
-	tokenConfig.Lifetime = time.Duration(lifetime) * time.Second
 
 	// Set token audience
 	audience, _ := cmd.Flags().GetString("audience")
