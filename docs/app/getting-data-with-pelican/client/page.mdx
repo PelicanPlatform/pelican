@@ -367,9 +367,12 @@ This will upload objects from the local directory into the remote collection, cr
 A token is required because writing to a federation always requires authorization.
 
 <Callout type="warning">
-When uploading, if the source is a single file and the destination path ends with `/`, Pelican interprets the destination as a collection.
-If that collection does not already exist at the remote, the destination will be treated as an object name instead.
-To avoid confusion, omit the trailing `/` when the destination is intended to be an object, or ensure the collection already exists.
+When uploading a single file, be careful with trailing slashes on the destination path.
+A trailing `/` signals that the destination is a collection, and the file should be placed inside it.
+However, if that collection does not already exist at the remote, the trailing `/` is ignored and the entire path (including what looks like a collection name) becomes the object's name.
+
+For example, syncing `myfile.txt` to `pelican://osg-htc.org/my-namespace/new-dir/` will place `myfile.txt` inside `new-dir` if that collection exists, but if `new-dir` does not exist, it will create an object literally named `new-dir/` instead.
+To avoid this, either ensure the destination collection exists beforehand, or omit the trailing `/` so the destination is treated as an explicit object name.
 </Callout>
 
 ### Sync with a Specific Cache
@@ -405,6 +408,11 @@ This is useful for sharing access to objects without distributing long-lived tok
 Sharing is **prefix-based**, meaning all objects whose names match the given prefix will be accessible via the generated URL.
 For example, sharing `pelican://osg-htc.org/my-namespace/data/` grants access to all objects under that path.
 </Callout>
+
+The generated URL contains an embedded authorization token scoped to specific operations:
+
+- **Read-only (default):** The token grants the `storage.read` scope. Recipients can use `object get`, `object stat`, and `object ls` against matching object names.
+- **Read-write (`--write`):** The token grants the `storage.create` scope in addition to read. Recipients can also use `object put` and `object sync` to upload objects under the shared prefix.
 
 ### Generate a Read-Only Sharing URL
 
@@ -483,7 +491,9 @@ For a complete reference of all flags for every subcommand, see the [Commands Re
 
 ### Global Flags:
 
-- **`-h` or `--help`:** Takes no argument and can be used with any Pelican sub command for more information about the sub command and additional supported flags.
+These flags are available on every `pelican` subcommand, including all `object` subcommands:
+
+- **`-h` or `--help`:** Displays usage information for the current subcommand, including all supported flags. Available on every Pelican command and subcommand.
 - **`-f` or `--federation`:** Takes a URL that indicates to Pelican which federation the request should be made to.
 - **`-d` or `--debug`:** Takes no argument, but runs Pelican in debug mode, which provides verbose output for debugging purposes.
 - **`--config`:** Takes a filepath and indicates to Pelican the location of the Pelican configuration file.
