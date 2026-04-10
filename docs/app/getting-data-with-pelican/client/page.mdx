@@ -1,4 +1,5 @@
 import ExportedImage from "next-image-export-optimizer";
+import { Callout } from 'nextra/components'
 
 # Pelican's Command Line Client
 
@@ -164,6 +165,266 @@ and to do an `object put`:
 pelican object copy <path/to/local/file> pelican://<federation-url></namespace-prefix></path/to/destination> -t </path/to/token/file>
 ```
 
+## Listing Objects in a Collection
+
+To list objects in a remote collection, use Pelican's `object ls` subcommand.
+This command queries a federation for all objects and subcollections at a given path.
+
+<Callout type="info">
+A **collection** is a grouping of objects in a namespace, analogous to a directory on a filesystem.
+Collections may contain other collections (subcollections) as well as objects.
+For a detailed definition, see [Core Concepts](../../about-pelican/core-concepts#collections).
+The `ls` command requires that the origin serving the namespace has the **Listing** capability enabled.
+To learn more about origin capabilities, see the [Origin docs](../federating-your-data/origin).
+</Callout>
+
+### Basic Listing
+
+To list the contents of a collection:
+
+```bash copy
+pelican object ls pelican://osg-htc.org/pelicanplatform/test
+```
+
+This will display the objects and subcollections at the `/pelicanplatform/test` path, similar to running `ls` on a local directory.
+
+You can verify whether an origin supports listings before running `ls` by checking the Director.
+The Director's web UI shows each origin's capabilities as colored chips — look for a green **Listing** chip.
+Alternatively, query the Director's API:
+
+```bash copy
+curl https://<director-url>/api/v1.0/director_ui/servers?server_type=origin
+```
+
+Look for `"Listing": true` in the `capabilities` field of the relevant origin.
+
+If the origin does not support listings, you will see an error like:
+
+```console
+ERROR  Failure getting pelican://osg-htc.org/pelicanplatform/test: failed to perform list request:
+Collections URL not found in director response. Are you sure there's an origin for this prefix that
+supports listings?
+```
+
+### Extended Listing
+
+Use the `-l` flag to show extended information about each entry, including size and modification time:
+
+```bash copy
+pelican object ls -l pelican://osg-htc.org/pelicanplatform/test
+```
+
+### Filtering Results
+
+You can filter results to show only collections or only objects:
+
+```bash copy
+# List only collections (directories)
+pelican object ls -C pelican://osg-htc.org/pelicanplatform/test
+
+# List only objects (files)
+pelican object ls -O pelican://osg-htc.org/pelicanplatform/test
+```
+
+### Recursive Listing
+
+To recursively list all objects in subcollections, use the `-r` flag:
+
+```bash copy
+pelican object ls -r pelican://osg-htc.org/pelicanplatform/test
+```
+
+You can limit the recursion depth with `--depth`:
+
+```bash copy
+# List two levels deep, similar to find . -maxdepth 2
+pelican object ls -r --depth 2 pelican://osg-htc.org/pelicanplatform/test
+```
+
+### JSON Output
+
+Several `object` subcommands (including `ls` and `stat`) support a `-j` flag for machine-readable JSON output:
+
+```bash copy
+pelican object ls -j pelican://osg-htc.org/pelicanplatform/test
+```
+
+### Accessing Protected Collections
+
+Whether a namespace requires a token depends on its capabilities.
+Namespaces with the **PublicReads** capability allow `stat` and reads without a token.
+There is no separate public listing capability — whether a listing requires a token is determined by whether the namespace uses **Reads** (token required) or **PublicReads** (no token required).
+In either case, the **Listing** capability must be enabled on the origin for `ls` to work at all.
+
+To operate on objects in a protected namespace, provide a token with the `-t` flag.
+This flag is supported by all `object` subcommands (`get`, `put`, `ls`, `stat`, `sync`, etc.):
+
+```bash copy
+pelican object ls -t /path/to/token pelican://osg-htc.org/some-protected-namespace/data
+```
+
+For the complete flag reference, see [`pelican object ls`](../commands-reference/object/ls).
+
+## Getting Object Metadata with Stat
+
+To retrieve metadata about an object or collection without downloading it, use Pelican's `object stat` subcommand.
+This command returns information such as the object's name, size, modification time, and whether it is a collection.
+
+### Stat an Object
+
+```bash copy
+pelican object stat pelican://osg-htc.org/pelicanplatform/test/hello-world.txt
+```
+
+This will return output like:
+
+```console
+       Name: /pelicanplatform/test/hello-world.txt
+       Size: 30
+    ModTime: 2024-09-19 12:54:21 +0000 UTC
+IsCollection: false
+```
+
+`Size` is reported in bytes.
+`ModTime` uses the format `YYYY-MM-DD HH:MM:SS +0000 UTC`.
+
+### Stat a Collection
+
+You can also stat a collection:
+
+```bash copy
+pelican object stat pelican://osg-htc.org/pelicanplatform/test
+```
+
+which returns output like:
+
+```console
+       Name: /pelicanplatform/test
+       Size: 0
+    ModTime: 2024-09-19 12:54:00 +0000 UTC
+IsCollection: true
+```
+
+### Requesting Checksums
+
+If the origin supports it, you can request checksum information for an object:
+
+```bash copy
+pelican object stat --checksums md5 pelican://osg-htc.org/pelicanplatform/test/hello-world.txt
+```
+
+Known checksum values are: `md5`, `crc32c`, `crc32`, `sha`.
+
+The `stat` command also supports `-j` for JSON output and `-t` for protected namespaces, as described in [Listing Objects](#listing-objects-in-a-collection).
+For the complete flag reference, see [`pelican object stat`](../commands-reference/object/stat).
+
+## Syncing Objects with a Federation
+
+The `object sync` command synchronizes objects between a Pelican federation and a local directory.
+Unlike `object get` and `object put`, which transfer individual objects or collections in a one-shot manner, `object sync` compares the objects at the source and destination and only transfers what is missing or incomplete.
+
+This makes `object sync` ideal for keeping a local directory in sync with a remote collection, or for uploading a local directory to a federation while avoiding retransfer of objects that already exist.
+
+<Callout type="info">
+The `object sync` command requires that the origin supports **listings** when syncing from a remote collection to a local directory.
+You can verify this by running `pelican object ls` against the collection first.
+</Callout>
+
+### How Sync Determines What to Transfer
+
+The `object sync` command uses object sizes to determine whether an object needs to be transferred:
+
+- If an object at the destination does not exist, it will be transferred.
+- If an object at the destination is the same size or larger than the corresponding source object, it will **not** be overwritten.
+- If an object at the destination is smaller than the source object, `sync` assumes a previous transfer was interrupted and appends the remaining bytes to complete the partial transfer.
+
+<Callout type="warning">
+Because Pelican objects are immutable, the partial-transfer behavior assumes any size mismatch where the destination is smaller is the result of an interrupted sync.
+If the destination has a different object with the same name that happens to be smaller, `sync` will append data to it, resulting in corrupted data.
+Before syncing, verify that the destination does not contain different objects with the same names as the source.
+</Callout>
+
+### Sync from a Remote Collection to a Local Directory
+
+To download a remote collection and keep a local directory in sync:
+
+```bash copy
+pelican object sync pelican://osg-htc.org/pelicanplatform/test /local/path/to/directory
+```
+
+This will transfer all objects from the remote `/pelicanplatform/test` collection into the local directory, preserving the directory structure.
+If the local directory already contains some of the objects at their full size, those objects will be skipped.
+
+### Sync from a Local Directory to a Remote Collection
+
+To upload local files to a remote collection:
+
+```bash copy
+pelican object sync /local/path/to/directory pelican://osg-htc.org/my-namespace/data -t /path/to/token
+```
+
+This will upload objects from the local directory into the remote collection, creating any necessary paths in the namespace.
+A token is required because writing to a federation always requires authorization.
+
+<Callout type="warning">
+When uploading, if the source is a single file and the destination path ends with `/`, Pelican interprets the destination as a collection.
+If that collection does not already exist at the remote, the destination will be treated as an object name instead.
+To avoid confusion, omit the trailing `/` when the destination is intended to be an object, or ensure the collection already exists.
+</Callout>
+
+### Sync with a Specific Cache
+
+Use the `-c` flag to prefer a specific cache for downloads:
+
+```bash copy
+pelican object sync -c https://my-cache.example.com pelican://osg-htc.org/pelicanplatform/test /local/path
+```
+
+Add a `+` to the cache list to allow fallback to discovered caches if the preferred cache fails:
+
+```bash copy
+pelican object sync -c "https://my-cache.example.com,+" pelican://osg-htc.org/pelicanplatform/test /local/path
+```
+
+### Dry Run
+
+Use the `--dry-run` flag to see what would be synchronized without actually modifying the destination:
+
+```bash copy
+pelican object sync --dry-run pelican://osg-htc.org/pelicanplatform/test /local/path
+```
+
+For complete flag reference, see [`pelican object sync`](../commands-reference/object/sync).
+
+## Sharing Object Access
+
+The `object share` command generates a URL that grants access to a namespace prefix.
+This is useful for sharing access to objects without distributing long-lived tokens.
+
+<Callout type="info">
+Sharing is **prefix-based**, meaning all objects whose names match the given prefix will be accessible via the generated URL.
+For example, sharing `pelican://osg-htc.org/my-namespace/data/` grants access to all objects under that path.
+</Callout>
+
+### Generate a Read-Only Sharing URL
+
+```bash copy
+pelican object share pelican://osg-htc.org/my-namespace/data/shared-dataset
+```
+
+This outputs a URL with an embedded authorization token that can be shared with others.
+Recipients can use this URL directly with `pelican object get` to download the shared objects.
+
+### Generate a Read-Write Sharing URL
+
+To allow writes to the shared prefix, add the `--write` flag:
+
+```bash copy
+pelican object share --write pelican://osg-htc.org/my-namespace/data/shared-dataset
+```
+
+For complete flag reference, see [`pelican object share`](../commands-reference/object/share).
+
 ## Utilizing Queries with your URL
 The Pelican client allows users to modify the behavior of requests by passing URL query parameters in the remote path of an object. Currently supported queries include: `?pack`, `?recursive`, and `?directread`.
 
@@ -217,7 +478,8 @@ The `?recursive` and the `?directread` queries do **not** require any sort of va
 
 ## Additional Flags
 
-The Pelican client supports a variety of command line flags that modify the client's behavior:
+The Pelican client supports a variety of command line flags that modify the client's behavior.
+For a complete reference of all flags for every subcommand, see the [Commands Reference](../commands-reference/object).
 
 ### Global Flags:
 
@@ -233,10 +495,34 @@ The Pelican client supports a variety of command line flags that modify the clie
 
 - **`-c` or `--cache`:** Takes a cache URL and indicates to Pelican that only the specified cache should be used. When used, Pelican will not attempt to use other caches if the provided cache cannot provide the file.
 - **`--caches`:** Takes the path to a JSON file containing a list of caches. Similar to the `-c` flag, Pelican will attempt to use only these caches in the order they are listed.
-- **`-h` or `--help`:** Gives additional information on how to use the command as well as lists these flags with short descriptions for the `object copy` command.
 - **`--methods`:** Takes a comma separated list of methods to try for downloads/uploads, the default is just http.
 - **`-r` or `--recursive`:** Takes no argument and indicates to Pelican that all sub paths at the level of the provided namespace should be copied recursively. This option is only supported if the origin supports the WebDav protocol.
 - **`-t` or `--token`:** Takes a path to a file containing a signed JWT, and is used to download protected objects.
+
+### Flags For `object ls`:
+
+- **`-l` or `--long`:** Include extended information such as size and modification time.
+- **`-1` or `--single-column`:** Force output to be one entry per line.
+- **`-C` or `--collection-only`:** List only collections.
+- **`-O` or `--object-only`:** List only objects.
+- **`-j` or `--json`:** Print results in JSON format.
+- **`-r` or `--recursive`:** Recursively list all objects in subcollections.
+- **`--depth`:** Maximum depth to recurse. Use `-1` for unlimited depth (default).
+- **`--collections-url`:** Override the URL to use for collection listing, instead of using the director's response.
+- **`-t` or `--token`:** Token file to use for accessing protected namespaces.
+
+### Flags For `object stat`:
+
+- **`-j` or `--json`:** Print results in JSON format.
+- **`--checksums`:** Checksums to request from the server. Known values: `md5`, `crc32c`, `crc32`, `sha`.
+- **`-t` or `--token`:** Token file to use for accessing protected namespaces.
+
+### Flags For `object sync`:
+
+- **`-c` or `--cache`:** A comma-separated list of preferred caches, with `+` to allow fallback to discovered caches.
+- **`--inplace`:** Write files directly to the destination instead of using temporary files.
+- **`--dry-run`:** Show what would be synchronized without actually modifying the destination.
+- **`-t` or `--token`:** Token file to use for transfer.
 
 ## Aliases of The Pelican Binary
 
