@@ -34,68 +34,14 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
-	"syscall"
 	"testing"
 
-	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"kernel.org/pub/linux/libs/security/libcap/cap"
 
 	"github.com/pelicanplatform/pelican/identity"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
-
-// skipUnlessPrivileged skips the test if the process lacks CAP_SETUID or
-// CAP_SETGID in its effective capability set.  setfsuid(2) requires
-// CAP_SETUID to switch to an arbitrary UID.
-func skipUnlessPrivileged(t *testing.T) {
-	t.Helper()
-
-	curSet := cap.GetProc()
-	if curSet == nil {
-		t.Skip("cannot query process capabilities")
-	}
-
-	for _, c := range []cap.Value{cap.SETUID, cap.SETGID} {
-		enabled, err := curSet.GetFlag(cap.Effective, c)
-		if err != nil || !enabled {
-			t.Skipf("missing capability %v in effective set", c)
-		}
-	}
-}
-
-// skipUnlessTestUsers skips the test if the expected dev-container users
-// (alice, bob) are not present.
-func skipUnlessTestUsers(t *testing.T, usernames ...string) {
-	t.Helper()
-	for _, name := range usernames {
-		if _, err := user.Lookup(name); err != nil {
-			t.Skipf("test user %q not found: %v", name, err)
-		}
-	}
-}
-
-// statOwner returns the UID and GID of a path.
-func statOwner(t *testing.T, path string) (uid, gid uint32) {
-	t.Helper()
-	info, err := os.Stat(path)
-	require.NoError(t, err)
-	stat := info.Sys().(*syscall.Stat_t)
-	return stat.Uid, stat.Gid
-}
-
-// buildMultiuserFS creates a multiuserFileSystem backed by a real OS directory.
-func buildMultiuserFS(t *testing.T, root string) *multiuserFileSystem {
-	t.Helper()
-	osFs := afero.NewOsFs()
-	baseFs := afero.NewBasePathFs(osFs, root)
-	inner := newAferoFileSystem(baseFs, "", nil)
-
-	lookup := identity.NewLookup()
-	fs, err := newMultiuserFileSystem(context.Background(), inner, lookup, 0)
-	require.NoError(t, err)
-	return fs.(*multiuserFileSystem)
-}
 
 // ctxForUser builds a context with userInfo for the given user/group.
 func ctxForUser(username, groupname string) context.Context {
@@ -108,12 +54,10 @@ func ctxForUser(username, groupname string) context.Context {
 // TestPrivileged_UserSwitching exercises real setfsuid/setfsgid-based user
 // switching against the OS filesystem and verifies resulting ownership.
 func TestPrivileged_UserSwitching(t *testing.T) {
-	skipUnlessPrivileged(t)
-	skipUnlessTestUsers(t, "alice", "bob")
+	test_utils.SkipUnlessPrivileged(t)
+	test_utils.SkipUnlessTestUsers(t, "alice", "bob")
 
 	aliceInfo, err := user.Lookup("alice")
-	require.NoError(t, err)
-	bobInfo, err := user.Lookup("bob")
 	require.NoError(t, err)
 
 	tmpDir, err := os.MkdirTemp("", "pelican-multiuser-test-*")
@@ -122,49 +66,46 @@ func TestPrivileged_UserSwitching(t *testing.T) {
 	// Make the dir world-traversable so switched UIDs can access it.
 	require.NoError(t, os.Chmod(tmpDir, 0777))
 
-	mfs := buildMultiuserFS(t, tmpDir)
+	mfs := buildMultiuserFS(t, tmpDir, identity.NewLookup(), 0)
 
-	t.Run("MkdirOwnership", func(t *testing.T) {
-		ctxAlice := ctxForUser("alice", "alice")
-		ctxBob := ctxForUser("bob", "bob")
+	t.Run("OwnershipVerification", func(t *testing.T) {
+		tests := []struct {
+			name string
+			user string
+			op   string // "mkdir" or "file"
+			path string
+			perm os.FileMode
+		}{
+			{"AliceMkdir", "alice", "mkdir", "/alice-dir", 0755},
+			{"BobMkdir", "bob", "mkdir", "/bob-dir", 0755},
+			{"AliceFile", "alice", "file", "/alice-file.txt", 0644},
+			{"BobFile", "bob", "file", "/bob-file.txt", 0644},
+			{"NobodyFile", "nobody", "file", "/nobody-file.txt", 0644},
+		}
 
-		require.NoError(t, mfs.Mkdir(ctxAlice, "/alice-dir", 0755))
-		require.NoError(t, mfs.Mkdir(ctxBob, "/bob-dir", 0755))
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				test_utils.SkipUnlessTestUsers(t, tc.user)
+				userInfo, err := user.Lookup(tc.user)
+				require.NoError(t, err)
 
-		uid, gid := statOwner(t, filepath.Join(tmpDir, "alice-dir"))
-		assert.Equal(t, aliceInfo.Uid, uidStr(uid), "alice-dir should be owned by alice")
-		assert.Equal(t, aliceInfo.Gid, uidStr(gid), "alice-dir should have alice's group")
+				ctx := ctxForUser(tc.user, tc.user)
+				switch tc.op {
+				case "mkdir":
+					require.NoError(t, mfs.Mkdir(ctx, tc.path, tc.perm))
+				case "file":
+					f, err := mfs.OpenFile(ctx, tc.path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, tc.perm)
+					require.NoError(t, err)
+					_, err = f.Write([]byte("hello from " + tc.user))
+					require.NoError(t, err)
+					require.NoError(t, f.Close())
+				}
 
-		uid, gid = statOwner(t, filepath.Join(tmpDir, "bob-dir"))
-		assert.Equal(t, bobInfo.Uid, uidStr(uid), "bob-dir should be owned by bob")
-		assert.Equal(t, bobInfo.Gid, uidStr(gid), "bob-dir should have bob's group")
-	})
-
-	t.Run("CreateFileOwnership", func(t *testing.T) {
-		ctxAlice := ctxForUser("alice", "alice")
-		ctxBob := ctxForUser("bob", "bob")
-
-		// Create a file as alice
-		f, err := mfs.OpenFile(ctxAlice, "/alice-file.txt", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-		require.NoError(t, err)
-		_, err = f.Write([]byte("hello from alice"))
-		require.NoError(t, err)
-		require.NoError(t, f.Close())
-
-		// Create a file as bob
-		f, err = mfs.OpenFile(ctxBob, "/bob-file.txt", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-		require.NoError(t, err)
-		_, err = f.Write([]byte("hello from bob"))
-		require.NoError(t, err)
-		require.NoError(t, f.Close())
-
-		uid, gid := statOwner(t, filepath.Join(tmpDir, "alice-file.txt"))
-		assert.Equal(t, aliceInfo.Uid, uidStr(uid), "alice-file.txt should be owned by alice")
-		assert.Equal(t, aliceInfo.Gid, uidStr(gid))
-
-		uid, gid = statOwner(t, filepath.Join(tmpDir, "bob-file.txt"))
-		assert.Equal(t, bobInfo.Uid, uidStr(uid), "bob-file.txt should be owned by bob")
-		assert.Equal(t, bobInfo.Gid, uidStr(gid))
+				uid, gid := test_utils.FileOwner(t, filepath.Join(tmpDir, tc.path[1:]))
+				assert.Equal(t, userInfo.Uid, uidStr(uid), "%s should be owned by %s", tc.path, tc.user)
+				assert.Equal(t, userInfo.Gid, uidStr(gid), "%s should have %s's group", tc.path, tc.user)
+			})
+		}
 	})
 
 	t.Run("ReadBackFile", func(t *testing.T) {
@@ -224,7 +165,7 @@ func TestPrivileged_UserSwitching(t *testing.T) {
 
 		// Verify ownership of files inside the directory
 		for _, name := range []string{"one.txt", "two.txt"} {
-			uid, gid := statOwner(t, filepath.Join(tmpDir, "alice-list-dir", name))
+			uid, gid := test_utils.FileOwner(t, filepath.Join(tmpDir, "alice-list-dir", name))
 			assert.Equal(t, aliceInfo.Uid, uidStr(uid), "%s should be owned by alice", name)
 			assert.Equal(t, aliceInfo.Gid, uidStr(gid))
 		}
@@ -240,7 +181,7 @@ func TestPrivileged_UserSwitching(t *testing.T) {
 		require.NoError(t, mfs.Rename(ctxAlice, "/alice-rename-src.txt", "/alice-rename-dst.txt"))
 
 		// Ownership shouldn't change after rename
-		uid, gid := statOwner(t, filepath.Join(tmpDir, "alice-rename-dst.txt"))
+		uid, gid := test_utils.FileOwner(t, filepath.Join(tmpDir, "alice-rename-dst.txt"))
 		assert.Equal(t, aliceInfo.Uid, uidStr(uid))
 		assert.Equal(t, aliceInfo.Gid, uidStr(gid))
 	})
@@ -277,20 +218,6 @@ func TestPrivileged_UserSwitching(t *testing.T) {
 		assert.True(t, os.IsPermission(err), "bob should not be able to read alice's private file, got: %v", err)
 	})
 
-	t.Run("NobodyUser", func(t *testing.T) {
-		skipUnlessTestUsers(t, "nobody")
-		nobodyInfo, err := user.Lookup("nobody")
-		require.NoError(t, err)
-
-		ctxNobody := ctxForUser("nobody", "nobody")
-
-		f, err := mfs.OpenFile(ctxNobody, "/nobody-file.txt", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-		require.NoError(t, err)
-		require.NoError(t, f.Close())
-
-		uid, _ := statOwner(t, filepath.Join(tmpDir, "nobody-file.txt"))
-		assert.Equal(t, nobodyInfo.Uid, uidStr(uid), "file should be owned by nobody")
-	})
 }
 
 // uidStr converts a uint32 UID/GID to the string form returned by os/user.
@@ -308,8 +235,8 @@ func uidStr(id uint32) string {
 // The test creates the group and membership if they don't exist, skipping
 // if it cannot.
 func TestPrivileged_SecondaryGroups(t *testing.T) {
-	skipUnlessPrivileged(t)
-	skipUnlessTestUsers(t, "alice", "bob")
+	test_utils.SkipUnlessPrivileged(t)
+	test_utils.SkipUnlessTestUsers(t, "alice", "bob")
 
 	aliceInfo, err := user.Lookup("alice")
 	require.NoError(t, err)
@@ -325,7 +252,7 @@ func TestPrivileged_SecondaryGroups(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll(tmpDir) })
 	require.NoError(t, os.Chmod(tmpDir, 0777))
 
-	mfs := buildMultiuserFS(t, tmpDir)
+	mfs := buildMultiuserFS(t, tmpDir, identity.NewLookup(), 0)
 
 	t.Run("SecondaryGroupWrite", func(t *testing.T) {
 		// Bob creates a directory owned by bob:pelican_shared with group-write.
@@ -334,7 +261,7 @@ func TestPrivileged_SecondaryGroups(t *testing.T) {
 		ctxBob := ctxForUser("bob", "pelican_shared")
 		require.NoError(t, mfs.Mkdir(ctxBob, "/shared-dir", 0770))
 
-		bobUID, grpGID := statOwner(t, filepath.Join(tmpDir, "shared-dir"))
+		bobUID, grpGID := test_utils.FileOwner(t, filepath.Join(tmpDir, "shared-dir"))
 		assert.Equal(t, bobInfo.Uid, uidStr(bobUID), "shared-dir should be owned by bob")
 		assert.Equal(t, uidStr(sharedGroup.GID), uidStr(grpGID), "shared-dir should have pelican_shared group")
 
@@ -348,7 +275,7 @@ func TestPrivileged_SecondaryGroups(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, f.Close())
 
-		uid, _ := statOwner(t, filepath.Join(tmpDir, "shared-dir", "alice-via-secondary.txt"))
+		uid, _ := test_utils.FileOwner(t, filepath.Join(tmpDir, "shared-dir", "alice-via-secondary.txt"))
 		assert.Equal(t, aliceInfo.Uid, uidStr(uid), "file should be owned by alice")
 	})
 
@@ -418,93 +345,47 @@ type sharedGroupInfo struct {
 // creating directories and files with different umask values and verifying
 // the resulting permissions.
 func TestPrivileged_Umask(t *testing.T) {
-	skipUnlessPrivileged(t)
-	skipUnlessTestUsers(t, "alice")
+	test_utils.SkipUnlessPrivileged(t)
+	test_utils.SkipUnlessTestUsers(t, "alice")
 
-	t.Run("UmaskZeroPreservesPermissions", func(t *testing.T) {
-		tmpDir, err := os.MkdirTemp("", "pelican-umask-zero-*")
-		require.NoError(t, err)
-		t.Cleanup(func() { os.RemoveAll(tmpDir) })
-		require.NoError(t, os.Chmod(tmpDir, 0777))
+	tests := []struct {
+		name     string
+		umask    int
+		dirPerm  os.FileMode
+		wantDir  os.FileMode
+		filePerm os.FileMode
+		wantFile os.FileMode
+	}{
+		{"UmaskZeroPreservesPermissions", 0, 0770, 0770, 0664, 0664},
+		{"UmaskMasksPermissions", 0022, 0770, 0750, 0666, 0644},
+		{"RestrictiveUmask", 0077, 0777, 0700, 0666, 0600},
+	}
 
-		mfs := buildMultiuserFS(t, tmpDir) // umask=0
-		ctxAlice := ctxForUser("alice", "alice")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir, err := os.MkdirTemp("", "pelican-umask-test-*")
+			require.NoError(t, err)
+			t.Cleanup(func() { os.RemoveAll(tmpDir) })
+			require.NoError(t, os.Chmod(tmpDir, 0777))
 
-		// Mkdir with 0770 should produce exactly 0770
-		require.NoError(t, mfs.Mkdir(ctxAlice, "/dir-0770", 0770))
-		info, err := os.Stat(filepath.Join(tmpDir, "dir-0770"))
-		require.NoError(t, err)
-		assert.Equal(t, os.FileMode(0770), info.Mode().Perm(),
-			"umask=0 should preserve directory permissions 0770 exactly")
+			mfs := buildMultiuserFS(t, tmpDir, identity.NewLookup(), tc.umask)
+			ctxAlice := ctxForUser("alice", "alice")
 
-		// File with 0664 should produce exactly 0664
-		f, err := mfs.OpenFile(ctxAlice, "/file-0664", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0664)
-		require.NoError(t, err)
-		require.NoError(t, f.Close())
-		info, err = os.Stat(filepath.Join(tmpDir, "file-0664"))
-		require.NoError(t, err)
-		assert.Equal(t, os.FileMode(0664), info.Mode().Perm(),
-			"umask=0 should preserve file permissions 0664 exactly")
-	})
+			require.NoError(t, mfs.Mkdir(ctxAlice, "/test-dir", tc.dirPerm))
+			info, err := os.Stat(filepath.Join(tmpDir, "test-dir"))
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantDir, info.Mode().Perm(),
+				"umask=%04o should mask dir perm %04o to %04o", tc.umask, tc.dirPerm, tc.wantDir)
 
-	t.Run("UmaskMasksPermissions", func(t *testing.T) {
-		tmpDir, err := os.MkdirTemp("", "pelican-umask-0022-*")
-		require.NoError(t, err)
-		t.Cleanup(func() { os.RemoveAll(tmpDir) })
-		require.NoError(t, os.Chmod(tmpDir, 0777))
-
-		// Build with umask=0022 (standard: removes group-write + other-write)
-		osFs := afero.NewOsFs()
-		baseFs := afero.NewBasePathFs(osFs, tmpDir)
-		inner := newAferoFileSystem(baseFs, "", nil)
-		lookup := identity.NewLookup()
-		fs, err := newMultiuserFileSystem(context.Background(), inner, lookup, 0022)
-		require.NoError(t, err)
-		mfs := fs.(*multiuserFileSystem)
-
-		ctxAlice := ctxForUser("alice", "alice")
-
-		// Mkdir with 0770: umask 0022 should mask to 0750
-		require.NoError(t, mfs.Mkdir(ctxAlice, "/dir-masked", 0770))
-		info, err := os.Stat(filepath.Join(tmpDir, "dir-masked"))
-		require.NoError(t, err)
-		assert.Equal(t, os.FileMode(0750), info.Mode().Perm(),
-			"umask=0022 should mask 0770 to 0750")
-
-		// File with 0666: umask 0022 should mask to 0644
-		f, err := mfs.OpenFile(ctxAlice, "/file-masked", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
-		require.NoError(t, err)
-		require.NoError(t, f.Close())
-		info, err = os.Stat(filepath.Join(tmpDir, "file-masked"))
-		require.NoError(t, err)
-		assert.Equal(t, os.FileMode(0644), info.Mode().Perm(),
-			"umask=0022 should mask 0666 to 0644")
-	})
-
-	t.Run("RestrictiveUmask", func(t *testing.T) {
-		tmpDir, err := os.MkdirTemp("", "pelican-umask-0077-*")
-		require.NoError(t, err)
-		t.Cleanup(func() { os.RemoveAll(tmpDir) })
-		require.NoError(t, os.Chmod(tmpDir, 0777))
-
-		// Build with umask=0077 (removes all group + other bits)
-		osFs := afero.NewOsFs()
-		baseFs := afero.NewBasePathFs(osFs, tmpDir)
-		inner := newAferoFileSystem(baseFs, "", nil)
-		lookup := identity.NewLookup()
-		fs, err := newMultiuserFileSystem(context.Background(), inner, lookup, 0077)
-		require.NoError(t, err)
-		mfs := fs.(*multiuserFileSystem)
-
-		ctxAlice := ctxForUser("alice", "alice")
-
-		// Mkdir with 0777: umask 0077 should mask to 0700
-		require.NoError(t, mfs.Mkdir(ctxAlice, "/dir-private", 0777))
-		info, err := os.Stat(filepath.Join(tmpDir, "dir-private"))
-		require.NoError(t, err)
-		assert.Equal(t, os.FileMode(0700), info.Mode().Perm(),
-			"umask=0077 should mask 0777 to 0700")
-	})
+			f, err := mfs.OpenFile(ctxAlice, "/test-file", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, tc.filePerm)
+			require.NoError(t, err)
+			require.NoError(t, f.Close())
+			info, err = os.Stat(filepath.Join(tmpDir, "test-file"))
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantFile, info.Mode().Perm(),
+				"umask=%04o should mask file perm %04o to %04o", tc.umask, tc.filePerm, tc.wantFile)
+		})
+	}
 }
 
 // requireSharedGroup checks that the named group exists and that member

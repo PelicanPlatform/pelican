@@ -1146,14 +1146,24 @@ components: ["origin"]
 ---
 name: Origin.MultiuserUmask
 description: |+
-  The file-creation mask (umask) applied during filesystem operations.
-  When the origin switches to a user's credentials to perform a filesystem operation, this umask controls which permission bits are masked off from the requested mode.
-  This is commonly used to control the default permissions for created directories or files.
+  The file-creation mask (umask) applied to the process at startup when multiuser mode is enabled.
+  This umask controls which permission bits are masked off from the requested mode for all filesystem operations.
+  The umask is set once when the multiuser filesystem is initialised and left in place for the lifetime of the process.
+  A value of -1 (the default) means the process inherits the umask from its parent and does not change it.
   A value of 0 means the exact permissions requested by the caller are applied (no bits masked).
-  Specify the value in octal notation (e.g. 0022 removes group-write and other-write).
-  Common values: 0 (no masking), 0022 (standard), 0077 (restrictive).
+  Specify the value in YAML octal notation (e.g. 0o0022 removes group-write and other-write).
+  Common values: -1 (inherit), 0 (no masking), 0o0022 (standard), 0o0077 (restrictive).
 type: int
-default: 0
+default: -1
+components: ["origin"]
+---
+name: Origin.MultiuserVarlinkSocketPath
+description: |+
+  The path to the systemd-userdbd varlink socket used by the multiuser origin for user/group lookups.
+  Only relevant when the identity lookup strategy selects systemd-userdbd (typically in non-CGO builds).
+type: string
+default: /run/systemd/userdb/io.systemd.UserDatabase
+hidden: true
 components: ["origin"]
 ---
 name: Origin.EnableCmsd

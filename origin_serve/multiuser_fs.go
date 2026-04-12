@@ -23,9 +23,10 @@ package origin_serve
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -128,7 +129,6 @@ type multiuserFileSystem struct {
 	inner  webdav.FileSystem
 	lookup identity.Lookup
 	stats  *opStats
-	umask  int // file-creation mask applied during FS operations
 }
 
 // Compile-time check that multiuserFileSystem implements webdav.FileSystem.
@@ -136,14 +136,21 @@ var _ webdav.FileSystem = (*multiuserFileSystem)(nil)
 
 // newMultiuserFileSystem creates a new multiuser filesystem wrapper.
 // The provided ctx controls the lifetime of the periodic summary goroutine.
-// On Linux, this always succeeds. On other platforms, it returns an error.
+// If umask >= 0 it is applied to the process once at startup; a negative
+// value (the default) leaves the inherited process umask unchanged.
 func newMultiuserFileSystem(ctx context.Context, inner webdav.FileSystem, lookup identity.Lookup, umask int) (webdav.FileSystem, error) {
+	if umask >= 0 {
+		prev := syscall.Umask(umask)
+		multiuserLogger.WithFields(log.Fields{
+			"previous": fmt.Sprintf("%04o", prev),
+			"new":      fmt.Sprintf("%04o", umask),
+		}).Info("Set process umask for multiuser mode")
+	}
 	stats := newOpStats()
 	mfs := &multiuserFileSystem{
 		inner:  inner,
 		lookup: lookup,
 		stats:  stats,
-		umask:  umask,
 	}
 	go mfs.runSummaryLoop(ctx)
 	return mfs, nil
@@ -175,11 +182,7 @@ func (m *multiuserFileSystem) logSummary() {
 	}
 
 	// Sort users for deterministic output
-	users := make([]string, 0, len(snap))
-	for u := range snap {
-		users = append(users, u)
-	}
-	sort.Strings(users)
+	users := slices.Sorted(maps.Keys(snap))
 
 	var totalOps, totalErrors int64
 	var parts []string
@@ -222,10 +225,13 @@ func (m *multiuserFileSystem) logSummary() {
 
 // resolveIdentity extracts userInfo from the context and resolves
 // the UID/GID via the identity.Lookup.
-func (m *multiuserFileSystem) resolveIdentity(ctx context.Context) resolvedID {
+//
+// It returns an error when the user is missing from the context or cannot
+// be resolved.  Callers must not proceed with UID/GID 0 on failure.
+func (m *multiuserFileSystem) resolveIdentity(ctx context.Context) (resolvedID, error) {
 	ui := getUserInfo(ctx)
 	if ui == nil || ui.User == "" {
-		return resolvedID{}
+		return resolvedID{}, fmt.Errorf("no user information in request context")
 	}
 
 	resolvedUid, err := m.lookup.UidForUser(ui.User)
@@ -233,8 +239,8 @@ func (m *multiuserFileSystem) resolveIdentity(ctx context.Context) resolvedID {
 		multiuserLogger.WithFields(log.Fields{
 			"user":  ui.User,
 			"error": err,
-		}).Debug("Failed to resolve UID")
-		return resolvedID{Username: ui.User}
+		}).Warn("Failed to resolve UID; denying operation")
+		return resolvedID{Username: ui.User}, fmt.Errorf("failed to resolve UID for user %q: %w", ui.User, err)
 	}
 
 	var groupname string
@@ -247,7 +253,8 @@ func (m *multiuserFileSystem) resolveIdentity(ctx context.Context) resolvedID {
 				"user":  ui.User,
 				"group": groupname,
 				"error": err,
-			}).Debug("Failed to resolve GID")
+			}).Warn("Failed to resolve GID; denying operation")
+			return resolvedID{Username: ui.User}, fmt.Errorf("failed to resolve GID for group %q: %w", groupname, err)
 		}
 	}
 
@@ -266,7 +273,7 @@ func (m *multiuserFileSystem) resolveIdentity(ctx context.Context) resolvedID {
 		UID:           resolvedUid,
 		GID:           resolvedGid,
 		SecondaryGIDs: secondaryGIDs,
-	}
+	}, nil
 }
 
 // logOp emits a debug-level structured log for a filesystem operation.
@@ -322,13 +329,14 @@ func threadGetgroups() ([]uint32, error) {
 	if errno != 0 {
 		return nil, fmt.Errorf("getgroups(0): %w", errno)
 	}
-	if n == 0 {
+	count := int(n)
+	if count == 0 {
 		return nil, nil
 	}
-	gids := make([]uint32, n)
-	_, _, errno = syscall.RawSyscall(syscall.SYS_GETGROUPS, n, uintptr(unsafe.Pointer(&gids[0])), 0)
+	gids := make([]uint32, count)
+	_, _, errno = syscall.RawSyscall(syscall.SYS_GETGROUPS, uintptr(count), uintptr(unsafe.Pointer(&gids[0])), 0)
 	if errno != 0 {
-		return nil, fmt.Errorf("getgroups(%d): %w", n, errno)
+		return nil, fmt.Errorf("getgroups(%d): %w", count, errno)
 	}
 	return gids, nil
 }
@@ -345,7 +353,7 @@ func threadGetgroups() ([]uint32, error) {
 //   - Restore UID first (regaining privileges)
 //   - Restore GID
 //   - Restore supplementary groups
-func runAsUser[T any](uid, gid uint32, secondaryGIDs []uint32, umask int, fn func() (T, error)) (T, error) {
+func runAsUser[T any](uid, gid uint32, secondaryGIDs []uint32, fn func() (T, error)) (T, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
@@ -366,17 +374,27 @@ func runAsUser[T any](uid, gid uint32, secondaryGIDs []uint32, umask int, fn fun
 		return zero, fmt.Errorf("failed to set supplementary groups: %w", err)
 	}
 
-	// Set FS GID (while we still have root UID)
-	prevGid, _, errno := syscall.Syscall(syscall.SYS_SETFSGID, uintptr(gid), 0, 0)
-	if errno != 0 {
+	// Set FS GID (while we still have root UID).
+	//
+	// setfsgid(2) always returns the previous fsgid regardless of
+	// success/failure and does not reliably set errno.  To verify that
+	// the change took effect, we call setfsgid again: if the returned
+	// "previous" value is the GID we just requested, the first call
+	// succeeded.
+	prevGid, _, _ := syscall.Syscall(syscall.SYS_SETFSGID, uintptr(gid), 0, 0)
+	checkGid, _, _ := syscall.Syscall(syscall.SYS_SETFSGID, uintptr(gid), 0, 0)
+	if checkGid != uintptr(gid) {
 		threadSetgroups(prevGroups) //nolint:errcheck
 		var zero T
-		return zero, fmt.Errorf("setfsgid(%d): %w", gid, errno)
+		return zero, fmt.Errorf("setfsgid(%d) failed: fsgid is still %d", gid, checkGid)
 	}
 
-	// Set FS UID
-	prevUid, _, errno := syscall.Syscall(syscall.SYS_SETFSUID, uintptr(uid), 0, 0)
-	if errno != 0 {
+	// Set FS UID.
+	//
+	// Same verification pattern as setfsgid above.
+	prevUid, _, _ := syscall.Syscall(syscall.SYS_SETFSUID, uintptr(uid), 0, 0)
+	checkUid, _, _ := syscall.Syscall(syscall.SYS_SETFSUID, uintptr(uid), 0, 0)
+	if checkUid != uintptr(uid) {
 		// Restore GID and groups before returning.  Panic on failure:
 		// a thread with wrong credentials must not be returned to the pool.
 		if _, _, e := syscall.Syscall(syscall.SYS_SETFSGID, uintptr(prevGid), 0, 0); e != 0 {
@@ -386,24 +404,24 @@ func runAsUser[T any](uid, gid uint32, secondaryGIDs []uint32, umask int, fn fun
 			panic(fmt.Sprintf("critical: failed to restore supplementary groups: %v", e))
 		}
 		var zero T
-		return zero, fmt.Errorf("setfsuid(%d): %w", uid, errno)
+		return zero, fmt.Errorf("setfsuid(%d) failed: fsuid is still %d", uid, checkUid)
 	}
 
-	// Set the configured umask so file/directory permissions are created
-	// according to policy.  umask is per-process (not per-thread), so we
-	// save and restore it.
-	prevUmask := syscall.Umask(umask)
-
 	defer func() {
-		// Restore umask, then UID (to regain root privileges), then GID, then groups.
+		// Restore UID first (regaining privileges), then GID, then groups.
 		// Panic on failure: a thread with wrong credentials must not be
 		// returned to the Go runtime's thread pool.
-		syscall.Umask(prevUmask)
-		if _, _, e := syscall.Syscall(syscall.SYS_SETFSUID, uintptr(prevUid), 0, 0); e != 0 {
-			panic(fmt.Sprintf("critical: failed to restore fsuid to %d: %v", prevUid, e))
+		//
+		// Note: setfsuid/setfsgid do not reliably set errno; we verify
+		// restoration by calling a second time and checking the returned
+		// previous value.
+		syscall.Syscall(syscall.SYS_SETFSUID, uintptr(prevUid), 0, 0) //nolint:errcheck
+		if check, _, _ := syscall.Syscall(syscall.SYS_SETFSUID, uintptr(prevUid), 0, 0); check != uintptr(prevUid) {
+			panic(fmt.Sprintf("critical: failed to restore fsuid to %d: current is %d", prevUid, check))
 		}
-		if _, _, e := syscall.Syscall(syscall.SYS_SETFSGID, uintptr(prevGid), 0, 0); e != 0 {
-			panic(fmt.Sprintf("critical: failed to restore fsgid to %d: %v", prevGid, e))
+		syscall.Syscall(syscall.SYS_SETFSGID, uintptr(prevGid), 0, 0) //nolint:errcheck
+		if check, _, _ := syscall.Syscall(syscall.SYS_SETFSGID, uintptr(prevGid), 0, 0); check != uintptr(prevGid) {
+			panic(fmt.Sprintf("critical: failed to restore fsgid to %d: current is %d", prevGid, check))
 		}
 		if e := threadSetgroups(prevGroups); e != nil {
 			panic(fmt.Sprintf("critical: failed to restore supplementary groups: %v", e))
@@ -414,8 +432,8 @@ func runAsUser[T any](uid, gid uint32, secondaryGIDs []uint32, umask int, fn fun
 }
 
 // runAsUserNoReturn is a convenience wrapper for operations that return only an error.
-func runAsUserNoReturn(uid, gid uint32, secondaryGIDs []uint32, umask int, fn func() error) error {
-	_, err := runAsUser(uid, gid, secondaryGIDs, umask, func() (struct{}, error) {
+func runAsUserNoReturn(uid, gid uint32, secondaryGIDs []uint32, fn func() error) error {
+	_, err := runAsUser(uid, gid, secondaryGIDs, func() (struct{}, error) {
 		return struct{}{}, fn()
 	})
 	return err
@@ -425,8 +443,11 @@ func runAsUserNoReturn(uid, gid uint32, secondaryGIDs []uint32, umask int, fn fu
 
 // Mkdir implements webdav.FileSystem.
 func (m *multiuserFileSystem) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
-	id := m.resolveIdentity(ctx)
-	err := runAsUserNoReturn(id.UID, id.GID, id.SecondaryGIDs, m.umask, func() error {
+	id, err := m.resolveIdentity(ctx)
+	if err != nil {
+		return err
+	}
+	err = runAsUserNoReturn(id.UID, id.GID, id.SecondaryGIDs, func() error {
 		return m.inner.Mkdir(ctx, name, perm)
 	})
 	m.logOp("mkdir", name, id, err)
@@ -435,8 +456,11 @@ func (m *multiuserFileSystem) Mkdir(ctx context.Context, name string, perm os.Fi
 
 // OpenFile implements webdav.FileSystem.
 func (m *multiuserFileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
-	id := m.resolveIdentity(ctx)
-	f, err := runAsUser(id.UID, id.GID, id.SecondaryGIDs, m.umask, func() (webdav.File, error) {
+	id, err := m.resolveIdentity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	f, err := runAsUser(id.UID, id.GID, id.SecondaryGIDs, func() (webdav.File, error) {
 		return m.inner.OpenFile(ctx, name, flag, perm)
 	})
 	m.logOp("open", name, id, err)
@@ -445,8 +469,11 @@ func (m *multiuserFileSystem) OpenFile(ctx context.Context, name string, flag in
 
 // RemoveAll implements webdav.FileSystem.
 func (m *multiuserFileSystem) RemoveAll(ctx context.Context, name string) error {
-	id := m.resolveIdentity(ctx)
-	err := runAsUserNoReturn(id.UID, id.GID, id.SecondaryGIDs, m.umask, func() error {
+	id, err := m.resolveIdentity(ctx)
+	if err != nil {
+		return err
+	}
+	err = runAsUserNoReturn(id.UID, id.GID, id.SecondaryGIDs, func() error {
 		return m.inner.RemoveAll(ctx, name)
 	})
 	m.logOp("remove", name, id, err)
@@ -455,8 +482,11 @@ func (m *multiuserFileSystem) RemoveAll(ctx context.Context, name string) error 
 
 // Rename implements webdav.FileSystem.
 func (m *multiuserFileSystem) Rename(ctx context.Context, oldName, newName string) error {
-	id := m.resolveIdentity(ctx)
-	err := runAsUserNoReturn(id.UID, id.GID, id.SecondaryGIDs, m.umask, func() error {
+	id, err := m.resolveIdentity(ctx)
+	if err != nil {
+		return err
+	}
+	err = runAsUserNoReturn(id.UID, id.GID, id.SecondaryGIDs, func() error {
 		return m.inner.Rename(ctx, oldName, newName)
 	})
 	m.logOp("rename", oldName+"->"+newName, id, err)
@@ -465,8 +495,11 @@ func (m *multiuserFileSystem) Rename(ctx context.Context, oldName, newName strin
 
 // Stat implements webdav.FileSystem.
 func (m *multiuserFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, error) {
-	id := m.resolveIdentity(ctx)
-	fi, err := runAsUser(id.UID, id.GID, id.SecondaryGIDs, m.umask, func() (os.FileInfo, error) {
+	id, err := m.resolveIdentity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	fi, err := runAsUser(id.UID, id.GID, id.SecondaryGIDs, func() (os.FileInfo, error) {
 		return m.inner.Stat(ctx, name)
 	})
 	m.logOp("stat", name, id, err)

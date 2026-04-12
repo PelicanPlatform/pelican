@@ -113,12 +113,13 @@ type operationMetrics struct {
 }
 
 // trackOperation returns a cleanup function that records metrics for a filesystem operation.
-// It tracks both operation count and timing, including slow operations (>2s).
-// All metrics use the unified pelican_storage_* namespace with backend="posixv2" label.
+// It captures the start time when called and records elapsed duration when the
+// returned cleanup function runs.  All metrics use the unified pelican_storage_*
+// namespace with backend="posixv2" label.
 //
 // Usage:
 //
-//	defer trackOperation(opMetrics)()
+//	defer trackOperation(opMetrics, username)()
 func trackOperation(om operationMetrics, username string) func() {
 	start := time.Now()
 
@@ -197,6 +198,15 @@ func (afs *aferoFileSystem) OpenFile(ctx context.Context, name string, flag int,
 		afs.logger(nil, nil) // Use the logger provided by webdav
 	}
 
+	// Track open operation metrics — the deferred closure captures the
+	// start time now and records elapsed duration when OpenFile returns.
+	defer trackOperation(operationMetrics{
+		total:         metrics.StorageOpensTotal,
+		timeHistogram: metrics.StorageOpenTime,
+		slowTotal:     metrics.StorageSlowOpensTotal,
+		slowHistogram: metrics.StorageSlowOpenTime,
+	}, username)()
+
 	// WORKAROUND: When attempting to upload a file to a path that is actually a directory/collection,
 	// the underlying filesystem will correctly return EISDIR (syscall.EISDIR on Unix).
 	// However, the golang.org/x/net/webdav handler has the following error handling logic:
@@ -232,14 +242,6 @@ func (afs *aferoFileSystem) OpenFile(ctx context.Context, name string, flag int,
 		}
 		return nil, err
 	}
-
-	// Track open operation metrics
-	trackOperation(operationMetrics{
-		total:         metrics.StorageOpensTotal,
-		timeHistogram: metrics.StorageOpenTime,
-		slowTotal:     metrics.StorageSlowOpensTotal,
-		slowHistogram: metrics.StorageSlowOpenTime,
-	}, username)()
 
 	// Extract username from context for rate limiting
 	userID := "unauthenticated"

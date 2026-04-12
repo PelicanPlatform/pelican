@@ -24,7 +24,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/user"
+	"path/filepath"
 	"runtime"
+	"strconv"
 	"sync"
 	"syscall"
 	"testing"
@@ -35,6 +38,7 @@ import (
 	"golang.org/x/net/webdav"
 
 	"github.com/pelicanplatform/pelican/identity"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // testLookup is a mock identity.Lookup for testing.
@@ -68,74 +72,115 @@ func (t *testLookup) SecondaryGidsForUser(_ string) ([]uint32, error) {
 	return nil, nil
 }
 
-func TestMultiuserFileSystem_ImplementsWebdavFS(t *testing.T) {
-	// Verify multiuserFileSystem implements webdav.FileSystem at compile time
-	var _ webdav.FileSystem = (*multiuserFileSystem)(nil)
+// Compile-time interface checks
+var _ webdav.FileSystem = (*multiuserFileSystem)(nil)
+var _ identity.Lookup = (*testLookup)(nil)
+
+// buildMultiuserFS creates a multiuserFileSystem for testing.
+// If root is non-empty, an OS-backed afero filesystem is created at that path;
+// otherwise the inner filesystem is nil (sufficient for resolveIdentity tests).
+func buildMultiuserFS(t *testing.T, root string, lookup identity.Lookup, umask int) *multiuserFileSystem {
+	t.Helper()
+	var inner webdav.FileSystem
+	if root != "" {
+		osFs := afero.NewOsFs()
+		baseFs := afero.NewBasePathFs(osFs, root)
+		inner = newAferoFileSystem(baseFs, "", nil)
+	}
+	fs, err := newMultiuserFileSystem(context.Background(), inner, lookup, umask)
+	require.NoError(t, err)
+	return fs.(*multiuserFileSystem)
 }
 
 func TestMultiuserFileSystem_ResolveIdentity(t *testing.T) {
-	lookup := newTestLookup()
-	fs, err := newMultiuserFileSystem(context.Background(), nil, lookup, 0)
-	require.NoError(t, err)
-	mfs := fs.(*multiuserFileSystem)
+	mfs := buildMultiuserFS(t, "", newTestLookup(), 0)
 
 	t.Run("NoUserInfo", func(t *testing.T) {
 		ctx := context.Background()
-		id := mfs.resolveIdentity(ctx)
-		assert.Equal(t, uint32(0), id.UID)
-		assert.Equal(t, uint32(0), id.GID)
+		_, err := mfs.resolveIdentity(ctx)
+		require.Error(t, err, "should error when no user info in context")
 	})
 
 	t.Run("RootUser", func(t *testing.T) {
 		ctx := setUserInfo(context.Background(), &userInfo{User: "root", Groups: []string{"root"}})
-		id := mfs.resolveIdentity(ctx)
+		id, err := mfs.resolveIdentity(ctx)
+		require.NoError(t, err)
 		assert.Equal(t, uint32(0), id.UID)
 		assert.Equal(t, uint32(0), id.GID)
 	})
 
 	t.Run("NobodyUser", func(t *testing.T) {
 		ctx := setUserInfo(context.Background(), &userInfo{User: "nobody", Groups: []string{"nogroup"}})
-		id := mfs.resolveIdentity(ctx)
+		id, err := mfs.resolveIdentity(ctx)
+		require.NoError(t, err)
 		assert.Equal(t, uint32(65534), id.UID)
 		assert.Equal(t, uint32(65534), id.GID)
 	})
 
 	t.Run("UnknownUser", func(t *testing.T) {
 		ctx := setUserInfo(context.Background(), &userInfo{User: "unknown_user", Groups: []string{"unknown_group"}})
-		id := mfs.resolveIdentity(ctx)
-		assert.Equal(t, uint32(0), id.UID)
-		assert.Equal(t, uint32(0), id.GID)
+		_, err := mfs.resolveIdentity(ctx)
+		require.Error(t, err, "should error when user cannot be resolved")
 	})
 
 	t.Run("EmptyUser", func(t *testing.T) {
 		ctx := setUserInfo(context.Background(), &userInfo{User: "", Groups: nil})
-		id := mfs.resolveIdentity(ctx)
-		assert.Equal(t, uint32(0), id.UID)
-		assert.Equal(t, uint32(0), id.GID)
+		_, err := mfs.resolveIdentity(ctx)
+		require.Error(t, err, "should error when user is empty")
 	})
 }
 
 func TestMultiuserFileSystem_BasicOperations(t *testing.T) {
 	// This test verifies that multiuserFileSystem correctly delegates to the
-	// inner webdav.FileSystem. Since we run as root in the dev container,
-	// setfsuid/setfsgid to root is a no-op and operations should succeed normally.
+	// inner webdav.FileSystem. When running as root, it uses a real non-root
+	// user (nobody) to exercise setfsuid/setfsgid and verify file ownership.
+	// Otherwise, it falls back to a mock lookup as root (no-op identity switch)
+	// to verify basic delegation.
 	tmpDir := t.TempDir()
 
-	// Build an inner webdav.FileSystem using the existing afero adapter
-	osFs := afero.NewOsFs()
-	baseFs := afero.NewBasePathFs(osFs, tmpDir)
-	inner := newAferoFileSystem(baseFs, "", nil)
+	var (
+		lookup      identity.Lookup
+		ctx         context.Context
+		verifyOwner func(t *testing.T, relPath string)
+	)
 
-	lookup := newTestLookup()
-	fs, err := newMultiuserFileSystem(context.Background(), inner, lookup, 0)
-	require.NoError(t, err)
-	mfs := fs.(*multiuserFileSystem)
+	if os.Getuid() == 0 {
+		nobodyUser, err := user.Lookup("nobody")
+		if err != nil {
+			t.Skip("nobody user not found")
+		}
+		nobodyGrp, err := user.LookupGroupId(nobodyUser.Gid)
+		if err != nil {
+			t.Skipf("cannot resolve group for nobody (gid %s): %v", nobodyUser.Gid, err)
+		}
+		expectedUID, err := strconv.ParseUint(nobodyUser.Uid, 10, 32)
+		require.NoError(t, err)
+		expectedGID, err := strconv.ParseUint(nobodyUser.Gid, 10, 32)
+		require.NoError(t, err)
 
-	ctx := setUserInfo(context.Background(), &userInfo{User: "root", Groups: []string{"root"}})
+		// Make the dir world-traversable so the switched UID can access it.
+		require.NoError(t, os.Chmod(tmpDir, 0777))
+
+		lookup = identity.NewLookup()
+		ctx = setUserInfo(context.Background(), &userInfo{User: "nobody", Groups: []string{nobodyGrp.Name}})
+		verifyOwner = func(t *testing.T, relPath string) {
+			t.Helper()
+			uid, gid := test_utils.FileOwner(t, filepath.Join(tmpDir, relPath))
+			assert.Equal(t, uint32(expectedUID), uid, "%s should be owned by nobody", relPath)
+			assert.Equal(t, uint32(expectedGID), gid, "%s should have nobody's group", relPath)
+		}
+	} else {
+		lookup = newTestLookup()
+		ctx = setUserInfo(context.Background(), &userInfo{User: "root", Groups: []string{"root"}})
+		verifyOwner = func(*testing.T, string) {} // no-op without privilege
+	}
+
+	mfs := buildMultiuserFS(t, tmpDir, lookup, 0)
 
 	// Mkdir
-	err = mfs.Mkdir(ctx, "/testdir", 0755)
+	err := mfs.Mkdir(ctx, "/testdir", 0755)
 	require.NoError(t, err)
+	verifyOwner(t, "testdir")
 
 	// Stat
 	info, err := mfs.Stat(ctx, "/testdir")
@@ -148,6 +193,7 @@ func TestMultiuserFileSystem_BasicOperations(t *testing.T) {
 	_, err = f.Write([]byte("hello"))
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
+	verifyOwner(t, "testfile.txt")
 
 	// OpenFile (read)
 	f, err = mfs.OpenFile(ctx, "/testfile.txt", os.O_RDONLY, 0)
@@ -167,9 +213,10 @@ func TestMultiuserFileSystem_BasicOperations(t *testing.T) {
 	_, err = mfs.Stat(ctx, "/testfile.txt")
 	assert.True(t, os.IsNotExist(err))
 
-	// Verify new path exists
+	// Verify new path exists and ownership is preserved
 	_, err = mfs.Stat(ctx, "/renamed.txt")
 	require.NoError(t, err)
+	verifyOwner(t, "renamed.txt")
 
 	// RemoveAll
 	err = mfs.RemoveAll(ctx, "/renamed.txt")
@@ -181,46 +228,32 @@ func TestMultiuserFileSystem_BasicOperations(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestRunAsUser_RestoresIdentity(t *testing.T) {
-	// Test that runAsUser properly restores the FS UID/GID after the operation
+func TestRunAsUser_ErrorPropagation(t *testing.T) {
+	// Verify that when the callback returns an error, runAsUser propagates it
+	// AND restores the original FS identity. We switch to a non-root UID so
+	// a broken implementation that never switches would be caught.
+	test_utils.SkipUnlessPrivileged(t)
+
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	// Get current fsuid (should be 0 = root)
-	origUid, _, _ := syscall.Syscall(syscall.SYS_SETFSUID, 0, 0, 0)
-	// Restore it
-	_, _, errno := syscall.Syscall(syscall.SYS_SETFSUID, origUid, 0, 0)
-	require.Equal(t, syscall.Errno(0), errno, "failed to restore fsuid")
-
-	result, err := runAsUser(uint32(0), uint32(0), nil, 0, func() (string, error) {
-		return "ok", nil
-	})
-	require.NoError(t, err)
-	assert.Equal(t, "ok", result)
-
-	// Verify UID is restored
-	curUid, _, _ := syscall.Syscall(syscall.SYS_SETFSUID, 0, 0, 0)
-	_, _, errno = syscall.Syscall(syscall.SYS_SETFSUID, curUid, 0, 0)
-	require.Equal(t, syscall.Errno(0), errno, "failed to restore fsuid")
-	assert.Equal(t, origUid, curUid, "FS UID should be restored after runAsUser")
-}
-
-func TestRunAsUser_ErrorPropagation(t *testing.T) {
 	expectedErr := fmt.Errorf("test error")
-	_, err := runAsUser(uint32(0), uint32(0), nil, 0, func() (string, error) {
+	_, err := runAsUser(uint32(65534), uint32(65534), nil, func() (string, error) {
 		return "", expectedErr
 	})
 	assert.Equal(t, expectedErr, err)
+
+	// Verify UID was restored to root (0) despite the error.
+	curUid, _, _ := syscall.Syscall(syscall.SYS_SETFSUID, 0, 0, 0)
+	syscall.Syscall(syscall.SYS_SETFSUID, curUid, 0, 0) //nolint:errcheck
+	assert.Equal(t, uintptr(0), curUid, "FS UID should be restored after runAsUser error")
 }
 
 func TestMultiuserFileSystem_ConcurrentAccess(t *testing.T) {
 	// Verify that concurrent goroutines can use multiuserFileSystem
 	// without interfering with each other's identity resolution.
 	// Since context flows per-call, there's no shared state to conflict.
-	lookup := newTestLookup()
-	fs, err := newMultiuserFileSystem(context.Background(), nil, lookup, 0) // inner not needed for resolveIdentity
-	require.NoError(t, err)
-	mfs := fs.(*multiuserFileSystem)
+	mfs := buildMultiuserFS(t, "", newTestLookup(), 0)
 
 	var wg sync.WaitGroup
 	const numGoroutines = 20
@@ -236,7 +269,8 @@ func TestMultiuserFileSystem_ConcurrentAccess(t *testing.T) {
 			}
 			ctx := setUserInfo(context.Background(), &userInfo{User: userName, Groups: []string{"root"}})
 
-			id := mfs.resolveIdentity(ctx)
+			id, err := mfs.resolveIdentity(ctx)
+			require.NoError(t, err)
 
 			if idx%2 == 0 {
 				assert.Equal(t, uint32(65534), id.UID, "goroutine %d expected nobody UID", idx)
@@ -247,9 +281,4 @@ func TestMultiuserFileSystem_ConcurrentAccess(t *testing.T) {
 	}
 
 	wg.Wait()
-}
-
-// Verify that the identity.Lookup interface is satisfied
-func TestLookupInterfaceCompliance(t *testing.T) {
-	var _ identity.Lookup = (*testLookup)(nil)
 }

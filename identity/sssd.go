@@ -79,7 +79,8 @@ func (s *SSSDLookup) LookupUser(ctx context.Context, username string) (*UserInfo
 
 	u, err := client.GetUserByName(username)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "No such") {
+		// gosssd returns "request failed with status: 1" for NOTFOUND
+		if strings.Contains(err.Error(), "status: 1") {
 			return nil, &ErrUserNotFound{Username: username}
 		}
 		return nil, fmt.Errorf("SSSD lookup user %q: %w", username, err)
@@ -112,7 +113,8 @@ func (s *SSSDLookup) LookupSecondaryGroups(ctx context.Context, username string)
 
 	gids, err := client.GetGroupsForUser(username)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "No such") {
+		// gosssd returns "request failed with status: 1" for NOTFOUND
+		if strings.Contains(err.Error(), "status: 1") {
 			return nil, &ErrUserNotFound{Username: username}
 		}
 		return nil, fmt.Errorf("SSSD lookup secondary groups for %q: %w", username, err)
@@ -130,7 +132,8 @@ func (s *SSSDLookup) LookupGroup(ctx context.Context, groupname string) (uint32,
 
 	grp, err := client.GetGroupByName(groupname)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "No such") {
+		// gosssd returns "request failed with status: 1" for NOTFOUND
+		if strings.Contains(err.Error(), "status: 1") {
 			return 0, &ErrGroupNotFound{Groupname: groupname}
 		}
 		return 0, fmt.Errorf("SSSD lookup group %q: %w", groupname, err)

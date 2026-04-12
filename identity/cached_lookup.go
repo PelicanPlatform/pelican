@@ -32,6 +32,11 @@ const (
 	// DefaultNegativeTTL is the TTL for failed lookups (shorter to allow
 	// recovery when a user/group is created after the first miss).
 	DefaultNegativeTTL = 1 * time.Minute
+
+	// lookupTimeout bounds how long a single strategy lookup may take
+	// before the cache loader gives up.  This prevents a hung backend
+	// (e.g. an unresponsive SSSD socket) from blocking callers indefinitely.
+	lookupTimeout = 10 * time.Second
 )
 
 // cachedUserResult holds either a successful UserInfo or an error.
@@ -91,7 +96,9 @@ func NewCachedLookupWithTTL(strategy LookupStrategy, positiveTTL, negativeTTL ti
 
 	userLoader := ttlcache.LoaderFunc[string, cachedUserResult](
 		func(cache *ttlcache.Cache[string, cachedUserResult], username string) *ttlcache.Item[string, cachedUserResult] {
-			info, err := strategy.LookupUser(context.Background(), username)
+			ctx, cancel := context.WithTimeout(context.Background(), lookupTimeout)
+			defer cancel()
+			info, err := strategy.LookupUser(ctx, username)
 			result := cachedUserResult{info: info, err: err}
 			ttl := positiveTTL
 			if err != nil {
@@ -103,7 +110,9 @@ func NewCachedLookupWithTTL(strategy LookupStrategy, positiveTTL, negativeTTL ti
 
 	gidLoader := ttlcache.LoaderFunc[string, cachedGIDResult](
 		func(cache *ttlcache.Cache[string, cachedGIDResult], groupname string) *ttlcache.Item[string, cachedGIDResult] {
-			gid, err := strategy.LookupGroup(context.Background(), groupname)
+			ctx, cancel := context.WithTimeout(context.Background(), lookupTimeout)
+			defer cancel()
+			gid, err := strategy.LookupGroup(ctx, groupname)
 			result := cachedGIDResult{gid: gid, err: err}
 			ttl := positiveTTL
 			if err != nil {
@@ -115,17 +124,21 @@ func NewCachedLookupWithTTL(strategy LookupStrategy, positiveTTL, negativeTTL ti
 
 	cl.userCache = ttlcache.New[string, cachedUserResult](
 		ttlcache.WithTTL[string, cachedUserResult](positiveTTL),
-		ttlcache.WithLoader[string, cachedUserResult](userLoader),
+		ttlcache.WithLoader[string, cachedUserResult](ttlcache.NewSuppressedLoader[string, cachedUserResult](userLoader, nil)),
+		ttlcache.WithCapacity[string, cachedUserResult](4096),
 	)
 
 	cl.gidCache = ttlcache.New[string, cachedGIDResult](
 		ttlcache.WithTTL[string, cachedGIDResult](positiveTTL),
-		ttlcache.WithLoader[string, cachedGIDResult](gidLoader),
+		ttlcache.WithLoader[string, cachedGIDResult](ttlcache.NewSuppressedLoader[string, cachedGIDResult](gidLoader, nil)),
+		ttlcache.WithCapacity[string, cachedGIDResult](4096),
 	)
 
 	secondaryLoader := ttlcache.LoaderFunc[string, cachedSecondaryResult](
 		func(cache *ttlcache.Cache[string, cachedSecondaryResult], username string) *ttlcache.Item[string, cachedSecondaryResult] {
-			gids, err := strategy.LookupSecondaryGroups(context.Background(), username)
+			ctx, cancel := context.WithTimeout(context.Background(), lookupTimeout)
+			defer cancel()
+			gids, err := strategy.LookupSecondaryGroups(ctx, username)
 			result := cachedSecondaryResult{gids: gids, err: err}
 			ttl := positiveTTL
 			if err != nil {
@@ -137,7 +150,8 @@ func NewCachedLookupWithTTL(strategy LookupStrategy, positiveTTL, negativeTTL ti
 
 	cl.secondaryCache = ttlcache.New[string, cachedSecondaryResult](
 		ttlcache.WithTTL[string, cachedSecondaryResult](positiveTTL),
-		ttlcache.WithLoader[string, cachedSecondaryResult](secondaryLoader),
+		ttlcache.WithLoader[string, cachedSecondaryResult](ttlcache.NewSuppressedLoader[string, cachedSecondaryResult](secondaryLoader, nil)),
+		ttlcache.WithCapacity[string, cachedSecondaryResult](4096),
 	)
 
 	return cl

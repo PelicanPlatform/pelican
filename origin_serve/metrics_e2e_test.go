@@ -21,6 +21,7 @@
 package origin_serve
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -282,7 +283,7 @@ func TestMetricsRecordedForAuthRejection(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, InitializeHandlers(exports))
+	require.NoError(t, InitializeHandlers(context.Background(), exports))
 
 	ac := &authConfig{}
 	ac.exports.Store(&exports)
@@ -302,7 +303,7 @@ func TestMetricsRecordedForAuthRejection(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code, "Request without token should be rejected")
 
 	// The key assertion: Prometheus must have recorded this rejected request.
-	count := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, "GET", "401"))
+	count := promtest.ToFloat64(metrics.HttpRequestsTotal.WithLabelValues(originServerType, "GET", "401", ""))
 	assert.Equal(t, float64(1), count,
 		"Auth-rejected requests must be counted in Prometheus metrics")
 }

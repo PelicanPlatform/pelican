@@ -34,8 +34,10 @@ type UserInfo struct {
 }
 
 // LookupStrategy defines the interface for user/group lookup implementations.
-// Implementations need not be safe for concurrent use; the CachedLookup
-// wrapper serialises access.
+// Implementations must be safe for concurrent use: CachedLookup may invoke
+// loaders for different keys (or different caches) concurrently on the same
+// strategy instance.  All built-in strategies satisfy this requirement by
+// being stateless or creating fresh connections per call.
 type LookupStrategy interface {
 	// LookupUser looks up a user by username and returns user info.
 	LookupUser(ctx context.Context, username string) (*UserInfo, error)
