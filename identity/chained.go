@@ -20,7 +20,6 @@ package identity
 
 import (
 	"context"
-	"errors"
 )
 
 // ChainedLookupStrategy tries multiple strategies in order until one succeeds.
@@ -28,8 +27,8 @@ type ChainedLookupStrategy struct {
 	strategies []LookupStrategy
 }
 
-// LookupUser tries each strategy in order.  ErrUserNotFound causes a
-// fallthrough to the next strategy; other errors also fall through.
+// LookupUser tries each strategy in order.  Any error (including
+// ErrUserNotFound) causes a fallthrough to the next strategy.
 func (c *ChainedLookupStrategy) LookupUser(ctx context.Context, username string) (*UserInfo, error) {
 	var lastErr error
 	for _, s := range c.strategies {
@@ -38,11 +37,6 @@ func (c *ChainedLookupStrategy) LookupUser(ctx context.Context, username string)
 			return info, nil
 		}
 		lastErr = err
-		// Always try next strategy
-		var notFound *ErrUserNotFound
-		if !errors.As(err, &notFound) {
-			continue
-		}
 	}
 	if lastErr != nil {
 		return nil, lastErr

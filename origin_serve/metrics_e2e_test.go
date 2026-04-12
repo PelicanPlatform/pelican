@@ -21,6 +21,7 @@
 package origin_serve
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -282,7 +283,7 @@ func TestMetricsRecordedForAuthRejection(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, InitializeHandlers(exports))
+	require.NoError(t, InitializeHandlers(context.Background(), exports))
 
 	ac := &authConfig{}
 	ac.exports.Store(&exports)

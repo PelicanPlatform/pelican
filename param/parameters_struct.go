@@ -295,6 +295,7 @@ type Config struct {
 		Multiuser bool `mapstructure:"multiuser" yaml:"Multiuser"`
 		MultiuserMinID int `mapstructure:"multiuserminid" yaml:"MultiuserMinID"`
 		MultiuserUmask int `mapstructure:"multiuserumask" yaml:"MultiuserUmask"`
+		MultiuserVarlinkSocketPath string `mapstructure:"multiuservarlinksocketpath" yaml:"MultiuserVarlinkSocketPath"`
 		NamespacePrefix string `mapstructure:"namespaceprefix" yaml:"NamespacePrefix"`
 		Port int `mapstructure:"port" yaml:"Port"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
@@ -747,6 +748,7 @@ type configWithType struct {
 		Multiuser struct { Type string; Value bool }
 		MultiuserMinID struct { Type string; Value int }
 		MultiuserUmask struct { Type string; Value int }
+		MultiuserVarlinkSocketPath struct { Type string; Value string }
 		NamespacePrefix struct { Type string; Value string }
 		Port struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }

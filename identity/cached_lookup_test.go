@@ -134,10 +134,8 @@ func TestCachedLookup_GidCache(t *testing.T) {
 	assert.Equal(t, int64(2), mock.groupCalls.Load())
 }
 
-func TestCachedLookup_ImplementsInterface(t *testing.T) {
-	// Verify CachedLookup implements Lookup at compile time
-	var _ Lookup = (*CachedLookup)(nil)
-}
+// Compile-time interface check
+var _ Lookup = (*CachedLookup)(nil)
 
 func TestCachedLookup_MinID_RejectsRoot(t *testing.T) {
 	// Strategy that resolves "root" to UID 0 / GID 0

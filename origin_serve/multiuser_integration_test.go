@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build linux
 
 /***************************************************************
  *
@@ -29,7 +29,6 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
-	"syscall"
 	"testing"
 	"time"
 
@@ -73,23 +72,16 @@ func createTokenForUser(t *testing.T, subject string) string {
 	return tkn
 }
 
-// fileOwner returns the UID and GID of the file at path.
-func fileOwner(t *testing.T, path string) (uid, gid uint32) {
-	t.Helper()
-	fi, err := os.Stat(path)
-	require.NoError(t, err, "stat %s", path)
-	st := fi.Sys().(*syscall.Stat_t)
-	return st.Uid, st.Gid
-}
-
-// lookupUID returns the numeric UID for the given username.
-func lookupUID(t *testing.T, username string) uint32 {
+// lookupUIDGID returns the numeric UID and primary GID for the given username.
+func lookupUIDGID(t *testing.T, username string) (uint32, uint32) {
 	t.Helper()
 	u, err := user.Lookup(username)
 	require.NoError(t, err)
 	uid, err := strconv.ParseUint(u.Uid, 10, 32)
 	require.NoError(t, err)
-	return uint32(uid)
+	gid, err := strconv.ParseUint(u.Gid, 10, 32)
+	require.NoError(t, err)
+	return uint32(uid), uint32(gid)
 }
 
 // pelURL constructs a pelican:// URL for the test federation.
@@ -110,18 +102,8 @@ func pelURL(path string) string {
 //   - CAP_SETUID + CAP_SETGID
 //   - Test users "alice" and "bob" present in the system
 func TestMultiuserIntegration(t *testing.T) {
-	if os.Geteuid() != 0 {
-		t.Skip("must run as root for multiuser tests")
-	}
-	hasCaps, err := pconfig.HasMultiuserCaps()
-	if err != nil || !hasCaps {
-		t.Skip("missing CAP_SETUID/CAP_SETGID capabilities")
-	}
-	for _, name := range []string{"alice", "bob"} {
-		if _, err := user.Lookup(name); err != nil {
-			t.Skipf("test user %q not found", name)
-		}
-	}
+	test_utils.SkipUnlessPrivileged(t)
+	test_utils.SkipUnlessTestUsers(t, "alice", "bob")
 
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
@@ -151,8 +133,8 @@ Director:
 	// Make it world-writable so switched UIDs can create entries.
 	require.NoError(t, os.Chmod(storagePrefix, 0777))
 
-	aliceUID := lookupUID(t, "alice")
-	bobUID := lookupUID(t, "bob")
+	aliceUID, aliceGID := lookupUIDGID(t, "alice")
+	bobUID, _ := lookupUIDGID(t, "bob")
 
 	aliceToken := createTokenForUser(t, "alice")
 	bobToken := createTokenForUser(t, "bob")
@@ -167,7 +149,7 @@ Director:
 			client.WithToken(aliceToken))
 		require.NoError(t, err)
 
-		uid, _ := fileOwner(t, filepath.Join(storagePrefix, "alice.txt"))
+		uid, _ := test_utils.FileOwner(t, filepath.Join(storagePrefix, "alice.txt"))
 		assert.Equal(t, aliceUID, uid, "file should be owned by alice")
 
 		// Upload as bob
@@ -178,7 +160,7 @@ Director:
 			client.WithToken(bobToken))
 		require.NoError(t, err)
 
-		uid, _ = fileOwner(t, filepath.Join(storagePrefix, "bob.txt"))
+		uid, _ = test_utils.FileOwner(t, filepath.Join(storagePrefix, "bob.txt"))
 		assert.Equal(t, bobUID, uid, "file should be owned by bob")
 	})
 
@@ -194,7 +176,7 @@ Director:
 		require.NoError(t, err)
 
 		// Verify ownership
-		uid, _ := fileOwner(t, filepath.Join(storagePrefix, "roundtrip.txt"))
+		uid, _ := test_utils.FileOwner(t, filepath.Join(storagePrefix, "roundtrip.txt"))
 		assert.Equal(t, aliceUID, uid)
 
 		// Download
@@ -213,7 +195,7 @@ Director:
 		// Bob should get a permission error trying to write into it.
 		aliceDir := filepath.Join(storagePrefix, "alice-private")
 		require.NoError(t, os.Mkdir(aliceDir, 0700))
-		require.NoError(t, os.Chown(aliceDir, int(aliceUID), int(aliceUID)))
+		require.NoError(t, os.Chown(aliceDir, int(aliceUID), int(aliceGID)))
 
 		localDir := t.TempDir()
 		localFile := filepath.Join(localDir, "denied.txt")
@@ -233,11 +215,11 @@ Director:
 		// Alice creates a file that only she can read
 		privateDir := filepath.Join(storagePrefix, "alice-readonly")
 		require.NoError(t, os.Mkdir(privateDir, 0700))
-		require.NoError(t, os.Chown(privateDir, int(aliceUID), int(aliceUID)))
+		require.NoError(t, os.Chown(privateDir, int(aliceUID), int(aliceGID)))
 
 		secretFile := filepath.Join(privateDir, "secret.txt")
 		require.NoError(t, os.WriteFile(secretFile, []byte("alice secret"), 0600))
-		require.NoError(t, os.Chown(secretFile, int(aliceUID), int(aliceUID)))
+		require.NoError(t, os.Chown(secretFile, int(aliceUID), int(aliceGID)))
 
 		// Bob tries to download alice's secret file — should get an HTTP error
 		dstFile := filepath.Join(t.TempDir(), "stolen.txt")
@@ -268,7 +250,7 @@ Director:
 		require.True(t, resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusNoContent,
 			"expected 201 or 204, got %d", resp.StatusCode)
 
-		uid, _ := fileOwner(t, filepath.Join(storagePrefix, "direct-alice.txt"))
+		uid, _ := test_utils.FileOwner(t, filepath.Join(storagePrefix, "direct-alice.txt"))
 		assert.Equal(t, aliceUID, uid, "directly uploaded file should be owned by alice")
 	})
 }

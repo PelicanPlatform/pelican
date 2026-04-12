@@ -28,24 +28,41 @@ import (
 	"net"
 	"os"
 	"time"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 const defaultVarlinkTimeout = 10 * time.Second
+
+const defaultVarlinkSocketPath = "/run/systemd/userdb/io.systemd.UserDatabase"
 
 // SystemdUserDBLookupStrategy uses systemd-userdbd via the varlink protocol.
 type SystemdUserDBLookupStrategy struct {
 	socketPath string
 }
 
-// NewSystemdUserDBLookup creates a new systemd-userdbd lookup strategy.
-func NewSystemdUserDBLookup() (*SystemdUserDBLookupStrategy, error) {
-	socketPath := "/run/systemd/userdb/io.systemd.UserDatabase"
+// SystemdUserDBOption configures a SystemdUserDBLookupStrategy.
+type SystemdUserDBOption func(*SystemdUserDBLookupStrategy)
 
-	if _, err := os.Stat(socketPath); err != nil {
+// WithVarlinkSocketPath overrides the default systemd-userdbd socket path.
+func WithVarlinkSocketPath(path string) SystemdUserDBOption {
+	return func(s *SystemdUserDBLookupStrategy) {
+		s.socketPath = path
+	}
+}
+
+// NewSystemdUserDBLookup creates a new systemd-userdbd lookup strategy.
+func NewSystemdUserDBLookup(opts ...SystemdUserDBOption) (*SystemdUserDBLookupStrategy, error) {
+	s := &SystemdUserDBLookupStrategy{socketPath: defaultVarlinkSocketPath}
+	for _, o := range opts {
+		o(s)
+	}
+
+	if _, err := os.Stat(s.socketPath); err != nil {
 		return nil, fmt.Errorf("systemd-userdbd socket not available: %w", err)
 	}
 
-	return &SystemdUserDBLookupStrategy{socketPath: socketPath}, nil
+	return s, nil
 }
 
 // ensureTimeout returns a context that has a deadline.  If the
@@ -317,5 +334,9 @@ func (s *SystemdUserDBLookupStrategy) Name() string {
 
 // trySystemdUserDB attempts to create a systemd-userdbd lookup strategy.
 func trySystemdUserDB() (LookupStrategy, error) { //nolint:unused // called from select_nocgo.go
-	return NewSystemdUserDBLookup()
+	var opts []SystemdUserDBOption
+	if p := param.Origin_MultiuserVarlinkSocketPath.GetString(); p != "" {
+		opts = append(opts, WithVarlinkSocketPath(p))
+	}
+	return NewSystemdUserDBLookup(opts...)
 }

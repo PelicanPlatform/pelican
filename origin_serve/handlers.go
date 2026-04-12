@@ -502,7 +502,18 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 
 			// Wrap with multiuser filesystem if configured
 			if param.Origin_Multiuser.GetBool() {
-				minID := uint32(param.Origin_MultiuserMinID.GetInt())
+				hasCaps, capErr := config.HasMultiuserCaps()
+				if capErr != nil {
+					return fmt.Errorf("failed to check multiuser capabilities for %s: %w", export.FederationPrefix, capErr)
+				}
+				if !hasCaps {
+					return fmt.Errorf("multiuser mode requires CAP_SETUID and CAP_SETGID capabilities (export: %s)", export.FederationPrefix)
+				}
+				minIDVal := param.Origin_MultiuserMinID.GetInt()
+				if minIDVal < 0 {
+					return fmt.Errorf("Origin.MultiuserMinID must be non-negative, got %d", minIDVal)
+				}
+				minID := uint32(minIDVal)
 				umask := param.Origin_MultiuserUmask.GetInt()
 				lookup := identity.NewLookup(identity.WithMinID(minID))
 				fs, err = newMultiuserFileSystem(ctx, fs, lookup, umask)

@@ -334,6 +334,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.Multiuser": false,
 	"Origin.MultiuserMinID": false,
 	"Origin.MultiuserUmask": false,
+	"Origin.MultiuserVarlinkSocketPath": false,
 	"Origin.NamespacePrefix": false,
 	"Origin.Port": false,
 	"Origin.RunLocation": false,
@@ -621,6 +622,7 @@ var stringAccessors = map[string]func(*Config) string{
 	"Origin.HttpServiceUrl": func(c *Config) string { return c.Origin.HttpServiceUrl },
 	"Origin.IssuerMode": func(c *Config) string { return c.Origin.IssuerMode },
 	"Origin.Mode": func(c *Config) string { return c.Origin.Mode },
+	"Origin.MultiuserVarlinkSocketPath": func(c *Config) string { return c.Origin.MultiuserVarlinkSocketPath },
 	"Origin.NamespacePrefix": func(c *Config) string { return c.Origin.NamespacePrefix },
 	"Origin.RunLocation": func(c *Config) string { return c.Origin.RunLocation },
 	"Origin.S3AccessKeyfile": func(c *Config) string { return c.Origin.S3AccessKeyfile },
@@ -1394,6 +1396,7 @@ var allParameterNames = []string{
 	"Origin.Multiuser",
 	"Origin.MultiuserMinID",
 	"Origin.MultiuserUmask",
+	"Origin.MultiuserVarlinkSocketPath",
 	"Origin.NamespacePrefix",
 	"Origin.Port",
 	"Origin.RunLocation",
@@ -1654,6 +1657,7 @@ var (
 	Origin_HttpServiceUrl = StringParam{"Origin.HttpServiceUrl"}
 	Origin_IssuerMode = StringParam{"Origin.IssuerMode"}
 	Origin_Mode = StringParam{"Origin.Mode"}
+	Origin_MultiuserVarlinkSocketPath = StringParam{"Origin.MultiuserVarlinkSocketPath"}
 	Origin_NamespacePrefix = StringParam{"Origin.NamespacePrefix"}
 	Origin_RunLocation = StringParam{"Origin.RunLocation"}
 	Origin_S3AccessKeyfile = StringParam{"Origin.S3AccessKeyfile"}
@@ -2085,6 +2089,7 @@ func init() {
 		"Origin.HttpServiceUrl": Origin_HttpServiceUrl,
 		"Origin.IssuerMode": Origin_IssuerMode,
 		"Origin.Mode": Origin_Mode,
+		"Origin.MultiuserVarlinkSocketPath": Origin_MultiuserVarlinkSocketPath,
 		"Origin.NamespacePrefix": Origin_NamespacePrefix,
 		"Origin.RunLocation": Origin_RunLocation,
 		"Origin.S3AccessKeyfile": Origin_S3AccessKeyfile,
