@@ -117,9 +117,18 @@ func downloadDB(localFile string) error {
 		if baseName != "GeoLite2-City.mmdb" {
 			continue
 		}
-		if _, err = io.Copy(fileHandle, tr); err != nil {
+		// Limit extraction to 512 MB to prevent a malicious or corrupted
+		// archive from exhausting disk space.
+		const maxDBSize = 512 * 1024 * 1024
+		limitedReader := io.LimitReader(tr, maxDBSize+1)
+		n, err := io.Copy(fileHandle, limitedReader)
+		if err != nil {
 			os.Remove(fileHandle.Name())
 			return err
+		}
+		if n > maxDBSize {
+			os.Remove(fileHandle.Name())
+			return errors.New("GeoIP database file exceeds maximum allowed size (512 MB)")
 		}
 		foundDB = true
 		break
