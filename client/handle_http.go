@@ -2417,13 +2417,27 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			// Determine write destination - use temporary file unless inPlace is true
 			// Special case: os.DevNull should always use inPlace mode (no temp files)
 			writeDestination = localPath
-			if !transfer.job.inPlace && localPath != os.DevNull {
-				// Use rsync-style temporary naming: .filename.XXXXXX (random suffix)
-				writeDestination = generateTempPath(localPath)
+			if !transfer.job.inPlace && localPath != os.DevNull && localPath != "" {
+				// Use os.CreateTemp for secure atomic temp file creation in the
+				// destination directory, using an rsync-style .basename.* pattern.
+				dir := filepath.Dir(localPath)
+				base := filepath.Base(localPath)
+				fp, err = os.CreateTemp(dir, "."+base+".")
+				if err == nil {
+					writeDestination = fp.Name()
+					fileWriter = fp
+				} else {
+					return
+				}
 			}
 			// Ensure temporary file is cleaned up if we exit early (errors, panics, etc.)
+			// Also handles closing the file; on Windows, open files cannot be removed.
 			if !transfer.job.inPlace && writeDestination != localPath {
 				defer func() {
+					if fp != nil {
+						fp.Close()
+						fp = nil
+					}
 					// Only clean up if the temporary file still exists and wasn't renamed
 					if _, statErr := os.Stat(writeDestination); statErr == nil {
 						if removeErr := os.Remove(writeDestination); removeErr != nil {
@@ -2431,18 +2445,22 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 						}
 					}
 				}()
-			}
-			// If the destination is something strange, like a block device, then the OpenFile below
-			// will create the appropriate error message
-			if fp, err = os.OpenFile(writeDestination, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644); err == nil {
-				fileWriter = fp
+			} else {
 				defer func() {
 					if fp != nil {
 						fp.Close()
+						fp = nil
 					}
 				}()
-			} else {
-				return
+			}
+			if fp == nil {
+				// If the destination is something strange, like a block device, then the OpenFile below
+				// will create the appropriate error message
+				if fp, err = os.OpenFile(writeDestination, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644); err == nil {
+					fileWriter = fp
+				} else {
+					return
+				}
 			}
 		}
 	} else { // Prestage case
