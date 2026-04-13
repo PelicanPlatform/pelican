@@ -1,10 +1,29 @@
-package database
+/***************************************************************
+ *
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you
+ * may not use this file except in compliance with the License.  You may
+ * obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ***************************************************************/
+
+package api_token
 
 import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -14,7 +33,47 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
+
+var (
+	VerifiedKeysCache *ttlcache.Cache[string, server_structs.ApiKeyCached] = ttlcache.New[string, server_structs.ApiKeyCached](
+		ttlcache.WithTTL[string, server_structs.ApiKeyCached](time.Hour * 24),
+	)
+	// API token format: <5-char ID>.<64-char secret>, total length = 70, alphanumeric
+	ApiTokenRegex = regexp.MustCompile(`^[a-zA-Z0-9]{5}\.[a-zA-Z0-9]{64}$`)
+)
+
+// init registers the API token verifier with the token package automatically
+// when any server binary imports this package.  Client binaries never import
+// this package, so they keep the default "not available" stub.
+func init() {
+	token.CheckApiTokenIssuerFunc = Verify
+}
+
+// Verify checks an API token string against the database and validates
+// the requested scopes.  It is wired into token.CheckApiTokenIssuerFunc
+// by Init().
+func Verify(tok string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
+	if !ApiTokenRegex.MatchString(tok) {
+		return errors.New("token does not match API token format")
+	}
+
+	valid, capabilities, err := VerifyApiKey(tok)
+	if err != nil {
+		return errors.Wrap(err, "failed to verify API token")
+	}
+	if !valid {
+		return errors.New("API token is invalid")
+	}
+
+	if !token_scopes.ScopeContains(capabilities, expectedScopes, allScopes) {
+		return errors.Errorf("API token does not have the required scope(s): %v", expectedScopes)
+	}
+
+	return nil
+}
 
 func generateSecret(length int) ([]byte, error) {
 	bytesSlice := make([]byte, length)
@@ -34,7 +93,7 @@ func generateTokenID(secret []byte) string {
 // It assumes that the API key is in the format "$ID.$SECRET_IN_HEX".
 // It returns true if the API key is valid, false if the API key is invalid, and an error if an error occurred.
 // If the API key is valid, it also returns the capabilities associated with the key.
-func VerifyApiKey(db *gorm.DB, apiKey string, verifiedKeysCache *ttlcache.Cache[string, server_structs.ApiKeyCached]) (bool, []string, error) {
+func VerifyApiKey(apiKey string) (bool, []string, error) {
 	parts := strings.Split(apiKey, ".")
 	if len(parts) != 2 {
 		return false, nil, errors.New("invalid API key format")
@@ -42,7 +101,7 @@ func VerifyApiKey(db *gorm.DB, apiKey string, verifiedKeysCache *ttlcache.Cache[
 	id := parts[0]
 	secretHex := parts[1]
 
-	item := verifiedKeysCache.Get(id)
+	item := VerifiedKeysCache.Get(id)
 	if item != nil {
 		// Cache hit
 		cached := item.Value()
@@ -60,8 +119,8 @@ func VerifyApiKey(db *gorm.DB, apiKey string, verifiedKeysCache *ttlcache.Cache[
 		return false, nil, errors.New("Failed to decode the secret")
 	}
 
-	var token server_structs.ApiKey
-	result := db.First(&token, "id = ?", id)
+	var apiToken server_structs.ApiKey
+	result := ServerDatabase.First(&apiToken, "id = ?", id)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return false, nil, errors.New("Token not found") // token not found
@@ -71,14 +130,14 @@ func VerifyApiKey(db *gorm.DB, apiKey string, verifiedKeysCache *ttlcache.Cache[
 
 	// Check if the token has expired
 	// If the token has an expiration time and the current time is after the expiration time, the token is invalid
-	if !token.ExpiresAt.IsZero() && time.Now().UTC().After(token.ExpiresAt) {
+	if !apiToken.ExpiresAt.IsZero() && time.Now().UTC().After(apiToken.ExpiresAt) {
 		return false, nil, errors.New("Token has expired")
 	}
 
 	// We compare the hashed value of the secret with the stored hashed value
 	// If there is a match, the API key is valid
 	// Otherwise, the API key is invalid
-	err = bcrypt.CompareHashAndPassword([]byte(token.HashedValue), []byte(secret))
+	err = bcrypt.CompareHashAndPassword([]byte(apiToken.HashedValue), []byte(secret))
 	if err != nil {
 		return false, nil, errors.New("Invalid API token")
 	}
@@ -87,8 +146,8 @@ func VerifyApiKey(db *gorm.DB, apiKey string, verifiedKeysCache *ttlcache.Cache[
 	// Keys that have an expiration time are cached with a TTL equal to the time until expiration
 	// Keys that don't have an expiration time are cached with the default TTL
 	cacheTTL := ttlcache.DefaultTTL
-	if !token.ExpiresAt.IsZero() {
-		timeUntilExpiration := time.Until(token.ExpiresAt)
+	if !apiToken.ExpiresAt.IsZero() {
+		timeUntilExpiration := time.Until(apiToken.ExpiresAt)
 		if timeUntilExpiration < cacheTTL {
 			cacheTTL = timeUntilExpiration
 		}
@@ -96,10 +155,10 @@ func VerifyApiKey(db *gorm.DB, apiKey string, verifiedKeysCache *ttlcache.Cache[
 
 	cached := server_structs.ApiKeyCached{
 		Token:        apiKey,
-		Capabilities: strings.Split(token.Scopes, ","),
-		ExpiresAt:    token.ExpiresAt,
+		Capabilities: strings.Split(apiToken.Scopes, ","),
+		ExpiresAt:    apiToken.ExpiresAt,
 	}
-	verifiedKeysCache.Set(id, cached, cacheTTL)
+	VerifiedKeysCache.Set(id, cached, cacheTTL)
 	return true, cached.Capabilities, nil
 }
 
@@ -145,8 +204,8 @@ func CreateApiKey(db *gorm.DB, name, createdBy, scopes string, expiration time.T
 
 // DeleteApiKey deletes the API key with the given ID.
 // It returns an error if an error occurred.
-// It also removes the API key from the verifiedKeysCache so that the deleted key is no longer valid.
-func DeleteApiKey(db *gorm.DB, id string, verifiedKeysCache *ttlcache.Cache[string, server_structs.ApiKeyCached]) error {
+// It also removes the API key from the VerifiedKeysCache so that the deleted key is no longer valid.
+func DeleteApiKey(db *gorm.DB, id string) error {
 	result := db.Delete(&server_structs.ApiKey{}, "id = ?", id)
 	if result.Error != nil {
 		return errors.Wrap(result.Error, "failed to delete the API key")
@@ -155,7 +214,7 @@ func DeleteApiKey(db *gorm.DB, id string, verifiedKeysCache *ttlcache.Cache[stri
 		return errors.New("API key not found")
 	}
 	// delete from cache so that we don't accidentally allow the deleted key to be used
-	verifiedKeysCache.Delete(id)
+	VerifiedKeysCache.Delete(id)
 	return nil
 }
 
@@ -168,3 +227,7 @@ func ListApiKeys(db *gorm.DB) ([]server_structs.ApiKey, error) {
 
 	return apiKeys, nil
 }
+
+// ServerDatabase holds the gorm.DB reference for looking up API keys.
+// It is set by the caller (e.g. web_ui) before any token verification happens.
+var ServerDatabase *gorm.DB
