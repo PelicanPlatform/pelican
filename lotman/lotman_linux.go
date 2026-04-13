@@ -1046,7 +1046,9 @@ func initLots(nsAds []server_structs.NamespaceAdV2) ([]Lot, error) {
 	log.Tracef("Lotman will split lot disk space quotas amongst the discovered disk space: %vB", totalDiskSpaceB)
 	if policy.DivideUnallocated {
 		log.Traceln("Dividing unallocated space among lots")
-		divideRemainingSpace(&lotMap, totalDiskSpaceB)
+		if err := divideRemainingSpace(&lotMap, totalDiskSpaceB); err != nil {
+			return nil, err
+		}
 	}
 
 	// Set up lot timestamps (creation, expiration, deletion) if needed
