@@ -23,6 +23,7 @@ package main
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -153,6 +154,11 @@ func init() {
 	rootCmd.AddCommand(config_printer.ConfigCmd)
 	preferredPrefix := config.GetPreferredPrefix()
 	rootCmd.Use = strings.ToLower(preferredPrefix.String())
+	// If the binary name differs from the prefix (e.g. pelican-server), use
+	// the actual binary name so that help output matches the executable.
+	if binName := filepath.Base(os.Args[0]); binName != "" {
+		rootCmd.Use = binName
+	}
 	rootCmd.DisableAutoGenTag = true
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/pelican/pelican.yaml)")
