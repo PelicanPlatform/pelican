@@ -1,4 +1,4 @@
-//go:build server && !windows
+//go:build client
 
 /***************************************************************
  *
@@ -20,20 +20,20 @@
 
 package main
 
-import (
-	_ "embed"
+import "strings"
 
-	"github.com/spf13/cobra"
-
-	"github.com/pelicanplatform/pelican/launchers"
-	"github.com/pelicanplatform/pelican/server_structs"
-)
-
-func serveOrigin(cmd *cobra.Command, args []string) error {
-	_, cancel, err := launchers.LaunchModules(cmd.Context(), server_structs.OriginType)
-	if err != nil {
-		cancel()
+func init() {
+	cliDispatchHook = func(execName string, args []string) (bool, error) {
+		if strings.HasPrefix(execName, "stash_plugin") ||
+			strings.HasPrefix(execName, "osdf_plugin") ||
+			strings.HasPrefix(execName, "pelican_xfer_plugin") ||
+			strings.HasPrefix(execName, "pelican_plugin") {
+			stashPluginMain(args[1:])
+			return true, nil
+		}
+		if strings.HasPrefix(execName, "stashcp") {
+			return true, copyCmd.Execute()
+		}
+		return false, nil
 	}
-
-	return err
 }

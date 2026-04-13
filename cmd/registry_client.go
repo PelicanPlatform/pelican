@@ -1,6 +1,8 @@
+//go:build client || server
+
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -248,6 +250,8 @@ func init() {
 	//getCmd.Flags().StringVar(&prefix, "prefix", "", "prefix for get namespace")
 	//getCmd.Flags().BoolVar(&jwks, "jwks", false, "Get the jwks of the namespace")
 	deleteCmd.Flags().StringVar(&prefix, "prefix", "", "prefix for delete namespace")
+
+	rootCmd.AddCommand(namespaceCmd)
 
 	namespaceCmd.PersistentFlags().String("namespace-url", "", "Endpoint for the namespace registry")
 	// Don't override Federation.RegistryUrl if the flag value is empty

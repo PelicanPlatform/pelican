@@ -1,6 +1,8 @@
+//go:build client || server
+
 /***************************************************************
 *
-* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -132,6 +134,7 @@ func addScopeFlags(cmd *cobra.Command) {
 }
 
 func init() {
+	rootCmd.AddCommand(tokenCmd)
 	tokenCmd.AddCommand(tokenCreateCmd)
 	tokenCmd.AddCommand(tokenFetchCmd)
 

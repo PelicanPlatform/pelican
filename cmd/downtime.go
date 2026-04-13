@@ -1,6 +1,8 @@
+//go:build client || server
+
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -36,6 +38,8 @@ administrative API endpoint.`,
 )
 
 func init() {
+	rootCmd.AddCommand(downtimeCmd)
+
 	// Add the server URL as a REQUIRED persistent flag to all subcommands of downtimeCmd
 	downtimeCmd.PersistentFlags().StringVarP(&serverURLStr, "server", "s", "", "Web URL of the Pelican server (e.g. https://my-origin.com:8447)")
 
