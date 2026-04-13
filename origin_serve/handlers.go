@@ -274,14 +274,15 @@ func authMiddleware() gin.HandlerFunc {
 		for _, tok := range tokens {
 			ctx, authorized := ac.authorizeWithContext(c.Request.Context(), action, resource, tok)
 			if authorized {
+				if authorizedContext == nil {
+					authorizedContext = ctx
+				}
 				// Check if this token is from the federation issuer (for DisableDirectClients tracking)
 				if disableDirectClients && fedDiscoveryURL != "" {
 					issuer, ok := ctx.Value(issuerContextKey{}).(string)
 					if ok && issuer == fedDiscoveryURL {
 						federationCtx = ctx
 					}
-				} else {
-					authorizedContext = ctx
 				}
 				if authorizedContext != nil && (!disableDirectClients || federationCtx != nil) {
 					break // No need to check more tokens
