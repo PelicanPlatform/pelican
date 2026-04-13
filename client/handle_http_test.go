@@ -3487,6 +3487,7 @@ func TestPermissionDeniedError(t *testing.T) {
 	transfer := &transferFile{
 		ctx:       context.Background(),
 		job:       tj,
+		localPath: os.DevNull,
 		remoteURL: svrURL,
 		token:     tj.token,
 		attempts: []transferAttemptDetails{
@@ -3502,7 +3503,6 @@ func TestPermissionDeniedError(t *testing.T) {
 			expiredTime.Unix(), expiredTime.Add(-time.Hour).Unix())
 		transfer.job.token.SetToken(expiredJWT)
 
-		time.Sleep(time.Second * 4) // Sleep for longer than the token lifetime
 		res, err := downloadObject(transfer)
 		require.NoError(t, err)
 		require.Error(t, res.Error)
