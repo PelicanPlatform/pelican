@@ -32,6 +32,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type RegisteredPrefixUpdate struct {
@@ -52,7 +53,7 @@ type RegisteredPrefixUpdate struct {
 
 // Generate server nonce for key-sign challenge when updating the public key of registered namespace(s)
 func updateNsKeySignChallengeInit(data *RegisteredPrefixUpdate) (map[string]interface{}, error) {
-	serverNonce, err := generateNonce()
+	serverNonce, err := utils.GenerateNonce()
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to generate nonce for key-sign challenge")
 	}
@@ -64,7 +65,7 @@ func updateNsKeySignChallengeInit(data *RegisteredPrefixUpdate) (map[string]inte
 		return nil, errors.Wrap(err, "Server is unable to generate a key sign challenge: Failed to load the server's private key")
 	}
 
-	serverSignature, err := signPayload(serverPayload, privateKey)
+	serverSignature, err := utils.SignPayload(serverPayload, privateKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to sign payload for key-sign challenge")
 	}
@@ -132,7 +133,7 @@ func updateNsKeySignChallengeCommit(data *RegisteredPrefixUpdate) (map[string]in
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to decode the client's signature")
 	}
-	clientVerified := verifySignature(clientPayload, clientSignature, (rawkey).(*ecdsa.PublicKey))
+	clientVerified := utils.VerifySignature(clientPayload, clientSignature, (rawkey).(*ecdsa.PublicKey))
 	serverPayload, err := hex.DecodeString(data.ServerPayload)
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to decode the server's payload")
@@ -148,7 +149,7 @@ func updateNsKeySignChallengeCommit(data *RegisteredPrefixUpdate) (map[string]in
 		return nil, errors.Wrap(err, "Failed to decode the server's private key")
 	}
 	serverPubkey := serverPrivateKey.PublicKey
-	serverVerified := verifySignature(serverPayload, serverSignature, &serverPubkey)
+	serverVerified := utils.VerifySignature(serverPayload, serverSignature, &serverPubkey)
 
 	// Overwrite the namespace's public key(s) with the latest keys in the origin
 	if clientVerified && serverVerified {
@@ -190,7 +191,7 @@ func updateNsKeySignChallengeCommit(data *RegisteredPrefixUpdate) (map[string]in
 				return nil, errors.Wrap(err, "failed to generate the raw key from the matched key")
 			}
 
-			keyUpdateAuthzVerified := verifySignature(clientPayload, keyUpdateAuthzSignature, rawkey)
+			keyUpdateAuthzVerified := utils.VerifySignature(clientPayload, keyUpdateAuthzSignature, rawkey)
 			if !keyUpdateAuthzVerified {
 				return nil, permissionDeniedError{
 					Message: fmt.Sprintf("The client that tries to update prefix '%s' cannot be authorized because it fails to pass the proof of possession verification", prefix),

@@ -41,7 +41,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/registry"
+	"github.com/pelicanplatform/pelican/registry/registry_client"
 )
 
 // Variables to which command line arguments will
@@ -122,13 +122,13 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 	if withIdentity {
-		err := registry.NamespaceRegisterWithIdentity(privateKey, registrationEndpointURL, prefix, siteName)
+		err := registry_client.NamespaceRegisterWithIdentity(privateKey, registrationEndpointURL, prefix, siteName)
 		if err != nil {
 			log.Errorf("Failed to register prefix %s with identity: %v", prefix, err)
 			os.Exit(1)
 		}
 	} else {
-		err := registry.NamespaceRegister(privateKey, registrationEndpointURL, "", prefix, siteName)
+		err := registry_client.NamespaceRegister(privateKey, registrationEndpointURL, "", prefix, siteName)
 		if err != nil {
 			log.Errorf("Failed to register prefix %s: %v", prefix, err)
 			os.Exit(1)
@@ -154,7 +154,7 @@ func deleteANamespace(cmd *cobra.Command, args []string) {
 		log.Errorf("Failed to construction deletion endpoint URL: %v", err)
 	}
 
-	err = registry.NamespaceDelete(deletionEndpointURL, prefix)
+	err = registry_client.NamespaceDelete(deletionEndpointURL, prefix)
 	if err != nil {
 		log.Errorf("Failed to delete prefix %s: %v", prefix, err)
 		os.Exit(1)
@@ -179,7 +179,7 @@ func listAllNamespaces(cmd *cobra.Command, args []string) {
 		log.Errorf("Failed to construction list endpoint URL: %v", err)
 	}
 
-	err = registry.NamespaceList(listEndpoint)
+	err = registry_client.NamespaceList(listEndpoint)
 	if err != nil {
 		log.Errorf("Failed to list namespace information: %v", err)
 		os.Exit(1)
@@ -203,7 +203,7 @@ func listAllNamespaces(cmd *cobra.Command, args []string) {
 // 		}
 
 // 		endpoint := url.JoinPath(namespaceEndpoint, prefix, "issuer.jwks")
-// 		err = registry.NamespaceGet(endpoint)
+// 		err = registry_client.NamespaceGet(endpoint)
 // 		if err != nil {
 // 			log.Errorf("Failed to get jwks info for prefix %s: %v", prefix, err)
 // 			os.Exit(1)

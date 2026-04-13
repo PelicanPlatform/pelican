@@ -28,10 +28,7 @@ package registry
 
 import (
 	"context"
-	"crypto"
 	"crypto/ecdsa"
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -55,6 +52,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 var OIDC struct {
@@ -163,15 +161,6 @@ func matchKeys(incomingKey jwk.Key, registeredNamespaces []string) (bool, error)
 	return foundMatch, nil
 }
 
-func generateNonce() (string, error) {
-	nonce := make([]byte, 32)
-	_, err := rand.Read(nonce)
-	if err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(nonce), nil
-}
-
 func loadServerKeys() (*ecdsa.PrivateKey, error) {
 	// Note: go 1.21 introduces `OnceValues` which automates this procedure.
 	// TODO: Reimplement the function once we switch to a minimum of 1.21
@@ -199,20 +188,6 @@ func loadServerKeys() (*ecdsa.PrivateKey, error) {
 	})
 
 	return serverCredsPrivKey, serverCredsErr
-}
-
-func signPayload(payload []byte, privateKey *ecdsa.PrivateKey) ([]byte, error) {
-	hash := sha256.Sum256(payload)
-	signature, err := privateKey.Sign(rand.Reader, hash[:], crypto.SHA256) // Use crypto.SHA256 instead of the hash[:]
-	if err != nil {
-		return nil, err
-	}
-	return signature, nil
-}
-
-func verifySignature(payload []byte, signature []byte, publicKey *ecdsa.PublicKey) bool {
-	hash := sha256.Sum256(payload)
-	return ecdsa.VerifyASN1(publicKey, hash[:], signature)
 }
 
 // When a request wants to register a new service (Origin/Cache) on an existing server,
@@ -252,7 +227,7 @@ func verifyServerOwnership(existingServer *server_structs.ServerRegistration, da
 			continue
 		}
 
-		verified := verifySignature(clientPayload, clientSignature, ecdsaKey)
+		verified := utils.VerifySignature(clientPayload, clientSignature, ecdsaKey)
 
 		if verified {
 			return true, nil // Stop iteration
@@ -263,7 +238,7 @@ func verifyServerOwnership(existingServer *server_structs.ServerRegistration, da
 
 // Generate server nonce for key-sign challenge
 func keySignChallengeInit(data *registrationData) (map[string]interface{}, error) {
-	serverNonce, err := generateNonce()
+	serverNonce, err := utils.GenerateNonce()
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to generate nonce for key-sign challenge")
 	}
@@ -275,7 +250,7 @@ func keySignChallengeInit(data *registrationData) (map[string]interface{}, error
 		return nil, errors.Wrap(err, "Server is unable to generate a key sign challenge: Failed to load the server's private key")
 	}
 
-	serverSignature, err := signPayload(serverPayload, privateKey)
+	serverSignature, err := utils.SignPayload(serverPayload, privateKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to sign payload for key-sign challenge")
 	}
@@ -313,7 +288,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 	if err != nil {
 		return false, nil, errors.Wrap(err, "Failed to decode the client's signature")
 	}
-	clientVerified := verifySignature(clientPayload, clientSignature, (rawkey).(*ecdsa.PublicKey))
+	clientVerified := utils.VerifySignature(clientPayload, clientSignature, (rawkey).(*ecdsa.PublicKey))
 	serverPayload, err := hex.DecodeString(data.ServerPayload)
 	if err != nil {
 		return false, nil, errors.Wrap(err, "Failed to decode the server's payload")
@@ -329,7 +304,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		return false, nil, errors.Wrap(err, "Failed to decode the server's private key")
 	}
 	serverPubkey := serverPrivateKey.PublicKey
-	serverVerified := verifySignature(serverPayload, serverSignature, &serverPubkey)
+	serverVerified := utils.VerifySignature(serverPayload, serverSignature, &serverPubkey)
 
 	if !(clientVerified && serverVerified) {
 		return false, nil, errors.Errorf("Unable to verify the client's public key, or an encountered an error with its own: "+

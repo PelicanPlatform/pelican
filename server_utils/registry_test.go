@@ -28,6 +28,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/utils/registry_discovery"
 )
 
 func TestGetNSIssuerURL(t *testing.T) {
@@ -37,7 +38,7 @@ func TestGetNSIssuerURL(t *testing.T) {
 	require.NoError(t, config.InitClient())
 
 	require.NoError(t, param.Set(param.Federation_RegistryUrl, "https://registry.com:8446"))
-	url, err := GetNSIssuerURL("/test-prefix")
+	url, err := registry_discovery.GetNSIssuerURL("/test-prefix")
 	assert.Equal(t, nil, err)
 	assert.Equal(t, "https://registry.com:8446/api/v1.0/registry/test-prefix", url)
 	ResetTestState()
@@ -53,11 +54,11 @@ func TestGetJWKSURLFromIssuerURL(t *testing.T) {
 	defer registry.Close()
 	require.NoError(t, param.Set(param.Federation_RegistryUrl, registry.URL))
 	expectedIssuerUrl := registry.URL + "/api/v1.0/registry/test-prefix"
-	url, err := GetNSIssuerURL("/test-prefix")
+	url, err := registry_discovery.GetNSIssuerURL("/test-prefix")
 	assert.Equal(t, nil, err)
 	assert.Equal(t, expectedIssuerUrl, url)
 
-	keyLoc, err := GetJWKSURLFromIssuerURL(url)
+	keyLoc, err := registry_discovery.GetJWKSURLFromIssuerURL(url)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, "https://registry.com:8446/api/v1.0/registry/test-prefix/.well-known/issuer.jwks", keyLoc)
 }
