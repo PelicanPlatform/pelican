@@ -20,11 +20,12 @@ package web_ui
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"embed"
 	"fmt"
 	builtin_log "log"
-	"math/rand"
+	"math/big"
 	"mime"
 	"net"
 	"net/http"
@@ -69,6 +70,20 @@ var (
 )
 
 const notFoundFilePath = "frontend/out/404/index.html"
+
+// isSafeRedirectURL checks whether a redirect target is a relative
+// path (no scheme or host), preventing open-redirect attacks.
+func isSafeRedirectURL(rawURL string) bool {
+	if rawURL == "" {
+		return false
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	// Reject absolute URLs (scheme or host set) and protocol-relative URLs (//evil.com)
+	return parsed.Scheme == "" && parsed.Host == "" && !strings.HasPrefix(rawURL, "//")
+}
 
 type CreateApiTokenReq struct {
 	Name       string   `json:"name"`
@@ -301,7 +316,7 @@ func handleWebUIAuth(ctx *gin.Context) {
 	// Redirect authenticated users from login pages
 	if strings.HasPrefix(requestPath, "/login") && err == nil && user != "" {
 		returnUrl := ctx.Query("returnURL")
-		if returnUrl == "" {
+		if !isSafeRedirectURL(returnUrl) {
 			returnUrl = "/view/"
 		}
 		ctx.Redirect(http.StatusFound, returnUrl)
@@ -746,7 +761,12 @@ func waitUntilLogin(ctx context.Context) error {
 	}()
 	for {
 		previousCode.Store(currentCode.Load())
-		newCode := fmt.Sprintf("%06v", rand.Intn(1000000))
+		randVal, err := rand.Int(rand.Reader, big.NewInt(1000000))
+		if err != nil {
+			log.Errorf("Failed to generate secure activation code: %v", err)
+			continue
+		}
+		newCode := fmt.Sprintf("%06v", randVal.Int64())
 		currentCode.Store(&newCode)
 		newCodeWithNewline := fmt.Sprintf("%v\n", newCode)
 		if err := os.WriteFile(activationFile, []byte(newCodeWithNewline), 0600); err != nil {

@@ -480,6 +480,7 @@ func getAllowedPrefixesForCaches() (map[string][]string, error) {
 // The rest of the AdminMetadata fields is matched by `==`
 func getRegistrationsByFilter(filterNs server_structs.Registration, pType prefixType, legacy bool) ([]server_structs.Registration, error) {
 	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM registrations WHERE 1=1 `
+	queryArgs := []interface{}{}
 	if pType == prefixForCache {
 		// Refer to the cache prefix name in cmd/cache_serve
 		query += ` AND prefix LIKE '/caches/%'`
@@ -504,7 +505,8 @@ func getRegistrationsByFilter(filterNs server_structs.Registration, pType prefix
 		return nil, errors.New("Unsupported operation: Can't filter against Pubkey field.")
 	}
 	if filterNs.Prefix != "" {
-		query += fmt.Sprintf(" AND prefix like '%%%s%%' ", filterNs.Prefix)
+		query += " AND prefix like ? "
+		queryArgs = append(queryArgs, "%"+filterNs.Prefix+"%")
 	}
 	if !filterNs.AdminMetadata.ApprovedAt.Equal(time.Time{}) || !filterNs.AdminMetadata.UpdatedAt.Equal(time.Time{}) || !filterNs.AdminMetadata.CreatedAt.Equal(time.Time{}) {
 		return nil, errors.New("Unsupported operation: Can't filter against date.")
@@ -513,7 +515,7 @@ func getRegistrationsByFilter(filterNs server_structs.Registration, pType prefix
 	query += " ORDER BY id ASC"
 
 	registrationsIn := []server_structs.Registration{}
-	if err := database.ServerDatabase.Raw(query).Scan(&registrationsIn).Error; err != nil {
+	if err := database.ServerDatabase.Raw(query, queryArgs...).Scan(&registrationsIn).Error; err != nil {
 		return nil, err
 	}
 
