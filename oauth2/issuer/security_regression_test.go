@@ -181,6 +181,107 @@ func TestTokenExchangeScopeEnforcement(t *testing.T) {
 		"no refresh token should be issued when offline_access is not granted")
 }
 
+// --- Finding #2b: Auth code flow client scope enforcement ---
+
+// TestAuthCodeClientScopeEnforcement verifies that the authorization code
+// flow enforces the client's configured scope allow-list. A client that does
+// not include offline_access in its scopes must not receive it in the
+// resulting token even when the user's auth rules permit it. This is the
+// auth code path analog of TestTokenExchangeScopeEnforcement (Finding #2).
+func TestAuthCodeClientScopeEnforcement(t *testing.T) {
+	provider, ts := setupIntegration(t)
+
+	// Create a client that does NOT list offline_access in its scopes.
+	secret := "authcode-scope-secret"
+	clientID := "authcode-scope-client"
+	hashedSecret, err := secBcryptHash(secret)
+	require.NoError(t, err)
+
+	narrowClient := &fosite.DefaultClient{
+		ID:            clientID,
+		Secret:        hashedSecret,
+		RedirectURIs:  []string{testRedirect},
+		GrantTypes:    fosite.Arguments{"authorization_code", "refresh_token"},
+		ResponseTypes: fosite.Arguments{"code"},
+		// Note: no offline_access in scopes.
+		Scopes:   fosite.Arguments{"openid", "wlcg", "storage.read:/"},
+		Audience: fosite.Arguments{WLCGAudienceAny},
+	}
+	require.NoError(t, provider.Storage().CreateClient(context.Background(), narrowClient))
+
+	httpClient := ts.Client()
+	httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
+	// Step 1: Authorize — request offline_access and storage.read:/.
+	// Fosite validates requested scopes are in the client's registered
+	// scopes, so we only request scopes the client declares. But we rely
+	// on our handler to block offline_access since it's not in the
+	// client's scope list.
+	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	codeChallenge := generateCodeChallenge(codeVerifier)
+
+	authURL := ts.URL + "/api/v1.0/issuer/ns/test/ns/authorize?" + url.Values{
+		"response_type":         {"code"},
+		"client_id":             {clientID},
+		"redirect_uri":          {testRedirect},
+		"scope":                 {"openid wlcg storage.read:/"},
+		"state":                 {"scope-enforce-test"},
+		"code_challenge":        {codeChallenge},
+		"code_challenge_method": {"S256"},
+	}.Encode()
+
+	resp, err := httpClient.Get(authURL)
+	require.NoError(t, err)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	require.True(t, resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusFound,
+		"authorize should redirect, got %d: %s", resp.StatusCode, string(body))
+
+	location := resp.Header.Get("Location")
+	redirectURL, err := url.Parse(location)
+	require.NoError(t, err)
+	code := redirectURL.Query().Get("code")
+	require.NotEmpty(t, code, "redirect should contain authorization code")
+
+	// Step 2: Exchange code for tokens using the narrow client.
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"redirect_uri":  {testRedirect},
+		"client_id":     {clientID},
+		"code_verifier": {codeVerifier},
+	}
+	req, err := http.NewRequest("POST", ts.URL+"/api/v1.0/issuer/ns/test/ns/token", strings.NewReader(form.Encode()))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth(clientID, secret)
+
+	tokenResp, err := httpClient.Do(req)
+	require.NoError(t, err)
+	tokenBody, _ := io.ReadAll(tokenResp.Body)
+	tokenResp.Body.Close()
+	require.Equal(t, http.StatusOK, tokenResp.StatusCode,
+		"token exchange should succeed, body: %s", string(tokenBody))
+
+	var tokenResult map[string]interface{}
+	require.NoError(t, json.Unmarshal(tokenBody, &tokenResult))
+
+	accessToken := tokenResult["access_token"].(string)
+	claims := secParseJWT(t, provider, accessToken)
+	scopeStr, _ := claims.Get("scope")
+	assert.NotContains(t, scopeStr, "offline_access",
+		"auth-code token must not contain offline_access when client scopes exclude it")
+	assert.Contains(t, scopeStr, "storage.read:",
+		"auth-code token should contain storage.read which is in both user and client scopes")
+
+	// Must NOT have a refresh token since offline_access was not granted.
+	_, hasRefresh := tokenResult["refresh_token"]
+	assert.False(t, hasRefresh,
+		"no refresh token should be issued when offline_access is not in client scopes")
+}
+
 // --- Finding #3: Device flow client scope enforcement ---
 
 // TestDeviceFlowClientScopeEnforcement verifies that a device client limited

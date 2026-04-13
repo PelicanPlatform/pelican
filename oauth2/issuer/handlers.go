@@ -407,15 +407,24 @@ func handleAuthorize(provider *OIDCProvider) gin.HandlerFunc {
 		// Filter requested scopes to what the user is allowed.
 		// When a requested scope is broader than what's permitted,
 		// substitute in all narrower allowed scopes that fall under it.
+		//
+		// Standard OIDC scopes (openid, offline_access, wlcg, profile,
+		// email) are protocol-level and not governed by the user's data
+		// authorization rules. They bypass the user-authorization check
+		// but are still subject to the client's configured scope list so
+		// that operators can restrict which clients receive them.
+		clientScopes := ar.GetClient().GetScopes()
 		for _, scope := range ar.GetRequestedScopes() {
 			scope = cleanScopePath(scope)
-			if isStandardScope(scope) {
-				ar.GrantScope(scope)
-			} else if scopeAllowed(scope, allowedScopes) {
-				ar.GrantScope(scope)
+			var candidates []string
+			if isStandardScope(scope) || scopeAllowed(scope, allowedScopes) {
+				candidates = []string{scope}
 			} else {
-				for _, ns := range collectNarrowerScopes(scope, allowedScopes) {
-					ar.GrantScope(ns)
+				candidates = collectNarrowerScopes(scope, allowedScopes)
+			}
+			for _, s := range candidates {
+				if scopeAllowed(s, clientScopes) {
+					ar.GrantScope(s)
 				}
 			}
 		}
@@ -675,13 +684,14 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 
 		// Filter scopes — when a requested scope is broader than what's
 		// permitted, substitute in all narrower allowed scopes.
-		// Standard scopes are not auto-allowed here; any scope must be
-		// agreed by both the user's authorization rules and the client's
-		// configured scope list (enforced in the second pass below).
+		// Standard OIDC scopes (openid, offline_access, etc.) bypass
+		// the user-authorization check (they are protocol-level, not
+		// data-access scopes) but are still filtered against the
+		// client's configured scope list in the second pass below.
 		grantedScopes := make([]string, 0)
 		for _, scope := range requestedScopes {
 			scope = cleanScopePath(scope)
-			if scopeAllowed(scope, allowedScopes) {
+			if isStandardScope(scope) || scopeAllowed(scope, allowedScopes) {
 				grantedScopes = append(grantedScopes, scope)
 			} else {
 				grantedScopes = append(grantedScopes, collectNarrowerScopes(scope, allowedScopes)...)
@@ -1377,6 +1387,10 @@ func handleAdminDispatch(ctx *gin.Context) {
 	}
 }
 
+// isStandardScope returns true for OIDC/WLCG protocol-level scopes
+// that are not governed by per-user data authorization rules.
+// These scopes bypass the user-authorization check but are still
+// subject to the client's configured scope allow-list.
 func isStandardScope(scope string) bool {
 	switch scope {
 	case "openid", "offline_access", "wlcg", "profile", "email":
