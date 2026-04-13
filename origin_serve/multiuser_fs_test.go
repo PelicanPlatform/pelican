@@ -136,7 +136,13 @@ func TestMultiuserFileSystem_BasicOperations(t *testing.T) {
 	// user (nobody) to exercise setfsuid/setfsgid and verify file ownership.
 	// Otherwise, it falls back to a mock lookup as root (no-op identity switch)
 	// to verify basic delegation.
-	tmpDir := t.TempDir()
+
+	// Create the temp directory directly under /tmp so an unprivileged user
+	// can traverse to it without needing to chmod arbitrary parent dirs
+	// (t.TempDir() nests arbitrarily deep on some platforms).
+	tmpDir, err := os.MkdirTemp("/tmp", "pelican-multiuser-test-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
 
 	var (
 		lookup      identity.Lookup
@@ -158,8 +164,8 @@ func TestMultiuserFileSystem_BasicOperations(t *testing.T) {
 		expectedGID, err := strconv.ParseUint(nobodyUser.Gid, 10, 32)
 		require.NoError(t, err)
 
-		// Make the dir world-traversable so the switched UID can access it.
-		require.NoError(t, os.Chmod(tmpDir, 0777))
+		// Give nobody ownership so it can create/rename/remove entries.
+		require.NoError(t, os.Chown(tmpDir, int(expectedUID), int(expectedGID)))
 
 		lookup = identity.NewLookup()
 		ctx = setUserInfo(context.Background(), &userInfo{User: "nobody", Groups: []string{nobodyGrp.Name}})
@@ -178,7 +184,7 @@ func TestMultiuserFileSystem_BasicOperations(t *testing.T) {
 	mfs := buildMultiuserFS(t, tmpDir, lookup, 0)
 
 	// Mkdir
-	err := mfs.Mkdir(ctx, "/testdir", 0755)
+	err = mfs.Mkdir(ctx, "/testdir", 0755)
 	require.NoError(t, err)
 	verifyOwner(t, "testdir")
 
