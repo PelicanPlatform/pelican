@@ -91,8 +91,7 @@ builds:
     ldflags:
       - *ldflags-metadata
 
-  # Build a second, server binary that enables Lotman. Eventually, we'll
-  # also use this to filter which modules are built into the binary.
+  # Build a second, server-only binary.
   - id: pelican-server
     env:
       - CGO_ENABLED=0
@@ -106,7 +105,6 @@ builds:
     tags:
       - forceposix
       - server
-      - lotman
     ldflags:
       - *ldflags-metadata
 

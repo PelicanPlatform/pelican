@@ -29,10 +29,10 @@ jobs:
         include:
           - binary_name: pelican
             coverprofile: coverage.out
-            tags: ""
+            tags: client
           - binary_name: pelican-server
             coverprofile: coverage-server.out
-            tags: lotman
+            tags: server
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
