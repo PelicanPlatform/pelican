@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -48,6 +48,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/term"
 
+	"github.com/pelicanplatform/pelican/api_token"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/metrics"
@@ -469,7 +470,7 @@ func createApiToken(ctx *gin.Context) {
 		})
 		return
 	}
-	token, err := database.CreateApiKey(database.ServerDatabase, req.Name, user, scopes, expirationTime)
+	token, err := api_token.CreateApiKey(database.ServerDatabase, req.Name, user, scopes, expirationTime)
 	if err != nil {
 		log.Warning("Failed to create API key: ", err)
 		ctx.JSON(status, server_structs.SimpleApiResp{
@@ -498,7 +499,7 @@ func deleteApiToken(ctx *gin.Context) {
 		return
 	}
 	id := ctx.Param("id")
-	err = database.DeleteApiKey(database.ServerDatabase, id, token.VerifiedKeysCache)
+	err = api_token.DeleteApiKey(database.ServerDatabase, id)
 	if err != nil {
 		log.Warning("Failed to delete API key: ", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -530,7 +531,7 @@ func listApiTokens(ctx *gin.Context) {
 		return
 	}
 
-	apiKeys, err := database.ListApiKeys(database.ServerDatabase)
+	apiKeys, err := api_token.ListApiKeys(database.ServerDatabase)
 	if err != nil {
 		log.Warning("Failed to list API keys: ", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -785,16 +786,19 @@ func waitUntilLogin(ctx context.Context) error {
 //
 // You need to mount the static resources for UI in a separate function
 func ConfigureServerWebAPI(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
+	// Give the API token package access to the server DB
+	api_token.ServerDatabase = database.ServerDatabase
+
 	// start the cache for verified API keys
 	egrp.Go(func() error {
-		token.VerifiedKeysCache.Start()
+		api_token.VerifiedKeysCache.Start()
 		return nil
 	})
 
 	// Wait on the context to stop the cache
 	egrp.Go(func() error {
 		<-ctx.Done()
-		token.VerifiedKeysCache.Stop()
+		api_token.VerifiedKeysCache.Stop()
 		return nil
 	})
 

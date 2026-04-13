@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -26,22 +26,18 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
@@ -73,18 +69,15 @@ const (
 const (
 	FederationIssuer TokenIssuer = "FederationIssuer"
 	LocalIssuer      TokenIssuer = "LocalIssuer"
+	// The APITokenIssuer issuer is ONLY available in server binaries.
+	// Attempting to use it in the client will create a runtime error!
 	APITokenIssuer   TokenIssuer = "APITokenIssuer"
 	RegisteredServer TokenIssuer = "RegisteredServer"
 )
 
 var (
-	federationJWK     *jwk.Cache
-	authChecker       AuthChecker
-	VerifiedKeysCache *ttlcache.Cache[string, server_structs.ApiKeyCached] = ttlcache.New[string, server_structs.ApiKeyCached](
-		ttlcache.WithTTL[string, server_structs.ApiKeyCached](time.Hour * 24),
-	)
-	// API token format: <5-char ID>.<64-char secret>, total length = 70, alphanumeric
-	ApiTokenRegex = regexp.MustCompile(`^[a-zA-Z0-9]{5}\.[a-zA-Z0-9]{64}$`)
+	federationJWK *jwk.Cache
+	authChecker   AuthChecker
 
 	registeredServerJWKSResolver atomic.Pointer[RegisteredServerJWKSResolver]
 )
@@ -399,7 +392,11 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 				return http.StatusOK, true, nil
 			}
 		case APITokenIssuer:
-			if err := checkApiTokenIssuer(token, authOption.Scopes, authOption.AllScopes); err != nil {
+			// This token issuer is ONLY available to server binaries, since it relies on the CheckApiTokenIssuerFunc
+			// which is set by the api_token package's init() function.
+			// This workaround was needed at the time to disentangle dependencies so that the client binary
+			// could be built without pulling in the database dependencies associated with API token verification.
+			if err := CheckApiTokenIssuerFunc(token, authOption.Scopes, authOption.AllScopes); err != nil {
 				compoundErr = append(compoundErr, errors.Wrap(err, "cannot verify token with API token issuer"))
 			} else {
 				return http.StatusOK, true, nil
@@ -555,21 +552,11 @@ func GetJWKSFromIssUrl(issuer string) (*jwk.Set, error) {
 	return &kSet, nil
 }
 
-func checkApiTokenIssuer(token string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
-	matched := ApiTokenRegex.MatchString(token)
-	if !matched {
-		return errors.New("Invalid API token format")
-	}
-	ok, capabilities, err := database.VerifyApiKey(database.ServerDatabase, token, VerifiedKeysCache)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return errors.New("Invalid API token")
-	}
-
-	if !token_scopes.ScopeContains(capabilities, expectedScopes, allScopes) {
-		return errors.New(fmt.Sprintf("Token does not contain any of the scopes: %v", expectedScopes))
-	}
-	return nil
+// CheckApiTokenIssuerFunc is a hook for verifying API tokens against the database.
+// It is set automatically by the api_token package's init() for server binaries.
+// If you see the warning below in logs, it means APITokenIssuer was requested but
+// the api_token package was never imported — add a blank import in a server-only file.
+var CheckApiTokenIssuerFunc = func(tok string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
+	log.Warn("API token verification requested but api_token package is not linked; import api_token in a server-tagged file")
+	return errors.New("API token verification is not available in this binary")
 }
