@@ -560,7 +560,7 @@ func (s *OIDCStorage) GetAuthorizeCodeSession(ctx context.Context, signature str
 
 func (s *OIDCStorage) InvalidateAuthorizeCodeSession(ctx context.Context, signature string) error {
 	return s.db.WithContext(ctx).Table("oidc_authorization_codes").
-		Where("signature = ?", signature).
+		Where("signature = ? AND namespace = ?", signature, s.Namespace).
 		Update("active", false).Error
 }
 

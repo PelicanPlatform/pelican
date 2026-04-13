@@ -29,7 +29,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/go-jose/go-jose/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/mohae/deepcopy"
@@ -73,10 +72,6 @@ type OIDCProvider struct {
 	// RegistrationLimiter enforces per-IP rate limiting on the dynamic
 	// client registration endpoint.
 	RegistrationLimiter *registrationRateLimiter
-
-	// adminMiddleware holds the authentication/authorization middleware
-	// that must be applied to admin endpoints. Set via SetAdminMiddleware.
-	adminMiddleware []gin.HandlerFunc
 }
 
 // NewOIDCProvider creates a new embedded OIDC provider for the given namespace.
@@ -420,12 +415,6 @@ func (p *OIDCProvider) EnsureClient(ctx context.Context, clientID, secret string
 // compiled by oa4mp.InitAuthzRules().
 func (p *OIDCProvider) SetAuthzRules(rules []*oa4mp.CompiledAuthz) {
 	p.AuthzRules = rules
-}
-
-// SetAdminMiddleware stores the admin authentication/authorization middleware
-// that will be enforced on admin endpoints (e.g. /admin/clients).
-func (p *OIDCProvider) SetAdminMiddleware(middleware ...gin.HandlerFunc) {
-	p.adminMiddleware = middleware
 }
 
 // EnsurePublicClient registers a public OAuth2 client (no secret) if absent.

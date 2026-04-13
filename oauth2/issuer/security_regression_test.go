@@ -58,26 +58,25 @@ import (
 // when no admin middleware is configured, and allow them when middleware is
 // set and passes.
 func TestAdminMiddlewareEnforced(t *testing.T) {
-	t.Run("NoMiddleware-Rejects", func(t *testing.T) {
-		provider, ts := setupIntegration(t)
-		// Do NOT set admin middleware — provider.adminMiddleware is empty.
-		_ = provider
+	t.Run("NoMiddleware-Returns404", func(t *testing.T) {
+		// When RegisterAdminRoutes is never called, the admin URL prefix
+		// is simply not registered, so Gin returns 404.
+		_, ts := setupIntegration(t)
 		httpClient := ts.Client()
 
-		resp, err := httpClient.Get(ts.URL + "/api/v1.0/issuer/ns/test/ns/admin/clients")
+		resp, err := httpClient.Get(ts.URL + "/api/v1.0/issuer/admin/ns/test/ns/clients")
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
-		assert.Equal(t, http.StatusForbidden, resp.StatusCode,
-			"admin endpoint must reject requests when no admin middleware is configured")
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode,
+			"admin endpoint must not be routable when RegisterAdminRoutes is not called")
 	})
 
 	t.Run("WithMiddleware-Allows", func(t *testing.T) {
-		provider, ts := setupAdminTestServer(t)
-		_ = provider
+		_, ts := setupAdminTestServer(t)
 		httpClient := ts.Client()
 
-		resp, err := httpClient.Get(ts.URL + "/api/v1.0/issuer/ns/test/ns/admin/clients")
+		resp, err := httpClient.Get(ts.URL + "/api/v1.0/issuer/admin/ns/test/ns/clients")
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
@@ -105,13 +104,13 @@ func TestAdminMiddlewareEnforced(t *testing.T) {
 		registry := NewProviderRegistry()
 		registry.Register(testNamespace, provider)
 		RegisterRoutesWithMiddleware(engine, registry)
-		RegisterAdminRoutes(registry, abortingMiddleware)
+		RegisterAdminRoutes(engine, registry, abortingMiddleware)
 
 		ts := httptest.NewTLSServer(engine)
 		t.Cleanup(ts.Close)
 
 		httpClient := ts.Client()
-		resp, err := httpClient.Get(ts.URL + "/api/v1.0/issuer/ns/test/ns/admin/clients")
+		resp, err := httpClient.Get(ts.URL + "/api/v1.0/issuer/admin/ns/test/ns/clients")
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
@@ -268,9 +267,11 @@ func TestStorageNamespaceIsolation(t *testing.T) {
 	betaStorage := NewOIDCStorage(db, "/beta")
 
 	// Create a client in alpha.
+	sharedSecret, err := secBcryptHash("shared-secret")
+	require.NoError(t, err)
 	alphaClient := &fosite.DefaultClient{
 		ID:            "shared-client",
-		Secret:        []byte("$2a$10$fakehashfakehashfakehashfakehashfakehashfakehashfake"),
+		Secret:        sharedSecret,
 		RedirectURIs:  []string{"https://localhost/callback"},
 		GrantTypes:    fosite.Arguments{"authorization_code"},
 		ResponseTypes: fosite.Arguments{"code"},
@@ -493,6 +494,53 @@ func TestClientIDNamespaceIsolation(t *testing.T) {
 		"beta must have its own client record")
 }
 
+// --- Finding #9: CreateClient must not silently overwrite ---
+
+// TestCreateClientFailsOnDuplicate verifies that creating a client with the
+// same (ID, namespace) pair fails instead of silently overwriting the existing
+// record. Operators must explicitly delete-and-recreate.
+func TestCreateClientFailsOnDuplicate(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "dup-client.sqlite")
+	db, err := dbutils.InitSQLiteDB(dbPath)
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { sqlDB.Close() })
+	require.NoError(t, dbutils.MigrateDB(sqlDB, database.EmbedUniversalMigrations, "universal_migrations"))
+	require.NoError(t, dbutils.MigrateServerSpecificDB(sqlDB, database.EmbedOriginMigrations, "origin_migrations", "origin"))
+
+	storage := NewOIDCStorage(db, "/test/ns")
+
+	client := &fosite.DefaultClient{
+		ID:            "dup-client",
+		Secret:        []byte("original-secret"),
+		RedirectURIs:  []string{"https://localhost/callback"},
+		GrantTypes:    fosite.Arguments{"authorization_code"},
+		ResponseTypes: fosite.Arguments{"code"},
+		Scopes:        fosite.Arguments{"openid"},
+	}
+	require.NoError(t, storage.CreateClient(context.Background(), client))
+
+	// Second create with the same ID in the same namespace must fail.
+	duplicate := &fosite.DefaultClient{
+		ID:            "dup-client",
+		Secret:        []byte("new-secret"),
+		RedirectURIs:  []string{"https://evil/callback"},
+		GrantTypes:    fosite.Arguments{"authorization_code"},
+		ResponseTypes: fosite.Arguments{"code"},
+		Scopes:        fosite.Arguments{"openid", "storage.read:/"},
+	}
+	err = storage.CreateClient(context.Background(), duplicate)
+	assert.Error(t, err,
+		"CreateClient must fail on duplicate (id, namespace) to prevent silent overwrites")
+
+	// Original client must be unchanged.
+	found, err := storage.GetClient(context.Background(), "dup-client")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"https://localhost/callback"}, found.GetRedirectURIs(),
+		"original client must not be overwritten")
+}
+
 // --- Finding #10: PKCE enforcement for public clients ---
 
 // TestPKCEEnforcedForPublicClients verifies that the fosite config requires
@@ -610,8 +658,10 @@ func TestRefreshTokenRotationSetsInactive(t *testing.T) {
 
 	storage := NewOIDCStorage(db, "/test/ns")
 
+	rtSecret, err := secBcryptHash("rt-client-secret")
+	require.NoError(t, err)
 	client := &fosite.DefaultClient{
-		ID: "rt-client", Secret: []byte("$2a$10$fakehashfakehashfakehashfakehashfakehashfakehashfake"),
+		ID: "rt-client", Secret: rtSecret,
 		RedirectURIs: []string{"https://localhost/callback"},
 		GrantTypes:   fosite.Arguments{"authorization_code", "refresh_token"},
 		Scopes:       fosite.Arguments{"openid", "offline_access"},
@@ -661,8 +711,10 @@ func TestRefreshTokenRotationBySignature(t *testing.T) {
 
 	storage := NewOIDCStorage(db, "/test/ns")
 
+	chainSecret, err := secBcryptHash("chain-client-secret")
+	require.NoError(t, err)
 	client := &fosite.DefaultClient{
-		ID: "chain-client", Secret: []byte("$2a$10$fakehashfakehashfakehashfakehashfakehashfakehashfake"),
+		ID: "chain-client", Secret: chainSecret,
 		RedirectURIs: []string{"https://localhost/callback"},
 		GrantTypes:   fosite.Arguments{"authorization_code", "refresh_token"},
 		Scopes:       fosite.Arguments{"openid", "offline_access"},
@@ -889,9 +941,11 @@ func TestCrossNamespaceRevocationBlocked(t *testing.T) {
 	betaStorage := NewOIDCStorage(db, "/beta")
 
 	// Create clients in both namespaces.
+	revSecret, err := secBcryptHash("rev-client-secret")
+	require.NoError(t, err)
 	for _, s := range []*OIDCStorage{alphaStorage, betaStorage} {
 		client := &fosite.DefaultClient{
-			ID: "rev-client", Secret: []byte("$2a$10$fakehashfakehashfakehashfakehashfakehashfakehashfake"),
+			ID: "rev-client", Secret: revSecret,
 			RedirectURIs: []string{"https://localhost/callback"},
 			GrantTypes:   fosite.Arguments{"authorization_code", "refresh_token"},
 			Scopes:       fosite.Arguments{"openid", "offline_access"},
@@ -926,9 +980,9 @@ func TestCrossNamespaceRevocationBlocked(t *testing.T) {
 
 // ---- Helpers ----
 
-// secBcryptHash bcrypt-hashes a secret string.
+// secBcryptHash bcrypt-hashes a secret string using minimum cost for faster tests.
 func secBcryptHash(secret string) ([]byte, error) {
-	return bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
+	return bcrypt.GenerateFromPassword([]byte(secret), bcrypt.MinCost)
 }
 
 // secMintTestAccessToken creates a signed access token directly via the provider's

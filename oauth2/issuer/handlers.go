@@ -95,15 +95,19 @@ func RegisterRoutesWithMiddleware(engine *gin.Engine, registry *ProviderRegistry
 	}
 }
 
-// RegisterAdminRoutes registers admin middleware for admin client-management endpoints.
-// The middleware is stored on each provider and enforced in the dispatch handler
-// whenever an admin/* action is requested.
-func RegisterAdminRoutes(registry *ProviderRegistry, middleware ...gin.HandlerFunc) {
-	for _, ns := range registry.Namespaces() {
-		if p := registry.Get(ns); p != nil {
-			p.SetAdminMiddleware(middleware...)
-		}
-	}
+// RegisterAdminRoutes registers admin client-management endpoints on a
+// separate URL prefix so that admin-specific middleware (authentication,
+// authorization) is applied through Gin's native route-group mechanism
+// rather than being invoked manually inside the dispatch handler.
+//
+// URL scheme: /api/v1.0/issuer/admin/ns/*namespace/clients[/{id}]
+func RegisterAdminRoutes(engine *gin.Engine, registry *ProviderRegistry, middleware ...gin.HandlerFunc) {
+	allMiddleware := append([]gin.HandlerFunc{NamespaceMiddleware(registry)}, middleware...)
+	adminGroup := engine.Group("/api/v1.0/issuer/admin/ns", allMiddleware...)
+	adminGroup.GET("/*namespace", handleAdminDispatch)
+	adminGroup.POST("/*namespace", handleAdminDispatch)
+	adminGroup.PUT("/*namespace", handleAdminDispatch)
+	adminGroup.DELETE("/*namespace", handleAdminDispatch)
 }
 
 // handleDispatch is the catch-all handler for GET and POST requests.
@@ -144,23 +148,6 @@ func handleDispatch(ctx *gin.Context) {
 		handleClientConfigurationRead(provider)(ctx)
 	case action == ".well-known/openid-configuration":
 		handleIssuerDiscovery(provider)(ctx)
-	// Admin endpoints — enforce admin middleware before dispatching.
-	case strings.HasPrefix(action, "admin/"):
-		if !runAdminMiddleware(ctx, provider) {
-			return
-		}
-		switch {
-		case action == "admin/clients" && ctx.Request.Method == http.MethodGet:
-			handleAdminListClients(provider)(ctx)
-		case action == "admin/clients" && ctx.Request.Method == http.MethodPost:
-			handleAdminCreateClient(provider)(ctx)
-		case strings.HasPrefix(action, "admin/clients/") && ctx.Request.Method == http.MethodGet:
-			clientID := strings.TrimPrefix(action, "admin/clients/")
-			ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
-			handleAdminGetClient(provider)(ctx)
-		default:
-			ctx.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
-		}
 	default:
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
 	}
@@ -181,13 +168,6 @@ func handleDispatchPut(ctx *gin.Context) {
 		clientID := strings.TrimPrefix(action, "oidc-cm/")
 		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
 		handleClientConfigurationUpdate(provider)(ctx)
-	case strings.HasPrefix(action, "admin/clients/"):
-		if !runAdminMiddleware(ctx, provider) {
-			return
-		}
-		clientID := strings.TrimPrefix(action, "admin/clients/")
-		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
-		handleAdminUpdateClient(provider)(ctx)
 	default:
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
 	}
@@ -208,13 +188,6 @@ func handleDispatchDelete(ctx *gin.Context) {
 		clientID := strings.TrimPrefix(action, "oidc-cm/")
 		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
 		handleClientConfigurationDelete(provider)(ctx)
-	case strings.HasPrefix(action, "admin/clients/"):
-		if !runAdminMiddleware(ctx, provider) {
-			return
-		}
-		clientID := strings.TrimPrefix(action, "admin/clients/")
-		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
-		handleAdminDeleteClient(provider)(ctx)
 	default:
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
 	}
@@ -702,10 +675,13 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 
 		// Filter scopes — when a requested scope is broader than what's
 		// permitted, substitute in all narrower allowed scopes.
+		// Standard scopes are not auto-allowed here; any scope must be
+		// agreed by both the user's authorization rules and the client's
+		// configured scope list (enforced in the second pass below).
 		grantedScopes := make([]string, 0)
 		for _, scope := range requestedScopes {
 			scope = cleanScopePath(scope)
-			if isStandardScope(scope) || scopeAllowed(scope, allowedScopes) {
+			if scopeAllowed(scope, allowedScopes) {
 				grantedScopes = append(grantedScopes, scope)
 			} else {
 				grantedScopes = append(grantedScopes, collectNarrowerScopes(scope, allowedScopes)...)
@@ -1365,23 +1341,40 @@ func deviceViewURL(namespace, userCode string) string {
 
 // Helpers
 
-// runAdminMiddleware executes the provider's admin middleware chain.
-// Returns true if the request should proceed, false if middleware aborted it.
-func runAdminMiddleware(ctx *gin.Context, provider *OIDCProvider) bool {
-	if len(provider.adminMiddleware) == 0 {
-		ctx.JSON(http.StatusForbidden, gin.H{
-			"error":             "access_denied",
-			"error_description": "Admin endpoints are not available (no admin middleware configured)",
-		})
-		return false
+// handleAdminDispatch is the dispatcher for admin client-management
+// endpoints registered via RegisterAdminRoutes.  It is reached through
+// a Gin route group that already applied namespace resolution and admin
+// authentication middleware.
+func handleAdminDispatch(ctx *gin.Context) {
+	provider := GetProvider(ctx)
+	if provider == nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "no provider"})
+		return
 	}
-	for _, mw := range provider.adminMiddleware {
-		mw(ctx)
-		if ctx.IsAborted() {
-			return false
+
+	action := strings.TrimPrefix(ActionSuffix(ctx), "/")
+
+	switch {
+	case action == "clients" && ctx.Request.Method == http.MethodGet:
+		handleAdminListClients(provider)(ctx)
+	case action == "clients" && ctx.Request.Method == http.MethodPost:
+		handleAdminCreateClient(provider)(ctx)
+	case strings.HasPrefix(action, "clients/"):
+		clientID := strings.TrimPrefix(action, "clients/")
+		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
+		switch ctx.Request.Method {
+		case http.MethodGet:
+			handleAdminGetClient(provider)(ctx)
+		case http.MethodPut:
+			handleAdminUpdateClient(provider)(ctx)
+		case http.MethodDelete:
+			handleAdminDeleteClient(provider)(ctx)
+		default:
+			ctx.JSON(http.StatusMethodNotAllowed, gin.H{"error": "method_not_allowed"})
 		}
+	default:
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
 	}
-	return true
 }
 
 func isStandardScope(scope string) bool {
