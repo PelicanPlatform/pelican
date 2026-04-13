@@ -94,21 +94,22 @@ func TestInPlaceDefault(t *testing.T) {
 		}
 	}()
 
-	// Give download time to start
-	time.Sleep(50 * time.Millisecond)
-
-	// Check for temporary file (should exist during download)
-	files, err := os.ReadDir(tempDir)
-	require.NoError(t, err)
-
-	for _, file := range files {
-		if strings.HasPrefix(file.Name(), ".testfile.txt.") {
-			tempFileSeen = true
-			// Verify temp file has expected format: .basename.XXXXXX
-			assert.Regexp(t, `^\.testfile\.txt\.[a-zA-Z0-9]{6}$`, file.Name())
-			break
+	// Wait for temp file to appear (replaces fixed sleep for reliability)
+	require.Eventually(t, func() bool {
+		files, readErr := os.ReadDir(tempDir)
+		if readErr != nil {
+			return false
 		}
-	}
+		for _, file := range files {
+			if strings.HasPrefix(file.Name(), ".testfile.txt.") {
+				tempFileSeen = true
+				// Verify temp file has expected format from os.CreateTemp: .basename.NNNNNNNNN
+				assert.Regexp(t, `^\.testfile\.txt\.\d+$`, file.Name())
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 10*time.Millisecond, "Temporary file should appear during download")
 
 	// Wait for download to complete
 	err = <-doneChan
@@ -123,7 +124,7 @@ func TestInPlaceDefault(t *testing.T) {
 	assert.Equal(t, testContent, string(content))
 
 	// Verify temp file was cleaned up
-	files, err = os.ReadDir(tempDir)
+	files, err := os.ReadDir(tempDir)
 	require.NoError(t, err)
 	for _, file := range files {
 		assert.False(t, strings.HasPrefix(file.Name(), ".testfile.txt."),
@@ -186,8 +187,11 @@ func TestInPlaceFlag(t *testing.T) {
 		}
 	}()
 
-	// Give download time to start
-	time.Sleep(50 * time.Millisecond)
+	// Wait for inPlace download to start writing the final file directly
+	require.Eventually(t, func() bool {
+		_, statErr := os.Stat(finalPath)
+		return statErr == nil
+	}, 5*time.Second, 10*time.Millisecond, "Final file should appear when inPlace=true")
 
 	// Check that NO temporary file exists
 	files, err := os.ReadDir(tempDir)
