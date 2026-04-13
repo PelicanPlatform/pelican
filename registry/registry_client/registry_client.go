@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package registry
+package registry_client
 
 import (
 	"bufio"
@@ -35,10 +35,10 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pelicanplatform/pelican/utils/registry_discovery"
 )
 
 type clientResponseData struct {
@@ -132,7 +132,7 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 		log.Debugln("Constructed JWKS from loading public key:", string(jsonbuf))
 	}
 
-	clientNonce, err := generateNonce()
+	clientNonce, err := utils.GenerateNonce()
 	if err != nil {
 		return errors.Wrap(err, "failed to generate client nonce")
 	}
@@ -177,7 +177,7 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 	if err = privateKey.Raw(privateKeyRaw); err != nil {
 		return errors.Wrap(err, "failed to get an ECDSA private key")
 	}
-	signature, err := signPayload([]byte(clientPayload), privateKeyRaw)
+	signature, err := utils.SignPayload([]byte(clientPayload), privateKeyRaw)
 	if err != nil {
 		return errors.Wrap(err, "failed to sign payload")
 	}
@@ -252,7 +252,7 @@ func NamespaceDelete(endpoint string, prefix string) error {
 	// First we create a token for the registry to check that the deletion
 	// request is valid
 
-	issuerURL, err := server_utils.GetNSIssuerURL(prefix)
+	issuerURL, err := registry_discovery.GetNSIssuerURL(prefix)
 	if err != nil {
 		return errors.Wrap(err, "Failed to determine prefix's issuer/pubkey URL for creating deletion token")
 	}
@@ -326,7 +326,7 @@ func NamespacesPubKeyUpdate(privateKey jwk.Key, prefixes []string, siteName stri
 	}
 	log.Debugln("Constructed JWKS from loading public key:", string(jsonbuf))
 
-	clientNonce, err := generateNonce()
+	clientNonce, err := utils.GenerateNonce()
 	if err != nil {
 		return errors.Wrap(err, "failed to generate client nonce")
 	}
@@ -366,7 +366,7 @@ func NamespacesPubKeyUpdate(privateKey jwk.Key, prefixes []string, siteName stri
 	if err = privateKey.Raw(privateKeyRaw); err != nil {
 		return errors.Wrap(err, "failed to get an ECDSA private key")
 	}
-	signature, err := signPayload([]byte(clientPayload), privateKeyRaw)
+	signature, err := utils.SignPayload([]byte(clientPayload), privateKeyRaw)
 	if err != nil {
 		return errors.Wrap(err, "failed to sign payload")
 	}
@@ -412,7 +412,7 @@ func NamespacesPubKeyUpdate(privateKey jwk.Key, prefixes []string, siteName stri
 			if err := issuerPrivKey.Raw(rawkey); err != nil {
 				return errors.Wrap(err, "failed to generate raw private key from the issuer private key matched with the registered public key")
 			}
-			if keyUpdateAuthzSignature, err = signPayload([]byte(clientPayload), rawkey); err != nil {
+			if keyUpdateAuthzSignature, err = utils.SignPayload([]byte(clientPayload), rawkey); err != nil {
 				return errors.Wrap(err, "failed to sign the payload with the issuer private key matched with the registered public key")
 			}
 			matchedKeyId = issuerPubKey.KeyID()

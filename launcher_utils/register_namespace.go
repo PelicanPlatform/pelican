@@ -38,7 +38,7 @@ import (
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/registry"
+	"github.com/pelicanplatform/pelican/registry/registry_client"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
@@ -256,7 +256,7 @@ func registerNamespacePrep(ctx context.Context, prefix string) (key jwk.Key, reg
 }
 
 func registerNamespaceImpl(key jwk.Key, prefix string, siteName string, registrationEndpointURL string) error {
-	if err := registry.NamespaceRegister(key, registrationEndpointURL, "", prefix, siteName); err != nil {
+	if err := registry_client.NamespaceRegister(key, registrationEndpointURL, "", prefix, siteName); err != nil {
 		metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusCritical, fmt.Sprintf("XRootD server failed to register its namespace %s at the registry: %v", prefix, err))
 		return errors.Wrapf(err, "Failed to register prefix %s", prefix)
 	}
