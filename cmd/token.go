@@ -37,12 +37,11 @@ import (
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
-
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils/registry_discovery"
 )
 
 var (
@@ -182,7 +181,7 @@ func splitClaim(claim string) (string, string, error) {
 
 // Given some issuer and a set of KIDs, determine whether the issuer's JWKS contains a key with a matching KID
 func issuerMatchesKey(issuer string, kidSet map[string]struct{}) (bool, error) {
-	remoteJWKS, err := server_utils.GetJWKSFromIssUrl(issuer)
+	remoteJWKS, err := registry_discovery.GetJWKSFromIssUrl(issuer)
 	if err != nil {
 		return false, err
 	}
@@ -209,7 +208,7 @@ func getIssuer(directorInfo server_structs.DirectorResponse, kidSet map[string]s
 
 	// Comb through the JWKS from each issuer to find which matches the signing key
 	for _, issuer := range directorInfo.XPelAuthHdr.Issuers {
-		remoteJWKS, err := server_utils.GetJWKSFromIssUrl(issuer.String())
+		remoteJWKS, err := registry_discovery.GetJWKSFromIssUrl(issuer.String())
 		if err != nil {
 			log.Warningf("Unable to get JWKS from issuer URL %s: %v; skipping", issuer, err)
 			continue

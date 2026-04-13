@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package server_utils
+package registry_discovery
 
 import (
 	"context"
