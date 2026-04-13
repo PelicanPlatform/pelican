@@ -397,6 +397,7 @@ type Config struct {
 		TLSCertificate string `mapstructure:"tlscertificate" yaml:"TLSCertificate"`
 		TLSCertificateChain string `mapstructure:"tlscertificatechain" yaml:"TLSCertificateChain"`
 		TLSKey string `mapstructure:"tlskey" yaml:"TLSKey"`
+		TrustedProxies []string `mapstructure:"trustedproxies" yaml:"TrustedProxies"`
 		UIActivationCodeFile string `mapstructure:"uiactivationcodefile" yaml:"UIActivationCodeFile"`
 		UIAdminUsers []string `mapstructure:"uiadminusers" yaml:"UIAdminUsers"`
 		UILoginRateLimit int `mapstructure:"uiloginratelimit" yaml:"UILoginRateLimit"`
@@ -851,6 +852,7 @@ type configWithType struct {
 		TLSCertificate struct { Type string; Value string }
 		TLSCertificateChain struct { Type string; Value string }
 		TLSKey struct { Type string; Value string }
+		TrustedProxies struct { Type string; Value []string }
 		UIActivationCodeFile struct { Type string; Value string }
 		UIAdminUsers struct { Type string; Value []string }
 		UILoginRateLimit struct { Type string; Value int }

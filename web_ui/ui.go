@@ -849,6 +849,31 @@ func GetEngine() (*gin.Engine, error) {
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
 	engine.Use(gin.Recovery())
+
+	// Configure trusted proxies for accurate client IP detection.
+	// By default, trust no proxies so ctx.ClientIP() returns the
+	// network-level remote address and cannot be spoofed via
+	// X-Forwarded-For headers.
+	trustedProxies := param.Server_TrustedProxies.GetStringSlice()
+	if len(trustedProxies) > 0 {
+		// Expand wildcard "*" to trust all IPv4 and IPv6 addresses.
+		expanded := make([]string, 0, len(trustedProxies))
+		for _, entry := range trustedProxies {
+			if entry == "*" {
+				expanded = append(expanded, "0.0.0.0/0", "::/0")
+			} else {
+				expanded = append(expanded, entry)
+			}
+		}
+		if err := engine.SetTrustedProxies(expanded); err != nil {
+			return nil, errors.Wrap(err, "failed to set trusted proxies")
+		}
+	} else {
+		if err := engine.SetTrustedProxies(nil); err != nil {
+			return nil, errors.Wrap(err, "failed to disable trusted proxies")
+		}
+	}
+
 	webLogger := log.WithFields(log.Fields{"daemon": "gin"})
 	engine.Use(func(ctx *gin.Context) {
 		startTime := time.Now()

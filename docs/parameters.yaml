@@ -3018,6 +3018,18 @@ type: int
 default: 8444
 components: ["cache", "director", "origin", "registry"]
 ---
+name: Server.TrustedProxies
+description: |+
+  A list of CIDR ranges or IP addresses of trusted reverse proxies.
+  When set, the Gin web engine will use X-Forwarded-For headers only from these trusted sources to determine the client IP.
+  When empty (the default), no proxies are trusted and the client IP is always taken from the network connection's remote address.
+  Use "*" to trust all sources (equivalent to 0.0.0.0/0 and ::/0).
+  Both IPv4 and IPv6 addresses and CIDR ranges are supported.
+  Example: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fd00::/8"]
+type: stringSlice
+default: []
+components: ["cache", "director", "origin", "registry"]
+---
 name: Server.WebHost
 description: |+
   A string-encoded IP address that the Pelican web engine is configured to listen on.
