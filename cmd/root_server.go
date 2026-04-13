@@ -1,4 +1,4 @@
-//go:build server && !windows
+//go:build server
 
 /***************************************************************
  *
@@ -21,19 +21,20 @@
 package main
 
 import (
-	_ "embed"
-
-	"github.com/spf13/cobra"
+	"fmt"
 
 	"github.com/pelicanplatform/pelican/launchers"
-	"github.com/pelicanplatform/pelican/server_structs"
 )
 
-func serveOrigin(cmd *cobra.Command, args []string) error {
-	_, cancel, err := launchers.LaunchModules(cmd.Context(), server_structs.OriginType)
-	if err != nil {
-		cancel()
+func init() {
+	egrpPostHandler = func(err error) (bool, error) {
+		if err == launchers.ErrExitOnSignal {
+			fmt.Println("Pelican is safely exited")
+			return true, nil
+		} else if err == launchers.ErrRestart {
+			fmt.Println("Restarting server...")
+			return true, restartProgram()
+		}
+		return false, nil
 	}
-
-	return err
 }

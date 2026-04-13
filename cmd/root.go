@@ -1,6 +1,8 @@
+//go:build client || server
+
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -20,7 +22,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -35,7 +36,6 @@ import (
 
 	"github.com/pelicanplatform/pelican/cmd/config_printer"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/logging"
 	"github.com/pelicanplatform/pelican/param"
 )
@@ -101,6 +101,10 @@ func (i *uint16Value) Type() string {
 
 func (i *uint16Value) String() string { return strconv.FormatUint(uint64(*i), 10) }
 
+// egrpPostHandler is a hook for server-specific error handling in Execute().
+// It returns (handled, result) where handled=true means the error was consumed.
+var egrpPostHandler func(error) (bool, error)
+
 func Execute() error {
 	egrp, egrpCtx := errgroup.WithContext(context.Background())
 	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
@@ -117,14 +121,12 @@ func Execute() error {
 		_ = out.Sync()
 	}
 
-	if egrpErr == launchers.ErrExitOnSignal {
-		fmt.Println("Pelican is safely exited")
-		return nil
-	} else if egrpErr == launchers.ErrRestart {
-		fmt.Println("Restarting server...")
-		return restartProgram()
+	if egrpPostHandler != nil {
+		if handled, result := egrpPostHandler(egrpErr); handled {
+			return result
+		}
 	}
-	// Other errors we got from the errogroup
+	// Other errors we got from the errgroup
 	if egrpErr != nil {
 		log.Errorln("Fatal error occurred that lead to the shutdown of the process:", egrpErr)
 		return egrpErr
@@ -148,24 +150,7 @@ func restartProgram() error {
 }
 
 func init() {
-	rootCmd.AddCommand(objectCmd)
-	objectCmd.CompletionOptions.DisableDefaultCmd = true
-	rootCmd.AddCommand(directorCmd)
-	rootCmd.AddCommand(registryCmd)
-	rootCmd.AddCommand(originCmd)
-	rootCmd.AddCommand(cacheCmd)
-	rootCmd.AddCommand(tokenCmd)
-	rootCmd.AddCommand(namespaceCmd)
-	rootCmd.AddCommand(rootConfigCmd)
-	rootCmd.AddCommand(rootPluginCmd)
-	rootCmd.AddCommand(serveCmd)
-	rootCmd.AddCommand(generateCmd)
-	rootCmd.AddCommand(keyCmd)
-	rootCmd.AddCommand(downtimeCmd)
-	rootCmd.AddCommand(apiKeyCmd)
-	rootCmd.AddCommand(serverCmd)
 	rootCmd.AddCommand(config_printer.ConfigCmd)
-	rootCmd.AddCommand(sshHelperCmd) // Hidden command for SSH POSIXv2 helper
 	preferredPrefix := config.GetPreferredPrefix()
 	rootCmd.Use = strings.ToLower(preferredPrefix.String())
 	rootCmd.DisableAutoGenTag = true

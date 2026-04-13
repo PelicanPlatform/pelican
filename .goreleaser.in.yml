@@ -68,6 +68,7 @@ builds:
     binary: pelican
     tags:
       - forceposix
+      - client
     ldflags:
       - &ldflags-metadata
         -X github.com/pelicanplatform/pelican/version.commit={{.Commit}} -X github.com/pelicanplatform/pelican/version.date={{.Date}} -X github.com/pelicanplatform/pelican/version.builtBy=goreleaser -X github.com/pelicanplatform/pelican/version.version=%VERSION%
@@ -104,6 +105,7 @@ builds:
     binary: pelican-server
     tags:
       - forceposix
+      - server
       - lotman
     ldflags:
       - *ldflags-metadata

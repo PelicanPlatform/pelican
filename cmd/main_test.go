@@ -1,6 +1,8 @@
+//go:build client && server
+
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -23,7 +25,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -35,61 +36,6 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 )
-
-var (
-	// testPelicanBinary holds the path to the built pelican binary for tests
-	testPelicanBinary string
-	// testTempDir holds the temp directory for the test binary
-	testTempDir string
-	// buildOnce ensures we only build the binary once across all tests
-	buildOnce sync.Once
-	// buildErr stores any error from building the binary
-	buildErr error
-)
-
-// getPelicanBinary builds the pelican binary once and returns its path
-func getPelicanBinary(t *testing.T) string {
-	buildOnce.Do(func() {
-		binaryName := "pelican"
-		if runtime.GOOS == "windows" {
-			binaryName = "pelican.exe"
-		}
-		testPelicanBinary = filepath.Join(testTempDir, binaryName)
-
-		buildCmd := exec.Command("go", "build", "-buildvcs=false", "-o", testPelicanBinary, ".")
-		buildOutput, err := buildCmd.CombinedOutput()
-		if err != nil {
-			buildErr = fmt.Errorf("failed to build pelican binary: %w\nOutput: %s", err, string(buildOutput))
-		}
-	})
-
-	if buildErr != nil {
-		t.Fatalf("Failed to build pelican binary: %v", buildErr)
-	}
-
-	return testPelicanBinary
-}
-
-// TestMain handles test setup and cleanup
-func TestMain(m *testing.M) {
-	// Create temp directory for test binary
-	var err error
-	testTempDir, err = os.MkdirTemp("", "pelican-test-*")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create temp directory: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Run tests
-	code := m.Run()
-
-	// Cleanup: remove the temp directory and its contents
-	if testTempDir != "" {
-		os.RemoveAll(testTempDir)
-	}
-
-	os.Exit(code)
-}
 
 func TestHandleCLIVersionFlag(t *testing.T) {
 	// Save the current version to reset this variable

@@ -1,6 +1,8 @@
+//go:build client
+
 /***************************************************************
 *
-* Copyright (C) 2025, University of Nebraska-Lincoln
+* Copyright (C) 2026, University of Nebraska-Lincoln
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -76,6 +78,8 @@ const (
 )
 
 func init() {
+	rootCmd.AddCommand(rootPluginCmd)
+
 	// Define the file transfer plugin command
 	xferCmd := &cobra.Command{
 		Use:                "transfer",

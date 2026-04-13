@@ -1,6 +1,8 @@
+//go:build server
+
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -56,12 +58,12 @@ for JWT signature verification.
 
 	outPasswordPath string
 	inPasswordPath  string
-
-	privateKeyPath string
-	publicKeyPath  string
+	privateKeyPath  string
+	publicKeyPath   string
 )
 
 func init() {
+	rootCmd.AddCommand(generateCmd)
 	generateCmd.AddCommand(keygenCmd, passwordCmd)
 
 	passwordCmd.Flags().StringVarP(&outPasswordPath, "output", "o", "", "The path to the generate htpasswd password file. Default: ./server-web-passwd")

@@ -1,3 +1,5 @@
+//go:build client
+
 /***************************************************************
  *
  * Copyright (C) 2023, University of Nebraska-Lincoln
