@@ -87,12 +87,13 @@ func (s *SystemdUserDBLookupStrategy) dial(ctx context.Context) (net.Conn, func(
 		return nil, nil, fmt.Errorf("failed to connect to systemd-userdbd: %w", err)
 	}
 
-	// Propagate deadline to the connection so blocking I/O is bounded.
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
-	}
-
-	// Watch for cancellation in a goroutine.
+	// Watch for cancellation in a goroutine.  When ctx fires, the
+	// connection is closed, unblocking any in-flight I/O.  We
+	// intentionally do NOT use conn.SetDeadline because it races
+	// with ctx: SetDeadline can fire (producing os.ErrDeadlineExceeded)
+	// before ctx.Done() closes, causing wrapErr to miss the context
+	// error and leak a raw "i/o timeout" instead of
+	// context.DeadlineExceeded.
 	done := make(chan struct{})
 	go func() {
 		select {
