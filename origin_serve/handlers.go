@@ -189,19 +189,23 @@ func extractTokens(r *http.Request) []string {
 	return tokens
 }
 
-// getActionFromMethod determines the token scope action from HTTP method
+// getActionFromMethod determines the token scope action from HTTP method.
+//
+// Scope hierarchy (least to most privileged):
+//   - read:   no mutation (GET, HEAD, OPTIONS, PROPFIND)
+//   - create: mutation without data loss (PUT, POST, MKCOL, LOCK, UNLOCK, PROPPATCH)
+//   - modify: mutation that may cause data loss (DELETE, COPY, MOVE, and any unknown method)
 func getActionFromMethod(method string) token_scopes.TokenScope {
 	switch method {
-	case http.MethodGet, http.MethodHead:
+	case http.MethodGet, http.MethodHead, http.MethodOptions, "PROPFIND":
 		return token_scopes.Wlcg_Storage_Read
-	case http.MethodPut, http.MethodPost:
+	case http.MethodPut, http.MethodPost, "MKCOL", "LOCK", "UNLOCK", "PROPPATCH":
 		return token_scopes.Wlcg_Storage_Create
-	case http.MethodDelete:
+	case http.MethodDelete, "COPY", "MOVE":
 		return token_scopes.Wlcg_Storage_Modify
-	case "PROPFIND":
-		return token_scopes.Wlcg_Storage_Read
 	default:
-		return token_scopes.Wlcg_Storage_Read
+		// Unknown methods default to the most restrictive scope
+		return token_scopes.Wlcg_Storage_Modify
 	}
 }
 
