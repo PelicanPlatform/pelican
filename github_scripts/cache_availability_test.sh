@@ -204,7 +204,7 @@ wait_for_healthy() {
 # 1. Start federation (director + registry + origin, NO built-in cache)
 # ---------------------------------------------------------------------------
 echo "Starting federation (director + registry + origin) ..."
-./pelican serve --module director --module registry --module origin -d &
+./pelican-server serve --module director --module registry --module origin -d &
 FED_PID=$!
 
 FED_ADDR_FILE="${FED_RUNTIME_DIR}/pelican.addresses"
@@ -258,7 +258,7 @@ EOF
 
     # Each cache runs in its own PELICAN_RUNTIMEDIR so address files don't collide.
     PELICAN_RUNTIMEDIR="${CACHE_RT}" \
-        ./pelican cache serve --config "${CACHE_CFG}" -d &
+        ./pelican-server cache serve --config "${CACHE_CFG}" -d &
     CACHE_PIDS+=($!)
 
     CACHE_ADDR_FILE="${CACHE_RT}/pelican.addresses"

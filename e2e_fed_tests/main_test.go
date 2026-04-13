@@ -51,7 +51,7 @@ func getPelicanBinary(t *testing.T) string {
 		}
 		testPelicanBinary = filepath.Join(testTempDir, binaryName)
 
-		buildCmd := exec.Command("go", "build", "-buildvcs=false", "-o", testPelicanBinary, "../cmd")
+		buildCmd := exec.Command("go", "build", "-tags", "client,server", "-buildvcs=false", "-o", testPelicanBinary, "../cmd")
 		buildCmd.Env = os.Environ()
 		buildOutput, err := buildCmd.CombinedOutput()
 		if err != nil {
