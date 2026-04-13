@@ -37,10 +37,10 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pelicanplatform/pelican/utils/registry_discovery"
 )
 
 type LotAction string
@@ -56,7 +56,7 @@ func tokenSignedByAuthorizedCaller(strToken string, authorizedCallers *[]string)
 	ownerFound := false
 	var tok jwt.Token
 	for _, owner := range *authorizedCallers {
-		kSet, err := server_utils.GetJWKSFromIssUrl(owner)
+		kSet, err := registry_discovery.GetJWKSFromIssUrl(owner)
 		if err != nil {
 			log.Debugf("Error getting JWKS for owner %s: %v", owner, err)
 			continue
@@ -121,7 +121,7 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 			return false, err
 		}
 
-		kSet, err := server_utils.GetJWKSFromIssUrl(issuerUrl)
+		kSet, err := registry_discovery.GetJWKSFromIssUrl(issuerUrl)
 		if err != nil {
 			return false, errors.Wrap(err, "Error getting JWKS from issuer URL")
 		}
@@ -149,7 +149,7 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 
 		ownerFound := false
 		for owner := range ownersSet {
-			kSet, err := server_utils.GetJWKSFromIssUrl(owner)
+			kSet, err := registry_discovery.GetJWKSFromIssUrl(owner)
 
 			// Print the kSet as a string for debugging
 			kSetStr, _ := json.Marshal(kSet)
@@ -250,7 +250,7 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 	namespace := xPelicanNamespaceMap["namespace"]
 
 	// Get the issuer URL for that namespace
-	nsIssuerUrl, err := server_utils.GetNSIssuerURL(namespace)
+	nsIssuerUrl, err := registry_discovery.GetNSIssuerURL(namespace)
 	if err != nil {
 		return false, errors.Wrapf(err, errMsgPrefix+"no issuer could be found for namespace %s", namespace)
 	}
