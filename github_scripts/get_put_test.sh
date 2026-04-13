@@ -95,12 +95,17 @@ cleanup() {
 echo "This is some random content in the random file" > "$GET_PUT_INPUT"
 
 if [ ! -f ./pelican ]; then
-  echo "Pelican executable does not exist in PWD. Exiting.."
+  echo "Pelican client executable does not exist in PWD. Exiting.."
+  exit 1
+fi
+
+if [ ! -f ./pelican-server ]; then
+  echo "Pelican server executable does not exist in PWD. Exiting.."
   exit 1
 fi
 
 # Run federation in the background
-./pelican serve --module director --module registry --module origin -d &
+./pelican-server serve --module director --module registry --module origin -d &
 pid_federationServe=$!
 
 # Setup trap with the PID as an argument to the cleanup function
