@@ -77,7 +77,7 @@ func buildPelicanBinary(t *testing.T) string {
 		}
 
 		pelicanBinPath = filepath.Join(binaryTempDir, "pelican")
-		cmd := exec.Command("go", "build", "-buildvcs=false", "-o", pelicanBinPath, "../cmd")
+		cmd := exec.Command("go", "build", "-tags", "client", "-buildvcs=false", "-o", pelicanBinPath, "../cmd")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			os.RemoveAll(binaryTempDir)
