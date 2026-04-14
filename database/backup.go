@@ -412,8 +412,27 @@ func createBackup(ctx context.Context) error {
 
 	// Escape any single quotes in the path to prevent SQL injection.
 	escapedPath := strings.ReplaceAll(vacuumPath, "'", "''")
-	if _, err := sqlDB.ExecContext(ctx, "VACUUM INTO '"+escapedPath+"'"); err != nil {
-		return errors.Wrap(err, "failed to create database backup via VACUUM INTO")
+
+	// Retry VACUUM INTO up to 3 times with exponential backoff to handle
+	// transient SQLITE_BUSY errors when concurrent writes hold locks.
+	var vacuumErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(attempt) * 5 * time.Second
+			log.Warnf("Database backup attempt #%d failed: %v; retrying in %s", attempt+1, vacuumErr, backoff)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
+		_, vacuumErr = sqlDB.ExecContext(ctx, "VACUUM INTO '"+escapedPath+"'")
+		if vacuumErr == nil {
+			break
+		}
+	}
+	if vacuumErr != nil {
+		return errors.Wrap(vacuumErr, "failed to create database backup via VACUUM INTO")
 	}
 
 	// Open the vacuumed database for streaming.
