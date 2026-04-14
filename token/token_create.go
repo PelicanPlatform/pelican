@@ -31,7 +31,6 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
@@ -429,9 +428,13 @@ func (tokenConfig *TokenConfig) CreateTokenWithKey(key jwk.Key) (string, error) 
 	}
 
 	log.Debugln("Signing token with key id:", key.KeyID())
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
+	alg, err := config.SigningAlgorithmForJWK(key)
 	if err != nil {
-		return "", errors.Wrap(err, "Failed to sign the deletion token")
+		return "", errors.Wrap(err, "Failed to determine signing algorithm for key")
+	}
+	signed, err := jwt.Sign(tok, jwt.WithKey(alg, key))
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to sign the token")
 	}
 
 	return string(signed), nil
