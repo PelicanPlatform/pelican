@@ -44,6 +44,7 @@ type globusExportStatus string
 
 // For internal globusExports map
 type globusExport struct {
+	CollectionID      string             `json:"-"`
 	DisplayName       string             `json:"displayName"`
 	FederationPrefix  string             `json:"federationPrefix"`
 	Status            globusExportStatus `json:"status"`
@@ -58,7 +59,26 @@ type globusExport struct {
 // For UI
 type globusExportUI struct {
 	globusExport
-	UUID string `json:"uuid"`
+	UUID          string `json:"uuid"`
+	StoragePrefix string `json:"storagePrefix"`
+}
+
+// GlobusExportPathConfig captures the per-export path mapping for a single
+// Globus collection exposed through XRootD.
+type GlobusExportPathConfig struct {
+	FederationPrefix string
+	StoragePrefix    string
+}
+
+// GlobusBackendConfig merges static export config with runtime Globus state
+// needed to render XRootD stanzas. Pelican currently supports a single
+// Globus collection per origin process, with multiple exported paths.
+type GlobusBackendConfig struct {
+	CollectionID      string
+	HttpsServer       string
+	TokenFile         string
+	TransferTokenFile string
+	Exports           []GlobusExportPathConfig
 }
 
 // GlobusTokenType represents the type of Globus token
@@ -75,7 +95,7 @@ const (
 )
 
 var (
-	// An in-memory map-struct to keep Globus collections information with key being the collection UUID.
+	// An in-memory map-struct to keep Globus collections information with key being the federation prefix.
 	globusExports      map[string]*globusExport
 	globusExportsMutex = sync.RWMutex{}
 )
@@ -144,6 +164,7 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 		}
 
 		globusEsp := globusExport{
+			CollectionID:     esp.GlobusCollectionID,
 			DisplayName:      esp.GlobusCollectionName,
 			FederationPrefix: esp.FederationPrefix,
 			Status:           GlobusInactive,
@@ -157,7 +178,7 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 		}
 		if !ok {
 			// Collection doesn't exist in DB, mark as inactive
-			globusExports[esp.GlobusCollectionID] = &globusEsp
+			globusExports[esp.FederationPrefix] = &globusEsp
 			continue
 		}
 		// We found the collection in DB, try to get access token via the refresh token
@@ -173,7 +194,7 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 				return errors.Wrapf(err, "failed to delete expired credential record for Globus collection %s with name %s", esp.GlobusCollectionID, esp.GlobusCollectionName)
 			}
 			log.Infof("Access credentials for Globus collection %s with name %s is expired and removed.", esp.GlobusCollectionID, esp.GlobusCollectionName)
-			globusExports[esp.GlobusCollectionID] = &globusEsp
+			globusExports[esp.FederationPrefix] = &globusEsp
 			continue
 		}
 
@@ -184,7 +205,7 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 				return errors.Wrapf(err, "failed to delete expired credential record for Globus collection %s with name %s", esp.GlobusCollectionID, esp.GlobusCollectionName)
 			}
 			log.Infof("Transfer access credentials for Globus collection %s with name %s is expired and removed.", esp.GlobusCollectionID, esp.GlobusCollectionName)
-			globusExports[esp.GlobusCollectionID] = &globusEsp
+			globusExports[esp.FederationPrefix] = &globusEsp
 			continue
 		}
 
@@ -213,7 +234,7 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 		globusEsp.Description = "Activated with cached credentials"
 		globusEsp.TokenFile = tokenFileName
 		globusEsp.TransferTokenFile = transferTokenFileName
-		globusExports[esp.GlobusCollectionID] = &globusEsp
+		globusExports[esp.FederationPrefix] = &globusEsp
 	}
 	return nil
 }
@@ -221,15 +242,11 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 // Return whether a Globus collection export is activated based on its federation prefix.
 //
 // This function can be accessed by multiple goroutines simultaneously.
-func isExportActivated(fedPrefix string) (ok bool) {
+func isExportActivated(fedPrefix string) bool {
 	globusExportsMutex.RLock()
 	defer globusExportsMutex.RUnlock()
-	for _, exp := range globusExports {
-		if exp.FederationPrefix == fedPrefix {
-			return exp.Status == GlobusActivated
-		}
-	}
-	return false
+	exp, ok := globusExports[fedPrefix]
+	return ok && exp.Status == GlobusActivated
 }
 
 // refreshTokenWithRetry handles token refresh with retry logic for a specific token type
@@ -260,17 +277,17 @@ func refreshTokenWithRetry(cid string, token *oauth2.Token, tokenType GlobusToke
 // Return the first error if any.
 func doGlobusTokenRefresh() error {
 	var firstErr error
-	for cid, exp := range globusExports {
-		err := func(cidInt string, expInt *globusExport) error {
+	for _, exp := range globusExports {
+		err := func(expInt *globusExport) error {
 			globusExportsMutex.Lock()
 			defer globusExportsMutex.Unlock()
 			// We can't refresh exports that are never activated
-			if exp.Status == GlobusInactive {
+			if expInt.Status == GlobusInactive {
 				return nil
 			}
 
 			// Refresh collection token
-			newTok, err := refreshTokenWithRetry(cid, exp.Token, TokenTypeCollection, exp)
+			newTok, err := refreshTokenWithRetry(expInt.CollectionID, expInt.Token, TokenTypeCollection, expInt)
 			if err != nil {
 				return err
 			}
@@ -279,7 +296,7 @@ func doGlobusTokenRefresh() error {
 			}
 
 			// Refresh transfer token
-			newTransferTok, err := refreshTokenWithRetry(cid, exp.TransferToken, TokenTypeTransfer, exp)
+			newTransferTok, err := refreshTokenWithRetry(expInt.CollectionID, expInt.TransferToken, TokenTypeTransfer, expInt)
 			if err != nil {
 				return err
 			}
@@ -288,7 +305,7 @@ func doGlobusTokenRefresh() error {
 			}
 
 			return nil
-		}(cid, exp)
+		}(exp)
 		if err != nil && firstErr == nil {
 			firstErr = err
 		}
@@ -344,18 +361,59 @@ func GetGlobusExportsValues(activeOnly bool) []globusExport {
 	return exps
 }
 
+// GetGlobusBackendConfig returns the shared backend config for the single
+// supported Globus collection, plus the exported path mappings that should use
+// it. If multiple distinct collection UUIDs are configured, it returns an
+// error.
+func GetGlobusBackendConfig(exps []server_utils.OriginExport) (*GlobusBackendConfig, error) {
+	globusExportsMutex.RLock()
+	defer globusExportsMutex.RUnlock()
+
+	var config *GlobusBackendConfig
+	for _, exp := range exps {
+		if exp.GlobusCollectionID == "" {
+			continue
+		}
+
+		gexp, ok := globusExports[exp.FederationPrefix]
+		if !ok {
+			return nil, errors.Errorf("Globus collection %s (prefix %s) is not found in Pelican", exp.GlobusCollectionID, exp.FederationPrefix)
+		}
+
+		if config == nil {
+			config = &GlobusBackendConfig{
+				CollectionID:      exp.GlobusCollectionID,
+				HttpsServer:       gexp.HttpsServer,
+				TokenFile:         gexp.TokenFile,
+				TransferTokenFile: gexp.TransferTokenFile,
+				Exports:           make([]GlobusExportPathConfig, 0, len(exps)),
+			}
+		} else if config.CollectionID != exp.GlobusCollectionID {
+			return nil, errors.Errorf("multiple Globus collections are not supported for XRootD config generation: found %s and %s", config.CollectionID, exp.GlobusCollectionID)
+		}
+
+		config.Exports = append(config.Exports, GlobusExportPathConfig{
+			FederationPrefix: exp.FederationPrefix,
+			StoragePrefix:    exp.StoragePrefix,
+		})
+	}
+
+	return config, nil
+}
+
 // Parse the OriginExport to add Globus status for each export for frontend RESTful API
 func originExportToGlobusExport(exps []server_utils.OriginExport) ([]globusExportUI, error) {
 	globusExportsMutex.RLock()
 	defer globusExportsMutex.RUnlock()
 	exportList := []globusExportUI{}
 	for _, exp := range exps {
-		if gexp, ok := globusExports[exp.GlobusCollectionID]; !ok {
-			return nil, errors.Errorf("Globus collection %s is not found in Pelican", exp.GlobusCollectionID)
+		if gexp, ok := globusExports[exp.FederationPrefix]; !ok {
+			return nil, errors.Errorf("Globus collection %s (prefix %s) is not found in Pelican", exp.GlobusCollectionID, exp.FederationPrefix)
 		} else {
 			exportList = append(exportList, globusExportUI{
-				UUID:         exp.GlobusCollectionID,
-				globusExport: *gexp,
+				UUID:          exp.GlobusCollectionID,
+				StoragePrefix: exp.StoragePrefix,
+				globusExport:  *gexp,
 			})
 		}
 	}
