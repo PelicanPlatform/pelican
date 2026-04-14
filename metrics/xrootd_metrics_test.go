@@ -963,3 +963,292 @@ func TestComputePaths(t *testing.T) {
 	assert.Equal(t, "/foo/bar/baz", computePrefix("/foo/bar/baz", []PathList{{Paths: []string{"", "1"}}, {Paths: []string{"", "foo", "*", "baz"}}}))
 	assert.Equal(t, "/foo/bar/baz", computePrefix("/foo/bar/baz", []PathList{{Paths: []string{"", "foo", "*", "*"}}}))
 }
+
+func TestHandleXrdcurlstatsPacket(t *testing.T) {
+	// Reset all relevant metrics and lastXrdCurlStats before each test
+	resetXrdclMetrics := func() {
+		XrdclHTTPRequests.Reset()
+		XrdclHTTPRequestDuration.Reset()
+		XrdclHTTPBytes.Reset()
+		XrdclConncall.Reset()
+		lastXrdCurlStats.Workers = nil
+	}
+
+	t.Run("per-status-all-fields", func(t *testing.T) {
+		resetXrdclMetrics()
+
+		// Simulates C++ output for a HEAD request with status 200 and 307, covering all per-status fields
+		statsJSON := `{
+			"event": "xrdcurlstats",
+			"start": 1000,
+			"now": 1001,
+			"file": {"prefetch": {"count": 0, "expired": 0, "failed": 0, "reads_hit": 0, "reads_miss": 0, "bytes_used": 0}},
+			"queues": {"produced": 0, "consumed": 0, "pending": 0, "rejected": 0},
+			"workers": {
+				"http_HEAD_200_error": 1,
+				"http_HEAD_200_finished": 5,
+				"http_HEAD_200_client_timeout": 2,
+				"http_HEAD_200_server_timeout": 3,
+				"http_HEAD_200_duration": 100,
+				"http_HEAD_200_pause_duration": 10,
+				"http_HEAD_200_bytes": 4096,
+				"http_HEAD_307_error": 1,
+				"http_HEAD_307_finished": 2
+			}
+		}`
+
+		err := handleXrdcurlstatsPacket([]byte(statsJSON))
+		require.NoError(t, err)
+
+		// Verify per-status requests (error, finished, client_timeout, server_timeout)
+		expected := `
+# HELP xrootd_xrdcl_http_requests_total Statistics about HTTP requests.
+# TYPE xrootd_xrdcl_http_requests_total counter
+xrootd_xrdcl_http_requests_total{status="200",type="client_timeout",verb="HEAD"} 2
+xrootd_xrdcl_http_requests_total{status="200",type="error",verb="HEAD"} 1
+xrootd_xrdcl_http_requests_total{status="200",type="finished",verb="HEAD"} 5
+xrootd_xrdcl_http_requests_total{status="200",type="server_timeout",verb="HEAD"} 3
+xrootd_xrdcl_http_requests_total{status="307",type="error",verb="HEAD"} 1
+xrootd_xrdcl_http_requests_total{status="307",type="finished",verb="HEAD"} 2
+`
+		if err := testutil.CollectAndCompare(XrdclHTTPRequests, strings.NewReader(expected), "xrootd_xrdcl_http_requests_total"); err != nil {
+			require.NoError(t, err, "HTTP requests metric mismatch")
+		}
+
+		// Verify duration metrics (duration, pause_duration)
+		expectedDuration := `
+# HELP xrootd_xrdcl_http_request_duration_seconds_total Total duration of HTTP requests.
+# TYPE xrootd_xrdcl_http_request_duration_seconds_total counter
+xrootd_xrdcl_http_request_duration_seconds_total{status="200",type="duration",verb="HEAD"} 100
+xrootd_xrdcl_http_request_duration_seconds_total{status="200",type="pause_duration",verb="HEAD"} 10
+`
+		if err := testutil.CollectAndCompare(XrdclHTTPRequestDuration, strings.NewReader(expectedDuration), "xrootd_xrdcl_http_request_duration_seconds_total"); err != nil {
+			require.NoError(t, err, "HTTP duration metric mismatch")
+		}
+
+		// Verify bytes metric
+		expectedBytes := `
+# HELP xrootd_xrdcl_http_bytes_total Bytes transferred for HTTP requests.
+# TYPE xrootd_xrdcl_http_bytes_total counter
+xrootd_xrdcl_http_bytes_total{status="200",verb="HEAD"} 4096
+`
+		if err := testutil.CollectAndCompare(XrdclHTTPBytes, strings.NewReader(expectedBytes), "xrootd_xrdcl_http_bytes_total"); err != nil {
+			require.NoError(t, err, "HTTP bytes metric mismatch")
+		}
+	})
+
+	t.Run("preheader-fields", func(t *testing.T) {
+		resetXrdclMetrics()
+
+		// Simulates C++ output for pre-header events (op_idx 401)
+		statsJSON := `{
+			"event": "xrdcurlstats",
+			"start": 1000,
+			"now": 1001,
+			"file": {"prefetch": {"count": 0, "expired": 0, "failed": 0, "reads_hit": 0, "reads_miss": 0, "bytes_used": 0}},
+			"queues": {"produced": 0, "consumed": 0, "pending": 0, "rejected": 0},
+			"workers": {
+				"http_HEAD_started": 10,
+				"http_HEAD_preheader_error": 2,
+				"http_HEAD_preheader_finished": 8,
+				"http_HEAD_preheader_timeout": 1,
+				"http_HEAD_conncall_timeout": 3,
+				"http_HEAD_preheader_duration": 50
+			}
+		}`
+
+		err := handleXrdcurlstatsPacket([]byte(statsJSON))
+		require.NoError(t, err)
+
+		// Verify pre-header requests
+		expected := `
+# HELP xrootd_xrdcl_http_requests_total Statistics about HTTP requests.
+# TYPE xrootd_xrdcl_http_requests_total counter
+xrootd_xrdcl_http_requests_total{status="",type="started",verb="HEAD"} 10
+xrootd_xrdcl_http_requests_total{status="conncall",type="timeout",verb="HEAD"} 3
+xrootd_xrdcl_http_requests_total{status="preheader",type="error",verb="HEAD"} 2
+xrootd_xrdcl_http_requests_total{status="preheader",type="finished",verb="HEAD"} 8
+xrootd_xrdcl_http_requests_total{status="preheader",type="timeout",verb="HEAD"} 1
+`
+		if err := testutil.CollectAndCompare(XrdclHTTPRequests, strings.NewReader(expected), "xrootd_xrdcl_http_requests_total"); err != nil {
+			require.NoError(t, err, "HTTP requests preheader metric mismatch")
+		}
+
+		// Verify preheader duration
+		expectedDuration := `
+# HELP xrootd_xrdcl_http_request_duration_seconds_total Total duration of HTTP requests.
+# TYPE xrootd_xrdcl_http_request_duration_seconds_total counter
+xrootd_xrdcl_http_request_duration_seconds_total{status="preheader",type="duration",verb="HEAD"} 50
+`
+		if err := testutil.CollectAndCompare(XrdclHTTPRequestDuration, strings.NewReader(expectedDuration), "xrootd_xrdcl_http_request_duration_seconds_total"); err != nil {
+			require.NoError(t, err, "HTTP preheader duration metric mismatch")
+		}
+	})
+
+	t.Run("conncall-stats", func(t *testing.T) {
+		resetXrdclMetrics()
+
+		statsJSON := `{
+			"event": "xrdcurlstats",
+			"start": 1000,
+			"now": 1001,
+			"file": {"prefetch": {"count": 0, "expired": 0, "failed": 0, "reads_hit": 0, "reads_miss": 0, "bytes_used": 0}},
+			"queues": {"produced": 0, "consumed": 0, "pending": 0, "rejected": 0},
+			"workers": {
+				"conncall_error": 1,
+				"conncall_started": 5,
+				"conncall_success": 4,
+				"conncall_timeout": 2
+			}
+		}`
+
+		err := handleXrdcurlstatsPacket([]byte(statsJSON))
+		require.NoError(t, err)
+
+		expected := `
+# HELP xrootd_xrdcl_conncall_total Statistics about connection calls.
+# TYPE xrootd_xrdcl_conncall_total counter
+xrootd_xrdcl_conncall_total{type="error"} 1
+xrootd_xrdcl_conncall_total{type="started"} 5
+xrootd_xrdcl_conncall_total{type="success"} 4
+xrootd_xrdcl_conncall_total{type="timeout"} 2
+`
+		if err := testutil.CollectAndCompare(XrdclConncall, strings.NewReader(expected), "xrootd_xrdcl_conncall_total"); err != nil {
+			require.NoError(t, err, "Conncall metric mismatch")
+		}
+	})
+
+	t.Run("real-world-cache-snapshot", func(t *testing.T) {
+		resetXrdclMetrics()
+
+		// Exact real-world snapshot from a production OSDF cache
+		statsJSON := `{
+			"event": "xrdcurlstats",
+			"start": 1772037000,
+			"now": 1772037778,
+			"file": {"prefetch": {"count": 0, "expired": 0, "failed": 0, "reads_hit": 0, "reads_miss": 0, "bytes_used": 0}},
+			"queues": {"produced": 0, "consumed": 0, "pending": 0, "rejected": 0},
+			"workers": {
+				"oldest_op": 1772037777.845475,
+				"oldest_cycle": 1772037777.845475,
+				"http_HEAD_200_duration": 0.006657,
+				"http_HEAD_200_finished": 454,
+				"http_HEAD_307_duration": 9.401606,
+				"http_HEAD_307_error": 131,
+				"http_HEAD_307_finished": 85599,
+				"http_HEAD_preheader_duration": 3408.343802,
+				"http_HEAD_started": 171067,
+				"http_HEAD_preheader_error": 85014,
+				"http_GET_200_duration": 0.023252,
+				"http_GET_200_bytes": 30418,
+				"http_GET_200_finished": 454,
+				"http_GET_preheader_duration": 1.230774,
+				"http_GET_started": 454,
+				"http_OPTIONS_200_duration": 0.000322,
+				"http_OPTIONS_200_finished": 16,
+				"http_OPTIONS_preheader_duration": 16.983807,
+				"http_OPTIONS_started": 147,
+				"http_OPTIONS_preheader_error": 131,
+				"conncall_error": 0,
+				"conncall_started": 0,
+				"conncall_success": 0,
+				"conncall_timeout": 0
+			}
+		}`
+
+		err := handleXrdcurlstatsPacket([]byte(statsJSON))
+		require.NoError(t, err)
+
+		// Verify all HTTP request counters
+		expectedRequests := `
+# HELP xrootd_xrdcl_http_requests_total Statistics about HTTP requests.
+# TYPE xrootd_xrdcl_http_requests_total counter
+xrootd_xrdcl_http_requests_total{status="",type="started",verb="GET"} 454
+xrootd_xrdcl_http_requests_total{status="",type="started",verb="HEAD"} 171067
+xrootd_xrdcl_http_requests_total{status="",type="started",verb="OPTIONS"} 147
+xrootd_xrdcl_http_requests_total{status="200",type="finished",verb="GET"} 454
+xrootd_xrdcl_http_requests_total{status="200",type="finished",verb="HEAD"} 454
+xrootd_xrdcl_http_requests_total{status="200",type="finished",verb="OPTIONS"} 16
+xrootd_xrdcl_http_requests_total{status="307",type="error",verb="HEAD"} 131
+xrootd_xrdcl_http_requests_total{status="307",type="finished",verb="HEAD"} 85599
+xrootd_xrdcl_http_requests_total{status="preheader",type="error",verb="HEAD"} 85014
+xrootd_xrdcl_http_requests_total{status="preheader",type="error",verb="OPTIONS"} 131
+`
+		if err := testutil.CollectAndCompare(XrdclHTTPRequests, strings.NewReader(expectedRequests), "xrootd_xrdcl_http_requests_total"); err != nil {
+			require.NoError(t, err, "Real-world HTTP requests mismatch")
+		}
+
+		// Verify all duration counters
+		expectedDuration := `
+# HELP xrootd_xrdcl_http_request_duration_seconds_total Total duration of HTTP requests.
+# TYPE xrootd_xrdcl_http_request_duration_seconds_total counter
+xrootd_xrdcl_http_request_duration_seconds_total{status="200",type="duration",verb="GET"} 0.023252
+xrootd_xrdcl_http_request_duration_seconds_total{status="200",type="duration",verb="HEAD"} 0.006657
+xrootd_xrdcl_http_request_duration_seconds_total{status="200",type="duration",verb="OPTIONS"} 0.000322
+xrootd_xrdcl_http_request_duration_seconds_total{status="307",type="duration",verb="HEAD"} 9.401606
+xrootd_xrdcl_http_request_duration_seconds_total{status="preheader",type="duration",verb="GET"} 1.230774
+xrootd_xrdcl_http_request_duration_seconds_total{status="preheader",type="duration",verb="HEAD"} 3408.343802
+xrootd_xrdcl_http_request_duration_seconds_total{status="preheader",type="duration",verb="OPTIONS"} 16.983807
+`
+		if err := testutil.CollectAndCompare(XrdclHTTPRequestDuration, strings.NewReader(expectedDuration), "xrootd_xrdcl_http_request_duration_seconds_total"); err != nil {
+			require.NoError(t, err, "Real-world HTTP duration mismatch")
+		}
+
+		// Verify bytes
+		expectedBytes := `
+# HELP xrootd_xrdcl_http_bytes_total Bytes transferred for HTTP requests.
+# TYPE xrootd_xrdcl_http_bytes_total counter
+xrootd_xrdcl_http_bytes_total{status="200",verb="GET"} 30418
+`
+		if err := testutil.CollectAndCompare(XrdclHTTPBytes, strings.NewReader(expectedBytes), "xrootd_xrdcl_http_bytes_total"); err != nil {
+			require.NoError(t, err, "Real-world HTTP bytes mismatch")
+		}
+	})
+
+	t.Run("delta-computation", func(t *testing.T) {
+		resetXrdclMetrics()
+
+		// First packet: initial values
+		statsJSON1 := `{
+			"event": "xrdcurlstats",
+			"start": 1000,
+			"now": 1001,
+			"file": {"prefetch": {"count": 0, "expired": 0, "failed": 0, "reads_hit": 0, "reads_miss": 0, "bytes_used": 0}},
+			"queues": {"produced": 0, "consumed": 0, "pending": 0, "rejected": 0},
+			"workers": {
+				"http_GET_200_finished": 10,
+				"http_GET_200_error": 2
+			}
+		}`
+
+		err := handleXrdcurlstatsPacket([]byte(statsJSON1))
+		require.NoError(t, err)
+
+		// Second packet: incremented values (delta should be applied)
+		statsJSON2 := `{
+			"event": "xrdcurlstats",
+			"start": 1000,
+			"now": 1002,
+			"file": {"prefetch": {"count": 0, "expired": 0, "failed": 0, "reads_hit": 0, "reads_miss": 0, "bytes_used": 0}},
+			"queues": {"produced": 0, "consumed": 0, "pending": 0, "rejected": 0},
+			"workers": {
+				"http_GET_200_finished": 15,
+				"http_GET_200_error": 3
+			}
+		}`
+
+		err = handleXrdcurlstatsPacket([]byte(statsJSON2))
+		require.NoError(t, err)
+
+		// Total should be 10 + 5 = 15 for finished, 2 + 1 = 3 for error
+		expected := `
+# HELP xrootd_xrdcl_http_requests_total Statistics about HTTP requests.
+# TYPE xrootd_xrdcl_http_requests_total counter
+xrootd_xrdcl_http_requests_total{status="200",type="error",verb="GET"} 3
+xrootd_xrdcl_http_requests_total{status="200",type="finished",verb="GET"} 15
+`
+		if err := testutil.CollectAndCompare(XrdclHTTPRequests, strings.NewReader(expected), "xrootd_xrdcl_http_requests_total"); err != nil {
+			require.NoError(t, err, "Delta computation metric mismatch")
+		}
+	})
+}
