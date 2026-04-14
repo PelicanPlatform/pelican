@@ -40,6 +40,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
@@ -991,9 +992,18 @@ var (
 	// Maps a file identifier with a file record
 	transfers    = ttlcache.New[FileId, FileRecord](ttlcache.WithTTL[FileId, FileRecord](24 * time.Hour))
 	monitorPaths []PathList
+
+	// rate limiter for log manager
+	warningLogRateLimiter = rate.NewLimiter(rate.Limit(rate.Every(time.Second)), 1)
 )
 
 var allowedEvents = map[string]bool{OssStatsEvent: true, S3FileStatsEvent: true}
+
+func warnWithRateLimit[T any](msg T, limiter *rate.Limiter) {
+	if limiter.Allow() {
+		log.Warning(msg)
+	}
+}
 
 // Set up listening and parsing xrootd monitoring UDP packets into prometheus
 //
@@ -1353,7 +1363,7 @@ func handlePacket(packet []byte) error {
 					if userRecord != nil {
 						maskedIP, ok := utils.ExtractAndMaskIP(userRecord.Value().XrdUserId.Host)
 						if !ok {
-							log.Warning(fmt.Sprintf("Failed to mask IP address: %s", maskedIP))
+							warnWithRateLimit(fmt.Sprintf("Failed to mask IP address: %s", maskedIP), warningLogRateLimiter)
 						} else {
 							labels["network"] = maskedIP
 						}
@@ -1488,7 +1498,7 @@ func handlePacket(packet []byte) error {
 				if userRecord != nil {
 					maskedIP, ok := utils.ExtractAndMaskIP(userRecord.Value().XrdUserId.Host)
 					if !ok {
-						log.Warning(fmt.Sprintf("Failed to mask IP address: %s", maskedIP))
+						warnWithRateLimit(fmt.Sprintf("Failed to mask IP address: %s", maskedIP), warningLogRateLimiter)
 					} else {
 						logFields["network"] = maskedIP
 					}
@@ -1543,7 +1553,7 @@ func handlePacket(packet []byte) error {
 					if userRecord != nil {
 						maskedIP, ok := utils.ExtractAndMaskIP(userRecord.Value().XrdUserId.Host)
 						if !ok {
-							log.Warning(fmt.Sprintf("Failed to mask IP address: %s", maskedIP))
+							warnWithRateLimit(fmt.Sprintf("Failed to mask IP address: %s", maskedIP), warningLogRateLimiter)
 						} else {
 							labels["network"] = maskedIP
 						}
