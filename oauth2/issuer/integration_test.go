@@ -61,6 +61,14 @@ var testGroups = []string{"/collab/analysis", "/collab/production"}
 // setupIntegration creates an in-memory test environment: provider, Gin engine,
 // and httptest server. The engine has auth middleware that injects testUser.
 func setupIntegration(t *testing.T) (*OIDCProvider, *httptest.Server) {
+	provider, _, ts := setupIntegrationWithRegistry(t)
+	return provider, ts
+}
+
+// setupIntegrationWithRegistry is like setupIntegration but also returns the
+// ProviderRegistry, allowing tests to manipulate shared state like the
+// registration rate limiter.
+func setupIntegrationWithRegistry(t *testing.T) (*OIDCProvider, *ProviderRegistry, *httptest.Server) {
 	t.Helper()
 
 	// Reset config and set up signing key
@@ -127,7 +135,7 @@ func setupIntegration(t *testing.T) (*OIDCProvider, *httptest.Server) {
 	ts := httptest.NewTLSServer(engine)
 	t.Cleanup(ts.Close)
 
-	return provider, ts
+	return provider, registry, ts
 }
 
 // newTestClientWithJar creates a test HTTP client from the TLS test server

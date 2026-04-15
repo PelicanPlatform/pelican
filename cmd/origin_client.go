@@ -35,12 +35,6 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 )
 
-const (
-	// issuerAdminClientsAPISuffix is the API path suffix for admin client management,
-	// appended after the per-namespace issuer prefix.
-	issuerAdminClientsAPISuffix = "/admin/clients"
-)
-
 var (
 	originIssuerCmd = &cobra.Command{
 		Use:   "issuer",
@@ -150,7 +144,7 @@ func init() {
 // issuerAdminClientsAPIPath returns the full admin clients API path
 // for the configured namespace.
 func issuerAdminClientsAPIPath() string {
-	return "/api/v1.0/issuer/ns" + issuerClientNamespace + issuerAdminClientsAPISuffix
+	return "/api/v1.0/issuer/admin/ns" + issuerClientNamespace + "/clients"
 }
 
 // constructIssuerAdminURL validates the server URL and returns the full admin API endpoint.

@@ -32,12 +32,19 @@ import (
 type ProviderRegistry struct {
 	mu        sync.RWMutex
 	providers map[string]*OIDCProvider
+
+	// RegistrationLimiter is a shared rate limiter for dynamic client
+	// registration across all namespaces, preventing an attacker from
+	// multiplying the per-IP rate limit by cycling through namespaces.
+	RegistrationLimiter *registrationRateLimiter
 }
 
-// NewProviderRegistry creates an empty provider registry.
+// NewProviderRegistry creates an empty provider registry with a shared
+// rate limiter for dynamic client registration.
 func NewProviderRegistry() *ProviderRegistry {
 	return &ProviderRegistry{
-		providers: make(map[string]*OIDCProvider),
+		providers:           make(map[string]*OIDCProvider),
+		RegistrationLimiter: newRegistrationRateLimiter(1.0/60.0, 5),
 	}
 }
 
@@ -84,6 +91,9 @@ const namespaceContextKey = "issuerNamespace"
 // providerContextKey is the gin context key for the resolved OIDCProvider.
 const providerContextKey = "issuerProvider"
 
+// registryContextKey is the gin context key for the ProviderRegistry.
+const registryContextKey = "issuerRegistry"
+
 // NamespaceMiddleware returns a Gin middleware that extracts the namespace
 // from the URL path and resolves the corresponding OIDCProvider.
 //
@@ -119,12 +129,15 @@ func NamespaceMiddleware(registry *ProviderRegistry) gin.HandlerFunc {
 
 		ctx.Set(namespaceContextKey, provider.Namespace)
 		ctx.Set(providerContextKey, provider)
+		ctx.Set(registryContextKey, registry)
 		ctx.Next()
 	}
 }
 
 // resolveProvider finds the OIDCProvider whose namespace is a prefix of the
-// given path. It picks the longest matching prefix.
+// given path. It picks the longest matching prefix and requires matches at
+// path-component boundaries to prevent prefix aliasing (e.g. "/test/ns"
+// must not match "/test/nsoidc-cm").
 func resolveProvider(registry *ProviderRegistry, path string) *OIDCProvider {
 	registry.mu.RLock()
 	defer registry.mu.RUnlock()
@@ -132,7 +145,7 @@ func resolveProvider(registry *ProviderRegistry, path string) *OIDCProvider {
 	var best *OIDCProvider
 	bestLen := 0
 	for ns, p := range registry.providers {
-		if strings.HasPrefix(path, ns) || strings.HasPrefix(path, ns+"/") || path == ns {
+		if path == ns || strings.HasPrefix(path, ns+"/") {
 			if len(ns) > bestLen {
 				best = p
 				bestLen = len(ns)
@@ -155,6 +168,15 @@ func GetProvider(ctx *gin.Context) *OIDCProvider {
 // GetNamespace extracts the resolved namespace from the Gin context.
 func GetNamespace(ctx *gin.Context) string {
 	return ctx.GetString(namespaceContextKey)
+}
+
+// GetRegistry extracts the ProviderRegistry from the Gin context.
+func GetRegistry(ctx *gin.Context) *ProviderRegistry {
+	v, _ := ctx.Get(registryContextKey)
+	if v == nil {
+		return nil
+	}
+	return v.(*ProviderRegistry)
 }
 
 // ActionSuffix returns the portion of the wildcard path after the namespace
