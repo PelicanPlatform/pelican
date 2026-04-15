@@ -24,6 +24,8 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"os/user"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -31,6 +33,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -929,6 +932,64 @@ func TestValidatePosixPermissions(t *testing.T) {
 		err = o.validatePosixPermissions(tmpDir, caps, "/test")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
+	})
+
+	// Regression test: directory owned by a group the daemon user belongs to via a
+	// supplementary membership (not the primary GID).  Before the fix, the check would
+	// fall through to world permission bits and incorrectly deny access.
+	t.Run("SupplementaryGroupAccess", func(t *testing.T) {
+		daemonUser, err := config.GetDaemonUserInfo()
+		require.NoError(t, err)
+
+		// Enumerate every group the daemon user belongs to.
+		u, err := user.Lookup(daemonUser.Username)
+		require.NoError(t, err)
+		groupIds, err := u.GroupIds()
+		require.NoError(t, err)
+
+		// Find a supplementary group — a GID that is in the list but is not the
+		// user's primary GID, so the primary-GID fast-path in the checker is bypassed.
+		primaryGIDStr := strconv.Itoa(daemonUser.Gid)
+		supplementaryGID := -1
+		for _, gidStr := range groupIds {
+			if gidStr == primaryGIDStr {
+				continue
+			}
+			gid, err := strconv.Atoi(gidStr)
+			if err == nil {
+				supplementaryGID = gid
+				break
+			}
+		}
+		if supplementaryGID == -1 {
+			t.Skip("daemon user has no supplementary groups; skipping supplementary group access test")
+		}
+
+		o := &PosixOrigin{}
+		tmpDir := t.TempDir()
+		// Directory owned by root:supplementaryGID with group-readable permissions but
+		// no world access (0750 = rwx r-x ---).
+		// The daemon user is not the owner, but IS in the group via supplementary membership.
+		require.NoError(t, os.Chown(tmpDir, 0, supplementaryGID))
+		require.NoError(t, os.Chmod(tmpDir, 0750))
+		defer func() { _ = os.Chmod(tmpDir, 0755) }()
+
+		// Reads should pass: before the fix this fell to world bits (none → error).
+		caps := server_structs.Capabilities{Reads: true}
+		err = o.validatePosixPermissions(tmpDir, caps, "/test")
+		assert.NoError(t, err, "reads should succeed via supplementary group membership")
+
+		// Listings should also pass for the same reason.
+		caps = server_structs.Capabilities{Listings: true}
+		err = o.validatePosixPermissions(tmpDir, caps, "/test")
+		assert.NoError(t, err, "listings should succeed via supplementary group membership")
+
+		// Writes should still fail: group bits have no write permission (0750).
+		caps = server_structs.Capabilities{Writes: true}
+		err = o.validatePosixPermissions(tmpDir, caps, "/test")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
+		assert.Contains(t, err.Error(), "Writes")
 	})
 
 	// Test error message contains useful information
