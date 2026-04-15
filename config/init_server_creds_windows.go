@@ -26,6 +26,12 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// UserInGroup on Windows always returns false; Unix supplementary-group semantics
+// do not apply on Windows (which uses ACLs).
+func UserInGroup(_ User, _ int) bool {
+	return false
+}
+
 // checkFileReadableByUser on Windows logs a warning since Unix-style permission
 // checking doesn't apply. Windows uses ACLs which have a different permission model.
 // The Server.DropPrivileges feature is primarily designed for Unix systems.
