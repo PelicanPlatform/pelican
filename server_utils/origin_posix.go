@@ -179,18 +179,13 @@ func (o *PosixOrigin) validateExtra(e *OriginExport, _ int) error {
 // on the given path to support the specified capabilities.
 func (o *PosixOrigin) validatePosixPermissions(storagePath string, caps server_structs.Capabilities, federationPrefix string) error {
 	// Get XRootD daemon user info
-	uid, err := config.GetDaemonUID()
+	daemonUser, err := config.GetDaemonUserInfo()
 	if err != nil {
-		return errors.Wrap(err, "failed to get XRootD daemon UID for permission validation")
+		return errors.Wrap(err, "failed to get XRootD daemon user info for permission validation")
 	}
-	gid, err := config.GetDaemonGID()
-	if err != nil {
-		return errors.Wrap(err, "failed to get XRootD daemon GID for permission validation")
-	}
-	username, err := config.GetDaemonUser()
-	if err != nil {
-		username = "username-unknown"
-	}
+	uid := daemonUser.Uid
+	gid := daemonUser.Gid
+	username := daemonUser.Username
 
 	// Check if the storage prefix exists
 	info, err := os.Stat(storagePath)
@@ -218,15 +213,18 @@ func (o *PosixOrigin) validatePosixPermissions(storagePath string, caps server_s
 	}
 	mode := info.Mode()
 
-	// Determine which permission bits apply to XRootD daemon user
+	// Determine which permission bits apply to XRootD daemon user.
+	// Check supplementary groups (not just the primary GID) so that a directory
+	// owned by a group the daemon user belongs to via a secondary membership is
+	// handled correctly — otherwise we'd incorrectly fall through to world bits.
 	var canRead, canWrite, canExecute bool
 	if uid == dirUID {
 		// User is owner - check owner bits
 		canRead = mode&0400 != 0
 		canWrite = mode&0200 != 0
 		canExecute = mode&0100 != 0
-	} else if gid == dirGID {
-		// User is in group - check group bits
+	} else if config.UserInGroup(daemonUser, dirGID) {
+		// User is in group (primary or supplementary) - check group bits
 		canRead = mode&0040 != 0
 		canWrite = mode&0020 != 0
 		canExecute = mode&0010 != 0
