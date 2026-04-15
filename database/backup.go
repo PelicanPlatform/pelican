@@ -54,6 +54,10 @@ import (
 	"github.com/pelicanplatform/pelican/version"
 )
 
+// backupMaxRetries is the number of times to retry a backup snapshot if it
+// fails with a transient error (e.g. SQLITE_BUSY).
+const backupMaxRetries = 3
+
 const (
 	backupFilePrefix = "pelican-db-backup-"
 	backupFileExt    = ".bak"
@@ -410,23 +414,47 @@ func createBackup(ctx context.Context) error {
 		return errors.Wrap(err, "failed to get underlying SQL database")
 	}
 
+	// Pin a single connection so the PRAGMA busy_timeout change doesn't
+	// leak to other goroutines sharing the pool.
+	sqlConn, err := sqlDB.Conn(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to get database connection for backup")
+	}
+	defer sqlConn.Close()
+
+	// Raise busy_timeout to 30 s for the backup operation so VACUUM INTO can
+	// wait out long-running write transactions (the pool default is 5 s).
+	if _, err := sqlConn.ExecContext(ctx, "PRAGMA busy_timeout = 30000"); err != nil {
+		return errors.Wrap(err, "failed to set busy_timeout for backup")
+	}
+	defer func() {
+		// Reset to the pool's default before returning the connection.
+		if _, err := sqlConn.ExecContext(context.Background(), "PRAGMA busy_timeout = 5000"); err != nil {
+			log.Warnf("Failed to reset busy_timeout after backup: %v", err)
+		}
+	}()
+
 	// Escape any single quotes in the path to prevent SQL injection.
 	escapedPath := strings.ReplaceAll(vacuumPath, "'", "''")
 
-	// Retry VACUUM INTO up to 3 times with exponential backoff to handle
-	// transient SQLITE_BUSY errors when concurrent writes hold locks.
+	// Retry up to backupMaxRetries times with backoff to handle transient
+	// SQLITE_BUSY errors when concurrent writes hold locks beyond even the
+	// extended busy_timeout.
 	var vacuumErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt < backupMaxRetries; attempt++ {
 		if attempt > 0 {
 			backoff := time.Duration(attempt) * 5 * time.Second
-			log.Warnf("Database backup attempt #%d failed: %v; retrying in %s", attempt+1, vacuumErr, backoff)
+			log.Warnf("Database backup attempt %d/%d failed: %v; retrying in %s",
+				attempt+1, backupMaxRetries, vacuumErr, backoff)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-time.After(backoff):
 			}
+			// Clean up any partial file from the previous attempt.
+			os.Remove(vacuumPath)
 		}
-		_, vacuumErr = sqlDB.ExecContext(ctx, "VACUUM INTO '"+escapedPath+"'")
+		_, vacuumErr = sqlConn.ExecContext(ctx, "VACUUM INTO '"+escapedPath+"'")
 		if vacuumErr == nil {
 			break
 		}
