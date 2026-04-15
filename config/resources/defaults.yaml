@@ -100,6 +100,7 @@ Origin:
   MultiuserVarlinkSocketPath: "/run/systemd/userdb/io.systemd.UserDatabase"
   EnableMacaroons: false
   EnableVoms: true
+  ScitokensUnauthenticatedUser: nobody
   IssuerMode: oa4mp
   SelfTestInterval: 15s
   SSH:

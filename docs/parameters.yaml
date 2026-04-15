@@ -1363,6 +1363,16 @@ type: duration
 default: 1m
 components: ["origin"]
 ---
+name: Origin.ScitokensUnauthenticatedUser
+description: |+
+  The username to use for requests that arrive without a valid token (unauthenticated requests).
+  Defaults to "nobody".
+  Set to the empty string to reject unauthenticated requests entirely.
+type: string
+default: nobody
+hidden: true
+components: ["origin"]
+---
 name: Origin.TokenAudience
 description: |+
   This parameter can be used to configure accepted audiences for the Origin's SciTokens configuration, referenced when deciding

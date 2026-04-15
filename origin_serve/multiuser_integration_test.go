@@ -22,6 +22,7 @@ package origin_serve_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -252,5 +253,102 @@ Director:
 
 		uid, _ := test_utils.FileOwner(t, filepath.Join(storagePrefix, "direct-alice.txt"))
 		assert.Equal(t, aliceUID, uid, "directly uploaded file should be owned by alice")
+	})
+}
+
+// TestMultiuserMapfileIntegration exercises the mapfile-based user mapping in
+// a full federation.  A mapfile rule maps the token subject "testsubject" to
+// the local user "alice".  We then upload a file using that token and verify
+// the on-disk file is owned by alice, proving the mapfile mapping was applied
+// end-to-end through the auth middleware, user mapper, and multiuser filesystem.
+//
+// Requirements (skipped otherwise):
+//   - Running as root (euid == 0)
+//   - CAP_SETUID + CAP_SETGID
+//   - Test user "alice" present in the system
+func TestMultiuserMapfileIntegration(t *testing.T) {
+	test_utils.SkipUnlessPrivileged(t)
+	test_utils.SkipUnlessTestUsers(t, "alice")
+
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	// Create the mapfile before starting the federation, because the config
+	// must reference its path.
+	mapfileDir := t.TempDir()
+	mapfilePath := filepath.Join(mapfileDir, "scitokens-mapfile.json")
+
+	type mapfileRule struct {
+		Sub    *string `json:"sub,omitempty"`
+		Result string  `json:"result"`
+	}
+	sub := "testsubject"
+	rules := []mapfileRule{
+		{Sub: &sub, Result: "alice"},
+	}
+	data, err := json.Marshal(rules)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(mapfilePath, data, 0644))
+
+	originCfg := fmt.Sprintf(`
+Origin:
+  StorageType: posixv2
+  Multiuser: true
+  ScitokensNameMapFile: %s
+  ScitokensDefaultUser: nobody
+  Exports:
+    - FederationPrefix: /test
+      Capabilities: ["Reads", "Writes", "Listings", "DirectReads"]
+Director:
+  MinStatResponse: 1
+  MaxStatResponse: 1
+`, mapfilePath)
+
+	ft := fed_test_utils.NewFedTest(t, originCfg)
+	require.NotNil(t, ft)
+
+	storagePrefix := ft.Exports[0].StoragePrefix
+	require.NotEmpty(t, storagePrefix)
+	require.NoError(t, os.Chmod(storagePrefix, 0777))
+
+	aliceUID, _ := lookupUIDGID(t, "alice")
+
+	// Create a token with subject "testsubject" — not a real local user, but
+	// the mapfile maps it to "alice".
+	testToken := createTokenForUser(t, "testsubject")
+
+	t.Run("MapfileRemapsToAlice", func(t *testing.T) {
+		localDir := t.TempDir()
+		localFile := filepath.Join(localDir, "mapped.txt")
+		require.NoError(t, os.WriteFile(localFile, []byte("mapped via mapfile"), 0644))
+
+		_, err := client.DoPut(ft.Ctx, localFile, pelURL("/test/mapped.txt"), false,
+			client.WithToken(testToken))
+		require.NoError(t, err)
+
+		uid, _ := test_utils.FileOwner(t, filepath.Join(storagePrefix, "mapped.txt"))
+		assert.Equal(t, aliceUID, uid,
+			"file uploaded with subject 'testsubject' should be owned by alice per mapfile")
+	})
+
+	t.Run("MapfileNoMatchFallsBack", func(t *testing.T) {
+		// "unknownsub" is not in the mapfile; ScitokensDefaultUser is "nobody",
+		// so the file should be owned by nobody.
+		nobodyUID, _ := lookupUIDGID(t, "nobody")
+
+		unmatchedToken := createTokenForUser(t, "unknownsub")
+
+		localDir := t.TempDir()
+		localFile := filepath.Join(localDir, "fallback.txt")
+		require.NoError(t, os.WriteFile(localFile, []byte("no mapfile match"), 0644))
+
+		_, err := client.DoPut(ft.Ctx, localFile, pelURL("/test/fallback.txt"), false,
+			client.WithToken(unmatchedToken))
+		require.NoError(t, err)
+
+		uid, _ := test_utils.FileOwner(t, filepath.Join(storagePrefix, "fallback.txt"))
+		assert.Equal(t, nobodyUID, uid,
+			"file uploaded with unmatched subject should be owned by nobody (default user)")
 	})
 }

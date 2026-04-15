@@ -370,6 +370,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.ScitokensMapSubject": false,
 	"Origin.ScitokensNameMapFile": false,
 	"Origin.ScitokensRestrictedPaths": false,
+	"Origin.ScitokensUnauthenticatedUser": false,
 	"Origin.ScitokensUsernameClaim": false,
 	"Origin.SelfTest": false,
 	"Origin.SelfTestInterval": false,
@@ -644,6 +645,7 @@ var stringAccessors = map[string]func(*Config) string{
 	"Origin.ScitokensDefaultUser": func(c *Config) string { return c.Origin.ScitokensDefaultUser },
 	"Origin.ScitokensGroupsClaim": func(c *Config) string { return c.Origin.ScitokensGroupsClaim },
 	"Origin.ScitokensNameMapFile": func(c *Config) string { return c.Origin.ScitokensNameMapFile },
+	"Origin.ScitokensUnauthenticatedUser": func(c *Config) string { return c.Origin.ScitokensUnauthenticatedUser },
 	"Origin.ScitokensUsernameClaim": func(c *Config) string { return c.Origin.ScitokensUsernameClaim },
 	"Origin.StoragePrefix": func(c *Config) string { return c.Origin.StoragePrefix },
 	"Origin.StorageType": func(c *Config) string { return c.Origin.StorageType },
@@ -1432,6 +1434,7 @@ var allParameterNames = []string{
 	"Origin.ScitokensMapSubject",
 	"Origin.ScitokensNameMapFile",
 	"Origin.ScitokensRestrictedPaths",
+	"Origin.ScitokensUnauthenticatedUser",
 	"Origin.ScitokensUsernameClaim",
 	"Origin.SelfTest",
 	"Origin.SelfTestInterval",
@@ -1679,6 +1682,7 @@ var (
 	Origin_ScitokensDefaultUser = StringParam{"Origin.ScitokensDefaultUser"}
 	Origin_ScitokensGroupsClaim = StringParam{"Origin.ScitokensGroupsClaim"}
 	Origin_ScitokensNameMapFile = StringParam{"Origin.ScitokensNameMapFile"}
+	Origin_ScitokensUnauthenticatedUser = StringParam{"Origin.ScitokensUnauthenticatedUser"}
 	Origin_ScitokensUsernameClaim = StringParam{"Origin.ScitokensUsernameClaim"}
 	Origin_StoragePrefix = StringParam{"Origin.StoragePrefix"}
 	Origin_StorageType = StringParam{"Origin.StorageType"}
@@ -2111,6 +2115,7 @@ func init() {
 		"Origin.ScitokensDefaultUser": Origin_ScitokensDefaultUser,
 		"Origin.ScitokensGroupsClaim": Origin_ScitokensGroupsClaim,
 		"Origin.ScitokensNameMapFile": Origin_ScitokensNameMapFile,
+		"Origin.ScitokensUnauthenticatedUser": Origin_ScitokensUnauthenticatedUser,
 		"Origin.ScitokensUsernameClaim": Origin_ScitokensUsernameClaim,
 		"Origin.StoragePrefix": Origin_StoragePrefix,
 		"Origin.StorageType": Origin_StorageType,

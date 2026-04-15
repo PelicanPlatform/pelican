@@ -193,7 +193,7 @@ func TestExtractUserInfo(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			token := createTestToken(t, key, "https://test.example.com", tt.subject, tt.groups, "read:/test")
 
-			mapper := NewUserMapper("sub", "wlcg.groups", "")
+			mapper := NewUserMapper("sub", "wlcg.groups", "", "nobody", "nobody")
 			userInfo := mapper.MapTokenToUser(token)
 			require.NotNil(t, userInfo)
 			assert.Equal(t, tt.expectedUser, userInfo.User)

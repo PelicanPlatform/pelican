@@ -333,6 +333,7 @@ type Config struct {
 		ScitokensMapSubject bool `mapstructure:"scitokensmapsubject" yaml:"ScitokensMapSubject"`
 		ScitokensNameMapFile string `mapstructure:"scitokensnamemapfile" yaml:"ScitokensNameMapFile"`
 		ScitokensRestrictedPaths []string `mapstructure:"scitokensrestrictedpaths" yaml:"ScitokensRestrictedPaths"`
+		ScitokensUnauthenticatedUser string `mapstructure:"scitokensunauthenticateduser" yaml:"ScitokensUnauthenticatedUser"`
 		ScitokensUsernameClaim string `mapstructure:"scitokensusernameclaim" yaml:"ScitokensUsernameClaim"`
 		SelfTest bool `mapstructure:"selftest" yaml:"SelfTest"`
 		SelfTestInterval time.Duration `mapstructure:"selftestinterval" yaml:"SelfTestInterval"`
@@ -786,6 +787,7 @@ type configWithType struct {
 		ScitokensMapSubject struct { Type string; Value bool }
 		ScitokensNameMapFile struct { Type string; Value string }
 		ScitokensRestrictedPaths struct { Type string; Value []string }
+		ScitokensUnauthenticatedUser struct { Type string; Value string }
 		ScitokensUsernameClaim struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }
 		SelfTestInterval struct { Type string; Value time.Duration }
