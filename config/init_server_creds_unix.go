@@ -21,9 +21,9 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"os/user"
+	"strconv"
 	"syscall"
 
 	"github.com/pkg/errors"
@@ -100,9 +100,9 @@ func UserInGroup(puser User, fileGid int) bool {
 		return false
 	}
 
-	fileGidStr := fmt.Sprintf("%d", fileGid)
 	for _, gidStr := range groupIds {
-		if gidStr == fileGidStr {
+		gid, err := strconv.Atoi(gidStr)
+		if err == nil && gid == fileGid {
 			return true
 		}
 	}
