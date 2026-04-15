@@ -166,6 +166,7 @@ func HandleSetLogLevel(ctx *gin.Context) {
 		effectiveAt := time.Now().Add(drainPeriod)
 		response.RequiresRestart = true
 		response.EffectiveAt = &effectiveAt
+		response.EndTime = response.EndTime.Add(drainPeriod)
 	}
 
 	log.WithFields(log.Fields{

@@ -112,14 +112,15 @@ func TestRestartXrootd_PreRestartHookCalled(t *testing.T) {
 		return nil, nil
 	}
 
-	hookCalls := 0
-	preRestartFn = func(_ context.Context, _ []restartInfo) error {
-		hookCalls++
+	preCalls := 0
+	preRestartFn = func(_ context.Context, infos []restartInfo) error {
+		preCalls++
+		assert.Len(t, infos, 2)
 		return nil
 	}
 	postRestartFn = func(_ context.Context, _ []restartInfo) error { return nil }
 
-	// Return an arbitrary non-zero PID to emulate success.
+	// Return an arbitrary non-zero PID to emulate success
 	launch := func(ls []daemon.Launcher) ([]int, error) { return []int{12345}, nil }
 	StoreRestartInfo([]int{999999}, launch, nil, false, false, false) // origin
 	StoreRestartInfo([]int{999998}, launch, nil, true, false, false)  // cache
@@ -127,7 +128,7 @@ func TestRestartXrootd_PreRestartHookCalled(t *testing.T) {
 	ctx := context.Background()
 	_, err := RestartXrootd(ctx, ctx, []int{999999, 999998})
 	require.NoError(t, err)
-	assert.Equal(t, 1, hookCalls, "global pre-restart hook should be called exactly once")
+	assert.Equal(t, 1, preCalls, "global pre-restart hook should be called exactly once")
 }
 
 // TestRestartXrootd_PostRestartHookCalled verifies global post-restart is called once
@@ -142,12 +143,13 @@ func TestRestartXrootd_PostRestartHookCalled(t *testing.T) {
 
 	postCalls := 0
 	preRestartFn = func(_ context.Context, _ []restartInfo) error { return nil }
-	postRestartFn = func(_ context.Context, _ []restartInfo) error {
+	postRestartFn = func(_ context.Context, infos []restartInfo) error {
 		postCalls++
+		assert.Len(t, infos, 2)
 		return nil
 	}
 
-	// Return an arbitrary non-zero PID to emulate success.
+	// Return an arbitrary non-zero PID to emulate success
 	launch := func(ls []daemon.Launcher) ([]int, error) { return []int{12345}, nil }
 	StoreRestartInfo([]int{999999}, launch, nil, false, false, false) // origin
 	StoreRestartInfo([]int{999998}, launch, nil, true, false, false)  // cache
@@ -220,26 +222,19 @@ func TestRestartXrootd_LaunchCtxOutlivesRestartCtx(t *testing.T) {
 	assert.True(t, launchCtxWasAlive, "the launch closure used a context that was already cancelled")
 }
 
-func TestRestartXrootd_PreRestartCalledOnceForMultipleRoles(t *testing.T) {
+func TestRestartXrootd_PreRestartErrorPropagates(t *testing.T) {
 	t.Cleanup(ResetRestartState)
 	configXrootdFn = func(_ context.Context, _ bool) (string, error) { return "/fake/xrootd.cfg", nil }
 	configureLaunchersFn = func(_ bool, _ string, _ bool, _ bool) ([]daemon.Launcher, error) { return nil, nil }
-
-	preCalls := 0
-	preRestartFn = func(_ context.Context, infos []restartInfo) error {
-		preCalls++
-		assert.Len(t, infos, 2)
-		return nil
-	}
+	preRestartFn = func(_ context.Context, _ []restartInfo) error { return errors.New("pre failed") }
 	postRestartFn = func(_ context.Context, _ []restartInfo) error { return nil }
 
 	launch := func(ls []daemon.Launcher) ([]int, error) { return []int{12345}, nil }
 	StoreRestartInfo([]int{999999}, launch, nil, false, false, false)
-	StoreRestartInfo([]int{999998}, launch, nil, true, false, false)
 
-	_, err := RestartXrootd(context.Background(), context.Background(), []int{999999, 999998})
-	require.NoError(t, err)
-	assert.Equal(t, 1, preCalls)
+	_, err := RestartXrootd(context.Background(), context.Background(), []int{999999})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pre failed")
 }
 
 func TestRestartXrootd_PostRestartErrorPropagates(t *testing.T) {

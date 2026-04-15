@@ -171,15 +171,19 @@ func setLogLevel(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "Failed to parse server response")
 	}
 
-	fmt.Printf("Log level for %s successfully changed to '%s' for %d seconds\n", response.ParameterName, response.Level, response.Remaining)
 	fmt.Printf("Change ID: %s\n", response.ChangeID)
-	fmt.Printf("Will revert at: %s\n", response.EndTime.Format(time.RFC3339))
 	if response.RequiresRestart {
 		if response.EffectiveAt != nil {
-			fmt.Printf("Note: This parameter requires an XRootD restart (with a graceful drain period).\n")
-			fmt.Printf("      Change will take effect at approximately: %s\n", response.EffectiveAt.Format(time.RFC3339))
+			fmt.Printf("Note: A restart of XRootD is required.\n")
+			fmt.Printf("Change will take effect at: %s\n", response.EffectiveAt.Local().Format(time.RFC3339))
 		}
 	}
+	fmt.Printf("Change will revert at: %s\n", response.EndTime.Local().Format(time.RFC3339))
+	fmt.Printf("Log level for %s successfully changed to '%s' for %d seconds", response.ParameterName, response.Level, response.Remaining)
+	if response.RequiresRestart {
+		fmt.Printf(" (pending restart of XRootD)")
+	}
+	fmt.Printf("\n")
 	return nil
 }
 
