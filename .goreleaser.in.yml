@@ -97,9 +97,11 @@ builds:
       - CGO_ENABLED=0
     goos:
       - linux
+      - darwin
     goarch:
       - amd64
       - arm64
+      - ppc64le
     dir: ./cmd
     binary: pelican-server
     tags:
@@ -107,6 +109,10 @@ builds:
       - server
     ldflags:
       - *ldflags-metadata
+      - *ldflags-strip-symbols
+    ignore:
+      - goos: darwin
+        goarch: ppc64le
 
 # Goreleaser complains if there's a different number of binaries built for different architectures
 # in the same archive. Instead of plopping pelican-server in the same archive as pelican, split the
