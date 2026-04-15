@@ -60,7 +60,7 @@ func checkFileReadableByUser(filePath string, fileInfo os.FileInfo, puser User) 
 		if fileMode&0400 != 0 {
 			canRead = true
 		}
-	} else if fileMode&0040 != 0 && userInGroup(puser, fileGid) {
+	} else if fileMode&0040 != 0 && UserInGroup(puser, fileGid) {
 		// File has group read permission and the pelican user is in the file's group
 		// (either via primary GID or supplementary groups)
 		canRead = true
@@ -81,9 +81,9 @@ func checkFileReadableByUser(filePath string, fileInfo os.FileInfo, puser User) 
 	return nil
 }
 
-// userInGroup returns true if the user's primary GID matches fileGid, or if
+// UserInGroup returns true if the user's primary GID matches fileGid, or if
 // fileGid appears in the user's supplementary group list.
-func userInGroup(puser User, fileGid int) bool {
+func UserInGroup(puser User, fileGid int) bool {
 	if fileGid == puser.Gid {
 		return true
 	}
