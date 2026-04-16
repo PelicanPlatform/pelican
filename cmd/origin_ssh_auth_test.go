@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -472,7 +472,7 @@ func TestSSHWebSocketAuthRequired(t *testing.T) {
 
 	// Set up server config so issuer keys are available for token verification
 	dirName := t.TempDir()
-	require.NoError(t, param.ConfigDir.Set(dirName))
+	require.NoError(t, param.ConfigBase.Set(dirName))
 	require.NoError(t, param.Server_WebPort.Set(0))
 	require.NoError(t, param.Server_ExternalWebUrl.Set("https://mock-origin.example.com"))
 	require.NoError(t, param.Origin_Port.Set(0))
