@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -183,7 +183,7 @@ func TestDropPrivilegeSignaling(t *testing.T) {
 			runDir := t.TempDir()
 			require.NoError(t, param.Origin_RunLocation.Set(runDir))
 			require.NoError(t, param.Cache_RunLocation.Set(runDir))
-			require.NoError(t, param.ConfigDir.Set(runDir))
+			require.NoError(t, param.ConfigBase.Set(runDir))
 
 			pelicanDir := filepath.Join(runDir, "pelican")
 			err := os.Mkdir(pelicanDir, 0755)
@@ -301,7 +301,7 @@ func TestCheckTLSCredsForDropPrivileges(t *testing.T) {
 		})
 
 		runDir := t.TempDir()
-		require.NoError(t, param.ConfigDir.Set(runDir))
+		require.NoError(t, param.ConfigBase.Set(runDir))
 		require.NoError(t, param.Server_DropPrivileges.Set(true))
 		require.NoError(t, param.Server_UnprivilegedUser.Set(currentUser.Username))
 
@@ -323,7 +323,7 @@ func TestCheckTLSCredsForDropPrivileges(t *testing.T) {
 		})
 
 		runDir := t.TempDir()
-		require.NoError(t, param.ConfigDir.Set(runDir))
+		require.NoError(t, param.ConfigBase.Set(runDir))
 		require.NoError(t, param.Server_DropPrivileges.Set(true))
 		require.NoError(t, param.Server_UnprivilegedUser.Set(currentUser.Username))
 
@@ -352,7 +352,7 @@ func TestCheckTLSCredsForDropPrivileges(t *testing.T) {
 		})
 
 		runDir := t.TempDir()
-		require.NoError(t, param.ConfigDir.Set(runDir))
+		require.NoError(t, param.ConfigBase.Set(runDir))
 		require.NoError(t, param.Server_DropPrivileges.Set(true))
 		require.NoError(t, param.Server_UnprivilegedUser.Set(currentUser.Username))
 
@@ -380,7 +380,7 @@ func TestCheckTLSCredsForDropPrivileges(t *testing.T) {
 		})
 
 		runDir := t.TempDir()
-		require.NoError(t, param.ConfigDir.Set(runDir))
+		require.NoError(t, param.ConfigBase.Set(runDir))
 		require.NoError(t, param.Server_DropPrivileges.Set(true))
 		require.NoError(t, param.Server_UnprivilegedUser.Set(currentUser.Username))
 
@@ -423,7 +423,7 @@ func TestCheckTLSCredsForDropPrivileges(t *testing.T) {
 		})
 
 		runDir := t.TempDir()
-		require.NoError(t, param.ConfigDir.Set(runDir))
+		require.NoError(t, param.ConfigBase.Set(runDir))
 		require.NoError(t, param.Server_DropPrivileges.Set(true))
 		require.NoError(t, param.Server_UnprivilegedUser.Set(currentUser.Username))
 
@@ -446,7 +446,7 @@ func TestCheckTLSCredsForDropPrivileges(t *testing.T) {
 		})
 
 		runDir := t.TempDir()
-		require.NoError(t, param.ConfigDir.Set(runDir))
+		require.NoError(t, param.ConfigBase.Set(runDir))
 		require.NoError(t, param.Server_DropPrivileges.Set(true))
 		require.NoError(t, param.Server_UnprivilegedUser.Set(currentUser.Username))
 
@@ -472,7 +472,7 @@ func TestCheckTLSCredsForDropPrivileges(t *testing.T) {
 		})
 
 		runDir := t.TempDir()
-		require.NoError(t, param.ConfigDir.Set(runDir))
+		require.NoError(t, param.ConfigBase.Set(runDir))
 		require.NoError(t, param.Server_DropPrivileges.Set(true))
 		require.NoError(t, param.Server_UnprivilegedUser.Set(currentUser.Username))
 

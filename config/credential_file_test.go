@@ -25,7 +25,6 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -145,7 +144,7 @@ func TestSaveConfigContentsToFile(t *testing.T) {
 
 		// Now use the Client.CredentialFile param to read it back
 		require.NoError(t, param.Client_CredentialFile.Set(filePath))
-		viper.Set("ConfigDir", tmpDir)
+		require.NoError(t, param.ConfigBase.Set(tmpDir))
 
 		readConfig, err := GetCredentialConfigContents()
 		require.NoError(t, err)
@@ -219,7 +218,7 @@ func TestGetEncryptedConfigNameOverride(t *testing.T) {
 		})
 
 		tmpDir := t.TempDir()
-		viper.Set("ConfigDir", tmpDir)
+		require.NoError(t, param.ConfigBase.Set(tmpDir))
 
 		result, err := GetEncryptedConfigName()
 		require.NoError(t, err)

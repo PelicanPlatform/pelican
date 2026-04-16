@@ -1,6 +1,6 @@
 /***************************************************************
 *
-* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -243,7 +243,7 @@ func TestCreateFedTok(t *testing.T) {
 			confDir := t.TempDir()
 			kDir := filepath.Join(confDir, "keys")
 			require.NoError(t, param.IssuerKeysDirectory.Set(kDir))
-			require.NoError(t, param.ConfigDir.Set(confDir))
+			require.NoError(t, param.ConfigBase.Set(confDir))
 
 			config.ResetFederationForTest()
 			fed := pelican_url.FederationDiscovery{

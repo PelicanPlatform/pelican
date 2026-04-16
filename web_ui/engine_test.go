@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -50,7 +50,7 @@ func setupPingEngine(t *testing.T, ctx context.Context, egrp *errgroup.Group) (c
 	dirname := t.TempDir()
 	server_utils.ResetTestState()
 	require.NoError(t, param.Logging_Level.Set("Debug"))
-	require.NoError(t, param.ConfigDir.Set(dirname))
+	require.NoError(t, param.ConfigBase.Set(dirname))
 	require.NoError(t, param.Server_WebPort.Set(8444))
 	require.NoError(t, param.Origin_Port.Set(8443))
 

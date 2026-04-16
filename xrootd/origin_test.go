@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -99,7 +99,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	err = os.Chmod(tmpPath, permissions)
 	require.NoError(t, err)
 
-	require.NoError(t, param.ConfigDir.Set(tmpPath))
+	require.NoError(t, param.ConfigBase.Set(tmpPath))
 	require.NoError(t, param.Origin_RunLocation.Set(filepath.Join(tmpPath, "xorigin")))
 	t.Cleanup(func() {
 		os.RemoveAll(tmpPath)
@@ -265,7 +265,7 @@ func TestMultiExportOrigin(t *testing.T) {
 	test_utils.MockFederationRoot(t, nil, nil)
 
 	// Initialize the origin before getting origin exports
-	require.NoError(t, param.ConfigDir.Set(t.TempDir()))
+	require.NoError(t, param.ConfigBase.Set(t.TempDir()))
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
