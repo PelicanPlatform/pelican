@@ -35,7 +35,6 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/youmark/pkcs8"
 	"golang.org/x/crypto/curve25519"
 	"golang.org/x/crypto/nacl/box"

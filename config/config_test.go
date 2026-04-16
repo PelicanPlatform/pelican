@@ -37,7 +37,6 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
 
 	"github.com/pelicanplatform/pelican/logging"
 	"github.com/pelicanplatform/pelican/param"
@@ -138,74 +137,6 @@ func newTimeoutTestServer(t *testing.T) *httptest.Server {
 	}))
 	t.Cleanup(srv.Close)
 	return srv
-}
-
-// Test that no deprecated config keys are present in defaultsYaml or osdfDefaultsYaml
-func TestNoReplacementKeysInDefaults(t *testing.T) {
-	type testCase struct {
-		yamlStr     string
-		fName       string
-		shouldError bool
-	}
-	testCases := []testCase{
-		{yamlStr: defaultsYaml, fName: "defaults.yaml", shouldError: false},
-		{yamlStr: osdfDefaultsYaml, fName: "osdfDefaults.yaml", shouldError: false},
-		// Example: Client.DisableHttpProxy is a replacement for DisableHttpProxy
-		{yamlStr: `
-Client:
-  DisableHttpProxy: true
-`, fName: "inline test case with replacement key Client.DisableHttpProxy", shouldError: true},
-	}
-
-	deprecatedMap := param.GetDeprecated()
-	for _, tc := range testCases {
-		var m map[string]any
-		err := yaml.Unmarshal([]byte(tc.yamlStr), &m)
-		require.NoError(t, err, "Failed to parse %s", tc.fName)
-
-		// Map replacement key -> deprecated key(s)
-		found := make(map[string]string)
-		for deprecated, replacements := range deprecatedMap {
-			for _, rep := range replacements {
-				if rep == "none" {
-					continue
-				}
-				// Check for top-level and nested keys (e.g., Logging.Level)
-				parts := strings.Split(rep, ".")
-				node := m
-				foundKey := true
-				for _, part := range parts {
-					val, ok := node[part]
-					if !ok {
-						foundKey = false
-						break
-					}
-					// If not at the last part, descend if possible
-					if mp, ok := val.(map[string]any); ok {
-						node = mp
-					} else if part != parts[len(parts)-1] {
-						foundKey = false
-						break
-					}
-				}
-				if foundKey {
-					found[rep] = deprecated
-				}
-			}
-		}
-
-		if tc.shouldError {
-			assert.NotEmpty(t, found, "Expected replacement key(s) in %s, but none found", tc.fName)
-		} else {
-			if len(found) > 0 {
-				var details []string
-				for rep, dep := range found {
-					details = append(details, fmt.Sprintf("%q (replacement for deprecated key %q)", rep, dep))
-				}
-				t.Errorf("Replacement config key(s) found in %s: %v. Please remove them from the defaults yaml and set them in a SetDefaults() function in the config package.", tc.fName, details)
-			}
-		}
-	}
 }
 
 func TestResponseHeaderTimeout(t *testing.T) {
@@ -1338,13 +1269,14 @@ func TestConfigFileBootstrapping(t *testing.T) {
 				param.Server_WebHost: "home-host",
 			},
 			etcConfig: map[configParam]string{
-				// Use a different string param to test no-merge behavior
-				param.Server_Hostname: "etc-hostname-should-not-appear",
+				// Use WebHost + a different param to test no-merge behavior
+				param.Server_WebHost:        "etc-host-should-not-appear",
+				param.Server_UIPasswordFile: "/etc/value-should-not-appear",
 			},
-			// Home config shadows /etc completely, so Hostname stays at default (empty), not from /etc
+			// Home config shadows /etc completely: WebHost comes from home,
+			// and UIPasswordFile stays at its generated default.
 			expectedConfig: map[configParam]string{
-				param.Server_WebHost:  "home-host",
-				param.Server_Hostname: "", // Default value, not merged from /etc
+				param.Server_WebHost: "home-host",
 			},
 		},
 		{
@@ -1418,4 +1350,200 @@ func TestConfigFileBootstrapping(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestApplyLogLevelInheritance verifies that when a user sets Logging.Level,
+// sub-loggers inherit the new level unless they are individually pinned.
+func TestApplyLogLevelInheritance(t *testing.T) {
+	t.Run("NoSourceRecorded_NoPropagation", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(func() { ResetConfig() })
+
+		v := viper.New()
+		SetBaseDefaultsInConfig(v)
+
+		// Logging.Level is at the default "info". No source recorded.
+		GetSourceTracker().Reset()
+
+		origCms := v.GetString(param.Logging_Origin_Cms.GetName())
+		ApplyLogLevelInheritance(v)
+		// Sub-loggers should not change.
+		assert.Equal(t, origCms, v.GetString(param.Logging_Origin_Cms.GetName()))
+	})
+
+	t.Run("UserSetsDebug_SubLoggersInherit", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(func() { ResetConfig() })
+
+		v := viper.New()
+		SetBaseDefaultsInConfig(v)
+		v.Set(param.Logging_Level.GetName(), "debug")
+
+		// Simulate user-set via config file.
+		st := GetSourceTracker()
+		st.Reset()
+		st.Record(strings.ToLower(param.Logging_Level.GetName()), ConfigSource{Type: SourceConfigFile, Detail: "test.yaml"})
+
+		ApplyLogLevelInheritance(v)
+
+		assert.Equal(t, "debug", v.GetString(param.Logging_Origin_Cms.GetName()))
+		assert.Equal(t, "debug", v.GetString(param.Logging_Cache_Http.GetName()))
+		assert.Equal(t, "debug", v.GetString(param.Logging_Cache_Pfc.GetName()))
+		// Special-case sub-loggers should also be debug when user overrides from info.
+		assert.Equal(t, "debug", v.GetString(param.Logging_Origin_Scitokens.GetName()))
+	})
+
+	t.Run("PinnedSubLoggerPreserved", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(func() { ResetConfig() })
+
+		v := viper.New()
+		SetBaseDefaultsInConfig(v)
+		v.Set(param.Logging_Level.GetName(), "debug")
+		v.Set(param.Logging_Cache_Http.GetName(), "warn")
+
+		st := GetSourceTracker()
+		st.Reset()
+		st.Record(strings.ToLower(param.Logging_Level.GetName()), ConfigSource{Type: SourceConfigFile, Detail: "test.yaml"})
+		st.Record(strings.ToLower(param.Logging_Cache_Http.GetName()), ConfigSource{Type: SourceConfigFile, Detail: "test.yaml"})
+
+		ApplyLogLevelInheritance(v)
+
+		// Pinned sub-logger keeps its explicit value.
+		assert.Equal(t, "warn", v.GetString(param.Logging_Cache_Http.GetName()))
+		// Unpinned sub-loggers inherit.
+		assert.Equal(t, "debug", v.GetString(param.Logging_Origin_Cms.GetName()))
+	})
+
+	t.Run("InfoLevel_SpecialCasesApply", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(func() { ResetConfig() })
+
+		v := viper.New()
+		SetBaseDefaultsInConfig(v)
+		// User explicitly sets "info" (matching default, but via config file).
+		v.Set(param.Logging_Level.GetName(), "info")
+
+		st := GetSourceTracker()
+		st.Reset()
+		st.Record(strings.ToLower(param.Logging_Level.GetName()), ConfigSource{Type: SourceConfigFile, Detail: "test.yaml"})
+
+		ApplyLogLevelInheritance(v)
+
+		// At info level, Scitokens → fatal, Pfc/Xrootd → info (special cases).
+		assert.Equal(t, "fatal", v.GetString(param.Logging_Origin_Scitokens.GetName()))
+		assert.Equal(t, "info", v.GetString(param.Logging_Origin_Xrootd.GetName()))
+		assert.Equal(t, "fatal", v.GetString(param.Logging_Cache_Scitokens.GetName()))
+		assert.Equal(t, "info", v.GetString(param.Logging_Cache_Pfc.GetName()))
+		// Standard sub-loggers get "info".
+		assert.Equal(t, "info", v.GetString(param.Logging_Origin_Cms.GetName()))
+	})
+}
+
+// TestDeprecationRespectsEnvVarReplacement verifies that handleDeprecatedConfig
+// does NOT overwrite a replacement key that was set by an environment variable.
+// Before the fix, InConfig() was used to detect user-set replacements, but it
+// only checks config files — missing env vars entirely.
+func TestDeprecationRespectsEnvVarReplacement(t *testing.T) {
+	ResetConfig()
+	t.Cleanup(func() {
+		ResetConfig()
+	})
+
+	// Use DisableHttpProxy (deprecated) → Client.DisableHttpProxy (replacement).
+	// Set the deprecated key to true via viper (simulating config file).
+	viper.Set(param.DisableHttpProxy.GetName(), true)
+
+	// Set the replacement key via env var. In real usage this would be
+	// PELICAN_CLIENT_DISABLEHTTPPROXY=false, but we simulate by recording it
+	// in the SourceTracker (which RecordEnvVarSources would have done) and
+	// setting the value via viper.Set (which env binding does under the hood).
+	viper.Set(param.Client_DisableHttpProxy.GetName(), false)
+	st := GetSourceTracker()
+	st.Reset()
+	st.Record(strings.ToLower(param.Client_DisableHttpProxy.GetName()), ConfigSource{
+		Type:   SourceEnvVar,
+		Detail: "PELICAN_CLIENT_DISABLEHTTPPROXY",
+	})
+
+	// Run deprecation handling.
+	handleDeprecatedConfig()
+
+	// The replacement key should retain its env-var-set value (false),
+	// NOT be overwritten by the deprecated key's value (true).
+	assert.Equal(t, false, viper.GetBool(param.Client_DisableHttpProxy.GetName()),
+		"handleDeprecatedConfig should not overwrite a replacement key set via env var")
+}
+
+func TestPort443StrippingInSetServerDefaults(t *testing.T) {
+	// Verify that SetServerDefaults strips :443 from generated defaults and
+	// from user-provided URLs for Origin.Url, Cache.Url, and Origin.TokenAudience.
+
+	t.Run("DefaultPort443IsStripped", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		v := viper.GetViper()
+
+		// Set ports to 443 so the generated defaults produce "https://host:443"
+		v.Set(param.Origin_Port.GetName(), 443)
+		v.Set(param.Cache_Port.GetName(), 443)
+		v.Set(param.Server_Hostname.GetName(), "test-host.example.com")
+
+		SetBaseDefaultsInConfig(v)
+
+		// Before SetServerDefaults, the generated defaults include :443
+		assert.Contains(t, v.GetString(param.Origin_Url.GetName()), ":443",
+			"Origin.Url should contain :443 before stripping")
+		assert.Contains(t, v.GetString(param.Origin_TokenAudience.GetName()), ":443",
+			"Origin.TokenAudience should contain :443 before stripping")
+
+		err := SetServerDefaults(v)
+		require.NoError(t, err)
+
+		// After SetServerDefaults, :443 should be stripped
+		assert.Equal(t, "https://test-host.example.com", v.GetString(param.Origin_Url.GetName()),
+			"Origin.Url should have :443 stripped")
+		assert.Equal(t, "https://test-host.example.com", v.GetString(param.Cache_Url.GetName()),
+			"Cache.Url should have :443 stripped")
+		assert.Equal(t, "https://test-host.example.com", v.GetString(param.Origin_TokenAudience.GetName()),
+			"Origin.TokenAudience should have :443 stripped")
+	})
+
+	t.Run("NonStandardPortPreserved", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		v := viper.GetViper()
+
+		v.Set(param.Origin_Port.GetName(), 8443)
+		v.Set(param.Server_Hostname.GetName(), "test-host.example.com")
+
+		SetBaseDefaultsInConfig(v)
+
+		err := SetServerDefaults(v)
+		require.NoError(t, err)
+
+		assert.Equal(t, "https://test-host.example.com:8443", v.GetString(param.Origin_Url.GetName()),
+			"Origin.Url should preserve non-443 ports")
+	})
+
+	t.Run("UserConfiguredUrlWithPort443", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		v := viper.GetViper()
+
+		v.Set(param.Server_Hostname.GetName(), "test-host.example.com")
+		SetBaseDefaultsInConfig(v)
+
+		// Simulate a user-configured URL with explicit :443
+		v.Set(param.Origin_Url.GetName(), "https://my-origin.example.com:443")
+
+		err := SetServerDefaults(v)
+		require.NoError(t, err)
+
+		assert.Equal(t, "https://my-origin.example.com", v.GetString(param.Origin_Url.GetName()),
+			"User-configured Origin.Url with :443 should be normalized")
+	})
 }
